@@ -193,7 +193,8 @@ def git(*args, timeout=60):
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    return r.stdout.strip() if r.returncode == 0 else None
+    # 只去掉行尾：porcelain 输出的行首空格有意义
+    return r.stdout.rstrip() if r.returncode == 0 else None
 
 
 def main_ref():
@@ -276,7 +277,7 @@ def print_status(markdown):
     closed = [t for t in tasks if t["status"] in CLOSED]
 
     if markdown:
-        print(f"## 任务看板（{len(open_tasks)} 进行中/待办，{len(closed)} 已关闭）\n")
+        print(f"## 任务看板（{len(open_tasks)} 个未关闭，{len(closed)} 个已关闭）\n")
     else:
         print(f"任务看板：{len(open_tasks)} 个未关闭，{len(closed)} 个已关闭（以当前检出的内容为准）")
 
@@ -759,6 +760,10 @@ def main(argv=None):
     except CollabError as e:
         print(f"错误：{e}", file=sys.stderr)
         return 1
+    except BrokenPipeError:
+        # 输出被 head 之类截断时安静退出
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
 
 
 if __name__ == "__main__":
