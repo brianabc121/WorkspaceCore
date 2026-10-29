@@ -1,7 +1,7 @@
 ---
 id: D-0001
 title: 用仓库内文件作为 Claude/Codex 协作状态的唯一事实来源
-status: proposed
+status: accepted
 date: 2026-10-29
 author: claude
 supersedes:
