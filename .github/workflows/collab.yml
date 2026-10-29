@@ -1,0 +1,20 @@
+name: collab
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 校验 .collab/ 协作文件
+        run: python3 scripts/collab.py check
+      - name: 输出任务看板到 Summary
+        if: always()
+        run: python3 scripts/collab.py status --markdown >> "$GITHUB_STEP_SUMMARY"
