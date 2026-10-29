@@ -1,31 +1,20 @@
 """需要真实 PostgreSQL / Redis 的测试（见 conftest.py 的说明）。"""
 
 import asyncio
-from pathlib import Path
 
 import asyncpg
 import httpx
 import pytest
 from alembic import command
-from alembic.config import Config
 from arq import create_pool
 from arq.connections import RedisSettings
 from arq.worker import Worker
 
 from app.jobs.worker import heartbeat
 from app.main import create_app
-from tests.helpers import asyncpg_dsn, settings_for
+from tests.helpers import alembic_config, asyncpg_dsn, settings_for
 
 pytestmark = pytest.mark.integration
-
-API_DIR = Path(__file__).resolve().parent.parent
-
-
-def _alembic_config(database_url: str) -> Config:
-    config = Config(str(API_DIR / "alembic.ini"))
-    config.attributes["database_url"] = database_url
-    config.attributes["configure_logger"] = False
-    return config
 
 
 async def _schema_state(database_url: str) -> tuple[bool, set[str]]:
@@ -42,11 +31,32 @@ async def _schema_state(database_url: str) -> tuple[bool, set[str]]:
     return bool(has_schema), {row["extname"] for row in rows}
 
 
+EXPECTED_TABLES = {
+    "users",
+    "auth_sessions",
+    "external_identities",
+    "workspaces",
+    "workspace_members",
+}
+
+
+async def _tables(database_url: str) -> set[str]:
+    conn = await asyncpg.connect(asyncpg_dsn(database_url))
+    try:
+        rows = await conn.fetch("SELECT tablename FROM pg_tables WHERE schemaname = 'workspace'")
+    finally:
+        await conn.close()
+    return {row["tablename"] for row in rows}
+
+
 def test_migrations_upgrade_downgrade_on_empty_database(temp_database_url: str) -> None:
-    config = _alembic_config(temp_database_url)
+    config = alembic_config(temp_database_url)
 
     command.upgrade(config, "head")
     assert asyncio.run(_schema_state(temp_database_url)) == (True, {"pgcrypto", "pg_trgm"})
+    assert asyncio.run(_tables(temp_database_url)) >= EXPECTED_TABLES
+    # ORM 模型与迁移一致：autogenerate 检测不到任何差异
+    command.check(config)
 
     command.downgrade(config, "base")
     assert asyncio.run(_schema_state(temp_database_url)) == (False, set())

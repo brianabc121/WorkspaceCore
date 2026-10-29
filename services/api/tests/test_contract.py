@@ -2,9 +2,13 @@
 
 import json
 import uuid
+from collections.abc import AsyncIterator
 
 import httpx
+import pytest
+from fastapi import FastAPI
 
+from app.api.deps import authenticated, get_db, get_redis
 from scripts.export_openapi import OUTPUT, render
 
 SPRINT_1_ENDPOINTS = {
@@ -22,6 +26,17 @@ SPRINT_1_ENDPOINTS = {
     ("patch", "/api/v1/workspaces/{workspace_id}"),
     ("get", "/api/v1/audit-logs"),
 }
+
+
+@pytest.fixture
+async def stub_client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
+    """只验证接口形态（校验、错误格式）：用桩替换数据库、Redis 和登录校验。"""
+    app.dependency_overrides[get_db] = lambda: None
+    app.dependency_overrides[get_redis] = lambda: None
+    app.dependency_overrides[authenticated] = lambda: None
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
 
 
 def test_committed_openapi_matches_code() -> None:
@@ -47,23 +62,27 @@ def test_validation_errors_are_documented_with_unified_format() -> None:
 
 
 async def test_invalid_uuid_path_parameter_returns_unified_error(
-    client: httpx.AsyncClient,
+    stub_client: httpx.AsyncClient,
 ) -> None:
-    response = await client.get("/api/v1/workspaces/not-a-uuid")
+    response = await stub_client.get("/api/v1/workspaces/not-a-uuid")
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_FAILED"
 
 
-async def test_unimplemented_endpoint_uses_unified_error_format(client: httpx.AsyncClient) -> None:
-    response = await client.get("/api/v1/me")
+async def test_unimplemented_endpoint_uses_unified_error_format(
+    stub_client: httpx.AsyncClient,
+) -> None:
+    response = await stub_client.patch(
+        f"/api/v1/workspaces/{uuid.uuid4()}", json={"name": "新名称"}
+    )
     assert response.status_code == 501
     error = response.json()["error"]
     assert error["code"] == "NOT_IMPLEMENTED"
     assert error["request_id"] == response.headers["X-Request-ID"]
 
 
-async def test_request_validation_runs_before_handler(client: httpx.AsyncClient) -> None:
-    response = await client.post(
+async def test_request_validation_runs_before_handler(stub_client: httpx.AsyncClient) -> None:
+    response = await stub_client.post(
         "/api/v1/setup",
         json={
             "setup_token": "t",
@@ -79,9 +98,11 @@ async def test_request_validation_runs_before_handler(client: httpx.AsyncClient)
 
 
 async def test_workspace_scoped_endpoint_requires_workspace_header(
-    client: httpx.AsyncClient,
+    stub_client: httpx.AsyncClient,
 ) -> None:
-    missing = await client.get("/api/v1/audit-logs")
+    missing = await stub_client.get("/api/v1/audit-logs")
     assert missing.status_code == 422
-    present = await client.get("/api/v1/audit-logs", headers={"X-Workspace-Id": str(uuid.uuid4())})
+    present = await stub_client.get(
+        "/api/v1/audit-logs", headers={"X-Workspace-Id": str(uuid.uuid4())}
+    )
     assert present.status_code == 501

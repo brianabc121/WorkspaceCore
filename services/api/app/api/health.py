@@ -14,6 +14,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.api.deps import get_app_settings
 from app.core.config import Settings
 from app.schemas.health import CheckStatus, HealthResponse, ReadinessResponse
 
@@ -44,11 +45,6 @@ def redis_check(client: Redis) -> ReadinessCheck:
 def get_readiness_checks(request: Request) -> dict[str, ReadinessCheck]:
     checks: dict[str, ReadinessCheck] = request.app.state.readiness_checks
     return checks
-
-
-def get_app_settings(request: Request) -> Settings:
-    settings: Settings = request.app.state.settings
-    return settings
 
 
 async def _run_check(name: str, check: ReadinessCheck, limit_seconds: float) -> CheckStatus:

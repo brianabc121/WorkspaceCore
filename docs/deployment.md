@@ -1,6 +1,6 @@
 # 部署与运行手册
 
-> 状态：Sprint 0。core Compose 已可一键启动；备份与恢复（`make backup` / `make restore-verify`）计划在 S6-04 实现，目前会明确报“尚未实现”。
+> 状态：Sprint 1 进行中。core Compose 已可一键启动，首次安装与登录接口已实现（T-0010）；备份与恢复（`make backup` / `make restore-verify`）计划在 S6-04 实现，目前会明确报“尚未实现”。
 
 ## 1. 一键启动（推荐）
 
@@ -12,7 +12,26 @@ make migrate   # 首次启动后执行：把数据库迁移到最新版本
 make smoke     # 经 Caddy 检查健康、就绪、前端页面与安全响应头
 ```
 
-打开 http://127.0.0.1:8080 即可看到首页。
+打开 http://localhost:8080 即可看到首页（这个地址就是 `.env` 里的 `PUBLIC_BASE_URL`，见第 3 节）。
+
+### 首次安装
+
+数据库里还没有任何用户时，需要先创建管理员（owner）和默认工作空间。为防止陌生人抢先注册，首次安装必须提供
+部署时随机生成的**安装凭据**：
+
+```bash
+make setup-token   # 显示 .env 里的 SETUP_TOKEN
+```
+
+在网页的安装页面填写邮箱、显示名、密码（12–128 个字符）、工作空间名称和安装凭据即可（安装页由前端任务 T-0012 提供）。
+在此之前可以直接调用接口：
+
+```bash
+curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -H 'Origin: http://localhost:8080' \
+  -d '{"setup_token":"<安装凭据>","email":"me@example.com","display_name":"我","password":"<至少 12 个字符>","workspace_name":"我的工作台"}'
+```
+
+首次安装只能成功一次，之后返回 `409 SETUP_COMPLETED`。成功后可以把 `.env` 里的 `SETUP_TOKEN` 清空。
 
 | 命令 | 作用 |
 |---|---|
@@ -49,9 +68,19 @@ make smoke     # 经 Caddy 检查健康、就绪、前端页面与安全响应�
 | `HTTP_BIND` / `HTTP_PORT` | Caddy 对外监听地址与端口 | `127.0.0.1` / `8080` |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | 数据库；API / Worker 的连接串由这三项自动拼接 | `workspace` / `workspace` / 随机 |
 | `DATABASE_URL` / `REDIS_URL` | **只在本机直接运行 API 时**使用，Compose 内不读取 | 指向 localhost |
-| `SESSION_SECRET` / `CREDENTIAL_ENCRYPTION_KEY` | Sprint 1 起使用 | 随机 |
+| `PUBLIC_BASE_URL` | 浏览器访问工作台的地址；登录、安装等写请求的 `Origin` 必须是它或下面的可信来源 | `http://localhost:8080` |
+| `CORS_ALLOWED_ORIGINS` | 其他可信来源，逗号分隔（例如用 IP 访问时的 `http://127.0.0.1:8080`） | `http://127.0.0.1:8080` |
+| `SESSION_SECRET` | 计算 CSRF Token 的密钥；生产环境必填且至少 32 个字符。轮换后所有人需要重新登录 | 随机 |
+| `SETUP_TOKEN` | 首次安装凭据（`make setup-token` 查看）；未配置时首次安装一律拒绝 | 随机 |
+| `CREDENTIAL_ENCRYPTION_KEY` | 第三方凭证加密密钥（T-0011 起使用） | 随机 |
 
 数据库密码请只用字母和数字（`make env` 生成的就是），否则需要在连接串中做 URL 编码。
+
+- 修改了 `HTTP_PORT` 或改用域名访问时，要同时修改 `PUBLIC_BASE_URL`（或加入 `CORS_ALLOWED_ORIGINS`），
+  否则登录会被拒绝（`403 CSRF_FAILED`）。改完后重新 `make up`。
+- 升级代码后再运行一次 `make env`：它只会把 `.env.example` 里新增的变量补进 `.env`（新密钥随机生成），不改已有的值。
+- 登录限流等参数也可以在 `.env` 中调整，变量见 `docs/decisions/2026-10-30-sprint-1-auth-contract.md` 第 9 节；
+  加进 `.env` 后还要在 `compose.yaml` 的 api `environment` 中传入。
 
 ## 4. 检查与排错
 
@@ -67,6 +96,10 @@ make smoke     # 经 Caddy 检查健康、就绪、前端页面与安全响应�
 - **`make up` 卡在等待健康检查**：`make logs` 查看是哪个服务没起来；`docker compose ps -a` 看退出码。
 - **`/readyz` 返回 503**：响应里 `checks` 指出是数据库还是 Redis；对应服务的日志里有原因（API 日志只记录异常类型）。
 - **端口 8080 被占用**：修改 `.env` 里的 `HTTP_PORT` 后重新 `make up`。
+- **登录 / 安装返回 `403 CSRF_FAILED`**：浏览器地址与 `PUBLIC_BASE_URL`、`CORS_ALLOWED_ORIGINS` 都不一致，见第 3 节。
+- **登录返回 `429 RATE_LIMITED`**：15 分钟内同一账户失败 5 次或同一 IP 失败 10 次，等 `Retry-After` 秒后自动解除。
+  需要立即解除时清除计数（不会影响其他数据）：
+  `docker compose exec redis sh -c "redis-cli --scan --pattern 'ratelimit:*' | xargs -r redis-cli del"`。
 - **改了数据库密码后连不上**：PostgreSQL 只在第一次初始化数据卷时读取密码；已有数据卷时需要在数据库里修改密码，或者确认不需要数据后手动删除卷（会丢数据，不要作为常规操作）。
 
 日志：所有服务输出到 stdout，由 Docker 的 json-file 驱动按 10 MB × 5 个文件轮转。API 与 Worker 的日志是 JSON，每条带 `request_id`；健康检查成功的请求只在 `LOG_LEVEL=DEBUG` 时记录。
@@ -84,7 +117,10 @@ make smoke     # 经 Caddy 检查健康、就绪、前端页面与安全响应�
 - **HTTPS**：在 `infra/caddy/Caddyfile` 中把 `:8080` 换成域名、去掉 `auto_https off`，Caddy 会自动申请证书；
   同时在 `header` 块加入 `Strict-Transport-Security "max-age=31536000; includeSubDomains"`，并把 `HTTP_BIND` 设为 `0.0.0.0`、端口改为 80/443。
 - **密钥**：生产环境用 Secret 管理工具注入，不要把真实值写进仓库或 Compose 文件。
-- **`APP_ENV=production`**：关闭 `/api/v1/docs` 与 OpenAPI。
+- **`APP_ENV=production`**：关闭 `/api/v1/docs` 与 OpenAPI；Cookie 加 `Secure`（`PUBLIC_BASE_URL` 是 https 时也会加）；
+  没有设置足够长的 `SESSION_SECRET` 时 API 拒绝启动。
+- **客户端 IP**：Compose 中 API 只能经 Caddy 访问，因此设置了 `TRUST_FORWARDED_FOR=true`（登录限流按 `X-Forwarded-For`
+  最右侧的地址计数）。如果绕过 Caddy 直接暴露 API，必须去掉这个设置，否则客户端可以伪造 IP 绕过限流。
 - 备份恢复尚未实现（S6-04）；在此之前请自行用 `pg_dump` 做数据库备份。
 
 ## 7. 本机直接运行（开发）
@@ -95,9 +131,14 @@ make smoke     # 经 Caddy 检查健康、就绪、前端页面与安全响应�
 make setup                              # 生成 .env 并安装前后端依赖
 export DATABASE_URL=postgresql+asyncpg://workspace:<密码>@localhost:5432/workspace
 export REDIS_URL=redis://localhost:6379/0
+export PUBLIC_BASE_URL=http://localhost:5173    # 浏览器访问的是 Vite 开发服务器
+export SETUP_TOKEN=$(make -s setup-token)       # 首次安装需要
 make migrate-local                      # 迁移本机数据库
 make dev                                # API :8000 + 前端 :5173（/api 等路径代理到 API）
 ```
+
+本机直接运行时 API 只读环境变量，不读取 `.env`，所以要像上面这样 `export` 需要的变量；
+没有设置 `SESSION_SECRET` 时使用内置的开发密钥（仅限非生产环境）。
 
 本机数据库只需要数据库 owner 权限，迁移不需要超级用户：
 

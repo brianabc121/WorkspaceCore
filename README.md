@@ -5,7 +5,7 @@ this is a personal workspace
 My Workspace：自托管的混合型个人工作台（统一首页、任务、文档入口、日历、GitHub、运维、通知、搜索、自动化、AI 辅助）。
 设计与范围见 [`docs/DEVELOPMENT_SPEC.md`](docs/DEVELOPMENT_SPEC.md)。
 
-> 当前进度：Sprint 0（工程骨架）已完成，验收记录见 [`docs/acceptance/sprint-0.md`](docs/acceptance/sprint-0.md)。
+> 当前进度：Sprint 0（工程骨架）已完成，验收记录见 [`docs/acceptance/sprint-0.md`](docs/acceptance/sprint-0.md)；Sprint 1（认证、工作空间、设置、审计）进行中。
 
 ## 快速开始
 
@@ -17,7 +17,7 @@ make migrate   # 首次启动后执行数据库迁移
 make smoke     # 检查健康、就绪、前端页面与安全响应头
 ```
 
-打开 http://127.0.0.1:8080 。停止服务用 `make down`（保留数据）。完整运行手册见 [`docs/deployment.md`](docs/deployment.md)，`make help` 列出全部命令。
+打开 http://localhost:8080 。第一次使用需要创建管理员，安装凭据用 `make setup-token` 查看（见 [`docs/deployment.md`](docs/deployment.md) 第 1 节）。停止服务用 `make down`（保留数据）。完整运行手册见 [`docs/deployment.md`](docs/deployment.md)，`make help` 列出全部命令。
 
 ## 本机开发
 
@@ -27,6 +27,7 @@ make smoke     # 检查健康、就绪、前端页面与安全响应头
 make setup         # 生成 .env、安装前后端依赖
 export DATABASE_URL=postgresql+asyncpg://workspace:<密码>@localhost:5432/workspace
 export REDIS_URL=redis://localhost:6379/0
+export PUBLIC_BASE_URL=http://localhost:5173 SETUP_TOKEN=$(make -s setup-token)
 make migrate-local # 迁移本机数据库
 make dev           # API（:8000）+ 前端（:5173，/api 等路径代理到 API）
 make lint          # ruff、mypy、ESLint、vue-tsc

@@ -1,11 +1,13 @@
 """工作空间：列表、详情与设置。非成员一律按不存在处理（404），防止枚举。"""
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Security
 
-from app.api.deps import authenticated, csrf_protected
+from app.api.deps import authenticated, csrf_protected, get_auth_service
 from app.core.errors import not_implemented
+from app.domain.auth import AuthContext, AuthService
 from app.schemas.common import Page, error_responses
 from app.schemas.workspaces import WorkspaceOut, WorkspaceUpdate
 
@@ -15,11 +17,14 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 @router.get(
     "",
     summary="我所属的工作空间",
-    dependencies=[Security(authenticated)],
     responses=error_responses(401, 501),
 )
-async def list_workspaces() -> Page[WorkspaceOut]:
-    raise not_implemented("T-0010")
+async def list_workspaces(
+    context: Annotated[AuthContext, Security(authenticated)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
+) -> Page[WorkspaceOut]:
+    items = await service.workspaces(context.user)
+    return Page(items=items, next_cursor=None, total_estimate=len(items))
 
 
 @router.get(

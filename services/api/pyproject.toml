@@ -10,6 +10,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.1,<2.2",
     "asyncpg>=0.32,<0.33",
     "alembic>=1.20,<2",
+    "argon2-cffi>=25.1,<26",
     # arq 0.28 要求 redis<6，见 docs/decisions/2026-10-29-backend-stack.md
     "redis>=5.2,<6",
     "arq>=0.28,<0.29",

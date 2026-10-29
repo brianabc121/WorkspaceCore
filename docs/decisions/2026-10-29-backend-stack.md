@@ -29,11 +29,15 @@
 | alembic | 1.20.1 | 数据库迁移 |
 | redis | 5.3.1 | Redis 客户端（版本上限见下文） |
 | arq | 0.28.0 | 后台作业 |
+| argon2-cffi | 25.1.0 | Argon2id 密码哈希（Sprint 1，T-0010） |
+| email-validator | 2.3.0 | 邮箱格式校验（`pydantic[email]`，Sprint 1，T-0009） |
 | uvicorn[standard] | 0.54.0 | ASGI 服务器 |
 | httpx / pytest / pytest-asyncio | 0.28.1 / 9.2.0 / 1.4.1 | 测试（开发依赖） |
 | ruff / mypy | 0.17.3 / 2.4.1 | lint、格式化、类型检查（开发依赖） |
 
-来源：2026-10-29 查询 PyPI（`pip index versions <包名>`、`https://pypi.org/pypi/<包名>/json`）。
+Argon2id 参数：t=3、m=64 MiB、p=4（RFC 9106 推荐的低内存配置，`app/domain/security.py`）；参数调整后，旧哈希会在用户下次登录时自动升级。
+
+来源：2026-10-29 / 2026-10-30 查询 PyPI（`pip index versions <包名>`、`https://pypi.org/pypi/<包名>/json`）。
 
 ### 基础服务镜像（CI 与 Compose 共用）
 

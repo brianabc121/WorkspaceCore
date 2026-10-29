@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app import __version__
 from app.api import health
@@ -23,6 +24,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
     engine = create_engine(settings)
     redis = create_redis(settings)
+    app.state.sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+    app.state.redis = redis
     app.state.readiness_checks = {
         "database": health.database_check(engine),
         "redis": health.redis_check(redis),
