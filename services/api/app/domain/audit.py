@@ -143,14 +143,23 @@ def _invalid_cursor() -> ApiError:
 
 def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
     try:
-        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
-        created_at, entry_id = json.loads(raw)
-        position = (datetime.fromisoformat(created_at), uuid.UUID(entry_id))
-    except (ValueError, TypeError, binascii.Error):
+        decoded = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+    except (ValueError, binascii.Error):
         raise _invalid_cursor() from None
-    if position[0].tzinfo is None:
+    # 游标来自客户端：先检查结构与类型，再做转换
+    if not (
+        isinstance(decoded, list)
+        and len(decoded) == 2
+        and all(isinstance(part, str) for part in decoded)
+    ):
         raise _invalid_cursor()
-    return position
+    try:
+        created_at, entry_id = datetime.fromisoformat(decoded[0]), uuid.UUID(decoded[1])
+    except ValueError:
+        raise _invalid_cursor() from None
+    if created_at.tzinfo is None:
+        raise _invalid_cursor()
+    return created_at, entry_id
 
 
 def _to_out(entry: AuditLog) -> AuditLogOut:

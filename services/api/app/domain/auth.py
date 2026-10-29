@@ -9,6 +9,7 @@ import hmac
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import NoReturn
 
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -137,12 +138,19 @@ class AuthService:
         else:
             valid = await asyncio.to_thread(security.verify_password, user.password_hash, password)
 
-        if user is None or not valid or user.status != "active":
-            await self.limiter.record_failure(limits)
-            await self._audit_login_failure(user, valid=valid, client_ip=client_ip)
-            await self.db.commit()
-            await asyncio.sleep(self.settings.login_failure_delay_seconds)
-            raise ApiError(401, "INVALID_CREDENTIALS", "邮箱或密码错误")
+        if user is None:
+            await self._reject_login(None, "unknown_account", limits, client_ip)
+        if not valid:
+            await self._reject_login(user, "invalid_password", limits, client_ip)
+
+        # 与修改密码串行化：Argon2 校验较慢，放在锁外；签发会话前在锁内确认密码没有被改过，
+        # 否则一个与改密并发、用旧密码发起的登录会拿到改密后仍然有效的会话
+        verified_hash = user.password_hash
+        locked = await user_repo.lock(self.db, user.id)
+        if locked is None or locked.password_hash != verified_hash:
+            await self._reject_login(locked, "invalid_password", limits, client_ip)
+        if user.status != "active":
+            await self._reject_login(user, "account_disabled", limits, client_ip)
 
         if security.needs_rehash(user.password_hash):
             user.password_hash = await asyncio.to_thread(security.hash_password, password)
@@ -154,24 +162,32 @@ class AuthService:
         await self.db.commit()
         return user, token
 
-    async def _audit_login_failure(self, user: User | None, *, valid: bool, client_ip: str) -> None:
-        """失败原因只写进审计日志，不返回给客户端。不存在的账户不记录邮箱。"""
+    async def _reject_login(
+        self, user: User | None, reason: str, limits: dict[str, int], client_ip: str
+    ) -> NoReturn:
+        """登录失败：计数、写审计日志、延迟，然后统一返回 401。
+
+        失败原因只写进审计日志，不返回给客户端；不存在的账户不记录邮箱。
+        """
+        await self.limiter.record_failure(limits)
         if user is None:
             await self.audit.record(
                 "auth.login_failed",
                 workspace_ids=[None],
-                metadata={"reason": "unknown_account"},
+                metadata={"reason": reason},
                 client_ip=client_ip,
             )
-            return
-        reason = "invalid_password" if not valid else "account_disabled"
-        await self.audit.record_for_account(
-            "auth.login_failed",
-            user_id=user.id,
-            actor_id=None,
-            metadata={"reason": reason},
-            client_ip=client_ip,
-        )
+        else:
+            await self.audit.record_for_account(
+                "auth.login_failed",
+                user_id=user.id,
+                actor_id=None,
+                metadata={"reason": reason},
+                client_ip=client_ip,
+            )
+        await self.db.commit()
+        await asyncio.sleep(self.settings.login_failure_delay_seconds)
+        raise ApiError(401, "INVALID_CREDENTIALS", "邮箱或密码错误")
 
     async def authenticate(self, token: str | None, *, client_ip: str) -> AuthContext:
         if not token:
@@ -254,13 +270,16 @@ class AuthService:
         self, context: AuthContext, *, current_password: str, new_password: str
     ) -> str:
         """校验当前密码后更换密码，撤销该用户全部会话并签发新会话，返回新的会话 Token。"""
-        user = context.user
-        key = f"ratelimit:password:user:{user.id}"
+        key = f"ratelimit:password:user:{context.user.id}"
         limits = {key: self.settings.login_max_failures_per_account}
         retry = await self.limiter.retry_after(limits)
         if retry is not None:
             raise _rate_limited(retry)
 
+        # 锁住用户行直到提交：与登录签发会话、其他改密请求串行，并以数据库里的最新密码为准
+        user = await user_repo.lock(self.db, context.user.id)
+        if user is None:
+            raise _unauthorized()
         if not await asyncio.to_thread(
             security.verify_password, user.password_hash, current_password
         ):

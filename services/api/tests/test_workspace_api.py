@@ -4,6 +4,8 @@
 S1-05（审计日志的写入、脱敏、分页与只追加）。
 """
 
+import base64
+import json
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -213,7 +215,19 @@ async def test_audit_log_pagination(world: World) -> None:
             break
     assert collected == [e["id"] for e in everything["items"]]
 
-    for bad in ("not-a-cursor", "W10", "WyJ4IiwieSJd"):
+    def encoded(value: Any) -> str:
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+
+    malformed = [
+        "not-a-cursor",
+        encoded([]),
+        encoded(["x", "y"]),
+        encoded(["2026-10-29T00:00:00+00:00", 123]),
+        encoded(["2026-10-29T00:00:00+00:00", [1]]),
+        encoded({"created_at": "2026-10-29T00:00:00+00:00"}),
+        encoded(["2026-10-29T00:00:00", str(uuid.uuid4())]),  # 缺时区
+    ]
+    for bad in malformed:
         invalid = await audit_logs(owner, target, cursor=bad)
         assert invalid.status_code == 422
         assert invalid.json()["error"]["code"] == "VALIDATION_FAILED"

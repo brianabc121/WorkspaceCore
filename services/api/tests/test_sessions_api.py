@@ -1,5 +1,6 @@
 """会话管理与修改密码的接口集成测试（T-0011，S1-05）：真实 PostgreSQL（已迁移）+ Redis。"""
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -7,7 +8,8 @@ from dataclasses import dataclass
 import httpx
 import pytest
 
-from tests.helpers import BOB, OWNER, ClientFactory, add_user, csrf
+from app.domain import security
+from tests.helpers import BOB, OWNER, ClientFactory, add_user, csrf, run_sql
 
 pytestmark = pytest.mark.integration
 
@@ -138,3 +140,45 @@ async def test_password_change_is_rate_limited(devices: Devices) -> None:
     assert (
         await laptop.post("/api/v1/auth/password", json=right, headers=csrf(laptop))
     ).status_code == 429
+
+
+async def test_login_racing_a_password_change_gets_no_session(
+    devices: Devices, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """用旧密码发起、与改密并发的登录：校验通过后密码已被改掉，不能拿到会话。"""
+    phone, database_url = devices.phone, devices.database_url
+    await phone.post("/api/v1/auth/logout", headers=csrf(phone))
+    real_verify = security.verify_password
+    new_hash = security.hash_password(NEW_PASSWORD)
+
+    def verify_then_password_changes(password_hash: str, password: str) -> bool:
+        result = real_verify(password_hash, password)
+        # 模拟改密请求恰好在本次校验之后、签发会话之前提交（这里运行在工作线程里）
+        asyncio.run(
+            run_sql(database_url, "UPDATE workspace.users SET password_hash = $1", new_hash)
+        )
+        return result
+
+    monkeypatch.setattr(security, "verify_password", verify_then_password_changes)
+    response = await phone.post("/api/v1/auth/login", json=LOGIN)
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_CREDENTIALS"
+    assert phone.cookies.get("ws_session") is None
+
+
+async def test_concurrent_password_changes_are_serialized(devices: Devices) -> None:
+    """两台设备同时用同一个当前密码改密：只有一个成功，另一个按当前密码错误处理。"""
+    laptop, phone = devices.laptop, devices.phone
+    results = await asyncio.gather(
+        laptop.post(
+            "/api/v1/auth/password",
+            json={"current_password": OWNER["password"], "new_password": NEW_PASSWORD},
+            headers=csrf(laptop),
+        ),
+        phone.post(
+            "/api/v1/auth/password",
+            json={"current_password": OWNER["password"], "new_password": "the other passphrase"},
+            headers=csrf(phone),
+        ),
+    )
+    assert sorted(r.status_code for r in results) == [204, 400]

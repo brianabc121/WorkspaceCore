@@ -25,3 +25,16 @@ async def create(db: AsyncSession, *, email: str, password_hash: str, display_na
     db.add(user)
     await db.flush()
     return user
+
+
+async def lock(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+    """SELECT … FOR UPDATE 锁住用户行（到事务结束），并用数据库里的最新值刷新会话中的对象。
+
+    登录签发会话与修改密码都要先拿这把锁，保证二者串行。
+    """
+    return await db.scalar(
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
