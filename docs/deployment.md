@@ -72,7 +72,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | `CORS_ALLOWED_ORIGINS` | 其他可信来源，逗号分隔（例如用 IP 访问时的 `http://127.0.0.1:8080`） | `http://127.0.0.1:8080` |
 | `SESSION_SECRET` | 计算 CSRF Token 的密钥；生产环境必填且至少 32 个字符。轮换后所有人需要重新登录 | 随机 |
 | `SETUP_TOKEN` | 首次安装凭据（`make setup-token` 查看）；未配置时首次安装一律拒绝 | 随机 |
-| `CREDENTIAL_ENCRYPTION_KEY` | 第三方凭证加密密钥（T-0011 起使用） | 随机 |
+| `CREDENTIAL_ENCRYPTION_KEY` | 第三方连接凭证的加密密钥（64 位十六进制）；格式错误时 API 拒绝启动。**丢失或更换后已保存的凭证无法解密**，请与数据库备份分开保存 | 随机 |
 
 数据库密码请只用字母和数字（`make env` 生成的就是），否则需要在连接串中做 URL 编码。
 

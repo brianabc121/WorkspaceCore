@@ -5,7 +5,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Security
 
 from app.api.deps import authenticated, csrf_protected, get_auth_service
-from app.core.errors import not_implemented
 from app.domain.auth import AuthContext, AuthService
 from app.schemas.common import error_responses
 from app.schemas.users import MeResponse, MeUpdate, UserOut
@@ -31,5 +30,9 @@ async def get_me(
     dependencies=[Security(authenticated), Depends(csrf_protected)],
     responses=error_responses(401, 403, 422, 501),
 )
-async def update_me(body: MeUpdate) -> UserOut:
-    raise not_implemented("T-0011")
+async def update_me(
+    body: MeUpdate,
+    context: Annotated[AuthContext, Security(authenticated)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
+) -> UserOut:
+    return await service.update_profile(context, display_name=body.display_name)

@@ -3,12 +3,14 @@
 在这里导入全部模型，Alembic 的 target_metadata 才能看到它们。
 """
 
+from app.models.audit import AuditLog
 from app.models.base import NAMING_CONVENTION, Base
 from app.models.identity import AuthSession, ExternalIdentity, User
 from app.models.workspace import Workspace, WorkspaceMember
 
 __all__ = [
     "NAMING_CONVENTION",
+    "AuditLog",
     "AuthSession",
     "Base",
     "ExternalIdentity",

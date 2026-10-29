@@ -37,6 +37,7 @@ EXPECTED_TABLES = {
     "external_identities",
     "workspaces",
     "workspace_members",
+    "audit_logs",
 }
 
 

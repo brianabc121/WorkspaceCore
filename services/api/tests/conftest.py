@@ -9,17 +9,21 @@
 import asyncio
 import os
 from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
+from typing import Any
 from uuid import uuid4
 
 import asyncpg
 import httpx
 import pytest
+from alembic import command
 from fastapi import FastAPI
+from pydantic import SecretStr
 from sqlalchemy.engine import make_url
 
 from app.core.config import Settings
 from app.main import create_app
-from tests.helpers import asyncpg_dsn
+from tests.helpers import BASE_URL, SETUP_TOKEN, ClientFactory, alembic_config, asyncpg_dsn
 
 
 def _integration_env(name: str) -> str:
@@ -73,3 +77,38 @@ def temp_database_url() -> Iterator[str]:
         yield make_url(admin_url).set(database=name).render_as_string(hide_password=False)
     finally:
         asyncio.run(execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+
+
+@pytest.fixture
+def migrated_database_url(temp_database_url: str) -> str:
+    command.upgrade(alembic_config(temp_database_url), "head")
+    return temp_database_url
+
+
+@pytest.fixture
+def make_client(migrated_database_url: str, redis_url: str) -> ClientFactory:
+    """接口集成测试：真实 PostgreSQL（已迁移）+ Redis。每次调用得到独立的客户端（各有 Cookie）。"""
+
+    @asynccontextmanager
+    async def factory(**overrides: Any) -> AsyncIterator[httpx.AsyncClient]:
+        options: dict[str, Any] = {
+            "app_env": "test",
+            "log_level": "WARNING",
+            "database_url": SecretStr(migrated_database_url),
+            "redis_url": SecretStr(redis_url),
+            "setup_token": SecretStr(SETUP_TOKEN),
+            "public_base_url": BASE_URL,
+            "login_max_failures_per_account": 3,
+            "login_max_failures_per_ip": 50,
+            "login_failure_delay_seconds": 0,
+        }
+        options.update(overrides)
+        app = create_app(Settings(**options))
+        async with app.router.lifespan_context(app):
+            # 清空测试用 Redis 库里的限流计数；同一个测试里的多个客户端请在开头一起创建
+            await app.state.redis.flushdb()
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+                yield client
+
+    return factory

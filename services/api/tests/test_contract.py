@@ -8,7 +8,8 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from app.api.deps import authenticated, get_db, get_redis
+from app.api.deps import authenticated, get_db, get_redis, get_workspace_service
+from app.core.errors import not_implemented
 from scripts.export_openapi import OUTPUT, render
 
 SPRINT_1_ENDPOINTS = {
@@ -69,9 +70,15 @@ async def test_invalid_uuid_path_parameter_returns_unified_error(
     assert response.json()["error"]["code"] == "VALIDATION_FAILED"
 
 
-async def test_unimplemented_endpoint_uses_unified_error_format(
-    stub_client: httpx.AsyncClient,
+class _UnfinishedWorkspaceService:
+    async def update(self, *args: object, **kwargs: object) -> None:
+        raise not_implemented("T-xxxx")
+
+
+async def test_business_errors_use_unified_error_format(
+    app: FastAPI, stub_client: httpx.AsyncClient
 ) -> None:
+    app.dependency_overrides[get_workspace_service] = _UnfinishedWorkspaceService
     response = await stub_client.patch(
         f"/api/v1/workspaces/{uuid.uuid4()}", json={"name": "新名称"}
     )
@@ -102,7 +109,6 @@ async def test_workspace_scoped_endpoint_requires_workspace_header(
 ) -> None:
     missing = await stub_client.get("/api/v1/audit-logs")
     assert missing.status_code == 422
-    present = await stub_client.get(
-        "/api/v1/audit-logs", headers={"X-Workspace-Id": str(uuid.uuid4())}
-    )
-    assert present.status_code == 501
+    assert missing.json()["error"]["code"] == "VALIDATION_FAILED"
+    invalid = await stub_client.get("/api/v1/audit-logs", headers={"X-Workspace-Id": "1"})
+    assert invalid.status_code == 422

@@ -1,10 +1,10 @@
-"""路由共用的依赖：数据库会话、会话 Cookie、CSRF 校验、工作空间上下文。
+"""路由共用的依赖：数据库会话、会话 Cookie、CSRF 校验、工作空间权限。
 
 约定见 docs/decisions/2026-10-30-sprint-1-auth-contract.md。参数签名决定 OpenAPI 的样子，
 修改时注意保持 openapi.json 不变（CI 会检查）。
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated
 from uuid import UUID
 
@@ -15,8 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, origin_of
 from app.core.errors import ApiError
+from app.domain import policy
 from app.domain.auth import AuthContext, AuthService
 from app.domain.security import csrf_token_for, csrf_token_matches
+from app.domain.workspaces import WorkspaceService
+from app.schemas.workspaces import Role
 
 SESSION_COOKIE = "ws_session"
 CSRF_COOKIE = "ws_csrf"
@@ -54,12 +57,20 @@ def get_auth_service(
     return AuthService(db, redis, settings)
 
 
+def get_workspace_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> WorkspaceService:
+    return WorkspaceService(db, settings)
+
+
 async def authenticated(
+    request: Request,
     token: Annotated[str | None, Security(session_cookie)],
     service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> AuthContext:
     """要求有效会话，否则 401 UNAUTHORIZED。"""
-    return await service.authenticate(token)
+    return await service.authenticate(token, client_ip=client_ip(request, service.settings))
 
 
 def _csrf_failed() -> ApiError:
@@ -114,14 +125,28 @@ async def origin_checked(
     _check_origin(request, settings)
 
 
-async def workspace_context(
-    workspace_id: Annotated[
-        UUID,
-        Header(alias=WORKSPACE_HEADER, description="当前工作空间；不是成员时返回 404"),
-    ],
-) -> UUID:
-    """工作空间范围的接口通过请求头指定工作空间。（成员与角色校验由 T-0011 实现）"""
-    return workspace_id
+WorkspaceHeader = Annotated[
+    UUID,
+    Header(alias=WORKSPACE_HEADER, description="当前工作空间；不是成员时返回 404"),
+]
+
+
+def workspace_role(minimum: Role) -> Callable[..., Awaitable[policy.WorkspaceAccess]]:
+    """工作空间范围的接口：用请求头指定工作空间，并要求至少 minimum 角色（404 / 403 见 policy）。"""
+
+    async def dependency(
+        workspace_id: WorkspaceHeader,
+        context: Annotated[AuthContext, Security(authenticated)],
+        db: Annotated[AsyncSession, Depends(get_db)],
+    ) -> policy.WorkspaceAccess:
+        return await policy.require_role(
+            db, user_id=context.user.id, workspace_id=workspace_id, minimum=minimum
+        )
+
+    return dependency
+
+
+workspace_admin = workspace_role(Role.admin)
 
 
 def client_ip(request: Request, settings: Settings) -> str:

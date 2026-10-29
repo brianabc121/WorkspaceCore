@@ -5,9 +5,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Security
 
-from app.api.deps import authenticated, csrf_protected, get_auth_service
-from app.core.errors import not_implemented
+from app.api.deps import (
+    authenticated,
+    csrf_protected,
+    get_auth_service,
+    get_workspace_service,
+)
 from app.domain.auth import AuthContext, AuthService
+from app.domain.workspaces import WorkspaceService
 from app.schemas.common import Page, error_responses
 from app.schemas.workspaces import WorkspaceOut, WorkspaceUpdate
 
@@ -33,8 +38,12 @@ async def list_workspaces(
     dependencies=[Security(authenticated)],
     responses=error_responses(401, 404, 501),
 )
-async def get_workspace(workspace_id: UUID) -> WorkspaceOut:
-    raise not_implemented("T-0011")
+async def get_workspace(
+    workspace_id: UUID,
+    context: Annotated[AuthContext, Security(authenticated)],
+    service: Annotated[WorkspaceService, Depends(get_workspace_service)],
+) -> WorkspaceOut:
+    return await service.get(context, workspace_id)
 
 
 @router.patch(
@@ -43,5 +52,10 @@ async def get_workspace(workspace_id: UUID) -> WorkspaceOut:
     dependencies=[Security(authenticated), Depends(csrf_protected)],
     responses=error_responses(401, 403, 404, 422, 501),
 )
-async def update_workspace(workspace_id: UUID, body: WorkspaceUpdate) -> WorkspaceOut:
-    raise not_implemented("T-0011")
+async def update_workspace(
+    workspace_id: UUID,
+    body: WorkspaceUpdate,
+    context: Annotated[AuthContext, Security(authenticated)],
+    service: Annotated[WorkspaceService, Depends(get_workspace_service)],
+) -> WorkspaceOut:
+    return await service.update(context, workspace_id, name=body.name)

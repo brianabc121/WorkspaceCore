@@ -1,12 +1,13 @@
 """审计日志（owner / admin）。按 X-Workspace-Id 指定的工作空间返回，新的在前。"""
 
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Security
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import authenticated, workspace_context
-from app.core.errors import not_implemented
+from app.api.deps import authenticated, get_db, workspace_admin
+from app.domain import audit
+from app.domain.policy import WorkspaceAccess
 from app.schemas.audit import AuditLogOut
 from app.schemas.common import Page, error_responses
 
@@ -20,8 +21,9 @@ router = APIRouter(tags=["audit"])
     responses=error_responses(401, 403, 404, 422, 501),
 )
 async def list_audit_logs(
-    workspace_id: Annotated[UUID, Depends(workspace_context)],
+    access: Annotated[WorkspaceAccess, Depends(workspace_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
     cursor: Annotated[str | None, Query(max_length=512)] = None,
 ) -> Page[AuditLogOut]:
-    raise not_implemented("T-0011")
+    return await audit.list_page(db, access.workspace.id, limit=limit, cursor=cursor)

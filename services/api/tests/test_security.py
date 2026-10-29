@@ -7,6 +7,7 @@ from starlette.requests import Request
 from app.api.deps import client_ip
 from app.core.config import Settings, origin_of
 from app.domain import security
+from app.domain.audit import REDACTED, redact
 from app.main import create_app
 
 
@@ -78,3 +79,36 @@ def test_client_ip_trusts_forwarded_for_only_when_enabled() -> None:
     forwarded = {"X-Forwarded-For": "1.1.1.1, 203.0.113.9"}
     assert client_ip(_request(forwarded), Settings()) == "172.18.0.5"
     assert client_ip(_request(forwarded), Settings(trust_forwarded_for=True)) == "203.0.113.9"
+
+
+def test_ip_hash_is_keyed_and_stable() -> None:
+    first = security.ip_hash(b"k" * 32, "203.0.113.7")
+    assert first == security.ip_hash(b"k" * 32, "203.0.113.7")
+    assert first != security.ip_hash(b"k" * 32, "203.0.113.8")
+    assert first != security.ip_hash(b"x" * 32, "203.0.113.7")
+    assert "203.0.113.7" not in first
+
+
+def test_audit_metadata_is_redacted() -> None:
+    metadata = {
+        "password": "hunter2-hunter2",
+        "new_password": "x",
+        "Authorization": "Bearer abc",
+        "api_key": "k",
+        "nested": {"refresh_token": "t", "name": "ok", "deep": {"a": {"b": {"c": 1}}}},
+        "list": [{"secret": "s"}, "x" * 300],
+        "wrapped": SecretStr("hidden"),
+        "count": 3,
+        "ratio": float("nan"),
+    }
+    redacted = redact(metadata)
+    for key in ("password", "new_password", "Authorization", "api_key", "wrapped"):
+        assert redacted[key] == REDACTED
+    assert redacted["nested"]["refresh_token"] == REDACTED
+    assert redacted["nested"]["name"] == "ok"
+    assert redacted["nested"]["deep"]["a"]["b"] == "[TRUNCATED]"
+    assert redacted["list"][0] == {"secret": REDACTED}
+    assert len(redacted["list"][1]) == 257
+    assert redacted["count"] == 3
+    assert redacted["ratio"] == "nan"
+    assert "hunter2" not in repr(redacted)
