@@ -14,6 +14,8 @@ Sprint 1 由 claude 做后端、codex 做前端，两边并行。本契约先固
   前端用它生成 TypeScript 类型，不手抄字段。本文说明 OpenAPI 表达不了的约定（Cookie、CSRF、错误码含义等）。
 - 端点已全部声明。还没实现的端点返回 `501 NOT_IMPLEMENTED`（统一错误格式），由 T-0010 / T-0011 逐步实现；
   实现过程中如需修改契约，必须同时更新 `openapi.json` 和本文，并在 PR 里写明。
+- 2026-10-30 更新：T-0010、T-0011 已实现全部端点，`openapi.json` 未改动。OpenAPI 中各端点仍列出 501 响应，
+  实际不会再返回；是否删除这些声明留到 T-0013 联调时与前端一起决定，避免前端类型在开发中途变化。
 
 ## 2. 端点总览
 
@@ -128,6 +130,7 @@ Sprint 1 由 claude 做后端、codex 做前端，两边并行。本契约先固
 
   达到阈值后返回 `429 RATE_LIMITED`（锁定期间密码正确也拒绝），成功登录会清除该账户的计数。
   账户维度的键用邮箱的 SHA-256，不在 Redis 中保存明文邮箱。首次安装按 IP 使用同样的阈值。
+  修改密码时当前密码错误按用户计数，阈值同账户维度，超过后返回 429（T-0011）。
 - 客户端 IP：Compose 中 API 只能经 Caddy 访问，设置 `TRUST_FORWARDED_FOR=true`，取 `X-Forwarded-For` 最右侧的地址；
   直接对外暴露 API 时必须关闭该选项，否则客户端可以伪造 IP 绕过限流。
 
@@ -139,7 +142,44 @@ Sprint 1 由 claude 做后端、codex 做前端，两边并行。本契约先固
 - 登录、安装、修改密码成功后，新 Cookie 由浏览器自动保存，前端无需处理 Token。
 - 后端未实现的端点返回 501：开发阶段用 mock（例如 MSW）对接，联调在 T-0013 进行。
 
-## 11. 后果
+## 11. 审计日志（T-0011 实现）
+
+- 表结构见 `docs/data-dictionary.md`（迁移 0003）。**只追加**：应用层不提供修改与删除，数据库触发器拒绝 UPDATE；
+  DELETE 仍允许（随工作空间级联删除，以及将来的保留期清理）。
+- 记录的事件：
+
+  | action | 写入哪个工作空间 | actor | 说明 |
+  |---|---|---|---|
+  | `setup.completed` | 新建的工作空间 | 新 owner | 首次安装 |
+  | `auth.login_succeeded` / `auth.logout` | 该用户所在的每个工作空间 | 本人 | |
+  | `auth.login_failed` | 该账户所在的每个工作空间 | null | `metadata.reason`：`invalid_password` / `account_disabled`；不存在的账户写 `workspace_id = NULL`，不记录邮箱，不通过 API 暴露 |
+  | `auth.password_changed` / `auth.password_change_failed` | 该用户所在的每个工作空间 | 本人 | 成功时 `metadata.revoked_sessions` 为撤销的会话数 |
+  | `auth.session_revoked` | 该用户所在的每个工作空间 | 本人 | `resource_id` 为会话 ID，`metadata.current` 表示是否当前会话 |
+  | `user.updated` | 该用户所在的每个工作空间 | 本人 | `metadata.display_name.old/new` |
+  | `workspace.updated` | 该工作空间 | 操作者 | `metadata.name.old/new` |
+
+  账户事件按“事件发生时用户所在的工作空间”各写一条，所以查询始终只按 `workspace_id` 过滤；
+  之后加入工作空间的成员，其加入前的账户事件不会出现在该工作空间。被限流拒绝（429）的请求不记录，避免刷日志。
+- `metadata` 写入前脱敏：键名包含 password / secret / token / cookie / authorization / credential / api_key /
+  private_key 的值替换为 `[REDACTED]`，并限制嵌套深度（4）、元素个数（50）与字符串长度（256）。
+- 客户端 IP 只保存 `HMAC-SHA256(SESSION_SECRET, IP)`（`ip_hash`），API 不返回该字段。轮换 `SESSION_SECRET` 后新旧记录的哈希不可比较。
+- 查询 `GET /api/v1/audit-logs`：owner / admin；新的在前；`limit` 1–100（默认 30）；`next_cursor` 是不透明字符串，
+  原样传回 `cursor` 取下一页；游标无效返回 `422 VALIDATION_FAILED`；`total_estimate` 为 null。
+
+## 12. 第三方连接凭证（T-0011 实现服务，Sprint 3 起使用）
+
+规范要求“数据库只存密钥引用或密文”（第 5.1 节第 7 项）。`app/domain/credentials.py` 提供两种引用：
+
+| 引用 | 含义 |
+|---|---|
+| `enc:v1:<key_id>:<密文>` | 用 `CREDENTIAL_ENCRYPTION_KEY`（64 位十六进制，32 字节）做 AES-256-GCM 加密；加密时绑定用途（例如 `integration_account:<id>`），密文挪到别的记录上会解密失败；`key_id` 由密钥派生，用于区分“密钥不对”和“密文被篡改” |
+| `env:WS_SECRET_<名称>` | 部署 Secret：运行时从环境变量读取，数据库里没有密钥内容；只允许 `WS_SECRET_` 前缀，避免借引用读到工作台自身的密钥 |
+
+- `CREDENTIAL_ENCRYPTION_KEY` 丢失或更换后，已保存的 `enc:` 凭证都无法解密（需要重新填写）；请与数据库备份分开、妥善保存。
+  密钥轮换（多密钥并存）留到真正保存凭证的 Sprint 3 再设计，格式里的版本号与 `key_id` 已为此预留。
+- 配置了该密钥但格式错误时，API 拒绝启动。
+
+## 13. 后果
 
 - 前端可以立即基于 `openapi.json` 开发；后端按端点逐个替换 501。
 - `X-Workspace-Id` 头会成为之后所有工作空间资源接口的统一做法。

@@ -5,83 +5,20 @@
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any
+from collections.abc import AsyncIterator
 
-import asyncpg
 import httpx
 import pytest
-from alembic import command
-from pydantic import SecretStr
 
-from app.core.config import Settings
-from app.main import create_app
-from tests.helpers import alembic_config, asyncpg_dsn
+from tests.helpers import BASE_URL, OWNER, ClientFactory, csrf, run_sql
 
 pytestmark = pytest.mark.integration
-
-BASE_URL = "http://testserver"
-SETUP_TOKEN = "test-setup-token-0123456789"  # noqa: S105
-OWNER = {
-    "setup_token": SETUP_TOKEN,
-    "email": "Owner@Example.com",
-    "password": "correct horse battery staple",
-    "display_name": "Owner",
-    "workspace_name": "我的工作空间",
-}
-
-ClientFactory = Callable[..., AbstractAsyncContextManager[httpx.AsyncClient]]
-
-
-@pytest.fixture
-def migrated_database_url(temp_database_url: str) -> str:
-    command.upgrade(alembic_config(temp_database_url), "head")
-    return temp_database_url
-
-
-@pytest.fixture
-def make_client(migrated_database_url: str, redis_url: str) -> ClientFactory:
-    @asynccontextmanager
-    async def factory(**overrides: Any) -> AsyncIterator[httpx.AsyncClient]:
-        options: dict[str, Any] = {
-            "app_env": "test",
-            "log_level": "WARNING",
-            "database_url": SecretStr(migrated_database_url),
-            "redis_url": SecretStr(redis_url),
-            "setup_token": SecretStr(SETUP_TOKEN),
-            "public_base_url": BASE_URL,
-            "login_max_failures_per_account": 3,
-            "login_max_failures_per_ip": 50,
-            "login_failure_delay_seconds": 0,
-        }
-        options.update(overrides)
-        app = create_app(Settings(**options))
-        async with app.router.lifespan_context(app):
-            await app.state.redis.flushdb()
-            transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
-                yield client
-
-    return factory
 
 
 @pytest.fixture
 async def client(make_client: ClientFactory) -> AsyncIterator[httpx.AsyncClient]:
     async with make_client() as c:
         yield c
-
-
-def csrf(client: httpx.AsyncClient) -> dict[str, str]:
-    return {"X-CSRF-Token": client.cookies.get("ws_csrf") or ""}
-
-
-async def run_sql(database_url: str, sql: str) -> None:
-    conn = await asyncpg.connect(asyncpg_dsn(database_url))
-    try:
-        await conn.execute(sql)
-    finally:
-        await conn.close()
 
 
 async def test_first_setup_creates_owner_workspace_and_session(client: httpx.AsyncClient) -> None:

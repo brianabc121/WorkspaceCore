@@ -15,6 +15,7 @@ from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import install_middleware
 from app.core.resources import create_engine, create_redis
+from app.domain.credentials import CredentialBox
 
 logger = logging.getLogger("app")
 
@@ -42,6 +43,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     settings.require_api_secrets()
+    if settings.credential_encryption_key is not None:
+        # 密钥格式错误时启动失败，而不是等到第一次使用凭证时才发现
+        CredentialBox.from_settings(settings)
     configure_logging(settings.log_level)
     docs_enabled = not settings.is_production
     app = FastAPI(

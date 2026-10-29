@@ -63,3 +63,8 @@ def csrf_token_matches(key: bytes, session_token: str, candidate: str) -> bool:
 def email_key(email: str) -> str:
     """限流计数用的账户键：不在 Redis 里保存明文邮箱。"""
     return hashlib.sha256(email.strip().lower().encode()).hexdigest()
+
+
+def ip_hash(key: bytes, ip: str) -> str:
+    """审计日志里的客户端 IP：带密钥的哈希，可用于比较是否同一来源，但无法枚举还原。"""
+    return hmac.new(key, b"audit-ip\x00" + ip.encode(), hashlib.sha256).hexdigest()

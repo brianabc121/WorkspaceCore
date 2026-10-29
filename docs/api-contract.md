@@ -1,6 +1,6 @@
 # API 契约
 
-> 状态：Sprint 1 契约已声明。完整规范见 `docs/DEVELOPMENT_SPEC.md` 第 6 节。
+> 状态：Sprint 1 端点已全部实现（T-0010、T-0011）。完整规范见 `docs/DEVELOPMENT_SPEC.md` 第 6 节。
 > **机器可读的接口以 `services/api/openapi.json` 为准**（`make openapi` 由代码生成，CI 检查一致性），前端据此生成类型。
 > Sprint 1 的 Cookie、CSRF、工作空间上下文、错误码等约定见 `docs/decisions/2026-10-30-sprint-1-auth-contract.md`。
 
@@ -57,12 +57,12 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | POST | `/api/v1/auth/login` | 登录 | 已实现（T-0010） |
 | POST | `/api/v1/auth/logout` | 登出 | 已实现（T-0010） |
 | GET | `/api/v1/me` | 当前用户与所属工作空间 | 已实现（T-0010） |
-| PATCH | `/api/v1/me` | 修改显示名 | 501，T-0011 实现 |
+| PATCH | `/api/v1/me` | 修改显示名 | 已实现（T-0011） |
 | GET | `/api/v1/workspaces` | 我所属的工作空间 | 已实现（T-0010） |
-| GET / PATCH | `/api/v1/workspaces/{workspace_id}` | 工作空间详情 / 设置 | 501，T-0011 实现 |
-| GET | `/api/v1/auth/sessions` | 我的会话 | 501，T-0011 实现 |
-| DELETE | `/api/v1/auth/sessions/{session_id}` | 撤销会话 | 501，T-0011 实现 |
-| POST | `/api/v1/auth/password` | 修改密码 | 501，T-0011 实现 |
-| GET | `/api/v1/audit-logs` | 审计日志（需 `X-Workspace-Id`） | 501，T-0011 实现 |
+| GET / PATCH | `/api/v1/workspaces/{workspace_id}` | 工作空间详情（viewer+）/ 设置（admin+） | 已实现（T-0011） |
+| GET | `/api/v1/auth/sessions` | 我的会话 | 已实现（T-0011） |
+| DELETE | `/api/v1/auth/sessions/{session_id}` | 撤销会话 | 已实现（T-0011） |
+| POST | `/api/v1/auth/password` | 修改密码 | 已实现（T-0011） |
+| GET | `/api/v1/audit-logs` | 审计日志（需 `X-Workspace-Id`，owner / admin） | 已实现（T-0011） |
 
 请求头约定：写请求带 `X-CSRF-Token`（值取自 `ws_csrf` Cookie）；工作空间范围的请求带 `X-Workspace-Id`。

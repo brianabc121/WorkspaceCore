@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     session_secret: SecretStr | None = None
     # 首次安装凭据；未配置时首次安装接口一律拒绝
     setup_token: SecretStr | None = None
+    # 第三方连接凭证的加密密钥：64 位十六进制（32 字节），make env 会生成
+    credential_encryption_key: SecretStr | None = None
     session_ttl_days: int = Field(default=30, ge=1, le=365)
     session_idle_days: int = Field(default=7, ge=1, le=365)
     # 登录 / 首次安装失败限流（Redis 计数，固定窗口）
@@ -54,6 +56,12 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_log_level(cls, value: object) -> object:
         return value.upper() if isinstance(value, str) else value
+
+    @field_validator("session_secret", "setup_token", "credential_encryption_key", mode="before")
+    @classmethod
+    def _blank_as_unset(cls, value: object) -> object:
+        # Compose 的 ${X:-} 在变量缺失时传入空字符串，按“未配置”处理
+        return None if isinstance(value, str) and not value.strip() else value
 
     def require_api_secrets(self) -> None:
         """API 启动时调用：生产环境必须提供足够长的 SESSION_SECRET。
