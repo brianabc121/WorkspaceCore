@@ -5,13 +5,13 @@
 """
 
 from functools import lru_cache
-from typing import Literal, Self
+from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 只用于开发与测试；生产环境必须通过 SESSION_SECRET 提供，否则启动失败
+# 只用于开发与测试；生产环境必须通过 SESSION_SECRET 提供，否则 API 拒绝启动
 _DEV_SESSION_SECRET = "development-only-session-secret-do-not-use-in-production"  # noqa: S105
 
 
@@ -55,13 +55,15 @@ class Settings(BaseSettings):
     def _normalize_log_level(cls, value: object) -> object:
         return value.upper() if isinstance(value, str) else value
 
-    @model_validator(mode="after")
-    def _require_production_secrets(self) -> Self:
+    def require_api_secrets(self) -> None:
+        """API 启动时调用：生产环境必须提供足够长的 SESSION_SECRET。
+
+        不放在字段校验里：Worker 也读取这份配置，但用不到会话密钥，Compose 也不给它注入。
+        """
         if self.is_production:
             secret = self.session_secret.get_secret_value() if self.session_secret else ""
             if len(secret) < 32:
-                raise ValueError("生产环境必须设置至少 32 个字符的 SESSION_SECRET")
-        return self
+                raise RuntimeError("生产环境必须设置至少 32 个字符的 SESSION_SECRET")
 
     @property
     def is_production(self) -> bool:

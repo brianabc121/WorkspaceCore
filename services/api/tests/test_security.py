@@ -1,12 +1,13 @@
 """安全原语与相关配置（不需要数据库）。"""
 
 import pytest
-from pydantic import SecretStr, ValidationError
+from pydantic import SecretStr
 from starlette.requests import Request
 
 from app.api.deps import client_ip
 from app.core.config import Settings, origin_of
 from app.domain import security
+from app.main import create_app
 
 
 def test_password_hash_round_trip() -> None:
@@ -36,13 +37,20 @@ def test_email_key_ignores_case_and_whitespace() -> None:
     assert security.email_key(" Owner@Example.com ") == security.email_key("owner@example.com")
 
 
-def test_production_requires_a_strong_session_secret() -> None:
-    with pytest.raises(ValidationError):
-        Settings(app_env="production")
-    with pytest.raises(ValidationError):
-        Settings(app_env="production", session_secret=SecretStr("too-short"))
+def test_production_api_requires_a_strong_session_secret() -> None:
+    with pytest.raises(RuntimeError):
+        create_app(Settings(app_env="production"))
+    with pytest.raises(RuntimeError):
+        create_app(Settings(app_env="production", session_secret=SecretStr("too-short")))
     settings = Settings(app_env="production", session_secret=SecretStr("x" * 32))
+    create_app(settings)
     assert settings.cookie_secure
+
+
+def test_worker_settings_do_not_require_session_secret() -> None:
+    # Worker 与 API 共用 Settings，但 Compose 不给 Worker 注入 SESSION_SECRET
+    settings = Settings(app_env="production")
+    assert settings.session_secret is None
 
 
 def test_trusted_origins_and_origin_parsing() -> None:

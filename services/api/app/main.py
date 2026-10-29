@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    settings.require_api_secrets()
     configure_logging(settings.log_level)
     docs_enabled = not settings.is_production
     app = FastAPI(
