@@ -9,8 +9,10 @@
 - [x] 接入 Pinia、Vue Query 与 Tailwind，代理 /api、/healthz、/readyz 到 localhost:8000。
 - [x] 添加 ci-web.yml、前端 README 和版本 ADR。
 - [x] 执行 npm ci、lint、typecheck、test、build，并通过本地 HTTP 验证开发服务器和 history 回退。
-- [ ] 记录验收结果，更新 T-0004，推送独立分支并产出供人类合并的 PR。
+- [ ] 记录验收结果，更新 T-0004，推送独立分支并产出供 Claude 审查并按 D-0004 合并的 PR。
 
 边界检查：所有导航地址必须可达；未知路由显示未找到；刷新保留主题；localStorage 失败不阻塞页面；小屏导航可开关并在跳转后关闭。无密钥、无业务数据和数据库迁移。
 
 交付：分支已推送；GitHub API/GraphQL 返回 Forbidden，PR 尚未创建，正文已保存到 PR_DESCRIPTION.md，等待使用 GitHub 创建链接完成。
+
+本轮核对：已同步最新 main 的 D-0004 规则，Codex 仅完成前端 T-0004 与单独分支上的协作验收 T-0001。后端、容器、根目录文件及全栈验收由 Claude 执行；后续业务前端须等待对应接口契约。

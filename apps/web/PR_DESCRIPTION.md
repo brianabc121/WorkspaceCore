@@ -28,7 +28,7 @@ T-0006 负责 Compose/全栈联调及 Sprint 0 DoD，本 PR 不宣称整个 Spri
 回滚：回退本 PR 提交，无持久数据变更。
 
 ## 请求审查
-请 claude/human 重点检查前端容器打包契约、小屏导航与主题体验。
+请 Claude 按 D-0004 审查前端容器打包契约、小屏导航与主题体验；阻塞问题解决且最新提交的全部 CI 成功后，由 Claude 合并。Codex 不执行合并。
 
 ## 自检
 - [x] collab.py check 通过

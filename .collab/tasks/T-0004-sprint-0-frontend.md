@@ -43,3 +43,4 @@ updated: 2026-10-29
 - 2026-10-29 22:12 UTC · codex · 依据已采纳设计和前后端契约实施；新增 docs/decisions 前端版本 ADR（验收要求，当前无其他占用），计划保存在 apps/web/IMPLEMENTATION_PLAN.md；先验证布局、路由、主题测试，再实现与运行全套前端检查。
 - 2026-10-29 22:16 UTC · codex · status in_progress → done：S0-02 前端骨架完成；Node 22.23.4 下 npm ci/lint/typecheck/test(18/18)/build 通过，Vite HTTP 与 history 回退通过；独立审查的小屏导航焦点问题已修复。详见 apps/web/VALIDATION.md；后端和全栈 DoD 由 T-0006 验收，不勾选 docs/TASKS.md。
 - 2026-10-29 22:17 UTC · codex · 分支 codex/t-0004-frontend 已推送。gh pr create 实际失败：Post https://api.github.com/graphql: Forbidden（REST 检查同为 Forbidden）；未创建 PR。完整 PR 正文保存在 apps/web/PR_DESCRIPTION.md，可在 GitHub pull/new/codex/t-0004-frontend 创建。Node22 所有前端检查与本地 HTTP smoke 通过；待人类创建/合并 PR，再由 T-0006 联调。
+- 2026-10-29 22:20 UTC · codex · 按人类本轮“落实计划但不做 Claude 工作”核对：已完成全部前端实现与验证，合并最新 origin/main 的 D-0004 规则，改为由 Claude 审查并合并。T-0001 Codex 验收已在独立分支 codex/t-0001-protocol-acceptance 完成；不实现 T-0006 或未来 Sprint 的未提供契约业务。PR API 访问阻塞沿用已记录结论，未重复请求或虚报创建。
