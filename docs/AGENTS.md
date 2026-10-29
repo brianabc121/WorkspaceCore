@@ -1,12 +1,12 @@
 # AGENTS.md — 所有 AI 代理的工作约定
 
-本仓库由两个 AI 代理协作开发 My Workspace，人类（仓库所有者）负责派活、裁决和合并：
+本仓库由两个 AI 代理协作开发 My Workspace，人类（仓库所有者）负责派活、裁决和审批：
 
 | 身份 | 是谁 | 职责 |
 |---|---|---|
 | `claude` | Claude Code | 做 owner 是 claude 的任务 |
 | `codex` | OpenAI Codex | 做 owner 是 codex 的任务 |
-| `human` | 仓库所有者 | 派活、裁决分歧、审批决策、**唯一能合并 PR 的人** |
+| `human` | 仓库所有者 | 派活、裁决分歧、审批决策、批准进入下一个 Sprint；PR 合并规则见 `.collab/decisions/D-0004-auto-merge.md` |
 
 **你每次会话都没有之前的记忆——仓库里的 `.collab/` 就是你和对方共同的记忆。**
 你是 Codex 就用身份 `codex`；你是 Claude Code 就用 `claude`（CLAUDE.md 里也会写明）。
@@ -82,7 +82,10 @@
 1. `python3 scripts/collab.py check` 必须通过（CI 也会跑）。
 2. 代码改动和 `.collab/` 改动放在**同一个 PR**。
 3. PR 标题 `[T-xxxx] 简述`，按 `.github/pull_request_template.md` 填写（它包含第 8 节要求的报告结构）。
-4. 推送你自己的分支并开 PR（或按你所在环境的方式产出 PR），然后停下，等人类合并。
+4. 推送你自己的分支并开 PR（或按你所在环境的方式产出 PR）。合并按 D-0004：
+   - claude 的 PR：最新提交上所有 CI 检查成功、没有冲突、没有未处理的阻塞审查意见时，claude 直接合并；
+   - codex 的 PR：开好 PR 后停下，由 claude 审查，没有阻塞问题且 CI 全绿时由 claude 合并；
+   - D-0004 第 3 节列出的情况（改人类负责的文件或协作协议、不可逆的数据迁移、进入下一个 Sprint）仍等人类决定。
 
 交接类型：
 
@@ -94,7 +97,8 @@
 
 ## 6. 红线
 
-- 不推送到对方的分支；不 force-push 共享分支；**不合并 PR**。
+- 不推送到对方的分支；不 force-push 共享分支。
+- **只有 claude 可以合并 PR，而且必须满足 D-0004 的全部条件**；codex 不合并任何 PR。绝不绕过失败的检查。
 - 不修改已提交的交接单；要更正就再发一份新的。
 - 不改 owner 不是你的任务的状态。
 - 不擅自修改协作协议本身（本文件 1–7 节、`.collab/templates/`、`scripts/collab.py` 的字段和状态集合）：
@@ -104,7 +108,8 @@
 ## 7. 审查与小改动
 
 - 审查在 PR 上进行：审查方在 PR 上留评论，不往作者的分支推送。作者负责回应审查意见。
-  建议非琐碎的 PR 都由另一个代理审查一次（人类在 PR 下评论触发，或在对话里让代理去审）。
+- codex 的每个 PR 合并前都由 claude 审查（D-0004）；claude 的 PR 可以由人类在 PR 下评论 `@codex review` 请 codex 审查，
+  合并后才收到的审查意见按新任务或 `rework` 处理。
 - 不建任务的小改动：只改错字、注释、格式这类不超过 20 行、且不碰别人占用路径的修改，
   PR 标题用 `[chore] 简述`。其余改动都要先有任务。
 
