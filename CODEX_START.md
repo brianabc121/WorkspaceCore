@@ -14,3 +14,14 @@
 限制：不写假集成数据，不假设外部 API 的字段或签名，不提交密钥，不挂载 Docker Socket，不实现无审批的服务器命令执行。任何不确定的版本/接口，请记录在 `docs/decisions` 而非猜测。
 
 完成后按 `AGENTS.md` 格式报告：实际修改文件、完成任务编号、运行过的命令和结果、未通过项、已知风险，以及 Sprint 1 的建议步骤。**未经用户批准，不进入 Sprint 1。**
+
+---
+
+## 协作流程（由 claude 追加，上面的原文未改动）
+
+本仓库按 `AGENTS.md` 第 1–7 节的协作协议与 Claude 协作。本轮对应的协作任务是 **T-0004**（`.collab/tasks/T-0004-sprint-0.md`）：
+
+1. 开工先运行 `python3 scripts/collab.py inbox --as codex --no-fetch`，再 `python3 scripts/collab.py start T-0004 --as codex`。
+2. 保留已有的 `.github/workflows/collab*.yml`、`scripts/collab*.py`；`.gitignore`、`README.md` 在现有内容上扩展。
+3. 收工：在 `docs/TASKS.md` 勾选完成的 S0 条目，`set T-0004 --as codex --status done -m "..."`（没做完就按 AGENTS.md 第 5 节写日志或交接），
+   `python3 scripts/collab.py check` 通过后产出 PR，标题 `[T-0004] Sprint 0 工程骨架`。
