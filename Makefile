@@ -10,24 +10,23 @@ UV ?= uv
 NPM ?= npm
 COMPOSE ?= docker compose
 HAS_WEB := $(wildcard $(WEB_DIR)/package.json)
-HAS_COMPOSE := $(wildcard compose.yaml)
+# 读取 .env 里的 HTTP_PORT（没有时用 8080），供 make smoke 使用
+HTTP_PORT := $(or $(shell sed -n 's/^HTTP_PORT=//p' .env 2>/dev/null),8080)
 
 define skip_web
 	@echo "跳过前端：$(WEB_DIR)/package.json 尚不存在"
 endef
 
-define need_compose
-	@if [ -z "$(HAS_COMPOSE)" ]; then echo "compose.yaml 尚未创建（Sprint 0 集成任务 T-0006）"; exit 1; fi
-endef
-
-.PHONY: help setup dev dev-api dev-web up down migrate lint lint-api lint-web format \
-	test test-api test-web build-web backup restore-verify
+.PHONY: help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke \
+	lint lint-api lint-web format test test-api test-web build-web backup restore-verify
 
 help: ## 列出可用命令
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-15s %s\n", $$1, $$2}'
 
-setup: ## 准备本地开发环境：复制 .env（不覆盖已有文件）并安装依赖
-	@test -f .env || { cp .env.example .env && echo "已从 .env.example 创建 .env，请替换其中的占位符"; }
+env: ## 从 .env.example 生成 .env，并随机生成密码与密钥（已存在则不改）
+	@python3 scripts/init_env.py
+
+setup: env ## 准备本地开发环境：生成 .env 并安装前后端依赖
 	cd $(API_DIR) && $(UV) sync
 ifneq ($(HAS_WEB),)
 	$(NPM) --prefix $(WEB_DIR) ci
@@ -46,16 +45,27 @@ dev-api: ## 只启动 API（热重载）
 dev-web: ## 只启动前端开发服务器
 	$(NPM) --prefix $(WEB_DIR) run dev
 
-up: ## 启动 core 服务（Docker Compose）
-	$(need_compose)
-	$(COMPOSE) up -d --build
+up: env ## 构建并启动 core 服务，等待全部健康检查通过
+	$(COMPOSE) up -d --build --wait --wait-timeout 300
+	@echo "已启动：http://127.0.0.1:$(HTTP_PORT)  首次启动后请运行 make migrate"
 
 down: ## 停止服务；保留数据卷，不会删除数据
-	$(need_compose)
 	$(COMPOSE) down
 
-migrate: ## 把数据库迁移到最新版本（使用环境变量 DATABASE_URL）
+ps: ## 查看服务状态
+	$(COMPOSE) ps
+
+logs: ## 跟踪全部服务日志（Ctrl+C 退出）
+	$(COMPOSE) logs -f --tail=100
+
+migrate: ## 在运行中的 api 容器里把数据库迁移到最新版本（需先 make up）
+	$(COMPOSE) exec -T api alembic upgrade head
+
+migrate-local: ## 本机直接运行迁移（使用环境变量 DATABASE_URL）
 	cd $(API_DIR) && $(UV) run alembic upgrade head
+
+smoke: ## 经 Caddy 检查健康、就绪、前端页面与安全响应头
+	scripts/smoke.sh http://127.0.0.1:$(HTTP_PORT)
 
 lint: lint-api lint-web ## 代码质量检查（前后端）
 

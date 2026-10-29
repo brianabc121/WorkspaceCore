@@ -1,0 +1,42 @@
+name: ci-infra
+
+# 全栈冒烟（Sprint 0 DoD）：构建镜像 → make up（等待全部健康检查）→ make migrate → make smoke。
+# 本文件归 claude 维护（docs/decisions/2026-10-29-sprint-0-contracts.md 第 6 节）。
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: 生成 .env（随机密码与密钥）
+        run: make env
+      - name: docker compose config
+        run: docker compose config --quiet
+      - name: 构建并启动（make up）
+        run: make up
+      - name: 数据库迁移（make migrate）
+        run: make migrate
+      - name: 冒烟检查（make smoke）
+        run: make smoke
+      - name: 停止后重启，确认数据卷保留
+        run: |
+          make down
+          docker compose up -d --wait --wait-timeout 240
+          docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select version_num from alembic_version"' | grep -qx 0001
+          make smoke
+      - name: 失败时输出服务状态与日志
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail=200
+      - name: 停止服务
+        if: always()
+        run: make down
