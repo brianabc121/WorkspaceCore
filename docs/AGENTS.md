@@ -155,4 +155,10 @@
 
 Claude 专属的说明在 CLAUDE.md；Codex 所在环境的注意事项写在这里（分支命名、能否联网、如何产出 PR 等）。
 
-- （暂无）
+- 使用现有 `/workspace/WorkspaceCore` 隔离工作区，不自动创建额外 worktree；每个交付使用 `codex/<任务>-<主题>` 分支，从最新 `origin/main` 开始。
+- 本机 Python 3.12.14；Node 24 为默认工具链，前端契约验证使用隔离安装的 Node 22.23.4。未来任务应使用 Node 22 和 `npm ci`。
+- 默认沙箱限制网络和监听端口；经平台允许的执行路径已验证 Git HTTPS fetch/push、npm 安装和本地 Vite HTTP 请求。保留平台代理和 TLS 校验，不自行改认证。
+- GitHub REST / GraphQL 在实际请求中均返回 Forbidden，Git 可读写不代表 API 可用。`gh auth status` 不能作为 Git 访问失败的依据；不要要求用户在聊天里提供 token。
+- API 不可用时先推送自己的分支，保存 PR 正文并提供 GitHub 创建 PR 链接；不声称 PR 已创建或远程 CI 已通过。按 D-0004 由 Claude 审查并在条件满足时合并，Codex 不合并。
+- `start` / `handoff` 能识别上述分支名，无需额外 `--branch`；`inbox --no-fetch` 用于本地检查，开工仍应先显式 fetch 最新 main。
+- 本次未验证 Docker daemon、镜像拉取或全栈 Compose；这部分由 Claude 的平台与验收任务负责。
