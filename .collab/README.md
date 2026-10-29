@@ -6,17 +6,18 @@
 ## 一句话
 
 **仓库里的文件就是看板。** 每个任务一个文件，`owner` 表示“球在谁手里”；
-球权只能通过一张写满内容的**交接单**转移；所有状态变化跟代码一起走 PR，**由你合并后生效**。
+球权只能通过一张写满内容的**交接单**转移；所有状态变化跟代码一起走 PR，**合并进 main 后生效**。
+合并由 Claude 在 CI 全绿、无冲突时执行（[D-0004](decisions/D-0004-auto-merge.md)）；Codex 的 PR 先经 Claude 审查。
 
 ```mermaid
 flowchart LR
-    H([你 human<br/>派活 · 裁决 · 合并])
+    H([你 human<br/>派活 · 裁决 · 审批])
     C[Claude]
     X[Codex]
     M[(main 分支<br/>.collab/ 看板)]
-    C -- "PR：代码 + 任务状态 + 交接单" --> H
-    X -- "PR：代码 + 任务状态 + 交接单" --> H
-    H -- 合并 --> M
+    X -- "PR：代码 + 任务状态 + 交接单" --> C
+    C -- "审查通过 + CI 全绿 → 合并" --> M
+    C -. "例外情况（D-0004 第 3 节）" .-> H
     M -- "开工：inbox" --> C
     M -- "开工：inbox" --> X
 ```
@@ -25,7 +26,7 @@ flowchart LR
 
 1. 两边都没有跨会话记忆，文件是唯一可靠的记忆；
 2. 两边都一定能读写仓库文件（Codex 云端沙箱通常不联网，不一定能访问 GitHub Issues）；
-3. 你合并 PR 这一步自然成了把关点：没合并的交接不生效，不会出现两边同时动一个东西。
+3. 合并 PR 这一步是把关点：没合并的交接不生效，不会出现两边同时动一个东西；合并前必须 CI 全绿，Codex 的 PR 还要经过 Claude 审查。
 
 ## 目录
 
@@ -118,11 +119,15 @@ stateDiagram-v2
 | 处理上报 | 看 `[交接] … → human` 的 issue 和它链接的交接单，决定后对某个代理说“T-0007 按方案 B 做，交给你了”（代理会先记录这次指派再开工） |
 | 看进度 | 打开 GitHub 上的「📋 协作看板」issue（自动更新）；或运行 `python3 scripts/collab.py status` |
 
-### 合并 PR 时检查
+### 合并 PR
 
-- PR 标题带任务号；`collab` 检查是绿的；
-- 如果 PR 里有交接单，扫一眼是否写得具体（第 3、4 节最重要）；
-- 两个 PR 改到同一处时，先合一个，让另一个代理合并 main 后再提交。
+平时不用你动手（[D-0004](decisions/D-0004-auto-merge.md)）：
+
+- Claude 的 PR：最新提交上所有 CI 检查成功、没有冲突，Claude 就直接合并；
+- Codex 的 PR：Claude 先审查，有问题写在 PR 上并退回 Codex；没问题且 CI 全绿就合并；
+- 下面这些仍会先问你：改了规范 / 开工指令（你没要求的）、改了协作规则、不可逆的数据迁移、进入下一个 Sprint。
+
+想在 Claude 的 PR 合并前让 Codex 再看一遍，在 PR 下评论 `@codex review`。
 
 ## 命令速查
 
@@ -147,8 +152,8 @@ python3 scripts/collab.py check                       # 校验（CI 同款）
 | 谁 | 负责 |
 |---|---|
 | Codex | 前端 `apps/web`、`ci-web.yml` |
-| Claude | 后端 `services/api`、数据库迁移、Compose / Caddy、根目录文件、第三方 API 核验、每个 Sprint 的联调与验收 |
-| 你 | 需求与路线图、开工指令、合并 PR、批准进入下一个 Sprint |
+| Claude | 后端 `services/api`、数据库迁移、Compose / Caddy、根目录文件、第三方 API 核验、每个 Sprint 的联调与验收、审查并合并 PR |
+| 你 | 需求与路线图、开工指令、例外情况的决定、批准进入下一个 Sprint |
 
 每个 Sprint：Claude 先提交接口契约（OpenAPI）→ 两边并行实现 → Claude 联调验收并勾选 `docs/TASKS.md` → 你批准进入下一个 Sprint。
 每个 PR 由另一个代理审查一次。要换分工方式，写一条新决策取代 D-0003。
