@@ -5,44 +5,43 @@ this is a personal workspace
 My Workspace：自托管的混合型个人工作台（统一首页、任务、文档入口、日历、GitHub、运维、通知、搜索、自动化、AI 辅助）。
 设计与范围见 [`docs/DEVELOPMENT_SPEC.md`](docs/DEVELOPMENT_SPEC.md)。
 
-> 当前进度：Sprint 0（工程骨架）。后端最小服务与数据库迁移已就绪；前端骨架（T-0004）与 Docker Compose（T-0006）进行中。
+> 当前进度：Sprint 0（工程骨架）已完成，验收记录见 [`docs/acceptance/sprint-0.md`](docs/acceptance/sprint-0.md)。
 
-## 快速开始（本机开发）
+## 快速开始
+
+需要：Docker（含 Compose v2）、GNU Make、Python 3。
+
+```bash
+make up        # 首次自动生成 .env（随机密码），构建并启动全部服务
+make migrate   # 首次启动后执行数据库迁移
+make smoke     # 检查健康、就绪、前端页面与安全响应头
+```
+
+打开 http://127.0.0.1:8080 。停止服务用 `make down`（保留数据）。完整运行手册见 [`docs/deployment.md`](docs/deployment.md)，`make help` 列出全部命令。
+
+## 本机开发
 
 需要：Python 3.12 + [uv](https://docs.astral.sh/uv/)、Node.js 22、PostgreSQL 16、Redis 7。
 
 ```bash
-make setup     # 复制 .env、安装依赖
-make help      # 列出全部命令
-```
-
-后端在本机直接运行时，用环境变量指向本机数据库（默认值为 `localhost` 上无密码的 `workspace` 库）：
-
-```bash
+make setup         # 生成 .env、安装前后端依赖
 export DATABASE_URL=postgresql+asyncpg://workspace:<密码>@localhost:5432/workspace
 export REDIS_URL=redis://localhost:6379/0
-make migrate   # 数据库迁移到最新版本
-make dev       # 启动 API（:8000），前端存在时同时启动（:5173）
-```
-
-验证：`curl localhost:8000/healthz` 返回 `{"status":"ok"}`；`curl localhost:8000/readyz` 检查数据库与 Redis。
-
-质量检查：
-
-```bash
-make lint      # ruff、mypy（以及前端 lint / typecheck）
-make test      # pytest（以及前端测试）
+make migrate-local # 迁移本机数据库
+make dev           # API（:8000）+ 前端（:5173，/api 等路径代理到 API）
+make lint          # ruff、mypy、ESLint、vue-tsc
+make test          # pytest、Vitest
 ```
 
 设置 `TEST_DATABASE_URL`（有建库权限）和 `TEST_REDIS_URL` 后，`make test` 还会运行连接真实 PostgreSQL / Redis 的集成测试。
-一键启动全部服务的 `make up` 将在 Sprint 0 集成任务（T-0006）中完成。
 
 ## 目录结构
 
 | 路径 | 内容 |
 |---|---|
 | `services/api/` | FastAPI 后端（BFF）、Alembic 迁移、ARQ Worker |
-| `apps/web/` | Vue 3 前端（T-0004） |
+| `apps/web/` | Vue 3 前端 |
+| `infra/caddy/`、`compose.yaml` | 统一入口与 core 服务编排 |
 | `docs/` | 规范、任务清单、工程文档、技术决策（`docs/decisions/`） |
 | `.collab/`、`scripts/collab*.py` | Claude 与 Codex 的协作状态与工具 |
 

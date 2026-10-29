@@ -2,10 +2,10 @@
 id: T-0006
 title: Sprint 0 集成与验收：Compose、Caddy、运行手册（S0-04、S0-06）
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
-paths: compose.yaml, infra, services/api/Dockerfile, apps/web/Dockerfile, apps/web/.dockerignore, Makefile, README.md, docs/deployment.md, .github/workflows/ci-infra.yml, docs/TASKS.md
+branch: claude/cool-wright-99qbbg
+paths: compose.yaml, infra, services/api/Dockerfile, services/api/.dockerignore, apps/web/Dockerfile, apps/web/.dockerignore, services/api/app/core/middleware.py, services/api/tests/test_health.py, Makefile, README.md, .env.example, scripts/init_env.py, scripts/smoke.sh, docs/deployment.md, docs/architecture.md, docs/threat-model.md, docs/acceptance, .github/workflows/ci-infra.yml, docs/TASKS.md
 depends_on: T-0004, T-0005
 created: 2026-10-29
 updated: 2026-10-29
@@ -35,3 +35,4 @@ updated: 2026-10-29
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-29 21:49 UTC · claude · 创建任务（owner: claude）
+- 2026-10-29 22:25 UTC · claude · 开始任务：依赖 T-0004（PR #7）与 T-0005（PR #5）均已合并，开始集成与 Sprint 0 验收
