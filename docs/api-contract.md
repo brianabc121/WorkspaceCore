@@ -48,17 +48,17 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 
 失败原因只写入日志（记录异常类型），不出现在响应里。
 
-## Sprint 1 端点（契约已声明）
+## Sprint 1 端点
 
 | 方法 | 路径 | 说明 | 状态 |
 |---|---|---|---|
-| GET | `/api/v1/setup/status` | 是否需要首次安装 | 501，T-0010 实现 |
-| POST | `/api/v1/setup` | 首次安装（需安装凭据） | 501，T-0010 实现 |
-| POST | `/api/v1/auth/login` | 登录 | 501，T-0010 实现 |
-| POST | `/api/v1/auth/logout` | 登出 | 501，T-0010 实现 |
-| GET | `/api/v1/me` | 当前用户与所属工作空间 | 501，T-0010 实现 |
+| GET | `/api/v1/setup/status` | 是否需要首次安装 | 已实现（T-0010） |
+| POST | `/api/v1/setup` | 首次安装（需安装凭据） | 已实现（T-0010） |
+| POST | `/api/v1/auth/login` | 登录 | 已实现（T-0010） |
+| POST | `/api/v1/auth/logout` | 登出 | 已实现（T-0010） |
+| GET | `/api/v1/me` | 当前用户与所属工作空间 | 已实现（T-0010） |
 | PATCH | `/api/v1/me` | 修改显示名 | 501，T-0011 实现 |
-| GET | `/api/v1/workspaces` | 我所属的工作空间 | 501，T-0010 实现 |
+| GET | `/api/v1/workspaces` | 我所属的工作空间 | 已实现（T-0010） |
 | GET / PATCH | `/api/v1/workspaces/{workspace_id}` | 工作空间详情 / 设置 | 501，T-0011 实现 |
 | GET | `/api/v1/auth/sessions` | 我的会话 | 501，T-0011 实现 |
 | DELETE | `/api/v1/auth/sessions/{session_id}` | 撤销会话 | 501，T-0011 实现 |

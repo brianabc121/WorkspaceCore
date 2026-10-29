@@ -1,5 +1,8 @@
 """测试共用的小工具。"""
 
+from pathlib import Path
+
+from alembic.config import Config
 from pydantic import SecretStr
 from sqlalchemy.engine import make_url
 
@@ -21,3 +24,13 @@ def settings_for(database_url: str, redis_url: str) -> Settings:
         redis_url=SecretStr(redis_url),
         readiness_timeout_seconds=1.0,
     )
+
+
+API_DIR = Path(__file__).resolve().parent.parent
+
+
+def alembic_config(database_url: str) -> Config:
+    config = Config(str(API_DIR / "alembic.ini"))
+    config.attributes["database_url"] = database_url
+    config.attributes["configure_logger"] = False
+    return config

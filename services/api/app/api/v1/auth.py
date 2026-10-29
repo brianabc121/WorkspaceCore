@@ -1,11 +1,23 @@
 """登录、登出、会话管理与修改密码。"""
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, Security, status
+from fastapi import APIRouter, Depends, Request, Response, Security, status
 
-from app.api.deps import authenticated, csrf_protected
+from app.api.deps import (
+    authenticated,
+    clear_session_cookies,
+    client_ip,
+    csrf_protected,
+    get_app_settings,
+    get_auth_service,
+    origin_checked,
+    set_session_cookies,
+)
+from app.core.config import Settings
 from app.core.errors import not_implemented
+from app.domain.auth import AuthContext, AuthService
 from app.schemas.auth import LoginRequest, PasswordChangeRequest, SessionOut
 from app.schemas.common import Page, error_responses
 from app.schemas.users import MeResponse
@@ -21,11 +33,23 @@ _signed_in_write = [Security(authenticated), Depends(csrf_protected)]
     summary="邮箱密码登录",
     description="成功时设置会话与 CSRF Cookie。"
     "账户不存在与密码错误返回相同的 401 INVALID_CREDENTIALS。",
-    dependencies=[Depends(csrf_protected)],
+    dependencies=[Depends(origin_checked)],
     responses=error_responses(401, 403, 422, 429, 501),
 )
-async def login(body: LoginRequest) -> MeResponse:
-    raise not_implemented("T-0010")
+async def login(
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    service: Annotated[AuthService, Depends(get_auth_service)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> MeResponse:
+    user, token = await service.login(
+        email=str(body.email),
+        password=body.password.get_secret_value(),
+        client_ip=client_ip(request, settings),
+    )
+    set_session_cookies(response, token, settings)
+    return await service.me(user)
 
 
 @router.post(
@@ -33,11 +57,17 @@ async def login(body: LoginRequest) -> MeResponse:
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     summary="登出：撤销当前会话并清除 Cookie",
-    dependencies=_signed_in_write,
+    dependencies=[Depends(csrf_protected)],
     responses=error_responses(401, 403, 501),
 )
-async def logout() -> None:
-    raise not_implemented("T-0010")
+async def logout(
+    response: Response,
+    context: Annotated[AuthContext, Security(authenticated)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    await service.logout(context)
+    clear_session_cookies(response, settings)
 
 
 @router.get(

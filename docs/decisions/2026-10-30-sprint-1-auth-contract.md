@@ -57,6 +57,8 @@ Sprint 1 由 claude 做后端、codex 做前端，两边并行。本契约先固
    - 需要登录的写请求：`X-CSRF-Token` 必须与按当前会话重新计算的值一致（常量时间比较），否则 `403 CSRF_FAILED`；
    - 所有写请求（含登录、首次安装）：请求带 `Origin`（或只带 `Referer`）时，其来源必须在可信列表中，否则 `403 CSRF_FAILED`。
      可信来源 = `PUBLIC_BASE_URL` + `CORS_ALLOWED_ORIGINS`（逗号分隔）。
+   - 登录、首次安装只做来源校验、不校验 Token：此时还没有可用的会话；而浏览器里残留的过期会话 Cookie，
+     或轮换 `SESSION_SECRET` 后失效的旧 Token，都不应该让用户无法重新登录（T-0010 实现时确认）。
 4. 本机开发时浏览器访问 `http://localhost:5173`（Vite 代理到 API），需要把它加入 `.env` 的 `CORS_ALLOWED_ORIGINS`。
 
 ## 5. 工作空间上下文
@@ -115,8 +117,19 @@ Sprint 1 由 claude 做后端、codex 做前端，两边并行。本契约先固
 - 邮箱不区分大小写（服务端统一转小写保存与比较）。
 - 密码使用 Argon2id 哈希（`argon2-cffi`，参数由 T-0010 写入 backend-stack ADR）；新密码 12–128 个字符。
 - 账户不存在时也对一个固定的虚拟哈希做一次校验，使响应时间与密码错误时相同，避免据此判断账户是否存在。
-- 登录失败限流（Redis 计数，15 分钟窗口）：同一 IP 失败 10 次、同一账户失败 5 次后返回 `429 RATE_LIMITED`；
-  每次失败额外延迟约 0.5 秒。具体阈值由 T-0010 确定并写进本节。
+- 登录失败限流（Redis 固定窗口计数，T-0010 已实现）：
+
+  | 维度 | 默认阈值 | 环境变量 |
+  |---|---|---|
+  | 同一账户 | 15 分钟内失败 5 次 | `LOGIN_MAX_FAILURES_PER_ACCOUNT` |
+  | 同一 IP | 15 分钟内失败 10 次 | `LOGIN_MAX_FAILURES_PER_IP` |
+  | 窗口 | 900 秒 | `LOGIN_FAILURE_WINDOW_SECONDS` |
+  | 每次失败的额外延迟 | 0.5 秒 | `LOGIN_FAILURE_DELAY_SECONDS` |
+
+  达到阈值后返回 `429 RATE_LIMITED`（锁定期间密码正确也拒绝），成功登录会清除该账户的计数。
+  账户维度的键用邮箱的 SHA-256，不在 Redis 中保存明文邮箱。首次安装按 IP 使用同样的阈值。
+- 客户端 IP：Compose 中 API 只能经 Caddy 访问，设置 `TRUST_FORWARDED_FOR=true`，取 `X-Forwarded-For` 最右侧的地址；
+  直接对外暴露 API 时必须关闭该选项，否则客户端可以伪造 IP 绕过限流。
 
 ## 10. 前端约定（T-0012）
 

@@ -30,7 +30,8 @@ jobs:
         run: |
           make down
           docker compose up -d --wait --wait-timeout 240
-          docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select version_num from alembic_version"' | grep -qx 0001
+          # 数据卷丢失时数据库是空的，alembic current 不会输出 (head)
+          docker compose exec -T api alembic current | grep -q '(head)'
           make smoke
       - name: 失败时输出服务状态与日志
         if: failure()

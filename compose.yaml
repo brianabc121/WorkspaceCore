@@ -68,7 +68,15 @@ services:
   api:
     <<: [*api-image, *hardening]
     restart: unless-stopped
-    environment: *api-env
+    environment:
+      <<: *api-env
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      SESSION_SECRET: ${SESSION_SECRET:?请先运行 make env 生成 .env}
+      # 未配置时首次安装接口一律拒绝；make setup-token 查看
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+      # API 只能经 Caddy 访问，取 X-Forwarded-For 最右侧的地址作为客户端 IP（登录限流用）
+      TRUST_FORWARDED_FOR: "true"
     depends_on:
       postgres:
         condition: service_healthy

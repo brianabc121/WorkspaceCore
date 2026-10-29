@@ -17,7 +17,7 @@ define skip_web
 	@echo "跳过前端：$(WEB_DIR)/package.json 尚不存在"
 endef
 
-.PHONY: help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke openapi \
+.PHONY: help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke openapi setup-token \
 	lint lint-api lint-web format test test-api test-web build-web backup restore-verify
 
 help: ## 列出可用命令
@@ -34,6 +34,9 @@ else
 	$(skip_web)
 endif
 
+setup-token: ## 显示首次安装所需的安装凭据（来自 .env 的 SETUP_TOKEN）
+	@sed -n 's/^SETUP_TOKEN=//p' .env
+
 dev: ## 本地开发：同时启动 API（热重载，:8000）和前端（:5173）
 	@trap 'kill 0' INT TERM EXIT; \
 	(cd $(API_DIR) && $(UV) run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000) & \
@@ -47,7 +50,7 @@ dev-web: ## 只启动前端开发服务器
 
 up: env ## 构建并启动 core 服务，等待全部健康检查通过
 	$(COMPOSE) up -d --build --wait --wait-timeout 300
-	@echo "已启动：http://127.0.0.1:$(HTTP_PORT)  首次启动后请运行 make migrate"
+	@echo "已启动：http://localhost:$(HTTP_PORT)  首次启动后请运行 make migrate；首次安装凭据：make setup-token"
 
 down: ## 停止服务；保留数据卷，不会删除数据
 	$(COMPOSE) down
