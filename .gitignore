@@ -1,2 +1,29 @@
+# Python
 __pycache__/
 *.pyc
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# 环境变量与密钥：只提交 .env.example
+.env
+.env.*
+!.env.example
+
+# 本地数据与备份
+*.sqlite3
+*.db
+pgdata/
+backups/
+
+# 编辑器与系统文件
+.DS_Store
+.idea/
+.vscode/

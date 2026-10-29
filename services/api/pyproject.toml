@@ -1,0 +1,63 @@
+[project]
+name = "my-workspace-api"
+version = "0.1.0"
+description = "My Workspace BFF：FastAPI 模块化单体"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.162,<0.163",
+    "pydantic>=2.14,<3",
+    "pydantic-settings>=2.16,<3",
+    "sqlalchemy[asyncio]>=2.1,<2.2",
+    "asyncpg>=0.32,<0.33",
+    "alembic>=1.20,<2",
+    # arq 0.28 要求 redis<6，见 docs/decisions/2026-10-29-backend-stack.md
+    "redis>=5.2,<6",
+    "arq>=0.28,<0.29",
+    "uvicorn[standard]>=0.54,<0.55",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28,<0.29",
+    "pytest>=9.2,<10",
+    "pytest-asyncio>=1.4,<2",
+    "ruff>=0.17,<0.18",
+    "mypy>=2.4,<3",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "SIM", "RUF"]
+# 注释和文档用中文书写，全角标点是正常的
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["asyncpg", "asyncpg.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "integration: 需要真实的 PostgreSQL / Redis（设置 TEST_DATABASE_URL、TEST_REDIS_URL）",
+]
+filterwarnings = [
+    # arq 0.28 内部仍调用 redis-py 已弃用的 close()；arq 处于仅维护状态，见 backend-stack ADR
+    "ignore:Call to deprecated close:DeprecationWarning:arq.worker",
+]
