@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import httpx
 from fastapi import FastAPI
@@ -106,3 +107,40 @@ async def test_unhandled_error_returns_500_without_details(app: FastAPI) -> None
     assert response.json()["error"]["code"] == "INTERNAL_ERROR"
     assert "internal detail" not in response.text
     assert response.headers[REQUEST_ID_HEADER].startswith("req_")
+
+
+class _Collect(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+async def test_probe_requests_are_logged_at_debug_unless_failing(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    request_logger = logging.getLogger("app.request")
+    collect = _Collect()
+    request_logger.addHandler(collect)
+    previous_level = request_logger.level
+    request_logger.setLevel(logging.DEBUG)
+    try:
+        _use_checks(app, {"database": _ok})
+        await client.get("/healthz")
+        await client.get("/readyz")
+        await client.get("/api/v1/nope")
+        _use_checks(app, {"database": _fail})
+        await client.get("/readyz")
+    finally:
+        request_logger.removeHandler(collect)
+        request_logger.setLevel(previous_level)
+
+    levels = [(r.__dict__["path"], r.__dict__["status"], r.levelno) for r in collect.records]
+    assert levels == [
+        ("/healthz", 200, logging.DEBUG),
+        ("/readyz", 200, logging.DEBUG),
+        ("/api/v1/nope", 404, logging.INFO),
+        ("/readyz", 503, logging.INFO),
+    ]
