@@ -13,8 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: 校验 .collab/ 协作文件
         run: python3 scripts/collab.py check
       - name: 输出任务看板到 Summary
         if: always()
         run: python3 scripts/collab.py status --markdown >> "$GITHUB_STEP_SUMMARY"
+      - name: 预览合并后的 GitHub 同步（只打印，不改动）
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/collab_sync.py --dry-run --before "$BASE_SHA"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}

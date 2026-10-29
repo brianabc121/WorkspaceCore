@@ -38,10 +38,12 @@ CLAUDE.md                  引用 AGENTS.md + Claude 专属说明（Claude 自�
   handoffs/                交接单：<时间>_<任务>_<from>-to-<to>.md，只增不改
   decisions/D-0001-xxx.md  决策记录（为什么这么做）
   templates/               任务 / 交接单 / 决策模板
-scripts/collab.py          命令行工具（只用 Python 标准库）
+scripts/collab.py          命令行工具（只用 Python 标准库，不联网）
+scripts/collab_sync.py     CI 专用：把状态镜像到 GitHub Issues
 .github/
   pull_request_template.md PR 模板
-  workflows/collab.yml     CI：校验 .collab/，并把看板输出到 Actions Summary
+  workflows/collab.yml     CI：校验 .collab/，输出看板，预览合并后的同步
+  workflows/collab-sync.yml main 更新时 / 每天：交接提醒 issue + 看板 issue
 ```
 
 ## 核心概念
@@ -102,6 +104,8 @@ stateDiagram-v2
 
 要指定任务就加一句“处理 T-0003”。
 
+交接合并进 main 后，GitHub 会自动开一个 `[交接]` issue（你会收到通知），里面就有给接收方的这段话，直接复制即可。
+
 ### 其他常用说法
 
 | 你想要 | 对代理说 |
@@ -109,8 +113,8 @@ stateDiagram-v2
 | 拆需求 | “把〈需求〉拆成任务（collab.py new），写清目标、验收标准和 paths，给出分配建议，先不要实现。” |
 | 指派任务 | “把 T-0005 指派给 codex。”（或自己运行 `collab.py set T-0005 --as human --owner codex -m 指派`） |
 | 交叉审查 | 在 Claude 的 PR 下评论 `@codex review`；或对 Claude 说“审查 PR #N，把意见留在 PR 上” |
-| 处理上报 | 看 `等人类处理` 里的任务和它的 escalate 交接单，决定后对某个代理说“T-0007 按方案 B 做，交给你了” |
-| 看进度 | 运行 `python3 scripts/collab.py status`，或看 Actions → collab → Summary |
+| 处理上报 | 看 `[交接] … → human` 的 issue 和它链接的交接单，决定后对某个代理说“T-0007 按方案 B 做，交给你了”（代理会先记录这次指派再开工） |
+| 看进度 | 打开 GitHub 上的「📋 协作看板」issue（自动更新）；或运行 `python3 scripts/collab.py status` |
 
 ### 合并 PR 时检查
 
@@ -164,8 +168,24 @@ CI 的 `collab` 检查会拦住大部分格式问题（空交接单、状态不�
 **想改协议本身？**
 你直接改，或让代理写一个 `proposed` 决策，你批准后再改 `AGENTS.md` / `collab.py`。
 
-## 以后可以加的自动化（目前没有做）
+## GitHub 上的自动化
 
-- main 合并后，如果有新交接单交给 codex，自动在对应 PR 下评论提醒；
-- 用 GitHub Projects 做一个只读的可视化看板（由 CI 从 `.collab/tasks` 同步）；
-- 对超过 N 天没更新的 `in_progress` 任务给出提醒。
+`collab-sync` 在 main 每次更新时、以及每天北京时间 09:17 运行（`scripts/collab_sync.py`）：
+
+| 自动做的事 | 说明 |
+|---|---|
+| 交接提醒 issue | main 上每出现一张新交接单，开一个 `[交接] T-xxxx from → to` 的 issue（标签 `collab-handoff`），里面有摘要、要做的事和**给接收方的开工话术** |
+| 自动关闭提醒 | 接收方 `start` 之后（任务不再停在这张交接单上），自动评论并关闭对应提醒 |
+| 看板 issue | 维护一个「📋 协作看板」issue（标签 `collab-board`），按 Claude / Codex / 等人类 分组显示所有任务；可以把它置顶 |
+| 停滞提醒 | 进行中 / 交接中 / 阻塞超过 3 天没更新的任务，在看板上标 `⚠ N 天未更新` |
+
+这些 issue 只是镜像，事实来源始终是 `.collab/` 下的文件；手动改 issue 不会改变任务状态。
+每个 PR 的 `collab` 检查里还有一步“预览合并后的 GitHub 同步”，可以在合并前看到会开哪些提醒。
+
+不用 GitHub Projects：用户名下的 Projects 需要额外配置带权限的令牌，看板 issue 不需要任何配置。
+
+### 建议你在 GitHub 上手动做的设置（可选）
+
+- **Settings → Branches → 为 `main` 添加保护规则**，勾选 “Require status checks to pass”，选中 `check`：
+  这样 `collab` 检查不通过的 PR 就合并不了。
+- 把「📋 协作看板」issue 置顶（issue 页面右侧 Pin issue）。

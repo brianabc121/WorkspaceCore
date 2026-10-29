@@ -1,0 +1,32 @@
+name: collab-sync
+
+# main 更新时：为新交接单开提醒 issue、关闭已处理的提醒、刷新看板 issue。
+# 每天定时跑一次，让“⚠ N 天未更新”的停滞提醒在没有新提交时也能刷新。
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 1 * * *" # 北京时间每天 09:17
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: collab-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 同步到 GitHub Issues
+        run: python3 scripts/collab_sync.py --before "$BEFORE"
+        env:
+          BEFORE: ${{ github.event.before }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}

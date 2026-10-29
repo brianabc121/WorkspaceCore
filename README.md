@@ -7,4 +7,4 @@ this is a personal workspace
 
 - 代理规则：[`AGENTS.md`](AGENTS.md)
 - 方案说明与操作手册：[`.collab/README.md`](.collab/README.md)
-- 查看进度：`python3 scripts/collab.py status`
+- 查看进度：GitHub 上的「📋 协作看板」issue（CI 自动更新），或 `python3 scripts/collab.py status`

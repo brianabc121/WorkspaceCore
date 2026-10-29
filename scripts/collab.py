@@ -34,6 +34,7 @@ HANDOFF_TYPES = ("continue", "rework", "escalate")
 PRIORITIES = ("P0", "P1", "P2", "P3")
 DECISION_STATUSES = ("proposed", "accepted", "superseded", "rejected")
 PLACEHOLDER = "（待填写"
+STALE_DAYS = 3
 
 TASK_KEYS = ("id", "title", "owner", "status", "priority", "created", "updated")
 HANDOFF_KEYS = ("task", "from", "to", "type", "created")
@@ -262,6 +263,17 @@ def latest_note_label(notes):
     return f"← {n['from']}·{n['type']} {n['created'][:10]}"
 
 
+def updated_label(task):
+    """更新日期；进行中/交接中/阻塞的任务超过 STALE_DAYS 天没动静时加上提醒。"""
+    try:
+        days = (now().date() - dt.date.fromisoformat(task["updated"])).days
+    except ValueError:
+        return task["updated"]
+    if task["status"] in ACTIVE and days >= STALE_DAYS:
+        return f"{task['updated']} ⚠ {days} 天未更新"
+    return task["updated"]
+
+
 def sort_key(task):
     return (STATUS_ORDER.get(task["status"], 9), task["priority"], task["id"])
 
@@ -289,12 +301,13 @@ def print_status(markdown):
             if not group:
                 print("_无_\n")
                 continue
-            print("| 任务 | 状态 | 优先级 | 标题 | 分支 | 最近交接 |")
-            print("|---|---|---|---|---|---|")
+            print("| 任务 | 状态 | 优先级 | 标题 | 分支 | 最近交接 | 更新 |")
+            print("|---|---|---|---|---|---|---|")
             for t in group:
                 print(
                     f"| {t['id']} | {t['status']} | {t['priority']} | {md_cell(t['title'])} "
-                    f"| {md_cell(t['branch'])} | {md_cell(latest_note_label(notes.get(t['id'], [])))} |"
+                    f"| {md_cell(t['branch'])} | {md_cell(latest_note_label(notes.get(t['id'], [])))} "
+                    f"| {md_cell(updated_label(t))} |"
                 )
             print()
         else:
@@ -304,7 +317,7 @@ def print_status(markdown):
                 branch = f" [{t['branch']}]" if t["branch"] else ""
                 print(
                     f"  {t['id']}  {t['status']:<11} {t['priority']}  {t['title']}"
-                    f"{branch}  {extra}  (更新 {t['updated']})".rstrip()
+                    f"{branch}  {extra}  (更新 {updated_label(t)})".rstrip()
                 )
 
     ids = ", ".join(f"{t['id']}({t['status']})" for t in sorted(closed, key=lambda t: t["id"]))
@@ -371,7 +384,7 @@ def cmd_inbox(args):
             f"读完交接单、跑通其中的验证命令后：python3 scripts/collab.py start <任务号> --as {me}")
 
     section("2. 你进行中的任务",
-            [f"{t['id']} {t['priority']} {t['title']}  (更新 {t['updated']})" for t in mine if t["status"] == "in_progress"])
+            [f"{t['id']} {t['priority']} {t['title']}  (更新 {updated_label(t)})" for t in mine if t["status"] == "in_progress"])
     section("3. 你被阻塞的任务",
             [f"{t['id']} {t['priority']} {t['title']}" for t in mine if t["status"] == "blocked"])
     section("4. 已分配给你、待开始",
