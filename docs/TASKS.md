@@ -3,12 +3,12 @@
 > 一次只取一个 Sprint；勾选完成前提供测试日志与验收结果。
 
 ## Sprint 0 — 工程骨架
-- [ ] S0-01 创建 Monorepo 目录结构、README、.env.example、.gitignore、Makefile。
-- [ ] S0-02 初始化 Vue3+TypeScript+Vite，路由、主题、基础布局及 Vitest。
-- [ ] S0-03 初始化 FastAPI/Pydantic2/SQLAlchemy2，`/healthz`、`/readyz`、pytest。
-- [ ] S0-04 建立 PostgreSQL/Redis/Core Compose，数据持久化及健康检查。
-- [ ] S0-05 集成 Alembic，空库迁移与初始化 smoke test。
-- [ ] S0-06 CI lint/typecheck/test/build/compose config，写运行手册。
+- [x] S0-01 创建 Monorepo 目录结构、README、.env.example、.gitignore、Makefile。
+- [x] S0-02 初始化 Vue3+TypeScript+Vite，路由、主题、基础布局及 Vitest。
+- [x] S0-03 初始化 FastAPI/Pydantic2/SQLAlchemy2，`/healthz`、`/readyz`、pytest。
+- [x] S0-04 建立 PostgreSQL/Redis/Core Compose，数据持久化及健康检查。
+- [x] S0-05 集成 Alembic，空库迁移与初始化 smoke test。
+- [x] S0-06 CI lint/typecheck/test/build/compose config，写运行手册。
 
 ## Sprint 1 — 用户、工作空间、安全
 - [ ] S1-01 User、Session、Workspace、Member 迁移及 repository。
