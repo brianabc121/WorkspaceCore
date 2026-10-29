@@ -102,7 +102,7 @@ stateDiagram-v2
 
 > 你的协作身份是 codex。按 AGENTS.md 的协作协议开工：先运行 `python3 scripts/collab.py inbox --as codex --no-fetch`，处理完后按收工流程结束。
 
-要指定任务就加一句“处理 T-0003”。
+要指定任务就加一句“处理 T-0003”。Sprint 0 的开工指令就是仓库根目录的 `CODEX_START.md`，把全文发给 Codex 即可（对应协作任务 T-0004）。
 
 交接合并进 main 后，GitHub 会自动开一个 `[交接]` issue（你会收到通知），里面就有给接收方的这段话，直接复制即可。
 

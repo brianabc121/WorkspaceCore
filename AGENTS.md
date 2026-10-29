@@ -1,6 +1,6 @@
 # AGENTS.md — 所有 AI 代理的工作约定
 
-本仓库由两个 AI 代理协作开发，人类（仓库所有者）负责派活、裁决和合并：
+本仓库由两个 AI 代理协作开发 My Workspace，人类（仓库所有者）负责派活、裁决和合并：
 
 | 身份 | 是谁 | 职责 |
 |---|---|---|
@@ -12,15 +12,19 @@
 你是 Codex 就用身份 `codex`；你是 Claude Code 就用 `claude`（CLAUDE.md 里也会写明）。
 所有 `scripts/collab.py` 命令都要带 `--as <你的身份>`。
 
-人类给的操作说明和设计原因见 `.collab/README.md`，本文件是你必须遵守的规则。
+- 第 1–7 节：两个代理之间怎么分工和交接（协作协议）。
+- **第 8 节：项目本身的工程规则，由人类制定**；与 1–7 节冲突时以第 8 节为准，并在任务日志里指出冲突。
+- 人类给的操作说明和设计原因见 `.collab/README.md`。
 
 ## 1. 事实来源
 
 | 内容 | 位置 | 规则 |
 |---|---|---|
-| 任务与进度 | `.collab/tasks/T-xxxx*.md` | 头部 `owner`/`status` 是唯一的状态；正文末尾“进度日志”只追加 |
+| 需求与路线图 | `docs/DEVELOPMENT_SPEC.md`、`docs/TASKS.md` | 人类制定。`TASKS.md` 的条目在完成它的那个 PR 里勾选 |
+| 任务与进度 | `.collab/tasks/T-xxxx*.md` | 谁在做、做到哪了。头部 `owner`/`status` 是唯一的状态；正文末尾“进度日志”只追加。任务标题写明对应的 `TASKS.md` 编号（如 S0-01） |
 | 交接 | `.collab/handoffs/*.md` | 一次交接一个文件，**提交后不再修改** |
-| 决策 | `.collab/decisions/D-xxxx*.md` | 改架构/约定前先读；不悄悄推翻 |
+| 技术决策（ADR） | `docs/decisions/` | 架构选择、第三方 API / 版本核验结果（附来源链接），按项目规范要求写 |
+| 协作决策 | `.collab/decisions/D-xxxx*.md` | 只记录协作流程本身的决策；改流程前先读，不悄悄推翻 |
 
 - 以**主干（main）**上的内容为准。一个 PR 对这些文件的修改，表示“**这个 PR 合并之后**”的状态。
 - 交接随 PR 合并才生效。接收方总是从最新的 main 开工（除非人类明确指定了别的分支）。
@@ -55,11 +59,10 @@
 
 - 只改任务 `paths` 声明范围内的文件。必须越界时，先确认没有碰到对方进行中任务的范围
   （`inbox` 第 6 节、`check` 的重叠警告），并在日志里写明原因。
-- 提交信息以任务号开头：`T-0003: 增加登录接口`。
+- 提交信息按项目规范（`docs/DEVELOPMENT_SPEC.md` 第 14 节）写，末尾带任务号：`feat(api): 增加 /healthz（T-0004）`。
 - 保持 main 随时可用：未完成的工作也要能构建、测试通过（模块先不接入、用开关等）。
-- 影响其他任务或长期有效的决定，用 `collab.py decision` 写成决策记录：
-  只影响你自己任务范围的，可以直接写 `status: accepted`；
-  涉及协作协议、全局架构、公共接口的，写 `proposed`，由人类改成 `accepted`。
+- 技术和架构决策写进 `docs/decisions/`。协作流程本身的决策用 `collab.py decision` 写进 `.collab/decisions/`：
+  只影响你自己任务范围的，可以直接写 `status: accepted`；涉及协作协议的，写 `proposed`，由人类改成 `accepted`。
   对已 accepted 的决策有异议：写新的提案并 escalate，不要直接改代码推翻它。
 - 发现对方代码的问题：不要顺手改。在对方任务日志里 `log`，或在 PR 上评论；
   对方任务已 done 的，新建任务或用 `rework` 交还给原作者（由人类决定）。
@@ -76,7 +79,7 @@
 
 1. `python3 scripts/collab.py check` 必须通过（CI 也会跑）。
 2. 代码改动和 `.collab/` 改动放在**同一个 PR**。
-3. PR 标题 `[T-xxxx] 简述`，按 `.github/pull_request_template.md` 填写。
+3. PR 标题 `[T-xxxx] 简述`，按 `.github/pull_request_template.md` 填写（它包含第 8 节要求的报告结构）。
 4. 推送你自己的分支并开 PR（或按你所在环境的方式产出 PR），然后停下，等人类合并。
 
 交接类型：
@@ -103,13 +106,43 @@
 - 不建任务的小改动：只改错字、注释、格式这类不超过 20 行、且不碰别人占用路径的修改，
   PR 标题用 `[chore] 简述`。其余改动都要先有任务。
 
-## 8. 项目信息（项目启动后补充）
+## 8. 项目规则：My Workspace（由人类制定，适用于所有代理）
 
-- 项目简介：（待定）
-- 技术栈：（待定）
-- 安装依赖：（待定）
-- 运行测试：（待定）—— 交接单第 4 节和 PR 的“验证”都应引用这里的命令
-- 代码规范 / lint：（待定）
+> 以下内容是人类写的项目工程规则，原文按 Codex 的口吻写成；Claude 实施代码时同样遵守。
+> 文中的 `DEVELOPMENT_SPEC.md`、`TASKS.md` 位于 `docs/` 目录。
+
+你正在实现 `DEVELOPMENT_SPEC.md` 所描述的混合型全能个人工作台。
+
+### 工作规则
+1. 每轮先阅读 `DEVELOPMENT_SPEC.md`、`TASKS.md`、相关现有源码与变更记录。若目录尚无源码，先做 Sprint 0。
+2. 仅实施当前选定 Sprint 的下一个未完成任务，不要跨 Sprint 一次生成全部系统；先写短计划，再修改代码。
+3. 禁止发明第三方 API、Webhook 格式和版本。必须核验运行实例或当前锁定 release 的官方 OpenAPI/文档；不可验证则实现明确的接口桩和 TODO，不标为完成。
+4. 任何数据表结构变化必须提供 Alembic 迁移和测试；不要直接更改第三方产品数据库。
+5. 后端模块化单体，使用 FastAPI/Pydantic 2/SQLAlchemy 2；前端 Vue 3/TS，组件复用，API 强类型。
+6. Token、Secret、Cookie、Webhook payload 必须脱敏；不能提交明文密钥、真实用户信息或生产配置。
+7. 外部 HTTP 必须有 timeout、错误归类、重试限制；写操作具有幂等和未知完成状态处理。
+8. 所有数据读取和写入均做 workspace scope + role 验证；不能只在前端隐藏按钮。
+9. 对任何 AI/自动化有副作用的操作强制工具策略校验；Critical 类操作需要显式审批。
+10. 完成前运行相关 lint/typecheck/tests/build/migrations；不能运行的项目注明原因、命令和实际输出，不得虚构通过结果。
+
+### 提交格式
+每次响应按以下结构总结：
+- 当前 Sprint / 已完成任务
+- 变更文件
+- 实现决策及偏差
+- 实际执行的命令和结果
+- 安全/数据迁移影响
+- 遗留问题与下一步
+
+### 最高优先级架构约束
+- Vikunja 是任务主源；AFFiNE V1 仅深链接与收藏，不猜测内容读写 API。
+- 工作台 Owns User/Workspace/Widget/Calendar/Mapping/Notification/Audit。
+- 第三方服务故障可降级；Webhook Inbox + 周期对账双保险。
+- 核心 Compose 优先，n8n/AFFiNE/Monitoring 可选部署，生产禁止浮动 latest 镜像。
+
+### 常用命令（`docs/DEVELOPMENT_SPEC.md` 第 11.3 节；Sprint 0 建立后可用）
+`make setup`、`make dev`、`make up`、`make migrate`、`make test`、`make lint`、`make backup`、`make restore-verify`、`make down`。
+交接单第 4 节和 PR 的“实际执行的命令和结果”都应引用这些命令。
 
 ## 9. Codex 环境备注（由 codex 维护）
 
