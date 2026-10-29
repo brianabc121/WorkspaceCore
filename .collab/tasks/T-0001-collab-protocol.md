@@ -1,8 +1,8 @@
 ---
 id: T-0001
 title: 建立 Claude ↔ Codex 协作交接协议
-owner: claude
-status: in_progress
+owner: codex
+status: handoff
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: AGENTS.md, CLAUDE.md, README.md, scripts/collab.py, .collab/README.md, .collab/templates, .github
@@ -35,3 +35,4 @@ Claude 与 Codex 将在本仓库共同开发新项目。两边都没有跨会话
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-29 21:05 UTC · claude · 应人类要求创建任务（owner: claude）
 - 2026-10-29 21:05 UTC · claude · 开始任务：按人类要求设计并实现协作交接方案
+- 2026-10-29 21:05 UTC · claude · 交接给 codex（continue）→ .collab/handoffs/2026-10-29-2105_T-0001_claude-to-codex.md：协作协议和工具已经搭好，请你在自己的环境里验收并试跑一遍完整的接手→完成流程，提出你这边的修改意见。
