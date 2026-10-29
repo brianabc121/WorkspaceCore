@@ -27,6 +27,33 @@ _CODES = {
 }
 
 
+class ApiError(Exception):
+    """业务代码抛出的错误，由处理器转换成统一错误格式。
+
+    错误码清单见 docs/decisions/2026-10-30-sprint-1-auth-contract.md 第 7 节。
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        details: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
+        self.message = message
+        self.details = dict(details or {})
+        self.headers = dict(headers or {})
+
+
+def not_implemented(task: str) -> ApiError:
+    """契约已声明、尚未实现的端点（Sprint 1 期间由对应任务补上）。"""
+    return ApiError(501, "NOT_IMPLEMENTED", f"接口尚未实现（{task}）")
+
+
 def error_response(
     status_code: int,
     code: str,
@@ -67,6 +94,11 @@ async def _validation_exception_handler(
     )
 
 
+async def _api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
+    return error_response(exc.status_code, exc.code, exc.message, exc.details, exc.headers)
+
+
 def install_error_handlers(app: FastAPI) -> None:
+    app.exception_handler(ApiError)(_api_error_handler)
     app.exception_handler(StarletteHTTPException)(_http_exception_handler)
     app.exception_handler(RequestValidationError)(_validation_exception_handler)

@@ -1,7 +1,8 @@
 # API 契约
 
-> 状态：Sprint 0。完整规范见 `docs/DEVELOPMENT_SPEC.md` 第 6 节；本文记录**已经实现**的接口。
-> 从 Sprint 1 起，接口以代码生成的 `services/api/openapi.json` 为准，前端据此生成类型。
+> 状态：Sprint 1 契约已声明。完整规范见 `docs/DEVELOPMENT_SPEC.md` 第 6 节。
+> **机器可读的接口以 `services/api/openapi.json` 为准**（`make openapi` 由代码生成，CI 检查一致性），前端据此生成类型。
+> Sprint 1 的 Cookie、CSRF、工作空间上下文、错误码等约定见 `docs/decisions/2026-10-30-sprint-1-auth-contract.md`。
 
 ## 通用约定
 
@@ -26,6 +27,9 @@
 | 422 | `VALIDATION_FAILED`（`details.errors` 只含 `loc`、`msg`、`type`，不回显用户输入） |
 | 429 | `RATE_LIMITED` |
 | 500 | `INTERNAL_ERROR`（不包含异常细节） |
+| 501 | `NOT_IMPLEMENTED`（契约已声明、尚未实现） |
+
+Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SETUP_COMPLETED` 等）见 Sprint 1 契约 ADR 第 7 节。
 
 ## 已实现的接口
 
@@ -43,3 +47,22 @@
 - 任一失败：`503 {"status": "unavailable", "checks": {"database": "ok", "redis": "error"}}`
 
 失败原因只写入日志（记录异常类型），不出现在响应里。
+
+## Sprint 1 端点（契约已声明）
+
+| 方法 | 路径 | 说明 | 状态 |
+|---|---|---|---|
+| GET | `/api/v1/setup/status` | 是否需要首次安装 | 501，T-0010 实现 |
+| POST | `/api/v1/setup` | 首次安装（需安装凭据） | 501，T-0010 实现 |
+| POST | `/api/v1/auth/login` | 登录 | 501，T-0010 实现 |
+| POST | `/api/v1/auth/logout` | 登出 | 501，T-0010 实现 |
+| GET | `/api/v1/me` | 当前用户与所属工作空间 | 501，T-0010 实现 |
+| PATCH | `/api/v1/me` | 修改显示名 | 501，T-0011 实现 |
+| GET | `/api/v1/workspaces` | 我所属的工作空间 | 501，T-0010 实现 |
+| GET / PATCH | `/api/v1/workspaces/{workspace_id}` | 工作空间详情 / 设置 | 501，T-0011 实现 |
+| GET | `/api/v1/auth/sessions` | 我的会话 | 501，T-0011 实现 |
+| DELETE | `/api/v1/auth/sessions/{session_id}` | 撤销会话 | 501，T-0011 实现 |
+| POST | `/api/v1/auth/password` | 修改密码 | 501，T-0011 实现 |
+| GET | `/api/v1/audit-logs` | 审计日志（需 `X-Workspace-Id`） | 501，T-0011 实现 |
+
+请求头约定：写请求带 `X-CSRF-Token`（值取自 `ws_csrf` Cookie）；工作空间范围的请求带 `X-Workspace-Id`。
