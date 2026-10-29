@@ -15,12 +15,14 @@
 - 第 1–7 节：两个代理之间怎么分工和交接（协作协议）。
 - **第 8 节：项目本身的工程规则，由人类制定**；与 1–7 节冲突时以第 8 节为准，并在任务日志里指出冲突。
 - 人类给的操作说明和设计原因见 `.collab/README.md`。
+- 本文件位于 `docs/AGENTS.md`；仓库根目录的 `AGENTS.md` 是指向它的链接（Codex 只自动读取根目录的那份），不要删除。
 
 ## 1. 事实来源
 
 | 内容 | 位置 | 规则 |
 |---|---|---|
-| 需求与路线图 | `docs/DEVELOPMENT_SPEC.md`、`docs/TASKS.md` | 人类制定。`TASKS.md` 的条目在完成它的那个 PR 里勾选 |
+| 需求与路线图 | `docs/DEVELOPMENT_SPEC.md`、`docs/TASKS.md` | 人类制定。`TASKS.md` 的条目由该 Sprint 的验收任务附测试日志统一勾选（避免并行 PR 在相邻行上冲突），其他任务不要改它 |
+| 目录归属 | `.collab/decisions/D-0003-module-ownership.md` | 每个目录长期归哪个代理；接口契约见 `docs/decisions/` |
 | 任务与进度 | `.collab/tasks/T-xxxx*.md` | 谁在做、做到哪了。头部 `owner`/`status` 是唯一的状态；正文末尾“进度日志”只追加。任务标题写明对应的 `TASKS.md` 编号（如 S0-01） |
 | 交接 | `.collab/handoffs/*.md` | 一次交接一个文件，**提交后不再修改** |
 | 技术决策（ADR） | `docs/decisions/` | 架构选择、第三方 API / 版本核验结果（附来源链接），按项目规范要求写 |

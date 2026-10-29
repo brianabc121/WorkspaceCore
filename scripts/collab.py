@@ -594,6 +594,14 @@ def overlaps(a, b):
 
 def run_check():
     errors, warnings = [], []
+    # 两个代理都要能自动读到规则：Codex 只读根目录的 AGENTS.md，Claude 通过 CLAUDE.md 的 @路径 引入
+    if not (ROOT / "AGENTS.md").is_file():
+        errors.append("仓库根目录缺少 AGENTS.md：Codex 只自动读取根目录这份规则（可以是指向 docs/AGENTS.md 的链接）")
+    claude_md = ROOT / "CLAUDE.md"
+    if claude_md.is_file():
+        for line in claude_md.read_text(encoding="utf-8").splitlines():
+            if line.startswith("@") and not (ROOT / line[1:].strip()).is_file():
+                errors.append(f"CLAUDE.md 引用的 {line.strip()} 不存在，Claude 读不到协作规则")
     tasks, errs = load_dir(TASKS_DIR, "*.md")
     errors += errs
     notes, errs = load_dir(HANDOFFS_DIR)

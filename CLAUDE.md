@@ -1,4 +1,4 @@
-@AGENTS.md
+@docs/AGENTS.md
 
 ## Claude 专属说明（由 claude 维护）
 

@@ -1,7 +1,7 @@
 # 协作中心：Claude ↔ Codex 交接方案
 
 这份文档给**你（人类）**看：方案怎么运作、你每天要做什么、遇到问题怎么办。
-代理必须遵守的规则写在仓库根目录的 [`AGENTS.md`](../AGENTS.md)。
+代理必须遵守的规则写在 [`docs/AGENTS.md`](../docs/AGENTS.md)（仓库根目录的 `AGENTS.md` 是指向它的链接，供 Codex 自动读取）。
 
 ## 一句话
 
@@ -30,8 +30,10 @@ flowchart LR
 ## 目录
 
 ```
-AGENTS.md                  所有代理的规则（Codex 自动读取）
-CLAUDE.md                  引用 AGENTS.md + Claude 专属说明（Claude 自动读取）
+AGENTS.md                  → docs/AGENTS.md 的链接（Codex 只自动读取根目录这份，不要删）
+CLAUDE.md                  引用 docs/AGENTS.md + Claude 专属说明（Claude 自动读取）
+docs/AGENTS.md             所有代理的规则（协作协议 + 项目规则）
+docs/decisions/            技术决策 ADR（含前后端接口契约）
 .collab/
   README.md                本文件
   tasks/T-0001-xxx.md      任务：头部字段 = 状态，正文末尾 = 进度日志
@@ -102,7 +104,7 @@ stateDiagram-v2
 
 > 你的协作身份是 codex。按 AGENTS.md 的协作协议开工：先运行 `python3 scripts/collab.py inbox --as codex --no-fetch`，处理完后按收工流程结束。
 
-要指定任务就加一句“处理 T-0003”。Sprint 0 的开工指令就是仓库根目录的 `CODEX_START.md`，把全文发给 Codex 即可（对应协作任务 T-0004）。
+要指定任务就加一句“处理 T-0003”。Sprint 0 前端的开工指令是 `docs/CODEX_START.md`，把全文发给 Codex 即可（对应协作任务 T-0004）。
 
 交接合并进 main 后，GitHub 会自动开一个 `[交接]` issue（你会收到通知），里面就有给接收方的这段话，直接复制即可。
 
@@ -138,12 +140,18 @@ python3 scripts/collab.py check                       # 校验（CI 同款）
 
 任务号可以简写：`3`、`T-3`、`T-0003` 都可以。
 
-## 两种分工模式（可随时切换）
+## 分工
 
-- **按任务分（默认）**：每个任务谁都可以做，由你指派；作者以外的一方做 PR 审查。适合并行推进。
-- **规划 / 实现分离**：一方负责拆任务、写验收标准和审查，另一方负责实现。适合需求还不清楚的早期。
+当前采用**按模块分工**（[D-0003](decisions/D-0003-module-ownership.md)）：
 
-选了哪种，建议写一条决策记录（D-xxxx），两边就都知道了。
+| 谁 | 负责 |
+|---|---|
+| Codex | 前端 `apps/web`、`ci-web.yml` |
+| Claude | 后端 `services/api`、数据库迁移、Compose / Caddy、根目录文件、第三方 API 核验、每个 Sprint 的联调与验收 |
+| 你 | 需求与路线图、开工指令、合并 PR、批准进入下一个 Sprint |
+
+每个 Sprint：Claude 先提交接口契约（OpenAPI）→ 两边并行实现 → Claude 联调验收并勾选 `docs/TASKS.md` → 你批准进入下一个 Sprint。
+每个 PR 由另一个代理审查一次。要换分工方式，写一条新决策取代 D-0003。
 
 ## 常见问题
 
