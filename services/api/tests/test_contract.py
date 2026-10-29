@@ -34,6 +34,26 @@ def test_all_sprint_1_endpoints_are_declared() -> None:
     assert declared >= SPRINT_1_ENDPOINTS
 
 
+def test_validation_errors_are_documented_with_unified_format() -> None:
+    """422 必须引用 ErrorResponse，不能出现 FastAPI 默认的 HTTPValidationError。"""
+    schema = render()
+    assert "HTTPValidationError" not in schema
+    paths = json.loads(schema)["paths"]
+    for path, ops in paths.items():
+        for method, op in ops.items():
+            if "422" in op["responses"]:
+                ref = op["responses"]["422"]["content"]["application/json"]["schema"]["$ref"]
+                assert ref.endswith("/ErrorResponse"), (method, path)
+
+
+async def test_invalid_uuid_path_parameter_returns_unified_error(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/api/v1/workspaces/not-a-uuid")
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_FAILED"
+
+
 async def test_unimplemented_endpoint_uses_unified_error_format(client: httpx.AsyncClient) -> None:
     response = await client.get("/api/v1/me")
     assert response.status_code == 501

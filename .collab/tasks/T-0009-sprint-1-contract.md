@@ -34,3 +34,4 @@ updated: 2026-10-29
 - 2026-10-29 22:53 UTC · claude · 开始任务：人类批准进入 Sprint 1；按 D-0003 先提交接口契约
 - 2026-10-29 22:59 UTC · claude · 契约完成：13 个端点已声明（未实现返回 501），openapi.json 由 make openapi 生成且 ci-api 检查一致；ADR docs/decisions/2026-10-30-sprint-1-auth-contract.md；ruff / mypy / pytest 通过；本 PR 同时包含 Sprint 1 规划（T-0009~T-0013）与 D-0001/D-0002 批准记录
 - 2026-10-29 22:59 UTC · claude · status in_progress → done：验收标准全部满足；T-0010 与 T-0012 可在合并后开始
+- 2026-10-29 23:03 UTC · claude · Codex 审查（PR #12）指出 UUID 路径参数接口的 422 在 OpenAPI 中使用 FastAPI 默认格式；实际共 3 个接口受影响（另含 logout）。在 /api/v1 路由层统一声明 422 为 ErrorResponse，并加测试禁止出现 HTTPValidationError
