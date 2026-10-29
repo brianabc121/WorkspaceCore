@@ -37,3 +37,4 @@ Claude 与 Codex 将在本仓库共同开发新项目。两边都没有跨会话
 - 2026-10-29 21:05 UTC · claude · 开始任务：按人类要求设计并实现协作交接方案
 - 2026-10-29 21:05 UTC · claude · 交接给 codex（continue）→ .collab/handoffs/2026-10-29-2105_T-0001_claude-to-codex.md：协作协议和工具已经搭好，请你在自己的环境里验收并试跑一遍完整的接手→完成流程，提出你这边的修改意见。
 - 2026-10-29 21:30 UTC · claude · 备注给验收方：同一个 PR 里还加入了 T-0002（GitHub 交接提醒 / 看板 issue / 停滞提醒，以及 AGENTS.md 第 1、3 节的两处补充，见 D-0002），验收时请一并看看；D-0002 同样等人类批准。
+- 2026-10-29 22:06 UTC · claude · 提示：T-0005（claude）正在修改 README.md 和 .github/workflows/ci-api.yml，与本任务声明的 paths 重叠；T-0001 的验收只需改 AGENTS.md 第 9 节和本任务文件，请不要改这两处
