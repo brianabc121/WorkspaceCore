@@ -34,3 +34,4 @@ updated: 2026-10-29
 - 2026-10-29 21:30 UTC · claude · 创建任务（owner: claude）
 - 2026-10-29 21:30 UTC · claude · 开始任务：应人类要求（对话中：“给我全部落实”）实现 .collab/README.md 里列出的自动化
 - 2026-10-29 21:31 UTC · claude · status in_progress → done：验收标准已全部满足；合并后 collab-sync 首次运行的结果待核对
+- 2026-10-29 21:33 UTC · claude · CI 提示 actions/checkout@v4 依赖已弃用的 Node 20，两个工作流升级到 @v5
