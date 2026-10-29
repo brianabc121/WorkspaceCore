@@ -1,10 +1,10 @@
 ---
 id: T-0001
 title: 建立 Claude ↔ Codex 协作交接协议
-owner: codex
-status: handoff
+owner: human
+status: blocked
 priority: P1
-branch: claude/cool-wright-99qbbg
+branch: codex/t-0001-protocol-acceptance
 paths: AGENTS.md, CLAUDE.md, README.md, scripts/collab.py, .collab/README.md, .collab/templates, .github
 depends_on:
 created: 2026-10-29
@@ -24,8 +24,8 @@ Claude 与 Codex 将在本仓库共同开发新项目。两边都没有跨会话
 - [x] `scripts/collab.py`：status / inbox / new / start / handoff / set / log / decision / check
 - [x] CI（`.github/workflows/collab.yml`）运行 check 并输出看板；PR 模板
 - [x] `.collab/README.md`：给人类的方案说明与操作手册
-- [ ] Codex 在自己的环境里读到规则，跑通 inbox → start → set done
-- [ ] Codex 对协议的意见已记录（没有意见也写明）
+- [x] Codex 在自己的环境里读到规则，跑通 inbox → start → set done
+- [x] Codex 对协议的意见已记录（没有意见也写明）
 - [ ] 人类审阅后把 D-0001 改为 accepted
 
 ## 背景 / 约束 / 参考
@@ -38,3 +38,6 @@ Claude 与 Codex 将在本仓库共同开发新项目。两边都没有跨会话
 - 2026-10-29 21:05 UTC · claude · 交接给 codex（continue）→ .collab/handoffs/2026-10-29-2105_T-0001_claude-to-codex.md：协作协议和工具已经搭好，请你在自己的环境里验收并试跑一遍完整的接手→完成流程，提出你这边的修改意见。
 - 2026-10-29 21:30 UTC · claude · 备注给验收方：同一个 PR 里还加入了 T-0002（GitHub 交接提醒 / 看板 issue / 停滞提醒，以及 AGENTS.md 第 1、3 节的两处补充，见 D-0002），验收时请一并看看；D-0002 同样等人类批准。
 - 2026-10-29 22:06 UTC · claude · 提示：T-0005（claude）正在修改 README.md 和 .github/workflows/ci-api.yml，与本任务声明的 paths 重叠；T-0001 的验收只需改 AGENTS.md 第 9 节和本任务文件，请不要改这两处
+- 2026-10-29 22:19 UTC · codex · 接手交接 2026-10-29-2105_T-0001_claude-to-codex.md
+- 2026-10-29 22:19 UTC · codex · 已读根 AGENTS.md（链接 docs/AGENTS.md）、D-0001/2/3/4 与交接单。真实 inbox/start/check/status 通过；隔离副本验证 inbox→start→set done 和非 owner 拒绝，check 通过。首次隔离副本漏拷 AGENTS 链接导致 check 正确报错，补齐根链接与目标文件后通过。collab_sync --dry-run 成功，未发送外部消息。对协议无修改意见；D-0001/2 的旧合并措辞以最新 accepted D-0004 为准，不修改协议或待人类审批的决策状态。第 9 节已记录工具、网络、分支、PR 能力实测。
+- 2026-10-29 22:19 UTC · codex · 交接给 human（escalate）→ .collab/handoffs/2026-10-29-2219_T-0001_codex-to-human.md：Codex 环境验收通过，待人类审阅 D-0001 与 D-0002；不修改 Claude 的开发任务
