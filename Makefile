@@ -17,7 +17,7 @@ define skip_web
 	@echo "跳过前端：$(WEB_DIR)/package.json 尚不存在"
 endef
 
-.PHONY: help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke \
+.PHONY: help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke openapi \
 	lint lint-api lint-web format test test-api test-web build-web backup restore-verify
 
 help: ## 列出可用命令
@@ -67,10 +67,13 @@ migrate-local: ## 本机直接运行迁移（使用环境变量 DATABASE_URL）
 smoke: ## 经 Caddy 检查健康、就绪、前端页面与安全响应头
 	scripts/smoke.sh http://127.0.0.1:$(HTTP_PORT)
 
+openapi: ## 由后端代码生成 services/api/openapi.json（前端据此生成类型）
+	cd $(API_DIR) && $(UV) run python -m scripts.export_openapi
+
 lint: lint-api lint-web ## 代码质量检查（前后端）
 
 lint-api:
-	cd $(API_DIR) && $(UV) run ruff check . && $(UV) run ruff format --check . && $(UV) run mypy app migrations tests
+	cd $(API_DIR) && $(UV) run ruff check . && $(UV) run ruff format --check . && $(UV) run mypy app migrations tests scripts
 
 lint-web:
 ifneq ($(HAS_WEB),)

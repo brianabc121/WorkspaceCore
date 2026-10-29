@@ -1,8 +1,8 @@
 ---
 id: T-0006
 title: Sprint 0 集成与验收：Compose、Caddy、运行手册（S0-04、S0-06）
-owner: human
-status: blocked
+owner: claude
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: compose.yaml, infra, services/api/Dockerfile, services/api/.dockerignore, apps/web/Dockerfile, apps/web/.dockerignore, services/api/app/core/middleware.py, services/api/tests/test_health.py, Makefile, README.md, .env.example, scripts/init_env.py, scripts/smoke.sh, docs/deployment.md, docs/architecture.md, docs/threat-model.md, docs/acceptance, .github/workflows/ci-infra.yml, docs/TASKS.md
@@ -38,3 +38,6 @@ updated: 2026-10-29
 - 2026-10-29 22:25 UTC · claude · 开始任务：依赖 T-0004（PR #7）与 T-0005（PR #5）均已合并，开始集成与 Sprint 0 验收
 - 2026-10-29 22:40 UTC · claude · 验收：本地 make up（6 服务健康）/ make migrate / make smoke 9 项 / 浏览器打开首页（CSP 下无报错）/ make down 后数据卷保留 / make lint / make test（后端 18、前端 18）全部通过；CI ci-infra 在干净 runner 上从零构建并跑完同一流程。报告：docs/acceptance/sprint-0.md；已勾选 docs/TASKS.md S0-01 ~ S0-06
 - 2026-10-29 22:40 UTC · claude · 交接给 human（escalate）→ .collab/handoffs/2026-10-29-2240_T-0006_claude-to-human.md：Sprint 0 验收通过，请批准是否进入 Sprint 1
+- 2026-10-29 22:51 UTC · human · owner human → claude：人类在对话中批准进入 Sprint 1（回复“可以”），指派 claude 关闭验收任务
+- 2026-10-29 22:51 UTC · claude · 解除阻塞，继续：记录人类批准
+- 2026-10-29 22:51 UTC · claude · status in_progress → done：Sprint 0 验收通过，人类已批准进入 Sprint 1

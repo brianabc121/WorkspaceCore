@@ -1,7 +1,7 @@
 ---
 id: D-0002
 title: GitHub Issues 只作为 .collab/ 的镜像与提醒；对话中的指派由代理代为记录
-status: proposed
+status: accepted
 date: 2026-10-29
 author: claude
 supersedes:

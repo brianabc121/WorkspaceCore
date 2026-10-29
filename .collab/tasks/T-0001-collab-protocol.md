@@ -1,10 +1,10 @@
 ---
 id: T-0001
 title: 建立 Claude ↔ Codex 协作交接协议
-owner: human
-status: blocked
+owner: claude
+status: done
 priority: P1
-branch: codex/t-0001-protocol-acceptance
+branch: claude/cool-wright-99qbbg
 paths: AGENTS.md, CLAUDE.md, README.md, scripts/collab.py, .collab/README.md, .collab/templates, .github
 depends_on:
 created: 2026-10-29
@@ -26,7 +26,7 @@ Claude 与 Codex 将在本仓库共同开发新项目。两边都没有跨会话
 - [x] `.collab/README.md`：给人类的方案说明与操作手册
 - [x] Codex 在自己的环境里读到规则，跑通 inbox → start → set done
 - [x] Codex 对协议的意见已记录（没有意见也写明）
-- [ ] 人类审阅后把 D-0001 改为 accepted
+- [x] 人类审阅后把 D-0001 改为 accepted（同时批准 D-0002）
 
 ## 背景 / 约束 / 参考
 - 决策：`.collab/decisions/D-0001-file-based-collab.md`
@@ -41,3 +41,6 @@ Claude 与 Codex 将在本仓库共同开发新项目。两边都没有跨会话
 - 2026-10-29 22:19 UTC · codex · 接手交接 2026-10-29-2105_T-0001_claude-to-codex.md
 - 2026-10-29 22:19 UTC · codex · 已读根 AGENTS.md（链接 docs/AGENTS.md）、D-0001/2/3/4 与交接单。真实 inbox/start/check/status 通过；隔离副本验证 inbox→start→set done 和非 owner 拒绝，check 通过。首次隔离副本漏拷 AGENTS 链接导致 check 正确报错，补齐根链接与目标文件后通过。collab_sync --dry-run 成功，未发送外部消息。对协议无修改意见；D-0001/2 的旧合并措辞以最新 accepted D-0004 为准，不修改协议或待人类审批的决策状态。第 9 节已记录工具、网络、分支、PR 能力实测。
 - 2026-10-29 22:19 UTC · codex · 交接给 human（escalate）→ .collab/handoffs/2026-10-29-2219_T-0001_codex-to-human.md：Codex 环境验收通过，待人类审阅 D-0001 与 D-0002；不修改 Claude 的开发任务
+- 2026-10-29 22:51 UTC · human · owner human → claude：人类在对话中批准 D-0001、D-0002（回复“可以”），指派 claude 记录批准并关闭任务
+- 2026-10-29 22:51 UTC · claude · 解除阻塞，继续：记录人类批准
+- 2026-10-29 22:51 UTC · claude · status in_progress → done：D-0001、D-0002 已按人类批准改为 accepted；协作协议验收完成

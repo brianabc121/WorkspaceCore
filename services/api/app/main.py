@@ -47,6 +47,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/v1/openapi.json" if docs_enabled else None,
         docs_url="/api/v1/docs" if docs_enabled else None,
         redoc_url=None,
+        # operationId 直接用函数名（要求全局唯一），前端生成的类型更易读
+        generate_unique_id_function=lambda route: route.name,
     )
     app.state.settings = settings
     app.state.readiness_checks = {}
