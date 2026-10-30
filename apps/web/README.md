@@ -1,6 +1,6 @@
 # My Workspace Web
 
-Sprint 2 / T-0016（包含 Sprint 1 的认证与安全功能）：Vue 3、TypeScript、Vite、Vue Router、Pinia、TanStack Vue Query、Tailwind CSS。
+Sprint 3 / T-0022（包含 Sprint 1 认证与 Sprint 2 仪表盘）：Vue 3、TypeScript、Vite、Vue Router、Pinia、TanStack Vue Query、Tailwind CSS。
 
 在本目录使用 Node.js 22（`.nvmrc` 为 22.23.4）和 npm：
 
@@ -67,3 +67,24 @@ CHROMIUM_PATH=/usr/bin/chromium npm run test:browser
 可用 `WEB_BASE_URL` 指定 Vite 地址，默认 `http://127.0.0.1:5173`。脚本实际执行鼠标拖拽、缩放、带版本的完整布局保存、刷新后读回、CSRF/工作空间头、快捷搜索、移动单列和暗色主题，截图写入 `docs/screenshots/`。这是模拟 API 的前端冒烟；Compose 全栈与 CI 浏览器 E2E 由 Claude 的 T-0017 负责。
 
 截图：[桌面](docs/screenshots/sprint2-desktop.png)、[移动暗色](docs/screenshots/sprint2-mobile-dark.png)。
+
+
+## Sprint 3 任务与集成
+
+`/tasks` 提供列表/看板、状态/项目/截止时间/优先级/标题筛选和游标分页，任务抽屉支持新建、按变更字段编辑、确认删除。项目与任务都标注 Vikunja 来源，原生链接只允许无凭据的 http(s) 地址；描述只作文本编辑，不解析 HTML。`/projects` 显示投影项目与同步新鲜度。viewer 只读，member 可写任务，owner/admin 配置集成。
+
+`/settings/integrations` 仅向 owner/admin 开放：创建/修改连接、启停、测试连接、手动同步，显示状态、核验版本/实例版本/Token 是否已设置、同步与 Webhook 状态。已有服务地址和 Token 不回填表单、不展示在页面，留空表示保留。Token 不放入 localStorage 或操作队列，提交后清空输入。连接测试的 HTTP 200 也可能有失败检查，界面逐项展示，不把它当作成功。
+
+任务写入每次新提交生成 UUID 幂等键并保存原请求快照。超时、外部服务不可用、网关 5xx 或无效成功响应均按结果待确认处理：锁定新写入，“查询原请求结果”复用原键/方法/请求体，让服务端查询。只有 OPERATION_NOT_APPLIED 且用户确认后才换新键。原请求超出后端 24 小时保留窗口时不再重放，必须核对列表。409 版本冲突先重新读取详情，成功后才能继续；任务已经删除时关闭旧编辑器并释放已确定冲突。
+
+未确认操作只保留在当前页面会话的内存中，按用户和工作空间隔离；关闭抽屉/切换路由或工作空间不会丢掉待确认请求，登出会清理。硬刷新或关闭浏览器会清空内存，因此页面提示先核对列表，不能把刷新后的新表单当作原请求重试。集成写入不具有服务端任务幂等语义，结果未知时只刷新连接状态，不自动重发凭据。任务写入成功和随后的查询刷新分开处理，刷新失败不会诱发重复创建。
+
+首页继续读取真实聚合接口，任务组件按模块 ok/stale/unavailable/unauthorized 显示；今日任务现在显示项目与安全的原生链接。T-0024（PR #28）行号修复在尚未合并时按本任务验收要求带入相同代码和8项回归，不修改该任务文件。
+
+浏览器 API mock 冒烟（沿用上节 Playwright 安装方法，另开终端运行 Vite）：
+
+```sh
+CHROMIUM_PATH=/usr/bin/chromium npm run test:browser:sprint3
+```
+
+实际流程：列表/看板 → 结果未知的新建 → 关闭抽屉/同键查询 → 版本编辑 → 移动端 → 地址/Token 不回显 → 连接检查失败 → 手动同步。截图在 `docs/screenshots/sprint3-*.png`。后端真实数据、Webhook/对账与全栈浏览器验收由 T-0023 负责；本脚本不宣称全栈验收通过。接口依据 `docs/decisions/2026-10-30-sprint-3-tasks-contract.md` 和已生成类型，没有新增依赖或修改 schema.d.ts。

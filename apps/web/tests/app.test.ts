@@ -20,7 +20,7 @@ describe('工程骨架', () => {
     for (const [href, name] of pages) {
       expect(nav.querySelector(`a[href="${href}"]`)).toHaveTextContent(name!)
     }
-    expect(screen.getByText('Sprint 2 · 个人仪表盘')).toBeVisible()
+    expect(screen.getByText('Sprint 3 · 任务与集成')).toBeVisible()
   })
   it('navigates without reloading and closes the mobile menu', async () => {
     const { router } = await open()

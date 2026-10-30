@@ -132,6 +132,24 @@ kbd { font: inherit; font-size: .65rem; color: var(--muted); }
 .grid-stack-item-content { border-radius: 14px; }
 .grid-stack-placeholder > .placeholder-content { border: 2px dashed var(--accent) !important; background: var(--accent-soft) !important; }
 .grid-stack > .grid-stack-item > .ui-resizable-se { color: var(--accent); }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.task-toolbar { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; align-items: center; }
+.task-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 20px; margin-bottom: 20px; align-items: end; }
+.task-filters label { display: grid; gap: 7px; color: var(--muted); font-size: .8rem; min-width: 0; }
+.task-filters select[multiple] { height: 92px; }
+.task-board { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.task-column { padding: 20px; min-width: 0; }
+.task-record { display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 18px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.task-record p { font-size: .8rem; color: var(--muted); }
+.task-title { padding: 0; color: var(--text); background: none; border: 0; text-align: left; font-weight: 600; font-size: 1rem; }
+.task-title:hover, .external-link:hover { text-decoration: underline; text-underline-offset: 4px; }
+.external-link { color: var(--accent); font-size: .8rem; overflow-wrap: anywhere; }
+.operation-panel { border: 1px solid var(--accent); background: var(--accent-soft); padding: 16px; margin: 16px 0; border-radius: 10px; }
+.operation-panel button { margin-top: 10px; }
+.check-field { display: flex; align-items: center; gap: 8px; margin: 14px 0; }
+.integration-card { margin-top: 20px; overflow-wrap: anywhere; }
+.integration-card > p { color: var(--muted); font-size: .85rem; }
+@media (max-width: 760px) { .task-filters, .task-board { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 1100px) { .module-grid, .settings-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) {
   .sidebar { position: fixed; left: -260px; top: 64px; bottom: 0; z-index: 30; overflow-y: auto; visibility: hidden; }
