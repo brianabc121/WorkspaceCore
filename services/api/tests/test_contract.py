@@ -28,6 +28,17 @@ SPRINT_1_ENDPOINTS = {
     ("get", "/api/v1/audit-logs"),
 }
 
+SPRINT_2_ENDPOINTS = {
+    ("get", "/api/v1/dashboard/overview"),
+    ("get", "/api/v1/dashboards"),
+    ("post", "/api/v1/dashboards"),
+    ("patch", "/api/v1/dashboards/{dashboard_id}"),
+    ("get", "/api/v1/dashboards/{dashboard_id}/widgets"),
+    ("post", "/api/v1/dashboards/{dashboard_id}/widgets"),
+    ("patch", "/api/v1/widgets/{widget_id}"),
+    ("delete", "/api/v1/widgets/{widget_id}"),
+}
+
 
 @pytest.fixture
 async def stub_client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
@@ -44,10 +55,34 @@ def test_committed_openapi_matches_code() -> None:
     assert OUTPUT.read_text(encoding="utf-8") == render(), "请运行 make openapi 并提交"
 
 
-def test_all_sprint_1_endpoints_are_declared() -> None:
+def test_all_sprint_1_and_2_endpoints_are_declared() -> None:
     paths = json.loads(render())["paths"]
     declared = {(method, path) for path, ops in paths.items() for method in ops}
-    assert declared >= SPRINT_1_ENDPOINTS
+    assert declared >= SPRINT_1_ENDPOINTS | SPRINT_2_ENDPOINTS
+
+
+def test_no_endpoint_documents_501() -> None:
+    """未实现的端点在运行时返回 501，但不写进契约，实现后前端类型不需要变化。"""
+    paths = json.loads(render())["paths"]
+    assert not [
+        (method, path)
+        for path, ops in paths.items()
+        for method, op in ops.items()
+        if "501" in op["responses"]
+    ]
+
+
+def test_widget_types_are_a_discriminated_union() -> None:
+    schema = json.loads(render())
+    body = schema["paths"]["/api/v1/dashboards/{dashboard_id}/widgets"]["post"]["requestBody"]
+    union = body["content"]["application/json"]["schema"]
+    assert union["discriminator"]["propertyName"] == "widget_type"
+    assert set(union["discriminator"]["mapping"]) == {
+        "quick_links",
+        "note",
+        "todo_summary",
+        "today_tasks",
+    }
 
 
 def test_validation_errors_are_documented_with_unified_format() -> None:

@@ -15,7 +15,7 @@ router = APIRouter(tags=["me"])
 @router.get(
     "/me",
     summary="当前用户及其所属工作空间（含角色）",
-    responses=error_responses(401, 501),
+    responses=error_responses(401),
 )
 async def get_me(
     context: Annotated[AuthContext, Security(authenticated)],
@@ -28,7 +28,7 @@ async def get_me(
     "/me",
     summary="修改个人资料（显示名）",
     dependencies=[Security(authenticated), Depends(csrf_protected)],
-    responses=error_responses(401, 403, 422, 501),
+    responses=error_responses(401, 403, 422),
 )
 async def update_me(
     body: MeUpdate,

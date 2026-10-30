@@ -33,7 +33,7 @@ _signed_in_write = [Security(authenticated), Depends(csrf_protected)]
     description="成功时设置会话与 CSRF Cookie。"
     "账户不存在与密码错误返回相同的 401 INVALID_CREDENTIALS。",
     dependencies=[Depends(origin_checked)],
-    responses=error_responses(401, 403, 422, 429, 501),
+    responses=error_responses(401, 403, 422, 429),
 )
 async def login(
     body: LoginRequest,
@@ -57,7 +57,7 @@ async def login(
     response_class=Response,
     summary="登出：撤销当前会话并清除 Cookie",
     dependencies=[Depends(csrf_protected)],
-    responses=error_responses(401, 403, 501),
+    responses=error_responses(401, 403),
 )
 async def logout(
     response: Response,
@@ -73,7 +73,7 @@ async def logout(
     "/sessions",
     summary="我的会话列表",
     dependencies=_signed_in,
-    responses=error_responses(401, 501),
+    responses=error_responses(401),
 )
 async def list_sessions(
     context: Annotated[AuthContext, Security(authenticated)],
@@ -90,7 +90,7 @@ async def list_sessions(
     summary="撤销我的某个会话",
     description="只能撤销自己的会话；别人的会话按不存在处理（404）。",
     dependencies=_signed_in_write,
-    responses=error_responses(401, 403, 404, 501),
+    responses=error_responses(401, 403, 404),
 )
 async def revoke_session(
     session_id: UUID,
@@ -112,7 +112,7 @@ async def revoke_session(
     description="成功后撤销该用户的全部会话，并为当前客户端签发新的会话与 CSRF Cookie。"
     "当前密码错误返回 400 INVALID_CURRENT_PASSWORD。",
     dependencies=_signed_in_write,
-    responses=error_responses(400, 401, 403, 422, 429, 501),
+    responses=error_responses(400, 401, 403, 422, 429),
 )
 async def change_password(
     body: PasswordChangeRequest,

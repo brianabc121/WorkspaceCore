@@ -2,9 +2,9 @@
 id: T-0014
 title: Sprint 2 接口契约：Dashboard、Widget、布局版本、聚合接口（S2 契约）
 owner: claude
-status: todo
+status: done
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api/app/schemas,services/api/app/api,services/api/openapi.json,services/api/tests/test_contract.py,apps/web/src/services/schema.d.ts,docs/api-contract.md,docs/decisions
 depends_on: T-0013
 created: 2026-10-30
@@ -18,11 +18,11 @@ updated: 2026-10-30
 按 D-0003 契约先行：后端先提交 Pydantic schema 与导出的 `services/api/openapi.json`；按 D-0005 同时提交重新生成的前端类型。
 
 ## 验收标准
-- [ ] ADR `docs/decisions/2026-10-30-sprint-2-dashboard-contract.md`：Dashboard / Widget 数据模型与默认仪表盘规则；Widget Registry 协议（Sprint 2 内置的 widget type 清单、每种 type 的配置 schema、未知 type 写入时拒绝、读取时如何标记以便前端安全报错）；布局协议（12 列栅格、x/y/w/h、desktop / mobile 断点与取值范围）；乐观并发（版本号、冲突返回 409 与当前版本）；权限矩阵（viewer 读、member 写，A03）；聚合接口 DTO（规范 6.2，模块状态 ok / stale / unavailable / unauthorized，总超时）；布局导入 / 导出 JSON 格式
-- [ ] `app/schemas/` 中 Sprint 2 全部请求 / 响应模型；`/api/v1` 下声明全部 Sprint 2 端点（未实现的统一返回 501，main 保持可用）
-- [ ] 按契约 ADR 第 1 节清理 Sprint 1 端点在 OpenAPI 中残留的 501 声明
-- [ ] `make openapi` 生成并提交 `services/api/openapi.json`；按 D-0005 运行 `npm run generate:api` 提交 `apps/web/src/services/schema.d.ts`，`npm run check:api` 与 `npm run typecheck` 通过
-- [ ] `docs/api-contract.md` 更新端点表；契约测试覆盖新端点
+- [x] ADR `docs/decisions/2026-10-30-sprint-2-dashboard-contract.md`：Dashboard / Widget 数据模型与默认仪表盘规则；Widget Registry 协议（Sprint 2 内置的 widget type 清单、每种 type 的配置 schema、未知 type 写入时拒绝、读取时如何标记以便前端安全报错）；布局协议（12 列栅格、x/y/w/h、desktop / mobile 断点与取值范围）；乐观并发（版本号、冲突返回 409 与当前版本）；权限矩阵（viewer 读、member 写，A03）；聚合接口 DTO（规范 6.2，模块状态 ok / stale / unavailable / unauthorized，总超时）；布局导入 / 导出 JSON 格式
+- [x] `app/schemas/` 中 Sprint 2 全部请求 / 响应模型；`/api/v1` 下声明全部 Sprint 2 端点（未实现的统一返回 501，main 保持可用）
+- [x] 按契约 ADR 第 1 节清理 Sprint 1 端点在 OpenAPI 中残留的 501 声明
+- [x] `make openapi` 生成并提交 `services/api/openapi.json`；按 D-0005 运行 `npm run generate:api` 提交 `apps/web/src/services/schema.d.ts`，`npm run check:api` 与 `npm run typecheck` 通过
+- [x] `docs/api-contract.md` 更新端点表；契约测试覆盖新端点
 
 ## 背景 / 约束 / 参考
 - 规范：`docs/DEVELOPMENT_SPEC.md` 第 5.1 节第 8–9 项、第 6.1 / 6.2 节、第 8.2 节；Sprint 2 范围与 DoD 见第 13 节；验收场景 A03、A04、A05
@@ -31,3 +31,6 @@ updated: 2026-10-30
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-30 03:04 UTC · claude · 创建任务（owner: claude）
+- 2026-10-30 03:12 UTC · claude · 开始任务
+- 2026-10-30 03:14 UTC · claude · 契约完成：ADR docs/decisions/2026-10-30-sprint-2-dashboard-contract.md；8 个端点（overview、dashboards CRUD 的读 / 建 / 改、widgets 列表 / 新增 / 修改 / 删除）已声明，登录 / CSRF / 成员与角色校验生效，处理函数返回 501（不写进 OpenAPI）；Widget 写入模型按 widget_type 区分（quick_links、note、todo_summary、today_tasks）；清除 Sprint 1 端点的 501 声明；按 D-0005 重新生成并提交 apps/web/src/services/schema.d.ts（前端 typecheck / lint / 50 项测试 / build 通过）；后端 84 passed；ruff / mypy 通过。
+- 2026-10-30 03:14 UTC · claude · status in_progress → done：验收标准全部满足；T-0015（claude 后端）与 T-0016（codex 前端）可在本契约合并后开始

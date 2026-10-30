@@ -18,7 +18,7 @@ router = APIRouter(tags=["audit"])
     "/audit-logs",
     summary="工作空间审计日志（owner / admin）",
     dependencies=[Security(authenticated)],
-    responses=error_responses(401, 403, 404, 422, 501),
+    responses=error_responses(401, 403, 404, 422),
 )
 async def list_audit_logs(
     access: Annotated[WorkspaceAccess, Depends(workspace_admin)],

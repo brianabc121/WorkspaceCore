@@ -33,7 +33,7 @@ async def get_setup_status(
     summary="首次安装：创建 owner 账户与默认工作空间，并直接登录",
     description="只能成功一次；之后返回 409 SETUP_COMPLETED。成功时设置会话与 CSRF Cookie。",
     dependencies=[Depends(origin_checked)],
-    responses=error_responses(403, 409, 422, 429, 501),
+    responses=error_responses(403, 409, 422, 429),
 )
 async def complete_setup(
     body: SetupRequest,
