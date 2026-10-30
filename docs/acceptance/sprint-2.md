@@ -16,7 +16,7 @@
 验收中发现并修复的问题：布局无法解析的组件原先被服务端固定放在第 999 行，桌面网格被撑到 72,551 像素高，错误卡片在页面 7 万多像素以下。
 现在改为紧接在其余组件下方（`services/api/app/domain/dashboards.py`，契约 ADR 第 5 节已更新），浏览器验收检查错误卡片的位置在 3,000 像素以内。
 
-## 2. 验收场景（规范第 16 节）
+## 2. 验收场景（规范第 15 节）
 
 全栈环境：Compose 6 个服务，经 Caddy 对外入口访问。两个脚本都**已纳入 CI**（`ci-infra.yml`）：
 接口级 `sprint2_acceptance.py`（39 项）和浏览器 `sprint2_browser.cjs`（9 步，无头 Chromium，Playwright 1.63.0）。

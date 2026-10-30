@@ -14,7 +14,7 @@
 | 登出后 session 失效 | 通过 | 全栈脚本：登出 204 后用旧 Cookie 访问 `/me` 返回 401；另一台设备的会话被撤销后立即 401。浏览器：撤销另一台设备的会话后，该设备访问 `/settings` 被引导登录。pytest：登出、撤销会话、修改密码撤销其他会话，以及与改密并发的旧密码登录拿不到会话 |
 | 迁移可从空库完成 | 通过 | CI `ci-infra`：在全新 runner 的空数据卷上 `make migrate`（0001 → 0002 → 0003）；全栈脚本确认 `alembic current` 为 head；pytest：空库 upgrade → `alembic check` → downgrade → upgrade |
 
-## 2. 验收场景（规范第 16 节）与 Sprint 1 关键路径
+## 2. 验收场景（规范第 15 节）与 Sprint 1 关键路径
 
 全栈环境：Compose 6 个服务（全新数据卷），经 Caddy 对外入口访问。接口级场景由 `tests/e2e/sprint1_acceptance.py` 自动化，**已纳入 CI**（`ci-infra.yml` 的 “Sprint 1 全栈验收” 步骤，在 `make smoke` 之后、任何创建用户的步骤之前运行）。
 
