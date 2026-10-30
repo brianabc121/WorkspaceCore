@@ -48,3 +48,22 @@ ESLint 9 用于兼容当前 typescript-eslint 和 eslint-plugin-vue 的 flat con
 - Vitest: https://vitest.dev/guide/
 
 版本以本次 npm registry 实际解析结果和提交的锁文件为准；以上不构成第三方业务 API 已验证的声明。
+
+## Sprint 1 新增依赖（T-0012 引入，T-0013 由 claude 补录核验结果）
+
+T-0012（codex，PR #16）因任务路径限制把依赖来源写在 `apps/web/README.md`；按 D-0003“版本核验 ADR 由 claude 负责”，在此补录。
+
+| 包 | 版本 | 类型 | 用途 |
+| --- | --- | --- | --- |
+| openapi-typescript | 7.13.0 | dev | 由 `services/api/openapi.json` 生成 `src/services/schema.d.ts`（`npm run generate:api`；CI 用 `npm run check:api` 检查一致） |
+| openapi-fetch | 0.17.0 | runtime | 基于生成类型的强类型 `fetch` 客户端 |
+| vee-validate | 4.15.1 | runtime | 表单状态与校验 |
+| @vee-validate/zod | 4.15.1 | runtime | vee-validate 的 Zod 适配器 |
+| zod | 3.25.76 | runtime | 表单校验 schema（适配器支持的 Zod 3 版本） |
+
+核验：2026-10-30 用 `npm view <包>@<版本> version` 在 npm registry 确认上述版本均存在，锁文件 `apps/web/package-lock.json` 固定传递依赖。
+官方文档（codex 引用；本次验收环境的网络策略未放行这些站点，未重新打开）：
+https://openapi-ts.dev/introduction 、 https://openapi-ts.dev/openapi-fetch/ 、 https://vee-validate.logaretm.com/v4/integrations/zod-schema-validation/ 。
+
+后果：`check:api` 让 `services/api/openapi.json` 与前端生成类型强绑定——后端修改接口契约的 PR 必须同时提交重新生成的
+`apps/web/src/services/schema.d.ts`，否则 Web CI 失败。这个生成文件由谁提交需要在协作流程里明确（见 `docs/acceptance/sprint-1.md` 第 6 节）。

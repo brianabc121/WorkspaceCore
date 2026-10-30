@@ -11,11 +11,11 @@
 - [x] S0-06 CI lint/typecheck/test/build/compose config，写运行手册。
 
 ## Sprint 1 — 用户、工作空间、安全
-- [ ] S1-01 User、Session、Workspace、Member 迁移及 repository。
-- [ ] S1-02 首次安装管理员初始化、Argon2id、session cookie、CSRF 与限流。
-- [ ] S1-03 Workspace 和 role policy，防 IDOR 用例。
-- [ ] S1-04 Settings 骨架、连接凭证密文或 secret 引用。
-- [ ] S1-05 Audit logs、会话撤销与 API 测试。
+- [x] S1-01 User、Session、Workspace、Member 迁移及 repository。
+- [x] S1-02 首次安装管理员初始化、Argon2id、session cookie、CSRF 与限流。
+- [x] S1-03 Workspace 和 role policy，防 IDOR 用例。
+- [x] S1-04 Settings 骨架、连接凭证密文或 secret 引用。
+- [x] S1-05 Audit logs、会话撤销与 API 测试。
 
 ## Sprint 2 — Dashboard
 - [ ] S2-01 Dashboard/Widget 数据表及读写 API。

@@ -1,0 +1,13 @@
+{
+  "name": "workspace-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "浏览器验收脚本的依赖（Playwright）；接口级验收 sprint1_acceptance.py 只用 Python 标准库",
+  "scripts": {
+    "browser:install": "playwright install chromium",
+    "sprint1:browser": "node sprint1_browser.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
