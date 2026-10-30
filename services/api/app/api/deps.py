@@ -20,6 +20,7 @@ from app.domain.auth import AuthContext, AuthService
 from app.domain.calendar import CalendarService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.dashboards import DashboardService
+from app.domain.developer import DeveloperService
 from app.domain.integrations import IntegrationService
 from app.domain.knowledge import KnowledgeService
 from app.domain.security import csrf_token_for, csrf_token_matches
@@ -111,6 +112,13 @@ def get_calendar_service(
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> CalendarService:
     return CalendarService(db, settings)
+
+
+def get_developer_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> DeveloperService:
+    return DeveloperService(db, settings)
 
 
 def get_task_service(

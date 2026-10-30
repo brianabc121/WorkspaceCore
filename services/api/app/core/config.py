@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     # full_sync_interval_seconds 再做一次全量（覆盖删除与丢失的事件）
     reconcile_interval_minutes: int = Field(default=5, ge=1, le=30)
     full_sync_interval_seconds: int = Field(default=3600, ge=300)
+    # GitHub REST API 的地址（Sprint 4 契约第 6.1 节，固定为 api.github.com）；
+    # 只有测试与 CI 验收会改成模拟服务，同时要把模拟服务的主机名加进 integration_allowed_hosts
+    github_api_url: str = "https://api.github.com"
 
     @field_validator("log_level", mode="before")
     @classmethod
