@@ -17,8 +17,11 @@ from app.core.config import Settings, origin_of
 from app.core.errors import ApiError
 from app.domain import policy
 from app.domain.auth import AuthContext, AuthService
+from app.domain.connectors import ConnectorRuntime
 from app.domain.dashboards import DashboardService
+from app.domain.integrations import IntegrationService
 from app.domain.security import csrf_token_for, csrf_token_matches
+from app.domain.tasks import TaskService
 from app.domain.workspaces import WorkspaceService
 from app.schemas.workspaces import Role
 
@@ -71,6 +74,27 @@ def get_workspace_service(
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> WorkspaceService:
     return WorkspaceService(db, settings)
+
+
+def get_connectors(request: Request) -> ConnectorRuntime:
+    runtime: ConnectorRuntime = request.app.state.connectors
+    return runtime
+
+
+def get_integration_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
+) -> IntegrationService:
+    return IntegrationService(db, settings, connectors)
+
+
+def get_task_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
+) -> TaskService:
+    return TaskService(db, settings, connectors)
 
 
 async def authenticated(

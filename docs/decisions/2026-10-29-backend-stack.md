@@ -33,7 +33,8 @@
 | email-validator | 2.3.0 | 邮箱格式校验（`pydantic[email]`，Sprint 1，T-0009） |
 | cryptography | 50.0.2 | 第三方凭证的 AES-256-GCM 加密（`AESGCM`，Sprint 1，T-0011） |
 | uvicorn[standard] | 0.54.0 | ASGI 服务器 |
-| httpx / pytest / pytest-asyncio | 0.28.1 / 9.2.0 / 1.4.1 | 测试（开发依赖） |
+| httpx | 0.28.1 | 访问第三方服务的 HTTP 客户端（Sprint 3 起为运行时依赖，T-0020）；测试里也用作 ASGI 客户端 |
+| pytest / pytest-asyncio | 9.2.0 / 1.4.1 | 测试（开发依赖） |
 | ruff / mypy | 0.17.3 / 2.4.1 | lint、格式化、类型检查（开发依赖） |
 
 Argon2id 参数：t=3、m=64 MiB、p=4（RFC 9106 推荐的低内存配置，`app/domain/security.py`）；参数调整后，旧哈希会在用户下次登录时自动升级。

@@ -9,8 +9,16 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Security, status
 
-from app.api.deps import authenticated, csrf_protected, workspace_admin, workspace_viewer
+from app.api.deps import (
+    authenticated,
+    csrf_protected,
+    get_integration_service,
+    workspace_admin,
+    workspace_viewer,
+)
 from app.core.errors import not_implemented
+from app.domain.auth import AuthContext
+from app.domain.integrations import IntegrationService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.common import Page, error_responses
 from app.schemas.integrations import (
@@ -25,6 +33,8 @@ router = APIRouter(tags=["integrations"], dependencies=[Security(authenticated)]
 
 Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
 Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
+Context = Annotated[AuthContext, Security(authenticated)]
+Service = Annotated[IntegrationService, Depends(get_integration_service)]
 _write = [Depends(csrf_protected)]
 _read_errors = error_responses(401, 404, 422)
 _write_errors = error_responses(401, 403, 404, 409, 422)
@@ -36,8 +46,9 @@ _write_errors = error_responses(401, 403, 404, 409, 422)
     description="不含任何凭证；status 与 sync 表示连接状态与数据新鲜度。",
     responses=_read_errors,
 )
-async def list_integrations(access: Viewer) -> Page[IntegrationOut]:
-    raise not_implemented("T-0020")
+async def list_integrations(access: Viewer, service: Service) -> Page[IntegrationOut]:
+    items = await service.list_integrations(access)
+    return Page(items=items, next_cursor=None, total_estimate=len(items))
 
 
 @router.post(
@@ -49,8 +60,10 @@ async def list_integrations(access: Viewer) -> Page[IntegrationOut]:
     dependencies=_write,
     responses=_write_errors,
 )
-async def create_integration(access: Admin, body: IntegrationCreate) -> IntegrationOut:
-    raise not_implemented("T-0020")
+async def create_integration(
+    access: Admin, context: Context, service: Service, body: IntegrationCreate
+) -> IntegrationOut:
+    return await service.create(context, access, body)
 
 
 @router.patch(
@@ -62,21 +75,28 @@ async def create_integration(access: Admin, body: IntegrationCreate) -> Integrat
     responses=_write_errors,
 )
 async def update_integration(
-    access: Admin, integration_id: UUID, body: IntegrationUpdate
+    access: Admin,
+    context: Context,
+    service: Service,
+    integration_id: UUID,
+    body: IntegrationUpdate,
 ) -> IntegrationOut:
-    raise not_implemented("T-0020")
+    return await service.update(context, access, integration_id, body)
 
 
 @router.post(
     "/integrations/{integration_id}/test",
     summary="测试连接与权限（admin）",
     description="逐项检查可达性、实例版本、Token、任务读权限与 Webhook 注册权限；"
-    "不返回外部响应原文。测试本身失败也返回 200，结果在 checks 里。",
+    "不返回外部响应原文。测试本身失败也返回 200，结果在 checks 里。"
+    "测试通过后立即做一次全量同步。",
     dependencies=_write,
     responses=_write_errors,
 )
-async def test_integration(access: Admin, integration_id: UUID) -> IntegrationTestResult:
-    raise not_implemented("T-0020")
+async def test_integration(
+    access: Admin, context: Context, service: Service, integration_id: UUID
+) -> IntegrationTestResult:
+    return await service.test(context, access, integration_id)
 
 
 @router.post(

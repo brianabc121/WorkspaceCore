@@ -75,6 +75,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | `SESSION_SECRET` | 计算 CSRF Token 的密钥；生产环境必填且至少 32 个字符。轮换后所有人需要重新登录 | 随机 |
 | `SETUP_TOKEN` | 首次安装凭据（`make setup-token` 查看）；未配置时首次安装一律拒绝 | 随机 |
 | `CREDENTIAL_ENCRYPTION_KEY` | 第三方连接凭证的加密密钥（64 位十六进制）；格式错误时 API 拒绝启动。**丢失或更换后已保存的凭证无法解密**，请与数据库备份分开保存 | 随机 |
+| `INTEGRATION_ALLOWED_HOSTS` | 允许工作台访问的内网主机名，逗号分隔。第三方服务的地址解析到私有 / 内网 / 链路本地地址时一律拒绝（SSRF 防护），除非主机名在这里 | `vikunja` |
 
 数据库密码请只用字母和数字（`make env` 生成的就是），否则需要在连接串中做 URL 编码。
 
@@ -83,6 +84,9 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 - 升级代码后再运行一次 `make env`：它只会把 `.env.example` 里新增的变量补进 `.env`（新密钥随机生成），不改已有的值。
 - 登录限流等参数也可以在 `.env` 中调整，变量见 `docs/decisions/2026-10-30-sprint-1-auth-contract.md` 第 9 节；
   加进 `.env` 后还要在 `compose.yaml` 的 api `environment` 中传入。
+- 访问第三方服务的超时与重试也可以调整（同样要在 api `environment` 中传入）：`CONNECTOR_CONNECT_TIMEOUT_SECONDS`（默认 3）、
+  `CONNECTOR_READ_TIMEOUT_SECONDS`（默认 10）、`CONNECTOR_READ_RETRIES`（只对读请求，默认 2；写请求从不自动重试）、
+  `SYNC_STALE_AFTER_SECONDS`（最近一次成功同步超过多久显示为“数据可能过期”，默认 900）。
 
 ## 4. 检查与排错
 
@@ -170,4 +174,8 @@ make vikunja-down    # 停止，保留数据卷
   因此要保持自助注册关闭，只给可信的人创建 Vikunja 用户。多人使用时改用出站代理（见核验 ADR 第 6 节）。
 - 数据在卷 `vikunja-db`（SQLite）与 `vikunja-files`；Vikunja 自带 `vikunja dump` / `restore` 备份命令，纳入 S6-04 的备份方案。
 - 工作台连接 Vikunja 用的 API Token 在 Vikunja 原生界面的设置里创建，需要的最小权限见核验 ADR 第 3 节。
+- 在工作台里添加集成（workspace admin）：服务地址填 `http://vikunja:3456`（容器内地址，已在 `INTEGRATION_ALLOWED_HOSTS` 里），
+  浏览器地址填 `VIKUNJA_PUBLIC_URL`，再粘贴 Token；保存后点“测试连接”，通过后会立即同步全部项目与任务。
+  接口见 `docs/api-contract.md` 的 Sprint 3 部分；Token 加密保存，之后不再显示。
+- Vikunja 只按秒保存时间：同一秒内两个人修改同一个任务时，后写的一方会覆盖前者而不报冲突（核验 ADR 第 5.5 节）。
 

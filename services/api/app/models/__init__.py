@@ -7,6 +7,13 @@ from app.models.audit import AuditLog
 from app.models.base import NAMING_CONVENTION, Base
 from app.models.dashboard import Dashboard, Widget
 from app.models.identity import AuthSession, ExternalIdentity, User
+from app.models.integration import (
+    ExternalResource,
+    IdempotencyRequest,
+    Integration,
+    IntegrationAccount,
+    SyncCursor,
+)
 from app.models.workspace import Workspace, WorkspaceMember
 
 __all__ = [
@@ -16,6 +23,11 @@ __all__ = [
     "Base",
     "Dashboard",
     "ExternalIdentity",
+    "ExternalResource",
+    "IdempotencyRequest",
+    "Integration",
+    "IntegrationAccount",
+    "SyncCursor",
     "User",
     "Widget",
     "Workspace",

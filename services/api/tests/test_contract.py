@@ -12,7 +12,9 @@ from fastapi import FastAPI
 from app.api.deps import (
     authenticated,
     get_db,
+    get_integration_service,
     get_redis,
+    get_task_service,
     get_workspace_service,
     workspace_admin,
     workspace_member,
@@ -177,11 +179,23 @@ async def test_workspace_scoped_endpoint_requires_workspace_header(
 # ---------------------------------------------------------------- Sprint 3
 
 
+class _ShapeOnlyService:
+    """请求形态通过校验后到达这里：返回 501，表示“形态正确”（业务逻辑另有测试）。"""
+
+    def __getattr__(self, name: str) -> object:
+        async def unfinished(*args: object, **kwargs: object) -> None:
+            raise not_implemented("contract-test")
+
+        return unfinished
+
+
 @pytest.fixture
 def any_role(app: FastAPI) -> None:
-    """跳过成员与角色检查（它们需要数据库），只验证请求形态。"""
+    """跳过成员与角色检查与业务逻辑（它们需要数据库），只验证请求形态。"""
     for dependency in (workspace_viewer, workspace_member, workspace_admin):
         app.dependency_overrides[dependency] = lambda: None
+    app.dependency_overrides[get_task_service] = _ShapeOnlyService
+    app.dependency_overrides[get_integration_service] = _ShapeOnlyService
 
 
 def _operation(method: str, path: str) -> dict[str, object]:

@@ -266,7 +266,7 @@ export interface paths {
         put?: never;
         /**
          * 测试连接与权限（admin）
-         * @description 逐项检查可达性、实例版本、Token、任务读权限与 Webhook 注册权限；不返回外部响应原文。测试本身失败也返回 200，结果在 checks 里。
+         * @description 逐项检查可达性、实例版本、Token、任务读权限与 Webhook 注册权限；不返回外部响应原文。测试本身失败也返回 200，结果在 checks 里。测试通过后立即做一次全量同步。
          */
         post: operations["test_integration"];
         delete?: never;

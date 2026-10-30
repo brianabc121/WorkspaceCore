@@ -40,6 +40,11 @@ EXPECTED_TABLES = {
     "audit_logs",
     "dashboards",
     "widgets",
+    "integrations",
+    "integration_accounts",
+    "external_resources",
+    "idempotency_requests",
+    "sync_cursors",
 }
 
 
