@@ -96,6 +96,12 @@ async function login(browser, email, problems, requests) {
   await page.waitForURL(`${base}/`)
   return { context, page }
 }
+// 提交被前端校验拦下：等表单级提示（role=alert，提交的校验结束后才出现）。
+// 字段级错误在输入时就会出现，只等它的话，提交的校验可能还没结束，接着改值就会被这次提交带走。
+async function rejectedOnSubmit(page, form, button, text) {
+  await page.getByRole('button', { name: button }).click()
+  await page.getByRole('form', { name: form }).getByRole('alert').filter({ hasText: text }).waitFor()
+}
 async function noHorizontalScroll(page) {
   return !(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth))
 }
@@ -118,15 +124,19 @@ async function noHorizontalScroll(page) {
   // ---------------------------------------------------------------- 配置 AFFiNE 地址（S4-01，管理员）
   await page.goto(`${base}/knowledge`)
   await page.getByText('尚未配置知识来源').waitFor()
+  const sourceBodies = []
+  page.on('request', (request) => {
+    if (request.url().endsWith('/api/v1/knowledge/sources') && request.method() === 'POST') sourceBodies.push(request.postData() || '')
+  })
   await page.getByRole('button', { name: '管理知识来源' }).click()
   await page.getByLabel('知识来源名称').fill('AFFiNE')
   await page.getByLabel('AFFiNE 外部地址').fill('http://169.254.169.254')
-  await page.getByRole('button', { name: '保存知识来源' }).click()
-  await page.getByText('不能使用链路本地、云元数据或未指定地址。').waitFor()
+  await rejectedOnSubmit(page, '知识来源配置', '保存知识来源', '不能使用链路本地、云元数据或未指定地址。')
   await page.getByLabel('AFFiNE 外部地址').fill(AFFINE)
   await page.getByRole('button', { name: '保存知识来源' }).click()
   await page.getByText('知识来源已保存').waitFor()
-  step('配置 AFFiNE 外部地址：元数据地址被拒绝（A12），合法地址保存成功')
+  check(sourceBodies.length === 1 && sourceBodies[0].includes(AFFINE), `应只提交一次合法地址：${sourceBodies}`)
+  step('配置 AFFiNE 外部地址：元数据地址被拒绝且没有提交（A12），合法地址保存成功')
 
   // ---------------------------------------------------------------- 新增收藏并关联任务（S4-01）
   const title = `浏览器收藏 ${run}`
@@ -137,8 +147,7 @@ async function noHorizontalScroll(page) {
   await page.getByRole('button', { name: '新增收藏' }).click()
   await page.getByLabel('收藏标题').fill(title)
   await page.getByLabel('文档链接').fill('javascript:alert(1)')
-  await page.getByRole('button', { name: '保存收藏' }).click()
-  await page.getByText('文档链接只支持 HTTP 或 HTTPS。').waitFor()
+  await rejectedOnSubmit(page, '收藏编辑', '保存收藏', '文档链接只支持 HTTP 或 HTTPS。')
   check(writes.length === 0, '不合法的链接不应提交到后端')
   await page.getByLabel('文档链接').fill(`${AFFINE}/workspace/ws1/doc-${run}?mode=page&refreshKey=1#heading`)
   await page.getByLabel('收藏备注').fill('上线前检查')
