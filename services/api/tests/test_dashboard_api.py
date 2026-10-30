@@ -82,6 +82,7 @@ async def test_setup_creates_the_default_dashboard_with_starter_widgets(home: Ho
             "as_of": None,
             "retryable": False,
             "reason": "not_configured",
+            "retry_at": None,
         }
     }
     assert data["summary"] == {
@@ -445,6 +446,7 @@ async def test_failing_or_slow_modules_only_degrade_themselves(home: Home) -> No
         "as_of": None,
         "retryable": True,
         "reason": "error",
+        "retry_at": None,
     }
     assert data["modules"]["calendar"]["reason"] == "timeout"
     assert "secret upstream detail" not in str(data)

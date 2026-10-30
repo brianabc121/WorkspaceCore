@@ -115,6 +115,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/calendar/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 区间内的日程（viewer）
+         * @description 返回与 [start, end) 有重叠的事件，按开始时间排序；start、end 必须带时区，跨度不超过 92 天，否则返回 422。
+         */
+        get: operations["list_events"];
+        put?: never;
+        /**
+         * 新建日程（member）
+         * @description 定时事件填 start_at / end_at（带时区），全天事件填 start_date / end_date（结束不含）；V1 不支持重复事件。
+         */
+        post: operations["create_event"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar/events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除日程（member，前端先二次确认） */
+        delete: operations["delete_event"];
+        options?: never;
+        head?: never;
+        /** 修改日程（member，乐观并发） */
+        patch: operations["update_event"];
+        trace?: never;
+    };
     "/api/v1/dashboard/overview": {
         parameters: {
             query?: never;
@@ -191,6 +233,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/developer/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GitHub Issue（viewer，读本地投影；不含 PR） */
+        get: operations["list_issues"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/developer/pulls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GitHub PR（viewer，读本地投影） */
+        get: operations["list_pulls"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/developer/repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GitHub 仓库（viewer，读本地投影） */
+        get: operations["list_repos"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/developer/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GitHub Actions 最近运行（viewer，读本地投影）
+         * @description 失败的运行带 failure_summary（失败的 job 与 step 名称，不含日志）。
+         */
+        get: operations["list_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/integrations": {
         parameters: {
             query?: never;
@@ -205,8 +318,8 @@ export interface paths {
         get: operations["list_integrations"];
         put?: never;
         /**
-         * 新建 Vikunja 集成（admin）
-         * @description 保存后状态为 pending，需要测试连接；每个工作空间最多 1 个同类集成（第 2 个返回 409 LIMIT_EXCEEDED）。base_url 解析到私有地址且不在部署允许列表里时返回 422。
+         * 新建 Vikunja 或 GitHub 集成（admin）
+         * @description 请求体按 provider 区分。保存后状态为 pending，需要测试连接；每个工作空间最多 1 个同类集成（第 2 个返回 409 LIMIT_EXCEEDED）。Vikunja 的 base_url 解析到私有地址且不在部署允许列表里时返回 422；GitHub 的地址固定为 api.github.com，只同步 repositories 中列出的仓库。
          */
         post: operations["create_integration"];
         delete?: never;
@@ -230,7 +343,7 @@ export interface paths {
         head?: never;
         /**
          * 修改集成（admin，乐观并发）
-         * @description version 不一致时返回 409 VERSION_CONFLICT；改 base_url 或 api_token 后状态回到 pending。
+         * @description version 不一致时返回 409 VERSION_CONFLICT；改 base_url 或 api_token 后状态回到 pending。api_token 的前缀必须与集成的 provider 一致；base_url / public_url 只用于 Vikunja，repositories 只用于 GitHub，不适用时返回 422。
          */
         patch: operations["update_integration"];
         trace?: never;
@@ -275,6 +388,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/knowledge/bookmarks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 收藏 AFFiNE 文档（member）
+         * @description 链接按核验 ADR 第 8.3 节校验（不合规返回 422，details.reason 说明原因）；没有配置知识来源时返回 409 INTEGRATION_UNAVAILABLE；同一文档已有同样可见性的收藏时返回 409 BOOKMARK_EXISTS（details.existing_id）。
+         */
+        post: operations["create_bookmark"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/bookmarks/{bookmark_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除收藏（member；私有收藏只有创建者能删） */
+        delete: operations["delete_bookmark"];
+        options?: never;
+        head?: never;
+        /** 修改收藏（member，乐观并发；只有创建者能改 visibility） */
+        patch: operations["update_bookmark"];
+        trace?: never;
+    };
+    "/api/v1/knowledge/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 文档收藏列表（viewer；私有收藏只返回自己的）
+         * @description linked_resource_id 只返回关联了该 Vikunja 项目 / 任务的收藏（任务抽屉的“相关文档”）。
+         */
+        get: operations["list_resources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 知识来源（AFFiNE 外部地址）列表（viewer） */
+        get: operations["list_sources"];
+        put?: never;
+        /**
+         * 配置 AFFiNE 外部地址（admin）
+         * @description 只检查地址字符串，工作台从不访问它；每个工作空间最多 1 个（第 2 个返回 409 LIMIT_EXCEEDED）。
+         */
+        post: operations["create_source"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除知识来源（admin；连同它的全部收藏，前端先二次确认） */
+        delete: operations["delete_source"];
+        options?: never;
+        head?: never;
+        /**
+         * 修改知识来源（admin，乐观并发）
+         * @description 修改 base_url 后，该来源下所有收藏的链接都随之改为新地址。
+         */
+        patch: operations["update_source"];
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -302,6 +515,26 @@ export interface paths {
         };
         /** 外部项目列表（viewer，读本地投影） */
         get: operations["list_projects"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 跨资源搜索（viewer）
+         * @description 中文按字面包含与相似度匹配（不分词），相关性有限；排序见契约第 8 节。
+         */
+        get: operations["search"];
         put?: never;
         post?: never;
         delete?: never;
@@ -544,6 +777,232 @@ export interface components {
             /** Resource Type */
             resource_type: string | null;
         };
+        /** BookmarkCreate */
+        BookmarkCreate: {
+            /**
+             * Linked Resource Ids
+             * @description 关联的 Vikunja 项目 / 任务（投影 UUID）；修改时整体替换
+             */
+            linked_resource_ids?: string[];
+            /**
+             * Note
+             * @description 纯文本备注；前端按文本显示，不解析 HTML / Markdown
+             * @default
+             */
+            note: string;
+            /** Title */
+            title: string;
+            /**
+             * Url
+             * @description 在 AFFiNE 里打开文档时浏览器地址栏的链接；服务端按核验 ADR 第 8.3 节校验并规范化
+             */
+            url: string;
+            /**
+             * Visibility
+             * @default workspace
+             * @enum {string}
+             */
+            visibility: "workspace" | "private";
+        };
+        /**
+         * BookmarkUpdate
+         * @description 只发送要改的字段，都不能为 null；只有创建者能修改 visibility（否则 403）。
+         */
+        BookmarkUpdate: {
+            /** Linked Resource Ids */
+            linked_resource_ids?: string[] | null;
+            /** Note */
+            note?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Url */
+            url?: string | null;
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
+            /** Visibility */
+            visibility?: ("workspace" | "private") | null;
+        };
+        /**
+         * CalendarAgendaConfig
+         * @description Sprint 4：组件自己调用 GET /calendar/events（Sprint 4 契约第 9.2 节）。
+         */
+        CalendarAgendaConfig: {
+            /**
+             * Days
+             * @description 从现在起显示多少天
+             * @default 7
+             */
+            days: number;
+            /**
+             * Limit
+             * @default 5
+             */
+            limit: number;
+        };
+        /** CalendarAgendaWidgetCreate */
+        CalendarAgendaWidgetCreate: {
+            config?: components["schemas"]["CalendarAgendaConfig"];
+            layout: components["schemas"]["WidgetLayout"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "calendar_agenda";
+        };
+        /** CalendarAgendaWidgetUpdate */
+        CalendarAgendaWidgetUpdate: {
+            config: components["schemas"]["CalendarAgendaConfig"];
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "calendar_agenda";
+        };
+        /** CalendarEventCreate */
+        CalendarEventCreate: {
+            /**
+             * All Day
+             * @default false
+             */
+            all_day: boolean;
+            /**
+             * Description
+             * @description 纯文本；前端按文本显示
+             * @default
+             */
+            description: string;
+            /**
+             * End At
+             * @description 定时事件的结束（带时区，不含）
+             */
+            end_at?: string | null;
+            /**
+             * End Date
+             * @description 全天事件的结束日期（不含）
+             */
+            end_date?: string | null;
+            /**
+             * Location
+             * @default
+             */
+            location: string;
+            /**
+             * Start At
+             * @description 定时事件的开始（带时区）
+             */
+            start_at?: string | null;
+            /**
+             * Start Date
+             * @description 全天事件的开始日期
+             */
+            start_date?: string | null;
+            /**
+             * Timezone
+             * @description IANA 时区名，例如 Asia/Shanghai；全天事件按它换算，前端按它显示
+             */
+            timezone: string;
+            /** Title */
+            title: string;
+        };
+        /** CalendarEventOut */
+        CalendarEventOut: {
+            /** All Day */
+            all_day: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Description
+             * @description 纯文本；前端按文本显示
+             */
+            description: string;
+            /**
+             * End At
+             * Format: date-time
+             * @description 结束（UTC，不含）
+             */
+            end_at: string;
+            /**
+             * End Date
+             * @description 全天事件的结束日期（不含）；定时事件为 null
+             */
+            end_date: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Location */
+            location: string;
+            /**
+             * Owner Id
+             * @description 创建者；用户被删除后为 null
+             */
+            owner_id: string | null;
+            /**
+             * Start At
+             * Format: date-time
+             * @description 开始（UTC）；全天事件为 timezone 当地 0 点
+             */
+            start_at: string;
+            /**
+             * Start Date
+             * @description 全天事件的开始日期；定时事件为 null
+             */
+            start_date: string | null;
+            /** Timezone */
+            timezone: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
+        /**
+         * CalendarEventUpdate
+         * @description 只发送要改的字段，都不能为 null；改 all_day 时同时给出对应的一对时间。
+         *
+         *     合并后的结果由服务端再校验。
+         */
+        CalendarEventUpdate: {
+            /** All Day */
+            all_day?: boolean | null;
+            /** Description */
+            description?: string | null;
+            /** End At */
+            end_at?: string | null;
+            /** End Date */
+            end_date?: string | null;
+            /** Location */
+            location?: string | null;
+            /** Start At */
+            start_at?: string | null;
+            /** Start Date */
+            start_date?: string | null;
+            /** Timezone */
+            timezone?: string | null;
+            /** Title */
+            title?: string | null;
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
+        };
         /** DashboardCreate */
         DashboardCreate: {
             /** Title */
@@ -552,7 +1011,7 @@ export interface components {
              * Widgets
              * @description 可选：创建时一并加入的组件（用于导入布局 JSON），整体在一个事务里完成
              */
-            widgets?: (components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"])[];
+            widgets?: (components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"])[];
         };
         /** DashboardOut */
         DashboardOut: {
@@ -599,7 +1058,7 @@ export interface components {
             generated_at: string;
             /**
              * Modules
-             * @description 按模块名索引（本 Sprint 只有 tasks）；单个模块失败只影响对应组件
+             * @description 按模块名索引：tasks（Sprint 3）、calendar、knowledge、github（Sprint 4）；单个模块失败只影响对应组件
              */
             modules: {
                 [key: string]: components["schemas"]["ModuleStatus"];
@@ -670,6 +1129,89 @@ export interface components {
         ErrorResponse: {
             error: components["schemas"]["ErrorBody"];
         };
+        /** FailedJob */
+        FailedJob: {
+            /**
+             * Failed Steps
+             * @description 失败的 step 名称；不含日志
+             */
+            failed_steps: string[];
+            /** Name */
+            name: string;
+        };
+        /**
+         * FailureSummary
+         * @description 只来自 jobs 接口的名称与结论，不读 Actions 日志（日志里可能有密钥）。
+         */
+        FailureSummary: {
+            /** Failed Jobs */
+            failed_jobs: components["schemas"]["FailedJob"][];
+        };
+        /** GitHubActivityConfig */
+        GitHubActivityConfig: {
+            /**
+             * Kind
+             * @description 显示最近的 Actions 运行、PR 或 Issue
+             * @default runs
+             * @enum {string}
+             */
+            kind: "runs" | "pulls" | "issues";
+            /**
+             * Limit
+             * @default 5
+             */
+            limit: number;
+        };
+        /** GitHubActivityWidgetCreate */
+        GitHubActivityWidgetCreate: {
+            config?: components["schemas"]["GitHubActivityConfig"];
+            layout: components["schemas"]["WidgetLayout"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "github_activity";
+        };
+        /** GitHubActivityWidgetUpdate */
+        GitHubActivityWidgetUpdate: {
+            config: components["schemas"]["GitHubActivityConfig"];
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "github_activity";
+        };
+        /**
+         * GitHubIntegrationCreate
+         * @description 新建 GitHub 集成（Sprint 4）：地址固定为 api.github.com，不接受 base_url / public_url。
+         */
+        GitHubIntegrationCreate: {
+            /**
+             * Api Token
+             * Format: password
+             * @description GitHub 细粒度 Personal Access Token（github_pat_ 开头）；只写不读
+             */
+            api_token: string;
+            /** Name */
+            name: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            provider: "github";
+            /** Repositories */
+            repositories: string[];
+            /**
+             * Token Expires At
+             * @description Token 的过期时间（在 GitHub 创建 Token 时设置），用于到期提醒
+             */
+            token_expires_at?: string | null;
+        };
         /** HealthResponse */
         HealthResponse: {
             /**
@@ -693,7 +1235,10 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
-        /** IntegrationCreate */
+        /**
+         * IntegrationCreate
+         * @description 新建 Vikunja 集成（Sprint 3）。
+         */
         IntegrationCreate: {
             /**
              * Api Token
@@ -706,8 +1251,8 @@ export interface components {
             /** Name */
             name: string;
             /**
-             * Provider
-             * @constant
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
              */
             provider: "vikunja";
             /**
@@ -751,14 +1296,19 @@ export interface components {
             name: string;
             /**
              * Provider
-             * @constant
+             * @enum {string}
              */
-            provider: "vikunja";
+            provider: "vikunja" | "github";
             /**
              * Public Url
              * @description 浏览器打开原生界面的地址
              */
             public_url: string;
+            /**
+             * Repositories
+             * @description GitHub 集成要同步的仓库（owner/repo）；其他集成为空
+             */
+            repositories?: string[];
             /**
              * Status
              * @enum {string}
@@ -805,6 +1355,11 @@ export interface components {
              */
             ok: boolean;
             /**
+             * Repositories
+             * @description GitHub 集成：每个仓库的读权限检查；其他集成为 null
+             */
+            repositories?: components["schemas"]["RepositoryCheck"][] | null;
+            /**
              * Status
              * @description 测试之后的集成状态
              * @enum {string}
@@ -818,6 +1373,9 @@ export interface components {
         /**
          * IntegrationUpdate
          * @description 至少改一项；改 base_url 或 api_token 后状态回到 pending，需要重新测试连接。
+         *
+         *     api_token 的前缀、base_url / public_url（只用于 Vikunja）与 repositories（只用于 GitHub）
+         *     是否适用于该集成由服务端检查，不适用时返回 422。
          */
         IntegrationUpdate: {
             /** Api Token */
@@ -836,8 +1394,245 @@ export interface components {
              * @description 显式传 null 表示恢复为 base_url
              */
             public_url?: string | null;
+            /**
+             * Repositories
+             * @description 只用于 GitHub：整体替换要同步的仓库
+             */
+            repositories?: string[] | null;
             /** Token Expires At */
             token_expires_at?: string | null;
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
+        };
+        /** IssueOut */
+        IssueOut: {
+            /**
+             * Assignees
+             * @description 登录名
+             */
+            assignees: string[];
+            /**
+             * Author
+             * @description 创建者的登录名
+             */
+            author: string | null;
+            /** Closed At */
+            closed_at: string | null;
+            /** Comments */
+            comments: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * External Id
+             * @description github:<类型>:<GitHub 的数字 id>；只用于显示与排错
+             */
+            external_id: string;
+            /**
+             * Id
+             * Format: uuid
+             * @description 投影 UUID
+             */
+            id: string;
+            /**
+             * Integration Id
+             * Format: uuid
+             */
+            integration_id: string;
+            /** Labels */
+            labels: string[];
+            /** Number */
+            number: number;
+            /** Repo Full Name */
+            repo_full_name: string;
+            /**
+             * Repo Id
+             * Format: uuid
+             * @description 所属仓库的投影 UUID
+             */
+            repo_id: string;
+            /**
+             * Source Updated At
+             * @description GitHub 上最后修改的时间
+             */
+            source_updated_at: string | null;
+            /**
+             * Source Url
+             * @description GitHub 上的地址（html_url）
+             */
+            source_url: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "closed";
+            /**
+             * State Reason
+             * @description completed / reopened / not_planned / duplicate
+             */
+            state_reason: string | null;
+            /**
+             * Synced At
+             * Format: date-time
+             */
+            synced_at: string;
+            /** Title */
+            title: string;
+        };
+        /** IssuePage */
+        IssuePage: {
+            /** Items */
+            items: components["schemas"]["IssueOut"][];
+            /**
+             * Next Cursor
+             * @description 下一页游标；没有更多数据时为 null
+             */
+            next_cursor?: string | null;
+            sync: components["schemas"]["SyncState"];
+            /** Total Estimate */
+            total_estimate?: number | null;
+        };
+        /** KnowledgeResourceOut */
+        KnowledgeResourceOut: {
+            /** Affine Workspace Id */
+            affine_workspace_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Doc Id */
+            doc_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Link Kind
+             * @description workspace_doc：/workspace/<ws>/<doc>；share：/share/<ws>/<doc>
+             * @enum {string}
+             */
+            link_kind: "workspace_doc" | "share";
+            /** Links */
+            links: components["schemas"]["ResourceLinkOut"][];
+            /**
+             * Note
+             * @description 纯文本备注；前端按文本显示
+             */
+            note: string;
+            /**
+             * Owner Id
+             * @description 创建者；用户被删除后为 null
+             */
+            owner_id: string | null;
+            /**
+             * Provider
+             * @constant
+             */
+            provider: "affine";
+            /**
+             * Resource Type
+             * @constant
+             */
+            resource_type: "affine_doc";
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Url
+             * @description 规范化后的链接：来源地址 + 文档路径 + 保留的查询参数
+             */
+            url: string;
+            /** Version */
+            version: number;
+            /**
+             * Visibility
+             * @description workspace：成员都能看到；private：只有创建者能看到
+             * @enum {string}
+             */
+            visibility: "workspace" | "private";
+        };
+        /** KnowledgeSourceCreate */
+        KnowledgeSourceCreate: {
+            /**
+             * Base Url
+             * @description AFFiNE 的 server.externalUrl（可带子路径），与浏览器里打开 AFFiNE 的地址一致
+             */
+            base_url: string;
+            /** Name */
+            name: string;
+            /**
+             * Provider
+             * @constant
+             */
+            provider: "affine";
+        };
+        /** KnowledgeSourceOut */
+        KnowledgeSourceOut: {
+            /**
+             * Base Url
+             * @description AFFiNE 的外部地址；收藏的链接都以它开头
+             */
+            base_url: string;
+            /**
+             * Bookmark Count
+             * @description 该来源下的收藏数（含所有人的私有收藏）
+             */
+            bookmark_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Provider
+             * @constant
+             */
+            provider: "affine";
+            /**
+             * Tested Version
+             * @description 工作台核验过的 AFFiNE 版本
+             */
+            tested_version: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
+        /**
+         * KnowledgeSourceUpdate
+         * @description 修改 base_url 后，该来源下所有收藏的链接都随之改为新地址。
+         */
+        KnowledgeSourceUpdate: {
+            /** Base Url */
+            base_url?: string | null;
+            /** Name */
+            name?: string | null;
             /**
              * Version
              * @description 乐观并发版本号；写请求必须带上读取时的版本
@@ -890,6 +1685,11 @@ export interface components {
              * @description 机器可读的原因，例如 not_configured、timeout、error；不含敏感信息
              */
             reason?: string | null;
+            /**
+             * Retry At
+             * @description 被第三方限流时预计恢复的时间（reason 为 rate_limited）；其余情况为 null
+             */
+            retry_at?: string | null;
             /**
              * Retryable
              * @description 稍后重试是否可能恢复
@@ -958,6 +1758,18 @@ export interface components {
             /** Total Estimate */
             total_estimate?: number | null;
         };
+        /** Page[CalendarEventOut] */
+        Page_CalendarEventOut_: {
+            /** Items */
+            items: components["schemas"]["CalendarEventOut"][];
+            /**
+             * Next Cursor
+             * @description 下一页游标；没有更多数据时为 null
+             */
+            next_cursor?: string | null;
+            /** Total Estimate */
+            total_estimate?: number | null;
+        };
         /** Page[DashboardOut] */
         Page_DashboardOut_: {
             /** Items */
@@ -974,6 +1786,30 @@ export interface components {
         Page_IntegrationOut_: {
             /** Items */
             items: components["schemas"]["IntegrationOut"][];
+            /**
+             * Next Cursor
+             * @description 下一页游标；没有更多数据时为 null
+             */
+            next_cursor?: string | null;
+            /** Total Estimate */
+            total_estimate?: number | null;
+        };
+        /** Page[KnowledgeResourceOut] */
+        Page_KnowledgeResourceOut_: {
+            /** Items */
+            items: components["schemas"]["KnowledgeResourceOut"][];
+            /**
+             * Next Cursor
+             * @description 下一页游标；没有更多数据时为 null
+             */
+            next_cursor?: string | null;
+            /** Total Estimate */
+            total_estimate?: number | null;
+        };
+        /** Page[KnowledgeSourceOut] */
+        Page_KnowledgeSourceOut_: {
+            /** Items */
+            items: components["schemas"]["KnowledgeSourceOut"][];
             /**
              * Next Cursor
              * @description 下一页游标；没有更多数据时为 null
@@ -1079,6 +1915,96 @@ export interface components {
             /** Total Estimate */
             total_estimate?: number | null;
         };
+        /** PullOut */
+        PullOut: {
+            /** Author */
+            author: string | null;
+            /** Base Ref */
+            base_ref: string;
+            /** Closed At */
+            closed_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Draft */
+            draft: boolean;
+            /**
+             * External Id
+             * @description github:<类型>:<GitHub 的数字 id>；只用于显示与排错
+             */
+            external_id: string;
+            /** Head Ref */
+            head_ref: string;
+            /**
+             * Id
+             * Format: uuid
+             * @description 投影 UUID
+             */
+            id: string;
+            /**
+             * Integration Id
+             * Format: uuid
+             */
+            integration_id: string;
+            /** Labels */
+            labels: string[];
+            /** Merged */
+            merged: boolean;
+            /** Merged At */
+            merged_at: string | null;
+            /** Number */
+            number: number;
+            /** Repo Full Name */
+            repo_full_name: string;
+            /**
+             * Repo Id
+             * Format: uuid
+             * @description 所属仓库的投影 UUID
+             */
+            repo_id: string;
+            /**
+             * Requested Reviewers
+             * @description 登录名
+             */
+            requested_reviewers: string[];
+            /**
+             * Source Updated At
+             * @description GitHub 上最后修改的时间
+             */
+            source_updated_at: string | null;
+            /**
+             * Source Url
+             * @description GitHub 上的地址（html_url）
+             */
+            source_url: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "closed";
+            /**
+             * Synced At
+             * Format: date-time
+             */
+            synced_at: string;
+            /** Title */
+            title: string;
+        };
+        /** PullPage */
+        PullPage: {
+            /** Items */
+            items: components["schemas"]["PullOut"][];
+            /**
+             * Next Cursor
+             * @description 下一页游标；没有更多数据时为 null
+             */
+            next_cursor?: string | null;
+            sync: components["schemas"]["SyncState"];
+            /** Total Estimate */
+            total_estimate?: number | null;
+        };
         /** QuickLink */
         QuickLink: {
             /** Title */
@@ -1127,12 +2053,302 @@ export interface components {
              */
             status: "ok" | "unavailable";
         };
+        /** RecentDocsConfig */
+        RecentDocsConfig: {
+            /**
+             * Limit
+             * @default 5
+             */
+            limit: number;
+        };
+        /** RecentDocsWidgetCreate */
+        RecentDocsWidgetCreate: {
+            config?: components["schemas"]["RecentDocsConfig"];
+            layout: components["schemas"]["WidgetLayout"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "recent_docs";
+        };
+        /** RecentDocsWidgetUpdate */
+        RecentDocsWidgetUpdate: {
+            config: components["schemas"]["RecentDocsConfig"];
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "recent_docs";
+        };
+        /** RepoOut */
+        RepoOut: {
+            /**
+             * Access
+             * @description 最近一次同步时 Token 对该仓库的访问情况
+             * @enum {string}
+             */
+            access: "ok" | "missing_permission" | "not_found";
+            /** Archived */
+            archived: boolean;
+            /** Default Branch */
+            default_branch: string;
+            /** Description */
+            description: string | null;
+            /**
+             * External Id
+             * @description github:<类型>:<GitHub 的数字 id>；只用于显示与排错
+             */
+            external_id: string;
+            /** Full Name */
+            full_name: string;
+            /**
+             * Id
+             * Format: uuid
+             * @description 投影 UUID
+             */
+            id: string;
+            /**
+             * Integration Id
+             * Format: uuid
+             */
+            integration_id: string;
+            /** Private */
+            private: boolean;
+            /** Pushed At */
+            pushed_at: string | null;
+            /**
+             * Source Updated At
+             * @description GitHub 上最后修改的时间
+             */
+            source_updated_at: string | null;
+            /**
+             * Source Url
+             * @description GitHub 上的地址（html_url）
+             */
+            source_url: string;
+            /**
+             * Synced At
+             * Format: date-time
+             */
+            synced_at: string;
+        };
+        /** RepoPage */
+        RepoPage: {
+            /** Items */
+            items: components["schemas"]["RepoOut"][];
+            /**
+             * Next Cursor
+             * @description 下一页游标；没有更多数据时为 null
+             */
+            next_cursor?: string | null;
+            sync: components["schemas"]["SyncState"];
+            /** Total Estimate */
+            total_estimate?: number | null;
+        };
+        /**
+         * RepositoryCheck
+         * @description GitHub 集成逐个仓库的读权限检查（Sprint 4 契约第 6.3 节）。
+         */
+        RepositoryCheck: {
+            /** Checks */
+            checks: components["schemas"]["RepositoryPermissionCheck"][];
+            /** Full Name */
+            full_name: string;
+            /** Ok */
+            ok: boolean;
+        };
+        /** RepositoryPermissionCheck */
+        RepositoryPermissionCheck: {
+            /**
+             * Code
+             * @description 未通过时的错误码：missing_permission / not_found 等
+             */
+            code?: string | null;
+            /**
+             * Name
+             * @enum {string}
+             */
+            name: "metadata" | "issues" | "pull_requests" | "actions";
+            /** Ok */
+            ok: boolean;
+        };
+        /**
+         * ResourceLinkOut
+         * @description 关联的项目 / 任务；它在 Vikunja 里删除后不再出现（A10）。
+         */
+        ResourceLinkOut: {
+            /**
+             * Resource Id
+             * Format: uuid
+             * @description 项目或任务的投影 UUID
+             */
+            resource_id: string;
+            /**
+             * Resource Type
+             * @enum {string}
+             */
+            resource_type: "task" | "project";
+            /**
+             * Source Url
+             * @description Vikunja 原生界面中的地址
+             */
+            source_url: string;
+            /** Title */
+            title: string;
+        };
         /**
          * Role
          * @description 权限由高到低：owner > admin > member > viewer。
          * @enum {string}
          */
         Role: "owner" | "admin" | "member" | "viewer";
+        /** RunOut */
+        RunOut: {
+            /**
+             * Actor
+             * @description 触发者的登录名
+             */
+            actor: string | null;
+            /**
+             * Conclusion
+             * @description success / failure / cancelled 等；未结束时为 null
+             */
+            conclusion: string | null;
+            /** Display Title */
+            display_title: string;
+            /** Event */
+            event: string;
+            /**
+             * External Id
+             * @description github:<类型>:<GitHub 的数字 id>；只用于显示与排错
+             */
+            external_id: string;
+            /** @description 失败的运行才有 */
+            failure_summary: components["schemas"]["FailureSummary"] | null;
+            /** Head Branch */
+            head_branch: string | null;
+            /** Head Sha */
+            head_sha: string;
+            /**
+             * Id
+             * Format: uuid
+             * @description 投影 UUID
+             */
+            id: string;
+            /**
+             * Integration Id
+             * Format: uuid
+             */
+            integration_id: string;
+            /** Name */
+            name: string | null;
+            /** Repo Full Name */
+            repo_full_name: string;
+            /**
+             * Repo Id
+             * Format: uuid
+             * @description 所属仓库的投影 UUID
+             */
+            repo_id: string;
+            /** Run Attempt */
+            run_attempt: number;
+            /** Run Number */
+            run_number: number;
+            /** Run Started At */
+            run_started_at: string | null;
+            /**
+             * Source Updated At
+             * @description GitHub 上最后修改的时间
+             */
+            source_updated_at: string | null;
+            /**
+             * Source Url
+             * @description GitHub 上的地址（html_url）
+             */
+            source_url: string;
+            /**
+             * Status
+             * @description queued / in_progress / completed 等
+             */
+            status: string | null;
+            /**
+             * Synced At
+             * Format: date-time
+             */
+            synced_at: string;
+        };
+        /** RunPage */
+        RunPage: {
+            /** Items */
+            items: components["schemas"]["RunOut"][];
+            /**
+             * Next Cursor
+             * @description 下一页游标；没有更多数据时为 null
+             */
+            next_cursor?: string | null;
+            sync: components["schemas"]["SyncState"];
+            /** Total Estimate */
+            total_estimate?: number | null;
+        };
+        /**
+         * SearchPage
+         * @description total_estimate 恒为 null。
+         */
+        SearchPage: {
+            /** Items */
+            items: components["schemas"]["SearchResultOut"][];
+            /**
+             * Next Cursor
+             * @description 下一页游标；没有更多数据时为 null
+             */
+            next_cursor?: string | null;
+            /** Total Estimate */
+            total_estimate?: number | null;
+        };
+        /** SearchResultOut */
+        SearchResultOut: {
+            /**
+             * Context
+             * @description 辅助信息：任务的项目名、Issue / PR 的仓库名、事件的日期等
+             */
+            context: string | null;
+            /**
+             * Id
+             * Format: uuid
+             * @description 该资源在自己接口里的 UUID
+             */
+            id: string;
+            /**
+             * Match
+             * @description title：标题命中；text：只在备注、说明等正文命中
+             * @enum {string}
+             */
+            match: "title" | "text";
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "vikunja" | "github" | "affine" | "local";
+            /**
+             * Resource Type
+             * @enum {string}
+             */
+            resource_type: "task" | "project" | "bookmark" | "event" | "repo" | "issue" | "pull";
+            /**
+             * Source Url
+             * @description 外部原生界面的链接；本地日历事件为 null
+             */
+            source_url: string | null;
+            /** Title */
+            title: string;
+            /** Updated At */
+            updated_at: string | null;
+        };
         /** SessionOut */
         SessionOut: {
             /**
@@ -1222,6 +2438,11 @@ export interface components {
              * @description 机器可读的原因，例如 not_synced；不含敏感信息
              */
             reason?: string | null;
+            /**
+             * Retry At
+             * @description 被第三方限流时预计恢复的时间（reason 为 rate_limited）；其余情况为 null
+             */
+            retry_at?: string | null;
             /**
              * Status
              * @enum {string}
@@ -1512,7 +2733,7 @@ export interface components {
             version: number;
             /**
              * Widget Type
-             * @description 当前版本内置：quick_links、note、todo_summary、today_tasks；也可能是已不再支持的旧类型，前端应显示安全的错误卡片
+             * @description 当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity；也可能是已不再支持的旧类型，前端应显示安全的错误卡片
              */
             widget_type: string;
         };
@@ -1901,6 +3122,285 @@ export interface operations {
             };
         };
     };
+    list_events: {
+        parameters: {
+            query: {
+                start: string;
+                end: string;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_CalendarEventOut_"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_event: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarEventCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarEventOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_event: {
+        parameters: {
+            query: {
+                /** @description 乐观并发版本号；写请求必须带上读取时的版本 */
+                version: number;
+            };
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_event: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarEventUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarEventOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_dashboard_overview: {
         parameters: {
             query?: never;
@@ -2219,7 +3719,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"];
+                "application/json": components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"];
             };
         };
         responses: {
@@ -2261,6 +3761,234 @@ export interface operations {
             };
             /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_issues: {
+        parameters: {
+            query?: {
+                repo_id?: string | null;
+                state?: "open" | "closed" | "all";
+                /** @description 标题包含 */
+                q?: string | null;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuePage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_pulls: {
+        parameters: {
+            query?: {
+                repo_id?: string | null;
+                state?: "open" | "closed" | "all";
+                /** @description 标题包含 */
+                q?: string | null;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PullPage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_repos: {
+        parameters: {
+            query?: {
+                integration_id?: string | null;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoPage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_runs: {
+        parameters: {
+            query?: {
+                repo_id?: string | null;
+                status?: ("completed" | "action_required" | "cancelled" | "failure" | "neutral" | "skipped" | "stale" | "success" | "timed_out" | "in_progress" | "queued" | "requested" | "waiting" | "pending") | null;
+                conclusion?: ("success" | "failure" | "neutral" | "cancelled" | "skipped" | "timed_out" | "action_required") | null;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunPage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2343,7 +4071,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["IntegrationCreate"];
+                "application/json": components["schemas"]["IntegrationCreate"] | components["schemas"]["GitHubIntegrationCreate"];
             };
         };
         responses: {
@@ -2623,6 +4351,561 @@ export interface operations {
             };
         };
     };
+    create_bookmark: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookmarkCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeResourceOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_bookmark: {
+        parameters: {
+            query: {
+                /** @description 乐观并发版本号；写请求必须带上读取时的版本 */
+                version: number;
+            };
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bookmark_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_bookmark: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bookmark_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookmarkUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeResourceOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_resources: {
+        parameters: {
+            query?: {
+                source_id?: string | null;
+                linked_resource_id?: string | null;
+                visibility?: "workspace" | "private" | "all";
+                q?: string | null;
+                sort?: "updated" | "title";
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_KnowledgeResourceOut_"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_sources: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_KnowledgeSourceOut_"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_source: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeSourceCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSourceOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_source: {
+        parameters: {
+            query: {
+                /** @description 乐观并发版本号；写请求必须带上读取时的版本 */
+                version: number;
+            };
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_source: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeSourceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSourceOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_me: {
         parameters: {
             query?: never;
@@ -2741,6 +5024,63 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectPage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    search: {
+        parameters: {
+            query: {
+                /** @description 去掉首尾空白后 1–100 字 */
+                q: string;
+                /** @description 可重复；默认全部类型 */
+                types?: ("task" | "project" | "bookmark" | "event" | "repo" | "issue" | "pull")[] | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchPage"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -3428,7 +5768,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QuickLinksWidgetUpdate"] | components["schemas"]["NoteWidgetUpdate"] | components["schemas"]["TodoSummaryWidgetUpdate"] | components["schemas"]["TodayTasksWidgetUpdate"];
+                "application/json": components["schemas"]["QuickLinksWidgetUpdate"] | components["schemas"]["NoteWidgetUpdate"] | components["schemas"]["TodoSummaryWidgetUpdate"] | components["schemas"]["TodayTasksWidgetUpdate"] | components["schemas"]["CalendarAgendaWidgetUpdate"] | components["schemas"]["RecentDocsWidgetUpdate"] | components["schemas"]["GitHubActivityWidgetUpdate"];
             };
         };
         responses: {
