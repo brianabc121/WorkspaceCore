@@ -5,7 +5,7 @@ this is a personal workspace
 My Workspace：自托管的混合型个人工作台（统一首页、任务、文档入口、日历、GitHub、运维、通知、搜索、自动化、AI 辅助）。
 设计与范围见 [`docs/DEVELOPMENT_SPEC.md`](docs/DEVELOPMENT_SPEC.md)。
 
-> 当前进度：Sprint 0（工程骨架）已完成，验收记录见 [`docs/acceptance/sprint-0.md`](docs/acceptance/sprint-0.md)；Sprint 1（认证、工作空间、设置、审计）进行中。
+> 当前进度：Sprint 0（工程骨架）、Sprint 1（认证、工作空间、设置、审计）已完成，验收记录见 [`docs/acceptance/sprint-0.md`](docs/acceptance/sprint-0.md)、[`docs/acceptance/sprint-1.md`](docs/acceptance/sprint-1.md)；进入 Sprint 2 待批准。
 
 ## 快速开始
 
