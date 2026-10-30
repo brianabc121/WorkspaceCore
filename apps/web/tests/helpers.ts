@@ -6,6 +6,7 @@ import { vi } from 'vitest'
 import App from '../src/App.vue'
 import { createAppRouter } from '../src/app/router'
 import type { Schema } from '../src/services/api'
+import { overview } from './dashboard-fixtures'
 
 export const workspace: Schema['WorkspaceOut'] = { id: 'workspace-a', name: '个人空间', role: 'owner', created_at: '2026-10-30T00:00:00Z', updated_at: '2026-10-30T00:00:00Z' }
 export const me: Schema['MeResponse'] = { user: { id: 'user-a', email: 'test@example.com', display_name: '测试用户', created_at: '2026-10-30T00:00:00Z' }, workspaces: [workspace] }
@@ -23,6 +24,7 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (path === '/api/v1/me' && request.method === 'GET') return Response.json(me)
     if (path === '/api/v1/auth/sessions') return Response.json({ ...emptyPage, items: [session] })
     if (path === '/api/v1/audit-logs') return Response.json(emptyPage)
+    if (path === '/api/v1/dashboard/overview') return Response.json(overview)
     throw new Error(`Unexpected request: ${request.method} ${path}`)
   })
   return requests

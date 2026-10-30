@@ -1,6 +1,6 @@
 # My Workspace Web
 
-Sprint 1 / T-0012：Vue 3、TypeScript、Vite、Vue Router、Pinia、TanStack Vue Query、Tailwind CSS。
+Sprint 2 / T-0016（包含 Sprint 1 的认证与安全功能）：Vue 3、TypeScript、Vite、Vue Router、Pinia、TanStack Vue Query、Tailwind CSS。
 
 在本目录使用 Node.js 22（`.nvmrc` 为 22.23.4）和 npm：
 
@@ -31,6 +31,39 @@ npm run build
 
 新增依赖固定为 openapi-typescript 7.13.0、openapi-fetch 0.17.0、vee-validate / @vee-validate/zod 4.15.1、Zod 3.25.76（对应适配器的 Zod 3 版本）。来源：[OpenAPI TypeScript](https://openapi-ts.dev/introduction)、[OpenAPI Fetch](https://openapi-ts.dev/openapi-fetch/)、[Vee Validate Zod](https://vee-validate.logaretm.com/v4/integrations/zod-schema-validation/)。锁文件固定传递依赖。
 
-其他业务页面仍明确标注为规划中，不提供任务、搜索或外部服务连接。主题优先读取本地偏好，再读取系统偏好；仅将主题写入 localStorage，存储不可用时可继续使用。小屏通过顶栏按钮展开导航，跳转后收起。
+任务、项目与外部服务等其他业务页面仍明确标注为规划中，不提供任务、搜索或外部服务连接。主题优先读取本地偏好，再读取系统偏好；仅将主题写入 localStorage，存储不可用时可继续使用。小屏通过顶栏按钮展开导航，跳转后收起。
 
 验证说明见 `VALIDATION.md`；基础栈选择见 `../../docs/decisions/2026-10-30-frontend-stack.md`，接口约定见 `../../docs/decisions/2026-10-30-sprint-1-auth-contract.md`。
+
+
+## Sprint 2 仪表盘
+
+首页通过一次 `/api/v1/dashboard/overview` 获取默认仪表盘、组件与模块状态。常用链接和纯文本便签独立可用；待办汇总与今日任务在尚未接入任务服务时显示 unavailable，不用 0 或“今天暂无任务”冒充正常数据。未知类型或非法配置只显示错误卡片，不显示原始配置。
+
+- member / admin / owner 可编辑布局：拖动卡片标题、拖动右下角改变大小，或展开“键盘调整布局”填写桌面位置/尺寸与移动端顺序/高度；保存会提交所有组件和读取时的版本。
+- viewer 只读。移动端单列，按 mobile.y 排序；桌面拖动只修改 desktop，不覆盖 mobile 排序。
+- 409 冲突停止编辑写入，需要成功“重新加载最新版本”后才能继续。网络中断的写入提示结果未知；写入成功但后续读取失败时，明确提示操作已完成，并锁定写入以免重复创建。
+- 可添加/配置/确认删除四种组件：note、quick_links、todo_summary、today_tasks。配置编辑器使用对应 JSON schema 校验，便签不解析 HTML，链接仅允许无用户名/密码的 http(s) 地址。
+- 导出 JSON 不含 ID、版本和时间；导入先严格校验格式与配置，再一次性创建新仪表盘，不覆盖当前首页。导入后可“设为首页”；也可按需加载并选择工作空间里的仪表盘。设置页提供导入/导出入口。
+- `Ctrl/Cmd+K` 打开本地搜索，输入后筛选页面导航与当前已加载首页的组件；不调用尚未提供的外部搜索接口。“创建”和“通知”为明确的禁用占位入口。
+
+GridStack 固定 **14.0.0**（无新增传递运行依赖）。已核验 npm registry 的该版本与包内 `GridStack.init / load / setStatic / change` 类型及实现，使用 12 列、float 模式；DOM 与组件内容由 Vue 管理，不向 GridStack 传入 HTML 配置内容。来源：[npm 14.0.0](https://www.npmjs.com/package/gridstack/v/14.0.0)、[官方文档](https://gridstackjs.com/)、[源码](https://github.com/gridstack/gridstack.js)。按任务路径限制，核验记录放在本文件；需要汇入项目 ADR 时由 Claude 在其文档任务中补录。遵守 D-0005，本任务不改生成类型文件。
+
+### 浏览器冒烟（API mock）
+
+使用已有的 `tests/e2e` Playwright 锁文件安装依赖；不需要真实后端。先在本目录 `npm run dev`，另一个终端：
+
+```sh
+# 仓库根目录
+npm ci --prefix tests/e2e
+# 默认使用 Playwright 下载的 Chromium；首次安装可运行：
+npm run browser:install --prefix tests/e2e
+cd apps/web
+npm run test:browser
+# 或使用环境已有浏览器：
+CHROMIUM_PATH=/usr/bin/chromium npm run test:browser
+```
+
+可用 `WEB_BASE_URL` 指定 Vite 地址，默认 `http://127.0.0.1:5173`。脚本实际执行鼠标拖拽、缩放、带版本的完整布局保存、刷新后读回、CSRF/工作空间头、快捷搜索、移动单列和暗色主题，截图写入 `docs/screenshots/`。这是模拟 API 的前端冒烟；Compose 全栈与 CI 浏览器 E2E 由 Claude 的 T-0017 负责。
+
+截图：[桌面](docs/screenshots/sprint2-desktop.png)、[移动暗色](docs/screenshots/sprint2-mobile-dark.png)。

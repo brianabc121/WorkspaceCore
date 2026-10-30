@@ -1,0 +1,45 @@
+const { chromium } = require('../../../tests/e2e/node_modules/playwright');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const fs = require('node:fs');
+const baseUrl = process.env.WEB_BASE_URL || 'http://127.0.0.1:5173';
+const screenshots = path.resolve(__dirname, '../docs/screenshots');
+fs.mkdirSync(screenshots, {recursive:true});
+(async () => {
+ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, headless: true, args: ['--no-sandbox'] });
+ const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+ const page = await context.newPage(); const errors=[];page.on('pageerror', e => errors.push(e.message));
+ const time='2026-10-30T00:00:00Z'; const dashboard={id:'22222222-2222-4222-8222-222222222222',title:'我的首页',version:1,is_default:true,owner_id:'user-a',created_at:time,updated_at:time};
+ let widgets=[{id:'11111111-1111-4111-8111-111111111111',dashboard_id:dashboard.id,widget_type:'note',config:{text:'今天，先完成最重要的一件事。\n\n把常用工具与待办放在眼前，让工作保持清晰。'},layout:{desktop:{x:0,y:0,w:6,h:3},mobile:{y:0,h:3}},version:1,created_at:time,updated_at:time}, {id:'33333333-3333-4333-8333-333333333333',dashboard_id:dashboard.id,widget_type:'quick_links',config:{links:[{title:'项目文档',url:'https://example.com/docs'},{title:'代码仓库',url:'https://github.com/brianabc121/WorkspaceCore'}]},layout:{desktop:{x:6,y:0,w:6,h:3},mobile:{y:3,h:3}},version:1,created_at:time,updated_at:time}, {id:'44444444-4444-4444-8444-444444444444',dashboard_id:dashboard.id,widget_type:'todo_summary',config:{},layout:{desktop:{x:0,y:3,w:4,h:3},mobile:{y:6,h:3}},version:1,created_at:time,updated_at:time}, {id:'55555555-5555-4555-8555-555555555555',dashboard_id:dashboard.id,widget_type:'today_tasks',config:{limit:5},layout:{desktop:{x:4,y:3,w:8,h:3},mobile:{y:9,h:3}},version:1,created_at:time,updated_at:time}];
+ let writes=[];
+ await page.route('**/api/v1/**',async route=> {
+  const req=route.request(),path=new URL(req.url()).pathname;let body,status=200;
+  if(path==='/api/v1/setup/status')body={setup_required:false};
+  else if(path==='/api/v1/me')body={user:{id:'user-a',display_name:'演示用户',email:'test@example.com',created_at:time},workspaces:[{id:'workspace-a',name:'个人工作空间',role:'owner',created_at:time,updated_at:time}]};
+  else if(path==='/api/v1/dashboard/overview')body={dashboard,widgets,summary:{pending_tasks:null,active_projects:null,unread_notifications:null},modules:{tasks:{status:'unavailable',reason:'not_configured',as_of:null,retryable:false}},today_tasks:[],generated_at:time};
+  else if(path==='/api/v1/dashboards/'+dashboard.id&&req.method()==='PATCH') {const write=req.postDataJSON();assert.equal(req.headers()['x-workspace-id'],'workspace-a');assert.equal(req.headers()['x-csrf-token'],'browser-csrf');assert.equal(write.version,dashboard.version);assert.equal(write.layout.length,widgets.length);writes.push(write); widgets=widgets.map(w=>({...w,layout:write.layout.find(p=>p.widget_id===w.id).layout}));dashboard.version++;body=dashboard;}
+  else throw new Error(`Unexpected ${req.method()} ${path}`);
+  await route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
+ });
+ await context.addCookies([{name:'ws_csrf',value:'browser-csrf',url:baseUrl}]);
+ await page.goto(baseUrl + '/'); await page.getByText('今天，先完成最重要的一件事。',{exact:false}).waitFor();
+ await page.screenshot({path:path.join(screenshots,'sprint2-desktop.png'),fullPage:true});
+ await page.getByRole('button',{name:'编辑布局',exact:true}).click();
+ const item=page.locator('.grid-stack-item[gs-id="11111111-1111-4111-8111-111111111111"]');const before=await item.getAttribute('gs-y');
+ const handle=await item.locator('.widget-handle').boundingBox();
+ await page.mouse.move(handle.x+30,handle.y+12);await page.mouse.down();await page.mouse.move(handle.x+30,handle.y+440,{steps:20});await page.mouse.up();
+ assert.notEqual(await item.getAttribute('gs-y'),before,'real pointer drag must move the widget');
+ await item.locator('.ui-resizable-se').scrollIntoViewIfNeeded(); const resize=await item.locator('.ui-resizable-se').boundingBox();assert(resize,'resize handle exists');
+ const widthBefore=await item.getAttribute('gs-w');const heightBefore=await item.getAttribute('gs-h');
+ await page.mouse.move(resize.x+resize.width/2,resize.y+resize.height/2);await page.mouse.down();await page.mouse.move(resize.x-85,resize.y-80,{steps:12});await page.mouse.up();
+ assert(await item.getAttribute('gs-w')!==widthBefore || await item.getAttribute('gs-h')!==heightBefore,'real pointer resize must change size');
+ await page.getByRole('button',{name:'保存布局',exact:true}).click();await page.getByText('布局已保存',{exact:true}).waitFor();assert.equal(writes.length,1);
+ const saved=JSON.stringify(widgets.map(w=>w.layout));await page.reload();await page.getByText('版本 2',{exact:true}).waitFor();assert.equal(JSON.stringify(widgets.map(w=>w.layout)),saved);
+ await page.getByRole('button',{name:'编辑布局',exact:true}).click();await item.getByText('键盘调整布局',{exact:true}).click();
+ assert.equal(await item.getByLabel('桌面宽度',{exact:true}).inputValue(),String(widgets[0].layout.desktop.w));await page.getByRole('button',{name:'取消编辑',exact:true}).click();
+ await page.keyboard.press('Control+k');await page.getByRole('dialog',{name:'搜索当前工作空间'}).waitFor();await page.getByLabel('搜索页面与组件').fill('便签');await page.getByRole('button',{name:/文本便签/}).waitFor();await page.keyboard.press('Escape');
+ await page.getByRole('button',{name:'切换到暗色主题'}).click();await page.setViewportSize({width:390,height:844});await page.getByRole('article',{name:'文本便签'}).waitFor();
+ assert.equal(await page.locator('.mobile-widget-grid > article').count(),4);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth > innerWidth),false);
+ await page.screenshot({path:path.join(screenshots,'sprint2-mobile-dark.png'),fullPage:true});assert.deepEqual(errors,[]);
+ console.log('PASS: Chromium real drag + resize → versioned full-layout save → reload persisted; CSRF/workspace headers; Ctrl+K; mobile single-column/dark theme; no page errors/overflow.');await browser.close();
+})().catch(e=>{console.error(e);process.exit(1)});

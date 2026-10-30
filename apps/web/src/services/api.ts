@@ -37,6 +37,10 @@ export function errorMessage(error: unknown): string {
     HTTP_ERROR: '服务暂时不可用，请稍后重试。',
     INVALID_RESPONSE: '服务响应异常，请刷新重试。',
     STALE_SESSION: '登录状态已变化，请刷新页面后重试。',
+    VERSION_CONFLICT: '已被其他人修改，请重新加载最新版本后再操作。',
+    LIMIT_EXCEEDED: '已达到仪表盘或组件数量上限。',
+    IMPORT_INVALID: '格式或组件配置不符合契约，请检查 JSON 后重试。',
+    REFRESH_REQUIRED: '操作已完成，但刷新失败。请重新加载最新版本，不要重复提交。',
   }
   if (error.status === 429) return error.retryAfter === null ? '请求过于频繁，请稍后重试。' : `请求过于频繁，请在 ${error.retryAfter} 秒后重试。`
   return messages[error.code] ?? '请求失败，请稍后重试。'
@@ -91,7 +95,7 @@ export function createApi(options: { workspaceId?: () => string | null; sessionV
         if (token) request.headers.set('X-CSRF-Token', token)
       }
       const path = new URL(request.url).pathname
-      if (path === '/api/v1/audit-logs' || path.startsWith('/api/v1/workspaces/')) {
+      if (path === '/api/v1/audit-logs' || /^\/api\/v1\/(workspaces\/|dashboard(?:\/|$)|dashboards(?:\/|$)|widgets\/)/.test(path)) {
         const workspaceId = options.workspaceId?.()
         if (workspaceId && !request.headers.has('X-Workspace-Id')) request.headers.set('X-Workspace-Id', workspaceId)
       }

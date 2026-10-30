@@ -13,11 +13,13 @@
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
     "generate:api": "openapi-typescript ../../services/api/openapi.json -o src/services/schema.d.ts",
-    "check:api": "npm run generate:api && git diff --exit-code -- src/services/schema.d.ts"
+    "check:api": "npm run generate:api && git diff --exit-code -- src/services/schema.d.ts",
+    "test:browser": "node tests/browser-dashboard.cjs"
   },
   "dependencies": {
     "@tanstack/vue-query": "5.105.0",
     "@vee-validate/zod": "4.15.1",
+    "gridstack": "14.0.0",
     "openapi-fetch": "0.17.0",
     "pinia": "3.0.4",
     "vee-validate": "4.15.1",

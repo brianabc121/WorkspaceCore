@@ -13,6 +13,7 @@ const auth = useAuthStore()
       <section v-else class="panel form-panel"><h2>工作空间</h2><p>你尚未加入任何工作空间，请联系管理员。</p></section>
     </div>
     <RouterLink class="primary-link" to="/settings/security">管理密码与会话 →</RouterLink>
+    <RouterLink class="primary-link" to="/#dashboard-tools">导入 / 导出仪表盘布局 →</RouterLink>
   </template>
   <p v-else role="alert">请先登录以查看设置。</p>
 </template>

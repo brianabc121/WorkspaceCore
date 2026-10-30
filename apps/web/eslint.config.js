@@ -13,5 +13,6 @@ export default ts.config(
     languageOptions: { globals: globals.browser, parserOptions: { parser: ts.parser } },
     rules: { 'vue/multi-word-component-names': 'off', 'vue/max-attributes-per-line': 'off', 'vue/singleline-html-element-content-newline': 'off', 'vue/html-self-closing': 'off' },
   },
-  { files: ['*.config.{js,ts}', 'tests/**/*.ts'], languageOptions: { globals: globals.node } },
+  { files: ['*.config.{js,ts}', 'tests/**/*.{ts,cjs}'], languageOptions: { globals: globals.node } },
+  { files: ['tests/**/*.cjs'], languageOptions: { globals: globals.browser }, rules: { '@typescript-eslint/no-require-imports': 'off' } },
 )

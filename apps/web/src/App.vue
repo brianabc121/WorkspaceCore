@@ -5,6 +5,7 @@ import { navigation } from './app/navigation'
 import { useThemeStore } from './stores/theme'
 import { useAuthStore } from './stores/auth'
 import { errorMessage } from './services/api'
+import HeaderSearch from './components/HeaderSearch.vue'
 
 const route = useRoute()
 const theme = useThemeStore()
@@ -59,6 +60,7 @@ watch(pageTitle, (title) => { document.title = `${title} · My Workspace` }, { i
           <span class="breadcrumb">工作空间 <span aria-hidden="true">/</span> <strong>{{ pageTitle }}</strong></span>
         </div>
         <div class="topbar-actions">
+          <template v-if="auth.user"><HeaderSearch /><button class="theme-button" disabled title="创建入口将在后续阶段开放">创建 · 即将开放</button><button class="theme-button" disabled title="通知入口将在后续阶段开放">通知 · 即将开放</button></template>
           <select v-if="auth.workspaces.length > 1" aria-label="当前工作空间" :value="auth.workspaceId" @change="auth.selectWorkspace(($event.target as HTMLSelectElement).value)"><option v-for="workspace in auth.workspaces" :key="workspace.id" :value="workspace.id">{{ workspace.name }}</option></select>
           <span v-else-if="auth.currentWorkspace" class="user-label">{{ auth.currentWorkspace.name }}</span>
           <span v-if="auth.user" class="user-label">{{ auth.user.display_name }}</span>
@@ -67,7 +69,7 @@ watch(pageTitle, (title) => { document.title = `${title} · My Workspace` }, { i
         </div>
       </header>
       <main id="main-content" tabindex="-1">
-        <p v-if="auth.user" class="eyebrow">Sprint 1 · 用户与安全</p>
+        <p v-if="auth.user" class="eyebrow">Sprint 2 · 个人仪表盘</p>
         <p v-if="logoutError" role="alert" class="feedback">{{ logoutError }}</p>
         <p v-if="auth.loading" role="status">正在连接工作空间…</p>
         <RouterView v-else />

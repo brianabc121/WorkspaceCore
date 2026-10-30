@@ -1,3 +1,19 @@
+# T-0016 验证记录
+
+日期：2026-10-30（Asia/Shanghai）。目标：Sprint 2 / S2-02 ~ S2-05 前端。
+
+- 分支从 origin/main fc11f8e 创建；Node v22.23.4，npm ci；实现前 Sprint 1 的 50 项测试通过。
+- 新增 GridStack14.0.0；版本与官方来源、API、设计选择记录在 README。未修改 services、docs/TASKS、Claude 的 T-0017 路径或 schema.d.ts。
+- Registry 契约测试先于模块实现；首页初次 7 项测试在旧占位页全部失败，实现后通过。包含未知类型/__proto__/constructor、越界布局、严格配置、非法链接、无 ID 导出与新建导入。
+- 独立代码审查发现两项 P2，已按失败→修复→通过验证：创建组件成功但随后的 GET 失败导致重复创建；冲突后重载 GET 失败解除编辑锁。另补测导出/关闭对话框不绕过冲突锁、搜索输入自动聚焦、旧空间晚到写响应与搜索隔离。
+- Vitest：82 项测试（8 个文件）；包括原 50 项回归、四种卡片的独立状态、局部失败、401/403/429、CSRF、版本冲突、导入/导出、键盘编辑与空间隔离。
+- Chromium 真实鼠标（API mock）：拖拽与调整大小 → 提交全组件布局/版本 → 刷新布局保留；请求携带 CSRF 与空间头；Ctrl+K 搜索；390px 单列暗色，无 page error / 横向溢出。脚本 `tests/browser-dashboard.cjs`，截图 `docs/screenshots/`。
+- lint / typecheck / test / build / check:api 在 Node22 下执行，最终实际输出写入 PR。
+
+没有后端或数据库迁移。浏览器冒烟使用 mock，真实 Compose/后端、浏览器 E2E 纳入 CI 与 Sprint 2 总体验收归 T-0017，本任务不宣称这些已完成。安装仍有既有 whatwg-encoding / ESLint9 弃用提示；没有新增对应兼容性变更。
+
+---
+
 # T-0012 验证记录
 
 日期：2026-10-30（Asia/Shanghai）。目标：Sprint 1 前端，S1-02 / S1-03 / S1-04 / S1-05 的界面部分。
