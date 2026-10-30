@@ -79,6 +79,10 @@ services:
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       # Connector 默认拒绝私有地址（SSRF 防护）；这里显式允许 integrations 网络里的 Vikunja 容器
       INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-vikunja}
+      # GitHub REST API 的地址；只有 CI 验收会改成模拟服务（Sprint 4 契约第 6.1 节）。
+      # .env 里用 WORKSPACE_GITHUB_API_URL：GitHub Actions 会在 shell 里设置 GITHUB_API_URL，
+      # 而 Compose 插值时 shell 变量优先于 .env
+      GITHUB_API_URL: ${WORKSPACE_GITHUB_API_URL:-https://api.github.com}
       # API 只能经 Caddy 访问，取 X-Forwarded-For 最右侧的地址作为客户端 IP（登录限流用）
       TRUST_FORWARDED_FOR: "true"
     depends_on:
@@ -109,6 +113,7 @@ services:
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-http://caddy:8080}
       # 周期对账的间隔（分钟，1–30）
       RECONCILE_INTERVAL_MINUTES: ${RECONCILE_INTERVAL_MINUTES:-5}
+      GITHUB_API_URL: ${WORKSPACE_GITHUB_API_URL:-https://api.github.com}
     depends_on:
       postgres:
         condition: service_healthy
@@ -120,8 +125,9 @@ services:
       timeout: 10s
       retries: 5
       start_period: 15s
-    # Worker 经 integrations 访问同机部署的第三方服务；连接外部托管的服务需要出网时再接入 frontend 网络
-    networks: [backend, integrations]
+    # Worker 经 integrations 访问同机部署的第三方服务，经 egress 访问外部托管的服务（GitHub 周期同步）；
+    # 出站地址仍由 Connector 的 SSRF 检查限制
+    networks: [backend, integrations, egress]
     logging: *logging
 
   web:
@@ -172,6 +178,8 @@ networks:
   # 第三方服务碰不到 backend 里的 PostgreSQL / Redis；internal 表示这个网络本身不提供出网
   integrations:
     internal: true
+  # 只给 worker 出网用（api 经 frontend 出网）；不接任何别的服务
+  egress: {}
 
 volumes:
   postgres-data:

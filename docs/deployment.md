@@ -49,13 +49,15 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | caddy | `caddy:2.11.7-alpine` | 统一入口：路由、安全响应头、请求体限制 | frontend + integrations | `127.0.0.1:8080`（可配置） |
 | web | `my-workspace-web:local`（`apps/web/Dockerfile`） | 前端静态文件（nginx，非 root） | frontend | 无 |
 | api | `my-workspace-api:local`（`services/api/Dockerfile`） | FastAPI BFF（非 root） | backend + frontend + integrations | 无 |
-| worker | 同 api 镜像 | ARQ 后台作业 | backend + integrations | 无 |
+| worker | 同 api 镜像 | ARQ 后台作业 | backend + integrations + egress | 无 |
 | postgres | `postgres:16.15-alpine3.24` | 数据库 | backend | 无 |
 | redis | `redis:7.4.12-alpine3.21` | 缓存 / 作业队列 | backend | 无 |
 
 - `backend` 是内部网络（不通外网）；数据库和 Redis 只在这个网络里，宿主机和外网都连不到。
 - `integrations` 也是内部网络，只有 caddy、api、worker 加入，供独立部署的第三方服务（Vikunja 等，见第 8 节）与工作台互通；
   第三方服务碰不到 backend 里的数据库和 Redis。
+- `egress` 只有 worker 加入，用来访问外部托管的服务（GitHub 的周期同步要访问 `https://api.github.com`）；
+  api 经 `frontend` 出网。出站地址仍由 Connector 的 SSRF 检查限制（私有地址只允许 `INTEGRATION_ALLOWED_HOSTS` 里的主机）。
 - api、worker、web 以只读文件系统运行，去掉全部 Linux capabilities，禁止提权。
 - Caddy 路由：`/api/*`、`/healthz` → api；`/readyz` 只接受内网来源（公网返回 404）；其余 → web。
 
@@ -237,7 +239,9 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
   - 增量同步时，三个列表的第一页都带 `ETag`，没有变化时返回 304，不消耗额度。
   - 从集成里移除的仓库，以及 GitHub 上删除的 Issue / PR，会在全量同步后从工作台消失。
 - 被限流时记下恢复时间，期间不再请求 GitHub；Token 失效后集成变为 `unauthorized`，不再自动同步，更换 Token 并重新测试后恢复。
-- 测试与 CI 验收可以用 `GITHUB_API_URL` 把地址改成模拟服务（同时把它的主机名加进 `INTEGRATION_ALLOWED_HOSTS`）；生产环境不要设置。
+- 测试与 CI 验收可以在 `.env` 里用 `WORKSPACE_GITHUB_API_URL` 把地址改成模拟服务（Compose 把它作为
+  `GITHUB_API_URL` 传给 api 与 worker；同时把模拟服务的主机名加进 `INTEGRATION_ALLOWED_HOSTS`）；生产环境不要设置。
+  `.env` 里不用 `GITHUB_API_URL` 这个名字：GitHub Actions 等环境会在 shell 里设置它，而 Compose 插值时 shell 变量优先于 `.env`。
 
 ## 11. 跨资源搜索
 

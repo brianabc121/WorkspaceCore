@@ -27,7 +27,10 @@ def _ts(offset_minutes: int = 0) -> str:
 
 
 class FakeGitHub:
-    def __init__(self) -> None:
+    """base：分页与重定向链接里用的地址（CI 验收里是 http://fake-github:8080）。"""
+
+    def __init__(self, base: str = BASE) -> None:
+        self.base = base.rstrip("/")
         self.repos: dict[str, dict[str, Any]] = {}
         self.issues: dict[str, list[dict[str, Any]]] = {}
         self.pulls: dict[str, list[dict[str, Any]]] = {}
@@ -221,7 +224,7 @@ class FakeGitHub:
         if full_name in self.renamed:
             target = self.renamed[full_name]
             tail = "/".join(parts[3:])
-            location = f"{BASE}/repos/{target}" + (f"/{tail}" if tail else "")
+            location = f"{self.base}/repos/{target}" + (f"/{tail}" if tail else "")
             if request.url.query:
                 location += "?" + request.url.query.decode()
             return 301, {"headers": {"location": location}}
@@ -258,7 +261,7 @@ class FakeGitHub:
             return chunk
         query = {k: v[0] for k, v in params.items()}
         query["page"] = str(page + 1)
-        link = f'<{BASE}{request.url.path}?{urlencode(query)}>; rel="next"'
+        link = f'<{self.base}{request.url.path}?{urlencode(query)}>; rel="next"'
         return {"_link": link, "items": chunk}
 
 
