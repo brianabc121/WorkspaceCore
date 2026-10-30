@@ -1,0 +1,79 @@
+# Vikunja（任务主源）的独立 Compose（docs/DEVELOPMENT_SPEC.md 第 11 节：Vikunja 单独安装，经受控网络与工作台连通）。
+# 版本核验与安全取舍见 docs/decisions/2026-10-30-vikunja-2.7.1-verification.md；用法见 docs/deployment.md 第 8 节。
+#
+#   make vikunja-up      启动（需要先 make up：加入 core 的 integrations 网络）
+#   make vikunja-user    创建 Vikunja 用户（注册已关闭）
+#   make vikunja-down    停止（保留数据卷）
+#
+# 网络：只加入自己的默认网络（原生界面端口、出网）和 core 的 integrations 网络（与 api / worker / caddy 互通），
+# 不加入 core 的 backend 网络，碰不到工作台的 PostgreSQL / Redis。
+
+name: my-workspace-vikunja
+
+services:
+  # 数据卷第一次创建时属于 root，而 Vikunja 以 uid 1000 运行；这里只负责改一次属主
+  volume-init:
+    image: postgres:16.15-alpine3.24
+    entrypoint: ["chown", "-R", "1000:1000", "/db", "/files"]
+    volumes:
+      - vikunja-db:/db
+      - vikunja-files:/files
+    network_mode: none
+    restart: "no"
+
+  vikunja:
+    # 锁定 release 与 digest（规范第 2 节：生产禁止浮动标签）
+    image: vikunja/vikunja:2.7.1@sha256:f7dc8428d10aef17f3075886d3c1c022f566ec456f88985f02c137f4fc534576
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      VIKUNJA_SERVICE_PUBLICURL: ${VIKUNJA_PUBLIC_URL:-http://localhost:3456/}
+      # 签发 JWT 等用的密钥；不设置时每次重启随机生成，已登录的会话和 Token 全部失效
+      VIKUNJA_SERVICE_SECRET: ${VIKUNJA_SERVICE_SECRET:?请先在仓库根目录运行 make env 生成 .env}
+      # 个人模式：关闭自助注册，用户由 make vikunja-user 创建
+      VIKUNJA_SERVICE_ENABLEREGISTRATION: "false"
+      VIKUNJA_SERVICE_TIMEZONE: ${VIKUNJA_TIMEZONE:-UTC}
+      # 原生界面与 API 同源，不需要跨域
+      VIKUNJA_CORS_ENABLE: "false"
+      VIKUNJA_DATABASE_TYPE: sqlite
+      VIKUNJA_DATABASE_PATH: /db/vikunja.db
+      # Webhook 要发到 integrations 网络里的 caddy（私有地址），默认的 SSRF 防护会拦截；
+      # 放开后的风险与缓解见版本核验 ADR 第 6 节
+      VIKUNJA_OUTGOINGREQUESTS_ALLOWNONROUTABLEIPS: "true"
+    volumes:
+      - vikunja-db:/db
+      - vikunja-files:/app/vikunja/files
+    ports:
+      # 原生界面：默认只绑定本机
+      - "${VIKUNJA_BIND:-127.0.0.1}:${VIKUNJA_PORT:-3456}:3456"
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/app/vikunja/vikunja", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks: [default, integrations]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  # core（compose.yaml）创建的受控网络；COMPOSE 项目名不是 my-workspace 时用 WORKSPACE_PROJECT 指定
+  integrations:
+    external: true
+    name: ${WORKSPACE_PROJECT:-my-workspace}_integrations
+
+volumes:
+  vikunja-db:
+  vikunja-files:

@@ -46,14 +46,16 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 
 | 服务 | 镜像 | 作用 | 网络 | 对外端口 |
 |---|---|---|---|---|
-| caddy | `caddy:2.11.7-alpine` | 统一入口：路由、安全响应头、请求体限制 | frontend | `127.0.0.1:8080`（可配置） |
+| caddy | `caddy:2.11.7-alpine` | 统一入口：路由、安全响应头、请求体限制 | frontend + integrations | `127.0.0.1:8080`（可配置） |
 | web | `my-workspace-web:local`（`apps/web/Dockerfile`） | 前端静态文件（nginx，非 root） | frontend | 无 |
-| api | `my-workspace-api:local`（`services/api/Dockerfile`） | FastAPI BFF（非 root） | backend + frontend | 无 |
-| worker | 同 api 镜像 | ARQ 后台作业 | backend | 无 |
+| api | `my-workspace-api:local`（`services/api/Dockerfile`） | FastAPI BFF（非 root） | backend + frontend + integrations | 无 |
+| worker | 同 api 镜像 | ARQ 后台作业 | backend + integrations | 无 |
 | postgres | `postgres:16.15-alpine3.24` | 数据库 | backend | 无 |
 | redis | `redis:7.4.12-alpine3.21` | 缓存 / 作业队列 | backend | 无 |
 
 - `backend` 是内部网络（不通外网）；数据库和 Redis 只在这个网络里，宿主机和外网都连不到。
+- `integrations` 也是内部网络，只有 caddy、api、worker 加入，供独立部署的第三方服务（Vikunja 等，见第 8 节）与工作台互通；
+  第三方服务碰不到 backend 里的数据库和 Redis。
 - api、worker、web 以只读文件系统运行，去掉全部 Linux capabilities，禁止提权。
 - Caddy 路由：`/api/*`、`/healthz` → api；`/readyz` 只接受内网来源（公网返回 404）；其余 → web。
 
@@ -146,3 +148,26 @@ make dev                                # API :8000 + 前端 :5173（/api 等路
 CREATE ROLE workspace LOGIN PASSWORD '<本地密码>';
 CREATE DATABASE workspace OWNER workspace;
 ```
+
+## 8. Vikunja（任务主源，独立部署）
+
+Vikunja 用单独的 Compose 文件 `infra/vikunja/compose.yaml` 运行（规范第 11 节），版本固定为 **2.7.1**（镜像带 digest）。
+版本核验、权限与安全取舍见 `docs/decisions/2026-10-30-vikunja-2.7.1-verification.md`。
+
+```bash
+make up              # 先启动 core：它会创建 integrations 网络
+make vikunja-up      # 启动 Vikunja；原生界面 http://localhost:3456
+make vikunja-user    # 创建用户（自助注册已关闭）
+make vikunja-down    # 停止，保留数据卷
+```
+
+- 配置在根目录 `.env`：`VIKUNJA_SERVICE_SECRET`（`make env` 随机生成；丢失后所有 Vikunja 登录与 Token 失效）、
+  `VIKUNJA_PUBLIC_URL`、`VIKUNJA_BIND`、`VIKUNJA_PORT`。core 的 Compose 项目名不是 `my-workspace` 时，
+  make 会按 `COMPOSE_PROJECT_NAME` 自动找到对应的 integrations 网络。
+- 工作台访问 Vikunja 用 `http://vikunja:3456`（integrations 网络内）；Vikunja 把 Webhook 发到
+  `http://caddy:8080/api/v1/webhooks/vikunja/<集成 ID>`，不经过对外端口。
+- 为了让 Webhook 能发到私有地址，Compose 里打开了 `VIKUNJA_OUTGOINGREQUESTS_ALLOWNONROUTABLEIPS`；
+  因此要保持自助注册关闭，只给可信的人创建 Vikunja 用户。多人使用时改用出站代理（见核验 ADR 第 6 节）。
+- 数据在卷 `vikunja-db`（SQLite）与 `vikunja-files`；Vikunja 自带 `vikunja dump` / `restore` 备份命令，纳入 S6-04 的备份方案。
+- 工作台连接 Vikunja 用的 API Token 在 Vikunja 原生界面的设置里创建，需要的最小权限见核验 ADR 第 3 节。
+
