@@ -2,8 +2,10 @@
 
 - 验收人：claude（协作任务 T-0032，按 D-0003 负责每个 Sprint 的联调与验收）
 - 日期：2026-10-30
-- 结论（第一部分）：**接口级验收全部通过**（DoD 与 A10 ~ A13、A17），已纳入 CI。
-  浏览器验收要等 codex 的 T-0030 / T-0031（前端）合并后进行，本报告届时补充第 2.2 节并勾选 `docs/TASKS.md`。
+- 结论（进行中）：
+  - **接口级验收全部通过**（DoD 与 A10 ~ A13、A17），已纳入 CI。
+  - **知识库与日历的浏览器验收全部通过**（T-0030 已合并），已纳入 CI。
+  - GitHub 连接、开发者页与全局搜索框的浏览器验收要等 codex 的 T-0031 合并；之后补齐第 2.2 节并勾选 `docs/TASKS.md`。
 - 是否进入 Sprint 5：人类已在 2026-10-30 的对话中预先批准“验收通过就自动进入”（记录在 T-0032 的进度日志）。
 
 全栈环境：Compose 6 个服务，外加一个模拟 GitHub 服务（`tests/e2e/fake_github_server.py`，见第 4 节）。
@@ -44,14 +46,31 @@ CI 里没有真实的 GitHub Token。
 - 跨资源搜索：收藏、日程、GitHub 仓库与 PR 都能搜到。
 - 审计日志：记录了集成、收藏、日程的写操作，且不含 Token、标题、备注与链接。
 
-### 2.2 浏览器（待 T-0030 / T-0031）
+### 2.2 浏览器（`tests/e2e/sprint4_browser.cjs`）
 
-未运行：前端（知识入口、日历、全局搜索、开发者页）由 codex 的 T-0030 / T-0031 实现，尚未提交。
-合并后新增 `tests/e2e/sprint4_browser.cjs` 并纳入 CI，覆盖以下流程：
-- 新增收藏 → 关联任务 → 搜索命中 → 删除后搜索不再出现
-- 日历新建 / 编辑 / 删除，以及首页 agenda
-- 连接 GitHub → 开发者页 → 限流提示
-- viewer 只读
+真实后端，无头 Chromium（Playwright 1.63.0），浏览器时区 Asia/Shanghai，已纳入 CI（`ci-infra.yml`）。
+AFFiNE 地址是不存在的主机 `http://affine.e2e.invalid:3010`：页面只显示链接，浏览器和后端都不应请求它。
+被关联的 Vikunja 任务直接写进投影。
+
+| 步骤 | 结果 |
+|---|---|
+| 知识库页配置 AFFiNE 外部地址：`http://169.254.169.254` 在前端被拒绝（A12），合法地址保存成功 | 通过 |
+| 新增收藏：`javascript:` 链接在前端被拦下，没有发出请求；合法链接保存后已规范化（保留 `mode`，去掉 `refreshKey` 与片段），并关联了任务 | 通过 |
+| 任务抽屉的“相关文档”显示关联的收藏 | 通过 |
+| 跨资源搜索能找到新收藏（接口；搜索框由 T-0031 提供） | 通过 |
+| 日历新建、编辑日程：时间按 Asia/Shanghai 换算成 UTC 保存，地点保存，版本递增 | 通过 |
+| 首页“最近文档”“近期日程”组件显示真实数据 | 通过 |
+| 390px 宽度下知识库与日历页没有横向滚动 | 通过 |
+| viewer：能看收藏与日程，没有新增 / 管理 / 删除入口，日程表单只读 | 通过 |
+| A10：删除日程与收藏后，页面与搜索里都不再出现 | 通过 |
+| DoD：全程没有向 AFFiNE 地址发出请求 | 通过 |
+
+页面全程没有脚本错误，本机连续 3 次通过。
+
+待 T-0031 合并后补充的步骤：
+- 连接 GitHub → 开发者页 → 限流提示（模拟 GitHub）
+- 全局搜索框：搜索命中 → 删除后不再出现
+- viewer 在开发者页只读
 
 ## 3. 任务清单（docs/TASKS.md Sprint 4）
 
@@ -59,8 +78,8 @@ CI 里没有真实的 GitHub Token。
 
 | 条目 | 后端 | 前端 |
 |---|---|---|
-| S4-01 AFFiNE Deep Link、收藏和权限可见性 | T-0025 核验 ADR（PR #39）、T-0026 契约（PR #40）、T-0027（PR #41） | T-0030（codex，未提交） |
-| S4-02 本地日历 CRUD / agenda | T-0026、T-0027 | T-0030 |
+| S4-01 AFFiNE Deep Link、收藏和权限可见性 | T-0025 核验 ADR（PR #39）、T-0026 契约（PR #40）、T-0027（PR #41） | T-0030（codex，PR #45） |
+| S4-02 本地日历 CRUD / agenda | T-0026、T-0027 | T-0030（PR #45） |
 | S4-03 外部资源统一映射与搜索索引 | T-0029（PR #43） | — |
 | S4-04 GitHub 只读仓库 / Issue / PR / Actions，限流 / 分页 | T-0025、T-0026、T-0028（PR #42） | T-0031（codex，未提交） |
 | S4-05 全局搜索 UI、跨工作空间安全测试 | T-0029；本报告的 A11 | T-0031 |
@@ -108,6 +127,8 @@ CI 里没有这两个变量，所以跳过；本机同样没有，**未运行**�
 ```bash
 docker build …（本机经代理构建 api 镜像）&& docker compose up -d --no-build --wait && docker compose exec -T api alembic upgrade head
 python3 tests/e2e/sprint4_acceptance.py      # 31 项全部通过，本机连续 3 次（中间补了次级限流与“新的成功同步”两项检查）
+docker build …（本机经代理构建 web 镜像，T-0030 合并后的 main）&& docker compose up -d --no-build --wait
+node tests/e2e/sprint4_browser.cjs           # 10 步全部通过（页面无错误），连续 3 次
 ```
 
 - Sprint 1 ~ 3 的验收脚本没有在本机重跑（Sprint 3 需要 Vikunja）。它们在同一个 CI 流程里运行，结果见本 PR 的 CI。
@@ -117,7 +138,7 @@ python3 tests/e2e/sprint4_acceptance.py      # 31 项全部通过，本机连续
 
 | 项目 | 说明 |
 |---|---|
-| 浏览器验收 | 等 T-0030 / T-0031（见第 2.2 节） |
+| 浏览器验收（GitHub、开发者页、搜索框） | 等 T-0031（见第 2.2 节）；知识库与日历部分已通过 |
 | 真实 GitHub | 需要 `TEST_GITHUB_TOKEN` / `TEST_GITHUB_REPO`，本机与 CI 都没有；T-0025 的核验用的是官方 OpenAPI 与匿名实测 |
 | 真实 AFFiNE | 工作台不向 AFFiNE 发请求，只校验链接字符串，没有部署 AFFiNE 实例；路由规则来自 v0.27.4 源码（核验 ADR 第 8 节） |
 | 中文分词 | 搜索对中文按字面包含匹配，不分词（部署文档第 11 节） |
