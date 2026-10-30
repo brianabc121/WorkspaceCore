@@ -20,7 +20,10 @@ jobs:
       - name: 生成 .env（随机密码与密钥）
         run: make env
       - name: docker compose config
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          # 独立部署的 Vikunja（infra/vikunja/compose.yaml）；在 Sprint 3 验收（T-0023）中启动
+          docker compose -p my-workspace-vikunja -f infra/vikunja/compose.yaml --env-file .env config --quiet
       - name: 构建并启动（make up）
         run: make up
       - name: 数据库迁移（make migrate）

@@ -90,8 +90,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
-    # frontend 网络供 caddy 访问，也给之后的 Connector 留出访问外网的出口
-    networks: [backend, frontend]
+    # frontend 网络供 caddy 访问，也给 Connector 访问外网；integrations 连到独立部署的第三方服务（Vikunja 等）
+    networks: [backend, frontend, integrations]
     logging: *logging
 
   worker:
@@ -110,8 +110,8 @@ services:
       timeout: 10s
       retries: 5
       start_period: 15s
-    # Sprint 0 的 Worker 不需要外网；Sprint 3 起 Connector 同步需要出口时再接入 frontend 网络
-    networks: [backend]
+    # Worker 经 integrations 访问同机部署的第三方服务；连接外部托管的服务需要出网时再接入 frontend 网络
+    networks: [backend, integrations]
     logging: *logging
 
   web:
@@ -150,13 +150,18 @@ services:
         condition: service_healthy
       web:
         condition: service_healthy
-    networks: [frontend]
+    # integrations：第三方服务经此把 Webhook 发到 /api/v1/webhooks/…（不经过对外端口）
+    networks: [frontend, integrations]
     logging: *logging
 
 networks:
   backend:
     internal: true
   frontend: {}
+  # 与独立部署的第三方服务（infra/vikunja/compose.yaml 等）互通的受控网络：只有 api、worker、caddy 加入，
+  # 第三方服务碰不到 backend 里的 PostgreSQL / Redis；internal 表示这个网络本身不提供出网
+  integrations:
+    internal: true
 
 volumes:
   postgres-data:
