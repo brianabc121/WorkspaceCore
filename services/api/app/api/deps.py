@@ -23,6 +23,7 @@ from app.domain.dashboards import DashboardService
 from app.domain.developer import DeveloperService
 from app.domain.integrations import IntegrationService
 from app.domain.knowledge import KnowledgeService
+from app.domain.search import SearchService
 from app.domain.security import csrf_token_for, csrf_token_matches
 from app.domain.tasks import TaskService
 from app.domain.workspaces import WorkspaceService
@@ -119,6 +120,10 @@ def get_developer_service(
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> DeveloperService:
     return DeveloperService(db, settings)
+
+
+def get_search_service(db: Annotated[AsyncSession, Depends(get_db)]) -> SearchService:
+    return SearchService(db)
 
 
 def get_task_service(

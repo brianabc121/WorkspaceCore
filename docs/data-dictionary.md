@@ -95,4 +95,10 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
   - 运行的 `failure_summary` 只有失败的 job / step 名称，不含日志。
 - `sync_cursors.resource_type = github`：增量同步的游标（上次同步开始时间往前 2 分钟）；全量同步的时间与 Vikunja 一样记在 `full_sync`。
 
+### 迁移 `0008`（S4-03、S4-05）
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `search_documents` | `id`、`workspace_id`、`resource_type`、`resource_id`、`provider`、`title`、`body`、`context`、`source_url`、`owner_id`、`visibility_json`、`source_updated_at`、`search_vector`、`indexed_at` | 跨资源搜索索引（规范 5.1 第 12 项），**只由触发器维护**，应用只读。触发器 `search_index` 挂在 `external_resources`、`bookmarks`、`calendar_events` 上，插入、更新、tombstone、删除都在同一个事务里同步；Actions 运行不进索引。只存标题、备注、说明、地点、标签与上下文（项目名 / 仓库名 / 日期），不含 Token 与外部文档正文。`(resource_type, resource_id)` 唯一；随工作空间级联删除；`owner_id` 只在私有收藏上有值（查询时只对该用户可见），创建者被删除的私有收藏从索引移除；`search_vector` 是 `to_tsvector('english', title \|\| ' ' \|\| body)` 的生成列（GIN 索引）；`title` 另有 `gin_trgm_ops` 索引供中文模糊匹配；收藏的 `source_url` 为 NULL，查询时用知识来源的地址拼出。`workspace.search_rebuild()` 整体重建（`python -m app.commands.reindex_search`） |
+
 ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。

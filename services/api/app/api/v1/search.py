@@ -8,15 +8,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Security
 
-from app.api.deps import authenticated, workspace_viewer
-from app.core.errors import not_implemented
+from app.api.deps import authenticated, get_search_service, workspace_viewer
+from app.domain.auth import AuthContext
 from app.domain.policy import WorkspaceAccess
+from app.domain.search import SearchService
 from app.schemas.common import error_responses
 from app.schemas.search import SearchPage, SearchQuery, SearchType
 
 router = APIRouter(tags=["search"], dependencies=[Security(authenticated)])
 
 Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
+Context = Annotated[AuthContext, Security(authenticated)]
+Service = Annotated[SearchService, Depends(get_search_service)]
 
 
 @router.get(
@@ -27,9 +30,11 @@ Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
 )
 async def search(
     access: Viewer,
+    context: Context,
+    service: Service,
     q: Annotated[SearchQuery, Query(description="去掉首尾空白后 1–100 字")],
     types: Annotated[list[SearchType] | None, Query(description="可重复；默认全部类型")] = None,
     cursor: Annotated[str | None, Query(max_length=512)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> SearchPage:
-    raise not_implemented("T-0029")
+    return await service.search(context, access, q=q, types=types, cursor=cursor, limit=limit)
