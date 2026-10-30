@@ -2,9 +2,9 @@
 id: T-0017
 title: Sprint 2 集成与验收：DoD 实测、A03/A04 自动化、浏览器 E2E 纳入 CI、勾选 TASKS.md
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: docs/acceptance,docs/TASKS.md,tests/e2e,.github/workflows/ci-infra.yml,scripts/smoke.sh
 depends_on: T-0015, T-0016
 created: 2026-10-30
@@ -30,3 +30,6 @@ T-0015、T-0016 合并后做前后端联调，并按 Sprint 2 的 DoD 实测验�
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-30 03:04 UTC · claude · 创建任务（owner: claude）
+- 2026-10-30 06:12 UTC · claude · 开始任务
+- 2026-10-30 06:12 UTC · claude · 人类在对话中说明 Codex 正忙别的任务、让我先做其他事：偏离任务“T-0015、T-0016 都合并后才开始”的约定，先做不依赖前端的部分——Compose 全栈接口级 A03/A04/A05 与 DoD（未知组件类型 422、单个组件数据损坏不影响首页）自动化并纳入 ci-infra。拖拽布局、浏览器 E2E（含 Sprint 1 浏览器流程）在 T-0016 合并后再做：T-0016 会改顶栏/侧栏，现在把浏览器流程放进 CI 可能卡住 Codex 的 PR。
+- 2026-10-30 06:19 UTC · claude · 第一部分完成（接口级，本 PR）：tests/e2e/sprint2_acceptance.py 共 38 项（A03/A04/A05、版本冲突、跨工作空间、DoD 未知类型 422、损坏组件不影响首页、审计不含内容），纳入 ci-infra；共用 HTTP 工具抽到 tests/e2e/e2e_support.py，sprint1_acceptance.py 改为导入（行为不变）；docs/acceptance/sprint-2.md 为进行中版本。下一步（T-0016 合并后）：浏览器 E2E（拖拽保存刷新、未知类型错误卡片、模块降级展示）连同 Sprint 1 浏览器流程纳入 CI，补全验收报告，勾选 S2-01~S2-05，escalate 请求进入 Sprint 3。
