@@ -1,6 +1,7 @@
 name: ci-infra
 
-# 全栈冒烟（Sprint 0 DoD）：构建镜像 → make up（等待全部健康检查）→ make migrate → make smoke。
+# 全栈冒烟（Sprint 0 DoD）：构建镜像 → make up（等待全部健康检查）→ make migrate → make smoke；
+# 之后运行各 Sprint 的全栈验收（tests/e2e：接口级与浏览器）。
 # 本文件归 claude 维护（docs/decisions/2026-10-29-sprint-0-contracts.md 第 6 节）。
 on:
   pull_request:
@@ -32,6 +33,19 @@ jobs:
       - name: Sprint 2 全栈验收（A03 / A04 / A05 / DoD，接口级）
         # 不要求空库：每次用新的邮箱写入测试用户
         run: python3 tests/e2e/sprint2_acceptance.py
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22.23.4'
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+      - name: 安装浏览器验收依赖（Playwright 版本由 tests/e2e 的锁文件固定）
+        working-directory: tests/e2e
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Sprint 2 浏览器验收（拖拽保存刷新、版本冲突、错误卡片、viewer 只读、移动端）
+        # 不要求空库：每次用新的邮箱写入测试用户
+        run: node tests/e2e/sprint2_browser.cjs
       - name: 停止后重启，确认数据卷保留
         run: |
           make down
@@ -39,6 +53,13 @@ jobs:
           # 数据卷丢失时数据库是空的，alembic current 不会输出 (head)
           docker compose exec -T api alembic current | grep -q '(head)'
           make smoke
+      - name: 清空数据卷并重新迁移（Sprint 1 浏览器验收要从首次安装开始）
+        run: |
+          docker compose down -v
+          docker compose up -d --wait --wait-timeout 240
+          make migrate
+      - name: Sprint 1 浏览器验收（首次安装 → 登录 → 修改设置 → 撤销会话 → 登出）
+        run: node tests/e2e/sprint1_browser.cjs
       - name: 失败时输出服务状态与日志
         if: failure()
         run: |

@@ -9,10 +9,10 @@ DoD“未知 widget type 安全报错”（422 且不回显输入）、DoD“部
 拖拽与页面渲染属于浏览器验收，见 docs/acceptance/sprint-2.md。
 
 前提：Compose 全栈已启动并迁移（make up && make migrate）。不要求空库：本脚本每次运行都用新的邮箱，
-用户与工作空间由 `docker compose exec api` 用应用自身的代码写入（V1 只能通过首次安装创建用户）。
+用户与工作空间由同目录的 seed.py 经 `docker compose exec api` 用应用自身的代码写入。
 用法：python3 tests/e2e/sprint2_acceptance.py [--base-url http://127.0.0.1:8080]
   - 请求的 Origin 取 --base-url 的来源，它必须是 PUBLIC_BASE_URL 或在 CORS_ALLOWED_ORIGINS 里。
-只依赖 Python 标准库，共用工具在同目录的 e2e_support.py；CI（ci-infra.yml）与本机共用。
+只依赖 Python 标准库，共用工具在同目录的 e2e_support.py、seed.py；CI（ci-infra.yml）与本机共用。
 """
 
 import argparse
@@ -23,6 +23,7 @@ import uuid
 from typing import Any
 
 from e2e_support import Client, Report, compose_exec, default_base_url, parse_base_url
+from seed import add_corrupt_widget, add_member, create_user
 
 PASSWORD = "e2e sprint2 passphrase"  # noqa: S105 -- 只用于本脚本临时创建的测试账号
 # 首页聚合的总耗时上限（契约 ADR 第 8 节，DASHBOARD_OVERVIEW_TIMEOUT_SECONDS 的默认值）
@@ -31,73 +32,11 @@ STARTER_TYPES = ["note", "quick_links", "todo_summary", "today_tasks"]
 # 用来确认错误响应和审计日志不回显输入内容的标记
 ECHO_MARK = "e2e-should-not-echo"
 
-# 在 api 容器里用应用自身的代码写入用户（含工作空间与默认首页）、成员关系或一条已损坏的组件
-SEED_SCRIPT = r"""
-import asyncio, os, sys, uuid
-from sqlalchemy.ext.asyncio import async_sessionmaker
-from app.core.config import get_settings
-from app.core.resources import create_engine
-from app.domain import dashboard_defaults
-from app.domain.security import hash_password
-from app.models import Widget, WorkspaceMember
-from app.repositories import users, workspaces
-
-async def main():
-    engine = create_engine(get_settings())
-    try:
-        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-            command = sys.argv[1]
-            if command == "user":
-                user = await users.create(
-                    db,
-                    email=os.environ["E2E_EMAIL"],
-                    password_hash=hash_password(os.environ["E2E_PASSWORD"]),
-                    display_name=os.environ["E2E_NAME"],
-                )
-                workspace = await workspaces.create_with_owner(
-                    db, name=os.environ["E2E_NAME"] + " 的空间", owner_id=user.id
-                )
-                # 与首次安装一致：新工作空间带默认首页和入门组件
-                await dashboard_defaults.create_default_dashboard(
-                    db, workspace_id=workspace.id, owner_id=user.id
-                )
-                print(user.id, workspace.id)
-            elif command == "member":
-                workspace_id, user_id, role = sys.argv[2:5]
-                db.add(WorkspaceMember(
-                    workspace_id=uuid.UUID(workspace_id), user_id=uuid.UUID(user_id), role=role
-                ))
-            else:
-                # 模拟旧版本留下或被手工改坏的数据：已不支持的类型、不是对象的配置、无法解析的布局
-                widget = Widget(
-                    dashboard_id=uuid.UUID(sys.argv[2]),
-                    widget_type="retired_widget",
-                    config_json="not-an-object",
-                    layout_json={"desktop": "broken"},
-                )
-                db.add(widget)
-                await db.flush()
-                print(widget.id)
-            await db.commit()
-    finally:
-        await engine.dispose()
-
-asyncio.run(main())
-"""
-
 
 def seed_user(run: str, name: str) -> tuple[str, str, str]:
     """返回 (邮箱, 用户 ID, 自己的工作空间 ID)。"""
     email = f"{name.lower()}-{run}@e2e.example.com"
-    output = compose_exec(
-        "api",
-        "python",
-        "-c",
-        SEED_SCRIPT,
-        "user",
-        env={"E2E_EMAIL": email, "E2E_PASSWORD": PASSWORD, "E2E_NAME": name},
-    )
-    user_id, workspace_id = output.split()[-2:]
+    user_id, workspace_id, _ = create_user(email, name, PASSWORD)
     return email, user_id, workspace_id
 
 
@@ -128,8 +67,8 @@ def main() -> int:
     victor_email, victor_id, _ = seed_user(run, "Victor")
     molly_email, molly_id, _ = seed_user(run, "Molly")
     olga_email, _, olga_workspace = seed_user(run, "Olga")
-    compose_exec("api", "python", "-c", SEED_SCRIPT, "member", workspace, victor_id, "viewer")
-    compose_exec("api", "python", "-c", SEED_SCRIPT, "member", workspace, molly_id, "member")
+    add_member(workspace, victor_id, "viewer")
+    add_member(workspace, molly_id, "member")
     in_workspace = {"X-Workspace-Id": workspace}
 
     alice = login(base, alice_email)
@@ -364,11 +303,11 @@ def main() -> int:
         )
 
     # ---------------------------------------------------------------- DoD 部分 Widget 失败
-    broken_id = compose_exec("api", "python", "-c", SEED_SCRIPT, "corrupt", dashboard_id).split()[
-        -1
-    ]
+    broken_id = add_corrupt_widget(dashboard_id)
     page = alice.request("GET", "/api/v1/dashboard/overview", headers=in_workspace)
     page_widgets = (page.json() or {}).get("widgets") or []
+    desktops = [layout["desktop"] for layout in saved.values()]
+    mobiles = [layout["mobile"] for layout in saved.values()]
     broken: dict[str, Any] = next((w for w in page_widgets if w["id"] == broken_id), {})
     report.check(
         "DoD 库里有一条已损坏的组件时首页聚合仍然 200",
@@ -376,11 +315,18 @@ def main() -> int:
         page.summary,
     )
     report.check(
-        "DoD 损坏的组件原样标出类型，配置为空、放到最下方，交给前端显示错误卡片",
-        broken.get("widget_type") == "retired_widget"
-        and broken.get("config") == {}
-        and (broken.get("layout") or {}).get("desktop", {}).get("y") == 999,
+        "DoD 损坏的组件原样标出类型，配置为空，交给前端显示错误卡片",
+        broken.get("widget_type") == "retired_widget" and broken.get("config") == {},
         str(broken),
+    )
+    below = {
+        "desktop": {"x": 0, "y": max(d["y"] + d["h"] for d in desktops), "w": 4, "h": 3},
+        "mobile": {"y": max(m["y"] + m["h"] for m in mobiles), "h": 3},
+    }
+    report.check(
+        "DoD 无法解析的布局紧接着放在其余组件下方，不会把页面撑高",
+        broken.get("layout") == below,
+        str(broken.get("layout")),
     )
     report.check(
         "DoD 其余组件不受影响",

@@ -18,11 +18,11 @@
 - [x] S1-05 Audit logs、会话撤销与 API 测试。
 
 ## Sprint 2 — Dashboard
-- [ ] S2-01 Dashboard/Widget 数据表及读写 API。
-- [ ] S2-02 Vue 顶栏、侧栏、响应式页面、dark/light theme。
-- [ ] S2-03 Widget registry/schema、基础卡片。
-- [ ] S2-04 Grid 拖拽/布局保存/版本冲突处理。
-- [ ] S2-05 聚合接口、loading/error/stale、E2E。
+- [x] S2-01 Dashboard/Widget 数据表及读写 API。
+- [x] S2-02 Vue 顶栏、侧栏、响应式页面、dark/light theme。
+- [x] S2-03 Widget registry/schema、基础卡片。
+- [x] S2-04 Grid 拖拽/布局保存/版本冲突处理。
+- [x] S2-05 聚合接口、loading/error/stale、E2E。
 
 ## Sprint 3 — Vikunja
 - [ ] S3-01 核验锁定版本 OpenAPI、认证/字段映射并形成 ADR。

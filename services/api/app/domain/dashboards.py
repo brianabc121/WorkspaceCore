@@ -40,10 +40,8 @@ from app.schemas.dashboards import (
 
 logger = logging.getLogger("app.dashboards")
 
-# 库里的布局无法解析时（只可能来自手工改库）的兜底位置：放到最下方，不让整个接口失败
-_FALLBACK_LAYOUT = WidgetLayout.model_validate(
-    {"desktop": {"x": 0, "y": 999, "w": 4, "h": 3}, "mobile": {"y": 999, "h": 3}}
-)
+# 布局的行号上限（与 schemas.dashboards 的 y 取值范围一致）
+_MAX_ROW = 999
 
 
 def version_conflict(current: int) -> ApiError:
@@ -73,12 +71,27 @@ def _dashboard_out(dashboard: Dashboard) -> DashboardOut:
     return DashboardOut.model_validate(dashboard, from_attributes=True)
 
 
-def _widget_out(widget: Widget) -> WidgetOut:
+def _parse_layout(widget: Widget) -> WidgetLayout | None:
     try:
-        layout = WidgetLayout.model_validate(widget.layout_json)
+        return WidgetLayout.model_validate(widget.layout_json)
     except ValidationError:
         logger.warning("widget layout invalid", extra={"widget_id": str(widget.id)})
-        layout = _FALLBACK_LAYOUT
+        return None
+
+
+def _fallback_layout(desktop_y: int = 0, mobile_y: int = 0) -> WidgetLayout:
+    """库里的布局无法解析时（只可能来自手工改库）的兜底位置，不让整个接口失败。"""
+    return WidgetLayout.model_validate(
+        {
+            "desktop": {"x": 0, "y": min(desktop_y, _MAX_ROW), "w": 4, "h": 3},
+            "mobile": {"y": min(mobile_y, _MAX_ROW), "h": 3},
+        }
+    )
+
+
+def _widget_out(widget: Widget, layout: WidgetLayout | None = None) -> WidgetOut:
+    if layout is None:
+        layout = _parse_layout(widget) or _fallback_layout()
     config = widget.config_json if isinstance(widget.config_json, dict) else {}
     return WidgetOut(
         id=widget.id,
@@ -93,8 +106,17 @@ def _widget_out(widget: Widget) -> WidgetOut:
 
 
 def _widgets_out(widgets: Sequence[Widget]) -> list[WidgetOut]:
-    """按桌面端 (y, x) 排序，与网格从上到下、从左到右的阅读顺序一致。"""
-    items = [_widget_out(widget) for widget in widgets]
+    """按桌面端 (y, x) 排序，与网格从上到下、从左到右的阅读顺序一致。
+
+    布局无法解析的组件紧接着放在其余组件下方（而不是第 999 行），页面不会因此被撑得很高。
+    """
+    parsed = [(widget, _parse_layout(widget)) for widget in widgets]
+    valid = [layout for _, layout in parsed if layout is not None]
+    fallback = _fallback_layout(
+        max((layout.desktop.y + layout.desktop.h for layout in valid), default=0),
+        max((layout.mobile.y + layout.mobile.h for layout in valid), default=0),
+    )
+    items = [_widget_out(widget, layout or fallback) for widget, layout in parsed]
     return sorted(items, key=lambda w: (w.layout.desktop.y, w.layout.desktop.x, str(w.id)))
 
 

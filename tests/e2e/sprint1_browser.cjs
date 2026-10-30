@@ -6,7 +6,7 @@
 //   node sprint1_browser.cjs [BASE_URL]                    # 默认 http://127.0.0.1:${HTTP_PORT:-8080}
 //   - 安装凭据取环境变量 SETUP_TOKEN，未设置时读取仓库根目录的 .env。
 //   - BASE_URL 的来源必须是 PUBLIC_BASE_URL 或在 CORS_ALLOWED_ORIGINS 里，否则写请求会被来源校验拒绝。
-// 未纳入 CI：CI 里的接口级验收见 tests/e2e/sprint1_acceptance.py。
+// CI（.github/workflows/ci-infra.yml）在清空数据卷后运行；接口级验收见 tests/e2e/sprint1_acceptance.py。
 const fs = require('node:fs')
 const path = require('node:path')
 const { chromium } = require('playwright')

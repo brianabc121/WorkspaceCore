@@ -389,7 +389,12 @@ async def test_unknown_types_in_storage_do_not_break_the_page(home: Home) -> Non
     data = await home.overview()
     legacy = next(w for w in data["widgets"] if w["widget_type"] == "legacy_widget")
     assert legacy["config"] == {"anything": [1, 2]}
-    assert legacy["layout"]["desktop"]["y"] == 999  # 无法解析的布局放到最下方
+    # 无法解析的布局紧接着放在其余组件下方（入门组件桌面端到第 7 行、移动端到第 13 行）
+    assert legacy["layout"] == {
+        "desktop": {"x": 0, "y": 7, "w": 4, "h": 3},
+        "mobile": {"y": 13, "h": 3},
+    }
+    assert data["widgets"][-1]["id"] == legacy["id"]
     assert len(data["widgets"]) == 5
 
 
