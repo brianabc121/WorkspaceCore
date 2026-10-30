@@ -130,7 +130,12 @@ async def test_task_filters_sort_and_pagination(env: Env) -> None:
 async def test_reads_without_an_integration(env: Env) -> None:
     page = await env.get("/api/v1/tasks")
     assert page["items"] == []
-    assert page["sync"] == {"status": "not_configured", "as_of": None, "reason": "not_configured"}
+    assert page["sync"] == {
+        "status": "not_configured",
+        "as_of": None,
+        "reason": "not_configured",
+        "retry_at": None,
+    }
     missing = await env.client.get(f"/api/v1/tasks/{uuid.uuid4()}", headers=env.headers())
     assert missing.status_code == 404
 

@@ -102,3 +102,30 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 新增错误码：`409 IDEMPOTENCY_KEY_REUSED` / `IDEMPOTENCY_IN_PROGRESS` / `OPERATION_NOT_APPLIED` / `INTEGRATION_UNAVAILABLE` / `SYNC_IN_PROGRESS`、
 `401 WEBHOOK_SIGNATURE_INVALID`、`403 EXTERNAL_FORBIDDEN`、`413 PAYLOAD_TOO_LARGE`、`422 EXTERNAL_VALIDATION_FAILED`、
 `502 INTEGRATION_UNAUTHORIZED`、`503 EXTERNAL_UNAVAILABLE` / `EXTERNAL_RATE_LIMITED`、`504 RESULT_UNKNOWN`（用同一个幂等键重发以查询结果）。
+
+## Sprint 4 端点
+
+约定见 `docs/decisions/2026-10-30-sprint-4-knowledge-search-contract.md`。GitHub 与 AFFiNE 的核验结果见
+`docs/decisions/2026-10-30-github-rest-and-affine-verification.md`。全部需要 `X-Workspace-Id`。
+收藏、知识来源、日程都是本地数据，写入**不需要** `Idempotency-Key`。
+
+| 方法 | 路径 | 说明 | 状态 |
+|---|---|---|---|
+| GET / POST | `/api/v1/knowledge/sources` | AFFiNE 外部地址（viewer 查看 / admin 配置；每个工作空间 1 个） | 已声明，T-0027 实现 |
+| PATCH / DELETE | `/api/v1/knowledge/sources/{source_id}` | 修改（改地址后收藏的链接随之改）/ 删除（连同全部收藏） | 已声明，T-0027 实现 |
+| GET | `/api/v1/knowledge/resources` | 文档收藏列表（私有收藏只返回自己的；可按关联的任务过滤） | 已声明，T-0027 实现 |
+| POST | `/api/v1/knowledge/bookmarks` | 收藏 AFFiNE 文档（member；链接只做字符串校验，不访问 AFFiNE） | 已声明，T-0027 实现 |
+| PATCH / DELETE | `/api/v1/knowledge/bookmarks/{bookmark_id}` | 修改（乐观并发；只有创建者能改可见性）/ 删除 | 已声明，T-0027 实现 |
+| GET / POST | `/api/v1/calendar/events` | 区间内的日程（`start`、`end` 必填，最多 92 天）/ 新建（定时或全天） | 已声明，T-0027 实现 |
+| PATCH / DELETE | `/api/v1/calendar/events/{event_id}` | 修改 / 删除（乐观并发） | 已声明，T-0027 实现 |
+| POST | `/api/v1/integrations`（`provider: github`） | 新建 GitHub 集成：细粒度 Token（`github_pat_`）+ 要同步的仓库 | 已声明，T-0028 实现 |
+| GET | `/api/v1/developer/repos`、`/issues`、`/pulls`、`/runs` | GitHub 投影（带 `sync`；限流时 `reason: rate_limited` 与 `retry_at`） | 已声明，T-0028 实现 |
+| GET | `/api/v1/search?q=` | 跨资源搜索（只返回当前用户可见、未删除的资源） | 已声明，T-0029 实现 |
+
+- 已有接口只增不改：
+  - `IntegrationOut.repositories`、`IntegrationTestResult.repositories`；
+  - `SyncState.retry_at`、`ModuleStatus.retry_at`；
+  - 首页 `modules` 增加 `calendar`、`knowledge`、`github`；
+  - 组件类型增加 `calendar_agenda`、`recent_docs`、`github_activity`。
+- 修改集成时，`api_token` 的前缀必须与 provider 一致；`repositories` 只用于 GitHub。不适用时返回 422（已实现）。
+- 新增错误码：`409 BOOKMARK_EXISTS`（`details.existing_id`）。收藏链接不合规时返回 `422 VALIDATION_FAILED`，`details.reason` 见契约第 4.2 节。

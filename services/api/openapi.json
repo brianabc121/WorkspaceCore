@@ -72,6 +72,551 @@
         "title": "AuditLogOut",
         "type": "object"
       },
+      "BookmarkCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "linked_resource_ids": {
+            "description": "关联的 Vikunja 项目 / 任务（投影 UUID）；修改时整体替换",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Linked Resource Ids",
+            "type": "array"
+          },
+          "note": {
+            "default": "",
+            "description": "纯文本备注；前端按文本显示，不解析 HTML / Markdown",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "description": "在 AFFiNE 里打开文档时浏览器地址栏的链接；服务端按核验 ADR 第 8.3 节校验并规范化",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          },
+          "visibility": {
+            "default": "workspace",
+            "enum": [
+              "workspace",
+              "private"
+            ],
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "title"
+        ],
+        "title": "BookmarkCreate",
+        "type": "object"
+      },
+      "BookmarkUpdate": {
+        "additionalProperties": false,
+        "description": "只发送要改的字段，都不能为 null；只有创建者能修改 visibility（否则 403）。",
+        "properties": {
+          "linked_resource_ids": {
+            "anyOf": [
+              {
+                "description": "关联的 Vikunja 项目 / 任务（投影 UUID）；修改时整体替换",
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Resource Ids"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "description": "纯文本备注；前端按文本显示，不解析 HTML / Markdown",
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "description": "在 AFFiNE 里打开文档时浏览器地址栏的链接；服务端按核验 ADR 第 8.3 节校验并规范化",
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "enum": [
+                  "workspace",
+                  "private"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "BookmarkUpdate",
+        "type": "object"
+      },
+      "CalendarAgendaConfig": {
+        "additionalProperties": false,
+        "description": "Sprint 4：组件自己调用 GET /calendar/events（Sprint 4 契约第 9.2 节）。",
+        "properties": {
+          "days": {
+            "default": 7,
+            "description": "从现在起显示多少天",
+            "maximum": 14.0,
+            "minimum": 1.0,
+            "title": "Days",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 5,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "CalendarAgendaConfig",
+        "type": "object"
+      },
+      "CalendarAgendaWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/CalendarAgendaConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "calendar_agenda",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "CalendarAgendaWidgetCreate",
+        "type": "object"
+      },
+      "CalendarAgendaWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/CalendarAgendaConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "calendar_agenda",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "CalendarAgendaWidgetUpdate",
+        "type": "object"
+      },
+      "CalendarEventCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "all_day": {
+            "default": false,
+            "title": "All Day",
+            "type": "boolean"
+          },
+          "description": {
+            "default": "",
+            "description": "纯文本；前端按文本显示",
+            "maxLength": 5000,
+            "title": "Description",
+            "type": "string"
+          },
+          "end_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "定时事件的结束（带时区，不含）",
+            "title": "End At"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "全天事件的结束日期（不含）",
+            "title": "End Date"
+          },
+          "location": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Location",
+            "type": "string"
+          },
+          "start_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "定时事件的开始（带时区）",
+            "title": "Start At"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "全天事件的开始日期",
+            "title": "Start Date"
+          },
+          "timezone": {
+            "description": "IANA 时区名，例如 Asia/Shanghai；全天事件按它换算，前端按它显示",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "timezone"
+        ],
+        "title": "CalendarEventCreate",
+        "type": "object"
+      },
+      "CalendarEventOut": {
+        "properties": {
+          "all_day": {
+            "title": "All Day",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "description": "纯文本；前端按文本显示",
+            "title": "Description",
+            "type": "string"
+          },
+          "end_at": {
+            "description": "结束（UTC，不含）",
+            "format": "date-time",
+            "title": "End At",
+            "type": "string"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "全天事件的结束日期（不含）；定时事件为 null",
+            "title": "End Date"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "创建者；用户被删除后为 null",
+            "title": "Owner Id"
+          },
+          "start_at": {
+            "description": "开始（UTC）；全天事件为 timezone 当地 0 点",
+            "format": "date-time",
+            "title": "Start At",
+            "type": "string"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "全天事件的开始日期；定时事件为 null",
+            "title": "Start Date"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "location",
+          "all_day",
+          "start_at",
+          "end_at",
+          "start_date",
+          "end_date",
+          "timezone",
+          "owner_id",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CalendarEventOut",
+        "type": "object"
+      },
+      "CalendarEventUpdate": {
+        "additionalProperties": false,
+        "description": "只发送要改的字段，都不能为 null；改 all_day 时同时给出对应的一对时间。\n\n合并后的结果由服务端再校验。",
+        "properties": {
+          "all_day": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "All Day"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "description": "纯文本；前端按文本显示",
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "end_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End At"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "start_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start At"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "description": "IANA 时区名，例如 Asia/Shanghai；全天事件按它换算，前端按它显示",
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "CalendarEventUpdate",
+        "type": "object"
+      },
       "DashboardCreate": {
         "additionalProperties": false,
         "properties": {
@@ -86,8 +631,11 @@
             "items": {
               "discriminator": {
                 "mapping": {
+                  "calendar_agenda": "#/components/schemas/CalendarAgendaWidgetCreate",
+                  "github_activity": "#/components/schemas/GitHubActivityWidgetCreate",
                   "note": "#/components/schemas/NoteWidgetCreate",
                   "quick_links": "#/components/schemas/QuickLinksWidgetCreate",
+                  "recent_docs": "#/components/schemas/RecentDocsWidgetCreate",
                   "today_tasks": "#/components/schemas/TodayTasksWidgetCreate",
                   "todo_summary": "#/components/schemas/TodoSummaryWidgetCreate"
                 },
@@ -105,6 +653,15 @@
                 },
                 {
                   "$ref": "#/components/schemas/TodayTasksWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/CalendarAgendaWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/RecentDocsWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/GitHubActivityWidgetCreate"
                 }
               ]
             },
@@ -190,7 +747,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/ModuleStatus"
             },
-            "description": "按模块名索引（本 Sprint 只有 tasks）；单个模块失败只影响对应组件",
+            "description": "按模块名索引：tasks（Sprint 3）、calendar、knowledge、github（Sprint 4）；单个模块失败只影响对应组件",
             "title": "Modules",
             "type": "object"
           },
@@ -369,6 +926,177 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "FailedJob": {
+        "properties": {
+          "failed_steps": {
+            "description": "失败的 step 名称；不含日志",
+            "items": {
+              "type": "string"
+            },
+            "title": "Failed Steps",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "failed_steps"
+        ],
+        "title": "FailedJob",
+        "type": "object"
+      },
+      "FailureSummary": {
+        "description": "只来自 jobs 接口的名称与结论，不读 Actions 日志（日志里可能有密钥）。",
+        "properties": {
+          "failed_jobs": {
+            "items": {
+              "$ref": "#/components/schemas/FailedJob"
+            },
+            "title": "Failed Jobs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "failed_jobs"
+        ],
+        "title": "FailureSummary",
+        "type": "object"
+      },
+      "GitHubActivityConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "default": "runs",
+            "description": "显示最近的 Actions 运行、PR 或 Issue",
+            "enum": [
+              "runs",
+              "pulls",
+              "issues"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "limit": {
+            "default": 5,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "GitHubActivityConfig",
+        "type": "object"
+      },
+      "GitHubActivityWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/GitHubActivityConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "github_activity",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "GitHubActivityWidgetCreate",
+        "type": "object"
+      },
+      "GitHubActivityWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/GitHubActivityConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "github_activity",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "GitHubActivityWidgetUpdate",
+        "type": "object"
+      },
+      "GitHubIntegrationCreate": {
+        "additionalProperties": false,
+        "description": "新建 GitHub 集成（Sprint 4）：地址固定为 api.github.com，不接受 base_url / public_url。",
+        "properties": {
+          "api_token": {
+            "description": "GitHub 细粒度 Personal Access Token（github_pat_ 开头）；只写不读",
+            "format": "password",
+            "maxLength": 512,
+            "minLength": 12,
+            "title": "Api Token",
+            "type": "string",
+            "writeOnly": true
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "const": "github",
+            "title": "Provider",
+            "type": "string"
+          },
+          "repositories": {
+            "items": {
+              "description": "owner/repo",
+              "maxLength": 140,
+              "minLength": 3,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Repositories",
+            "type": "array"
+          },
+          "token_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Token 的过期时间（在 GitHub 创建 Token 时设置），用于到期提醒",
+            "title": "Token Expires At"
+          }
+        },
+        "required": [
+          "provider",
+          "name",
+          "api_token",
+          "repositories"
+        ],
+        "title": "GitHubIntegrationCreate",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "status": {
@@ -422,6 +1150,7 @@
       },
       "IntegrationCreate": {
         "additionalProperties": false,
+        "description": "新建 Vikunja 集成（Sprint 3）。",
         "properties": {
           "api_token": {
             "description": "Vikunja API Token（tk_ 开头）；只写不读",
@@ -536,7 +1265,10 @@
             "type": "string"
           },
           "provider": {
-            "const": "vikunja",
+            "enum": [
+              "vikunja",
+              "github"
+            ],
             "title": "Provider",
             "type": "string"
           },
@@ -544,6 +1276,14 @@
             "description": "浏览器打开原生界面的地址",
             "title": "Public Url",
             "type": "string"
+          },
+          "repositories": {
+            "description": "GitHub 集成要同步的仓库（owner/repo）；其他集成为空",
+            "items": {
+              "type": "string"
+            },
+            "title": "Repositories",
+            "type": "array"
           },
           "status": {
             "enum": [
@@ -657,6 +1397,21 @@
             "title": "Ok",
             "type": "boolean"
           },
+          "repositories": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RepositoryCheck"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GitHub 集成：每个仓库的读权限检查；其他集成为 null",
+            "title": "Repositories"
+          },
           "status": {
             "description": "测试之后的集成状态",
             "enum": [
@@ -696,12 +1451,12 @@
       },
       "IntegrationUpdate": {
         "additionalProperties": false,
-        "description": "至少改一项；改 base_url 或 api_token 后状态回到 pending，需要重新测试连接。",
+        "description": "至少改一项；改 base_url 或 api_token 后状态回到 pending，需要重新测试连接。\n\napi_token 的前缀、base_url / public_url（只用于 Vikunja）与 repositories（只用于 GitHub）\n是否适用于该集成由服务端检查，不适用时返回 422。",
         "properties": {
           "api_token": {
             "anyOf": [
               {
-                "description": "Vikunja API Token（tk_ 开头）；只写不读",
+                "description": "与集成的 provider 对应的 Token：Vikunja 为 tk_，GitHub 为 github_pat_；只写不读",
                 "format": "password",
                 "maxLength": 512,
                 "minLength": 4,
@@ -766,6 +1521,26 @@
             "description": "显式传 null 表示恢复为 base_url",
             "title": "Public Url"
           },
+          "repositories": {
+            "anyOf": [
+              {
+                "items": {
+                  "description": "owner/repo",
+                  "maxLength": 140,
+                  "minLength": 3,
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "只用于 GitHub：整体替换要同步的仓库",
+            "title": "Repositories"
+          },
           "token_expires_at": {
             "anyOf": [
               {
@@ -789,6 +1564,453 @@
           "version"
         ],
         "title": "IntegrationUpdate",
+        "type": "object"
+      },
+      "IssueOut": {
+        "properties": {
+          "assignees": {
+            "description": "登录名",
+            "items": {
+              "type": "string"
+            },
+            "title": "Assignees",
+            "type": "array"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "创建者的登录名",
+            "title": "Author"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "comments": {
+            "title": "Comments",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "external_id": {
+            "description": "github:<类型>:<GitHub 的数字 id>；只用于显示与排错",
+            "title": "External Id",
+            "type": "string"
+          },
+          "id": {
+            "description": "投影 UUID",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "integration_id": {
+            "format": "uuid",
+            "title": "Integration Id",
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "repo_full_name": {
+            "title": "Repo Full Name",
+            "type": "string"
+          },
+          "repo_id": {
+            "description": "所属仓库的投影 UUID",
+            "format": "uuid",
+            "title": "Repo Id",
+            "type": "string"
+          },
+          "source_updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GitHub 上最后修改的时间",
+            "title": "Source Updated At"
+          },
+          "source_url": {
+            "description": "GitHub 上的地址（html_url）",
+            "title": "Source Url",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "state_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "completed / reopened / not_planned / duplicate",
+            "title": "State Reason"
+          },
+          "synced_at": {
+            "format": "date-time",
+            "title": "Synced At",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "integration_id",
+          "external_id",
+          "source_url",
+          "source_updated_at",
+          "synced_at",
+          "repo_id",
+          "repo_full_name",
+          "number",
+          "title",
+          "state",
+          "state_reason",
+          "author",
+          "labels",
+          "assignees",
+          "comments",
+          "created_at",
+          "closed_at"
+        ],
+        "title": "IssueOut",
+        "type": "object"
+      },
+      "IssuePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IssueOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "sync": {
+            "$ref": "#/components/schemas/SyncState"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items",
+          "sync"
+        ],
+        "title": "IssuePage",
+        "type": "object"
+      },
+      "KnowledgeResourceOut": {
+        "properties": {
+          "affine_workspace_id": {
+            "title": "Affine Workspace Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "doc_id": {
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "link_kind": {
+            "description": "workspace_doc：/workspace/<ws>/<doc>；share：/share/<ws>/<doc>",
+            "enum": [
+              "workspace_doc",
+              "share"
+            ],
+            "title": "Link Kind",
+            "type": "string"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceLinkOut"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "note": {
+            "description": "纯文本备注；前端按文本显示",
+            "title": "Note",
+            "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "创建者；用户被删除后为 null",
+            "title": "Owner Id"
+          },
+          "provider": {
+            "const": "affine",
+            "title": "Provider",
+            "type": "string"
+          },
+          "resource_type": {
+            "const": "affine_doc",
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "url": {
+            "description": "规范化后的链接：来源地址 + 文档路径 + 保留的查询参数",
+            "title": "Url",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "visibility": {
+            "description": "workspace：成员都能看到；private：只有创建者能看到",
+            "enum": [
+              "workspace",
+              "private"
+            ],
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source_id",
+          "provider",
+          "resource_type",
+          "title",
+          "note",
+          "url",
+          "link_kind",
+          "affine_workspace_id",
+          "doc_id",
+          "visibility",
+          "owner_id",
+          "links",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "KnowledgeResourceOut",
+        "type": "object"
+      },
+      "KnowledgeSourceCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "base_url": {
+            "description": "AFFiNE 的 server.externalUrl（可带子路径），与浏览器里打开 AFFiNE 的地址一致",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Base Url",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "const": "affine",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "name",
+          "base_url"
+        ],
+        "title": "KnowledgeSourceCreate",
+        "type": "object"
+      },
+      "KnowledgeSourceOut": {
+        "properties": {
+          "base_url": {
+            "description": "AFFiNE 的外部地址；收藏的链接都以它开头",
+            "title": "Base Url",
+            "type": "string"
+          },
+          "bookmark_count": {
+            "description": "该来源下的收藏数（含所有人的私有收藏）",
+            "minimum": 0.0,
+            "title": "Bookmark Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "const": "affine",
+            "title": "Provider",
+            "type": "string"
+          },
+          "tested_version": {
+            "description": "工作台核验过的 AFFiNE 版本",
+            "title": "Tested Version",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "name",
+          "base_url",
+          "tested_version",
+          "bookmark_count",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "KnowledgeSourceOut",
+        "type": "object"
+      },
+      "KnowledgeSourceUpdate": {
+        "additionalProperties": false,
+        "description": "修改 base_url 后，该来源下所有收藏的链接都随之改为新地址。",
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "description": "AFFiNE 的 server.externalUrl（可带子路径），与浏览器里打开 AFFiNE 的地址一致",
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "KnowledgeSourceUpdate",
         "type": "object"
       },
       "LoginRequest": {
@@ -899,6 +2121,19 @@
             ],
             "description": "机器可读的原因，例如 not_configured、timeout、error；不含敏感信息",
             "title": "Reason"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "被第三方限流时预计恢复的时间（reason 为 rate_limited）；其余情况为 null",
+            "title": "Retry At"
           },
           "retryable": {
             "description": "稍后重试是否可能恢复",
@@ -1070,6 +2305,45 @@
         "title": "Page[AuditLogOut]",
         "type": "object"
       },
+      "Page_CalendarEventOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CalendarEventOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[CalendarEventOut]",
+        "type": "object"
+      },
       "Page_DashboardOut_": {
         "properties": {
           "items": {
@@ -1146,6 +2420,84 @@
           "items"
         ],
         "title": "Page[IntegrationOut]",
+        "type": "object"
+      },
+      "Page_KnowledgeResourceOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeResourceOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[KnowledgeResourceOut]",
+        "type": "object"
+      },
+      "Page_KnowledgeSourceOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeSourceOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[KnowledgeSourceOut]",
         "type": "object"
       },
       "Page_SessionOut_": {
@@ -1396,6 +2748,214 @@
         "title": "ProjectPage",
         "type": "object"
       },
+      "PullOut": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "base_ref": {
+            "title": "Base Ref",
+            "type": "string"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "draft": {
+            "title": "Draft",
+            "type": "boolean"
+          },
+          "external_id": {
+            "description": "github:<类型>:<GitHub 的数字 id>；只用于显示与排错",
+            "title": "External Id",
+            "type": "string"
+          },
+          "head_ref": {
+            "title": "Head Ref",
+            "type": "string"
+          },
+          "id": {
+            "description": "投影 UUID",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "integration_id": {
+            "format": "uuid",
+            "title": "Integration Id",
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "merged": {
+            "title": "Merged",
+            "type": "boolean"
+          },
+          "merged_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merged At"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "repo_full_name": {
+            "title": "Repo Full Name",
+            "type": "string"
+          },
+          "repo_id": {
+            "description": "所属仓库的投影 UUID",
+            "format": "uuid",
+            "title": "Repo Id",
+            "type": "string"
+          },
+          "requested_reviewers": {
+            "description": "登录名",
+            "items": {
+              "type": "string"
+            },
+            "title": "Requested Reviewers",
+            "type": "array"
+          },
+          "source_updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GitHub 上最后修改的时间",
+            "title": "Source Updated At"
+          },
+          "source_url": {
+            "description": "GitHub 上的地址（html_url）",
+            "title": "Source Url",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "synced_at": {
+            "format": "date-time",
+            "title": "Synced At",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "integration_id",
+          "external_id",
+          "source_url",
+          "source_updated_at",
+          "synced_at",
+          "repo_id",
+          "repo_full_name",
+          "number",
+          "title",
+          "state",
+          "draft",
+          "merged",
+          "merged_at",
+          "author",
+          "labels",
+          "requested_reviewers",
+          "head_ref",
+          "base_ref",
+          "created_at",
+          "closed_at"
+        ],
+        "title": "PullOut",
+        "type": "object"
+      },
+      "PullPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PullOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "sync": {
+            "$ref": "#/components/schemas/SyncState"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items",
+          "sync"
+        ],
+        "title": "PullPage",
+        "type": "object"
+      },
       "QuickLink": {
         "additionalProperties": false,
         "properties": {
@@ -1511,6 +3071,319 @@
         "title": "ReadinessResponse",
         "type": "object"
       },
+      "RecentDocsConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 5,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "RecentDocsConfig",
+        "type": "object"
+      },
+      "RecentDocsWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/RecentDocsConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "recent_docs",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "RecentDocsWidgetCreate",
+        "type": "object"
+      },
+      "RecentDocsWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/RecentDocsConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "recent_docs",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "RecentDocsWidgetUpdate",
+        "type": "object"
+      },
+      "RepoOut": {
+        "properties": {
+          "access": {
+            "description": "最近一次同步时 Token 对该仓库的访问情况",
+            "enum": [
+              "ok",
+              "missing_permission",
+              "not_found"
+            ],
+            "title": "Access",
+            "type": "string"
+          },
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "default_branch": {
+            "title": "Default Branch",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "external_id": {
+            "description": "github:<类型>:<GitHub 的数字 id>；只用于显示与排错",
+            "title": "External Id",
+            "type": "string"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "id": {
+            "description": "投影 UUID",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "integration_id": {
+            "format": "uuid",
+            "title": "Integration Id",
+            "type": "string"
+          },
+          "private": {
+            "title": "Private",
+            "type": "boolean"
+          },
+          "pushed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pushed At"
+          },
+          "source_updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GitHub 上最后修改的时间",
+            "title": "Source Updated At"
+          },
+          "source_url": {
+            "description": "GitHub 上的地址（html_url）",
+            "title": "Source Url",
+            "type": "string"
+          },
+          "synced_at": {
+            "format": "date-time",
+            "title": "Synced At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "integration_id",
+          "external_id",
+          "source_url",
+          "source_updated_at",
+          "synced_at",
+          "full_name",
+          "description",
+          "private",
+          "archived",
+          "default_branch",
+          "pushed_at",
+          "access"
+        ],
+        "title": "RepoOut",
+        "type": "object"
+      },
+      "RepoPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RepoOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "sync": {
+            "$ref": "#/components/schemas/SyncState"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items",
+          "sync"
+        ],
+        "title": "RepoPage",
+        "type": "object"
+      },
+      "RepositoryCheck": {
+        "description": "GitHub 集成逐个仓库的读权限检查（Sprint 4 契约第 6.3 节）。",
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryPermissionCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "full_name",
+          "ok",
+          "checks"
+        ],
+        "title": "RepositoryCheck",
+        "type": "object"
+      },
+      "RepositoryPermissionCheck": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "未通过时的错误码：missing_permission / not_found 等",
+            "title": "Code"
+          },
+          "name": {
+            "enum": [
+              "metadata",
+              "issues",
+              "pull_requests",
+              "actions"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "ok"
+        ],
+        "title": "RepositoryPermissionCheck",
+        "type": "object"
+      },
+      "ResourceLinkOut": {
+        "description": "关联的项目 / 任务；它在 Vikunja 里删除后不再出现（A10）。",
+        "properties": {
+          "resource_id": {
+            "description": "项目或任务的投影 UUID",
+            "format": "uuid",
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "resource_type": {
+            "enum": [
+              "task",
+              "project"
+            ],
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "source_url": {
+            "description": "Vikunja 原生界面中的地址",
+            "title": "Source Url",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_id",
+          "resource_type",
+          "title",
+          "source_url"
+        ],
+        "title": "ResourceLinkOut",
+        "type": "object"
+      },
       "Role": {
         "description": "权限由高到低：owner > admin > member > viewer。",
         "enum": [
@@ -1521,6 +3394,361 @@
         ],
         "title": "Role",
         "type": "string"
+      },
+      "RunOut": {
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "触发者的登录名",
+            "title": "Actor"
+          },
+          "conclusion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "success / failure / cancelled 等；未结束时为 null",
+            "title": "Conclusion"
+          },
+          "display_title": {
+            "title": "Display Title",
+            "type": "string"
+          },
+          "event": {
+            "title": "Event",
+            "type": "string"
+          },
+          "external_id": {
+            "description": "github:<类型>:<GitHub 的数字 id>；只用于显示与排错",
+            "title": "External Id",
+            "type": "string"
+          },
+          "failure_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "失败的运行才有"
+          },
+          "head_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Branch"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "id": {
+            "description": "投影 UUID",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "integration_id": {
+            "format": "uuid",
+            "title": "Integration Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "repo_full_name": {
+            "title": "Repo Full Name",
+            "type": "string"
+          },
+          "repo_id": {
+            "description": "所属仓库的投影 UUID",
+            "format": "uuid",
+            "title": "Repo Id",
+            "type": "string"
+          },
+          "run_attempt": {
+            "title": "Run Attempt",
+            "type": "integer"
+          },
+          "run_number": {
+            "title": "Run Number",
+            "type": "integer"
+          },
+          "run_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Started At"
+          },
+          "source_updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GitHub 上最后修改的时间",
+            "title": "Source Updated At"
+          },
+          "source_url": {
+            "description": "GitHub 上的地址（html_url）",
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "queued / in_progress / completed 等",
+            "title": "Status"
+          },
+          "synced_at": {
+            "format": "date-time",
+            "title": "Synced At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "integration_id",
+          "external_id",
+          "source_url",
+          "source_updated_at",
+          "synced_at",
+          "repo_id",
+          "repo_full_name",
+          "name",
+          "display_title",
+          "status",
+          "conclusion",
+          "event",
+          "head_branch",
+          "head_sha",
+          "run_number",
+          "run_attempt",
+          "actor",
+          "run_started_at",
+          "failure_summary"
+        ],
+        "title": "RunOut",
+        "type": "object"
+      },
+      "RunPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "sync": {
+            "$ref": "#/components/schemas/SyncState"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items",
+          "sync"
+        ],
+        "title": "RunPage",
+        "type": "object"
+      },
+      "SearchPage": {
+        "description": "total_estimate 恒为 null。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResultOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "SearchPage",
+        "type": "object"
+      },
+      "SearchResultOut": {
+        "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "辅助信息：任务的项目名、Issue / PR 的仓库名、事件的日期等",
+            "title": "Context"
+          },
+          "id": {
+            "description": "该资源在自己接口里的 UUID",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "match": {
+            "description": "title：标题命中；text：只在备注、说明等正文命中",
+            "enum": [
+              "title",
+              "text"
+            ],
+            "title": "Match",
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "vikunja",
+              "github",
+              "affine",
+              "local"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "resource_type": {
+            "enum": [
+              "task",
+              "project",
+              "bookmark",
+              "event",
+              "repo",
+              "issue",
+              "pull"
+            ],
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "外部原生界面的链接；本地日历事件为 null",
+            "title": "Source Url"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "resource_type",
+          "id",
+          "title",
+          "context",
+          "provider",
+          "source_url",
+          "updated_at",
+          "match"
+        ],
+        "title": "SearchResultOut",
+        "type": "object"
       },
       "SessionOut": {
         "properties": {
@@ -1681,6 +3909,19 @@
             ],
             "description": "机器可读的原因，例如 not_synced；不含敏感信息",
             "title": "Reason"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "被第三方限流时预计恢复的时间（reason 为 rate_limited）；其余情况为 null",
+            "title": "Retry At"
           },
           "status": {
             "enum": [
@@ -2333,7 +4574,7 @@
             "type": "integer"
           },
           "widget_type": {
-            "description": "当前版本内置：quick_links、note、todo_summary、today_tasks；也可能是已不再支持的旧类型，前端应显示安全的错误卡片",
+            "description": "当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity；也可能是已不再支持的旧类型，前端应显示安全的错误卡片",
             "title": "Widget Type",
             "type": "string"
           }
@@ -2943,6 +5184,494 @@
         ]
       }
     },
+    "/api/v1/calendar/events": {
+      "get": {
+        "description": "返回与 [start, end) 有重叠的事件，按开始时间排序；start、end 必须带时区，跨度不超过 92 天，否则返回 422。",
+        "operationId": "list_events",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "End",
+              "type": "string"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_CalendarEventOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "区间内的日程（viewer）",
+        "tags": [
+          "calendar"
+        ]
+      },
+      "post": {
+        "description": "定时事件填 start_at / end_at（带时区），全天事件填 start_date / end_date（结束不含）；V1 不支持重复事件。",
+        "operationId": "create_event",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarEventCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarEventOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "新建日程（member）",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
+    "/api/v1/calendar/events/{event_id}": {
+      "delete": {
+        "operationId": "delete_event",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "乐观并发版本号；写请求必须带上读取时的版本",
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "删除日程（member，前端先二次确认）",
+        "tags": [
+          "calendar"
+        ]
+      },
+      "patch": {
+        "operationId": "update_event",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarEventUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarEventOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "修改日程（member，乐观并发）",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
     "/api/v1/dashboard/overview": {
       "get": {
         "description": "不同步等待外部服务；单个模块失败只把该模块标为 unavailable / stale，不影响其余内容。",
@@ -3458,8 +6187,11 @@
               "schema": {
                 "discriminator": {
                   "mapping": {
+                    "calendar_agenda": "#/components/schemas/CalendarAgendaWidgetCreate",
+                    "github_activity": "#/components/schemas/GitHubActivityWidgetCreate",
                     "note": "#/components/schemas/NoteWidgetCreate",
                     "quick_links": "#/components/schemas/QuickLinksWidgetCreate",
+                    "recent_docs": "#/components/schemas/RecentDocsWidgetCreate",
                     "today_tasks": "#/components/schemas/TodayTasksWidgetCreate",
                     "todo_summary": "#/components/schemas/TodoSummaryWidgetCreate"
                   },
@@ -3477,6 +6209,15 @@
                   },
                   {
                     "$ref": "#/components/schemas/TodayTasksWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CalendarAgendaWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecentDocsWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitHubActivityWidgetCreate"
                   }
                 ],
                 "title": "Body"
@@ -3558,6 +6299,606 @@
         ]
       }
     },
+    "/api/v1/developer/issues": {
+      "get": {
+        "operationId": "list_issues",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repo_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "enum": [
+                "open",
+                "closed",
+                "all"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "description": "标题包含",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "标题包含",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "GitHub Issue（viewer，读本地投影；不含 PR）",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/api/v1/developer/pulls": {
+      "get": {
+        "operationId": "list_pulls",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repo_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "enum": [
+                "open",
+                "closed",
+                "all"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "description": "标题包含",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "标题包含",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "GitHub PR（viewer，读本地投影）",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/api/v1/developer/repos": {
+      "get": {
+        "operationId": "list_repos",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "integration_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Integration Id"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepoPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "GitHub 仓库（viewer，读本地投影）",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/api/v1/developer/runs": {
+      "get": {
+        "description": "失败的运行带 failure_summary（失败的 job 与 step 名称，不含日志）。",
+        "operationId": "list_runs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repo_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "completed",
+                    "action_required",
+                    "cancelled",
+                    "failure",
+                    "neutral",
+                    "skipped",
+                    "stale",
+                    "success",
+                    "timed_out",
+                    "in_progress",
+                    "queued",
+                    "requested",
+                    "waiting",
+                    "pending"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "conclusion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "success",
+                    "failure",
+                    "neutral",
+                    "cancelled",
+                    "skipped",
+                    "timed_out",
+                    "action_required"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Conclusion"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "GitHub Actions 最近运行（viewer，读本地投影）",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
     "/api/v1/integrations": {
       "get": {
         "description": "不含任何凭证；status 与 sync 表示连接状态与数据新鲜度。",
@@ -3629,7 +6970,7 @@
         ]
       },
       "post": {
-        "description": "保存后状态为 pending，需要测试连接；每个工作空间最多 1 个同类集成（第 2 个返回 409 LIMIT_EXCEEDED）。base_url 解析到私有地址且不在部署允许列表里时返回 422。",
+        "description": "请求体按 provider 区分。保存后状态为 pending，需要测试连接；每个工作空间最多 1 个同类集成（第 2 个返回 409 LIMIT_EXCEEDED）。Vikunja 的 base_url 解析到私有地址且不在部署允许列表里时返回 422；GitHub 的地址固定为 api.github.com，只同步 repositories 中列出的仓库。",
         "operationId": "create_integration",
         "parameters": [
           {
@@ -3667,7 +7008,22 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IntegrationCreate"
+                "discriminator": {
+                  "mapping": {
+                    "github": "#/components/schemas/GitHubIntegrationCreate",
+                    "vikunja": "#/components/schemas/IntegrationCreate"
+                  },
+                  "propertyName": "provider"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/IntegrationCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitHubIntegrationCreate"
+                  }
+                ],
+                "title": "Body"
               }
             }
           },
@@ -3740,7 +7096,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "新建 Vikunja 集成（admin）",
+        "summary": "新建 Vikunja 或 GitHub 集成（admin）",
         "tags": [
           "integrations"
         ]
@@ -3748,7 +7104,7 @@
     },
     "/api/v1/integrations/{integration_id}": {
       "patch": {
-        "description": "version 不一致时返回 409 VERSION_CONFLICT；改 base_url 或 api_token 后状态回到 pending。",
+        "description": "version 不一致时返回 409 VERSION_CONFLICT；改 base_url 或 api_token 后状态回到 pending。api_token 的前缀必须与集成的 provider 一致；base_url / public_url 只用于 Vikunja，repositories 只用于 GitHub，不适用时返回 422。",
         "operationId": "update_integration",
         "parameters": [
           {
@@ -4113,6 +7469,994 @@
         ]
       }
     },
+    "/api/v1/knowledge/bookmarks": {
+      "post": {
+        "description": "链接按核验 ADR 第 8.3 节校验（不合规返回 422，details.reason 说明原因）；没有配置知识来源时返回 409 INTEGRATION_UNAVAILABLE；同一文档已有同样可见性的收藏时返回 409 BOOKMARK_EXISTS（details.existing_id）。",
+        "operationId": "create_bookmark",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookmarkCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeResourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "收藏 AFFiNE 文档（member）",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/api/v1/knowledge/bookmarks/{bookmark_id}": {
+      "delete": {
+        "operationId": "delete_bookmark",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bookmark_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bookmark Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "乐观并发版本号；写请求必须带上读取时的版本",
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "删除收藏（member；私有收藏只有创建者能删）",
+        "tags": [
+          "knowledge"
+        ]
+      },
+      "patch": {
+        "operationId": "update_bookmark",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bookmark_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bookmark Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookmarkUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeResourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "修改收藏（member，乐观并发；只有创建者能改 visibility）",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/api/v1/knowledge/resources": {
+      "get": {
+        "description": "linked_resource_id 只返回关联了该 Vikunja 项目 / 任务的收藏（任务抽屉的“相关文档”）。",
+        "operationId": "list_resources",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "linked_resource_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Linked Resource Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "visibility",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "workspace",
+                "private",
+                "all"
+              ],
+              "title": "Visibility",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "updated",
+              "enum": [
+                "updated",
+                "title"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_KnowledgeResourceOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "文档收藏列表（viewer；私有收藏只返回自己的）",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/api/v1/knowledge/sources": {
+      "get": {
+        "operationId": "list_sources",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_KnowledgeSourceOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "知识来源（AFFiNE 外部地址）列表（viewer）",
+        "tags": [
+          "knowledge"
+        ]
+      },
+      "post": {
+        "description": "只检查地址字符串，工作台从不访问它；每个工作空间最多 1 个（第 2 个返回 409 LIMIT_EXCEEDED）。",
+        "operationId": "create_source",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeSourceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "配置 AFFiNE 外部地址（admin）",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/api/v1/knowledge/sources/{source_id}": {
+      "delete": {
+        "operationId": "delete_source",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "乐观并发版本号；写请求必须带上读取时的版本",
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "删除知识来源（admin；连同它的全部收藏，前端先二次确认）",
+        "tags": [
+          "knowledge"
+        ]
+      },
+      "patch": {
+        "description": "修改 base_url 后，该来源下所有收藏的链接都随之改为新地址。",
+        "operationId": "update_source",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeSourceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "修改知识来源（admin，乐观并发）",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
     "/api/v1/me": {
       "get": {
         "operationId": "get_me",
@@ -4386,6 +8730,149 @@
         "summary": "外部项目列表（viewer，读本地投影）",
         "tags": [
           "tasks"
+        ]
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "description": "中文按字面包含与相似度匹配（不分词），相关性有限；排序见契约第 8 节。",
+        "operationId": "search",
+        "parameters": [
+          {
+            "description": "去掉首尾空白后 1–100 字",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "去掉首尾空白后 1–100 字",
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "可重复；默认全部类型",
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "task",
+                      "project",
+                      "bookmark",
+                      "event",
+                      "repo",
+                      "issue",
+                      "pull"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "可重复；默认全部类型",
+              "title": "Types"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "跨资源搜索（viewer）",
+        "tags": [
+          "search"
         ]
       }
     },
@@ -5560,8 +10047,11 @@
                 "description": "修改配置；widget_type 必须与现有类型相同（类型不能修改）",
                 "discriminator": {
                   "mapping": {
+                    "calendar_agenda": "#/components/schemas/CalendarAgendaWidgetUpdate",
+                    "github_activity": "#/components/schemas/GitHubActivityWidgetUpdate",
                     "note": "#/components/schemas/NoteWidgetUpdate",
                     "quick_links": "#/components/schemas/QuickLinksWidgetUpdate",
+                    "recent_docs": "#/components/schemas/RecentDocsWidgetUpdate",
                     "today_tasks": "#/components/schemas/TodayTasksWidgetUpdate",
                     "todo_summary": "#/components/schemas/TodoSummaryWidgetUpdate"
                   },
@@ -5579,6 +10069,15 @@
                   },
                   {
                     "$ref": "#/components/schemas/TodayTasksWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CalendarAgendaWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecentDocsWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitHubActivityWidgetUpdate"
                   }
                 ],
                 "title": "Body"

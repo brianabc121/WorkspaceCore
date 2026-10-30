@@ -71,6 +71,19 @@ def _url_not_allowed(field: str) -> ApiError:
     )
 
 
+def _not_applicable(field: str, message: str) -> ApiError:
+    return ApiError(
+        422,
+        "VALIDATION_FAILED",
+        "请求参数校验失败",
+        details={"errors": [{"loc": ["body", field], "msg": message, "type": "value_error"}]},
+    )
+
+
+# 每种集成的 Token 前缀（Sprint 4 契约第 6.2 节）；修改时的请求体不带 provider，在这里检查
+_TOKEN_PREFIX = {"vikunja": "tk_", "github": "github_pat_"}
+
+
 def _version_conflict(current: int) -> ApiError:
     return ApiError(
         409,
@@ -222,6 +235,12 @@ class IntegrationService:
         if integration.version != body.version:
             raise _version_conflict(integration.version)
         fields = body.model_fields_set - {"version"}
+        if "repositories" in fields and integration.provider != "github":
+            raise _not_applicable("repositories", "只有 GitHub 集成可以设置仓库")
+        if body.api_token is not None and not body.api_token.get_secret_value().startswith(
+            _TOKEN_PREFIX.get(integration.provider, "tk_")
+        ):
+            raise _not_applicable("api_token", "Token 与集成的类型不符")
         reset = False
         if "name" in fields and body.name is not None:
             integration.name = body.name

@@ -105,6 +105,24 @@ class TodayTasksConfig(_Strict):
     limit: int = Field(default=5, ge=1, le=20)
 
 
+class CalendarAgendaConfig(_Strict):
+    """Sprint 4：组件自己调用 GET /calendar/events（Sprint 4 契约第 9.2 节）。"""
+
+    days: int = Field(default=7, ge=1, le=14, description="从现在起显示多少天")
+    limit: int = Field(default=5, ge=1, le=20)
+
+
+class RecentDocsConfig(_Strict):
+    limit: int = Field(default=5, ge=1, le=20)
+
+
+class GitHubActivityConfig(_Strict):
+    kind: Literal["runs", "pulls", "issues"] = Field(
+        default="runs", description="显示最近的 Actions 运行、PR 或 Issue"
+    )
+    limit: int = Field(default=5, ge=1, le=20)
+
+
 class _WidgetBody(_Strict):
     layout: WidgetLayout
 
@@ -129,8 +147,29 @@ class TodayTasksWidgetCreate(_WidgetBody):
     config: TodayTasksConfig = Field(default_factory=TodayTasksConfig)
 
 
+class CalendarAgendaWidgetCreate(_WidgetBody):
+    widget_type: Literal["calendar_agenda"]
+    config: CalendarAgendaConfig = Field(default_factory=CalendarAgendaConfig)
+
+
+class RecentDocsWidgetCreate(_WidgetBody):
+    widget_type: Literal["recent_docs"]
+    config: RecentDocsConfig = Field(default_factory=RecentDocsConfig)
+
+
+class GitHubActivityWidgetCreate(_WidgetBody):
+    widget_type: Literal["github_activity"]
+    config: GitHubActivityConfig = Field(default_factory=GitHubActivityConfig)
+
+
 WidgetCreate = Annotated[
-    QuickLinksWidgetCreate | NoteWidgetCreate | TodoSummaryWidgetCreate | TodayTasksWidgetCreate,
+    QuickLinksWidgetCreate
+    | NoteWidgetCreate
+    | TodoSummaryWidgetCreate
+    | TodayTasksWidgetCreate
+    | CalendarAgendaWidgetCreate
+    | RecentDocsWidgetCreate
+    | GitHubActivityWidgetCreate,
     Field(discriminator="widget_type"),
 ]
 
@@ -159,8 +198,29 @@ class TodayTasksWidgetUpdate(_WidgetUpdateBody):
     config: TodayTasksConfig
 
 
+class CalendarAgendaWidgetUpdate(_WidgetUpdateBody):
+    widget_type: Literal["calendar_agenda"]
+    config: CalendarAgendaConfig
+
+
+class RecentDocsWidgetUpdate(_WidgetUpdateBody):
+    widget_type: Literal["recent_docs"]
+    config: RecentDocsConfig
+
+
+class GitHubActivityWidgetUpdate(_WidgetUpdateBody):
+    widget_type: Literal["github_activity"]
+    config: GitHubActivityConfig
+
+
 WidgetUpdate = Annotated[
-    QuickLinksWidgetUpdate | NoteWidgetUpdate | TodoSummaryWidgetUpdate | TodayTasksWidgetUpdate,
+    QuickLinksWidgetUpdate
+    | NoteWidgetUpdate
+    | TodoSummaryWidgetUpdate
+    | TodayTasksWidgetUpdate
+    | CalendarAgendaWidgetUpdate
+    | RecentDocsWidgetUpdate
+    | GitHubActivityWidgetUpdate,
     Field(
         discriminator="widget_type",
         description="修改配置；widget_type 必须与现有类型相同（类型不能修改）",
@@ -172,7 +232,8 @@ class WidgetOut(BaseModel):
     id: UUID
     dashboard_id: UUID
     widget_type: str = Field(
-        description="当前版本内置：quick_links、note、todo_summary、today_tasks；"
+        description="当前版本内置：quick_links、note、todo_summary、today_tasks、"
+        "calendar_agenda、recent_docs、github_activity；"
         "也可能是已不再支持的旧类型，前端应显示安全的错误卡片"
     )
     config: dict[str, Any] = Field(description="该类型的配置；前端按自己的 Registry 再校验一次")
@@ -235,6 +296,10 @@ class ModuleStatus(BaseModel):
         default=None,
         description="机器可读的原因，例如 not_configured、timeout、error；不含敏感信息",
     )
+    retry_at: datetime | None = Field(
+        default=None,
+        description="被第三方限流时预计恢复的时间（reason 为 rate_limited）；其余情况为 null",
+    )
 
 
 class OverviewSummary(BaseModel):
@@ -260,7 +325,8 @@ class DashboardOverview(BaseModel):
     widgets: list[WidgetOut]
     summary: OverviewSummary
     modules: dict[str, ModuleStatus] = Field(
-        description="按模块名索引（本 Sprint 只有 tasks）；单个模块失败只影响对应组件"
+        description="按模块名索引：tasks（Sprint 3）、calendar、knowledge、github（Sprint 4）；"
+        "单个模块失败只影响对应组件"
     )
     today_tasks: list[TaskBrief]
     generated_at: datetime

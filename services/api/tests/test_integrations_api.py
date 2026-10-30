@@ -208,6 +208,27 @@ async def test_update_uses_versions_and_resets_status(env: Env) -> None:
     assert "tk_" not in audits
 
 
+async def test_update_rejects_fields_of_another_provider(env: Env) -> None:
+    """Sprint 4 契约第 6.2 节：Token 前缀与 provider 一致；repositories 只用于 GitHub。"""
+    integration = await env.connect()
+    path = f"/api/v1/integrations/{integration['id']}"
+    github_token = "github_pat_11AAAAAAA0" + "x" * 30
+    cases: list[tuple[dict[str, object], str]] = [
+        ({"api_token": github_token}, "api_token"),
+        ({"repositories": ["octo/hello-world"]}, "repositories"),
+    ]
+    for body, field in cases:
+        response = await env.client.patch(
+            path, json={"version": integration["version"], **body}, headers=env.headers(write=True)
+        )
+        assert response.status_code == 422, field
+        assert response.json()["error"]["details"]["errors"][0]["loc"] == ["body", field]
+        assert github_token not in response.text
+    unchanged = await env.client.get("/api/v1/integrations", headers=env.headers())
+    assert unchanged.json()["items"][0]["version"] == integration["version"]
+    assert unchanged.json()["items"][0]["repositories"] == []
+
+
 async def test_only_admins_manage_integrations(env: Env) -> None:
     integration = await env.connect()
     async with env.member("member@example.com", "member") as member:

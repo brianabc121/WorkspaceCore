@@ -1,5 +1,6 @@
 """接口契约：Sprint 1（docs/decisions/2026-10-30-sprint-1-auth-contract.md）、
-Sprint 2（…-sprint-2-dashboard-contract.md）、Sprint 3（…-sprint-3-tasks-contract.md）。"""
+Sprint 2（…-sprint-2-dashboard-contract.md）、Sprint 3（…-sprint-3-tasks-contract.md）、
+Sprint 4（…-sprint-4-knowledge-search-contract.md）。"""
 
 import json
 import uuid
@@ -64,6 +65,26 @@ SPRINT_3_ENDPOINTS = {
     ("delete", "/api/v1/tasks/{task_id}"),
     ("post", "/api/v1/webhooks/vikunja/{integration_id}"),
 }
+
+SPRINT_4_ENDPOINTS = {
+    ("get", "/api/v1/knowledge/sources"),
+    ("post", "/api/v1/knowledge/sources"),
+    ("patch", "/api/v1/knowledge/sources/{source_id}"),
+    ("delete", "/api/v1/knowledge/sources/{source_id}"),
+    ("get", "/api/v1/knowledge/resources"),
+    ("post", "/api/v1/knowledge/bookmarks"),
+    ("patch", "/api/v1/knowledge/bookmarks/{bookmark_id}"),
+    ("delete", "/api/v1/knowledge/bookmarks/{bookmark_id}"),
+    ("get", "/api/v1/calendar/events"),
+    ("post", "/api/v1/calendar/events"),
+    ("patch", "/api/v1/calendar/events/{event_id}"),
+    ("delete", "/api/v1/calendar/events/{event_id}"),
+    ("get", "/api/v1/developer/repos"),
+    ("get", "/api/v1/developer/issues"),
+    ("get", "/api/v1/developer/pulls"),
+    ("get", "/api/v1/developer/runs"),
+    ("get", "/api/v1/search"),
+}
 WORKSPACE = {"X-Workspace-Id": str(uuid.uuid4())}
 
 
@@ -85,7 +106,9 @@ def test_committed_openapi_matches_code() -> None:
 def test_all_sprint_endpoints_are_declared() -> None:
     paths = json.loads(render())["paths"]
     declared = {(method, path) for path, ops in paths.items() for method in ops}
-    assert declared >= SPRINT_1_ENDPOINTS | SPRINT_2_ENDPOINTS | SPRINT_3_ENDPOINTS
+    assert declared >= (
+        SPRINT_1_ENDPOINTS | SPRINT_2_ENDPOINTS | SPRINT_3_ENDPOINTS | SPRINT_4_ENDPOINTS
+    )
 
 
 def test_no_endpoint_documents_501() -> None:
@@ -109,6 +132,9 @@ def test_widget_types_are_a_discriminated_union() -> None:
         "note",
         "todo_summary",
         "today_tasks",
+        "calendar_agenda",
+        "recent_docs",
+        "github_activity",
     }
 
 
@@ -309,3 +335,195 @@ def test_webhook_endpoint_does_not_require_a_session(app: FastAPI) -> None:
     operation = app.openapi()["paths"]["/api/v1/webhooks/vikunja/{integration_id}"]["post"]
     assert "security" not in operation
     assert {p["name"] for p in operation.get("parameters", [])} >= {"X-Vikunja-Signature"}
+
+
+# ---------------------------------------------------------------- Sprint 4
+
+
+def _schemas() -> dict[str, dict[str, object]]:
+    schemas: dict[str, dict[str, object]] = json.loads(render())["components"]["schemas"]
+    return schemas
+
+
+def test_sprint_4_only_adds_optional_fields_to_existing_schemas() -> None:
+    """契约第 1 节：已有字段与枚举不变，新字段在生成的 TypeScript 类型里是可选的。"""
+    schemas = _schemas()
+    for name, field in [
+        ("IntegrationOut", "repositories"),
+        ("IntegrationTestResult", "repositories"),
+        ("SyncState", "retry_at"),
+        ("ModuleStatus", "retry_at"),
+    ]:
+        assert field in schemas[name]["properties"], (name, field)  # type: ignore[operator]
+        assert field not in schemas[name].get("required", []), (name, field)  # type: ignore[operator]
+    check = schemas["IntegrationCheck"]["properties"]["name"]  # type: ignore[index]
+    assert set(check["enum"]) == {"reachable", "version", "token", "tasks_read", "webhooks"}
+
+
+def test_integration_create_is_a_union_by_provider() -> None:
+    body = _operation("post", "/api/v1/integrations")["requestBody"]
+    union = body["content"]["application/json"]["schema"]  # type: ignore[index]
+    assert union["discriminator"]["propertyName"] == "provider"
+    assert set(union["discriminator"]["mapping"]) == {"vikunja", "github"}
+    github = _schemas()["GitHubIntegrationCreate"]["properties"]
+    assert github["api_token"]["writeOnly"] is True  # type: ignore[index]
+    assert "base_url" not in github  # type: ignore[operator]
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_github_integration_payload_rules(stub_client: httpx.AsyncClient) -> None:
+    classic = "ghp_classic0123456789abcdefghij"
+    base = {"provider": "github", "name": "GitHub", "repositories": ["octo/hello-world"]}
+    wrong = await stub_client.post(
+        "/api/v1/integrations", json={**base, "api_token": classic}, headers=WORKSPACE
+    )
+    assert wrong.status_code == 422
+    assert classic not in wrong.text
+    # 测试用的假 Token
+    token = "github_pat_11AAAAAAA0example"  # noqa: S105
+    cases = {
+        "没有仓库": {**base, "repositories": []},
+        "仓库格式": {**base, "repositories": ["octo"]},
+        "仓库重复": {**base, "repositories": ["octo/a", "Octo/A"]},
+        "仓库是 ..": {**base, "repositories": ["octo/.."]},
+        "不接受 base_url": {**base, "base_url": "https://github.example.com"},
+        "仓库太多": {**base, "repositories": [f"octo/r{i}" for i in range(21)]},
+    }
+    for name, payload in cases.items():
+        response = await stub_client.post(
+            "/api/v1/integrations", json={**payload, "api_token": token}, headers=WORKSPACE
+        )
+        assert response.status_code == 422, name
+    ok = await stub_client.post(
+        "/api/v1/integrations", json={**base, "api_token": token}, headers=WORKSPACE
+    )
+    assert ok.status_code == 501  # 形态正确，GitHub 集成在 T-0028 实现
+    patch = f"/api/v1/integrations/{uuid.uuid4()}"
+    invalid: list[dict[str, object]] = [
+        {"version": 1, "api_token": "sk_other"},
+        {"version": 1, "repositories": None},
+    ]
+    for update in invalid:
+        response = await stub_client.patch(patch, json=update, headers=WORKSPACE)
+        assert response.status_code == 422, update
+    accepted = await stub_client.patch(
+        patch,
+        json={"version": 1, "api_token": token, "repositories": ["octo/b"]},
+        headers=WORKSPACE,
+    )
+    assert accepted.status_code == 501
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_knowledge_source_and_bookmark_payload_rules(
+    stub_client: httpx.AsyncClient,
+) -> None:
+    for url in [
+        "http://169.254.169.254/latest",
+        "javascript:alert(1)",
+        "https://user:pw@affine.example.com",
+        "https://affine.example.com/?a=1",
+        "http://0.0.0.0:3010",
+    ]:
+        response = await stub_client.post(
+            "/api/v1/knowledge/sources",
+            json={"provider": "affine", "name": "AFFiNE", "base_url": url},
+            headers=WORKSPACE,
+        )
+        assert response.status_code == 422, url
+        assert "pw@" not in response.text
+    for url in ["https://affine.example.com/affine/", "http://localhost:3010"]:
+        ok = await stub_client.post(
+            "/api/v1/knowledge/sources",
+            json={"provider": "affine", "name": "AFFiNE", "base_url": url},
+            headers=WORKSPACE,
+        )
+        assert ok.status_code == 501, url  # 本机开发的回环地址允许
+    doc = "https://affine.example.com/workspace/w/d"
+    linked = str(uuid.uuid4())
+    bookmark_cases = {
+        "没有标题": {"url": doc},
+        "可见性": {"url": doc, "title": "设计", "visibility": "team"},
+        "重复关联": {"url": doc, "title": "设计", "linked_resource_ids": [linked, linked]},
+        "多余字段": {"url": doc, "title": "设计", "body": "正文"},
+    }
+    for name, body in bookmark_cases.items():
+        response = await stub_client.post(
+            "/api/v1/knowledge/bookmarks", json=body, headers=WORKSPACE
+        )
+        assert response.status_code == 422, name
+    created = await stub_client.post(
+        "/api/v1/knowledge/bookmarks", json={"url": doc, "title": "设计"}, headers=WORKSPACE
+    )
+    assert created.status_code == 501  # 链接是否属于知识来源在服务端校验（T-0027）
+    path = f"/api/v1/knowledge/bookmarks/{uuid.uuid4()}"
+    for body in [{"version": 1}, {"version": 1, "title": None}]:
+        response = await stub_client.patch(path, json=body, headers=WORKSPACE)
+        assert response.status_code == 422, body
+    no_version = await stub_client.delete(path, headers=WORKSPACE)
+    assert no_version.status_code == 422
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_calendar_event_payload_rules(stub_client: httpx.AsyncClient) -> None:
+    timed: dict[str, object] = {
+        "title": "评审",
+        "timezone": "Asia/Shanghai",
+        "start_at": "2026-11-02T10:00:00+08:00",
+        "end_at": "2026-11-02T11:00:00+08:00",
+    }
+    all_day: dict[str, object] = {
+        "title": "出差",
+        "timezone": "Asia/Shanghai",
+        "all_day": True,
+        "start_date": "2026-11-02",
+        "end_date": "2026-11-04",
+    }
+    cases = {
+        "没有时区偏移": {**timed, "start_at": "2026-11-02T10:00:00"},
+        "时区名无效": {**timed, "timezone": "China/Beijing"},
+        "结束早于开始": {**timed, "end_at": "2026-11-02T09:00:00+08:00"},
+        "超过 92 天": {**timed, "end_at": "2027-03-02T10:00:00+08:00"},
+        "全天事件带时刻": {**all_day, "start_at": timed["start_at"]},
+        "定时事件带日期": {**timed, "start_date": "2026-11-02"},
+        "不支持重复": {**timed, "rrule": "FREQ=WEEKLY"},
+    }
+    for name, body in cases.items():
+        response = await stub_client.post("/api/v1/calendar/events", json=body, headers=WORKSPACE)
+        assert response.status_code == 422, name
+    for body in [timed, all_day]:
+        response = await stub_client.post("/api/v1/calendar/events", json=body, headers=WORKSPACE)
+        assert response.status_code == 501, body["title"]
+    path = f"/api/v1/calendar/events/{uuid.uuid4()}"
+    switch = await stub_client.patch(
+        path, json={"version": 1, "all_day": True, "start_date": "2026-11-02"}, headers=WORKSPACE
+    )
+    assert switch.status_code == 422  # 改 all_day 要同时给出一对日期
+    ok = await stub_client.patch(path, json={"version": 1, "title": "改期"}, headers=WORKSPACE)
+    assert ok.status_code == 501
+    missing = await stub_client.get("/api/v1/calendar/events", headers=WORKSPACE)
+    assert missing.status_code == 422  # start / end 必填
+    ranged = await stub_client.get(
+        "/api/v1/calendar/events",
+        params={"start": "2026-11-01T00:00:00+08:00", "end": "2026-11-08T00:00:00+08:00"},
+        headers=WORKSPACE,
+    )
+    assert ranged.status_code == 501
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_search_and_developer_query_rules(stub_client: httpx.AsyncClient) -> None:
+    for params in [{}, {"q": "   "}, {"q": "x" * 101}, {"q": "设计", "types": "doc"}]:
+        response = await stub_client.get("/api/v1/search", params=params, headers=WORKSPACE)
+        assert response.status_code == 422, params
+    ok = await stub_client.get(
+        "/api/v1/search", params={"q": "设计", "types": ["task", "bookmark"]}, headers=WORKSPACE
+    )
+    assert ok.status_code == 501
+    bad = await stub_client.get(
+        "/api/v1/developer/runs", params={"status": "broken"}, headers=WORKSPACE
+    )
+    assert bad.status_code == 422
+    for path in ["repos", "issues", "pulls", "runs"]:
+        response = await stub_client.get(f"/api/v1/developer/{path}", headers=WORKSPACE)
+        assert response.status_code == 501, path
