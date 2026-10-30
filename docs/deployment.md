@@ -238,3 +238,14 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
   - 从集成里移除的仓库，以及 GitHub 上删除的 Issue / PR，会在全量同步后从工作台消失。
 - 被限流时记下恢复时间，期间不再请求 GitHub；Token 失效后集成变为 `unauthorized`，不再自动同步，更换 Token 并重新测试后恢复。
 - 测试与 CI 验收可以用 `GITHUB_API_URL` 把地址改成模拟服务（同时把它的主机名加进 `INTEGRATION_ALLOWED_HOSTS`）；生产环境不要设置。
+
+## 11. 跨资源搜索
+
+- 顶栏搜索查的是工作台自己的索引：Vikunja 的任务与项目、GitHub 的仓库 / Issue / PR、AFFiNE 收藏（标题与备注）、本地日程。
+  - 不搜 AFFiNE 文档正文，也不搜 Actions 运行。
+  - 只返回你能看到的内容：别人的私有收藏、其他工作空间的数据都搜不到。
+- 索引由数据库触发器随写入更新，删除或同步掉的内容会立刻搜不到，平时不需要维护。
+  怀疑索引与数据不一致时可以重建：`docker compose exec -T api python -m app.commands.reindex_search`。
+- 中文按字面包含匹配，不做分词，所以相关性有限：能找到包含查询文字的结果，排序只区分“标题完全一致 / 标题开头 / 标题包含 / 只在正文里”。
+  英文支持词干，例如 deploy 能找到 deploying。
+

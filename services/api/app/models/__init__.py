@@ -17,6 +17,7 @@ from app.models.integration import (
     WebhookInboxEvent,
 )
 from app.models.knowledge import Bookmark, KnowledgeSource, ResourceLink
+from app.models.search import SearchDocument
 from app.models.workspace import Workspace, WorkspaceMember
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "IntegrationAccount",
     "KnowledgeSource",
     "ResourceLink",
+    "SearchDocument",
     "SyncCursor",
     "User",
     "WebhookInboxEvent",
