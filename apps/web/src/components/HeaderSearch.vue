@@ -16,7 +16,7 @@ function shortcut(event: KeyboardEvent) { if ((event.ctrlKey || event.metaKey) &
 onMounted(() => window.addEventListener('keydown', shortcut))
 onUnmounted(() => window.removeEventListener('keydown', shortcut))
 const entries = computed(() => [
-  ...navigation.map((item) => ({ label: item.title, detail: '', path: item.path })),
+  ...navigation.filter((item) => item.path !== '/settings/integrations' || auth.canManage).map((item) => ({ label: item.title, detail: '', path: item.path })),
   ...(auth.canManage ? [{ label: '审计日志', detail: '', path: '/settings/audit' }] : []),
   ...dashboard.widgets.flatMap((widget) => {
     const value = parseWidget(widget)

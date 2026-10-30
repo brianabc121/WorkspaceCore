@@ -14,7 +14,8 @@
     "test": "vitest run",
     "generate:api": "openapi-typescript ../../services/api/openapi.json -o src/services/schema.d.ts",
     "check:api": "npm run generate:api && git diff --exit-code -- src/services/schema.d.ts",
-    "test:browser": "node tests/browser-dashboard.cjs"
+    "test:browser": "node tests/browser-dashboard.cjs",
+    "test:browser:sprint3": "node tests/browser-tasks.cjs"
   },
   "dependencies": {
     "@tanstack/vue-query": "5.105.0",

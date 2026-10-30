@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { Schema } from '../services/api'
 import type { WidgetValue } from './registry'
 import { formatTime } from '../features/time'
+import ExternalLink from '../components/ExternalLink.vue'
 const props = defineProps<{ value: WidgetValue; overview?: Schema['DashboardOverview']; loading?: boolean; failed?: boolean }>()
 defineEmits<{ retry: [] }>()
 const module = computed(() => props.overview?.modules.tasks)
@@ -29,7 +30,7 @@ const state = computed(() => {
       <p v-if="state === 'stale'" class="card-state">数据可能已过期 · {{ formatTime(module?.as_of ?? null) }}</p>
       <template v-if="value.widget_type === 'todo_summary'"><p class="summary-number">{{ overview?.summary.pending_tasks ?? '未知' }}</p><p class="form-help">待办任务</p></template>
       <template v-else-if="value.widget_type === 'today_tasks'">
-        <ul v-if="overview?.today_tasks.length" class="task-list"><li v-for="task in overview.today_tasks.slice(0, value.config.limit)" :key="task.id">{{ task.title }}<small v-if="task.due_at">{{ formatTime(task.due_at) }}</small></li></ul><p v-else class="card-state">{{ state === 'stale' ? '暂无可用的缓存任务' : '今天暂无任务' }}</p>
+        <ul v-if="overview?.today_tasks.length" class="task-list"><li v-for="task in overview.today_tasks.slice(0, value.config.limit)" :key="task.id">{{ task.title }}<small v-if="task.due_at">{{ formatTime(task.due_at) }}</small><small v-if="task.project_title">{{ task.project_title }}</small><ExternalLink v-if="task.source_url" :href="task.source_url" /></li></ul><p v-else class="card-state">{{ state === 'stale' ? '暂无可用的缓存任务' : '今天暂无任务' }}</p>
       </template>
     </template>
     <button v-if="module?.retryable || state === 'error'" class="secondary-button" :disabled="loading" @click="$emit('retry')">重试组件</button>

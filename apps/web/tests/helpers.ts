@@ -7,13 +7,14 @@ import App from '../src/App.vue'
 import { createAppRouter } from '../src/app/router'
 import type { Schema } from '../src/services/api'
 import { overview } from './dashboard-fixtures'
+import { task, project, integration, sync } from './sprint3-fixtures'
 
 export const workspace: Schema['WorkspaceOut'] = { id: 'workspace-a', name: '个人空间', role: 'owner', created_at: '2026-10-30T00:00:00Z', updated_at: '2026-10-30T00:00:00Z' }
 export const me: Schema['MeResponse'] = { user: { id: 'user-a', email: 'test@example.com', display_name: '测试用户', created_at: '2026-10-30T00:00:00Z' }, workspaces: [workspace] }
 export const session: Schema['SessionOut'] = { id: 'session-a', current: true, created_at: '2026-10-30T00:00:00Z', expires_at: '2026-11-30T00:00:00Z', last_seen_at: null }
 export const emptyPage = { items: [], next_cursor: null, total_estimate: null }
 export const fail = (status: number, code: string) => Response.json({ error: { code, message: '请求失败', request_id: 'req-test', details: {} } }, { status })
-export function mockApi(handler?: (request: Request) => Response | Promise<Response> | undefined) {
+export function mockApi(handler?: (request: Request) => Response | Promise<Response | undefined> | undefined) {
   const requests: Request[] = []
   vi.stubGlobal('fetch', async (request: Request) => {
     requests.push(request)
@@ -25,6 +26,9 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (path === '/api/v1/auth/sessions') return Response.json({ ...emptyPage, items: [session] })
     if (path === '/api/v1/audit-logs') return Response.json(emptyPage)
     if (path === '/api/v1/dashboard/overview') return Response.json(overview)
+    if (path === '/api/v1/tasks') return Response.json({ items: [task], sync, next_cursor: null, total_estimate: 1 })
+    if (path === '/api/v1/projects') return Response.json({ items: [project], sync, next_cursor: null, total_estimate: 1 })
+    if (path === '/api/v1/integrations') return Response.json({ items: [integration], next_cursor: null, total_estimate: 1 })
     throw new Error(`Unexpected request: ${request.method} ${path}`)
   })
   return requests

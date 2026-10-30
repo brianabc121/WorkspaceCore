@@ -13,6 +13,9 @@ import AuditPage from '../pages/AuditPage.vue'
 import HomePage from '../pages/HomePage.vue'
 import PlaceholderPage from '../pages/PlaceholderPage.vue'
 import NotFoundPage from '../pages/NotFoundPage.vue'
+import TasksPage from '../pages/TasksPage.vue'
+import ProjectsPage from '../pages/ProjectsPage.vue'
+import IntegrationsPage from '../pages/IntegrationsPage.vue'
 
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHistory(), queryClient = new QueryClient()) {
   const auth = useAuthStore(pinia)
@@ -26,8 +29,8 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
       { path: '/settings/audit', component: AuditPage, meta: { title: '审计日志', admin: true } },
       ...navigation.map((item) => ({
         path: item.path,
-        component: item.path === '/' ? HomePage : item.path === '/settings' ? SettingsPage : item.path === '/settings/security' ? SecurityPage : PlaceholderPage,
-        meta: { title: item.title, description: item.description },
+        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/settings': SettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
+        meta: { title: item.title, description: item.description, admin: item.path === '/settings/integrations' },
       })),
       { path: '/:pathMatch(.*)*', component: NotFoundPage, meta: { title: '页面未找到' } },
     ],

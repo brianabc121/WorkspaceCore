@@ -41,8 +41,19 @@ export function errorMessage(error: unknown): string {
     LIMIT_EXCEEDED: '已达到仪表盘或组件数量上限。',
     IMPORT_INVALID: '格式或组件配置不符合契约，请检查 JSON 后重试。',
     REFRESH_REQUIRED: '操作已完成，但刷新失败。请重新加载最新版本，不要重复提交。',
+    RESULT_UNKNOWN: '操作结果未知，请查询原请求的结果，不要再次新建。',
+    IDEMPOTENCY_IN_PROGRESS: '原请求仍在处理中，请稍后查询结果。',
+    IDEMPOTENCY_KEY_REUSED: '提交标识与请求内容不一致，请重新加载后再操作。',
+    IDEMPOTENCY_EXPIRED: '原操作已超过 24 小时确认窗口，不能自动重放。请核对列表后再决定是否新建。',
+    OPERATION_NOT_APPLIED: '已确认原操作没有生效，可确认后重新提交。',
+    INTEGRATION_UNAVAILABLE: '任务服务尚未配置、已停用或未通过连接测试。',
+    SYNC_IN_PROGRESS: '同步正在进行，请稍后刷新状态。',
+    EXTERNAL_FORBIDDEN: 'Vikunja 不允许访问此项目或任务。',
+    EXTERNAL_VALIDATION_FAILED: 'Vikunja 拒绝了输入内容，请检查后重试。',
+    INTEGRATION_UNAUTHORIZED: 'Vikunja Token 已失效或权限不足，请管理员更新连接。',
+    EXTERNAL_UNAVAILABLE: 'Vikunja 暂不可用。写入结果可能未知，请用原请求查询确认。',
   }
-  if (error.status === 429) return error.retryAfter === null ? '请求过于频繁，请稍后重试。' : `请求过于频繁，请在 ${error.retryAfter} 秒后重试。`
+  if (error.status === 429 || error.code === 'EXTERNAL_RATE_LIMITED') return error.retryAfter === null ? '请求过于频繁，请稍后重试。' : `请求过于频繁，请在 ${error.retryAfter} 秒后重试。`
   return messages[error.code] ?? '请求失败，请稍后重试。'
 }
 
@@ -95,7 +106,7 @@ export function createApi(options: { workspaceId?: () => string | null; sessionV
         if (token) request.headers.set('X-CSRF-Token', token)
       }
       const path = new URL(request.url).pathname
-      if (path === '/api/v1/audit-logs' || /^\/api\/v1\/(workspaces\/|dashboard(?:\/|$)|dashboards(?:\/|$)|widgets\/)/.test(path)) {
+      if (path === '/api/v1/audit-logs' || /^\/api\/v1\/(workspaces\/|dashboard(?:\/|$)|dashboards(?:\/|$)|widgets\/|integrations(?:\/|$)|projects(?:\/|$)|tasks(?:\/|$))/.test(path)) {
         const workspaceId = options.workspaceId?.()
         if (workspaceId && !request.headers.has('X-Workspace-Id')) request.headers.set('X-Workspace-Id', workspaceId)
       }
