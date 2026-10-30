@@ -25,6 +25,7 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (path === '/api/v1/me' && request.method === 'GET') return Response.json(me)
     if (path === '/api/v1/auth/sessions') return Response.json({ ...emptyPage, items: [session] })
     if (path === '/api/v1/audit-logs') return Response.json(emptyPage)
+    if (path === '/api/v1/knowledge/resources' || path === '/api/v1/knowledge/sources' || path === '/api/v1/calendar/events') return Response.json(emptyPage)
     if (path === '/api/v1/dashboard/overview') return Response.json(overview)
     if (path === '/api/v1/tasks') return Response.json({ items: [task], sync, next_cursor: null, total_estimate: 1 })
     if (path === '/api/v1/projects') return Response.json({ items: [project], sync, next_cursor: null, total_estimate: 1 })

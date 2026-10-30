@@ -5,8 +5,8 @@ import type { Schema } from '../src/services/api'
 export const layout: Schema['WidgetLayout'] = { desktop: { x: 0, y: 0, w: 6, h: 3 }, mobile: { y: 0, h: 3 } }
 export const widget: Schema['WidgetOut'] = { id: '11111111-1111-4111-8111-111111111111', dashboard_id: '22222222-2222-4222-8222-222222222222', widget_type: 'note', config: { text: '欢迎' }, layout, version: 1, created_at: '2026-10-30T00:00:00Z', updated_at: '2026-10-30T00:00:00Z' }
 describe('Widget Registry 与导入契约', () => {
-  it('registers all four builtin cards with their contract defaults', () => {
-    expect(Object.keys(registry).sort()).toEqual(['note', 'quick_links', 'today_tasks', 'todo_summary'])
+  it('registers the supported builtin cards with their contract defaults', () => {
+    expect(Object.keys(registry).sort()).toEqual(['calendar_agenda', 'note', 'quick_links', 'recent_docs', 'today_tasks', 'todo_summary'])
     expect(parseWidget({ ...widget, widget_type: 'today_tasks', config: {} })?.config).toEqual({ limit: 5 })
     expect(parseWidget({ ...widget, widget_type: 'quick_links', config: {} })?.config).toEqual({ links: [] })
   })

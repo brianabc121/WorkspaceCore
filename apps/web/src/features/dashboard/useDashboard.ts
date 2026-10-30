@@ -1,15 +1,16 @@
 import { computed, nextTick, ref, watch } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { useDashboardSearch } from '../../stores/dashboardSearch'
 import { ApiError, dataOf, errorMessage, isAccessError, type Schema } from '../../services/api'
 import { dashboardFileSchema, layoutSchema, type WidgetValue } from '../../widgets/registry'
 
-type Update = Schema['NoteWidgetUpdate'] | Schema['QuickLinksWidgetUpdate'] | Schema['TodoSummaryWidgetUpdate'] | Schema['TodayTasksWidgetUpdate']
+type Update = Schema['NoteWidgetUpdate'] | Schema['QuickLinksWidgetUpdate'] | Schema['TodoSummaryWidgetUpdate'] | Schema['TodayTasksWidgetUpdate'] | Schema['RecentDocsWidgetUpdate'] | Schema['CalendarAgendaWidgetUpdate']
 export function useDashboard() {
   const auth = useAuthStore()
   const search = useDashboardSearch()
   const scope = auth.workspaceId!
+  const cache = useQueryClient(), user = auth.user?.id
   const header = { 'X-Workspace-Id': scope }
   const selected = ref<Schema['DashboardOut'] | null>(null)
   const choices = ref<Schema['DashboardOut'][]>([])
@@ -52,6 +53,7 @@ export function useDashboard() {
         selected.value = list.items.find((item) => item.id === selected.value!.id) ?? null
         if (selected.value) await refresh(widgetsQuery)
       }
+      await cache.invalidateQueries({ predicate: (query) => ['knowledge', 'calendar'].includes(String(query.queryKey[0])) && query.queryKey[1] === user && query.queryKey[2] === scope && query.queryKey[3] === 'widget' })
       editing.value = false; dirty.value = false; failure.value = null
     } catch (error) {
       failure.value = isAccessError(error) ? error : keepBlocked ? previousFailure : error
