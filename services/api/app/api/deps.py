@@ -146,6 +146,8 @@ def workspace_role(minimum: Role) -> Callable[..., Awaitable[policy.WorkspaceAcc
     return dependency
 
 
+workspace_viewer = workspace_role(Role.viewer)
+workspace_member = workspace_role(Role.member)
 workspace_admin = workspace_role(Role.admin)
 
 

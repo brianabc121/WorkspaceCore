@@ -72,6 +72,253 @@
         "title": "AuditLogOut",
         "type": "object"
       },
+      "DashboardCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "widgets": {
+            "description": "可选：创建时一并加入的组件（用于导入布局 JSON），整体在一个事务里完成",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "note": "#/components/schemas/NoteWidgetCreate",
+                  "quick_links": "#/components/schemas/QuickLinksWidgetCreate",
+                  "today_tasks": "#/components/schemas/TodayTasksWidgetCreate",
+                  "todo_summary": "#/components/schemas/TodoSummaryWidgetCreate"
+                },
+                "propertyName": "widget_type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/QuickLinksWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/NoteWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/TodoSummaryWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/TodayTasksWidgetCreate"
+                }
+              ]
+            },
+            "maxItems": 50,
+            "title": "Widgets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "DashboardCreate",
+        "type": "object"
+      },
+      "DashboardOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_default": {
+            "description": "首页使用的仪表盘；每个工作空间恰好一个",
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "创建者；用户被删除后为 null",
+            "title": "Owner Id"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "description": "布局、组件增删、标题与默认标记的任何变化都会递增",
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "is_default",
+          "owner_id",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "DashboardOut",
+        "type": "object"
+      },
+      "DashboardOverview": {
+        "properties": {
+          "dashboard": {
+            "$ref": "#/components/schemas/DashboardOut"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "modules": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModuleStatus"
+            },
+            "description": "按模块名索引（本 Sprint 只有 tasks）；单个模块失败只影响对应组件",
+            "title": "Modules",
+            "type": "object"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/OverviewSummary"
+          },
+          "today_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskBrief"
+            },
+            "title": "Today Tasks",
+            "type": "array"
+          },
+          "widgets": {
+            "items": {
+              "$ref": "#/components/schemas/WidgetOut"
+            },
+            "title": "Widgets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "dashboard",
+          "widgets",
+          "summary",
+          "modules",
+          "today_tasks",
+          "generated_at"
+        ],
+        "title": "DashboardOverview",
+        "type": "object"
+      },
+      "DashboardUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "is_default": {
+            "anyOf": [
+              {
+                "const": true,
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "设为首页；原默认仪表盘会自动取消默认，只能设为 true",
+            "title": "Is Default"
+          },
+          "layout": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WidgetPlacement"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "保存布局：必须恰好列出该仪表盘当前的全部组件",
+            "title": "Layout"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "DashboardUpdate",
+        "type": "object"
+      },
+      "DesktopPosition": {
+        "additionalProperties": false,
+        "description": "桌面端 12 列栅格中的位置与大小。",
+        "properties": {
+          "h": {
+            "maximum": 24.0,
+            "minimum": 1.0,
+            "title": "H",
+            "type": "integer"
+          },
+          "w": {
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "W",
+            "type": "integer"
+          },
+          "x": {
+            "maximum": 11.0,
+            "minimum": 0.0,
+            "title": "X",
+            "type": "integer"
+          },
+          "y": {
+            "maximum": 999.0,
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "w",
+          "h"
+        ],
+        "title": "DesktopPosition",
+        "type": "object"
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -194,6 +441,188 @@
         "title": "MeUpdate",
         "type": "object"
       },
+      "MobilePosition": {
+        "additionalProperties": false,
+        "description": "移动端单列：按 y 从小到大排列。",
+        "properties": {
+          "h": {
+            "maximum": 24.0,
+            "minimum": 1.0,
+            "title": "H",
+            "type": "integer"
+          },
+          "y": {
+            "maximum": 999.0,
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "y",
+          "h"
+        ],
+        "title": "MobilePosition",
+        "type": "object"
+      },
+      "ModuleStatus": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "数据的时间点；从未成功获取过时为 null",
+            "title": "As Of"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "机器可读的原因，例如 not_configured、timeout、error；不含敏感信息",
+            "title": "Reason"
+          },
+          "retryable": {
+            "description": "稍后重试是否可能恢复",
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "stale",
+              "unavailable",
+              "unauthorized"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "as_of",
+          "retryable"
+        ],
+        "title": "ModuleStatus",
+        "type": "object"
+      },
+      "NoteConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "default": "",
+            "description": "纯文本，前端按文本显示，不解析 HTML / Markdown",
+            "maxLength": 2000,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "title": "NoteConfig",
+        "type": "object"
+      },
+      "NoteWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/NoteConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "note",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "NoteWidgetCreate",
+        "type": "object"
+      },
+      "NoteWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/NoteConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "note",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "NoteWidgetUpdate",
+        "type": "object"
+      },
+      "OverviewSummary": {
+        "description": "未知时为 null，不以 0 冒充（规范第 16 节 A17：不把空数据当正常）。",
+        "properties": {
+          "active_projects": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Projects"
+          },
+          "pending_tasks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Tasks"
+          },
+          "unread_notifications": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unread Notifications"
+          }
+        },
+        "required": [
+          "pending_tasks",
+          "active_projects",
+          "unread_notifications"
+        ],
+        "title": "OverviewSummary",
+        "type": "object"
+      },
       "Page_AuditLogOut_": {
         "properties": {
           "items": {
@@ -233,6 +662,45 @@
         "title": "Page[AuditLogOut]",
         "type": "object"
       },
+      "Page_DashboardOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[DashboardOut]",
+        "type": "object"
+      },
       "Page_SessionOut_": {
         "properties": {
           "items": {
@@ -270,6 +738,45 @@
           "items"
         ],
         "title": "Page[SessionOut]",
+        "type": "object"
+      },
+      "Page_WidgetOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WidgetOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[WidgetOut]",
         "type": "object"
       },
       "Page_WorkspaceOut_": {
@@ -335,6 +842,92 @@
           "new_password"
         ],
         "title": "PasswordChangeRequest",
+        "type": "object"
+      },
+      "QuickLink": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "title": "QuickLink",
+        "type": "object"
+      },
+      "QuickLinksConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/QuickLink"
+            },
+            "maxItems": 20,
+            "title": "Links",
+            "type": "array"
+          }
+        },
+        "title": "QuickLinksConfig",
+        "type": "object"
+      },
+      "QuickLinksWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/QuickLinksConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "quick_links",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "QuickLinksWidgetCreate",
+        "type": "object"
+      },
+      "QuickLinksWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/QuickLinksConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "quick_links",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "QuickLinksWidgetUpdate",
         "type": "object"
       },
       "ReadinessResponse": {
@@ -483,6 +1076,178 @@
         "title": "SetupStatus",
         "type": "object"
       },
+      "TaskBrief": {
+        "description": "今日任务条目；字段在 Sprint 3 接入 Vikunja 时可能扩展（只增不删）。",
+        "properties": {
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "project_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Title"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "due_at",
+          "project_title",
+          "source_url"
+        ],
+        "title": "TaskBrief",
+        "type": "object"
+      },
+      "TodayTasksConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 5,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "TodayTasksConfig",
+        "type": "object"
+      },
+      "TodayTasksWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/TodayTasksConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "today_tasks",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "TodayTasksWidgetCreate",
+        "type": "object"
+      },
+      "TodayTasksWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/TodayTasksConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "today_tasks",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "TodayTasksWidgetUpdate",
+        "type": "object"
+      },
+      "TodoSummaryConfig": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "TodoSummaryConfig",
+        "type": "object"
+      },
+      "TodoSummaryWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/TodoSummaryConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "todo_summary",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "TodoSummaryWidgetCreate",
+        "type": "object"
+      },
+      "TodoSummaryWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/TodoSummaryConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "todo_summary",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "TodoSummaryWidgetUpdate",
+        "type": "object"
+      },
       "UserOut": {
         "properties": {
           "created_at": {
@@ -512,6 +1277,96 @@
           "created_at"
         ],
         "title": "UserOut",
+        "type": "object"
+      },
+      "WidgetLayout": {
+        "additionalProperties": false,
+        "properties": {
+          "desktop": {
+            "$ref": "#/components/schemas/DesktopPosition"
+          },
+          "mobile": {
+            "$ref": "#/components/schemas/MobilePosition"
+          }
+        },
+        "required": [
+          "desktop",
+          "mobile"
+        ],
+        "title": "WidgetLayout",
+        "type": "object"
+      },
+      "WidgetOut": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "description": "该类型的配置；前端按自己的 Registry 再校验一次",
+            "title": "Config",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dashboard_id": {
+            "format": "uuid",
+            "title": "Dashboard Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "description": "当前版本内置：quick_links、note、todo_summary、today_tasks；也可能是已不再支持的旧类型，前端应显示安全的错误卡片",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "dashboard_id",
+          "widget_type",
+          "config",
+          "layout",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WidgetOut",
+        "type": "object"
+      },
+      "WidgetPlacement": {
+        "additionalProperties": false,
+        "properties": {
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_id": {
+            "format": "uuid",
+            "title": "Widget Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "widget_id",
+          "layout"
+        ],
+        "title": "WidgetPlacement",
         "type": "object"
       },
       "WorkspaceOut": {
@@ -677,16 +1532,6 @@
               }
             },
             "description": "参数校验失败（VALIDATION_FAILED）"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "接口已声明、尚未实现（NOT_IMPLEMENTED）"
           }
         },
         "security": [
@@ -784,16 +1629,6 @@
               }
             },
             "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "接口已声明、尚未实现（NOT_IMPLEMENTED）"
           }
         },
         "summary": "邮箱密码登录",
@@ -858,16 +1693,6 @@
               }
             },
             "description": "参数校验失败（VALIDATION_FAILED）"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "接口已声明、尚未实现（NOT_IMPLEMENTED）"
           }
         },
         "security": [
@@ -968,16 +1793,6 @@
               }
             },
             "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "接口已声明、尚未实现（NOT_IMPLEMENTED）"
           }
         },
         "security": [
@@ -1024,16 +1839,6 @@
               }
             },
             "description": "参数校验失败（VALIDATION_FAILED）"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "接口已声明、尚未实现（NOT_IMPLEMENTED）"
           }
         },
         "security": [
@@ -1124,16 +1929,6 @@
               }
             },
             "description": "参数校验失败（VALIDATION_FAILED）"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "接口已声明、尚未实现（NOT_IMPLEMENTED）"
           }
         },
         "security": [
@@ -1144,6 +1939,621 @@
         "summary": "撤销我的某个会话",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/dashboard/overview": {
+      "get": {
+        "description": "不同步等待外部服务；单个模块失败只把该模块标为 unavailable / stale，不影响其余内容。",
+        "operationId": "get_dashboard_overview",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardOverview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "首页聚合：默认仪表盘、组件与各模块状态（viewer）",
+        "tags": [
+          "dashboards"
+        ]
+      }
+    },
+    "/api/v1/dashboards": {
+      "get": {
+        "operationId": "list_dashboards",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_DashboardOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "工作空间的仪表盘列表（viewer）",
+        "tags": [
+          "dashboards"
+        ]
+      },
+      "post": {
+        "operationId": "create_dashboard",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DashboardCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "创建仪表盘，可一并导入组件（member）",
+        "tags": [
+          "dashboards"
+        ]
+      }
+    },
+    "/api/v1/dashboards/{dashboard_id}": {
+      "patch": {
+        "description": "version 与当前版本不一致时返回 409 VERSION_CONFLICT，details.current_version 为最新版本。",
+        "operationId": "update_dashboard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dashboard_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Dashboard Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DashboardUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "修改标题、设为首页或保存布局（member，乐观并发）",
+        "tags": [
+          "dashboards"
+        ]
+      }
+    },
+    "/api/v1/dashboards/{dashboard_id}/widgets": {
+      "get": {
+        "operationId": "list_widgets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dashboard_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Dashboard Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_WidgetOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "仪表盘的组件（viewer）",
+        "tags": [
+          "dashboards"
+        ]
+      },
+      "post": {
+        "operationId": "create_widget",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dashboard_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Dashboard Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "note": "#/components/schemas/NoteWidgetCreate",
+                    "quick_links": "#/components/schemas/QuickLinksWidgetCreate",
+                    "today_tasks": "#/components/schemas/TodayTasksWidgetCreate",
+                    "todo_summary": "#/components/schemas/TodoSummaryWidgetCreate"
+                  },
+                  "propertyName": "widget_type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/QuickLinksWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/NoteWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TodoSummaryWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TodayTasksWidgetCreate"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WidgetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "添加组件（member）；仪表盘版本递增",
+        "tags": [
+          "dashboards"
         ]
       }
     },
@@ -1180,16 +2590,6 @@
               }
             },
             "description": "参数校验失败（VALIDATION_FAILED）"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "接口已声明、尚未实现（NOT_IMPLEMENTED）"
           }
         },
         "security": [
@@ -1274,16 +2674,6 @@
               }
             },
             "description": "参数校验失败（VALIDATION_FAILED）"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "接口已声明、尚未实现（NOT_IMPLEMENTED）"
           }
         },
         "security": [
@@ -1381,16 +2771,6 @@
               }
             },
             "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "接口已声明、尚未实现（NOT_IMPLEMENTED）"
           }
         },
         "summary": "首次安装：创建 owner 账户与默认工作空间，并直接登录",
@@ -1430,6 +2810,258 @@
         ]
       }
     },
+    "/api/v1/widgets/{widget_id}": {
+      "delete": {
+        "operationId": "delete_widget",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "widget_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Widget Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "删除组件（member）；仪表盘版本递增",
+        "tags": [
+          "dashboards"
+        ]
+      },
+      "patch": {
+        "description": "version 与当前版本不一致时返回 409 VERSION_CONFLICT；widget_type 必须与现有类型相同。",
+        "operationId": "update_widget",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "widget_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Widget Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "修改配置；widget_type 必须与现有类型相同（类型不能修改）",
+                "discriminator": {
+                  "mapping": {
+                    "note": "#/components/schemas/NoteWidgetUpdate",
+                    "quick_links": "#/components/schemas/QuickLinksWidgetUpdate",
+                    "today_tasks": "#/components/schemas/TodayTasksWidgetUpdate",
+                    "todo_summary": "#/components/schemas/TodoSummaryWidgetUpdate"
+                  },
+                  "propertyName": "widget_type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/QuickLinksWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/NoteWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TodoSummaryWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TodayTasksWidgetUpdate"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WidgetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "修改组件配置（member，乐观并发）",
+        "tags": [
+          "dashboards"
+        ]
+      }
+    },
     "/api/v1/workspaces": {
       "get": {
         "operationId": "list_workspaces",
@@ -1463,16 +3095,6 @@
               }
             },
             "description": "参数校验失败（VALIDATION_FAILED）"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "接口已声明、尚未实现（NOT_IMPLEMENTED）"
           }
         },
         "security": [
@@ -1541,16 +3163,6 @@
               }
             },
             "description": "参数校验失败（VALIDATION_FAILED）"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "接口已声明、尚未实现（NOT_IMPLEMENTED）"
           }
         },
         "security": [
@@ -1655,16 +3267,6 @@
               }
             },
             "description": "参数校验失败（VALIDATION_FAILED）"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "接口已声明、尚未实现（NOT_IMPLEMENTED）"
           }
         },
         "security": [
