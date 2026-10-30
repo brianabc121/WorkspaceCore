@@ -8,7 +8,7 @@
 
 全栈环境：Compose 6 个服务，外加一个模拟 GitHub 服务（`tests/e2e/fake_github_server.py`，见第 4 节）。
 模拟服务加入 integrations 网络，主机名是 `fake-github`。CI 的 `.env` 有三处改动：
-`GITHUB_API_URL=http://fake-github:8080`，`INTEGRATION_ALLOWED_HOSTS=vikunja,fake-github`，`RECONCILE_INTERVAL_MINUTES=1`。
+`WORKSPACE_GITHUB_API_URL=http://fake-github:8080`，`INTEGRATION_ALLOWED_HOSTS=vikunja,fake-github`，`RECONCILE_INTERVAL_MINUTES=1`。
 
 接口级脚本 `tests/e2e/sprint4_acceptance.py` 共 31 项，**已纳入 CI**（`ci-infra.yml`）。
 它不要求空库：每次运行都新建工作台用户（`tests/e2e/seed.py`）。
@@ -85,7 +85,7 @@ CI 里没有真实的 GitHub Token。
 | ETag | 按响应体的哈希生成强 ETag | 可能是弱 ETag（`W/"…"`） | 工作台原样回传，两种都适用 |
 | 额度 | 单一的 `core` 计数，每个 200 响应减一 | 按资源分桶，与同一用户的其他调用共用 | 低额度提前停下（剩余 50）由 pytest 覆盖 |
 | 次级限流 | 只在验收脚本打开时触发，固定 `retry-after: 30` | 按并发、CPU 时间等触发，不可预测，也可能不带 `retry-after` | 没有 `retry-after` 时至少等 60 秒（ADR 第 5 节），由 pytest 覆盖 |
-| 传输 | `http://fake-github:8080`（内网，需在 `INTEGRATION_ALLOWED_HOSTS` 里） | `https://api.github.com` | 生产固定为 `api.github.com`，`GITHUB_API_URL` 只用于测试 |
+| 传输 | `http://fake-github:8080`（内网，需在 `INTEGRATION_ALLOWED_HOSTS` 里） | `https://api.github.com` | 生产固定为 `api.github.com`，`WORKSPACE_GITHUB_API_URL` 只用于测试 |
 | 5xx / 超时 | 不模拟 | 偶尔发生 | 错误分类、超时与重试上限由 pytest 覆盖 |
 
 真实验证：`services/api/tests/test_github_live.py` 需要 `TEST_GITHUB_TOKEN`（细粒度 Token，按 ADR 第 3 节授权）与 `TEST_GITHUB_REPO`。
@@ -99,7 +99,9 @@ CI 里没有这两个变量，所以跳过；本机同样没有，**未运行**�
   - 修复：新增只给 Worker 用的 `egress` 网络（`compose.yaml`）；出站地址仍由 Connector 的 SSRF 检查限制。
   - 本机实测：去掉 `egress` 后，在 Worker 里解析 `api.github.com` 报 `Temporary failure in name resolution`；加上后能连到 443 端口。
   - 部署文档第 2 节已更新。
-- `GITHUB_API_URL` 之前没有从 `.env` 传给 api 与 worker 容器，现在由 `compose.yaml` 传入，默认值仍是 `https://api.github.com`。
+- GitHub 的地址之前不能通过 `.env` 改成模拟服务。现在 `compose.yaml` 把 `.env` 里的 `WORKSPACE_GITHUB_API_URL` 作为 `GITHUB_API_URL` 传给 api 与 worker，默认值仍是 `https://api.github.com`。
+  - 第一次 CI 失败（PR #44 的 compose job）：`.env` 里直接写 `GITHUB_API_URL`，但 GitHub Actions 会在 shell 里设置同名变量，Compose 插值时 shell 变量优先，api 实际访问了真实的 api.github.com，模拟 Token 被拒（`token_rejected`），模拟服务一个请求都没收到。
+  - 本机复现：shell 里设置 `GITHUB_API_URL=https://api.github.com` 后重建 api，容器里的值就是真实地址。改用 `WORKSPACE_GITHUB_API_URL` 后，同样的 shell 环境下容器里是模拟服务的地址。
 
 ## 6. 实际执行的命令
 

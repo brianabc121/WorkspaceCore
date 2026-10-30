@@ -16,7 +16,7 @@ DoD 见 docs/DEVELOPMENT_SPEC.md 第 13 节，验收场景见第 15 节：
 
 模拟 GitHub（fake_github_server.py）复用后端测试的内存版 GitHub，运行在 api 镜像里，
 加入 integrations 网络。前提：Compose 全栈已启动并迁移，.env 里
-GITHUB_API_URL=http://fake-github:8080、INTEGRATION_ALLOWED_HOSTS 含 fake-github、
+WORKSPACE_GITHUB_API_URL=http://fake-github:8080、INTEGRATION_ALLOWED_HOSTS 含 fake-github、
 RECONCILE_INTERVAL_MINUTES=1（CI 的 ci-infra.yml 这样设置）。
 不要求空库：每次运行用新的工作台用户。
 用法：python3 tests/e2e/sprint4_acceptance.py [--base-url http://127.0.0.1:8080]
@@ -74,7 +74,7 @@ def project_name() -> str:
 def start_fake(token: str) -> None:
     """在 api 镜像里启动模拟 GitHub：在默认网络发布控制端口，再加入 integrations 网络。
 
-    在 integrations 网络里的别名是 fake-github（Worker 用 GITHUB_API_URL 访问它）。
+    在 integrations 网络里的别名是 fake-github（api 与 worker 的 GITHUB_API_URL 指向它）。
     """
     run("docker", "rm", "-f", FAKE_NAME, check=False)
     api = run("docker", "compose", "ps", "-q", "api")

@@ -79,8 +79,10 @@ services:
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       # Connector 默认拒绝私有地址（SSRF 防护）；这里显式允许 integrations 网络里的 Vikunja 容器
       INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-vikunja}
-      # GitHub REST API 的地址；只有 CI 验收会改成模拟服务（Sprint 4 契约第 6.1 节）
-      GITHUB_API_URL: ${GITHUB_API_URL:-https://api.github.com}
+      # GitHub REST API 的地址；只有 CI 验收会改成模拟服务（Sprint 4 契约第 6.1 节）。
+      # .env 里用 WORKSPACE_GITHUB_API_URL：GitHub Actions 会在 shell 里设置 GITHUB_API_URL，
+      # 而 Compose 插值时 shell 变量优先于 .env
+      GITHUB_API_URL: ${WORKSPACE_GITHUB_API_URL:-https://api.github.com}
       # API 只能经 Caddy 访问，取 X-Forwarded-For 最右侧的地址作为客户端 IP（登录限流用）
       TRUST_FORWARDED_FOR: "true"
     depends_on:
@@ -111,7 +113,7 @@ services:
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-http://caddy:8080}
       # 周期对账的间隔（分钟，1–30）
       RECONCILE_INTERVAL_MINUTES: ${RECONCILE_INTERVAL_MINUTES:-5}
-      GITHUB_API_URL: ${GITHUB_API_URL:-https://api.github.com}
+      GITHUB_API_URL: ${WORKSPACE_GITHUB_API_URL:-https://api.github.com}
     depends_on:
       postgres:
         condition: service_healthy

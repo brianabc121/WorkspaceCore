@@ -22,8 +22,9 @@ jobs:
           make env
           # Sprint 3 验收的 A09 要等周期对账纠正投影：CI 中每分钟对账一次（默认 5 分钟）
           echo "RECONCILE_INTERVAL_MINUTES=1" >> .env
-          # Sprint 4 验收用模拟 GitHub（tests/e2e/fake_github_server.py），CI 里没有真实 GitHub Token
-          echo "GITHUB_API_URL=http://fake-github:8080" >> .env
+          # Sprint 4 验收用模拟 GitHub（tests/e2e/fake_github_server.py），CI 里没有真实 GitHub Token。
+          # 不能用 GITHUB_API_URL：Actions 在 shell 里设置了它，Compose 插值时优先于 .env
+          echo "WORKSPACE_GITHUB_API_URL=http://fake-github:8080" >> .env
           sed -i 's/^INTEGRATION_ALLOWED_HOSTS=.*/INTEGRATION_ALLOWED_HOSTS=vikunja,fake-github/' .env
           grep -q '^INTEGRATION_ALLOWED_HOSTS=vikunja,fake-github$' .env
       - name: docker compose config

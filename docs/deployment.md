@@ -239,8 +239,9 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
   - 增量同步时，三个列表的第一页都带 `ETag`，没有变化时返回 304，不消耗额度。
   - 从集成里移除的仓库，以及 GitHub 上删除的 Issue / PR，会在全量同步后从工作台消失。
 - 被限流时记下恢复时间，期间不再请求 GitHub；Token 失效后集成变为 `unauthorized`，不再自动同步，更换 Token 并重新测试后恢复。
-- 测试与 CI 验收可以在 `.env` 里用 `GITHUB_API_URL` 把地址改成模拟服务（api 与 worker 都会读取；
-  同时把它的主机名加进 `INTEGRATION_ALLOWED_HOSTS`）；生产环境不要设置。
+- 测试与 CI 验收可以在 `.env` 里用 `WORKSPACE_GITHUB_API_URL` 把地址改成模拟服务（Compose 把它作为
+  `GITHUB_API_URL` 传给 api 与 worker；同时把模拟服务的主机名加进 `INTEGRATION_ALLOWED_HOSTS`）；生产环境不要设置。
+  `.env` 里不用 `GITHUB_API_URL` 这个名字：GitHub Actions 等环境会在 shell 里设置它，而 Compose 插值时 shell 变量优先于 `.env`。
 
 ## 11. 跨资源搜索
 
