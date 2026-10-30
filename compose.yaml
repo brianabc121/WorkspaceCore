@@ -107,6 +107,8 @@ services:
       INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-vikunja}
       # Vikunja 投递 Webhook 的目标：integrations 网络里的 caddy（不经过对外端口）
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-http://caddy:8080}
+      # 周期对账的间隔（分钟，1–30）
+      RECONCILE_INTERVAL_MINUTES: ${RECONCILE_INTERVAL_MINUTES:-5}
     depends_on:
       postgres:
         condition: service_healthy

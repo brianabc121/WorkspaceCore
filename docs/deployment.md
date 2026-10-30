@@ -89,7 +89,8 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
   `CONNECTOR_READ_TIMEOUT_SECONDS`（默认 10）、`CONNECTOR_READ_RETRIES`（只对读请求，默认 2；写请求从不自动重试）、
   `SYNC_STALE_AFTER_SECONDS`（最近一次成功同步超过多久显示为“数据可能过期”，默认 900）；
   Worker 的 `WEBHOOK_MAX_ATTEMPTS`（Webhook 事件最多尝试几次后进死信，默认 8）、
-  `FULL_SYNC_INTERVAL_SECONDS`（多久做一次全量对账，默认 3600）——这两个要在 worker 的 `environment` 中传入。
+  `FULL_SYNC_INTERVAL_SECONDS`（多久做一次全量对账，默认 3600）——这两个要在 worker 的 `environment` 中传入；
+  `RECONCILE_INTERVAL_MINUTES`（增量对账的间隔，1–30 分钟，默认 5）已在 compose.yaml 中传入。
 
 ## 4. 检查与排错
 
