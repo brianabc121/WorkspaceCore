@@ -21,6 +21,7 @@ from app.domain.auth import AuthContext
 from app.domain.policy import WorkspaceAccess, not_found
 from app.models import Dashboard, Widget
 from app.repositories import dashboards as dashboard_repo
+from app.repositories import workspaces as workspace_repo
 from app.schemas.dashboards import (
     MAX_DASHBOARDS_PER_WORKSPACE,
     MAX_WIDGETS_PER_DASHBOARD,
@@ -119,6 +120,8 @@ class DashboardService:
         self, context: AuthContext, access: WorkspaceAccess, body: DashboardCreate
     ) -> DashboardOut:
         workspace_id = access.workspace.id
+        # 锁住工作空间行再计数：并发创建时超限的一方返回 409，而不是一起插入超过上限
+        await workspace_repo.lock(self.db, workspace_id)
         if await dashboard_repo.count_for_workspace(self.db, workspace_id) >= (
             MAX_DASHBOARDS_PER_WORKSPACE
         ):
@@ -147,8 +150,9 @@ class DashboardService:
         body: DashboardUpdate,
     ) -> DashboardOut:
         if body.is_default:
-            # 切换默认仪表盘会改动另一行：先锁住全部仪表盘，并发的切换排队执行
-            await dashboard_repo.lock_all_for_workspace(self.db, access.workspace.id)
+            # 切换默认仪表盘会改动另一行：先锁住工作空间行，并发的切换排队执行。
+            # 加锁顺序固定为“工作空间 → 仪表盘”，没有反向加锁的路径，不会死锁
+            await workspace_repo.lock(self.db, access.workspace.id)
         dashboard = await self._locked_dashboard(access, dashboard_id)
         if body.version != dashboard.version:
             raise version_conflict(dashboard.version)
@@ -241,10 +245,7 @@ class DashboardService:
         widget_id: uuid.UUID,
         body: WidgetUpdate,
     ) -> WidgetOut:
-        widget = await self._widget(access, widget_id)
-        # 锁住所属仪表盘，与同一仪表盘上的其他写操作串行
-        await self._locked_dashboard(access, widget.dashboard_id)
-        await self.db.refresh(widget)
+        widget, _ = await self._locked_widget(access, widget_id)
         if body.widget_type != widget.widget_type:
             raise _invalid(["widget_type"], "组件类型不能修改")
         if body.version != widget.version:
@@ -261,20 +262,31 @@ class DashboardService:
     async def delete_widget(
         self, context: AuthContext, access: WorkspaceAccess, widget_id: uuid.UUID
     ) -> None:
-        widget = await self._widget(access, widget_id)
-        dashboard = await self._locked_dashboard(access, widget.dashboard_id)
+        widget, dashboard = await self._locked_widget(access, widget_id)
         await self._audit_widget("widget.deleted", context, access, widget)
         await dashboard_repo.delete_widget(self.db, widget.id)
         dashboard.version += 1
         await self.db.commit()
 
-    async def _widget(self, access: WorkspaceAccess, widget_id: uuid.UUID) -> Widget:
+    async def _locked_widget(
+        self, access: WorkspaceAccess, widget_id: uuid.UUID
+    ) -> tuple[Widget, Dashboard]:
+        """锁住组件所属的仪表盘（与同一仪表盘上的写操作串行），再重新读取组件。
+
+        锁之前读到的组件可能在等锁期间被并发删除：拿到锁后重新查询，不存在就按 404 处理。
+        """
         widget = await dashboard_repo.get_widget_for_workspace(
             self.db, widget_id=widget_id, workspace_id=access.workspace.id
         )
         if widget is None:
             raise not_found()
-        return widget
+        dashboard = await self._locked_dashboard(access, widget.dashboard_id)
+        widget = await dashboard_repo.get_widget_for_workspace(
+            self.db, widget_id=widget_id, workspace_id=access.workspace.id, refresh=True
+        )
+        if widget is None:
+            raise not_found()
+        return widget, dashboard
 
     async def _audit_widget(
         self, action: str, context: AuthContext, access: WorkspaceAccess, widget: Widget

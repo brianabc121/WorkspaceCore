@@ -15,6 +15,7 @@ import httpx
 import pytest
 
 from app.domain.overview import ModuleResult, unavailable
+from app.repositories import dashboards as dashboard_repo
 from app.schemas.dashboards import ModuleStatus, TaskBrief
 from tests.helpers import (
     BOB,
@@ -541,3 +542,80 @@ async def test_concurrent_writes_are_serialized(home: Home) -> None:
     assert [r.status_code for r in switches] == [200, 200]
     listed = (await home.client.get("/api/v1/dashboards", headers=home.headers())).json()
     assert sum(d["is_default"] for d in listed["items"]) == 1
+
+
+def _pause_after(monkeypatch: pytest.MonkeyPatch, name: str, seconds: float = 0.3) -> None:
+    """在 repository 读取之后、加锁之前插入等待，稳定地制造并发窗口。"""
+    original = getattr(dashboard_repo, name)
+
+    async def paused(*args: Any, **kwargs: Any) -> Any:
+        result = await original(*args, **kwargs)
+        if not kwargs.get("refresh"):
+            await asyncio.sleep(seconds)
+        return result
+
+    monkeypatch.setattr(dashboard_repo, name, paused)
+
+
+async def test_concurrent_creates_respect_the_dashboard_limit(
+    home: Home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for index in range(20 - 2):
+        created = await home.client.post(
+            "/api/v1/dashboards", json={"title": f"第 {index} 个"}, headers=home.headers(write=True)
+        )
+        assert created.status_code == 201
+    # 两个请求都在计数之后停顿：没有工作空间锁时都会数到 19 并插入成功
+    _pause_after(monkeypatch, "count_for_workspace")
+    results = await asyncio.gather(
+        *[
+            home.client.post(
+                "/api/v1/dashboards", json={"title": f"并发 {i}"}, headers=home.headers(write=True)
+            )
+            for i in range(2)
+        ]
+    )
+    assert sorted(r.status_code for r in results) == [201, 409]
+    listed = (await home.client.get("/api/v1/dashboards", headers=home.headers())).json()
+    assert listed["total_estimate"] == 20
+
+
+async def _delete_first_then(home: Home, path: str, second: Any) -> tuple[httpx.Response, Any]:
+    """先发删除，稍后发第二个请求：二者都在读到组件后停顿，删除先拿到仪表盘锁并提交。"""
+    deleting = asyncio.create_task(home.client.delete(path, headers=home.headers(write=True)))
+    await asyncio.sleep(0.05)
+    other = await second()
+    return await deleting, other
+
+
+async def test_concurrent_delete_and_update_never_fail_with_500(
+    home: Home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    note = (await home.overview())["widgets"][0]
+    path = f"/api/v1/widgets/{note['id']}"
+    update = {"widget_type": "note", "config": {"text": "并发"}, "version": note["version"]}
+    _pause_after(monkeypatch, "get_widget_for_workspace")
+    deleted, updated = await _delete_first_then(
+        home,
+        path,
+        lambda: home.client.patch(path, json=update, headers=home.headers(write=True)),
+    )
+    assert deleted.status_code == 204
+    assert updated.status_code == 404, updated.text
+
+
+async def test_concurrent_deletes_take_effect_once(
+    home: Home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = await home.overview()
+    path = f"/api/v1/widgets/{data['widgets'][0]['id']}"
+    _pause_after(monkeypatch, "get_widget_for_workspace")
+    first, second = await _delete_first_then(
+        home, path, lambda: home.client.delete(path, headers=home.headers(write=True))
+    )
+    assert (first.status_code, second.status_code) == (204, 404)
+    monkeypatch.undo()
+    after = await home.overview()
+    assert after["dashboard"]["version"] == data["dashboard"]["version"] + 1
+    logs = (await home.client.get("/api/v1/audit-logs", headers=home.headers())).json()["items"]
+    assert sum(e["action"] == "widget.deleted" for e in logs) == 1

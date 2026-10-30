@@ -49,16 +49,6 @@ async def get_for_workspace(
     return await db.scalar(stmt)
 
 
-async def lock_all_for_workspace(db: AsyncSession, workspace_id: uuid.UUID) -> None:
-    """按 ID 顺序锁住工作空间的全部仪表盘：切换默认仪表盘时串行，且加锁顺序固定、不会死锁。"""
-    await db.execute(
-        select(Dashboard.id)
-        .where(Dashboard.workspace_id == workspace_id)
-        .order_by(Dashboard.id)
-        .with_for_update()
-    )
-
-
 async def create(
     db: AsyncSession,
     *,
@@ -109,13 +99,17 @@ async def count_widgets(db: AsyncSession, dashboard_id: uuid.UUID) -> int:
 
 
 async def get_widget_for_workspace(
-    db: AsyncSession, *, widget_id: uuid.UUID, workspace_id: uuid.UUID
+    db: AsyncSession, *, widget_id: uuid.UUID, workspace_id: uuid.UUID, refresh: bool = False
 ) -> Widget | None:
-    return await db.scalar(
+    """refresh=True 时用数据库里的最新值覆盖会话中已加载的对象（拿到锁之后重新读取用）。"""
+    stmt = (
         select(Widget)
         .join(Dashboard, Dashboard.id == Widget.dashboard_id)
         .where(Widget.id == widget_id, Dashboard.workspace_id == workspace_id)
     )
+    if refresh:
+        stmt = stmt.execution_options(populate_existing=True)
+    return await db.scalar(stmt)
 
 
 async def add_widget(
