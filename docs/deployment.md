@@ -191,3 +191,41 @@ make vikunja-down    # 停止，保留数据卷
     `docker compose exec -T postgres psql -U workspace -d workspace -c "SELECT event_type, attempts, error_text, received_at FROM workspace.webhook_inbox WHERE status = 'dead_letter' ORDER BY received_at DESC LIMIT 20"`。
     `token_rejected` 表示 Token 失效或被收回权限：在 Vikunja 里重新创建 Token，粘贴到集成设置并重新测试连接。
 
+
+## 9. AFFiNE（文档主源，V1 只做深链接）
+
+工作台**不连接 AFFiNE**：V1 只保存你收藏的 AFFiNE 文档链接，以及你手工填写的标题和备注。
+它不读取文档内容，也不调用 AFFiNE 的接口（规范 7.2）。核验结论见 `docs/decisions/2026-10-30-github-rest-and-affine-verification.md` 第 7 ~ 9 节。
+
+- 本仓库不提供 AFFiNE 的 Compose。需要自己部署时，以官方自托管文档为准，版本锁定为 **0.27.4**：
+  `ghcr.io/toeverything/affine:0.27.4@sha256:b649f5ce2384ffdf13c23bccf81d759e15973d59d0b0058af65d895a84373099`。
+- 官方 Compose 有几处默认配置不安全，部署时要改：
+  - PostgreSQL 用的是 `POSTGRES_HOST_AUTH_METHOD: trust`（不要密码）：改成设置密码，`DATABASE_URL` 带上密码；
+  - `redis`、`pgvector/pgvector:pg16` 没有锁定版本：都锁定到具体版本；
+  - 不要把 AFFiNE 加入工作台的 `backend` / `integrations` 网络，用单独的 Compose 项目。
+- 0.27 起服务端配置以 `config.json` 为主。用 `server.externalUrl` 设置浏览器访问 AFFiNE 的地址；部署在子路径下时还要设置 `server.path`。
+- 在工作台里填写的 **AFFiNE 外部地址**要和 `server.externalUrl` 完全一致，包括子路径。具体在哪里填，见 Sprint 4 接口契约（T-0026）。
+  收藏只接受这个地址下 `/workspace/<工作空间 ID>/<文档 ID>` 或 `/share/<工作空间 ID>/<文档 ID>` 形式的链接。
+  在 AFFiNE 里打开文档后，复制浏览器地址栏里的地址即可。
+- 外部地址必须是 `https://`；内网开发时可以用 `http://`，但必须显式配置。
+- 备份：AFFiNE 的 PostgreSQL、`storage` 和 `config` 三者要一起备份（规范 11.4）。工作台的备份只包含收藏链接。
+- 许可证：AFFiNE 服务端适用 Enterprise Edition 许可，其中不属于 Community Edition 的部分在生产环境使用需要订阅。部署前请自行确认（核验 ADR 第 7 节）。
+
+## 10. GitHub（只读）
+
+工作台用 GitHub REST API（版本 `2026-03-10`）**只读**同步你指定仓库的 Issue、PR 和 Actions 最近运行。
+V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一个 ADR 的第 2 ~ 6 节。
+**GitHub 连接在 T-0028 完成后才可用**；下面关于工作台行为的描述是按核验结论确定的设计。
+
+- 在 GitHub 的 Settings → Developer settings → Personal access tokens → **Fine-grained tokens** 里创建 Token：
+  - Resource owner：仓库所属的用户或组织（组织可能要求审批，审批前只能读公开仓库）；
+  - Repository access：**Only select repositories**，只选要在工作台里看的仓库；
+  - Repository permissions 全部设为 **Read-only**：Metadata（自动带上）、Issues、Pull requests、Actions；其他权限都不要给；
+  - 建议设置过期时间，并在集成设置里填上同样的过期时间。
+- 不要用经典 Token（`ghp_` 开头）：它能访问你的所有仓库。测试连接时如果识别出经典 Token，会提示改用细粒度 Token。
+- `api.github.com` 是公网地址，不需要加进 `INTEGRATION_ALLOWED_HOSTS`。服务器要能访问 `https://api.github.com`。
+- 限流：每个 Token 每小时 5,000 次，同一用户的其他调用方式共用这个额度。
+  - 工作台串行请求，并用条件请求（数据没变时不消耗额度）；
+  - 被限流时页面显示“GitHub 限流中”和预计恢复时间，不会显示成空列表；
+  - Token 失效时显示“需要重新连接”，不会反复重试：GitHub 会因为反复使用无效凭证暂时拒绝该用户的所有请求。
+- 连接 GitHub 的具体操作（集成设置里填什么）见 Sprint 4 接口契约（T-0026）。实现完成（T-0028）后补充到这一节。
