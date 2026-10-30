@@ -12,7 +12,8 @@ function changeType() { config.value = JSON.stringify(registry[type.value].confi
 function parse(): WidgetValue | null {
   try {
     const size = registry[type.value].defaultSize
-    const result = widgetSchema.safeParse({ widget_type: type.value, config: JSON.parse(config.value), layout: props.widget?.layout ?? { desktop: { x: 0, y: props.bottom, ...size }, mobile: { y: props.bottom, h: size.h } } })
+    const y = Math.min(props.bottom, 999)
+    const result = widgetSchema.safeParse({ widget_type: type.value, config: JSON.parse(config.value), layout: props.widget?.layout ?? { desktop: { x: 0, y, ...size }, mobile: { y, h: size.h } } })
     invalid.value = !result.success
     return result.success ? result.data : null
   } catch { invalid.value = true; return null }
