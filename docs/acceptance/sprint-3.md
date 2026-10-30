@@ -3,7 +3,7 @@
 - 验收人：claude（协作任务 T-0023，按 D-0003 负责每个 Sprint 的联调与验收）
 - 日期：2026-10-30
 - 结论：**Sprint 3 的 DoD 与 A05 ~ A09 全部通过**，接口级与浏览器验收都已纳入 CI；“未运行 / 限制”逐条见第 5 节。
-- 是否进入 Sprint 4：等待人类批准（D-0003 / D-0004：进入下一个 Sprint 由人类决定）。
+- 是否进入 Sprint 4：人类已于 2026-10-30 在对话中批准（D-0003 / D-0004：进入下一个 Sprint 由人类决定）。
 
 全栈环境：Compose 6 个服务 + `infra/vikunja/compose.yaml` 启动的 Vikunja 2.7.1（锁定 digest），工作台经 integrations 网络访问
 `http://vikunja:3456`，Vikunja 的 Webhook 投递到 `http://caddy:8080`。两个脚本都**已纳入 CI**（`ci-infra.yml`）：

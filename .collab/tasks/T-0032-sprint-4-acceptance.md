@@ -1,0 +1,35 @@
+---
+id: T-0032
+title: Sprint 4 集成与验收：DoD 实测、A10 / A11 / A12 / A13 / A17 自动化、全栈与浏览器 E2E 纳入 CI、勾选 TASKS.md
+owner: claude
+status: todo
+priority: P1
+branch:
+paths: docs/acceptance,docs/TASKS.md,tests/e2e,.github/workflows/ci-infra.yml,scripts/smoke.sh
+depends_on: T-0027, T-0028, T-0029, T-0030, T-0031
+created: 2026-10-30
+updated: 2026-10-30
+---
+
+# T-0032 Sprint 4 集成与验收：DoD 实测、A10 / A11 / A12 / A13 / A17 自动化、全栈与浏览器 E2E 纳入 CI、勾选 TASKS.md
+
+## 目标
+T-0027 ~ T-0031 合并后做前后端联调，并按 Sprint 4 的 DoD 实测验收。
+通过后勾选 `docs/TASKS.md` 的 S4-01 ~ S4-05，请人类批准进入 Sprint 5。
+
+## 验收标准
+- [ ] DoD 实测（规范第 13 节）：无未授权文档正文抓取（工作台不向 AFFiNE 发请求，索引里没有文档正文）；搜索结果只显示可见资源；GitHub 限流有清晰降级
+- [ ] 在 Compose 全栈上自动化 A10（源对象删除后搜索投影标记删除、页面无僵尸引用）、A11（搜索另一工作空间的数据不返回）、A12（`http://169.254.169.254` 等危险地址作为集成地址或收藏链接被拒绝）、A13（失效的 GitHub Token 显示重新连接、不无限重试）、A17（GitHub 429 / 次级限流时遵守退避，不把空列表当正常），并纳入 CI
+- [ ] CI 里没有真实 GitHub Token：全栈验收用按 T-0025 记录的官方响应格式编写的模拟 GitHub 服务（只用于测试，可注入 429 / 401），并写明它与真实 GitHub 的差异；另提供需要 `TEST_GITHUB_TOKEN` 的可选真实验证
+- [ ] 浏览器 E2E 纳入 CI：新增收藏 → 关联任务 → 搜索命中 → 删除后搜索不再出现；日历新建 / 编辑 / 删除与首页 agenda；连接 GitHub → 开发者页 → 限流提示；viewer 只读
+- [ ] `docs/acceptance/sprint-4.md` 逐条列出通过 / 失败 / 未运行及原因（规范第 18 节）
+- [ ] 勾选 `docs/TASKS.md` 的 S4-01 ~ S4-05；escalate 给人类，请求批准进入 Sprint 5
+
+## 背景 / 约束 / 参考
+- 依赖：T-0027 ~ T-0031 都合并之后才开始；接口级验收可以先于前端完成（同 T-0023 的两段做法）
+- 规范：`docs/DEVELOPMENT_SPEC.md` 第 13 节（Sprint 4 DoD）、第 15 节（A10 ~ A13、A17）、第 18 节
+- Sprint 1 ~ 3 的验收脚本继续在 CI 里运行，不能因为本 Sprint 的改动失败
+
+## 进度日志
+<!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
+- 2026-10-30 16:43 UTC · claude · 创建任务（owner: claude）
