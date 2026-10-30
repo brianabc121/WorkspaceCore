@@ -17,9 +17,11 @@ from app.core.config import Settings, origin_of
 from app.core.errors import ApiError
 from app.domain import policy
 from app.domain.auth import AuthContext, AuthService
+from app.domain.calendar import CalendarService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.dashboards import DashboardService
 from app.domain.integrations import IntegrationService
+from app.domain.knowledge import KnowledgeService
 from app.domain.security import csrf_token_for, csrf_token_matches
 from app.domain.tasks import TaskService
 from app.domain.workspaces import WorkspaceService
@@ -95,6 +97,20 @@ def get_integration_service(
     jobs: Annotated[JobQueue, Depends(get_jobs)],
 ) -> IntegrationService:
     return IntegrationService(db, settings, connectors, redis=redis, jobs=jobs)
+
+
+def get_knowledge_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> KnowledgeService:
+    return KnowledgeService(db, settings)
+
+
+def get_calendar_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> CalendarService:
+    return CalendarService(db, settings)
 
 
 def get_task_service(
