@@ -10,8 +10,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Response, Security, status
 from pydantic import AwareDatetime
 
-from app.api.deps import authenticated, csrf_protected, workspace_member, workspace_viewer
-from app.core.errors import not_implemented
+from app.api.deps import (
+    authenticated,
+    csrf_protected,
+    get_calendar_service,
+    workspace_member,
+    workspace_viewer,
+)
+from app.domain.auth import AuthContext
+from app.domain.calendar import CalendarService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.calendar import CalendarEventCreate, CalendarEventOut, CalendarEventUpdate, Version
 from app.schemas.common import Page, error_responses
@@ -20,6 +27,8 @@ router = APIRouter(tags=["calendar"], dependencies=[Security(authenticated)])
 
 Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
 Member = Annotated[WorkspaceAccess, Depends(workspace_member)]
+Context = Annotated[AuthContext, Security(authenticated)]
+Service = Annotated[CalendarService, Depends(get_calendar_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 _write = [Depends(csrf_protected)]
@@ -36,12 +45,13 @@ _write_errors = error_responses(401, 403, 404, 409, 422)
 )
 async def list_events(
     access: Viewer,
+    service: Service,
     start: Annotated[AwareDatetime, Query()],
     end: Annotated[AwareDatetime, Query()],
     cursor: Cursor = None,
     limit: Limit = 30,
 ) -> Page[CalendarEventOut]:
-    raise not_implemented("T-0027")
+    return await service.list_events(access, start=start, end=end, cursor=cursor, limit=limit)
 
 
 @router.post(
@@ -54,8 +64,10 @@ async def list_events(
     dependencies=_write,
     responses=_write_errors,
 )
-async def create_event(access: Member, body: CalendarEventCreate) -> CalendarEventOut:
-    raise not_implemented("T-0027")
+async def create_event(
+    access: Member, context: Context, service: Service, body: CalendarEventCreate
+) -> CalendarEventOut:
+    return await service.create_event(context, access, body)
 
 
 @router.patch(
@@ -65,9 +77,9 @@ async def create_event(access: Member, body: CalendarEventCreate) -> CalendarEve
     responses=_write_errors,
 )
 async def update_event(
-    access: Member, event_id: UUID, body: CalendarEventUpdate
+    access: Member, context: Context, service: Service, event_id: UUID, body: CalendarEventUpdate
 ) -> CalendarEventOut:
-    raise not_implemented("T-0027")
+    return await service.update_event(context, access, event_id, body)
 
 
 @router.delete(
@@ -79,6 +91,11 @@ async def update_event(
     responses=_write_errors,
 )
 async def delete_event(
-    access: Member, event_id: UUID, version: Annotated[Version, Query()]
+    access: Member,
+    context: Context,
+    service: Service,
+    event_id: UUID,
+    version: Annotated[Version, Query()],
 ) -> Response:
-    raise not_implemented("T-0027")
+    await service.delete_event(context, access, event_id, version)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

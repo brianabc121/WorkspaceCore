@@ -49,13 +49,15 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | caddy | `caddy:2.11.7-alpine` | 统一入口：路由、安全响应头、请求体限制 | frontend + integrations | `127.0.0.1:8080`（可配置） |
 | web | `my-workspace-web:local`（`apps/web/Dockerfile`） | 前端静态文件（nginx，非 root） | frontend | 无 |
 | api | `my-workspace-api:local`（`services/api/Dockerfile`） | FastAPI BFF（非 root） | backend + frontend + integrations | 无 |
-| worker | 同 api 镜像 | ARQ 后台作业 | backend + integrations | 无 |
+| worker | 同 api 镜像 | ARQ 后台作业 | backend + integrations + egress | 无 |
 | postgres | `postgres:16.15-alpine3.24` | 数据库 | backend | 无 |
 | redis | `redis:7.4.12-alpine3.21` | 缓存 / 作业队列 | backend | 无 |
 
 - `backend` 是内部网络（不通外网）；数据库和 Redis 只在这个网络里，宿主机和外网都连不到。
 - `integrations` 也是内部网络，只有 caddy、api、worker 加入，供独立部署的第三方服务（Vikunja 等，见第 8 节）与工作台互通；
   第三方服务碰不到 backend 里的数据库和 Redis。
+- `egress` 只有 worker 加入，用来访问外部托管的服务（GitHub 的周期同步要访问 `https://api.github.com`）；
+  api 经 `frontend` 出网。出站地址仍由 Connector 的 SSRF 检查限制（私有地址只允许 `INTEGRATION_ALLOWED_HOSTS` 里的主机）。
 - api、worker、web 以只读文件系统运行，去掉全部 Linux capabilities，禁止提权。
 - Caddy 路由：`/api/*`、`/healthz` → api；`/readyz` 只接受内网来源（公网返回 404）；其余 → web。
 
@@ -204,7 +206,9 @@ make vikunja-down    # 停止，保留数据卷
   - `redis`、`pgvector/pgvector:pg16` 没有锁定版本：都锁定到具体版本；
   - 不要把 AFFiNE 加入工作台的 `backend` / `integrations` 网络，用单独的 Compose 项目。
 - 0.27 起服务端配置以 `config.json` 为主。用 `server.externalUrl` 设置浏览器访问 AFFiNE 的地址；部署在子路径下时还要设置 `server.path`。
-- 在工作台里填写的 **AFFiNE 外部地址**要和 `server.externalUrl` 完全一致，包括子路径。具体在哪里填，见 Sprint 4 接口契约（T-0026）。
+- 在工作台里填写的 **AFFiNE 外部地址**要和 `server.externalUrl` 完全一致，包括子路径。
+  由 workspace admin 配置（接口 `POST /api/v1/knowledge/sources`，设置页入口由前端任务 T-0030 提供）；
+  每个工作空间一个，以后改地址时，已有收藏的链接会自动改为新地址。
   收藏只接受这个地址下 `/workspace/<工作空间 ID>/<文档 ID>` 或 `/share/<工作空间 ID>/<文档 ID>` 形式的链接。
   在 AFFiNE 里打开文档后，复制浏览器地址栏里的地址即可。
 - 外部地址必须是 `https://`；内网开发时可以用 `http://`，但必须显式配置。
@@ -215,7 +219,6 @@ make vikunja-down    # 停止，保留数据卷
 
 工作台用 GitHub REST API（版本 `2026-03-10`）**只读**同步你指定仓库的 Issue、PR 和 Actions 最近运行。
 V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一个 ADR 的第 2 ~ 6 节。
-**GitHub 连接在 T-0028 完成后才可用**；下面关于工作台行为的描述是按核验结论确定的设计。
 
 - 在 GitHub 的 Settings → Developer settings → Personal access tokens → **Fine-grained tokens** 里创建 Token：
   - Resource owner：仓库所属的用户或组织（组织可能要求审批，审批前只能读公开仓库）；
@@ -228,4 +231,25 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
   - 工作台串行请求，并用条件请求（数据没变时不消耗额度）；
   - 被限流时页面显示“GitHub 限流中”和预计恢复时间，不会显示成空列表；
   - Token 失效时显示“需要重新连接”，不会反复重试：GitHub 会因为反复使用无效凭证暂时拒绝该用户的所有请求。
-- 连接 GitHub 的具体操作（集成设置里填什么）见 Sprint 4 接口契约（T-0026）。实现完成（T-0028）后补充到这一节。
+- 连接（workspace admin）：在集成设置里新建 GitHub 集成，粘贴 Token，列出要同步的仓库（`owner/repo`，最多 20 个），
+  保存后点“测试连接”。测试会逐个仓库检查四项读权限，缺哪一项会单独标出；通过后立即同步一次。
+  接口见 `docs/api-contract.md` 的 Sprint 4 部分（`POST /api/v1/integrations`，`provider: github`）。
+- 同步：Worker 随周期对账同步（`RECONCILE_INTERVAL_MINUTES`，默认 5 分钟），每小时做一次全量。
+  - 每个仓库同步 Issue、PR 和最近 30 次 Actions 运行。失败的运行会读一次 jobs，记下失败的 job 和 step 名称，不读日志。
+  - 增量同步时，三个列表的第一页都带 `ETag`，没有变化时返回 304，不消耗额度。
+  - 从集成里移除的仓库，以及 GitHub 上删除的 Issue / PR，会在全量同步后从工作台消失。
+- 被限流时记下恢复时间，期间不再请求 GitHub；Token 失效后集成变为 `unauthorized`，不再自动同步，更换 Token 并重新测试后恢复。
+- 测试与 CI 验收可以在 `.env` 里用 `WORKSPACE_GITHUB_API_URL` 把地址改成模拟服务（Compose 把它作为
+  `GITHUB_API_URL` 传给 api 与 worker；同时把模拟服务的主机名加进 `INTEGRATION_ALLOWED_HOSTS`）；生产环境不要设置。
+  `.env` 里不用 `GITHUB_API_URL` 这个名字：GitHub Actions 等环境会在 shell 里设置它，而 Compose 插值时 shell 变量优先于 `.env`。
+
+## 11. 跨资源搜索
+
+- 顶栏搜索查的是工作台自己的索引：Vikunja 的任务与项目、GitHub 的仓库 / Issue / PR、AFFiNE 收藏（标题与备注）、本地日程。
+  - 不搜 AFFiNE 文档正文，也不搜 Actions 运行。
+  - 只返回你能看到的内容：别人的私有收藏、其他工作空间的数据都搜不到。
+- 索引由数据库触发器随写入更新，删除或同步掉的内容会立刻搜不到，平时不需要维护。
+  怀疑索引与数据不一致时可以重建：`docker compose exec -T api python -m app.commands.reindex_search`。
+- 中文按字面包含匹配，不做分词，所以相关性有限：能找到包含查询文字的结果，排序只区分“标题完全一致 / 标题开头 / 标题包含 / 只在正文里”。
+  英文支持词干，例如 deploy 能找到 deploying。
+

@@ -10,8 +10,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Security
 
-from app.api.deps import authenticated, workspace_viewer
-from app.core.errors import not_implemented
+from app.api.deps import authenticated, get_developer_service, workspace_viewer
+from app.domain.developer import DeveloperService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.common import error_responses
 from app.schemas.developer import (
@@ -27,6 +27,7 @@ from app.schemas.developer import (
 router = APIRouter(tags=["developer"], dependencies=[Security(authenticated)])
 
 Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
+Service = Annotated[DeveloperService, Depends(get_developer_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 Title = Annotated[str | None, Query(min_length=1, max_length=100, description="标题包含")]
@@ -40,11 +41,12 @@ _read_errors = error_responses(401, 404, 422)
 )
 async def list_repos(
     access: Viewer,
+    service: Service,
     integration_id: UUID | None = None,
     cursor: Cursor = None,
     limit: Limit = 30,
 ) -> RepoPage:
-    raise not_implemented("T-0028")
+    return await service.repos(access, integration_id=integration_id, cursor=cursor, limit=limit)
 
 
 @router.get(
@@ -54,13 +56,16 @@ async def list_repos(
 )
 async def list_issues(
     access: Viewer,
+    service: Service,
     repo_id: UUID | None = None,
     state: GitHubStateFilter = "open",
     q: Title = None,
     cursor: Cursor = None,
     limit: Limit = 30,
 ) -> IssuePage:
-    raise not_implemented("T-0028")
+    return await service.issues(
+        access, repo_id=repo_id, state=state, q=q, cursor=cursor, limit=limit
+    )
 
 
 @router.get(
@@ -70,13 +75,16 @@ async def list_issues(
 )
 async def list_pulls(
     access: Viewer,
+    service: Service,
     repo_id: UUID | None = None,
     state: GitHubStateFilter = "open",
     q: Title = None,
     cursor: Cursor = None,
     limit: Limit = 30,
 ) -> PullPage:
-    raise not_implemented("T-0028")
+    return await service.pulls(
+        access, repo_id=repo_id, state=state, q=q, cursor=cursor, limit=limit
+    )
 
 
 @router.get(
@@ -87,10 +95,18 @@ async def list_pulls(
 )
 async def list_runs(
     access: Viewer,
+    service: Service,
     repo_id: UUID | None = None,
     status_filter: Annotated[RunStatusFilter | None, Query(alias="status")] = None,
     conclusion: RunConclusionFilter | None = None,
     cursor: Cursor = None,
     limit: Limit = 30,
 ) -> RunPage:
-    raise not_implemented("T-0028")
+    return await service.runs(
+        access,
+        repo_id=repo_id,
+        status=status_filter,
+        conclusion=conclusion,
+        cursor=cursor,
+        limit=limit,
+    )

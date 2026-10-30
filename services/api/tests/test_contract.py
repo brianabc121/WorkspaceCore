@@ -12,9 +12,13 @@ from fastapi import FastAPI
 
 from app.api.deps import (
     authenticated,
+    get_calendar_service,
     get_db,
+    get_developer_service,
     get_integration_service,
+    get_knowledge_service,
     get_redis,
+    get_search_service,
     get_task_service,
     get_workspace_service,
     workspace_admin,
@@ -220,8 +224,15 @@ def any_role(app: FastAPI) -> None:
     """跳过成员与角色检查与业务逻辑（它们需要数据库），只验证请求形态。"""
     for dependency in (workspace_viewer, workspace_member, workspace_admin):
         app.dependency_overrides[dependency] = lambda: None
-    app.dependency_overrides[get_task_service] = _ShapeOnlyService
-    app.dependency_overrides[get_integration_service] = _ShapeOnlyService
+    for service in (
+        get_task_service,
+        get_integration_service,
+        get_knowledge_service,
+        get_calendar_service,
+        get_developer_service,
+        get_search_service,
+    ):
+        app.dependency_overrides[service] = _ShapeOnlyService
 
 
 def _operation(method: str, path: str) -> dict[str, object]:

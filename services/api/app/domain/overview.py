@@ -13,10 +13,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from typing import Protocol
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.connectors import sync_state
 from app.integrations.vikunja import PROVIDER
+from app.models import CalendarEvent, KnowledgeSource
 from app.repositories import integrations as integration_repo
 from app.repositories import projection as projection_repo
 from app.schemas.dashboards import ModuleStatus, TaskBrief
@@ -139,10 +141,98 @@ def _due(meta: dict[str, object]) -> datetime | None:
         return None
 
 
+class CalendarProvider:
+    """日历模块（Sprint 4 契约第 9.1 节）：本地数据，能读就是 ok；组件自己调用 /calendar/events。"""
+
+    name = "calendar"
+    timeout_seconds = 2.0
+
+    def __init__(self, sessions: Callable[[], AsyncSession] | None = None) -> None:
+        self._sessions = sessions
+
+    async def fetch(self, workspace_id: uuid.UUID) -> ModuleResult:
+        if self._sessions is None:
+            return ModuleResult(status=unavailable("not_configured", retryable=False))
+        async with self._sessions() as db:
+            await db.scalar(
+                select(CalendarEvent.id).where(CalendarEvent.workspace_id == workspace_id).limit(1)
+            )
+        return ModuleResult(
+            status=ModuleStatus(status="ok", as_of=datetime.now(UTC), retryable=True)
+        )
+
+
+class KnowledgeProvider:
+    """知识模块：没有配置 AFFiNE 地址时 not_configured，否则 ok（不访问 AFFiNE）。"""
+
+    name = "knowledge"
+    timeout_seconds = 2.0
+
+    def __init__(self, sessions: Callable[[], AsyncSession] | None = None) -> None:
+        self._sessions = sessions
+
+    async def fetch(self, workspace_id: uuid.UUID) -> ModuleResult:
+        if self._sessions is None:
+            return ModuleResult(status=unavailable("not_configured", retryable=False))
+        async with self._sessions() as db:
+            configured = await db.scalar(
+                select(KnowledgeSource.id)
+                .where(KnowledgeSource.workspace_id == workspace_id)
+                .limit(1)
+            )
+        if configured is None:
+            return ModuleResult(status=unavailable("not_configured", retryable=False))
+        return ModuleResult(
+            status=ModuleStatus(status="ok", as_of=datetime.now(UTC), retryable=True)
+        )
+
+
+class GitHubProvider:
+    """GitHub 模块（Sprint 4 契约第 9.1 节）：按 GitHub 投影的同步状态给出，不访问 GitHub。"""
+
+    name = "github"
+    timeout_seconds = 2.0
+
+    def __init__(
+        self, sessions: Callable[[], AsyncSession] | None = None, stale_after_seconds: int = 900
+    ) -> None:
+        self._sessions = sessions
+        self._stale_after = stale_after_seconds
+
+    async def fetch(self, workspace_id: uuid.UUID) -> ModuleResult:
+        if self._sessions is None:
+            return ModuleResult(status=unavailable("not_configured", retryable=False))
+        async with self._sessions() as db:
+            integration = await integration_repo.get_provider(db, workspace_id, "github")
+            cursor = (
+                await integration_repo.get_cursor(db, integration.id, "github")
+                if integration
+                else None
+            )
+        state = sync_state(integration, cursor, stale_after_seconds=self._stale_after)
+        status = state.status
+        if status == "not_configured":
+            return ModuleResult(status=unavailable("not_configured", retryable=False))
+        return ModuleResult(
+            status=ModuleStatus(
+                status=status,
+                as_of=state.as_of,
+                retryable=state.status != "unauthorized",
+                reason=state.reason,
+                retry_at=state.retry_at,
+            )
+        )
+
+
 def default_providers(
     sessions: Callable[[], AsyncSession] | None = None, stale_after_seconds: int = 900
 ) -> list[ModuleProvider]:
-    return [TasksProvider(sessions, stale_after_seconds)]
+    return [
+        TasksProvider(sessions, stale_after_seconds),
+        CalendarProvider(sessions),
+        KnowledgeProvider(sessions),
+        GitHubProvider(sessions, stale_after_seconds),
+    ]
 
 
 async def collect(

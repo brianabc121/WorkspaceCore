@@ -76,15 +76,18 @@ async def test_setup_creates_the_default_dashboard_with_starter_widgets(home: Ho
         "todo_summary",
         "today_tasks",
     ]
-    assert data["modules"] == {
-        "tasks": {
-            "status": "unavailable",
-            "as_of": None,
-            "retryable": False,
-            "reason": "not_configured",
-            "retry_at": None,
-        }
+    assert data["modules"]["tasks"] == {
+        "status": "unavailable",
+        "as_of": None,
+        "retryable": False,
+        "reason": "not_configured",
+        "retry_at": None,
     }
+    # Sprint 4：本地日历总是可用；还没有配置 AFFiNE 地址
+    assert data["modules"]["calendar"]["status"] == "ok"
+    assert data["modules"]["knowledge"]["reason"] == "not_configured"
+    assert data["modules"]["github"]["reason"] == "not_configured"
+    assert set(data["modules"]) == {"tasks", "calendar", "knowledge", "github"}
     assert data["summary"] == {
         "pending_tasks": None,
         "active_projects": None,

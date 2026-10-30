@@ -17,7 +17,6 @@ from app.api.deps import (
     workspace_admin,
     workspace_viewer,
 )
-from app.core.errors import not_implemented
 from app.domain.auth import AuthContext
 from app.domain.integrations import IntegrationService
 from app.domain.policy import WorkspaceAccess
@@ -68,7 +67,7 @@ async def create_integration(
     access: Admin, context: Context, service: Service, body: AnyIntegrationCreate
 ) -> IntegrationOut:
     if isinstance(body, GitHubIntegrationCreate):
-        raise not_implemented("T-0028")
+        return await service.create_github(context, access, body)
     return await service.create(context, access, body)
 
 
