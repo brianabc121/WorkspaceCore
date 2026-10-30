@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     login_max_failures_per_ip: int = Field(default=10, ge=1)
     login_failure_window_seconds: int = Field(default=900, ge=1)
     login_failure_delay_seconds: float = Field(default=0.5, ge=0, le=5)
+    # 首页聚合接口的总耗时上限（各模块另有自己的超时）
+    dashboard_overview_timeout_seconds: float = Field(default=3.0, gt=0, le=10)
     # 只在 API 前面有可信反向代理（Compose 中的 Caddy）时开启，取 X-Forwarded-For 最右侧的地址
     trust_forwarded_for: bool = False
 

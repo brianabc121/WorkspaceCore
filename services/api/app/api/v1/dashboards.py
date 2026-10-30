@@ -3,8 +3,6 @@
 所有端点都是工作空间范围的资源，用 X-Workspace-Id 指定工作空间：
 viewer 可读，member 及以上可写（A03）；路径里的仪表盘 / 组件不属于该工作空间时返回 404。
 约定见 docs/decisions/2026-10-30-sprint-2-dashboard-contract.md。
-
-T-0014 只声明契约：登录、CSRF、成员与角色校验已经生效，处理函数在 T-0015 实现之前返回 501。
 """
 
 from typing import Annotated
@@ -12,8 +10,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Response, Security, status
 
-from app.api.deps import authenticated, csrf_protected, workspace_member, workspace_viewer
-from app.core.errors import not_implemented
+from app.api.deps import (
+    authenticated,
+    csrf_protected,
+    get_dashboard_service,
+    workspace_member,
+    workspace_viewer,
+)
+from app.domain.auth import AuthContext
+from app.domain.dashboards import DashboardService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.common import Page, error_responses
 from app.schemas.dashboards import (
@@ -30,6 +35,8 @@ router = APIRouter(tags=["dashboards"], dependencies=[Security(authenticated)])
 
 Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
 Member = Annotated[WorkspaceAccess, Depends(workspace_member)]
+Context = Annotated[AuthContext, Security(authenticated)]
+Service = Annotated[DashboardService, Depends(get_dashboard_service)]
 _write = [Depends(csrf_protected)]
 _read_errors = error_responses(401, 404, 422)
 _write_errors = error_responses(401, 403, 404, 409, 422)
@@ -42,8 +49,8 @@ _write_errors = error_responses(401, 403, 404, 409, 422)
     "不影响其余内容。",
     responses=_read_errors,
 )
-async def get_dashboard_overview(access: Viewer) -> DashboardOverview:
-    raise not_implemented("T-0015")
+async def get_dashboard_overview(access: Viewer, service: Service) -> DashboardOverview:
+    return await service.overview(access)
 
 
 @router.get(
@@ -51,8 +58,9 @@ async def get_dashboard_overview(access: Viewer) -> DashboardOverview:
     summary="工作空间的仪表盘列表（viewer）",
     responses=_read_errors,
 )
-async def list_dashboards(access: Viewer) -> Page[DashboardOut]:
-    raise not_implemented("T-0015")
+async def list_dashboards(access: Viewer, service: Service) -> Page[DashboardOut]:
+    items = await service.list_dashboards(access)
+    return Page(items=items, next_cursor=None, total_estimate=len(items))
 
 
 @router.post(
@@ -62,8 +70,10 @@ async def list_dashboards(access: Viewer) -> Page[DashboardOut]:
     dependencies=_write,
     responses=_write_errors,
 )
-async def create_dashboard(access: Member, body: DashboardCreate) -> DashboardOut:
-    raise not_implemented("T-0015")
+async def create_dashboard(
+    access: Member, context: Context, service: Service, body: DashboardCreate
+) -> DashboardOut:
+    return await service.create_dashboard(context, access, body)
 
 
 @router.patch(
@@ -75,9 +85,9 @@ async def create_dashboard(access: Member, body: DashboardCreate) -> DashboardOu
     responses=_write_errors,
 )
 async def update_dashboard(
-    dashboard_id: UUID, access: Member, body: DashboardUpdate
+    dashboard_id: UUID, access: Member, context: Context, service: Service, body: DashboardUpdate
 ) -> DashboardOut:
-    raise not_implemented("T-0015")
+    return await service.update_dashboard(context, access, dashboard_id, body)
 
 
 @router.get(
@@ -85,8 +95,9 @@ async def update_dashboard(
     summary="仪表盘的组件（viewer）",
     responses=_read_errors,
 )
-async def list_widgets(dashboard_id: UUID, access: Viewer) -> Page[WidgetOut]:
-    raise not_implemented("T-0015")
+async def list_widgets(dashboard_id: UUID, access: Viewer, service: Service) -> Page[WidgetOut]:
+    items = await service.list_widgets(access, dashboard_id)
+    return Page(items=items, next_cursor=None, total_estimate=len(items))
 
 
 @router.post(
@@ -97,9 +108,13 @@ async def list_widgets(dashboard_id: UUID, access: Viewer) -> Page[WidgetOut]:
     responses=_write_errors,
 )
 async def create_widget(
-    dashboard_id: UUID, access: Member, body: Annotated[WidgetCreate, Body()]
+    dashboard_id: UUID,
+    access: Member,
+    context: Context,
+    service: Service,
+    body: Annotated[WidgetCreate, Body()],
 ) -> WidgetOut:
-    raise not_implemented("T-0015")
+    return await service.create_widget(context, access, dashboard_id, body)
 
 
 @router.patch(
@@ -111,9 +126,13 @@ async def create_widget(
     responses=_write_errors,
 )
 async def update_widget(
-    widget_id: UUID, access: Member, body: Annotated[WidgetUpdate, Body()]
+    widget_id: UUID,
+    access: Member,
+    context: Context,
+    service: Service,
+    body: Annotated[WidgetUpdate, Body()],
 ) -> WidgetOut:
-    raise not_implemented("T-0015")
+    return await service.update_widget(context, access, widget_id, body)
 
 
 @router.delete(
@@ -124,5 +143,7 @@ async def update_widget(
     dependencies=_write,
     responses=error_responses(401, 403, 404, 422),
 )
-async def delete_widget(widget_id: UUID, access: Member) -> None:
-    raise not_implemented("T-0015")
+async def delete_widget(
+    widget_id: UUID, access: Member, context: Context, service: Service
+) -> None:
+    await service.delete_widget(context, access, widget_id)

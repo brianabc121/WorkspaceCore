@@ -38,6 +38,8 @@ EXPECTED_TABLES = {
     "workspaces",
     "workspace_members",
     "audit_logs",
+    "dashboards",
+    "widgets",
 }
 
 

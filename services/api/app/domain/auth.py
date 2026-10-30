@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import security
+from app.domain import dashboard_defaults, security
 from app.domain.audit import AuditTrail
 from app.domain.policy import not_found
 from app.domain.ratelimit import FailureLimiter
@@ -105,6 +105,9 @@ class AuthService:
         )
         workspace = await workspace_repo.create_with_owner(
             self.db, name=workspace_name, owner_id=user.id
+        )
+        await dashboard_defaults.create_default_dashboard(
+            self.db, workspace_id=workspace.id, owner_id=user.id
         )
         token = await self._start_session(user)
         await self.audit.record(

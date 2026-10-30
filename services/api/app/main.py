@@ -15,6 +15,7 @@ from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import install_middleware
 from app.core.resources import create_engine, create_redis
+from app.domain import overview
 from app.domain.credentials import CredentialBox
 
 logger = logging.getLogger("app")
@@ -59,6 +60,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         generate_unique_id_function=lambda route: route.name,
     )
     app.state.settings = settings
+    # 首页聚合的模块数据来源；测试可以替换成会失败或超时的 provider
+    app.state.module_providers = overview.default_providers()
     app.state.readiness_checks = {}
     install_error_handlers(app)
     install_middleware(app)
