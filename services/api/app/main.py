@@ -19,6 +19,7 @@ from app.domain import overview
 from app.domain.connectors import ConnectorRuntime
 from app.domain.credentials import CredentialBox
 from app.integrations.http import CircuitBreaker
+from app.jobs.queue import ArqJobQueue
 
 logger = logging.getLogger("app")
 
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     redis = create_redis(settings)
     app.state.sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     app.state.redis = redis
+    app.state.jobs = ArqJobQueue(redis)
     app.state.readiness_checks = {
         "database": health.database_check(engine),
         "redis": health.redis_check(redis),

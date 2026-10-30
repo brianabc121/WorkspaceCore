@@ -16,7 +16,6 @@ from app.api.deps import (
     workspace_admin,
     workspace_viewer,
 )
-from app.core.errors import not_implemented
 from app.domain.auth import AuthContext
 from app.domain.integrations import IntegrationService
 from app.domain.policy import WorkspaceAccess
@@ -108,5 +107,7 @@ async def test_integration(
     dependencies=_write,
     responses=_write_errors,
 )
-async def sync_integration(access: Admin, integration_id: UUID) -> SyncRequestOut:
-    raise not_implemented("T-0021")
+async def sync_integration(
+    access: Admin, context: Context, service: Service, integration_id: UUID
+) -> SyncRequestOut:
+    return await service.request_sync(context, access, integration_id)

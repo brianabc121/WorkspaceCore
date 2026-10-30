@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     connector_read_retries: int = Field(default=2, ge=0, le=5)
     # 最近一次成功同步超过这个时间就算 stale（契约第 10 节）
     sync_stale_after_seconds: int = Field(default=900, ge=60)
+    # Vikunja 投递 Webhook 用的工作台地址（Compose 中为 http://caddy:8080）；
+    # 为空时不自动注册 Webhook，只靠周期对账（契约第 9 节）
+    webhook_base_url: str = ""
+    # Webhook 事件处理失败的最多尝试次数，超过后进 dead_letter（规范第 10 节）
+    webhook_max_attempts: int = Field(default=8, ge=1, le=50)
+    # 周期对账：每次做增量；距上次全量超过这个时间再做一次全量（覆盖删除与丢失的事件）
+    full_sync_interval_seconds: int = Field(default=3600, ge=300)
 
     @field_validator("log_level", mode="before")
     @classmethod

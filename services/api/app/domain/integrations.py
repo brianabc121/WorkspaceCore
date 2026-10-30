@@ -11,18 +11,26 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import projection
+from app.domain import projection, sync_lock
 from app.domain.audit import AuditTrail
 from app.domain.auth import AuthContext
-from app.domain.connectors import ConnectorRuntime, account_context, sync_state, webhook_context
+from app.domain.connectors import (
+    ACTIVE_STATUSES,
+    ConnectorRuntime,
+    account_context,
+    sync_state,
+    webhook_context,
+)
 from app.domain.policy import WorkspaceAccess, not_found
 from app.integrations.base import ConnectorError
 from app.integrations.http import OutboundPolicy
 from app.integrations.vikunja import VikunjaClient
+from app.jobs.queue import REGISTER_WEBHOOKS, SYNC_INTEGRATION, JobQueue
 from app.models import Integration, IntegrationAccount
 from app.repositories import integrations as repo
 from app.repositories import workspaces as workspace_repo
@@ -34,6 +42,7 @@ from app.schemas.integrations import (
     IntegrationOut,
     IntegrationTestResult,
     IntegrationUpdate,
+    SyncRequestOut,
     WebhookRegistration,
 )
 
@@ -72,10 +81,20 @@ def _version_conflict(current: int) -> ApiError:
 
 
 class IntegrationService:
-    def __init__(self, db: AsyncSession, settings: Settings, runtime: ConnectorRuntime) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        settings: Settings,
+        runtime: ConnectorRuntime,
+        *,
+        redis: Redis | None = None,
+        jobs: JobQueue | None = None,
+    ) -> None:
         self.db = db
         self.settings = settings
         self.runtime = runtime
+        self.redis = redis
+        self.jobs = jobs
         self.audit = AuditTrail(db, settings)
 
     # ---------------------------------------------------------------- 读取
@@ -317,6 +336,8 @@ class IntegrationService:
         await self.db.commit()
         if ok and integration.status == "active":
             await self._initial_sync(integration, client)
+            if webhooks.get("mode") == "auto":
+                await self._enqueue_registration(integration.id)
         return IntegrationTestResult(
             ok=ok,
             status=integration.status,
@@ -346,6 +367,57 @@ class IntegrationService:
             "registered_projects": 0,
             "reason": None if allowed else "missing_permission",
         }
+
+    async def _enqueue_registration(self, integration_id: uuid.UUID) -> None:
+        """让 Worker 为每个项目注册 Webhook（契约第 9 节）。
+
+        投递失败不影响测试结果：Worker 每次全量对账都会检查并补注册。
+        """
+        if self.jobs is None:
+            return
+        try:
+            await self.jobs.enqueue(REGISTER_WEBHOOKS, str(integration_id))
+        except Exception as error:
+            logger.warning(
+                "webhook registration not queued",
+                extra={"integration_id": str(integration_id), "error_type": type(error).__name__},
+            )
+
+    # ---------------------------------------------------------------- 手动同步
+
+    async def request_sync(
+        self, context: AuthContext, access: WorkspaceAccess, integration_id: uuid.UUID
+    ) -> SyncRequestOut:
+        """加锁并投递一次全量同步；锁由 Worker 的作业接手，结束时释放。
+
+        锁的约定见 app/domain/sync_lock.py。
+        """
+        integration = await self._get(access, integration_id)
+        account = await repo.get_account(self.db, integration.id)
+        if integration.status not in ACTIVE_STATUSES or account is None:
+            raise ApiError(409, "INTEGRATION_UNAVAILABLE", "集成尚未测试通过或已停用，请先测试连接")
+        if self.redis is None or self.jobs is None:
+            raise RuntimeError("后台任务队列未初始化")
+        owner = sync_lock.new_owner("manual")
+        if not await sync_lock.acquire(self.redis, integration.id, owner):
+            raise ApiError(409, "SYNC_IN_PROGRESS", "同步正在进行，请稍后再试")
+        try:
+            await self.jobs.enqueue(SYNC_INTEGRATION, str(integration.id), owner)
+        except Exception:
+            await sync_lock.release(self.redis, integration.id, owner)
+            raise
+        queued_at = datetime.now(UTC)
+        await self.audit.record(
+            "integration.sync_requested",
+            workspace_ids=[access.workspace.id],
+            actor_id=context.user.id,
+            resource_type="integration",
+            resource_id=integration.id,
+            metadata={"mode": "full"},
+            client_ip=context.client_ip,
+        )
+        await self.db.commit()
+        return SyncRequestOut(integration_id=integration.id, mode="full", queued_at=queued_at)
 
     async def _initial_sync(self, integration: Integration, client: VikunjaClient) -> None:
         """测试通过后立即做一次全量同步，项目与任务马上可用；失败只记录在同步状态里。"""

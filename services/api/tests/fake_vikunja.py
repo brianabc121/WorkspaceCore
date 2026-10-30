@@ -54,6 +54,8 @@ class FakeVikunja:
     webhooks_allowed: bool = True
     projects: dict[int, dict[str, Any]] = field(default_factory=dict)
     tasks: dict[int, dict[str, Any]] = field(default_factory=dict)
+    # 注册的 Webhook：id → {id, project_id, target_url, events, secret}（secret 只为测试保存）
+    webhooks: dict[int, dict[str, Any]] = field(default_factory=dict)
     requests: list[httpx.Request] = field(default_factory=list)
     faults: list[Fault] = field(default_factory=list)
     _next_id: int = 100
@@ -159,7 +161,9 @@ class FakeVikunja:
         routes: list[tuple[str, str, Callable[..., httpx.Response]]] = [
             ("GET", r"/info", self._info),
             ("GET", r"/projects", self._list_projects),
+            ("GET", r"/projects/(\d+)", self._get_project),
             ("GET", r"/projects/(\d+)/webhooks", self._webhooks),
+            ("POST", r"/projects/(\d+)/webhooks", self._create_webhook),
             ("GET", r"/projects/(\d+)/tasks", self._list_project_tasks),
             ("POST", r"/projects/(\d+)/tasks", self._create_task),
             ("GET", r"/tasks", self._list_tasks),
@@ -197,10 +201,56 @@ class FakeVikunja:
         items = [p for p in self.projects.values() if archived or not p["is_archived"]]
         return self._page(request, sorted(items, key=lambda p: p["id"]))
 
+    def _get_project(self, request: httpx.Request, project_id: int) -> httpx.Response:
+        project = self.projects.get(project_id)
+        if project is None:
+            return _json(404, {"code": 3001, "message": "project does not exist"})
+        return _json(200, project)
+
     def _webhooks(self, request: httpx.Request, project_id: int) -> httpx.Response:
         if not self.webhooks_allowed:
             return _json(401, {"code": 11, "message": "missing permission"})
-        return _json(200, [])
+        hooks = [
+            {k: v for k, v in hook.items() if k != "secret"}
+            for hook in self.webhooks.values()
+            if hook["project_id"] == project_id
+        ]
+        return self._page(request, hooks)
+
+    def _create_webhook(self, request: httpx.Request, project_id: int) -> httpx.Response:
+        if not self.webhooks_allowed:
+            return _json(401, {"code": 11, "message": "missing permission"})
+        if project_id not in self.projects:
+            return _json(404, {"code": 3001, "message": "project does not exist"})
+        body = json.loads(request.content)
+        self._next_id += 1
+        hook = {
+            "id": self._next_id,
+            "project_id": project_id,
+            "target_url": body["target_url"],
+            "events": body["events"],
+            "secret": body.get("secret", ""),
+        }
+        self.webhooks[hook["id"]] = hook
+        return _json(200, {**hook, "secret": ""})
+
+    def delivery(
+        self,
+        event_name: str,
+        *,
+        task: dict[str, Any] | None = None,
+        project: dict[str, Any] | None = None,
+    ) -> bytes:
+        """Vikunja 投递的请求体（核验 ADR 第 6 节）；time 精确到纳秒，所以每次都不同。"""
+        self.tick()
+        stamp = _nanos(_stamp(self._clock))
+        data: dict[str, Any] = {"doer": {"id": 1, "username": "someone", "name": "某人"}}
+        if task is not None:
+            data["task"] = task
+            data["project"] = self.projects.get(task["project_id"], {"id": task["project_id"]})
+        if project is not None:
+            data["project"] = project
+        return json.dumps({"event_name": event_name, "time": stamp, "data": data}).encode()
 
     def _filtered(
         self, request: httpx.Request, tasks: list[dict[str, Any]]

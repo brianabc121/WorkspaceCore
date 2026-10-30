@@ -304,13 +304,8 @@ async def test_integration_payload_rules_do_not_echo_the_token(
     assert nothing.status_code == 422
 
 
-async def test_webhook_endpoint_does_not_require_a_session(app: FastAPI) -> None:
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.post(
-            f"/api/v1/webhooks/vikunja/{uuid.uuid4()}",
-            content=b"{}",
-            headers={"Content-Type": "application/json", "X-Vikunja-Signature": "00"},
-        )
-    # 没有会话也不是 401 UNAUTHORIZED：签名校验在 T-0021 实现
-    assert response.status_code == 501
+def test_webhook_endpoint_does_not_require_a_session(app: FastAPI) -> None:
+    """Webhook 只认签名：契约里不声明会话认证（运行时行为见 tests/test_webhooks_api.py）。"""
+    operation = app.openapi()["paths"]["/api/v1/webhooks/vikunja/{integration_id}"]["post"]
+    assert "security" not in operation
+    assert {p["name"] for p in operation.get("parameters", [])} >= {"X-Vikunja-Signature"}

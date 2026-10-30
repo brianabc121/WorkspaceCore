@@ -168,6 +168,12 @@
 - 注册：同步时如果 Token 有 `projects_webhooks` 权限，服务端为每个项目注册（或修复）一个 Webhook，事件为
   `task.created`、`task.updated`、`task.deleted`、`project.updated`、`project.deleted`，目标地址为
   `<WEBHOOK_BASE_URL>/api/v1/webhooks/vikunja/<integration_id>`（部署配置，Compose 中为 `http://caddy:8080`）。没有该权限时只靠周期对账。
+- 实现（T-0021）：测试连接通过后 API 投递注册作业，Worker 为每个**未归档**项目注册；之后每次全量同步再检查一遍，
+  为新项目补注册。已有同一 `target_url` 的 Webhook 就不再注册（地址含集成 ID，是本集成之前注册的）。
+  结果写在集成的 `webhooks`：`{mode: auto, registered_projects: n, reason: null | partial}`，
+  或 `{mode: unavailable, reason: missing_permission | not_configured | registration_failed}`。
+  401 视为缺少 `projects_webhooks` 权限并停止；单个项目 403（没有写权限）跳过该项目（`reason: partial`）。
+- `event_key` 相同的重复送达只记录一次（`202`），也只投递一次处理作业。
 
 ## 10. 同步状态与首页任务模块
 
@@ -185,7 +191,30 @@
 首页聚合（Sprint 2 契约 ADR 第 8 节）的 `modules.tasks` 改为按上表给出（`not_configured` 时仍是 `unavailable` + `reason: not_configured`，与 Sprint 2 一致）。
 状态为 `ok` / `stale` 时：`summary.pending_tasks` = 未完成任务数，`summary.active_projects` = 未归档项目数，
 `today_tasks` = 截止时间早于“明天 0 点（UTC）”的未完成任务（含已逾期），按截止时间排序，最多 20 条。其余状态下仍为 null / 空数组。
-周期对账的频率与做法由 T-0021 决定（增量 + 定期全量，覆盖删除与丢失的事件）。
+周期对账的频率与做法由 T-0021 决定（增量 + 定期全量，覆盖删除与丢失的事件），见第 10.1 节。
+
+### 10.1 Worker 的同步作业（T-0021）
+
+| 作业 | 时机 | 做什么 |
+|---|---|---|
+| `process_webhooks` | 收到新事件后由 API 投递；另有每分钟一次的兜底 | 用 `FOR UPDATE SKIP LOCKED` 领取到期的 Inbox 事件（最多 20 个），按事件里的 ID 读取 Vikunja 的当前任务 / 项目写入投影；404 或 403 记 tombstone，项目删除时连带它的任务 |
+| `reconcile` | 每 5 分钟 | 对每个 `active` / `unavailable` 的集成：增量同步（`updated >=` 上次游标 − 2 分钟，项目每次全量读）；距上次全量超过 `FULL_SYNC_INTERVAL_SECONDS`（默认 1 小时）就改做全量（发现删除），全量之后检查 Webhook 注册 |
+| `sync_integration` | `POST /integrations/{id}/sync` 投递 | 一次全量同步 + Webhook 检查 |
+| `register_webhooks` | 测试连接通过后投递 | 只注册 Webhook |
+| `purge` | 每小时 | 删除过期的幂等记录、处理完超过 7 天的 Inbox 事件；`dead_letter` 保留以便排查 |
+
+- **Inbox 状态**：`pending` → `processing` → `completed`；暂时性失败（不可用、限流、超时）为 `retry`，等待 30 秒 × 2^(n−1)、
+  上限 1 小时、±20% 抖动（限流时不短于 `Retry-After`）；第 `WEBHOOK_MAX_ATTEMPTS`（默认 8）次仍失败进 `dead_letter`。
+  Token 被拒（401）直接 `dead_letter`（`token_rejected`），集成标为 `unauthorized`，不再自动重试；
+  凭证无法解密、Vikunja 拒绝请求内容同样直接 `dead_letter`。未测试或已停用的集成的事件标为 `completed`（`integration_inactive`），
+  重新测试 / 启用后的全量同步会补齐。
+- **租约**：领取时 `next_retry_at` 设为 5 分钟后；处理它的 Worker 中途退出时，租约到期后事件被重新领取（`attempts` 照常累加）。
+- **游标**：投影与游标在同一个事务里提交，失败时游标不前移，只记 `last_error`；游标记的是 Vikunja 自己的 `updated`，
+  不受两边时钟偏差影响。全量同步的时间记在 `resource_type = full_sync` 的游标上。
+- **互斥**：同一集成同一时间只有一个同步（Redis 锁 `ws:sync-lock:<集成 ID>`，15 分钟过期）。手动同步由 API 加锁后投递作业，
+  拿不到锁返回 `409 SYNC_IN_PROGRESS`；定时对账拿不到锁就跳过这一轮。Webhook 事件的处理不加锁：它与同步都按外部 `updated`
+  写入投影，旧数据不会覆盖新数据。
+- 不自动同步 `unauthorized` 的集成：管理员更换 Token 并重新测试后恢复。
 
 ## 11. 权限
 

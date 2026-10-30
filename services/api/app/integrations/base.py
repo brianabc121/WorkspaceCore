@@ -7,12 +7,12 @@
 - `Connector`：标识与健康检查（可达性、实例版本）
 - `Readable`：全量 / 增量读取项目与任务（投影同步与对账）
 - `Writable`：任务写入；从不自动重试，结果未知时调用方用 `find_created_tasks` 等查询（契约第 7 节）
-- `WebhookCapable`：能否为资源注册 Webhook（注册与签名校验在 T-0021）
+- `WebhookCapable`：为资源注册 Webhook（签名校验在 app/domain/webhooks.py）
 - Searchable：V1 不需要——搜索走本地投影
 领域层依赖这些 Protocol，而不是具体的客户端类。
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, Protocol, TypeVar
@@ -72,6 +72,7 @@ class InstanceInfo:
 
 ProjectT = TypeVar("ProjectT")
 TaskT = TypeVar("TaskT")
+WebhookT = TypeVar("WebhookT")
 
 
 class Connector(Protocol):
@@ -86,6 +87,8 @@ class Readable(Connector, Protocol[ProjectT, TaskT]):
     async def list_tasks(self, *, updated_since: datetime | None = None) -> list[TaskT]: ...
 
     async def get_task(self, task_id: int) -> TaskT: ...
+
+    async def get_project(self, project_id: int) -> ProjectT: ...
 
 
 class Writable(Readable[ProjectT, TaskT], Protocol[ProjectT, TaskT]):
@@ -108,5 +111,11 @@ class Writable(Readable[ProjectT, TaskT], Protocol[ProjectT, TaskT]):
     ) -> list[TaskT]: ...
 
 
-class WebhookCapable(Protocol):
+class WebhookCapable(Protocol[WebhookT]):
     async def can_manage_webhooks(self, project_id: int) -> bool: ...
+
+    async def list_webhooks(self, project_id: int) -> list[WebhookT]: ...
+
+    async def create_webhook(
+        self, project_id: int, *, target_url: str, events: Sequence[str], secret: str
+    ) -> WebhookT: ...

@@ -13,8 +13,12 @@ from typing import Any, cast
 import httpx
 from pydantic import SecretStr
 
+from app.domain.connectors import webhook_context
+from app.domain.credentials import CredentialBox, parse_key
+from app.domain.sync import SyncContext
+from app.domain.webhooks import sign
 from tests.fake_vikunja import BASE_URL, TOKEN, FakeVikunja
-from tests.helpers import OWNER, ClientFactory, add_member, add_user, csrf
+from tests.helpers import OWNER, ClientFactory, add_member, add_user, csrf, run_sql
 
 CREDENTIAL_KEY = secrets.token_hex(32)
 # 内存版 Vikunja 的主机名在允许列表里；读请求不重试，让失败场景的测试保持简短
@@ -22,15 +26,47 @@ CONNECTOR_SETTINGS: dict[str, Any] = {
     "integration_allowed_hosts": "vikunja.test",
     "credential_encryption_key": SecretStr(CREDENTIAL_KEY),
     "connector_read_retries": 0,
+    "webhook_base_url": "http://caddy:8080",
 }
+
+
+class RecordingQueue:
+    """代替 ARQ 的作业队列：只记录投递了什么（Worker 的作业由测试直接调用）。"""
+
+    def __init__(self) -> None:
+        self.jobs: list[tuple[str, tuple[Any, ...]]] = []
+        self.fail = False
+
+    async def enqueue(self, function: str, *args: Any) -> None:
+        if self.fail:
+            raise ConnectionError("queue unavailable")
+        self.jobs.append((function, args))
+
+    def names(self) -> list[str]:
+        return [name for name, _ in self.jobs]
 
 
 def app_of(client: httpx.AsyncClient) -> Any:
     return cast(httpx.ASGITransport, client._transport).app
 
 
-def use_fake(client: httpx.AsyncClient, fake: FakeVikunja) -> None:
-    app_of(client).state.connectors.transport = fake.transport
+def use_fake(client: httpx.AsyncClient, fake: FakeVikunja) -> RecordingQueue:
+    app = app_of(client)
+    app.state.connectors.transport = fake.transport
+    queue = RecordingQueue()
+    app.state.jobs = queue
+    return queue
+
+
+def sync_context(client: httpx.AsyncClient) -> SyncContext:
+    """Worker 作业用的上下文：与这个客户端的应用共用数据库、Redis、Connector（内存版 Vikunja）。"""
+    app = app_of(client)
+    return SyncContext(
+        sessions=app.state.sessionmaker,
+        runtime=app.state.connectors,
+        redis=app.state.redis,
+        settings=app.state.settings,
+    )
 
 
 def integration_body(**overrides: Any) -> dict[str, Any]:
@@ -52,6 +88,11 @@ class Env:
     database_url: str
     fake: FakeVikunja
     make_client: ClientFactory
+    queue: RecordingQueue
+
+    @property
+    def sync(self) -> SyncContext:
+        return sync_context(self.client)
 
     def headers(self, *, write: bool = False, key: uuid.UUID | None = None) -> dict[str, str]:
         headers = {"X-Workspace-Id": self.workspace_id, **(csrf(self.client) if write else {})}
@@ -150,10 +191,12 @@ class Env:
 
 
 @asynccontextmanager
-async def open_env(make_client: ClientFactory, database_url: str) -> AsyncIterator[Env]:
+async def open_env(
+    make_client: ClientFactory, database_url: str, **overrides: Any
+) -> AsyncIterator[Env]:
     fake = FakeVikunja()
-    async with make_client(**CONNECTOR_SETTINGS) as client:
-        use_fake(client, fake)
+    async with make_client(**{**CONNECTOR_SETTINGS, **overrides}) as client:
+        queue = use_fake(client, fake)
         setup = await client.post("/api/v1/setup", json=OWNER)
         assert setup.status_code == 201, setup.text
         data = setup.json()
@@ -164,4 +207,33 @@ async def open_env(make_client: ClientFactory, database_url: str) -> AsyncIterat
             database_url=database_url,
             fake=fake,
             make_client=make_client,
+            queue=queue,
+        )
+
+
+async def webhook_secret(env: Env, integration_id: str) -> str:
+    """测试里模拟 Vikunja 投递：取出该集成加密保存的 Webhook 签名密钥。"""
+    ref = await run_sql(
+        env.database_url,
+        "SELECT webhook_secret_ref FROM workspace.integrations WHERE id = $1",
+        uuid.UUID(integration_id),
+    )
+    box = CredentialBox(parse_key(CREDENTIAL_KEY))
+    return box.resolve(ref, context=webhook_context(integration_id)).get_secret_value()
+
+
+async def deliver(
+    env: Env, integration_id: str, body: bytes, *, secret: str | None = None
+) -> httpx.Response:
+    """以 Vikunja 的方式投递一个事件：对原始请求体签名，不带会话与 CSRF。"""
+    key = secret if secret is not None else await webhook_secret(env, integration_id)
+    async with httpx.AsyncClient(transport=env.client._transport, base_url=BASE_URL) as vikunja:
+        return await vikunja.post(
+            f"/api/v1/webhooks/vikunja/{integration_id}",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "Vikunja/v2.7.1",
+                "X-Vikunja-Signature": sign(key, body),
+            },
         )

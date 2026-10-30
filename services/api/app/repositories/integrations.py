@@ -1,6 +1,7 @@
 """集成、凭证、同步游标与幂等记录的数据访问。查询一律限定工作空间。"""
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 
 from sqlalchemy import delete, func, select
@@ -43,6 +44,17 @@ async def get_for_workspace(
 
 async def get_by_id(db: AsyncSession, integration_id: uuid.UUID) -> Integration | None:
     return await db.get(Integration, integration_id)
+
+
+async def list_ids_with_status(db: AsyncSession, statuses: Sequence[str]) -> list[uuid.UUID]:
+    """所有工作空间里处于这些状态的集成（Worker 的周期对账用）。"""
+    return list(
+        await db.scalars(
+            select(Integration.id)
+            .where(Integration.status.in_(list(statuses)))
+            .order_by(Integration.created_at)
+        )
+    )
 
 
 async def get_provider(

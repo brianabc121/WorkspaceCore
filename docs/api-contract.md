@@ -93,11 +93,11 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET / POST | `/api/v1/integrations` | 集成列表（viewer）/ 新建 Vikunja 集成（admin，Token 只写不读） | 已实现（T-0020） |
 | PATCH | `/api/v1/integrations/{integration_id}` | 修改集成（admin，乐观并发） | 已实现（T-0020） |
 | POST | `/api/v1/integrations/{integration_id}/test` | 测试连接与权限（admin） | 已实现（T-0020） |
-| POST | `/api/v1/integrations/{integration_id}/sync` | 排队全量同步（admin，202） | 已声明，T-0021 实现 |
+| POST | `/api/v1/integrations/{integration_id}/sync` | 排队全量同步（admin，202） | 已实现（T-0021） |
 | GET | `/api/v1/projects` | 外部项目（投影，带 `sync` 新鲜度） | 已实现（T-0020） |
 | GET / POST | `/api/v1/tasks` | 任务列表（投影，过滤与分页）/ 创建任务（member，幂等键） | 已实现（T-0020） |
 | GET / PATCH / DELETE | `/api/v1/tasks/{task_id}` | 详情 / 修改 / 删除（member，幂等键 + `version`） | 已实现（T-0020） |
-| POST | `/api/v1/webhooks/vikunja/{integration_id}` | Vikunja 回调：只认签名，不用会话与 CSRF（202） | 已声明，T-0021 实现 |
+| POST | `/api/v1/webhooks/vikunja/{integration_id}` | Vikunja 回调：只认签名，不用会话与 CSRF（202） | 已实现（T-0021） |
 
 新增错误码：`409 IDEMPOTENCY_KEY_REUSED` / `IDEMPOTENCY_IN_PROGRESS` / `OPERATION_NOT_APPLIED` / `INTEGRATION_UNAVAILABLE` / `SYNC_IN_PROGRESS`、
 `401 WEBHOOK_SIGNATURE_INVALID`、`403 EXTERNAL_FORBIDDEN`、`413 PAYLOAD_TOO_LARGE`、`422 EXTERNAL_VALIDATION_FAILED`、

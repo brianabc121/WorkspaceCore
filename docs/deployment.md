@@ -76,6 +76,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | `SETUP_TOKEN` | 首次安装凭据（`make setup-token` 查看）；未配置时首次安装一律拒绝 | 随机 |
 | `CREDENTIAL_ENCRYPTION_KEY` | 第三方连接凭证的加密密钥（64 位十六进制）；格式错误时 API 拒绝启动。**丢失或更换后已保存的凭证无法解密**，请与数据库备份分开保存 | 随机 |
 | `INTEGRATION_ALLOWED_HOSTS` | 允许工作台访问的内网主机名，逗号分隔。第三方服务的地址解析到私有 / 内网 / 链路本地地址时一律拒绝（SSRF 防护），除非主机名在这里 | `vikunja` |
+| `WEBHOOK_BASE_URL` | Vikunja 投递 Webhook 用的工作台地址（容器之间访问，Worker 注册 Webhook 时使用）；留空则不自动注册，只靠每 5 分钟的对账 | `http://caddy:8080` |
 
 数据库密码请只用字母和数字（`make env` 生成的就是），否则需要在连接串中做 URL 编码。
 
@@ -86,7 +87,9 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
   加进 `.env` 后还要在 `compose.yaml` 的 api `environment` 中传入。
 - 访问第三方服务的超时与重试也可以调整（同样要在 api `environment` 中传入）：`CONNECTOR_CONNECT_TIMEOUT_SECONDS`（默认 3）、
   `CONNECTOR_READ_TIMEOUT_SECONDS`（默认 10）、`CONNECTOR_READ_RETRIES`（只对读请求，默认 2；写请求从不自动重试）、
-  `SYNC_STALE_AFTER_SECONDS`（最近一次成功同步超过多久显示为“数据可能过期”，默认 900）。
+  `SYNC_STALE_AFTER_SECONDS`（最近一次成功同步超过多久显示为“数据可能过期”，默认 900）；
+  Worker 的 `WEBHOOK_MAX_ATTEMPTS`（Webhook 事件最多尝试几次后进死信，默认 8）、
+  `FULL_SYNC_INTERVAL_SECONDS`（多久做一次全量对账，默认 3600）——这两个要在 worker 的 `environment` 中传入。
 
 ## 4. 检查与排错
 
@@ -178,4 +181,12 @@ make vikunja-down    # 停止，保留数据卷
   浏览器地址填 `VIKUNJA_PUBLIC_URL`，再粘贴 Token；保存后点“测试连接”，通过后会立即同步全部项目与任务。
   接口见 `docs/api-contract.md` 的 Sprint 3 部分；Token 加密保存，之后不再显示。
 - Vikunja 只按秒保存时间：同一秒内两个人修改同一个任务时，后写的一方会覆盖前者而不报冲突（核验 ADR 第 5.5 节）。
+- **Vikunja 里的改动怎么回到工作台**（契约第 9、10.1 节）：
+  - Token 带 `projects_webhooks` 权限时，测试连接通过后 Worker 自动为每个未归档项目注册 Webhook，
+    Vikunja 经 `WEBHOOK_BASE_URL` 投递，改动通常一两秒内出现；之后新建的项目在每小时的全量对账时补注册。
+  - Worker 每 5 分钟做一次增量对账、每小时做一次全量对账（发现删除），Webhook 丢失或没有 Webhook 权限时也能最终一致；
+    集成页的“立即同步”触发一次全量同步。
+  - 处理失败的事件会重试，多次失败后进死信（不会丢，也不会无限重试）。查看：
+    `docker compose exec -T postgres psql -U workspace -d workspace -c "SELECT event_type, attempts, error_text, received_at FROM workspace.webhook_inbox WHERE status = 'dead_letter' ORDER BY received_at DESC LIMIT 20"`。
+    `token_rejected` 表示 Token 失效或被收回权限：在 Vikunja 里重新创建 Token，粘贴到集成设置并重新测试连接。
 

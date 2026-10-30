@@ -6,7 +6,7 @@
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -15,7 +15,13 @@ from urllib.parse import quote
 import httpx
 
 from app import __version__
-from app.integrations.base import ConnectorError, InstanceInfo, Readable, Writable
+from app.integrations.base import (
+    ConnectorError,
+    InstanceInfo,
+    Readable,
+    WebhookCapable,
+    Writable,
+)
 from app.integrations.http import ConnectorHttp
 
 logger = logging.getLogger("app.integrations.vikunja")
@@ -119,6 +125,26 @@ def parse_task(data: Any) -> VikunjaTask:
         created=_datetime(data.get("created")),
         updated=updated,
         version=_iso(updated),
+    )
+
+
+@dataclass(frozen=True)
+class VikunjaWebhook:
+    id: int
+    project_id: int
+    target_url: str
+    events: tuple[str, ...]
+
+
+def parse_webhook(data: Any) -> VikunjaWebhook:
+    if not isinstance(data, dict) or not isinstance(data.get("id"), int):
+        raise _invalid()
+    events = data.get("events") or []
+    return VikunjaWebhook(
+        id=data["id"],
+        project_id=int(data.get("project_id") or 0),
+        target_url=str(data.get("target_url") or ""),
+        events=tuple(str(e) for e in events if isinstance(e, str)),
     )
 
 
@@ -265,6 +291,9 @@ class VikunjaClient:
     async def get_task(self, task_id: int) -> VikunjaTask:
         return parse_task(await self._json("GET", f"/tasks/{task_id}", params=_MARKDOWN))
 
+    async def get_project(self, project_id: int) -> VikunjaProject:
+        return parse_project(await self._json("GET", f"/projects/{project_id}"))
+
     async def find_created_tasks(
         self, project_id: int, *, title: str, created_since: datetime
     ) -> list[VikunjaTask]:
@@ -318,6 +347,23 @@ class VikunjaClient:
     async def delete_task(self, task_id: int) -> None:
         await self._call("DELETE", f"/tasks/{task_id}")
 
+    # ---------------------------------------------------------------- Webhook（核验 ADR 第 6 节）
+
+    async def list_webhooks(self, project_id: int) -> list[VikunjaWebhook]:
+        items = await self._pages(f"/projects/{project_id}/webhooks", [])
+        return [parse_webhook(item) for item in items]
+
+    async def create_webhook(
+        self, project_id: int, *, target_url: str, events: Sequence[str], secret: str
+    ) -> VikunjaWebhook:
+        """secret 只写不读：Vikunja 用它对每次投递的请求体做 HMAC-SHA256。"""
+        data = await self._json(
+            "POST",
+            f"/projects/{project_id}/webhooks",
+            json={"target_url": target_url, "events": list(events), "secret": secret},
+        )
+        return parse_webhook(data)
+
 
 def task_source_url(public_url: str, task_id: int) -> str:
     return f"{public_url.rstrip('/')}/tasks/{task_id}"
@@ -330,3 +376,4 @@ def project_source_url(public_url: str, project_id: int) -> str:
 # 领域层按能力使用 Vikunja Connector；VikunjaClient 满足这些 Protocol 由测试里的类型检查保证
 ProjectReader = Readable[VikunjaProject, VikunjaTask]
 TaskConnector = Writable[VikunjaProject, VikunjaTask]
+WebhookRegistrar = WebhookCapable[VikunjaWebhook]

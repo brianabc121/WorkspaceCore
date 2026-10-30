@@ -121,8 +121,11 @@ async def tombstone(db: AsyncSession, resource_id: uuid.UUID) -> None:
 
 async def tombstone_missing(
     db: AsyncSession, *, integration_id: uuid.UUID, resource_type: str, seen: Iterable[str]
-) -> int:
-    """全量同步后：外部已经没有的资源记 tombstone（核验 ADR 第 1 节：删除后接口里整条消失）。"""
+) -> list[str]:
+    """全量列表之后：外部已经没有的资源记 tombstone（核验 ADR 第 1 节：删除后接口里整条消失）。
+
+    返回被记 tombstone 的外部 ID。
+    """
     stmt = (
         update(ExternalResource)
         .where(
@@ -132,9 +135,42 @@ async def tombstone_missing(
             ExternalResource.external_id.not_in(list(seen)),
         )
         .values(deleted_at=func.now(), synced_at=func.now())
+        .returning(ExternalResource.external_id)
     )
-    result = await db.execute(stmt)
-    return int(getattr(result, "rowcount", 0) or 0)
+    return list(await db.scalars(stmt))
+
+
+async def tombstone_external(
+    db: AsyncSession, *, integration_id: uuid.UUID, resource_type: str, external_id: str
+) -> None:
+    await db.execute(
+        update(ExternalResource)
+        .where(
+            ExternalResource.integration_id == integration_id,
+            ExternalResource.resource_type == resource_type,
+            ExternalResource.external_id == external_id,
+            ExternalResource.deleted_at.is_(None),
+        )
+        .values(deleted_at=func.now(), synced_at=func.now())
+    )
+
+
+async def tombstone_project_tasks(
+    db: AsyncSession, *, integration_id: uuid.UUID, project_external_ids: Sequence[str]
+) -> None:
+    """项目在 Vikunja 里删除后，它的任务也随之消失（Vikunja 不为这些任务单独发事件）。"""
+    if not project_external_ids:
+        return
+    await db.execute(
+        update(ExternalResource)
+        .where(
+            ExternalResource.integration_id == integration_id,
+            ExternalResource.resource_type == TASK,
+            ExternalResource.deleted_at.is_(None),
+            _meta["project_external_id"].astext.in_(list(project_external_ids)),
+        )
+        .values(deleted_at=func.now(), synced_at=func.now())
+    )
 
 
 async def project_ids_by_external(

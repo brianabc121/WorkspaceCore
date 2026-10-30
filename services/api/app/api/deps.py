@@ -23,6 +23,7 @@ from app.domain.integrations import IntegrationService
 from app.domain.security import csrf_token_for, csrf_token_matches
 from app.domain.tasks import TaskService
 from app.domain.workspaces import WorkspaceService
+from app.jobs.queue import JobQueue
 from app.schemas.workspaces import Role
 
 SESSION_COOKIE = "ws_session"
@@ -76,6 +77,11 @@ def get_workspace_service(
     return WorkspaceService(db, settings)
 
 
+def get_jobs(request: Request) -> JobQueue:
+    jobs: JobQueue = request.app.state.jobs
+    return jobs
+
+
 def get_connectors(request: Request) -> ConnectorRuntime:
     runtime: ConnectorRuntime = request.app.state.connectors
     return runtime
@@ -85,8 +91,10 @@ def get_integration_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_app_settings)],
     connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
+    redis: Annotated[Redis, Depends(get_redis)],
+    jobs: Annotated[JobQueue, Depends(get_jobs)],
 ) -> IntegrationService:
-    return IntegrationService(db, settings, connectors)
+    return IntegrationService(db, settings, connectors, redis=redis, jobs=jobs)
 
 
 def get_task_service(
