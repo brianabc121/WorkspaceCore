@@ -4,13 +4,14 @@ import vue from 'eslint-plugin-vue'
 import globals from 'globals'
 
 export default ts.config(
-  { ignores: ['dist/**', 'node_modules/**'] },
+  { ignores: ['dist/**', 'node_modules/**', 'src/services/schema.d.ts'] },
   js.configs.recommended,
   ...ts.configs.recommended,
   ...vue.configs['flat/recommended'],
   {
     files: ['**/*.{ts,vue,js}'],
-    languageOptions: { globals: { ...globals.browser, ...globals.node }, parserOptions: { parser: ts.parser } },
+    languageOptions: { globals: globals.browser, parserOptions: { parser: ts.parser } },
     rules: { 'vue/multi-word-component-names': 'off', 'vue/max-attributes-per-line': 'off', 'vue/singleline-html-element-content-newline': 'off', 'vue/html-self-closing': 'off' },
   },
+  { files: ['*.config.{js,ts}', 'tests/**/*.ts'], languageOptions: { globals: globals.node } },
 )

@@ -1,10 +1,6 @@
-import { render, screen, fireEvent } from '@testing-library/vue'
-import { createPinia } from 'pinia'
-import { VueQueryPlugin } from '@tanstack/vue-query'
-import { createMemoryHistory } from 'vue-router'
-import { describe, it, expect, vi } from 'vitest'
-import App from '../src/App.vue'
-import { createAppRouter } from '../src/app/router'
+import { screen, fireEvent } from '@testing-library/vue'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { mockApi, openApp } from './helpers'
 
 const pages = [
   ['/', '总览'], ['/tasks', '任务'], ['/projects', '项目'], ['/knowledge', '知识库'],
@@ -13,12 +9,9 @@ const pages = [
   ['/settings/integrations', '集成设置'], ['/settings/security', '安全设置'],
 ]
 async function open(path = '/') {
-  const router = createAppRouter(createMemoryHistory())
-  await router.push(path)
-  await router.isReady()
-  const view = render(App, { global: { plugins: [createPinia(), router, VueQueryPlugin] } })
-  return { ...view, router }
+  return openApp(path)
 }
+beforeEach(() => { mockApi() })
 describe('工程骨架', () => {
   it.each(pages)('renders the %s page and navigation', async (path, label) => {
     await open(path)
@@ -27,7 +20,7 @@ describe('工程骨架', () => {
     for (const [href, name] of pages) {
       expect(nav.querySelector(`a[href="${href}"]`)).toHaveTextContent(name!)
     }
-    expect(screen.getByText('Sprint 0 · 工程骨架')).toBeVisible()
+    expect(screen.getByText('Sprint 1 · 用户与安全')).toBeVisible()
   })
   it('navigates without reloading and closes the mobile menu', async () => {
     const { router } = await open()
