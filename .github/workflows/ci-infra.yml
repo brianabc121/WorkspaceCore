@@ -68,6 +68,9 @@ jobs:
       - name: Sprint 3 浏览器验收（连接 Vikunja → 新建 / 编辑 → 原生修改 → 页面更新 → 删除、viewer 只读）
         # 真实 Vikunja：每次新建工作台用户、Vikunja 用户与项目
         run: node tests/e2e/sprint3_browser.cjs
+      - name: Sprint 4 浏览器验收（收藏与关联、日历、首页组件、viewer 只读、不请求 AFFiNE）
+        # 不要求空库：每次用新的工作台用户；被关联的 Vikunja 任务直接写进投影
+        run: node tests/e2e/sprint4_browser.cjs
       - name: 停止 Vikunja（之后的重启检查会删除 core 的网络）
         run: make vikunja-down
       - name: 停止后重启，确认数据卷保留
