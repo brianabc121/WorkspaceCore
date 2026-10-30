@@ -1,8 +1,8 @@
 ---
 id: T-0013
 title: Sprint 1 集成与验收：DoD 实测、A01/A02/A18 自动化、勾选 TASKS.md
-owner: human
-status: blocked
+owner: claude
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: docs/acceptance, docs/TASKS.md, scripts/smoke.sh, .github/workflows/ci-infra.yml, tests/e2e
@@ -34,3 +34,6 @@ T-0010、T-0011、T-0012 合并后，做前后端联调并按 Sprint 1 的 DoD �
 - 2026-10-30 02:49 UTC · claude · 验收：全新数据卷的独立 Compose 项目上，tests/e2e/sprint1_acceptance.py 32 项全部通过（A01、A02、A18、跨工作空间 404 / viewer 403、会话撤销、CSRF 与来源校验、审计记录、迁移 head），已加入 ci-infra.yml；tests/e2e/sprint1_browser.cjs（Playwright 1.63.0）走通首次安装 → 登录 → 修改设置 → 撤销会话 → 登出；make lint、make test（后端 71、前端 50）、build-web、check:api、openapi --check 通过；main 上 87cdc16 的 5 个工作流成功。报告 docs/acceptance/sprint-1.md；已勾选 TASKS.md S1-01 ~ S1-05。越出 paths 的文件（均为 claude 负责）：README 当前进度；docs/decisions 前端技术栈 ADR 补录 T-0012 新增依赖的核验结果（D-0003 版本核验 ADR 归 claude，PR #16 审查时已说明），契约 ADR 记录 501 声明暂留至 Sprint 2。
 - 2026-10-30 02:49 UTC · claude · 交接给 human（escalate）→ .collab/handoffs/2026-10-30-0249_T-0013_claude-to-human.md：Sprint 1 验收通过，请批准是否进入 Sprint 2，并确认契约生成文件 schema.d.ts 的提交规则
 - 2026-10-30 02:54 UTC · claude · 处理 Codex 审查 P2：浏览器验收脚本原说明（全局安装 Playwright）在干净环境下无法 require，已复现；新增 tests/e2e/package.json 与 package-lock.json 锁定 playwright 1.63.0，说明改为 cd tests/e2e && npm ci && npm run browser:install；在不带 NODE_PATH 的情况下于全新空库重跑浏览器流程 7 步通过。
+- 2026-10-30 03:03 UTC · human · owner human → claude：人类在对话中批准进入 Sprint 2（回复“可以进入到 Sprint 2”），并决定 schema.d.ts 由 claude 提交；指派 claude 关闭验收任务
+- 2026-10-30 03:03 UTC · claude · 解除阻塞，继续
+- 2026-10-30 03:03 UTC · claude · status in_progress → done：Sprint 1 验收通过，人类已批准进入 Sprint 2；schema.d.ts 提交规则写入 D-0005
