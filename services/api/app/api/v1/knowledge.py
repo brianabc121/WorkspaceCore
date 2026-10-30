@@ -13,11 +13,13 @@ from fastapi import APIRouter, Depends, Query, Response, Security, status
 from app.api.deps import (
     authenticated,
     csrf_protected,
+    get_knowledge_service,
     workspace_admin,
     workspace_member,
     workspace_viewer,
 )
-from app.core.errors import not_implemented
+from app.domain.auth import AuthContext
+from app.domain.knowledge import KnowledgeService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.common import Page, error_responses
 from app.schemas.knowledge import (
@@ -37,6 +39,8 @@ router = APIRouter(tags=["knowledge"], dependencies=[Security(authenticated)])
 Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
 Member = Annotated[WorkspaceAccess, Depends(workspace_member)]
 Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
+Context = Annotated[AuthContext, Security(authenticated)]
+Service = Annotated[KnowledgeService, Depends(get_knowledge_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 _write = [Depends(csrf_protected)]
@@ -52,8 +56,8 @@ _write_errors = error_responses(401, 403, 404, 409, 422)
     summary="知识来源（AFFiNE 外部地址）列表（viewer）",
     responses=_read_errors,
 )
-async def list_sources(access: Viewer) -> Page[KnowledgeSourceOut]:
-    raise not_implemented("T-0027")
+async def list_sources(access: Viewer, service: Service) -> Page[KnowledgeSourceOut]:
+    return await service.list_sources(access)
 
 
 @router.post(
@@ -65,8 +69,10 @@ async def list_sources(access: Viewer) -> Page[KnowledgeSourceOut]:
     dependencies=_write,
     responses=_write_errors,
 )
-async def create_source(access: Admin, body: KnowledgeSourceCreate) -> KnowledgeSourceOut:
-    raise not_implemented("T-0027")
+async def create_source(
+    access: Admin, context: Context, service: Service, body: KnowledgeSourceCreate
+) -> KnowledgeSourceOut:
+    return await service.create_source(context, access, body)
 
 
 @router.patch(
@@ -77,9 +83,9 @@ async def create_source(access: Admin, body: KnowledgeSourceCreate) -> Knowledge
     responses=_write_errors,
 )
 async def update_source(
-    access: Admin, source_id: UUID, body: KnowledgeSourceUpdate
+    access: Admin, context: Context, service: Service, source_id: UUID, body: KnowledgeSourceUpdate
 ) -> KnowledgeSourceOut:
-    raise not_implemented("T-0027")
+    return await service.update_source(context, access, source_id, body)
 
 
 @router.delete(
@@ -91,9 +97,14 @@ async def update_source(
     responses=_write_errors,
 )
 async def delete_source(
-    access: Admin, source_id: UUID, version: Annotated[Version, Query()]
+    access: Admin,
+    context: Context,
+    service: Service,
+    source_id: UUID,
+    version: Annotated[Version, Query()],
 ) -> Response:
-    raise not_implemented("T-0027")
+    await service.delete_source(context, access, source_id, version)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------- 收藏
@@ -108,6 +119,8 @@ async def delete_source(
 )
 async def list_resources(
     access: Viewer,
+    context: Context,
+    service: Service,
     source_id: UUID | None = None,
     linked_resource_id: UUID | None = None,
     visibility: KnowledgeVisibilityFilter = "all",
@@ -116,7 +129,17 @@ async def list_resources(
     cursor: Cursor = None,
     limit: Limit = 30,
 ) -> Page[KnowledgeResourceOut]:
-    raise not_implemented("T-0027")
+    return await service.list_resources(
+        context,
+        access,
+        source_id=source_id,
+        linked_resource_id=linked_resource_id,
+        visibility=visibility,
+        q=q,
+        sort=sort,
+        cursor=cursor,
+        limit=limit,
+    )
 
 
 @router.post(
@@ -129,8 +152,10 @@ async def list_resources(
     dependencies=_write,
     responses=_write_errors,
 )
-async def create_bookmark(access: Member, body: BookmarkCreate) -> KnowledgeResourceOut:
-    raise not_implemented("T-0027")
+async def create_bookmark(
+    access: Member, context: Context, service: Service, body: BookmarkCreate
+) -> KnowledgeResourceOut:
+    return await service.create_bookmark(context, access, body)
 
 
 @router.patch(
@@ -140,9 +165,9 @@ async def create_bookmark(access: Member, body: BookmarkCreate) -> KnowledgeReso
     responses=_write_errors,
 )
 async def update_bookmark(
-    access: Member, bookmark_id: UUID, body: BookmarkUpdate
+    access: Member, context: Context, service: Service, bookmark_id: UUID, body: BookmarkUpdate
 ) -> KnowledgeResourceOut:
-    raise not_implemented("T-0027")
+    return await service.update_bookmark(context, access, bookmark_id, body)
 
 
 @router.delete(
@@ -154,6 +179,11 @@ async def update_bookmark(
     responses=_write_errors,
 )
 async def delete_bookmark(
-    access: Member, bookmark_id: UUID, version: Annotated[Version, Query()]
+    access: Member,
+    context: Context,
+    service: Service,
+    bookmark_id: UUID,
+    version: Annotated[Version, Query()],
 ) -> Response:
-    raise not_implemented("T-0027")
+    await service.delete_bookmark(context, access, bookmark_id, version)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

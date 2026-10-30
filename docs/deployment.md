@@ -204,7 +204,9 @@ make vikunja-down    # 停止，保留数据卷
   - `redis`、`pgvector/pgvector:pg16` 没有锁定版本：都锁定到具体版本；
   - 不要把 AFFiNE 加入工作台的 `backend` / `integrations` 网络，用单独的 Compose 项目。
 - 0.27 起服务端配置以 `config.json` 为主。用 `server.externalUrl` 设置浏览器访问 AFFiNE 的地址；部署在子路径下时还要设置 `server.path`。
-- 在工作台里填写的 **AFFiNE 外部地址**要和 `server.externalUrl` 完全一致，包括子路径。具体在哪里填，见 Sprint 4 接口契约（T-0026）。
+- 在工作台里填写的 **AFFiNE 外部地址**要和 `server.externalUrl` 完全一致，包括子路径。
+  由 workspace admin 配置（接口 `POST /api/v1/knowledge/sources`，设置页入口由前端任务 T-0030 提供）；
+  每个工作空间一个，以后改地址时，已有收藏的链接会自动改为新地址。
   收藏只接受这个地址下 `/workspace/<工作空间 ID>/<文档 ID>` 或 `/share/<工作空间 ID>/<文档 ID>` 形式的链接。
   在 AFFiNE 里打开文档后，复制浏览器地址栏里的地址即可。
 - 外部地址必须是 `https://`；内网开发时可以用 `http://`，但必须显式配置。
