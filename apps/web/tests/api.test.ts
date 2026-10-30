@@ -3,6 +3,15 @@ import { ApiError, createApi, dataOf, errorMessage } from '../src/services/api'
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); document.cookie = 'ws_csrf=; Max-Age=0; Path=/' })
 describe('契约客户端', () => {
+  it('scopes dashboard and widget operations with the captured workspace', async () => {
+    const requests: Request[] = []
+    vi.stubGlobal('fetch', async (r: Request) => { requests.push(r); return new Response(null, { status: 204 }) })
+    const api = createApi({ workspaceId: () => 'workspace-a' })
+    await api.GET('/api/v1/dashboard/overview', { params: { header: { 'X-Workspace-Id': 'workspace-a' } } })
+    await api.PATCH('/api/v1/dashboards/{dashboard_id}', { params: { path: { dashboard_id: 'dashboard-a' }, header: { 'X-Workspace-Id': 'workspace-a' } }, body: { version: 1 } })
+    await api.DELETE('/api/v1/widgets/{widget_id}', { params: { path: { widget_id: 'widget-a' }, header: { 'X-Workspace-Id': 'workspace-a' } } })
+    expect(requests.map((r) => r.headers.get('X-Workspace-Id'))).toEqual(['workspace-a', 'workspace-a', 'workspace-a'])
+  })
   it('sends same-origin cookies, reads the latest CSRF cookie on each write, and scopes workspace resources', async () => {
     const requests: Request[] = []
     vi.stubGlobal('fetch', async (request: Request) => { requests.push(request); return new Response(null, { status: 204 }) })
