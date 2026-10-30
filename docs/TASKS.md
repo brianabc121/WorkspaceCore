@@ -25,12 +25,12 @@
 - [x] S2-05 聚合接口、loading/error/stale、E2E。
 
 ## Sprint 3 — Vikunja
-- [ ] S3-01 核验锁定版本 OpenAPI、认证/字段映射并形成 ADR。
-- [ ] S3-02 Integration、Token 授权及 Connector 基类。
-- [ ] S3-03 Vikunja project/task list/create/update/detail API 与 UI。
-- [ ] S3-04 Idempotency-Key 和未知执行状态处理。
-- [ ] S3-05 Webhook 签名校验、Inbox、Worker、重试、死信。
-- [ ] S3-06 周期对账、tombstones、同步 cursor、契约/E2E 测试。
+- [x] S3-01 核验锁定版本 OpenAPI、认证/字段映射并形成 ADR。
+- [x] S3-02 Integration、Token 授权及 Connector 基类。
+- [x] S3-03 Vikunja project/task list/create/update/detail API 与 UI。
+- [x] S3-04 Idempotency-Key 和未知执行状态处理。
+- [x] S3-05 Webhook 签名校验、Inbox、Worker、重试、死信。
+- [x] S3-06 周期对账、tombstones、同步 cursor、契约/E2E 测试。
 
 ## Sprint 4 — 文档与搜索
 - [ ] S4-01 AFFiNE Deep Link、收藏和权限可见性，禁止未验证的私有 API。
