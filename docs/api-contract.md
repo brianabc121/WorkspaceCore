@@ -82,3 +82,23 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | PATCH / DELETE | `/api/v1/widgets/{widget_id}` | 修改配置（乐观并发）/ 删除组件 | 已实现（T-0015） |
 
 新增错误码：`409 VERSION_CONFLICT`（`details.current_version`）、`409 LIMIT_EXCEEDED`。
+
+## Sprint 3 端点
+
+约定见 `docs/decisions/2026-10-30-sprint-3-tasks-contract.md`（Vikunja 的核验结果见 `docs/decisions/2026-10-30-vikunja-2.7.1-verification.md`）。
+除 Webhook 外都需要 `X-Workspace-Id`；任务的写接口还必须带 `Idempotency-Key`（UUID）。
+
+| 方法 | 路径 | 说明 | 状态 |
+|---|---|---|---|
+| GET / POST | `/api/v1/integrations` | 集成列表（viewer）/ 新建 Vikunja 集成（admin，Token 只写不读） | 已声明，T-0020 实现 |
+| PATCH | `/api/v1/integrations/{integration_id}` | 修改集成（admin，乐观并发） | 已声明，T-0020 实现 |
+| POST | `/api/v1/integrations/{integration_id}/test` | 测试连接与权限（admin） | 已声明，T-0020 实现 |
+| POST | `/api/v1/integrations/{integration_id}/sync` | 排队全量同步（admin，202） | 已声明，T-0021 实现 |
+| GET | `/api/v1/projects` | 外部项目（投影，带 `sync` 新鲜度） | 已声明，T-0020 实现 |
+| GET / POST | `/api/v1/tasks` | 任务列表（投影，过滤与分页）/ 创建任务（member，幂等键） | 已声明，T-0020 实现 |
+| GET / PATCH / DELETE | `/api/v1/tasks/{task_id}` | 详情 / 修改 / 删除（member，幂等键 + `version`） | 已声明，T-0020 实现 |
+| POST | `/api/v1/webhooks/vikunja/{integration_id}` | Vikunja 回调：只认签名，不用会话与 CSRF（202） | 已声明，T-0021 实现 |
+
+新增错误码：`409 IDEMPOTENCY_KEY_REUSED` / `IDEMPOTENCY_IN_PROGRESS` / `OPERATION_NOT_APPLIED` / `INTEGRATION_UNAVAILABLE` / `SYNC_IN_PROGRESS`、
+`401 WEBHOOK_SIGNATURE_INVALID`、`403 EXTERNAL_FORBIDDEN`、`413 PAYLOAD_TOO_LARGE`、`422 EXTERNAL_VALIDATION_FAILED`、
+`502 INTEGRATION_UNAUTHORIZED`、`503 EXTERNAL_UNAVAILABLE` / `EXTERNAL_RATE_LIMITED`、`504 RESULT_UNKNOWN`（用同一个幂等键重发以查询结果）。
