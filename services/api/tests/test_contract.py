@@ -14,6 +14,7 @@ from app.api.deps import (
     authenticated,
     get_calendar_service,
     get_db,
+    get_developer_service,
     get_integration_service,
     get_knowledge_service,
     get_redis,
@@ -227,6 +228,7 @@ def any_role(app: FastAPI) -> None:
         get_integration_service,
         get_knowledge_service,
         get_calendar_service,
+        get_developer_service,
     ):
         app.dependency_overrides[service] = _ShapeOnlyService
 

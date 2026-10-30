@@ -9,6 +9,7 @@ from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain.credentials import CredentialBox, CredentialError
 from app.integrations.base import ConnectorError
+from app.integrations.github import GitHubClient
 from app.integrations.http import CircuitBreaker, ConnectorHttp, OutboundPolicy
 from app.integrations.vikunja import VikunjaClient
 from app.models import Integration, IntegrationAccount, SyncCursor
@@ -58,7 +59,7 @@ class ConnectorRuntime:
                 "服务端未配置凭证加密密钥，暂时无法使用第三方集成",
             ) from error
 
-    def vikunja(self, integration: Integration, account: IntegrationAccount) -> VikunjaClient:
+    def _token(self, integration: Integration, account: IntegrationAccount) -> str:
         try:
             token = self.credentials().resolve(
                 account.credential_ref, context=account_context(account.id)
@@ -71,7 +72,16 @@ class ConnectorRuntime:
             raise ApiError(
                 502, "INTEGRATION_UNAUTHORIZED", "无法读取已保存的凭证，请重新填写 Token"
             ) from error
-        return VikunjaClient(self.http(), integration.base_url, token.get_secret_value())
+        return token.get_secret_value()
+
+    def vikunja(self, integration: Integration, account: IntegrationAccount) -> VikunjaClient:
+        return VikunjaClient(self.http(), integration.base_url, self._token(integration, account))
+
+    def github(self, integration: Integration, account: IntegrationAccount) -> GitHubClient:
+        """地址取部署配置（默认 api.github.com），不取集成里保存的 base_url。"""
+        return GitHubClient(
+            self.http(), self._token(integration, account), self.settings.github_api_url
+        )
 
 
 def api_error(error: ConnectorError) -> ApiError:
@@ -113,6 +123,15 @@ def integration_status_after(error: ConnectorError, current: str) -> str:
     return current
 
 
+def rate_limited_until(integration: Integration) -> datetime | None:
+    """同步被限流时记下的恢复时间（GitHub；integration.settings_json 里的 rate_limited_until）。"""
+    value = integration.settings_json.get("rate_limited_until")
+    try:
+        return datetime.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        return None
+
+
 def sync_state(
     integration: Integration | None,
     cursor: SyncCursor | None,
@@ -126,12 +145,18 @@ def sync_state(
     last = cursor.last_success_at if cursor else None
     if integration.status == "unauthorized":
         return SyncState(status="unauthorized", as_of=last, reason="token_rejected")
+    current = now or datetime.now(UTC)
+    limited = rate_limited_until(integration)
+    if limited is not None and limited > current:
+        # 被第三方限流（Sprint 4 契约第 7 节，A17）：不把空列表当正常，告诉页面何时恢复
+        status = "stale" if last is not None else "unavailable"
+        return SyncState(status=status, as_of=last, reason="rate_limited", retry_at=limited)
     if last is None:
         return SyncState(status="unavailable", as_of=None, reason="not_synced")
     if integration.status == "unavailable":
-        # 最近一次访问 Vikunja 失败（验收场景 A05）：数据照常显示，但标为可能过期
+        # 最近一次访问第三方失败（验收场景 A05）：数据照常显示，但标为可能过期
         return SyncState(status="stale", as_of=last, reason="source_unavailable")
-    age = (now or datetime.now(UTC)) - last
+    age = current - last
     if age <= timedelta(seconds=stale_after_seconds):
         return SyncState(status="ok", as_of=last)
     return SyncState(status="stale", as_of=last, reason="sync_overdue")

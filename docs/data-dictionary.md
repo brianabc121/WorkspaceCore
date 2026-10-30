@@ -77,4 +77,22 @@ Alembic 版本表 `alembic_version` 位于 `public` schema。
 | `resource_links` | `id`、`workspace_id`、`source_resource_id`、`target_resource_id`、`relation`、`created_at` | 跨系统关联（规范 5.1 第 11 项）：`source_resource_id` → `bookmarks`、`target_resource_id` → `external_resources`（Vikunja 项目 / 任务投影），任一方删除时级联删除；目标写了 tombstone（`deleted_at`）时读取一律排除，页面不留僵尸引用（A10）；`(source_resource_id, target_resource_id)` 唯一；`relation` 目前只有 `related` |
 | `calendar_events` | `id`、`workspace_id`、`owner_id`、`title`、`description`、`location`、`all_day`、`start_at`、`end_at`、`start_date`、`end_date`、`timezone`、`rrule`、`version`、`created_at`、`updated_at` | 本地日历（工作台是主源）；随工作空间级联删除；`owner_id` → `users`（删除后置空）；`start_at` / `end_at` 总是 UTC，全天事件为 `timezone` 当地 0 点（结束不含），区间查询只比较这两列；CHECK：`end_at > start_at`，且全天事件必须有 `start_date` / `end_date`、定时事件必须没有；`rrule` V1 不使用（总是 NULL）；索引 `(workspace_id, start_at)` |
 
+### GitHub 投影（T-0028，无新迁移）
+
+GitHub 集成复用 `integrations`、`integration_accounts`、`external_resources`、`sync_cursors`，没有新表：
+
+- `integrations.settings_json`（`provider = github`）：
+  - `repositories`：要同步的仓库；
+  - `etags`：各列表第一页的 ETag；
+  - `repo_access`：各仓库最近一次的访问情况；
+  - `rate_limited_until`：被限流时的恢复时间；
+  - `last_tested_at`。
+
+  都不含 Token。
+- `external_resources.resource_type` ∈ `repo` / `issue` / `pull` / `run`：
+  - `external_id` 是 GitHub 的数字 `id`；
+  - Issue、PR、运行的 `metadata_json` 里有 `repo_resource_id`（所属仓库的投影 UUID）与 `repo_full_name`；
+  - 运行的 `failure_summary` 只有失败的 job / step 名称，不含日志。
+- `sync_cursors.resource_type = github`：增量同步的游标（上次同步开始时间往前 2 分钟）；全量同步的时间与 Vikunja 一样记在 `full_sync`。
+
 ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。

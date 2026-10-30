@@ -25,9 +25,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import projection, sync_lock
-from app.domain.connectors import ConnectorRuntime, integration_status_after, webhook_context
+from app.domain import github_sync, projection, sync_lock
+from app.domain.connectors import (
+    ConnectorRuntime,
+    integration_status_after,
+    rate_limited_until,
+    webhook_context,
+)
 from app.integrations.base import ConnectorError
+from app.integrations.github import PROVIDER as GITHUB
 from app.integrations.vikunja import TaskConnector, VikunjaClient, WebhookRegistrar
 from app.models import Integration, WebhookInboxEvent
 from app.repositories import inbox
@@ -289,6 +295,8 @@ async def sync_integration(
         account = await integration_repo.get_account(db, integration_id) if integration else None
         if integration is None or account is None or integration.status not in SYNCABLE:
             return "skipped"
+        if integration.provider == GITHUB:
+            return await _sync_github(db, ctx, integration, account, force_full=force_full)
         try:
             client = _client(ctx.runtime, integration, account)
         except ApiError as error:
@@ -318,6 +326,42 @@ async def sync_integration(
         return "full" if full else "incremental"
 
 
+async def _sync_github(
+    db: AsyncSession,
+    ctx: SyncContext,
+    integration: Integration,
+    account: Any,
+    *,
+    force_full: bool,
+) -> str:
+    """GitHub：只读同步（Sprint 4 契约第 7 节），没有 Webhook；限流期间直接跳过这一轮。"""
+    limited = rate_limited_until(integration)
+    if limited is not None and limited > datetime.now(UTC):
+        return "skipped"
+    try:
+        client = ctx.runtime.github(integration, account)
+    except ApiError as error:
+        logger.error(
+            "sync skipped: credential unreadable",
+            extra={"integration_id": str(integration.id), "error_type": error.code},
+        )
+        return "skipped"
+    full = force_full or await _full_due(db, integration.id, ctx.settings)
+    try:
+        await github_sync.sync(db, integration, client, full=full)
+    except ConnectorError as error:
+        integration.status = integration_status_after(error, integration.status)
+        await db.commit()
+        logger.warning(
+            "github sync failed",
+            extra={"integration_id": str(integration.id), "error_type": error.kind},
+        )
+        return "failed"
+    _healthy(integration)
+    await db.commit()
+    return "full" if full else "incremental"
+
+
 async def _full_due(db: AsyncSession, integration_id: uuid.UUID, settings: Settings) -> bool:
     cursor = await integration_repo.get_cursor(db, integration_id, projection.FULL_SYNC)
     if cursor is None or cursor.last_success_at is None:
@@ -334,7 +378,12 @@ async def register_for(ctx: SyncContext, integration_id: uuid.UUID) -> str:
     async with ctx.sessions() as db:
         integration = await integration_repo.get_by_id(db, integration_id)
         account = await integration_repo.get_account(db, integration_id) if integration else None
-        if integration is None or account is None or integration.status not in SYNCABLE:
+        if (
+            integration is None
+            or account is None
+            or integration.status not in SYNCABLE
+            or integration.provider == GITHUB  # V1 不注册 GitHub Webhook
+        ):
             return "skipped"
         try:
             client = _client(ctx.runtime, integration, account)
