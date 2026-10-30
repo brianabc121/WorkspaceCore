@@ -1,0 +1,92 @@
+"""第三方集成：Vikunja 的配置、测试连接与手动同步（Sprint 3）。
+
+工作空间范围的资源，用 X-Workspace-Id 指定工作空间：viewer 可查看，admin 及以上可配置。
+Token 只写不读。约定见 docs/decisions/2026-10-30-sprint-3-tasks-contract.md 第 4 节。
+"""
+
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Security, status
+
+from app.api.deps import authenticated, csrf_protected, workspace_admin, workspace_viewer
+from app.core.errors import not_implemented
+from app.domain.policy import WorkspaceAccess
+from app.schemas.common import Page, error_responses
+from app.schemas.integrations import (
+    IntegrationCreate,
+    IntegrationOut,
+    IntegrationTestResult,
+    IntegrationUpdate,
+    SyncRequestOut,
+)
+
+router = APIRouter(tags=["integrations"], dependencies=[Security(authenticated)])
+
+Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
+Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
+_write = [Depends(csrf_protected)]
+_read_errors = error_responses(401, 404, 422)
+_write_errors = error_responses(401, 403, 404, 409, 422)
+
+
+@router.get(
+    "/integrations",
+    summary="工作空间的集成列表（viewer）",
+    description="不含任何凭证；status 与 sync 表示连接状态与数据新鲜度。",
+    responses=_read_errors,
+)
+async def list_integrations(access: Viewer) -> Page[IntegrationOut]:
+    raise not_implemented("T-0020")
+
+
+@router.post(
+    "/integrations",
+    status_code=status.HTTP_201_CREATED,
+    summary="新建 Vikunja 集成（admin）",
+    description="保存后状态为 pending，需要测试连接；每个工作空间最多 1 个同类集成"
+    "（第 2 个返回 409 LIMIT_EXCEEDED）。base_url 解析到私有地址且不在部署允许列表里时返回 422。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def create_integration(access: Admin, body: IntegrationCreate) -> IntegrationOut:
+    raise not_implemented("T-0020")
+
+
+@router.patch(
+    "/integrations/{integration_id}",
+    summary="修改集成（admin，乐观并发）",
+    description="version 不一致时返回 409 VERSION_CONFLICT；"
+    "改 base_url 或 api_token 后状态回到 pending。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def update_integration(
+    access: Admin, integration_id: UUID, body: IntegrationUpdate
+) -> IntegrationOut:
+    raise not_implemented("T-0020")
+
+
+@router.post(
+    "/integrations/{integration_id}/test",
+    summary="测试连接与权限（admin）",
+    description="逐项检查可达性、实例版本、Token、任务读权限与 Webhook 注册权限；"
+    "不返回外部响应原文。测试本身失败也返回 200，结果在 checks 里。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def test_integration(access: Admin, integration_id: UUID) -> IntegrationTestResult:
+    raise not_implemented("T-0020")
+
+
+@router.post(
+    "/integrations/{integration_id}/sync",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="排队一次全量同步（admin）",
+    description="已有同步在运行时返回 409 SYNC_IN_PROGRESS；集成未测试通过或已停用时返回 409 "
+    "INTEGRATION_UNAVAILABLE。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def sync_integration(access: Admin, integration_id: UUID) -> SyncRequestOut:
+    raise not_implemented("T-0021")
