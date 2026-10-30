@@ -9,23 +9,22 @@
   - 安装凭据取环境变量 SETUP_TOKEN，未设置时读取仓库根目录的 .env（make env 生成）。
   - 请求的 Origin 取 --base-url 的来源，它必须是 PUBLIC_BASE_URL 或在 CORS_ALLOWED_ORIGINS 里。
   - V1 只能通过首次安装创建用户，第二个用户由 `docker compose exec api` 用应用自身的代码写入。
-只依赖 Python 标准库；CI（.github/workflows/ci-infra.yml）与本机共用。
+只依赖 Python 标准库，共用工具在同目录的 e2e_support.py；CI（ci-infra.yml）与本机共用。
 """
 
 import argparse
-import json
-import os
-import subprocess
 import sys
-import urllib.error
-import urllib.request
 import uuid
-from http.cookiejar import CookieJar
-from pathlib import Path
-from typing import Any
-from urllib.parse import urlsplit
 
-ROOT = Path(__file__).resolve().parents[2]
+from e2e_support import (
+    Client,
+    Report,
+    compose_exec,
+    default_base_url,
+    parse_base_url,
+    setup_token,
+)
+
 OWNER = {
     "email": "owner@e2e.example.com",
     "password": "e2e owner passphrase 1",
@@ -72,108 +71,10 @@ asyncio.run(main())
 """
 
 
-class Response:
-    def __init__(self, status: int, body: bytes, headers: Any) -> None:
-        self.status = status
-        self.text = body.decode("utf-8", errors="replace")
-        self.headers = headers
-
-    def json(self) -> Any:
-        return json.loads(self.text) if self.text else None
-
-    @property
-    def code(self) -> str | None:
-        try:
-            return str(self.json()["error"]["code"])
-        except (ValueError, TypeError, KeyError):
-            return None
-
-
-class Client:
-    """一个“浏览器”：自己的 Cookie，写请求自动带 Origin 和 X-CSRF-Token。"""
-
-    def __init__(self, base_url: str) -> None:
-        self.base_url = base_url
-        self.origin = "{0.scheme}://{0.netloc}".format(urlsplit(base_url))
-        self.jar = CookieJar()
-        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
-
-    def cookie(self, name: str) -> str | None:
-        return next((c.value for c in self.jar if c.name == name), None)
-
-    def request(
-        self,
-        method: str,
-        path: str,
-        body: Any = None,
-        *,
-        headers: dict[str, str] | None = None,
-        csrf: bool = True,
-    ) -> Response:
-        all_headers = {"Accept": "application/json", **(headers or {})}
-        data = None
-        if body is not None:
-            data = json.dumps(body).encode()
-            all_headers["Content-Type"] = "application/json"
-        if method != "GET":
-            all_headers.setdefault("Origin", self.origin)
-            token = self.cookie("ws_csrf")
-            if csrf and token:
-                all_headers.setdefault("X-CSRF-Token", token)
-        # base_url 在 main() 里已限定为 http(s)
-        req = urllib.request.Request(  # noqa: S310
-            self.base_url + path, data=data, method=method, headers=all_headers
-        )
-        try:
-            with self.opener.open(req, timeout=15) as resp:
-                return Response(resp.status, resp.read(), resp.headers)
-        except urllib.error.HTTPError as error:
-            return Response(error.code, error.read(), error.headers)
-
-
-class Report:
-    def __init__(self) -> None:
-        self.failures = 0
-
-    def check(self, name: str, ok: bool, detail: str = "") -> bool:
-        print(f"{'通过' if ok else '失败'}  {name}" + (f"（{detail}）" if detail else ""))
-        self.failures += 0 if ok else 1
-        return ok
-
-
-def setup_token() -> str:
-    if os.environ.get("SETUP_TOKEN"):
-        return os.environ["SETUP_TOKEN"]
-    env_file = ROOT / ".env"
-    if env_file.exists():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            if line.startswith("SETUP_TOKEN="):
-                return line.split("=", 1)[1].strip()
-    sys.exit("缺少安装凭据：请设置 SETUP_TOKEN 或先运行 make env")
-
-
-def compose_exec(service: str, *args: str, env: dict[str, str] | None = None) -> str:
-    command = ["docker", "compose", "exec", "-T"]
-    for key, value in (env or {}).items():
-        command += ["-e", f"{key}={value}"]
-    # 固定的 docker compose 命令，参数来自本脚本自身
-    result = subprocess.run(  # noqa: S603
-        [*command, service, *args], cwd=ROOT, capture_output=True, text=True, check=False
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"docker compose exec {service} 失败：{result.stderr.strip()[-500:]}")
-    return result.stdout
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument(
-        "--base-url", default=f"http://127.0.0.1:{os.environ.get('HTTP_PORT', '8080')}"
-    )
-    args = parser.parse_args()
-    base = args.base_url.rstrip("/")
-    if urlsplit(base).scheme not in {"http", "https"}:
-        sys.exit("--base-url 必须是 http:// 或 https:// 地址")
+    parser.add_argument("--base-url", default=default_base_url())
+    base = parse_base_url(parser.parse_args().base_url)
     report = Report()
     print(f"Sprint 1 全栈验收：{base}")
 
@@ -327,8 +228,7 @@ def main() -> int:
         ", ".join(sorted(expected - actions)) or "",
     )
 
-    print(f"\n{'全部通过' if report.failures == 0 else f'{report.failures} 项失败'}")
-    return 0 if report.failures == 0 else 1
+    return report.finish()
 
 
 if __name__ == "__main__":
