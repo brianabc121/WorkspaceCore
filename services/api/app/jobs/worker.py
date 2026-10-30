@@ -30,6 +30,9 @@ from app.jobs.queue import PROCESS_WEBHOOKS, REGISTER_WEBHOOKS, SYNC_INTEGRATION
 logger = logging.getLogger("app.worker")
 
 LOG_CONFIG = dict_config(get_settings().log_level)
+# 对账的分钟：错开整点（第 2 分钟起），间隔由 RECONCILE_INTERVAL_MINUTES 决定
+_interval = get_settings().reconcile_interval_minutes
+RECONCILE_MINUTES = set(range(2 % _interval, 60, _interval))
 
 
 async def heartbeat(ctx: dict[str, Any]) -> str:
@@ -101,7 +104,7 @@ class WorkerSettings:
         cron(heartbeat, minute=set(range(0, 60, 5))),
         # 兜底：API 投递失败或事件到了重试时间时，也会在一分钟内被处理
         cron(process_webhooks, second=30),
-        cron(reconcile, minute=set(range(2, 60, 5)), timeout=900),
+        cron(reconcile, minute=RECONCILE_MINUTES, timeout=900),
         cron(purge, minute=17),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())

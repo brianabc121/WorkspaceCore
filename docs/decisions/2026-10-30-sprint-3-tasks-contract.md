@@ -185,6 +185,7 @@
 | 工作空间没有 Vikunja 集成，或集成已停用 | `not_configured` |
 | 集成 `unauthorized` | `unauthorized` |
 | 从未成功同步 | `unavailable`（`reason`：`not_synced`） |
+| 集成 `unavailable`（最近一次访问 Vikunja 失败；T-0023 补充，验收场景 A05） | `stale`（`reason`：`source_unavailable`），数据照常显示 |
 | 最近一次成功同步在 15 分钟内 | `ok` |
 | 更早 | `stale` |
 
@@ -198,7 +199,7 @@
 | 作业 | 时机 | 做什么 |
 |---|---|---|
 | `process_webhooks` | 收到新事件后由 API 投递；另有每分钟一次的兜底 | 用 `FOR UPDATE SKIP LOCKED` 领取到期的 Inbox 事件（最多 20 个），按事件里的 ID 读取 Vikunja 的当前任务 / 项目写入投影；404 或 403 记 tombstone，项目删除时连带它的任务 |
-| `reconcile` | 每 5 分钟 | 对每个 `active` / `unavailable` 的集成：增量同步（`updated >=` 上次游标 − 2 分钟，项目每次全量读）；距上次全量超过 `FULL_SYNC_INTERVAL_SECONDS`（默认 1 小时）就改做全量（发现删除），全量之后检查 Webhook 注册 |
+| `reconcile` | 每 5 分钟（`RECONCILE_INTERVAL_MINUTES`，CI 中为 1） | 对每个 `active` / `unavailable` 的集成：增量同步（`updated >=` 上次游标 − 2 分钟，项目每次全量读）；距上次全量超过 `FULL_SYNC_INTERVAL_SECONDS`（默认 1 小时）就改做全量（发现删除），全量之后检查 Webhook 注册 |
 | `sync_integration` | `POST /integrations/{id}/sync` 投递 | 一次全量同步 + Webhook 检查 |
 | `register_webhooks` | 测试连接通过后投递 | 只注册 Webhook |
 | `purge` | 每小时 | 删除过期的幂等记录、处理完超过 7 天的 Inbox 事件；`dead_letter` 保留以便排查 |

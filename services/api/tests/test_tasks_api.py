@@ -292,6 +292,32 @@ async def test_not_sent_can_be_retried_with_the_same_key(ready: Env) -> None:
     assert (await ready.integration())["status"] == "active"  # 成功后恢复
 
 
+async def test_unreachable_vikunja_marks_the_data_stale(ready: Env) -> None:
+    """A05：第三方服务断开时首页任务模块显示 stale，其余组件照常；读取仍走投影。"""
+    projects = await ready.projects()
+    ready.fake.fault("POST", r"/projects/\d+/tasks", "connect")
+    failed = await ready.create_task({"project_id": projects["工作"], "title": "断开时创建"})
+    assert failed.status_code == 503
+    page = await ready.get("/api/v1/tasks")
+    assert page["sync"]["status"] == "stale"
+    assert page["sync"]["reason"] == "source_unavailable"
+    assert [t["title"] for t in page["items"]] == ["写周报"]
+    overview = await ready.get("/api/v1/dashboard/overview")
+    module = overview["modules"]["tasks"]
+    assert (module["status"], module["reason"], module["retryable"]) == (
+        "stale",
+        "source_unavailable",
+        True,
+    )
+    assert overview["summary"]["pending_tasks"] == 1  # stale 仍显示数据
+    assert len(overview["widgets"]) == 4  # 其余组件照常
+    # 恢复后第一次成功访问就回到 ok
+    assert (
+        await ready.create_task({"project_id": projects["工作"], "title": "恢复后"})
+    ).status_code == 201
+    assert (await ready.get("/api/v1/tasks"))["sync"]["status"] == "ok"
+
+
 async def test_rate_limit_keeps_retry_after_and_allows_retry(ready: Env) -> None:
     projects = await ready.projects()
     key = uuid.uuid4()

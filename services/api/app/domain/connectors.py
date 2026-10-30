@@ -128,6 +128,9 @@ def sync_state(
         return SyncState(status="unauthorized", as_of=last, reason="token_rejected")
     if last is None:
         return SyncState(status="unavailable", as_of=None, reason="not_synced")
+    if integration.status == "unavailable":
+        # 最近一次访问 Vikunja 失败（验收场景 A05）：数据照常显示，但标为可能过期
+        return SyncState(status="stale", as_of=last, reason="source_unavailable")
     age = (now or datetime.now(UTC)) - last
     if age <= timedelta(seconds=stale_after_seconds):
         return SyncState(status="ok", as_of=last)

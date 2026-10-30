@@ -1,6 +1,6 @@
 """全栈验收脚本共用的工具：经 Caddy 对外入口发请求的“浏览器”、结果汇总、docker compose exec。
 
-只依赖 Python 标准库；被 sprint1_acceptance.py、sprint2_acceptance.py 导入（同目录）。
+只依赖 Python 标准库；被同目录的各 Sprint 验收脚本导入。
 """
 
 import json
@@ -106,15 +106,23 @@ def parse_base_url(value: str) -> str:
     return base
 
 
-def setup_token() -> str:
-    if os.environ.get("SETUP_TOKEN"):
-        return os.environ["SETUP_TOKEN"]
+def env_value(name: str, default: str | None = None) -> str | None:
+    """先取环境变量，再取仓库根目录 .env（make env 生成）里的值。"""
+    if os.environ.get(name):
+        return os.environ[name]
     env_file = ROOT / ".env"
     if env_file.exists():
         for line in env_file.read_text(encoding="utf-8").splitlines():
-            if line.startswith("SETUP_TOKEN="):
+            if line.startswith(f"{name}="):
                 return line.split("=", 1)[1].strip()
-    sys.exit("缺少安装凭据：请设置 SETUP_TOKEN 或先运行 make env")
+    return default
+
+
+def setup_token() -> str:
+    token = env_value("SETUP_TOKEN")
+    if not token:
+        sys.exit("缺少安装凭据：请设置 SETUP_TOKEN 或先运行 make env")
+    return token
 
 
 def compose_exec(service: str, *args: str, env: dict[str, str] | None = None) -> str:

@@ -68,7 +68,9 @@ class Settings(BaseSettings):
     webhook_base_url: str = ""
     # Webhook 事件处理失败的最多尝试次数，超过后进 dead_letter（规范第 10 节）
     webhook_max_attempts: int = Field(default=8, ge=1, le=50)
-    # 周期对账：每次做增量；距上次全量超过这个时间再做一次全量（覆盖删除与丢失的事件）
+    # 周期对账：每 reconcile_interval_minutes 分钟做一次增量；距上次全量超过
+    # full_sync_interval_seconds 再做一次全量（覆盖删除与丢失的事件）
+    reconcile_interval_minutes: int = Field(default=5, ge=1, le=30)
     full_sync_interval_seconds: int = Field(default=3600, ge=300)
 
     @field_validator("log_level", mode="before")
