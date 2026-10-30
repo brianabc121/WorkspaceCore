@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     # 只在 API 前面有可信反向代理（Compose 中的 Caddy）时开启，取 X-Forwarded-For 最右侧的地址
     trust_forwarded_for: bool = False
 
+    # 第三方集成（Sprint 3 契约第 4.3 节）：解析到私有地址时只允许这些主机名（逗号分隔），
+    # 例如 Compose 中独立部署的 vikunja；其余私有、回环、链路本地地址一律拒绝（SSRF 防护）
+    integration_allowed_hosts: str = ""
+    connector_connect_timeout_seconds: float = Field(default=3.0, gt=0, le=30)
+    connector_read_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    # 只对读请求重试（指数退避）；写请求从不自动重试，结果未知时按契约第 7 节处理
+    connector_read_retries: int = Field(default=2, ge=0, le=5)
+    # 最近一次成功同步超过这个时间就算 stale（契约第 10 节）
+    sync_stale_after_seconds: int = Field(default=900, ge=60)
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, value: object) -> object:
@@ -93,6 +103,12 @@ class Settings(BaseSettings):
     def trusted_origins(self) -> frozenset[str]:
         candidates = [self.public_base_url, *self.cors_allowed_origins.split(",")]
         return frozenset(o for c in candidates if c.strip() and (o := origin_of(c)))
+
+    @property
+    def allowed_integration_hosts(self) -> frozenset[str]:
+        return frozenset(
+            h.strip().lower() for h in self.integration_allowed_hosts.split(",") if h.strip()
+        )
 
 
 @lru_cache

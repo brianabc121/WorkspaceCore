@@ -1,0 +1,365 @@
+"""第三方集成的配置、测试连接与首次同步（Sprint 3 契约第 4 节）。
+
+Token 与 Webhook 签名密钥用凭证加密服务保存，从不返回、不写日志与审计。
+地址在保存时做 SSRF 检查（解析出的地址必须是公网，除非主机名在 INTEGRATION_ALLOWED_HOSTS 里），
+连接时 ConnectorHttp 会再检查一次。
+"""
+
+import logging
+import secrets
+import uuid
+from datetime import UTC, datetime
+from typing import Any, Literal
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import Settings
+from app.core.errors import ApiError
+from app.domain import projection
+from app.domain.audit import AuditTrail
+from app.domain.auth import AuthContext
+from app.domain.connectors import ConnectorRuntime, account_context, sync_state, webhook_context
+from app.domain.policy import WorkspaceAccess, not_found
+from app.integrations.base import ConnectorError
+from app.integrations.http import OutboundPolicy
+from app.integrations.vikunja import VikunjaClient
+from app.models import Integration, IntegrationAccount
+from app.repositories import integrations as repo
+from app.repositories import workspaces as workspace_repo
+from app.schemas.integrations import (
+    VIKUNJA_API_VERSION,
+    VIKUNJA_TESTED_VERSION,
+    IntegrationCheck,
+    IntegrationCreate,
+    IntegrationOut,
+    IntegrationTestResult,
+    IntegrationUpdate,
+    WebhookRegistration,
+)
+
+logger = logging.getLogger("app.integrations")
+
+MAX_PER_PROVIDER = 1  # V1（契约第 4.3 节）
+CheckName = Literal["reachable", "version", "token", "tasks_read", "webhooks"]
+
+
+def _url_not_allowed(field: str) -> ApiError:
+    # 与请求校验失败相同的格式；不回显地址
+    return ApiError(
+        422,
+        "VALIDATION_FAILED",
+        "请求参数校验失败",
+        details={
+            "errors": [
+                {
+                    "loc": ["body", field],
+                    "msg": "该地址不被允许：私有或内网地址需要在部署配置 "
+                    "INTEGRATION_ALLOWED_HOSTS 中显式允许",
+                    "type": "value_error",
+                }
+            ]
+        },
+    )
+
+
+def _version_conflict(current: int) -> ApiError:
+    return ApiError(
+        409,
+        "VERSION_CONFLICT",
+        "内容已被其他操作修改，请刷新后重试",
+        details={"current_version": current},
+    )
+
+
+class IntegrationService:
+    def __init__(self, db: AsyncSession, settings: Settings, runtime: ConnectorRuntime) -> None:
+        self.db = db
+        self.settings = settings
+        self.runtime = runtime
+        self.audit = AuditTrail(db, settings)
+
+    # ---------------------------------------------------------------- 读取
+
+    async def out(self, integration: Integration) -> IntegrationOut:
+        account = await repo.get_account(self.db, integration.id)
+        cursor = await repo.get_cursor(self.db, integration.id, "task")
+        settings = integration.settings_json
+        webhooks = settings.get("webhooks") or {}
+        last_tested = settings.get("last_tested_at")
+        return IntegrationOut(
+            id=integration.id,
+            provider="vikunja",
+            name=integration.name,
+            base_url=integration.base_url,
+            public_url=integration.public_url,
+            status=integration.status,
+            token_set=account is not None,
+            token_expires_at=account.expires_at if account else None,
+            tested_version=str(settings.get("tested_version") or VIKUNJA_TESTED_VERSION),
+            api_version=str(settings.get("api_version") or VIKUNJA_API_VERSION),
+            instance_version=settings.get("instance_version"),
+            last_tested_at=datetime.fromisoformat(last_tested) if last_tested else None,
+            sync=sync_state(
+                integration, cursor, stale_after_seconds=self.settings.sync_stale_after_seconds
+            ),
+            webhooks=WebhookRegistration(
+                mode=webhooks.get("mode", "unavailable"),
+                registered_projects=int(webhooks.get("registered_projects", 0)),
+                reason=webhooks.get("reason", "not_tested"),
+            ),
+            version=integration.version,
+            created_at=integration.created_at,
+            updated_at=integration.updated_at,
+        )
+
+    async def list_integrations(self, access: WorkspaceAccess) -> list[IntegrationOut]:
+        return [
+            await self.out(i) for i in await repo.list_for_workspace(self.db, access.workspace.id)
+        ]
+
+    async def _get(self, access: WorkspaceAccess, integration_id: uuid.UUID) -> Integration:
+        integration = await repo.get_for_workspace(
+            self.db, integration_id=integration_id, workspace_id=access.workspace.id, lock=True
+        )
+        if integration is None:
+            raise not_found()
+        return integration
+
+    # ---------------------------------------------------------------- 写入
+
+    async def _check_url(self, url: str, field: str) -> None:
+        try:
+            await OutboundPolicy(self.settings.allowed_integration_hosts).check(url)
+        except ConnectorError as error:
+            if error.reason == "dns_failed":
+                return  # 暂时解析不到不阻止保存；测试连接时会报告不可达
+            raise _url_not_allowed(field) from None
+
+    async def create(
+        self, context: AuthContext, access: WorkspaceAccess, body: IntegrationCreate
+    ) -> IntegrationOut:
+        box = self.runtime.credentials()
+        # public_url 只给浏览器打开，服务端不访问，不做地址检查（模型已限制为 http(s)）
+        await self._check_url(body.base_url, "base_url")
+        await workspace_repo.lock(self.db, access.workspace.id)
+        if (
+            await repo.count_provider(self.db, access.workspace.id, body.provider)
+            >= MAX_PER_PROVIDER
+        ):
+            raise ApiError(409, "LIMIT_EXCEEDED", "每个工作空间最多配置 1 个 Vikunja 集成")
+        integration_id = uuid.uuid4()
+        integration = Integration(
+            id=integration_id,
+            workspace_id=access.workspace.id,
+            provider=body.provider,
+            name=body.name,
+            base_url=body.base_url,
+            public_url=body.public_url or body.base_url,
+            status="pending",
+            settings_json={
+                "tested_version": VIKUNJA_TESTED_VERSION,
+                "api_version": VIKUNJA_API_VERSION,
+            },
+            webhook_secret_ref=box.seal(
+                secrets.token_hex(32), context=webhook_context(integration_id)
+            ),
+        )
+        self.db.add(integration)
+        await self.db.flush()
+        account_id = uuid.uuid4()
+        self.db.add(
+            IntegrationAccount(
+                id=account_id,
+                integration_id=integration_id,
+                user_id=context.user.id,
+                auth_type="api_token",
+                credential_ref=box.seal(
+                    body.api_token.get_secret_value(), context=account_context(account_id)
+                ),
+                expires_at=body.token_expires_at,
+            )
+        )
+        await self.audit.record(
+            "integration.created",
+            workspace_ids=[access.workspace.id],
+            actor_id=context.user.id,
+            resource_type="integration",
+            resource_id=integration_id,
+            metadata={"provider": body.provider},
+            client_ip=context.client_ip,
+        )
+        await self.db.commit()
+        await self.db.refresh(integration)
+        return await self.out(integration)
+
+    async def update(
+        self,
+        context: AuthContext,
+        access: WorkspaceAccess,
+        integration_id: uuid.UUID,
+        body: IntegrationUpdate,
+    ) -> IntegrationOut:
+        integration = await self._get(access, integration_id)
+        if integration.version != body.version:
+            raise _version_conflict(integration.version)
+        fields = body.model_fields_set - {"version"}
+        reset = False
+        if "name" in fields and body.name is not None:
+            integration.name = body.name
+        if "base_url" in fields and body.base_url is not None:
+            await self._check_url(body.base_url, "base_url")
+            if body.base_url != integration.base_url:
+                reset = True
+            integration.base_url = body.base_url
+        if "public_url" in fields:
+            integration.public_url = body.public_url or integration.base_url
+        account = await repo.get_account(self.db, integration.id)
+        if "api_token" in fields and body.api_token is not None:
+            box = self.runtime.credentials()
+            if account is None:
+                account = IntegrationAccount(
+                    id=uuid.uuid4(),
+                    integration_id=integration.id,
+                    user_id=context.user.id,
+                    auth_type="api_token",
+                    credential_ref="",
+                )
+                self.db.add(account)
+            account.credential_ref = box.seal(
+                body.api_token.get_secret_value(), context=account_context(account.id)
+            )
+            account.user_id = context.user.id
+            reset = True
+        if "token_expires_at" in fields and account is not None:
+            account.expires_at = body.token_expires_at
+        if reset and integration.status != "disabled":
+            integration.status = "pending"
+        if "enabled" in fields and body.enabled is not None:
+            if not body.enabled:
+                integration.status = "disabled"
+            elif integration.status == "disabled":
+                integration.status = "pending"  # 重新启用：需要再测试一次
+        integration.version += 1
+        await self.audit.record(
+            "integration.updated",
+            workspace_ids=[access.workspace.id],
+            actor_id=context.user.id,
+            resource_type="integration",
+            resource_id=integration.id,
+            # Token 只记“已更换”：字段名本身不含内容
+            metadata={"fields": sorted(fields)},
+            client_ip=context.client_ip,
+        )
+        await self.db.commit()
+        await self.db.refresh(integration)
+        return await self.out(integration)
+
+    # ---------------------------------------------------------------- 测试连接
+
+    async def test(
+        self, context: AuthContext, access: WorkspaceAccess, integration_id: uuid.UUID
+    ) -> IntegrationTestResult:
+        integration = await self._get(access, integration_id)
+        account = await repo.get_account(self.db, integration.id)
+        if account is None:
+            raise ApiError(409, "INTEGRATION_UNAVAILABLE", "尚未保存 Token")
+        client = self.runtime.vikunja(integration, account)
+        checks: list[IntegrationCheck] = []
+        warnings: list[str] = []
+        instance_version: str | None = None
+        webhooks: dict[str, Any] = {"mode": "unavailable", "registered_projects": 0}
+        failure: ConnectorError | None = None
+        try:
+            info = await client.info()
+            checks.append(IntegrationCheck(name="reachable", ok=True))
+            instance_version = info.version
+            compatible = instance_version == VIKUNJA_TESTED_VERSION
+            checks.append(
+                IntegrationCheck(
+                    name="version", ok=compatible, code=None if compatible else "untested_version"
+                )
+            )
+            if not compatible:
+                warnings.append(
+                    f"实例版本 {instance_version or '未知'} 未经核验"
+                    f"（已核验 {VIKUNJA_TESTED_VERSION}）"
+                )
+            step: CheckName = "token"
+            projects = await client.first_project_page()
+            checks.append(IntegrationCheck(name="token", ok=True))
+            step = "tasks_read"
+            await client.first_task_page()
+            checks.append(IntegrationCheck(name="tasks_read", ok=True))
+            webhooks = await self._webhook_permission(client, projects, checks)
+        except ConnectorError as error:
+            failure = error
+            failed: CheckName = "reachable" if not checks else step
+            checks.append(IntegrationCheck(name=failed, ok=False, code=error.reason or error.kind))
+        ok = failure is None
+        if integration.status != "disabled":
+            integration.status = "active" if ok else _status_after_failure(failure)
+        integration.settings_json = {
+            **integration.settings_json,
+            "instance_version": instance_version,
+            "last_tested_at": datetime.now(UTC).isoformat(),
+            "webhooks": webhooks,
+        }
+        integration.version += 1
+        await self.audit.record(
+            "integration.tested",
+            workspace_ids=[access.workspace.id],
+            actor_id=context.user.id,
+            resource_type="integration",
+            resource_id=integration.id,
+            metadata={"ok": ok, "status": integration.status},
+            client_ip=context.client_ip,
+        )
+        await self.db.commit()
+        if ok and integration.status == "active":
+            await self._initial_sync(integration, client)
+        return IntegrationTestResult(
+            ok=ok,
+            status=integration.status,
+            instance_version=instance_version,
+            api_version=VIKUNJA_API_VERSION if instance_version else None,
+            tested_version=VIKUNJA_TESTED_VERSION,
+            compatible=instance_version == VIKUNJA_TESTED_VERSION,
+            checks=checks,
+            warnings=warnings,
+        )
+
+    async def _webhook_permission(
+        self, client: VikunjaClient, projects: list[Any], checks: list[IntegrationCheck]
+    ) -> dict[str, Any]:
+        """可选检查：Token 能否注册 Webhook（没有时只靠周期对账，不影响 ok）。"""
+        if not projects:
+            checks.append(IntegrationCheck(name="webhooks", ok=False, code="no_projects"))
+            return {"mode": "unavailable", "registered_projects": 0, "reason": "no_projects"}
+        allowed = await client.can_manage_webhooks(projects[0].id)
+        checks.append(
+            IntegrationCheck(
+                name="webhooks", ok=allowed, code=None if allowed else "missing_permission"
+            )
+        )
+        return {
+            "mode": "auto" if allowed else "unavailable",
+            "registered_projects": 0,
+            "reason": None if allowed else "missing_permission",
+        }
+
+    async def _initial_sync(self, integration: Integration, client: VikunjaClient) -> None:
+        """测试通过后立即做一次全量同步，项目与任务马上可用；失败只记录在同步状态里。"""
+        try:
+            await projection.full_sync(self.db, integration, client)
+        except ConnectorError as error:
+            logger.warning(
+                "initial sync failed",
+                extra={"integration_id": str(integration.id), "error_type": error.kind},
+            )
+        await self.db.commit()
+
+
+def _status_after_failure(error: ConnectorError | None) -> str:
+    if error is not None and error.kind == "AUTH_FAILED" and not error.resource_level:
+        return "unauthorized"
+    return "unavailable"

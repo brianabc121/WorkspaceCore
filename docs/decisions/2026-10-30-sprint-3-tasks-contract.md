@@ -116,6 +116,8 @@
 - **并发**（核验 ADR 第 5.3 节：Vikunja 写入不校验 `If-Match`）：修改与删除前服务端先读取 Vikunja 上的当前任务，
   `updated` 与请求的 `version` 不一致时返回 `409 VERSION_CONFLICT`，`details` 带 `current_version` 与最新的 `current`（TaskOut）。
   读取与写入之间仍有很短的窗口，期间别人的修改会被覆盖——这是 Vikunja 侧“后写覆盖”的限制，契约明确接受。
+- `version` 是 `updated` 截到秒的 UTC 时间（`YYYY-MM-DDTHH:MM:SSZ`），前端只原样带回、不解析。Vikunja 只按秒保存时间
+  （核验 ADR 第 5.5 节，T-0020 实测），所以同一秒内的两次修改 version 相同，这种情况下的覆盖也发现不了。
 - 本 Sprint 不支持写标签、负责人、评论与附件（需要额外权限和多次调用，核验 ADR 第 5.1 节）；需要时在原生界面操作。
 
 ## 7. Idempotency-Key（规范 4.1、6.3；验收 A06、A07）
@@ -133,7 +135,12 @@
 | 同键、**不同**请求 | `409 IDEMPOTENCY_KEY_REUSED`（A07） |
 | 请求已发出但超时 / 连接中断 | `504 RESULT_UNKNOWN`，`details.retry_with_same_key = true`；记录状态 `unknown` |
 | 同键、同请求，状态 `unknown` | 服务端先查询结果：创建——在目标项目里查找请求开始之后、由 Token 所有者创建、标题相同的任务（核验 ADR 第 5.4 节）；修改 / 删除——读取当前任务判断是否已生效。找到 → 按成功返回（201 / 200 / 204）；确认没有生效 → `409 OPERATION_NOT_APPLIED`（需要换新键重试）；Vikunja 仍不可用 → `503 EXTERNAL_UNAVAILABLE`，状态保持 `unknown` |
-| 确定没有发出（连接被拒、DNS 失败等） | `503 EXTERNAL_UNAVAILABLE`；不保存记录，可以用同一个键重试 |
+| 请求已发出，Vikunja 返回 5xx 或无法解析的响应（T-0020 补充） | `503 EXTERNAL_UNAVAILABLE`；不能确定有没有生效，记录状态 `unknown`，处理同上一行 |
+| 确定没有发出（连接被拒、DNS 失败、熔断等） | `503 EXTERNAL_UNAVAILABLE`；不保存记录，可以用同一个键重试 |
+| Vikunja 限流（429）或拒绝 Token（401） | `503 EXTERNAL_RATE_LIMITED` 带 `Retry-After` / `502 INTEGRATION_UNAUTHORIZED`；对方没有处理，不保存记录，恢复后可以用同一个键重试 |
+| 登记之后、调用 Vikunja 之前失败（资源不存在、集成不可用等） | 返回对应错误；不保存记录 |
+
+重放已确定失败的请求时同样带 `Idempotent-Replayed: true`。
 
 ## 8. 外部错误到 HTTP 的映射
 

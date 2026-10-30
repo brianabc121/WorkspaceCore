@@ -77,6 +77,8 @@ services:
       SETUP_TOKEN: ${SETUP_TOKEN:-}
       # 第三方连接凭证的加密密钥；格式错误时 API 拒绝启动
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      # Connector 默认拒绝私有地址（SSRF 防护）；这里显式允许 integrations 网络里的 Vikunja 容器
+      INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-vikunja}
       # API 只能经 Caddy 访问，取 X-Forwarded-For 最右侧的地址作为客户端 IP（登录限流用）
       TRUST_FORWARDED_FOR: "true"
     depends_on:

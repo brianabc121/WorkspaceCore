@@ -16,7 +16,9 @@ from app.core.logging import configure_logging
 from app.core.middleware import install_middleware
 from app.core.resources import create_engine, create_redis
 from app.domain import overview
+from app.domain.connectors import ConnectorRuntime
 from app.domain.credentials import CredentialBox
+from app.integrations.http import CircuitBreaker
 
 logger = logging.getLogger("app")
 
@@ -61,7 +63,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     # 首页聚合的模块数据来源；测试可以替换成会失败或超时的 provider
-    app.state.module_providers = overview.default_providers()
+    app.state.module_providers = overview.default_providers(
+        lambda: app.state.sessionmaker(), settings.sync_stale_after_seconds
+    )
+    # Connector 共用的出站策略与熔断状态；测试可以替换 transport（httpx.MockTransport）
+    app.state.connectors = ConnectorRuntime(settings, CircuitBreaker())
     app.state.readiness_checks = {}
     install_error_handlers(app)
     install_middleware(app)

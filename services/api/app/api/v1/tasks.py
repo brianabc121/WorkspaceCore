@@ -9,11 +9,19 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Response, Security, status
+from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, Field
 
-from app.api.deps import authenticated, csrf_protected, workspace_member, workspace_viewer
-from app.core.errors import not_implemented
+from app.api.deps import (
+    authenticated,
+    csrf_protected,
+    get_task_service,
+    workspace_member,
+    workspace_viewer,
+)
+from app.domain.auth import AuthContext
 from app.domain.policy import WorkspaceAccess
+from app.domain.tasks import TaskService, WriteResult
 from app.schemas.common import error_responses
 from app.schemas.tasks import (
     ProjectPage,
@@ -30,6 +38,8 @@ router = APIRouter(tags=["tasks"], dependencies=[Security(authenticated)])
 
 Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
 Member = Annotated[WorkspaceAccess, Depends(workspace_member)]
+Context = Annotated[AuthContext, Security(authenticated)]
+Service = Annotated[TaskService, Depends(get_task_service)]
 IdempotencyKey = Annotated[
     UUID,
     Header(
@@ -48,6 +58,14 @@ _REPLAY = (
 )
 
 
+def _respond(result: WriteResult) -> Response:
+    """写接口的结果；重放时带 Idempotent-Replayed（契约第 7 节）。"""
+    headers = {"Idempotent-Replayed": "true"} if result.replayed else None
+    if result.body is None:
+        return Response(status_code=result.status_code, headers=headers)
+    return JSONResponse(result.body, status_code=result.status_code, headers=headers)
+
+
 @router.get(
     "/projects",
     summary="外部项目列表（viewer，读本地投影）",
@@ -55,13 +73,21 @@ _REPLAY = (
 )
 async def list_projects(
     access: Viewer,
+    service: Service,
     integration_id: UUID | None = None,
     include_archived: bool = False,
     q: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
     cursor: Cursor = None,
     limit: Limit = 30,
 ) -> ProjectPage:
-    raise not_implemented("T-0020")
+    return await service.list_projects(
+        access,
+        integration_id=integration_id,
+        include_archived=include_archived,
+        q=q,
+        cursor=cursor,
+        limit=limit,
+    )
 
 
 @router.get(
@@ -72,6 +98,7 @@ async def list_projects(
 )
 async def list_tasks(
     access: Viewer,
+    service: Service,
     status_filter: Annotated[TaskStatusFilter, Query(alias="status")] = "open",
     project_id: UUID | None = None,
     priority: Annotated[list[Annotated[int, Field(ge=0, le=5)]] | None, Query()] = None,
@@ -82,7 +109,18 @@ async def list_tasks(
     cursor: Cursor = None,
     limit: Limit = 30,
 ) -> TaskPage:
-    raise not_implemented("T-0020")
+    return await service.list_tasks(
+        access,
+        status=status_filter,
+        project_id=project_id,
+        priorities=priority,
+        due_before=due_before,
+        due_after=due_after,
+        q=q,
+        sort=sort,
+        cursor=cursor,
+        limit=limit,
+    )
 
 
 @router.post(
@@ -91,11 +129,18 @@ async def list_tasks(
     summary="创建任务（member，必须带 Idempotency-Key）",
     description=_REPLAY
     + "请求已发出但结果未知时返回 504 RESULT_UNKNOWN，用同一个键重发即可查询结果。",
+    response_model=TaskOut,
     dependencies=_write,
     responses=_write_errors,
 )
-async def create_task(access: Member, idempotency_key: IdempotencyKey, body: TaskCreate) -> TaskOut:
-    raise not_implemented("T-0020")
+async def create_task(
+    access: Member,
+    context: Context,
+    service: Service,
+    idempotency_key: IdempotencyKey,
+    body: TaskCreate,
+) -> Response:
+    return _respond(await service.create_task(context, access, idempotency_key, body))
 
 
 @router.get(
@@ -103,8 +148,8 @@ async def create_task(access: Member, idempotency_key: IdempotencyKey, body: Tas
     summary="任务详情（viewer，读本地投影）",
     responses=_read_errors,
 )
-async def get_task(access: Viewer, task_id: UUID) -> TaskOut:
-    raise not_implemented("T-0020")
+async def get_task(access: Viewer, service: Service, task_id: UUID) -> TaskOut:
+    return await service.get_task(access, task_id)
 
 
 @router.patch(
@@ -112,13 +157,19 @@ async def get_task(access: Viewer, task_id: UUID) -> TaskOut:
     summary="修改任务（member，必须带 Idempotency-Key 与 version）",
     description=_REPLAY + "version 与 Vikunja 上的当前版本不一致时返回 409 VERSION_CONFLICT，"
     "details.current 为最新的任务。",
+    response_model=TaskOut,
     dependencies=_write,
     responses=_write_errors,
 )
 async def update_task(
-    access: Member, task_id: UUID, idempotency_key: IdempotencyKey, body: TaskUpdate
-) -> TaskOut:
-    raise not_implemented("T-0020")
+    access: Member,
+    context: Context,
+    service: Service,
+    task_id: UUID,
+    idempotency_key: IdempotencyKey,
+    body: TaskUpdate,
+) -> Response:
+    return _respond(await service.update_task(context, access, task_id, idempotency_key, body))
 
 
 @router.delete(
@@ -132,8 +183,10 @@ async def update_task(
 )
 async def delete_task(
     access: Member,
+    context: Context,
+    service: Service,
     task_id: UUID,
     idempotency_key: IdempotencyKey,
     version: Annotated[TaskVersion, Query()],
-) -> None:
-    raise not_implemented("T-0020")
+) -> Response:
+    return _respond(await service.delete_task(context, access, task_id, idempotency_key, version))
