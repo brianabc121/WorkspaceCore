@@ -17,6 +17,7 @@ from app.core.config import Settings, origin_of
 from app.core.errors import ApiError
 from app.domain import policy
 from app.domain.auth import AuthContext, AuthService
+from app.domain.dashboards import DashboardService
 from app.domain.security import csrf_token_for, csrf_token_matches
 from app.domain.workspaces import WorkspaceService
 from app.schemas.workspaces import Role
@@ -55,6 +56,14 @@ def get_auth_service(
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> AuthService:
     return AuthService(db, redis, settings)
+
+
+def get_dashboard_service(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> DashboardService:
+    return DashboardService(db, settings, request.app.state.module_providers)
 
 
 def get_workspace_service(

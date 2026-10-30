@@ -51,3 +51,14 @@ async def ids_for_user(db: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
             select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == user_id)
         )
     )
+
+
+async def lock(db: AsyncSession, workspace_id: uuid.UUID) -> None:
+    """SELECT … FOR NO KEY UPDATE 锁住工作空间行（到事务结束），用于工作空间级的计数与切换。
+
+    不用 FOR UPDATE：它会挡住其他事务插入引用该工作空间的行（外键检查需要 KEY SHARE 锁），
+    例如审计日志。
+    """
+    await db.execute(
+        select(Workspace.id).where(Workspace.id == workspace_id).with_for_update(key_share=True)
+    )
