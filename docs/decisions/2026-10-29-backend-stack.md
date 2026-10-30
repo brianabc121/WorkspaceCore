@@ -60,6 +60,10 @@ cryptography 50.0.2 于 2026-09-30 发布，`requires_python >= 3.9`，本地已
 按规范，Sprint 0 仍采用 ARQ，但：作业逻辑不依赖 ARQ 特有的 API；关键作业状态先写 PostgreSQL（规范第 2、10 节），
 Redis 不当作唯一持久化队列。如果之后 ARQ 无法满足需要（例如需要 redis-py 6+），写新的 ADR 评估替代方案。
 
+Sprint 3（T-0021）按这个约束落地：Webhook 事件先写 PostgreSQL 的 `webhook_inbox`，Worker 用 `FOR UPDATE SKIP LOCKED` 领取，
+ARQ 只负责“尽快唤醒 Worker”和定时调度——投递丢了，每分钟的兜底轮询与每 5 分钟的对账仍会处理。
+API 投递作业只经过 `app/jobs/queue.py` 的 `JobQueue`（与 API 共用 Redis 连接池的 `ArqRedis`），替换 ARQ 时只需改这一处与 Worker 入口。
+
 ## 后果
 
 - 升级任何依赖：修改 `pyproject.toml` 范围 → `uv lock` → 运行 `make lint`、`make test`（含集成测试）→ 更新本 ADR 的版本表。

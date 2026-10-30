@@ -6,14 +6,21 @@ HMAC-SHA256。集成不存在、已停用、签名缺失或不对一律返回同
 约定见 docs/decisions/2026-10-30-sprint-3-tasks-contract.md 第 9 节。
 """
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Request, status
+from fastapi import APIRouter, Depends, Header, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import not_implemented
+from app.api.deps import get_connectors, get_db, get_jobs
+from app.domain import webhooks
+from app.domain.connectors import ConnectorRuntime
+from app.jobs.queue import PROCESS_WEBHOOKS, JobQueue
 from app.schemas.common import error_responses
 from app.schemas.tasks import WebhookAccepted
+
+logger = logging.getLogger("app.webhooks")
 
 router = APIRouter(tags=["webhooks"])
 
@@ -43,6 +50,32 @@ _VIKUNJA_BODY = {
 async def receive_vikunja_webhook(
     integration_id: UUID,
     request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
+    jobs: Annotated[JobQueue, Depends(get_jobs)],
     signature: Annotated[str | None, Header(alias="X-Vikunja-Signature")] = None,
 ) -> WebhookAccepted:
-    raise not_implemented("T-0021")
+    body = await _read_body(request)
+    created = await webhooks.receive(
+        db, connectors, integration_id=integration_id, body=body, signature=signature
+    )
+    if created:
+        try:
+            await jobs.enqueue(PROCESS_WEBHOOKS)
+        except Exception as error:
+            # 事件已经落库：Worker 每分钟的兜底轮询会处理它
+            logger.warning("enqueue failed", extra={"error_type": type(error).__name__})
+    return WebhookAccepted()
+
+
+async def _read_body(request: Request) -> bytes:
+    """读原始请求体（签名针对原始字节），超过上限立即停止读取。"""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > webhooks.MAX_BODY_BYTES:
+        raise webhooks.payload_too_large()
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > webhooks.MAX_BODY_BYTES:
+            raise webhooks.payload_too_large()
+    return bytes(body)

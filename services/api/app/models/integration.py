@@ -1,6 +1,6 @@
 """第三方集成、外部资源投影、幂等记录与同步游标。
 
-docs/DEVELOPMENT_SPEC.md 第 5.1 节第 6、7、10、16、18 项。
+docs/DEVELOPMENT_SPEC.md 第 5.1 节第 6、7、10、15、16、18 项。
 
 约定见 docs/decisions/2026-10-30-sprint-3-tasks-contract.md。凭证与 Webhook 签名密钥只以
 `enc:v1:` 引用（Sprint 1 契约第 12 节）保存，数据库里没有明文。
@@ -150,3 +150,38 @@ class SyncCursor(Base):
     # 机器可读的错误码，不含外部响应原文
     last_error: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = _updated_at()
+
+
+class WebhookInboxEvent(Base):
+    """收到的 Webhook 事件（规范第 5.1 节第 15 项、第 10 节）。
+
+    status：pending → processing → completed；失败 retry（next_retry_at 之后再试），
+    超过次数上限或永久失败为 dead_letter。processing 时 next_retry_at 是租约到期时间：
+    处理它的进程中途退出后，租约到期即可被重新领取。payload_json 只保存事件名、时间与资源 ID。
+    """
+
+    __tablename__ = "webhook_inbox"
+    __table_args__ = (
+        UniqueConstraint("integration_id", "event_key"),
+        Index(
+            "ix_webhook_pending",
+            "next_retry_at",
+            postgresql_where=text("status IN ('pending', 'retry', 'processing')"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    integration_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.integrations.id", ondelete="CASCADE")
+    )
+    # sha256(原始请求体)：Vikunja 没有投递 ID，请求体里的 time 精确到纳秒（核验 ADR 第 6 节）
+    event_key: Mapped[str] = mapped_column(Text)
+    event_type: Mapped[str] = mapped_column(Text)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
+    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    received_at: Mapped[datetime] = _created_at()
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 机器可读的错误码，不含外部响应原文
+    error_text: Mapped[str | None] = mapped_column(Text)

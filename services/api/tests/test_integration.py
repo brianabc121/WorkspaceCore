@@ -45,6 +45,7 @@ EXPECTED_TABLES = {
     "external_resources",
     "idempotency_requests",
     "sync_cursors",
+    "webhook_inbox",
 }
 
 

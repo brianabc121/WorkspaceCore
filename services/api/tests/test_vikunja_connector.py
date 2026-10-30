@@ -20,7 +20,7 @@ import httpx
 import pytest
 
 from app.core.logging import request_id_var
-from app.integrations.base import ConnectorError, Readable, WebhookCapable
+from app.integrations.base import ConnectorError, Readable
 from app.integrations.http import CircuitBreaker, ConnectorHttp, OutboundPolicy
 from app.integrations.vikunja import (
     PAGE_SIZE,
@@ -28,6 +28,7 @@ from app.integrations.vikunja import (
     VikunjaClient,
     VikunjaProject,
     VikunjaTask,
+    WebhookRegistrar,
     error_from_response,
     parse_project,
     parse_task,
@@ -90,7 +91,7 @@ def test_vikunja_client_implements_the_capability_protocols() -> None:
     # 这几行由 mypy 检查：VikunjaClient 的方法签名与规范第 7 节的能力分层一致
     readable: Readable[VikunjaProject, VikunjaTask] = client
     writable: TaskConnector = client
-    webhooks: WebhookCapable = client
+    webhooks: WebhookRegistrar = client
     assert readable.provider == writable.provider == "vikunja"
     assert webhooks is client
 

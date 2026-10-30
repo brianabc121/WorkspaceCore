@@ -1,13 +1,14 @@
 """Vikunja 数据 ↔ 投影行 ↔ 接口 DTO 的转换，以及全量同步（Sprint 3 契约第 3、5、6、10 节）。
 
 全量同步是投影的基础：读出全部项目与任务，写入投影，外部已经没有的记 tombstone
-（核验 ADR 第 1 节：删除后接口里整条消失，没有“已删除列表”）。增量同步、定时对账与
-Webhook 处理在 T-0021 接入，复用这里的写入函数。
+（核验 ADR 第 1 节：删除后接口里整条消失，没有“已删除列表”）。增量同步只读上次以来更新过的任务；
+Webhook 处理（app/domain/sync.py）复用这里的写入函数。乱序到达的旧数据不会覆盖新数据：
+投影写入时比较外部的 updated（repositories/projection.upsert）。
 """
 
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +27,11 @@ from app.repositories import projection as repo
 from app.schemas.tasks import ProjectOut, TaskOut
 
 logger = logging.getLogger("app.sync")
+
+# 最近一次全量同步的时间记在这个游标上（周期对账据此决定何时再做全量）
+FULL_SYNC = "full_sync"
+# 增量同步的时间窗口往前多读一段，抵御事务提交顺序与漏读（规范第 10 节）
+INCREMENTAL_OVERLAP = timedelta(minutes=2)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -144,28 +150,45 @@ def task_out(resource: ExternalResource) -> TaskOut:
     )
 
 
+async def _save_projects(
+    db: AsyncSession, integration: Integration, projects: list[VikunjaProject]
+) -> None:
+    """写入全部项目；列表里已经没有的项目连同它的任务记 tombstone。"""
+    for project in projects:
+        await save_project(db, integration, project)
+    removed = await repo.tombstone_missing(
+        db,
+        integration_id=integration.id,
+        resource_type=repo.PROJECT,
+        seen=[str(p.id) for p in projects],
+    )
+    await repo.tombstone_project_tasks(
+        db, integration_id=integration.id, project_external_ids=removed
+    )
+
+
+async def _record_failure(
+    db: AsyncSession, integration: Integration, error: ConnectorError
+) -> None:
+    await integration_repo.upsert_cursor(
+        db, integration.id, repo.TASK, success_at=None, error=error.reason or error.kind
+    )
+
+
 async def full_sync(db: AsyncSession, integration: Integration, client: ProjectReader) -> None:
     """读出全部项目与任务写入投影，并为外部已删除的记 tombstone；成功后更新同步游标。
 
     失败时只记录错误码并抛出 ConnectorError，由调用方决定集成状态；投影里已有的数据不动。
+    游标与投影在同一个事务里提交（规范第 10 节：一批处理完毕且提交后才前移）。
     """
     started = datetime.now(UTC)
     try:
         projects = await client.list_projects(include_archived=True)
         tasks = await client.list_tasks()
     except ConnectorError as error:
-        await integration_repo.upsert_cursor(
-            db, integration.id, repo.TASK, success_at=None, error=error.reason or error.kind
-        )
+        await _record_failure(db, integration, error)
         raise
-    for project in projects:
-        await save_project(db, integration, project)
-    await repo.tombstone_missing(
-        db,
-        integration_id=integration.id,
-        resource_type=repo.PROJECT,
-        seen=[str(p.id) for p in projects],
-    )
+    await _save_projects(db, integration, projects)
     project_ids = await repo.project_ids_by_external(db, integration.id)
     for task in tasks:
         await save_task(db, integration, task, project_ids=project_ids)
@@ -173,20 +196,57 @@ async def full_sync(db: AsyncSession, integration: Integration, client: ProjectR
         db, integration_id=integration.id, resource_type=repo.TASK, seen=[str(t.id) for t in tasks]
     )
     newest = max((t.updated for t in tasks), default=None)
-    for resource_type in (repo.PROJECT, repo.TASK):
-        await integration_repo.upsert_cursor(
-            db,
-            integration.id,
-            resource_type,
-            success_at=started,
-            cursor_value=_iso(newest) if resource_type == repo.TASK else None,
-        )
+    await _advance(db, integration, started, newest)
+    await integration_repo.upsert_cursor(db, integration.id, FULL_SYNC, success_at=started)
     logger.info(
         "full sync finished",
         extra={
             "integration_id": str(integration.id),
             "projects": len(projects),
             "tasks": len(tasks),
-            "tombstoned_tasks": removed,
+            "tombstoned_tasks": len(removed),
         },
+    )
+
+
+async def incremental_sync(
+    db: AsyncSession, integration: Integration, client: ProjectReader
+) -> None:
+    """只读上次以来更新过的任务（往前重叠 INCREMENTAL_OVERLAP）；项目每次全量读。
+
+    项目数量少，全量读顺带发现被删除的项目。
+
+    任务的删除在增量里看不到，由定期的全量同步补上。从未同步过时直接做全量。
+    """
+    cursor = await integration_repo.get_cursor(db, integration.id, repo.TASK)
+    since = _parse(cursor.cursor_value) if cursor else None
+    if since is None:
+        await full_sync(db, integration, client)
+        return
+    started = datetime.now(UTC)
+    try:
+        projects = await client.list_projects(include_archived=True)
+        tasks = await client.list_tasks(updated_since=since - INCREMENTAL_OVERLAP)
+    except ConnectorError as error:
+        await _record_failure(db, integration, error)
+        raise
+    await _save_projects(db, integration, projects)
+    project_ids = await repo.project_ids_by_external(db, integration.id)
+    for task in tasks:
+        await save_task(db, integration, task, project_ids=project_ids)
+    newest = max((t.updated for t in tasks), default=since)
+    await _advance(db, integration, started, max(newest, since))
+    logger.info(
+        "incremental sync finished",
+        extra={"integration_id": str(integration.id), "tasks": len(tasks)},
+    )
+
+
+async def _advance(
+    db: AsyncSession, integration: Integration, started: datetime, newest: datetime | None
+) -> None:
+    """游标记 Vikunja 自己的 updated（对方的时钟），不受两边时钟偏差影响。"""
+    await integration_repo.upsert_cursor(db, integration.id, repo.PROJECT, success_at=started)
+    await integration_repo.upsert_cursor(
+        db, integration.id, repo.TASK, success_at=started, cursor_value=_iso(newest)
     )

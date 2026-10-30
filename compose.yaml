@@ -100,7 +100,13 @@ services:
     <<: [*api-image, *hardening]
     restart: unless-stopped
     command: ["arq", "app.jobs.worker.WorkerSettings", "--custom-log-dict", "app.jobs.worker.LOG_CONFIG"]
-    environment: *api-env
+    environment:
+      <<: *api-env
+      # Worker 处理 Webhook 事件、周期对账、注册 Webhook：同样要解密凭证、遵守出站允许列表
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-vikunja}
+      # Vikunja 投递 Webhook 的目标：integrations 网络里的 caddy（不经过对外端口）
+      WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-http://caddy:8080}
     depends_on:
       postgres:
         condition: service_healthy

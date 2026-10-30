@@ -13,6 +13,7 @@ from app.models.integration import (
     Integration,
     IntegrationAccount,
     SyncCursor,
+    WebhookInboxEvent,
 )
 from app.models.workspace import Workspace, WorkspaceMember
 
@@ -29,6 +30,7 @@ __all__ = [
     "IntegrationAccount",
     "SyncCursor",
     "User",
+    "WebhookInboxEvent",
     "Widget",
     "Workspace",
     "WorkspaceMember",
