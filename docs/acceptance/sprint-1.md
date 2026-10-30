@@ -40,7 +40,7 @@
 | 审计日志页显示撤销会话、修改设置、首次安装等记录 | 通过 |
 | 登出后访问受保护页面 → 登录页 | 通过 |
 
-页面无脚本错误（登录前 / 登出后查询 `/me` 的 401 是预期响应）。该脚本需要本机安装 Playwright，暂未纳入 CI（见第 5 节）。
+页面无脚本错误（登录前 / 登出后查询 `/me` 的 401 是预期响应）。运行方式：`cd tests/e2e && npm ci && npm run browser:install`，再 `node sprint1_browser.cjs <BASE_URL>`（Playwright 版本由该目录的锁文件固定）；暂未纳入 CI（见第 5 节）。
 
 ## 3. 任务清单（docs/TASKS.md Sprint 1）
 
@@ -103,7 +103,7 @@ $ python3 tests/e2e/sprint1_acceptance.py --base-url http://127.0.0.1:18080
 全部通过
 
 # 重置为空库后
-$ node tests/e2e/sprint1_browser.cjs http://127.0.0.1:18080
+$ cd tests/e2e && npm ci && node sprint1_browser.cjs http://127.0.0.1:18080
 通过  空库时打开首页 → 首次安装页
 …
 全部通过（页面无错误）

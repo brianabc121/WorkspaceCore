@@ -1,8 +1,9 @@
 // Sprint 1 浏览器验收（T-0013）：首次安装 → 登录 → 修改设置 → 撤销会话 → 登出。
 //
 // 前提：Compose 全栈已启动并迁移（make up && make migrate），数据库里还没有任何用户。
-// 用法：node tests/e2e/sprint1_browser.cjs [BASE_URL]，默认 http://127.0.0.1:${HTTP_PORT:-8080}
-//   - 需要 Playwright（验收时使用 1.63.0 与其自带的 Chromium），例如：npm i -g playwright@1.63.0 && npx playwright install chromium
+// 用法（依赖由同目录的 package.json / package-lock.json 锁定为 Playwright 1.63.0）：
+//   cd tests/e2e && npm ci && npm run browser:install    # 首次：安装依赖与 Chromium
+//   node sprint1_browser.cjs [BASE_URL]                    # 默认 http://127.0.0.1:${HTTP_PORT:-8080}
 //   - 安装凭据取环境变量 SETUP_TOKEN，未设置时读取仓库根目录的 .env。
 //   - BASE_URL 的来源必须是 PUBLIC_BASE_URL 或在 CORS_ALLOWED_ORIGINS 里，否则写请求会被来源校验拒绝。
 // 未纳入 CI：CI 里的接口级验收见 tests/e2e/sprint1_acceptance.py。
