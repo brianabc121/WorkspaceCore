@@ -22,6 +22,10 @@ jobs:
           make env
           # Sprint 3 验收的 A09 要等周期对账纠正投影：CI 中每分钟对账一次（默认 5 分钟）
           echo "RECONCILE_INTERVAL_MINUTES=1" >> .env
+          # Sprint 4 验收用模拟 GitHub（tests/e2e/fake_github_server.py），CI 里没有真实 GitHub Token
+          echo "GITHUB_API_URL=http://fake-github:8080" >> .env
+          sed -i 's/^INTEGRATION_ALLOWED_HOSTS=.*/INTEGRATION_ALLOWED_HOSTS=vikunja,fake-github/' .env
+          grep -q '^INTEGRATION_ALLOWED_HOSTS=vikunja,fake-github$' .env
       - name: docker compose config
         run: |
           docker compose config --quiet
@@ -44,6 +48,9 @@ jobs:
       - name: Sprint 3 全栈验收（DoD / A05 ~ A09，接口级，真实 Vikunja）
         # 每次新建工作台用户、Vikunja 用户与项目；会临时停掉 caddy 与 vikunja（A09、A05）
         run: python3 tests/e2e/sprint3_acceptance.py
+      - name: Sprint 4 全栈验收（DoD / A10 ~ A13 / A17，接口级，模拟 GitHub）
+        # 模拟 GitHub 在 api 镜像里运行并加入 integrations 网络；限流与 Token 失效的检查要等约 3 分钟
+        run: python3 tests/e2e/sprint4_acceptance.py
       - uses: actions/setup-node@v5
         with:
           node-version: '22.23.4'

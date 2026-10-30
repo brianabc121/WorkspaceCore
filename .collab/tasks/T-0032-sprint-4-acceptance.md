@@ -2,9 +2,9 @@
 id: T-0032
 title: Sprint 4 集成与验收：DoD 实测、A10 / A11 / A12 / A13 / A17 自动化、全栈与浏览器 E2E 纳入 CI、勾选 TASKS.md
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: docs/acceptance,docs/TASKS.md,tests/e2e,.github/workflows/ci-infra.yml,scripts/smoke.sh
 depends_on: T-0027, T-0028, T-0029, T-0030, T-0031
 created: 2026-10-30
@@ -34,3 +34,5 @@ T-0027 ~ T-0031 合并后做前后端联调，并按 Sprint 4 的 DoD 实测验�
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-30 16:43 UTC · claude · 创建任务（owner: claude）
 - 2026-10-30 17:27 UTC · claude · 人类在 2026-10-30 的对话中启动长期任务（定期检查 codex 的提交并持续落实设计文档的全部功能，直到完成），并对“Sprint 交界怎么办”选择了“验收通过就自动进入”：视为对 Sprint 5、Sprint 6 的预先批准（D-0004 第 3 节“进入下一个 Sprint”的例外由人类本人放开）。修改协作协议、不可逆的数据迁移、需要人类提供凭据或决定的事项仍然先问人类。
+- 2026-10-30 18:36 UTC · claude · 开始任务
+- 2026-10-30 18:57 UTC · claude · 第一部分（接口级）完成：tests/e2e/sprint4_acceptance.py 31 项（DoD、A10 ~ A13、A17 主限流与次级限流）本机连续 3 次全部通过，已加入 ci-infra.yml；模拟 GitHub 为 tests/e2e/fake_github_server.py（复用 services/api/tests/fake_github.py，加了 base 参数）。越界改动（都是 claude 的目录，D-0003）：compose.yaml 给 worker 加 egress 网络并传入 GITHUB_API_URL——修复 T-0028 的缺陷：worker 只在内部网络里，周期同步解析不到 api.github.com（本机实测确认）；docs/deployment.md 第 2、10 节同步更新。下一步：等 codex 的 T-0030 / T-0031 合并后写 sprint4_browser.cjs，补报告第 2.2、3 节，勾选 TASKS.md S4-01 ~ S4-05。
