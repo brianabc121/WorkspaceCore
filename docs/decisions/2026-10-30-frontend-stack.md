@@ -67,3 +67,19 @@ https://openapi-ts.dev/introduction 、 https://openapi-ts.dev/openapi-fetch/ �
 
 后果：`check:api` 让 `services/api/openapi.json` 与前端生成类型强绑定——后端修改接口契约的 PR 必须同时提交重新生成的
 `apps/web/src/services/schema.d.ts`，否则 Web CI 失败。这个生成文件由谁提交需要在协作流程里明确（见 `docs/acceptance/sprint-1.md` 第 6 节）。
+
+## Sprint 2 新增依赖：拖拽网格（T-0016 引入，T-0017 由 claude 补录核验结果）
+
+规范第 2 节把“拖拽布局”定为“GridStack 或维护活跃的 Vue 网格库，Sprint 2 评估后固定”。T-0016（codex，PR #23）选定 GridStack，并把来源写在 `apps/web/README.md`；按 D-0003 在此补录。
+
+| 包 | 版本 | 类型 | 用途 |
+| --- | --- | --- | --- |
+| gridstack | 14.0.0 | runtime | 桌面端 12 列网格的拖拽与调整大小（`float` 模式保持存储的坐标；DOM 和组件内容由 Vue 渲染，不向 GridStack 传入 HTML） |
+
+核验（2026-10-30，npm registry `https://registry.npmjs.org/gridstack`）：
+- 14.0.0 发布于 2026-09-21，是当前 `latest`；MIT 许可；没有运行时依赖（`dependencies` 为空），不引入传递依赖。
+- 包内自带类型（`dist/gridstack.d.ts`），前端用到的 `GridStack.init`、`load(items, addRemove)`、`setStatic`、`on('change')`、`destroy(removeDOM)`、`engine.nodes` 都在该版本的类型里。
+- `apps/web/package-lock.json` 里的 integrity 与 registry 一致，`npm ci` 时校验通过。
+- 官方站点 https://gridstackjs.com/ 与 GitHub 发布页 https://github.com/gridstack/gridstack.js/releases 在本次验收环境的网络策略下被拒绝（403），未重新打开；以 registry 元数据与包内类型为准。
+
+结论：Sprint 2 起，拖拽网格固定为 GridStack 14.0.0；升级主版本时需要重新核验上述 API，并跑 `tests/e2e/sprint2_browser.cjs`（拖拽、调整大小、保存后刷新）。
