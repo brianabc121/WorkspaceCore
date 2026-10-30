@@ -1,5 +1,21 @@
 @import "tailwindcss";
 
+.knowledge-list, .calendar-agenda { display: grid; gap: 16px; margin: 18px 0; }
+.resource-record { min-width: 0; overflow-wrap: anywhere; }
+.resource-record .section-heading { margin: 0 0 12px; }
+.resource-badge { border: 1px solid var(--line); border-radius: 14px; padding: 4px 10px; white-space: nowrap; }
+.resource-relations { padding-left: 20px; color: var(--muted); font-size: .85rem; }
+.related-documents { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 20px; }
+.calendar-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
+.calendar-day { padding: 16px; min-width: 0; overflow-wrap: anywhere; }
+.calendar-day h2 { font-size: .85rem; margin-bottom: 14px; }
+.calendar-record { border-top: 1px solid var(--line); padding: 12px 0; }
+.calendar-record .task-title { white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.calendar-record .form-help { font-size: .75rem; }
+.calendar-agenda .calendar-day h2 { color: var(--accent); }
+@media (max-width: 1100px) { .calendar-week { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .calendar-week { grid-template-columns: minmax(0, 1fr); } }
+
 :root {
   font-family: Inter, "Noto Sans SC", system-ui, sans-serif;
   color-scheme: light;

@@ -23,7 +23,7 @@ function parse(): WidgetValue | null {
   <ModalPanel :title="widget ? '配置组件' : '添加组件'" :busy="busy" @close="!busy && $emit('close')">
     <form @submit.prevent="((value) => value && $emit('save', value))(parse())">
       <label class="form-field">组件类型<select v-model="type" :disabled="!!widget || busy" @change="changeType"><option v-for="definition in registry" :key="definition.type" :value="definition.type">{{ definition.title }}</option></select></label>
-      <p class="form-help">文本便签填写 text；常用链接填写 links（title / http(s) url）；今日任务填写 limit（1–20）。</p>
+      <p class="form-help">文本便签填写 text；常用链接填写 links（title / http(s) url）；今日任务与最近文档填写 limit（1–20）；近期日程填写 days（1–14）与 limit（1–20）。</p>
       <label class="form-field">组件配置 JSON<textarea v-model="config" rows="9" :disabled="busy" spellcheck="false"></textarea></label>
       <p v-if="invalid" role="alert">组件配置或布局无效，请按所选类型的规则填写。</p><p v-if="error" role="alert">{{ error }}</p>
       <button class="primary-button" :disabled="busy">{{ busy ? '正在提交…' : '保存组件' }}</button>

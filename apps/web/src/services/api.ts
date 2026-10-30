@@ -106,7 +106,7 @@ export function createApi(options: { workspaceId?: () => string | null; sessionV
         if (token) request.headers.set('X-CSRF-Token', token)
       }
       const path = new URL(request.url).pathname
-      if (path === '/api/v1/audit-logs' || /^\/api\/v1\/(workspaces\/|dashboard(?:\/|$)|dashboards(?:\/|$)|widgets\/|integrations(?:\/|$)|projects(?:\/|$)|tasks(?:\/|$))/.test(path)) {
+      if (path === '/api/v1/audit-logs' || /^\/api\/v1\/(workspaces\/|dashboard(?:\/|$)|dashboards(?:\/|$)|widgets\/|integrations(?:\/|$)|projects(?:\/|$)|tasks(?:\/|$)|knowledge(?:\/|$)|calendar(?:\/|$))/.test(path)) {
         const workspaceId = options.workspaceId?.()
         if (workspaceId && !request.headers.has('X-Workspace-Id')) request.headers.set('X-Workspace-Id', workspaceId)
       }

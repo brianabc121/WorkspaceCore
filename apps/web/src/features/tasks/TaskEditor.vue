@@ -8,6 +8,7 @@ import type { TaskCommand } from '../../stores/taskOperations'
 import { priorities, toLocalInput } from './shared'
 import TextField from '../../components/TextField.vue'
 import ExternalLink from '../../components/ExternalLink.vue'
+import RelatedDocuments from '../knowledge/RelatedDocuments.vue'
 const props = defineProps<{ task?: Schema['TaskOut']; projects: Schema['ProjectOut'][]; writable: boolean; locked: boolean }>()
 const emit = defineEmits<{ submit: [command: TaskCommand] }>()
 const schema = z.object({ title: z.string().trim().min(1, '请输入任务标题').max(250), description: z.string().max(10000), project_id: props.task ? z.string().uuid().or(z.literal('')) : z.string({ required_error: '请选择项目' }).uuid('请选择项目'), priority: z.number().int().min(0).max(5), due: z.string().refine((v) => !v || !Number.isNaN(new Date(v).getTime()), '截止时间无效'), done: z.boolean() })
@@ -47,4 +48,5 @@ function remove() { if (props.task && props.writable && !props.locked && window.
     </fieldset>
   </form>
   <p v-if="!writable" class="form-help">当前角色只读。</p><ExternalLink v-if="task" :href="task.source_url" />
+  <RelatedDocuments v-if="task" :key="task.id" :resource-id="task.id" />
 </template>

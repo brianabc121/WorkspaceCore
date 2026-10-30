@@ -31,6 +31,7 @@ fs.mkdirSync(screenshots, { recursive: true });
     if (pathname === '/api/v1/setup/status') body = { setup_required: false };
     else if (pathname === '/api/v1/me') body = { user: { id: 'user-a', display_name: '演示用户', email: 'test@example.com', created_at: time }, workspaces: [{ id: 'workspace-a', name: '个人工作空间', role: 'owner', created_at: time, updated_at: time }] };
     else if (pathname === '/api/v1/projects') body = { items: [project], sync, next_cursor: null, total_estimate: 1 };
+    else if (pathname === '/api/v1/knowledge/resources') body = { items: [], next_cursor: null, total_estimate: null };
     else if (pathname === '/api/v1/tasks' && request.method() === 'GET') body = { items: tasks, sync, next_cursor: null, total_estimate: tasks.length };
     else if (pathname === '/api/v1/tasks' && request.method() === 'POST') {
       createCount++;
