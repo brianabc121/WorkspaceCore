@@ -141,7 +141,7 @@ async def test_breaker_counts_each_scope_separately() -> None:
 
 
 def test_runtime_scopes_breakers_per_integration() -> None:
-    runtime = ConnectorRuntime(Settings(_env_file=None), CircuitBreaker())  # type: ignore[call-arg]
+    runtime = ConnectorRuntime(Settings(app_env="test"), CircuitBreaker())
     assert runtime.http("integration:1").breaker_scope == "integration:1"
     assert runtime.http().breaker_scope == ""  # 部署级的监控检查按目标服务计数
     assert runtime.http("integration:1").breaker is runtime.http("integration:2").breaker

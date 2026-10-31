@@ -1,11 +1,15 @@
-"""接口安全矩阵（T-0043，规范第 12 节）：按 OpenAPI 枚举全部 /api/v1 接口逐个检查，新增的接口自动纳入。
+"""接口安全矩阵（T-0043，规范第 12 节）：按 OpenAPI 枚举全部 /api/v1 接口逐个检查。
+
+新增的接口自动纳入检查。
 
 - 未登录：除首次安装、登录、Webhook 外，一律 401
 - 写请求没有 CSRF Token：一律 403 CSRF_FAILED
 - 非成员带别人的工作空间 ID：一律 404（与不存在的工作空间一样，不暴露存在与否）
 - viewer：工作空间内的写接口一律 403（只改自己通知的已读状态除外）
 
-鉴权、CSRF、成员与角色检查都在依赖里，先于请求体校验执行，所以这里用占位的 ID 与空请求体就能检查。
+鉴权、CSRF、成员与角色检查大多在依赖里，先于请求体校验执行，
+所以多数接口用占位的 ID 与空请求体就能检查；
+少数在业务层检查成员与角色的接口（BODIES）给一个合法的请求体。
 """
 
 import json
@@ -34,6 +38,10 @@ PUBLIC = {
 # viewer 也可以执行的写操作：只改自己的通知
 VIEWER_WRITES = {("PATCH", "/api/v1/notifications")}
 CAROL = {"email": "carol@example.com", "password": "carol password 123456"}
+# 成员与角色在业务层检查的接口：空请求体会先得到 422（对任何工作空间都一样，不暴露是否存在）
+BODIES: dict[tuple[str, str], dict[str, Any]] = {
+    ("PATCH", "/api/v1/workspaces/{workspace_id}"): {"name": "安全矩阵改的名字"},
+}
 
 
 @dataclass(frozen=True)
@@ -83,7 +91,7 @@ async def call(
             params["workspace_id"] = str(workspace)
     if with_csrf and op.is_write:
         headers.update(csrf(client))
-    body = {} if op.method in {"POST", "PUT", "PATCH"} else None
+    body = BODIES.get((op.method, op.path), {}) if op.method in {"POST", "PUT", "PATCH"} else None
     return await client.request(op.method, path, headers=headers, params=params, json=body)
 
 
@@ -123,50 +131,54 @@ def test_matrix_covers_every_documented_operation() -> None:
 
 
 async def test_every_private_operation_requires_a_session(world: World) -> None:
-    unexpected = []
+    unexpected, checked = [], 0
     for op in operations():
         if (op.method, op.path) in PUBLIC:
             continue
+        checked += 1
         response = await call(world.anonymous, op, workspace=world.workspace)
         if response.status_code != 401:
             unexpected.append(f"{op} → {response.status_code}")
-    assert unexpected == []
+    assert unexpected == [] and checked >= 60
 
 
 async def test_every_write_requires_a_csrf_token(world: World) -> None:
-    unexpected = []
+    unexpected, checked = [], 0
     for op in operations():
         if not op.is_write or (op.method, op.path) in PUBLIC:
             continue
+        checked += 1
         workspace = world.workspace if op.in_workspace or "{workspace_id}" in op.path else None
         response = await call(world.owner, op, workspace=workspace, with_csrf=False)
         code = response.json().get("error", {}).get("code") if response.content else None
         if response.status_code != 403 or code != "CSRF_FAILED":
             unexpected.append(f"{op} → {response.status_code} {code}")
-    assert unexpected == []
+    assert unexpected == [] and checked >= 33
 
 
 async def test_non_members_get_404_for_every_workspace_operation(world: World) -> None:
-    unexpected = []
+    unexpected, checked = [], 0
     for op in operations():
         if not (op.in_workspace or "{workspace_id}" in op.path):
             continue
+        checked += 1
         response = await call(world.outsider, op, workspace=world.workspace)
         code = response.json().get("error", {}).get("code") if response.content else None
         if response.status_code != 404 or code != "NOT_FOUND":
             unexpected.append(f"{op} → {response.status_code} {code}")
-    assert unexpected == []
+    assert unexpected == [] and checked >= 53
 
 
 async def test_viewers_cannot_write_anything_in_the_workspace(world: World) -> None:
-    unexpected = []
+    unexpected, checked = [], 0
     for op in operations():
         if not op.is_write or (op.method, op.path) in VIEWER_WRITES:
             continue
         if not (op.in_workspace or "{workspace_id}" in op.path):
             continue  # 登出、改密码、改个人资料等只作用于自己的账号
+        checked += 1
         response = await call(world.viewer, op, workspace=world.workspace)
         code = response.json().get("error", {}).get("code") if response.content else None
         if response.status_code != 403 or code != "FORBIDDEN":
             unexpected.append(f"{op} → {response.status_code} {code}")
-    assert unexpected == []
+    assert unexpected == [] and checked >= 28
