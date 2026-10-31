@@ -5,7 +5,7 @@ owner: claude
 status: in_progress
 priority: P1
 branch: claude/cool-wright-99qbbg
-paths: scripts,tests/e2e,tests/perf,.github/workflows,Makefile,docs/deployment.md,apps/web,.gitleaks.toml,docs/decisions
+paths: scripts,tests/e2e,tests/perf,.github/workflows,Makefile,docs/deployment.md,apps/web,.gitleaksignore,docs/decisions,services/api
 depends_on: T-0041
 created: 2026-10-31
 updated: 2026-10-31
@@ -32,3 +32,4 @@ S6-05：把安全扫描、性能基准和覆盖全部模块的端到端 Smoke Te
 - 2026-10-31 06:04 UTC · claude · 创建任务（owner: claude）
 - 2026-10-31 07:10 UTC · claude · 开始任务
 - 2026-10-31 07:18 UTC · claude · paths 加上 apps/web、.gitleaks.toml、docs/decisions：T-0041 第 5.2 / 5.4 节把 zod 公告与 web 镜像的系统包漏洞留给本任务处理；codex 暂停（D-0007），apps/web 没有进行中的其他任务
+- 2026-10-31 07:48 UTC · claude · paths 再加 services/api，.gitleaks.toml 换成 .gitleaksignore：性能基准发现首页聚合在并发下连接池耗尽、模块全部超时（并发 16 时 64 次里 28 次），属于 S6-05 的性能目标，就在本任务修复（ADR 第 8.6 节）；误报改按指纹登记（ADR 第 8.4 节）。services/api 没有其他进行中的任务

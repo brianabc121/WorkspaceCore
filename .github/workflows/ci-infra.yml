@@ -86,6 +86,14 @@ jobs:
       - name: Sprint 5 浏览器验收（运维页与首页运维组件、停掉 Prometheus 后显示过期、viewer 可读、不暴露监控地址）
         # 用 Sprint 5 接口级验收时启动的 prometheus；中途会临时停掉再启动它
         run: node tests/e2e/sprint5_browser.cjs
+      - name: 完整端到端冒烟（make smoke-full：全部读接口与页面、核心服务、SSE、写入往返、登出）
+        # 不要求空库：用新的临时用户；新增的接口（openapi.json）与页面（navigation.ts）自动纳入
+        run: make smoke-full
+      - name: 性能基准（基础 API P95 < 300 ms、首页 P95 < 500 ms；CI 的 runner 不稳定，允许 2 倍）
+        # 结果表格同时写进本次运行的 Summary；正式数据以本机固定环境为准（docs/acceptance/sprint-6.md）
+        run: |
+          set -o pipefail
+          python3 tests/perf/benchmark.py --tolerance 2 | tee -a "$GITHUB_STEP_SUMMARY"
       - name: 备份恢复验收（A15：make backup → 隔离环境 make restore-verify → 登录与首页配置一致）
         # 备份写入临时的本地 restic 仓库；恢复在独立的 Compose 项目（端口 18080）里进行，结束后删除
         run: python3 tests/e2e/backup_acceptance.py

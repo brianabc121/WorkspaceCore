@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     login_failure_delay_seconds: float = Field(default=0.5, ge=0, le=5)
     # 首页聚合接口的总耗时上限（各模块另有自己的超时）
     dashboard_overview_timeout_seconds: float = Field(default=3.0, gt=0, le=10)
+    # 每个进程同时进行的首页聚合数：每次聚合有约 5 个模块各占一个数据库连接，
+    # 超出的请求排队等候，排队的时间不计入模块的超时（T-0044 性能基准）
+    dashboard_overview_concurrency: int = Field(default=3, ge=1, le=50)
+    # 每个进程的数据库连接池（api 与 worker 各一个）：常驻连接数与高峰时额外允许的连接数
+    database_pool_size: int = Field(default=10, ge=1, le=100)
+    database_max_overflow: int = Field(default=10, ge=0, le=100)
     # 只在 API 前面有可信反向代理（Compose 中的 Caddy）时开启，取 X-Forwarded-For 最右侧的地址
     trust_forwarded_for: bool = False
 

@@ -1,5 +1,6 @@
 """FastAPI 应用入口：`uvicorn app.main:app`。"""
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -87,6 +88,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.sync_stale_after_seconds,
         lambda: deployment_health(app),
     )
+    app.state.overview_gate = asyncio.Semaphore(settings.dashboard_overview_concurrency)
     # Connector 共用的出站策略与熔断状态；测试可以替换 transport（httpx.MockTransport）
     app.state.connectors = ConnectorRuntime(settings, CircuitBreaker())
     app.state.readiness_checks = {}

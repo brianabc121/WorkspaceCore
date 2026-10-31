@@ -489,6 +489,45 @@ async def test_overview_respects_the_total_time_budget(make_client: ClientFactor
     assert elapsed < 5
 
 
+async def test_concurrent_overviews_queue_instead_of_timing_out(make_client: ClientFactory) -> None:
+    """T-0044 性能基准发现：并发一多，各模块等数据库连接就超时了。
+    现在同时进行的聚合数受限，超出的请求排队；排队的时间不计入模块的超时，
+    聚合期间也不占着本请求自己的数据库连接。"""
+    running = peak = 0
+    checked_out: list[int] = []
+
+    async with make_client(dashboard_overview_concurrency=2) as client:
+        engine = app_of(client).state.sessionmaker.kw["bind"]
+
+        class _Counting:
+            name = "tasks"
+            timeout_seconds = 0.5
+
+            async def fetch(self, workspace_id: uuid.UUID) -> ModuleResult:
+                nonlocal running, peak
+                running += 1
+                peak = max(peak, running)
+                checked_out.append(engine.pool.checkedout())
+                await asyncio.sleep(0.2)
+                running -= 1
+                ok = ModuleStatus(status="ok", as_of=None, retryable=False, reason=None)
+                return ModuleResult(status=ok)
+
+        setup = (await client.post("/api/v1/setup", json=OWNER)).json()
+        app_of(client).state.module_providers = [_Counting()]
+        headers = {"X-Workspace-Id": setup["workspaces"][0]["id"]}
+        single = await client.get("/api/v1/dashboard/overview", headers=headers)
+        assert single.status_code == 200
+        assert checked_out == [0]  # 本请求的只读事务已经结束，连接还给了连接池
+        responses = await asyncio.gather(
+            *(client.get("/api/v1/dashboard/overview", headers=headers) for _ in range(6))
+        )
+    assert [r.status_code for r in responses] == [200] * 6
+    # 每次聚合 0.2 秒、最多 2 个同时进行：最后的请求排队约 0.4 秒，加上执行已超过模块的 0.5 秒超时，仍然是 ok
+    assert [r.json()["modules"]["tasks"]["status"] for r in responses] == ["ok"] * 6
+    assert peak == 2
+
+
 async def test_dashboard_writes_are_audited_without_content(home: Home) -> None:
     data = await home.overview()
     dashboard, note = data["dashboard"], data["widgets"][0]

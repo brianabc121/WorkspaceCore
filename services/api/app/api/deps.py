@@ -74,7 +74,9 @@ def get_dashboard_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> DashboardService:
-    return DashboardService(db, settings, request.app.state.module_providers)
+    return DashboardService(
+        db, settings, request.app.state.module_providers, request.app.state.overview_gate
+    )
 
 
 def get_workspace_service(

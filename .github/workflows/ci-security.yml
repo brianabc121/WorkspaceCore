@@ -1,0 +1,59 @@
+name: ci-security
+
+# 安全扫描（S6-05，T-0044）：依赖漏洞、密钥泄露、容器镜像，三个 job 并行，不拖慢 ci-infra。
+# 与本机共用 scripts/security-scan.sh（make scan）；工具版本与策略见
+# docs/decisions/2026-10-31-sprint-6-backup-and-scan-verification.md 第 5、8 节。
+# 每周一定时跑一次：新公布的漏洞即使没有代码改动也能发现。
+# 本文件归 claude 维护（docs/decisions/2026-10-29-sprint-0-contracts.md 第 6 节）。
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 2 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Python 与 npm 依赖（pip-audit、npm audit；高危及以上失败）
+        run: scripts/security-scan.sh deps
+
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # gitleaks 扫描整个 git 历史
+      - name: 密钥泄露（gitleaks；已知误报见 .gitleaksignore）
+        run: scripts/security-scan.sh secrets
+
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: 生成 .env（第三方镜像清单来自 compose 文件）
+        run: make env
+      - name: 构建本仓库的镜像（api、web）
+        run: docker compose build api web
+      - name: 当天的日期（trivy 漏洞库缓存一天）
+        id: day
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/trivy/db
+          key: trivy-db-${{ steps.day.outputs.day }}
+          restore-keys: trivy-db-
+      - name: 容器镜像（trivy；本仓库的镜像有已修复的高危 / 严重漏洞就失败，第三方镜像只报告）
+        run: scripts/security-scan.sh images
