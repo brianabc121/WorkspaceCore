@@ -168,7 +168,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET / POST | `/api/v1/agents/instances` | 实例列表 / 登记（owner；登记不签发凭证） | 已实现（T-0054） |
 | GET / PATCH | `/api/v1/agents/instances/{instance_id}` | 详情 / 修改（乐观并发；网络模式不能改） | 已实现（T-0054） |
 | POST | `/api/v1/agents/instances/{instance_id}/disable`、`/enable` | 停用（凭证失效、IM 强制下线）/ 启用 | 已实现（T-0054） |
-| POST | `/api/v1/agents/instances/{instance_id}/bundle` | 生成接入包（`application/zip`）并签发新凭证；凭证只在这里出现一次 | 已声明（T-0054） |
+| POST | `/api/v1/agents/instances/{instance_id}/bundle` | 生成接入包（`application/zip`）并签发新凭证；凭证只在这里出现一次 | 已实现（T-0054） |
 | POST | `/api/v1/agents/instances/{instance_id}/credentials/{credential_id}/revoke` | 立即吊销一份凭证 | 已实现（T-0054） |
 | PUT | `/api/v1/agents/instances/{instance_id}/secret-grants` | 实例可取用的密钥（整体替换） | 已实现（T-0054） |
 | GET / POST | `/api/v1/agents/secrets` | 密钥列表 / 新增（只写不读） | 已实现（T-0054） |
@@ -205,5 +205,5 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 
 - OpenIM 回调 `/internal/openim/{path_token}/{command}` 只走内部网络，不进 OpenAPI（V2 契约第 10 节）。
 - 已有接口只增不改：SSE 的 `topics` 增加 `im`、`agents`、`ai`。
-- 新增错误码：`409 AGENT_SECRET_EXISTS`、`401 AGENT_UNAUTHORIZED`、`403 STEP_UP_REQUIRED` / `STEP_UP_FAILED`、`409 AGENT_DISABLED` / `IM_NOT_READY` /
+- 新增错误码：`409 AGENT_SECRET_EXISTS` / `AGENT_INGRESS_NOT_CONFIGURED`、`401 AGENT_UNAUTHORIZED`、`403 STEP_UP_REQUIRED` / `STEP_UP_FAILED`、`409 AGENT_DISABLED` / `IM_NOT_READY` /
   `IM_SEND_REJECTED` / `PIN_LIMIT_REACHED` / `EXECUTION_NOT_PENDING`、`503 IM_UNAVAILABLE`（V2 契约第 12 节）。

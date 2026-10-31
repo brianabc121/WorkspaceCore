@@ -7,7 +7,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Security, status
+from fastapi import APIRouter, Depends, Query, Request, Response, Security, status
 
 from app.api.deps import (
     authenticated,
@@ -16,7 +16,6 @@ from app.api.deps import (
     get_agent_service,
     workspace_owner,
 )
-from app.core.errors import not_implemented
 from app.domain.agents import AgentService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.agents import (
@@ -49,7 +48,6 @@ _write = [Depends(csrf_protected)]
 _read_errors = error_responses(401, 403, 404, 422)
 _write_errors = error_responses(401, 403, 404, 409, 422)
 _im_errors = error_responses(401, 403, 404, 409, 422, 503)
-_T = "T-0054"
 
 
 def _ip(request: Request, service: AgentService) -> str:
@@ -170,8 +168,20 @@ async def enable_agent_instance(
     responses={200: _ZIP, **_write_errors},
     response_model=None,
 )
-async def issue_agent_bundle(access: Owner, instance_id: UUID, body: BundleRequest) -> None:
-    raise not_implemented(_T)
+async def issue_agent_bundle(
+    access: Owner, request: Request, service: Service, instance_id: UUID, body: BundleRequest
+) -> Response:
+    filename, data = await service.issue_bundle(
+        access, instance_id, body, client_ip=_ip(request, service)
+    )
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.post(

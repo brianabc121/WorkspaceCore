@@ -106,7 +106,8 @@
   - 返回 `application/zip`，`Cache-Control: no-store`，文件名 `myworkspace-<实例名>.zip`；
   - 每次调用都签发新的实例令牌，外网模式还签发新的客户端证书；令牌和私钥**只在这个 zip 里出现一次**；
   - `previous=keep_24h`（默认）：已有的有效凭证再保留 24 小时；`revoke_now`：立即吊销。同一种凭证同时最多两份有效，超出时最旧的立即吊销；
-  - 内容：`myworkspace.env`（权限 600）、`openclaw.json` 片段（由 `infra/openclaw/openclaw.json.template` 生成）、`bin/myworkspace-secret-resolver`、`bin/myworkspace-openclaw-start`、定时器（`secrets reload` 每 10 分钟，每周重启）、`CHECKLIST.md`；外网模式另有 `tls/client.crt`、`tls/client.key`、隧道配置；
+  - 内容（OC-2 实现，见 `services/api/app/agent_bundle/__init__.py`）：`myworkspace.env`（600：实例令牌、各接入地址、Gateway 令牌、上报的版本）、`state/openclaw.json`（600）、`bin/myworkspace-secret-resolver` 与 `bin/myworkspace-openclaw-start`（755）、`compose.yaml`（OpenClaw 服务器用，锁定镜像）、`CHECKLIST.md`、`README.md`；外网模式另有 `tls/client.crt`、`tls/client.key`（600）。定时任务（`secrets reload` 每 10 分钟、每周重启）写在 `CHECKLIST.md` 里，由部署的人放进宿主机的 cron；隧道配置在 OC-2 第 4 部分核验后加入；
+  - 接入地址来自 `AGENT_INTRANET_URL` / `AGENT_PUBLIC_URL`；外网模式经本机隧道，接入包里写 `http://127.0.0.1:<AGENT_TUNNEL_PORT>`。没有配置对应入口时返回 409 `AGENT_INGRESS_NOT_CONFIGURED`；
   - `inboundWhitelist` 写入生成时本工作空间全部 owner / admin 和全部实例的 IM ID；管理员或实例变化后要重新生成接入包（OC-2 在实例页提示）。
     这个白名单对一个账号的所有群都生效，不能按群设置，所以“允许接力”由工作台在回调里按群执行（第 10 节）；
   - 已停用的实例返回 409 `AGENT_DISABLED`。
@@ -409,6 +410,7 @@
 | 403 | `STEP_UP_REQUIRED` | 批准高危操作没有带密码 |
 | 403 | `STEP_UP_FAILED` | 批准高危操作的密码错误 |
 | 409 | `AGENT_DISABLED` | 对已停用的实例生成接入包 |
+| 409 | `AGENT_INGRESS_NOT_CONFIGURED` | 这个网络模式的接入入口还没有配置，不能生成接入包（`details.network_mode`；OC-2 补充） |
 | 409 | `AGENT_SECRET_EXISTS` | 工作空间里已有同名的密钥（`details.existing_id`；OC-2 补充） |
 | 409 | `IM_NOT_READY` | 实例的 IM 账号还没就绪 |
 | 409 | `IM_SEND_REJECTED` | OpenIM 拒收了这条消息 |

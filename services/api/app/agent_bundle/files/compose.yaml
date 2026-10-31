@@ -1,0 +1,30 @@
+# OpenClaw 服务器上的 Compose 文件（My Workspace 接入包生成）。在接入包解压目录里运行：
+#   docker compose up -d
+# 镜像锁定 OpenClaw extended-stable（docs/versions.md 第 1.5 节）；不挂载 Docker socket，不开放端口。
+name: myworkspace-openclaw
+
+services:
+  openclaw:
+    image: openclaw/openclaw:2026.9.36@sha256:eefba69ec4a5fa596f3b1a8fac4f09525ce10435617a23f2a2090ddd3b6c1c2f
+    restart: unless-stopped
+    # 启动前用实例凭证取 IM 令牌，再启动原入口（OC-0 核验的入口是 tini → node /app/docker-entrypoint.mjs）。
+    # IM 令牌每签发一次会踢掉旧连接，所以只在启动时领取（OC-0 ADR F1）
+    entrypoint:
+      - tini
+      - -s
+      - --
+      - /opt/myworkspace/bin/myworkspace-openclaw-start
+      - --
+      - node
+      - /app/docker-entrypoint.mjs
+    command: ["node", "openclaw.mjs", "gateway"]
+    user: node
+    env_file: myworkspace.env
+    volumes:
+      - ./bin:/opt/myworkspace/bin:ro
+      # OpenClaw 的配置与状态（会话、记忆）；state/openclaw.json 由接入包提供
+      - ./state:/home/node/.openclaw
+    # 与 OC-0 核验时一致；外网模式的本机隧道监听宿主机的 127.0.0.1
+    network_mode: host
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]

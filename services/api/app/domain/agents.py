@@ -21,8 +21,10 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import agent_bundle
 from app.core.config import Settings
 from app.core.errors import ApiError
+from app.domain.agent_ca import ClientCertificate, ensure_ca, issue_client_certificate
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
 from app.domain.policy import WorkspaceAccess
@@ -36,6 +38,7 @@ from app.models import (
     AgentSecretGrant,
     AgentSecretVersion,
     AgentSettings,
+    WorkspaceMember,
 )
 from app.schemas.agents import (
     AgentCredentialOut,
@@ -50,6 +53,7 @@ from app.schemas.agents import (
     AgentSecretUpdate,
     AgentSettingsOut,
     AgentSettingsUpdate,
+    BundleRequest,
     HeartbeatRequest,
     HeartbeatResponse,
     SecretAccessOut,
@@ -77,10 +81,6 @@ HEARTBEAT_PER_MINUTE = 60
 
 def agent_secret_context(secret_id: uuid.UUID, value_version: int) -> str:
     return f"agent_secret:{secret_id}:{value_version}"
-
-
-def agent_ca_context(ca_id: uuid.UUID) -> str:
-    return f"agent_ca:{ca_id}"
 
 
 def im_user_id_for(instance_id: uuid.UUID) -> str:
@@ -507,6 +507,96 @@ class AgentService:
         self.db.add(credential)
         await self.db.flush()
         return credential
+
+    async def _whitelist(self, workspace_id: uuid.UUID) -> list[str]:
+        """接入包里的 inboundWhitelist：本工作空间的 owner / admin 与全部实例（契约第 3 节）。"""
+        members = (
+            await self.db.scalars(
+                select(WorkspaceMember.user_id)
+                .where(
+                    WorkspaceMember.workspace_id == workspace_id,
+                    WorkspaceMember.role.in_(("owner", "admin")),
+                )
+                .order_by(WorkspaceMember.user_id)
+            )
+        ).all()
+        instances = (
+            await self.db.scalars(
+                select(AgentInstance.im_user_id)
+                .where(AgentInstance.workspace_id == workspace_id)
+                .order_by(AgentInstance.im_user_id)
+            )
+        ).all()
+        return [f"ws_{user_id.hex}" for user_id in members] + list(instances)
+
+    async def issue_bundle(
+        self,
+        access: WorkspaceAccess,
+        instance_id: uuid.UUID,
+        body: BundleRequest,
+        *,
+        client_ip: str,
+    ) -> tuple[str, bytes]:
+        """签发新凭证并生成接入包（zip）。凭证与私钥只出现在返回的字节里。"""
+        instance = await self._instance(access, instance_id)
+        self._check_version(instance, body.version)
+        if instance.status == "disabled":
+            raise ApiError(409, "AGENT_DISABLED", "实例已停用，启用后才能生成接入包")
+        public = instance.network_mode == "public"
+        configured = self.settings.agent_public_url if public else self.settings.agent_intranet_url
+        if not configured:
+            raise ApiError(
+                409,
+                "AGENT_INGRESS_NOT_CONFIGURED",
+                "这个网络模式的接入入口还没有配置",
+                details={"network_mode": instance.network_mode},
+            )
+        now = _now()
+        keep = body.previous == "keep_24h"
+        issued = await self.issue_token(instance, keep_previous=keep, now=now)
+        cert: ClientCertificate | None = None
+        if public:
+            box = self._box()
+            ca = await ensure_ca(self.db, box, now=now)
+            cert = issue_client_certificate(ca, box, instance, now=now)
+            await self.add_client_cert(
+                instance,
+                fingerprint=cert.fingerprint,
+                expires_at=cert.not_after,
+                keep_previous=keep,
+                now=now,
+            )
+        base = f"http://127.0.0.1:{self.settings.agent_tunnel_port}" if public else configured
+        data = agent_bundle.build(
+            agent_bundle.BundleInput(
+                instance_id=str(instance.id),
+                instance_name=instance.name,
+                network_mode=instance.network_mode,
+                token=issued.token,
+                base_url=base,
+                whitelist=await self._whitelist(instance.workspace_id),
+                client_cert_pem=cert.cert_pem if cert else None,
+                client_key_pem=cert.key_pem if cert else None,
+            ),
+            now=now,
+        )
+        instance.bundle_issued_at = now
+        instance.version += 1
+        await self.audit.record(
+            "agents.bundle.issued",
+            workspace_ids=[access.workspace.id],
+            actor_id=access.user_id,
+            resource_type="agent_instance",
+            resource_id=instance.id,
+            metadata={
+                "previous": body.previous,
+                "token_prefix": issued.credential.token_prefix,
+                "cert_fingerprint": cert.fingerprint if cert else None,
+            },
+            client_ip=client_ip,
+        )
+        await self.db.commit()
+        return agent_bundle.filename_for(str(instance.id)), data
 
     async def _retire(
         self, instance: AgentInstance, kind: str, *, keep_previous: bool, now: datetime

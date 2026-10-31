@@ -23,7 +23,8 @@ from typing import Any
 from sqlalchemy import Table, and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.agents import agent_ca_context, agent_secret_context
+from app.domain.agent_ca import agent_ca_context
+from app.domain.agents import agent_secret_context
 from app.domain.connectors import account_context, webhook_context
 from app.domain.credentials import CredentialBox, CredentialError
 from app.models import (

@@ -6,8 +6,12 @@
 未授权与不存在都是 NOT_FOUND、每次取用都留记录、轮换后旧值不再下发且密文清除；跨工作空间隔离。
 """
 
+import hashlib
+import io
+import json
 import secrets
 import uuid
+import zipfile
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -15,6 +19,9 @@ from typing import Any, cast
 
 import httpx
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from fastapi import FastAPI
 from pydantic import SecretStr
 
@@ -29,6 +36,8 @@ SETTINGS: dict[str, Any] = {
     "credential_encryption_key": SecretStr(secrets.token_hex(32)),
     # 测试客户端（httpx.ASGITransport）的对端地址是 127.0.0.1，当作接入入口的 Caddy
     "agent_ingress_trusted_proxies": "127.0.0.1/32",
+    "agent_intranet_url": "https://10.0.0.5",
+    "agent_public_url": "https://agent.example.com",
 }
 ADMIN = {"email": "admin@example.com", "password": "admin password 123456"}
 SECRET_VALUE = "sk-test-" + secrets.token_hex(8)
@@ -467,3 +476,135 @@ async def test_heartbeat_reports_versions(env: Env) -> None:
     assert (current["reported_version"], current["plugin_version"]) == ("2026.9.36", "0.3.3")
     assert current["last_seen_at"] is not None
     assert current["credentials"][0]["last_used_at"] is not None
+
+
+# ---------------------------------------------------------------- 接入包与内部 CA
+
+
+async def _bundle(env: Env, instance_id: str, previous: str = "keep_24h") -> httpx.Response:
+    version = (await env.instance(instance_id))["version"]
+    return await env.client.post(
+        f"/api/v1/agents/instances/{instance_id}/bundle",
+        json={"version": version, "previous": previous},
+        headers=env.headers(write=True),
+    )
+
+
+def _unzip(response: httpx.Response) -> dict[str, tuple[str, int]]:
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        return {
+            info.filename: (zf.read(info).decode(), (info.external_attr >> 16) & 0o777)
+            for info in zf.infolist()
+        }
+
+
+def _env_value(files: dict[str, tuple[str, int]], name: str) -> str:
+    for line in files["myworkspace.env"][0].splitlines():
+        if line.startswith(f"{name}="):
+            return line.split("=", 1)[1]
+    raise AssertionError(name)
+
+
+async def test_bundle_carries_a_fresh_token_only_once(env: Env) -> None:
+    instance = await env.create_instance()
+    response = await _bundle(env, instance["id"])
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "application/zip"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["content-disposition"].startswith("attachment; filename=")
+    files = _unzip(response)
+    assert set(files) == {
+        "myworkspace.env",
+        "state/openclaw.json",
+        "bin/myworkspace-secret-resolver",
+        "bin/myworkspace-openclaw-start",
+        "compose.yaml",
+        "CHECKLIST.md",
+        "README.md",
+    }
+    assert files["myworkspace.env"][1] == 0o600 and files["state/openclaw.json"][1] == 0o600
+    assert files["bin/myworkspace-secret-resolver"][1] == 0o755
+    token = _env_value(files, "MYWS_INSTANCE_TOKEN")
+    assert _env_value(files, "MYWS_AGENT_API") == "https://10.0.0.5/agent-api"
+    assert _env_value(files, "OPENIM_WS_ADDR") == "wss://10.0.0.5/im/ws"
+    assert (await resolve(env.client, token, ["k"])).status_code == 200
+
+    me = await env.client.get("/api/v1/me")
+    config = json.loads(files["state/openclaw.json"][0])
+    whitelist = config["channels"]["openim"]["accounts"]["default"]["inboundWhitelist"]
+    assert whitelist == ["ws_" + uuid.UUID(me.json()["user"]["id"]).hex, instance["im_user_id"]]
+    assert config["tools"]["exec"]["security"] == "deny"
+
+    after = await env.instance(instance["id"])
+    assert after["bundle_issued_at"] is not None
+    assert token not in str(after) and token.startswith(after["credentials"][0]["token_prefix"])
+    audit = await run_sql(
+        env.database_url,
+        "SELECT metadata_redacted_json::text FROM workspace.audit_logs"
+        " WHERE action = 'agents.bundle.issued'",
+    )
+    assert token not in audit
+
+    rotated = _unzip(await _bundle(env, instance["id"], previous="revoke_now"))
+    new_token = _env_value(rotated, "MYWS_INSTANCE_TOKEN")
+    assert new_token != token
+    assert (await resolve(env.client, token, ["k"])).status_code == 401
+    assert (await resolve(env.client, new_token, ["k"])).status_code == 200
+
+
+async def test_public_bundle_has_a_client_certificate_from_the_internal_ca(env: Env) -> None:
+    instance = await env.create_instance(network_mode="public")
+    files = _unzip(await _bundle(env, instance["id"]))
+    assert files["tls/client.key"][1] == 0o600
+    token = _env_value(files, "MYWS_INSTANCE_TOKEN")
+    assert _env_value(files, "MYWS_AGENT_API") == "http://127.0.0.1:18443/agent-api"
+    cert = x509.load_pem_x509_certificate(files["tls/client.crt"][0].encode())
+    fingerprint = hashlib.sha256(cert.public_bytes(serialization.Encoding.DER)).hexdigest()
+    ca_pem = await run_sql(
+        env.database_url, "SELECT cert_pem FROM workspace.agent_ca WHERE retired_at IS NULL"
+    )
+    ca = x509.load_pem_x509_certificate(ca_pem.encode())
+    cert.verify_directly_issued_by(ca)
+    assert (
+        cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value == instance["im_user_id"]
+    )
+    usage = cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+    assert list(usage) == [ExtendedKeyUsageOID.CLIENT_AUTH]
+    assert cert.not_valid_after_utc - cert.not_valid_before_utc <= timedelta(days=91)
+    key_ref = await run_sql(env.database_url, "SELECT key_ref FROM workspace.agent_ca")
+    assert key_ref.startswith("enc:v1:")  # CA 私钥只存密文
+
+    ok = await resolve(env.client, token, ["k"], ingress="public", cert=fingerprint)
+    assert ok.status_code == 200
+    # 再生成一次：沿用同一套 CA，新证书也能用
+    second = _unzip(await _bundle(env, instance["id"]))
+    assert await run_sql(env.database_url, "SELECT count(*) FROM workspace.agent_ca") == 1
+    cert2 = x509.load_pem_x509_certificate(second["tls/client.crt"][0].encode())
+    cert2.verify_directly_issued_by(ca)
+
+
+async def test_bundle_is_refused_for_disabled_or_unconfigured_instances(
+    make_client: ClientFactory,
+) -> None:
+    settings = {**SETTINGS, "agent_public_url": ""}
+    async with make_client(**settings) as client:
+        setup = await client.post("/api/v1/setup", json=OWNER)
+        env = Env(client, setup.json()["workspaces"][0]["id"], "")
+        public = await env.create_instance(network_mode="public")
+        refused = await _bundle(env, public["id"])
+        assert refused.status_code == 409
+        assert refused.json()["error"]["code"] == "AGENT_INGRESS_NOT_CONFIGURED"
+        instance = await env.create_instance()
+        await client.post(
+            f"/api/v1/agents/instances/{instance['id']}/disable",
+            json={"version": instance["version"]},
+            headers=env.headers(write=True),
+        )
+        disabled = await _bundle(env, instance["id"])
+        assert disabled.status_code == 409 and disabled.json()["error"]["code"] == "AGENT_DISABLED"
+        stale = await client.post(
+            f"/api/v1/agents/instances/{instance['id']}/bundle",
+            json={"version": 1},
+            headers=env.headers(write=True),
+        )
+        assert stale.status_code == 409 and stale.json()["error"]["code"] == "VERSION_CONFLICT"
