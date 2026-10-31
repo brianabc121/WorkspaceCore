@@ -83,18 +83,30 @@ class Settings(BaseSettings):
     # 浏览器打开 Grafana 仪表盘的地址（外链），与上面的内部地址分开
     grafana_dashboard_url: str = ""
     monitoring_timeout_seconds: float = Field(default=3.0, gt=0, le=30)
+    # Worker 检查 api 是否就绪用的内部地址（Compose 中为 http://api:8000）；为空时不检查
+    api_internal_url: str = ""
     # 服务状态检查结果的缓存时间；Worker 心跳超过这个时间没有更新就算 down
     service_status_cache_seconds: float = Field(default=15.0, ge=0, le=300)
     worker_heartbeat_stale_seconds: int = Field(default=180, ge=60, le=3600)
     # 访问日志里的路径：path 为实际路径（不含查询串）；route 只记录路由模板，连路径参数也不记录
     log_request_path: Literal["path", "route"] = "path"
 
+    # SSE（Sprint 5 契约第 5 节）：每个 api 进程的连接数上限、单个连接的最长时间（到期后浏览器
+    # 带着 Last-Event-ID 自动重连）、多久复核一次会话与成员身份
+    sse_max_connections: int = Field(default=200, ge=1, le=10_000)
+    sse_max_connections_per_user: int = Field(default=5, ge=1, le=100)
+    sse_max_seconds: float = Field(default=600, ge=1, le=3600)
+    sse_recheck_seconds: float = Field(default=60, ge=0.1, le=600)
+    sse_block_seconds: float = Field(default=10, ge=0.1, le=30)
+    # 通知的保留天数：已读的超过这个时间删除，未读的保留两倍时间
+    notification_retention_days: int = Field(default=90, ge=1, le=3650)
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, value: object) -> object:
         return value.upper() if isinstance(value, str) else value
 
-    @field_validator("prometheus_url", "grafana_url", "grafana_dashboard_url")
+    @field_validator("prometheus_url", "grafana_url", "grafana_dashboard_url", "api_internal_url")
     @classmethod
     def _http_url_or_blank(cls, value: str) -> str:
         value = value.strip()

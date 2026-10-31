@@ -22,6 +22,8 @@ _RANK = {Role.viewer: 0, Role.member: 1, Role.admin: 2, Role.owner: 3}
 class WorkspaceAccess:
     workspace: Workspace
     role: Role
+    # 当前用户；只属于用户自己的数据（通知）按它过滤
+    user_id: uuid.UUID | None = None
 
 
 def has_role(role: Role, minimum: Role) -> bool:
@@ -41,4 +43,4 @@ async def require_role(
     workspace, role = found
     if not has_role(role, minimum):
         raise ApiError(403, "FORBIDDEN", "没有权限执行此操作")
-    return WorkspaceAccess(workspace=workspace, role=role)
+    return WorkspaceAccess(workspace=workspace, role=role, user_id=user_id)

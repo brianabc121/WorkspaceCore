@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import dashboard_defaults, overview
+from app.domain import dashboard_defaults, notifications, overview
 from app.domain.audit import AuditTrail
 from app.domain.auth import AuthContext
 from app.domain.policy import WorkspaceAccess, not_found
@@ -350,6 +350,8 @@ class DashboardService:
             if result.status.status in {"ok", "stale"}:
                 summary.update({k: v for k, v in result.summary.items() if k in summary})
                 today_tasks.extend(result.today_tasks)
+        # 通知属于当前用户，不放在按工作空间的模块里；与通知列表的 unread_count 一致（契约第 4 节）
+        summary["unread_notifications"] = await notifications.unread_count(self.db, access)
         return DashboardOverview(
             dashboard=_dashboard_out(dashboard),
             widgets=_widgets_out(widgets),

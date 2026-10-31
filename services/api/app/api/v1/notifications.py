@@ -8,8 +8,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Security
 
-from app.api.deps import authenticated, csrf_protected, workspace_viewer
-from app.core.errors import not_implemented
+from app.api.deps import (
+    authenticated,
+    csrf_protected,
+    get_notification_service,
+    workspace_viewer,
+)
+from app.domain.notifications import NotificationService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.common import error_responses
 from app.schemas.notifications import NotificationMark, NotificationMarkResult, NotificationPage
@@ -17,6 +22,7 @@ from app.schemas.notifications import NotificationMark, NotificationMarkResult, 
 router = APIRouter(tags=["notifications"], dependencies=[Security(authenticated)])
 
 Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
+Service = Annotated[NotificationService, Depends(get_notification_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 
@@ -28,11 +34,12 @@ Limit = Annotated[int, Query(ge=1, le=100)]
 )
 async def list_notifications(
     access: Viewer,
+    service: Service,
     unread_only: bool = False,
     cursor: Cursor = None,
     limit: Limit = 30,
 ) -> NotificationPage:
-    raise not_implemented("T-0036")
+    return await service.list(access, unread_only=unread_only, cursor=cursor, limit=limit)
 
 
 @router.patch(
@@ -41,5 +48,7 @@ async def list_notifications(
     dependencies=[Depends(csrf_protected)],
     responses=error_responses(401, 403, 404, 422),
 )
-async def mark_notifications(access: Viewer, body: NotificationMark) -> NotificationMarkResult:
-    raise not_implemented("T-0036")
+async def mark_notifications(
+    access: Viewer, service: Service, body: NotificationMark
+) -> NotificationMarkResult:
+    return await service.mark(access, body)

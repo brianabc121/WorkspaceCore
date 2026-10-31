@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import idempotency, projection
+from app.domain import idempotency, notifications, projection
 from app.domain.audit import AuditTrail
 from app.domain.auth import AuthContext
 from app.domain.connectors import (
@@ -252,7 +252,9 @@ class TaskService:
         resource: ExternalResource | None = None,
     ) -> ApiError:
         """按契约第 7、8 节记下结果并返回要抛出的错误（调用方负责 raise）。"""
-        integration.status = integration_status_after(error, integration.status)
+        old_status = integration.status
+        integration.status = integration_status_after(error, old_status)
+        await notifications.integration_status_changed(self.db, integration, old_status)
         problem = api_error(error)
         sent_but_unclear = error.kind == "UNAVAILABLE" and not error.not_sent
         if error.kind == "TIMEOUT_UNKNOWN" or sent_but_unclear:
@@ -265,7 +267,7 @@ class TaskService:
             await idempotency.discard(self.db, record)
         else:
             if error.kind == "NOT_FOUND" and resource is not None:
-                await repo.tombstone(self.db, resource.id)
+                await repo.tombstone(self.db, resource)
             idempotency.fail(record, problem)
         await self.db.commit()
         return problem
@@ -497,12 +499,14 @@ class TaskService:
     ) -> ApiError:
         """写之前的读取失败：还没有改动任何东西。"""
         if error.kind == "NOT_FOUND":
-            await repo.tombstone(self.db, resource.id)
+            await repo.tombstone(self.db, resource)
             problem = api_error(error)
             idempotency.fail(record, problem)
             await self.db.commit()
             return problem
-        integration.status = integration_status_after(error, integration.status)
+        old_status = integration.status
+        integration.status = integration_status_after(error, old_status)
+        await notifications.integration_status_changed(self.db, integration, old_status)
         if record.status == "processing":
             await idempotency.discard(self.db, record)
         await self.db.commit()
@@ -578,7 +582,7 @@ class TaskService:
         resource: ExternalResource,
     ) -> WriteResult:
         self._healthy(integration)
-        await repo.tombstone(self.db, resource.id)
+        await repo.tombstone(self.db, resource)
         idempotency.succeed(record, 204, None)
         await self._audit(
             "task.deleted", context, access, resource.id, {"external_id": resource.external_id}

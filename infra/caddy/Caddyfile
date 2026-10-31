@@ -6,7 +6,9 @@
 }
 
 :8080 {
-	encode zstd gzip
+	# SSE（/api/v1/events/stream）不压缩：压缩会攒够一块才发，事件就不能立刻送到浏览器
+	@compressible not path /api/v1/events/stream
+	encode @compressible zstd gzip
 
 	# 请求体上限：防止超大请求拖垮后端（Webhook 等需要更大限制时单独放宽）
 	request_body {
@@ -30,6 +32,14 @@
 	}
 	handle @readyz_public {
 		respond 404
+	}
+
+	# SSE：不缓冲，每个事件立即转发（Sprint 5 契约第 5 节）
+	@events path /api/v1/events/stream
+	handle @events {
+		reverse_proxy api:8000 {
+			flush_interval -1
+		}
 	}
 
 	@backend path /api/* /healthz /readyz

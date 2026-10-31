@@ -12,7 +12,7 @@ ARQ 目前处于仅维护状态（见 docs/decisions/2026-10-29-backend-stack.md
 
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 from arq import cron, func
@@ -23,9 +23,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.config import get_settings
 from app.core.logging import configure_logging, dict_config
 from app.core.resources import create_engine
-from app.domain import sync
+from app.domain import alerts, events, notifications, sync
 from app.domain.connectors import ConnectorRuntime
-from app.domain.operations import WORKER_HEARTBEAT_KEY
+from app.domain.operations import WORKER_HEARTBEAT_KEY, DeploymentHealth, ServiceCache
 from app.integrations.http import CircuitBreaker
 from app.jobs.queue import PROCESS_WEBHOOKS, REGISTER_WEBHOOKS, SYNC_INTEGRATION
 
@@ -72,8 +72,22 @@ async def reconcile(ctx: dict[str, Any]) -> int:
 
 
 async def purge(ctx: dict[str, Any]) -> None:
-    """清理过期的幂等记录与已处理完的 Inbox 事件。"""
-    await sync.purge(_sync(ctx))
+    """清理过期的幂等记录、已处理完的 Inbox 事件与过期的通知。"""
+    context = _sync(ctx)
+    await sync.purge(context)
+    async with context.sessions() as db:
+        retention = timedelta(days=context.settings.notification_retention_days)
+        removed = await notifications.purge(db, retention=retention)
+        await db.commit()
+    if removed:
+        logger.info("notifications purged", extra={"count": removed})
+
+
+async def check_services(ctx: dict[str, Any]) -> list[str]:
+    """服务健康告警（S5-02）：api、Prometheus、Grafana 变为 down 或恢复时通知管理员。"""
+    health: DeploymentHealth = ctx["health"]
+    items = [await health.api_internal(), *await health.monitoring()]
+    return await alerts.evaluate(ctx["redis"], _sync(ctx).sessions, items)
 
 
 async def startup(ctx: dict[str, Any]) -> None:
@@ -82,16 +96,23 @@ async def startup(ctx: dict[str, Any]) -> None:
     engine = create_engine(settings)
     ctx["engine"] = engine
     # ctx["redis"] 是 ARQ 的连接（redis.asyncio.Redis 的子类），同步锁与 API 共用同一个 Redis
+    bus = events.EventBus(ctx["redis"])
+    runtime = ConnectorRuntime(settings, CircuitBreaker())
+    ctx["events"] = bus
     ctx["sync"] = sync.SyncContext(
-        sessions=async_sessionmaker(engine, expire_on_commit=False),
-        runtime=ConnectorRuntime(settings, CircuitBreaker()),
+        sessions=async_sessionmaker(engine, expire_on_commit=False, info=bus.session_info()),
+        runtime=runtime,
         redis=ctx["redis"],
         settings=settings,
     )
+    ctx["health"] = DeploymentHealth(ctx["redis"], settings, runtime, {}, ServiceCache())
     logger.info("worker started")
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
+    bus = ctx.get("events")
+    if bus is not None:
+        await bus.drain()
     engine = ctx.get("engine")
     if engine is not None:
         await engine.dispose()
@@ -111,6 +132,7 @@ class WorkerSettings:
         cron(process_webhooks, second=30),
         cron(reconcile, minute=RECONCILE_MINUTES, timeout=900),
         cron(purge, minute=17),
+        cron(check_services, second=45, timeout=60),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())
     on_startup = startup

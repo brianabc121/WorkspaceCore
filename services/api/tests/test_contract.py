@@ -19,6 +19,7 @@ from app.api.deps import (
     get_developer_service,
     get_integration_service,
     get_knowledge_service,
+    get_notification_service,
     get_operations_service,
     get_redis,
     get_search_service,
@@ -259,6 +260,7 @@ def any_role(app: FastAPI) -> None:
         get_developer_service,
         get_search_service,
         get_operations_service,
+        get_notification_service,
     ):
         app.dependency_overrides[service] = _ShapeOnlyService
 
@@ -690,13 +692,7 @@ async def test_event_stream_rules(stub_client: httpx.AsyncClient) -> None:
     assert missing.headers["content-type"].startswith("application/json")
     invalid = await stub_client.get("/api/v1/events/stream", params={"workspace_id": "1"})
     assert invalid.status_code == 422
-    unfinished = await stub_client.get(
-        "/api/v1/events/stream",
-        params={"workspace_id": str(uuid.uuid4())},
-        headers={"Last-Event-ID": "42"},
-    )
-    assert unfinished.status_code == 501  # 成员校验在推送开始之前（T-0036）
-    assert unfinished.json()["error"]["code"] == "NOT_IMPLEMENTED"
+    # 成员校验、补发与重置的行为见 tests/test_notifications_api.py（T-0036）
 
 
 @pytest.mark.usefixtures("any_role")

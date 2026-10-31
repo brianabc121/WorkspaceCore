@@ -105,9 +105,10 @@ def main() -> int:
         str(tasks),
     )
     report.check(
-        "A05 汇总值未知时为 null（不以 0 冒充），today_tasks 为空",
+        "A05 任务汇总未知时为 null（不以 0 冒充），today_tasks 为空；"
+        "未读通知是本地数据，Sprint 5 起为实际值 0",
         overview.get("summary")
-        == {"pending_tasks": None, "active_projects": None, "unread_notifications": None}
+        == {"pending_tasks": None, "active_projects": None, "unread_notifications": 0}
         and overview.get("today_tasks") == [],
         str(overview.get("summary")),
     )
