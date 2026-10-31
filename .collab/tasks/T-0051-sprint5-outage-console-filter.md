@@ -2,7 +2,7 @@
 id: T-0051
 title: Sprint 5 浏览器验收：断开期间 Chrome 报 ERR_SOCKET_NOT_CONNECTED 被误记为页面错误
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: tests/e2e/sprint5_browser.cjs
@@ -25,7 +25,7 @@ PR #69（只改文档）合并后，main 上 ci-infra 的 Sprint 5 浏览器验�
 - [x] 控制台过滤改为同时匹配消息文本和 `location().url`，并补上 `ERR_SOCKET_NOT_CONNECTED`；只在断开期间放过，其他时候照常记录（并带上地址，便于定位）
 - [x] 用脚本里取出的真实过滤函数核对：旧写法会把这条消息记为问题，新写法放过；断开期间真正的脚本错误、非断开期间的连接错误仍被记录
 - [x] 用真实 Chromium 确认资源加载失败的消息地址在 `location().url` 里
-- [ ] PR 的 ci-infra（含 Sprint 5 浏览器验收）通过，合并后 main 的工作流全部成功
+- [x] PR 的 ci-infra（含 Sprint 5 浏览器验收）通过，合并后 main 的工作流全部成功
 
 ## 背景 / 约束 / 参考
 - 失败日志：ci-infra run 41202363148，job 124540516059，第 20 步
@@ -36,3 +36,5 @@ PR #69（只改文档）合并后，main 上 ci-infra 的 Sprint 5 浏览器验�
 - 2026-10-31 13:05 UTC · claude · 创建任务（owner: claude）
 - 2026-10-31 13:05 UTC · claude · 开始任务
 - 2026-10-31 13:06 UTC · claude · 修复已推送到 PR；等 CI 通过并合并后，确认 main 的工作流成功再改为 done
+- 2026-10-31 13:39 UTC · claude · PR #70 合并（d81a49f）；main 上 ci-api、Web CI、ci-infra（含 Sprint 5 浏览器验收）、ci-security、collab、collab-sync 全部成功
+- 2026-10-31 13:39 UTC · claude · status in_progress → done：修复已合并，main 恢复全绿
