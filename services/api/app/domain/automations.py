@@ -298,7 +298,11 @@ class AutomationService:
             raise ApiError(
                 503, "EXTERNAL_UNAVAILABLE", "无法读取 n8n 的 API Key，请重新保存连接"
             ) from error
-        return N8nClient(connection.base_url, key.get_secret_value(), self.runtime.http())
+        return N8nClient(
+            connection.base_url,
+            key.get_secret_value(),
+            self.runtime.http(f"automation_connection:{connection.id}"),
+        )
 
     def _secret(self, connection: AutomationConnection) -> str:
         box = self.runtime.credentials()

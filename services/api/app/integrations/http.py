@@ -2,10 +2,13 @@
 
 - **SSRF 防护**（Sprint 3 契约第 4.3 节）：每次请求前解析目标主机，任何一个地址不是公网地址
   就拒绝，除非主机名在部署配置 INTEGRATION_ALLOWED_HOSTS 里；不跟随重定向。
+- **防 DNS 重绑定**（T-0043）：检查通过后直接连接检查过的那个 IP，不让 httpx 连接时再解析一次
+  （两次解析之间结果可能被换成内网地址）。Host 头与 TLS 的 SNI / 证书校验仍用原来的主机名。
 - **超时与错误归类**：连接超时 / 连接失败说明请求没有发出（`not_sent`）；读超时等发生在
   请求发出之后，读操作归为 UNAVAILABLE，写操作归为 TIMEOUT_UNKNOWN（结果未知，不能盲目重试）。
 - **重试**：只对读请求（GET）做有限次数的指数退避重试；429 不重试，交给调用方按 Retry-After 处理。
-- **熔断**：同一个服务连续失败达到阈值后，在冷却期内直接失败，不再发请求。
+- **熔断**：同一个服务连续失败达到阈值后，在冷却期内直接失败，不再发请求。计数按调用方给的范围
+  （每个集成 / n8n 连接）分开：一个集成持续失败，不影响指向同一主机的其他集成（T-0043）。
 
 请求带上当前的 X-Request-ID，便于对照两边的日志；Authorization 等请求头不写日志。
 """
@@ -48,18 +51,24 @@ class OutboundPolicy:
 
     allowed_hosts: frozenset[str] = frozenset()
 
-    async def check(self, url: str) -> None:
+    async def check(self, url: str) -> str | None:
+        """不允许访问时抛出 ConnectorError；主机名经过解析时返回应当连接的地址（固定下来防重绑定）。
+
+        部署时允许的内网主机名与 IP 字面量返回 None：前者由 Compose 的内部 DNS 解析，后者无需解析。
+        """
         host = host_of(url)
         if not host:
             raise _not_allowed()
         if host in self.allowed_hosts:
-            return
+            return None
         try:
-            addresses = [str(ipaddress.ip_address(host))]
+            literal = str(ipaddress.ip_address(host))
         except ValueError:
-            addresses = await _resolve(host, urlsplit(url).port or 443)
+            literal = None
+        addresses = [literal] if literal else await _resolve(host, urlsplit(url).port or 443)
         if not addresses or not all(_is_public(a) for a in addresses):
             raise _not_allowed()
+        return None if literal else addresses[0]
 
 
 async def _resolve(host: str, port: int) -> list[str]:
@@ -120,6 +129,8 @@ class ConnectorHttp:
     breaker: CircuitBreaker = field(default_factory=CircuitBreaker)
     transport: httpx.AsyncBaseTransport | None = None
     backoff_base_seconds: float = 0.2
+    # 熔断计数的范围，例如 "integration:<ID>"；为空时按目标服务计数（部署级的监控组件）
+    breaker_scope: str = ""
 
     async def request(
         self,
@@ -135,7 +146,8 @@ class ConnectorHttp:
         method = method.upper()
         is_read = method in _READ_METHODS
         attempts = 1 + (self.read_retries if is_read else 0)
-        key = f"{urlsplit(url).scheme}://{urlsplit(url).netloc}"
+        origin = f"{urlsplit(url).scheme}://{urlsplit(url).netloc}"
+        key = f"{self.breaker_scope}|{origin}" if self.breaker_scope else origin
         all_headers = {"Accept": "application/json", **headers}
         if content_type:
             all_headers["Content-Type"] = content_type
@@ -147,9 +159,9 @@ class ConnectorHttp:
             if attempt:
                 await asyncio.sleep(self.backoff_base_seconds * 2 ** (attempt - 1))
             self.breaker.before(key)
-            await self.policy.check(url)
+            pinned = await self.policy.check(url)
             try:
-                response = await self._send(method, url, all_headers, params, json)
+                response = await self._send(method, url, all_headers, params, json, pinned)
             except ConnectorError as error:
                 self.breaker.failure(key)
                 last_error = error
@@ -172,7 +184,16 @@ class ConnectorHttp:
         headers: dict[str, str],
         params: Mapping[str, Any] | list[tuple[str, Any]] | None,
         json: Any,
+        pinned: str | None = None,
     ) -> httpx.Response:
+        target = httpx.URL(url)
+        extensions: dict[str, Any] = {}
+        if pinned:
+            # 连接检查过的 IP；Host 头与 TLS 的 SNI（证书按它校验）保留原来的主机名
+            headers = {**headers, "Host": target.netloc.decode("ascii")}
+            if target.scheme == "https":
+                extensions["sni_hostname"] = target.host
+            target = target.copy_with(host=pinned)
         timeout = httpx.Timeout(
             connect=self.connect_timeout,
             read=self.read_timeout,
@@ -184,7 +205,9 @@ class ConnectorHttp:
             async with httpx.AsyncClient(
                 transport=self.transport, timeout=timeout, follow_redirects=False
             ) as client:
-                return await client.request(method, url, headers=headers, params=params, json=json)
+                return await client.request(
+                    method, target, headers=headers, params=params, json=json, extensions=extensions
+                )
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as error:
             # 连接没有建立：请求肯定没有到达对方
             raise ConnectorError(

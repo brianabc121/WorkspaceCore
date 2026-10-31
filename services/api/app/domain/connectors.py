@@ -37,7 +37,8 @@ class ConnectorRuntime:
     breaker: CircuitBreaker
     transport: Any = None
 
-    def http(self) -> ConnectorHttp:
+    def http(self, scope: str = "") -> ConnectorHttp:
+        """scope 是熔断计数的范围（每个集成 / 连接分开）；为空时按目标服务计数。"""
         return ConnectorHttp(
             policy=OutboundPolicy(self.settings.allowed_integration_hosts),
             connect_timeout=self.settings.connector_connect_timeout_seconds,
@@ -45,6 +46,7 @@ class ConnectorRuntime:
             read_retries=self.settings.connector_read_retries,
             breaker=self.breaker,
             transport=self.transport,
+            breaker_scope=scope,
         )
 
     def credentials(self) -> CredentialBox:
@@ -75,12 +77,18 @@ class ConnectorRuntime:
         return token.get_secret_value()
 
     def vikunja(self, integration: Integration, account: IntegrationAccount) -> VikunjaClient:
-        return VikunjaClient(self.http(), integration.base_url, self._token(integration, account))
+        return VikunjaClient(
+            self.http(f"integration:{integration.id}"),
+            integration.base_url,
+            self._token(integration, account),
+        )
 
     def github(self, integration: Integration, account: IntegrationAccount) -> GitHubClient:
         """地址取部署配置（默认 api.github.com），不取集成里保存的 base_url。"""
         return GitHubClient(
-            self.http(), self._token(integration, account), self.settings.github_api_url
+            self.http(f"integration:{integration.id}"),
+            self._token(integration, account),
+            self.settings.github_api_url,
         )
 
 

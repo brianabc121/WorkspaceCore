@@ -2,9 +2,9 @@
 id: T-0043
 title: Sprint 6 安全加固与安全测试：DNS 重绑定、按集成计数的熔断、规范第 12 节安全测试补齐（S6-05）
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api
 depends_on: T-0040
 created: 2026-10-31
@@ -29,3 +29,4 @@ updated: 2026-10-31
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-31 06:04 UTC · claude · 创建任务（owner: claude）
+- 2026-10-31 06:41 UTC · claude · 开始任务
