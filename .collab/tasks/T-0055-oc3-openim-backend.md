@@ -24,6 +24,10 @@ updated: 2026-10-31
 - [ ] 防刷屏（连续 8 条、每分钟 6 条、可按群调整），禁止实例之间单聊；图片上传与代理显示，外链图片不加载
 - [ ] 后端测试覆盖以上规则，以及回调丢失后的对账
 
+- [ ] 自建打过补丁的 OpenIM 镜像（OC-0 ADR 第 6 节），锁定 digest；`infra/openim/probes/rest-authz.py` 对补丁镜像退出码为 0，并进入 CI
+- [ ] 评估并替换 bitnamilegacy 的 kafka / minio / etcd，开启 etcd 认证与 Kafka SASL，调小 Kafka 日志段与保留期（从 OC-0 移来）
+- [ ] 图片：对象存储上传流程核验与实现（从 OC-0 移来）；OC-0 ADR F1（签发令牌会踢下线）、F2（导入好友前先查关系）、F7（日志里的消息内容）落实
+
 ## 背景 / 约束 / 参考
 - 依据：`docs/v2/TRANSFORMATION_PLAN.md`；论证与上游源码核对见 `docs/v2/OPENCLAW_PLAN.md`
 - 拆自 T-0047（人类 2026-10-31 决定按推荐执行）
