@@ -7,6 +7,20 @@ import { useAuthStore } from '../src/stores/auth'
 import { registry, parseWidget } from '../src/widgets/registry'
 
 describe('notifications', () => {
+  it('keeps original list/overview read timestamps when count patch succeeds but subsequent reads fail', async () => {
+    let failed = false
+    mockApi(r => {
+      if (r.method === 'PATCH' && path(r) === '/api/v1/notifications') { failed = true; return Response.json({ updated: 1, unread_count: 1 }) }
+      if (path(r) === '/api/v1/notifications') return failed ? fail(503, 'HTTP_ERROR') : Response.json(notifications)
+      if (path(r) === '/api/v1/dashboard/overview' && failed) return fail(503, 'HTTP_ERROR')
+    })
+    const { queryClient } = await openApp('/'); await fireEvent.click(await screen.findByRole('button', { name: '通知，2 条未读' })); await screen.findByText(notification.body)
+    const old = Date.parse('2026-10-30T01:00:00Z')
+    for (const q of queryClient.getQueryCache().findAll({ predicate: q => ['notifications', 'overview'].includes(String(q.queryKey[0])) })) queryClient.setQueryData(q.queryKey, q.state.data, { updatedAt: old })
+    await fireEvent.click(screen.getByRole('button', { name: '标为已读：服务告警' })); const banner = await screen.findByText(/通知数据可能过期.*截至/)
+    expect(banner.querySelector('time')).toHaveAttribute('datetime', '2026-10-30T01:00:00.000Z')
+    expect(queryClient.getQueryState(['overview', 'user-a', 'workspace-a'])?.dataUpdatedAt).toBe(old)
+  })
   it('closes the notification dialog with Escape even if focus was lost after list changes', async () => {
     mockApi(r => path(r) === '/api/v1/notifications' ? Response.json(notifications) : undefined)
     await openApp('/'); await fireEvent.click(await screen.findByRole('button', { name: '通知，2 条未读' })); await screen.findByRole('dialog')

@@ -35,8 +35,11 @@ export function useNotificationMutation(scope: string) {
       const result = dataOf(await auth.api.PATCH('/api/v1/notifications', { params: { header: { 'X-Workspace-Id': scope } }, body }))
       if (!active()) return
       committed = true
-      cache.setQueriesData<InfiniteData<Schema['NotificationPage']>>({ predicate: q => matches(q.queryKey) && q.queryKey[0] === 'notifications' }, old => old && ({ ...old, pages: old.pages.map(page => ({ ...page, unread_count: result.unread_count })) }))
-      cache.setQueriesData<Schema['DashboardOverview']>({ predicate: q => matches(q.queryKey) && q.queryKey[0] === 'overview' }, old => old && ({ ...old, summary: { ...old.summary, unread_notifications: result.unread_count } }))
+      for (const q of cache.getQueryCache().findAll({ predicate: q => matches(q.queryKey) })) {
+        const options = { updatedAt: q.state.dataUpdatedAt }
+        if (q.queryKey[0] === 'notifications') cache.setQueryData<InfiniteData<Schema['NotificationPage']>>(q.queryKey, old => old && ({ ...old, pages: old.pages.map(page => ({ ...page, unread_count: result.unread_count })) }), options)
+        else cache.setQueryData<Schema['DashboardOverview']>(q.queryKey, old => old && ({ ...old, summary: { ...old.summary, unread_notifications: result.unread_count } }), options)
+      }
       await cache.invalidateQueries({ predicate: q => matches(q.queryKey) }, { throwOnError: true })
       if (active()) message.value = '通知已标为已读。'
     } catch (cause) {

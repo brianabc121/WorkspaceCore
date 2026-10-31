@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fireEvent, screen, within } from '@testing-library/vue'
 import { mockApi, openApp, fail, me, workspace } from './helpers'
 import { automation, automations, connection, run, path } from './sprint5-fixtures'
@@ -19,7 +19,51 @@ async function fillTrigger() {
   await fireEvent.update(screen.getByLabelText('发送 *'), 'false')
   await fireEvent.click(screen.getByRole('button', { name: '检查并确认' }))
 }
+afterEach(() => vi.restoreAllMocks())
+
 describe('automations', () => {
+  it('blocks policy-denied triggering across close/reopen until a post-failure read succeeds, ignoring an older read', async () => {
+    let rejected = false, refreshFails = false, hold = false, finish!: (r: Response) => void
+    const requests = setup(r => {
+      if (path(r).endsWith('/trigger')) { rejected = true; refreshFails = true; return Response.json({ error: { code: 'AUTOMATION_UNAVAILABLE', details: { reason: 'connection_unavailable' } } }, { status: 409 }) }
+      if (path(r) === '/api/v1/automations') { if (hold) return new Promise<Response>(resolve => { finish = resolve }); if (refreshFails) return fail(503, 'HTTP_ERROR') }
+    })
+    const { queryClient } = await openApp('/automations'); await openTrigger(); await fillTrigger()
+    hold = true; const late = queryClient.invalidateQueries({ queryKey: ['automations'] }); await vi.waitFor(() => expect(finish).toBeDefined())
+    await fireEvent.click(screen.getByRole('button', { name: '确认触发' })); await vi.waitFor(() => expect(rejected).toBe(true)); await screen.findByRole('alert')
+    expect(screen.queryByRole('button', { name: '检查并确认' })).not.toBeInTheDocument()
+    hold = false; finish(Response.json(automations)); await late
+    await fireEvent.click(screen.getByRole('button', { name: '关闭对话框' })); expect(screen.getByRole('button', { name: '触发：生成日报' })).toBeDisabled()
+    await fireEvent.click(screen.getByRole('button', { name: '刷新自动化' })); await screen.findAllByRole('alert'); expect(screen.getByRole('button', { name: '触发：生成日报' })).toBeDisabled()
+    refreshFails = false; await fireEvent.click(screen.getByRole('button', { name: '刷新自动化' })); await vi.waitFor(() => expect(screen.getByRole('button', { name: '触发：生成日报' })).toBeEnabled())
+    expect(requests.filter(r => path(r).endsWith('/trigger'))).toHaveLength(1)
+  })
+  it('latches an upstream credential rejection and does not offer same-key trigger replay', async () => {
+    setup(r => path(r).endsWith('/trigger') ? fail(502, 'INTEGRATION_UNAUTHORIZED') : undefined)
+    await openApp('/automations'); await openTrigger(); await fillTrigger(); await fireEvent.click(screen.getByRole('button', { name: '确认触发' })); expect(await screen.findByRole('alert')).toHaveTextContent('n8n 凭据被拒绝')
+    expect(screen.queryByRole('button', { name: '用原请求核对' })).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: '检查并确认' })).not.toBeInTheDocument()
+  })
+  it('shows usable run records inside unknown recovery and requires a fresh successful read before new-submission acknowledgement', async () => {
+    let finish!: (r: Response) => void, failed = false
+    setup(r => {
+      if (path(r).endsWith('/trigger')) return Response.json(run, { status: 202 })
+      if (path(r).endsWith('/runs')) return failed ? fail(503, 'HTTP_ERROR') : new Promise<Response>(resolve => { finish = resolve })
+    })
+    await openApp('/automations'); await openTrigger(); await fillTrigger(); await fireEvent.click(screen.getByRole('button', { name: '确认触发' })); const dialog = screen.getByRole('dialog'); await within(dialog).findByText('结果未知，正在确认')
+    await fireEvent.click(within(dialog).getByRole('button', { name: '核对运行记录' })); await vi.waitFor(() => expect(finish).toBeDefined())
+    expect(within(dialog).getByRole('button', { name: '已核对，开始新提交' })).toBeDisabled()
+    finish(Response.json({ items: [run], next_cursor: null })); expect(await within(dialog).findByRole('table', { name: '生成日报运行记录' })).toBeVisible()
+    await vi.waitFor(() => expect(within(dialog).getByRole('button', { name: '已核对，开始新提交' })).toBeEnabled())
+    failed = true; await fireEvent.click(within(dialog).getByRole('button', { name: '刷新运行记录' })); await within(dialog).findByRole('alert')
+    expect(within(dialog).getByRole('button', { name: '已核对，开始新提交' })).toBeDisabled()
+  })
+  it('blocks triggering if browser session recovery storage is unavailable', async () => {
+    const requests = setup(); await openApp('/automations')
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('blocked') })
+    await openTrigger(); expect(await screen.findByRole('alert')).toHaveTextContent('无法保存触发恢复标识')
+    expect(screen.getByRole('button', { name: '检查并确认' })).toBeDisabled(); expect(requests.some(r => path(r).endsWith('/trigger'))).toBe(false)
+    vi.restoreAllMocks()
+  })
   it.each([['not_configured', '尚未配置 n8n'], ['unavailable', 'n8n 暂不可用'], ['unauthorized', 'n8n 授权已失效'], ['stale', '自动化数据可能过期']])('shows connection %s explicitly and prevents triggering', async (status, text) => {
     setup(r => path(r) === '/api/v1/automations' ? Response.json({ ...automations, connection: { status, as_of: status === 'stale' ? '2026-10-31T01:00:00Z' : null } }) : undefined)
     await openApp('/automations'); expect(await screen.findByText(new RegExp(text))).toBeVisible()

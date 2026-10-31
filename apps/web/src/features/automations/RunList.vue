@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 import { useRuns, useAutomationAccess } from './queries'
 import { runLabels } from './validation'
 import { errorMessage } from '../../services/api'
 import { formatTime } from '../time'
-const props = defineProps<{ id: string; name: string }>(), auth = useAuthStore(), query = useRuns(auth.workspaceId!, props.id), access = useAutomationAccess()
+const props = defineProps<{ id: string; name: string; verify?: boolean }>(), auth = useAuthStore(), query = useRuns(auth.workspaceId!, props.id), access = useAutomationAccess()
+const emit = defineEmits<{ verified: [value: boolean] }>(), verified = ref(false)
+onMounted(async () => { if (props.verify) { await query.refetch(); verified.value = true } })
+watch([verified, query.isFetching, query.error, () => access.denied], () => emit('verified', verified.value && !query.isFetching.value && !query.error.value && !access.denied), { immediate: true, flush: 'sync' })
 const items = computed(() => access.denied ? [] : [...new Map(query.data.value?.pages.flatMap(p => p.items).map(r => [r.id, r]) ?? []).values()])
 </script>
 <template>
