@@ -2,10 +2,10 @@
 id: T-0047
 title: Sprint 6 AI（S6-01 ~ S6-03）：等人类恢复 AI 厂商选型后再拆分
 owner: human
-status: todo
+status: blocked
 priority: P2
-branch:
-paths: docs/decisions
+branch: claude/cool-wright-99qbbg
+paths: docs/decisions, docs/v2
 depends_on:
 created: 2026-10-31
 updated: 2026-10-31
@@ -30,3 +30,7 @@ S6-01 ~ S6-03（AI provider 抽象、对话与消息、只读工具与检索、�
 - 2026-10-31 06:04 UTC · claude · 创建任务（owner: human）
 - 2026-10-31 08:57 UTC · claude · S6-04 ~ S6-06 已验收（docs/acceptance/sprint-6.md）。Sprint 6 只剩本任务的 AI 部分（S6-01 ~ S6-03、DoD 前两条、A14），等人类恢复 AI 服务选型后由 claude 拆分实施
 - 2026-10-31 12:24 UTC · claude · 人类提供了 V2.0 设计资料包（docs/v2/），其中 AGENT_TASKS_V2 打算替换 S6-01 ~ S6-03；是否替换、应用内 AI 助手是否保留，见 docs/v2/REVIEW.md 第 2 节第 7 条和第 7 节
+- 2026-10-31 15:08 UTC · human · owner human → claude：人类在对话中指派：用 OpenClaw 接替原来设计的 AI 操作方案（S6-01 ~ S6-03），“OpenClaw 已经是很成熟的方案，可以直接用”；要求 claude 根据上传的 V2 升级方案重新优化
+- 2026-10-31 15:08 UTC · claude · 开始任务
+- 2026-10-31 15:17 UTC · claude · 按人类决定写了优化方案 docs/v2/OPENCLAW_PLAN.md：OpenClaw 负责模型、对话、手机与渠道，工作台提供 MCP 工具服务器、权限、审批与审计；按人类补充的要求，两台服务器之间走私网（推荐 Tailscale）。任务拆成 OC-0 ~ OC-5，替换 S6-01 ~ S6-03。方案和规范文件的修订方式等人类批准，见方案第 10 节
+- 2026-10-31 15:17 UTC · claude · 交接给 human（escalate）→ .collab/handoffs/2026-10-31-1517_T-0047_claude-to-human.md：OpenClaw 接替 AI 方案的优化方案已写好（docs/v2/OPENCLAW_PLAN.md），请批准方案并决定第 10 节的 6 项
