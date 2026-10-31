@@ -3,6 +3,8 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    agents,
+    ai,
     audit,
     auth,
     automations,
@@ -10,6 +12,7 @@ from app.api.v1 import (
     dashboards,
     developer,
     events,
+    im,
     integrations,
     knowledge,
     me,
@@ -44,5 +47,8 @@ for module in (
     notifications,
     events,
     automations,
+    agents,
+    im,
+    ai,
 ):
     router.include_router(module.router)
