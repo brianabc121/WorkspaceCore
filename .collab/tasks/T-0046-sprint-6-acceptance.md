@@ -2,9 +2,9 @@
 id: T-0046
 title: Sprint 6 验收（S6-04 ~ S6-06）：A15、备份恢复后的 Smoke Test、扫描与基准结果、验收报告
 owner: claude
-status: todo
+status: done
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: docs/acceptance,docs/TASKS.md,tests/e2e,.github/workflows/ci-infra.yml
 depends_on: T-0042, T-0043, T-0044, T-0045
 created: 2026-10-31
@@ -18,9 +18,9 @@ T-0042 ~ T-0045 合并后，按 Sprint 6 的 DoD 与 A15 做全栈验收，写�
 AI 部分（S6-01 ~ S6-03、A14 与 DoD 的前两条）等 T-0047 拆分后另行验收。
 
 ## 验收标准
-- [ ] DoD“能从备份恢复并通过 Smoke Tests”实测通过，A15 在 CI 里自动运行；Sprint 1 ~ 5 的验收继续通过
-- [ ] 安全扫描、性能基准、端到端 Smoke Test 的结果写进报告（通过 / 失败 / 未运行及原因）
-- [ ] `docs/acceptance/sprint-6.md` 逐条列出通过 / 失败 / 未运行及原因（规范第 18 节）；勾选 `docs/TASKS.md` 的 S6-04 ~ S6-06
+- [x] DoD“能从备份恢复并通过 Smoke Tests”实测通过，A15 在 CI 里自动运行；Sprint 1 ~ 5 的验收继续通过
+- [x] 安全扫描、性能基准、端到端 Smoke Test 的结果写进报告（通过 / 失败 / 未运行及原因）
+- [x] `docs/acceptance/sprint-6.md` 逐条列出通过 / 失败 / 未运行及原因（规范第 18 节）；勾选 `docs/TASKS.md` 的 S6-04 ~ S6-06
 
 ## 背景 / 约束 / 参考
 - 依赖：T-0042、T-0043、T-0044、T-0045
@@ -29,3 +29,5 @@ AI 部分（S6-01 ~ S6-03、A14 与 DoD 的前两条）等 T-0047 拆分后另�
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-31 06:04 UTC · claude · 创建任务（owner: claude）
+- 2026-10-31 08:55 UTC · claude · 开始任务
+- 2026-10-31 08:57 UTC · claude · status in_progress → done：验收报告 docs/acceptance/sprint-6.md：S6-04 ~ S6-06 通过（A15 与 DoD 第三条通过，CI 运行 41185591245 / 41185591256 全绿，Sprint 1 ~ 5 回归全部通过）；勾选 TASKS.md 的 S6-04 ~ S6-06。AI 部分（S6-01 ~ S6-03、DoD 前两条、A14）未开始，等人类恢复选型（T-0047）
