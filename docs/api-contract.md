@@ -1,6 +1,6 @@
 # API 契约
 
-> 状态：Sprint 1 端点已全部实现（T-0010、T-0011）；Sprint 2 端点已实现（T-0015）。完整规范见 `docs/DEVELOPMENT_SPEC.md` 第 6 节。
+> 状态：Sprint 1 ~ 4 端点已全部实现；Sprint 5 端点已在契约中声明，未实现的返回 501（T-0035 ~ T-0037）。完整规范见 `docs/DEVELOPMENT_SPEC.md` 第 6 节。
 > **机器可读的接口以 `services/api/openapi.json` 为准**（`make openapi` 由代码生成，CI 检查一致性），前端据此生成类型。
 > Sprint 1 的 Cookie、CSRF、工作空间上下文、错误码等约定见 `docs/decisions/2026-10-30-sprint-1-auth-contract.md`。
 > Sprint 2 的仪表盘、Widget Registry、布局、乐观并发与首页聚合约定见 `docs/decisions/2026-10-30-sprint-2-dashboard-contract.md`。
@@ -129,3 +129,28 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
   - 组件类型增加 `calendar_agenda`、`recent_docs`、`github_activity`。
 - 修改集成时，`api_token` 的前缀必须与 provider 一致；`repositories` 只用于 GitHub。不适用时返回 422（已实现）。
 - 新增错误码：`409 BOOKMARK_EXISTS`（`details.existing_id`）。收藏链接不合规时返回 `422 VALIDATION_FAILED`，`details.reason` 见契约第 4.2 节。
+
+## Sprint 5 端点
+
+约定见 `docs/decisions/2026-10-31-sprint-5-operations-automations-contract.md`。Prometheus、Grafana、n8n 的核验结果见
+`docs/decisions/2026-10-31-prometheus-grafana-n8n-verification.md`。除 SSE 外都需要 `X-Workspace-Id`。
+
+| 方法 | 路径 | 说明 | 状态 |
+|---|---|---|---|
+| GET | `/api/v1/operations/services` | 核心服务、监控组件、集成与 n8n 的状态（没有部署的为 `not_configured`） | 契约（T-0035） |
+| GET | `/api/v1/operations/metrics?range=&views=` | 预设指标视图，聚合好的数据点；不接受 PromQL；带 `sync` 与 `grafana_url` | 契约（T-0035） |
+| GET / PATCH | `/api/v1/notifications` | 我的通知（游标分页、`unread_count`）/ 标为已读（`ids` 或 `all: true`） | 契约（T-0036） |
+| GET | `/api/v1/events/stream?workspace_id=` | SSE：只发 `event: invalidate` 失效提示；`Last-Event-ID` 续传，无法续传时 `reset: true` | 契约（T-0036） |
+| GET / PUT | `/api/v1/automations/connection` | n8n 连接（admin；API Key 与共享密钥只写不读） | 契约（T-0037） |
+| POST | `/api/v1/automations/connection/test` | 测试 n8n 连接（不触发工作流） | 契约（T-0037） |
+| GET / POST | `/api/v1/automations` | 白名单工作流与最近一次执行 / 登记（admin） | 契约（T-0037） |
+| PATCH / DELETE | `/api/v1/automations/{automation_id}` | 修改 / 移出白名单（admin，乐观并发；执行记录保留） | 契约（T-0037） |
+| POST | `/api/v1/automations/{automation_id}/trigger` | 触发（member，策略校验，必须带 `Idempotency-Key`；结果未知时为 `unknown`，不自动重发） | 契约（T-0037） |
+| GET | `/api/v1/automations/{automation_id}/runs` | 执行记录（只有状态与错误摘要） | 契约（T-0037） |
+
+- 已有接口只增不改：
+  - 首页 `modules` 增加 `operations`、`automations`；`summary.unread_notifications` 从 T-0036 起返回实际值；
+  - 组件类型增加 `service_health`、`api_latency`、`notifications`；
+  - `IntegrationCheck.name`、集成的 `provider` 不加值：n8n 连接单独放在 `/automations/connection`。
+- SSE 的事件类型在前端用 `components["schemas"]["InvalidateEvent"]`；开始推送之前的错误是普通 JSON。
+- 新增错误码：`409 AUTOMATION_UNAVAILABLE`（`details.reason`）、`409 AUTOMATION_EXISTS`（`details.existing_id`）。

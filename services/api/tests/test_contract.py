@@ -1,6 +1,7 @@
 """接口契约：Sprint 1（docs/decisions/2026-10-30-sprint-1-auth-contract.md）、
 Sprint 2（…-sprint-2-dashboard-contract.md）、Sprint 3（…-sprint-3-tasks-contract.md）、
-Sprint 4（…-sprint-4-knowledge-search-contract.md）。"""
+Sprint 4（…-sprint-4-knowledge-search-contract.md）、
+Sprint 5（…-sprint-5-operations-automations-contract.md）。"""
 
 import json
 import uuid
@@ -89,6 +90,23 @@ SPRINT_4_ENDPOINTS = {
     ("get", "/api/v1/developer/runs"),
     ("get", "/api/v1/search"),
 }
+
+SPRINT_5_ENDPOINTS = {
+    ("get", "/api/v1/operations/services"),
+    ("get", "/api/v1/operations/metrics"),
+    ("get", "/api/v1/notifications"),
+    ("patch", "/api/v1/notifications"),
+    ("get", "/api/v1/events/stream"),
+    ("get", "/api/v1/automations/connection"),
+    ("put", "/api/v1/automations/connection"),
+    ("post", "/api/v1/automations/connection/test"),
+    ("get", "/api/v1/automations"),
+    ("post", "/api/v1/automations"),
+    ("patch", "/api/v1/automations/{automation_id}"),
+    ("delete", "/api/v1/automations/{automation_id}"),
+    ("post", "/api/v1/automations/{automation_id}/trigger"),
+    ("get", "/api/v1/automations/{automation_id}/runs"),
+}
 WORKSPACE = {"X-Workspace-Id": str(uuid.uuid4())}
 
 
@@ -111,7 +129,11 @@ def test_all_sprint_endpoints_are_declared() -> None:
     paths = json.loads(render())["paths"]
     declared = {(method, path) for path, ops in paths.items() for method in ops}
     assert declared >= (
-        SPRINT_1_ENDPOINTS | SPRINT_2_ENDPOINTS | SPRINT_3_ENDPOINTS | SPRINT_4_ENDPOINTS
+        SPRINT_1_ENDPOINTS
+        | SPRINT_2_ENDPOINTS
+        | SPRINT_3_ENDPOINTS
+        | SPRINT_4_ENDPOINTS
+        | SPRINT_5_ENDPOINTS
     )
 
 
@@ -139,6 +161,9 @@ def test_widget_types_are_a_discriminated_union() -> None:
         "calendar_agenda",
         "recent_docs",
         "github_activity",
+        "service_health",
+        "api_latency",
+        "notifications",
     }
 
 
@@ -538,3 +563,212 @@ async def test_search_and_developer_query_rules(stub_client: httpx.AsyncClient) 
     for path in ["repos", "issues", "pulls", "runs"]:
         response = await stub_client.get(f"/api/v1/developer/{path}", headers=WORKSPACE)
         assert response.status_code == 501, path
+
+
+# ---------------------------------------------------------------- Sprint 5
+
+
+def test_sprint_5_keeps_existing_schemas_unchanged() -> None:
+    """契约第 1 节：前端按枚举索引的类型不加值；新模块与新组件类型不影响已有类型。"""
+    schemas = _schemas()
+    check = schemas["IntegrationCheck"]["properties"]["name"]  # type: ignore[index]
+    assert set(check["enum"]) == {"reachable", "version", "token", "tasks_read", "webhooks"}
+    provider = schemas["IntegrationOut"]["properties"]["provider"]  # type: ignore[index]
+    assert set(provider["enum"]) == {"vikunja", "github"}
+    modules = schemas["DashboardOverview"]["properties"]["modules"]  # type: ignore[index]
+    assert modules["additionalProperties"]["$ref"].endswith("/ModuleStatus")
+
+
+def test_event_stream_is_documented_as_server_sent_events() -> None:
+    op = _operation("get", "/api/v1/events/stream")
+    params = op["parameters"]
+    assert isinstance(params, list)
+    workspace = next(p for p in params if p["name"] == "workspace_id")
+    assert workspace["in"] == "query" and workspace["required"]
+    assert "X-Workspace-Id" not in {p["name"] for p in params}  # EventSource 不能带请求头
+    responses = op["responses"]
+    assert isinstance(responses, dict)
+    stream = responses["200"]["content"]["text/event-stream"]["itemSchema"]
+    data = stream["properties"]["data"]
+    assert data["contentSchema"]["$ref"].endswith("/InvalidateEvent")
+    for code in ("401", "404", "422"):  # 推送开始之前的错误是普通 JSON
+        assert list(responses[code]["content"]) == ["application/json"], code
+    event = _schemas()["InvalidateEvent"]["properties"]
+    assert set(event) == {"workspace_id", "topics", "reset", "at"}  # 只有失效提示，没有数据
+
+
+def test_automation_secrets_are_write_only() -> None:
+    schemas = _schemas()
+    upsert = schemas["AutomationConnectionUpsert"]["properties"]
+    for field in ("api_key", "trigger_secret"):
+        variants = upsert[field]["anyOf"]  # type: ignore[index]
+        assert variants[0]["writeOnly"] is True, field
+    out = schemas["AutomationConnectionOut"]["properties"]
+    assert not {"api_key", "trigger_secret"} & set(out)
+    assert {"api_key_set", "trigger_secret_set", "tested_version"} <= set(out)
+    run = schemas["AutomationRunOut"]["properties"]
+    assert not {"payload", "result", "data", "params"} & set(run)  # 只存错误摘要（规范 7.5）
+
+
+def test_metrics_do_not_accept_queries() -> None:
+    """浏览器只能选预设视图与时间范围，不能提交 PromQL（核验 ADR 第 3 节）。"""
+    params = _operation("get", "/api/v1/operations/metrics")["parameters"]
+    assert isinstance(params, list)
+    assert {p["name"] for p in params} == {"range", "views", "X-Workspace-Id"}
+
+
+def test_automation_trigger_requires_an_idempotency_key_header() -> None:
+    params = _operation("post", "/api/v1/automations/{automation_id}/trigger")["parameters"]
+    assert isinstance(params, list)
+    header = next(p for p in params if p["name"] == "Idempotency-Key")
+    assert header["in"] == "header" and header["required"]
+    assert header["schema"]["format"] == "uuid"
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_operations_query_rules(stub_client: httpx.AsyncClient) -> None:
+    for params in [
+        {"range": "30d"},
+        {"views": "cpu_usage"},
+        {"query": "up"},
+        {"views": 'up{job="api"}'},
+    ]:
+        response = await stub_client.get(
+            "/api/v1/operations/metrics", params=params, headers=WORKSPACE
+        )
+        expected = 501 if "query" in params else 422  # 不认识的查询参数被忽略，不会执行
+        assert response.status_code == expected, params
+    ok = await stub_client.get(
+        "/api/v1/operations/metrics",
+        params={"range": "7d", "views": ["latency_p95", "error_rate"]},
+        headers=WORKSPACE,
+    )
+    assert ok.status_code == 501
+    services = await stub_client.get("/api/v1/operations/services", headers=WORKSPACE)
+    assert services.status_code == 501
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_notification_rules(stub_client: httpx.AsyncClient) -> None:
+    some = str(uuid.uuid4())
+    cases: dict[str, dict[str, object]] = {
+        "空请求": {},
+        "空 ids": {"ids": []},
+        "all 为 false": {"all": False},
+        "二者都给": {"ids": [some], "all": True},
+        "ids 太多": {"ids": [str(uuid.uuid4()) for _ in range(101)]},
+        "ids 不是 UUID": {"ids": ["1"]},
+        "多余字段": {"all": True, "read": True},
+    }
+    for name, body in cases.items():
+        response = await stub_client.patch("/api/v1/notifications", json=body, headers=WORKSPACE)
+        assert response.status_code == 422, name
+    for body in [{"all": True}, {"ids": [some]}]:
+        response = await stub_client.patch("/api/v1/notifications", json=body, headers=WORKSPACE)
+        assert response.status_code == 501, body
+    too_many = await stub_client.get(
+        "/api/v1/notifications", params={"limit": 101}, headers=WORKSPACE
+    )
+    assert too_many.status_code == 422
+    listed = await stub_client.get(
+        "/api/v1/notifications", params={"unread_only": True}, headers=WORKSPACE
+    )
+    assert listed.status_code == 501
+
+
+async def test_event_stream_rules(stub_client: httpx.AsyncClient) -> None:
+    missing = await stub_client.get("/api/v1/events/stream", headers=WORKSPACE)
+    assert missing.status_code == 422  # 工作空间用查询参数，不看请求头
+    assert missing.headers["content-type"].startswith("application/json")
+    invalid = await stub_client.get("/api/v1/events/stream", params={"workspace_id": "1"})
+    assert invalid.status_code == 422
+    unfinished = await stub_client.get(
+        "/api/v1/events/stream",
+        params={"workspace_id": str(uuid.uuid4())},
+        headers={"Last-Event-ID": "42"},
+    )
+    assert unfinished.status_code == 501  # 成员校验在推送开始之前（T-0036）
+    assert unfinished.json()["error"]["code"] == "NOT_IMPLEMENTED"
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_automation_connection_rules_do_not_echo_secrets(
+    stub_client: httpx.AsyncClient,
+) -> None:
+    short_key = "n8n_api_short"
+    path = "/api/v1/automations/connection"
+    key = "n8n_api_" + "k" * 24
+    secret = "trigger-secret-0123456789"  # noqa: S105  测试用的假值
+    base = {"base_url": "http://n8n:5678", "api_key": key, "trigger_secret": secret}
+    wrong = await stub_client.put(path, json={**base, "api_key": short_key}, headers=WORKSPACE)
+    assert wrong.status_code == 422
+    assert short_key not in wrong.text
+    cases: dict[str, dict[str, object]] = {
+        "什么都没改": {},
+        "只有版本": {"version": 1},
+        "地址带凭据": {**base, "base_url": "http://admin:pw@n8n:5678"},
+        "地址带查询": {**base, "base_url": "http://n8n:5678/?a=1"},
+        "密钥太短": {**base, "trigger_secret": "short"},
+        "多余字段": {**base, "owner_password": "x"},
+    }
+    for name, body in cases.items():
+        response = await stub_client.put(path, json=body, headers=WORKSPACE)
+        assert response.status_code == 422, name
+        assert "pw@" not in response.text
+    ok = await stub_client.put(path, json=base, headers=WORKSPACE)
+    assert ok.status_code == 501
+    tested = await stub_client.post(f"{path}/test", headers=WORKSPACE)
+    assert tested.status_code == 501
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_automation_payload_rules(stub_client: httpx.AsyncClient) -> None:
+    base: dict[str, object] = {
+        "name": "发送日报",
+        "workflow_id": "aB3dE5fG7hJ9kL1m",
+        "webhook_path": "daily-report",
+        "params": [{"name": "recipient", "label": "收件人", "type": "string", "sensitive": True}],
+    }
+    param = {"name": "x", "label": "X", "type": "string"}
+    cases: dict[str, dict[str, object]] = {
+        "完整网址": {**base, "webhook_path": "https://n8n.example.com/webhook/daily"},
+        "路径穿越": {**base, "webhook_path": "../rest/workflows"},
+        "工作流 ID": {**base, "workflow_id": "a/b"},
+        "参数名": {**base, "params": [{**param, "name": "Bad-Name"}]},
+        "参数类型": {**base, "params": [{**param, "type": "object"}]},
+        "参数太多": {**base, "params": [{**param, "name": f"p{i}"} for i in range(21)]},
+        "多余字段": {**base, "headers": {"X-Any": "1"}},
+    }
+    for name, body in cases.items():
+        response = await stub_client.post("/api/v1/automations", json=body, headers=WORKSPACE)
+        assert response.status_code == 422, name
+    created = await stub_client.post("/api/v1/automations", json=base, headers=WORKSPACE)
+    assert created.status_code == 501
+    path = f"/api/v1/automations/{uuid.uuid4()}"
+    nothing = await stub_client.patch(path, json={"version": 1}, headers=WORKSPACE)
+    assert nothing.status_code == 422
+    renamed = await stub_client.patch(path, json={"version": 1, "name": "周报"}, headers=WORKSPACE)
+    assert renamed.status_code == 501
+    no_version = await stub_client.delete(path, headers=WORKSPACE)
+    assert no_version.status_code == 422
+    for listing in ["/api/v1/automations", f"{path}/runs"]:
+        response = await stub_client.get(listing, headers=WORKSPACE)
+        assert response.status_code == 501, listing
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_automation_trigger_rules(stub_client: httpx.AsyncClient) -> None:
+    path = f"/api/v1/automations/{uuid.uuid4()}/trigger"
+    body = {"params": {"recipient": "me@example.com"}}
+    missing = await stub_client.post(path, json=body, headers=WORKSPACE)
+    assert missing.status_code == 422
+    assert ["header", "Idempotency-Key"] in [
+        e["loc"] for e in missing.json()["error"]["details"]["errors"]
+    ]
+    headers = {**WORKSPACE, "Idempotency-Key": str(uuid.uuid4())}
+    extra = await stub_client.post(path, json={**body, "workflow_id": "other"}, headers=headers)
+    assert extra.status_code == 422  # 只能触发白名单里登记的工作流
+    accepted = await stub_client.post(path, json=body, headers=headers)
+    assert accepted.status_code == 501  # 参数按声明校验在 T-0037
+    empty = await stub_client.post(path, json={}, headers=headers)
+    assert empty.status_code == 501
