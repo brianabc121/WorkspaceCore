@@ -7,6 +7,8 @@
   python3 tests/e2e/seed.py member <工作空间ID> <用户ID> <角色>
   python3 tests/e2e/seed.py corrupt <仪表盘ID>
       输出组件 ID
+  python3 tests/e2e/seed.py notify <工作空间ID> <用户ID> <标识> <标题>
+      给用户写一条通知，并像应用自身一样发布数据失效事件（SSE）
 新用户自带工作空间“<显示名> 的空间”和默认首页（与首次安装一致）。
 只依赖 Python 标准库与 docker compose；Compose 全栈需已启动并迁移。
 """
@@ -21,16 +23,20 @@ SEED_SCRIPT = r"""
 import asyncio, os, sys, uuid
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.config import get_settings
-from app.core.resources import create_engine
-from app.domain import dashboard_defaults
+from app.core.resources import create_engine, create_redis
+from app.domain import dashboard_defaults, events, notifications
 from app.domain.security import hash_password
 from app.models import Widget, WorkspaceMember
 from app.repositories import users, workspaces
 
 async def main():
-    engine = create_engine(get_settings())
+    settings = get_settings()
+    engine = create_engine(settings)
+    redis = create_redis(settings)
+    bus = events.EventBus(redis)
     try:
-        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        sessions = async_sessionmaker(engine, expire_on_commit=False, info=bus.session_info())
+        async with sessions() as db:
             command = sys.argv[1]
             if command == "user":
                 user = await users.create(
@@ -46,6 +52,13 @@ async def main():
                     db, workspace_id=workspace.id, owner_id=user.id
                 )
                 print(user.id, workspace.id, dashboard.id)
+            elif command == "notify":
+                workspace_id, user_id, key, title = sys.argv[2:6]
+                await notifications.notify_user(
+                    db, uuid.UUID(workspace_id), uuid.UUID(user_id), type_="e2e_notice",
+                    severity="info", title=title, body="<b>按纯文本显示</b>",
+                    link="/operations", key=key,
+                )
             elif command == "member":
                 workspace_id, user_id, role = sys.argv[2:5]
                 db.add(WorkspaceMember(
@@ -63,8 +76,10 @@ async def main():
                 await db.flush()
                 print(widget.id)
             await db.commit()
+        await bus.drain()
     finally:
         await engine.dispose()
+        await redis.aclose()
 
 asyncio.run(main())
 """
@@ -89,6 +104,10 @@ def add_corrupt_widget(dashboard_id: str) -> str:
     return _run("corrupt", dashboard_id)[-1]
 
 
+def notify(workspace_id: str, user_id: str, key: str, title: str) -> None:
+    _run("notify", workspace_id, user_id, key, title)
+
+
 def main(argv: list[str]) -> int:
     match argv:
         case ["user", email, name]:
@@ -100,6 +119,8 @@ def main(argv: list[str]) -> int:
             add_member(workspace_id, user_id, role)
         case ["corrupt", dashboard_id]:
             print(add_corrupt_widget(dashboard_id))
+        case ["notify", workspace_id, user_id, key, title]:
+            notify(workspace_id, user_id, key, title)
         case _:
             sys.exit(__doc__)
     return 0
