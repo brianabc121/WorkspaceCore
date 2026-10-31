@@ -25,6 +25,8 @@ const projectItems = computed(() => projects.data.value?.pages.flatMap((p) => p.
 const tasks = computed(() => isAccessError(query.error.value) ? [] : query.data.value?.pages.flatMap((p) => p.items) ?? [])
 const writable = computed(() => !!auth.currentWorkspace && auth.currentWorkspace.role !== 'viewer' && !isAccessError(query.error.value))
 const board = ref(false), opened = ref<string | null>(null), formError = ref(''), reloadError = ref('')
+// 编辑器只在打开另一个任务或用户点“重新加载”时重建；后台重新拉取不重建，避免丢掉正在输入的内容（T-0049）
+const editorGeneration = ref(0)
 const detail = useQuery({ queryKey: computed(() => ['task', userId, scope, opened.value]), enabled: computed(() => !!opened.value && opened.value !== 'new'), queryFn: async ({ signal, queryKey }) => dataOf(await auth.api.GET('/api/v1/tasks/{task_id}', { params: { header, path: { task_id: queryKey[3]! } }, signal })) })
 function apply() {
   const value = form.value
@@ -44,6 +46,7 @@ async function reloadOperation() {
     try {
       const fresh = await auth.api.GET('/api/v1/tasks/{task_id}', { params: { header, path: { task_id: cmd.id } } })
       cache.setQueryData(['task', userId, scope, cmd.id], dataOf(fresh))
+      editorGeneration.value += 1
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 404) {
         opened.value = null; operation.clearResolved(); reloadError.value = '任务已不存在或无权访问，请从列表选择其他任务。'
@@ -80,7 +83,7 @@ function submit(command: TaskCommand) { void finish(() => operation.submit(comma
     <DataState :loading="projects.isPending.value" :error="projects.error.value" :empty="!projectItems.length" empty-text="尚无可选项目，请检查同步状态。" @retry="projects.refetch()" />
     <button v-if="projects.hasNextPage.value" class="secondary-button" :disabled="projects.isFetching.value" @click="projects.fetchNextPage()">加载更多项目</button>
     <DataState v-if="opened !== 'new'" :loading="detail.isPending.value" :error="detail.error.value" :empty="false" empty-text="" @retry="detail.refetch()" />
-    <TaskEditor v-if="opened === 'new' || (detail.data.value && !detail.error.value)" :key="opened + (detail.data.value?.version ?? '')" :task="opened === 'new' ? undefined : detail.data.value" :projects="projectItems" :writable="writable" :locked="operation.locked || (opened !== 'new' && detail.isFetching.value)" @submit="submit" />
+    <TaskEditor v-if="opened === 'new' || (detail.data.value && !detail.error.value)" :key="`${opened}:${editorGeneration}`" :task="opened === 'new' ? undefined : detail.data.value" :projects="projectItems" :writable="writable" :locked="operation.locked" @submit="submit" />
     <OperationPanel :writable="writable" v-on="operationEvents" />
     <p v-if="reloadError" role="alert">{{ reloadError }}</p>
   </ModalPanel>

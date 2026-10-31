@@ -50,7 +50,7 @@ function closeEditor() { if (!model.pending) { editor.value = null; if (!model.b
       <div class="form-actions">
         <button class="secondary-button" :disabled="model.pending || model.fetching" @click="model.reload">刷新首页</button>
         <template v-if="model.dashboard && !model.loading && !model.denied">
-          <button v-if="model.canEdit && !model.editing" class="primary-button" :disabled="model.pending || model.blocked || !!model.queryError" @click="model.beginEdit">编辑布局</button>
+          <button v-if="model.canEdit && !model.editing" class="primary-button" :disabled="model.pending || model.fetching || model.blocked || !!model.queryError" @click="model.beginEdit">编辑布局</button>
           <template v-if="model.editing"><button class="primary-button" :disabled="model.pending || model.blocked || !model.dirty" @click="model.saveLayout">{{ model.pending ? '正在保存…' : '保存布局' }}</button><button class="secondary-button" :disabled="model.pending" @click="model.editing = false; model.dirty = false">取消编辑</button></template>
           <button v-if="model.canEdit && !model.editing" class="secondary-button" :disabled="model.pending || model.blocked || model.widgets.length >= 50" @click="model.failure = null; editor = 'new'">添加组件</button>
           <button class="secondary-button" :disabled="model.pending || model.dirty" @click="openTools('export')">导出 JSON</button>

@@ -73,6 +73,25 @@ describe('仪表盘首页', () => {
     await vi.waitFor(() => expect(screen.getByRole('button', { name: '刷新首页' })).toBeEnabled())
     expect(screen.getByText(/任务模块暂不可用/)).toBeVisible()
   })
+  it('disables layout editing while the overview refreshes, then lets the user edit', async () => {
+    // T-0049：后台重新拉取时 beginEdit 会直接返回；按钮不能看起来可用却点了没反应
+    let calls = 0
+    let finish: ((r: Response) => void) | undefined
+    mockApi((r) => {
+      if (pathOf(r) !== '/api/v1/dashboard/overview') return undefined
+      calls += 1
+      return calls === 1 ? Response.json(overview) : new Promise<Response>((resolve) => { finish = resolve })
+    })
+    await openApp()
+    const edit = await screen.findByRole('button', { name: '编辑布局' })
+    await fireEvent.click(screen.getByRole('button', { name: '刷新首页' }))
+    await vi.waitFor(() => expect(finish).toBeDefined())
+    expect(edit).toBeDisabled()
+    finish!(Response.json(overview))
+    await vi.waitFor(() => expect(edit).toBeEnabled())
+    await fireEvent.click(edit)
+    expect(await screen.findByRole('button', { name: '保存布局' })).toBeVisible()
+  })
   it('shows a loading state until the first overview arrives', async () => {
     let finish: ((r: Response) => void) | undefined
     mockApi((r) => pathOf(r) === '/api/v1/dashboard/overview' ? new Promise<Response>((resolve) => { finish = resolve }) : undefined)

@@ -2,7 +2,7 @@
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '../../services/forms'
 import { z } from 'zod'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import type { Schema } from '../../services/api'
 import type { TaskCommand } from '../../stores/taskOperations'
 import { priorities, toLocalInput } from './shared'
@@ -12,14 +12,26 @@ import RelatedDocuments from '../knowledge/RelatedDocuments.vue'
 const props = defineProps<{ task?: Schema['TaskOut']; projects: Schema['ProjectOut'][]; writable: boolean; locked: boolean }>()
 const emit = defineEmits<{ submit: [command: TaskCommand] }>()
 const schema = z.object({ title: z.string().trim().min(1, '请输入任务标题').max(250), description: z.string().max(10000), project_id: props.task ? z.string().uuid().or(z.literal('')) : z.string({ error: '请选择项目' }).uuid('请选择项目'), priority: z.number().int().min(0).max(5), due: z.string().refine((v) => !v || !Number.isNaN(new Date(v).getTime()), '截止时间无效'), done: z.boolean() })
-const { handleSubmit, defineField, isSubmitting } = useForm({ validationSchema: toTypedSchema(schema), initialValues: { title: props.task?.title ?? '', description: props.task?.description ?? '', project_id: props.task?.project_id ?? '', priority: props.task?.priority ?? 0, due: toLocalInput(props.task?.due_at ?? null), done: props.task?.done ?? false } })
+const valuesOf = (task?: Schema['TaskOut']) => ({ title: task?.title ?? '', description: task?.description ?? '', project_id: task?.project_id ?? '', priority: task?.priority ?? 0, due: toLocalInput(task?.due_at ?? null), done: task?.done ?? false })
+const { handleSubmit, defineField, isSubmitting, values, resetForm } = useForm({ validationSchema: toTypedSchema(schema), initialValues: valuesOf(props.task) })
+// 编辑的基准是打开时的任务（T-0049）：后台重新拉取（SSE 失效、对账）拿到新版本时，
+// 用户还没改就换成新版本；已经改了就保留输入，保存时仍按打开时的版本提交，真有冲突由后端返回 409
+const base = ref(props.task)
+watch(() => props.task, (task) => {
+  const old = base.value
+  if (!task || !old || task.version === old.version) return
+  const start = valuesOf(old)
+  if ((Object.keys(start) as (keyof typeof start)[]).every((key) => values[key] === start[key])) { base.value = task; resetForm({ values: valuesOf(task) }) }
+  else message.value = '这个任务刚在别处更新过。你的修改还在；保存时如果有冲突，会提示重新加载。'
+})
 const [description] = defineField('description'), [projectId] = defineField('project_id'), [priority] = defineField('priority'), [due] = defineField('due'), [done] = defineField('done')
 const message = ref('')
 const submit = handleSubmit((value) => {
-  if (!props.writable || props.locked) return
+  if (!props.writable) return
+  if (props.locked) { message.value = '有任务操作正在进行，请等它结束后再保存。'; return }
   const due_at = value.due ? new Date(value.due).toISOString() : null
   if (!props.task) { emit('submit', { method: 'POST', body: { title: value.title, description: value.description, project_id: value.project_id, priority: value.priority, due_at } }); return }
-  const old = props.task
+  const old = base.value ?? props.task
   const body: Schema['TaskUpdate'] = { version: old.version }
   if (value.title !== old.title) body.title = value.title
   if (value.description !== old.description) body.description = value.description
