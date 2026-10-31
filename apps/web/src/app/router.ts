@@ -18,6 +18,7 @@ import ProjectsPage from '../pages/ProjectsPage.vue'
 import IntegrationsPage from '../pages/IntegrationsPage.vue'
 import KnowledgePage from '../pages/KnowledgePage.vue'
 import CalendarPage from '../pages/CalendarPage.vue'
+import DeveloperPage from '../pages/DeveloperPage.vue'
 
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHistory(), queryClient = new QueryClient()) {
   const auth = useAuthStore(pinia)
@@ -31,7 +32,7 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
       { path: '/settings/audit', component: AuditPage, meta: { title: '审计日志', admin: true } },
       ...navigation.map((item) => ({
         path: item.path,
-        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/settings': SettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
+        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/settings': SettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
         meta: { title: item.title, description: item.description, admin: item.path === '/settings/integrations' },
       })),
       { path: '/:pathMatch(.*)*', component: NotFoundPage, meta: { title: '页面未找到' } },

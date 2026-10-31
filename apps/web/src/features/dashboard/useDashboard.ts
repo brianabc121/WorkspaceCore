@@ -5,7 +5,7 @@ import { useDashboardSearch } from '../../stores/dashboardSearch'
 import { ApiError, dataOf, errorMessage, isAccessError, type Schema } from '../../services/api'
 import { dashboardFileSchema, layoutSchema, type WidgetValue } from '../../widgets/registry'
 
-type Update = Schema['NoteWidgetUpdate'] | Schema['QuickLinksWidgetUpdate'] | Schema['TodoSummaryWidgetUpdate'] | Schema['TodayTasksWidgetUpdate'] | Schema['RecentDocsWidgetUpdate'] | Schema['CalendarAgendaWidgetUpdate']
+type Update = Schema['NoteWidgetUpdate'] | Schema['QuickLinksWidgetUpdate'] | Schema['TodoSummaryWidgetUpdate'] | Schema['TodayTasksWidgetUpdate'] | Schema['RecentDocsWidgetUpdate'] | Schema['CalendarAgendaWidgetUpdate'] | Schema['GitHubActivityWidgetUpdate']
 export function useDashboard() {
   const auth = useAuthStore()
   const search = useDashboardSearch()
@@ -33,7 +33,7 @@ export function useDashboard() {
   const canEdit = computed(() => !!auth.currentWorkspace && auth.currentWorkspace.role !== 'viewer' && !denied.value && !queryError.value)
   const error = computed(() => failure.value ? errorMessage(failure.value) : '')
   const shownWidgets = computed(() => denied.value ? [] : editing.value ? draft.value : widgets.value)
-  watch(widgets, (value) => { search.widgets = denied.value ? [] : value }, { immediate: true })
+  watch(widgets, (value) => { search.widgets = denied.value || search.denied ? [] : value }, { immediate: true })
   watch(denied, (value) => { if (value) { editing.value = false; search.widgets = [] } })
   async function refresh(query: { refetch: () => Promise<{ error: unknown }> }) {
     const result = await query.refetch()
@@ -53,7 +53,7 @@ export function useDashboard() {
         selected.value = list.items.find((item) => item.id === selected.value!.id) ?? null
         if (selected.value) await refresh(widgetsQuery)
       }
-      await cache.invalidateQueries({ predicate: (query) => ['knowledge', 'calendar'].includes(String(query.queryKey[0])) && query.queryKey[1] === user && query.queryKey[2] === scope && query.queryKey[3] === 'widget' })
+      await cache.invalidateQueries({ predicate: (query) => ['knowledge', 'calendar', 'developer'].includes(String(query.queryKey[0])) && query.queryKey[1] === user && query.queryKey[2] === scope && query.queryKey[3] === 'widget' })
       editing.value = false; dirty.value = false; failure.value = null
     } catch (error) {
       failure.value = isAccessError(error) ? error : keepBlocked ? previousFailure : error

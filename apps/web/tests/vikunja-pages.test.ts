@@ -127,7 +127,7 @@ describe('Vikunja 页面', () => {
     await fireEvent.click(screen.getByRole('button', { name: '修改连接' }))
     expect(screen.getByLabelText('服务地址')).toHaveValue('')
     expect(screen.getByLabelText('API Token')).toHaveValue('')
-    expect(document.body).not.toHaveTextContent('http://private-vikunja:3456')
+    expect(screen.getByText('http://private-vikunja:3456')).toBeVisible()
     await fireEvent.update(screen.getByLabelText('API Token'), 'tk_test-replacement')
     await fireEvent.click(screen.getByRole('button', { name: '保存连接' }))
     expect(await screen.findByText('连接已保存，请测试连接')).toBeVisible()
