@@ -122,6 +122,10 @@ services:
       # 周期对账的间隔（分钟，1–30）
       RECONCILE_INTERVAL_MINUTES: ${RECONCILE_INTERVAL_MINUTES:-5}
       GITHUB_API_URL: ${WORKSPACE_GITHUB_API_URL:-https://api.github.com}
+      # 服务健康告警（每分钟检查 api、Prometheus、Grafana，变为不可用或恢复时通知管理员）
+      API_INTERNAL_URL: http://api:8000
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-}
+      GRAFANA_URL: ${GRAFANA_URL:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,8 +138,8 @@ services:
       retries: 5
       start_period: 15s
     # Worker 经 integrations 访问同机部署的第三方服务，经 egress 访问外部托管的服务（GitHub 周期同步）；
-    # 出站地址仍由 Connector 的 SSRF 检查限制
-    networks: [backend, integrations, egress]
+    # 出站地址仍由 Connector 的 SSRF 检查限制；monitoring 用于健康告警检查 Prometheus / Grafana
+    networks: [backend, integrations, egress, monitoring]
     logging: *logging
 
   web:
@@ -252,7 +256,7 @@ networks:
     internal: true
   # 只给 worker 出网用（api 经 frontend 出网）；不接任何别的服务
   egress: {}
-  # 可选监控：api、prometheus、grafana；internal，不提供出网
+  # 可选监控：api、worker、prometheus、grafana；internal，不提供出网
   monitoring:
     internal: true
   monitoring-public: {}

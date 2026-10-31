@@ -139,8 +139,8 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 |---|---|---|---|
 | GET | `/api/v1/operations/services` | 核心服务、监控组件、集成与 n8n 的状态（没有部署的为 `not_configured`） | 已实现（T-0035） |
 | GET | `/api/v1/operations/metrics?range=&views=` | 预设指标视图，聚合好的数据点；不接受 PromQL；带 `sync` 与 `grafana_url` | 已实现（T-0035） |
-| GET / PATCH | `/api/v1/notifications` | 我的通知（游标分页、`unread_count`）/ 标为已读（`ids` 或 `all: true`） | 契约（T-0036） |
-| GET | `/api/v1/events/stream?workspace_id=` | SSE：只发 `event: invalidate` 失效提示；`Last-Event-ID` 续传，无法续传时 `reset: true` | 契约（T-0036） |
+| GET / PATCH | `/api/v1/notifications` | 我的通知（游标分页、`unread_count`）/ 标为已读（`ids` 或 `all: true`） | 已实现（T-0036） |
+| GET | `/api/v1/events/stream?workspace_id=` | SSE：只发 `event: invalidate` 失效提示；`Last-Event-ID` 续传，无法续传时 `reset: true`；连接太多时 `429` | 已实现（T-0036） |
 | GET / PUT | `/api/v1/automations/connection` | n8n 连接（admin；API Key 与共享密钥只写不读） | 契约（T-0037） |
 | POST | `/api/v1/automations/connection/test` | 测试 n8n 连接（不触发工作流） | 契约（T-0037） |
 | GET / POST | `/api/v1/automations` | 白名单工作流与最近一次执行 / 登记（admin） | 契约（T-0037） |

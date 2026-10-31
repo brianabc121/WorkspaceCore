@@ -93,7 +93,7 @@ async def test_setup_creates_the_default_dashboard_with_starter_widgets(home: Ho
     assert data["summary"] == {
         "pending_tasks": None,
         "active_projects": None,
-        "unread_notifications": None,
+        "unread_notifications": 0,  # Sprint 5：通知中心上线后返回实际的未读数
     }
     assert data["today_tasks"] == []
     listed = (await home.client.get("/api/v1/dashboards", headers=home.headers())).json()

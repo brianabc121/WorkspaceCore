@@ -18,3 +18,13 @@ def create_redis(settings: Settings) -> Redis:
         socket_timeout=timeout,
     )
     return client
+
+
+def create_stream_redis(settings: Settings) -> Redis:
+    """SSE 用：XREAD 会阻塞 sse_block_seconds 秒，读超时要比它长。"""
+    client: Redis = Redis.from_url(
+        settings.redis_url.get_secret_value(),
+        socket_connect_timeout=settings.readiness_timeout_seconds,
+        socket_timeout=settings.sse_block_seconds + 10,
+    )
+    return client

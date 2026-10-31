@@ -15,6 +15,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 
+from app.domain import events
 from app.models import ExternalResource
 
 PROJECT = "project"
@@ -40,6 +41,7 @@ async def upsert(
     source_updated_at: datetime | None,
 ) -> ExternalResource:
     """写入或更新投影；外部更新时间比已存的旧时不覆盖（乱序的事件不写入旧数据）。"""
+    events.mark(db, workspace_id, *events.resource_topics(resource_type))
     values = {
         "workspace_id": workspace_id,
         "integration_id": integration_id,
@@ -111,12 +113,13 @@ async def get_any(
     )
 
 
-async def tombstone(db: AsyncSession, resource_id: uuid.UUID) -> None:
+async def tombstone(db: AsyncSession, resource: ExternalResource) -> None:
     await db.execute(
         update(ExternalResource)
-        .where(ExternalResource.id == resource_id, ExternalResource.deleted_at.is_(None))
+        .where(ExternalResource.id == resource.id, ExternalResource.deleted_at.is_(None))
         .values(deleted_at=func.now(), synced_at=func.now())
     )
+    events.mark(db, resource.workspace_id, *events.resource_topics(resource.resource_type))
 
 
 async def tombstone_missing(

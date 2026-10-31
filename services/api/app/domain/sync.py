@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import github_sync, projection, sync_lock
+from app.domain import events, github_sync, notifications, projection, sync_lock
 from app.domain.connectors import (
     ConnectorRuntime,
     integration_status_after,
@@ -96,8 +96,8 @@ def _healthy(integration: Integration) -> None:
 async def process_inbox(ctx: SyncContext, *, limit: int = BATCH_SIZE) -> int:
     """领取一批到期的事件逐个处理；返回处理的数量。"""
     async with ctx.sessions() as db:
-        events = await inbox.claim(db, now=datetime.now(UTC), lease=LEASE, limit=limit)
-        ids = [event.id for event in events]
+        claimed = await inbox.claim(db, now=datetime.now(UTC), lease=LEASE, limit=limit)
+        ids = [event.id for event in claimed]
         await db.commit()
     for event_id in ids:
         await process_event(ctx, event_id)
@@ -126,6 +126,7 @@ async def process_event(ctx: SyncContext, event_id: uuid.UUID) -> None:
             _finish(event, "completed", "integration_inactive")
             await db.commit()
             return
+        old_status = integration.status
         try:
             client = _client(ctx.runtime, integration, account)
             await apply_event(db, integration, client, event.event_type, event.payload_json)
@@ -144,6 +145,7 @@ async def process_event(ctx: SyncContext, event_id: uuid.UUID) -> None:
         else:
             _healthy(integration)
             _finish(event, "completed", None)
+        await notifications.integration_status_changed(db, integration, old_status)
         await db.commit()
 
 
@@ -191,6 +193,7 @@ async def apply_event(
     payload: dict[str, Any],
 ) -> None:
     """按事件里的 ID 读 Vikunja 的当前状态写入投影；事件内容本身不写入。"""
+    events.mark(db, integration.workspace_id, "tasks", "projects", "overview")
     task_id = payload.get("task_id")
     project_id = payload.get("project_id")
     if event_type.startswith("task.") and isinstance(task_id, int):
@@ -295,7 +298,10 @@ async def sync_integration(
         account = await integration_repo.get_account(db, integration_id) if integration else None
         if integration is None or account is None or integration.status not in SYNCABLE:
             return "skipped"
+        # 同步之后数据与新鲜度都可能变了（包括批量 tombstone）；只在提交成功时发布
+        events.mark(db, integration.workspace_id, "integrations", "operations", "overview")
         if integration.provider == GITHUB:
+            events.mark(db, integration.workspace_id, "developer")
             return await _sync_github(db, ctx, integration, account, force_full=force_full)
         try:
             client = _client(ctx.runtime, integration, account)
@@ -306,6 +312,8 @@ async def sync_integration(
             )
             return "skipped"
         full = force_full or await _full_due(db, integration_id, ctx.settings)
+        events.mark(db, integration.workspace_id, "tasks", "projects")
+        old_status = integration.status
         try:
             if full:
                 await projection.full_sync(db, integration, client)
@@ -313,6 +321,7 @@ async def sync_integration(
                 await projection.incremental_sync(db, integration, client)
         except ConnectorError as error:
             integration.status = integration_status_after(error, integration.status)
+            await notifications.integration_status_changed(db, integration, old_status)
             await db.commit()
             logger.warning(
                 "sync failed",
@@ -320,6 +329,7 @@ async def sync_integration(
             )
             return "failed"
         _healthy(integration)
+        await notifications.integration_status_changed(db, integration, old_status)
         await db.commit()
         if full:
             await register_webhooks(db, ctx, integration, client)
@@ -347,10 +357,15 @@ async def _sync_github(
         )
         return "skipped"
     full = force_full or await _full_due(db, integration.id, ctx.settings)
+    old_status = integration.status
     try:
         await github_sync.sync(db, integration, client, full=full)
     except ConnectorError as error:
         integration.status = integration_status_after(error, integration.status)
+        await notifications.integration_status_changed(db, integration, old_status)
+        if error.kind == "RATE_LIMITED":
+            wait = timedelta(seconds=error.retry_after or 60)
+            await notifications.integration_rate_limited(db, integration, wait)
         await db.commit()
         logger.warning(
             "github sync failed",
@@ -358,6 +373,7 @@ async def _sync_github(
         )
         return "failed"
     _healthy(integration)
+    await notifications.integration_status_changed(db, integration, old_status)
     await db.commit()
     return "full" if full else "incremental"
 

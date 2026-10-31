@@ -334,3 +334,31 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
   - 给工作台用的 API Key 只勾选 `workflow:list`、`workflow:read`、`execution:list`、`execution:read`。
   - 白名单工作流用 Webhook 节点加 Header Auth 作为入口。
   - n8n 采用 Sustainable Use License：对外商业托管或让其他客户配置工作流之前，要重新核验许可证。
+
+## 13. 通知与实时更新（Sprint 5）
+
+约定见 `docs/decisions/2026-10-31-sprint-5-operations-automations-contract.md` 第 4、5 节。
+
+- **通知**存在 PostgreSQL 的 `notifications` 表（迁移 0009）。
+  - 来源：
+    - 集成授权失效、无法连接、恢复，以及 GitHub 限流，发给工作空间的 owner / admin；
+    - 服务健康告警（见下）；
+    - 自动化的执行结果，发给触发者（T-0037）。
+  - 同一件事一小时内只通知一次。
+  - 保留期：已读的保留 `NOTIFICATION_RETENTION_DAYS` 天（默认 90），未读的保留两倍时间。Worker 每小时第 17 分钟清理。
+- **服务健康告警**（S5-02）：
+  - Worker 每分钟检查 api（`API_INTERNAL_URL=http://api:8000` 的 `/readyz`）、Prometheus、Grafana；
+  - 连续两次不可用时通知管理员，恢复时再通知一次；
+  - 没有部署的组件不检查。
+  - PostgreSQL 不可用时通知写不进去，Redis 不可用时 Worker 无法调度：这两项只在运维页显示。
+- **SSE**（`/api/v1/events/stream`）：
+  - 每个工作空间一条 Redis Stream（`events:ws:<ID>`），保留最近 500 条，24 小时没有新事件就过期。
+  - 断线重连时按 `Last-Event-ID` 补发；超出保留范围时发 `reset`，页面会全部重新拉取。
+  - Caddy 对这个路径不压缩、不缓冲（`infra/caddy/Caddyfile`，`flush_interval -1`）。
+    如果前面还有别的反向代理（例如云负载均衡），也要关闭对 `text/event-stream` 的缓冲，
+    并把空闲超时设为 30 秒以上（服务端每 15 秒发一次心跳）。
+  - 连接上限（每个 api 进程，可在 api 的 `environment` 中调整）：
+    - `SSE_MAX_CONNECTIONS`（默认 200）、`SSE_MAX_CONNECTIONS_PER_USER`（默认 5），超出时返回 `429`；
+    - 单个连接最长 `SSE_MAX_SECONDS` 秒（默认 600），到期后浏览器自动重连；
+    - 每 `SSE_RECHECK_SECONDS` 秒（默认 60）复核会话与成员身份，登出或被移出工作空间后停止推送。
+  - SSE 不是可靠队列：页面重连、重新可见时都会重新拉取数据。

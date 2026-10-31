@@ -17,6 +17,7 @@ from typing import Any
 import asyncpg
 import pytest
 
+from app.domain import events as events_module
 from app.domain import sync, sync_lock
 from app.domain.sync import WEBHOOK_EVENTS
 from app.jobs.queue import SYNC_INTEGRATION
@@ -25,6 +26,7 @@ from tests.helpers import ClientFactory, asyncpg_dsn, run_sql
 from tests.vikunja_support import (
     CONNECTOR_SETTINGS,
     Env,
+    app_of,
     deliver,
     open_env,
     sync_context,
@@ -244,6 +246,10 @@ async def test_rejected_token_is_not_retried(ready: Setup) -> None:
     [event] = await events(env)
     assert (event["status"], event["error_text"]) == ("dead_letter", "token_rejected")
     assert await integration_status(env) == "unauthorized"
+    # Sprint 5：通知管理员重新授权（契约第 4 节）
+    notices = await rows(env, "SELECT type, severity, user_id FROM workspace.notifications")
+    assert [(n["type"], n["severity"]) for n in notices] == [("integration_unauthorized", "error")]
+    assert notices[0]["user_id"] == env.owner_id
 
 
 async def test_events_of_a_crashed_worker_are_reclaimed(ready: Setup) -> None:
@@ -331,9 +337,18 @@ async def test_reconcile_restores_freshness(ready: Setup) -> None:
     )
     overview = await env.get("/api/v1/dashboard/overview")
     assert overview["modules"]["tasks"]["status"] == "stale"
+    redis = app_of(env.client).state.redis
+    key = events_module.stream_key(uuid.UUID(env.workspace_id))
+    before = await redis.xlen(key)
     await sync.reconcile_all(env.sync)
     overview = await env.get("/api/v1/dashboard/overview")
     assert overview["modules"]["tasks"]["status"] == "ok"
+    # 对账提交后发布失效事件，打开的页面经 SSE 得知要重新拉取（A16）
+    await app_of(env.client).state.events.drain()
+    published = [
+        set(fields[b"topics"].decode().split(",")) for _, fields in (await redis.xrange(key))
+    ][before:]
+    assert any({"tasks", "projects", "overview"} <= topics for topics in published)
 
 
 async def test_failed_reconcile_keeps_the_cursor(ready: Setup) -> None:

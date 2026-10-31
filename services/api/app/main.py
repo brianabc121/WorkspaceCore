@@ -16,8 +16,8 @@ from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
 from app.core.metrics import CONTENT_TYPE, HttpMetrics
 from app.core.middleware import install_middleware
-from app.core.resources import create_engine, create_redis
-from app.domain import overview
+from app.core.resources import create_engine, create_redis, create_stream_redis
+from app.domain import events, overview, stream
 from app.domain.connectors import ConnectorRuntime
 from app.domain.credentials import CredentialBox
 from app.domain.operations import ServiceCache
@@ -32,8 +32,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
     engine = create_engine(settings)
     redis = create_redis(settings)
-    app.state.sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+    stream_redis = create_stream_redis(settings)
+    # 会话提交后由 EventBus 发布数据失效事件（SSE，Sprint 5 契约第 5 节）
+    bus = events.EventBus(redis)
+    app.state.sessionmaker = async_sessionmaker(
+        engine, expire_on_commit=False, info=bus.session_info()
+    )
     app.state.redis = redis
+    app.state.stream_redis = stream_redis
+    app.state.events = bus
     app.state.jobs = ArqJobQueue(redis)
     app.state.readiness_checks = {
         "database": health.database_check(engine),
@@ -43,6 +50,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await bus.drain()
+        await stream_redis.aclose()
         await redis.aclose()
         await engine.dispose()
         logger.info("api stopped")
@@ -69,6 +78,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.http_metrics = HttpMetrics()
     app.state.service_cache = ServiceCache()
+    app.state.stream_limiter = stream.StreamLimiter(
+        per_user=settings.sse_max_connections_per_user, total=settings.sse_max_connections
+    )
     # 首页聚合的模块数据来源；测试可以替换成会失败或超时的 provider
     app.state.module_providers = overview.default_providers(
         lambda: app.state.sessionmaker(),

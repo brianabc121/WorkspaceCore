@@ -23,6 +23,7 @@ from app.domain.dashboards import DashboardService
 from app.domain.developer import DeveloperService
 from app.domain.integrations import IntegrationService
 from app.domain.knowledge import KnowledgeService
+from app.domain.notifications import NotificationService
 from app.domain.operations import DeploymentHealth, OperationsService
 from app.domain.search import SearchService
 from app.domain.security import csrf_token_for, csrf_token_matches
@@ -136,6 +137,10 @@ def deployment_health(app: FastAPI) -> DeploymentHealth:
         app.state.readiness_checks,
         app.state.service_cache,
     )
+
+
+def get_notification_service(db: Annotated[AsyncSession, Depends(get_db)]) -> NotificationService:
+    return NotificationService(db)
 
 
 def get_operations_service(

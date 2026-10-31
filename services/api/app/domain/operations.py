@@ -297,8 +297,13 @@ class DeploymentHealth:
         return _status("worker", "core", "ok", checked_at=beat)
 
     def _monitoring_http(self) -> ConnectorHttp:
-        """访问内部监控组件：地址来自部署配置，只允许这两个主机名；不重试，失败就显示 down。"""
-        hosts = {host_of(u) for u in (self.settings.prometheus_url, self.settings.grafana_url) if u}
+        """访问内部组件：地址来自部署配置，只允许这几个主机名；不重试，失败就显示 down。"""
+        urls = (
+            self.settings.prometheus_url,
+            self.settings.grafana_url,
+            self.settings.api_internal_url,
+        )
+        hosts = {host_of(u) for u in urls if u}
         timeout = self.settings.monitoring_timeout_seconds
         return ConnectorHttp(
             policy=OutboundPolicy(frozenset(hosts)),
@@ -328,6 +333,22 @@ class DeploymentHealth:
         return await self._timed(
             "prometheus", "monitoring", client.ready, self.settings.monitoring_timeout_seconds
         )
+
+    async def api_internal(self) -> ServiceStatusOut:
+        """Worker 用：经内部地址检查 api 的 /readyz（数据库与 Redis 都正常才算就绪）。"""
+        if not self.settings.api_internal_url:
+            return _status("api", "core", "not_configured", reason="not_checked")
+        http = self._monitoring_http()
+        url = f"{self.settings.api_internal_url}/readyz"
+
+        async def probe() -> None:
+            response = await http.request("GET", url, headers={})
+            if response.status_code != 200:
+                raise ConnectorError(
+                    "UNAVAILABLE", "api 未就绪", status=response.status_code, reason="not_ready"
+                )
+
+        return await self._timed("api", "core", probe, self.settings.monitoring_timeout_seconds)
 
     async def _grafana(self) -> ServiceStatusOut:
         if not self.settings.grafana_url:
