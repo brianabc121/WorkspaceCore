@@ -73,7 +73,8 @@ async function login(page) {
   await login(phone)
   await phone.waitForURL(`${base}/`)
   await laptop.goto(`${base}/settings/security`)
-  await laptop.getByText('其他会话').waitFor()
+  // exact：修改密码表单的说明里也有“其他会话”四个字，要等的是会话列表里的那一条
+  await laptop.getByText('其他会话', { exact: true }).waitFor()
   await laptop.getByRole('button', { name: '撤销会话', exact: true }).click()
   await laptop.getByRole('dialog').getByRole('button', { name: '确认撤销' }).click()
   await laptop.getByText('会话已撤销').waitFor()
