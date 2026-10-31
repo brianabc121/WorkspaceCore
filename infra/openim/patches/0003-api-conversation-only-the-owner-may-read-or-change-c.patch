@@ -1,0 +1,153 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: My Workspace patches <claude@local>
+Date: Sat, 31 Oct 2026 20:39:59 +0000
+Subject: [PATCH 3/3] api/conversation: only the owner may read or change
+ conversations
+
+The conversation RPCs trust the owner in the request because internal
+services call them for other users, so the REST handlers now check that
+a non-admin caller only reads or changes its own conversations.
+get_conversation_offline_push_user_ids is app manager only.
+---
+ internal/api/conversation.go | 76 +++++++++++++++++++++++++++++-------
+ internal/api/router.go       |  2 +-
+ 2 files changed, 63 insertions(+), 15 deletions(-)
+
+diff --git a/internal/api/conversation.go b/internal/api/conversation.go
+index f7dbc13..3964e60 100644
+--- a/internal/api/conversation.go
++++ b/internal/api/conversation.go
+@@ -16,58 +16,106 @@ package api
+ 
+ import (
+ 	"github.com/gin-gonic/gin"
++	"github.com/openimsdk/open-im-server/v3/pkg/authverify"
+ 	"github.com/openimsdk/protocol/conversation"
+ 	"github.com/openimsdk/tools/a2r"
++	"github.com/openimsdk/tools/errs"
+ )
+ 
++// My Workspace patch (not upstream): the conversation RPCs trust the owner user ID in
++// the request (internal services call them for other users), so the REST layer checks
++// that a non-admin caller only reads or changes its own conversations.
++
+ type ConversationApi struct {
+-	Client conversation.ConversationClient
++	Client        conversation.ConversationClient
++	imAdminUserID []string
++}
++
++func NewConversationApi(client conversation.ConversationClient, imAdminUserID []string) ConversationApi {
++	return ConversationApi{Client: client, imAdminUserID: imAdminUserID}
++}
++
++func (o *ConversationApi) checkOwners(c *gin.Context, owners ...string) error {
++	if authverify.IsAppManagerUid(c, o.imAdminUserID) {
++		return nil
++	}
++	if len(owners) == 0 {
++		return errs.ErrNoPermission.WrapMsg("owner user ID required")
++	}
++	for _, owner := range owners {
++		if err := authverify.CheckAccessV3(c, owner, o.imAdminUserID); err != nil {
++			return err
++		}
++	}
++	return nil
+ }
+ 
+-func NewConversationApi(client conversation.ConversationClient) ConversationApi {
+-	return ConversationApi{client}
++func (o *ConversationApi) checkAdmin(c *gin.Context) error {
++	return authverify.CheckAdmin(c, o.imAdminUserID)
+ }
+ 
+ func (o *ConversationApi) GetAllConversations(c *gin.Context) {
+-	a2r.Call(c, conversation.ConversationClient.GetAllConversations, o.Client)
++	a2r.Call(c, conversation.ConversationClient.GetAllConversations, o.Client,
++		&a2r.Option[conversation.GetAllConversationsReq, conversation.GetAllConversationsResp]{
++			BindAfter: func(req *conversation.GetAllConversationsReq) error { return o.checkOwners(c, req.OwnerUserID) }})
+ }
+ 
+ func (o *ConversationApi) GetSortedConversationList(c *gin.Context) {
+-	a2r.Call(c, conversation.ConversationClient.GetSortedConversationList, o.Client)
++	a2r.Call(c, conversation.ConversationClient.GetSortedConversationList, o.Client,
++		&a2r.Option[conversation.GetSortedConversationListReq, conversation.GetSortedConversationListResp]{
++			BindAfter: func(req *conversation.GetSortedConversationListReq) error { return o.checkOwners(c, req.UserID) }})
+ }
+ 
+ func (o *ConversationApi) GetConversation(c *gin.Context) {
+-	a2r.Call(c, conversation.ConversationClient.GetConversation, o.Client)
++	a2r.Call(c, conversation.ConversationClient.GetConversation, o.Client,
++		&a2r.Option[conversation.GetConversationReq, conversation.GetConversationResp]{
++			BindAfter: func(req *conversation.GetConversationReq) error { return o.checkOwners(c, req.OwnerUserID) }})
+ }
+ 
+ func (o *ConversationApi) GetConversations(c *gin.Context) {
+-	a2r.Call(c, conversation.ConversationClient.GetConversations, o.Client)
++	a2r.Call(c, conversation.ConversationClient.GetConversations, o.Client,
++		&a2r.Option[conversation.GetConversationsReq, conversation.GetConversationsResp]{
++			BindAfter: func(req *conversation.GetConversationsReq) error { return o.checkOwners(c, req.OwnerUserID) }})
+ }
+ 
+ func (o *ConversationApi) SetConversations(c *gin.Context) {
+-	a2r.Call(c, conversation.ConversationClient.SetConversations, o.Client)
++	a2r.Call(c, conversation.ConversationClient.SetConversations, o.Client,
++		&a2r.Option[conversation.SetConversationsReq, conversation.SetConversationsResp]{
++			BindAfter: func(req *conversation.SetConversationsReq) error { return o.checkOwners(c, req.UserIDs...) }})
+ }
+ 
+ func (o *ConversationApi) GetConversationOfflinePushUserIDs(c *gin.Context) {
+-	a2r.Call(c, conversation.ConversationClient.GetConversationOfflinePushUserIDs, o.Client)
++	a2r.Call(c, conversation.ConversationClient.GetConversationOfflinePushUserIDs, o.Client,
++		&a2r.Option[conversation.GetConversationOfflinePushUserIDsReq, conversation.GetConversationOfflinePushUserIDsResp]{
++			BindAfter: func(*conversation.GetConversationOfflinePushUserIDsReq) error { return o.checkAdmin(c) }})
+ }
+ 
+ func (o *ConversationApi) GetFullOwnerConversationIDs(c *gin.Context) {
+-	a2r.Call(c, conversation.ConversationClient.GetFullOwnerConversationIDs, o.Client)
++	a2r.Call(c, conversation.ConversationClient.GetFullOwnerConversationIDs, o.Client,
++		&a2r.Option[conversation.GetFullOwnerConversationIDsReq, conversation.GetFullOwnerConversationIDsResp]{
++			BindAfter: func(req *conversation.GetFullOwnerConversationIDsReq) error { return o.checkOwners(c, req.UserID) }})
+ }
+ 
+ func (o *ConversationApi) GetIncrementalConversation(c *gin.Context) {
+-	a2r.Call(c, conversation.ConversationClient.GetIncrementalConversation, o.Client)
++	a2r.Call(c, conversation.ConversationClient.GetIncrementalConversation, o.Client,
++		&a2r.Option[conversation.GetIncrementalConversationReq, conversation.GetIncrementalConversationResp]{
++			BindAfter: func(req *conversation.GetIncrementalConversationReq) error { return o.checkOwners(c, req.UserID) }})
+ }
+ 
+ func (o *ConversationApi) GetOwnerConversation(c *gin.Context) {
+-	a2r.Call(c, conversation.ConversationClient.GetOwnerConversation, o.Client)
++	a2r.Call(c, conversation.ConversationClient.GetOwnerConversation, o.Client,
++		&a2r.Option[conversation.GetOwnerConversationReq, conversation.GetOwnerConversationResp]{
++			BindAfter: func(req *conversation.GetOwnerConversationReq) error { return o.checkOwners(c, req.UserID) }})
+ }
+ 
+ func (o *ConversationApi) GetNotNotifyConversationIDs(c *gin.Context) {
+-	a2r.Call(c, conversation.ConversationClient.GetNotNotifyConversationIDs, o.Client)
++	a2r.Call(c, conversation.ConversationClient.GetNotNotifyConversationIDs, o.Client,
++		&a2r.Option[conversation.GetNotNotifyConversationIDsReq, conversation.GetNotNotifyConversationIDsResp]{
++			BindAfter: func(req *conversation.GetNotNotifyConversationIDsReq) error { return o.checkOwners(c, req.UserID) }})
+ }
+ 
+ func (o *ConversationApi) GetPinnedConversationIDs(c *gin.Context) {
+-	a2r.Call(c, conversation.ConversationClient.GetPinnedConversationIDs, o.Client)
++	a2r.Call(c, conversation.ConversationClient.GetPinnedConversationIDs, o.Client,
++		&a2r.Option[conversation.GetPinnedConversationIDsReq, conversation.GetPinnedConversationIDsResp]{
++			BindAfter: func(req *conversation.GetPinnedConversationIDsReq) error { return o.checkOwners(c, req.UserID) }})
+ }
+diff --git a/internal/api/router.go b/internal/api/router.go
+index bad891f..295b9cc 100644
+--- a/internal/api/router.go
++++ b/internal/api/router.go
+@@ -249,7 +249,7 @@ func newGinRouter(ctx context.Context, client discovery.SvcDiscoveryRegistry, co
+ 	}
+ 	// Conversation
+ 	{
+-		c := NewConversationApi(conversation.NewConversationClient(conversationConn))
++		c := NewConversationApi(conversation.NewConversationClient(conversationConn), config.Share.IMAdminUserID)
+ 		conversationGroup := r.Group("/conversation")
+ 		conversationGroup.POST("/get_sorted_conversation_list", c.GetSortedConversationList)
+ 		conversationGroup.POST("/get_all_conversations", c.GetAllConversations)

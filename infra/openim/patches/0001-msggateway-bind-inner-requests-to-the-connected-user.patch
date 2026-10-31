@@ -1,0 +1,173 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: My Workspace patches <claude@local>
+Date: Sat, 31 Oct 2026 20:39:59 +0000
+Subject: [PATCH 1/3] msggateway: bind inner requests to the connected user
+
+The gateway only checked the outer envelope's sendID. Inner protobuf
+requests carried their own userID, so any user could pull another
+user's messages (1001/1002/1005/1006/1007) or send as another user
+(1003). Bind the inner user to the connection, require sendID to be the
+connected user, reject notification sessions and content types from
+clients, and disable the unused signal path (1004).
+---
+ internal/msggateway/message_handler.go | 22 ++++++++++--------
+ internal/msggateway/myws_authz.go      | 29 ++++++++++++++++++++++++
+ internal/msggateway/myws_authz_test.go | 31 ++++++++++++++++++++++++++
+ 3 files changed, 73 insertions(+), 9 deletions(-)
+ create mode 100644 internal/msggateway/myws_authz.go
+ create mode 100644 internal/msggateway/myws_authz_test.go
+
+diff --git a/internal/msggateway/message_handler.go b/internal/msggateway/message_handler.go
+index ca15e1e..c0ea36a 100644
+--- a/internal/msggateway/message_handler.go
++++ b/internal/msggateway/message_handler.go
+@@ -132,6 +132,8 @@ func (g *GrpcHandler) GetSeq(ctx context.Context, data *Req) ([]byte, error) {
+ 	if err := proto.Unmarshal(data.Data, &req); err != nil {
+ 		return nil, errs.WrapMsg(err, "GetSeq: error unmarshaling request", "action", "unmarshal", "dataType", "GetMaxSeqReq")
+ 	}
++	// My Workspace patch: the inner request always acts as the connected user.
++	req.UserID = data.SendID
+ 	if err := g.validate.Struct(&req); err != nil {
+ 		return nil, errs.WrapMsg(err, "GetSeq: validation failed", "action", "validate", "dataType", "GetMaxSeqReq")
+ 	}
+@@ -157,6 +159,10 @@ func (g *GrpcHandler) SendMessage(ctx context.Context, data *Req) ([]byte, error
+ 	if err := g.validate.Struct(&msgData); err != nil {
+ 		return nil, errs.WrapMsg(err, "SendMessage: message data validation failed", "action", "validate", "dataType", "MsgData")
+ 	}
++	// My Workspace patch: a client may only send as itself, and never a notification.
++	if err := checkClientMsg(data.SendID, &msgData); err != nil {
++		return nil, err
++	}
+ 
+ 	req := msg.SendMsgReq{MsgData: &msgData}
+ 	resp, err := g.msgClient.MsgClient.SendMsg(ctx, &req)
+@@ -173,15 +179,8 @@ func (g *GrpcHandler) SendMessage(ctx context.Context, data *Req) ([]byte, error
+ }
+ 
+ func (g *GrpcHandler) SendSignalMessage(ctx context.Context, data *Req) ([]byte, error) {
+-	resp, err := g.msgClient.MsgClient.SendMsg(ctx, nil)
+-	if err != nil {
+-		return nil, err
+-	}
+-	c, err := proto.Marshal(resp)
+-	if err != nil {
+-		return nil, errs.WrapMsg(err, "error marshaling response", "action", "marshal", "dataType", "SendMsgResp")
+-	}
+-	return c, nil
++	// My Workspace patch: signaling is not used; upstream forwarded a nil request.
++	return nil, errs.ErrNoPermission.WrapMsg("signal messages are disabled")
+ }
+ 
+ func (g *GrpcHandler) PullMessageBySeqList(ctx context.Context, data *Req) ([]byte, error) {
+@@ -189,6 +188,7 @@ func (g *GrpcHandler) PullMessageBySeqList(ctx context.Context, data *Req) ([]by
+ 	if err := proto.Unmarshal(data.Data, &req); err != nil {
+ 		return nil, errs.WrapMsg(err, "err proto unmarshal", "action", "unmarshal", "dataType", "PullMessageBySeqsReq")
+ 	}
++	req.UserID = data.SendID // My Workspace patch
+ 	if err := g.validate.Struct(data); err != nil {
+ 		return nil, errs.WrapMsg(err, "validation failed", "action", "validate", "dataType", "PullMessageBySeqsReq")
+ 	}
+@@ -208,6 +208,7 @@ func (g *GrpcHandler) GetConversationsHasReadAndMaxSeq(ctx context.Context, data
+ 	if err := proto.Unmarshal(data.Data, &req); err != nil {
+ 		return nil, errs.WrapMsg(err, "err proto unmarshal", "action", "unmarshal", "dataType", "GetConversationsHasReadAndMaxSeq")
+ 	}
++	req.UserID = data.SendID // My Workspace patch
+ 	if err := g.validate.Struct(data); err != nil {
+ 		return nil, errs.WrapMsg(err, "validation failed", "action", "validate", "dataType", "GetConversationsHasReadAndMaxSeq")
+ 	}
+@@ -227,6 +228,7 @@ func (g *GrpcHandler) GetSeqMessage(ctx context.Context, data *Req) ([]byte, err
+ 	if err := proto.Unmarshal(data.Data, &req); err != nil {
+ 		return nil, errs.WrapMsg(err, "error unmarshaling request", "action", "unmarshal", "dataType", "GetSeqMessage")
+ 	}
++	req.UserID = data.SendID // My Workspace patch
+ 	if err := g.validate.Struct(data); err != nil {
+ 		return nil, errs.WrapMsg(err, "validation failed", "action", "validate", "dataType", "GetSeqMessage")
+ 	}
+@@ -246,6 +248,7 @@ func (g *GrpcHandler) UserLogout(ctx context.Context, data *Req) ([]byte, error)
+ 	if err := proto.Unmarshal(data.Data, &req); err != nil {
+ 		return nil, errs.WrapMsg(err, "error unmarshaling request", "action", "unmarshal", "dataType", "DelUserPushTokenReq")
+ 	}
++	req.UserID = data.SendID // My Workspace patch
+ 	resp, err := g.pushClient.PushMsgServiceClient.DelUserPushToken(ctx, &req)
+ 	if err != nil {
+ 		return nil, err
+@@ -273,6 +276,7 @@ func (g *GrpcHandler) GetLastMessage(ctx context.Context, data *Req) ([]byte, er
+ 	if err := proto.Unmarshal(data.Data, &req); err != nil {
+ 		return nil, err
+ 	}
++	req.UserID = data.SendID // My Workspace patch
+ 	resp, err := g.msgClient.GetLastMessage(ctx, &req)
+ 	if err != nil {
+ 		return nil, err
+diff --git a/internal/msggateway/myws_authz.go b/internal/msggateway/myws_authz.go
+new file mode 100644
+index 0000000..e5304f5
+--- /dev/null
++++ b/internal/msggateway/myws_authz.go
+@@ -0,0 +1,29 @@
++// My Workspace patch (not upstream): bind gateway requests to the connected user.
++//
++// Upstream only checks the outer envelope's sendID against the connection; the inner
++// protobuf requests carried their own userID / sendID, so any user could read or send
++// on behalf of another user. See docs/decisions/2026-10-31-v2-oc0-openclaw-openim-verification.md.
++
++package msggateway
++
++import (
++	"github.com/openimsdk/protocol/constant"
++	"github.com/openimsdk/protocol/sdkws"
++	"github.com/openimsdk/tools/errs"
++)
++
++// checkClientMsg rejects messages a client must not send: as another user, as a
++// notification session, or with a notification content type (those skip the
++// before-send webhooks).
++func checkClientMsg(connUserID string, m *sdkws.MsgData) error {
++	if m.SendID != connUserID {
++		return errs.ErrNoPermission.WrapMsg("sendID must be the connected user", "sendID", m.SendID)
++	}
++	if m.SessionType != constant.SingleChatType && m.SessionType != constant.ReadGroupChatType {
++		return errs.ErrNoPermission.WrapMsg("session type not allowed for clients", "sessionType", m.SessionType)
++	}
++	if m.ContentType >= constant.NotificationBegin {
++		return errs.ErrNoPermission.WrapMsg("notification content types are server-only", "contentType", m.ContentType)
++	}
++	return nil
++}
+diff --git a/internal/msggateway/myws_authz_test.go b/internal/msggateway/myws_authz_test.go
+new file mode 100644
+index 0000000..1084710
+--- /dev/null
++++ b/internal/msggateway/myws_authz_test.go
+@@ -0,0 +1,31 @@
++// My Workspace patch (not upstream): tests for checkClientMsg.
++
++package msggateway
++
++import (
++	"testing"
++
++	"github.com/openimsdk/protocol/constant"
++	"github.com/openimsdk/protocol/sdkws"
++)
++
++func TestCheckClientMsg(t *testing.T) {
++	cases := []struct {
++		name string
++		msg  *sdkws.MsgData
++		ok   bool
++	}{
++		{"own single text", &sdkws.MsgData{SendID: "oc_a", RecvID: "ws_admin", SessionType: constant.SingleChatType, ContentType: constant.Text}, true},
++		{"own group at-text", &sdkws.MsgData{SendID: "oc_a", GroupID: "g1", SessionType: constant.ReadGroupChatType, ContentType: constant.AtText}, true},
++		{"impersonate admin", &sdkws.MsgData{SendID: "ws_admin", RecvID: "oc_b", SessionType: constant.SingleChatType, ContentType: constant.Text}, false},
++		{"notification session", &sdkws.MsgData{SendID: "oc_a", RecvID: "oc_b", SessionType: constant.NotificationChatType, ContentType: constant.Text}, false},
++		{"legacy write group session", &sdkws.MsgData{SendID: "oc_a", GroupID: "g1", SessionType: constant.WriteGroupChatType, ContentType: constant.Text}, false},
++		{"notification content type", &sdkws.MsgData{SendID: "oc_a", RecvID: "oc_b", SessionType: constant.SingleChatType, ContentType: constant.FriendAddedNotification}, false},
++	}
++	for _, c := range cases {
++		err := checkClientMsg("oc_a", c.msg)
++		if (err == nil) != c.ok {
++			t.Errorf("%s: err=%v, want ok=%v", c.name, err, c.ok)
++		}
++	}
++}
