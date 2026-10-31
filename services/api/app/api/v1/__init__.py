@@ -5,12 +5,16 @@ from fastapi import APIRouter
 from app.api.v1 import (
     audit,
     auth,
+    automations,
     calendar,
     dashboards,
     developer,
+    events,
     integrations,
     knowledge,
     me,
+    notifications,
+    operations,
     search,
     setup,
     tasks,
@@ -36,5 +40,9 @@ for module in (
     calendar,
     developer,
     search,
+    operations,
+    notifications,
+    events,
+    automations,
 ):
     router.include_router(module.router)

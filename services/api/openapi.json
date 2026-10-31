@@ -1,6 +1,82 @@
 {
   "components": {
     "schemas": {
+      "ApiLatencyConfig": {
+        "additionalProperties": false,
+        "description": "Sprint 5：组件调用 GET /operations/metrics，显示一个延迟分位。",
+        "properties": {
+          "quantile": {
+            "default": "p95",
+            "enum": [
+              "p50",
+              "p95",
+              "p99"
+            ],
+            "title": "Quantile",
+            "type": "string"
+          },
+          "range": {
+            "default": "1h",
+            "enum": [
+              "1h",
+              "6h",
+              "24h"
+            ],
+            "title": "Range",
+            "type": "string"
+          }
+        },
+        "title": "ApiLatencyConfig",
+        "type": "object"
+      },
+      "ApiLatencyWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/ApiLatencyConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "api_latency",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "ApiLatencyWidgetCreate",
+        "type": "object"
+      },
+      "ApiLatencyWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/ApiLatencyConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "api_latency",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "ApiLatencyWidgetUpdate",
+        "type": "object"
+      },
       "AuditLogOut": {
         "properties": {
           "action": {
@@ -70,6 +146,615 @@
           "created_at"
         ],
         "title": "AuditLogOut",
+        "type": "object"
+      },
+      "AutomationConnectionOut": {
+        "properties": {
+          "api_key_set": {
+            "default": false,
+            "title": "Api Key Set",
+            "type": "boolean"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "工作台访问 n8n 的地址（只给管理员看）",
+            "title": "Base Url"
+          },
+          "configured": {
+            "description": "false 时其余字段为默认值，页面引导管理员配置",
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "instance_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instance Version"
+          },
+          "last_tested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Tested At"
+          },
+          "public_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "浏览器打开 n8n 编辑器的地址",
+            "title": "Public Url"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pending",
+                  "active",
+                  "unauthorized",
+                  "unavailable",
+                  "disabled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "sync": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SyncState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "读取执行记录的同步状态"
+          },
+          "tested_version": {
+            "default": "2.45.7",
+            "title": "Tested Version",
+            "type": "string"
+          },
+          "trigger_secret_set": {
+            "default": false,
+            "title": "Trigger Secret Set",
+            "type": "boolean"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "configured"
+        ],
+        "title": "AutomationConnectionOut",
+        "type": "object"
+      },
+      "AutomationConnectionUpsert": {
+        "additionalProperties": false,
+        "description": "新建或修改 n8n 连接（admin）。新建时 base_url、api_key、trigger_secret 都必须给。",
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "description": "n8n 的 API Key，只勾选 workflow:list、workflow:read、execution:list、execution:read；只写不读",
+                "format": "password",
+                "maxLength": 4096,
+                "minLength": 20,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "false 停用：不读取执行记录、拒绝触发",
+            "title": "Enabled"
+          },
+          "public_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "不填时与 base_url 相同",
+            "title": "Public Url"
+          },
+          "trigger_secret": {
+            "anyOf": [
+              {
+                "description": "Webhook 节点 Header Auth 凭据里的值（请求头 X-Workspace-Trigger）；只写不读",
+                "format": "password",
+                "maxLength": 512,
+                "minLength": 16,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger Secret"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "description": "乐观并发版本号；写请求必须带上读取时的版本",
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "修改时必填；新建时不填",
+            "title": "Version"
+          }
+        },
+        "title": "AutomationConnectionUpsert",
+        "type": "object"
+      },
+      "AutomationCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/ParamSpec"
+            },
+            "maxItems": 20,
+            "title": "Params",
+            "type": "array"
+          },
+          "webhook_path": {
+            "description": "n8n Webhook 节点的 path；工作台调用 POST <n8n>/webhook/<path>",
+            "title": "Webhook Path",
+            "type": "string"
+          },
+          "workflow_id": {
+            "pattern": "^[A-Za-z0-9]{1,64}$",
+            "title": "Workflow Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "workflow_id",
+          "webhook_path"
+        ],
+        "title": "AutomationCreate",
+        "type": "object"
+      },
+      "AutomationOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AutomationRunOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/ParamSpec"
+            },
+            "title": "Params",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "webhook_path": {
+            "title": "Webhook Path",
+            "type": "string"
+          },
+          "workflow_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次从 n8n 读到的工作流是否已激活；从未读到时为 null",
+            "title": "Workflow Active"
+          },
+          "workflow_id": {
+            "description": "n8n 的工作流 ID",
+            "title": "Workflow Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "workflow_id",
+          "webhook_path",
+          "params",
+          "enabled",
+          "workflow_active",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AutomationOut",
+        "type": "object"
+      },
+      "AutomationPage": {
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/SyncState",
+            "description": "n8n 连接的状态：未配置为 not_configured，授权失效为 unauthorized"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AutomationOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items",
+          "connection"
+        ],
+        "title": "AutomationPage",
+        "type": "object"
+      },
+      "AutomationRunOut": {
+        "properties": {
+          "automation_id": {
+            "format": "uuid",
+            "title": "Automation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "失败原因的摘要（纯文本，最多 500 字）；不含第三方 payload 原文",
+            "title": "Error Summary"
+          },
+          "external_execution_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "n8n 的执行 ID；还没对应上时为 null（核验 ADR 第 5.2 节）",
+            "title": "External Execution Id"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "description": "queued 已受理；running 执行中；success / error / canceled 已结束；unknown 触发请求的结果未知（超时等），由对账确认，不会自动重发",
+            "enum": [
+              "queued",
+              "running",
+              "success",
+              "error",
+              "canceled",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "triggered_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggered By"
+          }
+        },
+        "required": [
+          "id",
+          "automation_id",
+          "status",
+          "external_execution_id",
+          "triggered_by",
+          "error_summary",
+          "started_at",
+          "finished_at",
+          "created_at"
+        ],
+        "title": "AutomationRunOut",
+        "type": "object"
+      },
+      "AutomationRunPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AutomationRunOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AutomationRunPage",
+        "type": "object"
+      },
+      "AutomationUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ParamSpec"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "webhook_path": {
+            "anyOf": [
+              {
+                "description": "n8n Webhook 节点的 path；工作台调用 POST <n8n>/webhook/<path>",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Path"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "AutomationUpdate",
         "type": "object"
       },
       "BookmarkCreate": {
@@ -631,11 +1316,14 @@
             "items": {
               "discriminator": {
                 "mapping": {
+                  "api_latency": "#/components/schemas/ApiLatencyWidgetCreate",
                   "calendar_agenda": "#/components/schemas/CalendarAgendaWidgetCreate",
                   "github_activity": "#/components/schemas/GitHubActivityWidgetCreate",
                   "note": "#/components/schemas/NoteWidgetCreate",
+                  "notifications": "#/components/schemas/NotificationsWidgetCreate",
                   "quick_links": "#/components/schemas/QuickLinksWidgetCreate",
                   "recent_docs": "#/components/schemas/RecentDocsWidgetCreate",
+                  "service_health": "#/components/schemas/ServiceHealthWidgetCreate",
                   "today_tasks": "#/components/schemas/TodayTasksWidgetCreate",
                   "todo_summary": "#/components/schemas/TodoSummaryWidgetCreate"
                 },
@@ -662,6 +1350,15 @@
                 },
                 {
                   "$ref": "#/components/schemas/GitHubActivityWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/ServiceHealthWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/ApiLatencyWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/NotificationsWidgetCreate"
                 }
               ]
             },
@@ -747,7 +1444,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/ModuleStatus"
             },
-            "description": "按模块名索引：tasks（Sprint 3）、calendar、knowledge、github（Sprint 4）；单个模块失败只影响对应组件",
+            "description": "按模块名索引：tasks（Sprint 3）、calendar、knowledge、github（Sprint 4）、operations、automations（Sprint 5）；单个模块失败只影响对应组件",
             "title": "Modules",
             "type": "object"
           },
@@ -1566,6 +2263,55 @@
         "title": "IntegrationUpdate",
         "type": "object"
       },
+      "InvalidateEvent": {
+        "description": "SSE `event: invalidate` 的 data（JSON）。只说明哪些数据变了，不带数据本身。",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "reset": {
+            "default": false,
+            "description": "true：无法按 Last-Event-ID 续传（事件已过期或服务重启），topics 为全部范围，客户端应重新拉取当前页面的全部数据",
+            "title": "Reset",
+            "type": "boolean"
+          },
+          "topics": {
+            "description": "需要重新拉取的数据范围",
+            "items": {
+              "enum": [
+                "overview",
+                "tasks",
+                "projects",
+                "knowledge",
+                "calendar",
+                "developer",
+                "integrations",
+                "notifications",
+                "operations",
+                "automations"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Topics",
+            "type": "array"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "topics",
+          "at"
+        ],
+        "title": "InvalidateEvent",
+        "type": "object"
+      },
       "IssueOut": {
         "properties": {
           "assignees": {
@@ -2071,6 +2817,151 @@
         "title": "MeUpdate",
         "type": "object"
       },
+      "MetricPoint": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "没有数据或无法计算（例如除数为 0）时为 null",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "at",
+          "value"
+        ],
+        "title": "MetricPoint",
+        "type": "object"
+      },
+      "MetricSeries": {
+        "properties": {
+          "label": {
+            "description": "序列名，例如服务名；单序列视图为空字符串",
+            "title": "Label",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/MetricPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "label",
+          "points"
+        ],
+        "title": "MetricSeries",
+        "type": "object"
+      },
+      "MetricViewOut": {
+        "properties": {
+          "id": {
+            "enum": [
+              "request_rate",
+              "latency_p50",
+              "latency_p95",
+              "latency_p99",
+              "error_rate",
+              "services_up"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/MetricSeries"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unit": {
+            "enum": [
+              "requests_per_second",
+              "seconds",
+              "ratio",
+              "count"
+            ],
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "unit",
+          "series"
+        ],
+        "title": "MetricViewOut",
+        "type": "object"
+      },
+      "MetricsOut": {
+        "properties": {
+          "grafana_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Grafana 仪表盘的外链（部署时配置）；未配置时为 null",
+            "title": "Grafana Url"
+          },
+          "range": {
+            "enum": [
+              "1h",
+              "6h",
+              "24h",
+              "7d"
+            ],
+            "title": "Range",
+            "type": "string"
+          },
+          "step_seconds": {
+            "description": "点与点之间的间隔：1h 为 60，6h 为 300，24h 为 900，7d 为 3600",
+            "title": "Step Seconds",
+            "type": "integer"
+          },
+          "sync": {
+            "$ref": "#/components/schemas/SyncState",
+            "description": "Prometheus 的状态：没有部署为 not_configured；不可达或超时为 stale （有之前的结果）或 unavailable；as_of 是返回的这批数据的查询时间"
+          },
+          "views": {
+            "description": "按请求的 views 顺序返回。Prometheus 不可达时返回最近一次成功查询的结果（sync 为 stale）；没有这样的结果时为空（sync 为 unavailable），不以 0 冒充",
+            "items": {
+              "$ref": "#/components/schemas/MetricViewOut"
+            },
+            "title": "Views",
+            "type": "array"
+          }
+        },
+        "required": [
+          "range",
+          "step_seconds",
+          "views",
+          "sync"
+        ],
+        "title": "MetricsOut",
+        "type": "object"
+      },
       "MobilePosition": {
         "additionalProperties": false,
         "description": "移动端单列：按 y 从小到大排列。",
@@ -2219,6 +3110,247 @@
           "config"
         ],
         "title": "NoteWidgetUpdate",
+        "type": "object"
+      },
+      "NotificationMark": {
+        "additionalProperties": false,
+        "description": "把通知标为已读：给出 ids，或者 all=true 把全部未读标为已读，二者选一。",
+        "properties": {
+          "all": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "true：全部标为已读",
+            "title": "All"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ids"
+          }
+        },
+        "title": "NotificationMark",
+        "type": "object"
+      },
+      "NotificationMarkResult": {
+        "properties": {
+          "unread_count": {
+            "title": "Unread Count",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "这次新标为已读的条数（已经是已读的不计）",
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updated",
+          "unread_count"
+        ],
+        "title": "NotificationMarkResult",
+        "type": "object"
+      },
+      "NotificationOut": {
+        "properties": {
+          "body": {
+            "description": "纯文本；前端按文本显示，不解析 HTML / Markdown",
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "点开后跳转的工作台内部路径（以 / 开头），没有时为 null",
+            "title": "Link"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "error"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "机器可读的类型，取值会随功能增加，例如 service_down、service_recovered、integration_unauthorized、integration_rate_limited、automation_failed、automation_succeeded；前端遇到不认识的类型按普通通知显示",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "severity",
+          "title",
+          "body",
+          "read_at",
+          "created_at"
+        ],
+        "title": "NotificationOut",
+        "type": "object"
+      },
+      "NotificationPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          },
+          "unread_count": {
+            "description": "当前用户在当前工作空间的未读数，与首页 summary 一致",
+            "title": "Unread Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "unread_count"
+        ],
+        "title": "NotificationPage",
+        "type": "object"
+      },
+      "NotificationsConfig": {
+        "additionalProperties": false,
+        "description": "Sprint 5：组件调用 GET /notifications。",
+        "properties": {
+          "limit": {
+            "default": 5,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "unread_only": {
+            "default": true,
+            "title": "Unread Only",
+            "type": "boolean"
+          }
+        },
+        "title": "NotificationsConfig",
+        "type": "object"
+      },
+      "NotificationsWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/NotificationsConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "notifications",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "NotificationsWidgetCreate",
+        "type": "object"
+      },
+      "NotificationsWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/NotificationsConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "notifications",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "NotificationsWidgetUpdate",
         "type": "object"
       },
       "OverviewSummary": {
@@ -2615,6 +3747,81 @@
           "items"
         ],
         "title": "Page[WorkspaceOut]",
+        "type": "object"
+      },
+      "ParamSpec": {
+        "additionalProperties": false,
+        "description": "触发参数的声明；工作台按它校验后才发给 n8n，未声明的参数一律拒绝。",
+        "properties": {
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "只用于 string：限定可选值",
+            "title": "Choices"
+          },
+          "label": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "max_length": {
+            "anyOf": [
+              {
+                "maximum": 2000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "只用于 string",
+            "title": "Max Length"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9_]{0,31}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "required": {
+            "default": false,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "sensitive": {
+            "default": false,
+            "description": "true：参数值不写进审计与执行记录（例如邮箱、单号）",
+            "title": "Sensitive",
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "number",
+              "boolean"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "type"
+        ],
+        "title": "ParamSpec",
         "type": "object"
       },
       "PasswordChangeRequest": {
@@ -3750,6 +4957,183 @@
         "title": "SearchResultOut",
         "type": "object"
       },
+      "ServiceHealthConfig": {
+        "additionalProperties": false,
+        "description": "Sprint 5：组件调用 GET /operations/services（Sprint 5 契约第 7.2 节）。",
+        "properties": {
+          "limit": {
+            "default": 8,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "ServiceHealthConfig",
+        "type": "object"
+      },
+      "ServiceHealthWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/ServiceHealthConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "service_health",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "ServiceHealthWidgetCreate",
+        "type": "object"
+      },
+      "ServiceHealthWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/ServiceHealthConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "service_health",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "ServiceHealthWidgetUpdate",
+        "type": "object"
+      },
+      "ServiceStatusList": {
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceStatusOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "generated_at"
+        ],
+        "title": "ServiceStatusList",
+        "type": "object"
+      },
+      "ServiceStatusOut": {
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次检查的时间；从未检查过时为 null",
+            "title": "Checked At"
+          },
+          "id": {
+            "description": "稳定的标识：核心服务为 api、worker、postgres、redis；监控为 prometheus、grafana；集成为 integration:<集成 UUID>；n8n 连接为 n8n",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "core",
+              "monitoring",
+              "integration"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次检查的耗时（毫秒）",
+            "title": "Latency Ms"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "集成的类型（vikunja / github / n8n）；其他服务为 null",
+            "title": "Provider"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "机器可读的原因，例如 timeout、unreachable、rate_limited、token_rejected；不含地址、Token 等敏感信息",
+            "title": "Reason"
+          },
+          "status": {
+            "description": "ok 正常；degraded 可用但有问题（限流、部分检查失败）；down 不可用；unknown 还没检查过；not_configured 没有部署或没有配置",
+            "enum": [
+              "ok",
+              "degraded",
+              "down",
+              "unknown",
+              "not_configured"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "status",
+          "checked_at"
+        ],
+        "title": "ServiceStatusOut",
+        "type": "object"
+      },
       "SessionOut": {
         "properties": {
           "created_at": {
@@ -4443,6 +5827,19 @@
         "title": "TodoSummaryWidgetUpdate",
         "type": "object"
       },
+      "TriggerRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "params": {
+            "additionalProperties": true,
+            "description": "按 AutomationOut.params 的声明校验；多余或类型不对返回 422",
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "title": "TriggerRequest",
+        "type": "object"
+      },
       "UserOut": {
         "properties": {
           "created_at": {
@@ -4574,7 +5971,7 @@
             "type": "integer"
           },
           "widget_type": {
-            "description": "当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity；也可能是已不再支持的旧类型，前端应显示安全的错误卡片",
+            "description": "当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications；也可能是已不再支持的旧类型，前端应显示安全的错误卡片",
             "title": "Widget Type",
             "type": "string"
           }
@@ -5181,6 +6578,1071 @@
         "summary": "撤销我的某个会话",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/automations": {
+      "get": {
+        "operationId": "list_automations",
+        "parameters": [
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "白名单工作流与最近一次执行（viewer）",
+        "tags": [
+          "automations"
+        ]
+      },
+      "post": {
+        "description": "工作台会到 n8n 核对 workflow_id 存在；未激活的工作流可以登记，但不能触发。",
+        "operationId": "create_automation",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务拒绝了工作台的凭证（INTEGRATION_UNAUTHORIZED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "登记白名单工作流（admin）",
+        "tags": [
+          "automations"
+        ]
+      }
+    },
+    "/api/v1/automations/connection": {
+      "get": {
+        "description": "没有配置时 configured 为 false；API Key 与共享密钥从不返回。",
+        "operationId": "get_automation_connection",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "n8n 连接（admin）",
+        "tags": [
+          "automations"
+        ]
+      },
+      "put": {
+        "operationId": "put_automation_connection",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomationConnectionUpsert"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "新建或修改 n8n 连接（admin，乐观并发）",
+        "tags": [
+          "automations"
+        ]
+      }
+    },
+    "/api/v1/automations/connection/test": {
+      "post": {
+        "description": "检查可达（/healthz/readiness）、版本与 API Key（只读 scope）；不会触发任何工作流。",
+        "operationId": "test_automation_connection",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationTestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "测试 n8n 连接（admin）",
+        "tags": [
+          "automations"
+        ]
+      }
+    },
+    "/api/v1/automations/{automation_id}": {
+      "delete": {
+        "operationId": "delete_automation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "automation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Automation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "读取时的版本",
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "读取时的版本",
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "移出白名单（admin，乐观并发；执行记录保留）",
+        "tags": [
+          "automations"
+        ]
+      },
+      "patch": {
+        "operationId": "update_automation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "automation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Automation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomationUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "修改白名单工作流（admin，乐观并发）",
+        "tags": [
+          "automations"
+        ]
+      }
+    },
+    "/api/v1/automations/{automation_id}/runs": {
+      "get": {
+        "operationId": "list_automation_runs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "automation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Automation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationRunPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "执行记录（viewer，按时间倒序）",
+        "tags": [
+          "automations"
+        ]
+      }
+    },
+    "/api/v1/automations/{automation_id}/trigger": {
+      "post": {
+        "description": "同一个 Idempotency-Key 的重复请求原样返回第一次的执行记录，不会重复触发。触发请求的结果未知时执行记录为 unknown，由对账确认。",
+        "operationId": "trigger_automation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "automation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Automation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "每次用户提交生成一个新的 UUID；网络重试与查询结果时复用同一个",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "每次用户提交生成一个新的 UUID；网络重试与查询结果时复用同一个",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务拒绝了工作台的凭证（INTEGRATION_UNAUTHORIZED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "触发白名单工作流（member，经策略校验，必须带 Idempotency-Key）",
+        "tags": [
+          "automations"
         ]
       }
     },
@@ -6187,11 +8649,14 @@
               "schema": {
                 "discriminator": {
                   "mapping": {
+                    "api_latency": "#/components/schemas/ApiLatencyWidgetCreate",
                     "calendar_agenda": "#/components/schemas/CalendarAgendaWidgetCreate",
                     "github_activity": "#/components/schemas/GitHubActivityWidgetCreate",
                     "note": "#/components/schemas/NoteWidgetCreate",
+                    "notifications": "#/components/schemas/NotificationsWidgetCreate",
                     "quick_links": "#/components/schemas/QuickLinksWidgetCreate",
                     "recent_docs": "#/components/schemas/RecentDocsWidgetCreate",
+                    "service_health": "#/components/schemas/ServiceHealthWidgetCreate",
                     "today_tasks": "#/components/schemas/TodayTasksWidgetCreate",
                     "todo_summary": "#/components/schemas/TodoSummaryWidgetCreate"
                   },
@@ -6218,6 +8683,15 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitHubActivityWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ServiceHealthWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ApiLatencyWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/NotificationsWidgetCreate"
                   }
                 ],
                 "title": "Body"
@@ -6896,6 +9370,118 @@
         "summary": "GitHub Actions 最近运行（viewer，读本地投影）",
         "tags": [
           "developer"
+        ]
+      }
+    },
+    "/api/v1/events/stream": {
+      "get": {
+        "description": "每个事件都是 `event: invalidate`，data 是 InvalidateEvent 的 JSON，id 用于断线重连（Last-Event-ID）；以冒号开头的行是心跳。SSE 只是提示，不是可靠队列：客户端重连后、页面重新可见时仍要按需重新拉取。",
+        "operationId": "event_stream",
+        "parameters": [
+          {
+            "description": "要订阅的工作空间（EventSource 不能带请求头）",
+            "in": "query",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "description": "要订阅的工作空间（EventSource 不能带请求头）",
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "浏览器重连时自动带上",
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "浏览器重连时自动带上",
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "properties": {
+                    "data": {
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "$ref": "#/components/schemas/InvalidateEvent"
+                      },
+                      "type": "string"
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "retry": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "SSE：数据失效通知（成员）",
+        "tags": [
+          "events"
         ]
       }
     },
@@ -8587,6 +11173,410 @@
         ]
       }
     },
+    "/api/v1/notifications": {
+      "get": {
+        "operationId": "list_notifications",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "unread_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Unread Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "我的通知（按时间倒序）",
+        "tags": [
+          "notifications"
+        ]
+      },
+      "patch": {
+        "operationId": "mark_notifications",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationMark"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationMarkResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "把通知标为已读（ids 或 all=true）",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/operations/metrics": {
+      "get": {
+        "description": "按视图 ID 返回聚合好的数据点；Prometheus 不可用时 views 为空、sync 说明原因。",
+        "operationId": "get_metrics",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "default": "1h",
+              "enum": [
+                "1h",
+                "6h",
+                "24h",
+                "7d"
+              ],
+              "title": "Range",
+              "type": "string"
+            }
+          },
+          {
+            "description": "可重复；默认全部预设视图",
+            "in": "query",
+            "name": "views",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "request_rate",
+                      "latency_p50",
+                      "latency_p95",
+                      "latency_p99",
+                      "error_rate",
+                      "services_up"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "可重复；默认全部预设视图",
+              "title": "Views"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "预设指标（viewer）",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/v1/operations/services": {
+      "get": {
+        "description": "核心服务、可选的监控组件，以及当前工作空间的集成；没有部署的组件为 not_configured。",
+        "operationId": "list_services",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceStatusList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "服务状态（viewer）",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
     "/api/v1/projects": {
       "get": {
         "operationId": "list_projects",
@@ -10047,11 +13037,14 @@
                 "description": "修改配置；widget_type 必须与现有类型相同（类型不能修改）",
                 "discriminator": {
                   "mapping": {
+                    "api_latency": "#/components/schemas/ApiLatencyWidgetUpdate",
                     "calendar_agenda": "#/components/schemas/CalendarAgendaWidgetUpdate",
                     "github_activity": "#/components/schemas/GitHubActivityWidgetUpdate",
                     "note": "#/components/schemas/NoteWidgetUpdate",
+                    "notifications": "#/components/schemas/NotificationsWidgetUpdate",
                     "quick_links": "#/components/schemas/QuickLinksWidgetUpdate",
                     "recent_docs": "#/components/schemas/RecentDocsWidgetUpdate",
+                    "service_health": "#/components/schemas/ServiceHealthWidgetUpdate",
                     "today_tasks": "#/components/schemas/TodayTasksWidgetUpdate",
                     "todo_summary": "#/components/schemas/TodoSummaryWidgetUpdate"
                   },
@@ -10078,6 +13071,15 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitHubActivityWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ServiceHealthWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ApiLatencyWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/NotificationsWidgetUpdate"
                   }
                 ],
                 "title": "Body"

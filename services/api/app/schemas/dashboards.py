@@ -123,6 +123,26 @@ class GitHubActivityConfig(_Strict):
     limit: int = Field(default=5, ge=1, le=20)
 
 
+class ServiceHealthConfig(_Strict):
+    """Sprint 5：组件调用 GET /operations/services（Sprint 5 契约第 7.2 节）。"""
+
+    limit: int = Field(default=8, ge=1, le=20)
+
+
+class ApiLatencyConfig(_Strict):
+    """Sprint 5：组件调用 GET /operations/metrics，显示一个延迟分位。"""
+
+    range: Literal["1h", "6h", "24h"] = "1h"
+    quantile: Literal["p50", "p95", "p99"] = "p95"
+
+
+class NotificationsConfig(_Strict):
+    """Sprint 5：组件调用 GET /notifications。"""
+
+    limit: int = Field(default=5, ge=1, le=20)
+    unread_only: bool = True
+
+
 class _WidgetBody(_Strict):
     layout: WidgetLayout
 
@@ -162,6 +182,21 @@ class GitHubActivityWidgetCreate(_WidgetBody):
     config: GitHubActivityConfig = Field(default_factory=GitHubActivityConfig)
 
 
+class ServiceHealthWidgetCreate(_WidgetBody):
+    widget_type: Literal["service_health"]
+    config: ServiceHealthConfig = Field(default_factory=ServiceHealthConfig)
+
+
+class ApiLatencyWidgetCreate(_WidgetBody):
+    widget_type: Literal["api_latency"]
+    config: ApiLatencyConfig = Field(default_factory=ApiLatencyConfig)
+
+
+class NotificationsWidgetCreate(_WidgetBody):
+    widget_type: Literal["notifications"]
+    config: NotificationsConfig = Field(default_factory=NotificationsConfig)
+
+
 WidgetCreate = Annotated[
     QuickLinksWidgetCreate
     | NoteWidgetCreate
@@ -169,7 +204,10 @@ WidgetCreate = Annotated[
     | TodayTasksWidgetCreate
     | CalendarAgendaWidgetCreate
     | RecentDocsWidgetCreate
-    | GitHubActivityWidgetCreate,
+    | GitHubActivityWidgetCreate
+    | ServiceHealthWidgetCreate
+    | ApiLatencyWidgetCreate
+    | NotificationsWidgetCreate,
     Field(discriminator="widget_type"),
 ]
 
@@ -213,6 +251,21 @@ class GitHubActivityWidgetUpdate(_WidgetUpdateBody):
     config: GitHubActivityConfig
 
 
+class ServiceHealthWidgetUpdate(_WidgetUpdateBody):
+    widget_type: Literal["service_health"]
+    config: ServiceHealthConfig
+
+
+class ApiLatencyWidgetUpdate(_WidgetUpdateBody):
+    widget_type: Literal["api_latency"]
+    config: ApiLatencyConfig
+
+
+class NotificationsWidgetUpdate(_WidgetUpdateBody):
+    widget_type: Literal["notifications"]
+    config: NotificationsConfig
+
+
 WidgetUpdate = Annotated[
     QuickLinksWidgetUpdate
     | NoteWidgetUpdate
@@ -220,7 +273,10 @@ WidgetUpdate = Annotated[
     | TodayTasksWidgetUpdate
     | CalendarAgendaWidgetUpdate
     | RecentDocsWidgetUpdate
-    | GitHubActivityWidgetUpdate,
+    | GitHubActivityWidgetUpdate
+    | ServiceHealthWidgetUpdate
+    | ApiLatencyWidgetUpdate
+    | NotificationsWidgetUpdate,
     Field(
         discriminator="widget_type",
         description="修改配置；widget_type 必须与现有类型相同（类型不能修改）",
@@ -233,7 +289,7 @@ class WidgetOut(BaseModel):
     dashboard_id: UUID
     widget_type: str = Field(
         description="当前版本内置：quick_links、note、todo_summary、today_tasks、"
-        "calendar_agenda、recent_docs、github_activity；"
+        "calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications；"
         "也可能是已不再支持的旧类型，前端应显示安全的错误卡片"
     )
     config: dict[str, Any] = Field(description="该类型的配置；前端按自己的 Registry 再校验一次")
@@ -325,8 +381,8 @@ class DashboardOverview(BaseModel):
     widgets: list[WidgetOut]
     summary: OverviewSummary
     modules: dict[str, ModuleStatus] = Field(
-        description="按模块名索引：tasks（Sprint 3）、calendar、knowledge、github（Sprint 4）；"
-        "单个模块失败只影响对应组件"
+        description="按模块名索引：tasks（Sprint 3）、calendar、knowledge、github（Sprint 4）、"
+        "operations、automations（Sprint 5）；单个模块失败只影响对应组件"
     )
     today_tasks: list[TaskBrief]
     generated_at: datetime
