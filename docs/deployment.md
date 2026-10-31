@@ -1,6 +1,6 @@
 # 部署与运行手册
 
-> 状态：Sprint 1 进行中。core Compose 已可一键启动，首次安装与登录接口已实现（T-0010）；备份与恢复（`make backup` / `make restore-verify`）计划在 S6-04 实现，目前会明确报“尚未实现”。
+> 状态：Sprint 6 进行中。Sprint 0 ~ 5 的功能已验收（`docs/acceptance/`）；备份与隔离恢复见第 14 节（S6-04）。
 
 ## 1. 一键启动（推荐）
 
@@ -126,9 +126,10 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 
 ## 5. 升级与停机
 
-1. `git pull`
-2. `make up`（重新构建镜像并滚动重建容器）
-3. `make migrate`
+1. `make backup`（升级前先备份，见第 14 节）
+2. `git pull`
+3. `make up`（重新构建镜像并滚动重建容器）
+4. `make migrate`
 
 停机用 `make down`，**不要**使用 `docker compose down -v`：`-v` 会删除数据卷。
 
@@ -141,7 +142,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
   没有设置足够长的 `SESSION_SECRET` 时 API 拒绝启动。
 - **客户端 IP**：Compose 中 API 只能经 Caddy 访问，因此设置了 `TRUST_FORWARDED_FOR=true`（登录限流按 `X-Forwarded-For`
   最右侧的地址计数）。如果绕过 Caddy 直接暴露 API，必须去掉这个设置，否则客户端可以伪造 IP 绕过限流。
-- 备份恢复尚未实现（S6-04）；在此之前请自行用 `pg_dump` 做数据库备份。
+- **备份**：把 `BACKUP_REPOSITORY` 配成异地仓库，定时运行 `make backup`，每月运行一次 `make restore-verify` 演练（第 14 节）。
 
 ## 7. 本机直接运行（开发）
 
@@ -186,7 +187,7 @@ make vikunja-down    # 停止，保留数据卷
   `http://caddy:8080/api/v1/webhooks/vikunja/<集成 ID>`，不经过对外端口。
 - 为了让 Webhook 能发到私有地址，Compose 里打开了 `VIKUNJA_OUTGOINGREQUESTS_ALLOWNONROUTABLEIPS`；
   因此要保持自助注册关闭，只给可信的人创建 Vikunja 用户。多人使用时改用出站代理（见核验 ADR 第 6 节）。
-- 数据在卷 `vikunja-db`（SQLite）与 `vikunja-files`；Vikunja 自带 `vikunja dump` / `restore` 备份命令，纳入 S6-04 的备份方案。
+- 数据在卷 `vikunja-db`（SQLite）与 `vikunja-files`。Vikunja 独立部署、各自备份：用它自带的 `vikunja dump` / `restore`（第 14.1 节）；`make backup` 只备份工作台的数据库。
 - 工作台连接 Vikunja 用的 API Token 在 Vikunja 原生界面的设置里创建，需要的最小权限见核验 ADR 第 3 节。
 - 在工作台里添加集成（workspace admin）：服务地址填 `http://vikunja:3456`（容器内地址，已在 `INTEGRATION_ALLOWED_HOSTS` 里），
   浏览器地址填 `VIKUNJA_PUBLIC_URL`，再粘贴 Token；保存后点“测试连接”，通过后会立即同步全部项目与任务。
@@ -405,3 +406,61 @@ n8n 是独立的 Compose（`infra/n8n/compose.yaml`），与 Vikunja 一样加�
     - 单个连接最长 `SSE_MAX_SECONDS` 秒（默认 600），到期后浏览器自动重连；
     - 每 `SSE_RECHECK_SECONDS` 秒（默认 60）复核会话与成员身份，登出或被移出工作空间后停止推送。
   - SSE 不是可靠队列：页面重连、重新可见时都会重新拉取数据。
+
+## 14. 备份与恢复（S6-04）
+
+工具与格式的核验见 `docs/decisions/2026-10-31-sprint-6-backup-and-scan-verification.md`。
+
+### 14.1 备份什么
+
+- **进备份**：工作台的 PostgreSQL 数据库（`pg_dump` custom 格式，备份时不用停服务），以及一份记录迁移版本与时间的 `backup-info.json`。
+- **不进备份**：
+  - `.env`：里面有解密凭证的 `CREDENTIAL_ENCRYPTION_KEY`、会话密钥和备份仓库的密码。
+    把它和备份分开保管（例如放进密码管理器），**不要只留在这台服务器上**。丢了它，备份里保存的第三方凭证就无法解密，备份本身也打不开。
+  - Redis：只有缓存、任务队列、SSE 事件与限流计数，丢失后会自动重建；会话与幂等记录都在 PostgreSQL 里。
+  - 独立部署的组件各自备份：Vikunja 用 `vikunja dump`（第 8 节）；n8n 备份它的数据卷与 `N8N_ENCRYPTION_KEY`；
+    AFFiNE 的 PostgreSQL、storage、config 要一起备份（第 9 节）。
+
+### 14.2 配置（`.env`）
+
+| 变量 | 作用 | 默认 |
+|---|---|---|
+| `BACKUP_REPOSITORY` | restic 仓库。本地目录只适合测试，不算异地；生产用 `s3:https://…`、`sftp:…`、`rest:…` 等 | `./backups/restic` |
+| `BACKUP_PASSWORD` | 仓库密码，`make env` 随机生成。**丢失就无法恢复** | 随机 |
+| `BACKUP_KEEP_DAILY` / `BACKUP_KEEP_WEEKLY` / `BACKUP_KEEP_MONTHLY` | 保留时长：最近 7 天每天一份、30 天内每周一份、90 天内每月一份 | `7d` / `30d` / `90d` |
+| `RESTORE_HTTP_PORT` | `make restore-verify` 临时环境的端口 | `18080` |
+
+S3 仓库的凭据（`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_DEFAULT_REGION`）只从环境变量读取，不写进 `.env`。
+
+### 14.3 命令
+
+- `make backup`：
+  - `pg_dump` 生成归档，用 `pg_restore --list` 确认完整；
+  - 写进 restic 仓库（加密）；
+  - 按保留策略清理旧快照（`forget --prune`），再 `check` 仓库。
+  - 归档只在权限 700 的临时目录里短暂存在，结束后删除。
+  - 第一次运行时自动初始化仓库。
+- `make restore-verify`（恢复演练）：
+  - 在**另一个 Compose 项目**（`<项目名>-restore-verify`，端口 `RESTORE_HTTP_PORT`，自己的网络与数据卷）里恢复最新快照；
+  - 执行 `alembic upgrade head`，确认迁移能在恢复出来的数据上运行；
+  - 冒烟检查（`scripts/smoke.sh`）与数据检查（用户、工作空间、仪表盘不为空）；
+  - 结束后删除这个临时项目。正在运行的栈不受影响。
+  - 临时环境**不启动 Worker**，恢复出来的集成凭证不会去连接真实的第三方服务。
+  - `scripts/restore-verify.sh --keep [快照 ID]` 会保留临时环境，便于登录核对；看完用 `scripts/restore-verify.sh --cleanup` 删除。
+- CI 的 A15 验收（`tests/e2e/backup_acceptance.py`）：
+  - 写入数据后备份，再改动正在运行的栈；
+  - 在临时环境里恢复后，用原来的账号登录，核对显示名、首页配置、日程与审计日志都是备份时的状态。
+
+### 14.4 定时备份与每月演练
+
+- **每天备份**：例如 crontab 加一行：`17 3 * * * cd /srv/my-workspace && make backup >> backups/backup.log 2>&1`。失败时 `make backup` 以非零状态退出，可以接到监控或邮件。
+- **每月演练**：运行 `make restore-verify`，把结果（快照 ID、耗时、是否通过）记下来。本机实测：恢复约 50 个用户的数据库并通过检查，约 26 秒。
+
+### 14.5 真实恢复（服务器损坏时）
+
+1. 在新机器上 `git clone` 并检出与备份相同或更新的版本（`backup-info.json` 里有备份时的提交号与迁移版本）。
+2. 放回单独保管的 `.env`（同一个 `CREDENTIAL_ENCRYPTION_KEY` 才能解密已保存的第三方凭证）。
+3. `docker compose up -d --wait postgres redis`。
+4. 取出快照：`docker run --rm -e RESTIC_REPOSITORY=… -e RESTIC_PASSWORD_FILE=… restic/restic:0.19.1@sha256:… restore latest --target <目录>`（写法同 `scripts/backup_common.sh`）。
+5. `docker compose exec -T postgres pg_restore -U <POSTGRES_USER> -d <POSTGRES_DB> --exit-on-error < <目录>/backup/workspace.dump`。
+6. `make up && make migrate && make smoke`，然后登录核对。

@@ -138,8 +138,8 @@ endif
 build-web: ## 构建前端生产包
 	$(NPM) --prefix $(WEB_DIR) run build
 
-backup: ## 备份（尚未实现，计划在 S6-04）
-	@echo "make backup 尚未实现：计划在 Sprint 6（S6-04）完成"; exit 1
+backup: env ## 备份数据库到加密的 restic 仓库，并按 7/30/90 日清理（见 docs/deployment.md 第 14 节）
+	scripts/backup.sh
 
-restore-verify: ## 在隔离环境验证恢复（尚未实现，计划在 S6-04）
-	@echo "make restore-verify 尚未实现：计划在 Sprint 6（S6-04）完成"; exit 1
+restore-verify: ## 在隔离的临时环境恢复最新备份并做冒烟检查，结束后删除临时环境
+	scripts/restore-verify.sh
