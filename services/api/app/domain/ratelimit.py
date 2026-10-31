@@ -38,3 +38,22 @@ class FailureLimiter:
 
     async def clear(self, key: str) -> None:
         await _resolve(self._redis.delete(key))
+
+
+class WindowLimiter:
+    """请求次数限流：Redis 固定窗口计数（V2 实例接口按实例限流）。"""
+
+    def __init__(self, redis: Redis, window_seconds: int) -> None:
+        self._redis = redis
+        self._window = window_seconds
+
+    async def hit(self, key: str, limit: int) -> int | None:
+        """记一次请求；超过上限时返回还需等待的秒数，否则返回 None。"""
+        async with self._redis.pipeline(transaction=False) as pipe:
+            pipe.incr(key)
+            pipe.expire(key, self._window, nx=True)
+            count, _ = await pipe.execute()
+        if int(count) <= limit:
+            return None
+        ttl = int(await _resolve(self._redis.ttl(key)))
+        return max(ttl, 1)

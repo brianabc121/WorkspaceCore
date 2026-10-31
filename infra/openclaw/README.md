@@ -13,11 +13,16 @@
 
 ## 文件
 
-| 文件 | 用途 | 核验 |
+> **OC-2 起，接入包由工作台生成**：实例页的“下载接入包”（`POST /api/v1/agents/instances/{id}/bundle`）
+> 返回一个 zip，里面是下面这些文件（已填好地址、凭证与 `inboundWhitelist`），外加 `compose.yaml` 与 `CHECKLIST.md`。
+> 模板和程序的源文件在 `services/api/app/agent_bundle/files/`：API 镜像只包含 `services/api`，所以从本目录移到了那里。
+> 部署时以接入包里的 `CHECKLIST.md` 为准；下面是 OC-0 时的说明，保留作为背景。
+
+| 文件（在接入包里） | 用途 | 核验 |
 |---|---|---|
 | `bin/myworkspace-secret-resolver` | OpenClaw exec SecretRef 的取密钥程序（protocolVersion 1），向工作台的 `/agent-api/v1/secrets/resolve` 取模型密钥等 | ADR 第 2 节第 6、7 项 |
-| `bin/myworkspace-openclaw-start` | 启动包装：先取 IM 令牌放进 `OPENIM_TOKEN`，再启动 OpenClaw 原入口 | 本机用模拟接口测过：令牌注入、退出码透传、凭证错误时重试 5 次后失败 |
-| `openclaw.json.template` | OpenClaw 配置模板：加固基线、exec 密钥源、MCP、`openim` 渠道 | ADR 第 2、7 节 |
+| `bin/myworkspace-openclaw-start` | 启动包装：先取 IM 令牌放进 `OPENIM_TOKEN`、上报版本（`/agent-api/v1/heartbeat`，失败不影响启动），再启动 OpenClaw 原入口 | 本机用模拟接口测过：令牌注入、心跳、退出码透传、凭证错误时重试 5 次后失败 |
+| `state/openclaw.json` | OpenClaw 配置：加固基线、exec 密钥源、MCP、`openim` 渠道 | ADR 第 2、7 节 |
 
 ## 部署步骤（单台 OpenClaw 服务器）
 

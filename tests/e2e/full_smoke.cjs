@@ -36,8 +36,9 @@ function pages() {
   return [...found, { route: '/settings/audit', title: '审计日志' }]
 }
 
-// 全部 GET 接口：路径参数用本次的工作空间与仪表盘，必填的查询参数给固定值；SSE 单独检查
-function readOperations(workspace, dashboard) {
+// 全部 GET 接口：路径参数用本次的工作空间与仪表盘，必填的查询参数给固定值；SSE 单独检查。
+// 只给 owner 的接口（summary 写着“（owner”，例如 V2 的实例与密钥库）在冒烟账号不是 owner 时跳过
+function readOperations(workspace, dashboard, role) {
   const spec = JSON.parse(fs.readFileSync(path.join(ROOT, 'services/api/openapi.json'), 'utf8'))
   const query = {
     start: '2026-01-05T00:00:00+08:00', end: '2026-01-12T00:00:00+08:00', q: 'smoke',
@@ -48,6 +49,7 @@ function readOperations(workspace, dashboard) {
   for (const [route, methods] of Object.entries(spec.paths)) {
     const op = methods.get
     if (!op || route === '/api/v1/events/stream') continue
+    if (role !== 'owner' && (op.summary || '').includes('（owner')) { skipped.push(route); continue }
     const params = op.parameters || []
     const unknown = params.filter((p) => p.in === 'path' && !(p.name in known))
     if (unknown.length) { skipped.push(route); continue }  // 需要具体资源 ID（任务、自动化）：由各 Sprint 验收覆盖
@@ -121,6 +123,7 @@ async function api(page, workspace, method, pathname, body) {
     const me = await api(page, null, 'GET', '/api/v1/me')
     check(me.status === 200, `登录后 /api/v1/me 应为 200，实际 ${me.status}`)
     const workspace = me.body.workspaces?.[0]?.id
+    const role = me.body.workspaces?.[0]?.role
     check(workspace, '当前用户没有工作空间')
     const dashboards = await api(page, workspace, 'GET', '/api/v1/dashboards')
     const dashboard = dashboards.body?.items?.find((d) => d.is_default)?.id || dashboards.body?.items?.[0]?.id
@@ -128,7 +131,7 @@ async function api(page, workspace, method, pathname, body) {
     step(`登录：${email}`)
 
     // ---------------------------------------------------------------- 2. 全部读接口
-    const { operations, skipped } = readOperations(workspace, dashboard)
+    const { operations, skipped } = readOperations(workspace, dashboard, role)
     for (const url of operations) probed.urls.add(new URL(url, base).href)
     const failed = []
     const declared = []  // 契约已声明、实现任务还没完成的接口（501 NOT_IMPLEMENTED）：单独列出，不算失败
@@ -140,7 +143,7 @@ async function api(page, workspace, method, pathname, body) {
     check(failed.length === 0, `读接口没有全部返回 200：\n  ${failed.join('\n  ')}`)
     const implemented = operations.length - declared.length
     check(implemented >= 25, `只找到 ${implemented} 个已实现的读接口，openapi.json 可能不完整`)
-    step(`全部读接口返回 200：${implemented} 个（需要具体资源 ID 的 ${skipped.length} 个由各 Sprint 验收覆盖）`)
+    step(`全部读接口返回 200：${implemented} 个（需要具体资源 ID 或 owner 角色的 ${skipped.length} 个由各 Sprint 验收覆盖）`)
     if (declared.length) console.log(`说明  契约已声明、尚未实现（501）：${declared.length} 个\n  ${declared.join('\n  ')}`)
 
     // ---------------------------------------------------------------- 核心服务都正常（Worker 心跳每分钟一次，刚启动时最多等 90 秒）

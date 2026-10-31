@@ -9,12 +9,15 @@
 认证失败一律 401 AGENT_UNAUTHORIZED，不区分原因。实现：OC-2（T-0054）、OC-3（T-0055）。
 """
 
+from ipaddress import IPv4Network, IPv6Network, ip_address
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Request, Security
+from fastapi import APIRouter, Depends, Path, Request, Response, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.api.deps import client_ip, get_agent_service
 from app.core.errors import not_implemented
+from app.domain.agents import AgentPrincipal, AgentService
 from app.schemas.agents import (
     HeartbeatRequest,
     HeartbeatResponse,
@@ -31,6 +34,39 @@ instance_token = HTTPBearer(
 )
 InstanceCredentials = Annotated[HTTPAuthorizationCredentials | None, Security(instance_token)]
 
+INGRESS_HEADER = "X-MyWS-Ingress"
+CERT_HEADER = "X-MyWS-Client-Cert-SHA256"
+
+Service = Annotated[AgentService, Depends(get_agent_service)]
+
+
+async def instance_principal(
+    request: Request, credentials: InstanceCredentials, service: Service
+) -> AgentPrincipal:
+    """实例认证。入口与证书指纹由接入入口的 Caddy 写进请求头；只在配置为可信时采用。"""
+    settings = request.app.state.settings
+    trusted = _from_ingress_proxy(request, settings.agent_ingress_proxy_networks)
+    return await service.authenticate(
+        credentials.credentials if credentials else None,
+        ingress=request.headers.get(INGRESS_HEADER) if trusted else None,
+        cert_fingerprint=request.headers.get(CERT_HEADER) if trusted else None,
+        client_ip=client_ip(request, settings),
+    )
+
+
+def _from_ingress_proxy(request: Request, networks: tuple[IPv4Network | IPv6Network, ...]) -> bool:
+    """直接对端（不看 X-Forwarded-For）是否是接入入口的 Caddy。"""
+    if not networks or request.client is None:
+        return False
+    try:
+        peer = ip_address(request.client.host)
+    except ValueError:
+        return False
+    return any(peer in network for network in networks)
+
+
+Principal = Annotated[AgentPrincipal, Depends(instance_principal)]
+
 router = APIRouter(prefix="/agent-api/v1", tags=["agent-api"])
 _errors = error_responses(401, 422, 429)
 
@@ -43,9 +79,16 @@ _errors = error_responses(401, 422, 429)
     responses=_errors,
 )
 async def resolve_agent_secrets(
-    credentials: InstanceCredentials, body: SecretResolveRequest
+    request: Request,
+    response: Response,
+    principal: Principal,
+    service: Service,
+    body: SecretResolveRequest,
 ) -> SecretResolveResponse:
-    raise not_implemented("T-0054")
+    response.headers["Cache-Control"] = "no-store"
+    return await service.resolve_secrets(
+        principal, body.ids, client_ip=client_ip(request, request.app.state.settings)
+    )
 
 
 @router.post(
@@ -65,9 +108,9 @@ async def issue_agent_im_token(credentials: InstanceCredentials) -> ImTokenRespo
     responses=_errors,
 )
 async def agent_heartbeat(
-    credentials: InstanceCredentials, body: HeartbeatRequest
+    principal: Principal, service: Service, body: HeartbeatRequest
 ) -> HeartbeatResponse:
-    raise not_implemented("T-0054")
+    return await service.heartbeat(principal, body)
 
 
 gateway = APIRouter(include_in_schema=False)

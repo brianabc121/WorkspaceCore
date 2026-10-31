@@ -7,10 +7,16 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Security, status
+from fastapi import APIRouter, Depends, Query, Request, Response, Security, status
 
-from app.api.deps import authenticated, csrf_protected, workspace_owner
-from app.core.errors import not_implemented
+from app.api.deps import (
+    authenticated,
+    client_ip,
+    csrf_protected,
+    get_agent_service,
+    workspace_owner,
+)
+from app.domain.agents import AgentService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.agents import (
     AgentInstanceCreate,
@@ -35,13 +41,18 @@ from app.schemas.common import error_responses
 router = APIRouter(tags=["agents"], dependencies=[Security(authenticated)])
 
 Owner = Annotated[WorkspaceAccess, Depends(workspace_owner)]
+Service = Annotated[AgentService, Depends(get_agent_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 _write = [Depends(csrf_protected)]
 _read_errors = error_responses(401, 403, 404, 422)
 _write_errors = error_responses(401, 403, 404, 409, 422)
 _im_errors = error_responses(401, 403, 404, 409, 422, 503)
-_T = "T-0054"
+
+
+def _ip(request: Request, service: AgentService) -> str:
+    return client_ip(request, request.app.state.settings)
+
 
 _ZIP = {
     "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}},
@@ -56,8 +67,8 @@ _ZIP = {
 
 
 @router.get("/agents/settings", summary="实例总开关（owner）", responses=_read_errors)
-async def get_agent_settings(access: Owner) -> AgentSettingsOut:
-    raise not_implemented(_T)
+async def get_agent_settings(access: Owner, service: Service) -> AgentSettingsOut:
+    return await service.get_settings(access)
 
 
 @router.patch(
@@ -68,8 +79,10 @@ async def get_agent_settings(access: Owner) -> AgentSettingsOut:
     dependencies=_write,
     responses=_im_errors,
 )
-async def update_agent_settings(access: Owner, body: AgentSettingsUpdate) -> AgentSettingsOut:
-    raise not_implemented(_T)
+async def update_agent_settings(
+    access: Owner, request: Request, service: Service, body: AgentSettingsUpdate
+) -> AgentSettingsOut:
+    return await service.update_settings(access, body, client_ip=_ip(request, service))
 
 
 # ---------------------------------------------------------------- 实例
@@ -77,9 +90,9 @@ async def update_agent_settings(access: Owner, body: AgentSettingsUpdate) -> Age
 
 @router.get("/agents/instances", summary="实例列表（owner）", responses=_read_errors)
 async def list_agent_instances(
-    access: Owner, cursor: Cursor = None, limit: Limit = 50
+    access: Owner, service: Service, cursor: Cursor = None, limit: Limit = 50
 ) -> AgentInstancePage:
-    raise not_implemented(_T)
+    return await service.list_instances(access, cursor=cursor, limit=limit)
 
 
 @router.post(
@@ -91,13 +104,17 @@ async def list_agent_instances(
     dependencies=_write,
     responses=_write_errors,
 )
-async def create_agent_instance(access: Owner, body: AgentInstanceCreate) -> AgentInstanceOut:
-    raise not_implemented(_T)
+async def create_agent_instance(
+    access: Owner, request: Request, service: Service, body: AgentInstanceCreate
+) -> AgentInstanceOut:
+    return await service.create_instance(access, body, client_ip=_ip(request, service))
 
 
 @router.get("/agents/instances/{instance_id}", summary="实例详情（owner）", responses=_read_errors)
-async def get_agent_instance(access: Owner, instance_id: UUID) -> AgentInstanceOut:
-    raise not_implemented(_T)
+async def get_agent_instance(
+    access: Owner, service: Service, instance_id: UUID
+) -> AgentInstanceOut:
+    return await service.get_instance(access, instance_id)
 
 
 @router.patch(
@@ -107,9 +124,9 @@ async def get_agent_instance(access: Owner, instance_id: UUID) -> AgentInstanceO
     responses=_im_errors,
 )
 async def update_agent_instance(
-    access: Owner, instance_id: UUID, body: AgentInstanceUpdate
+    access: Owner, request: Request, service: Service, instance_id: UUID, body: AgentInstanceUpdate
 ) -> AgentInstanceOut:
-    raise not_implemented(_T)
+    return await service.update_instance(access, instance_id, body, client_ip=_ip(request, service))
 
 
 @router.post(
@@ -120,9 +137,11 @@ async def update_agent_instance(
     responses=_im_errors,
 )
 async def disable_agent_instance(
-    access: Owner, instance_id: UUID, body: VersionBody
+    access: Owner, request: Request, service: Service, instance_id: UUID, body: VersionBody
 ) -> AgentInstanceOut:
-    raise not_implemented(_T)
+    return await service.set_enabled(
+        access, instance_id, enabled=False, version=body.version, client_ip=_ip(request, service)
+    )
 
 
 @router.post(
@@ -132,9 +151,11 @@ async def disable_agent_instance(
     responses=_write_errors,
 )
 async def enable_agent_instance(
-    access: Owner, instance_id: UUID, body: VersionBody
+    access: Owner, request: Request, service: Service, instance_id: UUID, body: VersionBody
 ) -> AgentInstanceOut:
-    raise not_implemented(_T)
+    return await service.set_enabled(
+        access, instance_id, enabled=True, version=body.version, client_ip=_ip(request, service)
+    )
 
 
 @router.post(
@@ -147,8 +168,20 @@ async def enable_agent_instance(
     responses={200: _ZIP, **_write_errors},
     response_model=None,
 )
-async def issue_agent_bundle(access: Owner, instance_id: UUID, body: BundleRequest) -> None:
-    raise not_implemented(_T)
+async def issue_agent_bundle(
+    access: Owner, request: Request, service: Service, instance_id: UUID, body: BundleRequest
+) -> Response:
+    filename, data = await service.issue_bundle(
+        access, instance_id, body, client_ip=_ip(request, service)
+    )
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.post(
@@ -158,9 +191,20 @@ async def issue_agent_bundle(access: Owner, instance_id: UUID, body: BundleReque
     responses=_write_errors,
 )
 async def revoke_agent_credential(
-    access: Owner, instance_id: UUID, credential_id: UUID, body: VersionBody
+    access: Owner,
+    request: Request,
+    service: Service,
+    instance_id: UUID,
+    credential_id: UUID,
+    body: VersionBody,
 ) -> AgentInstanceOut:
-    raise not_implemented(_T)
+    return await service.revoke_credential(
+        access,
+        instance_id,
+        credential_id,
+        version=body.version,
+        client_ip=_ip(request, service),
+    )
 
 
 @router.put(
@@ -170,9 +214,9 @@ async def revoke_agent_credential(
     responses=_write_errors,
 )
 async def replace_agent_secret_grants(
-    access: Owner, instance_id: UUID, body: SecretGrantsReplace
+    access: Owner, request: Request, service: Service, instance_id: UUID, body: SecretGrantsReplace
 ) -> AgentInstanceOut:
-    raise not_implemented(_T)
+    return await service.replace_grants(access, instance_id, body, client_ip=_ip(request, service))
 
 
 # ---------------------------------------------------------------- 密钥库
@@ -180,9 +224,9 @@ async def replace_agent_secret_grants(
 
 @router.get("/agents/secrets", summary="密钥列表（owner，不含明文）", responses=_read_errors)
 async def list_agent_secrets(
-    access: Owner, cursor: Cursor = None, limit: Limit = 50
+    access: Owner, service: Service, cursor: Cursor = None, limit: Limit = 50
 ) -> AgentSecretPage:
-    raise not_implemented(_T)
+    return await service.list_secrets(access, cursor=cursor, limit=limit)
 
 
 @router.post(
@@ -192,8 +236,10 @@ async def list_agent_secrets(
     dependencies=_write,
     responses=_write_errors,
 )
-async def create_agent_secret(access: Owner, body: AgentSecretCreate) -> AgentSecretOut:
-    raise not_implemented(_T)
+async def create_agent_secret(
+    access: Owner, request: Request, service: Service, body: AgentSecretCreate
+) -> AgentSecretOut:
+    return await service.create_secret(access, body, client_ip=_ip(request, service))
 
 
 @router.get(
@@ -203,13 +249,21 @@ async def create_agent_secret(access: Owner, body: AgentSecretCreate) -> AgentSe
 )
 async def list_secret_accesses(
     access: Owner,
+    service: Service,
     instance_id: UUID | None = None,
     secret_id: UUID | None = None,
     result: SecretAccessResult | None = None,
     cursor: Cursor = None,
     limit: Limit = 50,
 ) -> SecretAccessPage:
-    raise not_implemented(_T)
+    return await service.list_accesses(
+        access,
+        instance_id=instance_id,
+        secret_id=secret_id,
+        result=result,
+        cursor=cursor,
+        limit=limit,
+    )
 
 
 @router.patch(
@@ -219,9 +273,9 @@ async def list_secret_accesses(
     responses=_write_errors,
 )
 async def update_agent_secret(
-    access: Owner, secret_id: UUID, body: AgentSecretUpdate
+    access: Owner, request: Request, service: Service, secret_id: UUID, body: AgentSecretUpdate
 ) -> AgentSecretOut:
-    raise not_implemented(_T)
+    return await service.update_secret(access, secret_id, body, client_ip=_ip(request, service))
 
 
 @router.post(
@@ -232,9 +286,9 @@ async def update_agent_secret(
     responses=_write_errors,
 )
 async def rotate_agent_secret(
-    access: Owner, secret_id: UUID, body: AgentSecretRotate
+    access: Owner, request: Request, service: Service, secret_id: UUID, body: AgentSecretRotate
 ) -> AgentSecretOut:
-    raise not_implemented(_T)
+    return await service.rotate_secret(access, secret_id, body, client_ip=_ip(request, service))
 
 
 @router.delete(
@@ -246,6 +300,10 @@ async def rotate_agent_secret(
     responses=_write_errors,
 )
 async def delete_agent_secret(
-    access: Owner, secret_id: UUID, version: Annotated[int, Query(ge=1)]
+    access: Owner,
+    request: Request,
+    service: Service,
+    secret_id: UUID,
+    version: Annotated[int, Query(ge=1)],
 ) -> None:
-    raise not_implemented(_T)
+    await service.delete_secret(access, secret_id, version=version, client_ip=_ip(request, service))
