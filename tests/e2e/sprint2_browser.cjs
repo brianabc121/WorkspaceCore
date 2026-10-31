@@ -63,7 +63,10 @@ function overview(page, workspaceId) {
   const { page } = await login(browser, `alice-${run}@browser.example.com`, problems)
 
   for (const title of STARTERS) await page.getByRole('article', { name: title }).waitFor()
-  check(await page.getByText('任务模块暂不可用，尚未接入任务服务。').count() === 2, '两个任务组件应显示尚未接入')
+  // 组件卡片与首页聚合的模块状态不一定同时到达：等两段降级说明都出现再计数（T-0048）
+  const unavailable = page.getByText('任务模块暂不可用，尚未接入任务服务。')
+  await unavailable.nth(1).waitFor()
+  check(await unavailable.count() === 2, '两个任务组件应显示尚未接入')
   check(await page.locator('.summary-number').count() === 0, '汇总值未知时不应显示数字')
   step('首页显示 4 个入门组件；A05 任务模块不可用时任务组件显示降级说明、不显示 0，便签与链接正常')
 

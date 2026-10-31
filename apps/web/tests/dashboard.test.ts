@@ -54,6 +54,35 @@ describe('仪表盘首页', () => {
     expect(screen.queryByText('SHOULD NOT RENDER')).not.toBeInTheDocument()
     expect(screen.queryByText('0', { selector: '.summary-number' })).not.toBeInTheDocument()
   })
+  it('keeps widget content on screen while the overview refreshes in the background', async () => {
+    // T-0048：SSE 建立后的失效会立即重新拉取首页；已有数据时组件不能闪成“正在加载组件…”
+    let calls = 0
+    let finish: ((r: Response) => void) | undefined
+    mockApi((r) => {
+      if (pathOf(r) !== '/api/v1/dashboard/overview') return undefined
+      calls += 1
+      return calls === 1 ? Response.json(overview) : new Promise<Response>((resolve) => { finish = resolve })
+    })
+    await openApp()
+    expect(await screen.findByText(/任务模块暂不可用/)).toBeVisible()
+    await fireEvent.click(screen.getByRole('button', { name: '刷新首页' }))
+    await vi.waitFor(() => expect(finish).toBeDefined())
+    expect(screen.getByText(/任务模块暂不可用/)).toBeVisible()
+    expect(screen.queryByText('正在加载组件…')).not.toBeInTheDocument()
+    finish!(Response.json(overview))
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: '刷新首页' })).toBeEnabled())
+    expect(screen.getByText(/任务模块暂不可用/)).toBeVisible()
+  })
+  it('shows a loading state until the first overview arrives', async () => {
+    let finish: ((r: Response) => void) | undefined
+    mockApi((r) => pathOf(r) === '/api/v1/dashboard/overview' ? new Promise<Response>((resolve) => { finish = resolve }) : undefined)
+    await openApp()
+    await vi.waitFor(() => expect(finish).toBeDefined())
+    expect(await screen.findByText('正在加载…')).toBeVisible()
+    finish!(Response.json(overview))
+    expect(await screen.findByText(/任务模块暂不可用/)).toBeVisible()
+    expect(screen.queryByText('正在加载…')).not.toBeInTheDocument()
+  })
   it('shows stale module data with its timestamp instead of calling it fresh', async () => {
     mockApi((r) => pathOf(r) === '/api/v1/dashboard/overview' ? Response.json({ ...overview, summary: { ...overview.summary, pending_tasks: 7 }, modules: { tasks: { status: 'stale', as_of: overview.generated_at, retryable: true } } }) : undefined)
     await openApp()

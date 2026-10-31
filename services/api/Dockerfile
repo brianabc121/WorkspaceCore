@@ -4,7 +4,7 @@
 #   迁移:   alembic upgrade head
 # 版本说明见 docs/decisions/2026-10-29-backend-stack.md 与 2026-10-30-sprint-0-integration.md。
 
-FROM python:3.12.15-slim-trixie AS build
+FROM python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 AS build
 RUN pip install --no-cache-dir uv==0.12.24
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -18,7 +18,7 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
 
-FROM python:3.12.15-slim-trixie
+FROM python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --home-dir /app --shell /usr/sbin/nologin app
 COPY --from=build /opt/venv /opt/venv

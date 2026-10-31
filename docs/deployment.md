@@ -1,7 +1,13 @@
 # 部署与运行手册
 
-> 状态：Sprint 6 进行中。Sprint 0 ~ 5 的功能已验收（`docs/acceptance/`）；备份与隔离恢复见第 14 节（S6-04），
-> 安全扫描、完整冒烟与性能基准见第 15 节（S6-05）。
+> 状态：Sprint 6（2026-10-31）。Sprint 0 ~ 5 的功能已验收（`docs/acceptance/`）。
+> - 升级与回滚：第 5 节；
+> - 备份与隔离恢复：第 14 节；
+> - 安全扫描、完整冒烟与性能基准：第 15 节；
+> - 所有组件的锁定版本与许可证：`docs/versions.md`；
+> - 发布前逐项检查：`docs/release-checklist.md`。
+>
+> AI 助手（S6-01 ~ S6-03）等人类选定 AI 服务后再做，目前页面上只有占位说明。
 
 ## 1. 一键启动（推荐）
 
@@ -24,8 +30,8 @@ make smoke     # 经 Caddy 检查健康、就绪、前端页面与安全响应�
 make setup-token   # 显示 .env 里的 SETUP_TOKEN
 ```
 
-在网页的安装页面填写邮箱、显示名、密码（12–128 个字符）、工作空间名称和安装凭据即可（安装页由前端任务 T-0012 提供）。
-在此之前可以直接调用接口：
+第一次打开首页会自动进入安装页，填写邮箱、显示名、密码（12–128 个字符）、工作空间名称和安装凭据即可。
+也可以直接调用接口：
 
 ```bash
 curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -H 'Origin: http://localhost:8080' \
@@ -40,6 +46,9 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | `make up` | 构建镜像并启动 6 个服务，等待全部健康检查通过（最多 300 秒） |
 | `make migrate` | 在运行中的 `api` 容器里执行 `alembic upgrade head` |
 | `make smoke` | 冒烟检查（`scripts/smoke.sh`），CI 使用同一个脚本 |
+| `make smoke-full` | 完整端到端冒烟：全部读接口与页面、核心服务、SSE、写入往返、登出（第 15.2 节） |
+| `make backup` / `make restore-verify` | 加密备份 / 在隔离环境恢复演练（第 14 节） |
+| `make scan` / `make perf` | 安全扫描 / 性能基准（第 15 节） |
 | `make ps` / `make logs` | 查看服务状态 / 跟踪日志 |
 | `make down` | 停止并删除容器，**保留数据卷**（数据不会丢） |
 
@@ -129,14 +138,57 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 
 日志：所有服务输出到 stdout，由 Docker 的 json-file 驱动按 10 MB × 5 个文件轮转。API 与 Worker 的日志是 JSON，每条带 `request_id`；健康检查成功的请求只在 `LOG_LEVEL=DEBUG` 时记录。
 
-## 5. 升级与停机
+## 5. 升级、回滚与停机
 
-1. `make backup`（升级前先备份，见第 14 节）
-2. `git pull`
-3. `make up`（重新构建镜像并滚动重建容器）
-4. `make migrate`
+发布前的逐项检查见 `docs/release-checklist.md`；所有组件的锁定版本见 `docs/versions.md`。
 
-停机用 `make down`，**不要**使用 `docker compose down -v`：`-v` 会删除数据卷。
+### 5.1 升级
+
+1. 读新版本的变更：`docs/versions.md` 与 `services/api/migrations/versions/` 有没有变化，需不需要新的 `.env` 变量。
+2. 记下当前版本，回滚时要用：
+   - `git rev-parse HEAD`；
+   - `docker compose exec -T api alembic current`，例如 `0010 (head)`。
+3. `make backup`，记下输出里的快照 ID（`备份完成：<快照 ID> <时间>`）；把当前的 `.env` 另存一份。
+4. `git fetch && git checkout <新版本的 tag 或提交>`，然后 `make env`：只补上新增的变量，不改已有的值。
+5. `docker compose build`：先构建新镜像，旧容器照常服务。
+6. `docker compose run --rm --no-deps -T api alembic upgrade head`：用新镜像执行迁移，此时旧版本仍在运行。
+   - 迁移只新增对象（第 5.2 节），旧代码不受影响。
+7. `make up`：用新镜像重建容器，等待全部健康检查通过。
+8. `make smoke`。装了 `tests/e2e` 的依赖时再跑 `make smoke-full`。
+9. 登录核对首页、任务、日历等常用页面，查看运维页的服务状态。
+
+Vikunja、n8n 等独立部署的组件分开升级：
+- 先各自备份（Vikunja 用 `vikunja dump`；n8n 备份数据卷与 `N8N_ENCRYPTION_KEY`）；
+- 再改 `infra/*/compose.yaml` 里的 tag + digest，按对应的核验 ADR 重新验证。
+
+### 5.2 数据库迁移的约定
+
+- 迁移 `0001` ~ `0010` 都**只新增**表、索引、触发器，每个都有 downgrade。
+  CI 每次都跑 `upgrade head → downgrade base → upgrade head`（`ci-api.yml`），恢复演练也会在恢复出来的数据上执行 `upgrade head`。
+- 以后的迁移继续遵守“先扩展、后收缩”：
+  - 新版本只加表、加列（可为空或有默认值），旧代码照常运行；
+  - 删列、改类型、改名分两次发布：先让代码不再使用，下一次发布再删除。
+- **会改写或删除已有数据的迁移不可逆**：downgrade 无法找回数据。这类迁移要写明，并由人类决定后再合并（D-0004 第 3 节）；回滚只能从备份恢复。
+- downgrade 会删除这次迁移新增的表，**连同其中的数据**。例如退回 `0009` 会删除自动化的连接、白名单与执行记录。
+
+### 5.3 回滚
+
+按升级时走到了哪一步，选择对应的做法：
+
+| 情况 | 做法 |
+|---|---|
+| 迁移前就失败了（构建失败、`make env` 后发现问题） | `git checkout <旧版本>`，旧容器一直在运行，不用做别的 |
+| 已经迁移，但这次没有新的迁移 | `git checkout <旧版本>` → `make up` → `make smoke` |
+| 已经迁移，有新的迁移，而且只新增对象 | **先用新版本的代码**执行 `docker compose exec -T api alembic downgrade <升级前的版本号>`（旧代码里没有新迁移的 downgrade 脚本），再 `git checkout <旧版本>` → `make up` → `make smoke`。新表里在这期间写入的数据会丢失 |
+| downgrade 失败、迁移不可逆，或数据已经出问题 | 从升级前的快照恢复：<br>1. `scripts/restore-verify.sh <快照 ID>` 先在隔离环境验证这个快照；<br>2. `git checkout <旧版本>`，放回升级前的 `.env`；<br>3. `make down`，再按第 14.5 节恢复（把 `latest` 换成这个快照 ID）；<br>4. `make up && make smoke`。<br>升级之后写入的数据会丢失 |
+| 第三方镜像升级后有问题 | 改回旧的 tag + digest（`git revert` 那次提交）→ `make up`。**PostgreSQL 换了大版本时不能这样回滚**：数据目录不兼容，只能从备份恢复 |
+
+- 回滚后，在任务日志或 issue 里记下原因、做法与丢失的数据范围。
+- 修复后按升级步骤重新发布。
+
+### 5.4 停机
+
+停机用 `make down`。**不要**使用 `docker compose down -v`：`-v` 会删除数据卷。
 
 ## 6. 生产环境注意事项
 
@@ -148,6 +200,10 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 - **客户端 IP**：Compose 中 API 只能经 Caddy 访问，因此设置了 `TRUST_FORWARDED_FOR=true`（登录限流按 `X-Forwarded-For`
   最右侧的地址计数）。如果绕过 Caddy 直接暴露 API，必须去掉这个设置，否则客户端可以伪造 IP 绕过限流。
 - **备份**：把 `BACKUP_REPOSITORY` 配成异地仓库，定时运行 `make backup`，每月运行一次 `make restore-verify` 演练（第 14 节）。
+- **版本锁定**：所有镜像都是 tag + digest（`docs/versions.md`）。不要改成 `latest`；升级按第 5 节和 `docs/release-checklist.md` 进行。
+- **许可证**：Grafana、Vikunja 是 AGPL-3.0，n8n 是 Sustainable Use License，Redis 7.4 是 RSALv2 / SSPLv1。
+  自托管自用没有问题；要对外提供服务或分发之前，先看 `docs/versions.md` 第 5 节。
+- **发布前**：按 `docs/release-checklist.md` 逐项检查（CI、扫描、版本锁定、备份演练、`.env` 与密钥轮换、性能、回滚方案）。
 
 ## 7. 本机直接运行（开发）
 

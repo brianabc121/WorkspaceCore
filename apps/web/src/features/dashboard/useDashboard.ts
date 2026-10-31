@@ -21,6 +21,9 @@ export function useDashboard() {
   const widgets = computed(() => selected.value ? widgetsQuery.data.value?.items ?? [] : overviewQuery.data.value?.widgets ?? [])
   const loading = computed(() => overviewQuery.isPending.value || (!!selected.value && widgetsQuery.isPending.value))
   const fetching = computed(() => overviewQuery.isFetching.value || (!!selected.value && widgetsQuery.isFetching.value))
+  // 组件只在还没有数据时显示“加载中”：已有数据时，后台重新拉取（SSE 建立或重连后的失效、窗口重新获得焦点、刷新）
+  // 继续显示已有内容，不让所有组件闪成“正在加载组件…”（T-0048）
+  const cardLoading = computed(() => (overviewQuery.isFetching.value && !overviewQuery.data.value) || (!!selected.value && widgetsQuery.isFetching.value && !widgetsQuery.data.value))
   const queryError = computed(() => overviewQuery.error.value ?? (selected.value ? widgetsQuery.error.value : null))
   const failure = ref<unknown>(null)
   const notice = ref('')
@@ -168,5 +171,5 @@ export function useDashboard() {
       await refresh(overviewQuery)
     }, '组件已删除')
   }
-  return { overview: overviewQuery.data, dashboard, widgets, shownWidgets, choices, loading, fetching, queryError, denied, error, failure, notice, pending, canEdit, editing, dirty, blocked, beginEdit, changeLayout, saveLayout, importJson, reload, choose, loadChoices, makeDefault, saveWidget, removeWidget }
+  return { overview: overviewQuery.data, dashboard, widgets, shownWidgets, choices, loading, fetching, cardLoading, queryError, denied, error, failure, notice, pending, canEdit, editing, dirty, blocked, beginEdit, changeLayout, saveLayout, importJson, reload, choose, loadChoices, makeDefault, saveWidget, removeWidget }
 }

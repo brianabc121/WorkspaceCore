@@ -14,7 +14,7 @@ name: my-workspace-n8n
 services:
   # 数据卷第一次创建时属于 root，而 n8n 以 node（uid 1000）运行；这里只负责改一次属主
   volume-init:
-    image: postgres:16.15-alpine3.24
+    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     entrypoint: ["chown", "-R", "1000:1000", "/data"]
     volumes:
       - n8n-data:/data

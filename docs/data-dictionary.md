@@ -1,6 +1,7 @@
 # 数据字典
 
-> 状态：Sprint 3 进行中（迁移 0006 已完成）。目标实体清单见 `docs/DEVELOPMENT_SPEC.md` 第 5 节；本文记录**已经迁移**的数据库对象。
+> 状态：Sprint 6（迁移到 `0010`）。目标实体清单见 `docs/DEVELOPMENT_SPEC.md` 第 5 节；本文记录**已经迁移**的数据库对象。
+> 迁移 `0001` ~ `0010` 都只新增对象，都有 downgrade；升级与回退的做法见 `docs/deployment.md` 第 5 节。
 
 ## 约定
 
@@ -100,5 +101,19 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 | 表 | 主要字段 | 约束与说明 |
 |---|---|---|
 | `search_documents` | `id`、`workspace_id`、`resource_type`、`resource_id`、`provider`、`title`、`body`、`context`、`source_url`、`owner_id`、`visibility_json`、`source_updated_at`、`search_vector`、`indexed_at` | 跨资源搜索索引（规范 5.1 第 12 项），**只由触发器维护**，应用只读。触发器 `search_index` 挂在 `external_resources`、`bookmarks`、`calendar_events` 上，插入、更新、tombstone、删除都在同一个事务里同步；Actions 运行不进索引。只存标题、备注、说明、地点、标签与上下文（项目名 / 仓库名 / 日期），不含 Token 与外部文档正文。`(resource_type, resource_id)` 唯一；随工作空间级联删除；`owner_id` 只在私有收藏上有值（查询时只对该用户可见），创建者被删除的私有收藏从索引移除；`search_vector` 是 `to_tsvector('english', title \|\| ' ' \|\| body)` 的生成列（GIN 索引）；`title` 另有 `gin_trgm_ops` 索引供中文模糊匹配；收藏的 `source_url` 为 NULL，查询时用知识来源的地址拼出。`workspace.search_rebuild()` 整体重建（`python -m app.commands.reindex_search`） |
+
+### 迁移 `0009`（S5-03）
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `notifications` | `id`、`workspace_id`、`user_id`、`type`、`severity`、`title`、`body`、`link`、`source_key`、`read_at`、`created_at` | 通知中心，每个收件人一行。`(user_id, workspace_id, source_key)` 在 `source_key` 非空时唯一，同一事件不会重复通知；`ix_notifications_unread` 是只含未读的部分索引（未读数）；`ix_notifications_recipient_created` 用于按时间分页；随用户、工作空间级联删除。`title` / `body` 按纯文本显示，不含 Token 与第三方 payload |
+
+### 迁移 `0010`（S5-04）
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `automation_connections` | `id`、`workspace_id`、`base_url`、`public_url`、`status`、`api_key_ref`、`trigger_secret_ref`、`settings_json`、`version`、`created_at`、`updated_at` | 每个工作空间最多一个 n8n 连接（`workspace_id` 唯一）；API Key 与触发共享密钥只存 `enc:v1` 引用，从不返回；随工作空间级联删除 |
+| `automations` | `id`、`workspace_id`、`name`、`description`、`workflow_id`、`webhook_path`、`params_json`、`enabled`、`workflow_active`、`deleted_at`、`version`、`created_at`、`updated_at` | 白名单工作流，软删除（`deleted_at`）；未删除的行里 `(workspace_id, webhook_path)`、`(workspace_id, workflow_id)` 各自唯一（部分唯一索引）；`params_json` 是允许的参数定义，不含参数值 |
+| `automation_runs` | `id`、`workspace_id`、`automation_id`、`status`、`trace_id`、`external_execution_id`、`triggered_by`、`error_summary`、`started_at`、`finished_at`、`created_at`、`updated_at` | 执行记录，保留（白名单删除后仍在）；**不保存触发参数与第三方 payload**；`(automation_id, external_execution_id)` 在后者非空时唯一；`ix_automation_runs_open` 是 `queued` / `running` / `unknown` 的部分索引，供对账；`triggered_by` 在用户删除时置空 |
 
 ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。
