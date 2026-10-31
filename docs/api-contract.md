@@ -1,6 +1,6 @@
 # API 契约
 
-> 状态：Sprint 1 ~ 5 端点已全部实现。完整规范见 `docs/DEVELOPMENT_SPEC.md` 第 6 节。
+> 状态：Sprint 1 ~ 5 端点已全部实现；V2（OpenClaw、IM、审批）的端点已在 OC-1 声明，实现中。完整规范见 `docs/DEVELOPMENT_SPEC.md` 第 6 节。
 > **机器可读的接口以 `services/api/openapi.json` 为准**（`make openapi` 由代码生成，CI 检查一致性），前端据此生成类型。
 > Sprint 1 的 Cookie、CSRF、工作空间上下文、错误码等约定见 `docs/decisions/2026-10-30-sprint-1-auth-contract.md`。
 > Sprint 2 的仪表盘、Widget Registry、布局、乐观并发与首页聚合约定见 `docs/decisions/2026-10-30-sprint-2-dashboard-contract.md`。
@@ -154,3 +154,56 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
   - `IntegrationCheck.name`、集成的 `provider` 不加值：n8n 连接单独放在 `/automations/connection`。
 - SSE 的事件类型在前端用 `components["schemas"]["InvalidateEvent"]`；开始推送之前的错误是普通 JSON。
 - 新增错误码：`409 AUTOMATION_UNAVAILABLE`（`details.reason`）、`409 AUTOMATION_EXISTS`（`details.existing_id`）。
+
+## V2 端点（OpenClaw 实例、密钥库、IM、工具审批）
+
+约定见 `docs/decisions/2026-10-31-v2-oc1-contract.md`（下称“V2 契约”）；上游核验见
+`docs/decisions/2026-10-31-v2-oc0-openclaw-openim-verification.md`。所有端点目前返回 `501`，由括号里的任务实现。
+
+**管理员接口**（浏览器；会话 + CSRF + `X-Workspace-Id`）：
+
+| 方法 | 路径 | 说明 | 状态 |
+|---|---|---|---|
+| GET / PATCH | `/api/v1/agents/settings` | 实例总开关（owner） | 已声明（T-0054） |
+| GET / POST | `/api/v1/agents/instances` | 实例列表 / 登记（owner；登记不签发凭证） | 已声明（T-0054） |
+| GET / PATCH | `/api/v1/agents/instances/{instance_id}` | 详情 / 修改（乐观并发；网络模式不能改） | 已声明（T-0054） |
+| POST | `/api/v1/agents/instances/{instance_id}/disable`、`/enable` | 停用（凭证失效、IM 强制下线）/ 启用 | 已声明（T-0054） |
+| POST | `/api/v1/agents/instances/{instance_id}/bundle` | 生成接入包（`application/zip`）并签发新凭证；凭证只在这里出现一次 | 已声明（T-0054） |
+| POST | `/api/v1/agents/instances/{instance_id}/credentials/{credential_id}/revoke` | 立即吊销一份凭证 | 已声明（T-0054） |
+| PUT | `/api/v1/agents/instances/{instance_id}/secret-grants` | 实例可取用的密钥（整体替换） | 已声明（T-0054） |
+| GET / POST | `/api/v1/agents/secrets` | 密钥列表 / 新增（只写不读） | 已声明（T-0054） |
+| GET | `/api/v1/agents/secrets/accesses` | 取密钥记录 | 已声明（T-0054） |
+| PATCH / DELETE | `/api/v1/agents/secrets/{secret_id}` | 改名称与说明 / 删除 | 已声明（T-0054） |
+| POST | `/api/v1/agents/secrets/{secret_id}/rotate` | 轮换值（旧值不再下发） | 已声明（T-0054） |
+| GET | `/api/v1/im/status`、`/api/v1/im/badges` | IM 状态 / 顶栏角标（未读不含免打扰、待审批数） | 已声明（T-0055） |
+| GET / POST | `/api/v1/im/conversations` | 会话列表（置顶在前）/ 打开与实例的单聊 | 已声明（T-0055） |
+| PATCH | `/api/v1/im/conversations/{conversation_id}` | 置顶 / 免打扰（同步到 OpenIM） | 已声明（T-0055） |
+| POST | `/api/v1/im/conversations/{conversation_id}/read` | 已读序号（只增不减） | 已声明（T-0055） |
+| GET / POST | `/api/v1/im/conversations/{conversation_id}/messages` | 消息历史 / 发送（必须带 `Idempotency-Key`；结果未知时 `504`，不自动重发） | 已声明（T-0055） |
+| GET / POST / DELETE | `/api/v1/im/conversations/{conversation_id}/pins[/{server_msg_id}]` | 消息置顶（每个会话最多 10 条） | 已声明（T-0055） |
+| GET | `/api/v1/im/conversations/{conversation_id}/export` | 导出（`application/x-ndjson`） | 已声明（T-0055） |
+| POST | `/api/v1/im/uploads` | 上传图片（请求体是图片本身，≤ 10 MiB） | 已声明（T-0055） |
+| GET | `/api/v1/im/media/{media_id}` | 显示 OpenIM 对象存储里的图片（外部图片不经这里，前端不自动加载） | 已声明（T-0055） |
+| POST | `/api/v1/im/groups` | 建群（必须带 `Idempotency-Key`） | 已声明（T-0055） |
+| GET / PATCH / DELETE | `/api/v1/im/groups/{group_id}` | 群详情 / 改群名与公告 / 解散 | 已声明（T-0055） |
+| POST / DELETE | `/api/v1/im/groups/{group_id}/members[/{im_user_id}]` | 邀请 / 移出成员 | 已声明（T-0055） |
+| PUT | `/api/v1/im/groups/{group_id}/policy` | 防刷屏设置（允许接力、连续条数、每分钟条数） | 已声明（T-0055） |
+| GET | `/api/v1/im/contacts` | 通讯录（没有删除好友） | 已声明（T-0055） |
+| GET / POST / PATCH / DELETE / PUT | `/api/v1/im/contact-groups[/{contact_group_id}[/members]]` | 分组 | 已声明（T-0055） |
+| GET | `/api/v1/ai/tool-executions[/{execution_id}]` | 工具调用记录与待审批（member 及以下只看自己的） | 已声明（T-0057） |
+| POST | `/api/v1/ai/tool-executions/{execution_id}/approve`、`/reject` | 审批（必须带 `If-Match`；高危操作要重新输入密码） | 已声明（T-0057） |
+
+**实例接口**（只在接入入口；`Authorization: Bearer <实例令牌>`，外网另需客户端证书；失败一律 `401 AGENT_UNAUTHORIZED`）：
+
+| 方法 | 路径 | 说明 | 状态 |
+|---|---|---|---|
+| POST | `/agent-api/v1/secrets/resolve` | 取密钥：未授权与不存在都返回 `NOT_FOUND` | 已声明（T-0054） |
+| POST | `/agent-api/v1/im-token` | 取 IM 令牌（只在启动时调用：签发会踢掉旧连接） | 已声明（T-0055） |
+| POST | `/agent-api/v1/heartbeat` | 上报 OpenClaw 与插件版本 | 已声明（T-0054） |
+| POST | `/mcp` | MCP 工具（不进 OpenAPI；工具清单见 `app/schemas/ai_tools.py` 的 `TOOLS`） | 未挂载（T-0057） |
+| GET / POST | `/im/ws`、`/im/api/{route}`、`/im/obj/*` | 接入网关（不进 OpenAPI；白名单见 V2 契约第 8 节） | 已声明（T-0055） |
+
+- OpenIM 回调 `/internal/openim/{path_token}/{command}` 只走内部网络，不进 OpenAPI（V2 契约第 10 节）。
+- 已有接口只增不改：SSE 的 `topics` 增加 `im`、`agents`、`ai`。
+- 新增错误码：`401 AGENT_UNAUTHORIZED`、`403 STEP_UP_REQUIRED` / `STEP_UP_FAILED`、`409 AGENT_DISABLED` / `IM_NOT_READY` /
+  `IM_SEND_REJECTED` / `PIN_LIMIT_REACHED` / `EXECUTION_NOT_PENDING`、`503 IM_UNAVAILABLE`（V2 契约第 12 节）。

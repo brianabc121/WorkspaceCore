@@ -287,10 +287,18 @@ async function noHorizontalScroll(page) {
   // ---------------------------------------------------------------- 限流提示（A17）
   await fakeGitHub('POST', '/_fake/control', { rate_limit: 'primary', reset_in: 120 })
   await page.goto(`${base}/settings/integrations`)
-  await card.getByRole('button', { name: '手动同步' }).click()
-  await page.getByText('同步已排队，请稍后刷新状态').waitFor()
+  // CI 里每分钟对账一次（RECONCILE_INTERVAL_MINUTES=1），可能和这一步撞上：
+  // - 对账先碰到限流：按钮按设计被禁用（限流期间不能手动同步）；
+  // - 对账正持有同步锁：手动同步返回 409 SYNC_IN_PROGRESS，页面提示“同步正在进行”。
+  // 这几种情况下都会有一次同步碰到限流（最迟是下一次对账；限流持续 120 秒），所以下面最多等 90 秒
+  const syncButton = card.getByRole('button', { name: '手动同步' })
+  await syncButton.waitFor()
+  if (await syncButton.isEnabled()) {
+    const clicked = await syncButton.click({ timeout: 5000 }).then(() => true, () => false)
+    if (clicked) await page.getByText(/同步已排队，请稍后刷新状态|同步正在进行，请稍后刷新状态/).waitFor()
+  }
   await page.goto(`${base}/developer`)
-  check(await refreshUntil(page, '刷新 GitHub 数据', page.getByText(/GitHub 限流中，预计/)), '开发者页应提示 GitHub 限流中与预计恢复时间')
+  check(await refreshUntil(page, '刷新 GitHub 数据', page.getByText(/GitHub 限流中，预计/), 90000), '开发者页应提示 GitHub 限流中与预计恢复时间')
   check(await page.getByRole('heading', { name: FAKE_REPO }).count() === 1, '限流时仍显示已同步的仓库，不显示成空列表')
   await fakeGitHub('POST', '/_fake/control', { rate_limit: null })
   step('A17：GitHub 限流时开发者页显示“限流中”与预计恢复时间，列表照常显示')

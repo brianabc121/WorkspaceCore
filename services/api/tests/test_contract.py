@@ -1,7 +1,8 @@
 """接口契约：Sprint 1（docs/decisions/2026-10-30-sprint-1-auth-contract.md）、
 Sprint 2（…-sprint-2-dashboard-contract.md）、Sprint 3（…-sprint-3-tasks-contract.md）、
 Sprint 4（…-sprint-4-knowledge-search-contract.md）、
-Sprint 5（…-sprint-5-operations-automations-contract.md）。"""
+Sprint 5（…-sprint-5-operations-automations-contract.md）、
+V2 OC-1（…-v2-oc1-contract.md）。"""
 
 import json
 import uuid
@@ -28,6 +29,7 @@ from app.api.deps import (
     get_workspace_service,
     workspace_admin,
     workspace_member,
+    workspace_owner,
     workspace_viewer,
 )
 from app.core.errors import not_implemented
@@ -111,6 +113,62 @@ SPRINT_5_ENDPOINTS = {
     ("post", "/api/v1/automations/{automation_id}/trigger"),
     ("get", "/api/v1/automations/{automation_id}/runs"),
 }
+V2_ADMIN_ENDPOINTS = {
+    ("get", "/api/v1/agents/settings"),
+    ("patch", "/api/v1/agents/settings"),
+    ("get", "/api/v1/agents/instances"),
+    ("post", "/api/v1/agents/instances"),
+    ("get", "/api/v1/agents/instances/{instance_id}"),
+    ("patch", "/api/v1/agents/instances/{instance_id}"),
+    ("post", "/api/v1/agents/instances/{instance_id}/disable"),
+    ("post", "/api/v1/agents/instances/{instance_id}/enable"),
+    ("post", "/api/v1/agents/instances/{instance_id}/bundle"),
+    ("post", "/api/v1/agents/instances/{instance_id}/credentials/{credential_id}/revoke"),
+    ("put", "/api/v1/agents/instances/{instance_id}/secret-grants"),
+    ("get", "/api/v1/agents/secrets"),
+    ("post", "/api/v1/agents/secrets"),
+    ("get", "/api/v1/agents/secrets/accesses"),
+    ("patch", "/api/v1/agents/secrets/{secret_id}"),
+    ("post", "/api/v1/agents/secrets/{secret_id}/rotate"),
+    ("delete", "/api/v1/agents/secrets/{secret_id}"),
+    ("get", "/api/v1/im/status"),
+    ("get", "/api/v1/im/badges"),
+    ("get", "/api/v1/im/conversations"),
+    ("post", "/api/v1/im/conversations"),
+    ("patch", "/api/v1/im/conversations/{conversation_id}"),
+    ("post", "/api/v1/im/conversations/{conversation_id}/read"),
+    ("get", "/api/v1/im/conversations/{conversation_id}/messages"),
+    ("post", "/api/v1/im/conversations/{conversation_id}/messages"),
+    ("get", "/api/v1/im/conversations/{conversation_id}/pins"),
+    ("post", "/api/v1/im/conversations/{conversation_id}/pins"),
+    ("delete", "/api/v1/im/conversations/{conversation_id}/pins/{server_msg_id}"),
+    ("get", "/api/v1/im/conversations/{conversation_id}/export"),
+    ("post", "/api/v1/im/uploads"),
+    ("get", "/api/v1/im/media/{media_id}"),
+    ("post", "/api/v1/im/groups"),
+    ("get", "/api/v1/im/groups/{group_id}"),
+    ("patch", "/api/v1/im/groups/{group_id}"),
+    ("delete", "/api/v1/im/groups/{group_id}"),
+    ("post", "/api/v1/im/groups/{group_id}/members"),
+    ("delete", "/api/v1/im/groups/{group_id}/members/{im_user_id}"),
+    ("put", "/api/v1/im/groups/{group_id}/policy"),
+    ("get", "/api/v1/im/contacts"),
+    ("get", "/api/v1/im/contact-groups"),
+    ("post", "/api/v1/im/contact-groups"),
+    ("patch", "/api/v1/im/contact-groups/{contact_group_id}"),
+    ("delete", "/api/v1/im/contact-groups/{contact_group_id}"),
+    ("put", "/api/v1/im/contact-groups/{contact_group_id}/members"),
+    ("get", "/api/v1/ai/tool-executions"),
+    ("get", "/api/v1/ai/tool-executions/{execution_id}"),
+    ("post", "/api/v1/ai/tool-executions/{execution_id}/approve"),
+    ("post", "/api/v1/ai/tool-executions/{execution_id}/reject"),
+}
+
+V2_AGENT_ENDPOINTS = {
+    ("post", "/agent-api/v1/secrets/resolve"),
+    ("post", "/agent-api/v1/im-token"),
+    ("post", "/agent-api/v1/heartbeat"),
+}
 WORKSPACE = {"X-Workspace-Id": str(uuid.uuid4())}
 
 
@@ -138,6 +196,8 @@ def test_all_sprint_endpoints_are_declared() -> None:
         | SPRINT_3_ENDPOINTS
         | SPRINT_4_ENDPOINTS
         | SPRINT_5_ENDPOINTS
+        | V2_ADMIN_ENDPOINTS
+        | V2_AGENT_ENDPOINTS
     )
 
 
@@ -251,7 +311,7 @@ class _ShapeOnlyService:
 @pytest.fixture
 def any_role(app: FastAPI) -> None:
     """跳过成员与角色检查与业务逻辑（它们需要数据库），只验证请求形态。"""
-    for dependency in (workspace_viewer, workspace_member, workspace_admin):
+    for dependency in (workspace_viewer, workspace_member, workspace_admin, workspace_owner):
         app.dependency_overrides[dependency] = lambda: None
     for service in (
         get_task_service,
@@ -778,3 +838,394 @@ async def test_automation_trigger_rules(stub_client: httpx.AsyncClient) -> None:
     assert accepted.status_code == 501  # 参数按声明校验在 T-0037
     empty = await stub_client.post(path, json={}, headers=headers)
     assert empty.status_code == 501
+
+
+# ---------------------------------------------------------------- V2 OC-1 契约
+
+
+def _cases(cases: dict[str, dict[str, object]]) -> list[tuple[str, dict[str, object]]]:
+    return list(cases.items())
+
+
+def test_v2_admin_endpoints_use_the_session_and_agent_endpoints_the_instance_token() -> None:
+    paths = json.loads(render())["paths"]
+    for method, path in V2_AGENT_ENDPOINTS:
+        assert paths[path][method]["security"] == [{"InstanceToken": []}], path
+    for method, path in V2_ADMIN_ENDPOINTS:
+        assert paths[path][method]["security"] == [{"SessionCookie": []}], path
+
+
+def test_v2_internal_and_gateway_routes_are_not_documented() -> None:
+    paths = json.loads(render())["paths"]
+    assert not [p for p in paths if p.startswith(("/internal", "/im/", "/mcp"))]
+
+
+def test_v2_secrets_and_credentials_never_appear_in_responses() -> None:
+    schemas = _schemas()
+    for name in ["AgentSecretCreate", "AgentSecretRotate"]:
+        value = schemas[name]["properties"]["value"]  # type: ignore[index]
+        assert value["writeOnly"] is True, name
+    for name in [
+        "AgentSecretOut",
+        "AgentInstanceOut",
+        "AgentCredentialOut",
+        "SecretAccessOut",
+        "AgentInstancePage",
+    ]:
+        props = schemas[name]["properties"]
+        assert isinstance(props, dict)
+        assert not set(props) & {"value", "token", "private_key", "client_private_key_pem"}, name
+    approve = schemas["ApproveRequest"]["properties"]["password"]  # type: ignore[index]
+    assert approve["anyOf"][0]["writeOnly"] is True
+
+
+def test_v2_third_party_writes_require_an_idempotency_key_header() -> None:
+    for method, path in [
+        ("post", "/api/v1/im/conversations/{conversation_id}/messages"),
+        ("post", "/api/v1/im/groups"),
+    ]:
+        params = _operation(method, path)["parameters"]
+        assert isinstance(params, list)
+        header = next(p for p in params if p["name"] == "Idempotency-Key")
+        assert header["in"] == "header" and header["required"], (method, path)
+
+
+def test_v2_approvals_require_if_match() -> None:
+    for action in ["approve", "reject"]:
+        params = _operation("post", f"/api/v1/ai/tool-executions/{{execution_id}}/{action}")[
+            "parameters"
+        ]
+        assert isinstance(params, list)
+        header = next(p for p in params if p["name"] == "If-Match")
+        assert header["in"] == "header" and header["required"], action
+
+
+def test_v2_keeps_existing_enums_and_only_adds_event_topics() -> None:
+    schemas = _schemas()
+    topics = schemas["InvalidateEvent"]["properties"]["topics"]["items"]["enum"]  # type: ignore[index]
+    assert set(topics) == {
+        "overview",
+        "tasks",
+        "projects",
+        "knowledge",
+        "calendar",
+        "developer",
+        "integrations",
+        "notifications",
+        "operations",
+        "automations",
+        "im",
+        "agents",
+        "ai",
+    }
+    provider = schemas["IntegrationOut"]["properties"]["provider"]  # type: ignore[index]
+    assert set(provider["enum"]) == {"vikunja", "github"}
+
+
+def test_v2_mcp_tools_match_the_plan() -> None:
+    from pydantic import BaseModel
+
+    from app.schemas.ai_tools import FORBIDDEN_TOOL_AREAS, TOOLS, PendingApproval
+    from app.schemas.workspaces import Role
+
+    by_risk: dict[str, set[str]] = {}
+    for spec in TOOLS.values():
+        by_risk.setdefault(spec.risk, set()).add(spec.name)
+    assert by_risk == {
+        "read": {
+            "search",
+            "list_tasks",
+            "get_task",
+            "list_projects",
+            "calendar_agenda",
+            "list_bookmarks",
+            "list_knowledge_sources",
+            "list_repos",
+            "list_issues",
+            "list_pull_requests",
+            "service_status",
+            "list_notifications",
+            "list_automations",
+            "dashboard_overview",
+            "get_action_status",
+        },
+        "write": {
+            "create_task",
+            "update_task",
+            "complete_task",
+            "create_calendar_event",
+            "create_bookmark",
+            "mark_notification_read",
+        },
+        "critical": {"delete_task", "delete_calendar_event", "trigger_automation"},
+    }
+    for spec in TOOLS.values():
+        assert spec.name.isidentifier() and spec.name.islower()
+        assert not any(area in spec.name for area in FORBIDDEN_TOOL_AREAS), spec.name
+        assert spec.input_model.model_config.get("extra") == "forbid", spec.name
+        assert issubclass(spec.output_model, BaseModel)
+        spec.input_model.model_json_schema()  # MCP 工具清单要用到，必须能生成
+        if spec.risk == "read":
+            assert spec.scope == "read" and spec.min_role == Role.viewer, spec.name
+            assert spec.output_model is not PendingApproval, spec.name
+        else:  # 写与高危：只生成待审批记录，不执行
+            assert spec.scope == "read_write", spec.name
+            assert spec.output_model is PendingApproval, spec.name
+
+
+def test_v2_mcp_outputs_keep_free_text_under_untrusted() -> None:
+    """来自第三方或用户输入的文字一律放在 untrusted 里（契约第 9.3 节）。"""
+    from app.schemas.ai_tools import TOOLS
+
+    free_text = {"title", "description", "note", "body", "name", "location", "context", "url"}
+
+    def walk(schema: dict[str, object], defs: dict[str, dict[str, object]], seen: set[str]) -> None:
+        props = schema.get("properties")
+        if isinstance(props, dict):
+            leaked = free_text & {k for k in props if k != "untrusted"}
+            if schema.get("title") == "AutomationParam":  # 参数名受格式限制，由管理员登记
+                leaked -= {"name"}
+            assert not leaked, (schema.get("title"), leaked)
+            for key, sub in props.items():
+                if key != "untrusted":
+                    walk(sub, defs, seen)
+        for key in ("items", "anyOf", "allOf"):
+            sub = schema.get(key)
+            for part in sub if isinstance(sub, list) else [sub] if isinstance(sub, dict) else []:
+                walk(part, defs, seen)
+        ref = schema.get("$ref")
+        if isinstance(ref, str) and ref not in seen:
+            seen.add(ref)
+            walk(defs[ref.rsplit("/", 1)[-1]], defs, seen)
+
+    for spec in TOOLS.values():
+        if spec.risk != "read" or spec.name == "get_action_status":
+            continue
+        schema = spec.output_model.model_json_schema()
+        walk(schema, schema.get("$defs", {}), set())
+
+
+def test_v2_openim_callback_samples_parse() -> None:
+    """OC-0 实际抓到的回调载荷（open-im-server v3.8.3-patch.18）。"""
+    from app.schemas.openim_callbacks import (
+        CallbackResponse,
+        DeleteFriendCallback,
+        MsgCallback,
+        UserStatusCallback,
+    )
+
+    msg = MsgCallback.model_validate(
+        {
+            "sendID": "ws_admin",
+            "callbackCommand": "callbackBeforeSendSingleMsgCommand",
+            "serverMsgID": "c0a649cc7a3906e2b21425acc0852c49",
+            "clientMsgID": "68547bbdda84659ea4b1a5714203bcb5",
+            "operationID": "45d7fa84a1334d3c81c9661f68600c1f",
+            "senderPlatformID": 5,
+            "senderNickname": "",
+            "sessionType": 1,
+            "msgFrom": 200,
+            "contentType": 101,
+            "status": 0,
+            "sendTime": 1793465387450,
+            "createTime": 1793465387449,
+            "content": '{"content":"你好"}',
+            "seq": 0,
+            "atUserList": None,
+            "faceURL": "",
+            "ex": "",
+            "recvID": "oc_a",
+        }
+    )
+    assert (msg.send_id, msg.recv_id, msg.group_id, msg.session_type) == ("ws_admin", "oc_a", "", 1)
+    group = MsgCallback.model_validate(
+        {
+            "sendID": "imAdmin",
+            "callbackCommand": "callbackBeforeSendGroupMsgCommand",
+            "serverMsgID": "ad54e6daf278466cf1f26e40062c2887",
+            "clientMsgID": "4c49db1792e79cc1432bf9fd1a1836cc",
+            "sessionType": 3,
+            "contentType": 1501,
+            "groupID": "3221856193",
+        }
+    )
+    assert group.group_id == "3221856193" and group.recv_id == ""
+    online = UserStatusCallback.model_validate(
+        {
+            "callbackCommand": "callbackAfterUserOnlineCommand",
+            "operationID": "p_46_1",
+            "platformID": 5,
+            "platform": "Web",
+            "userID": "oc_a",
+            "seq": 1793465372741,
+            "isAppBackground": False,
+            "connID": "",
+        }
+    )
+    assert (online.user_id, online.platform_id) == ("oc_a", 5)
+    deleted = DeleteFriendCallback.model_validate(
+        {
+            "callbackCommand": "callbackAfterDeleteFriendCommand",
+            "ownerUserID": "oc_a",
+            "friendUserID": "ws_admin",
+        }
+    )
+    assert deleted.friend_user_id == "ws_admin"
+    assert CallbackResponse.allow().model_dump(by_alias=True) == {
+        "actionCode": 0,
+        "errCode": 0,
+        "errMsg": "",
+        "errDlt": "",
+        "nextCode": 0,
+    }
+    reject = CallbackResponse.reject(5001).model_dump(by_alias=True)
+    assert (reject["errCode"], reject["nextCode"], reject["errMsg"]) == (5001, 1, "RELAY_PAUSED")
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_v2_instance_and_secret_payload_rules(stub_client: httpx.AsyncClient) -> None:
+    create = "/api/v1/agents/instances"
+    for name, body in _cases(
+        {
+            "缺网络模式": {"name": "a"},
+            "未知网络模式": {"name": "a", "network_mode": "lan"},
+            "名称为空": {"name": " ", "network_mode": "intranet"},
+            "最高角色不能是 owner": {"name": "a", "network_mode": "intranet", "max_role": "owner"},
+            "多余字段": {"name": "a", "network_mode": "intranet", "token": "x"},
+        }
+    ):
+        response = await stub_client.post(create, json=body, headers=WORKSPACE)
+        assert response.status_code == 422, name
+    ok = await stub_client.post(
+        create, json={"name": "a", "network_mode": "public"}, headers=WORKSPACE
+    )
+    assert ok.status_code == 501
+    instance = f"{create}/{uuid.uuid4()}"
+    for name, body in _cases(
+        {
+            "只有 version": {"version": 1},
+            "不能改网络模式": {"version": 1, "network_mode": "public"},
+            "null": {"version": 1, "name": None},
+        }
+    ):
+        response = await stub_client.patch(instance, json=body, headers=WORKSPACE)
+        assert response.status_code == 422, name
+    grants = f"{instance}/secret-grants"
+    some = str(uuid.uuid4())
+    for name, body in _cases(
+        {
+            "ref_id 重复": {"version": 1, "grants": [{"secret_id": some, "ref_id": "k"}] * 2},
+            "ref_id 格式": {"version": 1, "grants": [{"secret_id": some, "ref_id": "Bad-Id"}]},
+            "太多": {
+                "version": 1,
+                "grants": [{"secret_id": some, "ref_id": f"k{i}"} for i in range(33)],
+            },
+        }
+    ):
+        response = await stub_client.put(grants, json=body, headers=WORKSPACE)
+        assert response.status_code == 422, name
+    bundle = await stub_client.post(
+        f"{instance}/bundle", json={"version": 1, "previous": "never"}, headers=WORKSPACE
+    )
+    assert bundle.status_code == 422
+    secret = "placeholder-" + uuid.uuid4().hex
+    for name, body in _cases(
+        {
+            "缺值": {"name": "OpenAI"},
+            "值太长": {"name": "OpenAI", "value": "x" * 8193},
+            "名称格式": {"name": "-bad", "value": secret},
+            "未知类型": {"name": "OpenAI", "kind": "password", "value": secret},
+        }
+    ):
+        response = await stub_client.post("/api/v1/agents/secrets", json=body, headers=WORKSPACE)
+        assert response.status_code == 422, name
+        assert secret not in response.text, name  # 校验错误不回显密钥
+    created = await stub_client.post(
+        "/api/v1/agents/secrets", json={"name": "OpenAI", "value": secret}, headers=WORKSPACE
+    )
+    assert created.status_code == 501
+
+
+async def test_v2_agent_api_payload_rules(stub_client: httpx.AsyncClient) -> None:
+    resolve = "/agent-api/v1/secrets/resolve"
+    for name, body in _cases(
+        {
+            "空": {"ids": []},
+            "太多": {"ids": [f"k{i}" for i in range(33)]},
+            "格式": {"ids": ["../etc"]},
+            "多余字段": {"ids": ["k"], "provider": "x"},
+        }
+    ):
+        response = await stub_client.post(resolve, json=body)
+        assert response.status_code == 422, name
+    assert (await stub_client.post(resolve, json={"ids": ["openai_api_key"]})).status_code == 501
+    heartbeat = await stub_client.post("/agent-api/v1/heartbeat", json={})
+    assert heartbeat.status_code == 422
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_v2_im_payload_rules(stub_client: httpx.AsyncClient) -> None:
+    conversation = "/api/v1/im/conversations/si_oc_a_ws_b"
+    headers = {**WORKSPACE, "Idempotency-Key": str(uuid.uuid4())}
+    missing = await stub_client.post(
+        f"{conversation}/messages", json={"kind": "text", "text": "hi"}, headers=WORKSPACE
+    )
+    assert missing.status_code == 422
+    for name, body in _cases(
+        {
+            "文字缺正文": {"kind": "text"},
+            "文字带图片": {"kind": "text", "text": "hi", "upload_id": str(uuid.uuid4())},
+            "图片缺上传": {"kind": "image"},
+            "太长": {"kind": "text", "text": "x" * 4001},
+            "未知类型": {"kind": "file", "text": "hi"},
+        }
+    ):
+        response = await stub_client.post(f"{conversation}/messages", json=body, headers=headers)
+        assert response.status_code == 422, name
+    sent = await stub_client.post(
+        f"{conversation}/messages", json={"kind": "text", "text": "hi"}, headers=headers
+    )
+    assert sent.status_code == 501
+    bad_id = await stub_client.get("/api/v1/im/conversations/../../x/messages", headers=WORKSPACE)
+    assert bad_id.status_code in {404, 422}
+    for name, body in _cases({"空": {}, "null": {"muted": None}}):
+        response = await stub_client.patch(conversation, json=body, headers=WORKSPACE)
+        assert response.status_code == 422, name
+    no_instance = await stub_client.post(
+        "/api/v1/im/groups", json={"name": "g", "user_ids": [str(uuid.uuid4())]}, headers=headers
+    )
+    assert no_instance.status_code == 422
+    policy = await stub_client.put(
+        "/api/v1/im/groups/123/policy",
+        json={"version": 1, "relay_enabled": True, "max_agent_streak": 0, "max_per_minute": 6},
+        headers=WORKSPACE,
+    )
+    assert policy.status_code == 422
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_v2_approval_rules(stub_client: httpx.AsyncClient) -> None:
+    path = f"/api/v1/ai/tool-executions/{uuid.uuid4()}/approve"
+    missing = await stub_client.post(path, json={}, headers=WORKSPACE)
+    assert missing.status_code == 422
+    assert ["header", "If-Match"] in [
+        e["loc"] for e in missing.json()["error"]["details"]["errors"]
+    ]
+    bad = await stub_client.post(path, json={}, headers={**WORKSPACE, "If-Match": "abc"})
+    assert bad.status_code == 422
+    ok = await stub_client.post(path, json={}, headers={**WORKSPACE, "If-Match": '"3"'})
+    assert ok.status_code == 501
+    listed = await stub_client.get(
+        "/api/v1/ai/tool-executions", params={"status": "approved"}, headers=WORKSPACE
+    )
+    assert listed.status_code == 422  # 没有 approved 这个状态：批准后直接 executing
+
+
+async def test_v2_openim_callback_route_rules(stub_client: httpx.AsyncClient) -> None:
+    short = await stub_client.post("/internal/openim/short/callbackAfterUserOnlineCommand")
+    assert short.status_code == 422
+    token = "t" * 32
+    bad = await stub_client.post(f"/internal/openim/{token}/rm -rf")
+    assert bad.status_code == 422
+    ok = await stub_client.post(f"/internal/openim/{token}/callbackAfterUserOnlineCommand")
+    assert ok.status_code == 501

@@ -55,8 +55,8 @@ for (let attempt = 1; attempt <= 5; attempt += 1) {
 }
 
 const env = { ...process.env, OPENIM_TOKEN: im.token };
-if (im.wsAddr) env.OPENIM_WS_ADDR = im.wsAddr;
-if (im.apiAddr) env.OPENIM_API_ADDR = im.apiAddr;
+if (im.ws_addr) env.OPENIM_WS_ADDR = im.ws_addr;
+if (im.api_addr) env.OPENIM_API_ADDR = im.api_addr;
 const child = spawn(cmd[0], cmd.slice(1), { stdio: "inherit", env });
 for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => child.kill(sig));
 child.on("exit", (code, signal) => { process.exit(signal ? 128 : (code ?? 1)); });

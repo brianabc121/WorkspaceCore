@@ -9,6 +9,7 @@ const families: Record<Schema['InvalidateEvent']['topics'][number], string[]> = 
   calendar: ['calendar', 'search'], developer: ['developer', 'search'], integrations: ['integrations'],
   notifications: ['notifications', 'overview'], operations: ['operations'],
   automations: ['automations', 'automation-connection', 'automation-runs'],
+  im: ['im'], agents: ['agents'], ai: ['ai-tool-executions', 'im'],
 }
 // Backoff for rebuilding a stream the browser closed; reset after every successful open.
 const RETRY_BASE_MS = 1000, RETRY_MAX_MS = 30000

@@ -23,6 +23,10 @@ EventTopic = Literal[
     "notifications",
     "operations",
     "automations",
+    # V2（OC-1 契约第 11 节）：IM 会话与消息、实例状态、工具调用与审批
+    "im",
+    "agents",
+    "ai",
 ]
 MAX_MARK_IDS = 100
 
