@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useForm } from 'vee-validate'
-import { toTypedSchema } from '@vee-validate/zod'
+import { toTypedSchema } from '../../services/forms'
 import { z } from 'zod'
 import { ref } from 'vue'
 import type { Schema } from '../../services/api'
@@ -11,7 +11,7 @@ import ExternalLink from '../../components/ExternalLink.vue'
 import RelatedDocuments from '../knowledge/RelatedDocuments.vue'
 const props = defineProps<{ task?: Schema['TaskOut']; projects: Schema['ProjectOut'][]; writable: boolean; locked: boolean }>()
 const emit = defineEmits<{ submit: [command: TaskCommand] }>()
-const schema = z.object({ title: z.string().trim().min(1, '请输入任务标题').max(250), description: z.string().max(10000), project_id: props.task ? z.string().uuid().or(z.literal('')) : z.string({ required_error: '请选择项目' }).uuid('请选择项目'), priority: z.number().int().min(0).max(5), due: z.string().refine((v) => !v || !Number.isNaN(new Date(v).getTime()), '截止时间无效'), done: z.boolean() })
+const schema = z.object({ title: z.string().trim().min(1, '请输入任务标题').max(250), description: z.string().max(10000), project_id: props.task ? z.string().uuid().or(z.literal('')) : z.string({ error: '请选择项目' }).uuid('请选择项目'), priority: z.number().int().min(0).max(5), due: z.string().refine((v) => !v || !Number.isNaN(new Date(v).getTime()), '截止时间无效'), done: z.boolean() })
 const { handleSubmit, defineField, isSubmitting } = useForm({ validationSchema: toTypedSchema(schema), initialValues: { title: props.task?.title ?? '', description: props.task?.description ?? '', project_id: props.task?.project_id ?? '', priority: props.task?.priority ?? 0, due: toLocalInput(props.task?.due_at ?? null), done: props.task?.done ?? false } })
 const [description] = defineField('description'), [projectId] = defineField('project_id'), [priority] = defineField('priority'), [due] = defineField('due'), [done] = defineField('done')
 const message = ref('')

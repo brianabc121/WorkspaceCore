@@ -2,10 +2,10 @@
 id: T-0044
 title: Sprint 6 安全扫描、性能基准与完整端到端 Smoke Test，纳入 CI（S6-05）
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
-paths: scripts,tests/e2e,tests/perf,.github/workflows,Makefile,docs/deployment.md
+branch: claude/cool-wright-99qbbg
+paths: scripts,tests/e2e,tests/perf,.github/workflows,Makefile,docs/deployment.md,apps/web,.gitleaks.toml,docs/decisions
 depends_on: T-0041
 created: 2026-10-31
 updated: 2026-10-31
@@ -30,3 +30,5 @@ S6-05：把安全扫描、性能基准和覆盖全部模块的端到端 Smoke Te
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-31 06:04 UTC · claude · 创建任务（owner: claude）
+- 2026-10-31 07:10 UTC · claude · 开始任务
+- 2026-10-31 07:18 UTC · claude · paths 加上 apps/web、.gitleaks.toml、docs/decisions：T-0041 第 5.2 / 5.4 节把 zod 公告与 web 镜像的系统包漏洞留给本任务处理；codex 暂停（D-0007），apps/web 没有进行中的其他任务

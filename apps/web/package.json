@@ -23,14 +23,13 @@
   },
   "dependencies": {
     "@tanstack/vue-query": "5.105.0",
-    "@vee-validate/zod": "4.15.1",
     "gridstack": "14.0.0",
     "openapi-fetch": "0.17.0",
     "pinia": "3.0.4",
     "vee-validate": "4.15.1",
     "vue": "3.5.44",
     "vue-router": "4.6.4",
-    "zod": "3.25.76"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

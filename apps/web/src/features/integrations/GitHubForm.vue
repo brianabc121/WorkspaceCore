@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ErrorMessage, useForm } from 'vee-validate'
-import { toTypedSchema } from '@vee-validate/zod'
+import { toTypedSchema } from '../../services/forms'
 import { z } from 'zod'
 import { ref } from 'vue'
 import type { Schema } from '../../services/api'

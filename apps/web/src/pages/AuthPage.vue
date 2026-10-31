@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useForm } from 'vee-validate'
-import { toTypedSchema } from '@vee-validate/zod'
+import { toTypedSchema } from '../services/forms'
 import { useAuthStore } from '../stores/auth'
 import { ApiError, type Schema } from '../services/api'
 import { loginSchema, setupSchema, useAction } from '../features/forms'
