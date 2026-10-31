@@ -34,3 +34,4 @@ updated: 2026-10-31
 - 2026-10-31 03:13 UTC · codex · 开始任务
 - 2026-10-31 03:14 UTC · codex · 已核对最新 main 7baeb46、issue #50 C-4 与收件箱：T-0034/T-0035 已合并，无重复执行/待合并 PR。指定新分支启动，短计划 apps/web/docs/plans/T-0038.md。采用现有 Vue3、SVG 断点趋势与数据表，无新依赖；先测后写，仅 BFF，遵守 D-0006，不操作共享 Docker。
 - 2026-10-31 03:34 UTC · codex · status in_progress → done：已完成运维页、service_health/api_latency 组件及共享权限拒绝隔离。Node22 npm ci；lint/typecheck/check:api/build 全部退出0；22文件224测试通过；26项运维专项通过；Chromium模拟BFF亮暗/移动/首页检查通过。一次独立审查 Important 已回归修复，Minor模板排版延后。真实部署联调归T-0040，SSE归T-0039；schema.d.ts未改。验证记录 apps/web/docs/verification/T-0038.md。待开PR由Claude审查合并，T-0039同路径等待。
+- 2026-10-31 03:36 UTC · codex · 已提交 edc7512 并推送 codex/T-0038-sprint-5-operations，PR https://github.com/brianabc121/WorkspaceCore/pull/58 已创建；issue #50 已回执 T-0038 部分（issuecomment-6538492418）。等待 Claude 审查与CI，不自行合并；T-0039路径重叠等待本PR合并后接手。
