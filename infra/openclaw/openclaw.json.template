@@ -1,0 +1,63 @@
+{
+  "_comment": "OpenClaw 服务器的参考配置（OC-0 初稿，ADR 2026-10-31-v2-oc0-openclaw-openim-verification.md）。${VAR} 由 OpenClaw 从进程环境读取；不要把明文写进本文件。",
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback",
+    "auth": { "mode": "token", "token": "${OPENCLAW_GATEWAY_TOKEN}" }
+  },
+  "secrets": {
+    "providers": {
+      "myworkspace": {
+        "source": "exec",
+        "command": "/opt/myworkspace/bin/myworkspace-secret-resolver",
+        "passEnv": ["PATH", "MYWS_INSTANCE_TOKEN", "MYWS_AGENT_API", "MYWS_CA_FILE", "MYWS_CLIENT_CERT", "MYWS_CLIENT_KEY"],
+        "jsonOnly": true,
+        "timeoutMs": 5000
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "openai": {
+        "apiKey": { "source": "exec", "provider": "myworkspace", "id": "openai_api_key" }
+      }
+    }
+  },
+  "session": { "dmScope": "per-channel-peer" },
+  "tools": {
+    "profile": "messaging",
+    "deny": ["group:automation", "group:runtime", "group:fs", "sessions_spawn", "sessions_send"],
+    "fs": { "workspaceOnly": true },
+    "exec": { "security": "deny", "ask": "always" },
+    "elevated": { "enabled": false },
+    "agentToAgent": { "enabled": false }
+  },
+  "mcp": {
+    "servers": {
+      "myworkspace": {
+        "url": "${MYWS_MCP_URL}",
+        "transport": "streamable-http",
+        "headers": { "Authorization": "Bearer ${MYWS_INSTANCE_TOKEN}" },
+        "requestTimeoutMs": 20000,
+        "connectionTimeoutMs": 5000
+      }
+    }
+  },
+  "plugins": {
+    "allow": ["openclaw-channel"]
+  },
+  "channels": {
+    "openim": {
+      "accounts": {
+        "default": {
+          "enabled": true,
+          "token": "${OPENIM_TOKEN}",
+          "wsAddr": "${OPENIM_WS_ADDR}",
+          "apiAddr": "${OPENIM_API_ADDR}",
+          "requireMention": true,
+          "inboundWhitelist": ["${MYWS_ADMIN_IM_ID}"]
+        }
+      }
+    }
+  }
+}

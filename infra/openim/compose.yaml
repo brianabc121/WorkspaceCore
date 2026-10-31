@@ -1,0 +1,128 @@
+# OpenIM（工作台管理员端 IM 的后端）的独立 Compose —— OC-0 初稿，**未打补丁，不得用于生产**。
+#
+# 依据：docs/v2/TRANSFORMATION_PLAN.md 第 4.4、6.1 节；核验与越权问题见
+# docs/decisions/2026-10-31-v2-oc0-openclaw-openim-verification.md。
+#   - 官方 openim-server 镜像有越权问题（ADR 第 4 节），OC-3 换成按 infra/openim/patches/ 自建的镜像；
+#   - bitnamilegacy/* 不再更新，OC-3 评估换成各组件官方镜像；
+#   - OC-3 再接入 core 的网络、Caddy 接入入口与工作台回调地址，并把变量加进 .env.example / make env。
+# 本初稿在 OC-0 中按同样的组件、版本和环境变量实际启动过（ADR 第 2 节）。
+#
+# 用法（只用于本机核验）：
+#   docker compose -f infra/openim/compose.yaml --env-file infra/openim/.env up -d
+# infra/openim/.env 需要（全部随机生成，例如 openssl rand -hex 16；禁止使用官方默认值 openIM123）：
+#   OPENIM_SECRET  OPENIM_MONGO_ROOT_PASSWORD  OPENIM_MONGO_PASSWORD  OPENIM_REDIS_PASSWORD  OPENIM_MINIO_SECRET
+#   OPENIM_WEBHOOK_URL（回调地址，只能是内部网络地址）
+
+name: my-workspace-openim
+
+networks:
+  openim: {}
+
+volumes:
+  openim-mongo: {}
+  openim-redis: {}
+  openim-kafka: {}
+  openim-etcd: {}
+  openim-minio: {}
+
+services:
+  mongo:
+    image: mongo:7.0.28@sha256:4510cf3d7050003e958745adb25d2deb3fb907430716162d9cc1a92eda2a6047
+    command: ["mongod", "--wiredTigerCacheSizeGB", "1", "--auth"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${OPENIM_MONGO_ROOT_PASSWORD:?}
+      MONGO_INITDB_DATABASE: openim_v3
+      OPENIM_MONGO_PASSWORD: ${OPENIM_MONGO_PASSWORD:?}
+    volumes:
+      - openim-mongo:/data/db
+      - ./mongo-init.sh:/docker-entrypoint-initdb.d/10-openim-user.sh:ro
+    restart: unless-stopped
+    networks: [openim]
+
+  redis:
+    image: redis:7.0.0@sha256:1b90dbfe6943c72a7469c134cad3f02eb810f016049a0e19ad78be07040cdb0c
+    command: ["redis-server", "--requirepass", "${OPENIM_REDIS_PASSWORD:?}", "--appendonly", "yes"]
+    volumes: [openim-redis:/data]
+    restart: unless-stopped
+    networks: [openim]
+
+  etcd:
+    image: bitnamilegacy/etcd:3.5.21@sha256:1b9977cf4cce7546873e0ee50e684c38a38a4e7a27d22086fbd2b8a1b44a69d0
+    environment:
+      ETCD_NAME: s1
+      ETCD_DATA_DIR: /bitnami/etcd/data
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd:2380
+      ETCD_INITIAL_CLUSTER: s1=http://etcd:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      # 只在 openim 内部网络可达；OC-3 评估开启 etcd 认证（openim-docker 已支持）
+      ALLOW_NONE_AUTHENTICATION: "yes"
+    volumes: [openim-etcd:/bitnami/etcd]
+    restart: unless-stopped
+    networks: [openim]
+
+  kafka:
+    image: bitnamilegacy/kafka:3.5.1@sha256:c98ae8022239c956ed81c761262d018ce9a22bb2ef0214e2be670ee6b71741db
+    environment:
+      KAFKA_CFG_NODE_ID: 0
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_NUM_PARTITIONS: 8
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_LISTENERS: "INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9094"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "INTERNAL://kafka:9092,EXTERNAL://kafka:9094"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: INTERNAL
+    volumes: [openim-kafka:/bitnami/kafka]
+    restart: unless-stopped
+    networks: [openim]
+
+  minio:
+    image: bitnamilegacy/minio:2024.1.13@sha256:35d0a4404341601ae4dff4d8672699f7b49e2975fd0fae897c5f5af4638f816e
+    environment:
+      MINIO_ROOT_USER: openimroot
+      MINIO_ROOT_PASSWORD: ${OPENIM_MINIO_SECRET:?}
+    volumes: [openim-minio:/bitnami/minio/data]
+    restart: unless-stopped
+    networks: [openim]
+
+  openim-server:
+    # 官方镜像（未打补丁）：OC-3 换成自建镜像
+    image: openim/openim-server:v3.8.3-patch.18@sha256:71d5872be4e603c94a3a06d4279bac2b3b5aa66685e95403efac7489690773e1
+    init: true
+    # 只绑定本机，用于核验；OC-3 改为只经 Caddy 接入入口访问
+    ports:
+      - "127.0.0.1:10001:10001"
+      - "127.0.0.1:10002:10002"
+    environment:
+      IMENV_MONGODB_ADDRESS: mongo:27017
+      IMENV_MONGODB_USERNAME: openim
+      IMENV_MONGODB_PASSWORD: ${OPENIM_MONGO_PASSWORD:?}
+      IMENV_KAFKA_ADDRESS: kafka:9094
+      IMENV_DISCOVERY_ETCD_ADDRESS: etcd:2379
+      IMENV_REDIS_ADDRESS: redis:6379
+      IMENV_REDIS_PASSWORD: ${OPENIM_REDIS_PASSWORD:?}
+      IMENV_MINIO_INTERNALADDRESS: minio:9000
+      IMENV_MINIO_EXTERNALADDRESS: http://127.0.0.1:10005
+      IMENV_MINIO_ACCESSKEYID: openimroot
+      IMENV_MINIO_SECRETACCESSKEY: ${OPENIM_MINIO_SECRET:?}
+      IMENV_SHARE_SECRET: ${OPENIM_SECRET:?}
+      IMENV_LOG_ISSTDOUT: "true"
+      IMENV_LOG_REMAINLOGLEVEL: "3"
+      # 回调没有签名：地址只能在内部网络（ADR 第 2 节第 10 项）
+      IMENV_WEBHOOKS_URL: ${OPENIM_WEBHOOK_URL:?}
+      IMENV_WEBHOOKS_AFTERUSERONLINE_ENABLE: "true"
+      IMENV_WEBHOOKS_AFTERUSEROFFLINE_ENABLE: "true"
+      IMENV_WEBHOOKS_AFTERSENDSINGLEMSG_ENABLE: "true"
+      IMENV_WEBHOOKS_AFTERSENDGROUPMSG_ENABLE: "true"
+      IMENV_WEBHOOKS_BEFORESENDSINGLEMSG_ENABLE: "true"
+      IMENV_WEBHOOKS_BEFORESENDGROUPMSG_ENABLE: "true"
+      IMENV_WEBHOOKS_AFTERDELETEFRIEND_ENABLE: "true"
+      IMENV_WEBHOOKS_AFTERIMPORTFRIENDS_ENABLE: "true"
+    depends_on: [mongo, redis, etcd, kafka, minio]
+    restart: unless-stopped
+    networks: [openim]

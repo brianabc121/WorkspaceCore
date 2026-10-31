@@ -1,0 +1,62 @@
+#!/usr/bin/env node
+// OpenClaw 启动包装（OC-0 初稿，接口在 OC-1 定稿）：
+//   1. 用实例凭证向 My Workspace 取 IM 令牌（插件只认 OPENIM_TOKEN 环境变量，不支持 SecretRef）；
+//   2. 把令牌放进环境变量，启动原来的 OpenClaw 入口，转发退出信号。
+// 只用 Node 标准库。用法（Docker）：
+//   entrypoint: ["tini", "-s", "--", "/opt/myworkspace/bin/myworkspace-openclaw-start", "--"]
+//   command:    ["node", "/app/docker-entrypoint.mjs", "node", "openclaw.mjs", "gateway"]
+// 注意：工作台每签发一次 IM 令牌，同一实例正在使用的旧令牌就会被踢下线（ADR F1），所以只在启动时取。
+import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import http from "node:http";
+import https from "node:https";
+
+const fail = (msg) => { process.stderr.write(`myworkspace-openclaw-start: ${msg}\n`); process.exit(1); };
+const sep = process.argv.indexOf("--");
+const cmd = sep >= 0 ? process.argv.slice(sep + 1) : [];
+if (cmd.length === 0) fail("missing command after --");
+const base = process.env.MYWS_AGENT_API, token = process.env.MYWS_INSTANCE_TOKEN;
+if (!base || !token) fail("MYWS_AGENT_API / MYWS_INSTANCE_TOKEN not set");
+
+function fetchImToken() {
+  return new Promise((resolve, reject) => {
+    const url = new URL(base.replace(/\/$/, "") + "/v1/im-token");
+    const opts = { method: "POST", timeout: 10000, headers: { authorization: `Bearer ${token}`, "content-length": 0 } };
+    if (url.protocol === "https:") {
+      if (process.env.MYWS_CA_FILE) opts.ca = readFileSync(process.env.MYWS_CA_FILE);
+      if (process.env.MYWS_CLIENT_CERT) { opts.cert = readFileSync(process.env.MYWS_CLIENT_CERT); opts.key = readFileSync(process.env.MYWS_CLIENT_KEY); }
+    } else if (!["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
+      return reject(new Error("refusing plain http to a non-loopback host"));
+    }
+    const req = (url.protocol === "https:" ? https : http).request(url, opts, (res) => {
+      let data = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => { data += c; });
+      res.on("end", () => {
+        if (res.statusCode !== 200) return reject(new Error(`workspace returned ${res.statusCode}`));
+        try { const body = JSON.parse(data); body.token ? resolve(body) : reject(new Error("no token in response")); }
+        catch { reject(new Error("invalid response json")); }
+      });
+    });
+    req.on("timeout", () => req.destroy(new Error("timeout")));
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+let im;
+for (let attempt = 1; attempt <= 5; attempt += 1) {
+  try { im = await fetchImToken(); break; }
+  catch (e) {
+    process.stderr.write(`myworkspace-openclaw-start: im-token attempt ${attempt} failed: ${e.message}\n`);
+    if (attempt === 5) fail("could not obtain IM token");
+    await new Promise((r) => setTimeout(r, attempt * 2000));
+  }
+}
+
+const env = { ...process.env, OPENIM_TOKEN: im.token };
+if (im.wsAddr) env.OPENIM_WS_ADDR = im.wsAddr;
+if (im.apiAddr) env.OPENIM_API_ADDR = im.apiAddr;
+const child = spawn(cmd[0], cmd.slice(1), { stdio: "inherit", env });
+for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => child.kill(sig));
+child.on("exit", (code, signal) => { process.exit(signal ? 128 : (code ?? 1)); });

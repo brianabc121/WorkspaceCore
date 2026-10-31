@@ -23,6 +23,9 @@ updated: 2026-10-31
 - [ ] Caddy 内网与外网两个接入入口，默认拒绝；凭证和入口绑定；外网入口要求客户端证书，按指纹吊销；限流和封禁
 - [ ] 测试覆盖：凭证错配、入口错配、吊销立即生效、密钥授权与审计
 
+- [ ] 外网模式的本机隧道（ghostunnel 客户端或同类）加 Caddy `client_auth` 双向证书跑通，MCP、`/agent-api`、IM 三类连接都经过隧道（从 OC-0 移来）
+- [ ] OC-0 ADR 的 F5（离线启动时 doctor 的 npm 检查）、F6（不设 `commands.ownerAllowFrom`）、F8（exec 程序属主与权限）落进接入包与检查清单
+
 ## 背景 / 约束 / 参考
 - 依据：`docs/v2/TRANSFORMATION_PLAN.md`；论证与上游源码核对见 `docs/v2/OPENCLAW_PLAN.md`
 - 拆自 T-0047（人类 2026-10-31 决定按推荐执行）

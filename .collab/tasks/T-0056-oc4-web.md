@@ -21,6 +21,8 @@ updated: 2026-10-31
 - [ ] 通讯录与分组（没有删除好友）、OpenClaw 实例页、密钥库页、AI 审批中心与活动记录；顶栏未读与待审批数
 - [ ] 390px 移动端无横向滚动；`apps/web` 的 lint、typecheck、test、build、`check:api` 通过；浏览器验收覆盖主流程
 
+- [ ] OC-0 ADR F3：第一版实例不能主动发图片，界面上不提供相关入口或说明
+
 ## 背景 / 约束 / 参考
 - 依据：`docs/v2/TRANSFORMATION_PLAN.md`；论证与上游源码核对见 `docs/v2/OPENCLAW_PLAN.md`
 - 拆自 T-0047（人类 2026-10-31 决定按推荐执行）

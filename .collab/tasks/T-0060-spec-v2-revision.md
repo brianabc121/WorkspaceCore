@@ -31,3 +31,4 @@ updated: 2026-10-31
 - 2026-10-31 16:30 UTC · claude · 开始任务
 - 2026-10-31 16:32 UTC · claude · 起草完成：DEVELOPMENT_SPEC 修订第 1.1 ~ 1.3、2、3、4、4.2、5.1、6.1、8.1、9.2、9.3、11.1、13、15、16 节（开头加 V2 修订说明）；TASKS 改写 S6-01 ~ S6-03（S6-04 ~ 06 不动）；AGENTS 第 8 节追加 V2 补充规则。docs/DEVELOPMENT_SPEC.docx 未同步（资料包也注明 Word 版不同步）。按 D-0004 第 3 节，等人类批准后合并
 - 2026-10-31 16:32 UTC · claude · status in_progress → done：规范修订已起草；PR 经人类批准合并后生效
+- 2026-10-31 17:09 UTC · human · 人类在对话中批准合并 PR #75（“可以合并”）
