@@ -2,7 +2,7 @@
 id: T-0044
 title: Sprint 6 安全扫描、性能基准与完整端到端 Smoke Test，纳入 CI（S6-05）
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: scripts,tests/e2e,tests/perf,.github/workflows,Makefile,docs/deployment.md,apps/web,.gitleaksignore,docs/decisions,services/api
@@ -18,10 +18,10 @@ S6-05：把安全扫描、性能基准和覆盖全部模块的端到端 Smoke Te
 性能达到规范第 12 节的测试目标（或如实记录差距）。
 
 ## 验收标准
-- [ ] 安全扫描纳入 CI（按 T-0041 的选择）：Python 与 npm 依赖、密钥泄露、容器镜像；高危以上失败；已知误报在文件里登记理由
-- [ ] 性能基准脚本（`tests/perf/` 或 T-0041 选定的位置）：在 Compose 全栈上测基础 API 与缓存命中的首页的 P95，输出报告；结果与规范目标（300 ms / 500 ms）对比，未达标时写明原因
-- [ ] 完整端到端 Smoke Test：一条命令（例如扩展 `make smoke`）覆盖登录、首页、任务、知识、日历、开发者、运维、通知、自动化等页面与接口的基本可用性，纳入 CI
-- [ ] CI 总时长保持在合理范围（例如把扫描放进独立的 job）；本机与 CI 共用同一套脚本
+- [x] 安全扫描纳入 CI（按 T-0041 的选择）：Python 与 npm 依赖、密钥泄露、容器镜像；高危以上失败；已知误报在文件里登记理由
+- [x] 性能基准脚本（`tests/perf/` 或 T-0041 选定的位置）：在 Compose 全栈上测基础 API 与缓存命中的首页的 P95，输出报告；结果与规范目标（300 ms / 500 ms）对比，未达标时写明原因
+- [x] 完整端到端 Smoke Test：一条命令（例如扩展 `make smoke`）覆盖登录、首页、任务、知识、日历、开发者、运维、通知、自动化等页面与接口的基本可用性，纳入 CI
+- [x] CI 总时长保持在合理范围（例如把扫描放进独立的 job）；本机与 CI 共用同一套脚本
 
 ## 背景 / 约束 / 参考
 - 依赖：T-0041
@@ -33,3 +33,4 @@ S6-05：把安全扫描、性能基准和覆盖全部模块的端到端 Smoke Te
 - 2026-10-31 07:10 UTC · claude · 开始任务
 - 2026-10-31 07:18 UTC · claude · paths 加上 apps/web、.gitleaks.toml、docs/decisions：T-0041 第 5.2 / 5.4 节把 zod 公告与 web 镜像的系统包漏洞留给本任务处理；codex 暂停（D-0007），apps/web 没有进行中的其他任务
 - 2026-10-31 07:48 UTC · claude · paths 再加 services/api，.gitleaks.toml 换成 .gitleaksignore：性能基准发现首页聚合在并发下连接池耗尽、模块全部超时（并发 16 时 64 次里 28 次），属于 S6-05 的性能目标，就在本任务修复（ADR 第 8.6 节）；误报改按指纹登记（ADR 第 8.4 节）。services/api 没有其他进行中的任务
+- 2026-10-31 07:50 UTC · claude · status in_progress → done：四项验收标准完成：ci-security.yml（deps / secrets / images 并行）；tests/perf/benchmark.py（并发 4 全部达标，并发 16 首页 P95 565 ms 超过 500 ms，原因见 ADR 第 8.6 节）；make smoke-full 纳入 ci-infra；顺带修复首页聚合在并发下连接池耗尽导致模块超时、zod 公告、vitest 严重漏洞与 web 镜像漏洞

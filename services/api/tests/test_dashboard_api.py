@@ -523,7 +523,8 @@ async def test_concurrent_overviews_queue_instead_of_timing_out(make_client: Cli
             *(client.get("/api/v1/dashboard/overview", headers=headers) for _ in range(6))
         )
     assert [r.status_code for r in responses] == [200] * 6
-    # 每次聚合 0.2 秒、最多 2 个同时进行：最后的请求排队约 0.4 秒，加上执行已超过模块的 0.5 秒超时，仍然是 ok
+    # 每次聚合 0.2 秒、最多 2 个同时进行：最后的请求排队约 0.4 秒，
+    # 加上执行已超过模块的 0.5 秒超时，仍然是 ok
     assert [r.json()["modules"]["tasks"]["status"] for r in responses] == ["ok"] * 6
     assert peak == 2
 
