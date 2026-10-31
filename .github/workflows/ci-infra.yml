@@ -86,6 +86,9 @@ jobs:
       - name: Sprint 5 浏览器验收（运维页与首页运维组件、停掉 Prometheus 后显示过期、viewer 可读、不暴露监控地址）
         # 用 Sprint 5 接口级验收时启动的 prometheus；中途会临时停掉再启动它
         run: node tests/e2e/sprint5_browser.cjs
+      - name: 备份恢复验收（A15：make backup → 隔离环境 make restore-verify → 登录与首页配置一致）
+        # 备份写入临时的本地 restic 仓库；恢复在独立的 Compose 项目（端口 18080）里进行，结束后删除
+        run: python3 tests/e2e/backup_acceptance.py
       - name: 停止 Prometheus（之后的 make down 只管 core 服务）
         run: docker compose --profile monitoring rm -sf prometheus
       - name: 停止 Vikunja（之后的重启检查会删除 core 的网络）

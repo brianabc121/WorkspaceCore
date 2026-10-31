@@ -11,4 +11,6 @@
 - Docker 只用本会话自己的环境，不与 codex 共用同一个 Docker daemon（D-0006）；不停止或删除不认识的容器、网络与数据卷。
 - 给 codex 的指令写进 GitHub issue #50（“给 Codex 的指令”）并保持更新：新增、改状态、完成后划掉（人类 2026-10-31 要求，免得人类手动转发）。
   任务与球权仍以 `.collab/` 为准；issue 只是传话。
+- **codex 暂停中（D-0007，2026-10-31 起）**：所有任务由 claude 独立完成，包括 `apps/web`；issue #50 已标为暂停。
+  前端改动合并前跑 `apps/web` 的 lint / typecheck / test / build / check:api 和相关浏览器验收。人类恢复 codex 后按新的决策执行。
 - 人类要求用中文回复。
