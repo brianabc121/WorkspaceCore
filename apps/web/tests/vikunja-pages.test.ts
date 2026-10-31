@@ -86,6 +86,58 @@ describe('Vikunja 页面', () => {
     expect(query.get('status')).toBe('done'); expect(query.get('project_id')).toBe(project.id)
     expect(query.getAll('priority')).toEqual(['3']); expect(query.has('due_after')).toBe(true); expect(query.has('cursor')).toBe(false)
   })
+  it('saves an edit made while the task refetches in the background', async () => {
+    // T-0049：SSE 失效触发的重新拉取期间点“保存任务”，提交不能被静默丢掉
+    let reads = 0
+    let hold: ((r: Response) => void) | undefined
+    const requests = vikunja((r) => {
+      if (r.method === 'PATCH') return Response.json({ ...task, title: '发布新版' })
+      if (pathOf(r) !== `/api/v1/tasks/${task.id}`) return
+      reads += 1
+      return reads === 1 ? Response.json(task) : new Promise<Response>((resolve) => { hold = resolve })
+    })
+    const { queryClient } = await openApp('/tasks'); await fireEvent.click(await screen.findByRole('button', { name: '准备发布' }))
+    await fireEvent.update(await screen.findByLabelText('任务标题'), '发布新版')
+    void queryClient.invalidateQueries({ queryKey: ['task'] })
+    await vi.waitFor(() => expect(hold).toBeDefined())
+    expect(screen.getByRole('button', { name: '保存任务' })).toBeEnabled()
+    await fireEvent.click(screen.getByRole('button', { name: '保存任务' }))
+    await vi.waitFor(() => expect(requests.some((r) => r.method === 'PATCH')).toBe(true))
+    expect(await requests.find((r) => r.method === 'PATCH')!.clone().json()).toEqual({ version: 'opaque-version', title: '发布新版' })
+    hold!(Response.json(task))
+  })
+  it('keeps unsaved edits when a newer version arrives and saves against the version the user opened', async () => {
+    let reads = 0
+    const requests = vikunja((r) => {
+      if (r.method === 'PATCH') return fail(409, 'VERSION_CONFLICT')
+      if (pathOf(r) !== `/api/v1/tasks/${task.id}`) return
+      reads += 1
+      return Response.json(reads === 1 ? task : { ...task, description: '别处改的说明', version: 'newer-version' })
+    })
+    const { queryClient } = await openApp('/tasks'); await fireEvent.click(await screen.findByRole('button', { name: '准备发布' }))
+    await fireEvent.update(await screen.findByLabelText('任务标题'), '我的新标题')
+    await queryClient.invalidateQueries({ queryKey: ['task'] })
+    expect(await screen.findByText(/这个任务刚在别处更新过。你的修改还在/)).toBeVisible()
+    expect(screen.getByLabelText('任务标题')).toHaveValue('我的新标题')
+    await fireEvent.click(screen.getByRole('button', { name: '保存任务' }))
+    await vi.waitFor(() => expect(requests.some((r) => r.method === 'PATCH')).toBe(true))
+    // 按打开时的版本提交：别处的修改由后端的版本检查发现（409），不会被这次保存悄悄覆盖
+    expect(await requests.find((r) => r.method === 'PATCH')!.clone().json()).toEqual({ version: 'opaque-version', title: '我的新标题' })
+    expect(await screen.findByRole('button', { name: '重新加载任务' })).toBeVisible()
+  })
+  it('shows the newer version when the user has not changed anything yet', async () => {
+    let reads = 0
+    vikunja((r) => {
+      if (pathOf(r) !== `/api/v1/tasks/${task.id}`) return
+      reads += 1
+      return Response.json(reads === 1 ? task : { ...task, title: '别处改的标题', version: 'newer-version' })
+    })
+    const { queryClient } = await openApp('/tasks'); await fireEvent.click(await screen.findByRole('button', { name: '准备发布' }))
+    expect(await screen.findByLabelText('任务标题')).toHaveValue('准备发布')
+    await queryClient.invalidateQueries({ queryKey: ['task'] })
+    await vi.waitFor(() => expect(screen.getByLabelText('任务标题')).toHaveValue('别处改的标题'))
+    expect(screen.queryByText(/这个任务刚在别处更新过/)).not.toBeInTheDocument()
+  })
   it('edits only changed task fields, keeps version opaque, and renders descriptions as text', async () => {
     const requests = vikunja((r) => r.method === 'PATCH' ? Response.json({ ...task, title: '发布新版' }) : undefined)
     await openApp('/tasks'); await fireEvent.click(await screen.findByRole('button', { name: '准备发布' }))
