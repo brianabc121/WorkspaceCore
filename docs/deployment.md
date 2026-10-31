@@ -325,7 +325,50 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
   需要严格的“7 天”时，在宿主机的日志收集里按时间清理。
 - 指标在 Prometheus 里保留 7 天。长期趋势请在 Grafana 里另行配置聚合或远端存储（不在 V1 范围）。
 
-### 12.4 n8n（T-0037 补上启用步骤）
+### 12.4 n8n（自动化，可选）
+
+n8n 是独立的 Compose（`infra/n8n/compose.yaml`），与 Vikunja 一样加入 core 的 `integrations` 网络。
+接口约定见 Sprint 5 契约第 6 节，触发与执行记录的实测见 `docs/decisions/2026-10-31-n8n-trigger-and-execution-verification.md`。
+
+1. 启动：
+
+   ```bash
+   make up
+   ```
+
+   ```bash
+   make n8n-up
+   ```
+
+   `make env` 会随机生成 `N8N_ENCRYPTION_KEY`，请与数据库备份分开保存。
+2. 允许工作台访问 n8n：在 `.env` 的 `INTEGRATION_ALLOWED_HOSTS` 里加上 `n8n`（新生成的 `.env` 默认就是 `vikunja,n8n`），然后 `make up`。
+3. 打开编辑器（默认 `http://localhost:5678/`），创建 owner 账号，然后：
+   - **API Key**：Settings → n8n API → Create an API key，只勾选 `workflow:list`、`workflow:read`、`execution:list`、`execution:read`。
+     工作台不会尝试写入，所以测试连接发现不了权限过大的 Key，请只勾选这四项。
+   - **共享密钥**：新建 Header Auth 凭据，Name 填 `X-Workspace-Trigger`，Value 用一段随机字符串（至少 16 个字符）。
+   - **工作流**：以 Webhook 节点开头：
+     - HTTP Method 为 `POST`；
+     - Path 是一个固定的名字（只用字母、数字、`-`、`_`）；
+     - Authentication 选 Header Auth，并选上面的凭据；
+     - Respond 选 Immediately。
+     保存并激活。
+4. 在工作台的自动化页（admin）：
+   - 填写连接：`base_url` 为 `http://n8n:5678`，`public_url` 为浏览器打开编辑器的地址，再填 API Key 与共享密钥；
+   - 测试连接；
+   - 登记白名单：工作流 ID 在编辑器地址栏的 `/workflow/<ID>` 里，Webhook 路径就是上面的 Path，并声明参数。
+5. 工作流收到的请求体是 `{"workspace_run_id": "<执行记录 ID>", "params": {…}}`。
+   - 在 n8n 里用 `{{ $json.body.params.<参数名> }}` 读取参数；
+   - 只有登记时声明过的参数才会发过来。
+
+注意：
+
+- **版本**：工作台读不到 n8n 的版本号（n8n 不提供）。测试连接时会给出警告，请确认部署的是核验过的 2.45.7，`infra/n8n/compose.yaml` 已按 digest 锁定。
+- **执行记录**：Worker 每分钟对账一次。
+  - 按触发请求的 `traceparent` 找到对应的 n8n 执行；
+  - 失败时只读 n8n 遮蔽后的节点名与错误类型作为摘要，错误正文请到编辑器里看。
+  - 触发后 15 分钟仍找不到对应执行的，标为“无法确认是否执行”，并通知触发者。
+- **重复执行**：触发请求结果未知（超时、连接中断）时不会自动重发。同一个 Idempotency-Key 的重复请求只会返回原来的执行记录。
+- **执行数据**：n8n 自己保存的执行数据由 n8n 管理，工作台不读取、不保存参数与输出。需要时在 n8n 里设置执行数据的保留期与遮蔽策略。
 
 - **n8n**（`n8nio/n8n:2.45.7`）
   - 必须设 `N8N_LISTEN_ADDRESS=0.0.0.0`：没有 IPv6 的网络里，默认的 `::` 会让容器直接退出。

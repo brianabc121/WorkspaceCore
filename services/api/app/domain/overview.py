@@ -16,10 +16,12 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.automations import connection_sync
 from app.domain.connectors import sync_state
 from app.domain.operations import DeploymentHealth
 from app.integrations.vikunja import PROVIDER
 from app.models import CalendarEvent, KnowledgeSource
+from app.repositories import automations as automation_repo
 from app.repositories import integrations as integration_repo
 from app.repositories import projection as projection_repo
 from app.schemas.dashboards import ModuleStatus, TaskBrief
@@ -249,6 +251,36 @@ class OperationsProvider:
         )
 
 
+class AutomationsProvider:
+    """首页的 automations 模块（Sprint 5 契约第 7.1 节）：按 n8n 连接的新鲜度给出，不访问 n8n。"""
+
+    name = "automations"
+    timeout_seconds = 2.0
+
+    def __init__(
+        self, sessions: Callable[[], AsyncSession] | None = None, stale_after_seconds: int = 900
+    ) -> None:
+        self._sessions = sessions
+        self._stale_after = stale_after_seconds
+
+    async def fetch(self, workspace_id: uuid.UUID) -> ModuleResult:
+        if self._sessions is None:
+            return ModuleResult(status=unavailable("not_configured", retryable=False))
+        async with self._sessions() as db:
+            connection = await automation_repo.get_connection(db, workspace_id)
+        state = connection_sync(connection, stale_after_seconds=self._stale_after)
+        if state.status == "not_configured":
+            return ModuleResult(status=unavailable("not_configured", retryable=False))
+        return ModuleResult(
+            status=ModuleStatus(
+                status=state.status,
+                as_of=state.as_of,
+                retryable=state.status != "unauthorized",
+                reason=state.reason,
+            )
+        )
+
+
 def default_providers(
     sessions: Callable[[], AsyncSession] | None = None,
     stale_after_seconds: int = 900,
@@ -260,6 +292,7 @@ def default_providers(
         KnowledgeProvider(sessions),
         GitHubProvider(sessions, stale_after_seconds),
         OperationsProvider(health),
+        AutomationsProvider(sessions, stale_after_seconds),
     ]
 
 

@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.config import get_settings
 from app.core.logging import configure_logging, dict_config
 from app.core.resources import create_engine
-from app.domain import alerts, events, notifications, sync
+from app.domain import alerts, automations, events, notifications, sync
 from app.domain.connectors import ConnectorRuntime
 from app.domain.operations import WORKER_HEARTBEAT_KEY, DeploymentHealth, ServiceCache
 from app.integrations.http import CircuitBreaker
@@ -83,6 +83,12 @@ async def purge(ctx: dict[str, Any]) -> None:
         logger.info("notifications purged", extra={"count": removed})
 
 
+async def reconcile_automations(ctx: dict[str, Any]) -> int:
+    """n8n 执行记录对账（Sprint 5 契约第 6.4 节）：状态、错误摘要与结果通知。"""
+    context = _sync(ctx)
+    return await automations.reconcile_all(context.sessions, context.settings, context.runtime)
+
+
 async def check_services(ctx: dict[str, Any]) -> list[str]:
     """服务健康告警（S5-02）：api、Prometheus、Grafana 变为 down 或恢复时通知管理员。"""
     health: DeploymentHealth = ctx["health"]
@@ -133,6 +139,7 @@ class WorkerSettings:
         cron(reconcile, minute=RECONCILE_MINUTES, timeout=900),
         cron(purge, minute=17),
         cron(check_services, second=45, timeout=60),
+        cron(reconcile_automations, second=15, timeout=120),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())
     on_startup = startup

@@ -23,12 +23,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.domain import github_sync
+from app.domain.automations import connection_sync
 from app.domain.connectors import ConnectorRuntime, sync_state
 from app.domain.policy import WorkspaceAccess
 from app.integrations.base import ConnectorError
 from app.integrations.http import ConnectorHttp, OutboundPolicy, host_of
 from app.integrations.prometheus import PrometheusClient
 from app.models import Integration
+from app.repositories import automations as automation_repo
 from app.repositories import integrations as integration_repo
 from app.schemas.integrations import SyncState
 from app.schemas.operations import (
@@ -378,9 +380,36 @@ class OperationsService:
         now = datetime.now(UTC)
         core, monitoring = await asyncio.gather(self.health.core(), self.health.monitoring())
         items = [*core, *monitoring, *await self._integrations(access.workspace.id)]
-        # n8n 连接由 T-0037 接入；在那之前按“没有配置”列出（契约第 3.1 节）
-        items.append(_status("n8n", "integration", "not_configured", name="n8n", provider="n8n"))
+        items.append(await self._n8n(access.workspace.id))
         return ServiceStatusList(items=items, generated_at=now)
+
+    async def _n8n(self, workspace_id: uuid.UUID) -> ServiceStatusOut:
+        """n8n 连接（契约第 3.1 节）：按连接状态与最近一次对账映射，不在请求里访问 n8n。"""
+        connection = await automation_repo.get_connection(self.db, workspace_id)
+        sync = connection_sync(
+            connection, stale_after_seconds=self.health.settings.sync_stale_after_seconds
+        )
+        state: ServiceState
+        reason = sync.reason
+        if connection is None or sync.status == "not_configured":
+            state = "not_configured"
+        elif connection.status == "pending":
+            state, reason = "unknown", "not_tested"
+        elif sync.status == "ok":
+            state = "ok"
+        elif sync.status == "stale" and connection.status == "active":
+            state = "degraded"
+        else:
+            state = "down"
+        return _status(
+            "n8n",
+            "integration",
+            state,
+            reason=reason,
+            checked_at=sync.as_of,
+            name="n8n",
+            provider="n8n",
+        )
 
     async def _integrations(self, workspace_id: uuid.UUID) -> list[ServiceStatusOut]:
         items: list[ServiceStatusOut] = []
