@@ -1,8 +1,8 @@
 ---
 id: T-0047
 title: Sprint 6 AI（S6-01 ~ S6-03）：等人类恢复 AI 厂商选型后再拆分
-owner: claude
-status: in_progress
+owner: human
+status: blocked
 priority: P2
 branch: claude/cool-wright-99qbbg
 paths: docs/decisions, docs/v2
@@ -36,3 +36,6 @@ S6-01 ~ S6-03（AI provider 抽象、对话与消息、只读工具与检索、�
 - 2026-10-31 15:17 UTC · claude · 交接给 human（escalate）→ .collab/handoffs/2026-10-31-1517_T-0047_claude-to-human.md：OpenClaw 接替 AI 方案的优化方案已写好（docs/v2/OPENCLAW_PLAN.md），请批准方案并决定第 10 节的 6 项
 - 2026-10-31 15:45 UTC · human · owner human → claude：人类在对话中指派：调整 OpenClaw 方案——1. 工作台管理多个 OpenClaw，分布在不同服务器，有的无法走内网，需同时支持内网与外网两种交互方式；2. 密钥放在工作台，OpenClaw 远程请求密钥；3. 与 OpenClaw 的交互放在工作台：用 OpenIM 搭建 Web 端 IM（管理员端），每个 OpenClaw 作为一个用户，经 openimsdk/openclaw-channel 接入；支持拉群（多个 OpenClaw 在群里互相沟通）、消息置顶、免打扰、分组；不提供删除好友；OpenClaw 上线后管理员端自动加为好友
 - 2026-10-31 15:45 UTC · claude · 解除阻塞，继续
+- 2026-10-31 16:02 UTC · human · 人类在对话中确认：AGPL 许可证没问题（针对 openclaw-channel 插件；记录在方案第 9 节）
+- 2026-10-31 16:02 UTC · claude · 方案更新为第 2 版（docs/v2/OPENCLAW_PLAN.md）：多实例登记与接入包；内网、外网两种模式，都由 OpenClaw 主动连回工作台，外网用本机隧道加双向证书；工作台密钥库加 exec SecretRef 取密钥小程序；基于 OpenIM 的管理员端 IM，推荐由工作台后端中转；群聊防刷屏；OpenIM 安全短板的对策；任务 OC-0 ~ OC-7。等人类批准方案第 12 节的 9 项
+- 2026-10-31 16:02 UTC · claude · 交接给 human（escalate）→ .collab/handoffs/2026-10-31-1602_T-0047_claude-to-human.md：OpenClaw 方案第 2 版已按三项调整写好（docs/v2/OPENCLAW_PLAN.md），请批准并决定第 12 节的 9 项
