@@ -40,11 +40,11 @@
 - [x] S4-05 全局搜索 UI、跨工作空间安全测试。
 
 ## Sprint 5 — 监控和自动化
-- [ ] S5-01 Prometheus/Grafana 可选 Compose、API 预设指标视图。
-- [ ] S5-02 Service status、健康告警、降级状态。
-- [ ] S5-03 通知中心、SSE 重连与缓存失效。
-- [ ] S5-04 n8n 白名单触发及运行日志，密钥隔离。
-- [ ] S5-05 监控保留 7 天策略及无敏感日志检查。
+- [x] S5-01 Prometheus/Grafana 可选 Compose、API 预设指标视图。
+- [x] S5-02 Service status、健康告警、降级状态。
+- [x] S5-03 通知中心、SSE 重连与缓存失效。
+- [x] S5-04 n8n 白名单触发及运行日志，密钥隔离。
+- [x] S5-05 监控保留 7 天策略及无敏感日志检查。
 
 ## Sprint 6 — AI 与发布
 - [ ] S6-01 AI provider abstraction、conversations/messages。

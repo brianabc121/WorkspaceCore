@@ -1,11 +1,11 @@
 # Sprint 5 验收报告
 
-- 验收人：claude（协作任务 T-0040，按 D-0003 负责每个 Sprint 的联调与验收）
+- 验收人：claude（协作任务 T-0040，按 D-0003 负责每个 Sprint 的联调与验收；codex 暂停后按 D-0007 独立完成所有任务）
 - 日期：2026-10-31
 - 结论：**Sprint 5 的 DoD 与 A16 全部通过**。接口级（30 项）与浏览器（15 步）验收都已纳入 CI。“未运行 / 限制”逐条见第 7 节。
-- 是否进入 Sprint 6：人类已在 2026-10-30 预先批准“验收通过就自动进入”（记录在 T-0032 的进度日志）。
-  但 2026-10-31 人类在对话中要求 Sprint 6 先暂缓，AI 厂商选型也先暂停（记录在 T-0040 的进度日志）。
-  所以本次验收通过后，**先不开始 Sprint 6**，等人类决定。
+- 是否进入 Sprint 6：人类已在 2026-10-30 预先批准“验收通过就自动进入”（记录在 T-0032 的进度日志），本次验收通过，按此进入 Sprint 6。
+  - 2026-10-31 人类在对话中暂停了 AI 厂商选型（记录在 T-0040 的进度日志）。所以 Sprint 6 先做不依赖它的 S6-04 ~ S6-06；S6-01 ~ S6-03（AI）等人类恢复选型后再开始。
+  - 同一天人类决定 codex 暂停，所有任务由 claude 独立完成（D-0007）。
 
 全栈环境：Compose 6 个核心服务，外加：
 - `prometheus`（`--profile monitoring`，只启动 prometheus；Grafana 不在 CI 启动，见第 7 节）；
@@ -75,7 +75,7 @@ CI 里没有真实的 n8n、Grafana 凭据。两个验收脚本都不要求空�
 |---|---|---|
 | S5-01 Prometheus/Grafana 可选 Compose、API 预设指标视图 | 核验：T-0033（PR #53）；契约：T-0034（PR #54）；后端：T-0035（PR #55）；前端：T-0038（codex，PR #58） | `--profile monitoring`，镜像按 tag 加 digest 锁定；6 个预设视图（接口级 S5-01，浏览器第 2、3 步） |
 | S5-02 Service status、健康告警、降级状态 | T-0035、T-0036（PR #56）；T-0038 | 服务状态与 Worker 心跳；连续两次检查失败才告警，恢复时再通知一次（T-0036 实测）；Prometheus 不可用时显示 stale（DoD） |
-| S5-03 通知中心、SSE 重连与缓存失效 | T-0036；T-0039（codex，PR #61） | 通知去重（接口级）；SSE 推送与 A16（接口级、浏览器第 4 ~ 6 步） |
+| S5-03 通知中心、SSE 重连与缓存失效 | T-0036；T-0039（codex 实现，PR #61；claude 按 D-0007 接手修复 SSE 重连） | 通知去重（接口级）；SSE 推送与 A16（接口级、浏览器第 4 ~ 6 步） |
 | S5-04 n8n 白名单触发及运行日志，密钥隔离 | T-0033、T-0037（PR #57）；T-0039 | 白名单、参数校验、幂等、遮蔽后的错误摘要、结果未知（接口级 S5-04，浏览器第 7 ~ 10 步）；密钥只写不读（DoD） |
 | S5-05 监控保留 7 天策略及无敏感日志检查 | T-0035 | Prometheus 保留 7 天、管理接口关闭；访问日志不记录查询串（接口级 S5-05）；n8n 只读遮蔽后的执行数据（T-0037 ADR 第 3 节） |
 
@@ -103,7 +103,8 @@ CI 里没有真实的 n8n、Grafana 凭据。两个验收脚本都不要求空�
 
 - **api 重启后 SSE 不再重连**（T-0039 的缺陷，PR #61 审查时发现）：
   - 现象：api 重启期间，Caddy 对浏览器的重连请求返回 502。EventSource 收到非 200 就永久关闭，之后页面不再实时刷新，直到用户刷新页面。
-  - 修复：EventSource 被关闭后按退避重新建立（codex 在 PR #61 修复）。浏览器验收第 5 步覆盖这个场景。
+  - 修复：EventSource 被关闭后按退避重新建立（1 秒起翻倍，最长 30 秒），成功连上后清零；切换工作空间、登出时取消。codex 没有额度继续，claude 按 D-0007 接手修复。
+  - 测试：Vitest 新增“关闭后按退避重建”“切换或登出后取消重建”两条用例（前者在修复前失败）；浏览器验收第 5 步覆盖 api 重启的场景。
 - **验收脚本留下启用的 n8n 连接**：
   - 接口级验收结束时会删除模拟 n8n，但它的 n8n 连接仍是启用状态。之后 Worker 每分钟对账都连不上这个主机，按主机计数的熔断器可能打开，影响随后的浏览器验收（同一个主机 `fake-n8n`）。
   - 两个脚本现在都在结束前停用自己的 n8n 连接（Sprint 4 的 GitHub 集成也是这样处理的）。
@@ -111,7 +112,8 @@ CI 里没有真实的 n8n、Grafana 凭据。两个验收脚本都不要求空�
 ## 6. 实际执行的命令
 
 ```bash
-docker build …（本机经代理构建 web 镜像：PR #58、PR #61 的前端）&& docker compose up -d --no-build --wait
+cd apps/web && npm ci && npm run lint && npm run typecheck && npm run test && npm run build && npm run check:api   # 25 个文件 262 个测试通过
+docker build …（本机经代理构建 web 镜像：PR #58、PR #61 与修复后的前端）&& docker compose up -d --no-build --wait
 docker compose --profile monitoring up -d --wait prometheus
 python3 tests/e2e/sprint5_acceptance.py      # 30 项全部通过
 node tests/e2e/sprint5_browser.cjs           # 15 步全部通过（页面无错误）
