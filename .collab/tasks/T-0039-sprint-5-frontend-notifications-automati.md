@@ -1,10 +1,10 @@
 ---
 id: T-0039
 title: Sprint 5 前端（二）：通知中心与 SSE 订阅（重连、缓存失效）、自动化页（白名单触发、运行记录）（S5-03、S5-04 前端）
-owner: codex
+owner: claude
 status: done
 priority: P1
-branch: codex/T-0039-sprint-5-notifications-automations
+branch: claude/cool-wright-99qbbg
 paths: apps/web,.github/workflows/ci-web.yml
 depends_on: T-0034
 created: 2026-10-31
@@ -36,3 +36,6 @@ updated: 2026-10-31
 - 2026-10-31 04:13 UTC · codex · 通知/SSE/自动化功能已实现；32项专项测试通过，模拟BFF+EventSource Chromium通知/重连/触发未知/亮暗移动端检查通过。浏览器发现弹窗焦点丢失Escape失效，新增失败回归后修复；参数select增加明确可访问名称。独立整分支审查进行中，最终全套验证与PR待完成，不标done。
 - 2026-10-31 04:22 UTC · codex · status in_progress → done：通知入口/首页组件、SSE作用域刷新、自动化白名单/连接管理/运行记录/参数确认和幂等恢复已完成。Node22 npm ci；lint/typecheck/check:api/build/browser均退出0；25文件261测试通过（专项37）。一次独立审查5项回归RED→GREEN后全套复跑。schema无改动，collab check0警告；build有527.16kB非阻塞警告。真实部署联调由T0040，验证 apps/web/docs/verification/T-0039.md。将推PR等Claude审查合并。
 - 2026-10-31 04:24 UTC · codex · 交付PR https://github.com/brianabc121/WorkspaceCore/pull/61 已创建；issue50完成回执 issuecomment-6538968989。前端/API在同步main661bd45时无变化，最终261测试和全部前端检查已通过；等待Claude审查与远程CI。Codex不合并，停止开工新任务。聊天PR附加工具未返回结果，PR实际链接已核对。
+- 2026-10-31 05:38 UTC · human · owner codex → claude，status done → in_progress：人类在对话中指派（2026-10-31）：codex 没有额度，由 claude 直接修复 PR #61 的阻塞问题（api 重启后 SSE 不再重连）并完成本任务；之后所有任务由 claude 独立完成（D-0007）。codex 的提交已合进 claude/cool-wright-99qbbg，不推送 codex 的分支。
+- 2026-10-31 05:49 UTC · claude · 修复 PR #61 的阻塞问题：useWorkspaceEvents.ts 在 EventSource 被浏览器关闭（非 200：api 重启期间的 502/503、429、401）后按退避重建（1 秒起翻倍，最长 30 秒），open 时清零；切换工作空间、登出、卸载时取消重建。网络错误仍由浏览器带 Last-Event-ID 自动重连。workspace-events.test.ts：原“被拒后只剩手动刷新”的用例改为“关闭后按退避重建、手动刷新仍可用”，新增“切换工作空间或登出后取消重建”；修复前前者失败，修复后通过。apps/web：npm ci 后 lint / typecheck / test（25 文件 262 个测试）/ build / check:api 全部通过，schema.d.ts 无变化。全栈（claude 自己的 Docker）：sprint5_acceptance.py 30 项、sprint5_browser.cjs 15 步全部通过（含“重启 api，期间 502 后 SSE 恢复”）。
+- 2026-10-31 05:49 UTC · claude · status in_progress → done：验收标准全部满足；阻塞问题已修复，全栈浏览器验收通过。与 T-0040 同一个 PR 合并。

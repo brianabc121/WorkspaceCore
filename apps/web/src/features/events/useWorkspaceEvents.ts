@@ -10,6 +10,8 @@ const families: Record<Schema['InvalidateEvent']['topics'][number], string[]> = 
   notifications: ['notifications', 'overview'], operations: ['operations'],
   automations: ['automations', 'automation-connection', 'automation-runs'],
 }
+// Backoff for rebuilding a stream the browser closed; reset after every successful open.
+const RETRY_BASE_MS = 1000, RETRY_MAX_MS = 30000
 export function useWorkspaceEvents() {
   const auth = useAuthStore(), cache = useQueryClient(), available = ref(false)
   let close = () => {}
@@ -20,18 +22,16 @@ export function useWorkspaceEvents() {
   watch(() => [auth.user?.id, auth.workspaceId], ([user, scope]) => {
     close(); available.value = false
     if (!user || !scope || typeof EventSource === 'undefined') return
-    let stream: EventSource
-    try { stream = new EventSource('/api/v1/events/stream?workspace_id=' + encodeURIComponent(scope)) }
-    catch { return }
-    let current = true
+    const url = '/api/v1/events/stream?workspace_id=' + encodeURIComponent(scope)
+    let current = true, attempt = 0, timer: ReturnType<typeof setTimeout> | undefined, stream: EventSource | null = null
     const active = () => current && auth.user?.id === user && auth.workspaceId === scope
-    const open = () => { if (active()) { available.value = true; refresh() } }
+    const open = () => { if (active()) { attempt = 0; available.value = true; refresh() } }
     const error = () => {
-      if (!active()) return
+      if (!active() || !stream) return
       available.value = false
-      // Native EventSource retains Last-Event-ID during ordinary reconnects.
-      // Fatal HTTP responses (including 429) close it; manual refresh remains.
-      if (stream.readyState === 2) stream.close()
+      // Network errors keep the stream CONNECTING and the browser retries with Last-Event-ID.
+      // A non-200 response (502/503 while api restarts, 429, 401) closes it for good, so rebuild it with backoff.
+      if (stream.readyState === 2) { detach(stream); stream = null; timer = setTimeout(connect, Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** attempt++)) }
     }
     const invalidate = (event: Event) => {
       if (!active()) return
@@ -42,8 +42,15 @@ export function useWorkspaceEvents() {
       const prefixes = new Set(data.topics.flatMap(topic => typeof topic === 'string' ? families[topic] ?? [] : []))
       if (prefixes.size) void cache.invalidateQueries({ predicate: q => q.queryKey[1] === user && q.queryKey[2] === scope && prefixes.has(String(q.queryKey[0])) })
     }
-    stream.addEventListener('open', open); stream.addEventListener('error', error); stream.addEventListener('invalidate', invalidate)
-    close = () => { current = false; stream.removeEventListener('open', open); stream.removeEventListener('error', error); stream.removeEventListener('invalidate', invalidate); stream.close() }
+    const detach = (target: EventSource) => { target.removeEventListener('open', open); target.removeEventListener('error', error); target.removeEventListener('invalidate', invalidate); target.close() }
+    const connect = () => {
+      timer = undefined
+      if (!active()) return
+      try { stream = new EventSource(url) } catch { return }
+      stream.addEventListener('open', open); stream.addEventListener('error', error); stream.addEventListener('invalidate', invalidate)
+    }
+    close = () => { current = false; clearTimeout(timer); if (stream) detach(stream); stream = null }
+    connect()
   }, { immediate: true, flush: 'sync' })
   const visible = () => { if (document.visibilityState === 'visible') refresh() }
   document.addEventListener('visibilitychange', visible)

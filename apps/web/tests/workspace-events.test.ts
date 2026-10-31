@@ -59,10 +59,21 @@ describe('workspace events', () => {
     await new Promise(resolve => setTimeout(resolve, 20)); expect(model.requests).toHaveLength(count)
     useAuthStore(pinia).clearSession(); expect(Stream.all[1]!.closed).toBe(true); unmount()
   })
-  it('keeps manual refresh usable when stream is unavailable or rejected before opening (including 429)', async () => {
+  it('rebuilds a stream the browser closed (502 while api restarts, 429) with backoff and keeps manual refresh usable', async () => {
     const model = setup(); await openApp('/operations'); await screen.findByRole('region', { name: 'API 0' }); expect(Stream.all).toHaveLength(1)
     Stream.all[0]!.readyState = 2; Stream.all[0]!.dispatchEvent(new Event('error'))
-    model.change(); await fireEvent.click(screen.getByRole('button', { name: '刷新运维数据' })); await screen.findByRole('region', { name: 'API 1' })
     expect(Stream.all[0]!.closed).toBe(true); expect(Stream.all).toHaveLength(1)
+    model.change(); await fireEvent.click(screen.getByRole('button', { name: '刷新运维数据' })); await screen.findByRole('region', { name: 'API 1' })
+    await vi.waitFor(() => expect(Stream.all).toHaveLength(2), { timeout: 2000 })
+    expect(Stream.all[1]!.url).toBe('/api/v1/events/stream?workspace_id=workspace-a')
+    model.change(); Stream.all[1]!.open(); await screen.findByRole('region', { name: 'API 2' })
+  })
+  it('cancels a pending rebuild when the workspace switches or the session ends', async () => {
+    setup(); const { pinia } = await openApp('/operations'); await screen.findByRole('region', { name: 'API 0' }); expect(Stream.all).toHaveLength(1)
+    Stream.all[0]!.readyState = 2; Stream.all[0]!.dispatchEvent(new Event('error'))
+    useAuthStore(pinia).selectWorkspace('workspace-b'); await vi.waitFor(() => expect(Stream.all).toHaveLength(2))
+    expect(Stream.all[1]!.url).toBe('/api/v1/events/stream?workspace_id=workspace-b')
+    Stream.all[1]!.readyState = 2; Stream.all[1]!.dispatchEvent(new Event('error')); useAuthStore(pinia).clearSession()
+    await new Promise(resolve => setTimeout(resolve, 1500)); expect(Stream.all).toHaveLength(2)
   })
 })
