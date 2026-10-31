@@ -49,7 +49,7 @@ RUN mkdir -p _output/logs _output/tmp _output/export _output/tools \
     && chown -R openim:openim _output/logs _output/tmp _output/export _output/tools
 
 LABEL org.opencontainers.image.title="openim-server (My Workspace patched)" \
-      org.opencontainers.image.version="v3.8.3-patch.18-myws.1" \
+      org.opencontainers.image.version="v3.8.3-patch.18-myws.2" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.source="https://github.com/openimsdk/open-im-server" \
       org.opencontainers.image.revision="120cee6d5783959a02ea1acfa414589fe5aae90f"

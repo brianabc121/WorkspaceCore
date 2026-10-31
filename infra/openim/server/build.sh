@@ -15,7 +15,7 @@ set -euo pipefail
 UPSTREAM_URL="https://github.com/openimsdk/open-im-server.git"
 UPSTREAM_TAG="v3.8.3-patch.18"
 UPSTREAM_SHA="120cee6d5783959a02ea1acfa414589fe5aae90f"
-IMAGE="${1:-my-workspace/openim-server:v3.8.3-patch.18-myws.1}"
+IMAGE="${1:-my-workspace/openim-server:v3.8.3-patch.18-myws.2}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 patches="$here/../patches"

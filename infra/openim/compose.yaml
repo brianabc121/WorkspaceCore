@@ -3,14 +3,15 @@
 # 依据：docs/v2/TRANSFORMATION_PLAN.md 第 4.4、6.1 节；核验与越权问题见
 # docs/decisions/2026-10-31-v2-oc0-openclaw-openim-verification.md。
 #   - openim-server 用按 infra/openim/patches/ 自建的镜像（先运行 infra/openim/server/build.sh）；
-#   - bitnamilegacy/* 不再更新，OC-3 评估换成各组件官方镜像；
+#   - etcd、Kafka 用各自的官方镜像，并开启认证（etcd 用户与角色、Kafka SASL/PLAIN）；
+#   - minio 还是 bitnamilegacy（不再更新），对象存储的替换和图片上传一起在 OC-3 后续部分处理；
 #   - OC-3 再接入 core 的网络、Caddy 接入入口与工作台回调地址，并把变量加进 .env.example / make env。
-# 本初稿在 OC-0 中按同样的组件、版本和环境变量实际启动过（ADR 第 2 节）。
 #
 # 用法（只用于本机核验）：
 #   docker compose -f infra/openim/compose.yaml --env-file infra/openim/.env up -d
 # infra/openim/.env 需要（全部随机生成，例如 openssl rand -hex 16；禁止使用官方默认值 openIM123）：
 #   OPENIM_SECRET  OPENIM_MONGO_ROOT_PASSWORD  OPENIM_MONGO_PASSWORD  OPENIM_REDIS_PASSWORD  OPENIM_MINIO_SECRET
+#   OPENIM_ETCD_ROOT_PASSWORD  OPENIM_ETCD_PASSWORD  OPENIM_KAFKA_PASSWORD（这三项只能是字母和数字）
 #   OPENIM_WEBHOOK_URL（回调地址，只能是内部网络地址）
 
 name: my-workspace-openim
@@ -21,8 +22,9 @@ networks:
 volumes:
   openim-mongo: {}
   openim-redis: {}
-  openim-kafka: {}
-  openim-etcd: {}
+  # 换成官方镜像后数据目录与属主都变了，所以用新的数据卷名，不复用 bitnamilegacy 留下的卷
+  openim-kafka-data: {}
+  openim-etcd-data: {}
   openim-minio: {}
 
 services:
@@ -48,36 +50,83 @@ services:
     networks: [openim]
 
   etcd:
-    image: bitnamilegacy/etcd:3.5.21@sha256:1b9977cf4cce7546873e0ee50e684c38a38a4e7a27d22086fbd2b8a1b44a69d0
+    # 官方镜像（distroless，没有 shell）；认证由 etcd-init 开启
+    image: gcr.io/etcd-development/etcd:v3.5.34@sha256:04726053dabaf26b56ce7ef28c3d20b8b4a4006ed887d30194aa4f0756ee4f8d
     environment:
       ETCD_NAME: s1
-      ETCD_DATA_DIR: /bitnami/etcd/data
+      ETCD_DATA_DIR: /var/lib/etcd/data
       ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
       ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
       ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
       ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd:2380
       ETCD_INITIAL_CLUSTER: s1=http://etcd:2380
       ETCD_INITIAL_CLUSTER_STATE: new
-      # 只在 openim 内部网络可达；OC-3 评估开启 etcd 认证（openim-docker 已支持）
-      ALLOW_NONE_AUTHENTICATION: "yes"
-    volumes: [openim-etcd:/bitnami/etcd]
+      ETCD_AUTO_COMPACTION_RETENTION: "1"
+    volumes: [openim-etcd-data:/var/lib/etcd]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
     restart: unless-stopped
     networks: [openim]
 
-  kafka:
-    image: bitnamilegacy/kafka:3.5.1@sha256:c98ae8022239c956ed81c761262d018ce9a22bb2ef0214e2be670ee6b71741db
+  etcd-init:
+    # 一次性：建 root / openim 用户并开启认证；以后每次启动同步 openim 的密码（etcd-init.sh）
+    image: alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+    command: ["sh", "/etcd-init.sh"]
     environment:
-      KAFKA_CFG_NODE_ID: 0
-      KAFKA_CFG_PROCESS_ROLES: controller,broker
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      OPENIM_ETCD_ROOT_PASSWORD: ${OPENIM_ETCD_ROOT_PASSWORD:?}
+      OPENIM_ETCD_PASSWORD: ${OPENIM_ETCD_PASSWORD:?}
+    volumes:
+      - ./etcd-init.sh:/etcd-init.sh:ro
+    user: "65534:65534"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on: [etcd]
+    restart: "no"
+    networks: [openim]
+
+  kafka:
+    # 官方镜像，KRaft 单节点。3.9 是最后一个保留旧协议版本的系列：OpenIM 的消费者按 Kafka 2.0 协议连接
+    # （openimsdk/tools mq/kafka/config.go 的 sarama.V2_0_0_0），4.x 删掉了 2.1 以下的协议版本
+    image: apache/kafka:3.9.2@sha256:05b4616e0702ef2729327705d54ad6b50ea70b271c4b730fabd2320789fb7b02
+    environment:
+      # KRaft 集群 ID（16 字节 UUID 的 base64url，不是密钥；只在第一次格式化数据目录时使用）
+      CLUSTER_ID: -3bzyVp9S3yCan0auOL5yg
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: INTERNAL://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:SASL_PLAINTEXT,CONTROLLER:SASL_PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # 所有连接都要 SASL/PLAIN；只有一个用户 openim（broker 之间与 OpenIM 共用）
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: PLAIN
+      KAFKA_LISTENER_NAME_INTERNAL_PLAIN_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        username="openim" password="${OPENIM_KAFKA_PASSWORD:?}" user_openim="${OPENIM_KAFKA_PASSWORD:?}";
+      KAFKA_LISTENER_NAME_CONTROLLER_PLAIN_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        username="openim" password="${OPENIM_KAFKA_PASSWORD:?}" user_openim="${OPENIM_KAFKA_PASSWORD:?}";
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_NUM_PARTITIONS: 8
-      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_CFG_LISTENERS: "INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9094"
-      KAFKA_CFG_ADVERTISED_LISTENERS: "INTERNAL://kafka:9092,EXTERNAL://kafka:9094"
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT"
-      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: INTERNAL
-    volumes: [openim-kafka:/bitnami/kafka]
+      KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 8
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # 消息由 OpenIM 写进 MongoDB 后，Kafka 里的只是中转：日志段 16 MiB、保留 3 天、索引上限 1 MiB
+      # （默认 1 GiB 段与 10 MiB 索引会让空闲的 Kafka 占 1.7 GB，OC-0 ADR 第 8 节）
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LOG_SEGMENT_BYTES: 16777216
+      KAFKA_LOG_RETENTION_HOURS: 72
+      KAFKA_LOG_INDEX_SIZE_MAX_BYTES: 1048576
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes: [openim-kafka-data:/var/lib/kafka/data]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
     restart: unless-stopped
     networks: [openim]
 
@@ -93,7 +142,7 @@ services:
   openim-server:
     # 打过补丁的自建镜像（OC-3）：infra/openim/server/build.sh 按锁定的上游提交与 patches/ 构建，
     # 不从镜像仓库拉取。官方镜像有越权问题（ADR 第 4 节），不要换回去
-    image: my-workspace/openim-server:v3.8.3-patch.18-myws.1
+    image: my-workspace/openim-server:v3.8.3-patch.18-myws.2
     pull_policy: never
     init: true
     # 只绑定本机，用于核验；OC-3 改为只经 Caddy 接入入口访问
@@ -105,7 +154,11 @@ services:
       IMENV_MONGODB_USERNAME: openim
       IMENV_MONGODB_PASSWORD: ${OPENIM_MONGO_PASSWORD:?}
       IMENV_KAFKA_ADDRESS: kafka:9094
+      IMENV_KAFKA_USERNAME: openim
+      IMENV_KAFKA_PASSWORD: ${OPENIM_KAFKA_PASSWORD:?}
       IMENV_DISCOVERY_ETCD_ADDRESS: etcd:2379
+      IMENV_DISCOVERY_ETCD_USERNAME: openim
+      IMENV_DISCOVERY_ETCD_PASSWORD: ${OPENIM_ETCD_PASSWORD:?}
       IMENV_REDIS_ADDRESS: redis:6379
       IMENV_REDIS_PASSWORD: ${OPENIM_REDIS_PASSWORD:?}
       IMENV_MINIO_INTERNALADDRESS: minio:9000
@@ -125,6 +178,11 @@ services:
       IMENV_WEBHOOKS_BEFORESENDGROUPMSG_ENABLE: "true"
       IMENV_WEBHOOKS_AFTERDELETEFRIEND_ENABLE: "true"
       IMENV_WEBHOOKS_AFTERIMPORTFRIENDS_ENABLE: "true"
-    depends_on: [mongo, redis, etcd, kafka, minio]
+    depends_on:
+      mongo: {condition: service_started}
+      redis: {condition: service_started}
+      kafka: {condition: service_started}
+      minio: {condition: service_started}
+      etcd-init: {condition: service_completed_successfully}
     restart: unless-stopped
     networks: [openim]

@@ -79,7 +79,68 @@ OC-0 的回归测试脚本没有覆盖这一项，覆盖它的是这个单元测
 
 ## 6. 还没做的（T-0055 后续部分）
 
-- 升级第 5 节的依赖，镜像扫描进入 CI；
-- 替换 bitnamilegacy 的 kafka / minio / etcd，开启 etcd 认证和 Kafka SASL，调小 Kafka 日志段；
+- ~~升级第 5 节的依赖，镜像扫描进入 CI~~（第 2 部分，见第 7 节）；
+- ~~替换 bitnamilegacy 的 kafka / etcd，开启 etcd 认证和 Kafka SASL，调小 Kafka 日志段~~（第 2 部分）；
+- 替换 bitnamilegacy 的 minio：和图片上传流程一起核验（官方 MinIO 镜像的发布状态要先核实，见第 7.4 节）；
 - 接入工作台：内部网络、回调地址、接入入口 `/im/*`、`.env.example`；
 - 备份 MongoDB 与 MinIO。
+
+## 7. 第 2 部分：依赖升级、etcd 与 Kafka 换官方镜像并开启认证（2026-10-31）
+
+镜像名改为 `my-workspace/openim-server:v3.8.3-patch.18-myws.2`（内容变了，标签跟着变）。
+
+### 7.1 补丁 0004：依赖升级
+
+| 依赖 | 原版本 | 新版本 | 原因 |
+|---|---|---|---|
+| `golang.org/x/net` | 0.55.0 | 0.60.0（2026-10-08） | 高危，已有修复；要求 Go ≥ 1.26 |
+| `golang.org/x/image` | 0.39.0 | 0.45.0 | 高危 |
+| `github.com/klauspost/compress` | 1.17.7 | 1.18.7 | 高危 |
+| `google.golang.org/grpc` | 1.79.3 | 1.83.2（2026-08-25） | 高危（三项） |
+| `github.com/go-jose/go-jose/v4` | 4.1.4 | 4.1.6（2026-10-14） | 升级 grpc 后带进来的，高危 |
+| `golang.org/x/crypto`、`x/text`、`otel` | 0.52 / 0.37 / 1.39 | 0.57 / 0.42 / 1.44 | 上面几项要求的最低版本 |
+
+- `go.mod` 的 `go` 指令随之变成 1.26.0（构建镜像是 1.26.9）；连带升级了 Firebase 推送用到的 `cloud.google.com/go`、`google.golang.org/api` 等间接依赖。
+- `go build ./...`、`TestCheckClientMsg` 通过。`go vet` 报的无键结构体字面量和一个测试文件的未知字段，升级前就有（上游问题）。
+- trivy：严重 0；高危只剩 Go 标准库 1.26.9。修复在 1.26.10，2026-10-27 发布，不满两周，下次升级构建镜像时处理。
+- `ci-openim` 增加镜像扫描：高危只报告，有修复的严重漏洞就失败。
+
+### 7.2 etcd：官方镜像 + 认证
+
+- 镜像 `gcr.io/etcd-development/etcd:v3.5.34@sha256:04726053dabaf26b56ce7ef28c3d20b8b4a4006ed887d30194aa4f0756ee4f8d`（2026-09-22；OpenIM 的客户端是 etcd 3.5 系列）。distroless 镜像，没有 shell。
+- 认证由一次性服务 `etcd-init`（`alpine:3.24.2`，脚本 `infra/openim/etcd-init.sh`）通过 etcd 的 JSON 网关开启：
+  - 两个用户：`root`（角色 root）与 `openim`；
+  - `openim` 只能读写 `openim` 前缀和 `/check_openim_component` 这一个键。后者是启动检查 `check-component` 用的，在前缀之外，第一次实测时因为没授权而启动失败；
+  - 已经开启认证时，每次启动重新授权，并同步 `openim` 的密码（支持轮换）。
+- 实测：
+  - 不带凭证读写 `openim` 前缀返回 400；
+  - `openim` 用户写前缀之外的键返回 403；
+  - OpenIM 用 `openim` 用户正常启动。
+
+### 7.3 Kafka：官方镜像 + SASL/PLAIN
+
+- 镜像 `apache/kafka:3.9.2@sha256:05b4616e0702ef2729327705d54ad6b50ea70b271c4b730fabd2320789fb7b02`（2026-02-21），KRaft 单节点。
+- **不用 4.x**：OpenIM 的消费者组按 Kafka 2.0 协议连接（`openimsdk/tools` 的 `mq/kafka/config.go` 写死 `sarama.V2_0_0_0`），而 Kafka 4.0 删掉了 2.1 以下的协议版本（KIP-896）。3.9 是最后一个保留旧协议的系列。
+- broker 与 controller 两个监听都是 `SASL_PLAINTEXT` + PLAIN，只有一个用户 `openim`。OpenIM 用 `IMENV_KAFKA_USERNAME` / `IMENV_KAFKA_PASSWORD` 连接（sarama 默认机制就是 PLAIN）。
+- 日志段 16 MiB、保留 72 小时、索引上限 1 MiB、堆 512 MiB：
+  - 空闲时数据卷 648 KB（bitnamilegacy 时是 1.74 GB），内存约 370 MiB；
+  - 消息由 OpenIM 写进 MongoDB 后，Kafka 里的只是中转。
+- 实测：
+  - 不带 SASL 的客户端被拒（broker 日志 `Failed authentication ... Unexpected Kafka request of type METADATA during SASL handshake`）；
+  - 带 SASL 能列出 OpenIM 的 4 个主题；
+  - 管理员代发的消息能被收件人拉到，说明消息经 Kafka 中转正常。
+- 数据卷改名为 `openim-kafka-data` / `openim-etcd-data`：官方镜像的数据目录和属主都变了，不复用旧卷。
+
+### 7.4 MinIO：这次没换
+
+- Docker Hub 上的 `minio/minio` 查不到 tag 信息；`quay.io` 被本会话的代理拒绝（403）；`bitnami/minio` 已经是空的。
+- 候选：官方 MinIO（需先核实发布状态）、Garage、SeaweedFS、RustFS。
+- OpenIM 的对象存储有 minio / aws / cos / oss / kodo 几种驱动，换实现之前要先核对它用到的 S3 接口（例如公开读的 bucket policy）。所以和图片上传一起做。
+
+### 7.5 本机结果（全新数据卷）
+
+| 项目 | 结果 |
+|---|---|
+| `rest-authz.py` | 5 项全部“已挡住”，退出码 0 |
+| 正常使用 | 拉取自己的会话（读到消息）、增量同步会话、改自己的会话设置、标记已读、好友列表、管理员搜索消息，全部 errCode 0 |
+| 空闲内存 | openim-server 395 MiB、kafka 370 MiB、mongo 354 MiB、minio 125 MiB、etcd 18 MiB |
