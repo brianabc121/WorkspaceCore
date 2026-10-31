@@ -55,13 +55,17 @@ CI 的 `ci-api.yml` 用与 1.1 节相同的 PostgreSQL、Redis 镜像（同一�
 ### 1.5 V2：OpenClaw 与 OpenIM（OC-0 核验结果，尚未进入正式部署）
 
 来源与说明见 `2026-10-31-v2-oc0-openclaw-openim-verification.md`。
-OpenIM 的官方镜像有越权问题，OC-3 会换成自建的补丁镜像，届时补上自建镜像的 digest。
+OpenIM 的官方镜像有越权问题，已换成自建的补丁镜像（`2026-10-31-v2-oc3-openim-patched-image.md`）。自建镜像每次构建的 digest 不同，所以锁定的是全部构建输入。
 
 | 组件 | 镜像 / 包 | digest / 校验值 | 许可证 | 在哪里 |
 |---|---|---|---|---|
 | OpenClaw 2026.9.36（extended-stable） | `openclaw/openclaw:2026.9.36` | `sha256:eefba69ec4a5fa596f3b1a8fac4f09525ce10435617a23f2a2090ddd3b6c1c2f` | MIT | 各 OpenClaw 服务器（`infra/openclaw/`） |
 | OpenIM 渠道插件 0.3.3 | `@openim/openclaw-channel@0.3.3`（npm） | tarball sha256 `3d10dca0edcba0ecdb0dc915e7cf1ddf5a8453165de13dec76bbe5ef85607643` | AGPL-3.0-only | 同上 |
-| OpenIM Server v3.8.3-patch.18（官方，**未打补丁**） | `openim/openim-server:v3.8.3-patch.18` | `sha256:71d5872be4e603c94a3a06d4279bac2b3b5aa66685e95403efac7489690773e1` | Apache-2.0 | `infra/openim/compose.yaml`（初稿） |
+| OpenIM Server v3.8.3-patch.18 **补丁镜像** | `my-workspace/openim-server:v3.8.3-patch.18-myws.1`（本机构建，不推送） | 上游提交 `120cee6d5783959a02ea1acfa414589fe5aae90f` + `infra/openim/patches/` | Apache-2.0 | `infra/openim/compose.yaml`；构建 `infra/openim/server/build.sh` |
+| 构建镜像 Go 1.26.9 | `golang:1.26.9-alpine3.24` | `sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade` | BSD-3-Clause | `infra/openim/server/Dockerfile`（只用于构建） |
+| 运行镜像 Alpine 3.24.2 | `alpine:3.24.2` | `sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6` | MIT（busybox 等为 GPL-2.0） | 同上（补丁镜像的基础） |
+| mage v1.17.2 | `github.com/magefile/mage@v1.17.2`（Go 模块） | Go 模块校验 | Apache-2.0 | 同上（OpenIM 的构建与启动工具） |
+| OpenIM Server v3.8.3-patch.18（官方，**有越权问题，不再使用**） | `openim/openim-server:v3.8.3-patch.18` | `sha256:71d5872be4e603c94a3a06d4279bac2b3b5aa66685e95403efac7489690773e1` | Apache-2.0 | 只在 OC-0 核验中用过 |
 | MongoDB 7.0.28 | `mongo:7.0.28` | `sha256:4510cf3d7050003e958745adb25d2deb3fb907430716162d9cc1a92eda2a6047` | SSPL-1.0 | 同上 |
 | Redis 7.0.0（OpenIM 用） | `redis:7.0.0` | `sha256:1b90dbfe6943c72a7469c134cad3f02eb810f016049a0e19ad78be07040cdb0c` | BSD-3-Clause | 同上 |
 | Kafka 3.5.1 | `bitnamilegacy/kafka:3.5.1` | `sha256:c98ae8022239c956ed81c761262d018ce9a22bb2ef0214e2be670ee6b71741db` | Apache-2.0 | 同上（OC-3 评估替换） |

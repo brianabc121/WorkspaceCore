@@ -1,8 +1,8 @@
-# OpenIM（工作台管理员端 IM 的后端）的独立 Compose —— OC-0 初稿，**未打补丁，不得用于生产**。
+# OpenIM（工作台管理员端 IM 的后端）的独立 Compose —— OC-3 进行中，**还没接入工作台，不得用于生产**。
 #
 # 依据：docs/v2/TRANSFORMATION_PLAN.md 第 4.4、6.1 节；核验与越权问题见
 # docs/decisions/2026-10-31-v2-oc0-openclaw-openim-verification.md。
-#   - 官方 openim-server 镜像有越权问题（ADR 第 4 节），OC-3 换成按 infra/openim/patches/ 自建的镜像；
+#   - openim-server 用按 infra/openim/patches/ 自建的镜像（先运行 infra/openim/server/build.sh）；
 #   - bitnamilegacy/* 不再更新，OC-3 评估换成各组件官方镜像；
 #   - OC-3 再接入 core 的网络、Caddy 接入入口与工作台回调地址，并把变量加进 .env.example / make env。
 # 本初稿在 OC-0 中按同样的组件、版本和环境变量实际启动过（ADR 第 2 节）。
@@ -91,8 +91,10 @@ services:
     networks: [openim]
 
   openim-server:
-    # 官方镜像（未打补丁）：OC-3 换成自建镜像
-    image: openim/openim-server:v3.8.3-patch.18@sha256:71d5872be4e603c94a3a06d4279bac2b3b5aa66685e95403efac7489690773e1
+    # 打过补丁的自建镜像（OC-3）：infra/openim/server/build.sh 按锁定的上游提交与 patches/ 构建，
+    # 不从镜像仓库拉取。官方镜像有越权问题（ADR 第 4 节），不要换回去
+    image: my-workspace/openim-server:v3.8.3-patch.18-myws.1
+    pull_policy: never
     init: true
     # 只绑定本机，用于核验；OC-3 改为只经 Caddy 接入入口访问
     ports:
