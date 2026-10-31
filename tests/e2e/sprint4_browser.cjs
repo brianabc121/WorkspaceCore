@@ -1,7 +1,9 @@
-// Sprint 4 浏览器验收（T-0032）：真实后端上的知识入口、日历与首页组件——
-// 配置 AFFiNE 地址 → 新增收藏并关联任务 → 任务抽屉显示相关文档 → 搜索命中 → 日历新建 / 编辑 →
-// 首页“最近文档”“近期日程”显示真实数据 → viewer 只读 → 删除日程与收藏后搜索不再出现。
-// GitHub 连接、开发者页与全局搜索框由 T-0031 的前端提供，合并后在本脚本里补上。
+// Sprint 4 浏览器验收（T-0032）：真实后端上的知识入口、日历、GitHub 与全局搜索——
+// 配置 AFFiNE 地址 → 新增收藏并关联任务 → 任务抽屉显示相关文档 → 日历新建 / 编辑 →
+// 首页“最近文档”“近期日程”显示真实数据 → 连接 GitHub → 开发者页 → 限流提示 →
+// 顶栏搜索框命中并跳转 → viewer 只读 → 删除日程与收藏后页面与搜索都不再出现。
+// GitHub 用模拟服务（fake_github_server.py，与 sprint4_acceptance.py 相同），.env 需要
+// WORKSPACE_GITHUB_API_URL=http://fake-github:8080，INTEGRATION_ALLOWED_HOSTS 含 fake-github。
 //
 // 前提：Compose 全栈已启动并迁移（make up && make migrate）。
 // 不要求空库：每次用新的工作台用户；用户由同目录的 seed.py 写入。
@@ -24,6 +26,9 @@ const password = 'e2e sprint4 browser pass'
 const run = randomBytes(4).toString('hex')
 const AFFINE = 'http://affine.e2e.invalid:3010'
 const ZONE = 'Asia/Shanghai'
+const FAKE_NAME = 'ws-e2e-fake-github'
+const FAKE_PORT = 18090
+const FAKE_REPO = 'e2e/workspace'
 
 function envValue(name) {
   if (process.env[name]) return process.env[name]
@@ -39,6 +44,52 @@ function seed(...args) {
   }).trim().split(/\s+/)
 }
 function check(condition, message) { if (!condition) throw new Error(message) }
+
+function docker(...args) {
+  return execFileSync('docker', args, { cwd: ROOT, encoding: 'utf8' }).trim()
+}
+// 模拟 GitHub：在 api 镜像里运行，加入 integrations 网络（别名 fake-github），控制接口发布在本机
+function startFakeGitHub(token) {
+  stopFakeGitHub()
+  const image = docker('inspect', '--format', '{{.Config.Image}}', docker('compose', 'ps', '-q', 'api'))
+  docker(
+    'run', '-d', '--name', FAKE_NAME, '-p', `127.0.0.1:${FAKE_PORT}:8080`,
+    '-e', `FAKE_GITHUB_TOKEN=${token}`, '-e', `FAKE_GITHUB_REPO=${FAKE_REPO}`,
+    '-v', `${ROOT}/services/api/tests:/fake/tests:ro`, '-v', `${ROOT}/tests/e2e/fake_github_server.py:/fake/server.py:ro`,
+    '--entrypoint', 'python', image, '/fake/server.py',
+  )
+  docker('network', 'connect', '--alias', 'fake-github', `${envValue('COMPOSE_PROJECT_NAME') || 'my-workspace'}_integrations`, FAKE_NAME)
+}
+function stopFakeGitHub() {
+  try { docker('rm', '-f', FAKE_NAME) } catch { /* 没有在运行 */ }
+}
+async function fakeGitHub(method, pathname, body) {
+  const response = await fetch(`http://127.0.0.1:${FAKE_PORT}${pathname}`, {
+    method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  check(response.ok, `模拟 GitHub ${pathname} 失败：${response.status}`)
+  return response.status === 204 ? null : response.json()
+}
+async function fakeGitHubReady() {
+  for (let i = 0; i < 60; i += 1) {
+    try { await fakeGitHub('GET', '/_fake/stats'); return true } catch { await new Promise((r) => setTimeout(r, 500)) }
+  }
+  return false
+}
+// 点刷新按钮，直到 locator 出现：同步由 Worker 异步完成
+async function refreshUntil(page, button, locator, timeout = 30000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    if (await locator.count()) return true
+    await page.getByRole('button', { name: button }).click()
+    await page.waitForTimeout(800)
+  }
+  return (await locator.count()) > 0
+}
+async function openSearch(page, q) {
+  await page.getByRole('button', { name: /Ctrl K/ }).click()
+  await page.getByLabel('搜索页面与组件').fill(q)
+}
 
 // 拼进 SQL 的值只允许 UUID，先校验格式
 function uuid(value) {
@@ -165,10 +216,6 @@ async function noHorizontalScroll(page) {
   await page.getByRole('region', { name: '相关文档' }).getByText(title).waitFor()
   step('任务抽屉的“相关文档”显示关联的收藏')
 
-  // ---------------------------------------------------------------- 搜索命中（S4-03；搜索框由 T-0031 提供）
-  check((await searchTitles(page, workspace, run)).includes(title), '搜索应能找到新收藏')
-  step('跨资源搜索能找到新收藏')
-
   // ---------------------------------------------------------------- 日历新建 / 编辑（S4-02）
   await page.goto(`${base}/calendar`)
   await page.getByLabel('查看日期').fill(tomorrow)
@@ -209,6 +256,58 @@ async function noHorizontalScroll(page) {
   await page.getByRole('article', { name: '近期日程' }).getByText(`${eventTitle} 改`).waitFor()
   step('首页“最近文档”“近期日程”组件显示真实数据')
 
+  // ---------------------------------------------------------------- 连接 GitHub（S4-04，模拟 GitHub）
+  const token = 'github_pat_e2e_' + randomBytes(20).toString('hex')
+  startFakeGitHub(token)
+  check(await fakeGitHubReady(), '模拟 GitHub 没有就绪')
+  await page.goto(`${base}/settings/integrations`)
+  await page.getByRole('button', { name: '新建 GitHub 连接' }).click()
+  await page.getByLabel('GitHub Token', { exact: true }).fill(token)
+  await page.getByLabel('GitHub 仓库列表').fill(FAKE_REPO)
+  await page.getByRole('button', { name: '保存 GitHub 连接' }).click()
+  await page.getByText('连接已保存，请测试连接').waitFor()
+  const card = page.locator('section.integration-card').filter({ has: page.getByRole('heading', { name: 'GitHub', exact: true }) })
+  await card.getByRole('button', { name: '测试连接' }).click()
+  const checks = page.getByRole('region', { name: '连接检查结果' })
+  await checks.getByText('必需检查通过').waitFor({ timeout: 30000 })
+  await checks.getByText('仓库权限检查通过').waitFor()
+  check(!(await page.content()).includes(token), '页面上不应出现 GitHub Token')
+  step('设置页连接 GitHub：细粒度 Token 保存后测试连接通过，逐仓库权限检查通过，页面不显示 Token')
+
+  // ---------------------------------------------------------------- 开发者页（仓库 / Issue / Actions 与故障摘要）
+  await page.goto(`${base}/developer`)
+  check(await refreshUntil(page, '刷新 GitHub 数据', page.getByRole('heading', { name: FAKE_REPO })), '开发者页应显示同步来的仓库')
+  await page.getByRole('button', { name: 'Issues', exact: true }).click()
+  await page.getByRole('heading', { name: '验收：登录失败' }).waitFor()
+  check(await page.getByRole('heading', { name: '验收：修复登录' }).count() === 0, 'Issue 列表里不应出现 PR')
+  await page.getByRole('button', { name: 'Actions', exact: true }).click()
+  await page.getByText('test：Run pytest').waitFor()
+  step('开发者页：仓库、Issue（不含 PR）、Actions 运行与故障摘要（失败的 job / step）')
+
+  // ---------------------------------------------------------------- 限流提示（A17）
+  await fakeGitHub('POST', '/_fake/control', { rate_limit: 'primary', reset_in: 120 })
+  await page.goto(`${base}/settings/integrations`)
+  await card.getByRole('button', { name: '手动同步' }).click()
+  await page.getByText('同步已排队，请稍后刷新状态').waitFor()
+  await page.goto(`${base}/developer`)
+  check(await refreshUntil(page, '刷新 GitHub 数据', page.getByText(/GitHub 限流中，预计/)), '开发者页应提示 GitHub 限流中与预计恢复时间')
+  check(await page.getByRole('heading', { name: FAKE_REPO }).count() === 1, '限流时仍显示已同步的仓库，不显示成空列表')
+  await fakeGitHub('POST', '/_fake/control', { rate_limit: null })
+  step('A17：GitHub 限流时开发者页显示“限流中”与预计恢复时间，列表照常显示')
+
+  // ---------------------------------------------------------------- 顶栏全局搜索（S4-05）
+  await openSearch(page, run)
+  await page.getByRole('region', { name: '搜索结果：收藏文档' }).getByText(title).waitFor()
+  const events = page.getByRole('region', { name: '搜索结果：日程' })
+  await events.getByText(`${eventTitle} 改`).waitFor()
+  await page.getByLabel('搜索页面与组件').fill(FAKE_REPO)
+  await page.getByRole('region', { name: '搜索结果：仓库' }).getByText(FAKE_REPO).waitFor()
+  await page.getByLabel('搜索页面与组件').fill(run)
+  await events.getByRole('link').first().click()
+  await page.waitForURL(new RegExp(`/calendar\\?date=${tomorrow}`))
+  await page.getByRole('button', { name: `${eventTitle} 改`, exact: true }).waitFor()
+  step('顶栏搜索：收藏、日程、GitHub 仓库按类型分组显示；点日程跳到日历对应日期')
+
   // ---------------------------------------------------------------- 移动端
   await page.setViewportSize({ width: 390, height: 844 })
   for (const route of ['/knowledge', '/calendar']) {
@@ -236,7 +335,10 @@ async function noHorizontalScroll(page) {
   check(await viewer.page.getByRole('button', { name: '新建日程' }).count() === 0, 'viewer 不应看到新建日程')
   check(await viewer.page.getByRole('button', { name: '保存日程' }).count() === 0, 'viewer 不应看到保存日程')
   check(await viewer.page.getByRole('button', { name: '删除日程' }).count() === 0, 'viewer 不应看到删除日程')
-  step('viewer：能看收藏与日程，没有新增、管理、删除入口，日程表单只读')
+  await viewer.page.goto(`${base}/developer`)
+  await viewer.page.getByRole('heading', { name: FAKE_REPO }).waitFor()
+  check(await viewer.page.getByRole('link', { name: '重新连接 GitHub' }).count() === 0, 'viewer 不应看到连接管理入口')
+  step('viewer：能看收藏、日程与开发者页，没有新增、管理、删除入口，日程表单只读')
 
   // ---------------------------------------------------------------- 删除日程与收藏（A10）
   await page.goto(`${base}/calendar`)
@@ -253,17 +355,32 @@ async function noHorizontalScroll(page) {
   check(await page.getByRole('heading', { name: title }).count() === 0, '删除后收藏应从列表消失')
   const left = await searchTitles(page, workspace, run)
   check(!left.includes(title) && !left.includes(`${eventTitle} 改`), `删除后搜索不应再返回：${left}`)
-  step('A10：删除日程与收藏后，页面与搜索都不再出现')
+  // 被关联的任务标题里也有 run：等任务分组出现（结果已返回），再确认收藏与日程分组都没有了
+  await openSearch(page, run)
+  await page.getByRole('region', { name: '搜索结果：任务' }).getByText(taskTitle).waitFor()
+  check(await page.getByRole('region', { name: '搜索结果：收藏文档' }).count() === 0, '删除后搜索框里不应再有收藏')
+  check(await page.getByRole('region', { name: '搜索结果：日程' }).count() === 0, '删除后搜索框里不应再有日程')
+  step('A10：删除日程与收藏后，页面、搜索接口与顶栏搜索框都不再出现')
 
   // ---------------------------------------------------------------- DoD：不请求 AFFiNE
   const affine = requests.filter((url) => url.startsWith(AFFINE))
   check(affine.length === 0, `浏览器不应请求 AFFiNE：${affine.join(', ')}`)
   step('DoD：全程没有向 AFFiNE 地址发出请求')
 
+  // 收尾：停用本次的 GitHub 集成。模拟服务随脚本结束而删除，留着启用的集成会让周期对账一直连不上它，
+  // 熔断器打开后同一主机的其他集成也会被拒绝（本机重复运行时出现过）
+  const listed = await api(page, workspace, 'GET', '/api/v1/integrations')
+  const github = listed.body.items.find((item) => item.provider === 'github')
+  const disabled = await api(page, workspace, 'PATCH', `/api/v1/integrations/${github.id}`, { version: github.version, enabled: false })
+  check(disabled.status === 200, `停用 GitHub 集成失败：${disabled.status}`)
+
   await browser.close()
   if (problems.length) throw new Error(`页面错误：${problems.join('; ')}`)
   console.log('\n全部通过（页面无错误）')
 })().catch((error) => {
   console.error(`失败  ${error.message}`)
-  process.exit(1)
+  process.exitCode = 1
+}).finally(() => {
+  stopFakeGitHub()
+  process.exit()
 })

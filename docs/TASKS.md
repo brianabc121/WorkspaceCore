@@ -33,11 +33,11 @@
 - [x] S3-06 周期对账、tombstones、同步 cursor、契约/E2E 测试。
 
 ## Sprint 4 — 文档与搜索
-- [ ] S4-01 AFFiNE Deep Link、收藏和权限可见性，禁止未验证的私有 API。
-- [ ] S4-02 本地日历 CRUD / agenda 展示。
-- [ ] S4-03 外部资源统一映射与搜索索引。
-- [ ] S4-04 GitHub 只读仓库/Issue/PR/Actions，限流/分页处理。
-- [ ] S4-05 全局搜索 UI、跨工作空间安全测试。
+- [x] S4-01 AFFiNE Deep Link、收藏和权限可见性，禁止未验证的私有 API。
+- [x] S4-02 本地日历 CRUD / agenda 展示。
+- [x] S4-03 外部资源统一映射与搜索索引。
+- [x] S4-04 GitHub 只读仓库/Issue/PR/Actions，限流/分页处理。
+- [x] S4-05 全局搜索 UI、跨工作空间安全测试。
 
 ## Sprint 5 — 监控和自动化
 - [ ] S5-01 Prometheus/Grafana 可选 Compose、API 预设指标视图。
