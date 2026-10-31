@@ -253,3 +253,23 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
 - 中文按字面包含匹配，不做分词，所以相关性有限：能找到包含查询文字的结果，排序只区分“标题完全一致 / 标题开头 / 标题包含 / 只在正文里”。
   英文支持词干，例如 deploy 能找到 deploying。
 
+
+## 12. 监控与自动化（Sprint 5，可选组件）
+
+版本与核验结果见 `docs/decisions/2026-10-31-prometheus-grafana-n8n-verification.md`。
+可选的 Compose 由 T-0035（`infra/monitoring/`）与 T-0037（`infra/n8n/`）提供，届时在这里补上启用步骤。部署时注意：
+
+- **Prometheus**（`prom/prometheus:v3.15.1`，按 digest 锁定）
+  - 只放在内部网络，不发布端口，不经 Caddy 转发：它的配置接口在默认情况下可以直接读到。
+  - 不加 `--web.enable-admin-api`、`--web.enable-lifecycle`。
+  - 保留 7 天：`--storage.tsdb.retention.time=7d`。
+- **Grafana**（`grafana/grafana:13.2.5`）
+  - 保持匿名访问关闭，用 `GF_SECURITY_ADMIN_PASSWORD` 设置管理员密码，数据源用只读的预置文件。
+  - 工作台只保存浏览器访问 Grafana 的地址并生成外链，不保存 Grafana 的账号或 Token。
+- **n8n**（`n8nio/n8n:2.45.7`）
+  - 必须设 `N8N_LISTEN_ADDRESS=0.0.0.0`：没有 IPv6 的网络里，默认的 `::` 会让容器直接退出。
+  - 健康检查用 `/healthz/readiness`：`/healthz` 在数据库迁移完成前就返回 ok。
+  - 固定 `N8N_ENCRYPTION_KEY`，丢失后已存的凭据无法解密。
+  - 给工作台用的 API Key 只勾选 `workflow:list`、`workflow:read`、`execution:list`、`execution:read`。
+  - 白名单工作流用 Webhook 节点加 Header Auth 作为入口。
+  - n8n 采用 Sustainable Use License：对外商业托管或让其他客户配置工作流之前，要重新核验许可证。
