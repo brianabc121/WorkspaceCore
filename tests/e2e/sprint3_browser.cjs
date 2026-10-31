@@ -76,6 +76,15 @@ async function login(browser, email, problems, viewport = { width: 1440, height:
   await page.waitForURL(`${base}/`)
   return { context, page }
 }
+async function waitForWebhook(projectId) {
+  const deadline = Date.now() + WEBHOOK_TIMEOUT
+  while (Date.now() < deadline) {
+    const hooks = await vikunja('GET', `/projects/${projectId}/webhooks`)
+    if ((hooks.items || []).some((hook) => hook.target_url.includes('/api/v1/webhooks/vikunja/'))) return true
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  return false
+}
 // 点“刷新任务”直到列表里出现（或不再出现）某个标题：原生改动经 Webhook 回到投影需要一两秒
 async function waitForTitle(page, title, present = true) {
   const deadline = Date.now() + WEBHOOK_TIMEOUT
@@ -171,6 +180,8 @@ async function waitForTitle(page, title, present = true) {
   step('编辑抽屉：修改标题并标为完成，Vikunja 同步变化')
 
   // ---------------------------------------------------------------- 原生修改 → 工作台更新（DoD）
+  // Webhook 由 Worker 在测试连接之后异步注册：注册之前在 Vikunja 里的改动不会产生事件，要先等它注册好
+  check(await waitForWebhook(project.id), 'Worker 应为项目自动注册 Webhook')
   await vikunja('PATCH', `/tasks/${native.id}`, { title: '原生界面里改的' }, { merge: true })
   check(await waitForTitle(page, '原生界面里改的'), '在 Vikunja 里的修改应出现在工作台任务页')
   step('DoD：在 Vikunja 原生修改任务，工作台任务页显示更新（Webhook）')
