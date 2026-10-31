@@ -2,9 +2,9 @@
 id: T-0052
 title: OC-0 核验与选型：OpenClaw extended-stable、openclaw-channel 兼容性、OpenIM 部署与接口、exec 密钥、外网隧道、假模型（S6-01）
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: docs/decisions,docs/versions.md,infra/openclaw,infra/openim
 depends_on:
 created: 2026-10-31
@@ -31,3 +31,5 @@ updated: 2026-10-31
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-31 16:14 UTC · claude · 创建任务（owner: claude）
+- 2026-10-31 16:30 UTC · claude · 开始任务
+- 2026-10-31 16:32 UTC · claude · 开工。已确认：extended-stable 维护线当前为 v2026.9.33 ~ 9.36（最新 9.36）；镜像 openclaw/openclaw:2026.9.36（Docker Hub）与 ghcr.io/openclaw/openclaw:2026.9.36 的 digest 相同，均为 sha256:eefba69ec4a5fa596f3b1a8fac4f09525ce10435617a23f2a2090ddd3b6c1c2f；npm 上 @openim/openclaw-channel 最新为 0.3.3（GitHub tag 只到 v0.3.2）。ghcr 的镜像层下载被本会话网络策略拦截，改用 Docker Hub；Docker Hub 对 mongo、bitnamilegacy/minio 返回 429，稍后重试

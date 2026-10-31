@@ -147,6 +147,14 @@
 - 第三方服务故障可降级；Webhook Inbox + 周期对账双保险。
 - 核心 Compose 优先，n8n/AFFiNE/Monitoring 可选部署，生产禁止浮动 latest 镜像。
 
+### V2 补充规则（2026-10-31，人类批准；来自 V2 资料包，按 `docs/v2/TRANSFORMATION_PLAN.md` 调整）
+- 实现 AI、OpenClaw、IM 相关模块前，先读 `docs/v2/TRANSFORMATION_PLAN.md`；与本规范冲突时以它为准。
+- OpenClaw、OpenIM、`openclaw-channel` 的接口与行为，必须在锁定版本上核验（源码、生成的 schema 或运行实例），不得按概念名称猜测；核验不了的写成接口桩和 TODO。
+- 不得放宽 OpenClaw 智能体的工具限制（只开工作台工具和 IM 发消息工具），不得开启 exec 或挂载 Docker socket。
+- 工作台是唯一的权限来源：写操作必须经工作台审批，不得为了完成任务自动批准、跳过审批或修改安全策略。
+- 不得跨工作空间或跨实例泄露会话、消息、密钥、工具结果。
+- 浏览器不直连 OpenIM；所有对 OpenIM 的调用经工作台后端或接入网关。
+
 ### 常用命令（`docs/DEVELOPMENT_SPEC.md` 第 11.3 节；Sprint 0 建立后可用）
 `make setup`、`make dev`、`make up`、`make migrate`、`make test`、`make lint`、`make backup`、`make restore-verify`、`make down`。
 交接单第 4 节和 PR 的“实际执行的命令和结果”都应引用这些命令。

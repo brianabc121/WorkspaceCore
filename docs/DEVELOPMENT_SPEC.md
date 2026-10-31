@@ -1,6 +1,12 @@
 # My Workspace：混合型全能个人工作台开发实施规格
 
 > 版本：1.0.0 | 文档日期：2026-10-30 | 状态：可供 Codex 分阶段实施 | 目标：单人优先、可扩展多用户、自托管
+>
+> **V2.0 修订（2026-10-31，人类批准）**：
+> - AI 部分改为由 **OpenClaw**（多实例，部署在其他服务器）承担；
+> - 工作台负责 OpenClaw 实例与接入凭证、集中密钥、基于 **OpenIM** 的管理员端 IM、MCP 工具与审批。
+> - 设计细节以 `docs/v2/TRANSFORMATION_PLAN.md`（定稿）为准。
+> - 本文第 1.1 ~ 1.3、2、3、4、5、6.1、8、9、11、13、15、16 节已按定稿修订；其余章节不变。
 
 ## 0. Codex 首次执行指令（必须遵守）
 
@@ -12,7 +18,7 @@
 
 ### 1.1 目标
 
-建立自主可控的个人工作操作系统：统一首页、任务/项目、文档入口、日历、GitHub、运维、通知、搜索、自动化、AI 辅助。高频工作在本系统内原生操作，低频复杂编辑进入专业系统，所有系统由 Connector/BFF 集成。
+建立自主可控的个人工作操作系统：统一首页、任务/项目、文档入口、日历、GitHub、运维、通知、搜索、自动化、AI 辅助（V2：由 OpenClaw 智能体承担，管理员通过工作台 IM 与之沟通）。高频工作在本系统内原生操作，低频复杂编辑进入专业系统，所有系统由 Connector/BFF 集成。
 
 ### 1.2 技术边界
 
@@ -22,11 +28,22 @@
 - GitHub：V1 仅只读仓库、Issue、PR、Actions 汇总；写权限后期审批开放。
 - 监控：V1 只读指标和告警；不能在监控面板直接执行 Shell 或 Docker 管理操作。
 - n8n：V1 列表、执行状态及受控 Webhook；不在工作台复制完整流程设计器。
-- AI：先只读工具，再开发显式审批的写入操作；不得向 LLM 暴露密钥。
+- AI（V2）：
+  - 模型、对话、记忆、智能体运行由 **OpenClaw** 承担，可以有多个实例，分布在其他服务器上；
+  - 工作台不自建模型兼容层，也不保存对话正文；
+  - OpenClaw 通过工作台提供的 **MCP 工具**读写工作台数据。读操作直接执行；写操作经工作台**人工审批**后，由工作台按审批时存下的参数执行；
+  - 所有连接都由 OpenClaw **主动连回**工作台，分内网、外网两种接入；外网接入必须双向证书；
+  - 模型密钥等**集中存放在工作台密钥库**，OpenClaw 远程取用；工作台从不把密钥交给管理员浏览器；
+  - 详见 `docs/v2/TRANSFORMATION_PLAN.md`。
+- IM（V2）：
+  - 工作台内置基于 **OpenIM** 的管理员端 IM，由工作台后端中转，浏览器不直连 OpenIM；
+  - 每个 OpenClaw 通过 `openclaw-channel` 插件作为一个 IM 用户接入；
+  - 支持单聊、拉群、会话置顶与单条消息置顶、免打扰、分组；
+  - 不提供删除好友；OpenClaw 上线后自动成为管理员的好友。
 
 ### 1.3 不在 V1 范围
 
-聊天/IM、协同实时文档编辑、自建完整笔记编辑器、原生手机应用、替代 Grafana 查询语言、Kubernetes、微服务拆分、多租户计费、直接修改第三方系统数据库、自动远程执行系统命令。
+成员之间的通用聊天（V2 只提供管理员与 OpenClaw 之间的 IM，见 1.2）、协同实时文档编辑、自建完整笔记编辑器、原生手机应用、替代 Grafana 查询语言、Kubernetes、微服务拆分、多租户计费、直接修改第三方系统数据库、自动远程执行系统命令。
 
 ### 1.4 验收总体标准
 
@@ -49,7 +66,8 @@
 | 反向代理 | Caddy | HTTPS，开发环境可不启用 TLS |
 | 指标 | Prometheus + Grafana | 按 profile 可选启动 |
 | 自动化 | n8n 独立部署 | Webhook 和受控执行 |
-| AI | 模型兼容层 + 工具注册 | 接口抽象，不绑定单一模型厂商 |
+| AI（V2） | OpenClaw（锁定 extended-stable 维护线）+ 工作台 MCP 工具服务器 | 模型由 OpenClaw 接入，不绑定单一厂商；工具与审批的权限判断只在工作台 |
+| IM（V2） | OpenIM Server（锁定版本与 digest）+ `@openim/openclaw-channel` | 工作台后端中转；OpenIM 只在内部网络，OpenClaw 经工作台接入入口连接 |
 | CI | GitHub Actions | lint / typecheck / tests / migrations / build |
 
 版本要求：第三方产品固定**具体 release/tag 或 digest**，禁止生产默认使用 `latest`/`stable` 浮动标签。每个 Connector 保存 `tested_version`；升级先执行契约测试。以上技术栈是设计选型，不代表所有第三方已实际兼容验证。
@@ -98,6 +116,8 @@ my-workspace/
 │       └── tests/
 ├── infra/caddy/
 ├── infra/monitoring/
+├── infra/openim/                # V2：OpenIM 独立 Compose 项目
+├── infra/openclaw/              # V2：OpenClaw 服务器的接入包模板与检查清单（不在本机运行）
 └── scripts/
 ```
 
@@ -120,6 +140,11 @@ flowchart TD
     Connect --> GitHub[GitHub]
     Connect --> Monitor[Prometheus/Grafana]
     Connect --> N8N[n8n]
+    Connect --> OpenIM["OpenIM（V2，内部网络）"]
+    Agents["OpenClaw 实例（V2，其他服务器）"] -- "MCP / 取密钥 / IM（主动连回）" --> Ingress["接入入口：内网 / 外网（双向证书）"]
+    Ingress --> API
+    Ingress --> OpenIM
+    OpenIM -- "回调" --> API
     API --> Inbox[(Webhook Inbox)]
     Worker[ARQ Worker/Reconciler] --> Inbox
     Worker --> PG
@@ -151,7 +176,10 @@ flowchart TD
 | GitHub 代码/Issue | GitHub | 状态投影 | V1 只读 |
 | 监控时间序列 | Prometheus | 当前指标缓存 | 只读 |
 | 自动化定义 | n8n | ID/运行状态/关联 | n8n 接口 |
-| AI 对话和审批 | Workspace | 全量+留存策略 | 本地 API |
+| AI 对话（V2） | OpenIM（IM 消息） | 管理员视角的会话与消息投影、置顶、免打扰、分组 | 工作台 IM 接口（后端中转） |
+| AI 工具调用与审批（V2） | Workspace | 全量 + 留存策略 | 本地 API / MCP |
+| OpenClaw 实例、接入凭证、密钥（V2） | Workspace | 全量（凭证只存哈希，密钥加密） | 本地 API |
+| OpenClaw 的记忆与会话 | 各 OpenClaw 实例 | 不存储 | OpenClaw 自身 |
 
 ## 5. 数据库详细模型
 
@@ -178,10 +206,14 @@ flowchart TD
 17. `outbox_events(id,workspace_id,event_type,payload_json,status,attempts,next_retry_at,created_at)`。
 18. `idempotency_requests(id,workspace_id,actor_id,idempotency_key,request_fingerprint,status,response_code,response_json,created_at,expires_at)`：unique actor+key。
 19. `automation_runs(id,workspace_id,integration_id,provider_run_id,status,started_at,finished_at,metadata_json)`。
-20. `ai_conversations(id,workspace_id,user_id,title,created_at,updated_at)`。
-21. `ai_messages(id,conversation_id,role,content_json,token_usage_json,created_at)`。
-22. `ai_tool_executions(id,conversation_id,actor_id,tool_name,risk_level,arguments_redacted_json,status,approved_at,executed_at,result_summary,error_text)`。
+20. ~~`ai_conversations`~~、21. ~~`ai_messages`~~：**V2 不建**。对话就是 IM 消息，由 OpenIM 保存，工作台只做投影（见下方 V2 实体）。
+22. `ai_tool_executions(id,workspace_id,instance_id,acting_user_id,tool_name,risk_level,arguments_redacted_json,arguments_hash,status,expires_at,decided_by,decided_at,executed_at,result_summary,error_text,version,request_id)`：V2 按实例记录 MCP 工具调用与审批。
 23. `audit_logs(id,workspace_id,actor_id,action,resource_type,resource_id,metadata_redacted_json,ip_hash,created_at)`：追加写，避免存原始敏感数据。
+
+V2 新增（字段与约束见 `docs/v2/TRANSFORMATION_PLAN.md` 第 5 节）：
+- 实例与接入：`agent_instances`、`agent_credentials`；
+- 密钥库：`agent_secrets`、`agent_secret_versions`、`agent_secret_grants`；现有凭证密文增加 `key_version`，加密密钥可轮换；
+- IM：`im_conversations`、`im_messages`、`im_message_pins`、`im_contact_groups`、`im_contact_group_members`、`im_group_policies`、`im_webhook_inbox`。
 
 ### 5.2 关键 SQL 迁移（示意，Codex 必须拆为 Alembic revision）
 
@@ -299,9 +331,13 @@ CREATE INDEX ix_webhook_pending ON workspace.webhook_inbox(next_retry_at)
 | GET | `/api/v1/operations/metrics` | 预设安全指标 | viewer |
 | GET | `/api/v1/automations` | n8n 流程/运行 | viewer |
 | POST | `/api/v1/automations/{id}/trigger` | 触发允许流程 | member + policy |
-| GET/POST | `/api/v1/ai/conversations` | AI 对话列表/创建 | member |
-| POST | `/api/v1/ai/conversations/{id}/messages` | 发送消息 | member |
-| POST | `/api/v1/ai/tool-executions/{id}/approve` | 工具审批 | owner/admin |
+| — | ~~`/api/v1/ai/conversations`~~、~~`/api/v1/ai/conversations/{id}/messages`~~ | **V2 取消**，对话走 IM | — |
+| GET/POST/PATCH | `/api/v1/agents/instances[...]` | V2：OpenClaw 实例登记、停用、轮换、接入包 | owner |
+| GET/POST | `/api/v1/agents/secrets[...]` | V2：密钥库（只写不读）与授权 | owner |
+| GET/POST/PATCH | `/api/v1/im/...` | V2：会话、消息、群、置顶、免打扰、分组（后端中转） | owner/admin |
+| GET | `/api/v1/ai/tool-executions` | V2：工具调用与审批记录 | member（自己的）/ owner/admin |
+| POST | `/api/v1/ai/tool-executions/{id}/approve`、`/reject` | 工具审批（`If-Match`；高危需二次认证） | owner/admin |
+| POST | `/mcp`、`/agent-api/v1/...` | V2：只在接入入口开放，认证用实例凭证（外网另需客户端证书） | OpenClaw 实例 |
 | GET/PATCH | `/api/v1/notifications` | 通知和已读状态 | authenticated |
 | GET | `/api/v1/events/stream` | SSE | authenticated |
 | GET | `/api/v1/audit-logs` | 审计日志 | owner/admin |
@@ -401,7 +437,7 @@ class WritableConnector(Connector, Protocol):
 
 左侧 220~260px 导航，顶栏 56~64px（全局搜索、创建、通知、用户），中央响应式 12 列 Widget Grid，右侧 320~420px 可收起 AI/详情抽屉。小屏幕侧栏折叠；移动端展示单列小组件。
 
-主要页面：`/`、`/tasks`、`/projects`、`/knowledge`、`/calendar`、`/developer`、`/operations`、`/automations`、`/ai`、`/settings`、`/settings/integrations`、`/settings/security`。
+主要页面：`/`、`/tasks`、`/projects`、`/knowledge`、`/calendar`、`/developer`、`/operations`、`/automations`、`/settings`、`/settings/integrations`、`/settings/security`；V2 新增 `/im`、`/im/contacts`、`/agents`、`/agents/secrets`、`/ai/approvals`、`/ai/activity`（取代 `/ai`），首页 AIQuickAsk 组件改为打开 IM。
 
 ### 8.2 Widget 插件规范
 
@@ -435,7 +471,7 @@ type WidgetDefinition<TConfig> = {
 
 ### 9.2 角色
 
-`owner` 管理工作空间/密钥/AI 高危审批；`admin` 管理集成和成员；`member` 修改业务内容；`viewer` 仅查看授权内容。权限在服务端统一 Policy 层验证；每个列表查询和资源读取都验证归属，避免 IDOR。
+`owner` 管理工作空间/密钥/AI 高危审批/OpenClaw 实例与密钥库（V2）；`admin` 管理集成和成员；`member` 修改业务内容；`viewer` 仅查看授权内容。权限在服务端统一 Policy 层验证；每个列表查询和资源读取都验证归属，避免 IDOR。
 
 ### 9.3 关键风险
 
@@ -443,7 +479,19 @@ type WidgetDefinition<TConfig> = {
 - 秘钥：加密存储/Secret Manager，`.env` 不提交 Git，日志/错误响应严格脱敏。
 - Webhook：校验签名+时间戳（供应商支持时）+ body 大小限制；payload 不信任，入库后异步处理。
 - AI Prompt Injection：来自文档、Issue、日志的文本都是不可信数据，不得改变系统权限指令；Tool Executor 强制校验策略。
-- AI 高风险操作：必须用户逐次审批；展示工具、参数预览、目标资源、风险，审批短期有效并绑定参数哈希。
+- AI 高风险操作：必须用户逐次审批；展示工具、参数预览、目标资源、风险，审批短期有效并绑定参数哈希。V2：
+  - 第一版所有写操作都要审批，高危操作还要重新输入密码；
+  - AI 不能批准，聊天里回复“同意”不算审批。
+- OpenClaw 接入（V2）：
+  - 接入入口默认拒绝，只放行 MCP、取密钥、IM 几类路径；
+  - 实例凭证只存哈希，并且和入口绑定；外网入口必须双向证书；
+  - 可以停用单个实例，也有全局总开关；
+  - OpenClaw 智能体只开工作台工具和 IM 发消息工具，禁止 shell、文件、浏览器、网页抓取。
+- OpenIM（V2）：
+  - OpenClaw 访问 OpenIM REST 必须经过接入网关（白名单、用户 ID 校验）；
+  - 回调只走内部网络；
+  - 删好友被拦截，被删后自动补回；
+  - 群聊防刷屏：管理员不发言时 OpenClaw 连续最多 8 条、每群每分钟最多 6 条；禁止实例之间单聊。
 - Docker/Host：不挂载未隔离的 docker.sock 给工作台，不以 root 身份运行 API，不暴露 Redis/Postgres 公网端口。
 - CSP/反向代理：Caddy 设置合理 CSP、HSTS（生产 HTTPS）、请求体限制、安全 header、可信代理头。
 
@@ -461,7 +509,7 @@ type WidgetDefinition<TConfig> = {
 
 ### 11.1 Core Compose 最小服务
 
-`web`、`api`、`worker`、`postgres`、`redis`、`caddy`。生产数据库使用强密码和独立持久卷。支持 `docker compose --profile monitoring ...` 启用可选服务；Vikunja/AFFiNE/n8n 各自单独 Compose 安装并通过受控网络连通。
+`web`、`api`、`worker`、`postgres`、`redis`、`caddy`。生产数据库使用强密码和独立持久卷。支持 `docker compose --profile monitoring ...` 启用可选服务；Vikunja/AFFiNE/n8n 各自单独 Compose 安装并通过受控网络连通。V2：OpenIM 用 `infra/openim/` 的独立 Compose 项目，部署在工作台所在服务器；OpenClaw 部署在其他服务器，按 `infra/openclaw/` 的接入包配置。
 
 ### 11.2 环境变量示例
 
@@ -523,7 +571,18 @@ LOG_LEVEL=INFO
 
 ### Sprint 6：AI、强化、安全发布
 
-**范围**：聊天、只读工具、写工具审批、审计、备份恢复、观测、E2E、文档完善。**DoD**：无审批不能执行高危操作；攻击性文档内容无法绕过工具策略；能从备份恢复并通过 Smoke Tests。
+**范围**：备份恢复、观测、E2E、文档完善（S6-04 ~ S6-06），以及 V2 的 AI 部分（S6-01 ~ S6-03）：
+- OpenClaw 多实例接入与集中密钥；
+- 基于 OpenIM 的管理员端 IM 与只读工具；
+- 写工具审批与安全。
+
+AI 部分按 `docs/v2/TRANSFORMATION_PLAN.md` 第 9 节的 OC-0 ~ OC-7 实施。
+
+**DoD**：
+- 无审批不能执行高危操作；
+- 攻击性文档内容（包括其他 OpenClaw 的群消息）无法绕过工具策略；
+- 能从备份恢复（含 OpenIM）并通过 Smoke Tests；
+- 定稿第 8 节的验收场景自动化通过。
 
 每个 Sprint PR 必含：变更清单、数据库迁移与影响、API 变更、执行命令、测试结果、未完成项、回滚说明、必要的截图（涉及 UI 时）。
 
@@ -553,11 +612,15 @@ LOG_LEVEL=INFO
 | A11 | 搜索另一工作空间数据 | 不返回未授权结果 |
 | A12 | 使用危险 `http://169.254.169.254` 集成 URL | 被拒绝 |
 | A13 | 失效的外部 Token | 显示重新连接，不无限重试 |
-| A14 | AI 试图执行未经审批的删除 | Tool Executor 拒绝并记录 |
+| A14 | AI 试图执行未经审批的删除 | V2：MCP 工具只返回 pending_approval，不执行，并记录；批准后按存下的参数执行 |
 | A15 | 备份后在空环境恢复 | 数据/登录/首页配置通过 Smoke Test |
 | A16 | 断开 SSE 后重连 | 页面能重新拉取最新投影 |
 | A17 | GitHub 429 | 遵守限流和退避，不把空列表当正常 |
 | A18 | 登录后 logout | 旧 Session 不能再访问私有 API |
+| A19 | V2：OpenClaw 实例登记后上线 | 自动成为管理员的好友，状态“在线”；停用后取密钥、MCP、IM 立即失效 |
+| A20 | V2：凭证或证书错配（跨实例、跨入口、外网无证书） | 全部拒绝 |
+| A21 | V2：群里多个 OpenClaw 互相 @ | 超过防刷屏阈值后暂停，管理员发言后恢复；实例之间单聊被拒收 |
+| A22 | V2：删除好友（经网关或绕过网关） | 网关拦截；绕过后自动补回并告警 |
 
 ## 16. 主要风险及决策记录
 
@@ -571,6 +634,9 @@ LOG_LEVEL=INFO
 | 跨系统中文搜索 | 中文相关性不佳 | 模糊搜索 MVP + 专用分词方案 |
 | 资源占用失控 | 单机稳定性下降 | core 优先、可选模块、监控后扩展 |
 | AI Prompt Injection | 工具滥用与泄露 | 数据不可信，独立 Policy + 审批 |
+| OpenClaw 版本更新快，插件兼容性未声明（V2） | 接入失效 | 锁定 extended-stable 与插件版本；升级前跑多实例端到端测试 |
+| OpenIM 接口权限薄弱、回调无签名（V2） | 越权读取或改动 | 浏览器不直连；接入网关白名单与用户 ID 校验；回调只走内网；定期对账 |
+| 密钥集中在工作台（V2） | 工作台成为高价值目标 | 加密存储、加密密钥可轮换、按实例授权与审计、停用即止损 |
 
 ## 17. 参考资料与实现前核验清单
 
