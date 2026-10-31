@@ -47,8 +47,8 @@ dump="$work/restore/backup/workspace.dump"
 [[ -s "$dump" ]] || { echo "快照里没有 workspace.dump" >&2; exit 1; }
 echo "备份信息：$(cat "$work/restore/backup/backup-info.json" | tr -d '\n')"
 
-# 临时环境的 .env：沿用原来的密钥（恢复出来的凭证才能解密），换掉端口与对外地址，不连接监控
-(umask 077 && grep -v -E '^(HTTP_PORT|PUBLIC_BASE_URL|CORS_ALLOWED_ORIGINS|PROMETHEUS_URL|GRAFANA_URL|GRAFANA_DASHBOARD_URL)=' .env > "$work/restore.env")
+# 临时环境的 .env：沿用原来的密钥（恢复出来的凭证才能解密），换掉端口、对外地址与 agent-ingress 网段，不连接监控
+(umask 077 && grep -v -E '^(HTTP_PORT|PUBLIC_BASE_URL|CORS_ALLOWED_ORIGINS|PROMETHEUS_URL|GRAFANA_URL|GRAFANA_DASHBOARD_URL|AGENT_INGRESS_NET|AGENT_INGRESS_TRUSTED_PROXIES)=' .env > "$work/restore.env")
 cat >> "$work/restore.env" <<EOF
 HTTP_PORT=$port
 PUBLIC_BASE_URL=http://localhost:$port
@@ -56,6 +56,8 @@ CORS_ALLOWED_ORIGINS=http://127.0.0.1:$port
 PROMETHEUS_URL=
 GRAFANA_URL=
 GRAFANA_DASHBOARD_URL=
+# agent-ingress 网络用另一个固定网段，免得和正在运行的环境冲突
+AGENT_INGRESS_NET=172.31.251
 EOF
 compose=(docker compose -p "$project" --env-file "$work/restore.env")
 

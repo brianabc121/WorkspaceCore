@@ -621,7 +621,8 @@ OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式�
    | `AGENT_PUBLIC_BIND` / `AGENT_PUBLIC_PORT` | `0.0.0.0` / `9443` | 外网入口发布的地址与端口（默认 `127.0.0.1:9443`） |
    | `AGENT_INTRANET_ALLOWED_CIDRS` | `100.64.0.0/10` | 内网入口只接受的来源（空格分隔） |
    | `AGENT_INTRANET_URL` / `AGENT_PUBLIC_URL` | `https://ws.tailnet.example:8443` / `https://agent.example.com:9443` | 写进接入包的地址；没有配置的入口不能生成该模式的接入包 |
-   | `AGENT_INGRESS_TRUSTED_PROXIES` | 默认 `172.31.250.2` | API 只信任这个地址（agent-gateway 在 `agent-ingress` 网络里的固定地址）写入的入口与证书请求头；一般不用改 |
+   | `AGENT_INGRESS_NET` | 默认 `172.31.250` | `agent-ingress` 网络的网段前三段：子网 `<值>.0/29`，agent-gateway 固定在 `<值>.2`。同一台机器上有别的 Docker 网络占用了这个网段时改它；`make restore-verify` 的临时环境自动用 `172.31.251` |
+   | `AGENT_INGRESS_TRUSTED_PROXIES` | 默认 `<AGENT_INGRESS_NET>.2` | API 只信任这个地址写入的入口与证书请求头；一般不用改 |
 
 3. `docker compose up -d api`，让 api 读到新的变量。
 4. `make agents-up`：

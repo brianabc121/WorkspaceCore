@@ -79,8 +79,8 @@ services:
       # 第三方连接凭证的加密密钥；格式错误时 API 拒绝启动
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS: ${CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS:-}
-      # V2 实例接口：只采用接入入口 agent-gateway（agent-ingress 网络里的固定地址）写入的入口与证书请求头
-      AGENT_INGRESS_TRUSTED_PROXIES: ${AGENT_INGRESS_TRUSTED_PROXIES:-172.31.250.2}
+      # V2 实例接口：只采用接入入口 agent-gateway（agent-ingress 网络里的固定地址 <AGENT_INGRESS_NET>.2）写入的入口与证书请求头
+      AGENT_INGRESS_TRUSTED_PROXIES: ${AGENT_INGRESS_TRUSTED_PROXIES:-${AGENT_INGRESS_NET:-172.31.250}.2}
       # 接入包里写给 OpenClaw 的内网 / 外网入口地址；没有配置的入口不能生成接入包
       AGENT_INTRANET_URL: ${AGENT_INTRANET_URL:-}
       AGENT_PUBLIC_URL: ${AGENT_PUBLIC_URL:-}
@@ -223,7 +223,7 @@ services:
     networks:
       agent-ingress:
         # API 只信任这个地址写入的入口与证书请求头（AGENT_INGRESS_TRUSTED_PROXIES）
-        ipv4_address: 172.31.250.2
+        ipv4_address: ${AGENT_INGRESS_NET:-172.31.250}.2
       # 发布端口用（internal 网络不能发布端口）；只有 agent-gateway 加入，所以访问 api 只能经 agent-ingress
       agent-edge: {}
     logging: *logging
@@ -306,15 +306,16 @@ networks:
   monitoring:
     internal: true
   monitoring-public: {}
-  # OpenClaw 接入入口 → API：只有 agent-gateway（固定 172.31.250.2）与 api 加入。
-  # 动态分配只用 .4 ~ .7，别的容器拿不到网关的地址；internal，不提供出网
+  # OpenClaw 接入入口 → API：只有 agent-gateway（固定 <AGENT_INGRESS_NET>.2）与 api 加入。
+  # 动态分配只用 .4 ~ .7，别的容器拿不到网关的地址；internal，不提供出网。
+  # 同一台机器上的第二套环境（例如 make restore-verify 的临时环境）要换一个 AGENT_INGRESS_NET，否则网段冲突
   agent-edge: {}
   agent-ingress:
     internal: true
     ipam:
       config:
-        - subnet: 172.31.250.0/29
-          ip_range: 172.31.250.4/30
+        - subnet: ${AGENT_INGRESS_NET:-172.31.250}.0/29
+          ip_range: ${AGENT_INGRESS_NET:-172.31.250}.4/30
 
 volumes:
   postgres-data:

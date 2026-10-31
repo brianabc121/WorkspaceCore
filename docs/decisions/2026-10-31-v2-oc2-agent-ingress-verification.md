@@ -34,6 +34,7 @@
   - 外网入口 `https://$AGENT_PUBLIC_HOST:9443`：双向证书，信任 `infra/caddy/agent-ca/agent-ca.pem`（`make agent-ca` 导出）；
   - 两个入口都只放行 `/mcp`、`/agent-api/v1/*`，其余 404；
   - 发布端口由 `AGENT_INTRANET_BIND/PORT`、`AGENT_PUBLIC_BIND/PORT` 控制，默认只绑定本机。
+  - `agent-ingress` 的网段由 `AGENT_INGRESS_NET` 控制（默认 `172.31.250`，子网 `.0/29`，网关固定 `.2`）。同一台机器上的第二套环境必须换网段，否则 Docker 报 `Pool overlaps`：`make restore-verify` 的临时环境用 `172.31.251`（CI 的 A15 备份恢复验收发现）。
 - **证书来自文件**（`AGENT_TLS_DIR`）：内网用内部 CA 或 Tailscale 证书，外网用公网证书。
   - 不用 ACME：接入入口不一定在 80 / 443 端口上，而且可能和管理员入口在同一台机器。
   - 外网入口用私有 CA 时，接入包的 `tunnel` 服务要加 `--cacert`；内网入口用私有 CA 时，OpenClaw 那边设置 `NODE_EXTRA_CA_CERTS`（`docs/deployment.md` 第 16 节）。
