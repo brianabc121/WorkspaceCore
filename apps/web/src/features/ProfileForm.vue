@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useForm } from 'vee-validate'
-import { toTypedSchema } from '@vee-validate/zod'
+import { toTypedSchema } from '../services/forms'
 import { useAuthStore } from '../stores/auth'
 import { dataOf } from '../services/api'
 import { profileSchema, useAction } from './forms'

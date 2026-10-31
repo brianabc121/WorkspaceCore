@@ -153,3 +153,119 @@
 - **restic 的异地后端**（S3、SFTP 等）没有实测，只测了本地目录仓库：本环境没有对象存储，也没有凭据。T-0042 把后端做成配置项，部署文档写清楚怎么配置；接入真实存储时需要人类提供（放在环境的 Secret 里）。
 - **zod 4 + vee-validate 的接法**：留给 T-0044，升级前先读两者在锁定版本下的源码。
 - **trivy 漏洞库下载**：在 GitHub Actions 上的耗时与稳定性，在 T-0044 的 CI 里确认。
+
+## 8. T-0044 落实结果（2026-10-31）
+
+本节记录第 5、6 节的计划落实时的核验与偏差。命令都在 claude 自己的 Docker 环境里实际跑过（D-0006）。
+
+### 8.1 zod 4 与表单校验（第 5.2 节）
+
+- 版本：`zod@4.6.7`（npm 上 2026-10-12 发布，高于公告的修复版本 4.6.6）。
+- 去掉 `@vee-validate/zod`：它的最新版 4.15.1 只支持 zod 3（peer 依赖 `zod ^3.24.0`）。
+- 改用本地适配 `apps/web/src/services/forms.ts`，按 vee-validate 4.15.1 的 `TypedSchema` 接口实现：
+  - 接口见 `node_modules/vee-validate/dist/vee-validate.d.ts` 第 180 ~ 199 行：
+    `__type: 'VVTypedSchema'`、`parse(values) → Promise<{ value?, errors: { path?, errors: string[] }[] }>`、可选的 `cast`、`describe`；
+  - 适配实现了 `parse` 与 `cast`；`describe`（用来推断字段是否必填）现有表单都没有用到，没有实现。
+- 升级时遇到的 zod 4 行为差异：
+  - 对象的 `.default({})` 不再套用内部字段的默认值，组件配置改用 `.prefault({})`；
+  - `required_error` 改为 `error`；
+  - `invalid_union` 的错误放在 `issue.errors` 里，适配会把它们展开到各自的字段。
+- 结果：`npm audit --omit=dev` 为 0；lint、typecheck、267 项测试、build、check:api 全部通过。
+
+### 8.2 开发依赖：vitest 4.1.12
+
+- 原来的 `vitest@3.2.7` 带来 2 个严重漏洞与 2 个中危漏洞：
+  - `tinypool`：GHSA-5gmw-xhrv-c9v3（≤ 2.1.0）、GHSA-85c8-ppgw-ccpr（< 2.1.2），严重；
+  - `@vitest/mocker`：GHSA-82fw-gwwq-j7x9（< 4.1.11）、GHSA-qxg6-89mg-rqv8（< 4.1.12），中危。
+- 升级到 `vitest@4.1.12`（npm 上 2026-10-15 发布）：
+  - 它支持 `vite ^6 || ^7 || ^8`（现用 vite 7.3.7），不再依赖 tinypool；
+  - 测试代码不用改，267 项测试全部通过。
+- 锁文件用 npm 11.6.2 生成：npm 10.9.4 在解析 peer 依赖时报错（`Cannot read properties of null (reading 'edgesOut')`，
+  出自 `@npmcli/arborist` 的 `#loadPeerSet`）。用 npm 10.9.4 对这份锁文件执行 `npm ci` 正常，CI 用 Node 22 自带的 npm。
+- 剩下 19 个中危，都在开发工具里：
+  - `minimatch < 11.0.1`（GHSA-g3hv-75wg-m249），来自 eslint 9、typescript-eslint、openapi-typescript 与 `@vue/test-utils` → js-beautify；
+  - `glob`（GHSA-3g3m-2fjr-6pw4），同样来自 js-beautify。
+  - 没有不破坏兼容的修复：`npm audit fix` 会装 eslint 4。这些工具只在开发机与 CI 上处理仓库自己的文件，按策略只报告。
+
+### 8.3 前端镜像（第 5.4 节）
+
+- 原计划是构建时 `apk upgrade`。但本环境的网络策略拒绝 Alpine 的软件源（`dl-cdn.alpinelinux.org` 返回 403），无法在本地验证。
+- 改用基础镜像的 slim 变体：`nginxinc/nginx-unprivileged:1.30.6-alpine3.24-slim`，
+  digest `sha256:5d8bb9437d74a600ec5dbf90c035451c724dc33eac8d3a71078f6f8612c345f6`（Docker Hub 上 2026-10-19 更新）。
+  - 包含的包：nginx、Alpine 基础包、busybox（健康检查用它的 `wget`）、`gettext-envsubst`、OpenSSL 3.5.9 等；
+    没有 curl、freetype、brotli。
+  - 默认用户仍是 nginx（101），入口脚本相同。
+- 结果：
+  - trivy 扫描 0 个已有修复的高危 / 严重漏洞（完整变体是 3 个）；
+  - 镜像从 90 MB 降到 30 MB；
+  - `make smoke` 与完整冒烟都通过。
+- 构建不访问 Alpine 的软件源，同一个 digest 构建出来的结果相同。
+
+### 8.4 密钥扫描：用指纹而不是路径登记误报（第 5.3 节）
+
+- 原计划是 `.gitleaks.toml` 按路径列入允许列表。改为 `.gitleaksignore` 按指纹登记（`<提交>:<文件>:<规则>:<行号>`），范围更窄：
+  - 只忽略已登记的那 5 处，同一个文件里以后再出现的密钥仍然会让扫描失败；
+  - 实测：在 `services/api/tests/fake_n8n.py` 再加一个假密钥并提交，gitleaks 退出码 1。
+- gitleaks 8.30.1 通过 `--gitleaks-ignore-path` 读取这个文件，以 `#` 开头的说明行会被忽略（实测）。
+- 用默认规则，不需要 `.gitleaks.toml`。
+
+### 8.5 镜像扫描结果（2026-10-31 的漏洞库）
+
+`scripts/security-scan.sh images` 的实测结果，只统计已有修复版本的高危 / 严重漏洞：
+
+| 镜像 | 严重 | 高危 | 处理 |
+|---|---|---|---|
+| `my-workspace-api:local` | 0 | 0 | 有就让 CI 失败 |
+| `my-workspace-web:local` | 0 | 0 | 有就让 CI 失败 |
+| `caddy:2.11.7-alpine` | 1 | 8 | 只报告。这个 tag 在 2026-10-30 重新构建过，但漏洞没变（brotli-libs、curl，Go 标准库、go-jose、x/net） |
+| `grafana/grafana:13.2.5` | 0 | 35 | 只报告（内置插件的 Go 依赖） |
+| `n8nio/n8n:2.45.7` | 1 | 32 | 只报告（brotli-libs 与 Node 依赖） |
+| `postgres:16.15-alpine3.24` | 1 | 25 | 只报告（`gosu` 用较旧的 Go 编译） |
+| `prom/prometheus:v3.15.1` | 0 | 0 | — |
+| `redis:7.4.12-alpine3.21` | 0 | 0 | — |
+| `restic/restic:0.19.1` | 3 | 32 | 只报告（openssh、jq、Go 依赖；只在备份时临时运行） |
+| `vikunja/vikunja:2.7.1` | 2 | 7 | 只报告（echo 框架） |
+
+Caddy 是对外的入口，发布前要优先查看上游有没有包含修复的新版本（S6-06 的发布 checklist）。
+
+### 8.6 性能基准：发现的问题与修复（第 6 节）
+
+- 落实：`tests/perf/benchmark.py` 写入 200 条任务投影（带同步游标，任务模块会实际查询）、40 个本周日程、50 条通知
+  （`tests/e2e/seed.py bulk` 与日历接口），其余按第 6 节的测法。
+- **第一次测量发现一个缺陷**：
+  - 现象：并发 16 时，首页聚合的 P95 是 2.2 秒；64 次请求里有 28 次的全部模块都是 `unavailable` / `timeout`。
+  - 原因：首页每次聚合有 5 个模块，各开一个数据库会话并发查询；请求自己的会话也一直占着连接。
+    默认连接池只有 5 + 10 个连接，并发一多，模块都在等连接，等的时间算进了模块 2 秒的超时。
+- **修复**（`services/api`）：
+  1. 聚合前先结束请求自己的只读事务，把连接还给连接池（sessionmaker 是 `expire_on_commit=False`，已读出的数据不受影响）；
+  2. 同一个进程里同时进行的聚合数用信号量限制（`DASHBOARD_OVERVIEW_CONCURRENCY`，默认 3）。超出的请求排队，排队的时间不计入模块超时；
+  3. 连接池大小可配置（`DATABASE_POOL_SIZE` 默认 10、`DATABASE_MAX_OVERFLOW` 默认 10）。
+  - 测试：`tests/test_dashboard_api.py::test_concurrent_overviews_queue_instead_of_timing_out`。去掉修复时这个测试失败。
+- **修复后**：并发 16 的 64 次请求全部模块正常。本机（共享的云端容器，单个 uvicorn 进程）的 P95 如下，单位 ms：
+
+  | 接口 | 并发 4 | 并发 16 | 目标 |
+  |---|---|---|---|
+  | `/api/v1/me` | 29.9 | 109.1 | 300 |
+  | `/api/v1/workspaces` | 28.9 | 193.6 | 300 |
+  | `/api/v1/tasks`（200 条） | 57.3 | 273.1 | 300 |
+  | `/api/v1/calendar/events`（本周 40 个） | 42.7 | 168.3 | 300 |
+  | `/api/v1/notifications`（50 条） | 51.3 | 265.2 | 300 |
+  | `/api/v1/dashboard/overview` | 124.6 | **565.4** | 500 |
+
+  每组 200 次请求，都没有错误。
+
+- **未达标项**：并发 16 时首页聚合的 P95 是 565 ms，超过 500 ms。
+  - 原因是吞吐上限：单个进程每秒约能完成 39 次聚合。16 个请求同时到达时，平均排队约 16 / 39 ≈ 410 ms（实测 P50 388 ms）。
+  - 并发 4（一个用户打开页面时浏览器同时发出的请求数量级）P95 是 125 ms，远低于目标。
+  - 进一步改进要多进程运行 api。但进程内的状态（SSE 连接数限制、服务状态缓存、HTTP 指标）要先移到 Redis 或改为多进程汇总，
+    改动面较大，不在 T-0044 范围内；验收报告如实记录。
+
+### 8.7 CI
+
+- `.github/workflows/ci-security.yml`：`deps`、`secrets`、`images` 三个 job 并行，不拖慢 ci-infra；每周一 02:23（UTC）另跑一次。
+  - 用到的 Action 版本：`actions/checkout@v5`、`actions/setup-node@v5`、`astral-sh/setup-uv@v10.3.0`，与现有工作流相同；
+  - `actions/cache@v5`：tag 存在（`git ls-remote`），`action.yml` 的运行时是 `node24`。
+  - trivy 的漏洞库目录按天缓存。
+- `ci-infra.yml` 在 Sprint 5 浏览器验收之后运行 `make smoke-full` 与性能基准（`--tolerance 2`），表格写进运行的 Summary。
+- 本机实测耗时：`deps` 约 6 秒；`secrets` 约 2 秒；`images` 约 2 分钟（含 8 个第三方镜像）；完整冒烟约 30 秒；性能基准约 45 秒。
+

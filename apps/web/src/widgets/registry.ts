@@ -27,16 +27,16 @@ const apiLatency = z.object({ range: z.enum(['1h', '6h', '24h']).default('1h'), 
 const notifications = z.object({ limit: z.number().int().min(1).max(20).default(5), unread_only: z.boolean().default(true) }).strict()
 const shape = { layout: layoutSchema }
 export const widgetSchema = z.discriminatedUnion('widget_type', [
-  z.object({ ...shape, widget_type: z.literal('notifications'), config: notifications.default({}) }).strict(),
-  z.object({ ...shape, widget_type: z.literal('note'), config: note.default({}) }).strict(),
-  z.object({ ...shape, widget_type: z.literal('quick_links'), config: links.default({}) }).strict(),
-  z.object({ ...shape, widget_type: z.literal('todo_summary'), config: summary.default({}) }).strict(),
-  z.object({ ...shape, widget_type: z.literal('today_tasks'), config: tasks.default({}) }).strict(),
-  z.object({ ...shape, widget_type: z.literal('recent_docs'), config: tasks.default({}) }).strict(),
-  z.object({ ...shape, widget_type: z.literal('calendar_agenda'), config: agenda.default({}) }).strict(),
-  z.object({ ...shape, widget_type: z.literal('github_activity'), config: activity.default({}) }).strict(),
-  z.object({ ...shape, widget_type: z.literal('service_health'), config: serviceHealth.default({}) }).strict(),
-  z.object({ ...shape, widget_type: z.literal('api_latency'), config: apiLatency.default({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('notifications'), config: notifications.prefault({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('note'), config: note.prefault({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('quick_links'), config: links.prefault({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('todo_summary'), config: summary.prefault({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('today_tasks'), config: tasks.prefault({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('recent_docs'), config: tasks.prefault({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('calendar_agenda'), config: agenda.prefault({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('github_activity'), config: activity.prefault({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('service_health'), config: serviceHealth.prefault({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('api_latency'), config: apiLatency.prefault({}) }).strict(),
 ])
 export type WidgetValue = z.output<typeof widgetSchema>
 export type WidgetType = WidgetValue['widget_type']

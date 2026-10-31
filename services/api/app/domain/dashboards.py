@@ -4,6 +4,7 @@
 工作空间归属）由路由层的 workspace_role 依赖先行检查，这里再按工作空间限定每一条查询。
 """
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Sequence
@@ -126,10 +127,14 @@ class DashboardService:
         db: AsyncSession,
         settings: Settings,
         providers: Sequence[overview.ModuleProvider],
+        overview_gate: asyncio.Semaphore | None = None,
     ) -> None:
         self.db = db
         self.settings = settings
         self.providers = providers
+        self.overview_gate = overview_gate or asyncio.Semaphore(
+            settings.dashboard_overview_concurrency
+        )
         self.audit = AuditTrail(db, settings)
 
     # ---------------------------------------------------------------- 仪表盘
@@ -335,11 +340,21 @@ class DashboardService:
             )
             await self.db.commit()
         widgets = await dashboard_repo.list_widgets(self.db, dashboard.id)
-        modules = await overview.collect(
-            self.providers,
-            access.workspace.id,
-            total_timeout=self.settings.dashboard_overview_timeout_seconds,
-        )
+        # 通知属于当前用户，不放在按工作空间的模块里；与通知列表的 unread_count 一致（契约第 4 节）
+        unread = await notifications.unread_count(self.db, access)
+        workspace_id = access.workspace.id
+        dashboard_out, widgets_out = _dashboard_out(dashboard), _widgets_out(widgets)
+        # 各模块用自己的会话并发查询。先结束本请求的只读事务，把连接还给连接池；
+        # 同时进行的聚合数受 overview_gate 限制，排队的时间不计入模块的超时。
+        # 否则并发一多连接池被占满，模块等连接就超时了
+        # （T-0044 性能基准：并发 16 时近半数请求的全部模块超时）
+        await self.db.commit()
+        async with self.overview_gate:
+            modules = await overview.collect(
+                self.providers,
+                workspace_id,
+                total_timeout=self.settings.dashboard_overview_timeout_seconds,
+            )
         summary: dict[str, Any] = {
             "pending_tasks": None,
             "active_projects": None,
@@ -350,11 +365,10 @@ class DashboardService:
             if result.status.status in {"ok", "stale"}:
                 summary.update({k: v for k, v in result.summary.items() if k in summary})
                 today_tasks.extend(result.today_tasks)
-        # 通知属于当前用户，不放在按工作空间的模块里；与通知列表的 unread_count 一致（契约第 4 节）
-        summary["unread_notifications"] = await notifications.unread_count(self.db, access)
+        summary["unread_notifications"] = unread
         return DashboardOverview(
-            dashboard=_dashboard_out(dashboard),
-            widgets=_widgets_out(widgets),
+            dashboard=dashboard_out,
+            widgets=widgets_out,
             summary=OverviewSummary(**summary),
             modules={name: result.status for name, result in modules.items()},
             today_tasks=today_tasks,

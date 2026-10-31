@@ -1,0 +1,14 @@
+# gitleaks 的已知误报（scripts/security-scan.sh secrets 读取本文件）。每条是一个发现的指纹：<提交>:<文件>:<规则>:<行号>，
+# 只忽略这一处；同一个文件里以后再出现的密钥仍然会让扫描失败。新增条目前确认它不是真实凭据，并在上面一行写明理由。
+# 核验记录见 docs/decisions/2026-10-31-sprint-6-backup-and-scan-verification.md 第 5.3、8 节。
+
+# 模拟 n8n 的触发密钥：只在测试进程里使用的固定假值
+d0b0cd6011522b708fdd33cfed5a92c30d305ba0:services/api/tests/fake_n8n.py:generic-api-key:20
+# 自动化接口测试给模拟 n8n 设置的假密钥
+d0b0cd6011522b708fdd33cfed5a92c30d305ba0:services/api/tests/test_automations_api.py:generic-api-key:352
+# 契约测试里的假 Webhook 密钥
+b1b0602972361d49ecc19f3a34231c0b296c03a3:services/api/tests/test_contract.py:generic-api-key:701
+# Vikunja OpenAPI 副本的 SHA-256 校验值，不是密钥
+62e1e9235522f2d2b8025f870f9976ada0772de0:services/api/tests/test_vikunja_connector.py:generic-api-key:41
+# Vikunja 官方 OpenAPI 副本里的示例 token（jwt.io 的公开示例 “John Doe”）
+f722ead204e056d3a3703a93c0fb0f2ee4593a21:infra/vikunja/openapi/vikunja-2.7.1-api-v2.json:jwt:1651

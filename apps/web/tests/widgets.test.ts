@@ -10,6 +10,11 @@ describe('Widget Registry 与导入契约', () => {
     expect(parseWidget({ ...widget, widget_type: 'today_tasks', config: {} })?.config).toEqual({ limit: 5 })
     expect(parseWidget({ ...widget, widget_type: 'quick_links', config: {} })?.config).toEqual({ links: [] })
   })
+  it('fills nested defaults when an imported widget omits its configuration', () => {
+    // zod 4 的 .default({}) 不再套用内层默认值，配置缺省时要用 .prefault({})（T-0044）
+    const file = dashboardFileSchema.parse({ format: 'my-workspace/dashboard', format_version: 1, title: '导入', widgets: [{ widget_type: 'service_health', layout }, { widget_type: 'notifications', layout }, { widget_type: 'api_latency', layout }] })
+    expect(file.widgets.map((item) => item.config)).toEqual([{ limit: 8 }, { limit: 5, unread_only: true }, { range: '1h', quantile: 'p95' }])
+  })
   it.each(['unknown', '__proto__', 'constructor'])('rejects unsupported type %s', (widget_type) => {
     expect(parseWidget({ ...widget, widget_type })).toBeNull()
   })

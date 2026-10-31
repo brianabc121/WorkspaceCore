@@ -1,6 +1,7 @@
 # 部署与运行手册
 
-> 状态：Sprint 6 进行中。Sprint 0 ~ 5 的功能已验收（`docs/acceptance/`）；备份与隔离恢复见第 14 节（S6-04）。
+> 状态：Sprint 6 进行中。Sprint 0 ~ 5 的功能已验收（`docs/acceptance/`）；备份与隔离恢复见第 14 节（S6-04），
+> 安全扫描、完整冒烟与性能基准见第 15 节（S6-05）。
 
 ## 1. 一键启动（推荐）
 
@@ -98,6 +99,10 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 - 访问第三方服务的超时与重试也可以调整（同样要在 api `environment` 中传入）：`CONNECTOR_CONNECT_TIMEOUT_SECONDS`（默认 3）、
   `CONNECTOR_READ_TIMEOUT_SECONDS`（默认 10）、`CONNECTOR_READ_RETRIES`（只对读请求，默认 2；写请求从不自动重试）、
   `SYNC_STALE_AFTER_SECONDS`（最近一次成功同步超过多久显示为“数据可能过期”，默认 900）；
+- 数据库连接池与首页聚合的并发（同样要在 api `environment` 中传入）：`DATABASE_POOL_SIZE`（每个进程的常驻连接，默认 10）、
+  `DATABASE_MAX_OVERFLOW`（高峰时额外允许的连接，默认 10）、`DASHBOARD_OVERVIEW_CONCURRENCY`（同时进行的首页聚合数，默认 3；
+  每次聚合约占 5 个连接，超出的请求排队，不会让模块超时）。api 与 worker 各有一个连接池，两者之和要小于 PostgreSQL 的
+  `max_connections`（默认 100）。
   Worker 的 `WEBHOOK_MAX_ATTEMPTS`（Webhook 事件最多尝试几次后进死信，默认 8）、
   `FULL_SYNC_INTERVAL_SECONDS`（多久做一次全量对账，默认 3600）——这两个要在 worker 的 `environment` 中传入；
   `RECONCILE_INTERVAL_MINUTES`（增量对账的间隔，1–30 分钟，默认 5）已在 compose.yaml 中传入。
@@ -464,3 +469,59 @@ S3 仓库的凭据（`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_DEFAUL
 4. 取出快照：`docker run --rm -e RESTIC_REPOSITORY=… -e RESTIC_PASSWORD_FILE=… restic/restic:0.19.1@sha256:… restore latest --target <目录>`（写法同 `scripts/backup_common.sh`）。
 5. `docker compose exec -T postgres pg_restore -U <POSTGRES_USER> -d <POSTGRES_DB> --exit-on-error < <目录>/backup/workspace.dump`。
 6. `make up && make migrate && make smoke`，然后登录核对。
+
+## 15. 发布前检查：安全扫描、完整冒烟与性能基准（S6-05）
+
+工具、版本与判定规则的核验见 `docs/decisions/2026-10-31-sprint-6-backup-and-scan-verification.md` 第 5、6、8 节。
+三项都已纳入 CI：扫描在 `.github/workflows/ci-security.yml`（与其他检查并行，每周一另跑一次），
+完整冒烟与性能基准在 `ci-infra.yml` 的全栈验收里。本机与 CI 用的是同一套脚本。
+
+### 15.1 安全扫描：`make scan`
+
+| 子命令 | 内容 | 什么时候失败 |
+|---|---|---|
+| `scripts/security-scan.sh deps` | pip-audit（按 `services/api/uv.lock`）与 npm audit（`apps/web`、`tests/e2e` 的锁文件），都包含开发依赖 | 有高危或严重漏洞；中低危只报告 |
+| `scripts/security-scan.sh secrets` | gitleaks 扫描整个 git 历史 | 有任何发现。已知误报按指纹登记在 `.gitleaksignore`，每条写明理由 |
+| `scripts/security-scan.sh images` | trivy 扫描已有修复版本的高危 / 严重漏洞 | 本仓库构建的镜像（api、web）有就失败；第三方锁定镜像只报告 |
+
+- 需要：`deps` 要 `uv` 与 `npm`；`secrets` 与 `images` 要 Docker。`images` 要先构建镜像（`make up`），
+  第三方镜像的清单取自 compose 文件，所以还要有 `.env`。
+- trivy 的漏洞库缓存在 `~/.cache/trivy`（约 1 GB，`TRIVY_CACHE_DIR` 可改）；`SCAN_THIRD_PARTY=0` 只扫描本仓库的镜像。
+- 出网经过 TLS 代理的环境：设置 `SSL_CERT_FILE` 指向代理的 CA，脚本会把它挂进 trivy 容器；`HTTPS_PROXY` 等变量原样传入。
+- **第三方镜像有漏洞时**：修复只能来自上游的新版本。发布前对照报告查看上游是否已发布修复版本；
+  升级时按项目规则重新核验版本与 digest，更新 compose 文件，再跑全部验收，不要为了让扫描变绿而跟随最新版本。
+- **新增误报时**：确认它不是真实凭据（例如测试里的固定假值、第三方文档里的公开示例），
+  把 gitleaks 输出的 `Fingerprint` 加进 `.gitleaksignore`，上一行写明理由。真实凭据一旦进入 git 历史就要立即作废并更换。
+
+### 15.2 完整端到端冒烟：`make smoke-full`
+
+先运行 `make smoke`，再用浏览器（Playwright）检查整个系统的基本可用性：
+
+1. 登录；
+2. `services/api/openapi.json` 里的全部 GET 接口逐个请求，都应返回 200（需要具体资源 ID 的少数接口由各 Sprint 验收覆盖）；
+   运维接口报告的核心服务（API、Worker、PostgreSQL、Redis）都是“正常”；
+3. 导航里的全部页面（`apps/web/src/app/navigation.ts`）加审计日志页逐个打开，标题正确，没有页面错误、控制台错误与 5xx；
+4. 实时连接（SSE）能建立；
+5. 写入往返：新建日程、首页加便签 → 可见 → 删除；
+6. 登出后接口返回 401。
+
+新增的接口和页面会自动纳入检查。需要 `tests/e2e` 的依赖与 Chromium（`cd tests/e2e && npm ci && npm run browser:install`）。
+
+- 默认用 `tests/e2e/seed.py` 在 api 容器里新建一个临时用户（本机与 CI）。
+- 在已经部署的环境里检查时，设置 `SMOKE_EMAIL` / `SMOKE_PASSWORD` 使用一个专门的冒烟账号（工作空间的 owner 或 admin）；写入的测试数据在结束时删除。
+- 没有配置 Vikunja、GitHub、n8n、Prometheus 时，相关页面显示“未配置”，冒烟照样通过。
+
+### 15.3 性能基准：`make perf`
+
+`tests/perf/benchmark.py`（只用 Python 标准库）新建临时用户，写入 200 条任务投影、40 个本周日程与 50 条通知，
+经 Caddy 测量：
+
+- 基础 API（当前用户、工作空间、任务、本周日程、通知）：目标 P95 < 300 ms；
+- 首页聚合 `/api/v1/dashboard/overview`（读本地投影，预热后）：目标 P95 < 500 ms。
+
+每个接口先预热，再按并发 4 与 16 各发 200 次请求，输出 P50 / P95 / P99 / 最大值、错误数与吞吐的表格
+（`--output report.json` 另存 JSON）。判定：没有错误，且 P95 不超过“目标 × `--tolerance`”。
+
+- 本机固定环境用默认的 `--tolerance 1`，结果写进验收报告；CI 的 runner 性能不稳定，用 `--tolerance 2`，表格写进运行的 Summary。
+- 这些是测试目标，不是承诺（规范第 12 节）。本机实测数据与未达标项的原因见上述 ADR 的第 8.6 节，Sprint 6 的验收报告会附上发布前的数据。
+
