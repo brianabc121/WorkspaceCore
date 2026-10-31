@@ -127,6 +127,11 @@ CI 里没有这两个变量，所以跳过；本机同样没有，**未运行**�
 - GitHub 的地址之前不能通过 `.env` 改成模拟服务。现在 `compose.yaml` 把 `.env` 里的 `WORKSPACE_GITHUB_API_URL` 作为 `GITHUB_API_URL` 传给 api 与 worker，默认值仍是 `https://api.github.com`。
   - 第一次 CI 失败（PR #44 的 compose job）：`.env` 里直接写 `GITHUB_API_URL`，但 GitHub Actions 会在 shell 里设置同名变量，Compose 插值时 shell 变量优先，api 实际访问了真实的 api.github.com，模拟 Token 被拒（`token_rejected`），模拟服务一个请求都没收到。
   - 本机复现：shell 里设置 `GITHUB_API_URL=https://api.github.com` 后重建 api，容器里的值就是真实地址。改用 `WORKSPACE_GITHUB_API_URL` 后，同样的 shell 环境下容器里是模拟服务的地址。
+- **AFFiNE 地址可以用其他写法绕过链路本地检查**（T-0027 的缺陷，A12）：
+  - 原因：后端只认标准写法的 IP。`http://2852039166`、`http://0xa9fea9fe`、`http://0251.0376.0251.0376`、`http://169.254.43518` 都被当成主机名放行，但浏览器会把它们解析成 169.254.169.254。
+  - 影响很小：工作台从不访问这个地址，只把它当链接给用户自己的浏览器打开。前端用 `new URL()` 先规范化，在页面上已经会拦下。
+  - 修复：按 `inet_aton` 的规则解析这些写法，IPv4 映射的 IPv6 也按其中的 IPv4 判断。新增参数化测试，同时确认回环与内网地址仍然允许。
+  - 集成地址（服务端会访问）不受影响：Connector 先解析主机名再检查每个地址，这些写法本来就被拒绝，本机实测都是 `422`。
 
 ## 6. 实际执行的命令
 
@@ -148,3 +153,4 @@ node tests/e2e/sprint4_browser.cjs           # 10 步全部通过（页面无错
 | 真实 GitHub | 需要 `TEST_GITHUB_TOKEN` / `TEST_GITHUB_REPO`，本机与 CI 都没有；T-0025 的核验用的是官方 OpenAPI 与匿名实测 |
 | 真实 AFFiNE | 工作台不向 AFFiNE 发请求，只校验链接字符串，没有部署 AFFiNE 实例；路由规则来自 v0.27.4 源码（核验 ADR 第 8 节） |
 | 中文分词 | 搜索对中文按字面包含匹配，不分词（部署文档第 11 节） |
+| DNS 重绑定 | Connector 在发请求前解析并检查地址，但 httpx 连接时会再解析一次，两次之间 DNS 结果可能变化。集成只有工作空间管理员能配置。连接时固定已检查的 IP 留到 Sprint 6 的安全加固 |

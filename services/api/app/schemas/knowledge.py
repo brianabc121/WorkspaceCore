@@ -7,6 +7,8 @@
 """
 
 import ipaddress
+import re
+import socket
 from datetime import datetime
 from typing import Annotated, Literal, Self
 from urllib.parse import urlsplit
@@ -45,16 +47,33 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+# 浏览器也认的 IPv4 写法：十进制整数、十六进制、八进制、少于四段（2852039166 即 169.254.169.254）
+_NUMERIC_IPV4 = re.compile(r"[0-9a-fA-FxX.]+")
+
+
+def _ip_of(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    host = host.strip("[]")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        if not _NUMERIC_IPV4.fullmatch(host):
+            return None
+        try:
+            return ipaddress.IPv4Address(socket.inet_aton(host))
+        except OSError:
+            return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        return address.ipv4_mapped
+    return address
+
+
 def _blocked_host(host: str) -> bool:
     """链路本地（含云元数据地址 169.254.169.254）与未指定地址不能作为 AFFiNE 的外部地址（A12）。
 
     回环与内网地址允许：本机开发时 AFFiNE 常在 http://localhost:3010，链接只在用户自己的浏览器里打开。
     """
-    try:
-        address = ipaddress.ip_address(host.strip("[]"))
-    except ValueError:
-        return False
-    return address.is_link_local or address.is_unspecified
+    address = _ip_of(host)
+    return address is not None and (address.is_link_local or address.is_unspecified)
 
 
 def _source_url(value: str) -> str:

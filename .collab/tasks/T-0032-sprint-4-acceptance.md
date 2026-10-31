@@ -8,7 +8,7 @@ branch: claude/cool-wright-99qbbg
 paths: docs/acceptance,docs/TASKS.md,tests/e2e,.github/workflows/ci-infra.yml,scripts/smoke.sh
 depends_on: T-0027, T-0028, T-0029, T-0030, T-0031
 created: 2026-10-30
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # T-0032 Sprint 4 集成与验收：DoD 实测、A10 / A11 / A12 / A13 / A17 自动化、全栈与浏览器 E2E 纳入 CI、勾选 TASKS.md
@@ -39,3 +39,4 @@ T-0027 ~ T-0031 合并后做前后端联调，并按 Sprint 4 的 DoD 实测验�
 - 2026-10-30 19:19 UTC · claude · PR #44 第一次 CI（compose）失败：.env 里写的 GITHUB_API_URL 被 GitHub Actions 在 shell 里设置的同名变量覆盖（Compose 插值时 shell 优先），api 访问了真实 api.github.com，模拟 Token 被拒（token_rejected），模拟服务收到 0 个请求。本机在 shell 里设置 GITHUB_API_URL 复现；改为 .env 用 WORKSPACE_GITHUB_API_URL（compose 映射为容器内的 GITHUB_API_URL），同样环境下 31 项全部通过。Sprint 1 ~ 3 的验收在那次 CI 里都通过了。
 - 2026-10-30 23:36 UTC · claude · 第二部分（一）：T-0030（PR #45）审查无阻塞后合并。新增 tests/e2e/sprint4_browser.cjs（真实后端：配置 AFFiNE 地址与 A12、收藏规范化与关联任务、任务抽屉相关文档、搜索命中、日历新建/编辑与时区、首页最近文档/近期日程、移动端、viewer 只读、A10 删除后不出现、不请求 AFFiNE），本机连续 3 次全部通过，加入 ci-infra.yml。下一步：等 codex 的 T-0031，补 GitHub 连接 / 开发者页 / 搜索框步骤，勾选 TASKS.md S4-01 ~ S4-05。
 - 2026-10-30 23:49 UTC · claude · PR #46 第一次 CI 的 Sprint 4 浏览器步骤失败：脚本竞态（字段级错误在输入时就出现，被拦下的那次提交还在校验时脚本已填入合法地址，那次提交带着新值保存，弹窗关闭后第二次点击超时）。改为等表单级 alert（提交校验结束后才出现），并核对只提交一次合法地址；收藏表单同样处理。本机连续 3 次通过。
+- 2026-10-31 00:00 UTC · claude · A12 补充实测（本机全栈）：集成地址的各种写法（十进制 / 十六进制 / 八进制 IP、IPv4 映射 IPv6、fe80::、0.0.0.0、回环、内网、带凭据、file/gopher）都返回 422；AFFiNE 地址的十进制 / 十六进制 / 八进制写法被放行（后端只认标准 IP 写法）。已在 app/schemas/knowledge.py 修复（越界到 services/api，归 claude，D-0003），加参数化测试。另记：DNS 重绑定（检查与连接之间再次解析）留到 Sprint 6 安全加固。
