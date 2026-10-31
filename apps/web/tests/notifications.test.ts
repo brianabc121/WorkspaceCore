@@ -7,6 +7,13 @@ import { useAuthStore } from '../src/stores/auth'
 import { registry, parseWidget } from '../src/widgets/registry'
 
 describe('notifications', () => {
+  it('closes the notification dialog with Escape even if focus was lost after list changes', async () => {
+    mockApi(r => path(r) === '/api/v1/notifications' ? Response.json(notifications) : undefined)
+    await openApp('/'); await fireEvent.click(await screen.findByRole('button', { name: '通知，2 条未读' })); await screen.findByRole('dialog')
+    ;(document.activeElement as HTMLElement).blur()
+    await fireEvent.keyDown(document.body, { key: 'Escape' })
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
   it('shows unread count and plain body with application navigation for an unknown type', async () => {
     mockApi(r => path(r) === '/api/v1/notifications' ? Response.json(notifications) : undefined)
     await openApp('/operations'); await fireEvent.click(await screen.findByRole('button', { name: '通知，2 条未读' }))

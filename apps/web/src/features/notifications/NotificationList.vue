@@ -3,7 +3,7 @@ import type { Schema } from '../../services/api'
 import { formatTime } from '../time'
 defineProps<{ items: Schema['NotificationOut'][]; busy?: boolean; label: string }>()
 defineEmits<{ read: [id: string] }>()
-function internalPath(value: string | null | undefined) { return !!value && value.startsWith('/') && !value.startsWith('//') && !/[\\\u0000-\u0020\u007f]/.test(value) }
+function internalPath(value: string | null | undefined) { return !!value && value.startsWith('/') && !value.startsWith('//') && ![...value].some(char => char === '\\' || char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127) }
 </script>
 <template>
   <section role="region" :aria-label="label" class="notification-list">

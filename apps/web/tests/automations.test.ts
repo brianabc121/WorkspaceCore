@@ -20,6 +20,35 @@ async function fillTrigger() {
   await fireEvent.click(screen.getByRole('button', { name: '检查并确认' }))
 }
 describe('automations', () => {
+  it.each([['not_configured', '尚未配置 n8n'], ['unavailable', 'n8n 暂不可用'], ['unauthorized', 'n8n 授权已失效'], ['stale', '自动化数据可能过期']])('shows connection %s explicitly and prevents triggering', async (status, text) => {
+    setup(r => path(r) === '/api/v1/automations' ? Response.json({ ...automations, connection: { status, as_of: status === 'stale' ? '2026-10-31T01:00:00Z' : null } }) : undefined)
+    await openApp('/automations'); expect(await screen.findByText(new RegExp(text))).toBeVisible()
+    expect(screen.getByRole('button', { name: '触发：生成日报' })).toBeDisabled()
+  })
+  it('registers and edits local whitelist parameters with version, then confirms removal', async () => {
+    let items = [automation]
+    const requests = setup(async r => {
+      if (path(r) === '/api/v1/automations') {
+        if (r.method === 'POST') { const body = await r.clone().json(); const item = { ...automation, ...body, id: 'flow-new' }; items = [...items, item]; return Response.json(item, { status: 201 }) }
+        return Response.json({ ...automations, items })
+      }
+      if (path(r) === '/api/v1/automations/flow-new') {
+        if (r.method === 'PATCH') { const body = await r.clone().json(); items = items.map(i => i.id === 'flow-new' ? { ...i, ...body, version: 2 } : i); return Response.json(items[1]) }
+        if (r.method === 'DELETE') { items = items.filter(i => i.id !== 'flow-new'); return new Response(null, { status: 204 }) }
+      }
+    })
+    await openApp('/automations'); await fireEvent.click(await screen.findByRole('button', { name: '登记工作流' }))
+    await fireEvent.update(screen.getByLabelText('名称'), '新工作流'); await fireEvent.update(screen.getByLabelText('工作流 ID'), 'New1'); await fireEvent.update(screen.getByLabelText('触发路径'), 'new-hook')
+    await fireEvent.click(screen.getByRole('button', { name: '添加参数' })); await fireEvent.update(screen.getByLabelText('参数标识'), 'target'); await fireEvent.update(screen.getByLabelText('显示名称'), '目标'); await fireEvent.click(screen.getByLabelText('必填')); await fireEvent.update(screen.getByLabelText('最大长度'), '12')
+    await fireEvent.click(screen.getByRole('button', { name: '保存工作流' })); const entry = await screen.findByRole('region', { name: '新工作流' }); await vi.waitFor(() => expect(within(entry).getByRole('button', { name: '编辑工作流' })).toBeEnabled())
+    const created = await requests.find(r => r.method === 'POST' && path(r) === '/api/v1/automations')!.clone().json(); expect(created.params).toEqual([{ name: 'target', label: '目标', type: 'string', required: true, sensitive: false, max_length: 12, choices: null }])
+    await fireEvent.click(within(entry).getByRole('button', { name: '编辑工作流' })); await fireEvent.update(screen.getByLabelText('名称'), '已更新工作流'); await fireEvent.click(screen.getByRole('button', { name: '保存工作流' }))
+    const updated = await screen.findByRole('region', { name: '已更新工作流' }); await vi.waitFor(() => expect(within(updated).getByRole('button', { name: '移出白名单' })).toBeEnabled())
+    expect((await requests.find(r => r.method === 'PATCH')!.clone().json()).version).toBe(1)
+    vi.spyOn(window, 'confirm').mockReturnValue(false); await fireEvent.click(within(updated).getByRole('button', { name: '移出白名单' })); expect(requests.some(r => r.method === 'DELETE')).toBe(false)
+    vi.spyOn(window, 'confirm').mockReturnValue(true); await fireEvent.click(within(updated).getByRole('button', { name: '移出白名单' })); await vi.waitFor(() => expect(screen.queryByRole('region', { name: '已更新工作流' })).not.toBeInTheDocument())
+    expect(new URL(requests.find(r => r.method === 'DELETE')!.url).searchParams.get('version')).toBe('2')
+  })
   it('shows whitelist, unknown last run, safe editor link and paged run table', async () => {
     const requests = setup(r => path(r).endsWith('/runs') ? Response.json({ items: [{ ...run, status: 'error', error_summary: '<b>节点失败</b>' }], next_cursor: new URL(r.url).searchParams.has('cursor') ? null : 'next-run' }) : undefined)
     await openApp('/automations'); const flow = await screen.findByRole('region', { name: '生成日报' })
@@ -27,7 +56,7 @@ describe('automations', () => {
     await fireEvent.click(within(flow).getByRole('button', { name: '查看运行记录' }))
     const table = await screen.findByRole('table', { name: '生成日报运行记录' }); expect(table).toHaveTextContent('<b>节点失败</b>'); expect(table.querySelector('b')).toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: '更多运行记录' })); await vi.waitFor(() => expect(requests.some(r => new URL(r.url).searchParams.get('cursor') === 'next-run')).toBe(true))
-    expect(screen.getByRole('link', { name: '打开 n8n 编辑器' })).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(screen.getByRole('link', { name: /打开 n8n 编辑器/ })).toHaveAttribute('rel', 'noopener noreferrer')
   })
   it('allows viewer reads only and never requests connection secrets/settings', async () => {
     const requests = setup(r => path(r) === '/api/v1/me' ? Response.json({ ...me, workspaces: [{ ...workspace, role: 'viewer' }] }) : undefined)
