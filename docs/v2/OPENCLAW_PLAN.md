@@ -1,6 +1,7 @@
 # My Workspace V2.0 优化方案（第 2 版）：OpenClaw 接替 AI，工作台内置 IM
 
-> 状态：**方案草稿，等人类批准**。批准前开发仍以 `docs/DEVELOPMENT_SPEC.md`、`docs/TASKS.md` 为准。
+> 状态：**论证记录**。人类已按第 12 节的推荐采纳（2026-10-31），**定稿见 [`TRANSFORMATION_PLAN.md`](TRANSFORMATION_PLAN.md)**，实施以定稿为准。
+> 本文保留调研过程、上游源码核对和备选方案。
 >
 > **版本**：
 > - 第 1 版（2026-10-31，PR #72）：一台 OpenClaw，工作台只提供 MCP 工具与审批。
