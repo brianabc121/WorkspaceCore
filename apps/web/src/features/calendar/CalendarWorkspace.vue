@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useInfiniteQuery } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { dataOf, errorMessage, isAccessError, type Schema } from '../../services/api'
@@ -11,7 +12,9 @@ import MutationNotice from '../resources/MutationNotice.vue'
 import CalendarForm from './CalendarForm.vue'
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id, header = { 'X-Workspace-Id': scope }
 const { run, reload, busy, error, needsReload, accessDenied, message } = useResourceMutation(scope, ['calendar', 'overview'])
-const initialZone = browserZone(), date = ref(dateInZone(new Date().toISOString(), initialZone)), zone = ref(initialZone)
+const route = useRoute(), initialZone = browserZone()
+function initialDate() { try { return typeof route.query.date === 'string' ? addDays(route.query.date, 0) : dateInZone(new Date().toISOString(), initialZone) } catch { return dateInZone(new Date().toISOString(), initialZone) } }
+const date = ref(initialDate()), zone = ref(initialZone)
 const selected = ref({ date: date.value, zone: zone.value }), rangeError = ref(''), view = ref<'agenda' | 'week'>('agenda')
 const days = computed(() => weekDates(selected.value.date))
 // All-day events retain their civil dates even when their event timezone is on
@@ -33,6 +36,10 @@ function apply() {
     selected.value = { date: date.value, zone: zone.value }; rangeError.value = ''
   } catch (cause) { rangeError.value = cause instanceof Error ? cause.message : '日期范围无效。' }
 }
+watch(() => route.query.date, (value) => {
+  if (typeof value !== 'string') return
+  try { date.value = addDays(value, 0); zone.value = selected.value.zone; apply() } catch { /* Invalid route dates leave the current range unchanged. */ }
+})
 function move(offset: number) { date.value = addDays(selected.value.date, offset); zone.value = selected.value.zone; apply() }
 async function reset() { if (await reload()) opened.value = null }
 async function save(body: Schema['CalendarEventCreate']) {

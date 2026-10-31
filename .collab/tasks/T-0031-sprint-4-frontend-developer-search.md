@@ -2,9 +2,9 @@
 id: T-0031
 title: Sprint 4 前端（二）：GitHub 连接设置与开发者页、首页 GitHubActivity 组件、全局搜索 UI（S4-04、S4-05 前端）
 owner: codex
-status: todo
+status: done
 priority: P1
-branch:
+branch: codex/T-0031-sprint-4-github-search
 paths: apps/web,.github/workflows/ci-web.yml
 depends_on: T-0026
 created: 2026-10-30
@@ -18,12 +18,12 @@ updated: 2026-10-31
 并把 Sprint 2 的本地搜索升级为跨资源搜索。只做 `apps/web`；后端由 claude 的 T-0028 / T-0029 实现。
 
 ## 验收标准
-- [ ] S4-04：集成设置页支持 GitHub（Token 只写不回显；测试连接逐项显示检查结果；手动同步；连接状态）；非 admin 只读或隐藏
-- [ ] S4-04：`/developer` 页：仓库、Issue、PR、Actions 最近运行（失败的运行显示故障摘要）；分页或加载更多；“在 GitHub 中打开”；限流时明确显示“GitHub 限流、预计何时恢复”，不显示成空列表（A17）；Token 失效时提示重新连接（A13）
-- [ ] 首页 GitHubActivity 组件接真实数据，正确展示 ok / stale / unavailable / unauthorized
-- [ ] S4-05：全局搜索（顶栏与 `Ctrl/Cmd+K`）调用 `/api/v1/search`：按资源类型分组，显示来源与更新时间，键盘导航，跳到工作台页面或外部原生界面；加载、空结果、错误状态；切换工作空间后不残留上一个工作空间的结果
-- [ ] 顺带处理 PR #33 的 3 条非阻塞审查建议（同在集成设置页）：测试结果显示错误码与原因；显示已保存的服务地址与浏览器访问地址；`public_url` 可以恢复为默认（后端已支持显式传 `null`）
-- [ ] Vitest 覆盖限流 / Token 失效状态、搜索的工作空间隔离与键盘操作；`npm run lint / typecheck / test / build` 与 `npm run check:api` 通过并把输出写进 PR；不修改 `src/services/schema.d.ts`（D-0005）
+- [x] S4-04：集成设置页支持 GitHub（Token 只写不回显；测试连接逐项显示检查结果；手动同步；连接状态）；非 admin 只读或隐藏
+- [x] S4-04：`/developer` 页：仓库、Issue、PR、Actions 最近运行（失败的运行显示故障摘要）；分页或加载更多；“在 GitHub 中打开”；限流时明确显示“GitHub 限流、预计何时恢复”，不显示成空列表（A17）；Token 失效时提示重新连接（A13）
+- [x] 首页 GitHubActivity 组件接真实数据，正确展示 ok / stale / unavailable / unauthorized
+- [x] S4-05：全局搜索（顶栏与 `Ctrl/Cmd+K`）调用 `/api/v1/search`：按资源类型分组，显示来源与更新时间，键盘导航，跳到工作台页面或外部原生界面；加载、空结果、错误状态；切换工作空间后不残留上一个工作空间的结果
+- [x] 顺带处理 PR #33 的 3 条非阻塞审查建议（同在集成设置页）：测试结果显示错误码与原因；显示已保存的服务地址与浏览器访问地址；`public_url` 可以恢复为默认（后端已支持显式传 `null`）
+- [x] Vitest 覆盖限流 / Token 失效状态、搜索的工作空间隔离与键盘操作；`npm run lint / typecheck / test / build` 与 `npm run check:api` 通过并把输出写进 PR；不修改 `src/services/schema.d.ts`（D-0005）
 
 ## 背景 / 约束 / 参考
 - 依赖：T-0026（契约）合并后开始；开发时可用 mock，真实联调在 T-0032
@@ -34,4 +34,8 @@ updated: 2026-10-31
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-30 16:43 UTC · claude · 创建任务（owner: codex）
+- 2026-10-30 23:45 UTC · codex · 开始任务
+- 2026-10-30 23:46 UTC · codex · 已从最新 main bb65d74（PR #45 已合并）启动指定分支，无重复执行或 Codex 待合并 PR。实现计划见 apps/web/docs/plans/T-0031.md；沿用 Vue3/现有样式，无新依赖，先写测试再实现 GitHub 设置、开发者投影/卡片、BFF 全局搜索；不碰 Claude 验收路径及生成 schema。
+- 2026-10-31 00:06 UTC · codex · status in_progress → done：GitHub 设置/细粒度 Token/逐仓库四项检查、开发者投影与故障摘要、GitHubActivity、BFF 全局搜索完成；PR #33 三条非阻塞建议已处理。独立审查三项 Important 均已回归修复。Node22 下 198 项测试及 lint/typecheck/check:api/build/浏览器检查通过，collab check 0 警告。真实输出、审查裁定和截图见 apps/web/docs/verification/T-0031.md。未改生成 schema / 后端 / 迁移；开 PR 后停下等 Claude。
 - 2026-10-31 00:06 UTC · claude · 提醒 codex：人类在 2026-10-31 的对话中决定两个代理不共用 Docker 环境，见 .collab/decisions/D-0006-separate-docker.md。前端验证继续用契约模拟 BFF / 本地 Vite；需要真实栈时在你自己的 Docker 环境里另起一套，不要连接 claude 的 Docker，也不要和 claude 共用一个 daemon。真实后端的浏览器联调由 claude 的 T-0032 负责。
+- 2026-10-31 00:11 UTC · codex · 已推送指定分支并创建 PR #48：https://github.com/brianabc121/WorkspaceCore/pull/48。功能提交 dc3581d，已合入最新 main 7bb02c0；本地 198 项测试、lint/typecheck/check:api/build、模拟 BFF 浏览器与 collab check 全部通过。PR 链接已返回本聊天；按本次指令停下等 Claude 审查 / CI / 合并，不重复开工或推进 Sprint。

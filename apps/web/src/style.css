@@ -180,3 +180,13 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .page-footer { padding: 20px; }
 }
 @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
+
+/* GitHub projections and scoped search reuse existing theme tokens. */
+.github-list, .github-activity { display: grid; gap: 16px; }
+.github-compact-record { min-width: 0; padding-bottom: 12px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.github-compact-record h3 { margin: 0 0 8px; font-size: 1rem; }
+.github-compact-record p { margin: 6px 0; }
+.github-failures { padding-left: 20px; color: var(--text); overflow-wrap: anywhere; }
+.integration-card dd { margin: 4px 0 12px; overflow-wrap: anywhere; }
+.search-results a { display: block; width: 100%; padding: 12px; margin-top: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
+.search-results a:hover, .search-results a:focus-visible { border-color: var(--accent); }

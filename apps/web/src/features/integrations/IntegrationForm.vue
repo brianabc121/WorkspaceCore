@@ -14,7 +14,7 @@ const token = z.string().min(4).max(512).regex(/^tk_.+$/, '请输入 tk_ 开头�
 const schema = z.object({ name: z.string().trim().min(1, '请输入连接名称').max(64), base_url: props.integration ? url.or(z.literal('')) : url, api_token: props.integration ? token.or(z.literal('')) : token, public_url: url.or(z.literal('')), expires: z.string().refine((v) => !v || !Number.isNaN(new Date(v).getTime()), '过期时间无效'), enabled: z.boolean() })
 const { handleSubmit, defineField, setFieldValue, isSubmitting } = useForm({ validationSchema: toTypedSchema(schema), initialValues: { name: props.integration?.name ?? 'Vikunja', base_url: '', api_token: '', public_url: '', expires: toLocalInput(props.integration?.token_expires_at ?? null), enabled: props.integration?.status !== 'disabled' } })
 const [expires] = defineField('expires'), [enabled] = defineField('enabled')
-const notice = ref('')
+const notice = ref(''), resetPublic = ref(false)
 const submit = handleSubmit((value) => {
   if (props.busy || props.locked) return
   const token_expires_at = value.expires ? new Date(value.expires).toISOString() : null
@@ -23,7 +23,8 @@ const submit = handleSubmit((value) => {
     if (value.name !== props.integration.name) body.name = value.name
     if (value.base_url) body.base_url = value.base_url
     if (value.api_token) body.api_token = value.api_token
-    if (value.public_url) body.public_url = value.public_url
+    if (resetPublic.value) body.public_url = null
+    else if (value.public_url) body.public_url = value.public_url
     if (value.expires !== toLocalInput(props.integration.token_expires_at)) body.token_expires_at = token_expires_at
     if (value.enabled !== (props.integration.status !== 'disabled')) body.enabled = value.enabled
     if (Object.keys(body).length === 1) { notice.value = '没有需要保存的修改'; return }
@@ -37,8 +38,9 @@ const submit = handleSubmit((value) => {
     <fieldset :disabled="busy || locked || isSubmitting">
       <TextField name="name" label="连接名称" :maxlength="64" />
       <TextField name="base_url" label="服务地址" :maxlength="2048" />
-      <p class="form-help">{{ integration ? '留空保留已保存的服务地址；地址不回显。' : '由工作台服务器访问的 Vikunja 地址，内网域名需由部署管理员放行。' }}</p>
-      <TextField name="public_url" label="浏览器访问地址" :maxlength="2048" />
+      <p class="form-help">{{ integration ? '留空保留已保存的服务地址；已保存地址见连接信息。' : '由工作台服务器访问的 Vikunja 地址，内网域名需由部署管理员放行。' }}</p>
+      <label v-if="integration" class="check-field"><input v-model="resetPublic" type="checkbox" @change="resetPublic && setFieldValue('public_url', '')">恢复默认浏览器地址</label>
+      <TextField v-show="!resetPublic" name="public_url" label="浏览器访问地址" :maxlength="2048" />
       <TextField name="api_token" label="API Token" type="password" :maxlength="512" autocomplete="new-password" />
       <p class="form-help">{{ integration ? '留空保留现有 Token。' : '' }}从 Vikunja 创建受限 API Token，凭据只写入，不回显。</p>
       <label class="form-field">Token 过期时间<input v-model="expires" type="datetime-local"></label>
