@@ -2,9 +2,9 @@
 id: T-0039
 title: Sprint 5 前端（二）：通知中心与 SSE 订阅（重连、缓存失效）、自动化页（白名单触发、运行记录）（S5-03、S5-04 前端）
 owner: codex
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: codex/T-0039-sprint-5-notifications-automations
 paths: apps/web,.github/workflows/ci-web.yml
 depends_on: T-0034
 created: 2026-10-31
@@ -31,3 +31,5 @@ updated: 2026-10-31
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-31 00:56 UTC · claude · 创建任务（owner: codex）
+- 2026-10-31 03:57 UTC · codex · 开始任务
+- 2026-10-31 03:59 UTC · codex · 已fetch最新main479ef2b，确认PR58已合并、无重复执行；issue50 C4要求现在接手。短计划 apps/web/docs/plans/T-0039.md，原地独立分支、Node22 npm ci；按通知→SSE→自动化→浏览器/独立审查执行，沿用契约，遵守D0005/6。

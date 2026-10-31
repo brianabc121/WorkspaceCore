@@ -5,6 +5,7 @@ import BuiltinCard from './BuiltinCard.vue'
 import ResourceCard from './ResourceCard.vue'
 import GitHubActivity from './GitHubActivity.vue'
 import OperationsCard from './OperationsCard.vue'
+import NotificationsCard from './NotificationsCard.vue'
 
 export const safeUrl = (value: string) => {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password } catch { return false }
@@ -23,8 +24,10 @@ export const layoutSchema = z.object({
 const activity = z.object({ kind: z.enum(['runs', 'pulls', 'issues']).default('runs'), limit: z.number().int().min(1).max(20).default(5) }).strict()
 const serviceHealth = z.object({ limit: z.number().int().min(1).max(20).default(8) }).strict()
 const apiLatency = z.object({ range: z.enum(['1h', '6h', '24h']).default('1h'), quantile: z.enum(['p50', 'p95', 'p99']).default('p95') }).strict()
+const notifications = z.object({ limit: z.number().int().min(1).max(20).default(5), unread_only: z.boolean().default(true) }).strict()
 const shape = { layout: layoutSchema }
 export const widgetSchema = z.discriminatedUnion('widget_type', [
+  z.object({ ...shape, widget_type: z.literal('notifications'), config: notifications.default({}) }).strict(),
   z.object({ ...shape, widget_type: z.literal('note'), config: note.default({}) }).strict(),
   z.object({ ...shape, widget_type: z.literal('quick_links'), config: links.default({}) }).strict(),
   z.object({ ...shape, widget_type: z.literal('todo_summary'), config: summary.default({}) }).strict(),
@@ -39,6 +42,7 @@ export type WidgetValue = z.output<typeof widgetSchema>
 export type WidgetType = WidgetValue['widget_type']
 type WidgetDefinition = { type: WidgetType; title: string; defaultSize: { w: number; h: number }; configSchema: z.ZodTypeAny; component: Component; refreshPolicy: 'manual'; requiredCapability?: string }
 export const registry: Record<WidgetType, WidgetDefinition> = {
+  notifications: { type: 'notifications', title: '通知', defaultSize: { w: 6, h: 5 }, configSchema: notifications, component: markRaw(NotificationsCard), refreshPolicy: 'manual' },
   service_health: { type: 'service_health', title: '服务状态', defaultSize: { w: 6, h: 5 }, configSchema: serviceHealth, component: markRaw(OperationsCard), refreshPolicy: 'manual', requiredCapability: 'operations' },
   api_latency: { type: 'api_latency', title: 'API 延迟', defaultSize: { w: 6, h: 5 }, configSchema: apiLatency, component: markRaw(OperationsCard), refreshPolicy: 'manual', requiredCapability: 'operations' },
   github_activity: { type: 'github_activity', title: 'GitHub 动态', defaultSize: { w: 6, h: 5 }, configSchema: activity, component: markRaw(GitHubActivity), refreshPolicy: 'manual', requiredCapability: 'github' },
