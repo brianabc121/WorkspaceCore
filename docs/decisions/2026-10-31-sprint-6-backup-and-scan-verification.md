@@ -217,7 +217,7 @@
 |---|---|---|---|
 | `my-workspace-api:local` | 0 | 0 | 有就让 CI 失败 |
 | `my-workspace-web:local` | 0 | 0 | 有就让 CI 失败 |
-| `caddy:2.11.7-alpine` | 1 | 8 | 只报告。这个 tag 在 2026-10-30 重新构建过，但漏洞没变（brotli-libs、curl，Go 标准库、go-jose、x/net） |
+| `caddy:2.11.7-alpine` | 1 | 8 | 只报告。这个 tag 在 2026-10-30 重新推送过（digest 变了），漏洞没变（brotli-libs、curl，Go 标准库、go-jose、x/net） |
 | `grafana/grafana:13.2.5` | 0 | 35 | 只报告（内置插件的 Go 依赖） |
 | `n8nio/n8n:2.45.7` | 1 | 32 | 只报告（brotli-libs 与 Node 依赖） |
 | `postgres:16.15-alpine3.24` | 1 | 25 | 只报告（`gosu` 用较旧的 Go 编译） |

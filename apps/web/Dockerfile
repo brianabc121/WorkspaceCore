@@ -2,7 +2,7 @@
 # 本文件归 claude 维护（docs/decisions/2026-10-29-sprint-0-contracts.md 第 1 节）；应用代码归 codex。
 # 安全响应头由前置的 Caddy 统一设置（infra/caddy/Caddyfile）。
 
-FROM node:22.23.4-alpine3.24 AS build
+FROM node:22.23.4-alpine3.24@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
