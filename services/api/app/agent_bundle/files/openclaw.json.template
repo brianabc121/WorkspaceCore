@@ -10,7 +10,7 @@
       "myworkspace": {
         "source": "exec",
         "command": "/opt/myworkspace/bin/myworkspace-secret-resolver",
-        "passEnv": ["PATH", "MYWS_INSTANCE_TOKEN", "MYWS_AGENT_API", "MYWS_CA_FILE", "MYWS_CLIENT_CERT", "MYWS_CLIENT_KEY"],
+        "passEnv": ["PATH", "MYWS_INSTANCE_TOKEN", "MYWS_AGENT_API", "MYWS_LOCAL_TUNNEL_HOST", "MYWS_CA_FILE", "MYWS_CLIENT_CERT", "MYWS_CLIENT_KEY", "NODE_EXTRA_CA_CERTS"],
         "jsonOnly": true,
         "timeoutMs": 5000
       }

@@ -68,6 +68,7 @@ OpenIM 的官方镜像有越权问题，OC-3 会换成自建的补丁镜像，�
 | MinIO 2024.1.13 | `bitnamilegacy/minio:2024.1.13` | `sha256:35d0a4404341601ae4dff4d8672699f7b49e2975fd0fae897c5f5af4638f816e` | AGPL-3.0 | 同上（OC-3 评估替换） |
 | etcd 3.5.21 | `bitnamilegacy/etcd:3.5.21` | `sha256:1b9977cf4cce7546873e0ee50e684c38a38a4e7a27d22086fbd2b8a1b44a69d0` | Apache-2.0 | 同上（OC-3 评估替换） |
 | MCP Python SDK 2.3.0 | `mcp==2.3.0`（PyPI） | — | MIT | OC-1 起加入 `services/api` 依赖 |
+| ghostunnel v1.11.4 | `ghostunnel/ghostunnel:v1.11.4` | `sha256:e5248233863aadd36383a11c92360f2981141881ef05e38360a6ada8630d36b1` | Apache-2.0 | 外网模式 OpenClaw 服务器的本机隧道（接入包的 `compose.yaml`；`2026-10-31-v2-oc2-agent-ingress-verification.md`） |
 
 ## 2. 后端依赖（`services/api/uv.lock`）
 

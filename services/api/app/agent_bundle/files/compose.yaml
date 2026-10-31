@@ -26,5 +26,7 @@ services:
       - ./state:/home/node/.openclaw
     # 与 OC-0 核验时一致；外网模式的本机隧道监听宿主机的 127.0.0.1
     network_mode: host
+    # @PUBLIC_OPENCLAW@
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
+# @PUBLIC_SERVICES@

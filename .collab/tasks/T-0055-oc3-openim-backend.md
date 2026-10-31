@@ -27,6 +27,7 @@ updated: 2026-10-31
 - [ ] 自建打过补丁的 OpenIM 镜像（OC-0 ADR 第 6 节），锁定 digest；`infra/openim/probes/rest-authz.py` 对补丁镜像退出码为 0，并进入 CI
 - [ ] 评估并替换 bitnamilegacy 的 kafka / minio / etcd，开启 etcd 认证与 Kafka SASL，调小 Kafka 日志段与保留期（从 OC-0 移来）
 - [ ] 图片：对象存储上传流程核验与实现（从 OC-0 移来）；OC-0 ADR F1（签发令牌会踢下线）、F2（导入好友前先查关系）、F7（日志里的消息内容）落实
+- [ ] 接入入口放行 `/im/ws`、`/im/api/*`、`/im/obj/*`（forward_auth 与网关），IM 连接经外网模式的本机隧道与双向证书跑通（从 OC-2 移来）
 
 ## 背景 / 约束 / 参考
 - 依据：`docs/v2/TRANSFORMATION_PLAN.md`；论证与上游源码核对见 `docs/v2/OPENCLAW_PLAN.md`

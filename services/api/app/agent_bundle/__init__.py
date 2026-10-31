@@ -31,6 +31,11 @@ from typing import Any
 
 OPENCLAW_VERSION = "2026.9.36"
 PLUGIN_VERSION = "0.3.3"
+# 外网模式的本机隧道（OC-2 第 4 部分核验：client 模式的 --listen / --target / --cert / --key）
+GHOSTUNNEL_IMAGE = (
+    "ghostunnel/ghostunnel:v1.11.4"
+    "@sha256:e5248233863aadd36383a11c92360f2981141881ef05e38360a6ada8630d36b1"
+)
 _FILES = resources.files("app.agent_bundle") / "files"
 
 
@@ -44,6 +49,9 @@ class BundleInput:
     whitelist: list[str]
     client_cert_pem: str | None = None
     client_key_pem: str | None = None
+    # 外网模式：本机隧道转发的目标（工作台外网入口的 主机:端口）与本机监听端口
+    tunnel_target: str | None = None
+    tunnel_port: int = 18443
 
 
 def _read(name: str) -> str:
@@ -59,6 +67,10 @@ def _openclaw_json(whitelist: list[str]) -> str:
     account = config["channels"]["openim"]["accounts"]["default"]
     account["inboundWhitelist"] = whitelist
     return json.dumps(config, ensure_ascii=False, indent=2) + "\n"
+
+
+def _tunnel_host(data: BundleInput) -> str | None:
+    return data.tunnel_target.rsplit(":", 1)[0] if data.tunnel_target else None
 
 
 def _env(data: BundleInput) -> str:
@@ -77,6 +89,16 @@ def _env(data: BundleInput) -> str:
         f"MYWS_INSTANCE_TOKEN={data.token}",
         f"MYWS_AGENT_API={base}/agent-api",
         f"MYWS_MCP_URL={base}/mcp",
+        *(
+            [
+                "# 外网模式：这个域名在 OpenClaw 容器里解析到 127.0.0.1"
+                "（compose.yaml 的 extra_hosts），",
+                "# 请求经本机隧道（tunnel 服务，双向证书）转发；明文只走本机回环",
+                f"MYWS_LOCAL_TUNNEL_HOST={_tunnel_host(data)}",
+            ]
+            if data.tunnel_target
+            else []
+        ),
         f"OPENIM_WS_ADDR={ws}/im/ws",
         f"OPENIM_API_ADDR={base}/im/api",
         "# OpenClaw Gateway 自己的令牌（只在本机使用）",
@@ -118,6 +140,41 @@ def _readme(data: BundleInput, generated_at: datetime) -> str:
     return "\n".join(steps)
 
 
+def _compose(data: BundleInput) -> str:
+    text = _read("compose.yaml")
+    host = _tunnel_host(data)
+    if not data.tunnel_target or not host:
+        return text.replace("    # @PUBLIC_OPENCLAW@\n", "").replace("# @PUBLIC_SERVICES@\n", "")
+    openclaw = (
+        "    # 工作台外网入口的域名在容器里指向本机隧道\n"
+        f'    extra_hosts: ["{host}:127.0.0.1"]\n'
+        "    depends_on: [tunnel]\n"
+    )
+    tunnel = f"""
+  # 本机隧道：在 127.0.0.1:{data.tunnel_port} 接收明文，
+  # 用 tls/ 里的客户端证书（双向证书）转发到工作台外网入口。
+  # 校验服务器证书用系统信任库；外网入口用私有 CA 时，加上 --cacert 指向那张 CA 证书
+  tunnel:
+    image: {GHOSTUNNEL_IMAGE}
+    restart: unless-stopped
+    user: "1000:1000"
+    network_mode: host
+    command:
+      - client
+      - --listen=127.0.0.1:{data.tunnel_port}
+      - --target={data.tunnel_target}
+      - --cert=/tls/client.crt
+      - --key=/tls/client.key
+    volumes:
+      - ./tls:/tls:ro
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+"""
+    return text.replace("    # @PUBLIC_OPENCLAW@\n", openclaw).replace(
+        "# @PUBLIC_SERVICES@\n", tunnel
+    )
+
+
 def _add(zf: zipfile.ZipFile, name: str, content: str, mode: int, when: datetime) -> None:
     info = zipfile.ZipInfo(name, date_time=when.timetuple()[:6])
     info.external_attr = (0o100000 | mode) << 16
@@ -133,7 +190,7 @@ def build(data: BundleInput, *, now: datetime | None = None) -> bytes:
         _add(zf, "state/openclaw.json", _openclaw_json(data.whitelist), 0o600, now)
         for script in ("myworkspace-secret-resolver", "myworkspace-openclaw-start"):
             _add(zf, f"bin/{script}", _read(f"bin/{script}"), 0o755, now)
-        _add(zf, "compose.yaml", _read("compose.yaml"), 0o644, now)
+        _add(zf, "compose.yaml", _compose(data), 0o644, now)
         _add(zf, "CHECKLIST.md", _read("CHECKLIST.md"), 0o644, now)
         _add(zf, "README.md", _readme(data, now), 0o644, now)
         if data.client_cert_pem and data.client_key_pem:

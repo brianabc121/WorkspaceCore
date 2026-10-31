@@ -1,0 +1,55 @@
+# OpenClaw 实例的接入入口（V2 OC-2；方案第 4.2 节，契约 docs/decisions/2026-10-31-v2-oc1-contract.md 第 1、2.2、8 节）。
+# 与管理员入口（Caddyfile）分开的 Caddy：compose 的 agent-gateway 服务（--profile agents）。
+#
+# - 两个站点：内网入口（私网地址 + TLS，限定来源网段）与外网入口（公网域名 + 双向证书，信任工作台内部 CA）；
+# - 默认拒绝：只放行实例接口的路径，其余一律 404；
+# - 先删掉客户端带来的 X-MyWS-* 请求头，再由这里写入入口与客户端证书指纹。API 只在请求直接来自
+#   本服务（AGENT_INGRESS_TRUSTED_PROXIES）时采用这两个请求头；
+# - 证书来自文件（/certs）：内网可用内部 CA 或 Tailscale 证书，外网用公网证书；
+# - IM（/im/ws、/im/api、/im/obj）在 OC-3 接入 OpenIM 后再放行。
+{
+	admin off
+	auto_https off
+}
+
+(agent_routes) {
+	request_body {
+		max_size 1MB
+	}
+	header -Server
+
+	request_header -X-MyWS-Ingress
+	request_header -X-MyWS-Client-Cert-SHA256
+
+	@agent path /mcp /agent-api/v1/*
+	handle @agent {
+		reverse_proxy api:8000 {
+			header_up X-MyWS-Ingress {args[0]}
+			header_up X-MyWS-Client-Cert-SHA256 {http.request.tls.client.fingerprint}
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}
+
+https://{$AGENT_INTRANET_HOST}:8443 {
+	tls /certs/intranet.crt /certs/intranet.key
+
+	@outside not remote_ip {$AGENT_INTRANET_ALLOWED_CIDRS}
+	handle @outside {
+		respond 404
+	}
+	import agent_routes intranet
+}
+
+https://{$AGENT_PUBLIC_HOST}:9443 {
+	tls /certs/public.crt /certs/public.key {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /agent-ca/agent-ca.pem
+		}
+	}
+	import agent_routes public
+}

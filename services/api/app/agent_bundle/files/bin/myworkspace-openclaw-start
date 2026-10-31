@@ -28,7 +28,7 @@ function post(path, body, timeout) {
     if (url.protocol === "https:") {
       if (process.env.MYWS_CA_FILE) opts.ca = readFileSync(process.env.MYWS_CA_FILE);
       if (process.env.MYWS_CLIENT_CERT) { opts.cert = readFileSync(process.env.MYWS_CLIENT_CERT); opts.key = readFileSync(process.env.MYWS_CLIENT_KEY); }
-    } else if (!["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
+    } else if (!["127.0.0.1", "localhost", "::1", process.env.MYWS_LOCAL_TUNNEL_HOST].filter(Boolean).includes(url.hostname)) {
       return reject(new Error("refusing plain http to a non-loopback host"));
     }
     const req = (url.protocol === "https:" ? https : http).request(url, opts, (res) => {

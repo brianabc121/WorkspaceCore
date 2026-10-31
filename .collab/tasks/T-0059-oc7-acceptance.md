@@ -20,6 +20,7 @@ Sprint 6 AI 部分的整体验收（方案第 8 节）。
 - [ ] `ci-infra` 新增多实例端到端任务：工作台加 OpenIM，实例 A 走内网、实例 B 走外网隧道，都用假模型；方案第 8 节 14 个场景全部自动化
 - [ ] 文档：`docs/deployment.md`（服务器 A 的变更、OpenClaw 服务器检查清单、两种网络模式）、威胁模型、数据字典、架构
 - [ ] A15 恢复演练覆盖 OpenIM；`docs/acceptance/sprint-6.md` 补充 AI 部分；勾选 `docs/TASKS.md` 的 S6-01 ~ S6-03
+- [ ] ci-infra 运行 `tests/e2e/agent_ingress_acceptance.py`（接入入口、双向证书、本机隧道；测试证书在 CI 里生成）（OC-2 留下）
 
 ## 背景 / 约束 / 参考
 - 依据：`docs/v2/TRANSFORMATION_PLAN.md`；论证与上游源码核对见 `docs/v2/OPENCLAW_PLAN.md`
