@@ -48,8 +48,20 @@ function docker(...args) {
   // docker compose 的进度输出在 stderr：收起来，只在失败时随异常显示
   return execFileSync('docker', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 }
-// 断开期间浏览器会把 SSE 与接口的连接失败记为控制台错误，这是预期的
+// 断开期间浏览器会把 SSE 与接口的连接失败记为控制台错误，这是预期的。
+// Chrome 的“Failed to load resource: net::ERR_…”文本里不带地址，地址在 location().url 里，所以两者一起匹配；
+// Caddy 停止时，连接还可能报 ERR_SOCKET_NOT_CONNECTED（2026-10-31 main 上出现过，T-0051）
 const outage = { active: false }
+const OUTAGE_ERRORS = /ERR_CONNECTION|ERR_EMPTY_RESPONSE|ERR_INCOMPLETE_CHUNKED_ENCODING|ERR_SOCKET_NOT_CONNECTED|\b50[23]\b|events\/stream/
+function consoleProblem(message) {
+  if (message.type() !== 'error') return null
+  // 登录前查询当前用户的 401 是预期响应，浏览器会把它记为资源加载失败
+  if (/\b401\b/.test(message.text())) return null
+  const where = message.location()?.url || ''
+  const text = where ? `${message.text()}（${where}）` : message.text()
+  if (outage.active && OUTAGE_ERRORS.test(text)) return null
+  return text
+}
 const progress = { last: '登录' }
 
 // 模拟 n8n：在 api 镜像里运行，加入 integrations 网络（别名 fake-n8n），控制接口发布在本机
@@ -125,10 +137,8 @@ async function login(browser, email, problems, traffic) {
   const page = await context.newPage()
   page.on('pageerror', (error) => problems.push(error.message))
   page.on('console', (message) => {
-    // 登录前查询当前用户的 401 是预期响应，浏览器会把它记为资源加载失败
-    if (message.type() !== 'error' || /\b401\b/.test(message.text())) return
-    if (outage.active && /ERR_CONNECTION|ERR_EMPTY_RESPONSE|ERR_INCOMPLETE_CHUNKED_ENCODING|\b50[23]\b|events\/stream/.test(message.text())) return
-    problems.push(`${message.text()}（在“${progress.last}”之后）`)
+    const text = consoleProblem(message)
+    if (text) problems.push(`${text}（在“${progress.last}”之后）`)
   })
   page.on('request', (request) => traffic.requests.push(request.url()))
   page.on('response', async (response) => {
