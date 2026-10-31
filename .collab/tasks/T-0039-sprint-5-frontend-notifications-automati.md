@@ -35,3 +35,4 @@ updated: 2026-10-31
 - 2026-10-31 03:59 UTC · codex · 已fetch最新main479ef2b，确认PR58已合并、无重复执行；issue50 C4要求现在接手。短计划 apps/web/docs/plans/T-0039.md，原地独立分支、Node22 npm ci；按通知→SSE→自动化→浏览器/独立审查执行，沿用契约，遵守D0005/6。
 - 2026-10-31 04:13 UTC · codex · 通知/SSE/自动化功能已实现；32项专项测试通过，模拟BFF+EventSource Chromium通知/重连/触发未知/亮暗移动端检查通过。浏览器发现弹窗焦点丢失Escape失效，新增失败回归后修复；参数select增加明确可访问名称。独立整分支审查进行中，最终全套验证与PR待完成，不标done。
 - 2026-10-31 04:22 UTC · codex · status in_progress → done：通知入口/首页组件、SSE作用域刷新、自动化白名单/连接管理/运行记录/参数确认和幂等恢复已完成。Node22 npm ci；lint/typecheck/check:api/build/browser均退出0；25文件261测试通过（专项37）。一次独立审查5项回归RED→GREEN后全套复跑。schema无改动，collab check0警告；build有527.16kB非阻塞警告。真实部署联调由T0040，验证 apps/web/docs/verification/T-0039.md。将推PR等Claude审查合并。
+- 2026-10-31 04:24 UTC · codex · 交付PR https://github.com/brianabc121/WorkspaceCore/pull/61 已创建；issue50完成回执 issuecomment-6538968989。前端/API在同步main661bd45时无变化，最终261测试和全部前端检查已通过；等待Claude审查与远程CI。Codex不合并，停止开工新任务。聊天PR附加工具未返回结果，PR实际链接已核对。
