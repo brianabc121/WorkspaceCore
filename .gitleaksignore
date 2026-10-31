@@ -12,3 +12,10 @@ b1b0602972361d49ecc19f3a34231c0b296c03a3:services/api/tests/test_contract.py:gen
 62e1e9235522f2d2b8025f870f9976ada0772de0:services/api/tests/test_vikunja_connector.py:generic-api-key:41
 # Vikunja 官方 OpenAPI 副本里的示例 token（jwt.io 的公开示例 “John Doe”）
 f722ead204e056d3a3703a93c0fb0f2ee4593a21:infra/vikunja/openapi/vikunja-2.7.1-api-v2.json:jwt:1651
+# OpenIM 依赖升级补丁里 go.sum 的 h1: 模块校验和（同一行有 oauth2 / api / keyfunc 等词），不是密钥
+f9dc628f737a3acdc623f65c15cc77609e3074fb:infra/openim/patches/0004-deps-upgrade-modules-with-fixed-high-severity-adviso.patch:generic-api-key:217
+f9dc628f737a3acdc623f65c15cc77609e3074fb:infra/openim/patches/0004-deps-upgrade-modules-with-fixed-high-severity-adviso.patch:generic-api-key:256
+f9dc628f737a3acdc623f65c15cc77609e3074fb:infra/openim/patches/0004-deps-upgrade-modules-with-fixed-high-severity-adviso.patch:generic-api-key:503
+f9dc628f737a3acdc623f65c15cc77609e3074fb:infra/openim/patches/0004-deps-upgrade-modules-with-fixed-high-severity-adviso.patch:generic-api-key:509
+f9dc628f737a3acdc623f65c15cc77609e3074fb:infra/openim/patches/0004-deps-upgrade-modules-with-fixed-high-severity-adviso.patch:generic-api-key:631
+f9dc628f737a3acdc623f65c15cc77609e3074fb:infra/openim/patches/0004-deps-upgrade-modules-with-fixed-high-severity-adviso.patch:generic-api-key:633
