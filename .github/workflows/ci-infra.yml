@@ -64,8 +64,6 @@ jobs:
         # 模拟 n8n 在 api 镜像里运行并加入 integrations 网络；要等两轮自动化对账（约 3 分钟），
         # 中途会临时停掉 prometheus
         run: python3 tests/e2e/sprint5_acceptance.py
-      - name: 停止 Prometheus（之后的 make down 只管 core 服务）
-        run: docker compose --profile monitoring rm -sf prometheus
       - uses: actions/setup-node@v5
         with:
           node-version: '22.23.4'
@@ -85,6 +83,11 @@ jobs:
       - name: Sprint 4 浏览器验收（收藏与关联、日历、首页组件、viewer 只读、不请求 AFFiNE）
         # 不要求空库：每次用新的工作台用户；被关联的 Vikunja 任务直接写进投影
         run: node tests/e2e/sprint4_browser.cjs
+      - name: Sprint 5 浏览器验收（运维页与首页运维组件、停掉 Prometheus 后显示过期、viewer 可读、不暴露监控地址）
+        # 用 Sprint 5 接口级验收时启动的 prometheus；中途会临时停掉再启动它
+        run: node tests/e2e/sprint5_browser.cjs
+      - name: 停止 Prometheus（之后的 make down 只管 core 服务）
+        run: docker compose --profile monitoring rm -sf prometheus
       - name: 停止 Vikunja（之后的重启检查会删除 core 的网络）
         run: make vikunja-down
       - name: 停止后重启，确认数据卷保留
