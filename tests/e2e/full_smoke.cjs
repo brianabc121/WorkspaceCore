@@ -2,6 +2,7 @@
 // 不替代各 Sprint 的验收（那些检查业务细节）；这里只确认每个模块“能打开、能读、不报错”：
 // 1. 登录（真实页面）
 // 2. 接口：按 services/api/openapi.json 枚举全部 GET 接口逐个请求，都应 200——新增的接口自动纳入；
+//    契约已声明、实现任务还没完成的接口返回 501 NOT_IMPLEMENTED，单独列出，不算失败；
 //    运维接口报告的核心服务（API、Worker、PostgreSQL、Redis）都是“正常”
 // 3. 页面：按 apps/web/src/app/navigation.ts 逐个打开导航里的页面（再加审计日志），
 //    标题正确，没有页面错误、控制台错误和 5xx 响应——新增的页面自动纳入
@@ -92,14 +93,22 @@ async function api(page, workspace, method, pathname, body) {
   const page = await context.newPage()
   const problems = []
   const progress = { last: '登录' }
+  // 探测读接口时，契约已声明、尚未实现的接口返回 501：错误码由探测本身检查（必须是 NOT_IMPLEMENTED），
+  // 下面的监听在页面检查开始之前不重复记这些 URL；页面检查阶段的任何 501 照常算失败
+  const probed = { urls: new Set(), active: true }
+  const probedNotImplemented = (status, url) => status === 501 && probed.active && probed.urls.has(url)
   const step = (text) => { progress.last = text.split('：')[0]; console.log(`通过  ${text}`) }
   page.on('pageerror', (error) => problems.push(`页面错误：${error.message}（${progress.last}）`))
   page.on('console', (message) => {
     // 登录前与登出后查询当前用户的 401 是预期响应，浏览器会把它记为资源加载失败
-    if (message.type() === 'error' && !/\b401\b/.test(message.text())) problems.push(`控制台错误：${message.text()}（${progress.last}）`)
+    if (message.type() !== 'error' || /\b401\b/.test(message.text())) return
+    if (/\b501\b/.test(message.text()) && probedNotImplemented(501, message.location().url)) return
+    problems.push(`控制台错误：${message.text()}（${progress.last}）`)
   })
   page.on('response', (response) => {
-    if (response.url().startsWith(base) && response.status() >= 500) problems.push(`${response.status()} ${response.url()}（${progress.last}）`)
+    if (!response.url().startsWith(base) || response.status() < 500) return
+    if (probedNotImplemented(response.status(), response.url())) return
+    problems.push(`${response.status()} ${response.url()}（${progress.last}）`)
   })
   const cleanup = []
   try {
@@ -120,14 +129,19 @@ async function api(page, workspace, method, pathname, body) {
 
     // ---------------------------------------------------------------- 2. 全部读接口
     const { operations, skipped } = readOperations(workspace, dashboard)
+    for (const url of operations) probed.urls.add(new URL(url, base).href)
     const failed = []
+    const declared = []  // 契约已声明、实现任务还没完成的接口（501 NOT_IMPLEMENTED）：单独列出，不算失败
     for (const url of operations) {
       const response = await api(page, workspace, 'GET', url)
-      if (response.status !== 200) failed.push(`${url} → ${response.status} ${response.body?.error?.code || ''}`)
+      if (response.status === 501 && response.body?.error?.code === 'NOT_IMPLEMENTED') declared.push(url)
+      else if (response.status !== 200) failed.push(`${url} → ${response.status} ${response.body?.error?.code || ''}`)
     }
     check(failed.length === 0, `读接口没有全部返回 200：\n  ${failed.join('\n  ')}`)
-    check(operations.length >= 25, `只找到 ${operations.length} 个读接口，openapi.json 可能不完整`)
-    step(`全部读接口返回 200：${operations.length} 个（需要具体资源 ID 的 ${skipped.length} 个由各 Sprint 验收覆盖）`)
+    const implemented = operations.length - declared.length
+    check(implemented >= 25, `只找到 ${implemented} 个已实现的读接口，openapi.json 可能不完整`)
+    step(`全部读接口返回 200：${implemented} 个（需要具体资源 ID 的 ${skipped.length} 个由各 Sprint 验收覆盖）`)
+    if (declared.length) console.log(`说明  契约已声明、尚未实现（501）：${declared.length} 个\n  ${declared.join('\n  ')}`)
 
     // ---------------------------------------------------------------- 核心服务都正常（Worker 心跳每分钟一次，刚启动时最多等 90 秒）
     let core = []
@@ -142,6 +156,7 @@ async function api(page, workspace, method, pathname, body) {
     step(`核心服务正常：${core.map((s) => s.name).join('、')}`)
 
     // ---------------------------------------------------------------- 3. 全部页面
+    probed.active = false
     for (const { route, title } of pages()) {
       progress.last = `打开 ${route}`
       await page.goto(`${base}${route}`)
