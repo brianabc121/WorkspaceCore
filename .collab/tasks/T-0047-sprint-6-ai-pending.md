@@ -1,8 +1,8 @@
 ---
 id: T-0047
 title: Sprint 6 AI（S6-01 ~ S6-03）：等人类恢复 AI 厂商选型后再拆分
-owner: human
-status: blocked
+owner: claude
+status: in_progress
 priority: P2
 branch: claude/cool-wright-99qbbg
 paths: docs/decisions, docs/v2
@@ -34,3 +34,5 @@ S6-01 ~ S6-03（AI provider 抽象、对话与消息、只读工具与检索、�
 - 2026-10-31 15:08 UTC · claude · 开始任务
 - 2026-10-31 15:17 UTC · claude · 按人类决定写了优化方案 docs/v2/OPENCLAW_PLAN.md：OpenClaw 负责模型、对话、手机与渠道，工作台提供 MCP 工具服务器、权限、审批与审计；按人类补充的要求，两台服务器之间走私网（推荐 Tailscale）。任务拆成 OC-0 ~ OC-5，替换 S6-01 ~ S6-03。方案和规范文件的修订方式等人类批准，见方案第 10 节
 - 2026-10-31 15:17 UTC · claude · 交接给 human（escalate）→ .collab/handoffs/2026-10-31-1517_T-0047_claude-to-human.md：OpenClaw 接替 AI 方案的优化方案已写好（docs/v2/OPENCLAW_PLAN.md），请批准方案并决定第 10 节的 6 项
+- 2026-10-31 15:45 UTC · human · owner human → claude：人类在对话中指派：调整 OpenClaw 方案——1. 工作台管理多个 OpenClaw，分布在不同服务器，有的无法走内网，需同时支持内网与外网两种交互方式；2. 密钥放在工作台，OpenClaw 远程请求密钥；3. 与 OpenClaw 的交互放在工作台：用 OpenIM 搭建 Web 端 IM（管理员端），每个 OpenClaw 作为一个用户，经 openimsdk/openclaw-channel 接入；支持拉群（多个 OpenClaw 在群里互相沟通）、消息置顶、免打扰、分组；不提供删除好友；OpenClaw 上线后管理员端自动加为好友
+- 2026-10-31 15:45 UTC · claude · 解除阻塞，继续
