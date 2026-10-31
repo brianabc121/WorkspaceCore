@@ -5,7 +5,7 @@ export const navigation = [
   { path: '/knowledge', title: '知识库', section: '工作空间', description: 'AFFiNE 文档收藏与项目、任务关联。' },
   { path: '/calendar', title: '日历', section: '工作空间', description: '工作空间共享日程与周视图。' },
   { path: '/developer', title: '开发者', section: '连接与工具', description: 'GitHub 仓库、Issue、PR 与 Actions 只读视图。' },
-  { path: '/operations', title: '运维', section: '连接与工具', description: '服务状态与监控将在 Sprint 5 开放。' },
+  { path: '/operations', title: '运维', section: '连接与工具', description: '服务状态、预设指标与 Grafana 外链。' },
   { path: '/automations', title: '自动化', section: '连接与工具', description: '受控自动化入口将在 Sprint 5 开放。' },
   { path: '/ai', title: 'AI 助手', section: '连接与工具', description: 'AI 工具与审批将在 Sprint 6 开放。' },
   { path: '/settings', title: '设置', section: '管理', description: '管理个人资料与工作空间。' },

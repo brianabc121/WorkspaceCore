@@ -17,7 +17,8 @@
     "test:browser": "node tests/browser-dashboard.cjs",
     "test:browser:sprint3": "node tests/browser-tasks.cjs",
     "test:browser:knowledge-calendar": "node tests/browser-knowledge-calendar.cjs",
-    "test:browser:github-search": "node tests/browser-github-search.cjs"
+    "test:browser:github-search": "node tests/browser-github-search.cjs",
+    "test:browser:operations": "node tests/browser-operations.cjs"
   },
   "dependencies": {
     "@tanstack/vue-query": "5.105.0",
