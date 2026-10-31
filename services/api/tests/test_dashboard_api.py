@@ -89,7 +89,15 @@ async def test_setup_creates_the_default_dashboard_with_starter_widgets(home: Ho
     assert data["modules"]["github"]["reason"] == "not_configured"
     # Sprint 5：核心服务都正常（Worker 还没有心跳不算 down）
     assert data["modules"]["operations"]["status"] == "ok"
-    assert set(data["modules"]) == {"tasks", "calendar", "knowledge", "github", "operations"}
+    assert data["modules"]["automations"]["reason"] == "not_configured"
+    assert set(data["modules"]) == {
+        "tasks",
+        "calendar",
+        "knowledge",
+        "github",
+        "operations",
+        "automations",
+    }
     assert data["summary"] == {
         "pending_tasks": None,
         "active_projects": None,

@@ -15,6 +15,10 @@ WORKSPACE_PROJECT := $(or $(COMPOSE_PROJECT_NAME),my-workspace)
 VIKUNJA_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-vikunja \
 	-f infra/vikunja/compose.yaml --env-file .env
 VIKUNJA_URL := $(or $(shell sed -n 's/^VIKUNJA_PUBLIC_URL=//p' .env 2>/dev/null),http://localhost:3456/)
+# 可选的 n8n（infra/n8n/compose.yaml），同样加入 core 的 integrations 网络
+N8N_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-n8n \
+	-f infra/n8n/compose.yaml --env-file .env
+N8N_URL := $(or $(shell sed -n 's/^N8N_PUBLIC_URL=//p' .env 2>/dev/null),http://localhost:5678/)
 # 读取 .env 里的 HTTP_PORT（没有时用 8080），供 make smoke 使用
 HTTP_PORT := $(or $(shell sed -n 's/^HTTP_PORT=//p' .env 2>/dev/null),8080)
 
@@ -24,7 +28,7 @@ endef
 
 .PHONY: help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke openapi setup-token \
 	lint lint-api lint-web format test test-api test-web build-web backup restore-verify \
-	vikunja-up vikunja-down vikunja-user vikunja-logs
+	vikunja-up vikunja-down vikunja-user vikunja-logs n8n-up n8n-down n8n-logs
 
 help: ## 列出可用命令
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-15s %s\n", $$1, $$2}'
@@ -86,6 +90,16 @@ vikunja-down: ## 停止 Vikunja；保留数据卷
 
 vikunja-logs: ## 跟踪 Vikunja 日志（Ctrl+C 退出）
 	$(VIKUNJA_COMPOSE) logs -f --tail=100
+
+n8n-up: env ## 启动独立部署的 n8n（自动化，可选）；需要先 make up
+	$(N8N_COMPOSE) up -d --wait --wait-timeout 300
+	@echo "n8n 编辑器：$(N8N_URL)  首次打开时创建 owner 账号；工作台的接入步骤见 docs/deployment.md 第 12.4 节"
+
+n8n-down: ## 停止 n8n；保留数据卷
+	$(N8N_COMPOSE) down
+
+n8n-logs: ## 跟踪 n8n 日志（Ctrl+C 退出）
+	$(N8N_COMPOSE) logs -f --tail=100
 
 smoke: ## 经 Caddy 检查健康、就绪、前端页面与安全响应头
 	scripts/smoke.sh http://127.0.0.1:$(HTTP_PORT)

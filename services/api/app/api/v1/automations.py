@@ -13,11 +13,13 @@ from fastapi import APIRouter, Depends, Header, Query, Response, Security, statu
 from app.api.deps import (
     authenticated,
     csrf_protected,
+    get_automation_service,
     workspace_admin,
     workspace_member,
     workspace_viewer,
 )
-from app.core.errors import not_implemented
+from app.domain.auth import AuthContext
+from app.domain.automations import AutomationService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.automations import (
     AutomationConnectionOut,
@@ -38,6 +40,8 @@ router = APIRouter(tags=["automations"], dependencies=[Security(authenticated)])
 Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
 Member = Annotated[WorkspaceAccess, Depends(workspace_member)]
 Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
+Context = Annotated[AuthContext, Security(authenticated)]
+Service = Annotated[AutomationService, Depends(get_automation_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 IdempotencyKey = Annotated[
@@ -62,8 +66,8 @@ _admin_errors = error_responses(401, 403, 404, 409, 422)
     description="没有配置时 configured 为 false；API Key 与共享密钥从不返回。",
     responses=error_responses(401, 403, 404, 422),
 )
-async def get_automation_connection(access: Admin) -> AutomationConnectionOut:
-    raise not_implemented("T-0037")
+async def get_automation_connection(access: Admin, service: Service) -> AutomationConnectionOut:
+    return await service.get_connection(access)
 
 
 @router.put(
@@ -73,9 +77,9 @@ async def get_automation_connection(access: Admin) -> AutomationConnectionOut:
     responses=_admin_errors,
 )
 async def put_automation_connection(
-    access: Admin, body: AutomationConnectionUpsert
+    access: Admin, context: Context, service: Service, body: AutomationConnectionUpsert
 ) -> AutomationConnectionOut:
-    raise not_implemented("T-0037")
+    return await service.put_connection(context, access, body)
 
 
 @router.post(
@@ -86,8 +90,10 @@ async def put_automation_connection(
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422),
 )
-async def test_automation_connection(access: Admin) -> IntegrationTestResult:
-    raise not_implemented("T-0037")
+async def test_automation_connection(
+    access: Admin, context: Context, service: Service
+) -> IntegrationTestResult:
+    return await service.test_connection(context, access)
 
 
 # ---------------------------------------------------------------- 白名单工作流
@@ -99,9 +105,9 @@ async def test_automation_connection(access: Admin) -> IntegrationTestResult:
     responses=_read_errors,
 )
 async def list_automations(
-    access: Viewer, cursor: Cursor = None, limit: Limit = 50
+    access: Viewer, service: Service, cursor: Cursor = None, limit: Limit = 50
 ) -> AutomationPage:
-    raise not_implemented("T-0037")
+    return await service.list_automations(access, cursor=cursor, limit=limit)
 
 
 @router.post(
@@ -112,8 +118,10 @@ async def list_automations(
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422, 502, 503),
 )
-async def create_automation(access: Admin, body: AutomationCreate) -> AutomationOut:
-    raise not_implemented("T-0037")
+async def create_automation(
+    access: Admin, context: Context, service: Service, body: AutomationCreate
+) -> AutomationOut:
+    return await service.create(context, access, body)
 
 
 @router.patch(
@@ -123,9 +131,9 @@ async def create_automation(access: Admin, body: AutomationCreate) -> Automation
     responses=_admin_errors,
 )
 async def update_automation(
-    automation_id: UUID, access: Admin, body: AutomationUpdate
+    automation_id: UUID, access: Admin, context: Context, service: Service, body: AutomationUpdate
 ) -> AutomationOut:
-    raise not_implemented("T-0037")
+    return await service.update(context, access, automation_id, body)
 
 
 @router.delete(
@@ -139,9 +147,11 @@ async def update_automation(
 async def delete_automation(
     automation_id: UUID,
     access: Admin,
+    context: Context,
+    service: Service,
     version: Annotated[int, Query(ge=1, description="读取时的版本")],
 ) -> None:
-    raise not_implemented("T-0037")
+    await service.delete(context, access, automation_id, version)
 
 
 # ---------------------------------------------------------------- 触发与执行记录
@@ -159,10 +169,12 @@ async def delete_automation(
 async def trigger_automation(
     automation_id: UUID,
     access: Member,
+    context: Context,
+    service: Service,
     key: IdempotencyKey,
     body: TriggerRequest,
 ) -> AutomationRunOut:
-    raise not_implemented("T-0037")
+    return await service.trigger(context, access, automation_id, key, body)
 
 
 @router.get(
@@ -171,6 +183,6 @@ async def trigger_automation(
     responses=_read_errors,
 )
 async def list_automation_runs(
-    automation_id: UUID, access: Viewer, cursor: Cursor = None, limit: Limit = 30
+    automation_id: UUID, access: Viewer, service: Service, cursor: Cursor = None, limit: Limit = 30
 ) -> AutomationRunPage:
-    raise not_implemented("T-0037")
+    return await service.runs(access, automation_id, cursor=cursor, limit=limit)

@@ -23,6 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models import (
+    Automation,
+    AutomationConnection,
+    AutomationRun,
     Bookmark,
     CalendarEvent,
     ExternalResource,
@@ -65,6 +68,9 @@ _TOPICS: dict[type, Callable[[Any], Iterable[EventTopic]]] = {
     KnowledgeSource: lambda _: ("knowledge", "overview"),
     Integration: lambda _: ("integrations", "operations", "overview"),
     Notification: lambda _: ("notifications", "overview"),
+    Automation: lambda _: ("automations",),
+    AutomationRun: lambda _: ("automations",),
+    AutomationConnection: lambda _: ("automations", "operations", "overview"),
 }
 
 

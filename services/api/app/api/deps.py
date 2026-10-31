@@ -17,6 +17,7 @@ from app.core.config import Settings, origin_of
 from app.core.errors import ApiError
 from app.domain import policy
 from app.domain.auth import AuthContext, AuthService
+from app.domain.automations import AutomationService
 from app.domain.calendar import CalendarService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.dashboards import DashboardService
@@ -137,6 +138,14 @@ def deployment_health(app: FastAPI) -> DeploymentHealth:
         app.state.readiness_checks,
         app.state.service_cache,
     )
+
+
+def get_automation_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
+) -> AutomationService:
+    return AutomationService(db, settings, connectors)
 
 
 def get_notification_service(db: Annotated[AsyncSession, Depends(get_db)]) -> NotificationService:

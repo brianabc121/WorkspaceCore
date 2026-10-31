@@ -78,8 +78,8 @@ services:
       SETUP_TOKEN: ${SETUP_TOKEN:-}
       # 第三方连接凭证的加密密钥；格式错误时 API 拒绝启动
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
-      # Connector 默认拒绝私有地址（SSRF 防护）；这里显式允许 integrations 网络里的 Vikunja 容器
-      INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-vikunja}
+      # Connector 默认拒绝私有地址（SSRF 防护）；这里显式允许 integrations 网络里的 Vikunja、n8n 容器
+      INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-vikunja,n8n}
       # GitHub REST API 的地址；只有 CI 验收会改成模拟服务（Sprint 4 契约第 6.1 节）。
       # .env 里用 WORKSPACE_GITHUB_API_URL：GitHub Actions 会在 shell 里设置 GITHUB_API_URL，
       # 而 Compose 插值时 shell 变量优先于 .env
@@ -116,7 +116,7 @@ services:
       <<: *api-env
       # Worker 处理 Webhook 事件、周期对账、注册 Webhook：同样要解密凭证、遵守出站允许列表
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
-      INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-vikunja}
+      INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-vikunja,n8n}
       # Vikunja 投递 Webhook 的目标：integrations 网络里的 caddy（不经过对外端口）
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-http://caddy:8080}
       # 周期对账的间隔（分钟，1–30）

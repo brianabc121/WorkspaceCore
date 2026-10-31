@@ -1,6 +1,6 @@
 # API 契约
 
-> 状态：Sprint 1 ~ 4 端点已全部实现；Sprint 5 端点已在契约中声明，未实现的返回 501（T-0035 ~ T-0037）。完整规范见 `docs/DEVELOPMENT_SPEC.md` 第 6 节。
+> 状态：Sprint 1 ~ 5 端点已全部实现。完整规范见 `docs/DEVELOPMENT_SPEC.md` 第 6 节。
 > **机器可读的接口以 `services/api/openapi.json` 为准**（`make openapi` 由代码生成，CI 检查一致性），前端据此生成类型。
 > Sprint 1 的 Cookie、CSRF、工作空间上下文、错误码等约定见 `docs/decisions/2026-10-30-sprint-1-auth-contract.md`。
 > Sprint 2 的仪表盘、Widget Registry、布局、乐观并发与首页聚合约定见 `docs/decisions/2026-10-30-sprint-2-dashboard-contract.md`。
@@ -141,12 +141,12 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET | `/api/v1/operations/metrics?range=&views=` | 预设指标视图，聚合好的数据点；不接受 PromQL；带 `sync` 与 `grafana_url` | 已实现（T-0035） |
 | GET / PATCH | `/api/v1/notifications` | 我的通知（游标分页、`unread_count`）/ 标为已读（`ids` 或 `all: true`） | 已实现（T-0036） |
 | GET | `/api/v1/events/stream?workspace_id=` | SSE：只发 `event: invalidate` 失效提示；`Last-Event-ID` 续传，无法续传时 `reset: true`；连接太多时 `429` | 已实现（T-0036） |
-| GET / PUT | `/api/v1/automations/connection` | n8n 连接（admin；API Key 与共享密钥只写不读） | 契约（T-0037） |
-| POST | `/api/v1/automations/connection/test` | 测试 n8n 连接（不触发工作流） | 契约（T-0037） |
-| GET / POST | `/api/v1/automations` | 白名单工作流与最近一次执行 / 登记（admin） | 契约（T-0037） |
-| PATCH / DELETE | `/api/v1/automations/{automation_id}` | 修改 / 移出白名单（admin，乐观并发；执行记录保留） | 契约（T-0037） |
-| POST | `/api/v1/automations/{automation_id}/trigger` | 触发（member，策略校验，必须带 `Idempotency-Key`；结果未知时为 `unknown`，不自动重发） | 契约（T-0037） |
-| GET | `/api/v1/automations/{automation_id}/runs` | 执行记录（只有状态与错误摘要） | 契约（T-0037） |
+| GET / PUT | `/api/v1/automations/connection` | n8n 连接（admin；API Key 与共享密钥只写不读） | 已实现（T-0037） |
+| POST | `/api/v1/automations/connection/test` | 测试 n8n 连接（不触发工作流） | 已实现（T-0037） |
+| GET / POST | `/api/v1/automations` | 白名单工作流与最近一次执行 / 登记（admin） | 已实现（T-0037） |
+| PATCH / DELETE | `/api/v1/automations/{automation_id}` | 修改 / 移出白名单（admin，乐观并发；执行记录保留） | 已实现（T-0037） |
+| POST | `/api/v1/automations/{automation_id}/trigger` | 触发（member，策略校验，必须带 `Idempotency-Key`；结果未知时为 `unknown`，不自动重发） | 已实现（T-0037） |
+| GET | `/api/v1/automations/{automation_id}/runs` | 执行记录（只有状态与错误摘要） | 已实现（T-0037） |
 
 - 已有接口只增不改：
   - 首页 `modules` 增加 `operations`、`automations`；`summary.unread_notifications` 从 T-0036 起返回实际值；

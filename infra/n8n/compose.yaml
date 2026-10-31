@@ -1,0 +1,73 @@
+# n8n（自动化，可选）的独立 Compose（docs/DEVELOPMENT_SPEC.md 第 7.5、11 节：n8n 单独安装，经受控网络与工作台连通）。
+# 版本核验与安全边界见 docs/decisions/2026-10-31-prometheus-grafana-n8n-verification.md 第 5 节，
+# 触发与执行记录的实测见 docs/decisions/2026-10-31-n8n-trigger-and-execution-verification.md；
+# 用法见 docs/deployment.md 第 12.4 节。
+#
+#   make n8n-up      启动（需要先 make up：加入 core 的 integrations 网络）
+#   make n8n-down    停止（保留数据卷）
+#
+# 网络：只加入自己的默认网络（编辑器端口、出网，工作流可能要访问外部服务）和 core 的 integrations 网络
+# （api / worker 经此读取执行记录、触发 Webhook），不加入 core 的 backend 网络，碰不到工作台的 PostgreSQL / Redis。
+
+name: my-workspace-n8n
+
+services:
+  # 数据卷第一次创建时属于 root，而 n8n 以 node（uid 1000）运行；这里只负责改一次属主
+  volume-init:
+    image: postgres:16.15-alpine3.24
+    entrypoint: ["chown", "-R", "1000:1000", "/data"]
+    volumes:
+      - n8n-data:/data
+    network_mode: none
+    restart: "no"
+
+  n8n:
+    # 锁定 release 与 digest（规范第 2 节：生产禁止浮动标签）
+    image: n8nio/n8n:2.45.7@sha256:9a8d8dcea75667496695d7810d7e1fe018a65efb36cc499d347f3931b3957b5d
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      # 默认监听 ::，在没有 IPv6 的网络里会直接退出（核验 ADR 第 5.1 节）
+      N8N_LISTEN_ADDRESS: 0.0.0.0
+      # 加密 n8n 里保存的凭据；丢失后已存的凭据无法解密
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?请先在仓库根目录运行 make env 生成 .env}
+      N8N_EDITOR_BASE_URL: ${N8N_PUBLIC_URL:-http://localhost:5678/}
+      # 经 HTTPS 访问编辑器时改为 true；本机 HTTP 访问时为 false，否则无法登录
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      GENERIC_TIMEZONE: ${N8N_TIMEZONE:-UTC}
+    volumes:
+      - n8n-data:/home/node/.n8n
+    ports:
+      # 编辑器：默认只绑定本机
+      - "${N8N_BIND:-127.0.0.1}:${N8N_PORT:-5678}:5678"
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    healthcheck:
+      # /healthz 在数据库迁移完成前就返回 ok，就绪要看 /healthz/readiness（核验 ADR 第 5.1 节）
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5678/healthz/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks: [default, integrations]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  # core（compose.yaml）创建的受控网络；COMPOSE 项目名不是 my-workspace 时用 WORKSPACE_PROJECT 指定
+  integrations:
+    external: true
+    name: ${WORKSPACE_PROJECT:-my-workspace}_integrations
+
+volumes:
+  n8n-data:
