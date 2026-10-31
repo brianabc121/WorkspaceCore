@@ -9,7 +9,10 @@ RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.30.6-alpine3.24
+# 用 slim 变体：只有 nginx 与 Alpine 基础包，没有 curl、freetype、brotli 等用不到的库。
+# 完整变体在 T-0044 的 trivy 扫描里有 3 个已有修复的高危 / 严重漏洞（brotli-libs、curl / libcurl），slim 变体为 0。
+# 健康检查用 busybox 的 wget（compose.yaml）。digest 见 docs/decisions/2026-10-31-sprint-6-backup-and-scan-verification.md 第 8 节。
+FROM nginxinc/nginx-unprivileged:1.30.6-alpine3.24-slim@sha256:5d8bb9437d74a600ec5dbf90c035451c724dc33eac8d3a71078f6f8612c345f6
 COPY <<'EOF' /etc/nginx/conf.d/default.conf
 server {
     listen 8080;
