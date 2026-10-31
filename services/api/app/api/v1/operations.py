@@ -9,8 +9,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Security
 
-from app.api.deps import authenticated, workspace_viewer
-from app.core.errors import not_implemented
+from app.api.deps import authenticated, get_operations_service, workspace_viewer
+from app.domain.operations import OperationsService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.common import error_responses
 from app.schemas.operations import MetricRange, MetricsOut, MetricViewId, ServiceStatusList
@@ -18,6 +18,7 @@ from app.schemas.operations import MetricRange, MetricsOut, MetricViewId, Servic
 router = APIRouter(tags=["operations"], dependencies=[Security(authenticated)])
 
 Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
+Service = Annotated[OperationsService, Depends(get_operations_service)]
 _read_errors = error_responses(401, 404, 422)
 
 
@@ -28,8 +29,8 @@ _read_errors = error_responses(401, 404, 422)
     "没有部署的组件为 not_configured。",
     responses=_read_errors,
 )
-async def list_services(access: Viewer) -> ServiceStatusList:
-    raise not_implemented("T-0035")
+async def list_services(access: Viewer, service: Service) -> ServiceStatusList:
+    return await service.services(access)
 
 
 @router.get(
@@ -40,9 +41,10 @@ async def list_services(access: Viewer) -> ServiceStatusList:
 )
 async def get_metrics(
     access: Viewer,
+    service: Service,
     range_: Annotated[MetricRange, Query(alias="range")] = "1h",
     views: Annotated[
         list[MetricViewId] | None, Query(description="可重复；默认全部预设视图")
     ] = None,
 ) -> MetricsOut:
-    raise not_implemented("T-0035")
+    return await service.metrics(range_, views or [])

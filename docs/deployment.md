@@ -48,20 +48,24 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 |---|---|---|---|---|
 | caddy | `caddy:2.11.7-alpine` | 统一入口：路由、安全响应头、请求体限制 | frontend + integrations | `127.0.0.1:8080`（可配置） |
 | web | `my-workspace-web:local`（`apps/web/Dockerfile`） | 前端静态文件（nginx，非 root） | frontend | 无 |
-| api | `my-workspace-api:local`（`services/api/Dockerfile`） | FastAPI BFF（非 root） | backend + frontend + integrations | 无 |
+| api | `my-workspace-api:local`（`services/api/Dockerfile`） | FastAPI BFF（非 root） | backend + frontend + integrations + monitoring | 无 |
 | worker | 同 api 镜像 | ARQ 后台作业 | backend + integrations + egress | 无 |
 | postgres | `postgres:16.15-alpine3.24` | 数据库 | backend | 无 |
 | redis | `redis:7.4.12-alpine3.21` | 缓存 / 作业队列 | backend | 无 |
+| prometheus（可选） | `prom/prometheus:v3.15.1` | 指标（`--profile monitoring`，第 12 节） | monitoring | 无 |
+| grafana（可选） | `grafana/grafana:13.2.5` | 仪表盘与告警（外链） | monitoring + monitoring-public | `127.0.0.1:3000`（可配置） |
 
 - `backend` 是内部网络（不通外网）；数据库和 Redis 只在这个网络里，宿主机和外网都连不到。
 - `integrations` 也是内部网络，只有 caddy、api、worker 加入，供独立部署的第三方服务（Vikunja 等，见第 8 节）与工作台互通；
   第三方服务碰不到 backend 里的数据库和 Redis。
 - `egress` 只有 worker 加入，用来访问外部托管的服务（GitHub 的周期同步要访问 `https://api.github.com`）；
   api 经 `frontend` 出网。出站地址仍由 Connector 的 SSRF 检查限制（私有地址只允许 `INTEGRATION_ALLOWED_HOSTS` 里的主机）。
-- api、worker、web 以只读文件系统运行，去掉全部 Linux capabilities，禁止提权。
+- `monitoring` 是内部网络，只有 api、prometheus、grafana 加入；`monitoring-public` 只用来发布 Grafana 的端口。
+- api、worker、web、prometheus、grafana 以只读文件系统运行，去掉全部 Linux capabilities，禁止提权。
 - Caddy 路由：`/api/*`、`/healthz` → api；`/readyz` 只接受内网来源（公网返回 404）；其余 → web。
 
-数据卷：`postgres-data`、`redis-data`、`caddy-data`、`caddy-config`（Compose 项目名 `my-workspace`，卷名带此前缀）。
+数据卷：`postgres-data`、`redis-data`、`caddy-data`、`caddy-config`，启用监控后还有 `prometheus-data`、`grafana-data`
+（Compose 项目名 `my-workspace`，卷名带此前缀）。
 
 ## 3. 环境变量（`.env`）
 
@@ -79,6 +83,10 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | `CREDENTIAL_ENCRYPTION_KEY` | 第三方连接凭证的加密密钥（64 位十六进制）；格式错误时 API 拒绝启动。**丢失或更换后已保存的凭证无法解密**，请与数据库备份分开保存 | 随机 |
 | `INTEGRATION_ALLOWED_HOSTS` | 允许工作台访问的内网主机名，逗号分隔。第三方服务的地址解析到私有 / 内网 / 链路本地地址时一律拒绝（SSRF 防护），除非主机名在这里 | `vikunja` |
 | `WEBHOOK_BASE_URL` | Vikunja 投递 Webhook 用的工作台地址（容器之间访问，Worker 注册 Webhook 时使用）；留空则不自动注册，只靠每 5 分钟的对账 | `http://caddy:8080` |
+| `PROMETHEUS_URL` / `GRAFANA_URL` | 可选监控的内部地址（第 12 节）；留空表示没有部署，运维页显示“未部署” | 空 |
+| `GRAFANA_DASHBOARD_URL` | 运维页 Grafana 外链（浏览器访问的地址） | 空 |
+| `GRAFANA_ADMIN_PASSWORD` | Grafana 管理员密码；为空时 Grafana 拒绝启动 | 随机 |
+| `LOG_REQUEST_PATH` | 访问日志的路径：`path` 为实际路径（不含查询串），`route` 只记录路由模板 | `path` |
 
 数据库密码请只用字母和数字（`make env` 生成的就是），否则需要在连接串中做 URL 编码。
 
@@ -256,16 +264,69 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
 
 ## 12. 监控与自动化（Sprint 5，可选组件）
 
-版本与核验结果见 `docs/decisions/2026-10-31-prometheus-grafana-n8n-verification.md`。
-可选的 Compose 由 T-0035（`infra/monitoring/`）与 T-0037（`infra/n8n/`）提供，届时在这里补上启用步骤。部署时注意：
+版本与核验结果见 `docs/decisions/2026-10-31-prometheus-grafana-n8n-verification.md`，
+接口约定见 `docs/decisions/2026-10-31-sprint-5-operations-automations-contract.md` 第 3 节。
+
+### 12.1 启用监控（Prometheus + Grafana）
+
+监控是 `compose.yaml` 里的可选 profile（规范第 11.1 节），配置文件在 `infra/monitoring/`：
+
+1. `make env`：会补上新变量，并随机生成 `GRAFANA_ADMIN_PASSWORD`（没有它 Grafana 拒绝启动，避免默认密码 `admin`）。
+2. 在 `.env` 里填上三个地址，让工作台知道监控已部署：
+
+   ```dotenv
+   PROMETHEUS_URL=http://prometheus:9090
+   GRAFANA_URL=http://grafana:3000
+   GRAFANA_DASHBOARD_URL=http://localhost:3000/d/workspace-overview/my-workspace
+   ```
+
+   - 前两个是容器之间的内部地址，只给 api 用，不会下发到浏览器。
+   - 第三个是浏览器打开的外链；换了域名或端口时同时改 `GRAFANA_PUBLIC_URL`。
+3. 启动：
+
+   ```bash
+   docker compose --profile monitoring up -d --wait
+   ```
+
+4. 检查：运维页（`/operations`）里 Prometheus、Grafana 显示为正常；Grafana 用 `admin` 和 `.env` 里的密码登录，
+   “My Workspace” 文件夹里有预置的仪表盘。
+   - 不填这三个地址时，运维页显示“未部署”，工作台照常使用。
+   - 停用：从 `.env` 删掉三个地址，然后执行：
+
+     ```bash
+     docker compose --profile monitoring stop prometheus grafana
+     ```
+
+     数据卷 `prometheus-data`、`grafana-data` 保留。
+
+### 12.2 安全边界
 
 - **Prometheus**（`prom/prometheus:v3.15.1`，按 digest 锁定）
-  - 只放在内部网络，不发布端口，不经 Caddy 转发：它的配置接口在默认情况下可以直接读到。
+  - 只在内部网络 `monitoring` 里，不发布端口，不经 Caddy 转发：它的配置接口在默认情况下可以直接读到。
   - 不加 `--web.enable-admin-api`、`--web.enable-lifecycle`。
-  - 保留 7 天：`--storage.tsdb.retention.time=7d`。
+  - 保留 7 天：`--storage.tsdb.retention.time=7d`（S5-05）。
+  - 抓取 api 的 `/metrics`（`infra/monitoring/prometheus.yml`）。job 名必须以 `workspace-` 开头，运维页的“服务在线”按它查询。
+- **api 的 `/metrics`**
+  - Caddy 只转发 `/api/*`、`/healthz`、`/readyz`，所以从外部访问 `/metrics` 只会得到前端页面。
+  - 指标标签只有方法、路由模板和状态码类别，不含原始路径、查询串、Token。
+  - 容器之间可以访问 `api:8000/metrics`，内容只有请求计数与耗时。
 - **Grafana**（`grafana/grafana:13.2.5`）
-  - 保持匿名访问关闭，用 `GF_SECURITY_ADMIN_PASSWORD` 设置管理员密码，数据源用只读的预置文件。
-  - 工作台只保存浏览器访问 Grafana 的地址并生成外链，不保存 Grafana 的账号或 Token。
+  - 匿名访问、注册、嵌入（`allow_embedding`）都关闭，不向外报告统计；数据源与仪表盘是只读的预置文件。
+  - 端口默认只绑定本机（`GRAFANA_BIND=127.0.0.1`）。对外开放时放在 HTTPS 反向代理后面，并设置 `GRAFANA_PUBLIC_URL`。
+  - 工作台只生成外链，不调用 Grafana API，不保存 Grafana 的账号或 Token。
+- **浏览器**只拿到 BFF 聚合好的预设视图，不能提交 PromQL。
+  - Prometheus 不可达时，运维页显示最近一次的结果并标为“可能过期”；没有结果时显示不可用，不显示 0。
+
+### 12.3 日志与保留（S5-05）
+
+- 访问日志不记录查询串。设置 `LOG_REQUEST_PATH=route` 后，连路径里的 ID 也不记录，只记录路由模板，
+  例如 `/api/v1/tasks/{task_id}`。
+- 容器日志由 Docker 的 `json-file` 按大小轮转（每个服务 5 × 10 MB），不是按天保留。
+  需要严格的“7 天”时，在宿主机的日志收集里按时间清理。
+- 指标在 Prometheus 里保留 7 天。长期趋势请在 Grafana 里另行配置聚合或远端存储（不在 V1 范围）。
+
+### 12.4 n8n（T-0037 补上启用步骤）
+
 - **n8n**（`n8nio/n8n:2.45.7`）
   - 必须设 `N8N_LISTEN_ADDRESS=0.0.0.0`：没有 IPv6 的网络里，默认的 `::` 会让容器直接退出。
   - 健康检查用 `/healthz/readiness`：`/healthz` 在数据库迁移完成前就返回 ok。

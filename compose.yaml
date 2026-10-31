@@ -3,6 +3,7 @@
 #
 # 网络：backend 为内部网络（不通外网），postgres / redis 只在这里；对外只有 caddy 一个端口。
 # 所有镜像固定具体版本，不使用 latest。
+# 可选监控（Prometheus + Grafana）：docker compose --profile monitoring up -d，见 docs/deployment.md 第 12 节。
 
 name: my-workspace
 
@@ -85,6 +86,12 @@ services:
       GITHUB_API_URL: ${WORKSPACE_GITHUB_API_URL:-https://api.github.com}
       # API 只能经 Caddy 访问，取 X-Forwarded-For 最右侧的地址作为客户端 IP（登录限流用）
       TRUST_FORWARDED_FOR: "true"
+      # 可选监控（--profile monitoring）：留空表示没有部署，运维页显示 not_configured
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-}
+      GRAFANA_URL: ${GRAFANA_URL:-}
+      GRAFANA_DASHBOARD_URL: ${GRAFANA_DASHBOARD_URL:-}
+      # 访问日志里只记录路由模板（不含路径参数）时设为 route（S5-05）
+      LOG_REQUEST_PATH: ${LOG_REQUEST_PATH:-path}
     depends_on:
       postgres:
         condition: service_healthy
@@ -96,8 +103,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
-    # frontend 网络供 caddy 访问，也给 Connector 访问外网；integrations 连到独立部署的第三方服务（Vikunja 等）
-    networks: [backend, frontend, integrations]
+    # frontend 网络供 caddy 访问，也给 Connector 访问外网；integrations 连到独立部署的第三方服务（Vikunja 等）；
+    # monitoring 供 Prometheus 抓取 /metrics、api 检查 Prometheus / Grafana 是否就绪
+    networks: [backend, frontend, integrations, monitoring]
     logging: *logging
 
   worker:
@@ -170,6 +178,70 @@ services:
     networks: [frontend, integrations]
     logging: *logging
 
+  # ---------------------------------------------------------------- 可选监控（--profile monitoring）
+  # 版本与安全边界见 docs/decisions/2026-10-31-prometheus-grafana-n8n-verification.md
+
+  prometheus:
+    <<: *hardening
+    profiles: [monitoring]
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    restart: unless-stopped
+    # 不加 --web.enable-admin-api / --web.enable-lifecycle / --web.enable-remote-write-receiver；
+    # 详细数据保留 7 天（S5-05）
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # 只在内部网络：/api/v1/status/config 等默认可读，所以不发布端口、不经 Caddy 转发
+    networks: [monitoring]
+    logging: *logging
+
+  grafana:
+    <<: *hardening
+    profiles: [monitoring]
+    image: grafana/grafana:13.2.5@sha256:9f7aa1e1e3246aade5792d35a738049f7f32f89cd51d1956cf426a4e86268a84
+    restart: unless-stopped
+    # 没有设置管理员密码时拒绝启动（否则 Grafana 会使用默认密码 admin）；make env 会随机生成
+    entrypoint: ["/bin/sh", "-c", "test -n \"$$GF_SECURITY_ADMIN_PASSWORD\" || { echo '请先运行 make env 生成 GRAFANA_ADMIN_PASSWORD' >&2; exit 1; }; exec /run.sh"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_SERVER_ROOT_URL: ${GRAFANA_PUBLIC_URL:-http://localhost:3000}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SECURITY_ALLOW_EMBEDDING: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_LOG_MODE: console
+    volumes:
+      - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      # 默认只绑定本机；Grafana 有自己的登录，工作台只生成外链
+      - "${GRAFANA_BIND:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    # monitoring 访问 Prometheus；monitoring-public 只用来发布端口给浏览器
+    networks: [monitoring, monitoring-public]
+    logging: *logging
+
 networks:
   backend:
     internal: true
@@ -180,9 +252,15 @@ networks:
     internal: true
   # 只给 worker 出网用（api 经 frontend 出网）；不接任何别的服务
   egress: {}
+  # 可选监控：api、prometheus、grafana；internal，不提供出网
+  monitoring:
+    internal: true
+  monitoring-public: {}
 
 volumes:
   postgres-data:
   redis-data:
   caddy-data:
   caddy-config:
+  prometheus-data:
+  grafana-data:

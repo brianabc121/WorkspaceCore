@@ -1,0 +1,10 @@
+# 预置仪表盘：运维页的 Grafana 外链指向其中的 workspace-overview
+apiVersion: 1
+providers:
+  - name: workspace
+    folder: My Workspace
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards

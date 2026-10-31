@@ -30,3 +30,4 @@ updated: 2026-10-31
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-31 00:56 UTC · claude · 创建任务（owner: claude）
+- 2026-10-31 02:19 UTC · claude · 来自 T-0035：服务状态的健康告警（契约第 3.1 节：服务变为 down / 恢复时给 owner、admin 发 service_down / service_recovered 通知，同一变化一段时间内只发一次）在本任务实现；可在 Worker 的周期任务里调用 app.domain.operations.DeploymentHealth 比较前后状态。

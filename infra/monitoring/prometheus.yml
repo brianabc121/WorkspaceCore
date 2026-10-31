@@ -1,0 +1,16 @@
+# 可选监控（docker compose --profile monitoring up -d），见 docs/deployment.md 第 12 节。
+# Prometheus 只在内部的 monitoring 网络里，不发布端口；浏览器只能经工作台的 BFF 拿到预设视图。
+# job 名必须以 workspace- 开头：运维页的“服务在线”视图按 up{job=~"workspace-.*"} 查询。
+global:
+  scrape_interval: 15s
+  scrape_timeout: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: workspace-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
+  - job_name: workspace-prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

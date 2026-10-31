@@ -12,6 +12,7 @@ ARQ 目前处于仅维护状态（见 docs/decisions/2026-10-29-backend-stack.md
 
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 from arq import cron, func
@@ -24,6 +25,7 @@ from app.core.logging import configure_logging, dict_config
 from app.core.resources import create_engine
 from app.domain import sync
 from app.domain.connectors import ConnectorRuntime
+from app.domain.operations import WORKER_HEARTBEAT_KEY
 from app.integrations.http import CircuitBreaker
 from app.jobs.queue import PROCESS_WEBHOOKS, REGISTER_WEBHOOKS, SYNC_INTEGRATION
 
@@ -36,8 +38,11 @@ RECONCILE_MINUTES = set(range(2 % _interval, 60, _interval))
 
 
 async def heartbeat(ctx: dict[str, Any]) -> str:
-    """定时写一条日志，便于确认 Worker 在正常调度。"""
-    logger.info("worker heartbeat")
+    """每分钟写一次心跳时间；运维页按它判断 Worker 是否在正常调度（Sprint 5 契约第 3.1 节）。"""
+    now = datetime.now(UTC)
+    await ctx["redis"].set(WORKER_HEARTBEAT_KEY, now.isoformat())
+    if now.minute % 5 == 0:
+        logger.info("worker heartbeat")
     return "ok"
 
 
@@ -101,7 +106,7 @@ class WorkerSettings:
         func(register_webhooks, name=REGISTER_WEBHOOKS),
     ]
     cron_jobs: ClassVar[list[CronJob]] = [
-        cron(heartbeat, minute=set(range(0, 60, 5))),
+        cron(heartbeat, second=0, run_at_startup=True),
         # 兜底：API 投递失败或事件到了重试时间时，也会在一分钟内被处理
         cron(process_webhooks, second=30),
         cron(reconcile, minute=RECONCILE_MINUTES, timeout=900),
