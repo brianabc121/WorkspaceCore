@@ -2,9 +2,9 @@
 id: T-0054
 title: OC-2 OpenClaw 实例、凭证、密钥库与接入入口：迁移、加密密钥可轮换、接入包、取密钥小程序、两个 Caddy 入口、接入网关、内部 CA（S6-01）
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api/app,services/api/migrations,services/api/tests,infra/caddy,infra/openclaw,compose.yaml,.env.example,scripts
 depends_on: T-0053
 created: 2026-10-31
@@ -33,3 +33,5 @@ updated: 2026-10-31
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-31 16:14 UTC · claude · 创建任务（owner: claude）
+- 2026-10-31 19:03 UTC · claude · 开始任务
+- 2026-10-31 19:15 UTC · claude · 第 1 部分（PR A）：迁移 0011 建 V2 表（agent_settings / agent_instances / agent_credentials / agent_secrets / agent_secret_versions / agent_secret_grants / agent_secret_accesses / agent_ca），alembic upgrade/downgrade/check 通过；加密密钥可轮换：CredentialBox 改为密钥环（CREDENTIAL_ENCRYPTION_KEY + CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS），新增 python -m app.commands.rotate_credentials 逐条重新加密集成凭证、Webhook 密钥、n8n 密钥、密钥库与 CA 私钥（不改 updated_at，可重复运行）。方案第 5 节的 key_version 列由密文引用里已有的 key_id 承担，不给旧表加列。越出 paths：docs/deployment.md 第 6.1 节（轮换步骤）。下一步：PR B——实例、凭证、密钥库服务与管理员接口、/agent-api 取密钥与心跳、实例认证

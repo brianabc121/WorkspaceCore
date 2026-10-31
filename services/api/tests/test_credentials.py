@@ -83,3 +83,55 @@ def test_api_refuses_to_start_with_a_malformed_key() -> None:
     # Compose 在变量缺失时传入空字符串：按未配置处理，不影响启动
     assert Settings(app_env="test", credential_encryption_key="").credential_encryption_key is None
     create_app(Settings(app_env="test", credential_encryption_key=SecretStr(KEY)))
+
+
+# ---------------------------------------------------------------- 加密密钥轮换（V2 OC-2）
+
+
+def test_previous_keys_decrypt_but_new_ciphertext_uses_the_current_key() -> None:
+    old_key, new_key = secrets.token_bytes(32), secrets.token_bytes(32)
+    old = CredentialBox(old_key)
+    ref = old.seal("secret", context=CONTEXT)
+    rotated = CredentialBox(new_key, [old_key])
+    assert rotated.resolve(ref, context=CONTEXT).get_secret_value() == "secret"
+    assert rotated.needs_rotation(ref)
+    assert rotated.previous_key_ids == {old.key_id}
+    fresh = rotated.seal("secret", context=CONTEXT)
+    assert rotated.key_id_in(fresh) == rotated.key_id != old.key_id
+    resealed = rotated.reseal(ref, context=CONTEXT)
+    assert not rotated.needs_rotation(resealed)
+    assert rotated.resolve(resealed, context=CONTEXT).get_secret_value() == "secret"
+    assert rotated.reseal(resealed, context=CONTEXT) == resealed  # 已是当前密钥：原样返回
+    assert rotated.reseal("env:WS_SECRET_X", context=CONTEXT) == "env:WS_SECRET_X"
+    with pytest.raises(CredentialError, match="用途不匹配"):
+        rotated.reseal(ref, context="integration_account:other")
+
+
+def test_removing_the_previous_key_makes_old_ciphertext_unreadable() -> None:
+    old_key = secrets.token_bytes(32)
+    ref = CredentialBox(old_key).seal("secret", context=CONTEXT)
+    with pytest.raises(CredentialError, match="CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS") as excinfo:
+        CredentialBox(secrets.token_bytes(32)).resolve(ref, context=CONTEXT)
+    assert old_key.hex() not in str(excinfo.value)
+
+
+def test_previous_keys_are_read_from_settings() -> None:
+    old_a, old_b = secrets.token_hex(32), secrets.token_hex(32)
+    settings = Settings(
+        credential_encryption_key=SecretStr(KEY),
+        credential_encryption_keys_previous=SecretStr(f" {old_a} ,{old_b},"),
+    )
+    box = CredentialBox.from_settings(settings)
+    assert len(box.previous_key_ids) == 2
+    assert box.key_id == CredentialBox(parse_key(KEY)).key_id
+    blank = Settings(
+        credential_encryption_key=SecretStr(KEY), credential_encryption_keys_previous=""
+    )
+    assert CredentialBox.from_settings(blank).previous_key_ids == frozenset()
+    with pytest.raises(CredentialError, match="64 位十六进制"):
+        CredentialBox.from_settings(
+            Settings(
+                credential_encryption_key=SecretStr(KEY),
+                credential_encryption_keys_previous=SecretStr("not-hex"),
+            )
+        )

@@ -90,7 +90,8 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | `CORS_ALLOWED_ORIGINS` | 其他可信来源，逗号分隔（例如用 IP 访问时的 `http://127.0.0.1:8080`） | `http://127.0.0.1:8080` |
 | `SESSION_SECRET` | 计算 CSRF Token 的密钥；生产环境必填且至少 32 个字符。轮换后所有人需要重新登录 | 随机 |
 | `SETUP_TOKEN` | 首次安装凭据（`make setup-token` 查看）；未配置时首次安装一律拒绝 | 随机 |
-| `CREDENTIAL_ENCRYPTION_KEY` | 第三方连接凭证的加密密钥（64 位十六进制）；格式错误时 API 拒绝启动。**丢失或更换后已保存的凭证无法解密**，请与数据库备份分开保存 | 随机 |
+| `CREDENTIAL_ENCRYPTION_KEY` | 第三方连接凭证与密钥库的加密密钥（64 位十六进制）；格式错误时 API 拒绝启动。**丢失后已保存的凭证无法解密**，请与数据库备份分开保存；更换按第 6.1 节轮换 | 随机 |
+| `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS` | 轮换期间保留的旧密钥（逗号分隔，只用于解密）；平时为空 | 空 |
 | `INTEGRATION_ALLOWED_HOSTS` | 允许工作台访问的内网主机名，逗号分隔。第三方服务的地址解析到私有 / 内网 / 链路本地地址时一律拒绝（SSRF 防护），除非主机名在这里 | `vikunja` |
 | `WEBHOOK_BASE_URL` | Vikunja 投递 Webhook 用的工作台地址（容器之间访问，Worker 注册 Webhook 时使用）；留空则不自动注册，只靠每 5 分钟的对账 | `http://caddy:8080` |
 | `PROMETHEUS_URL` / `GRAFANA_URL` | 可选监控的内部地址（第 12 节）；留空表示没有部署，运维页显示“未部署” | 空 |
@@ -204,6 +205,24 @@ Vikunja、n8n 等独立部署的组件分开升级：
 - **许可证**：Grafana、Vikunja 是 AGPL-3.0，n8n 是 Sustainable Use License，Redis 7.4 是 RSALv2 / SSPLv1。
   自托管自用没有问题；要对外提供服务或分发之前，先看 `docs/versions.md` 第 5 节。
 - **发布前**：按 `docs/release-checklist.md` 逐项检查（CI、扫描、版本锁定、备份演练、`.env` 与密钥轮换、性能、回滚方案）。
+
+### 6.1 加密密钥轮换
+
+凭证密文的引用里带着加密它的密钥 ID（`enc:v1:<key_id>:…`），所以新旧密钥可以并存，按记录逐条换成新密钥：
+
+1. 生成新密钥：`python3 -c "import secrets; print(secrets.token_hex(32))"`。
+2. 改 `.env`：把原来的 `CREDENTIAL_ENCRYPTION_KEY` 移到 `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS`，新密钥填进 `CREDENTIAL_ENCRYPTION_KEY`；
+   然后 `docker compose up -d api worker`。这时新旧密文都能解密，新写入的都用新密钥。
+3. 先预演，再重新加密：
+   ```
+   docker compose exec -T api python -m app.commands.rotate_credentials --dry-run
+   docker compose exec -T api python -m app.commands.rotate_credentials
+   ```
+   覆盖集成凭证、集成的 Webhook 密钥、n8n 的 API Key 与共享密钥、OpenClaw 密钥库、内部 CA 私钥。
+   可以重复运行；只改密文，不改记录的 `updated_at` 和版本号。
+4. 输出“仍是旧密钥：0；失败：0”（退出码 0）之后，清空 `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS`，再 `docker compose up -d api worker`。
+   失败的记录原样保留：通常是缺了更早的某把旧密钥，把它也加进 `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS` 再运行一次。
+5. 轮换前后各做一次 `make backup`；旧的备份要用旧密钥才能解密，旧密钥按备份的保留期一起保管。
 
 ## 7. 本机直接运行（开发）
 

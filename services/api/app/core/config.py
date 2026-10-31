@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     setup_token: SecretStr | None = None
     # 第三方连接凭证的加密密钥：64 位十六进制（32 字节），make env 会生成
     credential_encryption_key: SecretStr | None = None
+    # 轮换期间保留的旧密钥（逗号分隔，同样是 64 位十六进制）：只用于解密，
+    # `python -m app.commands.rotate_credentials` 把密文全部换成当前密钥之后再删掉
+    credential_encryption_keys_previous: SecretStr | None = None
     session_ttl_days: int = Field(default=30, ge=1, le=365)
     session_idle_days: int = Field(default=7, ge=1, le=365)
     # 登录 / 首次安装失败限流（Redis 计数，固定窗口）
@@ -120,7 +123,13 @@ class Settings(BaseSettings):
             raise ValueError("必须是不带用户名密码的 http(s) 地址")
         return value.rstrip("/")
 
-    @field_validator("session_secret", "setup_token", "credential_encryption_key", mode="before")
+    @field_validator(
+        "session_secret",
+        "setup_token",
+        "credential_encryption_key",
+        "credential_encryption_keys_previous",
+        mode="before",
+    )
     @classmethod
     def _blank_as_unset(cls, value: object) -> object:
         # Compose 的 ${X:-} 在变量缺失时传入空字符串，按“未配置”处理
