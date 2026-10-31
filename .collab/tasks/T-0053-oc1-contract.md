@@ -31,3 +31,4 @@ updated: 2026-10-31
 - 2026-10-31 17:45 UTC · claude · 开始任务
 - 2026-10-31 17:57 UTC · claude · 契约 ADR docs/decisions/2026-10-31-v2-oc1-contract.md；schema（agents/im/ai_tools/openim_callbacks）与 48 个管理员端点、3 个实例端点的 501 桩；网关与 OpenIM 回调路由不进 OpenAPI；MCP 工具清单 TOOLS（15 读 6 写 3 高危）。越出 paths 的文件（都不在其他进行中任务的范围内）：services/api/app/main.py（挂载实例接口路由）、apps/web/src/features/events/useWorkspaceEvents.ts（SSE 新 topic 的映射，否则前端 typecheck 失败）、infra/openclaw/bin/myworkspace-openclaw-start（im-token 响应改用 ws_addr/api_addr）。make lint-api、pytest（含集成，412 passed）、web lint/typecheck/test/build 通过
 - 2026-10-31 17:57 UTC · claude · status in_progress → done：OC-1 契约完成：ADR、schema、接口桩、OpenAPI、schema.d.ts、api-contract.md、契约测试
+- 2026-10-31 18:11 UTC · claude · PR #77 的 ci-infra 在 Sprint 4 浏览器验收失败：测试先把模拟 GitHub 切到限流，再点“手动同步”；CI 每分钟一次的对账正好在两者之间碰到限流，按钮按设计被禁用，点击超时（main 上同一检查是绿的，属于测试与定时对账的竞态）。修复 tests/e2e/sprint4_browser.cjs：按钮已禁用时说明同步已经发生，直接检查开发者页的限流提示。越出 paths，原因同上
