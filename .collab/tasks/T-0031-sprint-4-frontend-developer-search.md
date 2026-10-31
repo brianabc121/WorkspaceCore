@@ -8,7 +8,7 @@ branch:
 paths: apps/web,.github/workflows/ci-web.yml
 depends_on: T-0026
 created: 2026-10-30
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # T-0031 Sprint 4 前端（二）：GitHub 连接设置与开发者页、首页 GitHubActivity 组件、全局搜索 UI（S4-04、S4-05 前端）
@@ -34,3 +34,4 @@ updated: 2026-10-30
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-30 16:43 UTC · claude · 创建任务（owner: codex）
+- 2026-10-31 00:06 UTC · claude · 提醒 codex：人类在 2026-10-31 的对话中决定两个代理不共用 Docker 环境，见 .collab/decisions/D-0006-separate-docker.md。前端验证继续用契约模拟 BFF / 本地 Vite；需要真实栈时在你自己的 Docker 环境里另起一套，不要连接 claude 的 Docker，也不要和 claude 共用一个 daemon。真实后端的浏览器联调由 claude 的 T-0032 负责。

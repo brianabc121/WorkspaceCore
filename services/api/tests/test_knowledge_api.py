@@ -129,15 +129,43 @@ async def test_source_is_configured_once_and_never_fetched(env: Env) -> None:
     assert integrations.json()["items"] == []
 
 
-async def test_metadata_address_is_rejected(env: Env) -> None:
-    """A12：云元数据地址不能作为 AFFiNE 地址。"""
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://169.254.169.254",
+        # 浏览器会把这些写法都当成 169.254.169.254 或未指定地址
+        "http://2852039166",
+        "http://0xa9fea9fe",
+        "http://0251.0376.0251.0376",
+        "http://169.254.43518",
+        "http://[::ffff:169.254.169.254]",
+        "http://[fe80::1]",
+        "http://0",
+    ],
+)
+async def test_metadata_address_is_rejected(env: Env, url: str) -> None:
+    """A12：云元数据（链路本地）与未指定地址不能作为 AFFiNE 地址。"""
     response = await env.client.post(
         "/api/v1/knowledge/sources",
-        json={"provider": "affine", "name": "AFFiNE", "base_url": "http://169.254.169.254"},
+        json={"provider": "affine", "name": "AFFiNE", "base_url": url},
         headers=env.headers(write=True),
     )
     assert response.status_code == 422
-    assert "169.254.169.254" not in response.text
+    assert url not in response.text  # 不回显地址
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["http://localhost:3010", "http://127.0.0.1:3010", "http://10.0.0.5", "http://deadbeef.local"],
+)
+async def test_loopback_and_lan_addresses_are_allowed(env: Env, url: str) -> None:
+    """本机与内网的 AFFiNE 可以用：工作台不访问这个地址，链接只在用户自己的浏览器里打开。"""
+    response = await env.client.post(
+        "/api/v1/knowledge/sources",
+        json={"provider": "affine", "name": "AFFiNE", "base_url": url},
+        headers=env.headers(write=True),
+    )
+    assert response.status_code == 201, response.text
 
 
 async def test_only_admins_manage_sources(env: Env) -> None:
