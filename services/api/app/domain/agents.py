@@ -15,6 +15,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
 from redis.asyncio import Redis
 from sqlalchemy import delete, select, update
@@ -566,7 +567,15 @@ class AgentService:
                 keep_previous=keep,
                 now=now,
             )
-        base = f"http://127.0.0.1:{self.settings.agent_tunnel_port}" if public else configured
+        tunnel_target: str | None = None
+        base = configured
+        if public:
+            # 外网模式：公网域名在 OpenClaw 那边解析到本机隧道
+            # （Caddy 开启客户端证书时要求 SNI 与 Host 一致，所以不能用 127.0.0.1）
+            url = urlsplit(configured)
+            host = url.hostname or ""
+            tunnel_target = f"{host}:{url.port or 443}"
+            base = f"http://{host}:{self.settings.agent_tunnel_port}"
         data = agent_bundle.build(
             agent_bundle.BundleInput(
                 instance_id=str(instance.id),
@@ -577,6 +586,8 @@ class AgentService:
                 whitelist=await self._whitelist(instance.workspace_id),
                 client_cert_pem=cert.cert_pem if cert else None,
                 client_key_pem=cert.key_pem if cert else None,
+                tunnel_target=tunnel_target,
+                tunnel_port=self.settings.agent_tunnel_port,
             ),
             now=now,
         )

@@ -79,8 +79,8 @@ services:
       # 第三方连接凭证的加密密钥；格式错误时 API 拒绝启动
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS: ${CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS:-}
-      # V2 实例接口：接入入口 Caddy 的地址（OC-2 第 4 部分加入接入入口后设置）；为空时实例接口一律 401
-      AGENT_INGRESS_TRUSTED_PROXIES: ${AGENT_INGRESS_TRUSTED_PROXIES:-}
+      # V2 实例接口：只采用接入入口 agent-gateway（agent-ingress 网络里的固定地址）写入的入口与证书请求头
+      AGENT_INGRESS_TRUSTED_PROXIES: ${AGENT_INGRESS_TRUSTED_PROXIES:-172.31.250.2}
       # 接入包里写给 OpenClaw 的内网 / 外网入口地址；没有配置的入口不能生成接入包
       AGENT_INTRANET_URL: ${AGENT_INTRANET_URL:-}
       AGENT_PUBLIC_URL: ${AGENT_PUBLIC_URL:-}
@@ -111,7 +111,7 @@ services:
       start_period: 10s
     # frontend 网络供 caddy 访问，也给 Connector 访问外网；integrations 连到独立部署的第三方服务（Vikunja 等）；
     # monitoring 供 Prometheus 抓取 /metrics、api 检查 Prometheus / Grafana 是否就绪
-    networks: [backend, frontend, integrations, monitoring]
+    networks: [backend, frontend, integrations, monitoring, agent-ingress]
     logging: *logging
 
   worker:
@@ -187,6 +187,45 @@ services:
         condition: service_healthy
     # integrations：第三方服务经此把 Webhook 发到 /api/v1/webhooks/…（不经过对外端口）
     networks: [frontend, integrations]
+    logging: *logging
+
+  # ---------------------------------------------------------------- OpenClaw 接入入口（--profile agents）
+  # 与管理员入口分开的 Caddy：内网入口（私网地址 + TLS）与外网入口（公网域名 + 双向证书）。
+  # 证书放在 AGENT_TLS_DIR（intranet.crt/key、public.crt/key）；内部 CA 证书由 make agent-ca 导出。
+  # 部署步骤见 docs/deployment.md 第 16 节；约定见 docs/decisions/2026-10-31-v2-oc1-contract.md 第 1、8 节
+
+  agent-gateway:
+    image: caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+    profiles: [agents]
+    restart: unless-stopped
+    environment:
+      AGENT_INTRANET_HOST: ${AGENT_INTRANET_HOST:-intranet.invalid}
+      AGENT_PUBLIC_HOST: ${AGENT_PUBLIC_HOST:-public.invalid}
+      # 内网入口只接受这些来源（空格分隔）；默认是私网地址与 Tailscale 的 100.64.0.0/10
+      AGENT_INTRANET_ALLOWED_CIDRS: ${AGENT_INTRANET_ALLOWED_CIDRS:-10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10}
+    ports:
+      - "${AGENT_INTRANET_BIND:-127.0.0.1}:${AGENT_INTRANET_PORT:-8443}:8443"
+      - "${AGENT_PUBLIC_BIND:-127.0.0.1}:${AGENT_PUBLIC_PORT:-9443}:9443"
+    volumes:
+      - ./infra/caddy/agent.Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${AGENT_TLS_DIR:-./infra/caddy/agent-tls}:/certs:ro
+      - ./infra/caddy/agent-ca:/agent-ca:ro
+      - agent-caddy-data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      agent-ingress:
+        # API 只信任这个地址写入的入口与证书请求头（AGENT_INGRESS_TRUSTED_PROXIES）
+        ipv4_address: 172.31.250.2
+      # 发布端口用（internal 网络不能发布端口）；只有 agent-gateway 加入，所以访问 api 只能经 agent-ingress
+      agent-edge: {}
     logging: *logging
 
   # ---------------------------------------------------------------- 可选监控（--profile monitoring）
@@ -267,6 +306,15 @@ networks:
   monitoring:
     internal: true
   monitoring-public: {}
+  # OpenClaw 接入入口 → API：只有 agent-gateway（固定 172.31.250.2）与 api 加入。
+  # 动态分配只用 .4 ~ .7，别的容器拿不到网关的地址；internal，不提供出网
+  agent-edge: {}
+  agent-ingress:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.250.0/29
+          ip_range: 172.31.250.4/30
 
 volumes:
   postgres-data:
@@ -275,3 +323,4 @@ volumes:
   caddy-config:
   prometheus-data:
   grafana-data:
+  agent-caddy-data:

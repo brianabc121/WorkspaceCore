@@ -29,7 +29,7 @@ endef
 .PHONY: help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke openapi setup-token \
 	lint lint-api lint-web format test test-api test-web build-web backup restore-verify \
 	smoke-full perf scan \
-	vikunja-up vikunja-down vikunja-user vikunja-logs n8n-up n8n-down n8n-logs
+	vikunja-up vikunja-down vikunja-user vikunja-logs n8n-up n8n-down n8n-logs agent-ca agents-up
 
 help: ## 列出可用命令
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-15s %s\n", $$1, $$2}'
@@ -91,6 +91,13 @@ vikunja-down: ## 停止 Vikunja；保留数据卷
 
 vikunja-logs: ## 跟踪 Vikunja 日志（Ctrl+C 退出）
 	$(VIKUNJA_COMPOSE) logs -f --tail=100
+
+agent-ca: ## 导出 OpenClaw 外网入口信任的内部 CA 证书（不含私钥）到 infra/caddy/agent-ca/；需要先 make up
+	docker compose exec -T api python -m app.commands.agent_ca export > infra/caddy/agent-ca/agent-ca.pem
+	@echo "已导出 infra/caddy/agent-ca/agent-ca.pem；接入入口见 docs/deployment.md 第 16 节"
+
+agents-up: agent-ca ## 启动 OpenClaw 接入入口（agent-gateway，--profile agents）；证书与变量见 docs/deployment.md 第 16 节
+	docker compose --profile agents up -d agent-gateway
 
 n8n-up: env ## 启动独立部署的 n8n（自动化，可选）；需要先 make up
 	$(N8N_COMPOSE) up -d --wait --wait-timeout 300

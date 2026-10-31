@@ -600,3 +600,50 @@ S3 仓库的凭据（`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_DEFAUL
 - 本机固定环境用默认的 `--tolerance 1`，结果写进验收报告；CI 的 runner 性能不稳定，用 `--tolerance 2`，表格写进运行的 Summary。
 - 这些是测试目标，不是承诺（规范第 12 节）。本机实测数据与未达标项的原因见上述 ADR 的第 8.6 节，Sprint 6 的验收报告会附上发布前的数据。
 
+
+## 16. OpenClaw 接入入口（V2，`--profile agents`）
+
+OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式经私网地址，外网模式经公网域名加双向证书。
+设计见 `docs/v2/TRANSFORMATION_PLAN.md` 第 4.2、6 节；核验结论见
+`docs/decisions/2026-10-31-v2-oc2-agent-ingress-verification.md`。
+
+### 16.1 证书与变量
+
+1. 准备接入入口的服务器证书，放进 `AGENT_TLS_DIR`（默认 `infra/caddy/agent-tls/`，目录已忽略，不提交）：
+   - `intranet.crt` / `intranet.key`：内网入口，内部 CA 或 Tailscale 证书都可以；
+   - `public.crt` / `public.key`：外网入口，公网证书（例如 certbot 申请的证书）。
+2. 在 `.env` 里设置：
+
+   | 变量 | 例子 | 说明 |
+   |---|---|---|
+   | `AGENT_INTRANET_HOST` / `AGENT_PUBLIC_HOST` | `ws.tailnet.example` / `agent.example.com` | 证书里的域名；外网入口开启客户端证书后 SNI 必须与 Host 一致 |
+   | `AGENT_INTRANET_BIND` / `AGENT_INTRANET_PORT` | `100.64.0.5` / `8443` | 内网入口发布的地址与端口（默认 `127.0.0.1:8443`） |
+   | `AGENT_PUBLIC_BIND` / `AGENT_PUBLIC_PORT` | `0.0.0.0` / `9443` | 外网入口发布的地址与端口（默认 `127.0.0.1:9443`） |
+   | `AGENT_INTRANET_ALLOWED_CIDRS` | `100.64.0.0/10` | 内网入口只接受的来源（空格分隔） |
+   | `AGENT_INTRANET_URL` / `AGENT_PUBLIC_URL` | `https://ws.tailnet.example:8443` / `https://agent.example.com:9443` | 写进接入包的地址；没有配置的入口不能生成该模式的接入包 |
+   | `AGENT_INGRESS_TRUSTED_PROXIES` | 默认 `172.31.250.2` | API 只信任这个地址（agent-gateway 在 `agent-ingress` 网络里的固定地址）写入的入口与证书请求头；一般不用改 |
+
+3. `docker compose up -d api`，让 api 读到新的变量。
+4. `make agents-up`：
+   - 先导出内部 CA 证书（`make agent-ca`，不含私钥）；
+   - 再启动 `agent-gateway`。
+5. 防火墙：外网入口的端口对公网开放；内网入口的端口只在私网开放。
+
+### 16.2 接入一台 OpenClaw 服务器
+
+1. 工作台的实例页：登记实例，选网络模式和权限，授权密钥，下载接入包（zip，凭证只出现这一次）；
+2. 在 OpenClaw 服务器上解压，按里面的 `CHECKLIST.md` 设置属主、权限、插件和定时任务，然后 `docker compose up -d`；
+   - 外网模式会同时启动 `tunnel` 服务：本机隧道，用接入包里的客户端证书连外网入口；
+3. 入口用私有 CA 签发的证书时：
+   - 外网模式：在接入包 `compose.yaml` 的 `tunnel` 命令里加 `--cacert=<CA 证书>`；
+   - 内网模式：在 `myworkspace.env` 里设置 `NODE_EXTRA_CA_CERTS=<CA 证书>`。
+4. 重新生成接入包会签发新凭证，旧凭证默认再保留 24 小时；客户端证书 90 天到期，到期前重新生成。
+
+### 16.3 验收
+
+```
+python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的 CA> \
+    --intranet <内网域名>:<端口> --public <外网域名>:<端口> --connect <发布端口所在的地址>
+```
+
+覆盖内网与外网入口、双向证书、本机隧道、入口错配、吊销，以及伪造请求头。
