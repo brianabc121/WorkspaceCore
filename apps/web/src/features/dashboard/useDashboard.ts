@@ -6,7 +6,7 @@ import { useOperationsAccessStore } from '../../stores/operationsAccess'
 import { ApiError, dataOf, errorMessage, isAccessError, type Schema } from '../../services/api'
 import { dashboardFileSchema, layoutSchema, type WidgetValue } from '../../widgets/registry'
 
-type Update = Schema['NoteWidgetUpdate'] | Schema['QuickLinksWidgetUpdate'] | Schema['TodoSummaryWidgetUpdate'] | Schema['TodayTasksWidgetUpdate'] | Schema['RecentDocsWidgetUpdate'] | Schema['CalendarAgendaWidgetUpdate'] | Schema['GitHubActivityWidgetUpdate'] | Schema['ServiceHealthWidgetUpdate'] | Schema['ApiLatencyWidgetUpdate']
+type Update = Schema['NoteWidgetUpdate'] | Schema['QuickLinksWidgetUpdate'] | Schema['TodoSummaryWidgetUpdate'] | Schema['TodayTasksWidgetUpdate'] | Schema['RecentDocsWidgetUpdate'] | Schema['CalendarAgendaWidgetUpdate'] | Schema['GitHubActivityWidgetUpdate'] | Schema['ServiceHealthWidgetUpdate'] | Schema['ApiLatencyWidgetUpdate'] | Schema['NotificationsWidgetUpdate']
 export function useDashboard() {
   const auth = useAuthStore()
   const search = useDashboardSearch(), operationsAccess = useOperationsAccessStore()
@@ -55,7 +55,7 @@ export function useDashboard() {
         if (selected.value) await refresh(widgetsQuery)
       }
       if (operationsAccess.denied && !await operationsAccess.recover(user, scope)) throw operationsAccess.error ?? new ApiError(403, 'FORBIDDEN', '')
-      await cache.invalidateQueries({ predicate: (query) => ['knowledge', 'calendar', 'developer', 'operations'].includes(String(query.queryKey[0])) && query.queryKey[1] === user && query.queryKey[2] === scope && query.queryKey[3] === 'widget' })
+      await cache.invalidateQueries({ predicate: (query) => ['knowledge', 'calendar', 'developer', 'operations', 'notifications'].includes(String(query.queryKey[0])) && query.queryKey[1] === user && query.queryKey[2] === scope && query.queryKey[3] === 'widget' })
       editing.value = false; dirty.value = false; failure.value = null
     } catch (error) {
       failure.value = isAccessError(error) ? error : keepBlocked ? previousFailure : error

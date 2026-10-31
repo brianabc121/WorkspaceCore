@@ -5,4 +5,4 @@ import { afterEach, vi } from 'vitest'
 window.scrollTo = vi.fn()
 // GridStack observes actual element sizes in browsers; jsdom has no layout engine.
 globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); document.documentElement.removeAttribute('data-theme') })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); document.documentElement.removeAttribute('data-theme') })
