@@ -6,6 +6,7 @@ Sprint 5（…-sprint-5-operations-automations-contract.md）。"""
 import json
 import uuid
 from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 import pytest
@@ -568,6 +569,11 @@ async def test_search_and_developer_query_rules(stub_client: httpx.AsyncClient) 
 # ---------------------------------------------------------------- Sprint 5
 
 
+def _properties(name: str) -> dict[str, Any]:
+    properties: dict[str, Any] = _schemas()[name]["properties"]  # type: ignore[assignment]
+    return properties
+
+
 def test_sprint_5_keeps_existing_schemas_unchanged() -> None:
     """契约第 1 节：前端按枚举索引的类型不加值；新模块与新组件类型不影响已有类型。"""
     schemas = _schemas()
@@ -593,20 +599,19 @@ def test_event_stream_is_documented_as_server_sent_events() -> None:
     assert data["contentSchema"]["$ref"].endswith("/InvalidateEvent")
     for code in ("401", "404", "422"):  # 推送开始之前的错误是普通 JSON
         assert list(responses[code]["content"]) == ["application/json"], code
-    event = _schemas()["InvalidateEvent"]["properties"]
+    event = _properties("InvalidateEvent")
     assert set(event) == {"workspace_id", "topics", "reset", "at"}  # 只有失效提示，没有数据
 
 
 def test_automation_secrets_are_write_only() -> None:
-    schemas = _schemas()
-    upsert = schemas["AutomationConnectionUpsert"]["properties"]
+    upsert = _properties("AutomationConnectionUpsert")
     for field in ("api_key", "trigger_secret"):
-        variants = upsert[field]["anyOf"]  # type: ignore[index]
+        variants = upsert[field]["anyOf"]
         assert variants[0]["writeOnly"] is True, field
-    out = schemas["AutomationConnectionOut"]["properties"]
+    out = _properties("AutomationConnectionOut")
     assert not {"api_key", "trigger_secret"} & set(out)
     assert {"api_key_set", "trigger_secret_set", "tested_version"} <= set(out)
-    run = schemas["AutomationRunOut"]["properties"]
+    run = _properties("AutomationRunOut")
     assert not {"payload", "result", "data", "params"} & set(run)  # 只存错误摘要（规范 7.5）
 
 
@@ -663,7 +668,8 @@ async def test_notification_rules(stub_client: httpx.AsyncClient) -> None:
     for name, body in cases.items():
         response = await stub_client.patch("/api/v1/notifications", json=body, headers=WORKSPACE)
         assert response.status_code == 422, name
-    for body in [{"all": True}, {"ids": [some]}]:
+    valid: list[dict[str, object]] = [{"all": True}, {"ids": [some]}]
+    for body in valid:
         response = await stub_client.patch("/api/v1/notifications", json=body, headers=WORKSPACE)
         assert response.status_code == 501, body
     too_many = await stub_client.get(
