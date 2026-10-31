@@ -13,8 +13,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
+from app.api.agent_api import instance_principal
 from app.api.deps import (
     authenticated,
+    get_agent_service,
     get_automation_service,
     get_calendar_service,
     get_db,
@@ -323,6 +325,7 @@ def any_role(app: FastAPI) -> None:
         get_operations_service,
         get_notification_service,
         get_automation_service,
+        get_agent_service,
     ):
         app.dependency_overrides[service] = _ShapeOnlyService
 
@@ -1146,7 +1149,11 @@ async def test_v2_instance_and_secret_payload_rules(stub_client: httpx.AsyncClie
     assert created.status_code == 501
 
 
-async def test_v2_agent_api_payload_rules(stub_client: httpx.AsyncClient) -> None:
+async def test_v2_agent_api_payload_rules(app: FastAPI, stub_client: httpx.AsyncClient) -> None:
+    unauthenticated = await stub_client.post("/agent-api/v1/secrets/resolve", json={"ids": []})
+    assert unauthenticated.status_code != 422  # 先认证再校验：未认证的请求看不到校验细节
+    app.dependency_overrides[instance_principal] = lambda: None
+    app.dependency_overrides[get_agent_service] = _ShapeOnlyService
     resolve = "/agent-api/v1/secrets/resolve"
     for name, body in _cases(
         {

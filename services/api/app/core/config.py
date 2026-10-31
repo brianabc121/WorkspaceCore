@@ -5,6 +5,7 @@
 """
 
 from functools import lru_cache
+from ipaddress import IPv4Network, IPv6Network, ip_network
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -62,6 +63,10 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=10, ge=0, le=100)
     # 只在 API 前面有可信反向代理（Compose 中的 Caddy）时开启，取 X-Forwarded-For 最右侧的地址
     trust_forwarded_for: bool = False
+    # V2 实例接口：接入入口 Caddy 的地址（逗号分隔的 IP 或网段）。只有直接来自这些地址的请求，
+    # 才采用 Caddy 加的 X-MyWS-Ingress 与 X-MyWS-Client-Cert-SHA256；其他来源（包括同一网络里的
+    # 其他容器）带这两个请求头也不算。为空时实例接口一律 401
+    agent_ingress_trusted_proxies: str = ""
 
     # 第三方集成（Sprint 3 契约第 4.3 节）：解析到私有地址时只允许这些主机名（逗号分隔），
     # 例如 Compose 中独立部署的 vikunja；其余私有、回环、链路本地地址一律拒绝（SSRF 防护）
@@ -163,6 +168,25 @@ class Settings(BaseSettings):
     def trusted_origins(self) -> frozenset[str]:
         candidates = [self.public_base_url, *self.cors_allowed_origins.split(",")]
         return frozenset(o for c in candidates if c.strip() and (o := origin_of(c)))
+
+    @property
+    def agent_ingress_proxy_networks(self) -> tuple[IPv4Network | IPv6Network, ...]:
+        return tuple(
+            ip_network(part.strip(), strict=False)
+            for part in self.agent_ingress_trusted_proxies.split(",")
+            if part.strip()
+        )
+
+    @field_validator("agent_ingress_trusted_proxies")
+    @classmethod
+    def _networks(cls, value: str) -> str:
+        for part in value.split(","):
+            if part.strip():
+                try:
+                    ip_network(part.strip(), strict=False)
+                except ValueError:
+                    raise ValueError("必须是逗号分隔的 IP 地址或网段") from None
+        return value
 
     @property
     def allowed_integration_hosts(self) -> frozenset[str]:

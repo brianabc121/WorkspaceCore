@@ -31,7 +31,8 @@
 - **路由隔离靠 Caddy，API 再检查一次**：
   - 管理员入口只把 `/api/*` 转给 API，所以 `/agent-api`、`/mcp`、`/internal` 从浏览器那边到不了；
   - 接入入口默认拒绝，只放行上表的路径，其余返回 404；
-  - 接入入口给请求加 `X-MyWS-Ingress: intranet|public`（外网另加 `X-MyWS-Client-Cert-SHA256`）。管理员入口删掉这两个请求头。API 只在请求来自配置的代理地址时才相信它们（OC-2 实现）。
+  - 接入入口给请求加 `X-MyWS-Ingress: intranet|public`（外网另加 `X-MyWS-Client-Cert-SHA256`）。管理员入口删掉这两个请求头。
+  - API 只在请求的直接对端属于 `AGENT_INGRESS_TRUSTED_PROXIES`（接入入口 Caddy 的地址或网段）时才相信它们，不看 `X-Forwarded-For`；同一网络里其他容器带这两个请求头也不算。为空时实例接口一律 401（OC-2 实现）。
 - **实例凭证不能调用管理员接口，会话也不能调用实例接口**。审批只在管理员接口里，所以 AI 无法批准。
 - 错误格式沿用规范第 6 节；新错误码见第 12 节。未实现的端点返回 501，但不写进 OpenAPI。
 
@@ -408,6 +409,7 @@
 | 403 | `STEP_UP_REQUIRED` | 批准高危操作没有带密码 |
 | 403 | `STEP_UP_FAILED` | 批准高危操作的密码错误 |
 | 409 | `AGENT_DISABLED` | 对已停用的实例生成接入包 |
+| 409 | `AGENT_SECRET_EXISTS` | 工作空间里已有同名的密钥（`details.existing_id`；OC-2 补充） |
 | 409 | `IM_NOT_READY` | 实例的 IM 账号还没就绪 |
 | 409 | `IM_SEND_REJECTED` | OpenIM 拒收了这条消息 |
 | 409 | `PIN_LIMIT_REACHED` | 会话里置顶的消息已经有 10 条 |

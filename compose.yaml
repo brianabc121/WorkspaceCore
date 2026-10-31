@@ -79,6 +79,8 @@ services:
       # 第三方连接凭证的加密密钥；格式错误时 API 拒绝启动
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS: ${CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS:-}
+      # V2 实例接口：接入入口 Caddy 的地址（OC-2 第 4 部分加入接入入口后设置）；为空时实例接口一律 401
+      AGENT_INGRESS_TRUSTED_PROXIES: ${AGENT_INGRESS_TRUSTED_PROXIES:-}
       # Connector 默认拒绝私有地址（SSRF 防护）；这里显式允许 integrations 网络里的 Vikunja、n8n 容器
       INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-vikunja,n8n}
       # GitHub REST API 的地址；只有 CI 验收会改成模拟服务（Sprint 4 契约第 6.1 节）。
