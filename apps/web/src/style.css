@@ -190,3 +190,26 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .integration-card dd { margin: 4px 0 12px; overflow-wrap: anywhere; }
 .search-results a { display: block; width: 100%; padding: 12px; margin-top: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
 .search-results a:hover, .search-results a:focus-visible { border-color: var(--accent); }
+
+/* Operations: scoped summaries, null-safe trends and readable data tables. */
+.service-grid, .metrics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.service-record, .metric-view { min-width: 0; border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-wrap: anywhere; }
+.service-record .section-heading { margin: 0 0 10px; gap: 12px; flex-wrap: wrap; }
+.service-state { font-size: .85rem; border-radius: 6px; padding: 4px 8px; background: var(--accent-soft); }
+.service-record[data-state="down"] .service-state { border: 1px solid #dc6672; }
+.service-record[data-state="degraded"] .service-state { border: 1px solid #b88b37; }
+.service-record[data-state="not_configured"] .service-state, .service-record[data-state="unknown"] .service-state { background: var(--bg); color: var(--muted); }
+.service-record p, .metric-view p { margin-top: 8px; }
+.metric-chart { width: 100%; height: 130px; margin-top: 12px; overflow: visible; }
+.metric-chart polyline { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.metric-chart circle { fill: var(--accent); }
+.metric-axis { stroke: var(--line); }
+.metric-table-scroll { max-width: 100%; max-height: 210px; overflow: auto; margin-top: 12px; }
+.metric-table-scroll table { width: 100%; font-size: .85rem; border-collapse: collapse; }
+.metric-table-scroll caption { text-align: left; color: var(--muted); padding-bottom: 8px; }
+.metric-table-scroll th, .metric-table-scroll td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); font-weight: 400; }
+.metric-table-scroll thead th { font-weight: 600; }
+.widget-body .service-grid, .widget-body .metrics-grid { grid-template-columns: minmax(0, 1fr); }
+.widget-body .service-record { padding: 12px; }
+.widget-body .service-record h3, .widget-body .metric-view h3 { margin: 0; font-size: 1rem; }
+@media (max-width: 760px) { .service-grid, .metrics-grid { grid-template-columns: minmax(0, 1fr); } }
