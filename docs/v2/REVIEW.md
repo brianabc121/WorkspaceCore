@@ -1,5 +1,9 @@
 # V2.0 设计资料包评审（claude，2026-10-31）
 
+> **后续**：评审之后，人类决定用 OpenClaw 接替 AI 方案，并说明 OpenClaw 将运行在另一台服务器上。
+> 优化方案见 [`OPENCLAW_PLAN.md`](OPENCLAW_PLAN.md)。本评审第 3 节曾建议“先只做 Codex、OpenClaw 推迟”，现在以人类的决定为准。
+> 第 4 节的安全意见（隔离、手机访问、Prompt Injection、审批疲劳、版本锁定）都已落进新方案。
+
 > 评审对象：`docs/v2/package/` 的 8 个文件，重点是 `AGENT_ARCHITECTURE_V2.md` 和 `AGENT_TASKS_V2.md`。
 > 评审方法：
 > - 通读全部文件，逐一和仓库现状（V1 代码、`docs/`、`.collab/`）对比。
