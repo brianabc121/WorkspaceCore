@@ -28,3 +28,4 @@ S6-01 ~ S6-03（AI provider 抽象、对话与消息、只读工具与检索、�
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-31 06:04 UTC · claude · 创建任务（owner: human）
+- 2026-10-31 08:57 UTC · claude · S6-04 ~ S6-06 已验收（docs/acceptance/sprint-6.md）。Sprint 6 只剩本任务的 AI 部分（S6-01 ~ S6-03、DoD 前两条、A14），等人类恢复 AI 服务选型后由 claude 拆分实施

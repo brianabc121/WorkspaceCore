@@ -50,6 +50,6 @@
 - [ ] S6-01 AI provider abstraction、conversations/messages。
 - [ ] S6-02 只读工具与搜索检索，权限边界。
 - [ ] S6-03 写工具审批、参数哈希、审计、反 Prompt Injection 测试。
-- [ ] S6-04 备份、隔离恢复与演练脚本。
-- [ ] S6-05 安全扫描、性能基准、完整端到端 Smoke Test。
-- [ ] S6-06 更新部署文档、版本表、升级/回滚说明、发布 checklist。
+- [x] S6-04 备份、隔离恢复与演练脚本。
+- [x] S6-05 安全扫描、性能基准、完整端到端 Smoke Test。
+- [x] S6-06 更新部署文档、版本表、升级/回滚说明、发布 checklist。
