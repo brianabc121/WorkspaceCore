@@ -16,4 +16,5 @@ services:
       - ./probes/webhook-stub.py:/stub/webhook-stub.py:ro
     networks: [openim]
   openim-server:
-    depends_on: [mongo, redis, etcd, kafka, minio, webhook-stub]
+    depends_on:
+      webhook-stub: {condition: service_started}

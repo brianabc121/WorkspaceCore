@@ -29,11 +29,25 @@ jobs:
           node-version: "22.23.4"
       - name: 构建补丁镜像
         run: infra/openim/server/build.sh
+      - name: 镜像扫描（trivy：高危只报告，有修复的严重漏洞就失败）
+        run: |
+          # 与 scripts/security-scan.sh 用同一个锁定的 trivy 镜像
+          trivy_image="$(sed -n 's/^TRIVY_IMAGE="\(.*\)"$/\1/p' scripts/security-scan.sh)"
+          test -n "$trivy_image"
+          image="$(sed -n 's/^IMAGE="${1:-\(.*\)}"$/\1/p' infra/openim/server/build.sh)"
+          test -n "$image"
+          run() {
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$HOME/.cache/trivy:/root/.cache/trivy" \
+              "$trivy_image" image --quiet --skip-version-check --ignore-unfixed "$@" "$image"
+          }
+          run --severity HIGH,CRITICAL --format table
+          run --severity CRITICAL --exit-code 1 --format table
       - name: 生成 infra/openim/.env（随机密码）
         run: |
           umask 077
           {
-            for v in OPENIM_SECRET OPENIM_MONGO_ROOT_PASSWORD OPENIM_MONGO_PASSWORD OPENIM_REDIS_PASSWORD OPENIM_MINIO_SECRET; do
+            for v in OPENIM_SECRET OPENIM_MONGO_ROOT_PASSWORD OPENIM_MONGO_PASSWORD OPENIM_REDIS_PASSWORD OPENIM_MINIO_SECRET \
+                     OPENIM_ETCD_ROOT_PASSWORD OPENIM_ETCD_PASSWORD OPENIM_KAFKA_PASSWORD; do
               echo "$v=$(openssl rand -hex 16)"
             done
             echo "OPENIM_WEBHOOK_URL=http://webhook-stub:10006"
