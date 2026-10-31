@@ -403,6 +403,15 @@ def run_checks(base: str, report: Report) -> None:
     reset_stream.close()
     report.check("A16 无法续传时发 reset（要求重新拉取全部数据）", bool(reset) and reset["data"]["reset"] is True)
 
+    # 收尾：停用本次的 n8n 连接。模拟服务随脚本结束而删除，留着启用的连接
+    # 会让 Worker 每分钟对账失败；按主机计数的熔断器打开后，
+    # 之后的浏览器验收连同一个主机（fake-n8n）也会被拒绝
+    current = owner.request("GET", "/api/v1/automations/connection", headers=h).json()
+    owner.request(
+        "PUT", "/api/v1/automations/connection",
+        {"version": current["version"], "enabled": False}, headers=h,
+    )
+
 
 if __name__ == "__main__":
     sys.exit(main())

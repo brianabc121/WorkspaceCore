@@ -1,0 +1,9 @@
+import type { Schema } from '../src/services/api'
+export const at = '2026-10-31T04:00:00Z'
+export const notification: Schema['NotificationOut'] = { id: 'notice-a', type: 'future_type', severity: 'warning', title: '服务告警', body: '<img src=x onerror=alert(1)>纯文本', link: '/operations', read_at: null, created_at: at }
+export const notifications: Schema['NotificationPage'] = { items: [notification], unread_count: 2, next_cursor: null, total_estimate: 1 }
+export const run: Schema['AutomationRunOut'] = { id: 'run-a', automation_id: 'flow-a', status: 'unknown', external_execution_id: null, triggered_by: 'user-a', error_summary: null, started_at: null, finished_at: null, created_at: at }
+export const automation: Schema['AutomationOut'] = { id: 'flow-a', name: '生成日报', description: '合成工作流', workflow_id: 'Report1', webhook_path: 'report', enabled: true, workflow_active: true, params: [{ name: 'recipient', label: '收件人', type: 'string', required: true, max_length: 24, sensitive: true }, { name: 'count', label: '份数', type: 'number', required: true, sensitive: false }, { name: 'mode', label: '格式', type: 'string', required: false, sensitive: false, choices: ['摘要', '完整'] }, { name: 'send', label: '发送', type: 'boolean', required: true, sensitive: false }], last_run: run, version: 1, created_at: at, updated_at: at }
+export const automations: Schema['AutomationPage'] = { items: [automation], connection: { status: 'ok', as_of: at }, next_cursor: null, total_estimate: 1 }
+export const connection: Schema['AutomationConnectionOut'] = { configured: true, base_url: 'http://n8n:5678', public_url: 'https://n8n.example.test', api_key_set: true, trigger_secret_set: true, version: 2, status: 'active', tested_version: '2.45.7', last_tested_at: at, sync: { status: 'ok', as_of: at } }
+export const path = (r: Request) => new URL(r.url).pathname
