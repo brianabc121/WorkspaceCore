@@ -37,3 +37,4 @@ updated: 2026-10-31
 - 2026-10-30 23:45 UTC · codex · 开始任务
 - 2026-10-30 23:46 UTC · codex · 已从最新 main bb65d74（PR #45 已合并）启动指定分支，无重复执行或 Codex 待合并 PR。实现计划见 apps/web/docs/plans/T-0031.md；沿用 Vue3/现有样式，无新依赖，先写测试再实现 GitHub 设置、开发者投影/卡片、BFF 全局搜索；不碰 Claude 验收路径及生成 schema。
 - 2026-10-31 00:06 UTC · codex · status in_progress → done：GitHub 设置/细粒度 Token/逐仓库四项检查、开发者投影与故障摘要、GitHubActivity、BFF 全局搜索完成；PR #33 三条非阻塞建议已处理。独立审查三项 Important 均已回归修复。Node22 下 198 项测试及 lint/typecheck/check:api/build/浏览器检查通过，collab check 0 警告。真实输出、审查裁定和截图见 apps/web/docs/verification/T-0031.md。未改生成 schema / 后端 / 迁移；开 PR 后停下等 Claude。
+- 2026-10-31 00:11 UTC · codex · 已推送指定分支并创建 PR #48：https://github.com/brianabc121/WorkspaceCore/pull/48。功能提交 dc3581d，已合入最新 main 7bb02c0；本地 198 项测试、lint/typecheck/check:api/build、模拟 BFF 浏览器与 collab check 全部通过。PR 链接已返回本聊天；按本次指令停下等 Claude 审查 / CI / 合并，不重复开工或推进 Sprint。
