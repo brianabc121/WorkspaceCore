@@ -33,3 +33,4 @@ updated: 2026-10-31
 - 2026-10-31 17:57 UTC · claude · status in_progress → done：OC-1 契约完成：ADR、schema、接口桩、OpenAPI、schema.d.ts、api-contract.md、契约测试
 - 2026-10-31 18:11 UTC · claude · PR #77 的 ci-infra 在 Sprint 4 浏览器验收失败：测试先把模拟 GitHub 切到限流，再点“手动同步”；CI 每分钟一次的对账正好在两者之间碰到限流，按钮按设计被禁用，点击超时（main 上同一检查是绿的，属于测试与定时对账的竞态）。修复 tests/e2e/sprint4_browser.cjs：按钮已禁用时说明同步已经发生，直接检查开发者页的限流提示。越出 paths，原因同上
 - 2026-10-31 18:30 UTC · claude · 第二轮 ci-infra 在 make smoke-full 失败，是本 PR 引起的：full_smoke.cjs 按 openapi.json 遍历全部 GET 接口要求 200，新增的 V2 桩返回 501。修复：探测到 501 NOT_IMPLEMENTED 时单独列出不算失败（其他非 200 照常失败），页面检查开始前不把这些 URL 的 501 记为控制台错误；页面阶段的 501 照常算失败。本地把分支 API 代码只读挂进本会话自己的 api 容器后运行 full_smoke：全部通过（27 个读接口 200，10 个已声明未实现）
+- 2026-10-31 18:43 UTC · claude · 第三轮 ci-infra 的 Sprint 4 浏览器验收又撞上整分钟的定时对账：这次点击成功，但对账正持有同步锁，手动同步返回 409 SYNC_IN_PROGRESS，“同步已排队”没出现。改为三种情况都接受（按钮已禁用 / 已排队 / 同步正在进行），开发者页的限流提示最多等 90 秒（最迟下一次对账会碰到限流，模拟限流持续 120 秒）。本地运行 sprint4_browser.cjs 全部通过
