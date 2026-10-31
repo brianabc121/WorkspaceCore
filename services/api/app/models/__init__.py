@@ -3,6 +3,16 @@
 在这里导入全部模型，Alembic 的 target_metadata 才能看到它们。
 """
 
+from app.models.agent import (
+    AgentCa,
+    AgentCredential,
+    AgentInstance,
+    AgentSecret,
+    AgentSecretAccess,
+    AgentSecretGrant,
+    AgentSecretVersion,
+    AgentSettings,
+)
 from app.models.audit import AuditLog
 from app.models.automation import Automation, AutomationConnection, AutomationRun
 from app.models.base import NAMING_CONVENTION, Base
@@ -24,6 +34,14 @@ from app.models.workspace import Workspace, WorkspaceMember
 
 __all__ = [
     "NAMING_CONVENTION",
+    "AgentCa",
+    "AgentCredential",
+    "AgentInstance",
+    "AgentSecret",
+    "AgentSecretAccess",
+    "AgentSecretGrant",
+    "AgentSecretVersion",
+    "AgentSettings",
     "AuditLog",
     "AuthSession",
     "Automation",
