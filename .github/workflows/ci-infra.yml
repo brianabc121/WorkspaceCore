@@ -30,6 +30,8 @@ jobs:
       - name: docker compose config
         run: |
           docker compose config --quiet
+          # 可选监控（Prometheus + Grafana，docs/deployment.md 第 12 节）
+          docker compose --profile monitoring config --quiet
           # 独立部署的 Vikunja（infra/vikunja/compose.yaml）；在 Sprint 3 验收前启动
           docker compose -p my-workspace-vikunja -f infra/vikunja/compose.yaml --env-file .env config --quiet
       - name: 构建并启动（make up）

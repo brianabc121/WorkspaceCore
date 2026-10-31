@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.connectors import sync_state
+from app.domain.operations import DeploymentHealth
 from app.integrations.vikunja import PROVIDER
 from app.models import CalendarEvent, KnowledgeSource
 from app.repositories import integrations as integration_repo
@@ -224,14 +225,41 @@ class GitHubProvider:
         )
 
 
+class OperationsProvider:
+    """首页的 operations 模块（Sprint 5 契约第 7.1 节）。
+
+    核心服务都正常为 ok；有核心服务 down 为 unavailable（reason: service_down）；
+    只有可选组件或集成有问题时仍为 ok，具体看运维页。
+    """
+
+    name = "operations"
+    timeout_seconds = 2.5
+
+    def __init__(self, health: Callable[[], DeploymentHealth] | None = None) -> None:
+        self._health = health
+
+    async def fetch(self, workspace_id: uuid.UUID) -> ModuleResult:
+        if self._health is None:
+            return ModuleResult(status=unavailable("not_configured", retryable=False))
+        core = await self._health().core()
+        if any(item.status == "down" for item in core):
+            return ModuleResult(status=unavailable("service_down", retryable=True))
+        return ModuleResult(
+            status=ModuleStatus(status="ok", as_of=datetime.now(UTC), retryable=True)
+        )
+
+
 def default_providers(
-    sessions: Callable[[], AsyncSession] | None = None, stale_after_seconds: int = 900
+    sessions: Callable[[], AsyncSession] | None = None,
+    stale_after_seconds: int = 900,
+    health: Callable[[], DeploymentHealth] | None = None,
 ) -> list[ModuleProvider]:
     return [
         TasksProvider(sessions, stale_after_seconds),
         CalendarProvider(sessions),
         KnowledgeProvider(sessions),
         GitHubProvider(sessions, stale_after_seconds),
+        OperationsProvider(health),
     ]
 
 

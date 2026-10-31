@@ -4,20 +4,23 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app import __version__
 from app.api import health
 from app.api import v1 as api_v1
+from app.api.deps import deployment_health
 from app.core.config import Settings, get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
+from app.core.metrics import CONTENT_TYPE, HttpMetrics
 from app.core.middleware import install_middleware
 from app.core.resources import create_engine, create_redis
 from app.domain import overview
 from app.domain.connectors import ConnectorRuntime
 from app.domain.credentials import CredentialBox
+from app.domain.operations import ServiceCache
 from app.integrations.http import CircuitBreaker
 from app.jobs.queue import ArqJobQueue
 
@@ -64,9 +67,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         generate_unique_id_function=lambda route: route.name,
     )
     app.state.settings = settings
+    app.state.http_metrics = HttpMetrics()
+    app.state.service_cache = ServiceCache()
     # 首页聚合的模块数据来源；测试可以替换成会失败或超时的 provider
     app.state.module_providers = overview.default_providers(
-        lambda: app.state.sessionmaker(), settings.sync_stale_after_seconds
+        lambda: app.state.sessionmaker(),
+        settings.sync_stale_after_seconds,
+        lambda: deployment_health(app),
     )
     # Connector 共用的出站策略与熔断状态；测试可以替换 transport（httpx.MockTransport）
     app.state.connectors = ConnectorRuntime(settings, CircuitBreaker())
@@ -75,6 +82,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_middleware(app)
     app.include_router(health.router)
     app.include_router(api_v1.router)
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics(request: Request) -> Response:
+        # 只在内部网络供 Prometheus 抓取：Caddy 不转发 /metrics（Sprint 5 契约第 3.2 节）
+        body = request.app.state.http_metrics.render()
+        return Response(content=body, media_type=CONTENT_TYPE)
+
     return app
 
 

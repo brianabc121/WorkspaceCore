@@ -10,6 +10,7 @@ from arq import create_pool
 from arq.connections import RedisSettings
 from arq.worker import Worker
 
+from app.domain.operations import WORKER_HEARTBEAT_KEY
 from app.jobs.worker import heartbeat
 from app.main import create_app
 from tests.helpers import alembic_config, asyncpg_dsn, settings_for
@@ -110,5 +111,7 @@ async def test_worker_runs_heartbeat_job(redis_url: str) -> None:
         finally:
             await worker.close()
         assert await job.result(timeout=5) == "ok"
+        assert await pool.get(WORKER_HEARTBEAT_KEY) is not None  # 运维页读取的心跳
     finally:
+        await pool.delete(WORKER_HEARTBEAT_KEY)
         await pool.aclose()

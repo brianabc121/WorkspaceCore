@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, Header, Request, Response, Security
+from fastapi import Depends, FastAPI, Header, Request, Response, Security
 from fastapi.security import APIKeyCookie
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,7 @@ from app.domain.dashboards import DashboardService
 from app.domain.developer import DeveloperService
 from app.domain.integrations import IntegrationService
 from app.domain.knowledge import KnowledgeService
+from app.domain.operations import DeploymentHealth, OperationsService
 from app.domain.search import SearchService
 from app.domain.security import csrf_token_for, csrf_token_matches
 from app.domain.tasks import TaskService
@@ -124,6 +125,23 @@ def get_developer_service(
 
 def get_search_service(db: Annotated[AsyncSession, Depends(get_db)]) -> SearchService:
     return SearchService(db)
+
+
+def deployment_health(app: FastAPI) -> DeploymentHealth:
+    """部署级检查；readiness_checks 与 redis 在 lifespan 里才创建，所以每次现取。"""
+    return DeploymentHealth(
+        app.state.redis,
+        app.state.settings,
+        app.state.connectors,
+        app.state.readiness_checks,
+        app.state.service_cache,
+    )
+
+
+def get_operations_service(
+    request: Request, db: Annotated[AsyncSession, Depends(get_db)]
+) -> OperationsService:
+    return OperationsService(db, deployment_health(request.app))
 
 
 def get_task_service(

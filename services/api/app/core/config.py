@@ -76,10 +76,31 @@ class Settings(BaseSettings):
     # 只有测试与 CI 验收会改成模拟服务，同时要把模拟服务的主机名加进 integration_allowed_hosts
     github_api_url: str = "https://api.github.com"
 
+    # 运维（Sprint 5 契约第 3 节）：都在内部网络，由部署配置，浏览器拿不到这些地址。
+    # 为空表示没有部署对应组件（docker compose --profile monitoring 启用）
+    prometheus_url: str = ""
+    grafana_url: str = ""
+    # 浏览器打开 Grafana 仪表盘的地址（外链），与上面的内部地址分开
+    grafana_dashboard_url: str = ""
+    monitoring_timeout_seconds: float = Field(default=3.0, gt=0, le=30)
+    # 服务状态检查结果的缓存时间；Worker 心跳超过这个时间没有更新就算 down
+    service_status_cache_seconds: float = Field(default=15.0, ge=0, le=300)
+    worker_heartbeat_stale_seconds: int = Field(default=180, ge=60, le=3600)
+    # 访问日志里的路径：path 为实际路径（不含查询串）；route 只记录路由模板，连路径参数也不记录
+    log_request_path: Literal["path", "route"] = "path"
+
     @field_validator("log_level", mode="before")
     @classmethod
     def _normalize_log_level(cls, value: object) -> object:
         return value.upper() if isinstance(value, str) else value
+
+    @field_validator("prometheus_url", "grafana_url", "grafana_dashboard_url")
+    @classmethod
+    def _http_url_or_blank(cls, value: str) -> str:
+        value = value.strip()
+        if value and (origin_of(value) is None or "@" in urlsplit(value).netloc):
+            raise ValueError("必须是不带用户名密码的 http(s) 地址")
+        return value.rstrip("/")
 
     @field_validator("session_secret", "setup_token", "credential_encryption_key", mode="before")
     @classmethod

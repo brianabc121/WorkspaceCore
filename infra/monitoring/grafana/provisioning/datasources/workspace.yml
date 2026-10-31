@@ -1,0 +1,10 @@
+# 只读的预置数据源（核验 ADR 第 4 节）：界面上不能修改或删除
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: workspace-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

@@ -18,6 +18,8 @@ dependencies = [
     "cryptography>=50.0.2,<51",
     # Connector 访问第三方服务（Sprint 3 起为运行时依赖），见 docs/decisions/2026-10-29-backend-stack.md
     "httpx>=0.28,<0.29",
+    # api 自身的指标（Sprint 5），见 docs/decisions/2026-10-31-prometheus-grafana-n8n-verification.md
+    "prometheus-client>=0.26,<0.27",
 ]
 
 [dependency-groups]
