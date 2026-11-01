@@ -22,7 +22,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeGuard
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +36,8 @@ from app.models import (
     AgentInstance,
     AgentSettings,
     ImAccount,
+    ImGroup,
+    ImGroupMember,
     ImMedia,
     WorkspaceMember,
 )
@@ -58,7 +60,19 @@ USERS_INFO_ROUTE = "/user/get_users_info"
 # 被拦截时插件不处理这个错误，OpenClaw 进程因未处理的 Promise 拒绝而退出（T-0059 验收发现）。
 # 请求体 {fromUserID, toUserID}：令牌用户必须是其中一方，另一方必须是本工作空间的 IM 用户
 FRIEND_APPLY_ROUTE = "/friend/get_designated_friend_apply"
+# 同样是 SDK 发消息前自己调用的（T-0059 验收发现，被拦截时消息发不出去）：
+# - 单聊前查对方的好友信息 {ownerUserID, friendUserIDs}：owner 必须是令牌用户，对方都在本工作空间；
+# - 群聊前查群成员信息 {groupID, userIDs}：令牌用户必须是群成员，查的也都是这个群的成员
+FRIENDS_INFO_ROUTE = "/friend/get_designated_friends"
+GROUP_MEMBERS_ROUTE = "/group/get_group_members_info"
+PAIR_ROUTES = frozenset(
+    {USERS_INFO_ROUTE, FRIEND_APPLY_ROUTE, FRIENDS_INFO_ROUTE, GROUP_MEMBERS_ROUTE}
+)
 PROTOBUF_ROUTES = frozenset({"/jssdk/get_active_conversations", "/jssdk/get_conversations"})
+
+
+def _str_list(value: object) -> TypeGuard[list[str]]:
+    return isinstance(value, list) and bool(value) and all(isinstance(v, str) for v in value)
 
 
 def blocked_body() -> dict[str, Any]:
@@ -236,7 +250,7 @@ class ImGateway:
         if route in PROTOBUF_ROUTES:
             owners = proto_string_fields(body, 1)
             return None if owners == [user] else 403
-        if route not in USER_ID_ROUTES and route not in (USERS_INFO_ROUTE, FRIEND_APPLY_ROUTE):
+        if route not in USER_ID_ROUTES and route not in PAIR_ROUTES:
             return 404
         try:
             payload = json.loads(body or b"{}")
@@ -250,6 +264,18 @@ class ImGateway:
                 return 403
             allowed = await self.workspace_im_users(instance.workspace_id)
             return None if set(wanted) <= allowed else 403
+        if route == FRIENDS_INFO_ROUTE:
+            friends = payload.get("friendUserIDs")
+            if payload.get("ownerUserID") != user or not _str_list(friends):
+                return 403
+            allowed = await self.workspace_im_users(instance.workspace_id)
+            return None if set(friends) <= allowed else 403
+        if route == GROUP_MEMBERS_ROUTE:
+            group_id, wanted = payload.get("groupID"), payload.get("userIDs")
+            if not isinstance(group_id, str) or not _str_list(wanted):
+                return 403
+            members = await self.group_members(instance.workspace_id, group_id)
+            return None if user in members and set(wanted) <= members else 403
         if route == FRIEND_APPLY_ROUTE:
             pair = (payload.get("fromUserID"), payload.get("toUserID"))
             if not all(isinstance(u, str) for u in pair) or user not in pair:
@@ -257,6 +283,19 @@ class ImGateway:
             other = pair[1] if pair[0] == user else pair[0]
             return None if other in await self.workspace_im_users(instance.workspace_id) else 403
         return None if payload.get("userID") == user else 403
+
+    async def group_members(self, workspace_id: uuid.UUID, group_id: str) -> set[str]:
+        """本工作空间这个群（未解散）的成员 IM ID；不是本工作空间的群返回空集合。"""
+        rows = await self.db.scalars(
+            select(ImGroupMember.im_user_id)
+            .join(ImGroup, ImGroup.id == ImGroupMember.group_pk)
+            .where(
+                ImGroup.workspace_id == workspace_id,
+                ImGroup.group_id == group_id,
+                ImGroup.dismissed_at.is_(None),
+            )
+        )
+        return set(rows.all())
 
     async def media_for_instance(self, media_id: uuid.UUID) -> ImMedia | None:
         """实例取图：只认已经发出的图片（能力地址）。"""
