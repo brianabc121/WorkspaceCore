@@ -20,9 +20,15 @@ TARGET = ROOT / ".env"
 PLACEHOLDER = "CHANGE_ME"
 
 
+# 要求 64 位十六进制的变量（32 字节）
+HEX32_KEYS = {"CREDENTIAL_ENCRYPTION_KEY", "OPENIM_GARAGE_RPC_SECRET", "OPENIM_S3_SECRET_KEY"}
+
+
 def random_value(key: str) -> str:
-    if key == "CREDENTIAL_ENCRYPTION_KEY":
-        return secrets.token_hex(32)  # 32 字节，十六进制表示
+    if key in HEX32_KEYS:
+        return secrets.token_hex(32)
+    if key == "OPENIM_S3_ACCESS_KEY":
+        return "GK" + secrets.token_hex(12)  # Garage 的访问密钥 ID 格式
     return secrets.token_hex(24)
 
 

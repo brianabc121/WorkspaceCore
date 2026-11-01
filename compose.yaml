@@ -33,6 +33,12 @@ x-api-env: &api-env
   # 由 POSTGRES_* 拼接，避免与数据库密码不一致；密码只用字母和数字（make env 生成的就是）
   DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-workspace}:${POSTGRES_PASSWORD:?请先运行 make env 生成 .env}@postgres:5432/${POSTGRES_DB:-workspace}
   REDIS_URL: redis://redis:6379/0
+  # V2 IM（OC-3）：独立部署的 OpenIM（infra/openim/compose.yaml，make openim-up）。
+  # OPENIM_API_URL 留空表示没有部署：IM 接口返回 503 IM_UNAVAILABLE，Worker 不做 IM 对账
+  OPENIM_API_URL: ${OPENIM_API_URL:-}
+  OPENIM_SECRET: ${OPENIM_SECRET:-}
+  # OpenIM 对象存储的地址，与 OpenIM 的 IMENV_MINIO_EXTERNALADDRESS 相同；留空时不能上传和显示图片
+  OPENIM_OBJECT_URL: ${OPENIM_OBJECT_URL:-}
 
 services:
   postgres:
@@ -84,6 +90,11 @@ services:
       # 接入包里写给 OpenClaw 的内网 / 外网入口地址；没有配置的入口不能生成接入包
       AGENT_INTRANET_URL: ${AGENT_INTRANET_URL:-}
       AGENT_PUBLIC_URL: ${AGENT_PUBLIC_URL:-}
+      # OpenIM 回调 /internal/openim/<口令>/<命令>：只接受 im 网络里 openim-server 的固定地址 <IM_NET>.2
+      OPENIM_CALLBACK_PATH_TOKEN: ${OPENIM_CALLBACK_PATH_TOKEN:-}
+      OPENIM_CALLBACK_ALLOWED_CIDRS: ${OPENIM_CALLBACK_ALLOWED_CIDRS:-${IM_NET:-172.31.252}.2/32}
+      # 写进图片消息的取图地址前缀；留空时按 AGENT_PUBLIC_URL / AGENT_INTRANET_URL 推出（OC-3 ADR 第 15 节）
+      AGENT_IM_OBJECT_BASE_URL: ${AGENT_IM_OBJECT_BASE_URL:-}
       # Connector 默认拒绝私有地址（SSRF 防护）；这里显式允许 integrations 网络里的 Vikunja、n8n 容器
       INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-vikunja,n8n}
       # GitHub REST API 的地址；只有 CI 验收会改成模拟服务（Sprint 4 契约第 6.1 节）。
@@ -110,8 +121,8 @@ services:
       retries: 10
       start_period: 10s
     # frontend 网络供 caddy 访问，也给 Connector 访问外网；integrations 连到独立部署的第三方服务（Vikunja 等）；
-    # monitoring 供 Prometheus 抓取 /metrics、api 检查 Prometheus / Grafana 是否就绪
-    networks: [backend, frontend, integrations, monitoring, agent-ingress]
+    # monitoring 供 Prometheus 抓取 /metrics、api 检查 Prometheus / Grafana 是否就绪；im 连到 OpenIM
+    networks: [backend, frontend, integrations, monitoring, agent-ingress, im]
     logging: *logging
 
   worker:
@@ -145,8 +156,9 @@ services:
       retries: 5
       start_period: 15s
     # Worker 经 integrations 访问同机部署的第三方服务，经 egress 访问外部托管的服务（GitHub 周期同步）；
-    # 出站地址仍由 Connector 的 SSRF 检查限制；monitoring 用于健康告警检查 Prometheus / Grafana
-    networks: [backend, integrations, egress, monitoring]
+    # 出站地址仍由 Connector 的 SSRF 检查限制；monitoring 用于健康告警检查 Prometheus / Grafana；
+    # im 用于 IM 对账、账号登记
+    networks: [backend, integrations, egress, monitoring, im]
     logging: *logging
 
   web:
@@ -203,6 +215,8 @@ services:
       AGENT_PUBLIC_HOST: ${AGENT_PUBLIC_HOST:-public.invalid}
       # 内网入口只接受这些来源（空格分隔）；默认是私网地址与 Tailscale 的 100.64.0.0/10
       AGENT_INTRANET_ALLOWED_CIDRS: ${AGENT_INTRANET_ALLOWED_CIDRS:-10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10}
+      # /im/ws 透传的目标：OpenIM 消息网关（agent-im 网络）
+      OPENIM_MSG_GATEWAY: ${OPENIM_MSG_GATEWAY:-openim-server:10001}
     ports:
       - "${AGENT_INTRANET_BIND:-127.0.0.1}:${AGENT_INTRANET_PORT:-8443}:8443"
       - "${AGENT_PUBLIC_BIND:-127.0.0.1}:${AGENT_PUBLIC_PORT:-9443}:9443"
@@ -226,6 +240,8 @@ services:
         ipv4_address: ${AGENT_INGRESS_NET:-172.31.250}.2
       # 发布端口用（internal 网络不能发布端口）；只有 agent-gateway 加入，所以访问 api 只能经 agent-ingress
       agent-edge: {}
+      # 只到 OpenIM 消息网关（/im/ws）；api 不在这个网络里，所以接入入口访问 api 仍然只经 agent-ingress
+      agent-im: {}
     logging: *logging
 
   # ---------------------------------------------------------------- 可选监控（--profile monitoring）
@@ -316,6 +332,19 @@ networks:
       config:
         - subnet: ${AGENT_INGRESS_NET:-172.31.250}.0/29
           ip_range: ${AGENT_INGRESS_NET:-172.31.250}.4/30
+  # OpenIM（infra/openim/compose.yaml，独立项目）→ 工作台：api、worker 与 OpenIM 的 openim-server（固定 <IM_NET>.2，
+  # API 只接受这个地址的回调）、garage（对象存储）。动态分配只用 .8 ~ .15；internal，不提供出网。
+  # 同一台机器上的第二套环境要换一个 IM_NET
+  im:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${IM_NET:-172.31.252}.0/28
+          ip_range: ${IM_NET:-172.31.252}.8/29
+  # 接入入口 → OpenIM 消息网关：只有 agent-gateway（--profile agents）与 openim-server。
+  # 由 agent-gateway 创建，所以要先 make agents-up 再 make openim-up
+  agent-im:
+    internal: true
 
 volumes:
   postgres-data:

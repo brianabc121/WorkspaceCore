@@ -2,7 +2,7 @@
 id: T-0055
 title: OC-3 OpenIM 部署与 IM 后端：infra/openim、连接器、好友同步、回调收件箱、消息投影与对账、群管理、防刷屏、图片（S6-02）
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: services/api/app,services/api/migrations,services/api/tests,infra/openim,infra/backup,scripts
@@ -17,17 +17,17 @@ updated: 2026-11-01
 部署 OpenIM，实现 IM 后端（方案第 4.4、4.5、6.1 节）。
 
 ## 验收标准
-- [ ] `infra/openim/compose.yaml`：digest 锁定、随机密码、不映射数据库端口；备份覆盖 MongoDB 与 MinIO
-- [ ] OpenIM 连接器：管理员令牌、用户注册、好友导入、建群与成员管理、代发、IM 令牌签发
-- [ ] 回调收件箱去重、消息投影、30 秒增量对账与每日全量对账；`/im/api` 接入网关的白名单与用户 ID 校验
-- [ ] 会话置顶、单条消息置顶、免打扰、分组、不能删好友（拦截加自动补回）、上线自动加好友
-- [ ] 防刷屏（连续 8 条、每分钟 6 条、可按群调整），禁止实例之间单聊；图片上传与代理显示，外链图片不加载
-- [ ] 后端测试覆盖以上规则，以及回调丢失后的对账
+- [x] `infra/openim/compose.yaml`：digest 锁定、随机密码、不映射数据库端口；备份覆盖 MongoDB 与 MinIO（对象存储已换成 Garage，备份覆盖 Garage；OC-3 ADR 第 16、17 节）
+- [x] OpenIM 连接器：管理员令牌、用户注册、好友导入、建群与成员管理、代发、IM 令牌签发（B1，真实实例测试 `tests/test_openim_live.py`）
+- [x] 回调收件箱去重、消息投影、30 秒增量对账与每日全量对账；`/im/api` 接入网关的白名单与用户 ID 校验（B2、B3、B6）
+- [x] 会话置顶、单条消息置顶、免打扰、分组、不能删好友（拦截加自动补回）、上线自动加好友（B3、B4a、B4b；实例侧 `/friend/delete_friend` 不在网关白名单）
+- [x] 防刷屏（连续 8 条、每分钟 6 条、可按群调整），禁止实例之间单聊；图片上传与代理显示，外链图片不加载（B2、B4b、B5；后端不代取外链，只给出 `external_url`，前端不自动加载属于 OC-4）
+- [x] 后端测试覆盖以上规则，以及回调丢失后的对账（模拟 OpenIM 的集成测试与真实补丁镜像测试；B7 起在真实部署上端到端验证）
 
 - [x] 自建打过补丁的 OpenIM 镜像（OC-0 ADR 第 6 节），锁定 digest；`infra/openim/probes/rest-authz.py` 对补丁镜像退出码为 0，并进入 CI
 - [x] 评估并替换 bitnamilegacy 的 kafka / minio / etcd，开启 etcd 认证与 Kafka SASL，调小 Kafka 日志段与保留期（从 OC-0 移来）
-- [ ] 图片：对象存储上传流程核验与实现（从 OC-0 移来）；OC-0 ADR F1（签发令牌会踢下线）、F2（导入好友前先查关系）、F7（日志里的消息内容）落实
-- [ ] 接入入口放行 `/im/ws`、`/im/api/*`、`/im/obj/*`（forward_auth 与网关），IM 连接经外网模式的本机隧道与双向证书跑通（从 OC-2 移来）
+- [x] 图片：对象存储上传流程核验与实现（从 OC-0 移来）；OC-0 ADR F1（签发令牌会踢下线）、F2（导入好友前先查关系）、F7（日志里的消息内容）落实（B5；F1 只在 im-token 接口签发、对账不签发；F2 `is_friend` 后再导入；F7 写进接入包 CHECKLIST）
+- [x] 接入入口放行 `/im/ws`、`/im/api/*`、`/im/obj/*`（forward_auth 与网关），IM 连接经外网模式的本机隧道与双向证书跑通（从 OC-2 移来；`/im/obj/*` 实为 `/im/obj/m/<media_id>`，见 OC-3 ADR 第 15、17 节）
 
 ## 背景 / 约束 / 参考
 - 依据：`docs/v2/TRANSFORMATION_PLAN.md`；论证与上游源码核对见 `docs/v2/OPENCLAW_PLAN.md`
@@ -48,3 +48,7 @@ updated: 2026-11-01
 - 2026-11-01 04:49 UTC · claude · 第 4 部分 B5（本地完成）：图片——上传（按文件头识别 PNG/JPEG/GIF/WebP，≤10 MiB，分片传到 OpenIM 对象存储）、发图（102，实例侧地址统一为本机回环 http://127.0.0.1:<AGENT_TUNNEL_PORT>/im/obj/m/<media_id>，因为 openclaw-channel 对图片地址发不带凭证的 GET）、显示（/im/media 只给上传者或能看到会话的管理员，后端代理，nosniff）、未用上传到期清理。迁移 0016。B4b 补验：指定群 ID、公告随建群写入在真实实例上通过；更正：imAdmin 不入群。真实补丁镜像 + Garage 端到端 5 项连续 3 次通过。人类同意 Docker 到时限后直接重启（写进 CLAUDE.md）。下一步：接入网关 /im/*（含 /im/obj/m 与内网实例的本机代理）
 - 2026-11-01 05:11 UTC · claude · 第 4 部分 B6a（本地完成，等 PR #89 合并后提交）：接入网关 IM 部分——IM 令牌按 HS256 在本地校验（锁定源码核实）；/internal/gateway/im-auth（forward_auth 放行 /im/ws：sendID、platformID、入口、证书、封禁）；/im/api 白名单与用户校验（含 jssdk protobuf 字段 1）；/im/obj/m/<media_id> 能力地址取图（偏离契约第 8 节，已注明）；agent.Caddyfile 加 IM 路由（route 固定 forward_auth 在 rewrite 之前、去掉 WebSocket 升级头，均为实测问题）。真实入口 Caddy + 补丁 OpenIM 端到端：WS 握手 101 / 篡改 401，REST 转发拿到真实应答。取图默认地址改为外网域名:隧道端口（Host 须与 SNI 一致）。下一步 B6b：内网实例接入包的本机代理与内网入口接受外网域名
 - 2026-11-01 05:16 UTC · claude · 第 4 部分 B6b（本地完成，与 B6a 同一个 PR）：内网实例的取图代理——工作台配置了外网入口时，内网实例的接入包增加 image-proxy（ghostunnel 客户端模式，127.0.0.1:<AGENT_TUNNEL_PORT> → 内网入口，--disable-authentication），OpenClaw 用 extra_hosts 把外网域名指到 127.0.0.1；agent.Caddyfile 的内网入口同时接受 AGENT_PUBLIC_HOST；CHECKLIST 补了一项。实测：经真实 ghostunnel 代理，Host 是外网域名的请求路由到 API，其他 Host 不进 API。PR #89（B5）已合并。下一步 B7：接入部署（compose 网络、OpenIM 回调地址与 before 回调失败即拒、环境变量、备份、端到端回调）
+- 2026-11-01 05:42 UTC · claude · 第 4 部分 B7a（本地完成）：接入部署——core 新增 internal 网络 im（api、worker 与 openim-server 固定 <IM_NET>.2、garage）与 agent-im（agent-gateway 与 openim-server；不让接入入口与 api 共用第二个网络，保证来源地址判断稳定）；OpenIM 去掉本机端口（移到 compose.probe.yaml，并在那里自建网络，ci-openim 不依赖工作台）；回调地址默认指向 API（口令必填），before 回调 failedContinue=false（上游默认 true）；对象存储地址默认 http://garage:3900；.env.example / make env 增加 OPENIM_* 与 IM_NET（按格式生成）；make openim-build/up/down/logs；restore-verify 改用 IM_NET=172.31.253。实测发现访问日志记下回调口令，已改为 *** （取图能力地址同样处理）。端到端：真实 make 流程起全套，before 回调放行与 5003 拒收、api 停止时 90004 失败即拒、after 回调入收件箱、经真实接入入口 /im/ws 101、/im/api、/im/obj/m 均通过，im 网络其他地址伪造回调 404。越出 paths：compose.yaml、Makefile、.env.example、docs/deployment.md（平台文件归 claude，D-0003）。下一步 B7b：备份覆盖 OpenIM 的 MongoDB 与 Garage
+- 2026-11-01 06:02 UTC · claude · 第 4 部分 B7b（本地完成，等 PR #91 合并后提交）：备份覆盖 OpenIM——scripts/openim_backup.sh：mongodump 归档（OpenIM 用户、密码不进命令行）与 Garage 元数据快照 + 节点身份 + 数据块打包，openim-info.json 记数量；backup.sh 在 OpenIM 运行时一并放进 restic 快照（配置了却没运行就警告）；restore-verify.sh 与 ci-openim 在不联网的临时容器里恢复并核对数量；restore 子命令只写入全新数据卷做真实恢复。实测：backup → restore-verify 通过；真实恢复演练好友一致、真实消息逐条一致、270 KB 图片字节一致、恢复后新消息序号 52/53（OpenIM 按块预留序号，不恢复 Redis 时往前跳，空号是 status 4 占位项、投影跳过；不备份 Redis 以免序号回退撞号）。下一步：PR、合并；之后外网模式 IM 经隧道的端到端，然后 OC-4
+- 2026-11-01 06:05 UTC · claude · 外网模式 IM 端到端（B7b 一并提交）：外网实例的接入包客户端证书 + ghostunnel 隧道 → 外网入口：im-token 200、/im/ws 101、/im/api 好友列表、按消息里的地址 http://public.test:18443/im/obj/m/<id> 取图字节一致、缩略图 200、伪造令牌 401。勾选“接入入口放行 /im/* 并经外网隧道跑通”一项
+- 2026-11-01 06:06 UTC · claude · status in_progress → done：OC-3 完成：补丁镜像与官方组件（第 1~3 部分）、OpenIM 连接器、账号与回调、投影与对账、管理员 IM 接口、群与通讯录、图片、接入网关 /im/*、接入部署与备份（B1~B7）。验收标准全部勾选；外网模式 IM 经隧道端到端通过。下一步 OC-4（T-0056）/ OC-5（T-0057）

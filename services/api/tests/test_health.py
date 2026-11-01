@@ -144,3 +144,21 @@ async def test_probe_requests_are_logged_at_debug_unless_failing(
         ("/api/v1/nope", 404, logging.INFO),
         ("/readyz", 503, logging.INFO),
     ]
+
+
+def test_secret_path_segments_are_redacted_in_access_log() -> None:
+    from app.core.middleware import _redact_path
+
+    token = "a" * 48
+    assert (
+        _redact_path(
+            f"/internal/openim/{token}/callbackAfterSendSingleMsgCommand",
+            "/internal/openim/{path_token}/{command}",
+        )
+        == "/internal/openim/***/callbackAfterSendSingleMsgCommand"
+    )
+    media = "284bf7a8-f490-4ccc-9015-1acafecd3f5e"
+    assert _redact_path(f"/im/obj/m/{media}", "/im/obj/m/{media_id}") == "/im/obj/m/***"
+    # 其他路由照旧记录实际路径；段数对不上时退回路由模板
+    assert _redact_path("/api/v1/tasks/7", "/api/v1/tasks/{task_id}") == "/api/v1/tasks/7"
+    assert _redact_path("/im/obj/m/x/y", "/im/obj/m/{media_id}") == "/im/obj/m/{media_id}"
