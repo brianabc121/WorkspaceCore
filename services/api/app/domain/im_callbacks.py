@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain import notifications
+from app.domain import notifications, ops_metrics
 from app.domain.im import NOTICE_USER_ID, is_im_admin, user_id_from_im
 from app.domain.ratelimit import WindowLimiter, _resolve
 from app.models import (
@@ -193,6 +193,8 @@ class CallbackJudge:
             nx=True,
             ex=STREAK_TTL_SECONDS,
         )
+        if first:
+            await ops_metrics.bump(self.redis, "im_relay_pauses")
         return Verdict(CallbackResponse.reject(5001), paused_group=group if first else None)
 
 

@@ -391,7 +391,24 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
 - **api 的 `/metrics`**
   - Caddy 只转发 `/api/*`、`/healthz`、`/readyz`，所以从外部访问 `/metrics` 只会得到前端页面。
   - 指标标签只有方法、路由模板和状态码类别，不含原始路径、查询串、Token。
-  - 容器之间可以访问 `api:8000/metrics`，内容只有请求计数与耗时。
+  - 容器之间可以访问 `api:8000/metrics`，内容是请求计数与耗时，以及下面的 V2 指标（全部工作空间合计）。
+- **V2 指标**（方案第 6.1 节，T-0062；`app/domain/ops_metrics.py`）：
+
+  | 指标 | 类型 | 含义 |
+  |---|---|---|
+  | `workspace_agent_instances{status}` | gauge | 登记的 OpenClaw 实例数：`pending` / `online` / `offline` / `disabled` |
+  | `workspace_agent_secret_resolves_total{result}` | counter | 实例取密钥（每个密钥 ID 一次）：`ok` / `not_found` / `rate_limited` |
+  | `workspace_agent_auth_failures_total{ingress}` | counter | 实例认证失败（凭证无效、吊销、停用、入口不符、缺客户端证书），按 `intranet` / `public` / `none` |
+  | `workspace_mcp_tool_calls_total{tool,outcome}` | counter | MCP 工具调用；`outcome` 为 `ok` 或工具错误码（小写），不认识的工具名记为 `unknown` |
+  | `workspace_ai_pending_approvals` | gauge | 等待人工审批、还没过期的写操作 |
+  | `workspace_im_inbox_events{status}` | gauge | OpenIM 回调收件箱里没处理完的事件：`pending` / `processing` / `retry` / `dead_letter` |
+  | `workspace_im_reconcile_filled_messages_total` | counter | 周期对账补进投影的消息（回调丢失或延迟时才会增加） |
+  | `workspace_im_relay_pauses_total` | counter | 群聊因实例连续发言达到上限而暂停自动接力的次数 |
+
+  - 计数类记在 Redis（api 的多个进程和 Worker 都会写），Redis 清空后从 0 重新计数；状态类在抓取时查 PostgreSQL。
+    数据库或 Redis 不可用时 `/metrics` 只返回请求指标。
+  - 标签里没有实例 ID、工作空间 ID、Token 或用户输入；单个实例的状态看工作台的运维页或实例页。
+  - Grafana 的预置仪表盘有对应的四个面板；运维页的服务列表里，OpenIM 与本工作空间的实例单独成组（实例只对 owner / admin 显示）。
 - **Grafana**（`grafana/grafana:13.2.5`）
   - 匿名访问、注册、嵌入（`allow_embedding`）都关闭，不向外报告统计；数据源与仪表盘是只读的预置文件。
   - 端口默认只绑定本机（`GRAFANA_BIND=127.0.0.1`）。对外开放时放在 HTTPS 反向代理后面，并设置 `GRAFANA_PUBLIC_URL`。

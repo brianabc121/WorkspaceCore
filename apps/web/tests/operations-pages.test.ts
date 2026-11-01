@@ -36,6 +36,18 @@ describe('运维页', () => {
     expect(requests.filter((r) => path(r).includes('/operations/')).every((r) => r.headers.get('X-Workspace-Id') === 'workspace-a')).toBe(true)
     expect(requests.every((r) => new URL(r.url).origin === window.location.origin)).toBe(true)
   })
+  it('shows OpenIM and OpenClaw instances as their own group with readable reasons', async () => {
+    operations((r) => path(r).endsWith('/services') ? Response.json({ ...services, items: [...services.items,
+      { id: 'openim', name: 'OpenIM', kind: 'agents', status: 'degraded', checked_at: opsTime, reason: 'inbox_backlog' },
+      { id: 'agent:a', name: '实例甲', kind: 'agents', provider: 'openclaw', status: 'down', checked_at: opsTime, reason: 'agent_offline' },
+      { id: 'agent:b', name: '实例乙', kind: 'agents', provider: 'openclaw', status: 'not_configured', checked_at: null, reason: 'agent_disabled' }] }) : undefined)
+    await openApp('/operations')
+    const openim = await screen.findByRole('region', { name: 'OpenIM' })
+    expect(within(openim).getByText('OpenClaw 与 IM')).toBeVisible()
+    expect(within(openim).getByText('IM 回调积压，消息投影可能落后')).toBeVisible()
+    expect(within(screen.getByRole('region', { name: '实例甲' })).getByText('实例离线（IM 未连接）')).toBeVisible()
+    expect(within(screen.getByRole('region', { name: '实例乙' })).getByText('实例已停用')).toBeVisible()
+  })
   it('splits metric trends at null samples, preserves genuine zero and links Grafana safely', async () => {
     operations(); await openApp('/operations')
     const view = await screen.findByRole('region', { name: 'API P95 延迟' })

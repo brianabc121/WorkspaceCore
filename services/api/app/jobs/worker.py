@@ -31,6 +31,7 @@ from app.domain import (
     im,
     im_projection,
     notifications,
+    ops_metrics,
     sync,
 )
 from app.domain.ai_tools import AiToolService
@@ -138,13 +139,21 @@ async def process_im_inbox(ctx: dict[str, Any]) -> int:
 async def reconcile_im(ctx: dict[str, Any]) -> int:
     """IM 增量对账（每 30 秒）：按管理员账号的 newest_seq 补齐有变化的会话。"""
     im_ctx = _im(ctx)
-    return await im_projection.reconcile(im_ctx) if im_ctx is not None else 0
+    if im_ctx is None:
+        return 0
+    written = await im_projection.reconcile(im_ctx)
+    await ops_metrics.bump(ctx["redis"], "im_reconcile_filled", amount=written)
+    return written
 
 
 async def reconcile_im_full(ctx: dict[str, Any]) -> int:
     """IM 全量对账（每天一次）：重新拉每个会话最近 1000 条，补上中间缺的。"""
     im_ctx = _im(ctx)
-    return await im_projection.reconcile(im_ctx, full=True) if im_ctx is not None else 0
+    if im_ctx is None:
+        return 0
+    written = await im_projection.reconcile(im_ctx, full=True)
+    await ops_metrics.bump(ctx["redis"], "im_reconcile_filled", amount=written)
+    return written
 
 
 async def send_approval_cards(ctx: dict[str, Any], execution_id: str) -> int:
