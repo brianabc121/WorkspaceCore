@@ -205,3 +205,30 @@ OC-0 的回归测试脚本没有覆盖这一项，覆盖它的是这个单元测
 
 - 预签名链接的外部地址经接入入口（`/im/obj`）提供；外链图片不加载（工作台代理显示）。这些属于接入工作台与 IM 后端部分。
 - Garage 数据卷纳入 restic 备份与 A15 恢复演练。
+
+## 9. 第 4 部分（B1）：OpenIM 连接器与核验（2026-11-01）
+
+`services/api/app/integrations/openim.py`：工作台后端以 imAdmin 身份调用 OpenIM REST 的连接器。
+- 管理员令牌缓存在 Redis，到期前 1 小时刷新；遇到令牌类错误（1501 ~ 1507）重取一次。
+- 复用 `ConnectorHttp`（超时、熔断、错误归类）；OpenIM 地址由部署配置放行。
+
+在补丁镜像上实测（`tests/test_openim_live.py`，连续 3 次通过）：
+
+| 契约第 13 节 / 连接器依赖的行为 | 结论 |
+|---|---|
+| `ws_` / `oc_` 加 32 位十六进制的用户 ID（35 个字符） | 可用 |
+| IM 令牌有效期能否按次指定 | **不能**：`/auth/get_user_token` 只收 `userID`、`platformID`；有效期由 `openim-rpc-auth.yml` 的 `tokenPolicy.expire`（天，默认 90）决定，接入部署时改成 30 |
+| protobuf 的 StringValue / BoolValue / Int32Value 字段（群名、群公告、昵称、置顶、免打扰）怎么写 | **按普通值写**。写成 `{"value": ...}` 返回 1001：OpenIM 的 JSON 解析把包装类型当标量 |
+| 重复注册 | 1102 `RegisteredAlreadyError`，归为 CONFLICT |
+| `is_friend` / `import_friend` | 导入是双向的；`is_friend` 要两个方向都为真 |
+| 以 `ws_` 用户代发后能否按序号拉回原文 | 能。会话里还有导入好友产生的通知（contentType 1201），所以投影要按 contentType 过滤 |
+| 群：建立、邀请、改名与公告、@ 消息（106，`{"text", "atUserList"}`）、移出、解散 | 全部可用；解散后再邀请会报错 |
+| 会话置顶、免打扰（`recvMsgOpt=2`）同步到 OpenIM | 可用 |
+
+- 错误码归类：
+  - 1101 / 1201 / 1203 / 1204 → NOT_FOUND；
+  - 1102 / 1202 / 1304 → CONFLICT；
+  - 1001 → VALIDATION_FAILED，1002 → AUTH_FAILED；
+  - 其余 → UNAVAILABLE；
+  - 错误信息里不带 OpenIM 的错误详情。
+- 数据表（IM 投影、收件箱、群与通讯录）和用到它们的业务代码一起，放在下一部分。
