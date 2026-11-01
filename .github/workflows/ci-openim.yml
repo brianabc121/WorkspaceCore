@@ -55,6 +55,9 @@ jobs:
             echo "OPENIM_S3_ACCESS_KEY=GK$(openssl rand -hex 12)"
             echo "OPENIM_S3_SECRET_KEY=$(openssl rand -hex 32)"
             echo "OPENIM_WEBHOOK_URL=http://webhook-stub:10006"
+            # compose.yaml 里回调地址的默认值引用了必填的口令；有的 Compose 版本即使覆盖了
+            # OPENIM_WEBHOOK_URL 也会先检查它，所以照样给一个（回调桩不看口令）
+            echo "OPENIM_CALLBACK_PATH_TOKEN=$(openssl rand -hex 24)"
             # 预签名链接要能被对象检查访问：检查脚本在 openim 网络的容器里运行
             echo "OPENIM_OBJECT_EXTERNAL_URL=http://garage:3900"
           } > infra/openim/.env

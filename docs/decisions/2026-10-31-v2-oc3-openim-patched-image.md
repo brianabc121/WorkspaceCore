@@ -460,7 +460,7 @@ OpenIM 仍是独立的 Compose 项目（方案第 6.1 节），这一批把它�
   - OpenIM 内部的 MongoDB、Redis、etcd、Kafka 只在自己的 `openim` 网络里，`im` 网络里看不到工作台的 PostgreSQL / Redis（实测解析不到）。
 - **回调**：
   - openim-server 在 `im` 网络里固定为 `<IM_NET>.2`（默认 `172.31.252.2`，子网 `/28`，动态地址只用 `.8/29`），API 的 `OPENIM_CALLBACK_ALLOWED_CIDRS` 默认就是 `<IM_NET>.2/32`；
-  - 回调地址默认 `http://api:8000/internal/openim/${OPENIM_CALLBACK_PATH_TOKEN}`，口令没有设置时 OpenIM 拒绝启动（嵌套的 `:?` 只在没有覆盖 `OPENIM_WEBHOOK_URL` 时求值，回归测试用的回调桩不受影响，已用 `docker compose config` 验证）；
+  - 回调地址默认 `http://api:8000/internal/openim/${OPENIM_CALLBACK_PATH_TOKEN}`，口令没有设置时 OpenIM 拒绝启动。嵌套的 `:?` 何时求值随 Compose 版本而变：本机 v5.6.1 只在没有覆盖 `OPENIM_WEBHOOK_URL` 时求值，GitHub 运行器上的版本覆盖了也会检查（`ci-openim` 第一次运行因此失败），所以回归测试生成的 `.env` 也给一个随机口令；
   - **before 回调失败即拒**：锁定镜像里的 `config/webhooks.yml` 中，`beforeSendSingleMsg`、`beforeSendGroupMsg` 默认 `failedContinue: true`（回调失败照样发出），所以用 `IMENV_WEBHOOKS_BEFORESENDSINGLEMSG_FAILEDCONTINUE=false` 与 `IMENV_WEBHOOKS_BEFORESENDGROUPMSG_FAILEDCONTINUE=false` 关掉。这就是契约第 10 节要求的“OC-3 配置并实测”。
 - **对象存储地址**：`IMENV_MINIO_EXTERNALADDRESS` 默认改为 `http://garage:3900`，与 API 的 `OPENIM_OBJECT_URL` 相同。只有 API 用这个地址，浏览器和实例都拿不到。
 - **端口**：openim-server 不再映射到 `127.0.0.1:10001/10002`。回归测试用的 `compose.probe.yaml` 把端口加回来，并把 `im` / `agent-im` 改为自己创建（带 `-probe` 后缀），所以 `ci-openim` 不需要启动工作台。

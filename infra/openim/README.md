@@ -36,7 +36,8 @@ infra/openim/server/build.sh        # 生成 my-workspace/openim-server:v3.8.3-p
 #   OPENIM_ETCD_ROOT_PASSWORD OPENIM_ETCD_PASSWORD OPENIM_KAFKA_PASSWORD
 #   OPENIM_GARAGE_RPC_SECRET 与 OPENIM_S3_SECRET_KEY 用 openssl rand -hex 32；OPENIM_GARAGE_ADMIN_TOKEN 随机；
 #   OPENIM_S3_ACCESS_KEY=GK$(openssl rand -hex 12)
-# 回归测试时 OPENIM_WEBHOOK_URL=http://webhook-stub:10006
+# 回归测试时 OPENIM_WEBHOOK_URL=http://webhook-stub:10006；OPENIM_CALLBACK_PATH_TOKEN 也要给一个随机值
+# （有的 Compose 版本即使覆盖了回调地址也会检查这个必填变量）
 docker compose -p my-workspace-openim -f infra/openim/compose.yaml -f infra/openim/compose.probe.yaml \
   --env-file infra/openim/.env up -d
 python3 -I infra/openim/probes/rest-authz.py --api http://127.0.0.1:10002 --secret "$OPENIM_SECRET"
