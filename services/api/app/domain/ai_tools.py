@@ -19,12 +19,12 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +36,7 @@ from app.domain.automations import AutomationService
 from app.domain.calendar import CalendarService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.credentials import CredentialBox, CredentialError
+from app.domain.im import NOTICE_USER_ID
 from app.domain.knowledge import KnowledgeService
 from app.domain.notifications import NotificationService, notify_admins
 from app.domain.policy import WorkspaceAccess, has_role, not_found
@@ -49,6 +50,10 @@ from app.models import (
     AiToolExecution,
     Automation,
     CalendarEvent,
+    ImConversation,
+    ImGroup,
+    ImGroupMember,
+    ImMessage,
     User,
     Workspace,
     WorkspaceMember,
@@ -80,6 +85,8 @@ logger = logging.getLogger("app.ai")
 SENSITIVE_MASK = "***"
 # 审批中心（前端 T-0056）里定位到这条记录
 APPROVAL_LINK = "/approvals?id={id}"
+# 推断 source 时只看最近这么久内收到的消息
+SOURCE_WINDOW = timedelta(minutes=10)
 SEALED_KEY = "$sealed"
 _UNKNOWN_CODES = frozenset({"RESULT_UNKNOWN", "WRITE_UNKNOWN"})
 
@@ -349,7 +356,7 @@ class AiToolService:
             display=_display(arguments, target.sensitive),
             stored=self._seal(arguments, target.sensitive, row_id),
             row_id=row_id,
-            source=source,
+            source=source or await self.infer_source(requester.instance),
             request_id=request_id,
         )
         row.target_version = target.version
@@ -415,6 +422,49 @@ class AiToolService:
             else:
                 opened[k] = v
         return {**arguments, "params": opened}
+
+    async def infer_source(self, instance: AgentInstance) -> ExecutionSource:
+        """MCP 请求不带会话信息：取这个实例最近收到的、管理员发来的私聊或 @ 它的群消息。
+
+        只看最近 SOURCE_WINDOW 内的消息；找不到时各字段为空，inferred 仍为 true（契约第 6 节）。
+        """
+        since = _now() - SOURCE_WINDOW
+        singles = select(ImConversation.conversation_id).where(
+            ImConversation.peer_instance_id == instance.id
+        )
+        groups = (
+            select(func.concat("sg_", ImGroup.group_id))
+            .join(ImGroupMember, ImGroupMember.group_pk == ImGroup.id)
+            .where(ImGroupMember.im_user_id == instance.im_user_id)
+        )
+        message: ImMessage | None = await self.db.scalar(
+            select(ImMessage)
+            .where(
+                ImMessage.workspace_id == instance.workspace_id,
+                ImMessage.sent_at >= since,
+                ImMessage.sender_im_id.startswith("ws_", autoescape=True),
+                ImMessage.sender_im_id != NOTICE_USER_ID,
+                or_(
+                    ImMessage.conversation_id.in_(singles),
+                    and_(
+                        ImMessage.conversation_id.in_(groups),
+                        ImMessage.at_im_ids.contains([instance.im_user_id]),
+                    ),
+                ),
+            )
+            .order_by(ImMessage.sent_at.desc(), ImMessage.id.desc())
+            .limit(1)
+        )
+        if message is None:
+            return ExecutionSource(
+                conversation_id=None, message_server_id=None, triggered_by_im_id=None, inferred=True
+            )
+        return ExecutionSource(
+            conversation_id=message.conversation_id,
+            message_server_id=message.server_msg_id,
+            triggered_by_im_id=message.sender_im_id,
+            inferred=True,
+        )
 
     async def _pending_duplicate(
         self, instance_id: uuid.UUID, tool_name: str, digest: str
