@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { adminOnly, navigation } from './app/navigation'
+import { adminOnly, navigation, ownerOnly } from './app/navigation'
 import { useThemeStore } from './stores/theme'
 import { useAuthStore } from './stores/auth'
 import { errorMessage } from './services/api'
@@ -16,7 +16,7 @@ const auth = useAuthStore()
 useWorkspaceEvents()
 const logoutError = ref('')
 const loggingOut = ref(false)
-const visibleNavigation = computed(() => auth.canManage ? [...navigation, { path: '/settings/audit', title: '审计日志', section: '管理' }] : navigation.filter((entry) => !adminOnly.has(entry.path)))
+const visibleNavigation = computed(() => (auth.canManage ? [...navigation, { path: '/settings/audit', title: '审计日志', section: '管理' }] : navigation.filter((entry) => !adminOnly.has(entry.path))).filter((entry) => auth.isOwner || !ownerOnly.has(entry.path)))
 async function logout() {
   if (loggingOut.value) return
   loggingOut.value = true

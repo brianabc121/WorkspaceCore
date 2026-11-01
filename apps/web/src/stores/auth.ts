@@ -12,6 +12,7 @@ export const useAuthStore = defineStore('auth', () => {
   const initializationError = ref<unknown>(null)
   const currentWorkspace = computed(() => workspaces.value.find((item) => item.id === workspaceId.value) ?? null)
   const canManage = computed(() => ['owner', 'admin'].includes(currentWorkspace.value?.role ?? ''))
+  const isOwner = computed(() => currentWorkspace.value?.role === 'owner')
   let pending: Promise<void> | null = null
   let sessionVersion = 0
   function clearSession() { sessionVersion++; user.value = null; workspaces.value = []; workspaceId.value = null }
@@ -52,5 +53,5 @@ export const useAuthStore = defineStore('auth', () => {
     await api.POST('/api/v1/auth/password', { body })
     sessionVersion++
   }
-  return { user, workspaces, workspaceId, currentWorkspace, canManage, setupRequired, initialized, loading, initializationError, api, initialize, acceptSession, clearSession, selectWorkspace, login, setup, logout, changePassword }
+  return { user, workspaces, workspaceId, currentWorkspace, canManage, isOwner, setupRequired, initialized, loading, initializationError, api, initialize, acceptSession, clearSession, selectWorkspace, login, setup, logout, changePassword }
 })
