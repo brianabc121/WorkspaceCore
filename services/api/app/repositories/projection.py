@@ -3,6 +3,11 @@
 任务的展示字段放在 metadata_json 里（project_resource_id、done、priority、due_at、labels、
 version 等）；
 V1 的数据量下按 JSONB 表达式过滤与排序即可，不另建列。
+
+并发（T-0061）：写投影的函数先取这个集成的事务级 advisory lock，同一个集成的投影写入事务
+（API 写任务、Webhook 处理、定时对账）依次进行。否则会死锁：对账重存项目时，搜索触发器
+改写这个项目下所有任务的搜索文档（先锁 search_documents 再锁任务行），API 删除任务的顺序相反。
+取锁时不自动 flush：会话里还没写出去的改动（例如集成状态）在拿到锁之后才写，不会先占住别的行锁。
 """
 
 import uuid
@@ -10,7 +15,7 @@ from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Integer, cast, func, or_, select, update
+from sqlalchemy import Boolean, DateTime, Integer, cast, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
@@ -26,6 +31,13 @@ _done = cast(_meta["done"].astext, Boolean)
 _priority = cast(_meta["priority"].astext, Integer)
 _due_at = cast(_meta["due_at"].astext, DateTime(timezone=True))
 _project = _meta["project_resource_id"].astext
+_LOCK = text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))")
+
+
+async def lock_integration(db: AsyncSession, integration_id: uuid.UUID) -> None:
+    """取这个集成的投影写锁，到事务结束自动释放；同一事务里重复取不会阻塞。"""
+    with db.no_autoflush:
+        await db.execute(_LOCK, {"key": f"projection:{integration_id}"})
 
 
 async def upsert(
@@ -41,6 +53,7 @@ async def upsert(
     source_updated_at: datetime | None,
 ) -> ExternalResource:
     """写入或更新投影；外部更新时间比已存的旧时不覆盖（乱序的事件不写入旧数据）。"""
+    await lock_integration(db, integration_id)
     events.mark(db, workspace_id, *events.resource_topics(resource_type))
     values = {
         "workspace_id": workspace_id,
@@ -114,6 +127,7 @@ async def get_any(
 
 
 async def tombstone(db: AsyncSession, resource: ExternalResource) -> None:
+    await lock_integration(db, resource.integration_id)
     await db.execute(
         update(ExternalResource)
         .where(ExternalResource.id == resource.id, ExternalResource.deleted_at.is_(None))
@@ -129,6 +143,7 @@ async def tombstone_missing(
 
     返回被记 tombstone 的外部 ID。
     """
+    await lock_integration(db, integration_id)
     stmt = (
         update(ExternalResource)
         .where(
@@ -146,6 +161,7 @@ async def tombstone_missing(
 async def tombstone_external(
     db: AsyncSession, *, integration_id: uuid.UUID, resource_type: str, external_id: str
 ) -> None:
+    await lock_integration(db, integration_id)
     await db.execute(
         update(ExternalResource)
         .where(
@@ -164,6 +180,7 @@ async def tombstone_project_tasks(
     """项目在 Vikunja 里删除后，它的任务也随之消失（Vikunja 不为这些任务单独发事件）。"""
     if not project_external_ids:
         return
+    await lock_integration(db, integration_id)
     await db.execute(
         update(ExternalResource)
         .where(
