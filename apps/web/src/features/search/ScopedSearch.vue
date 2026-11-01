@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useInfiniteQuery } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { useDashboardSearch } from '../../stores/dashboardSearch'
-import { navigation } from '../../app/navigation'
+import { adminOnly, navigation } from '../../app/navigation'
 import { dataOf, errorMessage, isAccessError } from '../../services/api'
 import { parseWidget, registry } from '../../widgets/registry'
 import { formatTime } from '../time'
@@ -30,7 +30,7 @@ const remote = computed(() => !ready.value || denied.value ? [] : [...new Map((q
 const groups = computed(() => (Object.keys(searchTypes) as SearchType[]).map((kind) => ({ kind, title: searchTypes[kind], items: remote.value.filter((item) => item.resource_type === kind) })).filter((group) => group.items.length))
 const providers = { vikunja: 'Vikunja', github: 'GitHub', affine: 'AFFiNE', local: '工作台日历' }
 const entries = computed(() => [
-  ...navigation.filter((entry) => entry.path !== '/settings/integrations' || auth.canManage).map((entry) => ({ label: entry.title, detail: '', path: entry.path })),
+  ...navigation.filter((entry) => !adminOnly.has(entry.path) || auth.canManage).map((entry) => ({ label: entry.title, detail: '', path: entry.path })),
   ...(auth.canManage ? [{ label: '审计日志', detail: '', path: '/settings/audit' }] : []),
   ...(denied.value ? [] : dashboard.widgets.flatMap((widget) => {
     const value = parseWidget(widget)
