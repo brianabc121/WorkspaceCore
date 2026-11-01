@@ -65,7 +65,7 @@ async def new_instance(env: Env | N8nEnv, *, scope: str = "read_write", name: st
 async def call(
     env: Env | N8nEnv, instance_id: str, tool: str, args: dict[str, Any]
 ) -> PendingApproval:
-    """MCP 写工具（第 2 批接上 /mcp 之前直接调用领域服务）。"""
+    """直接调用领域服务（经 /mcp 的调用见 tests/test_mcp_api.py）。"""
     app = app_of(env.client)
     async with app.state.sessionmaker() as db:
         service = AiToolService(db, app.state.settings, app.state.connectors, app.state.redis)

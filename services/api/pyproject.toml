@@ -20,6 +20,8 @@ dependencies = [
     "httpx>=0.28,<0.29",
     # api 自身的指标（Sprint 5），见 docs/decisions/2026-10-31-prometheus-grafana-n8n-verification.md
     "prometheus-client>=0.26,<0.27",
+    # MCP 工具服务器（V2 OC-5），版本在 OC-0 锁定：docs/decisions/2026-10-31-v2-oc0-openclaw-openim-verification.md 第 7 节
+    "mcp==2.3.0",
 ]
 
 [dependency-groups]

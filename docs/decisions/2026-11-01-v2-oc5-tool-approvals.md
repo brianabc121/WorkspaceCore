@@ -4,7 +4,7 @@
 - 日期：2026-11-01
 - 作者：claude（协作任务 T-0057，OC-5 第 1 批）
 - 依据：`docs/v2/TRANSFORMATION_PLAN.md` 第 4.6 节；`docs/decisions/2026-10-31-v2-oc1-contract.md` 第 2、6 节
-- 范围：第 1 批只做记录表、审批流程和执行器；`POST /mcp`、读工具、审批卡片在后续批次（见第 8 节）
+- 范围：第 1 批是记录表、审批流程和执行器；第 2 批是 `POST /mcp`（第 8 节）；读工具与审批卡片在后续批次（第 9 节）
 
 契约已经定了接口形态，这里记录实现时做出的、契约里没有写死的决定。
 
@@ -73,9 +73,40 @@
 - 由工作台按参数和查到的目标生成（例如“删除任务「写周报」”），不采用 AI 给的文字；
   标题截断到 60 个字符。
 
-## 8. 后续批次
+## 8. `POST /mcp`（第 2 批）
 
-- 第 2 批：`POST /mcp`（MCP Python SDK，见 OC-0 ADR 第 7 节）、实例凭证认证、读工具（结果包在
-  `untrusted` 里）、按实例限流、`get_action_status`，读工具与 `denied` 也写记录。
+- **SDK 用法**：用 MCP Python SDK 2.3.0 的底层 `Server` 加 `StreamableHTTPSessionManager`
+  （无状态、JSON 响应），没用 OC-0 测试时的 `MCPServer`。
+  `MCPServer` 按函数签名生成参数 schema，而工具的参数模型已经在 `app/schemas/ai_tools.py` 里
+  （禁止多余字段，写工具复用 V1 的创建模型），`tools/list` 直接用这些模型的 JSON Schema。
+  传输与 OC-0 核验时相同（Streamable HTTP、无状态、JSON 响应），OpenClaw 那一侧不受影响。
+- **挂载方式**：`POST /mcp` 是普通的 FastAPI 路由，依赖 `instance_principal` 做认证，与 `/agent-api` 完全相同
+  （失败一律 401 `AGENT_UNAUTHORIZED`，外网入口另需客户端证书，外网失败 10 次封禁）。
+  认证通过后，把还没读过的请求原样交给 SDK。
+  SDK 在自己的任务组里处理请求，contextvar 传不过去，所以实例 ID 放在 ASGI scope 的 state 里，
+  工具处理函数从 `ctx.request.state` 读取。
+- **只接受 POST**：无状态模式下 GET 会打开一条一直不结束的 SSE 流（本地实测），DELETE 没有会话可删，
+  两者都返回 405。MCP 规范允许服务器对 GET 返回 405。
+- **SDK 的会话管理器**放在应用自己的后台任务里运行（`McpRunner`）：它内部的 anyio 任务组必须在同一个任务里
+  进入和退出，而 lifespan 的启动和关闭不保证在同一个任务里。
+- **工具清单**：
+  - 只列实例权限范围里的工具（`read` 范围的实例看不到写工具）；
+  - 角色在调用时再检查，因为登记人的角色可能变化；
+  - 还没实现的读工具不列出，调用返回 `NOT_FOUND`，下一批补齐；
+  - 工具注解标明只读和破坏性（`readOnlyHint`、`destructiveHint`）。
+- **限流**：每次 `tools/call` 都计数（Redis 固定窗口，按实例每分钟 120 次），超出返回工具错误 `RATE_LIMITED`，
+  不返回 HTTP 429：OpenClaw 把工具错误当作工具结果交给模型，模型能看懂要等一等。
+- **错误**：工具错误是 `isError: true`，结构化内容为 `{"error": {"code", "message"}}`。
+  领域服务的错误换成契约里的错误码：404 → `NOT_FOUND`，422 → `VALIDATION_FAILED`，429 → `RATE_LIMITED`，
+  其余 → `EXTERNAL_UNAVAILABLE`。错误信息里不带内部细节。
+  意外异常由 SDK 返回统一的 JSON-RPC 内部错误，不透出异常信息。
+- **记录**：
+  - 读工具（目前是 `get_action_status`）每次调用写一条 `succeeded` / `failed` 记录；
+  - 权限不够写 `denied`；
+  - 参数校验不通过的调用不写记录：参数不合法，没有可存的规范化参数，AI 也只是拿到错误。
+
+## 9. 后续批次
+
+- 第 2 批剩余部分：其余 14 个读工具（结果里第三方或用户写的文字放进 `untrusted`，读外部数据的带 `freshness`）。
 - 第 3 批：审批卡片经 `ws_notice` 发到“审批通知”会话，同时写通知 `approval_requested`；`source` 的推断。
 - 审批中心与活动页（前端）在 T-0056 里做。

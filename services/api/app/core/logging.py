@@ -49,6 +49,8 @@ def configure_logging(level: str) -> None:
         logger.handlers = []
         logger.propagate = True
     logging.getLogger("uvicorn.access").disabled = True
+    # MCP SDK 每个无状态请求都会记 INFO（创建与关闭传输）；访问日志已经由中间件记录
+    logging.getLogger("mcp").setLevel(max(logging.WARNING, root.level))
 
 
 def dict_config(level: str) -> dict[str, object]:
