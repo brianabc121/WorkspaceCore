@@ -550,7 +550,7 @@ async def restore_friend(
             severity="info",
             title=f"已恢复与“{instance.im_nickname or instance.name}”的好友关系",
             body="工作台不支持删除好友，好友关系已自动补回。",
-            link=f"/im?conversation={single_conversation_id(admin_im, instance_im)}",
+            link=f"/im?c={single_conversation_id(admin_im, instance_im)}",
             key=f"{instance.id}:{user_id}:{datetime.now(UTC).isoformat()}",
         )
     return None

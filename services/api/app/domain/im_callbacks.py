@@ -209,7 +209,7 @@ async def relay_paused(db: AsyncSession, group: ImGroup) -> None:
         severity="warning",
         title=f"群“{group.name}”的自动接力已暂停",
         body=f"实例连续发言达到 {group.max_agent_streak} 条，管理员在群里发言后恢复。",
-        link=f"/im?conversation=sg_{group.group_id}",
+        link=f"/im?c=sg_{group.group_id}",
         key=group.group_id,
     )
     await db.commit()

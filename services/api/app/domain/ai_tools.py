@@ -36,7 +36,7 @@ from app.domain.calendar import CalendarService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.credentials import CredentialBox, CredentialError
 from app.domain.knowledge import KnowledgeService
-from app.domain.notifications import NotificationService
+from app.domain.notifications import NotificationService, notify_admins
 from app.domain.policy import WorkspaceAccess, has_role, not_found
 from app.domain.ratelimit import FailureLimiter
 from app.domain.security import verify_password
@@ -74,6 +74,8 @@ from app.schemas.workspaces import Role
 STEP_UP_FAILURE_LIMIT = 5
 STEP_UP_WINDOW_SECONDS = 15 * 60
 SENSITIVE_MASK = "***"
+# 审批中心（前端 T-0056）里定位到这条记录
+APPROVAL_LINK = "/approvals?id={id}"
 SEALED_KEY = "$sealed"
 _UNKNOWN_CODES = frozenset({"RESULT_UNKNOWN", "WRITE_UNKNOWN"})
 
@@ -347,6 +349,7 @@ class AiToolService:
         row.expires_at = _now() + APPROVAL_TTL
         self.db.add(row)
         events.mark(self.db, requester.workspace.id, "ai", "im")
+        await self._notify_requested(row)
         try:
             await self.db.commit()
         except IntegrityError:
@@ -545,7 +548,7 @@ class AiToolService:
             raise not_found()
         return row
 
-    def _decidable(self, row: AiToolExecution, if_match: int) -> None:
+    async def _decidable(self, row: AiToolExecution, if_match: int) -> None:
         if row.version != if_match:
             raise _version_conflict(row.version)
         if row.status != "pending_approval":
@@ -554,7 +557,39 @@ class AiToolService:
             row.status = "expired"
             row.arguments = None
             row.version += 1
+            await self._notify_expired(row.workspace_id, row.id, row.instance_name, row.summary)
             raise _not_pending()
+
+    # ---------------------------------------------------------------- 通知中心
+
+    async def _notify_requested(self, row: AiToolExecution) -> None:
+        """approval_requested：发给能审批的 owner / admin（契约第 6、11 节）。"""
+        critical = row.risk_level == "critical"
+        await notify_admins(
+            self.db,
+            row.workspace_id,
+            type_="approval_requested",
+            severity="warning" if critical else "info",
+            title=_clip(f"「{row.instance_name}」请求：{row.summary}", 120),
+            body=("高危操作，批准时需要重新输入密码。" if critical else "")
+            + "15 分钟内没人处理会自动拒绝。",
+            link=APPROVAL_LINK.format(id=row.id),
+            key=str(row.id),
+        )
+
+    async def _notify_expired(
+        self, workspace_id: uuid.UUID, execution_id: uuid.UUID, instance_name: str, summary: str
+    ) -> None:
+        await notify_admins(
+            self.db,
+            workspace_id,
+            type_="approval_expired",
+            severity="info",
+            title=_clip(f"「{instance_name}」的请求已过期：{summary}", 120),
+            body="15 分钟内没人处理，已自动拒绝，没有执行。",
+            link=APPROVAL_LINK.format(id=execution_id),
+            key=str(execution_id),
+        )
 
     async def reject(
         self,
@@ -566,7 +601,7 @@ class AiToolService:
     ) -> AiToolExecution:
         row = await self._locked(access, execution_id)
         try:
-            self._decidable(row, if_match)
+            await self._decidable(row, if_match)
         except ApiError:
             await self.db.commit()
             raise
@@ -591,7 +626,7 @@ class AiToolService:
         workspace_id = access.workspace.id  # 执行失败回滚后 ORM 对象会过期，先记下
         row = await self._locked(access, execution_id)
         try:
-            self._decidable(row, if_match)
+            await self._decidable(row, if_match)
         except ApiError:
             await self.db.commit()
             raise
@@ -680,13 +715,19 @@ class AiToolService:
                 AiToolExecution.expires_at <= _now(),
             )
             .values(status="expired", arguments=None, version=AiToolExecution.version + 1)
-            .returning(AiToolExecution.workspace_id)
+            .returning(
+                AiToolExecution.id,
+                AiToolExecution.workspace_id,
+                AiToolExecution.instance_name,
+                AiToolExecution.summary,
+            )
         )
         if workspace_id is not None:
             stmt = stmt.where(AiToolExecution.workspace_id == workspace_id)
-        expired = list(await self.db.scalars(stmt))
-        for ws in set(expired):
+        expired = list((await self.db.execute(stmt)).all())
+        for execution_id, ws, instance_name, summary in expired:
             events.mark(self.db, ws, "ai", "im")
+            await self._notify_expired(ws, execution_id, instance_name, summary)
         if expired:
             await self.db.commit()
         return len(expired)
