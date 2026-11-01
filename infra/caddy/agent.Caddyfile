@@ -14,6 +14,12 @@
 	auto_https off
 }
 
+# 容器自己的健康检查（compose 的 healthcheck）：只绑定容器内的回环地址，外部访问不到
+http://127.0.0.1:8099 {
+	bind 127.0.0.1
+	respond "ok" 200
+}
+
 (agent_routes) {
 	request_body {
 		max_size 1MB

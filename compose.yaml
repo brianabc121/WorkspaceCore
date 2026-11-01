@@ -197,6 +197,12 @@ services:
         condition: service_healthy
       web:
         condition: service_healthy
+    # 就绪检查只看 Caddy 自己：Caddyfile 里只绑定容器回环地址的 :8099
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8099/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
     # integrations：第三方服务经此把 Webhook 发到 /api/v1/webhooks/…（不经过对外端口）
     networks: [frontend, integrations]
     logging: *logging
@@ -234,6 +240,12 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    # 就绪检查只看 Caddy 自己：Caddyfile 里只绑定容器回环地址的 :8099
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8099/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
     networks:
       agent-ingress:
         # API 只信任这个地址写入的入口与证书请求头（AGENT_INGRESS_TRUSTED_PROXIES）

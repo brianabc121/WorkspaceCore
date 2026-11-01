@@ -701,7 +701,7 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 2. `make openim-build`：按锁定的上游提交与补丁构建 `my-workspace/openim-server` 镜像（要 8 GB 左右的临时磁盘；
    Docker Hub 限流时 `BASE_REGISTRY=mirror.gcr.io/library make openim-build`）；
 3. `make up`、`make agents-up`（第 16 节）：创建 `im` 与 `agent-im` 网络；
-4. `make openim-up`：启动 OpenIM，第一次启动要 1 分钟左右（初始化 etcd、Garage、MongoDB 用户）；
+4. `make openim-up`：启动 OpenIM 并等各服务的健康检查通过（`--wait`），第一次启动要 1 分钟左右（初始化 etcd、Garage、MongoDB 用户）；
 5. 在 `.env` 里设置下面两项，再 `make up` 让 api、worker 生效：
 
    ```
@@ -725,6 +725,10 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 
 ### 17.4 日常
 
+- **IM 令牌有效期 30 天**（`infra/openim/compose.yaml` 的 `IMENV_OPENIM_RPC_AUTH_TOKENPOLICY_EXPIRE`，上游默认 90 天）。实例每次启动领取新令牌，
+  每周的定时重启负责续期；令牌到期前 7 天、客户端证书到期前 14 天，Worker 会通知管理员（`agent_im_token_expiring`、`agent_credential_expiring`）。
+- **实例状态的周期检查**：Worker 每 5 分钟按 OpenIM 的实时在线状态纠正“在线 / 离线”（上下线回调丢失时也能纠正），离线超过 10 分钟通知管理员一次
+  （`agent_offline`；每周重启、冷启动都在几分钟内，不会提醒）；每小时检查实例与 owner / admin 的好友关系，缺了就补。
 - `make openim-logs` 看日志；`make openim-down` 停止（保留数据卷）；
 - 资源：空闲时 openim-server 约 390 MiB、Kafka 约 370 MiB、MongoDB 约 190 MiB、Garage 与 etcd 各十几 MiB；
 - 升级 OpenIM 只能换补丁镜像（`infra/openim/patches/`），**不要换回官方镜像**：官方镜像有越权问题（OC-0 ADR 第 4 节）。

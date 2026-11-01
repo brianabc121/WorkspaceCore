@@ -49,8 +49,22 @@ def execution_id_from_ex(raw: object) -> uuid.UUID | None:
         return None
 
 
+def _source_line(row: AiToolExecution) -> str | None:
+    """卡片上写明由谁、在哪触发（方案第 4.6 节）；推断不到时不写。"""
+    source = row.source or {}
+    name = source.get("triggered_by_name")
+    conversation = source.get("conversation_id")
+    if not isinstance(name, str) or not name or not isinstance(conversation, str):
+        return None
+    where = "在群聊里 @ 它" if conversation.startswith("sg_") else "私聊它"
+    return f"由 {name} {where}触发（根据实例最近收到的消息推断）。"
+
+
 def card_text(row: AiToolExecution) -> str:
     lines = [f"「{row.instance_name}」请求：{row.summary}"]
+    source_line = _source_line(row)
+    if source_line:
+        lines.append(source_line)
     if row.risk_level == "critical":
         lines.append("高危操作，批准时需要重新输入密码。")
     lines.append("15 分钟内没人处理会自动拒绝。在工作台的审批中心或这张卡片上处理。")

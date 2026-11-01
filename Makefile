@@ -109,7 +109,7 @@ openim-build: ## 构建打过补丁的 OpenIM 镜像（infra/openim/server/build
 openim-up: env ## 启动独立部署的 OpenIM（IM 后端）；需要先 make openim-build 与 make agents-up
 	@docker network inspect $(WORKSPACE_PROJECT)_im $(WORKSPACE_PROJECT)_agent-im >/dev/null 2>&1 || \
 		{ echo "缺少 core 的 im / agent-im 网络：请先 make up 与 make agents-up" >&2; exit 1; }
-	$(OPENIM_COMPOSE) up -d
+	$(OPENIM_COMPOSE) up -d --wait
 	@echo "OpenIM 已启动。第一次部署时在 .env 里设置 OPENIM_API_URL=http://openim-server:10002 与"
 	@echo "OPENIM_OBJECT_URL=http://garage:3900，再运行 make up 让 api、worker 生效；步骤见 docs/deployment.md 第 17 节"
 

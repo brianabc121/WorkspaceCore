@@ -1787,6 +1787,11 @@ export interface components {
              */
             im_ready: boolean;
             /**
+             * Im Token Expires At
+             * @description 最近一次签发的 IM 令牌何时到期（实例每次启动时领取）；从未签发为 null
+             */
+            im_token_expires_at?: string | null;
+            /**
              * Im User Id
              * @description OpenIM 用户 ID：oc_ 加实例 ID（32 位十六进制）
              */
@@ -2783,6 +2788,11 @@ export interface components {
              * @description @ 或私聊这个实例的人
              */
             triggered_by_im_id: string | null;
+            /**
+             * Triggered By Name
+             * @description 触发者的显示名（推断时记下；早于这个字段的记录为 null）
+             */
+            triggered_by_name?: string | null;
         };
         /** FailedJob */
         FailedJob: {

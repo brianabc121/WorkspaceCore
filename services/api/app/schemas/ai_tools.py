@@ -70,6 +70,9 @@ class ExecutionSource(BaseModel):
     conversation_id: str | None
     message_server_id: str | None = Field(description="触发这次调用的消息")
     triggered_by_im_id: str | None = Field(description="@ 或私聊这个实例的人")
+    triggered_by_name: str | None = Field(
+        default=None, description="触发者的显示名（推断时记下；早于这个字段的记录为 null）"
+    )
     inferred: bool
 
 

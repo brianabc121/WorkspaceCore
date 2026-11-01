@@ -28,7 +28,7 @@ const source = computed(() => props.execution.source)
     </p>
     <p v-if="source.conversation_id" class="form-help">
       <!-- The IM page is for owner / admin only; others just see where it came from. -->
-      来源：<RouterLink v-if="auth.canManage" :to="{ path: '/im', query: { c: source.conversation_id } }">IM 会话</RouterLink><span v-else>IM 会话</span><template v-if="source.inferred">（根据实例最近收到的消息推断）</template>
+      来源：<template v-if="source.triggered_by_name">{{ source.triggered_by_name }} {{ source.conversation_id.startsWith('sg_') ? '在群聊里 @ 它' : '私聊它' }} · </template><RouterLink v-if="auth.canManage" :to="{ path: '/im', query: { c: source.conversation_id } }">IM 会话</RouterLink><span v-else>IM 会话</span><template v-if="source.inferred">（根据实例最近收到的消息推断）</template>
     </p>
     <p v-if="execution.result_summary" class="preserve-text">结果：{{ execution.result_summary }}</p>
     <p v-if="execution.error_code" class="note-text">错误码：<code>{{ execution.error_code }}</code></p>

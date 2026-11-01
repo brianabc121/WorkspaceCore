@@ -133,7 +133,7 @@ jobs:
   # 与 compose job 并行；测试证书在这里生成，用完即丢。
   agents:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 85
     steps:
       - uses: actions/checkout@v5
       - name: 腾出磁盘空间（OpenIM 补丁镜像的构建约 8 GB 临时空间，OpenClaw 镜像约 3 GB）
@@ -184,6 +184,19 @@ jobs:
             --intranet intranet.test:8443 --public public.test:9443
       - name: A15 恢复演练含 OpenIM（上一步留下的消息、好友与群随快照恢复，数量一致）
         run: python3 tests/e2e/backup_acceptance.py --expect-openim
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22.23.4'
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+      - name: 安装浏览器验收依赖（Playwright 版本由 tests/e2e 的锁文件固定）
+        working-directory: tests/e2e
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: V2 浏览器验收（密钥库、实例页、通讯录与单聊、导出、建群、IM 审批卡片、审批中心、移动端、member 不可见）
+        # 真实 OpenIM；每次用新的工作台用户，登记的实例不需要在线，结束时在页面上停用
+        run: node tests/e2e/sprint6_browser.cjs
       - name: 失败时输出服务状态与日志
         if: failure()
         run: |

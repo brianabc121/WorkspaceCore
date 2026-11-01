@@ -1,7 +1,7 @@
 # 数据字典
 
-> 状态：Sprint 6（迁移到 `0017`）。目标实体清单见 `docs/DEVELOPMENT_SPEC.md` 第 5 节（V2 见 `docs/v2/TRANSFORMATION_PLAN.md` 第 5 节）；本文记录**已经迁移**的数据库对象。
-> 迁移 `0001` ~ `0017` 都只新增对象，都有 downgrade；`0011` 起没有改动 `0010` 及以前的表，唯一的加列是 `0014` 给 `0013` 新建的 `im_messages` 加可空列 `idempotency_key`（无默认值）。升级与回退的做法见 `docs/deployment.md` 第 5 节。
+> 状态：Sprint 6（迁移到 `0018`）。目标实体清单见 `docs/DEVELOPMENT_SPEC.md` 第 5 节（V2 见 `docs/v2/TRANSFORMATION_PLAN.md` 第 5 节）；本文记录**已经迁移**的数据库对象。
+> 迁移 `0001` ~ `0018` 都只新增对象，都有 downgrade；`0011` 起没有改动 `0010` 及以前的表。加列只有两处，都可空、无默认值：`0014` 给 `0013` 新建的 `im_messages` 加 `idempotency_key`，`0018` 给 `0011` 新建的 `agent_instances` 加 `im_token_expires_at`。升级与回退的做法见 `docs/deployment.md` 第 5 节。
 
 ## 约定
 
@@ -179,5 +179,11 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 | 表 | 主要字段 | 约束与说明 |
 |---|---|---|
 | `ai_tool_executions` | `id`、`workspace_id`、`instance_id`、`instance_name`、`acting_user_id`、`tool_name`、`risk_level`、`status`、`summary`、`arguments`、`arguments_display`、`arguments_hash`、`target_version`、`source`、`expires_at`、`decided_by`、`decided_at`、`decision_reason`、`executed_at`、`result_summary`、`error_code`、`request_id`、`version`、`created_at` | MCP 工具调用记录与审批，每次调用一行；随工作空间级联删除；`instance_id`、`acting_user_id`、`decided_by` 在对应记录删除后置空，`instance_name` 留作说明。CHECK：`risk_level` ∈ `read` / `write` / `critical`，`status` ∈ `pending_approval` / `rejected` / `expired` / `executing` / `succeeded` / `failed` / `unknown` / `denied`。读工具直接记 `succeeded` / `failed`，权限不够记 `denied`；写工具与高危工具先记 `pending_approval`，**此时没有执行**（A14）。`arguments` 是规范化后的完整参数，执行时就用它：只在待审批期间保存（读工具与 `denied` 不存），处理完（执行结束、拒绝、过期）就清空；工作流里标为敏感的参数值先加密再存（`$sealed`，用途绑定本行与参数名）；从不对外返回。`arguments_display` 是脱敏后给人看的参数（敏感值为 `***`），长期保留。`arguments_hash` 用于去重，执行前也用它校验参数没被改过；配置了凭证密钥时是 HMAC-SHA256，否则是 SHA-256。部分唯一索引 `uq_ai_tool_executions_pending_args`（`status = 'pending_approval'`）保证同一实例、同一工具、同样参数同时只有一条待审批；每个实例最多 20 条待审批，由服务层检查。`expires_at` 为创建后 15 分钟，Worker 每分钟按部分索引 `ix_ai_tool_executions_pending_expiry` 把到期的改为 `expired`。`target_version` 是创建审批时目标任务 / 日程的版本，执行时版本变了就失败。`source` 是 `{conversation_id, message_server_id, triggered_by_im_id, inferred}`，MCP 请求不带会话信息时由工作台推断。`summary` 由工作台按参数生成，不用 AI 给的文字；`error_code` 只存错误码；`request_id` 是那次 HTTP 请求的 ID；`version` 用于乐观并发（审批接口的 `If-Match`）。索引 `(workspace_id, created_at)`、`(acting_user_id, created_at)`；目前没有清理任务 |
+
+### 迁移 `0018`（T-0063）
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `agent_instances`（新增列） | `im_token_expires_at` | 可空，无默认值。实例启动时领取 IM 令牌，工作台按 OpenIM 返回的 `expireTimeSeconds` 记下到期时间（令牌有效期 30 天）；Worker 每天检查，到期前 7 天提醒管理员（`agent_im_token_expiring`）。每周的定时重启会换新令牌、刷新这一列 |
 
 ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。

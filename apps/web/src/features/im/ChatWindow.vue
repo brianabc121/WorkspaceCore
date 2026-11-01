@@ -6,6 +6,7 @@ import { checkUpload, chronological, imError, useGroup, useMessages, usePins } f
 import MessageItem from './MessageItem.vue'
 import GroupDetails from './GroupDetails.vue'
 import { useImAction } from './action'
+import { downloadConversation } from './media'
 
 const props = defineProps<{ scope: string; conversation: Schema['ImConversationOut']; selfId: string | null; names: Record<string, string> }>()
 defineEmits<{ back: [] }>()
@@ -85,6 +86,7 @@ async function sendImage(event: Event) {
 }
 const setFlag = (patch: Schema['ImConversationUpdate'], success: string) => act(() => auth.api.PATCH('/api/v1/im/conversations/{conversation_id}', { params: { header, path: { conversation_id: id.value } }, body: patch }), success)
 const pin = (message: Schema['ImMessageOut']) => act(() => auth.api.POST('/api/v1/im/conversations/{conversation_id}/pins', { params: { header, path: { conversation_id: id.value } }, body: { server_msg_id: message.server_msg_id! } }), '已置顶这条消息')
+const exportConversation = () => act(() => downloadConversation(props.scope, id.value), '已导出会话（NDJSON 文件，每行一条消息）；导出操作已记入审计日志')
 const unpin = (serverMsgId: string) => act(() => auth.api.DELETE('/api/v1/im/conversations/{conversation_id}/pins/{server_msg_id}', { params: { header, path: { conversation_id: id.value, server_msg_id: serverMsgId } } }), '已取消置顶')
 
 // Mark everything shown as read once per conversation and max_seq, so the badge clears without a loop.
@@ -108,6 +110,7 @@ watch(() => messages.isSuccess.value, ok => { if (ok) void scrollToEnd() }, { im
       <div class="im-chat-actions">
         <button type="button" class="secondary-button" :disabled="busy" :aria-pressed="conversation.pinned" @click="setFlag({ pinned: !conversation.pinned }, conversation.pinned ? '已取消置顶会话' : '已置顶会话')">{{ conversation.pinned ? '取消置顶会话' : '置顶会话' }}</button>
         <button v-if="conversation.kind === 'group' && conversation.group_id" type="button" class="secondary-button" :aria-expanded="showGroup" @click="showGroup = !showGroup">群设置</button>
+        <button type="button" class="secondary-button" :disabled="busy" @click="exportConversation">导出</button>
         <button type="button" class="secondary-button" :disabled="busy" :aria-pressed="conversation.muted" @click="setFlag({ muted: !conversation.muted }, conversation.muted ? '已关闭免打扰' : '已开启免打扰')">{{ conversation.muted ? '关闭免打扰' : '免打扰' }}</button>
       </div>
     </header>

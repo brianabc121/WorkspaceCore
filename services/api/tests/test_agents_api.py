@@ -540,6 +540,9 @@ async def test_bundle_carries_a_fresh_token_only_once(env: Env) -> None:
     whitelist = config["channels"]["openim"]["accounts"]["default"]["inboundWhitelist"]
     assert whitelist == ["ws_" + uuid.UUID(me.json()["user"]["id"]).hex, instance["im_user_id"]]
     assert config["tools"]["exec"]["security"] == "deny"
+    # 插件的发图片 / 文件 / 视频工具默认禁用（OC-0 F3；方案第 6.2 节）
+    media = {"openim_send_image", "openim_send_file", "openim_send_video"}
+    assert media <= set(config["tools"]["deny"])
     # 锁定版本的 OpenClaw 把未知的键（例如 _comment）判为无效配置（T-0059 用真实 OpenClaw 验收发现）
     assert not [key for key in config if key.startswith("_")]
     assert config["plugins"] == {

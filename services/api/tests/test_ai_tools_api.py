@@ -434,6 +434,7 @@ async def test_source_is_inferred_from_the_latest_message_to_the_instance(env: E
         "conversation_id": None,
         "message_server_id": None,
         "triggered_by_im_id": None,
+        "triggered_by_name": None,
         "inferred": True,
     }
     await message("recent", owner_im, 1)
@@ -443,5 +444,6 @@ async def test_source_is_inferred_from_the_latest_message_to_the_instance(env: E
         "conversation_id": conv,
         "message_server_id": "recent",
         "triggered_by_im_id": owner_im,
+        "triggered_by_name": "Owner",
         "inferred": True,
     }

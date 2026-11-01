@@ -9,7 +9,7 @@ const path = (r: Request) => new URL(r.url).pathname
 const execution = (over: Partial<Schema['AiToolExecutionOut']> = {}): Schema['AiToolExecutionOut'] => ({
   id: 'exec-1', instance_id: 'inst-a', instance_name: 'alpha', acting_user_id: 'user-a', tool_name: 'workspace.task.create', risk_level: 'write', status: 'pending_approval',
   summary: '在项目「运维」创建任务「重启 nginx」', arguments: { project_id: 'p1', title: '重启 nginx', token: '***' }, arguments_hash: 'h', request_id: 'req-1',
-  source: { conversation_id: 'si_alpha', message_server_id: 'srv-9', triggered_by_im_id: 'ws_owner', inferred: true },
+  source: { conversation_id: 'si_alpha', message_server_id: 'srv-9', triggered_by_im_id: 'ws_owner', triggered_by_name: 'Owner', inferred: true },
   result_summary: null, error_code: null, decision_reason: null, decided_by: null, decided_at: null, executed_at: null, expires_at: '2026-11-01T04:15:00Z', created_at: at, version: 3, ...over })
 const page = (items: Schema['AiToolExecutionOut'][], pending = items.filter(e => e.status === 'pending_approval').length) => Response.json({ items, next_cursor: null, total_estimate: items.length, pending_count: pending })
 
@@ -38,6 +38,9 @@ describe('ai approvals', () => {
     const record = await screen.findByRole('listitem')
     expect(within(record).getByText('在项目「运维」创建任务「重启 nginx」')).toBeVisible()
     expect(within(record).getByText('写操作')).toBeVisible()
+    // Who triggered it and where (inferred from the instance's latest message).
+    expect(within(record).getByText(/Owner 私聊它/)).toBeVisible()
+    expect(within(record).getByRole('link', { name: 'IM 会话' })).toHaveAttribute('href', '/im?c=si_alpha')
     expect(within(record).getByRole('link', { name: 'IM 会话' })).toHaveAttribute('href', '/im?c=si_alpha')
     expect(within(record).getByText(/根据实例最近收到的消息推断/)).toBeVisible()
     const list = requests.find(r => path(r) === '/api/v1/ai/tool-executions')!
@@ -177,6 +180,7 @@ describe('approval cards in im', () => {
     const message = await screen.findByText('在项目「运维」创建任务「重启 nginx」')
     const bubble = message.closest('.ai-card') as HTMLElement
     expect(within(bubble).getByText('待审批')).toBeVisible()
+    expect(within(bubble).getByText(/由 Owner 触发/)).toBeVisible()
     expect(within(bubble).getByRole('link', { name: '在审批中心查看参数' })).toHaveAttribute('href', '/ai?id=exec-1')
     await fireEvent.click(within(bubble).getByRole('button', { name: '批准并执行' }))
     await vi.waitFor(() => expect(decisions(requests, 'approve')).toHaveLength(1))

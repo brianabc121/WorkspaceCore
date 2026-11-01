@@ -56,13 +56,28 @@ services:
     volumes:
       - openim-mongo:/data/db
       - ./mongo-init.sh:/docker-entrypoint-initdb.d/10-openim-user.sh:ro
+    # 就绪检查（规范第 14 节）：ping 不需要登录
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     restart: unless-stopped
     networks: [openim]
 
   redis:
     image: redis:7.0.0@sha256:1b90dbfe6943c72a7469c134cad3f02eb810f016049a0e19ad78be07040cdb0c
     command: ["redis-server", "--requirepass", "${OPENIM_REDIS_PASSWORD:?}", "--appendonly", "yes"]
+    environment:
+      # 只给容器里的 redis-cli 用（健康检查），不出现在命令行参数里
+      REDISCLI_AUTH: ${OPENIM_REDIS_PASSWORD:?}
     volumes: [openim-redis:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -qx PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
     networks: [openim]
 
@@ -79,7 +94,15 @@ services:
       ETCD_INITIAL_CLUSTER: s1=http://etcd:2380
       ETCD_INITIAL_CLUSTER_STATE: new
       ETCD_AUTO_COMPACTION_RETENTION: "1"
+      # 只给容器里的 etcdctl 用（健康检查）。开启认证之前检查不通过：etcd-init 建好用户后才算就绪
+      ETCDCTL_USER: openim:${OPENIM_ETCD_PASSWORD:?}
     volumes: [openim-etcd-data:/var/lib/etcd]
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     restart: unless-stopped
@@ -144,6 +167,13 @@ services:
     volumes: [openim-kafka-data:/var/lib/kafka/data]
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
+    # 监听端口打开即就绪（客户端协议要 SASL 登录，健康检查不带凭证）
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9094"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
     restart: unless-stopped
     networks: [openim]
 
@@ -158,6 +188,12 @@ services:
       - openim-garage:/var/lib/garage
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
+    # 镜像里只有 garage 程序：用它自己的 status 命令（经 RPC 连本节点）
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
     # im：API 按 OpenIM 签出的链接上传、下载图片（S3 签名校验；浏览器与实例都拿不到这个地址）
     networks: [openim, im]
@@ -208,6 +244,9 @@ services:
       IMENV_MINIO_SECRETACCESSKEY: ${OPENIM_S3_SECRET_KEY:?}
       IMENV_MINIO_BUCKET: openim
       IMENV_SHARE_SECRET: ${OPENIM_SECRET:?}
+      # IM 令牌有效期 30 天（方案第 4.3 节；上游默认 90）。openim-rpc-auth.yml 的 tokenPolicy.expire，
+      # 在锁定的补丁镜像上实测：get_user_token 返回的 expireTimeSeconds 从 7776000 变为 2592000
+      IMENV_OPENIM_RPC_AUTH_TOKENPOLICY_EXPIRE: "30"
       IMENV_LOG_ISSTDOUT: "true"
       IMENV_LOG_REMAINLOGLEVEL: "3"
       # 回调没有签名：地址只能在内部网络（ADR 第 2 节第 10 项）。OpenIM 在后面加 /<callbackCommand>
@@ -224,11 +263,18 @@ services:
       IMENV_WEBHOOKS_AFTERDELETEFRIEND_ENABLE: "true"
       IMENV_WEBHOOKS_AFTERIMPORTFRIENDS_ENABLE: "true"
     depends_on:
-      mongo: {condition: service_started}
-      redis: {condition: service_started}
-      kafka: {condition: service_started}
+      mongo: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      kafka: {condition: service_healthy}
       garage-init: {condition: service_completed_successfully}
       etcd-init: {condition: service_completed_successfully}
+    # REST（10002）与消息网关（10001）都开始监听才算就绪；第一次启动要 1 分钟左右
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10002 && nc -z 127.0.0.1 10001"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
     restart: unless-stopped
     networks:
       openim: {}

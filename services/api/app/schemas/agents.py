@@ -117,6 +117,10 @@ class AgentInstanceOut(BaseModel):
     bundle_issued_at: datetime | None = Field(
         description="最近一次生成接入包的时间；从未生成为 null"
     )
+    im_token_expires_at: datetime | None = Field(
+        default=None,
+        description="最近一次签发的 IM 令牌何时到期（实例每次启动时领取）；从未签发为 null",
+    )
     disabled_at: datetime | None
     credentials: list[AgentCredentialOut] = Field(description="有效与最近吊销的凭证，新的在前")
     secret_grants: list[SecretGrantOut]

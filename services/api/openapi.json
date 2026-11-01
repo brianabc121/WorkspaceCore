@@ -256,6 +256,19 @@
             "title": "Im Ready",
             "type": "boolean"
           },
+          "im_token_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次签发的 IM 令牌何时到期（实例每次启动时领取）；从未签发为 null",
+            "title": "Im Token Expires At"
+          },
           "im_user_id": {
             "description": "OpenIM 用户 ID：oc_ 加实例 ID（32 位十六进制）",
             "title": "Im User Id",
@@ -2777,6 +2790,18 @@
             ],
             "description": "@ 或私聊这个实例的人",
             "title": "Triggered By Im Id"
+          },
+          "triggered_by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "触发者的显示名（推断时记下；早于这个字段的记录为 null）",
+            "title": "Triggered By Name"
           }
         },
         "required": [
