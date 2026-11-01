@@ -12,33 +12,40 @@
 
 | 文件 | 用途 |
 |---|---|
-| `compose.yaml` | 独立的 Compose 项目：mongo、redis、etcd、kafka、minio、openim-server。<br/>第三方镜像全部锁定 tag 加 digest；openim-server 用本机构建的补丁镜像（`pull_policy: never`）；<br/>密码全部来自环境变量，`:?` 表示必填，没有默认值 |
+| `compose.yaml` | 独立的 Compose 项目：mongo、redis、etcd、kafka、garage（对象存储）、openim-server。<br/>第三方镜像全部锁定 tag 加 digest；openim-server 用本机构建的补丁镜像（`pull_policy: never`）；<br/>密码全部来自环境变量，`:?` 表示必填，没有默认值 |
 | `compose.probe.yaml` | 只用于越权回归测试的覆盖文件：加一个放行一切的回调桩。不要在生产环境使用 |
 | `mongo-init.sh` | MongoDB 第一次初始化时创建 OpenIM 专用用户，只有 `openim_v3` 库的读写权限 |
 | `etcd-init.sh` | 一次性服务 `etcd-init` 执行：开启 etcd 认证，`openim` 用户只能读写 `openim` 前缀与启动检查用的键；以后每次启动同步授权与密码 |
+| `garage.toml`、`garage-init.sh` | Garage 配置（单节点）与一次性服务 `garage-init`：应用布局、导入访问密钥、建桶 `openim` 并授权（幂等） |
 | `patches/*.patch` | 对上游 v3.8.3-patch.18 的补丁（`git am` 顺序应用） |
 | `server/build.sh`、`server/Dockerfile` | 构建补丁镜像：校验上游提交 SHA → 打补丁 → 构建（构建输入全部锁定） |
 | `probes/rest-authz.py` | 越权回归测试，覆盖 REST 和 WebSocket。退出码：0 = 全部挡住；1 = 有越权；2 = 无法判断 |
 | `probes/ws-pull-other-user.mjs` | WebSocket 部分（`rest-authz.py` 会自动调用）。Node 22 及以上，用内置 WebSocket |
 | `probes/webhook-stub.py` | `compose.probe.yaml` 用的回调桩（放行一切，不记录载荷） |
+| `probes/object-check.py` | 对象存储检查：小文件、12 MB 分片、图片缩略图，经 OpenIM 上传、下载、比对。要在能访问预签名链接的地方运行 |
 
 ## 构建与本机核验
 
 ```
 infra/openim/server/build.sh        # 生成 my-workspace/openim-server:v3.8.3-patch.18-myws.2
 # 生成 infra/openim/.env（不提交）：每项都用 openssl rand -hex 16 生成，禁止使用 openIM123：
-#   OPENIM_SECRET OPENIM_MONGO_ROOT_PASSWORD OPENIM_MONGO_PASSWORD OPENIM_REDIS_PASSWORD OPENIM_MINIO_SECRET
+#   OPENIM_SECRET OPENIM_MONGO_ROOT_PASSWORD OPENIM_MONGO_PASSWORD OPENIM_REDIS_PASSWORD
 #   OPENIM_ETCD_ROOT_PASSWORD OPENIM_ETCD_PASSWORD OPENIM_KAFKA_PASSWORD
+#   OPENIM_GARAGE_RPC_SECRET 与 OPENIM_S3_SECRET_KEY 用 openssl rand -hex 32；OPENIM_GARAGE_ADMIN_TOKEN 随机；
+#   OPENIM_S3_ACCESS_KEY=GK$(openssl rand -hex 12)
 # 回归测试时 OPENIM_WEBHOOK_URL=http://webhook-stub:10006
 docker compose -p my-workspace-openim -f infra/openim/compose.yaml -f infra/openim/compose.probe.yaml \
   --env-file infra/openim/.env up -d
 python3 -I infra/openim/probes/rest-authz.py --api http://127.0.0.1:10002 --secret "$OPENIM_SECRET"
+# 对象存储检查要能访问预签名链接：OPENIM_OBJECT_EXTERNAL_URL=http://garage:3900，并在 openim 网络里运行
+docker run --rm --network my-workspace-openim_openim -v "$PWD/infra/openim/probes/object-check.py:/c.py:ro" \
+  python:3.12.15-slim-trixie python -I /c.py --api http://openim-server:10002 --secret "$OPENIM_SECRET"
 ```
 
 - Docker Hub 限流时：`BASE_REGISTRY=mirror.gcr.io/library infra/openim/server/build.sh`（digest 不变）。
 - 构建要 8 GB 左右的空闲磁盘（Go 编译缓存）。
-- CI：`ci-openim` 工作流在 `infra/openim/**` 变化时执行上面三步，测试脚本必须以 0 结束；另外用 trivy 扫描镜像（高危只报告，有修复的严重漏洞就失败）。
-- 从 bitnamilegacy 的 etcd / Kafka 换成官方镜像后，数据卷名变了（`openim-etcd-data`、`openim-kafka-data`）。旧卷可以在确认不再需要后手动删除。
+- CI：`ci-openim` 工作流在 `infra/openim/**` 变化时执行上面几步，两个检查都必须以 0 结束；另外用 trivy 扫描镜像（高危只报告，有修复的严重漏洞就失败）。
+- 从 bitnamilegacy 换成官方 etcd / Kafka 和 Garage 后，数据卷名变了（`openim-etcd-data`、`openim-kafka-data`、`openim-garage`）。旧卷（含 `openim-minio`）确认不再需要后可以手动删除；MinIO 里的对象不会自动迁移到 Garage。
 
 | 检查 | 官方镜像（OC-0） | 补丁镜像（OC-3） |
 |---|---|---|
@@ -51,10 +58,10 @@ python3 -I infra/openim/probes/rest-authz.py --api http://127.0.0.1:10002 --secr
 
 ## OC-3 还要完成的事
 
-1. **替换 MinIO**（etcd、Kafka 已换成官方镜像并开启认证）：和图片上传流程一起核验，见 OC-3 ADR 第 7.4 节。
+1. **对象存储接入**（已换成 Garage，见 OC-3 ADR 第 8 节）：预签名链接的外部地址经接入入口 `/im/obj` 提供；外链图片不加载。
 2. **接入工作台**：
    - 回调地址指向工作台 API 的内部路径（回调没有签名，只能走内部网络）；
    - 去掉 `127.0.0.1` 端口映射，改为只经 Caddy 接入入口访问；
    - 变量加进 `.env.example` 和 `make env`。
-3. **备份与恢复**：MongoDB 导出和 MinIO 数据纳入 restic 备份，A15 恢复演练覆盖 OpenIM。
-4. **资源**：空闲时（myws.2 + 官方 etcd / Kafka，2026-10-31）openim-server 约 395 MiB、Kafka 约 370 MiB、MongoDB 约 354 MiB、MinIO 约 125 MiB、etcd 约 18 MiB；Kafka 数据卷空闲时不到 1 MB。压测后补充峰值数据。
+3. **备份与恢复**：MongoDB 导出和 Garage 数据纳入 restic 备份，A15 恢复演练覆盖 OpenIM。
+4. **资源**：空闲时（2026-11-01）openim-server 约 392 MiB、Kafka 约 367 MiB、MongoDB 约 187 MiB、Garage 约 9 MiB、etcd 约 16 MiB；Kafka 数据卷空闲时不到 1 MB。压测后补充峰值数据。

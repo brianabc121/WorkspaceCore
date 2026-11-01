@@ -4,13 +4,15 @@
 # docs/decisions/2026-10-31-v2-oc0-openclaw-openim-verification.md。
 #   - openim-server 用按 infra/openim/patches/ 自建的镜像（先运行 infra/openim/server/build.sh）；
 #   - etcd、Kafka 用各自的官方镜像，并开启认证（etcd 用户与角色、Kafka SASL/PLAIN）；
-#   - minio 还是 bitnamilegacy（不再更新），对象存储的替换和图片上传一起在 OC-3 后续部分处理；
+#   - 对象存储用 Garage（S3 兼容；MinIO 官方镜像已不在 Docker Hub 发布，bitnamilegacy 不再更新），OpenIM 仍走 minio 驱动；
 #   - OC-3 再接入 core 的网络、Caddy 接入入口与工作台回调地址，并把变量加进 .env.example / make env。
 #
 # 用法（只用于本机核验）：
 #   docker compose -f infra/openim/compose.yaml --env-file infra/openim/.env up -d
 # infra/openim/.env 需要（全部随机生成，例如 openssl rand -hex 16；禁止使用官方默认值 openIM123）：
-#   OPENIM_SECRET  OPENIM_MONGO_ROOT_PASSWORD  OPENIM_MONGO_PASSWORD  OPENIM_REDIS_PASSWORD  OPENIM_MINIO_SECRET
+#   OPENIM_SECRET  OPENIM_MONGO_ROOT_PASSWORD  OPENIM_MONGO_PASSWORD  OPENIM_REDIS_PASSWORD
+#   OPENIM_GARAGE_RPC_SECRET（64 位十六进制）  OPENIM_GARAGE_ADMIN_TOKEN
+#   OPENIM_S3_ACCESS_KEY（GK + 24 位十六进制）  OPENIM_S3_SECRET_KEY（64 位十六进制）
 #   OPENIM_ETCD_ROOT_PASSWORD  OPENIM_ETCD_PASSWORD  OPENIM_KAFKA_PASSWORD（这三项只能是字母和数字）
 #   OPENIM_WEBHOOK_URL（回调地址，只能是内部网络地址）
 
@@ -25,7 +27,7 @@ volumes:
   # 换成官方镜像后数据目录与属主都变了，所以用新的数据卷名，不复用 bitnamilegacy 留下的卷
   openim-kafka-data: {}
   openim-etcd-data: {}
-  openim-minio: {}
+  openim-garage: {}
 
 services:
   mongo:
@@ -130,13 +132,36 @@ services:
     restart: unless-stopped
     networks: [openim]
 
-  minio:
-    image: bitnamilegacy/minio:2024.1.13@sha256:35d0a4404341601ae4dff4d8672699f7b49e2975fd0fae897c5f5af4638f816e
+  garage:
+    # S3 兼容的对象存储（AGPL-3.0）。镜像只有一个静态程序：没有 shell，初始化由 garage-init 完成
+    image: dxflrs/garage:v2.4.1@sha256:9c96caa2612d3411acc5b0e6701fb238dbfba33e533a6d7d3d811a4b12d0d020
     environment:
-      MINIO_ROOT_USER: openimroot
-      MINIO_ROOT_PASSWORD: ${OPENIM_MINIO_SECRET:?}
-    volumes: [openim-minio:/bitnami/minio/data]
+      GARAGE_RPC_SECRET: ${OPENIM_GARAGE_RPC_SECRET:?}
+      GARAGE_ADMIN_TOKEN: ${OPENIM_GARAGE_ADMIN_TOKEN:?}
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - openim-garage:/var/lib/garage
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
     restart: unless-stopped
+    networks: [openim]
+
+  garage-init:
+    # 一次性：应用单节点布局、导入访问密钥、建桶并授权（garage-init.sh，幂等）
+    image: alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+    command: ["sh", "/garage-init.sh"]
+    environment:
+      OPENIM_GARAGE_ADMIN_TOKEN: ${OPENIM_GARAGE_ADMIN_TOKEN:?}
+      OPENIM_S3_ACCESS_KEY: ${OPENIM_S3_ACCESS_KEY:?}
+      OPENIM_S3_SECRET_KEY: ${OPENIM_S3_SECRET_KEY:?}
+    volumes:
+      - ./garage-init.sh:/garage-init.sh:ro
+    user: "65534:65534"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on: [garage]
+    restart: "no"
     networks: [openim]
 
   openim-server:
@@ -161,10 +186,13 @@ services:
       IMENV_DISCOVERY_ETCD_PASSWORD: ${OPENIM_ETCD_PASSWORD:?}
       IMENV_REDIS_ADDRESS: redis:6379
       IMENV_REDIS_PASSWORD: ${OPENIM_REDIS_PASSWORD:?}
-      IMENV_MINIO_INTERNALADDRESS: minio:9000
-      IMENV_MINIO_EXTERNALADDRESS: http://127.0.0.1:10005
-      IMENV_MINIO_ACCESSKEYID: openimroot
-      IMENV_MINIO_SECRETACCESSKEY: ${OPENIM_MINIO_SECRET:?}
+      # 对象存储：Garage 的 S3 接口，用 OpenIM 的 minio 驱动访问（只用标准 S3 接口，publicRead 保持 false）。
+      # 外部地址出现在预签名链接里；接入工作台时改成接入入口的 /im/obj（OC-3 后续部分）
+      IMENV_MINIO_INTERNALADDRESS: garage:3900
+      IMENV_MINIO_EXTERNALADDRESS: ${OPENIM_OBJECT_EXTERNAL_URL:-http://127.0.0.1:3900}
+      IMENV_MINIO_ACCESSKEYID: ${OPENIM_S3_ACCESS_KEY:?}
+      IMENV_MINIO_SECRETACCESSKEY: ${OPENIM_S3_SECRET_KEY:?}
+      IMENV_MINIO_BUCKET: openim
       IMENV_SHARE_SECRET: ${OPENIM_SECRET:?}
       IMENV_LOG_ISSTDOUT: "true"
       IMENV_LOG_REMAINLOGLEVEL: "3"
@@ -182,7 +210,7 @@ services:
       mongo: {condition: service_started}
       redis: {condition: service_started}
       kafka: {condition: service_started}
-      minio: {condition: service_started}
+      garage-init: {condition: service_completed_successfully}
       etcd-init: {condition: service_completed_successfully}
     restart: unless-stopped
     networks: [openim]

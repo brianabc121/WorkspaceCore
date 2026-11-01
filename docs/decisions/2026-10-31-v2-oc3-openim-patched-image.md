@@ -81,7 +81,7 @@ OC-0 的回归测试脚本没有覆盖这一项，覆盖它的是这个单元测
 
 - ~~升级第 5 节的依赖，镜像扫描进入 CI~~（第 2 部分，见第 7 节）；
 - ~~替换 bitnamilegacy 的 kafka / etcd，开启 etcd 认证和 Kafka SASL，调小 Kafka 日志段~~（第 2 部分）；
-- 替换 bitnamilegacy 的 minio：和图片上传流程一起核验（官方 MinIO 镜像的发布状态要先核实，见第 7.4 节）；
+- ~~替换 bitnamilegacy 的 minio~~（第 3 部分，见第 8 节：换成 Garage）；
 - 接入工作台：内部网络、回调地址、接入入口 `/im/*`、`.env.example`；
 - 备份 MongoDB 与 MinIO。
 
@@ -144,3 +144,64 @@ OC-0 的回归测试脚本没有覆盖这一项，覆盖它的是这个单元测
 | `rest-authz.py` | 5 项全部“已挡住”，退出码 0 |
 | 正常使用 | 拉取自己的会话（读到消息）、增量同步会话、改自己的会话设置、标记已读、好友列表、管理员搜索消息，全部 errCode 0 |
 | 空闲内存 | openim-server 395 MiB、kafka 370 MiB、mongo 354 MiB、minio 125 MiB、etcd 18 MiB |
+
+## 8. 第 3 部分：对象存储换成 Garage（2026-11-01）
+
+### 8.1 为什么换、换成什么
+
+- MinIO 已经不能用锁定的官方镜像了：
+  - Docker Hub 上的 `minio/minio` 仓库已不存在（API 返回 `object not found`，pull 报 `repository does not exist`）；
+  - `quay.io` 被本会话的代理拒绝（403），无法核实；
+  - `bitnami/minio` 已经是空的，`bitnamilegacy/minio:2024.1.13` 不再更新。
+- OpenIM 的 minio 驱动（`openimsdk/tools` 的 `s3/minio`）只用标准 S3 接口，所以任何兼容 S3 的服务都可以：
+  - 桶：BucketExists、GetBucketLocation、MakeBucket；
+  - 对象：Get、Put、Stat、Remove、ListObjects；
+  - 分片：New、ListParts、Complete、Abort MultipartUpload；
+  - 预签名 URL；
+  - `SetBucketPolicy` 只在 `publicRead: true` 时调用，我们保持 false。
+- 但上传流程（`s3/cont`）有两个硬要求：单次 PUT 的 ETag 必须是内容的 MD5；CopyObject 后 ETag 不变。
+- 候选：
+
+  | 候选 | 版本 | 镜像 | 许可证 | 结论 |
+  |---|---|---|---|---|
+  | **Garage** | v2.4.1（2026-09-08） | 99 MB，单个静态程序 | AGPL-3.0（人类已接受 AGPL） | **采用**：实测通过，空闲内存 9 MiB |
+  | SeaweedFS | 4.48（2026-09-28） | 724 MB | Apache-2.0 | 没有实测；镜像大，凭证要从环境变量生成 JSON 配置 |
+  | RustFS | 1.0.x（1.0.0 是 2026-09-16） | — | Apache-2.0 | 太新，没有选 |
+
+- 镜像 `dxflrs/garage:v2.4.1@sha256:9c96caa2612d3411acc5b0e6701fb238dbfba33e533a6d7d3d811a4b12d0d020`。
+
+### 8.2 部署
+
+- `infra/openim/garage.toml`：
+  - 单节点、单副本，元数据用 sqlite，S3 区域 `garage`；
+  - 管理 API 只在 openim 内部网络；
+  - **监听 `0.0.0.0`**：本会话的 Docker 没有 IPv6，Garage 示例里的 `[::]` 会启动失败（`Address family not supported by protocol`）。
+- 一次性服务 `garage-init`（`alpine:3.24.2` + `garage-init.sh`，调用管理 API v2），幂等：
+  - 布局还是 0 版时，加入本节点并应用。重复应用会报 `Invalid new layout version`，所以只在 0 版时做；
+  - 访问密钥不存在（404）就 `ImportKey`；存在时比对密钥，不一致就报错退出。Garage **不允许复用已删除的密钥 ID**（`KeyAlreadyExists ... Even if it is deleted`），所以轮换时要换一个新的 `GK…` ID；
+  - 桶 `openim` 不存在（404）就创建；授权读、写、owner（重复授权返回 200）。
+- 变量：`OPENIM_GARAGE_RPC_SECRET`（64 位十六进制）、`OPENIM_GARAGE_ADMIN_TOKEN`、`OPENIM_S3_ACCESS_KEY`（`GK` + 24 位十六进制）、`OPENIM_S3_SECRET_KEY`（64 位十六进制）。删掉了 `OPENIM_MINIO_SECRET`。
+- OpenIM 仍用 minio 驱动：
+  - 内部地址 `garage:3900`；
+  - 外部地址 `OPENIM_OBJECT_EXTERNAL_URL`。它出现在预签名链接里，接入工作台时改成接入入口的 `/im/obj`。
+
+### 8.3 实测（本会话自己的 Docker，全新数据卷）
+
+| 项目 | MinIO（bitnamilegacy，对照） | Garage |
+|---|---|---|
+| 200 KB 文件，预签名单次上传 | ETag = MD5，下载一致 | ETag = MD5，下载一致 |
+| 12 MB 文件，3 片分片上传 | 每片 ETag = MD5，下载一致 | 每片 ETag = MD5，下载一致 |
+| PNG 缩略图（`access_url` 加 `type=image`） | — | 400×300 → 64×48 PNG |
+| 匿名访问桶和对象 | — | 403 |
+| `garage-init` 重跑 | — | 只输出“Garage 就绪”，不重复建 |
+| 密钥不一致 | — | 退出码 1，提示换新的密钥 ID |
+| `rest-authz.py` | 0 | 0 |
+| 空闲内存 | 125 MiB | 9 MiB |
+
+- `infra/openim/probes/object-check.py` 覆盖前三项，进入 `ci-openim`（在 openim 网络的容器里运行，因为预签名链接要能访问到）。
+- 实测中遇到过一次：openim-server 容器是在 10002 端口被占时创建的，启动后 DNS 指向了 8.8.4.4。重建容器后恢复（`127.0.0.11`）。这是本机操作顺序的问题，不是配置问题。
+
+### 8.4 还没做的
+
+- 预签名链接的外部地址经接入入口（`/im/obj`）提供；外链图片不加载（工作台代理显示）。这些属于接入工作台与 IM 后端部分。
+- Garage 数据卷纳入 restic 备份与 A15 恢复演练。

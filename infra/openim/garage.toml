@@ -1,0 +1,18 @@
+# Garage（OpenIM 的对象存储，替代不再发布的 MinIO 镜像）——V2 OC-3。
+# 单节点、单副本；密钥与令牌不写在这里，由环境变量 GARAGE_RPC_SECRET / GARAGE_ADMIN_TOKEN 提供。
+# 本会话的 Docker 没有 IPv6，所以监听 0.0.0.0（Garage 示例里的 [::] 会启动失败）。
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+replication_factor = 1
+rpc_bind_addr = "0.0.0.0:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+# OpenIM 的 MinIO 驱动会先 GetBucketLocation，再用返回的区域签名
+s3_region = "garage"
+api_bind_addr = "0.0.0.0:3900"
+
+[admin]
+# 只在 openim 内部网络可达；所有接口（/health 除外）都要 GARAGE_ADMIN_TOKEN
+api_bind_addr = "0.0.0.0:3903"
