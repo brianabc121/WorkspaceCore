@@ -21,14 +21,14 @@
   color-scheme: light;
   --bg: #f6f7fa; --surface: #ffffff; --text: #202838; --muted: #647084;
   --line: #e5e8ef; --accent: #4458d8; --accent-soft: #eef0ff;
-  --welcome: #f0f2ff; --shadow: 0 4px 22px #20283806;
+  --welcome: #f0f2ff; --shadow: 0 4px 22px #20283806; --danger: #b3263a;
   background: var(--bg); color: var(--text);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #11141d; --surface: #1a1e2b; --text: #edf0f8; --muted: #a4aec1;
   --line: #2d3346; --accent: #a2adff; --accent-soft: #292f50;
-  --welcome: #232942; --shadow: 0 4px 22px #00000016;
+  --welcome: #232942; --shadow: 0 4px 22px #00000016; --danger: #ff9aa5;
 }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
@@ -265,6 +265,13 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .im-image { display: block; max-width: 100%; height: auto; max-height: 320px; border-radius: 6px; }
 .im-message-actions .secondary-button { padding: 2px 8px; font-size: .75rem; }
 .im-composer textarea { width: 100%; resize: vertical; }
+.im-mentions { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; min-width: 0; }
+.im-mentions .form-field { margin: 0; }
+.im-mentions select { max-width: 100%; }
+.im-mentions ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.im-mentions li { display: inline-flex; gap: 4px; align-items: center; border: 1px solid var(--accent); border-radius: 14px; padding: 2px 4px 2px 10px; color: var(--accent); overflow-wrap: anywhere; }
+.im-mentions li .secondary-button { padding: 0 8px; border: 0; }
+.im-mention-me { border-color: var(--accent); color: var(--accent); }
 .im-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 @media (max-width: 760px) {
   .im-layout { grid-template-columns: minmax(0, 1fr); }
@@ -297,3 +304,23 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .agent-table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: .85rem; }
 .agent-table th, .agent-table td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); }
 @media (max-width: 760px) { .agent-card, .agent-switch { padding: 16px; } }
+/* AI tool calls and approvals (V2 OC-5): approval center, activity log, IM approval cards. */
+.ai-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 12px; min-width: 0; }
+.ai-execution { padding: 16px; min-width: 0; overflow-wrap: anywhere; display: grid; gap: 8px; justify-items: start; }
+.ai-execution > * { max-width: 100%; }
+.ai-execution p, .ai-execution .form-help { margin: 0; }
+.ai-heading, .ai-card-heading { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; width: 100%; min-width: 0; margin: 0; }
+.ai-heading h3 { margin: 0; font-size: 1rem; flex: 1 1 220px; min-width: 0; }
+.ai-execution-focused { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.ai-arguments { width: 100%; max-height: 320px; overflow: auto; margin: 0; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font-size: .8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-actions { display: grid; gap: 8px; width: 100%; min-width: 0; }
+.ai-actions .form-field { margin: 0; }
+.ai-actions input { width: 100%; max-width: 360px; }
+.ai-actions [role="alert"] { color: var(--danger); }
+.ai-filters { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 16px; margin-bottom: 12px; }
+.ai-filters .form-field { margin: 0; }
+.ai-card { display: grid; gap: 6px; min-width: 0; }
+.ai-card .ai-actions .primary-button, .ai-card .ai-actions .secondary-button { padding: 6px 10px; }
+.ai-risk-write, .ai-status-pending_approval { border-color: var(--accent); color: var(--accent); }
+.ai-status-pending_approval { background: var(--accent-soft); }
+.ai-risk-critical, .ai-status-failed, .ai-status-unknown, .ai-status-denied { border-color: var(--danger); color: var(--danger); }

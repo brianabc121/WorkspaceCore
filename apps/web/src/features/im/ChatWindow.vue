@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, toRef, watch } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError, dataOf, type Schema } from '../../services/api'
-import { checkUpload, chronological, imError, useMessages, usePins } from './queries'
+import { checkUpload, chronological, imError, useGroup, useMessages, usePins } from './queries'
 import MessageItem from './MessageItem.vue'
 import GroupDetails from './GroupDetails.vue'
 import { useImAction } from './action'
@@ -25,6 +25,22 @@ const draft = ref(''), list = ref<HTMLElement | null>(null), picker = ref<HTMLIn
 // One Idempotency-Key per draft: retrying the same draft after an unknown result can never send it twice.
 let draftKey: string | null = null
 const canSend = computed(() => props.conversation.kind !== 'notice')
+// @ members (groups only; the server rejects mentions in single chats and of non-members). Picking one adds
+// "@昵称" to the draft for people and the member's IM ID to at_im_ids for OpenClaw (requireMention).
+const MAX_MENTIONS = 20
+const group = useGroup(props.scope, toRef(() => props.conversation.kind === 'group' ? props.conversation.group_id : null))
+const members = computed(() => (group.data.value?.members ?? []).filter(m => m.im_user_id !== props.selfId))
+const mentions = ref<string[]>([]), mentionPick = ref('')
+const memberName = (imId: string) => members.value.find(m => m.im_user_id === imId)?.nickname ?? props.names[imId] ?? imId
+function mention() {
+  const imId = mentionPick.value
+  mentionPick.value = ''
+  if (!imId || mentions.value.includes(imId)) return
+  if (mentions.value.length >= MAX_MENTIONS) { error.value = `一条消息最多 @ ${MAX_MENTIONS} 个成员。`; return }
+  mentions.value = [...mentions.value, imId]
+  draft.value = `${draft.value}${draft.value && !/\s$/.test(draft.value) ? ' ' : ''}@${memberName(imId)} `
+}
+const unmention = (imId: string) => { mentions.value = mentions.value.filter(m => m !== imId) }
 function sender(message: Schema['ImMessageOut']) {
   return props.names[message.sender_im_id] ?? (props.conversation.kind === 'single' ? props.conversation.title : message.sender_im_id)
 }
@@ -50,7 +66,7 @@ async function send(body: Schema['ImMessageSend']) {
 async function sendText() {
   const text = draft.value.trim()
   if (!text || !canSend.value) return
-  if (await send({ kind: 'text', text, at_im_ids: [] })) draft.value = ''
+  if (await send({ kind: 'text', text, at_im_ids: props.conversation.kind === 'group' ? [...mentions.value] : [] })) { draft.value = ''; mentions.value = [] }
 }
 async function sendImage(event: Event) {
   const input = event.target as HTMLInputElement, file = input.files?.[0]
@@ -80,7 +96,7 @@ watch(() => [id.value, props.conversation.max_seq, props.conversation.unread_cou
   try { await auth.api.POST('/api/v1/im/conversations/{conversation_id}/read', { params: { header, path: { conversation_id: conversation } }, body: { seq } }); if (active()) await refresh() }
   catch { readSent = '' }
 }, { immediate: true })
-watch(id, () => { draft.value = ''; draftKey = null; pending.value = []; error.value = ''; notice.value = ''; void scrollToEnd() })
+watch(id, () => { draft.value = ''; mentions.value = []; draftKey = null; pending.value = []; error.value = ''; notice.value = ''; void scrollToEnd() })
 watch(() => messages.isSuccess.value, ok => { if (ok) void scrollToEnd() }, { immediate: true })
 </script>
 
@@ -106,11 +122,15 @@ watch(() => messages.isSuccess.value, ok => { if (ok) void scrollToEnd() }, { im
       <p v-else-if="messages.isPending.value" role="status">正在加载消息…</p>
       <p v-else-if="!items.length" class="empty-state">还没有消息。</p>
       <ol v-else class="im-message-list">
-        <MessageItem v-for="message in items" :key="message.server_msg_id ?? message.client_msg_id" :scope="scope" :message="message" :sender="sender(message)" :mine="message.sender_im_id === selfId" :can-pin="message.kind !== 'system'" :locked="busy" @pin="pin(message)" @unpin="unpin(message.server_msg_id!)" />
+        <MessageItem v-for="message in items" :key="message.server_msg_id ?? message.client_msg_id" :scope="scope" :message="message" :sender="sender(message)" :mine="message.sender_im_id === selfId" :self-id="selfId" :can-pin="message.kind !== 'system'" :locked="busy" @pin="pin(message)" @unpin="unpin(message.server_msg_id!)" />
       </ol>
     </div>
     <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
     <form v-if="canSend" class="im-composer" @submit.prevent="sendText">
+      <div v-if="conversation.kind === 'group' && members.length" class="im-mentions">
+        <label class="form-field"><span>@ 成员</span><select v-model="mentionPick" :disabled="busy" @change="mention"><option value="">选择成员…</option><option v-for="m in members" :key="m.im_user_id" :value="m.im_user_id" :disabled="mentions.includes(m.im_user_id)">{{ m.nickname }}{{ m.instance_id ? '（实例）' : '' }}</option></select></label>
+        <ul v-if="mentions.length" aria-label="将 @ 的成员"><li v-for="m in mentions" :key="m"><span>@{{ memberName(m) }}</span><button type="button" class="secondary-button" :aria-label="`不再 @ ${memberName(m)}`" @click="unmention(m)">×</button></li></ul>
+      </div>
       <label class="form-field"><span>消息</span><textarea v-model="draft" rows="2" maxlength="4000" placeholder="输入消息，Ctrl + Enter 发送" @keydown.ctrl.enter.prevent="sendText" @keydown.meta.enter.prevent="sendText" /></label>
       <div class="form-actions">
         <input ref="picker" type="file" accept="image/png,image/jpeg,image/gif,image/webp" class="im-file" aria-label="选择图片" @change="sendImage" />

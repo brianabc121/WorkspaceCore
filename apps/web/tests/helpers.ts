@@ -27,6 +27,7 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (path === '/api/v1/notifications') return Response.json({ ...emptyPage, unread_count: 0 })
     if (path === '/api/v1/im/badges') return Response.json({ im_unread: 0, pending_approvals: 0 })
     if (path === '/api/v1/search') return Response.json(emptyPage)
+    if (path === '/api/v1/ai/tool-executions') return Response.json({ ...emptyPage, pending_count: 0 })
     if (path === '/api/v1/audit-logs') return Response.json(emptyPage)
     if (path === '/api/v1/knowledge/resources' || path === '/api/v1/knowledge/sources' || path === '/api/v1/calendar/events') return Response.json(emptyPage)
     if (path === '/api/v1/dashboard/overview') return Response.json(overview)

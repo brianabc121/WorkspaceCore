@@ -24,6 +24,7 @@ import AutomationsPage from '../pages/AutomationsPage.vue'
 import ImPage from '../pages/ImPage.vue'
 import AgentsPage from '../pages/AgentsPage.vue'
 import SecretsPage from '../pages/SecretsPage.vue'
+import AiPage from '../pages/AiPage.vue'
 
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHistory(), queryClient = new QueryClient()) {
   const auth = useAuthStore(pinia)
@@ -37,9 +38,11 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
       { path: '/settings/audit', component: AuditPage, meta: { title: '审计日志', admin: true } },
       ...navigation.map((item) => ({
         path: item.path,
-        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/automations': AutomationsPage, '/im': ImPage, '/agents': AgentsPage, '/agents/secrets': SecretsPage, '/settings': SettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
+        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/automations': AutomationsPage, '/im': ImPage, '/agents': AgentsPage, '/agents/secrets': SecretsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
         meta: { title: item.title, description: item.description, admin: adminOnly.has(item.path), owner: ownerOnly.has(item.path) },
       })),
+      // Notification links for AI approvals (OC-1 contract §6) use /approvals?id=…
+      { path: '/approvals', redirect: (to) => ({ path: '/ai', query: to.query }) },
       { path: '/:pathMatch(.*)*', component: NotFoundPage, meta: { title: '页面未找到' } },
     ],
     scrollBehavior: () => ({ top: 0 }),

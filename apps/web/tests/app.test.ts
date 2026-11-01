@@ -5,7 +5,7 @@ import { mockApi, openApp } from './helpers'
 const pages = [
   ['/', '总览'], ['/tasks', '任务'], ['/projects', '项目'], ['/knowledge', '知识库'],
   ['/calendar', '日历'], ['/developer', '开发者'], ['/operations', '运维'],
-  ['/automations', '自动化'], ['/ai', 'AI 助手'], ['/settings', '设置'],
+  ['/automations', '自动化'], ['/ai', 'AI 审批'], ['/settings', '设置'],
   ['/settings/integrations', '集成设置'], ['/settings/security', '安全设置'],
 ]
 async function open(path = '/') {
