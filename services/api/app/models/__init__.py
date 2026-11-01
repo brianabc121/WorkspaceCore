@@ -25,6 +25,7 @@ from app.models.im import (
     ImGroup,
     ImGroupMember,
     ImMessage,
+    ImMessagePin,
     ImWebhookInboxEvent,
 )
 from app.models.integration import (
@@ -67,6 +68,7 @@ __all__ = [
     "ImGroup",
     "ImGroupMember",
     "ImMessage",
+    "ImMessagePin",
     "ImWebhookInboxEvent",
     "Integration",
     "IntegrationAccount",

@@ -7,10 +7,12 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Path, Query, Security, status
+from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response, Security, status
+from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.api.deps import authenticated, csrf_protected, workspace_admin
+from app.api.deps import authenticated, client_ip, csrf_protected, get_im_service, workspace_admin
 from app.core.errors import not_implemented
+from app.domain.im_service import ImService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.common import error_responses
 from app.schemas.im import (
@@ -51,6 +53,7 @@ from app.schemas.im import (
 router = APIRouter(tags=["im"], dependencies=[Security(authenticated)])
 
 Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
+Service = Annotated[ImService, Depends(get_im_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 Conversation = Annotated[ConversationId, Path()]
@@ -87,8 +90,8 @@ _EXPORT_RESPONSE = {
 
 
 @router.get("/im/status", summary="IM 状态（owner / admin）", responses=_read_errors)
-async def get_im_status(access: Admin) -> ImStatus:
-    raise not_implemented(_T)
+async def get_im_status(access: Admin, service: Service) -> ImStatus:
+    return await service.status(access)
 
 
 @router.get(
@@ -96,8 +99,8 @@ async def get_im_status(access: Admin) -> ImStatus:
     summary="顶栏角标：IM 未读数与待审批数（owner / admin）",
     responses=_read_errors,
 )
-async def get_im_badges(access: Admin) -> ImBadges:
-    raise not_implemented(_T)
+async def get_im_badges(access: Admin, service: Service) -> ImBadges:
+    return await service.badges(access)
 
 
 # ---------------------------------------------------------------- 会话
@@ -111,8 +114,12 @@ async def list_im_conversations(
     q: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
     cursor: Cursor = None,
     limit: Limit = 50,
+    *,
+    service: Service,
 ) -> ImConversationPage:
-    raise not_implemented(_T)
+    return await service.list_conversations(
+        access, kind=kind, contact_group_id=contact_group_id, q=q, cursor=cursor, limit=limit
+    )
 
 
 @router.post(
@@ -122,8 +129,10 @@ async def list_im_conversations(
     dependencies=_write,
     responses=_im_write_errors,
 )
-async def open_im_conversation(access: Admin, body: ImConversationOpen) -> ImConversationOut:
-    raise not_implemented(_T)
+async def open_im_conversation(
+    access: Admin, service: Service, body: ImConversationOpen
+) -> ImConversationOut:
+    return await service.open_conversation(access, body.instance_id)
 
 
 @router.patch(
@@ -134,9 +143,9 @@ async def open_im_conversation(access: Admin, body: ImConversationOpen) -> ImCon
     responses=_im_write_errors,
 )
 async def update_im_conversation(
-    access: Admin, conversation_id: Conversation, body: ImConversationUpdate
+    access: Admin, service: Service, conversation_id: Conversation, body: ImConversationUpdate
 ) -> ImConversationOut:
-    raise not_implemented(_T)
+    return await service.update_conversation(access, conversation_id, body)
 
 
 @router.post(
@@ -146,9 +155,9 @@ async def update_im_conversation(
     responses=_read_errors,
 )
 async def mark_im_conversation_read(
-    access: Admin, conversation_id: Conversation, body: ImReadRequest
+    access: Admin, service: Service, conversation_id: Conversation, body: ImReadRequest
 ) -> ImConversationOut:
-    raise not_implemented(_T)
+    return await service.mark_read(access, conversation_id, body.seq)
 
 
 @router.get(
@@ -157,9 +166,13 @@ async def mark_im_conversation_read(
     responses=_read_errors,
 )
 async def list_im_messages(
-    access: Admin, conversation_id: Conversation, cursor: Cursor = None, limit: Limit = 50
+    access: Admin,
+    service: Service,
+    conversation_id: Conversation,
+    cursor: Cursor = None,
+    limit: Limit = 50,
 ) -> ImMessagePage:
-    raise not_implemented(_T)
+    return await service.list_messages(access, conversation_id, cursor=cursor, limit=limit)
 
 
 @router.post(
@@ -168,16 +181,23 @@ async def list_im_messages(
     summary="发送消息（owner / admin，幂等）",
     description="以当前用户的 IM 账号发出。结果未知时返回 504 RESULT_UNKNOWN，不会自动重发："
     "用同一个 Idempotency-Key 重发以查询结果。",
+    response_model=ImMessageOut,
     dependencies=_write,
     responses=_send_errors,
 )
 async def send_im_message(
+    request: Request,
     access: Admin,
+    service: Service,
     conversation_id: Conversation,
     body: ImMessageSend,
     idempotency_key: IdempotencyKey,
-) -> ImMessageOut:
-    raise not_implemented(_T)
+) -> Response:
+    result = await service.send_message(
+        access, conversation_id, body, idempotency_key, path=request.url.path
+    )
+    headers = {"Idempotent-Replayed": "true"} if result.replayed else None
+    return JSONResponse(result.body, status_code=result.status_code, headers=headers)
 
 
 @router.get(
@@ -185,8 +205,10 @@ async def send_im_message(
     summary="会话里置顶的消息（owner / admin）",
     responses=_read_errors,
 )
-async def list_im_pins(access: Admin, conversation_id: Conversation) -> ImMessagePinList:
-    raise not_implemented(_T)
+async def list_im_pins(
+    access: Admin, service: Service, conversation_id: Conversation
+) -> ImMessagePinList:
+    return await service.list_pins(access, conversation_id)
 
 
 @router.post(
@@ -198,9 +220,9 @@ async def list_im_pins(access: Admin, conversation_id: Conversation) -> ImMessag
     responses=_local_write_errors,
 )
 async def pin_im_message(
-    access: Admin, conversation_id: Conversation, body: ImPinCreate
+    access: Admin, service: Service, conversation_id: Conversation, body: ImPinCreate
 ) -> ImMessagePinOut:
-    raise not_implemented(_T)
+    return await service.pin(access, conversation_id, body.server_msg_id)
 
 
 @router.delete(
@@ -211,9 +233,12 @@ async def pin_im_message(
     responses=_read_errors,
 )
 async def unpin_im_message(
-    access: Admin, conversation_id: Conversation, server_msg_id: Annotated[ServerMsgId, Path()]
+    access: Admin,
+    service: Service,
+    conversation_id: Conversation,
+    server_msg_id: Annotated[ServerMsgId, Path()],
 ) -> None:
-    raise not_implemented(_T)
+    await service.unpin(access, conversation_id, server_msg_id)
 
 
 @router.get(
@@ -222,8 +247,21 @@ async def unpin_im_message(
     responses={200: _EXPORT_RESPONSE, **_read_errors},
     response_model=None,
 )
-async def export_im_conversation(access: Admin, conversation_id: Conversation) -> None:
-    raise not_implemented(_T)
+async def export_im_conversation(
+    request: Request, access: Admin, service: Service, conversation_id: Conversation
+) -> StreamingResponse:
+    rows = await service.export(
+        access, conversation_id, client_ip=client_ip(request, request.app.state.settings)
+    )
+    filename = f"{conversation_id}.ndjson"
+    return StreamingResponse(
+        rows,
+        media_type="application/x-ndjson",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 # ---------------------------------------------------------------- 图片
