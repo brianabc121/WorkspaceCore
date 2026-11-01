@@ -2,13 +2,13 @@
 id: T-0056
 title: OC-4 管理员端页面：IM、通讯录与分组、OpenClaw 实例、密钥库、审批中心与活动记录、移动端（S6-02）
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: apps/web
 depends_on: T-0055
 created: 2026-10-31
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # T-0056 OC-4 管理员端页面：IM、通讯录与分组、OpenClaw 实例、密钥库、审批中心与活动记录、移动端（S6-02）
@@ -30,3 +30,5 @@ updated: 2026-10-31
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-31 16:14 UTC · claude · 创建任务（owner: claude）
+- 2026-11-01 06:22 UTC · claude · 开始任务
+- 2026-11-01 06:34 UTC · claude · 第 1 批 W1（IM 主界面）：apps/web 新增 /im（只有 owner/admin，导航、搜索、路由共用 adminOnly）。会话列表（类型筛选、搜索、未读、置顶/免打扰标记、更多）、与实例开始聊天、聊天窗口（消息由新到旧分页、按时间显示、加载更早、发文字与图片、单条置顶/取消、会话置顶/免打扰、打开即已读且每个 max_seq 只发一次）。图片经 fetch 带 X-Workspace-Id 取回再转成 blob URL（共用的 API 客户端按文本读响应、<img> 不能带请求头）；外部图片只显示地址不加载。同一草稿复用 Idempotency-Key，结果未知时重试不会重复发送；发出的消息先并入列表，投影追上后以服务端为准；忙时选图给出提示。测试：tests/im.test.ts 9 项；真实栈（b7e2e：真实 API + OpenIM）浏览器验收连续 3 次通过（登录 → 消息页 → 历史与图片 → 发文字 → 发图 → 置顶/取消 → 免打扰 → 390px 无横向滚动 → 无外部请求与页面错误）。下一批：通讯录与分组、群（建群、成员、防刷屏设置）、顶栏未读数；实例页与密钥库页；审批中心等 OC-5

@@ -4,6 +4,7 @@ export const navigation = [
   { path: '/projects', title: '项目', section: '工作空间', description: '查看已同步的 Vikunja 项目。' },
   { path: '/knowledge', title: '知识库', section: '工作空间', description: 'AFFiNE 文档收藏与项目、任务关联。' },
   { path: '/calendar', title: '日历', section: '工作空间', description: '工作空间共享日程与周视图。' },
+  { path: '/im', title: '消息', section: '工作空间', description: '与 OpenClaw 实例单聊、群聊（owner 与 admin）。' },
   { path: '/developer', title: '开发者', section: '连接与工具', description: 'GitHub 仓库、Issue、PR 与 Actions 只读视图。' },
   { path: '/operations', title: '运维', section: '连接与工具', description: '服务状态、预设指标与 Grafana 外链。' },
   { path: '/automations', title: '自动化', section: '连接与工具', description: '受控自动化入口将在 Sprint 5 开放。' },
@@ -12,3 +13,6 @@ export const navigation = [
   { path: '/settings/integrations', title: '集成设置', section: '管理', description: '管理员配置 Vikunja / GitHub、测试权限与同步。' },
   { path: '/settings/security', title: '安全设置', section: '管理', description: '管理密码与登录会话。' },
 ] as const
+
+// Pages only owner / admin can open; hidden from members and guarded by the router.
+export const adminOnly: ReadonlySet<string> = new Set(['/settings/integrations', '/im'])

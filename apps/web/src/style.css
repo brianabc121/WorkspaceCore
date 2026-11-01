@@ -229,3 +229,46 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 @media (max-width: 760px) { .automation-entry, .automation-connection { padding: 16px; } }
 
 .table-scroll { max-width: 100%; overflow-x: auto; }
+
+/* IM (V2 OC-4): conversation list beside the chat; on narrow screens one pane at a time. */
+.im-layout { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 16px; min-width: 0; align-items: start; }
+.im-side { display: grid; gap: 16px; min-width: 0; }
+.im-start, .im-conversations, .im-chat { padding: 16px; min-width: 0; }
+.im-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.im-filter [aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.im-conversation-list, .im-message-list, .im-pins ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.im-conversation { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; width: 100%; padding: 10px; text-align: left; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.im-conversation[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.im-conversation-title { font-weight: 600; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.im-conversation-preview { grid-column: 1; color: var(--muted); font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.im-conversation-side { grid-column: 2; grid-row: 1 / span 2; display: grid; justify-items: end; gap: 4px; color: var(--muted); font-size: .75rem; }
+.im-unread { min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--accent); color: var(--bg); text-align: center; font-weight: 600; }
+.im-unread-muted { background: var(--line); color: var(--text); }
+.im-chat { display: grid; gap: 12px; }
+.im-chat-header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.im-chat-header h2 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
+.im-chat-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.im-back { display: none; }
+.im-pins { border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.im-pins h3 { margin: 0 0 6px; font-size: .9rem; }
+.im-pins li { display: flex; gap: 8px; align-items: center; justify-content: space-between; min-width: 0; }
+.im-messages { max-height: min(60vh, 640px); overflow-y: auto; display: grid; gap: 8px; min-width: 0; }
+.im-message { display: grid; gap: 4px; justify-items: start; min-width: 0; }
+.im-message-mine { justify-items: end; }
+.im-message-system { justify-items: center; }
+.im-system-text { color: var(--muted); font-size: .8rem; margin: 0; }
+.im-message-meta { margin: 0; color: var(--muted); font-size: .75rem; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.im-sender { color: var(--text); font-weight: 600; }
+.im-bubble { max-width: min(560px, 100%); padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow-wrap: anywhere; }
+.im-bubble p { margin: 0; }
+.im-message-mine .im-bubble { background: var(--accent-soft); border-color: var(--accent); }
+.im-image { display: block; max-width: 100%; height: auto; max-height: 320px; border-radius: 6px; }
+.im-message-actions .secondary-button { padding: 2px 8px; font-size: .75rem; }
+.im-composer textarea { width: 100%; resize: vertical; }
+.im-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+@media (max-width: 760px) {
+  .im-layout { grid-template-columns: minmax(0, 1fr); }
+  .im-layout-chat .im-side, .im-layout:not(.im-layout-chat) .im-chat { display: none; }
+  .im-back { display: inline-block; }
+  .im-messages { max-height: 55vh; }
+}
