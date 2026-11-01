@@ -52,6 +52,10 @@ class BundleInput:
     # 外网模式：本机隧道转发的目标（工作台外网入口的 主机:端口）与本机监听端口
     tunnel_target: str | None = None
     tunnel_port: int = 18443
+    # 内网模式、且工作台也有外网入口时：图片地址用的是外网域名（OC-3 ADR 第 15 节），
+    # 内网实例要把这个域名指向本机代理，代理（不带客户端证书）转发到内网入口
+    image_proxy_host: str | None = None
+    image_proxy_target: str | None = None
 
 
 def _read(name: str) -> str:
@@ -140,9 +144,42 @@ def _readme(data: BundleInput, generated_at: datetime) -> str:
     return "\n".join(steps)
 
 
+def _image_proxy(data: BundleInput) -> tuple[str, str] | None:
+    """内网实例的本机取图代理：在 OpenClaw 里把外网域名指向 127.0.0.1，转发到内网入口。"""
+    if not data.image_proxy_host or not data.image_proxy_target:
+        return None
+    openclaw = (
+        "    # 图片地址用的是工作台的外网域名：在容器里指向本机代理（转发到内网入口）\n"
+        f'    extra_hosts: ["{data.image_proxy_host}:127.0.0.1"]\n'
+        "    depends_on: [image-proxy]\n"
+    )
+    service = f"""
+  # 本机取图代理：在 127.0.0.1:{data.tunnel_port} 接收明文，用 TLS（不带客户端证书）转发到
+  # 工作台内网入口。校验服务器证书用系统信任库；内网入口用私有 CA 时，加上 --cacert 指向那张 CA 证书
+  image-proxy:
+    image: {GHOSTUNNEL_IMAGE}
+    restart: unless-stopped
+    user: "1000:1000"
+    network_mode: host
+    command:
+      - client
+      - --listen=127.0.0.1:{data.tunnel_port}
+      - --target={data.image_proxy_target}
+      - --disable-authentication
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+"""
+    return openclaw, service
+
+
 def _compose(data: BundleInput) -> str:
     text = _read("compose.yaml")
     host = _tunnel_host(data)
+    proxy = _image_proxy(data)
+    if proxy is not None:
+        return text.replace("    # @PUBLIC_OPENCLAW@\n", proxy[0]).replace(
+            "# @PUBLIC_SERVICES@\n", proxy[1]
+        )
     if not data.tunnel_target or not host:
         return text.replace("    # @PUBLIC_OPENCLAW@\n", "").replace("# @PUBLIC_SERVICES@\n", "")
     openclaw = (

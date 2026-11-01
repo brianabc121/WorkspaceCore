@@ -13,8 +13,10 @@ import asyncio
 import hmac
 import json
 import logging
+import uuid
 from ipaddress import IPv4Network, IPv6Network, ip_address
 from typing import Annotated, Any
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Path, Request, Response, Security
 from fastapi.responses import JSONResponse
@@ -23,13 +25,17 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import client_ip, get_agent_service, get_db, get_redis
-from app.core.errors import ApiError, not_implemented
+from app.core.errors import ApiError
 from app.domain import im_callbacks
 from app.domain.agents import AgentPrincipal, AgentService
 from app.domain.im import openim_client
+from app.domain.im_gateway import MAX_API_BODY_BYTES, ImGateway, blocked_body
 from app.domain.im_groups import send_relay_paused_notice
+from app.domain.ratelimit import FailureLimiter
+from app.integrations.base import ConnectorError
+from app.integrations.openim import PLATFORM_WEB, ObjectStore
 from app.jobs.queue import PROCESS_IM_INBOX
-from app.models import ImGroup
+from app.models import AgentInstance, ImGroup
 from app.schemas.agents import (
     HeartbeatRequest,
     HeartbeatResponse,
@@ -144,14 +150,154 @@ async def agent_heartbeat(
 gateway = APIRouter(include_in_schema=False)
 
 
-@gateway.post("/im/api/{route:path}")
-async def forward_openim_rest(request: Request, route: str) -> None:
-    raise not_implemented("T-0055")
+# 外网入口同一来源的 IM 认证失败：与实例接口一样，10 次后封禁 15 分钟（契约第 7 节）
+IM_AUTH_FAILURE_LIMIT = 10
+IM_AUTH_FAILURE_WINDOW_SECONDS = 15 * 60
+
+
+def _ingress(request: Request) -> tuple[str | None, str | None]:
+    """直接来自接入入口时，取入口与客户端证书指纹；其他来源一律视为没有。"""
+    settings = request.app.state.settings
+    if not _from_ingress_proxy(request, settings.agent_ingress_proxy_networks):
+        return None, None
+    return request.headers.get(INGRESS_HEADER), request.headers.get(CERT_HEADER)
+
+
+async def _authorize_im(
+    request: Request, db: AsyncSession, redis: Redis, token: str | None
+) -> tuple[AgentInstance | None, int | None]:
+    """返回 (实例, 封禁剩余秒数)。外网入口按来源统计失败次数。"""
+    ingress, fingerprint = _ingress(request)
+    settings = request.app.state.settings
+    limiter = FailureLimiter(redis, IM_AUTH_FAILURE_WINDOW_SECONDS) if ingress == "public" else None
+    key = f"im_auth_fail:{client_ip(request, settings)}"
+    if limiter is not None:
+        retry = await limiter.retry_after({key: IM_AUTH_FAILURE_LIMIT})
+        if retry is not None:
+            return None, retry
+    instance = await ImGateway(db, settings).authorize(
+        token, ingress=ingress, cert_fingerprint=fingerprint
+    )
+    if instance is None and limiter is not None:
+        await limiter.record_failure([key])
+    return instance, None
 
 
 @gateway.get("/internal/gateway/im-auth")
-async def authorize_openim_passthrough(request: Request) -> None:
-    raise not_implemented("T-0055")
+async def authorize_openim_passthrough(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> Response:
+    """Caddy forward_auth：放行 /im/ws（WebSocket 透传到 OpenIM 消息网关）。
+
+    令牌与用户 ID 在查询参数里（msggateway 的 token、sendID）；不符一律 401。
+    """
+    uri = urlsplit(request.headers.get("X-Forwarded-Uri", ""))
+    if request.headers.get("X-Forwarded-Method", "GET") != "GET" or uri.path != "/im/ws":
+        return Response(status_code=403)
+    query = parse_qs(uri.query)
+    token = (query.get("token") or [""])[0]
+    instance, retry = await _authorize_im(request, db, redis, token)
+    if retry is not None:
+        return Response(status_code=429, headers={"Retry-After": str(retry)})
+    platform = (query.get("platformID") or [str(PLATFORM_WEB)])[0]
+    if (
+        instance is None
+        or (query.get("sendID") or [""])[0] != instance.im_user_id
+        or platform != str(PLATFORM_WEB)
+    ):
+        return Response(status_code=401)
+    return Response(status_code=200)
+
+
+@gateway.post("/im/api/{route:path}")
+async def forward_openim_rest(
+    request: Request,
+    route: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> Response:
+    """检查后转发到 OpenIM REST：白名单、请求体里的用户等于令牌的用户（契约第 8 节）。"""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_API_BODY_BYTES:
+        return JSONResponse(blocked_body(), status_code=413)
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_API_BODY_BYTES:
+            return JSONResponse(blocked_body(), status_code=413)
+    instance, retry = await _authorize_im(request, db, redis, request.headers.get("token"))
+    if retry is not None:
+        return JSONResponse(blocked_body(), status_code=429, headers={"Retry-After": str(retry)})
+    if instance is None:
+        return JSONResponse(blocked_body(), status_code=401)
+    path = "/" + route.lstrip("/")
+    settings = request.app.state.settings
+    refused = await ImGateway(db, settings).check_api(instance, path, bytes(body))
+    if refused is not None:
+        return JSONResponse(blocked_body(), status_code=refused)
+    client = openim_client(settings, request.app.state.connectors, redis)
+    if client is None:
+        return JSONResponse(blocked_body(), status_code=503)
+    headers = {
+        "token": request.headers.get("token", ""),
+        "operationID": request.headers.get("operationID", "") or uuid.uuid4().hex,
+    }
+    try:
+        upstream = await client.http.request(
+            "POST",
+            client.base_url + path,
+            headers=headers,
+            content=bytes(body),
+            content_type=request.headers.get("content-type") or "application/json",
+        )
+    except ConnectorError as error:
+        logger.warning("openim rest forward failed", extra={"error_kind": error.kind})
+        return JSONResponse(
+            {"errCode": 500, "errMsg": "ServerInternalError", "errDlt": "openim unavailable"},
+            status_code=502,
+        )
+    # 不带回 Set-Cookie 等上游的响应头；httpx 已解压，所以也不带 Content-Encoding
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type"),
+    )
+
+
+@gateway.get("/im/obj/m/{media_id}")
+async def get_instance_media(
+    request: Request,
+    media_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+    thumb: bool = False,
+) -> Response:
+    """实例取工作台发出的图片（只读）：只经接入入口，按能力地址认已发出的图片。"""
+    ingress, _ = _ingress(request)
+    if ingress not in ("intranet", "public"):
+        return Response(status_code=404)
+    settings = request.app.state.settings
+    media = await ImGateway(db, settings).media_for_instance(media_id)
+    client = openim_client(settings, request.app.state.connectors, redis)
+    if media is None:
+        return Response(status_code=404)
+    if client is None or not settings.openim_object_url:
+        return Response(status_code=503)
+    query = {"type": "image", "width": "256", "height": "256"} if thumb else None
+    try:
+        data, content_type = await ObjectStore(client).download(media.object_name, query=query)
+    except ConnectorError as error:
+        return Response(status_code=404 if error.kind == "NOT_FOUND" else 503)
+    mime = content_type.split(";")[0].strip() if thumb else media.mime
+    if not mime.startswith("image/"):
+        mime = media.mime
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 # before 回调的判断上限：超过就拒收 5009（目标是 200 毫秒内，契约第 10 节）

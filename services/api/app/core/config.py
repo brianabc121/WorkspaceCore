@@ -90,8 +90,9 @@ class Settings(BaseSettings):
     openim_object_url: str = ""
     # 没有用于发消息的上传，多少分钟后删除记录（契约第 5.4 节）
     im_upload_ttl_minutes: int = Field(default=60, ge=5, le=1440)
-    # 写进图片消息、给实例取图用的地址前缀。实例统一经本机回环（接入包里的本机代理）访问工作台，
-    # 所以默认是 http://127.0.0.1:<agent_tunnel_port>，内网与外网实例都能用同一个地址
+    # 写进图片消息、给实例取图用的地址前缀（openclaw-channel 取图时不带凭证、也不改地址）。
+    # 默认：配置了外网入口时用 http://<外网域名>:<agent_tunnel_port>（外网实例经本机隧道访问，
+    # 外网入口要求 Host 与 SNI 一致，所以必须是这个域名）；只有内网入口时用内网入口地址
     agent_im_object_base_url: str = ""
 
     # 第三方集成（Sprint 3 契约第 4.3 节）：解析到私有地址时只允许这些主机名（逗号分隔），
@@ -225,9 +226,14 @@ class Settings(BaseSettings):
 
     @property
     def im_object_base_url(self) -> str:
-        return (
-            self.agent_im_object_base_url or f"http://127.0.0.1:{self.agent_tunnel_port}"
-        ).rstrip("/")
+        if self.agent_im_object_base_url:
+            return self.agent_im_object_base_url.rstrip("/")
+        public_host = urlsplit(self.agent_public_url).hostname if self.agent_public_url else None
+        if public_host:
+            return f"http://{public_host}:{self.agent_tunnel_port}"
+        if self.agent_intranet_url:
+            return self.agent_intranet_url.rstrip("/")
+        return f"http://127.0.0.1:{self.agent_tunnel_port}"
 
     @property
     def openim_enabled(self) -> bool:
