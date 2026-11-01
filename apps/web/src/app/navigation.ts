@@ -9,7 +9,7 @@ export const navigation = [
   { path: '/operations', title: '运维', section: '连接与工具', description: '服务状态、预设指标与 Grafana 外链。' },
   { path: '/automations', title: '自动化', section: '连接与工具', description: '受控自动化入口将在 Sprint 5 开放。' },
   { path: '/agents', title: 'OpenClaw 实例', section: '连接与工具', description: '登记实例、接入包、凭证与密钥授权（owner）。' },
-  { path: '/ai', title: 'AI 助手', section: '连接与工具', description: 'AI 工具与审批将在 Sprint 6 开放。' },
+  { path: '/ai', title: 'AI 审批', section: '连接与工具', description: '审批 OpenClaw 实例的写操作，查看每一次工具调用。' },
   { path: '/settings', title: '设置', section: '管理', description: '管理个人资料与工作空间。' },
   { path: '/settings/integrations', title: '集成设置', section: '管理', description: '管理员配置 Vikunja / GitHub、测试权限与同步。' },
   { path: '/settings/security', title: '安全设置', section: '管理', description: '管理密码与登录会话。' },
