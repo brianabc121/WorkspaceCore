@@ -9,6 +9,7 @@
   同一档按更新时间倒序，再按 id。
 """
 
+import uuid
 from typing import cast
 from urllib.parse import urlsplit
 
@@ -16,7 +17,6 @@ from sqlalchemy import and_, case, func, literal, or_, select, text
 from sqlalchemy.dialects.postgresql import REGCONFIG
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.auth import AuthContext
 from app.domain.policy import WorkspaceAccess
 from app.domain.tasks import decode_cursor, encode_cursor
 from app.models import Bookmark, KnowledgeSource, SearchDocument
@@ -49,7 +49,7 @@ class SearchService:
 
     async def search(
         self,
-        context: AuthContext,
+        user_id: uuid.UUID,
         access: WorkspaceAccess,
         *,
         q: str,
@@ -78,7 +78,7 @@ class SearchService:
             .outerjoin(KnowledgeSource, KnowledgeSource.id == Bookmark.source_id)
             .where(
                 d.workspace_id == access.workspace.id,
-                or_(d.owner_id.is_(None), d.owner_id == context.user.id),
+                or_(d.owner_id.is_(None), d.owner_id == user_id),
                 or_(
                     title_hit,
                     d.body.ilike(pattern, escape="\\"),

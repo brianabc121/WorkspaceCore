@@ -15,7 +15,6 @@ import contextlib
 import json
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,12 +29,11 @@ from app import __version__
 from app.core.errors import ApiError
 from app.core.logging import request_id_var
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
+from app.domain.mcp_read_tools import READ_HANDLERS, ReadCall
 from app.domain.ratelimit import WindowLimiter
 from app.models import AgentInstance
 from app.schemas.ai_tools import (
     TOOLS,
-    ActionStatusOutput,
-    GetActionStatusInput,
     ToolSpec,
 )
 
@@ -52,33 +50,6 @@ class McpCaller:
 
     instance_id: uuid.UUID
     request_id: str | None
-
-
-ReadHandler = Callable[[AiToolService, Requester, Any], Awaitable[BaseModel]]
-
-
-async def _action_status(
-    service: AiToolService, requester: Requester, args: GetActionStatusInput
-) -> ActionStatusOutput:
-    row = await service.get_for_instance(requester.instance, args.action_id)
-    if row is None:
-        raise ToolCallError("NOT_FOUND", "没有这条操作记录")
-    return ActionStatusOutput(
-        action_id=row.id,
-        tool_name=row.tool_name,
-        status=row.status,
-        expires_at=row.expires_at,
-        decided_at=row.decided_at,
-        executed_at=row.executed_at,
-        result_summary=row.result_summary,
-        error_code=row.error_code,
-    )
-
-
-# 读工具的实现；没有列在这里的读工具还没有接上，tools/list 里不出现，调用返回 NOT_FOUND
-READ_HANDLERS: dict[str, ReadHandler] = {
-    "get_action_status": _action_status,
-}
 
 
 def available(spec: ToolSpec) -> bool:
@@ -187,7 +158,7 @@ async def _call_tool(
             raw = dict(params.arguments or {})
             try:
                 if spec.risk == "read":
-                    output = await _read(service, requester, spec, raw, caller)
+                    output = await _read(service, requester, spec, raw, caller, state)
                 else:
                     output = await service.request(
                         requester, spec, raw, request_id=caller.request_id
@@ -208,6 +179,7 @@ async def _read(
     spec: ToolSpec,
     raw: dict[str, Any],
     caller: McpCaller,
+    state: Any,
 ) -> BaseModel:
     try:
         parsed = spec.input_model.model_validate(raw)
@@ -221,7 +193,15 @@ async def _read(
         )
         raise ToolCallError(denied, "这个实例没有权限调用这个工具")
     try:
-        output = await READ_HANDLERS[spec.name](service, requester, parsed)
+        call = ReadCall(
+            db=service.db,
+            settings=service.settings,
+            runtime=service.runtime,
+            redis=service.redis,
+            state=state,
+            requester=requester,
+        )
+        output: BaseModel = await READ_HANDLERS[spec.name](call, parsed)
     except (ToolCallError, ApiError) as error:
         code = error.code if isinstance(error, ToolCallError) else _from_api_error(error)[0]
         # 不回滚：读工具不写数据，回滚会让 requester 里的 ORM 对象过期（异步会话不能隐式加载）

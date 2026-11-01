@@ -289,6 +289,23 @@ async def list_tasks(
     return list(await db.scalars(stmt))
 
 
+async def task_counts(
+    db: AsyncSession, workspace_id: uuid.UUID, *, now: datetime
+) -> tuple[int, int]:
+    """未完成任务数、其中已逾期（截止时间早于 now）的任务数。"""
+    live = [
+        ExternalResource.workspace_id == workspace_id,
+        ExternalResource.deleted_at.is_(None),
+        ExternalResource.resource_type == TASK,
+        _done.is_not(True),
+    ]
+    pending = await db.scalar(select(func.count()).select_from(ExternalResource).where(*live))
+    overdue = await db.scalar(
+        select(func.count()).select_from(ExternalResource).where(*live, _due_at < now)
+    )
+    return int(pending or 0), int(overdue or 0)
+
+
 async def task_summary(
     db: AsyncSession, workspace_id: uuid.UUID, *, due_until: datetime, today_limit: int
 ) -> tuple[int, int, Sequence[ExternalResource]]:

@@ -130,7 +130,7 @@ async def list_resources(
     limit: Limit = 30,
 ) -> Page[KnowledgeResourceOut]:
     return await service.list_resources(
-        context,
+        context.user.id,
         access,
         source_id=source_id,
         linked_resource_id=linked_resource_id,

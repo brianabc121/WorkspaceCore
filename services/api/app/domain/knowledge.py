@@ -216,7 +216,7 @@ class KnowledgeService:
 
     async def list_resources(
         self,
-        context: AuthContext,
+        user_id: uuid.UUID,
         access: WorkspaceAccess,
         *,
         source_id: uuid.UUID | None,
@@ -230,7 +230,7 @@ class KnowledgeService:
         offset = decode_cursor(cursor)
         stmt = repo.list_query(
             access.workspace.id,
-            context.user.id,
+            user_id,
             source_id=source_id,
             linked_resource_id=linked_resource_id,
             visibility=visibility,
