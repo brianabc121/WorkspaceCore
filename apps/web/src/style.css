@@ -18,6 +18,8 @@
   --color-accent: var(--accent-soft);
   --color-accent-foreground: var(--text);
   --color-destructive: var(--danger);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--text);
 }
 
 .knowledge-list, .calendar-agenda { display: grid; gap: 16px; margin: 18px 0; }

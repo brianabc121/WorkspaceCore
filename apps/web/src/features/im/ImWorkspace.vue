@@ -9,6 +9,7 @@ import ConversationList from './ConversationList.vue'
 import ChatWindow from './ChatWindow.vue'
 import ContactsPanel from './ContactsPanel.vue'
 import GroupCreateForm from './GroupCreateForm.vue'
+import { useCreateIntent } from '../../composables/useCreateIntent'
 
 const auth = useAuthStore(), route = useRoute(), router = useRouter(), cache = useQueryClient()
 const scope = auth.workspaceId!, user = auth.user?.id
@@ -24,6 +25,8 @@ watch(selected, value => { if (value) remembered.value = value })
 const names = computed<Record<string, string>>(() => Object.fromEntries((contacts.data.value?.items ?? []).map(c => [c.im_user_id, c.nickname])))
 const startable = computed(() => (contacts.data.value?.items ?? []).filter(c => c.instance_id && c.status !== 'disabled'))
 const opening = ref(false), openError = ref('')
+// 顶栏“创建 → 新建群聊”（规范 §8.1）：IM 可用时打开建群表单，不可用时页面会说明原因
+useCreateIntent(() => status.isPending.value ? 'wait' : !!(status.data.value?.available && status.data.value.account_ready), () => { creating.value = true })
 
 function select(id: string | null) { void router.replace({ query: { ...route.query, view: undefined, c: id ?? undefined } }) }
 function show(next: 'chats' | 'contacts') { void router.replace({ query: { ...route.query, view: next === 'contacts' ? 'contacts' : undefined } }) }

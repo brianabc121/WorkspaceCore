@@ -1,7 +1,7 @@
 // Sprint 6 V2 浏览器验收（T-0063；方案第 8 节的页面部分）：真实后端 + 真实 OpenIM 上的 OpenClaw 与 IM 页面——
 // 密钥库：添加密钥后页面上看不到明文 → 实例页：打开总开关、登记实例、授权密钥、下载接入包 →
 // 通讯录：登记的实例自动出现 → 单聊：发消息、经 OpenIM 回调投影后显示、导出会话 →
-// 建群：拉入实例、群设置里的防刷屏 → 审批：IM 里的审批卡片写明由谁触发，在卡片上批准并执行，
+// 建群（从顶栏“创建”菜单打开）：拉入实例、群设置里的防刷屏 → 审批：IM 里的审批卡片写明由谁触发，在卡片上批准并执行，
 // 审批中心显示结果与来源 → 右侧 AI 抽屉与实例对话 → 390px 宽度下无横向滚动 → member 看不到 IM / 实例页 →
 // 浏览器只访问工作台自己的地址（不直连 OpenIM），接口响应与页面里没有密钥明文。
 //
@@ -233,7 +233,11 @@ async function download(page, click) {
 
   // ---------------------------------------------------------------- 建群与防刷屏设置
   const groupName = `验收群${run}`
-  await page.getByRole('button', { name: '建群' }).first().click()
+  // 从顶栏“创建”菜单打开建群表单（规范 §8.1，T-0067）：跳到消息页并去掉地址里的 create 参数
+  await page.goto(`${base}/`)
+  await page.getByRole('button', { name: '创建', exact: true }).click()
+  await page.getByRole('menu').getByRole('menuitem', { name: /^新建群聊/ }).click()
+  await page.waitForURL(`${base}/im`)
   const groupDialog = page.getByRole('dialog', { name: '建群' })
   await groupDialog.getByLabel('群名称 *').fill(groupName)
   await groupDialog.getByLabel(name).check()
@@ -245,7 +249,7 @@ async function download(page, click) {
   const settings = page.getByRole('region', { name: '群设置' })
   await settings.getByLabel('单个实例每分钟最多（条）').waitFor()
   await settings.getByLabel('管理员不发言时，实例最多连续发言（条）').waitFor()
-  step('建群：拉入实例后会话列表出现群聊，群设置里有防刷屏上限')
+  step('建群：从顶栏“创建”菜单打开建群表单，拉入实例后会话列表出现群聊，群设置里有防刷屏上限')
 
   // ---------------------------------------------------------------- 审批卡片：写明由谁触发，在卡片上批准
   // 新建日程只写工作台自己的表，不依赖第三方服务
