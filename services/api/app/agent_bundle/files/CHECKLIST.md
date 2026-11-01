@@ -8,11 +8,14 @@
       里面有实例凭证；泄露后到工作台的实例页吊销并重新生成接入包。
 - [ ] `bin/` 下两个程序：**属主是运行 OpenClaw 的用户**（官方镜像里是 uid 1000）、权限 0755、不是符号链接（OC-0 ADR F8）：
       `chown -R 1000:1000 bin && chmod 0755 bin/*`
-- [ ] 插件：核对 `@openim/openclaw-channel@0.3.3` 的 tarball sha256 是
-      `3d10dca0edcba0ecdb0dc915e7cf1ddf5a8453165de13dec76bbe5ef85607643`，然后
-      `docker compose exec openclaw node openclaw.mjs plugins install @openim/openclaw-channel@0.3.3 --force --accept-capabilities`。
-      升级插件前重新做 OC-0 ADR F9 的审查。
-- [ ] `openclaw.json` 里的模型服务商换成实际使用的那一家；密钥 ID 与工作台密钥库里给这个实例的授权一致。
+- [ ] 插件（**第一次启动之前**）：核对 `@openim/openclaw-channel@0.3.3` 的 tarball sha256 是
+      `3d10dca0edcba0ecdb0dc915e7cf1ddf5a8453165de13dec76bbe5ef85607643`，然后用一份临时的空配置安装
+      （`state/openclaw.json` 里已经写了这个插件提供的 `openim` 渠道，插件装好之前 OpenClaw 认为这份配置无效、拒绝安装）：
+      `echo '{}' > state/plugin-install.json && chown 1000:1000 state/plugin-install.json`
+      `docker compose run --rm --no-deps -e OPENCLAW_CONFIG_PATH=/home/node/.openclaw/plugin-install.json --entrypoint node openclaw openclaw.mjs plugins install @openim/openclaw-channel@0.3.3 --force --accept-capabilities`
+      装好后再 `docker compose up -d`。升级插件前重新做 OC-0 ADR F9 的审查。
+- [ ] `state/openclaw.json` 里的模型服务商换成实际使用的那一家；密钥 ID 与工作台密钥库里给这个实例的授权一致。
+      `${VAR}` 由 OpenClaw 从进程环境（`myworkspace.env`）读取，不要把明文写进这个文件；也不要加 `_comment` 之类的说明键（OpenClaw 会判为无效配置）。
 - [ ] 冷启动要 2 ~ 4 分钟：启动时 doctor 会联网检查插件更新，没有外网时要等超时（OC-0 ADR F5）。
 
 - [ ] 外网模式：`tunnel` 服务（本机隧道）在 127.0.0.1:18443 监听，用 `tls/` 里的客户端证书连工作台外网入口；

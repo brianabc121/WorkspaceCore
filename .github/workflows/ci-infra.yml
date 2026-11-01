@@ -128,13 +128,18 @@ jobs:
           make vikunja-down || true
           make down
 
-  # V2 OpenClaw 接入入口（T-0059，OC-2 留下的验收）：Caddy 接入入口 + 本机隧道 + 双向证书，全栈。
+  # V2 OpenClaw（T-0059，OC-7）：接入入口验收（Caddy 接入入口 + 本机隧道 + 双向证书），
+  # 然后是多实例端到端（OpenIM + 两个真实 OpenClaw 实例 + 假模型，方案第 8 节）。
   # 与 compose job 并行；测试证书在这里生成，用完即丢。
   agents:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
+      - name: 腾出磁盘空间（OpenIM 补丁镜像的构建约 8 GB 临时空间，OpenClaw 镜像约 3 GB）
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
       - name: 生成 .env 与接入入口的测试证书
         run: |
           make env
@@ -154,7 +159,12 @@ jobs:
           set_env AGENT_PUBLIC_HOST public.test
           set_env AGENT_INTRANET_URL https://intranet.test:8443
           set_env AGENT_PUBLIC_URL https://public.test:9443
+          # OpenIM（docs/deployment.md 第 17 节）：api / worker 经 im 网络访问 OpenIM REST 与 Garage
+          set_env OPENIM_API_URL http://openim-server:10002
+          set_env OPENIM_OBJECT_URL http://garage:3900
           docker compose --profile agents config --quiet
+      - name: 构建打过补丁的 OpenIM 镜像（make openim-build）
+        run: make openim-build
       - name: 构建并启动（make up）
         run: make up
       - name: 数据库迁移（make migrate）
@@ -165,11 +175,21 @@ jobs:
         run: |
           python3 tests/e2e/agent_ingress_acceptance.py --server-ca "$RUNNER_TEMP/agent-server-ca.pem" \
             --intranet intranet.test:8443 --public public.test:9443
+      - name: 启动 OpenIM（make openim-up）
+        run: make openim-up
+      - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道）
+        run: |
+          # 要以 root 运行：接入包目录交给容器里的 uid 1000（CHECKLIST.md 的做法）
+          sudo -E python3 tests/e2e/agents_acceptance.py --server-ca "$RUNNER_TEMP/agent-server-ca.pem" \
+            --intranet intranet.test:8443 --public public.test:9443
       - name: 失败时输出服务状态与日志
         if: failure()
         run: |
           docker compose --profile agents ps -a
           docker compose --profile agents logs --no-color --tail=200
+          docker compose -p my-workspace-openim -f infra/openim/compose.yaml --env-file .env logs --no-color --tail=150 || true
       - name: 停止服务
         if: always()
-        run: docker compose --profile agents down -v
+        run: |
+          make openim-down || true
+          docker compose --profile agents down -v

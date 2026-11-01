@@ -63,11 +63,9 @@ def _read(name: str) -> str:
 
 
 def _openclaw_json(whitelist: list[str]) -> str:
+    # 不能加说明用的键（例如 _comment）：OpenClaw 会把整个配置判为无效
+    # （T-0059 用真实 OpenClaw 验收发现）。说明写在 CHECKLIST.md / README.md 里
     config: dict[str, Any] = json.loads(_read("openclaw.json.template"))
-    config["_comment"] = (
-        "My Workspace 接入包生成。${VAR} 由 OpenClaw 从进程环境（myworkspace.env）读取；"
-        "不要把明文写进本文件。模型服务商按实际使用的那一家修改，密钥 ID 与工作台密钥库的授权一致。"
-    )
     account = config["channels"]["openim"]["accounts"]["default"]
     account["inboundWhitelist"] = whitelist
     return json.dumps(config, ensure_ascii=False, indent=2) + "\n"

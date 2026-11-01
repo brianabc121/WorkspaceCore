@@ -200,6 +200,30 @@ async def test_rest_whitelist_and_user_checks(env: ImEnv) -> None:
         assert refused.status_code == 404 and refused.json() == blocked, route
     assert len(env.fake.forwarded) == forwarded
 
+    # 好友申请通知后 SDK 查这条申请：只能查自己与本工作空间成员之间的（被拦截会让 OpenClaw 退出）
+    apply = "/friend/get_designated_friend_apply"
+    allowed = await _api(env, apply, {"fromUserID": owner, "toUserID": oc}, token)
+    assert allowed.status_code == 200, allowed.text
+    assert json.loads(env.fake.forwarded[-1][2]) == {"fromUserID": owner, "toUserID": oc}
+    for pair in (
+        {"fromUserID": owner, "toUserID": b["im_user_id"]},  # 别人之间的申请
+        {"fromUserID": f"ws_{uuid.uuid4().hex}", "toUserID": oc},  # 工作空间以外的人
+        {"fromUserID": oc},  # 缺字段
+    ):
+        refused = await _api(env, apply, pair, token)
+        assert refused.status_code == 403, pair
+
+    # 单聊前查对方的好友信息：只能以自己为 owner、查本工作空间的人
+    friends = "/friend/get_designated_friends"
+    mine = {"ownerUserID": oc, "friendUserIDs": [owner, b["im_user_id"]]}
+    assert (await _api(env, friends, mine, token)).status_code == 200
+    for lookup in (
+        {"ownerUserID": owner, "friendUserIDs": [oc]},  # 冒充别人
+        {"ownerUserID": oc, "friendUserIDs": [f"oc_{uuid.uuid4().hex}"]},  # 工作空间以外
+        {"ownerUserID": oc, "friendUserIDs": []},
+    ):
+        assert (await _api(env, friends, lookup, token)).status_code == 403, lookup
+
     same_ws = await _api(
         env, "/user/get_users_info", {"userIDs": [oc, b["im_user_id"], owner, "ws_notice"]}, token
     )
@@ -231,6 +255,36 @@ async def test_rest_whitelist_and_user_checks(env: ImEnv) -> None:
         headers={"token": token},
     )
     assert no_ingress.status_code == 401
+
+
+async def test_group_member_lookups_stay_inside_the_group(env: ImEnv) -> None:
+    """SDK 发群消息前查群成员信息（被拦截时消息发不出去，T-0059 验收发现）：只能查自己所在的群。"""
+    a = await env.create_instance()
+    b = await env.create_instance(name="乙")
+    c = await env.create_instance(name="丙")
+    await env.client.get("/api/v1/im/status", headers=env.headers())
+    created = await env.client.post(
+        "/api/v1/im/groups",
+        json={"name": "值班群", "instance_ids": [a["id"], b["id"]], "user_ids": []},
+        headers={**env.headers(write=True), "Idempotency-Key": str(uuid.uuid4())},
+    )
+    assert created.status_code == 201, created.text
+    gid = created.json()["group_id"]
+    route = "/group/get_group_members_info"
+    token_a = make_token(a["im_user_id"])
+    body = {"groupID": gid, "userIDs": [a["im_user_id"], b["im_user_id"]]}
+    allowed = await _api(env, route, body, token_a)
+    assert allowed.status_code == 200, allowed.text
+    assert json.loads(env.fake.forwarded[-1][2]) == body
+    # 不在群里的实例查不了；群成员也不能借它查群外的人或别的群
+    outsider = await _api(env, route, body, make_token(c["im_user_id"]))
+    assert outsider.status_code == 403
+    for refused in (
+        {"groupID": gid, "userIDs": [c["im_user_id"]]},
+        {"groupID": f"ws{uuid.uuid4().hex}", "userIDs": [a["im_user_id"]]},
+        {"groupID": gid, "userIDs": []},
+    ):
+        assert (await _api(env, route, refused, token_a)).status_code == 403, refused
 
 
 async def test_instances_fetch_sent_images_by_capability(env: ImEnv) -> None:

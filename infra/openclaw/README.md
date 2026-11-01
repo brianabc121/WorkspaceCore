@@ -31,7 +31,8 @@
    - 不用 `latest`。
 2. **安装插件**：
    - 先核对 tarball 的 sha256 是 `3d10dca0edcba0ecdb0dc915e7cf1ddf5a8453165de13dec76bbe5ef85607643`（`npm pack @openim/openclaw-channel@0.3.3`）；
-   - 然后执行：
+   - 然后在**写入完整配置之前**执行（配置里的 `openim` 渠道由这个插件提供，插件装好之前 OpenClaw 认为配置无效、拒绝安装；
+     已经有完整配置时，用 `OPENCLAW_CONFIG_PATH` 指向一份临时的空配置 `{}` 再安装，接入包的 `CHECKLIST.md` 写了具体命令）：
      ```
      openclaw plugins install @openim/openclaw-channel@0.3.3 --force --accept-capabilities
      ```
@@ -45,7 +46,7 @@
    - 把 `bin/` 下的两个程序放到 `/opt/myworkspace/bin/`；
    - **属主改成运行 OpenClaw 的用户**（Docker 镜像里是 uid 1000），权限 0755，不能是符号链接。这是 OpenClaw 对 exec 程序的要求。
 4. **配置**：
-   - 用 `openclaw.json.template` 生成 `~/.openclaw/openclaw.json`；
+   - 用 `openclaw.json.template` 生成 `~/.openclaw/openclaw.json`；不要加 `_comment` 之类的说明键，OpenClaw 会把整个配置判为无效；
    - 把模型服务商换成实际要用的那一家，密钥 ID 和工作台密钥库里的授权保持一致。
 5. **环境变量**：
    - 写进权限 600 的环境文件：`MYWS_INSTANCE_TOKEN`、`MYWS_AGENT_API`、`MYWS_MCP_URL`、`MYWS_ADMIN_IM_ID`、`OPENCLAW_GATEWAY_TOKEN`（`openssl rand -hex 32`）；

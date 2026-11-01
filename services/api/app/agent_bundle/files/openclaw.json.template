@@ -1,5 +1,4 @@
 {
-  "_comment": "OpenClaw 服务器的参考配置（OC-0 初稿，ADR 2026-10-31-v2-oc0-openclaw-openim-verification.md）。${VAR} 由 OpenClaw 从进程环境读取；不要把明文写进本文件。",
   "gateway": {
     "mode": "local",
     "bind": "loopback",
@@ -44,7 +43,8 @@
     }
   },
   "plugins": {
-    "allow": ["openclaw-channel"]
+    "allow": ["openclaw-channel"],
+    "entries": { "openclaw-channel": { "enabled": true } }
   },
   "channels": {
     "openim": {
