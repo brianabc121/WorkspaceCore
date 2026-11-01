@@ -540,6 +540,15 @@ async def test_bundle_carries_a_fresh_token_only_once(env: Env) -> None:
     whitelist = config["channels"]["openim"]["accounts"]["default"]["inboundWhitelist"]
     assert whitelist == ["ws_" + uuid.UUID(me.json()["user"]["id"]).hex, instance["im_user_id"]]
     assert config["tools"]["exec"]["security"] == "deny"
+    # 锁定版本的 OpenClaw 把未知的键（例如 _comment）判为无效配置（T-0059 用真实 OpenClaw 验收发现）
+    assert not [key for key in config if key.startswith("_")]
+    assert config["plugins"] == {
+        "allow": ["openclaw-channel"],
+        "entries": {"openclaw-channel": {"enabled": True}},
+    }
+    # 插件要在第一次启动前、用临时空配置安装（配置里的 openim 渠道由插件提供）
+    checklist = files["CHECKLIST.md"][0]
+    assert "OPENCLAW_CONFIG_PATH=/home/node/.openclaw/plugin-install.json" in checklist
 
     after = await env.instance(instance["id"])
     assert after["bundle_issued_at"] is not None
