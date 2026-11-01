@@ -14,6 +14,7 @@ PROCESS_WEBHOOKS = "process_webhooks"
 SYNC_INTEGRATION = "sync_integration"
 REGISTER_WEBHOOKS = "register_webhooks"
 PROCESS_IM_INBOX = "process_im_inbox"
+SEND_APPROVAL_CARDS = "send_approval_cards"
 
 
 class JobQueue(Protocol):

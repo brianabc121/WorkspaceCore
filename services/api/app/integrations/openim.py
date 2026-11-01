@@ -24,7 +24,7 @@ import hashlib
 import json
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 from urllib.parse import urlencode
 
@@ -36,10 +36,15 @@ PLATFORM_WEB = 5
 # 会话类型（sdkws.MsgData.sessionType）
 SESSION_SINGLE = 1
 SESSION_GROUP = 3
+# 通知会话（sn_）：只有通知账号能发 OA 通知（contentType 1400）
+SESSION_NOTIFICATION = 4
 # 消息类型
 CONTENT_TEXT = 101
 CONTENT_PICTURE = 102
 CONTENT_AT_TEXT = 106
+CONTENT_OA_NOTIFICATION = 1400
+# 通知账号的 AppMangerLevel（protocol constant.AppNotificationAdmin，v0.0.73-alpha.19 核实）
+APP_NOTIFICATION_ADMIN = 3
 # 群类型：工作群（groupType=2）
 GROUP_TYPE_WORK = 2
 
@@ -98,7 +103,8 @@ class OpenIMError(ConnectorError):
 class OpenIMClient:
     http: ConnectorHttp
     base_url: str
-    secret: str
+    # 不进 repr：异常回溯与调试输出里不出现 secret
+    secret: str = field(repr=False)
     admin_user_id: str = "imAdmin"
     cache: TokenCache | None = None
 
@@ -181,6 +187,46 @@ class OpenIMClient:
             {"users": [{"userID": user_id, "nickname": nickname} for user_id, nickname in users]},
         )
 
+    async def add_notification_account(self, user_id: str, nickname: str) -> None:
+        """注册通知账号（`/user/add_notification_account`，AppMangerLevel = 3）。
+
+        只有通知账号能发 OA 通知；用户 ID 已存在时 OpenIM 返回 1001（VALIDATION_FAILED），
+        已有的普通账号不能升级（v3.8.3-patch.18 源码核实），所以调用方先用 existing_users 判断。
+        """
+        await self.call(
+            "/user/add_notification_account",
+            {
+                "userID": user_id,
+                "nickName": nickname,
+                "faceURL": "",
+                "appMangerLevel": APP_NOTIFICATION_ADMIN,
+            },
+        )
+
+    async def send_oa_notification(
+        self, *, send_id: str, recv_id: str, name: str, text: str, ex: str
+    ) -> SentMessage:
+        """以通知账号 send_id 给 recv_id 发 OA 通知（会话 sn_<两个 ID 按字典序>）。
+
+        ex 同时写进消息的 ex 与 OA 元素的 ex：投影按消息的 ex 识别审批卡片（实测原样保留）。
+        """
+        return await self._send(
+            send_id=send_id,
+            recv_id=recv_id,
+            group_id="",
+            content={
+                "notificationName": name,
+                "notificationType": 1,
+                "text": text,
+                "mixType": 0,
+                "ex": ex,
+            },
+            content_type=CONTENT_OA_NOTIFICATION,
+            sender_nickname=name,
+            ex=ex,
+            session_type=SESSION_NOTIFICATION,
+        )
+
     async def existing_users(self, user_ids: Sequence[str]) -> set[str]:
         """`/user/account_check`：accountStatus 为 1（constant.Registered）的用户。"""
         data = await self.call("/user/account_check", {"checkUserIDs": list(user_ids)})
@@ -247,6 +293,7 @@ class OpenIMClient:
         content_type: int,
         sender_nickname: str,
         ex: str,
+        session_type: int | None = None,
     ) -> SentMessage:
         if bool(recv_id) == bool(group_id):
             raise ValueError("recv_id 与 group_id 必须且只能给一个")
@@ -258,7 +305,7 @@ class OpenIMClient:
             "senderPlatformID": PLATFORM_WEB,
             "content": dict(content),
             "contentType": content_type,
-            "sessionType": SESSION_GROUP if group_id else SESSION_SINGLE,
+            "sessionType": session_type or (SESSION_GROUP if group_id else SESSION_SINGLE),
             # 原样存进 MsgData.ex（服务端生成 clientMsgID，调用方不能指定）
             "ex": ex,
         }
@@ -565,6 +612,12 @@ def single_conversation_id(user_a: str, user_b: str) -> str:
     """单聊会话 ID：si_<两个用户 ID 按字典序>（OC-0 实测）。"""
     first, second = sorted((user_a, user_b))
     return f"si_{first}_{second}"
+
+
+def notice_conversation_id(user_a: str, user_b: str) -> str:
+    """通知会话 ID：sn_<两个用户 ID 按字典序>（v3.8.3-patch.18 源码与实例实测）。"""
+    first, second = sorted((user_a, user_b))
+    return f"sn_{first}_{second}"
 
 
 def group_conversation_id(group_id: str) -> str:

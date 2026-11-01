@@ -104,3 +104,46 @@ async def test_users_friends_messages_groups_conversations() -> None:
     with pytest.raises(ConnectorError) as gone:
         await im.invite_to_group(group_id, [agent_b])
     assert gone.value.kind in ("NOT_FOUND", "VALIDATION_FAILED")
+
+
+async def test_notification_account_sends_approval_cards() -> None:
+    """工作空间通知账号（OC-5 第 3 批）：注册为通知账号、发 OA 通知、按序号拉回并识别为审批卡片。"""
+    from app.domain.approval_cards import card_ex
+    from app.domain.im_projection import parse_message
+    from app.integrations.openim import notice_conversation_id
+
+    im = _client()
+    admin, notice = f"ws_{uuid.uuid4().hex}", f"wn_{uuid.uuid4().hex}"
+    await im.register_users([(admin, "管理员")])
+    await im.add_notification_account(notice, "审批通知")
+    assert await im.existing_users([notice]) == {notice}
+    # 已存在的用户 ID 不能再注册成通知账号（1001）
+    with pytest.raises(ConnectorError) as used:
+        await im.add_notification_account(admin, "x")
+    assert used.value.kind == "VALIDATION_FAILED"
+    # 普通账号发 OA 通知被拒（1002）
+    with pytest.raises(ConnectorError) as denied:
+        await im.send_oa_notification(send_id=admin, recv_id=notice, name="x", text="x", ex="")
+    assert denied.value.kind == "AUTH_FAILED"
+
+    execution_id = uuid.uuid4()
+    await im.send_oa_notification(
+        send_id=notice,
+        recv_id=admin,
+        name="审批通知",
+        text="「alpha」请求：删除任务",
+        ex=card_ex(execution_id),
+    )
+    conv = notice_conversation_id(notice, admin)
+    parsed = None
+    for _ in range(30):
+        top = (await im.max_seqs(admin)).get(conv, 0)
+        if top:
+            [raw] = await im.pull_messages(admin, conv, 1, top)
+            parsed = parse_message(raw)
+            break
+        await asyncio.sleep(1)
+    assert parsed is not None
+    assert parsed.content_type == 1400 and parsed.sender_im_id == notice
+    assert parsed.plain_text == "「alpha」请求：删除任务"
+    assert parsed.content == {"approval_execution_id": str(execution_id)}

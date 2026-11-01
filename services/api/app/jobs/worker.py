@@ -23,7 +23,16 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.config import get_settings
 from app.core.logging import configure_logging, dict_config
 from app.core.resources import create_engine
-from app.domain import alerts, automations, events, im, im_projection, notifications, sync
+from app.domain import (
+    alerts,
+    approval_cards,
+    automations,
+    events,
+    im,
+    im_projection,
+    notifications,
+    sync,
+)
 from app.domain.ai_tools import AiToolService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.operations import WORKER_HEARTBEAT_KEY, DeploymentHealth, ServiceCache
@@ -32,6 +41,7 @@ from app.jobs.queue import (
     PROCESS_IM_INBOX,
     PROCESS_WEBHOOKS,
     REGISTER_WEBHOOKS,
+    SEND_APPROVAL_CARDS,
     SYNC_INTEGRATION,
 )
 
@@ -137,6 +147,16 @@ async def reconcile_im_full(ctx: dict[str, Any]) -> int:
     return await im_projection.reconcile(im_ctx, full=True) if im_ctx is not None else 0
 
 
+async def send_approval_cards(ctx: dict[str, Any], execution_id: str) -> int:
+    """新的待审批：由工作空间的通知账号给 owner / admin 发 IM 审批卡片（V2 OC-5）。"""
+    context = _sync(ctx)
+    client = im.openim_client(context.settings, context.runtime, ctx["redis"])
+    if client is None:
+        return 0
+    async with context.sessions() as db:
+        return await approval_cards.send_cards(db, client, ctx["redis"], uuid.UUID(execution_id))
+
+
 async def expire_ai_approvals(ctx: dict[str, Any]) -> int:
     """15 分钟没人处理的待审批默认拒绝（expired，V2 OC-5）。"""
     context = _sync(ctx)
@@ -187,6 +207,7 @@ class WorkerSettings:
         func(sync_integration, name=SYNC_INTEGRATION, timeout=900),
         func(register_webhooks, name=REGISTER_WEBHOOKS),
         func(process_im_inbox, name=PROCESS_IM_INBOX),
+        func(send_approval_cards, name=SEND_APPROVAL_CARDS),
     ]
     cron_jobs: ClassVar[list[CronJob]] = [
         cron(heartbeat, second=0, run_at_startup=True),

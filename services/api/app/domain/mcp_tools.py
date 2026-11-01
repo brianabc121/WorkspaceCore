@@ -150,7 +150,9 @@ async def _call_tool(
             if await limiter.hit(f"mcp_calls:{caller.instance_id}", CALLS_PER_MINUTE) is not None:
                 return error_result("RATE_LIMITED", "调用太频繁，请稍后再试")
         async with state.sessionmaker() as db:
-            service = AiToolService(db, state.settings, state.connectors, state.redis)
+            service = AiToolService(
+                db, state.settings, state.connectors, state.redis, jobs=state.jobs
+            )
             instance = await db.get(AgentInstance, caller.instance_id)
             if instance is None:
                 return error_result("NOT_FOUND", "实例不存在")
