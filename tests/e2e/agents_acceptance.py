@@ -520,7 +520,7 @@ def scenario_8(c: Ctx) -> None:
         ("/auth/get_admin_token", {"secret": "x", "userID": "imAdmin"}),
         ("/msg/pull_msg_by_seq", {"userID": c.admin_im, "seqRanges": []}),
     ):
-        status, text = c.a.request("POST", f"{api}{path}", body=body, headers={"token": token, "operationID": uuid.uuid4().hex})
+        status, _ = c.a.request("POST", f"{api}{path}", body=body, headers={"token": token, "operationID": uuid.uuid4().hex})
         results[path] = status
     c.check("场景 8：改会话、搜消息、管理接口、拉别人的消息都被接入网关拦截",
             all(v in (403, 404) for v in results.values()), json.dumps(results))
@@ -533,16 +533,28 @@ def scenario_9(c: Ctx) -> None:
         "title": f"验收日程{i}", "timezone": "Asia/Shanghai", "start_at": start,
         "end_at": "2026-12-01T11:00:00+08:00"}) for i in (1, 2)]
     target = events[0]["id"]
+
+    def event_ids() -> set[str]:
+        # 日程没有单条查询接口，按区间列出
+        page = c.owner.call("GET", "/api/v1/calendar/events?start=2026-12-01T00:00:00%2B08:00"
+                            "&end=2026-12-02T00:00:00%2B08:00&limit=100")
+        return {e["id"] for e in page["items"]}
+
     c.owner.send(c.conv_a, "TOOL:myworkspace__delete_calendar_event " + json.dumps({"event_id": target}))
 
+    mine = {e["id"] for e in events}
+
     def pending() -> list[dict[str, Any]]:
+        # 只看这次建的两条日程（重跑时之前留下的待审批不算）
         return [e for e in c.owner.call("GET", "/api/v1/ai/tool-executions?status=pending_approval")["items"]
-                if e["tool_name"] == "delete_calendar_event" and e["instance_id"] == c.a.id]
+                if e["tool_name"] == "delete_calendar_event" and e["instance_id"] == c.a.id
+                and e["arguments"].get("event_id") in mine]
 
     found = wait_for("待审批记录", pending, timeout=150)
     record = found[0]
-    still = c.owner.call("GET", f"/api/v1/calendar/events/{target}", expect=200)
-    c.check("场景 9：实例发起删除只生成待审批记录，没有执行", record["status"] == "pending_approval" and still["id"] == target)
+    assert record["arguments"].get("event_id") == target, record["arguments"]
+    c.check("场景 9：实例发起删除只生成待审批记录，没有执行",
+            record["status"] == "pending_approval" and target in event_ids())
     notice = wait_for("审批卡片", lambda: [x for x in c.owner.call("GET", "/api/v1/im/conversations?kind=notice")["items"]
                                        if x["last_message"] and x["last_message"]["kind"] == "approval_card"], timeout=120)
     c.check("场景 9：管理员的 IM 里出现审批卡片", bool(notice))
@@ -552,12 +564,11 @@ def scenario_9(c: Ctx) -> None:
     approved = c.owner.call("POST", f"/api/v1/ai/tool-executions/{record['id']}/approve", {"password": PASSWORD},
                             **{"If-Match": f'"{record["version"]}"'})
     c.check("场景 9：批准（含二次认证）后执行", approved["status"] == "succeeded", approved["status"])
-    gone = c.owner.client.request("GET", f"/api/v1/calendar/events/{target}", headers=c.owner.headers).status
-    other = c.owner.client.request("GET", f"/api/v1/calendar/events/{events[1]['id']}", headers=c.owner.headers).status
+    left = event_ids()
     second = next(e for e in both if e["id"] != record["id"])
-    c.check("场景 9：只执行批准的那一条；改参数后的请求仍待审批", gone == 404 and other == 200
+    c.check("场景 9：只执行批准的那一条；改参数后的请求仍待审批", target not in left and events[1]["id"] in left
             and c.owner.call("GET", f"/api/v1/ai/tool-executions/{second['id']}")["status"] == "pending_approval",
-            f"{gone}/{other}")
+            f"剩余 {len(left)} 条")
 
 
 def scenario_10(c: Ctx) -> None:
@@ -749,8 +760,8 @@ def main() -> int:
     parser.add_argument("--server-ca", required=True)
     parser.add_argument("--npm-proxy", action="store_true", help="安装插件时经 HTTPS_PROXY 访问 npm（本机开发环境）")
     parser.add_argument("--keep", action="store_true", help="结束后保留现场（state.json），便于排查或 --attach")
-    parser.add_argument("--attach", help="接入 --keep 保留的现场（state.json 的路径），跳过搭建")
-    parser.add_argument("--only", help="只跑这些场景（逗号分隔，例如 3,4）")
+    parser.add_argument("--attach", help="接入 --keep 保留的现场（state.json 的路径），跳过搭建；不带 --keep 时跑完就清理")
+    parser.add_argument("--only", help="只跑这些场景（逗号分隔，例如 3,4；传空字符串只清理现场）")
     parser.add_argument("--api-image", default=None, help="运行假模型用的镜像（默认用 api 服务的镜像）")
     args = parser.parse_args()
     base = parse_base_url(args.base_url)
@@ -758,7 +769,7 @@ def main() -> int:
     ctx: Ctx | None = None
     try:
         ctx = attach(args, report, base) if args.attach else setup(args, report, base)
-        selected = args.only.split(",") if args.only else list(SCENARIOS)
+        selected = [k for k in args.only.split(",") if k] if args.only is not None else list(SCENARIOS)
         for key in selected:
             try:
                 SCENARIOS[key](ctx)
@@ -766,7 +777,7 @@ def main() -> int:
                 report.check(f"场景 {key}：{SCENARIOS[key].__doc__.splitlines()[0]}", False, f"{type(error).__name__}: {error}")
         return report.finish()
     finally:
-        if ctx is not None and (args.keep or args.attach):
+        if ctx is not None and args.keep:
             print(f"保留现场：{save(ctx)}", file=sys.stderr)
         elif ctx is not None:
             if report.failures:
