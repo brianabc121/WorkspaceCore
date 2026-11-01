@@ -527,7 +527,12 @@ async def test_bundle_carries_a_fresh_token_only_once(env: Env) -> None:
     token = _env_value(files, "MYWS_INSTANCE_TOKEN")
     assert _env_value(files, "MYWS_AGENT_API") == "https://10.0.0.5/agent-api"
     assert _env_value(files, "OPENIM_WS_ADDR") == "wss://10.0.0.5/im/ws"
-    assert "tunnel:" not in files["compose.yaml"][0] and "@PUBLIC" not in files["compose.yaml"][0]
+    compose = files["compose.yaml"][0]
+    assert "\n  tunnel:" not in compose and "@PUBLIC" not in compose
+    # 工作台也有外网入口：内网实例的本机取图代理（不带客户端证书）把外网域名转发到内网入口
+    assert "\n  image-proxy:" in compose and "--disable-authentication" in compose
+    assert "--target=10.0.0.5:443" in compose and "--listen=127.0.0.1:18443" in compose
+    assert 'extra_hosts: ["agent.example.com:127.0.0.1"]' in compose
     assert (await resolve(env.client, token, ["k"])).status_code == 200
 
     me = await env.client.get("/api/v1/me")

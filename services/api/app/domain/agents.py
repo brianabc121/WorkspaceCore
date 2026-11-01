@@ -616,7 +616,14 @@ class AgentService:
                 now=now,
             )
         tunnel_target: str | None = None
+        image_proxy_host: str | None = None
+        image_proxy_target: str | None = None
         base = configured
+        if not public and self.settings.agent_public_url:
+            # 图片地址用外网域名（OC-3 ADR 第 15 节）：内网实例经本机代理转发到内网入口
+            intranet = urlsplit(configured)
+            image_proxy_host = urlsplit(self.settings.agent_public_url).hostname
+            image_proxy_target = f"{intranet.hostname}:{intranet.port or 443}"
         if public:
             # 外网模式：公网域名在 OpenClaw 那边解析到本机隧道
             # （Caddy 开启客户端证书时要求 SNI 与 Host 一致，所以不能用 127.0.0.1）
@@ -636,6 +643,8 @@ class AgentService:
                 client_key_pem=cert.key_pem if cert else None,
                 tunnel_target=tunnel_target,
                 tunnel_port=self.settings.agent_tunnel_port,
+                image_proxy_host=image_proxy_host,
+                image_proxy_target=image_proxy_target,
             ),
             now=now,
         )

@@ -305,3 +305,118 @@ async def test_image_upload_send_and_display_on_real_openim(
         assert projected, "对账没有投影出图片消息"
         assert projected["image"]["media_id"] == upload["upload_id"]
         assert projected["image"]["width"] == 320
+
+
+def _pb_string(field: int, value: str) -> bytes:
+    data = value.encode()
+    return bytes([(field << 3) | 2, len(data)]) + data
+
+
+async def test_ingress_gateway_on_real_openim(
+    make_client: ClientFactory, migrated_database_url: str
+) -> None:
+    """接入网关：真实 IM 令牌经 /im/api 转发到 OpenIM（白名单、用户校验、protobuf 接口）、
+    forward_auth 放行 /im/ws、实例经 /im/obj/m 取回工作台发出的图片（含缩略图）。"""
+    object_url = os.environ.get("TEST_OPENIM_OBJECT_URL", "")
+    if not object_url:
+        pytest.skip("需要 TEST_OPENIM_OBJECT_URL")
+    from tests.test_agents_api import agent_headers as _agent_headers
+
+    overrides: dict[str, Any] = {
+        **IM_SETTINGS,
+        "openim_api_url": URL.rstrip("/"),
+        "openim_secret": SecretStr(SECRET),
+        "openim_object_url": object_url,
+    }
+    async with im_env(make_client, migrated_database_url, **overrides) as env:
+        env.app.state.connectors.transport = None
+        instance = await env.create_instance(name=f"live-{uuid.uuid4().hex[:6]}")
+        oc, owner = instance["im_user_id"], admin_im_user_id(env.owner_id)
+        token = await env.issue_token(instance["id"])
+        im_token = (
+            await env.client.post("/agent-api/v1/im-token", headers=_agent_headers(token))
+        ).json()["token"]
+        ingress = {"X-MyWS-Ingress": "intranet"}
+
+        async def api(route: str, body: Any, *, raw: bytes | None = None) -> Any:
+            return await env.client.post(
+                f"/im/api{route}",
+                content=raw if raw is not None else json.dumps(body).encode(),
+                headers={
+                    **ingress,
+                    "token": im_token,
+                    "operationID": uuid.uuid4().hex,
+                    "Content-Type": "application/json",
+                },
+            )
+
+        friends = await api("/friend/get_full_friend_user_ids", {"userID": oc, "idHash": 0})
+        assert friends.status_code == 200, friends.text
+        assert friends.json()["errCode"] == 0 and owner in friends.json()["data"]["userIDs"]
+        other = await api("/friend/get_full_friend_user_ids", {"userID": owner, "idHash": 0})
+        assert other.status_code == 403 and other.json()["errCode"] == 1002
+        blocked = await api("/friend/delete_friend", {"ownerUserID": oc, "friendUserID": owner})
+        assert blocked.status_code == 404
+        info = await api("/user/get_users_info", {"userIDs": [oc, owner]})
+        assert info.status_code == 200 and info.json()["errCode"] == 0
+        stranger = await api("/user/get_users_info", {"userIDs": [f"ws_{uuid.uuid4().hex}"]})
+        assert stranger.status_code == 403
+        active = await api(
+            "/jssdk/get_active_conversations", None, raw=_pb_string(1, oc) + b"\x10\x0a"
+        )
+        assert active.status_code == 200, active.text
+        spoofed = await api("/jssdk/get_active_conversations", None, raw=_pb_string(1, owner))
+        assert spoofed.status_code == 403
+        bad_token = await env.client.post(
+            "/im/api/friend/get_full_friend_user_ids",
+            json={"userID": oc, "idHash": 0},
+            headers={**ingress, "token": im_token[:-2] + "xx"},
+        )
+        assert bad_token.status_code == 401
+
+        async def auth(uri: str) -> int:
+            response = await env.client.get(
+                "/internal/gateway/im-auth",
+                headers={**ingress, "X-Forwarded-Method": "GET", "X-Forwarded-Uri": uri},
+            )
+            return response.status_code
+
+        assert await auth(f"/im/ws?sendID={oc}&token={im_token}&platformID=5") == 200
+        assert await auth(f"/im/ws?sendID={owner}&token={im_token}&platformID=5") == 401
+        assert await auth(f"/im/obj/x?sendID={oc}&token={im_token}") == 403
+
+        # 实例取图：管理员发出的图片，经 /im/obj/m 原样取回；缩略图不超过 256
+        await env.client.post(
+            "/api/v1/im/conversations",
+            json={"instance_id": instance["id"]},
+            headers=env.headers(write=True),
+        )
+        conv = single_conversation_id(owner, oc)
+        image = _png(600, 400)
+        upload = (
+            await env.client.post(
+                "/api/v1/im/uploads",
+                content=image,
+                headers={**env.headers(write=True), "Content-Type": "image/png"},
+            )
+        ).json()
+        unsent = await env.client.get(f"/im/obj/m/{upload['upload_id']}", headers=ingress)
+        assert unsent.status_code == 404  # 还没发出
+        await env.client.post(
+            f"/api/v1/im/conversations/{conv}/messages",
+            json={"kind": "image", "upload_id": upload["upload_id"]},
+            headers={**env.headers(write=True), "Idempotency-Key": str(uuid.uuid4())},
+        )
+        fetched = await env.client.get(f"/im/obj/m/{upload['upload_id']}", headers=ingress)
+        assert fetched.status_code == 200 and fetched.content == image
+        thumb = await env.client.get(f"/im/obj/m/{upload['upload_id']}?thumb=1", headers=ingress)
+        assert thumb.status_code == 200 and thumb.content[:8] == b"\x89PNG\r\n\x1a\n"
+        import struct
+
+        width, height = struct.unpack(">II", thumb.content[16:24])
+        assert max(width, height) <= 256
+        assert (await env.client.get(f"/im/obj/m/{upload['upload_id']}")).status_code == 404
+
+        # 停用后令牌不再放行
+        await env.set_enabled(instance["id"], False)
+        assert await auth(f"/im/ws?sendID={oc}&token={im_token}&platformID=5") == 401

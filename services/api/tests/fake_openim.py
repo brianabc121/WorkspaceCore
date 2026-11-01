@@ -19,6 +19,21 @@ OBJECT_HOST = "objects.test"
 OBJECT_URL = f"http://{OBJECT_HOST}:3900"
 SECRET = "fake-openim-secret"  # noqa: S105 - 测试用的假 secret
 TOKEN_SECONDS = 30 * 24 * 3600
+# 实例经接入网关调用、带用户令牌的接口（OC-0 ADR 第 5 节）
+USER_TOKEN_ROUTES = frozenset(
+    {
+        "/conversation/get_incremental_conversations",
+        "/conversation/get_not_notify_conversation_ids",
+        "/friend/get_full_friend_user_ids",
+        "/friend/get_incremental_friends",
+        "/group/get_full_join_group_ids",
+        "/group/get_incremental_join_groups",
+        "/group/get_incremental_group_members_batch",
+        "/user/get_users_info",
+        "/jssdk/get_active_conversations",
+        "/jssdk/get_conversations",
+    }
+)
 
 
 class FakeOpenIM:
@@ -43,6 +58,7 @@ class FakeOpenIM:
         self.groups: dict[str, dict[str, Any]] = {}
         # 对象名 → 内容；上传中的分片按 uploadID 暂存
         self.objects: dict[str, bytes] = {}
+        self.forwarded: list[tuple[str, str, bytes]] = []
         self.pending_parts: dict[str, dict[int, bytes]] = {}
 
     def add_message(
@@ -87,6 +103,10 @@ class FakeOpenIM:
         if request.url.host != HOST:
             return httpx.Response(404)
         path = request.url.path
+        if path in USER_TOKEN_ROUTES:
+            # 接入网关转发的实例请求：带的是用户令牌（protobuf 接口的请求体不是 JSON），原样记下
+            self.forwarded.append((path, request.headers.get("token", ""), request.content))
+            return self._ok({"forwarded": True})
         body: dict[str, Any] = json.loads(request.content or b"{}")
         self.calls.append((path, body))
         if path == "/auth/get_admin_token":

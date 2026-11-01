@@ -6,7 +6,9 @@
 # - 先删掉客户端带来的 X-MyWS-* 请求头，再由这里写入入口与客户端证书指纹。API 只在请求直接来自
 #   本服务（AGENT_INGRESS_TRUSTED_PROXIES）时采用这两个请求头；
 # - 证书来自文件（/certs）：内网可用内部 CA 或 Tailscale 证书，外网用公网证书；
-# - IM（/im/ws、/im/api、/im/obj）在 OC-3 接入 OpenIM 后再放行。
+# - IM（OC-3，契约第 8 节）：/im/ws 先由 API 的 /internal/gateway/im-auth 做 forward_auth，再透传到
+#   OpenIM 消息网关（OPENIM_MSG_GATEWAY）；/im/api/* 交给 API 检查后转发；/im/obj/m/* 只读，由 API
+#   取图。这里不记访问日志：/im/ws 的 IM 令牌在查询参数里。
 {
 	admin off
 	auto_https off
@@ -29,12 +31,66 @@
 		}
 	}
 
+	# IM 消息网关（WebSocket）：令牌与 sendID 在查询参数里，由 API 校验后透传
+	@im_ws {
+		path /im/ws
+		method GET
+	}
+	handle @im_ws {
+		# route 保持书写顺序：先认证（看到的还是 /im/ws），再改写路径、透传到消息网关。
+		# 不用 route 时 Caddy 会把 rewrite 排到 forward_auth 前面（实测）
+		route {
+			forward_auth api:8000 {
+				uri /internal/gateway/im-auth
+				# 认证请求是普通的 GET：不带 WebSocket 升级的请求头，否则 API 会按 WebSocket 连接处理
+				header_up -Connection
+				header_up -Upgrade
+				header_up -Sec-WebSocket-Key
+				header_up -Sec-WebSocket-Version
+				header_up -Sec-WebSocket-Extensions
+				header_up X-MyWS-Ingress {args[0]}
+				header_up X-MyWS-Client-Cert-SHA256 {http.request.tls.client.fingerprint}
+			}
+			rewrite * /?{query}
+			reverse_proxy {$OPENIM_MSG_GATEWAY:openim-server:10001}
+		}
+	}
+
+	# IM REST：API 检查白名单与用户后转发到 OpenIM（请求体上限 64 KiB，契约第 8 节）
+	@im_api {
+		path /im/api/*
+		method POST
+	}
+	handle @im_api {
+		request_body {
+			max_size 64KB
+		}
+		reverse_proxy api:8000 {
+			header_up X-MyWS-Ingress {args[0]}
+			header_up X-MyWS-Client-Cert-SHA256 {http.request.tls.client.fingerprint}
+		}
+	}
+
+	# 工作台发出的图片（只读）
+	@im_obj {
+		path /im/obj/m/*
+		method GET
+	}
+	handle @im_obj {
+		reverse_proxy api:8000 {
+			header_up X-MyWS-Ingress {args[0]}
+			header_up X-MyWS-Client-Cert-SHA256 {http.request.tls.client.fingerprint}
+		}
+	}
+
 	handle {
 		respond 404
 	}
 }
 
-https://{$AGENT_INTRANET_HOST}:8443 {
+# 内网入口也接受外网域名：两种实例并存时，内网实例取图用的地址是 http://<外网域名>:<隧道端口>，
+# 经接入包里的本机代理（不带客户端证书）转发到这里，Host 是外网域名、SNI 是内网域名
+https://{$AGENT_INTRANET_HOST}:8443, https://{$AGENT_PUBLIC_HOST}:8443 {
 	tls /certs/intranet.crt /certs/intranet.key
 
 	@outside not remote_ip {$AGENT_INTRANET_ALLOWED_CIDRS}

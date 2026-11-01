@@ -310,6 +310,7 @@
     - 响应体用 OpenIM 的格式 `{"errCode": 1002, "errMsg": "NoPermissionError", "errDlt": "blocked by My Workspace gateway"}`。插件遇到非 200 的行为在 OC-3 核实；
   - 请求体上限 64 KiB；不转发 `Accept-Encoding`（OC-0 ADR 第 5 节）；去掉响应里的 `Set-Cookie`。
 - **`GET /im/obj/*`**：`forward_auth` 同上，只允许 GET（下载图片）；上传路径在第一版拦截（OC-0 F3）。
+  - OC-3 实现时改为 `GET /im/obj/m/{media_id}`，由 API 按能力地址提供：插件取图时不带 IM 令牌，OpenIM 的对象地址又指向不对外的对象存储（OC-3 ADR 第 15 节）。
 
 ## 9. MCP 工具（OC-5）
 

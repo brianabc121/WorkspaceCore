@@ -176,7 +176,8 @@ async def test_send_image_and_display(env: ImEnv) -> None:
     call = env.fake.paths("/msg/send_msg")[-1]
     assert call["contentType"] == 102 and call["recvID"] == instance["im_user_id"]
     picture = call["content"]
-    url = f"http://127.0.0.1:18443/im/obj/m/{upload['upload_id']}"
+    # 测试配置了外网入口 https://agent.example.com：实例经本机隧道用外网域名访问
+    url = f"http://agent.example.com:18443/im/obj/m/{upload['upload_id']}"
     assert picture["sourcePicture"]["url"] == url and picture["bigPicture"]["url"] == url
     assert picture["snapshotPicture"]["url"] == url + "?thumb=1"
     assert (picture["snapshotPicture"]["width"], picture["snapshotPicture"]["height"]) == (256, 192)

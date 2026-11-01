@@ -403,3 +403,48 @@ OC-0 的回归测试脚本没有覆盖这一项，覆盖它的是这个单元测
 - **验证**：
   - 模拟 OpenIM 与对象存储 17 项（`tests/test_im_media_api.py`，含按内容识别的单元测试）；
   - 真实补丁镜像加 Garage：上传、发图、`/im/media` 取回的字节与上传的一致、投影带 `media_id`，与其他真实实例测试一起连续 3 次通过。
+
+## 15. 第 4 部分（B6）：接入网关的 IM 部分与内网实例的取图代理（2026-11-01）
+
+契约第 8 节。API 侧在 `app/domain/im_gateway.py` 与 `app/api/agent_api.py`，入口侧在 `infra/caddy/agent.Caddyfile`。
+
+- **IM 令牌**：OpenIM 的用户令牌是用 share.secret 签名的 HS256 JWT（锁定源码 openimsdk/tools `tokenverify`、open-im-server `pkg/authverify/token.go`）。
+  - 工作台在本地校验签名与有效期，不再调用 `/auth/parse_token`，这就是契约第 8 节留给 OC-3 核实的“签名方式”；
+  - 令牌是否已被踢下线，仍由 OpenIM 的 REST 与消息网关自己判断。
+- **放行条件**（三个入口共用）：
+  - 令牌属于已启用、IM 已就绪的实例（`oc_*`，平台 5），总开关打开；
+  - 请求经接入入口来，并且是实例登记的那个入口；外网入口还要同一实例的有效客户端证书；
+  - 外网入口同一来源失败 10 次后封禁 15 分钟；
+  - 任何不符都返回 401，不区分原因。
+- **`/im/ws`**：Caddy 用 `forward_auth` 问 `/internal/gateway/im-auth`，通过后透传到 OpenIM 消息网关。
+  - 认证时看查询参数里的 `token`、`sendID`（必须等于令牌的用户）和 `platformID`（必须是 5）；
+  - 实测有两个坑：
+    - Caddy 会按指令的默认顺序把 `rewrite` 排到 `forward_auth` 前面，认证看到的路径会变成 `/`，所以用 `route` 固定顺序；
+    - `forward_auth` 默认把 WebSocket 升级的请求头一起带给认证请求，API 会按 WebSocket 连接处理并返回 403，所以要去掉这些请求头。
+  - 入口不记访问日志，因为令牌在查询参数里。
+- **`/im/api/{route}`**：API 检查后转发到 OpenIM REST（请求体 ≤ 64 KiB）。
+  - 白名单就是 OC-0 抓到的 7 个接口，校验请求体里的 `userID` 等于令牌的用户；
+  - `/user/get_users_info` 只能查同一工作空间的 IM 账号（实例、owner / admin、ws_notice、imAdmin）；
+  - `/jssdk/*` 是 protobuf，只读顶层字段 1（ownerUserID），必须恰好一个且等于令牌的用户；
+  - 被拒时：不在白名单返回 404，用户不符返回 403，响应体都用 OpenIM 的格式（`errCode 1002`）；
+  - 转发时不带回上游的响应头，httpx 已解压，所以也不带 `Content-Encoding`。
+- **`/im/obj/m/{media_id}`**：实例取工作台发出的图片（只读，`thumb=1` 给缩略图）。openclaw-channel 取图不带凭证，所以只认经接入入口来的请求和已经发出的图片。
+  - **对契约第 8 节的偏差**：契约写的是 `/im/obj/*` 用 IM 令牌做 forward_auth 后透传 OpenIM 的对象地址。实际插件取图时不带令牌，OpenIM 的对象地址又指向不对外的对象存储，所以改成 API 自己按能力地址提供，其他 `/im/obj/*` 一律 404。
+- **更正第 14 节的取图地址**：OC-2 核实过，外网入口开启客户端证书后 Host 必须与 SNI 一致；外网实例访问工作台用的是 `http://<外网域名>:<隧道端口>`（这个域名在 OpenClaw 容器里指向本机隧道）。所以默认前缀改为：
+  - 配置了外网入口时：`http://<外网域名>:<AGENT_TUNNEL_PORT>`；
+  - 只有内网入口时：内网入口地址；
+  - 两种实例并存时，内网实例还要在接入包里把外网域名指向一个本机代理，内网入口也要接受这个域名，见下面的“内网实例的取图代理”。
+- **入口的实测**：本机起 API，测试用的入口 Caddy 接入 OpenIM 的网络，按 `agent.Caddyfile` 原样加载。
+  - WebSocket：正确令牌握手返回 101（消息网关接受连接）；sendID 不符或令牌被篡改都返回 401；
+  - REST：转发拿到 OpenIM 的真实应答；`/friend/delete_friend` 返回 404；客户端自带的 `X-MyWS-Ingress` 会被入口改写；
+  - `/im/obj/m` 路由到 API；`PUT`、其他路径返回 404。
+- **内网实例的取图代理**：一条群消息同时发给内网和外网实例，图片地址只能有一个，所以内网实例也用外网域名取图。
+  - 接入包（工作台配置了外网入口、实例是内网模式时）增加 `image-proxy` 服务：ghostunnel 客户端模式，在宿主机 `127.0.0.1:<AGENT_TUNNEL_PORT>` 接收明文，用 TLS 转发到内网入口，`--disable-authentication`（不带客户端证书，内网入口本来就不要）；
+  - OpenClaw 容器用 `extra_hosts` 把外网域名解析到 127.0.0.1，与外网实例的本机隧道同一个做法；
+  - 内网入口的站点同时接受 `{$AGENT_PUBLIC_HOST}`：代理连过去时 SNI 是内网域名、Host 是外网域名，内网入口不开客户端证书，Caddy 按 Host 选路由；
+  - 内网实例的其他请求（MCP、`/agent-api`、`/im/ws`、`/im/api`）照旧直连内网入口，代理只用于取图；
+  - 实测（ghostunnel v1.11.4 与上面的测试入口）：经本机代理，Host 是外网域名的请求路由到 API（不存在的图片返回 API 的 404），Host 是其他域名的请求不匹配任何站点（Caddy 默认的空 200，不进 API）。
+- **测试**：
+  - `tests/test_im_gateway.py`：6 项，包括令牌与 protobuf 的单元测试、forward_auth 的各种拒绝、外网证书与封禁、REST 白名单、实例取图；
+  - `tests/test_im_live.py`：在真实补丁镜像上用真实令牌走一遍；
+  - `tests/test_agents_api.py`：内网接入包带 `image-proxy`、不带 `tunnel`，目标是内网入口。
