@@ -1,4 +1,24 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+/* shadcn-vue 组件（src/components/ui）用的颜色令牌映射到本项目已有的主题变量，亮暗主题自动跟随；
+   不新增颜色，不改全局元素样式。见 docs/decisions/2026-11-01-shadcn-vue-and-drawer.md */
+@theme inline {
+  --color-background: var(--surface);
+  --color-foreground: var(--text);
+  --color-muted: var(--bg);
+  --color-muted-foreground: var(--muted);
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-ring: var(--accent);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--surface);
+  --color-secondary: var(--accent-soft);
+  --color-secondary-foreground: var(--accent);
+  --color-accent: var(--accent-soft);
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--danger);
+}
 
 .knowledge-list, .calendar-agenda { display: grid; gap: 16px; margin: 18px 0; }
 .resource-record { min-width: 0; overflow-wrap: anywhere; }
@@ -324,3 +344,21 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .ai-risk-write, .ai-status-pending_approval { border-color: var(--accent); color: var(--accent); }
 .ai-status-pending_approval { background: var(--accent-soft); }
 .ai-risk-critical, .ai-status-failed, .ai-status-unknown, .ai-status-denied { border-color: var(--danger); color: var(--danger); }
+
+/* 右侧 AI / 详情抽屉（规范 §8.1）：宽屏停靠 380px；窄屏是侧滑面板（.app-drawer-sheet） */
+.app-drawer { width: 380px; flex-shrink: 0; border-left: 1px solid var(--line); background: var(--surface); position: sticky; top: 0; height: 100dvh; overflow-y: auto; }
+.drawer-panel { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; min-height: 100%; }
+.app-drawer-sheet .drawer-panel { height: 100%; overflow-y: auto; padding-right: 48px; }
+.drawer-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; }
+.drawer-tabs { width: 100%; }
+.drawer-body { min-width: 0; }
+.drawer-body[hidden] { display: none; }
+.drawer-detail .section-heading { margin-bottom: 12px; }
+.drawer-detail h3 { font-size: 1rem; font-weight: 600; margin: 0; }
+.assistant-chat { display: flex; flex-direction: column; gap: 12px; }
+.assistant-messages { max-height: 45dvh; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--bg); }
+.assistant-messages ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.assistant-messages li { display: grid; gap: 2px; font-size: .85rem; }
+.assistant-messages li.is-mine { text-align: right; }
+.assistant-sender { color: var(--muted); font-size: .72rem; }
+.assistant-composer { display: grid; gap: 8px; }

@@ -27,6 +27,7 @@ OpenClaw AI 实例——管理员在工作台里和实例聊天，实例的每�
 | 自动化 | 白名单内的 n8n 工作流：确认后触发、查看运行记录（可选部署） |
 | 通知 | 通知中心与实时推送（SSE），首页通知组件 |
 | 设置 | 个人资料、工作空间、成员管理、集成、安全（密码与会话）、审计日志 |
+| 右侧抽屉 | 顶栏“AI 助手”打开：宽屏停靠在页面右侧、窄屏为侧滑面板；在里面与 OpenClaw 实例对话，任务的新建与编辑也在这里（Task Drawer） |
 | **V2：消息（IM）** | 管理员与 OpenClaw 实例单聊、群聊（@、置顶、免打扰、分组、导出）；浏览器不直连 OpenIM |
 | **V2：OpenClaw 实例** | 登记实例、生成接入包（凭证只出现一次）、内网 / 外网两种接入方式、在线状态与到期提醒 |
 | **V2：密钥库** | 集中保存模型 API Key 等密钥，按实例授权，记录每次取用；只写不读 |
@@ -54,7 +55,7 @@ flowchart LR
 ```
 
 - 后端是模块化单体（BFF）：FastAPI + Pydantic 2 + SQLAlchemy 2（async）+ Alembic，后台作业用 ARQ（Redis）。
-- 前端：Vue 3 + TypeScript + Vite，TanStack Query、Pinia、GridStack、Zod；接口类型由 OpenAPI 生成。
+- 前端：Vue 3 + TypeScript + Vite，Tailwind CSS 4 + shadcn-vue（reka-ui），TanStack Query、Pinia、GridStack、Zod；接口类型由 OpenAPI 生成。
 - 部署：Docker Compose。core 6 个服务；Vikunja、n8n、OpenIM 各自独立的 Compose 项目；监控是可选 profile。
 
 更多见 [`docs/architecture.md`](docs/architecture.md)。

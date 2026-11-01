@@ -4,7 +4,8 @@
     "strict": true, "skipLibCheck": true, "noEmit": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client", "vitest/globals", "node"],
-    "esModuleInterop": true, "resolveJsonModule": true
+    "esModuleInterop": true, "resolveJsonModule": true,
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "vite.config.ts"]
 }

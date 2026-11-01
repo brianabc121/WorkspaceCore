@@ -8,11 +8,14 @@ import { errorMessage } from './services/api'
 import HeaderSearch from './components/HeaderSearch.vue'
 import HeaderNotifications from './components/HeaderNotifications.vue'
 import ImHeaderBadges from './features/im/ImHeaderBadges.vue'
+import AppDrawer from './components/AppDrawer.vue'
+import { useDrawerStore } from './stores/drawer'
 import { useWorkspaceEvents } from './features/events/useWorkspaceEvents'
 
 const route = useRoute()
 const theme = useThemeStore()
 const auth = useAuthStore()
+const drawer = useDrawerStore()
 useWorkspaceEvents()
 const logoutError = ref('')
 const loggingOut = ref(false)
@@ -64,7 +67,7 @@ watch(pageTitle, (title) => { document.title = `${title} · My Workspace` }, { i
           <span class="breadcrumb">工作空间 <span aria-hidden="true">/</span> <strong>{{ pageTitle }}</strong></span>
         </div>
         <div class="topbar-actions">
-          <template v-if="auth.user"><HeaderSearch /><button class="theme-button" disabled title="创建入口将在后续阶段开放">创建 · 即将开放</button><ImHeaderBadges v-if="auth.canManage && auth.workspaceId" :key="auth.user.id + ':' + auth.workspaceId" /><HeaderNotifications /></template>
+          <template v-if="auth.user"><HeaderSearch /><button class="theme-button" disabled title="创建入口将在后续阶段开放">创建 · 即将开放</button><ImHeaderBadges v-if="auth.canManage && auth.workspaceId" :key="auth.user.id + ':' + auth.workspaceId" /><HeaderNotifications /><button class="theme-button" type="button" aria-controls="app-drawer" :aria-expanded="drawer.open" @click="drawer.toggle()">{{ drawer.open ? '收起 AI 助手' : 'AI 助手' }}</button></template>
           <select v-if="auth.workspaces.length > 1" aria-label="当前工作空间" :value="auth.workspaceId" @change="auth.selectWorkspace(($event.target as HTMLSelectElement).value)"><option v-for="workspace in auth.workspaces" :key="workspace.id" :value="workspace.id">{{ workspace.name }}</option></select>
           <span v-else-if="auth.currentWorkspace" class="user-label">{{ auth.currentWorkspace.name }}</span>
           <span v-if="auth.user" class="user-label">{{ auth.user.display_name }}</span>
@@ -80,5 +83,6 @@ watch(pageTitle, (title) => { document.title = `${title} · My Workspace` }, { i
       </main>
       <footer class="page-footer">My Workspace · 自托管个人工作台</footer>
     </div>
+    <AppDrawer />
   </div>
 </template>
