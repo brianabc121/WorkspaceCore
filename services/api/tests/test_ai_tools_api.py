@@ -115,6 +115,11 @@ async def test_a14_ai_delete_only_creates_a_pending_record(env: Env) -> None:
     assert listed.json()["pending_count"] == 1
     badges = await env.client.get("/api/v1/im/badges", headers=env.headers())
     assert badges.json()["pending_approvals"] == 1
+    # 通知中心：能审批的 owner / admin 收到 approval_requested，点开定位到这条记录
+    notes = await env.client.get("/api/v1/notifications", headers=env.headers())
+    [note] = [n for n in notes.json()["items"] if n["type"] == "approval_requested"]
+    assert note["severity"] == "warning" and "删除任务「写周报」" in note["title"]
+    assert note["link"] == f"/approvals?id={pending.action_id}"
 
 
 async def test_approving_a_critical_action_needs_the_password(env: Env) -> None:
@@ -376,3 +381,6 @@ async def test_the_worker_expires_overdue_approvals(env: Env) -> None:
     assert (await execution(env, fresh.action_id)).json()["status"] == "pending_approval"
     badges = await env.client.get("/api/v1/im/badges", headers=env.headers())
     assert badges.json()["pending_approvals"] == 1
+    notes = await env.client.get("/api/v1/notifications", headers=env.headers())
+    expired_notes = [n for n in notes.json()["items"] if n["type"] == "approval_expired"]
+    assert [n["link"] for n in expired_notes] == [f"/approvals?id={old.action_id}"]

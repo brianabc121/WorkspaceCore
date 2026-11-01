@@ -313,7 +313,7 @@ async def test_deleted_friend_is_restored_and_admin_notified(env: ImEnv) -> None
         env.database_url,
         "SELECT link FROM workspace.notifications WHERE type = 'im_friend_restored'",
     )
-    assert notice == f"/im?conversation={conv}"
+    assert notice == f"/im?c={conv}"
 
 
 async def test_failures_are_retried_then_dead_lettered(env: ImEnv) -> None:
