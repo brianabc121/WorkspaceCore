@@ -39,9 +39,11 @@ from app.domain.ratelimit import WindowLimiter
 from app.integrations.base import ConnectorError
 from app.integrations.openim import (
     CONTENT_AT_TEXT,
+    CONTENT_OA_NOTIFICATION,
     CONTENT_PICTURE,
     CONTENT_TEXT,
     SESSION_GROUP,
+    SESSION_NOTIFICATION,
     SESSION_SINGLE,
     ObjectStore,
     OpenIMClient,
@@ -85,8 +87,6 @@ logger = logging.getLogger("app.im")
 SEND_PER_MINUTE = 30
 # 结果未知的消息：超过这个时间投影里仍找不到，就确认 OpenIM 没有受理
 UNKNOWN_GRACE = timedelta(minutes=5)
-# OpenIM 的通知会话（sn_）的会话类型
-SESSION_NOTIFICATION = 4
 # before 回调的拒收码（契约第 10 节）与 OpenIM 的参数类错误：发送被拒，不是暂时不可用
 _REJECT_CODES = frozenset(range(5001, 5010)) | {1001, 1004, 1101, 1201, 1203, 1204}
 NOTICE_TITLE = "审批通知"
@@ -117,9 +117,22 @@ def _decode_cursor(cursor: str | None) -> dict[str, Any] | None:
     return data
 
 
+def _approval_execution_id(row: ImMessage) -> uuid.UUID | None:
+    """审批卡片（工作空间通知账号发的 OA 通知，投影时记下了记录 ID）。"""
+    raw = (row.content_json or {}).get("approval_execution_id")
+    if row.content_type != CONTENT_OA_NOTIFICATION or not isinstance(raw, str):
+        return None
+    try:
+        return uuid.UUID(raw)
+    except ValueError:
+        return None
+
+
 def message_kind(row: ImMessage) -> MessageKind:
     if row.content_type in (CONTENT_TEXT, CONTENT_AT_TEXT):
         return "text"
+    if _approval_execution_id(row) is not None:
+        return "approval_card"
     if row.content_type == CONTENT_PICTURE:
         return "image"
     if row.content_type >= 1000:
@@ -199,10 +212,10 @@ def message_out(row: ImMessage, *, pinned: bool) -> ImMessageOut:
         sender_im_id=row.sender_im_id,
         sender_instance_id=row.sender_instance_id,
         kind=message_kind(row),
-        text=row.plain_text if message_kind(row) in ("text", "system") else None,
+        text=row.plain_text if message_kind(row) in ("text", "system", "approval_card") else None,
         image=_image(row),
         at_im_ids=list(row.at_im_ids or []),
-        approval_execution_id=None,
+        approval_execution_id=_approval_execution_id(row),
         status=row.status,
         sent_at=row.sent_at,
         pinned=pinned,

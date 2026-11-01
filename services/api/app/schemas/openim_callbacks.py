@@ -42,7 +42,7 @@ class MsgCallback(_Lenient):
     group_id: str = Field(default="", alias="groupID", description="群聊的群 ID；单聊为空")
     server_msg_id: str = Field(alias="serverMsgID")
     client_msg_id: str = Field(alias="clientMsgID")
-    session_type: int = Field(alias="sessionType", description="1 单聊；3 群聊")
+    session_type: int = Field(alias="sessionType", description="1 单聊；3 群聊；4 通知（OA 通知）")
     content_type: int = Field(
         alias="contentType", description="101 文字、102 图片、1201 加好友通知、1501 建群通知等"
     )

@@ -165,6 +165,13 @@ async def test_a14_delete_through_mcp_only_creates_a_pending_record(env: Env) ->
     assert pending["status"] == "pending_approval" and pending["deduplicated"] is False
     assert "删除任务「写周报」" in pending["summary"]
     assert any(t["title"] == "写周报" for t in env.fake.tasks.values())  # 没有执行
+    # 交给 worker 发 IM 审批卡片
+    assert ("send_approval_cards", (pending["action_id"],)) in env.queue.jobs
+    # 作业队列不可用时，待审批照常建好（卡片只是提醒，通知中心里已经有 approval_requested）
+    env.queue.fail = True
+    other = await call(env, token, "create_bookmark", {"url": "https://a.test/q", "title": "q"})
+    assert other["structuredContent"]["status"] == "pending_approval"
+    env.queue.fail = False
 
     status = await call(env, token, "get_action_status", {"action_id": pending["action_id"]})
     assert status["structuredContent"]["status"] == "pending_approval"

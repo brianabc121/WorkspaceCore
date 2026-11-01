@@ -15,6 +15,7 @@
 import hashlib
 import hmac
 import json
+import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -41,6 +42,7 @@ from app.domain.policy import WorkspaceAccess, has_role, not_found
 from app.domain.ratelimit import FailureLimiter
 from app.domain.security import verify_password
 from app.domain.tasks import TaskService, WriteResult
+from app.jobs.queue import SEND_APPROVAL_CARDS, JobQueue
 from app.models import (
     AgentInstance,
     AgentSettings,
@@ -73,6 +75,8 @@ from app.schemas.workspaces import Role
 # 高危操作二次认证：同一用户 15 分钟内输错 5 次后暂时不能再试
 STEP_UP_FAILURE_LIMIT = 5
 STEP_UP_WINDOW_SECONDS = 15 * 60
+logger = logging.getLogger("app.ai")
+
 SENSITIVE_MASK = "***"
 # 审批中心（前端 T-0056）里定位到这条记录
 APPROVAL_LINK = "/approvals?id={id}"
@@ -167,11 +171,14 @@ class AiToolService:
         settings: Settings,
         runtime: ConnectorRuntime,
         redis: Redis | None = None,
+        jobs: JobQueue | None = None,
     ) -> None:
         self.db = db
         self.settings = settings
         self.runtime = runtime
         self.redis = redis
+        # 有作业队列时（MCP 调用），新的待审批交给 worker 发 IM 审批卡片
+        self.jobs = jobs
         try:
             self.box: CredentialBox | None = CredentialBox.from_settings(settings)
         except CredentialError:
@@ -359,7 +366,20 @@ class AiToolService:
             if existing is None:
                 raise
             return _pending(existing, deduplicated=True)
+        await self._enqueue_cards(row.id)
         return _pending(row, deduplicated=False)
+
+    async def _enqueue_cards(self, execution_id: uuid.UUID) -> None:
+        """投递发审批卡片的作业；投递失败只记日志（通知中心里已经有 approval_requested）。"""
+        if self.jobs is None:
+            return
+        try:
+            await self.jobs.enqueue(SEND_APPROVAL_CARDS, str(execution_id))
+        except Exception as error:
+            logger.warning(
+                "approval card job not enqueued",
+                extra={"execution_id": str(execution_id), "error_type": type(error).__name__},
+            )
 
     def _seal(
         self, arguments: dict[str, Any], sensitive: tuple[str, ...], row_id: uuid.UUID

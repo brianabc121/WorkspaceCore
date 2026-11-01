@@ -27,9 +27,13 @@ from app.models import AgentInstance, ImAccount, User, WorkspaceMember
 
 logger = logging.getLogger("app.im")
 
-# 系统通知账号：发审批卡片与系统提示（契约第 5.1 节）
+# 系统通知账号：在群里发“自动接力已暂停”等提示（契约第 5.1 节）
 NOTICE_USER_ID = "ws_notice"
 NOTICE_NICKNAME = "系统通知"
+# 审批卡片由每个工作空间自己的通知账号发（OC-5 ADR 第 11 节）：通知会话按“发送方 + 接收方”区分，
+# 共用一个账号时，同一个人在两个工作空间收到的卡片会落进同一个会话
+APPROVAL_NOTICE_PREFIX = "wn_"
+APPROVAL_NOTICE_NICKNAME = "审批通知"
 IM_ROLES = ("owner", "admin")
 # OpenIM 的昵称没有明确上限；与工作台的名称上限保持一致，避免超长
 _NICKNAME_MAX = 64
@@ -42,6 +46,20 @@ def admin_im_user_id(user_id: uuid.UUID) -> str:
 def user_id_from_im(im_user_id: str) -> uuid.UUID | None:
     """`ws_<32 位十六进制>` → 用户 ID；其他格式（包括 ws_notice）返回 None。"""
     if not im_user_id.startswith("ws_") or len(im_user_id) != 35:
+        return None
+    try:
+        return uuid.UUID(hex=im_user_id[3:])
+    except ValueError:
+        return None
+
+
+def workspace_notice_im_id(workspace_id: uuid.UUID) -> str:
+    """这个工作空间发审批卡片的通知账号：`wn_<工作空间 UUID 十六进制>`。"""
+    return f"{APPROVAL_NOTICE_PREFIX}{workspace_id.hex}"
+
+
+def workspace_id_from_notice(im_user_id: str) -> uuid.UUID | None:
+    if not im_user_id.startswith(APPROVAL_NOTICE_PREFIX) or len(im_user_id) != 35:
         return None
     try:
         return uuid.UUID(hex=im_user_id[3:])
@@ -133,6 +151,13 @@ class ImAccounts:
             .on_conflict_do_nothing()
         )
         return im_user_id
+
+    async def ensure_workspace_notice(self, workspace_id: uuid.UUID) -> str:
+        """工作空间的审批通知账号；第一次需要时注册为通知账号（AppMangerLevel = 3）。"""
+        notice = workspace_notice_im_id(workspace_id)
+        if notice not in await self.client.existing_users([notice]):
+            await self.client.add_notification_account(notice, APPROVAL_NOTICE_NICKNAME)
+        return notice
 
     async def ensure_notice_user(self) -> str:
         await self._register(NOTICE_USER_ID, NOTICE_NICKNAME)

@@ -39,6 +39,8 @@ USER_TOKEN_ROUTES = frozenset(
 class FakeOpenIM:
     def __init__(self) -> None:
         self.users: dict[str, str] = {}
+        # 通知账号的 AppMangerLevel（/user/add_notification_account 注册的为 3）
+        self.levels: dict[str, int] = {}
         self.friends: set[tuple[str, str]] = set()
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.logged_out: list[str] = []
@@ -74,8 +76,8 @@ class FakeOpenIM:
         if members:
             self.members.setdefault(conversation_id, set()).update(members)
         body = conversation_id[3:]
-        if conversation_id.startswith("si_") and len(body) == 71:
-            # 单聊的两个用户就是成员
+        if conversation_id.startswith(("si_", "sn_")) and len(body) == 71:
+            # 单聊、通知会话的两个用户就是成员
             self.members.setdefault(conversation_id, set()).update({body[:35], body[36:]})
         log = self.messages.setdefault(conversation_id, [])
         seq = len(log) + 1
@@ -87,7 +89,7 @@ class FakeOpenIM:
             "contentType": content_type,
             "content": base64.b64encode(json.dumps(content or {}).encode()).decode(),
             "sendTime": 1700000000000 + seq * 1000,
-            "sessionType": 3 if conversation_id.startswith("sg_") else 1,
+            "sessionType": {"sg_": 3, "sn_": 4}.get(conversation_id[:3], 1),
         }
         log.append(msg)
         return msg
@@ -215,19 +217,35 @@ class FakeOpenIM:
             },
         )
 
+    def _user_add_notification_account(self, body: dict[str, Any]) -> httpx.Response:
+        user_id = body["userID"]
+        if user_id in self.users:
+            return self._error(1001)  # userID is used（已有的用户不能改成通知账号）
+        self.users[user_id] = body.get("nickName") or user_id
+        self.levels[user_id] = int(body.get("appMangerLevel") or 0)
+        return self._ok({"userID": user_id})
+
     def _msg_send_msg(self, body: dict[str, Any]) -> httpx.Response:
         if self.send_error:
             return self._error(self.send_error)
         sender, group = body["sendID"], body.get("groupID") or ""
-        if group:
+        if int(body.get("sessionType") or 0) == 4:
+            # OA 通知：只有通知账号能发（实测普通账号返回 1002）
+            if self.levels.get(sender, 0) < 3:
+                return self._error(1002)
+            first, second = sorted((sender, body["recvID"]))
+            conv = f"sn_{first}_{second}"
+        elif group:
             conv = f"sg_{group}"
         else:
             first, second = sorted((sender, body["recvID"]))
             conv = f"si_{first}_{second}"
             self.members.setdefault(conv, set()).update({first, second})
-        msg = self.add_message(
-            conv, sender, body.get("content") or {}, content_type=int(body["contentType"])
-        )
+        content = body.get("content") or {}
+        if int(body["contentType"]) == 1400:
+            # 实例实测：拉取到的 OA 通知 content 是 {"detail": "<OA 元素的 JSON>"}
+            content = {"detail": json.dumps(content, ensure_ascii=False)}
+        msg = self.add_message(conv, sender, content, content_type=int(body["contentType"]))
         msg["ex"] = body.get("ex") or ""
         if self.send_timeout:
             raise httpx.ReadTimeout("simulated timeout")

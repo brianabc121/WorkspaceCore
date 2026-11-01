@@ -31,15 +31,19 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain import events, notifications
-from app.domain.im import ImAccounts, is_im_admin, user_id_from_im
+from app.domain.approval_cards import execution_id_from_ex
+from app.domain.im import ImAccounts, is_im_admin, user_id_from_im, workspace_id_from_notice
 from app.domain.sync import retry_delay
 from app.integrations.base import ConnectorError
 from app.integrations.openim import (
     CONTENT_AT_TEXT,
+    CONTENT_OA_NOTIFICATION,
     CONTENT_PICTURE,
     CONTENT_TEXT,
+    SESSION_NOTIFICATION,
     OpenIMClient,
     group_conversation_id,
+    notice_conversation_id,
     single_conversation_id,
 )
 from app.models import (
@@ -140,6 +144,17 @@ def _key_from_ex(raw: object) -> uuid.UUID | None:
         return None
 
 
+def _oa_text(content: dict[str, Any]) -> str:
+    """OA 通知的 content 是 {"detail": "<OA 元素的 JSON>"}（实例实测），取其中的 text。"""
+    detail = content.get("detail")
+    try:
+        element = json.loads(detail) if isinstance(detail, str) else {}
+    except ValueError:
+        element = {}
+    text = element.get("text") if isinstance(element, dict) else None
+    return str(text)[:4000] if isinstance(text, str) else "系统通知"
+
+
 def parse_message(raw: dict[str, Any]) -> ParsedMessage | None:
     """pull_msg_by_seq 返回的一条 MsgData；缺必要字段时返回 None。"""
     try:
@@ -162,15 +177,25 @@ def parse_message(raw: dict[str, Any]) -> ParsedMessage | None:
         at = [str(u) for u in content.get("atUserList") or [] if isinstance(u, str)][:50]
     elif content_type in SYSTEM_TEXTS:
         text = SYSTEM_TEXTS[content_type]
+    elif content_type == CONTENT_OA_NOTIFICATION:
+        text = _oa_text(content)
     elif content_type >= _NOTIFICATION_BEGIN:
         text = "系统通知"
+    stored: dict[str, Any] = (
+        content if content_type in (CONTENT_TEXT, CONTENT_AT_TEXT, CONTENT_PICTURE) else {}
+    )
+    if content_type == CONTENT_OA_NOTIFICATION and workspace_id_from_notice(sender) is not None:
+        # 工作空间通知账号发的审批卡片：只记下记录 ID，状态以审批记录为准
+        execution_id = execution_id_from_ex(raw.get("ex"))
+        if execution_id is not None:
+            stored = {"approval_execution_id": str(execution_id)}
     return ParsedMessage(
         server_msg_id=server_msg_id[:128],
         client_msg_id=str(raw.get("clientMsgID") or server_msg_id)[:128],
         seq=seq,
         sender_im_id=sender[:64],
         content_type=content_type,
-        content=content if content_type in (CONTENT_TEXT, CONTENT_AT_TEXT, CONTENT_PICTURE) else {},
+        content=stored,
         plain_text=text,
         at_im_ids=at,
         sent_at=datetime.fromtimestamp(send_time / 1000, UTC)
@@ -187,7 +212,7 @@ def parse_message(raw: dict[str, Any]) -> ParsedMessage | None:
 class ConversationRef:
     conversation_id: str
     workspace_id: uuid.UUID
-    kind: Literal["single", "group"]
+    kind: Literal["single", "group", "notice"]
     # 以谁的身份拉取（必须是会话成员）
     pull_as: str
     # 能看到这个会话的管理员（各有一行 im_conversations）
@@ -196,9 +221,10 @@ class ConversationRef:
     group_pk: uuid.UUID | None = None
 
 
-def split_single(conversation_id: str) -> tuple[str, str] | None:
+def split_single(conversation_id: str, prefix: str = "si_") -> tuple[str, str] | None:
+    """单聊（si_）或通知会话（sn_）的两个用户 ID。"""
     body = conversation_id[3:]
-    if not conversation_id.startswith("si_") or len(body) != 2 * _USER_ID_LENGTH + 1:
+    if not conversation_id.startswith(prefix) or len(body) != 2 * _USER_ID_LENGTH + 1:
         return None
     if body[_USER_ID_LENGTH] != "_":
         return None
@@ -228,6 +254,26 @@ async def resolve(db: AsyncSession, conversation_id: str) -> ConversationRef | N
             pull_as=admin_im,
             owners=(user_id,),
             peer_instance_id=instance.id,
+        )
+    if conversation_id.startswith("sn_"):
+        # 工作空间通知账号 ↔ 管理员：审批卡片（OC-5 ADR 第 11 节）
+        pair = split_single(conversation_id, "sn_")
+        if pair is None:
+            return None
+        admin_im = next((u for u in pair if u.startswith("ws_")), "")
+        notice_im = next((u for u in pair if workspace_id_from_notice(u) is not None), "")
+        user_id = user_id_from_im(admin_im)
+        workspace_id = workspace_id_from_notice(notice_im)
+        if user_id is None or workspace_id is None:
+            return None
+        if not await is_im_admin(db, user_id, workspace_id):
+            return None
+        return ConversationRef(
+            conversation_id=conversation_id,
+            workspace_id=workspace_id,
+            kind="notice",
+            pull_as=admin_im,
+            owners=(user_id,),
         )
     if conversation_id.startswith("sg_"):
         group = await db.scalar(select(ImGroup).where(ImGroup.group_id == conversation_id[3:]))
@@ -468,11 +514,12 @@ async def apply_event(
     """处理一条回调；返回说明（例如为什么忽略），正常处理返回 None。"""
     if command in ("callbackAfterSendSingleMsgCommand", "callbackAfterSendGroupMsgCommand"):
         msg = MsgCallback.model_validate(payload)
-        conversation_id = (
-            group_conversation_id(msg.group_id)
-            if msg.group_id
-            else single_conversation_id(msg.send_id, msg.recv_id)
-        )
+        if msg.group_id:
+            conversation_id = group_conversation_id(msg.group_id)
+        elif msg.session_type == SESSION_NOTIFICATION:
+            conversation_id = notice_conversation_id(msg.send_id, msg.recv_id)
+        else:
+            conversation_id = single_conversation_id(msg.send_id, msg.recv_id)
         ref = await resolve(db, conversation_id)
         if ref is None:
             return "not_tracked"
@@ -594,7 +641,7 @@ async def reconcile(ctx: ImContext, *, full: bool = False) -> int:
 
 async def _reconcile_account(ctx: ImContext, im_user_id: str, seen: set[str], *, full: bool) -> int:
     remote = await ctx.client.max_seqs(im_user_id)
-    candidates = [c for c in remote if c.startswith(("si_", "sg_")) and c not in seen]
+    candidates = [c for c in remote if c.startswith(("si_", "sg_", "sn_")) and c not in seen]
     if not candidates:
         return 0
     async with ctx.sessions() as db:
