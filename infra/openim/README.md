@@ -1,7 +1,7 @@
 # OpenIM（管理员端 IM 的后端）——OC-3 进行中
 
 > **部署步骤见 `docs/deployment.md` 第 17 节**（`make openim-build` → `make agents-up` → `make openim-up`）。
-> 已接入工作台的内部网络、回调地址与接入入口；**备份还没有覆盖 OpenIM**（下一步），上线前先看文末清单。
+> 已接入工作台的内部网络、回调地址与接入入口；`make backup` 会一并备份 OpenIM 的 MongoDB 与 Garage（第 17.5 节）。
 > **不要换回官方镜像** `openim/openim-server:v3.8.3-patch.18`：任何一个 IM 用户的令牌都能读到别人的私聊，
 > 还能改别人的会话设置（OC-0 ADR 第 4 节）。
 
@@ -64,5 +64,5 @@ docker run --rm --network my-workspace-openim_openim -v "$PWD/infra/openim/probe
 
 1. ~~对象存储接入~~：预签名链接只给工作台 API 用（`http://garage:3900`），实例取图走接入入口的 `/im/obj/m/<media_id>`（OC-3 ADR 第 14、15 节）。
 2. ~~接入工作台~~：回调地址指向 API 的内部路径，before 回调失败即拒；不发布端口，只经接入入口访问；变量进了 `.env.example` 与 `make env`（OC-3 ADR 第 16 节）。
-3. **备份与恢复**：MongoDB 导出和 Garage 数据纳入 restic 备份，A15 恢复演练覆盖 OpenIM。
+3. ~~备份与恢复~~：MongoDB 归档与 Garage 快照进 restic 快照，`make restore-verify` 与 `ci-openim` 做隔离恢复检查，`scripts/openim_backup.sh restore` 做真实恢复（OC-3 ADR 第 17 节）。
 4. **资源**：空闲时（2026-11-01）openim-server 约 392 MiB、Kafka 约 367 MiB、MongoDB 约 187 MiB、Garage 约 9 MiB、etcd 约 16 MiB；Kafka 数据卷空闲时不到 1 MB。压测后补充峰值数据。

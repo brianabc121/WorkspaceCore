@@ -7,7 +7,8 @@
 # 恢复出来的集成凭证不会去连接真实的第三方服务。
 #
 # 步骤：从 restic 仓库取出快照 → 启动临时的 postgres / redis → pg_restore → alembic upgrade head（检查迁移）
-#       → 启动 api / web / caddy → 冒烟检查与数据检查 → 删除临时环境（--keep 时保留，供进一步检查）。
+#       → 启动 api / web / caddy → 冒烟检查与数据检查 →（快照含 OpenIM 时）在不联网的临时容器里恢复
+#       OpenIM 的 MongoDB 与 Garage 并核对数量 → 删除临时环境（--keep 时保留，供进一步检查）。
 #
 # 用法：scripts/restore-verify.sh [--keep] [快照 ID，默认 latest]
 #       scripts/restore-verify.sh --cleanup        # 删除 --keep 留下的临时环境
@@ -18,6 +19,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 # shellcheck source=scripts/backup_common.sh
 source "$ROOT/scripts/backup_common.sh"
+# shellcheck source=scripts/openim_backup.sh
+source "$ROOT/scripts/openim_backup.sh"
 
 project="$(env_value COMPOSE_PROJECT_NAME my-workspace)-restore-verify"
 port="$(env_value RESTORE_HTTP_PORT 18080)"
@@ -83,6 +86,12 @@ counts="$("${compose[@]}" exec -T postgres psql -U "$pg_user" -d "$pg_db" -tA -F
 read -r users workspaces dashboards <<< "$counts"
 echo "数据检查：$users 个用户、$workspaces 个工作空间、$dashboards 个仪表盘"
 (( users > 0 && workspaces > 0 && dashboards > 0 )) || { echo "恢复出来的数据是空的" >&2; exit 1; }
+
+if [[ -e "$work/restore/backup/openim-info.json" ]]; then
+  openim_verify "$work/restore/backup"
+else
+  echo "快照不含 OpenIM（备份时 OpenIM 没有运行）"
+fi
 
 if [[ "$keep" == 1 ]]; then
   echo "临时环境保留在 http://127.0.0.1:$port（项目 $project）；检查完运行 scripts/restore-verify.sh --cleanup"

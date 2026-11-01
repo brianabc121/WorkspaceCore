@@ -479,3 +479,28 @@ OpenIM 仍是独立的 Compose 项目（方案第 6.1 节），这一批把它�
   - `im` 网络里另一个地址（`172.31.252.12`）带着正确口令伪造回调：404；
   - 访问日志里的回调路径是 `/internal/openim/***/callback…Command`。
 - **还没做**：备份覆盖 OpenIM 的 MongoDB 与 Garage（B7b）；外网模式的 IM 连接经本机隧道与双向证书的端到端验证。
+
+## 17. 第 4 部分（B7b）：备份与恢复覆盖 OpenIM（2026-11-01）
+
+方案第 6.1 节：restic 增加 OpenIM 的 MongoDB 导出与对象存储；恢复演练覆盖 OpenIM，恢复后消息历史和好友关系一致。实现在 `scripts/openim_backup.sh`，`backup.sh`、`restore-verify.sh` 引入它。
+
+- **备份什么**：
+  - MongoDB：`mongodump --db openim_v3 --archive --gzip`。用 OpenIM 自己的用户（只有这个库的读写权限）；密码取 mongo 容器自己的环境变量，写进容器里权限 600 的临时配置文件，不出现在命令行；统计用 mongosh 在容器里读同一个环境变量；
+  - Garage：`garage meta snapshot`（v2.4.1 的命令，快照是 `meta/snapshots/<时间>/db.sqlite`，实测只保留最近两份），再从只读挂载的数据卷打包：元数据目录里除正在使用的 `db.sqlite*` 与快照目录外原样打包（节点密钥、集群布局等，恢复后节点 ID 不变，布局才对得上），数据库换成刚做的快照，数据块目录整个打包。用符号链接加 `tar -h` 一次输出，不在容器里复制数据；
+  - 小对象（实测 158 字节的图片）内联在元数据里，大对象（270 KB）才有数据块，两种都验证过；
+  - `openim-info.json` 记下各集合的文档数（user、friend、group、group_member、conversation、msg、seq、seq_user）与桶里的对象数；
+  - 不备份 Kafka、Redis、etcd（理由见下面“序号”一条）。
+- **何时备份**：按 Compose 标签找 OpenIM 的 mongo 与 garage 容器（项目名默认 `<COMPOSE_PROJECT_NAME>-openim`，可用 `OPENIM_PROJECT` 指定），都在运行才备份；配置了 `OPENIM_API_URL` 却没在运行时，照常备份工作台并警告。
+- **恢复检查**（`make restore-verify` 与 `ci-openim`）：在 `--network none` 的临时容器里，用部署时锁定的同一个镜像，分别 `mongorestore` 与解开 Garage 归档后启动单节点 Garage（RPC 密钥临时生成，节点身份来自归档），核对文档数与对象数。临时容器与数据卷在函数返回时删除。
+- **真实恢复**：`scripts/openim_backup.sh restore <目录> [项目名]`。只写入全新的数据卷：项目还有容器或数据卷时拒绝。步骤是 `compose create garage mongo` → 解开 Garage 归档 → 启动 mongo（第一次启动建 OpenIM 用户）→ `mongorestore --drop` → `make openim-up`（garage-init 幂等，确认布局、密钥与桶）。
+- **序号会往前跳**（实测）：OpenIM 在 MongoDB 里按块预留会话序号，当前值只缓存在 Redis。只恢复 MongoDB 时，`newest_seq` 返回预留块的末尾（实测从 5 变成 51），新消息从 52 开始；中间的空号由 `pull_msg_by_seq` 返回 `status: 4`、没有 serverMsgID 与发送人的占位项，工作台的投影解析时要求这两项，会跳过它们（`im_projection.py`）。
+  - 不备份 Redis 是有意的：Redis 与 MongoDB 不是同一时刻的快照，恢复旧的 Redis 可能让序号回退，新消息就会和已有消息撞号。往前跳只多出空号，不丢消息、不覆盖。
+- **实测**（本会话的 Docker）：
+  - `scripts/backup.sh`：工作台归档 282 项加 OpenIM 两份归档写进同一个 restic 快照；`scripts/restore-verify.sh`：冒烟与数据检查通过，OpenIM 隔离恢复检查数量一致；
+  - `scripts/openim_backup.sh check`：B7a 的端到端环境与越权测试用的环境（189 个用户、307 个会话、137 个消息文档、18 个对象，含对象检查留下的 12 MB 分片对象）都通过；
+  - 真实恢复演练：停掉原来的 OpenIM，把归档恢复到全新的项目并启动。好友关系一致；两个会话的真实消息逐条一致（只多出上面说的空号）；270 KB 的图片经接入入口 `/im/obj/m` 取回，字节一致；恢复后管理员发的两条消息序号是 52、53，投影正常。
+- **CI**：`ci-openim` 在对象检查之后运行 `scripts/openim_backup.sh check`，触发路径加上这个脚本。A15（`ci-infra`）的环境没有 OpenIM，快照里没有 OpenIM 时 `restore-verify` 只提示一句。
+- **外网模式 IM 端到端**（补上第 15、16 节留下的一项）：在同一套环境里登记外网实例、下载接入包，用包里的客户端证书起 ghostunnel 本机隧道（与接入包的 `tunnel` 服务同样的参数），全部请求经隧道到外网入口（双向证书）：
+  - 用实例凭证经 `/agent-api/v1/im-token` 领到 IM 令牌；
+  - `/im/ws` 用插件实际的查询参数握手 101；`/im/api/friend/get_full_friend_user_ids` 返回管理员；伪造的 IM 令牌 401；
+  - 管理员给外网实例发图，按图片消息里的地址 `http://<外网域名>:18443/im/obj/m/<media_id>` 经隧道取回，字节一致；`thumb=1` 返回缩略图。

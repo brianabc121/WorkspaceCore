@@ -495,6 +495,8 @@ n8n 是独立的 Compose（`infra/n8n/compose.yaml`），与 Vikunja 一样加�
 ### 14.1 备份什么
 
 - **进备份**：工作台的 PostgreSQL 数据库（`pg_dump` custom 格式，备份时不用停服务），以及一份记录迁移版本与时间的 `backup-info.json`。
+- **OpenIM 在运行时也进备份**（第 17.5 节）：MongoDB 的 `openim_v3` 库（`mongodump` 归档）与 Garage（元数据快照、节点身份与数据块）。
+  OpenIM 的 Kafka、Redis、etcd 不备份：Kafka 只是中转，Redis 是缓存与在线令牌，etcd 只做服务发现。
 - **不进备份**：
   - `.env`：里面有解密凭证的 `CREDENTIAL_ENCRYPTION_KEY`、会话密钥和备份仓库的密码。
     把它和备份分开保管（例如放进密码管理器），**不要只留在这台服务器上**。丢了它，备份里保存的第三方凭证就无法解密，备份本身也打不开。
@@ -525,9 +527,11 @@ S3 仓库的凭据（`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_DEFAUL
   - 在**另一个 Compose 项目**（`<项目名>-restore-verify`，端口 `RESTORE_HTTP_PORT`，自己的网络与数据卷）里恢复最新快照；
   - 执行 `alembic upgrade head`，确认迁移能在恢复出来的数据上运行；
   - 冒烟检查（`scripts/smoke.sh`）与数据检查（用户、工作空间、仪表盘不为空）；
+  - 快照里有 OpenIM 时，在不联网的临时容器里分别恢复 MongoDB 与 Garage，核对文档数与对象数与备份时一致；
   - 结束后删除这个临时项目。正在运行的栈不受影响。
   - 临时环境**不启动 Worker**，恢复出来的集成凭证不会去连接真实的第三方服务。
   - `scripts/restore-verify.sh --keep [快照 ID]` 会保留临时环境，便于登录核对；看完用 `scripts/restore-verify.sh --cleanup` 删除。
+- CI 的 `ci-openim` 对 OpenIM 单独跑一遍“导出 + 隔离恢复检查”（`scripts/openim_backup.sh check`）。
 - CI 的 A15 验收（`tests/e2e/backup_acceptance.py`）：
   - 写入数据后备份，再改动正在运行的栈；
   - 在临时环境里恢复后，用原来的账号登录，核对显示名、首页配置、日程与审计日志都是备份时的状态。
@@ -545,6 +549,7 @@ S3 仓库的凭据（`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_DEFAUL
 4. 取出快照：`docker run --rm -e RESTIC_REPOSITORY=… -e RESTIC_PASSWORD_FILE=… restic/restic:0.19.1@sha256:… restore latest --target <目录>`（写法同 `scripts/backup_common.sh`）。
 5. `docker compose exec -T postgres pg_restore -U <POSTGRES_USER> -d <POSTGRES_DB> --exit-on-error < <目录>/backup/workspace.dump`。
 6. `make up && make migrate && make smoke`，然后登录核对。
+7. 部署了 OpenIM 的，按第 17.5 节恢复 OpenIM。
 
 ## 15. 发布前检查：安全扫描、完整冒烟与性能基准（S6-05）
 
@@ -658,8 +663,6 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 和 Vikunja 一样加入 core 创建的网络。设计见 `docs/v2/TRANSFORMATION_PLAN.md` 第 4.4、6.1 节；
 补丁镜像、接入方式与实测见 `docs/decisions/2026-10-31-v2-oc3-openim-patched-image.md`（第 16 节是部署）。
 
-> **备份还没有覆盖 OpenIM**（下一步）：现在 `make backup` 不含 OpenIM 的 MongoDB 与 Garage，聊天记录丢了只能靠工作台自己的消息投影。
-
 ### 17.1 网络与地址
 
 | 网络 | 成员 | 用途 |
@@ -705,3 +708,24 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 - `make openim-logs` 看日志；`make openim-down` 停止（保留数据卷）；
 - 资源：空闲时 openim-server 约 390 MiB、Kafka 约 370 MiB、MongoDB 约 190 MiB、Garage 与 etcd 各十几 MiB；
 - 升级 OpenIM 只能换补丁镜像（`infra/openim/patches/`），**不要换回官方镜像**：官方镜像有越权问题（OC-0 ADR 第 4 节）。
+
+### 17.5 备份与恢复
+
+- **备份**：`make backup` 发现 OpenIM 在运行（项目名默认 `<COMPOSE_PROJECT_NAME 或 my-workspace>-openim`，可用 `OPENIM_PROJECT` 指定），
+  就把下面三个文件放进同一个 restic 快照：
+  - `openim-mongo.archive.gz`：`mongodump --archive --gzip`，只含 `openim_v3` 库；
+  - `openim-garage.tar`：先 `garage meta snapshot`，再打包快照出来的元数据库、节点密钥与集群布局，以及数据块目录；
+  - `openim-info.json`：备份时各集合的文档数与桶里的对象数，恢复时用来核对。
+- 配置了 `OPENIM_API_URL` 但 OpenIM 没在运行时，`make backup` 照常备份工作台，并提示这次不含 OpenIM。
+- **恢复演练**：`make restore-verify` 会在不联网的临时容器里恢复两份归档并核对数量，不影响正在运行的 OpenIM。
+- **真实恢复**（在仓库根目录，用部署时的 `.env`）：
+  1. 按第 14.5 节取出快照（目录里的 `backup/` 下有上面三个文件）；
+  2. 工作台与接入入口先起来（`make up`、`make agents-up`）；
+  3. `scripts/openim_backup.sh restore <目录>/backup`：只写入**全新的**数据卷——OpenIM 项目还有容器或数据卷时拒绝，
+     绝不覆盖现有数据（旧数据卷确认不再需要后自己删除）；
+  4. `make openim-up`，再按第 17.2 节第 5 步确认 `OPENIM_API_URL` 与 `OPENIM_OBJECT_URL`。
+- **恢复后会话序号会往前跳一段**：OpenIM 在 MongoDB 里按块预留序号，当前值只缓存在 Redis。
+  Redis 不恢复时，新消息从预留块的末尾继续编号（实测从 5 跳到 52）；中间的空号是 `status: 4` 的占位项，工作台的投影会跳过。
+  不恢复 Redis 是有意的：Redis 与 MongoDB 不是同一时刻的快照，恢复旧的 Redis 可能让序号回退、覆盖已有消息。
+- 实例的 IM 令牌在 Redis 里，恢复后会失效；实例重启后会重新领取（接入包的启动脚本每次启动都取新令牌）。
+

@@ -2,17 +2,20 @@ name: ci-openim
 
 # 打过补丁的 OpenIM（V2 OC-3，T-0055）：构建自建镜像 → 启动 infra/openim 全套 → 越权回归测试。
 # ADR：docs/decisions/2026-10-31-v2-oc0-openclaw-openim-verification.md 第 6 节——
-# infra/openim/probes/rest-authz.py 对补丁镜像必须以 0 退出（REST 与 WebSocket 都挡住）。
+# infra/openim/probes/rest-authz.py 对补丁镜像必须以 0 退出（REST 与 WebSocket 都挡住）；
+# 另外检查 OpenIM 的备份能在隔离的临时容器里恢复（scripts/openim_backup.sh，OC-3 ADR 第 17 节）。
 # 只在 OpenIM 相关文件变化时运行。本文件归 claude 维护。
 on:
   pull_request:
     paths:
       - "infra/openim/**"
+      - "scripts/openim_backup.sh"
       - ".github/workflows/ci-openim.yml"
   push:
     branches: [main]
     paths:
       - "infra/openim/**"
+      - "scripts/openim_backup.sh"
       - ".github/workflows/ci-openim.yml"
 
 permissions:
@@ -91,6 +94,9 @@ jobs:
           docker run --rm --network my-workspace-openim_openim \
             -v "$PWD/infra/openim/probes/object-check.py:/object-check.py:ro" "$python_image" \
             python -I /object-check.py --api http://openim-server:10002 --secret "$OPENIM_SECRET"
+      - name: 备份与隔离恢复检查（MongoDB 归档 + Garage 快照，核对数量）
+        # 放在对象存储检查之后：Garage 里已经有 12 MB 的分片对象，能检查真正的数据块
+        run: scripts/openim_backup.sh check my-workspace-openim
       - name: 失败时的日志
         if: failure()
         run: |
