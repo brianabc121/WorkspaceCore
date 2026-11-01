@@ -15,7 +15,9 @@
 """
 
 import argparse
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -44,6 +46,27 @@ def login(base: str, email: str) -> Client:
     return client
 
 
+def check_openim(report: Report, backup_output: str, restore_output: str) -> None:
+    """快照含 OpenIM，隔离恢复后各集合的文档数与 Garage 对象数和备份时一致（scripts/openim_backup.sh）。"""
+    line = next(
+        (x for x in restore_output.splitlines() if x.startswith("OpenIM 恢复检查通过")), ""
+    )
+    counts = {
+        name: int(value)
+        for name, value in re.findall(r"(\w+) (\d+)", line.split("MongoDB", 1)[-1].split("；")[0])
+    }
+    report.check(
+        "A15（V2）：快照包含 OpenIM（MongoDB 归档与 Garage 快照）",
+        "不含 OpenIM" not in backup_output and bool(line),
+        line or "恢复输出里没有 OpenIM 的检查结果",
+    )
+    report.check(
+        "A15（V2）：恢复后 OpenIM 的消息、好友、群成员与会话数量和备份时一致且不为空",
+        all(counts.get(name, 0) > 0 for name in ("msg", "friend", "group_member", "conversation")),
+        json.dumps(counts, ensure_ascii=False),
+    )
+
+
 def note_of(overview: dict[str, Any], widget_id: str) -> dict[str, Any]:
     return next((w for w in overview.get("widgets", []) if w["id"] == widget_id), {})
 
@@ -51,6 +74,11 @@ def note_of(overview: dict[str, Any], widget_id: str) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--base-url", default=default_base_url())
+    parser.add_argument(
+        "--expect-openim",
+        action="store_true",
+        help="OpenIM 正在运行：快照必须包含 OpenIM，恢复后消息与好友关系的数量一致（方案第 6.1 节）",
+    )
     args = parser.parse_args()
     base = parse_base_url(args.base_url)
     report = Report()
@@ -59,14 +87,16 @@ def main() -> int:
     env = {"BACKUP_REPOSITORY": f"./{repository}", "RESTORE_HTTP_PORT": RESTORE_PORT}
     print(f"备份恢复验收（A15）：{base}，临时仓库 {repository}，临时环境端口 {RESTORE_PORT}")
     try:
-        run_checks(base, report, run, env)
+        run_checks(base, report, run, env, expect_openim=args.expect_openim)
     finally:
         run_script("scripts/restore-verify.sh", "--cleanup", env=env)
         shutil.rmtree(ROOT / repository, ignore_errors=True)
     return report.finish()
 
 
-def run_checks(base: str, report: Report, run: str, env: dict[str, str]) -> None:
+def run_checks(
+    base: str, report: Report, run: str, env: dict[str, str], *, expect_openim: bool = False
+) -> None:
     email = f"a15-{run}@backup.example.com"
     _, workspace_id, dashboard_id = create_user(email, "A15", PASSWORD)
     owner = login(base, email)
@@ -165,6 +195,8 @@ def run_checks(base: str, report: Report, run: str, env: dict[str, str]) -> None
     if restore.returncode != 0:
         print(output[-3000:])
         return
+    if expect_openim:
+        check_openim(report, backup.stdout + backup.stderr, output)
 
     # ---------------------------------------------------------------- 5. 在恢复出来的环境里核对
     restored_base = f"http://127.0.0.1:{env['RESTORE_HTTP_PORT']}"
