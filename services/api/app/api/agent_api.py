@@ -26,6 +26,8 @@ from app.api.deps import client_ip, get_agent_service, get_db, get_redis
 from app.core.errors import ApiError, not_implemented
 from app.domain import im_callbacks
 from app.domain.agents import AgentPrincipal, AgentService
+from app.domain.im import openim_client
+from app.domain.im_groups import send_relay_paused_notice
 from app.jobs.queue import PROCESS_IM_INBOX
 from app.models import ImGroup
 from app.schemas.agents import (
@@ -177,7 +179,13 @@ async def _read_callback(request: Request) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-async def _notify_relay_paused(sessions: async_sessionmaker[AsyncSession], group: ImGroup) -> None:
+async def _notify_relay_paused(
+    app: Any, sessions: async_sessionmaker[AsyncSession], group: ImGroup
+) -> None:
+    """群里由 ws_notice 提示，并通知本工作空间的管理员；都只是尽力而为。"""
+    client = openim_client(app.state.settings, app.state.connectors, app.state.redis)
+    if client is not None:
+        await send_relay_paused_notice(client, group.group_id)
     try:
         async with sessions() as db:
             await im_callbacks.relay_paused(db, group)
@@ -255,6 +263,6 @@ async def _judge(
         return CallbackResponse.reject(5009)
     if verdict.paused_group is not None:
         background.add_task(
-            _notify_relay_paused, request.app.state.sessionmaker, verdict.paused_group
+            _notify_relay_paused, request.app, request.app.state.sessionmaker, verdict.paused_group
         )
     return verdict.response

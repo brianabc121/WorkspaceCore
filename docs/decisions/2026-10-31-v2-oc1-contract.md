@@ -412,6 +412,7 @@
 | 409 | `AGENT_DISABLED` | 对已停用的实例生成接入包 |
 | 409 | `AGENT_INGRESS_NOT_CONFIGURED` | 这个网络模式的接入入口还没有配置，不能生成接入包（`details.network_mode`；OC-2 补充） |
 | 409 | `AGENT_SECRET_EXISTS` | 工作空间里已有同名的密钥（`details.existing_id`；OC-2 补充） |
+| 409 | `CONTACT_GROUP_EXISTS` | 工作空间里已有同名的通讯录分组（OC-3 补充） |
 | 409 | `IM_NOT_READY` | 实例的 IM 账号还没就绪 |
 | 409 | `IM_SEND_REJECTED` | OpenIM 拒收了这条消息 |
 | 409 | `PIN_LIMIT_REACHED` | 会话里置顶的消息已经有 10 条 |

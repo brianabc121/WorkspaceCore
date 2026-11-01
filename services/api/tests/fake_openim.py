@@ -35,6 +35,8 @@ class FakeOpenIM:
         self.send_timeout = False
         # 设为 True 时连接被拒（请求确定没有发出）
         self.refuse = False
+        # 群 ID → {"name", "notification", "owner", "dismissed"}；成员记在 members["sg_<群>"]
+        self.groups: dict[str, dict[str, Any]] = {}
 
     def add_message(
         self,
@@ -207,6 +209,56 @@ class FakeOpenIM:
                 "sendTime": msg["sendTime"],
             }
         )
+
+    def _group_create_group(self, body: dict[str, Any]) -> httpx.Response:
+        info = body.get("groupInfo") or {}
+        group_id = info.get("groupID") or uuid.uuid4().hex[:10]
+        if group_id in self.groups:
+            return self._error(1202)
+        members = {body["ownerUserID"], *body.get("memberUserIDs", []), "imAdmin"}
+        if any(m not in self.users and m != "imAdmin" for m in members):
+            return self._error(1101)
+        self.groups[group_id] = {
+            "name": info.get("groupName"),
+            "notification": info.get("notification", ""),
+            "owner": body["ownerUserID"],
+            "dismissed": False,
+        }
+        self.members[f"sg_{group_id}"] = members
+        return self._ok({"groupInfo": {"groupID": group_id}})
+
+    def _live(self, group_id: str) -> dict[str, Any] | None:
+        group = self.groups.get(group_id)
+        return group if group and not group["dismissed"] else None
+
+    def _group_invite_user_to_group(self, body: dict[str, Any]) -> httpx.Response:
+        if self._live(body["groupID"]) is None:
+            return self._error(1204)
+        self.members[f"sg_{body['groupID']}"].update(body["invitedUserIDs"])
+        return self._ok({})
+
+    def _group_kick_group(self, body: dict[str, Any]) -> httpx.Response:
+        if self._live(body["groupID"]) is None:
+            return self._error(1204)
+        self.members[f"sg_{body['groupID']}"].difference_update(body["kickedUserIDs"])
+        return self._ok({})
+
+    def _group_set_group_info_ex(self, body: dict[str, Any]) -> httpx.Response:
+        group = self._live(body["groupID"])
+        if group is None:
+            return self._error(1204)
+        if "groupName" in body:
+            group["name"] = body["groupName"]
+        if "notification" in body:
+            group["notification"] = body["notification"]
+        return self._ok({})
+
+    def _group_dismiss_group(self, body: dict[str, Any]) -> httpx.Response:
+        group = self._live(body["groupID"])
+        if group is None:
+            return self._error(1204)
+        group["dismissed"] = True
+        return self._ok({})
 
     def unfriend(self, a: str, b: str) -> None:
         self.friends -= {(a, b), (b, a)}

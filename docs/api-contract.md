@@ -175,21 +175,21 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET | `/api/v1/agents/secrets/accesses` | 取密钥记录 | 已实现（T-0054） |
 | PATCH / DELETE | `/api/v1/agents/secrets/{secret_id}` | 改名称与说明 / 删除 | 已实现（T-0054） |
 | POST | `/api/v1/agents/secrets/{secret_id}/rotate` | 轮换值（旧值不再下发） | 已实现（T-0054） |
-| GET | `/api/v1/im/status`、`/api/v1/im/badges` | IM 状态 / 顶栏角标（未读不含免打扰、待审批数） | 已声明（T-0055） |
-| GET / POST | `/api/v1/im/conversations` | 会话列表（置顶在前）/ 打开与实例的单聊 | 已声明（T-0055） |
-| PATCH | `/api/v1/im/conversations/{conversation_id}` | 置顶 / 免打扰（同步到 OpenIM） | 已声明（T-0055） |
-| POST | `/api/v1/im/conversations/{conversation_id}/read` | 已读序号（只增不减） | 已声明（T-0055） |
-| GET / POST | `/api/v1/im/conversations/{conversation_id}/messages` | 消息历史 / 发送（必须带 `Idempotency-Key`；结果未知时 `504`，不自动重发） | 已声明（T-0055） |
-| GET / POST / DELETE | `/api/v1/im/conversations/{conversation_id}/pins[/{server_msg_id}]` | 消息置顶（每个会话最多 10 条） | 已声明（T-0055） |
-| GET | `/api/v1/im/conversations/{conversation_id}/export` | 导出（`application/x-ndjson`） | 已声明（T-0055） |
+| GET | `/api/v1/im/status`、`/api/v1/im/badges` | IM 状态 / 顶栏角标（未读不含免打扰、待审批数） | 已实现（T-0055） |
+| GET / POST | `/api/v1/im/conversations` | 会话列表（置顶在前）/ 打开与实例的单聊 | 已实现（T-0055） |
+| PATCH | `/api/v1/im/conversations/{conversation_id}` | 置顶 / 免打扰（同步到 OpenIM） | 已实现（T-0055） |
+| POST | `/api/v1/im/conversations/{conversation_id}/read` | 已读序号（只增不减） | 已实现（T-0055） |
+| GET / POST | `/api/v1/im/conversations/{conversation_id}/messages` | 消息历史 / 发送（必须带 `Idempotency-Key`；结果未知时 `504`，不自动重发） | 已实现（T-0055） |
+| GET / POST / DELETE | `/api/v1/im/conversations/{conversation_id}/pins[/{server_msg_id}]` | 消息置顶（每个会话最多 10 条） | 已实现（T-0055） |
+| GET | `/api/v1/im/conversations/{conversation_id}/export` | 导出（`application/x-ndjson`） | 已实现（T-0055） |
 | POST | `/api/v1/im/uploads` | 上传图片（请求体是图片本身，≤ 10 MiB） | 已声明（T-0055） |
 | GET | `/api/v1/im/media/{media_id}` | 显示 OpenIM 对象存储里的图片（外部图片不经这里，前端不自动加载） | 已声明（T-0055） |
-| POST | `/api/v1/im/groups` | 建群（必须带 `Idempotency-Key`） | 已声明（T-0055） |
-| GET / PATCH / DELETE | `/api/v1/im/groups/{group_id}` | 群详情 / 改群名与公告 / 解散 | 已声明（T-0055） |
-| POST / DELETE | `/api/v1/im/groups/{group_id}/members[/{im_user_id}]` | 邀请 / 移出成员 | 已声明（T-0055） |
-| PUT | `/api/v1/im/groups/{group_id}/policy` | 防刷屏设置（允许接力、连续条数、每分钟条数） | 已声明（T-0055） |
-| GET | `/api/v1/im/contacts` | 通讯录（没有删除好友） | 已声明（T-0055） |
-| GET / POST / PATCH / DELETE / PUT | `/api/v1/im/contact-groups[/{contact_group_id}[/members]]` | 分组 | 已声明（T-0055） |
+| POST | `/api/v1/im/groups` | 建群（必须带 `Idempotency-Key`） | 已实现（T-0055） |
+| GET / PATCH / DELETE | `/api/v1/im/groups/{group_id}` | 群详情 / 改群名与公告 / 解散 | 已实现（T-0055） |
+| POST / DELETE | `/api/v1/im/groups/{group_id}/members[/{im_user_id}]` | 邀请 / 移出成员 | 已实现（T-0055） |
+| PUT | `/api/v1/im/groups/{group_id}/policy` | 防刷屏设置（允许接力、连续条数、每分钟条数） | 已实现（T-0055） |
+| GET | `/api/v1/im/contacts` | 通讯录（没有删除好友） | 已实现（T-0055） |
+| GET / POST / PATCH / DELETE / PUT | `/api/v1/im/contact-groups[/{contact_group_id}[/members]]` | 分组 | 已实现（T-0055） |
 | GET | `/api/v1/ai/tool-executions[/{execution_id}]` | 工具调用记录与待审批（member 及以下只看自己的） | 已声明（T-0057） |
 | POST | `/api/v1/ai/tool-executions/{execution_id}/approve`、`/reject` | 审批（必须带 `If-Match`；高危操作要重新输入密码） | 已声明（T-0057） |
 
@@ -198,7 +198,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | 方法 | 路径 | 说明 | 状态 |
 |---|---|---|---|
 | POST | `/agent-api/v1/secrets/resolve` | 取密钥：未授权与不存在都返回 `NOT_FOUND` | 已实现（T-0054） |
-| POST | `/agent-api/v1/im-token` | 取 IM 令牌（只在启动时调用：签发会踢掉旧连接） | 已声明（T-0055） |
+| POST | `/agent-api/v1/im-token` | 取 IM 令牌（只在启动时调用：签发会踢掉旧连接） | 已实现（T-0055） |
 | POST | `/agent-api/v1/heartbeat` | 上报 OpenClaw 与插件版本 | 已实现（T-0054） |
 | POST | `/mcp` | MCP 工具（不进 OpenAPI；工具清单见 `app/schemas/ai_tools.py` 的 `TOOLS`） | 未挂载（T-0057） |
 | GET / POST | `/im/ws`、`/im/api/{route}`、`/im/obj/*` | 接入网关（不进 OpenAPI；白名单见 V2 契约第 8 节） | 已声明（T-0055） |
@@ -206,4 +206,5 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 - OpenIM 回调 `/internal/openim/{path_token}/{command}` 只走内部网络，不进 OpenAPI（V2 契约第 10 节）。
 - 已有接口只增不改：SSE 的 `topics` 增加 `im`、`agents`、`ai`。
 - 新增错误码：`409 AGENT_SECRET_EXISTS` / `AGENT_INGRESS_NOT_CONFIGURED`、`401 AGENT_UNAUTHORIZED`、`403 STEP_UP_REQUIRED` / `STEP_UP_FAILED`、`409 AGENT_DISABLED` / `IM_NOT_READY` /
-  `IM_SEND_REJECTED` / `PIN_LIMIT_REACHED` / `EXECUTION_NOT_PENDING`、`503 IM_UNAVAILABLE`（V2 契约第 12 节）。
+  `IM_SEND_REJECTED` / `PIN_LIMIT_REACHED` / `EXECUTION_NOT_PENDING` / `CONTACT_GROUP_EXISTS`（OC-3 补充）、
+  `503 IM_UNAVAILABLE`（V2 契约第 12 节）。

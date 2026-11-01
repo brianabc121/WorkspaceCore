@@ -303,15 +303,33 @@ class OpenIMClient:
 
     # ----------------------------------------------------------------- 群
 
-    async def create_group(self, *, owner: str, name: str, members: Sequence[str]) -> str:
-        """建工作群（groupType=2，群主是管理员），返回群 ID。"""
+    async def create_group(
+        self,
+        *,
+        owner: str,
+        name: str,
+        members: Sequence[str],
+        group_id: str = "",
+        notification: str = "",
+    ) -> str:
+        """建工作群（groupType=2，群主是管理员），返回群 ID。
+
+        group_id 为空时由 OpenIM 生成；指定且已存在时返回 1202（CONFLICT），调用方可以据此
+        把重复的建群当作已完成（`internal/rpc/group/group.go` 的 GenGroupID）。
+        调用者（imAdmin）不在成员里时 OpenIM 会把它也加进群。
+        """
+        info: dict[str, Any] = {"groupName": name, "groupType": GROUP_TYPE_WORK}
+        if group_id:
+            info["groupID"] = group_id
+        if notification:
+            info["notification"] = notification
         data = await self.call(
             "/group/create_group",
             {
                 "ownerUserID": owner,
                 "memberUserIDs": list(members),
                 "adminUserIDs": [],
-                "groupInfo": {"groupName": name, "groupType": GROUP_TYPE_WORK},
+                "groupInfo": info,
             },
         )
         group_id = str((data.get("groupInfo") or {}).get("groupID") or "")

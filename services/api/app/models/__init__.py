@@ -21,6 +21,8 @@ from app.models.dashboard import Dashboard, Widget
 from app.models.identity import AuthSession, ExternalIdentity, User
 from app.models.im import (
     ImAccount,
+    ImContactGroup,
+    ImContactGroupMember,
     ImConversation,
     ImGroup,
     ImGroupMember,
@@ -64,6 +66,8 @@ __all__ = [
     "ExternalResource",
     "IdempotencyRequest",
     "ImAccount",
+    "ImContactGroup",
+    "ImContactGroupMember",
     "ImConversation",
     "ImGroup",
     "ImGroupMember",
