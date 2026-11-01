@@ -131,6 +131,8 @@ class Settings(BaseSettings):
     sse_block_seconds: float = Field(default=10, ge=0.1, le=30)
     # 通知的保留天数：已读的超过这个时间删除，未读的保留两倍时间
     notification_retention_days: int = Field(default=90, ge=1, le=3650)
+    # IM 消息投影的保留天数（方案第 5 节“有保留期”）；OpenIM 里的消息不受影响
+    im_message_retention_days: int = Field(default=365, ge=7, le=3650)
 
     @field_validator("log_level", mode="before")
     @classmethod

@@ -10,7 +10,9 @@ docs/decisions/2026-10-31-v2-oc1-contract.md 第 5、10 节。
   合并进来：一对一，没有单独成表的必要）。
 - 回调收件箱：按 event_key 去重；处理状态与 webhook_inbox 相同（pending → processing → completed，
   失败 retry，超限 dead_letter）。回调没有签名，payload 只当作“有变化”的提示，内容以拉取为准。
-- 会话、消息投影、置顶、通讯录分组与上传，在 OC-3 后续部分与用到它们的代码一起加。
+- 会话属于“用户 + 工作空间”（每个管理员一行，各自的已读、置顶、免打扰）；消息投影按 OpenIM 的
+  会话 ID 存一份（群里的多个管理员共用），序号与内容以 pull_msg_by_seq 拉回的为准。
+- 消息置顶、通讯录分组与上传，在 OC-3 后续部分与用到它们的代码一起加。
 """
 
 import uuid
@@ -18,6 +20,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -29,13 +32,15 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
 
 GROUP_MEMBER_ROLES = ("owner", "admin", "member")
 INBOX_STATUSES = ("pending", "processing", "retry", "completed", "dead_letter")
+CONVERSATION_KINDS = ("single", "group", "notice")
+MESSAGE_STATUSES = ("sending", "sent", "failed", "unknown")
 
 
 def _uuid_pk() -> Mapped[uuid.UUID]:
@@ -145,3 +150,77 @@ class ImWebhookInboxEvent(Base):
     received_at: Mapped[datetime] = _created()
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_text: Mapped[str | None] = mapped_column(Text)
+
+
+class ImConversation(Base):
+    """一个管理员在一个工作空间里的会话（单聊或群聊）。"""
+
+    __tablename__ = "im_conversations"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "conversation_id"),
+        CheckConstraint(f"kind IN {CONVERSATION_KINDS}", name="kind"),
+        CheckConstraint("read_seq >= 0 AND max_seq >= 0", name="seqs"),
+        Index("ix_im_conversations_conversation_id", "conversation_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="CASCADE")
+    )
+    # OpenIM 的会话 ID：si_<两个用户>、sg_<群>、sn_<通知>
+    conversation_id: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    peer_instance_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="CASCADE")
+    )
+    group_pk: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.im_groups.id", ondelete="CASCADE")
+    )
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    muted: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    read_seq: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    max_seq: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()
+
+
+class ImMessage(Base):
+    """消息投影：每条 OpenIM 消息一行；工作台代发、还没被 OpenIM 受理的消息 seq 与
+    server_msg_id 为空。"""
+
+    __tablename__ = "im_messages"
+    __table_args__ = (
+        UniqueConstraint("server_msg_id"),
+        UniqueConstraint("conversation_id", "seq"),
+        UniqueConstraint("conversation_id", "client_msg_id"),
+        CheckConstraint(f"status IN {MESSAGE_STATUSES}", name="status"),
+        Index("ix_im_messages_conversation_sent", "conversation_id", "sent_at"),
+        Index("ix_im_messages_sent_at", "sent_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    conversation_id: Mapped[str] = mapped_column(Text)
+    server_msg_id: Mapped[str | None] = mapped_column(Text)
+    client_msg_id: Mapped[str] = mapped_column(Text)
+    seq: Mapped[int | None] = mapped_column(BigInteger)
+    sender_im_id: Mapped[str] = mapped_column(Text)
+    sender_instance_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="SET NULL")
+    )
+    content_type: Mapped[int] = mapped_column(Integer)
+    # 解码后的 content（JSON 对象）；过大或无法解析时为 {}
+    content_json: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'"))
+    # 纯文本：文字消息的正文，系统消息的说明；其他类型为空
+    plain_text: Mapped[str | None] = mapped_column(Text)
+    at_im_ids: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
+    status: Mapped[str] = mapped_column(Text, server_default=text("'sent'"))
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created()

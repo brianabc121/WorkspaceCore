@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain import notifications
-from app.domain.im import IM_ROLES, NOTICE_USER_ID, user_id_from_im
+from app.domain.im import NOTICE_USER_ID, is_im_admin, user_id_from_im
 from app.domain.ratelimit import WindowLimiter, _resolve
 from app.models import (
     AgentInstance,
@@ -31,8 +31,6 @@ from app.models import (
     ImGroup,
     ImGroupMember,
     ImWebhookInboxEvent,
-    User,
-    WorkspaceMember,
 )
 from app.schemas.openim_callbacks import (
     CallbackResponse,
@@ -115,17 +113,7 @@ class CallbackJudge:
             raise Rejected(5004)
 
     async def _is_im_admin(self, user_id: uuid.UUID, workspace_id: uuid.UUID) -> bool:
-        found = await self.db.scalar(
-            select(WorkspaceMember.user_id)
-            .join(User, User.id == WorkspaceMember.user_id)
-            .where(
-                WorkspaceMember.workspace_id == workspace_id,
-                WorkspaceMember.user_id == user_id,
-                WorkspaceMember.role.in_(IM_ROLES),
-                User.status == "active",
-            )
-        )
-        return found is not None
+        return await is_im_admin(self.db, user_id, workspace_id)
 
     # ------------------------------------------------------------------ 单聊
 

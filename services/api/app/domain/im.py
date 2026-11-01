@@ -81,6 +81,21 @@ def openim_client(
     )
 
 
+async def is_im_admin(db: AsyncSession, user_id: uuid.UUID, workspace_id: uuid.UUID) -> bool:
+    """这个用户现在能不能在这个工作空间用 IM（状态正常的 owner / admin）。"""
+    found = await db.scalar(
+        select(WorkspaceMember.user_id)
+        .join(User, User.id == WorkspaceMember.user_id)
+        .where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == user_id,
+            WorkspaceMember.role.in_(IM_ROLES),
+            User.status == "active",
+        )
+    )
+    return found is not None
+
+
 def _nickname(value: str, fallback: str) -> str:
     return (value.strip() or fallback)[:_NICKNAME_MAX]
 
