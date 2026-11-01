@@ -3,7 +3,7 @@ import type { Schema } from '../../services/api'
 import { formatTime } from '../time'
 import type { ConversationKind } from './queries'
 
-defineProps<{ items: Schema['ImConversationOut'][]; selected: string | null; loading: boolean; error: string; hasMore: boolean; fetchingMore: boolean }>()
+defineProps<{ groups: Schema['ImContactGroupOut'][]; items: Schema['ImConversationOut'][]; selected: string | null; loading: boolean; error: string; hasMore: boolean; fetchingMore: boolean }>()
 const filter = defineModel<{ kind: ConversationKind | ''; q: string; group: string }>('filter', { required: true })
 defineEmits<{ select: [id: string]; more: [] }>()
 const kinds: { value: ConversationKind | ''; label: string }[] = [{ value: '', label: '全部' }, { value: 'single', label: '单聊' }, { value: 'group', label: '群聊' }, { value: 'notice', label: '通知' }]
@@ -19,6 +19,7 @@ function preview(item: Schema['ImConversationOut']) {
     <div class="im-filter" role="group" aria-label="会话类型">
       <button v-for="kind in kinds" :key="kind.value" type="button" class="secondary-button" :aria-pressed="filter.kind === kind.value" @click="filter = { ...filter, kind: kind.value }">{{ kind.label }}</button>
     </div>
+    <label v-if="groups.length" class="form-field"><span>按分组</span><select :value="filter.group" @change="filter = { ...filter, group: ($event.target as HTMLSelectElement).value }"><option value="">全部分组</option><option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option></select></label>
     <label class="form-field"><span>搜索会话</span><input :value="filter.q" type="search" maxlength="100" placeholder="名称" @change="filter = { ...filter, q: ($event.target as HTMLInputElement).value.trim() }" /></label>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-else-if="loading" role="status">正在加载会话…</p>

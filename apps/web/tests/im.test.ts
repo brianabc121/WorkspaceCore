@@ -10,6 +10,9 @@ const self = 'ws_owner', peer = 'oc_alpha'
 const conversation = (over: Partial<Schema['ImConversationOut']> = {}): Schema['ImConversationOut'] => ({ conversation_id: 'si_alpha', kind: 'single', title: '甲', peer_instance_id: 'inst-a', group_id: null, pinned: false, pinned_at: null, muted: false, unread_count: 2, read_seq: 1, max_seq: 3, last_message: { kind: 'text', sender_im_id: peer, sent_at: at, text_preview: '你好' }, last_message_at: at, ...over })
 const message = (seq: number, over: Partial<Schema['ImMessageOut']> = {}): Schema['ImMessageOut'] => ({ server_msg_id: `srv-${seq}`, client_msg_id: `cli-${seq}`, conversation_id: 'si_alpha', seq, sender_im_id: peer, sender_instance_id: 'inst-a', kind: 'text', text: `第 ${seq} 条`, image: null, at_im_ids: [], approval_execution_id: null, status: 'sent', sent_at: at, pinned: false, ...over })
 
+const group = (over: Partial<Schema['ImGroupOut']> = {}): Schema['ImGroupOut'] => ({ group_id: 'g1', conversation_id: 'sg_g1', name: '值班群', announcement: '', owner_im_id: self, created_at: at, dismissed: false,
+  members: [{ im_user_id: self, instance_id: null, nickname: '测试用户', online: null, role: 'owner', user_id: 'user-a' }, { im_user_id: peer, instance_id: 'inst-a', nickname: '甲', online: true, role: 'member', user_id: null }],
+  policy: { relay_enabled: true, max_agent_streak: 8, max_per_minute: 6, paused: true, version: 4 }, ...over })
 function setup(handler?: (r: Request) => Response | Promise<Response | undefined> | undefined, conversations = [conversation()], messages = [message(3), message(2), message(1)]) {
   return mockApi(async r => await handler?.(r) ?? (
     path(r) === '/api/v1/im/status' ? Response.json({ available: true, account_ready: true, im_user_id: self }) :
@@ -18,7 +21,9 @@ function setup(handler?: (r: Request) => Response | Promise<Response | undefined
     path(r).endsWith('/messages') && r.method === 'GET' ? Response.json({ items: messages, next_cursor: null, total_estimate: messages.length }) :
     path(r).endsWith('/pins') && r.method === 'GET' ? Response.json({ items: [] }) :
     path(r).endsWith('/read') ? Response.json(conversation({ unread_count: 0, read_seq: 3 })) :
-    path(r) === '/api/v1/im/badges' ? Response.json({ im_unread: 0, pending_approvals: 0 }) : undefined
+    path(r) === '/api/v1/im/contact-groups' && r.method === 'GET' ? Response.json({ items: [{ id: 'cg-1', name: '运维', instance_ids: [], sort_order: 0, version: 3 }] }) :
+    path(r) === '/api/v1/im/groups/g1' && r.method === 'GET' ? Response.json(group()) :
+    path(r) === '/api/v1/im/badges' ? Response.json({ im_unread: 5, pending_approvals: 2 }) : undefined
   ))
 }
 afterEach(() => vi.restoreAllMocks())
@@ -105,5 +110,65 @@ describe('im page', () => {
     const { router } = await openApp('/im')
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/forbidden'))
     expect(screen.queryByRole('link', { name: /消息/ })).not.toBeInTheDocument()
+  })
+
+  it('shows unread and pending approval counts in the top bar for admins', async () => {
+    setup()
+    await openApp('/')
+    expect(await screen.findByRole('link', { name: '消息，5 条未读' })).toHaveAttribute('href', '/im')
+    expect(screen.getByRole('link', { name: '2 项待审批' })).toHaveAttribute('href', '/ai')
+  })
+  it('manages contact groups with versions and starts a chat from contacts', async () => {
+    const requests = setup(r => {
+      if (path(r) === '/api/v1/im/contact-groups/cg-1' && r.method === 'PATCH') return Response.json({ id: 'cg-1', name: '值班', instance_ids: [], sort_order: 0, version: 4 })
+      if (path(r) === '/api/v1/im/contact-groups/cg-1/members') return Response.json({ id: 'cg-1', name: '值班', instance_ids: ['inst-a'], sort_order: 0, version: 5 })
+      if (path(r) === '/api/v1/im/conversations' && r.method === 'POST') return Response.json(conversation())
+    })
+    await openApp('/im?view=contacts')
+    const panel = await screen.findByRole('region', { name: '通讯录' })
+    const section = await within(panel).findByRole('region', { name: '分组：运维' })
+    await fireEvent.click(within(section).getByRole('button', { name: '编辑分组' }))
+    await fireEvent.update(within(section).getByLabelText('分组名称'), '值班')
+    await fireEvent.click(within(section).getByLabelText('甲'))
+    await fireEvent.click(within(section).getByRole('button', { name: '保存分组' }))
+    await vi.waitFor(() => expect(requests.some(r => path(r).endsWith('/members'))).toBe(true))
+    expect(await requests.find(r => r.method === 'PATCH')!.clone().json()).toEqual({ name: '值班', version: 3 })
+    expect(await requests.find(r => path(r).endsWith('/members'))!.clone().json()).toEqual({ instance_ids: ['inst-a'], version: 4 })
+    await fireEvent.click(within(within(panel).getByRole('region', { name: '未分组' })).getByRole('button', { name: '发消息' }))
+    expect(await screen.findByRole('region', { name: '与甲的会话' })).toBeVisible()
+    expect(await requests.find(r => path(r) === '/api/v1/im/conversations' && r.method === 'POST')!.clone().json()).toEqual({ instance_id: 'inst-a' })
+  })
+  it('creates a group with an Idempotency-Key and opens it', async () => {
+    const sg = conversation({ conversation_id: 'sg_g1', kind: 'group', title: '值班群', group_id: 'g1', peer_instance_id: null })
+    let created = false
+    const requests = setup(r => {
+      if (path(r) === '/api/v1/im/groups' && r.method === 'POST') { created = true; return Response.json(group(), { status: 201 }) }
+      if (path(r) === '/api/v1/im/conversations' && r.method === 'GET') return Response.json({ items: created ? [conversation(), sg] : [conversation()], next_cursor: null, total_estimate: 2, unread_total: 2 })
+    })
+    await openApp('/im')
+    await fireEvent.click(await screen.findByRole('button', { name: '建群' }))
+    const dialog = await screen.findByRole('dialog', { name: '建群' })
+    await fireEvent.update(within(dialog).getByLabelText('群名称 *'), '值班群')
+    await fireEvent.click(within(dialog).getByLabelText('甲'))
+    await fireEvent.click(within(dialog).getByRole('button', { name: '建群' }))
+    expect(await screen.findByRole('region', { name: '与值班群的会话' })).toBeVisible()
+    const post = requests.find(r => path(r) === '/api/v1/im/groups')!
+    expect(post.headers.get('Idempotency-Key')).toBeTruthy()
+    expect(await post.clone().json()).toEqual({ name: '值班群', announcement: '', relay_enabled: true, instance_ids: ['inst-a'] })
+  })
+  it('edits group anti-spam settings with the policy version and shows the paused state', async () => {
+    const sg = conversation({ conversation_id: 'sg_g1', kind: 'group', title: '值班群', group_id: 'g1', peer_instance_id: null, unread_count: 0 })
+    const requests = setup(r => path(r) === '/api/v1/im/groups/g1/policy' ? Response.json({ relay_enabled: false, max_agent_streak: 3, max_per_minute: 6, paused: false, version: 5 }) : undefined, [sg], [])
+    await openApp('/im?c=sg_g1')
+    const chat = await screen.findByRole('region', { name: '与值班群的会话' })
+    await fireEvent.click(within(chat).getByRole('button', { name: '群设置' }))
+    const panel = await within(chat).findByRole('region', { name: '群设置' })
+    expect(await within(panel).findByText(/自动接力已暂停/)).toBeVisible()
+    expect(within(panel).queryByRole('button', { name: /移出/ })).toBeInTheDocument()
+    await fireEvent.click(within(panel).getByLabelText(/允许实例之间接力/))
+    await fireEvent.update(within(panel).getByLabelText(/最多连续发言/), '3')
+    await fireEvent.click(within(panel).getByRole('button', { name: '保存防刷屏设置' }))
+    await vi.waitFor(() => expect(requests.some(r => path(r).endsWith('/policy'))).toBe(true))
+    expect(await requests.find(r => path(r).endsWith('/policy'))!.clone().json()).toEqual({ relay_enabled: false, max_agent_streak: 3, max_per_minute: 6, version: 4 })
   })
 })

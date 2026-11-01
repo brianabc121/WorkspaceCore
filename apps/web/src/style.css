@@ -272,3 +272,16 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .im-back { display: inline-block; }
   .im-messages { max-height: 55vh; }
 }
+.im-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.im-tabs [aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.im-contacts, .im-group { padding: 16px; min-width: 0; }
+.im-group { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 10px; }
+.im-group h3, .im-group h4, .im-contact-section h3 { margin: 0; font-size: 1rem; }
+.im-group-form, .im-contact-section { display: grid; gap: 8px; min-width: 0; margin-top: 12px; }
+.im-group-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.im-group-members, .im-contact-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.im-group-members li, .im-contact-list li { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; min-width: 0; padding: 6px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.im-checks { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; display: grid; gap: 2px; min-width: 0; }
+.im-checks .check-field { margin: 4px 0; }
+.im-danger { border-color: #dc6672; justify-self: start; }
+.im-header-link { display: inline-flex; gap: 6px; align-items: center; text-decoration: none; }

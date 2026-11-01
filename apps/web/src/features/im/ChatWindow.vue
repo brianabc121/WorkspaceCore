@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef, watch } from 'vue'
-import { useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError, dataOf, type Schema } from '../../services/api'
 import { checkUpload, chronological, imError, useMessages, usePins } from './queries'
 import MessageItem from './MessageItem.vue'
+import GroupDetails from './GroupDetails.vue'
+import { useImAction } from './action'
 
 const props = defineProps<{ scope: string; conversation: Schema['ImConversationOut']; selfId: string | null; names: Record<string, string> }>()
 defineEmits<{ back: [] }>()
-const auth = useAuthStore(), cache = useQueryClient(), user = auth.user?.id
+const auth = useAuthStore()
 const id = toRef(() => props.conversation.conversation_id)
 const messages = useMessages(props.scope, id), pins = usePins(props.scope, id)
 const header = { 'X-Workspace-Id': props.scope }
@@ -19,25 +20,16 @@ watch(() => messages.data.value, data => {
   const known = new Set((data?.pages ?? []).flatMap(p => p.items).map(m => m.server_msg_id ?? m.client_msg_id))
   pending.value = pending.value.filter(m => !known.has(m.server_msg_id ?? m.client_msg_id))
 })
-const draft = ref(''), busy = ref(false), error = ref(''), notice = ref(''), list = ref<HTMLElement | null>(null), picker = ref<HTMLInputElement | null>(null)
+const { busy, error, notice, act, active, refresh } = useImAction(props.scope)
+const draft = ref(''), list = ref<HTMLElement | null>(null), picker = ref<HTMLInputElement | null>(null), showGroup = ref(false)
 // One Idempotency-Key per draft: retrying the same draft after an unknown result can never send it twice.
 let draftKey: string | null = null
 const canSend = computed(() => props.conversation.kind !== 'notice')
-const active = () => auth.user?.id === user && auth.workspaceId === props.scope
-
-const refresh = () => cache.invalidateQueries({ predicate: q => q.queryKey[0] === 'im' && q.queryKey[1] === user && q.queryKey[2] === props.scope })
 function sender(message: Schema['ImMessageOut']) {
   return props.names[message.sender_im_id] ?? (props.conversation.kind === 'single' ? props.conversation.title : message.sender_im_id)
 }
 async function scrollToEnd() { await nextTick(); if (list.value) list.value.scrollTop = list.value.scrollHeight }
 
-async function act(effect: () => Promise<unknown>, success = '') {
-  if (busy.value || !active()) return false
-  busy.value = true; error.value = ''; notice.value = ''
-  try { await effect(); if (!active()) return false; notice.value = success; await refresh(); return true }
-  catch (cause) { if (active()) error.value = imError(cause); return false }
-  finally { busy.value = false }
-}
 
 async function send(body: Schema['ImMessageSend']) {
   draftKey ??= crypto.randomUUID()
@@ -99,9 +91,11 @@ watch(() => messages.isSuccess.value, ok => { if (ok) void scrollToEnd() }, { im
       <h2>{{ conversation.title }}</h2>
       <div class="im-chat-actions">
         <button type="button" class="secondary-button" :disabled="busy" :aria-pressed="conversation.pinned" @click="setFlag({ pinned: !conversation.pinned }, conversation.pinned ? '已取消置顶会话' : '已置顶会话')">{{ conversation.pinned ? '取消置顶会话' : '置顶会话' }}</button>
+        <button v-if="conversation.kind === 'group' && conversation.group_id" type="button" class="secondary-button" :aria-expanded="showGroup" @click="showGroup = !showGroup">群设置</button>
         <button type="button" class="secondary-button" :disabled="busy" :aria-pressed="conversation.muted" @click="setFlag({ muted: !conversation.muted }, conversation.muted ? '已关闭免打扰' : '已开启免打扰')">{{ conversation.muted ? '关闭免打扰' : '免打扰' }}</button>
       </div>
     </header>
+    <GroupDetails v-if="showGroup && conversation.group_id" :scope="scope" :group-id="conversation.group_id" @close="showGroup = false" />
     <section v-if="pins.data.value?.items.length" class="im-pins" aria-label="置顶消息">
       <h3>置顶消息</h3>
       <ul><li v-for="item in pins.data.value.items" :key="item.server_msg_id"><span class="preserve-text">{{ item.message.kind === 'image' ? '[图片]' : item.message.text }}</span><button type="button" class="secondary-button" :disabled="busy" @click="unpin(item.server_msg_id)">取消置顶</button></li></ul>

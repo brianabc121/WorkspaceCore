@@ -67,6 +67,23 @@ export function useContacts(scope: string) {
     queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/im/contacts', { params: { header: c.header }, signal })) })
 }
 
+export function useContactGroups(scope: string) {
+  const c = context(scope)
+  return useQuery({ queryKey: ['im', c.user, scope, 'contact-groups'], enabled: computed(() => c.active() && c.auth.canManage),
+    queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/im/contact-groups', { params: { header: c.header }, signal })) })
+}
+
+export function useGroup(scope: string, groupId: Ref<string | null>) {
+  const c = context(scope)
+  return useQuery({
+    queryKey: computed(() => ['im', c.user, scope, 'group', groupId.value]),
+    enabled: computed(() => c.active() && c.auth.canManage && !!groupId.value),
+    queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/im/groups/{group_id}', { params: { header: c.header, path: { group_id: groupId.value! } }, signal })),
+  })
+}
+
+export const STATUS_LABELS: Record<Schema['ImContactOut']['status'], string> = { pending: '准备中', online: '在线', offline: '离线', disabled: '已停用' }
+
 // Messages come newest first; the chat shows them oldest first and drops duplicates across pages.
 export function chronological(pages: Schema['ImMessagePage'][] | undefined): Schema['ImMessageOut'][] {
   const seen = new Map<string, Schema['ImMessageOut']>()
@@ -95,6 +112,8 @@ export function imError(error: unknown): string {
     OPERATION_NOT_APPLIED: '上一条消息确认没有发出，可以重新发送。',
     NOT_FOUND: '会话不存在，或你已无权访问。',
     FORBIDDEN: '只有 owner 与 admin 可以使用 IM。',
+    CONTACT_GROUP_EXISTS: '已有同名分组。',
+    VERSION_CONFLICT: '已被其他人修改，请刷新后再操作。',
   }
   if (error.status === 429) return error.retryAfter === null ? '发送过于频繁，请稍后重试。' : `发送过于频繁，请在 ${error.retryAfter} 秒后重试。`
   return messages[error.code] ?? (error.status === 0 ? '网络连接失败，请检查连接后重试。' : '请求失败，请稍后重试。')
