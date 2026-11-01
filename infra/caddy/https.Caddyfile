@@ -1,0 +1,23 @@
+# 用域名对外提供 HTTPS（docs/deploy-guide.md 第 5 步；compose.https.yaml 挂载本文件替换 Caddyfile）。
+# Caddy 自动向 Let's Encrypt 申请并续期证书：域名要先解析到这台服务器，80 与 443 端口要能从公网访问。
+{
+	admin off
+	email {$ACME_EMAIL}
+}
+
+# 容器自己的健康检查（compose 的 healthcheck）：只绑定容器内的回环地址，外部访问不到
+http://127.0.0.1:8099 {
+	bind 127.0.0.1
+	respond "ok" 200
+}
+
+# 容器之间（Vikunja 投递 Webhook：WEBHOOK_BASE_URL=http://caddy:8080）与本机检查（make smoke）仍走 :8080；
+# 宿主机上只绑定 HTTP_BIND（默认 127.0.0.1），不对外
+:8080 {
+	import /etc/caddy/routes.caddy
+}
+
+{$SITE_DOMAIN} {
+	import /etc/caddy/routes.caddy
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}

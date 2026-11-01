@@ -1,6 +1,6 @@
 # 部署与运行手册
 
-> 状态：Sprint 6（2026-11-01）。Sprint 0 ~ 5 的功能已验收（`docs/acceptance/`）。
+> 状态：Sprint 0 ~ 6 已验收（`docs/acceptance/`）。第一次部署建议先读按步骤写的 `docs/deploy-guide.md`，本手册是完整参考。
 > - 升级与回滚：第 5 节；
 > - 备份与隔离恢复：第 14 节；
 > - 安全扫描、完整冒烟与性能基准：第 15 节；
@@ -84,7 +84,8 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 |---|---|---|
 | `APP_ENV` | `development` / `production`；production 关闭 API 文档页 | `development` |
 | `LOG_LEVEL` | `DEBUG` / `INFO` / `WARNING` / `ERROR` | `INFO` |
-| `HTTP_BIND` / `HTTP_PORT` | Caddy 对外监听地址与端口 | `127.0.0.1` / `8080` |
+| `HTTP_BIND` / `HTTP_PORT` | Caddy 的 HTTP 端口（宿主机上的监听地址与端口） | `127.0.0.1` / `8080` |
+| `COMPOSE_FILE`、`SITE_DOMAIN`、`ACME_EMAIL` | 用域名对外提供 HTTPS（第 6 节）：`COMPOSE_FILE=compose.yaml:compose.https.yaml` 加上域名与 Let's Encrypt 联系邮箱 | 不启用 |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | 数据库；API / Worker 的连接串由这三项自动拼接 | `workspace` / `workspace` / 随机 |
 | `DATABASE_URL` / `REDIS_URL` | **只在本机直接运行 API 时**使用，Compose 内不读取 | 指向 localhost |
 | `PUBLIC_BASE_URL` | 浏览器访问工作台的地址；登录、安装等写请求的 `Origin` 必须是它或下面的可信来源 | `http://localhost:8080` |
@@ -122,7 +123,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 
 | 检查 | 预期 |
 |---|---|
-| `make ps` | 6 个服务都是 `Up`，其中 5 个显示 `(healthy)`（caddy 没有单独的健康检查） |
+| `make ps` | 6 个服务都是 `Up (healthy)` |
 | `curl -s 127.0.0.1:8080/healthz` | `{"status":"ok"}` |
 | `curl -s 127.0.0.1:8080/readyz` | `{"status":"ok","checks":{"database":"ok","redis":"ok"}}`；依赖不可用时返回 503 |
 | `docker compose exec worker arq app.jobs.worker.WorkerSettings --check` | 退出码 0 |
@@ -165,7 +166,7 @@ Vikunja、n8n 等独立部署的组件分开升级：
 
 ### 5.2 数据库迁移的约定
 
-- 迁移 `0001` ~ `0017` 都**只新增**表、索引、触发器（`0014` 给 `0013` 新建的 `im_messages` 加了一个可空列），每个都有 downgrade。
+- 迁移 `0001` ~ `0018` 都**只新增**表、索引、触发器或可空列（`0014` 给 `im_messages` 加了一列，`0018` 给 `agent_instances` 加了一列），每个都有 downgrade。
   CI 每次都跑 `upgrade head → downgrade base → upgrade head`（`ci-api.yml`），恢复演练也会在恢复出来的数据上执行 `upgrade head`。
 - 以后的迁移继续遵守“先扩展、后收缩”：
   - 新版本只加表、加列（可为空或有默认值），旧代码照常运行；
@@ -194,8 +195,11 @@ Vikunja、n8n 等独立部署的组件分开升级：
 
 ## 6. 生产环境注意事项
 
-- **HTTPS**：在 `infra/caddy/Caddyfile` 中把 `:8080` 换成域名、去掉 `auto_https off`，Caddy 会自动申请证书；
-  同时在 `header` 块加入 `Strict-Transport-Security "max-age=31536000; includeSubDomains"`，并把 `HTTP_BIND` 设为 `0.0.0.0`、端口改为 80/443。
+- **HTTPS**：在 `.env` 里设置 `COMPOSE_FILE=compose.yaml:compose.https.yaml`、`SITE_DOMAIN`（已解析到本机的域名）、`ACME_EMAIL`，
+  `PUBLIC_BASE_URL` 改为 `https://<域名>`，然后 `make up`。Caddy 改用 `infra/caddy/https.Caddyfile`：自动向 Let's Encrypt 申请并续期证书，
+  发布 80 / 443（HTTP 自动跳转 HTTPS），域名站点加 HSTS；内部的 `:8080` 保留（Vikunja 的 Webhook 经 `http://caddy:8080` 投递），
+  宿主机上仍按 `HTTP_BIND` 只绑定本机。两份 Caddyfile 的路由与安全响应头都写在 `infra/caddy/routes.caddy`。
+  完整步骤见 `docs/deploy-guide.md` 第 5 步。
 - **密钥**：生产环境用 Secret 管理工具注入，不要把真实值写进仓库或 Compose 文件。
 - **`APP_ENV=production`**：关闭 `/api/v1/docs` 与 OpenAPI；Cookie 加 `Secure`（`PUBLIC_BASE_URL` 是 https 时也会加）；
   没有设置足够长的 `SESSION_SECRET` 时 API 拒绝启动。

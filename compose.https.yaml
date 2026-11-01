@@ -1,0 +1,17 @@
+# 用域名对外提供 HTTPS（docs/deploy-guide.md 第 5 步）。在 .env 里设置：
+#   COMPOSE_FILE=compose.yaml:compose.https.yaml   # 之后 make up / docker compose 都会带上本文件
+#   SITE_DOMAIN=workspace.example.com              # 已解析到这台服务器
+#   ACME_EMAIL=you@example.com                     # Let's Encrypt 的联系邮箱（证书到期提醒）
+#   PUBLIC_BASE_URL=https://workspace.example.com
+# 80 与 443 端口要能从公网访问（申请证书、HTTP 跳转 HTTPS）；:8080 仍按 HTTP_BIND 只绑定本机。
+services:
+  caddy:
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?在 .env 里设置 SITE_DOMAIN（对外访问的域名）}
+      ACME_EMAIL: ${ACME_EMAIL:?在 .env 里设置 ACME_EMAIL（Let's Encrypt 联系邮箱）}
+    volumes:
+      - ./infra/caddy/https.Caddyfile:/etc/caddy/Caddyfile:ro
