@@ -179,8 +179,10 @@ jobs:
         run: make openim-up
       - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道）
         run: |
-          # 要以 root 运行：接入包目录交给容器里的 uid 1000（CHECKLIST.md 的做法）
-          sudo -E python3 tests/e2e/agents_acceptance.py --server-ca "$RUNNER_TEMP/agent-server-ca.pem" \
+          # 要以 root 运行：接入包目录交给容器里的 uid 1000（CHECKLIST.md 的做法）。
+          # npm 缓存放到临时目录：用 runner 的 ~/.npm 会留下 root 所有的文件，后面的 npm ci 会因 EACCES 失败
+          sudo -E env npm_config_cache="$RUNNER_TEMP/npm-root-cache" \
+            python3 tests/e2e/agents_acceptance.py --server-ca "$RUNNER_TEMP/agent-server-ca.pem" \
             --intranet intranet.test:8443 --public public.test:9443
       - name: A15 恢复演练含 OpenIM（上一步留下的消息、好友与群随快照恢复，数量一致）
         run: python3 tests/e2e/backup_acceptance.py --expect-openim
