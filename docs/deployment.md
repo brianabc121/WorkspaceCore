@@ -4,6 +4,7 @@
 > - 升级与回滚：第 5 节；
 > - 备份与隔离恢复：第 14 节；
 > - 安全扫描、完整冒烟与性能基准：第 15 节；
+> - V2：OpenClaw 接入入口第 16 节，OpenIM 第 17 节；
 > - 所有组件的锁定版本与许可证：`docs/versions.md`；
 > - 发布前逐项检查：`docs/release-checklist.md`。
 >
@@ -635,9 +636,11 @@ OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式�
 1. 工作台的实例页：登记实例，选网络模式和权限，授权密钥，下载接入包（zip，凭证只出现这一次）；
 2. 在 OpenClaw 服务器上解压，按里面的 `CHECKLIST.md` 设置属主、权限、插件和定时任务，然后 `docker compose up -d`；
    - 外网模式会同时启动 `tunnel` 服务：本机隧道，用接入包里的客户端证书连外网入口；
+   - 内网模式、且工作台也配置了外网入口时，会同时启动 `image-proxy` 服务：本机取图代理（不带客户端证书），
+     把工作台发来的图片地址（外网域名）转到内网入口（OC-3 ADR 第 15 节）；
 3. 入口用私有 CA 签发的证书时：
    - 外网模式：在接入包 `compose.yaml` 的 `tunnel` 命令里加 `--cacert=<CA 证书>`；
-   - 内网模式：在 `myworkspace.env` 里设置 `NODE_EXTRA_CA_CERTS=<CA 证书>`。
+   - 内网模式：在 `myworkspace.env` 里设置 `NODE_EXTRA_CA_CERTS=<CA 证书>`；有 `image-proxy` 时在它的命令里也加 `--cacert=<CA 证书>`。
 4. 重新生成接入包会签发新凭证，旧凭证默认再保留 24 小时；客户端证书 90 天到期，到期前重新生成。
 
 ### 16.3 验收
@@ -648,3 +651,57 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 ```
 
 覆盖内网与外网入口、双向证书、本机隧道、入口错配、吊销，以及伪造请求头。
+
+## 17. OpenIM（V2 管理员端 IM 的后端，独立部署）
+
+管理员在工作台里和 OpenClaw 实例聊天，消息经 OpenIM 中转。OpenIM 是**独立的 Compose 项目**（`infra/openim/compose.yaml`），
+和 Vikunja 一样加入 core 创建的网络。设计见 `docs/v2/TRANSFORMATION_PLAN.md` 第 4.4、6.1 节；
+补丁镜像、接入方式与实测见 `docs/decisions/2026-10-31-v2-oc3-openim-patched-image.md`（第 16 节是部署）。
+
+> **备份还没有覆盖 OpenIM**（下一步）：现在 `make backup` 不含 OpenIM 的 MongoDB 与 Garage，聊天记录丢了只能靠工作台自己的消息投影。
+
+### 17.1 网络与地址
+
+| 网络 | 成员 | 用途 |
+|---|---|---|
+| `im`（core 创建，internal） | api、worker；OpenIM 的 openim-server（固定 `<IM_NET>.2`）与 garage | API 调 OpenIM REST、上传和下载图片；OpenIM 回调 API |
+| `agent-im`（core 的 agent-gateway 创建，internal） | agent-gateway、openim-server | 接入入口把 `/im/ws` 转发到消息网关 |
+| `openim`（OpenIM 项目自己的） | MongoDB、Redis、etcd、Kafka、Garage、openim-server | OpenIM 内部；不发布任何端口 |
+
+- 浏览器和实例都不直连 OpenIM：管理员经工作台 API，实例经接入入口（`/im/ws`、`/im/api/*`、`/im/obj/m/*`，第 16 节）；
+- OpenIM 的回调没有签名，所以 API 只接受来自 `<IM_NET>.2` 的回调，地址里还有随机口令（访问日志里记成 `***`）；
+- **before 回调失败即拒**：工作台 API 不可用时，IM 消息直接发送失败（OpenIM 返回 90004），这是有意的（契约第 10 节）。
+
+### 17.2 部署步骤
+
+1. `make env`：在 `.env` 里随机生成 `OPENIM_SECRET`、`OPENIM_CALLBACK_PATH_TOKEN` 和 OpenIM 各组件的密码（已有的值不改）；
+2. `make openim-build`：按锁定的上游提交与补丁构建 `my-workspace/openim-server` 镜像（要 8 GB 左右的临时磁盘；
+   Docker Hub 限流时 `BASE_REGISTRY=mirror.gcr.io/library make openim-build`）；
+3. `make up`、`make agents-up`（第 16 节）：创建 `im` 与 `agent-im` 网络；
+4. `make openim-up`：启动 OpenIM，第一次启动要 1 分钟左右（初始化 etcd、Garage、MongoDB 用户）；
+5. 在 `.env` 里设置下面两项，再 `make up` 让 api、worker 生效：
+
+   ```
+   OPENIM_API_URL=http://openim-server:10002
+   OPENIM_OBJECT_URL=http://garage:3900
+   ```
+
+6. 打开工作台的 IM 页面：管理员第一次打开时自动注册 IM 账号；登记的实例会自动注册并加好友（失败时 Worker 每 5 分钟重试）。
+
+### 17.3 变量
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `OPENIM_API_URL` / `OPENIM_OBJECT_URL` | 空 | 留空表示没有部署 OpenIM：IM 接口返回 503，Worker 不做 IM 对账 |
+| `OPENIM_SECRET` | `make env` 生成 | OpenIM 的 share.secret；工作台用它换 imAdmin 令牌，接入网关用它校验实例的 IM 令牌。更换后所有 IM 令牌失效，实例要重启 |
+| `OPENIM_CALLBACK_PATH_TOKEN` | `make env` 生成 | 回调地址 `http://api:8000/internal/openim/<口令>` 里的口令，至少 32 个字符 |
+| `IM_NET` | `172.31.252` | `im` 网络的网段前三段：子网 `<值>.0/28`，openim-server 固定在 `<值>.2`。和本机别的 Docker 网络冲突时改它；`make restore-verify` 的临时环境自动用 `172.31.253`，并且不连接 OpenIM |
+| `OPENIM_CALLBACK_ALLOWED_CIDRS` | `<IM_NET>.2/32` | API 只接受这些地址的回调；一般不用改 |
+| `AGENT_IM_OBJECT_BASE_URL` | 自动 | 写进图片消息的取图地址前缀；默认是 `http://<外网入口域名>:18443`（接入包里本机隧道的端口），只有内网入口时是内网入口地址 |
+| `OPENIM_MONGO_*`、`OPENIM_REDIS_PASSWORD`、`OPENIM_ETCD_*`、`OPENIM_KAFKA_PASSWORD`、`OPENIM_GARAGE_*`、`OPENIM_S3_*` | `make env` 生成 | 只在 OpenIM 的 Compose 里使用。MongoDB 的用户与 Garage 的访问密钥在**第一次启动时**写进数据卷，之后改 `.env` 不会生效 |
+
+### 17.4 日常
+
+- `make openim-logs` 看日志；`make openim-down` 停止（保留数据卷）；
+- 资源：空闲时 openim-server 约 390 MiB、Kafka 约 370 MiB、MongoDB 约 190 MiB、Garage 与 etcd 各十几 MiB；
+- 升级 OpenIM 只能换补丁镜像（`infra/openim/patches/`），**不要换回官方镜像**：官方镜像有越权问题（OC-0 ADR 第 4 节）。

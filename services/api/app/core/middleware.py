@@ -20,6 +20,14 @@ logger = logging.getLogger("app.request")
 # 容器健康检查每隔几秒请求一次，访问日志降为 DEBUG，避免淹没正常请求；失败（非 2xx）仍按 INFO 记录
 _PROBE_PATHS = frozenset({"/healthz", "/readyz"})
 
+# 路径里本身就是凭证的参数：访问日志里换成 ***（规范第 8 节第 6 条）。
+# OpenIM 回调地址的口令；实例取图的能力地址（拿到 media_id 就能经接入入口取图）
+_SECRET_PATH_PARAMS: dict[str, frozenset[str]] = {
+    "/internal/openim/{path_token}/{command}": frozenset({"{path_token}"}),
+    "/im/obj/m/{media_id}": frozenset({"{media_id}"}),
+}
+REDACTED = "***"
+
 
 async def request_context(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -44,7 +52,10 @@ async def request_context(
             metrics.observe(request.method, route, response.status_code, elapsed)
         quiet = path in _PROBE_PATHS and response.status_code < 300
         # 不记录查询参数（可能包含敏感信息）；LOG_REQUEST_PATH=route 时连路径参数也不记录（S5-05）
-        logged_path = route if request.app.state.settings.log_request_path == "route" else path
+        if request.app.state.settings.log_request_path == "route":
+            logged_path = route
+        else:
+            logged_path = _redact_path(path, route)
         logger.log(
             logging.DEBUG if quiet else logging.INFO,
             "request",
@@ -73,6 +84,18 @@ def _route_template(request: Request) -> str:
     actual = request.scope.get("path", "").strip("/").split("/")
     prefix = actual[: len(actual) - len(own)] if len(actual) > len(own) else []
     return "/" + "/".join([*prefix, *own]) if prefix or own else "/"
+
+
+def _redact_path(path: str, route: str) -> str:
+    """把路径里属于凭证的段换成 ***；路由模板与实际路径按段一一对应（见 _route_template）。"""
+    secret = _SECRET_PATH_PARAMS.get(route)
+    if not secret:
+        return path
+    actual = path.split("/")
+    template = route.split("/")
+    if len(actual) != len(template):
+        return route
+    return "/".join(REDACTED if t in secret else a for a, t in zip(actual, template, strict=True))
 
 
 def install_middleware(app: FastAPI) -> None:

@@ -19,6 +19,9 @@ VIKUNJA_URL := $(or $(shell sed -n 's/^VIKUNJA_PUBLIC_URL=//p' .env 2>/dev/null)
 N8N_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-n8n \
 	-f infra/n8n/compose.yaml --env-file .env
 N8N_URL := $(or $(shell sed -n 's/^N8N_PUBLIC_URL=//p' .env 2>/dev/null),http://localhost:5678/)
+# 独立部署的 OpenIM（infra/openim/compose.yaml），加入 core 的 im 与 agent-im 网络
+OPENIM_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-openim \
+	-f infra/openim/compose.yaml --env-file .env
 # 读取 .env 里的 HTTP_PORT（没有时用 8080），供 make smoke 使用
 HTTP_PORT := $(or $(shell sed -n 's/^HTTP_PORT=//p' .env 2>/dev/null),8080)
 
@@ -29,7 +32,8 @@ endef
 .PHONY: help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke openapi setup-token \
 	lint lint-api lint-web format test test-api test-web build-web backup restore-verify \
 	smoke-full perf scan \
-	vikunja-up vikunja-down vikunja-user vikunja-logs n8n-up n8n-down n8n-logs agent-ca agents-up
+	vikunja-up vikunja-down vikunja-user vikunja-logs n8n-up n8n-down n8n-logs agent-ca agents-up \
+	openim-build openim-up openim-down openim-logs
 
 help: ## 列出可用命令
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-15s %s\n", $$1, $$2}'
@@ -98,6 +102,22 @@ agent-ca: ## 导出 OpenClaw 外网入口信任的内部 CA 证书（不含私�
 
 agents-up: agent-ca ## 启动 OpenClaw 接入入口（agent-gateway，--profile agents）；证书与变量见 docs/deployment.md 第 16 节
 	docker compose --profile agents up -d agent-gateway
+
+openim-build: ## 构建打过补丁的 OpenIM 镜像（infra/openim/server/build.sh；约 8 GB 临时磁盘）
+	infra/openim/server/build.sh
+
+openim-up: env ## 启动独立部署的 OpenIM（IM 后端）；需要先 make openim-build 与 make agents-up
+	@docker network inspect $(WORKSPACE_PROJECT)_im $(WORKSPACE_PROJECT)_agent-im >/dev/null 2>&1 || \
+		{ echo "缺少 core 的 im / agent-im 网络：请先 make up 与 make agents-up" >&2; exit 1; }
+	$(OPENIM_COMPOSE) up -d
+	@echo "OpenIM 已启动。第一次部署时在 .env 里设置 OPENIM_API_URL=http://openim-server:10002 与"
+	@echo "OPENIM_OBJECT_URL=http://garage:3900，再运行 make up 让 api、worker 生效；步骤见 docs/deployment.md 第 17 节"
+
+openim-down: ## 停止 OpenIM；保留数据卷
+	$(OPENIM_COMPOSE) down
+
+openim-logs: ## 跟踪 OpenIM 日志（Ctrl+C 退出）
+	$(OPENIM_COMPOSE) logs -f --tail=100
 
 n8n-up: env ## 启动独立部署的 n8n（自动化，可选）；需要先 make up
 	$(N8N_COMPOSE) up -d --wait --wait-timeout 300

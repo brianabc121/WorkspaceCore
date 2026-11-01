@@ -10,6 +10,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -20,6 +21,7 @@ import pytest
 from app.domain.im import admin_im_user_id
 from app.domain.im_gateway import proto_string_fields, verify_im_token
 from tests import fake_openim
+from tests.test_health import _Collect
 from tests.test_im_accounts_callbacks import ImEnv, im_env
 from tests.test_im_media_api import png
 
@@ -238,8 +240,20 @@ async def test_instances_fetch_sent_images_by_capability(env: ImEnv) -> None:
         json={"kind": "image", "upload_id": upload["upload_id"]},
         headers={**env.headers(write=True), "Idempotency-Key": str(uuid.uuid4())},
     )
-    fetched = await env.client.get(path, headers=INTRANET)
+    request_logger = logging.getLogger("app.request")
+    collect = _Collect()
+    request_logger.addHandler(collect)
+    previous_level = request_logger.level
+    request_logger.setLevel(logging.INFO)
+    try:
+        fetched = await env.client.get(path, headers=INTRANET)
+    finally:
+        request_logger.removeHandler(collect)
+        request_logger.setLevel(previous_level)
     assert fetched.status_code == 200 and fetched.content == image
+    # 能力地址不进访问日志
+    logged = [r.__dict__.get("path") for r in collect.records]
+    assert "/im/obj/m/***" in logged and not any(upload["upload_id"] in str(p) for p in logged)
     assert fetched.headers["content-type"] == "image/png"
     assert (await env.client.get(path)).status_code == 404  # 不是经接入入口来的
     assert (await env.client.get(f"/im/obj/m/{uuid.uuid4()}", headers=INTRANET)).status_code == 404

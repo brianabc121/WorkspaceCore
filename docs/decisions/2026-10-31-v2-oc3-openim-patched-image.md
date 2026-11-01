@@ -448,3 +448,34 @@ OC-0 的回归测试脚本没有覆盖这一项，覆盖它的是这个单元测
   - `tests/test_im_gateway.py`：6 项，包括令牌与 protobuf 的单元测试、forward_auth 的各种拒绝、外网证书与封禁、REST 白名单、实例取图；
   - `tests/test_im_live.py`：在真实补丁镜像上用真实令牌走一遍；
   - `tests/test_agents_api.py`：内网接入包带 `image-proxy`、不带 `tunnel`，目标是内网入口。
+
+## 16. 第 4 部分（B7a）：接入部署——网络、回调、变量（2026-11-01）
+
+OpenIM 仍是独立的 Compose 项目（方案第 6.1 节），这一批把它接进工作台。部署步骤写在 `docs/deployment.md` 第 17 节。
+
+- **网络**：core 新建两个 internal 网络，OpenIM 以 external 方式加入。
+  - `im`：api、worker，加上 OpenIM 的 openim-server 与 garage。API 经它调 OpenIM REST（`http://openim-server:10002`）、按签出的链接上传和下载图片（`http://garage:3900`），OpenIM 经它回调 API；
+  - `agent-im`：只有 agent-gateway 与 openim-server，接入入口经它把 `/im/ws` 转发到消息网关（10001）；
+  - **为什么接入入口不直接进 `im`**：API 只采用来源是接入入口固定地址的入口与证书请求头（OC-2）。接入入口和 api 同时在两个网络里时，Docker 的内置 DNS 可能把 `api` 解析成另一个网络的地址，来源就对不上了（只会失败、不会放大权限，但结果不稳定）。所以另建一个没有 api 的网络。代价是 `agent-im` 由 agent-gateway 创建，要先 `make agents-up` 再 `make openim-up`；OpenIM 只服务于 OpenClaw 实例，这个顺序可以接受；
+  - OpenIM 内部的 MongoDB、Redis、etcd、Kafka 只在自己的 `openim` 网络里，`im` 网络里看不到工作台的 PostgreSQL / Redis（实测解析不到）。
+- **回调**：
+  - openim-server 在 `im` 网络里固定为 `<IM_NET>.2`（默认 `172.31.252.2`，子网 `/28`，动态地址只用 `.8/29`），API 的 `OPENIM_CALLBACK_ALLOWED_CIDRS` 默认就是 `<IM_NET>.2/32`；
+  - 回调地址默认 `http://api:8000/internal/openim/${OPENIM_CALLBACK_PATH_TOKEN}`，口令没有设置时 OpenIM 拒绝启动（嵌套的 `:?` 只在没有覆盖 `OPENIM_WEBHOOK_URL` 时求值，回归测试用的回调桩不受影响，已用 `docker compose config` 验证）；
+  - **before 回调失败即拒**：锁定镜像里的 `config/webhooks.yml` 中，`beforeSendSingleMsg`、`beforeSendGroupMsg` 默认 `failedContinue: true`（回调失败照样发出），所以用 `IMENV_WEBHOOKS_BEFORESENDSINGLEMSG_FAILEDCONTINUE=false` 与 `IMENV_WEBHOOKS_BEFORESENDGROUPMSG_FAILEDCONTINUE=false` 关掉。这就是契约第 10 节要求的“OC-3 配置并实测”。
+- **对象存储地址**：`IMENV_MINIO_EXTERNALADDRESS` 默认改为 `http://garage:3900`，与 API 的 `OPENIM_OBJECT_URL` 相同。只有 API 用这个地址，浏览器和实例都拿不到。
+- **端口**：openim-server 不再映射到 `127.0.0.1:10001/10002`。回归测试用的 `compose.probe.yaml` 把端口加回来，并把 `im` / `agent-im` 改为自己创建（带 `-probe` 后缀），所以 `ci-openim` 不需要启动工作台。
+- **变量**：`.env.example` 增加 `OPENIM_*` 与 `IM_NET`，`make env` 按格式生成（Garage 的 RPC 密钥与 S3 密钥是 64 位十六进制，访问密钥 ID 是 `GK` 加 24 位十六进制）。`OPENIM_API_URL`、`OPENIM_OBJECT_URL` 默认留空：部署了 OpenIM 再填，没部署时 IM 接口返回 503。
+- **恢复演练**：api 现在加入有固定网段的 `im` 网络，`make restore-verify` 的临时环境改用 `IM_NET=172.31.253`，并且不连接 OpenIM，否则网段冲突、临时环境起不来。
+- **Makefile**：`openim-build`、`openim-up`（先检查 core 的两个网络是否存在）、`openim-down`、`openim-logs`。
+- **实测中发现并修正**：API 的访问日志记录实际路径，回调口令原样出现在日志里。访问日志现在把这类凭证段换成 `***`：回调口令，以及实例取图的能力地址 `/im/obj/m/<media_id>`。
+- **端到端实测**（本会话的 Docker；按 `make up` → `make agents-up` → `make openim-up` 的顺序，用新的 Compose 项目与全新数据卷；api 镜像沿用本地已构建的版本，挂载当前源码，依赖没有变化）：
+  - openim-server 拿到 `172.31.252.2`，api 经 `im` 网络调通 OpenIM REST；
+  - 管理员打开 IM 页面后注册了 IM 账号；登记的两个实例 `im_ready`；
+  - 管理员发文字和图片：before 回调到达 API 并放行（失败即拒的配置下能发出，就说明回调走通了），after 回调进收件箱、Worker 投影完成；
+  - imAdmin 代实例甲给实例乙发单聊：API 的 before 回调拒收，OpenIM 返回 5003；
+  - 停掉 api 后管理员发消息：OpenIM 返回 90004，消息没有发出；api 恢复后正常发出；
+  - 经真实的 agent-gateway：`/im/ws` 用插件实际的查询参数握手返回 101，sendID 冒充 401；`/im/api/friend/get_full_friend_user_ids` 拿到真实好友列表；读 owner 的会话 403；`/im/obj/m/<media_id>` 取回的字节与上传一致；
+  - 实例连上又断开后，上线、下线回调进收件箱，实例状态变为 offline；
+  - `im` 网络里另一个地址（`172.31.252.12`）带着正确口令伪造回调：404；
+  - 访问日志里的回调路径是 `/internal/openim/***/callback…Command`。
+- **还没做**：备份覆盖 OpenIM 的 MongoDB 与 Garage（B7b）；外网模式的 IM 连接经本机隧道与双向证书的端到端验证。

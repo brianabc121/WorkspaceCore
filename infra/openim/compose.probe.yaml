@@ -1,11 +1,26 @@
-# 越权回归测试用的覆盖文件（OC-3；CI 的 ci-openim 工作流使用）。
+# 越权回归测试用的覆盖文件（OC-3；CI 的 ci-openim 工作流使用）。不要在生产环境使用。
 #
 #   docker compose -p my-workspace-openim -f infra/openim/compose.yaml -f infra/openim/compose.probe.yaml \
 #     --env-file infra/openim/.env up -d
 #
-# 只增加一个放行一切的回调桩（probes/webhook-stub.py）：测试环境里没有工作台 API，
-# 而 OpenIM 的“发送前”回调失败时消息发不出去。此时 OPENIM_WEBHOOK_URL=http://webhook-stub:10006。
-# 不要在生产环境使用。
+# - 加一个放行一切的回调桩（probes/webhook-stub.py）：测试环境里没有工作台 API，
+#   而 OpenIM 的“发送前”回调失败时消息发不出去。此时 OPENIM_WEBHOOK_URL=http://webhook-stub:10006；
+# - im、agent-im 改为本项目自己创建（不需要先启动工作台），名字带 -probe，不会占用工作台的网络；
+# - REST 与消息网关绑定到本机 127.0.0.1，给回归测试脚本使用。
+networks:
+  im:
+    external: false
+    name: ${COMPOSE_PROJECT_NAME:-my-workspace-openim}-probe_im
+    internal: true
+    ipam:
+      config:
+        - subnet: ${IM_NET:-172.31.252}.0/28
+          ip_range: ${IM_NET:-172.31.252}.8/29
+  agent-im:
+    external: false
+    name: ${COMPOSE_PROJECT_NAME:-my-workspace-openim}-probe_agent-im
+    internal: true
+
 services:
   webhook-stub:
     image: python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
@@ -16,5 +31,8 @@ services:
       - ./probes/webhook-stub.py:/stub/webhook-stub.py:ro
     networks: [openim]
   openim-server:
+    ports:
+      - "127.0.0.1:10001:10001"
+      - "127.0.0.1:10002:10002"
     depends_on:
       webhook-stub: {condition: service_started}
