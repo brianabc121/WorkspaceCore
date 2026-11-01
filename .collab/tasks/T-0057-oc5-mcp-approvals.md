@@ -31,3 +31,4 @@ updated: 2026-11-01
 - 2026-10-31 16:14 UTC · claude · 创建任务（owner: claude）
 - 2026-11-01 07:25 UTC · claude · 开始任务
 - 2026-11-01 08:03 UTC · claude · 第 1 批（PR 待开）：迁移 0017 ai_tool_executions；审批流程（参数规范化与 HMAC 哈希去重、每实例最多 20 条、15 分钟过期 + worker 每分钟清理、If-Match、高危操作密码二次认证并按用户限流、按存下的参数以登记人身份执行、记录 ID 作幂等键、版本保护、结果未知不重试）；敏感工作流参数加密保存、处理完清空完整参数；/api/v1/ai/tool-executions 列表/详情/批准/拒绝；IM 角标待审批数；A14 测试。决定写在 docs/decisions/2026-11-01-v2-oc5-tool-approvals.md（越出 paths 只为写 ADR 和 docs/api-contract.md 状态列）。下一步：第 2 批 POST /mcp（MCP SDK、实例凭证、读工具、限流、get_action_status），第 3 批审批卡片。
+- 2026-11-01 09:09 UTC · claude · 第 1 批已合并（PR #94）。第 2 批（PR 待开）：POST /mcp（MCP SDK 2.3.0 底层 Server + 无状态 JSON 会话管理器，只接受 POST）、实例认证与 /agent-api 相同、按实例每分钟 120 次调用、写/高危工具接审批、get_action_status（读记录）；官方 MCP 客户端互通测试。新依赖 mcp==2.3.0（MIT），pip-audit 无漏洞。下一步：其余 14 个读工具（untrusted + freshness），然后第 3 批审批卡片。

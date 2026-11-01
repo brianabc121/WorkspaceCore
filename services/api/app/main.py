@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request, Response
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app import __version__
-from app.api import agent_api, health
+from app.api import agent_api, health, mcp
 from app.api import v1 as api_v1
 from app.api.deps import deployment_health
 from app.core.config import Settings, get_settings
@@ -18,7 +18,7 @@ from app.core.logging import configure_logging
 from app.core.metrics import CONTENT_TYPE, HttpMetrics
 from app.core.middleware import install_middleware
 from app.core.resources import create_engine, create_redis, create_stream_redis
-from app.domain import events, overview, stream
+from app.domain import events, mcp_tools, overview, stream
 from app.domain.connectors import ConnectorRuntime
 from app.domain.credentials import CredentialBox
 from app.domain.operations import ServiceCache
@@ -47,10 +47,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "database": health.database_check(engine),
         "redis": health.redis_check(redis),
     }
+    # MCP 工具（V2 OC-5）：SDK 的会话管理器在后台任务里运行，每个应用实例一个
+    mcp_runner = mcp_tools.McpRunner()
+    await mcp_runner.start()
+    app.state.mcp = mcp_runner.manager
     logger.info("api started", extra={"app_env": settings.app_env, "version": __version__})
     try:
         yield
     finally:
+        app.state.mcp = None
+        await mcp_runner.stop()
         await bus.drain()
         await stream_redis.aclose()
         await redis.aclose()
@@ -92,6 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Connector 共用的出站策略与熔断状态；测试可以替换 transport（httpx.MockTransport）
     app.state.connectors = ConnectorRuntime(settings, CircuitBreaker())
     app.state.readiness_checks = {}
+    app.state.mcp = None
     install_error_handlers(app)
     install_middleware(app)
     app.include_router(health.router)
@@ -99,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # V2 实例接口：只经接入入口到达（Caddy 管理员入口只转发 /api/*）
     app.include_router(agent_api.router)
     app.include_router(agent_api.gateway)
+    app.include_router(mcp.router)
 
     @app.get("/metrics", include_in_schema=False)
     async def metrics(request: Request) -> Response:

@@ -306,7 +306,7 @@ class AiToolService:
         try:
             parsed = spec.input_model.model_validate(raw)
         except ValidationError as error:
-            raise ToolCallError("VALIDATION_FAILED", _validation_message(error)) from None
+            raise ToolCallError("VALIDATION_FAILED", validation_message(error)) from None
         arguments = parsed.model_dump(mode="json", exclude_unset=spec.name == "update_task")
         denied = self.check(requester, spec)
         if denied is not None:
@@ -366,7 +366,7 @@ class AiToolService:
         if not sensitive or not isinstance(params, dict) or not params.keys() & set(sensitive):
             return arguments
         if self.box is None:
-            raise ToolCallError("NOT_CONFIGURED", "未配置凭证加密密钥，不能保存敏感参数")
+            raise ToolCallError("EXTERNAL_UNAVAILABLE", "未配置凭证加密密钥，不能保存敏感参数")
         box = self.box
         sealed = {
             k: {SEALED_KEY: box.seal(json.dumps(v), context=f"ai_tool_execution:{row_id}:{k}")}
@@ -873,7 +873,7 @@ def _display(
     return {**arguments, "params": masked}
 
 
-def _validation_message(error: ValidationError) -> str:
+def validation_message(error: ValidationError) -> str:
     details = error.errors()
     if not details:
         return "参数不合法"
