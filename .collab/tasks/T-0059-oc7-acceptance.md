@@ -2,13 +2,13 @@
 id: T-0059
 title: OC-7 Sprint 6 AI 部分验收：CI 多实例端到端、部署与威胁模型文档、备份覆盖 OpenIM、验收报告、勾选 TASKS（S6-01 ~ S6-03、DoD、A14）
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: docs/acceptance,docs/TASKS.md,docs/deployment.md,docs/threat-model.md,docs/data-dictionary.md,docs/architecture.md,tests/e2e,.github/workflows/ci-infra.yml
 depends_on: T-0056, T-0057, T-0058
 created: 2026-10-31
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # T-0059 OC-7 Sprint 6 AI 部分验收：CI 多实例端到端、部署与威胁模型文档、备份覆盖 OpenIM、验收报告、勾选 TASKS（S6-01 ~ S6-03、DoD、A14）
@@ -29,3 +29,5 @@ Sprint 6 AI 部分的整体验收（方案第 8 节）。
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-31 16:14 UTC · claude · 创建任务（owner: claude）
+- 2026-11-01 11:53 UTC · claude · 开始任务
+- 2026-11-01 11:54 UTC · claude · 第 1 批：ci-infra 新增 agents job（与 compose job 并行）：生成 .env 与两张自签名测试证书（intranet.test / public.test，只在 CI 里用），make up → make migrate → make agents-up（导出内部 CA、启动 agent-gateway），然后运行 tests/e2e/agent_ingress_acceptance.py（13 项：内网/外网入口、双向证书、本机隧道、/mcp initialize、入口错配、吊销、伪造请求头）。本机在 b7e2e 栈上用同样参数跑过 13 项全部通过（T-0058）。验收标准第 4 项待 CI 通过后勾选。下一批：多实例端到端（OpenIM + 两个真实 OpenClaw 实例 + 假模型，方案第 8 节 14 个场景），然后文档、A15 覆盖 OpenIM、验收报告
