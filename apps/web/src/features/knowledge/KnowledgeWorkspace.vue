@@ -14,6 +14,7 @@ import MutationNotice from '../resources/MutationNotice.vue'
 import BookmarkForm from './BookmarkForm.vue'
 import SourceForm from './SourceForm.vue'
 import type { BookmarkFields } from './validation'
+import { useCreateIntent } from '../../composables/useCreateIntent'
 const auth = useAuthStore(), route = useRoute(), scope = auth.workspaceId!, user = auth.user?.id
 const header = { 'X-Workspace-Id': scope }, linked = ref(typeof route.query.linked_resource_id === 'string' ? route.query.linked_resource_id : '')
 const { run, reload, busy, error, needsReload, accessDenied, message } = useResourceMutation(scope, ['knowledge', 'knowledge-sources', 'related-docs', 'overview'])
@@ -38,6 +39,8 @@ const feedback = computed(() => {
   return error.value ? errorMessage(error.value) : ''
 })
 watch(blocked, (value) => { if (value) { opened.value = null; manageSource.value = false } })
+// 顶栏“创建 → 收藏文档”（规范 §8.1）。还没配置知识来源时，管理员先打开来源配置，其他人看到页面上的提示
+useCreateIntent(() => sources.isPending.value ? 'wait' : writable.value && !busy.value && !needsReload.value && (!!source.value || (auth.canManage && !sources.error.value)), () => { if (source.value) opened.value = 'new'; else manageSource.value = true })
 async function reset() { if (await reload()) { opened.value = null; manageSource.value = false } }
 async function saveBookmark(body: BookmarkFields) {
   if (!writable.value || !opened.value) return

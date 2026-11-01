@@ -4,6 +4,7 @@ import type { Pinia } from 'pinia'
 import { QueryClient } from '@tanstack/vue-query'
 import { adminOnly, navigation, ownerOnly } from './navigation'
 import { useAuthStore } from '../stores/auth'
+import { isCreateIntentCleanup } from '../composables/useCreateIntent'
 import AuthPage from '../pages/AuthPage.vue'
 import ConnectionErrorPage from '../pages/ConnectionErrorPage.vue'
 import UnauthorizedPage from '../pages/UnauthorizedPage.vue'
@@ -45,7 +46,7 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
       { path: '/approvals', redirect: (to) => ({ path: '/ai', query: to.query }) },
       { path: '/:pathMatch(.*)*', component: NotFoundPage, meta: { title: '页面未找到' } },
     ],
-    scrollBehavior: () => ({ top: 0 }),
+    scrollBehavior: (to, from) => (isCreateIntentCleanup(to, from) ? false : { top: 0 }),
   })
   router.beforeEach(async (to) => {
     if (to.path === '/connection-error') return true

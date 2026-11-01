@@ -6,6 +6,7 @@ import { agentError, downloadBundle, unique, useAgentSettings, useInstances, use
 import { useAgentAction } from './action'
 import InstanceCard from './InstanceCard.vue'
 import InstanceForm from './InstanceForm.vue'
+import { useCreateIntent } from '../../composables/useCreateIntent'
 
 const auth = useAuthStore(), scope = auth.workspaceId!
 const settings = useAgentSettings(scope), instances = useInstances(scope), secrets = useSecrets(scope)
@@ -14,6 +15,8 @@ const editing = ref<Schema['AgentInstanceOut'] | 'new' | null>(null)
 const items = computed(() => unique(instances.data.value?.pages))
 const secretItems = computed(() => unique(secrets.data.value?.pages))
 const path = (instance: Schema['AgentInstanceOut']) => ({ instance_id: instance.id })
+// 顶栏“创建 → 登记 OpenClaw 实例”（规范 §8.1）
+useCreateIntent(() => !busy.value, () => { editing.value = 'new' })
 
 function toggleAll() {
   const s = settings.data.value

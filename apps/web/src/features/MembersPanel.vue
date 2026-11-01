@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { useAuthStore } from '../stores/auth'
 import { ApiError, dataOf, errorMessage, isAccessError, type Schema } from '../services/api'
 import DataState from '../components/DataState.vue'
 import ActionFeedback from '../components/ActionFeedback.vue'
 import { formatTime } from './time'
+import { useCreateIntent } from '../composables/useCreateIntent'
 
 // Workspace members (spec §9.2, T-0064). admin manages member / viewer; granting, revoking or removing admin
 // is owner-only; the owner cannot be changed. The server enforces all of this — the page only hides choices.
@@ -21,6 +22,9 @@ const query = useQuery({
   enabled: computed(() => auth.canManage && auth.workspaceId === props.workspaceId),
 })
 const busy = ref(false), error = ref(''), notice = ref('')
+// 顶栏“创建 → 添加成员”（规范 §8.1）：把焦点移到添加成员表单的邮箱框
+const emailInput = ref<HTMLInputElement | null>(null)
+useCreateIntent(() => true, () => { void nextTick(() => { emailInput.value?.focus(); emailInput.value?.scrollIntoView?.({ block: 'center' }) }) })
 const form = reactive({ email: '', role: 'member' as Assignable, create: false, display_name: '', password: '' })
 // Server messages for these codes already say what to do; other errors use the shared wording.
 const OWN_MESSAGES = new Set(['MEMBER_EXISTS', 'USER_EXISTS', 'FORBIDDEN'])
@@ -75,7 +79,7 @@ function remove(m: Member) {
     </ul>
     <form class="im-group-form" aria-label="添加成员" @submit.prevent="add">
       <h3>添加成员</h3>
-      <label class="form-field"><span>邮箱 *</span><input v-model="form.email" type="email" required maxlength="254" autocomplete="off" /></label>
+      <label class="form-field"><span>邮箱 *</span><input ref="emailInput" v-model="form.email" type="email" required maxlength="254" autocomplete="off" /></label>
       <label class="form-field"><span>角色</span><select v-model="form.role"><option v-for="r in assignable" :key="r" :value="r">{{ ROLE_LABELS[r] }}</option></select></label>
       <label class="check-field"><input v-model="form.create" type="checkbox" /> 同时创建账号（这个邮箱还没有账号时）</label>
       <template v-if="form.create">

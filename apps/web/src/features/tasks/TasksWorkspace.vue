@@ -12,6 +12,7 @@ import SyncNotice from '../../components/SyncNotice.vue'
 import ExternalLink from '../../components/ExternalLink.vue'
 import DrawerDetail from '../../components/DrawerDetail.vue'
 import TaskEditor from './TaskEditor.vue'
+import { useCreateIntent } from '../../composables/useCreateIntent'
 import OperationPanel from './OperationPanel.vue'
 const auth = useAuthStore(), operation = useTaskOperations(), cache = useQueryClient()
 const scope = auth.workspaceId!, userId = auth.user!.id
@@ -61,6 +62,8 @@ async function reloadOperation() {
 }
 const operationEvents = { retry: () => finish(() => operation.retry()), resubmit: () => { if (window.confirm('已确认原操作未生效，重新提交一次？')) void finish(() => operation.confirmResubmit()) }, reload: reloadOperation }
 function submit(command: TaskCommand) { void finish(() => operation.submit(command)) }
+// 顶栏“创建 → 新建任务”（规范 §8.1）；有未结束的任务操作时不开新的，结果面板会说明
+useCreateIntent(() => writable.value && !operation.locked, () => { opened.value = 'new' })
 </script>
 <template>
   <div class="task-toolbar"><div class="form-actions"><button class="secondary-button" :aria-pressed="!board" @click="board = false">列表</button><button class="secondary-button" :aria-pressed="board" @click="board = true">看板</button><button class="secondary-button" :disabled="query.isFetching.value" @click="query.refetch()">刷新任务</button></div><button v-if="writable" class="primary-button" :disabled="operation.locked" @click="opened = 'new'">新建任务</button></div>

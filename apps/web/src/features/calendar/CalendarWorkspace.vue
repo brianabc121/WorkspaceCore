@@ -10,6 +10,7 @@ import DataState from '../../components/DataState.vue'
 import ModalPanel from '../../components/ModalPanel.vue'
 import MutationNotice from '../resources/MutationNotice.vue'
 import CalendarForm from './CalendarForm.vue'
+import { useCreateIntent } from '../../composables/useCreateIntent'
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id, header = { 'X-Workspace-Id': scope }
 const { run, reload, busy, error, needsReload, accessDenied, message } = useResourceMutation(scope, ['calendar', 'overview'])
 const route = useRoute(), initialZone = browserZone()
@@ -33,6 +34,8 @@ const writable = computed(() => ['owner', 'admin', 'member'].includes(auth.curre
 const opened = ref<Schema['CalendarEventOut'] | 'new' | null>(null)
 const feedback = computed(() => error.value ? errorMessage(error.value) : '')
 watch(blocked, (value) => { if (value) opened.value = null })
+// 顶栏“创建 → 新建日程”（规范 §8.1）
+useCreateIntent(() => writable.value && !busy.value && !needsReload.value, () => { opened.value = 'new' })
 function apply() {
   try {
     if (!validZone(zone.value)) throw new Error('请输入有效的显示时区。')
