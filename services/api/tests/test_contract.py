@@ -7,6 +7,7 @@ V2 OC-1（…-v2-oc1-contract.md）。"""
 import json
 import uuid
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -180,7 +181,10 @@ async def stub_client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
     """只验证接口形态（校验、错误格式）：用桩替换数据库、Redis 和登录校验。"""
     app.dependency_overrides[get_db] = lambda: None
     app.dependency_overrides[get_redis] = lambda: None
-    app.dependency_overrides[authenticated] = lambda: None
+    # 登录校验的桩：只有路由里会读的用户 ID（例如搜索按用户过滤私有收藏）
+    app.dependency_overrides[authenticated] = lambda: SimpleNamespace(
+        user=SimpleNamespace(id=uuid.UUID(int=0))
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

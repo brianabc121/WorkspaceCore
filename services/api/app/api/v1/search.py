@@ -37,4 +37,6 @@ async def search(
     cursor: Annotated[str | None, Query(max_length=512)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> SearchPage:
-    return await service.search(context, access, q=q, types=types, cursor=cursor, limit=limit)
+    return await service.search(
+        context.user.id, access, q=q, types=types, cursor=cursor, limit=limit
+    )

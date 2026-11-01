@@ -200,7 +200,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | POST | `/agent-api/v1/secrets/resolve` | 取密钥：未授权与不存在都返回 `NOT_FOUND` | 已实现（T-0054） |
 | POST | `/agent-api/v1/im-token` | 取 IM 令牌（只在启动时调用：签发会踢掉旧连接） | 已实现（T-0055） |
 | POST | `/agent-api/v1/heartbeat` | 上报 OpenClaw 与插件版本 | 已实现（T-0054） |
-| POST | `/mcp` | MCP 工具（不进 OpenAPI；工具清单见 `app/schemas/ai_tools.py` 的 `TOOLS`；只接受 POST） | 已实现写 / 高危工具与 `get_action_status`；其余读工具下一批（T-0057） |
+| POST | `/mcp` | MCP 工具（不进 OpenAPI；工具清单见 `app/schemas/ai_tools.py` 的 `TOOLS`；只接受 POST） | 已实现（T-0057；审批卡片在第 3 批） |
 | GET / POST | `/im/ws`、`/im/api/{route}`、`/im/obj/m/{media_id}` | 接入网关（不进 OpenAPI；白名单见 V2 契约第 8 节；取图改为能力地址，见 OC-3 ADR 第 15 节） | 已实现（T-0055） |
 
 - OpenIM 回调 `/internal/openim/{path_token}/{command}` 只走内部网络，不进 OpenAPI（V2 契约第 10 节）。
