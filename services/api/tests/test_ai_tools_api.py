@@ -19,6 +19,8 @@ import httpx
 import pytest
 
 from app.domain.ai_tools import AiToolService, ToolCallError, arguments_hash
+from app.domain.im import admin_im_user_id
+from app.integrations.openim import single_conversation_id
 from app.models import AgentInstance
 from app.schemas.ai_tools import TOOLS, PendingApproval
 from tests.fake_n8n import FakeN8n
@@ -384,3 +386,62 @@ async def test_the_worker_expires_overdue_approvals(env: Env) -> None:
     notes = await env.client.get("/api/v1/notifications", headers=env.headers())
     expired_notes = [n for n in notes.json()["items"] if n["type"] == "approval_expired"]
     assert [n["link"] for n in expired_notes] == [f"/approvals?id={old.action_id}"]
+
+
+async def test_source_is_inferred_from_the_latest_message_to_the_instance(env: Env) -> None:
+    created = await env.client.post(
+        "/api/v1/agents/instances",
+        json={"name": "alpha", "network_mode": "intranet", "scope": "read_write"},
+        headers=env.headers(write=True),
+    )
+    instance_id, instance_im = created.json()["id"], created.json()["im_user_id"]
+    owner_im = admin_im_user_id(env.owner_id)
+    conv = single_conversation_id(owner_im, instance_im)
+    await run_sql(
+        env.database_url,
+        "INSERT INTO workspace.im_conversations (workspace_id, owner_user_id, conversation_id,"
+        " kind, peer_instance_id) VALUES ($1, $2, $3, 'single', $4)",
+        uuid.UUID(env.workspace_id),
+        env.owner_id,
+        conv,
+        uuid.UUID(instance_id),
+    )
+
+    seqs = iter(range(1, 10))
+
+    async def message(server_id: str, sender: str, minutes_ago: int) -> None:
+        await run_sql(
+            env.database_url,
+            "INSERT INTO workspace.im_messages (workspace_id, conversation_id, server_msg_id,"
+            " client_msg_id, seq, sender_im_id, content_type, plain_text, sent_at)"
+            " VALUES ($1, $2, $3, $3, $6, $4, 101, '帮我删掉写周报',"
+            " now() - make_interval(mins => $5))",
+            uuid.UUID(env.workspace_id),
+            conv,
+            server_id,
+            sender,
+            minutes_ago,
+            next(seqs),
+        )
+
+    # 太久以前的不算；实例自己发的不算
+    await message("old", owner_im, 30)
+    await message("mine", instance_im, 0)
+    task = await env.task_by_title("写周报")
+    first = await call(env, instance_id, "update_task", {"task_id": task["id"], "priority": 5})
+    source = (await execution(env, first.action_id)).json()["source"]
+    assert source == {
+        "conversation_id": None,
+        "message_server_id": None,
+        "triggered_by_im_id": None,
+        "inferred": True,
+    }
+    await message("recent", owner_im, 1)
+    second = await call(env, instance_id, "delete_task", {"task_id": task["id"]})
+    source = (await execution(env, second.action_id)).json()["source"]
+    assert source == {
+        "conversation_id": conv,
+        "message_server_id": "recent",
+        "triggered_by_im_id": owner_im,
+        "inferred": True,
+    }
