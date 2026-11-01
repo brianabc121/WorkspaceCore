@@ -74,6 +74,17 @@ class Settings(BaseSettings):
     agent_public_url: str = ""
     agent_tunnel_port: int = Field(default=18443, ge=1024, le=65535)
 
+    # V2 IM（OC-3，契约第 5、7、10 节）：OpenIM 的 REST 地址（内部网络，例如 http://openim-server:10002）
+    # 与 share.secret（换 imAdmin 令牌）。为空表示没有部署 OpenIM：IM 接口返回 503 IM_UNAVAILABLE
+    openim_api_url: str = ""
+    openim_secret: SecretStr | None = None
+    openim_admin_user_id: str = "imAdmin"
+    # OpenIM 回调地址 /internal/openim/<path_token>/<命令>：path_token 至少 32 个字符；
+    # 只接受来自这些网段（OpenIM 所在的 Docker 网络）的回调
+    openim_callback_path_token: SecretStr | None = None
+    openim_callback_allowed_cidrs: str = ""
+    openim_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+
     # 第三方集成（Sprint 3 契约第 4.3 节）：解析到私有地址时只允许这些主机名（逗号分隔），
     # 例如 Compose 中独立部署的 vikunja；其余私有、回环、链路本地地址一律拒绝（SSRF 防护）
     integration_allowed_hosts: str = ""
@@ -133,6 +144,7 @@ class Settings(BaseSettings):
         "api_internal_url",
         "agent_intranet_url",
         "agent_public_url",
+        "openim_api_url",
     )
     @classmethod
     def _http_url_or_blank(cls, value: str) -> str:
@@ -146,6 +158,8 @@ class Settings(BaseSettings):
         "setup_token",
         "credential_encryption_key",
         "credential_encryption_keys_previous",
+        "openim_secret",
+        "openim_callback_path_token",
         mode="before",
     )
     @classmethod
@@ -190,7 +204,26 @@ class Settings(BaseSettings):
             if part.strip()
         )
 
-    @field_validator("agent_ingress_trusted_proxies")
+    @property
+    def openim_callback_networks(self) -> tuple[IPv4Network | IPv6Network, ...]:
+        return tuple(
+            ip_network(part.strip(), strict=False)
+            for part in self.openim_callback_allowed_cidrs.split(",")
+            if part.strip()
+        )
+
+    @property
+    def openim_enabled(self) -> bool:
+        return bool(self.openim_api_url and self.openim_secret)
+
+    @field_validator("openim_callback_path_token")
+    @classmethod
+    def _path_token(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value()) < 32:
+            raise ValueError("至少 32 个字符")
+        return value
+
+    @field_validator("agent_ingress_trusted_proxies", "openim_callback_allowed_cidrs")
     @classmethod
     def _networks(cls, value: str) -> str:
         for part in value.split(","):
