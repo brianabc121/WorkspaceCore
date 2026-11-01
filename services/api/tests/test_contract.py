@@ -1234,5 +1234,6 @@ async def test_v2_openim_callback_route_rules(stub_client: httpx.AsyncClient) ->
     token = "t" * 32
     bad = await stub_client.post(f"/internal/openim/{token}/rm -rf")
     assert bad.status_code == 422
-    ok = await stub_client.post(f"/internal/openim/{token}/callbackAfterUserOnlineCommand")
-    assert ok.status_code == 501
+    # 没有部署 OpenIM（未配置地址与口令）时回调地址不存在（契约第 10 节；实现见 T-0055）
+    missing = await stub_client.post(f"/internal/openim/{token}/callbackAfterUserOnlineCommand")
+    assert missing.status_code == 404

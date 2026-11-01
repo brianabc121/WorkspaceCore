@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.config import get_settings
 from app.core.logging import configure_logging, dict_config
 from app.core.resources import create_engine
-from app.domain import alerts, automations, events, notifications, sync
+from app.domain import alerts, automations, events, im, notifications, sync
 from app.domain.connectors import ConnectorRuntime
 from app.domain.operations import WORKER_HEARTBEAT_KEY, DeploymentHealth, ServiceCache
 from app.integrations.http import CircuitBreaker
@@ -89,6 +89,16 @@ async def reconcile_automations(ctx: dict[str, Any]) -> int:
     return await automations.reconcile_all(context.sessions, context.settings, context.runtime)
 
 
+async def provision_im(ctx: dict[str, Any]) -> int:
+    """IM 账号尚未就绪的实例再试一次（V2 OC-3）；没有部署 OpenIM 时什么也不做。"""
+    context = _sync(ctx)
+    client = im.openim_client(context.settings, context.runtime, ctx["redis"])
+    if client is None:
+        return 0
+    async with context.sessions() as db:
+        return await im.provision_pending(db, client)
+
+
 async def check_services(ctx: dict[str, Any]) -> list[str]:
     """服务健康告警（S5-02）：api、Prometheus、Grafana 变为 down 或恢复时通知管理员。"""
     health: DeploymentHealth = ctx["health"]
@@ -140,6 +150,7 @@ class WorkerSettings:
         cron(purge, minute=17),
         cron(check_services, second=45, timeout=60),
         cron(reconcile_automations, second=15, timeout=120),
+        cron(provision_im, minute=set(range(4, 60, 5)), second=40, timeout=120),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())
     on_startup = startup
