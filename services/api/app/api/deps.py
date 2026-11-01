@@ -17,6 +17,7 @@ from app.core.config import Settings, origin_of
 from app.core.errors import ApiError
 from app.domain import policy
 from app.domain.agents import AgentService
+from app.domain.ai_tools import AiToolService
 from app.domain.auth import AuthContext, AuthService
 from app.domain.automations import AutomationService
 from app.domain.calendar import CalendarService
@@ -199,6 +200,15 @@ def get_operations_service(
     request: Request, db: Annotated[AsyncSession, Depends(get_db)]
 ) -> OperationsService:
     return OperationsService(db, deployment_health(request.app))
+
+
+def get_ai_tool_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> AiToolService:
+    return AiToolService(db, settings, connectors, redis)
 
 
 def get_task_service(

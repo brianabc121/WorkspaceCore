@@ -2,13 +2,13 @@
 id: T-0057
 title: OC-5 MCP 工具与审批：读写高危工具、审批流程（参数哈希、过期、去重、If-Match、二次认证）、审批卡片、A14（S6-02、S6-03）
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api/app,services/api/migrations,services/api/tests
 depends_on: T-0054
 created: 2026-10-31
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # T-0057 OC-5 MCP 工具与审批：读写高危工具、审批流程（参数哈希、过期、去重、If-Match、二次认证）、审批卡片、A14（S6-02、S6-03）
@@ -29,3 +29,5 @@ updated: 2026-10-31
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-10-31 16:14 UTC · claude · 创建任务（owner: claude）
+- 2026-11-01 07:25 UTC · claude · 开始任务
+- 2026-11-01 08:03 UTC · claude · 第 1 批（PR 待开）：迁移 0017 ai_tool_executions；审批流程（参数规范化与 HMAC 哈希去重、每实例最多 20 条、15 分钟过期 + worker 每分钟清理、If-Match、高危操作密码二次认证并按用户限流、按存下的参数以登记人身份执行、记录 ID 作幂等键、版本保护、结果未知不重试）；敏感工作流参数加密保存、处理完清空完整参数；/api/v1/ai/tool-executions 列表/详情/批准/拒绝；IM 角标待审批数；A14 测试。决定写在 docs/decisions/2026-11-01-v2-oc5-tool-approvals.md（越出 paths 只为写 ADR 和 docs/api-contract.md 状态列）。下一步：第 2 批 POST /mcp（MCP SDK、实例凭证、读工具、限流、get_action_status），第 3 批审批卡片。

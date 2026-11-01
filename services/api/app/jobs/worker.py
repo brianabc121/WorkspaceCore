@@ -24,6 +24,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, dict_config
 from app.core.resources import create_engine
 from app.domain import alerts, automations, events, im, im_projection, notifications, sync
+from app.domain.ai_tools import AiToolService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.operations import WORKER_HEARTBEAT_KEY, DeploymentHealth, ServiceCache
 from app.integrations.http import CircuitBreaker
@@ -136,6 +137,13 @@ async def reconcile_im_full(ctx: dict[str, Any]) -> int:
     return await im_projection.reconcile(im_ctx, full=True) if im_ctx is not None else 0
 
 
+async def expire_ai_approvals(ctx: dict[str, Any]) -> int:
+    """15 分钟没人处理的待审批默认拒绝（expired，V2 OC-5）。"""
+    context = _sync(ctx)
+    async with context.sessions() as db:
+        return await AiToolService(db, context.settings, context.runtime, ctx["redis"]).expire_due()
+
+
 async def check_services(ctx: dict[str, Any]) -> list[str]:
     """服务健康告警（S5-02）：api、Prometheus、Grafana 变为 down 或恢复时通知管理员。"""
     health: DeploymentHealth = ctx["health"]
@@ -191,6 +199,7 @@ class WorkerSettings:
         cron(provision_im, minute=set(range(4, 60, 5)), second=40, timeout=120),
         cron(process_im_inbox, second=50, timeout=120),
         cron(reconcile_im, second={5, 35}, timeout=60),
+        cron(expire_ai_approvals, second=25, timeout=60),
         cron(reconcile_im_full, hour=19, minute=23, timeout=1800),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())

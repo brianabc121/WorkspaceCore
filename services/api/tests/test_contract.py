@@ -17,6 +17,7 @@ from app.api.agent_api import instance_principal
 from app.api.deps import (
     authenticated,
     get_agent_service,
+    get_ai_tool_service,
     get_automation_service,
     get_calendar_service,
     get_db,
@@ -326,6 +327,7 @@ def any_role(app: FastAPI) -> None:
         get_notification_service,
         get_automation_service,
         get_agent_service,
+        get_ai_tool_service,
     ):
         app.dependency_overrides[service] = _ShapeOnlyService
 

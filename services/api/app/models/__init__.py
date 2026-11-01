@@ -13,6 +13,7 @@ from app.models.agent import (
     AgentSecretVersion,
     AgentSettings,
 )
+from app.models.ai import AiToolExecution
 from app.models.audit import AuditLog
 from app.models.automation import Automation, AutomationConnection, AutomationRun
 from app.models.base import NAMING_CONVENTION, Base
@@ -54,6 +55,7 @@ __all__ = [
     "AgentSecretGrant",
     "AgentSecretVersion",
     "AgentSettings",
+    "AiToolExecution",
     "AuditLog",
     "AuthSession",
     "Automation",

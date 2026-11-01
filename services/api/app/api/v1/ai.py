@@ -4,16 +4,23 @@
 - owner / admin 看全部、审批；viewer / member 只看以自己身份执行的记录；
 - 批准与拒绝要会话 + CSRF + If-Match（GET 返回的 ETag，即 version）；高危操作还要重新输入密码；
 - 实例凭证不能调用这些接口，AI 不能批准。
-实现：OC-5（T-0057）。
+实现：OC-5（T-0057），领域逻辑在 app/domain/ai_tools.py。
 """
 
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Security
+from fastapi import APIRouter, Depends, Header, Query, Response, Security
 
-from app.api.deps import authenticated, csrf_protected, workspace_admin, workspace_viewer
-from app.core.errors import not_implemented
+from app.api.deps import (
+    authenticated,
+    csrf_protected,
+    get_ai_tool_service,
+    workspace_admin,
+    workspace_viewer,
+)
+from app.domain.ai_tools import AiToolService, parse_if_match, to_out
+from app.domain.auth import AuthContext
 from app.domain.policy import WorkspaceAccess
 from app.schemas.ai_tools import (
     AiToolExecutionOut,
@@ -39,8 +46,13 @@ IfMatch = Annotated[
         description="GET 返回的 ETag（就是 version）；与当前版本不一致时返回 409 VERSION_CONFLICT",
     ),
 ]
+Service = Annotated[AiToolService, Depends(get_ai_tool_service)]
+Context = Annotated[AuthContext, Security(authenticated)]
 _write = [Depends(csrf_protected)]
-_T = "T-0057"
+
+
+def _etag(response: Response, version: int) -> None:
+    response.headers["ETag"] = f'"{version}"'
 
 
 @router.get(
@@ -50,6 +62,7 @@ _T = "T-0057"
 )
 async def list_tool_executions(
     access: Viewer,
+    service: Service,
     status_filter: Annotated[list[ExecutionStatus] | None, Query(alias="status")] = None,
     risk_level: Annotated[list[RiskLevel] | None, Query()] = None,
     instance_id: UUID | None = None,
@@ -57,7 +70,15 @@ async def list_tool_executions(
     cursor: Cursor = None,
     limit: Limit = 50,
 ) -> AiToolExecutionPage:
-    raise not_implemented(_T)
+    return await service.list(
+        access,
+        statuses=list(status_filter) if status_filter else None,
+        risks=list(risk_level) if risk_level else None,
+        instance_id=instance_id,
+        tool_name=tool_name,
+        cursor=cursor,
+        limit=limit,
+    )
 
 
 @router.get(
@@ -65,8 +86,12 @@ async def list_tool_executions(
     summary="一次工具调用的详情（响应头 ETag 即 version）",
     responses=error_responses(401, 404, 422),
 )
-async def get_tool_execution(access: Viewer, execution_id: UUID) -> AiToolExecutionOut:
-    raise not_implemented(_T)
+async def get_tool_execution(
+    access: Viewer, service: Service, execution_id: UUID, response: Response
+) -> AiToolExecutionOut:
+    row = await service.get(access, execution_id)
+    _etag(response, row.version)
+    return to_out(row)
 
 
 @router.post(
@@ -79,9 +104,17 @@ async def get_tool_execution(access: Viewer, execution_id: UUID) -> AiToolExecut
     responses=error_responses(401, 403, 404, 409, 422, 429),
 )
 async def approve_tool_execution(
-    access: Admin, execution_id: UUID, if_match: IfMatch, body: ApproveRequest
+    access: Admin,
+    context: Context,
+    service: Service,
+    execution_id: UUID,
+    if_match: IfMatch,
+    body: ApproveRequest,
+    response: Response,
 ) -> AiToolExecutionOut:
-    raise not_implemented(_T)
+    row = await service.approve(context, access, execution_id, parse_if_match(if_match), body)
+    _etag(response, row.version)
+    return to_out(row)
 
 
 @router.post(
@@ -91,6 +124,14 @@ async def approve_tool_execution(
     responses=error_responses(401, 403, 404, 409, 422),
 )
 async def reject_tool_execution(
-    access: Admin, execution_id: UUID, if_match: IfMatch, body: RejectRequest
+    access: Admin,
+    context: Context,
+    service: Service,
+    execution_id: UUID,
+    if_match: IfMatch,
+    body: RejectRequest,
+    response: Response,
 ) -> AiToolExecutionOut:
-    raise not_implemented(_T)
+    row = await service.reject(context, access, execution_id, parse_if_match(if_match), body.reason)
+    _etag(response, row.version)
+    return to_out(row)
