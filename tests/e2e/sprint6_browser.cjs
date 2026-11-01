@@ -2,7 +2,7 @@
 // 密钥库：添加密钥后页面上看不到明文 → 实例页：打开总开关、登记实例、授权密钥、下载接入包 →
 // 通讯录：登记的实例自动出现 → 单聊：发消息、经 OpenIM 回调投影后显示、导出会话 →
 // 建群：拉入实例、群设置里的防刷屏 → 审批：IM 里的审批卡片写明由谁触发，在卡片上批准并执行，
-// 审批中心显示结果与来源 → 390px 宽度下无横向滚动 → member 看不到 IM / 实例页 →
+// 审批中心显示结果与来源 → 右侧 AI 抽屉与实例对话 → 390px 宽度下无横向滚动 → member 看不到 IM / 实例页 →
 // 浏览器只访问工作台自己的地址（不直连 OpenIM），接口响应与页面里没有密钥明文。
 //
 // 前提：Compose 全栈已启动并迁移（make up && make migrate），OpenIM 已启动（make openim-up），
@@ -216,11 +216,12 @@ async function download(page, click) {
   await chat.getByLabel('消息').fill(text)
   await chat.getByRole('button', { name: '发送', exact: true }).click()
   await chat.getByText(text).waitFor()
-  // 页面先显示刚发出的消息；以服务端（OpenIM 回调 → Worker 投影）列出的为准，再刷新页面确认
+  // 页面先显示刚发出的消息；以服务端（OpenIM 回调 → Worker 投影，带上序号）列出的为准，再刷新页面确认。
+  // 发送接口先返回 server_msg_id，序号要等回调投影后才有；导出按序号取消息，所以要等序号
   const conversationId = await page.evaluate(() => new URL(location.href).searchParams.get('c'))
   check(conversationId && conversationId.startsWith('si_'), `单聊会话 ID 不对：${conversationId}`)
   const projected = await until(async () => (await apiGet(page, workspace, `/api/v1/im/conversations/${encodeURIComponent(conversationId)}/messages`))
-    .items.some((m) => m.text === text && m.server_msg_id))
+    .items.some((m) => m.text === text && m.server_msg_id && m.seq))
   check(projected, '发出的消息应经 OpenIM 回调投影进工作台')
   await page.goto(`${base}/im?c=${encodeURIComponent(conversationId)}`)
   await page.getByRole('region', { name: `与${name}的会话` }).getByText(text).waitFor()
@@ -276,8 +277,32 @@ async function download(page, click) {
   check(done.status === 'succeeded' && done.source.triggered_by_name === 'Owner', `批准后应执行成功并记下触发者：${done.status} ${done.error_code}`)
   step(`审批中心：记录显示“已执行”（${done.result_summary}）、来源“Owner 私聊它”与 IM 会话链接`)
 
+  // ---------------------------------------------------------------- 右侧 AI 抽屉（规范 §8.1，T-0066）
+  await page.goto(`${base}/`)
+  await page.getByRole('button', { name: 'AI 助手', exact: true }).click()
+  const drawer = page.getByRole('complementary', { name: 'AI 与详情' })
+  await drawer.waitFor()
+  check(await drawer.getByLabel('对话的实例').inputValue() === instance.id, '抽屉里应默认选中唯一的实例')
+  await drawer.getByText(text).waitFor()
+  const fromDrawer = `抽屉里发的 ${run}`
+  await drawer.getByRole('textbox', { name: '消息', exact: true }).fill(fromDrawer)
+  await drawer.getByRole('button', { name: '发送', exact: true }).click()
+  check(await until(async () => (await apiGet(page, workspace, `/api/v1/im/conversations/${encodeURIComponent(conversationId)}/messages`))
+    .items.some((m) => m.text === fromDrawer && m.seq)), '抽屉里发出的消息应经 OpenIM 投影进同一个会话')
+  await drawer.getByText(fromDrawer).waitFor()
+  await page.getByRole('button', { name: '收起 AI 与详情抽屉' }).click()
+  await drawer.waitFor({ state: 'detached' })
+  step('右侧 AI 抽屉：从顶栏打开，默认选中实例，显示与实例的最近对话，发出的消息经 OpenIM 投影进同一会话；可收起')
+
   // ---------------------------------------------------------------- 移动端
   await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`${base}/`)
+  await page.getByRole('button', { name: 'AI 助手', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'AI 助手' })
+  await sheet.getByLabel('对话的实例').waitFor()
+  check(await noHorizontalScroll(page), '390px 宽度下打开 AI 抽屉不应出现横向滚动')
+  await sheet.getByRole('button', { name: '关闭对话框' }).click()
+  await sheet.waitFor({ state: 'detached' })
   for (const route of ['/im', '/agents', '/agents/secrets', '/ai']) {
     await page.goto(`${base}${route}`)
     await page.getByRole('heading', { level: 1 }).waitFor()
@@ -285,7 +310,7 @@ async function download(page, click) {
     check(await noHorizontalScroll(page), `${route} 在 390px 宽度下不应出现横向滚动`)
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
-  step('390px 宽度下 IM、实例、密钥库、AI 审批页无横向滚动')
+  step('390px 宽度下 AI 抽屉改为侧滑面板；IM、实例、密钥库、AI 审批页无横向滚动')
 
   // ---------------------------------------------------------------- member：看不到 IM 与实例页
   const member = await login(browser, memberEmail, problems, traffic)

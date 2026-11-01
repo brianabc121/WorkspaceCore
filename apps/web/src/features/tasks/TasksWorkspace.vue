@@ -10,7 +10,7 @@ import { formatTime } from '../time'
 import DataState from '../../components/DataState.vue'
 import SyncNotice from '../../components/SyncNotice.vue'
 import ExternalLink from '../../components/ExternalLink.vue'
-import ModalPanel from '../../components/ModalPanel.vue'
+import DrawerDetail from '../../components/DrawerDetail.vue'
 import TaskEditor from './TaskEditor.vue'
 import OperationPanel from './OperationPanel.vue'
 const auth = useAuthStore(), operation = useTaskOperations(), cache = useQueryClient()
@@ -82,12 +82,13 @@ function submit(command: TaskCommand) { void finish(() => operation.submit(comma
     </section>
   </div>
   <p v-if="board" class="form-help">看板展示当前筛选下已加载的任务，状态在编辑抽屉中修改。</p><button v-if="query.hasNextPage.value && !isAccessError(query.error.value)" class="secondary-button" :disabled="query.isFetching.value" @click="query.fetchNextPage()">加载更多任务</button>
-  <ModalPanel v-if="opened" :title="opened === 'new' ? '新建任务' : '任务详情'" :busy="operation.current?.status === 'pending'" @close="operation.current?.status !== 'pending' && (opened = null)">
+  <!-- Task Drawer（规范 §8.4）：新建 / 编辑放在右侧抽屉的“详情”页 -->
+  <DrawerDetail v-if="opened" :title="opened === 'new' ? '新建任务' : '任务详情'" :busy="operation.current?.status === 'pending'" @close="operation.current?.status !== 'pending' && (opened = null)">
     <DataState :loading="projects.isPending.value" :error="projects.error.value" :empty="!projectItems.length" empty-text="尚无可选项目，请检查同步状态。" @retry="projects.refetch()" />
     <button v-if="projects.hasNextPage.value" class="secondary-button" :disabled="projects.isFetching.value" @click="projects.fetchNextPage()">加载更多项目</button>
     <DataState v-if="opened !== 'new'" :loading="detail.isPending.value" :error="detail.error.value" :empty="false" empty-text="" @retry="detail.refetch()" />
     <TaskEditor v-if="opened === 'new' || (detail.data.value && !detail.error.value)" :key="`${opened}:${editorGeneration}`" :task="opened === 'new' ? undefined : detail.data.value" :projects="projectItems" :writable="writable" :locked="operation.locked" @submit="submit" />
     <OperationPanel :writable="writable" v-on="operationEvents" />
     <p v-if="reloadError" role="alert">{{ reloadError }}</p>
-  </ModalPanel>
+  </DrawerDetail>
 </template>

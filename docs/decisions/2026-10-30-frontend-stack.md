@@ -10,7 +10,7 @@
 
 Tailwind 4 使用官方 Vite 插件；所有界面颜色集中为 CSS 主题变量。Vue Query 在应用入口注册，尚无业务请求。组件测试使用真实 Router、Pinia 和 Vue Query provider，jsdom 仅补齐不支持的 scrollTo。
 
-ESLint 9 用于兼容当前 typescript-eslint 和 eslint-plugin-vue 的 flat config；安装提示该主版本已停止支持，后续升级到新主版本应单独核对插件兼容性。未在本任务引入表单组件、shadcn-vue 或拖拽依赖，待对应 Sprint 使用时再核验。
+ESLint 9 用于兼容当前 typescript-eslint 和 eslint-plugin-vue 的 flat config；安装提示该主版本已停止支持，后续升级到新主版本应单独核对插件兼容性。未在本任务引入表单组件、shadcn-vue 或拖拽依赖，待对应 Sprint 使用时再核验。（2026-11-01 补充：shadcn-vue 已在 T-0066 引入，见 `2026-11-01-shadcn-vue-and-drawer.md`。）
 
 ## 锁定版本
 

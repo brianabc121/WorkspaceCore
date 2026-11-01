@@ -111,9 +111,12 @@ Python 运行时：3.12（`requires-python = ">=3.12,<3.13"`，镜像里是 3.12
 | vee-validate | 4.15.1 | MIT | 表单 |
 | zod | 4.6.7 | MIT | 校验（本地适配见 `apps/web/src/services/forms.ts`） |
 | gridstack | 14.0.0 | MIT | 首页拖拽布局 |
+| reka-ui | 2.11.0 | MIT | shadcn-vue 组件的基础（`2026-11-01-shadcn-vue-and-drawer.md`） |
+| class-variance-authority / clsx / tailwind-merge | 0.7.1 / 2.1.1 / 3.7.0 | Apache-2.0 / MIT / MIT | shadcn-vue 组件的样式工具 |
 | 开发：vite / vitest / typescript / vue-tsc | 7.3.7 / 4.1.12 / 5.9.3 / 3.3.14 | MIT / MIT / Apache-2.0 / MIT | 构建、测试、类型检查 |
 | 开发：eslint / typescript-eslint / eslint-plugin-vue | 9.39.5 / 8.72.1 / 10.12.0 | MIT | 代码检查 |
 | 开发：tailwindcss / @tailwindcss/vite | 4.3.3 | MIT | 样式 |
+| 开发：tw-animate-css | 1.4.0 | MIT | shadcn-vue Sheet 的进出动画 |
 | 开发：openapi-typescript | 7.13.0 | MIT | 由 `openapi.json` 生成类型 |
 | 开发：jsdom / @testing-library/vue / @testing-library/jest-dom | 26.1.0 / 8.1.0 / 6.9.1 | MIT | 组件测试 |
 
