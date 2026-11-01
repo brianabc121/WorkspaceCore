@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import agent_bundle
 from app.core.config import Settings
 from app.core.errors import ApiError
+from app.domain import ops_metrics
 from app.domain.agent_ca import ClientCertificate, ensure_ca, issue_client_certificate
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
@@ -1023,6 +1024,8 @@ class AgentService:
         if principal is None:
             if limiter is not None:
                 await limiter.record_failure([failure_key])
+            label = ingress if ingress in ("intranet", "public") else "none"
+            await ops_metrics.bump(self.redis, "agent_auth_failures", label)
             raise _unauthorized()
         return principal
 
@@ -1091,6 +1094,9 @@ class AgentService:
             for ref_id in wanted:
                 self._record_access(instance, ref_id, None, None, "rate_limited", client_ip)
             await self.db.commit()
+            await ops_metrics.bump(
+                self.redis, "agent_secret_resolves", "rate_limited", amount=len(wanted)
+            )
             raise _rate_limited(retry)
         rows = (
             await self.db.execute(
@@ -1131,6 +1137,8 @@ class AgentService:
                     instance, ref_id, secret.id, secret.current_version, "ok", client_ip
                 )
         await self.db.commit()
+        await ops_metrics.bump(self.redis, "agent_secret_resolves", "ok", amount=len(values))
+        await ops_metrics.bump(self.redis, "agent_secret_resolves", "not_found", amount=len(errors))
         return SecretResolveResponse(values=values, errors=errors)
 
     def _record_access(

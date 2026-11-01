@@ -1,14 +1,14 @@
 # 部署与运行手册
 
-> 状态：Sprint 6（2026-10-31）。Sprint 0 ~ 5 的功能已验收（`docs/acceptance/`）。
+> 状态：Sprint 6（2026-11-01）。Sprint 0 ~ 5 的功能已验收（`docs/acceptance/`）。
 > - 升级与回滚：第 5 节；
 > - 备份与隔离恢复：第 14 节；
 > - 安全扫描、完整冒烟与性能基准：第 15 节；
-> - V2：OpenClaw 接入入口第 16 节，OpenIM 第 17 节；
+> - V2：OpenClaw 接入入口第 16 节，OpenIM 第 17 节，上线总览（服务器 A 的变更、两种网络模式、OpenClaw 服务器检查清单）第 18 节；
 > - 所有组件的锁定版本与许可证：`docs/versions.md`；
 > - 发布前逐项检查：`docs/release-checklist.md`。
 >
-> AI 助手（S6-01 ~ S6-03）等人类选定 AI 服务后再做，目前页面上只有占位说明。
+> AI（S6-01 ~ S6-03）按 V2 方案改为 OpenClaw 多实例 + OpenIM（`docs/v2/TRANSFORMATION_PLAN.md`），是可选部署：不配置时工作台照常使用。
 
 ## 1. 一键启动（推荐）
 
@@ -165,7 +165,7 @@ Vikunja、n8n 等独立部署的组件分开升级：
 
 ### 5.2 数据库迁移的约定
 
-- 迁移 `0001` ~ `0010` 都**只新增**表、索引、触发器，每个都有 downgrade。
+- 迁移 `0001` ~ `0017` 都**只新增**表、索引、触发器（`0014` 给 `0013` 新建的 `im_messages` 加了一个可空列），每个都有 downgrade。
   CI 每次都跑 `upgrade head → downgrade base → upgrade head`（`ci-api.yml`），恢复演练也会在恢复出来的数据上执行 `upgrade head`。
 - 以后的迁移继续遵守“先扩展、后收缩”：
   - 新版本只加表、加列（可为空或有默认值），旧代码照常运行；
@@ -221,7 +221,8 @@ Vikunja、n8n 等独立部署的组件分开升级：
    ```
    覆盖集成凭证、集成的 Webhook 密钥、n8n 的 API Key 与共享密钥、OpenClaw 密钥库、内部 CA 私钥。
    可以重复运行；只改密文，不改记录的 `updated_at` 和版本号。
-4. 输出“仍是旧密钥：0；失败：0”（退出码 0）之后，清空 `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS`，再 `docker compose up -d api worker`。
+4. 输出“仍是旧密钥：0；失败：0”（退出码 0）之后，**再等 15 分钟**（AI 待审批的最长有效期）：待审批记录里加密的敏感参数与参数校验用的密钥
+   不在第 3 步的范围内，第 2 步之前创建的待审批要靠旧密钥才能批准执行。然后清空 `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS`，再 `docker compose up -d api worker`。
    失败的记录原样保留：通常是缺了更早的某把旧密钥，把它也加进 `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS` 再运行一次。
 5. 轮换前后各做一次 `make backup`；旧的备份要用旧密钥才能解密，旧密钥按备份的保留期一起保管。
 
@@ -391,7 +392,24 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
 - **api 的 `/metrics`**
   - Caddy 只转发 `/api/*`、`/healthz`、`/readyz`，所以从外部访问 `/metrics` 只会得到前端页面。
   - 指标标签只有方法、路由模板和状态码类别，不含原始路径、查询串、Token。
-  - 容器之间可以访问 `api:8000/metrics`，内容只有请求计数与耗时。
+  - 容器之间可以访问 `api:8000/metrics`，内容是请求计数与耗时，以及下面的 V2 指标（全部工作空间合计）。
+- **V2 指标**（方案第 6.1 节，T-0062；`app/domain/ops_metrics.py`）：
+
+  | 指标 | 类型 | 含义 |
+  |---|---|---|
+  | `workspace_agent_instances{status}` | gauge | 登记的 OpenClaw 实例数：`pending` / `online` / `offline` / `disabled` |
+  | `workspace_agent_secret_resolves_total{result}` | counter | 实例取密钥（每个密钥 ID 一次）：`ok` / `not_found` / `rate_limited` |
+  | `workspace_agent_auth_failures_total{ingress}` | counter | 实例认证失败（凭证无效、吊销、停用、入口不符、缺客户端证书），按 `intranet` / `public` / `none` |
+  | `workspace_mcp_tool_calls_total{tool,outcome}` | counter | MCP 工具调用；`outcome` 为 `ok` 或工具错误码（小写），不认识的工具名记为 `unknown` |
+  | `workspace_ai_pending_approvals` | gauge | 等待人工审批、还没过期的写操作 |
+  | `workspace_im_inbox_events{status}` | gauge | OpenIM 回调收件箱里没处理完的事件：`pending` / `processing` / `retry` / `dead_letter` |
+  | `workspace_im_reconcile_filled_messages_total` | counter | 周期对账补进投影的消息（回调丢失或延迟时才会增加） |
+  | `workspace_im_relay_pauses_total` | counter | 群聊因实例连续发言达到上限而暂停自动接力的次数 |
+
+  - 计数类记在 Redis（api 的多个进程和 Worker 都会写），Redis 清空后从 0 重新计数；状态类在抓取时查 PostgreSQL。
+    数据库或 Redis 不可用时 `/metrics` 只返回请求指标。
+  - 标签里没有实例 ID、工作空间 ID、Token 或用户输入；单个实例的状态看工作台的运维页或实例页。
+  - Grafana 的预置仪表盘有对应的四个面板；运维页的服务列表里，OpenIM 与本工作空间的实例单独成组（实例只对 owner / admin 显示）。
 - **Grafana**（`grafana/grafana:13.2.5`）
   - 匿名访问、注册、嵌入（`allow_embedding`）都关闭，不向外报告统计；数据源与仪表盘是只读的预置文件。
   - 端口默认只绑定本机（`GRAFANA_BIND=127.0.0.1`）。对外开放时放在 HTTPS 反向代理后面，并设置 `GRAFANA_PUBLIC_URL`。
@@ -567,6 +585,8 @@ S3 仓库的凭据（`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_DEFAUL
 
 - 需要：`deps` 要 `uv` 与 `npm`；`secrets` 与 `images` 要 Docker。`images` 要先构建镜像（`make up`），
   第三方镜像的清单取自 compose 文件，所以还要有 `.env`。
+- 第三方镜像清单（V2 起）：core 与 monitoring、agents 两个 profile、Vikunja、n8n、OpenIM 的依赖组件，
+  以及 OpenClaw 服务器上运行的 OpenClaw 与 ghostunnel（取自接入包模板）。OpenIM 的补丁镜像由 `ci-openim` 构建后扫描，有修复的严重漏洞就失败。
 - trivy 的漏洞库缓存在 `~/.cache/trivy`（约 1 GB，`TRIVY_CACHE_DIR` 可改）；`SCAN_THIRD_PARTY=0` 只扫描本仓库的镜像。
 - 出网经过 TLS 代理的环境：设置 `SSL_CERT_FILE` 指向代理的 CA，脚本会把它挂进 trivy 容器；`HTTPS_PROXY` 等变量原样传入。
 - **第三方镜像有漏洞时**：修复只能来自上游的新版本。发布前对照报告查看上游是否已发布修复版本；
@@ -729,3 +749,81 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
   不恢复 Redis 是有意的：Redis 与 MongoDB 不是同一时刻的快照，恢复旧的 Redis 可能让序号回退、覆盖已有消息。
 - 实例的 IM 令牌在 Redis 里，恢复后会失效；实例重启后会重新领取（接入包的启动脚本每次启动都取新令牌）。
 
+
+## 18. V2 上线总览（OpenClaw 多实例 + OpenIM）
+
+第 16、17 节分别讲接入入口与 OpenIM；本节把服务器 A 上的全部变更、两种网络模式与 OpenClaw 服务器的检查清单放在一起，
+供第一次上线和日后排查对照。设计见 `docs/v2/TRANSFORMATION_PLAN.md` 第 6 节，威胁与措施见 `docs/threat-model.md` 的 V2 各行。
+
+### 18.1 服务器 A 的变更
+
+| 项 | 变更 | 详见 |
+|---|---|---|
+| 新组件 | agent-gateway（`compose.yaml` 的 `agents` profile，`make agents-up`）；OpenIM（独立的 Compose 项目，`make openim-build`、`make openim-up`） | 第 16、17 节 |
+| 网络 | `agent-edge`（入口对外）、`agent-ingress`（入口 → API，agent-gateway 固定在 `<AGENT_INGRESS_NET>.2`）、`agent-im`（入口 → OpenIM 消息网关）、`im`（API / Worker ↔ OpenIM，openim-server 固定在 `<IM_NET>.2`），都是 internal 网络（`agent-edge` 除外） | 第 16.1、17.1 节 |
+| 端口 | 内网入口 `AGENT_INTRANET_BIND:AGENT_INTRANET_PORT`（只在私网开放）、外网入口 `AGENT_PUBLIC_BIND:AGENT_PUBLIC_PORT`（对公网开放）；OpenIM、MongoDB、Kafka、etcd、Garage 都**不**发布端口 | 第 16.1 节 |
+| 证书 | 入口的服务器证书放在 `AGENT_TLS_DIR`；工作台内部 CA 第一次需要时自动生成（EC P-256，5 年，私钥加密后存数据库），给外网模式签发 90 天的客户端证书 | 第 16.1 节 |
+| 变量 | `AGENT_*`（入口）、`OPENIM_*`（OpenIM 地址、secret、回调口令、各组件密码）；密钥库与内部 CA 用 `CREDENTIAL_ENCRYPTION_KEY` 加密（`make env` 已生成） | 第 16.1、17.3 节 |
+| 数据库 | 迁移 `0011` ~ `0017`（`make migrate`），只新增表 | `docs/data-dictionary.md` |
+| 备份 | `make backup` 发现 OpenIM 在运行就一并备份 MongoDB 与 Garage；`make restore-verify` 一并演练 | 第 17.5 节 |
+| 监控 | 运维页的“OpenClaw 与 IM”一组；`/metrics` 的 V2 指标与 Grafana 面板 | 第 12.2 节 |
+| 安全扫描 | 第三方镜像清单加入 OpenIM 的依赖、agent-gateway、OpenClaw 与 ghostunnel | 第 15.1 节 |
+| 资源 | OpenIM 空闲时合计约 1 GiB 内存（openim-server 约 390 MiB、Kafka 约 370 MiB、MongoDB 约 190 MiB，其余各十几 MiB）；OpenClaw 实例在各自的服务器上，不占服务器 A | 第 17.4 节 |
+
+### 18.2 两种网络模式
+
+| | 内网模式（`intranet`） | 外网模式（`public`） |
+|---|---|---|
+| 适用 | OpenClaw 服务器与工作台在同一私网（同机房、Tailscale 等） | OpenClaw 服务器只能经公网到达工作台 |
+| 连接 | OpenClaw 直连内网入口（HTTPS） | OpenClaw → 本机隧道（`tunnel` 服务，ghostunnel，监听 127.0.0.1:18443）→ 外网入口（HTTPS + 客户端证书） |
+| 认证 | 实例令牌（绑定内网入口）；入口只接受 `AGENT_INTRANET_ALLOWED_CIDRS` 里的来源 | 实例令牌（绑定外网入口）+ 客户端证书（按指纹校验、可单独吊销）；认证失败按来源 IP 限次 |
+| 接入包里的服务 | `openclaw`；工作台也配置了外网入口时多一个 `image-proxy`（本机取图代理，把图片地址里的外网域名转到内网入口） | `openclaw`、`tunnel` |
+| 域名解析 | 内网入口的域名指向私网地址；外网域名在容器里指向 127.0.0.1（有 `image-proxy` 时） | 外网入口的域名在容器里指向 127.0.0.1（`extra_hosts`），请求都经本机隧道 |
+| 私有 CA | `myworkspace.env` 里设 `NODE_EXTRA_CA_CERTS`；`image-proxy` 的命令加 `--cacert` | `tunnel` 的命令加 `--cacert` |
+| 凭证轮换 | 重新生成接入包（旧令牌再保留 24 小时） | 同左；客户端证书 90 天到期，到期前重新生成 |
+| 防火墙 | 服务器 A 的内网入口端口只对私网开放 | 服务器 A 的外网入口端口对公网开放；OpenClaw 服务器只需出站 |
+
+两种模式的实例都不能用错入口：令牌绑定登记时的入口，用在另一个入口一律 401（多实例端到端场景 7）。
+
+### 18.3 OpenClaw 服务器检查清单
+
+接入包里的 `CHECKLIST.md` 是这台服务器的权威清单（上线和每次改配置后都过一遍）；这里是要点与准备工作。
+
+1. **准备**：Docker（含 Compose v2）；能访问模型服务商；能访问工作台的入口（内网模式经私网，外网模式经公网）；
+   第一次安装插件时能访问 npm 仓库（插件的依赖从 npm 安装）；宿主机的 cron 或 systemd timer。
+2. **工作台**：密钥库录入模型密钥 → 实例页登记实例（网络模式、权限范围 `read` / `read_write`、最高角色）→ 授权密钥 → 下载接入包（凭证只出现这一次）。
+3. **安装**：解压到专用目录，属主改成容器里的 uid 1000，目录 700、`myworkspace.env` 与客户端私钥 600；`bin/` 下两个程序属主是运行用户、0755、不是符号链接。
+4. **插件**：核对 `@openim/openclaw-channel@0.3.3` 的 sha256，用临时的空配置安装（配置里已经写了插件提供的 `openim` 渠道，装好之前 OpenClaw 拒绝这份配置），然后 `docker compose up -d`；
+   冷启动要 2 ~ 4 分钟。
+5. **模型**：`state/openclaw.json` 里的模型服务商换成实际使用的那一家，密钥 ID 与工作台的授权一致；不要写明文，也不要加 `_comment` 之类的键（OpenClaw 会判为无效配置）。
+6. **加固**：Gateway 只监听本机、不映射端口；`security audit --deep`、`doctor`、`health` 通过；`tools.exec.security = deny`，不挂 Docker socket；
+   `plugins.allow` 只有 `openclaw-channel`；不设置 `commands.ownerAllowFrom`；发图片 / 文件 / 视频的插件工具不可用；`requireMention: true`；
+   `secrets audit` 没有明文；日志级别与保留期已设置（SDK 会把消息内容写进日志）。
+7. **定时任务**：每 10 分钟 `openclaw secrets reload`（轮换后的模型密钥不用重启就生效）；每周重启一次（换新的 IM 令牌）。
+8. **备份与回滚**：`openclaw backup create --verify` 能跑通；回滚要连同备份的状态一起恢复（降级不会撤销 OpenClaw 的迁移）。
+9. **确认**：工作台运维页里这个实例显示“正常”；IM 通讯录里出现这个实例并已互为好友，私聊能收到回复；
+   停用实例后它取不到密钥、MCP 返回 401、IM 被强制下线。
+
+### 18.4 从零上线的顺序
+
+1. `make env`；按第 16.1 节准备入口证书、填 `AGENT_*`；
+2. `make openim-build`（约 8 GB 临时磁盘）；
+3. `make up`、`make migrate`、`make agents-up`；
+4. `make openim-up`，第一次要 1 分钟左右；在 `.env` 里设置 `OPENIM_API_URL`、`OPENIM_OBJECT_URL`，再 `make up`；
+5. 运维页里 OpenIM 显示“正常”；打开 IM 页面，管理员的 IM 账号自动注册；
+6. 验收入口：`python3 tests/e2e/agent_ingress_acceptance.py ...`（第 16.3 节）；
+7. 按第 18.3 节接入每台 OpenClaw 服务器。
+
+预发布环境可以跑完整的多实例端到端（CI 的 agents 任务同样做法；会在本机启动两个测试用的 OpenClaw 实例和假模型，要 root）：
+
+```
+sudo -E python3 tests/e2e/agents_acceptance.py --server-ca <签发入口证书的 CA> \
+    --intranet <内网域名>:<端口> --public <外网域名>:<端口>
+```
+
+### 18.5 已知的上游行为
+
+- **OpenIM 重启后实例会自己重启一次**：openclaw-channel 的 SDK 重新同步时抛出未处理的错误，OpenClaw 进程退出，容器约 45 秒后重启并重连。
+  这段时间发给实例的消息插件不会补处理（工作台的消息投影不缺，周期对账也会补齐），需要的话重发一次。重启或升级 OpenIM 后看一眼运维页，确认实例重新上线。
+- **实例间私聊被拒收时，`message` 工具仍显示 done**：消息确实没有送达（before 回调拒收），只是插件没有把拒收反馈给模型。
+- **IM 令牌只在启动时领取**：实例每次启动都会让旧连接下线，所以只在启动时领取；每周的定时重启负责换新令牌。

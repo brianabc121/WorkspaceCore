@@ -199,6 +199,219 @@
           "legendFormat": "{{job}}"
         }
       ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "OpenClaw 实例（按状态）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "workspace-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "workspace-prometheus"
+          },
+          "expr": "workspace_agent_instances",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "待审批与 IM 回调积压",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "workspace-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "workspace-prometheus"
+          },
+          "expr": "workspace_ai_pending_approvals",
+          "legendFormat": "待审批"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "workspace-prometheus"
+          },
+          "expr": "sum(workspace_im_inbox_events{status!=\"dead_letter\"})",
+          "legendFormat": "回调待处理"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "workspace-prometheus"
+          },
+          "expr": "workspace_im_inbox_events{status=\"dead_letter\"}",
+          "legendFormat": "回调死信"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "取密钥与实例认证失败（每 5 分钟）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "workspace-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "workspace-prometheus"
+          },
+          "expr": "sum by (result) (increase(workspace_agent_secret_resolves_total[5m]))",
+          "legendFormat": "取密钥 {{result}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "workspace-prometheus"
+          },
+          "expr": "sum by (ingress) (increase(workspace_agent_auth_failures_total[5m]))",
+          "legendFormat": "认证失败 {{ingress}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "MCP 调用、防刷屏暂停与对账补齐（每 5 分钟）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "workspace-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "workspace-prometheus"
+          },
+          "expr": "sum by (outcome) (increase(workspace_mcp_tool_calls_total[5m]))",
+          "legendFormat": "MCP {{outcome}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "workspace-prometheus"
+          },
+          "expr": "increase(workspace_im_relay_pauses_total[5m])",
+          "legendFormat": "防刷屏暂停"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "workspace-prometheus"
+          },
+          "expr": "increase(workspace_im_reconcile_filled_messages_total[5m])",
+          "legendFormat": "对账补齐的消息"
+        }
+      ]
     }
   ]
 }

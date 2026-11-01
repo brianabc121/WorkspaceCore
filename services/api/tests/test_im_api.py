@@ -124,6 +124,8 @@ async def test_open_list_update_and_read_conversations(env: ImEnv) -> None:
         env.fake.add_message(conv_a["conversation_id"], a["im_user_id"], {"content": f"a{i}"})
     env.fake.add_message(conv_b["conversation_id"], b["im_user_id"], {"content": "b0"})
     await worker.reconcile_im(await _worker_ctx(env))
+    # 运维指标：对账补进投影的条数（T-0062）
+    assert int(await env.app.state.redis.hget("ops:counter:im_reconcile_filled", "_")) == 4
 
     listed = await env.client.get("/api/v1/im/conversations", headers=_h(env))
     body = listed.json()

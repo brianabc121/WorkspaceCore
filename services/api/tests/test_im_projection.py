@@ -208,6 +208,11 @@ async def test_reconcile_recovers_lost_callbacks_and_holes(env: ImEnv) -> None:
     assert await worker.reconcile_im(ctx) == 0
     assert await worker.reconcile_im_full(ctx) == 5
     assert [m[0] for m in await _messages(env, conv)] == [1, 2, 3, 4, 5]
+    # 运维指标只算真正补进投影的：增量 5 条 + 全量补的 1 条，全量重写的另外 4 条不算（T-0062）
+    filled = env.app.state.redis.hget("ops:counter:im_reconcile_filled", "_")
+    assert int(await filled) == 6
+    assert await worker.reconcile_im_full(ctx) == 5
+    assert int(await env.app.state.redis.hget("ops:counter:im_reconcile_filled", "_")) == 6
     # OpenIM 不可用时对账不报错，下一轮再来
     env.fake.down = True
     assert await worker.reconcile_im(ctx) == 0

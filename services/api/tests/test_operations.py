@@ -290,14 +290,15 @@ monitored = pytest.fixture(name="monitored")(_ops_fixture(**MONITORING))
 async def test_services_without_monitoring(ops: Ops) -> None:
     data = await ops.get("/api/v1/operations/services")
     ids = [item["id"] for item in data["items"]]
-    assert ids == ["api", "worker", "postgres", "redis", "prometheus", "grafana", "n8n"]
+    assert ids == ["api", "worker", "postgres", "redis", "prometheus", "grafana", "n8n", "openim"]
     items = {item["id"]: item for item in data["items"]}
     assert items["api"]["status"] == "ok"
     assert items["postgres"]["status"] == "ok" and items["redis"]["status"] == "ok"
     assert (items["worker"]["status"], items["worker"]["reason"]) == ("unknown", "no_heartbeat")
-    for name in ("prometheus", "grafana", "n8n"):
+    for name in ("prometheus", "grafana", "n8n", "openim"):
         assert items[name]["status"] == "not_configured", name
-    assert all(item["kind"] in {"core", "monitoring", "integration"} for item in data["items"])
+    kinds = {"core", "monitoring", "integration", "agents"}
+    assert all(item["kind"] in kinds for item in data["items"])
     assert "9090" not in json.dumps(data)  # 不透露内部地址
 
     redis = ops.app.state.redis

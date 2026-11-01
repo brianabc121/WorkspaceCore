@@ -19,17 +19,18 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from redis.asyncio import Redis
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.domain import github_sync
+from app.domain import github_sync, im
 from app.domain.automations import connection_sync
 from app.domain.connectors import ConnectorRuntime, sync_state
-from app.domain.policy import WorkspaceAccess
+from app.domain.policy import WorkspaceAccess, has_role
 from app.integrations.base import ConnectorError
 from app.integrations.http import ConnectorHttp, OutboundPolicy, host_of
 from app.integrations.prometheus import PrometheusClient
-from app.models import Integration
+from app.models import AgentInstance, ImWebhookInboxEvent, Integration
 from app.repositories import automations as automation_repo
 from app.repositories import integrations as integration_repo
 from app.schemas.integrations import SyncState
@@ -46,6 +47,7 @@ from app.schemas.operations import (
     ServiceStatusList,
     ServiceStatusOut,
 )
+from app.schemas.workspaces import Role
 
 logger = logging.getLogger("app.operations")
 
@@ -134,7 +136,10 @@ _NAMES = {
     "redis": "Redis",
     "prometheus": "Prometheus",
     "grafana": "Grafana",
+    "openim": "OpenIM",
 }
+# 回调收件箱里等待超过这么久还没处理完的事件，说明 Worker 处理不过来或卡住了
+INBOX_STUCK_AFTER = timedelta(minutes=5)
 
 
 def _status(
@@ -222,6 +227,22 @@ class DeploymentHealth:
                 self._cached("grafana", self._grafana),
             )
         )
+
+    async def openim(self) -> ServiceStatusOut:
+        """OpenIM（V2）：用 imAdmin 令牌查一次通知账号是否存在，证明 REST 与 secret 都可用。"""
+        return await self._cached("openim", self._openim)
+
+    async def _openim(self) -> ServiceStatusOut:
+        client = im.openim_client(self.settings, self.runtime, self.redis)
+        if client is None:
+            return _status("openim", "agents", "not_configured", reason="not_deployed")
+
+        async def probe() -> None:
+            await client.existing_users([im.NOTICE_USER_ID])
+
+        # 首次检查要先换 imAdmin 令牌（两次请求）
+        limit = self.settings.openim_timeout_seconds * 2 + 1
+        return await self._timed("openim", "agents", probe, limit)
 
     async def _cached(
         self, key: str, check: Callable[[], Awaitable[ServiceStatusOut]]
@@ -381,7 +402,59 @@ class OperationsService:
         core, monitoring = await asyncio.gather(self.health.core(), self.health.monitoring())
         items = [*core, *monitoring, *await self._integrations(access.workspace.id)]
         items.append(await self._n8n(access.workspace.id))
+        items.append(await self._openim())
+        if has_role(access.role, Role.admin):
+            items.extend(await self._agents(access.workspace.id))
         return ServiceStatusList(items=items, generated_at=now)
+
+    async def _openim(self) -> ServiceStatusOut:
+        """OpenIM 可用但回调收件箱里有卡住的事件时显示为降级（投影会落后，周期对账兜底）。"""
+        status = await self.health.openim()
+        if status.status != "ok":
+            return status
+        stuck = await self.db.scalar(
+            select(func.count())
+            .select_from(ImWebhookInboxEvent)
+            .where(
+                ImWebhookInboxEvent.status.in_(("pending", "processing", "retry")),
+                ImWebhookInboxEvent.received_at < datetime.now(UTC) - INBOX_STUCK_AFTER,
+            )
+        )
+        if stuck:
+            return status.model_copy(update={"status": "degraded", "reason": "inbox_backlog"})
+        return status
+
+    async def _agents(self, workspace_id: uuid.UUID) -> list[ServiceStatusOut]:
+        """本工作空间的 OpenClaw 实例。
+
+        在线状态来自 OpenIM 的上下线回调；“最近检查”是实例最近一次经接入入口认证的时间。
+        """
+        mapping: dict[str, tuple[ServiceState, str | None]] = {
+            "online": ("ok", None),
+            "offline": ("down", "agent_offline"),
+            "pending": ("unknown", "agent_not_connected"),
+            "disabled": ("not_configured", "agent_disabled"),
+        }
+        instances = await self.db.scalars(
+            select(AgentInstance)
+            .where(AgentInstance.workspace_id == workspace_id)
+            .order_by(AgentInstance.name, AgentInstance.id)
+        )
+        items: list[ServiceStatusOut] = []
+        for instance in instances:
+            state, reason = mapping.get(instance.status, ("unknown", None))
+            items.append(
+                _status(
+                    f"agent:{instance.id}",
+                    "agents",
+                    state,
+                    reason=reason,
+                    checked_at=instance.last_seen_at,
+                    name=instance.name,
+                    provider="openclaw",
+                )
+            )
+        return items
 
     async def _n8n(self, workspace_id: uuid.UUID) -> ServiceStatusOut:
         """n8n 连接（契约第 3.1 节）：按连接状态与最近一次对账映射，不在请求里访问 n8n。"""

@@ -7884,7 +7884,7 @@
             "title": "Checked At"
           },
           "id": {
-            "description": "稳定的标识：核心服务为 api、worker、postgres、redis；监控为 prometheus、grafana；集成为 integration:<集成 UUID>；n8n 连接为 n8n",
+            "description": "稳定的标识：核心服务为 api、worker、postgres、redis；监控为 prometheus、grafana；集成为 integration:<集成 UUID>；n8n 连接为 n8n；V2 为 openim 与 agent:<实例 UUID>（实例只对 owner / admin 列出）",
             "title": "Id",
             "type": "string"
           },
@@ -7892,7 +7892,8 @@
             "enum": [
               "core",
               "monitoring",
-              "integration"
+              "integration",
+              "agents"
             ],
             "title": "Kind",
             "type": "string"
@@ -7922,7 +7923,7 @@
                 "type": "null"
               }
             ],
-            "description": "集成的类型（vikunja / github / n8n）；其他服务为 null",
+            "description": "集成的类型（vikunja / github / n8n），OpenClaw 实例为 openclaw；其他服务为 null",
             "title": "Provider"
           },
           "reason": {

@@ -1,7 +1,7 @@
 # 数据字典
 
-> 状态：Sprint 6（迁移到 `0010`）。目标实体清单见 `docs/DEVELOPMENT_SPEC.md` 第 5 节；本文记录**已经迁移**的数据库对象。
-> 迁移 `0001` ~ `0010` 都只新增对象，都有 downgrade；升级与回退的做法见 `docs/deployment.md` 第 5 节。
+> 状态：Sprint 6（迁移到 `0017`）。目标实体清单见 `docs/DEVELOPMENT_SPEC.md` 第 5 节（V2 见 `docs/v2/TRANSFORMATION_PLAN.md` 第 5 节）；本文记录**已经迁移**的数据库对象。
+> 迁移 `0001` ~ `0017` 都只新增对象，都有 downgrade；`0011` 起没有改动 `0010` 及以前的表，唯一的加列是 `0014` 给 `0013` 新建的 `im_messages` 加可空列 `idempotency_key`（无默认值）。升级与回退的做法见 `docs/deployment.md` 第 5 节。
 
 ## 约定
 
@@ -115,5 +115,69 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 | `automation_connections` | `id`、`workspace_id`、`base_url`、`public_url`、`status`、`api_key_ref`、`trigger_secret_ref`、`settings_json`、`version`、`created_at`、`updated_at` | 每个工作空间最多一个 n8n 连接（`workspace_id` 唯一）；API Key 与触发共享密钥只存 `enc:v1` 引用，从不返回；随工作空间级联删除 |
 | `automations` | `id`、`workspace_id`、`name`、`description`、`workflow_id`、`webhook_path`、`params_json`、`enabled`、`workflow_active`、`deleted_at`、`version`、`created_at`、`updated_at` | 白名单工作流，软删除（`deleted_at`）；未删除的行里 `(workspace_id, webhook_path)`、`(workspace_id, workflow_id)` 各自唯一（部分唯一索引）；`params_json` 是允许的参数定义，不含参数值 |
 | `automation_runs` | `id`、`workspace_id`、`automation_id`、`status`、`trace_id`、`external_execution_id`、`triggered_by`、`error_summary`、`started_at`、`finished_at`、`created_at`、`updated_at` | 执行记录，保留（白名单删除后仍在）；**不保存触发参数与第三方 payload**；`(automation_id, external_execution_id)` 在后者非空时唯一；`ix_automation_runs_open` 是 `queued` / `running` / `unknown` 的部分索引，供对账；`triggered_by` 在用户删除时置空 |
+
+### 迁移 `0011`（S6-01，T-0054）
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `agent_settings` | `workspace_id`、`agents_enabled`、`version`、`updated_at`、`updated_by` | 每个工作空间的 OpenClaw 实例总开关，`workspace_id` 即主键，随工作空间级联删除；没有这一行时视为打开；关闭后本工作空间所有实例认证立即失败，并尽力强制 IM 下线；`updated_by` → `users`（删除后置空）；`version` 用于乐观并发 |
+| `agent_instances` | `id`、`workspace_id`、`name`、`description`、`network_mode`、`status`、`scope`、`max_role`、`im_user_id`、`im_nickname`、`im_ready`、`acting_user_id`、`reported_version`、`plugin_version`、`last_seen_at`、`bundle_issued_at`、`disabled_at`、`version`、`created_at`、`updated_at` | 实例登记；随工作空间级联删除，接口只能停用（`disabled_at`），不能删除；CHECK：`network_mode` ∈ `intranet` / `public`，`status` ∈ `pending` / `online` / `offline` / `disabled`，`scope` ∈ `read` / `read_write`（MCP 权限范围），`max_role` ∈ `admin` / `member` / `viewer`；`im_user_id`（`oc_` + 实例 UUID 十六进制）唯一；`(workspace_id, id)` 唯一，供凭证与密钥授权的复合外键保证同一工作空间；`acting_user_id` 是登记人 → `users`（删除后置空），实例以“登记人角色与 `max_role` 中较低的一个”调用工具；`im_ready` 表示 IM 账号已注册并与 owner / admin 互加好友，失败时由 Worker 每 5 分钟重试；`reported_version`、`plugin_version` 由心跳上报，`last_seen_at` 随心跳与认证更新；`version` 用于乐观并发 |
+| `agent_credentials` | `id`、`workspace_id`、`instance_id`、`kind`、`ingress`、`token_hash`、`token_prefix`、`cert_fingerprint`、`expires_at`、`revoked_at`、`last_used_at`、`last_used_ip`、`created_at` | `(workspace_id, instance_id)` → `agent_instances`（复合外键，级联删除）；`kind` ∈ `token` / `client_cert`；`ingress` ∈ `intranet` / `public`，凭证绑定登记时的入口；CHECK `material`：令牌行只有 `token_hash`，证书行只有 `cert_fingerprint`。令牌只存 SHA-256（`token_hash` 唯一），`token_prefix` 是前 12 个字符，供界面辨认；客户端证书只存 SHA-256 指纹（小写十六进制，`cert_fingerprint` 唯一），证书与私钥只放进接入包、不入库，吊销以指纹为准。令牌没有到期时间，证书 `expires_at` 为 90 天后；`revoked_at` 在将来表示处于轮换宽限期（旧凭证再保留 24 小时）；同一种凭证同时最多两份有效，由服务层保证；部分索引 `ix_agent_credentials_active`（`revoked_at IS NULL`）；`last_used_at` / `last_used_ip` 至多每 60 秒更新一次，IP 原样保存 |
+| `agent_secrets` | `id`、`workspace_id`、`name`、`kind`、`description`、`current_version`、`last_rotated_at`、`version`、`created_at`、`updated_at` | 密钥库条目，只有元数据，不含密钥值；随工作空间级联删除；`(workspace_id, name)` 唯一（重名返回 409 `AGENT_SECRET_EXISTS`）；`(workspace_id, id)` 唯一，供复合外键使用；`kind` ∈ `model_api_key` / `api_token` / `generic`；`current_version` 是当前值的版本号；删除密钥时它的版本与授权级联删除；`version` 用于乐观并发 |
+| `agent_secret_versions` | `id`、`workspace_id`、`secret_id`、`value_version`、`ciphertext_ref`、`created_at`、`destroyed_at` | `(workspace_id, secret_id)` → `agent_secrets`（复合外键，级联删除）；`(secret_id, value_version)` 唯一；`ciphertext_ref` 是 `enc:v1:<key_id>:…` 引用，加密用途绑定 `agent_secret:<secret_id>:<value_version>`；只有当前版本有密文：轮换时旧版本的 `ciphertext_ref` 置空并记 `destroyed_at`，旧值不再下发、也无法恢复；管理员接口从不返回明文 |
+| `agent_secret_grants` | `id`、`workspace_id`、`instance_id`、`secret_id`、`ref_id`、`created_at` | 实例可以取用的密钥；`ref_id` 是 OpenClaw 里用的 ID（如 `openai_api_key`），`(instance_id, ref_id)` 唯一；对实例、对密钥各有一个 `(workspace_id, …)` 复合外键，保证三者在同一工作空间，任一方删除时级联删除；授权按实例整体替换 |
+| `agent_secret_accesses` | `id`、`workspace_id`、`instance_id`、`instance_name`、`ref_id`、`secret_id`、`value_version`、`result`、`source_ip`、`at` | 取密钥记录，每次请求的每个 `ref_id` 一行，**不含密钥内容**；单独成表，不进 `audit_logs`；`result` ∈ `ok` / `not_found` / `rate_limited`（未授权与不存在都记 `not_found`）；随工作空间级联删除；`instance_id`、`secret_id` 在对应记录删除后置空，`instance_name` 留作说明；`source_ip` 原样保存；索引 `(workspace_id, at)`、`(instance_id, at)`；目前没有清理任务 |
+| `agent_ca` | `id`、`cert_pem`、`key_ref`、`not_after`、`created_at`、`retired_at` | 内部 CA，整个部署共用（不属于任何工作空间），给外网模式的实例签发客户端证书；表达式部分唯一索引 `uq_agent_ca_active`（`retired_at IS NULL`），同时只有一套在用；EC P-256，有效期 5 年，第一次需要时生成；`cert_pem` 只有证书；私钥只以 `enc:v1` 引用存在 `key_ref`（用途绑定 `agent_ca:<id>`）；不发布 CRL |
+
+方案第 5 节要求给已有凭证密文加 `key_version` 列，实际没有加：`enc:v1:<key_id>:…` 引用本身带着加密密钥的 ID。`python -m app.commands.rotate_credentials` 按它找出用旧密钥加密的记录，逐条重新加密，不改 `updated_at` 与 `version`。覆盖的列：
+- `integration_accounts.credential_ref`；
+- `integrations.webhook_secret_ref`；
+- `automation_connections.api_key_ref`、`trigger_secret_ref`；
+- `agent_secret_versions.ciphertext_ref`；
+- `agent_ca.key_ref`。
+
+步骤见 `docs/deployment.md` 第 6.1 节。
+
+### 迁移 `0012`（S6-02，T-0055）
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `im_accounts` | `user_id`、`im_user_id`、`created_at` | 管理员（owner / admin）的 OpenIM 账号，一个用户一个，多个工作空间共用，第一次需要时创建；`user_id` 即主键，随用户级联删除；`im_user_id`（`ws_` + 用户 UUID 十六进制）唯一；不保存 IM 令牌（imAdmin 令牌缓存在 Redis）。实例的账号在 `agent_instances.im_user_id` |
+| `im_groups` | `id`、`workspace_id`、`group_id`、`name`、`announcement`、`owner_user_id`、`relay_enabled`、`max_agent_streak`、`max_per_minute`、`dismissed_at`、`version`、`created_at`、`updated_at` | 工作空间的群，随工作空间级联删除；`group_id` 是 OpenIM 群 ID（`ws` + 32 位十六进制，由建群的 Idempotency-Key 推出；会话 ID 为 `sg_<group_id>`），唯一；`owner_user_id` 是群主 → `users`（删除后置空）。防刷屏阈值直接放在群上（方案的 `im_group_policies` 合并进来），计数在 Redis：CHECK `max_agent_streak` 在 1–50 之间（默认 8：管理员上次发言后，实例最多连续几条），`max_per_minute` 在 1–60 之间（默认 6：单个实例每分钟几条）。`relay_enabled = false` 时，拒收实例 @ 其他实例的群消息；解散只记 `dismissed_at`，不删行；`version` 用于防刷屏设置的乐观并发 |
+| `im_group_members` | `id`、`group_pk`、`im_user_id`、`instance_id`、`user_id`、`role`、`joined_at` | `group_pk` → `im_groups`、`instance_id` → `agent_instances`、`user_id` → `users`，都级联删除；CHECK `one_member`：`instance_id` 与 `user_id` 恰好一个有值（系统账号 `ws_notice` 进群但不记在这里）；`role` ∈ `owner` / `admin` / `member`；`(group_pk, im_user_id)` 唯一；索引 `ix_im_group_members_im_user_id`；成员只能是本工作空间的实例与 owner / admin，由服务层检查 |
+| `im_webhook_inbox` | `id`、`event_key`、`command`、`payload_json`、`status`、`attempts`、`next_retry_at`、`received_at`、`processed_at`、`error_text` | OpenIM after 回调（发消息、上下线、删好友）的收件箱。回调没有签名，回调地址带口令，只接受来自 OpenIM 网段的请求；before 回调同步判断，不进收件箱。`event_key` 唯一（`msg:<serverMsgID>`、`online:` / `offline:<用户>:<平台>:<seq>`、`delete_friend:<owner>:<friend>:<收到的毫秒>`），重复送达只记录一次。`payload_json` 是回调原始请求体（上限 256 KiB），处理时只取其中的 ID，内容以 `pull_msg_by_seq` 拉回的为准。不关联工作空间，没有外键。`status` ∈ `pending` / `processing` / `retry` / `completed` / `dead_letter`，失败 8 次进 `dead_letter`；`next_retry_at` 是下次可领取的时间，处理中时是 2 分钟租约的到期时间；部分索引 `ix_im_webhook_pending`（`status IN ('pending','retry','processing')`）；`error_text` 只存错误分类。处理完超过 7 天的事件由 Worker 清理，`dead_letter` 保留 |
+
+### 迁移 `0013`（S6-02，T-0055）
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `im_conversations` | `id`、`workspace_id`、`owner_user_id`、`conversation_id`、`kind`、`peer_instance_id`、`group_pk`、`pinned_at`、`muted`、`read_seq`、`max_seq`、`last_message_at`、`version`、`created_at`、`updated_at` | 每个管理员在一个工作空间里的会话，已读、置顶、免打扰各自独立；`(owner_user_id, conversation_id)` 唯一，`conversation_id` 另有索引；`conversation_id` 是 OpenIM 会话 ID（单聊 `si_`、群聊 `sg_`、通知 `sn_`）；`kind` ∈ `single` / `group` / `notice`，`notice` 是本工作空间的通知账号 `wn_<工作空间>` 发审批卡片的会话；`workspace_id`、`owner_user_id`（→ `users`）、`peer_instance_id`（→ `agent_instances`）、`group_pk`（→ `im_groups`）都级联删除。CHECK：`read_seq`、`max_seq` ≥ 0，两者只增不减；未读数 = 序号大于 `read_seq`、且不是自己发的消息条数，`muted` 的会话不计入顶栏未读。`pinned_at` / `muted` 先同步到 OpenIM，失败时本地不改；`version` 在修改置顶 / 免打扰时递增，接口不校验 |
+| `im_messages` | `id`、`workspace_id`、`conversation_id`、`server_msg_id`、`client_msg_id`、`seq`、`sender_im_id`、`sender_instance_id`、`content_type`、`content_json`、`plain_text`、`at_im_ids`、`status`、`sent_at`、`created_at` | 消息投影，每条 OpenIM 消息一行，按 OpenIM 会话 ID 只存一份：群里的多个管理员共用，不关联 `im_conversations` 的行。序号与内容以 `pull_msg_by_seq` 拉回的为准，每个会话最多补最近 1000 条。**保存消息内容**：`content_json` 是解码后的 content（超过 64 KiB 或无法解析时为 `{}`），`plain_text` 是文字消息正文或系统消息说明；图片消息只有地址与尺寸，图片本身在 OpenIM 对象存储。`server_msg_id` 唯一，`(conversation_id, seq)`、`(conversation_id, client_msg_id)` 各自唯一；工作台代发、还没被 OpenIM 受理的消息 `seq` 与 `server_msg_id` 为空。`status` ∈ `sending` / `sent` / `failed` / `unknown`；`sender_instance_id` → `agent_instances`（删除后置空）；随工作空间级联删除；索引 `(conversation_id, sent_at)` 与 `sent_at`。保留 `IM_MESSAGE_RETENTION_DAYS`（默认 365 天），超期由 Worker 按 `sent_at` 删除，OpenIM 里的消息不受影响 |
+
+### 迁移 `0014`（S6-02，T-0055）
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `im_message_pins` | `id`、`conversation_pk`、`server_msg_id`、`pinned_by`、`pinned_at` | 单条消息置顶，挂在当前用户的会话上，只在工作台记录；`conversation_pk` → `im_conversations`（级联删除）；`pinned_by` → `users`（删除后置空）；`(conversation_pk, server_msg_id)` 唯一；每个会话最多 10 条，由接口检查（`PIN_LIMIT_REACHED`）；按 `server_msg_id` 关联消息投影，没有外键，消息超过保留期被删除后，置顶不再显示 |
+| `im_messages`（新增列） | `idempotency_key` | 可空 UUID 列，加唯一约束 `uq_im_messages_idempotency_key`，没有默认值；值是工作台代发时的 Idempotency-Key，写进 OpenIM 消息的 `ex`，发送结果未知时靠它在投影里找回那条消息 |
+
+### 迁移 `0015`（S6-02，T-0055）
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `im_contact_groups` | `id`、`workspace_id`、`name`、`sort_order`、`version`、`created_at`、`updated_at` | 通讯录分组，属于工作空间，随工作空间级联删除；`(workspace_id, name)` 唯一（重名返回 409 `CONTACT_GROUP_EXISTS`）；CHECK `sort_order` 在 0–10000 之间；删除分组不影响实例与好友关系；`version` 用于乐观并发 |
+| `im_contact_group_members` | `contact_group_id`、`instance_id` | 分组与实例的对应关系，联合主键，一个实例可以在多个分组里；随分组或实例级联删除；索引 `ix_im_contact_group_members_instance_id`；成员整体替换，只接受本工作空间的实例（服务层检查） |
+
+### 迁移 `0016`（S6-02，T-0055）
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `im_media` | `id`、`workspace_id`、`uploaded_by`、`mime`、`size`、`width`、`height`、`object_name`、`status`、`conversation_id`、`server_msg_id`、`expires_at`、`created_at` | 管理员上传到 OpenIM 对象存储的图片，**数据库不存图片内容**；`id` 既是 upload_id 也是 media_id；随工作空间级联删除；`uploaded_by` → `users`（删除后置空）；`mime` 按文件头识别（PNG / JPEG / GIF / WebP，不超过 10 MiB）；CHECK `size`、`width`、`height` 都 > 0；`object_name`（`myws/<工作空间>/<id>.<扩展名>`）唯一。`status` ∈ `uploaded` / `used`，发出后记下所在的会话与消息。浏览器经 `/api/v1/im/media/{id}` 读取（上传者本人，或能看到那个会话的管理员）；实例经接入入口的 `/im/obj/m/{id}` 读取（只限 `used`）；两条路径都由工作台代理。部分索引 `ix_im_media_unused_expiry`（`status = 'uploaded'`）：没有用来发消息的上传，`IM_UPLOAD_TTL_MINUTES`（默认 60 分钟）后由 Worker 删除记录 |
+
+### 迁移 `0017`（S6-02、S6-03，T-0057）
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `ai_tool_executions` | `id`、`workspace_id`、`instance_id`、`instance_name`、`acting_user_id`、`tool_name`、`risk_level`、`status`、`summary`、`arguments`、`arguments_display`、`arguments_hash`、`target_version`、`source`、`expires_at`、`decided_by`、`decided_at`、`decision_reason`、`executed_at`、`result_summary`、`error_code`、`request_id`、`version`、`created_at` | MCP 工具调用记录与审批，每次调用一行；随工作空间级联删除；`instance_id`、`acting_user_id`、`decided_by` 在对应记录删除后置空，`instance_name` 留作说明。CHECK：`risk_level` ∈ `read` / `write` / `critical`，`status` ∈ `pending_approval` / `rejected` / `expired` / `executing` / `succeeded` / `failed` / `unknown` / `denied`。读工具直接记 `succeeded` / `failed`，权限不够记 `denied`；写工具与高危工具先记 `pending_approval`，**此时没有执行**（A14）。`arguments` 是规范化后的完整参数，执行时就用它：只在待审批期间保存（读工具与 `denied` 不存），处理完（执行结束、拒绝、过期）就清空；工作流里标为敏感的参数值先加密再存（`$sealed`，用途绑定本行与参数名）；从不对外返回。`arguments_display` 是脱敏后给人看的参数（敏感值为 `***`），长期保留。`arguments_hash` 用于去重，执行前也用它校验参数没被改过；配置了凭证密钥时是 HMAC-SHA256，否则是 SHA-256。部分唯一索引 `uq_ai_tool_executions_pending_args`（`status = 'pending_approval'`）保证同一实例、同一工具、同样参数同时只有一条待审批；每个实例最多 20 条待审批，由服务层检查。`expires_at` 为创建后 15 分钟，Worker 每分钟按部分索引 `ix_ai_tool_executions_pending_expiry` 把到期的改为 `expired`。`target_version` 是创建审批时目标任务 / 日程的版本，执行时版本变了就失败。`source` 是 `{conversation_id, message_server_id, triggered_by_im_id, inferred}`，MCP 请求不带会话信息时由工作台推断。`summary` 由工作台按参数生成，不用 AI 给的文字；`error_code` 只存错误码；`request_id` 是那次 HTTP 请求的 ID；`version` 用于乐观并发（审批接口的 `If-Match`）。索引 `(workspace_id, created_at)`、`(acting_user_id, created_at)`；目前没有清理任务 |
 
 ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。

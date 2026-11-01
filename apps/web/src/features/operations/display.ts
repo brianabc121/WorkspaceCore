@@ -1,7 +1,7 @@
 import type { Schema } from '../../services/api'
 export const serviceLabels: Record<Schema['ServiceStatusOut']['status'], string> = { ok: '正常', degraded: '降级', down: '不可用', unknown: '尚未检查', not_configured: '未部署 / 未配置' }
 export function serviceReason(item: Schema['ServiceStatusOut']): string {
-  const reasons: Record<string, string> = { timeout: '检查超时', unreachable: '无法连接服务', rate_limited: '服务限流中', token_rejected: '授权失效，请管理员更新连接', not_synced: '尚未完成同步', disabled: '连接已停用', not_deployed: '组件尚未部署', not_configured: '尚未配置连接', not_checked: '尚未完成检查', not_ready: '服务尚未就绪', heartbeat_overdue: 'Worker 心跳已过期', heartbeat_unreadable: '无法读取 Worker 心跳', no_heartbeat: '尚无 Worker 心跳', sync_overdue: '同步已过期', source_unavailable: '外部服务暂不可用', missing_permission: '缺少读取权限' }
+  const reasons: Record<string, string> = { timeout: '检查超时', unreachable: '无法连接服务', rate_limited: '服务限流中', token_rejected: '授权失效，请管理员更新连接', not_synced: '尚未完成同步', disabled: '连接已停用', not_deployed: '组件尚未部署', not_configured: '尚未配置连接', not_checked: '尚未完成检查', not_ready: '服务尚未就绪', heartbeat_overdue: 'Worker 心跳已过期', heartbeat_unreadable: '无法读取 Worker 心跳', no_heartbeat: '尚无 Worker 心跳', sync_overdue: '同步已过期', source_unavailable: '外部服务暂不可用', missing_permission: '缺少读取权限', agent_offline: '实例离线（IM 未连接）', agent_not_connected: '实例尚未接入', agent_disabled: '实例已停用', inbox_backlog: 'IM 回调积压，消息投影可能落后' }
   return item.reason ? reasons[item.reason] ?? (item.status === 'ok' ? '' : '请稍后刷新检查结果') : ''
 }
 export function metricText(value: number | null, unit: Schema['MetricViewOut']['unit']): string {

@@ -28,6 +28,7 @@ from starlette.requests import Request
 from app import __version__
 from app.core.errors import ApiError
 from app.core.logging import request_id_var
+from app.domain import ops_metrics
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.mcp_read_tools import READ_HANDLERS, ReadCall
 from app.domain.ratelimit import WindowLimiter
@@ -136,6 +137,20 @@ async def _list_tools(
 
 
 async def _call_tool(
+    ctx: ServerRequestContext[Any, Any], params: types.CallToolRequestParams
+) -> types.CallToolResult:
+    result = await _dispatch(ctx, params)
+    # 运维指标（app/domain/ops_metrics.py）：工具名只取已知的，结果是 ok 或契约里的错误码
+    tool = params.name if params.name in TOOLS else "unknown"
+    outcome = "ok"
+    if result.is_error:
+        error = (result.structured_content or {}).get("error") or {}
+        outcome = str(error.get("code") or "error").lower()
+    await ops_metrics.bump(getattr(_state(ctx), "redis", None), "mcp_tool_calls", tool, outcome)
+    return result
+
+
+async def _dispatch(
     ctx: ServerRequestContext[Any, Any], params: types.CallToolRequestParams
 ) -> types.CallToolResult:
     caller = _caller(ctx)

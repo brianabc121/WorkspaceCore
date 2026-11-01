@@ -4968,14 +4968,14 @@ export interface components {
             checked_at: string | null;
             /**
              * Id
-             * @description 稳定的标识：核心服务为 api、worker、postgres、redis；监控为 prometheus、grafana；集成为 integration:<集成 UUID>；n8n 连接为 n8n
+             * @description 稳定的标识：核心服务为 api、worker、postgres、redis；监控为 prometheus、grafana；集成为 integration:<集成 UUID>；n8n 连接为 n8n；V2 为 openim 与 agent:<实例 UUID>（实例只对 owner / admin 列出）
              */
             id: string;
             /**
              * Kind
              * @enum {string}
              */
-            kind: "core" | "monitoring" | "integration";
+            kind: "core" | "monitoring" | "integration" | "agents";
             /**
              * Latency Ms
              * @description 最近一次检查的耗时（毫秒）
@@ -4985,7 +4985,7 @@ export interface components {
             name: string;
             /**
              * Provider
-             * @description 集成的类型（vikunja / github / n8n）；其他服务为 null
+             * @description 集成的类型（vikunja / github / n8n），OpenClaw 实例为 openclaw；其他服务为 null
              */
             provider?: string | null;
             /**

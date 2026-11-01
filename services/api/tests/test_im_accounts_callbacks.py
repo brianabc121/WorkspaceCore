@@ -403,6 +403,8 @@ async def test_group_relay_streak_rate_and_mentions(env: ImEnv) -> None:
         "SELECT count(*) FROM workspace.notifications WHERE type = 'im_relay_paused'",
     )
     assert notices == 1
+    # 运维指标：每次暂停计一次（T-0062）
+    assert int(await env.app.state.redis.hget("ops:counter:im_relay_pauses", "_")) == 1
     # 系统消息不清零；管理员发言后恢复
     assert await env.verdict(GROUP, msg("ws_notice", group_id=group)) == 0
     assert await env.verdict(GROUP, msg(oc_a, group_id=group)) == 5001

@@ -18,7 +18,7 @@ from app.core.logging import configure_logging
 from app.core.metrics import CONTENT_TYPE, HttpMetrics
 from app.core.middleware import install_middleware
 from app.core.resources import create_engine, create_redis, create_stream_redis
-from app.domain import events, mcp_tools, overview, stream
+from app.domain import events, mcp_tools, ops_metrics, overview, stream
 from app.domain.connectors import ConnectorRuntime
 from app.domain.credentials import CredentialBox
 from app.domain.operations import ServiceCache
@@ -112,9 +112,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def metrics(request: Request) -> Response:
         # 只在内部网络供 Prometheus 抓取：Caddy 不转发 /metrics（Sprint 5 契约第 3.2 节）
         body = request.app.state.http_metrics.render()
-        return Response(content=body, media_type=CONTENT_TYPE)
+        return Response(content=body + await _ops_metrics(request.app), media_type=CONTENT_TYPE)
 
     return app
+
+
+async def _ops_metrics(app: FastAPI) -> bytes:
+    """V2 运维指标（app/domain/ops_metrics.py）。
+
+    数据库或 Redis 慢、不可用时省略这一部分，请求指标照常返回。
+    """
+    sessionmaker = getattr(app.state, "sessionmaker", None)
+    if sessionmaker is None:
+        return b""
+    try:
+        async with asyncio.timeout(app.state.settings.readiness_timeout_seconds):
+            async with sessionmaker() as db:
+                families = await ops_metrics.collect(db, getattr(app.state, "redis", None))
+    except Exception as error:  # 抓取失败时照常返回请求指标
+        logger.warning("ops metrics unavailable", extra={"error_type": type(error).__name__})
+        return b""
+    return ops_metrics.render(families)
 
 
 app = create_app()
