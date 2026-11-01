@@ -2,7 +2,7 @@ import { createRouter, createWebHistory, type RouterHistory } from 'vue-router'
 import { watch } from 'vue'
 import type { Pinia } from 'pinia'
 import { QueryClient } from '@tanstack/vue-query'
-import { adminOnly, navigation } from './navigation'
+import { adminOnly, navigation, ownerOnly } from './navigation'
 import { useAuthStore } from '../stores/auth'
 import AuthPage from '../pages/AuthPage.vue'
 import ConnectionErrorPage from '../pages/ConnectionErrorPage.vue'
@@ -22,6 +22,8 @@ import DeveloperPage from '../pages/DeveloperPage.vue'
 import OperationsPage from '../pages/OperationsPage.vue'
 import AutomationsPage from '../pages/AutomationsPage.vue'
 import ImPage from '../pages/ImPage.vue'
+import AgentsPage from '../pages/AgentsPage.vue'
+import SecretsPage from '../pages/SecretsPage.vue'
 
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHistory(), queryClient = new QueryClient()) {
   const auth = useAuthStore(pinia)
@@ -35,8 +37,8 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
       { path: '/settings/audit', component: AuditPage, meta: { title: '审计日志', admin: true } },
       ...navigation.map((item) => ({
         path: item.path,
-        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/automations': AutomationsPage, '/im': ImPage, '/settings': SettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
-        meta: { title: item.title, description: item.description, admin: adminOnly.has(item.path) },
+        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/automations': AutomationsPage, '/im': ImPage, '/agents': AgentsPage, '/agents/secrets': SecretsPage, '/settings': SettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
+        meta: { title: item.title, description: item.description, admin: adminOnly.has(item.path), owner: ownerOnly.has(item.path) },
       })),
       { path: '/:pathMatch(.*)*', component: NotFoundPage, meta: { title: '页面未找到' } },
     ],
@@ -50,6 +52,7 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
     if (!auth.user) return to.path === '/login' ? true : { path: '/login', query: { redirect: to.fullPath } }
     if (to.path === '/setup' || to.path === '/login') return '/'
     if (to.meta.admin && !auth.canManage) return '/forbidden'
+    if (to.meta.owner && !auth.isOwner) return '/forbidden'
     return true
   })
   watch(() => auth.user?.id, (user, previous) => {
@@ -60,7 +63,7 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
   }, { flush: 'sync' })
   watch(() => auth.workspaceId, () => {
     queryClient.removeQueries({ predicate: (query) => query.queryKey[0] === 'audit' })
-    if (router.currentRoute.value.meta.admin && !auth.canManage) void router.replace('/forbidden')
+    if ((router.currentRoute.value.meta.admin && !auth.canManage) || (router.currentRoute.value.meta.owner && !auth.isOwner)) void router.replace('/forbidden')
   })
   return router
 }

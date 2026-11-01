@@ -285,3 +285,15 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .im-checks .check-field { margin: 4px 0; }
 .im-danger { border-color: #dc6672; justify-self: start; }
 .im-header-link { display: inline-flex; gap: 6px; align-items: center; text-decoration: none; }
+/* OpenClaw instances and the secret vault (V2 OC-4). */
+.agent-list { display: grid; gap: 16px; min-width: 0; margin: 16px 0; }
+.agent-card, .agent-switch { padding: 20px; min-width: 0; overflow-wrap: anywhere; margin: 12px 0; }
+.agent-card h2 { margin: 0; font-size: 1.1rem; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.agent-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 16px; margin: 12px 0; }
+.agent-facts dt { color: var(--muted); font-size: .8rem; }
+.agent-facts dd { margin: 2px 0 0; }
+.agent-section { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; display: grid; gap: 8px; }
+.agent-section h3 { margin: 0; font-size: 1rem; }
+.agent-table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: .85rem; }
+.agent-table th, .agent-table td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); }
+@media (max-width: 760px) { .agent-card, .agent-switch { padding: 16px; } }
