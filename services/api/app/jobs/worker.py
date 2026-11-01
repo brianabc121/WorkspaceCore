@@ -150,14 +150,16 @@ async def watch_agents(ctx: dict[str, Any]) -> int:
         return 0
     async with im_ctx.sessions() as db:
         try:
-            changed = await agent_watch.reconcile_presence(
+            result = await agent_watch.reconcile_presence(
                 db, im.ImAccounts(db, im_ctx.client), im_ctx.redis
             )
         except ConnectorError as error:
             logger.warning("agent presence reconcile failed", extra={"error_kind": error.kind})
             return 0
         await db.commit()
-        return changed
+        # 离线提醒已随事务写入：提交成功后才记“已提醒”，提交失败时下一轮重新提醒
+        await agent_watch.confirm_notified(im_ctx.redis, result.notified)
+        return result.changed
 
 
 async def reconcile_im_friends(ctx: dict[str, Any]) -> int:

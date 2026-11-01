@@ -11,10 +11,11 @@
 
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain import events, notifications
@@ -77,11 +78,23 @@ async def _online_users(client: OpenIMClient, ids: Sequence[str]) -> set[str]:
     return online
 
 
+@dataclass
+class PresenceResult:
+    changed: int = 0
+    # 已写入通知、等提交成功后再记“已提醒”的 (Redis 键, 离线开始时间)
+    notified: list[tuple[str, str]] = field(default_factory=list)
+
+
 async def reconcile_presence(
     db: AsyncSession, accounts: ImAccounts, redis: Redis, *, now: datetime | None = None
-) -> int:
-    """按 OpenIM 的实时在线状态纠正实例状态；返回纠正的个数。调用方提交。"""
+) -> PresenceResult:
+    """按 OpenIM 的实时在线状态纠正实例状态。调用方提交，提交成功后调用 confirm_notified。
+
+    查询 OpenIM 期间管理员可能停用了实例：状态只用带原状态条件的原子更新修改，
+    条件不成立（例如已被停用）就不改，不会把 disabled 覆盖成 online / offline。
+    """
     moment = now or datetime.now(UTC)
+    result = PresenceResult()
     instances = list(
         (
             await db.scalars(
@@ -92,47 +105,62 @@ async def reconcile_presence(
         ).all()
     )
     if not instances:
-        return 0
+        return result
     online = await _online_users(accounts.client, [i.im_user_id for i in instances])
-    changed = 0
+    offline: list[AgentInstance] = []
     for instance in instances:
         connected = instance.im_user_id in online
-        if instance.status == "disabled":
+        current = instance.status
+        if current == "disabled":
             if connected:
                 # 停用后又连上来（旧令牌在下线之前签发）：再踢一次
                 await accounts.force_logout([instance.im_user_id])
             continue
-        if connected and instance.status != "online":
-            instance.status = "online"
-            await mark_online(redis, instance)
-        elif not connected and instance.status == "online":
-            instance.status = "offline"
-            await mark_offline(redis, instance, moment)
+        if connected and current != "online":
+            target = "online"
+        elif not connected and current == "online":
+            target = "offline"
         else:
+            if current == "offline":
+                offline.append(instance)
             continue
-        changed += 1
+        updated = await db.execute(
+            update(AgentInstance)
+            .where(AgentInstance.id == instance.id, AgentInstance.status == current)
+            .values(status=target)
+            .execution_options(synchronize_session=False)
+        )
+        if getattr(updated, "rowcount", 0) != 1:
+            continue  # 状态在查询期间被改了（例如被停用）：以那次修改为准
+        result.changed += 1
         events.mark(db, instance.workspace_id, "agents")
-    for instance in instances:
-        if instance.status == "offline":
-            await _notify_if_long_offline(db, redis, instance, moment)
-    return changed
+        if target == "online":
+            await mark_online(redis, instance)
+        else:
+            await mark_offline(redis, instance, moment)
+            offline.append(instance)
+    for instance in offline:
+        await _notify_if_long_offline(db, redis, instance, moment, result)
+    return result
+
+
+async def confirm_notified(redis: Redis, notified: Sequence[tuple[str, str]]) -> None:
+    """离线提醒随事务提交成功后，记下“已提醒”；提交失败时不记，下一轮重新提醒。"""
+    for key, since in notified:
+        await redis.set(key, since, ex=OFFLINE_KEY_TTL_SECONDS)
 
 
 async def _notify_if_long_offline(
-    db: AsyncSession, redis: Redis, instance: AgentInstance, now: datetime
+    db: AsyncSession, redis: Redis, instance: AgentInstance, now: datetime, result: PresenceResult
 ) -> None:
     since = await _offline_since(redis, instance, now)
     if now - since < OFFLINE_NOTIFY_AFTER:
         return
-    first = await redis.set(
-        OFFLINE_NOTIFIED_KEY.format(instance_id=instance.id),
-        since.isoformat(),
-        nx=True,
-        ex=OFFLINE_KEY_TTL_SECONDS,
-    )
-    if not first:
+    notified_key = OFFLINE_NOTIFIED_KEY.format(instance_id=instance.id)
+    if await redis.exists(notified_key):
         return
     minutes = int((now - since).total_seconds() // 60)
+    # 同一次离线在同一小时内只写一条（notify_admins 按小时去重），提交失败重试时不会重复
     await notifications.notify_admins(
         db,
         instance.workspace_id,
@@ -144,6 +172,7 @@ async def _notify_if_long_offline(
         link="/agents",
         key=f"{instance.id}:{since.isoformat()}",
     )
+    result.notified.append((notified_key, since.isoformat()))
 
 
 async def reconcile_friendships(db: AsyncSession, accounts: ImAccounts) -> int:

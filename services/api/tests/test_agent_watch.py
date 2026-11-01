@@ -13,7 +13,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.domain.agent_watch import OFFLINE_SINCE_KEY
+from app.domain import agent_watch, im
+from app.domain.agent_watch import OFFLINE_NOTIFIED_KEY, OFFLINE_SINCE_KEY
 from app.jobs import worker
 from tests.helpers import ClientFactory, run_sql
 from tests.test_agents_api import agent_headers
@@ -84,6 +85,57 @@ async def test_presence_follows_openim_and_long_offline_is_notified_once(env: Im
     env.fake.down = True
     assert await worker.watch_agents(ctx) == 0
     assert await _status(env, a["id"]) == "online"
+
+
+async def test_disabling_during_the_reconcile_is_not_overwritten(
+    env: ImEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """查询 OpenIM 期间管理员停用了实例：对账不能把 disabled 覆盖成 online / offline。"""
+    a = await env.create_instance(name="甲")
+    ctx = await _worker_ctx(env)
+    env.fake.online = {a["im_user_id"]}
+    assert await worker.watch_agents(ctx) == 1
+    assert await _status(env, a["id"]) == "online"
+
+    real = agent_watch._online_users
+
+    async def disable_meanwhile(client: object, ids: list[str]) -> set[str]:
+        online = await real(client, ids)  # type: ignore[arg-type]
+        await env.set_enabled(a["id"], False)  # 在对账读出实例之后、提交之前停用
+        return online
+
+    monkeypatch.setattr(agent_watch, "_online_users", disable_meanwhile)
+    env.fake.online = set()  # 停用时踢下线，对账看到的是“离线”
+    assert await worker.watch_agents(ctx) == 0
+    assert await _status(env, a["id"]) == "disabled"
+
+
+async def test_offline_notice_is_retried_when_the_transaction_fails(env: ImEnv) -> None:
+    """离线提醒在事务里写入；提交失败（这里回滚）时不记“已提醒”，下一轮重新提醒。"""
+    a = await env.create_instance(name="甲")
+    ctx = await _worker_ctx(env)
+    env.fake.online = {a["im_user_id"]}
+    await worker.watch_agents(ctx)
+    env.fake.online = set()
+    await worker.watch_agents(ctx)
+    redis = env.app.state.redis
+    await redis.set(
+        OFFLINE_SINCE_KEY.format(instance_id=a["id"]),
+        (datetime.now(UTC) - timedelta(minutes=11)).isoformat(),
+    )
+    app = env.app
+    client = im.openim_client(app.state.settings, app.state.connectors, redis)
+    assert client is not None
+    async with app.state.sessionmaker() as db:
+        result = await agent_watch.reconcile_presence(db, im.ImAccounts(db, client), redis)
+        assert len(result.notified) == 1
+        await db.rollback()
+    assert await redis.get(OFFLINE_NOTIFIED_KEY.format(instance_id=a["id"])) is None
+    assert await _count(env, "agent_offline") == 0
+    # 下一轮正常提交：提醒一次，并记下“已提醒”
+    await worker.watch_agents(ctx)
+    assert await _count(env, "agent_offline") == 1
+    assert await redis.get(OFFLINE_NOTIFIED_KEY.format(instance_id=a["id"])) is not None
 
 
 async def test_missing_friendships_are_restored_hourly(env: ImEnv) -> None:

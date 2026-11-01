@@ -36,3 +36,4 @@ updated: 2026-11-01
 - 2026-11-01 18:03 UTC · claude · 开始任务
 - 2026-11-01 18:37 UTC · claude · 全部完成：agent_watch（在线状态每 5 分钟、好友每小时、到期提醒每天）、迁移 0018 im_token_expires_at、OpenIM 令牌 30 天、tools.deny 禁用插件媒体工具（真实 OpenClaw 场景 2 核对工具清单）、OpenIM / caddy / agent-gateway 健康检查与 openim-up --wait、审批来源 triggered_by_name（卡片与审批中心）、IM 会话导出按钮、实例页显示 IM 令牌到期、tests/e2e/sprint6_browser.cjs（本机真实 OpenIM 上 10 项通过）接入 CI agents job。越界说明：docs/decisions/2026-10-31-v2-oc1-contract.md 补两条说明（claude 自己的契约 ADR，在 paths 的 docs/decisions 范围内）
 - 2026-11-01 18:37 UTC · claude · status in_progress → done：V2 缺口已补齐，检查见 PR
+- 2026-11-01 19:24 UTC · claude · 处理 Codex 审查（PR #107）：P1 在线状态对账改为带原状态条件的原子更新，查询 OpenIM 期间被停用的实例不会被覆盖；P2 离线“已提醒”标记改为事务提交成功后再写（confirm_notified）。各加一条回归测试
