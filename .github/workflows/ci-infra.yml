@@ -179,7 +179,8 @@ jobs:
         run: make openim-up
       - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道）
         run: |
-          python3 tests/e2e/agents_acceptance.py --server-ca "$RUNNER_TEMP/agent-server-ca.pem" \
+          # 要以 root 运行：接入包目录交给容器里的 uid 1000（CHECKLIST.md 的做法）
+          sudo -E python3 tests/e2e/agents_acceptance.py --server-ca "$RUNNER_TEMP/agent-server-ca.pem" \
             --intranet intranet.test:8443 --public public.test:9443
       - name: 失败时输出服务状态与日志
         if: failure()

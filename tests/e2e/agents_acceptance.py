@@ -683,8 +683,10 @@ def setup(args: argparse.Namespace, report: Report, base: str) -> Ctx:
     model_ip = model.start(args.api_image or api_image())
     tarball = plugin_tarball(workdir)
     owner = Owner(base)
-    status = owner.call("GET", "/api/v1/im/status")
-    report.check("管理员的 IM 账号就绪", status["available"] and status["account_ready"])
+    # OpenIM 刚启动时要一两分钟才就绪（第一次启动初始化各组件），期间 IM 状态是不可用
+    status = wait_for("OpenIM 就绪", lambda: (s := owner.call("GET", "/api/v1/im/status"))["available"]
+                      and s["account_ready"] and s, timeout=240, interval=5)
+    report.check("管理员的 IM 账号就绪", bool(status))
     keys = {"a": "sk-a-" + uuid.uuid4().hex, "b": "sk-b-" + uuid.uuid4().hex}
     secrets_: dict[str, str] = {}
     instances: list[Instance] = []
@@ -764,6 +766,9 @@ def main() -> int:
     parser.add_argument("--only", help="只跑这些场景（逗号分隔，例如 3,4；传空字符串只清理现场）")
     parser.add_argument("--api-image", default=None, help="运行假模型用的镜像（默认用 api 服务的镜像）")
     args = parser.parse_args()
+    if os.geteuid() != 0:
+        # 接入包目录要交给容器里的 uid 1000（与 CHECKLIST.md 一致），还要读写 600 的文件
+        sys.exit("需要 root 运行：sudo -E python3 tests/e2e/agents_acceptance.py ...")
     base = parse_base_url(args.base_url)
     report = Report()
     ctx: Ctx | None = None
