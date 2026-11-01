@@ -4,7 +4,8 @@
 
 - **群**：群主是当前用户（`groupType=2`）；成员只能是本工作空间的实例（至少一个，最多 50 个）和
   其他 owner / admin（最多 20 个）。`ws_notice` 建群时一起拉进去，用来发“自动接力已暂停”等提示；
-  imAdmin 作为调用者由 OpenIM 自动加入（`internal/rpc/group/group.go` 的 CreateGroup）。
+  调用者 imAdmin 不入群（`internal/rpc/group/group.go` 的 CreateGroup 只让群主、管理员、成员入群，
+  真实实例已核实）。
   建群必须带 Idempotency-Key：群 ID 由键推出（`ws` + 32 位十六进制），OpenIM 已有同 ID 的群时
   返回 1202，就当作上次已经建好（结果未知时重发同一个键即可）。
   改名与公告、邀请、移出（不能移出群主）、解散（只有群主）先调用 OpenIM，失败时 503、本地不改。

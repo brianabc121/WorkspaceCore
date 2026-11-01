@@ -84,6 +84,15 @@ class Settings(BaseSettings):
     openim_callback_path_token: SecretStr | None = None
     openim_callback_allowed_cidrs: str = ""
     openim_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+    # OpenIM 对象存储（Garage）的地址：OpenIM 签出的上传与下载链接指向它（OpenIM 的
+    # IMENV_MINIO_EXTERNALADDRESS 要设成同一个地址）。只有工作台后端访问它，不对外暴露；
+    # 为空时不能上传和显示图片
+    openim_object_url: str = ""
+    # 没有用于发消息的上传，多少分钟后删除记录（契约第 5.4 节）
+    im_upload_ttl_minutes: int = Field(default=60, ge=5, le=1440)
+    # 写进图片消息、给实例取图用的地址前缀。实例统一经本机回环（接入包里的本机代理）访问工作台，
+    # 所以默认是 http://127.0.0.1:<agent_tunnel_port>，内网与外网实例都能用同一个地址
+    agent_im_object_base_url: str = ""
 
     # 第三方集成（Sprint 3 契约第 4.3 节）：解析到私有地址时只允许这些主机名（逗号分隔），
     # 例如 Compose 中独立部署的 vikunja；其余私有、回环、链路本地地址一律拒绝（SSRF 防护）
@@ -213,6 +222,12 @@ class Settings(BaseSettings):
             for part in self.openim_callback_allowed_cidrs.split(",")
             if part.strip()
         )
+
+    @property
+    def im_object_base_url(self) -> str:
+        return (
+            self.agent_im_object_base_url or f"http://127.0.0.1:{self.agent_tunnel_port}"
+        ).rstrip("/")
 
     @property
     def openim_enabled(self) -> bool:

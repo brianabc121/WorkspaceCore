@@ -18,7 +18,7 @@ from app.api.deps import (
     get_im_service,
     workspace_admin,
 )
-from app.core.errors import not_implemented
+from app.core.errors import ApiError
 from app.domain.im_groups import ImGroupService
 from app.domain.im_service import ImService
 from app.domain.policy import WorkspaceAccess
@@ -286,8 +286,24 @@ async def export_im_conversation(
     responses=error_responses(401, 403, 404, 413, 422, 503),
     openapi_extra={"requestBody": _IMAGE_BODY},
 )
-async def upload_im_image(access: Admin) -> ImUploadOut:
-    raise not_implemented(_T)
+async def upload_im_image(request: Request, access: Admin, service: Service) -> ImUploadOut:
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_IMAGE_BYTES:
+        raise _too_large()
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_IMAGE_BYTES:
+            raise _too_large()
+    return await service.upload(access, bytes(body))
+
+
+def _too_large() -> ApiError:
+    return ApiError(
+        413,
+        "PAYLOAD_TOO_LARGE",
+        f"图片不能超过 {MAX_IMAGE_BYTES // (1024 * 1024)} MiB",
+    )
 
 
 @router.get(
@@ -296,8 +312,18 @@ async def upload_im_image(access: Admin) -> ImUploadOut:
     responses={200: _IMAGE_RESPONSE, **_read_errors},
     response_model=None,
 )
-async def get_im_media(access: Admin, media_id: UUID) -> None:
-    raise not_implemented(_T)
+async def get_im_media(access: Admin, service: Service, media_id: UUID) -> Response:
+    data, mime = await service.media(access, media_id)
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Content-Disposition": "inline",
+        },
+    )
 
 
 # ---------------------------------------------------------------- 群
