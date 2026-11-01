@@ -6,10 +6,13 @@
 - 认证失败一律 401 AGENT_UNAUTHORIZED，不区分原因；外网入口同一来源失败 10 次后封禁 15 分钟；
 - 密钥只写不读：管理员接口从不返回明文；实例取用时未授权与不存在都是 NOT_FOUND，每次取用都留记录。
 
-OpenIM 相关的动作（注册用户、加好友、强制下线）由 OC-3 接上，这里先保持实例的 im_ready = false。
+OpenIM 相关的动作（OC-3，app/domain/im.py）：登记实例后注册 IM 账号并与 owner / admin 互加好友，
+成功后 im_ready = true（失败时由 Worker 重试）；停用实例、关闭总开关时强制下线；
+实例启动时取 IM 令牌（每小时最多 10 次）。没有部署 OpenIM 时这些动作都跳过。
 """
 
 import hashlib
+import logging
 import secrets
 import uuid
 from collections.abc import Sequence
@@ -28,9 +31,12 @@ from app.core.errors import ApiError
 from app.domain.agent_ca import ClientCertificate, ensure_ca, issue_client_certificate
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
+from app.domain.im import ImAccounts, im_unavailable
 from app.domain.policy import WorkspaceAccess
 from app.domain.ratelimit import FailureLimiter, WindowLimiter
 from app.domain.tasks import decode_cursor, encode_cursor
+from app.integrations.base import ConnectorError
+from app.integrations.openim import PLATFORM_WEB, OpenIMClient
 from app.models import (
     AgentCredential,
     AgentInstance,
@@ -57,6 +63,7 @@ from app.schemas.agents import (
     BundleRequest,
     HeartbeatRequest,
     HeartbeatResponse,
+    ImTokenResponse,
     SecretAccessOut,
     SecretAccessPage,
     SecretGrantOut,
@@ -65,6 +72,8 @@ from app.schemas.agents import (
     SecretResolveError,
     SecretResolveResponse,
 )
+
+logger = logging.getLogger("app.agents")
 
 TOKEN_PREFIX = "mwa_"  # noqa: S105 -- 令牌格式的前缀，不是密钥
 TOKEN_PREFIX_SHOWN = 12
@@ -78,6 +87,8 @@ AUTH_FAILURE_LIMIT = 10
 AUTH_FAILURE_WINDOW_SECONDS = 15 * 60
 RESOLVE_PER_MINUTE = 60
 HEARTBEAT_PER_MINUTE = 60
+# 签发 IM 令牌会踢掉旧连接（OC-0 F1），只在实例启动时调用（契约第 7 节）
+IM_TOKEN_PER_HOUR = 10
 
 
 def agent_secret_context(secret_id: uuid.UUID, value_version: int) -> str:
@@ -162,10 +173,17 @@ class IssuedToken:
 
 
 class AgentService:
-    def __init__(self, db: AsyncSession, settings: Settings, redis: Redis | None = None) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        settings: Settings,
+        redis: Redis | None = None,
+        im: OpenIMClient | None = None,
+    ) -> None:
         self.db = db
         self.settings = settings
         self.redis = redis
+        self.im = im
         self.audit = AuditTrail(db, settings)
 
     def _box(self) -> CredentialBox:
@@ -217,7 +235,19 @@ class AgentService:
             client_ip=client_ip,
         )
         await self.db.commit()
-        # TODO(OC-3)：关闭时强制下线全部实例的 IM（/auth/force_logout）
+        if not body.agents_enabled and self.im is not None:
+            # 关闭总开关：强制下线本工作空间全部实例的 IM。尽力而为：回调与接入网关还会按
+            # 总开关拒收消息、拒绝连接
+            im_user_ids = (
+                await self.db.scalars(
+                    select(AgentInstance.im_user_id).where(
+                        AgentInstance.workspace_id == access.workspace.id,
+                        AgentInstance.im_ready.is_(True),
+                        AgentInstance.status != "disabled",
+                    )
+                )
+            ).all()
+            await ImAccounts(self.db, self.im).force_logout(im_user_ids)
         return self._settings_out(row)
 
     # ---------------------------------------------------------------- 实例
@@ -368,8 +398,24 @@ class AgentService:
             client_ip=client_ip,
         )
         await self.db.commit()
-        # TODO(OC-3)：注册 OpenIM 用户 oc_<id>，与 owner / admin 互加好友，成功后 im_ready = true
+        await self._provision_im(instance)
         return await self._one_out(instance)
+
+    async def _provision_im(self, instance: AgentInstance) -> bool:
+        """注册实例的 IM 账号并互加好友；失败时 im_ready 保持 false，由 Worker 重试。"""
+        if self.im is None:
+            return False
+        try:
+            await ImAccounts(self.db, self.im).provision_instance(instance)
+        except ConnectorError as error:
+            await self.db.rollback()
+            logger.warning(
+                "openim provisioning failed",
+                extra={"instance_id": str(instance.id), "error_kind": error.kind},
+            )
+            return False
+        await self.db.commit()
+        return True
 
     def _check_version(self, instance: AgentInstance, version: int) -> None:
         if instance.version != version:
@@ -428,7 +474,9 @@ class AgentService:
             client_ip=client_ip,
         )
         await self.db.commit()
-        # TODO(OC-3)：停用时强制下线 IM（/auth/force_logout）
+        if not enabled and instance.im_ready and self.im is not None:
+            # 尽力而为：回调与接入网关还会按停用状态拒收消息、拒绝连接
+            await ImAccounts(self.db, self.im).force_logout([instance.im_user_id])
         return await self._one_out(instance)
 
     async def revoke_credential(
@@ -1116,3 +1164,36 @@ class AgentService:
         )
         await self.db.commit()
         return HeartbeatResponse(server_time=now)
+
+    async def issue_im_token(self, principal: AgentPrincipal) -> ImTokenResponse:
+        """实例启动时取 IM 令牌（契约第 7 节）。IM 账号还没就绪时先补一次。"""
+        if self.redis is not None:
+            retry = await WindowLimiter(self.redis, 3600).hit(
+                f"agent_rate:im_token:{principal.instance.id}", IM_TOKEN_PER_HOUR
+            )
+            if retry is not None:
+                raise _rate_limited(retry)
+        if self.im is None:
+            raise im_unavailable()
+        instance = principal.instance
+        if not instance.im_ready and not await self._provision_im(instance):
+            raise im_unavailable()
+        try:
+            issued = await self.im.user_token(instance.im_user_id, PLATFORM_WEB)
+        except ConnectorError as error:
+            logger.warning(
+                "openim user token failed",
+                extra={"instance_id": str(instance.id), "error_kind": error.kind},
+            )
+            raise im_unavailable() from error
+        logger.info("openim user token issued", extra={"instance_id": str(instance.id)})
+        return ImTokenResponse(
+            token=issued.token,
+            im_user_id=instance.im_user_id,
+            platform_id=PLATFORM_WEB,
+            expires_at=_now() + timedelta(seconds=issued.expires_in)
+            if issued.expires_in > 0
+            else None,
+            ws_addr=None,
+            api_addr=None,
+        )

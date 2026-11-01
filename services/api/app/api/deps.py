@@ -23,6 +23,7 @@ from app.domain.calendar import CalendarService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.dashboards import DashboardService
 from app.domain.developer import DeveloperService
+from app.domain.im import openim_client
 from app.domain.integrations import IntegrationService
 from app.domain.knowledge import KnowledgeService
 from app.domain.notifications import NotificationService
@@ -31,6 +32,7 @@ from app.domain.search import SearchService
 from app.domain.security import csrf_token_for, csrf_token_matches
 from app.domain.tasks import TaskService
 from app.domain.workspaces import WorkspaceService
+from app.integrations.openim import OpenIMClient
 from app.jobs.queue import JobQueue
 from app.schemas.workspaces import Role
 
@@ -143,12 +145,22 @@ def deployment_health(app: FastAPI) -> DeploymentHealth:
     )
 
 
+def get_openim(
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> OpenIMClient | None:
+    """没有部署 OpenIM 时为 None；管理员令牌缓存在 Redis。"""
+    return openim_client(settings, connectors, redis)
+
+
 def get_agent_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_app_settings)],
     redis: Annotated[Redis, Depends(get_redis)],
+    im: Annotated[OpenIMClient | None, Depends(get_openim)],
 ) -> AgentService:
-    return AgentService(db, settings, redis)
+    return AgentService(db, settings, redis, im)
 
 
 def get_automation_service(

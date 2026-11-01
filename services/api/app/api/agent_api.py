@@ -9,15 +9,24 @@
 认证失败一律 401 AGENT_UNAUTHORIZED，不区分原因。实现：OC-2（T-0054）、OC-3（T-0055）。
 """
 
+import asyncio
+import hmac
+import json
+import logging
 from ipaddress import IPv4Network, IPv6Network, ip_address
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Path, Request, Response, Security
+from fastapi import APIRouter, BackgroundTasks, Depends, Path, Request, Response, Security
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.deps import client_ip, get_agent_service
-from app.core.errors import not_implemented
+from app.api.deps import client_ip, get_agent_service, get_db, get_redis
+from app.core.errors import ApiError, not_implemented
+from app.domain import im_callbacks
 from app.domain.agents import AgentPrincipal, AgentService
+from app.models import ImGroup
 from app.schemas.agents import (
     HeartbeatRequest,
     HeartbeatResponse,
@@ -26,6 +35,14 @@ from app.schemas.agents import (
     SecretResolveResponse,
 )
 from app.schemas.common import error_responses
+from app.schemas.openim_callbacks import (
+    BEFORE_COMMANDS,
+    MAX_CALLBACK_BYTES,
+    CallbackResponse,
+    MsgCallback,
+)
+
+logger = logging.getLogger("app.im")
 
 instance_token = HTTPBearer(
     scheme_name="InstanceToken",
@@ -56,6 +73,11 @@ async def instance_principal(
 
 def _from_ingress_proxy(request: Request, networks: tuple[IPv4Network | IPv6Network, ...]) -> bool:
     """直接对端（不看 X-Forwarded-For）是否是接入入口的 Caddy。"""
+    return _from_networks(request, networks)
+
+
+def _from_networks(request: Request, networks: tuple[IPv4Network | IPv6Network, ...]) -> bool:
+    """直接对端（不看 X-Forwarded-For）是否在这些网段里。"""
     if not networks or request.client is None:
         return False
     try:
@@ -98,8 +120,11 @@ async def resolve_agent_secrets(
     "每个实例每小时最多 10 次。",
     responses=error_responses(401, 429, 503),
 )
-async def issue_agent_im_token(credentials: InstanceCredentials) -> ImTokenResponse:
-    raise not_implemented("T-0055")
+async def issue_agent_im_token(
+    response: Response, principal: Principal, service: Service
+) -> ImTokenResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return await service.issue_im_token(principal)
 
 
 @router.post(
@@ -126,10 +151,108 @@ async def authorize_openim_passthrough(request: Request) -> None:
     raise not_implemented("T-0055")
 
 
+# before 回调的判断上限：超过就拒收 5009（目标是 200 毫秒内，契约第 10 节）
+JUDGE_TIMEOUT_SECONDS = 1.0
+
+
+def _callback_reply(response: CallbackResponse) -> JSONResponse:
+    return JSONResponse(response.model_dump(by_alias=True))
+
+
+async def _read_callback(request: Request) -> dict[str, Any] | None:
+    """读回调的请求体（上限 256 KiB）；超限或不是 JSON 对象时返回 None。"""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_CALLBACK_BYTES:
+        return None
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_CALLBACK_BYTES:
+            return None
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+async def _notify_relay_paused(sessions: async_sessionmaker[AsyncSession], group: ImGroup) -> None:
+    try:
+        async with sessions() as db:
+            await im_callbacks.relay_paused(db, group)
+    except Exception as error:  # 通知失败不影响已经发出的拒收应答
+        logger.warning(
+            "relay paused notification failed", extra={"error_type": type(error).__name__}
+        )
+
+
 @gateway.post("/internal/openim/{path_token}/{command}")
 async def receive_openim_callback(
     request: Request,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
     path_token: Annotated[str, Path(min_length=32, max_length=128)],
     command: Annotated[str, Path(max_length=64, pattern=r"^callback[A-Za-z]+Command$")],
-) -> None:
-    raise not_implemented("T-0055")
+) -> Response:
+    """OpenIM 回调。地址口令不对、来源不在允许的网段或没有部署 OpenIM 时一律 404。"""
+    settings = request.app.state.settings
+    expected = settings.openim_callback_path_token
+    if (
+        expected is None
+        or not settings.openim_enabled
+        or not hmac.compare_digest(path_token.encode(), expected.get_secret_value().encode())
+        or not _from_networks(request, settings.openim_callback_networks)
+    ):
+        raise ApiError(404, "NOT_FOUND", "资源不存在")
+    payload = await _read_callback(request)
+    if command in BEFORE_COMMANDS:
+        return _callback_reply(await _judge(request, background, db, redis, payload))
+    if payload is None:
+        logger.warning("openim callback unreadable", extra={"command": command})
+        return _callback_reply(CallbackResponse.allow())
+    event_key = im_callbacks.inbox_event_key(command, payload)
+    if event_key is not None:
+        try:
+            await im_callbacks.record_inbox(db, command, event_key, payload)
+        except Exception as error:  # 写不进收件箱也放行：对账会补齐
+            logger.warning(
+                "openim callback not recorded",
+                extra={"command": command, "error_type": type(error).__name__},
+            )
+    elif command != "callbackAfterImportFriendsCommand":
+        # 工作台自己导入好友也会触发 AfterImportFriends（OC-0 F2），放行不处理
+        await im_callbacks.count_ignored(redis, command)
+    return _callback_reply(CallbackResponse.allow())
+
+
+async def _judge(
+    request: Request,
+    background: BackgroundTasks,
+    db: AsyncSession,
+    redis: Redis,
+    payload: dict[str, Any] | None,
+) -> CallbackResponse:
+    """before 回调：判断不了（载荷无效）拒收 5005；数据库或 Redis 出错、超时拒收 5009。"""
+    try:
+        msg = MsgCallback.model_validate(payload) if payload is not None else None
+    except ValueError:
+        msg = None
+    if msg is None:
+        return CallbackResponse.reject(5005)
+    judge = im_callbacks.CallbackJudge(
+        db, redis, admin_user_id=request.app.state.settings.openim_admin_user_id
+    )
+    try:
+        async with asyncio.timeout(JUDGE_TIMEOUT_SECONDS):
+            verdict = await judge.judge(msg)
+    except Exception as error:  # 无法判断时拒收，不放行（方案第 4.5 节）
+        logger.warning(
+            "openim callback policy unavailable", extra={"error_type": type(error).__name__}
+        )
+        return CallbackResponse.reject(5009)
+    if verdict.paused_group is not None:
+        background.add_task(
+            _notify_relay_paused, request.app.state.sessionmaker, verdict.paused_group
+        )
+    return verdict.response

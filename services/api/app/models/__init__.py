@@ -19,6 +19,7 @@ from app.models.base import NAMING_CONVENTION, Base
 from app.models.calendar import CalendarEvent
 from app.models.dashboard import Dashboard, Widget
 from app.models.identity import AuthSession, ExternalIdentity, User
+from app.models.im import ImAccount, ImGroup, ImGroupMember, ImWebhookInboxEvent
 from app.models.integration import (
     ExternalResource,
     IdempotencyRequest,
@@ -54,6 +55,10 @@ __all__ = [
     "ExternalIdentity",
     "ExternalResource",
     "IdempotencyRequest",
+    "ImAccount",
+    "ImGroup",
+    "ImGroupMember",
+    "ImWebhookInboxEvent",
     "Integration",
     "IntegrationAccount",
     "KnowledgeSource",

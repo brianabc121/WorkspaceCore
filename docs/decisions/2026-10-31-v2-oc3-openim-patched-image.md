@@ -232,3 +232,40 @@ OC-0 的回归测试脚本没有覆盖这一项，覆盖它的是这个单元测
   - 其余 → UNAVAILABLE；
   - 错误信息里不带 OpenIM 的错误详情。
 - 数据表（IM 投影、收件箱、群与通讯录）和用到它们的业务代码一起，放在下一部分。
+
+## 10. 第 4 部分（B2）：IM 数据表、账号登记、IM 令牌与回调（2026-11-01）
+
+- **数据表**（迁移 0012）：
+  - `im_accounts`：管理员的 `ws_` 账号，一个用户一个；
+  - `im_groups`：群与防刷屏阈值（方案第 5 节的 `im_group_policies` 与群一对一，合并进来）；
+  - `im_group_members`：成员是实例或用户，二者恰好一个；
+  - `im_webhook_inbox`：after 回调，按 `event_key` 去重，状态与 V1 的 `webhook_inbox` 相同。
+  - 会话、消息投影、置顶、分组和上传的表，与用到它们的代码一起加。
+- **账号登记**（`app/domain/im.py`）：
+  - 登记实例后注册 `oc_` 账号，再与本工作空间状态正常的 owner / admin 互加好友。管理员的 `ws_` 账号第一次用到时注册并登记。
+  - 全部成功才 `im_ready = true`。OpenIM 不可用时实例照常登记，`im_ready` 保持 false：
+    - Worker 每 5 分钟重试一轮（`provision_im`）；
+    - 实例启动时取 IM 令牌也会先补一次。
+  - 重复注册（1102）当作已注册；加好友前先查关系（OC-0 F2）。
+- **强制下线**：停用实例、关闭总开关后调用 `/auth/force_logout`。
+  - 尽力而为，失败只记日志；回调（5004）与接入网关还会按状态拒绝。
+  - 重新启用后，实例要重启才会取新令牌（旧令牌已被下线作废）。
+- **`/agent-api/v1/im-token`**：
+  - 每个实例每小时 10 次，`Cache-Control: no-store`；
+  - 没有部署 OpenIM 或 OpenIM 不可用时返回 503 `IM_UNAVAILABLE`；
+  - `expires_at` 按 OpenIM 返回的 `expireTimeSeconds` 计算。
+- **回调**（`/internal/openim/<口令>/<命令>`，`app/domain/im_callbacks.py`）：
+  - 没有部署 OpenIM、没配口令、口令不对（常量时间比较）、来源不在 `OPENIM_CALLBACK_ALLOWED_CIDRS` 时一律 404。来源按直接对端判断，不看 `X-Forwarded-For`。
+  - before 回调按契约第 10 节判断。几个实现上的取舍：
+    - 载荷无效拒收 5005；数据库或 Redis 出错、判断超过 1 秒拒收 5009；
+    - 连续计数先 `INCR` 再比较，超出就 `DECR` 并拒收，避免并发的消息一起越过上限；
+    - 每次暂停只在第一次拒收时通知管理员（`im_relay_paused`）；
+    - 降级成 member 的用户在单聊和群里都拒收 5005。
+  - after 回调写收件箱后放行。缺字段或不是 JSON 也放行，不入库，靠对账补齐。
+  - `AfterImportFriends` 放行不处理（OC-0 F2）；其他命令放行，并在 Redis 哈希 `openim:callback_ignored` 里按命令计数。
+- **测试**：模拟 OpenIM（`tests/fake_openim.py`）加真实 PostgreSQL / Redis，12 项（`tests/test_im_accounts_callbacks.py`）。
+- **还没做的**：
+  - 收件箱的处理：消息投影、上线更新实例状态并补好友、删好友后自动补回；
+  - 群里由 `ws_notice` 发的“自动接力已暂停”提示：要在建群时把 `ws_notice` 拉进群，和群接口一起做；
+  - 管理员后来才升为 admin 时补加好友：放到管理员第一次打开 IM 时做；
+  - OpenIM 真实回调到 API 的端到端验证：接入部署（回调地址、网络）时做。
