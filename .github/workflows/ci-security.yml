@@ -27,6 +27,9 @@ jobs:
           node-version: '22'
       - name: Python 与 npm 依赖（pip-audit、npm audit；高危及以上失败）
         run: scripts/security-scan.sh deps
+      # OC-0 ADR F9（T-0058）：插件只在 npm 发布，核对 registry 上的 tarball 仍是锁定的那份并做静态扫描
+      - name: OpenClaw 渠道插件发布包（sha256 与 docs/versions.md 一致、静态扫描）
+        run: python3 tests/e2e/openclaw_plugin_review.py
 
   secrets:
     runs-on: ubuntu-latest

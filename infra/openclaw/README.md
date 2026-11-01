@@ -35,7 +35,12 @@
      ```
      openclaw plugins install @openim/openclaw-channel@0.3.3 --force --accept-capabilities
      ```
-     这个插件不在 ClawHub 审核范围内，所以要 `--force`。升级插件前，要重新做 ADR F9 的审查。
+     这个插件不在 ClawHub 审核范围内，所以要 `--force`。
+   - 升级插件前，重新做 ADR F9 的审查：
+     - 在仓库里运行 `python3 tests/e2e/openclaw_plugin_review.py --candidate <新版本>`。它会下载候选版本，做静态扫描（子进程、eval、安装期脚本、写死的外部地址、`OPENIM_*` 以外的环境变量），并列出与锁定版本的全部差异；
+     - 人工读完差异、确认没问题后，同时更新 `docs/versions.md`、本文件和接入包里的 `CHECKLIST.md` 中的版本与 sha256，以及 `app/agent_bundle` 的 `PLUGIN_VERSION`。后端测试会检查这几处是否一致；
+     - 在 ADR 里记下审查结论；
+     - ci-security 每次都会核对 registry 上锁定版本的 sha256 并做静态扫描。
 3. **放置文件**：
    - 把 `bin/` 下的两个程序放到 `/opt/myworkspace/bin/`；
    - **属主改成运行 OpenClaw 的用户**（Docker 镜像里是 uid 1000），权限 0755，不能是符号链接。这是 OpenClaw 对 exec 程序的要求。
