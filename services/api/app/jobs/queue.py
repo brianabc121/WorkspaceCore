@@ -13,6 +13,7 @@ from redis.asyncio import Redis
 PROCESS_WEBHOOKS = "process_webhooks"
 SYNC_INTEGRATION = "sync_integration"
 REGISTER_WEBHOOKS = "register_webhooks"
+PROCESS_IM_INBOX = "process_im_inbox"
 
 
 class JobQueue(Protocol):

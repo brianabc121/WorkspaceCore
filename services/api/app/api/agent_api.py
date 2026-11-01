@@ -26,6 +26,7 @@ from app.api.deps import client_ip, get_agent_service, get_db, get_redis
 from app.core.errors import ApiError, not_implemented
 from app.domain import im_callbacks
 from app.domain.agents import AgentPrincipal, AgentService
+from app.jobs.queue import PROCESS_IM_INBOX
 from app.models import ImGroup
 from app.schemas.agents import (
     HeartbeatRequest,
@@ -214,8 +215,9 @@ async def receive_openim_callback(
     event_key = im_callbacks.inbox_event_key(command, payload)
     if event_key is not None:
         try:
-            await im_callbacks.record_inbox(db, command, event_key, payload)
-        except Exception as error:  # 写不进收件箱也放行：对账会补齐
+            if await im_callbacks.record_inbox(db, command, event_key, payload):
+                await request.app.state.jobs.enqueue(PROCESS_IM_INBOX)
+        except Exception as error:  # 写不进收件箱或投递失败也放行：兜底轮询与对账会补齐
             logger.warning(
                 "openim callback not recorded",
                 extra={"command": command, "error_type": type(error).__name__},

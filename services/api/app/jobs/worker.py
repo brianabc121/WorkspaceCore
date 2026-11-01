@@ -23,11 +23,16 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.config import get_settings
 from app.core.logging import configure_logging, dict_config
 from app.core.resources import create_engine
-from app.domain import alerts, automations, events, im, notifications, sync
+from app.domain import alerts, automations, events, im, im_projection, notifications, sync
 from app.domain.connectors import ConnectorRuntime
 from app.domain.operations import WORKER_HEARTBEAT_KEY, DeploymentHealth, ServiceCache
 from app.integrations.http import CircuitBreaker
-from app.jobs.queue import PROCESS_WEBHOOKS, REGISTER_WEBHOOKS, SYNC_INTEGRATION
+from app.jobs.queue import (
+    PROCESS_IM_INBOX,
+    PROCESS_WEBHOOKS,
+    REGISTER_WEBHOOKS,
+    SYNC_INTEGRATION,
+)
 
 logger = logging.getLogger("app.worker")
 
@@ -72,15 +77,20 @@ async def reconcile(ctx: dict[str, Any]) -> int:
 
 
 async def purge(ctx: dict[str, Any]) -> None:
-    """清理过期的幂等记录、已处理完的 Inbox 事件与过期的通知。"""
+    """清理过期的幂等记录、已处理完的 Inbox 事件、过期的通知与 IM 消息投影。"""
     context = _sync(ctx)
     await sync.purge(context)
     async with context.sessions() as db:
         retention = timedelta(days=context.settings.notification_retention_days)
         removed = await notifications.purge(db, retention=retention)
+        im_messages, im_events = await im_projection.purge(
+            db, message_retention=timedelta(days=context.settings.im_message_retention_days)
+        )
         await db.commit()
     if removed:
         logger.info("notifications purged", extra={"count": removed})
+    if im_messages or im_events:
+        logger.info("im purged", extra={"messages": im_messages, "inbox_events": im_events})
 
 
 async def reconcile_automations(ctx: dict[str, Any]) -> int:
@@ -97,6 +107,33 @@ async def provision_im(ctx: dict[str, Any]) -> int:
         return 0
     async with context.sessions() as db:
         return await im.provision_pending(db, client)
+
+
+def _im(ctx: dict[str, Any]) -> im_projection.ImContext | None:
+    """没有部署 OpenIM 时为 None。"""
+    context = _sync(ctx)
+    client = im.openim_client(context.settings, context.runtime, ctx["redis"])
+    if client is None:
+        return None
+    return im_projection.ImContext(sessions=context.sessions, client=client, redis=ctx["redis"])
+
+
+async def process_im_inbox(ctx: dict[str, Any]) -> int:
+    """处理 OpenIM 回调收件箱（回调写入后由 API 投递，另有每分钟一次的兜底）。"""
+    im_ctx = _im(ctx)
+    return await im_projection.process_inbox(im_ctx) if im_ctx is not None else 0
+
+
+async def reconcile_im(ctx: dict[str, Any]) -> int:
+    """IM 增量对账（每 30 秒）：按管理员账号的 newest_seq 补齐有变化的会话。"""
+    im_ctx = _im(ctx)
+    return await im_projection.reconcile(im_ctx) if im_ctx is not None else 0
+
+
+async def reconcile_im_full(ctx: dict[str, Any]) -> int:
+    """IM 全量对账（每天一次）：重新拉每个会话最近 1000 条，补上中间缺的。"""
+    im_ctx = _im(ctx)
+    return await im_projection.reconcile(im_ctx, full=True) if im_ctx is not None else 0
 
 
 async def check_services(ctx: dict[str, Any]) -> list[str]:
@@ -141,6 +178,7 @@ class WorkerSettings:
         func(process_webhooks, name=PROCESS_WEBHOOKS),
         func(sync_integration, name=SYNC_INTEGRATION, timeout=900),
         func(register_webhooks, name=REGISTER_WEBHOOKS),
+        func(process_im_inbox, name=PROCESS_IM_INBOX),
     ]
     cron_jobs: ClassVar[list[CronJob]] = [
         cron(heartbeat, second=0, run_at_startup=True),
@@ -151,6 +189,9 @@ class WorkerSettings:
         cron(check_services, second=45, timeout=60),
         cron(reconcile_automations, second=15, timeout=120),
         cron(provision_im, minute=set(range(4, 60, 5)), second=40, timeout=120),
+        cron(process_im_inbox, second=50, timeout=120),
+        cron(reconcile_im, second={5, 35}, timeout=60),
+        cron(reconcile_im_full, hour=19, minute=23, timeout=1800),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())
     on_startup = startup

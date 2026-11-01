@@ -105,7 +105,12 @@ class OpenIMClient:
     async def call(
         self, path: str, body: Mapping[str, Any], *, admin: bool = True
     ) -> dict[str, Any]:
-        """调用一个 REST 接口，返回 `data`（没有时为 {}）。管理员令牌失效时重取一次。"""
+        """调用一个 REST 接口，返回 `data`（不是 JSON 对象时为 {}）。"""
+        data = await self.call_any(path, body, admin=admin)
+        return data if isinstance(data, dict) else {}
+
+    async def call_any(self, path: str, body: Mapping[str, Any], *, admin: bool = True) -> Any:
+        """调用一个 REST 接口，原样返回 `data`（有的接口是列表）。管理员令牌失效时重取一次。"""
         for attempt in range(2):
             headers = {"operationID": uuid.uuid4().hex}
             if admin:
@@ -132,8 +137,7 @@ class OpenIMClient:
                     "UNAVAILABLE", "OpenIM 应答无法解析", reason="invalid_response"
                 ) from None
             if err_code == 0:
-                data = payload.get("data")
-                return data if isinstance(data, dict) else {}
+                return payload.get("data")
             if admin and err_code in _TOKEN_ERRORS and attempt == 0:
                 if self.cache is not None:
                     await self.cache.delete(_TOKEN_CACHE_KEY)
@@ -212,6 +216,18 @@ class OpenIMClient:
                 "UNAVAILABLE", "OpenIM 没有返回用户令牌", reason="invalid_response"
             )
         return UserToken(token=token, expires_in=int(data.get("expireTimeSeconds") or 0))
+
+    async def online_users(self, user_ids: Sequence[str]) -> set[str]:
+        """当前在线的用户（`/user/get_users_online_status`，data 是列表；status 1 为在线）。"""
+        if not user_ids:
+            return set()
+        data = await self.call_any("/user/get_users_online_status", {"userIDs": list(user_ids)})
+        items = data if isinstance(data, list) else []
+        return {
+            str(item.get("userID"))
+            for item in items
+            if isinstance(item, dict) and int(item.get("status") or 0) == 1
+        }
 
     async def force_logout(self, user_id: str, platform_id: int = PLATFORM_WEB) -> None:
         """强制下线（停用实例、总开关关闭时）。"""
