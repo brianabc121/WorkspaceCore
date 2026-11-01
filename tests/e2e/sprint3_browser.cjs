@@ -76,14 +76,19 @@ async function login(browser, email, problems, viewport = { width: 1440, height:
   await page.waitForURL(`${base}/`)
   return { context, page }
 }
-async function waitForWebhook(projectId) {
+const hasHook = async (projectId) => ((await vikunja('GET', `/projects/${projectId}/webhooks`)).items || [])
+  .some((hook) => hook.target_url.includes('/api/v1/webhooks/vikunja/'))
+// Worker 在测试连接之后异步给每个未归档项目注册 Webhook。Vikunja 用 SQLite：注册时如果工作台同时写入
+// （例如新建任务），两次写入会撞上锁，Vikunja 返回 500 “database is locked”。所以等全部注册完再写入
+async function waitForWebhooks() {
   const deadline = Date.now() + WEBHOOK_TIMEOUT
   while (Date.now() < deadline) {
-    const hooks = await vikunja('GET', `/projects/${projectId}/webhooks`)
-    if ((hooks.items || []).some((hook) => hook.target_url.includes('/api/v1/webhooks/vikunja/'))) return true
+    const projects = ((await vikunja('GET', '/projects')).items || []).filter((p) => p.id > 0 && !p.is_archived)
+    const done = await Promise.all(projects.map((p) => hasHook(p.id)))
+    if (projects.length && done.every(Boolean)) return projects.length
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
-  return false
+  return 0
 }
 // 点“刷新任务”直到列表里出现（或不再出现）某个标题：原生改动经 Webhook 回到投影需要一两秒
 async function waitForTitle(page, title, present = true) {
@@ -148,6 +153,10 @@ async function waitForTitle(page, title, present = true) {
   check((await link.getAttribute('href')).startsWith(`${vikunjaUrl}/tasks/`), '任务应链接到 Vikunja 原生界面')
   step('任务页显示首次同步的 Vikunja 任务，标明来源并可跳到原生界面')
 
+  const hooked = await waitForWebhooks()
+  check(hooked > 0, 'Worker 应为每个项目自动注册 Webhook')
+  step(`Worker 在测试连接后为 ${hooked} 个项目自动注册了 Webhook`)
+
   // ---------------------------------------------------------------- 新建（S3-04：带 Idempotency-Key）
   const keys = []
   page.on('request', (request) => {
@@ -180,8 +189,8 @@ async function waitForTitle(page, title, present = true) {
   step('编辑抽屉：修改标题并标为完成，Vikunja 同步变化')
 
   // ---------------------------------------------------------------- 原生修改 → 工作台更新（DoD）
-  // Webhook 由 Worker 在测试连接之后异步注册：注册之前在 Vikunja 里的改动不会产生事件，要先等它注册好
-  check(await waitForWebhook(project.id), 'Worker 应为项目自动注册 Webhook')
+  // Webhook 已在新建任务之前确认注册好（注册之前在 Vikunja 里的改动不会产生事件）
+  check(await hasHook(project.id), 'Worker 应为项目自动注册 Webhook')
   await vikunja('PATCH', `/tasks/${native.id}`, { title: '原生界面里改的' }, { merge: true })
   check(await waitForTitle(page, '原生界面里改的'), '在 Vikunja 里的修改应出现在工作台任务页')
   step('DoD：在 Vikunja 原生修改任务，工作台任务页显示更新（Webhook）')
