@@ -5,7 +5,7 @@ owner: claude
 status: in_progress
 priority: P1
 branch: claude/cool-wright-99qbbg
-paths: docs/deployment.md,services/api/app/domain/ops_metrics.py,services/api/app/domain/operations.py,services/api/app/schemas/operations.py,services/api/app/main.py,services/api/app/domain/agents.py,services/api/app/domain/mcp_tools.py,services/api/app/domain/im_callbacks.py,services/api/app/jobs/worker.py,services/api/tests,services/api/openapi.json,apps/web/src/features/operations,apps/web/src/services/schema.d.ts,apps/web/tests/operations-pages.test.ts,infra/monitoring/grafana,docs/api-contract.md
+paths: docs/deployment.md,scripts/security-scan.sh,services/api/app/domain/ops_metrics.py,services/api/app/domain/operations.py,services/api/app/schemas/operations.py,services/api/app/main.py,services/api/app/domain/agents.py,services/api/app/domain/mcp_tools.py,services/api/app/domain/im_callbacks.py,services/api/app/jobs/worker.py,services/api/tests,services/api/openapi.json,apps/web/src/features/operations,apps/web/src/services/schema.d.ts,apps/web/tests/operations-pages.test.ts,infra/monitoring/grafana,docs/api-contract.md
 depends_on: T-0057
 created: 2026-11-01
 updated: 2026-11-01
@@ -24,6 +24,7 @@ updated: 2026-11-01
 - [ ] api 的 `/metrics` 输出方案第 6.1 节的各项指标；标签只用固定枚举值，不含实例 ID、工作空间 ID、Token、用户输入；数据库或 Redis 不可用时只返回请求指标
 - [ ] Grafana 预置仪表盘增加对应面板，测试保证仪表盘查询的指标都存在
 - [ ] 前端运维页显示新分组与原因文字；OpenAPI、`schema.d.ts`、`docs/api-contract.md`、`docs/deployment.md` 第 12.2 节同步
+- [ ] 方案第 7 节“镜像扫描覆盖 OpenIM 和 OpenClaw”：`scripts/security-scan.sh images` 的第三方清单加入 agents profile、OpenIM 的依赖镜像、OpenClaw 与 ghostunnel（补丁镜像已由 ci-openim 扫描）
 - [ ] 后端 ruff / mypy / pytest、前端 lint / typecheck / test / build / check:api 通过
 
 ## 背景 / 约束 / 参考
