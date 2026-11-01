@@ -52,7 +52,7 @@
 
 CI 的 `ci-api.yml` 用与 1.1 节相同的 PostgreSQL、Redis 镜像（同一个 digest）。
 
-### 1.5 V2：OpenClaw 与 OpenIM（OC-0 核验结果，尚未进入正式部署）
+### 1.5 V2：OpenClaw 与 OpenIM（OC-0 核验，OC-3 ~ OC-7 已部署并验收；`docs/deployment.md` 第 17、18 节）
 
 来源与说明见 `2026-10-31-v2-oc0-openclaw-openim-verification.md`。
 OpenIM 的官方镜像有越权问题，已换成自建的补丁镜像（`2026-10-31-v2-oc3-openim-patched-image.md`）。自建镜像每次构建的 digest 不同，所以锁定的是全部构建输入。

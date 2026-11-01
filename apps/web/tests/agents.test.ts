@@ -5,7 +5,7 @@ import type { Schema } from '../src/services/api'
 
 const at = '2026-11-01T04:00:00Z'
 const path = (r: Request) => new URL(r.url).pathname
-const instance = (over: Partial<Schema['AgentInstanceOut']> = {}): Schema['AgentInstanceOut'] => ({ id: 'inst-a', name: 'alpha', description: '机房 A', network_mode: 'public', scope: 'read', max_role: 'member', status: 'online', im_user_id: 'oc_a', im_nickname: '甲', im_ready: true, acting_user_id: 'user-a', last_seen_at: at, reported_version: '2026.9.36', plugin_version: '0.3.3', bundle_issued_at: at, disabled_at: null, version: 3, created_at: at, updated_at: at,
+const instance = (over: Partial<Schema['AgentInstanceOut']> = {}): Schema['AgentInstanceOut'] => ({ id: 'inst-a', name: 'alpha', description: '机房 A', network_mode: 'public', scope: 'read', max_role: 'member', status: 'online', im_user_id: 'oc_a', im_nickname: '甲', im_ready: true, acting_user_id: 'user-a', last_seen_at: at, reported_version: '2026.9.36', plugin_version: '0.3.3', bundle_issued_at: at, im_token_expires_at: '2026-12-01T04:00:00Z', disabled_at: null, version: 3, created_at: at, updated_at: at,
   credentials: [{ id: 'cred-1', kind: 'token', ingress: 'public', token_prefix: 'mwa_abcd', cert_fingerprint: null, created_at: at, expires_at: null, last_used_at: at, last_used_ip: '203.0.113.5', revoked_at: null }],
   secret_grants: [{ ref_id: 'openai_api_key', secret_id: 'sec-1', secret_name: 'OpenAI' }], ...over })
 const secret: Schema['AgentSecretOut'] = { id: 'sec-1', name: 'OpenAI', kind: 'model_api_key', description: '', value_version: 2, last_rotated_at: at, grants: [{ instance_id: 'inst-a', instance_name: 'alpha', ref_id: 'openai_api_key' }], version: 5, created_at: at, updated_at: at }
@@ -39,6 +39,7 @@ describe('openclaw instances', () => {
     await openApp('/agents')
     const card = await screen.findByRole('article', { name: '实例：alpha' })
     expect(within(card).getByText('在线')).toBeVisible()
+    expect(within(card).getByText(/到期（OpenClaw 每次启动时领取新的）/)).toBeVisible()
     await fireEvent.click(screen.getByRole('button', { name: '登记实例' }))
     const dialog = await screen.findByRole('dialog', { name: '登记 OpenClaw 实例' })
     await fireEvent.update(within(dialog).getByLabelText('名称 *'), 'beta')

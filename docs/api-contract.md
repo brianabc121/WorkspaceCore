@@ -62,6 +62,8 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | PATCH | `/api/v1/me` | 修改显示名 | 已实现（T-0011） |
 | GET | `/api/v1/workspaces` | 我所属的工作空间 | 已实现（T-0010） |
 | GET / PATCH | `/api/v1/workspaces/{workspace_id}` | 工作空间详情（viewer+）/ 设置（admin+） | 已实现（T-0011） |
+| GET / POST | `/api/v1/workspaces/{workspace_id}/members` | 成员列表 / 添加成员（admin+）：已有账号按邮箱加入；没有账号时同时给 `display_name` 与 `password`（初始密码）创建账号，响应头 `X-Account-Created: true`；没给时 404 `USER_NOT_FOUND`；已是成员 409 `MEMBER_EXISTS`；已有账号又给了密码 409 `USER_EXISTS` | 已实现（T-0064） |
+| PATCH / DELETE | `/api/v1/workspaces/{workspace_id}/members/{user_id}` | 改角色 / 移除：只能是 admin / member / viewer；admin 只管理 member / viewer，涉及 admin（原来是或改成）只能由 owner；owner 不能被修改或移除；全部写审计（`workspace.member_added`、`workspace.member_role_changed`、`workspace.member_removed`、`user.created`） | 已实现（T-0064） |
 | GET | `/api/v1/auth/sessions` | 我的会话 | 已实现（T-0011） |
 | DELETE | `/api/v1/auth/sessions/{session_id}` | 撤销会话 | 已实现（T-0011） |
 | POST | `/api/v1/auth/password` | 修改密码 | 已实现（T-0011） |

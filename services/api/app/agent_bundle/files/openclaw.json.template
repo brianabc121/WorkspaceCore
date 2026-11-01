@@ -25,7 +25,7 @@
   "session": { "dmScope": "per-channel-peer" },
   "tools": {
     "profile": "messaging",
-    "deny": ["group:automation", "group:runtime", "group:fs", "sessions_spawn", "sessions_send"],
+    "deny": ["group:automation", "group:runtime", "group:fs", "sessions_spawn", "sessions_send", "openim_send_image", "openim_send_file", "openim_send_video"],
     "fs": { "workspaceOnly": true },
     "exec": { "security": "deny", "ask": "always" },
     "elevated": { "enabled": false },

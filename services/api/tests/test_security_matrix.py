@@ -41,6 +41,11 @@ CAROL = {"email": "carol@example.com", "password": "carol password 123456"}
 # 成员与角色在业务层检查的接口：空请求体会先得到 422（对任何工作空间都一样，不暴露是否存在）
 BODIES: dict[tuple[str, str], dict[str, Any]] = {
     ("PATCH", "/api/v1/workspaces/{workspace_id}"): {"name": "安全矩阵改的名字"},
+    ("POST", "/api/v1/workspaces/{workspace_id}/members"): {
+        "email": "matrix@example.com",
+        "role": "member",
+    },
+    ("PATCH", "/api/v1/workspaces/{workspace_id}/members/{user_id}"): {"role": "viewer"},
 }
 
 

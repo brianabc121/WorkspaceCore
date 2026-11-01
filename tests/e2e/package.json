@@ -7,7 +7,8 @@
     "browser:install": "playwright install chromium",
     "sprint1:browser": "node sprint1_browser.cjs",
     "sprint2:browser": "node sprint2_browser.cjs",
-    "sprint3:browser": "node sprint3_browser.cjs"
+    "sprint3:browser": "node sprint3_browser.cjs",
+    "sprint6:browser": "node sprint6_browser.cjs"
   },
   "devDependencies": {
     "playwright": "1.63.0"

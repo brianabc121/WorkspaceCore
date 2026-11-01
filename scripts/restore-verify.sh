@@ -54,6 +54,8 @@ echo "备份信息：$(cat "$work/restore/backup/backup-info.json" | tr -d '\n')
 (umask 077 && grep -v -E '^(HTTP_PORT|PUBLIC_BASE_URL|CORS_ALLOWED_ORIGINS|PROMETHEUS_URL|GRAFANA_URL|GRAFANA_DASHBOARD_URL|AGENT_INGRESS_NET|AGENT_INGRESS_TRUSTED_PROXIES|IM_NET|OPENIM_API_URL|OPENIM_OBJECT_URL|OPENIM_CALLBACK_ALLOWED_CIDRS)=' .env > "$work/restore.env")
 cat >> "$work/restore.env" <<EOF
 HTTP_PORT=$port
+# 只用 compose.yaml：.env 里启用了 compose.https.yaml 时，临时环境不能去占 80 / 443
+COMPOSE_FILE=compose.yaml
 PUBLIC_BASE_URL=http://localhost:$port
 CORS_ALLOWED_ORIGINS=http://127.0.0.1:$port
 PROMETHEUS_URL=

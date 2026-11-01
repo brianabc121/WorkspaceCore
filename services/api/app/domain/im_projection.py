@@ -30,7 +30,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.domain import events, notifications, ops_metrics
+from app.domain import agent_watch, events, notifications, ops_metrics
 from app.domain.approval_cards import execution_id_from_ex
 from app.domain.im import ImAccounts, is_im_admin, user_id_from_im, workspace_id_from_notice
 from app.domain.sync import retry_delay
@@ -558,6 +558,7 @@ async def apply_presence(
     if online:
         instance.status = "online"
         instance.last_seen_at = datetime.now(UTC)
+        await agent_watch.mark_online(ctx.redis, instance)
         # 上线时补一次好友关系（契约第 10 节）：后来才加入的管理员也能收到
         admins = [
             await accounts.ensure_user(u)
@@ -570,6 +571,7 @@ async def apply_presence(
             return "still_online"
         if instance.status == "online":
             instance.status = "offline"
+            await agent_watch.mark_offline(ctx.redis, instance)
     events.mark(db, instance.workspace_id, "agents")
     return None
 

@@ -179,10 +179,11 @@ services:
     image: caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
     restart: unless-stopped
     ports:
-      # 默认只绑定本机；在服务器上对外提供服务时，把 .env 里的 HTTP_BIND 改为 0.0.0.0 并配置 HTTPS
+      # 默认只绑定本机。用域名对外提供 HTTPS 时加上 compose.https.yaml（发布 80/443，见 docs/deploy-guide.md 第 5 步）
       - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/routes.caddy:/etc/caddy/routes.caddy:ro
       - caddy-data:/data
       - caddy-config:/config
     security_opt:
@@ -197,6 +198,12 @@ services:
         condition: service_healthy
       web:
         condition: service_healthy
+    # 就绪检查只看 Caddy 自己：Caddyfile 里只绑定容器回环地址的 :8099
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8099/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
     # integrations：第三方服务经此把 Webhook 发到 /api/v1/webhooks/…（不经过对外端口）
     networks: [frontend, integrations]
     logging: *logging
@@ -234,6 +241,12 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    # 就绪检查只看 Caddy 自己：Caddyfile 里只绑定容器回环地址的 :8099
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8099/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
     networks:
       agent-ingress:
         # API 只信任这个地址写入的入口与证书请求头（AGENT_INGRESS_TRUSTED_PROXIES）

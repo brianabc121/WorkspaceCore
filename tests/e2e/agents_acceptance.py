@@ -370,6 +370,11 @@ class Ctx:
                 if m["sender_im_id"] == sender and needle in (m.get("text") or "")]
 
 
+# OpenClaw 2026.9.36 + 接入包的工具配置下，模型能拿到的全部工具：IM 发消息（message）、结束本轮
+# （sessions_yield），以及 Tool Search 的三个元工具（工作台的 MCP 工具经它们调用）
+AGENT_TOOLS = frozenset({"message", "sessions_yield", "tool_call", "tool_describe", "tool_search"})
+
+
 def message_tool(target: str, text: str) -> str:
     return "TOOL:message " + json.dumps({"action": "send", "channel": "openim", "target": target, "message": text},
                                         ensure_ascii=False)
@@ -397,6 +402,11 @@ def scenario_2(c: Ctx) -> None:
     replied = wait_for("甲的回复", lambda: c.from_sender(c.conv_a, c.a.im_user_id, "第一条私聊"), timeout=150)
     c.check("场景 2：管理员私聊甲，甲经假模型回复", bool(replied))
     c.check("场景 2：甲用工作台下发的模型密钥调用模型（exec SecretRef）", bool(c.model_calls(c.keys["a"])))
+    # 方案第 6.2、7 节：智能体只有工作台工具（经 Tool Search 调 MCP）与 IM 发消息工具，
+    # 没有 shell、文件、浏览器、网页抓取，也没有插件的发图片 / 文件 / 视频工具
+    offered = {name for r in c.model_calls(c.keys["a"]) for name in r.get("tools") or []}
+    c.check("场景 2：模型拿到的工具只有 IM 发消息与工作台工具（经 Tool Search）",
+            "message" in offered and offered <= AGENT_TOOLS, ", ".join(sorted(offered)))
     accesses = c.owner.call("GET", f"/api/v1/agents/secrets/accesses?instance_id={c.a.id}")["items"]
     c.check("场景 2：甲的取密钥记录（成功）", any(x["result"] == "ok" for x in accesses))
 

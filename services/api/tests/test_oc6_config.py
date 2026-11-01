@@ -59,3 +59,26 @@ def test_openclaw_channel_pin_is_consistent() -> None:
     # 审查脚本读的是同一处锁定值
     script = (ROOT / "tests/e2e/openclaw_plugin_review.py").read_text(encoding="utf-8")
     assert 'VERSIONS = ROOT / "docs" / "versions.md"' in script
+
+
+def test_im_tokens_last_30_days() -> None:
+    """方案第 4.3 节：IM 令牌有效期 30 天。
+
+    上游默认 90 天；T-0063 在锁定的补丁镜像上实测这个环境变量生效。
+    """
+    assert _openim_env()["IMENV_OPENIM_RPC_AUTH_TOKENPOLICY_EXPIRE"] == "30"
+
+
+def test_long_running_services_have_healthchecks() -> None:
+    """规范第 14 节：服务要有就绪检查（一次性的 *-init 除外）；make openim-up 用 --wait 等就绪。"""
+    for path in ("infra/openim/compose.yaml", "compose.yaml"):
+        text = (ROOT / path).read_text(encoding="utf-8")
+        services = text.split("\nservices:\n", 1)[1].split("\nnetworks:\n", 1)[0]
+        blocks = re.split(r"\n(?=  [a-z][a-z0-9-]*:\n)", services)
+        for block in blocks:
+            name = block.strip().split(":", 1)[0]
+            if not name or name.endswith("-init") or 'restart: "no"' in block:
+                continue
+            assert "healthcheck:" in block, f"{path}: {name} 没有健康检查"
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "$(OPENIM_COMPOSE) up -d --wait" in makefile

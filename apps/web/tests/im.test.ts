@@ -79,6 +79,31 @@ describe('im page', () => {
     expect(await within(chat).findByText('第 4 条')).toBeVisible()
     expect(within(chat).getAllByText('我').length).toBeGreaterThan(0)
   })
+  it('exports a conversation as an NDJSON download', async () => {
+    const created = vi.fn(() => 'blob:export'), click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: created, revokeObjectURL: () => undefined }))
+    const line = JSON.stringify(message(1)) + '\n'
+    const requests = setup(r => path(r).endsWith('/export') ? new Response(line, { headers: { 'Content-Type': 'application/x-ndjson', 'Content-Disposition': 'attachment; filename="si_alpha.ndjson"' } }) : undefined)
+    await openApp('/im?c=si_alpha')
+    const chat = await screen.findByRole('region', { name: '与甲的会话' })
+    await fireEvent.click(within(chat).getByRole('button', { name: '导出' }))
+    expect(await within(chat).findByText(/已导出会话/)).toBeVisible()
+    const exported = requests.find(r => path(r) === '/api/v1/im/conversations/si_alpha/export')!
+    expect(exported.method).toBe('GET')
+    expect(exported.headers.get('X-Workspace-Id')).toBe(workspace.id)
+    expect(created).toHaveBeenCalledTimes(1)
+    expect(click).toHaveBeenCalledTimes(1)
+    vi.unstubAllGlobals()
+  })
+
+  it('explains a failed export', async () => {
+    setup(r => path(r).endsWith('/export') ? fail(403, 'FORBIDDEN') : undefined)
+    await openApp('/im?c=si_alpha')
+    const chat = await screen.findByRole('region', { name: '与甲的会话' })
+    await fireEvent.click(within(chat).getByRole('button', { name: '导出' }))
+    expect(await within(chat).findByText('只有 owner 与 admin 可以使用 IM。')).toBeVisible()
+  })
+
   it('loads workspace images through the API and never loads external image links', async () => {
     vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:media-1', revokeObjectURL: () => undefined }))
     const requests = setup(r => path(r) === '/api/v1/im/media/media-1' ? new Response(new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }), { headers: { 'Content-Type': 'image/png' } }) : undefined,

@@ -40,6 +40,8 @@ from app.repositories import projection as repo
 from app.schemas.integrations import SyncState
 from app.schemas.tasks import (
     ProjectPage,
+    ProjectProgressList,
+    ProjectProgressOut,
     TaskCreate,
     TaskOut,
     TaskPage,
@@ -141,6 +143,22 @@ class TaskService:
             items=[projection.project_out(row) for row in rows[:limit]],
             next_cursor=_page_cursor(offset, limit, len(rows)),
             total_estimate=None,
+            sync=await self.sync(access),
+        )
+
+    async def project_progress(self, access: WorkspaceAccess, *, limit: int) -> ProjectProgressList:
+        rows = await repo.project_progress(self.db, access.workspace.id, limit=limit)
+        return ProjectProgressList(
+            items=[
+                ProjectProgressOut(
+                    project_id=row.id,
+                    title=row.title,
+                    source_url=row.source_url,
+                    open_tasks=open_tasks,
+                    done_tasks=done_tasks,
+                )
+                for row, open_tasks, done_tasks in rows
+            ],
             sync=await self.sync(access),
         )
 

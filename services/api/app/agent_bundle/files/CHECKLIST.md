@@ -32,7 +32,7 @@
 - [ ] `tools.exec.security = "deny"`；没有挂载 Docker socket；没有启用沙箱。
 - [ ] `plugins.allow` 只有 `openclaw-channel`；没有安装其他插件和技能。
 - [ ] **不设置 `commands.ownerAllowFrom`**：任何 IM 账号都不能在聊天里管理 OpenClaw（OC-0 ADR F6）。
-- [ ] `openim_send_image` / `openim_send_file` / `openim_send_video` 不可用，或已列入 `tools.deny`（OC-0 ADR F3）。
+- [ ] `openim_send_image` / `openim_send_file` / `openim_send_video` 在 `tools.deny` 里（接入包默认已列入，不要删掉；OC-0 ADR F3）。
 - [ ] `requireMention: true`；`inboundWhitelist` 是接入包生成时的管理员与本工作空间的实例（工作台的管理员或实例变化后重新生成接入包）。
 - [ ] `node openclaw.mjs secrets audit` 没有发现明文密钥。
 - [ ] 日志级别和保留期已设置：OpenIM SDK 会把消息内容写进日志（OC-0 ADR F7）。

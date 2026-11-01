@@ -263,6 +263,8 @@
   - 请求来自哪个会话、哪条消息、由谁 @ 触发；
   - MCP 请求不带会话信息时由工作台推断（`inferred: true`），依据是该实例最近一条收到的私聊或 @ 消息；
   - OpenClaw 是否在 MCP 请求里带会话标识，OC-5 核实。
+  - `triggered_by_name`（T-0063 补充）：推断时记下触发者的显示名，审批卡片写“由 X 私聊它 / 在群聊里 @ 它触发”，
+    审批中心的记录同时显示；更早的记录为 `null`。
 - **审批卡片**：工作空间的通知账号在“审批通知”会话（`kind: notice`，会话 ID `sn_`）发卡片，同时写进通知中心，类型为 `approval_requested`。卡片按钮直接调用上面的接口。（原写 `ws_notice`；通知会话按发送方和接收方区分，共用一个账号会把不同工作空间的卡片混进同一个会话，改为每个工作空间一个，见 OC-5 ADR 第 11 节。）
 - **AI 不能批准**：实例凭证调不了管理员接口；聊天里回“同意”不算批准。
 
@@ -399,7 +401,8 @@
   - OC-4 的查询键用这些前缀。
 - **通知类型**（`type` 是开放的字符串，前端按普通通知显示不认识的类型）：
   - `approval_requested`、`approval_expired`；
-  - `agent_offline`、`agent_credential_expiring`、`agent_im_token_expiring`；
+  - `agent_offline`、`agent_credential_expiring`、`agent_im_token_expiring`（T-0063 起由 Worker 的周期检查发出：
+    离线超过 10 分钟、客户端证书到期前 14 天、IM 令牌到期前 7 天；`AgentInstanceOut.im_token_expires_at` 记下最近一次签发的到期时间）；
   - `im_friend_restored`、`im_relay_paused`。
 - **首页组件**：“AI 快捷提问”改为打开 IM。新组件类型 `im_quick_chat`（配置 `instance_id`，可为空）在 OC-4 与前端一起加入：组件联合类型只增，前端 Registry 同时实现。
 

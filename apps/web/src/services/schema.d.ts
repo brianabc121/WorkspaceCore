@@ -1447,6 +1447,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目进度（viewer，读本地投影）
+         * @description 未归档项目的未完成 / 已完成任务数，供首页“项目进度”组件使用；有未完成任务的项目在前。
+         */
+        get: operations["project_progress"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search": {
         parameters: {
             query?: never;
@@ -1629,6 +1649,45 @@ export interface paths {
         patch: operations["update_workspace"];
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 成员列表（admin 及以上） */
+        get: operations["list_members"];
+        put?: never;
+        /**
+         * 添加成员（admin 及以上；授予 admin 只能由 owner）
+         * @description 已有账号按邮箱加入；没有账号时同时提供 display_name 与 password（初始密码），创建账号后加入，响应头 `X-Account-Created: true`。没有账号又没给初始密码时返回 404 `USER_NOT_FOUND`。
+         */
+        post: operations["add_member"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/members/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 移除成员（owner 不能移除；移除 admin 只能由 owner） */
+        delete: operations["remove_member"];
+        options?: never;
+        head?: never;
+        /** 修改成员角色（admin 管理 member / viewer；涉及 admin 只能由 owner） */
+        patch: operations["update_member"];
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -1786,6 +1845,11 @@ export interface components {
              * @description OpenIM 账号与好友关系已就绪；为 false 时后台会重试
              */
             im_ready: boolean;
+            /**
+             * Im Token Expires At
+             * @description 最近一次签发的 IM 令牌何时到期（实例每次启动时领取）；从未签发为 null
+             */
+            im_token_expires_at?: string | null;
             /**
              * Im User Id
              * @description OpenIM 用户 ID：oc_ 加实例 ID（32 位十六进制）
@@ -2646,7 +2710,7 @@ export interface components {
              * Widgets
              * @description 可选：创建时一并加入的组件（用于导入布局 JSON），整体在一个事务里完成
              */
-            widgets?: (components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"] | components["schemas"]["ServiceHealthWidgetCreate"] | components["schemas"]["ApiLatencyWidgetCreate"] | components["schemas"]["NotificationsWidgetCreate"])[];
+            widgets?: (components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"] | components["schemas"]["ServiceHealthWidgetCreate"] | components["schemas"]["ApiLatencyWidgetCreate"] | components["schemas"]["NotificationsWidgetCreate"] | components["schemas"]["ProjectProgressWidgetCreate"] | components["schemas"]["ImQuickChatWidgetCreate"])[];
         };
         /** DashboardOut */
         DashboardOut: {
@@ -2783,6 +2847,11 @@ export interface components {
              * @description @ 或私聊这个实例的人
              */
             triggered_by_im_id: string | null;
+            /**
+             * Triggered By Name
+             * @description 触发者的显示名（推断时记下；早于这个字段的记录为 null）
+             */
+            triggered_by_name?: string | null;
         };
         /** FailedJob */
         FailedJob: {
@@ -3327,6 +3396,43 @@ export interface components {
         ImPinCreate: {
             /** Server Msg Id */
             server_msg_id: string;
+        };
+        /**
+         * ImQuickChatConfig
+         * @description T-0064：首页的 IM 快捷入口，取代 AIQuickAsk（方案第 2 节、契约第 11 节）。
+         *
+         *     组件把一句话发给选定的实例并打开 IM 会话；IM 只对 owner / admin 开放，其他角色只看到说明。
+         */
+        ImQuickChatConfig: {
+            /**
+             * Instance Id
+             * @description 默认发给哪个实例；为空时在组件里选择
+             */
+            instance_id?: string | null;
+        };
+        /** ImQuickChatWidgetCreate */
+        ImQuickChatWidgetCreate: {
+            config?: components["schemas"]["ImQuickChatConfig"];
+            layout: components["schemas"]["WidgetLayout"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "im_quick_chat";
+        };
+        /** ImQuickChatWidgetUpdate */
+        ImQuickChatWidgetUpdate: {
+            config: components["schemas"]["ImQuickChatConfig"];
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "im_quick_chat";
         };
         /** ImReadRequest */
         ImReadRequest: {
@@ -3876,6 +3982,64 @@ export interface components {
             /** Display Name */
             display_name: string;
         };
+        /**
+         * MemberCreate
+         * @description 已有账号按邮箱加入；没有账号时同时填写 display_name 与 password，创建账号并加入。
+         */
+        MemberCreate: {
+            /**
+             * Display Name
+             * @description 只在创建新账号时使用
+             */
+            display_name?: string | null;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /**
+             * Password
+             * @description 新账号的初始密码（至少 12 位）；只在创建新账号时使用
+             */
+            password?: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "member" | "viewer";
+        };
+        /** MemberOut */
+        MemberOut: {
+            /** Display Name */
+            display_name: string;
+            /** Email */
+            email: string;
+            /**
+             * Joined At
+             * Format: date-time
+             * @description 加入这个工作空间的时间
+             */
+            joined_at: string;
+            role: components["schemas"]["Role"];
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /**
+             * You
+             * @description 是否为当前用户
+             */
+            you: boolean;
+        };
+        /** MemberUpdate */
+        MemberUpdate: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "member" | "viewer";
+        };
         /** MetricPoint */
         MetricPoint: {
             /**
@@ -4213,6 +4377,18 @@ export interface components {
             /** Total Estimate */
             total_estimate?: number | null;
         };
+        /** Page[MemberOut] */
+        Page_MemberOut_: {
+            /** Items */
+            items: components["schemas"]["MemberOut"][];
+            /**
+             * Next Cursor
+             * @description 下一页游标；没有更多数据时为 null
+             */
+            next_cursor?: string | null;
+            /** Total Estimate */
+            total_estimate?: number | null;
+        };
         /** Page[SessionOut] */
         Page_SessionOut_: {
             /** Items */
@@ -4345,6 +4521,66 @@ export interface components {
             sync: components["schemas"]["SyncState"];
             /** Total Estimate */
             total_estimate?: number | null;
+        };
+        /**
+         * ProjectProgressConfig
+         * @description T-0064：组件调用 GET /projects/progress（规范 §8.2 ProjectProgress）。
+         */
+        ProjectProgressConfig: {
+            /**
+             * Limit
+             * @default 5
+             */
+            limit: number;
+        };
+        /** ProjectProgressList */
+        ProjectProgressList: {
+            /** Items */
+            items: components["schemas"]["ProjectProgressOut"][];
+            sync: components["schemas"]["SyncState"];
+        };
+        /**
+         * ProjectProgressOut
+         * @description 首页“项目进度”组件（规范 §8.2 ProjectProgress；T-0064）。
+         */
+        ProjectProgressOut: {
+            /** Done Tasks */
+            done_tasks: number;
+            /** Open Tasks */
+            open_tasks: number;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Source Url */
+            source_url: string;
+            /** Title */
+            title: string;
+        };
+        /** ProjectProgressWidgetCreate */
+        ProjectProgressWidgetCreate: {
+            config?: components["schemas"]["ProjectProgressConfig"];
+            layout: components["schemas"]["WidgetLayout"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "project_progress";
+        };
+        /** ProjectProgressWidgetUpdate */
+        ProjectProgressWidgetUpdate: {
+            config: components["schemas"]["ProjectProgressConfig"];
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "project_progress";
         };
         /** PullOut */
         PullOut: {
@@ -5402,7 +5638,7 @@ export interface components {
             version: number;
             /**
              * Widget Type
-             * @description 当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications；也可能是已不再支持的旧类型，前端应显示安全的错误卡片
+             * @description 当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications、project_progress、im_quick_chat；也可能是已不再支持的旧类型，前端应显示安全的错误卡片
              */
             widget_type: string;
         };
@@ -8705,7 +8941,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"] | components["schemas"]["ServiceHealthWidgetCreate"] | components["schemas"]["ApiLatencyWidgetCreate"] | components["schemas"]["NotificationsWidgetCreate"];
+                "application/json": components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"] | components["schemas"]["ServiceHealthWidgetCreate"] | components["schemas"]["ApiLatencyWidgetCreate"] | components["schemas"]["NotificationsWidgetCreate"] | components["schemas"]["ProjectProgressWidgetCreate"] | components["schemas"]["ImQuickChatWidgetCreate"];
             };
         };
         responses: {
@@ -12325,6 +12561,58 @@ export interface operations {
             };
         };
     };
+    project_progress: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectProgressList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     search: {
         parameters: {
             query: {
@@ -13038,7 +13326,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QuickLinksWidgetUpdate"] | components["schemas"]["NoteWidgetUpdate"] | components["schemas"]["TodoSummaryWidgetUpdate"] | components["schemas"]["TodayTasksWidgetUpdate"] | components["schemas"]["CalendarAgendaWidgetUpdate"] | components["schemas"]["RecentDocsWidgetUpdate"] | components["schemas"]["GitHubActivityWidgetUpdate"] | components["schemas"]["ServiceHealthWidgetUpdate"] | components["schemas"]["ApiLatencyWidgetUpdate"] | components["schemas"]["NotificationsWidgetUpdate"];
+                "application/json": components["schemas"]["QuickLinksWidgetUpdate"] | components["schemas"]["NoteWidgetUpdate"] | components["schemas"]["TodoSummaryWidgetUpdate"] | components["schemas"]["TodayTasksWidgetUpdate"] | components["schemas"]["CalendarAgendaWidgetUpdate"] | components["schemas"]["RecentDocsWidgetUpdate"] | components["schemas"]["GitHubActivityWidgetUpdate"] | components["schemas"]["ServiceHealthWidgetUpdate"] | components["schemas"]["ApiLatencyWidgetUpdate"] | components["schemas"]["NotificationsWidgetUpdate"] | components["schemas"]["ProjectProgressWidgetUpdate"] | components["schemas"]["ImQuickChatWidgetUpdate"];
             };
         };
         responses: {
@@ -13210,6 +13498,264 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_members: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_MemberOut_"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    add_member: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_member: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_member: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

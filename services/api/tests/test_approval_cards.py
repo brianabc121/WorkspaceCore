@@ -189,3 +189,21 @@ def test_only_workspace_notice_accounts_produce_cards() -> None:
     for sender in ("imAdmin", f"oc_{uuid.uuid4().hex}", "ws_notice"):
         other = parse_message({**raw, "sendID": sender})
         assert other is not None and other.content == {}
+
+
+def test_card_text_names_who_triggered_it() -> None:
+    from app.models import AiToolExecution
+
+    row = AiToolExecution(instance_name="甲", summary="删除任务“写周报”", risk_level="high")
+    row.source = {"conversation_id": None, "triggered_by_name": None, "inferred": True}
+    assert approval_cards.card_text(row).splitlines()[0] == "「甲」请求：删除任务“写周报”"
+    assert "触发" not in approval_cards.card_text(row)
+    row.source = {"conversation_id": "si_a_b", "triggered_by_name": "张三", "inferred": True}
+    assert (
+        approval_cards.card_text(row).splitlines()[1]
+        == "由 张三 私聊它触发（根据实例最近收到的消息推断）。"
+    )
+    row.source = {"conversation_id": "sg_1", "triggered_by_name": "张三", "inferred": True}
+    assert "由 张三 在群聊里 @ 它触发" in approval_cards.card_text(row)
+    row.risk_level = "critical"
+    assert "重新输入密码" in approval_cards.card_text(row)

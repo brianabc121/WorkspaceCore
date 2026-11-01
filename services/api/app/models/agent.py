@@ -103,6 +103,8 @@ class AgentInstance(Base):
     plugin_version: Mapped[str | None] = mapped_column(Text)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     bundle_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 最近一次签发的 IM 令牌何时到期（令牌只在实例启动时领取；到期前 7 天提醒，迁移 0018）
+    im_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created()

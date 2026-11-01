@@ -277,6 +277,7 @@ OC-0 的回归测试脚本没有覆盖这一项，覆盖它的是这个单元测
   - `im_messages`：消息投影，按 OpenIM 的会话 ID 存一份，群里的多个管理员共用。
     - 唯一约束：`server_msg_id`、`(conversation_id, seq)`、`(conversation_id, client_msg_id)`；
     - 保留期 `IM_MESSAGE_RETENTION_DAYS`（默认 365 天），由每小时的清理任务删除；OpenIM 里的消息不受影响。
+      方案第 4.4 节写默认 180 天；人类 2026-11-01 确认保持 365 天（T-0064）。
 - **投影**（`app/domain/im_projection.py`）：
   - 回调只当作“这个会话有变化”的提示：取会话的最大序号（`/msg/newest_seq`），再按序号拉取缺的消息（`/msg/pull_msg_by_seq`，每次 100 条）。
   - 以会话成员的身份拉取：单聊用管理员，群聊优先用群主。每个会话最多补最近 1000 条。

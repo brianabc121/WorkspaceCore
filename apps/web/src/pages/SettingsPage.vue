@@ -2,16 +2,18 @@
 import { useAuthStore } from '../stores/auth'
 import ProfileForm from '../features/ProfileForm.vue'
 import WorkspaceForm from '../features/WorkspaceForm.vue'
+import MembersPanel from '../features/MembersPanel.vue'
 const auth = useAuthStore()
 </script>
 <template>
-  <div class="page-heading"><h1>设置</h1><p>管理个人资料与当前工作空间。</p></div>
+  <div class="page-heading"><h1>设置</h1><p>管理个人资料、当前工作空间与成员。</p></div>
   <template v-if="auth.user">
     <div class="settings-grid">
       <ProfileForm />
       <WorkspaceForm v-if="auth.currentWorkspace" :key="auth.workspaceId!" :workspace="auth.currentWorkspace" />
       <section v-else class="panel form-panel"><h2>工作空间</h2><p>你尚未加入任何工作空间，请联系管理员。</p></section>
     </div>
+    <MembersPanel v-if="auth.canManage && auth.workspaceId" :key="auth.workspaceId" :workspace-id="auth.workspaceId" />
     <RouterLink class="primary-link" to="/settings/security">管理密码与会话 →</RouterLink>
     <RouterLink class="primary-link" to="/#dashboard-tools">导入 / 导出仪表盘布局 →</RouterLink>
   </template>

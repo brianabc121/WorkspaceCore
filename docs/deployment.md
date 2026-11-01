@@ -1,6 +1,6 @@
 # 部署与运行手册
 
-> 状态：Sprint 6（2026-11-01）。Sprint 0 ~ 5 的功能已验收（`docs/acceptance/`）。
+> 状态：Sprint 0 ~ 6 已验收（`docs/acceptance/`）。第一次部署建议先读按步骤写的 `docs/deploy-guide.md`，本手册是完整参考。
 > - 升级与回滚：第 5 节；
 > - 备份与隔离恢复：第 14 节；
 > - 安全扫描、完整冒烟与性能基准：第 15 节；
@@ -84,7 +84,8 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 |---|---|---|
 | `APP_ENV` | `development` / `production`；production 关闭 API 文档页 | `development` |
 | `LOG_LEVEL` | `DEBUG` / `INFO` / `WARNING` / `ERROR` | `INFO` |
-| `HTTP_BIND` / `HTTP_PORT` | Caddy 对外监听地址与端口 | `127.0.0.1` / `8080` |
+| `HTTP_BIND` / `HTTP_PORT` | Caddy 的 HTTP 端口（宿主机上的监听地址与端口） | `127.0.0.1` / `8080` |
+| `COMPOSE_FILE`、`SITE_DOMAIN`、`ACME_EMAIL` | 用域名对外提供 HTTPS（第 6 节）：`COMPOSE_FILE=compose.yaml:compose.https.yaml` 加上域名与 Let's Encrypt 联系邮箱 | 不启用 |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | 数据库；API / Worker 的连接串由这三项自动拼接 | `workspace` / `workspace` / 随机 |
 | `DATABASE_URL` / `REDIS_URL` | **只在本机直接运行 API 时**使用，Compose 内不读取 | 指向 localhost |
 | `PUBLIC_BASE_URL` | 浏览器访问工作台的地址；登录、安装等写请求的 `Origin` 必须是它或下面的可信来源 | `http://localhost:8080` |
@@ -122,7 +123,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 
 | 检查 | 预期 |
 |---|---|
-| `make ps` | 6 个服务都是 `Up`，其中 5 个显示 `(healthy)`（caddy 没有单独的健康检查） |
+| `make ps` | 6 个服务都是 `Up (healthy)` |
 | `curl -s 127.0.0.1:8080/healthz` | `{"status":"ok"}` |
 | `curl -s 127.0.0.1:8080/readyz` | `{"status":"ok","checks":{"database":"ok","redis":"ok"}}`；依赖不可用时返回 503 |
 | `docker compose exec worker arq app.jobs.worker.WorkerSettings --check` | 退出码 0 |
@@ -165,7 +166,7 @@ Vikunja、n8n 等独立部署的组件分开升级：
 
 ### 5.2 数据库迁移的约定
 
-- 迁移 `0001` ~ `0017` 都**只新增**表、索引、触发器（`0014` 给 `0013` 新建的 `im_messages` 加了一个可空列），每个都有 downgrade。
+- 迁移 `0001` ~ `0018` 都**只新增**表、索引、触发器或可空列（`0014` 给 `im_messages` 加了一列，`0018` 给 `agent_instances` 加了一列），每个都有 downgrade。
   CI 每次都跑 `upgrade head → downgrade base → upgrade head`（`ci-api.yml`），恢复演练也会在恢复出来的数据上执行 `upgrade head`。
 - 以后的迁移继续遵守“先扩展、后收缩”：
   - 新版本只加表、加列（可为空或有默认值），旧代码照常运行；
@@ -194,8 +195,11 @@ Vikunja、n8n 等独立部署的组件分开升级：
 
 ## 6. 生产环境注意事项
 
-- **HTTPS**：在 `infra/caddy/Caddyfile` 中把 `:8080` 换成域名、去掉 `auto_https off`，Caddy 会自动申请证书；
-  同时在 `header` 块加入 `Strict-Transport-Security "max-age=31536000; includeSubDomains"`，并把 `HTTP_BIND` 设为 `0.0.0.0`、端口改为 80/443。
+- **HTTPS**：在 `.env` 里设置 `COMPOSE_FILE=compose.yaml:compose.https.yaml`、`SITE_DOMAIN`（已解析到本机的域名）、`ACME_EMAIL`，
+  `PUBLIC_BASE_URL` 改为 `https://<域名>`，然后 `make up`。Caddy 改用 `infra/caddy/https.Caddyfile`：自动向 Let's Encrypt 申请并续期证书，
+  发布 80 / 443（HTTP 自动跳转 HTTPS），域名站点加 HSTS；内部的 `:8080` 保留（Vikunja 的 Webhook 经 `http://caddy:8080` 投递），
+  宿主机上仍按 `HTTP_BIND` 只绑定本机。两份 Caddyfile 的路由与安全响应头都写在 `infra/caddy/routes.caddy`。
+  完整步骤见 `docs/deploy-guide.md` 第 5 步。
 - **密钥**：生产环境用 Secret 管理工具注入，不要把真实值写进仓库或 Compose 文件。
 - **`APP_ENV=production`**：关闭 `/api/v1/docs` 与 OpenAPI；Cookie 加 `Secure`（`PUBLIC_BASE_URL` 是 https 时也会加）；
   没有设置足够长的 `SESSION_SECRET` 时 API 拒绝启动。
@@ -701,7 +705,7 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 2. `make openim-build`：按锁定的上游提交与补丁构建 `my-workspace/openim-server` 镜像（要 8 GB 左右的临时磁盘；
    Docker Hub 限流时 `BASE_REGISTRY=mirror.gcr.io/library make openim-build`）；
 3. `make up`、`make agents-up`（第 16 节）：创建 `im` 与 `agent-im` 网络；
-4. `make openim-up`：启动 OpenIM，第一次启动要 1 分钟左右（初始化 etcd、Garage、MongoDB 用户）；
+4. `make openim-up`：启动 OpenIM 并等各服务的健康检查通过（`--wait`），第一次启动要 1 分钟左右（初始化 etcd、Garage、MongoDB 用户）；
 5. 在 `.env` 里设置下面两项，再 `make up` 让 api、worker 生效：
 
    ```
@@ -720,11 +724,16 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 | `OPENIM_CALLBACK_PATH_TOKEN` | `make env` 生成 | 回调地址 `http://api:8000/internal/openim/<口令>` 里的口令，至少 32 个字符 |
 | `IM_NET` | `172.31.252` | `im` 网络的网段前三段：子网 `<值>.0/28`，openim-server 固定在 `<值>.2`。和本机别的 Docker 网络冲突时改它；`make restore-verify` 的临时环境自动用 `172.31.253`，并且不连接 OpenIM |
 | `OPENIM_CALLBACK_ALLOWED_CIDRS` | `<IM_NET>.2/32` | API 只接受这些地址的回调；一般不用改 |
+| `IM_MESSAGE_RETENTION_DAYS` | `365` | 工作台里消息投影的保留天数（7 ~ 3650），超期由 Worker 每小时按发送时间删除；OpenIM 里的消息不受影响。V2 方案写的是默认 180 天，人类 2026-11-01 决定保持 365 天 |
 | `AGENT_IM_OBJECT_BASE_URL` | 自动 | 写进图片消息的取图地址前缀；默认是 `http://<外网入口域名>:18443`（接入包里本机隧道的端口），只有内网入口时是内网入口地址 |
 | `OPENIM_MONGO_*`、`OPENIM_REDIS_PASSWORD`、`OPENIM_ETCD_*`、`OPENIM_KAFKA_PASSWORD`、`OPENIM_GARAGE_*`、`OPENIM_S3_*` | `make env` 生成 | 只在 OpenIM 的 Compose 里使用。MongoDB 的用户与 Garage 的访问密钥在**第一次启动时**写进数据卷，之后改 `.env` 不会生效 |
 
 ### 17.4 日常
 
+- **IM 令牌有效期 30 天**（`infra/openim/compose.yaml` 的 `IMENV_OPENIM_RPC_AUTH_TOKENPOLICY_EXPIRE`，上游默认 90 天）。实例每次启动领取新令牌，
+  每周的定时重启负责续期；令牌到期前 7 天、客户端证书到期前 14 天，Worker 会通知管理员（`agent_im_token_expiring`、`agent_credential_expiring`）。
+- **实例状态的周期检查**：Worker 每 5 分钟按 OpenIM 的实时在线状态纠正“在线 / 离线”（上下线回调丢失时也能纠正），离线超过 10 分钟通知管理员一次
+  （`agent_offline`；每周重启、冷启动都在几分钟内，不会提醒）；每小时检查实例与 owner / admin 的好友关系，缺了就补。
 - `make openim-logs` 看日志；`make openim-down` 停止（保留数据卷）；
 - 资源：空闲时 openim-server 约 390 MiB、Kafka 约 370 MiB、MongoDB 约 190 MiB、Garage 与 etcd 各十几 MiB；
 - 升级 OpenIM 只能换补丁镜像（`infra/openim/patches/`），**不要换回官方镜像**：官方镜像有越权问题（OC-0 ADR 第 4 节）。

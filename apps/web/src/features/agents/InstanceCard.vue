@@ -29,6 +29,7 @@ function saveGrants() { if (grantsValid.value) { emit('grants', rows.value.map(r
       <div><dt>IM 账号</dt><dd>{{ instance.im_nickname }}（{{ instance.im_user_id }}）</dd></div>
       <div><dt>最近在线</dt><dd>{{ instance.last_seen_at ? formatTime(instance.last_seen_at) : '从未连接' }}</dd></div>
       <div><dt>上报版本</dt><dd>{{ instance.reported_version ?? '—' }} / 插件 {{ instance.plugin_version ?? '—' }}</dd></div>
+      <div v-if="instance.im_token_expires_at"><dt>IM 令牌</dt><dd>{{ formatTime(instance.im_token_expires_at) }} 到期（OpenClaw 每次启动时领取新的）</dd></div>
       <div><dt>接入包</dt><dd>{{ instance.bundle_issued_at ? `最近生成于 ${formatTime(instance.bundle_issued_at)}` : '还没有生成' }}</dd></div>
     </dl>
     <section class="agent-section" aria-label="接入包">

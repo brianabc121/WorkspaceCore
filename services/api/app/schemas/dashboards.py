@@ -143,6 +143,23 @@ class NotificationsConfig(_Strict):
     unread_only: bool = True
 
 
+class ProjectProgressConfig(_Strict):
+    """T-0064：组件调用 GET /projects/progress（规范 §8.2 ProjectProgress）。"""
+
+    limit: int = Field(default=5, ge=1, le=20)
+
+
+class ImQuickChatConfig(_Strict):
+    """T-0064：首页的 IM 快捷入口，取代 AIQuickAsk（方案第 2 节、契约第 11 节）。
+
+    组件把一句话发给选定的实例并打开 IM 会话；IM 只对 owner / admin 开放，其他角色只看到说明。
+    """
+
+    instance_id: UUID | None = Field(
+        default=None, description="默认发给哪个实例；为空时在组件里选择"
+    )
+
+
 class _WidgetBody(_Strict):
     layout: WidgetLayout
 
@@ -197,6 +214,16 @@ class NotificationsWidgetCreate(_WidgetBody):
     config: NotificationsConfig = Field(default_factory=NotificationsConfig)
 
 
+class ProjectProgressWidgetCreate(_WidgetBody):
+    widget_type: Literal["project_progress"]
+    config: ProjectProgressConfig = Field(default_factory=ProjectProgressConfig)
+
+
+class ImQuickChatWidgetCreate(_WidgetBody):
+    widget_type: Literal["im_quick_chat"]
+    config: ImQuickChatConfig = Field(default_factory=ImQuickChatConfig)
+
+
 WidgetCreate = Annotated[
     QuickLinksWidgetCreate
     | NoteWidgetCreate
@@ -207,7 +234,9 @@ WidgetCreate = Annotated[
     | GitHubActivityWidgetCreate
     | ServiceHealthWidgetCreate
     | ApiLatencyWidgetCreate
-    | NotificationsWidgetCreate,
+    | NotificationsWidgetCreate
+    | ProjectProgressWidgetCreate
+    | ImQuickChatWidgetCreate,
     Field(discriminator="widget_type"),
 ]
 
@@ -266,6 +295,16 @@ class NotificationsWidgetUpdate(_WidgetUpdateBody):
     config: NotificationsConfig
 
 
+class ProjectProgressWidgetUpdate(_WidgetUpdateBody):
+    widget_type: Literal["project_progress"]
+    config: ProjectProgressConfig
+
+
+class ImQuickChatWidgetUpdate(_WidgetUpdateBody):
+    widget_type: Literal["im_quick_chat"]
+    config: ImQuickChatConfig
+
+
 WidgetUpdate = Annotated[
     QuickLinksWidgetUpdate
     | NoteWidgetUpdate
@@ -276,7 +315,9 @@ WidgetUpdate = Annotated[
     | GitHubActivityWidgetUpdate
     | ServiceHealthWidgetUpdate
     | ApiLatencyWidgetUpdate
-    | NotificationsWidgetUpdate,
+    | NotificationsWidgetUpdate
+    | ProjectProgressWidgetUpdate
+    | ImQuickChatWidgetUpdate,
     Field(
         discriminator="widget_type",
         description="修改配置；widget_type 必须与现有类型相同（类型不能修改）",
@@ -289,7 +330,8 @@ class WidgetOut(BaseModel):
     dashboard_id: UUID
     widget_type: str = Field(
         description="当前版本内置：quick_links、note、todo_summary、today_tasks、"
-        "calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications；"
+        "calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications、"
+        "project_progress、im_quick_chat；"
         "也可能是已不再支持的旧类型，前端应显示安全的错误卡片"
     )
     config: dict[str, Any] = Field(description="该类型的配置；前端按自己的 Registry 再校验一次")

@@ -327,6 +327,7 @@ class AgentService:
                 plugin_version=i.plugin_version,
                 last_seen_at=i.last_seen_at,
                 bundle_issued_at=i.bundle_issued_at,
+                im_token_expires_at=i.im_token_expires_at,
                 disabled_at=i.disabled_at,
                 credentials=by_instance[i.id],
                 secret_grants=grants_by[i.id],
@@ -1204,13 +1205,17 @@ class AgentService:
             )
             raise im_unavailable() from error
         logger.info("openim user token issued", extra={"instance_id": str(instance.id)})
+        expires_at = (
+            _now() + timedelta(seconds=issued.expires_in) if issued.expires_in > 0 else None
+        )
+        # 记下到期时间：Worker 在到期前 7 天提醒管理员（方案第 4.3 节）
+        instance.im_token_expires_at = expires_at
+        await self.db.commit()
         return ImTokenResponse(
             token=issued.token,
             im_user_id=instance.im_user_id,
             platform_id=PLATFORM_WEB,
-            expires_at=_now() + timedelta(seconds=issued.expires_in)
-            if issued.expires_in > 0
-            else None,
+            expires_at=expires_at,
             ws_addr=None,
             api_addr=None,
         )

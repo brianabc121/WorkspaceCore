@@ -36,7 +36,7 @@ from app.domain.automations import AutomationService
 from app.domain.calendar import CalendarService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.credentials import CredentialBox, CredentialError
-from app.domain.im import NOTICE_USER_ID
+from app.domain.im import NOTICE_USER_ID, user_id_from_im
 from app.domain.knowledge import KnowledgeService
 from app.domain.notifications import NotificationService, notify_admins
 from app.domain.policy import WorkspaceAccess, has_role, not_found
@@ -477,10 +477,13 @@ class AiToolService:
             return ExecutionSource(
                 conversation_id=None, message_server_id=None, triggered_by_im_id=None, inferred=True
             )
+        sender_id = user_id_from_im(message.sender_im_id)
+        sender = await self.db.get(User, sender_id) if sender_id is not None else None
         return ExecutionSource(
             conversation_id=message.conversation_id,
             message_server_id=message.server_msg_id,
             triggered_by_im_id=message.sender_im_id,
+            triggered_by_name=(sender.display_name or sender.email) if sender else None,
             inferred=True,
         )
 

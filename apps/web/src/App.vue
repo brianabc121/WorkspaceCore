@@ -73,7 +73,7 @@ watch(pageTitle, (title) => { document.title = `${title} · My Workspace` }, { i
         </div>
       </header>
       <main id="main-content" tabindex="-1">
-        <p v-if="auth.user" class="eyebrow">Sprint 3 · 任务与集成</p>
+        <p v-if="auth.user && auth.currentWorkspace" class="eyebrow">{{ auth.currentWorkspace.name }}</p>
         <p v-if="logoutError" role="alert" class="feedback">{{ logoutError }}</p>
         <p v-if="auth.loading" role="status">正在连接工作空间…</p>
         <RouterView v-else />

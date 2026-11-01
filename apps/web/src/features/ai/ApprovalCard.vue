@@ -18,7 +18,7 @@ const execution = useExecution(props.scope, () => props.executionId)
         <span class="badge" :class="`ai-risk-${execution.data.value.risk_level}`">{{ RISK_LABELS[execution.data.value.risk_level] }}</span>
         <span class="badge" :class="`ai-status-${execution.data.value.status}`">{{ STATUS_LABELS[execution.data.value.status] }}</span>
       </p>
-      <p class="form-help">实例 {{ execution.data.value.instance_name }} · <RouterLink :to="{ path: '/ai', query: { id: execution.data.value.id } }">在审批中心查看参数</RouterLink></p>
+      <p class="form-help">实例 {{ execution.data.value.instance_name }}<template v-if="execution.data.value.source.triggered_by_name"> · 由 {{ execution.data.value.source.triggered_by_name }} 触发</template> · <RouterLink :to="{ path: '/ai', query: { id: execution.data.value.id } }">在审批中心查看参数</RouterLink></p>
       <ApprovalActions v-if="execution.data.value.status === 'pending_approval' && auth.canManage" :key="execution.data.value.version" :scope="scope" :execution="execution.data.value" />
     </template>
     <template v-else>

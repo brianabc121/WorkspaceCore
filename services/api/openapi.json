@@ -256,6 +256,19 @@
             "title": "Im Ready",
             "type": "boolean"
           },
+          "im_token_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次签发的 IM 令牌何时到期（实例每次启动时领取）；从未签发为 null",
+            "title": "Im Token Expires At"
+          },
           "im_user_id": {
             "description": "OpenIM 用户 ID：oc_ 加实例 ID（32 位十六进制）",
             "title": "Im User Id",
@@ -2432,8 +2445,10 @@
                   "api_latency": "#/components/schemas/ApiLatencyWidgetCreate",
                   "calendar_agenda": "#/components/schemas/CalendarAgendaWidgetCreate",
                   "github_activity": "#/components/schemas/GitHubActivityWidgetCreate",
+                  "im_quick_chat": "#/components/schemas/ImQuickChatWidgetCreate",
                   "note": "#/components/schemas/NoteWidgetCreate",
                   "notifications": "#/components/schemas/NotificationsWidgetCreate",
+                  "project_progress": "#/components/schemas/ProjectProgressWidgetCreate",
                   "quick_links": "#/components/schemas/QuickLinksWidgetCreate",
                   "recent_docs": "#/components/schemas/RecentDocsWidgetCreate",
                   "service_health": "#/components/schemas/ServiceHealthWidgetCreate",
@@ -2472,6 +2487,12 @@
                 },
                 {
                   "$ref": "#/components/schemas/NotificationsWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/ProjectProgressWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/ImQuickChatWidgetCreate"
                 }
               ]
             },
@@ -2777,6 +2798,18 @@
             ],
             "description": "@ 或私聊这个实例的人",
             "title": "Triggered By Im Id"
+          },
+          "triggered_by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "触发者的显示名（推断时记下；早于这个字段的记录为 null）",
+            "title": "Triggered By Name"
           }
         },
         "required": [
@@ -4157,6 +4190,75 @@
         "title": "ImPinCreate",
         "type": "object"
       },
+      "ImQuickChatConfig": {
+        "additionalProperties": false,
+        "description": "T-0064：首页的 IM 快捷入口，取代 AIQuickAsk（方案第 2 节、契约第 11 节）。\n\n组件把一句话发给选定的实例并打开 IM 会话；IM 只对 owner / admin 开放，其他角色只看到说明。",
+        "properties": {
+          "instance_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "默认发给哪个实例；为空时在组件里选择",
+            "title": "Instance Id"
+          }
+        },
+        "title": "ImQuickChatConfig",
+        "type": "object"
+      },
+      "ImQuickChatWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/ImQuickChatConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "im_quick_chat",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "ImQuickChatWidgetCreate",
+        "type": "object"
+      },
+      "ImQuickChatWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/ImQuickChatConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "im_quick_chat",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "ImQuickChatWidgetUpdate",
+        "type": "object"
+      },
       "ImReadRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5338,6 +5440,120 @@
         "title": "MeUpdate",
         "type": "object"
       },
+      "MemberCreate": {
+        "description": "已有账号按邮箱加入；没有账号时同时填写 display_name 与 password，创建账号并加入。",
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "只在创建新账号时使用",
+            "title": "Display Name"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "format": "password",
+                "maxLength": 128,
+                "minLength": 12,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "新账号的初始密码（至少 12 位）；只在创建新账号时使用",
+            "title": "Password"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "member",
+              "viewer"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "role"
+        ],
+        "title": "MemberCreate",
+        "type": "object"
+      },
+      "MemberOut": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "joined_at": {
+            "description": "加入这个工作空间的时间",
+            "format": "date-time",
+            "title": "Joined At",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          },
+          "you": {
+            "description": "是否为当前用户",
+            "title": "You",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "display_name",
+          "role",
+          "joined_at",
+          "you"
+        ],
+        "title": "MemberOut",
+        "type": "object"
+      },
+      "MemberUpdate": {
+        "properties": {
+          "role": {
+            "enum": [
+              "admin",
+              "member",
+              "viewer"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "MemberUpdate",
+        "type": "object"
+      },
       "MetricPoint": {
         "properties": {
           "at": {
@@ -6153,6 +6369,45 @@
         "title": "Page[KnowledgeSourceOut]",
         "type": "object"
       },
+      "Page_MemberOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemberOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[MemberOut]",
+        "type": "object"
+      },
       "Page_SessionOut_": {
         "properties": {
           "items": {
@@ -6474,6 +6729,124 @@
           "sync"
         ],
         "title": "ProjectPage",
+        "type": "object"
+      },
+      "ProjectProgressConfig": {
+        "additionalProperties": false,
+        "description": "T-0064：组件调用 GET /projects/progress（规范 §8.2 ProjectProgress）。",
+        "properties": {
+          "limit": {
+            "default": 5,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "ProjectProgressConfig",
+        "type": "object"
+      },
+      "ProjectProgressList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectProgressOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "sync": {
+            "$ref": "#/components/schemas/SyncState"
+          }
+        },
+        "required": [
+          "items",
+          "sync"
+        ],
+        "title": "ProjectProgressList",
+        "type": "object"
+      },
+      "ProjectProgressOut": {
+        "description": "首页“项目进度”组件（规范 §8.2 ProjectProgress；T-0064）。",
+        "properties": {
+          "done_tasks": {
+            "title": "Done Tasks",
+            "type": "integer"
+          },
+          "open_tasks": {
+            "title": "Open Tasks",
+            "type": "integer"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "title",
+          "source_url",
+          "open_tasks",
+          "done_tasks"
+        ],
+        "title": "ProjectProgressOut",
+        "type": "object"
+      },
+      "ProjectProgressWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/ProjectProgressConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "project_progress",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "ProjectProgressWidgetCreate",
+        "type": "object"
+      },
+      "ProjectProgressWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/ProjectProgressConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "project_progress",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "ProjectProgressWidgetUpdate",
         "type": "object"
       },
       "PullOut": {
@@ -8814,7 +9187,7 @@
             "type": "integer"
           },
           "widget_type": {
-            "description": "当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications；也可能是已不再支持的旧类型，前端应显示安全的错误卡片",
+            "description": "当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications、project_progress、im_quick_chat；也可能是已不再支持的旧类型，前端应显示安全的错误卡片",
             "title": "Widget Type",
             "type": "string"
           }
@@ -14347,8 +14720,10 @@
                     "api_latency": "#/components/schemas/ApiLatencyWidgetCreate",
                     "calendar_agenda": "#/components/schemas/CalendarAgendaWidgetCreate",
                     "github_activity": "#/components/schemas/GitHubActivityWidgetCreate",
+                    "im_quick_chat": "#/components/schemas/ImQuickChatWidgetCreate",
                     "note": "#/components/schemas/NoteWidgetCreate",
                     "notifications": "#/components/schemas/NotificationsWidgetCreate",
+                    "project_progress": "#/components/schemas/ProjectProgressWidgetCreate",
                     "quick_links": "#/components/schemas/QuickLinksWidgetCreate",
                     "recent_docs": "#/components/schemas/RecentDocsWidgetCreate",
                     "service_health": "#/components/schemas/ServiceHealthWidgetCreate",
@@ -14387,6 +14762,12 @@
                   },
                   {
                     "$ref": "#/components/schemas/NotificationsWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ProjectProgressWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ImQuickChatWidgetCreate"
                   }
                 ],
                 "title": "Body"
@@ -20752,6 +21133,89 @@
         ]
       }
     },
+    "/api/v1/projects/progress": {
+      "get": {
+        "description": "未归档项目的未完成 / 已完成任务数，供首页“项目进度”组件使用；有未完成任务的项目在前。",
+        "operationId": "project_progress",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectProgressList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "项目进度（viewer，读本地投影）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
     "/api/v1/search": {
       "get": {
         "description": "中文按字面包含与相似度匹配（不分词），相关性有限；排序见契约第 8 节。",
@@ -22069,8 +22533,10 @@
                     "api_latency": "#/components/schemas/ApiLatencyWidgetUpdate",
                     "calendar_agenda": "#/components/schemas/CalendarAgendaWidgetUpdate",
                     "github_activity": "#/components/schemas/GitHubActivityWidgetUpdate",
+                    "im_quick_chat": "#/components/schemas/ImQuickChatWidgetUpdate",
                     "note": "#/components/schemas/NoteWidgetUpdate",
                     "notifications": "#/components/schemas/NotificationsWidgetUpdate",
+                    "project_progress": "#/components/schemas/ProjectProgressWidgetUpdate",
                     "quick_links": "#/components/schemas/QuickLinksWidgetUpdate",
                     "recent_docs": "#/components/schemas/RecentDocsWidgetUpdate",
                     "service_health": "#/components/schemas/ServiceHealthWidgetUpdate",
@@ -22109,6 +22575,12 @@
                   },
                   {
                     "$ref": "#/components/schemas/NotificationsWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ProjectProgressWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ImQuickChatWidgetUpdate"
                   }
                 ],
                 "title": "Body"
@@ -22403,6 +22875,412 @@
           }
         ],
         "summary": "修改工作空间设置（admin 及以上）",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/members": {
+      "get": {
+        "operationId": "list_members",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_MemberOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "成员列表（admin 及以上）",
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "post": {
+        "description": "已有账号按邮箱加入；没有账号时同时提供 display_name 与 password（初始密码），创建账号后加入，响应头 `X-Account-Created: true`。没有账号又没给初始密码时返回 404 `USER_NOT_FOUND`。",
+        "operationId": "add_member",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "添加成员（admin 及以上；授予 admin 只能由 owner）",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/members/{user_id}": {
+      "delete": {
+        "operationId": "remove_member",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "移除成员（owner 不能移除；移除 admin 只能由 owner）",
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "patch": {
+        "operationId": "update_member",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "修改成员角色（admin 管理 member / viewer；涉及 admin 只能由 owner）",
         "tags": [
           "workspaces"
         ]

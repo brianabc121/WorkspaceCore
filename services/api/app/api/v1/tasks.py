@@ -25,6 +25,7 @@ from app.domain.tasks import TaskService, WriteResult
 from app.schemas.common import error_responses
 from app.schemas.tasks import (
     ProjectPage,
+    ProjectProgressList,
     TaskCreate,
     TaskOut,
     TaskPage,
@@ -88,6 +89,19 @@ async def list_projects(
         cursor=cursor,
         limit=limit,
     )
+
+
+@router.get(
+    "/projects/progress",
+    summary="项目进度（viewer，读本地投影）",
+    description="未归档项目的未完成 / 已完成任务数，供首页“项目进度”组件使用；"
+    "有未完成任务的项目在前。",
+    responses=_read_errors,
+)
+async def project_progress(
+    access: Viewer, service: Service, limit: Annotated[int, Query(ge=1, le=20)] = 5
+) -> ProjectProgressList:
+    return await service.project_progress(access, limit=limit)
 
 
 @router.get(

@@ -29,6 +29,7 @@ from app.domain.im_groups import ImGroupService
 from app.domain.im_service import ImService
 from app.domain.integrations import IntegrationService
 from app.domain.knowledge import KnowledgeService
+from app.domain.members import MemberService
 from app.domain.notifications import NotificationService
 from app.domain.operations import DeploymentHealth, OperationsService
 from app.domain.search import SearchService
@@ -90,6 +91,13 @@ def get_workspace_service(
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> WorkspaceService:
     return WorkspaceService(db, settings)
+
+
+def get_member_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> MemberService:
+    return MemberService(db, settings)
 
 
 def get_jobs(request: Request) -> JobQueue:

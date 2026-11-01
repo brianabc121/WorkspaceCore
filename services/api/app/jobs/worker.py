@@ -24,6 +24,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, dict_config
 from app.core.resources import create_engine
 from app.domain import (
+    agent_watch,
     alerts,
     approval_cards,
     automations,
@@ -36,6 +37,7 @@ from app.domain import (
 from app.domain.ai_tools import AiToolService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.operations import WORKER_HEARTBEAT_KEY, DeploymentHealth, ServiceCache
+from app.integrations.base import ConnectorError
 from app.integrations.http import CircuitBreaker
 from app.jobs.queue import (
     PROCESS_IM_INBOX,
@@ -141,6 +143,45 @@ async def reconcile_im(ctx: dict[str, Any]) -> int:
     return await im_projection.reconcile(im_ctx) if im_ctx is not None else 0
 
 
+async def watch_agents(ctx: dict[str, Any]) -> int:
+    """实例在线状态对账（每 5 分钟）：以 OpenIM 的实时状态为准；离线超过 10 分钟提醒管理员。"""
+    im_ctx = _im(ctx)
+    if im_ctx is None:
+        return 0
+    async with im_ctx.sessions() as db:
+        try:
+            result = await agent_watch.reconcile_presence(
+                db, im.ImAccounts(db, im_ctx.client), im_ctx.redis
+            )
+        except ConnectorError as error:
+            logger.warning("agent presence reconcile failed", extra={"error_kind": error.kind})
+            return 0
+        await db.commit()
+        # 离线提醒已随事务写入：提交成功后才记“已提醒”，提交失败时下一轮重新提醒
+        await agent_watch.confirm_notified(im_ctx.redis, result.notified)
+        return result.changed
+
+
+async def reconcile_im_friends(ctx: dict[str, Any]) -> int:
+    """好友关系对账（每小时）：实例与 owner / admin 缺了好友就补。"""
+    im_ctx = _im(ctx)
+    if im_ctx is None:
+        return 0
+    async with im_ctx.sessions() as db:
+        restored = await agent_watch.reconcile_friendships(db, im.ImAccounts(db, im_ctx.client))
+        await db.commit()
+        return restored
+
+
+async def warn_agent_expiry(ctx: dict[str, Any]) -> int:
+    """客户端证书、IM 令牌到期提醒（每天）。不需要 OpenIM。"""
+    context = _sync(ctx)
+    async with context.sessions() as db:
+        sent = await agent_watch.warn_expiring(db)
+        await db.commit()
+        return sent
+
+
 async def reconcile_im_full(ctx: dict[str, Any]) -> int:
     """IM 全量对账（每天一次）：重新拉每个会话最近 1000 条，补上中间缺的。"""
     im_ctx = _im(ctx)
@@ -222,6 +263,9 @@ class WorkerSettings:
         cron(reconcile_im, second={5, 35}, timeout=60),
         cron(expire_ai_approvals, second=25, timeout=60),
         cron(reconcile_im_full, hour=19, minute=23, timeout=1800),
+        cron(watch_agents, minute=set(range(2, 60, 5)), second=10, timeout=120),
+        cron(reconcile_im_friends, minute=41, timeout=600),
+        cron(warn_agent_expiry, hour=1, minute=7, timeout=120),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())
     on_startup = startup

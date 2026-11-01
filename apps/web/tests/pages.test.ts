@@ -33,7 +33,7 @@ describe('Sprint 1 页面', () => {
     await fillLogin()
     await fireEvent.submit(screen.getByRole('form', { name: '登录' }))
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/settings'))
-    expect(screen.getByText('测试用户')).toBeVisible()
+    expect(screen.getByText('测试用户', { selector: '.user-label' })).toBeVisible()
   })
   it('does not send invalid installation input and creates the first session with valid fields', async () => {
     const requests = mockApi((request) => {

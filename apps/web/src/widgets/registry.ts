@@ -6,6 +6,8 @@ import ResourceCard from './ResourceCard.vue'
 import GitHubActivity from './GitHubActivity.vue'
 import OperationsCard from './OperationsCard.vue'
 import NotificationsCard from './NotificationsCard.vue'
+import ProjectProgressCard from './ProjectProgressCard.vue'
+import ImQuickChatCard from './ImQuickChatCard.vue'
 
 export const safeUrl = (value: string) => {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password } catch { return false }
@@ -25,6 +27,8 @@ const activity = z.object({ kind: z.enum(['runs', 'pulls', 'issues']).default('r
 const serviceHealth = z.object({ limit: z.number().int().min(1).max(20).default(8) }).strict()
 const apiLatency = z.object({ range: z.enum(['1h', '6h', '24h']).default('1h'), quantile: z.enum(['p50', 'p95', 'p99']).default('p95') }).strict()
 const notifications = z.object({ limit: z.number().int().min(1).max(20).default(5), unread_only: z.boolean().default(true) }).strict()
+const projectProgress = z.object({ limit: z.number().int().min(1).max(20).default(5) }).strict()
+const imQuickChat = z.object({ instance_id: z.string().uuid().nullable().default(null) }).strict()
 const shape = { layout: layoutSchema }
 export const widgetSchema = z.discriminatedUnion('widget_type', [
   z.object({ ...shape, widget_type: z.literal('notifications'), config: notifications.prefault({}) }).strict(),
@@ -37,6 +41,8 @@ export const widgetSchema = z.discriminatedUnion('widget_type', [
   z.object({ ...shape, widget_type: z.literal('github_activity'), config: activity.prefault({}) }).strict(),
   z.object({ ...shape, widget_type: z.literal('service_health'), config: serviceHealth.prefault({}) }).strict(),
   z.object({ ...shape, widget_type: z.literal('api_latency'), config: apiLatency.prefault({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('project_progress'), config: projectProgress.prefault({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('im_quick_chat'), config: imQuickChat.prefault({}) }).strict(),
 ])
 export type WidgetValue = z.output<typeof widgetSchema>
 export type WidgetType = WidgetValue['widget_type']
@@ -51,6 +57,8 @@ export const registry: Record<WidgetType, WidgetDefinition> = {
   todo_summary: { type: 'todo_summary', title: '待办汇总', defaultSize: { w: 4, h: 3 }, configSchema: summary, component: markRaw(BuiltinCard), refreshPolicy: 'manual', requiredCapability: 'tasks' },
   today_tasks: { type: 'today_tasks', title: '今日任务', defaultSize: { w: 8, h: 4 }, configSchema: tasks, component: markRaw(BuiltinCard), refreshPolicy: 'manual', requiredCapability: 'tasks' },
   recent_docs: { type: 'recent_docs', title: '最近文档', defaultSize: { w: 6, h: 4 }, configSchema: tasks, component: markRaw(ResourceCard), refreshPolicy: 'manual', requiredCapability: 'knowledge' },
+  project_progress: { type: 'project_progress', title: '项目进度', defaultSize: { w: 6, h: 4 }, configSchema: projectProgress, component: markRaw(ProjectProgressCard), refreshPolicy: 'manual', requiredCapability: 'tasks' },
+  im_quick_chat: { type: 'im_quick_chat', title: '快捷提问（IM）', defaultSize: { w: 6, h: 4 }, configSchema: imQuickChat, component: markRaw(ImQuickChatCard), refreshPolicy: 'manual' },
   calendar_agenda: { type: 'calendar_agenda', title: '近期日程', defaultSize: { w: 6, h: 4 }, configSchema: agenda, component: markRaw(ResourceCard), refreshPolicy: 'manual', requiredCapability: 'calendar' },
 }
 export function parseWidget(widget: Schema['WidgetOut']): WidgetValue | null {

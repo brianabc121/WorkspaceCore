@@ -68,6 +68,38 @@ async function login(page) {
   await laptop.getByText('工作空间已保存').waitFor()
   step('修改显示名与工作空间名称')
 
+  // 成员管理（规范第 9.2 节，T-0064）：创建账号并加入 → 新成员登录后只能查看 → 改角色 → 移出后立即失去访问
+  const newcomer = { email: 'member@browser.example.com', password: 'browser member pass 1', name: 'Browser Member' }
+  const addForm = laptop.getByRole('form', { name: '添加成员' })
+  await addForm.getByLabel('邮箱 *').fill(newcomer.email)
+  await addForm.getByLabel('角色').selectOption('viewer')
+  await addForm.getByLabel(/同时创建账号/).check()
+  await addForm.getByLabel('显示名 *').fill(newcomer.name)
+  await addForm.getByLabel(/初始密码/).fill(newcomer.password)
+  await addForm.getByRole('button', { name: '添加成员' }).click()
+  await laptop.getByText(/已创建账号并加入/).waitFor()
+  const row = laptop.getByRole('listitem', { name: `成员：${newcomer.name}` })
+  await row.waitFor()
+  const guest = await (await browser.newContext()).newPage()
+  await guest.goto(`${base}/login`)
+  await guest.getByLabel('邮箱').fill(newcomer.email)
+  await guest.getByLabel('密码').fill(newcomer.password)
+  await guest.getByRole('button', { name: '登录' }).click()
+  await guest.waitForURL(`${base}/`)
+  await guest.goto(`${base}/settings`)
+  await guest.getByRole('form', { name: '工作空间设置' }).waitFor()
+  if (await guest.getByRole('region', { name: '成员' }).count()) throw new Error('viewer 不应看到成员管理')
+  if (await guest.getByLabel('工作空间名称').getAttribute('readonly') === null) throw new Error('viewer 的工作空间名称应只读')
+  await row.getByLabel('角色').selectOption('member')
+  await laptop.getByText(`${newcomer.name} 的角色已改为 member`).waitFor()
+  laptop.once('dialog', (dialog) => dialog.accept())
+  await row.getByRole('button', { name: '移出' }).click()
+  await laptop.getByText(`已移出：${newcomer.email}`).waitFor()
+  const left = await guest.evaluate(async () => (await (await fetch('/api/v1/workspaces')).json()).items.length)
+  if (left !== 0) throw new Error(`移出后对方不应再属于任何工作空间：${left}`)
+  await guest.context().close()
+  step('成员管理：创建账号并加入（viewer），对方登录后看不到成员管理、工作空间名称只读；改为 member；移出后对方立即失去访问')
+
   const phone = await (await browser.newContext()).newPage()
   await phone.goto(`${base}/login`)
   await login(phone)
@@ -87,10 +119,10 @@ async function login(page) {
   await laptop.goto(`${base}/settings/audit`)
   await laptop.locator('.record-list li').first().waitFor()
   const actions = await laptop.locator('.record-list li strong').allTextContents()
-  for (const action of ['auth.session_revoked', 'workspace.updated', 'user.updated', 'setup.completed']) {
+  for (const action of ['auth.session_revoked', 'workspace.updated', 'user.updated', 'setup.completed', 'workspace.member_added', 'workspace.member_role_changed', 'workspace.member_removed']) {
     if (!actions.includes(action)) throw new Error(`审计日志缺少 ${action}：${actions}`)
   }
-  step(`审计日志显示 ${actions.length} 条记录（含撤销会话、修改设置、首次安装）`)
+  step(`审计日志显示 ${actions.length} 条记录（含撤销会话、修改设置、首次安装、成员的加入 / 改角色 / 移出）`)
 
   await laptop.getByRole('button', { name: '登出' }).click()
   await laptop.waitForURL(/\/login/)
