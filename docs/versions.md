@@ -69,7 +69,7 @@ OpenIM 的官方镜像有越权问题，已换成自建的补丁镜像（`2026-1
 | MongoDB 7.0.28 | `mongo:7.0.28` | `sha256:4510cf3d7050003e958745adb25d2deb3fb907430716162d9cc1a92eda2a6047` | SSPL-1.0 | 同上 |
 | Redis 7.0.0（OpenIM 用） | `redis:7.0.0` | `sha256:1b90dbfe6943c72a7469c134cad3f02eb810f016049a0e19ad78be07040cdb0c` | BSD-3-Clause | 同上 |
 | Kafka 3.9.2（官方，KRaft，SASL/PLAIN） | `apache/kafka:3.9.2` | `sha256:05b4616e0702ef2729327705d54ad6b50ea70b271c4b730fabd2320789fb7b02` | Apache-2.0 | 同上；不用 4.x，见 OC-3 ADR 第 7.3 节 |
-| MinIO 2024.1.13 | `bitnamilegacy/minio:2024.1.13` | `sha256:35d0a4404341601ae4dff4d8672699f7b49e2975fd0fae897c5f5af4638f816e` | AGPL-3.0 | 同上（不再更新；OC-3 和图片上传一起替换） |
+| Garage v2.4.1（对象存储，替代 MinIO） | `dxflrs/garage:v2.4.1` | `sha256:9c96caa2612d3411acc5b0e6701fb238dbfba33e533a6d7d3d811a4b12d0d020` | AGPL-3.0 | 同上；初始化由 `garage-init`（`alpine:3.24.2`）完成，见 OC-3 ADR 第 8 节 |
 | etcd 3.5.34（官方，开启认证） | `gcr.io/etcd-development/etcd:v3.5.34` | `sha256:04726053dabaf26b56ce7ef28c3d20b8b4a4006ed887d30194aa4f0756ee4f8d` | Apache-2.0 | 同上；认证由 `etcd-init`（`alpine:3.24.2`）开启 |
 | MCP Python SDK 2.3.0 | `mcp==2.3.0`（PyPI） | — | MIT | OC-1 起加入 `services/api` 依赖 |
 | ghostunnel v1.11.4 | `ghostunnel/ghostunnel:v1.11.4` | `sha256:e5248233863aadd36383a11c92360f2981141881ef05e38360a6ada8630d36b1` | Apache-2.0 | 外网模式 OpenClaw 服务器的本机隧道（接入包的 `compose.yaml`；`2026-10-31-v2-oc2-agent-ingress-verification.md`） |

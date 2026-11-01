@@ -8,7 +8,7 @@ branch: claude/cool-wright-99qbbg
 paths: services/api/app,services/api/migrations,services/api/tests,infra/openim,infra/backup,scripts
 depends_on: T-0054
 created: 2026-10-31
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # T-0055 OC-3 OpenIM 部署与 IM 后端：infra/openim、连接器、好友同步、回调收件箱、消息投影与对账、群管理、防刷屏、图片（S6-02）
@@ -25,7 +25,7 @@ updated: 2026-10-31
 - [ ] 后端测试覆盖以上规则，以及回调丢失后的对账
 
 - [x] 自建打过补丁的 OpenIM 镜像（OC-0 ADR 第 6 节），锁定 digest；`infra/openim/probes/rest-authz.py` 对补丁镜像退出码为 0，并进入 CI
-- [ ] 评估并替换 bitnamilegacy 的 kafka / minio / etcd，开启 etcd 认证与 Kafka SASL，调小 Kafka 日志段与保留期（从 OC-0 移来）
+- [x] 评估并替换 bitnamilegacy 的 kafka / minio / etcd，开启 etcd 认证与 Kafka SASL，调小 Kafka 日志段与保留期（从 OC-0 移来）
 - [ ] 图片：对象存储上传流程核验与实现（从 OC-0 移来）；OC-0 ADR F1（签发令牌会踢下线）、F2（导入好友前先查关系）、F7（日志里的消息内容）落实
 - [ ] 接入入口放行 `/im/ws`、`/im/api/*`、`/im/obj/*`（forward_auth 与网关），IM 连接经外网模式的本机隧道与双向证书跑通（从 OC-2 移来）
 
@@ -39,3 +39,4 @@ updated: 2026-10-31
 - 2026-10-31 21:04 UTC · claude · 开始任务
 - 2026-10-31 21:06 UTC · claude · 第 1 部分：补丁镜像。infra/openim/patches/ 三个补丁：消息网关内层请求绑定连接用户、1003 发送人必须是连接用户且不能发通知类消息（OC-0 未发现，附单元测试）、1004 拒绝；消息 RPC 读取与已读接口校验调用者、搜索只给管理员；会话 REST 层校验属主（会话 RPC 有代表别的用户的内部调用，不能在 RPC 里校验，偏离 OC-0 ADR 第 6 节原计划）。infra/openim/server/build.sh 校验上游提交 SHA 后打补丁构建，基础镜像与 mage 锁定；“锁定 digest”落实为锁定全部构建输入（自建镜像每次构建 digest 不同）。本机：rest-authz.py 退出码 0，正常使用不受影响。新 CI 工作流 ci-openim。trivy：严重 0、高危来自上游依赖，升级放到下一部分。越出 paths：.github/workflows/ci-openim.yml、docs/decisions、docs/versions.md。下一步：替换 bitnamilegacy、升级依赖、接入工作台
 - 2026-10-31 22:03 UTC · claude · 第 2 部分：补丁 0004 升级有高危漏洞的 Go 依赖（x/net 0.60.0、x/image、compress、grpc 1.83.2、go-jose 4.1.6 等，go 指令 1.26.0），镜像改名 myws.2，trivy 只剩 Go 标准库 1.26.9（修复版不满两周）；ci-openim 加镜像扫描（严重漏洞失败）。etcd 换官方 gcr.io/etcd-development/etcd v3.5.34 并由 etcd-init（alpine + JSON 网关）开启认证，openim 用户只能读写 openim 前缀与 /check_openim_component；Kafka 换 apache/kafka 3.9.2（不用 4.x：OpenIM 消费者按 2.0 协议连接）并开启 SASL/PLAIN，日志段 16 MiB / 保留 72 小时 / 索引 1 MiB，空闲数据卷从 1.74 GB 降到 648 KB。本机：rest-authz.py 退出码 0，正常使用、经 Kafka 中转的消息、未认证访问被拒均已验证。MinIO 还没换（官方镜像发布状态无法核实），和图片上传一起做。下一步：对象存储与图片、接入工作台
+- 2026-11-01 02:07 UTC · claude · 第 3 部分：对象存储换成 Garage v2.4.1（MinIO 官方镜像已不在 Docker Hub、bitnami 没了）。garage.toml 单节点（监听 0.0.0.0，本机 Docker 无 IPv6），garage-init（alpine + 管理 API v2）幂等：应用布局、导入密钥（不一致报错，Garage 不允许复用已删除的密钥 ID）、建桶授权。OpenIM 继续用 minio 驱动。实测：MinIO 对照与 Garage 都通过预签名单次上传与 12 MB 分片上传（ETag=MD5、下载一致），Garage 上缩略图 400×300→64×48，匿名访问 403，rest-authz.py 0；Garage 空闲 9 MiB（MinIO 125 MiB）。新探针 probes/object-check.py 进入 ci-openim。bitnamilegacy 已全部替换，勾选对应验收项。下一步：接入工作台（内部网络、回调、/im/* 入口、.env.example、备份）与 IM 后端

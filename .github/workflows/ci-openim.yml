@@ -46,11 +46,17 @@ jobs:
         run: |
           umask 077
           {
-            for v in OPENIM_SECRET OPENIM_MONGO_ROOT_PASSWORD OPENIM_MONGO_PASSWORD OPENIM_REDIS_PASSWORD OPENIM_MINIO_SECRET \
+            for v in OPENIM_SECRET OPENIM_MONGO_ROOT_PASSWORD OPENIM_MONGO_PASSWORD OPENIM_REDIS_PASSWORD \
                      OPENIM_ETCD_ROOT_PASSWORD OPENIM_ETCD_PASSWORD OPENIM_KAFKA_PASSWORD; do
               echo "$v=$(openssl rand -hex 16)"
             done
+            echo "OPENIM_GARAGE_RPC_SECRET=$(openssl rand -hex 32)"
+            echo "OPENIM_GARAGE_ADMIN_TOKEN=$(openssl rand -hex 32)"
+            echo "OPENIM_S3_ACCESS_KEY=GK$(openssl rand -hex 12)"
+            echo "OPENIM_S3_SECRET_KEY=$(openssl rand -hex 32)"
             echo "OPENIM_WEBHOOK_URL=http://webhook-stub:10006"
+            # 预签名链接要能被对象检查访问：检查脚本在 openim 网络的容器里运行
+            echo "OPENIM_OBJECT_EXTERNAL_URL=http://garage:3900"
           } > infra/openim/.env
       - name: 启动 OpenIM
         run: |
@@ -73,6 +79,15 @@ jobs:
           # 消息网关在 10001 上接受 WebSocket，再等它就绪
           for i in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/10001) 2>/dev/null && break; sleep 2; done
           python3 -I infra/openim/probes/rest-authz.py --api http://127.0.0.1:10002 --secret "$OPENIM_SECRET"
+      - name: 对象存储检查（上传、下载、图片缩略图）
+        run: |
+          set -a; . infra/openim/.env; set +a
+          # 与 compose.probe.yaml 的回调桩用同一个锁定的 Python 镜像
+          python_image="$(sed -n 's/^ *image: \(python:.*\)$/\1/p' infra/openim/compose.probe.yaml)"
+          test -n "$python_image"
+          docker run --rm --network my-workspace-openim_openim \
+            -v "$PWD/infra/openim/probes/object-check.py:/object-check.py:ro" "$python_image" \
+            python -I /object-check.py --api http://openim-server:10002 --secret "$OPENIM_SECRET"
       - name: 失败时的日志
         if: failure()
         run: |
