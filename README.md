@@ -11,7 +11,7 @@ My Workspace：自托管的混合型个人工作台（统一首页、任务、�
 > - 知识库收藏、日历、GitHub 与跨资源搜索；
 > - 运维、通知与 n8n 自动化。
 >
-> Sprint 6 进行中：备份恢复、安全扫描、性能基准与发布文档已完成；AI 助手等人类选定 AI 服务后再做。
+> Sprint 6 已完成：备份恢复、安全扫描、性能基准与发布文档，以及 V2 的 AI 部分——OpenClaw 多实例接入、基于 OpenIM 的管理员端 IM、集中密钥库与写操作审批（可选部署，见 `docs/deployment.md` 第 16 ~ 18 节；验收见 `docs/acceptance/sprint-6.md`）。
 
 ## 快速开始
 
