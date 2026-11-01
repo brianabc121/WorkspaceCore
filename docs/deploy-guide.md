@@ -90,6 +90,11 @@ make env
 它从 `.env.example` 生成 `.env`，并把数据库密码、会话密钥、加密密钥、安装凭据、备份密码等**随机生成**。
 `.env` 已存在时不会改动已有的值（升级后再运行，只会补上新增的变量）。
 
+> **不要用 `cp .env.example .env`**：复制出来的文件里全是占位符（例如 `CREDENTIAL_ENCRYPTION_KEY=GENERATE_32_BYTE_KEY`、
+> 数据库密码 `CHANGE_ME`），api 会拒绝启动。`make env`（`make up` 也会先运行它）每次都会检查 `.env`：
+> 还有占位符、加密密钥不是 64 位十六进制、生产环境的 `SESSION_SECRET` 不到 32 个字符、用了 Windows 换行时，
+> 它会列出问题并停下，不会开始构建。处理方法见第 12 节“常见问题”。
+
 用编辑器打开 `.env`，**生产环境**至少确认这几项：
 
 | 变量 | 改成 | 说明 |
@@ -417,6 +422,27 @@ make up && make smoke
   - `docker compose logs caddy` 里看 Let's Encrypt 的报错。Let's Encrypt 对失败次数有限制，排查清楚再重试。
 - **`make up` 时提示 `required variable SITE_DOMAIN is missing a value`**：启用了 `compose.https.yaml`，但 `SITE_DOMAIN` 或 `ACME_EMAIL` 没填。
 - **`make up` 一直在等健康检查**：`make logs` 看是哪个服务起不来；`docker compose ps -a` 看退出码。
+- **`make env` / `make up` 提示“`.env` 有问题……占位符”**，或者 api 起不来、`docker compose logs api` 里是
+  `CREDENTIAL_ENCRYPTION_KEY 必须是 64 位十六进制`：`.env` 不是 `make env` 生成的（多半是从 `.env.example` 复制的），或者密钥被改坏了。
+  - 全新安装、还没有任何数据：重新生成。已经 `make up` 过的，PostgreSQL 数据卷已经用占位符密码初始化，要连同刚建的空数据卷一起删掉
+    （`docker compose down -v` 会删除本项目的**全部**数据卷，只在确认没有数据时执行）：
+
+    ```bash
+    docker compose down -v
+    ```
+
+    ```bash
+    mv .env .env.old && make env
+    ```
+
+    再把旧文件里改过的设置（`APP_ENV`、`PUBLIC_BASE_URL`、`COMPOSE_FILE`、`SITE_DOMAIN`、`ACME_EMAIL`、`HTTP_BIND` 等）抄进新的 `.env`，然后 `make up && make migrate`。
+  - 只有加密密钥格式不对、api 从没启动成功过（还没有用它加密任何凭证）：直接换一个新密钥：
+
+    ```bash
+    sed -i "s/^CREDENTIAL_ENCRYPTION_KEY=.*/CREDENTIAL_ENCRYPTION_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')/" .env
+    ```
+
+  - 已经在使用的系统：不要直接换 `CREDENTIAL_ENCRYPTION_KEY`（已保存的凭证会解不开），按手册第 6.1 节轮换。
 - **端口 8080 被占用**：改 `.env` 的 `HTTP_PORT`（用 IP 直接访问时 `PUBLIC_BASE_URL` 也一起改），再 `make up`。
 - **登录返回 `429 RATE_LIMITED`**：15 分钟内同一账号失败 5 次或同一 IP 失败 10 次，等提示的秒数后自动解除；立即解除的方法见手册第 4 节。
 - **改了 `.env` 里的数据库密码后连不上**：PostgreSQL 只在第一次初始化数据卷时读取密码，之后要在数据库里改密码（手册第 4 节）。

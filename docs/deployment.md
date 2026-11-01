@@ -43,7 +43,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 
 | 命令 | 作用 |
 |---|---|
-| `make env` | 从 `.env.example` 生成 `.env`，随机填写数据库密码、会话密钥等；`.env` 已存在则不改 |
+| `make env` | 从 `.env.example` 生成 `.env`，随机填写数据库密码、会话密钥等；`.env` 已存在则不改，只补新增的变量。每次都检查 `.env`（占位符、加密密钥格式、生产环境会话密钥长度、Windows 换行），有问题就列出并以非零状态退出，`make up` 不会开始构建 |
 | `make up` | 构建镜像并启动 6 个服务，等待全部健康检查通过（最多 300 秒） |
 | `make migrate` | 在运行中的 `api` 容器里执行 `alembic upgrade head` |
 | `make smoke` | 冒烟检查（`scripts/smoke.sh`），CI 使用同一个脚本 |

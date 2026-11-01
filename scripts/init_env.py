@@ -4,11 +4,17 @@
 - .env 不存在：按 .env.example 生成，占位符（CHANGE_ME、GENERATE_…）替换为随机值；
 - .env 已存在：已有的值一律不改，只把 .env.example 里新增、而 .env 里还没有的变量追加到末尾
   （例如升级后新增的 SETUP_TOKEN）；
-- 生成的密码只含字母和数字，可以直接放进连接串；本机运行用的 DATABASE_URL 会同步使用生成的数据库密码。
+- 生成的密码只含字母和数字，可以直接放进连接串；
+  本机运行用的 DATABASE_URL 会同步使用生成的数据库密码；
+- 最后检查 .env：还留着占位符（例如用 cp .env.example .env 复制出来的）、
+  加密密钥不是 64 位十六进制、生产环境的会话密钥太短、用了 Windows 换行时，
+  说明问题并以非零状态退出，make up 不再继续构建
+  （否则要等镜像构建完，api 才在启动时拒绝这些配置）。
 
 用法：python3 scripts/init_env.py   （make env / make up 会自动调用）
 """
 
+import re
 import secrets
 import sys
 from pathlib import Path
@@ -22,6 +28,10 @@ PLACEHOLDER = "CHANGE_ME"
 
 # 要求 64 位十六进制的变量（32 字节）
 HEX32_KEYS = {"CREDENTIAL_ENCRYPTION_KEY", "OPENIM_GARAGE_RPC_SECRET", "OPENIM_S3_SECRET_KEY"}
+HEX64 = re.compile(r"[0-9a-fA-F]{64}")
+# 与 API 的启动校验一致（app/core/config.py、app/domain/credentials.py）
+MIN_SESSION_SECRET = 32
+MIN_CALLBACK_TOKEN = 32
 
 
 def random_value(key: str) -> str:
@@ -86,11 +96,79 @@ def append_missing() -> None:
     print(f"{TARGET.name} 已存在，已补充缺少的变量：{added}")
 
 
+def clean(value: str) -> str:
+    """去掉值两边的引号；不带引号的值去掉行内注释（与 Compose 读取 .env 的方式一致）。"""
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value.split(" #", 1)[0].strip()
+
+
+def problems(text: str) -> list[str]:
+    """检查 .env 里会让服务拒绝启动、或者明显不安全的配置；返回问题说明，没有问题时为空。"""
+    found: list[str] = []
+    if "\r" in text:
+        found.append(
+            '用了 Windows 换行（CRLF），值的末尾会多出 \\r：运行 sed -i "s/\\r$//" .env 转换'
+        )
+    values = {entry[0]: clean(entry[1]) for line in text.splitlines() if (entry := parse(line))}
+    left = [
+        key for key, value in values.items() if is_placeholder(value) or f":{PLACEHOLDER}@" in value
+    ]
+    if left:
+        found.append(f"这些变量还是 .env.example 里的占位符，没有生成随机值：{', '.join(left)}")
+    hex_hint = '用 python3 -c "import secrets; print(secrets.token_hex(32))" 生成'
+    key = values.get("CREDENTIAL_ENCRYPTION_KEY", "")
+    if key and "CREDENTIAL_ENCRYPTION_KEY" not in left and not HEX64.fullmatch(key):
+        found.append(
+            f"CREDENTIAL_ENCRYPTION_KEY 必须是 64 位十六进制"
+            f"（现在是 {len(key)} 个字符），{hex_hint}"
+        )
+    previous = [
+        part.strip() for part in values.get("CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS", "").split(",")
+    ]
+    if any(part and not HEX64.fullmatch(part) for part in previous):
+        found.append(
+            "CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS 里的每个旧密钥都必须是 64 位十六进制（逗号分隔）"
+        )
+    secret = values.get("SESSION_SECRET", "")
+    if (
+        values.get("APP_ENV") == "production"
+        and "SESSION_SECRET" not in left
+        and len(secret) < MIN_SESSION_SECRET
+    ):
+        found.append(
+            f"生产环境（APP_ENV=production）的 SESSION_SECRET 至少 {MIN_SESSION_SECRET} 个字符"
+        )
+    token = values.get("OPENIM_CALLBACK_PATH_TOKEN", "")
+    if token and "OPENIM_CALLBACK_PATH_TOKEN" not in left and len(token) < MIN_CALLBACK_TOKEN:
+        found.append(f"OPENIM_CALLBACK_PATH_TOKEN 至少 {MIN_CALLBACK_TOKEN} 个字符")
+    return found
+
+
+HOW_TO_FIX = """处理方法：
+  - 全新安装、还没有任何数据：把 .env 改名备份（mv .env .env.old），重新运行 make env，
+    再把改过的设置（APP_ENV、PUBLIC_BASE_URL、COMPOSE_FILE、SITE_DOMAIN、ACME_EMAIL 等）
+    抄回新的 .env。
+    如果已经 make up 过，PostgreSQL 数据卷已经用旧密码初始化，还要先 docker compose down -v
+    （会删除本项目的全部数据卷，只在确认没有数据时这样做）。
+  - 已经在使用：只改上面列出的几项。CREDENTIAL_ENCRYPTION_KEY 已经加密过凭证时不能直接换，
+    按 docs/deployment.md 第 6.1 节（加密密钥轮换）操作。
+详见 docs/deploy-guide.md 第 4 步与“常见问题”。"""
+
+
 def main() -> int:
     if TARGET.exists():
         append_missing()
     else:
         create()
+    found = problems(TARGET.read_text(encoding="utf-8"))
+    if found:
+        print(f"{TARGET.name} 有问题，服务会拒绝启动或不安全（make up 已停止）：", file=sys.stderr)
+        for item in found:
+            print(f"  - {item}", file=sys.stderr)
+        print(HOW_TO_FIX, file=sys.stderr)
+        return 1
     return 0
 
 
