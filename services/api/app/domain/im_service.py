@@ -47,6 +47,8 @@ from app.integrations.openim import (
 from app.models import (
     AgentInstance,
     ImAccount,
+    ImContactGroup,
+    ImContactGroupMember,
     ImConversation,
     ImGroup,
     ImGroupMember,
@@ -363,9 +365,25 @@ class ImService:
         limit: int,
     ) -> ImConversationPage:
         user_id = self._user_id(access)
+        group_instances: list[uuid.UUID] | None = None
         if contact_group_id is not None:
-            # 通讯录分组在后续部分实现；在那之前没有任何分组
-            raise _not_found("分组")
+            group = await self.db.scalar(
+                select(ImContactGroup.id).where(
+                    ImContactGroup.id == contact_group_id,
+                    ImContactGroup.workspace_id == access.workspace.id,
+                )
+            )
+            if group is None:
+                raise _not_found("分组")
+            group_instances = list(
+                (
+                    await self.db.scalars(
+                        select(ImContactGroupMember.instance_id).where(
+                            ImContactGroupMember.contact_group_id == contact_group_id
+                        )
+                    )
+                ).all()
+            )
         decoded = _decode_cursor(cursor) or {}
         offset = decoded.get("o", 0)
         if not isinstance(offset, int) or isinstance(offset, bool) or not 0 <= offset <= 1_000_000:
@@ -381,6 +399,8 @@ class ImService:
         )
         if kind:
             stmt = stmt.where(ImConversation.kind == kind)
+        if group_instances is not None:
+            stmt = stmt.where(ImConversation.peer_instance_id.in_(group_instances))
         if q:
             needle = q.lower()
             stmt = stmt.where(

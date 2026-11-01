@@ -12,7 +12,8 @@ docs/decisions/2026-10-31-v2-oc1-contract.md 第 5、10 节。
   失败 retry，超限 dead_letter）。回调没有签名，payload 只当作“有变化”的提示，内容以拉取为准。
 - 会话属于“用户 + 工作空间”（每个管理员一行，各自的已读、置顶、免打扰）；消息投影按 OpenIM 的
   会话 ID 存一份（群里的多个管理员共用），序号与内容以 pull_msg_by_seq 拉回的为准。
-- 消息置顶挂在当前用户的会话上；通讯录分组与上传在 OC-3 后续部分与用到它们的代码一起加。
+- 消息置顶挂在当前用户的会话上；通讯录分组属于工作空间（名称在工作空间内唯一）。
+- 上传在 OC-3 后续部分与用到它的代码一起加。
 """
 
 import uuid
@@ -244,3 +245,35 @@ class ImMessagePin(Base):
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
     pinned_at: Mapped[datetime] = _created()
+
+
+class ImContactGroup(Base):
+    """通讯录分组：属于工作空间；一个实例可以在多个分组里。删除分组不影响实例与好友关系。"""
+
+    __tablename__ = "im_contact_groups"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name"),
+        CheckConstraint("sort_order BETWEEN 0 AND 10000", name="sort_order"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    name: Mapped[str] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()
+
+
+class ImContactGroupMember(Base):
+    __tablename__ = "im_contact_group_members"
+    __table_args__ = (Index("ix_im_contact_group_members_instance_id", "instance_id"),)
+
+    contact_group_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.im_contact_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="CASCADE"), primary_key=True
+    )

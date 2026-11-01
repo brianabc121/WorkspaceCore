@@ -199,7 +199,8 @@ class CallbackJudge:
 async def relay_paused(db: AsyncSession, group: ImGroup) -> None:
     """通知本工作空间的管理员：群的自动接力已暂停（im_relay_paused，契约第 11 节）。
 
-    群里由 ws_notice 发的提示在群功能（OC-3 后续部分）里加：建群时把 ws_notice 拉进群。
+    群里由 ws_notice 发的提示见 app/domain/im_groups.py 的 send_relay_paused_notice
+    （建群时 ws_notice 已在群里）。
     """
     await notifications.notify_admins(
         db,

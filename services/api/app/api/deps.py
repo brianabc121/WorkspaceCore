@@ -24,6 +24,7 @@ from app.domain.connectors import ConnectorRuntime
 from app.domain.dashboards import DashboardService
 from app.domain.developer import DeveloperService
 from app.domain.im import openim_client
+from app.domain.im_groups import ImGroupService
 from app.domain.im_service import ImService
 from app.domain.integrations import IntegrationService
 from app.domain.knowledge import KnowledgeService
@@ -162,6 +163,15 @@ def get_im_service(
     im: Annotated[OpenIMClient | None, Depends(get_openim)],
 ) -> ImService:
     return ImService(db, settings, redis, im)
+
+
+def get_im_group_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    redis: Annotated[Redis, Depends(get_redis)],
+    im: Annotated[OpenIMClient | None, Depends(get_openim)],
+) -> ImGroupService:
+    return ImGroupService(db, settings, redis, im)
 
 
 def get_agent_service(

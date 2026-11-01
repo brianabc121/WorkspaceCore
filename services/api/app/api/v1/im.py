@@ -10,8 +10,16 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response, Security, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.api.deps import authenticated, client_ip, csrf_protected, get_im_service, workspace_admin
+from app.api.deps import (
+    authenticated,
+    client_ip,
+    csrf_protected,
+    get_im_group_service,
+    get_im_service,
+    workspace_admin,
+)
 from app.core.errors import not_implemented
+from app.domain.im_groups import ImGroupService
 from app.domain.im_service import ImService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.common import error_responses
@@ -54,6 +62,7 @@ router = APIRouter(tags=["im"], dependencies=[Security(authenticated)])
 
 Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
 Service = Annotated[ImService, Depends(get_im_service)]
+Groups = Annotated[ImGroupService, Depends(get_im_group_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 Conversation = Annotated[ConversationId, Path()]
@@ -299,18 +308,27 @@ async def get_im_media(access: Admin, media_id: UUID) -> None:
     status_code=status.HTTP_201_CREATED,
     summary="建群（owner / admin，幂等）",
     description="群主是当前用户；成员只能是同一工作空间的实例与 owner / admin。",
+    response_model=ImGroupOut,
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422, 503, 504),
 )
 async def create_im_group(
-    access: Admin, body: ImGroupCreate, idempotency_key: IdempotencyKey
-) -> ImGroupOut:
-    raise not_implemented(_T)
+    request: Request,
+    access: Admin,
+    groups: Groups,
+    body: ImGroupCreate,
+    idempotency_key: IdempotencyKey,
+) -> Response:
+    status_code, out, replayed = await groups.create_group(
+        access, body, idempotency_key, path=request.url.path
+    )
+    headers = {"Idempotent-Replayed": "true"} if replayed else None
+    return JSONResponse(out, status_code=status_code, headers=headers)
 
 
 @router.get("/im/groups/{group_id}", summary="群详情（owner / admin）", responses=_read_errors)
-async def get_im_group(access: Admin, group_id: Group) -> ImGroupOut:
-    raise not_implemented(_T)
+async def get_im_group(access: Admin, groups: Groups, group_id: Group) -> ImGroupOut:
+    return await groups.get_group(access, group_id)
 
 
 @router.patch(
@@ -319,8 +337,10 @@ async def get_im_group(access: Admin, group_id: Group) -> ImGroupOut:
     dependencies=_write,
     responses=_im_write_errors,
 )
-async def update_im_group(access: Admin, group_id: Group, body: ImGroupUpdate) -> ImGroupOut:
-    raise not_implemented(_T)
+async def update_im_group(
+    access: Admin, groups: Groups, group_id: Group, body: ImGroupUpdate
+) -> ImGroupOut:
+    return await groups.update_group(access, group_id, body)
 
 
 @router.delete(
@@ -330,8 +350,8 @@ async def update_im_group(access: Admin, group_id: Group, body: ImGroupUpdate) -
     dependencies=_write,
     responses=_im_write_errors,
 )
-async def dismiss_im_group(access: Admin, group_id: Group) -> None:
-    raise not_implemented(_T)
+async def dismiss_im_group(access: Admin, groups: Groups, group_id: Group) -> None:
+    await groups.dismiss_group(access, group_id)
 
 
 @router.post(
@@ -341,9 +361,9 @@ async def dismiss_im_group(access: Admin, group_id: Group) -> None:
     responses=_im_write_errors,
 )
 async def add_im_group_members(
-    access: Admin, group_id: Group, body: ImGroupMembersAdd
+    access: Admin, groups: Groups, group_id: Group, body: ImGroupMembersAdd
 ) -> ImGroupOut:
-    raise not_implemented(_T)
+    return await groups.add_members(access, group_id, body)
 
 
 @router.delete(
@@ -355,9 +375,9 @@ async def add_im_group_members(
     responses=_im_write_errors,
 )
 async def remove_im_group_member(
-    access: Admin, group_id: Group, im_user_id: Annotated[ImUserId, Path()]
+    access: Admin, groups: Groups, group_id: Group, im_user_id: Annotated[ImUserId, Path()]
 ) -> None:
-    raise not_implemented(_T)
+    await groups.remove_member(access, group_id, im_user_id)
 
 
 @router.put(
@@ -367,9 +387,9 @@ async def remove_im_group_member(
     responses=_local_write_errors,
 )
 async def update_im_group_policy(
-    access: Admin, group_id: Group, body: ImGroupPolicyUpdate
+    access: Admin, groups: Groups, group_id: Group, body: ImGroupPolicyUpdate
 ) -> ImGroupPolicyOut:
-    raise not_implemented(_T)
+    return await groups.update_policy(access, group_id, body)
 
 
 # ---------------------------------------------------------------- 通讯录与分组
@@ -385,13 +405,15 @@ async def list_im_contacts(
     access: Admin,
     contact_group_id: UUID | None = None,
     q: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    *,
+    groups: Groups,
 ) -> ImContactList:
-    raise not_implemented(_T)
+    return await groups.list_contacts(access, contact_group_id=contact_group_id, q=q)
 
 
 @router.get("/im/contact-groups", summary="分组列表（owner / admin）", responses=_read_errors)
-async def list_im_contact_groups(access: Admin) -> ImContactGroupList:
-    raise not_implemented(_T)
+async def list_im_contact_groups(access: Admin, groups: Groups) -> ImContactGroupList:
+    return await groups.list_contact_groups(access)
 
 
 @router.post(
@@ -401,8 +423,10 @@ async def list_im_contact_groups(access: Admin) -> ImContactGroupList:
     dependencies=_write,
     responses=_local_write_errors,
 )
-async def create_im_contact_group(access: Admin, body: ImContactGroupCreate) -> ImContactGroupOut:
-    raise not_implemented(_T)
+async def create_im_contact_group(
+    access: Admin, groups: Groups, body: ImContactGroupCreate
+) -> ImContactGroupOut:
+    return await groups.create_contact_group(access, body)
 
 
 @router.patch(
@@ -412,9 +436,9 @@ async def create_im_contact_group(access: Admin, body: ImContactGroupCreate) -> 
     responses=_local_write_errors,
 )
 async def update_im_contact_group(
-    access: Admin, contact_group_id: UUID, body: ImContactGroupUpdate
+    access: Admin, groups: Groups, contact_group_id: UUID, body: ImContactGroupUpdate
 ) -> ImContactGroupOut:
-    raise not_implemented(_T)
+    return await groups.update_contact_group(access, contact_group_id, body)
 
 
 @router.delete(
@@ -426,9 +450,9 @@ async def update_im_contact_group(
     responses=_local_write_errors,
 )
 async def delete_im_contact_group(
-    access: Admin, contact_group_id: UUID, version: Annotated[int, Query(ge=1)]
+    access: Admin, groups: Groups, contact_group_id: UUID, version: Annotated[int, Query(ge=1)]
 ) -> None:
-    raise not_implemented(_T)
+    await groups.delete_contact_group(access, contact_group_id, version)
 
 
 @router.put(
@@ -438,6 +462,6 @@ async def delete_im_contact_group(
     responses=_local_write_errors,
 )
 async def replace_im_contact_group_members(
-    access: Admin, contact_group_id: UUID, body: ImContactGroupMembersReplace
+    access: Admin, groups: Groups, contact_group_id: UUID, body: ImContactGroupMembersReplace
 ) -> ImContactGroupOut:
-    raise not_implemented(_T)
+    return await groups.replace_contact_group_members(access, contact_group_id, body)
