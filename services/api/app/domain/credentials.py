@@ -17,6 +17,7 @@
 import base64
 import binascii
 import hashlib
+import hmac
 import os
 import re
 from collections.abc import Mapping, Sequence
@@ -67,6 +68,7 @@ class CredentialBox:
             if len(candidate) != _KEY_BYTES:
                 raise CredentialError("凭证加密密钥长度必须是 32 字节")
         self.key_id = key_id_of(key)
+        self._key = key
         self._aead = AESGCM(key)
         # key_id → 解密用的 AEAD；当前密钥放在最后，同一个密钥重复出现时以它为准
         self._keyring = {key_id_of(old): AESGCM(old) for old in previous}
@@ -83,6 +85,12 @@ class CredentialBox:
             if part.strip()
         ]
         return cls(parse_key(settings.credential_encryption_key.get_secret_value()), old_keys)
+
+    def derive_key(self, purpose: str) -> bytes:
+        """由当前密钥派生的子密钥（HMAC-SHA256），按用途区分，例如给参数哈希加盐。"""
+        return hmac.new(
+            self._key, b"workspace-derived-key\x00" + purpose.encode(), hashlib.sha256
+        ).digest()
 
     @property
     def previous_key_ids(self) -> frozenset[str]:

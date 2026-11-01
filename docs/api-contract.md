@@ -190,8 +190,8 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | PUT | `/api/v1/im/groups/{group_id}/policy` | 防刷屏设置（允许接力、连续条数、每分钟条数） | 已实现（T-0055） |
 | GET | `/api/v1/im/contacts` | 通讯录（没有删除好友） | 已实现（T-0055） |
 | GET / POST / PATCH / DELETE / PUT | `/api/v1/im/contact-groups[/{contact_group_id}[/members]]` | 分组 | 已实现（T-0055） |
-| GET | `/api/v1/ai/tool-executions[/{execution_id}]` | 工具调用记录与待审批（member 及以下只看自己的） | 已声明（T-0057） |
-| POST | `/api/v1/ai/tool-executions/{execution_id}/approve`、`/reject` | 审批（必须带 `If-Match`；高危操作要重新输入密码） | 已声明（T-0057） |
+| GET | `/api/v1/ai/tool-executions[/{execution_id}]` | 工具调用记录与待审批（member 及以下只看自己的） | 已实现（T-0057） |
+| POST | `/api/v1/ai/tool-executions/{execution_id}/approve`、`/reject` | 审批（必须带 `If-Match`；高危操作要重新输入密码） | 已实现（T-0057） |
 
 **实例接口**（只在接入入口；`Authorization: Bearer <实例令牌>`，外网另需客户端证书；失败一律 `401 AGENT_UNAUTHORIZED`）：
 

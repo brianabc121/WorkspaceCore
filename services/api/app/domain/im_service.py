@@ -50,6 +50,7 @@ from app.integrations.openim import (
 )
 from app.models import (
     AgentInstance,
+    AiToolExecution,
     ImAccount,
     ImContactGroup,
     ImContactGroupMember,
@@ -325,10 +326,18 @@ class ImService:
         return sum(int(count) for _, count in await self.db.execute(stmt))
 
     async def badges(self, access: WorkspaceAccess) -> ImBadges:
-        # 待审批数在工具调用与审批（OC-5）里实现
+        pending = await self.db.scalar(
+            select(func.count())
+            .select_from(AiToolExecution)
+            .where(
+                AiToolExecution.workspace_id == access.workspace.id,
+                AiToolExecution.status == "pending_approval",
+                AiToolExecution.expires_at > func.now(),
+            )
+        )
         return ImBadges(
             im_unread=await self._unread_total(self._user_id(access), access.workspace.id),
-            pending_approvals=0,
+            pending_approvals=int(pending or 0),
         )
 
     # ---------------------------------------------------------------- 会话
