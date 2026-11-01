@@ -58,13 +58,18 @@ def openim_client(
 ) -> OpenIMClient | None:
     """没有部署 OpenIM（未配置地址或 secret）时返回 None。
 
-    OpenIM 在内部网络，地址是部署配置的，所以只允许这一个主机名；熔断状态与其他连接器共用
+    OpenIM 与它的对象存储在内部网络，地址是部署配置的，所以只允许这两个主机名；
+    熔断状态与其他连接器共用
     （按 "openim" 计数），测试替换的 transport 也一并沿用。
     """
     if not settings.openim_enabled or settings.openim_secret is None:
         return None
+    hosts = {host_of(settings.openim_api_url)}
+    if settings.openim_object_url:
+        # 对象存储签出的上传、下载地址指向它（只有后端访问）
+        hosts.add(host_of(settings.openim_object_url))
     http = ConnectorHttp(
-        policy=OutboundPolicy(frozenset({host_of(settings.openim_api_url)})),
+        policy=OutboundPolicy(frozenset(hosts)),
         connect_timeout=settings.openim_timeout_seconds,
         read_timeout=settings.openim_timeout_seconds,
         read_retries=0,

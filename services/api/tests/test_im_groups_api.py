@@ -79,8 +79,9 @@ async def test_create_group_is_idempotent_and_validates_members(env: ImEnv) -> N
         "paused": False,
         "version": 1,
     }
-    # ws_notice 与 imAdmin 也在 OpenIM 的群里；群公告随建群写入
-    assert {"ws_notice", "imAdmin"} <= env.fake.members[group["conversation_id"]]
+    # ws_notice 也在 OpenIM 的群里（imAdmin 不入群）；群公告随建群写入
+    assert "ws_notice" in env.fake.members[group["conversation_id"]]
+    assert "imAdmin" not in env.fake.members[group["conversation_id"]]
     assert env.fake.groups[group["group_id"]]["notification"] == "每天同步一次"
     conversations = await run_sql(
         env.database_url,

@@ -13,11 +13,13 @@ import base64
 import binascii
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit
 
 from redis.asyncio import Redis
 from sqlalchemy import delete, func, or_, select, update
@@ -31,6 +33,7 @@ from app.domain import events, idempotency
 from app.domain.audit import AuditTrail
 from app.domain.im import ImAccounts, admin_im_user_id, im_unavailable
 from app.domain.im_projection import ex_for, resolve, sync_conversation
+from app.domain.images import sniff
 from app.domain.policy import WorkspaceAccess
 from app.domain.ratelimit import WindowLimiter
 from app.integrations.base import ConnectorError
@@ -40,6 +43,7 @@ from app.integrations.openim import (
     CONTENT_TEXT,
     SESSION_GROUP,
     SESSION_SINGLE,
+    ObjectStore,
     OpenIMClient,
     OpenIMError,
     single_conversation_id,
@@ -52,6 +56,7 @@ from app.models import (
     ImConversation,
     ImGroup,
     ImGroupMember,
+    ImMedia,
     ImMessage,
     ImMessagePin,
     User,
@@ -70,6 +75,7 @@ from app.schemas.im import (
     ImMessagePreview,
     ImMessageSend,
     ImStatus,
+    ImUploadOut,
     MessageKind,
 )
 
@@ -120,16 +126,64 @@ def message_kind(row: ImMessage) -> MessageKind:
     return "unsupported"
 
 
+# 工作台发出的图片，地址形如 <实例侧前缀>/im/obj/m/<media_id>
+_MEDIA_PATH = re.compile(
+    r"/im/obj/m/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+)
+THUMB_SIZE = 256
+UPLOADS_PER_MINUTE = 30
+
+
+def media_url(base: str, media_id: uuid.UUID, *, thumb: bool = False) -> str:
+    return f"{base}/im/obj/m/{media_id}" + ("?thumb=1" if thumb else "")
+
+
+def picture_elem(media: ImMedia, base: str) -> dict[str, Any]:
+    """OpenIM 的 PictureElem：原图与大图是同一个地址，缩略图带 thumb=1（最长边 256）。"""
+    scale = min(1.0, THUMB_SIZE / max(media.width, media.height))
+
+    def info(url: str, width: int, height: int) -> dict[str, Any]:
+        return {
+            "uuid": str(media.id),
+            "type": media.mime,
+            "size": media.size,
+            "width": width,
+            "height": height,
+            "url": url,
+        }
+
+    full = media_url(base, media.id)
+    return {
+        "sourcePath": "",
+        "sourcePicture": info(full, media.width, media.height),
+        "bigPicture": info(full, media.width, media.height),
+        "snapshotPicture": info(
+            media_url(base, media.id, thumb=True),
+            max(1, round(media.width * scale)),
+            max(1, round(media.height * scale)),
+        ),
+    }
+
+
 def _image(row: ImMessage) -> ImImage | None:
-    """图片的尺寸来自 sourcePicture；对象存储里的图片经 /im/media 显示（上传与代理在后续部分）。"""
+    """工作台发出的图片给 media_id（经 /im/media 显示）；其他图片只给外部链接，前端不自动加载。"""
     if row.content_type != CONTENT_PICTURE:
         return None
     source = row.content_json.get("sourcePicture") or {}
-    width = source.get("width") if isinstance(source, dict) else None
-    height = source.get("height") if isinstance(source, dict) else None
+    if not isinstance(source, dict):
+        source = {}
+    width, height, url = source.get("width"), source.get("height"), source.get("url")
+    media_id: uuid.UUID | None = None
+    external: str | None = None
+    if isinstance(url, str) and len(url) <= 2048:
+        match = _MEDIA_PATH.search(urlsplit(url).path)
+        if match:
+            media_id = uuid.UUID(match.group(1))
+        elif url.startswith(("https://", "http://")):
+            external = url
     return ImImage(
-        media_id=None,
-        external_url=None,
+        media_id=media_id,
+        external_url=external,
         width=width if isinstance(width, int) else None,
         height=height if isinstance(height, int) else None,
     )
@@ -601,9 +655,7 @@ class ImService:
     ) -> SendResult:
         user_id = self._user_id(access)
         conversation = await self._conversation(access, conversation_id)
-        if body.kind == "image":
-            # 图片上传（POST /im/uploads）在后续部分实现；在那之前没有可用的上传
-            raise _not_found("上传")
+        media = await self._media_for_send(access, body.upload_id) if body.kind == "image" else None
         recv_id, group_id, members = await self._target(conversation)
         if body.at_im_ids and not group_id:
             raise ApiError(
@@ -656,8 +708,12 @@ class ImService:
             conversation_id=conversation_id,
             client_msg_id=f"myws-{key}",
             sender_im_id=sender,
-            content_type=CONTENT_AT_TEXT if body.at_im_ids else CONTENT_TEXT,
-            content_json={},
+            content_type=CONTENT_PICTURE
+            if media is not None
+            else (CONTENT_AT_TEXT if body.at_im_ids else CONTENT_TEXT),
+            content_json=picture_elem(media, self.settings.im_object_base_url)
+            if media is not None
+            else {},
             plain_text=body.text,
             at_im_ids=list(body.at_im_ids),
             status="sending",
@@ -668,14 +724,23 @@ class ImService:
         events.mark(self.db, access.workspace.id, "im")
         await self.db.commit()
         try:
-            sent = await self.client.send_text(
-                send_id=sender,
-                recv_id=recv_id,
-                group_id=group_id,
-                text=body.text or "",
-                at_user_ids=body.at_im_ids,
-                ex=ex_for(key),
-            )
+            if media is not None:
+                sent = await self.client.send_picture(
+                    send_id=sender,
+                    recv_id=recv_id,
+                    group_id=group_id,
+                    picture=local.content_json,
+                    ex=ex_for(key),
+                )
+            else:
+                sent = await self.client.send_text(
+                    send_id=sender,
+                    recv_id=recv_id,
+                    group_id=group_id,
+                    text=body.text or "",
+                    at_user_ids=body.at_im_ids,
+                    ex=ex_for(key),
+                )
         except ConnectorError as error:
             raise await self._send_failed(begun.record, local, error) from error
         record = await self.db.get(type(begun.record), begun.record.id, with_for_update=True)
@@ -685,6 +750,10 @@ class ImService:
         if sent.send_time_ms > 0:
             local.sent_at = datetime.fromtimestamp(sent.send_time_ms / 1000, UTC)
         local.status = "sent"
+        if media is not None:
+            media.status = "used"
+            media.conversation_id = conversation_id
+            media.server_msg_id = local.server_msg_id
         out = message_out(local, pinned=False).model_dump(mode="json")
         if record is not None:
             idempotency.succeed(record, 202, out)
@@ -767,6 +836,125 @@ class ImService:
             select(ImMessage).where(ImMessage.idempotency_key == key)
         )
         return found
+
+    # ---------------------------------------------------------------- 图片
+
+    def _object_store(self) -> ObjectStore:
+        if self.client is None or not self.settings.openim_object_url:
+            raise im_unavailable()
+        return ObjectStore(self.client)
+
+    async def upload(self, access: WorkspaceAccess, data: bytes) -> ImUploadOut:
+        """上传图片（请求体就是图片）。类型与尺寸按内容识别，不看 Content-Type。"""
+        user_id = self._user_id(access)
+        store = self._object_store()
+        if self.redis is not None:
+            retry = await WindowLimiter(self.redis, 60).hit(
+                f"im_upload:{user_id}", UPLOADS_PER_MINUTE
+            )
+            if retry is not None:
+                raise ApiError(
+                    429,
+                    "RATE_LIMITED",
+                    "上传过于频繁，请稍后再试",
+                    headers={"Retry-After": str(retry)},
+                )
+        info = sniff(data)
+        if info is None:
+            raise ApiError(
+                422,
+                "VALIDATION_FAILED",
+                "只支持 PNG、JPEG、GIF、WebP 图片",
+                details={"errors": [{"loc": ["body"], "msg": "不是支持的图片"}]},
+            )
+        media_id = uuid.uuid4()
+        object_name = f"myws/{access.workspace.id}/{media_id}.{info.ext}"
+        try:
+            await store.upload(object_name, data, info.mime)
+        except ConnectorError as error:
+            logger.warning("im upload failed", extra={"error_kind": error.kind})
+            raise im_unavailable() from error
+        media = ImMedia(
+            id=media_id,
+            workspace_id=access.workspace.id,
+            uploaded_by=user_id,
+            mime=info.mime,
+            size=len(data),
+            width=info.width,
+            height=info.height,
+            object_name=object_name,
+            expires_at=datetime.now(UTC) + timedelta(minutes=self.settings.im_upload_ttl_minutes),
+        )
+        self.db.add(media)
+        await self.db.commit()
+        return ImUploadOut(
+            upload_id=media.id,
+            mime=media.mime,
+            size=media.size,
+            width=media.width,
+            height=media.height,
+            expires_at=media.expires_at,
+        )
+
+    async def _media_for_send(
+        self, access: WorkspaceAccess, upload_id: uuid.UUID | None
+    ) -> ImMedia:
+        """自己上传、还没用过、没有过期的图片；其他一律 404。"""
+        media = await self.db.scalar(
+            select(ImMedia).where(
+                ImMedia.id == upload_id,
+                ImMedia.workspace_id == access.workspace.id,
+                ImMedia.uploaded_by == self._user_id(access),
+                ImMedia.status == "uploaded",
+                ImMedia.expires_at > datetime.now(UTC),
+            )
+        )
+        if media is None:
+            raise _not_found("上传")
+        return media
+
+    async def media(
+        self, access: WorkspaceAccess, media_id: uuid.UUID, *, thumb: bool = False
+    ) -> tuple[bytes, str]:
+        """显示图片：上传者本人，或能看到图片所在会话的管理员。"""
+        user_id = self._user_id(access)
+        media = await self.db.scalar(
+            select(ImMedia).where(
+                ImMedia.id == media_id, ImMedia.workspace_id == access.workspace.id
+            )
+        )
+        allowed = media is not None and (
+            media.uploaded_by == user_id
+            or (
+                media.conversation_id is not None
+                and await self.db.scalar(
+                    select(ImConversation.id).where(
+                        ImConversation.owner_user_id == user_id,
+                        ImConversation.workspace_id == access.workspace.id,
+                        ImConversation.conversation_id == media.conversation_id,
+                    )
+                )
+                is not None
+            )
+        )
+        if media is None or not allowed:
+            raise _not_found("图片")
+        query = (
+            {"type": "image", "width": str(THUMB_SIZE), "height": str(THUMB_SIZE)}
+            if thumb
+            else None
+        )
+        try:
+            data, content_type = await self._object_store().download(media.object_name, query=query)
+        except ConnectorError as error:
+            if error.kind == "NOT_FOUND":
+                raise _not_found("图片") from error
+            raise im_unavailable() from error
+        # 原图用上传时识别的类型；缩略图由对象存储生成，只接受图片类型
+        mime = media.mime if not thumb else content_type.split(";")[0].strip()
+        if not mime.startswith("image/"):
+            mime = media.mime
+        return data, mime
 
     # ---------------------------------------------------------------- 消息置顶
 

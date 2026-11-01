@@ -48,6 +48,7 @@ from app.models import (
     ImConversation,
     ImGroup,
     ImGroupMember,
+    ImMedia,
     ImMessage,
     ImWebhookInboxEvent,
     User,
@@ -629,6 +630,8 @@ async def purge(
     messages = await db.execute(
         delete(ImMessage).where(ImMessage.sent_at < now - message_retention)
     )
+    # 没有用于发消息的上传：到期删除记录（契约第 5.4 节）
+    await db.execute(delete(ImMedia).where(ImMedia.status == "uploaded", ImMedia.expires_at < now))
     inbox = await db.execute(
         delete(ImWebhookInboxEvent).where(
             ImWebhookInboxEvent.status == "completed",

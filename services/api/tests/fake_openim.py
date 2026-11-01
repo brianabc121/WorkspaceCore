@@ -5,6 +5,7 @@ is_friend 分别给出两个方向；签发用户令牌返回 expireTimeSeconds�
 """
 
 import base64
+import hashlib
 import json
 import uuid
 from typing import Any
@@ -13,6 +14,9 @@ import httpx
 
 HOST = "openim.test"
 BASE_URL = f"http://{HOST}:10002"
+# 对象存储（Garage）：OpenIM 签出的上传与下载地址指向它
+OBJECT_HOST = "objects.test"
+OBJECT_URL = f"http://{OBJECT_HOST}:3900"
 SECRET = "fake-openim-secret"  # noqa: S105 - 测试用的假 secret
 TOKEN_SECONDS = 30 * 24 * 3600
 
@@ -37,6 +41,9 @@ class FakeOpenIM:
         self.refuse = False
         # 群 ID → {"name", "notification", "owner", "dismissed"}；成员记在 members["sg_<群>"]
         self.groups: dict[str, dict[str, Any]] = {}
+        # 对象名 → 内容；上传中的分片按 uploadID 暂存
+        self.objects: dict[str, bytes] = {}
+        self.pending_parts: dict[str, dict[int, bytes]] = {}
 
     def add_message(
         self,
@@ -73,10 +80,12 @@ class FakeOpenIM:
         return [body for p, body in self.calls if p == path]
 
     def handler(self, request: httpx.Request) -> httpx.Response:
-        if request.url.host != HOST:
-            return httpx.Response(404)
         if self.refuse:
             raise httpx.ConnectError("simulated refusal")
+        if request.url.host == OBJECT_HOST:
+            return self._object(request)
+        if request.url.host != HOST:
+            return httpx.Response(404)
         path = request.url.path
         body: dict[str, Any] = json.loads(request.content or b"{}")
         self.calls.append((path, body))
@@ -215,8 +224,9 @@ class FakeOpenIM:
         group_id = info.get("groupID") or uuid.uuid4().hex[:10]
         if group_id in self.groups:
             return self._error(1202)
-        members = {body["ownerUserID"], *body.get("memberUserIDs", []), "imAdmin"}
-        if any(m not in self.users and m != "imAdmin" for m in members):
+        # 与真实实例一致：调用者 imAdmin 不入群
+        members = {body["ownerUserID"], *body.get("memberUserIDs", [])}
+        if any(m not in self.users for m in members):
             return self._error(1101)
         self.groups[group_id] = {
             "name": info.get("groupName"),
@@ -259,6 +269,61 @@ class FakeOpenIM:
             return self._error(1204)
         group["dismissed"] = True
         return self._ok({})
+
+    # ---------------------------------------------------------------- 对象存储
+
+    def _object(self, request: httpx.Request) -> httpx.Response:
+        name = request.url.path.lstrip("/")
+        if request.method == "PUT":
+            upload_id = request.url.params.get("uploadId", "")
+            number = int(request.url.params.get("partNumber", "0"))
+            body = request.content
+            self.pending_parts.setdefault(upload_id, {})[number] = body
+            etag = hashlib.md5(body, usedforsecurity=False).hexdigest()
+            return httpx.Response(200, headers={"ETag": f'"{etag}"'})
+        if request.method == "GET":
+            data = self.objects.get(name)
+            if data is None:
+                return httpx.Response(404)
+            return httpx.Response(200, content=data, headers={"Content-Type": "image/png"})
+        return httpx.Response(405)
+
+    def _object_part_size(self, body: dict[str, Any]) -> httpx.Response:
+        return self._ok({"size": 5 * 1024 * 1024})
+
+    def _object_initiate_multipart_upload(self, body: dict[str, Any]) -> httpx.Response:
+        upload_id = uuid.uuid4().hex
+        size, part_size = int(body["size"]), int(body["partSize"])
+        count = max(1, -(-size // part_size))
+        self.pending_parts[upload_id] = {}
+        return self._ok(
+            {
+                "upload": {
+                    "uploadID": upload_id,
+                    "sign": {
+                        "url": f"{OBJECT_URL}/{body['name']}",
+                        "query": [{"key": "uploadId", "values": [upload_id]}],
+                        "parts": [
+                            {
+                                "partNumber": i,
+                                "query": [{"key": "partNumber", "values": [str(i)]}],
+                            }
+                            for i in range(1, count + 1)
+                        ],
+                    },
+                }
+            }
+        )
+
+    def _object_complete_multipart_upload(self, body: dict[str, Any]) -> httpx.Response:
+        parts = self.pending_parts.pop(body["uploadID"], {})
+        self.objects[body["name"]] = b"".join(parts[i] for i in sorted(parts))
+        return self._ok({"url": f"{BASE_URL}/object/{body['name']}"})
+
+    def _object_access_url(self, body: dict[str, Any]) -> httpx.Response:
+        if body["name"] not in self.objects:
+            return self._error(1004)
+        return self._ok({"url": f"{OBJECT_URL}/{body['name']}"})
 
     def unfriend(self, a: str, b: str) -> None:
         self.friends -= {(a, b), (b, a)}

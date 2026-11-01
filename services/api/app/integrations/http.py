@@ -141,6 +141,7 @@ class ConnectorHttp:
         params: Mapping[str, Any] | list[tuple[str, Any]] | None = None,
         json: Any = None,
         content_type: str | None = None,
+        content: bytes | None = None,
     ) -> httpx.Response:
         """返回状态码 < 400 以外的响应也照常返回，由调用方按 Connector 的规则归类。"""
         method = method.upper()
@@ -161,7 +162,9 @@ class ConnectorHttp:
             self.breaker.before(key)
             pinned = await self.policy.check(url)
             try:
-                response = await self._send(method, url, all_headers, params, json, pinned)
+                response = await self._send(
+                    method, url, all_headers, params, json, pinned, content=content
+                )
             except ConnectorError as error:
                 self.breaker.failure(key)
                 last_error = error
@@ -185,6 +188,8 @@ class ConnectorHttp:
         params: Mapping[str, Any] | list[tuple[str, Any]] | None,
         json: Any,
         pinned: str | None = None,
+        *,
+        content: bytes | None = None,
     ) -> httpx.Response:
         target = httpx.URL(url)
         extensions: dict[str, Any] = {}
@@ -206,7 +211,13 @@ class ConnectorHttp:
                 transport=self.transport, timeout=timeout, follow_redirects=False
             ) as client:
                 return await client.request(
-                    method, target, headers=headers, params=params, json=json, extensions=extensions
+                    method,
+                    target,
+                    headers=headers,
+                    params=params,
+                    json=json,
+                    content=content,
+                    extensions=extensions,
                 )
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as error:
             # 连接没有建立：请求肯定没有到达对方

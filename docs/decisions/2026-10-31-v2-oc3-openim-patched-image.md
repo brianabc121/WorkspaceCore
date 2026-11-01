@@ -348,7 +348,7 @@ OC-0 的回归测试脚本没有覆盖这一项，覆盖它的是这个单元测
 - **数据表**（迁移 0015）：`im_contact_groups`（名称在工作空间内唯一）、`im_contact_group_members`。
 - **建群**：
   - 群主是当前用户；成员只能是本工作空间已就绪、没有停用的实例（不存在 404，未就绪 409 `IM_NOT_READY`）和状态正常的 owner / admin（其他一律 404）；
-  - `ws_notice` 一起拉进群。调用者 imAdmin 由 OpenIM 自动加入（锁定源码 `internal/rpc/group/group.go` 的 CreateGroup：`opUserID` 不在成员里时追加）；
+  - `ws_notice` 一起拉进群。调用者 imAdmin **不入群**：CreateGroup 把 `opUserID` 加进的只是用于核对用户和计算成员数的列表，真正入群的只有群主、管理员和成员（第 14 节在真实实例上核实，更正了这里最初的判断）；
   - 群公告随建群写入（`groupInfo.notification`）。
 - **建群的幂等**：OpenIM 允许调用方指定群 ID，已存在时返回 1202（同一文件的 GenGroupID）。所以群 ID 由 Idempotency-Key 推出（`ws` 加 32 位十六进制）：
   - 重发同一个键时遇到 1202 就当作上次已经建好；
@@ -368,3 +368,38 @@ OC-0 的回归测试脚本没有覆盖这一项，覆盖它的是这个单元测
   - 模拟 OpenIM 加真实数据库共 5 项（`tests/test_im_groups_api.py`）；
   - 建群、邀请、移出、改名与公告、解散在 B1 的真实实例测试里验证过；
   - 指定群 ID 与随建群写入公告这两点，目前只按锁定源码核对过：本会话的 Docker 守护进程已到时限停止，没能在真实实例上再跑。接入部署时一并验证。
+
+## 14. 第 4 部分（B5）：图片，以及 B4b 的真实实例核验（2026-11-01）
+
+### 14.1 B4b 补验
+
+用全新的补丁镜像实测（`tests/test_im_live.py`，连续 3 次通过）：
+- 建群时指定的群 ID 生效；群公告随建群写入（`/group/get_groups_info` 的 `notification`）；
+- 重发同一个键时 OpenIM 返回 1202，仍然只有这一个群；
+- `ws_notice` 在群里，能发“自动接力已暂停”的提示。
+- **更正第 13 节**：imAdmin **不入群**。CreateGroup 把调用者加进的只是核对用户、计算成员数的列表，真正入群的只有群主、管理员和成员（`joinGroupFunc` 只对这三类调用）。对功能没有影响：群里的提示由 `ws_notice` 发。
+
+### 14.2 图片（契约第 5.4 节）
+
+- **数据表**（迁移 0016）：`im_media`，id 同时是 `upload_id` 与 `media_id`，记录类型、大小、宽高、对象名、发到了哪个会话。
+- **上传**（`POST /im/uploads`）：
+  - 请求体就是图片，≤ 10 MiB（超出 413）；每人每分钟 30 次。
+  - 类型与尺寸按文件头识别（`app/domain/images.py`）：只认 PNG、JPEG、GIF、WebP，SVG 等一律 422；不看 `Content-Type`。只读文件头、不解码像素，所以不引入图片库，也没有解码库的攻击面。
+  - 对象名 `myws/<工作空间>/<id>.<扩展名>`，用第 3 部分核过的分片流程上传（`ObjectStore`）。
+  - 没有用于发消息的上传，`IM_UPLOAD_TTL_MINUTES`（默认 60）后由清理任务删除记录。OpenIM 没有删除对象的接口，对象本身留在对象存储里，但工作台不会再给出它的地址。
+- **发图**：
+  - `kind=image` 加 `upload_id`：只能用自己上传、没用过、没过期的图片，其他一律 404。
+  - 消息是 102，PictureElem 的原图与大图地址相同，缩略图地址带 `thumb=1`（最长边 256）；OpenIM 的校验已在真实实例上通过。
+- **实例取图的地址**：
+  - openclaw-channel 收到图片时直接对 `sourcePicture.url` 发不带任何凭证的 GET（插件源码 `src/inbound.ts` 的 `fetchImageAsContentPart`）。所以地址必须是实例能直接访问的绝对地址，而同一条群消息会发给内网和外网两种实例。
+  - 决定：实例统一经本机回环 `http://127.0.0.1:<AGENT_TUNNEL_PORT>` 访问工作台，图片地址写成 `<前缀>/im/obj/m/<media_id>`（`AGENT_IM_OBJECT_BASE_URL` 可覆盖）。外网实例本来就经本机隧道；内网实例的接入包要加同样的本机代理，和接入网关一起做。
+  - `media_id` 是随机 UUID，按能力地址处理：只认工作台发出的图片。接入网关的这个路径在下一部分实现，对比契约第 8 节“`/im/obj/*` 用 IM 令牌做 forward_auth”的偏差也在那里说明。
+- **显示**（`GET /im/media/{media_id}`）：
+  - 只给上传者本人，或者能看到图片所在会话的管理员，其他一律 404。
+  - 由后端向 OpenIM 签出下载地址后取回，按上传时识别的类型返回，带 `X-Content-Type-Options: nosniff`、`Content-Security-Policy: default-src 'none'; sandbox`、`Cache-Control: private`。
+  - 对象存储（`OPENIM_OBJECT_URL`，即 OpenIM 的 `IMENV_MINIO_EXTERNALADDRESS`）只有后端访问，不对外暴露。
+  - 管理员接口暂不提供缩略图参数：加参数会改动 OC-1 的 OpenAPI 契约。缩略图只给实例侧的 `thumb=1` 用。
+- **投影**：图片消息的地址符合 `/im/obj/m/<UUID>` 时给出 `media_id`；其他 http(s) 地址只给 `external_url`，前端不自动加载。
+- **验证**：
+  - 模拟 OpenIM 与对象存储 17 项（`tests/test_im_media_api.py`，含按内容识别的单元测试）；
+  - 真实补丁镜像加 Garage：上传、发图、`/im/media` 取回的字节与上传的一致、投影带 `media_id`，与其他真实实例测试一起连续 3 次通过。

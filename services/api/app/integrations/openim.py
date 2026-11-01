@@ -20,11 +20,13 @@
 - **导入好友前先查关系**（OC-0 F2）：已是好友时再导入仍会触发回调和一条“已添加好友”通知。
 """
 
+import hashlib
 import json
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import urlencode
 
 from app.integrations.base import ConnectorError, ConnectorErrorKind
 from app.integrations.http import ConnectorHttp
@@ -235,6 +237,59 @@ class OpenIMClient:
 
     # ----------------------------------------------------------------- 消息
 
+    async def _send(
+        self,
+        *,
+        send_id: str,
+        recv_id: str,
+        group_id: str,
+        content: Mapping[str, Any],
+        content_type: int,
+        sender_nickname: str,
+        ex: str,
+    ) -> SentMessage:
+        if bool(recv_id) == bool(group_id):
+            raise ValueError("recv_id 与 group_id 必须且只能给一个")
+        body: dict[str, Any] = {
+            "sendID": send_id,
+            "recvID": recv_id,
+            "groupID": group_id,
+            "senderNickname": sender_nickname,
+            "senderPlatformID": PLATFORM_WEB,
+            "content": dict(content),
+            "contentType": content_type,
+            "sessionType": SESSION_GROUP if group_id else SESSION_SINGLE,
+            # 原样存进 MsgData.ex（服务端生成 clientMsgID，调用方不能指定）
+            "ex": ex,
+        }
+        data = await self.call("/msg/send_msg", body)
+        return SentMessage(
+            server_msg_id=str(data.get("serverMsgID") or ""),
+            client_msg_id=str(data.get("clientMsgID") or ""),
+            send_time_ms=int(data.get("sendTime") or 0),
+        )
+
+    async def send_picture(
+        self,
+        *,
+        send_id: str,
+        picture: Mapping[str, Any],
+        recv_id: str = "",
+        group_id: str = "",
+        ex: str = "",
+    ) -> SentMessage:
+        """图片消息（102）：picture 是 PictureElem（sourcePicture、bigPicture、snapshotPicture，
+        每个都要有 type、width、height、url，`pkg/apistruct/msg.go`）。"""
+        return await self._send(
+            send_id=send_id,
+            recv_id=recv_id,
+            group_id=group_id,
+            content=picture,
+            content_type=CONTENT_PICTURE,
+            sender_nickname="",
+            ex=ex,
+        )
+
     async def send_text(
         self,
         *,
@@ -247,31 +302,20 @@ class OpenIMClient:
         ex: str = "",
     ) -> SentMessage:
         """以 send_id 的身份发文字消息（单聊给 recv_id，群聊给 group_id；@ 时用 106）。"""
-        if bool(recv_id) == bool(group_id):
-            raise ValueError("recv_id 与 group_id 必须且只能给一个")
         if at_user_ids:
             content: dict[str, Any] = {"text": text, "atUserList": list(at_user_ids)}
             content_type = CONTENT_AT_TEXT
         else:
             content = {"content": text}
             content_type = CONTENT_TEXT
-        body: dict[str, Any] = {
-            "sendID": send_id,
-            "recvID": recv_id,
-            "groupID": group_id,
-            "senderNickname": sender_nickname,
-            "senderPlatformID": PLATFORM_WEB,
-            "content": content,
-            "contentType": content_type,
-            "sessionType": SESSION_GROUP if group_id else SESSION_SINGLE,
-            # 原样存进 MsgData.ex（服务端生成 clientMsgID，调用方不能指定）
-            "ex": ex,
-        }
-        data = await self.call("/msg/send_msg", body)
-        return SentMessage(
-            server_msg_id=str(data.get("serverMsgID") or ""),
-            client_msg_id=str(data.get("clientMsgID") or ""),
-            send_time_ms=int(data.get("sendTime") or 0),
+        return await self._send(
+            send_id=send_id,
+            recv_id=recv_id,
+            group_id=group_id,
+            content=content,
+            content_type=content_type,
+            sender_nickname=sender_nickname,
+            ex=ex,
         )
 
     async def max_seqs(self, user_id: str) -> dict[str, int]:
@@ -316,7 +360,7 @@ class OpenIMClient:
 
         group_id 为空时由 OpenIM 生成；指定且已存在时返回 1202（CONFLICT），调用方可以据此
         把重复的建群当作已完成（`internal/rpc/group/group.go` 的 GenGroupID）。
-        调用者（imAdmin）不在成员里时 OpenIM 会把它也加进群。
+        调用者 imAdmin 只用来核对用户与计入成员数，并不入群（真实实例已核实）。
         """
         info: dict[str, Any] = {"groupName": name, "groupType": GROUP_TYPE_WORK}
         if group_id:
@@ -397,6 +441,124 @@ class OpenIMClient:
         await self.call(
             "/conversation/set_conversations", {"userIDs": [owner], "conversation": conversation}
         )
+
+
+# 分片哈希之间的分隔符（openimsdk/tools s3/cont/consts.go）
+_PART_SEPARATOR = ","
+
+
+def _md5(data: bytes) -> str:
+    return hashlib.md5(data, usedforsecurity=False).hexdigest()
+
+
+def _with_query(url: str, query: Sequence[Mapping[str, Any]] | None) -> str:
+    pairs = [(kv["key"], v) for kv in query or [] for v in kv.get("values") or []]
+    return url if not pairs else url + ("&" if "?" in url else "?") + urlencode(pairs)
+
+
+def _headers(items: Sequence[Mapping[str, Any]] | None) -> dict[str, str]:
+    return {str(kv["key"]): str(kv["values"][0]) for kv in items or [] if kv.get("values")}
+
+
+class ObjectStore:
+    """OpenIM 的对象存储接口（`/object/*`，imAdmin 令牌）。
+
+    流程在第 3 部分用 probes/object-check.py 对真实实例核过：part_size → initiate_multipart_upload
+    → 按签好的地址逐片 PUT（ETag 必须等于分片的 MD5）→ complete_multipart_upload；
+    同样内容（同一个哈希）已存在时 initiate 不返回 upload，直接算作完成。
+    下载：access_url 签出对象存储的地址再 GET（可带缩略图参数 type=image&width&height）。
+    """
+
+    def __init__(self, client: "OpenIMClient") -> None:
+        self.client = client
+
+    async def upload(self, name: str, data: bytes, content_type: str) -> None:
+        size = int(
+            (await self.client.call("/object/part_size", {"size": len(data)})).get("size") or 0
+        )
+        if size <= 0:
+            raise ConnectorError(
+                "UNAVAILABLE", "OpenIM 没有返回分片大小", reason="invalid_response"
+            )
+        parts = [data[i : i + size] for i in range(0, len(data), size)] or [b""]
+        hashes = [_md5(p) for p in parts]
+        init = await self.client.call(
+            "/object/initiate_multipart_upload",
+            {
+                "hash": _md5(_PART_SEPARATOR.join(hashes).encode()),
+                "size": len(data),
+                "partSize": size,
+                "maxParts": -1,
+                "cause": "myws",
+                "name": name,
+                "contentType": content_type,
+            },
+        )
+        upload = init.get("upload")
+        if not upload:
+            return
+        sign = upload.get("sign") or {}
+        for number, part in enumerate(parts, start=1):
+            signed = next(
+                (p for p in sign.get("parts") or [] if int(p.get("partNumber") or 0) == number),
+                None,
+            )
+            if signed is None:
+                raise ConnectorError(
+                    "UNAVAILABLE", "OpenIM 没有签出分片地址", reason="invalid_response"
+                )
+            url = _with_query(
+                str(signed.get("url") or sign.get("url") or ""),
+                [*(sign.get("query") or []), *(signed.get("query") or [])],
+            )
+            response = await self.client.http.request(
+                "PUT",
+                url,
+                headers={**_headers(sign.get("header")), **_headers(signed.get("header"))},
+                content=part,
+            )
+            if response.status_code != 200:
+                raise ConnectorError(
+                    "UNAVAILABLE",
+                    f"对象存储返回 HTTP {response.status_code}",
+                    status=response.status_code,
+                    reason="object_put",
+                )
+            if response.headers.get("ETag", "").strip('"') != hashes[number - 1]:
+                raise ConnectorError("UNAVAILABLE", "分片校验不一致", reason="object_etag")
+        await self.client.call(
+            "/object/complete_multipart_upload",
+            {
+                "uploadID": upload.get("uploadID"),
+                "parts": hashes,
+                "name": name,
+                "contentType": content_type,
+                "cause": "myws",
+            },
+        )
+
+    async def download(
+        self, name: str, *, query: Mapping[str, str] | None = None
+    ) -> tuple[bytes, str]:
+        body: dict[str, Any] = {"name": name}
+        if query:
+            body["query"] = dict(query)
+        url = str((await self.client.call("/object/access_url", body)).get("url") or "")
+        if not url:
+            raise ConnectorError(
+                "UNAVAILABLE", "OpenIM 没有签出下载地址", reason="invalid_response"
+            )
+        response = await self.client.http.request("GET", url, headers={})
+        if response.status_code == 404:
+            raise ConnectorError("NOT_FOUND", "对象不存在", status=404, reason="object_missing")
+        if response.status_code != 200:
+            raise ConnectorError(
+                "UNAVAILABLE",
+                f"对象存储返回 HTTP {response.status_code}",
+                status=response.status_code,
+                reason="object_get",
+            )
+        return response.content, response.headers.get("Content-Type", "")
 
 
 def single_conversation_id(user_a: str, user_b: str) -> str:

@@ -13,7 +13,8 @@ docs/decisions/2026-10-31-v2-oc1-contract.md 第 5、10 节。
 - 会话属于“用户 + 工作空间”（每个管理员一行，各自的已读、置顶、免打扰）；消息投影按 OpenIM 的
   会话 ID 存一份（群里的多个管理员共用），序号与内容以 pull_msg_by_seq 拉回的为准。
 - 消息置顶挂在当前用户的会话上；通讯录分组属于工作空间（名称在工作空间内唯一）。
-- 上传在 OC-3 后续部分与用到它的代码一起加。
+- 图片（im_media）：管理员上传到 OpenIM 对象存储的图片；发消息后挂到那个会话上，
+  浏览器经 /api/v1/im/media/{id}、实例经接入入口的 /im/obj/m/{id} 读取（都由工作台代理）。
 """
 
 import uuid
@@ -41,6 +42,7 @@ from app.models.base import Base
 GROUP_MEMBER_ROLES = ("owner", "admin", "member")
 INBOX_STATUSES = ("pending", "processing", "retry", "completed", "dead_letter")
 CONVERSATION_KINDS = ("single", "group", "notice")
+MEDIA_STATUSES = ("uploaded", "used")
 MESSAGE_STATUSES = ("sending", "sent", "failed", "unknown")
 
 
@@ -277,3 +279,39 @@ class ImContactGroupMember(Base):
     instance_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspace.agent_instances.id", ondelete="CASCADE"), primary_key=True
     )
+
+
+class ImMedia(Base):
+    """上传的图片：id 同时是 upload_id 与 media_id。"""
+
+    __tablename__ = "im_media"
+    __table_args__ = (
+        UniqueConstraint("object_name"),
+        CheckConstraint(f"status IN {MEDIA_STATUSES}", name="status"),
+        CheckConstraint("size > 0 AND width > 0 AND height > 0", name="dimensions"),
+        Index(
+            "ix_im_media_unused_expiry",
+            "expires_at",
+            postgresql_where=text("status = 'uploaded'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    mime: Mapped[str] = mapped_column(Text)
+    size: Mapped[int] = mapped_column(Integer)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    # OpenIM 对象存储里的对象名：myws/<工作空间>/<id>.<扩展名>
+    object_name: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'uploaded'"))
+    # 发出后所在的会话（OpenIM 会话 ID）与消息
+    conversation_id: Mapped[str | None] = mapped_column(Text)
+    server_msg_id: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created()
