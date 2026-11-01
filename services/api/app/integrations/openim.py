@@ -244,6 +244,7 @@ class OpenIMClient:
         group_id: str = "",
         at_user_ids: Sequence[str] = (),
         sender_nickname: str = "",
+        ex: str = "",
     ) -> SentMessage:
         """以 send_id 的身份发文字消息（单聊给 recv_id，群聊给 group_id；@ 时用 106）。"""
         if bool(recv_id) == bool(group_id):
@@ -263,6 +264,8 @@ class OpenIMClient:
             "content": content,
             "contentType": content_type,
             "sessionType": SESSION_GROUP if group_id else SESSION_SINGLE,
+            # 原样存进 MsgData.ex（服务端生成 clientMsgID，调用方不能指定）
+            "ex": ex,
         }
         data = await self.call("/msg/send_msg", body)
         return SentMessage(

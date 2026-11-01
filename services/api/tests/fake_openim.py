@@ -30,6 +30,11 @@ class FakeOpenIM:
         self.messages: dict[str, list[dict[str, Any]]] = {}
         self.members: dict[str, set[str]] = {}
         self.online: set[str] = set()
+        # 代发的故障注入：send_error 为 errCode（拒收）；send_timeout 时消息照常入库但应答超时
+        self.send_error = 0
+        self.send_timeout = False
+        # 设为 True 时连接被拒（请求确定没有发出）
+        self.refuse = False
 
     def add_message(
         self,
@@ -43,6 +48,10 @@ class FakeOpenIM:
         """往会话里追加一条消息（序号自动递增），返回 MsgData。"""
         if members:
             self.members.setdefault(conversation_id, set()).update(members)
+        body = conversation_id[3:]
+        if conversation_id.startswith("si_") and len(body) == 71:
+            # 单聊的两个用户就是成员
+            self.members.setdefault(conversation_id, set()).update({body[:35], body[36:]})
         log = self.messages.setdefault(conversation_id, [])
         seq = len(log) + 1
         msg = {
@@ -64,6 +73,8 @@ class FakeOpenIM:
     def handler(self, request: httpx.Request) -> httpx.Response:
         if request.url.host != HOST:
             return httpx.Response(404)
+        if self.refuse:
+            raise httpx.ConnectError("simulated refusal")
         path = request.url.path
         body: dict[str, Any] = json.loads(request.content or b"{}")
         self.calls.append((path, body))
@@ -171,6 +182,30 @@ class FakeOpenIM:
                     for u in body.get("userIDs") or []
                 ],
             },
+        )
+
+    def _msg_send_msg(self, body: dict[str, Any]) -> httpx.Response:
+        if self.send_error:
+            return self._error(self.send_error)
+        sender, group = body["sendID"], body.get("groupID") or ""
+        if group:
+            conv = f"sg_{group}"
+        else:
+            first, second = sorted((sender, body["recvID"]))
+            conv = f"si_{first}_{second}"
+            self.members.setdefault(conv, set()).update({first, second})
+        msg = self.add_message(
+            conv, sender, body.get("content") or {}, content_type=int(body["contentType"])
+        )
+        msg["ex"] = body.get("ex") or ""
+        if self.send_timeout:
+            raise httpx.ReadTimeout("simulated timeout")
+        return self._ok(
+            {
+                "serverMsgID": msg["serverMsgID"],
+                "clientMsgID": msg["clientMsgID"],
+                "sendTime": msg["sendTime"],
+            }
         )
 
     def unfriend(self, a: str, b: str) -> None:

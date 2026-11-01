@@ -24,6 +24,7 @@ from app.domain.connectors import ConnectorRuntime
 from app.domain.dashboards import DashboardService
 from app.domain.developer import DeveloperService
 from app.domain.im import openim_client
+from app.domain.im_service import ImService
 from app.domain.integrations import IntegrationService
 from app.domain.knowledge import KnowledgeService
 from app.domain.notifications import NotificationService
@@ -152,6 +153,15 @@ def get_openim(
 ) -> OpenIMClient | None:
     """没有部署 OpenIM 时为 None；管理员令牌缓存在 Redis。"""
     return openim_client(settings, connectors, redis)
+
+
+def get_im_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    redis: Annotated[Redis, Depends(get_redis)],
+    im: Annotated[OpenIMClient | None, Depends(get_openim)],
+) -> ImService:
+    return ImService(db, settings, redis, im)
 
 
 def get_agent_service(

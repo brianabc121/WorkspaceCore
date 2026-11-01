@@ -305,3 +305,39 @@ OC-0 的回归测试脚本没有覆盖这一项，覆盖它的是这个单元测
   - 在线状态接口的列表格式；
   - 停用时强制下线。
 - **测试**：模拟 OpenIM 加真实数据库共 17 项（`tests/test_im_projection.py`），包括解析、回调触发投影、群、对账补缺、上下线、删好友补回、重试与 dead_letter、清理。
+
+## 12. 第 4 部分（B4a）：管理员 IM 接口——会话、消息、发送、置顶、导出（2026-11-01）
+
+实现 `app/api/v1/im.py` 中会话与消息相关的接口（`app/domain/im_service.py`），契约第 5.1–5.3、5.5、5.8 节。
+- **数据表**（迁移 0014）：
+  - `im_message_pins`：挂在当前用户的会话上；
+  - `im_messages.idempotency_key`：唯一，可空。
+- **状态**（`GET /im/status`）：第一次打开 IM 时注册当前用户的账号，并与本工作空间已就绪的实例补好友（后来才成为管理员的用户也能聊天）。OpenIM 不可用时 `available=false`。
+- **角标**：未读数是序号大于已读序号、不是自己发的消息，不含免打扰的会话。待审批数在 OC-5 实现，暂为 0。
+- **会话**：
+  - 排序：置顶的在前（`pinned_at` 倒序），其余按最后消息时间倒序；
+  - 筛选：`kind`、按标题（实例昵称或名称、群名）的关键字；`contact_group_id` 在通讯录分组实现前一律 404；
+  - 打开单聊：实例 IM 未就绪时 409 `IM_NOT_READY`，顺带补好友；
+  - 置顶与免打扰：先同步到 OpenIM（`isPinned`、`recvMsgOpt=2`），失败时 503、本地不改；
+  - 已读：只增不减，不超过最大序号。
+- **消息列表**：按 `sent_at` 倒序，游标是 (`sent_at`, `id`)。类型映射：
+  - 101 / 106 → `text`；102 → `image`；1000 以上 → `system`；其他 → `unsupported`；
+  - 图片的 `media_id` 等对象存储代理做完再给出。
+- **发送**：
+  - `Idempotency-Key` 沿用 V1 的幂等记录（同一个键换内容 409）；
+  - 先写一条 `sending` 的本地消息再调用 OpenIM。`clientMsgID` 由 OpenIM 服务端生成、调用方不能指定（`internal/api/msg.go` 已核对），所以把键写进 `ex`（原样存进 MsgData，真实实例验证过能随 `pull_msg_by_seq` 带回）；
+  - 结果按错误分三类：
+
+| OpenIM 的结果 | 接口返回 | 幂等记录 |
+|---|---|---|
+| 拒收：before 回调的 5001–5009 原样作为 `errCode` 返回（`pkg/callbackstruct/common.go` 已核对），以及 1001 等参数错误 | 409 `IM_SEND_REJECTED`（`details.err_code`） | 记为失败，重放同样的错误 |
+| 确定没发出：连不上、熔断、管理员令牌被拒 | 503 `IM_UNAVAILABLE` | 删除，同一个键可以重试 |
+| 结果未知：超时、5xx | 504 `RESULT_UNKNOWN` | 记为未知 |
+
+  - 结果未知后用同一个键重发：先补齐那个会话的投影，按 `ex` 里的键找回那条消息（投影会认领本地那一行，不会出现两行）；找到就返回 202，5 分钟后仍找不到就返回 409 `OPERATION_NOT_APPLIED`；
+  - 单聊不能 @，群里只能 @ 群成员；每人每分钟 30 条。
+- **消息置顶**：每个会话最多 10 条（先锁住会话行再数）；重复置顶返回原来那条。
+- **导出**：NDJSON，按序号升序分批输出，`Cache-Control: no-store`，写审计 `im.conversation.exported`。
+- **测试**：
+  - `tests/test_im_api.py`：9 项，覆盖权限、会话归属、排序与筛选、同步失败不改本地、发送的各种结果、限流、分页、置顶上限、导出；
+  - `tests/test_im_live.py`：在真实补丁镜像上，管理员发送后 `ex` 原样带回、投影只有一行，连续 3 次通过。

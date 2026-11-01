@@ -1189,10 +1189,7 @@ async def test_v2_im_payload_rules(stub_client: httpx.AsyncClient) -> None:
     ):
         response = await stub_client.post(f"{conversation}/messages", json=body, headers=headers)
         assert response.status_code == 422, name
-    sent = await stub_client.post(
-        f"{conversation}/messages", json={"kind": "text", "text": "hi"}, headers=headers
-    )
-    assert sent.status_code == 501
+    # 合法请求的处理（幂等、拒收、结果未知）由 test_im_api.py 对真实数据库覆盖（T-0055）
     bad_id = await stub_client.get("/api/v1/im/conversations/../../x/messages", headers=WORKSPACE)
     assert bad_id.status_code in {404, 422}
     for name, body in _cases({"空": {}, "null": {"muted": None}}):

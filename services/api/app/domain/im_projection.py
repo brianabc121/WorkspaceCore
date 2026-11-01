@@ -103,6 +103,8 @@ class ParsedMessage:
     plain_text: str | None
     at_im_ids: list[str]
     sent_at: datetime
+    # 工作台代发时写进 ex 的 Idempotency-Key
+    idempotency_key: uuid.UUID | None = None
 
 
 def _decode_content(raw: object) -> dict[str, Any]:
@@ -117,6 +119,24 @@ def _decode_content(raw: object) -> dict[str, Any]:
     except (binascii.Error, ValueError):
         return {}
     return content if isinstance(content, dict) else {}
+
+
+EX_KEY = "myws_key"
+
+
+def ex_for(key: uuid.UUID) -> str:
+    """代发消息的 ex：带上 Idempotency-Key，结果未知时靠它找回。"""
+    return json.dumps({EX_KEY: str(key)}, separators=(",", ":"))
+
+
+def _key_from_ex(raw: object) -> uuid.UUID | None:
+    if not isinstance(raw, str) or not raw or len(raw) > 1024:
+        return None
+    try:
+        data = json.loads(raw)
+        return uuid.UUID(str(data[EX_KEY])) if isinstance(data, dict) and EX_KEY in data else None
+    except (ValueError, TypeError):
+        return None
 
 
 def parse_message(raw: dict[str, Any]) -> ParsedMessage | None:
@@ -155,6 +175,7 @@ def parse_message(raw: dict[str, Any]) -> ParsedMessage | None:
         sent_at=datetime.fromtimestamp(send_time / 1000, UTC)
         if send_time > 0
         else datetime.now(UTC),
+        idempotency_key=_key_from_ex(raw.get("ex")),
     )
 
 
@@ -270,6 +291,7 @@ async def _upsert(
         plain_text=parsed.plain_text,
         at_im_ids=parsed.at_im_ids,
         status="sent",
+        idempotency_key=parsed.idempotency_key,
         sent_at=parsed.sent_at,
     )
     stmt = stmt.on_conflict_do_update(
@@ -286,6 +308,16 @@ async def _upsert(
     )
     try:
         async with db.begin_nested():
+            if parsed.idempotency_key is not None:
+                # 工作台代发、结果未知的那条本地记录：认领它，避免同一条消息出现两行
+                await db.execute(
+                    update(ImMessage)
+                    .where(
+                        ImMessage.idempotency_key == parsed.idempotency_key,
+                        ImMessage.server_msg_id.is_(None),
+                    )
+                    .values(server_msg_id=parsed.server_msg_id, client_msg_id=parsed.client_msg_id)
+                )
             await db.execute(stmt)
     except IntegrityError:
         # 同一个序号或客户端消息 ID 已被另一条记录占用：记日志跳过，全量对账时再看

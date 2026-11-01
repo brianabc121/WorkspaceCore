@@ -12,7 +12,7 @@ docs/decisions/2026-10-31-v2-oc1-contract.md 第 5、10 节。
   失败 retry，超限 dead_letter）。回调没有签名，payload 只当作“有变化”的提示，内容以拉取为准。
 - 会话属于“用户 + 工作空间”（每个管理员一行，各自的已读、置顶、免打扰）；消息投影按 OpenIM 的
   会话 ID 存一份（群里的多个管理员共用），序号与内容以 pull_msg_by_seq 拉回的为准。
-- 消息置顶、通讯录分组与上传，在 OC-3 后续部分与用到它们的代码一起加。
+- 消息置顶挂在当前用户的会话上；通讯录分组与上传在 OC-3 后续部分与用到它们的代码一起加。
 """
 
 import uuid
@@ -199,6 +199,7 @@ class ImMessage(Base):
         UniqueConstraint("conversation_id", "seq"),
         UniqueConstraint("conversation_id", "client_msg_id"),
         CheckConstraint(f"status IN {MESSAGE_STATUSES}", name="status"),
+        UniqueConstraint("idempotency_key"),
         Index("ix_im_messages_conversation_sent", "conversation_id", "sent_at"),
         Index("ix_im_messages_sent_at", "sent_at"),
     )
@@ -222,5 +223,24 @@ class ImMessage(Base):
     plain_text: Mapped[str | None] = mapped_column(Text)
     at_im_ids: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
     status: Mapped[str] = mapped_column(Text, server_default=text("'sent'"))
+    # 工作台代发时的 Idempotency-Key：写进 OpenIM 消息的 ex，结果未知时靠它在投影里找回
+    idempotency_key: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created()
+
+
+class ImMessagePin(Base):
+    """消息置顶：属于“当前用户 + 工作空间”（挂在当前用户的会话上），只在工作台记录。"""
+
+    __tablename__ = "im_message_pins"
+    __table_args__ = (UniqueConstraint("conversation_pk", "server_msg_id"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    conversation_pk: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.im_conversations.id", ondelete="CASCADE")
+    )
+    server_msg_id: Mapped[str] = mapped_column(Text)
+    pinned_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    pinned_at: Mapped[datetime] = _created()

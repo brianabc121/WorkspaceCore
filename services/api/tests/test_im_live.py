@@ -92,3 +92,57 @@ async def test_instance_account_token_and_projection_on_real_openim(
         assert system >= 1
 
         await env.set_enabled(instance["id"], False)
+
+
+async def test_admin_send_round_trips_ex_on_real_openim(
+    make_client: ClientFactory, migrated_database_url: str
+) -> None:
+    """管理员经工作台发消息：ex 里的 Idempotency-Key 原样回到 pull_msg_by_seq，投影不重复。"""
+    overrides: dict[str, Any] = {
+        **IM_SETTINGS,
+        "openim_api_url": URL.rstrip("/"),
+        "openim_secret": SecretStr(SECRET),
+    }
+    async with im_env(make_client, migrated_database_url, **overrides) as env:
+        env.app.state.connectors.transport = None
+        instance = await env.create_instance(name=f"live-{uuid.uuid4().hex[:6]}")
+        status = await env.client.get("/api/v1/im/status", headers=env.headers())
+        assert status.json()["available"] is True and status.json()["account_ready"] is True
+        opened = await env.client.post(
+            "/api/v1/im/conversations",
+            json={"instance_id": instance["id"]},
+            headers=env.headers(write=True),
+        )
+        assert opened.status_code == 200, opened.text
+        conv = opened.json()["conversation_id"]
+        key = uuid.uuid4()
+        marker = f"admin-{uuid.uuid4().hex[:8]}"
+        sent = await env.client.post(
+            f"/api/v1/im/conversations/{conv}/messages",
+            json={"kind": "text", "text": marker},
+            headers={**env.headers(write=True), "Idempotency-Key": str(key)},
+        )
+        assert sent.status_code == 202, sent.text
+        ctx = await _worker_ctx(env)
+        row: Any = None
+        for _ in range(30):
+            await worker.reconcile_im(ctx)
+            row = await run_sql(
+                env.database_url,
+                "SELECT json_build_object('seq', seq, 'key', idempotency_key,"
+                " 'n', count(*) OVER ()) FROM workspace.im_messages"
+                " WHERE conversation_id = $1 AND plain_text = $2",
+                conv,
+                marker,
+            )
+            if row and json.loads(row)["seq"]:
+                break
+            await asyncio.sleep(0.5)
+        assert row, "对账没有投影出管理员发的消息"
+        data = json.loads(row)
+        assert data["seq"] >= 1 and data["key"] == str(key) and data["n"] == 1
+        listed = await env.client.get(
+            f"/api/v1/im/conversations/{conv}/messages", headers=env.headers()
+        )
+        texts = [m["text"] for m in listed.json()["items"]]
+        assert texts.count(marker) == 1
