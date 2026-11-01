@@ -1,6 +1,6 @@
 import { screen, fireEvent } from '@testing-library/vue'
 import { beforeEach, describe, it, expect, vi } from 'vitest'
-import { mockApi, openApp } from './helpers'
+import { mockApi, openApp, workspace } from './helpers'
 
 const pages = [
   ['/', '总览'], ['/tasks', '任务'], ['/projects', '项目'], ['/knowledge', '知识库'],
@@ -20,7 +20,7 @@ describe('工程骨架', () => {
     for (const [href, name] of pages) {
       expect(nav.querySelector(`a[href="${href}"]`)).toHaveTextContent(name!)
     }
-    expect(screen.getByText('Sprint 3 · 任务与集成')).toBeVisible()
+    expect(screen.getByText(workspace.name, { selector: '.eyebrow' })).toBeVisible()
   })
   it('navigates without reloading and closes the mobile menu', async () => {
     const { router } = await open()

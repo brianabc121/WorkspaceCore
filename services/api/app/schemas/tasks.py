@@ -69,6 +69,21 @@ class ProjectPage(Page[ProjectOut]):
     sync: SyncState
 
 
+class ProjectProgressOut(BaseModel):
+    """首页“项目进度”组件（规范 §8.2 ProjectProgress；T-0064）。"""
+
+    project_id: UUID
+    title: str
+    source_url: str
+    open_tasks: int
+    done_tasks: int
+
+
+class ProjectProgressList(BaseModel):
+    items: list[ProjectProgressOut]
+    sync: SyncState
+
+
 # ---------------------------------------------------------------- 任务
 
 

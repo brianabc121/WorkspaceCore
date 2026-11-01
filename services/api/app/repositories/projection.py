@@ -15,9 +15,10 @@ from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Integer, cast, func, or_, select, text, update
+from sqlalchemy import Boolean, DateTime, Integer, Text, cast, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 
 from app.domain import events
@@ -287,6 +288,36 @@ async def list_tasks(
         .limit(limit)
     )
     return list(await db.scalars(stmt))
+
+
+async def project_progress(
+    db: AsyncSession, workspace_id: uuid.UUID, *, limit: int
+) -> list[tuple[ExternalResource, int, int]]:
+    """未归档项目的未完成 / 已完成任务数：有未完成任务的项目在前（多的在前），其次按名称。"""
+    task = aliased(ExternalResource)
+    task_done = cast(task.metadata_json["done"].astext, Boolean)
+    open_count = func.count(task.id).filter(task_done.is_not(True))
+    done_count = func.count(task.id).filter(task_done.is_(True))
+    stmt = (
+        select(ExternalResource, open_count, done_count)
+        .outerjoin(
+            task,
+            (task.workspace_id == ExternalResource.workspace_id)
+            & (task.resource_type == TASK)
+            & task.deleted_at.is_(None)
+            & (task.metadata_json["project_resource_id"].astext == cast(ExternalResource.id, Text)),
+        )
+        .where(
+            ExternalResource.workspace_id == workspace_id,
+            ExternalResource.resource_type == PROJECT,
+            ExternalResource.deleted_at.is_(None),
+            cast(_meta["archived"].astext, Boolean).is_not(True),
+        )
+        .group_by(ExternalResource.id)
+        .order_by(open_count.desc(), func.lower(ExternalResource.title), ExternalResource.id)
+        .limit(limit)
+    )
+    return [(row, int(o), int(d)) for row, o, d in (await db.execute(stmt)).all()]
 
 
 async def task_counts(

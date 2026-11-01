@@ -127,6 +127,32 @@ async def test_task_filters_sort_and_pagination(env: Env) -> None:
     assert [p["title"] for p in searched["items"]] == ["工作"]
 
 
+async def test_project_progress_counts_open_and_done_tasks(env: Env) -> None:
+    """首页“项目进度”组件（T-0064）：有未完成任务的项目在前，归档项目不显示。"""
+    work = env.fake.add_project("工作")
+    life = env.fake.add_project("生活")
+    env.fake.add_project("空项目")
+    env.fake.add_project("旧项目", archived=True)
+    for title in ("周报", "评审", "部署"):
+        env.fake.add_task(work["id"], title)
+    env.fake.add_task(work["id"], "已上线", done=True)
+    env.fake.add_task(life["id"], "买菜")
+    env.fake.add_task(life["id"], "交水费", done=True)
+    env.fake.add_task(life["id"], "体检", done=True)
+    await env.connect()
+    page = await env.get("/api/v1/projects/progress")
+    assert page["sync"]["status"] == "ok"
+    rows = [(p["title"], p["open_tasks"], p["done_tasks"]) for p in page["items"]]
+    assert rows == [("工作", 3, 1), ("生活", 1, 2), ("空项目", 0, 0)]
+    assert page["items"][0]["source_url"].startswith("https://tasks.example.com/projects/")
+    limited = await env.get("/api/v1/projects/progress", limit=1)
+    assert [p["title"] for p in limited["items"]] == ["工作"]
+    too_many = await env.client.get(
+        "/api/v1/projects/progress", params={"limit": 21}, headers=env.headers()
+    )
+    assert too_many.status_code == 422
+
+
 async def test_reads_without_an_integration(env: Env) -> None:
     page = await env.get("/api/v1/tasks")
     assert page["items"] == []

@@ -437,7 +437,7 @@ class WritableConnector(Connector, Protocol):
 
 左侧 220~260px 导航，顶栏 56~64px（全局搜索、创建、通知、用户），中央响应式 12 列 Widget Grid，右侧 320~420px 可收起 AI/详情抽屉。小屏幕侧栏折叠；移动端展示单列小组件。
 
-主要页面：`/`、`/tasks`、`/projects`、`/knowledge`、`/calendar`、`/developer`、`/operations`、`/automations`、`/settings`、`/settings/integrations`、`/settings/security`；V2 新增 `/im`、`/im/contacts`、`/agents`、`/agents/secrets`、`/ai/approvals`、`/ai/activity`（取代 `/ai`），首页 AIQuickAsk 组件改为打开 IM。
+主要页面：`/`、`/tasks`、`/projects`、`/knowledge`、`/calendar`、`/developer`、`/operations`、`/automations`、`/settings`、`/settings/integrations`、`/settings/security`；V2 新增 `/im`（通讯录为 `/im?view=contacts`）、`/agents`、`/agents/secrets`、`/ai`（审批中心；调用记录为 `/ai?view=activity`，旧地址 `/approvals` 重定向到这里），首页 AIQuickAsk 组件改为 IM 快捷入口（组件类型 `im_quick_chat`）。（2026-11-01 按实现更新，人类同意；T-0064）
 
 ### 8.2 Widget 插件规范
 

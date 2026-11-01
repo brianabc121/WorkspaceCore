@@ -29,6 +29,7 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (path === '/api/v1/search') return Response.json(emptyPage)
     if (path === '/api/v1/ai/tool-executions') return Response.json({ ...emptyPage, pending_count: 0 })
     if (path === '/api/v1/audit-logs') return Response.json(emptyPage)
+    if (/^\/api\/v1\/workspaces\/[^/]+\/members$/.test(path) && request.method === 'GET') return Response.json({ ...emptyPage, items: [{ user_id: me.user.id, email: me.user.email, display_name: me.user.display_name, role: 'owner', joined_at: '2026-10-30T00:00:00Z', you: true }] })
     if (path === '/api/v1/knowledge/resources' || path === '/api/v1/knowledge/sources' || path === '/api/v1/calendar/events') return Response.json(emptyPage)
     if (path === '/api/v1/dashboard/overview') return Response.json(overview)
     if (path === '/api/v1/tasks') return Response.json({ items: [task], sync, next_cursor: null, total_estimate: 1 })

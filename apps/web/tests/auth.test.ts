@@ -28,7 +28,7 @@ describe('认证与工作空间', () => {
     offline = false
     await fireEvent.click(screen.getByRole('button', { name: '重新连接' }))
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/settings'))
-    expect(screen.getByText('测试用户')).toBeVisible()
+    expect(screen.getByText('测试用户', { selector: '.user-label' })).toBeVisible()
   })
   it('clears session data and redirects when a protected API returns 401', async () => {
     mockApi((request) => new URL(request.url).pathname === '/api/v1/auth/sessions' ? fail(401, 'UNAUTHORIZED') : undefined)

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { useTaskOperations, type TaskCommand } from '../../stores/taskOperations'
@@ -15,9 +16,11 @@ import OperationPanel from './OperationPanel.vue'
 const auth = useAuthStore(), operation = useTaskOperations(), cache = useQueryClient()
 const scope = auth.workspaceId!, userId = auth.user!.id
 const header = { 'X-Workspace-Id': scope }
-const form = ref({ status: 'all' as 'all' | 'open' | 'done', project_id: '', priority: [] as string[], due_after: '', due_before: '', q: '' })
+// ?q= pre-fills the search (links from the calendar's task deadlines).
+const linked = (() => { const q = useRoute().query.q; return typeof q === 'string' ? q.trim().slice(0, 100) : '' })()
+const form = ref({ status: 'all' as 'all' | 'open' | 'done', project_id: '', priority: [] as string[], due_after: '', due_before: '', q: linked })
 type Filters = NonNullable<import('../../services/schema').operations['list_tasks']['parameters']['query']>
-const filters = ref<Filters>({ status: 'all', limit: 30 })
+const filters = ref<Filters>({ status: 'all', limit: 30, ...(linked ? { q: linked } : {}) })
 const query = useInfiniteQuery({ queryKey: computed(() => ['tasks', userId, scope, filters.value]), initialPageParam: null as string | null,
   queryFn: async ({ pageParam, signal }) => dataOf(await auth.api.GET('/api/v1/tasks', { params: { header, query: { ...filters.value, ...(pageParam ? { cursor: pageParam } : {}) } }, signal })), getNextPageParam: (page) => page.next_cursor ?? undefined })
 const projects = useProjects(scope)

@@ -720,6 +720,7 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 | `OPENIM_CALLBACK_PATH_TOKEN` | `make env` 生成 | 回调地址 `http://api:8000/internal/openim/<口令>` 里的口令，至少 32 个字符 |
 | `IM_NET` | `172.31.252` | `im` 网络的网段前三段：子网 `<值>.0/28`，openim-server 固定在 `<值>.2`。和本机别的 Docker 网络冲突时改它；`make restore-verify` 的临时环境自动用 `172.31.253`，并且不连接 OpenIM |
 | `OPENIM_CALLBACK_ALLOWED_CIDRS` | `<IM_NET>.2/32` | API 只接受这些地址的回调；一般不用改 |
+| `IM_MESSAGE_RETENTION_DAYS` | `365` | 工作台里消息投影的保留天数（7 ~ 3650），超期由 Worker 每小时按发送时间删除；OpenIM 里的消息不受影响。V2 方案写的是默认 180 天，人类 2026-11-01 决定保持 365 天 |
 | `AGENT_IM_OBJECT_BASE_URL` | 自动 | 写进图片消息的取图地址前缀；默认是 `http://<外网入口域名>:18443`（接入包里本机隧道的端口），只有内网入口时是内网入口地址 |
 | `OPENIM_MONGO_*`、`OPENIM_REDIS_PASSWORD`、`OPENIM_ETCD_*`、`OPENIM_KAFKA_PASSWORD`、`OPENIM_GARAGE_*`、`OPENIM_S3_*` | `make env` 生成 | 只在 OpenIM 的 Compose 里使用。MongoDB 的用户与 Garage 的访问密钥在**第一次启动时**写进数据卷，之后改 `.env` 不会生效 |
 

@@ -62,8 +62,9 @@
     - 审计日志里的 IP 哈希从此换了密钥，新旧记录不能互相对照。
     - 安排在维护窗口进行。
   - [ ] `CREDENTIAL_ENCRYPTION_KEY`：
-    - **目前不支持轮换**：换了它，已保存的第三方凭证就无法解密，要逐个重新填写。
-    - 只在怀疑泄露时更换，同时轮换所有第三方 Token。
+    - 按 `docs/deployment.md` 第 6.1 节轮换：旧密钥移到 `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS` → 预演并运行
+      `python -m app.commands.rotate_credentials` → 输出“仍是旧密钥：0；失败：0”后再等 15 分钟 → 清空旧密钥；前后各做一次 `make backup`。
+    - 怀疑泄露时同时轮换所有第三方 Token 与 OpenClaw 密钥库里的密钥。
   - [ ] `BACKUP_PASSWORD`：
     - 不能只改 `.env`：已有仓库会打不开，脚本会报“BACKUP_PASSWORD 与仓库不匹配”；
     - 要用 restic 的 `key passwd`（或 `key add` 加 `key remove`）更换仓库密码，再更新 `.env` 与单独保管的副本。

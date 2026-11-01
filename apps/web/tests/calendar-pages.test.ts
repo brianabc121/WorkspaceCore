@@ -2,6 +2,7 @@ import { fireEvent, screen } from '@testing-library/vue'
 import { describe, expect, it, vi } from 'vitest'
 import { mockApi, openApp, emptyPage, me, workspace, fail } from './helpers'
 import { calendarEvent } from './sprint4-fixtures'
+import { sync, task } from './sprint3-fixtures'
 const path = (r: Request) => new URL(r.url).pathname
 function calendar(override?: (r: Request) => Response | Promise<Response> | undefined) {
   return mockApi(async (r) => {
@@ -18,6 +19,21 @@ async function openCalendar() {
   await screen.findByRole('button', { name: calendarEvent.title })
 }
 describe('本地日历', () => {
+  it('shows Vikunja task due dates as read-only entries on their day', async () => {
+    const due = { ...task, due_at: '2026-10-30T09:00:00Z' }, done = { ...task, id: 'done-task', title: '已完成的任务', done: true, due_at: '2026-10-31T03:00:00Z' }
+    const requests = calendar((r) => path(r) === '/api/v1/tasks' ? Response.json({ items: [due, done], sync, next_cursor: null, total_estimate: 2 }) : undefined)
+    await openCalendar()
+    const entry = await screen.findByRole('article', { name: `任务截止：${task.title}` })
+    expect(entry.closest('[role="region"]')).toHaveAttribute('aria-label', '2026-10-30')
+    expect(entry).toHaveTextContent('17:00 截止')
+    expect(entry).toHaveTextContent('只读')
+    expect(screen.getByRole('link', { name: task.title })).toHaveAttribute('href', `/tasks?q=${encodeURIComponent(task.title)}`)
+    expect(screen.getByRole('article', { name: '任务截止：已完成的任务' })).toHaveTextContent('已完成')
+    const asked = new URL(requests.filter((r) => path(r) === '/api/v1/tasks').at(-1)!.url).searchParams
+    expect(asked.get('status')).toBe('all')
+    expect(asked.get('due_after')).toBeTruthy()
+    expect(asked.get('due_before')).toBeTruthy()
+  })
   it('retains civil-date all-day events across extreme display timezones and filters padded results', async () => {
     const allDay = { ...calendarEvent, title: '跨日期边界的全天安排', all_day: true, timezone: 'Pacific/Kiritimati', start_date: '2026-11-02', end_date: '2026-11-03', start_at: '2026-11-01T10:00:00Z', end_at: '2026-11-02T10:00:00Z' }
     const outside = { ...calendarEvent, id: 'outside', title: '显示周之前的日程', start_at: '2026-11-01T20:00:00Z', end_at: '2026-11-01T21:00:00Z' }

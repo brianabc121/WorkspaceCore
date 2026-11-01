@@ -235,6 +235,8 @@ def test_widget_types_are_a_discriminated_union() -> None:
         "service_health",
         "api_latency",
         "notifications",
+        "project_progress",
+        "im_quick_chat",
     }
 
 
