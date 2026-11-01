@@ -13,7 +13,7 @@
 2. 外网入口：不带客户端证书、带别的 CA 签发的证书，TLS 握手失败；
 3. 外网入口经本机隧道（ghostunnel 客户端 + 接入包里的客户端证书）：取到密钥、心跳成功，
    API 按 Caddy 传来的指纹认出证书（证明 Caddy 的指纹格式与工作台一致）；
-   /mcp 经隧道到达 API；内网令牌经外网入口无效；吊销证书后立即 401；
+   /mcp 经隧道到达 MCP 服务器（initialize 成功）；内网令牌经外网入口无效；吊销证书后立即 401；
 4. 同一网络里的其他容器直接连 API、伪造入口请求头：401。
 
 只依赖 Python 标准库与 docker；用法：
@@ -270,10 +270,29 @@ def main() -> int:
                 body={"openclaw_version": "2026.9.36", "plugin_version": "0.3.3"},
             )
             report.check("外网入口经隧道：心跳", status == 200, f"{status}")
-            status, text = plain_request(tunnel_hostport, "POST", "/mcp", token=public_token, body={})
+            # MCP 服务器（OC-5，T-0057）：经隧道完成 initialize
+            initialize = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "ingress-acceptance", "version": "1"},
+                },
+            }
+            status, text = _send(
+                http.client.HTTPConnection("127.0.0.1", TUNNEL_PORT, timeout=10),
+                tunnel_hostport,
+                "POST",
+                "/mcp",
+                public_token,
+                initialize,
+                {"Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-11-25"},
+            )
             report.check(
-                "外网入口经隧道：/mcp 到达 API（MCP 服务器在 OC-5 挂载，现在是 API 的 404）",
-                status == 404 and '"error"' in text,
+                "外网入口经隧道：/mcp 到达 API 的 MCP 服务器（initialize 成功）",
+                status == 200 and '"serverInfo"' in text,
                 f"{status}",
             )
             status, _ = plain_request(tunnel_hostport, "POST", "/agent-api/v1/secrets/resolve", token=intranet_token, body=resolve)

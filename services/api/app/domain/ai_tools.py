@@ -191,6 +191,10 @@ class AiToolService:
         except CredentialError:
             self.box = None
         self.hash_key = self.box.derive_key("ai_tool_arguments") if self.box else None
+        # 校验用：轮换凭证密钥前发起的待审批，哈希是用旧密钥算的
+        self.hash_keys: list[bytes | None] = (
+            list(self.box.derive_keys("ai_tool_arguments")) if self.box else [None]
+        )
 
     # ---------------------------------------------------------------- 发起方
 
@@ -405,6 +409,20 @@ class AiToolService:
             for k, v in params.items()
         }
         return {**arguments, "params": sealed}
+
+    def arguments_intact(self, row: AiToolExecution) -> bool:
+        """存下的参数与发起时算出的哈希一致：数据库里的参数被改过就不执行。
+
+        配置了凭证密钥时哈希是 HMAC，密钥不在数据库里，只改数据库伪造不出匹配的哈希。
+        """
+        try:
+            arguments = self.unsealed(row)
+        except (ApiError, CredentialError, ValueError):
+            return False
+        return any(
+            hmac.compare_digest(arguments_hash(row.tool_name, arguments, key), row.arguments_hash)
+            for key in self.hash_keys
+        )
 
     def unsealed(self, row: AiToolExecution) -> dict[str, Any]:
         """执行用的参数：解开加密的敏感参数。"""
@@ -748,6 +766,11 @@ class AiToolService:
         self, approver: AuthContext, row: AiToolExecution, instance: AgentInstance | None
     ) -> tuple[str, str | None, str | None]:
         """以登记人的身份执行；返回 (状态, 结果说明, 错误码)。"""
+        if not self.arguments_intact(row):
+            logger.warning(
+                "ai tool arguments do not match their hash", extra={"execution_id": str(row.id)}
+            )
+            return "failed", "参数与发起时不一致，没有执行；请让实例重新发起", "ARGUMENTS_TAMPERED"
         if instance is None or instance.status == "disabled":
             return "failed", "实例已停用或已删除", "AGENT_DISABLED"
         settings = await self.db.get(AgentSettings, instance.workspace_id)

@@ -175,14 +175,30 @@ async def test_rest_whitelist_and_user_checks(env: ImEnv) -> None:
         env, "/conversation/get_incremental_conversations", {"userID": b["im_user_id"]}, token
     )
     assert spoofed.status_code == 403 and spoofed.json() == blocked
+    forwarded = len(env.fake.forwarded)
+    # 白名单以外一律拦截（T-0058 / OC-6）：删好友、搜消息、改会话、按序号拉别人的消息、
+    # 建群踢人解散、撤回删除、管理员与注册接口；都不转发给 OpenIM
     for route in (
         "/friend/delete_friend",
+        "/friend/add_friend",
         "/msg/search_msg",
+        "/msg/pull_msg_by_seq",
+        "/msg/revoke_msg",
+        "/msg/delete_msgs",
+        "/conversation/set_conversations",
+        "/conversation/get_all_conversations",
         "/user/user_register",
+        "/user/get_users_online_status",
+        "/auth/get_admin_token",
+        "/auth/force_logout",
+        "/group/create_group",
         "/group/kick_group",
+        "/group/dismiss_group",
+        "/group/transfer_group",
     ):
         refused = await _api(env, route, {"userID": oc}, token)
         assert refused.status_code == 404 and refused.json() == blocked, route
+    assert len(env.fake.forwarded) == forwarded
 
     same_ws = await _api(
         env, "/user/get_users_info", {"userIDs": [oc, b["im_user_id"], owner, "ws_notice"]}, token
