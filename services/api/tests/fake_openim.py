@@ -26,6 +26,7 @@ USER_TOKEN_ROUTES = frozenset(
         "/conversation/get_not_notify_conversation_ids",
         "/friend/get_full_friend_user_ids",
         "/friend/get_incremental_friends",
+        "/friend/get_designated_friend_apply",
         "/group/get_full_join_group_ids",
         "/group/get_incremental_join_groups",
         "/group/get_incremental_group_members_batch",

@@ -54,6 +54,10 @@ USER_ID_ROUTES = frozenset(
     }
 )
 USERS_INFO_ROUTE = "/user/get_users_info"
+# 好友申请通过 / 新的好友申请通知（工作台导入好友、补回好友时会有）到达后，SDK 会查这条申请；
+# 被拦截时插件不处理这个错误，OpenClaw 进程因未处理的 Promise 拒绝而退出（T-0059 验收发现）。
+# 请求体 {fromUserID, toUserID}：令牌用户必须是其中一方，另一方必须是本工作空间的 IM 用户
+FRIEND_APPLY_ROUTE = "/friend/get_designated_friend_apply"
 PROTOBUF_ROUTES = frozenset({"/jssdk/get_active_conversations", "/jssdk/get_conversations"})
 
 
@@ -232,7 +236,7 @@ class ImGateway:
         if route in PROTOBUF_ROUTES:
             owners = proto_string_fields(body, 1)
             return None if owners == [user] else 403
-        if route not in USER_ID_ROUTES and route != USERS_INFO_ROUTE:
+        if route not in USER_ID_ROUTES and route not in (USERS_INFO_ROUTE, FRIEND_APPLY_ROUTE):
             return 404
         try:
             payload = json.loads(body or b"{}")
@@ -246,6 +250,12 @@ class ImGateway:
                 return 403
             allowed = await self.workspace_im_users(instance.workspace_id)
             return None if set(wanted) <= allowed else 403
+        if route == FRIEND_APPLY_ROUTE:
+            pair = (payload.get("fromUserID"), payload.get("toUserID"))
+            if not all(isinstance(u, str) for u in pair) or user not in pair:
+                return 403
+            other = pair[1] if pair[0] == user else pair[0]
+            return None if other in await self.workspace_im_users(instance.workspace_id) else 403
         return None if payload.get("userID") == user else 403
 
     async def media_for_instance(self, media_id: uuid.UUID) -> ImMedia | None:

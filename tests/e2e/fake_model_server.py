@@ -45,23 +45,20 @@ def _clean(text: str) -> str:
 
 
 def _since_user(messages: list[dict]) -> tuple[str, int]:
-    """最后一条用户消息（OpenClaw 会追加上下文包装，取最后一段连续的 user）与其后的工具结果数。"""
+    """最近一条有真实内容的用户消息与其后的工具结果数。
+
+    OpenClaw 会在工具结果之后追加只含内部上下文的用户消息，清理后是空的，跳过它们。
+    """
     tool_results = 0
-    tail: list[str] = []
     for m in reversed(messages):
         role = m.get("role")
         if role == "tool":
             tool_results += 1
-            continue
-        if role == "assistant":
-            if tail:
-                break
-            continue
-        if role == "user":
-            tail.append(_clean(_text(m.get("content"))))
-        elif tail:
-            break
-    return "\n".join(reversed(tail)), tool_results
+        elif role == "user":
+            text = _clean(_text(m.get("content")))
+            if text:
+                return text, tool_results
+    return "", tool_results
 
 
 def decide(body: dict) -> dict:
@@ -72,7 +69,7 @@ def decide(body: dict) -> dict:
         return {"content": "echo: " + text[:300]}
     repeat = int(m.group(1)) if (m := REPEAT.search(text)) else 1
     if done >= repeat:
-        last = messages[-1] if messages else {}
+        last = next((m for m in reversed(messages) if m.get("role") == "tool"), {})
         return {"content": "done: " + _text(last.get("content"))[:300]}
     name, args = match.group(1), match.group(2) or "{}"
     tools = [t.get("function", {}).get("name") for t in body.get("tools") or []]
@@ -111,8 +108,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
             return
         result = decide(body)
+        messages = body.get("messages", [])
         record = {"at": time.time(), "auth": self.headers.get("Authorization"),
-                  "last_user": _since_user(body.get("messages", []))[0][-500:], "result": result,
+                  "last_user": _since_user(messages)[0][-500:], "result": result,
+                  "roles": [m.get("role") for m in messages[-6:]],
+                  "last": _text(messages[-1].get("content"))[-800:] if messages else "",
                   "tools": [t.get("function", {}).get("name") for t in body.get("tools") or []]}
         with _lock, open(LOG, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")

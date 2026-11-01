@@ -200,6 +200,19 @@ async def test_rest_whitelist_and_user_checks(env: ImEnv) -> None:
         assert refused.status_code == 404 and refused.json() == blocked, route
     assert len(env.fake.forwarded) == forwarded
 
+    # 好友申请通知后 SDK 查这条申请：只能查自己与本工作空间成员之间的（被拦截会让 OpenClaw 退出）
+    apply = "/friend/get_designated_friend_apply"
+    allowed = await _api(env, apply, {"fromUserID": owner, "toUserID": oc}, token)
+    assert allowed.status_code == 200, allowed.text
+    assert json.loads(env.fake.forwarded[-1][2]) == {"fromUserID": owner, "toUserID": oc}
+    for pair in (
+        {"fromUserID": owner, "toUserID": b["im_user_id"]},  # 别人之间的申请
+        {"fromUserID": f"ws_{uuid.uuid4().hex}", "toUserID": oc},  # 工作空间以外的人
+        {"fromUserID": oc},  # 缺字段
+    ):
+        refused = await _api(env, apply, pair, token)
+        assert refused.status_code == 403, pair
+
     same_ws = await _api(
         env, "/user/get_users_info", {"userIDs": [oc, b["im_user_id"], owner, "ws_notice"]}, token
     )
