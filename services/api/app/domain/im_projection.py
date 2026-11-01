@@ -30,7 +30,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.domain import events, notifications
+from app.domain import events, notifications, ops_metrics
 from app.domain.approval_cards import execution_id_from_ex
 from app.domain.im import ImAccounts, is_im_admin, user_id_from_im, workspace_id_from_notice
 from app.domain.sync import retry_delay
@@ -651,19 +651,35 @@ async def _reconcile_account(ctx: ImContext, im_user_id: str, seen: set[str], *,
             .group_by(ImMessage.conversation_id)
         )
         local = {conversation_id: seq for conversation_id, seq in rows}
-        written = 0
-        for conversation_id in candidates:
-            if not full and int(local.get(conversation_id) or 0) >= remote[conversation_id]:
-                continue
-            ref = await resolve(db, conversation_id)
-            seen.add(conversation_id)
-            if ref is None:
-                continue
-            written += await sync_conversation(
-                db, ctx.client, ref, remote_max=remote[conversation_id], full=full
-            )
-            await db.commit()
+        written = filled = 0
+        try:
+            for conversation_id in candidates:
+                if not full and int(local.get(conversation_id) or 0) >= remote[conversation_id]:
+                    continue
+                ref = await resolve(db, conversation_id)
+                seen.add(conversation_id)
+                if ref is None:
+                    continue
+                before = await _projected_count(db, conversation_id)
+                written += await sync_conversation(
+                    db, ctx.client, ref, remote_max=remote[conversation_id], full=full
+                )
+                # 运维指标只算投影里原来没有的（全量对账会重写已有的消息，不算补齐）
+                after = await _projected_count(db, conversation_id)
+                await db.commit()
+                filled += after - before
+        finally:
+            await ops_metrics.bump(ctx.redis, "im_reconcile_filled", amount=filled)
     return written
+
+
+async def _projected_count(db: AsyncSession, conversation_id: str) -> int:
+    count = await db.scalar(
+        select(func.count())
+        .select_from(ImMessage)
+        .where(ImMessage.conversation_id == conversation_id)
+    )
+    return int(count or 0)
 
 
 async def purge(
