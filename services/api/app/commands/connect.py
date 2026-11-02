@@ -451,6 +451,9 @@ async def cmd_public_urls(env: Env, args: argparse.Namespace) -> int:
                 print("工作台里还没有 Vikunja 集成，跳过")
             elif (current.public_url or "").rstrip("/") == args.vikunja.rstrip("/"):
                 print(f"Vikunja 的打开地址已经是 {args.vikunja}")
+                relinked = await service.relink(access, current.id)
+                if relinked:
+                    print(f"已按这个地址刷新 {relinked} 个项目和任务的打开链接")
             else:
                 update = IntegrationUpdate.model_validate(
                     {"version": current.version, "public_url": args.vikunja}
@@ -475,6 +478,23 @@ async def cmd_public_urls(env: Env, args: argparse.Namespace) -> int:
     return 0
 
 
+async def cmd_relink(env: Env, args: argparse.Namespace) -> int:
+    """按 Vikunja 集成当前的打开地址刷新已同步的项目与任务链接，不改地址本身（T-0079）。"""
+    _, access = await resolve(env.db, args.email, args.workspace)
+    service = env.integrations()
+    current = _find(await service.list_integrations(access), "vikunja")
+    if current is None:
+        print("工作台里还没有 Vikunja 集成，跳过")
+        return 0
+    relinked = await service.relink(access, current.id)
+    print(
+        f"已按 {current.public_url} 刷新 {relinked} 个项目和任务的打开链接"
+        if relinked
+        else "打开链接都是最新的"
+    )
+    return 0
+
+
 # ---------------------------------------------------------------- 入口
 
 Command = Callable[[Env, argparse.Namespace], Awaitable[int]]
@@ -486,6 +506,7 @@ COMMANDS: dict[str, Command] = {
     "n8n-owner": cmd_n8n_owner,
     "n8n": cmd_n8n,
     "public-urls": cmd_public_urls,
+    "relink": cmd_relink,
 }
 
 
@@ -518,6 +539,7 @@ def parser() -> argparse.ArgumentParser:
         "--vikunja", default=None, help="Vikunja 的新对外地址，例如 https://vikunja.example.com"
     )
     urls.add_argument("--n8n", default=None, help="n8n 编辑器的新对外地址")
+    sub.add_parser("relink", help="按 Vikunja 当前的打开地址刷新已同步的项目与任务链接")
     return root
 
 

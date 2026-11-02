@@ -11,8 +11,10 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain import events
 from app.integrations.base import ConnectorError
 from app.integrations.vikunja import (
     ProjectReader,
@@ -110,6 +112,35 @@ async def save_task(
         },
         source_updated_at=task.updated,
     )
+
+
+async def relink(db: AsyncSession, integration: Integration) -> int:
+    """按集成当前的浏览器地址重写已投影项目与任务的“在 Vikunja 中打开”链接（T-0079）。
+
+    返回改动的条数。链接在同步时按当时的 public_url 算好存进投影；只改 public_url 不会触发同步，
+    不重写就一直指向旧地址。拿投影锁，避免和正在进行的同步交错写入旧地址。
+    """
+    await repo.lock_integration(db, integration.id)
+    rows = await db.scalars(
+        select(ExternalResource).where(
+            ExternalResource.integration_id == integration.id,
+            ExternalResource.resource_type.in_((repo.PROJECT, repo.TASK)),
+        )
+    )
+    changed = 0
+    for row in rows:
+        try:
+            external = int(row.external_id)
+        except ValueError:
+            continue
+        build = project_source_url if row.resource_type == repo.PROJECT else task_source_url
+        url = build(integration.public_url, external)
+        if row.source_url != url:
+            row.source_url = url
+            changed += 1
+    if changed:
+        events.mark(db, integration.workspace_id, "projects", "tasks", "overview")
+    return changed
 
 
 def project_out(resource: ExternalResource) -> ProjectOut:

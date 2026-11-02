@@ -107,3 +107,7 @@
   与页面均 200，主站不受影响）；Vikunja 报告的 `frontend_url` 是新地址；n8n 经 HTTPS 登录得到带 `Secure` 的 Cookie；
   工作台里的两个打开链接已更新；输入 `-` 取消后站点文件删除、`.env` 恢复、子域名不再服务。
   真实域名的 Let's Encrypt 签发没有在沙箱里验证（与主站同一机制）。
+- 补充（T-0079）：项目与任务的「在 Vikunja 中打开」链接是同步时按当时的 `public_url` 算好存进投影的，
+  只改 `public_url` 不会重写，要等下一次全量同步。现在改 Vikunja 集成的浏览器地址（网页或 `connect public-urls`）时
+  立即重写已同步的链接（`projection.relink`，持投影锁）；`connect relink` 只按当前地址刷新链接、不改地址，
+  `deploy.sh connect` 在对外设置没变化时调用它，修好 T-0079 之前改过地址留下的旧链接。

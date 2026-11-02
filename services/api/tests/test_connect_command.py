@@ -424,6 +424,7 @@ async def test_public_urls_update_the_saved_open_links(
     await call(world, connect.cmd_public_urls, namespace, monkeypatch)
     assert "还没有 Vikunja 集成" in capsys.readouterr().out
 
+    world.env.fake.add_project("收件箱")
     await world.env.connect()
     n8n = args("n8n", "--owner-email", N8N_OWNER, "--base-url", N8N_URL)
     assert await call(world, connect.cmd_n8n, n8n, monkeypatch, N8N_PASSWORD + "\n") == 0
@@ -440,6 +441,9 @@ async def test_public_urls_update_the_saved_open_links(
     integration = await world.env.integration()
     assert integration["public_url"] == "https://vikunja.example.com"
     assert integration["status"] == "active"  # 只改打开地址，不需要重新测试连接
+    # 已同步的项目与任务链接随之改成新地址（T-0079）
+    links = await project_and_task_links(world)
+    assert links and all(url.startswith("https://vikunja.example.com/") for url in links)
     connection = await world.env.get("/api/v1/automations/connection")
     assert connection["public_url"] == "https://n8n.example.com"
     assert connection["status"] == "active"
@@ -454,6 +458,34 @@ async def test_public_urls_update_the_saved_open_links(
         await call(
             world, connect.cmd_public_urls, args("public-urls", "--vikunja", "ftp://x"), monkeypatch
         )
+
+
+async def project_and_task_links(world: World) -> list[str]:
+    raw = await run_sql(
+        world.env.database_url,
+        "SELECT coalesce(json_agg(source_url), '[]') FROM workspace.external_resources"
+        " WHERE resource_type IN ('project', 'task')",
+    )
+    return list(json.loads(raw))
+
+
+async def test_relink_fixes_links_left_by_an_earlier_address_change(
+    world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = world.env.fake.add_project("收件箱")
+    world.env.fake.add_task(project["id"], "写周报")
+    await world.env.connect()
+    # T-0079 之前改地址留下的状态：集成的地址是新的，已同步的链接还是旧的
+    await run_sql(
+        world.env.database_url,
+        "UPDATE workspace.external_resources SET source_url = 'http://localhost:3456/projects/1'",
+    )
+    assert await call(world, connect.cmd_relink, args("relink"), monkeypatch) == 0
+    assert "刷新 2 个项目和任务的打开链接" in capsys.readouterr().out
+    public = (await world.env.integration())["public_url"]
+    assert all(url.startswith(public + "/") for url in await project_and_task_links(world))
+    assert await call(world, connect.cmd_relink, args("relink"), monkeypatch) == 0
+    assert "都是最新的" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------- 身份与状态

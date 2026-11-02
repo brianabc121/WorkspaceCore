@@ -348,8 +348,11 @@ class IntegrationService:
             if body.base_url != integration.base_url:
                 reset = True
             integration.base_url = body.base_url
+        relink = False
         if "public_url" in fields:
-            integration.public_url = body.public_url or integration.base_url
+            public_url = body.public_url or integration.base_url
+            relink = public_url != integration.public_url and integration.provider == "vikunja"
+            integration.public_url = public_url
         account = await repo.get_account(self.db, integration.id)
         if "api_token" in fields and body.api_token is not None:
             box = self.runtime.credentials()
@@ -377,6 +380,9 @@ class IntegrationService:
             elif integration.status == "disabled":
                 integration.status = "pending"  # 重新启用：需要再测试一次
         integration.version += 1
+        if relink:
+            # 已同步的“在 Vikunja 中打开”链接按新地址重写（T-0079）
+            await projection.relink(self.db, integration)
         await self.audit.record(
             "integration.updated",
             workspace_ids=[access.workspace.id],
@@ -390,6 +396,18 @@ class IntegrationService:
         await self.db.commit()
         await self.db.refresh(integration)
         return await self.out(integration)
+
+    async def relink(self, access: WorkspaceAccess, integration_id: uuid.UUID) -> int:
+        """按当前的浏览器地址刷新已同步的打开链接。
+
+        地址没变、链接却是旧的时用（例如 T-0079 之前改过地址）。
+        """
+        integration = await self._get(access, integration_id)
+        if integration.provider != "vikunja":
+            return 0
+        changed = await projection.relink(self.db, integration)
+        await self.db.commit()
+        return changed
 
     # ---------------------------------------------------------------- 测试连接
 

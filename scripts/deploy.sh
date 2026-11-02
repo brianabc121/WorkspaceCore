@@ -784,6 +784,8 @@ expose_apps() {
   fi
   if (( ! vikunja_changed && ! n8n_changed )); then
     info "对外访问设置没有变化"
+    # 顺带按当前地址刷新已同步的项目与任务链接（T-0079 之前改过地址的，链接还是旧的）；不改地址本身
+    if connected "$(status_of vikunja "$status")"; then connect_cmd relink </dev/null || true; fi
     return 0
   fi
   # 让新地址生效：重建 Vikunja / n8n（读取新的公开地址），校验后重启 Caddy，再更新工作台里的打开链接
