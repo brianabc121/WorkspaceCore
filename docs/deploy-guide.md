@@ -85,8 +85,25 @@ sudo bash scripts/deploy.sh connect
 - 已经接入的组件不会重复配置。GitHub 已接入时会问要不要换 Token 或仓库（例如权限检查没通过、重新生成了 Token）。
 - Vikunja 用户或 n8n owner 已经存在时，脚本改为询问它的密码。
 - 无人值守（`--yes`）时自动接入 Vikunja 和 n8n，跳过 GitHub。
-- Vikunja、n8n 的管理界面只绑定服务器本机，从自己的电脑访问用 SSH 隧道（第 8 节开头）。
+- 最后显示接入状态：「已接入」「未接入」，或者已保存但用不了的原因（凭证失效、暂时连不上等），以及 Vikunja、n8n 的打开地址。
 - 依据和实测记录见 [`decisions/2026-11-02-deploy-connect.md`](decisions/2026-11-02-deploy-connect.md)。
+
+#### 用子域名打开 Vikunja 和 n8n（可选）
+
+默认 Vikunja、n8n 的管理界面只绑定服务器本机，工作台里「在 Vikunja 中打开」「打开 n8n 编辑器」指向 `http://localhost:…`，
+要先建 SSH 隧道（第 8 节开头）才能打开。启用了域名与 HTTPS 时，`connect` 最后会问要不要用子域名对外打开：
+
+1. 先在域名服务商那里加两条 A 记录，指向这台服务器，例如 `vikunja.workspace.example.com`、`n8n.workspace.example.com`；
+2. 运行 `sudo bash scripts/deploy.sh connect`，问到「用子域名经 HTTPS 对外打开 Vikunja / n8n？」时回答 `y`，
+   域名直接回车用建议值（`vikunja.<SITE_DOMAIN>`、`n8n.<SITE_DOMAIN>`）或输入自己的。
+
+脚本会：在 `infra/caddy/apps-enabled/` 生成 Caddy 站点（自动申请证书，转发到容器）；把 `.env` 的 `VIKUNJA_DOMAIN`、
+`VIKUNJA_PUBLIC_URL`、`N8N_DOMAIN`、`N8N_PUBLIC_URL` 改成新地址，n8n 同时设 `N8N_SECURE_COOKIE=true`、`N8N_PROXY_HOPS=1`；
+重启 Vikunja、n8n 与 Caddy（先校验配置，不通过就撤销，工作台不受影响）；更新工作台里的打开链接；最后检查 HTTPS。
+
+- 公开后两者的登录页都暴露在公网。n8n 的 owner 能编辑和运行工作流，权限很大：用脚本生成的随机密码或同样强的密码，
+  在 n8n 设置里开启两步验证；不需要时再运行 `connect`，在域名提示处输入 `-` 取消对外。
+- 已经公开的，再运行 `connect` 时回车保持原样；无人值守（`--yes`）时沿用 `.env` 里的设置。
 
 已经有代码时，在代码目录里直接运行，也可以直接指定动作：
 

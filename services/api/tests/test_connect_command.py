@@ -221,7 +221,7 @@ async def test_vikunja_creates_least_privilege_token_and_connects(
     code = await call(world, connect.cmd_vikunja, namespace, monkeypatch, VIKUNJA_PASSWORD + "\n")
     assert code == 0
     assert len(world.provisioning.token_requests) == 1
-    assert "已接入 Vikunja" in capsys.readouterr().out
+    assert "已有 Vikunja 集成（已接入）" in capsys.readouterr().out
 
 
 async def test_vikunja_wrong_password_leaves_nothing(
@@ -305,7 +305,7 @@ async def test_github_failure_can_be_retried_with_a_new_token(
     # 不加 --replace：已有集成，跳过
     namespace = args("github", "--repos", "octo/app,octo/docs")
     assert await call(world, connect.cmd_github, namespace, monkeypatch, GITHUB_TOKEN + "\n") == 0
-    assert "已接入 GitHub" in capsys.readouterr().out
+    assert "已有 GitHub 集成" in capsys.readouterr().out
 
     # 重新生成了 Token：加 --replace 再运行，替换已保存的集成并重新检查
     world.github.forbidden.clear()
@@ -377,7 +377,7 @@ async def test_n8n_sets_up_owner_key_and_credential(
     code = await call(world, connect.cmd_n8n, namespace, monkeypatch, N8N_PASSWORD + "\n")
     assert code == 0
     assert len(world.provisioning.n8n_keys) == 1
-    assert "已接入 n8n" in capsys.readouterr().out
+    assert "已有 n8n 连接（已接入）" in capsys.readouterr().out
 
 
 async def test_n8n_owner_probe(
@@ -415,6 +415,45 @@ async def test_n8n_key_with_unexpected_scopes_is_not_saved(
     assert raised.value.reason == "scope_mismatch"
     connection = await world.env.get("/api/v1/automations/connection")
     assert connection["configured"] is False
+
+
+async def test_public_urls_update_the_saved_open_links(
+    world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    namespace = args("public-urls", "--vikunja", "https://vikunja.example.com")
+    await call(world, connect.cmd_public_urls, namespace, monkeypatch)
+    assert "还没有 Vikunja 集成" in capsys.readouterr().out
+
+    await world.env.connect()
+    n8n = args("n8n", "--owner-email", N8N_OWNER, "--base-url", N8N_URL)
+    assert await call(world, connect.cmd_n8n, n8n, monkeypatch, N8N_PASSWORD + "\n") == 0
+    capsys.readouterr()
+    namespace = args(
+        "public-urls",
+        "--vikunja",
+        "https://vikunja.example.com",
+        "--n8n",
+        "https://n8n.example.com",
+    )
+    assert await call(world, connect.cmd_public_urls, namespace, monkeypatch) == 0
+    assert "改为 https://vikunja.example.com" in capsys.readouterr().out
+    integration = await world.env.integration()
+    assert integration["public_url"] == "https://vikunja.example.com"
+    assert integration["status"] == "active"  # 只改打开地址，不需要重新测试连接
+    connection = await world.env.get("/api/v1/automations/connection")
+    assert connection["public_url"] == "https://n8n.example.com"
+    assert connection["status"] == "active"
+    assert (await audit_actions(world)).count("integration.updated") == 1
+
+    # 再运行一次：地址没变，不写入
+    await call(world, connect.cmd_public_urls, namespace, monkeypatch)
+    assert "已经是" in capsys.readouterr().out
+    assert (await audit_actions(world)).count("integration.updated") == 1
+
+    with pytest.raises(connect.Usage):
+        await call(
+            world, connect.cmd_public_urls, args("public-urls", "--vikunja", "ftp://x"), monkeypatch
+        )
 
 
 # ---------------------------------------------------------------- 身份与状态

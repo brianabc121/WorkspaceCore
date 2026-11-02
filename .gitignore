@@ -17,6 +17,9 @@ coverage/
 .env.*
 !.env.example
 
+# deploy.sh connect 生成的 Vikunja / n8n 对外站点（含本机的域名，不提交）
+infra/caddy/apps-enabled/*.caddy
+
 # 本地数据与备份
 *.sqlite3
 *.db
