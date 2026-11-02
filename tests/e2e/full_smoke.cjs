@@ -216,7 +216,9 @@ async function api(page, workspace, method, pathname, body) {
 
     // ---------------------------------------------------------------- 6. 登出
     progress.last = '登出'
-    await page.getByRole('button', { name: '登出' }).click()
+    // 登出在侧栏底部的账户菜单里（T-0083）
+    await page.getByRole('button', { name: '账户菜单' }).click()
+    await page.getByRole('menuitem', { name: '登出' }).click()
     await page.waitForURL(/\/login/)
     const out = await api(page, null, 'GET', '/api/v1/me')
     check(out.status === 401, `登出后 /api/v1/me 应为 401，实际 ${out.status}`)

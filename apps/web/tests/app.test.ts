@@ -1,4 +1,4 @@
-import { screen, fireEvent } from '@testing-library/vue'
+import { screen, fireEvent, within } from '@testing-library/vue'
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { mockApi, openApp, workspace } from './helpers'
 
@@ -20,7 +20,7 @@ describe('工程骨架', () => {
     for (const [href, name] of pages) {
       expect(nav.querySelector(`a[href="${href}"]`)).toHaveTextContent(name!)
     }
-    expect(screen.getByText(workspace.name, { selector: '.eyebrow' })).toBeVisible()
+    expect(screen.getByText(workspace.name, { selector: '.workspace-name' })).toBeVisible()
   })
   it('navigates without reloading and closes the mobile menu', async () => {
     const { router } = await open()
@@ -41,6 +41,35 @@ describe('工程骨架', () => {
     await fireEvent.keyDown(link, { key: 'Escape' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(toggle).toHaveFocus()
+  })
+  it('collapses the 管理 group by default and remembers each group', async () => {
+    const first = await open()
+    const manage = screen.getByRole('button', { name: '管理' })
+    expect(manage).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('link', { name: '安全设置' })).not.toBeInTheDocument()
+    await fireEvent.click(manage)
+    expect(manage).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('link', { name: '安全设置' })).toBeVisible()
+    await fireEvent.click(screen.getByRole('button', { name: '工作空间' }))
+    expect(screen.queryByRole('link', { name: '任务' })).not.toBeInTheDocument()
+    first.unmount()
+    await open('/settings')
+    expect(screen.getByRole('button', { name: '管理' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: '工作空间' })).toHaveAttribute('aria-expanded', 'false')
+  })
+  it('opens the group of the current page', async () => {
+    await open('/settings/security')
+    expect(screen.getByRole('button', { name: '管理' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('link', { name: '安全设置' })).toHaveClass('is-active')
+  })
+  it('shows the account menu with settings and logout', async () => {
+    const { router } = await open()
+    expect(screen.getByText('测试用户', { selector: '.user-label' })).toBeVisible()
+    await fireEvent.keyDown(screen.getByRole('button', { name: '账户菜单' }), { key: 'Enter' })
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual(['个人设置', '安全设置', '登出'])
+    await fireEvent.click(within(menu).getByRole('menuitem', { name: '安全设置' }))
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/settings/security'))
   })
   it('shows an explicit not-found page', async () => {
     await open('/missing')

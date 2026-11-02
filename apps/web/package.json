@@ -22,6 +22,7 @@
     "test:browser:sprint5": "node tests/browser-sprint5.cjs"
   },
   "dependencies": {
+    "@lucide/vue": "1.60.0",
     "@tanstack/vue-query": "5.105.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",

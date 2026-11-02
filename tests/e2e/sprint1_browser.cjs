@@ -28,6 +28,12 @@ async function login(page) {
   await page.getByRole('button', { name: '登录' }).click()
 }
 
+// 登出在侧栏底部的账户菜单里（T-0083）
+async function logout(page) {
+  await page.getByRole('button', { name: '账户菜单' }).click()
+  await page.getByRole('menuitem', { name: '登出' }).click()
+}
+
 ;(async () => {
   const browser = await chromium.launch()
   const laptop = await (await browser.newContext()).newPage()
@@ -50,9 +56,9 @@ async function login(page) {
   await laptop.getByRole('button', { name: '创建工作空间' }).click()
   await laptop.waitForURL(`${base}/`)
   await laptop.getByText(owner.name).first().waitFor()
-  step('首次安装完成，进入首页，顶栏显示管理员')
+  step('首次安装完成，进入首页，侧栏账户区域显示管理员')
 
-  await laptop.getByRole('button', { name: '登出' }).click()
+  await logout(laptop)
   await laptop.waitForURL(/\/login/)
   await laptop.goto(`${base}/settings`)
   await laptop.waitForURL(/\/login\?redirect=/)
@@ -124,7 +130,7 @@ async function login(page) {
   }
   step(`审计日志显示 ${actions.length} 条记录（含撤销会话、修改设置、首次安装、成员的加入 / 改角色 / 移出）`)
 
-  await laptop.getByRole('button', { name: '登出' }).click()
+  await logout(laptop)
   await laptop.waitForURL(/\/login/)
   await laptop.goto(`${base}/settings/audit`)
   await laptop.waitForURL(/\/login\?redirect=/)

@@ -1,0 +1,56 @@
+# 2026-11-02 界面外框重做：图标、侧栏分组、精简顶栏、账户菜单（T-0083）
+
+- 状态：accepted（人类 2026-11-02 在对话中要求“重新优化整个工作台的 UI 以及功能”；方案与细节由 claude 决定）
+- 关联：`apps/web/src/App.vue`、`apps/web/src/style.css`、`apps/web/src/app/navIcons.ts`、
+  `apps/web/src/components/AccountMenu.vue`、`apps/web/src/composables/useCollapsedSections.ts`、`apps/web/src/features/time.ts`
+- 延续：`2026-11-01-shadcn-vue-and-drawer.md`（颜色令牌映射、reka-ui 组件）
+
+## 1. 背景
+
+界面审查（亮 / 暗 / 390px 截图）发现的外框问题：
+
+| 问题 | 现象 |
+|---|---|
+| 顶栏拥挤 | 9 个文字按钮（搜索、创建、消息、待审批、通知全文、AI 助手、工作空间、用户名、主题、登出），手机上折成 3 行 |
+| 侧栏没有图标 | 15 个入口只有同样的小方块占位，“管理”类入口和日常入口一样显眼 |
+| 页头太高 | 工作空间名（与顶栏重复）+ 大标题 + 说明，约 200px |
+| 时间格式 | `toLocaleString()`：浏览器语言决定格式，常见“10/30/2026, 2:05:09 PM”，带秒 |
+
+UI 优化分四批，每批一个任务：本批（T-0083）只改外框；
+第 2 批任务与项目（勾选完成、快速添加、今天 / 逾期视图、看板拖动、项目进度），
+第 3 批首页与日历月视图，第 4 批手机底部导航与无障碍复查。
+
+## 2. 决定
+
+1. **图标库 `@lucide/vue` 1.60.0**（ISC 许可，`package.json` 精确版本）。
+   - 来源：npm 仓库 <https://www.npmjs.com/package/@lucide/vue>，源码 <https://github.com/lucide-icons/lucide>；
+     1.60.0 发布于 2026-10-20，只依赖 `vue >= 3.0.1`，没有其他运行时依赖。
+   - 没有用 `lucide-vue-next`：npm 上整个包已标记弃用（“Package deprecated. Please use @lucide/vue instead.”）。
+   - 按名字导入（`import { Bell } from '@lucide/vue'`），构建时只打包用到的图标。所有图标 `aria-hidden`，按钮的名字由文字或 `aria-label` 给出。
+2. **设计令牌**：沿用原来的变量名（`--bg`、`--surface`、`--text`、`--muted`、`--line`、`--accent`…），
+   新增 `--surface-2`（悬停底色）、`--accent-text`、`--success` / `--warning`（含 `-soft`）、`--radius-*`、`--sidebar-width`、`--topbar-height`，亮暗两套。
+   正文字号与原来一致；`h1` 从 1.85rem 降到 1.45rem，页头说明行 0.86rem。
+3. **侧栏**：品牌 → 工作空间（多个时是下拉框，名字仍是“当前工作空间”）→ 分组导航 → 账户。
+   - 每个入口一个图标（`navIcons.ts`）。
+   - 分组标题是按钮（`aria-expanded` / `aria-controls`），可以折叠；状态记在浏览器 `localStorage` 的 `workspace-nav-collapsed`，
+     第一次只折叠“管理”。打开某一页时自动展开它所在的分组。存储不可用时只在内存里记住。
+   - 底部账户区：头像（显示名首字）、显示名、中文角色；点开是“个人设置 / 安全设置 / 登出”菜单（reka-ui DropdownMenu）。
+     主题切换是旁边的图标按钮；未登录时（登录页）主题按钮在顶栏。
+   - 手机上侧栏仍然是“切换导航”打开的侧滑面板，入口最小高度 40px。
+4. **顶栏**：左边是“分组 / 页面名”，右边是搜索框（宽屏显示“搜索”和 `Ctrl K`）、创建（主色按钮）、消息、待审批、通知、AI 助手。
+   - 消息、待审批、通知改成图标 + 数字角标；可访问名称保持不变（“消息，N 条未读”“N 项待审批”“通知，N 条未读”“AI 助手 / 收起 AI 助手”“创建”），
+     现有测试和读屏用法不受影响。
+   - 手机上只显示图标，文字用视觉隐藏保留给读屏软件；顶栏保持一行。
+   - 顶栏 `position: sticky`（滚动时留在顶部）。sticky 会形成层叠上下文，顶栏里的搜索框和通知中心是 `position: fixed` 的弹窗，
+     所以用 `<Teleport to="body">` 挂到 body 下，否则会被限制在顶栏的层级里（改动前的浏览器测试 `browser-sprint5.cjs` 发现了这个问题）。
+5. **页面主体**：去掉每页顶部重复的工作空间名（`.eyebrow`），工作空间名只在侧栏显示；主体内边距 28px / 32px（手机 20px / 16px）。
+6. **时间格式**：`formatTime()` 统一为中文 24 小时制到分钟（`Intl.DateTimeFormat('zh-CN')`，例 `2026/11/02 14:05`），
+   用浏览器所在时区；精确时间仍在 `<time datetime>` 里。日历已经按浏览器时区显示（`features/calendar/time.ts`），不变。
+
+## 3. 测试
+
+- 单元测试：`app.test.ts` 增加分组折叠与记忆、打开页面时展开所在分组、账户菜单；
+  `auth.test.ts` 先展开“管理”再找“审计日志”；`isolation.test.ts` 从账户菜单登出。
+- 全栈浏览器验收：`tests/e2e/sprint1_browser.cjs`、`tests/e2e/full_smoke.cjs` 改为从账户菜单登出（`账户菜单` → `登出`）。
+- 截图：模拟接口下的亮 / 暗 / 390px 截图（没有横向滚动、没有页面错误）；`apps/web/docs/screenshots` 里 `browser-tasks.cjs`、
+  `browser-sprint5.cjs` 生成的截图已更新。
