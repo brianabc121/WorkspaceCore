@@ -40,6 +40,7 @@ describe('认证与工作空间', () => {
   it('switches workspace context and hides audit navigation for a viewer', async () => {
     mockApi((request) => new URL(request.url).pathname === '/api/v1/me' ? Response.json({ ...me, workspaces: [...me.workspaces, { ...me.workspaces[0], id: 'workspace-b', name: '只读空间', role: 'viewer' }] }) : undefined)
     const { pinia } = await openApp()
+    await fireEvent.click(screen.getByRole('button', { name: '管理' }))
     expect(screen.getByRole('link', { name: '审计日志' })).toBeVisible()
     await fireEvent.update(screen.getByLabelText('当前工作空间'), 'workspace-b')
     expect(useAuthStore(pinia).workspaceId).toBe('workspace-b')

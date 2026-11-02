@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, type ComponentPublicInstance } from 'vue'
 import { useRouter } from 'vue-router'
+import { Plus } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
 import { createGroups } from '../app/create'
 import { CREATE_QUERY } from '../composables/useCreateIntent'
@@ -28,7 +29,7 @@ function afterClose(event: Event) {
 
 <template>
   <DropdownMenu v-if="groups.length">
-    <DropdownMenuTrigger ref="trigger" class="theme-button"><span aria-hidden="true">＋ </span>创建</DropdownMenuTrigger>
+    <DropdownMenuTrigger ref="trigger" class="create-trigger"><Plus aria-hidden="true" /><span class="topbar-label">创建</span></DropdownMenuTrigger>
     <DropdownMenuContent align="end" :collision-padding="8" class="w-60" @close-auto-focus="afterClose">
       <template v-for="(group, index) in groups" :key="group.label">
         <DropdownMenuSeparator v-if="index" />
