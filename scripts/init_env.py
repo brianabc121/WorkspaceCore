@@ -14,6 +14,11 @@
 用法：python3 scripts/init_env.py   （make env / make up 会自动调用）
 """
 
+# 让类型标注不在运行时求值：Debian 11 自带 Python 3.9，
+# 不支持 tuple[str, str] | None 这种写法（需要 3.10），没有这一行时 make env 会报 TypeError
+# （人类部署时实际遇到）。最低要求 Python 3.8（用到了 :=）。
+from __future__ import annotations
+
 import re
 import secrets
 import sys

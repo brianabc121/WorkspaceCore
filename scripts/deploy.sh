@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # My Workspace 一键部署 / 升级 / 清空（T-0072）。
 #
-# 一条命令（在全新服务器上以 root 运行；会把代码放到 /srv/my-workspace）：
-#   curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | sudo bash
+# 一条命令（在全新服务器上运行；会把代码放到 /srv/my-workspace）。root 登录时：
+#   curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | bash
+# 普通用户把最后的 bash 换成 sudo bash（Debian 最小安装的 root 没有 sudo，不要加）。
 # 已有代码时：
 #   sudo bash scripts/deploy.sh [install|upgrade|reset|status] [选项]
 #
@@ -105,7 +106,9 @@ ensure_tools() {
     as_root apt-get update -qq
     as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git make python3 curl ca-certificates >/dev/null
   fi
-  ok "工具齐全"
+  python3 -c 'import sys; sys.exit(sys.version_info < (3, 8))' \
+    || die "需要 Python 3.8 或更新版本（当前 $(python3 --version 2>&1)）；Debian 11 自带的 3.9 可以用"
+  ok "工具齐全（$(python3 --version 2>&1)）"
 }
 
 ensure_docker() {
@@ -211,7 +214,7 @@ ask_parameters() {
 check_dns() {
   step "检查域名解析"
   local resolved local_ips
-  resolved="$(getent ahosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+  resolved="$( (getent ahosts "$DOMAIN" 2>/dev/null || true) | awk '{print $1}' | sort -u | tr '\n' ' ')"
   if [[ -z $resolved ]]; then
     warn "$DOMAIN 还没有解析。先在域名服务商那里加 A 记录指向本机公网 IP，否则证书申请会失败"
     confirm "仍然继续？（服务能启动，证书等解析生效后会自动申请）" n || die "请先配置 DNS"
@@ -220,7 +223,7 @@ check_dns() {
   local_ips="$(hostname -I 2>/dev/null || true)"
   local ip match=0 outbound
   for ip in $resolved; do [[ " $local_ips " == *" $ip "* ]] && match=1; done
-  outbound="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
+  outbound="$( (ip -4 route get 1.1.1.1 2>/dev/null || true) | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
   if (( match )); then ok "$DOMAIN → $resolved（是本机地址）"
   else
     warn "$DOMAIN → $resolved，本机出口地址是 ${outbound:-（未知）}"
@@ -442,7 +445,11 @@ do_reset() {
   step "清空项目"
   local projects=() name
   for name in "$PROJECT" "${OPTIONAL_PROJECTS[@]}"; do project_exists "$name" && projects+=("$name"); done
-  if ((${#projects[@]} == 0)); then ok "没有找到本项目的容器与数据卷"; else
+  if ((${#projects[@]} == 0)) && [[ $ENV_CHOICE != --delete-env ]]; then
+    ok "没有找到本项目的容器与数据卷，不需要清空"
+    return 0
+  fi
+  if ((${#projects[@]})); then
     warn "将删除下面这些 Compose 项目的全部容器、网络与数据卷（数据库、证书等，无法恢复）："
     for name in "${projects[@]}"; do
       info "$name：$(docker volume ls -q --filter "label=com.docker.compose.project=$name" | tr '\n' ' ')"
@@ -528,7 +535,7 @@ parse_args() {
       --confirm) CONFIRM="${2:?}"; shift ;;
       --keep-env|--delete-env) ENV_CHOICE="$1" ;;
       --after-pull) AFTER_PULL="${2:?}"; shift ;;
-      -h|--help) sed -n '2,22p' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null || echo "用法见 docs/deploy-guide.md"; exit 0 ;;
+      -h|--help) awk 'NR > 1 && /^#/ {sub(/^# ?/, ""); print; next} NR > 1 {exit}' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null || echo "用法见 docs/deploy-guide.md"; exit 0 ;;
       *) die "未知参数：$1（--help 查看用法）" ;;
     esac
     shift

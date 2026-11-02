@@ -10,11 +10,20 @@
 
 ## 一键脚本（推荐）
 
-在一台新的 Debian / Ubuntu 服务器上，用 root（或 sudo）运行这一条命令：
+在一台新的 Debian / Ubuntu 服务器上运行这一条命令。以 root 登录时（提示符是 `root@…#`）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | bash
+```
+
+用有 sudo 权限的普通用户时：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | sudo bash
 ```
+
+> Debian 最小安装通常**没有 sudo**：root 用户运行带 `sudo` 的命令会报 `sudo: command not found`，
+> 管道里的 `curl` 随之报 `curl: (23) Failure writing output to destination`。以 root 登录时把 `sudo` 去掉即可。
 
 脚本会把代码放到 `/srv/my-workspace`，然后显示菜单：
 
@@ -35,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 
 其余的都自动完成，并处理了部署时常见的坑：
 
-- 缺 git / make / python3 / curl 时用 apt 安装；没有 Docker 时用官方脚本安装（都会先问）；
+- 缺 git / make / python3 / curl 时用 apt 安装；没有 Docker 时用官方脚本安装（都会先问）；Python 3.8 及以上即可（Debian 11 自带的 3.9 可以用，不需要为此升级系统）；
 - `.env` 不存在就随机生成；是从 `.env.example` 复制来的（还有占位符）时，备份后重新生成；
 - 写入 `APP_ENV=production`、`COMPOSE_FILE=compose.yaml:compose.https.yaml`、域名、邮箱与 `PUBLIC_BASE_URL`；
 - 检查域名解析、80 / 443 是否被占用（例如 nginx）、ufw 是否放行；
@@ -87,12 +96,13 @@ sudo bash scripts/deploy.sh install --domain workspace.example.com --email you@e
 OpenIM 一套约 1 GiB（手册第 18.1 节）。
 
 > 不建议直接用 root 日常操作。下面的命令用一个有 sudo 权限的普通用户执行，代码放在 `/srv/my-workspace`。
+> 如果你以 root 登录、系统又没有 sudo（Debian 最小安装常见，会报 `sudo: command not found`），把命令里的 `sudo` 去掉即可。
 
 ---
 
 ## 2. 安装 Docker 与工具
 
-需要：Docker（含 Compose v2 插件）、GNU Make、Python 3（只用来生成 `.env`）、Git。
+需要：Docker（含 Compose v2 插件）、GNU Make、Python 3.8 及以上（只用来生成 `.env`；Debian 11 的 3.9、Ubuntu 20.04 的 3.8 都可以）、Git。
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git make python3 curl
@@ -177,7 +187,9 @@ make env
 getent hosts workspace.example.com
 ```
 
-**5.2 打开防火墙**：放行 80（申请证书、HTTP 跳转 HTTPS）和 443。以 ufw 为例（别忘了先放行 SSH）：
+**5.2 打开防火墙**：放行 80（申请证书、HTTP 跳转 HTTPS）和 443。以 ufw 为例（别忘了先放行 SSH）。
+Debian 默认没有装 ufw（`ufw: command not found`），也没有启用别的防火墙，这时只要云控制台的安全组放行即可；
+想用 ufw 就先 `sudo apt-get install -y ufw`，再执行下面的命令，**一定先放行 SSH 再 enable**，否则会把自己锁在外面：
 
 ```bash
 sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443 && sudo ufw enable

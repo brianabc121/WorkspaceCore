@@ -5,7 +5,7 @@ owner: claude
 status: in_progress
 priority: P1
 branch: claude/cool-wright-99qbbg
-paths: scripts/deploy.sh,docs/deploy-guide.md,docs/deployment.md,README.md
+paths: scripts/deploy.sh,scripts/init_env.py,services/api/tests/test_init_env.py,docs/deploy-guide.md,docs/deployment.md,README.md
 depends_on:
 created: 2026-11-02
 updated: 2026-11-02
@@ -34,3 +34,4 @@ updated: 2026-11-02
 - 2026-11-02 02:40 UTC · claude · 创建任务（owner: claude）
 - 2026-11-02 02:40 UTC · claude · 开始任务
 - 2026-11-02 02:40 UTC · claude · 人类在对话中要求：写一个自动化脚本，一条命令完成部署 / 清空 / 升级，运行前只按提示输入 SITE_DOMAIN、ACME_EMAIL、PUBLIC_BASE_URL；吸收这次部署踩过的坑（占位符 .env、数据库密码不一致、curl -I 405 等）。Gemini 对话链接因网络策略读不到，等人类粘贴
+- 2026-11-02 02:58 UTC · claude · 读了人类与 Gemini 的对话（PDF）：root 无 sudo、Debian 11 Python 3.9 下 init_env.py 报 TypeError（被迫升级系统）、Debian 无 ufw、cp .env.example、重复 clone。修：init_env.py 加 from __future__ import annotations（3.8/3.9 实测修复前报错、修复后通过）+ 回归测试；脚本检查 Python≥3.8、getent/ip 缺失不中断、清空无内容时直接结束；文档写明 root 去掉 sudo、Debian 无 ufw

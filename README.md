@@ -82,10 +82,11 @@ make smoke     # 检查健康、就绪、前端页面与安全响应头
 
 ## 部署到服务器
 
-一条命令部署（Debian / Ubuntu，root 运行；只问域名、证书邮箱与访问地址三个参数，之后同一脚本可以升级、清空、查看状态）：
+一条命令部署（Debian / Ubuntu；只问域名、证书邮箱与访问地址三个参数，之后同一脚本可以升级、清空、查看状态）。
+以 root 登录时运行下面的命令；普通用户把最后的 `bash` 换成 `sudo bash`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | bash
 ```
 
 按步骤的教程：**[`docs/deploy-guide.md`](docs/deploy-guide.md)**——准备服务器、安装 Docker、生成 `.env`、域名与自动 HTTPS、
