@@ -79,6 +79,29 @@ describe('im page', () => {
     expect(await within(chat).findByText('第 4 条')).toBeVisible()
     expect(within(chat).getAllByText('我').length).toBeGreaterThan(0)
   })
+  it('shows a sent message once while the server still lists it as sending', async () => {
+    // The send endpoint first stores a "sending" row (client_msg_id myws-<Idempotency-Key>, no server_msg_id) and
+    // pushes an event, so the list can refetch before the send returns; the sent copy has OpenIM's IDs.
+    let key: string | null = null
+    setup(r => {
+      if (path(r).endsWith('/messages') && r.method === 'POST') {
+        key = r.headers.get('Idempotency-Key')
+        return Response.json(message(4, { sender_im_id: self, client_msg_id: 'openim-4' }), { status: 202 })
+      }
+      if (path(r).endsWith('/messages') && r.method === 'GET' && key) {
+        const sending = message(4, { sender_im_id: self, server_msg_id: null, client_msg_id: `myws-${key}`, seq: null, status: 'sending' })
+        return Response.json({ items: [sending, message(3), message(2), message(1)], next_cursor: null, total_estimate: 4 })
+      }
+    })
+    await openApp('/im?c=si_alpha')
+    const chat = await screen.findByRole('region', { name: '与甲的会话' })
+    await fireEvent.update(within(chat).getByLabelText('消息'), '在吗')
+    await fireEvent.click(within(chat).getByRole('button', { name: '发送' }))
+    await vi.waitFor(() => expect(within(chat).getByLabelText('消息')).toHaveValue(''))
+    expect(await within(chat).findByText('第 4 条')).toBeVisible()
+    expect(within(chat).getAllByText('第 4 条')).toHaveLength(1)
+    expect((await within(chat).findAllByText(/第 \d 条/)).map(n => n.textContent)).toEqual(['第 1 条', '第 2 条', '第 3 条', '第 4 条'])
+  })
   it('exports a conversation as an NDJSON download', async () => {
     const created = vi.fn(() => 'blob:export'), click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
     vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: created, revokeObjectURL: () => undefined }))
