@@ -44,7 +44,9 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 
 其余的都自动完成，并处理了部署时常见的坑：
 
-- 缺 git / make / python3 / curl 时用 apt 安装；没有 Docker 时用官方脚本安装（都会先问）；Python 3.8 及以上即可（Debian 11 自带的 3.9 可以用，不需要为此升级系统）；
+- 缺 git / make / curl 时用 apt 安装；没有 Docker 时用官方脚本安装（都会先问）；
+- 没有 Python 3.12 时安装官方独立构建（python-build-standalone 3.12.16，校验 SHA-256）到 `/opt/my-workspace/`，命令是 `python3.12`。
+  项目脚本（生成 `.env`、备份）都用它，与 CI、api 镜像同一个版本；**系统自带的 `python3` 不替换**（apt 等系统工具依赖它），不需要为此升级系统；
 - `.env` 不存在就随机生成；是从 `.env.example` 复制来的（还有占位符）时，备份后重新生成；
   重新生成时如果找到之前留下的 `.env` 副本，沿用其中的 `BACKUP_PASSWORD`（之前的备份用它加密，换了密码就打不开）；
 - 写入 `APP_ENV=production`、`COMPOSE_FILE=compose.yaml:compose.https.yaml`、域名、邮箱与 `PUBLIC_BASE_URL`；
@@ -103,7 +105,8 @@ OpenIM 一套约 1 GiB（手册第 18.1 节）。
 
 ## 2. 安装 Docker 与工具
 
-需要：Docker（含 Compose v2 插件）、GNU Make、Python 3.8 及以上（只用来生成 `.env`；Debian 11 的 3.9、Ubuntu 20.04 的 3.8 都可以）、Git。
+需要：Docker（含 Compose v2 插件）、GNU Make、Git、Python 3。Python 只用来运行仓库脚本（生成 `.env`、备份）：
+`make` 优先用 `python3.12`（与 CI、api 镜像一致；一键脚本会自动安装），没有时用系统的 `python3`（3.8 及以上即可）。
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git make python3 curl
@@ -120,7 +123,7 @@ sudo usermod -aG docker "$USER"
 执行完 `usermod` 后**重新登录一次**，让 docker 组生效。确认版本：
 
 ```bash
-docker version && docker compose version && make --version | head -1 && python3 --version
+docker version && docker compose version && make --version | head -1 && (python3.12 --version || python3 --version)
 ```
 
 `docker compose version` 要能输出 v2.x；如果提示没有 `compose` 子命令，说明缺少 Compose 插件，按 Docker 官方文档为你的发行版安装 `docker-compose-plugin`。
@@ -489,6 +492,9 @@ make up && make smoke
   - `docker compose logs caddy` 里看 Let's Encrypt 的报错。Let's Encrypt 对失败次数有限制，排查清楚再重试。
 - **`make up` 时提示 `required variable SITE_DOMAIN is missing a value`**：启用了 `compose.https.yaml`，但 `SITE_DOMAIN` 或 `ACME_EMAIL` 没填。
 - **`make up` 一直在等健康检查**：`make logs` 看是哪个服务起不来；`docker compose ps -a` 看退出码。
+- **一键脚本装好 Python 3.12 后，`python3 --version` 还是 3.9 / 3.11**：正常。脚本不替换系统自带的 `python3`（apt 等系统工具依赖它），
+  3.12 是另装的，命令是 `python3.12`（`/usr/local/bin/python3.12` → `/opt/my-workspace/python-3.12.16`），`make` 与备份脚本会优先用它。
+  不要用 `update-alternatives` 或改链接的方式把 `python3` 指向 3.12。清空项目不会删除它；不需要时删除 `/usr/local/bin/python3.12` 与 `/opt/my-workspace/` 即可。
 - **`make env` / `make up` 提示“`.env` 有问题……占位符”**，或者 api 起不来、`docker compose logs api` 里是
   `CREDENTIAL_ENCRYPTION_KEY 必须是 64 位十六进制`：`.env` 不是 `make env` 生成的（多半是从 `.env.example` 复制的），或者密钥被改坏了。
   - 全新安装、还没有任何数据：重新生成。已经 `make up` 过的，PostgreSQL 数据卷已经用占位符密码初始化：重新生成后按下面“改了 `.env` 里的数据库密码后连不上”同步密码；或者连同刚建的空数据卷一起删掉

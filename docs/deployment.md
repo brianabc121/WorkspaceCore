@@ -12,7 +12,7 @@
 
 ## 1. 一键启动（推荐）
 
-前提：Docker（含 Compose v2）、GNU Make、Python 3（只用来生成 `.env`）。
+前提：Docker（含 Compose v2）、GNU Make、Python 3（只用来运行仓库脚本：生成 `.env`、备份；`make` 优先用 `python3.12`，一键脚本会另装 3.12，不替换系统的 `python3`，见 `docs/decisions/2026-11-02-host-python-3-12.md`）。
 
 ```bash
 make up        # 首次会自动生成 .env（随机密码），构建镜像并等待所有服务健康
