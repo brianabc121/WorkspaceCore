@@ -142,8 +142,8 @@
 - 遗留问题与下一步
 
 ### 最高优先级架构约束
-- Vikunja 是任务主源；AFFiNE V1 仅深链接与收藏，不猜测内容读写 API。
-- 工作台 Owns User/Workspace/Widget/Calendar/Mapping/Notification/Audit。
+- 项目与任务由工作台自己管理（人类 2026-11-02 决定移除 Vikunja，T-0082）；AFFiNE V1 仅深链接与收藏，不猜测内容读写 API。
+- 工作台 Owns User/Workspace/Project/Task/Widget/Calendar/Mapping/Notification/Audit。
 - 第三方服务故障可降级；Webhook Inbox + 周期对账双保险。
 - 核心 Compose 优先，n8n/AFFiNE/Monitoring 可选部署，生产禁止浮动 latest 镜像。
 

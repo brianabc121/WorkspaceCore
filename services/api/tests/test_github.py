@@ -7,19 +7,20 @@ tests/fake_github.py；验收场景 A13（Token 失效不无限重试）、A17�
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, cast
 
 import httpx
 import pytest
 
-from app.domain import sync
+from app.domain import sync, sync_lock
 from app.integrations.base import ConnectorError
 from app.integrations.github import GitHubClient, classify
 from app.integrations.http import ConnectorHttp, OutboundPolicy
+from app.jobs.queue import SYNC_INTEGRATION
 from tests.fake_github import BASE, TOKEN, FakeGitHub
 from tests.helpers import OWNER, ClientFactory, csrf, run_sql
-from tests.vikunja_support import CONNECTOR_SETTINGS, RecordingQueue, app_of, sync_context
+from tests.workspace_support import CONNECTOR_SETTINGS, RecordingQueue, app_of, sync_context
 
 SETTINGS = {**CONNECTOR_SETTINGS, "integration_allowed_hosts": "api.github.com"}
 
@@ -363,3 +364,72 @@ async def test_developer_pages_without_integration(env: Env) -> None:
         assert page["sync"]["status"] == "not_configured"
     overview = await env.client.get("/api/v1/dashboard/overview", headers=env.headers())
     assert overview.json()["modules"]["github"]["reason"] == "not_configured"
+
+
+# ---------------------------------------------------------------- Worker 作业
+# T-0082 之前在 tests/test_sync_worker.py（用 Vikunja 测）
+
+
+def test_retry_delay_grows_exponentially_with_jitter() -> None:
+    delays = [sync.retry_delay(n) for n in range(1, 9)]
+    assert timedelta(seconds=24) <= delays[0] <= timedelta(seconds=36)
+    assert timedelta(seconds=48) <= delays[1] <= timedelta(seconds=72)
+    assert all(d <= timedelta(hours=1, minutes=12) for d in delays)
+    assert sync.retry_delay(1, retry_after=600) >= timedelta(seconds=600)
+
+
+@pytest.mark.integration
+async def test_reconcile_skips_integrations_being_synced(env: Env) -> None:
+    integration = await env.create()
+    await env.test(integration)
+    ctx = sync_context(env.client)
+    integration_id = uuid.UUID(integration["id"])
+    owner = sync_lock.new_owner("test")
+    assert await sync_lock.acquire(ctx.redis, integration_id, owner)
+    assert await sync.reconcile_all(ctx) == 0
+    await sync_lock.release(ctx.redis, integration_id, owner)
+    assert await sync.reconcile_all(ctx) == 1
+
+
+@pytest.mark.integration
+async def test_manual_sync_job_runs_a_full_sync_and_releases_the_lock(env: Env) -> None:
+    integration = await env.create()
+    await env.test(integration)
+    path = f"/api/v1/integrations/{integration['id']}/sync"
+    assert (await env.client.post(path, headers=env.headers(write=True))).status_code == 202
+    jobs = cast(RecordingQueue, app_of(env.client).state.jobs).jobs
+    [(_, (integration_id, owner))] = [j for j in jobs if j[0] == SYNC_INTEGRATION]
+    # 全量同步才能发现的删除
+    env.fake.issues["octo/app"] = [i for i in env.fake.issues["octo/app"] if "pull_request" in i]
+    ctx = sync_context(env.client)
+    assert await sync.run_manual_sync(ctx, uuid.UUID(integration_id), owner) is True
+    assert (await env.get("issues"))["items"] == []
+    # 作业结束时释放了锁；另一个同步正在进行时，手动同步作业不运行
+    other = sync_lock.new_owner("cron")
+    assert await sync_lock.acquire(ctx.redis, uuid.UUID(integration_id), other)
+    assert await sync.run_manual_sync(ctx, uuid.UUID(integration_id), "manual:x") is False
+    await sync_lock.release(ctx.redis, uuid.UUID(integration_id), other)
+    assert (await env.client.post(path, headers=env.headers(write=True))).status_code == 202
+
+
+@pytest.mark.integration
+async def test_purge_removes_expired_idempotency_records(env: Env) -> None:
+    project = await env.client.post(
+        "/api/v1/projects", json={"title": "工作"}, headers=env.headers(write=True)
+    )
+    assert project.status_code == 201, project.text
+    created = await env.client.post(
+        "/api/v1/tasks",
+        json={"project_id": project.json()["id"], "title": "留下幂等记录"},
+        headers={**env.headers(write=True), "Idempotency-Key": str(uuid.uuid4())},
+    )
+    assert created.status_code == 201, created.text
+    assert await run_sql(env.database_url, "SELECT count(*) FROM workspace.idempotency_requests")
+    await run_sql(
+        env.database_url,
+        "UPDATE workspace.idempotency_requests SET expires_at = now() - interval '1 minute'",
+    )
+    await sync.purge(sync_context(env.client))
+    assert (
+        await run_sql(env.database_url, "SELECT count(*) FROM workspace.idempotency_requests") == 0
+    )

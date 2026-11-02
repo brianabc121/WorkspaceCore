@@ -1,4 +1,4 @@
-"""第三方集成：Vikunja（Sprint 3）与 GitHub（Sprint 4）的配置、测试连接与手动同步。
+"""第三方集成（GitHub，Sprint 4）的配置、测试连接与手动同步；Vikunja 已在 T-0082 移除。
 
 工作空间范围的资源，用 X-Workspace-Id 指定工作空间：viewer 可查看，admin 及以上可配置。
 Token 只写不读。约定见 docs/decisions/2026-10-30-sprint-3-tasks-contract.md 第 4 节与
@@ -22,7 +22,6 @@ from app.domain.integrations import IntegrationService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.common import Page, error_responses
 from app.schemas.integrations import (
-    AnyIntegrationCreate,
     GitHubIntegrationCreate,
     IntegrationOut,
     IntegrationTestResult,
@@ -55,28 +54,23 @@ async def list_integrations(access: Viewer, service: Service) -> Page[Integratio
 @router.post(
     "/integrations",
     status_code=status.HTTP_201_CREATED,
-    summary="新建 Vikunja 或 GitHub 集成（admin）",
-    description="请求体按 provider 区分。保存后状态为 pending，需要测试连接；"
-    "每个工作空间最多 1 个同类集成（第 2 个返回 409 LIMIT_EXCEEDED）。"
-    "Vikunja 的 base_url 解析到私有地址且不在部署允许列表里时返回 422；"
-    "GitHub 的地址固定为 api.github.com，只同步 repositories 中列出的仓库。",
+    summary="新建 GitHub 集成（admin）",
+    description="保存后状态为 pending，需要测试连接；每个工作空间最多 1 个"
+    "（第 2 个返回 409 LIMIT_EXCEEDED）。地址固定为 api.github.com，"
+    "只同步 repositories 中列出的仓库。",
     dependencies=_write,
     responses=_write_errors,
 )
 async def create_integration(
-    access: Admin, context: Context, service: Service, body: AnyIntegrationCreate
+    access: Admin, context: Context, service: Service, body: GitHubIntegrationCreate
 ) -> IntegrationOut:
-    if isinstance(body, GitHubIntegrationCreate):
-        return await service.create_github(context, access, body)
-    return await service.create(context, access, body)
+    return await service.create_github(context, access, body)
 
 
 @router.patch(
     "/integrations/{integration_id}",
     summary="修改集成（admin，乐观并发）",
-    description="version 不一致时返回 409 VERSION_CONFLICT；"
-    "改 base_url 或 api_token 后状态回到 pending。api_token 的前缀必须与集成的 provider 一致；"
-    "base_url / public_url 只用于 Vikunja，repositories 只用于 GitHub，不适用时返回 422。",
+    description="version 不一致时返回 409 VERSION_CONFLICT；改 api_token 后状态回到 pending。",
     dependencies=_write,
     responses=_write_errors,
 )

@@ -144,7 +144,7 @@ flowchart LR
 
 | 位置 | 内容 | 由谁维护 |
 |---|---|---|
-| 服务器 A | 现有工作台 Compose（不变）。另外新增：<br/>- **OpenIM 单独的 Compose 项目**（`infra/openim/compose.yaml`，做法和 `infra/vikunja/` 一样）；<br/>- Caddy 的两个接入入口 | claude 写配置，人类部署 |
+| 服务器 A | 现有工作台 Compose（不变）。另外新增：<br/>- **OpenIM 单独的 Compose 项目**（`infra/openim/compose.yaml`，做法和 `infra/n8n/` 一样）；<br/>- Caddy 的两个接入入口 | claude 写配置，人类部署 |
 | 各 OpenClaw 服务器 | OpenClaw（锁定 extended-stable 版本）、`openclaw-channel` 插件（锁定版本）、取密钥小程序；外网模式还有隧道小程序。参考配置放在 `infra/openclaw/` | claude 写参考配置和检查清单，人类部署 |
 
 **OpenIM 要部署的组件**：
@@ -232,7 +232,7 @@ OpenClaw 的 Vault、1Password 集成也是这样做的（`oc:plugins/vault.md`�
   - OpenIM 的消息回调（`afterSendSingleMsg`、`afterSendGroupMsg`）推到工作台；
   - 工作台写入收件箱和消息投影，再用现有 SSE 推到浏览器；
   - 回调可能丢（内存队列满了直接丢弃，不重试），所以定时用 `/msg/newest_seq` 和 `/msg/pull_msg_by_seq` 对账补齐。
-  - 这和 V1 对接 Vikunja 时“Webhook 收件箱加周期对账”是同一套做法。
+  - 这和 V1 对接 Vikunja 时“Webhook 收件箱加周期对账”是同一套做法（Vikunja 已于 T-0082 移除）。
 - **会话列表、未读数、置顶、免打扰、分组**：由工作台维护，需要时同步到 OpenIM。
 
 **为什么不在浏览器里直接用 OpenIM SDK**：
@@ -464,6 +464,6 @@ OpenClaw 的 Vault、1Password 集成也是这样做的（`oc:plugins/vault.md`�
 
 - 给 `openclaw-channel` 加令牌自动刷新：fork 并按 AGPL 公开，然后取消每周重启。
 - 文件消息：MinIO 经接入入口暴露，并加大小限制。
-- 编程任务：在 OpenClaw 服务器启用官方 Codex 插件（`oc:plugins/codex-harness.md`），工作台把 Vikunja 任务和 IM 会话关联起来。
+- 编程任务：在 OpenClaw 服务器启用官方 Codex 插件（`oc:plugins/codex-harness.md`），工作台把任务（T-0082 起由工作台自己管理）和 IM 会话关联起来。
 - Web Push 推送；高危审批改用 Passkey 二次认证。
 - 按工具配置“自动执行并记录”的审批策略。

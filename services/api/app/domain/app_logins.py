@@ -1,9 +1,11 @@
-"""Vikunja、n8n 管理界面的登录账号（T-0080，docs/decisions/2026-11-02-app-logins.md）。
+"""n8n 管理界面的登录账号（T-0080，docs/decisions/2026-11-02-app-logins.md）。
+
+T-0082 移除了 Vikunja，之后只有 n8n。
 
 - 只有 admin 以上能读写（路由层 workspace_admin；命令行先 require_role）。
 - 密码加密保存（CredentialBox，用途 `app_login:<id>:password`），列表接口只返回是否保存了密码；
   查看明文要单独调用 reveal，每次写审计 `app_login.revealed`。审计元数据只有应用名与改了哪些字段。
-- 工作台不去 Vikunja / n8n 校验密码：这里只是给管理员看的备忘，登录失败时在页面上改即可。
+- 工作台不去 n8n 校验密码：这里只是给管理员看的备忘，登录失败时在页面上改即可。
   `deploy.sh connect` 自动保存的密码都已经在接入时登录成功过。
 """
 
@@ -24,7 +26,6 @@ from app.domain.policy import WorkspaceAccess
 from app.models import AppLogin
 from app.models.app_login import APPS
 from app.repositories import automations as automation_repo
-from app.repositories import integrations as integration_repo
 from app.schemas.app_logins import (
     App,
     AppLoginList,
@@ -79,9 +80,6 @@ class AppLoginService:
         self.audit = AuditTrail(db, settings)
 
     async def _login_url(self, workspace_id: uuid.UUID, app: str) -> str | None:
-        if app == "vikunja":
-            integration = await integration_repo.get_provider(self.db, workspace_id, "vikunja")
-            return integration.public_url if integration else None
         connection = await automation_repo.get_connection(self.db, workspace_id)
         return connection.public_url if connection else None
 

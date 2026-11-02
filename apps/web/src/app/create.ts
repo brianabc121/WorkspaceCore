@@ -8,7 +8,8 @@ export interface CreateGroup { label: string; items: CreateItem[] }
 export function createGroups(role: Schema['WorkspaceOut']['role'] | undefined): CreateGroup[] {
   if (!role || role === 'viewer') return []
   const groups: CreateGroup[] = [{ label: '内容', items: [
-    { label: '新建任务', path: '/tasks', hint: 'Vikunja' },
+    { label: '新建任务', path: '/tasks', hint: '任务' },
+    { label: '新建项目', path: '/projects', hint: '项目' },
     { label: '新建日程', path: '/calendar', hint: '日历' },
     { label: '收藏文档', path: '/knowledge', hint: 'AFFiNE 链接' },
   ] }]

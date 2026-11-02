@@ -7,21 +7,21 @@
 
 | 组件 | 位置 | 当前状态 |
 |---|---|---|
-| API（FastAPI BFF） | `services/api/app/main.py` | 认证与会话、工作空间与角色、仪表盘与组件、任务（Vikunja）、知识库收藏与关联、日历、GitHub 只读视图、跨资源搜索、运维状态与指标、通知、SSE 事件流、n8n 白名单触发、审计；V2：OpenClaw 实例与接入包、密钥库、IM（经 OpenIM 中转）、MCP 工具与审批；`/healthz`、`/readyz`、`/metrics`（只在内部网络，Caddy 不转发）。实例只能经接入入口到达 `/agent-api/*`、`/mcp`、`/internal/gateway/*` |
-| Worker（ARQ） | `services/api/app/jobs/worker.py` | 心跳（每分钟）、Webhook Inbox 处理、增量与全量对账（Vikunja、GitHub）、服务状态检查、自动化执行记录对账、过期数据清理；V2：OpenIM 回调收件箱处理、IM 增量（30 秒）与全量（每天）对账、实例 IM 账号补注册、审批卡片发送、待审批过期 |
-| 数据库迁移（Alembic） | `services/api/migrations/` | `0001` ~ `0018`，都只新增对象、都有 downgrade（`docs/data-dictionary.md`） |
+| API（FastAPI BFF） | `services/api/app/main.py` | 认证与会话、工作空间与角色、仪表盘与组件、项目与任务（工作台自己管理，T-0082）、知识库收藏与关联、日历、GitHub 只读视图、跨资源搜索、运维状态与指标、通知、SSE 事件流、n8n 白名单触发、审计；V2：OpenClaw 实例与接入包、密钥库、IM（经 OpenIM 中转）、MCP 工具与审批；`/healthz`、`/readyz`、`/metrics`（只在内部网络，Caddy 不转发）。实例只能经接入入口到达 `/agent-api/*`、`/mcp`、`/internal/gateway/*` |
+| Worker（ARQ） | `services/api/app/jobs/worker.py` | 心跳（每分钟）、GitHub 增量与全量对账、服务状态检查、自动化执行记录对账、过期数据清理；V2：OpenIM 回调收件箱处理、IM 增量（30 秒）与全量（每天）对账、实例 IM 账号补注册、审批卡片发送、待审批过期 |
+| 数据库迁移（Alembic） | `services/api/migrations/` | `0001` ~ `0020`，都有 downgrade（`docs/data-dictionary.md`）；`0020` 新建项目与任务表、转换 Vikunja 投影并删除 Vikunja 集成与 `webhook_inbox`，降级只恢复结构 |
 | 前端（Vue 3） | `apps/web/` | 首页（GridStack 拖拽布局、组件库）、任务与项目、知识库、日历、开发者、运维、自动化、设置、集成设置、安全设置、审计日志、通知中心；V2：IM（单聊、群聊、置顶、免打扰、分组、@）、通讯录、OpenClaw 实例、密钥库、AI 审批与活动记录；右侧可收起的 AI / 详情抽屉（AI 助手、Task Drawer）。UI 组件：Tailwind 4 + shadcn-vue（`src/components/ui`，`2026-11-01-shadcn-vue-and-drawer.md`） |
 | 统一入口（Caddy） | `infra/caddy/Caddyfile`、`https.Caddyfile`、`routes.caddy` | 路由、安全响应头、压缩（SSE 除外）、请求体限制；`/readyz` 仅内网。默认 HTTP :8080；HTTPS 域名模式（`compose.https.yaml`）自动申请证书并加 HSTS |
 | core 编排 | `compose.yaml` | web、api、worker、postgres、redis、caddy，全部带健康检查；可选监控（`--profile monitoring`：Prometheus、Grafana） |
-| 独立部署的组件 | `infra/vikunja/`、`infra/n8n/`、`infra/openim/` | Vikunja（任务主源）、n8n（自动化，可选）、OpenIM（V2 的 IM 后端：打过补丁的 openim-server、MongoDB、Redis、etcd、Kafka、Garage 对象存储），各自的 Compose 项目，通过 `integrations` / `im` / `agent-im` 网络与工作台互通 |
+| 独立部署的组件 | `infra/n8n/`、`infra/openim/` | n8n（自动化，可选）、OpenIM（V2 的 IM 后端：打过补丁的 openim-server、MongoDB、Redis、etcd、Kafka、Garage 对象存储），各自的 Compose 项目，通过 `integrations` / `im` / `agent-im` 网络与工作台互通 |
 | 接入入口（V2，`--profile agents`） | `infra/caddy/agent.Caddyfile` | agent-gateway：内网入口与外网入口（双向证书）两个站点，只放行实例要用的路径；`/im/ws` 经 API 的 forward_auth 校验后透传到 OpenIM 消息网关 |
 | OpenClaw 实例（V2，别的服务器） | 接入包（`services/api/app/agent_bundle/`） | 每台一份接入包：OpenClaw（锁定版本）+ `openclaw-channel` 插件、取密钥小程序、启动包装脚本；外网模式另有本机隧道（ghostunnel） |
 | 运维脚本 | `scripts/` | 冒烟、备份与隔离恢复（restic）、安全扫描 |
 
 ## 数据流要点
 
-- **任务以 Vikunja 为主源**（规范第 4 节）：工作台的写入经 Connector 发给 Vikunja（带 `Idempotency-Key`，结果未知时不自动重试），
-  成功后更新本地投影；读取走本地投影。Vikunja 的 Webhook 进 Inbox 由 Worker 处理，周期对账兜底。
+- **项目与任务由工作台自己管理**（T-0082 移除了 Vikunja，`docs/decisions/2026-11-02-remove-vikunja.md`）：存在 `workspace.projects` / `workspace.tasks`；
+  任务写接口带 `Idempotency-Key`，幂等检查、写入、记下结果在同一个事务里完成；项目与任务的搜索文档由触发器维护。
 - **AFFiNE 只做深链接**与收藏，不读写文档内容；**GitHub 只读**投影（ETag、限流感知）。
 - **首页聚合**只读本地投影与缓存，各模块并发、有各自的超时与总时限；单个模块失败只让它自己降级。
 - **实时更新**：数据变化在事务提交后发布到 Redis Stream，SSE 只发“数据失效”提示，前端据此重新拉取。
@@ -63,11 +63,8 @@ flowchart LR
         K --> R
     end
     subgraph integrations[integrations 网络（internal）]
-        A --> V[vikunja]
-        K --> V
         A --> N[n8n]
         K --> N
-        V -->|Webhook| C
     end
     subgraph monitoring[monitoring 网络（internal，可选）]
         PR[prometheus] -->|/metrics| A
@@ -77,7 +74,7 @@ flowchart LR
 ```
 
 - 对外只有 caddy 一个端口（默认只绑定 127.0.0.1）；postgres、redis 只在内部网络，不映射宿主机端口。
-- `integrations` 网络连接独立部署的 Vikunja、n8n；Vikunja 的 Webhook 经 caddy 回到 api。
+- `integrations` 网络连接独立部署的 n8n（Vikunja 已于 T-0082 移除）；只有 api、worker、caddy 加入。
 - worker 经 `egress` 网络访问外部服务；api 访问 GitHub 等外部服务时同样受出站策略限制（SSRF 防护、DNS 固定）。
 - Grafana（可选）另有 `monitoring-public` 网络，用于浏览器访问它自己的端口；工作台只生成外链。
 - api 与 worker 使用同一个镜像（`services/api/Dockerfile`），以非 root 用户、只读文件系统运行。

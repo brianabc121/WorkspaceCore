@@ -2,12 +2,6 @@
 
 只在 `app.commands.connect` 里用，平时的同步不走这里。
 
-Vikunja 2.7.1（核验 ADR 第 3 节；请求与响应格式见存档的 OpenAPI）：
-- `POST /api/v2/login` `{username, password}` → `{token}`：短期 JWT，只用来创建下面的 API Token；
-  用户名或密码不对返回 403；
-- `POST /api/v2/tokens`（Bearer JWT）`{title, permissions, expires_at}` → `{id, token}`：
-  明文 `tk_` Token 只在创建时返回一次。
-
 n8n 2.45.7：建 owner、登录、建 API Key 与凭据只有内部 REST（`/rest/...`，不在 Public API 里），
 在锁定版本上实测（docs/decisions/2026-11-02-deploy-connect.md 第 3 节）：
 - `GET /rest/settings` → `data.userManagement.showSetupOnFirstLoad`：true 表示还没有 owner；
@@ -20,8 +14,6 @@ n8n 2.45.7：建 owner、登录、建 API Key 与凭据只有内部 REST（`/res
 写操作不重试（ConnectorHttp 只重试读请求）：结果未知时由调用方提示到对方界面里检查，不盲目重建。
 """
 
-from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -29,13 +21,6 @@ import httpx
 from app.integrations.base import ConnectorError
 from app.integrations.http import ConnectorHttp
 
-# 工作台需要的 Vikunja 权限：核验 ADR 第 3 节的最小权限；
-# projects_webhooks 用于自动注册 Webhook（实时同步）
-VIKUNJA_PERMISSIONS: dict[str, list[str]] = {
-    "projects": ["read_all", "read_one"],
-    "tasks": ["create", "read_all", "read_one", "update", "delete"],
-    "projects_webhooks": ["create", "read_all", "update", "delete"],
-}
 # 工作台只接受这四个只读 scope（核验 ADR 第 5.3 节）
 N8N_READ_SCOPES: tuple[str, ...] = (
     "workflow:list",
@@ -67,7 +52,7 @@ def _error(response: httpx.Response, service: str, *, login: bool = False) -> Co
     if status == 429:
         return ConnectorError("RATE_LIMITED", f"{service} 限流，稍后再试", status=status)
     if login and status in {400, 401, 403, 412}:
-        # 用户名或密码不对：Vikunja 2.7.1 返回 403，n8n 2.45.7 返回 401（实测）
+        # 用户名或密码不对：n8n 2.45.7 返回 401（实测）
         return ConnectorError(
             "AUTH_FAILED", f"{service} 用户名或密码不对", status=status, reason="login_failed"
         )
@@ -82,71 +67,6 @@ def _error(response: httpx.Response, service: str, *, login: bool = False) -> Co
     return ConnectorError(
         "UNAVAILABLE", f"{service} 暂时不可用", status=status, reason="upstream_error"
     )
-
-
-@dataclass(frozen=True)
-class CreatedToken:
-    token: str
-    token_id: int | None
-    expires_at: datetime
-
-
-class VikunjaProvisioner:
-    def __init__(self, http: ConnectorHttp, base_url: str) -> None:
-        self._http = http
-        self._api = f"{base_url.rstrip('/')}/api/v2"
-
-    async def login(self, username: str, password: str) -> str:
-        response = await self._http.request(
-            "POST",
-            f"{self._api}/login",
-            headers={},
-            json={"username": username, "password": password, "long_token": False},
-        )
-        if response.status_code >= 400:
-            raise _error(response, "Vikunja", login=True)
-        token = _json(response, "Vikunja").get("token")
-        if not isinstance(token, str) or not token:
-            raise _invalid("Vikunja")
-        return token
-
-    async def create_token(
-        self, session_token: str, *, title: str, expires_at: datetime
-    ) -> CreatedToken:
-        response = await self._http.request(
-            "POST",
-            f"{self._api}/tokens",
-            headers={"Authorization": f"Bearer {session_token}"},
-            json={
-                "title": title,
-                "permissions": VIKUNJA_PERMISSIONS,
-                "expires_at": expires_at.astimezone(UTC).isoformat().replace("+00:00", "Z"),
-            },
-        )
-        if response.status_code >= 400:
-            raise _error(response, "Vikunja")
-        body = _json(response, "Vikunja")
-        token = body.get("token")
-        if not isinstance(token, str) or not token.startswith("tk_"):
-            raise _invalid("Vikunja")
-        token_id = body.get("id")
-        return CreatedToken(
-            token=token,
-            token_id=token_id if isinstance(token_id, int) else None,
-            expires_at=expires_at,
-        )
-
-    async def revoke_token(self, session_token: str, token_id: int) -> bool:
-        """尽力吊销（`DELETE /api/v2/tokens/{id}`）；失败只返回 False。"""
-        try:
-            response = await self._http.request(
-                "DELETE",
-                f"{self._api}/tokens/{token_id}",
-                headers={"Authorization": f"Bearer {session_token}"},
-            )
-        except ConnectorError:
-            return False
-        return response.status_code < 400
 
 
 class N8nProvisioner:

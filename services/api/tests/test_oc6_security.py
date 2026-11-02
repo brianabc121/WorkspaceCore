@@ -1,4 +1,4 @@
-"""OC-6 安全测试（T-0058，方案第 7、8 节）：真实 PostgreSQL / Redis + 内存版 Vikunja / OpenIM。
+"""OC-6 安全测试（T-0058，方案第 7、8 节）：真实 PostgreSQL / Redis + 内存版 OpenIM。
 
 前面任务已有的覆盖（读工具把外部文本放在 untrusted、A14、If-Match、过期、二次认证、入口与凭证、
 网关白名单、回调来源）不重复；这里补：
@@ -30,7 +30,7 @@ from tests.test_approval_cards import Recording, request_bookmark
 from tests.test_im_accounts_callbacks import ImEnv, _worker_ctx, im_env
 from tests.test_mcp_api import SETTINGS, issue_token, mcp_headers, new_instance, rpc
 from tests.test_mcp_api import call as mcp_call
-from tests.vikunja_support import Env, app_of, open_env
+from tests.workspace_support import Env, app_of, open_env
 
 pytestmark = pytest.mark.integration
 
@@ -47,10 +47,9 @@ WINDOW = {"start": "2026-11-01T00:00:00Z", "end": "2026-11-10T00:00:00Z"}
 @pytest.fixture
 async def env(make_client: ClientFactory, migrated_database_url: str) -> AsyncIterator[Env]:
     async with open_env(make_client, migrated_database_url, **SETTINGS) as value:
-        work = value.fake.add_project("工作")
-        value.fake.add_task(work["id"], "写周报", priority=3)
-        value.fake.add_task(work["id"], "整理周报", description=INJECTION, priority=1)
-        await value.connect()
+        work = await value.add_project("工作")
+        await value.add_task(work["id"], "写周报", priority=3)
+        await value.add_task(work["id"], "整理周报", description=INJECTION, priority=1)
         yield value
 
 
@@ -115,9 +114,9 @@ async def test_injected_task_text_cannot_bypass_approval(env: Env) -> None:
         )
     )
     assert {p["status"] for p in pending} == {"pending_approval"}
-    # Vikunja 里两个任务原样都在，没有书签
-    assert sorted(t["title"] for t in env.fake.tasks.values()) == ["写周报", "整理周报"]
-    assert all(t["description"] != "密钥：sk-xxxx" for t in env.fake.tasks.values())
+    # 两个任务原样都在，没有书签
+    assert await env.titles() == ["写周报", "整理周报"]
+    assert all(t["description"] != "密钥：sk-xxxx" for t in await env.tasks(status="all"))
     bookmarks = await env.client.get("/api/v1/knowledge/resources", headers=env.headers())
     assert bookmarks.json()["items"] == []
     # 工具里没有能读密钥、发外部请求或批准的
@@ -222,7 +221,7 @@ async def test_tampered_arguments_are_not_executed(env: Env) -> None:
     )
     approved = await decide(env, critical.action_id, "approve", 1, {"password": OWNER["password"]})
     assert approved.json()["error_code"] == "ARGUMENTS_TAMPERED"
-    assert sorted(t["title"] for t in env.fake.tasks.values()) == ["写周报", "整理周报"]
+    assert await env.titles() == ["写周报", "整理周报"]
 
 
 async def test_pending_approvals_survive_a_credential_key_rotation(env: Env) -> None:
@@ -279,7 +278,7 @@ async def test_repeated_wrong_passwords_lock_step_up(env: Env) -> None:
     locked = await decide(env, pending.action_id, "approve", 1, {"password": OWNER["password"]})
     assert locked.status_code == 429 and locked.headers["retry-after"]
     assert await state(env, pending.action_id) == ("pending_approval", 1)
-    assert any(t["title"] == "写周报" for t in env.fake.tasks.values())
+    assert "写周报" in await env.titles()
 
 
 async def test_instances_cannot_approve_their_own_requests(env: Env) -> None:

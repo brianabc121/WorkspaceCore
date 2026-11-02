@@ -28,7 +28,7 @@ from app.schemas.notifications import (
 
 ADMINS = ("owner", "admin")
 INTEGRATIONS_LINK = "/settings/integrations"
-_PROVIDER_NAMES = {"vikunja": "Vikunja", "github": "GitHub"}
+_PROVIDER_NAMES = {"github": "GitHub"}
 
 
 def _hour() -> str:

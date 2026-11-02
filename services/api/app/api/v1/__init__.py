@@ -22,7 +22,6 @@ from app.api.v1 import (
     search,
     setup,
     tasks,
-    webhooks,
     workspaces,
 )
 from app.schemas.common import error_responses
@@ -39,7 +38,6 @@ for module in (
     dashboards,
     integrations,
     tasks,
-    webhooks,
     knowledge,
     calendar,
     developer,

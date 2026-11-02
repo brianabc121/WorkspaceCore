@@ -39,11 +39,11 @@ from app.models.integration import (
     Integration,
     IntegrationAccount,
     SyncCursor,
-    WebhookInboxEvent,
 )
 from app.models.knowledge import Bookmark, KnowledgeSource, ResourceLink
 from app.models.notification import Notification
 from app.models.search import SearchDocument
+from app.models.task import Project, Task
 from app.models.workspace import Workspace, WorkspaceMember
 
 __all__ = [
@@ -84,11 +84,12 @@ __all__ = [
     "IntegrationAccount",
     "KnowledgeSource",
     "Notification",
+    "Project",
     "ResourceLink",
     "SearchDocument",
     "SyncCursor",
+    "Task",
     "User",
-    "WebhookInboxEvent",
     "Widget",
     "Workspace",
     "WorkspaceMember",

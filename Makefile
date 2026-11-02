@@ -12,12 +12,10 @@ NPM ?= npm
 PYTHON ?= $(shell command -v python3.12 2>/dev/null || command -v python3 2>/dev/null || echo python3)
 COMPOSE ?= docker compose
 HAS_WEB := $(wildcard $(WEB_DIR)/package.json)
-# 独立部署的 Vikunja（infra/vikunja/compose.yaml）：项目名与 core 分开，并告诉它 core 的项目名以加入 integrations 网络
+# 独立部署的组件（n8n、OpenIM）：项目名与 core 分开，并告诉它 core 的项目名以加入 core 的网络
+# （T-0082 移除了 Vikunja，项目与任务由工作台自己管理）
 WORKSPACE_PROJECT := $(or $(COMPOSE_PROJECT_NAME),my-workspace)
-VIKUNJA_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-vikunja \
-	-f infra/vikunja/compose.yaml --env-file .env
-VIKUNJA_URL := $(or $(shell sed -n 's/^VIKUNJA_PUBLIC_URL=//p' .env 2>/dev/null),http://localhost:3456/)
-# 可选的 n8n（infra/n8n/compose.yaml），同样加入 core 的 integrations 网络
+# 可选的 n8n（infra/n8n/compose.yaml），加入 core 的 integrations 网络
 N8N_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-n8n \
 	-f infra/n8n/compose.yaml --env-file .env
 N8N_URL := $(or $(shell sed -n 's/^N8N_PUBLIC_URL=//p' .env 2>/dev/null),http://localhost:5678/)
@@ -37,7 +35,7 @@ endef
 .PHONY: help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke openapi setup-token \
 	lint lint-api lint-web format test test-api test-web build-web backup restore-verify \
 	smoke-full perf scan \
-	vikunja-up vikunja-down vikunja-user vikunja-logs n8n-up n8n-down n8n-logs agent-ca agents-up \
+	n8n-up n8n-down n8n-logs agent-ca agents-up \
 	openim-build openim-up openim-down openim-logs
 
 help: ## 列出可用命令
@@ -86,20 +84,6 @@ migrate: ## 在运行中的 api 容器里把数据库迁移到最新版本（需
 
 migrate-local: ## 本机直接运行迁移（使用环境变量 DATABASE_URL）
 	cd $(API_DIR) && $(UV) run alembic upgrade head
-
-vikunja-up: env ## 启动独立部署的 Vikunja（任务主源）；需要先 make up
-	$(VIKUNJA_COMPOSE) up -d --wait --wait-timeout 180
-	@echo "Vikunja 原生界面：$(VIKUNJA_URL)  首次使用请运行 make vikunja-user 创建用户（自助注册已关闭）"
-
-vikunja-user: ## 创建 Vikunja 用户（依次输入用户名、邮箱和密码）
-	@read -r -p "用户名：" name; read -r -p "邮箱：" email; \
-	$(VIKUNJA_COMPOSE) exec vikunja /app/vikunja/vikunja user create -u "$$name" -e "$$email"
-
-vikunja-down: ## 停止 Vikunja；保留数据卷
-	$(VIKUNJA_COMPOSE) down
-
-vikunja-logs: ## 跟踪 Vikunja 日志（Ctrl+C 退出）
-	$(VIKUNJA_COMPOSE) logs -f --tail=100
 
 agent-ca: ## 导出 OpenClaw 外网入口信任的内部 CA 证书（不含私钥）到 infra/caddy/agent-ca/；需要先 make up
 	docker compose exec -T api python -m app.commands.agent_ca export > infra/caddy/agent-ca/agent-ca.pem

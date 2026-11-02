@@ -76,13 +76,9 @@ async def test_setup_creates_the_default_dashboard_with_starter_widgets(home: Ho
         "todo_summary",
         "today_tasks",
     ]
-    assert data["modules"]["tasks"] == {
-        "status": "unavailable",
-        "as_of": None,
-        "retryable": False,
-        "reason": "not_configured",
-        "retry_at": None,
-    }
+    # T-0082：任务是工作台自己的数据，不需要先接入外部服务
+    assert data["modules"]["tasks"]["status"] == "ok"
+    assert data["today_tasks"] == []
     # Sprint 4：本地日历总是可用；还没有配置 AFFiNE 地址
     assert data["modules"]["calendar"]["status"] == "ok"
     assert data["modules"]["knowledge"]["reason"] == "not_configured"
@@ -99,8 +95,8 @@ async def test_setup_creates_the_default_dashboard_with_starter_widgets(home: Ho
         "automations",
     }
     assert data["summary"] == {
-        "pending_tasks": None,
-        "active_projects": None,
+        "pending_tasks": 0,  # T-0082：本地数据，没有任务时是 0 而不是未知
+        "active_projects": 0,
         "unread_notifications": 0,  # Sprint 5：通知中心上线后返回实际的未读数
     }
     assert data["today_tasks"] == []
@@ -437,9 +433,7 @@ class _HealthyTasks:
         return ModuleResult(
             status=ModuleStatus(status="ok", as_of=None, retryable=False, reason=None),
             summary={"pending_tasks": 3, "active_projects": 1},
-            today_tasks=[
-                TaskBrief(id="t1", title="写周报", due_at=None, project_title=None, source_url=None)
-            ],
+            today_tasks=[TaskBrief(id="t1", title="写周报", due_at=None, project_title=None)],
         )
 
 

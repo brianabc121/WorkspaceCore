@@ -22,9 +22,9 @@
 
 ### 1.2 技术边界
 
-- 任务数据唯一主源：Vikunja；工作台不复制业务任务为主表，只保留外部对象映射、只读投影和本地 UI 状态。
+- 项目与任务：由工作台自己管理（`workspace.projects` / `workspace.tasks`），单人版，没有负责人、指派、评论、按项目共享；角色不变（viewer 只读，member 及以上可写）。（2026-11-02 人类决定移除 Vikunja，T-0082，见 `docs/decisions/2026-11-02-remove-vikunja.md`；原文为“任务数据唯一主源：Vikunja”）
 - 文档主源：AFFiNE；V1 仅做跳转、收藏、人工添加文档元数据；**不能假设可通过未核验的 API 遍历、读取和修改 AFFiNE 全部文档**。
-- 日程：V1 工作台本地日程为主源；Vikunja 截止日期作为只读派生事件；外部 CalDAV 同步推迟到 V1.1。
+- 日程：V1 工作台本地日程为主源；任务截止日期作为只读派生事件（T-0082）；外部 CalDAV 同步推迟到 V1.1。
 - GitHub：V1 仅只读仓库、Issue、PR、Actions 汇总；写权限后期审批开放。
 - 监控：V1 只读指标和告警；不能在监控面板直接执行 Shell 或 Docker 管理操作。
 - n8n：V1 列表、执行状态及受控 Webhook；不在工作台复制完整流程设计器。
@@ -47,7 +47,7 @@
 
 ### 1.4 验收总体标准
 
-全新机器可按 README 启动核心服务；初始管理员可登录；首页可编辑布局；可以连接 Vikunja 并完成任务创建/编辑/查找/同步；第三方服务不可用时首页降级且无数据丢失；备份恢复可用；接口、权限、迁移、同步及前端关键路径有自动测试。
+全新机器可按 README 启动核心服务；初始管理员可登录；首页可编辑布局；可以创建项目并完成任务创建/编辑/查找（T-0082 前为“连接 Vikunja 并完成任务创建/编辑/查找/同步”）；第三方服务不可用时首页降级且无数据丢失；备份恢复可用；接口、权限、迁移、同步及前端关键路径有自动测试。
 
 ## 2. 技术栈与版本策略
 
@@ -135,7 +135,6 @@ flowchart TD
     Domain --> PG[(PostgreSQL)]
     Domain --> Redis[(Redis)]
     Domain --> Connect[Connector Adapters]
-    Connect --> Vikunja[Vikunja]
     Connect --> AFFiNE[AFFiNE - deep link only V1]
     Connect --> GitHub[GitHub]
     Connect --> Monitor[Prometheus/Grafana]
@@ -156,12 +155,13 @@ flowchart TD
 
 ### 4.1 创建任务成功路径
 
+（2026-11-02 按 T-0082 更新：任务不再写外部系统，见 `docs/decisions/2026-11-02-remove-vikunja.md` 第 3 节。原第 3–6 步是记录幂等状态、调用 Vikunja、写投影、Webhook/轮询对账。）
+
 1. 浏览器 `POST /api/v1/tasks`，附 `Idempotency-Key` UUID。
-2. BFF 验证会话、CSRF、工作空间权限、请求体及外部连接状态。
-3. 在本地记录幂等请求状态（不能先声称成功）。
-4. Connector 调用目标 Vikunja API，超时需要保留 `unknown` 状态而不是盲目再创建。
-5. 获得外部 ID 后写 external_resources/upsert 搜索投影；若本地写失败，记录待修复任务。
-6. 返回统一 Task DTO；后续用 Webhook/轮询对账校正。
+2. BFF 验证会话、CSRF、工作空间权限与请求体。
+3. 在同一个数据库事务里：检查幂等键 → 写入 `workspace.tasks`（保存点）→ 记下结果；并发的同一请求返回 409 `IDEMPOTENCY_IN_PROGRESS`。
+4. 搜索文档由触发器同步更新。
+5. 返回统一 Task DTO。
 
 **分布式写入限制：** 不能假设第三方 API 和本地 PostgreSQL 参与一个 ACID 事务。对跨系统操作使用幂等、状态机、定时核查与补偿；对于请求超时且不确定是否成功的场景，应先查询匹配结果或人工复核，避免重复创建。
 
@@ -169,7 +169,7 @@ flowchart TD
 
 | 数据对象 | 主源 | 工作台存储内容 | 修改方式 |
 |---|---|---|---|
-| 任务/项目 | Vikunja | 外部 ID、元数据投影、索引 | Vikunja Connector |
+| 任务/项目 | Workspace | 全量（T-0082 前主源是 Vikunja） | 本地 API |
 | AFFiNE 文档 | AFFiNE | 收藏 URL、手工标题、授权可得的元数据 | 跳转原系统 |
 | Widget 与首页 | Workspace | 全量 | 本地 API |
 | 本地日历 | Workspace | 全量 | 本地 API |
@@ -363,7 +363,7 @@ CREATE INDEX ix_webhook_pending ON workspace.webhook_inbox(next_retry_at)
 
 ```json
 {
-  "project_id": "vikunja:project:42",
+  "project_id": "0b6f3c1e-8a2d-4f5b-9c7e-1d2a3b4c5d6e",
   "title": "完成工作台首页",
   "description": "实现 Dashboard Widget",
   "priority": 3,
@@ -398,7 +398,9 @@ class WritableConnector(Connector, Protocol):
 
 组件化能力 `Readable / Searchable / Writable / WebhookCapable` 分层；不要求 AFFiNE 实现其不支持的能力。Connector 的 errors 统一分类 `AUTH_FAILED`, `RATE_LIMITED`, `TIMEOUT_UNKNOWN`, `UNAVAILABLE`, `NOT_SUPPORTED`, `CONFLICT`, `VALIDATION_FAILED`。
 
-### 7.1 Vikunja
+### 7.1 Vikunja（已移除）
+
+> 2026-11-02 人类决定移除 Vikunja，项目与任务改由工作台自己管理（T-0082，见 `docs/decisions/2026-11-02-remove-vikunja.md`）。本节保留为历史记录，不再适用。
 
 - 新集成使用 **API v2**；运行实例 `/api/v2/docs`、`/api/v2/openapi.json` 是实际 schema 基准。
 - API 版本与实例版本写入 integration metadata；通过 OpenAPI 生成类型或手工适配，禁止臆测 endpoint。
@@ -461,7 +463,7 @@ type WidgetDefinition<TConfig> = {
 
 ### 8.4 原生任务中心
 
-列表/看板两种视图；筛选状态、项目、截止日期、优先级；新增/编辑 Task Drawer；可选择跳到 Vikunja 原生界面完成高级操作。必须保证同一任务的外部来源清晰标识。
+列表/看板两种视图；筛选状态、项目、截止日期、优先级；新增/编辑 Task Drawer（含标签）；`/projects` 新建、改名、归档、删除项目。（2026-11-02 按 T-0082 更新：任务由工作台自己管理，去掉了“跳到 Vikunja 原生界面”和外部来源标识。）
 
 ## 9. 鉴权与安全设计
 
@@ -509,7 +511,7 @@ type WidgetDefinition<TConfig> = {
 
 ### 11.1 Core Compose 最小服务
 
-`web`、`api`、`worker`、`postgres`、`redis`、`caddy`。生产数据库使用强密码和独立持久卷。支持 `docker compose --profile monitoring ...` 启用可选服务；Vikunja/AFFiNE/n8n 各自单独 Compose 安装并通过受控网络连通。V2：OpenIM 用 `infra/openim/` 的独立 Compose 项目，部署在工作台所在服务器；OpenClaw 部署在其他服务器，按 `infra/openclaw/` 的接入包配置。
+`web`、`api`、`worker`、`postgres`、`redis`、`caddy`。生产数据库使用强密码和独立持久卷。支持 `docker compose --profile monitoring ...` 启用可选服务；AFFiNE/n8n 各自单独 Compose 安装并通过受控网络连通（Vikunja 已于 T-0082 移除）。V2：OpenIM 用 `infra/openim/` 的独立 Compose 项目，部署在工作台所在服务器；OpenClaw 部署在其他服务器，按 `infra/openclaw/` 的接入包配置。
 
 ### 11.2 环境变量示例
 
@@ -561,6 +563,8 @@ LOG_LEVEL=INFO
 
 **范围**：受限凭证连接、OpenAPI 版本固定、项目/任务列表、创建/修改、幂等状态、Webhook Inbox、Worker、Reconciler。**DoD**：外部原生任务改动最终出现在工作台；重复提交不创建双份任务；模拟 webhook 丢失可经对账补齐。
 
+> 已被 T-0082 取代（2026-11-02，见 `docs/decisions/2026-11-02-remove-vikunja.md`）：Vikunja 与 Webhook Inbox 已移除，项目与任务由工作台自己管理；Sprint 3 的全栈验收改为本地项目与任务。以上保留为历史记录。
+
 ### Sprint 4：知识入口、日历、搜索、GitHub
 
 **范围**：AFFiNE 深链接及收藏，本地日历，跨资源搜索投影，GitHub 只读。**DoD**：无未授权文档正文抓取；搜索结果只显示可见资源；GitHub rate-limit 有清晰降级。
@@ -606,7 +610,7 @@ AI 部分按 `docs/v2/TRANSFORMATION_PLAN.md` 第 9 节的 OC-0 ~ OC-7 实施。
 | A05 | 第三方服务断开 | 首页显示 stale/unavailable，其余模块可用 |
 | A06 | 创建任务重放同一幂等键 | 最多创建一个外部任务 |
 | A07 | 相同幂等键不同请求体 | 返回 409 |
-| A08 | Vikunja Webhook 重复送达 | 事件最多执行一次有效副作用 |
+| A08 | ~~Vikunja Webhook 重复送达~~（T-0082 移除 Vikunja 后不再适用） | 事件最多执行一次有效副作用 |
 | A09 | Webhook 丢失 | 周期对账最终纠正投影 |
 | A10 | 源对象删除 | 搜索投影标记删除，页面无僵尸引用 |
 | A11 | 搜索另一工作空间数据 | 不返回未授权结果 |
@@ -627,7 +631,7 @@ AI 部分按 `docs/v2/TRANSFORMATION_PLAN.md` 第 9 节的 OC-0 ~ OC-7 实施。
 | 风险 | 影响 | 解决方法 |
 |---|---|---|
 | AFFiNE 全量公开 API 不确定 | 无法原生编辑或全面索引 | V1 Deep Link，Spike 验证后再扩展 |
-| Vikunja API 版本升级 | 字段/认证/事件改变 | 固定版本、OpenAPI 与契约测试 |
+| ~~Vikunja API 版本升级~~（T-0082 已移除 Vikunja） | 字段/认证/事件改变 | 固定版本、OpenAPI 与契约测试 |
 | 外部 API 无分布式事务 | 数据部分成功 | 幂等、状态机、补偿、对账 |
 | 复杂 SSO 多应用行为不同 | 登录体验不一致 | V1 本地会话；后期 OIDC 兼容性验证 |
 | 监控与 Docker 管理权限 | 宿主机被接管风险 | 只读代理，禁止直通 socket |
@@ -640,8 +644,8 @@ AI 部分按 `docs/v2/TRANSFORMATION_PLAN.md` 第 9 节的 OC-0 ~ OC-7 实施。
 
 ## 17. 参考资料与实现前核验清单
 
-- Vikunja API v2：https://vikunja.io/docs/api-v2/ （以实例实际 `/api/v2/openapi.json` 为准）
-- Vikunja GitHub：https://github.com/go-vikunja/vikunja
+- Vikunja API v2：https://vikunja.io/docs/api-v2/ （以实例实际 `/api/v2/openapi.json` 为准；T-0082 已移除 Vikunja，保留为历史参考）
+- Vikunja GitHub：https://github.com/go-vikunja/vikunja（同上）
 - AFFiNE 自托管：https://docs.affine.pro/self-host-affine/
 - AFFiNE 官方 Compose：https://docs.affine.pro/self-host-affine/references/docker-compose-yml
 - AFFiNE 配置：https://docs.affine.pro/self-host-affine/install/configuration

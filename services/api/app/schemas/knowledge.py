@@ -118,7 +118,7 @@ LinkedResourceIds = Annotated[
     list[UUID],
     Field(
         max_length=MAX_LINKED_RESOURCES,
-        description="关联的 Vikunja 项目 / 任务（投影 UUID）；修改时整体替换",
+        description="关联的项目 / 任务的 ID；修改时整体替换",
     ),
     AfterValidator(_unique_ids),
 ]
@@ -166,12 +166,11 @@ class KnowledgeSourceUpdate(_Strict):
 
 
 class ResourceLinkOut(BaseModel):
-    """关联的项目 / 任务；它在 Vikunja 里删除后不再出现（A10）。"""
+    """关联的项目 / 任务；它被删除后关联随之删除（A10）。"""
 
-    resource_id: UUID = Field(description="项目或任务的投影 UUID")
+    resource_id: UUID = Field(description="项目或任务的 ID")
     resource_type: Literal["task", "project"]
     title: str
-    source_url: str = Field(description="Vikunja 原生界面中的地址")
 
 
 class KnowledgeResourceOut(BaseModel):

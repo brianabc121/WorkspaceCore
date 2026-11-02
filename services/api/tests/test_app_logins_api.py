@@ -1,7 +1,7 @@
-"""Vikunja、n8n 的登录账号（T-0080）：真实 PostgreSQL + Redis。
+"""n8n 的登录账号（T-0080；T-0082 移除 Vikunja 后只有 n8n）：真实 PostgreSQL + Redis。
 
 覆盖：只有 admin 以上能读写（member、viewer 403，非成员 404）；密码加密保存、列表不含密码；
-查看密码单独请求、带 CSRF、写审计、响应不缓存；乐观并发；删除；登录页地址取自集成与 n8n 连接；
+查看密码单独请求、带 CSRF、写审计、响应不缓存；乐观并发；删除；登录页地址取自 n8n 连接；
 审计与日志里没有密码。
 """
 
@@ -14,11 +14,11 @@ import httpx
 import pytest
 
 from tests.helpers import OWNER, ClientFactory, add_member, add_user, csrf, run_sql
-from tests.vikunja_support import CONNECTOR_SETTINGS
+from tests.workspace_support import CONNECTOR_SETTINGS
 
 pytestmark = pytest.mark.integration
 
-PASSWORD = "fake vikunja password"  # noqa: S105  测试用的假值
+PASSWORD = "fake app password"  # noqa: S105  测试用的假值
 N8N_PASSWORD = "fake n8n owner password"  # noqa: S105
 MEMBER = {"email": "member@example.com", "password": "member password 123"}
 
@@ -61,21 +61,24 @@ async def env(make_client: ClientFactory, migrated_database_url: str) -> AsyncIt
         yield Env(client, setup.json()["workspaces"][0]["id"], migrated_database_url)
 
 
-async def test_nothing_saved_returns_both_apps(env: Env) -> None:
+async def test_nothing_saved(env: Env) -> None:
     response = await env.client.get("/api/v1/app-logins", headers=env.headers())
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     items = response.json()["items"]
-    assert [item["app"] for item in items] == ["vikunja", "n8n"]
+    assert [item["app"] for item in items] == ["n8n"]
     assert all(item["configured"] is False and item["password_set"] is False for item in items)
     assert all(item["login_url"] is None and item["version"] is None for item in items)
-    missing = await env.reveal("vikunja")
+    missing = await env.reveal("n8n")
     assert missing.status_code == 404
 
 
 async def test_save_reveal_update_delete(env: Env, caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
-    created = await env.put("vikunja", {"username": " workspace ", "password": PASSWORD})
+    # 新建时必须给用户名
+    no_username = await env.put("n8n", {"password": PASSWORD})
+    assert no_username.status_code == 422
+    created = await env.put("n8n", {"username": " workspace ", "password": PASSWORD})
     assert created.status_code == 200, created.text
     assert created.headers["cache-control"] == "no-store"
     body = created.json()
@@ -85,64 +88,62 @@ async def test_save_reveal_update_delete(env: Env, caplog: pytest.LogCaptureFixt
 
     # 数据库里只有密文引用
     ref = await run_sql(
-        env.database_url, "SELECT password_ref FROM workspace.app_logins WHERE app = 'vikunja'"
+        env.database_url, "SELECT password_ref FROM workspace.app_logins WHERE app = 'n8n'"
     )
     assert ref.startswith("enc:v1:") and PASSWORD not in ref
 
     listed = await env.client.get("/api/v1/app-logins", headers=env.headers())
     assert PASSWORD not in listed.text
 
-    revealed = await env.reveal("vikunja")
+    revealed = await env.reveal("n8n")
     assert revealed.status_code == 200
     assert revealed.headers["cache-control"] == "no-store"
-    assert revealed.json() == {"app": "vikunja", "username": "workspace", "password": PASSWORD}
+    assert revealed.json() == {"app": "n8n", "username": "workspace", "password": PASSWORD}
 
     # 查看要 CSRF
     no_csrf = await env.client.post(
-        "/api/v1/app-logins/vikunja/reveal", headers={"X-Workspace-Id": env.workspace_id}
+        "/api/v1/app-logins/n8n/reveal", headers={"X-Workspace-Id": env.workspace_id}
     )
     assert no_csrf.status_code == 403
 
     # 只改用户名不动密码；版本不对 409；修改要带版本
-    stale = await env.put("vikunja", {"version": 9, "username": "other"})
+    stale = await env.put("n8n", {"version": 9, "username": "other"})
     assert stale.status_code == 409
     assert stale.json()["error"]["details"]["current_version"] == 1
-    no_version = await env.put("vikunja", {"username": "other"})
+    no_version = await env.put("n8n", {"username": "other"})
     assert no_version.status_code == 422
-    renamed = await env.put("vikunja", {"version": 1, "username": "other"})
+    renamed = await env.put("n8n", {"version": 1, "username": "other"})
     assert renamed.status_code == 200 and renamed.json()["version"] == 2
-    again = await env.reveal("vikunja")
+    again = await env.reveal("n8n")
     assert again.json()["password"] == PASSWORD and again.json()["username"] == "other"
-    empty = await env.put("vikunja", {"version": 2})
+    empty = await env.put("n8n", {"version": 2})
     assert empty.status_code == 422
 
-    # 新建时必须给用户名；可以不给密码
-    no_username = await env.put("n8n", {"password": N8N_PASSWORD})
-    assert no_username.status_code == 422
+    for unknown in ("grafana", "vikunja"):  # T-0082 移除了 Vikunja
+        assert (await env.put(unknown, {"username": "admin"})).status_code == 422, unknown
+
+    # 删除：版本不对 409；删除后回到未保存
+    wrong = await env.client.delete(
+        "/api/v1/app-logins/n8n?version=1", headers=env.headers(write=True)
+    )
+    assert wrong.status_code == 409
+    deleted = await env.client.delete(
+        "/api/v1/app-logins/n8n?version=2", headers=env.headers(write=True)
+    )
+    assert deleted.status_code == 204
+    assert (await env.logins())["n8n"]["configured"] is False
+    gone = await env.client.delete(
+        "/api/v1/app-logins/n8n?version=2", headers=env.headers(write=True)
+    )
+    assert gone.status_code == 404
+
+    # 可以先只保存用户名，之后再补密码
     only_user = await env.put("n8n", {"username": "owner@example.com"})
     assert only_user.status_code == 200 and only_user.json()["password_set"] is False
     assert (await env.reveal("n8n")).status_code == 404
     with_password = await env.put("n8n", {"version": 1, "password": N8N_PASSWORD})
     assert with_password.json()["password_set"] is True
     assert (await env.reveal("n8n")).json()["password"] == N8N_PASSWORD
-
-    unknown = await env.put("grafana", {"username": "admin"})
-    assert unknown.status_code == 422
-
-    # 删除：版本不对 409；删除后回到未保存
-    wrong = await env.client.delete(
-        "/api/v1/app-logins/vikunja?version=1", headers=env.headers(write=True)
-    )
-    assert wrong.status_code == 409
-    deleted = await env.client.delete(
-        "/api/v1/app-logins/vikunja?version=2", headers=env.headers(write=True)
-    )
-    assert deleted.status_code == 204
-    assert (await env.logins())["vikunja"]["configured"] is False
-    gone = await env.client.delete(
-        "/api/v1/app-logins/vikunja?version=2", headers=env.headers(write=True)
-    )
-    assert gone.status_code == 404
 
     # 审计：每次查看都记；元数据只有应用名与字段名
     events = await env.audit()
@@ -160,13 +161,7 @@ async def test_save_reveal_update_delete(env: Env, caplog: pytest.LogCaptureFixt
     assert PASSWORD not in caplog.text and N8N_PASSWORD not in caplog.text
 
 
-async def test_login_url_comes_from_connections(env: Env) -> None:
-    await run_sql(
-        env.database_url,
-        "INSERT INTO workspace.integrations (workspace_id, provider, name, base_url, public_url)"
-        " VALUES ($1, 'vikunja', 'Vikunja', 'http://vikunja:3456', 'https://vikunja.example.com/')",
-        uuid.UUID(env.workspace_id),
-    )
+async def test_login_url_comes_from_the_n8n_connection(env: Env) -> None:
     await run_sql(
         env.database_url,
         "INSERT INTO workspace.automation_connections"
@@ -175,12 +170,11 @@ async def test_login_url_comes_from_connections(env: Env) -> None:
         uuid.UUID(env.workspace_id),
     )
     logins = await env.logins()
-    assert logins["vikunja"]["login_url"] == "https://vikunja.example.com/"
     assert logins["n8n"]["login_url"] == "https://n8n.example.com/"
 
 
 async def test_only_admins(env: Env, make_client: ClientFactory) -> None:
-    saved = await env.put("vikunja", {"username": "workspace", "password": PASSWORD})
+    saved = await env.put("n8n", {"username": "workspace", "password": PASSWORD})
     assert saved.status_code == 200
     user_id = await add_user(env.database_url, MEMBER["email"], MEMBER["password"])
     await add_member(env.database_url, uuid.UUID(env.workspace_id), user_id, "viewer")
@@ -195,9 +189,9 @@ async def test_only_admins(env: Env, make_client: ClientFactory) -> None:
                 user_id,
             )
             listed = await other.get("/api/v1/app-logins", headers=headers)
-            revealed = await other.post("/api/v1/app-logins/vikunja/reveal", headers=headers)
+            revealed = await other.post("/api/v1/app-logins/n8n/reveal", headers=headers)
             changed = await other.put(
-                "/api/v1/app-logins/vikunja", json={"version": 1, "password": "x"}, headers=headers
+                "/api/v1/app-logins/n8n", json={"version": 1, "password": "x"}, headers=headers
             )
             assert (listed.status_code, revealed.status_code, changed.status_code) == (
                 403,
@@ -210,7 +204,7 @@ async def test_only_admins(env: Env, make_client: ClientFactory) -> None:
             "UPDATE workspace.workspace_members SET role = 'admin' WHERE user_id = $1",
             user_id,
         )
-        allowed = await other.post("/api/v1/app-logins/vikunja/reveal", headers=headers)
+        allowed = await other.post("/api/v1/app-logins/n8n/reveal", headers=headers)
         assert allowed.status_code == 200 and allowed.json()["password"] == PASSWORD
 
         # 别的工作空间看不到

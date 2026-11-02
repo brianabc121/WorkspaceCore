@@ -1,12 +1,12 @@
-"""项目与任务接口的集成测试（T-0020，S3-03 / S3-04）：真实 PostgreSQL / Redis + 内存版 Vikunja。
+"""工作台自己的项目与任务接口（T-0082）：真实 PostgreSQL / Redis。
 
-覆盖 Sprint 3 契约第 5 ~ 8、10 节：
-- 读取走本地投影（不访问 Vikunja）、过滤 / 排序 / 分页、新鲜度
-- 写入的 Idempotency-Key：重放（A06）、换内容复用（A07）、仍在处理、结果未知后的查询、
-  确定没发出时可以重试
-- 修改 / 删除的 version 比较、删除的幂等、外部错误的映射与集成状态
-- 权限：viewer 只读、member 可写、其他工作空间看不到
-- 首页的任务模块：汇总、今日任务、stale / unauthorized
+覆盖 docs/decisions/2026-11-02-remove-vikunja.md：
+- 项目：新建 / 改名 / 归档 / 删除（连带任务）、version 冲突、列表的任务数与搜索
+- 任务：读取的过滤 / 排序 / 分页，写入的 Idempotency-Key
+  （重放 A06、换内容复用 A07、并发的同一个请求），
+  修改 / 删除的 version 比较、删除的幂等、完成时间、标签、移动到其他项目
+- 权限：viewer 只读、member 可写、其他工作空间看不到；审计
+- 首页的任务模块与项目进度
 """
 
 import asyncio
@@ -15,17 +15,14 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import asyncpg
 import httpx
 import pytest
 
-from tests.helpers import BOB, ClientFactory, add_user, add_workspace, run_sql
-from tests.vikunja_support import Env, app_of, open_env
+from tests.helpers import BOB, ClientFactory, add_user, add_workspace, asyncpg_dsn, run_sql
+from tests.workspace_support import Env, open_env
 
 pytestmark = pytest.mark.integration
-
-
-def _stamp(value: datetime) -> str:
-    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @pytest.fixture
@@ -36,11 +33,10 @@ async def env(make_client: ClientFactory, migrated_database_url: str) -> AsyncIt
 
 @pytest.fixture
 async def ready(env: Env) -> Env:
-    """已连接、同步过一个项目和一个任务的工作空间。"""
-    work = env.fake.add_project("工作")
-    env.fake.add_project("生活")
-    env.fake.add_task(work["id"], "写周报", priority=3, description="**本周**")
-    await env.connect()
+    """有两个项目、一个任务的工作空间。"""
+    work = await env.add_project("工作", description="上班的事")
+    await env.add_project("生活")
+    await env.add_task(work["id"], "写周报", priority=3, description="**本周**", labels=["周报"])
     return env
 
 
@@ -49,47 +45,171 @@ def error_code(response: httpx.Response) -> str:
     return code
 
 
-async def new_task(env: Env, title: str = "新任务", **fields: Any) -> dict[str, Any]:
-    projects = await env.projects()
-    body = {"project_id": projects["工作"], "title": title, **fields}
-    response = await env.create_task(body)
-    assert response.status_code == 201, response.text
-    created: dict[str, Any] = response.json()
-    return created
+async def audit_count(env: Env, action: str) -> int:
+    count: int = await run_sql(
+        env.database_url, "SELECT count(*) FROM workspace.audit_logs WHERE action = $1", action
+    )
+    return count
 
 
-# ---------------------------------------------------------------- 读取
+# ---------------------------------------------------------------- 项目
 
 
-async def test_reads_come_from_the_projection(ready: Env) -> None:
-    before = len(ready.fake.requests)
-    page = await ready.get("/api/v1/tasks")
-    assert page["sync"]["status"] == "ok"
-    [task] = page["items"]
+async def test_create_rename_archive_and_list_projects(env: Env) -> None:
+    created = await env.create_project({"title": "  工作  ", "description": "上班的事"})
+    assert created.status_code == 201, created.text
+    project = created.json()
+    assert (project["title"], project["description"], project["archived"]) == (
+        "工作",
+        "上班的事",
+        False,
+    )
+    assert (project["version"], project["open_tasks"], project["done_tasks"]) == (1, 0, 0)
+    assert await audit_count(env, "project.created") == 1
+
+    renamed = await env.update_project(project["id"], {"version": 1, "title": "上班"})
+    assert renamed.status_code == 200, renamed.text
+    assert (renamed.json()["title"], renamed.json()["version"]) == ("上班", 2)
+    assert renamed.json()["updated_at"] >= project["updated_at"]
+
+    archived = await env.update_project(project["id"], {"version": 2, "archived": True})
+    assert archived.status_code == 200 and archived.json()["archived"] is True
+    assert (await env.get("/api/v1/projects"))["items"] == []  # 默认不含已归档
+    listed = await env.get("/api/v1/projects", include_archived=True)
+    assert [p["title"] for p in listed["items"]] == ["上班"]
+    assert (await env.get(f"/api/v1/projects/{project['id']}"))["archived"] is True
+    assert await audit_count(env, "project.updated") == 2
+
+
+async def test_project_validation_and_conflicts(env: Env) -> None:
+    invalid: list[dict[str, Any]] = [
+        {"title": ""},
+        {"title": "   "},
+        {"title": "x" * 121},
+        {"title": "a", "x": 1},
+    ]
+    for body in invalid:
+        response = await env.create_project(body)
+        assert response.status_code == 422, body
+    project = await env.add_project("工作")
+    updates: list[dict[str, Any]] = [
+        {"version": 1},
+        {"version": 1, "title": None},
+        {"version": 0, "title": "a"},
+    ]
+    for body in updates:
+        response = await env.update_project(project["id"], body)
+        assert response.status_code == 422, body
+    assert (
+        await env.update_project(project["id"], {"version": 1, "title": "新"})
+    ).status_code == 200
+    stale = await env.update_project(project["id"], {"version": 1, "title": "旧"})
+    assert stale.status_code == 409 and error_code(stale) == "VERSION_CONFLICT"
+    details = stale.json()["error"]["details"]
+    assert details["current_version"] == 2 and details["current"]["title"] == "新"
+    missing = await env.update_project(str(uuid.uuid4()), {"version": 1, "title": "x"})
+    assert missing.status_code == 404
+    assert (
+        await env.client.get(f"/api/v1/projects/{uuid.uuid4()}", headers=env.headers())
+    ).status_code == 404
+
+
+async def test_project_lists_count_tasks_search_and_paginate(env: Env) -> None:
+    work = await env.add_project("工作")
+    await env.add_project("生活")
+    await env.add_project("100%_完成")
+    await env.add_task(work["id"], "写周报")
+    await env.add_task(work["id"], "评审")
+    await env.add_task(work["id"], "上线", done=True)
+    items = (await env.get("/api/v1/projects"))["items"]
+    assert [p["title"] for p in items] == ["100%_完成", "工作", "生活"]
+    counts = {p["title"]: (p["open_tasks"], p["done_tasks"]) for p in items}
+    assert counts == {"100%_完成": (0, 0), "工作": (2, 1), "生活": (0, 0)}
+    assert (await env.get(f"/api/v1/projects/{work['id']}"))["open_tasks"] == 2
+    assert [p["title"] for p in (await env.get("/api/v1/projects", q="工"))["items"]] == ["工作"]
+    assert [p["title"] for p in (await env.get("/api/v1/projects", q="%_"))["items"]] == [
+        "100%_完成"
+    ]  # LIKE 通配符被转义
+    first = await env.get("/api/v1/projects", limit=2)
+    assert len(first["items"]) == 2 and first["next_cursor"]
+    second = await env.get("/api/v1/projects", limit=2, cursor=first["next_cursor"])
+    assert [p["title"] for p in second["items"]] == ["生活"] and second["next_cursor"] is None
+
+
+async def test_delete_project_removes_its_tasks(ready: Env) -> None:
+    projects = await ready.projects()
+    project = await ready.get(f"/api/v1/projects/{projects['工作']}")
+    task = await ready.task_by_title("写周报")
+    stale = await ready.delete_project(project["id"], project["version"] + 1)
+    assert stale.status_code == 409 and error_code(stale) == "VERSION_CONFLICT"
+    deleted = await ready.delete_project(project["id"], project["version"])
+    assert deleted.status_code == 204
+    assert await ready.projects() == {"生活": projects["生活"]}
+    missing = await ready.client.get(f"/api/v1/tasks/{task['id']}", headers=ready.headers())
+    assert missing.status_code == 404
+    assert await ready.tasks(status="all") == []
+    assert (await ready.delete_project(project["id"], project["version"])).status_code == 404
+    metadata = await run_sql(
+        ready.database_url,
+        "SELECT metadata_redacted_json::text FROM workspace.audit_logs"
+        " WHERE action = 'project.deleted'",
+    )
+    assert '"tasks_deleted": 1' in metadata
+
+
+async def test_project_progress_counts_open_and_done_tasks(env: Env) -> None:
+    """首页“项目进度”组件（T-0064）：有未完成任务的项目在前，归档项目不显示。"""
+    work = await env.add_project("工作")
+    life = await env.add_project("生活")
+    await env.add_project("空项目")
+    old = await env.add_project("旧项目")
+    for title in ("周报", "评审", "部署"):
+        await env.add_task(work["id"], title)
+    await env.add_task(work["id"], "已上线", done=True)
+    await env.add_task(life["id"], "买菜")
+    await env.add_task(life["id"], "交水费", done=True)
+    await env.add_task(life["id"], "体检", done=True)
+    await env.add_task(old["id"], "旧任务")
+    await env.update_project(old["id"], {"version": old["version"], "archived": True})
+    page = await env.get("/api/v1/projects/progress")
+    rows = [(p["title"], p["open_tasks"], p["done_tasks"]) for p in page["items"]]
+    assert rows == [("工作", 3, 1), ("生活", 1, 2), ("空项目", 0, 0)]
+    limited = await env.get("/api/v1/projects/progress", limit=1)
+    assert [p["title"] for p in limited["items"]] == ["工作"]
+    too_many = await env.client.get(
+        "/api/v1/projects/progress", params={"limit": 21}, headers=env.headers()
+    )
+    assert too_many.status_code == 422
+
+
+# ---------------------------------------------------------------- 任务读取
+
+
+async def test_task_fields(ready: Env) -> None:
+    [task] = (await ready.get("/api/v1/tasks"))["items"]
     assert task["title"] == "写周报"
     assert task["description"] == "**本周**"  # Markdown 原文
-    assert task["external_id"].startswith("vikunja:task:")
-    assert task["source_url"].startswith("https://tasks.example.com/tasks/")
+    assert (task["priority"], task["labels"], task["done"], task["done_at"]) == (
+        3,
+        ["周报"],
+        False,
+        None,
+    )
+    assert task["version"] == "1"
     assert task["project_id"] == (await ready.projects())["工作"]
-    detail = await ready.get(f"/api/v1/tasks/{task['id']}")
-    assert detail == task
-    projects = await ready.get("/api/v1/projects")
-    assert [p["title"] for p in projects["items"]] == ["工作", "生活"]
-    assert projects["sync"]["status"] == "ok"
-    assert len(ready.fake.requests) == before  # 读取不访问 Vikunja
+    assert "source_url" not in task and "external_id" not in task
+    assert await ready.get(f"/api/v1/tasks/{task['id']}") == task
 
 
 async def test_task_filters_sort_and_pagination(env: Env) -> None:
-    work = env.fake.add_project("工作")
-    life = env.fake.add_project("生活")
+    work = await env.add_project("工作")
+    life = await env.add_project("生活")
     now = datetime.now(UTC)
-    env.fake.add_task(work["id"], "明天", priority=1, due_date=_stamp(now + timedelta(days=1)))
-    env.fake.add_task(work["id"], "下周", priority=5, due_date=_stamp(now + timedelta(days=7)))
-    env.fake.add_task(work["id"], "无截止", priority=2)
-    env.fake.add_task(life["id"], "买菜 100%_", priority=4, due_date=_stamp(now))
-    env.fake.add_task(life["id"], "已完成", done=True)
-    await env.connect()
-    projects = await env.projects()
+    await env.add_task(work["id"], "明天", priority=1, due_at=(now + timedelta(days=1)).isoformat())
+    await env.add_task(work["id"], "下周", priority=5, due_at=(now + timedelta(days=7)).isoformat())
+    await env.add_task(work["id"], "无截止", priority=2)
+    await env.add_task(life["id"], "买菜 100%_", priority=4, due_at=now.isoformat())
+    await env.add_task(life["id"], "已完成", done=True)
 
     assert [t["title"] for t in await env.tasks()] == ["买菜 100%_", "明天", "下周", "无截止"]
     assert [t["title"] for t in await env.tasks(status="done")] == ["已完成"]
@@ -100,12 +220,16 @@ async def test_task_filters_sort_and_pagination(env: Env) -> None:
         "无截止",
         "明天",
     ]
-    assert {t["title"] for t in await env.tasks(project_id=projects["生活"])} == {"买菜 100%_"}
+    newest = (await env.tasks(sort="updated", status="all"))[0]
+    assert newest["title"] == "已完成"
+    assert {t["title"] for t in await env.tasks(project_id=life["id"])} == {"买菜 100%_"}
     assert {t["title"] for t in await env.tasks(priority=[1, 5])} == {"明天", "下周"}
     assert [t["title"] for t in await env.tasks(q="100%_")] == ["买菜 100%_"]  # LIKE 通配符被转义
     assert [t["title"] for t in await env.tasks(q="%")] == ["买菜 100%_"]
     soon = await env.tasks(due_before=(now + timedelta(days=2)).isoformat())
     assert {t["title"] for t in soon} == {"买菜 100%_", "明天"}
+    later = await env.tasks(due_after=(now + timedelta(days=2)).isoformat())
+    assert {t["title"] for t in later} == {"下周"}
 
     titles: list[str] = []
     cursor: str | None = None
@@ -123,45 +247,12 @@ async def test_task_filters_sort_and_pagination(env: Env) -> None:
     )
     assert bad.status_code == 422
     assert bad.json()["error"]["details"]["errors"][0]["loc"] == ["query", "cursor"]
-    searched = await env.get("/api/v1/projects", q="工")
-    assert [p["title"] for p in searched["items"]] == ["工作"]
 
 
-async def test_project_progress_counts_open_and_done_tasks(env: Env) -> None:
-    """首页“项目进度”组件（T-0064）：有未完成任务的项目在前，归档项目不显示。"""
-    work = env.fake.add_project("工作")
-    life = env.fake.add_project("生活")
-    env.fake.add_project("空项目")
-    env.fake.add_project("旧项目", archived=True)
-    for title in ("周报", "评审", "部署"):
-        env.fake.add_task(work["id"], title)
-    env.fake.add_task(work["id"], "已上线", done=True)
-    env.fake.add_task(life["id"], "买菜")
-    env.fake.add_task(life["id"], "交水费", done=True)
-    env.fake.add_task(life["id"], "体检", done=True)
-    await env.connect()
-    page = await env.get("/api/v1/projects/progress")
-    assert page["sync"]["status"] == "ok"
-    rows = [(p["title"], p["open_tasks"], p["done_tasks"]) for p in page["items"]]
-    assert rows == [("工作", 3, 1), ("生活", 1, 2), ("空项目", 0, 0)]
-    assert page["items"][0]["source_url"].startswith("https://tasks.example.com/projects/")
-    limited = await env.get("/api/v1/projects/progress", limit=1)
-    assert [p["title"] for p in limited["items"]] == ["工作"]
-    too_many = await env.client.get(
-        "/api/v1/projects/progress", params={"limit": 21}, headers=env.headers()
-    )
-    assert too_many.status_code == 422
-
-
-async def test_reads_without_an_integration(env: Env) -> None:
+async def test_reads_on_an_empty_workspace(env: Env) -> None:
     page = await env.get("/api/v1/tasks")
-    assert page["items"] == []
-    assert page["sync"] == {
-        "status": "not_configured",
-        "as_of": None,
-        "reason": "not_configured",
-        "retry_at": None,
-    }
+    assert page == {"items": [], "next_cursor": None, "total_estimate": None}
+    assert (await env.get("/api/v1/projects"))["items"] == []
     missing = await env.client.get(f"/api/v1/tasks/{uuid.uuid4()}", headers=env.headers())
     assert missing.status_code == 404
 
@@ -174,26 +265,27 @@ async def test_create_task_and_replay_with_the_same_key(ready: Env) -> None:
     projects = await ready.projects()
     key = uuid.uuid4()
     due = datetime(2026, 11, 3, 18, 0, tzinfo=UTC).isoformat()
-    body = {"project_id": projects["工作"], "title": "交报告", "priority": 4, "due_at": due}
+    body = {
+        "project_id": projects["工作"],
+        "title": "交报告",
+        "priority": 4,
+        "due_at": due,
+        "labels": ["月报", " 月报 ", "紧急"],
+    }
     first = await ready.create_task(body, key)
     assert first.status_code == 201, first.text
     assert "Idempotent-Replayed" not in first.headers
     created = first.json()
     assert (created["title"], created["priority"]) == ("交报告", 4)
     assert created["due_at"] == "2026-11-03T18:00:00Z"
+    assert created["labels"] == ["月报", "紧急"]  # 去掉空白后重复的只保留一个
     assert created["project_id"] == projects["工作"]
     replay = await ready.create_task(body, key)
     assert replay.status_code == 201
     assert replay.headers["Idempotent-Replayed"] == "true"
     assert replay.json() == created
-    assert len(ready.fake.calls("POST", r"/projects/\d+/tasks")) == 1
-    assert [t["title"] for t in ready.fake.tasks.values()].count("交报告") == 1
-    assert (await ready.get(f"/api/v1/tasks/{created['id']}"))["title"] == "交报告"
-    audit = await run_sql(
-        ready.database_url,
-        "SELECT count(*) FROM workspace.audit_logs WHERE action = 'task.created'",
-    )
-    assert audit == 1
+    assert (await ready.titles()).count("交报告") == 1
+    assert await audit_count(ready, "task.created") == 2  # 夹具里的一个 + 这一个
 
 
 async def test_reusing_a_key_for_a_different_request_is_rejected(ready: Env) -> None:
@@ -205,7 +297,7 @@ async def test_reusing_a_key_for_a_different_request_is_rejected(ready: Env) -> 
     reused = await ready.create_task({**body, "title": "第二次"}, key)
     assert reused.status_code == 409
     assert error_code(reused) == "IDEMPOTENCY_KEY_REUSED"
-    assert len(ready.fake.calls("POST", r"/projects/\d+/tasks")) == 1
+    assert "第二次" not in await ready.titles()
 
 
 async def test_writes_require_an_idempotency_key(ready: Env) -> None:
@@ -222,199 +314,159 @@ async def test_writes_require_an_idempotency_key(ready: Env) -> None:
         headers={**ready.headers(write=True), "Idempotency-Key": "abc"},
     )
     assert invalid.status_code == 422
-    assert ready.fake.calls("POST", r"/projects/\d+/tasks") == []
+    assert await ready.titles() == ["写周报"]
 
 
-class Gate(httpx.AsyncBaseTransport):
-    """让匹配的请求停在发出之前，直到测试放行（模拟一个很慢的 Vikunja）。"""
-
-    def __init__(self, inner: httpx.AsyncBaseTransport, method: str) -> None:
-        self.inner = inner
-        self.method = method
-        self.entered = asyncio.Event()
-        self.release = asyncio.Event()
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        if request.method == self.method:
-            self.entered.set()
-            await self.release.wait()
-        return await self.inner.handle_async_request(request)
+async def test_task_validation(ready: Env) -> None:
+    projects = await ready.projects()
+    base = {"project_id": projects["工作"]}
+    bodies: list[dict[str, Any]] = [
+        {**base, "title": ""},
+        {**base, "title": "x" * 251},
+        {**base, "title": "a", "priority": 6},
+        {**base, "title": "a", "due_at": "2026-11-03T18:00:00"},  # 必须带时区
+        {**base, "title": "a", "labels": ["x"] * 21},
+        {**base, "title": "a", "labels": ["x" * 51]},
+        {**base, "title": "a", "assignee": "bob"},  # 单人版没有负责人
+    ]
+    for body in bodies:
+        response = await ready.create_task(body)
+        assert response.status_code == 422, body
 
 
 async def test_concurrent_duplicate_is_in_progress(ready: Env) -> None:
+    """同一个键的另一个请求还没提交：这一个在唯一约束上等待，对方提交后返回“仍在处理”。"""
     projects = await ready.projects()
-    gate = Gate(ready.fake.transport, "POST")
-    app_of(ready.client).state.connectors.transport = gate
     key = uuid.uuid4()
     body = {"project_id": projects["工作"], "title": "慢慢创建"}
-    first = asyncio.create_task(ready.create_task(body, key))
-    await asyncio.wait_for(gate.entered.wait(), timeout=5)
-    duplicate = await ready.create_task(body, key)
-    assert duplicate.status_code == 409
+    conn = await asyncpg.connect(asyncpg_dsn(ready.database_url))
+    try:
+        other = conn.transaction()
+        await other.start()
+        await conn.execute(
+            "INSERT INTO workspace.idempotency_requests (workspace_id, actor_id, idempotency_key,"
+            " request_fingerprint, status, context_json, expires_at)"
+            " VALUES ($1, $2, $3, 'other', 'processing', '{}', now() + interval '1 hour')",
+            uuid.UUID(ready.workspace_id),
+            ready.owner_id,
+            key,
+        )
+        request = asyncio.create_task(ready.create_task(body, key))
+        for _ in range(100):  # 等这个请求停在唯一约束上
+            waiting = await run_sql(
+                ready.database_url, "SELECT count(*) FROM pg_locks WHERE NOT granted"
+            )
+            if waiting:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail("请求没有等待唯一约束")
+        await other.commit()
+        duplicate = await asyncio.wait_for(request, timeout=10)
+    finally:
+        await conn.close()
+    assert duplicate.status_code == 409, duplicate.text
     assert error_code(duplicate) == "IDEMPOTENCY_IN_PROGRESS"
     assert duplicate.headers["Retry-After"] == "1"
-    gate.release.set()
-    assert (await first).status_code == 201
-    assert (await ready.create_task(body, key)).headers["Idempotent-Replayed"] == "true"
-    assert len(ready.fake.calls("POST", r"/projects/\d+/tasks")) == 1
+    assert "慢慢创建" not in await ready.titles()  # 这一个的写入随事务回滚
 
 
-async def test_unknown_result_is_resolved_without_creating_twice(ready: Env) -> None:
-    """请求已到达 Vikunja 但响应丢了：返回 504；用同一个键重发时查到已创建的任务。"""
+async def test_left_over_processing_record_is_replaced(ready: Env) -> None:
+    """T-0082 之前留下的“处理中”记录（Vikunja 结果未知）：作废，按新请求执行。"""
     projects = await ready.projects()
     key = uuid.uuid4()
-    body = {"project_id": projects["工作"], "title": "响应丢失"}
-    ready.fake.fault("POST", r"/projects/\d+/tasks", "lose_response")
-    lost = await ready.create_task(body, key)
-    assert lost.status_code == 504
-    assert error_code(lost) == "RESULT_UNKNOWN"
-    assert lost.json()["error"]["details"] == {"retry_with_same_key": True}
-    resolved = await ready.create_task(body, key)
-    assert resolved.status_code == 201, resolved.text
-    assert resolved.json()["title"] == "响应丢失"
-    assert len(ready.fake.calls("POST", r"/projects/\d+/tasks")) == 1  # 没有再发一次创建
-    assert [t["title"] for t in ready.fake.tasks.values()].count("响应丢失") == 1
-    replay = await ready.create_task(body, key)
-    assert replay.headers["Idempotent-Replayed"] == "true"
-    assert replay.json() == resolved.json()
-
-
-async def test_unknown_result_that_did_not_apply(ready: Env) -> None:
-    projects = await ready.projects()
-    key = uuid.uuid4()
-    body = {"project_id": projects["工作"], "title": "其实没建"}
-    ready.fake.fault("POST", r"/projects/\d+/tasks", "timeout_before")
-    assert (await ready.create_task(body, key)).status_code == 504
-    not_applied = await ready.create_task(body, key)
-    assert not_applied.status_code == 409
-    assert error_code(not_applied) == "OPERATION_NOT_APPLIED"
-    again = await ready.create_task(body, key)
-    assert (again.status_code, again.headers["Idempotent-Replayed"]) == (409, "true")
-    # 用新的键重新提交才会真正创建
-    assert (await ready.create_task(body)).status_code == 201
-    assert len(ready.fake.calls("POST", r"/projects/\d+/tasks")) == 2
-
-
-async def test_server_error_after_sending_is_treated_as_unknown(ready: Env) -> None:
-    projects = await ready.projects()
-    key = uuid.uuid4()
-    body = {"project_id": projects["工作"], "title": "5xx"}
-    ready.fake.fault("POST", r"/projects/\d+/tasks", 500)
-    failed = await ready.create_task(body, key)
-    assert failed.status_code == 503
-    assert error_code(failed) == "EXTERNAL_UNAVAILABLE"
-    # 不能确定有没有生效：同一个键重发先查询，查不到就是没生效
-    assert error_code(await ready.create_task(body, key)) == "OPERATION_NOT_APPLIED"
-    assert (await ready.integration())["status"] == "unavailable"
-
-
-async def test_not_sent_can_be_retried_with_the_same_key(ready: Env) -> None:
-    projects = await ready.projects()
-    key = uuid.uuid4()
-    body = {"project_id": projects["工作"], "title": "连接失败"}
-    ready.fake.fault("POST", r"/projects/\d+/tasks", "connect")
-    failed = await ready.create_task(body, key)
-    assert failed.status_code == 503
-    assert error_code(failed) == "EXTERNAL_UNAVAILABLE"
-    assert (await ready.integration())["status"] == "unavailable"
-    retried = await ready.create_task(body, key)
-    assert retried.status_code == 201
-    assert "Idempotent-Replayed" not in retried.headers
-    assert (await ready.integration())["status"] == "active"  # 成功后恢复
-
-
-async def test_unreachable_vikunja_marks_the_data_stale(ready: Env) -> None:
-    """A05：第三方服务断开时首页任务模块显示 stale，其余组件照常；读取仍走投影。"""
-    projects = await ready.projects()
-    ready.fake.fault("POST", r"/projects/\d+/tasks", "connect")
-    failed = await ready.create_task({"project_id": projects["工作"], "title": "断开时创建"})
-    assert failed.status_code == 503
-    page = await ready.get("/api/v1/tasks")
-    assert page["sync"]["status"] == "stale"
-    assert page["sync"]["reason"] == "source_unavailable"
-    assert [t["title"] for t in page["items"]] == ["写周报"]
-    overview = await ready.get("/api/v1/dashboard/overview")
-    module = overview["modules"]["tasks"]
-    assert (module["status"], module["reason"], module["retryable"]) == (
-        "stale",
-        "source_unavailable",
-        True,
+    await run_sql(
+        ready.database_url,
+        "INSERT INTO workspace.idempotency_requests (workspace_id, actor_id, idempotency_key,"
+        " request_fingerprint, status, context_json, expires_at)"
+        " VALUES ($1, $2, $3, 'old', 'processing', '{}', now() + interval '1 hour')",
+        uuid.UUID(ready.workspace_id),
+        ready.owner_id,
+        key,
     )
-    assert overview["summary"]["pending_tasks"] == 1  # stale 仍显示数据
-    assert len(overview["widgets"]) == 4  # 其余组件照常
-    # 恢复后第一次成功访问就回到 ok
-    assert (
-        await ready.create_task({"project_id": projects["工作"], "title": "恢复后"})
-    ).status_code == 201
-    assert (await ready.get("/api/v1/tasks"))["sync"]["status"] == "ok"
+    body = {"project_id": projects["工作"], "title": "旧键新请求"}
+    reused = await ready.create_task(body, key)
+    assert reused.status_code == 409 and error_code(reused) == "IDEMPOTENCY_KEY_REUSED"
+    await run_sql(
+        ready.database_url,
+        "UPDATE workspace.idempotency_requests SET expires_at = now() - interval '1 minute'"
+        " WHERE idempotency_key = $1",
+        key,
+    )
+    created = await ready.create_task(body, key)
+    assert created.status_code == 201, created.text
+    assert (await ready.create_task(body, key)).headers["Idempotent-Replayed"] == "true"
 
 
-async def test_rate_limit_keeps_retry_after_and_allows_retry(ready: Env) -> None:
-    projects = await ready.projects()
+async def test_create_in_an_unknown_project_is_404_and_replayed(ready: Env) -> None:
     key = uuid.uuid4()
-    body = {"project_id": projects["工作"], "title": "限流"}
-    ready.fake.fault("POST", r"/projects/\d+/tasks", 429, headers={"Retry-After": "7"})
-    limited = await ready.create_task(body, key)
-    assert limited.status_code == 503
-    assert error_code(limited) == "EXTERNAL_RATE_LIMITED"
-    assert limited.headers["Retry-After"] == "7"
-    assert (await ready.create_task(body, key)).status_code == 201
+    body = {"project_id": str(uuid.uuid4()), "title": "没有项目"}
+    first = await ready.create_task(body, key)
+    assert first.status_code == 404
+    again = await ready.create_task(body, key)
+    assert again.status_code == 404  # 确定的失败也记下来，重放同样的错误
+    assert await ready.titles() == ["写周报"]
 
 
-async def test_vikunja_validation_errors_are_replayed(ready: Env) -> None:
-    projects = await ready.projects()
-    key = uuid.uuid4()
-    body = {"project_id": projects["工作"], "title": "被拒绝"}
-    ready.fake.fault("POST", r"/projects/\d+/tasks", 422)
-    rejected = await ready.create_task(body, key)
-    assert rejected.status_code == 422
-    assert error_code(rejected) == "EXTERNAL_VALIDATION_FAILED"
-    replay = await ready.create_task(body, key)
-    assert (replay.status_code, replay.headers["Idempotent-Replayed"]) == (422, "true")
-    assert error_code(replay) == "EXTERNAL_VALIDATION_FAILED"
-
-
-async def test_create_in_an_unknown_project_is_404(ready: Env) -> None:
-    response = await ready.create_task({"project_id": str(uuid.uuid4()), "title": "x"})
-    assert response.status_code == 404
-    assert ready.fake.calls("POST", r"/projects/\d+/tasks") == []
-
-
-# ---------------------------------------------------------------- 修改
+# ---------------------------------------------------------------- 修改与删除
 
 
 async def test_update_task_checks_the_version(ready: Env) -> None:
     task = await ready.task_by_title("写周报")
-    key = uuid.uuid4()
-    change = {"version": task["version"], "title": "写月报", "done": True, "due_at": None}
-    updated = await ready.update_task(task["id"], change, key)
+    updated = await ready.update_task(
+        task["id"], {"version": task["version"], "title": "写月报", "labels": ["月报"]}
+    )
     assert updated.status_code == 200, updated.text
     body = updated.json()
-    assert (body["title"], body["done"], body["due_at"]) == ("写月报", True, None)
-    assert body["done_at"] is not None
-    assert body["version"] != task["version"]
-    assert body["description"] == "**本周**"  # 没改的字段保持不变
-    replay = await ready.update_task(task["id"], change, key)
-    assert replay.headers["Idempotent-Replayed"] == "true"
-    assert replay.json() == body
-    assert len(ready.fake.calls("PATCH", r"/tasks/\d+")) == 1
-
-    stale = await ready.update_task(task["id"], {"version": task["version"], "priority": 1})
-    assert stale.status_code == 409
-    assert error_code(stale) == "VERSION_CONFLICT"
+    assert (body["title"], body["labels"], body["version"]) == ("写月报", ["月报"], "2")
+    assert body["description"] == "**本周**"  # 没发送的字段不变
+    stale = await ready.update_task(task["id"], {"version": task["version"], "title": "旧"})
+    assert stale.status_code == 409 and error_code(stale) == "VERSION_CONFLICT"
     details = stale.json()["error"]["details"]
-    assert details["current_version"] == body["version"]
-    assert details["current"]["title"] == "写月报"
-    assert len(ready.fake.calls("PATCH", r"/tasks/\d+")) == 1
+    assert details["current_version"] == "2" and details["current"]["title"] == "写月报"
+    patches: list[dict[str, Any]] = [
+        {"version": "2"},
+        {"version": "2", "title": None},
+        {"version": "2", "priority": None},
+        {"version": "2", "labels": None},
+    ]
+    for invalid in patches:
+        assert (await ready.update_task(task["id"], invalid)).status_code == 422, invalid
+    cleared = await ready.update_task(
+        task["id"], {"version": "2", "due_at": "2026-11-03T10:00:00+08:00"}
+    )
+    assert cleared.json()["due_at"] == "2026-11-03T02:00:00Z"
+    cleared = await ready.update_task(task["id"], {"version": "3", "due_at": None})
+    assert cleared.status_code == 200 and cleared.json()["due_at"] is None
+    missing = await ready.update_task(str(uuid.uuid4()), {"version": "1", "title": "x"})
+    assert missing.status_code == 404
+    metadata = await run_sql(
+        ready.database_url,
+        "SELECT metadata_redacted_json::text FROM workspace.audit_logs"
+        " WHERE action = 'task.updated' ORDER BY created_at LIMIT 1",
+    )
+    assert '"fields": ["labels", "title"]' in metadata
 
 
-async def test_conflict_refreshes_the_projection(ready: Env) -> None:
+async def test_done_sets_and_clears_the_done_time(ready: Env) -> None:
     task = await ready.task_by_title("写周报")
-    external = int(task["external_id"].rsplit(":", 1)[1])
-    ready.fake.tasks[external].update(title="别人改了", updated=ready.fake.tick())
-    stale = await ready.update_task(task["id"], {"version": task["version"], "priority": 2})
-    assert stale.status_code == 409
-    assert (await ready.get(f"/api/v1/tasks/{task['id']}"))["title"] == "别人改了"
+    done = await ready.update_task(task["id"], {"version": task["version"], "done": True})
+    assert done.status_code == 200
+    assert done.json()["done"] is True and done.json()["done_at"] is not None
+    reopened = await ready.update_task(task["id"], {"version": "2", "done": False})
+    assert reopened.json()["done"] is False and reopened.json()["done_at"] is None
+
+
+async def test_update_replay_returns_the_first_result(ready: Env) -> None:
+    task = await ready.task_by_title("写周报")
+    key = uuid.uuid4()
+    body = {"version": task["version"], "priority": 5}
+    first = await ready.update_task(task["id"], body, key)
+    assert first.status_code == 200
+    replay = await ready.update_task(task["id"], body, key)
+    assert replay.headers["Idempotent-Replayed"] == "true"
+    assert replay.json() == first.json()
+    assert (await ready.task_by_title("写周报"))["version"] == "2"  # 只改了一次
 
 
 async def test_move_task_to_another_project(ready: Env) -> None:
@@ -423,153 +475,25 @@ async def test_move_task_to_another_project(ready: Env) -> None:
     moved = await ready.update_task(
         task["id"], {"version": task["version"], "project_id": projects["生活"]}
     )
-    assert moved.status_code == 200, moved.text
-    assert moved.json()["project_id"] == projects["生活"]
-    unknown = await ready.update_task(
-        task["id"], {"version": moved.json()["version"], "project_id": str(uuid.uuid4())}
-    )
+    assert moved.status_code == 200 and moved.json()["project_id"] == projects["生活"]
+    unknown = await ready.update_task(task["id"], {"version": "2", "project_id": str(uuid.uuid4())})
     assert unknown.status_code == 404
-
-
-async def test_unknown_update_result_is_checked_against_vikunja(ready: Env) -> None:
-    task = await ready.task_by_title("写周报")
-    key = uuid.uuid4()
-    change = {"version": task["version"], "priority": 5}
-    ready.fake.fault("PATCH", r"/tasks/\d+", "lose_response")
-    assert (await ready.update_task(task["id"], change, key)).status_code == 504
-    resolved = await ready.update_task(task["id"], change, key)
-    assert resolved.status_code == 200, resolved.text
-    assert resolved.json()["priority"] == 5
-    assert len(ready.fake.calls("PATCH", r"/tasks/\d+")) == 1
-
-    other = await ready.task_by_title("写周报")
-    key = uuid.uuid4()
-    change = {"version": other["version"], "title": "没有生效"}
-    ready.fake.fault("PATCH", r"/tasks/\d+", "timeout_before")
-    assert (await ready.update_task(other["id"], change, key)).status_code == 504
-    not_applied = await ready.update_task(other["id"], change, key)
-    assert error_code(not_applied) == "OPERATION_NOT_APPLIED"
-
-
-async def test_task_deleted_in_vikunja_becomes_404(ready: Env) -> None:
-    task = await ready.task_by_title("写周报")
-    ready.fake.tasks.clear()
-    response = await ready.update_task(task["id"], {"version": task["version"], "priority": 1})
-    assert response.status_code == 404
-    gone = await ready.client.get(f"/api/v1/tasks/{task['id']}", headers=ready.headers())
-    assert gone.status_code == 404  # 投影已记 tombstone
-    assert await ready.tasks(status="all") == []
-
-
-# ---------------------------------------------------------------- 删除
+    assert (await ready.task_by_title("写周报"))["version"] == "2"  # 失败没有改动
 
 
 async def test_delete_task_is_idempotent(ready: Env) -> None:
     task = await ready.task_by_title("写周报")
+    stale = await ready.delete_task(task["id"], "7")
+    assert stale.status_code == 409 and error_code(stale) == "VERSION_CONFLICT"
     key = uuid.uuid4()
     deleted = await ready.delete_task(task["id"], task["version"], key)
     assert deleted.status_code == 204
-    assert ready.fake.tasks == {}
-    gone = await ready.client.get(f"/api/v1/tasks/{task['id']}", headers=ready.headers())
-    assert gone.status_code == 404
     replay = await ready.delete_task(task["id"], task["version"], key)
-    assert (replay.status_code, replay.headers["Idempotent-Replayed"]) == (204, "true")
-    # 换一个键再删：投影已经知道它被删除了，同样是 204，不再访问 Vikunja
-    before = len(ready.fake.requests)
-    assert (await ready.delete_task(task["id"], task["version"])).status_code == 204
-    assert len(ready.fake.requests) == before
-    assert len(ready.fake.calls("DELETE", r"/tasks/\d+")) == 1
-    missing = await ready.delete_task(str(uuid.uuid4()), "v")
-    assert missing.status_code == 404
-
-
-async def test_delete_when_already_gone_in_vikunja(ready: Env) -> None:
-    task = await ready.task_by_title("写周报")
-    ready.fake.tasks.clear()
-    assert (await ready.delete_task(task["id"], task["version"])).status_code == 204
-    assert ready.fake.calls("DELETE", r"/tasks/\d+") == []
-
-
-async def test_delete_checks_the_version_and_unknown_results(ready: Env) -> None:
-    task = await ready.task_by_title("写周报")
-    stale = await ready.delete_task(task["id"], "2000-01-01T00:00:00Z")
-    assert stale.status_code == 409
-    assert error_code(stale) == "VERSION_CONFLICT"
-    key = uuid.uuid4()
-    ready.fake.fault("DELETE", r"/tasks/\d+", "timeout_before")
-    assert (await ready.delete_task(task["id"], task["version"], key)).status_code == 504
-    not_applied = await ready.delete_task(task["id"], task["version"], key)
-    assert error_code(not_applied) == "OPERATION_NOT_APPLIED"
-    assert len(ready.fake.tasks) == 1
-
-    key = uuid.uuid4()
-    ready.fake.fault("DELETE", r"/tasks/\d+", "lose_response")
-    assert (await ready.delete_task(task["id"], task["version"], key)).status_code == 504
-    assert (await ready.delete_task(task["id"], task["version"], key)).status_code == 204
-
-
-# ---------------------------------------------------------------- 外部错误与集成状态
-
-
-async def test_revoked_token_is_502_and_marks_the_integration(ready: Env) -> None:
-    task = await ready.task_by_title("写周报")
-    ready.fake.token = "tk_" + "r" * 40
-    response = await ready.update_task(task["id"], {"version": task["version"], "priority": 1})
-    assert response.status_code == 502
-    assert error_code(response) == "INTEGRATION_UNAUTHORIZED"
-    assert (await ready.integration())["status"] == "unauthorized"
-    page = await ready.get("/api/v1/tasks")
-    assert page["sync"]["status"] == "unauthorized"
-    assert [t["title"] for t in page["items"]] == ["写周报"]  # 投影里的数据仍可读
-    overview = await ready.get("/api/v1/dashboard/overview")
-    assert overview["modules"]["tasks"]["status"] == "unauthorized"
-    assert overview["summary"]["pending_tasks"] is None
-
-
-async def test_rejected_token_on_create_can_be_retried_with_the_same_key(ready: Env) -> None:
-    projects = await ready.projects()
-    key = uuid.uuid4()
-    body = {"project_id": projects["工作"], "title": "换 Token 后重试"}
-    ready.fake.fault("POST", r"/projects/\d+/tasks", 401)
-    rejected = await ready.create_task(body, key)
-    assert rejected.status_code == 502
-    assert error_code(rejected) == "INTEGRATION_UNAUTHORIZED"
-    assert (await ready.integration())["status"] == "unauthorized"
-    # Vikunja 没有处理这个请求：不保留结果，Token 恢复后同一个键照常创建
-    retried = await ready.create_task(body, key)
-    assert retried.status_code == 201, retried.text
-    assert "Idempotent-Replayed" not in retried.headers
-    assert (await ready.integration())["status"] == "active"
-
-
-async def test_forbidden_resource_is_403_without_marking_the_integration(ready: Env) -> None:
-    task = await ready.task_by_title("写周报")
-    ready.fake.fault("GET", r"/tasks/\d+", 403)
-    response = await ready.update_task(task["id"], {"version": task["version"], "priority": 1})
-    assert response.status_code == 403
-    assert error_code(response) == "EXTERNAL_FORBIDDEN"
-    assert (await ready.integration())["status"] == "active"
-
-
-async def test_writes_need_a_tested_integration(ready: Env) -> None:
-    integration = await ready.integration()
-    rotated = await ready.client.patch(
-        f"/api/v1/integrations/{integration['id']}",
-        json={"version": integration["version"], "api_token": "tk_" + "n" * 40},
-        headers=ready.headers(write=True),
-    )
-    assert rotated.json()["status"] == "pending"
-    task = await ready.task_by_title("写周报")
-    key = uuid.uuid4()
-    response = await ready.update_task(task["id"], {"version": task["version"], "priority": 1}, key)
-    assert response.status_code == 409
-    assert error_code(response) == "INTEGRATION_UNAVAILABLE"
-    # 没有调用 Vikunja，也没有留下幂等记录：测试通过后用同一个键可以重试
-    assert ready.fake.calls("PATCH", r"/tasks/\d+") == []
-    assert (
-        await run_sql(ready.database_url, "SELECT count(*) FROM workspace.idempotency_requests")
-        == 0
-    )
+    assert replay.status_code == 204 and replay.headers["Idempotent-Replayed"] == "true"
+    again = await ready.delete_task(task["id"], task["version"])  # 新的键：已经不存在也是 204
+    assert again.status_code == 204
+    assert await ready.tasks(status="all") == []
+    assert await audit_count(ready, "task.deleted") == 1
 
 
 # ---------------------------------------------------------------- 权限
@@ -581,77 +505,96 @@ async def test_viewer_reads_member_writes(ready: Env) -> None:
     async with ready.member("viewer@example.com", "viewer") as viewer:
         headers = {"X-Workspace-Id": ready.workspace_id, "X-CSRF-Token": viewer.cookies["ws_csrf"]}
         assert (await viewer.get("/api/v1/tasks", headers=headers)).status_code == 200
-        denied = await viewer.post(
-            "/api/v1/tasks",
-            json={"project_id": projects["工作"], "title": "viewer"},
-            headers={**headers, "Idempotency-Key": str(uuid.uuid4())},
-        )
-        assert denied.status_code == 403
-        denied_delete = await viewer.delete(
-            f"/api/v1/tasks/{task['id']}",
-            params={"version": task["version"]},
-            headers={**headers, "Idempotency-Key": str(uuid.uuid4())},
-        )
-        assert denied_delete.status_code == 403
-    assert ready.fake.calls("POST", r"/projects/\d+/tasks") == []
+        assert (await viewer.get("/api/v1/projects", headers=headers)).status_code == 200
+        denied = [
+            await viewer.post(
+                "/api/v1/tasks",
+                json={"project_id": projects["工作"], "title": "viewer"},
+                headers={**headers, "Idempotency-Key": str(uuid.uuid4())},
+            ),
+            await viewer.delete(
+                f"/api/v1/tasks/{task['id']}",
+                params={"version": task["version"]},
+                headers={**headers, "Idempotency-Key": str(uuid.uuid4())},
+            ),
+            await viewer.post("/api/v1/projects", json={"title": "viewer"}, headers=headers),
+            await viewer.patch(
+                f"/api/v1/projects/{projects['工作']}",
+                json={"version": 1, "title": "viewer"},
+                headers=headers,
+            ),
+            await viewer.delete(
+                f"/api/v1/projects/{projects['工作']}", params={"version": 1}, headers=headers
+            ),
+        ]
+        assert [r.status_code for r in denied] == [403] * 5
+    assert await ready.titles() == ["写周报"]
+    assert set(await ready.projects()) == {"工作", "生活"}
     async with ready.member("member@example.com", "member") as member:
-        headers = {
-            "X-Workspace-Id": ready.workspace_id,
-            "X-CSRF-Token": member.cookies["ws_csrf"],
-            "Idempotency-Key": str(uuid.uuid4()),
-        }
+        headers = {"X-Workspace-Id": ready.workspace_id, "X-CSRF-Token": member.cookies["ws_csrf"]}
         created = await member.post(
             "/api/v1/tasks",
             json={"project_id": projects["工作"], "title": "member"},
-            headers=headers,
+            headers={**headers, "Idempotency-Key": str(uuid.uuid4())},
         )
         assert created.status_code == 201, created.text
+        project = await member.post("/api/v1/projects", json={"title": "成员的"}, headers=headers)
+        assert project.status_code == 201, project.text
 
 
-async def test_other_workspaces_cannot_see_tasks(ready: Env, make_client: ClientFactory) -> None:
+async def test_other_workspaces_cannot_see_or_use_projects_and_tasks(
+    ready: Env, make_client: ClientFactory
+) -> None:
     task = await ready.task_by_title("写周报")
+    projects = await ready.projects()
     bob_id = await add_user(ready.database_url, BOB["email"], BOB["password"])
     bob_workspace = await add_workspace(ready.database_url, bob_id, "Bob 的空间")
     async with make_client() as bob:
         assert (await bob.post("/api/v1/auth/login", json=BOB)).status_code == 200
-        own = {"X-Workspace-Id": str(bob_workspace)}
+        own = {"X-Workspace-Id": str(bob_workspace), "X-CSRF-Token": bob.cookies["ws_csrf"]}
         assert (await bob.get(f"/api/v1/tasks/{task['id']}", headers=own)).status_code == 404
+        assert (
+            await bob.get(f"/api/v1/projects/{projects['工作']}", headers=own)
+        ).status_code == 404
         assert (await bob.get("/api/v1/tasks", headers=own)).json()["items"] == []
+        assert (await bob.get("/api/v1/projects", headers=own)).json()["items"] == []
+        # 用别人的项目 ID 在自己的空间里建任务：项目不在这个空间里
+        foreign_project = await bob.post(
+            "/api/v1/tasks",
+            json={"project_id": projects["工作"], "title": "越权"},
+            headers={**own, "Idempotency-Key": str(uuid.uuid4())},
+        )
+        assert foreign_project.status_code == 404
+        renamed = await bob.patch(
+            f"/api/v1/projects/{projects['工作']}",
+            json={"version": 1, "title": "越权"},
+            headers=own,
+        )
+        assert renamed.status_code == 404
         foreign = {"X-Workspace-Id": ready.workspace_id}
         assert (await bob.get("/api/v1/tasks", headers=foreign)).status_code == 404
+    assert (await ready.get(f"/api/v1/projects/{projects['工作']}"))["title"] == "工作"
 
 
 # ---------------------------------------------------------------- 首页任务模块
 
 
-async def test_overview_tasks_module_reads_the_projection(env: Env) -> None:
-    work = env.fake.add_project("工作")
-    env.fake.add_project("归档", archived=True)
+async def test_overview_tasks_module(env: Env) -> None:
+    work = await env.add_project("工作")
+    archived = await env.add_project("归档", archived=True)
     now = datetime.now(UTC)
-    env.fake.add_task(work["id"], "今天", due_date=_stamp(now.replace(hour=0, minute=0, second=1)))
-    env.fake.add_task(work["id"], "逾期", due_date=_stamp(now - timedelta(days=3)))
-    env.fake.add_task(work["id"], "以后", due_date=_stamp(now + timedelta(days=3)))
-    env.fake.add_task(work["id"], "完成了", done=True, due_date=_stamp(now))
-    await env.connect()
+    start = now.replace(hour=0, minute=0, second=1, microsecond=0)
+    await env.add_task(work["id"], "今天", due_at=start.isoformat())
+    await env.add_task(work["id"], "逾期", due_at=(now - timedelta(days=3)).isoformat())
+    await env.add_task(work["id"], "以后", due_at=(now + timedelta(days=3)).isoformat())
+    await env.add_task(work["id"], "完成了", done=True, due_at=now.isoformat())
+    await env.add_task(archived["id"], "归档项目里的", due_at=(now + timedelta(days=9)).isoformat())
     overview = await env.get("/api/v1/dashboard/overview")
     module = overview["modules"]["tasks"]
     assert (module["status"], module["retryable"]) == ("ok", True)
-    assert module["as_of"] is not None
-    assert overview["summary"]["pending_tasks"] == 3
+    assert overview["summary"]["pending_tasks"] == 4
     assert overview["summary"]["active_projects"] == 1
     today = overview["today_tasks"]
     assert [t["title"] for t in today] == ["逾期", "今天"]
     assert {t["project_title"] for t in today} == {"工作"}
-    assert all(t["source_url"].startswith("https://tasks.example.com/") for t in today)
-
-
-async def test_overview_marks_old_data_as_stale(ready: Env) -> None:
-    await run_sql(
-        ready.database_url,
-        "UPDATE workspace.sync_cursors SET last_success_at = now() - interval '1 hour'",
-    )
-    overview = await ready.get("/api/v1/dashboard/overview")
-    assert overview["modules"]["tasks"]["status"] == "stale"
-    assert overview["modules"]["tasks"]["reason"] == "sync_overdue"
-    assert overview["summary"]["pending_tasks"] == 1  # stale 仍然显示数据
-    assert (await ready.get("/api/v1/tasks"))["sync"]["status"] == "stale"
+    assert all("source_url" not in t for t in today)

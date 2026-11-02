@@ -71,7 +71,7 @@ CHROMIUM_PATH=/usr/bin/chromium npm run test:browser
 
 ## Sprint 3 任务与集成
 
-`/tasks` 提供列表/看板、状态/项目/截止时间/优先级/标题筛选和游标分页，任务抽屉支持新建、按变更字段编辑、确认删除。项目与任务都标注 Vikunja 来源，原生链接只允许无凭据的 http(s) 地址；描述只作文本编辑，不解析 HTML。`/projects` 显示投影项目与同步新鲜度。viewer 只读，member 可写任务，owner/admin 配置集成。
+项目与任务由工作台自己管理（T-0082 移除了 Vikunja，`docs/decisions/2026-11-02-remove-vikunja.md`）。`/tasks` 提供列表/看板、状态/项目/截止时间/优先级/标题筛选和游标分页，显示所属项目与标签；任务抽屉支持新建、按变更字段编辑（含标签：逗号或顿号分隔，最多 20 个、每个不超过 50 字）、确认删除；`/tasks?project_id=` 筛选项目，`/tasks?task=` 直接打开任务。描述只作文本编辑，不解析 HTML。`/projects` 新建、改名、改说明、归档（默认隐藏，勾选后显示）/ 恢复、删除（二次确认并提示会删除的任务数），版本冲突时提示重新加载。viewer 只读，member 可写项目与任务，owner/admin 配置集成（只有 GitHub）。
 
 `/settings/integrations` 仅向 owner/admin 开放：创建/修改连接、启停、测试连接、手动同步，显示状态、核验版本/实例版本/Token 是否已设置、同步与 Webhook 状态。已有服务地址和 Token 不回填表单、不展示在页面，留空表示保留。Token 不放入 localStorage 或操作队列，提交后清空输入。连接测试的 HTTP 200 也可能有失败检查，界面逐项展示，不把它当作成功。
 

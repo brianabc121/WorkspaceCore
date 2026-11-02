@@ -28,12 +28,11 @@ from tests.helpers import BOB, OWNER, ClientFactory, add_member, add_user, add_w
 pytestmark = pytest.mark.integration
 
 OPENAPI = Path(__file__).resolve().parent.parent / "openapi.json"
-# 不需要会话的接口：首次安装（凭安装凭据）、登录、Webhook（凭签名）
+# 不需要会话的接口：首次安装（凭安装凭据）、登录（T-0082 删除了 Vikunja 的 Webhook 端点）
 PUBLIC = {
     ("POST", "/api/v1/setup"),
     ("GET", "/api/v1/setup/status"),
     ("POST", "/api/v1/auth/login"),
-    ("POST", "/api/v1/webhooks/vikunja/{integration_id}"),
 }
 # viewer 也可以执行的写操作：只改自己的通知
 VIEWER_WRITES = {("PATCH", "/api/v1/notifications")}

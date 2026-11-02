@@ -44,7 +44,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | 命令 | 作用 |
 |---|---|
 | `sudo bash scripts/deploy.sh` | 一键部署 / 升级 / 清空 / 查看状态（菜单；部署只问 `SITE_DOMAIN`、`ACME_EMAIL`、`PUBLIC_BASE_URL`），见部署教程开头的「一键脚本」 |
-| `sudo bash scripts/deploy.sh connect` | 首次安装后自动接入 Vikunja、GitHub、n8n（菜单第 5 项）；接入在 api 容器里用 `python -m app.commands.connect` 完成，见部署教程「自动接入 Vikunja、GitHub、n8n」 |
+| `sudo bash scripts/deploy.sh connect` | 首次安装后自动接入 GitHub、n8n 并部署 OpenIM（菜单第 5 项）；接入在 api 容器里用 `python -m app.commands.connect` 完成，见部署教程「自动接入 GitHub、n8n、OpenIM」 |
 | `make env` | 从 `.env.example` 生成 `.env`，随机填写数据库密码、会话密钥等；`.env` 已存在则不改，只补新增的变量。每次都检查 `.env`（占位符、加密密钥格式、生产环境会话密钥长度、Windows 换行），有问题就列出并以非零状态退出，`make up` 不会开始构建 |
 | `make up` | 构建镜像并启动 6 个服务，等待全部健康检查通过（最多 300 秒） |
 | `make migrate` | 在运行中的 `api` 容器里执行 `alembic upgrade head` |
@@ -69,7 +69,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | grafana（可选） | `grafana/grafana:13.2.5` | 仪表盘与告警（外链） | monitoring + monitoring-public | `127.0.0.1:3000`（可配置） |
 
 - `backend` 是内部网络（不通外网）；数据库和 Redis 只在这个网络里，宿主机和外网都连不到。
-- `integrations` 也是内部网络，只有 caddy、api、worker 加入，供独立部署的第三方服务（Vikunja 等，见第 8 节）与工作台互通；
+- `integrations` 也是内部网络，只有 caddy、api、worker 加入，供独立部署的第三方服务（n8n，见第 12.4 节）与工作台互通；
   第三方服务碰不到 backend 里的数据库和 Redis。
 - `egress` 只有 worker 加入，用来访问外部托管的服务（GitHub 的周期同步要访问 `https://api.github.com`）；
   api 经 `frontend` 出网。出站地址仍由 Connector 的 SSRF 检查限制（私有地址只允许 `INTEGRATION_ALLOWED_HOSTS` 里的主机）。
@@ -96,8 +96,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | `SETUP_TOKEN` | 首次安装凭据（`make setup-token` 查看）；未配置时首次安装一律拒绝 | 随机 |
 | `CREDENTIAL_ENCRYPTION_KEY` | 第三方连接凭证与密钥库的加密密钥（64 位十六进制）；格式错误时 API 拒绝启动。**丢失后已保存的凭证无法解密**，请与数据库备份分开保存；更换按第 6.1 节轮换 | 随机 |
 | `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS` | 轮换期间保留的旧密钥（逗号分隔，只用于解密）；平时为空 | 空 |
-| `INTEGRATION_ALLOWED_HOSTS` | 允许工作台访问的内网主机名，逗号分隔。第三方服务的地址解析到私有 / 内网 / 链路本地地址时一律拒绝（SSRF 防护），除非主机名在这里 | `vikunja` |
-| `WEBHOOK_BASE_URL` | Vikunja 投递 Webhook 用的工作台地址（容器之间访问，Worker 注册 Webhook 时使用）；留空则不自动注册，只靠每 5 分钟的对账 | `http://caddy:8080` |
+| `INTEGRATION_ALLOWED_HOSTS` | 允许工作台访问的内网主机名，逗号分隔。第三方服务的地址解析到私有 / 内网 / 链路本地地址时一律拒绝（SSRF 防护），除非主机名在这里 | `n8n` |
 | `PROMETHEUS_URL` / `GRAFANA_URL` | 可选监控的内部地址（第 12 节）；留空表示没有部署，运维页显示“未部署” | 空 |
 | `GRAFANA_DASHBOARD_URL` | 运维页 Grafana 外链（浏览器访问的地址） | 空 |
 | `GRAFANA_ADMIN_PASSWORD` | Grafana 管理员密码；为空时 Grafana 拒绝启动 | 随机 |
@@ -117,9 +116,9 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
   `DATABASE_MAX_OVERFLOW`（高峰时额外允许的连接，默认 10）、`DASHBOARD_OVERVIEW_CONCURRENCY`（同时进行的首页聚合数，默认 3；
   每次聚合约占 5 个连接，超出的请求排队，不会让模块超时）。api 与 worker 各有一个连接池，两者之和要小于 PostgreSQL 的
   `max_connections`（默认 100）。
-  Worker 的 `WEBHOOK_MAX_ATTEMPTS`（Webhook 事件最多尝试几次后进死信，默认 8）、
-  `FULL_SYNC_INTERVAL_SECONDS`（多久做一次全量对账，默认 3600）——这两个要在 worker 的 `environment` 中传入；
+  Worker 的 `FULL_SYNC_INTERVAL_SECONDS`（GitHub 多久做一次全量对账，默认 3600）要在 worker 的 `environment` 中传入；
   `RECONCILE_INTERVAL_MINUTES`（增量对账的间隔，1–30 分钟，默认 5）已在 compose.yaml 中传入。
+  T-0082 移除 Vikunja 后，`.env` 里旧的 `VIKUNJA_*`、`WEBHOOK_BASE_URL`、`WEBHOOK_MAX_ATTEMPTS` 不再读取，可以留着。
 
 ## 4. 检查与排错
 
@@ -164,18 +163,32 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 4. `git fetch && git checkout <新版本的 tag 或提交>`，然后 `make env`：只补上新增的变量，不改已有的值。
 5. `docker compose build`：先构建新镜像，旧容器照常服务。
 6. `docker compose run --rm --no-deps -T api alembic upgrade head`：用新镜像执行迁移，此时旧版本仍在运行。
-   - 迁移只新增对象（第 5.2 节），旧代码不受影响。
+   - 迁移通常只新增对象（第 5.2 节），旧代码不受影响；`0020` 例外（见下面「从带 Vikunja 的旧版本升级」）。
 7. `make up`：用新镜像重建容器，等待全部健康检查通过。
 8. `make smoke`。装了 `tests/e2e` 的依赖时再跑 `make smoke-full`。
 9. 登录核对首页、任务、日历等常用页面，查看运维页的服务状态。
 
-Vikunja、n8n 等独立部署的组件分开升级：
-- 先各自备份（Vikunja 用 `vikunja dump`；n8n 备份数据卷与 `N8N_ENCRYPTION_KEY`）；
+n8n 等独立部署的组件分开升级：
+- 先各自备份（n8n 备份数据卷与 `N8N_ENCRYPTION_KEY`）；
 - 再改 `infra/*/compose.yaml` 里的 tag + digest，按对应的核验 ADR 重新验证。
+
+**从带 Vikunja 的旧版本升级**（T-0082，`docs/decisions/2026-11-02-remove-vikunja.md`）：
+
+- 迁移 `0020` 把已经同步到工作台的 Vikunja 项目与任务转成工作台自己的数据（ID 不变；找不到项目的任务放进每个工作空间的「未分组任务」），
+  然后删除 Vikunja 集成、`webhook_inbox` 与保存的 Vikunja 登录账号。只转换工作台里已有的同步结果，升级前可以先在旧版本里对 Vikunja 集成点一次“立即同步”。
+  迁移期间旧版本的任务页可能出错，第 7 步换上新版本后恢复。
+- `scripts/deploy.sh upgrade` 在迁移之后自动停用旧的 Vikunja：按 Compose 项目标签（`<core 项目名>-vikunja`，默认 `my-workspace-vikunja`）
+  `docker rm -f` 它的容器并删除网络；删除 `infra/caddy/apps-enabled/vikunja.caddy` 并重启 caddy；清空 `.env` 的 `VIKUNJA_DOMAIN`。
+  **数据卷保留**，最后打印 `docker volume rm …`，确认不再需要以前的数据后由管理员手动执行。
+- 手动升级时自己做：`docker ps -aq --filter label=com.docker.compose.project=my-workspace-vikunja | xargs -r docker rm -f`；
+  有 `infra/caddy/apps-enabled/vikunja.caddy` 就删掉，再 `docker compose restart caddy`。
+- 降级到 `0020` 之前只恢复表结构（第 5.2 节），工作台的项目与任务会被删除；以前的数据还在 Vikunja 的数据卷里。
 
 ### 5.2 数据库迁移的约定
 
-- 迁移 `0001` ~ `0018` 都**只新增**表、索引、触发器或可空列（`0014` 给 `im_messages` 加了一列，`0018` 给 `agent_instances` 加了一列），每个都有 downgrade。
+- 迁移 `0001` ~ `0019` 都**只新增**表、索引、触发器或可空列（`0014` 给 `im_messages` 加了一列，`0018` 给 `agent_instances` 加了一列），每个都有 downgrade。
+  `0020`（T-0082）是例外：转换 Vikunja 投影为工作台自己的项目与任务，删除 Vikunja 集成、`webhook_inbox` 表与 `integrations.webhook_secret_ref`；
+  downgrade 只恢复结构、不恢复数据（人类确认后合并）。
   CI 每次都跑 `upgrade head → downgrade base → upgrade head`（`ci-api.yml`），恢复演练也会在恢复出来的数据上执行 `upgrade head`。
 - 以后的迁移继续遵守“先扩展、后收缩”：
   - 新版本只加表、加列（可为空或有默认值），旧代码照常运行；
@@ -206,7 +219,7 @@ Vikunja、n8n 等独立部署的组件分开升级：
 
 - **HTTPS**：在 `.env` 里设置 `COMPOSE_FILE=compose.yaml:compose.https.yaml`、`SITE_DOMAIN`（已解析到本机的域名）、`ACME_EMAIL`，
   `PUBLIC_BASE_URL` 改为 `https://<域名>`，然后 `make up`。Caddy 改用 `infra/caddy/https.Caddyfile`：自动向 Let's Encrypt 申请并续期证书，
-  发布 80 / 443（HTTP 自动跳转 HTTPS），域名站点加 HSTS；内部的 `:8080` 保留（Vikunja 的 Webhook 经 `http://caddy:8080` 投递），
+  发布 80 / 443（HTTP 自动跳转 HTTPS），域名站点加 HSTS；内部的 `:8080` 保留（本机检查与容器之间的访问用），
   宿主机上仍按 `HTTP_BIND` 只绑定本机。两份 Caddyfile 的路由与安全响应头都写在 `infra/caddy/routes.caddy`。
   完整步骤见 `docs/deploy-guide.md` 第 5 步。
 - **密钥**：生产环境用 Secret 管理工具注入，不要把真实值写进仓库或 Compose 文件。
@@ -216,7 +229,7 @@ Vikunja、n8n 等独立部署的组件分开升级：
   最右侧的地址计数）。如果绕过 Caddy 直接暴露 API，必须去掉这个设置，否则客户端可以伪造 IP 绕过限流。
 - **备份**：把 `BACKUP_REPOSITORY` 配成异地仓库，定时运行 `make backup`，每月运行一次 `make restore-verify` 演练（第 14 节）。
 - **版本锁定**：所有镜像都是 tag + digest（`docs/versions.md`）。不要改成 `latest`；升级按第 5 节和 `docs/release-checklist.md` 进行。
-- **许可证**：Grafana、Vikunja 是 AGPL-3.0，n8n 是 Sustainable Use License，Redis 7.4 是 RSALv2 / SSPLv1。
+- **许可证**：Grafana 是 AGPL-3.0，n8n 是 Sustainable Use License，Redis 7.4 是 RSALv2 / SSPLv1。
   自托管自用没有问题；要对外提供服务或分发之前，先看 `docs/versions.md` 第 5 节。
 - **发布前**：按 `docs/release-checklist.md` 逐项检查（CI、扫描、版本锁定、备份演练、`.env` 与密钥轮换、性能、回滚方案）。
 
@@ -263,41 +276,10 @@ CREATE ROLE workspace LOGIN PASSWORD '<本地密码>';
 CREATE DATABASE workspace OWNER workspace;
 ```
 
-## 8. Vikunja（任务主源，独立部署）
+## 8. 项目与任务（工作台自己管理）
 
-Vikunja 用单独的 Compose 文件 `infra/vikunja/compose.yaml` 运行（规范第 11 节），版本固定为 **2.7.1**（镜像带 digest）。
-版本核验、权限与安全取舍见 `docs/decisions/2026-10-30-vikunja-2.7.1-verification.md`。
-
-```bash
-make up              # 先启动 core：它会创建 integrations 网络
-make vikunja-up      # 启动 Vikunja；原生界面 http://localhost:3456
-make vikunja-user    # 创建用户（自助注册已关闭）
-make vikunja-down    # 停止，保留数据卷
-```
-
-- 配置在根目录 `.env`：`VIKUNJA_SERVICE_SECRET`（`make env` 随机生成；丢失后所有 Vikunja 登录与 Token 失效）、
-  `VIKUNJA_PUBLIC_URL`、`VIKUNJA_BIND`、`VIKUNJA_PORT`；可选的 `VIKUNJA_DOMAIN`（用子域名经 HTTPS 对外，由
-  `scripts/deploy.sh connect` 设置，见部署教程「用子域名打开 Vikunja 和 n8n」）。core 的 Compose 项目名不是 `my-workspace` 时，
-  make 会按 `COMPOSE_PROJECT_NAME` 自动找到对应的 integrations 网络。
-- 工作台访问 Vikunja 用 `http://vikunja:3456`（integrations 网络内）；Vikunja 把 Webhook 发到
-  `http://caddy:8080/api/v1/webhooks/vikunja/<集成 ID>`，不经过对外端口。
-- 为了让 Webhook 能发到私有地址，Compose 里打开了 `VIKUNJA_OUTGOINGREQUESTS_ALLOWNONROUTABLEIPS`；
-  因此要保持自助注册关闭，只给可信的人创建 Vikunja 用户。多人使用时改用出站代理（见核验 ADR 第 6 节）。
-- 数据在卷 `vikunja-db`（SQLite）与 `vikunja-files`。Vikunja 独立部署、各自备份：用它自带的 `vikunja dump` / `restore`（第 14.1 节）；`make backup` 只备份工作台的数据库。
-- 工作台连接 Vikunja 用的 API Token 在 Vikunja 原生界面的设置里创建，需要的最小权限见核验 ADR 第 3 节。
-- 在工作台里添加集成（workspace admin）：服务地址填 `http://vikunja:3456`（容器内地址，已在 `INTEGRATION_ALLOWED_HOSTS` 里），
-  浏览器地址填 `VIKUNJA_PUBLIC_URL`，再粘贴 Token；保存后点“测试连接”，通过后会立即同步全部项目与任务。
-  接口见 `docs/api-contract.md` 的 Sprint 3 部分；Token 加密保存，之后不再显示。
-- Vikunja 只按秒保存时间：同一秒内两个人修改同一个任务时，后写的一方会覆盖前者而不报冲突（核验 ADR 第 5.5 节）。
-- **Vikunja 里的改动怎么回到工作台**（契约第 9、10.1 节）：
-  - Token 带 `projects_webhooks` 权限时，测试连接通过后 Worker 自动为每个未归档项目注册 Webhook，
-    Vikunja 经 `WEBHOOK_BASE_URL` 投递，改动通常一两秒内出现；之后新建的项目在每小时的全量对账时补注册。
-  - Worker 每 5 分钟做一次增量对账、每小时做一次全量对账（发现删除），Webhook 丢失或没有 Webhook 权限时也能最终一致；
-    集成页的“立即同步”触发一次全量同步。
-  - 处理失败的事件会重试，多次失败后进死信（不会丢，也不会无限重试）。查看：
-    `docker compose exec -T postgres psql -U workspace -d workspace -c "SELECT event_type, attempts, error_text, received_at FROM workspace.webhook_inbox WHERE status = 'dead_letter' ORDER BY received_at DESC LIMIT 20"`。
-    `token_rejected` 表示 Token 失效或被收回权限：在 Vikunja 里重新创建 Token，粘贴到集成设置并重新测试连接。
-
+项目与任务由工作台自己管理（2026-11-02 人类决定移除 Vikunja，T-0082，`docs/decisions/2026-11-02-remove-vikunja.md`），不用部署或接入任何组件，数据随 `make backup` 一起备份；
+接口见 `docs/api-contract.md`，从带 Vikunja 的旧版本升级见第 5.1 节。以前的 Vikunja 部署说明见 git 历史。
 
 ## 9. AFFiNE（文档主源，V1 只做深链接）
 
@@ -350,7 +332,7 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
 
 ## 11. 跨资源搜索
 
-- 顶栏搜索查的是工作台自己的索引：Vikunja 的任务与项目、GitHub 的仓库 / Issue / PR、AFFiNE 收藏（标题与备注）、本地日程。
+- 顶栏搜索查的是工作台自己的索引：项目与任务、GitHub 的仓库 / Issue / PR、AFFiNE 收藏（标题与备注）、本地日程。
   - 不搜 AFFiNE 文档正文，也不搜 Actions 运行。
   - 只返回你能看到的内容：别人的私有收藏、其他工作空间的数据都搜不到。
 - 索引由数据库触发器随写入更新，删除或同步掉的内容会立刻搜不到，平时不需要维护。
@@ -444,7 +426,7 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
 > 用子域名经 HTTPS 对外打开 n8n 编辑器：设置 `N8N_DOMAIN`（同时 `N8N_PUBLIC_URL=https://<域名>/`、`N8N_SECURE_COOKIE=true`、
 > `N8N_PROXY_HOPS=1`），并在 `infra/caddy/apps-enabled/` 生成站点；`scripts/deploy.sh connect` 会询问并自动完成（T-0078）。
 
-n8n 是独立的 Compose（`infra/n8n/compose.yaml`），与 Vikunja 一样加入 core 的 `integrations` 网络。
+n8n 是独立的 Compose（`infra/n8n/compose.yaml`），加入 core 的 `integrations` 网络。
 接口约定见 Sprint 5 契约第 6 节，触发与执行记录的实测见 `docs/decisions/2026-10-31-n8n-trigger-and-execution-verification.md`。
 
 1. 启动：
@@ -458,7 +440,7 @@ n8n 是独立的 Compose（`infra/n8n/compose.yaml`），与 Vikunja 一样加�
    ```
 
    `make env` 会随机生成 `N8N_ENCRYPTION_KEY`，请与数据库备份分开保存。
-2. 允许工作台访问 n8n：在 `.env` 的 `INTEGRATION_ALLOWED_HOSTS` 里加上 `n8n`（新生成的 `.env` 默认就是 `vikunja,n8n`），然后 `make up`。
+2. 允许工作台访问 n8n：在 `.env` 的 `INTEGRATION_ALLOWED_HOSTS` 里加上 `n8n`（新生成的 `.env` 默认就是 `n8n`），然后 `make up`。
 3. 打开编辑器（默认 `http://localhost:5678/`），创建 owner 账号，然后：
    - **API Key**：Settings → n8n API → Create an API key，只勾选 `workflow:list`、`workflow:read`、`execution:list`、`execution:read`。
      工作台不会尝试写入，所以测试连接发现不了权限过大的 Key，请只勾选这四项。
@@ -536,7 +518,7 @@ n8n 是独立的 Compose（`infra/n8n/compose.yaml`），与 Vikunja 一样加�
   - `.env`：里面有解密凭证的 `CREDENTIAL_ENCRYPTION_KEY`、会话密钥和备份仓库的密码。
     把它和备份分开保管（例如放进密码管理器），**不要只留在这台服务器上**。丢了它，备份里保存的第三方凭证就无法解密，备份本身也打不开。
   - Redis：只有缓存、任务队列、SSE 事件与限流计数，丢失后会自动重建；会话与幂等记录都在 PostgreSQL 里。
-  - 独立部署的组件各自备份：Vikunja 用 `vikunja dump`（第 8 节）；n8n 备份它的数据卷与 `N8N_ENCRYPTION_KEY`；
+  - 独立部署的组件各自备份：n8n 备份它的数据卷与 `N8N_ENCRYPTION_KEY`；
     AFFiNE 的 PostgreSQL、storage、config 要一起备份（第 9 节）。
 
 ### 14.2 配置（`.env`）
@@ -602,7 +584,7 @@ S3 仓库的凭据（`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_DEFAUL
 
 - 需要：`deps` 要 `uv` 与 `npm`；`secrets` 与 `images` 要 Docker。`images` 要先构建镜像（`make up`），
   第三方镜像的清单取自 compose 文件，所以还要有 `.env`。
-- 第三方镜像清单（V2 起）：core 与 monitoring、agents 两个 profile、Vikunja、n8n、OpenIM 的依赖组件，
+- 第三方镜像清单（V2 起）：core 与 monitoring、agents 两个 profile、n8n、OpenIM 的依赖组件，
   以及 OpenClaw 服务器上运行的 OpenClaw 与 ghostunnel（取自接入包模板）。OpenIM 的补丁镜像由 `ci-openim` 构建后扫描，有修复的严重漏洞就失败。
 - trivy 的漏洞库缓存在 `~/.cache/trivy`（约 1 GB，`TRIVY_CACHE_DIR` 可改）；`SCAN_THIRD_PARTY=0` 只扫描本仓库的镜像。
 - 出网经过 TLS 代理的环境：设置 `SSL_CERT_FILE` 指向代理的 CA，脚本会把它挂进 trivy 容器；`HTTPS_PROXY` 等变量原样传入。
@@ -627,7 +609,7 @@ S3 仓库的凭据（`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_DEFAUL
 
 - 默认用 `tests/e2e/seed.py` 在 api 容器里新建一个临时用户（本机与 CI）。
 - 在已经部署的环境里检查时，设置 `SMOKE_EMAIL` / `SMOKE_PASSWORD` 使用一个专门的冒烟账号（工作空间的 owner 或 admin）；写入的测试数据在结束时删除。
-- 没有配置 Vikunja、GitHub、n8n、Prometheus 时，相关页面显示“未配置”，冒烟照样通过。
+- 没有配置 GitHub、n8n、Prometheus 时，相关页面显示“未配置”，冒烟照样通过。
 
 ### 15.3 性能基准：`make perf`
 
@@ -697,7 +679,7 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 ## 17. OpenIM（V2 管理员端 IM 的后端，独立部署）
 
 管理员在工作台里和 OpenClaw 实例聊天，消息经 OpenIM 中转。OpenIM 是**独立的 Compose 项目**（`infra/openim/compose.yaml`），
-和 Vikunja 一样加入 core 创建的网络。设计见 `docs/v2/TRANSFORMATION_PLAN.md` 第 4.4、6.1 节；
+和 n8n 一样加入 core 创建的网络。设计见 `docs/v2/TRANSFORMATION_PLAN.md` 第 4.4、6.1 节；
 补丁镜像、接入方式与实测见 `docs/decisions/2026-10-31-v2-oc3-openim-patched-image.md`（第 16 节是部署）。
 
 ### 17.1 网络与地址

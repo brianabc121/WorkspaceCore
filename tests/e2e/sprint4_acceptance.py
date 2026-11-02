@@ -157,21 +157,15 @@ def literal(value: str) -> str:
     return f"'{value}'"
 
 
-# 模拟 Vikunja 同步写入的任务投影（A10 / A11 用）；拼进 SQL 的值都经过 literal() 校验
-_INTEGRATION = (
-    "INSERT INTO workspace.integrations"
-    " (workspace_id, provider, name, base_url, public_url, status)"
-    " VALUES ({}, 'vikunja', 'e2e-vikunja', 'http://vikunja:3456', 'http://vikunja:3456',"
-    " 'active')"
-    " ON CONFLICT (workspace_id, provider, name) DO UPDATE SET name = EXCLUDED.name RETURNING id"
+# 工作台自己的项目与任务（T-0082 起；A10 / A11 用）；拼进 SQL 的值都经过 literal() 校验
+_PROJECT = (
+    "INSERT INTO workspace.projects (workspace_id, title) VALUES ({}, '验收项目') RETURNING id"
 )
 _TASK = (
-    "INSERT INTO workspace.external_resources"
-    " (workspace_id, integration_id, resource_type, external_id, title, source_url, metadata_json)"
-    " VALUES ({}, {}, 'task', {}, '验收发布清单', 'http://vikunja:3456/tasks/1',"
-    ' \'{{"description": ""}}\'::jsonb) RETURNING id'
+    "INSERT INTO workspace.tasks (workspace_id, project_id, title)"
+    " VALUES ({}, {}, '验收发布清单') RETURNING id"
 )
-_TOMBSTONE = "UPDATE workspace.external_resources SET deleted_at = now() WHERE id = {}"
+_DELETE_TASK = "DELETE FROM workspace.tasks WHERE id = {}"
 _AUDIT = (
     "SELECT coalesce(string_agg(action || ' ' || metadata_redacted_json::text, E'\\n'), '')"
     " FROM workspace.audit_logs WHERE workspace_id = {}"
@@ -183,11 +177,11 @@ def returning(query: str) -> str:
     return sql(query).splitlines()[0]
 
 
-def vikunja_task(workspace_id: str) -> str:
-    """在 workspace 里写一条任务投影，返回它的 UUID（没有凭据，Worker 不会同步这个集成）。"""
+def workspace_task(workspace_id: str) -> str:
+    """在 workspace 里写一个项目和其中的一个任务，返回任务的 UUID。"""
     ws = literal(workspace_id)
-    integration = returning(_INTEGRATION.format(ws))
-    return returning(_TASK.format(ws, literal(integration), literal(uuid.uuid4().hex)))
+    project = returning(_PROJECT.format(ws))
+    return returning(_TASK.format(ws, literal(project)))
 
 
 def quote(value: str) -> str:
@@ -411,30 +405,31 @@ def run_checks(base: str, report: Report, tag: str, token: str) -> int:
     )
 
     # ------------------------------------------------ A12：危险地址
-    metadata_url = "http://169.254.169.254/latest/meta-data"
-    vikunja = owner.request(
-        "POST",
-        "/api/v1/integrations",
-        {
-            "provider": "vikunja",
-            "name": "危险",
-            "base_url": metadata_url,
-            "api_token": "tk_" + "a" * 32,
-        },
-        headers=ws,
-    )
+    # T-0082 移除 Vikunja 后，集成只有 GitHub（地址固定为 api.github.com，不接受 base_url）
     source_bad = owner.request(
         "POST",
         "/api/v1/knowledge/sources",
         {"provider": "affine", "name": "危险", "base_url": "http://169.254.169.254"},
         headers=ws,
     )
+    github_bad = owner.request(
+        "POST",
+        "/api/v1/integrations",
+        {
+            "provider": "github",
+            "name": "危险",
+            "base_url": "http://169.254.169.254/latest/meta-data",
+            "api_token": "github_pat_" + "a" * 32,
+            "repositories": ["octo/app"],
+        },
+        headers=ws,
+    )
     report.check(
-        "A12：169.254.169.254 作为集成地址或 AFFiNE 地址都被拒绝（422），不回显地址",
-        vikunja.status == 422
-        and source_bad.status == 422
-        and "169.254" not in vikunja.text + source_bad.text,
-        f"{vikunja.status} / {source_bad.status}",
+        "A12：169.254.169.254 作为 AFFiNE 地址或集成地址都被拒绝（422），不回显地址",
+        source_bad.status == 422
+        and github_bad.status == 422
+        and "169.254" not in source_bad.text + github_bad.text,
+        f"{source_bad.status} / {github_bad.status}",
     )
 
     # ------------------------------------------------ 知识入口（S4-01）与 A10 关联
@@ -463,7 +458,7 @@ def run_checks(base: str, report: Report, tag: str, token: str) -> int:
         reasons == ["scheme_not_allowed", "host_mismatch", "not_a_document"],
         str(reasons),
     )
-    task_id = vikunja_task(workspace)
+    task_id = workspace_task(workspace)
     bookmark = owner.request(
         "POST",
         "/api/v1/knowledge/bookmarks",
@@ -490,11 +485,11 @@ def run_checks(base: str, report: Report, tag: str, token: str) -> int:
         headers=ws,
     )
     report.check("私有收藏 201", private.status == 201, private.summary)
-    sql(_TOMBSTONE.format(literal(task_id)))
+    sql(_DELETE_TASK.format(literal(task_id)))
     relisted = get("/api/v1/knowledge/resources")["items"]
     linked = [b for b in relisted if b["id"] == saved.get("id")]
     report.check(
-        "A10：被关联的任务写 tombstone 后，收藏里不留僵尸引用，搜索也不再返回它",
+        "A10：被关联的任务删除后，收藏里不留僵尸引用，搜索也不再返回它",
         bool(linked)
         and linked[0]["links"] == []
         and not get("/api/v1/search?q=" + quote("发布清单"))["items"],
@@ -525,7 +520,7 @@ def run_checks(base: str, report: Report, tag: str, token: str) -> int:
     )
 
     # ------------------------------------------------ 搜索与可见性（S4-03、S4-05、A11）
-    vikunja_task(outsider_ws)  # 与已删除的任务同名，只存在于别人的工作空间
+    workspace_task(outsider_ws)  # 与已删除的任务同名，只存在于别人的工作空间
     results = get("/api/v1/search?q=" + quote("验收"))["items"]
     kinds = {r["resource_type"] for r in results}
     titles = {r["title"] for r in results}

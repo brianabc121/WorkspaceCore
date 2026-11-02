@@ -32,7 +32,7 @@ describe('独立组件状态', () => {
     expect(screen.queryByText(/数据可能已过期/)).not.toBeInTheDocument()
   })
   it('limits tasks to the configured count when module data is fresh', () => {
-    render(WidgetFrame, { props: { widget: { ...widget, widget_type: 'today_tasks', config: { limit: 1 } }, overview: { ...overview, modules: { tasks: { status: 'ok', as_of: overview.generated_at, retryable: false } }, today_tasks: [{ id: 'a', title: '第一项', due_at: null, project_title: null, source_url: null }, { id: 'b', title: '第二项', due_at: null, project_title: null, source_url: null }] } } })
+    render(WidgetFrame, { props: { widget: { ...widget, widget_type: 'today_tasks', config: { limit: 1 } }, overview: { ...overview, modules: { tasks: { status: 'ok', as_of: overview.generated_at, retryable: false } }, today_tasks: [{ id: 'a', title: '第一项', due_at: null, project_title: null }, { id: 'b', title: '第二项', due_at: null, project_title: null }] } } })
     expect(screen.getByText('第一项')).toBeVisible()
     expect(screen.queryByText('第二项')).not.toBeInTheDocument()
   })

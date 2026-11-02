@@ -1,7 +1,7 @@
 # 数据字典
 
-> 状态：Sprint 6（迁移到 `0018`）。目标实体清单见 `docs/DEVELOPMENT_SPEC.md` 第 5 节（V2 见 `docs/v2/TRANSFORMATION_PLAN.md` 第 5 节）；本文记录**已经迁移**的数据库对象。
-> 迁移 `0001` ~ `0018` 都只新增对象，都有 downgrade；`0011` 起没有改动 `0010` 及以前的表。加列只有两处，都可空、无默认值：`0014` 给 `0013` 新建的 `im_messages` 加 `idempotency_key`，`0018` 给 `0011` 新建的 `agent_instances` 加 `im_token_expires_at`。升级与回退的做法见 `docs/deployment.md` 第 5 节。
+> 状态：Sprint 6 之后（迁移到 `0020`）。目标实体清单见 `docs/DEVELOPMENT_SPEC.md` 第 5 节（V2 见 `docs/v2/TRANSFORMATION_PLAN.md` 第 5 节）；本文记录**已经迁移**的数据库对象。
+> 迁移 `0001` ~ `0019` 都只新增对象，都有 downgrade；`0011` ~ `0019` 没有改动 `0010` 及以前的表。加列只有两处，都可空、无默认值：`0014` 给 `0013` 新建的 `im_messages` 加 `idempotency_key`，`0018` 给 `0011` 新建的 `agent_instances` 加 `im_token_expires_at`。`0020`（T-0082，移除 Vikunja）是例外：新建 `projects` / `tasks` 并转换 Vikunja 的投影，删除 `webhook_inbox` 表、`integrations.webhook_secret_ref` 列与 Vikunja 的数据，downgrade 只恢复结构、不恢复数据（见「迁移 `0020`」）。升级与回退的做法见 `docs/deployment.md` 第 5 节。
 
 ## 约定
 
@@ -53,9 +53,9 @@ Alembic 版本表 `alembic_version` 位于 `public` schema。
 
 | 表 | 主要字段 | 约束与说明 |
 |---|---|---|
-| `integrations` | `id`、`workspace_id`、`provider`、`name`、`base_url`、`public_url`、`status`、`settings_json`、`webhook_secret_ref`、`version`、`created_at`、`updated_at` | 随工作空间级联删除；`(workspace_id, provider, name)` 唯一，V1 每个工作空间每个 provider 最多 1 个由服务层保证；`status` ∈ `pending` / `active` / `unavailable` / `unauthorized` / `disabled`；`settings_json` 只放非敏感元数据（`tested_version`、`instance_version`、`last_tested_at`、Webhook 注册状态）；`webhook_secret_ref` 是加密后的签名密钥引用；`version` 用于乐观并发 |
+| `integrations` | `id`、`workspace_id`、`provider`、`name`、`base_url`、`public_url`、`status`、`settings_json`、`webhook_secret_ref`、`version`、`created_at`、`updated_at` | 随工作空间级联删除；`(workspace_id, provider, name)` 唯一，V1 每个工作空间每个 provider 最多 1 个由服务层保证；`status` ∈ `pending` / `active` / `unavailable` / `unauthorized` / `disabled`；`settings_json` 只放非敏感元数据（`tested_version`、`instance_version`、`last_tested_at`、Webhook 注册状态）；`webhook_secret_ref` 是加密后的签名密钥引用（`0020` 删除了这一列）；`version` 用于乐观并发 |
 | `integration_accounts` | `id`、`integration_id`、`user_id`、`auth_type`、`credential_ref`、`scopes_json`、`expires_at`、`status`、`created_at`、`updated_at` | `integration_id` 唯一（V1 一个集成一个凭证），随集成级联删除；`user_id` → `users`（删除后置空）；`credential_ref` 只存 `enc:v1:` 加密引用（AES-256-GCM，附加数据绑定本行 ID），明文 Token 从不入库 |
-| `external_resources` | `id`、`workspace_id`、`integration_id`、`resource_type`、`external_id`、`title`、`source_url`、`metadata_json`、`source_updated_at`、`synced_at`、`deleted_at` | 外部项目与任务的本地投影（只读缓存，Vikunja 是主源）；`(integration_id, resource_type, external_id)` 唯一；外部的更新时间比已存的旧时不覆盖（乱序事件）；外部删除后记 `deleted_at`（tombstone），查询一律排除；部分索引 `ix_external_resources_workspace_type`（`deleted_at IS NULL`）；任务的展示字段（完成、优先级、截止时间、标签、version 等）在 `metadata_json` 里 |
+| `external_resources` | `id`、`workspace_id`、`integration_id`、`resource_type`、`external_id`、`title`、`source_url`、`metadata_json`、`source_updated_at`、`synced_at`、`deleted_at` | 外部项目与任务的本地投影（只读缓存，Vikunja 是主源）；`(integration_id, resource_type, external_id)` 唯一；外部的更新时间比已存的旧时不覆盖（乱序事件）；外部删除后记 `deleted_at`（tombstone），查询一律排除；部分索引 `ix_external_resources_workspace_type`（`deleted_at IS NULL`）；任务的展示字段（完成、优先级、截止时间、标签、version 等）在 `metadata_json` 里。`0020` 起只有 GitHub 的投影：Vikunja 的项目与任务转进 `projects` / `tasks` 后随集成删除 |
 | `idempotency_requests` | `id`、`workspace_id`、`actor_id`、`idempotency_key`、`request_fingerprint`、`status`、`response_code`、`response_json`、`context_json`、`created_at`、`updated_at`、`expires_at` | `(actor_id, idempotency_key)` 唯一；随工作空间或用户级联删除；`status` ∈ `processing` / `succeeded` / `failed` / `unknown`；`response_json` 保存重放用的响应（任务 DTO 或错误码，不含 Token 与外部响应原文）；保留 24 小时，`expires_at` 有索引供清理 |
 | `sync_cursors` | `id`、`integration_id`、`resource_type`、`cursor_value`、`last_success_at`、`last_error`、`updated_at` | `(integration_id, resource_type)` 唯一，随集成级联删除；`last_success_at` 决定 `sync.status`（超过 `SYNC_STALE_AFTER_SECONDS` 为 stale）；`last_error` 只存错误分类，不存外部响应 |
 
@@ -65,7 +65,7 @@ Alembic 版本表 `alembic_version` 位于 `public` schema。
 
 | 表 | 主要字段 | 约束与说明 |
 |---|---|---|
-| `webhook_inbox` | `id`、`integration_id`、`event_key`、`event_type`、`payload_json`、`status`、`attempts`、`next_retry_at`、`received_at`、`processed_at`、`error_text` | 签名校验通过后才写入；`(integration_id, event_key)` 唯一，`event_key = sha256(原始请求体)`，重复送达只记录一次；随集成级联删除；`status` ∈ `pending` / `processing` / `completed` / `retry` / `dead_letter`；`payload_json` 只有事件名、时间与任务 / 项目 ID（不保存 `doer` 等内容）；`next_retry_at` 是下次可领取的时间，处理中时是租约到期时间；部分索引 `ix_webhook_pending`（`status IN ('pending','retry','processing')`）；`error_text` 只存错误分类；处理完超过 7 天的事件由 Worker 清理，`dead_letter` 保留 |
+| `webhook_inbox` | `id`、`integration_id`、`event_key`、`event_type`、`payload_json`、`status`、`attempts`、`next_retry_at`、`received_at`、`processed_at`、`error_text` | 签名校验通过后才写入；`(integration_id, event_key)` 唯一，`event_key = sha256(原始请求体)`，重复送达只记录一次；随集成级联删除；`status` ∈ `pending` / `processing` / `completed` / `retry` / `dead_letter`；`payload_json` 只有事件名、时间与任务 / 项目 ID（不保存 `doer` 等内容）；`next_retry_at` 是下次可领取的时间，处理中时是租约到期时间；部分索引 `ix_webhook_pending`（`status IN ('pending','retry','processing')`）；`error_text` 只存错误分类；处理完超过 7 天的事件由 Worker 清理，`dead_letter` 保留。**`0020` 已删除这张表**（T-0082） |
 
 `sync_cursors` 在 0005 已建立；T-0021 增加 `resource_type = full_sync` 一行，记录最近一次全量同步的时间。规则见 Sprint 3 契约 ADR 第 9、10.1 节。
 
@@ -75,7 +75,7 @@ Alembic 版本表 `alembic_version` 位于 `public` schema。
 |---|---|---|
 | `knowledge_sources` | `id`、`workspace_id`、`provider`、`name`、`base_url`、`version`、`created_at`、`updated_at` | 工作空间配置的 AFFiNE 外部地址（`provider = affine`），工作台从不访问它；随工作空间级联删除；V1 每个工作空间最多 1 个，由服务层加锁计数保证；`version` 用于乐观并发 |
 | `bookmarks` | `id`、`workspace_id`、`source_id`、`title`、`note`、`link_kind`、`affine_workspace_id`、`doc_id`、`suffix`、`visibility`、`owner_id`、`version`、`created_at`、`updated_at` | AFFiNE 文档收藏，**不含文档正文**；随知识来源或工作空间级联删除；`suffix` 是来源地址之后的路径与保留的查询参数，完整链接 = 来源的 `base_url` + `suffix`；`visibility` ∈ `workspace` / `private`，`link_kind` ∈ `workspace_doc` / `share`（CHECK 约束）；`owner_id` → `users`（删除后置空，私有收藏随之对所有人不可见）；部分唯一索引 `uq_bookmarks_workspace_doc`（工作空间可见的每篇文档一条）与 `uq_bookmarks_private_doc`（每个用户的私有收藏每篇文档一条）；索引 `(workspace_id, updated_at)` |
-| `resource_links` | `id`、`workspace_id`、`source_resource_id`、`target_resource_id`、`relation`、`created_at` | 跨系统关联（规范 5.1 第 11 项）：`source_resource_id` → `bookmarks`、`target_resource_id` → `external_resources`（Vikunja 项目 / 任务投影），任一方删除时级联删除；目标写了 tombstone（`deleted_at`）时读取一律排除，页面不留僵尸引用（A10）；`(source_resource_id, target_resource_id)` 唯一；`relation` 目前只有 `related` |
+| `resource_links` | `id`、`workspace_id`、`source_resource_id`、`target_resource_id`、`relation`、`created_at` | 跨系统关联（规范 5.1 第 11 项）：`source_resource_id` → `bookmarks`、`target_resource_id` → `external_resources`（Vikunja 项目 / 任务投影），任一方删除时级联删除；目标写了 tombstone（`deleted_at`）时读取一律排除，页面不留僵尸引用（A10）；`0020` 起目标改为 `projects` / `tasks` 的 ID（见「迁移 `0020`」）；`(source_resource_id, target_resource_id)` 唯一；`relation` 目前只有 `related` |
 | `calendar_events` | `id`、`workspace_id`、`owner_id`、`title`、`description`、`location`、`all_day`、`start_at`、`end_at`、`start_date`、`end_date`、`timezone`、`rrule`、`version`、`created_at`、`updated_at` | 本地日历（工作台是主源）；随工作空间级联删除；`owner_id` → `users`（删除后置空）；`start_at` / `end_at` 总是 UTC，全天事件为 `timezone` 当地 0 点（结束不含），区间查询只比较这两列；CHECK：`end_at > start_at`，且全天事件必须有 `start_date` / `end_date`、定时事件必须没有；`rrule` V1 不使用（总是 NULL）；索引 `(workspace_id, start_at)` |
 
 ### GitHub 投影（T-0028，无新迁移）
@@ -94,7 +94,7 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
   - `external_id` 是 GitHub 的数字 `id`；
   - Issue、PR、运行的 `metadata_json` 里有 `repo_resource_id`（所属仓库的投影 UUID）与 `repo_full_name`；
   - 运行的 `failure_summary` 只有失败的 job / step 名称，不含日志。
-- `sync_cursors.resource_type = github`：增量同步的游标（上次同步开始时间往前 2 分钟）；全量同步的时间与 Vikunja 一样记在 `full_sync`。
+- `sync_cursors.resource_type = github`：增量同步的游标（上次同步开始时间往前 2 分钟）；全量同步的时间记在 `full_sync`。
 
 ### 迁移 `0008`（S4-03、S4-05）
 
@@ -131,7 +131,7 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 
 方案第 5 节要求给已有凭证密文加 `key_version` 列，实际没有加：`enc:v1:<key_id>:…` 引用本身带着加密密钥的 ID。`python -m app.commands.rotate_credentials` 按它找出用旧密钥加密的记录，逐条重新加密，不改 `updated_at` 与 `version`。覆盖的列：
 - `integration_accounts.credential_ref`；
-- `integrations.webhook_secret_ref`；
+- `integrations.webhook_secret_ref`（`0020` 删除了这一列）；
 - `automation_connections.api_key_ref`、`trigger_secret_ref`；
 - `agent_secret_versions.ciphertext_ref`；
 - `agent_ca.key_ref`；
@@ -191,6 +191,29 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 
 | 表 | 主要字段 | 约束与说明 |
 |---|---|---|
-| `app_logins` | `id`、`workspace_id`、`app`、`username`、`password_ref`、`version`、`created_at`、`updated_at`、`updated_by` | Vikunja、n8n 管理界面的登录账号，给管理员看的备忘（工作台的 Connector 仍只用 API Token / API Key）；`(workspace_id, app)` 唯一，CHECK `app` ∈ `vikunja` / `n8n`；`username` 是 Vikunja 用户名或 n8n 登录邮箱；`password_ref` 可空，只存 `enc:v1` 引用（用途绑定 `app_login:<id>:password`），列表接口不返回，查看明文要单独请求并写审计；随工作空间级联删除，`updated_by` → `users`（删除后置空）；`version` 用于乐观并发。见 `docs/decisions/2026-11-02-app-logins.md` |
+| `app_logins` | `id`、`workspace_id`、`app`、`username`、`password_ref`、`version`、`created_at`、`updated_at`、`updated_by` | Vikunja、n8n 管理界面的登录账号，给管理员看的备忘（工作台的 Connector 仍只用 API Token / API Key）；`(workspace_id, app)` 唯一，CHECK `app` ∈ `vikunja` / `n8n`；`username` 是 Vikunja 用户名或 n8n 登录邮箱；`password_ref` 可空，只存 `enc:v1` 引用（用途绑定 `app_login:<id>:password`），列表接口不返回，查看明文要单独请求并写审计；随工作空间级联删除，`updated_by` → `users`（删除后置空）；`version` 用于乐观并发。见 `docs/decisions/2026-11-02-app-logins.md`。`0020` 删除 `app = vikunja` 的行，CHECK 改为只允许 `n8n` |
+
+### 迁移 `0020`（T-0082）
+
+人类 2026-11-02 决定移除 Vikunja，项目与任务由工作台自己管理（单人版：没有负责人、指派、评论、按项目共享；权限沿用工作空间角色）。
+见 `docs/decisions/2026-11-02-remove-vikunja.md`。
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `projects` | `id`、`workspace_id`、`title`、`description`、`archived`、`version`、`created_at`、`updated_at`、`created_by` | 工作台自己的项目；随工作空间级联删除；`created_by` → `users`（删除后置空）；`description` 默认空字符串，`archived` 默认 false（列表默认不含已归档）；`(workspace_id, id)` 唯一，供任务的复合外键使用；索引 `ix_projects_workspace_archived`（`workspace_id`、`archived`）；`version` 是整数，每次修改加 1，用于乐观并发 |
+| `tasks` | `id`、`workspace_id`、`project_id`、`title`、`description`、`done`、`done_at`、`priority`、`due_at`、`labels`、`version`、`created_at`、`updated_at`、`created_by` | 工作台自己的任务；`(workspace_id, project_id)` → `projects (workspace_id, id)`（复合外键，级联删除）：任务只能挂在同一工作空间的项目上，删除项目时连带删除任务；随工作空间级联删除；`created_by` → `users`（删除后置空）；CHECK `ck_tasks_priority`：`priority` 在 0–5 之间（0 未设置、1 低、2 中、3 高、4 紧急、5 立即）；`done_at` 是完成时间；`labels` 是 `text[]`，默认空数组（个数与长度由接口限制：最多 20 个、每个不超过 50 个字符）；索引 `ix_tasks_workspace_done_due`（`workspace_id`、`done`、`due_at`）、`ix_tasks_project`（`project_id`）；`version` 是整数，每次修改加 1，接口里是不透明字符串 |
+
+同一迁移里的其他变化：
+
+- **转换**：`external_resources` 里 provider = vikunja、未删除的项目与任务插入新表，**主键不变**（收藏关联、AI 审批记录里的 `task_id` 照旧有效）；
+  找不到所属项目的任务放进每个工作空间一个「未分组任务」项目；优先级截到 0–5，标签取自投影的 `metadata_json`。
+- **`resource_links.target_resource_id`**：去掉指向 `external_resources` 的外键，改为项目或任务的 ID（没有外键）；迁移时删掉指向不存在对象的关联，
+  之后由 `projects`、`tasks` 上的触发器 `delete_resource_links` 在删除时清理。
+- **删除**：provider = vikunja 的集成（级联删除投影、凭证、同步游标）、`webhook_inbox` 表（连同 `ix_webhook_pending`）、
+  `integrations.webhook_secret_ref` 列、`app_logins` 里 Vikunja 的行（CHECK `ck_app_logins_app` 改为 `app = 'n8n'`）。
+- **搜索**：`projects`、`tasks` 上的触发器 `search_index` 写 `search_documents`，provider = `local`、没有 `source_url`；
+  项目的 `body` 是说明，任务的 `body` 是说明加标签、`context` 是项目名（项目改名时同步更新）；`search_index_external` 只处理 GitHub；迁移最后整体重建一次索引。
+- **downgrade** 只恢复表结构（`webhook_inbox`、外键、`webhook_secret_ref` 列、旧的搜索函数），不恢复数据：工作台的项目与任务会被删除。
+  按 D-0004 第 3 节由人类确认后合并。
 
 ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。

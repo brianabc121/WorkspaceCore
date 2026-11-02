@@ -224,7 +224,6 @@ class TaskDetailText(_Untrusted):
 class TaskDetail(BaseModel):
     id: UUID
     project_id: UUID | None
-    identifier: str | None
     done: bool
     done_at: datetime | None
     priority: int
@@ -543,7 +542,7 @@ def _spec(
 
 _READ: list[ToolSpec] = [
     _spec("search", "read", SearchInput, SearchOutput, "全局搜索任务、项目、书签、日程、仓库"),
-    _spec("list_tasks", "read", ListTasksInput, ListTasksOutput, "列出任务（Vikunja 投影）"),
+    _spec("list_tasks", "read", ListTasksInput, ListTasksOutput, "列出任务"),
     _spec("get_task", "read", GetTaskInput, GetTaskOutput, "读取一个任务的详情"),
     _spec("list_projects", "read", EmptyInput, ListProjectsOutput, "列出项目"),
     _spec("calendar_agenda", "read", CalendarAgendaInput, CalendarAgendaOutput, "读取日程"),

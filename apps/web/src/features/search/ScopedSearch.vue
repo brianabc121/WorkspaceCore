@@ -28,7 +28,7 @@ const query = useInfiniteQuery({ queryKey: computed(() => ['search', user, scope
 const denied = computed(() => dashboard.denied || isAccessError(query.error.value))
 const remote = computed(() => !ready.value || denied.value ? [] : [...new Map((query.data.value?.pages.flatMap((page) => page.items) ?? []).map((item) => [item.resource_type + ':' + item.id, item])).values()])
 const groups = computed(() => (Object.keys(searchTypes) as SearchType[]).map((kind) => ({ kind, title: searchTypes[kind], items: remote.value.filter((item) => item.resource_type === kind) })).filter((group) => group.items.length))
-const providers = { vikunja: 'Vikunja', github: 'GitHub', affine: 'AFFiNE', local: '工作台日历' }
+const providers = { github: 'GitHub', affine: 'AFFiNE', local: '工作台' }
 const entries = computed(() => [
   ...navigation.filter((entry) => (!adminOnly.has(entry.path) || auth.canManage) && (!ownerOnly.has(entry.path) || auth.isOwner)).map((entry) => ({ label: entry.title, detail: '', path: entry.path })),
   ...(auth.canManage ? [{ label: '审计日志', detail: '', path: '/settings/audit' }] : []),

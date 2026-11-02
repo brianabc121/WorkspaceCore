@@ -2,7 +2,8 @@
 """Sprint 2 全栈验收（T-0017）：经 Caddy 对外入口验证规范第 13 节的 DoD 与验收场景（接口级）。
 
 覆盖 A03（viewer 修改 Widget 返回 403）、A04（保存并刷新首页布局一致，版本号更新）、
-A05（尚无 Connector：任务模块显示 unavailable，汇总值为 null，其余组件照常返回）、
+任务模块（T-0082 起任务是工作台自己的数据：新工作空间为 ok，汇总为 0；模块失败只影响自己的组件
+见 services/api/tests/test_dashboard_api.py）、
 版本冲突（两个客户端用同一版本保存，后者 409）、跨工作空间 404、
 DoD“未知 widget type 安全报错”（422 且不回显输入）、DoD“部分 Widget 失败不影响整页”
 （库里有一条类型与布局都已损坏的组件时，首页聚合仍然 200，其余组件不受影响）、审计日志不含组件内容。
@@ -100,20 +101,19 @@ def main() -> int:
     )
     tasks = (overview.get("modules") or {}).get("tasks") or {}
     report.check(
-        "A05 尚无任务 Connector：tasks 模块 unavailable / not_configured",
-        tasks.get("status") == "unavailable" and tasks.get("reason") == "not_configured",
+        "任务是工作台自己的数据（T-0082）：新工作空间的 tasks 模块为 ok",
+        tasks.get("status") == "ok",
         str(tasks),
     )
     report.check(
-        "A05 任务汇总未知时为 null（不以 0 冒充），today_tasks 为空；"
-        "未读通知是本地数据，Sprint 5 起为实际值 0",
+        "新工作空间的任务汇总为 0、today_tasks 为空；未读通知是本地数据，为实际值 0",
         overview.get("summary")
-        == {"pending_tasks": None, "active_projects": None, "unread_notifications": 0}
+        == {"pending_tasks": 0, "active_projects": 0, "unread_notifications": 0}
         and overview.get("today_tasks") == [],
         str(overview.get("summary")),
     )
     report.check(
-        "A05 模块不可用时其余组件照常返回",
+        "便签与快捷链接照常返回",
         {"note", "quick_links"} <= {w["widget_type"] for w in widgets},
     )
     listed = alice.request("GET", "/api/v1/dashboards", headers=in_workspace).json() or {}

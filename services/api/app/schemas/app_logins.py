@@ -1,4 +1,6 @@
-"""Vikunja、n8n 管理界面的登录账号（T-0080，docs/decisions/2026-11-02-app-logins.md）。
+"""n8n 管理界面的登录账号（T-0080，docs/decisions/2026-11-02-app-logins.md）。
+
+T-0082 移除了 Vikunja，之后只有 n8n。
 
 只有 admin 以上能读写。列表只返回账号与“是否保存了密码”，
 密码要单独调用 reveal 才返回，每次都写审计。
@@ -9,11 +11,11 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, StringConstraints, model_validator
 
-App = Literal["vikunja", "n8n"]
+App = Literal["n8n"]
 Username = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=254),
-    Field(description="Vikunja 是用户名；n8n 是登录邮箱"),
+    Field(description="n8n 的登录邮箱"),
 ]
 Password = Annotated[SecretStr, Field(min_length=1, max_length=256)]
 
@@ -25,15 +27,14 @@ class AppLoginOut(BaseModel):
     password_set: bool = False
     login_url: str | None = Field(
         default=None,
-        description="浏览器打开登录页的地址（Vikunja 集成或 n8n 连接的浏览器地址）；"
-        "没有配置时为 null",
+        description="浏览器打开登录页的地址（n8n 连接的浏览器地址）；没有配置时为 null",
     )
     updated_at: datetime | None = None
     version: int | None = None
 
 
 class AppLoginList(BaseModel):
-    items: list[AppLoginOut] = Field(description="固定两项：vikunja、n8n")
+    items: list[AppLoginOut] = Field(description="固定一项：n8n")
 
 
 class AppLoginUpsert(BaseModel):

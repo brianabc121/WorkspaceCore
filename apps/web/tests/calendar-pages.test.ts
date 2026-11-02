@@ -19,7 +19,7 @@ async function openCalendar() {
   await screen.findByRole('button', { name: calendarEvent.title })
 }
 describe('本地日历', () => {
-  it('shows Vikunja task due dates as read-only entries on their day', async () => {
+  it('shows task due dates as read-only entries on their day', async () => {
     const due = { ...task, due_at: '2026-10-30T09:00:00Z' }, done = { ...task, id: 'done-task', title: '已完成的任务', done: true, due_at: '2026-10-31T03:00:00Z' }
     const requests = calendar((r) => path(r) === '/api/v1/tasks' ? Response.json({ items: [due, done], sync, next_cursor: null, total_estimate: 2 }) : undefined)
     await openCalendar()
@@ -27,7 +27,7 @@ describe('本地日历', () => {
     expect(entry.closest('[role="region"]')).toHaveAttribute('aria-label', '2026-10-30')
     expect(entry).toHaveTextContent('17:00 截止')
     expect(entry).toHaveTextContent('只读')
-    expect(screen.getByRole('link', { name: task.title })).toHaveAttribute('href', `/tasks?q=${encodeURIComponent(task.title)}`)
+    expect(screen.getByRole('link', { name: task.title })).toHaveAttribute('href', `/tasks?task=${task.id}`)
     expect(screen.getByRole('article', { name: '任务截止：已完成的任务' })).toHaveTextContent('已完成')
     const asked = new URL(requests.filter((r) => path(r) === '/api/v1/tasks').at(-1)!.url).searchParams
     expect(asked.get('status')).toBe('all')

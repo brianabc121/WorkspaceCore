@@ -32,7 +32,7 @@ describe('global create menu', () => {
   it('lists what each role can create', async () => {
     setup('owner')
     await openApp('/')
-    expect(items(await openMenu())).toEqual(['新建任务Vikunja', '新建日程日历', '收藏文档AFFiNE 链接', '新建群聊与 OpenClaw 实例', '添加成员工作空间', '登记 OpenClaw 实例接入包'])
+    expect(items(await openMenu())).toEqual(['新建任务任务', '新建项目项目', '新建日程日历', '收藏文档AFFiNE 链接', '新建群聊与 OpenClaw 实例', '添加成员工作空间', '登记 OpenClaw 实例接入包'])
   })
 
   it('leaves out admin-only and owner-only entries for other roles', async () => {
@@ -42,7 +42,7 @@ describe('global create menu', () => {
     first.unmount()
     setup('member')
     await openApp('/')
-    expect(items(await openMenu())).toEqual(['新建任务Vikunja', '新建日程日历', '收藏文档AFFiNE 链接'])
+    expect(items(await openMenu())).toEqual(['新建任务任务', '新建项目项目', '新建日程日历', '收藏文档AFFiNE 链接'])
   })
 
   it('is hidden for viewers, who cannot create anything', async () => {

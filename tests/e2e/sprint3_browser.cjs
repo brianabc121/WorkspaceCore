@@ -1,34 +1,22 @@
-// Sprint 3 浏览器验收（T-0023）：真实后端 + 真实 Vikunja 2.7.1 上的任务中心——
-// 连接 Vikunja → 测试连接 → 任务列表 / 看板 → 新建 / 编辑任务 → 在 Vikunja 原生修改 → 工作台显示更新 →
-// 首页任务组件显示真实数据 → 删除任务 → viewer 只读。
+// 项目与任务的浏览器验收（T-0082 起：工作台自己的项目与任务，之前是 T-0023 的 Vikunja 验收）——
+// 新建项目 → 新建任务（带 Idempotency-Key、标签、今天截止）→ 编辑并标为完成 → 看板分列 → 首页待办汇总 →
+// 删除任务 → 改名 / 归档 / 删除项目（连带任务）→ 移动端 → viewer 只读。
 //
-// 前提：Compose 全栈已启动并迁移（make up && make migrate），Vikunja 已启动（make vikunja-up）。
-// 不要求空库：每次用新的工作台用户、Vikunja 用户与项目；工作台用户由同目录的 seed.py 写入。
+// 前提：Compose 全栈已启动并迁移（make up && make migrate）。
+// 不要求空库：每次用新的工作台用户；用户由同目录的 seed.py 写入。
 // 用法（依赖由同目录的 package.json / package-lock.json 锁定为 Playwright 1.63.0）：
 //   cd tests/e2e && npm ci && npm run browser:install    # 首次：安装依赖与 Chromium
 //   node sprint3_browser.cjs [BASE_URL]                    # 默认 http://127.0.0.1:${HTTP_PORT:-8080}
-// Vikunja 从本机访问的地址默认 http://127.0.0.1:${VIKUNJA_PORT:-3456}（VIKUNJA_URL 可覆盖）。
 // CI（.github/workflows/ci-infra.yml）与本机共用。
 const { execFileSync } = require('node:child_process')
 const { randomBytes } = require('node:crypto')
-const fs = require('node:fs')
 const path = require('node:path')
 const { chromium } = require('playwright')
 
-const ROOT = path.resolve(__dirname, '../..')
 const base = (process.argv[2] || `http://127.0.0.1:${process.env.HTTP_PORT || '8080'}`).replace(/\/$/, '')
-const vikunjaUrl = (process.env.VIKUNJA_URL || `http://127.0.0.1:${envValue('VIKUNJA_PORT') || '3456'}`).replace(/\/$/, '')
 const password = 'e2e sprint3 browser pass'
 const run = randomBytes(4).toString('hex')
-const WEBHOOK_TIMEOUT = 30000
 
-function envValue(name) {
-  if (process.env[name]) return process.env[name]
-  const file = path.join(ROOT, '.env')
-  if (!fs.existsSync(file)) return undefined
-  const line = fs.readFileSync(file, 'utf8').split('\n').find((l) => l.startsWith(`${name}=`))
-  return line ? line.slice(name.length + 1).trim() : undefined
-}
 function seed(...args) {
   return execFileSync('python3', [path.join(__dirname, 'seed.py'), ...args], {
     encoding: 'utf8',
@@ -36,29 +24,6 @@ function seed(...args) {
   }).trim().split(/\s+/)
 }
 function check(condition, message) { if (!condition) throw new Error(message) }
-
-// 直接访问 Vikunja：模拟用户在原生界面里的操作
-let vikunjaAuth = {}
-async function vikunja(method, pathname, body, { merge = false } = {}) {
-  const headers = { Accept: 'application/json', ...vikunjaAuth }
-  if (body !== undefined) headers['Content-Type'] = merge ? 'application/merge-patch+json' : 'application/json'
-  const response = await fetch(`${vikunjaUrl}/api/v2${pathname}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
-  const text = await response.text()
-  if (!response.ok) throw new Error(`Vikunja ${method} ${pathname} 失败：${response.status} ${text.slice(0, 200)}`)
-  return text ? JSON.parse(text) : null
-}
-async function vikunjaTitles(projectId) {
-  const page = await vikunja('GET', `/projects/${projectId}/tasks?per_page=50`)
-  return (page.items || []).map((task) => task.title)
-}
-function createVikunjaUser(username, secret) {
-  const project = envValue('COMPOSE_PROJECT_NAME') || 'my-workspace'
-  execFileSync('docker', [
-    'compose', '-p', `${project}-vikunja`, '-f', 'infra/vikunja/compose.yaml', '--env-file', '.env',
-    'exec', '-T', 'vikunja', '/app/vikunja/vikunja', 'user', 'create',
-    '-u', username, '-e', `${username}@browser.example.com`, '-p', secret,
-  ], { cwd: ROOT, env: { ...process.env, WORKSPACE_PROJECT: project }, stdio: 'pipe' })
-}
 
 async function login(browser, email, problems, viewport = { width: 1440, height: 1000 }) {
   const context = await browser.newContext({ viewport })
@@ -76,50 +41,10 @@ async function login(browser, email, problems, viewport = { width: 1440, height:
   await page.waitForURL(`${base}/`)
   return { context, page }
 }
-const hasHook = async (projectId) => ((await vikunja('GET', `/projects/${projectId}/webhooks`)).items || [])
-  .some((hook) => hook.target_url.includes('/api/v1/webhooks/vikunja/'))
-// Worker 在测试连接之后异步给每个未归档项目注册 Webhook。Vikunja 用 SQLite：注册时如果工作台同时写入
-// （例如新建任务），两次写入会撞上锁，Vikunja 返回 500 “database is locked”。所以等全部注册完再写入
-async function waitForWebhooks() {
-  const deadline = Date.now() + WEBHOOK_TIMEOUT
-  while (Date.now() < deadline) {
-    const projects = ((await vikunja('GET', '/projects')).items || []).filter((p) => p.id > 0 && !p.is_archived)
-    const done = await Promise.all(projects.map((p) => hasHook(p.id)))
-    if (projects.length && done.every(Boolean)) return projects.length
-    await new Promise((resolve) => setTimeout(resolve, 500))
-  }
-  return 0
-}
-// 点“刷新任务”直到列表里出现（或不再出现）某个标题：原生改动经 Webhook 回到投影需要一两秒
-async function waitForTitle(page, title, present = true) {
-  const deadline = Date.now() + WEBHOOK_TIMEOUT
-  while (Date.now() < deadline) {
-    await page.getByRole('button', { name: '刷新任务' }).click()
-    await page.waitForTimeout(800)
-    const count = await page.locator('button.task-title', { hasText: title }).count()
-    if (present ? count > 0 : count === 0) return true
-  }
-  return false
-}
+const taskButton = (page, title) => page.locator('button.task-title', { hasText: title })
+const projectCard = (page, title) => page.getByRole('region', { name: `项目 ${title}` })
 
 ;(async () => {
-  // ---------------------------------------------------------------- Vikunja 用户、受限 Token 与项目
-  const username = `browser${run}`
-  const vikunjaPassword = `e2e-${randomBytes(12).toString('hex')}`
-  createVikunjaUser(username, vikunjaPassword)
-  const session = await vikunja('POST', '/login', { username, password: vikunjaPassword })
-  vikunjaAuth = { Authorization: `Bearer ${session.token}` }
-  const expires = new Date(Date.now() + 86400000).toISOString().replace(/\.\d+Z$/, 'Z')
-  const permissions = {
-    projects: ['read_all', 'read_one'],
-    tasks: ['create', 'read_all', 'read_one', 'update', 'delete'],
-    projects_webhooks: ['create', 'read_all', 'update', 'delete'],
-    labels: ['read_all'],
-  }
-  const { token } = await vikunja('POST', '/tokens', { title: `browser-${run}`, expires_at: expires, permissions })
-  const project = await vikunja('POST', '/projects', { title: `浏览器验收 ${run}` })
-  const native = await vikunja('POST', `/projects/${project.id}/tasks`, { title: '原生任务' })
-
   const [, workspace] = seed('user', `owner-${run}@browser.example.com`, 'Owner')
   const [viewerId] = seed('user', `viewer-${run}@browser.example.com`, 'Viewer')
   seed('member', workspace, viewerId, 'viewer')
@@ -129,112 +54,127 @@ async function waitForTitle(page, title, present = true) {
   const step = (text) => console.log(`通过  ${text}`)
   const { page } = await login(browser, `owner-${run}@browser.example.com`, problems)
 
-  // ---------------------------------------------------------------- 连接 Vikunja（S3-02）
-  await page.goto(`${base}/settings/integrations`)
-  await page.getByRole('button', { name: '新建连接' }).click()
-  await page.getByLabel('服务地址').fill('http://vikunja:3456')
-  await page.getByLabel('浏览器访问地址').fill(vikunjaUrl)
-  await page.getByLabel('API Token').fill(token)
-  await page.getByRole('button', { name: '保存连接' }).click()
-  await page.getByText('连接已保存，请测试连接').waitFor()
-  check(!(await page.content()).includes(token), '页面上不应出现 Token')
-  await page.getByRole('button', { name: '测试连接' }).click()
-  await page.getByRole('heading', { name: '必需检查通过' }).waitFor({ timeout: 30000 })
-  await page.getByRole('button', { name: '刷新连接' }).click()
-  await page.getByText('状态：已连接').waitFor()
-  check(!(await page.content()).includes(token), '测试与刷新之后页面上仍不应出现 Token')
-  step('设置页连接 Vikunja：保存后测试连接通过、状态为已连接，页面不显示 Token')
+  // ---------------------------------------------------------------- 新建项目
+  const projectTitle = `浏览器验收 ${run}`
+  await page.goto(`${base}/projects`)
+  await page.getByRole('button', { name: '新建项目' }).click()
+  await page.getByLabel('项目名称').fill(projectTitle)
+  await page.getByLabel('项目说明').fill('浏览器验收创建')
+  await page.getByRole('button', { name: '创建项目' }).click()
+  await projectCard(page, projectTitle).waitFor()
+  check(!(await page.content()).includes('Vikunja'), '项目页不应再出现 Vikunja')
+  step('项目页新建项目，列表随即显示，页面里没有 Vikunja')
 
-  // ---------------------------------------------------------------- 任务列表 / 看板（S3-03）
-  await page.goto(`${base}/tasks`)
-  await page.locator('button.task-title', { hasText: '原生任务' }).waitFor()
-  check(await page.getByText('数据已同步').count() > 0, '同步状态应为已同步')
-  const link = page.getByRole('link', { name: /在 Vikunja 中打开/ }).first()
-  check((await link.getAttribute('href')).startsWith(`${vikunjaUrl}/tasks/`), '任务应链接到 Vikunja 原生界面')
-  step('任务页显示首次同步的 Vikunja 任务，标明来源并可跳到原生界面')
-
-  const hooked = await waitForWebhooks()
-  check(hooked > 0, 'Worker 应为每个项目自动注册 Webhook')
-  step(`Worker 在测试连接后为 ${hooked} 个项目自动注册了 Webhook`)
-
-  // ---------------------------------------------------------------- 新建（S3-04：带 Idempotency-Key）
+  // ---------------------------------------------------------------- 新建任务（带 Idempotency-Key）
   const keys = []
   page.on('request', (request) => {
     if (request.url().endsWith('/api/v1/tasks') && request.method() === 'POST') keys.push(request.headers()['idempotency-key'])
   })
-  await page.getByRole('button', { name: '新建任务' }).click()
-  await page.getByLabel('任务标题').fill('浏览器新建')
-  await page.getByLabel('任务项目').selectOption({ label: project.title })
-  await page.getByLabel('任务优先级').selectOption({ index: 3 })
-  // 截止时间设为今天，首页“今日任务”应显示它
-  const today = new Date(Date.now() + 60 * 60 * 1000)
-  const local = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-  await page.getByLabel('截止时间', { exact: true }).fill(local)
-  await page.getByRole('button', { name: '创建任务' }).click()
-  await page.locator('button.task-title', { hasText: '浏览器新建' }).waitFor()
-  const created = (await vikunjaTitles(project.id)).filter((title) => title === '浏览器新建').length
-  check(created === 1, `Vikunja 里应恰好有 1 个新建的任务，实际 ${created}`)
-  check(keys.length === 1 && /^[0-9a-f-]{36}$/.test(keys[0]), '创建请求应带 UUID 格式的 Idempotency-Key')
-  step('新建任务抽屉：提交一次、带 Idempotency-Key，Vikunja 里只有一个任务，列表随即显示')
+  async function createTask(title, { labels = '', dueToday = false } = {}) {
+    await page.getByRole('button', { name: '新建任务' }).click()
+    await page.getByLabel('任务标题').fill(title)
+    await page.getByLabel('任务项目').selectOption({ label: projectTitle })
+    await page.getByLabel('任务优先级').selectOption({ index: 3 })
+    if (labels) await page.getByLabel('任务标签').fill(labels)
+    if (dueToday) {
+      // 截止时间设为今天，首页“今日任务”应显示它
+      const soon = new Date(Date.now() + 60 * 60 * 1000)
+      const local = new Date(soon.getTime() - soon.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+      await page.getByLabel('截止时间', { exact: true }).fill(local)
+    }
+    await page.getByRole('button', { name: '创建任务' }).click()
+    await taskButton(page, title).waitFor()
+  }
+  await page.goto(`${base}/tasks`)
+  await createTask('浏览器新建', { labels: '验收，浏览器' })
+  await createTask('一直未完成', { dueToday: true })
+  check(keys.length === 2 && keys.every((key) => /^[0-9a-f-]{36}$/.test(key)) && keys[0] !== keys[1], '每次创建应带新的 UUID 格式 Idempotency-Key')
+  check(await taskButton(page, '浏览器新建').count() === 1, '新建的任务应只出现一次')
+  await page.getByText(`${projectTitle} · 验收 · 浏览器`).first().waitFor()
+  step('新建任务抽屉：每次提交带新的 Idempotency-Key，列表显示所属项目与标签')
 
   // ---------------------------------------------------------------- 编辑（带 version）
-  await page.locator('button.task-title', { hasText: '浏览器新建' }).click()
+  await taskButton(page, '浏览器新建').click()
   await page.getByLabel('任务标题').fill('浏览器修改')
   await page.getByLabel('已完成任务').check()
   await page.getByRole('button', { name: '保存任务' }).click()
-  await page.locator('button.task-title', { hasText: '浏览器修改' }).waitFor()
-  const edited = await vikunja('GET', `/projects/${project.id}/tasks?per_page=50`)
-  const editedTask = edited.items.find((task) => task.title === '浏览器修改')
-  check(editedTask && editedTask.done === true, 'Vikunja 里的任务应已改名并标为完成')
-  step('编辑抽屉：修改标题并标为完成，Vikunja 同步变化')
-
-  // ---------------------------------------------------------------- 原生修改 → 工作台更新（DoD）
-  // Webhook 已在新建任务之前确认注册好（注册之前在 Vikunja 里的改动不会产生事件）
-  check(await hasHook(project.id), 'Worker 应为项目自动注册 Webhook')
-  await vikunja('PATCH', `/tasks/${native.id}`, { title: '原生界面里改的' }, { merge: true })
-  check(await waitForTitle(page, '原生界面里改的'), '在 Vikunja 里的修改应出现在工作台任务页')
-  step('DoD：在 Vikunja 原生修改任务，工作台任务页显示更新（Webhook）')
+  await taskButton(page, '浏览器修改').waitFor()
+  await page.getByRole('button', { name: '关闭对话框' }).click().catch(() => {})
+  step('编辑抽屉：修改标题并标为完成')
 
   // ---------------------------------------------------------------- 看板
   await page.getByRole('button', { name: '看板', exact: true }).click()
-  const open = page.getByRole('region', { name: '未完成' })
-  const done = page.getByRole('region', { name: '已完成' })
-  await open.locator('button.task-title', { hasText: '原生界面里改的' }).waitFor()
-  await done.locator('button.task-title', { hasText: '浏览器修改' }).waitFor()
+  await page.getByRole('region', { name: '未完成' }).locator('button.task-title', { hasText: '一直未完成' }).waitFor()
+  await page.getByRole('region', { name: '已完成' }).locator('button.task-title', { hasText: '浏览器修改' }).waitFor()
   step('看板视图按完成状态分列')
 
-  // ---------------------------------------------------------------- 首页任务组件接真实数据
+  // ---------------------------------------------------------------- 首页任务组件
   await page.goto(`${base}/`)
   const summary = page.getByRole('article', { name: '待办汇总' })
   await summary.locator('.summary-number').waitFor()
-  check((await summary.locator('.summary-number').textContent()).trim() === '1', '待办汇总应为 1（原生任务未完成）')
-  step('首页待办汇总显示真实数据')
+  check((await summary.locator('.summary-number').textContent()).trim() === '1', '待办汇总应为 1（只有一个未完成）')
+  step('首页待办汇总显示工作台自己的任务数据')
 
-  // ---------------------------------------------------------------- 删除（二次确认）
+  // ---------------------------------------------------------------- 删除任务（二次确认）
   await page.goto(`${base}/tasks`)
   await page.getByRole('button', { name: '列表', exact: true }).click()
-  await page.locator('button.task-title', { hasText: '浏览器修改' }).click()
+  await taskButton(page, '浏览器修改').click()
   await page.getByRole('button', { name: '删除任务' }).click()
-  check(await waitForTitle(page, '浏览器修改', false), '删除后任务应从列表消失')
-  check(!(await vikunjaTitles(project.id)).includes('浏览器修改'), 'Vikunja 里应已删除')
-  step('删除任务（确认后）：工作台与 Vikunja 里都已删除')
+  await page.getByText('任务操作已完成').first().waitFor()
+  await page.getByRole('button', { name: '刷新任务' }).click()
+  await taskButton(page, '一直未完成').waitFor()
+  check(await taskButton(page, '浏览器修改').count() === 0, '删除后任务应从列表消失')
+  step('删除任务（确认后）从列表消失')
+
+  // ---------------------------------------------------------------- 项目改名、归档、删除
+  await page.goto(`${base}/projects`)
+  await projectCard(page, projectTitle).getByRole('button', { name: `编辑项目 ${projectTitle}` }).click()
+  const renamed = `${projectTitle} 改名`
+  await page.getByLabel('项目名称').fill(renamed)
+  await page.getByRole('button', { name: '保存项目' }).click()
+  await projectCard(page, renamed).waitFor()
+  await projectCard(page, renamed).getByRole('button', { name: `归档项目 ${renamed}` }).click()
+  await page.getByText(`已归档项目「${renamed}」，任务保留`).waitFor()
+  check(await projectCard(page, renamed).count() === 0, '归档的项目默认不显示')
+  await page.getByLabel('显示已归档的项目').check()
+  await projectCard(page, renamed).getByText('已归档').waitFor()
+  await projectCard(page, renamed).getByRole('button', { name: `删除项目 ${renamed}` }).click()
+  await page.getByText(`已删除项目「${renamed}」`).waitFor()
+  await page.goto(`${base}/tasks`)
+  await page.getByText('还没有项目，请先在「项目」页新建一个项目。').first().waitFor()
+  check(await taskButton(page, '一直未完成').count() === 0, '删除项目应一起删除它的任务')
+  step('项目改名、归档（默认隐藏）、删除（连带任务）')
 
   // ---------------------------------------------------------------- 移动端
+  await page.goto(`${base}/projects`)
+  await page.getByRole('button', { name: '新建项目' }).click()
+  await page.getByLabel('项目名称').fill(projectTitle)
+  await page.getByRole('button', { name: '创建项目' }).click()
+  await projectCard(page, projectTitle).waitFor()
+  await page.goto(`${base}/tasks`)
+  await createTask('移动端检查')
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.locator('button.task-title', { hasText: '原生界面里改的' }).waitFor()
-  check(!(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)), '移动端不应出现横向滚动')
-  step('390px 宽度下任务页无横向滚动')
+  await taskButton(page, '移动端检查').waitFor()
+  check(!(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)), '移动端任务页不应出现横向滚动')
+  await page.goto(`${base}/projects`)
+  await projectCard(page, projectTitle).waitFor()
+  check(!(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)), '移动端项目页不应出现横向滚动')
+  step('390px 宽度下任务页、项目页无横向滚动')
 
   // ---------------------------------------------------------------- viewer 只读
   const viewer = await login(browser, `viewer-${run}@browser.example.com`, problems)
   await viewer.page.getByLabel('当前工作空间').selectOption({ label: 'Owner 的空间' })
   await viewer.page.goto(`${base}/tasks`)
-  await viewer.page.locator('button.task-title', { hasText: '原生界面里改的' }).waitFor()
+  await taskButton(viewer.page, '移动端检查').waitFor()
   check(await viewer.page.getByRole('button', { name: '新建任务' }).count() === 0, 'viewer 不应看到新建任务')
-  await viewer.page.locator('button.task-title', { hasText: '原生界面里改的' }).click()
+  await taskButton(viewer.page, '移动端检查').click()
   check(await viewer.page.getByRole('button', { name: '保存任务' }).count() === 0, 'viewer 不应看到保存任务')
   check(await viewer.page.getByRole('button', { name: '删除任务' }).count() === 0, 'viewer 不应看到删除任务')
-  step('viewer：能看任务，没有新建、保存、删除入口')
+  await viewer.page.goto(`${base}/projects`)
+  await projectCard(viewer.page, projectTitle).waitFor()
+  check(await viewer.page.getByRole('button', { name: '新建项目' }).count() === 0, 'viewer 不应看到新建项目')
+  check(await projectCard(viewer.page, projectTitle).getByRole('button').count() === 0, 'viewer 不应看到项目的编辑、归档、删除')
+  step('viewer：能看任务和项目，没有新建、保存、删除入口')
 
   await browser.close()
   if (problems.length) throw new Error(`页面错误：${problems.join('; ')}`)

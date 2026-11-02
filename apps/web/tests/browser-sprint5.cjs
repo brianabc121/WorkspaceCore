@@ -37,7 +37,7 @@ const shots = path.resolve(__dirname, '../docs/screenshots');
           else body = { ...empty, unread_count: unread, items: unread ? [notification, { ...notification, id: 'notice-b', title: '未来通知', body: '普通通知', link: '//evil.example.test' }] : [] };
         } else if (p === '/api/v1/automations') body = { ...empty, items: [automation()], connection: { status: 'ok', as_of: at } };
         else if (p === '/api/v1/automations/connection') { assert.equal(role, 'owner'); body = { configured: true, base_url: 'http://n8n:5678', public_url: 'https://n8n.example.test', api_key_set: true, trigger_secret_set: true, version: 1, status: 'active', tested_version: '2.45.7', sync: { status: 'ok', as_of: at } }; }
-        else if (p === '/api/v1/app-logins') { assert.equal(role, 'owner'); body = { items: [{ app: 'vikunja', configured: false, username: null, password_set: false, login_url: null, updated_at: null, version: null }, { app: 'n8n', configured: true, username: 'ops@example.test', password_set: true, login_url: 'https://n8n.example.test', updated_at: at, version: 1 }] }; }
+        else if (p === '/api/v1/app-logins') { assert.equal(role, 'owner'); body = { items: [{ app: 'n8n', configured: true, username: 'ops@example.test', password_set: true, login_url: 'https://n8n.example.test', updated_at: at, version: 1 }] }; }
         else if (p === '/api/v1/app-logins/n8n/reveal') { assert.equal(role, 'owner'); body = { app: 'n8n', username: 'ops@example.test', password: 'browser shown password' }; }
         else if (p.endsWith('/trigger')) { assert.equal(role, 'owner'); triggered = true; body = run; }
         else if (p.endsWith('/runs')) body = { ...empty, items: triggered ? [run] : [] };

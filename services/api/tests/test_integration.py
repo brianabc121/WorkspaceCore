@@ -46,7 +46,9 @@ EXPECTED_TABLES = {
     "external_resources",
     "idempotency_requests",
     "sync_cursors",
-    "webhook_inbox",
+    # T-0082：工作台自己的项目与任务；webhook_inbox 随 Vikunja 一起删除
+    "projects",
+    "tasks",
 }
 
 

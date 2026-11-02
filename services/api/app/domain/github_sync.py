@@ -18,7 +18,6 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.projection import FULL_SYNC
 from app.integrations.base import ConnectorError
 from app.integrations.github import FAILED_CONCLUSIONS, GitHubClient, Listing
 from app.models import ExternalResource, Integration
@@ -27,6 +26,9 @@ from app.repositories import integrations as integration_repo
 from app.repositories import projection as projection_repo
 
 logger = logging.getLogger("app.sync")
+
+# 全量同步的游标行（sync_cursors.resource_type）；与增量游标分开记录
+FULL_SYNC = "full_sync"
 
 CURSOR = "github"
 RUNS_PER_REPO = 30
@@ -239,7 +241,7 @@ async def sync(
         db, integration.id, CURSOR, success_at=started, cursor_value=(started - OVERLAP).isoformat()
     )
     if state.full:
-        # 周期对账据此决定下一次全量的时间（与 Vikunja 共用 full_sync 游标）
+        # 周期对账据此决定下一次全量的时间
         await integration_repo.upsert_cursor(db, integration.id, FULL_SYNC, success_at=started)
     logger.info(
         "github sync finished",

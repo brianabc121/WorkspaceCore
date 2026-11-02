@@ -69,28 +69,21 @@ class Env:
         return data
 
     async def task(self, title: str) -> str:
-        """直接写一条 Vikunja 任务投影（关联的目标）。"""
-        integration_id = await run_sql(
+        """直接写一个工作台任务（关联的目标；T-0082 之前是 Vikunja 投影）。"""
+        project_id = await run_sql(
             self.database_url,
-            "INSERT INTO workspace.integrations"
-            " (workspace_id, provider, name, base_url, public_url)"
-            " VALUES ($1, 'vikunja', $2, 'http://vikunja:3456', 'https://tasks.example.com')"
-            " ON CONFLICT (workspace_id, provider, name) DO UPDATE SET name = EXCLUDED.name"
-            " RETURNING id",
+            "INSERT INTO workspace.projects (workspace_id, title) VALUES ($1, '项目') RETURNING id",
             uuid.UUID(self.workspace_id),
-            "Vikunja",
         )
-        resource_id = await run_sql(
+        task_id = await run_sql(
             self.database_url,
-            "INSERT INTO workspace.external_resources"
-            " (workspace_id, integration_id, resource_type, external_id, title, source_url)"
-            " VALUES ($1, $2, 'task', $3, $4, 'https://tasks.example.com/tasks/1') RETURNING id",
+            "INSERT INTO workspace.tasks (workspace_id, project_id, title)"
+            " VALUES ($1, $2, $3) RETURNING id",
             uuid.UUID(self.workspace_id),
-            integration_id,
-            str(uuid.uuid4()),
+            project_id,
             title,
         )
-        return str(resource_id)
+        return str(task_id)
 
 
 @pytest.fixture
@@ -408,7 +401,7 @@ async def test_viewers_and_other_workspaces_cannot_write(env: Env) -> None:
 
 
 async def test_links_to_tasks_disappear_with_the_task(env: Env) -> None:
-    """A10：被关联的任务在 Vikunja 里删除（tombstone）后，收藏里不留僵尸引用。"""
+    """A10：被关联的任务删除后，收藏里不留僵尸引用（数据库触发器删除关联）。"""
     await env.source()
     task_id = await env.task("准备发布")
     other_id = await env.task("写周报")
@@ -421,16 +414,12 @@ async def test_links_to_tasks_disappear_with_the_task(env: Env) -> None:
         url=f"{AFFINE}/share/ws/doc2", linked_resource_ids=[str(uuid.uuid4())]
     )
     assert missing.status_code == 422
-    await run_sql(
-        env.database_url,
-        "UPDATE workspace.external_resources SET deleted_at = now() WHERE id = $1",
-        uuid.UUID(task_id),
-    )
+    await run_sql(env.database_url, "DELETE FROM workspace.tasks WHERE id = $1", uuid.UUID(task_id))
     [item] = (await env.resources())["items"]
     assert [link["title"] for link in item["links"]] == ["写周报"]
     assert (await env.resources(linked_resource_id=task_id))["items"] == []
-    tombstoned = await env.bookmark(url=f"{AFFINE}/share/ws/doc3", linked_resource_ids=[task_id])
-    assert tombstoned.status_code == 422
+    deleted = await env.bookmark(url=f"{AFFINE}/share/ws/doc3", linked_resource_ids=[task_id])
+    assert deleted.status_code == 422
     replaced = await env.client.patch(
         f"/api/v1/knowledge/bookmarks/{item['id']}",
         json={"version": item["version"], "linked_resource_ids": []},

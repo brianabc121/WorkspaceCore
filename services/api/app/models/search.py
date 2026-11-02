@@ -41,7 +41,8 @@ class SearchDocument(Base):
     resource_type: Mapped[str] = mapped_column(Text)
     # 该资源在自己接口里的 UUID（投影行、收藏、日程）
     resource_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
-    provider: Mapped[str] = mapped_column(Text)  # vikunja / github / affine / local
+    # github / affine / local（工作台自己的项目、任务、日程）
+    provider: Mapped[str] = mapped_column(Text)
     title: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text, server_default=text("''"))
     context: Mapped[str | None] = mapped_column(Text)

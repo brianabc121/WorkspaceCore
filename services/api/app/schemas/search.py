@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from app.schemas.common import Page
 
 SearchType = Literal["task", "project", "bookmark", "event", "repo", "issue", "pull"]
-SearchProvider = Literal["vikunja", "github", "affine", "local"]
+SearchProvider = Literal["github", "affine", "local"]
 SearchQuery = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 
 

@@ -19,11 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.automations import connection_sync
 from app.domain.connectors import sync_state
 from app.domain.operations import DeploymentHealth
-from app.integrations.vikunja import PROVIDER
 from app.models import CalendarEvent, KnowledgeSource
 from app.repositories import automations as automation_repo
 from app.repositories import integrations as integration_repo
-from app.repositories import projection as projection_repo
+from app.repositories import tasks as task_repo
 from app.schemas.dashboards import ModuleStatus, TaskBrief
 
 logger = logging.getLogger("app.overview")
@@ -49,69 +48,38 @@ def unavailable(reason: str, *, retryable: bool) -> ModuleStatus:
 
 
 class TasksProvider:
-    """任务模块：读 Vikunja 的本地投影（Sprint 3 契约第 10 节），不访问 Vikunja。"""
+    """任务模块：工作台自己的项目与任务（T-0082），本地数据，能读就是 ok。"""
 
     name = "tasks"
     timeout_seconds = 2.0
 
-    def __init__(
-        self,
-        sessions: Callable[[], AsyncSession] | None = None,
-        stale_after_seconds: int = 900,
-    ) -> None:
+    def __init__(self, sessions: Callable[[], AsyncSession] | None = None) -> None:
         self._sessions = sessions
-        self._stale_after = stale_after_seconds
 
     async def fetch(self, workspace_id: uuid.UUID) -> ModuleResult:
         if self._sessions is None:
-            return _not_configured()
-        async with self._sessions() as db:
-            integration = await integration_repo.get_provider(db, workspace_id, PROVIDER)
-            cursor = (
-                await integration_repo.get_cursor(db, integration.id, projection_repo.TASK)
-                if integration
-                else None
+            return ModuleResult(
+                status=unavailable("not_configured", retryable=False),
+                summary={"pending_tasks": None, "active_projects": None},
             )
-            state = sync_state(integration, cursor, stale_after_seconds=self._stale_after)
-            if state.status == "not_configured":
-                return _not_configured()
-            if state.status not in {"ok", "stale"}:
-                return ModuleResult(
-                    status=ModuleStatus(
-                        status="unauthorized" if state.status == "unauthorized" else "unavailable",
-                        as_of=state.as_of,
-                        retryable=state.status != "unauthorized",
-                        reason=state.reason,
-                    ),
-                    summary={"pending_tasks": None, "active_projects": None},
-                )
+        async with self._sessions() as db:
             tomorrow = datetime.now(UTC).date() + timedelta(days=1)
-            pending, projects, today = await projection_repo.task_summary(
+            pending, projects, today = await task_repo.task_summary(
                 db,
                 workspace_id,
                 due_until=datetime.combine(tomorrow, time.min, tzinfo=UTC),
                 today_limit=TODAY_LIMIT,
             )
-            titles = await projection_repo.titles_by_id(
-                db, [p for row in today if (p := _project_uuid(row.metadata_json))]
-            )
+            titles = await task_repo.titles_by_id(db, [row.project_id for row in today])
         return ModuleResult(
-            status=ModuleStatus(
-                status=state.status,
-                as_of=state.as_of,
-                retryable=True,
-                reason=state.reason,
-            ),
+            status=ModuleStatus(status="ok", as_of=datetime.now(UTC), retryable=True),
             summary={"pending_tasks": pending, "active_projects": projects},
             today_tasks=[
                 TaskBrief(
                     id=str(row.id),
                     title=row.title,
-                    due_at=_due(row.metadata_json),
-                    project_title=titles.get(p)
-                    if (p := _project_uuid(row.metadata_json))
-                    else None,
-                    source_url=row.source_url,
+                    due_at=row.due_at,
+                    project_title=titles.get(row.project_id),
                 )
                 for row in today
             ],
@@ -119,29 +87,6 @@ class TasksProvider:
 
 
 TODAY_LIMIT = 20
-
-
-def _not_configured() -> ModuleResult:
-    return ModuleResult(
-        status=unavailable("not_configured", retryable=False),
-        summary={"pending_tasks": None, "active_projects": None},
-    )
-
-
-def _project_uuid(meta: dict[str, object]) -> uuid.UUID | None:
-    value = meta.get("project_resource_id")
-    try:
-        return uuid.UUID(value) if isinstance(value, str) else None
-    except ValueError:
-        return None
-
-
-def _due(meta: dict[str, object]) -> datetime | None:
-    value = meta.get("due_at")
-    try:
-        return datetime.fromisoformat(value) if isinstance(value, str) else None
-    except ValueError:
-        return None
 
 
 class CalendarProvider:
@@ -287,7 +232,7 @@ def default_providers(
     health: Callable[[], DeploymentHealth] | None = None,
 ) -> list[ModuleProvider]:
     return [
-        TasksProvider(sessions, stale_after_seconds),
+        TasksProvider(sessions),
         CalendarProvider(sessions),
         KnowledgeProvider(sessions),
         GitHubProvider(sessions, stale_after_seconds),

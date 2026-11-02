@@ -10,9 +10,7 @@ from arq.connections import ArqRedis
 from redis.asyncio import Redis
 
 # Worker 注册的作业名（app/jobs/worker.py）
-PROCESS_WEBHOOKS = "process_webhooks"
 SYNC_INTEGRATION = "sync_integration"
-REGISTER_WEBHOOKS = "register_webhooks"
 PROCESS_IM_INBOX = "process_im_inbox"
 SEND_APPROVAL_CARDS = "send_approval_cards"
 

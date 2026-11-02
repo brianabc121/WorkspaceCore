@@ -20,7 +20,7 @@ from app.domain.dashboards import version_conflict
 from app.domain.deeplinks import DocLink, LinkError, build_url, parse_doc_link
 from app.domain.policy import WorkspaceAccess, not_found
 from app.domain.tasks import decode_cursor, encode_cursor
-from app.models import Bookmark, ExternalResource, KnowledgeSource
+from app.models import Bookmark, KnowledgeSource
 from app.repositories import knowledge as repo
 from app.repositories import workspaces as workspace_repo
 from app.schemas.common import Page
@@ -79,17 +79,14 @@ def _source_out(source: KnowledgeSource, bookmark_count: int) -> KnowledgeSource
     )
 
 
-def _link_out(resource: ExternalResource) -> ResourceLinkOut:
+def _link_out(target: repo.LinkTarget) -> ResourceLinkOut:
     return ResourceLinkOut(
-        resource_id=resource.id,
-        resource_type=cast(Literal["task", "project"], resource.resource_type),
-        title=resource.title,
-        source_url=resource.source_url,
+        resource_id=target.id, resource_type=target.resource_type, title=target.title
     )
 
 
 def _bookmark_out(
-    bookmark: Bookmark, source: KnowledgeSource, links: list[ExternalResource]
+    bookmark: Bookmark, source: KnowledgeSource, links: list[repo.LinkTarget]
 ) -> KnowledgeResourceOut:
     return KnowledgeResourceOut(
         id=bookmark.id,
@@ -398,7 +395,7 @@ class KnowledgeService:
 
     async def _linkable(
         self, access: WorkspaceAccess, resource_ids: list[uuid.UUID]
-    ) -> list[ExternalResource]:
+    ) -> list[repo.LinkTarget]:
         found = await repo.linkable_resources(self.db, access.workspace.id, resource_ids)
         if len(found) != len(resource_ids):
             raise _invalid("linked_resource_ids", "关联的项目或任务不存在或已删除")

@@ -38,9 +38,9 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 |---|---|
 | 1 部署 | 首次安装；已经装过时重新检查并修复（不会丢数据） |
 | 2 升级 | 先加密备份数据库（`make backup`）与 `.env`，再拉取新代码、补 `.env` 新变量、重建、迁移、检查 |
-| 3 清空 | 删除本项目全部容器、网络与数据卷（包括 Vikunja、n8n、OpenIM 的），可选先备份；可选同时删除代码目录（其中的本机备份 `backups/` 与 `.env` 先移到 `/var/backups/my-workspace-<时间>/` 保留）；要输入项目名确认 |
+| 3 清空 | 删除本项目全部容器、网络与数据卷（包括 n8n、OpenIM 的，以及以前部署过的 Vikunja 的），可选先备份；可选同时删除代码目录（其中的本机备份 `backups/` 与 `.env` 先移到 `/var/backups/my-workspace-<时间>/` 保留）；要输入项目名确认 |
 | 4 状态 | 服务状态、本机与 HTTPS 健康检查、是否已完成首次安装 |
-| 5 接入组件 | 自动接入 Vikunja、GitHub、n8n（需要先在浏览器创建管理员，见下面的「自动接入 Vikunja、GitHub、n8n」） |
+| 5 接入组件 | 自动接入 GitHub、n8n，部署 OpenIM（需要先在浏览器创建管理员，见下面的「自动接入 GitHub、n8n、OpenIM」） |
 
 部署时只问三个问题：
 
@@ -63,9 +63,9 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 - 写入 `APP_ENV=production`、`COMPOSE_FILE=compose.yaml:compose.https.yaml`、域名、邮箱与 `PUBLIC_BASE_URL`；
 - 检查域名解析、80 / 443 是否被占用（例如 nginx）、ufw 是否放行；
 - `make up` → `make migrate`（数据库密码和 `.env` 不一致时自动同步）→ `make smoke` → 用 GET 检查 `https://<域名>/healthz`；
-- 还没创建管理员时显示安装凭据；在浏览器创建好管理员后回到终端按回车，接着自动接入 Vikunja、GitHub、n8n（见下一节）。
+- 还没创建管理员时显示安装凭据；在浏览器创建好管理员后回到终端按回车，接着自动接入 GitHub、n8n 并部署 OpenIM（见下一节）。
 
-### 自动接入 Vikunja、GitHub、n8n
+### 自动接入 GitHub、n8n、OpenIM
 
 部署结束时脚本提示去浏览器「首次安装」页创建管理员；创建好后回到终端按回车，逐个询问要不要接入（都可以跳过）。
 以后随时可以单独运行（菜单第 5 项）：
@@ -76,36 +76,36 @@ sudo bash scripts/deploy.sh connect
 
 | 组件 | 脚本自动做的事 | 需要你做的 |
 |---|---|---|
-| Vikunja（任务主源） | `make vikunja-up` → 建 Vikunja 用户（随机密码）→ 登录后建最小权限的 API Token（一年有效）→ 在工作台建集成、测试连接、同步项目与任务、注册 Webhook | 脚本显示一次 Vikunja 账号密码，同时加密保存到工作台「项目」页（只有管理员看得到），建议也存进密码管理器 |
 | GitHub（只读） | 显示预填好的 Token 创建链接（名称、90 天有效期、只读的 Issues / Pull requests / Actions）→ 列出 Token 能访问的仓库让你挑选 → 建集成、逐个仓库检查权限、开始同步 | 打开链接、勾选仓库、生成 Token 粘贴回终端（GitHub 不允许程序代建 Token） |
-| n8n（自动化） | `make n8n-up` → 建 owner 账号（随机密码）→ 建只读 API Key 与名为 `X-Workspace-Trigger` 的 Header Auth 凭据 → 在工作台建连接并测试 | n8n 账号密码同样保存在工作台「自动化」页；之后自己搭工作流（Webhook 节点选这个凭据），再到工作台“自动化”页登记 |
+| n8n（自动化） | `make n8n-up` → 建 owner 账号（随机密码）→ 建只读 API Key 与名为 `X-Workspace-Trigger` 的 Header Auth 凭据 → 在工作台建连接并测试 | 脚本显示一次 n8n 账号密码，同时加密保存到工作台「自动化」页（只有管理员看得到）；之后自己搭工作流（Webhook 节点选这个凭据），再到工作台“自动化”页登记 |
 | OpenIM（「消息」页） | 构建打过补丁的 openim-server 镜像（第一次约 5 ~ 15 分钟，临时占用约 8 GB 磁盘；Docker Hub 限流时自动改用 `mirror.gcr.io` 再试）→ `make openim-up` → 在 `.env` 里填好 `OPENIM_API_URL`、`OPENIM_OBJECT_URL` 并重启 api、worker → 确认工作台连得上 | 内存少于 4 GB 时默认不装（另外占用约 1 GB）；OpenClaw 实例的接入入口仍按第 8.6 节配置 |
 
+- 项目与任务由工作台自己管理，不需要接入（T-0082 移除了 Vikunja；从带 Vikunja 的旧版本升级见第 10 步）。
 - 接入以首次安装创建的管理员身份进行：Token 加密保存在工作台，操作写进审计日志，和在网页上配置一样。
-- 密码和 Token 不出现在命令行参数和日志里（Vikunja 建用户的命令行例外：密码会在 Vikunja 容器里短暂出现在进程参数中）。
+- 密码和 Token 不出现在命令行参数和日志里。
 - 已经接入的组件不会重复配置。GitHub 已接入时会问要不要换 Token 或仓库（例如权限检查没通过、重新生成了 Token）。
-- Vikunja 用户或 n8n owner 已经存在时，脚本改为询问它的密码。
-- 登录成功的 Vikunja、n8n 账号密码加密保存到工作台：管理员在「项目」「自动化」页的「登录账号」卡片里点「显示密码」
+- n8n owner 已经存在时，脚本改为询问它的密码。
+- 登录成功的 n8n 账号密码加密保存到工作台：管理员在「自动化」页的「登录账号」卡片里点「显示密码」
   或「复制密码」（每次都写审计日志），也可以在那里修改。之前已经接入、还没保存的，再运行 `connect` 时会问一次，
   输入账号密码（脚本先登录核对）后保存；也可以直接在页面上填写。member、viewer 看不到这张卡片。
-- 无人值守（`--yes`）时自动接入 Vikunja 和 n8n，跳过 GitHub。
-- 最后显示接入状态：「已接入」「未接入」，或者已保存但用不了的原因（凭证失效、暂时连不上等），以及 Vikunja、n8n 的打开地址。
+- 无人值守（`--yes`）时自动接入 n8n，跳过 GitHub。
+- 最后显示接入状态：「已接入」「未接入」，或者已保存但用不了的原因（凭证失效、暂时连不上等），以及 n8n 的打开地址。
 - 依据和实测记录见 [`decisions/2026-11-02-deploy-connect.md`](decisions/2026-11-02-deploy-connect.md)。
 
-#### 用子域名打开 Vikunja 和 n8n（可选）
+#### 用子域名打开 n8n（可选）
 
-默认 Vikunja、n8n 的管理界面只绑定服务器本机，工作台里「在 Vikunja 中打开」「打开 n8n 编辑器」指向 `http://localhost:…`，
+默认 n8n 的管理界面只绑定服务器本机，工作台里「打开 n8n 编辑器」指向 `http://localhost:5678`，
 要先建 SSH 隧道（第 8 节开头）才能打开。启用了域名与 HTTPS 时，`connect` 最后会问要不要用子域名对外打开：
 
-1. 先在域名服务商那里加两条 A 记录，指向这台服务器，例如 `vikunja.workspace.example.com`、`n8n.workspace.example.com`；
-2. 运行 `sudo bash scripts/deploy.sh connect`，问到「用子域名经 HTTPS 对外打开 Vikunja / n8n？」时回答 `y`，
-   域名直接回车用建议值（`vikunja.<SITE_DOMAIN>`、`n8n.<SITE_DOMAIN>`）或输入自己的。
+1. 先在域名服务商那里加一条 A 记录，指向这台服务器，例如 `n8n.workspace.example.com`；
+2. 运行 `sudo bash scripts/deploy.sh connect`，问到「用子域名经 HTTPS 对外打开 n8n？」时回答 `y`，
+   域名直接回车用建议值（`n8n.<SITE_DOMAIN>`）或输入自己的。
 
-脚本会：在 `infra/caddy/apps-enabled/` 生成 Caddy 站点（自动申请证书，转发到容器）；把 `.env` 的 `VIKUNJA_DOMAIN`、
-`VIKUNJA_PUBLIC_URL`、`N8N_DOMAIN`、`N8N_PUBLIC_URL` 改成新地址，n8n 同时设 `N8N_SECURE_COOKIE=true`、`N8N_PROXY_HOPS=1`；
-重启 Vikunja、n8n 与 Caddy（先校验配置，不通过就撤销，工作台不受影响）；更新工作台里的打开链接；最后检查 HTTPS。
+脚本会：在 `infra/caddy/apps-enabled/` 生成 Caddy 站点（自动申请证书，转发到容器）；把 `.env` 的 `N8N_DOMAIN`、
+`N8N_PUBLIC_URL` 改成新地址，同时设 `N8N_SECURE_COOKIE=true`、`N8N_PROXY_HOPS=1`；
+重启 n8n 与 Caddy（先校验配置，不通过就撤销，工作台不受影响）；更新工作台里的打开链接；最后检查 HTTPS。
 
-- 公开后两者的登录页都暴露在公网。n8n 的 owner 能编辑和运行工作流，权限很大：用脚本生成的随机密码或同样强的密码，
+- 公开后 n8n 的登录页暴露在公网。n8n 的 owner 能编辑和运行工作流，权限很大：用脚本生成的随机密码或同样强的密码，
   在 n8n 设置里开启两步验证；不需要时再运行 `connect`，在域名提示处输入 `-` 取消对外。
 - 已经公开的，再运行 `connect` 时回车保持原样；无人值守（`--yes`）时沿用 `.env` 里的设置。
 
@@ -123,7 +123,7 @@ sudo bash scripts/deploy.sh install --domain workspace.example.com --email you@e
 
 清空在无人值守时还必须加 `--confirm my-workspace`；连代码目录一起删除再加 `--delete-dir`。全部选项见 `sudo bash scripts/deploy.sh --help`。
 
-脚本部署工作台本身，并可以自动接入 Vikunja、GitHub、n8n，部署 OpenIM（上一节）；监控、OpenClaw 接入入口等其他可选组件以及异地备份，仍按第 8、9 步配置。
+脚本部署工作台本身，并可以自动接入 GitHub、n8n，部署 OpenIM（上一节）；监控、OpenClaw 接入入口等其他可选组件以及异地备份，仍按第 8、9 步配置。
 脚本跑完后，下面第 1 ~ 7 步都已完成。想了解每一步做了什么、或者手动部署，就按下面的步骤来。
 
 ---
@@ -132,8 +132,8 @@ sudo bash scripts/deploy.sh install --domain workspace.example.com --email you@e
 
 | 形态 | 包含 | 适合 |
 |---|---|---|
-| **最小** | 工作台本身（Caddy、前端、API、Worker、PostgreSQL、Redis） | 先试用：首页、日历、通知、收藏、成员管理 |
-| **常用** | 最小 + Vikunja（任务）+ GitHub（只读）+ 监控（Prometheus / Grafana） | 日常使用 |
+| **最小** | 工作台本身（Caddy、前端、API、Worker、PostgreSQL、Redis） | 先试用：首页、项目与任务、日历、通知、收藏、成员管理 |
+| **常用** | 最小 + GitHub（只读）+ 监控（Prometheus / Grafana） | 日常使用 |
 | **完整** | 常用 + n8n（自动化）+ OpenIM 与 OpenClaw（V2：管理员与 AI 实例的 IM、写操作审批） | 需要 AI 运维助手 |
 
 可选组件都可以以后再加，不影响已有数据。建议先按“最小”跑通第 1 ~ 7 步，再到第 8 步逐个添加。
@@ -227,7 +227,7 @@ make env
 
 然后**马上把 `.env` 备份到服务器以外的地方**（例如密码管理器）。它里面有：
 
-- `CREDENTIAL_ENCRYPTION_KEY`：加密已保存的第三方凭证（Vikunja / GitHub Token 等），**丢了就解不开**；
+- `CREDENTIAL_ENCRYPTION_KEY`：加密已保存的第三方凭证（GitHub Token、n8n API Key 等），**丢了就解不开**；
 - `BACKUP_PASSWORD`：备份仓库的密码，**丢了备份就打不开**；
 - `SESSION_SECRET`、`SETUP_TOKEN` 等。
 
@@ -254,7 +254,7 @@ Debian 默认没有装 ufw（`ufw: command not found`），也没有启用别的
 sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443 && sudo ufw enable
 ```
 
-云服务器还要在控制台的安全组里放行 80 和 443。**不要**对公网开放 8080、3000、3456、5678 这些端口。
+云服务器还要在控制台的安全组里放行 80 和 443。**不要**对公网开放 8080、3000、5678 这些端口。
 
 **5.3 在 `.env` 里启用 HTTPS**：取消 `COMPOSE_FILE` 那一行的注释，填上域名和邮箱：
 
@@ -268,7 +268,7 @@ PUBLIC_BASE_URL=https://workspace.example.com
 - `COMPOSE_FILE` 让之后的 `make up`、`docker compose …` 自动带上 `compose.https.yaml`：Caddy 改用 `infra/caddy/https.Caddyfile`，
   发布 80 / 443，HTTP 自动跳转 HTTPS，并加上 HSTS；
 - `ACME_EMAIL` 是 Let's Encrypt 的联系邮箱（证书出问题时通知你）；
-- 容器之间的内部地址 `http://caddy:8080` 保持不变（Vikunja 的 Webhook 用它），宿主机上的 8080 仍只绑定本机。
+- 容器之间的内部地址 `http://caddy:8080` 保持不变，宿主机上的 8080 仍只绑定本机。
 
 > **只在可信内网里使用、不配域名**：跳过第 5 步，把 `HTTP_BIND` 改为 `0.0.0.0`，`PUBLIC_BASE_URL` 改为 `http://<服务器内网 IP>:8080`。
 > 这时流量没有加密，不要这样暴露到公网。
@@ -344,29 +344,13 @@ make setup-token
 
 > 下面几个组件的管理界面默认只绑定服务器本机（`127.0.0.1`），不对外。从你自己的电脑访问时用 SSH 隧道最安全，例如：
 > ```
-> ssh -L 3456:127.0.0.1:3456 -L 3000:127.0.0.1:3000 -L 5678:127.0.0.1:5678 <用户>@<服务器>
+> ssh -L 3000:127.0.0.1:3000 -L 5678:127.0.0.1:5678 <用户>@<服务器>
 > ```
-> 然后在本机浏览器打开 `http://localhost:3456`（Vikunja）、`http://localhost:3000`（Grafana）、`http://localhost:5678`（n8n）。
+> 然后在本机浏览器打开 `http://localhost:3000`（Grafana）、`http://localhost:5678`（n8n）。
 
-### 8.1 Vikunja（任务）
+### 8.1 项目与任务（不需要接入）
 
-> 一键脚本可以自动完成本节：`sudo bash scripts/deploy.sh connect`（见开头的「自动接入 Vikunja、GitHub、n8n」）。下面是手动步骤。
-
-```bash
-make vikunja-up
-```
-
-```bash
-make vikunja-user
-```
-
-1. `make vikunja-user` 按提示创建 Vikunja 用户（Vikunja 关闭了自助注册）；
-2. 登录 Vikunja 原生界面，在设置里创建 API Token（最小权限见 `decisions/2026-10-30-vikunja-2.7.1-verification.md` 第 3 节；
-   要实时同步，给上 `projects_webhooks` 权限）；
-3. 工作台“集成设置”里新建 Vikunja 集成：服务地址填 `http://vikunja:3456`，浏览器地址填 `.env` 里的 `VIKUNJA_PUBLIC_URL`，粘贴 Token，
-   保存后点“测试连接”。通过后会立即同步项目与任务。
-
-细节（Webhook、对账、死信排查）见手册第 8 节。Vikunja 的数据要单独备份（`vikunja dump`）。
+项目与任务由工作台自己管理（2026-11-02 移除了 Vikunja，T-0082），不用部署任何组件；从带 Vikunja 的旧版本升级见第 10 步。
 
 ### 8.2 GitHub（只读）
 
@@ -412,7 +396,7 @@ make up
 make n8n-up
 ```
 
-1. 确认 `.env` 的 `INTEGRATION_ALLOWED_HOSTS` 里有 `n8n`（新生成的 `.env` 默认是 `vikunja,n8n`），然后 `make up`；
+1. 确认 `.env` 的 `INTEGRATION_ALLOWED_HOSTS` 里有 `n8n`（新生成的 `.env` 默认就是 `n8n`），然后 `make up`；
 2. 打开 n8n 编辑器，创建 owner 账号；创建只读的 API Key（`workflow:list`、`workflow:read`、`execution:list`、`execution:read`）
    和名为 `X-Workspace-Trigger` 的 Header Auth 凭据；工作流用 Webhook 节点开头；
 3. 工作台“自动化”页：填连接（`base_url` 为 `http://n8n:5678`），测试连接，登记白名单工作流。
@@ -487,7 +471,7 @@ set -a && . /etc/my-workspace/backup.env && set +a && make restore-verify
 
 它在另一个独立的 Compose 项目里恢复最新快照、迁移、冒烟检查后删除，正在运行的服务不受影响。
 
-Vikunja、n8n、AFFiNE 是独立部署的，各自备份（手册第 14.1 节）。服务器损坏后的真实恢复步骤见手册第 14.5 节——
+n8n、AFFiNE 是独立部署的，各自备份（手册第 14.1 节）。服务器损坏后的真实恢复步骤见手册第 14.5 节——
 那时需要第 4 步里另外保存的 `.env`。
 
 ---
@@ -523,9 +507,20 @@ make up && make smoke
 ```
 
 - `make env` 只补上新增的变量，不改已有的值；
-- 先构建、再迁移：迁移只新增对象，旧版本在迁移期间照常服务；
+- 先构建、再迁移：迁移通常只新增对象，旧版本在迁移期间照常服务（`0020` 例外：它删除 Vikunja 的数据，迁移期间旧版本的任务页可能出错，`make up` 换上新版本后恢复）；
 - 出问题时按手册第 5.3 节回滚：没有新迁移就 `git checkout <旧提交>` 再 `make up`；有新迁移先用新代码 `alembic downgrade` 到升级前的版本；
   更严重时从升级前的快照恢复。
+
+**从带 Vikunja 的旧版本升级**（T-0082）：迁移 `0020` 把已经同步到工作台的 Vikunja 项目与任务转成工作台自己的数据
+（ID 不变，收藏关联与搜索照常），然后删除 Vikunja 集成与 Webhook 收件箱。只转换工作台里已有的同步结果，
+升级前可以先在旧版本的“集成设置”里对 Vikunja 点一次同步。
+
+- 一键脚本升级（`sudo bash scripts/deploy.sh upgrade`）在迁移之后自动：停止并删除以前的 Vikunja 容器与网络
+  （Compose 项目 `my-workspace-vikunja`），删除 `infra/caddy/apps-enabled/vikunja.caddy` 并重启 Caddy，清空 `.env` 的 `VIKUNJA_DOMAIN`。
+  **数据卷保留**：最后打印 `docker volume rm …`，确认不再需要以前的数据后再手动执行。
+- 手动升级时，迁移之后自己做：`docker ps -aq --filter label=com.docker.compose.project=my-workspace-vikunja | xargs -r docker rm -f`；
+  有 `infra/caddy/apps-enabled/vikunja.caddy` 就删掉，再 `docker compose restart caddy`。
+- `.env` 里旧的 `VIKUNJA_*`、`WEBHOOK_BASE_URL` 不再读取，可以留着。降级到 `0020` 之前只恢复表结构，工作台的项目与任务会被删除。
 
 ---
 
@@ -540,7 +535,7 @@ make up && make smoke
 | 备份 / 恢复演练 | `make backup` / `make restore-verify` |
 | 安全扫描 / 性能基准 | `make scan` / `make perf`（手册第 15 节） |
 | 轮换加密密钥 | 手册第 6.1 节 |
-| 查看 Vikunja / n8n / OpenIM 日志 | `make vikunja-logs` / `make n8n-logs` / `make openim-logs` |
+| 查看 n8n / OpenIM 日志 | `make n8n-logs` / `make openim-logs` |
 
 “运维”页能看到各服务的状态；监控部署后还有请求量、延迟等预设指标。
 
