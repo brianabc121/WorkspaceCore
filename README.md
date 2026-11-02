@@ -82,6 +82,12 @@ make smoke     # 检查健康、就绪、前端页面与安全响应头
 
 ## 部署到服务器
 
+一条命令部署（Debian / Ubuntu，root 运行；只问域名、证书邮箱与访问地址三个参数，之后同一脚本可以升级、清空、查看状态）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | sudo bash
+```
+
 按步骤的教程：**[`docs/deploy-guide.md`](docs/deploy-guide.md)**——准备服务器、安装 Docker、生成 `.env`、域名与自动 HTTPS、
 创建管理员、接入 Vikunja / GitHub / 监控 / n8n / OpenClaw、配置异地备份与恢复演练、升级与回滚、常见问题。
 

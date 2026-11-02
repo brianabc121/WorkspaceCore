@@ -8,6 +8,59 @@
 
 ---
 
+## 一键脚本（推荐）
+
+在一台新的 Debian / Ubuntu 服务器上，用 root（或 sudo）运行这一条命令：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | sudo bash
+```
+
+脚本会把代码放到 `/srv/my-workspace`，然后显示菜单：
+
+| 选项 | 做什么 |
+|---|---|
+| 1 部署 | 首次安装；已经装过时重新检查并修复（不会丢数据） |
+| 2 升级 | 先加密备份数据库（`make backup`）与 `.env`，再拉取新代码、补 `.env` 新变量、重建、迁移、检查 |
+| 3 清空 | 删除本项目全部容器、网络与数据卷（包括 Vikunja、n8n、OpenIM 的），可选先备份；要输入项目名确认 |
+| 4 状态 | 服务状态、本机与 HTTPS 健康检查、是否已完成首次安装 |
+
+部署时只问三个问题：
+
+| 参数 | 例子 | 说明 |
+|---|---|---|
+| `SITE_DOMAIN` | `workspace.example.com` | 已解析到这台服务器的域名 |
+| `ACME_EMAIL` | `you@example.com` | Let's Encrypt 证书联系邮箱 |
+| `PUBLIC_BASE_URL` | `https://workspace.example.com` | 直接回车就是 `https://<域名>`；必须和浏览器地址栏完全一致 |
+
+其余的都自动完成，并处理了部署时常见的坑：
+
+- 缺 git / make / python3 / curl 时用 apt 安装；没有 Docker 时用官方脚本安装（都会先问）；
+- `.env` 不存在就随机生成；是从 `.env.example` 复制来的（还有占位符）时，备份后重新生成；
+- 写入 `APP_ENV=production`、`COMPOSE_FILE=compose.yaml:compose.https.yaml`、域名、邮箱与 `PUBLIC_BASE_URL`；
+- 检查域名解析、80 / 443 是否被占用（例如 nginx）、ufw 是否放行；
+- `make up` → `make migrate`（数据库密码和 `.env` 不一致时自动同步）→ `make smoke` → 用 GET 检查 `https://<域名>/healthz`；
+- 还没创建管理员时显示安装凭据。
+
+已经有代码时，在代码目录里直接运行，也可以直接指定动作：
+
+```bash
+sudo bash scripts/deploy.sh upgrade
+```
+
+无人值守（例如自动化）时用参数代替提问：
+
+```bash
+sudo bash scripts/deploy.sh install --domain workspace.example.com --email you@example.com --yes
+```
+
+清空在无人值守时还必须加 `--confirm my-workspace`。全部选项见 `sudo bash scripts/deploy.sh --help`。
+
+脚本只部署工作台本身（下面的“最小”形态）。Vikunja、监控、n8n、OpenIM 等可选组件，以及异地备份，仍按第 8、9 步配置；
+脚本跑完后，下面第 1 ~ 6 步都已完成，直接从第 7 步创建管理员开始。想了解每一步做了什么、或者手动部署，就按下面的步骤来。
+
+---
+
 ## 0. 先选部署形态
 
 | 形态 | 包含 | 适合 |
