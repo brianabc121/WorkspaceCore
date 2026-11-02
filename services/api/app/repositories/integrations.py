@@ -86,20 +86,6 @@ async def get_cursor(
     )
 
 
-async def cursors(
-    db: AsyncSession, integration_ids: list[uuid.UUID]
-) -> dict[uuid.UUID, SyncCursor]:
-    """每个集成的任务同步游标（任务的新鲜度代表整个集成的新鲜度）。"""
-    if not integration_ids:
-        return {}
-    rows = await db.scalars(
-        select(SyncCursor).where(
-            SyncCursor.integration_id.in_(integration_ids), SyncCursor.resource_type == "task"
-        )
-    )
-    return {row.integration_id: row for row in rows}
-
-
 async def upsert_cursor(
     db: AsyncSession,
     integration_id: uuid.UUID,

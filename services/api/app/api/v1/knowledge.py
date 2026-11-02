@@ -113,8 +113,7 @@ async def delete_source(
 @router.get(
     "/knowledge/resources",
     summary="文档收藏列表（viewer；私有收藏只返回自己的）",
-    description="linked_resource_id 只返回关联了该 Vikunja 项目 / 任务的收藏"
-    "（任务抽屉的“相关文档”）。",
+    description="linked_resource_id 只返回关联了该项目 / 任务的收藏（任务抽屉的“相关文档”）。",
     responses=_read_errors,
 )
 async def list_resources(

@@ -2,13 +2,24 @@
 
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Literal
 
 from sqlalchemy import ColumnElement, Select, and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Bookmark, ExternalResource, KnowledgeSource, ResourceLink
+from app.models import Bookmark, KnowledgeSource, Project, ResourceLink, Task
 
 LINKABLE_TYPES = ("task", "project")
+
+
+@dataclass(frozen=True)
+class LinkTarget:
+    """收藏关联的目标：工作台的项目或任务（T-0082 之前是 Vikunja 投影）。"""
+
+    id: uuid.UUID
+    resource_type: Literal["task", "project"]
+    title: str
 
 
 def visible_to(user_id: uuid.UUID) -> ColumnElement[bool]:
@@ -123,13 +134,12 @@ def list_query(
     elif visibility == "private":
         stmt = stmt.where(Bookmark.visibility == "private", Bookmark.owner_id == user_id)
     if linked_resource_id is not None:
+        # 项目、任务删除时触发器会删掉指向它的关联，所以不需要再核对目标是否存在
         stmt = stmt.where(
             select(ResourceLink.id)
-            .join(ExternalResource, ExternalResource.id == ResourceLink.target_resource_id)
             .where(
                 ResourceLink.source_resource_id == Bookmark.id,
                 ResourceLink.target_resource_id == linked_resource_id,
-                ExternalResource.deleted_at.is_(None),
             )
             .exists()
         )
@@ -149,22 +159,30 @@ def list_query(
 # ---------------------------------------------------------------- 关联
 
 
+async def _targets(
+    db: AsyncSession, workspace_id: uuid.UUID | None, resource_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, LinkTarget]:
+    ids = list(set(resource_ids))
+    if not ids:
+        return {}
+    project_query = select(Project.id, Project.title).where(Project.id.in_(ids))
+    task_query = select(Task.id, Task.title).where(Task.id.in_(ids))
+    if workspace_id is not None:
+        project_query = project_query.where(Project.workspace_id == workspace_id)
+        task_query = task_query.where(Task.workspace_id == workspace_id)
+    found: dict[uuid.UUID, LinkTarget] = {}
+    for resource_id, title in await db.execute(project_query):
+        found[resource_id] = LinkTarget(resource_id, "project", title)
+    for resource_id, title in await db.execute(task_query):
+        found[resource_id] = LinkTarget(resource_id, "task", title)
+    return found
+
+
 async def linkable_resources(
     db: AsyncSession, workspace_id: uuid.UUID, resource_ids: Sequence[uuid.UUID]
-) -> list[ExternalResource]:
-    """本工作空间中未删除的项目 / 任务投影。"""
-    if not resource_ids:
-        return []
-    return list(
-        await db.scalars(
-            select(ExternalResource).where(
-                ExternalResource.id.in_(resource_ids),
-                ExternalResource.workspace_id == workspace_id,
-                ExternalResource.resource_type.in_(LINKABLE_TYPES),
-                ExternalResource.deleted_at.is_(None),
-            )
-        )
-    )
+) -> list[LinkTarget]:
+    """本工作空间中存在的项目 / 任务。"""
+    return list((await _targets(db, workspace_id, resource_ids)).values())
 
 
 async def replace_links(
@@ -183,20 +201,20 @@ async def replace_links(
 
 async def links_for(
     db: AsyncSession, bookmark_ids: Sequence[uuid.UUID]
-) -> dict[uuid.UUID, list[ExternalResource]]:
-    """每个收藏关联的、仍然存在的项目 / 任务（写了 tombstone 的不返回，A10）。"""
+) -> dict[uuid.UUID, list[LinkTarget]]:
+    """每个收藏关联的项目 / 任务（按建立关联的顺序）。"""
     if not bookmark_ids:
         return {}
-    rows = await db.execute(
-        select(ResourceLink.source_resource_id, ExternalResource)
-        .join(ExternalResource, ExternalResource.id == ResourceLink.target_resource_id)
-        .where(
-            ResourceLink.source_resource_id.in_(bookmark_ids),
-            ExternalResource.deleted_at.is_(None),
+    rows = (
+        await db.execute(
+            select(ResourceLink.source_resource_id, ResourceLink.target_resource_id)
+            .where(ResourceLink.source_resource_id.in_(bookmark_ids))
+            .order_by(ResourceLink.created_at, ResourceLink.id)
         )
-        .order_by(ResourceLink.created_at, ResourceLink.id)
-    )
-    links: dict[uuid.UUID, list[ExternalResource]] = {}
-    for bookmark_id, resource in rows.all():
-        links.setdefault(bookmark_id, []).append(resource)
+    ).all()
+    targets = await _targets(db, None, [target for _, target in rows])
+    links: dict[uuid.UUID, list[LinkTarget]] = {}
+    for bookmark_id, target_id in rows:
+        if (target := targets.get(target_id)) is not None:
+            links.setdefault(bookmark_id, []).append(target)
     return links

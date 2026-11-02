@@ -1,7 +1,7 @@
-"""部署脚本的 connect 命令（T-0076）：真实 PostgreSQL / Redis + 内存版 Vikunja、GitHub、n8n。
+"""部署脚本的 connect 命令（T-0076；T-0082 移除了 Vikunja）。
 
-内存版服务只补上初始化用的接口（Vikunja 的 /login、/tokens，n8n 的 /rest/*，
-GitHub 的 /user/repos），其余请求交给 tests/fake_*.py；
+真实 PostgreSQL / Redis + 内存版 GitHub、n8n。内存版服务只补上初始化用的接口
+（n8n 的 /rest/*，GitHub 的 /user/repos），其余请求交给 tests/fake_*.py；
 接口格式按 app/integrations/provisioning.py 里实测的写法。
 覆盖：以首次安装的管理员身份创建集成并测试、同步；已接入时跳过；失败时不留下集成；
 密码与 Token 不出现在输出里；角色与工作空间的选择规则；status 的输出。
@@ -21,7 +21,7 @@ from pydantic import SecretStr
 
 from app.commands import connect
 from app.integrations.base import ConnectorError
-from app.integrations.provisioning import N8N_READ_SCOPES, VIKUNJA_PERMISSIONS
+from app.integrations.provisioning import N8N_READ_SCOPES
 from tests.fake_github import TOKEN as GITHUB_TOKEN
 from tests.fake_github import FakeGitHub
 from tests.fake_n8n import API_KEY as N8N_KEY
@@ -30,14 +30,11 @@ from tests.fake_n8n import FakeN8n
 from tests.fake_openim import BASE_URL as OPENIM_URL
 from tests.fake_openim import SECRET as OPENIM_SECRET
 from tests.fake_openim import FakeOpenIM
-from tests.fake_vikunja import BASE_URL as VIKUNJA_URL
-from tests.fake_vikunja import TOKEN as VIKUNJA_TOKEN
 from tests.helpers import OWNER, ClientFactory, add_member, add_user, run_sql
-from tests.vikunja_support import Env, app_of, open_env
+from tests.workspace_support import Env, app_of, open_env
 
 pytestmark = pytest.mark.integration
 
-VIKUNJA_PASSWORD = "vikunja password 1"  # noqa: S105 - 测试密码
 N8N_PASSWORD = "N8n password 1"  # noqa: S105 - 测试密码（n8n 要求含大写字母与数字）
 N8N_OWNER = "ops@example.com"
 
@@ -46,31 +43,11 @@ N8N_OWNER = "ops@example.com"
 class Provisioning:
     """初始化接口的内存版，记录收到的请求体。"""
 
-    vikunja_users: dict[str, str] = field(default_factory=lambda: {"admin": VIKUNJA_PASSWORD})
-    revoked: list[int] = field(default_factory=list)
-    token_requests: list[dict[str, Any]] = field(default_factory=list)
     n8n_owner: tuple[str, str] | None = None
     n8n_keys: list[dict[str, Any]] = field(default_factory=list)
     n8n_credentials: list[dict[str, Any]] = field(default_factory=list)
     n8n_scopes_override: list[str] | None = None
     github_repos: list[str] = field(default_factory=lambda: ["octo/app", "octo/docs"])
-
-    def vikunja(self, request: httpx.Request) -> httpx.Response | None:
-        path = request.url.path
-        if path == "/api/v2/login" and request.method == "POST":
-            body = json.loads(request.content)
-            if self.vikunja_users.get(body.get("username")) != body.get("password"):
-                return httpx.Response(403, json={"message": "Wrong username or password."})
-            return httpx.Response(200, json={"token": "jwt-session"})
-        if path == "/api/v2/tokens" and request.method == "POST":
-            assert request.headers["authorization"] == "Bearer jwt-session"
-            body = json.loads(request.content)
-            self.token_requests.append(body)
-            return httpx.Response(201, json={**body, "id": 7, "token": VIKUNJA_TOKEN})
-        if path.startswith("/api/v2/tokens/") and request.method == "DELETE":
-            self.revoked.append(int(path.rsplit("/", 1)[1]))
-            return httpx.Response(200, json={"message": "ok"})
-        return None
 
     def n8n(self, request: httpx.Request) -> httpx.Response | None:
         path = request.url.path
@@ -130,14 +107,11 @@ async def world(make_client: ClientFactory, migrated_database_url: str) -> Async
     async with open_env(
         make_client,
         migrated_database_url,
-        integration_allowed_hosts="vikunja.test,n8n,api.github.com",
+        integration_allowed_hosts="n8n,api.github.com",
     ) as env:
-        vikunja_handle = env.fake.handle
 
         def route(request: httpx.Request) -> httpx.Response:
             host = request.headers.get("host") or request.url.host
-            if host.startswith("vikunja.test"):
-                return provisioning.vikunja(request) or vikunja_handle(request)
             if host.startswith("n8n"):
                 return provisioning.n8n(request) or n8n.handler(request)
             return provisioning.github(request) or github.handle(request)
@@ -203,80 +177,6 @@ async def reveal(world: World, app: str) -> dict[str, Any] | None:
     assert response.status_code == 200, response.text
     data: dict[str, Any] = response.json()
     return data
-
-
-# ---------------------------------------------------------------- Vikunja
-
-
-async def test_vikunja_creates_least_privilege_token_and_connects(
-    world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    world.env.fake.add_project("收件箱")
-    namespace = args(
-        "vikunja", "--username", "admin", "--base-url", VIKUNJA_URL,
-        "--public-url", "http://localhost:3456",
-    )  # fmt: skip
-    code = await call(world, connect.cmd_vikunja, namespace, monkeypatch, VIKUNJA_PASSWORD + "\n")
-    assert code == 0
-    [request] = world.provisioning.token_requests
-    assert request["permissions"] == VIKUNJA_PERMISSIONS
-    assert request["title"] == "My Workspace"
-    assert request["expires_at"].endswith("Z")
-    integration = await world.env.integration()
-    assert integration["status"] == "active"
-    assert integration["public_url"] == "http://localhost:3456"
-    assert integration["token_expires_at"] is not None
-    assert "收件箱" in await world.env.projects()  # 测试通过后立即同步
-    actions = await audit_actions(world)
-    assert "integration.created" in actions and "integration.tested" in actions
-    out = capsys.readouterr()
-    assert VIKUNJA_PASSWORD not in out.out + out.err
-    assert VIKUNJA_TOKEN not in out.out + out.err
-    assert "通过  凭证有效" in out.out
-    # 登录成功的账号保存到工作台（T-0080）
-    assert "已把 Vikunja 的登录账号加密保存到工作台" in out.out
-    saved = await reveal(world, "vikunja")
-    assert saved == {"app": "vikunja", "username": "admin", "password": VIKUNJA_PASSWORD}
-
-    # 再运行一次：已经接入，不再创建 Token
-    code = await call(world, connect.cmd_vikunja, namespace, monkeypatch, VIKUNJA_PASSWORD + "\n")
-    assert code == 0
-    assert len(world.provisioning.token_requests) == 1
-    assert "已有 Vikunja 集成（已接入）" in capsys.readouterr().out
-
-
-async def test_vikunja_wrong_password_leaves_nothing(
-    world: World, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    namespace = args("vikunja", "--username", "admin", "--base-url", VIKUNJA_URL)
-    with pytest.raises(ConnectorError) as raised:
-        await call(world, connect.cmd_vikunja, namespace, monkeypatch, "wrong\n")
-    assert raised.value.reason == "login_failed"
-    assert world.provisioning.token_requests == []
-    items = (await world.env.get("/api/v1/integrations"))["items"]
-    assert items == []
-    assert await reveal(world, "vikunja") is None  # 密码不对就不保存
-
-
-async def test_vikunja_token_is_revoked_when_saving_fails(
-    world: World, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # 不合法的浏览器地址：工作台拒绝保存，刚建的 Token 要吊销
-    namespace = args(
-        "vikunja", "--username", "admin", "--base-url", VIKUNJA_URL, "--public-url", "ftp://x"
-    )
-    with pytest.raises(connect.Usage):
-        await call(world, connect.cmd_vikunja, namespace, monkeypatch, VIKUNJA_PASSWORD + "\n")
-    assert world.provisioning.revoked == [7]
-    assert (await world.env.get("/api/v1/integrations"))["items"] == []
-
-
-async def test_missing_password_is_a_usage_error(
-    world: World, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    namespace = args("vikunja", "--username", "admin", "--base-url", VIKUNJA_URL)
-    with pytest.raises(connect.Usage):
-        await call(world, connect.cmd_vikunja, namespace, monkeypatch, "")
 
 
 # ---------------------------------------------------------------- GitHub
@@ -441,75 +341,32 @@ async def test_n8n_key_with_unexpected_scopes_is_not_saved(
     assert connection["configured"] is False
 
 
-async def test_public_urls_update_the_saved_open_links(
+async def test_public_urls_update_the_n8n_editor_link(
     world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    namespace = args("public-urls", "--vikunja", "https://vikunja.example.com")
+    namespace = args("public-urls", "--n8n", "https://n8n.example.com")
     await call(world, connect.cmd_public_urls, namespace, monkeypatch)
-    assert "还没有 Vikunja 集成" in capsys.readouterr().out
+    assert "还没有 n8n 连接" in capsys.readouterr().out
 
-    world.env.fake.add_project("收件箱")
-    await world.env.connect()
     n8n = args("n8n", "--owner-email", N8N_OWNER, "--base-url", N8N_URL)
     assert await call(world, connect.cmd_n8n, n8n, monkeypatch, N8N_PASSWORD + "\n") == 0
     capsys.readouterr()
-    namespace = args(
-        "public-urls",
-        "--vikunja",
-        "https://vikunja.example.com",
-        "--n8n",
-        "https://n8n.example.com",
-    )
     assert await call(world, connect.cmd_public_urls, namespace, monkeypatch) == 0
-    assert "改为 https://vikunja.example.com" in capsys.readouterr().out
-    integration = await world.env.integration()
-    assert integration["public_url"] == "https://vikunja.example.com"
-    assert integration["status"] == "active"  # 只改打开地址，不需要重新测试连接
-    # 已同步的项目与任务链接随之改成新地址（T-0079）
-    links = await project_and_task_links(world)
-    assert links and all(url.startswith("https://vikunja.example.com/") for url in links)
+    assert "改为 https://n8n.example.com" in capsys.readouterr().out
     connection = await world.env.get("/api/v1/automations/connection")
     assert connection["public_url"] == "https://n8n.example.com"
-    assert connection["status"] == "active"
-    assert (await audit_actions(world)).count("integration.updated") == 1
+    assert connection["status"] == "active"  # 只改打开地址，不需要重新测试连接
 
     # 再运行一次：地址没变，不写入
     await call(world, connect.cmd_public_urls, namespace, monkeypatch)
     assert "已经是" in capsys.readouterr().out
-    assert (await audit_actions(world)).count("integration.updated") == 1
 
     with pytest.raises(connect.Usage):
         await call(
-            world, connect.cmd_public_urls, args("public-urls", "--vikunja", "ftp://x"), monkeypatch
+            world, connect.cmd_public_urls, args("public-urls", "--n8n", "ftp://x"), monkeypatch
         )
-
-
-async def project_and_task_links(world: World) -> list[str]:
-    raw = await run_sql(
-        world.env.database_url,
-        "SELECT coalesce(json_agg(source_url), '[]') FROM workspace.external_resources"
-        " WHERE resource_type IN ('project', 'task')",
-    )
-    return list(json.loads(raw))
-
-
-async def test_relink_fixes_links_left_by_an_earlier_address_change(
-    world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    project = world.env.fake.add_project("收件箱")
-    world.env.fake.add_task(project["id"], "写周报")
-    await world.env.connect()
-    # T-0079 之前改地址留下的状态：集成的地址是新的，已同步的链接还是旧的
-    await run_sql(
-        world.env.database_url,
-        "UPDATE workspace.external_resources SET source_url = 'http://localhost:3456/projects/1'",
-    )
-    assert await call(world, connect.cmd_relink, args("relink"), monkeypatch) == 0
-    assert "刷新 2 个项目和任务的打开链接" in capsys.readouterr().out
-    public = (await world.env.integration())["public_url"]
-    assert all(url.startswith(public + "/") for url in await project_and_task_links(world))
-    assert await call(world, connect.cmd_relink, args("relink"), monkeypatch) == 0
-    assert "都是最新的" in capsys.readouterr().out
+    with pytest.raises(SystemExit):  # T-0082 移除了 Vikunja
+        args("public-urls", "--vikunja", "https://vikunja.example.com")
 
 
 # ---------------------------------------------------------------- 身份与状态
@@ -523,57 +380,45 @@ async def test_status_reports_each_component(
     assert lines == [
         "setup=done",
         f"user={OWNER['email'].lower()}",
-        "vikunja=none",
         "github=none",
         "n8n=none",
-        "vikunja_login=none",
         "n8n_login=none",
         "openim=none",
     ]
-    await world.env.connect()
     await call(
         world,
         connect.cmd_save_login,
-        args("save-login", "--app", "vikunja", "--username", "admin", "--no-verify"),
+        args("save-login", "--app", "n8n", "--username", N8N_OWNER, "--no-verify"),
         monkeypatch,
-        VIKUNJA_PASSWORD + "\n",
+        N8N_PASSWORD + "\n",
     )
     await call(world, connect.cmd_status, args("status"), monkeypatch)
     lines = capsys.readouterr().out.split()
-    assert "vikunja=active" in lines and "vikunja_login=saved" in lines
-    assert "n8n_login=none" in lines
+    assert "n8n_login=saved" in lines and not any(x.startswith("vikunja") for x in lines)
 
 
 async def test_save_login_checks_the_password_first(
     world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    vikunja = args(
-        "save-login", "--app", "vikunja", "--username", "admin", "--base-url", VIKUNJA_URL
-    )
-    with pytest.raises(ConnectorError) as raised:
-        await call(world, connect.cmd_save_login, vikunja, monkeypatch, "wrong\n")
-    assert raised.value.reason == "login_failed"
-    assert await reveal(world, "vikunja") is None
-    with pytest.raises(connect.Usage):
-        await call(world, connect.cmd_save_login, vikunja, monkeypatch, "")
-    code = await call(world, connect.cmd_save_login, vikunja, monkeypatch, VIKUNJA_PASSWORD + "\n")
-    assert code == 0
-    assert (await reveal(world, "vikunja") or {})["password"] == VIKUNJA_PASSWORD
-    # 再保存一次覆盖旧的（新密码）
-    world.provisioning.vikunja_users["admin"] = "changed password 2"
-    code = await call(world, connect.cmd_save_login, vikunja, monkeypatch, "changed password 2\n")
-    assert code == 0
-    assert (await reveal(world, "vikunja") or {})["password"] == "changed password 2"  # noqa: S105
-
     world.provisioning.n8n_owner = (N8N_OWNER, N8N_PASSWORD)
     n8n = args("save-login", "--app", "n8n", "--username", N8N_OWNER, "--base-url", N8N_URL)
     with pytest.raises(ConnectorError):
         await call(world, connect.cmd_save_login, n8n, monkeypatch, "Wrong password 1\n")
+    assert await reveal(world, "n8n") is None  # 密码不对就不保存
+    with pytest.raises(connect.Usage):
+        await call(world, connect.cmd_save_login, n8n, monkeypatch, "")
     code = await call(world, connect.cmd_save_login, n8n, monkeypatch, N8N_PASSWORD + "\n")
     assert code == 0
     assert (await reveal(world, "n8n") or {})["username"] == N8N_OWNER
+    # 再保存一次覆盖旧的（新密码）
+    world.provisioning.n8n_owner = (N8N_OWNER, "Changed password 2")
+    code = await call(world, connect.cmd_save_login, n8n, monkeypatch, "Changed password 2\n")
+    assert code == 0
+    assert (await reveal(world, "n8n") or {})["password"] == "Changed password 2"  # noqa: S105
+    with pytest.raises(SystemExit):  # T-0082 移除了 Vikunja
+        args("save-login", "--app", "vikunja", "--username", "admin")
     out = capsys.readouterr()
-    assert VIKUNJA_PASSWORD not in out.out + out.err and N8N_PASSWORD not in out.out + out.err
+    assert N8N_PASSWORD not in out.out + out.err
     actions = await audit_actions(world)
     assert "app_login.created" in actions and "app_login.updated" in actions
 
@@ -584,12 +429,12 @@ async def test_members_below_admin_cannot_connect(
     user_id = await add_user(world.env.database_url, "member@example.com", "member password 1")
     await add_member(world.env.database_url, uuid.UUID(world.env.workspace_id), user_id, "member")
     namespace = args(
-        "--email", "member@example.com", "vikunja", "--username", "admin",
-        "--base-url", VIKUNJA_URL,
+        "--email", "member@example.com", "n8n", "--owner-email", N8N_OWNER,
+        "--base-url", N8N_URL,
     )  # fmt: skip
     with pytest.raises(connect.Usage):
-        await call(world, connect.cmd_vikunja, namespace, monkeypatch, VIKUNJA_PASSWORD + "\n")
-    assert world.provisioning.token_requests == []
+        await call(world, connect.cmd_n8n, namespace, monkeypatch, N8N_PASSWORD + "\n")
+    assert world.provisioning.n8n_keys == []
 
     # admin 可以；指定了不属于他的工作空间则不行
     await run_sql(

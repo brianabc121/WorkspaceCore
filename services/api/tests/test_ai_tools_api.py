@@ -1,6 +1,6 @@
 """MCP 工具调用记录与审批（T-0057，OC-5，契约第 6 节）。
 
-真实 PostgreSQL / Redis + 内存版 Vikunja。
+真实 PostgreSQL / Redis。
 
 覆盖：
 - A14：AI 发起的删除只生成待审批记录，不执行，并留下记录；
@@ -26,7 +26,7 @@ from app.schemas.ai_tools import TOOLS, PendingApproval
 from tests.fake_n8n import FakeN8n
 from tests.helpers import BOB, OWNER, ClientFactory, csrf, run_sql
 from tests.test_automations_api import CONNECTION, REPORT, SETTINGS
-from tests.vikunja_support import Env, app_of, open_env
+from tests.workspace_support import Env, app_of, open_env
 
 pytestmark = pytest.mark.integration
 
@@ -47,9 +47,8 @@ class N8nEnv:
 @pytest.fixture
 async def env(make_client: Any, migrated_database_url: str) -> AsyncIterator[Env]:
     async with open_env(make_client, migrated_database_url) as value:
-        work = value.fake.add_project("工作")
-        value.fake.add_task(work["id"], "写周报", priority=3)
-        await value.connect()
+        work = await value.add_project("工作")
+        await value.add_task(work["id"], "写周报", priority=3)
         yield value
 
 
@@ -101,8 +100,8 @@ async def test_a14_ai_delete_only_creates_a_pending_record(env: Env) -> None:
     pending = await call(env, instance, "delete_task", {"task_id": task["id"]})
     assert pending.status == "pending_approval" and pending.deduplicated is False
     assert "删除任务「写周报」" in pending.summary
-    # 没有执行：Vikunja 与投影里任务都还在
-    assert any(t["title"] == "写周报" for t in env.fake.tasks.values())
+    # 没有执行：任务还在
+    assert "写周报" in await env.titles()
     assert (await env.task_by_title("写周报"))["id"] == task["id"]
     detail = await execution(env, pending.action_id)
     body = detail.json()
@@ -139,7 +138,7 @@ async def test_approving_a_critical_action_needs_the_password(env: Env) -> None:
     body = approved.json()
     assert body["status"] == "succeeded" and body["decided_by"] == str(env.owner_id)
     assert approved.headers["etag"] == f'"{body["version"]}"'
-    assert not any(t["title"] == "写周报" for t in env.fake.tasks.values())
+    assert "写周报" not in await env.titles()
     # 已处理的不能再批
     again = await decide(env, pending.action_id, "approve", body["version"])
     assert again.status_code == 409 and again.json()["error"]["code"] == "EXECUTION_NOT_PENDING"

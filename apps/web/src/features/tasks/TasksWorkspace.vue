@@ -8,8 +8,6 @@ import { ApiError, dataOf, errorMessage, isAccessError } from '../../services/ap
 import { useProjects, priorities } from './shared'
 import { formatTime } from '../time'
 import DataState from '../../components/DataState.vue'
-import SyncNotice from '../../components/SyncNotice.vue'
-import ExternalLink from '../../components/ExternalLink.vue'
 import DrawerDetail from '../../components/DrawerDetail.vue'
 import TaskEditor from './TaskEditor.vue'
 import { useCreateIntent } from '../../composables/useCreateIntent'
@@ -17,18 +15,23 @@ import OperationPanel from './OperationPanel.vue'
 const auth = useAuthStore(), operation = useTaskOperations(), cache = useQueryClient()
 const scope = auth.workspaceId!, userId = auth.user!.id
 const header = { 'X-Workspace-Id': scope }
-// ?q= pre-fills the search (links from the calendar's task deadlines).
-const linked = (() => { const q = useRoute().query.q; return typeof q === 'string' ? q.trim().slice(0, 100) : '' })()
-const form = ref({ status: 'all' as 'all' | 'open' | 'done', project_id: '', priority: [] as string[], due_after: '', due_before: '', q: linked })
+// ?q= pre-fills the search; ?project_id= filters one project (project page, progress widget, knowledge links);
+// ?task= opens that task in the drawer (search results, calendar deadlines, knowledge links).
+const route = useRoute()
+const param = (name: string, max = 100) => { const v = route.query[name]; return typeof v === 'string' ? v.trim().slice(0, max) : '' }
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const linked = param('q'), linkedProject = uuid.test(param('project_id')) ? param('project_id') : '', linkedTask = uuid.test(param('task')) ? param('task') : ''
+const form = ref({ status: 'all' as 'all' | 'open' | 'done', project_id: linkedProject, priority: [] as string[], due_after: '', due_before: '', q: linked })
 type Filters = NonNullable<import('../../services/schema').operations['list_tasks']['parameters']['query']>
-const filters = ref<Filters>({ status: 'all', limit: 30, ...(linked ? { q: linked } : {}) })
+const filters = ref<Filters>({ status: 'all', limit: 30, ...(linked ? { q: linked } : {}), ...(linkedProject ? { project_id: linkedProject } : {}) })
 const query = useInfiniteQuery({ queryKey: computed(() => ['tasks', userId, scope, filters.value]), initialPageParam: null as string | null,
   queryFn: async ({ pageParam, signal }) => dataOf(await auth.api.GET('/api/v1/tasks', { params: { header, query: { ...filters.value, ...(pageParam ? { cursor: pageParam } : {}) } }, signal })), getNextPageParam: (page) => page.next_cursor ?? undefined })
 const projects = useProjects(scope)
 const projectItems = computed(() => projects.data.value?.pages.flatMap((p) => p.items) ?? [])
+const projectTitles = computed(() => new Map(projectItems.value.map((p) => [p.id, p.title])))
 const tasks = computed(() => isAccessError(query.error.value) ? [] : query.data.value?.pages.flatMap((p) => p.items) ?? [])
 const writable = computed(() => !!auth.currentWorkspace && auth.currentWorkspace.role !== 'viewer' && !isAccessError(query.error.value))
-const board = ref(false), opened = ref<string | null>(null), formError = ref(''), reloadError = ref('')
+const board = ref(false), opened = ref<string | null>(linkedTask || null), formError = ref(''), reloadError = ref('')
 // 编辑器只在打开另一个任务或用户点“重新加载”时重建；后台重新拉取不重建，避免丢掉正在输入的内容（T-0049）
 const editorGeneration = ref(0)
 const detail = useQuery({ queryKey: computed(() => ['task', userId, scope, opened.value]), enabled: computed(() => !!opened.value && opened.value !== 'new'), queryFn: async ({ signal, queryKey }) => dataOf(await auth.api.GET('/api/v1/tasks/{task_id}', { params: { header, path: { task_id: queryKey[3]! } }, signal })) })
@@ -77,17 +80,16 @@ useCreateIntent(() => writable.value && !operation.locked, () => { opened.value 
     <button class="secondary-button">应用筛选</button><p v-if="formError" role="alert">{{ formError }}</p>
   </form>
   <DataState v-if="!opened" :loading="projects.isPending.value" :error="projects.error.value" :empty="false" empty-text="" @retry="projects.refetch()" /><button v-if="projects.hasNextPage.value && !opened" class="secondary-button" :disabled="projects.isFetching.value" @click="projects.fetchNextPage()">加载更多项目</button>
-  <SyncNotice :sync="query.data.value?.pages[0]?.sync" />
-  <DataState :loading="query.isPending.value" :error="query.error.value" :empty="!tasks.length" :empty-text="query.data.value?.pages[0]?.sync.status === 'ok' ? '没有符合筛选条件的任务' : '暂无可用的缓存任务'" :stale="!!tasks.length" @retry="query.isFetchNextPageError.value ? query.fetchNextPage() : query.refetch()" />
+  <DataState :loading="query.isPending.value" :error="query.error.value" :empty="!tasks.length" :empty-text="projectItems.length || projects.isPending.value ? '没有符合筛选条件的任务' : '还没有项目，请先在「项目」页新建一个项目。'" :stale="!!tasks.length" @retry="query.isFetchNextPageError.value ? query.fetchNextPage() : query.refetch()" />
   <div :class="board ? 'task-board' : 'task-list-view'">
     <section v-for="column in (board ? [{ title: '未完成', done: false }, { title: '已完成', done: true }] : [{ title: '任务列表', done: null }])" :key="column.title" role="region" :aria-label="column.title" class="panel task-column">
-      <h2 v-if="board">{{ column.title }}</h2><article v-for="item in tasks.filter(t => column.done === null || t.done === column.done)" :key="item.id" class="task-record"><div><button class="task-title" @click="opened = item.id">{{ item.title }}</button><p class="form-help">Vikunja · {{ item.identifier ?? item.external_id }}</p><p>{{ item.done ? '已完成' : '未完成' }} · {{ priorities[item.priority] }} · {{ item.due_at ? formatTime(item.due_at) : '无截止时间' }}</p></div><ExternalLink :href="item.source_url" /></article>
+      <h2 v-if="board">{{ column.title }}</h2><article v-for="item in tasks.filter(t => column.done === null || t.done === column.done)" :key="item.id" class="task-record"><div><button class="task-title" @click="opened = item.id">{{ item.title }}</button><p class="form-help">{{ projectTitles.get(item.project_id) ?? '已归档的项目' }}<template v-if="item.labels.length"> · {{ item.labels.join(' · ') }}</template></p><p>{{ item.done ? '已完成' : '未完成' }} · {{ priorities[item.priority] }} · {{ item.due_at ? formatTime(item.due_at) : '无截止时间' }}</p></div></article>
     </section>
   </div>
   <p v-if="board" class="form-help">看板展示当前筛选下已加载的任务，状态在编辑抽屉中修改。</p><button v-if="query.hasNextPage.value && !isAccessError(query.error.value)" class="secondary-button" :disabled="query.isFetching.value" @click="query.fetchNextPage()">加载更多任务</button>
   <!-- Task Drawer（规范 §8.4）：新建 / 编辑放在右侧抽屉的“详情”页 -->
   <DrawerDetail v-if="opened" :title="opened === 'new' ? '新建任务' : '任务详情'" :busy="operation.current?.status === 'pending'" @close="operation.current?.status !== 'pending' && (opened = null)">
-    <DataState :loading="projects.isPending.value" :error="projects.error.value" :empty="!projectItems.length" empty-text="尚无可选项目，请检查同步状态。" @retry="projects.refetch()" />
+    <DataState :loading="projects.isPending.value" :error="projects.error.value" :empty="!projectItems.length" empty-text="还没有项目，请先在「项目」页新建一个项目。" @retry="projects.refetch()" />
     <button v-if="projects.hasNextPage.value" class="secondary-button" :disabled="projects.isFetching.value" @click="projects.fetchNextPage()">加载更多项目</button>
     <DataState v-if="opened !== 'new'" :loading="detail.isPending.value" :error="detail.error.value" :empty="false" empty-text="" @retry="detail.refetch()" />
     <TaskEditor v-if="opened === 'new' || (detail.data.value && !detail.error.value)" :key="`${opened}:${editorGeneration}`" :task="opened === 'new' ? undefined : detail.data.value" :projects="projectItems" :writable="writable" :locked="operation.locked" @submit="submit" />

@@ -409,13 +409,12 @@ class OverviewSummary(BaseModel):
 
 
 class TaskBrief(BaseModel):
-    """今日任务条目；字段在 Sprint 3 接入 Vikunja 时可能扩展（只增不删）。"""
+    """今日任务条目（工作台自己的任务，T-0082 起没有外部链接）。"""
 
     id: str
     title: str
     due_at: datetime | None
     project_title: str | None
-    source_url: str | None
 
 
 class DashboardOverview(BaseModel):

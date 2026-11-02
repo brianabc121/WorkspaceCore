@@ -1,8 +1,9 @@
-"""外部项目与任务（Sprint 3）：读本地投影，写经 Vikunja Connector。
+"""工作台自己的项目与任务（T-0082；之前是 Vikunja 的投影）。
 
 工作空间范围的资源，用 X-Workspace-Id 指定工作空间：viewer 可读，member 及以上可写。
-写接口必须带 Idempotency-Key（UUID），语义见
-docs/decisions/2026-10-30-sprint-3-tasks-contract.md 第 7 节；外部错误的映射见第 8 节。
+任务的写接口必须带 Idempotency-Key（UUID），语义沿用
+docs/decisions/2026-10-30-sprint-3-tasks-contract.md 第 7 节；
+项目的写接口用整数 version 做乐观并发。
 """
 
 from typing import Annotated
@@ -24,8 +25,12 @@ from app.domain.policy import WorkspaceAccess
 from app.domain.tasks import TaskService, WriteResult
 from app.schemas.common import error_responses
 from app.schemas.tasks import (
+    ProjectCreate,
+    ProjectOut,
     ProjectPage,
     ProjectProgressList,
+    ProjectUpdate,
+    ProjectVersion,
     TaskCreate,
     TaskOut,
     TaskPage,
@@ -51,9 +56,8 @@ IdempotencyKey = Annotated[
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 _read_errors = error_responses(401, 404, 422)
-# 写操作还可能遇到 Vikunja 的鉴权失败、不可用与结果未知（契约第 8 节）
 _write = [Depends(csrf_protected)]
-_write_errors = error_responses(401, 403, 404, 409, 422, 502, 503, 504)
+_write_errors = error_responses(401, 403, 404, 409, 422)
 _REPLAY = (
     "同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。"
 )
@@ -69,31 +73,39 @@ def _respond(result: WriteResult) -> Response:
 
 @router.get(
     "/projects",
-    summary="外部项目列表（viewer，读本地投影）",
+    summary="项目列表（viewer）",
+    description="默认不含已归档的项目；每个项目带未完成 / 已完成任务数。",
     responses=_read_errors,
 )
 async def list_projects(
     access: Viewer,
     service: Service,
-    integration_id: UUID | None = None,
     include_archived: bool = False,
     q: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
     cursor: Cursor = None,
     limit: Limit = 30,
 ) -> ProjectPage:
     return await service.list_projects(
-        access,
-        integration_id=integration_id,
-        include_archived=include_archived,
-        q=q,
-        cursor=cursor,
-        limit=limit,
+        access, include_archived=include_archived, q=q, cursor=cursor, limit=limit
     )
+
+
+@router.post(
+    "/projects",
+    status_code=status.HTTP_201_CREATED,
+    summary="新建项目（member）",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 422),
+)
+async def create_project(
+    access: Member, context: Context, service: Service, body: ProjectCreate
+) -> ProjectOut:
+    return await service.create_project(context, access, body)
 
 
 @router.get(
     "/projects/progress",
-    summary="项目进度（viewer，读本地投影）",
+    summary="项目进度（viewer）",
     description="未归档项目的未完成 / 已完成任务数，供首页“项目进度”组件使用；"
     "有未完成任务的项目在前。",
     responses=_read_errors,
@@ -105,9 +117,50 @@ async def project_progress(
 
 
 @router.get(
+    "/projects/{project_id}",
+    summary="项目详情（viewer）",
+    responses=_read_errors,
+)
+async def get_project(access: Viewer, service: Service, project_id: UUID) -> ProjectOut:
+    return await service.get_project(access, project_id)
+
+
+@router.patch(
+    "/projects/{project_id}",
+    summary="修改项目（member，乐观并发）",
+    description="改名、改描述、归档 / 取消归档；"
+    "version 与当前版本不一致时返回 409 VERSION_CONFLICT，details.current 为最新的项目。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def update_project(
+    access: Member, context: Context, service: Service, project_id: UUID, body: ProjectUpdate
+) -> ProjectOut:
+    return await service.update_project(context, access, project_id, body)
+
+
+@router.delete(
+    "/projects/{project_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    summary="删除项目及它的全部任务（member，乐观并发；前端先二次确认）",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def delete_project(
+    access: Member,
+    context: Context,
+    service: Service,
+    project_id: UUID,
+    version: Annotated[ProjectVersion, Query()],
+) -> None:
+    await service.delete_project(context, access, project_id, version)
+
+
+@router.get(
     "/tasks",
-    summary="任务列表（viewer，读本地投影）",
-    description="sync 表示投影的新鲜度；看板视图由前端按 done 分列。",
+    summary="任务列表（viewer）",
+    description="看板视图由前端按 done 分列。",
     responses=_read_errors,
 )
 async def list_tasks(
@@ -141,8 +194,7 @@ async def list_tasks(
     "/tasks",
     status_code=status.HTTP_201_CREATED,
     summary="创建任务（member，必须带 Idempotency-Key）",
-    description=_REPLAY
-    + "请求已发出但结果未知时返回 504 RESULT_UNKNOWN，用同一个键重发即可查询结果。",
+    description=_REPLAY,
     response_model=TaskOut,
     dependencies=_write,
     responses=_write_errors,
@@ -159,7 +211,7 @@ async def create_task(
 
 @router.get(
     "/tasks/{task_id}",
-    summary="任务详情（viewer，读本地投影）",
+    summary="任务详情（viewer）",
     responses=_read_errors,
 )
 async def get_task(access: Viewer, service: Service, task_id: UUID) -> TaskOut:
@@ -169,7 +221,7 @@ async def get_task(access: Viewer, service: Service, task_id: UUID) -> TaskOut:
 @router.patch(
     "/tasks/{task_id}",
     summary="修改任务（member，必须带 Idempotency-Key 与 version）",
-    description=_REPLAY + "version 与 Vikunja 上的当前版本不一致时返回 409 VERSION_CONFLICT，"
+    description=_REPLAY + "version 与当前版本不一致时返回 409 VERSION_CONFLICT，"
     "details.current 为最新的任务。",
     response_model=TaskOut,
     dependencies=_write,
@@ -191,7 +243,7 @@ async def update_task(
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     summary="删除任务（member，必须带 Idempotency-Key 与 version；前端先二次确认）",
-    description=_REPLAY + "Vikunja 里已经不存在时同样返回 204。",
+    description=_REPLAY + "任务已经不存在时同样返回 204。",
     dependencies=_write,
     responses=_write_errors,
 )

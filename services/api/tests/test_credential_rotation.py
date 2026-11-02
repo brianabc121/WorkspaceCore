@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.domain.agents import agent_secret_context
 from app.domain.app_logins import password_context
-from app.domain.connectors import account_context, webhook_context
+from app.domain.connectors import account_context
 from app.domain.credential_rotation import rotate
 from app.domain.credentials import CredentialBox
 from app.models import (
@@ -33,11 +33,10 @@ async def _seed(url: str, box: CredentialBox) -> dict[str, uuid.UUID]:
                 Integration(
                     id=integration_id,
                     workspace_id=workspace,
-                    provider="vikunja",
-                    name="Vikunja",
-                    base_url="http://vikunja:3456",
-                    public_url="http://vikunja.example",
-                    webhook_secret_ref=box.seal("hook", context=webhook_context(integration_id)),
+                    provider="github",
+                    name="GitHub",
+                    base_url="https://api.github.com",
+                    public_url="https://github.com",
                 )
             )
             await db.flush()
@@ -64,7 +63,7 @@ async def _seed(url: str, box: CredentialBox) -> dict[str, uuid.UUID]:
                 AppLogin(
                     id=login_id,
                     workspace_id=workspace,
-                    app="vikunja",
+                    app="n8n",
                     username="workspace",
                     password_ref=box.seal("pw", context=password_context(login_id)),
                 )
@@ -94,10 +93,10 @@ async def test_rotation_reencrypts_every_sealed_field(migrated_database_url: str
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
             dry = await rotate(db, box, dry_run=True)
-            assert dry.remaining_old == 4 and dry.failed == 0
+            assert dry.remaining_old == 3 and dry.failed == 0
             report = await rotate(db, box)
             assert report.remaining_old == 0 and report.failed == 0
-            assert sum(f.rotated for f in report.fields.values()) == 4
+            assert sum(f.rotated for f in report.fields.values()) == 3
             again = await rotate(db, box)  # 可以重复运行
             assert sum(f.rotated for f in again.fields.values()) == 0
             account = (await db.execute(select(IntegrationAccount))).scalar_one()
@@ -113,10 +112,6 @@ async def test_rotation_reencrypts_every_sealed_field(migrated_database_url: str
         ).get_secret_value()
         == "token"
     )
-    hook = box.resolve(
-        integration.webhook_secret_ref or "", context=webhook_context(ids["integration"])
-    )
-    assert hook.get_secret_value() == "hook"
     secret = box.resolve(
         version.ciphertext_ref or "", context=agent_secret_context(ids["secret"], 1)
     )
@@ -146,8 +141,8 @@ async def test_ciphertext_without_its_key_is_reported_not_dropped(
             report = await rotate(db, box)
     finally:
         await engine.dispose()
-    assert report.failed == 4
-    assert report.remaining_old == 4  # 原样保留，不会被清掉或写坏
+    assert report.failed == 3
+    assert report.remaining_old == 3  # 原样保留，不会被清掉或写坏
 
 
 @pytest.mark.parametrize("dry_run", [True])
@@ -162,4 +157,4 @@ async def test_dry_run_writes_nothing(migrated_database_url: str, dry_run: bool)
             report = await rotate(db, box, dry_run=True)
     finally:
         await engine.dispose()
-    assert report.remaining_old == 4
+    assert report.remaining_old == 3

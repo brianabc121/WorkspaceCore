@@ -20,7 +20,7 @@ jobs:
       - name: 生成 .env（随机密码与密钥）
         run: |
           make env
-          # Sprint 3 验收的 A09 要等周期对账纠正投影：CI 中每分钟对账一次（默认 5 分钟）
+          # Sprint 4 验收要等周期对账（GitHub 限流、Token 失效）：CI 中每分钟对账一次（默认 5 分钟）
           echo "RECONCILE_INTERVAL_MINUTES=1" >> .env
           # Sprint 4 验收用模拟 GitHub（tests/e2e/fake_github_server.py），CI 里没有真实 GitHub Token。
           # 不能用 GITHUB_API_URL：Actions 在 shell 里设置了它，Compose 插值时优先于 .env
@@ -29,15 +29,13 @@ jobs:
           # （tests/e2e/fake_n8n_server.py）；CI 里没有真实 n8n 的凭据，Grafana 不在 CI 里启动
           sed -i 's#^PROMETHEUS_URL=.*#PROMETHEUS_URL=http://prometheus:9090#' .env
           grep -q '^PROMETHEUS_URL=http://prometheus:9090$' .env
-          sed -i 's/^INTEGRATION_ALLOWED_HOSTS=.*/INTEGRATION_ALLOWED_HOSTS=vikunja,fake-github,fake-n8n/' .env
-          grep -q '^INTEGRATION_ALLOWED_HOSTS=vikunja,fake-github,fake-n8n$' .env
+          sed -i 's/^INTEGRATION_ALLOWED_HOSTS=.*/INTEGRATION_ALLOWED_HOSTS=fake-github,fake-n8n/' .env
+          grep -q '^INTEGRATION_ALLOWED_HOSTS=fake-github,fake-n8n$' .env
       - name: docker compose config
         run: |
           docker compose config --quiet
           # 可选监控（Prometheus + Grafana，docs/deployment.md 第 12 节）
           docker compose --profile monitoring config --quiet
-          # 独立部署的 Vikunja（infra/vikunja/compose.yaml）；在 Sprint 3 验收前启动
-          docker compose -p my-workspace-vikunja -f infra/vikunja/compose.yaml --env-file .env config --quiet
       - name: 构建并启动（make up）
         run: make up
       - name: 数据库迁移（make migrate）
@@ -50,10 +48,8 @@ jobs:
       - name: Sprint 2 全栈验收（A03 / A04 / A05 / DoD，接口级）
         # 不要求空库：每次用新的邮箱写入测试用户
         run: python3 tests/e2e/sprint2_acceptance.py
-      - name: 启动 Vikunja 2.7.1（make vikunja-up；加入 core 的 integrations 网络）
-        run: make vikunja-up
-      - name: Sprint 3 全栈验收（DoD / A05 ~ A09，接口级，真实 Vikunja）
-        # 每次新建工作台用户、Vikunja 用户与项目；会临时停掉 caddy 与 vikunja（A09、A05）
+      - name: 项目与任务全栈验收（T-0082 起由工作台自己管理：A06 / A07、version、权限、搜索、首页）
+        # 不要求空库：每次新建工作台用户
         run: python3 tests/e2e/sprint3_acceptance.py
       - name: Sprint 4 全栈验收（DoD / A10 ~ A13 / A17，接口级，模拟 GitHub）
         # 模拟 GitHub 在 api 镜像里运行并加入 integrations 网络；限流与 Token 失效的检查要等约 3 分钟
@@ -77,11 +73,11 @@ jobs:
       - name: Sprint 2 浏览器验收（拖拽保存刷新、版本冲突、错误卡片、viewer 只读、移动端）
         # 不要求空库：每次用新的邮箱写入测试用户
         run: node tests/e2e/sprint2_browser.cjs
-      - name: Sprint 3 浏览器验收（连接 Vikunja → 新建 / 编辑 → 原生修改 → 页面更新 → 删除、viewer 只读）
-        # 真实 Vikunja：每次新建工作台用户、Vikunja 用户与项目
+      - name: 项目与任务浏览器验收（新建项目 → 新建 / 编辑任务 → 看板 → 首页 → 删除 → 归档 / 删除项目、viewer 只读）
+        # 不要求空库：每次新建工作台用户
         run: node tests/e2e/sprint3_browser.cjs
       - name: Sprint 4 浏览器验收（收藏与关联、日历、首页组件、viewer 只读、不请求 AFFiNE）
-        # 不要求空库：每次用新的工作台用户；被关联的 Vikunja 任务直接写进投影
+        # 不要求空库：每次用新的工作台用户；被关联的任务直接写进工作台的任务表
         run: node tests/e2e/sprint4_browser.cjs
       - name: Sprint 5 浏览器验收（运维页与首页运维组件、停掉 Prometheus 后显示过期、viewer 可读、不暴露监控地址）
         # 用 Sprint 5 接口级验收时启动的 prometheus；中途会临时停掉再启动它
@@ -99,8 +95,6 @@ jobs:
         run: python3 tests/e2e/backup_acceptance.py
       - name: 停止 Prometheus（之后的 make down 只管 core 服务）
         run: docker compose --profile monitoring rm -sf prometheus
-      - name: 停止 Vikunja（之后的重启检查会删除 core 的网络）
-        run: make vikunja-down
       - name: 停止后重启，确认数据卷保留
         run: |
           make down
@@ -120,13 +114,9 @@ jobs:
         run: |
           docker compose ps -a
           docker compose logs --no-color --tail=200
-          docker compose -p my-workspace-vikunja -f infra/vikunja/compose.yaml --env-file .env \
-            logs --no-color --tail=100 || true
       - name: 停止服务
         if: always()
-        run: |
-          make vikunja-down || true
-          make down
+        run: make down
 
   # V2 OpenClaw（T-0059，OC-7）：接入入口验收（Caddy 接入入口 + 本机隧道 + 双向证书），
   # 然后是多实例端到端（OpenIM + 两个真实 OpenClaw 实例 + 假模型，方案第 8 节）。

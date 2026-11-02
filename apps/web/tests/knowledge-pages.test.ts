@@ -45,7 +45,7 @@ describe('知识入口与收藏', () => {
     expect(await request.clone().json()).toMatchObject({ title: '新文档', url: bookmark.url, linked_resource_ids: [project.id] })
   })
   it('preserves unloaded associations and does not send visibility for another creator', async () => {
-    const linked = { resource_id: '20000000-0000-4000-8000-000000000001', resource_type: 'task' as const, title: '较旧关联任务', source_url: task.source_url }
+    const linked = { resource_id: '20000000-0000-4000-8000-000000000001', resource_type: 'task' as const, title: '较旧关联任务' }
     const second = { ...linked, resource_id: '20000000-0000-4000-8000-000000000002', title: '第二个旧任务' }
     const requests = knowledge((r) => {
       if (r.method === 'PATCH') return Response.json(bookmark)

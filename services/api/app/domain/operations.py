@@ -487,8 +487,8 @@ class OperationsService:
     async def _integrations(self, workspace_id: uuid.UUID) -> list[ServiceStatusOut]:
         items: list[ServiceStatusOut] = []
         for integration in await integration_repo.list_for_workspace(self.db, workspace_id):
-            resource = github_sync.CURSOR if integration.provider == "github" else "task"
-            cursor = await integration_repo.get_cursor(self.db, integration.id, resource)
+            # T-0082 之后 integrations 里只有 GitHub
+            cursor = await integration_repo.get_cursor(self.db, integration.id, github_sync.CURSOR)
             state = sync_state(
                 integration,
                 cursor,

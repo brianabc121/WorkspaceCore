@@ -47,8 +47,6 @@ class Integration(Base):
     status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
     # tested_version、api_version、instance_version、last_tested_at、webhooks 等非敏感信息
     settings_json: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
-    # Webhook 签名密钥的 enc:v1 引用（用途 integration_webhook:<id>）
-    webhook_secret_ref: Mapped[str | None] = mapped_column(Text)
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
@@ -77,7 +75,11 @@ class IntegrationAccount(Base):
 
 
 class ExternalResource(Base):
-    """外部对象的只读投影：Vikunja 是主源，这里只存映射、展示所需的字段和新鲜度。"""
+    """外部对象的只读投影（GitHub 的仓库、Issue、PR、Actions 运行）：
+    只存映射、展示所需的字段和新鲜度。
+
+    T-0082 之前还有 Vikunja 的项目与任务，迁移 0020 把它们转成了工作台自己的 projects / tasks。
+    """
 
     __tablename__ = "external_resources"
     __table_args__ = (
@@ -97,8 +99,8 @@ class ExternalResource(Base):
     integration_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspace.integrations.id", ondelete="CASCADE")
     )
-    resource_type: Mapped[str] = mapped_column(Text)  # project / task
-    external_id: Mapped[str] = mapped_column(Text)  # Vikunja 的数字 ID（字符串）
+    resource_type: Mapped[str] = mapped_column(Text)  # repo / issue / pull / run
+    external_id: Mapped[str] = mapped_column(Text)  # 外部系统里的 ID（字符串）
     title: Mapped[str] = mapped_column(Text)
     source_url: Mapped[str] = mapped_column(Text)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
@@ -150,38 +152,3 @@ class SyncCursor(Base):
     # 机器可读的错误码，不含外部响应原文
     last_error: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = _updated_at()
-
-
-class WebhookInboxEvent(Base):
-    """收到的 Webhook 事件（规范第 5.1 节第 15 项、第 10 节）。
-
-    status：pending → processing → completed；失败 retry（next_retry_at 之后再试），
-    超过次数上限或永久失败为 dead_letter。processing 时 next_retry_at 是租约到期时间：
-    处理它的进程中途退出后，租约到期即可被重新领取。payload_json 只保存事件名、时间与资源 ID。
-    """
-
-    __tablename__ = "webhook_inbox"
-    __table_args__ = (
-        UniqueConstraint("integration_id", "event_key"),
-        Index(
-            "ix_webhook_pending",
-            "next_retry_at",
-            postgresql_where=text("status IN ('pending', 'retry', 'processing')"),
-        ),
-    )
-
-    id: Mapped[uuid.UUID] = _uuid_pk()
-    integration_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("workspace.integrations.id", ondelete="CASCADE")
-    )
-    # sha256(原始请求体)：Vikunja 没有投递 ID，请求体里的 time 精确到纳秒（核验 ADR 第 6 节）
-    event_key: Mapped[str] = mapped_column(Text)
-    event_type: Mapped[str] = mapped_column(Text)
-    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
-    status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
-    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
-    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    received_at: Mapped[datetime] = _created_at()
-    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # 机器可读的错误码，不含外部响应原文
-    error_text: Mapped[str | None] = mapped_column(Text)

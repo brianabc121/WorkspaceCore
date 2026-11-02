@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Schema } from '../src/services/api'
 import { mockApi, openApp, emptyPage, fail, me, workspace } from './helpers'
 const path = (r: Request) => new URL(r.url).pathname
-const result: Schema['SearchResultOut'] = { id: '60000000-0000-4000-8000-000000000031', resource_type: 'task', provider: 'vikunja', title: 'needle task', context: '发布项目', source_url: 'https://tasks.example.com/tasks/31', updated_at: '2026-10-31T00:00:00Z', match: 'title' }
+const result: Schema['SearchResultOut'] = { id: '60000000-0000-4000-8000-000000000031', resource_type: 'task', provider: 'local', title: 'needle task', context: '发布项目', source_url: null, updated_at: '2026-10-31T00:00:00Z', match: 'title' }
 async function openSearch(q = 'needle') {
   await fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
   await fireEvent.update(screen.getByLabelText('搜索页面与组件'), q)
@@ -42,12 +42,12 @@ describe('跨资源全局搜索', () => {
     expect(screen.queryByRole('button', { name: /文本便签/ })).not.toBeInTheDocument()
   })
   it('queries BFF with workspace and groups types with source metadata and native links', async () => {
-    const requests = mockApi((r) => path(r) === '/api/v1/search' ? Response.json({ ...emptyPage, items: [{ ...result, resource_type: 'issue', provider: 'github', title: 'needle issue' }, result] }) : undefined)
+    const requests = mockApi((r) => path(r) === '/api/v1/search' ? Response.json({ ...emptyPage, items: [{ ...result, resource_type: 'issue', provider: 'github', title: 'needle issue', source_url: 'https://github.com/team/app/issues/31' }, result] }) : undefined)
     await openApp('/'); await openSearch(' needle ')
     const dialog = screen.getByRole('dialog')
-    expect(await within(dialog).findByRole('link', { name: /needle task/ })).toHaveAttribute('href', result.source_url)
+    expect(await within(dialog).findByRole('link', { name: /needle task/ })).toHaveAttribute('href', `/tasks?task=${result.id}`)
     expect(within(dialog).getAllByRole('heading', { level: 3 }).map((el) => el.textContent)).toEqual(['任务', 'Issues'])
-    expect(within(dialog).getByText(/Vikunja.*更新于/)).toBeVisible()
+    expect(within(dialog).getByText(/工作台.*更新于/)).toBeVisible()
     const select = screen.getByLabelText('搜索资源类型'); select.focus()
     await fireEvent.keyDown(select, { key: 'ArrowDown' }); expect(select).toHaveFocus()
     screen.getByLabelText('搜索页面与组件').focus()
@@ -109,7 +109,7 @@ describe('跨资源全局搜索', () => {
   it('never turns an unsafe native URL into an executable link', async () => {
     mockApi((r) => path(r) === '/api/v1/search' ? Response.json({ ...emptyPage, items: [{ ...result, source_url: 'javascript:alert(1)' }] }) : undefined)
     await openApp('/'); await openSearch(); const link = await screen.findByRole('link', { name: /needle task/ })
-    expect(link).toHaveAttribute('href', '/tasks')
+    expect(link).toHaveAttribute('href', `/tasks?task=${result.id}`)
     expect(document.querySelector('a[href^="javascript:"]')).toBeNull()
   })
 })

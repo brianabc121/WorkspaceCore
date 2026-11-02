@@ -1157,7 +1157,7 @@
       "AppLoginList": {
         "properties": {
           "items": {
-            "description": "固定两项：vikunja、n8n",
+            "description": "固定一项：n8n",
             "items": {
               "$ref": "#/components/schemas/AppLoginOut"
             },
@@ -1174,10 +1174,7 @@
       "AppLoginOut": {
         "properties": {
           "app": {
-            "enum": [
-              "vikunja",
-              "n8n"
-            ],
+            "const": "n8n",
             "title": "App",
             "type": "string"
           },
@@ -1195,7 +1192,7 @@
                 "type": "null"
               }
             ],
-            "description": "浏览器打开登录页的地址（Vikunja 集成或 n8n 连接的浏览器地址）；没有配置时为 null",
+            "description": "浏览器打开登录页的地址（n8n 连接的浏览器地址）；没有配置时为 null",
             "title": "Login Url"
           },
           "password_set": {
@@ -1248,10 +1245,7 @@
       "AppLoginSecret": {
         "properties": {
           "app": {
-            "enum": [
-              "vikunja",
-              "n8n"
-            ],
+            "const": "n8n",
             "title": "App",
             "type": "string"
           },
@@ -1296,7 +1290,7 @@
           "username": {
             "anyOf": [
               {
-                "description": "Vikunja 是用户名；n8n 是登录邮箱",
+                "description": "n8n 的登录邮箱",
                 "maxLength": 254,
                 "minLength": 1,
                 "type": "string"
@@ -2031,7 +2025,7 @@
         "additionalProperties": false,
         "properties": {
           "linked_resource_ids": {
-            "description": "关联的 Vikunja 项目 / 任务（投影 UUID）；修改时整体替换",
+            "description": "关联的项目 / 任务的 ID；修改时整体替换",
             "items": {
               "format": "uuid",
               "type": "string"
@@ -2084,7 +2078,7 @@
           "linked_resource_ids": {
             "anyOf": [
               {
-                "description": "关联的 Vikunja 项目 / 任务（投影 UUID）；修改时整体替换",
+                "description": "关联的项目 / 任务的 ID；修改时整体替换",
                 "items": {
                   "format": "uuid",
                   "type": "string"
@@ -4617,7 +4611,6 @@
               "reachable",
               "version",
               "token",
-              "tasks_read",
               "webhooks"
             ],
             "title": "Name",
@@ -4633,73 +4626,6 @@
           "ok"
         ],
         "title": "IntegrationCheck",
-        "type": "object"
-      },
-      "IntegrationCreate": {
-        "additionalProperties": false,
-        "description": "新建 Vikunja 集成（Sprint 3）。",
-        "properties": {
-          "api_token": {
-            "description": "Vikunja API Token（tk_ 开头）；只写不读",
-            "format": "password",
-            "maxLength": 512,
-            "minLength": 4,
-            "title": "Api Token",
-            "type": "string",
-            "writeOnly": true
-          },
-          "base_url": {
-            "maxLength": 2048,
-            "minLength": 1,
-            "title": "Base Url",
-            "type": "string"
-          },
-          "name": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "provider": {
-            "const": "vikunja",
-            "title": "Provider",
-            "type": "string"
-          },
-          "public_url": {
-            "anyOf": [
-              {
-                "maxLength": 2048,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "不填时与 base_url 相同",
-            "title": "Public Url"
-          },
-          "token_expires_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Token 的过期时间（在 Vikunja 创建 Token 时设置），用于到期提醒",
-            "title": "Token Expires At"
-          }
-        },
-        "required": [
-          "provider",
-          "name",
-          "base_url",
-          "api_token"
-        ],
-        "title": "IntegrationCreate",
         "type": "object"
       },
       "IntegrationOut": {
@@ -4752,10 +4678,7 @@
             "type": "string"
           },
           "provider": {
-            "enum": [
-              "vikunja",
-              "github"
-            ],
+            "const": "github",
             "title": "Provider",
             "type": "string"
           },
@@ -4938,15 +4861,15 @@
       },
       "IntegrationUpdate": {
         "additionalProperties": false,
-        "description": "至少改一项；改 base_url 或 api_token 后状态回到 pending，需要重新测试连接。\n\napi_token 的前缀、base_url / public_url（只用于 Vikunja）与 repositories（只用于 GitHub）\n是否适用于该集成由服务端检查，不适用时返回 422。",
+        "description": "至少改一项；改 api_token 后状态回到 pending，需要重新测试连接。",
         "properties": {
           "api_token": {
             "anyOf": [
               {
-                "description": "与集成的 provider 对应的 Token：Vikunja 为 tk_，GitHub 为 github_pat_；只写不读",
+                "description": "GitHub 细粒度 Personal Access Token（github_pat_ 开头）；只写不读",
                 "format": "password",
                 "maxLength": 512,
-                "minLength": 4,
+                "minLength": 12,
                 "type": "string",
                 "writeOnly": true
               },
@@ -4955,19 +4878,6 @@
               }
             ],
             "title": "Api Token"
-          },
-          "base_url": {
-            "anyOf": [
-              {
-                "maxLength": 2048,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Url"
           },
           "enabled": {
             "anyOf": [
@@ -4993,20 +4903,6 @@
               }
             ],
             "title": "Name"
-          },
-          "public_url": {
-            "anyOf": [
-              {
-                "maxLength": 2048,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "显式传 null 表示恢复为 base_url",
-            "title": "Public Url"
           },
           "repositories": {
             "anyOf": [
@@ -6796,64 +6692,82 @@
         "title": "PasswordChangeRequest",
         "type": "object"
       },
+      "ProjectCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "ProjectCreate",
+        "type": "object"
+      },
       "ProjectOut": {
         "properties": {
           "archived": {
             "title": "Archived",
             "type": "boolean"
           },
-          "external_id": {
-            "description": "例如 vikunja:project:7；只用于显示与排错",
-            "title": "External Id",
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
             "type": "string"
           },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "done_tasks": {
+            "description": "已完成任务数",
+            "title": "Done Tasks",
+            "type": "integer"
+          },
           "id": {
-            "description": "投影 UUID；创建任务时的 project_id 用它",
             "format": "uuid",
             "title": "Id",
             "type": "string"
           },
-          "integration_id": {
-            "format": "uuid",
-            "title": "Integration Id",
-            "type": "string"
-          },
-          "source_updated_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Updated At"
-          },
-          "source_url": {
-            "description": "Vikunja 原生界面中的地址",
-            "title": "Source Url",
-            "type": "string"
-          },
-          "synced_at": {
-            "format": "date-time",
-            "title": "Synced At",
-            "type": "string"
+          "open_tasks": {
+            "description": "未完成任务数",
+            "title": "Open Tasks",
+            "type": "integer"
           },
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
           }
         },
         "required": [
           "id",
-          "integration_id",
-          "external_id",
           "title",
+          "description",
           "archived",
-          "source_url",
-          "source_updated_at",
-          "synced_at"
+          "open_tasks",
+          "done_tasks",
+          "version",
+          "created_at",
+          "updated_at"
         ],
         "title": "ProjectOut",
         "type": "object"
@@ -6879,9 +6793,6 @@
             "description": "下一页游标；没有更多数据时为 null",
             "title": "Next Cursor"
           },
-          "sync": {
-            "$ref": "#/components/schemas/SyncState"
-          },
           "total_estimate": {
             "anyOf": [
               {
@@ -6895,8 +6806,7 @@
           }
         },
         "required": [
-          "items",
-          "sync"
+          "items"
         ],
         "title": "ProjectPage",
         "type": "object"
@@ -6924,14 +6834,10 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "sync": {
-            "$ref": "#/components/schemas/SyncState"
           }
         },
         "required": [
-          "items",
-          "sync"
+          "items"
         ],
         "title": "ProjectProgressList",
         "type": "object"
@@ -6952,10 +6858,6 @@
             "title": "Project Id",
             "type": "string"
           },
-          "source_url": {
-            "title": "Source Url",
-            "type": "string"
-          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -6964,7 +6866,6 @@
         "required": [
           "project_id",
           "title",
-          "source_url",
           "open_tasks",
           "done_tasks"
         ],
@@ -7017,6 +6918,59 @@
           "config"
         ],
         "title": "ProjectProgressWidgetUpdate",
+        "type": "object"
+      },
+      "ProjectUpdate": {
+        "additionalProperties": false,
+        "description": "只发送要改的字段；archived 为 true 归档（列表默认不显示，任务保留）。",
+        "properties": {
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "version": {
+            "description": "读取时的版本；不一致时返回 409",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "ProjectUpdate",
         "type": "object"
       },
       "PullOut": {
@@ -7633,10 +7587,10 @@
         "type": "object"
       },
       "ResourceLinkOut": {
-        "description": "关联的项目 / 任务；它在 Vikunja 里删除后不再出现（A10）。",
+        "description": "关联的项目 / 任务；它被删除后关联随之删除（A10）。",
         "properties": {
           "resource_id": {
-            "description": "项目或任务的投影 UUID",
+            "description": "项目或任务的 ID",
             "format": "uuid",
             "title": "Resource Id",
             "type": "string"
@@ -7649,11 +7603,6 @@
             "title": "Resource Type",
             "type": "string"
           },
-          "source_url": {
-            "description": "Vikunja 原生界面中的地址",
-            "title": "Source Url",
-            "type": "string"
-          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -7662,8 +7611,7 @@
         "required": [
           "resource_id",
           "resource_type",
-          "title",
-          "source_url"
+          "title"
         ],
         "title": "ResourceLinkOut",
         "type": "object"
@@ -7971,7 +7919,6 @@
           },
           "provider": {
             "enum": [
-              "vikunja",
               "github",
               "affine",
               "local"
@@ -8466,7 +8413,7 @@
                 "type": "null"
               }
             ],
-            "description": "集成的类型（vikunja / github / n8n），OpenClaw 实例为 openclaw；其他服务为 null",
+            "description": "集成的类型（github / n8n），OpenClaw 实例为 openclaw；其他服务为 null",
             "title": "Provider"
           },
           "reason": {
@@ -8697,7 +8644,7 @@
         "type": "object"
       },
       "TaskBrief": {
-        "description": "今日任务条目；字段在 Sprint 3 接入 Vikunja 时可能扩展（只增不删）。",
+        "description": "今日任务条目（工作台自己的任务，T-0082 起没有外部链接）。",
         "properties": {
           "due_at": {
             "anyOf": [
@@ -8726,17 +8673,6 @@
             ],
             "title": "Project Title"
           },
-          "source_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Url"
-          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -8746,8 +8682,7 @@
           "id",
           "title",
           "due_at",
-          "project_title",
-          "source_url"
+          "project_title"
         ],
         "title": "TaskBrief",
         "type": "object"
@@ -8757,7 +8692,7 @@
         "properties": {
           "description": {
             "default": "",
-            "description": "Markdown 文本；前端按纯文本显示，不渲染 HTML",
+            "description": "纯文本（可以写 Markdown）；前端按纯文本显示，不渲染 HTML",
             "maxLength": 10000,
             "title": "Description",
             "type": "string"
@@ -8774,9 +8709,20 @@
             ],
             "title": "Due At"
           },
+          "labels": {
+            "description": "标签；重复的只保留一个，按给出的顺序",
+            "items": {
+              "maxLength": 50,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Labels",
+            "type": "array"
+          },
           "priority": {
             "default": 0,
-            "description": "0 未设置、1 低、2 中、3 高、4 紧急、5 立即（核验 ADR 第 5.1 节）",
+            "description": "0 未设置、1 低、2 中、3 高、4 紧急、5 立即",
             "maximum": 5.0,
             "minimum": 0.0,
             "title": "Priority",
@@ -8803,8 +8749,13 @@
       },
       "TaskOut": {
         "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
           "description": {
-            "description": "Markdown 文本；前端按纯文本显示，不渲染 HTML",
+            "description": "纯文本；前端按纯文本显示，不渲染 HTML",
             "title": "Description",
             "type": "string"
           },
@@ -8836,36 +8787,12 @@
             ],
             "title": "Due At"
           },
-          "external_id": {
-            "description": "例如 vikunja:task:42",
-            "title": "External Id",
-            "type": "string"
-          },
           "id": {
-            "description": "投影 UUID",
             "format": "uuid",
             "title": "Id",
             "type": "string"
           },
-          "identifier": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Vikunja 的任务标识，例如 PROJ-12",
-            "title": "Identifier"
-          },
-          "integration_id": {
-            "format": "uuid",
-            "title": "Integration Id",
-            "type": "string"
-          },
           "labels": {
-            "description": "标签标题；本 Sprint 只读",
             "items": {
               "type": "string"
             },
@@ -8879,42 +8806,17 @@
             "type": "integer"
           },
           "project_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "所属项目的投影 UUID；项目尚未同步时为 null",
-            "title": "Project Id"
-          },
-          "source_updated_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Updated At"
-          },
-          "source_url": {
-            "description": "Vikunja 原生界面中的地址",
-            "title": "Source Url",
-            "type": "string"
-          },
-          "synced_at": {
-            "format": "date-time",
-            "title": "Synced At",
+            "format": "uuid",
+            "title": "Project Id",
             "type": "string"
           },
           "title": {
             "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
             "type": "string"
           },
           "version": {
@@ -8925,10 +8827,7 @@
         },
         "required": [
           "id",
-          "integration_id",
           "project_id",
-          "external_id",
-          "identifier",
           "title",
           "description",
           "done",
@@ -8936,10 +8835,9 @@
           "priority",
           "due_at",
           "labels",
-          "source_url",
           "version",
-          "source_updated_at",
-          "synced_at"
+          "created_at",
+          "updated_at"
         ],
         "title": "TaskOut",
         "type": "object"
@@ -8965,9 +8863,6 @@
             "description": "下一页游标；没有更多数据时为 null",
             "title": "Next Cursor"
           },
-          "sync": {
-            "$ref": "#/components/schemas/SyncState"
-          },
           "total_estimate": {
             "anyOf": [
               {
@@ -8981,8 +8876,7 @@
           }
         },
         "required": [
-          "items",
-          "sync"
+          "items"
         ],
         "title": "TaskPage",
         "type": "object"
@@ -8994,7 +8888,7 @@
           "description": {
             "anyOf": [
               {
-                "description": "Markdown 文本；前端按纯文本显示，不渲染 HTML",
+                "description": "纯文本（可以写 Markdown）；前端按纯文本显示，不渲染 HTML",
                 "maxLength": 10000,
                 "type": "string"
               },
@@ -9027,10 +8921,28 @@
             ],
             "title": "Due At"
           },
+          "labels": {
+            "anyOf": [
+              {
+                "description": "标签；重复的只保留一个，按给出的顺序",
+                "items": {
+                  "maxLength": 50,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labels"
+          },
           "priority": {
             "anyOf": [
               {
-                "description": "0 未设置、1 低、2 中、3 高、4 紧急、5 立即（核验 ADR 第 5.1 节）",
+                "description": "0 未设置、1 低、2 中、3 高、4 紧急、5 立即",
                 "maximum": 5.0,
                 "minimum": 0.0,
                 "type": "integer"
@@ -9068,7 +8980,7 @@
             "title": "Title"
           },
           "version": {
-            "description": "读取时的 version，原样带回；与 Vikunja 上的当前版本不一致时返回 409",
+            "description": "读取时的 version，原样带回；与当前版本不一致时返回 409",
             "maxLength": 64,
             "minLength": 1,
             "title": "Version",
@@ -9255,18 +9167,6 @@
           "version"
         ],
         "title": "VersionBody",
-        "type": "object"
-      },
-      "WebhookAccepted": {
-        "properties": {
-          "status": {
-            "const": "accepted",
-            "default": "accepted",
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "title": "WebhookAccepted",
         "type": "object"
       },
       "WebhookRegistration": {
@@ -12315,7 +12215,7 @@
     },
     "/api/v1/app-logins": {
       "get": {
-        "description": "固定返回 vikunja、n8n 两项；没有保存时 configured 为 false。不含密码。",
+        "description": "固定返回 n8n 一项；没有保存时 configured 为 false。不含密码。",
         "operationId": "list_app_logins",
         "parameters": [
           {
@@ -12388,7 +12288,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "Vikunja、n8n 的登录账号（admin）",
+        "summary": "n8n 的登录账号（admin）",
         "tags": [
           "app-logins"
         ]
@@ -12403,10 +12303,7 @@
             "name": "app",
             "required": true,
             "schema": {
-              "enum": [
-                "vikunja",
-                "n8n"
-              ],
+              "const": "n8n",
               "title": "App",
               "type": "string"
             }
@@ -12514,7 +12411,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "删除保存的账号（admin，乐观并发；不影响 Vikunja、n8n 里的账号）",
+        "summary": "删除保存的账号（admin，乐观并发；不影响 n8n 里的账号）",
         "tags": [
           "app-logins"
         ]
@@ -12528,10 +12425,7 @@
             "name": "app",
             "required": true,
             "schema": {
-              "enum": [
-                "vikunja",
-                "n8n"
-              ],
+              "const": "n8n",
               "title": "App",
               "type": "string"
             }
@@ -12670,10 +12564,7 @@
             "name": "app",
             "required": true,
             "schema": {
-              "enum": [
-                "vikunja",
-                "n8n"
-              ],
+              "const": "n8n",
               "title": "App",
               "type": "string"
             }
@@ -19605,7 +19496,7 @@
         ]
       },
       "post": {
-        "description": "请求体按 provider 区分。保存后状态为 pending，需要测试连接；每个工作空间最多 1 个同类集成（第 2 个返回 409 LIMIT_EXCEEDED）。Vikunja 的 base_url 解析到私有地址且不在部署允许列表里时返回 422；GitHub 的地址固定为 api.github.com，只同步 repositories 中列出的仓库。",
+        "description": "保存后状态为 pending，需要测试连接；每个工作空间最多 1 个（第 2 个返回 409 LIMIT_EXCEEDED）。地址固定为 api.github.com，只同步 repositories 中列出的仓库。",
         "operationId": "create_integration",
         "parameters": [
           {
@@ -19643,22 +19534,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "discriminator": {
-                  "mapping": {
-                    "github": "#/components/schemas/GitHubIntegrationCreate",
-                    "vikunja": "#/components/schemas/IntegrationCreate"
-                  },
-                  "propertyName": "provider"
-                },
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/IntegrationCreate"
-                  },
-                  {
-                    "$ref": "#/components/schemas/GitHubIntegrationCreate"
-                  }
-                ],
-                "title": "Body"
+                "$ref": "#/components/schemas/GitHubIntegrationCreate"
               }
             }
           },
@@ -19731,7 +19607,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "新建 Vikunja 或 GitHub 集成（admin）",
+        "summary": "新建 GitHub 集成（admin）",
         "tags": [
           "integrations"
         ]
@@ -19739,7 +19615,7 @@
     },
     "/api/v1/integrations/{integration_id}": {
       "patch": {
-        "description": "version 不一致时返回 409 VERSION_CONFLICT；改 base_url 或 api_token 后状态回到 pending。api_token 的前缀必须与集成的 provider 一致；base_url / public_url 只用于 Vikunja，repositories 只用于 GitHub，不适用时返回 422。",
+        "description": "version 不一致时返回 409 VERSION_CONFLICT；改 api_token 后状态回到 pending。",
         "operationId": "update_integration",
         "parameters": [
           {
@@ -20474,7 +20350,7 @@
     },
     "/api/v1/knowledge/resources": {
       "get": {
-        "description": "linked_resource_id 只返回关联了该 Vikunja 项目 / 任务的收藏（任务抽屉的“相关文档”）。",
+        "description": "linked_resource_id 只返回关联了该项目 / 任务的收藏（任务抽屉的“相关文档”）。",
         "operationId": "list_resources",
         "parameters": [
           {
@@ -21628,25 +21504,9 @@
     },
     "/api/v1/projects": {
       "get": {
+        "description": "默认不含已归档的项目；每个项目带未完成 / 已完成任务数。",
         "operationId": "list_projects",
         "parameters": [
-          {
-            "in": "query",
-            "name": "integration_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Integration Id"
-            }
-          },
           {
             "in": "query",
             "name": "include_archived",
@@ -21766,7 +21626,113 @@
             "SessionCookie": []
           }
         ],
-        "summary": "外部项目列表（viewer，读本地投影）",
+        "summary": "项目列表（viewer）",
+        "tags": [
+          "tasks"
+        ]
+      },
+      "post": {
+        "operationId": "create_project",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "新建项目（member）",
         "tags": [
           "tasks"
         ]
@@ -21849,7 +21815,335 @@
             "SessionCookie": []
           }
         ],
-        "summary": "项目进度（viewer，读本地投影）",
+        "summary": "项目进度（viewer）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}": {
+      "delete": {
+        "operationId": "delete_project",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "读取时的版本；不一致时返回 409",
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "读取时的版本；不一致时返回 409",
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "删除项目及它的全部任务（member，乐观并发；前端先二次确认）",
+        "tags": [
+          "tasks"
+        ]
+      },
+      "get": {
+        "operationId": "get_project",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "项目详情（viewer）",
+        "tags": [
+          "tasks"
+        ]
+      },
+      "patch": {
+        "description": "改名、改描述、归档 / 取消归档；version 与当前版本不一致时返回 409 VERSION_CONFLICT，details.current 为最新的项目。",
+        "operationId": "update_project",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "修改项目（member，乐观并发）",
         "tags": [
           "tasks"
         ]
@@ -22123,7 +22417,7 @@
     },
     "/api/v1/tasks": {
       "get": {
-        "description": "sync 表示投影的新鲜度；看板视图由前端按 done 分列。",
+        "description": "看板视图由前端按 done 分列。",
         "operationId": "list_tasks",
         "parameters": [
           {
@@ -22337,13 +22631,13 @@
             "SessionCookie": []
           }
         ],
-        "summary": "任务列表（viewer，读本地投影）",
+        "summary": "任务列表（viewer）",
         "tags": [
           "tasks"
         ]
       },
       "post": {
-        "description": "同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。请求已发出但结果未知时返回 504 RESULT_UNKNOWN，用同一个键重发即可查询结果。",
+        "description": "同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。",
         "operationId": "create_task",
         "parameters": [
           {
@@ -22459,36 +22753,6 @@
               }
             },
             "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "第三方服务拒绝了工作台的凭证（INTEGRATION_UNAUTHORIZED）"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
-          },
-          "504": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "写操作结果未知（RESULT_UNKNOWN）：用同一个 Idempotency-Key 重发以查询结果"
           }
         },
         "security": [
@@ -22504,7 +22768,7 @@
     },
     "/api/v1/tasks/{task_id}": {
       "delete": {
-        "description": "同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。Vikunja 里已经不存在时同样返回 204。",
+        "description": "同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。任务已经不存在时同样返回 204。",
         "operationId": "delete_task",
         "parameters": [
           {
@@ -22518,12 +22782,12 @@
             }
           },
           {
-            "description": "读取时的 version，原样带回；与 Vikunja 上的当前版本不一致时返回 409",
+            "description": "读取时的 version，原样带回；与当前版本不一致时返回 409",
             "in": "query",
             "name": "version",
             "required": true,
             "schema": {
-              "description": "读取时的 version，原样带回；与 Vikunja 上的当前版本不一致时返回 409",
+              "description": "读取时的 version，原样带回；与当前版本不一致时返回 409",
               "maxLength": 64,
               "minLength": 1,
               "title": "Version",
@@ -22626,36 +22890,6 @@
               }
             },
             "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "第三方服务拒绝了工作台的凭证（INTEGRATION_UNAUTHORIZED）"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
-          },
-          "504": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "写操作结果未知（RESULT_UNKNOWN）：用同一个 Idempotency-Key 重发以查询结果"
           }
         },
         "security": [
@@ -22741,13 +22975,13 @@
             "SessionCookie": []
           }
         ],
-        "summary": "任务详情（viewer，读本地投影）",
+        "summary": "任务详情（viewer）",
         "tags": [
           "tasks"
         ]
       },
       "patch": {
-        "description": "同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。version 与 Vikunja 上的当前版本不一致时返回 409 VERSION_CONFLICT，details.current 为最新的任务。",
+        "description": "同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。version 与当前版本不一致时返回 409 VERSION_CONFLICT，details.current 为最新的任务。",
         "operationId": "update_task",
         "parameters": [
           {
@@ -22873,36 +23107,6 @@
               }
             },
             "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "第三方服务拒绝了工作台的凭证（INTEGRATION_UNAUTHORIZED）"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
-          },
-          "504": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "写操作结果未知（RESULT_UNKNOWN）：用同一个 Idempotency-Key 重发以查询结果"
           }
         },
         "security": [
@@ -22913,107 +23117,6 @@
         "summary": "修改任务（member，必须带 Idempotency-Key 与 version）",
         "tags": [
           "tasks"
-        ]
-      }
-    },
-    "/api/v1/webhooks/vikunja/{integration_id}": {
-      "post": {
-        "description": "请求体上限 256 KiB；同一事件重复送达同样返回 202（按请求体哈希去重）。",
-        "operationId": "receive_vikunja_webhook",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "integration_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Integration Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Vikunja-Signature",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Vikunja-Signature"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "description": "Vikunja 的事件：{event_name, time, data}（核验 ADR 第 6 节）；内容不受信任",
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookAccepted"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "请求无效"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
-          },
-          "413": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "请求体过大（PAYLOAD_TOO_LARGE）"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
-          }
-        },
-        "summary": "接收 Vikunja 的 Webhook（签名校验，不用会话）",
-        "tags": [
-          "webhooks"
         ]
       }
     },

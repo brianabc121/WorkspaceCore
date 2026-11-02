@@ -1,4 +1,4 @@
-"""Vikunja、n8n 管理界面的登录账号（T-0080，docs/decisions/2026-11-02-app-logins.md）。
+"""n8n 管理界面的登录账号（T-0080，docs/decisions/2026-11-02-app-logins.md；T-0082 后只有 n8n）。
 
 只有 admin 以上能读写（用 X-Workspace-Id 指定工作空间）；member、viewer 一律 403。
 列表不含密码；查看密码用 POST …/reveal（要 CSRF，写审计），响应带 Cache-Control: no-store。
@@ -26,8 +26,8 @@ NO_STORE = "no-store"
 
 @router.get(
     "/app-logins",
-    summary="Vikunja、n8n 的登录账号（admin）",
-    description="固定返回 vikunja、n8n 两项；没有保存时 configured 为 false。不含密码。",
+    summary="n8n 的登录账号（admin）",
+    description="固定返回 n8n 一项；没有保存时 configured 为 false。不含密码。",
     responses=error_responses(401, 403, 404, 422),
 )
 async def list_app_logins(access: Admin, service: Service, response: Response) -> AppLoginList:
@@ -72,7 +72,7 @@ async def reveal_app_login(
     "/app-logins/{app}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
-    summary="删除保存的账号（admin，乐观并发；不影响 Vikunja、n8n 里的账号）",
+    summary="删除保存的账号（admin，乐观并发；不影响 n8n 里的账号）",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422),
 )

@@ -32,7 +32,9 @@ from app.models import (
     Integration,
     KnowledgeSource,
     Notification,
+    Project,
     ResourceLink,
+    Task,
 )
 from app.schemas.notifications import EventTopic
 
@@ -52,16 +54,14 @@ def stream_key(workspace_id: uuid.UUID) -> str:
 
 
 def resource_topics(resource_type: str) -> tuple[EventTopic, ...]:
-    """外部资源投影：Vikunja 的任务 / 项目，其余是 GitHub（仓库、Issue、PR、Actions）。"""
-    if resource_type == "task":
-        return ("tasks", "overview")
-    if resource_type == "project":
-        return ("projects", "tasks", "overview")
+    """外部资源投影：现在只有 GitHub（仓库、Issue、PR、Actions）。"""
     return ("developer", "overview")
 
 
 _TOPICS: dict[type, Callable[[Any], Iterable[EventTopic]]] = {
     ExternalResource: lambda obj: resource_topics(obj.resource_type),
+    Project: lambda _: ("projects", "tasks", "overview"),
+    Task: lambda _: ("tasks", "projects", "overview"),
     CalendarEvent: lambda _: ("calendar", "overview"),
     Bookmark: lambda _: ("knowledge", "overview"),
     ResourceLink: lambda _: ("knowledge", "tasks"),

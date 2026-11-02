@@ -1,8 +1,8 @@
-"""外部项目与任务的投影（docs/DEVELOPMENT_SPEC.md 第 4.1、4.2、6.3 节）。
+"""工作台自己的项目与任务（T-0082，docs/decisions/2026-11-02-remove-vikunja.md）。
 
-约定见 docs/decisions/2026-10-30-sprint-3-tasks-contract.md 第 3、5、6、7 节：`id` 是投影行的 UUID，
-外部 ID（`vikunja:task:42`）只在 `external_id` 里；读接口读本地投影并带 `sync` 新鲜度，
-写接口经 Connector 写入 Vikunja，必须带 `Idempotency-Key`。
+单人版：没有负责人、指派、评论。viewer 可读，member 及以上可写。
+- 任务的写接口沿用 Sprint 3 的约定：必须带 `Idempotency-Key`，`version` 是不透明字符串（原样带回）；
+- 项目的写接口用整数 `version` 做乐观并发，不需要 Idempotency-Key。
 """
 
 from datetime import datetime
@@ -19,16 +19,17 @@ from pydantic import (
 )
 
 from app.schemas.common import Page
-from app.schemas.integrations import SyncState
 
 TASK_TITLE_MAX = 250
 TASK_DESCRIPTION_MAX = 10_000
+PROJECT_TITLE_MAX = 120
+PROJECT_DESCRIPTION_MAX = 2_000
+LABELS_MAX = 20
+LABEL_MAX = 50
 
 Priority = Annotated[
     int,
-    Field(
-        ge=0, le=5, description="0 未设置、1 低、2 中、3 高、4 紧急、5 立即（核验 ADR 第 5.1 节）"
-    ),
+    Field(ge=0, le=5, description="0 未设置、1 低、2 中、3 高、4 紧急、5 立即"),
 ]
 TaskTitle = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=TASK_TITLE_MAX)
@@ -36,13 +37,22 @@ TaskTitle = Annotated[
 TaskDescription = Annotated[
     str,
     StringConstraints(max_length=TASK_DESCRIPTION_MAX),
-    Field(description="Markdown 文本；前端按纯文本显示，不渲染 HTML"),
+    Field(description="纯文本（可以写 Markdown）；前端按纯文本显示，不渲染 HTML"),
+]
+Label = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=LABEL_MAX)]
+Labels = Annotated[
+    list[Label], Field(max_length=LABELS_MAX, description="标签；重复的只保留一个，按给出的顺序")
 ]
 TaskVersion = Annotated[
     str,
     StringConstraints(min_length=1, max_length=64),
-    Field(description="读取时的 version，原样带回；与 Vikunja 上的当前版本不一致时返回 409"),
+    Field(description="读取时的 version，原样带回；与当前版本不一致时返回 409"),
 ]
+ProjectTitle = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=PROJECT_TITLE_MAX)
+]
+ProjectDescription = Annotated[str, StringConstraints(max_length=PROJECT_DESCRIPTION_MAX)]
+ProjectVersion = Annotated[int, Field(ge=1, description="读取时的版本；不一致时返回 409")]
 TaskStatusFilter = Literal["open", "done", "all"]
 TaskSort = Literal["due_at", "priority", "updated"]
 
@@ -51,22 +61,50 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def _dedupe(labels: list[str]) -> list[str]:
+    return list(dict.fromkeys(labels))
+
+
 # ---------------------------------------------------------------- 项目
 
 
 class ProjectOut(BaseModel):
-    id: UUID = Field(description="投影 UUID；创建任务时的 project_id 用它")
-    integration_id: UUID
-    external_id: str = Field(description="例如 vikunja:project:7；只用于显示与排错")
+    id: UUID
     title: str
+    description: str
     archived: bool
-    source_url: str = Field(description="Vikunja 原生界面中的地址")
-    source_updated_at: datetime | None
-    synced_at: datetime
+    open_tasks: int = Field(description="未完成任务数")
+    done_tasks: int = Field(description="已完成任务数")
+    version: int
+    created_at: datetime
+    updated_at: datetime
 
 
 class ProjectPage(Page[ProjectOut]):
-    sync: SyncState
+    pass
+
+
+class ProjectCreate(_Strict):
+    title: ProjectTitle
+    description: ProjectDescription = ""
+
+
+class ProjectUpdate(_Strict):
+    """只发送要改的字段；archived 为 true 归档（列表默认不显示，任务保留）。"""
+
+    version: ProjectVersion
+    title: ProjectTitle | None = None
+    description: ProjectDescription | None = None
+    archived: bool | None = None
+
+    @model_validator(mode="after")
+    def _has_change(self) -> Self:
+        changed = self.model_fields_set - {"version"}
+        if not changed:
+            raise ValueError("至少要修改一项")
+        if any(getattr(self, name) is None for name in changed):
+            raise ValueError("字段不能为 null")
+        return self
 
 
 class ProjectProgressOut(BaseModel):
@@ -74,40 +112,34 @@ class ProjectProgressOut(BaseModel):
 
     project_id: UUID
     title: str
-    source_url: str
     open_tasks: int
     done_tasks: int
 
 
 class ProjectProgressList(BaseModel):
     items: list[ProjectProgressOut]
-    sync: SyncState
 
 
 # ---------------------------------------------------------------- 任务
 
 
 class TaskOut(BaseModel):
-    id: UUID = Field(description="投影 UUID")
-    integration_id: UUID
-    project_id: UUID | None = Field(description="所属项目的投影 UUID；项目尚未同步时为 null")
-    external_id: str = Field(description="例如 vikunja:task:42")
-    identifier: str | None = Field(description="Vikunja 的任务标识，例如 PROJ-12")
+    id: UUID
+    project_id: UUID
     title: str
-    description: str = Field(description="Markdown 文本；前端按纯文本显示，不渲染 HTML")
+    description: str = Field(description="纯文本；前端按纯文本显示，不渲染 HTML")
     done: bool
     done_at: datetime | None
     priority: int = Field(ge=0, le=5)
     due_at: datetime | None
-    labels: list[str] = Field(description="标签标题；本 Sprint 只读")
-    source_url: str = Field(description="Vikunja 原生界面中的地址")
+    labels: list[str]
     version: str = Field(description="乐观并发用的不透明字符串；修改 / 删除时原样带回")
-    source_updated_at: datetime | None
-    synced_at: datetime
+    created_at: datetime
+    updated_at: datetime
 
 
 class TaskPage(Page[TaskOut]):
-    sync: SyncState
+    pass
 
 
 class TaskCreate(_Strict):
@@ -116,6 +148,12 @@ class TaskCreate(_Strict):
     description: TaskDescription = ""
     priority: Priority = 0
     due_at: AwareDatetime | None = None
+    labels: Labels = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique_labels(self) -> Self:
+        self.labels = _dedupe(self.labels)
+        return self
 
 
 class TaskUpdate(_Strict):
@@ -128,6 +166,7 @@ class TaskUpdate(_Strict):
     due_at: AwareDatetime | None = None
     done: bool | None = None
     project_id: UUID | None = Field(default=None, description="移动到其他项目")
+    labels: Labels | None = None
 
     @model_validator(mode="after")
     def _has_change(self) -> Self:
@@ -136,11 +175,6 @@ class TaskUpdate(_Strict):
             raise ValueError("至少要修改一项")
         if any(getattr(self, name) is None for name in changed - {"due_at"}):
             raise ValueError("只有 due_at 可以设为 null")
+        if self.labels is not None:
+            self.labels = _dedupe(self.labels)
         return self
-
-
-# ---------------------------------------------------------------- Webhook
-
-
-class WebhookAccepted(BaseModel):
-    status: Literal["accepted"] = "accepted"

@@ -31,8 +31,7 @@ class ServiceStatusOut(BaseModel):
     kind: ServiceKind
     provider: str | None = Field(
         default=None,
-        description="集成的类型（vikunja / github / n8n），OpenClaw 实例为 openclaw；"
-        "其他服务为 null",
+        description="集成的类型（github / n8n），OpenClaw 实例为 openclaw；其他服务为 null",
     )
     status: ServiceState = Field(
         description="ok 正常；degraded 可用但有问题（限流、部分检查失败）；down 不可用；"

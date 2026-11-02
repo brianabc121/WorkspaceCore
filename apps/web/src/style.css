@@ -365,7 +365,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .assistant-sender { color: var(--muted); font-size: .72rem; }
 .assistant-composer { display: grid; gap: 8px; }
 
-/* Vikunja / n8n 登录账号（T-0080） */
+/* n8n 登录账号（T-0080） */
 .app-login { padding: 24px; min-width: 0; margin: 18px 0; overflow-wrap: anywhere; }
 .app-login-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; align-items: center; margin: 12px 0; }
 .app-login-fields dt { color: var(--muted); font-size: .85rem; }

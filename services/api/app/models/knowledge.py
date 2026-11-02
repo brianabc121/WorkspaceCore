@@ -97,9 +97,10 @@ class Bookmark(Base):
 
 
 class ResourceLink(Base):
-    """跨系统关联：收藏（source）→ Vikunja 项目 / 任务的投影（target）。
+    """关联：收藏（source）→ 工作台的项目 / 任务（target，T-0082 之前是 Vikunja 投影）。
 
-    任何一方删除时级联删除；目标写 tombstone 后读取时排除，页面不留僵尸引用（A10）。
+    target 可能是项目也可能是任务，所以没有外键：项目、任务删除时由数据库触发器
+    `delete_resource_links` 删掉指向它的关联（迁移 0020），收藏删除时级联删除。
     """
 
     __tablename__ = "resource_links"
@@ -114,8 +115,6 @@ class ResourceLink(Base):
     source_resource_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspace.bookmarks.id", ondelete="CASCADE")
     )
-    target_resource_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("workspace.external_resources.id", ondelete="CASCADE"), index=True
-    )
+    target_resource_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
     relation: Mapped[str] = mapped_column(Text, server_default=text("'related'"))
     created_at: Mapped[datetime] = _created_at()

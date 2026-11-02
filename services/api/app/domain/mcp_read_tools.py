@@ -33,7 +33,7 @@ from app.domain.policy import WorkspaceAccess
 from app.domain.search import SearchService
 from app.domain.tasks import TaskService
 from app.models import CalendarEvent
-from app.repositories import projection as projection_repo
+from app.repositories import tasks as task_repo
 from app.schemas.ai_tools import (
     ActionStatusOutput,
     AutomationItem,
@@ -136,6 +136,11 @@ def freshness(sync: SyncState) -> Freshness:
     return Freshness(status=status, as_of=sync.as_of)
 
 
+def local_freshness() -> Freshness:
+    """工作台自己的数据（项目、任务；T-0082）：读到的就是最新的。"""
+    return Freshness(status="ok", as_of=datetime.now(UTC))
+
+
 async def _search(call: ReadCall, args: SearchInput) -> SearchOutput:
     page = await SearchService(call.db).search(
         call.user_id, call.access, q=args.q, types=args.types or None, cursor=None, limit=args.limit
@@ -180,7 +185,7 @@ async def _list_tasks(call: ReadCall, args: ListTasksInput) -> ListTasksOutput:
             for t in page.items
         ],
         next_cursor=page.next_cursor,
-        freshness=freshness(page.sync),
+        freshness=local_freshness(),
     )
 
 
@@ -191,7 +196,6 @@ async def _get_task(call: ReadCall, args: GetTaskInput) -> GetTaskOutput:
         task=TaskDetail(
             id=task.id,
             project_id=task.project_id,
-            identifier=task.identifier,
             done=task.done,
             done_at=task.done_at,
             priority=task.priority,
@@ -200,20 +204,20 @@ async def _get_task(call: ReadCall, args: GetTaskInput) -> GetTaskOutput:
                 title=task.title, description=task.description, labels=task.labels
             ),
         ),
-        freshness=freshness(await service.sync(call.access)),
+        freshness=local_freshness(),
     )
 
 
 async def _list_projects(call: ReadCall, args: EmptyInput) -> ListProjectsOutput:
     page = await call.tasks().list_projects(
-        call.access, integration_id=None, include_archived=True, q=None, cursor=None, limit=LIST_CAP
+        call.access, include_archived=True, q=None, cursor=None, limit=LIST_CAP
     )
     return ListProjectsOutput(
         items=[
             ProjectItem(id=p.id, archived=p.archived, untrusted=ProjectText(title=p.title))
             for p in page.items
         ],
-        freshness=freshness(page.sync),
+        freshness=local_freshness(),
     )
 
 
@@ -409,10 +413,7 @@ async def _dashboard_overview(call: ReadCall, args: EmptyInput) -> DashboardOver
     """首页概况的几个数字。未知时为 null，不以 0 冒充；“今天”按 UTC 计算。"""
     access = call.access
     now = datetime.now(UTC)
-    pending: int | None = None
-    overdue: int | None = None
-    if (await call.tasks().sync(access)).status != "not_configured":
-        pending, overdue = await projection_repo.task_counts(call.db, access.workspace.id, now=now)
+    pending, overdue = await task_repo.task_counts(call.db, access.workspace.id, now=now)
     day = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_events = await call.db.scalar(
         select(func.count())

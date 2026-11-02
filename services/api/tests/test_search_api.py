@@ -1,7 +1,8 @@
 """跨资源搜索（T-0029；Sprint 4 契约第 8 节；A10、A11）。
 
-索引由数据库触发器维护：这里通过接口（收藏、日程）和直接写投影（模拟 Vikunja / GitHub 同步）
-产生数据，再验证搜索结果、可见性与删除后的表现。
+索引由数据库触发器维护：这里通过接口（收藏、日程）、直接写项目 / 任务表
+（T-0082 起是工作台自己的数据）和直接写投影（模拟 GitHub 同步）产生数据，
+再验证搜索结果、可见性与删除后的表现。
 """
 
 import json
@@ -76,6 +77,35 @@ class Env:
         )
         return value
 
+    async def project(self, title: str, workspace_id: str | None = None) -> uuid.UUID:
+        value: uuid.UUID = await run_sql(
+            self.database_url,
+            "INSERT INTO workspace.projects (workspace_id, title) VALUES ($1, $2) RETURNING id",
+            uuid.UUID(workspace_id or self.workspace_id),
+            title,
+        )
+        return value
+
+    async def task(
+        self,
+        project_id: uuid.UUID,
+        title: str,
+        description: str = "",
+        labels: list[str] | None = None,
+        workspace_id: str | None = None,
+    ) -> uuid.UUID:
+        value: uuid.UUID = await run_sql(
+            self.database_url,
+            "INSERT INTO workspace.tasks (workspace_id, project_id, title, description, labels)"
+            " VALUES ($1, $2, $3, $4, $5) RETURNING id",
+            uuid.UUID(workspace_id or self.workspace_id),
+            project_id,
+            title,
+            description,
+            labels or [],
+        )
+        return value
+
     async def resource(
         self,
         integration_id: uuid.UUID,
@@ -110,19 +140,8 @@ async def env(make_client: ClientFactory, migrated_database_url: str) -> AsyncIt
 
 
 async def test_every_resource_type_is_searchable(env: Env) -> None:
-    vikunja = await env.integration("vikunja")
-    project = await env.resource(vikunja, "project", "发布计划")
-    await env.resource(
-        vikunja,
-        "task",
-        "准备发布说明",
-        {
-            "project_resource_id": str(project),
-            "description": "Deploying the servers",
-            "labels": ["发布"],
-        },
-        url="https://tasks.example.com/tasks/1",
-    )
+    project = await env.project("发布计划")
+    await env.task(project, "准备发布说明", "Deploying the servers", ["发布"])
     github = await env.integration("github")
     repo = await env.resource(github, "repo", "octo/app", {"description": "主仓库"})
     await env.resource(
@@ -152,8 +171,8 @@ async def test_every_resource_type_is_searchable(env: Env) -> None:
     by_type = {r["resource_type"]: r for r in results}
     assert set(by_type) == {"task", "project", "issue", "bookmark", "event"}
     assert by_type["task"]["context"] == "发布计划"  # 任务带上项目名
-    assert by_type["task"]["provider"] == "vikunja"
-    assert by_type["task"]["source_url"] == "https://tasks.example.com/tasks/1"
+    assert by_type["task"]["provider"] == "local" and by_type["task"]["source_url"] is None
+    assert by_type["project"]["provider"] == "local"
     assert by_type["issue"]["context"] == "octo/app" and by_type["issue"]["provider"] == "github"
     assert by_type["bookmark"]["source_url"] == f"{AFFINE}/workspace/ws/doc1"
     assert by_type["bookmark"]["provider"] == "affine"
@@ -168,11 +187,11 @@ async def test_every_resource_type_is_searchable(env: Env) -> None:
 
 
 async def test_ranking_prefers_title_matches(env: Env) -> None:
-    vikunja = await env.integration("vikunja")
-    await env.resource(vikunja, "task", "写周报的模板", {"description": ""})
-    await env.resource(vikunja, "task", "周报", {"description": ""})
-    await env.resource(vikunja, "task", "整理文档", {"description": "顺便写周报"})
-    await env.resource(vikunja, "task", "周报汇总", {"description": ""})
+    project = await env.project("工作")
+    await env.task(project, "写周报的模板")
+    await env.task(project, "周报")
+    await env.task(project, "整理文档", "顺便写周报")
+    await env.task(project, "周报汇总")
     titles = [r["title"] for r in await env.search("周报")]
     assert titles == ["周报", "周报汇总", "写周报的模板", "整理文档"]
     assert [r["match"] for r in await env.search("周报")][-1] == "text"
@@ -191,8 +210,8 @@ async def test_ranking_prefers_title_matches(env: Env) -> None:
 
 async def test_deleted_resources_leave_the_index(env: Env) -> None:
     """A10：源对象删除（tombstone / 删除收藏 / 删除日程）后搜索不再返回。"""
-    vikunja = await env.integration("vikunja")
-    task = await env.resource(vikunja, "task", "临时任务", {"description": ""})
+    project = await env.project("项目")
+    await env.task(project, "临时任务")
     await env.post(
         "/api/v1/knowledge/sources", {"provider": "affine", "name": "AFFiNE", "base_url": AFFINE}
     )
@@ -210,11 +229,8 @@ async def test_deleted_resources_leave_the_index(env: Env) -> None:
         },
     )
     assert len(await env.search("临时")) == 3
-    await run_sql(
-        env.database_url,
-        "UPDATE workspace.external_resources SET deleted_at = now() WHERE id = $1",
-        task,
-    )
+    # 删除项目连带删除它的任务（外键级联）
+    await run_sql(env.database_url, "DELETE FROM workspace.projects WHERE id = $1", project)
     gone = await env.client.delete(
         f"/api/v1/knowledge/bookmarks/{bookmark['id']}",
         params={"version": bookmark["version"]},
@@ -247,10 +263,8 @@ async def test_visibility_and_workspace_isolation(env: Env) -> None:
     bob_id = await add_user(env.database_url, BOB["email"], BOB["password"])
     await add_member(env.database_url, uuid.UUID(env.workspace_id), bob_id, "viewer")
     other_ws = await add_workspace(env.database_url, bob_id, "Bob 的空间")
-    other_integration = await env.integration("vikunja", str(other_ws))
-    await env.resource(
-        other_integration, "task", "别人的日记", {"description": ""}, workspace_id=str(other_ws)
-    )
+    other_project = await env.project("Bob 的项目", workspace_id=str(other_ws))
+    await env.task(other_project, "别人的日记", workspace_id=str(other_ws))
     owner_titles = {r["title"] for r in await env.search("日记")}
     assert owner_titles == {"私人日记", "公开日记"}
     async with env.make_client() as bob:
@@ -287,10 +301,22 @@ async def test_source_url_follows_the_knowledge_source(env: Env) -> None:
 
 
 async def test_index_can_be_rebuilt(env: Env) -> None:
-    vikunja = await env.integration("vikunja")
-    await env.resource(vikunja, "task", "重建测试", {"description": ""})
+    project = await env.project("项目")
+    await env.task(project, "重建测试")
+    github = await env.integration("github")
+    await env.resource(github, "repo", "octo/重建")
     await run_sql(env.database_url, "DELETE FROM workspace.search_documents")
     assert await env.search("重建") == []
     count = await run_sql(env.database_url, "SELECT workspace.search_rebuild()")
-    assert count == 1
-    assert [r["title"] for r in await env.search("重建")] == ["重建测试"]
+    assert count == 3  # 项目、任务、仓库
+    assert sorted(r["title"] for r in await env.search("重建")) == ["octo/重建", "重建测试"]
+
+
+async def test_project_rename_updates_the_task_context(env: Env) -> None:
+    project = await env.project("旧名字")
+    await env.task(project, "改名测试")
+    await run_sql(
+        env.database_url, "UPDATE workspace.projects SET title = '新名字' WHERE id = $1", project
+    )
+    [hit] = await env.search("改名测试")
+    assert hit["context"] == "新名字"

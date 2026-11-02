@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from app.domain import automations
 from tests.fake_n8n import API_KEY, BASE_URL, TRIGGER_SECRET, FakeN8n
 from tests.helpers import OWNER, ClientFactory, add_member, add_user, csrf, run_sql
-from tests.vikunja_support import CONNECTOR_SETTINGS
+from tests.workspace_support import CONNECTOR_SETTINGS
 
 pytestmark = pytest.mark.integration
 

@@ -1,10 +1,8 @@
-"""第三方集成（docs/DEVELOPMENT_SPEC.md 第 5.1 节第 6–7 项、第 7 节）。
+"""第三方集成（docs/DEVELOPMENT_SPEC.md 第 5.1 节第 6–7 项、第 7 节）：现在只有 GitHub。
 
-Vikunja 在 Sprint 3 接入，GitHub 在 Sprint 4 接入。
-
+Vikunja 在 Sprint 3 接入，T-0082 移除（项目与任务由工作台自己管理）。
 约定见 docs/decisions/2026-10-30-sprint-3-tasks-contract.md 第 4、10 节与
 docs/decisions/2026-10-30-sprint-4-knowledge-search-contract.md 第 6、7 节；核验结果见
-docs/decisions/2026-10-30-vikunja-2.7.1-verification.md 与
 docs/decisions/2026-10-30-github-rest-and-affine-verification.md。
 API Token 用 SecretStr 接收，只写不读，任何响应、日志、审计里都不出现。
 """
@@ -26,16 +24,13 @@ from pydantic import (
     model_validator,
 )
 
-# 核验过的 Vikunja 版本与 API 版本（核验 ADR 第 2、3 节）
-VIKUNJA_TESTED_VERSION = "2.7.1"
-VIKUNJA_API_VERSION = "v2"
 # GitHub REST API 的版本与固定地址（GitHub 核验 ADR 第 1、2 节）
 GITHUB_API_VERSION = "2026-03-10"
 GITHUB_API_URL = "https://api.github.com"
 GITHUB_WEB_URL = "https://github.com"
 MAX_GITHUB_REPOSITORIES = 20
 
-Provider = Literal["vikunja", "github"]
+Provider = Literal["github"]
 IntegrationStatus = Literal["pending", "active", "unauthorized", "unavailable", "disabled"]
 SyncStatus = Literal["ok", "stale", "unavailable", "unauthorized", "not_configured"]
 
@@ -72,19 +67,6 @@ BaseUrl = Annotated[
 ]
 
 
-def _api_token(value: SecretStr) -> SecretStr:
-    if not value.get_secret_value().startswith("tk_"):
-        raise ValueError("请填写 Vikunja 的 API Token（以 tk_ 开头）")
-    return value
-
-
-ApiToken = Annotated[
-    SecretStr,
-    Field(min_length=4, max_length=512, description="Vikunja API Token（tk_ 开头）；只写不读"),
-    AfterValidator(_api_token),
-]
-
-
 def _github_token(value: SecretStr) -> SecretStr:
     secret = value.get_secret_value()
     if secret.startswith("ghp_"):
@@ -104,27 +86,6 @@ GitHubToken = Annotated[
         description="GitHub 细粒度 Personal Access Token（github_pat_ 开头）；只写不读",
     ),
     AfterValidator(_github_token),
-]
-
-
-def _any_token(value: SecretStr) -> SecretStr:
-    """修改时不知道集成的 provider：这里只认两种前缀，与 provider 是否一致由服务端检查。"""
-    if not value.get_secret_value().startswith(("tk_", "github_pat_")):
-        raise ValueError(
-            "请填写 Vikunja API Token（tk_ 开头）或 GitHub 细粒度 Token（github_pat_ 开头）"
-        )
-    return value
-
-
-AnyToken = Annotated[
-    SecretStr,
-    Field(
-        min_length=4,
-        max_length=512,
-        description="与集成的 provider 对应的 Token：Vikunja 为 tk_，GitHub 为 github_pat_；"
-        "只写不读",
-    ),
-    AfterValidator(_any_token),
 ]
 
 _REPOSITORY = re.compile(r"^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$")
@@ -203,19 +164,6 @@ class IntegrationOut(BaseModel):
     updated_at: datetime
 
 
-class IntegrationCreate(_Strict):
-    """新建 Vikunja 集成（Sprint 3）。"""
-
-    provider: Literal["vikunja"]
-    name: IntegrationName
-    base_url: BaseUrl
-    public_url: BaseUrl | None = Field(default=None, description="不填时与 base_url 相同")
-    api_token: ApiToken
-    token_expires_at: AwareDatetime | None = Field(
-        default=None, description="Token 的过期时间（在 Vikunja 创建 Token 时设置），用于到期提醒"
-    )
-
-
 class GitHubIntegrationCreate(_Strict):
     """新建 GitHub 集成（Sprint 4）：地址固定为 api.github.com，不接受 base_url / public_url。"""
 
@@ -228,23 +176,12 @@ class GitHubIntegrationCreate(_Strict):
     repositories: Repositories
 
 
-AnyIntegrationCreate = Annotated[
-    IntegrationCreate | GitHubIntegrationCreate, Field(discriminator="provider")
-]
-
-
 class IntegrationUpdate(_Strict):
-    """至少改一项；改 base_url 或 api_token 后状态回到 pending，需要重新测试连接。
-
-    api_token 的前缀、base_url / public_url（只用于 Vikunja）与 repositories（只用于 GitHub）
-    是否适用于该集成由服务端检查，不适用时返回 422。
-    """
+    """至少改一项；改 api_token 后状态回到 pending，需要重新测试连接。"""
 
     version: Version
     name: IntegrationName | None = None
-    base_url: BaseUrl | None = None
-    public_url: BaseUrl | None = Field(default=None, description="显式传 null 表示恢复为 base_url")
-    api_token: AnyToken | None = None
+    api_token: GitHubToken | None = None
     token_expires_at: AwareDatetime | None = None
     enabled: bool | None = Field(default=None, description="false 停用（不同步、拒绝写入）")
     repositories: Repositories | None = Field(
@@ -256,14 +193,13 @@ class IntegrationUpdate(_Strict):
         changed = self.model_fields_set - {"version"}
         if not changed:
             raise ValueError("至少要修改一项")
-        nullable = {"public_url", "token_expires_at"}
-        if any(getattr(self, name) is None for name in changed - nullable):
-            raise ValueError("只有 public_url 与 token_expires_at 可以设为 null")
+        if any(getattr(self, name) is None for name in changed - {"token_expires_at"}):
+            raise ValueError("只有 token_expires_at 可以设为 null")
         return self
 
 
 class IntegrationCheck(BaseModel):
-    name: Literal["reachable", "version", "token", "tasks_read", "webhooks"]
+    name: Literal["reachable", "version", "token", "webhooks"]
     ok: bool
     code: str | None = Field(default=None, description="未通过时的错误码；不含外部响应原文")
 

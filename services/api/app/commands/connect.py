@@ -1,25 +1,21 @@
-"""部署脚本自动接入 Vikunja、GitHub、n8n（T-0076）。在 api 容器里运行：
+"""部署脚本自动接入 GitHub、n8n（T-0076；Vikunja 已在 T-0082 移除）。在 api 容器里运行：
 
     docker compose exec -T api python -m app.commands.connect status
-    printf '%s\\n' "$PASSWORD" | docker compose exec -T api python -m app.commands.connect \\
-        vikunja --username admin --public-url http://localhost:3456
     printf '%s\\n' "$TOKEN" | docker compose exec -T api python -m app.commands.connect github-repos
     printf '%s\\n' "$TOKEN" | docker compose exec -T api python -m app.commands.connect \\
         github --repos owner/a,owner/b
     docker compose exec -T api python -m app.commands.connect n8n-owner
     printf '%s\\n' "$PASSWORD" | docker compose exec -T api python -m app.commands.connect \\
         n8n --owner-email you@example.com --public-url http://localhost:5678
-    docker compose exec -T api python -m app.commands.connect public-urls \\
-        --vikunja https://vikunja.example.com --n8n https://n8n.example.com
+    docker compose exec -T api python -m app.commands.connect public-urls --n8n https://n8n.example.com
     printf '%s\\n' "$PASSWORD" | docker compose exec -T api python -m app.commands.connect \\
-        save-login --app vikunja --username admin
+        save-login --app n8n --username you@example.com
 
 - 密码与 Token 只从标准输入读，不出现在命令行参数、进程列表与日志里。
 - 以工作空间管理员本人的身份调用和网页相同的服务：凭证加密保存、写审计、要求 admin 以上角色。
   默认是首次安装创建的管理员和他唯一管理的工作空间；不唯一时用 --email / --workspace 指定。
 - 已经接入的组件不重复创建，只报告状态（更换凭证到工作台“集成设置”里改）。
-- 登录成功的 Vikunja 用户、n8n owner 的账号密码加密保存到工作台，
-  管理员在「项目」「自动化」页查看（T-0080）。
+- 登录成功的 n8n owner 的账号密码加密保存到工作台，管理员在「自动化」页查看（T-0080）。
 - 接口的核验依据见 app/integrations/provisioning.py 与 docs/decisions/2026-11-02-deploy-connect.md。
 
 退出码：0 完成或已接入；1 接入失败（外部服务拒绝、测试没通过）；2 用法错误或前提不满足。
@@ -33,7 +29,6 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 
 from pydantic import ValidationError
 from redis.asyncio import Redis
@@ -52,7 +47,7 @@ from app.integrations.base import ConnectorError
 from app.integrations.github import GitHubClient
 from app.integrations.http import CircuitBreaker
 from app.integrations.n8n import TRIGGER_HEADER
-from app.integrations.provisioning import N8nProvisioner, VikunjaProvisioner
+from app.integrations.provisioning import N8nProvisioner
 from app.jobs.queue import ArqJobQueue, JobQueue
 from app.models import User
 from app.repositories import users as user_repo
@@ -61,15 +56,12 @@ from app.schemas.app_logins import App, AppLoginUpsert
 from app.schemas.automations import AutomationConnectionUpsert
 from app.schemas.integrations import (
     GitHubIntegrationCreate,
-    IntegrationCreate,
     IntegrationOut,
     IntegrationTestResult,
     IntegrationUpdate,
 )
 from app.schemas.workspaces import Role
 
-TOKEN_TITLE = "My Workspace"  # noqa: S105 - Token 的显示名称，不是密钥
-VIKUNJA_TOKEN_DAYS = 365
 N8N_KEY_LABEL = "My Workspace（只读）"
 
 _CHECKS = {
@@ -205,8 +197,8 @@ def read_secret(label: str) -> str:
     return value
 
 
-_APP_TITLE = {"vikunja": "Vikunja", "n8n": "n8n"}
-_APP_PAGE = {"vikunja": "项目", "n8n": "自动化"}
+_APP_TITLE = {"n8n": "n8n"}
+_APP_PAGE = {"n8n": "自动化"}
 
 
 async def save_login(
@@ -289,9 +281,8 @@ async def _sync_line(service: IntegrationService, access: WorkspaceAccess, provi
 
 
 async def cmd_status(env: Env, args: argparse.Namespace) -> int:
-    """key=value 一行一项，供部署脚本解析：setup、vikunja、github、n8n（none 表示还没接入），
-    vikunja_login、n8n_login（saved 表示工作台保存了登录密码），
-    以及 openim（none / ok / unavailable）。"""
+    """key=value 一行一项，供部署脚本解析：setup、github、n8n（none 表示还没接入），
+    n8n_login（saved 表示工作台保存了登录密码），以及 openim（none / ok / unavailable）。"""
     if await user_repo.count(env.db) == 0:
         print("setup=required")
         print(f"openim={await _openim_state(env)}")
@@ -300,9 +291,8 @@ async def cmd_status(env: Env, args: argparse.Namespace) -> int:
     actor, access = await resolve(env.db, args.email, args.workspace)
     print(f"user={actor.user.email}")
     integrations = await env.integrations().list_integrations(access)
-    for provider in ("vikunja", "github"):
-        found = _find(integrations, provider)
-        print(f"{provider}={found.status if found else 'none'}")
+    found = _find(integrations, "github")
+    print(f"github={found.status if found else 'none'}")
     connection = await env.automations().get_connection(access)
     print(f"n8n={connection.status if connection.configured and connection.status else 'none'}")
     for login in (await env.logins().list(access)).items:
@@ -326,48 +316,6 @@ async def _openim_state(env: Env) -> str:
     except (ConnectorError, TimeoutError):
         return "unavailable"
     return "ok"
-
-
-async def cmd_vikunja(env: Env, args: argparse.Namespace) -> int:
-    actor, access = await resolve(env.db, args.email, args.workspace)
-    service = env.integrations()
-    existing = _find(await service.list_integrations(access), "vikunja")
-    if existing is not None:
-        print(f"已有 Vikunja 集成（{status_label(existing.status)}），跳过")
-        print("更换 Token 请到工作台“集成设置”里修改")
-        return 0
-    password = read_secret("Vikunja 密码")
-    provisioner = VikunjaProvisioner(env.runtime.http("provision:vikunja"), args.base_url)
-    session = await provisioner.login(args.username, password)
-    await _remember_login(env, actor, access, "vikunja", args.username, password)
-    expires = datetime.now(UTC).replace(microsecond=0) + timedelta(days=VIKUNJA_TOKEN_DAYS)
-    created = await provisioner.create_token(session, title=TOKEN_TITLE, expires_at=expires)
-    print(f"已在 Vikunja 创建 API Token「{TOKEN_TITLE}」（最小权限，{expires:%Y-%m-%d} 到期）")
-    try:
-        body = IntegrationCreate.model_validate(
-            {
-                "provider": "vikunja",
-                "name": "Vikunja",
-                "base_url": args.base_url,
-                "public_url": args.public_url,
-                "api_token": created.token,
-                "token_expires_at": expires,
-            }
-        )
-        integration = await service.create(actor, access, body)
-    except (ValidationError, ApiError) as error:
-        # 工作台没保存成功：吊销刚建的 Token，不留下没人用的凭证
-        if created.token_id is not None:
-            await provisioner.revoke_token(session, created.token_id)
-        if isinstance(error, ValidationError):
-            raise _validation(error) from None
-        raise
-    result = await service.test(actor, access, integration.id)
-    report(result)
-    if not result.ok:
-        raise Failed("测试连接没有通过（见上面的检查项）；修好后到工作台“集成设置”里重新测试")
-    await _sync_line(service, access, "vikunja")
-    return 0
 
 
 async def cmd_github_repos(env: Env, args: argparse.Namespace) -> int:
@@ -515,28 +463,12 @@ async def cmd_n8n(env: Env, args: argparse.Namespace) -> int:
 
 
 async def cmd_public_urls(env: Env, args: argparse.Namespace) -> int:
-    """把工作台里“在 Vikunja 中打开”“打开 n8n 编辑器”的地址改成新的对外地址（给了哪个改哪个）。
+    """把工作台里“打开 n8n 编辑器”的地址改成新的对外地址（T-0078）。
 
-    部署脚本设置 VIKUNJA_DOMAIN / N8N_DOMAIN 后调用（T-0078）；与网页上修改一样带版本号、写审计。
+    部署脚本设置 N8N_DOMAIN 后调用；与网页上修改一样带版本号、写审计。
     """
     actor, access = await resolve(env.db, args.email, args.workspace)
     try:
-        if args.vikunja:
-            service = env.integrations()
-            current = _find(await service.list_integrations(access), "vikunja")
-            if current is None:
-                print("工作台里还没有 Vikunja 集成，跳过")
-            elif (current.public_url or "").rstrip("/") == args.vikunja.rstrip("/"):
-                print(f"Vikunja 的打开地址已经是 {args.vikunja}")
-                relinked = await service.relink(access, current.id)
-                if relinked:
-                    print(f"已按这个地址刷新 {relinked} 个项目和任务的打开链接")
-            else:
-                update = IntegrationUpdate.model_validate(
-                    {"version": current.version, "public_url": args.vikunja}
-                )
-                await service.update(actor, access, current.id, update)
-                print(f"Vikunja 的打开地址改为 {args.vikunja}")
         if args.n8n:
             automations = env.automations()
             connection = await automations.get_connection(access)
@@ -555,40 +487,16 @@ async def cmd_public_urls(env: Env, args: argparse.Namespace) -> int:
     return 0
 
 
-async def cmd_relink(env: Env, args: argparse.Namespace) -> int:
-    """按 Vikunja 集成当前的打开地址刷新已同步的项目与任务链接，不改地址本身（T-0079）。"""
-    _, access = await resolve(env.db, args.email, args.workspace)
-    service = env.integrations()
-    current = _find(await service.list_integrations(access), "vikunja")
-    if current is None:
-        print("工作台里还没有 Vikunja 集成，跳过")
-        return 0
-    relinked = await service.relink(access, current.id)
-    print(
-        f"已按 {current.public_url} 刷新 {relinked} 个项目和任务的打开链接"
-        if relinked
-        else "打开链接都是最新的"
-    )
-    return 0
-
-
-# ---------------------------------------------------------------- 入口
-
-
 async def cmd_save_login(env: Env, args: argparse.Namespace) -> int:
-    """把已有的 Vikunja 用户 / n8n owner 的账号密码保存到工作台（标准输入：密码）。
+    """把已有的 n8n owner 的账号密码保存到工作台（标准输入：密码）。
 
-    默认先登录一次确认密码正确（Vikunja 密码不对返回 403，n8n 返回 401），不对就不保存。
+    默认先登录一次确认密码正确（n8n 密码不对返回 401），不对就不保存。
     """
     actor, access = await resolve(env.db, args.email, args.workspace)
     password = read_secret(f"{_APP_TITLE[args.app]} 密码")
     if not args.no_verify:
-        if args.app == "vikunja":
-            vikunja = VikunjaProvisioner(env.runtime.http("provision:vikunja"), args.base_url)
-            await vikunja.login(args.username, password)
-        else:
-            n8n = N8nProvisioner(env.runtime.http("provision:n8n"), args.base_url)
-            await n8n.login(email=args.username, password=password)
+        n8n = N8nProvisioner(env.runtime.http("provision:n8n"), args.base_url)
+        await n8n.login(email=args.username, password=password)
         print(f"已用这个账号登录 {_APP_TITLE[args.app]}，密码正确")
     try:
         await save_login(env.logins(), actor, access, args.app, args.username, password)
@@ -600,32 +508,27 @@ async def cmd_save_login(env: Env, args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- 入口
+
+
 Command = Callable[[Env, argparse.Namespace], Awaitable[int]]
 COMMANDS: dict[str, Command] = {
     "status": cmd_status,
-    "vikunja": cmd_vikunja,
     "github-repos": cmd_github_repos,
     "github": cmd_github,
     "n8n-owner": cmd_n8n_owner,
     "n8n": cmd_n8n,
     "public-urls": cmd_public_urls,
-    "relink": cmd_relink,
     "save-login": cmd_save_login,
 }
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="自动接入 Vikunja、GitHub、n8n（部署脚本调用）")
+    root = argparse.ArgumentParser(description="自动接入 GitHub、n8n（部署脚本调用）")
     root.add_argument("--email", help="以哪个工作台用户的身份操作（默认首次安装创建的管理员）")
     root.add_argument("--workspace", type=uuid.UUID, help="工作空间 ID（该用户管理多个时必填）")
     sub = root.add_subparsers(dest="command", required=True)
     sub.add_parser("status", help="是否完成首次安装、各组件是否已接入")
-    vikunja = sub.add_parser(
-        "vikunja", help="登录 Vikunja 创建最小权限 Token 并接入（标准输入：密码）"
-    )
-    vikunja.add_argument("--username", required=True)
-    vikunja.add_argument("--base-url", default="http://vikunja:3456")
-    vikunja.add_argument("--public-url", default=None, help="浏览器打开 Vikunja 的地址")
     sub.add_parser("github-repos", help="列出 Token 能访问的仓库（标准输入：Token）")
     github = sub.add_parser("github", help="接入 GitHub 并检查权限（标准输入：Token）")
     github.add_argument("--repos", required=True, help="owner/repo，逗号分隔，最多 20 个")
@@ -638,25 +541,19 @@ def parser() -> argparse.ArgumentParser:
     n8n.add_argument("--owner-email", required=True)
     n8n.add_argument("--base-url", default="http://n8n:5678")
     n8n.add_argument("--public-url", default=None, help="浏览器打开 n8n 编辑器的地址")
-    urls = sub.add_parser("public-urls", help="更新工作台里打开 Vikunja / n8n 的地址")
-    urls.add_argument(
-        "--vikunja", default=None, help="Vikunja 的新对外地址，例如 https://vikunja.example.com"
-    )
+    urls = sub.add_parser("public-urls", help="更新工作台里打开 n8n 编辑器的地址")
     urls.add_argument("--n8n", default=None, help="n8n 编辑器的新对外地址")
-    sub.add_parser("relink", help="按 Vikunja 当前的打开地址刷新已同步的项目与任务链接")
-    login = sub.add_parser(
-        "save-login", help="把 Vikunja / n8n 的登录账号保存到工作台（标准输入：密码）"
-    )
-    login.add_argument("--app", required=True, choices=["vikunja", "n8n"])
-    login.add_argument("--username", required=True, help="Vikunja 用户名；n8n 用 owner 的登录邮箱")
-    login.add_argument("--base-url", default=None, help="核对密码时访问的地址（默认容器内地址）")
+    login = sub.add_parser("save-login", help="把 n8n 的登录账号保存到工作台（标准输入：密码）")
+    login.add_argument("--app", required=True, choices=["n8n"])
+    login.add_argument("--username", required=True, help="n8n owner 的登录邮箱")
+    login.add_argument("--base-url", default="http://n8n:5678", help="核对密码时访问的地址")
     login.add_argument("--no-verify", action="store_true", help="不登录核对密码，直接保存")
     return root
 
 
 async def run(args: argparse.Namespace) -> int:
     if args.command == "save-login" and args.base_url is None:
-        args.base_url = "http://vikunja:3456" if args.app == "vikunja" else "http://n8n:5678"
+        args.base_url = "http://n8n:5678"
     async with environment() as env:
         try:
             return await COMMANDS[args.command](env, args)

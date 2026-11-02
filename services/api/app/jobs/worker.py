@@ -41,8 +41,6 @@ from app.integrations.base import ConnectorError
 from app.integrations.http import CircuitBreaker
 from app.jobs.queue import (
     PROCESS_IM_INBOX,
-    PROCESS_WEBHOOKS,
-    REGISTER_WEBHOOKS,
     SEND_APPROVAL_CARDS,
     SYNC_INTEGRATION,
 )
@@ -69,28 +67,18 @@ def _sync(ctx: dict[str, Any]) -> sync.SyncContext:
     return context
 
 
-async def process_webhooks(ctx: dict[str, Any]) -> int:
-    """处理 Webhook Inbox 里到期的事件（收到 Webhook 后由 API 投递，另有每分钟一次的兜底）。"""
-    return await sync.process_inbox(_sync(ctx))
-
-
 async def sync_integration(ctx: dict[str, Any], integration_id: str, owner: str) -> bool:
     """手动同步（POST /api/v1/integrations/{id}/sync 投递）。"""
     return await sync.run_manual_sync(_sync(ctx), uuid.UUID(integration_id), owner)
 
 
-async def register_webhooks(ctx: dict[str, Any], integration_id: str) -> str:
-    """测试连接通过后为每个项目注册 Webhook。"""
-    return await sync.register_for(_sync(ctx), uuid.UUID(integration_id))
-
-
 async def reconcile(ctx: dict[str, Any]) -> int:
-    """周期对账：增量 + 定期全量（规范第 10 节）。"""
+    """GitHub 的周期对账：增量 + 定期全量（规范第 10 节）。"""
     return await sync.reconcile_all(_sync(ctx))
 
 
 async def purge(ctx: dict[str, Any]) -> None:
-    """清理过期的幂等记录、已处理完的 Inbox 事件、过期的通知与 IM 消息投影。"""
+    """清理过期的幂等记录、过期的通知与 IM 消息投影。"""
     context = _sync(ctx)
     await sync.purge(context)
     async with context.sessions() as db:
@@ -244,16 +232,12 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 class WorkerSettings:
     functions: ClassVar[list[Any]] = [
         heartbeat,
-        func(process_webhooks, name=PROCESS_WEBHOOKS),
         func(sync_integration, name=SYNC_INTEGRATION, timeout=900),
-        func(register_webhooks, name=REGISTER_WEBHOOKS),
         func(process_im_inbox, name=PROCESS_IM_INBOX),
         func(send_approval_cards, name=SEND_APPROVAL_CARDS),
     ]
     cron_jobs: ClassVar[list[CronJob]] = [
         cron(heartbeat, second=0, run_at_startup=True),
-        # 兜底：API 投递失败或事件到了重试时间时，也会在一分钟内被处理
-        cron(process_webhooks, second=30),
         cron(reconcile, minute=RECONCILE_MINUTES, timeout=900),
         cron(purge, minute=17),
         cron(check_services, second=45, timeout=60),

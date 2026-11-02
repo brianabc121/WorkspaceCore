@@ -1,11 +1,10 @@
 import { fireEvent, screen, within } from '@testing-library/vue'
 import { describe, expect, it, vi } from 'vitest'
 import { mockApi, openApp, emptyPage, fail, me, workspace } from './helpers'
-import { integration } from './sprint3-fixtures'
 import { github, checked } from './github-fixtures'
 const path = (r: Request) => new URL(r.url).pathname
 function settings(override?: (r: Request) => Response | Promise<Response> | undefined) {
-  return mockApi(async (r) => await override?.(r) ?? (path(r) === '/api/v1/integrations' ? Response.json({ ...emptyPage, items: [integration, github] }) : undefined))
+  return mockApi(async (r) => await override?.(r) ?? (path(r) === '/api/v1/integrations' ? Response.json({ ...emptyPage, items: [github] }) : undefined))
 }
 describe('GitHub 集成设置', () => {
   it('creates a fine-grained connection with deduplicated repositories', async () => {
@@ -46,16 +45,6 @@ describe('GitHub 集成设置', () => {
     await fireEvent.click(screen.getByRole('button', { name: '保存 GitHub 连接' }))
     await vi.waitFor(() => expect(requests.some((r) => r.method === 'PATCH')).toBe(true))
     expect(await requests.find((r) => r.method === 'PATCH')!.clone().json()).toEqual({ version: 1, repositories: ['team/new'] })
-  })
-  it('shows saved Vikunja addresses and explicitly resets public_url to default', async () => {
-    const requests = settings((r) => r.method === 'PATCH' ? Response.json(integration) : undefined)
-    await openApp('/settings/integrations'); await screen.findByText(integration.base_url)
-    expect(screen.getByText(integration.public_url)).toBeVisible()
-    await fireEvent.click(within(screen.getByRole('heading', { name: integration.name }).closest('section')!).getByRole('button', { name: '修改连接' }))
-    await fireEvent.click(screen.getByLabelText('恢复默认浏览器地址'))
-    await fireEvent.click(screen.getByRole('button', { name: '保存连接' }))
-    await vi.waitFor(() => expect(requests.some((r) => r.method === 'PATCH')).toBe(true))
-    expect(await requests.find((r) => r.method === 'PATCH')!.clone().json()).toEqual({ version: 1, public_url: null })
   })
   it('hides admin controls from a member', async () => {
     const requests = settings((r) => path(r) === '/api/v1/me' ? Response.json({ ...me, workspaces: [{ ...workspace, role: 'member' }] }) : undefined)

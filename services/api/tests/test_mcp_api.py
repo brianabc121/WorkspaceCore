@@ -1,4 +1,4 @@
-"""`POST /mcp`（T-0057，OC-5，契约第 9 节）：真实 PostgreSQL / Redis + 内存版 Vikunja + MCP SDK。
+"""`POST /mcp`（T-0057，OC-5，契约第 9 节）：真实 PostgreSQL / Redis + MCP SDK。
 
 覆盖：实例认证（与 /agent-api 相同，失败一律 401）、只接受 POST、工具清单按实例的权限范围、
 经 MCP 发起的删除只生成待审批（A14）、get_action_status、错误格式（isError + error.code）、
@@ -19,7 +19,7 @@ from app.domain.agents import AgentService
 from app.models import AgentInstance
 from app.schemas.ai_tools import TOOLS
 from tests.helpers import OWNER
-from tests.vikunja_support import Env, app_of, open_env
+from tests.workspace_support import Env, app_of, open_env
 
 pytestmark = pytest.mark.integration
 
@@ -35,9 +35,8 @@ PROTOCOL = "2025-11-25"
 @pytest.fixture
 async def env(make_client: Any, migrated_database_url: str) -> AsyncIterator[Env]:
     async with open_env(make_client, migrated_database_url, **SETTINGS) as value:
-        work = value.fake.add_project("工作")
-        value.fake.add_task(work["id"], "写周报", priority=3)
-        await value.connect()
+        work = await value.add_project("工作")
+        await value.add_task(work["id"], "写周报", priority=3)
         yield value
 
 
@@ -164,7 +163,7 @@ async def test_a14_delete_through_mcp_only_creates_a_pending_record(env: Env) ->
     pending = result["structuredContent"]
     assert pending["status"] == "pending_approval" and pending["deduplicated"] is False
     assert "删除任务「写周报」" in pending["summary"]
-    assert any(t["title"] == "写周报" for t in env.fake.tasks.values())  # 没有执行
+    assert "写周报" in await env.titles()  # 没有执行
     # 交给 worker 发 IM 审批卡片
     assert ("send_approval_cards", (pending["action_id"],)) in env.queue.jobs
     # 作业队列不可用时，待审批照常建好（卡片只是提醒，通知中心里已经有 approval_requested）
@@ -184,7 +183,7 @@ async def test_a14_delete_through_mcp_only_creates_a_pending_record(env: Env) ->
     status = await call(env, token, "get_action_status", {"action_id": pending["action_id"]})
     assert status["structuredContent"]["status"] == "succeeded"
     assert status["structuredContent"]["result_summary"] == "已删除任务"
-    assert not any(t["title"] == "写周报" for t in env.fake.tasks.values())
+    assert "写周报" not in await env.titles()
     # get_action_status 也是一次工具调用：写了读记录
     reads = await records(env, tool_name="get_action_status")
     assert [r["status"] for r in reads] == ["succeeded", "succeeded"]
@@ -265,4 +264,4 @@ async def test_the_official_mcp_client_can_use_the_endpoint(env: Env) -> None:
         assert result.is_error is False
         assert result.structured_content is not None
         assert result.structured_content["status"] == "pending_approval"
-    assert any(t["title"] == "写周报" for t in env.fake.tasks.values())
+    assert "写周报" in await env.titles()

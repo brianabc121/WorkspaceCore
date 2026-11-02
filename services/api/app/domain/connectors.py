@@ -1,4 +1,4 @@
-"""集成的运行时：构造 Vikunja 客户端、把 Connector 错误映射成接口错误（Sprint 3 契约第 8 节）。"""
+"""集成的运行时：构造外部服务的客户端、把 Connector 错误映射成接口错误（Sprint 3 契约第 8 节）。"""
 
 import logging
 from dataclasses import dataclass
@@ -11,7 +11,6 @@ from app.domain.credentials import CredentialBox, CredentialError
 from app.integrations.base import ConnectorError
 from app.integrations.github import GitHubClient
 from app.integrations.http import CircuitBreaker, ConnectorHttp, OutboundPolicy
-from app.integrations.vikunja import VikunjaClient
 from app.models import Integration, IntegrationAccount, SyncCursor
 from app.schemas.integrations import SyncState
 
@@ -23,10 +22,6 @@ ACTIVE_STATUSES = frozenset({"active", "unavailable", "unauthorized"})
 def account_context(account_id: object) -> str:
     """凭证加密的用途：密文挪到别的记录上会解密失败（Sprint 1 契约第 12 节）。"""
     return f"integration_account:{account_id}"
-
-
-def webhook_context(integration_id: object) -> str:
-    return f"integration_webhook:{integration_id}"
 
 
 @dataclass
@@ -76,13 +71,6 @@ class ConnectorRuntime:
             ) from error
         return token.get_secret_value()
 
-    def vikunja(self, integration: Integration, account: IntegrationAccount) -> VikunjaClient:
-        return VikunjaClient(
-            self.http(f"integration:{integration.id}"),
-            integration.base_url,
-            self._token(integration, account),
-        )
-
     def github(self, integration: Integration, account: IntegrationAccount) -> GitHubClient:
         """地址取部署配置（默认 api.github.com），不取集成里保存的 base_url。"""
         return GitHubClient(
@@ -93,24 +81,27 @@ class ConnectorRuntime:
 
 
 def api_error(error: ConnectorError) -> ApiError:
-    """契约第 8 节：工作台的 401 只表示自己的会话无效，所以 Vikunja 的鉴权失败用 502。"""
+    """契约第 8 节：工作台的 401 只表示自己的会话无效，
+
+    所以外部服务（GitHub、n8n）的鉴权失败用 502。
+    """
     if error.kind == "AUTH_FAILED" and error.resource_level:
-        return ApiError(403, "EXTERNAL_FORBIDDEN", "Vikunja 拒绝访问该资源")
+        return ApiError(403, "EXTERNAL_FORBIDDEN", "外部服务拒绝访问该资源")
     if error.kind == "AUTH_FAILED":
-        return ApiError(502, "INTEGRATION_UNAUTHORIZED", "Vikunja 拒绝了 Token，请检查或更换")
+        return ApiError(502, "INTEGRATION_UNAUTHORIZED", "外部服务拒绝了凭证，请检查或更换")
     if error.kind == "NOT_FOUND":
-        return ApiError(404, "NOT_FOUND", "资源不存在，或已在 Vikunja 中删除")
+        return ApiError(404, "NOT_FOUND", "资源不存在，或已在外部服务中删除")
     if error.kind == "VALIDATION_FAILED":
         return ApiError(
             422,
             "EXTERNAL_VALIDATION_FAILED",
-            "Vikunja 拒绝了请求内容",
+            "外部服务拒绝了请求内容",
             details={"errors": [{"loc": loc, "msg": msg} for loc, msg in error.errors]},
         )
     if error.kind == "RATE_LIMITED":
         retry = str(error.retry_after or 30)
         return ApiError(
-            503, "EXTERNAL_RATE_LIMITED", "Vikunja 限流，请稍后重试", headers={"Retry-After": retry}
+            503, "EXTERNAL_RATE_LIMITED", "外部服务限流，请稍后重试", headers={"Retry-After": retry}
         )
     if error.kind == "TIMEOUT_UNKNOWN":
         return ApiError(
@@ -119,7 +110,7 @@ def api_error(error: ConnectorError) -> ApiError:
             "操作结果未知：请用同一个 Idempotency-Key 重新发送以查询结果",
             details={"retry_with_same_key": True},
         )
-    return ApiError(503, "EXTERNAL_UNAVAILABLE", "Vikunja 暂时不可用，请稍后重试")
+    return ApiError(503, "EXTERNAL_UNAVAILABLE", "外部服务暂时不可用，请稍后重试")
 
 
 def integration_status_after(error: ConnectorError, current: str) -> str:

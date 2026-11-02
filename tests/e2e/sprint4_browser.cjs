@@ -7,8 +7,7 @@
 //
 // 前提：Compose 全栈已启动并迁移（make up && make migrate）。
 // 不要求空库：每次用新的工作台用户；用户由同目录的 seed.py 写入。
-// 被关联的 Vikunja 任务直接写进投影（模拟同步结果，Vikunja 本身在 Sprint 3 已实测）：
-// 这个集成没有凭据，Worker 不会同步它。
+// 被关联的任务直接写进工作台的项目 / 任务表（T-0082 起项目与任务由工作台自己管理）。
 // AFFiNE 地址是不存在的主机：工作台只保存链接，浏览器和后端都不应请求它（DoD）。
 // 用法（依赖由同目录的 package.json / package-lock.json 锁定为 Playwright 1.63.0）：
 //   cd tests/e2e && npm ci && npm run browser:install    # 首次：安装依赖与 Chromium
@@ -102,16 +101,10 @@ function sql(query) {
   const output = execFileSync('docker', ['compose', 'exec', '-T', 'postgres', 'psql', '-U', user, '-d', database, '-tAc', query], { cwd: ROOT, encoding: 'utf8' })
   return output.trim().split('\n')[0] // INSERT … RETURNING 之后 psql 还会输出 INSERT 0 1
 }
-function vikunjaTask(workspaceId, title) {
-  const integration = sql(
-    'INSERT INTO workspace.integrations (workspace_id, provider, name, base_url, public_url, status)' +
-    ` VALUES (${uuid(workspaceId)}, 'vikunja', 'e2e-vikunja', 'http://vikunja:3456', 'http://vikunja:3456', 'active') RETURNING id`,
-  )
-  return sql(
-    'INSERT INTO workspace.external_resources (workspace_id, integration_id, resource_type, external_id, title, source_url, metadata_json, source_updated_at)' +
-    ` VALUES (${uuid(workspaceId)}, ${uuid(integration)}, 'task', '${randomBytes(8).toString('hex')}', '${title}',` +
-    ` 'http://vikunja:3456/tasks/1', '{"description": "", "done": false, "version": "1"}'::jsonb, now()) RETURNING id`,
-  )
+// 被关联的任务：工作台自己的项目与任务（T-0082 起），直接写进数据库
+function workspaceTask(workspaceId, title) {
+  const project = sql(`INSERT INTO workspace.projects (workspace_id, title) VALUES (${uuid(workspaceId)}, '浏览器验收项目') RETURNING id`)
+  return sql(`INSERT INTO workspace.tasks (workspace_id, project_id, title) VALUES (${uuid(workspaceId)}, ${uuid(project)}, '${title}') RETURNING id`)
 }
 
 // 页面里直接调用接口（带会话 Cookie、CSRF 与工作空间），用于准备数据和核对结果
@@ -162,7 +155,7 @@ async function noHorizontalScroll(page) {
   const [viewerId] = seed('user', `viewer4-${run}@browser.example.com`, 'Viewer')
   seed('member', workspace, viewerId, 'viewer')
   const taskTitle = `浏览器关联任务 ${run}`
-  vikunjaTask(workspace, taskTitle)
+  workspaceTask(workspace, taskTitle)
   // 明天（显示时区）上午 10 点：落在首页“近期日程”的 7 天窗口里
   const tomorrow = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE }).format(new Date(Date.now() + 86400000))
 

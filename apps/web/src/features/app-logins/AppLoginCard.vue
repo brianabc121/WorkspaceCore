@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Vikunja / n8n 登录账号（T-0080）：只给 owner/admin 显示；密码默认遮住，显示或复制时才向服务端取明文（写审计）。
+// n8n 登录账号（T-0080；T-0082 移除 Vikunja 后只有 n8n）：只给 owner/admin 显示；密码默认遮住，显示或复制时才向服务端取明文（写审计）。
 import { computed, onUnmounted, reactive, ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
@@ -12,8 +12,8 @@ import ModalPanel from '../../components/ModalPanel.vue'
 type App = Schema['AppLoginOut']['app']
 const props = defineProps<{ app: App }>()
 const HIDE_AFTER_MS = 60_000
-const title = props.app === 'vikunja' ? 'Vikunja' : 'n8n'
-const userLabel = props.app === 'n8n' ? '登录邮箱' : '用户名'
+const title = 'n8n'
+const userLabel = '登录邮箱'
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id, header = { 'X-Workspace-Id': scope }
 const active = () => auth.user?.id === user && auth.workspaceId === scope
 const query = useQuery({

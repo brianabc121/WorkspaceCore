@@ -11,7 +11,7 @@ http://127.0.0.1:8099 {
 	respond "ok" 200
 }
 
-# 容器之间（Vikunja 投递 Webhook：WEBHOOK_BASE_URL=http://caddy:8080）与本机检查（make smoke）仍走 :8080；
+# 本机检查（make smoke）与容器之间的访问仍走 :8080；
 # 宿主机上只绑定 HTTP_BIND（默认 127.0.0.1），不对外
 :8080 {
 	import /etc/caddy/routes.caddy
@@ -22,6 +22,6 @@ http://127.0.0.1:8099 {
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 }
 
-# 可选：Vikunja / n8n 的对外子域名（VIKUNJA_DOMAIN / N8N_DOMAIN）。scripts/deploy.sh connect 在这个目录里
-# 生成 vikunja.caddy / n8n.caddy（写入的是具体域名，不依赖环境变量），没有文件时什么都不做（T-0078）
+# 可选：n8n 的对外子域名（N8N_DOMAIN）。scripts/deploy.sh connect 在这个目录里生成 n8n.caddy
+# （写入的是具体域名，不依赖环境变量），没有文件时什么都不做（T-0078）
 import /etc/caddy/apps/*.caddy

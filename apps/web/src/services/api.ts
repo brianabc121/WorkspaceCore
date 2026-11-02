@@ -48,10 +48,10 @@ export function errorMessage(error: unknown): string {
     OPERATION_NOT_APPLIED: '已确认原操作没有生效，可确认后重新提交。',
     INTEGRATION_UNAVAILABLE: '任务服务尚未配置、已停用或未通过连接测试。',
     SYNC_IN_PROGRESS: '同步正在进行，请稍后刷新状态。',
-    EXTERNAL_FORBIDDEN: 'Vikunja 不允许访问此项目或任务。',
-    EXTERNAL_VALIDATION_FAILED: 'Vikunja 拒绝了输入内容，请检查后重试。',
-    INTEGRATION_UNAUTHORIZED: 'Vikunja Token 已失效或权限不足，请管理员更新连接。',
-    EXTERNAL_UNAVAILABLE: 'Vikunja 暂不可用。写入结果可能未知，请用原请求查询确认。',
+    EXTERNAL_FORBIDDEN: '外部服务不允许访问这项内容。',
+    EXTERNAL_VALIDATION_FAILED: '外部服务拒绝了输入内容，请检查后重试。',
+    INTEGRATION_UNAUTHORIZED: '外部服务的 Token 已失效或权限不足，请管理员更新连接。',
+    EXTERNAL_UNAVAILABLE: '外部服务暂不可用，请稍后重试。',
   }
   if (error.status === 429 || error.code === 'EXTERNAL_RATE_LIMITED') return error.retryAfter === null ? '请求过于频繁，请稍后重试。' : `请求过于频繁，请在 ${error.retryAfter} 秒后重试。`
   return messages[error.code] ?? '请求失败，请稍后重试。'

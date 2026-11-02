@@ -15,8 +15,8 @@ fs.mkdirSync(screenshots, { recursive: true });
   page.on('dialog', (dialog) => dialog.accept());
   const time = '2026-10-30T00:00:00Z', empty = { items: [], next_cursor: null, total_estimate: null };
   const source = { id: '10000000-0000-4000-8000-000000000001', provider: 'affine', name: '团队知识库', base_url: 'https://docs.example.com', tested_version: '0.27.4', bookmark_count: 1, version: 1, created_at: time, updated_at: time };
-  const project = { id: '20000000-0000-4000-8000-000000000001', integration_id: '20000000-0000-4000-8000-000000000002', external_id: 'vikunja:project:1', title: '个人工作台', archived: false, source_url: 'https://tasks.example.com/projects/1', source_updated_at: time, synced_at: time };
-  const bookmark = { id: '10000000-0000-4000-8000-000000000002', source_id: source.id, provider: 'affine', resource_type: 'affine_doc', title: '工作台发布说明', note: '记录发布步骤、回滚方式和版本核验结果。', url: 'https://docs.example.com/workspace/team/release', link_kind: 'workspace_doc', affine_workspace_id: 'team', doc_id: 'release', visibility: 'workspace', owner_id: 'user-a', links: [{ resource_id: project.id, resource_type: 'project', title: project.title, source_url: project.source_url }], version: 1, created_at: time, updated_at: time };
+  const project = { id: '20000000-0000-4000-8000-000000000001', title: '个人工作台', description: '', archived: false, open_tasks: 0, done_tasks: 0, version: 1, created_at: time, updated_at: time };
+  const bookmark = { id: '10000000-0000-4000-8000-000000000002', source_id: source.id, provider: 'affine', resource_type: 'affine_doc', title: '工作台发布说明', note: '记录发布步骤、回滚方式和版本核验结果。', url: 'https://docs.example.com/workspace/team/release', link_kind: 'workspace_doc', affine_workspace_id: 'team', doc_id: 'release', visibility: 'workspace', owner_id: 'user-a', links: [{ resource_id: project.id, resource_type: 'project', title: project.title }], version: 1, created_at: time, updated_at: time };
   let bookmarks = [bookmark, { ...bookmark, id: '10000000-0000-4000-8000-000000000004', title: '接口设计与约定', note: '前后端共享的接口说明，仅保存手工元数据。', doc_id: 'api', url: 'https://docs.example.com/workspace/team/api', visibility: 'private', links: [] }];
   const event = { id: '10000000-0000-4000-8000-000000000003', title: '版本发布评审', description: '核对验收清单与发布窗口。', location: '线上会议', all_day: false, start_at: '2026-10-30T01:30:00Z', end_at: '2026-10-30T02:30:00Z', start_date: null, end_date: null, timezone: 'Asia/Shanghai', owner_id: 'user-a', version: 1, created_at: time, updated_at: time };
   let events = [event, { ...event, id: '10000000-0000-4000-8000-000000000005', title: '下阶段规划', start_at: new Date(Date.now() + 86400000).toISOString(), end_at: new Date(Date.now() + 90000000).toISOString() }];
@@ -30,8 +30,8 @@ fs.mkdirSync(screenshots, { recursive: true });
       if (writing) { assert.equal(request.headers()['x-csrf-token'], 'browser-csrf'); writes.push({ path: pathname, method, body: request.postDataJSON() }); }
       if (pathname === '/api/v1/setup/status') body = { setup_required: false };
       else if (pathname === '/api/v1/me') body = { user: { id: 'user-a', display_name: '演示用户', email: 'test@example.com', created_at: time }, workspaces: [{ id: 'workspace-a', name: '个人工作空间', role: 'owner', created_at: time, updated_at: time }] };
-      else if (pathname === '/api/v1/projects') body = { ...empty, items: [project], sync: { status: 'ok', as_of: time, reason: null } };
-      else if (pathname === '/api/v1/tasks') body = { ...empty, sync: { status: 'ok', as_of: time, reason: null } };
+      else if (pathname === '/api/v1/projects') body = { ...empty, items: [project] };
+      else if (pathname === '/api/v1/tasks') body = { ...empty };
       else if (pathname === '/api/v1/knowledge/sources') body = { ...empty, items: [{ ...source, bookmark_count: bookmarks.length }] };
       else if (pathname === '/api/v1/knowledge/resources') body = { ...empty, items: bookmarks.filter((item) => !url.searchParams.has('linked_resource_id') || item.links.some((link) => link.resource_id === url.searchParams.get('linked_resource_id'))).slice(0, Number(url.searchParams.get('limit') || 30)) };
       else if (pathname === '/api/v1/knowledge/bookmarks') {

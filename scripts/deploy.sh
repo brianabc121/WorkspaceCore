@@ -11,7 +11,7 @@
 # 部署时只需要回答三个问题：SITE_DOMAIN、ACME_EMAIL、PUBLIC_BASE_URL（默认 https://<域名>）。
 # 其余的都自动完成：安装缺少的工具与 Docker → 获取代码 → 生成 .env（随机密钥）→ 启用 HTTPS 与生产模式 →
 # 检查端口 / DNS / 防火墙 → make up → 迁移数据库 → 冒烟检查 → 检查 HTTPS → 显示安装凭据。
-# 在浏览器创建管理员后按回车，接着自动接入 Vikunja、GitHub、n8n（connect，也可以以后单独运行；T-0076）。
+# 在浏览器创建管理员后按回车，接着自动接入 GitHub、n8n 并部署 OpenIM（connect，也可以以后单独运行；T-0076）。
 #
 # 选项：
 #   --dir DIR          安装目录（默认 /srv/my-workspace；在代码目录里运行时就是该目录）
@@ -28,6 +28,7 @@ set -Eeuo pipefail
 REPO_URL="${WORKSPACE_REPO:-https://github.com/brianabc121/WorkspaceCore.git}"
 DEFAULT_DIR="${WORKSPACE_DIR:-/srv/my-workspace}"
 PROJECT="my-workspace"
+# $PROJECT-vikunja：T-0082 移除了 Vikunja；留在列表里，uninstall 时还能清理以前部署的
 OPTIONAL_PROJECTS=("$PROJECT-vikunja" "$PROJECT-n8n" "$PROJECT-openim")
 BACKUP_ENV_FILE="/etc/my-workspace/backup.env"
 
@@ -484,7 +485,7 @@ remind_backup_env() {
 }
 
 # ---------------------------------------------------------------- 接入组件（T-0076）
-# 管理员在浏览器里创建好之后，自动接入 Vikunja、GitHub、n8n。真正的接入在 api 容器里由
+# 管理员在浏览器里创建好之后，自动接入 GitHub、n8n（项目与任务由工作台自己管理，T-0082）。真正的接入在 api 容器里由
 # app/commands/connect.py 完成（和网页同一套服务：凭证加密保存、写审计、要求管理员角色）。
 # 密码与 Token 只经标准输入传给容器，不出现在命令行参数里。
 GITHUB_TOKEN_URL="https://github.com/settings/personal-access-tokens/new?name=My+Workspace&description=My+Workspace+read-only+sync&expires_in=90&issues=read&pull_requests=read&actions=read"
@@ -494,12 +495,6 @@ connect_cmd() { compose exec -T api python -m app.commands.connect "$@"; }
 # 不需要输入的调用都接上 /dev/null：docker compose exec -T 会读走终端里提前敲下的回答
 connect_status() { connect_cmd status </dev/null 2>/dev/null || true; }
 status_of() { sed -n "s/^$1=//p" <<<"$2" | head -1; }
-# 项目名与 Makefile 一致：默认 my-workspace，可以用 COMPOSE_PROJECT_NAME 改
-vikunja_cli() {
-  local core="${COMPOSE_PROJECT_NAME:-$PROJECT}"
-  (cd "$ROOT" && WORKSPACE_PROJECT="$core" docker compose -p "$core-vikunja" -f infra/vikunja/compose.yaml \
-    --env-file .env exec -T vikunja /app/vikunja/vikunja "$@" </dev/null)
-}
 public_url_of() { local v; v="$(env_get "$1")"; v="${v:-$2}"; printf '%s\n' "${v%/}"; }
 
 # n8n 的密码规则：8 ~ 64 位，至少一个数字和一个大写字母
@@ -573,38 +568,6 @@ wait_for_setup() {
     read -r -p "创建好后按回车继续（输入 s 跳过，以后运行 deploy.sh connect）: " answer || answer=s
     [[ $answer =~ ^[Ss] ]] && { info "已跳过；以后运行 bash $ROOT/scripts/deploy.sh connect"; return 1; }
   done
-}
-
-connect_vikunja() {
-  local state="$1" login="${2:-}" user email password created=0 url
-  step "Vikunja（任务主源）"
-  if [[ -n $state && $state != none ]]; then
-    show_state "$state" "集成设置"
-    offer_save_login vikunja Vikunja 项目 "$login" "Vikunja 用户名" admin
-    return 0
-  fi
-  confirm "部署 Vikunja 并自动接入？" y || { info "跳过"; return 0; }
-  (cd "$ROOT" && make -s vikunja-up </dev/null) || { warn "Vikunja 没有启动（见上面的输出），跳过"; return 0; }
-  url="$(public_url_of VIKUNJA_PUBLIC_URL http://localhost:3456)"
-  user="$(ask "Vikunja 用户名" admin)"
-  email="$(ask "Vikunja 用户的邮箱" "$(env_get ACME_EMAIL)")"
-  password="$(random_password)"
-  # Vikunja 的命令行只能用 -p 给密码（没有终端时不能从输入读）；密码只短暂出现在 Vikunja 容器的进程参数里
-  if vikunja_cli user create -u "$user" -e "$email" -p "$password" >/dev/null 2>&1; then
-    created=1
-    ok "已创建 Vikunja 用户 $user"
-  else
-    warn "没能创建 Vikunja 用户 $user（多半已经存在）"
-    password="$(ask_secret "输入 Vikunja 用户 $user 的密码（直接回车跳过）")"
-    [[ -n $password ]] || { info "跳过 Vikunja"; return 0; }
-  fi
-  if printf '%s\n' "$password" | connect_cmd vikunja --username "$user" --public-url "$url"; then
-    ok "Vikunja 已接入：项目与任务已同步到工作台"
-  else
-    warn "Vikunja 没有接入成功（见上面的输出）：修好后重新运行 deploy.sh connect，或到工作台「集成设置」里手动配置"
-  fi
-  (( created )) && show_credential "Vikunja" "$url" "$user" "$password" "$(env_get VIKUNJA_PORT | grep . || echo 3456)" "项目"
-  return 0
 }
 
 # 把“1,3,5”或空（全选）换成 owner/repo 列表；最多 GITHUB_MAX_REPOS 个
@@ -698,8 +661,8 @@ connect_n8n() {
   return 0
 }
 
-# ---------------------------------------------------------------- Vikunja / n8n 的对外子域名（T-0078）
-# 默认只在服务器本机开放（SSH 隧道）。设置 VIKUNJA_DOMAIN / N8N_DOMAIN 后，在 infra/caddy/apps-enabled/ 生成 Caddy 站点
+# ---------------------------------------------------------------- n8n 的对外子域名（T-0078）
+# 默认只在服务器本机开放（SSH 隧道）。设置 N8N_DOMAIN 后，在 infra/caddy/apps-enabled/ 生成 Caddy 站点
 # （写入具体域名），Caddy 自动申请证书并转发到 integrations 网络里的容器；同时改公开地址、更新工作台里的打开链接。
 APPS_DIR="infra/caddy/apps-enabled"
 app_site_file() { printf '%s\n' "$ROOT/$APPS_DIR/$1.caddy"; }
@@ -785,18 +748,13 @@ check_app_https() {
 connected() { [[ -n $1 && $1 != none ]]; }
 
 expose_apps() {
-  local status="$1" site vikunja_changed=0 n8n_changed=0 domain
-  step "Vikunja / n8n 的对外访问"
+  local status="$1" site n8n_changed=0 domain
+  step "n8n 的对外访问"
   if [[ $(env_get COMPOSE_FILE) != *compose.https.yaml* ]]; then
-    info "没有启用域名与 HTTPS，Vikunja 与 n8n 只能在服务器本机访问（SSH 隧道）"
+    info "没有启用域名与 HTTPS，n8n 只能在服务器本机访问（SSH 隧道）"
     return 0
   fi
   site="$(env_get SITE_DOMAIN)"
-  if connected "$(status_of vikunja "$status")" || [[ -n $(env_get VIKUNJA_DOMAIN) ]]; then
-    domain="$(choose_domain vikunja Vikunja VIKUNJA_DOMAIN "vikunja.$site")"
-    if apply_app_domain vikunja Vikunja VIKUNJA_DOMAIN VIKUNJA_PUBLIC_URL \
-      "http://localhost:$(env_get VIKUNJA_PORT | grep . || echo 3456)/" vikunja:3456 "$domain"; then vikunja_changed=1; fi
-  fi
   if connected "$(status_of n8n "$status")" || [[ -n $(env_get N8N_DOMAIN) ]]; then
     domain="$(choose_domain n8n n8n N8N_DOMAIN "n8n.$site")"
     if apply_app_domain n8n n8n N8N_DOMAIN N8N_PUBLIC_URL \
@@ -806,26 +764,21 @@ expose_apps() {
     else env_set N8N_SECURE_COOKIE false; env_set N8N_PROXY_HOPS 0
     fi
   fi
-  if (( ! vikunja_changed && ! n8n_changed )); then
+  if (( ! n8n_changed )); then
     info "对外访问设置没有变化"
-    # 顺带按当前地址刷新已同步的项目与任务链接（T-0079 之前改过地址的，链接还是旧的）；不改地址本身
-    if connected "$(status_of vikunja "$status")"; then connect_cmd relink </dev/null || true; fi
     return 0
   fi
-  # 让新地址生效：重建 Vikunja / n8n（读取新的公开地址），校验后重启 Caddy，再更新工作台里的打开链接
-  if (( vikunja_changed )); then (cd "$ROOT" && make -s vikunja-up </dev/null) || warn "Vikunja 没有重启成功（见上面的输出）"; fi
-  if (( n8n_changed )); then (cd "$ROOT" && make -s n8n-up </dev/null) || warn "n8n 没有重启成功（见上面的输出）"; fi
+  # 让新地址生效：重建 n8n（读取新的公开地址），校验后重启 Caddy，再更新工作台里的打开链接
+  (cd "$ROOT" && make -s n8n-up </dev/null) || warn "n8n 没有重启成功（见上面的输出）"
   if ! restart_caddy_with_apps; then
     warn "Caddy 配置校验没有通过，撤销刚生成的对外站点（工作台不受影响）"
-    (( vikunja_changed )) && rm -f "$(app_site_file vikunja)"
-    (( n8n_changed )) && rm -f "$(app_site_file n8n)"
+    rm -f "$(app_site_file n8n)"
     restart_caddy_with_apps || warn "Caddy 重启失败：运行 docker compose logs caddy 查看原因"
     return 0
   fi
-  connect_cmd public-urls --vikunja "$(public_url_of VIKUNJA_PUBLIC_URL http://localhost:3456)" \
-    --n8n "$(public_url_of N8N_PUBLIC_URL http://localhost:5678)" </dev/null || warn "工作台里的打开链接没有更新（见上面的输出）"
-  if (( vikunja_changed )) && [[ -n $(env_get VIKUNJA_DOMAIN) ]]; then check_app_https "https://$(env_get VIKUNJA_DOMAIN)/api/v1/info"; fi
-  if (( n8n_changed )) && [[ -n $(env_get N8N_DOMAIN) ]]; then check_app_https "https://$(env_get N8N_DOMAIN)/healthz"; fi
+  connect_cmd public-urls --n8n "$(public_url_of N8N_PUBLIC_URL http://localhost:5678)" </dev/null \
+    || warn "工作台里的打开链接没有更新（见上面的输出）"
+  if [[ -n $(env_get N8N_DOMAIN) ]]; then check_app_https "https://$(env_get N8N_DOMAIN)/healthz"; fi
   return 0
 }
 
@@ -911,23 +864,58 @@ upgrade_openim() {
   return 0
 }
 
+# ---------------------------------------------------------------- 旧的 Vikunja（T-0082）
+# 项目与任务改由工作台自己管理（迁移 0020 已把同步过来的项目、任务转成工作台自己的数据）：
+# 升级时停掉并删除以前部署的 Vikunja 容器与对外站点，数据卷保留，打印手动删除的命令。
+# 按 Compose 项目标签找容器，不依赖 infra/vikunja/compose.yaml（之后会删除）。
+retire_vikunja() {
+  local core name site containers networks volumes
+  core="$(env_get COMPOSE_PROJECT_NAME)"
+  name="${core:-$PROJECT}-vikunja"
+  site="$(app_site_file vikunja)"
+  containers="$(docker ps -aq --filter "label=com.docker.compose.project=$name" 2>/dev/null || true)"
+  [[ -n $containers || -f $site ]] || return 0
+  step "停用旧的 Vikunja（项目与任务已转成工作台自己的数据）"
+  if [[ -n $containers ]]; then
+    # shellcheck disable=SC2086 # 容器 ID 按空白分开传给 docker
+    if docker rm -f $containers >/dev/null; then ok "已停止并删除 Vikunja 的容器"
+    else warn "没能删除 Vikunja 的容器：运行 docker ps -a --filter label=com.docker.compose.project=$name 查看"
+    fi
+    networks="$(docker network ls -q --filter "label=com.docker.compose.project=$name" 2>/dev/null || true)"
+    # shellcheck disable=SC2086
+    [[ -z $networks ]] || docker network rm $networks >/dev/null 2>&1 || true
+  fi
+  if [[ -f $site ]]; then
+    rm -f "$site"
+    if restart_caddy_with_apps; then ok "已删除 Vikunja 的对外站点"
+    else warn "Caddy 重启失败：运行 docker compose logs caddy 查看原因"
+    fi
+  fi
+  [[ -z $(env_get VIKUNJA_DOMAIN) ]] || env_set VIKUNJA_DOMAIN ""
+  volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=$name" 2>/dev/null | tr '\n' ' ' || true)"
+  if [[ -n ${volumes// /} ]]; then
+    info "Vikunja 的数据卷保留着（以前的数据还在里面）。确认不再需要后，可以手动删除："
+    info "  docker volume rm ${volumes% }"
+  fi
+  return 0
+}
+
 connect_components() {
-  step "接入组件：Vikunja（任务）、GitHub（只读）、n8n（自动化）、OpenIM（消息）"
+  step "接入组件：GitHub（只读）、n8n（自动化）、OpenIM（消息）；项目与任务由工作台自己管理"
   compose ps --status running --services </dev/null 2>/dev/null | grep -qx api || { warn "api 没有运行，先部署（install）"; return 0; }
   wait_for_setup || return 0
   local status
   status="$(connect_status)"
   info "以管理员 $(status_of user "$status") 的身份接入：凭证加密保存在工作台，操作写入审计日志"
-  connect_vikunja "$(status_of vikunja "$status")" "$(status_of vikunja_login "$status")"
   connect_github "$(status_of github "$status")"
   connect_n8n "$(status_of n8n "$status")" "$(status_of n8n_login "$status")"
   connect_openim "$(status_of openim "$status")"
   status="$(connect_status)"
   expose_apps "$status"
   step "接入状态"
-  info "Vikunja：$(status_label "$(status_of vikunja "$status")")　GitHub：$(status_label "$(status_of github "$status")")　n8n：$(status_label "$(status_of n8n "$status")")"
+  info "GitHub：$(status_label "$(status_of github "$status")")　n8n：$(status_label "$(status_of n8n "$status")")"
   info "OpenIM：$(openim_label "$(status_of openim "$status")")"
-  info "打开地址：Vikunja $(public_url_of VIKUNJA_PUBLIC_URL http://localhost:3456)　n8n $(public_url_of N8N_PUBLIC_URL http://localhost:5678)"
+  info "n8n 打开地址：$(public_url_of N8N_PUBLIC_URL http://localhost:5678)"
   info "以后要接入或重试：bash $ROOT/scripts/deploy.sh connect"
 }
 
@@ -1007,6 +995,7 @@ do_upgrade() {
   migrate
   smoke
   [[ $BASE_URL == https://* ]] && check_https
+  retire_vikunja
   upgrade_openim
   step "升级完成：$(git -C "$ROOT" log -1 --format='%h %cs %s')"
   if [[ $AFTER_PULL != "$(git -C "$ROOT" rev-parse HEAD)" ]]; then
@@ -1142,7 +1131,7 @@ ${C_B}My Workspace 部署脚本${C_0}（代码目录：$ROOT）
   2) 升级到最新版本（自动备份、迁移、检查）
   3) 清空项目（删除全部容器与数据，可选同时删除代码目录）
   4) 查看状态
-  5) 接入 Vikunja / GitHub / n8n，部署 OpenIM（需要先在浏览器创建管理员）
+  5) 接入 GitHub / n8n，部署 OpenIM（需要先在浏览器创建管理员）
   0) 退出
 EOF
   local choice

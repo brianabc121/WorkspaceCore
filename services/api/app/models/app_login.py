@@ -1,4 +1,4 @@
-"""Vikunja、n8n 管理界面的登录账号（T-0080）。
+"""n8n 管理界面的登录账号（T-0080；T-0082 移除 Vikunja 后只剩 n8n）。
 
 人类要求：在工作台「项目」「自动化」页直接看到这两个账号，复制粘贴去登录。
 - 每个工作空间每个应用一条；密码只以 `enc:v1:` 引用保存（用途 `app_login:<id>:password`），
@@ -17,13 +17,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
 
-APPS = ("vikunja", "n8n")
+APPS = ("n8n",)
 
 
 class AppLogin(Base):
     __tablename__ = "app_logins"
     __table_args__ = (
-        CheckConstraint(f"app IN {APPS}", name="app"),
+        CheckConstraint("app = 'n8n'", name="app"),
         UniqueConstraint("workspace_id", "app"),
     )
 
@@ -34,7 +34,7 @@ class AppLogin(Base):
         ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
     )
     app: Mapped[str] = mapped_column(Text)
-    # Vikunja 是用户名，n8n 是登录邮箱
+    # n8n 的登录邮箱
     username: Mapped[str] = mapped_column(Text)
     password_ref: Mapped[str | None] = mapped_column(Text)
     version: Mapped[int] = mapped_column(Integer, server_default=sql_text("1"))

@@ -1,6 +1,6 @@
 """MCP 读工具（T-0057，OC-5，契约第 9.2、9.3 节）：经 `POST /mcp` 调用。
 
-真实 PostgreSQL / Redis + 内存版 Vikunja。
+真实 PostgreSQL / Redis。
 
 覆盖：每个读工具的返回形态；第三方或用户写的文字（含诱导指令）只出现在 `untrusted` 里；
 读外部数据的工具带 freshness；可见性与页面一致（别人的私有收藏看不到）；每次调用写读记录；
@@ -17,7 +17,7 @@ import pytest
 from app.schemas.ai_tools import TOOLS
 from tests.helpers import csrf
 from tests.test_mcp_api import SETTINGS, call, issue_token, new_instance, records, rpc
-from tests.vikunja_support import Env, open_env
+from tests.workspace_support import Env, open_env
 
 pytestmark = pytest.mark.integration
 
@@ -30,10 +30,9 @@ PRIVATE_DOC = f"{AFFINE}/workspace/0f1e2d3c-aaaa-bbbb-cccc-000000000001/Secret99
 @pytest.fixture
 async def env(make_client: Any, migrated_database_url: str) -> AsyncIterator[Env]:
     async with open_env(make_client, migrated_database_url, **SETTINGS) as value:
-        work = value.fake.add_project("工作")
-        value.fake.add_task(work["id"], "写周报", priority=3)
-        value.fake.add_task(work["id"], INJECTION, description=f"备注：{INJECTION}", priority=1)
-        await value.connect()
+        work = await value.add_project("工作")
+        await value.add_task(work["id"], "写周报", priority=3)
+        await value.add_task(work["id"], INJECTION, description=f"备注：{INJECTION}", priority=1)
         yield value
 
 

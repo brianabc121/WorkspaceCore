@@ -3,7 +3,8 @@ Sprint 2（…-sprint-2-dashboard-contract.md）、Sprint 3（…-sprint-3-tasks
 Sprint 4（…-sprint-4-knowledge-search-contract.md）、
 Sprint 5（…-sprint-5-operations-automations-contract.md）、
 V2 OC-1（…-v2-oc1-contract.md）、
-Vikunja / n8n 登录账号（2026-11-02-app-logins.md）。"""
+n8n 登录账号（2026-11-02-app-logins.md）；
+工作台自己的项目与任务（2026-11-02-remove-vikunja.md）。"""
 
 import json
 import uuid
@@ -80,7 +81,15 @@ SPRINT_3_ENDPOINTS = {
     ("get", "/api/v1/tasks/{task_id}"),
     ("patch", "/api/v1/tasks/{task_id}"),
     ("delete", "/api/v1/tasks/{task_id}"),
-    ("post", "/api/v1/webhooks/vikunja/{integration_id}"),
+}
+
+# T-0082：移除 Vikunja 后项目由工作台自己管理；Vikunja 的 Webhook 端点已删除
+NATIVE_PROJECT_ENDPOINTS = {
+    ("post", "/api/v1/projects"),
+    ("get", "/api/v1/projects/progress"),
+    ("get", "/api/v1/projects/{project_id}"),
+    ("patch", "/api/v1/projects/{project_id}"),
+    ("delete", "/api/v1/projects/{project_id}"),
 }
 
 SPRINT_4_ENDPOINTS = {
@@ -210,12 +219,18 @@ def test_all_sprint_endpoints_are_declared() -> None:
         SPRINT_1_ENDPOINTS
         | SPRINT_2_ENDPOINTS
         | SPRINT_3_ENDPOINTS
+        | NATIVE_PROJECT_ENDPOINTS
         | SPRINT_4_ENDPOINTS
         | SPRINT_5_ENDPOINTS
         | V2_ADMIN_ENDPOINTS
         | V2_AGENT_ENDPOINTS
         | APP_LOGIN_ENDPOINTS
     )
+
+
+def test_vikunja_endpoints_are_removed() -> None:
+    paths = json.loads(render())["paths"]
+    assert not [path for path in paths if "vikunja" in path or "webhooks" in path]
 
 
 def test_no_endpoint_documents_501() -> None:
@@ -369,18 +384,10 @@ def test_task_writes_require_an_idempotency_key_header() -> None:
 
 def test_api_token_is_write_only_and_never_part_of_a_response() -> None:
     schemas = json.loads(render())["components"]["schemas"]
-    token = schemas["IntegrationCreate"]["properties"]["api_token"]
+    token = schemas["GitHubIntegrationCreate"]["properties"]["api_token"]
     assert token["writeOnly"] is True
     assert "api_token" not in schemas["IntegrationOut"]["properties"]
     assert "token_set" in schemas["IntegrationOut"]["properties"]
-
-
-def test_webhook_endpoint_is_documented_without_session() -> None:
-    op = _operation("post", "/api/v1/webhooks/vikunja/{integration_id}")
-    params = op["parameters"]
-    assert isinstance(params, list)
-    assert {p["name"] for p in params} == {"integration_id", "X-Vikunja-Signature"}
-    assert "202" in op["responses"]  # type: ignore[operator]
 
 
 @pytest.mark.usefixtures("any_role")
@@ -413,7 +420,8 @@ async def test_task_payload_rules(stub_client: httpx.AsyncClient) -> None:
         "标题为 null": {"version": "v1", "title": None},
         "优先级越界": {"version": "v1", "priority": 6},
         "截止时间没有时区": {"version": "v1", "due_at": "2026-11-05T18:00:00"},
-        "多余字段": {"version": "v1", "labels": ["x"]},
+        "多余字段": {"version": "v1", "assignee": "bob"},  # 单人版没有负责人
+        "标签为 null": {"version": "v1", "labels": None},
     }
     for name, body in cases.items():
         response = await stub_client.patch(path, json=body, headers=headers)
@@ -428,38 +436,43 @@ async def test_task_payload_rules(stub_client: httpx.AsyncClient) -> None:
 async def test_integration_payload_rules_do_not_echo_the_token(
     stub_client: httpx.AsyncClient,
 ) -> None:
-    pasted = "not-a-vikunja-key-0123456789"
-    base = {"provider": "vikunja", "name": "Vikunja", "base_url": "http://vikunja:3456"}
-    wrong = await stub_client.post(
-        "/api/v1/integrations", json={**base, "api_token": pasted}, headers=WORKSPACE
-    )
-    assert wrong.status_code == 422
-    assert pasted not in wrong.text
-    for url in ["ftp://vikunja", "http://user:pw@vikunja", "http://vikunja/?a=1", "vikunja"]:
-        response = await stub_client.post(
-            "/api/v1/integrations",
-            json={**base, "base_url": url, "api_token": "tk_example"},
-            headers=WORKSPACE,
-        )
-        assert response.status_code == 422, url
-        assert "pw@" not in response.text
-    ok = await stub_client.post(
-        "/api/v1/integrations",
-        json={**base, "base_url": "http://vikunja:3456/", "api_token": "tk_example"},
-        headers=WORKSPACE,
-    )
-    assert ok.status_code == 501
+    pasted = "not-a-github-token-0123456789"
+    removed = {"provider": "vikunja", "name": "Vikunja", "base_url": "http://vikunja:3456"}
+    for body in [{**removed, "api_token": "tk_example"}, {**removed, "api_token": pasted}]:
+        response = await stub_client.post("/api/v1/integrations", json=body, headers=WORKSPACE)
+        assert response.status_code == 422  # T-0082 移除了 Vikunja
+        assert pasted not in response.text
     nothing = await stub_client.patch(
         f"/api/v1/integrations/{uuid.uuid4()}", json={"version": 1}, headers=WORKSPACE
     )
     assert nothing.status_code == 422
 
 
-def test_webhook_endpoint_does_not_require_a_session(app: FastAPI) -> None:
-    """Webhook 只认签名：契约里不声明会话认证（运行时行为见 tests/test_webhooks_api.py）。"""
-    operation = app.openapi()["paths"]["/api/v1/webhooks/vikunja/{integration_id}"]["post"]
-    assert "security" not in operation
-    assert {p["name"] for p in operation.get("parameters", [])} >= {"X-Vikunja-Signature"}
+@pytest.mark.usefixtures("any_role")
+async def test_project_payload_rules(stub_client: httpx.AsyncClient) -> None:
+    for name, body in {
+        "没有标题": {},
+        "标题为空": {"title": "  "},
+        "标题太长": {"title": "x" * 121},
+        "多余字段": {"title": "a", "owner": "bob"},
+    }.items():
+        response = await stub_client.post("/api/v1/projects", json=body, headers=WORKSPACE)
+        assert response.status_code == 422, name
+    ok = await stub_client.post("/api/v1/projects", json={"title": "工作"}, headers=WORKSPACE)
+    assert ok.status_code == 501
+    path = f"/api/v1/projects/{uuid.uuid4()}"
+    patches: dict[str, dict[str, object]] = {
+        "只有 version": {"version": 1},
+        "version 不是整数": {"version": "v1", "title": "a"},
+        "archived 为 null": {"version": 1, "archived": None},
+    }
+    for name, patch in patches.items():
+        response = await stub_client.patch(path, json=patch, headers=WORKSPACE)
+        assert response.status_code == 422, name
+    assert (await stub_client.delete(path, headers=WORKSPACE)).status_code == 422  # 没有 version
+    assert (
+        await stub_client.delete(path, params={"version": 1}, headers=WORKSPACE)
+    ).status_code == 501
 
 
 # ---------------------------------------------------------------- Sprint 4
@@ -482,14 +495,14 @@ def test_sprint_4_only_adds_optional_fields_to_existing_schemas() -> None:
         assert field in schemas[name]["properties"], (name, field)  # type: ignore[operator]
         assert field not in schemas[name].get("required", []), (name, field)  # type: ignore[operator]
     check = schemas["IntegrationCheck"]["properties"]["name"]  # type: ignore[index]
-    assert set(check["enum"]) == {"reachable", "version", "token", "tasks_read", "webhooks"}
+    # T-0082 移除 Vikunja 时去掉了 tasks_read（只有 Vikunja 用）
+    assert set(check["enum"]) == {"reachable", "version", "token", "webhooks"}
 
 
-def test_integration_create_is_a_union_by_provider() -> None:
+def test_integration_create_is_github_only() -> None:
     body = _operation("post", "/api/v1/integrations")["requestBody"]
-    union = body["content"]["application/json"]["schema"]  # type: ignore[index]
-    assert union["discriminator"]["propertyName"] == "provider"
-    assert set(union["discriminator"]["mapping"]) == {"vikunja", "github"}
+    schema = body["content"]["application/json"]["schema"]  # type: ignore[index]
+    assert schema["$ref"].endswith("/GitHubIntegrationCreate")
     github = _schemas()["GitHubIntegrationCreate"]["properties"]
     assert github["api_token"]["writeOnly"] is True  # type: ignore[index]
     assert "base_url" not in github  # type: ignore[operator]
@@ -666,9 +679,9 @@ def test_sprint_5_keeps_existing_schemas_unchanged() -> None:
     """契约第 1 节：前端按枚举索引的类型不加值；新模块与新组件类型不影响已有类型。"""
     schemas = _schemas()
     check = schemas["IntegrationCheck"]["properties"]["name"]  # type: ignore[index]
-    assert set(check["enum"]) == {"reachable", "version", "token", "tasks_read", "webhooks"}
+    assert set(check["enum"]) == {"reachable", "version", "token", "webhooks"}
     provider = schemas["IntegrationOut"]["properties"]["provider"]  # type: ignore[index]
-    assert set(provider["enum"]) == {"vikunja", "github"}
+    assert provider["const"] == "github" or set(provider["enum"]) == {"github"}
     modules = schemas["DashboardOverview"]["properties"]["modules"]  # type: ignore[index]
     assert modules["additionalProperties"]["$ref"].endswith("/ModuleStatus")
 
@@ -941,7 +954,7 @@ def test_v2_keeps_existing_enums_and_only_adds_event_topics() -> None:
         "ai",
     }
     provider = schemas["IntegrationOut"]["properties"]["provider"]  # type: ignore[index]
-    assert set(provider["enum"]) == {"vikunja", "github"}
+    assert provider["const"] == "github" or set(provider["enum"]) == {"github"}
 
 
 def test_v2_mcp_tools_match_the_plan() -> None:
@@ -1255,7 +1268,7 @@ async def test_v2_openim_callback_route_rules(stub_client: httpx.AsyncClient) ->
     assert missing.status_code == 404
 
 
-# ---------------------------------------------------------------- Vikunja / n8n 登录账号（T-0080）
+# ---------------------------------------------------------------- n8n 登录账号（T-0080）
 
 
 def test_app_logins_use_the_session_and_only_reveal_returns_the_password() -> None:
@@ -1275,9 +1288,10 @@ async def test_app_login_payload_rules(stub_client: httpx.AsyncClient) -> None:
     secret = "typed password"  # noqa: S105  测试用的假值
     cases: dict[str, tuple[str, dict[str, object]]] = {
         "不认识的应用": ("grafana", {"username": "admin"}),
-        "什么都没改": ("vikunja", {}),
-        "只有版本": ("vikunja", {"version": 1}),
-        "用户名为空": ("vikunja", {"username": "   "}),
+        "已移除的应用": ("vikunja", {"username": "admin"}),
+        "什么都没改": ("n8n", {}),
+        "只有版本": ("n8n", {"version": 1}),
+        "用户名为空": ("n8n", {"username": "   "}),
         "密码为空": ("n8n", {"username": "a@example.com", "password": ""}),
         "多余字段": ("n8n", {"username": "a@example.com", "url": "http://x"}),
         "版本不对": ("n8n", {"version": 0, "password": secret}),
@@ -1287,7 +1301,7 @@ async def test_app_login_payload_rules(stub_client: httpx.AsyncClient) -> None:
         assert response.status_code == 422, name
         assert secret not in response.text, name
     ok = await stub_client.put(
-        "/api/v1/app-logins/vikunja",
+        "/api/v1/app-logins/n8n",
         json={"username": "workspace", "password": secret},
         headers=WORKSPACE,
     )
