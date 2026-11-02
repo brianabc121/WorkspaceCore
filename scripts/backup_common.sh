@@ -2,6 +2,8 @@
 # restic 版本与 digest 的核验见 docs/decisions/2026-10-31-sprint-6-backup-and-scan-verification.md 第 3 节。
 
 RESTIC_IMAGE="restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510"
+# 解析 JSON 用的 Python：优先 3.12（一键部署脚本会安装，T-0074），没有时用系统的 python3
+PYTHON="${PYTHON:-$(command -v python3.12 || command -v python3 || echo python3)}"
 
 # 读取配置：shell 里的同名变量优先，其次是 .env，最后是默认值（与 docker compose 的插值顺序一致）
 env_value() {

@@ -83,7 +83,7 @@ openim_dump() {
     tar -chf - -C /tmp/a meta data' > "$out/openim-garage.tar"
   tar -tf "$out/openim-garage.tar" >/dev/null
 
-  python3 - "$out/openim-info.json" "${objects:-0}" "$counts" <<'EOF'
+  "${PYTHON:-python3}" - "$out/openim-info.json" "${objects:-0}" "$counts" <<'EOF'
 import json, sys
 path, objects, counts = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 collections = {k: int(v) for k, v in (line.split() for line in counts.splitlines() if line.strip())}
@@ -124,7 +124,7 @@ openim_verify() {
     sleep 1
   done
 
-  python3 - "$dir/openim-info.json" "$restored" "${objects:-missing}" <<'EOF'
+  "${PYTHON:-python3}" - "$dir/openim-info.json" "$restored" "${objects:-missing}" <<'EOF'
 import json, sys
 info = json.load(open(sys.argv[1]))
 restored = {k: int(v) for k, v in (line.split() for line in sys.argv[2].splitlines() if line.strip())}

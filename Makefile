@@ -8,6 +8,8 @@ API_DIR := services/api
 WEB_DIR := apps/web
 UV ?= uv
 NPM ?= npm
+# 运行仓库脚本的 Python：优先 3.12（一键部署脚本会安装，与 CI、api 镜像一致；T-0074），没有时用 python3
+PYTHON ?= $(shell command -v python3.12 2>/dev/null || command -v python3 2>/dev/null || echo python3)
 COMPOSE ?= docker compose
 HAS_WEB := $(wildcard $(WEB_DIR)/package.json)
 # 独立部署的 Vikunja（infra/vikunja/compose.yaml）：项目名与 core 分开，并告诉它 core 的项目名以加入 integrations 网络
@@ -39,7 +41,7 @@ help: ## 列出可用命令
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-15s %s\n", $$1, $$2}'
 
 env: ## 从 .env.example 生成 .env，并随机生成密码与密钥（已存在则不改）
-	@python3 scripts/init_env.py
+	@$(PYTHON) scripts/init_env.py
 
 setup: env ## 准备本地开发环境：生成 .env 并安装前后端依赖
 	cd $(API_DIR) && $(UV) sync
@@ -136,7 +138,7 @@ smoke-full: smoke ## 完整端到端冒烟：全部读接口与页面、核心�
 	node tests/e2e/full_smoke.cjs http://127.0.0.1:$(HTTP_PORT)
 
 perf: ## 性能基准：基础 API 与首页的 P50/P95/P99，对比规范第 12 节的目标（tests/perf）
-	python3 tests/perf/benchmark.py --base-url http://127.0.0.1:$(HTTP_PORT)
+	$(PYTHON) tests/perf/benchmark.py --base-url http://127.0.0.1:$(HTTP_PORT)
 
 scan: ## 安全扫描：依赖漏洞、密钥泄露、容器镜像（scripts/security-scan.sh；镜像扫描要先 make up）
 	scripts/security-scan.sh

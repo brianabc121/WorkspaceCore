@@ -63,4 +63,4 @@ echo "按保留策略清理：每天保留 $keep_daily，每周保留 $keep_week
 restic_run -- forget --tag workspace --host "$host" \
   --keep-within-daily "$keep_daily" --keep-within-weekly "$keep_weekly" --keep-within-monthly "$keep_monthly" --prune
 restic_run -- check
-echo "备份完成：$(restic_run -- snapshots --tag workspace --host "$host" --latest 1 --json | python3 -c 'import json,sys; s=json.load(sys.stdin); print(s[-1]["short_id"], s[-1]["time"][:19])')"
+echo "备份完成：$(restic_run -- snapshots --tag workspace --host "$host" --latest 1 --json | "$PYTHON" -c 'import json,sys; s=json.load(sys.stdin); print(s[-1]["short_id"], s[-1]["time"][:19])')"

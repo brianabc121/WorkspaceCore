@@ -70,7 +70,7 @@ env_get() {
   sed -n "s/^$1=//p" "$ROOT/.env" | tail -1 | tr -d '\r'
 }
 env_set() {
-  python3 - "$ROOT/.env" "$1" "$2" <<'PY'
+  "$PY" - "$ROOT/.env" "$1" "$2" <<'PY'
 import pathlib, re, sys
 path, key, value = sys.argv[1:4]
 p = pathlib.Path(path)
@@ -98,18 +98,94 @@ os_id() { (. /etc/os-release 2>/dev/null && printf '%s\n' "${ID:-unknown}") || e
 apt_based() { command -v apt-get >/dev/null; }
 
 ensure_tools() {
-  step "检查工具（git、make、python3、curl）"
+  step "检查工具（git、make、curl、Python 3.12）"
   local missing=() cmd
-  for cmd in git make python3 curl; do command -v "$cmd" >/dev/null || missing+=("$cmd"); done
+  for cmd in git make curl tar sha256sum; do command -v "$cmd" >/dev/null || missing+=("$cmd"); done
   if ((${#missing[@]})); then
     apt_based || die "缺少 ${missing[*]}，当前系统（$(os_id)）不是 apt 系，请先手动安装"
     confirm "缺少 ${missing[*]}，现在用 apt 安装？" y || die "请先安装 ${missing[*]}"
     as_root apt-get update -qq
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git make python3 curl ca-certificates >/dev/null
+    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git make curl ca-certificates tar coreutils >/dev/null
   fi
-  python3 -c 'import sys; sys.exit(sys.version_info < (3, 8))' \
-    || die "需要 Python 3.8 或更新版本（当前 $(python3 --version 2>&1)）；Debian 11 自带的 3.9 可以用"
-  ok "工具齐全（$(python3 --version 2>&1)）"
+  ensure_python
+  ok "工具齐全（git、make、curl；Python $(py_version "$PY")：$PY）"
+}
+
+# ---------------------------------------------------------------- Python 3.12（T-0074）
+# 服务器上的项目脚本（make env、备份）用 Python 3.12，与 CI、api 镜像是同一个小版本。
+# 系统自带的 python3 不替换（apt 等系统工具依赖它）。没有可用的 python3.12 时，安装 python-build-standalone
+# 的独立构建到 /opt/my-workspace/python-<版本>，并链接为 /usr/local/bin/python3.12。
+# 版本与校验和的来源见 docs/decisions/2026-11-02-host-python-3-12.md；升级时这四行一起改。
+PY_VERSION="3.12.16"
+PY_BUILD="20261026"
+PY_SHA256_X86_64="ce4f6d0a6cfdb3bed6e44c2f9affd85943c76a42e25ad3a259002f31d6fb8a20"
+PY_SHA256_AARCH64="bb4b6392670c5d3f93876996fcaa19858a4a413a0c7720144c18b0d6f1f0db2d"
+PY_PREFIX="/opt/my-workspace"
+PY_LINK="/usr/local/bin/python3.12"
+PY="python3.12"
+
+py_ok() { "$1" -c 'import sys, json, secrets; sys.exit(sys.version_info[:2] != (3, 12))' >/dev/null 2>&1; }
+py_version() { "$1" -c 'import platform; print(platform.python_version())' 2>/dev/null; }
+py_managed() { [[ $(readlink -f "$1" 2>/dev/null) == "$PY_PREFIX"/python-*/bin/python3.12 ]]; }
+
+ensure_python() {
+  local found current
+  for found in "$PY_LINK" "$(command -v python3.12 || true)"; do
+    if [[ -z $found ]] || ! py_ok "$found"; then continue; fi
+    current="$(py_version "$found")"
+    # 系统包或自己装的 3.12 照用；本脚本以前装的旧版本换成锁定的版本
+    if py_managed "$found" && [[ $current != "$PY_VERSION" ]]; then
+      info "本脚本以前安装的 Python $current 更新为 $PY_VERSION"
+      install_python
+    else
+      PY="$found"
+    fi
+    return 0
+  done
+  if command -v python3 >/dev/null; then current="$(python3 --version 2>&1)"; else current="没有 python3"; fi
+  info "项目脚本需要 Python 3.12（系统自带：$current）。另行安装，系统自带的 python3 保持不变"
+  confirm "安装 Python $PY_VERSION 到 $PY_PREFIX/python-$PY_VERSION？" y || die "请先安装 python3.12 再运行"
+  install_python
+}
+
+install_python() {
+  local arch sha file tmp base dest="$PY_PREFIX/python-$PY_VERSION" old
+  if [[ -e $PY_LINK || -L $PY_LINK ]] && ! py_managed "$PY_LINK"; then
+    die "$PY_LINK 已存在但不能用（不是 3.12，或缺少标准库模块），也不是本脚本安装的；修好或移走后重试"
+  fi
+  case "$(uname -m)" in
+    x86_64 | amd64) arch=x86_64 sha="$PY_SHA256_X86_64" ;;
+    aarch64 | arm64) arch=aarch64 sha="$PY_SHA256_AARCH64" ;;
+    *) die "没有 $(uname -m) 架构的 Python 安装包；请手动安装 python3.12 后重试" ;;
+  esac
+  file="cpython-$PY_VERSION%2B$PY_BUILD-$arch-unknown-linux-gnu-install_only_stripped.tar.gz"
+  tmp="$(mktemp -d)"
+  info "下载 Python $PY_VERSION（$arch，约 35 MB）"
+  for base in https://github.com/astral-sh/python-build-standalone/releases/download \
+    https://releases.astral.sh/github/python-build-standalone/releases/download; do
+    if curl -fsSL --retry 3 --connect-timeout 15 --max-time 900 -o "$tmp/python.tar.gz" "$base/$PY_BUILD/$file"; then break; fi
+    warn "从 ${base#https://} 下载失败"
+    rm -f "$tmp/python.tar.gz"
+  done
+  [[ -s $tmp/python.tar.gz ]] || { rm -rf "$tmp"; die "下载 Python 失败：检查服务器能否访问 github.com"; }
+  if ! printf '%s  %s\n' "$sha" "$tmp/python.tar.gz" | sha256sum -c --status -; then
+    rm -rf "$tmp"
+    die "Python 安装包的 SHA-256 与脚本里锁定的不一致，已停止（没有安装任何东西）"
+  fi
+  tar -xzf "$tmp/python.tar.gz" -C "$tmp" --no-same-owner
+  as_root mkdir -p "$PY_PREFIX"
+  as_root rm -rf -- "$dest"
+  as_root mv "$tmp/python" "$dest"
+  rm -rf "$tmp"
+  as_root chown -R 0:0 "$dest"
+  as_root chmod -R go-w "$dest"
+  as_root ln -sfn "$dest/bin/python3.12" "$PY_LINK"
+  py_ok "$PY_LINK" || die "Python $PY_VERSION 安装后不能运行（$PY_LINK）"
+  for old in "$PY_PREFIX"/python-*; do
+    [[ $old == "$dest" || ! -d $old ]] || as_root rm -rf -- "$old"
+  done
+  PY="$PY_LINK"
+  ok "已安装 Python $(py_version "$PY")（$PY → $dest；系统自带的 python3 没有改动）"
 }
 
 ensure_docker() {
@@ -280,17 +356,17 @@ reuse_backup_password() {
 prepare_env() {
   step "生成并检查 .env"
   if [[ ! -f $ROOT/.env ]]; then
-    (cd "$ROOT" && python3 scripts/init_env.py >/dev/null)
+    (cd "$ROOT" && "$PY" scripts/init_env.py >/dev/null)
     ok "已生成 .env（随机密码与密钥，权限 600）"
     reuse_backup_password
-  elif ! (cd "$ROOT" && python3 scripts/init_env.py >/dev/null 2>&1); then
-    (cd "$ROOT" && python3 scripts/init_env.py >/dev/null) || true
+  elif ! (cd "$ROOT" && "$PY" scripts/init_env.py >/dev/null 2>&1); then
+    (cd "$ROOT" && "$PY" scripts/init_env.py >/dev/null) || true
     warn ".env 有上面列出的问题（多半是从 .env.example 复制的，占位符没有替换）"
     confirm "备份当前 .env 并重新生成？（新的随机密钥；数据库密码之后会自动同步）" y || die "请按提示修改 .env 后重试"
     local backup
     backup="$ROOT/.env.bak-$(date +%Y%m%d%H%M%S)"
     mv "$ROOT/.env" "$backup" && chmod 600 "$backup"
-    (cd "$ROOT" && python3 scripts/init_env.py >/dev/null)
+    (cd "$ROOT" && "$PY" scripts/init_env.py >/dev/null)
     ok "已重新生成 .env（旧文件：$backup）"
     reuse_backup_password
   else
@@ -302,7 +378,7 @@ prepare_env() {
   env_set ACME_EMAIL "$EMAIL"
   env_set PUBLIC_BASE_URL "$BASE_URL"
   env_set HTTP_BIND 127.0.0.1
-  (cd "$ROOT" && python3 scripts/init_env.py >/dev/null) || die ".env 检查没有通过（见上面的说明）"
+  (cd "$ROOT" && "$PY" scripts/init_env.py >/dev/null) || die ".env 检查没有通过（见上面的说明）"
   ok "生产模式、HTTPS（compose.https.yaml）、域名与邮箱已写入 .env"
 }
 
@@ -444,7 +520,7 @@ do_upgrade() {
     exec bash "$ROOT/scripts/deploy.sh" "${args[@]}"
   fi
   step "更新 .env（补上新版本新增的变量并检查）"
-  (cd "$ROOT" && python3 scripts/init_env.py) || die ".env 检查没有通过"
+  (cd "$ROOT" && "$PY" scripts/init_env.py) || die ".env 检查没有通过"
   BASE_URL="$(env_get PUBLIC_BASE_URL)"
   start_services
   migrate
