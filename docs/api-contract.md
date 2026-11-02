@@ -210,3 +210,15 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 - 新增错误码：`409 AGENT_SECRET_EXISTS` / `AGENT_INGRESS_NOT_CONFIGURED`、`401 AGENT_UNAUTHORIZED`、`403 STEP_UP_REQUIRED` / `STEP_UP_FAILED`、`409 AGENT_DISABLED` / `IM_NOT_READY` /
   `IM_SEND_REJECTED` / `PIN_LIMIT_REACHED` / `EXECUTION_NOT_PENDING` / `CONTACT_GROUP_EXISTS`（OC-3 补充）、
   `503 IM_UNAVAILABLE`（V2 契约第 12 节）。
+
+## Vikunja / n8n 登录账号（T-0080）
+
+约定见 `docs/decisions/2026-11-02-app-logins.md`。都要 `X-Workspace-Id`，只给 owner / admin（member、viewer `403`）；
+响应都带 `Cache-Control: no-store`。
+
+| 方法 | 路径 | 说明 | 状态 |
+|---|---|---|---|
+| GET | `/api/v1/app-logins` | 固定两项（`vikunja`、`n8n`）：用户名、`password_set`、`login_url`、`version`；**不含密码**；没保存时 `configured = false` | 已实现（T-0080） |
+| PUT | `/api/v1/app-logins/{app}` | 新建（必须给 `username`）或修改（必须带 `version`）；`password` 不填表示不改 | 已实现（T-0080） |
+| POST | `/api/v1/app-logins/{app}/reveal` | 返回明文密码；要 CSRF，每次写审计 `app_login.revealed`；没保存密码时 `404` | 已实现（T-0080） |
+| DELETE | `/api/v1/app-logins/{app}?version=` | 删除保存的账号（不影响 Vikunja、n8n 里的账号） | 已实现（T-0080） |

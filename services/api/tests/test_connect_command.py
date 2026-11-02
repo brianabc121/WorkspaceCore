@@ -188,6 +188,19 @@ async def audit_actions(world: World) -> list[str]:
     return list(json.loads(raw))
 
 
+async def reveal(world: World, app: str) -> dict[str, Any] | None:
+    """工作台保存的登录账号（T-0080）；没有保存时为 None。"""
+    env = world.env
+    response = await env.client.post(
+        f"/api/v1/app-logins/{app}/reveal", headers=env.headers(write=True)
+    )
+    if response.status_code == 404:
+        return None
+    assert response.status_code == 200, response.text
+    data: dict[str, Any] = response.json()
+    return data
+
+
 # ---------------------------------------------------------------- Vikunja
 
 
@@ -216,6 +229,10 @@ async def test_vikunja_creates_least_privilege_token_and_connects(
     assert VIKUNJA_PASSWORD not in out.out + out.err
     assert VIKUNJA_TOKEN not in out.out + out.err
     assert "通过  凭证有效" in out.out
+    # 登录成功的账号保存到工作台（T-0080）
+    assert "已把 Vikunja 的登录账号加密保存到工作台" in out.out
+    saved = await reveal(world, "vikunja")
+    assert saved == {"app": "vikunja", "username": "admin", "password": VIKUNJA_PASSWORD}
 
     # 再运行一次：已经接入，不再创建 Token
     code = await call(world, connect.cmd_vikunja, namespace, monkeypatch, VIKUNJA_PASSWORD + "\n")
@@ -234,6 +251,7 @@ async def test_vikunja_wrong_password_leaves_nothing(
     assert world.provisioning.token_requests == []
     items = (await world.env.get("/api/v1/integrations"))["items"]
     assert items == []
+    assert await reveal(world, "vikunja") is None  # 密码不对就不保存
 
 
 async def test_vikunja_token_is_revoked_when_saving_fails(
@@ -369,6 +387,8 @@ async def test_n8n_sets_up_owner_key_and_credential(
     connection = await world.env.get("/api/v1/automations/connection")
     assert connection["status"] == "active"
     assert connection["public_url"] == "http://localhost:5678"
+    saved = await reveal(world, "n8n")
+    assert saved == {"app": "n8n", "username": N8N_OWNER, "password": N8N_PASSWORD}
     out = capsys.readouterr()
     assert N8N_PASSWORD not in out.out + out.err
     assert credential["data"]["value"] not in out.out + out.err
@@ -502,10 +522,55 @@ async def test_status_reports_each_component(
         "vikunja=none",
         "github=none",
         "n8n=none",
+        "vikunja_login=none",
+        "n8n_login=none",
     ]
     await world.env.connect()
+    await call(
+        world,
+        connect.cmd_save_login,
+        args("save-login", "--app", "vikunja", "--username", "admin", "--no-verify"),
+        monkeypatch,
+        VIKUNJA_PASSWORD + "\n",
+    )
     await call(world, connect.cmd_status, args("status"), monkeypatch)
-    assert "vikunja=active" in capsys.readouterr().out.split()
+    lines = capsys.readouterr().out.split()
+    assert "vikunja=active" in lines and "vikunja_login=saved" in lines
+    assert "n8n_login=none" in lines
+
+
+async def test_save_login_checks_the_password_first(
+    world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    vikunja = args(
+        "save-login", "--app", "vikunja", "--username", "admin", "--base-url", VIKUNJA_URL
+    )
+    with pytest.raises(ConnectorError) as raised:
+        await call(world, connect.cmd_save_login, vikunja, monkeypatch, "wrong\n")
+    assert raised.value.reason == "login_failed"
+    assert await reveal(world, "vikunja") is None
+    with pytest.raises(connect.Usage):
+        await call(world, connect.cmd_save_login, vikunja, monkeypatch, "")
+    code = await call(world, connect.cmd_save_login, vikunja, monkeypatch, VIKUNJA_PASSWORD + "\n")
+    assert code == 0
+    assert (await reveal(world, "vikunja") or {})["password"] == VIKUNJA_PASSWORD
+    # 再保存一次覆盖旧的（新密码）
+    world.provisioning.vikunja_users["admin"] = "changed password 2"
+    code = await call(world, connect.cmd_save_login, vikunja, monkeypatch, "changed password 2\n")
+    assert code == 0
+    assert (await reveal(world, "vikunja") or {})["password"] == "changed password 2"  # noqa: S105
+
+    world.provisioning.n8n_owner = (N8N_OWNER, N8N_PASSWORD)
+    n8n = args("save-login", "--app", "n8n", "--username", N8N_OWNER, "--base-url", N8N_URL)
+    with pytest.raises(ConnectorError):
+        await call(world, connect.cmd_save_login, n8n, monkeypatch, "Wrong password 1\n")
+    code = await call(world, connect.cmd_save_login, n8n, monkeypatch, N8N_PASSWORD + "\n")
+    assert code == 0
+    assert (await reveal(world, "n8n") or {})["username"] == N8N_OWNER
+    out = capsys.readouterr()
+    assert VIKUNJA_PASSWORD not in out.out + out.err and N8N_PASSWORD not in out.out + out.err
+    actions = await audit_actions(world)
+    assert "app_login.created" in actions and "app_login.updated" in actions
 
 
 async def test_members_below_admin_cannot_connect(

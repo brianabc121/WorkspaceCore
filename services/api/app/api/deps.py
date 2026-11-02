@@ -18,6 +18,7 @@ from app.core.errors import ApiError
 from app.domain import policy
 from app.domain.agents import AgentService
 from app.domain.ai_tools import AiToolService
+from app.domain.app_logins import AppLoginService
 from app.domain.auth import AuthContext, AuthService
 from app.domain.automations import AutomationService
 from app.domain.calendar import CalendarService
@@ -198,6 +199,14 @@ def get_automation_service(
     connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
 ) -> AutomationService:
     return AutomationService(db, settings, connectors)
+
+
+def get_app_login_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
+) -> AppLoginService:
+    return AppLoginService(db, settings, connectors)
 
 
 def get_notification_service(db: Annotated[AsyncSession, Depends(get_db)]) -> NotificationService:

@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     agents,
     ai,
+    app_logins,
     audit,
     auth,
     automations,
@@ -47,6 +48,7 @@ for module in (
     notifications,
     events,
     automations,
+    app_logins,
     agents,
     im,
     ai,

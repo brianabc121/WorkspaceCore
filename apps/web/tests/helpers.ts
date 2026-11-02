@@ -13,6 +13,7 @@ export const workspace: Schema['WorkspaceOut'] = { id: 'workspace-a', name: '个
 export const me: Schema['MeResponse'] = { user: { id: 'user-a', email: 'test@example.com', display_name: '测试用户', created_at: '2026-10-30T00:00:00Z' }, workspaces: [workspace] }
 export const session: Schema['SessionOut'] = { id: 'session-a', current: true, created_at: '2026-10-30T00:00:00Z', expires_at: '2026-11-30T00:00:00Z', last_seen_at: null }
 export const emptyPage = { items: [], next_cursor: null, total_estimate: null }
+export const noLogins: Schema['AppLoginList'] = { items: (['vikunja', 'n8n'] as const).map(app => ({ app, configured: false, username: null, password_set: false, login_url: null, updated_at: null, version: null })) }
 export const fail = (status: number, code: string) => Response.json({ error: { code, message: '请求失败', request_id: 'req-test', details: {} } }, { status })
 export function mockApi(handler?: (request: Request) => Response | Promise<Response | undefined> | undefined) {
   const requests: Request[] = []
@@ -35,6 +36,7 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (path === '/api/v1/tasks') return Response.json({ items: [task], sync, next_cursor: null, total_estimate: 1 })
     if (path === '/api/v1/projects') return Response.json({ items: [project], sync, next_cursor: null, total_estimate: 1 })
     if (path === '/api/v1/integrations') return Response.json({ items: [integration], next_cursor: null, total_estimate: 1 })
+    if (path === '/api/v1/app-logins' && request.method === 'GET') return Response.json(noLogins)
     throw new Error(`Unexpected request: ${request.method} ${path}`)
   })
   return requests

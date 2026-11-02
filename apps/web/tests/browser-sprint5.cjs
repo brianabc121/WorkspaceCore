@@ -37,9 +37,13 @@ const shots = path.resolve(__dirname, '../docs/screenshots');
           else body = { ...empty, unread_count: unread, items: unread ? [notification, { ...notification, id: 'notice-b', title: '未来通知', body: '普通通知', link: '//evil.example.test' }] : [] };
         } else if (p === '/api/v1/automations') body = { ...empty, items: [automation()], connection: { status: 'ok', as_of: at } };
         else if (p === '/api/v1/automations/connection') { assert.equal(role, 'owner'); body = { configured: true, base_url: 'http://n8n:5678', public_url: 'https://n8n.example.test', api_key_set: true, trigger_secret_set: true, version: 1, status: 'active', tested_version: '2.45.7', sync: { status: 'ok', as_of: at } }; }
+        else if (p === '/api/v1/app-logins') { assert.equal(role, 'owner'); body = { items: [{ app: 'vikunja', configured: false, username: null, password_set: false, login_url: null, updated_at: null, version: null }, { app: 'n8n', configured: true, username: 'ops@example.test', password_set: true, login_url: 'https://n8n.example.test', updated_at: at, version: 1 }] }; }
+        else if (p === '/api/v1/app-logins/n8n/reveal') { assert.equal(role, 'owner'); body = { app: 'n8n', username: 'ops@example.test', password: 'browser shown password' }; }
         else if (p.endsWith('/trigger')) { assert.equal(role, 'owner'); triggered = true; body = run; }
         else if (p.endsWith('/runs')) body = { ...empty, items: triggered ? [run] : [] };
         else if (p === '/api/v1/search') body = empty;
+        else if (p === '/api/v1/im/badges') body = { im_unread: 0, pending_approvals: 0 };
+        else if (p === '/api/v1/ai/tool-executions') body = { ...empty, pending_count: 0 };
         else throw new Error('Unexpected ' + method + ' ' + p);
         await route.fulfill({ status: p.endsWith('/trigger') ? 202 : 200, contentType: 'application/json', body: JSON.stringify(body) });
       } catch (error) { errors.push(error.message); await route.fulfill({ status: 500, body: '{}' }); }
@@ -57,8 +61,11 @@ const shots = path.resolve(__dirname, '../docs/screenshots');
     await page.getByRole('button', { name: '确认触发', exact: true }).click(); const dialog = page.getByRole('dialog'); await dialog.getByText('结果未知，正在确认', { exact: true }).waitFor(); await dialog.getByRole('button', { name: '核对运行记录' }).click(); await dialog.getByRole('table', { name: title + '运行记录' }).waitFor(); await dialog.getByRole('button', { name: '刷新运行记录' }).click(); await dialog.getByRole('button', { name: '已核对，开始新提交' }).waitFor();
     assert.equal(writes.filter(w => w.path.endsWith('/trigger')).length, 1); const submission = writes.find(w => w.path.endsWith('/trigger')); assert.match(submission.key, /^[0-9a-f-]{36}$/); assert.deepEqual(submission.body, { params: { recipient: 'sample@example.test', count: 2, send: false } }); assert.equal(await page.evaluate(() => JSON.stringify(sessionStorage).includes('sample@example.test')), false);
     await page.screenshot({ path: path.join(shots, 'sprint5-trigger-unknown.png'), fullPage: true }); await page.getByRole('button', { name: '关闭对话框' }).click(); await page.getByRole('button', { name: '查看运行记录' }).click(); await page.getByRole('table', { name: title + '运行记录' }).waitFor(); await page.screenshot({ path: path.join(shots, 'sprint5-automations.png'), fullPage: true });
+    const login = page.getByRole('region', { name: 'n8n 登录', exact: true }); await login.getByText('ops@example.test', { exact: true }).waitFor(); assert.equal(await login.getByText('browser shown password').count(), 0);
+    await login.getByRole('button', { name: '显示密码' }).click(); await login.getByText('browser shown password', { exact: true }).waitFor(); assert.equal(writes.filter(w => w.path.endsWith('/reveal')).length, 1);
+    await login.getByRole('button', { name: '隐藏密码' }).click(); assert.equal(await login.getByText('browser shown password').count(), 0); await page.screenshot({ path: path.join(shots, 'sprint5-app-login.png'), fullPage: true });
     await page.getByRole('button', { name: '切换到暗色主题' }).click(); await page.screenshot({ path: path.join(shots, 'sprint5-automations-dark.png'), fullPage: true }); await page.setViewportSize({ width: 390, height: 844 }); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false); await page.screenshot({ path: path.join(shots, 'sprint5-automations-mobile.png'), fullPage: true });
-    role = 'viewer'; await page.reload(); await page.getByRole('region', { name: title, exact: true }).waitFor(); assert.equal(await page.getByRole('button', { name: /触发：|配置 n8n|登记工作流|移出白名单/ }).count(), 0);
+    role = 'viewer'; await page.reload(); await page.getByRole('region', { name: title, exact: true }).waitFor(); assert.equal(await page.getByRole('button', { name: /触发：|配置 n8n|登记工作流|移出白名单|显示密码|复制密码|n8n 账号/ }).count(), 0); assert.equal(await page.getByRole('region', { name: 'n8n 登录' }).count(), 0);
     assert.deepEqual(errors, []); assert.deepEqual(external, []);
     console.log('PASS: notification count/read/all/plain text/safe links, SSE reconnect refetch, typed confirmed trigger with UUID/unknown reconciliation/no duplicate or sensitive storage, viewer read-only, light/dark/mobile; no page errors or external requests.');
   } finally { await browser.close(); }
