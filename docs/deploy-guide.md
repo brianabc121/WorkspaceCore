@@ -424,7 +424,7 @@ make up && make smoke
 - **`make up` 一直在等健康检查**：`make logs` 看是哪个服务起不来；`docker compose ps -a` 看退出码。
 - **`make env` / `make up` 提示“`.env` 有问题……占位符”**，或者 api 起不来、`docker compose logs api` 里是
   `CREDENTIAL_ENCRYPTION_KEY 必须是 64 位十六进制`：`.env` 不是 `make env` 生成的（多半是从 `.env.example` 复制的），或者密钥被改坏了。
-  - 全新安装、还没有任何数据：重新生成。已经 `make up` 过的，PostgreSQL 数据卷已经用占位符密码初始化，要连同刚建的空数据卷一起删掉
+  - 全新安装、还没有任何数据：重新生成。已经 `make up` 过的，PostgreSQL 数据卷已经用占位符密码初始化：重新生成后按下面“改了 `.env` 里的数据库密码后连不上”同步密码；或者连同刚建的空数据卷一起删掉
     （`docker compose down -v` 会删除本项目的**全部**数据卷，只在确认没有数据时执行）：
 
     ```bash
@@ -445,7 +445,18 @@ make up && make smoke
   - 已经在使用的系统：不要直接换 `CREDENTIAL_ENCRYPTION_KEY`（已保存的凭证会解不开），按手册第 6.1 节轮换。
 - **端口 8080 被占用**：改 `.env` 的 `HTTP_PORT`（用 IP 直接访问时 `PUBLIC_BASE_URL` 也一起改），再 `make up`。
 - **登录返回 `429 RATE_LIMITED`**：15 分钟内同一账号失败 5 次或同一 IP 失败 10 次，等提示的秒数后自动解除；立即解除的方法见手册第 4 节。
-- **改了 `.env` 里的数据库密码后连不上**：PostgreSQL 只在第一次初始化数据卷时读取密码，之后要在数据库里改密码（手册第 4 节）。
+- **改了 `.env` 里的数据库密码后连不上**（`make migrate` 或 api 日志里是 `password authentication failed for user "workspace"`）：
+  PostgreSQL 只在第一次初始化数据卷时读取密码，之后改 `.env` 不会改数据库里的密码。
+  例如先用复制来的 `.env`（密码 `CHANGE_ME`）`make up` 过，再重新 `make env` 生成了新密码。
+  用下面的命令把数据库里的密码改成 `.env` 里的 `POSTGRES_PASSWORD`。数据不受影响；容器内经本地连接执行，不需要旧密码；
+  密码经标准输入传给 `psql`，不会出现在命令行参数里：
+
+  ```bash
+  printf "ALTER USER workspace WITH PASSWORD '%s';\n" "$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)" | docker compose exec -T postgres psql -U workspace -d workspace
+  ```
+
+  看到 `ALTER ROLE` 就成功了，再运行 `make migrate`。
+  `.env` 里改过 `POSTGRES_USER` / `POSTGRES_DB` 的，把命令里的 `workspace` 换成对应的值。
 - **集成显示“需要重新连接”**：第三方 Token 失效或被收回了权限，在对方系统里重新创建 Token，粘贴到集成设置并重新测试连接。
 
 更多排错见手册第 4 节；安全相关的设计与已知风险见 [`threat-model.md`](threat-model.md)。
