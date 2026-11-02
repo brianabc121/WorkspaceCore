@@ -4,6 +4,7 @@
 # 一条命令（在全新服务器上运行；会把代码放到 /srv/my-workspace）。root 登录时：
 #   curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | bash
 # 普通用户把最后的 bash 换成 sudo bash（Debian 最小安装的 root 没有 sudo，不要加）。
+# 提示 curl: command not found（Debian 最小安装常见）时先安装：apt-get update && apt-get install -y curl ca-certificates
 # 已有代码时：
 #   sudo bash scripts/deploy.sh [install|upgrade|reset|status] [选项]
 #
@@ -192,7 +193,15 @@ ensure_docker() {
   step "检查 Docker 与 Compose v2"
   if ! command -v docker >/dev/null; then
     confirm "没有安装 Docker，现在用官方脚本（get.docker.com）安装？" y || die "请先安装 Docker（docs/deploy-guide.md 第 2 步）"
-    curl -fsSL https://get.docker.com | as_root sh
+    if ! curl -fsSL https://get.docker.com | as_root sh; then
+      # 官方脚本默认装最新版，并从 28.2 起加装 docker-model-plugin；已停止支持的发行版（例如 Ubuntu 20.04）
+      # 的 Docker 仓库最高只到 28.1，没有这个包，整条安装失败（T-0075）。仓库已经配好时只装核心组件
+      if ! apt_based || [[ ! -f /etc/apt/sources.list.d/docker.list ]]; then die "Docker 安装失败（见上面的输出）"; fi
+      warn "官方脚本安装失败；Docker 仓库已配好，改为只安装核心组件（不含 docker-model-plugin）"
+      as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+        docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin >/dev/null \
+        || die "Docker 安装失败（见上面的输出）"
+    fi
   fi
   if ! docker info >/dev/null 2>&1; then
     as_root systemctl enable --now docker >/dev/null 2>&1 || true
@@ -203,6 +212,20 @@ ensure_docker() {
     docker compose version >/dev/null 2>&1 || die "缺少 docker compose v2（安装 docker-compose-plugin）"
   fi
   ok "$(docker version --format 'Docker {{.Server.Version}}' 2>/dev/null)，$(docker compose version --short 2>/dev/null | sed 's/^/Compose /')"
+}
+
+# 已停止常规安全更新的系统：能部署，但提醒换系统（T-0075）
+check_os() {
+  local id ver name major
+  id="$(os_id)"
+  ver="$( (. /etc/os-release 2>/dev/null && printf '%s\n' "${VERSION_ID:-}") || true)"
+  name="$( (. /etc/os-release 2>/dev/null && printf '%s\n' "${PRETTY_NAME:-$id $ver}") || true)"
+  major="${ver%%.*}"
+  [[ $major =~ ^[0-9]+$ ]] || return 0
+  if { [[ $id == ubuntu ]] && (( major < 22 )); } || { [[ $id == debian ]] && (( major < 12 )); }; then
+    warn "$name 已停止常规安全更新，Docker 也会停止为它发布新版本（Ubuntu 20.04 停在 28.1.1）；能部署，但生产环境建议换成 Ubuntu 24.04 或 Debian 12 及以上"
+  fi
+  return 0
 }
 
 check_resources() {
@@ -461,6 +484,7 @@ remind_backup_env() {
 
 # ---------------------------------------------------------------- 动作
 do_install() {
+  check_os
   ensure_docker
   check_resources
   ask_parameters

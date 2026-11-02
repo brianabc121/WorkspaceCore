@@ -25,6 +25,13 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 > Debian 最小安装通常**没有 sudo**：root 用户运行带 `sudo` 的命令会报 `sudo: command not found`，
 > 管道里的 `curl` 随之报 `curl: (23) Failure writing output to destination`。以 root 登录时把 `sudo` 去掉即可。
 
+> 有的最小安装镜像**连 curl 也没有**，会报 `curl: command not found`。先装上 curl 再运行上面的命令
+> （普通用户在两个 `apt-get` 前加 `sudo`）；git、make、Python 3.12、Docker 之后都由脚本安装：
+>
+> ```bash
+> apt-get update && apt-get install -y curl ca-certificates
+> ```
+
 脚本会把代码放到 `/srv/my-workspace`，然后显示菜单：
 
 | 选项 | 做什么 |
@@ -44,7 +51,10 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 
 其余的都自动完成，并处理了部署时常见的坑：
 
-- 缺 git / make / curl 时用 apt 安装；没有 Docker 时用官方脚本安装（都会先问）；
+- 缺 git / make / curl 时用 apt 安装；没有 Docker 时用官方脚本安装（都会先问）。
+  官方脚本在已停止支持的系统上可能失败（例如 Ubuntu 20.04：Docker 仓库最高只到 28.1.1，没有脚本要加装的 `docker-model-plugin`），
+  这时改为只安装核心组件（docker-ce、CLI、containerd、Compose 与 Buildx 插件）；
+- Ubuntu 22.04 以下、Debian 12 以下的系统已停止常规安全更新：照样部署，但会提醒生产环境换成 Ubuntu 24.04 或 Debian 12 及以上；
 - 没有 Python 3.12 时安装官方独立构建（python-build-standalone 3.12.16，校验 SHA-256）到 `/opt/my-workspace/`，命令是 `python3.12`。
   项目脚本（生成 `.env`、备份）都用它，与 CI、api 镜像同一个版本；**系统自带的 `python3` 不替换**（apt 等系统工具依赖它），不需要为此升级系统；
 - `.env` 不存在就随机生成；是从 `.env.example` 复制来的（还有占位符）时，备份后重新生成；

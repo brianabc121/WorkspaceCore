@@ -89,6 +89,8 @@ make smoke     # 检查健康、就绪、前端页面与安全响应头
 curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | bash
 ```
 
+提示 `curl: command not found`（Debian 最小安装常见）时，先运行 `apt-get update && apt-get install -y curl ca-certificates`。
+
 按步骤的教程：**[`docs/deploy-guide.md`](docs/deploy-guide.md)**——准备服务器、安装 Docker、生成 `.env`、域名与自动 HTTPS、
 创建管理员、接入 Vikunja / GitHub / 监控 / n8n / OpenClaw、配置异地备份与恢复演练、升级与回滚、常见问题。
 
