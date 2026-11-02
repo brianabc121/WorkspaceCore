@@ -3,7 +3,7 @@
 自托管的混合型个人工作台：一个首页汇总任务、文档、日历、GitHub、服务状态与通知，并可接入部署在其他服务器上的
 OpenClaw AI 实例——管理员在工作台里和实例聊天，实例的每一次写操作都要在工作台审批。
 
-- **第三方系统各管各的数据**：任务以 Vikunja 为准，文档留在 AFFiNE（只收藏链接），GitHub 只读；工作台只保存投影与自己的数据，
+- **第三方系统各管各的数据**：项目与任务由工作台自己管理，文档留在 AFFiNE（只收藏链接），GitHub 只读；第三方的数据工作台只保存投影，
   第三方服务出故障时对应模块降级，其余照常可用。
 - **可配置的首页**：拖拽布局的组件（今日任务、项目进度、近期日程、GitHub 动态、服务状态、API 延迟、通知、快捷提问等），可导入 / 导出。
 - **多人与权限**：工作空间 + 角色（owner / admin / member / viewer），所有读写都在服务端校验工作空间与角色；关键操作写审计日志。
@@ -18,9 +18,9 @@ OpenClaw AI 实例——管理员在工作台里和实例聊天，实例的每�
 | 模块 | 能做什么 |
 |---|---|
 | 首页 | 统一入口；组件按模块独立加载与降级；布局导入 / 导出 JSON |
-| 任务与项目 | 读写 Vikunja 的任务（列表 / 看板、筛选、新建与编辑）；Webhook + 周期对账保持一致；写操作带幂等键 |
+| 任务与项目 | 工作台自己管理的项目（新建、改名、归档、删除）与任务（列表 / 看板、筛选、标签、新建与编辑）；任务写操作带幂等键，修改用版本号防止互相覆盖 |
 | 知识库 | 收藏 AFFiNE 文档链接，与项目、任务互相关联（不读取文档正文） |
-| 日历 | 工作空间共享日程（全天 / 定时、时区）；按天显示 Vikunja 任务的截止时间 |
+| 日历 | 工作空间共享日程（全天 / 定时、时区）；按天显示任务的截止时间 |
 | 开发者 | 指定 GitHub 仓库的 Issue、PR、Actions 最近运行（只读、限流感知） |
 | 搜索 | 跨任务、项目、仓库、Issue / PR、收藏、日程搜索，只返回你有权看到的内容 |
 | 运维 | 服务状态、Prometheus 预设指标、Grafana 外链（监控为可选部署） |
@@ -45,7 +45,6 @@ flowchart LR
     A --> R[(Redis)]
     K[Worker ARQ] --> P
     K --> R
-    A -. 可选 .-> V[Vikunja]
     A -. 只读 .-> G[GitHub API]
     A -. 可选 .-> M[Prometheus / Grafana]
     A -. 可选 .-> N[n8n]
@@ -57,7 +56,7 @@ flowchart LR
 
 - 后端是模块化单体（BFF）：FastAPI + Pydantic 2 + SQLAlchemy 2（async）+ Alembic，后台作业用 ARQ（Redis）。
 - 前端：Vue 3 + TypeScript + Vite，Tailwind CSS 4 + shadcn-vue（reka-ui），TanStack Query、Pinia、GridStack、Zod；接口类型由 OpenAPI 生成。
-- 部署：Docker Compose。core 6 个服务；Vikunja、n8n、OpenIM 各自独立的 Compose 项目；监控是可选 profile。
+- 部署：Docker Compose。core 6 个服务；n8n、OpenIM 各自独立的 Compose 项目；监控是可选 profile。
 
 更多见 [`docs/architecture.md`](docs/architecture.md)。
 
@@ -92,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 提示 `curl: command not found`（Debian 最小安装常见）时，先运行 `apt-get update && apt-get install -y curl ca-certificates`。
 
 按步骤的教程：**[`docs/deploy-guide.md`](docs/deploy-guide.md)**——准备服务器、安装 Docker、生成 `.env`、域名与自动 HTTPS、
-创建管理员、接入 Vikunja / GitHub / 监控 / n8n / OpenClaw、配置异地备份与恢复演练、升级与回滚、常见问题。
+创建管理员、接入 GitHub / 监控 / n8n / OpenClaw、配置异地备份与恢复演练、升级与回滚、常见问题。
 
 要点：
 
@@ -152,7 +151,7 @@ make test          # pytest、Vitest
 | `apps/web/` | Vue 3 前端 |
 | `compose.yaml`、`compose.https.yaml` | core 服务编排（可选监控 `--profile monitoring`、接入入口 `--profile agents`）；HTTPS 域名模式 |
 | `infra/caddy/` | 统一入口与 OpenClaw 接入入口的 Caddy 配置 |
-| `infra/vikunja/`、`infra/n8n/`、`infra/openim/`、`infra/monitoring/` | 独立部署的 Vikunja、n8n、OpenIM 与监控配置 |
+| `infra/n8n/`、`infra/openim/`、`infra/monitoring/` | 独立部署的 n8n、OpenIM 与监控配置 |
 | `infra/openclaw/` | OpenClaw 服务器端的说明 |
 | `scripts/` | 冒烟、备份恢复、安全扫描、`.env` 生成等脚本 |
 | `tests/e2e/`、`tests/perf/` | 全栈验收、浏览器验收、完整冒烟与性能基准 |
@@ -170,5 +169,5 @@ make test          # pytest、Vitest
 
 ## 许可证
 
-本仓库代码以 [Apache License 2.0](LICENSE) 发布。部署时用到的第三方组件各有许可证（例如 Grafana、Vikunja 为 AGPL-3.0，n8n 为 Sustainable Use License，
+本仓库代码以 [Apache License 2.0](LICENSE) 发布。部署时用到的第三方组件各有许可证（例如 Grafana 为 AGPL-3.0，n8n 为 Sustainable Use License，
 Redis 7.4 为 RSALv2 / SSPLv1）：自托管自用没有问题，对外提供服务或分发前请先看 [`docs/versions.md`](docs/versions.md) 第 5 节。
