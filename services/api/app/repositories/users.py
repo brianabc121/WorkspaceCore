@@ -38,3 +38,11 @@ async def lock(db: AsyncSession, user_id: uuid.UUID) -> User | None:
         .with_for_update()
         .execution_options(populate_existing=True)
     )
+
+
+async def earliest(db: AsyncSession) -> User | None:
+    """最早创建的用户，即首次安装创建的管理员。
+
+    部署脚本的 connect 命令默认以他的身份操作（T-0076）。
+    """
+    return await db.scalar(select(User).order_by(User.created_at, User.id).limit(1))

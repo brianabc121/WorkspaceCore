@@ -18,7 +18,7 @@ from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain import github_sync, projection, sync_lock
 from app.domain.audit import AuditTrail
-from app.domain.auth import AuthContext
+from app.domain.auth import Actor
 from app.domain.connectors import (
     ACTIVE_STATUSES,
     ConnectorRuntime,
@@ -207,7 +207,7 @@ class IntegrationService:
             raise _url_not_allowed(field) from None
 
     async def create(
-        self, context: AuthContext, access: WorkspaceAccess, body: IntegrationCreate
+        self, context: Actor, access: WorkspaceAccess, body: IntegrationCreate
     ) -> IntegrationOut:
         box = self.runtime.credentials()
         # public_url 只给浏览器打开，服务端不访问，不做地址检查（模型已限制为 http(s)）
@@ -264,7 +264,7 @@ class IntegrationService:
         return await self.out(integration)
 
     async def create_github(
-        self, context: AuthContext, access: WorkspaceAccess, body: GitHubIntegrationCreate
+        self, context: Actor, access: WorkspaceAccess, body: GitHubIntegrationCreate
     ) -> IntegrationOut:
         """地址固定为 api.github.com（契约第 6.1 节），不需要 SSRF 保存检查与 Webhook 密钥。"""
         box = self.runtime.credentials()
@@ -315,7 +315,7 @@ class IntegrationService:
 
     async def update(
         self,
-        context: AuthContext,
+        context: Actor,
         access: WorkspaceAccess,
         integration_id: uuid.UUID,
         body: IntegrationUpdate,
@@ -394,7 +394,7 @@ class IntegrationService:
     # ---------------------------------------------------------------- 测试连接
 
     async def test(
-        self, context: AuthContext, access: WorkspaceAccess, integration_id: uuid.UUID
+        self, context: Actor, access: WorkspaceAccess, integration_id: uuid.UUID
     ) -> IntegrationTestResult:
         integration = await self._get(access, integration_id)
         account = await repo.get_account(self.db, integration.id)
@@ -473,7 +473,7 @@ class IntegrationService:
 
     async def _test_github(
         self,
-        context: AuthContext,
+        context: Actor,
         access: WorkspaceAccess,
         integration: Integration,
         client: GitHubClient,
@@ -579,7 +579,7 @@ class IntegrationService:
     # ---------------------------------------------------------------- 手动同步
 
     async def request_sync(
-        self, context: AuthContext, access: WorkspaceAccess, integration_id: uuid.UUID
+        self, context: Actor, access: WorkspaceAccess, integration_id: uuid.UUID
     ) -> SyncRequestOut:
         """加锁并投递一次全量同步；锁由 Worker 的作业接手，结束时释放。
 
