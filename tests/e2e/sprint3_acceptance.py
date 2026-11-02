@@ -19,6 +19,7 @@
 import argparse
 import sys
 import uuid
+from urllib.parse import quote
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -166,9 +167,9 @@ def main() -> int:
         and overview["summary"]["active_projects"] == 1,
         str(overview["summary"]),
     )
-    found = ws.get("/api/v1/search?q=" + "验收项目改名")
+    found = ws.get("/api/v1/search?q=" + quote("验收项目改名"))
     hits = {(r["resource_type"], r["provider"]) for r in found["items"]}
-    task_hits = ws.get("/api/v1/search?q=" + "第二个任务")["items"]
+    task_hits = ws.get("/api/v1/search?q=" + quote("第二个任务"))["items"]
     report.check(
         "搜索找到工作台自己的项目与任务（provider=local，没有外部链接），任务带项目名",
         ("project", "local") in hits

@@ -42,3 +42,4 @@ updated: 2026-11-02
 - 2026-11-02 21:04 UTC · claude · 创建任务（owner: claude）
 - 2026-11-02 21:04 UTC · claude · 开始任务
 - 2026-11-02 21:52 UTC · claude · 实现完成：迁移 0020（转换已同步数据、ID 不变；收藏关联与搜索改指向新表；删除 Vikunja 集成、webhook_inbox）；项目 / 任务接口改为本地读写（项目增删改查、任务幂等在同一事务）；前端项目管理页与任务标签；deploy.sh upgrade 停用旧 Vikunja（保留数据卷）；CI 换成本地项目 / 任务验收；删除 infra/vikunja。后端 pytest、前端 lint/typecheck/test/build、迁移升降级实测通过。迁移删除已有数据，按 D-0004 第 3 节等人类确认后合并。
+- 2026-11-02 22:07 UTC · claude · 人类在对话中确认（2026-11-02）：「CI 全绿就合并吧」——同意合并含删除数据迁移的 PR #123（D-0004 第 3 节）。修复 CI：sprint3_acceptance.py 搜索参数里的中文没有 URL 编码；沙箱全栈（独立项目 t82）实测 sprint2_browser、sprint3_acceptance、sprint3_browser 全部通过。
