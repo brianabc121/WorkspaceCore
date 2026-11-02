@@ -208,6 +208,26 @@ async def test_update_uses_versions_and_resets_status(env: Env) -> None:
     assert "tk_" not in audits
 
 
+async def test_changing_the_browser_address_rewrites_synced_links(env: Env) -> None:
+    """链接在同步时算好存进投影；改了浏览器地址要立即重写，不能等下一次全量同步（T-0079）。"""
+    project = env.fake.add_project("收件箱")
+    task = env.fake.add_task(project["id"], "写周报")
+    integration = await env.connect()
+    projects = (await env.get("/api/v1/projects"))["items"]
+    assert projects[0]["source_url"].startswith("https://tasks.example.com/")
+    updated = await env.client.patch(
+        f"/api/v1/integrations/{integration['id']}",
+        json={"version": integration["version"], "public_url": "https://vikunja.example.org"},
+        headers=env.headers(write=True),
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["status"] == "active"
+    projects = (await env.get("/api/v1/projects"))["items"]
+    assert projects[0]["source_url"] == f"https://vikunja.example.org/projects/{project['id']}"
+    [synced] = await env.tasks(status="all")
+    assert synced["source_url"] == f"https://vikunja.example.org/tasks/{task['id']}"
+
+
 async def test_update_rejects_fields_of_another_provider(env: Env) -> None:
     """Sprint 4 契约第 6.2 节：Token 前缀与 provider 一致；repositories 只用于 GitHub。"""
     integration = await env.connect()
