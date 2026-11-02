@@ -5,6 +5,7 @@ make env 以前对已存在的 .env 一律不检查，
 要等镜像构建完，api 才在启动时以“CREDENTIAL_ENCRYPTION_KEY 必须是 64 位十六进制”拒绝启动。
 """
 
+import ast
 import importlib.util
 import secrets
 from pathlib import Path
@@ -136,3 +137,14 @@ def test_missing_variables_are_still_appended(init_env: ModuleType) -> None:
         if line.startswith("BACKUP_PASSWORD=")
     ]
     assert len(appended) == 1 and not appended[0].endswith("=")
+
+
+def test_runs_on_python_3_8_and_3_9() -> None:
+    """服务器上的 make env 用系统自带的 python3。
+
+    Debian 11 是 3.9，Ubuntu 20.04 是 3.8；人类部署时在 3.9 上报过 TypeError。
+    """
+    source = (ROOT / "scripts/init_env.py").read_text(encoding="utf-8")
+    ast.parse(source, feature_version=(3, 8))  # 语法不超过 3.8
+    # 标注里的 tuple[str, str] | None 在 3.9 及以下运行时会报错，必须推迟求值
+    assert "from __future__ import annotations" in source

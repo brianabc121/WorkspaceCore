@@ -1,0 +1,39 @@
+---
+id: T-0072
+title: 一键部署 / 升级 / 清空脚本（scripts/deploy.sh）
+owner: claude
+status: done
+priority: P1
+branch: claude/cool-wright-99qbbg
+paths: scripts/deploy.sh,scripts/init_env.py,services/api/tests/test_init_env.py,docs/deploy-guide.md,docs/deployment.md,README.md
+depends_on:
+created: 2026-11-02
+updated: 2026-11-02
+---
+
+# T-0072 一键部署 / 升级 / 清空脚本（scripts/deploy.sh）
+
+## 目标
+人类部署时连续踩坑（`.env` 占位符、数据库密码与 `.env` 不一致、忘记迁移、`curl -I` 得到 405 等），要求一条命令完成部署 / 升级 / 清空，
+运行前只需按提示输入 `SITE_DOMAIN`、`ACME_EMAIL`、`PUBLIC_BASE_URL`。
+
+## 验收标准
+- [x] `curl -fsSL …/scripts/deploy.sh | sudo bash` 在没有代码的机器上克隆到 `/srv/my-workspace` 后继续执行；菜单：部署 / 升级 / 清空 / 状态
+- [x] 部署只问三个参数（校验格式，`PUBLIC_BASE_URL` 默认 `https://<域名>`），其余自动：工具与 Docker、`.env`、HTTPS 与生产模式、DNS / 端口 / ufw 检查、up、migrate、smoke、HTTPS GET 检查、安装凭据
+- [x] 处理已知的坑：占位符 `.env` 自动重建；数据库密码不一致时自动同步；网段冲突给出提示
+- [x] 升级：本地修改时拒绝；先备份数据库与 `.env`；拉取后用新脚本完成 env / up / migrate / smoke；给出回滚提示
+- [x] 清空：列出将删除的项目与数据卷（含可选组件），可选先备份，输入项目名确认；无人值守必须 `--confirm my-workspace`
+- [x] 支持无人值守参数（`--domain --email --base-url --yes`）；shellcheck 无告警；沙箱端到端测试
+- [x] 部署教程、README、运行手册说明
+
+## 背景 / 约束 / 参考
+（可选）
+
+## 进度日志
+<!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
+- 2026-11-02 02:40 UTC · claude · 创建任务（owner: claude）
+- 2026-11-02 02:40 UTC · claude · 开始任务
+- 2026-11-02 02:40 UTC · claude · 人类在对话中要求：写一个自动化脚本，一条命令完成部署 / 清空 / 升级，运行前只按提示输入 SITE_DOMAIN、ACME_EMAIL、PUBLIC_BASE_URL；吸收这次部署踩过的坑（占位符 .env、数据库密码不一致、curl -I 405 等）。Gemini 对话链接因网络策略读不到，等人类粘贴
+- 2026-11-02 02:58 UTC · claude · 读了人类与 Gemini 的对话（PDF）：root 无 sudo、Debian 11 Python 3.9 下 init_env.py 报 TypeError（被迫升级系统）、Debian 无 ufw、cp .env.example、重复 clone。修：init_env.py 加 from __future__ import annotations（3.8/3.9 实测修复前报错、修复后通过）+ 回归测试；脚本检查 Python≥3.8、getent/ip 缺失不中断、清空无内容时直接结束；文档写明 root 去掉 sudo、Debian 无 ufw
+- 2026-11-02 03:10 UTC · claude · 沙箱端到端：curl|bash 引导安装、重复部署保留密钥、状态、占位符 .env + 旧数据库密码自动修复、升级（备份→拉取→新脚本完成→迁移→冒烟→回滚提示）、已是最新、清空（无人值守缺 --confirm 被拒、确认后 0 容器 0 数据卷）、伪终端交互（菜单、格式校验、默认值）、域名未解析中止、无内容清空、清空后重装沿用 BACKUP_PASSWORD 备份成功。未测：真实 Let's Encrypt、自动安装 Docker / apt 包、ufw 交互
+- 2026-11-02 03:10 UTC · claude · status in_progress → done：一键部署 / 升级 / 清空脚本完成，沙箱端到端测试通过

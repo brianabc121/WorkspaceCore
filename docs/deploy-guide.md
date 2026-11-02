@@ -8,6 +8,69 @@
 
 ---
 
+## 一键脚本（推荐）
+
+在一台新的 Debian / Ubuntu 服务器上运行这一条命令。以 root 登录时（提示符是 `root@…#`）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | bash
+```
+
+用有 sudo 权限的普通用户时：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | sudo bash
+```
+
+> Debian 最小安装通常**没有 sudo**：root 用户运行带 `sudo` 的命令会报 `sudo: command not found`，
+> 管道里的 `curl` 随之报 `curl: (23) Failure writing output to destination`。以 root 登录时把 `sudo` 去掉即可。
+
+脚本会把代码放到 `/srv/my-workspace`，然后显示菜单：
+
+| 选项 | 做什么 |
+|---|---|
+| 1 部署 | 首次安装；已经装过时重新检查并修复（不会丢数据） |
+| 2 升级 | 先加密备份数据库（`make backup`）与 `.env`，再拉取新代码、补 `.env` 新变量、重建、迁移、检查 |
+| 3 清空 | 删除本项目全部容器、网络与数据卷（包括 Vikunja、n8n、OpenIM 的），可选先备份；要输入项目名确认 |
+| 4 状态 | 服务状态、本机与 HTTPS 健康检查、是否已完成首次安装 |
+
+部署时只问三个问题：
+
+| 参数 | 例子 | 说明 |
+|---|---|---|
+| `SITE_DOMAIN` | `workspace.example.com` | 已解析到这台服务器的域名 |
+| `ACME_EMAIL` | `you@example.com` | Let's Encrypt 证书联系邮箱 |
+| `PUBLIC_BASE_URL` | `https://workspace.example.com` | 直接回车就是 `https://<域名>`；必须和浏览器地址栏完全一致 |
+
+其余的都自动完成，并处理了部署时常见的坑：
+
+- 缺 git / make / python3 / curl 时用 apt 安装；没有 Docker 时用官方脚本安装（都会先问）；Python 3.8 及以上即可（Debian 11 自带的 3.9 可以用，不需要为此升级系统）；
+- `.env` 不存在就随机生成；是从 `.env.example` 复制来的（还有占位符）时，备份后重新生成；
+  重新生成时如果找到之前留下的 `.env` 副本，沿用其中的 `BACKUP_PASSWORD`（之前的备份用它加密，换了密码就打不开）；
+- 写入 `APP_ENV=production`、`COMPOSE_FILE=compose.yaml:compose.https.yaml`、域名、邮箱与 `PUBLIC_BASE_URL`；
+- 检查域名解析、80 / 443 是否被占用（例如 nginx）、ufw 是否放行；
+- `make up` → `make migrate`（数据库密码和 `.env` 不一致时自动同步）→ `make smoke` → 用 GET 检查 `https://<域名>/healthz`；
+- 还没创建管理员时显示安装凭据。
+
+已经有代码时，在代码目录里直接运行，也可以直接指定动作：
+
+```bash
+sudo bash scripts/deploy.sh upgrade
+```
+
+无人值守（例如自动化）时用参数代替提问：
+
+```bash
+sudo bash scripts/deploy.sh install --domain workspace.example.com --email you@example.com --yes
+```
+
+清空在无人值守时还必须加 `--confirm my-workspace`。全部选项见 `sudo bash scripts/deploy.sh --help`。
+
+脚本只部署工作台本身（下面的“最小”形态）。Vikunja、监控、n8n、OpenIM 等可选组件，以及异地备份，仍按第 8、9 步配置；
+脚本跑完后，下面第 1 ~ 6 步都已完成，直接从第 7 步创建管理员开始。想了解每一步做了什么、或者手动部署，就按下面的步骤来。
+
+---
+
 ## 0. 先选部署形态
 
 | 形态 | 包含 | 适合 |
@@ -34,12 +97,13 @@
 OpenIM 一套约 1 GiB（手册第 18.1 节）。
 
 > 不建议直接用 root 日常操作。下面的命令用一个有 sudo 权限的普通用户执行，代码放在 `/srv/my-workspace`。
+> 如果你以 root 登录、系统又没有 sudo（Debian 最小安装常见，会报 `sudo: command not found`），把命令里的 `sudo` 去掉即可。
 
 ---
 
 ## 2. 安装 Docker 与工具
 
-需要：Docker（含 Compose v2 插件）、GNU Make、Python 3（只用来生成 `.env`）、Git。
+需要：Docker（含 Compose v2 插件）、GNU Make、Python 3.8 及以上（只用来生成 `.env`；Debian 11 的 3.9、Ubuntu 20.04 的 3.8 都可以）、Git。
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git make python3 curl
@@ -124,7 +188,9 @@ make env
 getent hosts workspace.example.com
 ```
 
-**5.2 打开防火墙**：放行 80（申请证书、HTTP 跳转 HTTPS）和 443。以 ufw 为例（别忘了先放行 SSH）：
+**5.2 打开防火墙**：放行 80（申请证书、HTTP 跳转 HTTPS）和 443。以 ufw 为例（别忘了先放行 SSH）。
+Debian 默认没有装 ufw（`ufw: command not found`），也没有启用别的防火墙，这时只要云控制台的安全组放行即可；
+想用 ufw 就先 `sudo apt-get install -y ufw`，再执行下面的命令，**一定先放行 SSH 再 enable**，否则会把自己锁在外面：
 
 ```bash
 sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443 && sudo ufw enable
