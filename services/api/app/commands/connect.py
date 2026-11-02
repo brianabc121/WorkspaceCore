@@ -9,6 +9,8 @@
     docker compose exec -T api python -m app.commands.connect n8n-owner
     printf '%s\\n' "$PASSWORD" | docker compose exec -T api python -m app.commands.connect \\
         n8n --owner-email you@example.com --public-url http://localhost:5678
+    docker compose exec -T api python -m app.commands.connect public-urls \\
+        --vikunja https://vikunja.example.com --n8n https://n8n.example.com
 
 - 密码与 Token 只从标准输入读，不出现在命令行参数、进程列表与日志里。
 - 以工作空间管理员本人的身份调用和网页相同的服务：凭证加密保存、写审计、要求 admin 以上角色。
@@ -83,6 +85,20 @@ _SYNC = {
     "unauthorized": "凭证失效",
     "not_configured": "还没有同步",
 }
+
+
+# 集成状态（IntegrationStatus）的中文说明，与 scripts/deploy.sh 的 status_label 一致
+_STATUS = {
+    "active": "已接入",
+    "pending": "已保存，还没通过测试连接",
+    "unauthorized": "凭证失效",
+    "unavailable": "暂时连不上",
+    "disabled": "已停用",
+}
+
+
+def status_label(status: str | None) -> str:
+    return _STATUS.get(status or "", f"状态未知（{status}）")
 
 
 class Usage(Exception):
@@ -242,7 +258,7 @@ async def cmd_vikunja(env: Env, args: argparse.Namespace) -> int:
     service = env.integrations()
     existing = _find(await service.list_integrations(access), "vikunja")
     if existing is not None:
-        print(f"已接入 Vikunja（状态：{existing.status}），跳过")
+        print(f"已有 Vikunja 集成（{status_label(existing.status)}），跳过")
         print("更换 Token 请到工作台“集成设置”里修改")
         return 0
     password = read_secret("Vikunja 密码")
@@ -304,7 +320,7 @@ async def cmd_github(env: Env, args: argparse.Namespace) -> int:
     service = env.integrations()
     existing = _find(await service.list_integrations(access), "github")
     if existing is not None and not args.replace:
-        print(f"已接入 GitHub（状态：{existing.status}），跳过")
+        print(f"已有 GitHub 集成（{status_label(existing.status)}），跳过")
         print("更换 Token 或仓库：加 --replace 重新运行，或到工作台“集成设置”里修改")
         return 0
     token = read_secret("GitHub Token")
@@ -327,7 +343,7 @@ async def cmd_github(env: Env, args: argparse.Namespace) -> int:
             )
             integration_id = (await service.update(actor, access, existing.id, update)).id
             print(
-                f"已用新 Token 替换工作台里的 GitHub 集成（之前的状态：{existing.status}，"
+                f"已用新 Token 替换工作台里的 GitHub 集成（之前：{status_label(existing.status)}，"
                 f"{len(repositories)} 个仓库），检查权限："
             )
     except ValidationError as error:
@@ -370,7 +386,8 @@ async def cmd_n8n(env: Env, args: argparse.Namespace) -> int:
     service = env.automations()
     current = await service.get_connection(access)
     if current.configured:
-        print(f"已接入 n8n（状态：{current.status}），跳过；更换 API Key 请到工作台“自动化”页修改")
+        print(f"已有 n8n 连接（{status_label(current.status)}），跳过")
+        print("更换 API Key 请到工作台“自动化”页修改")
         return 0
     password = read_secret("n8n 密码")
     provisioner = N8nProvisioner(env.runtime.http("provision:n8n"), args.base_url)
@@ -420,6 +437,44 @@ async def cmd_n8n(env: Env, args: argparse.Namespace) -> int:
     return 0
 
 
+async def cmd_public_urls(env: Env, args: argparse.Namespace) -> int:
+    """把工作台里“在 Vikunja 中打开”“打开 n8n 编辑器”的地址改成新的对外地址（给了哪个改哪个）。
+
+    部署脚本设置 VIKUNJA_DOMAIN / N8N_DOMAIN 后调用（T-0078）；与网页上修改一样带版本号、写审计。
+    """
+    actor, access = await resolve(env.db, args.email, args.workspace)
+    try:
+        if args.vikunja:
+            service = env.integrations()
+            current = _find(await service.list_integrations(access), "vikunja")
+            if current is None:
+                print("工作台里还没有 Vikunja 集成，跳过")
+            elif (current.public_url or "").rstrip("/") == args.vikunja.rstrip("/"):
+                print(f"Vikunja 的打开地址已经是 {args.vikunja}")
+            else:
+                update = IntegrationUpdate.model_validate(
+                    {"version": current.version, "public_url": args.vikunja}
+                )
+                await service.update(actor, access, current.id, update)
+                print(f"Vikunja 的打开地址改为 {args.vikunja}")
+        if args.n8n:
+            automations = env.automations()
+            connection = await automations.get_connection(access)
+            if not connection.configured:
+                print("工作台里还没有 n8n 连接，跳过")
+            elif (connection.public_url or "").rstrip("/") == args.n8n.rstrip("/"):
+                print(f"n8n 编辑器的打开地址已经是 {args.n8n}")
+            else:
+                upsert = AutomationConnectionUpsert.model_validate(
+                    {"version": connection.version, "public_url": args.n8n}
+                )
+                await automations.put_connection(actor, access, upsert)
+                print(f"n8n 编辑器的打开地址改为 {args.n8n}")
+    except ValidationError as error:
+        raise _validation(error) from None
+    return 0
+
+
 # ---------------------------------------------------------------- 入口
 
 Command = Callable[[Env, argparse.Namespace], Awaitable[int]]
@@ -430,6 +485,7 @@ COMMANDS: dict[str, Command] = {
     "github": cmd_github,
     "n8n-owner": cmd_n8n_owner,
     "n8n": cmd_n8n,
+    "public-urls": cmd_public_urls,
 }
 
 
@@ -457,6 +513,11 @@ def parser() -> argparse.ArgumentParser:
     n8n.add_argument("--owner-email", required=True)
     n8n.add_argument("--base-url", default="http://n8n:5678")
     n8n.add_argument("--public-url", default=None, help="浏览器打开 n8n 编辑器的地址")
+    urls = sub.add_parser("public-urls", help="更新工作台里打开 Vikunja / n8n 的地址")
+    urls.add_argument(
+        "--vikunja", default=None, help="Vikunja 的新对外地址，例如 https://vikunja.example.com"
+    )
+    urls.add_argument("--n8n", default=None, help="n8n 编辑器的新对外地址")
     return root
 
 

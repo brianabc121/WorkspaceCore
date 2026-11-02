@@ -89,3 +89,21 @@
 - Vikunja、n8n 换版本时，先在新版本上重跑第 3 节的检查（`services/api/tests/test_connect_command.py` 覆盖了请求格式，
   真实行为要对新实例实测），再改 compose 里锁定的版本。
 - GitHub 预填链接的参数名来自官方文档；文档变化时更新 `scripts/deploy.sh` 的 `GITHUB_TOKEN_URL`。
+
+## 6. 可选：Vikunja、n8n 用子域名经 HTTPS 对外（T-0078）
+
+- 背景：管理界面默认只绑定服务器本机，工作台里的打开链接指向 `http://localhost:…`，要先建 SSH 隧道。人类选择让 Vikunja 与
+  n8n 都可以用子域名直接打开（2026-11-02）；默认仍不对外，只有设置了 `VIKUNJA_DOMAIN` / `N8N_DOMAIN` 才开放。
+- 做法：HTTPS 模式的 Caddy 导入 `/etc/caddy/apps/*.caddy`（挂载 `infra/caddy/apps-enabled/`，没有文件时什么都不做，
+  已在 caddy 2.11.7 上验证空目录是合法配置）。`deploy.sh connect` 在这里生成写入具体域名的站点（不依赖环境变量，避免
+  变量为空时 Caddy 配置无效、整站停掉），`reverse_proxy vikunja:3456` / `n8n:5678`（Caddy 本来就在 integrations 网络里），
+  加 HSTS、`nosniff`、`Referrer-Policy`，去掉 `Server` 头。生成后先 `caddy validate`，通过才重启 Caddy，不通过就撤销。
+- 公开地址：`VIKUNJA_PUBLIC_URL`（Vikunja 的 `service.publicurl`）、`N8N_PUBLIC_URL`（`N8N_EDITOR_BASE_URL`）改成
+  `https://<域名>/`；n8n 再设 `N8N_SECURE_COOKIE=true` 与 `N8N_PROXY_HOPS=1`（2.45.7 的配置项，按 `X-Forwarded-For`
+  识别客户端以便限流）。工作台里保存的打开链接由 `connect public-urls` 更新（带版本号、写审计，状态不变）。
+- 风险：两个登录页暴露在公网。n8n 的 owner 能编辑和运行工作流，被攻破的影响大，所以文档要求强密码与两步验证；
+  工作台触发 n8n 仍走内网 `http://n8n:5678/webhook/…`，Webhook 本身也要求共享密钥（Header Auth）。
+- 沙箱验证（`*.localhost` 域名，Caddy 内部 CA）：两个子域名经 HTTPS 正常转发（Vikunja `/api/v1/info`、n8n `/healthz`
+  与页面均 200，主站不受影响）；Vikunja 报告的 `frontend_url` 是新地址；n8n 经 HTTPS 登录得到带 `Secure` 的 Cookie；
+  工作台里的两个打开链接已更新；输入 `-` 取消后站点文件删除、`.env` 恢复、子域名不再服务。
+  真实域名的 Let's Encrypt 签发没有在沙箱里验证（与主站同一机制）。

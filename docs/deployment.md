@@ -276,7 +276,8 @@ make vikunja-down    # 停止，保留数据卷
 ```
 
 - 配置在根目录 `.env`：`VIKUNJA_SERVICE_SECRET`（`make env` 随机生成；丢失后所有 Vikunja 登录与 Token 失效）、
-  `VIKUNJA_PUBLIC_URL`、`VIKUNJA_BIND`、`VIKUNJA_PORT`。core 的 Compose 项目名不是 `my-workspace` 时，
+  `VIKUNJA_PUBLIC_URL`、`VIKUNJA_BIND`、`VIKUNJA_PORT`；可选的 `VIKUNJA_DOMAIN`（用子域名经 HTTPS 对外，由
+  `scripts/deploy.sh connect` 设置，见部署教程「用子域名打开 Vikunja 和 n8n」）。core 的 Compose 项目名不是 `my-workspace` 时，
   make 会按 `COMPOSE_PROJECT_NAME` 自动找到对应的 integrations 网络。
 - 工作台访问 Vikunja 用 `http://vikunja:3456`（integrations 网络内）；Vikunja 把 Webhook 发到
   `http://caddy:8080/api/v1/webhooks/vikunja/<集成 ID>`，不经过对外端口。
@@ -439,6 +440,9 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
 - 指标在 Prometheus 里保留 7 天。长期趋势请在 Grafana 里另行配置聚合或远端存储（不在 V1 范围）。
 
 ### 12.4 n8n（自动化，可选）
+
+> 用子域名经 HTTPS 对外打开 n8n 编辑器：设置 `N8N_DOMAIN`（同时 `N8N_PUBLIC_URL=https://<域名>/`、`N8N_SECURE_COOKIE=true`、
+> `N8N_PROXY_HOPS=1`），并在 `infra/caddy/apps-enabled/` 生成站点；`scripts/deploy.sh connect` 会询问并自动完成（T-0078）。
 
 n8n 是独立的 Compose（`infra/n8n/compose.yaml`），与 Vikunja 一样加入 core 的 `integrations` 网络。
 接口约定见 Sprint 5 契约第 6 节，触发与执行记录的实测见 `docs/decisions/2026-10-31-n8n-trigger-and-execution-verification.md`。

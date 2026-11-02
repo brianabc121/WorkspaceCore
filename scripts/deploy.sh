@@ -523,10 +523,23 @@ show_credential() {
   info "  管理界面只绑定服务器本机，从自己的电脑访问用 SSH 隧道：ssh -L $5:127.0.0.1:$5 <用户>@<服务器>"
 }
 
+# 集成状态（app/schemas/integrations.py 的 IntegrationStatus；none 是 connect status 表示还没有集成）的中文说明
+status_label() {
+  case "$1" in
+    active) echo "已接入" ;;
+    none | "") echo "未接入" ;;
+    pending) echo "已保存，还没通过测试连接" ;;
+    unauthorized) echo "凭证失效" ;;
+    unavailable) echo "暂时连不上" ;;
+    disabled) echo "已停用" ;;
+    *) echo "状态未知（$1）" ;;
+  esac
+}
+
 # 已经接入过的组件：active 才算通过，其他状态提示到工作台对应页面处理
 show_state() {
-  if [[ $1 == active ]]; then ok "已接入（状态：active）"
-  else warn "已保存但现在不可用（状态：$1）：到工作台「$2」页查看原因、重新测试连接"
+  if [[ $1 == active ]]; then ok "已接入"
+  else warn "已保存但现在不可用：$(status_label "$1")。到工作台「$2」页查看原因、重新测试连接"
   fi
 }
 
@@ -661,6 +674,135 @@ connect_n8n() {
   return 0
 }
 
+# ---------------------------------------------------------------- Vikunja / n8n 的对外子域名（T-0078）
+# 默认只在服务器本机开放（SSH 隧道）。设置 VIKUNJA_DOMAIN / N8N_DOMAIN 后，在 infra/caddy/apps-enabled/ 生成 Caddy 站点
+# （写入具体域名），Caddy 自动申请证书并转发到 integrations 网络里的容器；同时改公开地址、更新工作台里的打开链接。
+APPS_DIR="infra/caddy/apps-enabled"
+app_site_file() { printf '%s\n' "$ROOT/$APPS_DIR/$1.caddy"; }
+
+write_app_site() {
+  local name="$1" domain="$2" upstream="$3"
+  mkdir -p "$ROOT/$APPS_DIR"
+  cat >"$(app_site_file "$name")" <<EOF
+# 由 scripts/deploy.sh connect 生成（T-0078）：$name 的对外入口。删除本文件并重启 caddy 即取消对外
+$domain {
+	encode zstd gzip
+	reverse_proxy $upstream
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+EOF
+}
+
+# choose_domain <名称> <显示名> <变量> <建议> → 选定的域名（空 = 不对外）；无人值守时沿用 .env 里的设置
+choose_domain() {
+  local title="$2" key="$3" suggest="$4" current answer=""
+  current="$(env_get "$key")"
+  if (( ASSUME_YES )) || ! interactive; then printf '%s\n' "$current"; return; fi
+  if [[ -n $current ]]; then
+    answer="$(ask "$title 的对外域名（回车保持 $current；输入 - 取消对外）" "$current")"
+    [[ $answer == "-" ]] && answer=""
+  elif confirm "用子域名经 HTTPS 对外打开 $title？（登录页会暴露在公网；不打开时只能经 SSH 隧道访问）" n; then
+    answer="$(ask "$title 的对外域名（先在域名服务商那里把它解析到本机）" "$suggest")"
+  fi
+  printf '%s' "$answer" | tr '[:upper:]' '[:lower:]' | sed -E 's#^https?://##; s#/.*$##'
+  printf '\n'
+}
+
+# apply_app_domain <名称> <显示名> <域名变量> <地址变量> <本机地址> <上游> <域名> → 0 表示有变化
+apply_app_domain() {
+  local name="$1" title="$2" key="$3" url_key="$4" local_url="$5" upstream="$6" domain="$7" file
+  file="$(app_site_file "$name")"
+  if [[ -z $domain ]]; then
+    [[ -n $(env_get "$key") || -f $file ]] || return 1
+    rm -f "$file"
+    env_set "$key" ""
+    env_set "$url_key" "$local_url"
+    info "$title 取消对外：只能在服务器本机访问（SSH 隧道）"
+    return 0
+  fi
+  if ! valid_domain "$domain" || [[ $domain == "$(env_get SITE_DOMAIN)" ]]; then
+    warn "「$domain」不能用作 $title 的域名（要是一个单独的子域名），保持原样"
+    return 1
+  fi
+  if [[ -f $file ]] && grep -qx "$domain {" "$file" && [[ $(env_get "$key") == "$domain" ]]; then return 1; fi
+  write_app_site "$name" "$domain" "$upstream"
+  env_set "$key" "$domain"
+  env_set "$url_key" "https://$domain/"
+  [[ -n "$( (getent ahosts "$domain" 2>/dev/null || true) | head -1)" ]] \
+    || warn "$domain 还没有解析：在域名服务商那里加 A 记录指向本机，证书会在解析生效后自动申请"
+  ok "$title 的对外地址：https://$domain"
+  return 0
+}
+
+# 先校验再重启：admin 接口关闭，新站点要重启 caddy 才生效；配置有错时撤销生成的站点，不让整个工作台停掉
+restart_caddy_with_apps() {
+  compose up -d --no-deps caddy </dev/null >/dev/null 2>&1 || true
+  if compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile </dev/null >/dev/null 2>&1; then
+    compose restart caddy </dev/null >/dev/null && return 0
+  fi
+  return 1
+}
+
+check_app_https() {
+  local url="$1" _ code=""
+  for _ in $(seq 1 18); do
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || true)"
+    [[ $code =~ ^(200|204|301|302)$ ]] && { ok "$url 可以访问"; return 0; }
+    sleep 5
+  done
+  warn "$url 暂时访问不到（状态码：${code:-无}）：多半是 DNS 还没生效或证书还在申请，Caddy 会自动重试"
+}
+
+connected() { [[ -n $1 && $1 != none ]]; }
+
+expose_apps() {
+  local status="$1" site vikunja_changed=0 n8n_changed=0 domain
+  step "Vikunja / n8n 的对外访问"
+  if [[ $(env_get COMPOSE_FILE) != *compose.https.yaml* ]]; then
+    info "没有启用域名与 HTTPS，Vikunja 与 n8n 只能在服务器本机访问（SSH 隧道）"
+    return 0
+  fi
+  site="$(env_get SITE_DOMAIN)"
+  if connected "$(status_of vikunja "$status")" || [[ -n $(env_get VIKUNJA_DOMAIN) ]]; then
+    domain="$(choose_domain vikunja Vikunja VIKUNJA_DOMAIN "vikunja.$site")"
+    if apply_app_domain vikunja Vikunja VIKUNJA_DOMAIN VIKUNJA_PUBLIC_URL \
+      "http://localhost:$(env_get VIKUNJA_PORT | grep . || echo 3456)/" vikunja:3456 "$domain"; then vikunja_changed=1; fi
+  fi
+  if connected "$(status_of n8n "$status")" || [[ -n $(env_get N8N_DOMAIN) ]]; then
+    domain="$(choose_domain n8n n8n N8N_DOMAIN "n8n.$site")"
+    if apply_app_domain n8n n8n N8N_DOMAIN N8N_PUBLIC_URL \
+      "http://localhost:$(env_get N8N_PORT | grep . || echo 5678)/" n8n:5678 "$domain"; then n8n_changed=1; fi
+    # 经 HTTPS 反向代理访问：Cookie 只走 HTTPS，并按 X-Forwarded-For 识别客户端；取消对外时恢复
+    if [[ -n $(env_get N8N_DOMAIN) ]]; then env_set N8N_SECURE_COOKIE true; env_set N8N_PROXY_HOPS 1
+    else env_set N8N_SECURE_COOKIE false; env_set N8N_PROXY_HOPS 0
+    fi
+  fi
+  if (( ! vikunja_changed && ! n8n_changed )); then
+    info "对外访问设置没有变化"
+    return 0
+  fi
+  # 让新地址生效：重建 Vikunja / n8n（读取新的公开地址），校验后重启 Caddy，再更新工作台里的打开链接
+  if (( vikunja_changed )); then (cd "$ROOT" && make -s vikunja-up </dev/null) || warn "Vikunja 没有重启成功（见上面的输出）"; fi
+  if (( n8n_changed )); then (cd "$ROOT" && make -s n8n-up </dev/null) || warn "n8n 没有重启成功（见上面的输出）"; fi
+  if ! restart_caddy_with_apps; then
+    warn "Caddy 配置校验没有通过，撤销刚生成的对外站点（工作台不受影响）"
+    (( vikunja_changed )) && rm -f "$(app_site_file vikunja)"
+    (( n8n_changed )) && rm -f "$(app_site_file n8n)"
+    restart_caddy_with_apps || warn "Caddy 重启失败：运行 docker compose logs caddy 查看原因"
+    return 0
+  fi
+  connect_cmd public-urls --vikunja "$(public_url_of VIKUNJA_PUBLIC_URL http://localhost:3456)" \
+    --n8n "$(public_url_of N8N_PUBLIC_URL http://localhost:5678)" </dev/null || warn "工作台里的打开链接没有更新（见上面的输出）"
+  if (( vikunja_changed )) && [[ -n $(env_get VIKUNJA_DOMAIN) ]]; then check_app_https "https://$(env_get VIKUNJA_DOMAIN)/api/v1/info"; fi
+  if (( n8n_changed )) && [[ -n $(env_get N8N_DOMAIN) ]]; then check_app_https "https://$(env_get N8N_DOMAIN)/healthz"; fi
+  return 0
+}
+
 connect_components() {
   step "接入组件：Vikunja（任务）、GitHub（只读）、n8n（自动化）"
   compose ps --status running --services </dev/null 2>/dev/null | grep -qx api || { warn "api 没有运行，先部署（install）"; return 0; }
@@ -672,8 +814,10 @@ connect_components() {
   connect_github "$(status_of github "$status")"
   connect_n8n "$(status_of n8n "$status")"
   status="$(connect_status)"
+  expose_apps "$status"
   step "接入状态"
-  info "Vikunja：$(status_of vikunja "$status")　GitHub：$(status_of github "$status")　n8n：$(status_of n8n "$status")（none 表示没有接入）"
+  info "Vikunja：$(status_label "$(status_of vikunja "$status")")　GitHub：$(status_label "$(status_of github "$status")")　n8n：$(status_label "$(status_of n8n "$status")")"
+  info "打开地址：Vikunja $(public_url_of VIKUNJA_PUBLIC_URL http://localhost:3456)　n8n $(public_url_of N8N_PUBLIC_URL http://localhost:5678)"
   info "以后要接入或重试：bash $ROOT/scripts/deploy.sh connect"
 }
 

@@ -37,6 +37,8 @@ services:
       N8N_EDITOR_BASE_URL: ${N8N_PUBLIC_URL:-http://localhost:5678/}
       # 经 HTTPS 访问编辑器时改为 true；本机 HTTP 访问时为 false，否则无法登录
       N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+      # 经 Caddy 的对外子域名访问时为 1（N8N_DOMAIN），n8n 才按 X-Forwarded-For 识别客户端地址
+      N8N_PROXY_HOPS: ${N8N_PROXY_HOPS:-0}
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
       N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
