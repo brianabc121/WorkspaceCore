@@ -33,7 +33,7 @@ describe('本地资源写入恢复', () => {
       if (r.method === 'PATCH') { denied = true; return fail(status, status === 403 ? 'FORBIDDEN' : 'NOT_FOUND') }
       if (path(r) === '/api/v1/calendar/events') return denied ? fail(readStatus, 'FORBIDDEN') : Response.json({ ...emptyPage, items: [calendarEvent] })
     })
-    await openApp('/calendar'); await fireEvent.click(await screen.findByRole('button', { name: calendarEvent.title }))
+    await openApp('/calendar?date=2026-10-30'); await fireEvent.click(await screen.findByRole('button', { name: calendarEvent.title }))
     await fireEvent.update(screen.getByLabelText('日程标题'), '失去权限后的修改')
     await fireEvent.click(screen.getByRole('button', { name: '保存日程' }))
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
@@ -54,7 +54,7 @@ describe('本地资源写入恢复', () => {
       if (r.method === 'POST') { committed = true; return Response.json(calendarEvent, { status: 201 }) }
       return committed && broken ? fail(503, 'HTTP_ERROR') : Response.json({ ...emptyPage, items: [calendarEvent] })
     })
-    await openApp('/calendar'); await screen.findByRole('button', { name: '发布评审' })
+    await openApp('/calendar?date=2026-10-30'); await screen.findByRole('button', { name: '发布评审' })
     await fireEvent.click(screen.getByRole('button', { name: '新建日程' })); await fireEvent.update(screen.getByLabelText('日程标题'), '一次写入')
     await fireEvent.click(screen.getByRole('button', { name: '保存日程' }))
     expect(await screen.findByText(/操作已完成，但刷新失败/)).toBeVisible()
@@ -69,7 +69,7 @@ describe('本地资源写入恢复', () => {
   it('preserves sub-minute timestamps when editing only the event title', async () => {
     const event = { ...calendarEvent, start_at: '2026-10-30T01:30:45Z', end_at: '2026-10-30T02:30:45Z' }
     const requests = mockApi((r) => path(r) === '/api/v1/calendar/events' ? Response.json({ ...emptyPage, items: [event] }) : r.method === 'PATCH' ? Response.json(event) : undefined)
-    await openApp('/calendar'); await fireEvent.click(await screen.findByRole('button', { name: '发布评审' }))
+    await openApp('/calendar?date=2026-10-30'); await fireEvent.click(await screen.findByRole('button', { name: '发布评审' }))
     await fireEvent.update(screen.getByLabelText('日程标题'), '只改标题'); await fireEvent.click(screen.getByRole('button', { name: '保存日程' }))
     await vi.waitFor(() => expect(requests.some((r) => r.method === 'PATCH')).toBe(true))
     expect(await requests.find((r) => r.method === 'PATCH')!.clone().json()).toEqual({ version: 3, title: '只改标题' })
@@ -81,7 +81,7 @@ describe('本地资源写入恢复', () => {
       if (r.method === 'POST') return new Promise<Response>((resolve) => { finish = resolve })
       if (path(r) === '/api/v1/calendar/events') return Response.json({ ...emptyPage, items: [{ ...calendarEvent, title: r.headers.get('X-Workspace-Id') === 'workspace-b' ? 'B日程' : 'A日程' }] })
     })
-    await openApp('/calendar'); await screen.findByRole('button', { name: 'A日程' })
+    await openApp('/calendar?date=2026-10-30'); await screen.findByRole('button', { name: 'A日程' })
     await fireEvent.click(screen.getByRole('button', { name: '新建日程' })); await fireEvent.update(screen.getByLabelText('日程标题'), 'A创建')
     await fireEvent.click(screen.getByRole('button', { name: '保存日程' })); await vi.waitFor(() => expect(finish).toBeDefined())
     await fireEvent.update(screen.getByLabelText('当前工作空间'), 'workspace-b'); await screen.findByRole('button', { name: 'B日程' })

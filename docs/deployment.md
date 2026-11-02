@@ -137,7 +137,14 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 - **登录返回 `429 RATE_LIMITED`**：15 分钟内同一账户失败 5 次或同一 IP 失败 10 次，等 `Retry-After` 秒后自动解除。
   需要立即解除时清除计数（不会影响其他数据）：
   `docker compose exec redis sh -c "redis-cli --scan --pattern 'ratelimit:*' | xargs -r redis-cli del"`。
-- **改了数据库密码后连不上**：PostgreSQL 只在第一次初始化数据卷时读取密码；已有数据卷时需要在数据库里修改密码，或者确认不需要数据后手动删除卷（会丢数据，不要作为常规操作）。
+- **改了数据库密码后连不上**（`password authentication failed for user "workspace"`）：PostgreSQL 只在第一次初始化数据卷时读取密码。
+  已有数据卷时，在数据库里把密码改成 `.env` 的 `POSTGRES_PASSWORD`（经容器内本地连接执行，不需要旧密码，数据不受影响）：
+
+  ```bash
+  printf "ALTER USER workspace WITH PASSWORD '%s';\n" "$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)" | docker compose exec -T postgres psql -U workspace -d workspace
+  ```
+
+  不要靠删除数据卷解决（会丢数据）。
 
 日志：所有服务输出到 stdout，由 Docker 的 json-file 驱动按 10 MB × 5 个文件轮转。API 与 Worker 的日志是 JSON，每条带 `request_id`；健康检查成功的请求只在 `LOG_LEVEL=DEBUG` 时记录。
 
