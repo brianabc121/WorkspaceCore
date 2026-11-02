@@ -8,10 +8,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.domain.agents import agent_secret_context
+from app.domain.app_logins import password_context
 from app.domain.connectors import account_context, webhook_context
 from app.domain.credential_rotation import rotate
 from app.domain.credentials import CredentialBox
-from app.models import AgentSecret, AgentSecretVersion, Integration, IntegrationAccount
+from app.models import (
+    AgentSecret,
+    AgentSecretVersion,
+    AppLogin,
+    Integration,
+    IntegrationAccount,
+)
 from tests.helpers import add_user, add_workspace, run_sql
 
 
@@ -52,8 +59,23 @@ async def _seed(url: str, box: CredentialBox) -> dict[str, uuid.UUID]:
                     ciphertext_ref=box.seal("sk-1", context=agent_secret_context(secret_id, 1)),
                 )
             )
+            login_id = uuid.uuid4()
+            db.add(
+                AppLogin(
+                    id=login_id,
+                    workspace_id=workspace,
+                    app="vikunja",
+                    username="workspace",
+                    password_ref=box.seal("pw", context=password_context(login_id)),
+                )
+            )
             await db.commit()
-            return {"integration": integration_id, "account": account_id, "secret": secret_id}
+            return {
+                "integration": integration_id,
+                "account": account_id,
+                "secret": secret_id,
+                "login": login_id,
+            }
     finally:
         await engine.dispose()
 
@@ -72,15 +94,16 @@ async def test_rotation_reencrypts_every_sealed_field(migrated_database_url: str
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
             dry = await rotate(db, box, dry_run=True)
-            assert dry.remaining_old == 3 and dry.failed == 0
+            assert dry.remaining_old == 4 and dry.failed == 0
             report = await rotate(db, box)
             assert report.remaining_old == 0 and report.failed == 0
-            assert sum(f.rotated for f in report.fields.values()) == 3
+            assert sum(f.rotated for f in report.fields.values()) == 4
             again = await rotate(db, box)  # 可以重复运行
             assert sum(f.rotated for f in again.fields.values()) == 0
             account = (await db.execute(select(IntegrationAccount))).scalar_one()
             integration = (await db.execute(select(Integration))).scalar_one()
             version = (await db.execute(select(AgentSecretVersion))).scalar_one()
+            login = (await db.execute(select(AppLogin))).scalar_one()
     finally:
         await engine.dispose()
     assert box.key_id_in(account.credential_ref) == box.key_id
@@ -98,6 +121,8 @@ async def test_rotation_reencrypts_every_sealed_field(migrated_database_url: str
         version.ciphertext_ref or "", context=agent_secret_context(ids["secret"], 1)
     )
     assert secret.get_secret_value() == "sk-1"
+    password = box.resolve(login.password_ref or "", context=password_context(ids["login"]))
+    assert password.get_secret_value() == "pw"
     # 重新加密对业务不可见：不改 updated_at
     assert integration.updated_at == before
     # 只用新密钥（删掉旧密钥之后）也能读
@@ -121,8 +146,8 @@ async def test_ciphertext_without_its_key_is_reported_not_dropped(
             report = await rotate(db, box)
     finally:
         await engine.dispose()
-    assert report.failed == 3
-    assert report.remaining_old == 3  # 原样保留，不会被清掉或写坏
+    assert report.failed == 4
+    assert report.remaining_old == 4  # 原样保留，不会被清掉或写坏
 
 
 @pytest.mark.parametrize("dry_run", [True])
@@ -137,4 +162,4 @@ async def test_dry_run_writes_nothing(migrated_database_url: str, dry_run: bool)
             report = await rotate(db, box, dry_run=True)
     finally:
         await engine.dispose()
-    assert report.remaining_old == 3
+    assert report.remaining_old == 4

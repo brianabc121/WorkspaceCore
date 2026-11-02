@@ -2,7 +2,8 @@
 Sprint 2（…-sprint-2-dashboard-contract.md）、Sprint 3（…-sprint-3-tasks-contract.md）、
 Sprint 4（…-sprint-4-knowledge-search-contract.md）、
 Sprint 5（…-sprint-5-operations-automations-contract.md）、
-V2 OC-1（…-v2-oc1-contract.md）。"""
+V2 OC-1（…-v2-oc1-contract.md）、
+Vikunja / n8n 登录账号（2026-11-02-app-logins.md）。"""
 
 import json
 import uuid
@@ -19,6 +20,7 @@ from app.api.deps import (
     authenticated,
     get_agent_service,
     get_ai_tool_service,
+    get_app_login_service,
     get_automation_service,
     get_calendar_service,
     get_db,
@@ -168,6 +170,13 @@ V2_ADMIN_ENDPOINTS = {
     ("post", "/api/v1/ai/tool-executions/{execution_id}/reject"),
 }
 
+APP_LOGIN_ENDPOINTS = {
+    ("get", "/api/v1/app-logins"),
+    ("put", "/api/v1/app-logins/{app}"),
+    ("post", "/api/v1/app-logins/{app}/reveal"),
+    ("delete", "/api/v1/app-logins/{app}"),
+}
+
 V2_AGENT_ENDPOINTS = {
     ("post", "/agent-api/v1/secrets/resolve"),
     ("post", "/agent-api/v1/im-token"),
@@ -205,6 +214,7 @@ def test_all_sprint_endpoints_are_declared() -> None:
         | SPRINT_5_ENDPOINTS
         | V2_ADMIN_ENDPOINTS
         | V2_AGENT_ENDPOINTS
+        | APP_LOGIN_ENDPOINTS
     )
 
 
@@ -334,6 +344,7 @@ def any_role(app: FastAPI) -> None:
         get_automation_service,
         get_agent_service,
         get_ai_tool_service,
+        get_app_login_service,
     ):
         app.dependency_overrides[service] = _ShapeOnlyService
 
@@ -1242,3 +1253,48 @@ async def test_v2_openim_callback_route_rules(stub_client: httpx.AsyncClient) ->
     # 没有部署 OpenIM（未配置地址与口令）时回调地址不存在（契约第 10 节；实现见 T-0055）
     missing = await stub_client.post(f"/internal/openim/{token}/callbackAfterUserOnlineCommand")
     assert missing.status_code == 404
+
+
+# ---------------------------------------------------------------- Vikunja / n8n 登录账号（T-0080）
+
+
+def test_app_logins_use_the_session_and_only_reveal_returns_the_password() -> None:
+    paths = json.loads(render())["paths"]
+    for method, path in APP_LOGIN_ENDPOINTS:
+        assert paths[path][method]["security"] == [{"SessionCookie": []}], path
+    upsert = _properties("AppLoginUpsert")
+    assert upsert["password"]["anyOf"][0]["writeOnly"] is True
+    for name in ("AppLoginOut", "AppLoginList"):
+        assert "password" not in _properties(name), name
+    assert "password_set" in _properties("AppLoginOut")
+    assert set(_properties("AppLoginSecret")) == {"app", "username", "password"}
+
+
+@pytest.mark.usefixtures("any_role")
+async def test_app_login_payload_rules(stub_client: httpx.AsyncClient) -> None:
+    secret = "typed password"  # noqa: S105  测试用的假值
+    cases: dict[str, tuple[str, dict[str, object]]] = {
+        "不认识的应用": ("grafana", {"username": "admin"}),
+        "什么都没改": ("vikunja", {}),
+        "只有版本": ("vikunja", {"version": 1}),
+        "用户名为空": ("vikunja", {"username": "   "}),
+        "密码为空": ("n8n", {"username": "a@example.com", "password": ""}),
+        "多余字段": ("n8n", {"username": "a@example.com", "url": "http://x"}),
+        "版本不对": ("n8n", {"version": 0, "password": secret}),
+    }
+    for name, (app, body) in cases.items():
+        response = await stub_client.put(f"/api/v1/app-logins/{app}", json=body, headers=WORKSPACE)
+        assert response.status_code == 422, name
+        assert secret not in response.text, name
+    ok = await stub_client.put(
+        "/api/v1/app-logins/vikunja",
+        json={"username": "workspace", "password": secret},
+        headers=WORKSPACE,
+    )
+    assert ok.status_code == 501
+    revealed = await stub_client.post("/api/v1/app-logins/n8n/reveal", headers=WORKSPACE)
+    assert revealed.status_code == 501
+    unknown = await stub_client.post("/api/v1/app-logins/grafana/reveal", headers=WORKSPACE)
+    assert unknown.status_code == 422
+    no_version = await stub_client.delete("/api/v1/app-logins/n8n", headers=WORKSPACE)
+    assert no_version.status_code == 422

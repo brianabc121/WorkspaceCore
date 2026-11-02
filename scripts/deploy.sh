@@ -516,7 +516,7 @@ ask_secret() {
 }
 
 show_credential() {
-  warn "$1 的登录信息只显示这一次，请保存到密码管理器："
+  warn "$1 的登录信息如下，建议存进密码管理器；工作台「$6」页也能查看（只有管理员看得到）："
   info "  地址：$2"
   info "  账号：$3"
   info "  密码：$4"
@@ -543,6 +543,22 @@ show_state() {
   fi
 }
 
+# 已经接入、但工作台还没保存登录账号（T-0080 之前接入的）：问一次要不要补上。先登录一次核对密码
+offer_save_login() {
+  local app="$1" title="$2" page="$3" saved="$4" user_prompt="$5" default_user="$6" user password
+  [[ $saved == none ]] || return 0
+  if (( ASSUME_YES )) || ! interactive; then return 0; fi
+  confirm "工作台还没有保存 $title 的登录账号，现在保存吗？（管理员可以在「$page」页查看、复制）" y || return 0
+  user="$(ask "$user_prompt" "$default_user")"
+  password="$(ask_secret "$title 的密码（输入不显示，直接回车跳过）")"
+  [[ -n $password ]] || { info "跳过"; return 0; }
+  if printf '%s\n' "$password" | connect_cmd save-login --app "$app" --username "$user"; then
+    ok "已保存：到工作台「$page」页查看"
+  else
+    warn "没有保存（见上面的输出）：也可以直接在工作台「$page」页填写"
+  fi
+}
+
 wait_for_setup() {
   local status answer
   while :; do
@@ -560,9 +576,13 @@ wait_for_setup() {
 }
 
 connect_vikunja() {
-  local state="$1" user email password created=0 url
+  local state="$1" login="${2:-}" user email password created=0 url
   step "Vikunja（任务主源）"
-  if [[ -n $state && $state != none ]]; then show_state "$state" "集成设置"; return 0; fi
+  if [[ -n $state && $state != none ]]; then
+    show_state "$state" "集成设置"
+    offer_save_login vikunja Vikunja 项目 "$login" "Vikunja 用户名" admin
+    return 0
+  fi
   confirm "部署 Vikunja 并自动接入？" y || { info "跳过"; return 0; }
   (cd "$ROOT" && make -s vikunja-up </dev/null) || { warn "Vikunja 没有启动（见上面的输出），跳过"; return 0; }
   url="$(public_url_of VIKUNJA_PUBLIC_URL http://localhost:3456)"
@@ -583,7 +603,7 @@ connect_vikunja() {
   else
     warn "Vikunja 没有接入成功（见上面的输出）：修好后重新运行 deploy.sh connect，或到工作台「集成设置」里手动配置"
   fi
-  (( created )) && show_credential "Vikunja" "$url" "$user" "$password" "$(env_get VIKUNJA_PORT | grep . || echo 3456)"
+  (( created )) && show_credential "Vikunja" "$url" "$user" "$password" "$(env_get VIKUNJA_PORT | grep . || echo 3456)" "项目"
   return 0
 }
 
@@ -647,9 +667,13 @@ connect_github() {
 }
 
 connect_n8n() {
-  local state="$1" email password created=0 url owner
+  local state="$1" login="${2:-}" email password created=0 url owner
   step "n8n（自动化，可选）"
-  if [[ -n $state && $state != none ]]; then show_state "$state" "自动化"; return 0; fi
+  if [[ -n $state && $state != none ]]; then
+    show_state "$state" "自动化"
+    offer_save_login n8n n8n 自动化 "$login" "n8n owner 的登录邮箱" "$(env_get ACME_EMAIL)"
+    return 0
+  fi
   confirm "部署 n8n 并自动接入？（另外占用约 1 GB 内存）" y || { info "跳过"; return 0; }
   (cd "$ROOT" && make -s n8n-up </dev/null) || { warn "n8n 没有启动（见上面的输出），跳过"; return 0; }
   url="$(public_url_of N8N_PUBLIC_URL http://localhost:5678)"
@@ -670,7 +694,7 @@ connect_n8n() {
   else
     warn "n8n 没有接入成功（见上面的输出）：修好后重新运行 deploy.sh connect，或到工作台「自动化」页手动配置"
   fi
-  (( created )) && show_credential "n8n" "$url" "$email" "$password" "$(env_get N8N_PORT | grep . || echo 5678)"
+  (( created )) && show_credential "n8n" "$url" "$email" "$password" "$(env_get N8N_PORT | grep . || echo 5678)" "自动化"
   return 0
 }
 
@@ -812,9 +836,9 @@ connect_components() {
   local status
   status="$(connect_status)"
   info "以管理员 $(status_of user "$status") 的身份接入：凭证加密保存在工作台，操作写入审计日志"
-  connect_vikunja "$(status_of vikunja "$status")"
+  connect_vikunja "$(status_of vikunja "$status")" "$(status_of vikunja_login "$status")"
   connect_github "$(status_of github "$status")"
-  connect_n8n "$(status_of n8n "$status")"
+  connect_n8n "$(status_of n8n "$status")" "$(status_of n8n_login "$status")"
   status="$(connect_status)"
   expose_apps "$status"
   step "接入状态"

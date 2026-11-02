@@ -364,3 +364,11 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .assistant-messages li.is-mine { text-align: right; }
 .assistant-sender { color: var(--muted); font-size: .72rem; }
 .assistant-composer { display: grid; gap: 8px; }
+
+/* Vikunja / n8n 登录账号（T-0080） */
+.app-login { padding: 24px; min-width: 0; margin: 18px 0; overflow-wrap: anywhere; }
+.app-login-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; align-items: center; margin: 12px 0; }
+.app-login-fields dt { color: var(--muted); font-size: .85rem; }
+.app-login-fields dd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; min-width: 0; }
+.app-login-fields code { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); overflow-wrap: anywhere; }
+@media (max-width: 760px) { .app-login { padding: 16px; } .app-login-fields { grid-template-columns: minmax(0, 1fr); } }

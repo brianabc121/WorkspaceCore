@@ -25,11 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.agent_ca import agent_ca_context
 from app.domain.agents import agent_secret_context
+from app.domain.app_logins import password_context
 from app.domain.connectors import account_context, webhook_context
 from app.domain.credentials import CredentialBox, CredentialError
 from app.models import (
     AgentCa,
     AgentSecretVersion,
+    AppLogin,
     AutomationConnection,
     Integration,
     IntegrationAccount,
@@ -89,6 +91,12 @@ FIELDS: tuple[SealedField, ...] = (
         AgentCa,
         "key_ref",
         lambda row: agent_ca_context(row.id),
+    ),
+    SealedField(
+        "app_logins.password_ref",
+        AppLogin,
+        "password_ref",
+        lambda row: password_context(row.id),
     ),
 )
 

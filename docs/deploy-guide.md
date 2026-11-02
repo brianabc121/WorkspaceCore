@@ -76,14 +76,17 @@ sudo bash scripts/deploy.sh connect
 
 | 组件 | 脚本自动做的事 | 需要你做的 |
 |---|---|---|
-| Vikunja（任务主源） | `make vikunja-up` → 建 Vikunja 用户（随机密码）→ 登录后建最小权限的 API Token（一年有效）→ 在工作台建集成、测试连接、同步项目与任务、注册 Webhook | 记下脚本显示的 Vikunja 账号密码（只显示一次） |
+| Vikunja（任务主源） | `make vikunja-up` → 建 Vikunja 用户（随机密码）→ 登录后建最小权限的 API Token（一年有效）→ 在工作台建集成、测试连接、同步项目与任务、注册 Webhook | 脚本显示一次 Vikunja 账号密码，同时加密保存到工作台「项目」页（只有管理员看得到），建议也存进密码管理器 |
 | GitHub（只读） | 显示预填好的 Token 创建链接（名称、90 天有效期、只读的 Issues / Pull requests / Actions）→ 列出 Token 能访问的仓库让你挑选 → 建集成、逐个仓库检查权限、开始同步 | 打开链接、勾选仓库、生成 Token 粘贴回终端（GitHub 不允许程序代建 Token） |
-| n8n（自动化） | `make n8n-up` → 建 owner 账号（随机密码）→ 建只读 API Key 与名为 `X-Workspace-Trigger` 的 Header Auth 凭据 → 在工作台建连接并测试 | 记下 n8n 账号密码；之后自己搭工作流（Webhook 节点选这个凭据），再到工作台“自动化”页登记 |
+| n8n（自动化） | `make n8n-up` → 建 owner 账号（随机密码）→ 建只读 API Key 与名为 `X-Workspace-Trigger` 的 Header Auth 凭据 → 在工作台建连接并测试 | n8n 账号密码同样保存在工作台「自动化」页；之后自己搭工作流（Webhook 节点选这个凭据），再到工作台“自动化”页登记 |
 
 - 接入以首次安装创建的管理员身份进行：Token 加密保存在工作台，操作写进审计日志，和在网页上配置一样。
 - 密码和 Token 不出现在命令行参数和日志里（Vikunja 建用户的命令行例外：密码会在 Vikunja 容器里短暂出现在进程参数中）。
 - 已经接入的组件不会重复配置。GitHub 已接入时会问要不要换 Token 或仓库（例如权限检查没通过、重新生成了 Token）。
 - Vikunja 用户或 n8n owner 已经存在时，脚本改为询问它的密码。
+- 登录成功的 Vikunja、n8n 账号密码加密保存到工作台：管理员在「项目」「自动化」页的「登录账号」卡片里点「显示密码」
+  或「复制密码」（每次都写审计日志），也可以在那里修改。之前已经接入、还没保存的，再运行 `connect` 时会问一次，
+  输入账号密码（脚本先登录核对）后保存；也可以直接在页面上填写。member、viewer 看不到这张卡片。
 - 无人值守（`--yes`）时自动接入 Vikunja 和 n8n，跳过 GitHub。
 - 最后显示接入状态：「已接入」「未接入」，或者已保存但用不了的原因（凭证失效、暂时连不上等），以及 Vikunja、n8n 的打开地址。
 - 依据和实测记录见 [`decisions/2026-11-02-deploy-connect.md`](decisions/2026-11-02-deploy-connect.md)。

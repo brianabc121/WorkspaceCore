@@ -134,7 +134,8 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 - `integrations.webhook_secret_ref`；
 - `automation_connections.api_key_ref`、`trigger_secret_ref`；
 - `agent_secret_versions.ciphertext_ref`；
-- `agent_ca.key_ref`。
+- `agent_ca.key_ref`；
+- `app_logins.password_ref`（迁移 `0019` 新增）。
 
 步骤见 `docs/deployment.md` 第 6.1 节。
 
@@ -185,5 +186,11 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 | 表 | 主要字段 | 约束与说明 |
 |---|---|---|
 | `agent_instances`（新增列） | `im_token_expires_at` | 可空，无默认值。实例启动时领取 IM 令牌，工作台按 OpenIM 返回的 `expireTimeSeconds` 记下到期时间（令牌有效期 30 天）；Worker 每天检查，到期前 7 天提醒管理员（`agent_im_token_expiring`）。每周的定时重启会换新令牌、刷新这一列 |
+
+### 迁移 `0019`（T-0080）
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `app_logins` | `id`、`workspace_id`、`app`、`username`、`password_ref`、`version`、`created_at`、`updated_at`、`updated_by` | Vikunja、n8n 管理界面的登录账号，给管理员看的备忘（工作台的 Connector 仍只用 API Token / API Key）；`(workspace_id, app)` 唯一，CHECK `app` ∈ `vikunja` / `n8n`；`username` 是 Vikunja 用户名或 n8n 登录邮箱；`password_ref` 可空，只存 `enc:v1` 引用（用途绑定 `app_login:<id>:password`），列表接口不返回，查看明文要单独请求并写审计；随工作空间级联删除，`updated_by` → `users`（删除后置空）；`version` 用于乐观并发。见 `docs/decisions/2026-11-02-app-logins.md` |
 
 ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。

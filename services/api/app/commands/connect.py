@@ -11,11 +11,15 @@
         n8n --owner-email you@example.com --public-url http://localhost:5678
     docker compose exec -T api python -m app.commands.connect public-urls \\
         --vikunja https://vikunja.example.com --n8n https://n8n.example.com
+    printf '%s\\n' "$PASSWORD" | docker compose exec -T api python -m app.commands.connect \\
+        save-login --app vikunja --username admin
 
 - 密码与 Token 只从标准输入读，不出现在命令行参数、进程列表与日志里。
 - 以工作空间管理员本人的身份调用和网页相同的服务：凭证加密保存、写审计、要求 admin 以上角色。
   默认是首次安装创建的管理员和他唯一管理的工作空间；不唯一时用 --email / --workspace 指定。
 - 已经接入的组件不重复创建，只报告状态（更换凭证到工作台“集成设置”里改）。
+- 登录成功的 Vikunja 用户、n8n owner 的账号密码加密保存到工作台，
+  管理员在「项目」「自动化」页查看（T-0080）。
 - 接口的核验依据见 app/integrations/provisioning.py 与 docs/decisions/2026-11-02-deploy-connect.md。
 
 退出码：0 完成或已接入；1 接入失败（外部服务拒绝、测试没通过）；2 用法错误或前提不满足。
@@ -38,6 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings, get_settings
 from app.core.errors import ApiError
 from app.core.resources import create_engine, create_redis
+from app.domain.app_logins import AppLoginService
 from app.domain.automations import AutomationService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.integrations import IntegrationService
@@ -51,6 +56,7 @@ from app.jobs.queue import ArqJobQueue, JobQueue
 from app.models import User
 from app.repositories import users as user_repo
 from app.repositories import workspaces as workspace_repo
+from app.schemas.app_logins import App, AppLoginUpsert
 from app.schemas.automations import AutomationConnectionUpsert
 from app.schemas.integrations import (
     GitHubIntegrationCreate,
@@ -133,6 +139,9 @@ class Env:
     def automations(self) -> AutomationService:
         return AutomationService(self.db, self.settings, self.runtime)
 
+    def logins(self) -> AppLoginService:
+        return AppLoginService(self.db, self.settings, self.runtime)
+
 
 @asynccontextmanager
 async def environment() -> AsyncIterator[Env]:
@@ -195,6 +204,48 @@ def read_secret(label: str) -> str:
     return value
 
 
+_APP_TITLE = {"vikunja": "Vikunja", "n8n": "n8n"}
+_APP_PAGE = {"vikunja": "项目", "n8n": "自动化"}
+
+
+async def save_login(
+    service: AppLoginService,
+    actor: CliActor,
+    access: WorkspaceAccess,
+    app: App,
+    username: str,
+    password: str,
+) -> None:
+    """新建或覆盖工作台保存的登录账号（T-0080）。"""
+    current = next(item for item in (await service.list(access)).items if item.app == app)
+    body = AppLoginUpsert.model_validate(
+        {"version": current.version, "username": username, "password": password}
+    )
+    await service.put(actor, access, app, body)
+
+
+async def _remember_login(
+    env: Env, actor: CliActor, access: WorkspaceAccess, app: App, username: str, password: str
+) -> None:
+    """接入时登录成功的账号顺手保存；保存失败不影响接入，只提示到页面上手动填写。
+
+    用单独的数据库会话：失败时回滚不会让接入流程里已加载的用户、工作空间对象失效。
+    """
+    title, page = _APP_TITLE[app], _APP_PAGE[app]
+    try:
+        async with AsyncSession(env.db.bind, expire_on_commit=False) as db:
+            service = AppLoginService(db, env.settings, env.runtime)
+            await save_login(service, actor, access, app, username, password)
+    except (ValidationError, ApiError) as error:
+        reason = error.message if isinstance(error, ApiError) else "账号或密码格式不对"
+        print(
+            f"注意  没能把 {title} 的登录账号保存到工作台（{reason}），可以在「{page}」页手动填写",
+            file=sys.stderr,
+        )
+        return
+    print(f"已把 {title} 的登录账号加密保存到工作台（管理员在「{page}」页查看）")
+
+
 def _find(items: list[IntegrationOut], provider: str) -> IntegrationOut | None:
     return next((item for item in items if item.provider == provider), None)
 
@@ -237,7 +288,8 @@ async def _sync_line(service: IntegrationService, access: WorkspaceAccess, provi
 
 
 async def cmd_status(env: Env, args: argparse.Namespace) -> int:
-    """key=value 一行一项，供部署脚本解析：setup、vikunja、github、n8n（none 表示还没接入）。"""
+    """key=value 一行一项，供部署脚本解析：setup、vikunja、github、n8n（none 表示还没接入），
+    以及 vikunja_login、n8n_login（saved 表示工作台保存了登录密码）。"""
     if await user_repo.count(env.db) == 0:
         print("setup=required")
         return 0
@@ -250,6 +302,8 @@ async def cmd_status(env: Env, args: argparse.Namespace) -> int:
         print(f"{provider}={found.status if found else 'none'}")
     connection = await env.automations().get_connection(access)
     print(f"n8n={connection.status if connection.configured and connection.status else 'none'}")
+    for login in (await env.logins().list(access)).items:
+        print(f"{login.app}_login={'saved' if login.password_set else 'none'}")
     return 0
 
 
@@ -264,6 +318,7 @@ async def cmd_vikunja(env: Env, args: argparse.Namespace) -> int:
     password = read_secret("Vikunja 密码")
     provisioner = VikunjaProvisioner(env.runtime.http("provision:vikunja"), args.base_url)
     session = await provisioner.login(args.username, password)
+    await _remember_login(env, actor, access, "vikunja", args.username, password)
     expires = datetime.now(UTC).replace(microsecond=0) + timedelta(days=VIKUNJA_TOKEN_DAYS)
     created = await provisioner.create_token(session, title=TOKEN_TITLE, expires_at=expires)
     print(f"已在 Vikunja 创建 API Token「{TOKEN_TITLE}」（最小权限，{expires:%Y-%m-%d} 到期）")
@@ -404,6 +459,7 @@ async def cmd_n8n(env: Env, args: argparse.Namespace) -> int:
             raise
         print(f"已创建 n8n owner 账号：{args.owner_email}")
     cookie = await provisioner.login(email=args.owner_email, password=password)
+    await _remember_login(env, actor, access, "n8n", args.owner_email, password)
     api_key = await provisioner.create_api_key(cookie, label=N8N_KEY_LABEL)
     print("已在 n8n 创建只读 API Key（workflow:list/read、execution:list/read）")
     secret = secrets.token_urlsafe(32)
@@ -497,6 +553,32 @@ async def cmd_relink(env: Env, args: argparse.Namespace) -> int:
 
 # ---------------------------------------------------------------- 入口
 
+
+async def cmd_save_login(env: Env, args: argparse.Namespace) -> int:
+    """把已有的 Vikunja 用户 / n8n owner 的账号密码保存到工作台（标准输入：密码）。
+
+    默认先登录一次确认密码正确（Vikunja 密码不对返回 403，n8n 返回 401），不对就不保存。
+    """
+    actor, access = await resolve(env.db, args.email, args.workspace)
+    password = read_secret(f"{_APP_TITLE[args.app]} 密码")
+    if not args.no_verify:
+        if args.app == "vikunja":
+            vikunja = VikunjaProvisioner(env.runtime.http("provision:vikunja"), args.base_url)
+            await vikunja.login(args.username, password)
+        else:
+            n8n = N8nProvisioner(env.runtime.http("provision:n8n"), args.base_url)
+            await n8n.login(email=args.username, password=password)
+        print(f"已用这个账号登录 {_APP_TITLE[args.app]}，密码正确")
+    try:
+        await save_login(env.logins(), actor, access, args.app, args.username, password)
+    except ValidationError as error:
+        raise _validation(error) from None
+    print(
+        f"已保存到工作台：管理员在「{_APP_PAGE[args.app]}」页查看 {_APP_TITLE[args.app]} 的登录账号"
+    )
+    return 0
+
+
 Command = Callable[[Env, argparse.Namespace], Awaitable[int]]
 COMMANDS: dict[str, Command] = {
     "status": cmd_status,
@@ -507,6 +589,7 @@ COMMANDS: dict[str, Command] = {
     "n8n": cmd_n8n,
     "public-urls": cmd_public_urls,
     "relink": cmd_relink,
+    "save-login": cmd_save_login,
 }
 
 
@@ -540,10 +623,19 @@ def parser() -> argparse.ArgumentParser:
     )
     urls.add_argument("--n8n", default=None, help="n8n 编辑器的新对外地址")
     sub.add_parser("relink", help="按 Vikunja 当前的打开地址刷新已同步的项目与任务链接")
+    login = sub.add_parser(
+        "save-login", help="把 Vikunja / n8n 的登录账号保存到工作台（标准输入：密码）"
+    )
+    login.add_argument("--app", required=True, choices=["vikunja", "n8n"])
+    login.add_argument("--username", required=True, help="Vikunja 用户名；n8n 用 owner 的登录邮箱")
+    login.add_argument("--base-url", default=None, help="核对密码时访问的地址（默认容器内地址）")
+    login.add_argument("--no-verify", action="store_true", help="不登录核对密码，直接保存")
     return root
 
 
 async def run(args: argparse.Namespace) -> int:
+    if args.command == "save-login" and args.base_url is None:
+        args.base_url = "http://vikunja:3456" if args.app == "vikunja" else "http://n8n:5678"
     async with environment() as env:
         try:
             return await COMMANDS[args.command](env, args)
