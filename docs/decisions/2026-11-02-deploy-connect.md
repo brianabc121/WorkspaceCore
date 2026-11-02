@@ -113,3 +113,36 @@
   只改 `public_url` 不会重写，要等下一次全量同步。现在改 Vikunja 集成的浏览器地址（网页或 `connect public-urls`）时
   立即重写已同步的链接（`projection.relink`，持投影锁）；`connect relink` 只按当前地址刷新链接、不改地址，
   `deploy.sh connect` 在对外设置没变化时调用它，修好 T-0079 之前改过地址留下的旧链接。
+
+## 7. 一键部署 OpenIM（T-0081）
+
+- 人类要求（2026-11-02）一键部署脚本也把 OpenIM 部署起来。`deploy.sh connect`（安装结束时也会运行）在 n8n 之后问
+  「部署 OpenIM？」：内存少于 4 GB、或 Docker 所在磁盘剩余不到 12 GB 且还没构建过镜像时默认「否」，其余默认「是」。
+- 步骤：
+  1. 构建打过补丁的 `openim-server` 镜像（`make openim-build`；镜像已存在就跳过）。官方镜像有越权问题，只能在服务器上构建
+     （OC-0 ADR 第 4 节、OC-3 ADR）。基础镜像从 Docker Hub 拉取失败时，改用 `BASE_REGISTRY=mirror.gcr.io/library` 再试一次
+     （`build.sh` 本来就支持，digest 不变）；
+  2. `make openim-up`（`--wait`，最多 10 分钟）；
+  3. `.env` 里 `OPENIM_API_URL`、`OPENIM_OBJECT_URL` 为空时填 `http://openim-server:10002`、`http://garage:3900`，
+     再 `make up` 让 api、worker 生效；已有别的值时保持不变；
+  4. `connect status` 的 `openim=` 行（与运维页同样的检查：用 imAdmin 令牌查通知账号）变成 `ok` 才算部署成功，最多等 90 秒。
+  已部署（`ok`）时跳过；已配置但连不上（`unavailable`）时不再询问，直接重新执行上面的步骤（都是幂等的）。
+- **与 OpenClaw 接入入口解耦**：之前 `infra/openim/compose.yaml` 把 openim-server 接到 `agent-im` 网络，而这个网络只有
+  `make agents-up`（要先准备接入入口的证书）才会创建，所以不部署接入入口就起不了 OpenIM。现在 `agent-im` 挪到
+  `infra/openim/compose.agents.yaml`，`make openim-up` 在网络存在时自动叠加；先部署 OpenIM、后部署接入入口时，
+  `make agents-up` 重新运行 `make openim-up`，让 openim-server 加入 `agent-im`。网络隔离不变：没有接入入口时
+  openim-server 只在 `openim` 与 `im` 网络里。
+- `deploy.sh upgrade`：OpenIM 在运行时，按新版本锁定的镜像标签构建（标签没变就跳过）并重新 `make openim-up`。
+- `deploy.sh status` 显示 OpenIM 是否部署、能否连上；`reset` 本来就会删除 `<项目>-openim` 的容器与数据卷（构建好的镜像保留）。
+- 运行时的镜像（mongo、redis、kafka、garage、alpine）仍从 Docker Hub 拉取；匿名拉取被限流（429 `toomanyrequests`）时，
+  脚本提示等一小时或 `docker login` 后重新运行 `connect`。
+- 沙箱验证（2026-11-02，独立项目名与网段，镜像已构建过，所以没有重新构建）：
+  - `deploy.sh connect` 拒绝 Vikunja、GitHub、n8n，同意 OpenIM：`make openim-up` 约 1 分钟全部健康，`.env` 填好两个地址、
+    api / worker 重启后 `connect status` 为 `openim=ok`，汇总显示「OpenIM：已部署」；openim-server 只在 `openim` 与
+    `im`（`<IM_NET>.2`）网络里；
+  - 管理员登录后 `GET /api/v1/im/status` 返回 `available: true, account_ready: true`（自动注册了 IM 账号），
+    运维页 OpenIM 为 `ok`；
+  - 再运行 `connect`：OpenIM 一项显示「已部署」直接跳过；`deploy.sh status` 显示「OpenIM：已部署」；
+  - 之后 `make agents-up`：重新 `openim-up`，openim-server 加入 `agent-im`，`im` 里的固定地址不变，`openim=ok`；
+  - `upgrade_openim`：镜像已存在时跳过构建，重新 `openim-up` 成功。
+  - 没有在沙箱里验证：从零构建镜像（CI 的 ci-openim 每次都构建）、内存不足 4 GB 时的默认选择、Docker Hub 限流时的重试。

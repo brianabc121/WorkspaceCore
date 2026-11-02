@@ -82,3 +82,23 @@ def test_long_running_services_have_healthchecks() -> None:
             assert "healthcheck:" in block, f"{path}: {name} 没有健康检查"
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     assert "$(OPENIM_COMPOSE) up -d --wait" in makefile
+
+
+def test_openim_runs_without_the_agent_gateway() -> None:
+    """T-0081：一键部署脚本只部署 OpenIM 时没有 agent-im 网络（它由 OpenClaw 接入入口创建）。
+
+    基础 Compose 不引用它；compose.agents.yaml 只在网络存在时由 make openim-up 叠加，
+    make agents-up 在 OpenIM 已运行时重新 openim-up，让 openim-server 加入。
+    """
+    base = (ROOT / "infra/openim/compose.yaml").read_text(encoding="utf-8")
+    assert "_agent-im" not in base and "agent-im: {}" not in base
+    agents = (ROOT / "infra/openim/compose.agents.yaml").read_text(encoding="utf-8")
+    assert "name: ${WORKSPACE_PROJECT:-my-workspace}_agent-im" in agents
+    assert "openim-server:" in agents and "agent-im: {}" in agents
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    compose = makefile.split("OPENIM_COMPOSE = ", 1)[1].split("\n\n", 1)[0]
+    # 用 shell 的 $$(...) 在执行时判断：$(shell) 在 make 展开命令时就执行，早于 agent-gateway 启动
+    assert "$$(docker network inspect $(WORKSPACE_PROJECT)_agent-im" in compose
+    assert "compose.agents.yaml" in compose
+    agents_up = makefile.split("\nagents-up:", 1)[1].split("\n\n", 1)[0]
+    assert "$(OPENIM_COMPOSE) up -d --wait" in agents_up

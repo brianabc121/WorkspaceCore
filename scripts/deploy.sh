@@ -829,8 +829,90 @@ expose_apps() {
   return 0
 }
 
+# ---------------------------------------------------------------- OpenIM（T-0081）
+# 「消息」页（管理员之间、管理员与 OpenClaw 实例）的后端。openim-server 用打过补丁的镜像（官方镜像有越权问题），
+# 只能在服务器上构建：从 GitHub 取锁定的上游提交、打 infra/openim/patches/ 的补丁、编译。
+openim_image() { sed -n 's|^    image: \(my-workspace/openim-server:.*\)$|\1|p' "$ROOT/infra/openim/compose.yaml" | head -1; }
+openim_running() { [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME:-$PROJECT}-openim" 2>/dev/null)" ]]; }
+openim_label() {
+  case "$1" in
+    ok) echo "已部署" ;;
+    none | "") echo "未部署" ;;
+    unavailable) echo "已配置，但工作台现在连不上" ;;
+    *) echo "状态未知（$1）" ;;
+  esac
+}
+
+build_openim() {
+  local image
+  image="$(openim_image)"
+  [[ -n $image ]] || { warn "读不到 infra/openim/compose.yaml 里的镜像名"; return 1; }
+  if docker image inspect "$image" >/dev/null 2>&1; then ok "镜像 $image 已经构建过"; return 0; fi
+  info "构建 $image：取锁定的上游源码、打补丁、编译（第一次约 5 ~ 15 分钟，临时占用约 8 GB 磁盘）"
+  (cd "$ROOT" && make -s openim-build </dev/null) && return 0
+  # 基础镜像（golang、alpine）默认从 Docker Hub 拉取；匿名拉取有次数限制（429 toomanyrequests）
+  warn "构建没有成功；改用 Google 的 Docker Hub 镜像站（mirror.gcr.io，镜像 digest 不变）再试一次"
+  (cd "$ROOT" && BASE_REGISTRY=mirror.gcr.io/library make -s openim-build </dev/null)
+}
+
+# 让 api、worker 连上 OpenIM：.env 里两个地址为空时填上，有变化才重启 api、worker
+openim_env() {
+  local changed=0 key want current
+  for key in OPENIM_API_URL OPENIM_OBJECT_URL; do
+    if [[ $key == OPENIM_API_URL ]]; then want=http://openim-server:10002; else want=http://garage:3900; fi
+    current="$(env_get "$key")"
+    if [[ -z $current ]]; then env_set "$key" "$want"; changed=1
+    elif [[ $current != "$want" ]]; then info "$key 已经设置为 $current，保持不变"
+    fi
+  done
+  (( changed )) || return 0
+  info "已在 .env 里设置 OPENIM_API_URL、OPENIM_OBJECT_URL，重启 api、worker 让它们生效"
+  (cd "$ROOT" && make -s up </dev/null)
+}
+
+connect_openim() {
+  local state="$1" free_kb mem_kb default=y i
+  step "OpenIM（「消息」页：管理员之间、管理员与 OpenClaw 实例，可选）"
+  if [[ $state == ok ]]; then ok "已部署"; return 0; fi
+  if [[ $state == unavailable ]]; then
+    warn "已配置，但工作台现在连不上 OpenIM：重新启动一次"
+  else
+    mem_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+    if (( mem_kb > 0 && mem_kb < 3800 * 1024 )); then
+      warn "内存 $((mem_kb / 1024)) MB：OpenIM 另外占用约 1 GB，建议总内存至少 4 GB"; default=n
+    fi
+    free_kb="$(df -Pk "$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /)" 2>/dev/null | awk 'NR==2 {print $4}')"
+    if [[ -n $free_kb ]] && (( free_kb < 12 * 1024 * 1024 )) && ! docker image inspect "$(openim_image)" >/dev/null 2>&1; then
+      warn "Docker 所在磁盘剩余 $((free_kb / 1024 / 1024)) GB：第一次构建要临时占用约 8 GB"; default=n
+    fi
+    confirm "部署 OpenIM？（另外占用约 1 GB 内存；第一次要在服务器上构建镜像，约 5 ~ 15 分钟）" "$default" \
+      || { info "跳过；以后运行 deploy.sh connect"; return 0; }
+  fi
+  build_openim || { warn "OpenIM 镜像没有构建成功（见上面的输出），跳过；以后重新运行 deploy.sh connect"; return 0; }
+  if ! (cd "$ROOT" && make -s openim-up </dev/null); then
+    warn "OpenIM 没有启动成功（见上面的输出）：运行 make openim-logs 查看日志；拉取镜像遇到 429 toomanyrequests 时等一小时，或 docker login 后再运行 deploy.sh connect"
+    return 0
+  fi
+  openim_env || { warn "api、worker 没有重启成功（见上面的输出）"; return 0; }
+  for i in $(seq 1 30); do
+    [[ $(status_of openim "$(connect_status)") == ok ]] && { ok "OpenIM 已部署：工作台的「消息」页可以用了"; return 0; }
+    sleep 3
+  done
+  warn "OpenIM 已启动，但工作台还连不上：到工作台「运维」页查看 OpenIM 的状态，或运行 make openim-logs"
+  return 0
+}
+
+# 升级：已经部署了 OpenIM 时，按新版本锁定的镜像重新构建（标签没变就跳过）并重建容器
+upgrade_openim() {
+  openim_running || return 0
+  step "OpenIM"
+  build_openim || { warn "OpenIM 镜像没有构建成功，继续用正在运行的版本；以后重新运行 deploy.sh upgrade"; return 0; }
+  (cd "$ROOT" && make -s openim-up </dev/null) || warn "OpenIM 没有启动成功：运行 make openim-logs 查看日志"
+  return 0
+}
+
 connect_components() {
-  step "接入组件：Vikunja（任务）、GitHub（只读）、n8n（自动化）"
+  step "接入组件：Vikunja（任务）、GitHub（只读）、n8n（自动化）、OpenIM（消息）"
   compose ps --status running --services </dev/null 2>/dev/null | grep -qx api || { warn "api 没有运行，先部署（install）"; return 0; }
   wait_for_setup || return 0
   local status
@@ -839,10 +921,12 @@ connect_components() {
   connect_vikunja "$(status_of vikunja "$status")" "$(status_of vikunja_login "$status")"
   connect_github "$(status_of github "$status")"
   connect_n8n "$(status_of n8n "$status")" "$(status_of n8n_login "$status")"
+  connect_openim "$(status_of openim "$status")"
   status="$(connect_status)"
   expose_apps "$status"
   step "接入状态"
   info "Vikunja：$(status_label "$(status_of vikunja "$status")")　GitHub：$(status_label "$(status_of github "$status")")　n8n：$(status_label "$(status_of n8n "$status")")"
+  info "OpenIM：$(openim_label "$(status_of openim "$status")")"
   info "打开地址：Vikunja $(public_url_of VIKUNJA_PUBLIC_URL http://localhost:3456)　n8n $(public_url_of N8N_PUBLIC_URL http://localhost:5678)"
   info "以后要接入或重试：bash $ROOT/scripts/deploy.sh connect"
 }
@@ -923,6 +1007,7 @@ do_upgrade() {
   migrate
   smoke
   [[ $BASE_URL == https://* ]] && check_https
+  upgrade_openim
   step "升级完成：$(git -C "$ROOT" log -1 --format='%h %cs %s')"
   if [[ $AFTER_PULL != "$(git -C "$ROOT" rev-parse HEAD)" ]]; then
     info "回滚：没有新迁移时 git -C $ROOT checkout $(git -C "$ROOT" rev-parse --short "$AFTER_PULL") 后再 make up；有新迁移见 docs/deployment.md 第 5.3 节"
@@ -1042,6 +1127,9 @@ do_status() {
     code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$BASE_URL/healthz" 2>/dev/null || true)"
     if [[ $code == 200 ]]; then ok "$BASE_URL/healthz → 200"; else warn "$BASE_URL/healthz → ${code:-无响应}"; fi
   fi
+  if compose ps --status running --services </dev/null 2>/dev/null | grep -qx api; then
+    info "OpenIM：$(openim_label "$(status_of openim "$(connect_status)")")"
+  fi
   show_setup
 }
 
@@ -1054,7 +1142,7 @@ ${C_B}My Workspace 部署脚本${C_0}（代码目录：$ROOT）
   2) 升级到最新版本（自动备份、迁移、检查）
   3) 清空项目（删除全部容器与数据，可选同时删除代码目录）
   4) 查看状态
-  5) 接入 Vikunja / GitHub / n8n（需要先在浏览器创建管理员）
+  5) 接入 Vikunja / GitHub / n8n，部署 OpenIM（需要先在浏览器创建管理员）
   0) 退出
 EOF
   local choice

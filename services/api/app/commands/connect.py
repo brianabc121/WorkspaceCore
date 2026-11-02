@@ -42,6 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings, get_settings
 from app.core.errors import ApiError
 from app.core.resources import create_engine, create_redis
+from app.domain import im
 from app.domain.app_logins import AppLoginService
 from app.domain.automations import AutomationService
 from app.domain.connectors import ConnectorRuntime
@@ -289,9 +290,11 @@ async def _sync_line(service: IntegrationService, access: WorkspaceAccess, provi
 
 async def cmd_status(env: Env, args: argparse.Namespace) -> int:
     """key=value 一行一项，供部署脚本解析：setup、vikunja、github、n8n（none 表示还没接入），
-    以及 vikunja_login、n8n_login（saved 表示工作台保存了登录密码）。"""
+    vikunja_login、n8n_login（saved 表示工作台保存了登录密码），
+    以及 openim（none / ok / unavailable）。"""
     if await user_repo.count(env.db) == 0:
         print("setup=required")
+        print(f"openim={await _openim_state(env)}")
         return 0
     print("setup=done")
     actor, access = await resolve(env.db, args.email, args.workspace)
@@ -304,7 +307,25 @@ async def cmd_status(env: Env, args: argparse.Namespace) -> int:
     print(f"n8n={connection.status if connection.configured and connection.status else 'none'}")
     for login in (await env.logins().list(access)).items:
         print(f"{login.app}_login={'saved' if login.password_set else 'none'}")
+    print(f"openim={await _openim_state(env)}")
     return 0
+
+
+async def _openim_state(env: Env) -> str:
+    """OpenIM（T-0081）：none 没有配置地址或 secret；ok 用 imAdmin 令牌查得到通知账号；
+    其他情况 unavailable。
+
+    与运维页的检查相同（app/domain/operations.py 的 _openim）。
+    """
+    client = im.openim_client(env.settings, env.runtime, env.redis)
+    if client is None:
+        return "none"
+    limit = env.settings.openim_timeout_seconds * 2 + 1
+    try:
+        await asyncio.wait_for(client.existing_users([im.NOTICE_USER_ID]), timeout=limit)
+    except (ConnectorError, TimeoutError):
+        return "unavailable"
+    return "ok"
 
 
 async def cmd_vikunja(env: Env, args: argparse.Namespace) -> int:
