@@ -5,6 +5,8 @@
   核验依据：`2026-10-30-vikunja-2.7.1-verification.md`（第 3 节）、`2026-10-30-github-rest-and-affine-verification.md`（第 3、4、10 节）、
   `2026-10-31-prometheus-grafana-n8n-verification.md`（第 5 节）
 
+> 其中 Vikunja 的部分（部署、接入、子域名、`connect vikunja` / `relink`）已由 `2026-11-02-remove-vikunja.md`（T-0082）移除；GitHub、n8n 的部分仍然有效。
+
 ## 1. 背景
 
 人类要求：首次安装后由程序自动配置 Vikunja，自动完成 GitHub 的认证、权限检查与同步，n8n 也要自动配置。

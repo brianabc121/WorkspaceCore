@@ -6,6 +6,8 @@
 - 依据：`docs/decisions/2026-10-30-vikunja-2.7.1-verification.md`（下称“核验 ADR”）；规范第 4.1、4.2、5.1、6、7、10 节
 - 实现：后端 T-0020（集成、Connector、项目 / 任务读写、幂等）与 T-0021（Webhook Inbox、Worker、对账）；前端 T-0022
 
+> 已被 `2026-11-02-remove-vikunja.md`（T-0082）取代：Vikunja 已移除，项目与任务由工作台自己管理（任务接口的幂等约定仍沿用，见该 ADR 第 3 节）。本文保留为历史记录。
+
 ## 1. 背景与原则
 
 - **Vikunja 是任务主源**（规范 4.2）。工作台只保存外部对象的映射与只读投影（`external_resources`）、幂等记录和本地状态，不把任务复制成自己的主表。

@@ -42,7 +42,7 @@
 | **新增：部署** | - `infra/openim/`：OpenIM 独立的 Compose 项目；<br/>- Caddy 两个接入入口；<br/>- `infra/openclaw/`：OpenClaw 服务器的接入包模板、取密钥小程序、启动包装脚本、隧道配置、检查清单；<br/>- 备份覆盖 OpenIM |
 | **修改** | - 凭证加密改为可轮换（现在的 `CREDENTIAL_ENCRYPTION_KEY` 不能轮换）；<br/>- 通知中心：增加 IM 未读和审批提醒；<br/>- 首页“AI 快捷提问”组件改为打开 IM；<br/>- 运维页增加 OpenClaw 实例和 OpenIM 的状态 |
 | **不做** | - 规范原来设计的 `ai_conversations` / `ai_messages` 表和 `/api/v1/ai/conversations` 接口；<br/>- 工作台调用 OpenClaw 的 OpenAI 兼容接口或 hooks；<br/>- Codex Cloud；<br/>- V2 资料包里的 Agent 控制面（13 张表、Codex 桥接、调度和对账服务） |
-| **不变** | V1 的全部功能与接口；Vikunja 仍是任务主源 |
+| **不变** | V1 的全部功能与接口（任务主源原为 Vikunja；T-0082 起项目与任务由工作台自己管理，见 `docs/decisions/2026-11-02-remove-vikunja.md`） |
 
 ## 3. 目标架构
 
@@ -149,7 +149,7 @@ flowchart LR
   - 每次取用都写审计：实例、ID、版本、来源 IP、结果；按实例限流。
 - **加密密钥可轮换**：
   - 密文带加密密钥版本；新增版本后后台重新加密；旧版本在全部重新加密完之前保留；
-  - 这项改造同时覆盖现有的集成凭证（Vikunja、GitHub、n8n）。
+  - 这项改造同时覆盖现有的集成凭证（GitHub、n8n；当时还有 Vikunja，T-0082 已移除）。
 - **OpenClaw 那边**：
   - 模型密钥：用 exec SecretRef 调取密钥小程序；
   - MCP 请求头：直接用实例凭证（`${MYWS_INSTANCE_TOKEN}`），因为这个配置项不支持 SecretRef；
@@ -284,7 +284,7 @@ flowchart LR
 ### 6.1 服务器 A
 
 - **OpenIM**：
-  - 放在 `infra/openim/compose.yaml`，用单独的 Compose 项目，做法和 `infra/vikunja/` 一样；
+  - 放在 `infra/openim/compose.yaml`，用单独的 Compose 项目，做法和 `infra/n8n/` 一样；
   - 镜像全部锁定 tag 加 digest；
   - **密码和 `secret` 全部随机生成**，默认值 `openIM123` 不允许出现，`make env` 时生成；
   - `bitnamilegacy/*` 镜像在 OC-0 评估换成各组件的官方镜像；

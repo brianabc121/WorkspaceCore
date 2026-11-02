@@ -4,6 +4,8 @@
 - 关联：`2026-11-02-deploy-connect.md`（第 2.4 条由本决定修改）、`services/api/app/domain/app_logins.py`、
   `apps/web/src/features/app-logins/AppLoginCard.vue`、迁移 `0019`
 
+> 其中 Vikunja 的部分（「项目」页的登录账号卡片、`app = vikunja`）已由 `2026-11-02-remove-vikunja.md`（T-0082）移除；现在只保存 n8n 的登录账号。
+
 ## 1. 背景
 
 人类要求（2026-11-02）：在工作台的「项目」页（Vikunja）与「自动化」页（n8n）直接看到这两个管理界面的账号密码，

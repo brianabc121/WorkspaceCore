@@ -90,20 +90,46 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 约定见 `docs/decisions/2026-10-30-sprint-3-tasks-contract.md`（Vikunja 的核验结果见 `docs/decisions/2026-10-30-vikunja-2.7.1-verification.md`）。
 除 Webhook 外都需要 `X-Workspace-Id`；任务的写接口还必须带 `Idempotency-Key`（UUID）。
 
+> **T-0082（2026-11-02）移除了 Vikunja**：项目与任务改为工作台自己的数据，现行接口见下面的「项目与任务（T-0082）」；
+> 本节的 Vikunja 部分保留为历史记录。
+
 | 方法 | 路径 | 说明 | 状态 |
 |---|---|---|---|
-| GET / POST | `/api/v1/integrations` | 集成列表（viewer）/ 新建 Vikunja 集成（admin，Token 只写不读） | 已实现（T-0020） |
+| GET / POST | `/api/v1/integrations` | 集成列表（viewer）/ 新建集成（admin，Token 只写不读；T-0082 起只能是 GitHub） | 已实现（T-0020） |
 | PATCH | `/api/v1/integrations/{integration_id}` | 修改集成（admin，乐观并发） | 已实现（T-0020） |
 | POST | `/api/v1/integrations/{integration_id}/test` | 测试连接与权限（admin） | 已实现（T-0020） |
 | POST | `/api/v1/integrations/{integration_id}/sync` | 排队全量同步（admin，202） | 已实现（T-0021） |
-| GET | `/api/v1/projects` | 外部项目（投影，带 `sync` 新鲜度） | 已实现（T-0020） |
-| GET / POST | `/api/v1/tasks` | 任务列表（投影，过滤与分页）/ 创建任务（member，幂等键） | 已实现（T-0020） |
-| GET / PATCH / DELETE | `/api/v1/tasks/{task_id}` | 详情 / 修改 / 删除（member，幂等键 + `version`） | 已实现（T-0020） |
-| POST | `/api/v1/webhooks/vikunja/{integration_id}` | Vikunja 回调：只认签名，不用会话与 CSRF（202） | 已实现（T-0021） |
+| GET | `/api/v1/projects` | ~~外部项目（投影，带 `sync` 新鲜度）~~ T-0082 改为工作台自己的项目 | 已实现（T-0020，T-0082 改） |
+| GET / POST | `/api/v1/tasks` | 任务列表（过滤与分页）/ 创建任务（member，幂等键）；T-0082 起是本地数据 | 已实现（T-0020，T-0082 改） |
+| GET / PATCH / DELETE | `/api/v1/tasks/{task_id}` | 详情 / 修改 / 删除（member，幂等键 + `version`）；T-0082 起是本地数据 | 已实现（T-0020，T-0082 改） |
+| POST | ~~`/api/v1/webhooks/vikunja/{integration_id}`~~ | Vikunja 回调：只认签名，不用会话与 CSRF（202） | T-0082 已删除 |
 
 新增错误码：`409 IDEMPOTENCY_KEY_REUSED` / `IDEMPOTENCY_IN_PROGRESS` / `OPERATION_NOT_APPLIED` / `INTEGRATION_UNAVAILABLE` / `SYNC_IN_PROGRESS`、
-`401 WEBHOOK_SIGNATURE_INVALID`、`403 EXTERNAL_FORBIDDEN`、`413 PAYLOAD_TOO_LARGE`、`422 EXTERNAL_VALIDATION_FAILED`、
+`401 WEBHOOK_SIGNATURE_INVALID`（T-0082 随 Webhook 删除）、`403 EXTERNAL_FORBIDDEN`、`413 PAYLOAD_TOO_LARGE`、`422 EXTERNAL_VALIDATION_FAILED`、
 `502 INTEGRATION_UNAUTHORIZED`、`503 EXTERNAL_UNAVAILABLE` / `EXTERNAL_RATE_LIMITED`、`504 RESULT_UNKNOWN`（用同一个幂等键重发以查询结果）。
+
+## 项目与任务（T-0082）
+
+约定见 `docs/decisions/2026-11-02-remove-vikunja.md` 第 3 节（取代 Sprint 3 契约里 Vikunja 的部分）。项目与任务是工作台自己的数据
+（单人版：没有负责人、指派、评论）。全部需要 `X-Workspace-Id`；viewer 可读，member 及以上可写，后端校验工作空间范围与角色。
+
+| 方法 | 路径 | 说明 | 状态 |
+|---|---|---|---|
+| GET | `/api/v1/projects` | 项目列表：默认不含已归档（`include_archived=true` 包含），`q` 按标题搜索，游标分页；每项带 `open_tasks` / `done_tasks` | 已实现（T-0082） |
+| POST | `/api/v1/projects` | 新建项目（`title` 最多 120 字，`description` 最多 2000 字）；不需要 Idempotency-Key | 已实现（T-0082） |
+| GET | `/api/v1/projects/progress` | 首页“项目进度”：未归档项目的未完成 / 已完成任务数（`limit` 最大 20） | 已实现（T-0064，T-0082 改为本地数据） |
+| GET / PATCH / DELETE | `/api/v1/projects/{project_id}` | 详情 / 改名、改说明、归档或恢复（带整数 `version`）/ 删除（`?version=`，连同它的全部任务，审计记下删除的任务数） | 已实现（T-0082） |
+| GET / POST | `/api/v1/tasks` | 任务列表（`status` = `open` / `done` / `all`、`project_id`、`priority`、`due_before` / `due_after`、`q`、`sort`、游标分页）/ 创建任务（必须带 `Idempotency-Key`） | 已实现（T-0082） |
+| GET / PATCH / DELETE | `/api/v1/tasks/{task_id}` | 详情 / 修改（`Idempotency-Key` + `version`；可以改 `project_id` 移到别的项目）/ 删除（`Idempotency-Key` + `?version=`） | 已实现（T-0082） |
+
+- `ProjectOut`：`id`、`title`、`description`、`archived`、`open_tasks`、`done_tasks`、`version`（整数）、`created_at`、`updated_at`。
+- `TaskOut`：`id`、`project_id`、`title`、`description`、`done`、`done_at`、`priority`（0–5）、`due_at`、`labels`、`version`（不透明字符串）、`created_at`、`updated_at`。
+  去掉了 `integration_id`、`external_id`、`identifier`、`source_url`、`source_updated_at`、`synced_at`；任务列表不再带 `sync`。
+- `labels` 最多 20 个、每个最多 50 个字符，重复的只保留一个；修改任务时只有 `due_at` 可以设为 null（清除截止时间）。
+- 版本不一致返回 `409 VERSION_CONFLICT`，`details.current` 是最新的项目或任务。
+- 任务的幂等在同一个事务里完成：并发的同一个请求返回 `409 IDEMPOTENCY_IN_PROGRESS`（`Retry-After: 1`）；确定的失败（404、409）也记下来，重放时返回同样的错误。
+- 首页 `modules.tasks` 总是 `ok`（本地数据）；新工作空间的 `pending_tasks`、`active_projects` 是 0 而不是 null。
+- 删除了 `POST /api/v1/webhooks/vikunja/{integration_id}`；集成只剩 GitHub（`provider` 只能是 `github`），`IntegrationCheck.name` 去掉 `tasks_read`。
 
 ## Sprint 4 端点
 
@@ -211,14 +237,14 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
   `IM_SEND_REJECTED` / `PIN_LIMIT_REACHED` / `EXECUTION_NOT_PENDING` / `CONTACT_GROUP_EXISTS`（OC-3 补充）、
   `503 IM_UNAVAILABLE`（V2 契约第 12 节）。
 
-## Vikunja / n8n 登录账号（T-0080）
+## n8n 登录账号（T-0080；T-0082 去掉了 Vikunja）
 
 约定见 `docs/decisions/2026-11-02-app-logins.md`。都要 `X-Workspace-Id`，只给 owner / admin（member、viewer `403`）；
 响应都带 `Cache-Control: no-store`。
 
 | 方法 | 路径 | 说明 | 状态 |
 |---|---|---|---|
-| GET | `/api/v1/app-logins` | 固定两项（`vikunja`、`n8n`）：用户名、`password_set`、`login_url`、`version`；**不含密码**；没保存时 `configured = false` | 已实现（T-0080） |
+| GET | `/api/v1/app-logins` | 固定一项（`n8n`；T-0082 前还有 `vikunja`）：用户名、`password_set`、`login_url`、`version`；**不含密码**；没保存时 `configured = false` | 已实现（T-0080） |
 | PUT | `/api/v1/app-logins/{app}` | 新建（必须给 `username`）或修改（必须带 `version`）；`password` 不填表示不改 | 已实现（T-0080） |
 | POST | `/api/v1/app-logins/{app}/reveal` | 返回明文密码；要 CSRF，每次写审计 `app_login.revealed`；没保存密码时 `404` | 已实现（T-0080） |
-| DELETE | `/api/v1/app-logins/{app}?version=` | 删除保存的账号（不影响 Vikunja、n8n 里的账号） | 已实现（T-0080） |
+| DELETE | `/api/v1/app-logins/{app}?version=` | 删除保存的账号（不影响 n8n 里的账号） | 已实现（T-0080） |

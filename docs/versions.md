@@ -25,9 +25,8 @@
 |---|---|---|---|---|---|
 | Prometheus 3.15.1 | `prom/prometheus:v3.15.1` | `sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2` | Apache-2.0 | `compose.yaml`（`--profile monitoring`） | `2026-10-31-prometheus-grafana-n8n-verification.md` |
 | Grafana 13.2.5 | `grafana/grafana:13.2.5` | `sha256:9f7aa1e1e3246aade5792d35a738049f7f32f89cd51d1956cf426a4e86268a84` | AGPL-3.0 | 同上 | 同上 |
-| Vikunja 2.7.1 | `vikunja/vikunja:2.7.1` | `sha256:f7dc8428d10aef17f3075886d3c1c022f566ec456f88985f02c137f4fc534576` | AGPL-3.0-or-later | `infra/vikunja/compose.yaml` | `2026-10-30-vikunja-2.7.1-verification.md` |
 | n8n 2.45.7 | `n8nio/n8n:2.45.7` | `sha256:9a8d8dcea75667496695d7810d7e1fe018a65efb36cc499d347f3931b3957b5d` | Sustainable Use License（`.ee` 文件另有企业许可） | `infra/n8n/compose.yaml` | `2026-10-31-prometheus-grafana-n8n-verification.md`、`2026-10-31-n8n-trigger-and-execution-verification.md` |
-| Vikunja / n8n 的数据库 | `postgres:16.15-alpine3.24` | 同 1.1 节 | PostgreSQL License | 两个 infra compose 文件 | — |
+| n8n 的数据库 | `postgres:16.15-alpine3.24` | 同 1.1 节 | PostgreSQL License | `infra/n8n/compose.yaml` | — |
 | AFFiNE | 不随本仓库部署 | — | `packages/backend` 与原生模块以外为 MIT；服务端为 AFFiNE Enterprise Edition 许可（CE 部分 MPL 2.0） | 用户自行部署，工作台只存链接 | `2026-10-30-github-rest-and-affine-verification.md` 第 7 节 |
 
 ### 1.3 本仓库镜像的基础镜像与构建工具
@@ -129,7 +128,7 @@ Node 运行时：22（`engines` 要求 ≥ 22.12；镜像里是 22.23.4）。锁
 
 ## 5. 许可证注意事项
 
-- **AGPL-3.0（Grafana、Vikunja）**：作为独立服务原样运行，工作台只通过 HTTP API 使用或生成外链，不修改也不链接它们的代码。修改它们并对外提供服务时，要按 AGPL 公开修改。
+- **AGPL-3.0（Grafana）**：作为独立服务原样运行，工作台只通过 HTTP API 使用或生成外链，不修改也不链接它的代码。修改它并对外提供服务时，要按 AGPL 公开修改。（Vikunja 已于 T-0082 移除。）
 - **n8n（Sustainable Use License）**：允许自托管用于内部业务。对外商业托管、或让其他客户配置工作流之前，要重新核验许可证（规范 7.5）。
 - **Redis 7.4（RSALv2 或 SSPLv1，二选一）**：Redis 从 7.4 起不再是 BSD 许可。
   - RSALv2 的限制是不得把 Redis 的功能作为服务提供给第三方。

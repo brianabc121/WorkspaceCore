@@ -25,7 +25,7 @@
 - [ ] `make scan` 通过（或最新的 `ci-security` 成功）：依赖没有高危或严重漏洞，git 历史里没有密钥，本仓库的镜像没有已修复的高危漏洞
 - [ ] 查看第三方镜像的报告（`scripts/security-scan.sh images` 的“只报告”部分）：
   - [ ] **Caddy**（对外入口）：上游有没有包含修复的新版本；有就按第 4 节升级
-  - [ ] PostgreSQL、Redis、Prometheus、Grafana、Vikunja、n8n、restic：上游有没有修复版本；暂不升级的写明原因
+  - [ ] PostgreSQL、Redis、Prometheus、Grafana、n8n、restic：上游有没有修复版本；暂不升级的写明原因
 - [ ] `.gitleaksignore` 新增的条目都写明了理由，不是真实凭据
 
 ## 3. 版本锁定
@@ -45,7 +45,7 @@
 - [ ] 本月做过恢复演练：`make restore-verify` 通过，记下快照 ID、耗时与结果
 - [ ] 升级前刚做过 `make backup`，快照 ID 已填在上面的发布记录里
 - [ ] `.env` 有一份单独保管的副本（不和备份放在一起），`BACKUP_PASSWORD` 也单独保管
-- [ ] Vikunja、n8n 等独立组件已各自备份（`docs/deployment.md` 第 5.1 节）
+- [ ] n8n 等独立组件已各自备份（`docs/deployment.md` 第 5.1 节）
 
 ## 5. 配置与密钥（`.env`）
 
@@ -56,7 +56,7 @@
 - [ ] `INTEGRATION_ALLOWED_HOSTS` 只包含确实需要访问的内部主机
 - [ ] 监控地址（`PROMETHEUS_URL`、`GRAFANA_URL`）只在内部网络可达
 - [ ] **密钥轮换**（按计划，或怀疑泄露时立即执行）：
-  - [ ] Vikunja、GitHub、n8n 的 Token / API Key：先在对方系统里生成新的，再到工作台的集成设置里替换，然后作废旧的
+  - [ ] GitHub、n8n 的 Token / API Key：先在对方系统里生成新的，再到工作台的集成设置里替换，然后作废旧的
   - [ ] `SESSION_SECRET`：
     - 修改后已有会话的 CSRF Token 全部失效，所有用户要重新登录后才能保存修改；
     - 审计日志里的 IP 哈希从此换了密钥，新旧记录不能互相对照。
