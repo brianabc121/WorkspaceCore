@@ -19,3 +19,6 @@ f9dc628f737a3acdc623f65c15cc77609e3074fb:infra/openim/patches/0004-deps-upgrade-
 f9dc628f737a3acdc623f65c15cc77609e3074fb:infra/openim/patches/0004-deps-upgrade-modules-with-fixed-high-severity-adviso.patch:generic-api-key:509
 f9dc628f737a3acdc623f65c15cc77609e3074fb:infra/openim/patches/0004-deps-upgrade-modules-with-fixed-high-severity-adviso.patch:generic-api-key:631
 f9dc628f737a3acdc623f65c15cc77609e3074fb:infra/openim/patches/0004-deps-upgrade-modules-with-fixed-high-severity-adviso.patch:generic-api-key:633
+# connect 命令的集成测试给内存版 Vikunja / n8n 用的假密码（T-0076）；之后的提交已换成低熵的假值
+92efc64d4d732014211dc5b7052b6ffa130acc80:services/api/tests/test_connect_command.py:generic-api-key:36
+92efc64d4d732014211dc5b7052b6ffa130acc80:services/api/tests/test_connect_command.py:generic-api-key:37

@@ -33,8 +33,8 @@ from tests.vikunja_support import Env, app_of, open_env
 
 pytestmark = pytest.mark.integration
 
-VIKUNJA_PASSWORD = "vikunja-Passw0rd-xyz"  # noqa: S105 - 测试密码
-N8N_PASSWORD = "N8n-Passw0rd-xyz"  # noqa: S105 - 测试密码
+VIKUNJA_PASSWORD = "vikunja password 1"  # noqa: S105 - 测试密码
+N8N_PASSWORD = "N8n password 1"  # noqa: S105 - 测试密码（n8n 要求含大写字母与数字）
 N8N_OWNER = "ops@example.com"
 
 
