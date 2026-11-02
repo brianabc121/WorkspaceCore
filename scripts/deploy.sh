@@ -218,11 +218,12 @@ check_dns() {
     return 0
   fi
   local_ips="$(hostname -I 2>/dev/null || true)"
-  local ip match=0
+  local ip match=0 outbound
   for ip in $resolved; do [[ " $local_ips " == *" $ip "* ]] && match=1; done
+  outbound="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
   if (( match )); then ok "$DOMAIN → $resolved（是本机地址）"
   else
-    warn "$DOMAIN → $resolved，本机网卡地址是 ${local_ips:-（未知）}"
+    warn "$DOMAIN → $resolved，本机出口地址是 ${outbound:-（未知）}"
     info "云服务器的公网 IP 通常不在网卡上，这种情况可以忽略；否则请检查 A 记录"
   fi
 }
@@ -373,7 +374,7 @@ do_install() {
 }
 
 run_backup() {
-  step "升级前备份数据库（make backup，加密的 restic 仓库）"
+  step "${1:-备份数据库}（make backup，加密的 restic 仓库）"
   # shellcheck source=/dev/null
   if [[ -f $BACKUP_ENV_FILE ]]; then set -a; . "$BACKUP_ENV_FILE"; set +a; info "已读取 $BACKUP_ENV_FILE"; fi
   if (cd "$ROOT" && make backup); then ok "备份完成"; return 0; fi
@@ -401,7 +402,7 @@ do_upgrade() {
       info "当前 $(git -C "$ROOT" log -1 --format='%h %cs %s' "$old")"
       info "目标 $(git -C "$ROOT" log -1 --format='%h %cs %s' "$new")（$(git -C "$ROOT" rev-list --count "$old..$new") 个新提交）"
       confirm "开始升级？" y || return 0
-      if compose ps --status running --services 2>/dev/null | grep -qx postgres; then run_backup; else warn "服务没有运行，跳过升级前备份"; fi
+      if compose ps --status running --services 2>/dev/null | grep -qx postgres; then run_backup "升级前备份数据库"; else warn "服务没有运行，跳过升级前备份"; fi
       mkdir -p "$ROOT/backups" && cp "$ROOT/.env" "$ROOT/backups/env-$(git -C "$ROOT" rev-parse --short "$old")-$(date +%Y%m%d%H%M%S)" && chmod 600 "$ROOT"/backups/env-*
       if git -C "$ROOT" show-ref -q --verify "refs/remotes/origin/$target"; then
         git -C "$ROOT" checkout -q "$target" && git -C "$ROOT" merge -q --ff-only "origin/$target"
@@ -434,6 +435,9 @@ project_exists() {
 }
 
 do_reset() {
+  if (( ASSUME_YES )) || ! interactive; then
+    [[ $CONFIRM == "$PROJECT" ]] || die "无人值守清空必须加 --confirm $PROJECT"
+  fi
   ensure_docker
   step "清空项目"
   local projects=() name
@@ -446,7 +450,7 @@ do_reset() {
     info "Caddy 的证书也会删除；重新部署会重新申请，Let's Encrypt 对同一域名每周最多签发 5 次"
   fi
   if ((${#projects[@]})) && compose ps --status running --services 2>/dev/null | grep -qx postgres && [[ -f $ROOT/.env ]]; then
-    confirm "清空前先备份数据库？（make backup；备份在 BACKUP_REPOSITORY，不会被清空）" y && { run_backup || true; }
+    confirm "清空前先备份数据库？（make backup；备份在 BACKUP_REPOSITORY，不会被清空）" y && { run_backup "清空前备份数据库" || true; }
   fi
   local delete_env=0
   case "$ENV_CHOICE" in
@@ -454,9 +458,7 @@ do_reset() {
     --keep-env) delete_env=0 ;;
     *) [[ -f $ROOT/.env ]] && confirm "同时删除 .env（所有密钥）？保留的话重新部署会沿用原来的密钥" n && delete_env=1 ;;
   esac
-  if (( ASSUME_YES )) || ! interactive; then
-    [[ $CONFIRM == "$PROJECT" ]] || die "无人值守清空必须加 --confirm $PROJECT"
-  else
+  if ! (( ASSUME_YES )) && interactive; then
     local typed
     read -r -p "确认清空请输入项目名 $PROJECT: " typed || true
     [[ $typed == "$PROJECT" ]] || die "输入不一致，已取消"
