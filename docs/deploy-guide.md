@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 |---|---|
 | 1 部署 | 首次安装；已经装过时重新检查并修复（不会丢数据） |
 | 2 升级 | 先加密备份数据库（`make backup`）与 `.env`，再拉取新代码、补 `.env` 新变量、重建、迁移、检查 |
-| 3 清空 | 删除本项目全部容器、网络与数据卷（包括 Vikunja、n8n、OpenIM 的），可选先备份；要输入项目名确认 |
+| 3 清空 | 删除本项目全部容器、网络与数据卷（包括 Vikunja、n8n、OpenIM 的），可选先备份；可选同时删除代码目录（其中的本机备份 `backups/` 与 `.env` 先移到 `/var/backups/my-workspace-<时间>/` 保留）；要输入项目名确认 |
 | 4 状态 | 服务状态、本机与 HTTPS 健康检查、是否已完成首次安装 |
 
 部署时只问三个问题：
@@ -64,7 +64,7 @@ sudo bash scripts/deploy.sh upgrade
 sudo bash scripts/deploy.sh install --domain workspace.example.com --email you@example.com --yes
 ```
 
-清空在无人值守时还必须加 `--confirm my-workspace`。全部选项见 `sudo bash scripts/deploy.sh --help`。
+清空在无人值守时还必须加 `--confirm my-workspace`；连代码目录一起删除再加 `--delete-dir`。全部选项见 `sudo bash scripts/deploy.sh --help`。
 
 脚本只部署工作台本身（下面的“最小”形态）。Vikunja、监控、n8n、OpenIM 等可选组件，以及异地备份，仍按第 8、9 步配置；
 脚本跑完后，下面第 1 ~ 6 步都已完成，直接从第 7 步创建管理员开始。想了解每一步做了什么、或者手动部署，就按下面的步骤来。

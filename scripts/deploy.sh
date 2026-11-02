@@ -18,6 +18,7 @@
 #   --yes              所有确认都按默认回答（无人值守）；清空还必须同时给 --confirm my-workspace
 #   --confirm NAME     无人值守清空时的确认（必须是项目名 my-workspace）
 #   --keep-env / --delete-env   清空时是否保留 .env（默认保留）
+#   --delete-dir       清空时同时删除代码目录（backups/ 与 .env 先移到 /var/backups/my-workspace-<时间>/）
 #
 # 说明见 docs/deploy-guide.md 开头的「一键脚本」一节。
 set -Eeuo pipefail
@@ -28,7 +29,7 @@ PROJECT="my-workspace"
 OPTIONAL_PROJECTS=("$PROJECT-vikunja" "$PROJECT-n8n" "$PROJECT-openim")
 BACKUP_ENV_FILE="/etc/my-workspace/backup.env"
 
-ACTION="" DIR="" REF="" DOMAIN="" EMAIL="" BASE_URL="" ASSUME_YES=0 CONFIRM="" ENV_CHOICE="" AFTER_PULL="" ROOT=""
+ACTION="" DIR="" REF="" DOMAIN="" EMAIL="" BASE_URL="" ASSUME_YES=0 CONFIRM="" ENV_CHOICE="" DIR_CHOICE="" AFTER_PULL="" ROOT=""
 
 # ---------------------------------------------------------------- 输出与交互
 if [[ -t 2 ]]; then C_B=$'\e[1m' C_G=$'\e[32m' C_Y=$'\e[33m' C_R=$'\e[31m' C_0=$'\e[0m'; else C_B="" C_G="" C_Y="" C_R="" C_0=""; fi
@@ -170,6 +171,7 @@ bootstrap() {
   (( ASSUME_YES )) && args+=(--yes)
   [[ -n $CONFIRM ]] && args+=(--confirm "$CONFIRM")
   [[ -n $ENV_CHOICE ]] && args+=("$ENV_CHOICE")
+  [[ -n $DIR_CHOICE ]] && args+=("$DIR_CHOICE")
   if (exec </dev/tty) 2>/dev/null; then exec bash "$target/scripts/deploy.sh" "${args[@]}" </dev/tty; fi
   exec bash "$target/scripts/deploy.sh" "${args[@]}" </dev/null
 }
@@ -459,36 +461,59 @@ project_exists() {
     || [[ -n "$(docker volume ls -q --filter "label=com.docker.compose.project=$1" 2>/dev/null)" ]]
 }
 
+# 删除代码目录前的检查：必须是本项目的 git 检出，不能是 /、家目录、/srv 这类目录
+safe_to_delete_dir() {
+  local real
+  real="$(cd "$ROOT" && pwd -P)" || return 1
+  [[ -d $real/.git && -f $real/compose.yaml && -f $real/scripts/deploy.sh ]] || return 1
+  [[ $real == /*/* && $real != "$HOME" && ! $real =~ ^/home/[^/]+$ ]]
+}
+
+# 删除代码目录时，本机备份（backups/）与 .env 先移到这里保留
+preserve_root() { if [[ -w /var/backups ]]; then echo /var/backups; else echo "$HOME"; fi; }
+
 do_reset() {
   if (( ASSUME_YES )) || ! interactive; then
     [[ $CONFIRM == "$PROJECT" ]] || die "无人值守清空必须加 --confirm $PROJECT"
   fi
   ensure_docker
   step "清空项目"
-  local projects=() name
+  local projects=() name delete_dir=0 delete_env=0
+  [[ $DIR_CHOICE == --delete-dir ]] && delete_dir=1
   for name in "$PROJECT" "${OPTIONAL_PROJECTS[@]}"; do project_exists "$name" && projects+=("$name"); done
-  if ((${#projects[@]} == 0)) && [[ $ENV_CHOICE != --delete-env ]]; then
-    ok "没有找到本项目的容器与数据卷，不需要清空"
-    return 0
-  fi
-  if ((${#projects[@]})); then
+  if ((${#projects[@]} == 0)); then
+    ok "没有找到本项目的容器与数据卷"
+    if (( ! delete_dir )) && ! (( ASSUME_YES )) && interactive; then
+      confirm "要删除代码目录 $ROOT 吗？" n && delete_dir=1
+    fi
+    if (( ! delete_dir )) && [[ $ENV_CHOICE != --delete-env ]]; then info "不需要清空"; return 0; fi
+  else
     warn "将删除下面这些 Compose 项目的全部容器、网络与数据卷（数据库、证书等，无法恢复）："
     for name in "${projects[@]}"; do
       info "$name：$(docker volume ls -q --filter "label=com.docker.compose.project=$name" | tr '\n' ' ')"
     done
     info "Caddy 的证书也会删除；重新部署会重新申请，Let's Encrypt 对同一域名每周最多签发 5 次"
+    if compose ps --status running --services 2>/dev/null | grep -qx postgres && [[ -f $ROOT/.env ]]; then
+      confirm "清空前先备份数据库？（make backup；备份在 BACKUP_REPOSITORY，不会被清空）" y && { run_backup "清空前备份数据库" || true; }
+    fi
+    if (( ! delete_dir )) && [[ -z $DIR_CHOICE ]] && ! (( ASSUME_YES )) && interactive; then
+      confirm "同时删除代码目录 $ROOT？（其中的 backups/ 与 .env 会先移到 $(preserve_root)/ 下保留）" n && delete_dir=1
+    fi
   fi
-  if ((${#projects[@]})) && compose ps --status running --services 2>/dev/null | grep -qx postgres && [[ -f $ROOT/.env ]]; then
-    confirm "清空前先备份数据库？（make backup；备份在 BACKUP_REPOSITORY，不会被清空）" y && { run_backup "清空前备份数据库" || true; }
+  local target=""
+  if (( delete_dir )); then
+    safe_to_delete_dir || die "$ROOT 看起来不是本项目的代码目录（需要有 .git、compose.yaml、scripts/deploy.sh），不删除"
+    target="$(cd "$ROOT" && pwd -P)"
+  else
+    case "$ENV_CHOICE" in
+      --delete-env) delete_env=1 ;;
+      --keep-env) delete_env=0 ;;
+      *) [[ -f $ROOT/.env ]] && confirm "同时删除 .env（所有密钥）？保留的话重新部署会沿用原来的密钥" n && delete_env=1 ;;
+    esac
   fi
-  local delete_env=0
-  case "$ENV_CHOICE" in
-    --delete-env) delete_env=1 ;;
-    --keep-env) delete_env=0 ;;
-    *) [[ -f $ROOT/.env ]] && confirm "同时删除 .env（所有密钥）？保留的话重新部署会沿用原来的密钥" n && delete_env=1 ;;
-  esac
   if ! (( ASSUME_YES )) && interactive; then
     local typed
+    (( delete_dir )) && warn "代码目录 $ROOT 也会被删除"
     read -r -p "确认清空请输入项目名 $PROJECT: " typed || true
     [[ $typed == "$PROJECT" ]] || die "输入不一致，已取消"
   fi
@@ -497,6 +522,28 @@ do_reset() {
     docker compose -p "$name" down -v --remove-orphans
     ok "已删除 $name"
   done
+  if (( delete_dir )); then
+    local keep=""
+    if [[ -f $ROOT/.env || -n "$(ls -A "$ROOT/backups" 2>/dev/null)" ]]; then
+      keep="$(preserve_root)/$PROJECT-$(date +%Y%m%d%H%M%S)"
+      mkdir -p "$keep" && chmod 700 "$keep"
+      if [[ -d $ROOT/backups ]]; then mv "$ROOT/backups" "$keep/backups"; fi
+      if [[ -f $ROOT/.env ]]; then cp -p "$ROOT/.env" "$keep/env" && chmod 600 "$keep/env"; fi
+      ok "本机备份与 .env 已移到 $keep"
+    fi
+    cd / && rm -rf -- "$target"
+    ok "已删除代码目录 $target"
+    step "清空完成"
+    if [[ -n $keep ]]; then
+      info "保留的文件：$keep"
+      [[ -d $keep/backups ]] && info "  backups/：本机备份（restic 仓库与之前的 .env 副本，都是加密或只有 root 可读）"
+      [[ -f $keep/env ]] && info "  env：原来的 .env，里面有打开备份用的 BACKUP_PASSWORD 与加密密钥"
+      info "确认不再需要后自己删除：rm -rf $keep"
+    fi
+    info "重新部署：curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scripts/deploy.sh | bash"
+    info "当前终端如果还停在 $ROOT 里，先 cd ~"
+    return 0
+  fi
   if (( delete_env )) && [[ -f $ROOT/.env ]]; then
     local keep
     keep="$ROOT/backups/env-deleted-$(date +%Y%m%d%H%M%S)"
@@ -504,7 +551,7 @@ do_reset() {
     ok "已移走 .env（留了一份在 $keep，确认不需要后自己删除）"
   fi
   step "清空完成"
-  info "代码目录 $ROOT 与 backups/ 保留；重新部署：sudo bash $ROOT/scripts/deploy.sh install"
+  info "代码目录 $ROOT 与 backups/ 保留；重新部署：bash $ROOT/scripts/deploy.sh install"
 }
 
 do_status() {
@@ -532,7 +579,7 @@ menu() {
 ${C_B}My Workspace 部署脚本${C_0}（代码目录：$ROOT）
   1) 部署（首次安装，或重新检查并修复）
   2) 升级到最新版本（自动备份、迁移、检查）
-  3) 清空项目（删除全部容器与数据）
+  3) 清空项目（删除全部容器与数据，可选同时删除代码目录）
   4) 查看状态
   0) 退出
 EOF
@@ -556,6 +603,7 @@ parse_args() {
       --yes|-y) ASSUME_YES=1 ;;
       --confirm) CONFIRM="${2:?}"; shift ;;
       --keep-env|--delete-env) ENV_CHOICE="$1" ;;
+      --delete-dir) DIR_CHOICE="$1" ;;
       --after-pull) AFTER_PULL="${2:?}"; shift ;;
       -h|--help) awk 'NR > 1 && /^#/ {sub(/^# ?/, ""); print; next} NR > 1 {exit}' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null || echo "用法见 docs/deploy-guide.md"; exit 0 ;;
       *) die "未知参数：$1（--help 查看用法）" ;;
