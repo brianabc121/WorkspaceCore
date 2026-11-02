@@ -2,7 +2,7 @@
 id: T-0080
 title: 工作台保存并向管理员显示 Vikunja、n8n 的登录账号密码（加密保存、点击显示并审计）
 owner: claude
-status: in_progress
+status: done
 priority: P2
 branch: claude/cool-wright-99qbbg
 paths: services/api/app/models,services/api/app/repositories/app_logins.py,services/api/app/domain/app_logins.py,services/api/app/api/v1/app_logins.py,services/api/app/api/v1/__init__.py,services/api/app/api/deps.py,services/api/app/schemas/app_logins.py,services/api/migrations/versions,services/api/app/commands/connect.py,services/api/openapi.json,services/api/tests,apps/web/src,apps/web/tests,scripts/deploy.sh,docs
@@ -37,3 +37,4 @@ updated: 2026-11-02
 - 2026-11-02 19:37 UTC · claude · 开始任务
 - 2026-11-02 19:37 UTC · claude · 人类在对话中要求：在项目页（Vikunja）与自动化页（n8n）显示两者的登录账号密码，方便复制登录。做法：工作台加密保存，只给 admin 以上显示，默认遮住、点击显示才取明文并写审计、响应 no-store；可在页面填写 / 修改；connect 新建账号时自动保存。与 Vikunja 核验 ADR 的“不保存用户的 Vikunja 密码”不同（那是指 Connector 不用密码），在新 ADR 里说明
 - 2026-11-02 20:05 UTC · claude · 后端（迁移 0019、服务、接口、密钥轮换）、connect save-login 与自动保存、deploy.sh 补存已接入组件的账号、前端两张卡片、测试与文档完成；顺带补上 apps/web/tests/browser-sprint5.cjs 缺的 /im/badges、/ai/tool-executions mock（之前新增的请求，测试不在 CI 里，一直没发现）
+- 2026-11-02 20:15 UTC · claude · status in_progress → done：验收标准全部完成，PR #121
