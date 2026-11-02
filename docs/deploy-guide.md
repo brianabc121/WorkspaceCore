@@ -79,6 +79,7 @@ sudo bash scripts/deploy.sh connect
 | Vikunja（任务主源） | `make vikunja-up` → 建 Vikunja 用户（随机密码）→ 登录后建最小权限的 API Token（一年有效）→ 在工作台建集成、测试连接、同步项目与任务、注册 Webhook | 脚本显示一次 Vikunja 账号密码，同时加密保存到工作台「项目」页（只有管理员看得到），建议也存进密码管理器 |
 | GitHub（只读） | 显示预填好的 Token 创建链接（名称、90 天有效期、只读的 Issues / Pull requests / Actions）→ 列出 Token 能访问的仓库让你挑选 → 建集成、逐个仓库检查权限、开始同步 | 打开链接、勾选仓库、生成 Token 粘贴回终端（GitHub 不允许程序代建 Token） |
 | n8n（自动化） | `make n8n-up` → 建 owner 账号（随机密码）→ 建只读 API Key 与名为 `X-Workspace-Trigger` 的 Header Auth 凭据 → 在工作台建连接并测试 | n8n 账号密码同样保存在工作台「自动化」页；之后自己搭工作流（Webhook 节点选这个凭据），再到工作台“自动化”页登记 |
+| OpenIM（「消息」页） | 构建打过补丁的 openim-server 镜像（第一次约 5 ~ 15 分钟，临时占用约 8 GB 磁盘；Docker Hub 限流时自动改用 `mirror.gcr.io` 再试）→ `make openim-up` → 在 `.env` 里填好 `OPENIM_API_URL`、`OPENIM_OBJECT_URL` 并重启 api、worker → 确认工作台连得上 | 内存少于 4 GB 时默认不装（另外占用约 1 GB）；OpenClaw 实例的接入入口仍按第 8.6 节配置 |
 
 - 接入以首次安装创建的管理员身份进行：Token 加密保存在工作台，操作写进审计日志，和在网页上配置一样。
 - 密码和 Token 不出现在命令行参数和日志里（Vikunja 建用户的命令行例外：密码会在 Vikunja 容器里短暂出现在进程参数中）。
@@ -122,7 +123,7 @@ sudo bash scripts/deploy.sh install --domain workspace.example.com --email you@e
 
 清空在无人值守时还必须加 `--confirm my-workspace`；连代码目录一起删除再加 `--delete-dir`。全部选项见 `sudo bash scripts/deploy.sh --help`。
 
-脚本部署工作台本身，并可以自动接入 Vikunja、GitHub、n8n（上一节）；监控、OpenIM 等其他可选组件以及异地备份，仍按第 8、9 步配置。
+脚本部署工作台本身，并可以自动接入 Vikunja、GitHub、n8n，部署 OpenIM（上一节）；监控、OpenClaw 接入入口等其他可选组件以及异地备份，仍按第 8、9 步配置。
 脚本跑完后，下面第 1 ~ 7 步都已完成。想了解每一步做了什么、或者手动部署，就按下面的步骤来。
 
 ---
@@ -419,6 +420,9 @@ make n8n-up
 `N8N_ENCRYPTION_KEY` 要和备份分开保存。完整步骤见手册第 12.4 节。
 
 ### 8.6 OpenClaw 与 IM（V2，可选）
+
+> 一键脚本可以完成下面的第 2、4 步（OpenIM 本身）：`sudo bash scripts/deploy.sh connect`。接入入口（第 1、3 步）和实例仍要手动配置；
+> 先部署了 OpenIM 也没关系，`make agents-up` 会让 OpenIM 加入接入入口的网络。
 
 让部署在其他服务器上的 OpenClaw 实例接入工作台：管理员在工作台里和实例单聊、群聊；实例的写操作都要在工作台审批。
 这一部分组件较多，按手册第 18.4 节的顺序做，要点：

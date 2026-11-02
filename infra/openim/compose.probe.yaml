@@ -5,7 +5,8 @@
 #
 # - 加一个放行一切的回调桩（probes/webhook-stub.py）：测试环境里没有工作台 API，
 #   而 OpenIM 的“发送前”回调失败时消息发不出去。此时 OPENIM_WEBHOOK_URL=http://webhook-stub:10006；
-# - im、agent-im 改为本项目自己创建（不需要先启动工作台），名字带 -probe，不会占用工作台的网络；
+# - im 改为本项目自己创建（不需要先启动工作台），名字带 -probe，不会占用工作台的网络
+#   （agent-im 在 compose.agents.yaml 里，回归测试不叠加它）；
 # - REST 与消息网关绑定到本机 127.0.0.1，给回归测试脚本使用。
 networks:
   im:
@@ -16,10 +17,6 @@ networks:
       config:
         - subnet: ${IM_NET:-172.31.252}.0/28
           ip_range: ${IM_NET:-172.31.252}.8/29
-  agent-im:
-    external: false
-    name: ${COMPOSE_PROJECT_NAME:-my-workspace-openim}-probe_agent-im
-    internal: true
 
 services:
   webhook-stub:

@@ -21,9 +21,12 @@ VIKUNJA_URL := $(or $(shell sed -n 's/^VIKUNJA_PUBLIC_URL=//p' .env 2>/dev/null)
 N8N_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-n8n \
 	-f infra/n8n/compose.yaml --env-file .env
 N8N_URL := $(or $(shell sed -n 's/^N8N_PUBLIC_URL=//p' .env 2>/dev/null),http://localhost:5678/)
-# 独立部署的 OpenIM（infra/openim/compose.yaml），加入 core 的 im 与 agent-im 网络
+# 独立部署的 OpenIM（infra/openim/compose.yaml），加入 core 的 im 网络；部署了 OpenClaw 接入入口（agent-im 网络存在）时
+# 再叠加 compose.agents.yaml。用 shell 的 $$(...) 在执行时判断，不用 $(shell)：make 会在执行前展开整个命令
 OPENIM_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-openim \
-	-f infra/openim/compose.yaml --env-file .env
+	-f infra/openim/compose.yaml \
+	$$(docker network inspect $(WORKSPACE_PROJECT)_agent-im >/dev/null 2>&1 && echo -f infra/openim/compose.agents.yaml) \
+	--env-file .env
 # 读取 .env 里的 HTTP_PORT（没有时用 8080），供 make smoke 使用
 HTTP_PORT := $(or $(shell sed -n 's/^HTTP_PORT=//p' .env 2>/dev/null),8080)
 
@@ -104,16 +107,22 @@ agent-ca: ## 导出 OpenClaw 外网入口信任的内部 CA 证书（不含私�
 
 agents-up: agent-ca ## 启动 OpenClaw 接入入口（agent-gateway，--profile agents）；证书与变量见 docs/deployment.md 第 16 节
 	docker compose --profile agents up -d agent-gateway
+	@# 先部署了 OpenIM：让 openim-server 加入接入入口刚创建的 agent-im 网络，实例才能连上消息网关
+	@if [ -n "$$(docker ps -q --filter label=com.docker.compose.project=$(WORKSPACE_PROJECT)-openim)" ]; then \
+		echo "OpenIM 已在运行：让 openim-server 加入 agent-im 网络"; $(OPENIM_COMPOSE) up -d --wait --wait-timeout 600; fi
 
 openim-build: ## 构建打过补丁的 OpenIM 镜像（infra/openim/server/build.sh；约 8 GB 临时磁盘）
 	infra/openim/server/build.sh
 
-openim-up: env ## 启动独立部署的 OpenIM（IM 后端）；需要先 make openim-build 与 make agents-up
-	@docker network inspect $(WORKSPACE_PROJECT)_im $(WORKSPACE_PROJECT)_agent-im >/dev/null 2>&1 || \
-		{ echo "缺少 core 的 im / agent-im 网络：请先 make up 与 make agents-up" >&2; exit 1; }
-	$(OPENIM_COMPOSE) up -d --wait
-	@echo "OpenIM 已启动。第一次部署时在 .env 里设置 OPENIM_API_URL=http://openim-server:10002 与"
-	@echo "OPENIM_OBJECT_URL=http://garage:3900，再运行 make up 让 api、worker 生效；步骤见 docs/deployment.md 第 17 节"
+openim-up: env ## 启动独立部署的 OpenIM（IM 后端）；需要先 make up 与 make openim-build（一键脚本：deploy.sh connect）
+	@docker network inspect $(WORKSPACE_PROJECT)_im >/dev/null 2>&1 || \
+		{ echo "缺少 core 的 im 网络：请先 make up" >&2; exit 1; }
+	@docker network inspect $(WORKSPACE_PROJECT)_agent-im >/dev/null 2>&1 || \
+		echo "没有部署 OpenClaw 接入入口：OpenIM 先只给消息页用；以后 make agents-up 时会自动让实例能连上"
+	$(OPENIM_COMPOSE) up -d --wait --wait-timeout 600
+	@grep -q '^OPENIM_API_URL=.' .env || { \
+		echo "OpenIM 已启动。第一次部署时在 .env 里设置 OPENIM_API_URL=http://openim-server:10002 与"; \
+		echo "OPENIM_OBJECT_URL=http://garage:3900，再运行 make up 让 api、worker 生效；步骤见 docs/deployment.md 第 17 节"; }
 
 openim-down: ## 停止 OpenIM；保留数据卷
 	$(OPENIM_COMPOSE) down

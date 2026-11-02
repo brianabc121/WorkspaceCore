@@ -7,8 +7,9 @@
 #   - etcd、Kafka 用各自的官方镜像，并开启认证（etcd 用户与角色、Kafka SASL/PLAIN）；
 #   - 对象存储用 Garage（S3 兼容；MinIO 官方镜像已不在 Docker Hub 发布，bitnamilegacy 不再更新），OpenIM 仍走 minio 驱动。
 #
-# 用法（在仓库根目录；密码由 make env 随机生成在 .env 里）：
-#   make agents-up       先启动工作台与接入入口：本项目要加入它们创建的 im、agent-im 网络
+# 用法（在仓库根目录；密码由 make env 随机生成在 .env 里；一键部署脚本 deploy.sh connect 会自动做这些）：
+#   make up              先启动工作台：本项目要加入它创建的 im 网络
+#   make openim-build    构建打过补丁的 openim-server 镜像
 #   make openim-up       启动 OpenIM
 #   make openim-down     停止（保留数据卷）
 #
@@ -16,7 +17,8 @@
 #   - openim（本项目）：MongoDB、Redis、etcd、Kafka、Garage、openim-server 互通，不发布任何端口；
 #   - im（core）：只有 openim-server（固定地址 <IM_NET>.2，API 只接受这个地址的回调）与 garage 加入，
 #     与 api、worker 互通：API 调 OpenIM REST、上传和下载图片；OpenIM 回调 API；
-#   - agent-im（core）：只有 openim-server 加入，接入入口 agent-gateway 经它把 /im/ws 转发到消息网关。
+#   - agent-im（core，只有部署了 OpenClaw 接入入口才有）：见 compose.agents.yaml。make openim-up 在这个网络存在时
+#     自动叠加它；没有接入入口时 OpenIM 只给工作台的消息页用（T-0081）。
 #
 # 需要的变量（全部随机生成，禁止使用官方默认值 openIM123）：
 #   OPENIM_SECRET  OPENIM_CALLBACK_PATH_TOKEN  OPENIM_MONGO_ROOT_PASSWORD  OPENIM_MONGO_PASSWORD  OPENIM_REDIS_PASSWORD
@@ -28,13 +30,10 @@ name: my-workspace-openim
 
 networks:
   openim: {}
-  # core（compose.yaml）创建的两个网络；core 的项目名不是 my-workspace 时用 WORKSPACE_PROJECT 指定
+  # core（compose.yaml）创建的网络；core 的项目名不是 my-workspace 时用 WORKSPACE_PROJECT 指定
   im:
     external: true
     name: ${WORKSPACE_PROJECT:-my-workspace}_im
-  agent-im:
-    external: true
-    name: ${WORKSPACE_PROJECT:-my-workspace}_agent-im
 
 volumes:
   openim-mongo: {}
@@ -281,4 +280,3 @@ services:
       im:
         # API 只接受这个地址的回调（OPENIM_CALLBACK_ALLOWED_CIDRS 默认 <IM_NET>.2/32）
         ipv4_address: ${IM_NET:-172.31.252}.2
-      agent-im: {}

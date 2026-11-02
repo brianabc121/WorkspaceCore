@@ -1,6 +1,6 @@
 # OpenIM（管理员端 IM 的后端）——OC-3 进行中
 
-> **部署步骤见 `docs/deployment.md` 第 17 节**（`make openim-build` → `make agents-up` → `make openim-up`）。
+> **部署步骤见 `docs/deployment.md` 第 17 节**（`make up` → `make openim-build` → `make openim-up`；一键部署脚本 `deploy.sh connect` 会自动做；接 OpenClaw 实例时再 `make agents-up`）。
 > 已接入工作台的内部网络、回调地址与接入入口；`make backup` 会一并备份 OpenIM 的 MongoDB 与 Garage（第 17.5 节）。
 > **不要换回官方镜像** `openim/openim-server:v3.8.3-patch.18`：任何一个 IM 用户的令牌都能读到别人的私聊，
 > 还能改别人的会话设置（OC-0 ADR 第 4 节）。
@@ -13,8 +13,9 @@
 
 | 文件 | 用途 |
 |---|---|
-| `compose.yaml` | 独立的 Compose 项目：mongo、redis、etcd、kafka、garage（对象存储）、openim-server。<br/>第三方镜像全部锁定 tag 加 digest；openim-server 用本机构建的补丁镜像（`pull_policy: never`）；<br/>密码全部来自仓库根目录的 `.env`（`make env` 生成），`:?` 表示必填；不发布任何端口；<br/>openim-server 加入 core 的 `im`（固定 `<IM_NET>.2`）与 `agent-im` 网络，garage 加入 `im` |
-| `compose.probe.yaml` | 只用于越权回归测试的覆盖文件：加一个放行一切的回调桩，`im` / `agent-im` 改为自己创建（不需要工作台），REST 与消息网关绑定本机。不要在生产环境使用 |
+| `compose.yaml` | 独立的 Compose 项目：mongo、redis、etcd、kafka、garage（对象存储）、openim-server。<br/>第三方镜像全部锁定 tag 加 digest；openim-server 用本机构建的补丁镜像（`pull_policy: never`）；<br/>密码全部来自仓库根目录的 `.env`（`make env` 生成），`:?` 表示必填；不发布任何端口；<br/>openim-server 加入 core 的 `im` 网络（固定 `<IM_NET>.2`），garage 加入 `im` |
+| `compose.agents.yaml` | 叠加文件（T-0081）：让 openim-server 加入 OpenClaw 接入入口创建的 `agent-im` 网络。`make openim-up` 在这个网络存在时自动叠加；先部署 OpenIM 后部署接入入口时，`make agents-up` 会重新 `make openim-up` |
+| `compose.probe.yaml` | 只用于越权回归测试的覆盖文件：加一个放行一切的回调桩，`im` 改为自己创建（不需要工作台），REST 与消息网关绑定本机。不要在生产环境使用 |
 | `mongo-init.sh` | MongoDB 第一次初始化时创建 OpenIM 专用用户，只有 `openim_v3` 库的读写权限 |
 | `etcd-init.sh` | 一次性服务 `etcd-init` 执行：开启 etcd 认证，`openim` 用户只能读写 `openim` 前缀与启动检查用的键；以后每次启动同步授权与密码 |
 | `garage.toml`、`garage-init.sh` | Garage 配置（单节点）与一次性服务 `garage-init`：应用布局、导入访问密钥、建桶 `openim` 并授权（幂等） |

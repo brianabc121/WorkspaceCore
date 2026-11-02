@@ -17,6 +17,7 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from app.commands import connect
 from app.integrations.base import ConnectorError
@@ -26,6 +27,9 @@ from tests.fake_github import FakeGitHub
 from tests.fake_n8n import API_KEY as N8N_KEY
 from tests.fake_n8n import BASE_URL as N8N_URL
 from tests.fake_n8n import FakeN8n
+from tests.fake_openim import BASE_URL as OPENIM_URL
+from tests.fake_openim import SECRET as OPENIM_SECRET
+from tests.fake_openim import FakeOpenIM
 from tests.fake_vikunja import BASE_URL as VIKUNJA_URL
 from tests.fake_vikunja import TOKEN as VIKUNJA_TOKEN
 from tests.helpers import OWNER, ClientFactory, add_member, add_user, run_sql
@@ -524,6 +528,7 @@ async def test_status_reports_each_component(
         "n8n=none",
         "vikunja_login=none",
         "n8n_login=none",
+        "openim=none",
     ]
     await world.env.connect()
     await call(
@@ -614,4 +619,22 @@ async def test_status_before_setup(
         async with app.state.sessionmaker() as db:
             env = connect.Env(app.state.settings, db, app.state.connectors, app.state.redis, None)  # type: ignore[arg-type]
             assert await connect.cmd_status(env, args("status")) == 0
-    assert capsys.readouterr().out.split() == ["setup=required"]
+    assert capsys.readouterr().out.split() == ["setup=required", "openim=none"]
+
+
+async def test_status_reports_openim(
+    make_client: ClientFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """T-0081：部署脚本据此判断 OpenIM 是否已部署、工作台能否连上（与运维页的检查相同）。"""
+    fake = FakeOpenIM()
+    settings = {"openim_api_url": OPENIM_URL, "openim_secret": SecretStr(OPENIM_SECRET)}
+    async with make_client(**settings) as client:
+        app = app_of(client)
+        app.state.connectors.transport = httpx.MockTransport(fake.handler)
+        async with app.state.sessionmaker() as db:
+            env = connect.Env(app.state.settings, db, app.state.connectors, app.state.redis, None)  # type: ignore[arg-type]
+            assert await connect.cmd_status(env, args("status")) == 0
+            assert capsys.readouterr().out.split() == ["setup=required", "openim=ok"]
+            fake.down = True
+            assert await connect.cmd_status(env, args("status")) == 0
+            assert capsys.readouterr().out.split() == ["setup=required", "openim=unavailable"]

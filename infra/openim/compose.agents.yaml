@@ -1,0 +1,15 @@
+# 叠加在 compose.yaml 上：让 openim-server 加入 core 的 agent-im 网络（T-0081）。
+#
+# agent-im 只有 OpenClaw 接入入口 agent-gateway（make agents-up，--profile agents）与 openim-server 加入，
+# 接入入口经它把实例的 /im/ws 转发到消息网关。这个网络由 agent-gateway 创建，所以只在它存在时叠加：
+# make openim-up 自动判断；先部署 OpenIM、后部署接入入口时，make agents-up 会重新运行 make openim-up。
+
+networks:
+  agent-im:
+    external: true
+    name: ${WORKSPACE_PROJECT:-my-workspace}_agent-im
+
+services:
+  openim-server:
+    networks:
+      agent-im: {}

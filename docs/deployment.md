@@ -705,7 +705,7 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 | 网络 | 成员 | 用途 |
 |---|---|---|
 | `im`（core 创建，internal） | api、worker；OpenIM 的 openim-server（固定 `<IM_NET>.2`）与 garage | API 调 OpenIM REST、上传和下载图片；OpenIM 回调 API |
-| `agent-im`（core 的 agent-gateway 创建，internal） | agent-gateway、openim-server | 接入入口把 `/im/ws` 转发到消息网关 |
+| `agent-im`（core 的 agent-gateway 创建，internal） | agent-gateway、openim-server（只有部署了接入入口时才加入，`infra/openim/compose.agents.yaml`） | 接入入口把 `/im/ws` 转发到消息网关 |
 | `openim`（OpenIM 项目自己的） | MongoDB、Redis、etcd、Kafka、Garage、openim-server | OpenIM 内部；不发布任何端口 |
 
 - 浏览器和实例都不直连 OpenIM：管理员经工作台 API，实例经接入入口（`/im/ws`、`/im/api/*`、`/im/obj/m/*`，第 16 节）；
@@ -714,11 +714,16 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 
 ### 17.2 部署步骤
 
+一键部署脚本会做完下面的第 1 ~ 5 步：`sudo bash scripts/deploy.sh connect`，问到「部署 OpenIM？」时回答 `y`（T-0081；
+镜像已经构建过就跳过构建，`.env` 里两个地址已经有值时保持不变）。手动步骤：
+
 1. `make env`：在 `.env` 里随机生成 `OPENIM_SECRET`、`OPENIM_CALLBACK_PATH_TOKEN` 和 OpenIM 各组件的密码（已有的值不改）；
 2. `make openim-build`：按锁定的上游提交与补丁构建 `my-workspace/openim-server` 镜像（要 8 GB 左右的临时磁盘；
    Docker Hub 限流时 `BASE_REGISTRY=mirror.gcr.io/library make openim-build`）；
-3. `make up`、`make agents-up`（第 16 节）：创建 `im` 与 `agent-im` 网络；
-4. `make openim-up`：启动 OpenIM 并等各服务的健康检查通过（`--wait`），第一次启动要 1 分钟左右（初始化 etcd、Garage、MongoDB 用户）；
+3. `make up`：创建 `im` 网络。要接 OpenClaw 实例时再 `make agents-up`（第 16 节，创建 `agent-im` 网络），先后不限：
+   先启动了 OpenIM 时，`make agents-up` 会重新运行 `make openim-up`，让 openim-server 加入 `agent-im`；
+4. `make openim-up`：启动 OpenIM 并等各服务的健康检查通过（`--wait`，最多 10 分钟），第一次启动要 1 分钟左右
+   （初始化 etcd、Garage、MongoDB 用户）。`agent-im` 网络存在时自动叠加 `infra/openim/compose.agents.yaml`；
 5. 在 `.env` 里设置下面两项，再 `make up` 让 api、worker 生效：
 
    ```
@@ -827,6 +832,8 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
    停用实例后它取不到密钥、MCP 返回 401、IM 被强制下线。
 
 ### 18.4 从零上线的顺序
+
+（OpenIM 本身——下面的第 2、4 步——也可以由一键部署脚本 `deploy.sh connect` 完成，先后与接入入口无关，见第 17.2 节。）
 
 1. `make env`；按第 16.1 节准备入口证书、填 `AGENT_*`；
 2. `make openim-build`（约 8 GB 临时磁盘）；
