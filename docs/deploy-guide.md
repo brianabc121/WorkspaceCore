@@ -46,6 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 
 - 缺 git / make / python3 / curl 时用 apt 安装；没有 Docker 时用官方脚本安装（都会先问）；Python 3.8 及以上即可（Debian 11 自带的 3.9 可以用，不需要为此升级系统）；
 - `.env` 不存在就随机生成；是从 `.env.example` 复制来的（还有占位符）时，备份后重新生成；
+  重新生成时如果找到之前留下的 `.env` 副本，沿用其中的 `BACKUP_PASSWORD`（之前的备份用它加密，换了密码就打不开）；
 - 写入 `APP_ENV=production`、`COMPOSE_FILE=compose.yaml:compose.https.yaml`、域名、邮箱与 `PUBLIC_BASE_URL`；
 - 检查域名解析、80 / 443 是否被占用（例如 nginx）、ufw 是否放行；
 - `make up` → `make migrate`（数据库密码和 `.env` 不一致时自动同步）→ `make smoke` → 用 GET 检查 `https://<域名>/healthz`；

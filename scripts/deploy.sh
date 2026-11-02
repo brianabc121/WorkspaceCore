@@ -255,11 +255,32 @@ check_ports() {
 # ---------------------------------------------------------------- .env
 postgres_volume_exists() { docker volume inspect "${PROJECT}_postgres-data" >/dev/null 2>&1; }
 
+# 新生成的 .env 有新的 BACKUP_PASSWORD；之前的备份是用旧密码加密的，换了密码 make backup 会失败、也无法恢复。
+# 有之前留下的 .env 副本（清空、重新生成、升级时保存的）就沿用其中的 BACKUP_PASSWORD
+reuse_backup_password() {
+  local candidates=() file saved="" old="" _
+  for file in "$ROOT"/.env.bak-* "$ROOT"/backups/env-*; do [[ -f $file ]] && candidates+=("$file"); done
+  ((${#candidates[@]})) || return 0
+  while read -r _ file; do
+    old="$(sed -n 's/^BACKUP_PASSWORD=//p' "$file" | tail -1 | tr -d '\r')"
+    if [[ -n $old && $old != GENERATE_* && $old != CHANGE_ME ]]; then saved="$file"; break; fi
+    old=""
+  done < <(stat -c '%Y %n' "${candidates[@]}" | sort -rn)
+  [[ -n $saved ]] || return 0
+  if confirm "找到之前的 .env（$saved）。沿用其中的 BACKUP_PASSWORD？之前的备份用它加密，沿用才能继续备份到同一个仓库、并从中恢复" y; then
+    env_set BACKUP_PASSWORD "$old"
+    ok "已沿用之前的 BACKUP_PASSWORD"
+  else
+    warn "新 .env 的 BACKUP_PASSWORD 和之前的备份不同：往原来的仓库备份会失败；不需要旧备份的话把 backups/restic 改名后重新备份"
+  fi
+}
+
 prepare_env() {
   step "生成并检查 .env"
   if [[ ! -f $ROOT/.env ]]; then
     (cd "$ROOT" && python3 scripts/init_env.py >/dev/null)
     ok "已生成 .env（随机密码与密钥，权限 600）"
+    reuse_backup_password
   elif ! (cd "$ROOT" && python3 scripts/init_env.py >/dev/null 2>&1); then
     (cd "$ROOT" && python3 scripts/init_env.py >/dev/null) || true
     warn ".env 有上面列出的问题（多半是从 .env.example 复制的，占位符没有替换）"
@@ -269,6 +290,7 @@ prepare_env() {
     mv "$ROOT/.env" "$backup" && chmod 600 "$backup"
     (cd "$ROOT" && python3 scripts/init_env.py >/dev/null)
     ok "已重新生成 .env（旧文件：$backup）"
+    reuse_backup_password
   else
     ok ".env 已存在，保留原有密钥"
   fi
@@ -381,8 +403,8 @@ run_backup() {
   # shellcheck source=/dev/null
   if [[ -f $BACKUP_ENV_FILE ]]; then set -a; . "$BACKUP_ENV_FILE"; set +a; info "已读取 $BACKUP_ENV_FILE"; fi
   if (cd "$ROOT" && make backup); then ok "备份完成"; return 0; fi
-  warn "备份失败"
-  confirm "不备份继续升级？（不推荐）" n || die "已取消升级"
+  warn "备份失败（见上面的输出）"
+  confirm "不备份继续？（不推荐）" n || die "已取消"
 }
 
 do_upgrade() {
