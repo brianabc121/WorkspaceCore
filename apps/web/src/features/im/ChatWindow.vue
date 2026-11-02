@@ -15,11 +15,23 @@ const id = toRef(() => props.conversation.conversation_id)
 const messages = useMessages(props.scope, id), pins = usePins(props.scope, id)
 const header = { 'X-Workspace-Id': props.scope }
 // Messages we sent show up at once; the server list replaces them when the projection catches up.
-const pending = ref<Schema['ImMessageOut'][]>([])
-const items = computed(() => chronological([...(messages.data.value?.pages ?? []), { items: pending.value, next_cursor: null }]))
+// While a send is in flight the server already lists it as a "sending" row whose client_msg_id is
+// `myws-<Idempotency-Key>` (no server_msg_id yet). Once we hold the sent copy that row is the same message, so it is
+// hidden instead of showing the message twice until the next refresh. Either ID matching means the server caught up.
+type Sent = { key: string; message: Schema['ImMessageOut'] }
+const pending = ref<Sent[]>([])
+const idsOf = (m: Schema['ImMessageOut']) => [m.server_msg_id, m.client_msg_id].filter((v): v is string => !!v)
+const listedIds = (pages: Schema['ImMessagePage'][]) => new Set(pages.flatMap(p => p.items).flatMap(idsOf))
+const items = computed(() => {
+  const pages = messages.data.value?.pages ?? [], listed = listedIds(pages)
+  const placeholders = new Set(pending.value.map(s => `myws-${s.key}`))
+  const server = pages.map(p => ({ ...p, items: p.items.filter(m => !placeholders.has(m.client_msg_id)) }))
+  const unsent = pending.value.map(s => s.message).filter(m => !idsOf(m).some(v => listed.has(v)))
+  return chronological([...server, { items: unsent, next_cursor: null }])
+})
 watch(() => messages.data.value, data => {
-  const known = new Set((data?.pages ?? []).flatMap(p => p.items).map(m => m.server_msg_id ?? m.client_msg_id))
-  pending.value = pending.value.filter(m => !known.has(m.server_msg_id ?? m.client_msg_id))
+  const listed = listedIds(data?.pages ?? [])
+  pending.value = pending.value.filter(s => !idsOf(s.message).some(v => listed.has(v)))
 })
 const { busy, error, notice, act, active, refresh } = useImAction(props.scope)
 const draft = ref(''), list = ref<HTMLElement | null>(null), picker = ref<HTMLInputElement | null>(null), showGroup = ref(false)
@@ -54,7 +66,7 @@ async function send(body: Schema['ImMessageSend']) {
   const ok = await act(async () => {
     try {
       const sent = dataOf(await auth.api.POST('/api/v1/im/conversations/{conversation_id}/messages', { params: { header: { ...header, 'Idempotency-Key': key }, path: { conversation_id: id.value } }, body }))
-      if (active() && sent.conversation_id === id.value) pending.value = [...pending.value.filter(m => (m.server_msg_id ?? m.client_msg_id) !== (sent.server_msg_id ?? sent.client_msg_id)), sent]
+      if (active() && sent.conversation_id === id.value) pending.value = [...pending.value.filter(s => s.key !== key), { key, message: sent }]
     } catch (cause) {
       // A definite answer (rejected, not found, validation) ends this draft's key; unknown results keep it for the retry.
       if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500 && cause.status !== 429) draftKey = null
