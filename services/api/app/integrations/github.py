@@ -292,6 +292,15 @@ class GitHubClient:
             summary.append({"name": str(job.get("name") or ""), "failed_steps": steps})
         return summary
 
+    async def list_user_repos(self) -> Listing:
+        """Token 能访问的仓库：核验 ADR 第 3、4 节的 `/user/repos`，只需 Metadata 只读。
+
+        按官方文档实现，没有用真实 Token 实测（核验 ADR 第 10 节）。
+
+        细粒度 Token 创建时选了哪些仓库，这里就只返回哪些；部署脚本用它让管理员挑选要同步的仓库。
+        """
+        return await self._list("/user/repos", {"sort": "full_name", "per_page": PER_PAGE})
+
     async def probe(self, path: str) -> GitHubResponse:
         """测试连接用：读一条记录。"""
         return await self.get(path, {"per_page": 1})

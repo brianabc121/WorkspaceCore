@@ -9,7 +9,7 @@ import hmac
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import NoReturn
+from typing import NoReturn, Protocol
 
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -41,6 +41,17 @@ class AuthContext:
     session: AuthSession
     token: str
     client_ip: str
+
+
+class Actor(Protocol):
+    """做出改动的人：网页请求是登录会话（AuthContext）；部署脚本的 connect 命令是
+    工作空间的管理员本人，没有会话与客户端 IP（T-0076）。服务层只用这两个字段写归属与审计。"""
+
+    @property
+    def user(self) -> User: ...
+
+    @property
+    def client_ip(self) -> str | None: ...
 
 
 def _now() -> datetime:

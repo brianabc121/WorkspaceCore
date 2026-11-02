@@ -6,11 +6,12 @@
 # 普通用户把最后的 bash 换成 sudo bash（Debian 最小安装的 root 没有 sudo，不要加）。
 # 提示 curl: command not found（Debian 最小安装常见）时先安装：apt-get update && apt-get install -y curl ca-certificates
 # 已有代码时：
-#   sudo bash scripts/deploy.sh [install|upgrade|reset|status] [选项]
+#   sudo bash scripts/deploy.sh [install|upgrade|reset|status|connect] [选项]
 #
 # 部署时只需要回答三个问题：SITE_DOMAIN、ACME_EMAIL、PUBLIC_BASE_URL（默认 https://<域名>）。
 # 其余的都自动完成：安装缺少的工具与 Docker → 获取代码 → 生成 .env（随机密钥）→ 启用 HTTPS 与生产模式 →
 # 检查端口 / DNS / 防火墙 → make up → 迁移数据库 → 冒烟检查 → 检查 HTTPS → 显示安装凭据。
+# 在浏览器创建管理员后按回车，接着自动接入 Vikunja、GitHub、n8n（connect，也可以以后单独运行；T-0076）。
 #
 # 选项：
 #   --dir DIR          安装目录（默认 /srv/my-workspace；在代码目录里运行时就是该目录）
@@ -482,6 +483,200 @@ remind_backup_env() {
   info "请把 $ROOT/.env 备份到服务器以外的地方（密码管理器）：其中的 CREDENTIAL_ENCRYPTION_KEY、BACKUP_PASSWORD 丢了就无法解密凭证、打开备份"
 }
 
+# ---------------------------------------------------------------- 接入组件（T-0076）
+# 管理员在浏览器里创建好之后，自动接入 Vikunja、GitHub、n8n。真正的接入在 api 容器里由
+# app/commands/connect.py 完成（和网页同一套服务：凭证加密保存、写审计、要求管理员角色）。
+# 密码与 Token 只经标准输入传给容器，不出现在命令行参数里。
+GITHUB_TOKEN_URL="https://github.com/settings/personal-access-tokens/new?name=My+Workspace&description=My+Workspace+read-only+sync&expires_in=90&issues=read&pull_requests=read&actions=read"
+GITHUB_MAX_REPOS=20
+
+connect_cmd() { compose exec -T api python -m app.commands.connect "$@"; }
+# 不需要输入的调用都接上 /dev/null：docker compose exec -T 会读走终端里提前敲下的回答
+connect_status() { connect_cmd status </dev/null 2>/dev/null || true; }
+status_of() { sed -n "s/^$1=//p" <<<"$2" | head -1; }
+# 项目名与 Makefile 一致：默认 my-workspace，可以用 COMPOSE_PROJECT_NAME 改
+vikunja_cli() {
+  local core="${COMPOSE_PROJECT_NAME:-$PROJECT}"
+  (cd "$ROOT" && WORKSPACE_PROJECT="$core" docker compose -p "$core-vikunja" -f infra/vikunja/compose.yaml \
+    --env-file .env exec -T vikunja /app/vikunja/vikunja "$@" </dev/null)
+}
+public_url_of() { local v; v="$(env_get "$1")"; v="${v:-$2}"; printf '%s\n' "${v%/}"; }
+
+# n8n 的密码规则：8 ~ 64 位，至少一个数字和一个大写字母
+random_password() {
+  "$PY" -c 'import secrets, string; a = string.ascii_letters + string.digits; print("Ws" + "".join(secrets.choice(a) for _ in range(20)) + "7")'
+}
+
+ask_secret() {
+  local answer=""
+  if (( ASSUME_YES )) || ! interactive; then printf '\n'; return; fi
+  read -r -s -p "$1: " answer || true
+  printf '\n' >&2
+  printf '%s\n' "$answer"
+}
+
+show_credential() {
+  warn "$1 的登录信息只显示这一次，请保存到密码管理器："
+  info "  地址：$2"
+  info "  账号：$3"
+  info "  密码：$4"
+  info "  管理界面只绑定服务器本机，从自己的电脑访问用 SSH 隧道：ssh -L $5:127.0.0.1:$5 <用户>@<服务器>"
+}
+
+# 已经接入过的组件：active 才算通过，其他状态提示到工作台对应页面处理
+show_state() {
+  if [[ $1 == active ]]; then ok "已接入（状态：active）"
+  else warn "已保存但现在不可用（状态：$1）：到工作台「$2」页查看原因、重新测试连接"
+  fi
+}
+
+wait_for_setup() {
+  local status answer
+  while :; do
+    status="$(connect_status)"
+    [[ -n $status ]] || { warn "读不到工作台的状态（api 容器没有运行？）"; return 1; }
+    [[ $(status_of setup "$status") == "done" ]] && return 0
+    if (( ASSUME_YES )) || ! interactive; then
+      info "还没有创建管理员：在浏览器完成首次安装后，运行 bash $ROOT/scripts/deploy.sh connect 接入组件"
+      return 1
+    fi
+    info "接入组件之前，先在浏览器打开 ${BASE_URL:-工作台} 完成「首次安装」创建管理员（安装凭据见上面）"
+    read -r -p "创建好后按回车继续（输入 s 跳过，以后运行 deploy.sh connect）: " answer || answer=s
+    [[ $answer =~ ^[Ss] ]] && { info "已跳过；以后运行 bash $ROOT/scripts/deploy.sh connect"; return 1; }
+  done
+}
+
+connect_vikunja() {
+  local state="$1" user email password created=0 url
+  step "Vikunja（任务主源）"
+  if [[ -n $state && $state != none ]]; then show_state "$state" "集成设置"; return 0; fi
+  confirm "部署 Vikunja 并自动接入？" y || { info "跳过"; return 0; }
+  (cd "$ROOT" && make -s vikunja-up </dev/null) || { warn "Vikunja 没有启动（见上面的输出），跳过"; return 0; }
+  url="$(public_url_of VIKUNJA_PUBLIC_URL http://localhost:3456)"
+  user="$(ask "Vikunja 用户名" admin)"
+  email="$(ask "Vikunja 用户的邮箱" "$(env_get ACME_EMAIL)")"
+  password="$(random_password)"
+  # Vikunja 的命令行只能用 -p 给密码（没有终端时不能从输入读）；密码只短暂出现在 Vikunja 容器的进程参数里
+  if vikunja_cli user create -u "$user" -e "$email" -p "$password" >/dev/null 2>&1; then
+    created=1
+    ok "已创建 Vikunja 用户 $user"
+  else
+    warn "没能创建 Vikunja 用户 $user（多半已经存在）"
+    password="$(ask_secret "输入 Vikunja 用户 $user 的密码（直接回车跳过）")"
+    [[ -n $password ]] || { info "跳过 Vikunja"; return 0; }
+  fi
+  if printf '%s\n' "$password" | connect_cmd vikunja --username "$user" --public-url "$url"; then
+    ok "Vikunja 已接入：项目与任务已同步到工作台"
+  else
+    warn "Vikunja 没有接入成功（见上面的输出）：修好后重新运行 deploy.sh connect，或到工作台「集成设置」里手动配置"
+  fi
+  (( created )) && show_credential "Vikunja" "$url" "$user" "$password" "$(env_get VIKUNJA_PORT | grep . || echo 3456)"
+  return 0
+}
+
+# 把“1,3,5”或空（全选）换成 owner/repo 列表；最多 GITHUB_MAX_REPOS 个
+pick_repos() {
+  local answer="$1" names=() picked=() choices=() n i
+  mapfile -t names <<<"$2"
+  if [[ -z ${answer// /} ]]; then
+    picked=("${names[@]:0:GITHUB_MAX_REPOS}")
+  else
+    IFS=',' read -r -a choices <<<"$answer"
+    for n in "${choices[@]}"; do
+      n="${n// /}"
+      [[ $n =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#names[@]} )) || { warn "忽略无效的编号：$n"; continue; }
+      i=$((n - 1))
+      [[ " ${picked[*]} " == *" ${names[i]} "* ]] || picked+=("${names[i]}")
+    done
+    picked=("${picked[@]:0:GITHUB_MAX_REPOS}")
+  fi
+  local IFS=','
+  printf '%s\n' "${picked[*]}"
+}
+
+connect_github() {
+  local state="$1" token repos selected names=() i replace=()
+  step "GitHub（只读：Issues、Pull requests、Actions）"
+  if [[ -n $state && $state != none ]]; then
+    show_state "$state" "集成设置"
+    # 仓库权限不够时集成状态仍是 active，所以由管理员决定要不要换 Token
+    if (( ASSUME_YES )) || ! interactive; then return 0; fi
+    confirm "要换 Token 或要同步的仓库吗？" n || return 0
+    replace=(--replace)
+  elif (( ASSUME_YES )) || ! interactive; then
+    info "GitHub 的 Token 要在网页上生成，无人值守时跳过；以后运行 deploy.sh connect"
+    return 0
+  else
+    confirm "接入 GitHub？" y || { info "跳过"; return 0; }
+  fi
+  info "1. 打开下面的链接（已预填名称、90 天有效期，以及只读的 Issues、Pull requests、Actions 权限）："
+  info "   $GITHUB_TOKEN_URL"
+  info "2. Repository access 选 Only select repositories，勾选要同步的仓库（最多 $GITHUB_MAX_REPOS 个），点 Generate token"
+  info "3. 复制 github_pat_ 开头的 Token 粘贴到下面（输入不显示；不要用 ghp_ 开头的经典 Token）"
+  token="$(ask_secret "GitHub Token（直接回车跳过）")"
+  [[ -n $token ]] || { info "跳过 GitHub"; return 0; }
+  if repos="$(printf '%s\n' "$token" | connect_cmd github-repos)" && [[ -n $repos ]]; then
+    mapfile -t names <<<"$repos"
+    info "Token 能访问的仓库："
+    for i in "${!names[@]}"; do info "  $((i + 1))) ${names[i]}"; done
+    selected="$(pick_repos "$(ask "要同步的仓库编号（逗号分隔，直接回车全选，最多 $GITHUB_MAX_REPOS 个）" "")" "$repos")"
+  else
+    warn "没能列出 Token 能访问的仓库，手动输入"
+    selected="$(ask "要同步的仓库（owner/repo，逗号分隔）" "")"
+  fi
+  [[ -n $selected ]] || { warn "没有选择仓库，跳过 GitHub"; return 0; }
+  if printf '%s\n' "$token" | connect_cmd github --repos "$selected" "${replace[@]}"; then
+    ok "GitHub 已接入：权限检查通过，已开始同步"
+  else
+    warn "GitHub 没有接入成功（见上面的检查项）：按提示处理后再运行 deploy.sh connect（选择换 Token），或到工作台「集成设置」里修改"
+  fi
+  return 0
+}
+
+connect_n8n() {
+  local state="$1" email password created=0 url owner
+  step "n8n（自动化，可选）"
+  if [[ -n $state && $state != none ]]; then show_state "$state" "自动化"; return 0; fi
+  confirm "部署 n8n 并自动接入？（另外占用约 1 GB 内存）" y || { info "跳过"; return 0; }
+  (cd "$ROOT" && make -s n8n-up </dev/null) || { warn "n8n 没有启动（见上面的输出），跳过"; return 0; }
+  url="$(public_url_of N8N_PUBLIC_URL http://localhost:5678)"
+  owner="$(connect_cmd n8n-owner </dev/null 2>/dev/null || true)"
+  if [[ $owner == owner=exists ]]; then
+    email="$(ask "n8n 已经有 owner 账号，输入它的邮箱" "$(env_get ACME_EMAIL)")"
+    password="$(ask_secret "n8n owner 的密码（直接回车跳过）")"
+    [[ -n $password ]] || { info "跳过 n8n"; return 0; }
+  elif [[ $owner == owner=none ]]; then
+    email="$(ask "n8n owner 账号的邮箱" "$(env_get ACME_EMAIL)")"
+    password="$(random_password)"
+    created=1
+  else
+    warn "读不到 n8n 的状态，跳过"; return 0
+  fi
+  if printf '%s\n' "$password" | connect_cmd n8n --owner-email "$email" --public-url "$url"; then
+    ok "n8n 已接入：工作流的 Webhook 节点选 Header Auth 凭据 X-Workspace-Trigger，再到工作台「自动化」页登记"
+  else
+    warn "n8n 没有接入成功（见上面的输出）：修好后重新运行 deploy.sh connect，或到工作台「自动化」页手动配置"
+  fi
+  (( created )) && show_credential "n8n" "$url" "$email" "$password" "$(env_get N8N_PORT | grep . || echo 5678)"
+  return 0
+}
+
+connect_components() {
+  step "接入组件：Vikunja（任务）、GitHub（只读）、n8n（自动化）"
+  compose ps --status running --services </dev/null 2>/dev/null | grep -qx api || { warn "api 没有运行，先部署（install）"; return 0; }
+  wait_for_setup || return 0
+  local status
+  status="$(connect_status)"
+  info "以管理员 $(status_of user "$status") 的身份接入：凭证加密保存在工作台，操作写入审计日志"
+  connect_vikunja "$(status_of vikunja "$status")"
+  connect_github "$(status_of github "$status")"
+  connect_n8n "$(status_of n8n "$status")"
+  status="$(connect_status)"
+  step "接入状态"
+  info "Vikunja：$(status_of vikunja "$status")　GitHub：$(status_of github "$status")　n8n：$(status_of n8n "$status")（none 表示没有接入）"
+  info "以后要接入或重试：bash $ROOT/scripts/deploy.sh connect"
+}
+
 # ---------------------------------------------------------------- 动作
 do_install() {
   check_os
@@ -497,7 +692,15 @@ do_install() {
   check_https
   step "部署完成：$(git -C "$ROOT" rev-parse --short HEAD)"
   show_setup
+  connect_components
   remind_backup_env
+}
+
+do_connect() {
+  [[ -f $ROOT/.env ]] || die "还没有部署过（找不到 $ROOT/.env），先运行 install"
+  ensure_docker
+  BASE_URL="$(env_get PUBLIC_BASE_URL)"
+  connect_components
 }
 
 run_backup() {
@@ -673,7 +876,7 @@ do_status() {
 }
 
 menu() {
-  interactive || die "没有终端可以显示菜单：请指定动作（install / upgrade / reset / status）"
+  interactive || die "没有终端可以显示菜单：请指定动作（install / upgrade / reset / status / connect）"
   cat >&2 <<EOF
 
 ${C_B}My Workspace 部署脚本${C_0}（代码目录：$ROOT）
@@ -681,12 +884,13 @@ ${C_B}My Workspace 部署脚本${C_0}（代码目录：$ROOT）
   2) 升级到最新版本（自动备份、迁移、检查）
   3) 清空项目（删除全部容器与数据，可选同时删除代码目录）
   4) 查看状态
+  5) 接入 Vikunja / GitHub / n8n（需要先在浏览器创建管理员）
   0) 退出
 EOF
   local choice
   read -r -p "请选择 [1]: " choice || true
   case "${choice:-1}" in
-    1) ACTION=install ;; 2) ACTION=upgrade ;; 3) ACTION=reset ;; 4) ACTION=status ;; 0) exit 0 ;;
+    1) ACTION=install ;; 2) ACTION=upgrade ;; 3) ACTION=reset ;; 4) ACTION=status ;; 5) ACTION=connect ;; 0) exit 0 ;;
     *) die "无效的选择：$choice" ;;
   esac
 }
@@ -694,7 +898,7 @@ EOF
 parse_args() {
   while (($#)); do
     case "$1" in
-      install|upgrade|reset|status) ACTION="$1" ;;
+      install|upgrade|reset|status|connect) ACTION="$1" ;;
       --dir) DIR="${2:?--dir 需要目录}"; shift ;;
       --ref) REF="${2:?--ref 需要分支或 tag}"; shift ;;
       --domain) DOMAIN="${2:?}"; shift ;;
@@ -726,6 +930,7 @@ main() {
     upgrade) ensure_tools; do_upgrade ;;
     reset) do_reset ;;
     status) do_status ;;
+    connect) ensure_tools; do_connect ;;
   esac
 }
 

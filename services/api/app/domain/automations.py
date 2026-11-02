@@ -31,7 +31,7 @@ from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain import idempotency, notifications
 from app.domain.audit import AuditTrail
-from app.domain.auth import AuthContext
+from app.domain.auth import Actor
 from app.domain.connectors import ConnectorRuntime, api_error
 from app.domain.credentials import CredentialError
 from app.domain.policy import WorkspaceAccess, not_found
@@ -329,7 +329,7 @@ class AutomationService:
         return _connection_out(connection, self.settings)
 
     async def put_connection(
-        self, context: AuthContext, access: WorkspaceAccess, body: AutomationConnectionUpsert
+        self, context: Actor, access: WorkspaceAccess, body: AutomationConnectionUpsert
     ) -> AutomationConnectionOut:
         connection = await repo.get_connection(self.db, access.workspace.id, lock=True)
         if body.base_url is not None:
@@ -409,7 +409,7 @@ class AutomationService:
         return _connection_out(connection, self.settings)
 
     async def test_connection(
-        self, context: AuthContext, access: WorkspaceAccess
+        self, context: Actor, access: WorkspaceAccess
     ) -> IntegrationTestResult:
         connection = await repo.get_connection(self.db, access.workspace.id, lock=True)
         if connection is None:
@@ -523,7 +523,7 @@ class AutomationService:
             )
 
     async def create(
-        self, context: AuthContext, access: WorkspaceAccess, body: AutomationCreate
+        self, context: Actor, access: WorkspaceAccess, body: AutomationCreate
     ) -> AutomationOut:
         connection = await self._usable_connection(access)
         await self._conflict(access, webhook_path=body.webhook_path, workflow_id=body.workflow_id)
@@ -592,7 +592,7 @@ class AutomationService:
 
     async def update(
         self,
-        context: AuthContext,
+        context: Actor,
         access: WorkspaceAccess,
         automation_id: uuid.UUID,
         body: AutomationUpdate,
@@ -628,7 +628,7 @@ class AutomationService:
 
     async def delete(
         self,
-        context: AuthContext,
+        context: Actor,
         access: WorkspaceAccess,
         automation_id: uuid.UUID,
         version: int,
@@ -671,7 +671,7 @@ class AutomationService:
 
     async def _audit_trigger(
         self,
-        context: AuthContext,
+        context: Actor,
         access: WorkspaceAccess,
         automation: Automation,
         *,
@@ -712,7 +712,7 @@ class AutomationService:
 
     async def trigger(
         self,
-        context: AuthContext,
+        context: Actor,
         access: WorkspaceAccess,
         automation_id: uuid.UUID,
         key: uuid.UUID,
@@ -809,7 +809,7 @@ class AutomationService:
 
     async def _trigger_failed(
         self,
-        context: AuthContext,
+        context: Actor,
         access: WorkspaceAccess,
         automation: Automation,
         record: Any,
