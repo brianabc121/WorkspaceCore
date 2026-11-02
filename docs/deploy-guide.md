@@ -179,10 +179,11 @@ make smoke
 启用了 HTTPS 的，再从你自己的电脑上确认证书已经签好：
 
 ```bash
-curl -sI https://workspace.example.com/healthz | head -1
+curl -sS -o /dev/null -w '%{http_code}\n' https://workspace.example.com/healthz
 ```
 
-应返回 `HTTP/2 200`。如果报证书错误，看第 12 节“常见问题”。
+应输出 `200`。如果报证书错误（例如 `SSL certificate problem`），看第 12 节“常见问题”。
+不要用 `curl -I`：它发的是 HEAD 请求，`/healthz` 只接受 GET，会返回 `405`（这时证书其实已经正常）。
 
 ---
 

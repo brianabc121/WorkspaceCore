@@ -19,6 +19,7 @@ PostgreSQL 数据卷已经用旧密码（`CHANGE_ME`）初始化。文档只写�
 
 ## 验收标准
 - [x] 部署教程常见问题与运行手册给出可直接执行的同步命令（数据不受影响、不需要旧密码、密码不出现在命令行参数里）
+- [x] 部署教程第 6 步的 HTTPS 检查命令改为 GET（原来的 `curl -I` 是 HEAD 请求，`/healthz` 返回 405，人类在服务器上实际遇到）
 - [x] 命令在同一 PostgreSQL 镜像上验证：先用旧密码初始化数据卷、换新密码重建容器后网络登录失败；执行命令后新密码登录成功、旧密码失败
 
 ## 背景 / 约束 / 参考
@@ -30,3 +31,4 @@ PostgreSQL 数据卷已经用旧密码（`CHANGE_ME`）初始化。文档只写�
 - 2026-11-02 02:13 UTC · claude · 开始任务
 - 2026-11-02 02:13 UTC · claude · 人类在对话中贴出 make migrate 的 password authentication failed；同一镜像上复现并验证同步命令；写入部署教程与运行手册
 - 2026-11-02 02:13 UTC · claude · status in_progress → done：文档给出数据库密码同步命令，已在同一镜像上验证
+- 2026-11-02 02:20 UTC · claude · 人类按教程用 curl -sI 检查 HTTPS 得到 HTTP/2 405：HEAD 请求，/healthz 只接受 GET；本地确认 HEAD→405、GET→200，教程改为 curl -sS -o /dev/null -w '%{http_code}'
