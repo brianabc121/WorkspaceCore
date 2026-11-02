@@ -19,9 +19,9 @@
 import argparse
 import sys
 import uuid
-from urllib.parse import quote
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import quote
 
 from e2e_support import Client, Report, Response, default_base_url, parse_base_url
 from seed import add_member, create_user
