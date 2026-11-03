@@ -7,10 +7,12 @@
 """
 
 from datetime import datetime
+from ipaddress import ip_address
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -314,6 +316,18 @@ class HeartbeatResponse(BaseModel):
 
 # ---------------------------------------------------------------- SSH 自动部署（T-0089）
 
+
+def _host_labels(value: str) -> str:
+    """域名每一段 1 ~ 63 个字符、不以连字符开头或结尾（IP 地址不检查）。"""
+    try:
+        ip_address(value)
+    except ValueError:
+        for label in value.rstrip(".").split("."):
+            if not 1 <= len(label) <= 63 or label.startswith("-") or label.endswith("-"):
+                raise ValueError("不是有效的主机名") from None
+    return value
+
+
 SshHost = Annotated[
     str,
     StringConstraints(
@@ -324,6 +338,7 @@ SshHost = Annotated[
         # 域名、IPv4 或 IPv6（具体的地址检查在探测时做）
         pattern=r"^[A-Za-z0-9.:-]+$",
     ),
+    AfterValidator(_host_labels),
 ]
 SshUsername = Annotated[
     str,

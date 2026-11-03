@@ -291,3 +291,45 @@ def owner_db(owner: Owner) -> str:
     assert isinstance(transport, httpx.ASGITransport)
     url: str = transport.app.state.settings.database_url.get_secret_value()  # type: ignore[attr-defined]
     return url
+
+
+async def test_confirming_during_a_replacement_never_pins_the_new_key(
+    owner: Owner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """更换服务器的探测进行中，另一个请求确认了旧指纹：更换必须失败，旧确认不能落到新公钥上。"""
+    instance = await owner.instance()
+    async with ssh_server() as (port, old_key):
+        first = (await owner.put(instance["id"], host="127.0.0.1", port=port)).json()["target"]
+    new_key = asyncssh.generate_private_key("ssh-ed25519")
+    confirmed: list[int] = []
+
+    async def probe_while_confirming(address: str, port: int) -> ssh.HostKey:
+        response = await owner.confirm(
+            instance["id"], first["version"], old_key.get_fingerprint("sha256")
+        )
+        confirmed.append(response.status_code)
+        return ssh.HostKey(
+            algorithm="ssh-ed25519",
+            public_key=" ".join(new_key.export_public_key().decode().split()[:2]),
+            fingerprint=new_key.get_fingerprint("sha256"),
+        )
+
+    monkeypatch.setattr(ssh, "probe_host_key", probe_while_confirming)
+    replaced = await owner.put(
+        instance["id"], host="127.0.0.1", port=port + 1, version=first["version"]
+    )
+    assert confirmed == [200]
+    assert replaced.status_code == 409, replaced.text
+    assert replaced.json()["error"]["code"] == "VERSION_CONFLICT"
+    target = (await owner.state(instance["id"]))["target"]
+    assert target["host_key_fingerprint"] == old_key.get_fingerprint("sha256")
+    assert target["port"] == port and target["host_key_confirmed"] is True
+
+
+async def test_hostnames_with_overlong_labels_are_rejected(owner: Owner) -> None:
+    instance = await owner.instance()
+    response = await owner.put(instance["id"], host="a" * 64 + ".com")
+    assert response.status_code == 422, response.text
+    with pytest.raises(ssh.SshError) as caught:
+        await ssh.resolve("a" * 64 + ".com", 22)
+    assert caught.value.reason == "dns"

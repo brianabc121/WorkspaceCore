@@ -61,7 +61,8 @@ async def resolve(host: str, port: int, *, allow_loopback: bool = False) -> str:
         try:
             async with asyncio.timeout(DNS_TIMEOUT):
                 infos = await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        except (TimeoutError, OSError) as error:
+        except (TimeoutError, OSError, UnicodeError) as error:
+            # UnicodeError：IDNA 编码失败（例如某一段超过 63 个字符）
             raise SshError("dns", f"解析不了主机名：{host}") from error
         addresses = [ipaddress.ip_address(info[4][0]) for info in infos]
         if not addresses:

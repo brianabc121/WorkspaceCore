@@ -44,3 +44,4 @@ owner 在 OpenClaw 实例页填写一台新服务器的 SSH 地址、端口、�
 - 2026-11-03 03:28 UTC · human · owner unassigned → claude：人类在对话中指派：填写 SSH 服务器后自动安装 OpenClaw 并建立连接（全流程自动化）；选择：密码只用一次换专用密钥、显示指纹确认后才安装、自动安装 Docker。本任务是 B 部分（后端），分 B1（依赖、表结构、指纹探测与确认）、B2（安装任务）、B3（卸载 / 吊销与 CI 端到端）几个 PR
 - 2026-11-03 03:28 UTC · claude · 开始任务
 - 2026-11-03 03:39 UTC · claude · B1 完成：asyncssh 2.24.1 依赖与核验（ADR 第 4.1 节）；迁移 0021 agent_ssh_targets；地址检查（拒绝回环 / 链路本地 / 组播等，域名只解析一次）；探测主机公钥（不登录，SHA256 指纹）、确认固定、删除，owner 专用、按工作空间隔离、限流、审计；OpenAPI 与 schema.d.ts 已更新。下一步 B2：安装任务（一次性密码阶段、专用密钥、Docker、接入包、插件、启动、定时任务、等待上线）
+- 2026-11-03 03:51 UTC · claude · 越界说明：apps/web/src/services/schema.d.ts 是由 openapi.json 生成的文件，接口变化时必须一起更新（apps/web 的 check:api），不改前端代码。Codex 审查 PR #130 的两条意见已修：并发更换与确认（探测后锁行重新检查版本，确认、删除也锁行）、域名某一段过长（模型校验 + IDNA 编码错误归为 dns）

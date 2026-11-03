@@ -100,7 +100,18 @@ class AgentSshService:
         )
 
     async def _existing(self, access: WorkspaceAccess, instance_id: uuid.UUID) -> AgentSshTarget:
-        target = await self._target(await self._instance(access, instance_id))
+        """锁住这一行再读（SELECT ... FOR UPDATE）：版本检查与写入在同一个事务里，
+        不会与并发的更换交错。"""
+        instance = await self._instance(access, instance_id)
+        target = await self.db.scalar(
+            select(AgentSshTarget)
+            .where(
+                AgentSshTarget.instance_id == instance.id,
+                AgentSshTarget.workspace_id == instance.workspace_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         if target is None:
             raise ApiError(404, "NOT_FOUND", "这个实例还没有填写目标服务器")
         return target
@@ -154,6 +165,7 @@ class AgentSshService:
                     "这台服务器上已经装了工作台的专用公钥：先吊销，再更换服务器",
                 )
         await self._check_probe_rate(access)
+        # 探测要几秒：前面只是普通读取（READ COMMITTED，不加锁）；探测完再锁行、重新检查
         try:
             address = await ssh.resolve(
                 body.host, body.port, allow_loopback=self.settings.agent_ssh_allow_loopback
@@ -161,6 +173,18 @@ class AgentSshService:
             key = await ssh.probe_host_key(address, body.port)
         except ssh.SshError as error:
             raise _unreachable(error) from error
+        if target is not None:
+            # 探测期间可能有别的请求确认了旧指纹或改了这条记录：版本变了就拒绝，
+            # 旧指纹的确认绝不能落到新公钥上
+            target = await self._existing(access, instance_id)
+            if target.version != body.version:
+                raise _version_conflict(target.version)
+            if target.client_key_ref is not None:
+                raise ApiError(
+                    409,
+                    "AGENT_SSH_KEY_INSTALLED",
+                    "这台服务器上已经装了工作台的专用公钥：先吊销，再更换服务器",
+                )
         if target is None:
             target = AgentSshTarget(
                 workspace_id=instance.workspace_id,
