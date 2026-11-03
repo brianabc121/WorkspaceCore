@@ -129,7 +129,7 @@
 6. Token、Secret、Cookie、Webhook payload 必须脱敏；不能提交明文密钥、真实用户信息或生产配置。
 7. 外部 HTTP 必须有 timeout、错误归类、重试限制；写操作具有幂等和未知完成状态处理。
 8. 所有数据读取和写入均做 workspace scope + role 验证；不能只在前端隐藏按钮。
-9. 对任何 AI/自动化有副作用的操作强制工具策略校验；Critical 类操作需要显式审批。
+9. 对任何 AI/自动化有副作用的操作强制工具策略校验；Critical 类操作需要显式审批。（知识库笔记的删除进回收站、可以恢复，不算 Critical，见 `docs/v2/KNOWLEDGE_PLAN.md` 3.8；人类 2026-11-03 决定）
 10. 完成前运行相关 lint/typecheck/tests/build/migrations；不能运行的项目注明原因、命令和实际输出，不得虚构通过结果。
 
 ### 提交格式
@@ -143,7 +143,7 @@
 
 ### 最高优先级架构约束
 - 项目与任务由工作台自己管理（人类 2026-11-02 决定移除 Vikunja，T-0082）；AFFiNE V1 仅深链接与收藏，不猜测内容读写 API。
-- 工作台 Owns User/Workspace/Project/Task/Widget/Calendar/Mapping/Notification/Audit。
+- 工作台 Owns User/Workspace/Project/Task/Widget/Calendar/Mapping/Notification/Audit/Knowledge（知识库笔记，人类 2026-11-03 决定）。
 - 第三方服务故障可降级；Webhook Inbox + 周期对账双保险。
 - 核心 Compose 优先，n8n/AFFiNE/Monitoring 可选部署，生产禁止浮动 latest 镜像。
 
@@ -152,6 +152,7 @@
 - OpenClaw、OpenIM、`openclaw-channel` 的接口与行为，必须在锁定版本上核验（源码、生成的 schema 或运行实例），不得按概念名称猜测；核验不了的写成接口桩和 TODO。
 - 不得放宽 OpenClaw 智能体的工具限制（只开工作台工具和 IM 发消息工具），不得开启 exec 或挂载 Docker socket。
 - 工作台是唯一的权限来源：写操作必须经工作台审批，不得为了完成任务自动批准、跳过审批或修改安全策略。
+  例外：智能体对工作台知识库的读、写、改、删（`knowledge_*` 工具）直接执行、不审批。它们仍必须经过工作台的权限与策略校验和 `docs/v2/KNOWLEDGE_PLAN.md` 3.8 的保护，不得绕过（人类 2026-11-03 决定）。
 - 不得跨工作空间或跨实例泄露会话、消息、密钥、工具结果。
 - 浏览器不直连 OpenIM；所有对 OpenIM 的调用经工作台后端或接入网关。
 

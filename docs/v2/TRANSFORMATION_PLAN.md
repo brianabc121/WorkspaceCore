@@ -226,6 +226,13 @@ flowchart LR
 | 读 | `search`、`list_tasks`、`get_task`、`list_projects`、`calendar_agenda`、`list_bookmarks`、`list_knowledge_sources`、`list_repos`、`list_issues`、`list_pull_requests`、`service_status`、`list_notifications`、`list_automations`、`dashboard_overview`、`get_action_status` |
 | 写 | `create_task`、`update_task`、`complete_task`、`create_calendar_event`、`create_bookmark`、`mark_notification_read` |
 | 高危 | `delete_task`、`delete_calendar_event`、`trigger_automation` |
+| 知识库读 | `knowledge_search`、`knowledge_get`、`knowledge_list`、`knowledge_brief` |
+| 知识库写（直接执行，不审批） | `knowledge_write`、`knowledge_delete`（删除进回收站） |
+
+- 知识库工具是 2026-11-03 人类决定加的，规则见 `docs/v2/KNOWLEDGE_PLAN.md` 3.7、3.8：
+  - 不进审批队列；
+  - 仍要校验权限范围与角色、知识库访问规则；
+  - 还有限流与自动暂停、密钥拦截、版本与撤销。
 
 - **永远不做成工具**：集成凭证与设置、成员与角色、会话、工作台设置、实例与密钥管理、审计日志。
 - **写和高危操作的审批流程**：
