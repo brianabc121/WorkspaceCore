@@ -218,7 +218,8 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .segmented button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
 .inline-select select { height: 36px; padding: 0 8px; font-size: .84rem; }
 .quick-add { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; margin-bottom: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
-.quick-add:focus-within { border-color: var(--accent); }
+/* 输入框本身不画 outline，整个快速添加框显示焦点环（T-0086） */
+.quick-add:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
 .quick-add-icon { width: 18px; height: 18px; color: var(--accent); flex-shrink: 0; }
 .quick-add input { flex: 1; min-width: 0; border: 0; background: none; padding: 8px 4px; }
 .quick-add input:focus-visible { outline: none; }
@@ -293,7 +294,8 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .welcome-panel h2 { font-size: 1.25rem; }
   .page-footer { padding: 20px 16px; }
 }
-@media (prefers-reduced-motion: reduce) { .sidebar, .nav-chevron { transition: none; } }
+/* 减少动效偏好：关掉所有过渡与动画（T-0086） */
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; } }
 
 /* GitHub projections and scoped search reuse existing theme tokens. */
 .github-list, .github-activity { display: grid; gap: 16px; }
@@ -474,7 +476,10 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .calendar-month-row .calendar-cell:last-child { border-right: 0; }
 .calendar-month-row:last-child .calendar-cell { border-bottom: 0; }
 .calendar-cell.is-outside { background: var(--bg); }
-.calendar-cell.is-outside .calendar-cell-date { color: var(--muted); opacity: .7; }
+.calendar-cell.is-outside .calendar-cell-date { color: var(--muted); font-weight: 400; }
+.calendar-dots { display: none; gap: 3px; }
+.calendar-dots i { width: 6px; height: 6px; border-radius: 3px; background: var(--accent); }
+.calendar-dots i.is-due { background: var(--warning); }
 .calendar-cell-date { align-self: flex-start; min-width: 26px; height: 26px; padding: 0 6px; border: 0; border-radius: 13px; background: none; color: var(--text); font-size: .8rem; font-weight: 600; }
 .calendar-cell-date:hover { background: var(--surface-2); }
 .calendar-cell.is-today .calendar-cell-date { background: var(--accent); color: var(--accent-text); }
@@ -483,9 +488,8 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .calendar-more { align-self: flex-start; padding: 0 4px; border: 0; background: none; color: var(--muted); font-size: .72rem; }
 @media (max-width: 760px) {
   .calendar-cell { min-height: 64px; padding: 4px 2px; align-items: center; }
-  .calendar-chip { font-size: 0; height: 6px; width: 6px; padding: 0; border-radius: 3px; background: var(--accent); }
-  .calendar-chip-due { background: var(--warning); }
-  .calendar-more { font-size: .64rem; }
+  .calendar-chip, .calendar-more { display: none; }
+  .calendar-dots { display: flex; }
   .calendar-month-head span { padding: 6px 2px; text-align: center; font-size: .7rem; }
 }
 
@@ -501,3 +505,26 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .project-progress progress::-webkit-progress-bar { background: var(--surface-2); border-radius: 3px; }
 .project-progress progress::-webkit-progress-value { background: var(--accent); border-radius: 3px; }
 .project-progress progress::-moz-progress-bar { background: var(--accent); border-radius: 3px; }
+
+/* 手机底部导航与触控尺寸（T-0086） */
+.bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding-bottom: env(safe-area-inset-bottom); border-top: 1px solid var(--line); background: var(--surface); box-shadow: 0 -2px 12px #1c23330a; }
+.bottom-nav-link { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: var(--muted); font-size: .7rem; }
+.bottom-nav-link.is-active { color: var(--accent); font-weight: 600; }
+.bottom-nav-icon { position: relative; display: inline-flex; }
+.bottom-nav-icon svg { width: 22px; height: 22px; }
+.bottom-nav-icon .count-badge { top: -6px; right: -10px; }
+.workspace-shell.has-bottom-nav .main-shell { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+.workspace-shell.has-bottom-nav .sidebar { bottom: calc(56px + env(safe-area-inset-bottom)); }
+.workspace-shell.has-bottom-nav .nav-backdrop { bottom: calc(56px + env(safe-area-inset-bottom)); }
+@media (max-width: 760px) {
+  .shell-icon { min-width: 40px; height: 40px; }
+  .search-trigger, .create-trigger { width: 40px; height: 40px; }
+  .chip-button { height: 36px; padding: 0 14px; }
+  .segmented button { height: 36px; padding: 0 14px; }
+  .inline-select select { height: 40px; }
+  .task-check { width: 22px; height: 22px; margin-top: 0; }
+  .primary-button, .secondary-button { min-height: 40px; }
+  .calendar-cell-date { min-width: 32px; height: 32px; border-radius: 16px; }
+  .account-trigger { min-height: 44px; }
+  .nav-label { min-height: 36px; }
+}

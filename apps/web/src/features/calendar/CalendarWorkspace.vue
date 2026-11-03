@@ -84,17 +84,20 @@ async function remove() {
   <div class="task-toolbar calendar-nav"><button class="secondary-button" @click="move(-1)">{{ view === 'month' ? '上个月' : '上一周' }}</button><p>{{ view === 'month' ? monthTitle : `${days[0]} — ${days[6]}` }} · {{ selected.zone }}</p><button class="secondary-button" @click="move(1)">{{ view === 'month' ? '下个月' : '下一周' }}</button></div>
   <MutationNotice v-if="!opened" :error="feedback" :message="message" :needs-reload="needsReload" :busy="busy" reload-label="重新加载日历" @reload="reset" />
   <DataState :loading="query.isPending.value" :error="query.error.value" :empty="!items.length && !dueItems.length" empty-text="此时间范围暂无日程。" :stale="!!items.length" @retry="query.isFetchNextPageError.value ? query.fetchNextPage() : query.refetch()" />
-  <section v-if="view === 'month'" class="panel calendar-month" role="grid" :aria-label="`${monthTitle}月历`">
+  <!-- 用表格语义（不是 grid：grid 需要方向键导航）；格子里的按钮与链接按 Tab 顺序访问（T-0086） -->
+  <div v-if="view === 'month'" class="panel calendar-month" role="table" :aria-label="`${monthTitle}月历`">
     <div class="calendar-month-head" role="row"><span v-for="name in ['一', '二', '三', '四', '五', '六', '日']" :key="name" role="columnheader">周{{ name }}</span></div>
     <div v-for="week in 6" :key="week" class="calendar-month-row" role="row">
-      <div v-for="cell in cells.slice((week - 1) * 7, week * 7)" :key="cell.day" role="gridcell" class="calendar-cell" :class="{ 'is-outside': !cell.inMonth, 'is-today': cell.day === today }" :aria-label="`${cell.day}，${cell.events.length} 个日程${cell.due.length ? `，${cell.due.length} 个任务截止` : ''}`">
+      <div v-for="cell in cells.slice((week - 1) * 7, week * 7)" :key="cell.day" role="cell" class="calendar-cell" :class="{ 'is-outside': !cell.inMonth, 'is-today': cell.day === today }" :aria-label="`${cell.day}，${cell.events.length} 个日程${cell.due.length ? `，${cell.due.length} 个任务截止` : ''}`">
         <button type="button" class="calendar-cell-date" :aria-label="`查看 ${cell.day} 所在的一周`" @click="openWeek(cell.day)">{{ Number(cell.day.slice(8)) }}</button>
         <button v-for="event in cell.events.slice(0, MONTH_SHOWN)" :key="event.id" type="button" class="calendar-chip" :title="eventTime(event)" @click="opened = event">{{ event.all_day ? '' : localDateTime(event.start_at, selected.zone).slice(11) + ' ' }}{{ event.title }}</button>
         <RouterLink v-for="task in cell.due.slice(0, Math.max(0, MONTH_SHOWN - cell.events.length))" :key="task.id" class="calendar-chip calendar-chip-due" :to="{ path: '/tasks', query: { task: task.id } }" :aria-label="`任务截止：${task.title}`">截止 {{ task.title }}</RouterLink>
         <button v-if="cell.events.length + cell.due.length > MONTH_SHOWN" type="button" class="calendar-more" @click="openWeek(cell.day)">还有 {{ cell.events.length + cell.due.length - MONTH_SHOWN }} 项</button>
+        <!-- 手机上只显示圆点（不可点，点日期进入那一周） -->
+        <span v-if="cell.events.length + cell.due.length" class="calendar-dots" aria-hidden="true"><i v-for="n in Math.min(cell.events.length, 3)" :key="`e${n}`"></i><i v-for="n in Math.min(cell.due.length, Math.max(0, 3 - cell.events.length))" :key="`d${n}`" class="is-due"></i></span>
       </div>
     </div>
-  </section>
+  </div>
   <div v-else :class="view === 'week' ? 'calendar-week' : 'calendar-agenda'"><section v-for="group in groups" :key="group.day" class="panel calendar-day" role="region" :aria-label="group.day"><h2>{{ group.day }}</h2><article v-for="event in group.events" :key="event.id" class="calendar-record"><button class="task-title" @click="opened = event">{{ event.title }}</button><p class="form-help">{{ eventTime(event) }}</p><p class="note-text">{{ event.location }}</p></article><article v-for="task in group.due" :key="task.id" class="calendar-record calendar-deadline" :aria-label="`任务截止：${task.title}`"><span class="badge">任务截止</span> <RouterLink class="task-title" :to="{ path: '/tasks', query: { task: task.id } }">{{ task.title }}</RouterLink><span v-if="task.done" class="badge">已完成</span><p class="form-help">{{ dueTime(task) }} 截止 · 只读（在任务页修改）</p></article><p v-if="!group.events.length && !group.due.length" class="form-help">暂无日程</p></section></div>
   <p v-if="deadlines.error.value && !blocked" class="note-text">任务截止日期暂时无法加载：{{ errorMessage(deadlines.error.value) }}</p>
   <p v-else-if="deadlines.data.value?.next_cursor" class="note-text">这段时间截止的任务超过 100 个，只显示前 100 个；完整列表见任务页。</p>

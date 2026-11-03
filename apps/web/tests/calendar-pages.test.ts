@@ -65,9 +65,9 @@ describe('本地日历', () => {
     const requests = calendar((r) => path(r) === '/api/v1/tasks' ? Response.json({ items: [due], sync, next_cursor: null, total_estimate: 1 }) : undefined)
     await openCalendar()
     await fireEvent.click(screen.getByRole('button', { name: '月视图' }))
-    const grid = await screen.findByRole('grid', { name: '2026年10月月历' })
+    const grid = await screen.findByRole('table', { name: '2026年10月月历' })
     // 6 周 42 天，从 9 月 28 日（周一）开始
-    const cells = within(grid).getAllByRole('gridcell')
+    const cells = within(grid).getAllByRole('cell')
     expect(cells).toHaveLength(42)
     expect(cells[0]).toHaveAccessibleName(/^2026-09-28/)
     expect(cells[0]).toHaveClass('is-outside')
@@ -76,7 +76,7 @@ describe('本地日历', () => {
     // 读取范围覆盖整个网格（含两天时区余量），不超过接口的 92 天上限
     await vi.waitFor(() => expect(requests.some((r) => path(r) === '/api/v1/calendar/events' && new URL(r.url).searchParams.get('start') === '2026-09-25T16:00:00.000Z')).toBe(true))
     await fireEvent.click(screen.getByRole('button', { name: '下个月' }))
-    expect(await screen.findByRole('grid', { name: '2026年11月月历' })).toBeVisible()
+    expect(await screen.findByRole('table', { name: '2026年11月月历' })).toBeVisible()
     await fireEvent.click(screen.getByRole('button', { name: '上个月' }))
     await fireEvent.click(await screen.findByRole('button', { name: '查看 2026-10-14 所在的一周' }))
     expect(screen.getByRole('button', { name: '周视图' })).toHaveAttribute('aria-pressed', 'true')
