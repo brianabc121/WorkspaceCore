@@ -835,3 +835,52 @@ def test_an_old_tmux_deploy_must_be_finished_first(tmp_path: Path) -> None:
     assert "以前版本的部署还在 tmux 会话里" in result.stderr
     assert "tmux -L my-workspace attach -t deploy" in result.stderr
     assert not (root / ".deploy/state").exists()
+
+
+def test_state_writes_from_both_sides_do_not_overwrite_each_other(tmp_path: Path) -> None:
+    """前台与后台同时写状态文件：任何一方写下的键都不能被另一方用旧内容覆盖掉。"""
+    out = _shell(
+        tmp_path,
+        "deploy_dir_init\n"
+        '( for i in $(seq 1 60); do state_set "k$i" "$i"; done ) &\n'
+        '( for i in $(seq 1 300); do state_set step "$i"; done ) &\n'
+        "wait\n"
+        'grep -c "^k" "$(state_file)"; state_get step\n',
+    ).stdout.split()
+    assert out == ["60", "300"]
+
+
+def test_an_unsaved_n8n_password_goes_to_a_root_only_file_not_the_log(tmp_path: Path) -> None:
+    """后台生成的 n8n 密码：接入完成前只在只有 root 能读的文件里，接入成功后删除，不进日志。"""
+    body = (
+        "deploy_dir_init\nPHASE=run\nANS[N8N]=y\nANS[N8N_EMAIL]=ops@example.com\n"
+        "pull_images() { :; }\nmake() { :; }\n"
+        "connect_cmd() {\n"
+        '  case $1 in n8n-owner) echo "owner=$OWNER" ;;\n'
+        "    n8n) cat >/dev/null\n"
+        "      [[ -f $(credential_file n8n) ]] && echo KEPT_WHILE_CONNECTING >&2\n"
+        '      return "$RC" ;; esac\n'
+        "}\n"
+        'connect_n8n none ""\n'
+    )
+    file = tmp_path / "root/.deploy/n8n-credential.txt"
+    todo = tmp_path / "root/.deploy/todo"
+    # 接入失败（例如 owner 已创建、登录失败）：密码留在文件里，列为待办
+    failed = _shell(tmp_path, body, env={"RC": "1", "OWNER": "none"})
+    assert "KEPT_WHILE_CONNECTING" in failed.stderr
+    assert file.stat().st_mode & 0o777 == 0o600
+    password = file.read_text().split("密码：", 1)[1].strip()
+    assert len(password) >= 20
+    assert password not in failed.stderr and password not in failed.stdout
+    assert str(file) in todo.read_text()
+    # 再次运行时 owner 已经存在：待办指向那个文件，而不是要一个从未拿到的密码
+    todo.unlink()
+    again = _shell(tmp_path, body, env={"RC": "1", "OWNER": "exists"})
+    assert str(file) in todo.read_text()
+    assert password not in again.stderr and password not in again.stdout
+    # 接入成功：密码已加密保存在工作台，文件删除，日志里只说去哪里看
+    file.unlink()
+    ok = _shell(tmp_path, body, env={"RC": "0", "OWNER": "none"})
+    assert "KEPT_WHILE_CONNECTING" in ok.stderr
+    assert not file.exists()
+    assert "已加密保存在工作台「自动化」页（日志里不显示）" in ok.stderr

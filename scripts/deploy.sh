@@ -109,7 +109,8 @@ answers_file() { printf '%s\n' "${ANSWERS_PATH:-$(deploy_dir)/answers.env}"; }
 deploy_dir_init() { local d; d="$(deploy_dir)"; mkdir -p "$d" && chmod 700 "$d"; }
 
 state_get() { local f; f="$(state_file)"; [[ -r $f ]] && sed -n "s/^$1=//p" "$f" | tail -1; return 0; }
-# state_set 键 值 [键 值 …]：原子地替换这几项（值里的换行换成空格）
+# state_set 键 值 [键 值 …]：替换这几项（值里的换行换成空格）。前台与后台都会写：
+# 整个读出、修改、替换的过程加锁，否则一方可能用旧内容覆盖另一方刚写的（例如丢掉后台的 pid）
 state_set() {
   local f tmp keys="" pairs=() k v
   f="$(state_file)"; [[ -d ${f%/*} ]] || return 0
@@ -118,8 +119,11 @@ state_set() {
     keys+="${keys:+|}$k"; pairs+=("$k=$v")
   done
   tmp="$f.tmp.$$"
-  { [[ -f $f ]] && grep -Ev "^($keys)=" "$f"; printf '%s\n' "${pairs[@]}"; } >"$tmp" 2>/dev/null || true
-  chmod 600 "$tmp" && mv -f "$tmp" "$f"
+  {
+    command -v flock >/dev/null && flock 8
+    { [[ -f $f ]] && grep -Ev "^($keys)=" "$f"; printf '%s\n' "${pairs[@]}"; } >"$tmp" 2>/dev/null || true
+    chmod 600 "$tmp" && mv -f "$tmp" "$f"
+  } 8>"$f.lock"
 }
 todo_add() { local f; f="$(todo_file)"; [[ -d ${f%/*} ]] && printf '%s\n' "$*" >>"$f"; warn "待办：$*"; }
 
@@ -230,11 +234,11 @@ launch_run() {
   if have_systemd; then
     for name in "${RUN_ENV_VARS[@]}"; do [[ -n ${!name:-} ]] && envs+=(--setenv "$name=${!name}"); done
     systemctl reset-failed "$RUN_UNIT" >/dev/null 2>&1 || true
+    state_set runner "systemd:$RUN_UNIT"
     systemd-run --quiet --unit "$RUN_UNIT" --description "My Workspace 部署（$ACTION）" --collect \
       --property "StandardOutput=append:$log" --property "StandardError=append:$log" \
       --working-directory "$ROOT" "${envs[@]}" /bin/bash "$script" "${args[@]}" \
       || die "没能启动后台任务（systemd-run）：用 --foreground 在当前终端运行"
-    state_set runner "systemd:$RUN_UNIT"
   else
     setsid nohup /bin/bash "$script" "${args[@]}" </dev/null >>"$log" 2>&1 &
     state_set runner "pid:$!"
@@ -822,6 +826,20 @@ show_credential() {
   info "  管理界面只绑定服务器本机，从自己的电脑访问用 SSH 隧道：ssh -L $5:127.0.0.1:$5 <用户>@<服务器>"
 }
 
+# 后台生成的初始密码不能写进日志，接入成功后才加密保存在工作台。在那之前先写进只有 root 能读的文件
+# （credential_file 名称 → 路径；keep_credential_file 名称 地址 账号 密码），接入成功后删除，
+# 这样接入失败、或者后台在中途被中断（例如服务器重启）也不会丢掉密码
+credential_file() { printf '%s\n' "$(deploy_dir)/$1-credential.txt"; }
+keep_credential_file() {
+  local file
+  file="$(credential_file "$1")"
+  (umask 077 && printf '地址：%s\n账号：%s\n密码：%s\n' "$2" "$3" "$4" >"$file")
+  chmod 600 "$file"
+}
+credential_todo() {
+  todo_add "$1 的账号已经创建但没有接入完成：账号与密码在 $(credential_file "$1")（只有 root 能读）。记进密码管理器后删除这个文件，再运行 bash $ROOT/scripts/deploy.sh connect"
+}
+
 # 集成状态（app/schemas/integrations.py 的 IntegrationStatus；none 是 connect status 表示还没有集成）的中文说明
 status_label() {
   case "$1" in
@@ -936,7 +954,9 @@ connect_n8n() {
   url="$(public_url_of N8N_PUBLIC_URL http://localhost:5678)"
   owner="$(connect_cmd n8n-owner </dev/null 2>/dev/null || true)"
   if [[ $owner == owner=exists && $PHASE == run ]]; then
-    todo_add "n8n 已经有 owner 账号，接入要它的密码：在终端运行 bash $ROOT/scripts/deploy.sh connect（当场输入，不保存）"
+    if [[ -f $(credential_file n8n) ]]; then credential_todo n8n; else
+      todo_add "n8n 已经有 owner 账号，接入要它的密码：在终端运行 bash $ROOT/scripts/deploy.sh connect（当场输入，不保存）"
+    fi
     return 0
   elif [[ $owner == owner=exists ]]; then
     email="$(ask "n8n 已经有 owner 账号，输入它的邮箱" "$(env_get ACME_EMAIL)")"
@@ -949,12 +969,22 @@ connect_n8n() {
   else
     warn "读不到 n8n 的状态，跳过"; return 0
   fi
+  # 后台：connect 先创建 owner、再登录、最后才把密码加密保存到工作台，中间任何一步失败或中断，密码都还没保存
+  local keep=0 connected_ok=0
+  if (( created )) && [[ $PHASE == run ]]; then keep=1; keep_credential_file n8n "$url" "$email" "$password"; fi
   if printf '%s\n' "$password" | connect_cmd n8n --owner-email "$email" --public-url "$url"; then
     ok "n8n 已接入：工作流的 Webhook 节点选 Header Auth 凭据 X-Workspace-Trigger，再到工作台「自动化」页登记"
+    connected_ok=1
   else
     warn "n8n 没有接入成功（见上面的输出）：修好后重新运行 deploy.sh connect，或到工作台「自动化」页手动配置"
   fi
-  (( created )) && show_credential "n8n" "$url" "$email" "$password" "$(env_get N8N_PORT | grep . || echo 5678)" "自动化"
+  (( created )) || return 0
+  if (( keep && ! connected_ok )); then
+    credential_todo n8n
+  else
+    if (( keep )); then rm -f "$(credential_file n8n)"; fi
+    show_credential "n8n" "$url" "$email" "$password" "$(env_get N8N_PORT | grep . || echo 5678)" "自动化"
+  fi
   return 0
 }
 

@@ -37,3 +37,4 @@ updated: 2026-11-03
 - 2026-11-03 09:07 UTC · claude · 开始任务
 - 2026-11-03 09:38 UTC · claude · 实现：scripts/deploy.sh 分为前台 plan_*（一次问完，decide/choose 记下回答）与后台 --run（systemd-run 或 setsid nohup，不提问）；.deploy/ 下的 answers.env、state、deploy.log、todo；wait_for_setup_run 自动检测首次安装；follow_run / status / logs；失败后沿用回答；升级固定 UPGRADE_TO；删除 tmux 部分（保留 real_tty 给 bootstrap）。越界：.gitignore 加 .deploy/（新文件，避免 git status 不干净）。测试 27 passed（含真实进程端到端）；shellcheck -S warning 无警告；本机真实 Docker：install 后台 make up / 迁移 / 冒烟通过，connect 后台等首次安装、调用首次安装接口后 4 秒内自动继续并完成。
 - 2026-11-03 09:39 UTC · claude · status in_progress → done：重新设计完成并验证；随 PR 合并生效
+- 2026-11-03 09:51 UTC · claude · 处理 PR #137 的 Codex 审查（两条 P2）：1) state_set 的读出-修改-替换整个用 flock 加锁（.deploy/state.lock），launch_run 在 systemd-run 之前写 runner，新增并发测试（去掉锁时 3/3 失败）；2) 后台生成的 n8n 密码：接入前写进 .deploy/n8n-credential.txt（600），接入成功后删除，失败或中断时留着并列为待办，再次运行 owner 已存在时待办指向该文件；新增测试（不在接入前写文件时失败）。ADR 2.2/2.4/3 同步。ruff/mypy/29 个部署脚本测试/shellcheck 通过。
