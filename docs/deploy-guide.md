@@ -39,22 +39,38 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 | 1 部署 | 首次安装；已经装过时重新检查并修复（不会丢数据） |
 | 2 升级 | 先加密备份数据库（`make backup`）与 `.env`，再拉取新代码、补 `.env` 新变量、重建、迁移、检查 |
 | 3 清空 | 删除本项目全部容器、网络与数据卷（包括 n8n、OpenIM 的，以及以前部署过的 Vikunja 的），可选先备份；可选同时删除代码目录（其中的本机备份 `backups/` 与 `.env` 先移到 `/var/backups/my-workspace-<时间>/` 保留）；要输入项目名确认 |
-| 4 状态 | 服务状态、本机与 HTTPS 健康检查、是否已完成首次安装 |
-| 5 接入组件 | 自动接入 n8n，部署 OpenIM，配置 OpenClaw 接入入口（需要先在浏览器创建管理员，见下面的「自动接入 n8n、OpenIM」）；GitHub 在网页上接入（第 8.2 节） |
+| 4 状态 | 后台任务的进度（等首次安装时显示安装凭据；失败时显示原因）、服务状态、本机与 HTTPS 健康检查 |
+| 5 接入组件 | 接入 n8n，部署 OpenIM，配置 OpenClaw 接入入口；GitHub 在网页上接入（第 8.2 节） |
+| 6 日志 | 后台任务的日志；任务还在运行时接着显示 |
 
-> **SSH 断开不会中断部署**（T-0092）：首次部署要下载几 GB 镜像、在服务器上编译 OpenIM，可能要几十分钟，
-> 网络不稳时 SSH 会断开（例如 `Timeout, server not responding`）。在终端里选择部署、升级或接入组件时，
-> 脚本自动进入一个专用的 tmux 会话（没有 tmux 时先自动安装），断线后部署在服务器上继续。重新登录后
-> **再运行一次同样的命令**（或 `sudo tmux -L my-workspace attach -t deploy`；以 root 登录时去掉 `sudo`）就接回原来的进度，
-> 不会开始第二次部署。万一没能自动接回（脚本会提示“部署在后台的会话里继续运行”），部署并没有中断，用上面的命令查看进度。
->
-> - 想暂时离开但不中断：先按 `Ctrl+b`，再按 `d`；向上翻看输出：先按 `Ctrl+b` 再按 `[`，按 `q` 退出；
-> - 脚本结束后停在最后的输出上（例如安装凭据），按回车才关闭会话；
+### 先问完，再在后台运行（T-0094）
+
+首次部署要下载几 GB 镜像、在服务器上编译 OpenIM，可能要几十分钟，网络不稳时 SSH 随时会断开（例如 `Timeout, server not responding`）。
+所以部署、升级、接入组件都分两段：
+
+1. **前台（大约一分钟）**：先检查系统、域名解析、80 / 443 端口，然后把**所有**要你回答的问题一次问完——三个参数（见下表）、
+   要不要部署 n8n / OpenIM / OpenClaw 接入入口和它们的参数、防火墙要不要放行等，最后显示汇总让你确认。
+   回答保存在 `/srv/my-workspace/.deploy/answers.env`（权限 600，**不含任何密码**）。
+2. **后台**：确认后，脚本作为系统服务在后台运行（`systemd-run`，服务名 `my-workspace-deploy`；没有 systemd 时用 `setsid nohup`），
+   **一个问题都不再问**，输出写进 `/srv/my-workspace/.deploy/deploy.log`。终端接着显示日志：
+   - 按 `Ctrl+C` 只是不看了，**SSH 断开、关掉终端都不影响部署**；
+   - 重新登录后运行 `sudo bash /srv/my-workspace/scripts/deploy.sh status` 看进度，`… logs` 接着看日志；
+     也可以再运行一次原来那条 `curl … | sudo bash`，它发现已经有任务在运行，会直接接着显示进度，不会开始第二次部署；
+   - **网页上的首次安装不用回终端按回车**：服务启动后，后台每隔几秒检测一次，你在浏览器里建好管理员，它就自动接着接入组件
+     （最多等 24 小时）。终端和 `status` 会显示网址与安装凭据；**安装凭据不写进日志**。
+3. 后台跑完会列出**需要你处理的事项**（例如以前装过的 n8n 已经有 owner 账号、接入要输入它的密码：这类需要密码的事后台不做，
+   提示你在终端运行 `deploy.sh connect` 当场输入）。失败时 `status` 显示原因和日志的最后几行；处理后**重新运行同样的命令**，
+   它会问是否沿用上次的回答，已完成的步骤会很快跳过。
+
+> - 无人值守（例如云服务器的初始化脚本）：`--domain … --email … --yes` 给出三个参数，其余按默认回答；
+>   或者写一个回答文件（格式同 `answers.env`，例如 `N8N=y`、`OPENIM=n`）用 `--answers 文件` 传入；
 > - 拉取镜像失败（网络超时）时自动重试 3 次，已经下载的部分不会重新下载；Docker Hub 的匿名拉取次数限制
 >   （`429 toomanyrequests`）不重试，等一小时或 `docker login` 后重新运行；
-> - 不想用 tmux：运行前设置 `WORKSPACE_NO_TMUX=1`（例如已经在自己的 screen 里）。
+> - 调试时可以加 `--foreground`：不转到后台，在当前终端边问边做（SSH 断开会中断）；
+> - 以前的版本（T-0092）把部署放在 tmux 会话里：那样的会话还在时，新脚本会提示你先用
+>   `sudo tmux -L my-workspace attach -t deploy` 接回去处理完，避免同时部署两次。
 
-部署时只问三个问题：
+前台要回答的三个参数：
 
 | 参数 | 例子 | 说明 |
 |---|---|---|
@@ -64,7 +80,7 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 
 其余的都自动完成，并处理了部署时常见的坑：
 
-- 缺 git / make / curl 时用 apt 安装；没有 Docker 时用官方脚本安装（都会先问）。
+- 缺 git / make / curl 时用 apt 安装；没有 Docker 时用官方脚本安装（在前台先问，后台安装）。
   官方脚本在已停止支持的系统上可能失败（例如 Ubuntu 20.04：Docker 仓库最高只到 28.1.1，没有脚本要加装的 `docker-model-plugin`），
   这时改为只安装核心组件（docker-ce、CLI、containerd、Compose 与 Buildx 插件）；
 - Ubuntu 22.04 以下、Debian 12 以下的系统已停止常规安全更新：照样部署，但会提醒生产环境换成 Ubuntu 24.04 或 Debian 12 及以上；
@@ -75,12 +91,13 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 - 写入 `APP_ENV=production`、`COMPOSE_FILE=compose.yaml:compose.https.yaml`、域名、邮箱与 `PUBLIC_BASE_URL`；
 - 检查域名解析、80 / 443 是否被占用（例如 nginx）、ufw 是否放行；
 - `make up` → `make migrate`（数据库密码和 `.env` 不一致时自动同步）→ `make smoke` → 用 GET 检查 `https://<域名>/healthz`；
-- 还没创建管理员时显示安装凭据；在浏览器创建好管理员后回到终端按回车，接着自动接入 n8n、部署 OpenIM（见下一节）。GitHub 在网页上接入（第 8.2 节）。
+- 还没创建管理员时，终端和 `status` 显示网址与安装凭据；你在浏览器建好管理员后，后台自动检测到并按前台的选择接入 n8n、部署 OpenIM、
+  配置 OpenClaw 接入入口（见下一节）。GitHub 在网页上接入（第 8.2 节）。
 
 ### 自动接入 n8n、OpenIM
 
-部署结束时脚本提示去浏览器「首次安装」页创建管理员；创建好后回到终端按回车，逐个询问要不要接入（都可以跳过）。
-以后随时可以单独运行（菜单第 5 项）：
+要不要接入这些组件，在部署开头（前台）就问好了；后台在你通过浏览器「首次安装」创建管理员后自动接入，不用回终端。
+以后随时可以单独运行（菜单第 5 项，同样是先问完再在后台运行）：
 
 ```bash
 sudo bash scripts/deploy.sh connect
@@ -88,7 +105,7 @@ sudo bash scripts/deploy.sh connect
 
 | 组件 | 脚本自动做的事 | 需要你做的 |
 |---|---|---|
-| n8n（自动化） | `make n8n-up` → 建 owner 账号（随机密码）→ 建只读 API Key 与名为 `X-Workspace-Trigger` 的 Header Auth 凭据 → 在工作台建连接并测试 | 脚本显示一次 n8n 账号密码，同时加密保存到工作台「自动化」页（只有管理员看得到）；之后自己搭工作流（Webhook 节点选这个凭据），再到工作台“自动化”页登记 |
+| n8n（自动化） | `make n8n-up` → 建 owner 账号（随机密码）→ 建只读 API Key 与名为 `X-Workspace-Trigger` 的 Header Auth 凭据 → 在工作台建连接并测试 | n8n 账号密码加密保存到工作台「自动化」页（只有管理员看得到；后台运行时不写进日志）；之后自己搭工作流（Webhook 节点选这个凭据），再到工作台“自动化”页登记 |
 | OpenIM（「消息」页） | 构建打过补丁的 openim-server 镜像（第一次约 5 ~ 15 分钟，临时占用约 8 GB 磁盘；Docker Hub 限流时自动改用 `mirror.gcr.io` 再试）→ `make openim-up` → 在 `.env` 里填好 `OPENIM_API_URL`、`OPENIM_OBJECT_URL` 并重启 api、worker → 确认工作台连得上 | 内存少于 4 GB 时默认不装（另外占用约 1 GB）；OpenClaw 本身（接入入口与实例）按第 8.6 节配置 |
 
 - 项目与任务由工作台自己管理，不需要接入（T-0082 移除了 Vikunja；从带 Vikunja 的旧版本升级见第 10 步）。
@@ -96,18 +113,19 @@ sudo bash scripts/deploy.sh connect
 - 密码和 Token 不出现在命令行参数和日志里。
 - 已经接入的组件不会重复配置。
 - **GitHub 不在脚本里接入**：在工作台网页上配置（第 8.2 节），脚本只显示它的状态和设置页的地址。
-- n8n owner 已经存在时，脚本改为询问它的密码。
+- n8n owner 已经存在时需要它的密码：运行 `connect` 时在前台当场询问并接入，密码不带到后台；
+  部署（install）的后台遇到这种情况会跳过，列为待办。
 - 登录成功的 n8n 账号密码加密保存到工作台：管理员在「自动化」页的「登录账号」卡片里点「显示密码」
-  或「复制密码」（每次都写审计日志），也可以在那里修改。之前已经接入、还没保存的，再运行 `connect` 时会问一次，
+  或「复制密码」（每次都写审计日志），也可以在那里修改。之前已经接入、还没保存的，再运行 `connect` 时（前台）会问一次，
   输入账号密码（脚本先登录核对）后保存；也可以直接在页面上填写。member、viewer 看不到这张卡片。
-- 无人值守（`--yes`）时自动接入 n8n，跳过 GitHub。
+- 无人值守（`--yes`）时按默认回答：接入 n8n，OpenIM 看内存与磁盘决定，不配置 OpenClaw 接入入口。
 - 最后显示接入状态：「已接入」「未接入」，或者已保存但用不了的原因（凭证失效、暂时连不上等），以及 n8n 的打开地址。
 - 依据和实测记录见 [`decisions/2026-11-02-deploy-connect.md`](decisions/2026-11-02-deploy-connect.md)。
 
 #### 用子域名打开 n8n（可选）
 
 默认 n8n 的管理界面只绑定服务器本机，工作台里「打开 n8n 编辑器」指向 `http://localhost:5678`，
-要先建 SSH 隧道（第 8 节开头）才能打开。启用了域名与 HTTPS 时，`connect` 最后会问要不要用子域名对外打开：
+要先建 SSH 隧道（第 8 节开头）才能打开。启用了域名与 HTTPS 时，部署或 `connect` 开头会问要不要用子域名对外打开：
 
 1. 先在域名服务商那里加一条 A 记录，指向这台服务器，例如 `n8n.workspace.example.com`；
 2. 运行 `sudo bash scripts/deploy.sh connect`，问到「用子域名经 HTTPS 对外打开 n8n？」时回答 `y`，

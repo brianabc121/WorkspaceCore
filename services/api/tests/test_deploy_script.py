@@ -5,11 +5,12 @@
 版本与校验和的来源见 docs/decisions/2026-11-02-host-python-3-12.md。
 """
 
+import contextlib
 import os
 import pty
 import re
 import select
-import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -165,6 +166,7 @@ def _ingress(
     check: str = "renew",
     answers: dict[str, str] | None = None,
     umask: str = "022",
+    prelude: str = "",
 ) -> tuple[str, str, dict[str, str]]:
     """在临时目录里运行 connect_agent_ingress；返回 (输出, docker/make 调用, .env)。"""
     import os
@@ -188,6 +190,7 @@ def _ingress(
             "-c",
             functions
             + OVERRIDES
+            + prelude
             + f'\numask {umask}\nPY=python3\nROOT="$1"\nconnect_agent_ingress',
             "deploy",
             str(root),
@@ -299,168 +302,7 @@ def test_ingress_creates_a_custom_tls_dir_the_gateway_can_enter(tmp_path: Path) 
     assert (custom / "public.crt").read_text() == "CERT ws.example.com"
 
 
-# ---------------------------------------------------------------- SSH 断线后继续运行（T-0092）
-
-FAKE_TMUX = """#!/usr/bin/env bash
-# 假的 tmux：每次调用记一行（参数用 \\x1f 分隔，保留空格）
-# has-session 按 $STATE/session 是否存在返回；
-# 设置 ATTACH_FAILS 时 attach 失败（像真的 tmux 那样报错）
-{ printf '%s\\x1f' "$@"; printf '\\n'; } >> "$LOG"
-for arg in "$@"; do [[ $arg == has-session ]] && { [[ -f $STATE/session ]]; exit; }; done
-for arg in "$@"; do
-  [[ $arg == attach && -n ${ATTACH_FAILS:-} ]] \\
-    && { echo "open terminal failed: can't use /dev/tty" >&2; exit 1; }
-done
-exit 0
-"""
-
-
-def _keep_running(
-    tmp_path: Path,
-    action: str = "install",
-    *,
-    terminal: bool = True,
-    multiplexer: bool = False,
-    session: bool = False,
-    tmux: bool = True,
-    env: dict[str, str] | None = None,
-) -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
-    """只加载 deploy.sh 的函数，在假的终端环境里运行 keep_running。"""
-    root, state, bin_dir = tmp_path / "root", tmp_path / "state", tmp_path / "bin"
-    for path in (root / "scripts", state, bin_dir):
-        path.mkdir(parents=True, exist_ok=True)
-    if session:
-        (state / "session").touch()
-    if tmux:
-        (bin_dir / "tmux").write_text(FAKE_TMUX, encoding="utf-8")
-        (bin_dir / "tmux").chmod(0o755)
-    log = tmp_path / "tmux.log"
-    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]
-    fake_tmux = 'tmux() { "$BIN/tmux" "$@"; }' if tmux else "tmux() { return 127; }"
-    overrides = "\n".join(
-        [
-            f"has_terminal() {{ {'return 0' if terminal else 'return 1'}; }}",
-            f"in_multiplexer() {{ {'return 0' if multiplexer else 'return 1'}; }}",
-            # 只用假的 tmux：本机装了真的 tmux 时也不会真的建会话
-            f"install_tmux() {{ {'return 0' if tmux else 'return 1'}; }}",
-            fake_tmux,
-            "",
-        ]
-    )
-    script = (
-        functions
-        + "\n"
-        + overrides
-        + f'ROOT="$1" ACTION="{action}" ASSUME_YES=1 DOMAIN=ws.example.com\n'
-        + 'keep_running\necho "keep_running returned"\n'
-    )
-    result = subprocess.run(  # noqa: S603 - 参数固定
-        ["/bin/bash", "-c", script, "deploy", str(root)],
-        env={
-            "PATH": f"{bin_dir}:/usr/bin:/bin",
-            "HOME": str(tmp_path),
-            "LOG": str(log),
-            "STATE": str(state),
-            "BIN": str(bin_dir),
-            **(env or {}),
-        },
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    calls = [
-        line.split("\x1f")[:-1] for line in (log.read_text().splitlines() if log.exists() else [])
-    ]
-    return result, calls
-
-
-@pytest.mark.parametrize("action", ["install", "upgrade", "connect"])
-def test_long_actions_move_into_a_tmux_session(tmp_path: Path, action: str) -> None:
-    result, calls = _keep_running(tmp_path, action)
-    assert result.returncode == 0, result.stderr
-    # exec tmux attach 替换了脚本：后面的 echo 不会运行
-    assert "keep_running returned" not in result.stdout
-    assert [c[:4] for c in calls] == [
-        ["-L", "my-workspace", "has-session", "-t"],
-        ["-L", "my-workspace", "new-session", "-d"],
-        ["-L", "my-workspace", "set-option", "-t"],
-        ["-L", "my-workspace", "attach", "-t"],
-    ]
-    new = calls[1]
-    assert new[new.index("-s") + 1] == "deploy"
-    # 会话里重新运行同一个动作，参数原样转发；结束后等回车，最后的输出（安装凭据等）不会一闪而过
-    script = str(tmp_path / "root/scripts/deploy.sh")
-    tail = new[new.index(script) :]
-    assert tail == [
-        script,
-        action,
-        "--dir",
-        str(tmp_path / "root"),
-        "--domain",
-        "ws.example.com",
-        "--yes",
-    ]
-    assert "WORKSPACE_IN_TMUX=1" in new
-    wrapper = new[new.index("-c") + 1]
-    assert "read -r _" in wrapper and 'exit "$code"' in wrapper
-    assert "SSH 断开后部署会继续" in result.stderr
-
-
-def test_running_again_reattaches_instead_of_starting_twice(tmp_path: Path) -> None:
-    result, calls = _keep_running(tmp_path, session=True)
-    assert result.returncode == 0, result.stderr
-    assert [c[2] for c in calls] == ["has-session", "attach"]
-    assert "接回去" in result.stderr
-
-
-@pytest.mark.parametrize(
-    "case",
-    [
-        {"action": "status"},
-        {"action": "reset"},
-        {"terminal": False},
-        {"multiplexer": True},
-        {"env": {"WORKSPACE_NO_TMUX": "1"}},
-    ],
-)
-def test_no_tmux_when_not_needed(tmp_path: Path, case: dict[str, object]) -> None:
-    result, calls = _keep_running(tmp_path, **case)  # type: ignore[arg-type]
-    assert result.returncode == 0, result.stderr
-    assert "keep_running returned" in result.stdout
-    assert calls == []
-
-
-def test_without_tmux_the_script_continues_with_a_warning(tmp_path: Path) -> None:
-    result, calls = _keep_running(tmp_path, tmux=False)
-    assert result.returncode == 0, result.stderr
-    assert "keep_running returned" in result.stdout
-    assert "没有 tmux" in result.stderr
-    assert calls == []
-
-
-def test_the_session_waits_for_enter_and_keeps_the_exit_code(tmp_path: Path) -> None:
-    """按假 tmux 记下的命令真正运行一次：脚本结束后显示退出码，按回车才关闭。"""
-    _, calls = _keep_running(tmp_path)
-    new = calls[1]
-    command = new[new.index("env") :]
-    script = Path(command[command.index("-c") + 2])
-    script.write_text('echo "deploy ran with: $*"; exit 3\n', encoding="utf-8")
-    result = subprocess.run(  # noqa: S603 - 参数来自上面的假 tmux 记录
-        command, input="\n", capture_output=True, text=True, check=False, timeout=30
-    )
-    assert result.returncode == 3
-    assert "deploy ran with: install --dir" in result.stdout
-    assert "退出码 3" in result.stdout
-
-
-def test_when_attach_fails_the_deploy_keeps_running(tmp_path: Path) -> None:
-    """T-0093：接回失败（例如 tmux 拒绝终端）时不当作部署失败：会话已经在跑，告诉用户怎么接回。"""
-    result, calls = _keep_running(tmp_path, env={"ATTACH_FAILS": "1"})
-    assert result.returncode == 0, result.stderr
-    assert "keep_running returned" not in result.stdout
-    assert [c[2] for c in calls] == ["has-session", "new-session", "set-option", "attach"]
-    assert "部署在后台的会话里继续运行" in result.stderr
-    assert "tmux -L my-workspace attach -t deploy" in result.stderr
+# ---------------------------------------------------------------- 真正的终端设备（T-0093）
 
 
 def _in_pty(script: str, env: dict[str, str], timeout: float = 30) -> str:
@@ -505,52 +347,6 @@ def test_real_tty_is_the_terminal_device_not_dev_tty(tmp_path: Path) -> None:
     assert fields["stdin"] == "/dev/tty"
     assert fields["stdout"].startswith("/dev/pts/")
     assert fields["real"] == fields["stdout"]
-
-
-@pytest.mark.skipif(shutil.which("tmux") is None, reason="需要真的 tmux")
-def test_attach_works_when_stdin_is_dev_tty(tmp_path: Path) -> None:
-    """真的 tmux：标准输入是 /dev/tty 时直接 attach 会报 can't use /dev/tty；tmux_attach 能接上。"""
-    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]
-    script = (
-        functions
-        + "\nset +eE; trap - ERR\nTMUX_SOCKET=t0093-test\n"
-        + "tmux_cmd new-session -d -s deploy 'sleep 1'\n"
-        + "exec </dev/tty\n"
-        + "tmux_attach\n"
-        + "echo not-reached\n"
-    )
-    env = {
-        "PATH": "/usr/bin:/bin",
-        "HOME": str(tmp_path),
-        "TERM": "xterm",
-        "TMUX_TMPDIR": str(tmp_path),
-    }
-    try:
-        out = _in_pty(script, env)
-    finally:
-        subprocess.run(
-            ["tmux", "-L", "t0093-test", "kill-server"],  # noqa: S607
-            env=env,
-            capture_output=True,
-            check=False,
-        )
-    assert "can't use /dev/tty" not in out
-    assert "没能接回" not in out
-    assert "[exited]" in out
-    assert "not-reached" not in out
-
-
-def test_in_multiplexer_sees_tmux_and_screen(tmp_path: Path) -> None:
-    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]
-    for var in ("TMUX", "STY", "WORKSPACE_IN_TMUX"):
-        result = subprocess.run(  # noqa: S603 - 参数固定
-            ["/bin/bash", "-c", functions + "\nin_multiplexer"],
-            env={"PATH": "/usr/bin:/bin", var: "1"},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.returncode == 0, (var, result.stderr)
 
 
 FAKE_MAKE = """#!/usr/bin/env bash
@@ -608,12 +404,17 @@ def test_pull_gives_up_after_three_attempts(tmp_path: Path) -> None:
     assert "失败了 3 次" in stderr
 
 
-def test_pull_does_not_retry_a_docker_hub_rate_limit(tmp_path: Path) -> None:
-    code, stderr, calls = _pull(
-        tmp_path,
-        fails=5,
-        message="toomanyrequests: You have reached your unauthenticated pull rate limit",
-    )
+@pytest.mark.parametrize(
+    "message",
+    [
+        "toomanyrequests: You have reached your unauthenticated pull rate limit",
+        # docker compose pull 有时只给出 HTTP 状态（T-0094 本机实测）
+        "unexpected status from HEAD request to https://registry-1.docker.io/v2/library/"
+        "postgres/manifests/sha256:0c: 429 Too Many Requests",
+    ],
+)
+def test_pull_does_not_retry_a_docker_hub_rate_limit(tmp_path: Path, message: str) -> None:
+    code, stderr, calls = _pull(tmp_path, fails=5, message=message)
     assert code == 1
     assert len(calls) == 1
     assert "429" in stderr
@@ -635,37 +436,451 @@ def test_deploy_pulls_before_starting() -> None:
     assert "grep -vx openim-server" in makefile
 
 
-def test_running_again_without_an_action_reattaches_before_the_menu(tmp_path: Path) -> None:
-    """curl | bash 重新运行时（没有动作）：已经有部署在运行就直接接回，不显示菜单。"""
-    root, state, bin_dir = tmp_path / "root", tmp_path / "state", tmp_path / "bin"
-    for path in (root / "scripts", state, bin_dir):
-        path.mkdir(parents=True)
-    (root / "compose.yaml").touch()
-    (root / "scripts/init_env.py").touch()
-    (state / "session").touch()
-    (bin_dir / "tmux").write_text(FAKE_TMUX, encoding="utf-8")
-    (bin_dir / "tmux").chmod(0o755)
-    log = tmp_path / "tmux.log"
-    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]
-    script = (
-        functions
-        + "\nhas_terminal() { return 0; }\nin_multiplexer() { return 1; }\n"
-        + 'tmux() { "$BIN/tmux" "$@"; }\nmenu() { echo "MENU SHOWN"; exit 9; }\n'
-        + 'main --dir "$1"\n'
+# ---------------------------------------------------------------- 先问完，再后台运行（T-0094）
+
+FUNCTIONS = DEPLOY.rstrip().rsplit("\n", 1)[0]
+
+
+def _shell(
+    tmp_path: Path,
+    body: str,
+    *,
+    stdin: str | None = None,
+    env: dict[str, str] | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """加载 deploy.sh 的函数后运行 body；ROOT 是临时目录。"""
+    root = tmp_path / "root"
+    root.mkdir(exist_ok=True)
+    return subprocess.run(  # noqa: S603 - 运行仓库里的脚本
+        ["/bin/bash", "-c", FUNCTIONS + f'\nROOT="{root}"\nPY=python3\n' + body],
+        input=stdin,
+        env={**os.environ, **(env or {})},
+        capture_output=True,
+        text=True,
+        check=check,
+        timeout=60,
     )
-    result = subprocess.run(  # noqa: S603 - 参数固定
-        ["/bin/bash", "-c", script, "deploy", str(root)],
-        env={
-            "PATH": f"{bin_dir}:/usr/bin:/bin",
-            "LOG": str(log),
-            "STATE": str(state),
-            "BIN": str(bin_dir),
-        },
+
+
+def test_answers_round_trip_without_executing_anything(tmp_path: Path) -> None:
+    marker = tmp_path / "pwned"
+    _shell(
+        tmp_path,
+        "deploy_dir_init\n"
+        "DOMAIN=ws.example.com EMAIL=ops@example.com BASE_URL=https://ws.example.com\n"
+        f"ANS[N8N_DOMAIN]='$(touch {marker})'\nANS[OPENIM]=n\nANS[N8N_EMAIL]=''\n"
+        "answers_save\n",
+    )
+    file = tmp_path / "root/.deploy/answers.env"
+    assert file.stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "root/.deploy").stat().st_mode & 0o777 == 0o700
+    file.write_text(file.read_text() + "lower_case=ignored\nnot a line\n")
+    out = _shell(
+        tmp_path,
+        'answers_load "$(answers_file)"\n'
+        'for k in $(printf "%s\\n" "${!ANS[@]}" | sort); do\n'
+        '  printf "%s=[%s]\\n" "$k" "${ANS[$k]}"\ndone\n'
+        'echo "DOMAIN=$DOMAIN EMAIL=$EMAIL BASE_URL=$BASE_URL"\n',
+    ).stdout
+    assert f"N8N_DOMAIN=[$(touch {marker})]" in out
+    assert "N8N_EMAIL=[]" in out and "OPENIM=[n]" in out
+    assert "lower_case" not in out
+    assert "DOMAIN=ws.example.com EMAIL=ops@example.com BASE_URL=https://ws.example.com" in out
+    assert not marker.exists()
+
+
+def test_questions_are_asked_up_front_and_never_in_the_background(tmp_path: Path) -> None:
+    # 前台：问并记下
+    plan = _shell(
+        tmp_path,
+        "interactive() { return 0; }\nPHASE=plan\n"
+        'decide OPENIM "部署 OpenIM？" y && echo OPENIM=yes || echo OPENIM=no\n'
+        'choose host INGRESS_HOST "OpenClaw 服务器访问工作台用的域名" "ws.example.com"\n'
+        'echo "host=$host"\n'
+        'decide OPENIM "部署 OpenIM？" y && echo again=yes || echo again=no\n'
+        'echo "recorded=${ANS[OPENIM]}/${ANS[INGRESS_HOST]}"\n',
+        stdin="n\nagent.example.com\n",
+    )
+    assert "OPENIM=no" in plan.stdout and "host=agent.example.com" in plan.stdout
+    assert "again=no" in plan.stdout  # 同一个问题只问一次
+    assert "recorded=n/agent.example.com" in plan.stdout
+    # 后台：有回答就用回答，没有就按默认值并写进日志；任何时候都不调用 confirm / ask
+    run = _shell(
+        tmp_path,
+        'confirm() { echo "ASKED $1"; return 0; }\nask() { echo "ASKED $1"; }\nPHASE=run\n'
+        "ANS[OPENIM]=n\nANS[INGRESS_HOST]=-\n"
+        'decide OPENIM "部署 OpenIM？" y && echo OPENIM=yes || echo OPENIM=no\n'
+        'decide N8N "部署 n8n？" y && echo N8N=yes || echo N8N=no\n'
+        'decide INGRESS "配置接入入口？" n && echo INGRESS=yes || echo INGRESS=no\n'
+        'choose host INGRESS_HOST "域名" "ws.example.com"; echo "host=$host"\n'
+        'choose email N8N_EMAIL "邮箱" "ops@example.com"; echo "email=$email"\n',
+    )
+    assert "ASKED" not in run.stdout
+    assert "OPENIM=no" in run.stdout and "N8N=yes" in run.stdout and "INGRESS=no" in run.stdout
+    assert "host=-" in run.stdout and "email=ops@example.com" in run.stdout
+    assert "没有事先回答「部署 n8n？」，按默认：是" in run.stderr
+    assert "没有事先回答「邮箱」，按默认：ops@example.com" in run.stderr
+
+
+def test_plan_components_records_every_choice(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "docker").write_text("#!/bin/sh\nexit 1\n")
+    (bin_dir / "docker").chmod(0o755)
+    (tmp_path / "root/infra/openim").mkdir(parents=True)
+    (tmp_path / "root/infra/openim/compose.yaml").write_text(
+        "    image: my-workspace/openim-server:test\n"
+    )
+    out = _shell(
+        tmp_path,
+        "interactive() { return 0; }\napi_running() { return 1; }\nPHASE=plan ACTION=install\n"
+        "DOMAIN=ws.example.com EMAIL=ops@example.com\n"
+        "plan_components\n"
+        'for k in $(printf "%s\\n" "${!ANS[@]}" | sort); do\n'
+        '  printf "%s=%s\\n" "$k" "${ANS[$k]}"\ndone\n',
+        # n8n：是、邮箱默认；对外：是、域名默认；OpenIM：否；接入入口：是、没有域名、IP
+        stdin="y\n\ny\n\nn\ny\n-\n203.0.113.9\n",
+        env={"PATH": f"{bin_dir}:{os.environ['PATH']}"},
+    ).stdout
+    answers = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+    assert answers == {
+        "N8N": "y",
+        "N8N_EMAIL": "ops@example.com",
+        "N8N_EXPOSE": "y",
+        "N8N_DOMAIN": "n8n.ws.example.com",
+        "OPENIM": "n",
+        "INGRESS": "y",
+        "INGRESS_HOST": "-",
+        "INGRESS_ADDRESS": "203.0.113.9",
+    }
+
+
+def test_ingress_in_the_background_uses_the_recorded_answers(tmp_path: Path) -> None:
+    prelude = "\nPHASE=run\nANS[INGRESS]=y\nANS[INGRESS_HOST]=-\nANS[INGRESS_ADDRESS]=203.0.113.8\n"
+    _, calls, env = _ingress(tmp_path, "SITE_DOMAIN=\nAGENT_PUBLIC_URL=\n", prelude=prelude)
+    assert "confirm" not in calls  # 后台一个问题都不问
+    assert env["AGENT_PUBLIC_ADDRESS"] == "203.0.113.8"
+    assert env["AGENT_PUBLIC_HOST"] == "agent-gateway.myworkspace.internal"
+
+
+# 后台运行的端到端：用真的进程走一遍 前台提问 → 启动后台 → 跟随日志 → 等网页首次安装 → 完成。
+# 只换掉真正部署的那部分（do_install 等），其余都是 deploy.sh 本身的代码；
+# 没有 systemd 时用 setsid nohup。
+STUB = r"""
+have_systemd() { return 1; }
+ensure_root() { :; }
+ensure_tools() { :; }
+legacy_tmux_session() { return 1; }
+SETUP_POLL=1
+connect_status() {
+  if [[ -f $ROOT/setup-done ]]; then echo setup=done; else echo setup=required; fi
+}
+plan_install() {
+  DOMAIN=ws.example.com EMAIL=ops@example.com BASE_URL=https://ws.example.com
+  decide N8N "部署 n8n？" y
+  plan_summary
+}
+do_install() {
+  step "第一步"
+  info "hello from background"
+  [[ -f $ROOT/fail ]] && die "模拟失败：端口被占用"
+  show_setup_stub
+  wait_for_setup_run
+  step "接入组件"
+  todo_add "示例待办"
+}
+show_setup_stub() { info "下一步：创建管理员"; }
+"""
+
+
+def _deploy_root(tmp_path: Path) -> Path:
+    root = tmp_path / "root"
+    (root / "scripts").mkdir(parents=True)
+    (root / "compose.yaml").touch()
+    (root / "Makefile").touch()
+    (root / "scripts/init_env.py").touch()
+    (root / ".env").write_text(
+        "PUBLIC_BASE_URL=https://ws.example.com\nSETUP_TOKEN=setup-token-123456\n"
+    )
+    (root / "scripts/deploy.sh").write_text(FUNCTIONS + "\n" + STUB + '\nmain "$@"\n')
+    return root
+
+
+def _state(root: Path) -> dict[str, str]:
+    path = root / ".deploy/state"
+    if not path.exists():
+        return {}
+    return dict(line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
+
+
+def _wait(predicate: object, timeout: float = 30) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():  # type: ignore[operator]
+            return
+        time.sleep(0.2)
+    raise AssertionError("超时")
+
+
+def _start(root: Path, *args: str) -> subprocess.Popen[str]:
+    return subprocess.Popen(  # noqa: S603 - 运行临时目录里的脚本
+        ["/bin/bash", str(root / "scripts/deploy.sh"), *args, "--dir", str(root)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "HOME": str(root.parent)},
+    )
+
+
+def _status(tmp_path: Path, root: Path) -> subprocess.CompletedProcess[str]:
+    """deploy.sh status；docker 换成总是失败的假命令（只看后台任务的部分）。"""
+    bin_dir = tmp_path / "nodocker"
+    bin_dir.mkdir(exist_ok=True)
+    (bin_dir / "docker").write_text("#!/bin/sh\nexit 1\n")
+    (bin_dir / "docker").chmod(0o755)
+    return subprocess.run(  # noqa: S603 - 运行临时目录里的脚本
+        ["/bin/bash", str(root / "scripts/deploy.sh"), "status", "--dir", str(root)],
         capture_output=True,
         text=True,
         check=False,
+        timeout=60,
+        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "MENU SHOWN" not in result.stdout
-    calls = [line.split("\x1f")[:-1] for line in log.read_text().splitlines()]
-    assert [c[2] for c in calls] == ["has-session", "attach"]
+
+
+def _stop_background(root: Path) -> None:
+    pid = _state(root).get("pid", "")
+    if pid.isdigit():
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(int(pid), 9)
+
+
+def test_deploy_runs_in_the_background_and_waits_for_the_web_setup(tmp_path: Path) -> None:
+    root = _deploy_root(tmp_path)
+    follower = _start(root, "install")
+    try:
+        _wait(lambda: _state(root).get("status") == "waiting_setup")
+        log = root / ".deploy/deploy.log"
+        assert "hello from background" in log.read_text()
+        # 后台进程独立于前台（自己的会话），前台退出也不受影响
+        pid = int(_state(root)["pid"])
+        assert os.getsid(pid) != os.getsid(follower.pid)
+        time.sleep(4)  # 前台每 2 秒看一次状态：等它显示出安装凭据
+        (root / "setup-done").touch()
+        out, err = follower.communicate(timeout=60)
+    finally:
+        _stop_background(root)
+    assert follower.returncode == 0, err
+    state = _state(root)
+    assert state["status"] == "done" and state["action"] == "install"
+    text = log.read_text()
+    # 前台显示了日志、安装凭据与待办；安装凭据只在终端上，不写进日志
+    assert "hello from background" in out and "示例待办" in out
+    assert "安装凭据：setup-token-123456" in err
+    assert "setup-token-123456" not in text
+    assert "已经创建管理员" in text and "全部完成" in text
+    answers = (root / ".deploy/answers.env").read_text()
+    assert "N8N=y" in answers and "SITE_DOMAIN=ws.example.com" in answers
+    assert (root / ".deploy/answers.env").stat().st_mode & 0o777 == 0o600
+    assert log.stat().st_mode & 0o777 == 0o600
+
+
+def test_ctrl_c_only_stops_following_and_running_again_follows_the_same_task(
+    tmp_path: Path,
+) -> None:
+    root = _deploy_root(tmp_path)
+    follower = _start(root, "install")
+    try:
+        _wait(lambda: _state(root).get("status") == "waiting_setup")
+        follower.send_signal(signal.SIGINT)
+        _, err = follower.communicate(timeout=30)
+        assert follower.returncode == 0
+        assert "已停止显示，部署在后台继续" in err
+        assert _state(root)["status"] == "waiting_setup"  # 后台还在等
+        # 重新运行（没有动作，像 curl | bash 那样）：不显示菜单、不开始第二次，接着显示这一次的进度
+        again = _start(root)
+        time.sleep(3)  # 让它先发现正在运行的任务，再让后台任务结束
+        (root / "setup-done").touch()
+        _, err2 = again.communicate(timeout=60)
+    finally:
+        _stop_background(root)
+    assert again.returncode == 0, err2
+    assert "已经有一个后台任务在运行" in err2
+    assert (root / ".deploy/deploy.log").read_text().count("后台任务开始") == 1
+    status = _status(tmp_path, root)
+    assert "已完成" in status.stderr and "示例待办" in status.stderr
+
+
+def test_a_failed_task_reports_why_and_running_again_reuses_the_answers(tmp_path: Path) -> None:
+    root = _deploy_root(tmp_path)
+    (root / "fail").touch()
+    follower = _start(root, "install")
+    try:
+        _, err = follower.communicate(timeout=60)
+    finally:
+        _stop_background(root)
+    assert follower.returncode == 1
+    assert "后台任务失败：模拟失败：端口被占用" in err
+    state = _state(root)
+    assert state["status"] == "failed" and state["error"] == "模拟失败：端口被占用"
+    status = _status(tmp_path, root)
+    assert "失败" in status.stderr and "模拟失败：端口被占用" in status.stderr
+    assert "hello from background" in status.stderr  # 日志的最后几行
+    # 处理后重新运行：沿用上次的回答（无人值守时按默认“是”）
+    (root / "fail").unlink()
+    (root / "setup-done").touch()
+    again = _start(root, "install")
+    try:
+        _, err2 = again.communicate(timeout=60)
+    finally:
+        _stop_background(root)
+    assert again.returncode == 0, err2
+    assert "上次的任务没有完成" in err2 and "已沿用上次的回答" in err2
+
+
+def test_systemd_runs_the_task_as_a_transient_service(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("systemd-run", "systemctl"):
+        (bin_dir / name).write_text(f'#!/bin/sh\nprintf "{name} %s\\n" "$*" >> "$LOG"\n')
+        (bin_dir / name).chmod(0o755)
+    log = tmp_path / "calls.log"
+    _shell(
+        tmp_path,
+        "have_systemd() { return 0; }\nfollow_run() { :; }\n"
+        "ACTION=install ASSUME_YES=1 DOMAIN=ws.example.com\nlaunch_run\n",
+        env={"PATH": f"{bin_dir}:{os.environ['PATH']}", "LOG": str(log), "HOME": "/root"},
+    )
+    calls = log.read_text()
+    root = tmp_path / "root"
+    assert "systemctl reset-failed my-workspace-deploy" in calls
+    run = next(line for line in calls.splitlines() if line.startswith("systemd-run"))
+    assert "--unit my-workspace-deploy" in run and "--collect" in run
+    assert f"StandardOutput=append:{root}/.deploy/deploy.log" in run
+    assert f"StandardError=append:{root}/.deploy/deploy.log" in run
+    assert "--setenv HOME=/root" in run
+    assert run.endswith(
+        f"/bin/bash {root}/scripts/deploy.sh install --dir {root} --run "
+        f"--answers {root}/.deploy/answers.env --yes"
+    )
+    assert _state(root)["runner"] == "systemd:my-workspace-deploy"
+
+
+def _git(*args: str) -> str:
+    """测试里的本地 git 仓库。"""
+    command = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", *args]
+    result = subprocess.run(command, capture_output=True, text=True, check=True)  # noqa: S603
+    return result.stdout.strip()
+
+
+def test_upgrade_in_the_background_goes_to_the_confirmed_version(tmp_path: Path) -> None:
+    """后台升级到前台确认过的提交（即使远端又有了新提交），并在同一个后台任务里交给新版本的脚本。"""
+    origin, root = tmp_path / "origin.git", tmp_path / "root"
+    _git("init", "-q", "--bare", "-b", "main", str(origin))
+    _git("clone", "-q", str(origin), str(root))
+    (root / "compose.yaml").touch()
+    _git("-C", str(root), "add", ".")
+    _git("-C", str(root), "commit", "-q", "-m", "v1")
+    _git("-C", str(root), "push", "-q", "origin", "HEAD:main")
+    old = _git("-C", str(root), "rev-parse", "HEAD")
+
+    def push(name: str) -> str:
+        work = tmp_path / f"work-{name}"
+        _git("clone", "-q", str(origin), str(work))
+        (work / name).touch()
+        _git("-C", str(work), "add", ".")
+        _git("-C", str(work), "commit", "-q", "-m", name)
+        _git("-C", str(work), "push", "-q", "origin", "HEAD:main")
+        return _git("-C", str(work), "rev-parse", "HEAD")
+
+    confirmed = push("v2")
+    push("v3")  # 确认之后远端又有了新提交
+    (root / ".env").write_text("A=1\n")
+    out = _shell(
+        tmp_path,
+        "ensure_docker() { :; }\ncompose() { return 1; }\n"
+        'exec() { echo "EXEC $*"; exit 0; }\n'
+        f"PHASE=run ACTION=upgrade\nANS[UPGRADE]=y\nANS[UPGRADE_TO]={confirmed}\n"
+        "deploy_dir_init\ndo_upgrade\n",
+    ).stdout
+    assert _git("-C", str(root), "rev-parse", "HEAD") == confirmed
+    assert (
+        f"EXEC bash {root}/scripts/deploy.sh upgrade --dir {root} --after-pull {old} "
+        f"--run --answers {root}/.deploy/answers.env"
+    ) in out
+
+
+def test_an_old_tmux_deploy_must_be_finished_first(tmp_path: Path) -> None:
+    root = _deploy_root(tmp_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "tmux").write_text("#!/bin/sh\nexit 0\n")
+    (bin_dir / "tmux").chmod(0o755)
+    script = (root / "scripts/deploy.sh").read_text()
+    (root / "scripts/deploy.sh").write_text(
+        script.replace("legacy_tmux_session() { return 1; }\n", "")
+    )
+    result = subprocess.run(  # noqa: S603
+        ["/bin/bash", str(root / "scripts/deploy.sh"), "install", "--dir", str(root)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+    )
+    assert result.returncode == 1
+    assert "以前版本的部署还在 tmux 会话里" in result.stderr
+    assert "tmux -L my-workspace attach -t deploy" in result.stderr
+    assert not (root / ".deploy/state").exists()
+
+
+def test_state_writes_from_both_sides_do_not_overwrite_each_other(tmp_path: Path) -> None:
+    """前台与后台同时写状态文件：任何一方写下的键都不能被另一方用旧内容覆盖掉。"""
+    out = _shell(
+        tmp_path,
+        "deploy_dir_init\n"
+        '( for i in $(seq 1 60); do state_set "k$i" "$i"; done ) &\n'
+        '( for i in $(seq 1 300); do state_set step "$i"; done ) &\n'
+        "wait\n"
+        'grep -c "^k" "$(state_file)"; state_get step\n',
+    ).stdout.split()
+    assert out == ["60", "300"]
+
+
+def test_an_unsaved_n8n_password_goes_to_a_root_only_file_not_the_log(tmp_path: Path) -> None:
+    """后台生成的 n8n 密码：接入完成前只在只有 root 能读的文件里，接入成功后删除，不进日志。"""
+    body = (
+        "deploy_dir_init\nPHASE=run\nANS[N8N]=y\nANS[N8N_EMAIL]=ops@example.com\n"
+        "pull_images() { :; }\nmake() { :; }\n"
+        "connect_cmd() {\n"
+        '  case $1 in n8n-owner) echo "owner=$OWNER" ;;\n'
+        "    n8n) cat >/dev/null\n"
+        "      [[ -f $(credential_file n8n) ]] && echo KEPT_WHILE_CONNECTING >&2\n"
+        '      return "$RC" ;; esac\n'
+        "}\n"
+        'connect_n8n none ""\n'
+    )
+    file = tmp_path / "root/.deploy/n8n-credential.txt"
+    todo = tmp_path / "root/.deploy/todo"
+    # 接入失败（例如 owner 已创建、登录失败）：密码留在文件里，列为待办
+    failed = _shell(tmp_path, body, env={"RC": "1", "OWNER": "none"})
+    assert "KEPT_WHILE_CONNECTING" in failed.stderr
+    assert file.stat().st_mode & 0o777 == 0o600
+    password = file.read_text().split("密码：", 1)[1].strip()
+    assert len(password) >= 20
+    assert password not in failed.stderr and password not in failed.stdout
+    assert str(file) in todo.read_text()
+    # 再次运行时 owner 已经存在：待办指向那个文件，而不是要一个从未拿到的密码
+    todo.unlink()
+    again = _shell(tmp_path, body, env={"RC": "1", "OWNER": "exists"})
+    assert str(file) in todo.read_text()
+    assert password not in again.stderr and password not in again.stdout
+    # 接入成功：密码已加密保存在工作台，文件删除，日志里只说去哪里看
+    file.unlink()
+    ok = _shell(tmp_path, body, env={"RC": "0", "OWNER": "none"})
+    assert "KEPT_WHILE_CONNECTING" in ok.stderr
+    assert not file.exists()
+    assert "已加密保存在工作台「自动化」页（日志里不显示）" in ok.stderr
