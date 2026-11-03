@@ -5,8 +5,13 @@
 版本与校验和的来源见 docs/decisions/2026-11-02-host-python-3-12.md。
 """
 
+import os
+import pty
 import re
+import select
+import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -298,9 +303,14 @@ def test_ingress_creates_a_custom_tls_dir_the_gateway_can_enter(tmp_path: Path) 
 
 FAKE_TMUX = """#!/usr/bin/env bash
 # 假的 tmux：每次调用记一行（参数用 \\x1f 分隔，保留空格）
-# has-session 按 $STATE/session 是否存在返回
+# has-session 按 $STATE/session 是否存在返回；
+# 设置 ATTACH_FAILS 时 attach 失败（像真的 tmux 那样报错）
 { printf '%s\\x1f' "$@"; printf '\\n'; } >> "$LOG"
 for arg in "$@"; do [[ $arg == has-session ]] && { [[ -f $STATE/session ]]; exit; }; done
+for arg in "$@"; do
+  [[ $arg == attach && -n ${ATTACH_FAILS:-} ]] \\
+    && { echo "open terminal failed: can't use /dev/tty" >&2; exit 1; }
+done
 exit 0
 """
 
@@ -441,6 +451,93 @@ def test_the_session_waits_for_enter_and_keeps_the_exit_code(tmp_path: Path) -> 
     assert result.returncode == 3
     assert "deploy ran with: install --dir" in result.stdout
     assert "退出码 3" in result.stdout
+
+
+def test_when_attach_fails_the_deploy_keeps_running(tmp_path: Path) -> None:
+    """T-0093：接回失败（例如 tmux 拒绝终端）时不当作部署失败：会话已经在跑，告诉用户怎么接回。"""
+    result, calls = _keep_running(tmp_path, env={"ATTACH_FAILS": "1"})
+    assert result.returncode == 0, result.stderr
+    assert "keep_running returned" not in result.stdout
+    assert [c[2] for c in calls] == ["has-session", "new-session", "set-option", "attach"]
+    assert "部署在后台的会话里继续运行" in result.stderr
+    assert "tmux -L my-workspace attach -t deploy" in result.stderr
+
+
+def _in_pty(script: str, env: dict[str, str], timeout: float = 30) -> str:
+    """在新的伪终端里运行 bash（它是终端的控制进程，/dev/tty 能打开），返回终端上的输出。"""
+    pid, fd = pty.fork()
+    if pid == 0:  # pragma: no cover - 子进程
+        os.execve("/bin/bash", ["/bin/bash", "-c", script], env)  # noqa: S606 - 参数固定
+    output = b""
+    deadline = time.monotonic() + timeout
+    try:
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([fd], [], [], 0.5)
+            if not ready:
+                continue
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError:  # 子进程退出后 Linux 上读主端返回 EIO
+                break
+            if not chunk:
+                break
+            output += chunk
+    finally:
+        os.close(fd)
+        if os.waitpid(pid, os.WNOHANG) == (0, 0):
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+    return output.decode(errors="replace")
+
+
+def test_real_tty_is_the_terminal_device_not_dev_tty(tmp_path: Path) -> None:
+    """curl | bash 时标准输入换成了 /dev/tty：real_tty 找到同一个终端真正的设备（/dev/pts/N）。"""
+    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]
+    script = (
+        functions
+        + "\nset +eE; trap - ERR\nexec </dev/tty\n"
+        + 'echo "stdin=$(readlink /proc/$$/fd/0) stdout=$(readlink /proc/$$/fd/1)'
+        + ' real=$(real_tty)"\n'
+    )
+    out = _in_pty(script, {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
+    line = next(item for item in out.splitlines() if item.startswith("stdin="))
+    fields = dict(part.split("=", 1) for part in line.split())
+    assert fields["stdin"] == "/dev/tty"
+    assert fields["stdout"].startswith("/dev/pts/")
+    assert fields["real"] == fields["stdout"]
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="需要真的 tmux")
+def test_attach_works_when_stdin_is_dev_tty(tmp_path: Path) -> None:
+    """真的 tmux：标准输入是 /dev/tty 时直接 attach 会报 can't use /dev/tty；tmux_attach 能接上。"""
+    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]
+    script = (
+        functions
+        + "\nset +eE; trap - ERR\nTMUX_SOCKET=t0093-test\n"
+        + "tmux_cmd new-session -d -s deploy 'sleep 1'\n"
+        + "exec </dev/tty\n"
+        + "tmux_attach\n"
+        + "echo not-reached\n"
+    )
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "TERM": "xterm",
+        "TMUX_TMPDIR": str(tmp_path),
+    }
+    try:
+        out = _in_pty(script, env)
+    finally:
+        subprocess.run(
+            ["tmux", "-L", "t0093-test", "kill-server"],  # noqa: S607
+            env=env,
+            capture_output=True,
+            check=False,
+        )
+    assert "can't use /dev/tty" not in out
+    assert "没能接回" not in out
+    assert "[exited]" in out
+    assert "not-reached" not in out
 
 
 def test_in_multiplexer_sees_tmux_and_screen(tmp_path: Path) -> None:
