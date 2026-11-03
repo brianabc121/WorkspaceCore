@@ -218,7 +218,7 @@ async function download(page, click) {
   const chat = page.getByRole('region', { name: `与${name}的会话` })
   await chat.waitFor()
   const text = `浏览器验收 ${run}：请帮我收藏一个链接`
-  await chat.getByLabel('消息').fill(text)
+  await chat.getByRole('textbox', { name: '消息', exact: true }).fill(text)
   await chat.getByRole('button', { name: '发送', exact: true }).click()
   await chat.getByText(text).waitFor()
   // 页面先显示刚发出的消息；以服务端（OpenIM 回调 → Worker 投影，带上序号）列出的为准，再刷新页面确认。
@@ -276,7 +276,7 @@ async function download(page, click) {
   const cardBox = noticeChat.locator('.ai-card').last()
   check(await reloadUntil(page, `${base}/im?c=${encodeURIComponent(await page.evaluate(() => new URL(location.href).searchParams.get('c') || ''))}`, page.getByRole('region', { name: '与审批通知的会话' }).getByText('待审批')), '审批卡片应显示“待审批”')
   await page.getByRole('region', { name: '与审批通知的会话' }).getByText(/由 Owner 触发/).waitFor()
-  check(await noticeChat.getByLabel('消息').count() === 0, '审批通知会话不能发消息')
+  check(await noticeChat.getByRole('textbox', { name: '消息', exact: true }).count() === 0, '审批通知会话不能发消息')
   await cardBox.getByRole('button', { name: '批准并执行' }).click()
   await cardBox.getByText('已执行').waitFor({ timeout: 30000 })
   step('审批卡片：IM 的“审批通知”会话里出现卡片，写明“由 Owner 触发”，在卡片上批准后显示“已执行”')
@@ -332,7 +332,7 @@ async function download(page, click) {
   }
   await member.page.goto(`${base}/im`)
   await member.page.waitForLoadState('networkidle')
-  check(await member.page.getByLabel('消息').count() === 0, 'member 打开 /im 不应看到聊天输入框')
+  check(await member.page.getByRole('textbox', { name: '消息', exact: true }).count() === 0, 'member 打开 /im 不应看到聊天输入框')
   step('member：导航里没有消息、OpenClaw 实例、密钥库，直接打开 /im 也不能聊天')
 
   // ---------------------------------------------------------------- 浏览器只访问工作台；没有密钥明文
