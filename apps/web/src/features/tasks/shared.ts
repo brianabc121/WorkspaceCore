@@ -19,3 +19,40 @@ export function useProjects(scope: string, includeArchived: MaybeRefOrGetter<boo
     getNextPageParam: (page) => page.next_cursor ?? undefined, enabled: computed(() => !!auth.user),
   })
 }
+
+// 任务页的智能视图（T-0084）：转成列表接口已有的参数（status、due_after 含、due_before 不含），按浏览器时区算“今天”
+export type TaskView = 'all' | 'open' | 'today' | 'overdue' | 'upcoming' | 'done'
+export const taskViews: { id: TaskView; label: string }[] = [
+  { id: 'all', label: '全部' }, { id: 'open', label: '未完成' }, { id: 'today', label: '今天' },
+  { id: 'overdue', label: '已逾期' }, { id: 'upcoming', label: '未来 7 天' }, { id: 'done', label: '已完成' },
+]
+const DAY = 24 * 60 * 60 * 1000
+export function startOfDay(date: Date) { return new Date(date.getFullYear(), date.getMonth(), date.getDate()) }
+function addDays(date: Date, days: number) { const next = new Date(date); next.setDate(next.getDate() + days); return next }
+export function viewQuery(view: TaskView, now = new Date()): { status: 'all' | 'open' | 'done'; due_after?: string; due_before?: string } {
+  const today = startOfDay(now)
+  if (view === 'today') return { status: 'open', due_after: today.toISOString(), due_before: addDays(today, 1).toISOString() }
+  if (view === 'overdue') return { status: 'open', due_before: now.toISOString() }
+  if (view === 'upcoming') return { status: 'open', due_after: now.toISOString(), due_before: new Date(now.getTime() + 7 * DAY).toISOString() }
+  if (view === 'open' || view === 'done') return { status: view }
+  return { status: 'all' }
+}
+// “今天”视图里快速添加的任务截止到今天 23:59（本地时间），添加后仍在这个视图里
+export function endOfToday(now = new Date()) { return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59).toISOString() }
+
+// 截止时间的简短说明：今天 / 明天 / 昨天 + 时刻，同一年省略年份；未完成且已过期的标为逾期
+const clock = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+export type DueTone = 'none' | 'overdue' | 'today' | 'normal'
+export function dueInfo(value: string | null, done: boolean, now = new Date()): { text: string; tone: DueTone } {
+  if (!value) return { text: '无截止时间', tone: 'none' }
+  const due = new Date(value)
+  if (Number.isNaN(due.getTime())) return { text: '时间不可用', tone: 'none' }
+  const days = Math.round((startOfDay(due).getTime() - startOfDay(now).getTime()) / DAY)
+  const time = clock.format(due)
+  const day = days === 0 ? '今天' : days === 1 ? '明天' : days === -1 ? '昨天'
+    : due.getFullYear() === now.getFullYear() ? `${due.getMonth() + 1}月${due.getDate()}日` : `${due.getFullYear()}年${due.getMonth() + 1}月${due.getDate()}日`
+  const text = `${day} ${time}`
+  if (done) return { text, tone: 'normal' }
+  if (due.getTime() < now.getTime()) return { text: `逾期 · ${text}`, tone: 'overdue' }
+  return { text, tone: days === 0 ? 'today' : 'normal' }
+}

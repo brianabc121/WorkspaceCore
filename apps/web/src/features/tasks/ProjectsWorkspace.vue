@@ -21,6 +21,8 @@ const { busy, needsReload, error, message } = mutation
 const blocked = computed(() => mutation.accessDenied.value || isAccessError(query.error.value))
 const items = computed(() => blocked.value ? [] : query.data.value?.pages.flatMap((p) => p.items) ?? [])
 const writable = computed(() => !!auth.currentWorkspace && auth.currentWorkspace.role !== 'viewer' && !blocked.value)
+// 完成进度（T-0084）：已完成 / 全部；没有任务时是 0
+const percent = (project: Project) => { const total = project.open_tasks + project.done_tasks; return total ? Math.round((project.done_tasks / total) * 100) : 0 }
 const editing = ref<Project | 'new' | null>(null), title = ref(''), description = ref(''), validation = ref('')
 
 function open(project: Project | 'new') {
@@ -78,20 +80,23 @@ const problem = computed(() => {
   <p v-if="message" role="status" class="feedback">{{ message }}</p>
   <button v-if="needsReload" class="secondary-button" :disabled="busy" @click="mutation.reload()">重新加载项目</button>
   <DataState :loading="query.isPending.value" :error="query.error.value" :empty="!items.length" :empty-text="writable ? '还没有项目，点「新建项目」开始。' : '还没有项目。'" @retry="query.refetch()" />
-  <section v-for="project in items" :key="project.id" class="panel form-panel integration-card" role="region" :aria-label="`项目 ${project.title}`">
-    <div class="section-heading"><h2>{{ project.title }}</h2><span v-if="project.archived" class="badge">已归档</span></div>
-    <p v-if="project.description" class="note-text">{{ project.description }}</p>
-    <p class="form-help">未完成 {{ project.open_tasks }} · 已完成 {{ project.done_tasks }} · 更新于 {{ formatTime(project.updated_at) }}</p>
-    <div class="form-actions">
-      <RouterLink :to="{ path: '/tasks', query: { project_id: project.id } }">查看任务</RouterLink>
-      <RouterLink :to="{ path: '/knowledge', query: { linked_resource_id: project.id } }">相关文档</RouterLink>
-      <template v-if="writable">
-        <button class="secondary-button" :aria-label="`编辑项目 ${project.title}`" :disabled="busy || needsReload" @click="open(project)">编辑</button>
-        <button class="secondary-button" :aria-label="`${project.archived ? '恢复' : '归档'}项目 ${project.title}`" :disabled="busy || needsReload" @click="archive(project)">{{ project.archived ? '恢复' : '归档' }}</button>
-        <button class="secondary-button" :aria-label="`删除项目 ${project.title}`" :disabled="busy || needsReload" @click="remove(project)">删除</button>
-      </template>
-    </div>
-  </section>
+  <div class="project-grid">
+    <section v-for="project in items" :key="project.id" class="panel form-panel integration-card project-card" role="region" :aria-label="`项目 ${project.title}`">
+      <div class="section-heading"><h2>{{ project.title }}</h2><span v-if="project.archived" class="badge">已归档</span></div>
+      <p v-if="project.description" class="note-text">{{ project.description }}</p>
+      <div class="progress-row"><div class="progress-track" role="progressbar" :aria-label="`${project.title} 完成进度`" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="percent(project)"><span :style="{ width: `${percent(project)}%` }"></span></div><span class="progress-value">{{ percent(project) }}%</span></div>
+      <p class="form-help">未完成 {{ project.open_tasks }} · 已完成 {{ project.done_tasks }} · 更新于 {{ formatTime(project.updated_at) }}</p>
+      <div class="form-actions">
+        <RouterLink :to="{ path: '/tasks', query: { project_id: project.id } }">查看任务</RouterLink>
+        <RouterLink :to="{ path: '/knowledge', query: { linked_resource_id: project.id } }">相关文档</RouterLink>
+        <template v-if="writable">
+          <button class="secondary-button" :aria-label="`编辑项目 ${project.title}`" :disabled="busy || needsReload" @click="open(project)">编辑</button>
+          <button class="secondary-button" :aria-label="`${project.archived ? '恢复' : '归档'}项目 ${project.title}`" :disabled="busy || needsReload" @click="archive(project)">{{ project.archived ? '恢复' : '归档' }}</button>
+          <button class="secondary-button" :aria-label="`删除项目 ${project.title}`" :disabled="busy || needsReload" @click="remove(project)">删除</button>
+        </template>
+      </div>
+    </section>
+  </div>
   <button v-if="query.hasNextPage.value" class="secondary-button" :disabled="query.isFetching.value" @click="query.fetchNextPage()">加载更多项目</button>
   <p v-if="!writable && !blocked" class="form-help">当前角色只读。</p>
   <ModalPanel v-if="editing" :title="editing === 'new' ? '新建项目' : '编辑项目'" :busy="busy" @close="!busy && (editing = null)">
