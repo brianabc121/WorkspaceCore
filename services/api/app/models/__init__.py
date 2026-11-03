@@ -12,6 +12,7 @@ from app.models.agent import (
     AgentSecretGrant,
     AgentSecretVersion,
     AgentSettings,
+    AgentSshJob,
     AgentSshTarget,
 )
 from app.models.ai import AiToolExecution
@@ -57,6 +58,7 @@ __all__ = [
     "AgentSecretGrant",
     "AgentSecretVersion",
     "AgentSettings",
+    "AgentSshJob",
     "AgentSshTarget",
     "AiToolExecution",
     "AppLogin",

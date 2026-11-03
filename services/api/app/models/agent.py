@@ -12,6 +12,7 @@ docs/decisions/2026-10-31-v2-oc1-contract.md 第 3、4、7 节：
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -26,7 +27,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -307,9 +308,60 @@ class AgentSshTarget(Base):
     )
     client_key_ref: Mapped[str | None] = mapped_column(Text)
     client_public_key: Mapped[str | None] = mapped_column(Text)
+    # 安装完成后（B2，迁移 0022）：接入包所在的目录与完成时间
+    install_dir: Mapped[str | None] = mapped_column(Text)
+    installed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
     created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()
+
+
+SSH_JOB_STATUSES = ("running", "succeeded", "failed", "interrupted")
+
+
+class AgentSshJob(Base):
+    """一次通过 SSH 的安装（T-0089 B2）。在 API 进程内运行；进程重启时 running 改为 interrupted。
+
+    steps：[{key, status, detail}]；log：命令输出的末尾，已脱敏（密码、令牌、私钥不会出现）。
+    """
+
+    __tablename__ = "agent_ssh_jobs"
+    __table_args__ = (
+        CheckConstraint("kind IN ('install')", name="kind"),
+        CheckConstraint(f"status IN {SSH_JOB_STATUSES}", name="status"),
+        ForeignKeyConstraint(
+            ["workspace_id", "instance_id"],
+            ["workspace.agent_instances.workspace_id", "workspace.agent_instances.id"],
+            ondelete="CASCADE",
+        ),
+        # 同一台目标服务器同时只有一个进行中的任务
+        Index(
+            "uq_agent_ssh_jobs_running",
+            "target_id",
+            unique=True,
+            postgresql_where=text("status = 'running'"),
+        ),
+        Index("ix_agent_ssh_jobs_target_started", "target_id", "started_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    instance_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    target_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.agent_ssh_targets.id", ondelete="CASCADE")
+    )
+    kind: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'running'"))
+    steps: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    log: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    error_code: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    started_at: Mapped[datetime] = _created()
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = _updated()

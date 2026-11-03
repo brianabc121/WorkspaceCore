@@ -110,3 +110,37 @@
 - `DELETE .../ssh?version=`：已经装了专用公钥时要先吊销（B3）。
 - 地址检查：拒绝回环（测试与 CI 用 `AGENT_SSH_ALLOW_LOOPBACK=true` 打开）、链路本地（含 169.254.169.254）、组播、
   未指定与保留地址；私网地址允许。域名只解析一次，之后都连解析出的地址（`address`）。
+
+## 5. B：安装任务（T-0089 B2）
+
+### 5.1 任务与密码
+
+- `POST /api/v1/agents/instances/{id}/ssh/install`（`version`、`password`）：主机公钥已确认、外网入口已配置（`AGENT_PUBLIC_URL`）、
+  实例启用且是外网模式、没有进行中的任务时，新建一条安装任务（`agent_ssh_jobs`，迁移 0022），立即返回 202；
+- 任务在 **API 进程内** 的后台协程里运行（API 只有一个进程）：密码只作为这个协程的参数存在，不写数据库、不进 Redis、不写日志；
+  密码阶段一结束就丢掉并断开连接；
+- 每一步的状态写进 `steps`（JSON），命令输出的末尾一段脱敏后写进 `log`（密码、实例令牌、私钥都替换成 `***`）；
+- API 重启时，还在 `running` 的任务标为 `interrupted`（协程已经不在了），owner 可以重新开始；同一台目标同时只能有一个任务（部分唯一索引）。
+
+### 5.2 步骤
+
+| 步骤 | 做什么 | 用什么登录 |
+|---|---|---|
+| connect | 校验固定的主机公钥，密码登录（也回答单个 Password: 的 keyboard-interactive） | 密码 |
+| inspect | 发行版、架构、uid、是否已有 Docker / Compose、当前用户能否直接用 Docker | 密码 |
+| authorize_key | 生成 ed25519 专用密钥，公钥追加到 `~/.ssh/authorized_keys`（已有就不重复），私钥加密保存（`agent_ssh:<目标 id>`） | 密码 |
+| docker | 需要时用 root（`sudo -S`，密码从标准输入）：从 Docker 官方软件源安装锁定版本（核对签名公钥指纹）、把账号加入 docker 组；已经能用就跳过 | 密码 |
+| reconnect | 断开密码连接，改用专用密钥重新登录（新会话里 docker 组生效），确认 `docker info` 可用 | 专用密钥 |
+| upload | 生成外网接入包（签发新凭证与客户端证书），用 SFTP 上传到 `~/myworkspace-openclaw/` | 专用密钥 |
+| pull | `docker compose pull` | 专用密钥 |
+| plugin | 在锁定的 OpenClaw 镜像里 `npm pack @openim/openclaw-channel@0.3.3`，核对 sha256 后用临时的空配置安装（与 CHECKLIST 相同） | 专用密钥 |
+| start | `state/`、`bin/`、`tls/` 交给 uid 1000（不是 root 也不是 1000 时用镜像里的 chown），`docker compose up -d` | 专用密钥 |
+| schedule | 当前用户的 crontab：每 10 分钟 `secrets reload`、每周一重启（带标记，重装时替换） | 专用密钥 |
+| online | 等实例心跳（最多 15 分钟；冷启动 2 ~ 4 分钟） | — |
+
+### 5.3 Docker 安装脚本
+
+只支持 Ubuntu 22.04 / 24.04、Debian 12（amd64、arm64）。2026-11-03 在官方软件源的 `Packages` 索引里核对了 24 个锁定版本全部存在，
+格式是 `<版本>~<ID>.<VERSION_ID>~<代号>`：`docker-ce` / `docker-ce-cli` `5:29.9.1-1~…`、`containerd.io` `2.4.2-2~…`、
+`docker-compose-plugin` `5.6.0-1~…`；Ubuntu 与 Debian 的签名公钥指纹都是 `9DC858229FC7DD38854AE2D88D81803C0EBFCD88`。
+其他发行版且没有 Docker 时任务失败，提示先手动安装 Docker。
