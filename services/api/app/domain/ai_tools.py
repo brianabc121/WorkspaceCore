@@ -311,6 +311,33 @@ class AiToolService:
         self.db.add(row)
         await self.db.commit()
 
+    async def record_knowledge(
+        self,
+        requester: Requester,
+        spec: ToolSpec,
+        arguments: dict[str, Any],
+        *,
+        ok: bool,
+        summary: str,
+        error_code: str | None = None,
+        request_id: str | None = None,
+    ) -> None:
+        """知识库工具（风险等级 knowledge，直接执行、不审批；docs/v2/KNOWLEDGE_PLAN.md 3.7）。"""
+        row = self._row(
+            requester,
+            spec,
+            arguments,
+            status="succeeded" if ok else "failed",
+            summary=summary,
+            request_id=request_id,
+        )
+        row.executed_at = _now()
+        row.error_code = error_code
+        self.db.add(row)
+        if spec.risk == "knowledge":
+            events.mark(self.db, requester.workspace.id, "ai")
+        await self.db.commit()
+
     # ---------------------------------------------------------------- 发起写操作（待审批）
 
     async def request(

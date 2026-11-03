@@ -87,7 +87,13 @@ const creating = ref(false), menuOpen = ref(false)
 // 顶栏“创建 → 新建群聊”（规范 §8.1）：IM 可用时打开建群表单
 useCreateIntent(() => status.isPending.value ? 'wait' : ready.value, () => { creating.value = true })
 const refresh = () => cache.invalidateQueries({ predicate: q => q.queryKey[0] === 'im' && q.queryKey[1] === user && q.queryKey[2] === scope })
-async function created(conversationId: string) { creating.value = false; await refresh(); go({ view: undefined, c: conversationId, info: undefined }) }
+// 刷新列表期间用户可能已经点开了新群（甚至它的群信息）：那时不再跳转，免得把群信息栏关掉
+async function created(conversationId: string) {
+  creating.value = false
+  const before = route.fullPath
+  await refresh()
+  if (route.fullPath === before) go({ view: undefined, c: conversationId, info: undefined })
+}
 
 const opening = ref(false), openError = ref('')
 async function open(instanceId: string) {

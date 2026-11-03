@@ -216,4 +216,26 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 - **downgrade** 只恢复表结构（`webhook_inbox`、外键、`webhook_secret_ref` 列、旧的搜索函数），不恢复数据：工作台的项目与任务会被删除。
   按 D-0004 第 3 节由人类确认后合并。
 
+### 迁移 `0024`（T-0098）
+
+知识库（`docs/v2/KNOWLEDGE_PLAN.md`，人类 2026-11-03 批准）。所有表随工作空间级联删除；作者字段指向 `users` / `agent_instances`，删除后置空。
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `knowledge_spaces` | `id`、`workspace_id`、`kind`、`project_id`、`instance_id`、`name`、`description`、`agent_access`、`writes_enabled`、`deletes_paused_at`、`corrections_unseen`、`version`、`created_at`、`updated_at` | 知识库。CHECK `kind` ∈ `public` / `project` / `agent`，`agent_access` ∈ `read_write` / `read` / `none`；部分唯一索引 `uq_knowledge_spaces_public` 保证每个工作空间一个公共库；`project_id`、`instance_id` 各自唯一，项目 / 实例删除后置空（知识库保留，对智能体只读）；`(workspace_id, id)` 唯一，供笔记的复合外键使用。`agent_access` 对公共库是所有智能体的权限（默认 `read_write`），对智能体自己的库是**别的**智能体能否读（`read` / `none`，默认 `read`），项目库不用它（看 `project_agents`）。`name` 跟随项目名 / 实例名。`writes_enabled = false` 时智能体不能写这个库；`deletes_paused_at` 是删除超限自动暂停的时间（管理员恢复后清空）；`corrections_unseen` 是智能体还没看到的纠正条数。迁移为已有的工作空间、项目、实例补建；之后新建的在第一次访问时补上（`ensure_spaces`）|
+| `project_agents` | `project_id`、`instance_id`、`workspace_id`、`access`、`created_at` | 参与项目的智能体，主键 `(project_id, instance_id)`；复合外键 `(workspace_id, project_id)` → `projects`、`(workspace_id, instance_id)` → `agent_instances`（级联删除），不能跨工作空间；CHECK `access` ∈ `read_write` / `read`；索引 `ix_project_agents_instance` |
+| `knowledge_notes` | `id`、`workspace_id`、`space_id`、`folder`、`title`、`title_key`、`aliases`、`body`、`type`、`tags`、`review_at`、`pinned`、`confirmed_by`、`confirmed_at`、`created_by_user` / `_instance`、`updated_by_user` / `_instance`、`source_kind`、`conflict_note`、`version`、`deleted_at`、`deleted_by_user` / `_instance`、`purge_after`、`created_at`、`updated_at` | 笔记（Markdown 正文）。复合外键 `(workspace_id, space_id)` → `knowledge_spaces`（级联删除）。`title_key` 是规范化（全角转半角、合并空白、转小写）的标题，部分唯一索引 `uq_knowledge_notes_title`（`space_id, title_key`，未删除）；`uq_knowledge_notes_brief` 保证每个库最多一篇未删除的 `brief`。CHECK `type` ∈ 方案 3.5 的 15 种加 `correction`（《收到的纠正》，工作台维护）；`source_kind` ∈ `human` / `observation` / `task` / `conversation` / `external` / `system`。`aliases`、`tags` 是 `text[]`。`confirmed_*` 是人确认可信，智能体再改会清空；`conflict_note` 是写入时发现的冲突 / 重复提醒，人编辑后清空。删除是软删除：`deleted_at` + `purge_after`（30 天后），Worker 按 `ix_knowledge_notes_purge` 彻底删除。`version` 是整数，每次修改加 1，用于乐观并发。另有 `ix_knowledge_notes_workspace_updated`、标题的 trigram 索引 `ix_knowledge_notes_title_trgm`（相似标题提醒）|
+| `knowledge_note_revisions` | `id`、`workspace_id`、`note_id`、`version`、`title`、`body`、`properties`、`change`、`author_user`、`author_instance`、`reason`、`evidence`、`idempotency_key`、`request_hash`、`lines_added`、`lines_removed`、`created_at` | 每次保存一行完整快照，随笔记级联删除；CHECK `change` ∈ `create` / `update` / `delete` / `restore` / `revert` / `rename`；`properties` 是类型、标签、别名等属性的快照；`reason`、`evidence`（`[{kind, ref}]`）是智能体写入时给的理由和证据；部分唯一索引 `uq_knowledge_note_revisions_idempotency`（`author_instance, idempotency_key`）实现智能体写入的幂等，`request_hash` 校验重放的参数一致；`lines_added` / `lines_removed` 供变更记录显示 |
+| `knowledge_links` | `id`、`workspace_id`、`source_note_id`、`target_note_id`、`target_text`、`target_key`、`target_space_key`、`target_resource_type`、`target_resource_id` | 从正文解析的 `[[链接]]`（代码块里的不算，每篇最多 500 条），保存时整体替换；随源笔记级联删除，目标笔记删除后置空（变成未解析）；`target_key` / `target_space_key` 是规范化的标题和库名；CHECK `target_resource_type` 为空或 ∈ `task` / `project` / `bookmark`（`[[task:<id>]]` 等，没有外键）；部分索引 `ix_knowledge_links_pending` 用于新建、改名的笔记补上指向它的链接 |
+| `knowledge_brief_reads` | `project_id`、`instance_id`、`workspace_id`、`version`、`read_at` | 智能体读过的项目简报版本，主键 `(project_id, instance_id)`，随项目 / 实例级联删除 |
+| `knowledge_read_stats` | `day`、`instance_id`、`note_id`、`workspace_id`、`reads` | 智能体每天读每篇笔记的次数（“被读次数”和智能体指标），主键 `(day, instance_id, note_id)`，随实例 / 笔记级联删除；索引 `ix_knowledge_read_stats_note` |
+| `knowledge_guard_events` | `id`、`workspace_id`、`instance_id`、`instance_name`、`kind`、`detail`、`note_title`、`created_at` | 保护机制拦下的操作（显示在变更记录里）；CHECK `kind` ∈ `secret_blocked` / `delete_paused` / `rate_limited` / `writes_disabled`；`detail` 只写规则名（如“GitHub 令牌”），**不存被拦下的内容**；索引 `(workspace_id, created_at)` |
+
+同一迁移里的其他变化：
+
+- **`ai_tool_executions.risk_level`**：CHECK 增加 `knowledge`（`knowledge_write` / `knowledge_delete` 直接执行，不进审批，人类 2026-11-03 决定）。
+- **搜索**：`knowledge_notes` 上的触发器 `search_index`（`search_trigger_note`）写 `search_documents`，`resource_type = note`、provider = `local`，
+  `body` 是别名、标签加正文，`context` 是知识库名；软删除时移出索引。`search_rebuild()` 加上笔记。智能体的通用 `search` 工具不搜笔记（用 `knowledge_search`）。
+- **downgrade** 删除知识库相关的工具调用记录（`risk_level = knowledge`），恢复旧的 CHECK、`search_rebuild()`，删除触发器、函数、笔记的搜索文档和全部知识库表。
+
 ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。

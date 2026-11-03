@@ -254,3 +254,40 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | PUT | `/api/v1/app-logins/{app}` | 新建（必须给 `username`）或修改（必须带 `version`）；`password` 不填表示不改 | 已实现（T-0080） |
 | POST | `/api/v1/app-logins/{app}/reveal` | 返回明文密码；要 CSRF，每次写审计 `app_login.revealed`；没保存密码时 `404` | 已实现（T-0080） |
 | DELETE | `/api/v1/app-logins/{app}?version=` | 删除保存的账号（不影响 n8n 里的账号） | 已实现（T-0080） |
+
+## 知识库（T-0098）
+
+方案见 `docs/v2/KNOWLEDGE_PLAN.md`（人类 2026-11-03 批准），OpenClaw 一侧的核验见 `docs/decisions/2026-11-03-knowledge-k0-verification.md`。
+都要 `X-Workspace-Id`；写接口要 CSRF。viewer 可读所有知识库，member 及以上编辑笔记，owner / admin 管理知识库设置、参与的智能体和彻底删除。
+笔记的 `version` 是整数，修改、删除、恢复、退回都要带上；不一致时 `409 VERSION_CONFLICT`，`details.current` 是服务器上的最新内容（编辑器据此三方合并）。
+
+| 方法 | 路径 | 说明 | 状态 |
+|---|---|---|---|
+| GET | `/api/v1/knowledge/spaces[/{space_id}]` | 知识库列表 / 详情：公共库、项目库、智能体库；含篇数、参与的智能体、写入开关、删除是否被暂停 | 已实现（T-0098） |
+| PATCH | `/api/v1/knowledge/spaces/{space_id}` | 说明、智能体权限（公共库 `read_write` / `read` / `none`，智能体库 `read` / `none`）、`writes_enabled`、`resume_deletes`（admin） | 已实现（T-0098） |
+| PUT / DELETE | `/api/v1/knowledge/spaces/{space_id}/agents/{instance_id}` | 项目库的参与智能体（`read_write` / `read`）（admin） | 已实现（T-0098） |
+| GET | `/api/v1/knowledge/notes` | 笔记列表与搜索：`space_id`、`folder`、`type`、`tag`、`author`（`user` / `agent`）、`q`，游标分页 | 已实现（T-0098） |
+| GET | `/api/v1/knowledge/notes/suggest?q=` | `[[` 补全：按标题、别名找笔记（跨库） | 已实现（T-0098） |
+| POST | `/api/v1/knowledge/notes` | 新建（201；同一库标题重复 `409 TITLE_TAKEN`） | 已实现（T-0098） |
+| GET / PATCH | `/api/v1/knowledge/notes/{note_id}` | 详情（含出链、反链、被智能体读的次数）/ 修改（可移动到别的库） | 已实现（T-0098） |
+| DELETE | `/api/v1/knowledge/notes/{note_id}?version=` | 放进回收站，30 天后 Worker 彻底删除（204） | 已实现（T-0098） |
+| POST | `/api/v1/knowledge/notes/{note_id}/restore`、`/confirm`、`/revert` | 从回收站恢复 / 人确认可信 / 退回到某一版（`to_version`） | 已实现（T-0098） |
+| GET | `/api/v1/knowledge/notes/{note_id}/revisions[/{version}]` | 版本历史 / 某一版与上一版的逐行差异 | 已实现（T-0098） |
+| GET | `/api/v1/knowledge/notes/{note_id}/graph?depth=1\|2` | 局部图谱 | 已实现（T-0098） |
+| GET | `/api/v1/knowledge/graph` | 全局图谱：笔记、`[[链接]]`、链接到的任务 / 项目 / 书签；`space_id` 可多选，`resources=false` 只要笔记；超过 2000 篇时 `truncated` | 已实现（T-0098） |
+| GET | `/api/v1/knowledge/changes` | 变更记录：每次改动（谁、何时、增删行数、理由、能否一键退回）与保护记录（`kind=guard`） | 已实现（T-0098） |
+| GET | `/api/v1/knowledge/trash` | 回收站 | 已实现（T-0098） |
+| DELETE | `/api/v1/knowledge/trash/{note_id}` | 彻底删除（admin，204） | 已实现（T-0098） |
+| GET | `/api/v1/knowledge/agents/{instance_id}` | 智能体主页：自己的库、参与的项目、近 7 天写 / 读 / 被纠正 / 被拦下的次数 | 已实现（T-0098） |
+
+**MCP 工具**（`/mcp`，工具清单见 `app/schemas/ai_tools.py`）：`knowledge_search`、`knowledge_get`、`knowledge_list`、`knowledge_brief`（风险级别 `read`），
+`knowledge_write`、`knowledge_delete`（风险级别 `knowledge`：**直接执行、不进审批**，人类 2026-11-03 决定；仍要通过实例的读写范围与角色检查）。
+
+- 智能体能读写哪些库：公共库按 `agent_access`；项目库只有参与的智能体；自己的库读写，别人的库按对方的 `agent_access`。项目归档或项目 / 实例已删除的库只读。
+- 智能体写入：正文不超过 20 KB（人 256 KB），每个库最多 5000 篇；必须带 `idempotency_key`（同一个键、不同参数 `409 IDEMPOTENCY_KEY_REUSED`）、`reason`，可带 `evidence`；
+  不能写项目简报（`BRIEF_HUMAN_ONLY`）和《收到的纠正》（`SYSTEM_NOTE`），不能移动笔记（`MOVE_NOT_ALLOWED`）；与已有笔记同名或标题相近时写入照常，两篇都标上“有冲突”（人编辑后清除），`notices` 里提醒智能体去合并。
+- 保护：内容里有密钥 `422 SECRET_DETECTED`（不保存内容，只记规则名）；每个实例每小时最多写 20 次（`429 RATE_LIMITED`）、删 5 次，超过后这个库的删除自动暂停（`403 DELETES_PAUSED`）并通知管理员（`knowledge_delete_paused`）；管理员关了写入时 `403 WRITES_DISABLED`。
+- 读到的笔记内容放在 `untrusted` 里；`notices` 提示新的纠正和简报更新。智能体的通用 `search` 工具不搜笔记。
+- 全局搜索增加 `type=note`；SSE 增加主题 `knowledge`。
+- 新增错误码：`409 TITLE_TAKEN` / `NOTE_DELETED` / `NOT_IN_TRASH`、`422 NOTE_TOO_LARGE` / `SECRET_DETECTED` / `SPACE_FULL` / `MOVE_NOT_ALLOWED` / `SYSTEM_NOTE` / `REVISION_NOT_FOUND`、
+  `403 READ_ONLY` / `WRITES_DISABLED` / `DELETES_PAUSED` / `BRIEF_HUMAN_ONLY`。

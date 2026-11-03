@@ -36,6 +36,7 @@ from app.domain import (
 )
 from app.domain.ai_tools import AiToolService
 from app.domain.connectors import ConnectorRuntime
+from app.domain.knowledge_base import KnowledgeBase
 from app.domain.operations import WORKER_HEARTBEAT_KEY, DeploymentHealth, ServiceCache
 from app.integrations.base import ConnectorError
 from app.integrations.http import CircuitBreaker
@@ -78,7 +79,7 @@ async def reconcile(ctx: dict[str, Any]) -> int:
 
 
 async def purge(ctx: dict[str, Any]) -> None:
-    """清理过期的幂等记录、过期的通知与 IM 消息投影。"""
+    """清理过期的幂等记录、过期的通知、IM 消息投影与知识库回收站。"""
     context = _sync(ctx)
     await sync.purge(context)
     async with context.sessions() as db:
@@ -87,7 +88,11 @@ async def purge(ctx: dict[str, Any]) -> None:
         im_messages, im_events = await im_projection.purge(
             db, message_retention=timedelta(days=context.settings.im_message_retention_days)
         )
+        # 知识库回收站：放进回收站 30 天后彻底删除（T-0098）
+        notes = await KnowledgeBase(db, context.settings).purge_expired()
         await db.commit()
+    if notes:
+        logger.info("knowledge notes purged", extra={"count": notes})
     if removed:
         logger.info("notifications purged", extra={"count": removed})
     if im_messages or im_events:

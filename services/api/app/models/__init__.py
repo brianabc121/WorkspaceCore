@@ -43,6 +43,16 @@ from app.models.integration import (
     SyncCursor,
 )
 from app.models.knowledge import Bookmark, KnowledgeSource, ResourceLink
+from app.models.knowledge_base import (
+    KnowledgeBriefRead,
+    KnowledgeGuardEvent,
+    KnowledgeLink,
+    KnowledgeNote,
+    KnowledgeNoteRevision,
+    KnowledgeReadStat,
+    KnowledgeSpace,
+    ProjectAgent,
+)
 from app.models.notification import Notification
 from app.models.search import SearchDocument
 from app.models.task import Project, Task
@@ -86,9 +96,17 @@ __all__ = [
     "ImWebhookInboxEvent",
     "Integration",
     "IntegrationAccount",
+    "KnowledgeBriefRead",
+    "KnowledgeGuardEvent",
+    "KnowledgeLink",
+    "KnowledgeNote",
+    "KnowledgeNoteRevision",
+    "KnowledgeReadStat",
     "KnowledgeSource",
+    "KnowledgeSpace",
     "Notification",
     "Project",
+    "ProjectAgent",
     "ResourceLink",
     "SearchDocument",
     "SyncCursor",
