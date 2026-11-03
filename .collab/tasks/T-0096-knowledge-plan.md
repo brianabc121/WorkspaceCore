@@ -1,8 +1,8 @@
 ---
 id: T-0096
 title: 知识库改造方案：笔记编辑器、知识图谱、智能体与项目知识库（方案与效果图）
-owner: human
-status: blocked
+owner: claude
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: docs/v2/KNOWLEDGE_PLAN.md,docs/v2/README.md
@@ -37,7 +37,7 @@ updated: 2026-11-03
   - 要修订的规范条文和需要人类决定的事。
 - [x] 效果图 https://claude.ai/artifact/Lib1PcRket1qH18Bo5YwBv ：电脑端 7 张、移动端 3 张，亮暗两套。
 - [x] OpenClaw 2026.9.36 的记忆、wiki 插件、定时任务按随版本文档核对；没有在实例上核验的点列进方案第 7 节，由 K-0 核验。
-- [ ] 人类批准方案第 11 节的规范修订和第 12 节的决定。
+- [x] 人类批准方案第 11 节的规范修订和第 12 节的决定（2026-11-03“按推荐的来”）。
 
 ## 背景 / 约束 / 参考
 - 与现行规则的冲突写在方案 2.6 和第 11 节：
@@ -52,3 +52,6 @@ updated: 2026-11-03
 - 2026-11-03 20:20 UTC · claude · 方案 docs/v2/KNOWLEDGE_PLAN.md 与效果图（https://claude.ai/artifact/Lib1PcRket1qH18Bo5YwBv，电脑端 7 张、移动端 3 张）完成。调研：仓库现状（知识库只有 AFFiNE 书签、项目与智能体无关联、写工具一律审批、无中文分词与向量检索）；OpenClaw v2026.9.36 随版文档（memory、memory-architecture、memory-wiki、automations）只读过文档，待 K-0 在实例上核验。智能体读写删改不审核与 AGENTS.md 第 8 节第 9 条、V2 补充规则冲突，已在对话中指出，方案第 11 节列出要修订的条文。
 - 2026-11-03 20:20 UTC · claude · 人类在对话中指派（2026-11-03）：知识库改为类 Obsidian 样式与知识图谱；一个智能体一个知识库、OpenClaw 通过平台读写删改；项目知识库；智能体主动写入、自我提升、项目认知对齐；先写方案与 UI 效果图。追加决定：知识库可编辑（需要笔记编辑器）；智能体的读写删改不再需要审核。
 - 2026-11-03 20:20 UTC · claude · 交接给 human（escalate）→ .collab/handoffs/2026-11-03-2020_T-0096_claude-to-human.md：知识库改造方案与效果图待批准：第 11 节规范修订（智能体改知识库不审核、自建笔记编辑器）与第 12 节 7 项决定
+- 2026-11-03 20:45 UTC · human · owner human → claude：人类在对话中批准（2026-11-03）：“按推荐的来。给我全面落实ui设计和知识库设计”——方案第 11 节规范修订照做，第 12 节 7 项按推荐
+- 2026-11-03 20:45 UTC · claude · 解除阻塞，继续
+- 2026-11-03 20:45 UTC · claude · status in_progress → done：方案与效果图已获人类批准；实施拆为 T-0097（K-0 核验与规范修订）、T-0098（后端）、T-0099（前端）、T-0100（认知对齐、自我提升与验收）
