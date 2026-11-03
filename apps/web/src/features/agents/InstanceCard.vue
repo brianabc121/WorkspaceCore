@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { Schema } from '../../services/api'
 import { formatTime } from '../time'
 import { NETWORK, ROLE, SCOPE, STATUS } from './queries'
+import SshDeploy from './SshDeploy.vue'
 
 const props = defineProps<{ instance: Schema['AgentInstanceOut']; secrets: Schema['AgentSecretOut'][]; busy: boolean }>()
 const emit = defineEmits<{ edit: []; toggle: []; bundle: [previous: Schema['BundleRequest']['previous']]; revoke: [credential: Schema['AgentCredentialOut']]; grants: [grants: Schema['SecretGrantIn'][]] }>()
@@ -32,9 +33,10 @@ function saveGrants() { if (grantsValid.value) { emit('grants', rows.value.map(r
       <div v-if="instance.im_token_expires_at"><dt>IM 令牌</dt><dd>{{ formatTime(instance.im_token_expires_at) }} 到期（OpenClaw 每次启动时领取新的）</dd></div>
       <div><dt>接入包</dt><dd>{{ instance.bundle_issued_at ? `最近生成于 ${formatTime(instance.bundle_issued_at)}` : '还没有生成' }}</dd></div>
     </dl>
+    <SshDeploy :instance="instance" />
     <section class="agent-section" aria-label="接入包">
       <h3>接入包</h3>
-      <p class="form-help">每次生成都会签发新凭证，凭证只出现在这一次下载的 zip 里。{{ instance.network_mode === 'public' ? '外网模式同时签发 90 天的客户端证书。' : '' }}</p>
+      <p class="form-help">每次生成都会签发新凭证，凭证只出现在这一次下载的 zip 里。{{ instance.network_mode === 'public' ? '外网模式同时签发 90 天的客户端证书；用上面的 SSH 自动部署时会自动生成，不用下载。' : '' }}</p>
       <div class="im-group-add">
         <label class="form-field"><span>旧凭证</span><select v-model="previous"><option value="keep_24h">再保留 24 小时</option><option value="revoke_now">立即吊销</option></select></label>
         <button type="button" class="primary-button" :disabled="busy || disabled" @click="$emit('bundle', previous)">生成并下载接入包</button>

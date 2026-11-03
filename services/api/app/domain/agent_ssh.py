@@ -428,7 +428,7 @@ class AgentSshService:
                 409, "AGENT_SSH_HOST_KEY_UNCONFIRMED", "先核对并确认服务器的主机公钥指纹"
             )
         if body.password is None and target.client_key_ref is None:
-            raise ApiError(422, "VALIDATION_ERROR", "第一次部署需要填写登录密码")
+            raise ApiError(422, "VALIDATION_FAILED", "第一次部署需要填写登录密码")
         if self.settings.credential_encryption_key is None:
             raise ApiError(503, "EXTERNAL_UNAVAILABLE", "密钥库未配置加密密钥")
         if await self._running(target):

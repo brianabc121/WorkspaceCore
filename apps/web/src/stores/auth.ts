@@ -17,6 +17,8 @@ export const useAuthStore = defineStore('auth', () => {
   let sessionVersion = 0
   function clearSession() { sessionVersion++; user.value = null; workspaces.value = []; workspaceId.value = null }
   const api = createApi({ workspaceId: () => workspaceId.value, sessionVersion: () => sessionVersion, onUnauthorized: clearSession })
+  // For the few requests that wait on another server (SSH probe and key revocation: up to ~25 s when it does not answer).
+  const slowApi = createApi({ workspaceId: () => workspaceId.value, sessionVersion: () => sessionVersion, onUnauthorized: clearSession, timeoutMs: 60000 })
   function acceptSession(me: Schema['MeResponse']) {
     sessionVersion++
     user.value = me.user
@@ -53,5 +55,5 @@ export const useAuthStore = defineStore('auth', () => {
     await api.POST('/api/v1/auth/password', { body })
     sessionVersion++
   }
-  return { user, workspaces, workspaceId, currentWorkspace, canManage, isOwner, setupRequired, initialized, loading, initializationError, api, initialize, acceptSession, clearSession, selectWorkspace, login, setup, logout, changePassword }
+  return { user, workspaces, workspaceId, currentWorkspace, canManage, isOwner, setupRequired, initialized, loading, initializationError, api, slowApi, initialize, acceptSession, clearSession, selectWorkspace, login, setup, logout, changePassword }
 })
