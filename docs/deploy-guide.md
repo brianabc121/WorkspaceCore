@@ -78,7 +78,7 @@ sudo bash scripts/deploy.sh connect
 |---|---|---|
 | GitHub（只读） | 显示预填好的 Token 创建链接（名称、90 天有效期、只读的 Issues / Pull requests / Actions）→ 列出 Token 能访问的仓库让你挑选 → 建集成、逐个仓库检查权限、开始同步 | 打开链接、勾选仓库、生成 Token 粘贴回终端（GitHub 不允许程序代建 Token） |
 | n8n（自动化） | `make n8n-up` → 建 owner 账号（随机密码）→ 建只读 API Key 与名为 `X-Workspace-Trigger` 的 Header Auth 凭据 → 在工作台建连接并测试 | 脚本显示一次 n8n 账号密码，同时加密保存到工作台「自动化」页（只有管理员看得到）；之后自己搭工作流（Webhook 节点选这个凭据），再到工作台“自动化”页登记 |
-| OpenIM（「消息」页） | 构建打过补丁的 openim-server 镜像（第一次约 5 ~ 15 分钟，临时占用约 8 GB 磁盘；Docker Hub 限流时自动改用 `mirror.gcr.io` 再试）→ `make openim-up` → 在 `.env` 里填好 `OPENIM_API_URL`、`OPENIM_OBJECT_URL` 并重启 api、worker → 确认工作台连得上 | 内存少于 4 GB 时默认不装（另外占用约 1 GB）；OpenClaw 实例的接入入口仍按第 8.6 节配置 |
+| OpenIM（「消息」页） | 构建打过补丁的 openim-server 镜像（第一次约 5 ~ 15 分钟，临时占用约 8 GB 磁盘；Docker Hub 限流时自动改用 `mirror.gcr.io` 再试）→ `make openim-up` → 在 `.env` 里填好 `OPENIM_API_URL`、`OPENIM_OBJECT_URL` 并重启 api、worker → 确认工作台连得上 | 内存少于 4 GB 时默认不装（另外占用约 1 GB）；OpenClaw 本身（接入入口与实例）按第 8.6 节配置 |
 
 - 项目与任务由工作台自己管理，不需要接入（T-0082 移除了 Vikunja；从带 Vikunja 的旧版本升级见第 10 步）。
 - 接入以首次安装创建的管理员身份进行：Token 加密保存在工作台，操作写进审计日志，和在网页上配置一样。
@@ -123,7 +123,7 @@ sudo bash scripts/deploy.sh install --domain workspace.example.com --email you@e
 
 清空在无人值守时还必须加 `--confirm my-workspace`；连代码目录一起删除再加 `--delete-dir`。全部选项见 `sudo bash scripts/deploy.sh --help`。
 
-脚本部署工作台本身，并可以自动接入 GitHub、n8n，部署 OpenIM（上一节）；监控、OpenClaw 接入入口等其他可选组件以及异地备份，仍按第 8、9 步配置。
+脚本部署工作台本身，并可以自动接入 GitHub、n8n，部署 OpenIM（上一节）；监控、OpenClaw（AI 运维助手，第 8.6 节）等其他可选组件以及异地备份，仍按第 8、9 步配置。
 脚本跑完后，下面第 1 ~ 7 步都已完成。想了解每一步做了什么、或者手动部署，就按下面的步骤来。
 
 ---
@@ -403,20 +403,166 @@ make n8n-up
 
 `N8N_ENCRYPTION_KEY` 要和备份分开保存。完整步骤见手册第 12.4 节。
 
-### 8.6 OpenClaw 与 IM（V2，可选）
+### 8.6 OpenClaw（AI 运维助手，V2，可选）
 
-> 一键脚本可以完成下面的第 2、4 步（OpenIM 本身）：`sudo bash scripts/deploy.sh connect`。接入入口（第 1、3 步）和实例仍要手动配置；
-> 先部署了 OpenIM 也没关系，`make agents-up` 会让 OpenIM 加入接入入口的网络。
+**OpenClaw 不装在工作台这台服务器上。** 它装在另一台服务器上（下面叫“OpenClaw 服务器”，工作台所在的叫“工作台服务器”），
+用工作台发给它的凭证**主动连回工作台**：
 
-让部署在其他服务器上的 OpenClaw 实例接入工作台：管理员在工作台里和实例单聊、群聊；实例的写操作都要在工作台审批。
-这一部分组件较多，按手册第 18.4 节的顺序做，要点：
+- 管理员在工作台的「消息」页和它单聊、群聊（群里要 @ 它）；
+- 它读工作台的数据（任务、日程、运维状态等）走工作台的接口；要**改**数据时（例如建任务），必须先在「AI 审批」页批准；
+- 它调用模型用的 API Key 存在工作台的「密钥库」里，OpenClaw 服务器上不保存明文。
 
-1. 准备接入入口的证书，在 `.env` 里填 `AGENT_*`（手册第 16.1 节）；
-2. `make openim-build`（约 8 GB 临时磁盘，构建打过补丁的 OpenIM）；
-3. `make agents-up`（导出内部 CA、启动接入入口 agent-gateway）；
-4. `make openim-up`，在 `.env` 里设置 `OPENIM_API_URL=http://openim-server:10002`、`OPENIM_OBJECT_URL=http://garage:3900`，再 `make up`；
-5. “运维”页里 OpenIM 显示“正常”，打开“消息”页，管理员的 IM 账号会自动注册；
-6. “OpenClaw 实例”页登记实例、授权密钥、下载接入包，到 OpenClaw 服务器上按包里的 `CHECKLIST.md` 部署（手册第 16.2、18.3 节）。
+一共 5 步：① 工作台服务器部署 OpenIM（消息中转）→ ② 工作台服务器打开接入入口 → ③ 工作台网页登记实例、下载接入包 →
+④ OpenClaw 服务器解压接入包并启动 → ⑤ 确认。一台工作台可以接多台 OpenClaw 服务器，每台重复第 ③ ~ ⑤ 步。
+
+**先选网络模式**（登记实例时要选，登记后不能改）：
+
+| | 内网模式 | 外网模式 |
+|---|---|---|
+| 什么时候用 | 两台服务器在同一个私网（同一机房、同一 VPC，或都装了 Tailscale） | OpenClaw 服务器只能经公网访问工作台 |
+| 工作台服务器要准备 | 一个内网能解析的域名，以及它的证书（内部 CA 或 Tailscale 签发） | 一个公网域名（例如 `agent.example.com`，A 记录指向工作台服务器），以及它的公网证书 |
+| 安全措施 | 只接受私网来源；实例令牌 | 实例令牌 + 客户端证书（接入包里自带，90 天到期） |
+| 防火墙 | 入口端口只对私网开放 | 入口端口对公网开放；OpenClaw 服务器只需出站 |
+
+#### ① 部署 OpenIM（工作台服务器）
+
+```bash
+sudo bash scripts/deploy.sh connect
+```
+
+问到 OpenIM 时回答 `y`。脚本会构建打过补丁的 OpenIM（第一次 5 ~ 15 分钟，临时占用约 8 GB 磁盘，之后常驻约 1 GB 内存）、
+启动它并把地址写进 `.env`。完成后工作台「运维」页里 OpenIM 显示“正常”；打开「消息」页，管理员的 IM 账号会自动注册。
+
+<details><summary>手动部署 OpenIM</summary>
+
+```bash
+make openim-build
+make openim-up
+```
+
+然后在 `.env` 里设置 `OPENIM_API_URL=http://openim-server:10002`、`OPENIM_OBJECT_URL=http://garage:3900`，再 `make up`。详见手册第 17 节。
+</details>
+
+#### ② 打开接入入口（工作台服务器）
+
+1. **放证书**：放进 `infra/caddy/agent-tls/`（目录已被 git 忽略，不会提交）：
+   - 内网模式：`intranet.crt`、`intranet.key`；
+   - 外网模式：`public.crt`、`public.key`（证书链放在 `.crt` 里）。
+2. **改 `.env`**（只填你用的那种模式）：
+
+   内网模式，例如工作台服务器的私网地址是 `10.0.0.5`、私网域名是 `ws.internal.example`：
+
+   ```dotenv
+   AGENT_INTRANET_HOST=ws.internal.example
+   AGENT_INTRANET_BIND=10.0.0.5
+   AGENT_INTRANET_PORT=8443
+   AGENT_INTRANET_ALLOWED_CIDRS=10.0.0.0/8
+   AGENT_INTRANET_URL=https://ws.internal.example:8443
+   ```
+
+   外网模式，例如公网域名是 `agent.example.com`：
+
+   ```dotenv
+   AGENT_PUBLIC_HOST=agent.example.com
+   AGENT_PUBLIC_BIND=0.0.0.0
+   AGENT_PUBLIC_PORT=9443
+   AGENT_PUBLIC_URL=https://agent.example.com:9443
+   ```
+
+   `*_URL` 会写进接入包，没填的那种模式不能生成接入包。每个变量的说明见手册第 16.1 节。
+3. **启动入口**：
+
+   ```bash
+   docker compose up -d api
+   make agents-up
+   ```
+
+   `make agents-up` 会导出工作台的内部 CA 证书并启动入口 `agent-gateway`；之前已经部署了 OpenIM 的，会顺便让 OpenIM 接上入口。
+4. **防火墙**：内网模式只对私网放行 `AGENT_INTRANET_PORT`；外网模式对公网放行 `AGENT_PUBLIC_PORT`。
+
+#### ③ 登记实例、下载接入包（工作台网页，用 owner 账号）
+
+1. 侧栏「管理 → 密钥库」：**添加密钥**，类型选“模型服务密钥”，值粘贴模型服务商的 API Key（只能写入、不能再读出）。
+2. 侧栏「连接与工具 → OpenClaw 实例」：确认页面顶部的**总开关**是打开的（默认打开），点**登记实例**：
+   - 名称、IM 昵称（在消息页里显示的名字）；
+   - **网络模式**：内网或外网（登记后不能改）；
+   - **工具权限**：“只读”，或“读写（写操作要审批）”——写操作每次都要在「AI 审批」页批准；
+   - **最高角色**：它以什么角色访问工作台（实际取你和这里的较低者）。
+3. 在这个实例的卡片上编辑**密钥授权**：选刚才的密钥，`ref_id` 填 `openai_api_key`。
+   接入包里的配置默认用 OpenAI 和这个 id；用别的模型服务商时，这里的 `ref_id` 和第 ④ 步配置里的 id 要一致。
+4. 点**生成并下载接入包**，得到 `myworkspace-agent-xxxxxxxx.zip`。**里面的凭证只出现这一次**，保存好、不要外传；
+   泄露了就回到这里重新生成（旧凭证再保留 24 小时）或停用实例。
+
+#### ④ 部署 OpenClaw（OpenClaw 服务器）
+
+准备：一台 Linux 服务器，装好 Docker（含 Compose v2，安装方法同第 2 步）；能访问模型服务商；
+能访问工作台的入口（内网模式经私网，外网模式经公网）；第一次安装插件时能访问 npm 仓库。
+
+1. **上传并解压**，设置属主和权限（容器里的用户是 uid 1000，接入包里有凭证）：
+
+   ```bash
+   sudo mkdir -p /opt/myworkspace-agent
+   cd /opt/myworkspace-agent
+   sudo unzip ~/myworkspace-agent-xxxxxxxx.zip
+   sudo chown -R 1000:1000 .
+   sudo chmod 700 .
+   sudo chmod 0755 bin/*
+   sudo chmod 600 myworkspace.env state/openclaw.json
+   ```
+
+   外网模式还有 `tls/client.key`，也设成 600：`sudo chmod 600 tls/client.key`。
+
+2. **安装 IM 插件**（第一次启动之前）。先核对插件包的 sha256 是
+   `3d10dca0edcba0ecdb0dc915e7cf1ddf5a8453165de13dec76bbe5ef85607643`（有 npm 的机器上
+   `npm pack @openim/openclaw-channel@0.3.3` 后对 `openim-openclaw-channel-0.3.3.tgz` 运行 `sha256sum`），然后：
+
+   ```bash
+   echo '{}' | sudo tee state/plugin-install.json >/dev/null
+   sudo chown 1000:1000 state/plugin-install.json
+   sudo docker compose run --rm --no-deps -e OPENCLAW_CONFIG_PATH=/home/node/.openclaw/plugin-install.json --entrypoint node openclaw openclaw.mjs plugins install @openim/openclaw-channel@0.3.3 --force --accept-capabilities
+   ```
+
+   用一份临时的空配置安装，是因为正式配置里已经写了插件提供的 `openim` 渠道，插件装好之前 OpenClaw 会拒绝那份配置。
+
+3. **模型**：默认用 OpenAI，不用改。用别的服务商时，修改 `state/openclaw.json` 里 `models.providers` 那一段
+   （写法见 OpenClaw 的文档），`apiKey` 保持 `{ "source": "exec", "provider": "myworkspace", "id": "<ref_id>" }` 的形式，
+   `id` 与第 ③ 步的 `ref_id` 一致。**不要写明文 Key**，也不要加 `_comment` 之类的说明键（OpenClaw 会判定整个配置无效）。
+
+4. **启动**：
+
+   ```bash
+   sudo docker compose up -d
+   sudo docker compose logs -f openclaw
+   ```
+
+   冷启动要 2 ~ 4 分钟。外网模式会同时启动本机隧道 `tunnel`；内网模式、且工作台也配置了外网入口时会多一个 `image-proxy`。
+
+5. **定时任务**（`sudo crontab -e`，把路径换成你的目录）：
+
+   ```cron
+   */10 * * * * cd /opt/myworkspace-agent && docker compose exec -T openclaw node openclaw.mjs secrets reload --json
+   17 4 * * 1 cd /opt/myworkspace-agent && docker compose restart openclaw
+   ```
+
+   第一行：工作台里轮换了模型密钥，10 分钟内生效，不用重启；第二行：每周重启一次，换新的 IM 令牌（令牌只在启动时领取）。
+
+入口证书是私有 CA 签发的（例如自建内部 CA）：外网模式在 `compose.yaml` 里 `tunnel` 的命令加 `--cacert=<CA 证书>`；
+内网模式在 `myworkspace.env` 里设置 `NODE_EXTRA_CA_CERTS=<CA 证书>`，有 `image-proxy` 时它的命令也加 `--cacert=<CA 证书>`。
+
+接入包里的 `CHECKLIST.md` 是这台服务器的完整清单（安装、加固、定时任务、备份），上线和每次改配置后都对照一遍。
+
+#### ⑤ 确认
+
+- 工作台「OpenClaw 实例」页：这个实例从“等待接入”变成“在线”；「运维」页的“OpenClaw 与 IM”一组正常；
+- 「消息」页：通讯录里出现这个实例，私聊发一句话能收到回复（群聊里要 @ 它）；
+- 让它做一件要改数据的事（例如“帮我建一个任务：明天检查备份”），「AI 审批」页出现待审批的调用，批准后才会执行。
+
+#### 日常维护
+
+- **重新生成接入包**会签发新凭证，旧凭证再保留 24 小时；外网模式的客户端证书 90 天到期，到期前重新生成并替换到 OpenClaw 服务器上；
+- 要立刻断开某个实例：在实例页停用它；断开全部实例：关闭总开关。停用后它取不到密钥、调不了工作台接口、IM 被强制下线；
+- 重启或升级 OpenIM 后，实例会自己重启一次（约 45 秒）再连上，这段时间发给它的消息需要重发；
+- 工作台服务器上的完整说明见手册第 16 ~ 18 节（入口变量、验收脚本、两种网络模式的细节、已知的上游行为）。
 
 ---
 
