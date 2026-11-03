@@ -13,6 +13,8 @@ import ImHeaderBadges from './features/im/ImHeaderBadges.vue'
 import AppDrawer from './components/AppDrawer.vue'
 import CreateMenu from './components/CreateMenu.vue'
 import AccountMenu from './components/AccountMenu.vue'
+import BottomNav from './components/BottomNav.vue'
+import { useMediaQuery } from './composables/useMediaQuery'
 import { useDrawerStore } from './stores/drawer'
 import { useWorkspaceEvents } from './features/events/useWorkspaceEvents'
 import { useCollapsedSections } from './composables/useCollapsedSections'
@@ -50,12 +52,15 @@ const pageTitle = computed(() => String(route.meta.title ?? 'My Workspace'))
 watch(() => route.path, () => { menuOpen.value = false })
 watch(() => currentEntry.value?.section, (section) => { if (section && collapsed.value.includes(section)) toggleSection(section) }, { immediate: true })
 watch(pageTitle, (title) => { document.title = `${title} · My Workspace` }, { immediate: true })
+// 手机上显示底部导航（T-0086）。按桌面宽度查询再取反：没有 matchMedia 的环境（jsdom）按桌面处理
+const wide = useMediaQuery('(min-width: 761px)')
+const bottomNav = computed(() => !wide.value && !!auth.user && !!auth.workspaceId)
 const themeLabel = computed(() => (theme.theme === 'light' ? '切换到暗色主题' : '切换到亮色主题'))
 </script>
 
 <template>
   <a class="skip-link" href="#main-content">跳到主要内容</a>
-  <div class="workspace-shell" @keydown="closeMenu">
+  <div class="workspace-shell" :class="{ 'has-bottom-nav': bottomNav }" @keydown="closeMenu">
     <aside v-if="auth.user" id="sidebar" class="sidebar" :class="{ 'is-open': menuOpen }">
       <RouterLink class="brand" to="/" aria-label="My Workspace 首页">
         <span class="brand-mark" aria-hidden="true">W</span>
@@ -109,5 +114,6 @@ const themeLabel = computed(() => (theme.theme === 'light' ? '切换到暗色主
       <footer class="page-footer">My Workspace · 自托管个人工作台</footer>
     </div>
     <AppDrawer />
+    <BottomNav v-if="bottomNav" :key="`${auth.user?.id}:${auth.workspaceId}:${auth.canManage}`" />
   </div>
 </template>
