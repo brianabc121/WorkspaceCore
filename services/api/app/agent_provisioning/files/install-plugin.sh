@@ -7,7 +7,7 @@ package="@PACKAGE@"
 expected="@SHA256@"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-npm pack "$package" --ignore-scripts --silent --pack-destination "$work" >/dev/null
+npm pack "$package" --ignore-scripts --loglevel=error --pack-destination "$work" >/dev/null
 set -- "$work"/*.tgz
 tarball="$1"
 actual="$(sha256sum "$tarball" | cut -d ' ' -f 1)"
