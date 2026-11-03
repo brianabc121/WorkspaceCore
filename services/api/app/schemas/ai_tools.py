@@ -249,8 +249,20 @@ class TaskDetail(BaseModel):
     untrusted: TaskDetailText
 
 
+class TaskBrief(BaseModel):
+    """任务所在项目的简报（T-0100，知识库方案 3.9 第 1 条）。"""
+
+    project_id: UUID
+    version: int = Field(description="简报的最新版本")
+    read_version: int | None = Field(description="你读过的版本；没读过为 null")
+    unread: bool = Field(description="为 true 时，先用 knowledge_brief 读最新的简报再做这个任务")
+
+
 class GetTaskOutput(BaseModel):
     task: TaskDetail
+    brief: TaskBrief | None = Field(
+        default=None, description="任务所在项目有简报、而且你参与这个项目时才有"
+    )
     freshness: Freshness
 
 

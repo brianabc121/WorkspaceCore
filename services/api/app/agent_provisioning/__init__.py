@@ -49,6 +49,7 @@ STEPS = (
     "start",
     "schedule",
     "online",
+    "reflection",
 )
 
 # 卸载任务的步骤（ADR 第 6 节）
@@ -144,6 +145,11 @@ def schedule_command(directory: str) -> str:
         f"{{ crontab -l 2>/dev/null | grep -vF {q(CRON_MARKER)}; printf '%s\\n' {lines}; }}"
         " | crontab -"
     )
+
+
+def reflection_command(directory: str) -> str:
+    """建（或更新）每晚复盘的 OpenClaw 定时任务：运行接入包里的 setup-reflection.sh（T-0100）。"""
+    return f"cd {q(directory)} && sh setup-reflection.sh"
 
 
 def unschedule_command() -> str:

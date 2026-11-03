@@ -7,9 +7,11 @@ import { CHANGE_LABELS, GUARD_LABELS, NOTE_TYPE_LABELS, initial, kbError, useAge
 import { noteHtml, when } from './format'
 import KbMobileHeader from './KbMobileHeader.vue'
 import KbTabs from './KbTabs.vue'
+import KbWeekChart from './KbWeekChart.vue'
 
 // 智能体知识库主页（T-0099，效果图“电脑端 · 智能体知识库（自我提升）”）：
 // 近 30 天的指标、自我提升循环、规则与写入开关、最近学到的、收到的纠正、它自己的笔记。
+// T-0100：近 8 周的读取（自己的 / 项目和公共等共享的）与写入趋势；每晚复盘任务的说明。
 const auth = useAuthStore(), route = useRoute(), router = useRouter(), scope = auth.workspaceId!
 const kb = useKb(scope)
 const spaces = useSpaces(scope)
@@ -54,6 +56,10 @@ async function resume() {
   try { await kb.updateSpace(s.id, { version: s.version, resume_deletes: true }); message.value = '已恢复删除' }
   catch (error) { failure.value = kbError(error) } finally { busy.value = false }
 }
+const readWeeks = computed(() => (info.value?.weekly ?? []).map(w => ({ week_start: w.week_start, values: { shared: w.reads_shared, own: w.reads_own } })))
+const writeWeeks = computed(() => (info.value?.weekly ?? []).map(w => ({ week_start: w.week_start, values: { writes: w.writes } })))
+const readSeries = [{ key: 'shared', label: '项目、公共和别的智能体的' }, { key: 'own', label: '自己的' }]
+const writeSeries = [{ key: 'writes', label: '写入与修改' }]
 const loop = computed(() => m.value ? [
   { step: '1 先查知识库', value: m.value.searches, note: '接到任务时检索经验、规范和决定' },
   { step: '2 读取笔记', value: m.value.reads, note: `它写的被别的智能体读了 ${m.value.read_by_others} 次` },
@@ -109,6 +115,14 @@ const loop = computed(() => m.value ? [
             </ol>
           </section>
 
+          <section class="kb-card" aria-label="每周趋势">
+            <div class="kb-card-head"><div class="kb-stack"><h2>每周趋势</h2><span class="kb-meta">读别人沉淀的知识越多、写进共享知识库越多，说明知识在智能体之间流动起来了。</span></div></div>
+            <div class="kb-chart-pair">
+              <KbWeekChart title="读取笔记" note="读到的是哪个知识库里的笔记" :series="readSeries" :weeks="readWeeks" empty="近 8 周它还没有读过知识库。" />
+              <KbWeekChart title="写入与修改" note="新建、修改、改名（所有知识库）" :series="writeSeries" :weeks="writeWeeks" empty="近 8 周它还没有写过知识库。" />
+            </div>
+          </section>
+
           <div class="kb-grid-2">
             <section class="kb-card" aria-label="最近学到的">
               <div class="kb-card-head"><h2>最近学到的</h2><RouterLink :to="{ path: '/knowledge/changes' }" class="kb-meta">全部写入记录</RouterLink></div>
@@ -130,7 +144,7 @@ const loop = computed(() => m.value ? [
               </dl>
               <label class="kb-check" style="align-items: flex-start"><input type="checkbox" :checked="info.writes_enabled" :disabled="!auth.canManage || busy || !space" @change="setWrites(($event.target as HTMLInputElement).checked)"><span class="kb-stack"><strong>允许写入和删除</strong><span class="kb-meta">关掉后它只能检索和阅读（所有知识库）</span></span></label>
               <label class="kb-check" style="align-items: flex-start"><input type="checkbox" :checked="space?.agent_access === 'read'" :disabled="!auth.canManage || busy || !space" @change="setAccess(($event.target as HTMLInputElement).checked ? 'read' : 'none')"><span class="kb-stack"><strong>其他智能体可以读它的知识库</strong><span class="kb-meta">只读；别的智能体不能改它的笔记</span></span></label>
-              <div class="kb-notice"><ShieldCheck aria-hidden="true" style="stroke: var(--kb-good)" /><span class="kb-grow">每晚的复盘任务和简报提醒在后续任务里接入（T-0100）。</span></div>
+              <div class="kb-notice"><ShieldCheck aria-hidden="true" style="stroke: var(--kb-good)" /><span class="kb-grow">每晚复盘：接入时在它的 OpenClaw 里建好一个定时任务（默认每晚 22:00，北京时间），回顾当天的工作，把值得长期记住的写进知识库，先看《收到的纠正》。项目简报更新后，它下次读写知识库时会被提醒先读。</span></div>
             </section>
           </div>
 

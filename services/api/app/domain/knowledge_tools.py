@@ -119,6 +119,15 @@ class _Context:
             out.append("管理员关闭了你的写入，现在只能读。")
         if own.deletes_paused_at is not None:
             out.append("你的删除被自动暂停了，等管理员解除后才能再删除。")
+        # 参与的项目里简报更新了而它还没读（方案 3.10）：最多提示 3 个
+        stale = [b for b in await self.kb.brief_status(self.instance.id) if b.unread]
+        for b in stale[:3]:
+            seen = f"你读过第 {b.read} 版" if b.read else "你还没读过"
+            # 不带项目名：提示是工作台写的固定文字，人填的内容只出现在 untrusted 里
+            out.append(
+                f"你参与的项目 {b.project_id} 的简报已更新到第 {b.version} 版（{seen}）："
+                f"处理这个项目的任务前，先用 knowledge_brief 读。"
+            )
         return out
 
 

@@ -9,6 +9,7 @@
   --kb-good: #0ca30c; --kb-good-text: #006300; --kb-warning: #fab219; --kb-warning-text: #7a5300; --kb-danger: #b3261e;
   --kb-mark: #fff3c4; --kb-add: #e6f6e6; --kb-add-text: #0b5d0b; --kb-del: #fdecea; --kb-del-text: #8c1d18;
   --kb-shadow: 0 8px 24px rgb(28 35 51 / .12);
+  --kb-chart-1: #2a78d6; --kb-chart-2: #eb6834; --kb-grid: #eceef2;
 }
 :root[data-theme="dark"] {
   --kb-bg: #10131a; --kb-surface: #181c26; --kb-surface-2: #212634; --kb-text: #eceff6; --kb-muted: #a2abbd; --kb-line: #2a3040;
@@ -17,6 +18,7 @@
   --kb-good: #0ca30c; --kb-good-text: #4cc24c; --kb-warning: #fab219; --kb-warning-text: #f5c95c; --kb-danger: #ff8a80;
   --kb-mark: #3d3519; --kb-add: #15301a; --kb-add-text: #8fdc8f; --kb-del: #3a1a1a; --kb-del-text: #ffb4ab;
   --kb-shadow: 0 8px 24px rgb(0 0 0 / .45);
+  --kb-chart-1: #3987e5; --kb-chart-2: #d95926; --kb-grid: #262b39;
 }
 
 .kb-app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; background: var(--kb-bg); color: var(--kb-text); font-size: 14px; line-height: 1.5; }
@@ -281,6 +283,39 @@
 .kb-switcher { display: flex; flex-wrap: wrap; gap: 6px; }
 .kb-switcher a { padding: 4px 12px; border: 1px solid var(--kb-line); border-radius: 16px; color: var(--kb-text) !important; font-size: 13px; text-decoration: none; }
 .kb-switcher a[aria-current="page"] { border-color: var(--kb-accent); background: var(--kb-accent-soft); font-weight: 600; }
+
+/* ---------------------------------------------------------------- 每周趋势图（T-0100）
+   系列色：亮 #2a78d6 / #eb6834，暗 #3987e5 / #d95926，在各自的卡片底色上跑过 dataviz 的配色检查（色觉障碍区分度、对比度）。 */
+.kb-chart { margin: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.kb-chart-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 6px 14px; font-size: 13px; }
+.kb-chart-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--kb-muted); font-size: 12px; }
+.kb-chart-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.kb-chart-swatch { flex: none; display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--kb-chart-1); }
+.kb-chart-swatch.is-2, .kb-chart-seg.is-2 { background: var(--kb-chart-2); }
+.kb-chart-empty { margin: 0; padding: 28px 0; text-align: center; }
+.kb-chart-body { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 132px auto; column-gap: 8px; row-gap: 6px; }
+.kb-chart-y { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; margin: -7px 0; font-size: 11px; color: var(--kb-muted); line-height: 14px; }
+.kb-chart-plot { position: relative; min-width: 0; }
+.kb-chart-grid { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+.kb-chart-grid span { height: 1px; background: var(--kb-grid); }
+.kb-chart-grid span:last-child { background: var(--kb-edge); }
+.kb-chart-cols { position: absolute; inset: 0 0 1px; margin: 0; padding: 0; list-style: none; display: flex; align-items: stretch; }
+.kb-chart-col { flex: 1 1 0; min-width: 0; display: flex; align-items: flex-end; justify-content: center; border-radius: 6px; cursor: default; outline-offset: -2px; }
+.kb-chart-col:hover, .kb-chart-col:focus-visible { background: color-mix(in srgb, var(--kb-text) 5%, transparent); }
+.kb-chart-bar { width: min(26px, 56%); display: flex; flex-direction: column-reverse; gap: 2px; border-radius: 4px 4px 0 0; overflow: hidden; }
+.kb-chart-seg { flex: 1 1 0; min-height: 2px; background: var(--kb-chart-1); }
+.kb-chart-x { grid-column: 2; display: flex; font-size: 11px; color: var(--kb-muted); }
+.kb-chart-x span { flex: 1 1 0; min-width: 0; text-align: center; white-space: nowrap; }
+.kb-chart-tip { position: absolute; z-index: 5; top: 0; min-width: 140px; padding: 8px 10px; border: 1px solid var(--kb-line); border-radius: 8px; background: var(--kb-surface); box-shadow: var(--kb-shadow); display: flex; flex-direction: column; gap: 3px; font-size: 12px; pointer-events: none; white-space: nowrap; }
+.kb-chart-tip > span { display: flex; align-items: center; gap: 6px; }
+.kb-chart-tip b { margin-left: auto; padding-left: 12px; font-weight: 600; color: var(--kb-text); }
+.kb-chart-table summary { cursor: pointer; color: var(--kb-muted); font-size: 12px; }
+.kb-chart-table table { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 12px; }
+.kb-chart-table th, .kb-chart-table td { padding: 4px 6px; border-bottom: 1px solid var(--kb-line); text-align: right; font-weight: 400; }
+.kb-chart-table th:first-child { text-align: left; color: var(--kb-muted); }
+.kb-chart-table thead th { color: var(--kb-muted); }
+.kb-chart-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px 28px; }
+@media (forced-colors: active) { .kb-chart-seg.is-2 { background: repeating-linear-gradient(45deg, CanvasText 0 2px, Canvas 2px 5px); } .kb-chart-seg, .kb-chart-swatch { forced-color-adjust: none; } }
 
 /* ---------------------------------------------------------------- 手机 */
 .kb-mobile-only { display: none !important; }

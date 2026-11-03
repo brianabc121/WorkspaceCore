@@ -275,6 +275,76 @@ async def test_brief_is_human_only_and_reads_are_tracked(env: Env) -> None:
     assert note["usage"]["reads_30d"] == 1 and note["usage"]["by_agent"][0]["name"] == "alpha"
 
 
+async def test_unread_brief_is_hinted_in_notices_and_get_task(env: Env) -> None:
+    alpha, token = await agent(env, "alpha")
+    project = await env.add_project("工作台 V2")
+    task = await env.add_task(project["id"], "发布 11 月版本")
+    space = (await spaces(env))["工作台 V2"]
+    await env.client.put(
+        f"/api/v1/knowledge/spaces/{space['id']}/agents/{alpha}",
+        json={"access": "read_write"},
+        headers=env.headers(write=True),
+    )
+    # 还没有简报：不提示
+    first = ok(await call(env, token, "get_task", {"task_id": task["id"]}))
+    assert first["brief"] is None
+    brief = await env.client.post(
+        "/api/v1/knowledge/notes",
+        json={"space_id": space["id"], "title": "简报", "type": "brief", "body": "目标"},
+        headers=env.headers(write=True),
+    )
+    assert brief.status_code == 201, brief.text
+    hinted = ok(await call(env, token, "get_task", {"task_id": task["id"]}))
+    assert hinted["brief"] == {
+        "project_id": project["id"],
+        "version": 1,
+        "read_version": None,
+        "unread": True,
+    }
+    searched = ok(await call(env, token, "knowledge_search", {"query": "目标"}))
+    stale = [n for n in searched["notices"] if "简报已更新" in n]
+    assert stale and project["id"] in stale[0] and "工作台 V2" not in stale[0], stale
+    ok(await call(env, token, "knowledge_brief", {"project_id": project["id"]}))
+    after = ok(await call(env, token, "get_task", {"task_id": task["id"]}))
+    assert after["brief"]["unread"] is False and after["brief"]["read_version"] == 1
+    again = ok(await call(env, token, "knowledge_search", {"query": "目标"}))
+    assert not any("简报已更新" in n for n in again["notices"])
+    # 人更新简报后再次提示
+    await env.client.patch(
+        f"/api/v1/knowledge/notes/{brief.json()['id']}",
+        json={"version": 1, "body": "目标：11 月上线"},
+        headers=env.headers(write=True),
+    )
+    updated = ok(await call(env, token, "get_task", {"task_id": task["id"]}))
+    assert updated["brief"]["version"] == 2 and updated["brief"]["unread"] is True
+
+
+async def test_weekly_activity_for_agent_and_space(env: Env) -> None:
+    alpha, token = await agent(env, "alpha")
+    own = (await spaces(env))["alpha"]
+    written = ok(await call(env, token, "knowledge_write", write_args(own["id"], "经验一")))
+    ok(await call(env, token, "knowledge_get", {"note_id": written["note_id"]}))
+    overview = await env.get(f"/api/v1/knowledge/agents/{alpha}")
+    weeks = overview["weekly"]
+    assert len(weeks) == 8 and weeks[0]["week_start"] < weeks[-1]["week_start"]
+    assert (
+        weeks[-1]["writes"] == 1 and weeks[-1]["reads_own"] == 1 and weeks[-1]["reads_shared"] == 0
+    )
+    human = await env.client.post(
+        "/api/v1/knowledge/notes",
+        json={"space_id": own["id"], "title": "人写的"},
+        headers=env.headers(write=True),
+    )
+    assert human.status_code == 201
+    activity = await env.get(f"/api/v1/knowledge/spaces/{own['id']}/activity")
+    assert len(activity["weeks"]) == 8
+    assert activity["weeks"][-1] | {"week_start": None} == {
+        "week_start": None,
+        "human": 1,
+        "agent": 1,
+    }
+
+
 async def test_secrets_and_disabled_writes_are_blocked(env: Env) -> None:
     instance, token = await agent(env, "ops-claw")
     own = (await spaces(env))["ops-claw"]

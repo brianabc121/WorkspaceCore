@@ -4,10 +4,12 @@
 默认值只适用于本机开发（不含密码）；部署时由 Compose / Secret 注入环境变量覆盖。
 """
 
+import re
 from functools import lru_cache
 from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from typing import Literal
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -81,6 +83,9 @@ class Settings(BaseSettings):
     agent_public_address: str = ""
     # SSH 自动部署（T-0089）：默认不允许连接本机回环地址；只有测试与 CI（目标是本机的 sshd）才打开
     agent_ssh_allow_loopback: bool = False
+    # 每晚复盘的 OpenClaw 定时任务（知识库方案 3.9，T-0100）：几点、按哪个时区（IANA 时区名）
+    agent_reflection_cron: str = "0 22 * * *"
+    agent_reflection_timezone: str = "Asia/Shanghai"
 
     # V2 IM（OC-3，契约第 5、7、10 节）：OpenIM 的 REST 地址（内部网络，例如 http://openim-server:10002）
     # 与 share.secret（换 imAdmin 令牌）。为空表示没有部署 OpenIM：IM 接口返回 503 IM_UNAVAILABLE
@@ -146,6 +151,25 @@ class Settings(BaseSettings):
     notification_retention_days: int = Field(default=90, ge=1, le=3650)
     # IM 消息投影的保留天数（方案第 5 节“有保留期”）；OpenIM 里的消息不受影响
     im_message_retention_days: int = Field(default=365, ge=7, le=3650)
+
+    @field_validator("agent_reflection_timezone")
+    @classmethod
+    def _iana_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise ValueError(
+                "AGENT_REFLECTION_TIMEZONE 要用 IANA 时区名，例如 Asia/Shanghai"
+            ) from error
+        return value
+
+    @field_validator("agent_reflection_cron")
+    @classmethod
+    def _five_field_cron(cls, value: str) -> str:
+        fields = value.split()
+        if len(fields) != 5 or not all(re.fullmatch(r"[0-9*/,\-]+", f) for f in fields):
+            raise ValueError("AGENT_REFLECTION_CRON 要是 5 段的 cron 表达式，例如 0 22 * * *")
+        return value
 
     @field_validator("log_level", mode="before")
     @classmethod

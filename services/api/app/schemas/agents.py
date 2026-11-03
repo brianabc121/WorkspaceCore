@@ -431,6 +431,7 @@ SshJobStepKey = Literal[
     "start",
     "schedule",
     "online",
+    "reflection",
     "stop",
     "unschedule",
     "remove_files",

@@ -16,6 +16,7 @@ export type GraphNode = Schema['GraphNode']
 export type Change = Schema['ChangeOut']
 export type Revision = Schema['RevisionOut']
 export type AgentKnowledge = Schema['AgentKnowledgeOut']
+export type SpaceActivity = Schema['SpaceActivity']
 export type ColorBy = 'space' | 'author' | 'confirmed'
 
 export const SPACE_KIND_LABELS: Record<SpaceKind, string> = { public: '公共', project: '项目', agent: '智能体' }
@@ -114,6 +115,13 @@ export function useAgentKnowledge(scope: string, instanceId: Ref<string | null>)
   const c = context(scope)
   return useQuery({ queryKey: computed(() => kbKey(c.user, scope, 'agent', instanceId.value)), enabled: computed(() => c.active() && !!instanceId.value),
     queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/knowledge/agents/{instance_id}', { params: { header: c.header, path: { instance_id: instanceId.value! } }, signal })) })
+}
+
+// 近 8 周人 / 智能体的修改次数（T-0100，知识库主页的趋势图）
+export function useSpaceActivity(scope: string, spaceId: Ref<string | null>) {
+  const c = context(scope)
+  return useQuery({ queryKey: computed(() => kbKey(c.user, scope, 'activity', spaceId.value)), enabled: computed(() => c.active() && !!spaceId.value),
+    queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/knowledge/spaces/{space_id}/activity', { params: { header: c.header, path: { space_id: spaceId.value! } }, signal })) })
 }
 
 // 写操作：成功后刷新所有 kb 查询（全局搜索也会变）

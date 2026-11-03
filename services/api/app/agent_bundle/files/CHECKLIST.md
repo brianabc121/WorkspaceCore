@@ -44,6 +44,9 @@
       `*/10 * * * * cd <本目录> && docker compose exec -T openclaw node openclaw.mjs secrets reload --json`
 - [ ] 每周重启一次，换上新的 IM 令牌（令牌只在启动时领取，OC-0 ADR F1）：
       `17 4 * * 1 cd <本目录> && docker compose restart openclaw`
+- [ ] 每晚复盘（知识库，T-0100）：OpenClaw 启动后在本目录运行一次 `sh setup-reflection.sh`。
+      它用 `openclaw automations add` 建 OpenClaw 自己的定时任务（默认每天 22:00，提示词在 `reflection-prompt.md`）；
+      重复运行只更新同一个任务。SSH 自动部署会自动运行这一步。
 
 ## 备份与回滚
 

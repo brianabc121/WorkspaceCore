@@ -80,3 +80,24 @@
 ## 4. 影响
 
 `docs/v2/KNOWLEDGE_PLAN.md` 的 3.9、3.10、第 7 节已按以上结果改写。
+
+## 5. 补充：定时任务的实测（T-0100，2026-11-03）
+
+在本机的 `openclaw/openclaw:2026.9.36@sha256:eefba69ec4a5fa596f3b1a8fac4f09525ce10435617a23f2a2090ddd3b6c1c2f` 上实测，修正 3.3 的做法。
+
+- **不用先查再建**：`automations add --help` 有 `--declaration-key <key>`（“Idempotent declaration identity key”）。
+  - 用同一个 key 再运行一次，输出 `"created": false`、`"updated": true`，只更新提示词与时间，不会建出第二个任务。
+  - 所以 `setup-reflection.sh` 直接用 `--declaration-key myworkspace-knowledge-reflection`，不再先 `automations list` 查同名任务。
+  - SSH 部署据输出里的 `"created": false` 显示“已有，已更新”。
+- **建任务用的参数**：`--cron <表达式> --tz <IANA 时区> --session isolated --no-deliver --message <提示词>`。
+  - 输出里 `sessionTarget` 是 `isolated`，`delivery.mode` 是 `none`；
+  - 结果不投递到任何渠道。
+- **`automations list --json` 的结构**：`{jobs: [...], total, ...}`。每个 job 有 `id`、`declarationKey`、`schedule`、`sessionTarget`、`payload`：
+  - `schedule` 是 `{kind: "cron", expr, tz}`；
+  - `payload` 是 `{kind: "agentTurn", message, toolsAllow}`。
+  - 默认还有一个内置的 `heartbeat:main` 任务，验收按 `declarationKey` 找我们的任务。
+- **工具范围**：新建的任务默认 `payload.toolsAllow: ["*"]`、`scheduledToolPolicy.mode: "trusted"`。
+  - 这不放宽接入包 `openclaw.json` 的工具限制（`tools.deny` 等对所有运行都生效）。
+  - CI 的 agents 任务（`tests/e2e/agents_acceptance.py` 场景 15）用 `automations run <id> --wait` 立即运行一次复盘，检查模型拿到的工具只有 IM 发消息与工作台工具。
+  - `--tools <list>` 可以进一步限定，但它和 Tool Search 暴露的 MCP 工具怎么配合没有核验，暂不使用（TODO：核验后再收紧）。
+- **权限**：CLI 在容器里用接入包的网关令牌（`OPENCLAW_GATEWAY_TOKEN`）连本机网关，和现有的 `secrets reload` 定时任务一样。

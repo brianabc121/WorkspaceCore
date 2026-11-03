@@ -27,6 +27,7 @@ from app.domain.calendar import CalendarService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.developer import DeveloperService
 from app.domain.knowledge import KnowledgeService
+from app.domain.knowledge_base import KnowledgeBase
 from app.domain.notifications import NotificationService
 from app.domain.operations import DeploymentHealth, OperationsService
 from app.domain.policy import WorkspaceAccess
@@ -82,6 +83,7 @@ from app.schemas.ai_tools import (
     SearchOutput,
     ServiceItem,
     ServiceStatusOutput,
+    TaskBrief,
     TaskDetail,
     TaskDetailText,
     TaskItem,
@@ -199,7 +201,18 @@ async def _list_tasks(call: ReadCall, args: ListTasksInput) -> ListTasksOutput:
 async def _get_task(call: ReadCall, args: GetTaskInput) -> GetTaskOutput:
     service = call.tasks()
     task = await service.get_task(call.access, args.task_id)
+    brief = None
+    if task.project_id is not None:
+        found = await KnowledgeBase(call.db, call.settings).brief_status(
+            call.requester.instance.id, task.project_id
+        )
+        if found:
+            b = found[0]
+            brief = TaskBrief(
+                project_id=b.project_id, version=b.version, read_version=b.read, unread=b.unread
+            )
     return GetTaskOutput(
+        brief=brief,
         task=TaskDetail(
             id=task.id,
             project_id=task.project_id,

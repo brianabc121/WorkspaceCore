@@ -1,10 +1,11 @@
 # 威胁模型
 
-> 状态：Sprint 6（2026-11-01 更新，含 V2 的 OpenClaw / OpenIM）。风险清单来自 `docs/DEVELOPMENT_SPEC.md` 第 9.3 节与
+> 状态：Sprint 6（2026-11-03 更新，含 V2 的 OpenClaw / OpenIM 与知识库）。风险清单来自 `docs/DEVELOPMENT_SPEC.md` 第 9.3 节与
 > `docs/v2/TRANSFORMATION_PLAN.md` 第 7 节；本文记录每项风险**目前**的处理情况，随 Sprint 更新。
 > 全部接口的未登录 / CSRF / 非成员 / viewer 写入检查由 `services/api/tests/test_security_matrix.py` 按 OpenAPI 自动覆盖（T-0043）；
 > V2 的反 Prompt Injection、越权与绕过审批测试在 `services/api/tests/test_oc6_security.py`（T-0058），
-> 真实 OpenClaw + OpenIM 的多实例端到端在 `tests/e2e/agents_acceptance.py`（方案第 8 节 14 个场景，CI 的 agents 任务，T-0059）。
+> 真实 OpenClaw + OpenIM 的多实例端到端在 `tests/e2e/agents_acceptance.py`（方案第 8 节 14 个场景，CI 的 agents 任务，T-0059；
+> 场景 15 是知识库与每晚复盘，T-0100）。知识库的方案与保护措施见 `docs/v2/KNOWLEDGE_PLAN.md` 3.8。
 
 | 风险 | 规范要求 | 当前状态 |
 |---|---|---|
@@ -37,4 +38,11 @@
 | **V2：外链图片（SSRF、追踪）** | 服务器端不抓取；浏览器端不自动加载 | 工作台不抓取消息里的外部图片地址；浏览器只显示“外部图片未加载”和地址文字；工作台自己的图片经 API 代理读取（上传者本人或能看到会话的管理员），实例经接入入口读取已发出的图片 |
 | **V2：跨工作空间泄露** | 会话、消息、密钥、工具结果不跨工作空间 | 实例、凭证、密钥授权用 `(workspace_id, …)` 复合外键绑定同一工作空间；IM 会话按管理员与工作空间分开；工具调用记录只在所属工作空间可见（`test_records_stay_in_their_workspace`）；接入网关只允许访问本工作空间的 IM 账号 |
 | **V2：供应链（OpenClaw、插件、OpenIM）** | 镜像锁定 digest；插件锁定版本；只允许一个插件 | OpenClaw 与 OpenIM 镜像按 tag + digest 锁定；`@openim/openclaw-channel` 锁定 0.3.3 并核对 tarball 的 sha256，CI 的 deps 任务重新下载核对并扫描（`tests/e2e/openclaw_plugin_review.py`），升级前按 `infra/openclaw/README.md` 重新审查；`plugins.allow` 只有 `openclaw-channel`；ci-security 的镜像扫描覆盖 OpenIM 的依赖镜像、agent-gateway、OpenClaw 与 ghostunnel（第三方只报告），OpenIM 补丁镜像由 ci-openim 扫描（有修复的严重漏洞就失败） |
+| **知识库：智能体直接读写删（不审批）** | 人类 2026-11-03 决定不审批；仍做工作台的权限与策略校验 | `knowledge_write` / `knowledge_delete` 的风险等级是 `knowledge`：不进审批，但照样经过 `AiToolService.check`（实例 `scope` 要 read_write、角色不低于 member）和知识库权限（公共库按 `agent_access`，项目库只有参与的智能体，别人的库最多只读），每次调用都有记录。每次写入留完整版本，删除进回收站 30 天，人可以一键撤销或恢复，撤销原因写回智能体的《收到的纠正》。每个实例每小时最多写 20 次、删 5 篇，删除超限自动暂停并通知管理员；单篇 20 KB、每库 5000 篇；项目简报只有人能改；管理员可以关掉某个智能体的写入（T-0098；真实 OpenClaw 验收是场景 15） |
+| **知识库：笔记里的 Prompt Injection** | 内容是资料，不是指令 | 笔记标题与正文放在工具结果的 `untrusted` 里，工具描述与复盘提示词都写明只当资料；`notices` 只用工作台写的固定文字（例如简报提醒只带 `project_id` 和版本号，不带人填的项目名）；智能体的通用 `search` 工具不搜笔记；“人已确认”和“有冲突”标记帮助判断可信度（T-0098、T-0100） |
+| **知识库：密钥写进知识库** | 拦截，不入库 | 人和智能体的写入都做密钥扫描（私钥、GitHub / AWS / 模型服务 / Slack 令牌、JWT、Bearer、URL 里的口令、`password=` 一类的赋值），命中就拒绝保存；原文不入库、不进日志，变更记录里的保护记录只写规则名（T-0098） |
+| **知识库：跨工作空间、跨项目** | 按工作空间、角色与参与关系限定 | 所有接口按 `X-Workspace-Id` 与角色校验（viewer 只读，member 编辑，owner / admin 管理设置与彻底删除）；智能体只能访问公共库、参与的项目库、自己的库和允许它读的其他智能体的库，跨工作空间返回 `NOT_FOUND`（T-0098） |
+| **知识库：每晚复盘定时任务** | 不放宽智能体的工具限制 | 定时任务由运维用 OpenClaw CLI 建（SSH 部署自动执行 `setup-reflection.sh`），智能体自己不能建（接入包的 `tools.deny` 禁用了 `group:automation`）。OpenClaw 给定时任务的 `toolsAllow` 是 `*`，但仍受接入包 `openclaw.json` 的工具限制；CI 验收检查复盘运行时模型拿到的工具只有 IM 发消息与工作台工具。任务在独立会话里运行，不投递到 IM（T-0100） |
+| **知识库：浏览器渲染笔记（XSS、追踪）** | 消毒，不自动加载外部资源 | markdown-it 关闭原始 HTML，渲染结果再经独立的 DOMPurify 实例消毒，链接只放行站内地址与 http / https / mailto；外部图片只显示成链接，不自动加载（T-0099） |
+| **知识库：提醒智能体读简报** | 不替管理员发消息 | “现在发给它”用已有的 IM 接口、以管理员自己的账号发（带 `Idempotency-Key`，重试不重复）；接入包的 IM 渠道只放行管理员，工作台不自动代发（T-0100） |
 | **V2：已知上游行为** | — | OpenIM 重启后 openclaw-channel 的 SDK 重新同步时会抛出未处理的错误，OpenClaw 进程退出、容器自动重启重连（约 45 秒），这段时间发给实例的消息插件不补处理（工作台的消息投影不缺）；实例间私聊被拒收时 `message` 工具仍显示 done。两者都不影响权限边界，记录在 Sprint 6 验收报告 |

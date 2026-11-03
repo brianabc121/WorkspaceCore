@@ -671,6 +671,7 @@ class Installer:
             )
 
         await self._wait_online(token, conn)
+        await self._reflection(conn, directory)
         async with self.sessionmaker() as db:
             target = await db.get(AgentSshTarget, self.target.target_id, with_for_update=True)
             if target is None:
@@ -681,6 +682,27 @@ class Installer:
             target.installed_at = _now()
             target.version += 1
             await db.commit()
+
+    async def _reflection(self, conn: asyncssh.SSHClientConnection, directory: str) -> None:
+        """每晚复盘的定时任务（知识库方案 3.9，T-0100）：同名任务已有就更新，不重复建。
+
+        建不成不算安装失败（实例已在线）：步骤记为跳过，原因在日志里，按 CHECKLIST 手动运行。
+        """
+        await self.rec.step("reflection", "running")
+        result = await self._run(
+            conn, "每晚复盘任务", prov.reflection_command(directory), seconds=START_TIMEOUT
+        )
+        if result.ok:
+            updated = '"created": false' in result.stdout
+            await self.rec.step(
+                "reflection", "done", "已有，已更新提示词与时间" if updated else "已建好"
+            )
+        else:
+            await self.rec.step(
+                "reflection",
+                "skipped",
+                "没建成（详见日志）：在服务器的接入包目录里运行 sh setup-reflection.sh",
+            )
 
 
 class Uninstaller(Installer):

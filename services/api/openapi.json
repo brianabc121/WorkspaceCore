@@ -570,6 +570,14 @@
             "title": "Space Id",
             "type": "string"
           },
+          "weekly": {
+            "description": "近 8 周，最早的在前",
+            "items": {
+              "$ref": "#/components/schemas/AgentWeek"
+            },
+            "title": "Weekly",
+            "type": "array"
+          },
           "writes_enabled": {
             "title": "Writes Enabled",
             "type": "boolean"
@@ -583,7 +591,8 @@
           "deletes_paused_at",
           "corrections_unseen",
           "metrics",
-          "projects"
+          "projects",
+          "weekly"
         ],
         "title": "AgentKnowledgeOut",
         "type": "object"
@@ -1208,6 +1217,7 @@
               "start",
               "schedule",
               "online",
+              "reflection",
               "stop",
               "unschedule",
               "remove_files"
@@ -1487,6 +1497,39 @@
           "version"
         ],
         "title": "AgentSshUninstall",
+        "type": "object"
+      },
+      "AgentWeek": {
+        "description": "一周（周一开始）的读写次数（T-0100，智能体主页的趋势图）。",
+        "properties": {
+          "reads_own": {
+            "description": "读自己知识库的次数",
+            "title": "Reads Own",
+            "type": "integer"
+          },
+          "reads_shared": {
+            "description": "读项目、公共与别的智能体知识库的次数",
+            "title": "Reads Shared",
+            "type": "integer"
+          },
+          "week_start": {
+            "format": "date",
+            "title": "Week Start",
+            "type": "string"
+          },
+          "writes": {
+            "description": "新建、修改、改名的次数（所有知识库）",
+            "title": "Writes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "week_start",
+          "reads_own",
+          "reads_shared",
+          "writes"
+        ],
+        "title": "AgentWeek",
         "type": "object"
       },
       "AiToolExecutionOut": {
@@ -10866,6 +10909,23 @@
         "title": "SetupStatus",
         "type": "object"
       },
+      "SpaceActivity": {
+        "description": "近 8 周的修改次数（T-0100，知识库主页的趋势图），最早的在前。",
+        "properties": {
+          "weeks": {
+            "items": {
+              "$ref": "#/components/schemas/SpaceWeek"
+            },
+            "title": "Weeks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "weeks"
+        ],
+        "title": "SpaceActivity",
+        "type": "object"
+      },
       "SpaceAgentOut": {
         "properties": {
           "access": {
@@ -11150,6 +11210,32 @@
           "version"
         ],
         "title": "SpaceUpdate",
+        "type": "object"
+      },
+      "SpaceWeek": {
+        "properties": {
+          "agent": {
+            "description": "智能体新建、修改、改名的次数",
+            "title": "Agent",
+            "type": "integer"
+          },
+          "human": {
+            "description": "人新建、修改、改名、退回的次数",
+            "title": "Human",
+            "type": "integer"
+          },
+          "week_start": {
+            "format": "date",
+            "title": "Week Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "week_start",
+          "human",
+          "agent"
+        ],
+        "title": "SpaceWeek",
         "type": "object"
       },
       "SyncRequestOut": {
@@ -26737,6 +26823,87 @@
           }
         ],
         "summary": "修改知识库设置（admin）",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
+    "/api/v1/knowledge/spaces/{space_id}/activity": {
+      "get": {
+        "description": "按周（周一开始，UTC）统计人和智能体的新建、修改、改名、退回次数，最早的在前。",
+        "operationId": "space_activity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Space Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceActivity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "知识库近 8 周的修改次数（viewer）",
         "tags": [
           "knowledge-base"
         ]

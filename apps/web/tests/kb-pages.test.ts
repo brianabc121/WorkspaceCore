@@ -194,6 +194,47 @@ describe('知识库页面', () => {
     expect(await screen.findByText('目标：11 月上线')).toBeVisible()
   })
 
+  it('charts weekly edits by people and agents and sends an unread brief over IM once per version', async () => {
+    const weeks = ['2026-10-27', '2026-11-03'].map((week_start, i) => ({ week_start, human: i ? 3 : 1, agent: i ? 5 : 0 }))
+    const requests = kbApi(async (r) => {
+      const p = path(r)
+      if (p === '/api/v1/knowledge/notes/note-brief') return Response.json({ ...note, id: 'note-brief', type: 'brief', title: '工作台 V2 简报', space_id: 'space-p1', body: '目标', links: [], version: 6 })
+      if (p === '/api/v1/knowledge/spaces/space-p1/activity') return Response.json({ weeks })
+      if (p === '/api/v1/im/status') return Response.json({ available: true, account_ready: true, im_user_id: 'ws_user-a' })
+      if (p === '/api/v1/im/conversations' && r.method === 'POST') return Response.json({ conversation_id: 'si_ws_user-a_inst-a' })
+      if (p.endsWith('/messages') && r.method === 'POST') return Response.json({ client_msg_id: 'c1' })
+      return undefined
+    })
+    await openApp('/knowledge/spaces/space-p1')
+    const chart = await screen.findByRole('region', { name: '每周的修改' })
+    expect(await within(chart).findByRole('list', { name: /最近一周 人 3 次，智能体 5 次/ })).toBeVisible()
+    expect(within(chart).getByRole('listitem', { name: '10 月 27 日起的一周：人 1 次，智能体 0 次' })).toBeVisible()
+    expect(within(chart).getAllByRole('row')).toHaveLength(3)
+    const agents = screen.getByRole('region', { name: '参与的智能体' })
+    await fireEvent.click(await within(agents).findByRole('button', { name: '现在发给它' }))
+    expect(await within(agents).findByText(/已通过 IM 发给它/)).toBeVisible()
+    const sent = requests.find(r => r.method === 'POST' && path(r).endsWith('/messages'))!
+    expect(path(sent)).toBe('/api/v1/im/conversations/si_ws_user-a_inst-a/messages')
+    expect(sent.headers.get('Idempotency-Key')).toMatch(/^[0-9a-f-]{36}$/)
+    const body = await sent.clone().json()
+    expect(body.kind).toBe('text')
+    expect(body.text).toContain('第 6 版')
+    expect(body.text).toContain('knowledge_brief')
+    expect(body.text).toContain('project_id: project-a')
+    expect(await requests.find(r => path(r) === '/api/v1/im/conversations')!.clone().json()).toEqual({ instance_id: 'inst-a' })
+  })
+
+  it('shows weekly reads (own vs shared) and writes on the agent page', async () => {
+    const metrics = { blocked: 0, corrected: 1, deletes: 0, notes: 1, overdue_reviews: 0, read_by_others: 2, reads: 9, searches: 4, writes: 3, writes_shared: 2 }
+    const weekly = [{ week_start: '2026-10-27', reads_own: 0, reads_shared: 0, writes: 0 }, { week_start: '2026-11-03', reads_own: 2, reads_shared: 7, writes: 3 }]
+    kbApi(r => path(r) === '/api/v1/knowledge/agents/inst-a' ? Response.json({ instance_id: 'inst-a', name: 'ops-claw', space_id: 'space-a', writes_enabled: true, deletes_paused_at: null, corrections_unseen: 0, projects: [], metrics, weekly }) : undefined)
+    await openApp('/knowledge/agents/inst-a')
+    const trend = await screen.findByRole('region', { name: '每周趋势' })
+    expect(within(trend).getByRole('listitem', { name: '11 月 3 日起的一周：项目、公共和别的智能体的 7 次，自己的 2 次' })).toBeVisible()
+    expect(within(trend).getByRole('listitem', { name: '11 月 3 日起的一周：写入与修改 3 次' })).toBeVisible()
+    expect(screen.getByText(/每晚复盘/)).toBeVisible()
+  })
+
   it('redirects old bookmark addresses to external documents', async () => {
     kbApi()
     const { router } = await openApp('/knowledge?linked_resource_id=project-a')

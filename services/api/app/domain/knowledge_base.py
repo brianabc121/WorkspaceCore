@@ -215,6 +215,18 @@ class SaveOptions:
 
 
 @dataclass(frozen=True)
+class BriefStatus:
+    project_id: uuid.UUID
+    project: str
+    version: int
+    read: int | None
+
+    @property
+    def unread(self) -> bool:
+        return self.read != self.version
+
+
+@dataclass(frozen=True)
 class SpaceState:
     space: KnowledgeSpace
     archived: bool
@@ -635,6 +647,41 @@ class KnowledgeBase:
         return UsageOut(
             reads_30d=sum(a.reads for a in by_agent), by_agent=by_agent, last_read_at=last
         )
+
+    async def brief_status(
+        self, instance_id: uuid.UUID, project_id: uuid.UUID | None = None
+    ) -> list[BriefStatus]:
+        """它参与的项目里有简报的：最新版本与它读过的版本（方案 3.10“谁读过最新简报”）。"""
+        stmt = (
+            select(
+                ProjectAgent.project_id,
+                KnowledgeSpace.name,
+                KnowledgeNote.version,
+                KnowledgeBriefRead.version,
+            )
+            .join(KnowledgeSpace, KnowledgeSpace.project_id == ProjectAgent.project_id)
+            .join(
+                KnowledgeNote,
+                and_(
+                    KnowledgeNote.space_id == KnowledgeSpace.id,
+                    KnowledgeNote.type == "brief",
+                    KnowledgeNote.deleted_at.is_(None),
+                ),
+            )
+            .outerjoin(
+                KnowledgeBriefRead,
+                and_(
+                    KnowledgeBriefRead.project_id == ProjectAgent.project_id,
+                    KnowledgeBriefRead.instance_id == ProjectAgent.instance_id,
+                ),
+            )
+            .where(ProjectAgent.instance_id == instance_id)
+            .order_by(KnowledgeSpace.name)
+        )
+        if project_id is not None:
+            stmt = stmt.where(ProjectAgent.project_id == project_id)
+        rows = (await self.db.execute(stmt)).all()
+        return [BriefStatus(project_id=r[0], project=r[1], version=r[2], read=r[3]) for r in rows]
 
     async def record_read(self, instance: AgentInstance, note: KnowledgeNote) -> None:
         stmt = pg_insert(KnowledgeReadStat).values(
