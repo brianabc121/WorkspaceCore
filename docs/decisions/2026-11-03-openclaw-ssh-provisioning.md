@@ -222,3 +222,27 @@ OpenClaw 还没走到这一步）。`install-plugin.sh` 先看 `extensions/openc
 `docker-pins` job 在 `debian:12`、`ubuntu:22.04`、`ubuntu:24.04` 的干净容器里真正运行 `install-docker.sh`，
 核对装上的是锁定版本并且都 hold 了（补上了本环境装不了的 Debian 12）。
 
+
+## 7. C：网页（T-0090）
+
+实例卡片上的「通过 SSH 自动部署」（`apps/web/src/features/agents/SshDeploy.vue`），只给外网模式的实例；内网实例只显示说明，不请求接口。
+
+- 流程：填写服务器（IP 或域名、端口、账号，前端按后端同样的规则校验）→ `PUT /ssh` 读取主机公钥 → 显示算法、SHA256 指纹与核对命令
+  （按算法给出 `ssh-keygen -lf /etc/ssh/ssh_host_<ed25519|ecdsa|rsa>_key.pub`，未知算法给出遍历全部主机公钥的命令）→
+  勾选“已在服务器上核对”后才能 `POST /ssh/confirm` → 输入密码 `POST /ssh/install`；
+- 密码：`type=password`、`autocomplete=off`，点开始部署时先从页面清空，再随这一个请求发出；不放进查询缓存、状态或浏览器存储；
+  已经装了专用公钥时可以不填（重新部署）；
+- 进度：`GET /ssh` 放在 `agents` 查询键下（写操作与 SSE 的 agents 主题都会刷新），任务 `running` 时每 2 秒轮询；
+  任务结束时刷新实例列表（状态、凭证变了），失败时默认展开脱敏后的命令输出；
+- 读取主机公钥与吊销要等对方服务器（连接超时 10 秒、登录 10 秒），用单独的 60 秒超时的客户端（`auth.slowApi`），
+  默认的 15 秒会在服务器不响应时误报“结果未知”；结果未知时刷新状态；
+- 吊销返回 503 `AGENT_SSH_UNREACHABLE` 或 409 `AGENT_SSH_KEY_INVALID` 时才出现“强制吊销”，确认后带 `force=true`，
+  并显示返回的 `warning`（要手动删除的那一行公钥）；
+- 装着专用公钥时不显示“更换 / 删除服务器”（后端也会拒绝），提示先吊销；
+- 错误码在前端映射成说明（`AGENT_SSH_UNREACHABLE` 按 `details.reason` 区分 DNS、超时、拒绝、握手），429 显示等待秒数。
+- 顺带把“第一次部署没填密码”的错误码从 `VALIDATION_ERROR` 改成全项目统一的 `VALIDATION_FAILED`（`docs/api-contract.md` 第 2 节）。
+
+验收：`apps/web/tests/agents-ssh.test.ts`（6 个：完整流程且密码只出现在一个请求里、失败与轮询、免密码重新部署、卸载与强制吊销、
+探测失败与限流、内网实例）；`tests/e2e/agent_ssh_browser.cjs` 在 CI 的 agents job 里接在接口级 SSH 验收之后，用同一台 sshd
+全程在网页上操作到真实 OpenClaw 上线，再卸载、吊销、删除服务器，并检查 390px 宽度、密码不在页面 / 响应 / 浏览器存储里。
+本机（真实 sshd、真实 API）跑通到插件一步（沙箱代理拦截 npm，`SSH_BROWSER_ALLOW_PLUGIN_FAILURE=1`），卸载与吊销通过。

@@ -639,6 +639,8 @@ async def test_preconditions(owner: Owner, tmp_path: Path) -> None:
         instance_id, version = await owner.prepare(port)
         response = await owner.install(instance_id, version, password=None)
         assert response.status_code == 422
+        # 与全项目的输入错误同一个错误码（T-0090 的网页按它提示）
+        assert response.json()["error"]["code"] == "VALIDATION_FAILED"
         response = await owner.install(instance_id, version + 5)
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "VERSION_CONFLICT"
