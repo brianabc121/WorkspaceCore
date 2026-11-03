@@ -25,6 +25,7 @@ from pydantic import SecretStr
 from app import agent_provisioning as prov
 from app.domain import agent_ssh_install
 from app.domain.agent_ssh_install import JobRecorder, SshJobRunner
+from app.integrations import ssh
 from tests.helpers import OWNER, ClientFactory, add_member, add_user, csrf, run_sql
 
 pytestmark = pytest.mark.integration
@@ -675,6 +676,88 @@ async def test_one_running_job_per_target(
     state = await owner.state(instance_id)
     assert state["job"]["status"] == "interrupted"
     assert state["job"]["finished_at"] is not None
+
+
+async def test_install_during_a_replacement_blocks_the_replacement(
+    owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """更换服务器的探测进行中，另一个请求对原目标开始了安装：更换必须失败（409），
+    不能在安装进行中改写目标（否则任务会把密码发给新服务器）。"""
+    monkeypatch.setattr(SshJobRunner, "start", lambda self, *a, **k: None)
+    monkeypatch.setattr(SshJobRunner, "running", lambda self, job_id: True)
+    host = FakeHost(tmp_path)
+    async with ssh_host(host) as (port, _):
+        instance_id, version = await owner.prepare(port)
+    other = asyncssh.generate_private_key("ssh-ed25519")
+    installs: list[int] = []
+
+    async def probe_while_installing(address: str, port: int) -> ssh.HostKey:
+        installs.append((await owner.install(instance_id, version)).status_code)
+        return ssh.HostKey(
+            algorithm="ssh-ed25519",
+            public_key=" ".join(other.export_public_key().decode().split()[:2]),
+            fingerprint=other.get_fingerprint("sha256"),
+        )
+
+    monkeypatch.setattr(ssh, "probe_host_key", probe_while_installing)
+    replaced = await owner.client.put(
+        f"/api/v1/agents/instances/{instance_id}/ssh",
+        json={"host": "127.0.0.1", "port": port + 1, "username": "deploy", "version": version},
+        headers=owner.headers(),
+    )
+    assert installs == [202]
+    assert replaced.status_code == 409, replaced.text
+    assert replaced.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
+    target = (await owner.state(instance_id))["target"]
+    assert target["port"] == port
+    assert target["host_key_confirmed"] is True
+
+
+async def test_job_refuses_a_target_that_changed(owner: Owner, tmp_path: Path) -> None:
+    """任务开始前目标服务器被改成未确认（例如绕过接口的改动）：任务不登录、不发送密码。"""
+    host = FakeHost(tmp_path)
+    async with ssh_host(host) as (port, _):
+        instance_id, version = await owner.prepare(port)
+        runner = owner.app.state.ssh_jobs
+        original = runner.start
+
+        def start_after_unconfirm(job_id: uuid.UUID, *args: Any, **kwargs: Any) -> None:
+            async def later() -> None:
+                await run_sql(
+                    owner.database_url,
+                    "UPDATE workspace.agent_ssh_targets SET host_key_confirmed_at = NULL",
+                )
+                original(job_id, *args, **kwargs)
+
+            runner.reserve(job_id)
+            asyncio.get_running_loop().create_task(later())
+
+        runner.start = start_after_unconfirm
+        try:
+            assert (await owner.install(instance_id, version)).status_code == 202
+            state = await owner.finished(instance_id)
+        finally:
+            runner.start = original
+    assert state["job"]["error_code"] == "host_key_unconfirmed"
+    assert host.logins == []
+
+
+async def test_authorized_keys_without_trailing_newline(owner: Owner, tmp_path: Path) -> None:
+    """已有的 authorized_keys 最后一行没有换行符：专用公钥要另起一行，原来的公钥不受影响。"""
+    host = FakeHost(tmp_path)
+    existing = asyncssh.generate_private_key("ssh-ed25519").export_public_key().decode().strip()
+    (host.home / ".ssh").mkdir(mode=0o700)
+    (host.home / ".ssh" / "authorized_keys").write_text(existing)  # 没有末尾换行
+    async with ssh_host(host) as (port, _):
+        instance_id, version = await owner.prepare(port)
+        state = await _install_ok(owner, host, instance_id, version)
+    lines = host.authorized()
+    assert len(lines) == 2
+    assert lines[0] == existing
+    assert (
+        asyncssh.import_public_key(lines[1]).get_fingerprint("sha256")
+        == (state["target"]["client_key_fingerprint"])
+    )
 
 
 async def test_stale_running_job_does_not_block(

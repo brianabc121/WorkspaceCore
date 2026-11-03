@@ -193,6 +193,7 @@ class Target:
     username: str
     host_key: str
     client_key_ref: str | None
+    host_key_confirmed: bool
 
 
 @dataclass(frozen=True)
@@ -322,6 +323,17 @@ class Installer:
         self.client_ip = client_ip
         self.home = ""
 
+    def _unchanged(self, target: AgentSshTarget) -> bool:
+        """任务开始后目标服务器没有被更换（地址、端口、账号、主机公钥都一样且仍然确认）。"""
+        t = self.target
+        return (
+            target.address == t.address
+            and target.port == t.port
+            and target.username == t.username
+            and target.host_key == t.host_key
+            and target.host_key_confirmed_at is not None
+        )
+
     def _box(self) -> CredentialBox:
         try:
             return CredentialBox.from_settings(self.settings)
@@ -390,6 +402,8 @@ class Installer:
             target = await db.get(AgentSshTarget, self.target.target_id, with_for_update=True)
             if target is None:
                 raise JobGone
+            if not self._unchanged(target):
+                raise InstallFailed("target_changed", "目标服务器在安装期间被更换，已停止")
             target.client_key_ref = sealed
             target.client_public_key = public
             target.version += 1
@@ -534,6 +548,9 @@ class Installer:
         await self.rec.step("online", "done", "实例已连上工作台")
 
     async def run(self, secret: OneTimePassword) -> None:
+        if not self.target.host_key_confirmed:
+            # 接口里已经检查过；任务开始时再确认一次，未确认的主机公钥绝不用来登录
+            raise InstallFailed("host_key_unconfirmed", "服务器的主机公钥还没有确认")
         key = self._existing_key()
         password = secret.get()
         if password is None and key is None:
@@ -654,6 +671,8 @@ class Installer:
             target = await db.get(AgentSshTarget, self.target.target_id, with_for_update=True)
             if target is None:
                 raise JobGone
+            if not self._unchanged(target):
+                raise InstallFailed("target_changed", "目标服务器在安装期间被更换，已停止")
             target.install_dir = directory
             target.installed_at = _now()
             target.version += 1
@@ -686,6 +705,7 @@ async def _load(sessionmaker: async_sessionmaker[AsyncSession], job_id: uuid.UUI
         username=target.username,
         host_key=target.host_key,
         client_key_ref=target.client_key_ref,
+        host_key_confirmed=target.host_key_confirmed_at is not None,
     )
 
 

@@ -273,6 +273,10 @@ class AgentSshService:
                     "AGENT_SSH_KEY_INSTALLED",
                     "这台服务器上已经装了工作台的专用公钥：先吊销，再更换服务器",
                 )
+            # 开始安装不改版本号：探测期间开始的安装任务也要在锁内再查一次，
+            # 否则任务会连到更换后的服务器（并把原服务器的登录密码发过去）
+            if await self._running(target):
+                raise _job_running()
         if target is None:
             target = AgentSshTarget(
                 workspace_id=instance.workspace_id,

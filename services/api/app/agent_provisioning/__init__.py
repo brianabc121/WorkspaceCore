@@ -70,13 +70,18 @@ def q(value: str) -> str:
 
 
 def authorize_key_command(public_key: str) -> str:
-    """把专用公钥追加到 ~/.ssh/authorized_keys；已经有同一行就不重复。"""
+    """把专用公钥追加到 ~/.ssh/authorized_keys；已经有同一行就不重复。
+
+    已有文件的最后一行没有换行符时先补一个，免得专用公钥接在原来那行的末尾。
+    """
     key = q(public_key)
+    path = "~/.ssh/authorized_keys"
     return (
-        "umask 077 && mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys"
-        f" && (grep -qxF {key} ~/.ssh/authorized_keys"
-        f" || printf '%s\\n' {key} >> ~/.ssh/authorized_keys)"
-        " && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+        f"umask 077 && mkdir -p ~/.ssh && touch {path}"
+        f" && (grep -qxF {key} {path}"
+        f' || {{ if [ -s {path} ] && [ -n "$(tail -c 1 {path})" ]; then echo >> {path}; fi'
+        f" && printf '%s\\n' {key} >> {path}; }})"
+        f" && chmod 700 ~/.ssh && chmod 600 {path}"
     )
 
 
