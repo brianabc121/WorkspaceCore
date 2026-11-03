@@ -30,3 +30,6 @@ backups/
 .DS_Store
 .idea/
 .vscode/
+
+# deploy.sh 的后台任务状态、回答与日志（T-0094）
+.deploy/
