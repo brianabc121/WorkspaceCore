@@ -9,6 +9,8 @@ import LayoutFields from '../../widgets/LayoutFields.vue'
 import WidgetEditor from './WidgetEditor.vue'
 import DataState from '../../components/DataState.vue'
 import ModalPanel from '../../components/ModalPanel.vue'
+import { Ellipsis, RefreshCw } from '@lucide/vue'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 const model = reactive(useDashboard())
 const mobile = ref(window.matchMedia?.('(max-width: 760px)').matches ?? false)
 const media = window.matchMedia?.('(max-width: 760px)')
@@ -41,23 +43,38 @@ function configure(widget: Schema['WidgetOut']) {
   editor.value = widget
 }
 async function saveWidget(value: WidgetValue) { if (await model.saveWidget(value, editor.value === 'new' ? undefined : editor.value ?? undefined)) editor.value = null }
+// 不常用的操作收进“更多”菜单（T-0085）。reka-ui 关闭菜单后会把焦点还给触发按钮，会抢走对话框里的焦点：
+// 选中一项时先阻止它，再在下一轮打开对话框（与顶栏“创建”菜单同样处理）
+let chosen: (() => void) | null = null
+function afterMenuClose(event: Event) {
+  if (!chosen) return
+  const action = chosen
+  chosen = null
+  event.preventDefault()
+  setTimeout(action, 0)
+}
 function closeEditor() { if (!model.pending) { editor.value = null; if (!model.blocked) model.failure = null } }
 </script>
 <template>
   <section aria-label="仪表盘">
     <div id="dashboard-tools" class="dashboard-toolbar">
-      <div><h2>{{ model.dashboard?.title ?? '首页' }}</h2><span v-if="model.dashboard" class="form-help">版本 {{ model.dashboard.version }}</span></div>
+      <div class="dashboard-title"><h2>{{ model.dashboard?.title ?? '首页' }}</h2><span v-if="model.dashboard" class="form-help">版本 {{ model.dashboard.version }}</span></div>
       <div class="form-actions">
-        <button class="secondary-button" :disabled="model.pending || model.fetching" @click="model.reload">刷新首页</button>
+        <button type="button" class="shell-icon" aria-label="刷新首页" title="刷新首页" :disabled="model.pending || model.fetching" @click="model.reload"><RefreshCw aria-hidden="true" /></button>
         <template v-if="model.dashboard && !model.loading && !model.denied">
+          <button v-if="model.canEdit && !model.editing" class="secondary-button" :disabled="model.pending || model.blocked || model.widgets.length >= 50" @click="model.failure = null; editor = 'new'">添加组件</button>
           <button v-if="model.canEdit && !model.editing" class="primary-button" :disabled="model.pending || model.fetching || model.blocked || !!model.queryError" @click="model.beginEdit">编辑布局</button>
           <template v-if="model.editing"><button class="primary-button" :disabled="model.pending || model.blocked || !model.dirty" @click="model.saveLayout">{{ model.pending ? '正在保存…' : '保存布局' }}</button><button class="secondary-button" :disabled="model.pending" @click="model.editing = false; model.dirty = false">取消编辑</button></template>
-          <button v-if="model.canEdit && !model.editing" class="secondary-button" :disabled="model.pending || model.blocked || model.widgets.length >= 50" @click="model.failure = null; editor = 'new'">添加组件</button>
-          <button class="secondary-button" :disabled="model.pending || model.dirty" @click="openTools('export')">导出 JSON</button>
-          <button v-if="model.canEdit" class="secondary-button" :disabled="model.pending || model.dirty || model.blocked" @click="openTools('import')">导入 JSON</button>
-          <button class="secondary-button" :disabled="model.pending || model.dirty || model.blocked" @click="model.loadChoices">选择仪表盘</button>
           <select v-if="model.choices.length" aria-label="选择仪表盘" :value="model.dashboard.id" :disabled="model.pending || model.blocked" @change="model.choose(($event.target as HTMLSelectElement).value)"><option v-for="choice in model.choices" :key="choice.id" :value="choice.id">{{ choice.title }}{{ choice.is_default ? ' · 首页' : '' }}</option></select>
-          <button v-if="model.canEdit && !model.dashboard.is_default" class="secondary-button" :disabled="model.pending || model.dirty || model.blocked" @click="model.makeDefault">设为首页</button>
+          <DropdownMenu>
+            <DropdownMenuTrigger class="shell-icon" aria-label="更多仪表盘操作" title="更多"><Ellipsis aria-hidden="true" /></DropdownMenuTrigger>
+            <DropdownMenuContent align="end" :collision-padding="8" class="w-48" @close-auto-focus="afterMenuClose">
+              <DropdownMenuItem :disabled="model.pending || model.dirty" @select="chosen = () => openTools('export')">导出 JSON</DropdownMenuItem>
+              <DropdownMenuItem v-if="model.canEdit" :disabled="model.pending || model.dirty || model.blocked" @select="chosen = () => openTools('import')">导入 JSON</DropdownMenuItem>
+              <DropdownMenuItem :disabled="model.pending || model.dirty || model.blocked" @select="model.loadChoices">选择仪表盘</DropdownMenuItem>
+              <DropdownMenuItem v-if="model.canEdit && !model.dashboard.is_default" :disabled="model.pending || model.dirty || model.blocked" @select="model.makeDefault">设为首页</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </template>
       </div>
     </div>

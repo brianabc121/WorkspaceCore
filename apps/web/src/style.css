@@ -463,3 +463,41 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .app-login-fields dd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; min-width: 0; }
 .app-login-fields code { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); overflow-wrap: anywhere; }
 @media (max-width: 760px) { .app-login { padding: 16px; } .app-login-fields { grid-template-columns: minmax(0, 1fr); } }
+
+/* 日历月视图（T-0085）：6 周网格；手机上每格只显示数量点 */
+.calendar-nav { align-items: center; }
+.calendar-nav p { margin: 0; font-weight: 600; }
+.calendar-month { padding: 0; overflow: hidden; margin: 14px 0; }
+.calendar-month-head, .calendar-month-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.calendar-month-head span { padding: 8px 10px; color: var(--muted); font-size: .76rem; border-bottom: 1px solid var(--line); }
+.calendar-cell { min-height: 108px; min-width: 0; padding: 6px; display: flex; flex-direction: column; gap: 3px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.calendar-month-row .calendar-cell:last-child { border-right: 0; }
+.calendar-month-row:last-child .calendar-cell { border-bottom: 0; }
+.calendar-cell.is-outside { background: var(--bg); }
+.calendar-cell.is-outside .calendar-cell-date { color: var(--muted); opacity: .7; }
+.calendar-cell-date { align-self: flex-start; min-width: 26px; height: 26px; padding: 0 6px; border: 0; border-radius: 13px; background: none; color: var(--text); font-size: .8rem; font-weight: 600; }
+.calendar-cell-date:hover { background: var(--surface-2); }
+.calendar-cell.is-today .calendar-cell-date { background: var(--accent); color: var(--accent-text); }
+.calendar-chip { display: block; width: 100%; padding: 2px 6px; border: 0; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-size: .74rem; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-chip-due { background: var(--warning-soft); color: var(--warning); }
+.calendar-more { align-self: flex-start; padding: 0 4px; border: 0; background: none; color: var(--muted); font-size: .72rem; }
+@media (max-width: 760px) {
+  .calendar-cell { min-height: 64px; padding: 4px 2px; align-items: center; }
+  .calendar-chip { font-size: 0; height: 6px; width: 6px; padding: 0; border-radius: 3px; background: var(--accent); }
+  .calendar-chip-due { background: var(--warning); }
+  .calendar-more { font-size: .64rem; }
+  .calendar-month-head span { padding: 6px 2px; text-align: center; font-size: .7rem; }
+}
+
+/* 首页（T-0085） */
+.dashboard-title { display: flex; align-items: baseline; gap: 10px; }
+.dashboard-title h2 { font-size: 1rem; }
+.dashboard-toolbar { align-items: center; }
+.today-list li { display: grid; gap: 4px; }
+.today-list a { color: var(--text); font-weight: 500; }
+.today-list a:hover { color: var(--accent); }
+.widget-link { display: inline-block; margin-top: 10px; color: var(--accent); font-size: .82rem; }
+.project-progress progress { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 6px; margin: 6px 0; border: 0; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.project-progress progress::-webkit-progress-bar { background: var(--surface-2); border-radius: 3px; }
+.project-progress progress::-webkit-progress-value { background: var(--accent); border-radius: 3px; }
+.project-progress progress::-moz-progress-bar { background: var(--accent); border-radius: 3px; }

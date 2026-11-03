@@ -180,9 +180,16 @@ function overview(page, workspaceId) {
   const viewer = await login(browser, `victor-${run}@browser.example.com`, problems)
   await viewer.page.getByLabel('当前工作空间').selectOption({ label: 'Alice 的空间' })
   await viewer.page.getByRole('article', { name: '文本便签' }).waitFor()
-  for (const name of ['编辑布局', '添加组件', '导入 JSON', '设为首页']) {
+  for (const name of ['编辑布局', '添加组件']) {
     check(await viewer.page.getByRole('button', { name, exact: true }).count() === 0, `viewer 不应看到“${name}”`)
   }
+  // 导入 JSON、设为首页在“更多”菜单里（T-0085）：viewer 打开菜单也看不到
+  await viewer.page.getByRole('button', { name: '更多仪表盘操作' }).click()
+  await viewer.page.getByRole('menuitem', { name: '导出 JSON' }).waitFor()
+  for (const name of ['导入 JSON', '设为首页']) {
+    check(await viewer.page.getByRole('menuitem', { name, exact: true }).count() === 0, `viewer 不应看到“${name}”`)
+  }
+  await viewer.page.keyboard.press('Escape')
   step('viewer 切到别人的工作空间：能看首页，没有编辑、添加、导入、设为首页入口')
 
   await browser.close()

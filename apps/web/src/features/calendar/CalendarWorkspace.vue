@@ -5,7 +5,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { dataOf, errorMessage, isAccessError, type Schema } from '../../services/api'
 import { useResourceMutation } from '../resources/mutation'
-import { addDays, browserZone, dateInZone, eventDates, eventTime, localDateTime, validZone, weekDates, zonedInstant } from './time'
+import { addDays, addMonths, browserZone, dateInZone, eventDates, eventTime, localDateTime, monthDates, validZone, weekDates, zonedInstant } from './time'
 import DataState from '../../components/DataState.vue'
 import ModalPanel from '../../components/ModalPanel.vue'
 import MutationNotice from '../resources/MutationNotice.vue'
@@ -16,11 +16,11 @@ const { run, reload, busy, error, needsReload, accessDenied, message } = useReso
 const route = useRoute(), initialZone = browserZone()
 function initialDate() { try { return typeof route.query.date === 'string' ? addDays(route.query.date, 0) : dateInZone(new Date().toISOString(), initialZone) } catch { return dateInZone(new Date().toISOString(), initialZone) } }
 const date = ref(initialDate()), zone = ref(initialZone)
-const selected = ref({ date: date.value, zone: zone.value }), rangeError = ref(''), view = ref<'agenda' | 'week'>('agenda')
-const days = computed(() => weekDates(selected.value.date))
+const selected = ref({ date: date.value, zone: zone.value }), rangeError = ref(''), view = ref<'agenda' | 'week' | 'month'>('agenda')
+const days = computed(() => (view.value === 'month' ? monthDates(selected.value.date) : weekDates(selected.value.date)))
 // All-day events retain their civil dates even when their event timezone is on
 // the opposite side of the date line. Pad reads, then filter the visible days.
-const range = computed(() => ({ start: new Date(Date.parse(zonedInstant(`${days.value[0]}T00:00`, selected.value.zone)) - 2 * 86400000).toISOString(), end: new Date(Date.parse(zonedInstant(`${addDays(days.value[6]!, 1)}T00:00`, selected.value.zone)) + 2 * 86400000).toISOString() }))
+const range = computed(() => ({ start: new Date(Date.parse(zonedInstant(`${days.value[0]}T00:00`, selected.value.zone)) - 2 * 86400000).toISOString(), end: new Date(Date.parse(zonedInstant(`${addDays(days.value.at(-1)!, 1)}T00:00`, selected.value.zone)) + 2 * 86400000).toISOString() }))
 const query = useInfiniteQuery({ queryKey: computed(() => ['calendar', user, scope, range.value]), initialPageParam: null as string | null, queryFn: async ({ pageParam, signal }) => dataOf(await auth.api.GET('/api/v1/calendar/events', { params: { header, query: { ...range.value, limit: 100, ...(pageParam ? { cursor: pageParam } : {}) } }, signal })), getNextPageParam: (page) => page.next_cursor ?? undefined })
 const blocked = computed(() => accessDenied.value || isAccessError(query.error.value))
 // Task due dates (spec §1.2): read-only entries derived from the workspace's tasks; edit them on the
@@ -39,8 +39,8 @@ useCreateIntent(() => writable.value && !busy.value && !needsReload.value, () =>
 function apply() {
   try {
     if (!validZone(zone.value)) throw new Error('请输入有效的显示时区。')
-    const week = weekDates(date.value)
-    zonedInstant(`${week[0]}T00:00`, zone.value); zonedInstant(`${addDays(week[6]!, 1)}T00:00`, zone.value)
+    const span = view.value === 'month' ? monthDates(date.value) : weekDates(date.value)
+    zonedInstant(`${span[0]}T00:00`, zone.value); zonedInstant(`${addDays(span.at(-1)!, 1)}T00:00`, zone.value)
     selected.value = { date: date.value, zone: zone.value }; rangeError.value = ''
   } catch (cause) { rangeError.value = cause instanceof Error ? cause.message : '日期范围无效。' }
 }
@@ -48,7 +48,15 @@ watch(() => route.query.date, (value) => {
   if (typeof value !== 'string') return
   try { date.value = addDays(value, 0); zone.value = selected.value.zone; apply() } catch { /* Invalid route dates leave the current range unchanged. */ }
 })
-function move(offset: number) { date.value = addDays(selected.value.date, offset); zone.value = selected.value.zone; apply() }
+function move(offset: number) { date.value = view.value === 'month' ? addMonths(selected.value.date, offset) : addDays(selected.value.date, offset * 7); zone.value = selected.value.zone; apply() }
+// 月视图：6 周网格，标出不在当月的日子和今天；点日期切到那一周
+const month = computed(() => selected.value.date.slice(0, 7))
+const today = computed(() => dateInZone(new Date().toISOString(), selected.value.zone))
+const monthTitle = computed(() => `${Number(month.value.slice(0, 4))}年${Number(month.value.slice(5, 7))}月`)
+const cells = computed(() => days.value.map((day) => ({ day, inMonth: day.startsWith(month.value), events: items.value.filter((event) => eventDates(event, selected.value.zone).includes(day)), due: dueItems.value.filter((task) => dateInZone(task.due_at!, selected.value.zone) === day) })))
+const MONTH_SHOWN = 3
+function openWeek(day: string) { date.value = day; zone.value = selected.value.zone; view.value = 'week'; apply() }
+function setView(next: 'agenda' | 'week' | 'month') { view.value = next; date.value = selected.value.date; zone.value = selected.value.zone; apply() }
 async function reset() { if (await reload()) opened.value = null }
 async function save(body: Schema['CalendarEventCreate']) {
   const current = opened.value
@@ -71,14 +79,25 @@ async function remove() {
 }
 </script>
 <template>
-  <div class="task-toolbar"><div class="form-actions"><button class="secondary-button" :aria-pressed="view === 'agenda'" @click="view = 'agenda'">日程列表</button><button class="secondary-button" :aria-pressed="view === 'week'" @click="view = 'week'">周视图</button><button class="secondary-button" :disabled="query.isFetching.value || busy" @click="query.refetch()">刷新日历</button></div><button v-if="writable" class="primary-button" :disabled="busy || needsReload" @click="opened = 'new'">新建日程</button></div>
+  <div class="task-toolbar"><div class="form-actions"><div class="segmented" role="group" aria-label="日历视图"><button type="button" :aria-pressed="view === 'agenda'" @click="setView('agenda')">日程列表</button><button type="button" :aria-pressed="view === 'week'" @click="setView('week')">周视图</button><button type="button" :aria-pressed="view === 'month'" @click="setView('month')">月视图</button></div><button class="secondary-button" :disabled="query.isFetching.value || busy" @click="query.refetch()">刷新日历</button></div><button v-if="writable" class="primary-button" :disabled="busy || needsReload" @click="opened = 'new'">新建日程</button></div>
   <form class="panel task-filters" aria-label="日历范围" @submit.prevent="apply"><label>查看日期<input v-model="date" type="date"></label><label>显示时区<input v-model="zone" maxlength="64" list="calendar-zones"></label><datalist id="calendar-zones"><option>Asia/Shanghai</option><option>UTC</option><option>America/New_York</option><option>Europe/London</option></datalist><button class="secondary-button">应用日历范围</button><p v-if="rangeError" role="alert">{{ rangeError }}</p></form>
-  <div class="task-toolbar"><button class="secondary-button" @click="move(-7)">上一周</button><p>{{ days[0] }} — {{ days[6] }} · {{ selected.zone }}</p><button class="secondary-button" @click="move(7)">下一周</button></div>
+  <div class="task-toolbar calendar-nav"><button class="secondary-button" @click="move(-1)">{{ view === 'month' ? '上个月' : '上一周' }}</button><p>{{ view === 'month' ? monthTitle : `${days[0]} — ${days[6]}` }} · {{ selected.zone }}</p><button class="secondary-button" @click="move(1)">{{ view === 'month' ? '下个月' : '下一周' }}</button></div>
   <MutationNotice v-if="!opened" :error="feedback" :message="message" :needs-reload="needsReload" :busy="busy" reload-label="重新加载日历" @reload="reset" />
   <DataState :loading="query.isPending.value" :error="query.error.value" :empty="!items.length && !dueItems.length" empty-text="此时间范围暂无日程。" :stale="!!items.length" @retry="query.isFetchNextPageError.value ? query.fetchNextPage() : query.refetch()" />
-  <div :class="view === 'week' ? 'calendar-week' : 'calendar-agenda'"><section v-for="group in groups" :key="group.day" class="panel calendar-day" role="region" :aria-label="group.day"><h2>{{ group.day }}</h2><article v-for="event in group.events" :key="event.id" class="calendar-record"><button class="task-title" @click="opened = event">{{ event.title }}</button><p class="form-help">{{ eventTime(event) }}</p><p class="note-text">{{ event.location }}</p></article><article v-for="task in group.due" :key="task.id" class="calendar-record calendar-deadline" :aria-label="`任务截止：${task.title}`"><span class="badge">任务截止</span> <RouterLink class="task-title" :to="{ path: '/tasks', query: { task: task.id } }">{{ task.title }}</RouterLink><span v-if="task.done" class="badge">已完成</span><p class="form-help">{{ dueTime(task) }} 截止 · 只读（在任务页修改）</p></article><p v-if="!group.events.length && !group.due.length" class="form-help">暂无日程</p></section></div>
+  <section v-if="view === 'month'" class="panel calendar-month" role="grid" :aria-label="`${monthTitle}月历`">
+    <div class="calendar-month-head" role="row"><span v-for="name in ['一', '二', '三', '四', '五', '六', '日']" :key="name" role="columnheader">周{{ name }}</span></div>
+    <div v-for="week in 6" :key="week" class="calendar-month-row" role="row">
+      <div v-for="cell in cells.slice((week - 1) * 7, week * 7)" :key="cell.day" role="gridcell" class="calendar-cell" :class="{ 'is-outside': !cell.inMonth, 'is-today': cell.day === today }" :aria-label="`${cell.day}，${cell.events.length} 个日程${cell.due.length ? `，${cell.due.length} 个任务截止` : ''}`">
+        <button type="button" class="calendar-cell-date" :aria-label="`查看 ${cell.day} 所在的一周`" @click="openWeek(cell.day)">{{ Number(cell.day.slice(8)) }}</button>
+        <button v-for="event in cell.events.slice(0, MONTH_SHOWN)" :key="event.id" type="button" class="calendar-chip" :title="eventTime(event)" @click="opened = event">{{ event.all_day ? '' : localDateTime(event.start_at, selected.zone).slice(11) + ' ' }}{{ event.title }}</button>
+        <RouterLink v-for="task in cell.due.slice(0, Math.max(0, MONTH_SHOWN - cell.events.length))" :key="task.id" class="calendar-chip calendar-chip-due" :to="{ path: '/tasks', query: { task: task.id } }" :aria-label="`任务截止：${task.title}`">截止 {{ task.title }}</RouterLink>
+        <button v-if="cell.events.length + cell.due.length > MONTH_SHOWN" type="button" class="calendar-more" @click="openWeek(cell.day)">还有 {{ cell.events.length + cell.due.length - MONTH_SHOWN }} 项</button>
+      </div>
+    </div>
+  </section>
+  <div v-else :class="view === 'week' ? 'calendar-week' : 'calendar-agenda'"><section v-for="group in groups" :key="group.day" class="panel calendar-day" role="region" :aria-label="group.day"><h2>{{ group.day }}</h2><article v-for="event in group.events" :key="event.id" class="calendar-record"><button class="task-title" @click="opened = event">{{ event.title }}</button><p class="form-help">{{ eventTime(event) }}</p><p class="note-text">{{ event.location }}</p></article><article v-for="task in group.due" :key="task.id" class="calendar-record calendar-deadline" :aria-label="`任务截止：${task.title}`"><span class="badge">任务截止</span> <RouterLink class="task-title" :to="{ path: '/tasks', query: { task: task.id } }">{{ task.title }}</RouterLink><span v-if="task.done" class="badge">已完成</span><p class="form-help">{{ dueTime(task) }} 截止 · 只读（在任务页修改）</p></article><p v-if="!group.events.length && !group.due.length" class="form-help">暂无日程</p></section></div>
   <p v-if="deadlines.error.value && !blocked" class="note-text">任务截止日期暂时无法加载：{{ errorMessage(deadlines.error.value) }}</p>
-  <p v-else-if="deadlines.data.value?.next_cursor" class="note-text">这一周截止的任务超过 100 个，只显示前 100 个；完整列表见任务页。</p>
+  <p v-else-if="deadlines.data.value?.next_cursor" class="note-text">这段时间截止的任务超过 100 个，只显示前 100 个；完整列表见任务页。</p>
   <button v-if="query.hasNextPage.value && !blocked" class="secondary-button" :disabled="query.isFetching.value" @click="query.fetchNextPage()">加载更多日程</button>
   <ModalPanel v-if="opened" :title="opened === 'new' ? '新建日程' : '日程详情'" :busy="busy" @close="!busy && (opened = null)"><CalendarForm :event="opened === 'new' ? undefined : opened" :date="selected.date" :zone="selected.zone" :writable="writable" :busy="busy" :locked="needsReload" @save="save" @remove="remove" /><MutationNotice :error="feedback" :message="message" :needs-reload="needsReload" :busy="busy" reload-label="重新加载日历" @reload="reset" /></ModalPanel>
 </template>

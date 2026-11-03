@@ -50,3 +50,15 @@ export function eventDates(event: Schema['CalendarEventOut'], zone: string): str
 export function eventTime(event: Schema['CalendarEventOut']): string {
   return event.all_day ? `全天 · ${event.start_date} 至 ${event.end_date}（结束日期不含）· ${event.timezone}` : `${localDateTime(event.start_at, event.timezone).replace('T', ' ')} — ${localDateTime(event.end_at, event.timezone).replace('T', ' ')} · ${event.timezone}`
 }
+// 月视图（T-0085）：从当月 1 日所在那周的周一开始，固定 6 周 42 天
+export function monthDates(date: string): string[] {
+  const first = `${addDays(date, 0).slice(0, 8)}01`
+  const start = weekDates(first)[0]!
+  return Array.from({ length: 42 }, (_, index) => addDays(start, index))
+}
+// 前后移动整月，日期落在当月 1 日
+export function addMonths(date: string, months: number): string {
+  const [year, month] = addDays(date, 0).split('-').map(Number) as [number, number]
+  const total = year * 12 + (month - 1) + months
+  return `${String(Math.floor(total / 12)).padStart(4, '0')}-${String((total % 12) + 1).padStart(2, '0')}-01`
+}
