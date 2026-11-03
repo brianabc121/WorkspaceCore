@@ -23,6 +23,8 @@ from app.domain.policy import WorkspaceAccess
 from app.schemas.common import Page, error_responses
 from app.schemas.integrations import (
     GitHubIntegrationCreate,
+    GitHubRepositoriesRequest,
+    GitHubRepositoryList,
     IntegrationOut,
     IntegrationTestResult,
     IntegrationUpdate,
@@ -65,6 +67,22 @@ async def create_integration(
     access: Admin, context: Context, service: Service, body: GitHubIntegrationCreate
 ) -> IntegrationOut:
     return await service.create_github(context, access, body)
+
+
+@router.post(
+    "/integrations/github/repositories",
+    summary="列出 GitHub Token 能访问的仓库（admin）",
+    description="网页上新建或修改 GitHub 连接时用：粘贴的新 Token，"
+    "或已保存的 Token（不给 api_token 时）。新 Token 只用来调用一次 GitHub `/user/repos`，"
+    "不保存、不写日志。细粒度 Token 创建时选了哪些仓库，这里就只返回哪些。"
+    "GitHub 拒绝 Token 时 502 INTEGRATION_UNAUTHORIZED；还没有保存 Token 时 409。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 409, 422, 502, 503),
+)
+async def list_github_repositories(
+    access: Admin, service: Service, body: GitHubRepositoriesRequest
+) -> GitHubRepositoryList:
+    return await service.github_repositories(access, body)
 
 
 @router.patch(

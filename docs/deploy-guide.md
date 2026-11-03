@@ -40,7 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 | 2 升级 | 先加密备份数据库（`make backup`）与 `.env`，再拉取新代码、补 `.env` 新变量、重建、迁移、检查 |
 | 3 清空 | 删除本项目全部容器、网络与数据卷（包括 n8n、OpenIM 的，以及以前部署过的 Vikunja 的），可选先备份；可选同时删除代码目录（其中的本机备份 `backups/` 与 `.env` 先移到 `/var/backups/my-workspace-<时间>/` 保留）；要输入项目名确认 |
 | 4 状态 | 服务状态、本机与 HTTPS 健康检查、是否已完成首次安装 |
-| 5 接入组件 | 自动接入 GitHub、n8n，部署 OpenIM（需要先在浏览器创建管理员，见下面的「自动接入 GitHub、n8n、OpenIM」） |
+| 5 接入组件 | 自动接入 n8n，部署 OpenIM，配置 OpenClaw 接入入口（需要先在浏览器创建管理员，见下面的「自动接入 n8n、OpenIM」）；GitHub 在网页上接入（第 8.2 节） |
 
 部署时只问三个问题：
 
@@ -63,9 +63,9 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 - 写入 `APP_ENV=production`、`COMPOSE_FILE=compose.yaml:compose.https.yaml`、域名、邮箱与 `PUBLIC_BASE_URL`；
 - 检查域名解析、80 / 443 是否被占用（例如 nginx）、ufw 是否放行；
 - `make up` → `make migrate`（数据库密码和 `.env` 不一致时自动同步）→ `make smoke` → 用 GET 检查 `https://<域名>/healthz`；
-- 还没创建管理员时显示安装凭据；在浏览器创建好管理员后回到终端按回车，接着自动接入 GitHub、n8n 并部署 OpenIM（见下一节）。
+- 还没创建管理员时显示安装凭据；在浏览器创建好管理员后回到终端按回车，接着自动接入 n8n、部署 OpenIM（见下一节）。GitHub 在网页上接入（第 8.2 节）。
 
-### 自动接入 GitHub、n8n、OpenIM
+### 自动接入 n8n、OpenIM
 
 部署结束时脚本提示去浏览器「首次安装」页创建管理员；创建好后回到终端按回车，逐个询问要不要接入（都可以跳过）。
 以后随时可以单独运行（菜单第 5 项）：
@@ -76,14 +76,14 @@ sudo bash scripts/deploy.sh connect
 
 | 组件 | 脚本自动做的事 | 需要你做的 |
 |---|---|---|
-| GitHub（只读） | 显示预填好的 Token 创建链接（名称、90 天有效期、只读的 Issues / Pull requests / Actions）→ 列出 Token 能访问的仓库让你挑选 → 建集成、逐个仓库检查权限、开始同步 | 打开链接、勾选仓库、生成 Token 粘贴回终端（GitHub 不允许程序代建 Token） |
 | n8n（自动化） | `make n8n-up` → 建 owner 账号（随机密码）→ 建只读 API Key 与名为 `X-Workspace-Trigger` 的 Header Auth 凭据 → 在工作台建连接并测试 | 脚本显示一次 n8n 账号密码，同时加密保存到工作台「自动化」页（只有管理员看得到）；之后自己搭工作流（Webhook 节点选这个凭据），再到工作台“自动化”页登记 |
 | OpenIM（「消息」页） | 构建打过补丁的 openim-server 镜像（第一次约 5 ~ 15 分钟，临时占用约 8 GB 磁盘；Docker Hub 限流时自动改用 `mirror.gcr.io` 再试）→ `make openim-up` → 在 `.env` 里填好 `OPENIM_API_URL`、`OPENIM_OBJECT_URL` 并重启 api、worker → 确认工作台连得上 | 内存少于 4 GB 时默认不装（另外占用约 1 GB）；OpenClaw 本身（接入入口与实例）按第 8.6 节配置 |
 
 - 项目与任务由工作台自己管理，不需要接入（T-0082 移除了 Vikunja；从带 Vikunja 的旧版本升级见第 10 步）。
 - 接入以首次安装创建的管理员身份进行：Token 加密保存在工作台，操作写进审计日志，和在网页上配置一样。
 - 密码和 Token 不出现在命令行参数和日志里。
-- 已经接入的组件不会重复配置。GitHub 已接入时会问要不要换 Token 或仓库（例如权限检查没通过、重新生成了 Token）。
+- 已经接入的组件不会重复配置。
+- **GitHub 不在脚本里接入**：在工作台网页上配置（第 8.2 节），脚本只显示它的状态和设置页的地址。
 - n8n owner 已经存在时，脚本改为询问它的密码。
 - 登录成功的 n8n 账号密码加密保存到工作台：管理员在「自动化」页的「登录账号」卡片里点「显示密码」
   或「复制密码」（每次都写审计日志），也可以在那里修改。之前已经接入、还没保存的，再运行 `connect` 时会问一次，
@@ -123,7 +123,7 @@ sudo bash scripts/deploy.sh install --domain workspace.example.com --email you@e
 
 清空在无人值守时还必须加 `--confirm my-workspace`；连代码目录一起删除再加 `--delete-dir`。全部选项见 `sudo bash scripts/deploy.sh --help`。
 
-脚本部署工作台本身，并可以自动接入 GitHub、n8n，部署 OpenIM（上一节）；监控、OpenClaw（AI 运维助手，第 8.6 节）等其他可选组件以及异地备份，仍按第 8、9 步配置。
+脚本部署工作台本身，并可以自动接入 n8n、部署 OpenIM（上一节）；GitHub 在网页上接入（第 8.2 节）；监控、OpenClaw（AI 运维助手，第 8.6 节）等其他可选组件以及异地备份，仍按第 8、9 步配置。
 脚本跑完后，下面第 1 ~ 7 步都已完成。想了解每一步做了什么、或者手动部署，就按下面的步骤来。
 
 ---
@@ -354,13 +354,19 @@ make setup-token
 
 ### 8.2 GitHub（只读）
 
-> 一键脚本会给出预填好的 Token 创建链接，并自动完成后面的步骤：`sudo bash scripts/deploy.sh connect`。
+在工作台网页上接入（管理员）：侧栏「管理 → 集成设置」→ **新建 GitHub 连接**，按弹窗里的三步做：
 
-1. GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens**：
-   只选要看的仓库，Repository permissions 只给 **Read-only** 的 Metadata、Issues、Pull requests、Actions；
-2. 工作台“集成设置”里新建 GitHub 集成，粘贴 Token，填仓库（`owner/repo`，最多 20 个），点“测试连接”。
+1. 点 **GitHub 生成 Token 页面** 链接：已经预填名称、90 天有效期，以及只读的 Issues、Pull requests、Actions 权限
+   （Metadata 总是只读）。Repository access 选 **Only select repositories**，勾选要同步的仓库（最多 20 个），点 **Generate token**；
+2. 把 `github_pat_` 开头的 Token 粘贴到“GitHub Token”，点 **读取可访问的仓库**：列出这个 Token 能访问的仓库并默认全选，
+   去掉不要的；读不到时也可以在“GitHub 仓库列表”里手动填写（每行一个 `owner/repo`）；
+3. 点 **保存 GitHub 连接**：页面自动检查权限（逐个仓库检查四项读权限），全部通过后立即开始第一次同步，
+   之后在「开发者」页查看仓库、Issues、Pull requests 与 Actions。
 
-不要用经典 Token（`ghp_` 开头）。服务器要能访问 `https://api.github.com`。细节见手册第 10 节。
+- 以后换 Token 或改仓库：点连接卡片上的 **修改连接**；只改仓库时不用重新粘贴 Token（“读取可访问的仓库”会用已保存的 Token）。
+- 不要用经典 Token（`ghp_` 开头），页面会拒绝。Token 只写不读：保存后页面上不会再显示。
+- 服务器要能访问 `https://api.github.com`。细节见手册第 10 节。
+- 一键脚本不再询问 GitHub（T-0091）；`deploy.sh connect` 只显示 GitHub 的状态和设置页的地址。
 
 ### 8.3 AFFiNE（文档收藏）
 

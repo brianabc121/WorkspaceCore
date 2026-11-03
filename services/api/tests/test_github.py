@@ -239,6 +239,52 @@ async def test_create_test_and_initial_sync(env: Env) -> None:
 
 
 @pytest.mark.integration
+async def test_repositories_a_token_can_access_are_listed_for_the_form(env: Env) -> None:
+    """网页上新建 GitHub 连接（T-0091）：粘贴 Token 后列出它能访问的仓库，供勾选。"""
+    env.fake.add_repo("octo/docs")
+    path = "/api/v1/integrations/github/repositories"
+    listed = await env.client.post(path, json={"api_token": TOKEN}, headers=env.headers(write=True))
+    assert listed.status_code == 200, listed.text
+    assert listed.json() == {"repositories": ["octo/app", "octo/docs"], "complete": True}
+    assert [r.url.path for r in env.fake.requests] == ["/user/repos"]
+    # 只调用一次 GitHub：不保存 Token，不建集成，不写审计
+    assert await run_sql(env.database_url, "SELECT count(*) FROM workspace.integrations") == 0
+    assert (
+        await run_sql(env.database_url, "SELECT count(*) FROM workspace.integration_accounts") == 0
+    )
+    audit = await run_sql(
+        env.database_url,
+        "SELECT coalesce(string_agg(metadata_redacted_json::text, ''), '')"
+        " FROM workspace.audit_logs",
+    )
+    assert TOKEN not in audit
+
+    # 还没有保存 Token：不给 api_token 时 409
+    missing = await env.client.post(path, json={}, headers=env.headers(write=True))
+    assert (
+        missing.status_code == 409 and missing.json()["error"]["code"] == "INTEGRATION_UNAVAILABLE"
+    )
+    # 保存之后，修改仓库时可以用已保存的 Token 读取
+    await env.create()
+    stored = await env.client.post(path, json={}, headers=env.headers(write=True))
+    assert stored.status_code == 200 and stored.json()["repositories"] == ["octo/app", "octo/docs"]
+
+    # GitHub 拒绝 Token：502；经典 Token 在请求校验时就拒绝
+    rejected = await env.client.post(
+        path, json={"api_token": "github_pat_" + "x" * 40}, headers=env.headers(write=True)
+    )
+    assert rejected.status_code == 502
+    assert rejected.json()["error"]["code"] == "INTEGRATION_UNAUTHORIZED"
+    classic = await env.client.post(
+        path, json={"api_token": "ghp_" + "x" * 36}, headers=env.headers(write=True)
+    )
+    assert classic.status_code == 422
+    # 需要 CSRF（写接口）
+    no_csrf = await env.client.post(path, json={"api_token": TOKEN}, headers=env.headers())
+    assert no_csrf.status_code == 403
+
+
+@pytest.mark.integration
 async def test_missing_permissions_are_reported_per_repository(env: Env) -> None:
     env.fake.forbidden.add(("octo/app", "actions"))
     env.fake.classic_scopes = "repo"

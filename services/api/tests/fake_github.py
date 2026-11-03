@@ -218,6 +218,11 @@ class FakeGitHub:
 
     def _route(self, request: httpx.Request) -> tuple[int, Any]:
         parts = request.url.path.strip("/").split("/")
+        if parts == ["user", "repos"]:
+            # 细粒度 Token 能访问的仓库（网页上让管理员勾选，T-0091）
+            params = parse_qs(urlsplit(str(request.url)).query)
+            listed = sorted(self.repos.values(), key=lambda repo: str(repo["full_name"]).lower())
+            return 200, self._paged(request, listed, params)
         if len(parts) < 3 or parts[0] != "repos":
             return 404, {"json": {"message": "Not Found"}}
         full_name = f"{parts[1]}/{parts[2]}".lower()

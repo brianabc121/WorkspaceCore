@@ -147,6 +147,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET / POST | `/api/v1/calendar/events` | 区间内的日程（`start`、`end` 必填，最多 92 天）/ 新建（定时或全天） | 已实现（T-0027） |
 | PATCH / DELETE | `/api/v1/calendar/events/{event_id}` | 修改 / 删除（乐观并发） | 已实现（T-0027） |
 | POST | `/api/v1/integrations`（`provider: github`） | 新建 GitHub 集成：细粒度 Token（`github_pat_`）+ 要同步的仓库 | 已实现（T-0028） |
+| POST | `/api/v1/integrations/github/repositories` | 列出 Token 能访问的仓库供网页勾选（admin）：新 Token 只用这一次、不保存；不给 Token 时用已保存的 | 已实现（T-0091） |
 | GET | `/api/v1/developer/repos`、`/issues`、`/pulls`、`/runs` | GitHub 投影（带 `sync`；限流时 `reason: rate_limited` 与 `retry_at`） | 已实现（T-0028） |
 | GET | `/api/v1/search?q=` | 跨资源搜索（只返回当前用户可见、未删除的资源） | 已实现（T-0029） |
 

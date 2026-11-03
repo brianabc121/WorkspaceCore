@@ -21,6 +21,7 @@ from app.domain.connectors import (
     ACTIVE_STATUSES,
     ConnectorRuntime,
     account_context,
+    api_error,
     sync_state,
 )
 from app.domain.policy import WorkspaceAccess, not_found
@@ -35,6 +36,8 @@ from app.schemas.integrations import (
     GITHUB_API_VERSION,
     GITHUB_WEB_URL,
     GitHubIntegrationCreate,
+    GitHubRepositoriesRequest,
+    GitHubRepositoryList,
     IntegrationCheck,
     IntegrationOut,
     IntegrationTestResult,
@@ -255,6 +258,41 @@ class IntegrationService:
         return await self.out(integration)
 
     # ---------------------------------------------------------------- 测试连接
+
+    async def github_repositories(
+        self, access: WorkspaceAccess, body: GitHubRepositoriesRequest
+    ) -> GitHubRepositoryList:
+        """Token 能访问的仓库（`/user/repos`，只需 Metadata 只读），网页上让管理员勾选（T-0091）。
+
+        新 Token 只用来调用这一次，不保存、不进日志与审计；不给 Token 时用已保存的那份。
+        """
+        if body.api_token is not None:
+            client = GitHubClient(
+                self.runtime.http("provision:github"),
+                body.api_token.get_secret_value(),
+                self.settings.github_api_url,
+            )
+        else:
+            integration = next(
+                (
+                    i
+                    for i in await repo.list_for_workspace(self.db, access.workspace.id)
+                    if i.provider == "github"
+                ),
+                None,
+            )
+            account = await repo.get_account(self.db, integration.id) if integration else None
+            if integration is None or account is None:
+                raise ApiError(409, "INTEGRATION_UNAVAILABLE", "尚未保存 GitHub Token")
+            client = self.runtime.github(integration, account)
+        try:
+            listing = await client.list_user_repos()
+        except ConnectorError as error:
+            raise api_error(error) from error
+        names = sorted(
+            {item["full_name"] for item in listing.items if isinstance(item.get("full_name"), str)}
+        )
+        return GitHubRepositoryList(repositories=names, complete=listing.complete)
 
     async def test(
         self, context: Actor, access: WorkspaceAccess, integration_id: uuid.UUID
