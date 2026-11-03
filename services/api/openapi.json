@@ -820,6 +820,178 @@
         "title": "AgentSettingsUpdate",
         "type": "object"
       },
+      "AgentSshConfirm": {
+        "additionalProperties": false,
+        "properties": {
+          "fingerprint": {
+            "description": "页面上显示、owner 核对过的 SHA256 指纹；与探测结果不一致时拒绝",
+            "maxLength": 128,
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "fingerprint"
+        ],
+        "title": "AgentSshConfirm",
+        "type": "object"
+      },
+      "AgentSshState": {
+        "properties": {
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentSshTargetOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "title": "AgentSshState",
+        "type": "object"
+      },
+      "AgentSshTargetOut": {
+        "properties": {
+          "address": {
+            "description": "探测时解析出的地址；之后都连这个地址",
+            "title": "Address",
+            "type": "string"
+          },
+          "client_key_installed": {
+            "description": "是否已经在这台服务器上装了工作台的专用公钥",
+            "title": "Client Key Installed",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "host_key_algorithm": {
+            "title": "Host Key Algorithm",
+            "type": "string"
+          },
+          "host_key_confirmed": {
+            "title": "Host Key Confirmed",
+            "type": "boolean"
+          },
+          "host_key_confirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Key Confirmed At"
+          },
+          "host_key_fingerprint": {
+            "description": "SHA256 指纹，格式与 ssh-keygen -lf 相同",
+            "title": "Host Key Fingerprint",
+            "type": "string"
+          },
+          "port": {
+            "title": "Port",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "host",
+          "address",
+          "port",
+          "username",
+          "host_key_algorithm",
+          "host_key_fingerprint",
+          "host_key_confirmed",
+          "host_key_confirmed_at",
+          "client_key_installed",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AgentSshTargetOut",
+        "type": "object"
+      },
+      "AgentSshTargetSet": {
+        "additionalProperties": false,
+        "description": "填写或更换目标服务器：工作台只读取它的主机公钥（不登录），等 owner 核对指纹后确认。",
+        "properties": {
+          "host": {
+            "description": "服务器的 IP 或域名",
+            "maxLength": 253,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9.:-]+$",
+            "title": "Host",
+            "type": "string"
+          },
+          "port": {
+            "default": 22,
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "type": "integer"
+          },
+          "username": {
+            "description": "SSH 账号；之后用 sudo 安装 Docker（需要时）",
+            "maxLength": 32,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9._-]*$",
+            "title": "Username",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "description": "乐观并发版本号；写请求带上读取时的版本",
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "已经有目标服务器时必填（更换），为当前版本号",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "host",
+          "username"
+        ],
+        "title": "AgentSshTargetSet",
+        "type": "object"
+      },
       "AiToolExecutionOut": {
         "properties": {
           "acting_user_id": {
@@ -10671,6 +10843,492 @@
           }
         ],
         "summary": "设置实例可以取用的密钥（owner，整体替换）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/ssh": {
+      "delete": {
+        "description": "已经装了工作台的专用公钥时要先吊销（409 AGENT_SSH_KEY_INSTALLED）。",
+        "operationId": "delete_agent_ssh",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "删除目标服务器（owner）",
+        "tags": [
+          "agents"
+        ]
+      },
+      "get": {
+        "operationId": "get_agent_ssh",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSshState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "SSH 自动部署的目标服务器（owner）",
+        "tags": [
+          "agents"
+        ]
+      },
+      "put": {
+        "description": "解析地址（拒绝回环、链路本地、组播等地址），连到 SSH 端口只读取主机公钥、不登录，返回 SHA256 指纹；owner 核对后调用 /ssh/confirm 确认。只支持外网模式的实例。连不上时 503 AGENT_SSH_UNREACHABLE（details.reason：dns / timeout / refused / unreachable / handshake）；地址不允许时 422 AGENT_SSH_ADDRESS_NOT_ALLOWED；已经装了专用公钥时 409 AGENT_SSH_KEY_INSTALLED。每个用户每分钟最多探测 10 次。",
+        "operationId": "set_agent_ssh",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSshTargetSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSshState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "填写或更换目标服务器，读取主机公钥（owner）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/ssh/confirm": {
+      "post": {
+        "description": "指纹必须与探测时读到的一致（409 AGENT_SSH_FINGERPRINT_MISMATCH）；确认后，之后的连接只接受这把主机公钥。",
+        "operationId": "confirm_agent_ssh",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSshConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSshState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "确认主机公钥的指纹（owner）",
         "tags": [
           "agents"
         ]

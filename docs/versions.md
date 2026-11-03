@@ -91,6 +91,7 @@ OpenIM 的官方镜像有越权问题，已换成自建的补丁镜像（`2026-1
 | uvicorn | 0.54.0 | BSD-3-Clause | ASGI 服务器 |
 | cryptography | 50.0.2 | Apache-2.0 OR BSD-3-Clause | 凭证加密 |
 | httpx | 0.28.1 | BSD-3-Clause | 出站 HTTP |
+| asyncssh | 2.24.1 | EPL-2.0 OR GPL-2.0-or-later（作为未修改的库使用） | SSH 自动部署 OpenClaw（T-0089；核验见 `docs/decisions/2026-11-03-openclaw-ssh-provisioning.md` 第 4 节） |
 | prometheus-client | 0.26.0 | Apache-2.0 AND BSD-2-Clause | 自身指标 |
 | 开发：pytest / pytest-asyncio / ruff / mypy | 9.2.0 / 1.4.1 / 0.17.3 / 2.4.1 | MIT / Apache-2.0 / MIT / MIT | 测试与检查 |
 

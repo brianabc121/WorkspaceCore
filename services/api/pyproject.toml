@@ -22,6 +22,9 @@ dependencies = [
     "prometheus-client>=0.26,<0.27",
     # MCP 工具服务器（V2 OC-5），版本在 OC-0 锁定：docs/decisions/2026-10-31-v2-oc0-openclaw-openim-verification.md 第 7 节
     "mcp==2.3.0",
+    # SSH 自动部署 OpenClaw（T-0089）：EPL-2.0 OR GPL-2.0-or-later，作为未修改的库使用；
+    # 核验见 docs/decisions/2026-11-03-openclaw-ssh-provisioning.md 第 4 节
+    "asyncssh>=2.24.1,<2.25",
 ]
 
 [dependency-groups]

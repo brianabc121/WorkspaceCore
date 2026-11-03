@@ -310,3 +310,61 @@ class HeartbeatRequest(_Strict):
 
 class HeartbeatResponse(BaseModel):
     server_time: datetime
+
+
+# ---------------------------------------------------------------- SSH 自动部署（T-0089）
+
+SshHost = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        to_lower=True,
+        min_length=1,
+        max_length=253,
+        # 域名、IPv4 或 IPv6（具体的地址检查在探测时做）
+        pattern=r"^[A-Za-z0-9.:-]+$",
+    ),
+]
+SshUsername = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=32, pattern=r"^[A-Za-z_][A-Za-z0-9._-]*$"
+    ),
+]
+
+
+class AgentSshTargetSet(_Strict):
+    """填写或更换目标服务器：工作台只读取它的主机公钥（不登录），等 owner 核对指纹后确认。"""
+
+    host: SshHost = Field(description="服务器的 IP 或域名")
+    port: int = Field(default=22, ge=1, le=65535)
+    username: SshUsername = Field(description="SSH 账号；之后用 sudo 安装 Docker（需要时）")
+    version: Version | None = Field(
+        default=None, description="已经有目标服务器时必填（更换），为当前版本号"
+    )
+
+
+class AgentSshConfirm(_Strict):
+    version: Version
+    fingerprint: Annotated[str, StringConstraints(strip_whitespace=True, max_length=128)] = Field(
+        description="页面上显示、owner 核对过的 SHA256 指纹；与探测结果不一致时拒绝"
+    )
+
+
+class AgentSshTargetOut(BaseModel):
+    host: str
+    address: str = Field(description="探测时解析出的地址；之后都连这个地址")
+    port: int
+    username: str
+    host_key_algorithm: str
+    host_key_fingerprint: str = Field(description="SHA256 指纹，格式与 ssh-keygen -lf 相同")
+    host_key_confirmed: bool
+    host_key_confirmed_at: datetime | None
+    client_key_installed: bool = Field(description="是否已经在这台服务器上装了工作台的专用公钥")
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentSshState(BaseModel):
+    target: AgentSshTargetOut | None

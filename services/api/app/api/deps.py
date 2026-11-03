@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, origin_of
 from app.core.errors import ApiError
 from app.domain import policy
+from app.domain.agent_ssh import AgentSshService
 from app.domain.agents import AgentService
 from app.domain.ai_tools import AiToolService
 from app.domain.app_logins import AppLoginService
@@ -191,6 +192,14 @@ def get_agent_service(
     im: Annotated[OpenIMClient | None, Depends(get_openim)],
 ) -> AgentService:
     return AgentService(db, settings, redis, im)
+
+
+def get_agent_ssh_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> AgentSshService:
+    return AgentSshService(db, settings, redis)
 
 
 def get_automation_service(

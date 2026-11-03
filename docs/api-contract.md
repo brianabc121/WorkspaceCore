@@ -199,6 +199,8 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | POST | `/api/v1/agents/instances/{instance_id}/bundle` | 生成接入包（`application/zip`）并签发新凭证；凭证只在这里出现一次 | 已实现（T-0054） |
 | POST | `/api/v1/agents/instances/{instance_id}/credentials/{credential_id}/revoke` | 立即吊销一份凭证 | 已实现（T-0054） |
 | PUT | `/api/v1/agents/instances/{instance_id}/secret-grants` | 实例可取用的密钥（整体替换） | 已实现（T-0054） |
+| GET / PUT / DELETE | `/api/v1/agents/instances/{instance_id}/ssh` | SSH 自动部署的目标服务器：查看 / 填写或更换（只读取主机公钥、不登录，返回 SHA256 指纹）/ 删除；只支持外网模式 | 已实现（T-0089 B1） |
+| POST | `/api/v1/agents/instances/{instance_id}/ssh/confirm` | 确认主机公钥的指纹（与探测结果不一致时 409），之后只接受这把公钥 | 已实现（T-0089 B1） |
 | GET / POST | `/api/v1/agents/secrets` | 密钥列表 / 新增（只写不读） | 已实现（T-0054） |
 | GET | `/api/v1/agents/secrets/accesses` | 取密钥记录 | 已实现（T-0054） |
 | PATCH / DELETE | `/api/v1/agents/secrets/{secret_id}` | 改名称与说明 / 删除 | 已实现（T-0054） |
