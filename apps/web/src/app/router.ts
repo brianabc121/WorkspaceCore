@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory, type RouterHistory } from 'vue-router'
+import { createRouter, createWebHistory, type RouteRecordRaw, type RouterHistory } from 'vue-router'
 import { watch } from 'vue'
 import type { Pinia } from 'pinia'
 import { QueryClient } from '@tanstack/vue-query'
@@ -27,6 +27,21 @@ import AgentsPage from '../pages/AgentsPage.vue'
 import SecretsPage from '../pages/SecretsPage.vue'
 import AiPage from '../pages/AiPage.vue'
 
+// 知识库的子页面按需加载（编辑器、图谱的依赖较大）。旧的书签链接（?linked_resource_id=、?create=1）转到“外部文档”
+const knowledgeRoutes: RouteRecordRaw[] = [
+  { path: '', component: () => import('../features/kb/KbGraphView.vue'), meta: { title: '知识库', kbSection: 'graph' },
+    beforeEnter: (to) => (to.query.linked_resource_id !== undefined || to.query.create !== undefined ? { path: '/knowledge/docs', query: to.query } : true) },
+  { path: 'graph', component: () => import('../features/kb/KbGraphView.vue'), meta: { title: '知识图谱', kbSection: 'graph', kbGraphOnly: true } },
+  { path: 'notes', component: () => import('../features/kb/KbNotesView.vue'), meta: { title: '笔记', kbSection: 'notes' } },
+  { path: 'notes/new', component: () => import('../features/kb/KbEditorView.vue'), meta: { title: '新建笔记', kbSection: 'notes' } },
+  { path: 'notes/:id', component: () => import('../features/kb/KbNoteView.vue'), meta: { title: '笔记', kbSection: 'notes' } },
+  { path: 'notes/:id/edit', component: () => import('../features/kb/KbEditorView.vue'), meta: { title: '编辑笔记', kbSection: 'notes' } },
+  { path: 'spaces/:id?', component: () => import('../features/kb/KbSpaceView.vue'), meta: { title: '项目知识库', kbSection: 'spaces' } },
+  { path: 'agents/:id?', component: () => import('../features/kb/KbAgentView.vue'), meta: { title: '智能体知识库', kbSection: 'agents' } },
+  { path: 'changes', component: () => import('../features/kb/KbChangesView.vue'), meta: { title: '变更记录', kbSection: 'changes' } },
+  { path: 'docs', component: () => import('../features/kb/KbDocsView.vue'), meta: { title: '外部文档', kbSection: 'docs' } },
+]
+
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHistory(), queryClient = new QueryClient()) {
   const auth = useAuthStore(pinia)
   const router = createRouter({
@@ -39,9 +54,11 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
       { path: '/settings/audit', component: AuditPage, meta: { title: '审计日志', admin: true } },
       ...navigation.map((item) => ({
         path: item.path,
+        // 知识库（T-0099）是带子页面的独立页面：图谱、笔记、编辑器、知识库主页、变更记录、外部文档
+        ...(item.path === '/knowledge' ? { children: knowledgeRoutes } : {}),
         component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/automations': AutomationsPage, '/im': ImPage, '/agents': AgentsPage, '/agents/secrets': SecretsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
-        // 消息页是不带工作台侧栏和顶栏的独立页面（T-0095）
-        meta: { title: item.title, description: item.description, admin: adminOnly.has(item.path), owner: ownerOnly.has(item.path), standalone: item.path === '/im' },
+        // 消息页（T-0095）、知识库（T-0099）是不带工作台侧栏和顶栏的独立页面
+        meta: { title: item.title, description: item.description, admin: adminOnly.has(item.path), owner: ownerOnly.has(item.path), standalone: item.path === '/im' || item.path === '/knowledge' },
       })),
       // Notification links for AI approvals (OC-1 contract §6) use /approvals?id=…
       { path: '/approvals', redirect: (to) => ({ path: '/ai', query: to.query }) },

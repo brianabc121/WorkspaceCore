@@ -114,6 +114,13 @@ Python 运行时：3.12（`requires-python = ">=3.12,<3.13"`，镜像里是 3.12
 | reka-ui | 2.11.0 | MIT | shadcn-vue 组件的基础（`2026-11-01-shadcn-vue-and-drawer.md`） |
 | class-variance-authority / clsx / tailwind-merge | 0.7.1 / 2.1.1 / 3.7.0 | Apache-2.0 / MIT / MIT | shadcn-vue 组件的样式工具 |
 | @lucide/vue | 1.60.0 | ISC | 侧栏与顶栏图标（`2026-11-02-ui-shell-refresh.md`；`lucide-vue-next` 已弃用，不用） |
+| @codemirror/state / view / commands / language / lang-markdown / autocomplete / search | 6.7.6 / 6.43.15 / 6.11.1 / 6.13.1 / 6.5.2 / 6.20.4 / 6.7.2 | MIT | 知识库笔记编辑器（T-0099；核验见 `2026-11-03-knowledge-k0-verification.md`；不用 `codemirror` 总包） |
+| @lezer/highlight | 1.2.5 | MIT | 编辑器的 Markdown 语法高亮 |
+| markdown-it | 15.0.3 | MIT | 笔记渲染（关闭原始 HTML） |
+| dompurify | 3.4.17 | MPL-2.0 OR Apache-2.0 | 渲染结果消毒 |
+| d3-force | 3.0.0 | ISC | 知识图谱布局（不用 2026-11-03 当天发布的 3.0.1） |
+| node-diff3 | 3.2.1 | MIT | 编辑冲突时的三方合并 |
+| 开发：@types/markdown-it / @types/d3-force | 14.2.0 / 3.0.10 | MIT | 类型 |
 | 开发：vite / vitest / typescript / vue-tsc | 7.3.7 / 4.1.12 / 5.9.3 / 3.3.14 | MIT / MIT / Apache-2.0 / MIT | 构建、测试、类型检查 |
 | 开发：eslint / typescript-eslint / eslint-plugin-vue | 9.39.5 / 8.72.1 / 10.12.0 | MIT | 代码检查 |
 | 开发：tailwindcss / @tailwindcss/vite | 4.3.3 | MIT | 样式 |

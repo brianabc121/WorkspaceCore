@@ -166,7 +166,8 @@ async function noHorizontalScroll(page) {
   const { page } = await login(browser, `owner4-${run}@browser.example.com`, problems, requests)
 
   // ---------------------------------------------------------------- 配置 AFFiNE 地址（S4-01，管理员）
-  await page.goto(`${base}/knowledge`)
+  // T-0099 起 AFFiNE 收藏在知识库的“外部文档”里（/knowledge 是笔记与知识图谱）
+  await page.goto(`${base}/knowledge/docs`)
   await page.getByText('尚未配置知识来源').waitFor()
   const sourceBodies = []
   page.on('request', (request) => {
@@ -317,18 +318,18 @@ async function noHorizontalScroll(page) {
 
   // ---------------------------------------------------------------- 移动端
   await page.setViewportSize({ width: 390, height: 844 })
-  for (const route of ['/knowledge', '/calendar']) {
+  for (const route of ['/knowledge', '/knowledge/docs', '/calendar']) {
     await page.goto(`${base}${route}`)
-    await page.locator('h1').waitFor()
+    await page.locator('h1:visible').first().waitFor()
     check(await noHorizontalScroll(page), `${route} 在 390px 宽度下不应出现横向滚动`)
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
-  step('390px 宽度下知识库与日历页无横向滚动')
+  step('390px 宽度下知识库、外部文档与日历页无横向滚动')
 
   // ---------------------------------------------------------------- viewer 只读
   const viewer = await login(browser, `viewer4-${run}@browser.example.com`, problems, requests)
   await viewer.page.getByLabel('当前工作空间').selectOption({ label: 'Owner 的空间' })
-  await viewer.page.goto(`${base}/knowledge`)
+  await viewer.page.goto(`${base}/knowledge/docs`)
   await viewer.page.getByRole('heading', { name: title }).waitFor()
   check(await viewer.page.getByRole('button', { name: '新增收藏' }).count() === 0, 'viewer 不应看到新增收藏')
   check(await viewer.page.getByRole('button', { name: '管理知识来源' }).count() === 0, 'viewer 不应看到管理知识来源')
@@ -356,7 +357,7 @@ async function noHorizontalScroll(page) {
   await page.getByRole('button', { name: '删除日程' }).click()
   await page.getByText('日程已删除').waitFor()
   check(await page.getByRole('button', { name: `${eventTitle} 改`, exact: true }).count() === 0, '删除后日程应从日历消失')
-  await page.goto(`${base}/knowledge`)
+  await page.goto(`${base}/knowledge/docs`)
   await page.getByRole('button', { name: `删除收藏 ${title}` }).click()
   await page.getByText('收藏已删除').waitFor()
   check(await page.getByRole('heading', { name: title }).count() === 0, '删除后收藏应从列表消失')

@@ -2,7 +2,7 @@ export const navigation = [
   { path: '/', title: '总览', section: '工作空间', description: '个人工作台的统一入口。' },
   { path: '/tasks', title: '任务', section: '工作空间', description: '新建、编辑任务，按列表或看板查看。' },
   { path: '/projects', title: '项目', section: '工作空间', description: '新建、改名、归档或删除项目。' },
-  { path: '/knowledge', title: '知识库', section: '工作空间', description: 'AFFiNE 文档收藏与项目、任务关联。' },
+  { path: '/knowledge', title: '知识库', section: '工作空间', description: '笔记与知识图谱：公共、项目、智能体三类知识库；AFFiNE 文档收藏在“外部文档”。' },
   { path: '/calendar', title: '日历', section: '工作空间', description: '工作空间共享日程与周视图。' },
   { path: '/im', title: '消息', section: '工作空间', description: '与 OpenClaw 实例单聊、群聊（owner 与 admin）。' },
   { path: '/developer', title: '开发者', section: '连接与工具', description: 'GitHub 仓库、Issue、PR 与 Actions 只读视图。' },

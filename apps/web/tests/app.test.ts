@@ -13,7 +13,8 @@ async function open(path = '/') {
 }
 beforeEach(() => { mockApi() })
 describe('工程骨架', () => {
-  it.each(pages)('renders the %s page and navigation', async (path, label) => {
+  // 知识库（T-0099）与消息页一样是独立页面，没有工作台的侧栏，单独在 kb-pages.test.ts 里测
+  it.each(pages.filter(([path]) => path !== '/knowledge'))('renders the %s page and navigation', async (path, label) => {
     await open(path)
     expect(screen.getByRole('heading', { level: 1, name: label })).toBeVisible()
     const nav = screen.getByRole('navigation', { name: '主导航' })

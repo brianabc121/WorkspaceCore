@@ -11,7 +11,7 @@ describe('本地资源写入恢复', () => {
       if (path(r) === '/api/v1/knowledge/sources') return Response.json({ ...emptyPage, items: [source] })
       if (path(r) === '/api/v1/knowledge/resources') return denied ? fail(readStatus, 'FORBIDDEN') : Response.json({ ...emptyPage, items: [bookmark] })
     })
-    await openApp('/knowledge'); await screen.findByText(bookmark.title)
+    await openApp('/knowledge/docs'); await screen.findByText(bookmark.title)
     await fireEvent.click(screen.getByRole('button', { name: `编辑收藏 ${bookmark.title}` }))
     await fireEvent.update(screen.getByLabelText('收藏标题'), '失去权限后的修改')
     await fireEvent.click(screen.getByRole('button', { name: '保存收藏' }))
@@ -98,7 +98,7 @@ describe('本地资源写入恢复', () => {
       if (r.method === 'POST') { configured = true; return Response.json(source, { status: 201 }) }
       return Response.json({ ...emptyPage, items: configured ? [source] : [] })
     })
-    await openApp('/knowledge'); await screen.findByText(/尚未配置知识来源/)
+    await openApp('/knowledge/docs'); await screen.findByText(/尚未配置知识来源/)
     await fireEvent.click(screen.getByRole('button', { name: '管理知识来源' }))
     await fireEvent.update(screen.getByLabelText('AFFiNE 外部地址'), 'https://docs.example.com')
     await fireEvent.click(screen.getByRole('button', { name: '保存知识来源' }))

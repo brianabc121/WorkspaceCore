@@ -32,7 +32,7 @@ describe('global create menu', () => {
   it('lists what each role can create', async () => {
     setup('owner')
     await openApp('/')
-    expect(items(await openMenu())).toEqual(['新建任务任务', '新建项目项目', '新建日程日历', '收藏文档AFFiNE 链接', '新建群聊与 OpenClaw 实例', '添加成员工作空间', '登记 OpenClaw 实例接入包'])
+    expect(items(await openMenu())).toEqual(['新建任务任务', '新建项目项目', '新建日程日历', '新建笔记知识库', '收藏文档AFFiNE 链接', '新建群聊与 OpenClaw 实例', '添加成员工作空间', '登记 OpenClaw 实例接入包'])
   })
 
   it('leaves out admin-only and owner-only entries for other roles', async () => {
@@ -42,7 +42,7 @@ describe('global create menu', () => {
     first.unmount()
     setup('member')
     await openApp('/')
-    expect(items(await openMenu())).toEqual(['新建任务任务', '新建项目项目', '新建日程日历', '收藏文档AFFiNE 链接'])
+    expect(items(await openMenu())).toEqual(['新建任务任务', '新建项目项目', '新建日程日历', '新建笔记知识库', '收藏文档AFFiNE 链接'])
   })
 
   it('is hidden for viewers, who cannot create anything', async () => {
@@ -91,8 +91,9 @@ describe('global create menu', () => {
 
   it('only removes the parameter when the page cannot create right now', async () => {
     setup('member')
+    // 旧的地址 /knowledge?create=1 转到“外部文档”（T-0099）
     const { router } = await openApp('/knowledge?create=1')
-    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/knowledge'))
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/knowledge/docs'))
     expect(await screen.findByText('尚未配置知识来源，请管理员配置 AFFiNE 外部地址。')).toBeVisible()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })

@@ -11,7 +11,8 @@ export function createGroups(role: Schema['WorkspaceOut']['role'] | undefined): 
     { label: '新建任务', path: '/tasks', hint: '任务' },
     { label: '新建项目', path: '/projects', hint: '项目' },
     { label: '新建日程', path: '/calendar', hint: '日历' },
-    { label: '收藏文档', path: '/knowledge', hint: 'AFFiNE 链接' },
+    { label: '新建笔记', path: '/knowledge/notes/new', hint: '知识库' },
+    { label: '收藏文档', path: '/knowledge/docs', hint: 'AFFiNE 链接' },
   ] }]
   if (role === 'owner' || role === 'admin') {
     groups.push({ label: '管理', items: [

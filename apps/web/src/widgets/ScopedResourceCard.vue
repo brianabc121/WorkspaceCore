@@ -43,7 +43,7 @@ function retry() { if (['ok', 'stale'].includes(module.value?.status ?? '')) voi
     <p v-if="query.error.value" role="alert" class="card-state">{{ errorMessage(query.error.value) }}</p>
     <template v-if="docs"><ul v-if="documents.length" class="quick-links"><li v-for="item in documents" :key="item.id"><span>{{ item.title }}</span><small>{{ formatTime(item.updated_at) }}</small><ExternalLink :href="item.url" label="在 AFFiNE 中打开" /></li></ul><p v-else-if="!query.error.value" class="card-state">{{ state === 'stale' ? '暂无可用的缓存文档' : '暂无收藏文档' }}</p></template>
     <template v-else><ul v-if="events.length" class="task-list"><li v-for="item in events" :key="item.id"><span>{{ item.title }}</span><small>{{ eventTime(item) }}</small></li></ul><p v-else-if="!query.error.value" class="card-state">{{ state === 'stale' ? '暂无可用的缓存日程' : '近期暂无日程' }}</p></template>
-    <RouterLink :to="docs ? '/knowledge' : '/calendar'">{{ docs ? '查看知识库' : '查看日历' }}</RouterLink>
+    <RouterLink :to="docs ? '/knowledge/docs' : '/calendar'">{{ docs ? '查看外部文档' : '查看日历' }}</RouterLink>
   </template>
   <button v-if="state !== 'unauthorized' && state !== 'loading' && (query.error.value || module?.retryable || failed)" class="secondary-button" :disabled="query.isFetching.value || loading" @click="retry">{{ query.error.value ? '重试组件数据' : '刷新组件数据' }}</button>
 </template>
