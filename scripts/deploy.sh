@@ -874,13 +874,18 @@ agent_tls_dir() {
 }
 
 # 把 issue-server 的 JSON（标准输入）写成证书与私钥（私钥 600）；私钥只经过本机管道。
-# agent-gateway 以 root 运行但去掉了全部 capability，只能读属主是 root 的 600 文件：不是 root 运行时改属主
+# agent-gateway 以 root 运行但去掉了全部 capability，只能读属主是 root 的 600 文件、进入其他用户可进入的目录：
+# 新建的目录是 755，不是 root 运行时改文件属主
 write_server_cert() {
   "$PY" -c '
 import json, os, sys
 data = json.load(sys.stdin)
 cert, key = sys.argv[1:3]
-os.makedirs(os.path.dirname(cert), mode=0o700, exist_ok=True)
+folder = os.path.dirname(cert)
+if not os.path.isdir(folder):
+    # 容器里的 root 没有 DAC 能力，要能进入目录（755）；私钥本身是 600
+    os.makedirs(folder, exist_ok=True)
+    os.chmod(folder, 0o755)
 for path, body, mode in ((key, data["key"], 0o600), (cert, data["cert"], 0o644)):
     tmp = path + ".tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)

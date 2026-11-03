@@ -151,7 +151,12 @@ outbound_ip() { echo 10.0.0.9; }
 
 
 def _ingress(
-    tmp_path: Path, env: str, *, check: str = "renew", answers: dict[str, str] | None = None
+    tmp_path: Path,
+    env: str,
+    *,
+    check: str = "renew",
+    answers: dict[str, str] | None = None,
+    umask: str = "022",
 ) -> tuple[str, str, dict[str, str]]:
     """在临时目录里运行 connect_agent_ingress；返回 (输出, docker/make 调用, .env)。"""
     import os
@@ -173,7 +178,9 @@ def _ingress(
         [
             "/bin/bash",
             "-c",
-            functions + OVERRIDES + '\nPY=python3\nROOT="$1"\nconnect_agent_ingress',
+            functions
+            + OVERRIDES
+            + f'\numask {umask}\nPY=python3\nROOT="$1"\nconnect_agent_ingress',
             "deploy",
             str(root),
         ],
@@ -269,3 +276,16 @@ def test_ingress_refuses_an_invalid_address(tmp_path: Path) -> None:
     )
     assert "不是 IP 地址" in out and "agent_ca" not in calls
     assert env == {"AGENT_PUBLIC_URL": ""}
+
+
+def test_ingress_creates_a_custom_tls_dir_the_gateway_can_enter(tmp_path: Path) -> None:
+    # agent-gateway 去掉了全部 capability：新建的证书目录不能是 700（umask 077 时也一样）
+    custom = tmp_path / "custom-tls"
+    _ingress(
+        tmp_path,
+        f"SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\nAGENT_TLS_DIR={custom}\n",
+        umask="077",
+    )
+    assert custom.stat().st_mode & 0o777 == 0o755
+    assert (custom / "public.key").stat().st_mode & 0o777 == 0o600
+    assert (custom / "public.crt").read_text() == "CERT ws.example.com"

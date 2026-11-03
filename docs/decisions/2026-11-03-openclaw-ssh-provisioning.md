@@ -48,7 +48,7 @@
 1. 询问是否让其他服务器上的 OpenClaw 连回来（无人值守时跳过）；
 2. 确定主机名（见 3.2）；没有域名时询问 OpenClaw 服务器访问这台服务器用的地址（默认取本机出站地址，可以改）；
 3. 在 api 容器里调用 `python -m app.commands.agent_ca issue-server`，把证书与私钥写进 `AGENT_TLS_DIR`
-   （私钥 600、属主 root：agent-gateway 以 root 运行但去掉了全部 capability，只能读属主是自己的 600 文件；
+   （私钥 600、属主 root；目录不存在时新建为 755：agent-gateway 以 root 运行但去掉了全部 capability，只能读属主是自己的 600 文件、进入别人可进入的目录；
    私钥只经过本机管道，不进日志、不存数据库）；没有 `intranet.crt` / `intranet.key` 时同时签一张内网入口的占位证书
    （主机名 `AGENT_INTRANET_HOST`，默认 `intranet.invalid`；内网入口默认只监听 127.0.0.1），否则同一个 Caddy 起不来；
 4. 写 `.env`：`AGENT_PUBLIC_HOST`、`AGENT_PUBLIC_BIND=0.0.0.0`、`AGENT_PUBLIC_PORT=9443`、`AGENT_PUBLIC_URL`、
