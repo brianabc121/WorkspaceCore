@@ -93,6 +93,31 @@ describe('ssh automatic deployment', () => {
     expect(document.body.innerHTML).not.toContain('hunter2-secret')
   })
 
+  it('never carries a password typed for one server over to another', async () => {
+    const a = target({ host_key_confirmed: true, host_key_confirmed_at: at, version: 2 })
+    let current = state(a)
+    const requests = setup(r => {
+      if (path(r) === base && r.method === 'GET') return Response.json(current)
+      if (path(r) === base && r.method === 'PUT') { current = state(target({ host: 'b.example.com', address: '198.51.100.7', host_key_fingerprint: 'SHA256:server-b', version: 3 })); return Response.json(current) }
+      if (path(r) === `${base}/confirm`) { current = state(target({ host: 'b.example.com', address: '198.51.100.7', host_key_fingerprint: 'SHA256:server-b', host_key_confirmed: true, host_key_confirmed_at: at, version: 4 })); return Response.json(current) }
+    })
+    const ssh = await panel()
+    let deploy = await within(ssh).findByRole('form', { name: '部署' })
+    await fireEvent.update(within(deploy).getByLabelText('登录密码 *'), 'password-for-a')
+    await fireEvent.click(within(deploy).getByRole('button', { name: '更换服务器' }))
+    const form = within(ssh).getByRole('form', { name: '目标服务器' })
+    await fireEvent.update(within(form).getByLabelText('服务器 IP 或域名 *'), 'b.example.com')
+    await fireEvent.click(within(form).getByRole('button', { name: '读取主机公钥' }))
+    const check = await within(ssh).findByRole('group', { name: '核对主机公钥' })
+    await fireEvent.click(within(check).getByLabelText(/我已在服务器上核对/))
+    await fireEvent.click(within(check).getByRole('button', { name: '确认指纹' }))
+    deploy = await within(ssh).findByRole('form', { name: '部署' })
+    expect((within(deploy).getByLabelText('登录密码 *') as HTMLInputElement).value).toBe('')
+    expect(within(deploy).getByRole('button', { name: '开始部署' })).toBeDisabled()
+    const bodies = await Promise.all(requests.filter(r => r.method !== 'GET').map(r => r.clone().text()))
+    expect(bodies.some(b => b.includes('password-for-a'))).toBe(false)
+  })
+
   it('polls a running job until it fails and shows the reason and the redacted log', async () => {
     let calls = 0
     const confirmed = target({ host_key_confirmed: true, host_key_confirmed_at: at, client_key_installed: true, version: 3 })

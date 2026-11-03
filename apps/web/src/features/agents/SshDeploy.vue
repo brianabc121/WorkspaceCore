@@ -34,9 +34,18 @@ watch(() => job.value?.status, (now, before) => {
   void cache.invalidateQueries({ queryKey: ['agents', user, scope, 'instances'] })
 })
 
+// A password typed for one server must never be sent to another: clear it whenever the target's identity changes
+// (another address, port, account or host key — including a removed target) and when the server is being edited.
+const identity = computed(() => {
+  const t = target.value
+  return t ? [t.address, t.port, t.username, t.host_key_fingerprint].join('\n') : ''
+})
+watch(identity, () => { password.value = '' })
+
 function edit() {
   const t = target.value
   Object.assign(form, t ? { host: t.host, port: t.port, username: t.username } : { host: '', port: 22, username: '' })
+  password.value = ''
   editing.value = true
 }
 async function probe() {
@@ -91,6 +100,7 @@ async function revoke(force = false) {
 async function remove() {
   const t = target.value
   if (!t || !window.confirm(`删除目标服务器 ${t.host}？之后可以重新填写。`)) return
+  password.value = ''
   await act(async () => {
     await auth.api.DELETE('/api/v1/agents/instances/{instance_id}/ssh', { params: { header, path: path.value, query: { version: t.version } } })
     put({ target: null, job: null, warning: null })
