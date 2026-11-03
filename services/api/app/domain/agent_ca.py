@@ -9,9 +9,15 @@
 
 Caddy 的外网入口要信任这张 CA 证书：`python -m app.commands.agent_ca export <路径>`
 把证书（不含私钥）写出来。
+
+外网入口的服务器证书也可以由这套 CA 签发（T-0088）：`deploy.sh connect` 调用
+`python -m app.commands.agent_ca issue-server --host <入口主机名>`，接入包附带 CA 证书，
+本机隧道用它校验入口（`AGENT_PUBLIC_INTERNAL_CA=true`）。
 """
 
 import hashlib
+import ipaddress
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -28,8 +34,14 @@ from app.models import AgentCa, AgentInstance
 
 CA_VALIDITY = timedelta(days=5 * 365)
 CLIENT_VALIDITY = timedelta(days=90)
+# 入口的服务器证书：2 年；deploy.sh connect 在剩不到 60 天时重签（T-0088）
+SERVER_VALIDITY = timedelta(days=730)
+SERVER_RENEW_BEFORE = timedelta(days=60)
 # 时钟偏差：证书从一小时前开始生效
 BACKDATE = timedelta(hours=1)
+# 入口主机名：小写的 DNS 名字（每段 1 ~ 63 个字母、数字或连字符），或者 IP 地址
+_LABEL = r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
+_HOSTNAME = re.compile(rf"^(?=.{{1,253}}$){_LABEL}(\.{_LABEL})*$")
 
 
 def agent_ca_context(ca_id: uuid.UUID) -> str:
@@ -122,13 +134,7 @@ def issue_client_certificate(
     ca: AgentCa, box: CredentialBox, instance: AgentInstance, *, now: datetime | None = None
 ) -> ClientCertificate:
     now = now or datetime.now(UTC)
-    ca_cert = x509.load_pem_x509_certificate(ca.cert_pem.encode())
-    ca_key = serialization.load_pem_private_key(
-        box.resolve(ca.key_ref, context=agent_ca_context(ca.id)).get_secret_value().encode(),
-        password=None,
-    )
-    if not isinstance(ca_key, ec.EllipticCurvePrivateKey):
-        raise ValueError("内部 CA 的私钥类型不对")
+    ca_cert, ca_key = _ca_signer(ca, box)
     key = ec.generate_private_key(ec.SECP256R1())
     not_after = min(now + CLIENT_VALIDITY, ca.not_after)
     cert = (
@@ -181,3 +187,111 @@ def issue_client_certificate(
         fingerprint=fingerprint_of(cert),
         not_after=not_after,
     )
+
+
+@dataclass(frozen=True)
+class ServerCertificate:
+    cert_pem: str
+    key_pem: str
+    ca_pem: str
+    not_after: datetime
+
+
+def _san_for(host: str) -> x509.GeneralName:
+    """证书的 SAN：IP 地址或 DNS 名字；都不是时 ValueError。"""
+    host = host.strip().lower()
+    try:
+        return x509.IPAddress(ipaddress.ip_address(host))
+    except ValueError:
+        if not _HOSTNAME.match(host):
+            raise ValueError(f"入口主机名无效：{host!r}") from None
+        return x509.DNSName(host)
+
+
+def _ca_signer(
+    ca: AgentCa, box: CredentialBox
+) -> tuple[x509.Certificate, ec.EllipticCurvePrivateKey]:
+    ca_cert = x509.load_pem_x509_certificate(ca.cert_pem.encode())
+    ca_key = serialization.load_pem_private_key(
+        box.resolve(ca.key_ref, context=agent_ca_context(ca.id)).get_secret_value().encode(),
+        password=None,
+    )
+    if not isinstance(ca_key, ec.EllipticCurvePrivateKey):
+        raise ValueError("内部 CA 的私钥类型不对")
+    return ca_cert, ca_key
+
+
+def issue_server_certificate(
+    ca: AgentCa, box: CredentialBox, host: str, *, now: datetime | None = None
+) -> ServerCertificate:
+    """外网接入入口的服务器证书（T-0088）：EC P-256、serverAuth，SAN 是入口主机名（或 IP）。"""
+    san = _san_for(host)
+    host = host.strip().lower()
+    now = now or datetime.now(UTC)
+    ca_cert, ca_key = _ca_signer(ca, box)
+    key = ec.generate_private_key(ec.SECP256R1())
+    not_after = min(now + SERVER_VALIDITY, ca.not_after)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(
+            x509.Name(
+                [
+                    x509.NameAttribute(NameOID.ORGANIZATION_NAME, "My Workspace"),
+                    x509.NameAttribute(NameOID.COMMON_NAME, host[:64]),
+                ]
+            )
+        )
+        .issuer_name(ca_cert.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - BACKDATE)
+        .not_valid_after(not_after)
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=True,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+        .add_extension(x509.SubjectAlternativeName([san]), critical=False)
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()),  # type: ignore[arg-type]
+            critical=False,
+        )
+        .sign(ca_key, hashes.SHA256())
+    )
+    return ServerCertificate(
+        cert_pem=cert.public_bytes(serialization.Encoding.PEM).decode(),
+        key_pem=_key_pem(key),
+        ca_pem=ca.cert_pem,
+        not_after=not_after,
+    )
+
+
+def server_certificate_status(
+    ca: AgentCa, cert_pem: str, host: str, *, now: datetime | None = None
+) -> str:
+    """已有的入口证书还能不能用：ok / renew（快到期、主机名不对、不是这套 CA 签发的或无法解析）。"""
+    now = now or datetime.now(UTC)
+    try:
+        cert = x509.load_pem_x509_certificate(cert_pem.encode())
+        ca_cert = x509.load_pem_x509_certificate(ca.cert_pem.encode())
+        cert.verify_directly_issued_by(ca_cert)
+        sans = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        wanted = _san_for(host)
+    except Exception:  # 任何解析或校验失败都重签
+        return "renew"
+    if wanted not in list(sans):
+        return "renew"
+    if cert.not_valid_after_utc - now < SERVER_RENEW_BEFORE:
+        return "renew"
+    return "ok"

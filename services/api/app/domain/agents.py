@@ -594,7 +594,8 @@ class AgentService:
         if instance.status == "disabled":
             raise ApiError(409, "AGENT_DISABLED", "实例已停用，启用后才能生成接入包")
         public = instance.network_mode == "public"
-        configured = self.settings.agent_public_url if public else self.settings.agent_intranet_url
+        settings = self.settings
+        configured = settings.agent_public_url if public else settings.agent_intranet_url
         if not configured:
             raise ApiError(
                 409,
@@ -647,6 +648,10 @@ class AgentService:
                 tunnel_port=self.settings.agent_tunnel_port,
                 image_proxy_host=image_proxy_host,
                 image_proxy_target=image_proxy_target,
+                # 外网入口用内部 CA 签发的证书时附带 CA；
+                # 没有公网 DNS 的入口主机名映射到工作台地址（T-0088）
+                server_ca_pem=cert.ca_pem if cert and settings.agent_public_internal_ca else None,
+                tunnel_address=(settings.agent_public_address or None) if tunnel_target else None,
             ),
             now=now,
         )

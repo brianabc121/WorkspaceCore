@@ -855,6 +855,138 @@ connect_openim() {
   return 0
 }
 
+# ---------------------------------------------------------------- OpenClaw 接入入口（T-0088）
+# 让其他服务器上的 OpenClaw 连回工作台：外网入口（9443，双向证书）的服务器证书由工作台内部 CA 签发，
+# 不用购买证书、不用 80 端口验证；接入包附带 CA，OpenClaw 那边不用另外配置（ADR 2026-11-03-openclaw-ssh-provisioning）。
+# 主机名默认用 SITE_DOMAIN（已经指向这台服务器）；没有公网域名时用固定的内部名字，接入包把它映射到这台服务器的 IP。
+AGENT_INTERNAL_HOST=agent-gateway.myworkspace.internal
+
+valid_ip() { "$PY" -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' "$1" 2>/dev/null; }
+outbound_ip() {
+  local addr=""
+  command -v ip >/dev/null && addr="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
+  [[ -n $addr ]] || addr="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  printf '%s\n' "$addr"
+}
+agent_tls_dir() {
+  local dir; dir="$(env_get AGENT_TLS_DIR)"; dir="${dir:-./infra/caddy/agent-tls}"
+  [[ $dir == /* ]] && printf '%s\n' "$dir" || printf '%s\n' "$ROOT/${dir#./}"
+}
+
+# 把 issue-server 的 JSON（标准输入）写成证书与私钥（私钥 600）；私钥只经过本机管道。
+# agent-gateway 以 root 运行但去掉了全部 capability，只能读属主是 root 的 600 文件：不是 root 运行时改属主
+write_server_cert() {
+  "$PY" -c '
+import json, os, sys
+data = json.load(sys.stdin)
+cert, key = sys.argv[1:3]
+os.makedirs(os.path.dirname(cert), mode=0o700, exist_ok=True)
+for path, body, mode in ((key, data["key"], 0o600), (cert, data["cert"], 0o644)):
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(body)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+print(data["not_after"][:10])
+' "$1" "$2" || return 1
+  (( EUID == 0 )) || as_root chown 0:0 "$1" "$2"
+}
+
+# 用内部 CA 签发一张入口证书，写到 <目录>/<名字>.crt / .key；输出到期日
+issue_agent_cert() {
+  compose exec -T api python -m app.commands.agent_ca issue-server --host "$1" </dev/null | write_server_cert "$2.crt" "$2.key"
+}
+
+# 用内部 CA 校验入口出示的服务器证书（外网入口要求客户端证书，TLS 1.3 下客户端这边的握手仍会完成）
+check_agent_ingress() {
+  "$PY" -c '
+import socket, ssl, sys
+host, port, ca = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+ctx = ssl.create_default_context(cafile=ca)
+with socket.create_connection(("127.0.0.1", port), timeout=5) as raw, ctx.wrap_socket(raw, server_hostname=host):
+    pass
+' "$1" "$2" "$3" 2>/dev/null
+}
+
+connect_agent_ingress() {
+  local url host site address port dir cert key status expiry ca changed=0
+  step "OpenClaw 接入入口（让其他服务器上的 OpenClaw 连回工作台，可选）"
+  url="$(env_get AGENT_PUBLIC_URL)"
+  if [[ -n $url && $(env_get AGENT_PUBLIC_INTERNAL_CA) != true ]]; then
+    ok "已经手动配置了外网入口（$url），保持不变"; return 0
+  fi
+  if [[ -z $url ]]; then
+    confirm "配置接入入口？（内部 CA 自动签发证书、开放 TCP 9443；之后可以在网页上通过 SSH 自动部署 OpenClaw）" n \
+      || { info "跳过；以后运行 deploy.sh connect"; return 0; }
+  fi
+  site="$(env_get SITE_DOMAIN)"
+  host="$(env_get AGENT_PUBLIC_HOST)"
+  [[ -n $host && $host != public.invalid ]] || host="$site"
+  host="$(ask "OpenClaw 服务器访问工作台用的域名（没有公网域名时输入 -，改用 IP）" "${host:--}")"
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  address=""
+  if [[ $host == - || $host == "$AGENT_INTERNAL_HOST" ]]; then
+    host="$AGENT_INTERNAL_HOST"
+    address="$(env_get AGENT_PUBLIC_ADDRESS)"; address="${address:-$(outbound_ip)}"
+    info "云服务器上本机看到的常是内网地址：这里要填 OpenClaw 服务器能访问到的地址（通常是公网 IP）"
+    address="$(ask "OpenClaw 服务器访问这台服务器用的 IP" "$address")"
+    valid_ip "$address" || { warn "「$address」不是 IP 地址，跳过"; return 0; }
+  elif ! valid_domain "$host"; then
+    warn "「$host」不是有效的域名，跳过"; return 0
+  fi
+  port="$(env_get AGENT_PUBLIC_PORT)"; [[ $port =~ ^[0-9]+$ ]] || port=9443
+  dir="$(agent_tls_dir)"; cert="$dir/public.crt"; key="$dir/public.key"
+  status=renew
+  if [[ -s $cert && -s $key ]]; then
+    status="$(compose exec -T api python -m app.commands.agent_ca check-server --host "$host" <"$cert" 2>/dev/null | tail -1 || true)"
+  fi
+  if [[ $status == ok ]]; then
+    ok "入口证书仍然有效（$host）"
+  else
+    expiry="$(issue_agent_cert "$host" "$dir/public")" || { warn "入口证书签发失败（见上面的输出），跳过"; return 0; }
+    ok "已用内部 CA 签发入口证书：$host，有效期到 $expiry"; changed=1
+  fi
+  # 内网入口与外网入口在同一个 Caddy 里，没有内网证书时 Caddy 起不来：签一张占位证书（内网入口默认只监听 127.0.0.1）
+  if [[ ! -s $dir/intranet.crt || ! -s $dir/intranet.key ]]; then
+    local intranet; intranet="$(env_get AGENT_INTRANET_HOST)"
+    issue_agent_cert "${intranet:-intranet.invalid}" "$dir/intranet" >/dev/null \
+      || { warn "内网入口的占位证书签发失败（见上面的输出），跳过"; return 0; }
+    changed=1
+  fi
+  local key_name want
+  for key_name in AGENT_PUBLIC_HOST AGENT_PUBLIC_BIND AGENT_PUBLIC_PORT AGENT_PUBLIC_URL AGENT_PUBLIC_ADDRESS AGENT_PUBLIC_INTERNAL_CA; do
+    case $key_name in
+      AGENT_PUBLIC_HOST) want="$host" ;;
+      AGENT_PUBLIC_BIND) want=0.0.0.0 ;;
+      AGENT_PUBLIC_PORT) want="$port" ;;
+      AGENT_PUBLIC_URL) want="https://$host:$port" ;;
+      AGENT_PUBLIC_ADDRESS) want="$address" ;;
+      AGENT_PUBLIC_INTERNAL_CA) want=true ;;
+    esac
+    [[ $(env_get "$key_name") == "$want" ]] || { env_set "$key_name" "$want"; changed=1; }
+  done
+  if (( changed )); then
+    compose up -d api worker </dev/null >/dev/null || { warn "api、worker 没有重启成功（见上面的输出）"; return 0; }
+  fi
+  (cd "$ROOT" && make -s agents-up </dev/null >/dev/null) || { warn "接入入口没有启动成功：运行 docker compose --profile agents logs agent-gateway 查看"; return 0; }
+  (( changed )) && compose --profile agents restart agent-gateway </dev/null >/dev/null 2>&1
+  ca="$ROOT/infra/caddy/agent-ca/agent-ca.pem"
+  local i
+  for i in 1 2 3 4 5; do
+    if check_agent_ingress "$host" "$port" "$ca"; then ok "接入入口已就绪：https://$host:$port（内部 CA 签发的证书）"; break; fi
+    (( i == 5 )) && warn "入口还没有响应：运行 docker compose --profile agents logs agent-gateway 查看"
+    sleep 2
+  done
+  if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    if ! ufw status 2>/dev/null | grep -qE "^$port(/tcp)?[[:space:]]+ALLOW"; then
+      confirm "防火墙（ufw）还没有放行 TCP $port，现在放行？" y && as_root ufw allow "$port/tcp" >/dev/null && ok "已放行 TCP $port"
+    fi
+  fi
+  info "云服务器的安全组 / 防火墙也要放行 TCP $port（OpenClaw 服务器只需要能访问这个端口）"
+  return 0
+}
+
 # 升级：已经部署了 OpenIM 时，按新版本锁定的镜像重新构建（标签没变就跳过）并重建容器
 upgrade_openim() {
   openim_running || return 0
@@ -901,7 +1033,7 @@ retire_vikunja() {
 }
 
 connect_components() {
-  step "接入组件：GitHub（只读）、n8n（自动化）、OpenIM（消息）；项目与任务由工作台自己管理"
+  step "接入组件：GitHub（只读）、n8n（自动化）、OpenIM（消息）、OpenClaw 接入入口；项目与任务由工作台自己管理"
   compose ps --status running --services </dev/null 2>/dev/null | grep -qx api || { warn "api 没有运行，先部署（install）"; return 0; }
   wait_for_setup || return 0
   local status
@@ -910,11 +1042,13 @@ connect_components() {
   connect_github "$(status_of github "$status")"
   connect_n8n "$(status_of n8n "$status")" "$(status_of n8n_login "$status")"
   connect_openim "$(status_of openim "$status")"
+  connect_agent_ingress
   status="$(connect_status)"
   expose_apps "$status"
   step "接入状态"
   info "GitHub：$(status_label "$(status_of github "$status")")　n8n：$(status_label "$(status_of n8n "$status")")"
   info "OpenIM：$(openim_label "$(status_of openim "$status")")"
+  info "OpenClaw 接入入口：$(public_url_of AGENT_PUBLIC_URL 未配置)"
   info "n8n 打开地址：$(public_url_of N8N_PUBLIC_URL http://localhost:5678)"
   info "以后要接入或重试：bash $ROOT/scripts/deploy.sh connect"
 }

@@ -117,3 +117,155 @@ def test_upgrade_without_old_vikunja_does_nothing(tmp_path: Path) -> None:
     assert out == ""
     assert calls.strip() == f"ps -aq --filter {PROJECT_LABEL}"
     assert "VIKUNJA_DOMAIN=vikunja.example.com" in (tmp_path / "root/.env").read_text()
+
+
+# ---------------------------------------------------------------- OpenClaw 接入入口（T-0088）
+
+FAKE_COMPOSE_DOCKER = """#!/usr/bin/env bash
+# 假的 docker：记下调用；agent_ca 子命令返回预先放好的结果（假证书，不是真的 PEM）
+echo "$*" >> "$LOG"
+case "$*" in
+  *"agent_ca check-server --host "*) cat >/dev/null; cat "$STATE/check" ;;
+  *"agent_ca issue-server --host "*)
+    args="$*"; host="${args##* }"
+    printf '{"cert": "CERT %s", "key": "KEY %s", "ca": "CA", ' "$host" "$host"
+    printf '"not_after": "2028-11-02T00:00:00+00:00"}' ;;
+esac
+exit 0
+"""
+FAKE_MAKE = '#!/usr/bin/env bash\necho "make $*" >> "$LOG"\n'
+# 测试里替换掉交互、握手检查与 root 操作
+OVERRIDES = r"""
+confirm() { echo "confirm $1" >> "$LOG"; return 0; }
+ask() {
+  case $1 in
+    *域名*) printf '%s\n' "${ANSWER_HOST:-$2}" ;;
+    *IP*) printf '%s\n' "${ANSWER_IP:-$2}" ;;
+    *) printf '%s\n' "$2" ;;
+  esac
+}
+check_agent_ingress() { echo "handshake $*" >> "$LOG"; }
+as_root() { echo "as_root $*" >> "$LOG"; }
+outbound_ip() { echo 10.0.0.9; }
+"""
+
+
+def _ingress(
+    tmp_path: Path, env: str, *, check: str = "renew", answers: dict[str, str] | None = None
+) -> tuple[str, str, dict[str, str]]:
+    """在临时目录里运行 connect_agent_ingress；返回 (输出, docker/make 调用, .env)。"""
+    import os
+    import subprocess
+
+    root, state, bin_dir = tmp_path / "root", tmp_path / "state", tmp_path / "bin"
+    for path in (root, state, bin_dir):
+        path.mkdir(parents=True, exist_ok=True)
+    if not (root / ".env").exists():
+        (root / ".env").write_text(env, encoding="utf-8")
+    (state / "check").write_text(check + "\n", encoding="utf-8")
+    for name, body in (("docker", FAKE_COMPOSE_DOCKER), ("make", FAKE_MAKE)):
+        (bin_dir / name).write_text(body, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    log = tmp_path / "calls.log"
+    log.unlink(missing_ok=True)
+    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]
+    result = subprocess.run(  # noqa: S603 - 运行仓库里的脚本
+        [
+            "/bin/bash",
+            "-c",
+            functions + OVERRIDES + '\nPY=python3\nROOT="$1"\nconnect_agent_ingress',
+            "deploy",
+            str(root),
+        ],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "LOG": str(log),
+            "STATE": str(state),
+            **(answers or {}),
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    calls = log.read_text(encoding="utf-8") if log.exists() else ""
+    values = dict(
+        line.split("=", 1)
+        for line in (root / ".env").read_text(encoding="utf-8").splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+    return result.stderr, calls, values
+
+
+def test_ingress_without_a_domain_uses_the_internal_name_and_an_ip(tmp_path: Path) -> None:
+    out, calls, env = _ingress(
+        tmp_path,
+        "SITE_DOMAIN=\nAGENT_PUBLIC_URL=\n",
+        answers={"ANSWER_HOST": "-", "ANSWER_IP": "203.0.113.7"},
+    )
+    host = "agent-gateway.myworkspace.internal"
+    assert {key: env.get(key) for key in env if key.startswith("AGENT_")} == {
+        "AGENT_PUBLIC_URL": f"https://{host}:9443",
+        "AGENT_PUBLIC_HOST": host,
+        "AGENT_PUBLIC_BIND": "0.0.0.0",  # noqa: S104 - 外网入口要对公网开放
+        "AGENT_PUBLIC_PORT": "9443",
+        "AGENT_PUBLIC_ADDRESS": "203.0.113.7",
+        "AGENT_PUBLIC_INTERNAL_CA": "true",
+    }
+    tls = tmp_path / "root/infra/caddy/agent-tls"
+    assert (tls / "public.crt").read_text() == f"CERT {host}"
+    assert (tls / "public.key").read_text() == f"KEY {host}"
+    assert (tls / "public.key").stat().st_mode & 0o777 == 0o600
+    assert (tls / "public.crt").stat().st_mode & 0o777 == 0o644
+    # 没有内网证书时 Caddy 起不来：签一张占位证书
+    assert (tls / "intranet.crt").read_text() == "CERT intranet.invalid"
+    assert "check-server" not in calls  # 还没有证书，直接签发
+    assert f"agent_ca issue-server --host {host}" in calls
+    assert "compose up -d api worker" in calls
+    assert "make -s agents-up" in calls
+    assert "compose --profile agents restart agent-gateway" in calls
+    assert f"handshake {host} 9443 {tmp_path}/root/infra/caddy/agent-ca/agent-ca.pem" in calls
+    assert "有效期到 2028-11-02" in out and "KEY" not in out
+
+
+def test_ingress_with_a_domain_and_a_still_valid_certificate(tmp_path: Path) -> None:
+    _, calls, env = _ingress(tmp_path, "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n")
+    assert env["AGENT_PUBLIC_HOST"] == "ws.example.com"
+    assert env["AGENT_PUBLIC_URL"] == "https://ws.example.com:9443"
+    assert env.get("AGENT_PUBLIC_ADDRESS", "") == ""  # 域名在公网 DNS 里，不需要映射
+    assert "issue-server --host ws.example.com" in calls
+
+    # 再运行一次：证书仍然有效、变量没变 → 不重签、不重启
+    out, calls, again = _ingress(tmp_path, "", check="ok")
+    assert again == env
+    assert "check-server --host ws.example.com" in calls
+    assert "issue-server" not in calls and "up -d api worker" not in calls
+    assert "restart agent-gateway" not in calls
+    assert "make -s agents-up" in calls  # 入口没有运行时会启动它
+    assert "入口证书仍然有效" in out
+
+
+def test_ingress_reissues_when_the_address_changes(tmp_path: Path) -> None:
+    answers = {"ANSWER_HOST": "-", "ANSWER_IP": "203.0.113.7"}
+    _ingress(tmp_path, "AGENT_PUBLIC_URL=\n", answers=answers)
+    _, calls, env = _ingress(
+        tmp_path, "", check="ok", answers={**answers, "ANSWER_IP": "198.51.100.2"}
+    )
+    assert env["AGENT_PUBLIC_ADDRESS"] == "198.51.100.2"
+    assert "issue-server" not in calls  # 证书里是主机名，地址变了不用重签
+    assert "compose up -d api worker" in calls  # 接入包里的地址变了，api 要读到新值
+
+
+def test_ingress_keeps_a_manually_configured_public_entry(tmp_path: Path) -> None:
+    out, calls, env = _ingress(tmp_path, "AGENT_PUBLIC_URL=https://agent.example.com:9443\n")
+    assert calls == "" and "保持不变" in out
+    assert env == {"AGENT_PUBLIC_URL": "https://agent.example.com:9443"}
+
+
+def test_ingress_refuses_an_invalid_address(tmp_path: Path) -> None:
+    out, calls, env = _ingress(
+        tmp_path, "AGENT_PUBLIC_URL=\n", answers={"ANSWER_HOST": "-", "ANSWER_IP": "not-an-ip"}
+    )
+    assert "不是 IP 地址" in out and "agent_ca" not in calls
+    assert env == {"AGENT_PUBLIC_URL": ""}

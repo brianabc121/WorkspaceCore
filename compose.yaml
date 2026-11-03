@@ -90,6 +90,10 @@ services:
       # 接入包里写给 OpenClaw 的内网 / 外网入口地址；没有配置的入口不能生成接入包
       AGENT_INTRANET_URL: ${AGENT_INTRANET_URL:-}
       AGENT_PUBLIC_URL: ${AGENT_PUBLIC_URL:-}
+      # 外网入口证书由工作台内部 CA 签发（deploy.sh connect 自动配置）时为 true；接入包附带 CA（T-0088）
+      AGENT_PUBLIC_INTERNAL_CA: ${AGENT_PUBLIC_INTERNAL_CA:-false}
+      # 外网入口主机名不在公网 DNS 里时，接入包把它映射到这个地址（工作台服务器的公网 IP）
+      AGENT_PUBLIC_ADDRESS: ${AGENT_PUBLIC_ADDRESS:-}
       # OpenIM 回调 /internal/openim/<口令>/<命令>：只接受 im 网络里 openim-server 的固定地址 <IM_NET>.2
       OPENIM_CALLBACK_PATH_TOKEN: ${OPENIM_CALLBACK_PATH_TOKEN:-}
       OPENIM_CALLBACK_ALLOWED_CIDRS: ${OPENIM_CALLBACK_ALLOWED_CIDRS:-${IM_NET:-172.31.252}.2/32}

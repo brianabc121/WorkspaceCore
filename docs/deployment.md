@@ -634,6 +634,16 @@ OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式�
 
 ### 16.1 证书与变量
 
+**外网入口可以一键配置**（T-0088）：`sudo bash scripts/deploy.sh connect` 的“OpenClaw 接入入口”一步用工作台内部 CA
+签发入口证书（EC P-256，2 年，`serverAuth`，SAN 是入口主机名），写进 `AGENT_TLS_DIR` 的 `public.crt` / `public.key`
+（私钥 600、属主 root；没有 `intranet.crt` 时同时签一张内网入口的占位证书，否则 Caddy 起不来），
+设置下表的外网变量与 `AGENT_PUBLIC_INTERNAL_CA=true`，重启 api、worker，`make agents-up`，再检查握手。
+再次运行时证书还有 60 天以上且主机名没变就不重签；已经手动配置了外网入口（`AGENT_PUBLIC_URL` 有值且没有用内部 CA）的保持不变。
+主机名默认是 `SITE_DOMAIN`；没有域名时用 `agent-gateway.myworkspace.internal`，接入包在隧道容器里把它映射到 `AGENT_PUBLIC_ADDRESS`。
+设计见 `docs/decisions/2026-11-03-openclaw-ssh-provisioning.md` 第 3 节。
+
+手动配置：
+
 1. 准备接入入口的服务器证书，放进 `AGENT_TLS_DIR`（默认 `infra/caddy/agent-tls/`，目录已忽略，不提交）：
    - `intranet.crt` / `intranet.key`：内网入口，内部 CA 或 Tailscale 证书都可以；
    - `public.crt` / `public.key`：外网入口，公网证书（例如 certbot 申请的证书）。
@@ -646,6 +656,8 @@ OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式�
    | `AGENT_PUBLIC_BIND` / `AGENT_PUBLIC_PORT` | `0.0.0.0` / `9443` | 外网入口发布的地址与端口（默认 `127.0.0.1:9443`） |
    | `AGENT_INTRANET_ALLOWED_CIDRS` | `100.64.0.0/10` | 内网入口只接受的来源（空格分隔） |
    | `AGENT_INTRANET_URL` / `AGENT_PUBLIC_URL` | `https://ws.tailnet.example:8443` / `https://agent.example.com:9443` | 写进接入包的地址；没有配置的入口不能生成该模式的接入包 |
+   | `AGENT_PUBLIC_INTERNAL_CA` | 默认 `false` | 外网入口证书由内部 CA 签发时为 `true`：外网接入包附带 `tls/ca.pem`，隧道加 `--cacert`（一键配置自动设置） |
+   | `AGENT_PUBLIC_ADDRESS` | `203.0.113.7` | 外网入口主机名不在公网 DNS 里时，OpenClaw 服务器访问工作台用的 IP；接入包的隧道容器把主机名映射到它（`extra_hosts`）。必须是 IP |
    | `AGENT_INGRESS_NET` | 默认 `172.31.250` | `agent-ingress` 网络的网段前三段：子网 `<值>.0/29`，agent-gateway 固定在 `<值>.2`。同一台机器上有别的 Docker 网络占用了这个网段时改它；`make restore-verify` 的临时环境自动用 `172.31.251` |
    | `AGENT_INGRESS_TRUSTED_PROXIES` | 默认 `<AGENT_INGRESS_NET>.2` | API 只信任这个地址写入的入口与证书请求头；一般不用改 |
 
@@ -662,7 +674,7 @@ OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式�
    - 外网模式会同时启动 `tunnel` 服务：本机隧道，用接入包里的客户端证书连外网入口；
    - 内网模式、且工作台也配置了外网入口时，会同时启动 `image-proxy` 服务：本机取图代理（不带客户端证书），
      把工作台发来的图片地址（外网域名）转到内网入口（OC-3 ADR 第 15 节）；
-3. 入口用私有 CA 签发的证书时：
+3. 入口用你自己的私有 CA 签发的证书时（一键配置的内部 CA 已经写进接入包，不用改）：
    - 外网模式：在接入包 `compose.yaml` 的 `tunnel` 命令里加 `--cacert=<CA 证书>`；
    - 内网模式：在 `myworkspace.env` 里设置 `NODE_EXTRA_CA_CERTS=<CA 证书>`；有 `image-proxy` 时在它的命令里也加 `--cacert=<CA 证书>`。
 4. 重新生成接入包会签发新凭证，旧凭证默认再保留 24 小时；客户端证书 90 天到期，到期前重新生成。

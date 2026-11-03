@@ -56,6 +56,10 @@ class BundleInput:
     # 内网实例要把这个域名指向本机代理，代理（不带客户端证书）转发到内网入口
     image_proxy_host: str | None = None
     image_proxy_target: str | None = None
+    # 外网入口用工作台内部 CA 签发的证书时（T-0088）：CA 证书写进 tls/ca.pem，隧道用它校验入口；
+    # 入口主机名不在公网 DNS 里时，隧道容器把它映射到这个地址
+    server_ca_pem: str | None = None
+    tunnel_address: str | None = None
 
 
 def _read(name: str) -> str:
@@ -185,22 +189,34 @@ def _compose(data: BundleInput) -> str:
         f'    extra_hosts: ["{host}:127.0.0.1"]\n'
         "    depends_on: [tunnel]\n"
     )
+    trust = (
+        "入口证书由工作台内部 CA 签发：用 tls/ca.pem 校验（接入包自带）"
+        if data.server_ca_pem
+        else "校验服务器证书用系统信任库；外网入口用私有 CA 时，加上 --cacert 指向那张 CA 证书"
+    )
+    hosts = (
+        "    # 入口主机名不在公网 DNS 里：指向工作台服务器\n"
+        f'    extra_hosts: ["{host}:{data.tunnel_address}"]\n'
+        if data.tunnel_address
+        else ""
+    )
+    cacert = "      - --cacert=/tls/ca.pem\n" if data.server_ca_pem else ""
     tunnel = f"""
   # 本机隧道：在 127.0.0.1:{data.tunnel_port} 接收明文，
   # 用 tls/ 里的客户端证书（双向证书）转发到工作台外网入口。
-  # 校验服务器证书用系统信任库；外网入口用私有 CA 时，加上 --cacert 指向那张 CA 证书
+  # {trust}
   tunnel:
     image: {GHOSTUNNEL_IMAGE}
     restart: unless-stopped
     user: "1000:1000"
     network_mode: host
-    command:
+{hosts}    command:
       - client
       - --listen=127.0.0.1:{data.tunnel_port}
       - --target={data.tunnel_target}
       - --cert=/tls/client.crt
       - --key=/tls/client.key
-    volumes:
+{cacert}    volumes:
       - ./tls:/tls:ro
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
@@ -231,6 +247,8 @@ def build(data: BundleInput, *, now: datetime | None = None) -> bytes:
         if data.client_cert_pem and data.client_key_pem:
             _add(zf, "tls/client.crt", data.client_cert_pem, 0o644, now)
             _add(zf, "tls/client.key", data.client_key_pem, 0o600, now)
+        if data.server_ca_pem and data.tunnel_target:
+            _add(zf, "tls/ca.pem", data.server_ca_pem, 0o644, now)
     return buffer.getvalue()
 
 
