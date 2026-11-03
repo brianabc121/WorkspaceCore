@@ -90,6 +90,34 @@ in_multiplexer() {
   return 1
 }
 tmux_cmd() { tmux -L "$TMUX_SOCKET" "$@"; }
+# 接回会话的命令（用 sudo 运行的脚本，tmux 服务属于 root，接回也要 sudo）
+attach_command() {
+  local prefix=""
+  (( EUID == 0 )) && [[ -n ${SUDO_USER:-} ]] && prefix="sudo "
+  printf '%stmux -L %s attach -t %s' "$prefix" "$TMUX_SOCKET" "$TMUX_SESSION"
+}
+
+# 这个终端真正的设备（/dev/pts/N）。curl | bash 时脚本的标准输入换成了 /dev/tty（菜单才能读输入），
+# 而 tmux 拒绝以 /dev/tty 打开的终端（open terminal failed: can't use /dev/tty，T-0093）
+real_tty() {
+  local fd dev
+  for fd in 0 1 2; do
+    dev="$(readlink "/proc/$$/fd/$fd" 2>/dev/null)" || continue
+    [[ $dev == /dev/pts/* || $dev =~ ^/dev/tty(S)?[0-9]+$ ]] && [[ -r $dev && -w $dev ]] && { printf '%s\n' "$dev"; return 0; }
+  done
+  dev="$(ps -o tty= -p $$ 2>/dev/null | tr -d ' ')"
+  [[ -n $dev && $dev != "?" && -r /dev/$dev && -w /dev/$dev ]] && { printf '/dev/%s\n' "$dev"; return 0; }
+  return 1
+}
+
+# 接回 tmux 会话（标准输入用真正的终端设备）；接不上时部署照样在会话里继续，告诉用户怎么接回
+tmux_attach() {
+  local tty
+  if tty="$(real_tty)"; then tmux_cmd attach -t "$TMUX_SESSION" <"$tty" && exit 0
+  else tmux_cmd attach -t "$TMUX_SESSION" && exit 0; fi
+  warn "没能接回 tmux 会话，部署在后台的会话里继续运行。查看进度：$(attach_command)"
+  exit 0
+}
 
 # 安装 tmux（系统的软件源，几百 KB）；装不上时返回 1，脚本照常运行并提醒
 install_tmux() {
@@ -110,8 +138,8 @@ attach_running() {
   use_tmux && command -v tmux >/dev/null || return 0
   tmux_cmd has-session -t "$TMUX_SESSION" 2>/dev/null || return 0
   step "已经有一次部署在运行（或刚结束），接回去"
-  info "离开但不中断：先按 Ctrl+b 再按 d；以后再运行 deploy.sh（或 tmux -L $TMUX_SOCKET attach）接回"
-  exec tmux -L "$TMUX_SOCKET" attach -t "$TMUX_SESSION"
+  info "离开但不中断：先按 Ctrl+b 再按 d；以后再运行 deploy.sh（或 $(attach_command)）接回"
+  tmux_attach
 }
 
 # 部署 / 升级 / 接入：在终端里运行时转到 tmux 会话里
@@ -127,14 +155,14 @@ keep_running() {
   forward_args
   script="$ROOT/scripts/deploy.sh"
   step "在 tmux 会话里运行：SSH 断开后部署会继续"
-  info "断线后重新登录，再运行一次同样的命令（或 tmux -L $TMUX_SOCKET attach）就能接回进度"
+  info "断线后重新登录，再运行一次同样的命令（或 $(attach_command)）就能接回进度"
   info "离开但不中断：先按 Ctrl+b 再按 d；向上翻看输出：先按 Ctrl+b 再按 [（按 q 退出）"
   # 结束后停在最后的输出上（安装凭据等），按回车才关闭会话
   tmux_cmd new-session -d -s "$TMUX_SESSION" -x 200 -y 50 \
     env WORKSPACE_IN_TMUX=1 bash -c 'bash "$0" "$@"; code=$?; printf "\n部署脚本已结束（退出码 %s）。按回车关闭这个会话……" "$code"; read -r _; exit "$code"' \
     "$script" "${args[@]}"
   tmux_cmd set-option -t "$TMUX_SESSION" history-limit 50000 >/dev/null 2>&1 || true
-  exec tmux -L "$TMUX_SOCKET" attach -t "$TMUX_SESSION"
+  tmux_attach
 }
 
 # 把命令行参数原样传给重新启动的脚本（args 由调用方声明）
@@ -358,7 +386,8 @@ find_checkout() {
   printf '%s\n' "$dir"
 }
 
-# 用 curl | bash 运行时没有本地代码：克隆后改用克隆下来的脚本继续（stdin 换成终端，菜单才能读输入）
+# 用 curl | bash 运行时没有本地代码：克隆后改用克隆下来的脚本继续（stdin 换成终端，菜单才能读输入；
+# 用真正的终端设备而不是 /dev/tty，之后才能接回 tmux 会话，T-0093）
 bootstrap() {
   local target="${DIR:-$DEFAULT_DIR}"
   ensure_tools
@@ -374,6 +403,8 @@ bootstrap() {
   fi
   local args=()
   DIR="$target" forward_args
+  local tty
+  if tty="$(real_tty)" && (exec <"$tty") 2>/dev/null; then exec bash "$target/scripts/deploy.sh" "${args[@]}" <"$tty"; fi
   if (exec </dev/tty) 2>/dev/null; then exec bash "$target/scripts/deploy.sh" "${args[@]}" </dev/tty; fi
   exec bash "$target/scripts/deploy.sh" "${args[@]}" </dev/null
 }
