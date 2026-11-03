@@ -191,7 +191,7 @@ PATH 里是假的 docker、sudo、bash、chown、crontab；覆盖完整安装、
 ### 6.2 吊销专用密钥
 
 `POST /api/v1/agents/instances/{id}/ssh/revoke`（`version`、`force`）：锁住目标服务器这一行，用专用密钥登录，
-从 `~/.ssh/authorized_keys` 删掉这把公钥所在的行（按“类型 公钥数据”匹配，先写临时文件再替换，其他行原样保留），
+从 `~/.ssh/authorized_keys` 删掉这把公钥所在的行（awk 按字段比较相邻的“类型 公钥数据”，制表符、多个空格、行首选项都能识别；先写临时文件再替换，其他行原样保留，删后按同样规则再核对一遍），
 再删除工作台保存的私钥（审计 `agents.ssh.key_revoked`，`remote_removed`）。连不上时 503 `AGENT_SSH_UNREACHABLE`；
 `force=true` 只删除工作台保存的私钥，返回的 `warning` 给出要在服务器上手动删除的那一行。吊销之后才能更换或删除目标服务器。
 
