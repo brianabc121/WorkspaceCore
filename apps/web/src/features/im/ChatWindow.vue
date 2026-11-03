@@ -40,8 +40,12 @@ watch(() => messages.data.value, data => {
 })
 const { busy, error, notice, act, active, refresh, setFlag, exportConversation } = useConversationActions(props.scope, () => id.value)
 const draft = ref(''), list = ref<HTMLElement | null>(null), picker = ref<HTMLInputElement | null>(null), box = ref<HTMLTextAreaElement | null>(null)
-// One Idempotency-Key per draft: retrying the same draft after an unknown result can never send it twice.
-let draftKey: string | null = null
+// One Idempotency-Key per message being sent: retrying it after an unknown result can never send it twice.
+// The draft, each re-sent failed message and each image have their own key, so sending one never drops another's
+// key while its result is still unknown.
+type Slot = { key: string | null }
+const draftSlot: Slot = { key: null }
+const resendSlots = new Map<string, Slot>()
 
 // 群聊：成员（@、顶栏的人数与在线实例数）与是否已解散
 const group = useGroup(props.scope, toRef(() => props.conversation.kind === 'group' ? props.conversation.group_id : null))
@@ -102,20 +106,20 @@ function keydown(event: KeyboardEvent) {
   if (event.ctrlKey || event.metaKey || (wide.value && !event.shiftKey && !event.altKey)) { event.preventDefault(); void sendText() }
 }
 
-async function send(body: Schema['ImMessageSend']) {
-  draftKey ??= crypto.randomUUID()
-  const key = draftKey
+async function send(body: Schema['ImMessageSend'], slot: Slot = draftSlot) {
+  slot.key ??= crypto.randomUUID()
+  const key = slot.key
   const ok = await act(async () => {
     try {
       const sent = dataOf(await auth.api.POST('/api/v1/im/conversations/{conversation_id}/messages', { params: { header: { ...header, 'Idempotency-Key': key }, path: { conversation_id: id.value } }, body }))
       if (active() && sent.conversation_id === id.value) pending.value = [...pending.value.filter(s => s.key !== key), { key, message: sent }]
     } catch (cause) {
       // A definite answer (rejected, not found, validation) ends this draft's key; unknown results keep it for the retry.
-      if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500 && cause.status !== 429) draftKey = null
+      if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500 && cause.status !== 429) slot.key = null
       throw cause
     }
   })
-  if (ok) { draftKey = null; void scrollToEnd() }
+  if (ok) { slot.key = null; void scrollToEnd() }
   return ok
 }
 async function sendText() {
@@ -123,12 +127,13 @@ async function sendText() {
   if (!text || !canSend.value) return
   if (await send({ kind: 'text', text, at_im_ids: props.conversation.kind === 'group' ? [...mentions.value] : [] })) { draft.value = ''; mentions.value = [] }
 }
-// 确定没有发出的文字消息（发送失败）可以重新发送：作为一条新消息，用新的幂等键
+// 确定没有发出的文字消息（发送失败）可以重新发送：作为一条新消息，用这条消息自己的幂等键（结果未知时再点仍用同一个）
 async function resend(message: Schema['ImMessageOut']) {
   if (!message.text || busy.value || !canSend.value) return
-  draftKey = null
-  await send({ kind: 'text', text: message.text, at_im_ids: props.conversation.kind === 'group' ? [...message.at_im_ids] : [] })
-  draftKey = null
+  const id = message.client_msg_id
+  const slot = resendSlots.get(id) ?? { key: null }
+  resendSlots.set(id, slot)
+  if (await send({ kind: 'text', text: message.text, at_im_ids: props.conversation.kind === 'group' ? [...message.at_im_ids] : [] }, slot)) resendSlots.delete(id)
 }
 async function sendImage(event: Event) {
   const input = event.target as HTMLInputElement, file = input.files?.[0]
@@ -143,7 +148,7 @@ async function sendImage(event: Event) {
       params: { header }, body: file as unknown as string, bodySerializer: (raw: unknown) => raw as File, headers: { 'Content-Type': file.type },
     }))
   })
-  if (uploaded && upload) { draftKey = null; await send({ kind: 'image', upload_id: (upload as Schema['ImUploadOut']).upload_id, at_im_ids: [] }) }
+  if (uploaded && upload) await send({ kind: 'image', upload_id: (upload as Schema['ImUploadOut']).upload_id, at_im_ids: [] }, { key: null })
 }
 const pin = (message: Schema['ImMessageOut']) => act(() => auth.api.POST('/api/v1/im/conversations/{conversation_id}/pins', { params: { header, path: { conversation_id: id.value } }, body: { server_msg_id: message.server_msg_id! } }), '已置顶这条消息')
 const unpin = (serverMsgId: string) => act(() => auth.api.DELETE('/api/v1/im/conversations/{conversation_id}/pins/{server_msg_id}', { params: { header, path: { conversation_id: id.value, server_msg_id: serverMsgId } } }), '已取消置顶')
@@ -153,13 +158,22 @@ const pinned = computed(() => pins.data.value?.items ?? [])
 const pinIndex = ref(0)
 const currentPin = computed(() => pinned.value.length ? pinned.value[pinIndex.value % pinned.value.length] : null)
 const pinText = (item: { message: Schema['ImMessageOut'] }) => item.message.kind === 'image' ? '[图片]' : item.message.kind === 'approval_card' ? '[审批卡片]' : (item.message.text ?? '')
-function jumpToPin() {
+// 置顶的消息不在已加载的消息里时，先往前加载（最多 10 页），仍找不到就把全文显示出来
+const MAX_PIN_PAGES = 10
+const findMessage = (serverMsgId: string) => list.value?.querySelector<HTMLElement>(`[data-msg="${CSS.escape(serverMsgId)}"]`) ?? null
+async function jumpToPin() {
   const item = currentPin.value
   if (!item) return
-  const el = list.value?.querySelector<HTMLElement>(`[data-msg="${CSS.escape(item.server_msg_id)}"]`)
-  el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
-  el?.classList.add('is-flash'); setTimeout(() => el?.classList.remove('is-flash'), 1200)
   pinIndex.value = (pinIndex.value + 1) % pinned.value.length
+  let el = findMessage(item.server_msg_id)
+  for (let page = 0; !el && page < MAX_PIN_PAGES && messages.hasNextPage.value; page++) {
+    await messages.fetchNextPage()
+    await nextTick()
+    el = findMessage(item.server_msg_id)
+  }
+  if (!el) { notice.value = `置顶消息：${pinText(item)}`; return }
+  el.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  el.classList.add('is-flash'); setTimeout(() => el?.classList.remove('is-flash'), 1200)
 }
 
 const more = usePopover()
@@ -174,7 +188,7 @@ watch(() => [id.value, props.conversation.max_seq, props.conversation.unread_cou
   try { await auth.api.POST('/api/v1/im/conversations/{conversation_id}/read', { params: { header, path: { conversation_id: conversation } }, body: { seq } }); if (active()) await refresh() }
   catch { readSent = '' }
 }, { immediate: true })
-watch(id, () => { draft.value = ''; mentions.value = []; draftKey = null; pending.value = []; error.value = ''; notice.value = ''; pinIndex.value = 0; void scrollToEnd() })
+watch(id, () => { draft.value = ''; mentions.value = []; draftSlot.key = null; resendSlots.clear(); pending.value = []; error.value = ''; notice.value = ''; pinIndex.value = 0; void scrollToEnd() })
 watch(() => messages.isSuccess.value, ok => { if (ok) void scrollToEnd() }, { immediate: true })
 const infoLabel = computed(() => props.conversation.kind === 'group' ? '群信息' : '会话信息')
 </script>
@@ -208,7 +222,7 @@ const infoLabel = computed(() => props.conversation.kind === 'group' ? '群信�
     <div v-if="currentPin" class="chat-pinbar">
       <button type="button" class="chat-pinbar-main" :aria-label="`置顶消息：${pinText(currentPin)}`" @click="jumpToPin">
         <span class="chat-pinbar-mark" aria-hidden="true"></span>
-        <span class="chat-pinbar-text"><span class="chat-pinbar-label">置顶消息<template v-if="pinned.length > 1">（{{ pinIndex % pinned.length + 1 }}/{{ pinned.length }}）</template></span><span class="chat-pinbar-body">{{ pinText(currentPin) }}</span></span>
+        <span class="chat-pinbar-text"><span class="chat-pinbar-label">置顶消息<template v-if="pinned.length > 1">（{{ pinIndex % pinned.length + 1 }}/{{ pinned.length }}）</template></span><span class="chat-pinbar-body" :title="pinText(currentPin)">{{ pinText(currentPin) }}</span></span>
       </button>
       <button type="button" class="chat-icon-button" :disabled="busy" aria-label="取消置顶这条消息" @click="unpin(currentPin.server_msg_id)"><PinOff aria-hidden="true" /></button>
     </div>

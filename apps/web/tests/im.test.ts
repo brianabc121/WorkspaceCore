@@ -366,3 +366,63 @@ describe('im composer keys (T-0095)', () => {
     await vi.waitFor(() => expect(box).toHaveValue(''))
   })
 })
+
+describe('im review fixes (T-0095)', () => {
+  it('re-sending a failed message keeps the unsent draft key while its result is unknown', async () => {
+    let posts = 0
+    const requests = setup(r => {
+      if (path(r).endsWith('/messages') && r.method === 'POST') { posts++; return posts === 1 ? fail(504, 'RESULT_UNKNOWN') : Response.json(message(10 + posts, { sender_im_id: self }), { status: 202 }) }
+    }, [conversation({ unread_count: 0 })], [message(3, { sender_im_id: self, text: '旧的失败消息', status: 'failed', server_msg_id: null }), message(1)])
+    await openApp('/im?c=si_alpha')
+    const chat = await screen.findByRole('region', { name: '与甲的会话' })
+    await fireEvent.update(within(chat).getByLabelText('消息'), '草稿')
+    await fireEvent.click(within(chat).getByRole('button', { name: '发送' }))
+    expect(await within(chat).findByRole('alert')).toHaveTextContent('结果未知')
+    const item = (await within(chat).findByText('旧的失败消息')).closest('li')!
+    await fireEvent.click(within(item).getByRole('button', { name: '消息操作' }))
+    await fireEvent.click(await within(item).findByRole('menuitem', { name: '重新发送' }))
+    await vi.waitFor(() => expect(posts).toBe(2))
+    await vi.waitFor(() => expect(within(chat).getByRole('button', { name: '发送' })).toBeEnabled())
+    expect(within(chat).getByLabelText('消息')).toHaveValue('草稿')
+    await fireEvent.click(within(chat).getByRole('button', { name: '发送' }))
+    await vi.waitFor(() => expect(posts).toBe(3))
+    const keys = requests.filter(r => path(r).endsWith('/messages') && r.method === 'POST').map(r => r.headers.get('Idempotency-Key'))
+    expect(keys[2]).toBe(keys[0])
+    expect(keys[1]).not.toBe(keys[0])
+  })
+  it('on a phone, back stays in the messages page when the chat was opened from elsewhere', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener: () => undefined, removeEventListener: () => undefined }))
+    try {
+      setup(undefined, [conversation({ unread_count: 0 })])
+      const { router } = await openApp('/')
+      await router.push('/im?c=si_alpha')
+      const chat = await screen.findByRole('region', { name: '与甲的会话' })
+      await fireEvent.click(within(chat).getByRole('button', { name: '返回会话列表' }))
+      await vi.waitFor(() => expect(router.currentRoute.value.query.c).toBeUndefined())
+      expect(router.currentRoute.value.path).toBe('/im')
+      // 在消息页里进入的会话：返回就是后退一步
+      await fireEvent.click(within(await screen.findByRole('region', { name: '会话列表' })).getByRole('button', { name: /甲/ }))
+      await vi.waitFor(() => expect(router.currentRoute.value.query.c).toBe('si_alpha'))
+      expect(router.options.history.state.imParent).toBe('/im')
+      await fireEvent.click(within(await screen.findByRole('region', { name: '与甲的会话' })).getByRole('button', { name: '返回会话列表' }))
+      await vi.waitFor(() => expect(router.currentRoute.value.query.c).toBeUndefined())
+      expect(router.currentRoute.value.path).toBe('/im')
+    } finally { vi.unstubAllGlobals() }
+  })
+  it('loads older messages to reach a pinned message that is not shown yet', async () => {
+    const requests = setup(r => {
+      if (path(r).endsWith('/pins') && r.method === 'GET') return Response.json({ items: [{ server_msg_id: 'srv-1', pinned_by: null, pinned_at: at, message: message(1, { pinned: true }) }] })
+      if (path(r).endsWith('/messages') && r.method === 'GET') {
+        const older = new URL(r.url).searchParams.get('cursor') === 'c1'
+        return Response.json(older ? { items: [message(1, { pinned: true })], next_cursor: null, total_estimate: 3 } : { items: [message(3), message(2)], next_cursor: 'c1', total_estimate: 3 })
+      }
+    }, [conversation({ unread_count: 0 })])
+    const { container } = await openApp('/im?c=si_alpha')
+    const chat = await screen.findByRole('region', { name: '与甲的会话' })
+    await within(chat).findByText('第 3 条')
+    expect(container.querySelector('[data-msg="srv-1"]')).toBeNull()
+    await fireEvent.click(await within(chat).findByRole('button', { name: '置顶消息：第 1 条' }))
+    await vi.waitFor(() => expect(requests.some(r => new URL(r.url).searchParams.get('cursor') === 'c1')).toBe(true))
+    await vi.waitFor(() => expect(container.querySelector('[data-msg="srv-1"]')).not.toBeNull())
+  })
+})

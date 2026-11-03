@@ -66,13 +66,17 @@ const folders = computed<Folder[]>(() => {
   return [...kinds, ...groups]
 })
 
-// 手机上进入下一层用 push（系统返回键回到上一层），宽屏用 replace（不堆历史）
+// 手机上进入下一层用 push（系统返回键回到上一层），宽屏用 replace（不堆历史）。push 时在历史记录里记下上一层的地址，
+// 页面上的“返回”只在上一条历史确实是这一层的上一层时才后退；从别的页面直接打开会话链接、或刚建群（replace）时，
+// 改为在消息页里回到上一层，不会离开消息页。
+const PARENT = 'imParent'
 function go(query: LocationQueryRaw, deeper = false) {
   const location = { query: { ...route.query, ...query } }
-  void (deeper && !wide.value ? router.push(location) : router.replace(location))
+  void (deeper && !wide.value ? router.push({ ...location, state: { [PARENT]: route.fullPath } }) : router.replace(location))
 }
 function back(query: LocationQueryRaw) {
-  if (!wide.value && router.options.history.state.back) router.back()
+  const state = router.options.history.state
+  if (!wide.value && typeof state[PARENT] === 'string' && state[PARENT] === state.back) router.back()
   else go(query)
 }
 const select = (id: string) => go({ view: undefined, c: id, info: undefined }, true)
