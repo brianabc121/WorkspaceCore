@@ -42,6 +42,17 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 | 4 状态 | 服务状态、本机与 HTTPS 健康检查、是否已完成首次安装 |
 | 5 接入组件 | 自动接入 n8n，部署 OpenIM，配置 OpenClaw 接入入口（需要先在浏览器创建管理员，见下面的「自动接入 n8n、OpenIM」）；GitHub 在网页上接入（第 8.2 节） |
 
+> **SSH 断开不会中断部署**（T-0092）：首次部署要下载几 GB 镜像、在服务器上编译 OpenIM，可能要几十分钟，
+> 网络不稳时 SSH 会断开（例如 `Timeout, server not responding`）。在终端里选择部署、升级或接入组件时，
+> 脚本自动进入一个专用的 tmux 会话（没有 tmux 时先自动安装），断线后部署在服务器上继续。重新登录后
+> **再运行一次同样的命令**（或 `tmux -L my-workspace attach`）就接回原来的进度，不会开始第二次部署。
+>
+> - 想暂时离开但不中断：先按 `Ctrl+b`，再按 `d`；向上翻看输出：先按 `Ctrl+b` 再按 `[`，按 `q` 退出；
+> - 脚本结束后停在最后的输出上（例如安装凭据），按回车才关闭会话；
+> - 拉取镜像失败（网络超时）时自动重试 3 次，已经下载的部分不会重新下载；Docker Hub 的匿名拉取次数限制
+>   （`429 toomanyrequests`）不重试，等一小时或 `docker login` 后重新运行；
+> - 不想用 tmux：运行前设置 `WORKSPACE_NO_TMUX=1`（例如已经在自己的 screen 里）。
+
 部署时只问三个问题：
 
 | 参数 | 例子 | 说明 |
