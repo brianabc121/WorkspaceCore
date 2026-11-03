@@ -1,12 +1,19 @@
-import { screen, fireEvent } from '@testing-library/vue'
+import { screen, fireEvent, within } from '@testing-library/vue'
 import { describe, it, expect, vi } from 'vitest'
 import { fail, me, mockApi, openApp, workspace } from './helpers'
 import { overview, widget, layout } from './dashboard-fixtures'
 
 const pathOf = (r: Request) => new URL(r.url).pathname
+// 导出 / 导入 / 选择仪表盘 / 设为首页在“更多”菜单里（T-0085）
+async function more(item: string) {
+  await fireEvent.keyDown(await screen.findByRole('button', { name: '更多仪表盘操作' }), { key: 'Enter' })
+  await fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: item }))
+  // 对话框在菜单关闭后的下一轮打开（把焦点留在对话框里）
+  await new Promise((resolve) => setTimeout(resolve, 10))
+}
 describe('仪表盘首页', () => {
   async function importOther() {
-    await fireEvent.click(await screen.findByRole('button', { name: '导入 JSON' }))
+    await more('导入 JSON')
     await fireEvent.update(screen.getByLabelText('布局 JSON'), JSON.stringify({ format: 'my-workspace/dashboard', format_version: 1, title: '其他仪表盘', widgets: [] }))
     await fireEvent.click(screen.getByRole('button', { name: '创建新仪表盘' }))
     await screen.findByText('已创建新仪表盘')
@@ -147,8 +154,8 @@ describe('仪表盘首页', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('已被其他人修改')
     expect(screen.getByRole('button', { name: '保存布局' })).toBeDisabled()
     await fireEvent.click(screen.getByRole('button', { name: '取消编辑' }))
-    await fireEvent.click(screen.getByRole('button', { name: '导出 JSON' }))
-    await fireEvent.click(screen.getByRole('button', { name: '关闭对话框' }))
+    await more('导出 JSON')
+    await fireEvent.click(await screen.findByRole('button', { name: '关闭对话框' }))
     expect(screen.getByRole('button', { name: '编辑布局' })).toBeDisabled()
     await fireEvent.click(screen.getByRole('button', { name: '重新加载最新版本' }))
     await vi.waitFor(() => expect(screen.getByText('版本 2')).toBeVisible())
@@ -159,7 +166,9 @@ describe('仪表盘首页', () => {
     await openApp()
     await screen.findByText('欢迎便签')
     expect(screen.queryByRole('button', { name: '编辑布局' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '导入 JSON' })).not.toBeInTheDocument()
+    await fireEvent.keyDown(screen.getByRole('button', { name: '更多仪表盘操作' }), { key: 'Enter' })
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual(['导出 JSON', '选择仪表盘'])
   })
   it('does not mix workspace rows or search results when an old save completes late', async () => {
     let finish: ((r: Response) => void) | undefined
@@ -204,7 +213,7 @@ describe('仪表盘首页', () => {
       if (pathOf(r) === '/api/v1/dashboards/new-dashboard/widgets') return Response.json({ items: [widget], next_cursor: null, total_estimate: 1 })
     })
     await openApp()
-    await fireEvent.click(await screen.findByRole('button', { name: '导入 JSON' }))
+    await more('导入 JSON')
     await fireEvent.update(screen.getByLabelText('布局 JSON'), '{"format_version":2}')
     await fireEvent.click(screen.getByRole('button', { name: '创建新仪表盘' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('格式或组件配置不符合契约')
