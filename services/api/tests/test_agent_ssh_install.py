@@ -89,7 +89,8 @@ _CRONTAB = r"""#!/bin/sh
 case "$1" in
   -l)
     if [ -f "$STATE/crontab" ]; then cat "$STATE/crontab"; else echo "no crontab" >&2; exit 1; fi ;;
-  -) cat > "$STATE/crontab" ;;
+  # 与真实的 crontab 一样：读完标准输入再整体替换（管道左边的 crontab -l 还在读旧文件）
+  -) t="$(mktemp)"; cat > "$t"; mv "$t" "$STATE/crontab" ;;
 esac
 """
 
@@ -797,6 +798,168 @@ async def test_admin_cannot_install(owner: Owner, make_client: ClientFactory) ->
     assert response.status_code == 403
 
 
+# ---------------------------------------------------------------- 卸载与吊销（B3）
+
+
+async def _post(
+    owner: Owner, instance_id: str, action: str, body: dict[str, Any]
+) -> httpx.Response:
+    return await owner.client.post(
+        f"/api/v1/agents/instances/{instance_id}/ssh/{action}", json=body, headers=owner.headers()
+    )
+
+
+async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -> None:
+    host = FakeHost(tmp_path)
+    other_key = asyncssh.generate_private_key("ssh-ed25519").export_public_key().decode().strip()
+    (host.home / ".ssh").mkdir(mode=0o700)
+    (host.home / ".ssh" / "authorized_keys").write_text(other_key + "\n")
+    (host.state / "crontab").write_text("0 1 * * * echo keep-me\n")
+    async with ssh_host(host) as (port, _):
+        instance_id, version = await owner.prepare(port)
+        state = await _install_ok(owner, host, instance_id, version)
+        assert len((host.state / "crontab").read_text().splitlines()) == 3
+
+        # 卸载，保留目录
+        response = await _post(
+            owner, instance_id, "uninstall", {"version": state["target"]["version"]}
+        )
+        assert response.status_code == 202, response.text
+        assert response.json()["job"]["kind"] == "uninstall"
+        state = await owner.finished(instance_id)
+        assert state["job"]["status"] == "succeeded", state["job"]
+        assert _steps(state) == {
+            "connect": "done",
+            "inspect": "done",
+            "stop": "done",
+            "unschedule": "done",
+            "remove_files": "skipped",
+        }
+        assert "docker compose down --remove-orphans" in host.calls()
+        assert (host.state / "crontab").read_text().splitlines() == ["0 1 * * * echo keep-me"]
+        assert host.directory.exists()
+        assert state["target"]["installed_at"] is None
+        assert state["target"]["install_dir"] == str(host.directory)
+        assert state["target"]["client_key_installed"] is True
+
+        # 再卸载一次，删除目录（uid 1001：先用镜像里的 chown 收回属主）
+        response = await _post(
+            owner,
+            instance_id,
+            "uninstall",
+            {"version": state["target"]["version"], "remove_files": True},
+        )
+        assert response.status_code == 202, response.text
+        state = await owner.finished(instance_id)
+        assert state["job"]["status"] == "succeeded", state["job"]
+        assert _steps(state)["remove_files"] == "done"
+        assert not host.directory.exists()
+        assert any(
+            f"{prov.OPENCLAW_IMAGE} -R 1001:1001 " in c
+            for c in host.calls()[-5:]
+            if c.startswith("docker run")
+        )
+        assert state["target"]["install_dir"] is None
+
+        # 吊销：服务器上只删掉专用公钥这一行
+        fingerprint = state["target"]["client_key_fingerprint"]
+        response = await _post(
+            owner, instance_id, "revoke", {"version": state["target"]["version"]}
+        )
+        assert response.status_code == 200, response.text
+        revoked = response.json()
+        assert revoked["warning"] is None
+        assert revoked["target"]["client_key_installed"] is False
+        assert revoked["target"]["client_key_fingerprint"] is None
+        assert host.authorized() == [other_key]
+        assert stat.S_IMODE((host.home / ".ssh" / "authorized_keys").stat().st_mode) == 0o600
+
+        # 吊销之后可以删除目标服务器
+        response = await owner.client.delete(
+            f"/api/v1/agents/instances/{instance_id}/ssh",
+            params={"version": revoked["target"]["version"]},
+            headers=owner.headers(),
+        )
+        assert response.status_code == 204, response.text
+    ref = await run_sql(owner.database_url, "SELECT count(*) FROM workspace.agent_ssh_targets")
+    assert ref == 0
+    actions = await run_sql(
+        owner.database_url,
+        "SELECT string_agg(action || ':' || coalesce(metadata_redacted_json->>'remote_removed', ''), ','"
+        " ORDER BY created_at) FROM workspace.audit_logs WHERE action LIKE 'agents.ssh.%'",
+    )
+    for action in (
+        "agents.ssh.uninstall_started:",
+        "agents.ssh.uninstall_succeeded:",
+        "agents.ssh.key_revoked:true",
+        "agents.ssh.target_removed:",
+    ):
+        assert action in actions, actions
+    assert fingerprint
+
+
+async def test_uninstall_and_revoke_need_the_key(owner: Owner, tmp_path: Path) -> None:
+    host = FakeHost(tmp_path)
+    async with ssh_host(host) as (port, _):
+        instance_id, version = await owner.prepare(port)
+        for action in ("uninstall", "revoke"):
+            response = await _post(owner, instance_id, action, {"version": version})
+            assert response.status_code == 409, response.text
+            assert response.json()["error"]["code"] == "AGENT_SSH_KEY_MISSING"
+    assert host.logins == []
+
+
+async def test_revoke_when_server_is_gone(owner: Owner, tmp_path: Path) -> None:
+    host = FakeHost(tmp_path)
+    async with ssh_host(host) as (port, _):
+        instance_id, version = await owner.prepare(port)
+        state = await _install_ok(owner, host, instance_id, version)
+    version = state["target"]["version"]
+    # 服务器已经关了：不强制时拒绝，并保留专用私钥
+    response = await _post(owner, instance_id, "revoke", {"version": version})
+    assert response.status_code == 503, response.text
+    assert response.json()["error"]["code"] == "AGENT_SSH_UNREACHABLE"
+    assert (await owner.state(instance_id))["target"]["client_key_installed"] is True
+    # 强制：只删除工作台保存的私钥，提示手动删除服务器上的那一行
+    response = await _post(owner, instance_id, "revoke", {"version": version, "force": True})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["target"]["client_key_installed"] is False
+    assert host.authorized()[0] in data["warning"]
+    remote = await run_sql(
+        owner.database_url,
+        "SELECT metadata_redacted_json->>'remote_removed' FROM workspace.audit_logs"
+        " WHERE action = 'agents.ssh.key_revoked'",
+    )
+    assert remote == "false"
+    ref = await run_sql(
+        owner.database_url, "SELECT client_key_ref FROM workspace.agent_ssh_targets"
+    )
+    assert ref is None
+
+
+async def test_revoke_and_uninstall_wait_for_a_running_job(
+    owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host = FakeHost(tmp_path)
+    async with ssh_host(host) as (port, _):
+        instance_id, version = await owner.prepare(port)
+        state = await _install_ok(owner, host, instance_id, version)
+        version = state["target"]["version"]
+        monkeypatch.setattr(SshJobRunner, "start", lambda self, *a, **k: None)
+        monkeypatch.setattr(SshJobRunner, "running", lambda self, job_id: True)
+        assert (
+            await _post(owner, instance_id, "uninstall", {"version": version})
+        ).status_code == 202
+        for action in ("revoke", "uninstall"):
+            response = await _post(owner, instance_id, action, {"version": version})
+            assert response.status_code == 409, response.text
+            assert response.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
+        response = await owner.install(instance_id, version, password=None)
+        assert response.status_code == 409
+    assert len(host.authorized()) == 1
+
+
 # ---------------------------------------------------------------- 单元
 
 
@@ -821,6 +984,14 @@ def test_parse_inspect_rejects_bad_home() -> None:
     info = agent_ssh_install.parse_inspect("uid=0\ngid=0\nhome=/\nos_id=debian\nos_version=12\n")
     assert info.home == ""
     assert info.root
+
+
+def test_remove_dir_only_accepts_the_bundle_directory() -> None:
+    with pytest.raises(ValueError):
+        prov.remove_dir_command("/home/deploy")
+    assert prov.remove_dir_command("/root/" + prov.INSTALL_DIR_NAME) == (
+        "rm -rf -- /root/myworkspace-openclaw"
+    )
 
 
 def test_commands_quote_paths() -> None:

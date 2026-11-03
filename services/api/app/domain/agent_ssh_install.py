@@ -40,7 +40,6 @@ from app.models import AgentCredential, AgentInstance, AgentSshJob, AgentSshTarg
 
 logger = logging.getLogger("app.agent_ssh")
 
-STEPS = prov.STEPS
 LOG_LIMIT = 64 * 1024
 DOCKER_TIMEOUT = 900.0
 PULL_TIMEOUT = 1200.0
@@ -108,11 +107,12 @@ class JobRecorder:
         sessionmaker: async_sessionmaker[AsyncSession],
         job_id: uuid.UUID,
         secrets: list[str] | None = None,
+        steps: tuple[str, ...] = prov.STEPS,
     ) -> None:
         self.sessionmaker = sessionmaker
         self.job_id = job_id
         self.steps: list[dict[str, Any]] = [
-            {"key": key, "status": "pending", "detail": None} for key in STEPS
+            {"key": key, "status": "pending", "detail": None} for key in steps
         ]
         self.log = ""
         self._secrets: list[str] = []
@@ -184,6 +184,7 @@ class JobRecorder:
 @dataclass(frozen=True)
 class Target:
     job_id: uuid.UUID
+    kind: str
     target_id: uuid.UUID
     instance_id: uuid.UUID
     workspace_id: uuid.UUID
@@ -679,6 +680,94 @@ class Installer:
             await db.commit()
 
 
+class Uninstaller(Installer):
+    """卸载（B3）：只用专用密钥。停止容器、删掉 crontab 里带标记的行，需要时删除接入包目录。
+
+    不碰 Docker 本身、专用公钥（另有吊销）和实例凭证（实例页可以吊销）。
+    """
+
+    async def uninstall(self, *, remove_files: bool) -> None:
+        if not self.target.host_key_confirmed:
+            raise InstallFailed("host_key_unconfirmed", "服务器的主机公钥还没有确认")
+        key = self._existing_key()
+        if key is None:
+            raise InstallFailed("client_key_missing", "这台服务器上没有工作台的专用公钥")
+        conn: asyncssh.SSHClientConnection | None = None
+        removed = False
+        try:
+            await self.rec.step("connect", "running")
+            conn = await self._connect(key=key)
+            await self.rec.step("connect", "done", "专用密钥登录")
+            info = await self._inspect(conn)
+            directory = f"{info.home}/{prov.INSTALL_DIR_NAME}"
+
+            await self.rec.step("stop", "running")
+            present = await self._run(
+                conn, "检查目录", f"[ -f {prov.q(directory)}/compose.yaml ]", log=False
+            )
+            if present.ok:
+                result = await self._run(
+                    conn,
+                    "停止",
+                    prov.compose_command(directory, "down", "--remove-orphans"),
+                    seconds=START_TIMEOUT,
+                )
+                if not result.ok:
+                    raise InstallFailed("stop_failed", "停止容器失败，详见日志")
+                await self.rec.step("stop", "done", "已停止并删除容器")
+            else:
+                await self.rec.step("stop", "skipped", f"服务器上没有 {directory}")
+
+            if info.crontab:
+                await self.rec.step("unschedule", "running")
+                result = await self._run(
+                    conn, "删除定时任务", prov.unschedule_command(), seconds=30
+                )
+                if not result.ok:
+                    raise InstallFailed("schedule_failed", "修改 crontab 失败")
+                await self.rec.step("unschedule", "done", "已删除带标记的定时任务")
+            else:
+                await self.rec.step("unschedule", "skipped", "服务器上没有 crontab")
+
+            exists = await self._run(conn, "检查目录", f"[ -d {prov.q(directory)} ]", log=False)
+            if not remove_files or not exists.ok:
+                await self.rec.step(
+                    "remove_files",
+                    "skipped",
+                    f"保留 {directory}（state/ 里是 OpenClaw 的会话与记忆）"
+                    if exists.ok
+                    else f"服务器上没有 {directory}",
+                )
+            else:
+                await self.rec.step("remove_files", "running")
+                reclaim = prov.reclaim_command(directory, uid=info.uid, gid=info.gid)
+                if reclaim is not None:
+                    result = await self._run(conn, "收回目录属主", reclaim, seconds=PULL_TIMEOUT)
+                    if not result.ok:
+                        raise InstallFailed("remove_failed", "无法收回目录属主，详见日志")
+                result = await self._run(
+                    conn, "删除目录", prov.remove_dir_command(directory), seconds=60
+                )
+                if not result.ok:
+                    raise InstallFailed("remove_failed", f"删除 {directory} 失败，详见日志")
+                removed = True
+                await self.rec.step("remove_files", "done", f"已删除 {directory}")
+        finally:
+            if conn is not None:
+                conn.close()
+        async with self.sessionmaker() as db:
+            target = await db.get(AgentSshTarget, self.target.target_id, with_for_update=True)
+            if target is None:
+                raise JobGone
+            if not self._unchanged(target):
+                raise InstallFailed("target_changed", "目标服务器在卸载期间被更换，已停止")
+            target.installed_at = None
+            if removed:
+                target.install_dir = None
+            target.version += 1
+            await db.commit()
+
+
 # ---------------------------------------------------------------- 任务入口
 
 
@@ -696,6 +785,7 @@ async def _load(sessionmaker: async_sessionmaker[AsyncSession], job_id: uuid.UUI
     job, target = row
     return Target(
         job_id=job.id,
+        kind=job.kind,
         target_id=target.id,
         instance_id=target.instance_id,
         workspace_id=target.workspace_id,
@@ -713,7 +803,7 @@ async def _finish(
     sessionmaker: async_sessionmaker[AsyncSession],
     settings: Settings,
     recorder: JobRecorder,
-    target: Target | None,
+    target: Target,
     *,
     status: str,
     code: str | None = None,
@@ -743,7 +833,7 @@ async def _write_result(
     sessionmaker: async_sessionmaker[AsyncSession],
     settings: Settings,
     recorder: JobRecorder,
-    target: Target | None,
+    target: Target,
     *,
     status: str,
     code: str | None = None,
@@ -765,11 +855,9 @@ async def _write_result(
         )
     except JobGone:
         return
-    if target is None:
-        return
     async with sessionmaker() as db:
         await AuditTrail(db, settings).record(
-            f"agents.ssh.install_{status}",
+            f"agents.ssh.{target.kind}_{status}",
             workspace_ids=[target.workspace_id],
             actor_id=target.started_by,
             resource_type="agent_instance",
@@ -780,23 +868,38 @@ async def _write_result(
         await db.commit()
 
 
-async def run_install(
+async def run_job(
     sessionmaker: async_sessionmaker[AsyncSession],
     settings: Settings,
     job_id: uuid.UUID,
     secret: OneTimePassword,
     *,
     client_ip: str | None = None,
+    remove_files: bool = False,
 ) -> None:
-    password = secret.get()
-    recorder = JobRecorder(
-        sessionmaker, job_id, [password.get_secret_value()] if password is not None else []
-    )
-    del password
-    target: Target | None = None
+    """后台协程：安装或卸载（按任务记录的 kind）。"""
     try:
         target = await _load(sessionmaker, job_id)
-        await Installer(sessionmaker, settings, recorder, target, client_ip=client_ip).run(secret)
+    except JobGone:
+        return
+    password = secret.get()
+    recorder = JobRecorder(
+        sessionmaker,
+        job_id,
+        [password.get_secret_value()] if password is not None else [],
+        steps=prov.STEPS if target.kind == "install" else prov.UNINSTALL_STEPS,
+    )
+    del password
+    label = "安装" if target.kind == "install" else "卸载"
+    try:
+        if target.kind == "install":
+            await Installer(sessionmaker, settings, recorder, target, client_ip=client_ip).run(
+                secret
+            )
+        else:
+            await Uninstaller(
+                sessionmaker, settings, recorder, target, client_ip=client_ip
+            ).uninstall(remove_files=remove_files)
     except JobGone:
         return
     except asyncio.CancelledError:
@@ -808,7 +911,7 @@ async def run_install(
                 target,
                 status="interrupted",
                 code="interrupted",
-                message="工作台停止，安装中断；可以重新开始",
+                message=f"工作台停止，{label}中断；可以重新开始",
                 client_ip=client_ip,
             )
         )
@@ -837,7 +940,7 @@ async def run_install(
         )
     except Exception:
         # 不带异常文本写进任务（可能含远端输出）；完整堆栈只在服务日志里，堆栈不含局部变量
-        logger.exception("agent ssh install failed", extra={"job_id": str(job_id)})
+        logger.exception("agent ssh job failed", extra={"job_id": str(job_id)})
         await _finish(
             sessionmaker,
             settings,
@@ -855,7 +958,7 @@ async def run_install(
 
 
 class SshJobRunner:
-    """进程内的安装任务。启动时把上次没跑完的任务标为中断，停止时取消还在跑的任务。"""
+    """进程内的安装 / 卸载任务。启动时把上次没跑完的任务标为中断，停止时取消还在跑的任务。"""
 
     def __init__(self, sessionmaker: async_sessionmaker[AsyncSession], settings: Settings) -> None:
         self._sessionmaker = sessionmaker
@@ -871,17 +974,23 @@ class SshJobRunner:
         self._reserved.discard(job_id)
 
     def start(
-        self, job_id: uuid.UUID, password: SecretStr | None, *, client_ip: str | None
+        self,
+        job_id: uuid.UUID,
+        password: SecretStr | None,
+        *,
+        client_ip: str | None,
+        remove_files: bool = False,
     ) -> None:
         task = asyncio.get_running_loop().create_task(
-            run_install(
+            run_job(
                 self._sessionmaker,
                 self.settings,
                 job_id,
                 OneTimePassword(password),
                 client_ip=client_ip,
+                remove_files=remove_files,
             ),
-            name=f"agent-ssh-install:{job_id}",
+            name=f"agent-ssh-job:{job_id}",
         )
         self._tasks[job_id] = task
         self._reserved.discard(job_id)
@@ -910,7 +1019,7 @@ class SshJobRunner:
                     .values(
                         status="interrupted",
                         error_code="interrupted",
-                        error_message="工作台重启，安装中断；可以重新开始",
+                        error_message="工作台重启，任务中断；可以重新开始",
                         finished_at=func.now(),
                         updated_at=func.now(),
                     )

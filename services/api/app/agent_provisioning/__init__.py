@@ -50,6 +50,9 @@ STEPS = (
     "online",
 )
 
+# 卸载任务的步骤（ADR 第 6 节）
+UNINSTALL_STEPS = ("connect", "inspect", "stop", "unschedule", "remove_files")
+
 _FILES = resources.files("app.agent_provisioning") / "files"
 
 
@@ -138,3 +141,32 @@ def schedule_command(directory: str) -> str:
         f"{{ crontab -l 2>/dev/null | grep -vF {q(CRON_MARKER)}; printf '%s\\n' {lines}; }}"
         " | crontab -"
     )
+
+
+def unschedule_command() -> str:
+    """删掉当前账号 crontab 里带标记的行，其他行保留。"""
+    return f"crontab -l 2>/dev/null | grep -vF {q(CRON_MARKER)} | crontab -"
+
+
+def _key_needle(public_key: str) -> str:
+    """authorized_keys 里按“类型 公钥数据”匹配（行首带选项、行尾注释不同的也算同一把）。"""
+    return " ".join(public_key.split()[:2])
+
+
+def revoke_key_command(public_key: str) -> str:
+    """从 ~/.ssh/authorized_keys 删掉这把公钥所在的行，其他行原样保留（先写临时文件再替换）。"""
+    needle = q(_key_needle(public_key))
+    path = "~/.ssh/authorized_keys"
+    return (
+        f"[ -f {path} ] || exit 0; t=$(mktemp {path}.XXXXXX) || exit 1;"
+        f' grep -vF -- {needle} {path} > "$t"; s=$?;'
+        f' if [ "$s" -gt 1 ]; then rm -f "$t"; exit 1; fi;'
+        f' chmod 600 "$t" && mv "$t" {path} && ! grep -qF -- {needle} {path}'
+    )
+
+
+def remove_dir_command(directory: str) -> str:
+    """删除接入包目录（只接受 <主目录>/myworkspace-openclaw 这一种路径）。"""
+    if not directory.endswith("/" + INSTALL_DIR_NAME):
+        raise ValueError("只能删除接入包目录")
+    return f"rm -rf -- {q(directory)}"

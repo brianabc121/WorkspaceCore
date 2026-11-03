@@ -256,6 +256,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/instances/{instance_id}/ssh/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 吊销专用密钥（owner）
+         * @description 用专用密钥登录，从服务器的 ~/.ssh/authorized_keys 删掉这把公钥，再删除工作台保存的私钥；之后可以更换或删除目标服务器。连不上服务器时 503 AGENT_SSH_UNREACHABLE（details.reason）；force=true 时仍然删除工作台保存的私钥，返回的 warning 说明要手动删除的那一行公钥。
+         */
+        post: operations["revoke_agent_ssh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/ssh/uninstall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 卸载服务器上的 OpenClaw（owner）
+         * @description 只用专用密钥登录：停止并删除容器、删掉工作台写入 crontab 的定时任务；remove_files=true 时同时删除接入包目录（含实例凭证与 OpenClaw 的会话、记忆，不可恢复）。不卸载 Docker，不吊销专用公钥与实例凭证。进度看 GET /ssh 的 job。没有专用公钥时 409 AGENT_SSH_KEY_MISSING；已经有进行中的任务时 409 AGENT_SSH_JOB_RUNNING。
+         */
+        post: operations["uninstall_agent_ssh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/secrets": {
         parameters: {
             query?: never;
@@ -2268,9 +2308,9 @@ export interface components {
             id: string;
             /**
              * Kind
-             * @constant
+             * @enum {string}
              */
-            kind: "install";
+            kind: "install" | "uninstall";
             /**
              * Log
              * @description 命令输出的末尾（最多 64 KB），密码、令牌、私钥已替换成 ***
@@ -2302,18 +2342,40 @@ export interface components {
              * Key
              * @enum {string}
              */
-            key: "connect" | "inspect" | "authorize_key" | "docker" | "reconnect" | "upload" | "pull" | "plugin" | "start" | "schedule" | "online";
+            key: "connect" | "inspect" | "authorize_key" | "docker" | "reconnect" | "upload" | "pull" | "plugin" | "start" | "schedule" | "online" | "stop" | "unschedule" | "remove_files";
             /**
              * Status
              * @enum {string}
              */
             status: "pending" | "running" | "done" | "skipped" | "failed";
         };
+        /**
+         * AgentSshRevoke
+         * @description 吊销专用密钥：从服务器的 authorized_keys 删掉专用公钥，再删除工作台保存的私钥。
+         */
+        AgentSshRevoke: {
+            /**
+             * Force
+             * @description 服务器连不上（或专用密钥已经登录不了）时仍然删除工作台保存的私钥；服务器上的那一行公钥要手动删除
+             * @default false
+             */
+            force: boolean;
+            /**
+             * Version
+             * @description 目标服务器的当前版本号
+             */
+            version: number;
+        };
         /** AgentSshState */
         AgentSshState: {
-            /** @description 最近一次安装任务 */
+            /** @description 最近一次安装或卸载任务 */
             job?: components["schemas"]["AgentSshJobOut"] | null;
             target: components["schemas"]["AgentSshTargetOut"] | null;
+            /**
+             * Warning
+             * @description 需要 owner 手动处理的事项（例如强制吊销时服务器上留下的公钥）
+             */
+            warning?: string | null;
         };
         /** AgentSshTargetOut */
         AgentSshTargetOut: {
@@ -2397,6 +2459,23 @@ export interface components {
              * @description 已经有目标服务器时必填（更换），为当前版本号
              */
             version?: number | null;
+        };
+        /**
+         * AgentSshUninstall
+         * @description 卸载：只用专用密钥。停止容器、删掉工作台写入的定时任务；可选删除接入包目录。
+         */
+        AgentSshUninstall: {
+            /**
+             * Remove Files
+             * @description 同时删除服务器上的接入包目录（含实例凭证、OpenClaw 的会话与记忆），不可恢复
+             * @default false
+             */
+            remove_files: boolean;
+            /**
+             * Version
+             * @description 目标服务器的当前版本号
+             */
+            version: number;
         };
         /** AiToolExecutionOut */
         AiToolExecutionOut: {
@@ -7202,6 +7281,176 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AgentSshInstall"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSshState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revoke_agent_ssh: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSshRevoke"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSshState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    uninstall_agent_ssh: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSshUninstall"];
             };
         };
         responses: {

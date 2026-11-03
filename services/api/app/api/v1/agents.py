@@ -34,8 +34,10 @@ from app.schemas.agents import (
     AgentSettingsUpdate,
     AgentSshConfirm,
     AgentSshInstall,
+    AgentSshRevoke,
     AgentSshState,
     AgentSshTargetSet,
+    AgentSshUninstall,
     BundleRequest,
     SecretAccessPage,
     SecretAccessResult,
@@ -266,6 +268,51 @@ async def install_agent_ssh(
     body: AgentSshInstall,
 ) -> AgentSshState:
     return await service.install(
+        access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
+    )
+
+
+@router.post(
+    "/agents/instances/{instance_id}/ssh/uninstall",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="卸载服务器上的 OpenClaw（owner）",
+    description="只用专用密钥登录：停止并删除容器、删掉工作台写入 crontab 的定时任务；"
+    "remove_files=true 时同时删除接入包目录（含实例凭证与 OpenClaw 的会话、记忆，不可恢复）。"
+    "不卸载 Docker，不吊销专用公钥与实例凭证。进度看 GET /ssh 的 job。"
+    "没有专用公钥时 409 AGENT_SSH_KEY_MISSING；已经有进行中的任务时 409 AGENT_SSH_JOB_RUNNING。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 503),
+)
+async def uninstall_agent_ssh(
+    access: Owner,
+    request: Request,
+    service: SshService,
+    instance_id: UUID,
+    body: AgentSshUninstall,
+) -> AgentSshState:
+    return await service.uninstall(
+        access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
+    )
+
+
+@router.post(
+    "/agents/instances/{instance_id}/ssh/revoke",
+    summary="吊销专用密钥（owner）",
+    description="用专用密钥登录，从服务器的 ~/.ssh/authorized_keys 删掉这把公钥，"
+    "再删除工作台保存的私钥；之后可以更换或删除目标服务器。"
+    "连不上服务器时 503 AGENT_SSH_UNREACHABLE（details.reason）；force=true 时仍然删除"
+    "工作台保存的私钥，返回的 warning 说明要手动删除的那一行公钥。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 503),
+)
+async def revoke_agent_ssh(
+    access: Owner,
+    request: Request,
+    service: SshService,
+    instance_id: UUID,
+    body: AgentSshRevoke,
+) -> AgentSshState:
+    return await service.revoke(
         access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
     )
 

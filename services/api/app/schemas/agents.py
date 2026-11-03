@@ -398,6 +398,27 @@ class AgentSshInstall(_Strict):
     )
 
 
+class AgentSshUninstall(_Strict):
+    """卸载：只用专用密钥。停止容器、删掉工作台写入的定时任务；可选删除接入包目录。"""
+
+    version: Version = Field(description="目标服务器的当前版本号")
+    remove_files: bool = Field(
+        default=False,
+        description="同时删除服务器上的接入包目录（含实例凭证、OpenClaw 的会话与记忆），不可恢复",
+    )
+
+
+class AgentSshRevoke(_Strict):
+    """吊销专用密钥：从服务器的 authorized_keys 删掉专用公钥，再删除工作台保存的私钥。"""
+
+    version: Version = Field(description="目标服务器的当前版本号")
+    force: bool = Field(
+        default=False,
+        description="服务器连不上（或专用密钥已经登录不了）时仍然删除工作台保存的私钥；"
+        "服务器上的那一行公钥要手动删除",
+    )
+
+
 SshJobStepKey = Literal[
     "connect",
     "inspect",
@@ -410,6 +431,9 @@ SshJobStepKey = Literal[
     "start",
     "schedule",
     "online",
+    "stop",
+    "unschedule",
+    "remove_files",
 ]
 
 
@@ -421,7 +445,7 @@ class AgentSshJobStep(BaseModel):
 
 class AgentSshJobOut(BaseModel):
     id: UUID
-    kind: Literal["install"]
+    kind: Literal["install", "uninstall"]
     status: Literal["running", "succeeded", "failed", "interrupted"]
     steps: list[AgentSshJobStep]
     log: str = Field(description="命令输出的末尾（最多 64 KB），密码、令牌、私钥已替换成 ***")
@@ -434,4 +458,7 @@ class AgentSshJobOut(BaseModel):
 
 class AgentSshState(BaseModel):
     target: AgentSshTargetOut | None
-    job: AgentSshJobOut | None = Field(default=None, description="最近一次安装任务")
+    job: AgentSshJobOut | None = Field(default=None, description="最近一次安装或卸载任务")
+    warning: str | None = Field(
+        default=None, description="需要 owner 手动处理的事项（例如强制吊销时服务器上留下的公钥）"
+    )

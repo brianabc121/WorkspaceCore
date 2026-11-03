@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import asyncssh
+from pydantic import SecretStr
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +28,7 @@ from app import agent_provisioning as prov
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain.audit import AuditTrail
+from app.domain.credentials import CredentialBox, CredentialError
 from app.domain.policy import WorkspaceAccess
 from app.domain.ratelimit import WindowLimiter
 from app.integrations import ssh
@@ -36,9 +38,11 @@ from app.schemas.agents import (
     AgentSshInstall,
     AgentSshJobOut,
     AgentSshJobStep,
+    AgentSshRevoke,
     AgentSshState,
     AgentSshTargetOut,
     AgentSshTargetSet,
+    AgentSshUninstall,
 )
 
 if TYPE_CHECKING:
@@ -67,6 +71,10 @@ def _unreachable(error: ssh.SshError) -> ApiError:
     return ApiError(503, "AGENT_SSH_UNREACHABLE", error.message, details={"reason": error.reason})
 
 
+def _key_missing() -> ApiError:
+    return ApiError(409, "AGENT_SSH_KEY_MISSING", "这台服务器上还没有装工作台的专用公钥")
+
+
 def _job_running() -> ApiError:
     return ApiError(409, "AGENT_SSH_JOB_RUNNING", "这台服务器正在安装，结束后再操作")
 
@@ -83,7 +91,7 @@ def _client_fingerprint(public_key: str | None) -> str | None:
 def _job_out(job: AgentSshJob) -> AgentSshJobOut:
     return AgentSshJobOut(
         id=job.id,
-        kind="install",
+        kind=job.kind,
         status=job.status,
         steps=[AgentSshJobStep.model_validate(step) for step in job.steps],
         log=job.log,
@@ -425,24 +433,11 @@ class AgentSshService:
             raise ApiError(503, "EXTERNAL_UNAVAILABLE", "密钥库未配置加密密钥")
         if await self._running(target):
             raise _job_running()
-        job = AgentSshJob(
-            id=uuid.uuid4(),
-            workspace_id=target.workspace_id,
-            instance_id=target.instance_id,
-            target_id=target.id,
+        return await self._start_job(
+            access,
+            target,
             kind="install",
-            status="running",
-            steps=[{"key": key, "status": "pending", "detail": None} for key in prov.STEPS],
-            log="",
-            started_by=access.user_id,
-        )
-        self.db.add(job)
-        await self.audit.record(
-            "agents.ssh.install_started",
-            workspace_ids=[target.workspace_id],
-            actor_id=access.user_id,
-            resource_type="agent_instance",
-            resource_id=target.instance_id,
+            password=body.password,
             metadata={
                 "host": target.host,
                 "port": target.port,
@@ -452,18 +447,165 @@ class AgentSshService:
             },
             client_ip=client_ip,
         )
+
+    async def _start_job(
+        self,
+        access: WorkspaceAccess,
+        target: AgentSshTarget,
+        *,
+        kind: str,
+        metadata: dict[str, object],
+        client_ip: str,
+        password: SecretStr | None = None,
+        remove_files: bool = False,
+    ) -> AgentSshState:
+        """新建任务（running）并交给进程内的后台协程；调用方已锁行并检查过没有进行中的任务。"""
+        assert self.runner is not None  # noqa: S101 - 调用方已检查
+        steps = prov.STEPS if kind == "install" else prov.UNINSTALL_STEPS
+        job = AgentSshJob(
+            id=uuid.uuid4(),
+            workspace_id=target.workspace_id,
+            instance_id=target.instance_id,
+            target_id=target.id,
+            kind=kind,
+            status="running",
+            steps=[{"key": key, "status": "pending", "detail": None} for key in steps],
+            log="",
+            started_by=access.user_id,
+        )
+        self.db.add(job)
+        await self.audit.record(
+            f"agents.ssh.{kind}_started",
+            workspace_ids=[target.workspace_id],
+            actor_id=access.user_id,
+            resource_type="agent_instance",
+            resource_id=target.instance_id,
+            metadata=metadata,
+            client_ip=client_ip,
+        )
         # 提交前先登记：提交之后、启动协程之前，别的请求不会把它当成失效的任务
         self.runner.reserve(job.id)
         try:
             await self.db.commit()
         except IntegrityError as error:
-            # 部分唯一索引：另一个请求同时开始了安装
+            # 部分唯一索引：另一个请求同时开始了任务
             self.runner.release(job.id)
             await self.db.rollback()
             raise _job_running() from error
         except BaseException:
             self.runner.release(job.id)
             raise
-        self.runner.start(job.id, body.password, client_ip=client_ip)
+        self.runner.start(job.id, password, client_ip=client_ip, remove_files=remove_files)
         await self.db.refresh(target)
         return await self._state(target)
+
+    async def uninstall(
+        self,
+        access: WorkspaceAccess,
+        instance_id: uuid.UUID,
+        body: AgentSshUninstall,
+        *,
+        client_ip: str,
+    ) -> AgentSshState:
+        """开始卸载（B3）：只用专用密钥；停止容器、删掉定时任务，可选删除接入包目录。"""
+        if self.runner is None:
+            raise ApiError(503, "EXTERNAL_UNAVAILABLE", "卸载任务暂时不可用，请稍后重试")
+        target = await self._existing(access, instance_id)
+        if body.version != target.version:
+            raise _version_conflict(target.version)
+        if target.host_key_confirmed_at is None:
+            raise ApiError(
+                409, "AGENT_SSH_HOST_KEY_UNCONFIRMED", "先核对并确认服务器的主机公钥指纹"
+            )
+        if target.client_key_ref is None:
+            raise _key_missing()
+        if self.settings.credential_encryption_key is None:
+            raise ApiError(503, "EXTERNAL_UNAVAILABLE", "密钥库未配置加密密钥")
+        if await self._running(target):
+            raise _job_running()
+        return await self._start_job(
+            access,
+            target,
+            kind="uninstall",
+            remove_files=body.remove_files,
+            metadata={
+                "host": target.host,
+                "port": target.port,
+                "remove_files": body.remove_files,
+            },
+            client_ip=client_ip,
+        )
+
+    async def revoke(
+        self,
+        access: WorkspaceAccess,
+        instance_id: uuid.UUID,
+        body: AgentSshRevoke,
+        *,
+        client_ip: str,
+    ) -> AgentSshState:
+        """吊销专用密钥（B3）：用它登录，从 authorized_keys 删掉这一行，再删除工作台保存的私钥。
+
+        锁住目标服务器这一行再连（最多几十秒）：期间不能开始安装或卸载。服务器连不上时，
+        force=true 只删除工作台保存的私钥，并提示 owner 手动删除服务器上的那一行。
+        """
+        target = await self._existing(access, instance_id)
+        if body.version != target.version:
+            raise _version_conflict(target.version)
+        if target.client_key_ref is None or not target.client_public_key:
+            raise _key_missing()
+        if await self._running(target):
+            raise _job_running()
+        public = target.client_public_key
+        reason: str | None = None
+        try:
+            await self._remove_remote_key(target, public)
+        except ssh.SshError as error:
+            if not body.force:
+                raise _unreachable(error) from error
+            reason = error.reason
+        except (CredentialError, asyncssh.KeyImportError) as error:
+            if not body.force:
+                raise ApiError(
+                    409, "AGENT_SSH_KEY_INVALID", "专用私钥无法解密；可以强制删除工作台保存的私钥"
+                ) from error
+            reason = "client_key_invalid"
+        target.client_key_ref = None
+        target.client_public_key = None
+        target.version += 1
+        await self.audit.record(
+            "agents.ssh.key_revoked",
+            workspace_ids=[target.workspace_id],
+            actor_id=access.user_id,
+            resource_type="agent_instance",
+            resource_id=target.instance_id,
+            metadata={
+                "client_key_fingerprint": _client_fingerprint(public),
+                "remote_removed": reason is None,
+                "reason": reason,
+            },
+            client_ip=client_ip,
+        )
+        await self.db.commit()
+        await self.db.refresh(target)
+        state = await self._state(target)
+        if reason is not None:
+            state.warning = (
+                f"没能连上服务器（{reason}），只删除了工作台保存的私钥；"
+                f"请在服务器的 ~/.ssh/authorized_keys 里手动删除这一行：{public}"
+            )
+        return state
+
+    async def _remove_remote_key(self, target: AgentSshTarget, public: str) -> None:
+        box = CredentialBox.from_settings(self.settings)
+        secret = box.resolve(target.client_key_ref or "", context=agent_ssh_context(target.id))
+        key = asyncssh.import_private_key(secret.get_secret_value())
+        conn = await ssh.connect(
+            target.address, target.port, target.username, target.host_key, client_key=key
+        )
+        try:
+            result = await ssh.run(conn, prov.revoke_key_command(public), seconds=30)
+        finally:
+            conn.close()
+        if not result.ok:
+            raise ssh.SshError("command_failed", "从 authorized_keys 删除专用公钥失败")
