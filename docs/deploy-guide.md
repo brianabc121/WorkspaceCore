@@ -420,7 +420,7 @@ make n8n-up
 | | 内网模式 | 外网模式 |
 |---|---|---|
 | 什么时候用 | 两台服务器在同一个私网（同一机房、同一 VPC，或都装了 Tailscale） | OpenClaw 服务器只能经公网访问工作台 |
-| 工作台服务器要准备 | 一个内网能解析的域名，以及它的证书（内部 CA 或 Tailscale 签发） | 一个公网域名（例如 `agent.example.com`，A 记录指向工作台服务器），以及它的公网证书 |
+| 工作台服务器要准备 | 一个内网能解析的域名，以及它的证书（内部 CA 或 Tailscale 签发） | **一键脚本自动配置**（推荐，见第 ② 步）；或者自己准备公网域名与公网证书 |
 | 安全措施 | 只接受私网来源；实例令牌 | 实例令牌 + 客户端证书（接入包里自带，90 天到期） |
 | 防火墙 | 入口端口只对私网开放 | 入口端口对公网开放；OpenClaw 服务器只需出站 |
 
@@ -444,6 +444,28 @@ make openim-up
 </details>
 
 #### ② 打开接入入口（工作台服务器）
+
+**外网模式：一键配置（推荐）。** 再运行一次
+
+```bash
+sudo bash scripts/deploy.sh connect
+```
+
+问到「配置接入入口？」时回答 `y`，脚本会：
+
+1. 确定入口的主机名：工作台配置了域名（`SITE_DOMAIN`）就用它，端口 9443（管理员页面仍在 443，DNS 不用改）；
+   没有域名（只用 IP 部署）时回答 `-`，改用固定的内部名字 `agent-gateway.myworkspace.internal`，
+   再填 OpenClaw 服务器访问这台服务器用的 IP（默认是本机的出站地址；云服务器上一般要改成**公网 IP**）；
+2. 用工作台的**内部 CA** 签发入口证书（2 年，剩不到 60 天时再运行一次会自动重签），写进 `infra/caddy/agent-tls/`；
+   不需要买证书，也不需要 80 端口验证；
+3. 写 `.env`（`AGENT_PUBLIC_HOST`、`AGENT_PUBLIC_BIND=0.0.0.0`、`AGENT_PUBLIC_PORT`、`AGENT_PUBLIC_URL`、
+   `AGENT_PUBLIC_ADDRESS`、`AGENT_PUBLIC_INTERNAL_CA=true`），重启 api、worker，`make agents-up` 启动入口，并检查入口能握手；
+4. 检测到 ufw 时询问是否放行 TCP 9443。**云服务器的安全组也要放行 TCP 9443**（脚本改不了安全组）。
+
+这样生成的外网接入包自带内部 CA 证书（`tls/ca.pem`）和地址映射，OpenClaw 服务器上不用再改任何配置。
+已经手动配置过外网入口（下面的做法）的，脚本保持不变。
+
+**手动配置**（内网模式，或者想用自己的公网证书）：
 
 1. **放证书**：放进 `infra/caddy/agent-tls/`（目录已被 git 忽略，不会提交）：
    - 内网模式：`intranet.crt`、`intranet.key`；
@@ -546,7 +568,7 @@ make openim-up
 
    第一行：工作台里轮换了模型密钥，10 分钟内生效，不用重启；第二行：每周重启一次，换新的 IM 令牌（令牌只在启动时领取）。
 
-入口证书是私有 CA 签发的（例如自建内部 CA）：外网模式在 `compose.yaml` 里 `tunnel` 的命令加 `--cacert=<CA 证书>`；
+入口证书是你自己的私有 CA 签发的（第 ② 步一键配置的不算，接入包已经带上了 CA）：外网模式在 `compose.yaml` 里 `tunnel` 的命令加 `--cacert=<CA 证书>`；
 内网模式在 `myworkspace.env` 里设置 `NODE_EXTRA_CA_CERTS=<CA 证书>`，有 `image-proxy` 时它的命令也加 `--cacert=<CA 证书>`。
 
 接入包里的 `CHECKLIST.md` 是这台服务器的完整清单（安装、加固、定时任务、备份），上线和每次改配置后都对照一遍。

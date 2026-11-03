@@ -607,6 +607,37 @@ async def test_public_bundle_has_a_client_certificate_from_the_internal_ca(env: 
     cert2.verify_directly_issued_by(ca)
 
 
+async def test_public_bundle_trusts_the_internal_ca_when_the_ingress_uses_it(
+    make_client: ClientFactory, migrated_database_url: str
+) -> None:
+    """入口证书由内部 CA 签发（T-0088）：接入包附带 CA，主机名映射到工作台地址。"""
+    host = "agent-gateway.myworkspace.internal"
+    settings = {
+        **SETTINGS,
+        "agent_public_url": f"https://{host}:9443",
+        "agent_public_internal_ca": True,
+        "agent_public_address": "203.0.113.7",
+    }
+    async with make_client(**settings) as client:
+        setup = await client.post("/api/v1/setup", json=OWNER)
+        env = Env(client, setup.json()["workspaces"][0]["id"], migrated_database_url)
+        public = await env.create_instance(network_mode="public")
+        files = _unzip(await _bundle(env, public["id"]))
+        ca_pem = await run_sql(
+            env.database_url, "SELECT cert_pem FROM workspace.agent_ca WHERE retired_at IS NULL"
+        )
+        assert files["tls/ca.pem"] == (ca_pem, 0o644)
+        assert "PRIVATE KEY" not in files["tls/ca.pem"][0]
+        compose = files["compose.yaml"][0]
+        assert f'extra_hosts: ["{host}:203.0.113.7"]' in compose
+        assert f'extra_hosts: ["{host}:127.0.0.1"]' in compose
+        assert f"--target={host}:9443" in compose and "--cacert=/tls/ca.pem" in compose
+        assert _env_value(files, "MYWS_AGENT_API") == f"http://{host}:18443/agent-api"
+        # 内网实例不带 CA，也没有地址映射
+        intranet = _unzip(await _bundle(env, (await env.create_instance())["id"]))
+        assert "tls/ca.pem" not in intranet and "203.0.113.7" not in intranet["compose.yaml"][0]
+
+
 async def test_bundle_is_refused_for_disabled_or_unconfigured_instances(
     make_client: ClientFactory,
 ) -> None:

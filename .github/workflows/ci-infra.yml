@@ -189,6 +189,19 @@ jobs:
       - name: V2 浏览器验收（密钥库、实例页、通讯录与单聊、导出、建群、IM 审批卡片、审批中心、移动端、member 不可见）
         # 真实 OpenIM；每次用新的工作台用户，登记的实例不需要在线，结束时在页面上停用
         run: node tests/e2e/sprint6_browser.cjs
+      # T-0088：放在最后，因为它把外网入口换成了内部 CA 签发的证书与内部主机名（前面的验收用的是 public.test）
+      - name: 一键配置接入入口（deploy.sh connect 的“OpenClaw 接入入口”一步：没有域名 → 内部主机名 + 本机出站地址）
+        run: |
+          # 模拟第一次配置：去掉上面手动配置的外网入口；“配置接入入口？”回答是，其余问题取默认值
+          sed -i -e 's#^AGENT_PUBLIC_URL=.*#AGENT_PUBLIC_URL=#' -e 's#^AGENT_PUBLIC_HOST=.*#AGENT_PUBLIC_HOST=#' .env
+          bash -c "$(sed '$d' scripts/deploy.sh)"'
+          confirm() { return 0; }
+          PY=python3 ROOT="$PWD"
+          connect_agent_ingress' 2>&1 | tee "$RUNNER_TEMP/agent-ingress.log"
+          grep -q "接入入口已就绪" "$RUNNER_TEMP/agent-ingress.log"
+          grep '^AGENT_PUBLIC_' .env
+      - name: 接入入口自动配置验收（原样的接入包：内部 CA + 地址映射，经本机隧道连回工作台）
+        run: sudo -E python3 tests/e2e/agent_auto_ingress_acceptance.py
       - name: 失败时输出服务状态与日志
         if: failure()
         run: |

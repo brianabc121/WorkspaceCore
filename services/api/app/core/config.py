@@ -5,7 +5,7 @@
 """
 
 from functools import lru_cache
-from ipaddress import IPv4Network, IPv6Network, ip_network
+from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     agent_intranet_url: str = ""
     agent_public_url: str = ""
     agent_tunnel_port: int = Field(default=18443, ge=1024, le=65535)
+    # 外网入口的服务器证书由工作台内部 CA 签发时为 true（deploy.sh connect 自动配置，T-0088）：
+    # 接入包附带 CA 证书（tls/ca.pem），本机隧道用它校验入口
+    agent_public_internal_ca: bool = False
+    # 外网入口的主机名不在公网 DNS 里时（没有配置域名，用 agent-gateway.myworkspace.internal），
+    # 接入包在本机隧道容器里把主机名映射到这个地址（工作台服务器的公网 IP）
+    agent_public_address: str = ""
 
     # V2 IM（OC-3，契约第 5、7、10 节）：OpenIM 的 REST 地址（内部网络，例如 http://openim-server:10002）
     # 与 share.secret（换 imAdmin 令牌）。为空表示没有部署 OpenIM：IM 接口返回 503 IM_UNAVAILABLE
@@ -159,6 +165,17 @@ class Settings(BaseSettings):
         if value and (origin_of(value) is None or "@" in urlsplit(value).netloc):
             raise ValueError("必须是不带用户名密码的 http(s) 地址")
         return value.rstrip("/")
+
+    @field_validator("agent_public_address")
+    @classmethod
+    def _ip_or_blank(cls, value: str) -> str:
+        value = value.strip()
+        if value:
+            try:
+                return str(ip_address(value))
+            except ValueError as error:
+                raise ValueError("必须是 IP 地址") from error
+        return value
 
     @field_validator(
         "session_secret",
