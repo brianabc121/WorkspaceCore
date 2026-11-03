@@ -99,10 +99,13 @@ describe('global create menu', () => {
 
   it('opens the group form, the member form and the instance form for admins and the owner', async () => {
     setup()
-    await openApp('/')
+    const { router } = await openApp('/')
     await choose('新建群聊')
     expect(await screen.findByRole('dialog', { name: '建群' })).toBeVisible()
     await fireEvent.click(within(screen.getByRole('dialog', { name: '建群' })).getByRole('button', { name: '关闭对话框' }))
+    // 消息页是独立页面（T-0095），没有工作台顶栏；回到工作台再用“创建”菜单
+    expect(screen.queryByRole('button', { name: '创建' })).not.toBeInTheDocument()
+    await router.push('/')
 
     await choose('添加成员')
     const form = await screen.findByRole('form', { name: '添加成员' })

@@ -56,64 +56,72 @@ watch(pageTitle, (title) => { document.title = `${title} · My Workspace` }, { i
 const wide = useMediaQuery('(min-width: 761px)')
 const bottomNav = computed(() => !wide.value && !!auth.user && !!auth.workspaceId)
 const themeLabel = computed(() => (theme.theme === 'light' ? '切换到暗色主题' : '切换到亮色主题'))
+// 独立页面（消息页，T-0095）不套侧栏、顶栏与 AI 抽屉，页面自己提供返回工作台的入口
+const standalone = computed(() => !!route.meta.standalone && !!auth.user)
 </script>
 
 <template>
-  <a class="skip-link" href="#main-content">跳到主要内容</a>
-  <div class="workspace-shell" :class="{ 'has-bottom-nav': bottomNav }" @keydown="closeMenu">
-    <aside v-if="auth.user" id="sidebar" class="sidebar" :class="{ 'is-open': menuOpen }">
-      <RouterLink class="brand" to="/" aria-label="My Workspace 首页">
-        <span class="brand-mark" aria-hidden="true">W</span>
-        <span>My Workspace</span>
-      </RouterLink>
-      <div v-if="auth.currentWorkspace" class="workspace-switcher">
-        <Building2 class="nav-icon" aria-hidden="true" />
-        <select v-if="auth.workspaces.length > 1" aria-label="当前工作空间" :value="auth.workspaceId" @change="auth.selectWorkspace(($event.target as HTMLSelectElement).value)"><option v-for="workspace in auth.workspaces" :key="workspace.id" :value="workspace.id">{{ workspace.name }}</option></select>
-        <span v-else class="workspace-name">{{ auth.currentWorkspace.name }}</span>
-      </div>
-      <nav aria-label="主导航" class="sidebar-nav">
-        <div v-for="section in sections" :key="section.title" class="nav-section">
-          <button class="nav-label" type="button" :aria-expanded="!collapsed.includes(section.title)" :aria-controls="section.id" @click="toggleSection(section.title)">
-            <span>{{ section.title }}</span><ChevronDown class="nav-chevron" aria-hidden="true" />
-          </button>
-          <div v-show="!collapsed.includes(section.title)" :id="section.id" class="nav-items">
-            <RouterLink v-for="item in section.items" :key="item.path" :to="item.path" class="nav-link" exact-active-class="is-active">
-              <component :is="navIcon(item.path)" class="nav-icon" aria-hidden="true" /><span>{{ item.title }}</span>
-            </RouterLink>
+  <template v-if="standalone">
+    <p v-if="auth.loading" role="status" class="standalone-status">正在连接工作空间…</p>
+    <RouterView v-else />
+  </template>
+  <template v-else>
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+    <div class="workspace-shell" :class="{ 'has-bottom-nav': bottomNav }" @keydown="closeMenu">
+      <aside v-if="auth.user" id="sidebar" class="sidebar" :class="{ 'is-open': menuOpen }">
+        <RouterLink class="brand" to="/" aria-label="My Workspace 首页">
+          <span class="brand-mark" aria-hidden="true">W</span>
+          <span>My Workspace</span>
+        </RouterLink>
+        <div v-if="auth.currentWorkspace" class="workspace-switcher">
+          <Building2 class="nav-icon" aria-hidden="true" />
+          <select v-if="auth.workspaces.length > 1" aria-label="当前工作空间" :value="auth.workspaceId" @change="auth.selectWorkspace(($event.target as HTMLSelectElement).value)"><option v-for="workspace in auth.workspaces" :key="workspace.id" :value="workspace.id">{{ workspace.name }}</option></select>
+          <span v-else class="workspace-name">{{ auth.currentWorkspace.name }}</span>
+        </div>
+        <nav aria-label="主导航" class="sidebar-nav">
+          <div v-for="section in sections" :key="section.title" class="nav-section">
+            <button class="nav-label" type="button" :aria-expanded="!collapsed.includes(section.title)" :aria-controls="section.id" @click="toggleSection(section.title)">
+              <span>{{ section.title }}</span><ChevronDown class="nav-chevron" aria-hidden="true" />
+            </button>
+            <div v-show="!collapsed.includes(section.title)" :id="section.id" class="nav-items">
+              <RouterLink v-for="item in section.items" :key="item.path" :to="item.path" class="nav-link" exact-active-class="is-active">
+                <component :is="navIcon(item.path)" class="nav-icon" aria-hidden="true" /><span>{{ item.title }}</span>
+              </RouterLink>
+            </div>
           </div>
+        </nav>
+        <div class="sidebar-footer">
+          <AccountMenu :logging-out="loggingOut" @logout="logout" />
+          <button class="shell-icon" type="button" :aria-label="themeLabel" :title="themeLabel" @click="theme.toggle"><Moon v-if="theme.theme === 'light'" aria-hidden="true" /><Sun v-else aria-hidden="true" /></button>
         </div>
-      </nav>
-      <div class="sidebar-footer">
-        <AccountMenu :logging-out="loggingOut" @logout="logout" />
-        <button class="shell-icon" type="button" :aria-label="themeLabel" :title="themeLabel" @click="theme.toggle"><Moon v-if="theme.theme === 'light'" aria-hidden="true" /><Sun v-else aria-hidden="true" /></button>
+      </aside>
+      <div v-if="menuOpen" class="nav-backdrop" aria-hidden="true" @click="menuOpen = false"></div>
+      <div class="main-shell">
+        <header class="topbar">
+          <div class="topbar-start">
+            <button v-if="auth.user" ref="menuToggle" class="shell-icon menu-toggle" type="button" aria-label="切换导航" aria-controls="sidebar" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen"><Menu aria-hidden="true" /></button>
+            <span class="breadcrumb"><span v-if="currentEntry" class="breadcrumb-section">{{ currentEntry.section }}<span aria-hidden="true" class="breadcrumb-sep">/</span></span><strong>{{ pageTitle }}</strong></span>
+          </div>
+          <div class="topbar-actions">
+            <template v-if="auth.user">
+              <HeaderSearch />
+              <CreateMenu v-if="auth.workspaceId" :key="auth.workspaceId" />
+              <ImHeaderBadges v-if="auth.canManage && auth.workspaceId" :key="auth.user.id + ':' + auth.workspaceId" />
+              <HeaderNotifications />
+              <button class="shell-icon topbar-ai" type="button" aria-controls="app-drawer" :aria-expanded="drawer.open" :aria-label="drawer.open ? '收起 AI 助手' : 'AI 助手'" :class="{ 'is-active': drawer.open }" @click="drawer.toggle()"><Sparkles aria-hidden="true" /><span class="topbar-label" aria-hidden="true">AI 助手</span></button>
+            </template>
+            <button v-else class="shell-icon" type="button" :aria-label="themeLabel" :title="themeLabel" @click="theme.toggle"><Moon v-if="theme.theme === 'light'" aria-hidden="true" /><Sun v-else aria-hidden="true" /></button>
+          </div>
+        </header>
+        <main id="main-content" tabindex="-1">
+          <p v-if="logoutError" role="alert" class="feedback">{{ logoutError }}</p>
+          <p v-if="auth.loading" role="status">正在连接工作空间…</p>
+          <RouterView v-else />
+        </main>
+        <footer class="page-footer">My Workspace · 自托管个人工作台</footer>
       </div>
-    </aside>
-    <div v-if="menuOpen" class="nav-backdrop" aria-hidden="true" @click="menuOpen = false"></div>
-    <div class="main-shell">
-      <header class="topbar">
-        <div class="topbar-start">
-          <button v-if="auth.user" ref="menuToggle" class="shell-icon menu-toggle" type="button" aria-label="切换导航" aria-controls="sidebar" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen"><Menu aria-hidden="true" /></button>
-          <span class="breadcrumb"><span v-if="currentEntry" class="breadcrumb-section">{{ currentEntry.section }}<span aria-hidden="true" class="breadcrumb-sep">/</span></span><strong>{{ pageTitle }}</strong></span>
-        </div>
-        <div class="topbar-actions">
-          <template v-if="auth.user">
-            <HeaderSearch />
-            <CreateMenu v-if="auth.workspaceId" :key="auth.workspaceId" />
-            <ImHeaderBadges v-if="auth.canManage && auth.workspaceId" :key="auth.user.id + ':' + auth.workspaceId" />
-            <HeaderNotifications />
-            <button class="shell-icon topbar-ai" type="button" aria-controls="app-drawer" :aria-expanded="drawer.open" :aria-label="drawer.open ? '收起 AI 助手' : 'AI 助手'" :class="{ 'is-active': drawer.open }" @click="drawer.toggle()"><Sparkles aria-hidden="true" /><span class="topbar-label" aria-hidden="true">AI 助手</span></button>
-          </template>
-          <button v-else class="shell-icon" type="button" :aria-label="themeLabel" :title="themeLabel" @click="theme.toggle"><Moon v-if="theme.theme === 'light'" aria-hidden="true" /><Sun v-else aria-hidden="true" /></button>
-        </div>
-      </header>
-      <main id="main-content" tabindex="-1">
-        <p v-if="logoutError" role="alert" class="feedback">{{ logoutError }}</p>
-        <p v-if="auth.loading" role="status">正在连接工作空间…</p>
-        <RouterView v-else />
-      </main>
-      <footer class="page-footer">My Workspace · 自托管个人工作台</footer>
+      <AppDrawer />
+      <BottomNav v-if="bottomNav" :key="`${auth.user?.id}:${auth.workspaceId}:${auth.canManage}`" />
     </div>
-    <AppDrawer />
-    <BottomNav v-if="bottomNav" :key="`${auth.user?.id}:${auth.workspaceId}:${auth.canManage}`" />
-  </div>
+  </template>
 </template>

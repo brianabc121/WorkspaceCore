@@ -40,7 +40,8 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
       ...navigation.map((item) => ({
         path: item.path,
         component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/automations': AutomationsPage, '/im': ImPage, '/agents': AgentsPage, '/agents/secrets': SecretsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
-        meta: { title: item.title, description: item.description, admin: adminOnly.has(item.path), owner: ownerOnly.has(item.path) },
+        // 消息页是不带工作台侧栏和顶栏的独立页面（T-0095）
+        meta: { title: item.title, description: item.description, admin: adminOnly.has(item.path), owner: ownerOnly.has(item.path), standalone: item.path === '/im' },
       })),
       // Notification links for AI approvals (OC-1 contract §6) use /approvals?id=…
       { path: '/approvals', redirect: (to) => ({ path: '/ai', query: to.query }) },

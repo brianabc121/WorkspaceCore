@@ -1,7 +1,7 @@
 // Sprint 6 V2 浏览器验收（T-0063；方案第 8 节的页面部分）：真实后端 + 真实 OpenIM 上的 OpenClaw 与 IM 页面——
 // 密钥库：添加密钥后页面上看不到明文 → 实例页：打开总开关、登记实例、授权密钥、下载接入包 →
 // 通讯录：登记的实例自动出现 → 单聊：发消息、经 OpenIM 回调投影后显示、导出会话 →
-// 建群（从顶栏“创建”菜单打开）：拉入实例、群设置里的防刷屏 → 审批：IM 里的审批卡片写明由谁触发，在卡片上批准并执行，
+// 建群（从顶栏“创建”菜单打开）：拉入实例、群信息栏里的防刷屏 → 审批：IM 里的审批卡片写明由谁触发，在卡片上批准并执行，
 // 审批中心显示结果与来源 → 右侧 AI 抽屉与实例对话 → 390px 宽度下无横向滚动 → member 看不到 IM / 实例页 →
 // 浏览器只访问工作台自己的地址（不直连 OpenIM），接口响应与页面里没有密钥明文。
 //
@@ -137,6 +137,11 @@ async function until(probe, timeout = 90000) {
   }
   return false
 }
+// 消息页是独立页面（T-0095）：通讯录在左上角的菜单里
+async function openContacts(page) {
+  await page.getByRole('button', { name: '菜单', exact: true }).click()
+  await page.getByRole('dialog', { name: '菜单' }).getByRole('button', { name: /通讯录/ }).click()
+}
 async function download(page, click) {
   const [file] = await Promise.all([page.waitForEvent('download'), click()])
   const saved = path.join(require('node:os').tmpdir(), `sprint6-${run}-${file.suggestedFilename()}`)
@@ -203,17 +208,17 @@ async function download(page, click) {
 
   // ---------------------------------------------------------------- 通讯录与单聊
   await page.goto(`${base}/im`)
-  await page.getByRole('button', { name: '通讯录' }).click()
+  check(await reloadUntil(page, `${base}/im`, page.getByRole('region', { name: '会话列表' })), 'IM 页应可用（OpenIM 已部署，账号就绪）')
+  check(await page.getByRole('navigation', { name: '主导航' }).count() === 0, '消息页应是独立页面，不显示工作台侧栏')
+  await openContacts(page)
   const contacts = page.getByRole('region', { name: '通讯录' })
   const contact = contacts.getByRole('listitem').filter({ hasText: name })
-  check(await reloadUntil(page, `${base}/im`, page.getByRole('button', { name: '通讯录' })), 'IM 页应可用（OpenIM 已部署，账号就绪）')
-  await page.getByRole('button', { name: '通讯录' }).click()
   await contact.waitFor()
   await contact.getByRole('button', { name: '发消息' }).click()
   const chat = page.getByRole('region', { name: `与${name}的会话` })
   await chat.waitFor()
   const text = `浏览器验收 ${run}：请帮我收藏一个链接`
-  await chat.getByLabel('消息').fill(text)
+  await chat.getByRole('textbox', { name: '消息', exact: true }).fill(text)
   await chat.getByRole('button', { name: '发送', exact: true }).click()
   await chat.getByText(text).waitFor()
   // 页面先显示刚发出的消息；以服务端（OpenIM 回调 → Worker 投影，带上序号）列出的为准，再刷新页面确认。
@@ -225,11 +230,15 @@ async function download(page, click) {
   check(projected, '发出的消息应经 OpenIM 回调投影进工作台')
   await page.goto(`${base}/im?c=${encodeURIComponent(conversationId)}`)
   await page.getByRole('region', { name: `与${name}的会话` }).getByText(text).waitFor()
-  const exported = await download(page, () => page.getByRole('region', { name: `与${name}的会话` }).getByRole('button', { name: '导出', exact: true }).click())
+  const exported = await download(page, async () => {
+    const single = page.getByRole('region', { name: `与${name}的会话` })
+    await single.getByRole('button', { name: '更多', exact: true }).click()
+    await single.getByRole('menuitem', { name: '导出聊天记录' }).click()
+  })
   files.push(exported.path)
   const lines = fs.readFileSync(exported.path, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
   check(exported.name.endsWith('.ndjson') && lines.some((m) => m.text === text), `导出的 NDJSON 应包含刚发的消息：${exported.name}`)
-  step(`单聊：通讯录里自动出现实例，发消息后经 OpenIM 回调投影显示，导出会话得到 ${lines.length} 行 NDJSON`)
+  step(`单聊（独立消息页，菜单里打开通讯录）：通讯录里自动出现实例，发消息后经 OpenIM 回调投影显示，导出会话得到 ${lines.length} 行 NDJSON`)
 
   // ---------------------------------------------------------------- 建群与防刷屏设置
   const groupName = `验收群${run}`
@@ -245,11 +254,11 @@ async function download(page, click) {
   const groupChat = page.getByRole('region', { name: `与${groupName}的会话` })
   check(await reloadUntil(page, `${base}/im`, page.getByRole('region', { name: '会话列表' }).getByRole('button', { name: new RegExp(groupName) })), '建群后会话列表应出现群聊')
   await page.getByRole('region', { name: '会话列表' }).getByRole('button', { name: new RegExp(groupName) }).click()
-  await groupChat.getByRole('button', { name: '群设置' }).click()
-  const settings = page.getByRole('region', { name: '群设置' })
+  await groupChat.getByRole('button', { name: '群信息', exact: true }).click()
+  const settings = page.getByRole('region', { name: '群信息' })
   await settings.getByLabel('单个实例每分钟最多（条）').waitFor()
   await settings.getByLabel('管理员不发言时，实例最多连续发言（条）').waitFor()
-  step('建群：从顶栏“创建”菜单打开建群表单，拉入实例后会话列表出现群聊，群设置里有防刷屏上限')
+  step('建群：从顶栏“创建”菜单打开建群表单，拉入实例后会话列表出现群聊，群信息栏里有防刷屏上限')
 
   // ---------------------------------------------------------------- 审批卡片：写明由谁触发，在卡片上批准
   // 新建日程只写工作台自己的表，不依赖第三方服务
@@ -267,7 +276,7 @@ async function download(page, click) {
   const cardBox = noticeChat.locator('.ai-card').last()
   check(await reloadUntil(page, `${base}/im?c=${encodeURIComponent(await page.evaluate(() => new URL(location.href).searchParams.get('c') || ''))}`, page.getByRole('region', { name: '与审批通知的会话' }).getByText('待审批')), '审批卡片应显示“待审批”')
   await page.getByRole('region', { name: '与审批通知的会话' }).getByText(/由 Owner 触发/).waitFor()
-  check(await noticeChat.getByLabel('消息').count() === 0, '审批通知会话不能发消息')
+  check(await noticeChat.getByRole('textbox', { name: '消息', exact: true }).count() === 0, '审批通知会话不能发消息')
   await cardBox.getByRole('button', { name: '批准并执行' }).click()
   await cardBox.getByText('已执行').waitFor({ timeout: 30000 })
   step('审批卡片：IM 的“审批通知”会话里出现卡片，写明“由 Owner 触发”，在卡片上批准后显示“已执行”')
@@ -323,7 +332,7 @@ async function download(page, click) {
   }
   await member.page.goto(`${base}/im`)
   await member.page.waitForLoadState('networkidle')
-  check(await member.page.getByLabel('消息').count() === 0, 'member 打开 /im 不应看到聊天输入框')
+  check(await member.page.getByRole('textbox', { name: '消息', exact: true }).count() === 0, 'member 打开 /im 不应看到聊天输入框')
   step('member：导航里没有消息、OpenClaw 实例、密钥库，直接打开 /im 也不能聊天')
 
   // ---------------------------------------------------------------- 浏览器只访问工作台；没有密钥明文

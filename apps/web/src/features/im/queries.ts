@@ -5,6 +5,8 @@ import { ApiError, dataOf, type Schema } from '../../services/api'
 
 // IM queries (V2 OC-4; OC-1 contract §5). All keys start with 'im' so the SSE topic `im` refreshes them.
 export type ConversationKind = Schema['ImConversationOut']['kind']
+// 会话列表顶部的分类（T-0095）：会话类型或通讯录分组；count 是有未读的会话数，muted 表示这些会话都开了免打扰
+export type Folder = { id: string; label: string; kind: ConversationKind | ''; group: string; count: number; muted: boolean }
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 export const UPLOAD_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
 
