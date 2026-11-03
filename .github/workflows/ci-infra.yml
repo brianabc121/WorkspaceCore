@@ -202,9 +202,35 @@ jobs:
           grep '^AGENT_PUBLIC_' .env
       - name: 接入入口自动配置验收（原样的接入包：内部 CA + 地址映射，经本机隧道连回工作台）
         run: sudo -E python3 tests/e2e/agent_auto_ingress_acceptance.py
+      # T-0089 B3：把 runner 自己当成一台“新服务器”——另起一个 sshd（2222），账号要 sudo 密码、不在 docker 组，
+      # 工作台经外网入口的地址（AGENT_PUBLIC_ADDRESS）连过来，从密码登录一路装到真实的 OpenClaw 上线
+      - name: SSH 自动部署验收准备（本机 sshd：专用账号，sudo 要密码，不在 docker 组）
+        run: |
+          command -v /usr/sbin/sshd >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq openssh-server >/dev/null; }
+          PW="$(openssl rand -hex 16)"
+          echo "::add-mask::$PW"
+          echo "SSH_TARGET_PASSWORD=$PW" >> "$GITHUB_ENV"
+          sudo useradd -m -s /bin/bash -G sudo mwdeploy
+          echo "mwdeploy:$PW" | sudo chpasswd
+          ADDR="$(sed -n 's/^AGENT_PUBLIC_ADDRESS=//p' .env)"
+          test -n "$ADDR"
+          D=/etc/ssh/e2e
+          sudo mkdir -p "$D" /run/sshd
+          sudo ssh-keygen -q -t ed25519 -N '' -f "$D/host_ed25519"
+          printf '%s\n' "Port 2222" "ListenAddress $ADDR" "HostKey $D/host_ed25519" "PidFile $D/sshd.pid" \
+            "PasswordAuthentication yes" "KbdInteractiveAuthentication no" "PubkeyAuthentication yes" \
+            "PermitRootLogin no" "UsePAM yes" "AllowUsers mwdeploy" "Subsystem sftp internal-sftp" \
+            | sudo tee "$D/sshd_config" >/dev/null
+          sudo /usr/sbin/sshd -t -f "$D/sshd_config"
+          sudo /usr/sbin/sshd -f "$D/sshd_config" -E "$RUNNER_TEMP/sshd.log"
+          { echo "SSH_TARGET_HOST=$ADDR"; echo "SSH_TARGET_PORT=2222"; echo "SSH_TARGET_USER=mwdeploy"; \
+            echo "SSH_HOST_KEY_PUB=$D/host_ed25519.pub"; } >> "$GITHUB_ENV"
+      - name: SSH 自动部署验收（指纹确认、密码换专用密钥、sudo 加入 docker 组、真实 OpenClaw 上线、重装、卸载、吊销）
+        run: sudo -E python3 tests/e2e/agent_ssh_acceptance.py
       - name: 失败时输出服务状态与日志
         if: failure()
         run: |
+          sudo tail -n 80 "$RUNNER_TEMP/sshd.log" 2>/dev/null || true
           docker compose --profile agents ps -a
           docker compose --profile agents logs --no-color --tail=200
           docker compose -p my-workspace-openim -f infra/openim/compose.yaml --env-file .env logs --no-color --tail=150 || true
@@ -213,3 +239,37 @@ jobs:
         run: |
           make openim-down || true
           docker compose --profile agents down -v
+
+  # T-0089：SSH 自动部署用的 Docker 安装脚本，在支持的三个发行版的干净容器里真正运行一次：
+  # 核对官方软件源的签名公钥指纹，装上锁定版本并 hold（容器里没有 init，最后按预期以 docker_not_running 结束）
+  docker-pins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:12", "ubuntu:22.04", "ubuntu:24.04"]
+    steps:
+      - uses: actions/checkout@v5
+      - name: 在 ${{ matrix.image }} 里运行 install-docker.sh
+        run: |
+          docker run --rm -v "$PWD/services/api/app/agent_provisioning/files/install-docker.sh:/install-docker.sh:ro" \
+            "${{ matrix.image }}" bash -c '
+              bash /install-docker.sh ""; echo "exit=$?"
+              dpkg-query -W -f="\${Package}=\${Version}\n" docker-ce docker-ce-cli containerd.io docker-compose-plugin
+              echo "held: $(apt-mark showhold | sort | tr "\n" " ")"
+            ' 2>&1 | tee "$RUNNER_TEMP/out.log"
+          python3 - "$RUNNER_TEMP/out.log" <<'PY'
+          import re, sys
+          text = open(sys.argv[1], encoding="utf-8").read()
+          script = open("services/api/app/agent_provisioning/files/install-docker.sh", encoding="utf-8").read()
+          pins = dict(re.findall(r'"(docker-ce|docker-ce-cli|containerd\.io|docker-compose-plugin)=([^"~]+)~\$\{suffix\}"', script))
+          assert len(pins) == 4, pins
+          assert "exit=5" in text and "docker_not_running" in text, "脚本应装完并因为容器里没有守护进程以 5 退出"
+          for name, version in pins.items():
+              assert re.search(rf"^{re.escape(name)}={re.escape(version)}~", text, re.M), f"{name} 不是锁定版本 {version}"
+          held = text.split("held: ", 1)[1].split()
+          assert sorted(held) == sorted(pins), f"没有全部 hold：{held}"
+          print("锁定版本与 hold 都正确：", pins)
+          PY
+

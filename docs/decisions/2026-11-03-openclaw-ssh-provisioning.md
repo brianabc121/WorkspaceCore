@@ -174,3 +174,42 @@
 PATH 里是假的 docker、sudo、bash、chown、crontab；覆盖完整安装、重新部署（不用密码）、root 与 uid 1000 账号、
 密码错误、sudo 被拒、不支持的发行版、插件校验失败、没有上线、主机公钥被换、前提条件、进行中的限制与重启中断，
 并检查密码与令牌不出现在任务、目标服务器与审计记录里。真实 sshd + 真实 OpenClaw 的端到端验收在 B3。
+
+## 6. B：卸载、吊销与端到端验收（T-0089 B3）
+
+### 6.1 卸载
+
+`POST /api/v1/agents/instances/{id}/ssh/uninstall`（`version`、`remove_files`）：任务（`kind = 'uninstall'`，迁移 0023 放宽检查约束），
+只用专用密钥，步骤 connect → inspect → stop → unschedule → remove_files：
+
+- stop：接入包目录里有 `compose.yaml` 时 `docker compose down --remove-orphans`；
+- unschedule：删掉 crontab 里带 `# myworkspace-openclaw` 标记的行，其他行保留；
+- remove_files（可选，不可恢复）：账号既不是 root 也不是 uid 1000 时先用锁定镜像里的 chown 收回属主，再
+  `rm -rf -- <主目录>/myworkspace-openclaw`（只接受这一种路径）；
+- 不卸载 Docker，不吊销专用公钥与实例凭证（实例页可以吊销凭证）；成功后清空 `installed_at`，删了目录时清空 `install_dir`。
+
+### 6.2 吊销专用密钥
+
+`POST /api/v1/agents/instances/{id}/ssh/revoke`（`version`、`force`）：锁住目标服务器这一行，用专用密钥登录，
+从 `~/.ssh/authorized_keys` 删掉这把公钥所在的行（按“类型 公钥数据”匹配，先写临时文件再替换，其他行原样保留），
+再删除工作台保存的私钥（审计 `agents.ssh.key_revoked`，`remote_removed`）。连不上时 503 `AGENT_SSH_UNREACHABLE`；
+`force=true` 只删除工作台保存的私钥，返回的 `warning` 给出要在服务器上手动删除的那一行。吊销之后才能更换或删除目标服务器。
+
+### 6.3 本机实测（2026-11-03）
+
+本会话的沙箱里起了一个只监听 127.0.0.1:2222 的真实 sshd，账号在 sudo 组（要密码）、不在 docker 组：
+密码登录（PAM）、inspect、装专用公钥、真实的 `sudo -S`、`install-docker.sh`（已有 Docker：只加入 docker 组）、
+专用密钥重新登录（新会话里 docker 组生效）、SFTP 上传、`docker compose pull`、镜像里的 chown 交给 uid 1000 都通过；
+插件一步因为沙箱的代理拦截 TLS 失败（`SELF_SIGNED_CERT_IN_CHAIN`）——由此发现 `npm pack --silent` 把错误也吞掉了，
+改为 `--loglevel=error`，失败原因进任务日志。卸载（停止、收回属主、删除目录）与吊销（authorized_keys 清空）也在这台 sshd 上通过。
+
+### 6.4 CI 端到端
+
+`ci-infra` 的 agents job 在接入入口自动配置之后，把 runner 自己当成一台新服务器：另起一个 sshd（2222，监听
+`AGENT_PUBLIC_ADDRESS`），账号 `mwdeploy` 要 sudo 密码、不在 docker 组；`tests/e2e/agent_ssh_acceptance.py`
+走完指纹确认 → 密码安装（sudo 加入 docker 组）→ **真实的 OpenClaw 经外网入口连上工作台** → 密码不在数据库里 →
+不填密码重装 → 卸载（删除目录）→ 吊销 → 删除目标服务器。
+
+`docker-pins` job 在 `debian:12`、`ubuntu:22.04`、`ubuntu:24.04` 的干净容器里真正运行 `install-docker.sh`，
+核对装上的是锁定版本并且都 hold 了（补上了本环境装不了的 Debian 12）。
+
