@@ -54,6 +54,9 @@ case "$1" in
       run)
         cat > "$STATE/plugin-stdin"
         if [ -f "$STATE/plugin_fail" ]; then echo "plugin_sha256_mismatch 0000" >&2; exit 6; fi
+        # 与 install-plugin.sh 一致：已经装了锁定版本时只打印这一行
+        if [ -f "$STATE/plugin_installed" ]; then echo "plugin_already_installed 0.3.3"; exit 0; fi
+        touch "$STATE/plugin_installed"
         echo "Installed plugin: openclaw-channel" ;;
       up) touch "$STATE/up" ;;
       ps) echo "openclaw   running" ;;
@@ -424,6 +427,7 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     # 插件脚本：锁定版本与 sha256
     plugin = (host.state / "plugin-stdin").read_text()
     assert f'package="{prov.PLUGIN_PACKAGE}"' in plugin
+    assert f'"{prov.PLUGIN_NAME}" "{prov.PLUGIN_VERSION}"' in plugin
     assert f'expected="{prov.PLUGIN_SHA256}"' in plugin
     assert "--force --accept-capabilities" in plugin
 
@@ -486,6 +490,8 @@ async def test_reinstall_without_password_reuses_key(owner: Owner, tmp_path: Pat
     steps = _steps(second)
     assert steps["authorize_key"] == "skipped"
     assert steps["docker"] == "skipped"
+    # 已经装了锁定版本的插件：不再重装（OpenClaw 运行过后带 --force 重装会被拒绝）
+    assert steps["plugin"] == "skipped"
     assert second["target"]["client_key_fingerprint"] == fingerprint
     assert "password" not in host.logins[logins:]
     assert len(host.authorized()) == 1

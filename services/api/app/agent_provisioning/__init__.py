@@ -22,7 +22,8 @@ OPENCLAW_IMAGE = (
     f"openclaw/openclaw:{OPENCLAW_VERSION}"
     "@sha256:eefba69ec4a5fa596f3b1a8fac4f09525ce10435617a23f2a2090ddd3b6c1c2f"
 )
-PLUGIN_PACKAGE = f"@openim/openclaw-channel@{PLUGIN_VERSION}"
+PLUGIN_NAME = "@openim/openclaw-channel"
+PLUGIN_PACKAGE = f"{PLUGIN_NAME}@{PLUGIN_VERSION}"
 # 发布包 sha256：与 docs/versions.md、接入包 CHECKLIST.md 一致（测试核对）
 PLUGIN_SHA256 = "3d10dca0edcba0ecdb0dc915e7cf1ddf5a8453165de13dec76bbe5ef85607643"
 # 官方镜像里运行 OpenClaw 的用户（node）
@@ -64,6 +65,8 @@ def plugin_script() -> str:
     return (
         script("install-plugin.sh")
         .replace("@PACKAGE@", PLUGIN_PACKAGE)
+        .replace("@PLUGIN_NAME@", PLUGIN_NAME)
+        .replace("@PLUGIN_VERSION@", PLUGIN_VERSION)
         .replace("@SHA256@", PLUGIN_SHA256)
     )
 

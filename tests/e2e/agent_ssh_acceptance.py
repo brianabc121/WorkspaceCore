@@ -211,7 +211,9 @@ def main() -> int:
         return report.finish()
     again = steps(state)
     report.check(
-        "重新部署跳过装公钥与 Docker", again["authorize_key"] == "skipped" and again["docker"] == "skipped"
+        "重新部署跳过装公钥、Docker 与已经装好的插件",
+        again["authorize_key"] == "skipped" and again["docker"] == "skipped" and again["plugin"] == "skipped",
+        json.dumps(again, ensure_ascii=False),
     )
     report.check("authorized_keys 里仍然只有一行", len(keys_file.read_text().splitlines()) == 1)
     if done["schedule"] == "done":

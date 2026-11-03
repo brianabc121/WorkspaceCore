@@ -203,7 +203,16 @@ PATH 里是假的 docker、sudo、bash、chown、crontab；覆盖完整安装、
 插件一步因为沙箱的代理拦截 TLS 失败（`SELF_SIGNED_CERT_IN_CHAIN`）——由此发现 `npm pack --silent` 把错误也吞掉了，
 改为 `--loglevel=error`，失败原因进任务日志。卸载（停止、收回属主、删除目录）与吊销（authorized_keys 清空）也在这台 sshd 上通过。
 
-### 6.4 CI 端到端
+### 6.4 重新部署时不重装插件
+
+CI 端到端第二次运行时发现：OpenClaw 运行过一段时间后，`state/` 里已有插件设置，带 `--force` 重装同一个插件会被拒绝
+（`Plugin settings are not ready for activation: openclaw-channel. Run openclaw doctor --fix …`；第一次 CI 通过只是因为重装时
+OpenClaw 还没走到这一步）。`install-plugin.sh` 先看 `extensions/openclaw-channel/package.json`：名字与版本都是锁定值时
+输出 `plugin_already_installed` 并跳过（任务里这一步显示 skipped），也避免与正在运行的 OpenClaw 同时改 `state/`。
+在锁定镜像里离线验证过两种情况（已安装 → 跳过、不联网；空的 state → 照常安装）。升级插件版本时的数据迁移
+（`doctor --fix`）没有核验，留到升级插件时再做。
+
+### 6.5 CI 端到端
 
 `ci-infra` 的 agents job 在接入入口自动配置之后，把 runner 自己当成一台新服务器：另起一个 sshd（2222，监听
 `AGENT_PUBLIC_ADDRESS`），账号 `mwdeploy` 要 sudo 密码、不在 docker 组；`tests/e2e/agent_ssh_acceptance.py`

@@ -644,7 +644,10 @@ class Installer:
         )
         if not result.ok:
             raise _script_failure(result, "plugin_failed", "安装 openclaw-channel 失败，详见日志")
-        await self.rec.step("plugin", "done", prov.PLUGIN_PACKAGE)
+        if "plugin_already_installed" in result.stdout:
+            await self.rec.step("plugin", "skipped", f"已经安装 {prov.PLUGIN_PACKAGE}")
+        else:
+            await self.rec.step("plugin", "done", prov.PLUGIN_PACKAGE)
 
         await self.rec.step("start", "running")
         result = await self._run(
