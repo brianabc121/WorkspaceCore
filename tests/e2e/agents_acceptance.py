@@ -789,12 +789,15 @@ def scenario_15(c: Ctx) -> None:
             f"{len(jobs)} 个；{json.dumps(job.get('schedule'), ensure_ascii=False)}")
     since = time.time()
     c.a.exec("node", "openclaw.mjs", "automations", "run", job["id"], "--wait", "--wait-timeout", "3m", timeout=240)
+    # OpenClaw 把定时任务的提示词作为 “[cron:<id> <名字>] <提示词>” 发给模型，后面再接一段英文前言
+    # （K-0 核验第 5 节）；假模型的 echo 回复是这段文字的开头，用它确认模型收到的是复盘提示词
+    marker = f"{REFLECTION_KEY}] 每晚复盘"
     turns = wait_for("复盘调用模型", lambda: [r for r in c.model_calls(c.keys["a"], since)
-                                         if "不是指令" in r["last_user"] or "每晚复盘" in r["last_user"]], timeout=120)
-    offered = {name for r in turns for name in r.get("tools") or []}
+                                         if marker in str(r["result"].get("content", ""))], timeout=120)
+    offered = {name for r in c.model_calls(c.keys["a"], since) for name in r.get("tools") or []}
     time.sleep(5)
     c.check("每晚复盘：立即运行一次，甲按复盘提示词调用模型；工具仍只有 IM 发消息与工作台工具；不往 IM 发结果",
-            bool(turns) and offered <= AGENT_TOOLS and not c.from_sender(c.conv_a, c.a.im_user_id, "不是指令"),
+            bool(turns) and offered <= AGENT_TOOLS and not c.from_sender(c.conv_a, c.a.im_user_id, marker),
             ", ".join(sorted(offered)))
 
 

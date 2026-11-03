@@ -101,3 +101,7 @@
   - CI 的 agents 任务（`tests/e2e/agents_acceptance.py` 场景 15）用 `automations run <id> --wait` 立即运行一次复盘，检查模型拿到的工具只有 IM 发消息与工作台工具。
   - `--tools <list>` 可以进一步限定，但它和 Tool Search 暴露的 MCP 工具怎么配合没有核验，暂不使用（TODO：核验后再收紧）。
 - **权限**：CLI 在容器里用接入包的网关令牌（`OPENCLAW_GATEWAY_TOKEN`）连本机网关，和现有的 `secrets reload` 定时任务一样。
+- **运行时模型收到什么**：`automations run <id> --wait` 立即运行一次（调试用），本机加假模型实测：
+  - 新的独立会话（`sessionKey` 是 `agent:main:cron:<id>:run:<会话>`），约 10 秒跑完，结果 `deliveryStatus: not-requested`；
+  - 用户消息是 `[cron:<id> <名字>] <提示词>`，后面接一段 OpenClaw 自带的英文前言（任务指令优先；任务不再需要时“在工具允许时删除它”，接入包禁用了定时任务工具，智能体删不了）。
+  - CI 的场景 15 按这个格式认出复盘请求。
