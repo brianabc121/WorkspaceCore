@@ -376,10 +376,62 @@ class AgentSshTargetOut(BaseModel):
     host_key_confirmed: bool
     host_key_confirmed_at: datetime | None
     client_key_installed: bool = Field(description="是否已经在这台服务器上装了工作台的专用公钥")
+    client_key_fingerprint: str | None = Field(
+        default=None, description="专用公钥的 SHA256 指纹（服务器上 authorized_keys 里的那一行）"
+    )
+    install_dir: str | None = Field(default=None, description="接入包在服务器上的目录")
+    installed_at: datetime | None = Field(default=None, description="最近一次安装成功的时间")
     version: int
     created_at: datetime
     updated_at: datetime
 
 
+class AgentSshInstall(_Strict):
+    """开始自动安装。登录密码只用于这一次（登录、装专用公钥、需要时用 sudo 装 Docker），不保存。"""
+
+    version: Version = Field(description="目标服务器的当前版本号")
+    password: SecretStr | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1024,
+        description="SSH 登录密码；已经装了专用公钥、且 Docker 可以直接使用时可以不填",
+    )
+
+
+SshJobStepKey = Literal[
+    "connect",
+    "inspect",
+    "authorize_key",
+    "docker",
+    "reconnect",
+    "upload",
+    "pull",
+    "plugin",
+    "start",
+    "schedule",
+    "online",
+]
+
+
+class AgentSshJobStep(BaseModel):
+    key: SshJobStepKey
+    status: Literal["pending", "running", "done", "skipped", "failed"]
+    detail: str | None = None
+
+
+class AgentSshJobOut(BaseModel):
+    id: UUID
+    kind: Literal["install"]
+    status: Literal["running", "succeeded", "failed", "interrupted"]
+    steps: list[AgentSshJobStep]
+    log: str = Field(description="命令输出的末尾（最多 64 KB），密码、令牌、私钥已替换成 ***")
+    error_code: str | None
+    error_message: str | None
+    started_at: datetime
+    finished_at: datetime | None
+    updated_at: datetime
+
+
 class AgentSshState(BaseModel):
     target: AgentSshTargetOut | None
+    job: AgentSshJobOut | None = Field(default=None, description="最近一次安装任务")

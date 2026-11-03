@@ -236,6 +236,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/instances/{instance_id}/ssh/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 开始自动安装 OpenClaw（owner）
+         * @description 主机公钥已确认、外网接入入口已配置、实例启用且是外网模式时，新建安装任务并立即返回；进度看 GET /ssh 的 job（steps、脱敏后的 log）。登录密码只用于这一次（登录、装专用公钥、需要时用 sudo 装 Docker），不保存；已经装了专用公钥、且 Docker 可以直接使用时可以不填。主机公钥未确认时 409 AGENT_SSH_HOST_KEY_UNCONFIRMED；已经有进行中的任务时 409 AGENT_SSH_JOB_RUNNING；外网入口未配置时 409 AGENT_INGRESS_NOT_CONFIGURED。
+         */
+        post: operations["install_agent_ssh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/secrets": {
         parameters: {
             query?: never;
@@ -2217,8 +2237,82 @@ export interface components {
              */
             version: number;
         };
+        /**
+         * AgentSshInstall
+         * @description 开始自动安装。登录密码只用于这一次（登录、装专用公钥、需要时用 sudo 装 Docker），不保存。
+         */
+        AgentSshInstall: {
+            /**
+             * Password
+             * @description SSH 登录密码；已经装了专用公钥、且 Docker 可以直接使用时可以不填
+             */
+            password?: string | null;
+            /**
+             * Version
+             * @description 目标服务器的当前版本号
+             */
+            version: number;
+        };
+        /** AgentSshJobOut */
+        AgentSshJobOut: {
+            /** Error Code */
+            error_code: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "install";
+            /**
+             * Log
+             * @description 命令输出的末尾（最多 64 KB），密码、令牌、私钥已替换成 ***
+             */
+            log: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "succeeded" | "failed" | "interrupted";
+            /** Steps */
+            steps: components["schemas"]["AgentSshJobStep"][];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** AgentSshJobStep */
+        AgentSshJobStep: {
+            /** Detail */
+            detail?: string | null;
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "connect" | "inspect" | "authorize_key" | "docker" | "reconnect" | "upload" | "pull" | "plugin" | "start" | "schedule" | "online";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "skipped" | "failed";
+        };
         /** AgentSshState */
         AgentSshState: {
+            /** @description 最近一次安装任务 */
+            job?: components["schemas"]["AgentSshJobOut"] | null;
             target: components["schemas"]["AgentSshTargetOut"] | null;
         };
         /** AgentSshTargetOut */
@@ -2228,6 +2322,11 @@ export interface components {
              * @description 探测时解析出的地址；之后都连这个地址
              */
             address: string;
+            /**
+             * Client Key Fingerprint
+             * @description 专用公钥的 SHA256 指纹（服务器上 authorized_keys 里的那一行）
+             */
+            client_key_fingerprint?: string | null;
             /**
              * Client Key Installed
              * @description 是否已经在这台服务器上装了工作台的专用公钥
@@ -2251,6 +2350,16 @@ export interface components {
              * @description SHA256 指纹，格式与 ssh-keygen -lf 相同
              */
             host_key_fingerprint: string;
+            /**
+             * Install Dir
+             * @description 接入包在服务器上的目录
+             */
+            install_dir?: string | null;
+            /**
+             * Installed At
+             * @description 最近一次安装成功的时间
+             */
+            installed_at?: string | null;
             /** Port */
             port: number;
             /**
@@ -7067,6 +7176,91 @@ export interface operations {
             };
             /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    install_agent_ssh: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSshInstall"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSshState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

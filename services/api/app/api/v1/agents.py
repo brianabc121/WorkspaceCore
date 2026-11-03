@@ -33,6 +33,7 @@ from app.schemas.agents import (
     AgentSettingsOut,
     AgentSettingsUpdate,
     AgentSshConfirm,
+    AgentSshInstall,
     AgentSshState,
     AgentSshTargetSet,
     BundleRequest,
@@ -241,6 +242,30 @@ async def confirm_agent_ssh(
     body: AgentSshConfirm,
 ) -> AgentSshState:
     return await service.confirm(
+        access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
+    )
+
+
+@router.post(
+    "/agents/instances/{instance_id}/ssh/install",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="开始自动安装 OpenClaw（owner）",
+    description="主机公钥已确认、外网接入入口已配置、实例启用且是外网模式时，新建安装任务并立即返回；"
+    "进度看 GET /ssh 的 job（steps、脱敏后的 log）。登录密码只用于这一次（登录、装专用公钥、"
+    "需要时用 sudo 装 Docker），不保存；已经装了专用公钥、且 Docker 可以直接使用时可以不填。"
+    "主机公钥未确认时 409 AGENT_SSH_HOST_KEY_UNCONFIRMED；已经有进行中的任务时 409 "
+    "AGENT_SSH_JOB_RUNNING；外网入口未配置时 409 AGENT_INGRESS_NOT_CONFIGURED。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 503),
+)
+async def install_agent_ssh(
+    access: Owner,
+    request: Request,
+    service: SshService,
+    instance_id: UUID,
+    body: AgentSshInstall,
+) -> AgentSshState:
+    return await service.install(
         access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
     )
 

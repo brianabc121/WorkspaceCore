@@ -7,14 +7,17 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.domain.agent_ssh import agent_ssh_context
 from app.domain.agents import agent_secret_context
 from app.domain.app_logins import password_context
 from app.domain.connectors import account_context
 from app.domain.credential_rotation import rotate
 from app.domain.credentials import CredentialBox
 from app.models import (
+    AgentInstance,
     AgentSecret,
     AgentSecretVersion,
+    AgentSshTarget,
     AppLogin,
     Integration,
     IntegrationAccount,
@@ -68,12 +71,41 @@ async def _seed(url: str, box: CredentialBox) -> dict[str, uuid.UUID]:
                     password_ref=box.seal("pw", context=password_context(login_id)),
                 )
             )
+            # SSH 自动部署的专用私钥（T-0089 B2）
+            instance_id, target_id = uuid.uuid4(), uuid.uuid4()
+            db.add(
+                AgentInstance(
+                    id=instance_id,
+                    workspace_id=workspace,
+                    name="SSH",
+                    network_mode="public",
+                    im_user_id="bot_rotation",
+                    im_nickname="SSH",
+                )
+            )
+            await db.flush()
+            db.add(
+                AgentSshTarget(
+                    id=target_id,
+                    workspace_id=workspace,
+                    instance_id=instance_id,
+                    host="203.0.113.5",
+                    address="203.0.113.5",
+                    port=22,
+                    username="deploy",
+                    host_key_algorithm="ssh-ed25519",
+                    host_key="ssh-ed25519 AAAA",
+                    host_key_fingerprint="SHA256:x",
+                    client_key_ref=box.seal("private key", context=agent_ssh_context(target_id)),
+                )
+            )
             await db.commit()
             return {
                 "integration": integration_id,
                 "account": account_id,
                 "secret": secret_id,
                 "login": login_id,
+                "target": target_id,
             }
     finally:
         await engine.dispose()
@@ -93,16 +125,17 @@ async def test_rotation_reencrypts_every_sealed_field(migrated_database_url: str
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
             dry = await rotate(db, box, dry_run=True)
-            assert dry.remaining_old == 3 and dry.failed == 0
+            assert dry.remaining_old == 4 and dry.failed == 0
             report = await rotate(db, box)
             assert report.remaining_old == 0 and report.failed == 0
-            assert sum(f.rotated for f in report.fields.values()) == 3
+            assert sum(f.rotated for f in report.fields.values()) == 4
             again = await rotate(db, box)  # 可以重复运行
             assert sum(f.rotated for f in again.fields.values()) == 0
             account = (await db.execute(select(IntegrationAccount))).scalar_one()
             integration = (await db.execute(select(Integration))).scalar_one()
             version = (await db.execute(select(AgentSecretVersion))).scalar_one()
             login = (await db.execute(select(AppLogin))).scalar_one()
+            target = (await db.execute(select(AgentSshTarget))).scalar_one()
     finally:
         await engine.dispose()
     assert box.key_id_in(account.credential_ref) == box.key_id
@@ -118,6 +151,8 @@ async def test_rotation_reencrypts_every_sealed_field(migrated_database_url: str
     assert secret.get_secret_value() == "sk-1"
     password = box.resolve(login.password_ref or "", context=password_context(ids["login"]))
     assert password.get_secret_value() == "pw"
+    key = box.resolve(target.client_key_ref or "", context=agent_ssh_context(ids["target"]))
+    assert key.get_secret_value() == "private key"
     # 重新加密对业务不可见：不改 updated_at
     assert integration.updated_at == before
     # 只用新密钥（删掉旧密钥之后）也能读
@@ -141,8 +176,8 @@ async def test_ciphertext_without_its_key_is_reported_not_dropped(
             report = await rotate(db, box)
     finally:
         await engine.dispose()
-    assert report.failed == 3
-    assert report.remaining_old == 3  # 原样保留，不会被清掉或写坏
+    assert report.failed == 4
+    assert report.remaining_old == 4  # 原样保留，不会被清掉或写坏
 
 
 @pytest.mark.parametrize("dry_run", [True])
@@ -157,4 +192,4 @@ async def test_dry_run_writes_nothing(migrated_database_url: str, dry_run: bool)
             report = await rotate(db, box, dry_run=True)
     finally:
         await engine.dispose()
-    assert report.remaining_old == 3
+    assert report.remaining_old == 4
