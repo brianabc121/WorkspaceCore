@@ -7,6 +7,8 @@
 - 认证在路由里做（`app/api/mcp.py`，与 `/agent-api` 同一套），这里只拿到已认证的实例 ID。
   SDK 在自己的任务组里处理请求，所以实例 ID 放在 ASGI scope 的 state 里传进来，不用 contextvar。
 - 每次工具调用都按实例限流（每分钟 120 次）；写工具与高危工具只建待审批记录（A14），读工具也写记录。
+- 知识库工具（knowledge_*，T-0098）由 app/domain/knowledge_tools.py 处理：写入直接执行、不审批，
+  由知识库自己的保护措施兜底（docs/v2/KNOWLEDGE_PLAN.md 3.8）。
 - 错误：`isError: true`，结构化内容 `{"error": {"code", "message"}}`。
 """
 
@@ -28,12 +30,13 @@ from starlette.requests import Request
 from app import __version__
 from app.core.errors import ApiError
 from app.core.logging import request_id_var
-from app.domain import ops_metrics
+from app.domain import knowledge_tools, ops_metrics
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.mcp_read_tools import READ_HANDLERS, ReadCall
 from app.domain.ratelimit import WindowLimiter
 from app.models import AgentInstance
 from app.schemas.ai_tools import (
+    KNOWLEDGE_TOOL_NAMES,
     TOOLS,
     ToolSpec,
 )
@@ -54,7 +57,7 @@ class McpCaller:
 
 
 def available(spec: ToolSpec) -> bool:
-    return spec.risk != "read" or spec.name in READ_HANDLERS
+    return spec.risk != "read" or spec.name in READ_HANDLERS or spec.name in KNOWLEDGE_TOOL_NAMES
 
 
 def tool_definition(spec: ToolSpec) -> types.Tool:
@@ -65,8 +68,9 @@ def tool_definition(spec: ToolSpec) -> types.Tool:
         output_schema=spec.output_model.model_json_schema(),
         annotations=types.ToolAnnotations(
             read_only_hint=spec.risk == "read",
-            destructive_hint=spec.risk == "critical",
-            idempotent_hint=spec.risk == "read",
+            destructive_hint=spec.risk == "critical" or spec.name == "knowledge_delete",
+            # 知识库写工具带幂等键：同一个键重试不会重复写入
+            idempotent_hint=spec.risk in ("read", "knowledge"),
             open_world_hint=False,
         ),
     )
@@ -174,7 +178,11 @@ async def _dispatch(
             requester = await service.requester(instance)
             raw = dict(params.arguments or {})
             try:
-                if spec.risk == "read":
+                if spec.name in KNOWLEDGE_TOOL_NAMES:
+                    output = await knowledge_tools.run(
+                        service, requester, spec, raw, request_id=caller.request_id
+                    )
+                elif spec.risk == "read":
                     output = await _read(service, requester, spec, raw, caller, state)
                 else:
                     output = await service.request(

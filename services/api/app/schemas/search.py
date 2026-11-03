@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from app.schemas.common import Page
 
-SearchType = Literal["task", "project", "bookmark", "event", "repo", "issue", "pull"]
+SearchType = Literal["task", "project", "bookmark", "event", "repo", "issue", "pull", "note"]
+# 智能体的 search 工具不含知识库笔记：笔记有按知识库的读权限，智能体用 knowledge_search（T-0098）
+AgentSearchType = Literal["task", "project", "bookmark", "event", "repo", "issue", "pull"]
 SearchProvider = Literal["github", "affine", "local"]
 SearchQuery = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 

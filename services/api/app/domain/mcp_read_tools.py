@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast, get_args
 
 from redis.asyncio import Redis
 from sqlalchemy import func, select
@@ -88,6 +88,7 @@ from app.schemas.ai_tools import (
     TaskText,
 )
 from app.schemas.integrations import SyncState
+from app.schemas.search import AgentSearchType
 
 # 没有分页参数的列表工具最多返回的条数（契约第 9.2 节：列表最多 50）
 LIST_CAP = 50
@@ -143,12 +144,18 @@ def local_freshness() -> Freshness:
 
 async def _search(call: ReadCall, args: SearchInput) -> SearchOutput:
     page = await SearchService(call.db).search(
-        call.user_id, call.access, q=args.q, types=args.types or None, cursor=None, limit=args.limit
+        call.user_id,
+        call.access,
+        q=args.q,
+        # 知识库笔记不在这里（按知识库的读权限，智能体用 knowledge_search）
+        types=list(args.types) or list(get_args(AgentSearchType)),
+        cursor=None,
+        limit=args.limit,
     )
     return SearchOutput(
         items=[
             SearchHit(
-                resource_type=item.resource_type,
+                resource_type=cast(AgentSearchType, item.resource_type),
                 id=item.id,
                 provider=item.provider,
                 updated_at=item.updated_at,

@@ -31,7 +31,22 @@ from app.schemas.calendar import CalendarEventCreate
 from app.schemas.common import Page
 from app.schemas.developer import GitHubStateFilter
 from app.schemas.knowledge import BookmarkCreate
-from app.schemas.search import SearchType
+from app.schemas.knowledge_tools import DESCRIPTIONS as KNOWLEDGE_DESCRIPTIONS
+from app.schemas.knowledge_tools import (
+    KnowledgeBriefInput,
+    KnowledgeBriefOutput,
+    KnowledgeDeleteInput,
+    KnowledgeDeleteOutput,
+    KnowledgeGetInput,
+    KnowledgeGetOutput,
+    KnowledgeListInput,
+    KnowledgeListOutput,
+    KnowledgeSearchInput,
+    KnowledgeSearchOutput,
+    KnowledgeWriteInput,
+    KnowledgeWriteOutput,
+)
+from app.schemas.search import AgentSearchType
 from app.schemas.tasks import (
     Priority,
     TaskCreate,
@@ -41,7 +56,8 @@ from app.schemas.tasks import (
 )
 from app.schemas.workspaces import Role
 
-RiskLevel = Literal["read", "write", "critical"]
+# knowledge：知识库工具，直接执行、不审批（docs/v2/KNOWLEDGE_PLAN.md 3.7，人类 2026-11-03 决定）
+RiskLevel = Literal["read", "write", "critical", "knowledge"]
 ExecutionStatus = Literal[
     "pending_approval",
     "rejected",
@@ -161,7 +177,9 @@ class _Untrusted(BaseModel):
 
 class SearchInput(_Strict):
     q: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
-    types: list[SearchType] = Field(default_factory=list, description="为空表示全部类型")
+    types: list[AgentSearchType] = Field(
+        default_factory=list, description="为空表示全部类型；知识库笔记用 knowledge_search"
+    )
     limit: int = Field(default=10, ge=1, le=20)
 
 
@@ -171,7 +189,7 @@ class SearchHitText(_Untrusted):
 
 
 class SearchHit(BaseModel):
-    resource_type: SearchType
+    resource_type: AgentSearchType
     id: UUID
     provider: str
     updated_at: datetime | None
@@ -540,6 +558,12 @@ def _spec(
     return ToolSpec(name, risk, scope, role, input_model, output_model, description)
 
 
+def _knowledge(name: str, input_model: type[BaseModel], output_model: type[BaseModel]) -> ToolSpec:
+    """知识库工具：读的风险等级是 read；写和删除是 knowledge（直接执行，权限范围 read_write）。"""
+    risk: RiskLevel = "knowledge" if name in ("knowledge_write", "knowledge_delete") else "read"
+    return _spec(name, risk, input_model, output_model, KNOWLEDGE_DESCRIPTIONS[name])
+
+
 _READ: list[ToolSpec] = [
     _spec("search", "read", SearchInput, SearchOutput, "全局搜索任务、项目、书签、日程、仓库"),
     _spec("list_tasks", "read", ListTasksInput, ListTasksOutput, "列出任务"),
@@ -607,7 +631,16 @@ _CRITICAL: list[ToolSpec] = [
         "触发白名单工作流（高危，需要审批和二次认证）",
     ),
 ]
-TOOLS: dict[str, ToolSpec] = {spec.name: spec for spec in _READ + _WRITE + _CRITICAL}
+_KNOWLEDGE: list[ToolSpec] = [
+    _knowledge("knowledge_search", KnowledgeSearchInput, KnowledgeSearchOutput),
+    _knowledge("knowledge_get", KnowledgeGetInput, KnowledgeGetOutput),
+    _knowledge("knowledge_list", KnowledgeListInput, KnowledgeListOutput),
+    _knowledge("knowledge_brief", KnowledgeBriefInput, KnowledgeBriefOutput),
+    _knowledge("knowledge_write", KnowledgeWriteInput, KnowledgeWriteOutput),
+    _knowledge("knowledge_delete", KnowledgeDeleteInput, KnowledgeDeleteOutput),
+]
+TOOLS: dict[str, ToolSpec] = {spec.name: spec for spec in _READ + _WRITE + _CRITICAL + _KNOWLEDGE}
+KNOWLEDGE_TOOL_NAMES = frozenset(spec.name for spec in _KNOWLEDGE)
 
 # 永远不做成工具（方案第 4.6 节）：集成凭证与设置、成员与角色、会话、工作台设置、
 # 实例与密钥管理、审计日志

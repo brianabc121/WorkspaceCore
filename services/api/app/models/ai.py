@@ -23,7 +23,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
 
-RISK_LEVELS = ("read", "write", "critical")
+# knowledge：知识库工具，直接执行、不审批（docs/v2/KNOWLEDGE_PLAN.md 3.7，迁移 0024）
+RISK_LEVELS = ("read", "write", "critical", "knowledge")
 EXECUTION_STATUSES = (
     "pending_approval",
     "rejected",

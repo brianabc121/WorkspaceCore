@@ -30,7 +30,8 @@ from app.domain.im import openim_client
 from app.domain.im_groups import ImGroupService
 from app.domain.im_service import ImService
 from app.domain.integrations import IntegrationService
-from app.domain.knowledge import KnowledgeService
+from app.domain.knowledge import KnowledgeService as BookmarkService
+from app.domain.knowledge_views import KnowledgeService
 from app.domain.members import MemberService
 from app.domain.notifications import NotificationService
 from app.domain.operations import DeploymentHealth, OperationsService
@@ -123,6 +124,13 @@ def get_integration_service(
 
 
 def get_knowledge_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> BookmarkService:
+    return BookmarkService(db, settings)
+
+
+def get_knowledge_base_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> KnowledgeService:

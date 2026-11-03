@@ -2,9 +2,9 @@
 id: T-0098
 title: 知识库后端：三类知识库、笔记与版本、链接、回收站、接口；智能体 knowledge_* 工具与保护（K-1 + K-4）
 owner: claude
-status: todo
+status: done
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web/src/services/schema.d.ts,apps/web/src/features/ai,apps/web/src/features/search,docs
 depends_on: T-0097
 created: 2026-11-03
@@ -19,15 +19,15 @@ updated: 2026-11-03
 - K-4：智能体的 `knowledge_*` MCP 工具（读直接执行，写不审核），以及 3.8 的保护：权限校验、版本与撤销、回收站、密钥拦截、限流与自动暂停、来源标记、冲突提醒、变更记录。
 
 ## 验收标准
-- [ ] 迁移 0024（新表与检查约束、搜索触发器、补建知识库）及升降级测试
-- [ ] 人用的接口：知识库、参与的智能体、笔记、版本与撤销、回收站、图谱、变更记录；按角色校验，跨工作空间隔离
-- [ ] MCP 工具 knowledge_search / get / list / brief / write / delete：
+- [x] 迁移 0024（新表与检查约束、搜索触发器、补建知识库）及升降级测试
+- [x] 人用的接口：知识库、参与的智能体、笔记、版本与撤销、回收站、图谱、变更记录；按角色校验，跨工作空间隔离
+- [x] MCP 工具 knowledge_search / get / list / brief / write / delete：
   - 风险等级 knowledge，不进审批；
   - 幂等，写入带 base_version；
   - 工具描述不超过 1200 字符
-- [ ] 保护：密钥拦截（原文不入库、不进日志）、每小时写 20 次 / 删 5 篇、超过删除上限自动暂停并通知、单篇 20 KB、简报只有人能改
-- [ ] 人修改或撤销智能体写的内容时，写回它的《收到的纠正》
-- [ ] ruff / mypy / pytest 通过；OpenAPI 与 `apps/web` 的 `schema.d.ts` 同步；web lint / typecheck / test 通过
+- [x] 保护：密钥拦截（原文不入库、不进日志）、每小时写 20 次 / 删 5 篇、超过删除上限自动暂停并通知、单篇 20 KB、简报只有人能改
+- [x] 人修改或撤销智能体写的内容时，写回它的《收到的纠正》
+- [x] ruff / mypy / pytest 通过；OpenAPI 与 `apps/web` 的 `schema.d.ts` 同步；web lint / typecheck / test 通过
 
 ## 背景 / 约束 / 参考
 - 方案：`docs/v2/KNOWLEDGE_PLAN.md`（已批准）；核验：`docs/decisions/2026-11-03-knowledge-k0-verification.md`
@@ -36,3 +36,6 @@ updated: 2026-11-03
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-03 20:45 UTC · claude · 创建任务（owner: claude）
+- 2026-11-03 21:32 UTC · claude · 开始任务
+- 2026-11-03 21:36 UTC · claude · 后端完成：迁移 0024 + 模型、/api/v1/knowledge/* 接口、knowledge_* 工具与保护、相近标题双向冲突标记；docs/api-contract.md、docs/data-dictionary.md 已补。本地：ruff/format/mypy 通过，pytest 全量 648 passed / 10 skipped（13 分 30 秒），知识库 25 个测试通过；web lint/typecheck/test 通过。越界一处：apps/web/src/features/im/ImWorkspace.vue（T-0095，已完成，claude 的），修复建群后刷新期间覆盖路由导致群信息栏被关（PR #141 的 agents 浏览器验收偶发失败的原因）。
+- 2026-11-03 21:36 UTC · claude · status in_progress → done：验收标准全部满足，随 PR 合并生效

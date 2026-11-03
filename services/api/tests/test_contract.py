@@ -983,6 +983,11 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "list_automations",
             "dashboard_overview",
             "get_action_status",
+            # 知识库（T-0098，docs/v2/KNOWLEDGE_PLAN.md 3.7）
+            "knowledge_search",
+            "knowledge_get",
+            "knowledge_list",
+            "knowledge_brief",
         },
         "write": {
             "create_task",
@@ -993,6 +998,8 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "mark_notification_read",
         },
         "critical": {"delete_task", "delete_calendar_event", "trigger_automation"},
+        # 直接执行、不审批（人类 2026-11-03 决定）
+        "knowledge": {"knowledge_write", "knowledge_delete"},
     }
     for spec in TOOLS.values():
         assert spec.name.isidentifier() and spec.name.islower()
@@ -1003,6 +1010,11 @@ def test_v2_mcp_tools_match_the_plan() -> None:
         if spec.risk == "read":
             assert spec.scope == "read" and spec.min_role == Role.viewer, spec.name
             assert spec.output_model is not PendingApproval, spec.name
+        elif spec.risk == "knowledge":  # 知识库写：直接执行，但仍要 read_write 与 member
+            assert spec.scope == "read_write" and spec.min_role == Role.member, spec.name
+            assert spec.output_model is not PendingApproval, spec.name
+            # OpenClaw 把工具描述截到 1200 个字符（K-0 核验 3.2）
+            assert len(spec.description) <= 1200, spec.name
         else:  # 写与高危：只生成待审批记录，不执行
             assert spec.scope == "read_write", spec.name
             assert spec.output_model is PendingApproval, spec.name
