@@ -363,7 +363,9 @@ async function noHorizontalScroll(page) {
   check(await page.getByRole('heading', { name: title }).count() === 0, '删除后收藏应从列表消失')
   const left = await searchTitles(page, workspace, run)
   check(!left.includes(title) && !left.includes(`${eventTitle} 改`), `删除后搜索不应再返回：${left}`)
-  // 被关联的任务标题里也有 run：等任务分组出现（结果已返回），再确认收藏与日程分组都没有了
+  // 被关联的任务标题里也有 run：等任务分组出现（结果已返回），再确认收藏与日程分组都没有了。
+  // 知识库（含外部文档）是独立页面、没有顶栏搜索框（T-0099），回到首页再用
+  await page.goto(`${base}/`)
   await openSearch(page, run)
   await page.getByRole('region', { name: '搜索结果：任务' }).getByText(taskTitle).waitFor()
   check(await page.getByRole('region', { name: '搜索结果：收藏文档' }).count() === 0, '删除后搜索框里不应再有收藏')
