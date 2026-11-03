@@ -22,3 +22,5 @@ f9dc628f737a3acdc623f65c15cc77609e3074fb:infra/openim/patches/0004-deps-upgrade-
 # connect 命令的集成测试给内存版 Vikunja / n8n 用的假密码（T-0076）；之后的提交已换成低熵的假值
 92efc64d4d732014211dc5b7052b6ffa130acc80:services/api/tests/test_connect_command.py:generic-api-key:36
 92efc64d4d732014211dc5b7052b6ffa130acc80:services/api/tests/test_connect_command.py:generic-api-key:37
+# 知识库密钥扫描的单元测试里的假 JWT（T-0098）；之后的提交改成运行时拼接，不再有字面量
+38bc4f8cf84aa485f9bb072b33fce0fc9bbe948c:services/api/tests/test_knowledge_units.py:jwt:55

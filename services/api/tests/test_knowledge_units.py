@@ -52,7 +52,10 @@ def test_secret_scan_catches_common_secrets() -> None:
         "AWS 访问密钥": "AKIA" + "ABCDEFGHIJKLMNOP",
         "模型服务的 API 密钥": "sk-proj-" + "x" * 30,
         "工作台实例令牌": "mwa_" + "y" * 40,
-        "JWT 令牌": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturepart",
+        # 运行时拼出来，免得仓库里出现像令牌的字面量（gitleaks 会报）
+        "JWT 令牌": ".".join(
+            ["eyJ" + "hbGciOiJIUzI1NiJ9", "eyJ" + "zdWIiOiIxMjM0NTY3ODkwIn0", "sig" + "naturepart"]
+        ),
         "链接里的用户名和密码": "postgresql://admin:hunter22@db:5432/app",
         "密码或密钥的明文": "数据库密码：S3cretPassw0rd",
     }
