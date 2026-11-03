@@ -1300,6 +1300,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/integrations/github/repositories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 列出 GitHub Token 能访问的仓库（admin）
+         * @description 网页上新建或修改 GitHub 连接时用：粘贴的新 Token，或已保存的 Token（不给 api_token 时）。新 Token 只用来调用一次 GitHub `/user/repos`，不保存、不写日志。细粒度 Token 创建时选了哪些仓库，这里就只返回哪些。GitHub 拒绝 Token 时 502 INTEGRATION_UNAUTHORIZED；还没有保存 Token 时 409。
+         */
+        post: operations["list_github_repositories"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/integrations/{integration_id}": {
         parameters: {
             query?: never;
@@ -3202,6 +3222,30 @@ export interface components {
              * @description Token 的过期时间（在 GitHub 创建 Token 时设置），用于到期提醒
              */
             token_expires_at?: string | null;
+        };
+        /**
+         * GitHubRepositoriesRequest
+         * @description 列出 Token 能访问的仓库，供管理员勾选（T-0091）。
+         */
+        GitHubRepositoriesRequest: {
+            /**
+             * Api Token
+             * @description 刚生成、还没保存的 Token；不给时用本工作空间已保存的 GitHub 集成的 Token。这里的 Token 只用来调用一次 GitHub，不保存、不写日志
+             */
+            api_token?: string | null;
+        };
+        /** GitHubRepositoryList */
+        GitHubRepositoryList: {
+            /**
+             * Complete
+             * @description false 表示仓库太多，只列出了前面一部分
+             */
+            complete: boolean;
+            /**
+             * Repositories
+             * @description Token 能访问的仓库（owner/repo），按名称排序
+             */
+            repositories: string[];
         };
         /** HealthResponse */
         HealthResponse: {
@@ -12215,6 +12259,89 @@ export interface operations {
             };
             /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_github_repositories: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GitHubRepositoriesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubRepositoryList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务拒绝了工作台的凭证（INTEGRATION_UNAUTHORIZED） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

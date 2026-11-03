@@ -1,7 +1,7 @@
 """部署脚本的 connect 命令（T-0076；T-0082 移除了 Vikunja）。
 
 真实 PostgreSQL / Redis + 内存版 GitHub、n8n。内存版服务只补上初始化用的接口
-（n8n 的 /rest/*，GitHub 的 /user/repos），其余请求交给 tests/fake_*.py；
+（n8n 的 /rest/*），其余请求交给 tests/fake_*.py；GitHub 在网页上接入（T-0091），见 test_github.py；
 接口格式按 app/integrations/provisioning.py 里实测的写法。
 覆盖：以首次安装的管理员身份创建集成并测试、同步；已接入时跳过；失败时不留下集成；
 密码与 Token 不出现在输出里；角色与工作空间的选择规则；status 的输出。
@@ -177,99 +177,6 @@ async def reveal(world: World, app: str) -> dict[str, Any] | None:
     assert response.status_code == 200, response.text
     data: dict[str, Any] = response.json()
     return data
-
-
-# ---------------------------------------------------------------- GitHub
-
-
-async def test_github_lists_repos_and_connects(
-    world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    code = await call(
-        world, connect.cmd_github_repos, args("github-repos"), monkeypatch, GITHUB_TOKEN + "\n"
-    )
-    assert code == 0
-    assert capsys.readouterr().out.split() == ["octo/app", "octo/docs"]
-
-    namespace = args("github", "--repos", "octo/app,octo/docs")
-    code = await call(world, connect.cmd_github, namespace, monkeypatch, GITHUB_TOKEN + "\n")
-    assert code == 0
-    out = capsys.readouterr()
-    assert GITHUB_TOKEN not in out.out + out.err
-    assert "通过  octo/app" in out.out
-    items = (await world.env.get("/api/v1/integrations"))["items"]
-    [github] = [item for item in items if item["provider"] == "github"]
-    assert github["status"] == "active"
-    assert set(github["repositories"]) == {"octo/app", "octo/docs"}
-
-
-async def test_github_reports_missing_permissions(
-    world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    world.github.forbidden.add(("octo/app", "actions"))
-    namespace = args("github", "--repos", "octo/app")
-    with pytest.raises(connect.Failed):
-        await call(world, connect.cmd_github, namespace, monkeypatch, GITHUB_TOKEN + "\n")
-    out = capsys.readouterr().out
-    assert "失败  octo/app" in out and "Actions" in out
-
-
-async def test_github_failure_can_be_retried_with_a_new_token(
-    world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    world.github.forbidden.add(("octo/app", "issues"))
-    namespace = args("github", "--repos", "octo/app")
-    with pytest.raises(connect.Failed) as raised:
-        await call(world, connect.cmd_github, namespace, monkeypatch, GITHUB_TOKEN + "\n")
-    assert "仓库权限不够" in str(raised.value)
-    assert "Webhook" not in capsys.readouterr().out  # GitHub 不用 Webhook，不显示为失败
-
-    # 不加 --replace：已有集成，跳过
-    namespace = args("github", "--repos", "octo/app,octo/docs")
-    assert await call(world, connect.cmd_github, namespace, monkeypatch, GITHUB_TOKEN + "\n") == 0
-    assert "已有 GitHub 集成" in capsys.readouterr().out
-
-    # 重新生成了 Token：加 --replace 再运行，替换已保存的集成并重新检查
-    world.github.forbidden.clear()
-    namespace = args("github", "--repos", "octo/app,octo/docs", "--replace")
-    assert await call(world, connect.cmd_github, namespace, monkeypatch, GITHUB_TOKEN + "\n") == 0
-    assert "已用新 Token 替换" in capsys.readouterr().out
-    items = (await world.env.get("/api/v1/integrations"))["items"]
-    [github] = [item for item in items if item["provider"] == "github"]
-    assert github["status"] == "active"
-    assert set(github["repositories"]) == {"octo/app", "octo/docs"}
-
-
-async def test_github_unreachable_is_reported_as_network(
-    world: World, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def down(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("refused", request=request)
-
-    app_of(world.env.client).state.connectors.transport = httpx.MockTransport(down)
-    namespace = args("github", "--repos", "octo/app")
-    with pytest.raises(connect.Failed) as raised:
-        await call(world, connect.cmd_github, namespace, monkeypatch, GITHUB_TOKEN + "\n")
-    assert "连不上 GitHub" in str(raised.value)
-
-
-async def test_github_rejects_classic_tokens_and_bad_repo_names(
-    world: World, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with pytest.raises(connect.Usage):
-        await call(world, connect.cmd_github_repos, args("github-repos"), monkeypatch, "ghp_x\n")
-    with pytest.raises(connect.Usage) as raised:
-        await call(
-            world,
-            connect.cmd_github,
-            args("github", "--repos", "not a repo"),
-            monkeypatch,
-            GITHUB_TOKEN + "\n",
-        )
-    assert GITHUB_TOKEN not in str(raised.value)
-
-
-# ---------------------------------------------------------------- n8n
 
 
 async def test_n8n_sets_up_owner_key_and_credential(

@@ -20,19 +20,25 @@ const existing = computed(() => typeof editing.value === 'object' && editing.val
 const testResult = ref<{ result: Schema['IntegrationTestResult']; name: string } | null>(null)
 const statusLabels = { pending: '待测试', active: '已连接', unauthorized: '授权失效', unavailable: '暂不可用', disabled: '已停用' }
 watch(blocked, (value) => { if (value) { editing.value = null; testResult.value = null } })
+// 保存后自动检查权限（T-0091）：新建、换 Token、改仓库或重新启用时；检查通过后后端立即开始全量同步
+function needsCheck(body: Schema['GitHubIntegrationCreate'] | Schema['IntegrationUpdate']) {
+  return 'provider' in body || 'api_token' in body || 'repositories' in body || ('enabled' in body && body.enabled === true)
+}
 async function save(body: Schema['GitHubIntegrationCreate'] | Schema['IntegrationUpdate']) {
   const current = editing.value
   if (!current || !auth.canManage || blocked.value) return
-  await run(async () => {
+  let saved: Schema['IntegrationOut'] | undefined
+  const ok = await run(async () => {
     const headers = { 'Idempotency-Key': crypto.randomUUID() }
-    if (typeof current === 'string') dataOf(await auth.api.POST('/api/v1/integrations', { params: { header }, body: body as Schema['GitHubIntegrationCreate'], headers }))
-    else dataOf(await auth.api.PATCH('/api/v1/integrations/{integration_id}', { params: { header, path: { integration_id: current.id } }, body: body as Schema['IntegrationUpdate'], headers }))
+    if (typeof current === 'string') saved = dataOf(await auth.api.POST('/api/v1/integrations', { params: { header }, body: body as Schema['GitHubIntegrationCreate'], headers }))
+    else saved = dataOf(await auth.api.PATCH('/api/v1/integrations/{integration_id}', { params: { header, path: { integration_id: current.id } }, body: body as Schema['IntegrationUpdate'], headers }))
     editing.value = null; testResult.value = null
-  }, '连接已保存，请测试连接')
+  }, '连接已保存')
+  if (ok && saved && needsCheck(body)) await test(saved, true)
 }
-async function test(item: Schema['IntegrationOut']) {
+async function test(item: Schema['IntegrationOut'], afterSave = false) {
   if (!auth.canManage || blocked.value) return
-  await run(async () => { testResult.value = { name: item.name, result: dataOf(await auth.api.POST('/api/v1/integrations/{integration_id}/test', { params: { header, path: { integration_id: item.id } }, headers: { 'Idempotency-Key': crypto.randomUUID() } })) } }, '连接测试已完成，请查看各项检查结果')
+  await run(async () => { testResult.value = { name: item.name, result: dataOf(await auth.api.POST('/api/v1/integrations/{integration_id}/test', { params: { header, path: { integration_id: item.id } }, headers: { 'Idempotency-Key': crypto.randomUUID() } })) } }, afterSave ? '连接已保存，并已自动检查权限：结果见下方，全部通过时已经开始同步' : '连接测试已完成，请查看各项检查结果')
 }
 async function sync(item: Schema['IntegrationOut']) {
   if (!auth.canManage || blocked.value) return
@@ -41,7 +47,7 @@ async function sync(item: Schema['IntegrationOut']) {
 async function reload() { if (await refresh()) { editing.value = null; testResult.value = null } }
 </script>
 <template>
-  <div class="task-toolbar"><p class="form-help">管理员配置 GitHub 连接，每个工作空间最多一个。项目与任务由工作台自己管理，不需要连接。</p><button class="secondary-button" :disabled="busy || query.isFetching.value" @click="reload">刷新连接</button></div>
+  <div class="task-toolbar"><p class="form-help">管理员在这里接入 GitHub（只读同步 Issues、Pull requests、Actions），每个工作空间最多一个；新建时页面会给出生成 Token 的链接和步骤。项目与任务由工作台自己管理，不需要连接。</p><button class="secondary-button" :disabled="busy || query.isFetching.value" @click="reload">刷新连接</button></div>
   <DataState :loading="query.isPending.value" :error="query.error.value" :empty="!items.length && !blocked" empty-text="尚未配置外部服务连接" @retry="reload" />
   <p v-if="error" role="alert" class="feedback">{{ errorMessage(error) }}</p><p v-if="notice" role="status" class="feedback">{{ notice }}</p>
   <button v-if="locked" class="secondary-button" :disabled="busy" @click="reload">重新加载连接</button>

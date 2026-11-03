@@ -5,7 +5,8 @@
   核验依据：`2026-10-30-vikunja-2.7.1-verification.md`（第 3 节）、`2026-10-30-github-rest-and-affine-verification.md`（第 3、4、10 节）、
   `2026-10-31-prometheus-grafana-n8n-verification.md`（第 5 节）
 
-> 其中 Vikunja 的部分（部署、接入、子域名、`connect vikunja` / `relink`）已由 `2026-11-02-remove-vikunja.md`（T-0082）移除；GitHub、n8n 的部分仍然有效。
+> 其中 Vikunja 的部分（部署、接入、子域名、`connect vikunja` / `relink`）已由 `2026-11-02-remove-vikunja.md`（T-0082）移除。
+> GitHub 的部分已由 T-0091 改为在工作台网页上接入（人类 2026-11-03 要求“GitHub 的连接也改到在 workspace 平台上配置，而不是通过一键部署脚本进行配置”）：生成 Token 的链接、列出 Token 能访问的仓库（`POST /api/v1/integrations/github/repositories`）、保存后自动检查权限并同步都在「集成设置」页面上；`connect github` / `github-repos` 子命令已删除，脚本只显示 GitHub 的状态。n8n 的部分仍然有效。
 
 ## 1. 背景
 

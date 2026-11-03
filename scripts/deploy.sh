@@ -11,7 +11,8 @@
 # 部署时只需要回答三个问题：SITE_DOMAIN、ACME_EMAIL、PUBLIC_BASE_URL（默认 https://<域名>）。
 # 其余的都自动完成：安装缺少的工具与 Docker → 获取代码 → 生成 .env（随机密钥）→ 启用 HTTPS 与生产模式 →
 # 检查端口 / DNS / 防火墙 → make up → 迁移数据库 → 冒烟检查 → 检查 HTTPS → 显示安装凭据。
-# 在浏览器创建管理员后按回车，接着自动接入 GitHub、n8n 并部署 OpenIM（connect，也可以以后单独运行；T-0076）。
+# 在浏览器创建管理员后按回车，接着自动接入 n8n、部署 OpenIM、配置 OpenClaw 接入入口（connect，也可以以后单独运行；T-0076）。
+# GitHub 在工作台「集成设置」页面上接入（T-0091）。
 #
 # 选项：
 #   --dir DIR          安装目录（默认 /srv/my-workspace；在代码目录里运行时就是该目录）
@@ -485,11 +486,10 @@ remind_backup_env() {
 }
 
 # ---------------------------------------------------------------- 接入组件（T-0076）
-# 管理员在浏览器里创建好之后，自动接入 GitHub、n8n（项目与任务由工作台自己管理，T-0082）。真正的接入在 api 容器里由
+# 管理员在浏览器里创建好之后，自动接入 n8n（项目与任务由工作台自己管理，T-0082）。真正的接入在 api 容器里由
 # app/commands/connect.py 完成（和网页同一套服务：凭证加密保存、写审计、要求管理员角色）。
-# 密码与 Token 只经标准输入传给容器，不出现在命令行参数里。
-GITHUB_TOKEN_URL="https://github.com/settings/personal-access-tokens/new?name=My+Workspace&description=My+Workspace+read-only+sync&expires_in=90&issues=read&pull_requests=read&actions=read"
-GITHUB_MAX_REPOS=20
+# 密码只经标准输入传给容器，不出现在命令行参数里。
+# GitHub 在工作台「集成设置」页面上接入（T-0091）：生成 Token 的链接、读取可访问的仓库都在网页上，这里只显示状态。
 
 connect_cmd() { compose exec -T api python -m app.commands.connect "$@"; }
 # 不需要输入的调用都接上 /dev/null：docker compose exec -T 会读走终端里提前敲下的回答
@@ -570,61 +570,15 @@ wait_for_setup() {
   done
 }
 
-# 把“1,3,5”或空（全选）换成 owner/repo 列表；最多 GITHUB_MAX_REPOS 个
-pick_repos() {
-  local answer="$1" names=() picked=() choices=() n i
-  mapfile -t names <<<"$2"
-  if [[ -z ${answer// /} ]]; then
-    picked=("${names[@]:0:GITHUB_MAX_REPOS}")
-  else
-    IFS=',' read -r -a choices <<<"$answer"
-    for n in "${choices[@]}"; do
-      n="${n// /}"
-      [[ $n =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#names[@]} )) || { warn "忽略无效的编号：$n"; continue; }
-      i=$((n - 1))
-      [[ " ${picked[*]} " == *" ${names[i]} "* ]] || picked+=("${names[i]}")
-    done
-    picked=("${picked[@]:0:GITHUB_MAX_REPOS}")
-  fi
-  local IFS=','
-  printf '%s\n' "${picked[*]}"
-}
-
 connect_github() {
-  local state="$1" token repos selected names=() i replace=()
+  local state="$1" page
   step "GitHub（只读：Issues、Pull requests、Actions）"
+  page="$(public_url_of PUBLIC_BASE_URL "http://localhost:$(http_port)")/settings/integrations"
   if [[ -n $state && $state != none ]]; then
     show_state "$state" "集成设置"
-    # 仓库权限不够时集成状态仍是 active，所以由管理员决定要不要换 Token
-    if (( ASSUME_YES )) || ! interactive; then return 0; fi
-    confirm "要换 Token 或要同步的仓库吗？" n || return 0
-    replace=(--replace)
-  elif (( ASSUME_YES )) || ! interactive; then
-    info "GitHub 的 Token 要在网页上生成，无人值守时跳过；以后运行 deploy.sh connect"
-    return 0
   else
-    confirm "接入 GitHub？" y || { info "跳过"; return 0; }
-  fi
-  info "1. 打开下面的链接（已预填名称、90 天有效期，以及只读的 Issues、Pull requests、Actions 权限）："
-  info "   $GITHUB_TOKEN_URL"
-  info "2. Repository access 选 Only select repositories，勾选要同步的仓库（最多 $GITHUB_MAX_REPOS 个），点 Generate token"
-  info "3. 复制 github_pat_ 开头的 Token 粘贴到下面（输入不显示；不要用 ghp_ 开头的经典 Token）"
-  token="$(ask_secret "GitHub Token（直接回车跳过）")"
-  [[ -n $token ]] || { info "跳过 GitHub"; return 0; }
-  if repos="$(printf '%s\n' "$token" | connect_cmd github-repos)" && [[ -n $repos ]]; then
-    mapfile -t names <<<"$repos"
-    info "Token 能访问的仓库："
-    for i in "${!names[@]}"; do info "  $((i + 1))) ${names[i]}"; done
-    selected="$(pick_repos "$(ask "要同步的仓库编号（逗号分隔，直接回车全选，最多 $GITHUB_MAX_REPOS 个）" "")" "$repos")"
-  else
-    warn "没能列出 Token 能访问的仓库，手动输入"
-    selected="$(ask "要同步的仓库（owner/repo，逗号分隔）" "")"
-  fi
-  [[ -n $selected ]] || { warn "没有选择仓库，跳过 GitHub"; return 0; }
-  if printf '%s\n' "$token" | connect_cmd github --repos "$selected" "${replace[@]}"; then
-    ok "GitHub 已接入：权限检查通过，已开始同步"
-  else
-    warn "GitHub 没有接入成功（见上面的检查项）：按提示处理后再运行 deploy.sh connect（选择换 Token），或到工作台「集成设置」里修改"
+    info "还没有接入。GitHub 在工作台网页上接入：管理员打开「管理 → 集成设置」（$page），"
+    info "点「新建 GitHub 连接」，按页面上的步骤生成只读 Token、勾选要同步的仓库，保存后会自动检查权限并开始同步"
   fi
   return 0
 }
@@ -1055,7 +1009,7 @@ connect_components() {
   info "OpenIM：$(openim_label "$(status_of openim "$status")")"
   info "OpenClaw 接入入口：$(public_url_of AGENT_PUBLIC_URL 未配置)"
   info "n8n 打开地址：$(public_url_of N8N_PUBLIC_URL http://localhost:5678)"
-  info "以后要接入或重试：bash $ROOT/scripts/deploy.sh connect"
+  info "以后要接入或重试：bash $ROOT/scripts/deploy.sh connect（GitHub 在工作台「集成设置」里接入）"
 }
 
 # ---------------------------------------------------------------- 动作

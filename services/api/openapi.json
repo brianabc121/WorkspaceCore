@@ -3328,6 +3328,54 @@
         "title": "GitHubIntegrationCreate",
         "type": "object"
       },
+      "GitHubRepositoriesRequest": {
+        "additionalProperties": false,
+        "description": "列出 Token 能访问的仓库，供管理员勾选（T-0091）。",
+        "properties": {
+          "api_token": {
+            "anyOf": [
+              {
+                "description": "GitHub 细粒度 Personal Access Token（github_pat_ 开头）；只写不读",
+                "format": "password",
+                "maxLength": 512,
+                "minLength": 12,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "刚生成、还没保存的 Token；不给时用本工作空间已保存的 GitHub 集成的 Token。这里的 Token 只用来调用一次 GitHub，不保存、不写日志",
+            "title": "Api Token"
+          }
+        },
+        "title": "GitHubRepositoriesRequest",
+        "type": "object"
+      },
+      "GitHubRepositoryList": {
+        "properties": {
+          "complete": {
+            "description": "false 表示仓库太多，只列出了前面一部分",
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "repositories": {
+            "description": "Token 能访问的仓库（owner/repo），按名称排序",
+            "items": {
+              "type": "string"
+            },
+            "title": "Repositories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "repositories",
+          "complete"
+        ],
+        "title": "GitHubRepositoryList",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "status": {
@@ -20266,6 +20314,135 @@
           }
         ],
         "summary": "新建 GitHub 集成（admin）",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/v1/integrations/github/repositories": {
+      "post": {
+        "description": "网页上新建或修改 GitHub 连接时用：粘贴的新 Token，或已保存的 Token（不给 api_token 时）。新 Token 只用来调用一次 GitHub `/user/repos`，不保存、不写日志。细粒度 Token 创建时选了哪些仓库，这里就只返回哪些。GitHub 拒绝 Token 时 502 INTEGRATION_UNAUTHORIZED；还没有保存 Token 时 409。",
+        "operationId": "list_github_repositories",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubRepositoriesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubRepositoryList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务拒绝了工作台的凭证（INTEGRATION_UNAUTHORIZED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "列出 GitHub Token 能访问的仓库（admin）",
         "tags": [
           "integrations"
         ]

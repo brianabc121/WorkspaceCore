@@ -176,6 +176,21 @@ class GitHubIntegrationCreate(_Strict):
     repositories: Repositories
 
 
+class GitHubRepositoriesRequest(_Strict):
+    """列出 Token 能访问的仓库，供管理员勾选（T-0091）。"""
+
+    api_token: GitHubToken | None = Field(
+        default=None,
+        description="刚生成、还没保存的 Token；不给时用本工作空间已保存的 GitHub 集成的 Token。"
+        "这里的 Token 只用来调用一次 GitHub，不保存、不写日志",
+    )
+
+
+class GitHubRepositoryList(BaseModel):
+    repositories: list[str] = Field(description="Token 能访问的仓库（owner/repo），按名称排序")
+    complete: bool = Field(description="false 表示仓库太多，只列出了前面一部分")
+
+
 class IntegrationUpdate(_Strict):
     """至少改一项；改 api_token 后状态回到 pending，需要重新测试连接。"""
 

@@ -44,7 +44,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | 命令 | 作用 |
 |---|---|
 | `sudo bash scripts/deploy.sh` | 一键部署 / 升级 / 清空 / 查看状态（菜单；部署只问 `SITE_DOMAIN`、`ACME_EMAIL`、`PUBLIC_BASE_URL`），见部署教程开头的「一键脚本」 |
-| `sudo bash scripts/deploy.sh connect` | 首次安装后自动接入 GitHub、n8n 并部署 OpenIM（菜单第 5 项）；接入在 api 容器里用 `python -m app.commands.connect` 完成，见部署教程「自动接入 GitHub、n8n、OpenIM」 |
+| `sudo bash scripts/deploy.sh connect` | 首次安装后自动接入 n8n、部署 OpenIM、配置 OpenClaw 接入入口（菜单第 5 项）；接入在 api 容器里用 `python -m app.commands.connect` 完成，见部署教程「自动接入 n8n、OpenIM」。GitHub 在网页上接入（第 10 节） |
 | `make env` | 从 `.env.example` 生成 `.env`，随机填写数据库密码、会话密钥等；`.env` 已存在则不改，只补新增的变量。每次都检查 `.env`（占位符、加密密钥格式、生产环境会话密钥长度、Windows 换行），有问题就列出并以非零状态退出，`make up` 不会开始构建 |
 | `make up` | 构建镜像并启动 6 个服务，等待全部健康检查通过（最多 300 秒） |
 | `make migrate` | 在运行中的 `api` 容器里执行 `alembic upgrade head` |
@@ -318,9 +318,10 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
   - 工作台串行请求，并用条件请求（数据没变时不消耗额度）；
   - 被限流时页面显示“GitHub 限流中”和预计恢复时间，不会显示成空列表；
   - Token 失效时显示“需要重新连接”，不会反复重试：GitHub 会因为反复使用无效凭证暂时拒绝该用户的所有请求。
-- 连接（workspace admin）：在集成设置里新建 GitHub 集成，粘贴 Token，列出要同步的仓库（`owner/repo`，最多 20 个），
-  保存后点“测试连接”。测试会逐个仓库检查四项读权限，缺哪一项会单独标出；通过后立即同步一次。
-  接口见 `docs/api-contract.md` 的 Sprint 4 部分（`POST /api/v1/integrations`，`provider: github`）。
+- 连接（workspace admin，T-0091 起只在网页上配置）：「集成设置」→ 新建 GitHub 连接。弹窗给出预填只读权限、90 天有效期的
+  生成 Token 链接；粘贴 Token 后“读取可访问的仓库”（`POST /api/v1/integrations/github/repositories`，Token 只用这一次、不保存）
+  列出这个 Token 能访问的仓库供勾选（最多 20 个，也可以手动填写 `owner/repo`）。保存后页面自动“测试连接”：逐个仓库检查四项读权限，
+  缺哪一项会单独标出；通过后立即同步一次。接口见 `docs/api-contract.md` 的 Sprint 4 部分（`POST /api/v1/integrations`，`provider: github`）。
 - 同步：Worker 随周期对账同步（`RECONCILE_INTERVAL_MINUTES`，默认 5 分钟），每小时做一次全量。
   - 每个仓库同步 Issue、PR 和最近 30 次 Actions 运行。失败的运行会读一次 jobs，记下失败的 job 和 step 名称，不读日志。
   - 增量同步时，三个列表的第一页都带 `ETag`，没有变化时返回 304，不消耗额度。

@@ -1,9 +1,6 @@
-"""部署脚本自动接入 GitHub、n8n（T-0076；Vikunja 已在 T-0082 移除）。在 api 容器里运行：
+"""部署脚本自动接入 n8n（T-0076；Vikunja 已在 T-0082 移除）。在 api 容器里运行：
 
     docker compose exec -T api python -m app.commands.connect status
-    printf '%s\\n' "$TOKEN" | docker compose exec -T api python -m app.commands.connect github-repos
-    printf '%s\\n' "$TOKEN" | docker compose exec -T api python -m app.commands.connect \\
-        github --repos owner/a,owner/b
     docker compose exec -T api python -m app.commands.connect n8n-owner
     printf '%s\\n' "$PASSWORD" | docker compose exec -T api python -m app.commands.connect \\
         n8n --owner-email you@example.com --public-url http://localhost:5678
@@ -15,6 +12,8 @@
 - 以工作空间管理员本人的身份调用和网页相同的服务：凭证加密保存、写审计、要求 admin 以上角色。
   默认是首次安装创建的管理员和他唯一管理的工作空间；不唯一时用 --email / --workspace 指定。
 - 已经接入的组件不重复创建，只报告状态（更换凭证到工作台“集成设置”里改）。
+- GitHub 在工作台「集成设置」页面上接入（T-0091：生成 Token 的链接、读取可访问的仓库都在网页上），
+  这里只在 status 里报告它的状态。
 - 登录成功的 n8n owner 的账号密码加密保存到工作台，管理员在「自动化」页查看（T-0080）。
 - 接口的核验依据见 app/integrations/provisioning.py 与 docs/decisions/2026-11-02-deploy-connect.md。
 
@@ -44,7 +43,6 @@ from app.domain.connectors import ConnectorRuntime
 from app.domain.integrations import IntegrationService
 from app.domain.policy import WorkspaceAccess, has_role, require_role
 from app.integrations.base import ConnectorError
-from app.integrations.github import GitHubClient
 from app.integrations.http import CircuitBreaker
 from app.integrations.n8n import TRIGGER_HEADER
 from app.integrations.provisioning import N8nProvisioner
@@ -55,10 +53,8 @@ from app.repositories import workspaces as workspace_repo
 from app.schemas.app_logins import App, AppLoginUpsert
 from app.schemas.automations import AutomationConnectionUpsert
 from app.schemas.integrations import (
-    GitHubIntegrationCreate,
     IntegrationOut,
     IntegrationTestResult,
-    IntegrationUpdate,
 )
 from app.schemas.workspaces import Role
 
@@ -76,13 +72,6 @@ _PERMISSIONS = {
     "issues": "Issues",
     "pull_requests": "Pull requests",
     "actions": "Actions",
-}
-_SYNC = {
-    "ok": "已同步",
-    "stale": "数据较旧",
-    "unavailable": "暂时不可用",
-    "unauthorized": "凭证失效",
-    "not_configured": "还没有同步",
 }
 
 
@@ -271,12 +260,6 @@ def report(result: IntegrationTestResult) -> None:
         print(f"  注意  {warning}")
 
 
-async def _sync_line(service: IntegrationService, access: WorkspaceAccess, provider: str) -> None:
-    current = _find(await service.list_integrations(access), provider)
-    if current is not None and current.sync is not None:
-        print(f"  同步：{_SYNC.get(current.sync.status, current.sync.status)}")
-
-
 # ---------------------------------------------------------------- 子命令
 
 
@@ -316,86 +299,6 @@ async def _openim_state(env: Env) -> str:
     except (ConnectorError, TimeoutError):
         return "unavailable"
     return "ok"
-
-
-async def cmd_github_repos(env: Env, args: argparse.Namespace) -> int:
-    """列出 Token 能访问的仓库（一行一个），部署脚本让管理员挑选。"""
-    token = read_secret("GitHub Token")
-    if not token.startswith("github_pat_"):
-        raise Usage("只接受细粒度 Token（github_pat_ 开头），不要用经典 Token")
-    client = GitHubClient(env.runtime.http("provision:github"), token, env.settings.github_api_url)
-    listing = await client.list_user_repos()
-    names = sorted(
-        {item["full_name"] for item in listing.items if isinstance(item.get("full_name"), str)}
-    )
-    for name in names:
-        print(name)
-    if not listing.complete:
-        print("注意  仓库太多，只列出了前面一部分", file=sys.stderr)
-    return 0
-
-
-async def cmd_github(env: Env, args: argparse.Namespace) -> int:
-    """新建 GitHub 集成并检查权限；--replace 时用新 Token 与仓库替换已有的集成，再重新检查。
-
-    仓库级的权限缺失不改变集成状态（核验 ADR 第 7 节），所以是否替换由管理员决定，不按状态判断。
-    """
-    actor, access = await resolve(env.db, args.email, args.workspace)
-    service = env.integrations()
-    existing = _find(await service.list_integrations(access), "github")
-    if existing is not None and not args.replace:
-        print(f"已有 GitHub 集成（{status_label(existing.status)}），跳过")
-        print("更换 Token 或仓库：加 --replace 重新运行，或到工作台“集成设置”里修改")
-        return 0
-    token = read_secret("GitHub Token")
-    repositories = [name.strip() for name in args.repos.split(",") if name.strip()]
-    try:
-        if existing is None:
-            body = GitHubIntegrationCreate.model_validate(
-                {
-                    "provider": "github",
-                    "name": "GitHub",
-                    "api_token": token,
-                    "repositories": repositories,
-                }
-            )
-            integration_id = (await service.create_github(actor, access, body)).id
-            print(f"已在工作台保存 GitHub 集成（{len(repositories)} 个仓库），检查权限：")
-        else:
-            update = IntegrationUpdate.model_validate(
-                {"version": existing.version, "api_token": token, "repositories": repositories}
-            )
-            integration_id = (await service.update(actor, access, existing.id, update)).id
-            print(
-                f"已用新 Token 替换工作台里的 GitHub 集成（之前：{status_label(existing.status)}，"
-                f"{len(repositories)} 个仓库），检查权限："
-            )
-    except ValidationError as error:
-        raise _validation(error) from None
-    result = await service.test(actor, access, integration_id)
-    report(result)
-    if not result.ok:
-        raise Failed(_github_failure(result))
-    await _sync_line(service, access, "github")
-    return 0
-
-
-def _github_failure(result: IntegrationTestResult) -> str:
-    failed = {check.name for check in result.checks if not check.ok and check.name != "webhooks"}
-    if "reachable" in failed:
-        return (
-            "连不上 GitHub（api.github.com）：检查服务器能否访问外网 HTTPS，"
-            "再重新运行 deploy.sh connect"
-        )
-    if "token" in failed:
-        return (
-            "GitHub 拒绝了这个 Token：确认复制完整、没有过期或被撤销，"
-            "重新生成后再运行 deploy.sh connect"
-        )
-    return (
-        "仓库权限不够（见上面每个仓库缺少的项）：重新生成 Token 时 Repository access 选上这些仓库，"
-        "Repository permissions 给 Issues、Pull requests、Actions 只读，再运行 deploy.sh connect"
-    )
 
 
 async def cmd_n8n_owner(env: Env, args: argparse.Namespace) -> int:
@@ -514,8 +417,6 @@ async def cmd_save_login(env: Env, args: argparse.Namespace) -> int:
 Command = Callable[[Env, argparse.Namespace], Awaitable[int]]
 COMMANDS: dict[str, Command] = {
     "status": cmd_status,
-    "github-repos": cmd_github_repos,
-    "github": cmd_github,
     "n8n-owner": cmd_n8n_owner,
     "n8n": cmd_n8n,
     "public-urls": cmd_public_urls,
@@ -524,17 +425,11 @@ COMMANDS: dict[str, Command] = {
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="自动接入 GitHub、n8n（部署脚本调用）")
+    root = argparse.ArgumentParser(description="自动接入 n8n、报告接入状态（部署脚本调用）")
     root.add_argument("--email", help="以哪个工作台用户的身份操作（默认首次安装创建的管理员）")
     root.add_argument("--workspace", type=uuid.UUID, help="工作空间 ID（该用户管理多个时必填）")
     sub = root.add_subparsers(dest="command", required=True)
     sub.add_parser("status", help="是否完成首次安装、各组件是否已接入")
-    sub.add_parser("github-repos", help="列出 Token 能访问的仓库（标准输入：Token）")
-    github = sub.add_parser("github", help="接入 GitHub 并检查权限（标准输入：Token）")
-    github.add_argument("--repos", required=True, help="owner/repo，逗号分隔，最多 20 个")
-    github.add_argument(
-        "--replace", action="store_true", help="已有 GitHub 集成时，用新 Token 与仓库替换并重新检查"
-    )
     owner = sub.add_parser("n8n-owner", help="n8n 是否已经有 owner 账号")
     owner.add_argument("--base-url", default="http://n8n:5678")
     n8n = sub.add_parser("n8n", help="建 owner、只读 API Key 与触发凭据并接入（标准输入：密码）")
