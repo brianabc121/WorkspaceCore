@@ -80,7 +80,8 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 self._send(200, json.dumps(stats).encode(), {"Content-Type": "application/json"})
                 return
-            if not self.path.startswith("/repos/"):
+            # /user/repos：网页上读取 Token 能访问的仓库（T-0091）
+            if not (self.path.startswith("/repos/") or self.path.split("?")[0] == "/user/repos"):
                 # 例如对 AFFiNE 地址的请求：工作台不应该发出任何这类请求（Sprint 4 DoD）
                 other_paths.append(self.path.split("?")[0])
                 self._send(404, b'{"message": "Not Found"}', {"Content-Type": "application/json"})
