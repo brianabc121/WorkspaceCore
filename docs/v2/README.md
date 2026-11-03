@@ -17,6 +17,7 @@ sha256 `2c0f41d55f9369c95a0aa83c64f05e905c9a48df353bd677765a6f3d4e3386a2`）。�
 | [`TRANSFORMATION_PLAN.md`](TRANSFORMATION_PLAN.md) | **改造方案（定稿）**：决策记录、改造范围、目标架构、模块设计、数据模型、部署、安全、测试与验收、实施计划（OC-0 ~ OC-7）、规范修订清单 | 新增，**已采纳** |
 | [`OPENCLAW_PLAN.md`](OPENCLAW_PLAN.md) | 论证记录（第 2 版）：多个 OpenClaw 分布在不同服务器，内网、外网两种接入，都由 OpenClaw 主动连回工作台；密钥集中在工作台；工作台内置基于 OpenIM 的管理员端 IM（单聊、拉群、置顶、免打扰、分组）；MCP 工具与审批，附上游源码核对和备选方案 | 新增，定稿的依据 |
 | [`REVIEW.md`](REVIEW.md) | claude 对资料包的评审：问题、业内通常的处理方式、需要人类决定的事项 | 新增 |
+| [`KNOWLEDGE_PLAN.md`](KNOWLEDGE_PLAN.md) | 知识库改造方案（2026-11-03，T-0096）：笔记编辑器、知识图谱、公共 / 项目 / 智能体三类知识库、智能体经 MCP 直接读写删改（不审核，用版本、回收站、密钥拦截、自动暂停保护）、项目认知对齐与自我提升；附效果图链接 | 新增，**待人类批准** |
 | [`package/README_V2.md`](package/README_V2.md) | 资料包说明 | 新增 |
 | [`package/AGENT_ARCHITECTURE_V2.md`](package/AGENT_ARCHITECTURE_V2.md) | Agent Control Plane 架构增补规格（V2 的主体） | 新增 |
 | [`package/AGENT_TASKS_V2.md`](package/AGENT_TASKS_V2.md) | V2-S0 ~ V2-S7 任务清单 | 新增 |
