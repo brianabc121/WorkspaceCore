@@ -1,7 +1,9 @@
 import { ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
+import type { Schema } from '../../services/api'
 import { imError } from './queries'
+import { downloadConversation } from './media'
 
 // One write at a time per panel; on success refresh every IM query of this user and workspace.
 export function useImAction(scope: string) {
@@ -17,4 +19,12 @@ export function useImAction(scope: string) {
     finally { busy.value = false }
   }
   return { busy, error, notice, act, active, refresh, header: { 'X-Workspace-Id': scope } }
+}
+
+// 会话的置顶、免打扰与导出（聊天顶栏和会话信息栏都用）
+export function useConversationActions(scope: string, id: () => string) {
+  const auth = useAuthStore(), action = useImAction(scope)
+  const setFlag = (patch: Schema['ImConversationUpdate'], success: string) => action.act(() => auth.api.PATCH('/api/v1/im/conversations/{conversation_id}', { params: { header: action.header, path: { conversation_id: id() } }, body: patch }), success)
+  const exportConversation = () => action.act(() => downloadConversation(scope, id()), '已导出会话（NDJSON 文件，每行一条消息）；导出操作已记入审计日志')
+  return { ...action, setFlag, exportConversation }
 }
