@@ -202,6 +202,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | PUT | `/api/v1/agents/instances/{instance_id}/secret-grants` | 实例可取用的密钥（整体替换） | 已实现（T-0054） |
 | GET / PUT / DELETE | `/api/v1/agents/instances/{instance_id}/ssh` | SSH 自动部署的目标服务器：查看 / 填写或更换（只读取主机公钥、不登录，返回 SHA256 指纹）/ 删除；只支持外网模式 | 已实现（T-0089 B1） |
 | POST | `/api/v1/agents/instances/{instance_id}/ssh/confirm` | 确认主机公钥的指纹（与探测结果不一致时 409），之后只接受这把公钥 | 已实现（T-0089 B1） |
+| POST | `/api/v1/agents/instances/{instance_id}/ssh/install` | 开始自动安装（202）：密码只用这一次（登录、装专用公钥、需要时 sudo 装 Docker），之后用专用密钥上传接入包、装插件、启动、写 crontab、等实例上线；进度在 GET `/ssh` 的 `job`（steps、脱敏 log）。已装专用公钥且 Docker 可用时可以不填密码；进行中时 409 `AGENT_SSH_JOB_RUNNING`，主机公钥未确认时 409 `AGENT_SSH_HOST_KEY_UNCONFIRMED` | 已实现（T-0089 B2） |
 | GET / POST | `/api/v1/agents/secrets` | 密钥列表 / 新增（只写不读） | 已实现（T-0054） |
 | GET | `/api/v1/agents/secrets/accesses` | 取密钥记录 | 已实现（T-0054） |
 | PATCH / DELETE | `/api/v1/agents/secrets/{secret_id}` | 改名称与说明 / 删除 | 已实现（T-0054） |

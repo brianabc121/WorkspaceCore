@@ -149,7 +149,7 @@ async def test_hostnames_resolve_once_and_are_checked() -> None:
 
 async def test_probe_shows_the_fingerprint_and_confirm_pins_it(owner: Owner) -> None:
     instance = await owner.instance()
-    assert (await owner.state(instance["id"])) == {"target": None}
+    assert (await owner.state(instance["id"])) == {"target": None, "job": None}
     async with ssh_server() as (port, host_key):
         response = await owner.put(instance["id"], host="LOCALHOST", port=port)
     assert response.status_code == 200, response.text
@@ -202,7 +202,7 @@ async def test_probe_shows_the_fingerprint_and_confirm_pins_it(owner: Owner) -> 
         headers=owner.headers(),
     )
     assert removed.status_code == 204
-    assert (await owner.state(instance["id"])) == {"target": None}
+    assert (await owner.state(instance["id"])) == {"target": None, "job": None}
 
 
 async def test_unreachable_and_refused_targets(owner: Owner) -> None:
@@ -213,7 +213,7 @@ async def test_unreachable_and_refused_targets(owner: Owner) -> None:
     assert refused.json()["error"]["details"]["reason"] == "refused"
     dns = await owner.put(instance["id"], host="no-such-host.invalid")
     assert dns.status_code == 503 and dns.json()["error"]["details"]["reason"] == "dns"
-    assert (await owner.state(instance["id"])) == {"target": None}
+    assert (await owner.state(instance["id"])) == {"target": None, "job": None}
 
 
 async def test_loopback_is_refused_outside_tests(make_client: ClientFactory) -> None:

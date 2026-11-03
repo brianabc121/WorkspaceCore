@@ -195,11 +195,13 @@ def get_agent_service(
 
 
 def get_agent_ssh_service(
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_app_settings)],
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> AgentSshService:
-    return AgentSshService(db, settings, redis)
+    # 安装任务在 API 进程内运行（T-0089 B2）；lifespan 里创建
+    return AgentSshService(db, settings, redis, getattr(request.app.state, "ssh_jobs", None))
 
 
 def get_automation_service(

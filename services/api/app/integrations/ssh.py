@@ -97,3 +97,117 @@ async def probe_host_key(address: str, port: int) -> HostKey:
         public_key=" ".join(line[:2]),
         fingerprint=key.get_fingerprint("sha256"),
     )
+
+
+# ---------------------------------------------------------------- 登录、执行命令、上传文件（B2）
+
+COMMAND_TIMEOUT = 120.0
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    exit_status: int
+    stdout: str
+    stderr: str
+
+    @property
+    def ok(self) -> bool:
+        return self.exit_status == 0
+
+
+async def connect(
+    address: str,
+    port: int,
+    username: str,
+    host_key: str,
+    *,
+    password: str | None = None,
+    client_key: asyncssh.SSHKey | None = None,
+) -> asyncssh.SSHClientConnection:
+    """按固定的主机公钥登录：密码或专用私钥，二选一。
+
+    密码登录也回答只有一个 Password: 提示的 keyboard-interactive（asyncssh 的行为，ADR 第 4.1 节）。
+
+    不用运行环境里的 ssh-agent、默认私钥与 ~/.ssh/config（agent_path=None、config=[]）。
+    """
+    if (password is None) == (client_key is None):
+        raise ValueError("密码与专用私钥只能给一个")
+    pinned = asyncssh.import_public_key(host_key)
+    try:
+        return await asyncssh.connect(
+            address,
+            port,
+            username=username,
+            known_hosts=([pinned], [], []),
+            config=[],
+            agent_path=None,
+            client_keys=[client_key] if client_key is not None else None,
+            password=password,
+            preferred_auth=(
+                "publickey" if client_key is not None else "keyboard-interactive,password"
+            ),
+            connect_timeout=CONNECT_TIMEOUT,
+            login_timeout=CONNECT_TIMEOUT,
+            keepalive_interval=15,
+        )
+    except asyncssh.HostKeyNotVerifiable as error:
+        raise SshError(
+            "host_key_changed", "服务器的主机公钥与确认过的不一致：可能被冒充，已停止连接"
+        ) from error
+    except asyncssh.PermissionDenied as error:
+        raise SshError(
+            "auth_failed",
+            "登录被拒绝：检查账号与密码" if password is not None else "专用密钥登录被拒绝",
+        ) from error
+    except (TimeoutError, OSError, asyncssh.Error) as error:
+        raise _classify(error) from error
+
+
+async def run(
+    conn: asyncssh.SSHClientConnection,
+    command: str,
+    *,
+    stdin: str | None = None,
+    seconds: float = COMMAND_TIMEOUT,
+) -> CommandResult:
+    """执行一条命令（远端的登录 shell）；stdin 用来传密码等，不出现在命令行里。
+
+    没有 stdin 时接到 DEVNULL（立即发送 EOF）：asyncssh 的 run() 只在有 input 时才发 EOF，
+    否则远端命令的标准输入一直开着，读标准输入的命令会卡住。
+    """
+    try:
+        if stdin is None:
+            result = await conn.run(command, stdin=asyncssh.DEVNULL, check=False, timeout=seconds)
+        else:
+            result = await conn.run(command, input=stdin, check=False, timeout=seconds)
+    except TimeoutError as error:
+        raise SshError("command_timeout", "命令执行超时") from error
+    except asyncssh.Error as error:
+        raise SshError("connection_lost", f"连接中断：{error.reason}") from error
+    status = result.exit_status if result.exit_status is not None else -1
+    return CommandResult(status, _text(result.stdout), _text(result.stderr))
+
+
+def _text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return str(value)
+
+
+async def put_files(
+    conn: asyncssh.SSHClientConnection, directory: str, files: dict[str, tuple[bytes, int]]
+) -> None:
+    """用 SFTP 把文件写到 directory 下（相对路径 → (内容, 权限)），需要时建子目录。"""
+    try:
+        async with conn.start_sftp_client() as sftp:
+            for name, (content, mode) in files.items():
+                path = f"{directory}/{name}"
+                parent = path.rsplit("/", 1)[0]
+                await sftp.makedirs(parent, exist_ok=True)
+                async with sftp.open(path, "wb") as handle:
+                    await handle.write(content)
+                await sftp.chmod(path, mode)
+    except (OSError, asyncssh.Error) as error:
+        raise SshError("upload_failed", f"上传文件失败：{error}") from error

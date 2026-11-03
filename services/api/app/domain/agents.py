@@ -591,6 +591,19 @@ class AgentService:
         """签发新凭证并生成接入包（zip）。凭证与私钥只出现在返回的字节里。"""
         instance = await self._instance(access, instance_id)
         self._check_version(instance, body.version)
+        return await self.build_bundle(
+            instance, previous=body.previous, actor_id=access.user_id, client_ip=client_ip
+        )
+
+    async def build_bundle(
+        self,
+        instance: AgentInstance,
+        *,
+        previous: str,
+        actor_id: uuid.UUID | None,
+        client_ip: str | None,
+    ) -> tuple[str, bytes]:
+        """签发新凭证并生成接入包，写审计并提交。网页下载与 SSH 自动部署（T-0089）共用。"""
         if instance.status == "disabled":
             raise ApiError(409, "AGENT_DISABLED", "实例已停用，启用后才能生成接入包")
         public = instance.network_mode == "public"
@@ -604,7 +617,7 @@ class AgentService:
                 details={"network_mode": instance.network_mode},
             )
         now = _now()
-        keep = body.previous == "keep_24h"
+        keep = previous == "keep_24h"
         issued = await self.issue_token(instance, keep_previous=keep, now=now)
         cert: ClientCertificate | None = None
         if public:
@@ -659,12 +672,12 @@ class AgentService:
         instance.version += 1
         await self.audit.record(
             "agents.bundle.issued",
-            workspace_ids=[access.workspace.id],
-            actor_id=access.user_id,
+            workspace_ids=[instance.workspace_id],
+            actor_id=actor_id,
             resource_type="agent_instance",
             resource_id=instance.id,
             metadata={
-                "previous": body.previous,
+                "previous": previous,
                 "token_prefix": issued.credential.token_prefix,
                 "cert_fingerprint": cert.fingerprint if cert else None,
             },

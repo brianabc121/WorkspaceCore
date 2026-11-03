@@ -5,7 +5,9 @@
 
 1. 填写目标服务器（主机、端口、账号）：解析地址并检查，读取主机公钥（不登录），记下 SHA256 指纹；
 2. owner 核对指纹后确认：之后的连接只接受这把公钥（B2 用 `known_hosts` 固定）；
-3. 删除目标服务器。
+3. 删除目标服务器；
+4. 开始自动安装（B2）：新建一条安装任务，交给进程内的 `SshJobRunner`
+   （app/domain/agent_ssh_install.py）。
 
 只有 owner 可以使用（与实例接口一致）；每个实例最多一台目标服务器；每一步写审计。
 探测会对外发起连接，按用户限流（每分钟 10 次），避免被用来扫描端口。
@@ -13,25 +15,34 @@
 
 import uuid
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
+import asyncssh
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import agent_provisioning as prov
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain.audit import AuditTrail
 from app.domain.policy import WorkspaceAccess
 from app.domain.ratelimit import WindowLimiter
 from app.integrations import ssh
-from app.models import AgentInstance, AgentSshTarget
+from app.models import AgentInstance, AgentSshJob, AgentSshTarget
 from app.schemas.agents import (
     AgentSshConfirm,
+    AgentSshInstall,
+    AgentSshJobOut,
+    AgentSshJobStep,
     AgentSshState,
     AgentSshTargetOut,
     AgentSshTargetSet,
 )
+
+if TYPE_CHECKING:
+    from app.domain.agent_ssh_install import SshJobRunner
 
 PROBES_PER_MINUTE = 10
 
@@ -56,6 +67,34 @@ def _unreachable(error: ssh.SshError) -> ApiError:
     return ApiError(503, "AGENT_SSH_UNREACHABLE", error.message, details={"reason": error.reason})
 
 
+def _job_running() -> ApiError:
+    return ApiError(409, "AGENT_SSH_JOB_RUNNING", "这台服务器正在安装，结束后再操作")
+
+
+def _client_fingerprint(public_key: str | None) -> str | None:
+    if not public_key:
+        return None
+    try:
+        return asyncssh.import_public_key(public_key).get_fingerprint("sha256")
+    except (asyncssh.KeyImportError, ValueError):
+        return None
+
+
+def _job_out(job: AgentSshJob) -> AgentSshJobOut:
+    return AgentSshJobOut(
+        id=job.id,
+        kind="install",
+        status=job.status,
+        steps=[AgentSshJobStep.model_validate(step) for step in job.steps],
+        log=job.log,
+        error_code=job.error_code,
+        error_message=job.error_message,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        updated_at=job.updated_at,
+    )
+
+
 def _out(target: AgentSshTarget) -> AgentSshTargetOut:
     return AgentSshTargetOut(
         host=target.host,
@@ -67,6 +106,9 @@ def _out(target: AgentSshTarget) -> AgentSshTargetOut:
         host_key_confirmed=target.host_key_confirmed_at is not None,
         host_key_confirmed_at=target.host_key_confirmed_at,
         client_key_installed=target.client_key_ref is not None,
+        client_key_fingerprint=_client_fingerprint(target.client_public_key),
+        install_dir=target.install_dir,
+        installed_at=target.installed_at,
         version=target.version,
         created_at=target.created_at,
         updated_at=target.updated_at,
@@ -74,10 +116,17 @@ def _out(target: AgentSshTarget) -> AgentSshTargetOut:
 
 
 class AgentSshService:
-    def __init__(self, db: AsyncSession, settings: Settings, redis: Redis | None = None) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        settings: Settings,
+        redis: Redis | None = None,
+        runner: "SshJobRunner | None" = None,
+    ) -> None:
         self.db = db
         self.settings = settings
         self.redis = redis
+        self.runner = runner
         self.audit = AuditTrail(db, settings)
 
     async def _instance(self, access: WorkspaceAccess, instance_id: uuid.UUID) -> AgentInstance:
@@ -116,9 +165,46 @@ class AgentSshService:
             raise ApiError(404, "NOT_FOUND", "这个实例还没有填写目标服务器")
         return target
 
+    async def _latest_job(self, target: AgentSshTarget) -> AgentSshJob | None:
+        return await self.db.scalar(
+            select(AgentSshJob)
+            .where(AgentSshJob.target_id == target.id)
+            .order_by(AgentSshJob.started_at.desc())
+            .limit(1)
+            .execution_options(populate_existing=True)
+        )
+
+    async def _running(self, target: AgentSshTarget) -> bool:
+        """有没有进行中的任务。
+
+        API 只有一个进程：记录是 running、但本进程里没有它的协程（协程意外退出），
+        就把它标为中断，不让它一直挡住后续操作（与启动时的处理相同）。
+        """
+        job = await self.db.scalar(
+            select(AgentSshJob).where(
+                AgentSshJob.target_id == target.id, AgentSshJob.status == "running"
+            )
+        )
+        if job is None:
+            return False
+        if self.runner is None or self.runner.running(job.id):
+            return True
+        job.status = "interrupted"
+        job.error_code = "interrupted"
+        job.error_message = "安装任务已不在运行；可以重新开始"
+        job.finished_at = datetime.now(UTC)
+        await self.db.flush()
+        return False
+
+    async def _state(self, target: AgentSshTarget | None) -> AgentSshState:
+        if target is None:
+            return AgentSshState(target=None, job=None)
+        job = await self._latest_job(target)
+        return AgentSshState(target=_out(target), job=_job_out(job) if job else None)
+
     async def state(self, access: WorkspaceAccess, instance_id: uuid.UUID) -> AgentSshState:
         target = await self._target(await self._instance(access, instance_id))
-        return AgentSshState(target=_out(target) if target else None)
+        return await self._state(target)
 
     async def _check_probe_rate(self, access: WorkspaceAccess) -> None:
         if self.redis is None:
@@ -164,6 +250,8 @@ class AgentSshService:
                     "AGENT_SSH_KEY_INSTALLED",
                     "这台服务器上已经装了工作台的专用公钥：先吊销，再更换服务器",
                 )
+            if await self._running(target):
+                raise _job_running()
         await self._check_probe_rate(access)
         # 探测要几秒：前面只是普通读取（READ COMMITTED，不加锁）；探测完再锁行、重新检查
         try:
@@ -185,6 +273,10 @@ class AgentSshService:
                     "AGENT_SSH_KEY_INSTALLED",
                     "这台服务器上已经装了工作台的专用公钥：先吊销，再更换服务器",
                 )
+            # 开始安装不改版本号：探测期间开始的安装任务也要在锁内再查一次，
+            # 否则任务会连到更换后的服务器（并把原服务器的登录密码发过去）
+            if await self._running(target):
+                raise _job_running()
         if target is None:
             target = AgentSshTarget(
                 workspace_id=instance.workspace_id,
@@ -225,7 +317,7 @@ class AgentSshService:
             await self.db.rollback()
             raise _version_conflict(1) from error
         await self.db.refresh(target)
-        return AgentSshState(target=_out(target))
+        return await self._state(target)
 
     async def confirm(
         self,
@@ -239,6 +331,8 @@ class AgentSshService:
         target = await self._existing(access, instance_id)
         if body.version != target.version:
             raise _version_conflict(target.version)
+        if await self._running(target):
+            raise _job_running()
         if body.fingerprint != target.host_key_fingerprint:
             raise ApiError(
                 409,
@@ -259,7 +353,7 @@ class AgentSshService:
         )
         await self.db.commit()
         await self.db.refresh(target)
-        return AgentSshState(target=_out(target))
+        return await self._state(target)
 
     async def remove(
         self, access: WorkspaceAccess, instance_id: uuid.UUID, *, version: int, client_ip: str
@@ -267,6 +361,8 @@ class AgentSshService:
         target = await self._existing(access, instance_id)
         if version != target.version:
             raise _version_conflict(target.version)
+        if await self._running(target):
+            raise _job_running()
         if target.client_key_ref is not None:
             raise ApiError(
                 409,
@@ -284,3 +380,90 @@ class AgentSshService:
         )
         await self.db.delete(target)
         await self.db.commit()
+
+    async def install(
+        self,
+        access: WorkspaceAccess,
+        instance_id: uuid.UUID,
+        body: AgentSshInstall,
+        *,
+        client_ip: str,
+    ) -> AgentSshState:
+        """开始自动安装：检查前提，新建任务（running），交给进程内的后台协程。
+
+        密码只交给协程（`SshJobRunner.start`），这里不写进任务记录、审计或日志。
+        """
+        if self.runner is None:
+            raise ApiError(503, "EXTERNAL_UNAVAILABLE", "安装任务暂时不可用，请稍后重试")
+        target = await self._existing(access, instance_id)
+        if body.version != target.version:
+            raise _version_conflict(target.version)
+        instance = await self._instance(access, instance_id)
+        if instance.status == "disabled":
+            raise ApiError(409, "AGENT_DISABLED", "实例已停用，启用后才能部署")
+        if instance.network_mode != "public":
+            raise ApiError(
+                409,
+                "AGENT_SSH_PUBLIC_ONLY",
+                "SSH 自动部署只支持外网模式的实例",
+                details={"network_mode": instance.network_mode},
+            )
+        if not self.settings.agent_public_url:
+            raise ApiError(
+                409,
+                "AGENT_INGRESS_NOT_CONFIGURED",
+                "外网接入入口还没有配置（AGENT_PUBLIC_URL）",
+                details={"network_mode": instance.network_mode},
+            )
+        if target.host_key_confirmed_at is None:
+            raise ApiError(
+                409, "AGENT_SSH_HOST_KEY_UNCONFIRMED", "先核对并确认服务器的主机公钥指纹"
+            )
+        if body.password is None and target.client_key_ref is None:
+            raise ApiError(422, "VALIDATION_ERROR", "第一次部署需要填写登录密码")
+        if self.settings.credential_encryption_key is None:
+            raise ApiError(503, "EXTERNAL_UNAVAILABLE", "密钥库未配置加密密钥")
+        if await self._running(target):
+            raise _job_running()
+        job = AgentSshJob(
+            id=uuid.uuid4(),
+            workspace_id=target.workspace_id,
+            instance_id=target.instance_id,
+            target_id=target.id,
+            kind="install",
+            status="running",
+            steps=[{"key": key, "status": "pending", "detail": None} for key in prov.STEPS],
+            log="",
+            started_by=access.user_id,
+        )
+        self.db.add(job)
+        await self.audit.record(
+            "agents.ssh.install_started",
+            workspace_ids=[target.workspace_id],
+            actor_id=access.user_id,
+            resource_type="agent_instance",
+            resource_id=target.instance_id,
+            metadata={
+                "host": target.host,
+                "port": target.port,
+                "username": target.username,
+                "host_key_fingerprint": target.host_key_fingerprint,
+                "with_password": body.password is not None,
+            },
+            client_ip=client_ip,
+        )
+        # 提交前先登记：提交之后、启动协程之前，别的请求不会把它当成失效的任务
+        self.runner.reserve(job.id)
+        try:
+            await self.db.commit()
+        except IntegrityError as error:
+            # 部分唯一索引：另一个请求同时开始了安装
+            self.runner.release(job.id)
+            await self.db.rollback()
+            raise _job_running() from error
+        except BaseException:
+            self.runner.release(job.id)
+            raise
+        self.runner.start(job.id, body.password, client_ip=client_ip)
+        await self.db.refresh(target)
+        return await self._state(target)

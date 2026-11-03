@@ -18,7 +18,7 @@ from app.core.logging import configure_logging
 from app.core.metrics import CONTENT_TYPE, HttpMetrics
 from app.core.middleware import install_middleware
 from app.core.resources import create_engine, create_redis, create_stream_redis
-from app.domain import events, mcp_tools, ops_metrics, overview, stream
+from app.domain import agent_ssh_install, events, mcp_tools, ops_metrics, overview, stream
 from app.domain.connectors import ConnectorRuntime
 from app.domain.credentials import CredentialBox
 from app.domain.operations import ServiceCache
@@ -51,10 +51,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     mcp_runner = mcp_tools.McpRunner()
     await mcp_runner.start()
     app.state.mcp = mcp_runner.manager
+    # SSH 自动部署的安装任务（T-0089 B2）：在本进程内运行；上次没跑完的标为中断
+    ssh_jobs = agent_ssh_install.SshJobRunner(app.state.sessionmaker, settings)
+    await ssh_jobs.recover()
+    app.state.ssh_jobs = ssh_jobs
     logger.info("api started", extra={"app_env": settings.app_env, "version": __version__})
     try:
         yield
     finally:
+        app.state.ssh_jobs = None
+        await ssh_jobs.stop()
         app.state.mcp = None
         await mcp_runner.stop()
         await bus.drain()
