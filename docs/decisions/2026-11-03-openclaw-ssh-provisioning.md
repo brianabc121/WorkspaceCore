@@ -84,3 +84,29 @@
 - 一次性密码只在 API 进程内存里，用于：校验已确认的主机公钥 → 装专用公钥 → （需要时）用 sudo 安装 Docker 并把账号加入 docker 组；
   之后的步骤（上传接入包、安装插件、启动、定时任务、升级、卸载）都用专用密钥，不再需要 root。
 - 只有 owner 可以使用（与实例接口一致）；每一步写审计日志，命令输出脱敏后保存为安装记录。
+
+### 4.1 asyncssh 核验（T-0089 B1，2026-11-03）
+
+来源：PyPI <https://pypi.org/project/asyncssh/2.24.1/>（JSON 元数据）、源码 <https://github.com/ronf/asyncssh>，
+以及在锁定版本上的实测（进程内的 asyncssh 服务器，见 `services/api/tests/test_agent_ssh.py`）。
+
+| 项目 | 结论 |
+|---|---|
+| 版本 | 2.24.1，2026-10-04 发布（当时 PyPI 上的最新版）；wheel sha256 `fc560b4f43be0f0c602d184783e5e3876f5d24d933a25359d86e5a50a5f46fe5`（与 `uv.lock` 一致） |
+| 许可证 | `EPL-2.0 OR GPL-2.0-or-later`；作为未修改的第三方库通过 pip 安装使用，与本项目 Apache-2.0 兼容 |
+| 依赖 | `cryptography>=48.0.1`、`typing_extensions>=4.0.0`，项目已有（50.0.2、4.16.0），锁文件只新增 asyncssh 一个包；可选依赖都不装 |
+| 读取主机公钥 | `get_server_host_key(host, port, ...)` 只完成密钥交换并返回服务器出示的主机公钥（文档：“connect to an SSH server and return the server host key presented during the SSH handshake”），不登录；实测服务器端的认证回调没有被调用 |
+| 指纹 | `SSHKey.get_fingerprint("sha256")` 返回 `SHA256:` 加 base64，与 `ssh-keygen -lf` 相同；`export_public_key()` 是 OpenSSH 公钥行 |
+| 固定公钥 | `connect(..., known_hosts=([公钥], [], []))`：三个列表分别是信任的主机公钥、CA、吊销的公钥（`known_hosts.match_known_hosts` 的文档）。实测：同一把公钥能连上；换一把就抛 `HostKeyNotVerifiable`；密码错误抛 `PermissionDenied` |
+| 运行环境 | 不给 `config` 时会读 `~/.ssh/config`（`connection.py` 第 8243 行）；工作台一律传 `config=[]`。B2 登录时同样显式给出 `client_keys`、关掉 ssh-agent，不用运行环境里的默认私钥 |
+| 专用密钥 | `generate_private_key("ssh-ed25519")`，`export_public_key()` 写进对方的 `authorized_keys` |
+
+### 4.2 B1 的接口
+
+- `GET /api/v1/agents/instances/{id}/ssh`：目标服务器与指纹（没有时 `target: null`）；
+- `PUT .../ssh`（`host`、`port`、`username`，更换时带 `version`）：检查地址 → 读取主机公钥 → 保存，确认作废；
+  只支持外网模式、未停用的实例；每个用户每分钟最多探测 10 次；
+- `POST .../ssh/confirm`（`version`、`fingerprint`）：指纹必须与保存的一致；
+- `DELETE .../ssh?version=`：已经装了专用公钥时要先吊销（B3）。
+- 地址检查：拒绝回环（测试与 CI 用 `AGENT_SSH_ALLOW_LOOPBACK=true` 打开）、链路本地（含 169.254.169.254）、组播、
+  未指定与保留地址；私网地址允许。域名只解析一次，之后都连解析出的地址（`address`）。

@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     # 外网入口的主机名不在公网 DNS 里时（没有配置域名，用 agent-gateway.myworkspace.internal），
     # 接入包在本机隧道容器里把主机名映射到这个地址（工作台服务器的公网 IP）
     agent_public_address: str = ""
+    # SSH 自动部署（T-0089）：默认不允许连接本机回环地址；只有测试与 CI（目标是本机的 sshd）才打开
+    agent_ssh_allow_loopback: bool = False
 
     # V2 IM（OC-3，契约第 5、7、10 节）：OpenIM 的 REST 地址（内部网络，例如 http://openim-server:10002）
     # 与 share.secret（换 imAdmin 令牌）。为空表示没有部署 OpenIM：IM 接口返回 503 IM_UNAVAILABLE

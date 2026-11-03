@@ -14,8 +14,10 @@ from app.api.deps import (
     client_ip,
     csrf_protected,
     get_agent_service,
+    get_agent_ssh_service,
     workspace_owner,
 )
+from app.domain.agent_ssh import AgentSshService
 from app.domain.agents import AgentService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.agents import (
@@ -30,6 +32,9 @@ from app.schemas.agents import (
     AgentSecretUpdate,
     AgentSettingsOut,
     AgentSettingsUpdate,
+    AgentSshConfirm,
+    AgentSshState,
+    AgentSshTargetSet,
     BundleRequest,
     SecretAccessPage,
     SecretAccessResult,
@@ -42,6 +47,7 @@ router = APIRouter(tags=["agents"], dependencies=[Security(authenticated)])
 
 Owner = Annotated[WorkspaceAccess, Depends(workspace_owner)]
 Service = Annotated[AgentService, Depends(get_agent_service)]
+SshService = Annotated[AgentSshService, Depends(get_agent_ssh_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 _write = [Depends(csrf_protected)]
@@ -181,6 +187,84 @@ async def issue_agent_bundle(
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": "no-store",
         },
+    )
+
+
+# ---------------------------------------------------------------- SSH 自动部署（T-0089）
+
+
+@router.get(
+    "/agents/instances/{instance_id}/ssh",
+    summary="SSH 自动部署的目标服务器（owner）",
+    responses=_read_errors,
+)
+async def get_agent_ssh(access: Owner, service: SshService, instance_id: UUID) -> AgentSshState:
+    return await service.state(access, instance_id)
+
+
+@router.put(
+    "/agents/instances/{instance_id}/ssh",
+    summary="填写或更换目标服务器，读取主机公钥（owner）",
+    description="解析地址（拒绝回环、链路本地、组播等地址），连到 SSH 端口只读取主机公钥、不登录，"
+    "返回 SHA256 指纹；owner 核对后调用 /ssh/confirm 确认。只支持外网模式的实例。"
+    "连不上时 503 AGENT_SSH_UNREACHABLE（details.reason：dns / timeout / refused / unreachable / "
+    "handshake）；地址不允许时 422 AGENT_SSH_ADDRESS_NOT_ALLOWED；已经装了专用公钥时 409 "
+    "AGENT_SSH_KEY_INSTALLED。每个用户每分钟最多探测 10 次。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 429, 503),
+)
+async def set_agent_ssh(
+    access: Owner,
+    request: Request,
+    service: SshService,
+    instance_id: UUID,
+    body: AgentSshTargetSet,
+) -> AgentSshState:
+    return await service.set_target(
+        access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
+    )
+
+
+@router.post(
+    "/agents/instances/{instance_id}/ssh/confirm",
+    summary="确认主机公钥的指纹（owner）",
+    description="指纹必须与探测时读到的一致（409 AGENT_SSH_FINGERPRINT_MISMATCH）；"
+    "确认后，之后的连接只接受这把主机公钥。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def confirm_agent_ssh(
+    access: Owner,
+    request: Request,
+    service: SshService,
+    instance_id: UUID,
+    body: AgentSshConfirm,
+) -> AgentSshState:
+    return await service.confirm(
+        access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
+    )
+
+
+@router.delete(
+    "/agents/instances/{instance_id}/ssh",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="删除目标服务器（owner）",
+    description="已经装了工作台的专用公钥时要先吊销（409 AGENT_SSH_KEY_INSTALLED）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def delete_agent_ssh(
+    access: Owner,
+    request: Request,
+    service: SshService,
+    instance_id: UUID,
+    version: Annotated[int, Query(ge=1)],
+) -> None:
+    await service.remove(
+        access,
+        instance_id,
+        version=version,
+        client_ip=client_ip(request, request.app.state.settings),
     )
 
 

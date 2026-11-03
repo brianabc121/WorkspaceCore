@@ -266,3 +266,50 @@ class AgentCa(Base):
     not_after: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created()
     retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentSshTarget(Base):
+    """通过 SSH 自动部署实例的目标服务器（T-0089）：每个实例最多一台。
+
+    - 主机公钥先探测、owner 核对指纹并确认后才固定（host_key_confirmed_at），
+      之后的连接只接受这把公钥；
+    - 登录密码从不保存；安装时生成的专用私钥以 `enc:v1:` 引用保存（client_key_ref，B2），
+      用途绑定到这条记录（agent_ssh:<id>）。
+    """
+
+    __tablename__ = "agent_ssh_targets"
+    __table_args__ = (
+        CheckConstraint("port BETWEEN 1 AND 65535", name="port"),
+        ForeignKeyConstraint(
+            ["workspace_id", "instance_id"],
+            ["workspace.agent_instances.workspace_id", "workspace.agent_instances.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("instance_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    instance_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    # owner 填写的主机名或 IP，以及探测时解析出的地址（之后都连这个地址）
+    host: Mapped[str] = mapped_column(Text)
+    address: Mapped[str] = mapped_column(Text)
+    port: Mapped[int] = mapped_column(Integer)
+    username: Mapped[str] = mapped_column(Text)
+    host_key_algorithm: Mapped[str] = mapped_column(Text)
+    host_key: Mapped[str] = mapped_column(Text)
+    host_key_fingerprint: Mapped[str] = mapped_column(Text)
+    host_key_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    host_key_confirmed_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    client_key_ref: Mapped[str | None] = mapped_column(Text)
+    client_public_key: Mapped[str | None] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()
