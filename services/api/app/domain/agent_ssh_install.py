@@ -25,6 +25,7 @@ from typing import Any
 import asyncssh
 from pydantic import SecretStr
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import agent_provisioning as prov
@@ -48,6 +49,8 @@ START_TIMEOUT = 300.0
 # 冷启动 2 ~ 4 分钟（doctor 联网检查插件更新，OC-0 ADR F5）；最多等 15 分钟
 ONLINE_TIMEOUT = 15 * 60.0
 ONLINE_POLL = 5.0
+# 启动时把上次没跑完的任务标为中断，最多等这么久（不拖慢 API 启动）
+RECOVER_TIMEOUT = 5.0
 # 自动安装 Docker 支持的发行版与架构（uname -m）；ADR 第 5.3 节
 SUPPORTED_OS = {("ubuntu", "22.04"), ("ubuntu", "24.04"), ("debian", "12")}
 SUPPORTED_ARCH = {"x86_64", "aarch64"}
@@ -697,6 +700,36 @@ async def _finish(
     message: str | None = None,
     client_ip: str | None = None,
 ) -> None:
+    """写回结果；数据库出错时只记日志（任务记录保持 running，由下一次操作或重启标为中断）。"""
+    try:
+        await _write_result(
+            sessionmaker,
+            settings,
+            recorder,
+            target,
+            status=status,
+            code=code,
+            message=message,
+            client_ip=client_ip,
+        )
+    except (OSError, SQLAlchemyError) as error:
+        logger.warning(
+            "agent ssh job result not saved",
+            extra={"job_id": str(recorder.job_id), "error": type(error).__name__},
+        )
+
+
+async def _write_result(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    recorder: JobRecorder,
+    target: Target | None,
+    *,
+    status: str,
+    code: str | None = None,
+    message: str | None = None,
+    client_ip: str | None = None,
+) -> None:
     current = recorder.current
     for step in recorder.steps:
         if step["key"] == current:
@@ -843,21 +876,29 @@ class SshJobRunner:
         if task is not None:
             await asyncio.gather(task, return_exceptions=True)
 
-    async def recover(self) -> int:
-        """API 只有一个进程：启动时还是 running 的任务，协程已经不在了。"""
-        async with self._sessionmaker() as db:
-            result = await db.execute(
-                update(AgentSshJob)
-                .where(AgentSshJob.status == "running")
-                .values(
-                    status="interrupted",
-                    error_code="interrupted",
-                    error_message="工作台重启，安装中断；可以重新开始",
-                    finished_at=func.now(),
-                    updated_at=func.now(),
+    async def recover(self, seconds: float = RECOVER_TIMEOUT) -> int | None:
+        """API 只有一个进程：启动时还是 running 的任务，协程已经不在了，标为中断。
+
+        数据库暂时连不上（或还没迁移）时不阻止 API 启动（/readyz 会报告），只记警告：
+        漏掉的任务在下一次操作时由 AgentSshService 标为中断（本进程里没有它的协程）。
+        """
+        try:
+            async with asyncio.timeout(seconds), self._sessionmaker() as db:
+                result = await db.execute(
+                    update(AgentSshJob)
+                    .where(AgentSshJob.status == "running")
+                    .values(
+                        status="interrupted",
+                        error_code="interrupted",
+                        error_message="工作台重启，安装中断；可以重新开始",
+                        finished_at=func.now(),
+                        updated_at=func.now(),
+                    )
                 )
-            )
-            await db.commit()
+                await db.commit()
+        except (TimeoutError, OSError, SQLAlchemyError) as error:
+            logger.warning("agent ssh job recovery skipped", extra={"error": type(error).__name__})
+            return None
         return int(getattr(result, "rowcount", 0) or 0)
 
     async def stop(self) -> None:

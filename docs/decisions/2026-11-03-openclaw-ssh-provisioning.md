@@ -125,6 +125,8 @@
 - 每一步的状态写进 `steps`（JSON），命令输出的末尾一段（最多 64 KB）脱敏后写进 `log`：密码、实例令牌、Gateway 令牌、
   私钥（PEM）、`mwa_` 开头的令牌都替换成 `***`；每次写库用新的短会话；
 - API 启动时，还在 `running` 的任务标为 `interrupted`（协程已经不在了），停止时取消进行中的任务并标为中断，owner 可以重新开始；
+  启动时数据库暂时连不上（或还没迁移）只记警告、不阻止启动（最多等 5 秒，`/readyz` 照常报告）；
+  记录是 `running` 但本进程里没有它的协程时，下一次操作把它标为中断（提交前先登记，不会误判刚提交、还没启动的任务）；
   同一台目标同时只能有一个任务（部分唯一索引）；任务进行中不能更换、确认或删除目标服务器（409 `AGENT_SSH_JOB_RUNNING`）；
 - 专用私钥加密保存在 `agent_ssh_targets.client_key_ref`（用途 `agent_ssh:<目标 id>`），已加入加密密钥轮换；
 - 审计：`agents.ssh.install_started` / `key_authorized` / `install_succeeded` / `install_failed` / `install_interrupted`，
