@@ -35,7 +35,7 @@ endef
 .PHONY: help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke openapi setup-token \
 	lint lint-api lint-web format test test-api test-web build-web backup restore-verify \
 	smoke-full perf scan \
-	n8n-up n8n-down n8n-logs agent-ca agents-up \
+	n8n-up n8n-down n8n-logs n8n-pull agent-ca agents-up pull openim-pull \
 	openim-build openim-up openim-down openim-logs
 
 help: ## 列出可用命令
@@ -65,6 +65,9 @@ dev-api: ## 只启动 API（热重载）
 
 dev-web: ## 只启动前端开发服务器
 	$(NPM) --prefix $(WEB_DIR) run dev
+
+pull: env ## 拉取 core 用到的镜像（不含本地构建的 api、web；deploy.sh 失败时重试，T-0092）
+	$(COMPOSE) pull --ignore-buildable
 
 up: env ## 构建并启动 core 服务，等待全部健康检查通过
 	$(COMPOSE) up -d --build --wait --wait-timeout 300
@@ -98,6 +101,9 @@ agents-up: agent-ca ## 启动 OpenClaw 接入入口（agent-gateway，--profile 
 openim-build: ## 构建打过补丁的 OpenIM 镜像（infra/openim/server/build.sh；约 8 GB 临时磁盘）
 	infra/openim/server/build.sh
 
+openim-pull: env ## 拉取 OpenIM 依赖的镜像（openim-server 是 make openim-build 在本机构建的，不拉取）
+	$(OPENIM_COMPOSE) pull $$($(OPENIM_COMPOSE) config --services | grep -vx openim-server)
+
 openim-up: env ## 启动独立部署的 OpenIM（IM 后端）；需要先 make up 与 make openim-build（一键脚本：deploy.sh connect）
 	@docker network inspect $(WORKSPACE_PROJECT)_im >/dev/null 2>&1 || \
 		{ echo "缺少 core 的 im 网络：请先 make up" >&2; exit 1; }
@@ -113,6 +119,9 @@ openim-down: ## 停止 OpenIM；保留数据卷
 
 openim-logs: ## 跟踪 OpenIM 日志（Ctrl+C 退出）
 	$(OPENIM_COMPOSE) logs -f --tail=100
+
+n8n-pull: env ## 拉取 n8n 的镜像
+	$(N8N_COMPOSE) pull
 
 n8n-up: env ## 启动独立部署的 n8n（自动化，可选）；需要先 make up
 	$(N8N_COMPOSE) up -d --wait --wait-timeout 300

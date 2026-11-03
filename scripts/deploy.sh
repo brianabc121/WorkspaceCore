@@ -13,6 +13,8 @@
 # 检查端口 / DNS / 防火墙 → make up → 迁移数据库 → 冒烟检查 → 检查 HTTPS → 显示安装凭据。
 # 在浏览器创建管理员后按回车，接着自动接入 n8n、部署 OpenIM、配置 OpenClaw 接入入口（connect，也可以以后单独运行；T-0076）。
 # GitHub 在工作台「集成设置」页面上接入（T-0091）。
+# 在终端里运行部署 / 升级 / 接入时，脚本自动在 tmux 会话里继续（T-0092）：SSH 断开不会中断，
+# 重新登录后再运行一次 deploy.sh 就接回原来的进度（不想用 tmux 时设置 WORKSPACE_NO_TMUX=1）。
 #
 # 选项：
 #   --dir DIR          安装目录（默认 /srv/my-workspace；在代码目录里运行时就是该目录）
@@ -67,6 +69,113 @@ confirm() {
 }
 
 as_root() { if (( EUID == 0 )); then "$@"; elif command -v sudo >/dev/null; then sudo "$@"; else die "需要 root 权限：$*"; fi; }
+
+# ---------------------------------------------------------------- SSH 断线后继续运行（T-0092）
+# 首次部署要下载几 GB 镜像、在服务器上编译 OpenIM，可能要几十分钟；脚本直接跑在 SSH 会话里时，
+# 网络一断（例如 "Timeout, server not responding"）终端关闭，脚本跟着被终止，部署停在一半。
+# 所以在终端里运行耗时的动作时，脚本把自己放进专用的 tmux 会话（独立的 tmux 服务 -L my-workspace，
+# 不影响用户自己的 tmux）：断线后部署继续；重新登录后再运行 deploy.sh 就接回这个会话。
+TMUX_SOCKET="my-workspace"
+TMUX_SESSION="deploy"
+has_terminal() { [[ -t 0 && -t 1 ]]; }
+# 已经在 tmux / screen 里（sudo 会清掉 TMUX、STY 变量，所以也看父进程）
+in_multiplexer() {
+  [[ -n ${TMUX:-}${STY:-}${WORKSPACE_IN_TMUX:-} ]] && return 0
+  local pid=$PPID comm
+  while [[ -n $pid && $pid != 0 && $pid != 1 ]]; do
+    comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' ')" || return 1
+    [[ $comm == tmux* || $comm == screen* ]] && return 0
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')" || return 1
+  done
+  return 1
+}
+tmux_cmd() { tmux -L "$TMUX_SOCKET" "$@"; }
+
+# 安装 tmux（系统的软件源，几百 KB）；装不上时返回 1，脚本照常运行并提醒
+install_tmux() {
+  command -v tmux >/dev/null && return 0
+  if apt_based; then
+    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux >/dev/null 2>&1 \
+      || { as_root apt-get update -qq >/dev/null 2>&1 && as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux >/dev/null 2>&1; }
+  elif command -v dnf >/dev/null; then as_root dnf install -y -q tmux >/dev/null 2>&1
+  elif command -v yum >/dev/null; then as_root yum install -y -q tmux >/dev/null 2>&1
+  fi
+  command -v tmux >/dev/null
+}
+
+use_tmux() { [[ ${WORKSPACE_NO_TMUX:-0} != 1 ]] && has_terminal && ! in_multiplexer; }
+
+# 已经有一次部署在 tmux 会话里运行（或刚结束、停在最后的输出上）：直接接回去，不再显示菜单
+attach_running() {
+  use_tmux && command -v tmux >/dev/null || return 0
+  tmux_cmd has-session -t "$TMUX_SESSION" 2>/dev/null || return 0
+  step "已经有一次部署在运行（或刚结束），接回去"
+  info "离开但不中断：先按 Ctrl+b 再按 d；以后再运行 deploy.sh（或 tmux -L $TMUX_SOCKET attach）接回"
+  exec tmux -L "$TMUX_SOCKET" attach -t "$TMUX_SESSION"
+}
+
+# 部署 / 升级 / 接入：在终端里运行时转到 tmux 会话里
+keep_running() {
+  case "$ACTION" in install|upgrade|connect) ;; *) return 0 ;; esac
+  use_tmux || return 0
+  if ! install_tmux; then
+    warn "没有 tmux（也没能自动安装）：SSH 断开会中断部署。网络不稳时先安装 tmux（或 screen），在里面运行本脚本"
+    return 0
+  fi
+  attach_running
+  local args=() script
+  forward_args
+  script="$ROOT/scripts/deploy.sh"
+  step "在 tmux 会话里运行：SSH 断开后部署会继续"
+  info "断线后重新登录，再运行一次同样的命令（或 tmux -L $TMUX_SOCKET attach）就能接回进度"
+  info "离开但不中断：先按 Ctrl+b 再按 d；向上翻看输出：先按 Ctrl+b 再按 [（按 q 退出）"
+  # 结束后停在最后的输出上（安装凭据等），按回车才关闭会话
+  tmux_cmd new-session -d -s "$TMUX_SESSION" -x 200 -y 50 \
+    env WORKSPACE_IN_TMUX=1 bash -c 'bash "$0" "$@"; code=$?; printf "\n部署脚本已结束（退出码 %s）。按回车关闭这个会话……" "$code"; read -r _; exit "$code"' \
+    "$script" "${args[@]}"
+  tmux_cmd set-option -t "$TMUX_SESSION" history-limit 50000 >/dev/null 2>&1 || true
+  exec tmux -L "$TMUX_SOCKET" attach -t "$TMUX_SESSION"
+}
+
+# 把命令行参数原样传给重新启动的脚本（args 由调用方声明）
+forward_args() {
+  [[ -n $ACTION ]] && args+=("$ACTION")
+  args+=(--dir "${ROOT:-${DIR:-$DEFAULT_DIR}}")
+  [[ -n $REF ]] && args+=(--ref "$REF")
+  [[ -n $DOMAIN ]] && args+=(--domain "$DOMAIN")
+  [[ -n $EMAIL ]] && args+=(--email "$EMAIL")
+  [[ -n $BASE_URL ]] && args+=(--base-url "$BASE_URL")
+  (( ASSUME_YES )) && args+=(--yes)
+  [[ -n $CONFIRM ]] && args+=(--confirm "$CONFIRM")
+  [[ -n $ENV_CHOICE ]] && args+=("$ENV_CHOICE")
+  [[ -n $DIR_CHOICE ]] && args+=("$DIR_CHOICE")
+  [[ -n $AFTER_PULL ]] && args+=(--after-pull "$AFTER_PULL")
+  return 0
+}
+
+# 拉取镜像：网络不稳时重试（已经下载的层不会重新下载）；三次都失败时返回 1，
+# 后面的 make up 会再试一次并给出具体的错误
+PULL_ATTEMPTS=3
+PULL_PAUSE=15
+pull_images() {
+  local target="$1" label="$2" i log
+  log="$(mktemp)"
+  for ((i = 1; i <= PULL_ATTEMPTS; i++)); do
+    if (cd "$ROOT" && make -s "$target" </dev/null) 2>&1 | tee "$log"; then rm -f "$log"; return 0; fi
+    if grep -q toomanyrequests "$log"; then
+      # Docker Hub 匿名拉取的次数限制：马上重试没有用
+      rm -f "$log"
+      warn "Docker Hub 限制了匿名拉取次数（429 toomanyrequests）：等一小时，或 docker login 后重新运行"
+      return 1
+    fi
+    (( i < PULL_ATTEMPTS )) || break
+    warn "拉取 $label 的镜像没有成功（第 $i 次，见上面的输出）；${PULL_PAUSE} 秒后重试，已经下载的部分不会重新下载"
+    sleep "$PULL_PAUSE"
+  done
+  rm -f "$log"
+  warn "拉取 $label 的镜像失败了 $PULL_ATTEMPTS 次（见上面的输出）：检查网络后重新运行"
+  return 1
+}
 
 # ---------------------------------------------------------------- .env 读写（保留其他行与注释）
 env_get() {
@@ -264,16 +373,7 @@ bootstrap() {
     ok "已克隆 $(git -C "$target" rev-parse --short HEAD)"
   fi
   local args=()
-  [[ -n $ACTION ]] && args+=("$ACTION")
-  args+=(--dir "$target")
-  [[ -n $REF ]] && args+=(--ref "$REF")
-  [[ -n $DOMAIN ]] && args+=(--domain "$DOMAIN")
-  [[ -n $EMAIL ]] && args+=(--email "$EMAIL")
-  [[ -n $BASE_URL ]] && args+=(--base-url "$BASE_URL")
-  (( ASSUME_YES )) && args+=(--yes)
-  [[ -n $CONFIRM ]] && args+=(--confirm "$CONFIRM")
-  [[ -n $ENV_CHOICE ]] && args+=("$ENV_CHOICE")
-  [[ -n $DIR_CHOICE ]] && args+=("$DIR_CHOICE")
+  DIR="$target" forward_args
   if (exec </dev/tty) 2>/dev/null; then exec bash "$target/scripts/deploy.sh" "${args[@]}" </dev/tty; fi
   exec bash "$target/scripts/deploy.sh" "${args[@]}" </dev/null
 }
@@ -411,6 +511,7 @@ prepare_env() {
 # ---------------------------------------------------------------- 启动、迁移、检查
 start_services() {
   step "构建并启动服务（make up，首次需要几分钟）"
+  pull_images pull "工作台" || true
   local log
   log="$(mktemp)"
   if (cd "$ROOT" && make up) 2>&1 | tee "$log"; then rm -f "$log"; return 0; fi
@@ -592,6 +693,7 @@ connect_n8n() {
     return 0
   fi
   confirm "部署 n8n 并自动接入？（另外占用约 1 GB 内存）" y || { info "跳过"; return 0; }
+  pull_images n8n-pull "n8n" || true
   (cd "$ROOT" && make -s n8n-up </dev/null) || { warn "n8n 没有启动（见上面的输出），跳过"; return 0; }
   url="$(public_url_of N8N_PUBLIC_URL http://localhost:5678)"
   owner="$(connect_cmd n8n-owner </dev/null 2>/dev/null || true)"
@@ -796,6 +898,7 @@ connect_openim() {
       || { info "跳过；以后运行 deploy.sh connect"; return 0; }
   fi
   build_openim || { warn "OpenIM 镜像没有构建成功（见上面的输出），跳过；以后重新运行 deploy.sh connect"; return 0; }
+  pull_images openim-pull "OpenIM" || true
   if ! (cd "$ROOT" && make -s openim-up </dev/null); then
     warn "OpenIM 没有启动成功（见上面的输出）：运行 make openim-logs 查看日志；拉取镜像遇到 429 toomanyrequests 时等一小时，或 docker login 后再运行 deploy.sh connect"
     return 0
@@ -1264,7 +1367,9 @@ main() {
     ROOT="$(find_checkout || true)"
   fi
   [[ -n $ROOT ]] || bootstrap
+  case "$ACTION" in ""|install|upgrade|connect) attach_running ;; esac
   [[ -n $ACTION ]] || menu
+  keep_running
   case "$ACTION" in
     install) ensure_tools; do_install ;;
     upgrade) ensure_tools; do_upgrade ;;

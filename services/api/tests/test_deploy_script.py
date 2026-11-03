@@ -6,7 +6,10 @@
 """
 
 import re
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 DEPLOY = (ROOT / "scripts/deploy.sh").read_text(encoding="utf-8")
@@ -289,3 +292,283 @@ def test_ingress_creates_a_custom_tls_dir_the_gateway_can_enter(tmp_path: Path) 
     assert custom.stat().st_mode & 0o777 == 0o755
     assert (custom / "public.key").stat().st_mode & 0o777 == 0o600
     assert (custom / "public.crt").read_text() == "CERT ws.example.com"
+
+
+# ---------------------------------------------------------------- SSH 断线后继续运行（T-0092）
+
+FAKE_TMUX = """#!/usr/bin/env bash
+# 假的 tmux：每次调用记一行（参数用 \\x1f 分隔，保留空格）
+# has-session 按 $STATE/session 是否存在返回
+{ printf '%s\\x1f' "$@"; printf '\\n'; } >> "$LOG"
+for arg in "$@"; do [[ $arg == has-session ]] && { [[ -f $STATE/session ]]; exit; }; done
+exit 0
+"""
+
+
+def _keep_running(
+    tmp_path: Path,
+    action: str = "install",
+    *,
+    terminal: bool = True,
+    multiplexer: bool = False,
+    session: bool = False,
+    tmux: bool = True,
+    env: dict[str, str] | None = None,
+) -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
+    """只加载 deploy.sh 的函数，在假的终端环境里运行 keep_running。"""
+    root, state, bin_dir = tmp_path / "root", tmp_path / "state", tmp_path / "bin"
+    for path in (root / "scripts", state, bin_dir):
+        path.mkdir(parents=True, exist_ok=True)
+    if session:
+        (state / "session").touch()
+    if tmux:
+        (bin_dir / "tmux").write_text(FAKE_TMUX, encoding="utf-8")
+        (bin_dir / "tmux").chmod(0o755)
+    log = tmp_path / "tmux.log"
+    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]
+    fake_tmux = 'tmux() { "$BIN/tmux" "$@"; }' if tmux else "tmux() { return 127; }"
+    overrides = "\n".join(
+        [
+            f"has_terminal() {{ {'return 0' if terminal else 'return 1'}; }}",
+            f"in_multiplexer() {{ {'return 0' if multiplexer else 'return 1'}; }}",
+            # 只用假的 tmux：本机装了真的 tmux 时也不会真的建会话
+            f"install_tmux() {{ {'return 0' if tmux else 'return 1'}; }}",
+            fake_tmux,
+            "",
+        ]
+    )
+    script = (
+        functions
+        + "\n"
+        + overrides
+        + f'ROOT="$1" ACTION="{action}" ASSUME_YES=1 DOMAIN=ws.example.com\n'
+        + 'keep_running\necho "keep_running returned"\n'
+    )
+    result = subprocess.run(  # noqa: S603 - 参数固定
+        ["/bin/bash", "-c", script, "deploy", str(root)],
+        env={
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            "LOG": str(log),
+            "STATE": str(state),
+            "BIN": str(bin_dir),
+            **(env or {}),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    calls = [
+        line.split("\x1f")[:-1] for line in (log.read_text().splitlines() if log.exists() else [])
+    ]
+    return result, calls
+
+
+@pytest.mark.parametrize("action", ["install", "upgrade", "connect"])
+def test_long_actions_move_into_a_tmux_session(tmp_path: Path, action: str) -> None:
+    result, calls = _keep_running(tmp_path, action)
+    assert result.returncode == 0, result.stderr
+    # exec tmux attach 替换了脚本：后面的 echo 不会运行
+    assert "keep_running returned" not in result.stdout
+    assert [c[:4] for c in calls] == [
+        ["-L", "my-workspace", "has-session", "-t"],
+        ["-L", "my-workspace", "new-session", "-d"],
+        ["-L", "my-workspace", "set-option", "-t"],
+        ["-L", "my-workspace", "attach", "-t"],
+    ]
+    new = calls[1]
+    assert new[new.index("-s") + 1] == "deploy"
+    # 会话里重新运行同一个动作，参数原样转发；结束后等回车，最后的输出（安装凭据等）不会一闪而过
+    script = str(tmp_path / "root/scripts/deploy.sh")
+    tail = new[new.index(script) :]
+    assert tail == [
+        script,
+        action,
+        "--dir",
+        str(tmp_path / "root"),
+        "--domain",
+        "ws.example.com",
+        "--yes",
+    ]
+    assert "WORKSPACE_IN_TMUX=1" in new
+    wrapper = new[new.index("-c") + 1]
+    assert "read -r _" in wrapper and 'exit "$code"' in wrapper
+    assert "SSH 断开后部署会继续" in result.stderr
+
+
+def test_running_again_reattaches_instead_of_starting_twice(tmp_path: Path) -> None:
+    result, calls = _keep_running(tmp_path, session=True)
+    assert result.returncode == 0, result.stderr
+    assert [c[2] for c in calls] == ["has-session", "attach"]
+    assert "接回去" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        {"action": "status"},
+        {"action": "reset"},
+        {"terminal": False},
+        {"multiplexer": True},
+        {"env": {"WORKSPACE_NO_TMUX": "1"}},
+    ],
+)
+def test_no_tmux_when_not_needed(tmp_path: Path, case: dict[str, object]) -> None:
+    result, calls = _keep_running(tmp_path, **case)  # type: ignore[arg-type]
+    assert result.returncode == 0, result.stderr
+    assert "keep_running returned" in result.stdout
+    assert calls == []
+
+
+def test_without_tmux_the_script_continues_with_a_warning(tmp_path: Path) -> None:
+    result, calls = _keep_running(tmp_path, tmux=False)
+    assert result.returncode == 0, result.stderr
+    assert "keep_running returned" in result.stdout
+    assert "没有 tmux" in result.stderr
+    assert calls == []
+
+
+def test_the_session_waits_for_enter_and_keeps_the_exit_code(tmp_path: Path) -> None:
+    """按假 tmux 记下的命令真正运行一次：脚本结束后显示退出码，按回车才关闭。"""
+    _, calls = _keep_running(tmp_path)
+    new = calls[1]
+    command = new[new.index("env") :]
+    script = Path(command[command.index("-c") + 2])
+    script.write_text('echo "deploy ran with: $*"; exit 3\n', encoding="utf-8")
+    result = subprocess.run(  # noqa: S603 - 参数来自上面的假 tmux 记录
+        command, input="\n", capture_output=True, text=True, check=False, timeout=30
+    )
+    assert result.returncode == 3
+    assert "deploy ran with: install --dir" in result.stdout
+    assert "退出码 3" in result.stdout
+
+
+def test_in_multiplexer_sees_tmux_and_screen(tmp_path: Path) -> None:
+    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]
+    for var in ("TMUX", "STY", "WORKSPACE_IN_TMUX"):
+        result = subprocess.run(  # noqa: S603 - 参数固定
+            ["/bin/bash", "-c", functions + "\nin_multiplexer"],
+            env={"PATH": "/usr/bin:/bin", var: "1"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, (var, result.stderr)
+
+
+FAKE_MAKE = """#!/usr/bin/env bash
+# 假的 make：前 $FAILS 次失败（输出 $MESSAGE），之后成功
+n=$(cat "$STATE/count" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$STATE/count"
+echo "make $*" >> "$LOG"
+if (( n <= FAILS )); then echo "$MESSAGE" >&2; exit 1; fi
+echo "pulled"
+"""
+
+
+def _pull(
+    tmp_path: Path, fails: int, message: str = "net/http: TLS handshake timeout"
+) -> tuple[int, str, list[str]]:
+    root, state, bin_dir = tmp_path / "root", tmp_path / "state", tmp_path / "bin"
+    for path in (root, state, bin_dir):
+        path.mkdir(parents=True, exist_ok=True)
+    (bin_dir / "make").write_text(FAKE_MAKE, encoding="utf-8")
+    (bin_dir / "make").chmod(0o755)
+    log = tmp_path / "make.log"
+    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]
+    result = subprocess.run(  # noqa: S603 - 参数固定
+        [
+            "/bin/bash",
+            "-c",
+            functions + '\nROOT="$1" PULL_PAUSE=0\npull_images openim-pull OpenIM',
+            "deploy",
+            str(root),
+        ],
+        env={
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "LOG": str(log),
+            "STATE": str(state),
+            "FAILS": str(fails),
+            "MESSAGE": message,
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode, result.stderr, log.read_text().splitlines()
+
+
+def test_pull_retries_until_it_works(tmp_path: Path) -> None:
+    code, stderr, calls = _pull(tmp_path, fails=2)
+    assert code == 0
+    assert calls == ["make -s openim-pull"] * 3
+    assert "第 1 次" in stderr and "第 2 次" in stderr
+
+
+def test_pull_gives_up_after_three_attempts(tmp_path: Path) -> None:
+    code, stderr, calls = _pull(tmp_path, fails=5)
+    assert code == 1
+    assert len(calls) == 3
+    assert "失败了 3 次" in stderr
+
+
+def test_pull_does_not_retry_a_docker_hub_rate_limit(tmp_path: Path) -> None:
+    code, stderr, calls = _pull(
+        tmp_path,
+        fails=5,
+        message="toomanyrequests: You have reached your unauthenticated pull rate limit",
+    )
+    assert code == 1
+    assert len(calls) == 1
+    assert "429" in stderr
+
+
+def test_deploy_pulls_before_starting() -> None:
+    for target, start in (
+        ("pull", "make up"),
+        ("openim-pull", "make -s openim-up"),
+        ("n8n-pull", "make -s n8n-up"),
+    ):
+        assert f"pull_images {target} " in DEPLOY, target
+        assert DEPLOY.index(f"pull_images {target} ") < DEPLOY.index(
+            start, DEPLOY.index(f"pull_images {target} ")
+        ), target
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    for target in ("pull", "openim-pull", "n8n-pull"):
+        assert re.search(rf"^{target}: env ##", makefile, re.MULTILINE), target
+    assert "grep -vx openim-server" in makefile
+
+
+def test_running_again_without_an_action_reattaches_before_the_menu(tmp_path: Path) -> None:
+    """curl | bash 重新运行时（没有动作）：已经有部署在运行就直接接回，不显示菜单。"""
+    root, state, bin_dir = tmp_path / "root", tmp_path / "state", tmp_path / "bin"
+    for path in (root / "scripts", state, bin_dir):
+        path.mkdir(parents=True)
+    (root / "compose.yaml").touch()
+    (root / "scripts/init_env.py").touch()
+    (state / "session").touch()
+    (bin_dir / "tmux").write_text(FAKE_TMUX, encoding="utf-8")
+    (bin_dir / "tmux").chmod(0o755)
+    log = tmp_path / "tmux.log"
+    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]
+    script = (
+        functions
+        + "\nhas_terminal() { return 0; }\nin_multiplexer() { return 1; }\n"
+        + 'tmux() { "$BIN/tmux" "$@"; }\nmenu() { echo "MENU SHOWN"; exit 9; }\n'
+        + 'main --dir "$1"\n'
+    )
+    result = subprocess.run(  # noqa: S603 - 参数固定
+        ["/bin/bash", "-c", script, "deploy", str(root)],
+        env={
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "LOG": str(log),
+            "STATE": str(state),
+            "BIN": str(bin_dir),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "MENU SHOWN" not in result.stdout
+    calls = [line.split("\x1f")[:-1] for line in log.read_text().splitlines()]
+    assert [c[2] for c in calls] == ["has-session", "attach"]
