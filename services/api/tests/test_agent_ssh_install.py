@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import secrets
 import stat
+import subprocess
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -1011,3 +1012,31 @@ def test_pins_match_bundle_and_docs() -> None:
         assert prov.PLUGIN_SHA256 in (ROOT / path).read_text(), path
     assert "@PACKAGE@" not in prov.plugin_script()
     assert "@SHA256@" not in prov.plugin_script()
+
+
+def test_revoke_command_matches_key_fields_not_spacing(tmp_path: Path) -> None:
+    """authorized_keys 被重新排版（制表符、多个空格、行首带选项）时也要删掉专用公钥，其他行保留。"""
+    ours = asyncssh.generate_private_key("ssh-ed25519").export_public_key().decode().split()
+    other = asyncssh.generate_private_key("ssh-ed25519").export_public_key().decode().strip()
+    kind, data = ours[0], ours[1]
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir()
+    keys = ssh_dir / "authorized_keys"
+    keys.write_text(
+        f"{kind}\t{data} tab-separated\n"
+        f"   {kind}    {data}   many-spaces\n"
+        f'command="echo hi",no-pty {kind} {data} with-options\n'
+        f"{other}\n"
+        f"{kind} {data}",  # 最后一行没有换行
+        encoding="utf-8",
+    )
+    result = subprocess.run(  # noqa: S603 - 命令由工作台自己生成
+        ["/bin/sh", "-c", prov.revoke_key_command(f"{kind} {data} myworkspace-agent")],
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert keys.read_text(encoding="utf-8").splitlines() == [other]
+    assert stat.S_IMODE(keys.stat().st_mode) == 0o600

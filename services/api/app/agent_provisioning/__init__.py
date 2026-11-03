@@ -148,20 +148,24 @@ def unschedule_command() -> str:
     return f"crontab -l 2>/dev/null | grep -vF {q(CRON_MARKER)} | crontab -"
 
 
-def _key_needle(public_key: str) -> str:
-    """authorized_keys 里按“类型 公钥数据”匹配（行首带选项、行尾注释不同的也算同一把）。"""
-    return " ".join(public_key.split()[:2])
+# 按字段找这把公钥：awk 默认按连续的空格 / 制表符分字段，行首带选项、两字段之间是制表符或多个空格、
+# 行尾注释不同的都算同一把（只比较相邻的“类型 公钥数据”两个字段）
+_AWK_MATCH = "{for (i = 1; i < NF; i++) if ($i == kt && $(i + 1) == kd) next; print}"
+_AWK_FOUND = "{for (i = 1; i < NF; i++) if ($i == kt && $(i + 1) == kd) f = 1} END {exit !f}"
 
 
 def revoke_key_command(public_key: str) -> str:
-    """从 ~/.ssh/authorized_keys 删掉这把公钥所在的行，其他行原样保留（先写临时文件再替换）。"""
-    needle = q(_key_needle(public_key))
+    """从 ~/.ssh/authorized_keys 删掉这把公钥所在的行，其他行原样保留（先写临时文件再替换）。
+
+    最后再按同样的字段规则检查一遍：还能找到这把公钥就返回失败，不会误报已吊销。
+    """
+    kind, data = public_key.split()[:2]
+    awk_vars = f"-v kt={q(kind)} -v kd={q(data)}"
     path = "~/.ssh/authorized_keys"
     return (
         f"[ -f {path} ] || exit 0; t=$(mktemp {path}.XXXXXX) || exit 1;"
-        f' grep -vF -- {needle} {path} > "$t"; s=$?;'
-        f' if [ "$s" -gt 1 ]; then rm -f "$t"; exit 1; fi;'
-        f' chmod 600 "$t" && mv "$t" {path} && ! grep -qF -- {needle} {path}'
+        f' awk {awk_vars} {q(_AWK_MATCH)} {path} > "$t" || {{ rm -f "$t"; exit 1; }};'
+        f' chmod 600 "$t" && mv "$t" {path} && ! awk {awk_vars} {q(_AWK_FOUND)} {path}'
     )
 
 
