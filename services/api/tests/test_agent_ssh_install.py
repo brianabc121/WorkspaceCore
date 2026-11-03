@@ -23,6 +23,7 @@ import pytest
 from fastapi import FastAPI
 from pydantic import SecretStr
 
+from app import agent_bundle
 from app import agent_provisioning as prov
 from app.domain import agent_ssh_install
 from app.domain.agent_ssh_install import JobRecorder, SshJobRunner
@@ -427,7 +428,7 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     # 插件脚本：锁定版本与 sha256
     plugin = (host.state / "plugin-stdin").read_text()
     assert f'package="{prov.PLUGIN_PACKAGE}"' in plugin
-    assert f'"{prov.PLUGIN_NAME}" "{prov.PLUGIN_VERSION}"' in plugin
+    assert f'"{prov.PLUGIN_NAME}" "{agent_bundle.PLUGIN_VERSION}"' in plugin
     assert f'expected="{prov.PLUGIN_SHA256}"' in plugin
     assert "--force --accept-capabilities" in plugin
 
