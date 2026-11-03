@@ -885,8 +885,9 @@ async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -
     assert ref == 0
     actions = await run_sql(
         owner.database_url,
-        "SELECT string_agg(action || ':' || coalesce(metadata_redacted_json->>'remote_removed', ''), ','"
-        " ORDER BY created_at) FROM workspace.audit_logs WHERE action LIKE 'agents.ssh.%'",
+        "SELECT string_agg(action || ':'"
+        " || coalesce(metadata_redacted_json->>'remote_removed', ''), ',' ORDER BY created_at)"
+        " FROM workspace.audit_logs WHERE action LIKE 'agents.ssh.%'",
     )
     for action in (
         "agents.ssh.uninstall_started:",

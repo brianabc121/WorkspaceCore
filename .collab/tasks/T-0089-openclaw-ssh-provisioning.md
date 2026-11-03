@@ -2,7 +2,7 @@
 id: T-0089
 title: OpenClaw 全自动部署 B：SSH 自动安装后端（指纹确认、一次性密码换专用密钥、Docker、部署接入包、等待上线）
 owner: claude
-status: in_progress
+status: done
 priority: P2
 branch: claude/cool-wright-99qbbg
 paths: services/api,tests/e2e,.github/workflows,docs
@@ -24,15 +24,15 @@ owner 在 OpenClaw 实例页填写一台新服务器的 SSH 地址、端口、�
 - B3：卸载、重装、吊销专用密钥；CI 端到端（真实 sshd + 真实 OpenClaw）。
 
 ## 验收标准
-- [ ] asyncssh 锁定版本、许可证与用到的接口在锁定版本上核验（ADR 第 4 节补充）
-- [ ] 探测只读取主机公钥、不登录；确认时指纹必须与探测结果一致；之后连接只接受这把公钥，变了就拒绝
-- [ ] 目标地址：拒绝回环、链路本地（含云元数据地址）、组播、未指定等地址；域名只解析一次，连接用解析出的地址
-- [ ] 密码只在 API 进程内存里：不写数据库、不进 Redis、不写日志与审计；命令输出脱敏后保存
-- [ ] 专用私钥用 CredentialBox 加密保存（用途绑定到目标）；可以吊销（从对方 authorized_keys 删除并删掉私钥）
-- [ ] Docker 只在 Ubuntu 22.04 / 24.04、Debian 12 上自动安装，来自官方软件源、核对签名公钥指纹、锁定版本
-- [ ] 安装完成后实例上线（心跳）；失败时给出失败的步骤与原因；API 重启时进行中的任务标为中断
-- [ ] 只有 owner 可以使用；所有读写按工作空间隔离；每一步写审计
-- [ ] 单元 / 集成测试（进程内 asyncssh 服务器）与 CI 端到端通过；ruff / mypy / pytest / `collab.py check` 通过
+- [x] asyncssh 锁定版本、许可证与用到的接口在锁定版本上核验（ADR 第 4 节补充）
+- [x] 探测只读取主机公钥、不登录；确认时指纹必须与探测结果一致；之后连接只接受这把公钥，变了就拒绝
+- [x] 目标地址：拒绝回环、链路本地（含云元数据地址）、组播、未指定等地址；域名只解析一次，连接用解析出的地址
+- [x] 密码只在 API 进程内存里：不写数据库、不进 Redis、不写日志与审计；命令输出脱敏后保存
+- [x] 专用私钥用 CredentialBox 加密保存（用途绑定到目标）；可以吊销（从对方 authorized_keys 删除并删掉私钥）
+- [x] Docker 只在 Ubuntu 22.04 / 24.04、Debian 12 上自动安装，来自官方软件源、核对签名公钥指纹、锁定版本
+- [x] 安装完成后实例上线（心跳）；失败时给出失败的步骤与原因；API 重启时进行中的任务标为中断
+- [x] 只有 owner 可以使用；所有读写按工作空间隔离；每一步写审计
+- [x] 单元 / 集成测试（进程内 asyncssh 服务器）与 CI 端到端通过；ruff / mypy / pytest / `collab.py check` 通过
 
 ## 背景 / 约束 / 参考
 - T-0088（接入入口自动配置）已合并；网页表单在 T-0090
@@ -50,3 +50,4 @@ owner 在 OpenClaw 实例页填写一台新服务器的 SSH 地址、端口、�
 - 2026-11-03 05:35 UTC · claude · B2 完成（待 PR 合并）：POST /ssh/install（202，任务在 API 进程内的后台协程里运行，SshJobRunner；启动时把 running 标为 interrupted，停止时取消）；步骤 connect→inspect→authorize_key→docker→reconnect→upload→pull→plugin→start→schedule→online。密码只经标准输入给 sudo -S，密码阶段结束即清掉并断开，改用专用 ed25519 密钥（加密保存在 client_key_ref，用途 agent_ssh:<id>，已加入密钥轮换）；已装专用公钥且 Docker 可用时重新部署可以不填密码。日志脱敏（密码、实例令牌、Gateway 令牌、PEM 私钥、mwa_ 令牌）。上线判断：这次签发的实例凭证第一次被使用。实测：install-docker.sh 在 ubuntu 24.04 / 22.04 容器里装上四个锁定版本并 hold（debian 12 因本环境代理拦截 deb.debian.org 只核对了索引）；install-plugin.sh 在锁定 OpenClaw 镜像里 npm pack → sha256 一致 → Installed plugin: openclaw-channel。发现并修复：asyncssh run() 只在有 input 时发 EOF，没有 stdin 的命令改接 DEVNULL。测试 tests/test_agent_ssh_install.py 17 个（进程内 asyncssh 服务器在临时目录里真正执行命令，假 docker/sudo/bash/chown/crontab）。下一步 B3：吊销 / 卸载 / 重装，CI 端到端（真实 sshd + 真实 OpenClaw）。越界说明：apps/web/src/services/schema.d.ts 由 openapi.json 生成，一起更新。
 - 2026-11-03 06:03 UTC · claude · PR #132 的 Codex 审查两条已修：P1 更换服务器的探测期间对原目标开始安装，锁内复查漏了进行中的任务 → set_target 在探测后的行锁内再查 _running；任务开始时要求主机公钥仍确认、保存专用私钥与记录完成前核对目标未被更换（target_changed）。P2 authorized_keys 最后一行没有换行时专用公钥接到行尾 → 追加前补换行。都先用测试复现再修。
 - 2026-11-03 06:48 UTC · claude · B3：卸载（POST /ssh/uninstall，任务 kind=uninstall，迁移 0023）与吊销专用密钥（POST /ssh/revoke，连不上时 force 只删本地）；CI 端到端 tests/e2e/agent_ssh_acceptance.py（runner 自己的 sshd，账号要 sudo 密码、不在 docker 组，真实 OpenClaw 上线、重装、卸载、吊销）；docker-pins job（debian 12 / ubuntu 22.04 / 24.04 真正运行 install-docker.sh 并核对锁定版本与 hold）。本机真实 sshd 实测：插件之前的步骤、卸载、吊销都通过（插件因沙箱代理拦截 TLS 失败，并由此修复 npm 错误被 --silent 吞掉）。人类中途反馈部署时 SSH 断线，先做了 T-0092，B3 的提交暂存在本地分支，T-0092 合并后推送。
+- 2026-11-03 07:10 UTC · claude · status in_progress → done：B1–B3 完成：指纹确认、一次性密码换专用密钥、Docker（官方源锁定版本）、接入包、插件、启动、定时任务、等待上线、卸载、吊销；CI 端到端（真实 sshd + 真实 OpenClaw）与 docker-pins。网页表单在 T-0090
