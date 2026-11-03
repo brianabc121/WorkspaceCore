@@ -319,18 +319,22 @@ class AgentSshTarget(Base):
     updated_at: Mapped[datetime] = _updated()
 
 
+SSH_JOB_KINDS = ("install", "uninstall")
 SSH_JOB_STATUSES = ("running", "succeeded", "failed", "interrupted")
 
 
 class AgentSshJob(Base):
-    """一次通过 SSH 的安装（T-0089 B2）。在 API 进程内运行；进程重启时 running 改为 interrupted。
+    """一次通过 SSH 的安装或卸载（T-0089 B2 / B3）。
+
+    在 API 进程内运行；进程重启时 running 改为 interrupted。
 
     steps：[{key, status, detail}]；log：命令输出的末尾，已脱敏（密码、令牌、私钥不会出现）。
     """
 
     __tablename__ = "agent_ssh_jobs"
     __table_args__ = (
-        CheckConstraint("kind IN ('install')", name="kind"),
+        # 'uninstall'：迁移 0023（T-0089 B3）
+        CheckConstraint(f"kind IN {SSH_JOB_KINDS}", name="kind"),
         CheckConstraint(f"status IN {SSH_JOB_STATUSES}", name="status"),
         ForeignKeyConstraint(
             ["workspace_id", "instance_id"],
