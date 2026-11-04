@@ -27,9 +27,11 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import uuid
 import zipfile
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -801,6 +803,95 @@ def scenario_15(c: Ctx) -> None:
             ", ".join(sorted(offered)))
 
 
+def usage_report(instance: Instance) -> subprocess.CompletedProcess[str]:
+    """照接入包 crontab 那一行跑一次用量上报（T-0104）：容器里调真实 OpenClaw 的 sessions.usage，经接入网关上报。"""
+    return instance.exec("node", "/opt/myworkspace/bin/usage-report.mjs", timeout=120, check=False)
+
+
+def scenario_16(c: Ctx) -> None:
+    """任务时间轴（T-0106）：甲真实上报 token 用量；交给甲执行（管理员的 IM 发任务）→ 甲调 complete_task 待审批 →
+    批准后任务完成、这段结束；时间轴显示这段的执行者、token 与等待审批。"""
+    tag = uuid.uuid4().hex[:6]
+    # 1. 第一次上报只记基准（之前的对话不算进时间轴）
+    first = usage_report(c.a)
+    # 实例接口不返回 usage_reported_at（只在库里），直接查
+    reported = sql(f"SELECT usage_reported_at IS NOT NULL FROM workspace.agent_instances WHERE id = '{c.a.id}'")
+    minutes = sql(f"SELECT count(*) FROM workspace.agent_usage_minutes WHERE instance_id = '{c.a.id}'")
+    c.check("时间轴：甲第一次上报用量成功，只记基准、不计 token",
+            first.returncode == 0 and reported == "t" and minutes == "0",
+            f"退出码 {first.returncode} {first.stderr.strip()[-300:]}；已上报 {reported}；{minutes} 分钟")
+
+    # 2. 建任务、执行者设为甲，交给它执行：管理员的 IM 把任务发给甲，同时开一段
+    project = c.owner.call("POST", "/api/v1/projects", {"title": f"时间轴验收 {tag}", "description": ""},
+                           **{"Idempotency-Key": str(uuid.uuid4())})
+    task = c.owner.call("POST", "/api/v1/tasks", {"project_id": project["id"], "title": f"整理巡检记录 {tag}"},
+                        **{"Idempotency-Key": str(uuid.uuid4())})
+    task = c.owner.call("PATCH", f"/api/v1/tasks/{task['id']}", {"version": task["version"], "assignee_instance_id": c.a.id},
+                        **{"Idempotency-Key": str(uuid.uuid4())})
+    key = str(uuid.uuid4())
+    run_ = c.owner.call("POST", f"/api/v1/tasks/{task['id']}/runs", {"dispatch": True}, **{"Idempotency-Key": key})
+    again = c.owner.call("POST", f"/api/v1/tasks/{task['id']}/runs", {"dispatch": True}, **{"Idempotency-Key": key})
+    sent = wait_for("任务消息", lambda: [m for m in c.owner.messages(c.conv_a)
+                                     if m["sender_im_id"] == c.admin_im and task["id"] in (m.get("text") or "")], timeout=60)
+    replied = wait_for("甲收到任务", lambda: c.from_sender(c.conv_a, c.a.im_user_id, f"整理巡检记录 {tag}"), timeout=150)
+    c.check("时间轴：交给甲执行——管理员的 IM 发出任务（含 task_id），甲收到并调用模型；同一个键重试不会再发、不多开一段",
+            run_["executor_kind"] == "instance" and run_["instance_id"] == c.a.id and again["id"] == run_["id"]
+            and len(sent) == 1 and bool(replied), f"{len(sent)} 条任务消息")
+
+    # 3. 甲调 complete_task：只生成待审批（完成照旧要审批）
+    c.owner.send(c.conv_a, "TOOL:myworkspace__complete_task " + json.dumps({"task_id": task["id"]}))
+
+    def pending() -> list[dict[str, Any]]:
+        return [e for e in c.owner.call("GET", "/api/v1/ai/tool-executions?status=pending_approval")["items"]
+                if e["tool_name"] == "complete_task" and e["instance_id"] == c.a.id
+                and e["arguments"].get("task_id") == task["id"]]
+
+    record = wait_for("complete_task 待审批", pending, timeout=150)[0]
+    running = c.owner.call("GET", f"/api/v1/tasks/{task['id']}")
+    c.check("时间轴：甲调用 complete_task 只生成待审批，任务还没完成、这段还在执行",
+            not running["done"] and running.get("started_at") is not None)
+
+    # 4. 这段还在执行时再上报：这期间的 token 按时间归属到这段。sessions.usage 有缓存，正在重新计算的会话
+    #    这一次报空（脚本跳过），所以隔 12 秒再报（接口限每分钟 6 次），直到有用量入库
+    reports: list[subprocess.CompletedProcess[str]] = []
+
+    def reported_tokens() -> int:
+        reports.append(usage_report(c.a))
+        return int(sql("SELECT coalesce(sum(input + output + cache_read + cache_write), 0)"
+                       f" FROM workspace.agent_usage_minutes WHERE instance_id = '{c.a.id}'") or 0)
+
+    usage = wait_for("用量入库", reported_tokens, timeout=90, interval=12)
+    c.check("时间轴：甲再次上报，交给它执行之后的对话 token 入库（真实 OpenClaw 的 sessions.usage）",
+            all(r.returncode == 0 for r in reports) and usage > 0,
+            f"上报 {len(reports)} 次，{usage} token；{reports[-1].stderr.strip()[-300:]}")
+
+    # 5. 批准（含二次认证）→ 任务完成 → 这段结束（done），等待审批落在这段里
+    approved = c.owner.call("POST", f"/api/v1/ai/tool-executions/{record['id']}/approve", {"password": PASSWORD},
+                            **{"If-Match": f'"{record["version"]}"'})
+    done = c.owner.call("GET", f"/api/v1/tasks/{task['id']}")
+    runs = c.owner.call("GET", f"/api/v1/tasks/{task['id']}/runs")["items"]
+    only = runs[0] if len(runs) == 1 else {}
+    c.check("时间轴：批准后任务完成，这段结束（done），分到 token，等待审批记在这段里",
+            approved["status"] == "succeeded" and done["done"] and only.get("end_reason") == "done"
+            and (only.get("tokens") or {}).get("total", 0) > 0 and only.get("usage_reported") is True
+            and any(w["execution_id"] == record["id"] and w["end"] for w in only.get("waits", [])),
+            json.dumps({"status": approved["status"], "runs": [(r["end_reason"], (r.get("tokens") or {}).get("total"),
+                                                                 len(r.get("waits", []))) for r in runs]}, ensure_ascii=False))
+
+    # 6. 时间轴接口（按项目）：甲的轨道上有这段，用量已上报
+    # 用量记在上报那一分钟的整分钟上（可能早于这段开始的时刻），范围从这段开始前 5 分钟起
+    start = datetime.fromisoformat(only.get("started_at") or run_["started_at"]) - timedelta(minutes=5)
+    params = urllib.parse.urlencode({"from": start.isoformat(), "to": datetime.now(UTC).isoformat(), "group": "executor",
+                                     "project_id": project["id"]})
+    timeline = c.owner.call("GET", f"/api/v1/tasks/timeline?{params}")
+    segment = next((s for s in timeline["segments"] if s["kind"] == "run" and s["task_id"] == task["id"]), {})
+    track = next((t for t in timeline["tracks"] if t["key"] == segment.get("track")), {})
+    c.check("时间轴：按项目查看时甲的轨道上有这段（已完成、有 token），用量显示为已上报",
+            track.get("kind") == "instance" and track.get("id") == c.a.id and (segment.get("run") or {}).get("end_reason") == "done"
+            and timeline["usage"]["reported"] and timeline["usage"]["scope"] == "project" and timeline["usage"]["total"]["total"] > 0,
+            json.dumps({"track": track, "usage": timeline["usage"]["total"]}, ensure_ascii=False))
+
+
 def scenario_6(c: Ctx) -> None:
     """停用乙：取密钥失败、MCP 返回 401、IM 被强制下线。放在最后（停用后乙不再参与）。"""
     current = c.owner.call("GET", f"/api/v1/agents/instances/{c.b.id}")
@@ -819,7 +910,7 @@ def scenario_6(c: Ctx) -> None:
 SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "2": scenario_2, "3": scenario_3, "4": scenario_4, "5": scenario_5, "7": scenario_7, "8": scenario_8,
     "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "15": scenario_15,
-    "6": scenario_6,
+    "16": scenario_16, "6": scenario_6,
 }
 
 

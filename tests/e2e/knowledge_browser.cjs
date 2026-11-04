@@ -229,6 +229,49 @@ const NOTE_URL = /\/knowledge\/notes\/[0-9a-f-]{36}$/
   await page.locator('.kb-node rect.f-file').first().waitFor()
   step('图片：编辑器上传后插入链接，阅读页显示并可放大，图谱“显示图片”有图片节点')
 
+  // ---------------------------------------------------------------- 图片（T-0106）：粘贴进编辑器；没有笔记引用的图片被每日清理删掉
+  // 往编辑区派发带图片文件的 paste 事件（与从剪贴板粘贴截图相同）；返回插入的图片地址
+  async function pasteImage(content) {
+    await page.locator('.cm-content').evaluate((el, bytes) => {
+      const data = new DataTransfer()
+      data.items.add(new File([new Uint8Array(bytes)], '截图.png', { type: 'image/png' }))
+      el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+    }, [...content])
+    const handle = await page.waitForFunction((known) => {
+      const found = [...(document.querySelector('.cm-content')?.textContent ?? '').matchAll(/!\[[^\]]*\]\((\/api\/v1\/knowledge\/files\/[0-9a-f-]{36})\)/g)].map((m) => m[1])
+      return found.find((url) => !known.includes(url)) ?? false
+    }, [], { timeout: 15000 })
+    return handle.jsonValue()
+  }
+  const pastedTitle = `粘贴截图的笔记 ${run}`
+  await page.goto(`${base}/knowledge/notes/new?space=${pub.id}`)
+  await editorReady(page)
+  await page.getByRole('textbox', { name: '标题' }).fill(pastedTitle)
+  await page.locator('.cm-content').click()
+  await page.keyboard.type('报错截图：')
+  const pastedUrl = await pasteImage(tinyPng(`${run}-pasted`))
+  await saveButton(page).click()
+  await page.waitForURL(NOTE_URL)
+  await page.locator(`article img.kb-img[src="${pastedUrl}"]`).waitFor()
+  await page.waitForFunction((src) => { const img = document.querySelector(`article img.kb-img[src="${src}"]`); return !!img && img.complete && img.naturalWidth > 0 }, pastedUrl)
+  // 粘贴后没保存就离开：这张图没有任何笔记引用
+  await page.goto(`${base}/knowledge/notes/new?space=${pub.id}`)
+  await editorReady(page)
+  await page.locator('.cm-content').click()
+  const orphanUrl = await pasteImage(tinyPng(`${run}-orphan`))
+  await page.goto(`${base}/operations`)
+  const storage = page.getByRole('region', { name: '知识库图片存储' })
+  await storage.getByText('3 张图片').waitFor()
+  const removed = Number(seed('cleanup-files', workspace)[0])
+  check(removed === 1, `每日清理应只删掉没有引用的那张图片：删了 ${removed} 张`)
+  await page.reload()
+  await storage.getByText('2 张图片').waitFor()
+  // 用浏览器上下文的会话直接问服务器（不走页面缓存：图片按内容寻址、可长期缓存）
+  const fetchStatus = async (url) => (await page.request.get(base + url)).status()
+  check(await fetchStatus(orphanUrl) === 404, '清理后没有引用的图片应返回 404')
+  check(await fetchStatus(pastedUrl) === 200, '笔记里引用的图片不应被清理')
+  step('图片：粘贴截图后上传并插入链接、阅读页显示；没有笔记引用的图片被每日清理删掉，运维页的张数随之减少')
+
   // ---------------------------------------------------------------- 手机宽度：底部导航，不横向滚动
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'zh-CN', storageState: await context.storageState() })
   const phone = await mobile.newPage()

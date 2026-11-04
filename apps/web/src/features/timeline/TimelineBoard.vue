@@ -163,6 +163,8 @@ async function dragEnd(clip: Clip) {
   const step15 = 15 * 60_000
   const delta = Math.round(((d.dx / d.width) * (end.value - start.value)) / step15) * step15
   if (!delta) return
+  // 选中拖动的任务：结果（“计划时间已更新”或错误）显示在右侧详情里
+  select(clip)
   await act(async () => {
     const id = clip.segment.task_id
     const current = dataOf(await auth.api.GET('/api/v1/tasks/{task_id}', { params: { header, path: { task_id: id } } }))

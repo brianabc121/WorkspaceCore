@@ -55,6 +55,8 @@ CI 的 `ci-api.yml` 用与 1.1 节相同的 PostgreSQL、Redis 镜像（同一�
 
 来源与说明见 `2026-10-31-v2-oc0-openclaw-openim-verification.md`。
 OpenClaw 定时任务（每晚复盘）的 CLI 用法在同一个版本上核验过，见 `2026-11-03-knowledge-k0-verification.md` 第 3.3、5 节（T-0100，没有新增依赖）。
+OpenClaw 网关的 `sessions.usage`（任务时间轴的用量上报）也在同一个版本上核验过，见 `2026-11-04-timeline-kb-upgrade-verification.md` 第 2 节（T-0104，没有新增依赖）。
+Garage v2.4.1 同时用于知识库图片的 S3 兼容存储在 CI 里的验收（路径与虚拟主机风格、主存储 + 副本，`scripts/garage_s3_check.sh`，T-0103 / T-0106），工作台本身不部署它。
 OpenIM 的官方镜像有越权问题，已换成自建的补丁镜像（`2026-10-31-v2-oc3-openim-patched-image.md`）。自建镜像每次构建的 digest 不同，所以锁定的是全部构建输入。
 
 | 组件 | 镜像 / 包 | digest / 校验值 | 许可证 | 在哪里 |
