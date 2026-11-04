@@ -41,7 +41,7 @@ const projectItems = computed(() => projects.data.value?.pages.flatMap((p) => p.
 const projectTitles = computed(() => new Map(projectItems.value.map((p) => [p.id, p.title])))
 const tasks = computed(() => isAccessError(query.error.value) ? [] : query.data.value?.pages.flatMap((p) => p.items) ?? [])
 const writable = computed(() => !!auth.currentWorkspace && auth.currentWorkspace.role !== 'viewer' && !isAccessError(query.error.value))
-const board = ref(false), opened = ref<string | null>(linkedTask || null), formError = ref(''), reloadError = ref('')
+const board = ref(route.query.board === '1'), opened = ref<string | null>(linkedTask || null), formError = ref(''), reloadError = ref('')
 // 编辑器只在打开另一个任务或用户点“重新加载”时重建；后台重新拉取不重建，避免丢掉正在输入的内容（T-0049）
 const editorGeneration = ref(0)
 const detail = useQuery({ queryKey: computed(() => ['task', userId, scope, opened.value]), enabled: computed(() => !!opened.value && opened.value !== 'new'), queryFn: async ({ signal, queryKey }) => dataOf(await auth.api.GET('/api/v1/tasks/{task_id}', { params: { header, path: { task_id: queryKey[3]! } }, signal })) })
@@ -164,7 +164,7 @@ const columns = computed(() => (board.value ? [{ title: '未完成', done: false
     </div>
     <div class="form-actions">
       <label class="inline-select"><span class="sr-only">排序</span><select v-model="sort" aria-label="排序" @change="changeSort"><option value="due_at">按截止时间</option><option value="priority">按优先级</option><option value="updated">最近更新</option></select></label>
-      <div class="segmented" role="group" aria-label="显示方式"><button type="button" :aria-pressed="!board" @click="board = false">列表</button><button type="button" :aria-pressed="board" @click="board = true">看板</button></div>
+      <div class="segmented" role="group" aria-label="显示方式"><button type="button" :aria-pressed="!board" @click="board = false">列表</button><button type="button" :aria-pressed="board" @click="board = true">看板</button><RouterLink v-slot="{ navigate }" :to="{ path: '/tasks/timeline', query: form.project_id ? { project: form.project_id } : {} }" custom><button type="button" aria-pressed="false" @click="navigate">时间轴</button></RouterLink></div>
       <button type="button" class="shell-icon" aria-label="刷新任务" title="刷新任务" :disabled="query.isFetching.value" @click="query.refetch()"><RefreshCw aria-hidden="true" /></button>
       <button v-if="writable" class="primary-button" :disabled="operation.locked" @click="opened = 'new'">新建任务</button>
     </div>
