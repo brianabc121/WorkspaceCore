@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from app.domain import knowledge_base
+from tests.helpers import tool_error
 from tests.test_mcp_api import SETTINGS, call, issue_token, new_instance, records, rpc
 from tests.workspace_support import Env, open_env
 
@@ -41,7 +42,7 @@ def ok(result: dict[str, Any]) -> dict[str, Any]:
 
 def err(result: dict[str, Any]) -> str:
     assert result["isError"] is True, result
-    code: str = result["structuredContent"]["error"]["code"]
+    code: str = tool_error(result)["code"]
     return code
 
 

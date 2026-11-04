@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from app.schemas.ai_tools import TOOLS
-from tests.helpers import csrf
+from tests.helpers import csrf, tool_error
 from tests.test_mcp_api import SETTINGS, call, issue_token, new_instance, records, rpc
 from tests.workspace_support import Env, open_env
 
@@ -82,7 +82,7 @@ async def test_task_tools_keep_task_text_under_untrusted(env: Env) -> None:
     assert [h["untrusted"]["title"] for h in hits["items"]] == ["写周报"]
     assert hits["items"][0]["resource_type"] == "task"
     missing = await call(env, token, "get_task", {"task_id": str(uuid.uuid4())})
-    assert missing["structuredContent"]["error"]["code"] == "NOT_FOUND"
+    assert tool_error(missing)["code"] == "NOT_FOUND"
     # 每次调用都写读记录（成功与失败）
     reads = await records(env, tool_name="get_task")
     assert sorted(r["status"] for r in reads) == ["failed", "succeeded"]
@@ -130,7 +130,7 @@ async def test_calendar_bookmarks_and_sources(env: Env) -> None:
     ]
     too_long = {"start": start.isoformat(), "end": (start + timedelta(days=40)).isoformat()}
     invalid = await call(env, token, "calendar_agenda", too_long)
-    assert invalid["structuredContent"]["error"]["code"] == "VALIDATION_FAILED"
+    assert tool_error(invalid)["code"] == "VALIDATION_FAILED"
 
     bookmarks = ok(await call(env, token, "list_bookmarks", {}))
     # 实例以登记人（owner）的身份读：别的成员的私有收藏看不到

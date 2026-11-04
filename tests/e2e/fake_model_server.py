@@ -113,6 +113,10 @@ class Handler(BaseHTTPRequestHandler):
                   "last_user": _since_user(messages)[0][-500:], "result": result,
                   "roles": [m.get("role") for m in messages[-6:]],
                   "last": _text(messages[-1].get("content"))[-800:] if messages else "",
+                  # 最近一条工具结果的末尾（OpenClaw 会在工具结果后面再补一条只含内部上下文的用户消息，
+                  # last 看不到它；工作台工具的错误码在结果的末尾，T-0108）
+                  "tool": next((_text(m.get("content"))[-1500:] for m in reversed(messages)
+                                if m.get("role") == "tool"), ""),
                   "tools": [t.get("function", {}).get("name") for t in body.get("tools") or []]}
         with _lock, open(LOG, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")

@@ -101,7 +101,7 @@
   - 工具注解标明只读和破坏性（`readOnlyHint`、`destructiveHint`）。
 - **限流**：每次 `tools/call` 都计数（Redis 固定窗口，按实例每分钟 120 次），超出返回工具错误 `RATE_LIMITED`，
   不返回 HTTP 429：OpenClaw 把工具错误当作工具结果交给模型，模型能看懂要等一等。
-- **错误**：工具错误是 `isError: true`，结构化内容为 `{"error": {"code", "message"}}`。
+- **错误**：工具错误是 `isError: true`，文字内容是 `{"error": {"code", "message"}}` 的 JSON，不带结构化内容（2026-11-04 修订，T-0108，原因见 OC-1 契约第 9.4 节）。
   领域服务的错误换成契约里的错误码：404 → `NOT_FOUND`，422 → `VALIDATION_FAILED`，429 → `RATE_LIMITED`，
   其余 → `EXTERNAL_UNAVAILABLE`。错误信息里不带内部细节。
   意外异常由 SDK 返回统一的 JSON-RPC 内部错误，不透出异常信息。

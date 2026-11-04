@@ -18,7 +18,7 @@ from app.domain import mcp_tools
 from app.domain.agents import AgentService
 from app.models import AgentInstance
 from app.schemas.ai_tools import TOOLS
-from tests.helpers import OWNER
+from tests.helpers import OWNER, tool_error
 from tests.workspace_support import Env, app_of, open_env
 
 pytestmark = pytest.mark.integration
@@ -193,17 +193,17 @@ async def test_tool_errors_use_is_error_with_a_code(env: Env) -> None:
     token = await issue_token(env, await new_instance(env))
     unknown = await call(env, token, "list_members", {})
     assert unknown["isError"] is True
-    assert unknown["structuredContent"]["error"]["code"] == "NOT_FOUND"
+    assert tool_error(unknown)["code"] == "NOT_FOUND"
     invalid = await call(env, token, "create_bookmark", {"url": "https://a.test", "extra": 1})
-    assert invalid["structuredContent"]["error"]["code"] == "VALIDATION_FAILED"
+    assert tool_error(invalid)["code"] == "VALIDATION_FAILED"
     missing = await call(env, token, "delete_task", {"task_id": str(uuid.uuid4())})
-    assert missing["structuredContent"]["error"]["code"] == "NOT_FOUND"
+    assert tool_error(missing)["code"] == "NOT_FOUND"
     # 别的实例发起的操作查不到
     other = await issue_token(env, await new_instance(env, name="beta"))
     pending = await call(env, other, "create_bookmark", {"url": "https://a.test/b", "title": "b"})
     action_id = pending["structuredContent"]["action_id"]
     hidden = await call(env, token, "get_action_status", {"action_id": action_id})
-    assert hidden["structuredContent"]["error"]["code"] == "NOT_FOUND"
+    assert tool_error(hidden)["code"] == "NOT_FOUND"
     failed = await records(env, tool_name="get_action_status", status="failed")
     assert [r["error_code"] for r in failed] == ["NOT_FOUND"]
 
@@ -215,7 +215,7 @@ async def test_scope_denials_are_recorded(env: Env) -> None:
         env, reader, "create_task", {"project_id": project, "title": "AI 想建的任务"}
     )
     assert denied["isError"] is True
-    assert denied["structuredContent"]["error"]["code"] == "FORBIDDEN_SCOPE"
+    assert tool_error(denied)["code"] == "FORBIDDEN_SCOPE"
     [record] = await records(env, status="denied")
     assert (record["tool_name"], record["error_code"]) == ("create_task", "FORBIDDEN_SCOPE")
     assert record["instance_name"] == "reader"
@@ -230,12 +230,12 @@ async def test_calls_are_rate_limited_per_instance(
     args = {"action_id": str(uuid.uuid4())}
     for _ in range(2):
         result = await call(env, token, "get_action_status", args)
-        assert result["structuredContent"]["error"]["code"] == "NOT_FOUND"
+        assert tool_error(result)["code"] == "NOT_FOUND"
     limited = await call(env, token, "get_action_status", args)
-    assert limited["structuredContent"]["error"]["code"] == "RATE_LIMITED"
+    assert tool_error(limited)["code"] == "RATE_LIMITED"
     # 按实例计数：另一个实例不受影响
     fine = await call(env, other, "get_action_status", args)
-    assert fine["structuredContent"]["error"]["code"] == "NOT_FOUND"
+    assert tool_error(fine)["code"] == "NOT_FOUND"
 
 
 async def test_the_official_mcp_client_can_use_the_endpoint(env: Env) -> None:

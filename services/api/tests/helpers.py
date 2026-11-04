@@ -1,5 +1,6 @@
 """测试共用的小工具。"""
 
+import json
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
@@ -106,3 +107,11 @@ async def add_workspace(database_url: str, owner_id: uuid.UUID, name: str) -> uu
     )
     await add_member(database_url, workspace_id, owner_id, "owner")
     return workspace_id
+
+
+def tool_error(result: dict[str, Any]) -> dict[str, Any]:
+    """MCP 工具错误：isError 为真、没有结构化内容，文字是 {"error": {...}} 的 JSON（T-0108）。"""
+    assert result["isError"] is True, result
+    assert result.get("structuredContent") is None, result
+    error: dict[str, Any] = json.loads(result["content"][0]["text"])["error"]
+    return error
