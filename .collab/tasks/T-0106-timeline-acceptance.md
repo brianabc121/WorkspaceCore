@@ -2,9 +2,9 @@
 id: T-0106
 title: 时间轴与知识库图片的验收与文档：真实 OpenClaw 用量上报、浏览器验收、S3 存储验收、威胁模型与部署文档
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: tests/e2e,.github/workflows,docs,services/api,apps/web,scripts
 depends_on: T-0103, T-0105
 created: 2026-11-04
@@ -31,3 +31,5 @@ updated: 2026-11-04
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-04 01:56 UTC · claude · 创建任务（owner: claude）
+- 2026-11-04 05:15 UTC · claude · 开始任务
+- 2026-11-04 05:21 UTC · claude · 进行中：Garage 上的主存储 + 副本验收（虚拟主机风格 + root_domain、复制、读主失败读副本、清理两边）；时间轴浏览器验收 timeline_browser.cjs（本机 Compose 通过）；知识库浏览器加粘贴截图与每日清理（本机通过）；agents 场景 16（真实 OpenClaw 用量上报、交给甲执行、complete_task 审批后段结束）与 SSH 验收照 crontab 跑一次上报，等 CI 验证。验收中发现拖动计划片段后没选中任务、结果提示看不到，已修（拖完选中这个任务）。越界说明：.github/workflows 与 scripts 在 paths 内；改了 apps/web 的 TimelineBoard.vue（T-0105 已 done，这是验收发现的小修正）。下一步：文档（威胁模型、架构、部署、运维、versions）与方案状态。

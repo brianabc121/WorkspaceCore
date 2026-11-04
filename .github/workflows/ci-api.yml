@@ -54,7 +54,7 @@ jobs:
         run: uv run python -m scripts.export_openapi --check
       - name: pytest
         run: uv run pytest
-      - name: 知识库图片的 S3 兼容客户端在锁定的 Garage 上读写删（路径风格，T-0103）
+      - name: 知识库图片的 S3 兼容存储在锁定的 Garage 上（路径 / 虚拟主机风格读写删、主存储 + 副本、读主失败读副本、清理，T-0103 / T-0106）
         run: bash ../../scripts/garage_s3_check.sh
       - name: 迁移冒烟（命令行 upgrade head → downgrade base → upgrade head）
         env:

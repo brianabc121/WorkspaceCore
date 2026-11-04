@@ -12,6 +12,12 @@
   python3 tests/e2e/seed.py bulk <工作空间ID> <用户ID> <任务数> <通知数>
       性能基准用的数据量：一个项目和其中的若干任务（T-0082 起是工作台自己的数据），
       以及若干条通知
+  python3 tests/e2e/seed.py timeline <工作空间ID> <任务ID> <实例名>
+      时间轴浏览器验收（T-0106）：一个实例（Compose 验收里没有真实 OpenClaw）、它在这个任务上
+      40 分钟前到 10 分钟前完成的一段执行，以及这段时间每分钟上报的 token；任务标为完成。输出实例 ID
+  python3 tests/e2e/seed.py cleanup-files <工作空间ID>
+      知识库图片清理（T-0106）：把这个工作空间的图片的上传时间改到 2 天前，再运行 Worker 的每日清理，
+      输出删掉的张数（没有笔记引用的才会删）
 新用户自带工作空间“<显示名> 的空间”和默认首页（与首次安装一致）。
 只依赖 Python 标准库与 docker compose；Compose 全栈需已启动并迁移。
 """
@@ -28,9 +34,12 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.config import get_settings
 from app.core.resources import create_engine, create_redis
-from app.domain import dashboard_defaults, events, notifications
+from sqlalchemy import update
+from app.domain import dashboard_defaults, events, knowledge_files, notifications
 from app.domain.security import hash_password
-from app.models import Project, Task, Widget, WorkspaceMember
+from app.models import (
+    AgentInstance, AgentUsageMinute, KnowledgeFile, Project, Task, TaskRun, Widget, WorkspaceMember,
+)
 from app.repositories import users, workspaces
 
 async def main():
@@ -83,6 +92,37 @@ async def main():
                         title=f"性能基准通知 {i}", body="", link=None,
                         key="perf-" + uuid.uuid4().hex,
                     )
+            elif command == "timeline":
+                workspace_id, task_id, name = uuid.UUID(sys.argv[2]), uuid.UUID(sys.argv[3]), sys.argv[4]
+                now = datetime.now(UTC).replace(second=0, microsecond=0)
+                instance = AgentInstance(
+                    workspace_id=workspace_id, name=name, network_mode="intranet", status="online",
+                    im_user_id="oc_" + uuid.uuid4().hex, im_nickname=name, im_ready=True,
+                    last_seen_at=now, usage_reported_at=now,
+                )
+                db.add(instance)
+                await db.flush()
+                started, ended = now - timedelta(minutes=40), now - timedelta(minutes=10)
+                db.add(TaskRun(
+                    workspace_id=workspace_id, task_id=task_id, executor_kind="instance",
+                    instance_id=instance.id, executor_name=name, started_at=started,
+                    ended_at=ended, end_reason="done",
+                ))
+                for i in range(30):
+                    db.add(AgentUsageMinute(
+                        instance_id=instance.id, workspace_id=workspace_id,
+                        minute=started + timedelta(minutes=i), input=1000 + i * 10, output=250,
+                        cache_read=2000, cache_write=50,
+                    ))
+                await db.execute(update(Task).where(Task.id == task_id).values(
+                    assignee_instance_id=instance.id, started_at=started, done=True, done_at=ended,
+                ))
+                print(instance.id)
+            elif command == "cleanup-files":
+                workspace_id = uuid.UUID(sys.argv[2])
+                await db.execute(update(KnowledgeFile).where(KnowledgeFile.workspace_id == workspace_id)
+                                 .values(created_at=datetime.now(UTC) - timedelta(days=2)))
+                print(await knowledge_files.cleanup_unreferenced(db, knowledge_files.FileStores(settings)))
             elif command == "member":
                 workspace_id, user_id, role = sys.argv[2:5]
                 db.add(WorkspaceMember(
@@ -136,6 +176,14 @@ def bulk(workspace_id: str, user_id: str, tasks: int, notices: int) -> None:
     _run("bulk", workspace_id, user_id, str(tasks), str(notices))
 
 
+def seed_timeline(workspace_id: str, task_id: str, name: str) -> str:
+    return _run("timeline", workspace_id, task_id, name)[-1]
+
+
+def cleanup_files(workspace_id: str) -> int:
+    return int(_run("cleanup-files", workspace_id)[-1])
+
+
 def main(argv: list[str]) -> int:
     match argv:
         case ["user", email, name]:
@@ -151,6 +199,10 @@ def main(argv: list[str]) -> int:
             notify(workspace_id, user_id, key, title)
         case ["bulk", workspace_id, user_id, tasks, notices]:
             bulk(workspace_id, user_id, int(tasks), int(notices))
+        case ["timeline", workspace_id, task_id, name]:
+            print(seed_timeline(workspace_id, task_id, name))
+        case ["cleanup-files", workspace_id]:
+            print(cleanup_files(workspace_id))
         case _:
             sys.exit(__doc__)
     return 0

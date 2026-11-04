@@ -230,6 +230,19 @@ def main() -> int:
         # 每 10 分钟取密钥、每分钟上报 token 用量（T-0104）、每周一重启
         report.check("crontab 有三行带标记的定时任务", cron.count(MARKER) == 3, cron)
         report.check("crontab 里有每分钟的用量上报", "/opt/myworkspace/bin/usage-report.mjs" in cron, cron)
+        # 照 crontab 那一行以部署账号跑一次（T-0106）：真实 OpenClaw 的 sessions.usage 经接入网关送到工作台，
+        # 实例记下第一次上报的时间（第一次只记基准，不计 token）
+        line = next((x for x in cron.splitlines() if "usage-report.mjs" in x), "")
+        command = line.split(None, 5)[5].split(" >/dev/null")[0] if line.count(" ") >= 5 else "false"
+        uploaded = run("sh", "-c", command, user=user)
+        reported = sql_rows(
+            f"SELECT usage_reported_at IS NOT NULL FROM workspace.agent_instances WHERE id = '{instance['id']}'"
+        ).strip()
+        report.check(
+            "照 crontab 那一行运行一次用量上报：成功，工作台记下实例上报过",
+            uploaded.returncode == 0 and reported == "t",
+            f"{command}；退出码 {uploaded.returncode}；{uploaded.stderr.strip()[-300:]}；{reported}",
+        )
 
     # ---------------------------------------------------------------- 不填密码重新部署
     response = target.post("install", {"version": state["target"]["version"]})
