@@ -2,7 +2,7 @@
 id: T-0110
 title: 项目成员与项目群：新建项目勾选智能体、项目页成员区、IM 项目群（建群、重试、同步成员、归档与删除）、旧项目补建群（迁移 0028）
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web,docs,tests/e2e
@@ -32,3 +32,4 @@ updated: 2026-11-04
 - 2026-11-04 09:15 UTC · claude · 创建任务（owner: claude）
 - 2026-11-04 09:16 UTC · claude · 开始任务
 - 2026-11-04 09:40 UTC · claude · 实现完成：迁移 0028（projects.im_group_status / owner / error，im_groups.project_id + 部分唯一索引）；app/domain/project_groups.py（成员 = project_agents，建群 / 同步 / 解散，群 ID 由项目与第几个群推出，锁行 SKIP LOCKED，失败只回滚保存点）；项目接口 instance_ids / im_group、成员 GET / PUT / DELETE、POST im-group；改名 / 说明 / 归档同步群信息，删除先解散；知识库页改参与者也标记同步；Worker 每分钟 sync_project_groups；任务执行者候选带实例说明。前端：新建项目勾选智能体与“同时建 IM 项目群”（owner / admin），项目卡片显示智能体与项目群状态，成员弹窗加入 / 移出 / 建群 / 重试 / 打开项目群。与方案的偏差：在 IM 里直接拉进项目群的智能体，下次同步时会被移出（项目群成员以项目页为准）；删除项目时解散失败只记日志，群留在 IM 里由群主处理。
+- 2026-11-04 09:50 UTC · claude · status in_progress → done：验收标准全部完成：新增后端测试 7 个通过；相关后端套件（任务、知识库、IM 群、契约、时间轴、迁移、MCP）119 个通过；ruff / mypy 通过；前端 lint / typecheck / 417 个测试 / build / check:api 通过。全量后端 pytest 交给 CI。下一步 T-0111。
