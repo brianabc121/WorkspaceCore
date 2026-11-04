@@ -31,7 +31,7 @@ import urllib.parse
 import uuid
 import zipfile
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -879,8 +879,9 @@ def scenario_16(c: Ctx) -> None:
                                                                  len(r.get("waits", []))) for r in runs]}, ensure_ascii=False))
 
     # 6. 时间轴接口（按项目）：甲的轨道上有这段，用量已上报
-    start = only.get("started_at") or run_["started_at"]
-    params = urllib.parse.urlencode({"from": start, "to": datetime.now(UTC).isoformat(), "group": "executor",
+    # 用量记在上报那一分钟的整分钟上（可能早于这段开始的时刻），范围从这段开始前 5 分钟起
+    start = datetime.fromisoformat(only.get("started_at") or run_["started_at"]) - timedelta(minutes=5)
+    params = urllib.parse.urlencode({"from": start.isoformat(), "to": datetime.now(UTC).isoformat(), "group": "executor",
                                      "project_id": project["id"]})
     timeline = c.owner.call("GET", f"/api/v1/tasks/timeline?{params}")
     segment = next((s for s in timeline["segments"] if s["kind"] == "run" and s["task_id"] == task["id"]), {})
