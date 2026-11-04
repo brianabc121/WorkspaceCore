@@ -32,7 +32,7 @@ const hover = ref<string | null>(null)
 const tip = ref<{ x: number; y: number; node: Node } | null>(null)
 
 const groupOf = (n: GraphNode) => n.kind === 'note' ? (n.space_id ?? 'none') : 'resources'
-const kindOf = (n: GraphNode) => n.kind === 'note' ? (n.space_kind ?? 'public') : 'resource'
+const kindOf = (n: GraphNode) => n.kind === 'note' ? (n.space_kind ?? 'public') : n.kind === 'file' ? 'file' : 'resource'
 
 function build() {
   const g = props.graph
@@ -127,6 +127,7 @@ const neighbors = computed(() => {
 const q = computed(() => normalize(props.query))
 const matches = (n: Node) => !!q.value && normalize(n.data.title).includes(q.value)
 const fillClass = (n: Node) => {
+  if (n.data.kind === 'file') return 'f-file'
   if (n.data.kind !== 'note') return 'f-resource'
   if (props.colorBy === 'author') return n.data.author_kind === 'agent' ? 'f-agent' : n.data.author_kind === 'system' ? 'f-resource' : 'f-user'
   if (props.colorBy === 'space') return `f-${n.data.space_kind ?? 'public'}`
@@ -150,7 +151,7 @@ const lines = computed(() => {
   return layout.value.edges.map(({ a, b }) => ({ key: a.id + '>' + b.id, a, b, hi: !!hv && (a.id === hv || b.id === hv), dim: (!!hv && a.id !== hv && b.id !== hv) || (!hv && !!q.value) }))
 })
 const focusable = computed(() => layout.value.nodes.length <= 250)
-const kindLabel = (n: GraphNode) => n.kind === 'note' ? (n.type ? NOTE_TYPE_LABELS[n.type] : '笔记') : n.kind === 'task' ? '任务' : n.kind === 'project' ? '项目' : '收藏文档'
+const kindLabel = (n: GraphNode) => n.kind === 'note' ? (n.type ? NOTE_TYPE_LABELS[n.type] : '笔记') : n.kind === 'task' ? '任务' : n.kind === 'project' ? '项目' : n.kind === 'file' ? '图片' : '收藏文档'
 const ariaFor = (n: Node) => `${n.data.title}，${n.data.kind === 'note' ? `笔记（${kindLabel(n.data)}）` : kindLabel(n.data)}，${n.data.degree} 条链接`
 
 function enter(n: Node) {
@@ -208,7 +209,8 @@ watch(q, (value) => {
         :transform="`translate(${d.n.x},${d.n.y})`" :tabindex="focusable ? 0 : -1" role="button" :aria-label="ariaFor(d.n)" :aria-pressed="d.n.id === selected"
         @click="pick(d.n)" @dblclick="dbl(d.n)" @keydown="key($event, d.n)" @pointerenter="enter(d.n)" @focus="enter(d.n)" @blur="leave"
       >
-        <circle :r="d.n.r" :class="d.fill" />
+        <rect v-if="d.n.data.kind === 'file'" :x="-d.n.r" :y="-d.n.r" :width="d.n.r * 2" :height="d.n.r * 2" rx="1.5" :class="d.fill" />
+        <circle v-else :r="d.n.r" :class="d.fill" />
         <circle :r="Math.max(d.n.r + 6, 12 / scale)" fill="transparent" stroke="none" />
         <text v-if="d.label" :y="d.n.r + 13 / scale" text-anchor="middle" :style="{ fontSize: `${(d.hub ? 13 : 11) / scale}px`, strokeWidth: `${3 / scale}px` }">{{ d.n.data.title }}</text>
       </g>

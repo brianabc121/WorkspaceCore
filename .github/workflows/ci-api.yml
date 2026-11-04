@@ -54,6 +54,8 @@ jobs:
         run: uv run python -m scripts.export_openapi --check
       - name: pytest
         run: uv run pytest
+      - name: 知识库图片的 S3 兼容客户端在锁定的 Garage 上读写删（路径风格，T-0103）
+        run: bash ../../scripts/garage_s3_check.sh
       - name: 迁移冒烟（命令行 upgrade head → downgrade base → upgrade head）
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres

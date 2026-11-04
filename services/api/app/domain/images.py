@@ -104,3 +104,81 @@ def sniff(data: bytes) -> ImageInfo | None:
     if not (0 < width <= MAX_DIMENSION and 0 < height <= MAX_DIMENSION):
         return None
     return ImageInfo(mime=mime, ext=ext, width=width, height=height)
+
+
+# ---------------------------------------------------------------- 去掉 JPEG 的元数据（T-0103）
+
+# 去掉的段：APP1（Exif、XMP，可能有拍摄地点）、APP13（Photoshop / IPTC）、COM（注释）。
+# 保留 APP0（JFIF）、APP2（ICC 色彩配置）、APP14（Adobe）等显示需要的段。
+_STRIP = frozenset({0xE1, 0xED, 0xFE})
+
+
+def _orientation(exif: bytes) -> int | None:
+    """从 Exif 段（不含 "Exif\\0\\0" 前缀的 TIFF 数据）里读 IFD0 的 Orientation（0x0112）。"""
+    if len(exif) < 8 or exif[:2] not in (b"II", b"MM"):
+        return None
+    order = "<" if exif[:2] == b"II" else ">"
+    (offset,) = struct.unpack(order + "I", exif[4:8])
+    if offset + 2 > len(exif):
+        return None
+    (count,) = struct.unpack(order + "H", exif[offset : offset + 2])
+    for i in range(min(count, 512)):
+        entry = offset + 2 + i * 12
+        if entry + 12 > len(exif):
+            return None
+        tag, kind = struct.unpack(order + "HH", exif[entry : entry + 4])
+        if tag == 0x0112 and kind == 3:  # SHORT
+            (value,) = struct.unpack(order + "H", exif[entry + 8 : entry + 10])
+            return value if 1 <= value <= 8 else None
+    return None
+
+
+def _orientation_segment(value: int) -> bytes:
+    """只含 Orientation 一项的最小 Exif 段：去掉元数据后照片方向不变。"""
+    tiff = (
+        b"II*\x00"
+        + struct.pack("<I", 8)
+        + struct.pack("<H", 1)
+        + struct.pack("<HHIHH", 0x0112, 3, 1, value, 0)
+        + struct.pack("<I", 0)
+    )
+    payload = b"Exif\x00\x00" + tiff
+    return b"\xff\xe1" + struct.pack(">H", len(payload) + 2) + payload
+
+
+def strip_jpeg_metadata(data: bytes) -> bytes:
+    """去掉 JPEG 里的 Exif / XMP / IPTC / 注释，只保留照片方向。不解码像素。
+
+    文件结构看不懂时原样返回（调用方已用 sniff 确认是 JPEG）。
+    """
+    if not data.startswith(b"\xff\xd8"):
+        return data
+    out = bytearray(b"\xff\xd8")
+    orientation: int | None = None
+    i = 2
+    while i + 4 <= len(data):
+        if data[i] != 0xFF:
+            return data
+        marker = data[i + 1]
+        if marker == 0xFF:
+            i += 1
+            continue
+        if marker == 0xDA:  # 图像数据开始：后面原样保留
+            if orientation and orientation != 1:
+                out += _orientation_segment(orientation)
+            out += data[i:]
+            return bytes(out)
+        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+            out += data[i : i + 2]
+            i += 2
+            continue
+        (length,) = struct.unpack(">H", data[i + 2 : i + 4])
+        if length < 2 or i + 2 + length > len(data):
+            return data
+        segment = data[i : i + 2 + length]
+        if marker == 0xE1 and segment[4:10] == b"Exif\x00\x00" and orientation is None:
+            orientation = _orientation(segment[10:])
+        if marker not in _STRIP:
+            out += segment
+        i += 2 + length
+    return data

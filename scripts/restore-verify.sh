@@ -82,6 +82,27 @@ migrated="$("${compose[@]}" exec -T api alembic upgrade head 2>&1)" || { echo "$
 "${compose[@]}" exec -T api alembic current 2>/dev/null | grep -q '(head)' || { echo "迁移没有到最新版本" >&2; exit 1; }
 echo "迁移检查：已到最新版本"
 
+# 知识库图片（T-0103）：解包到临时环境的 kb-files 卷，按文件名（内容的 SHA-256）逐个核对，数量与备份时一致
+if [[ -s "$work/restore/backup/kb-files.tar" ]]; then
+  kb_volume="$(docker inspect "$("${compose[@]}" ps -q api | head -n 1)" \
+    --format '{{range .Mounts}}{{if eq .Destination "/data/kb-files"}}{{.Name}}{{end}}{{end}}')"
+  [[ -n "$kb_volume" ]] || { echo "临时环境里找不到 kb-files 卷" >&2; exit 1; }
+  docker run --rm -i --network none -v "$kb_volume:/f" "$OPENIM_ALPINE_IMAGE" sh -euc '
+    tar -xf - -C /f && chown -R 10001:10001 /f' < "$work/restore/backup/kb-files.tar"
+  result="$(docker run --rm --network none -v "$kb_volume:/f:ro" "$OPENIM_ALPINE_IMAGE" sh -euc '
+    ok=0; bad=0
+    for f in $(find /f/kb -type f 2>/dev/null | grep -E "/[0-9a-f]{64}$" || true); do
+      if [ "$(sha256sum "$f" | cut -c1-64)" = "$(basename "$f")" ]; then ok=$((ok+1)); else bad=$((bad+1)); fi
+    done
+    echo "$ok $bad"')"
+  read -r kb_ok kb_bad <<< "$result"
+  kb_expected="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("kb_files", 0))' "$work/restore/backup/backup-info.json")"
+  echo "知识库图片检查：$kb_ok 个文件校验通过，$kb_bad 个不一致（备份时 $kb_expected 个）"
+  (( kb_bad == 0 && kb_ok == kb_expected )) || { echo "知识库图片恢复不完整" >&2; exit 1; }
+else
+  echo "快照不含知识库图片的本地存储"
+fi
+
 scripts/smoke.sh "http://127.0.0.1:$port"
 counts="$("${compose[@]}" exec -T postgres psql -U "$pg_user" -d "$pg_db" -tA -F ' ' -c \
   'select (select count(*) from workspace.users), (select count(*) from workspace.workspaces), (select count(*) from workspace.dashboards)')"

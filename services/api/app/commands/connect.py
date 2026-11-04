@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings, get_settings
 from app.core.errors import ApiError
 from app.core.resources import create_engine, create_redis
-from app.domain import im
+from app.domain import im, knowledge_files
 from app.domain.app_logins import AppLoginService
 from app.domain.automations import AutomationService
 from app.domain.connectors import ConnectorRuntime
@@ -415,12 +415,26 @@ async def cmd_save_login(env: Env, args: argparse.Namespace) -> int:
 
 
 Command = Callable[[Env, argparse.Namespace], Awaitable[int]]
+
+
+async def cmd_storage_check(env: Env, args: argparse.Namespace) -> int:
+    """知识库图片存储自检（T-0103）：主存储与副本各写、读、删一个探测对象。
+
+    一行一个存储：`<名字>=ok` 或 `<名字>=failed <原因>`；有失败时退出码 1。不输出密钥。
+    """
+    results = await knowledge_files.run_checks(knowledge_files.FileStores(env.settings), env.redis)
+    for name, check in results.items():
+        print(f"{name}=ok" if check.ok else f"{name}=failed {check.reason or ''}".rstrip())
+    return 0 if all(check.ok for check in results.values()) else 1
+
+
 COMMANDS: dict[str, Command] = {
     "status": cmd_status,
     "n8n-owner": cmd_n8n_owner,
     "n8n": cmd_n8n,
     "public-urls": cmd_public_urls,
     "save-login": cmd_save_login,
+    "storage-check": cmd_storage_check,
 }
 
 
@@ -443,6 +457,7 @@ def parser() -> argparse.ArgumentParser:
     login.add_argument("--username", required=True, help="n8n owner 的登录邮箱")
     login.add_argument("--base-url", default="http://n8n:5678", help="核对密码时访问的地址")
     login.add_argument("--no-verify", action="store_true", help="不登录核对密码，直接保存")
+    sub.add_parser("storage-check", help="知识库图片存储自检：写、读、删一个探测对象")
     return root
 
 

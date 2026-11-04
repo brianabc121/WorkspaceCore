@@ -84,3 +84,38 @@ class MetricsOut(BaseModel):
     grafana_url: str | None = Field(
         default=None, description="Grafana 仪表盘的外链（部署时配置）；未配置时为 null"
     )
+
+
+StorageName = Literal["local", "r2", "oss"]
+
+
+class StorageCheck(BaseModel):
+    ok: bool
+    reason: str | None = Field(
+        default=None, description="失败原因：错误分类或 S3 错误码（如 SignatureDoesNotMatch）"
+    )
+    checked_at: datetime
+
+
+class StorageLocation(BaseModel):
+    name: StorageName
+    configured: bool
+    where: str | None = Field(
+        default=None, description="R2 / OSS 为桶的地址（不含密钥）；本地存储不返回路径"
+    )
+    missing: list[str] = Field(default_factory=list, description="没配置完整时缺少的环境变量")
+    check: StorageCheck | None = Field(
+        default=None, description="最近一次自检（写、读、删探测对象）"
+    )
+
+
+class StorageStatus(BaseModel):
+    """知识库图片存储（T-0103，owner / admin）。"""
+
+    primary: StorageLocation
+    replica: StorageLocation | None
+    files: int = Field(description="这个工作空间的图片数")
+    used_bytes: int = Field(description="这个工作空间已用的空间")
+    quota_bytes: int
+    pending_replication: int = Field(description="全部工作空间里等待复制到副本的图片")
+    failed_replication: int

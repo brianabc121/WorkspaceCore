@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ArchiveRestore, CircleAlert, Ellipsis, History, Pin, SquarePen, Trash2 } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
@@ -41,7 +41,24 @@ const dirGroups = computed(() => {
 
 // 正文：[[链接]] 按后端解析的结果找到目标（找不到的点了去新建）
 const html = computed(() => note.value ? noteHtml(note.value) : '')
+// 正文里的图片可以用键盘放大：渲染后给它们加上焦点与说明（消毒后的 HTML 里不保留这些属性）
+const articleRef = ref<HTMLElement | null>(null)
+watch(html, () => nextTick(() => {
+  for (const img of articleRef.value?.querySelectorAll<HTMLImageElement>('img.kb-img') ?? []) {
+    img.tabIndex = 0; img.setAttribute('role', 'button'); img.setAttribute('aria-label', `放大图片：${img.alt || '图片'}`)
+  }
+}), { immediate: true })
+// 图片（T-0103）：点一下或回车放大
+const zoom = ref<{ src: string; alt: string } | null>(null)
+function zoomImage(target: EventTarget | null) {
+  const img = target instanceof HTMLImageElement && target.classList.contains('kb-img') ? target : null
+  if (!img?.getAttribute('src')) return false
+  zoom.value = { src: img.getAttribute('src')!, alt: img.alt || '图片' }
+  return true
+}
+function zoomKey(event: KeyboardEvent) { if (zoomImage(event.target)) event.preventDefault() }
 function follow(event: MouseEvent) {
+  if (zoomImage(event.target)) return
   const a = (event.target as HTMLElement).closest('a')
   const href = a?.getAttribute('href')
   if (!a || !href || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || a.target === '_blank') return
@@ -171,7 +188,7 @@ const notFound = computed(() => query.error.value instanceof ApiError && query.e
           <dt>版本</dt><dd class="kb-num">第 {{ note.version }} 版</dd>
         </dl>
         <!-- eslint-disable-next-line vue/no-v-html -- 已经过 DOMPurify 消毒（markdown.ts） -->
-        <article class="kb-md" @click="follow" v-html="html" />
+        <article ref="articleRef" class="kb-md" @click="follow" @keydown.enter="zoomKey" v-html="html" />
         <p v-if="!note.body.trim()" class="kb-meta">（还没有正文）</p>
       </div>
       <nav v-if="note" class="kb-mobile-only" aria-label="笔记关系" style="gap: 8px; padding: 10px 16px 18px; flex-wrap: wrap">
@@ -239,6 +256,10 @@ const notFound = computed(() => query.error.value instanceof ApiError && query.e
         <p v-if="failure" class="kb-error" role="alert" style="margin-top: 10px">{{ failure }}</p>
       </template>
       <p v-else-if="revision.error.value" class="kb-error" role="alert">{{ errorMessage(revision.error.value) }}</p>
+    </ModalPanel>
+    <ModalPanel v-if="zoom" :title="zoom.alt" @close="zoom = null">
+      <img class="kb-img-zoom" :src="zoom.src" :alt="zoom.alt">
+      <p class="form-actions"><a class="kb-btn" :href="zoom.src" target="_blank" rel="noopener">打开原图</a></p>
     </ModalPanel>
     <ModalPanel v-if="deleting && note" title="删除笔记" :busy="busy" @close="deleting = false">
       <p>《{{ note.title }}》会放进回收站，30 天后彻底删除；这期间可以恢复。智能体读不到回收站里的笔记。</p>

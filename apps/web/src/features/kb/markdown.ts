@@ -79,8 +79,10 @@ export function createRenderer(resolve: Resolver) {
     if (inline?.type === 'inline') tokens[idx].attrSet('id', headingId(inline.content))
     return self.renderToken(tokens, idx, options)
   }
+  // 本工作空间的图片（/api/v1/knowledge/files/<id>，T-0103）直接显示；外部网址的图片不自动加载，只显示链接
   md.renderer.rules.image = (tokens, idx) => {
     const token = tokens[idx], src = String(token.attrGet('src') ?? ''), alt = token.content || '图片'
+    if (KB_IMAGE.test(src)) return `<img class="kb-img" src="${md.utils.escapeHtml(src)}" alt="${md.utils.escapeHtml(alt)}" loading="lazy">`
     return `<a class="kb-image-link" href="${md.utils.escapeHtml(src)}" rel="noopener noreferrer nofollow" target="_blank">图片：${md.utils.escapeHtml(alt)}</a>`
   }
   const defaultLink = md.renderer.rules.link_open ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))
@@ -92,12 +94,14 @@ export function createRenderer(resolve: Resolver) {
   return (source: string) => sanitize(md.render(source))
 }
 
+const KB_IMAGE = /^\/api\/v1\/knowledge\/files\/[0-9a-fA-F-]{36}$/
 const PURIFY = {
-  ALLOWED_TAGS: ['a', 'p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 's', 'del', 'code', 'pre', 'blockquote', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'input'],
-  ALLOWED_ATTR: ['href', 'title', 'class', 'id', 'target', 'rel', 'type', 'checked', 'disabled', 'aria-label', 'start', 'style'],
+  ALLOWED_TAGS: ['a', 'p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 's', 'del', 'code', 'pre', 'blockquote', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'input', 'img'],
+  ALLOWED_ATTR: ['href', 'title', 'class', 'id', 'target', 'rel', 'type', 'checked', 'disabled', 'aria-label', 'start', 'style', 'src', 'alt', 'loading'],
 }
 const SAFE_HREF = /^(https?:|mailto:|\/(?!\/)|#)/i
-// 单独的 DOMPurify 实例，钩子不影响别处：链接只留 http / https / mailto / 站内；style 只留表格对齐；input 只能是只读勾选框
+// 单独的 DOMPurify 实例，钩子不影响别处：链接只留 http / https / mailto / 站内；style 只留表格对齐；input 只能是只读勾选框；
+// img 只能是本工作空间的图片
 let purifier: ReturnType<typeof DOMPurify> | null = null
 function instance() {
   if (purifier) return purifier
@@ -108,6 +112,9 @@ function instance() {
     const style = node.getAttribute('style')
     if (style !== null && !/^text-align:\s*(left|center|right);?$/.test(style.trim())) node.removeAttribute('style')
     if (node.tagName === 'INPUT') { node.setAttribute('type', 'checkbox'); node.setAttribute('disabled', '') }
+    // 图片只能是本工作空间的图片地址（经工作台读取），其他来源去掉 src
+    if (node.tagName === 'IMG' && !KB_IMAGE.test((node.getAttribute('src') ?? '').trim())) node.removeAttribute('src')
+    if (node.tagName !== 'IMG' && node.hasAttribute('src')) node.removeAttribute('src')
   })
   return purifier
 }

@@ -4094,6 +4094,60 @@
         "title": "FailureSummary",
         "type": "object"
       },
+      "FileOut": {
+        "description": "上传的图片（T-0103）。在正文里写 `![说明](url)` 引用；读取经工作台，按工作空间与角色校验。",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "height": {
+            "title": "Height",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "mime": {
+            "enum": [
+              "image/png",
+              "image/jpeg",
+              "image/gif",
+              "image/webp"
+            ],
+            "title": "Mime",
+            "type": "string"
+          },
+          "size": {
+            "description": "字节数（JPEG 去掉元数据之后）",
+            "title": "Size",
+            "type": "integer"
+          },
+          "url": {
+            "description": "/api/v1/knowledge/files/<id>",
+            "title": "Url",
+            "type": "string"
+          },
+          "width": {
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "mime",
+          "size",
+          "width",
+          "height",
+          "created_at"
+        ],
+        "title": "FileOut",
+        "type": "object"
+      },
       "GitHubActivityConfig": {
         "additionalProperties": false,
         "properties": {
@@ -4322,11 +4376,13 @@
             "type": "string"
           },
           "kind": {
+            "description": "file 是图片（只有 files=true 时返回，T-0103）",
             "enum": [
               "note",
               "task",
               "project",
-              "bookmark"
+              "bookmark",
+              "file"
             ],
             "title": "Kind",
             "type": "string"
@@ -11176,6 +11232,143 @@
           "agent"
         ],
         "title": "SpaceWeek",
+        "type": "object"
+      },
+      "StorageCheck": {
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "失败原因：错误分类或 S3 错误码（如 SignatureDoesNotMatch）",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "ok",
+          "checked_at"
+        ],
+        "title": "StorageCheck",
+        "type": "object"
+      },
+      "StorageLocation": {
+        "properties": {
+          "check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StorageCheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次自检（写、读、删探测对象）"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "missing": {
+            "description": "没配置完整时缺少的环境变量",
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "name": {
+            "enum": [
+              "local",
+              "r2",
+              "oss"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "where": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "R2 / OSS 为桶的地址（不含密钥）；本地存储不返回路径",
+            "title": "Where"
+          }
+        },
+        "required": [
+          "name",
+          "configured"
+        ],
+        "title": "StorageLocation",
+        "type": "object"
+      },
+      "StorageStatus": {
+        "description": "知识库图片存储（T-0103，owner / admin）。",
+        "properties": {
+          "failed_replication": {
+            "title": "Failed Replication",
+            "type": "integer"
+          },
+          "files": {
+            "description": "这个工作空间的图片数",
+            "title": "Files",
+            "type": "integer"
+          },
+          "pending_replication": {
+            "description": "全部工作空间里等待复制到副本的图片",
+            "title": "Pending Replication",
+            "type": "integer"
+          },
+          "primary": {
+            "$ref": "#/components/schemas/StorageLocation"
+          },
+          "quota_bytes": {
+            "title": "Quota Bytes",
+            "type": "integer"
+          },
+          "replica": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StorageLocation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "used_bytes": {
+            "description": "这个工作空间已用的空间",
+            "title": "Used Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "primary",
+          "replica",
+          "files",
+          "used_bytes",
+          "quota_bytes",
+          "pending_replication",
+          "failed_replication"
+        ],
+        "title": "StorageStatus",
         "type": "object"
       },
       "SyncRequestOut": {
@@ -24365,6 +24558,258 @@
         ]
       }
     },
+    "/api/v1/knowledge/files": {
+      "post": {
+        "description": "请求体就是图片本身；只接受 PNG、JPEG、GIF、WebP（按文件头判断，SVG 不收），不超过 FILE_MAX_MB（默认 10 MB），工作空间合计不超过 FILE_QUOTA_MB。JPEG 会去掉 Exif 等元数据（保留方向）；同样的内容只存一份，返回已有的那张。把返回的 url 写进笔记正文（`![说明](url)`）即可引用；没有笔记引用的图片 24 小时后清理。",
+        "operationId": "upload_file",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "image/gif": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/webp": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求体过大（PAYLOAD_TOO_LARGE）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "上传图片（member）",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
+    "/api/v1/knowledge/files/{file_id}": {
+      "get": {
+        "description": "图片一律经工作台读取。不需要 X-Workspace-Id：按图片所属的工作空间校验当前用户，不是成员时与不存在一样返回 404（笔记里的 <img> 由浏览器直接加载，带不了请求头）。",
+        "operationId": "get_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "image/gif": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "图片内容（Cache-Control: private；ETag 是内容的 SHA-256）"
+          },
+          "304": {
+            "description": "If-None-Match 命中"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "读取图片（图片所属工作空间的 viewer 以上）",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
     "/api/v1/knowledge/graph": {
       "get": {
         "description": "笔记与 [[链接]]，以及链接到的任务、项目、书签；超过 2000 篇时截断（truncated）。",
@@ -24398,6 +24843,18 @@
             "schema": {
               "default": true,
               "title": "Resources",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "显示图片：每张图片一个节点，连到引用它的笔记",
+            "in": "query",
+            "name": "files",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "显示图片：每张图片一个节点，连到引用它的笔记",
+              "title": "Files",
               "type": "boolean"
             }
           },
@@ -27726,6 +28183,186 @@
           }
         ],
         "summary": "服务状态（viewer）",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/v1/operations/storage": {
+      "get": {
+        "description": "主存储、副本、最近一次自检、这个工作空间的用量与配额、待复制数量。不返回密钥；本地存储不返回路径。",
+        "operationId": "storage_status",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "知识库图片存储的状态（owner / admin）",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/api/v1/operations/storage/check": {
+      "post": {
+        "description": "对主存储与副本各写一个探测对象、读回、删除；结果也显示在运维页。",
+        "operationId": "check_storage",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "知识库图片存储自检（owner / admin）",
         "tags": [
           "operations"
         ]

@@ -19,8 +19,10 @@ COPY migrations ./migrations
 COPY app ./app
 
 FROM python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
+# 知识库图片的本地存储（T-0103）：Compose 把卷 kb-files 挂到 /data/kb-files；新卷继承这个目录的属主
 RUN groupadd --system --gid 10001 app \
-    && useradd --system --uid 10001 --gid app --home-dir /app --shell /usr/sbin/nologin app
+    && useradd --system --uid 10001 --gid app --home-dir /app --shell /usr/sbin/nologin app \
+    && mkdir -p /data/kb-files && chown app:app /data/kb-files && chmod 700 /data/kb-files
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build --chown=root:root /app /app
 ENV PATH=/opt/venv/bin:$PATH \

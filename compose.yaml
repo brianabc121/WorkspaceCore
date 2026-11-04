@@ -39,6 +39,22 @@ x-api-env: &api-env
   OPENIM_SECRET: ${OPENIM_SECRET:-}
   # OpenIM 对象存储的地址，与 OpenIM 的 IMENV_MINIO_EXTERNALADDRESS 相同；留空时不能上传和显示图片
   OPENIM_OBJECT_URL: ${OPENIM_OBJECT_URL:-}
+  # 知识库图片（T-0103）：主存储 local / r2 / oss，副本 none / local / r2 / oss；local 存在卷 kb-files。
+  # R2 / OSS 走 S3 兼容接口，桶保持私有；图片一律经工作台读取。deploy.sh connect 的“图片存储”一步会写这些变量
+  FILE_STORAGE: ${FILE_STORAGE:-local}
+  FILE_STORAGE_REPLICA: ${FILE_STORAGE_REPLICA:-none}
+  FILE_MAX_MB: ${FILE_MAX_MB:-10}
+  FILE_QUOTA_MB: ${FILE_QUOTA_MB:-2048}
+  R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+  R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+  R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+  R2_BUCKET: ${R2_BUCKET:-}
+  R2_JURISDICTION: ${R2_JURISDICTION:-}
+  OSS_REGION: ${OSS_REGION:-}
+  OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+  OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+  OSS_BUCKET: ${OSS_BUCKET:-}
+  OSS_ENDPOINT: ${OSS_ENDPOINT:-}
 
 services:
   postgres:
@@ -116,6 +132,8 @@ services:
       GRAFANA_DASHBOARD_URL: ${GRAFANA_DASHBOARD_URL:-}
       # 访问日志里只记录路由模板（不含路径参数）时设为 route（S5-05）
       LOG_REQUEST_PATH: ${LOG_REQUEST_PATH:-path}
+    volumes:
+      - kb-files:/data/kb-files
     depends_on:
       postgres:
         condition: service_healthy
@@ -149,6 +167,9 @@ services:
       API_INTERNAL_URL: http://api:8000
       PROMETHEUS_URL: ${PROMETHEUS_URL:-}
       GRAFANA_URL: ${GRAFANA_URL:-}
+    # 知识库图片：副本复制与每日清理也要读写本地存储
+    volumes:
+      - kb-files:/data/kb-files
     depends_on:
       postgres:
         condition: service_healthy
@@ -367,6 +388,8 @@ networks:
 volumes:
   postgres-data:
   redis-data:
+  # 知识库图片的本地存储（FILE_STORAGE=local 或副本为 local 时使用），纳入 make backup
+  kb-files:
   caddy-data:
   caddy-config:
   prometheus-data:

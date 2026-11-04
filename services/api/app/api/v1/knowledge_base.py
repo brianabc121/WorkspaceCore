@@ -10,12 +10,13 @@ from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, Security, status
+from fastapi import APIRouter, Depends, Query, Request, Response, Security, status
 from pydantic import AfterValidator
 
 from app.api.deps import (
     authenticated,
     csrf_protected,
+    get_file_service,
     get_knowledge_base_service,
     workspace_admin,
     workspace_member,
@@ -24,13 +25,15 @@ from app.api.deps import (
 from app.core.errors import ApiError
 from app.domain.auth import AuthContext
 from app.domain.knowledge_base import Editor, NoteFields, SaveOptions
+from app.domain.knowledge_files import FileService, file_url
 from app.domain.knowledge_views import KnowledgeService
 from app.domain.policy import WorkspaceAccess, not_found
-from app.models import AgentInstance, ProjectAgent
+from app.models import AgentInstance, KnowledgeFile, ProjectAgent
 from app.schemas.common import error_responses
 from app.schemas.knowledge_base import (
     AgentKnowledgeOut,
     ChangePage,
+    FileOut,
     GraphOut,
     NoteCreate,
     NoteOut,
@@ -58,6 +61,7 @@ Member = Annotated[WorkspaceAccess, Depends(workspace_member)]
 Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
 Context = Annotated[AuthContext, Security(authenticated)]
 Service = Annotated[KnowledgeService, Depends(get_knowledge_base_service)]
+Files = Annotated[FileService, Depends(get_file_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 _write = [Depends(csrf_protected)]
@@ -433,8 +437,13 @@ async def graph(
     service: Service,
     space_id: Annotated[list[UUID] | None, Query(max_length=50)] = None,
     resources: bool = True,
+    files: Annotated[
+        bool, Query(description="显示图片：每张图片一个节点，连到引用它的笔记")
+    ] = False,
 ) -> GraphOut:
-    return await service.graph(access.workspace.id, space_ids=space_id, include_resources=resources)
+    return await service.graph(
+        access.workspace.id, space_ids=space_id, include_resources=resources, include_files=files
+    )
 
 
 @router.get(
@@ -500,6 +509,87 @@ async def agent_knowledge(access: Viewer, service: Service, instance_id: UUID) -
     result = await service.agent_overview(instance)
     await service.db.commit()
     return result
+
+
+# ---------------------------------------------------------------- 图片（T-0103）
+
+_IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+_IMAGE_BODY = {
+    "required": True,
+    "content": {mime: {"schema": {"type": "string", "format": "binary"}} for mime in _IMAGE_TYPES},
+}
+_IMAGE_RESPONSE = {
+    "content": {mime: {"schema": {"type": "string", "format": "binary"}} for mime in _IMAGE_TYPES},
+    "description": "图片内容（Cache-Control: private；ETag 是内容的 SHA-256）",
+}
+
+
+def _file_out(row: KnowledgeFile) -> FileOut:
+    return FileOut(
+        id=row.id,
+        url=file_url(row.id),
+        mime=row.mime,
+        size=row.size,
+        width=row.width,
+        height=row.height,
+        created_at=row.created_at,
+    )
+
+
+@router.post(
+    "/files",
+    status_code=status.HTTP_201_CREATED,
+    summary="上传图片（member）",
+    description="请求体就是图片本身；只接受 PNG、JPEG、GIF、WebP（按文件头判断，SVG 不收），"
+    "不超过 FILE_MAX_MB（默认 10 MB），工作空间合计不超过 FILE_QUOTA_MB。"
+    "JPEG 会去掉 Exif 等元数据（保留方向）；同样的内容只存一份，返回已有的那张。"
+    "把返回的 url 写进笔记正文（`![说明](url)`）即可引用；没有笔记引用的图片 24 小时后清理。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 413, 422, 429, 503),
+    openapi_extra={"requestBody": _IMAGE_BODY},
+)
+async def upload_file(request: Request, access: Member, files: Files) -> FileOut:
+    limit = files.max_bytes
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise _too_large(files)
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > limit:
+            raise _too_large(files)
+    row = await files.upload(access, bytes(body))
+    out = _file_out(row)
+    await files.db.commit()
+    return out
+
+
+def _too_large(files: FileService) -> ApiError:
+    return ApiError(413, "PAYLOAD_TOO_LARGE", f"图片不能超过 {files.settings.file_max_mb} MB")
+
+
+@router.get(
+    "/files/{file_id}",
+    summary="读取图片（图片所属工作空间的 viewer 以上）",
+    description="图片一律经工作台读取。不需要 X-Workspace-Id：按图片所属的工作空间校验当前用户，"
+    "不是成员时与不存在一样返回 404（笔记里的 <img> 由浏览器直接加载，带不了请求头）。",
+    responses={200: _IMAGE_RESPONSE, 304: {"description": "If-None-Match 命中"}, **_read_errors},
+    response_model=None,
+)
+async def get_file(request: Request, context: Context, files: Files, file_id: UUID) -> Response:
+    row = await files.get(context.user.id, file_id)
+    etag = f'"{row.sha256}"'
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "private, max-age=86400",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "Content-Disposition": "inline",
+    }
+    if etag in request.headers.get("if-none-match", ""):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    found = await files.read(row)
+    return Response(content=found.data, media_type=found.mime, headers=headers)
 
 
 _ = date  # 供 OpenAPI 生成日期类型（NoteCreate.review_at）

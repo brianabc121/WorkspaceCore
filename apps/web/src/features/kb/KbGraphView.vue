@@ -4,7 +4,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ChevronDown, CircleAlert, Info, List, Plus, Search, SquarePen, Waypoints } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
 import { errorMessage } from '../../services/api'
-import { CHANGE_LABELS, NOTE_TYPE_LABELS, SPACE_KIND_LABELS, TYPE_GROUPS, authorLabel, typeGroupOf, useChanges, useGraph, useNote, useSpaces, type ColorBy, type GraphNode, type NoteType, type TypeGroup } from './api'
+import { CHANGE_LABELS, NOTE_TYPE_LABELS, SPACE_KIND_LABELS, TYPE_GROUPS, authorLabel, noteImages, typeGroupOf, useChanges, useGraph, useNote, useSpaces, type ColorBy, type GraphNode, type NoteType, type TypeGroup } from './api'
 import { excerpt, isToday, nodeHref, statusOf, when } from './format'
 import KbForceGraph from './KbForceGraph.vue'
 import KbSpaceList from './KbSpaceList.vue'
@@ -20,8 +20,8 @@ const graphOnly = computed(() => !!route.meta.kbGraphOnly)
 const spaces = useSpaces(scope)
 const spaceItems = computed(() => spaces.data.value?.items ?? [])
 const spaceById = computed(() => new Map(spaceItems.value.map(s => [s.id, s])))
-const resources = ref(true)
-const graph = useGraph(scope, computed(() => ({ spaceIds: [], resources: resources.value })))
+const resources = ref(true), showFiles = ref(false)
+const graph = useGraph(scope, computed(() => ({ spaceIds: [], resources: resources.value, files: showFiles.value })))
 const changes = useChanges(scope, ref({}))
 const recent = computed(() => (changes.data.value?.pages[0]?.items ?? []).filter(c => c.kind === 'revision' && c.note_id && !c.note_deleted && c.author.kind !== 'system').slice(0, 4))
 const today = computed(() => {
@@ -45,10 +45,11 @@ watch(nodes, (list) => {
   const notes = list.filter(n => n.kind === 'note')
   selected.value = notes.reduce<GraphNode | null>((best, n) => (!best || n.degree > best.degree ? n : best), null)?.id ?? null
 }, { immediate: true })
-const kindOf = (n: GraphNode) => n.kind === 'note' ? (n.space_kind ?? 'public') : 'resource'
+const kindOf = (n: GraphNode) => n.kind === 'note' ? (n.space_kind ?? 'public') : n.kind === 'file' ? 'file' : 'resource'
 const shown = (n: GraphNode) => !hidden.value.includes(kindOf(n)) && !(n.kind === 'note' && n.type && hiddenTypes.value.includes(n.type))
 // 圆点颜色跟着“着色”走：类型（6 组）/ 知识库类型 / 作者；任务与文档一直是灰色
 function dotClass(n: GraphNode) {
+  if (n.kind === 'file') return 'is-file'
   if (n.kind !== 'note') return ''
   if (colorBy.value === 'space') return `k-${n.space_kind ?? 'public'}`
   if (colorBy.value === 'author') return n.author_kind === 'agent' ? 'k-agent' : n.author_kind === 'user' ? 'k-user' : ''
@@ -61,8 +62,12 @@ const typeCount = computed(() => {
 })
 type LegendItem = { key: string; dot: string; label: string; detail?: string; count: number; pressed?: boolean }
 const resourceItem = computed<LegendItem[]>(() => {
-  const count = nodes.value.filter(n => n.kind !== 'note').length
-  return count ? [{ key: 'resource', dot: '', label: '任务与文档', count, pressed: !hidden.value.includes('resource') }] : []
+  const count = nodes.value.filter(n => n.kind !== 'note' && n.kind !== 'file').length
+  const files = nodes.value.filter(n => n.kind === 'file').length
+  return [
+    ...(count ? [{ key: 'resource', dot: '', label: '任务与文档', count, pressed: !hidden.value.includes('resource') }] : []),
+    ...(files ? [{ key: 'file', dot: 'is-file', label: '图片', count: files, pressed: !hidden.value.includes('file') }] : []),
+  ]
 })
 const legend = computed<LegendItem[]>(() => {
   const notes = nodes.value.filter(n => n.kind === 'note')
@@ -96,7 +101,7 @@ const groupState = (key: TypeGroup) => {
   return { all: off === 0, some: off > 0 && off < types.length }
 }
 // 着色换了维度，按知识库类型的隐藏就看不到对应的图例了：清掉（任务与文档的开关一直在图例里）
-watch(colorBy, () => { hidden.value = hidden.value.filter(k => k === 'resource') })
+watch(colorBy, () => { hidden.value = hidden.value.filter(k => k === 'resource' || k === 'file') })
 const filterOpen = ref(false), filterBox = ref<HTMLElement | null>(null)
 const filterLabel = computed(() => hiddenTypes.value.length ? `类型：隐藏 ${hiddenTypes.value.length} 种` : '类型：全部')
 function closeFilter(event: PointerEvent) { if (filterOpen.value && !filterBox.value?.contains(event.target as Node)) filterOpen.value = false }
@@ -122,8 +127,12 @@ const neighbors = computed(() => {
   const ids = new Set(edges.value.flatMap(e => e.source === id ? [e.target] : e.target === id ? [e.source] : []))
   return [...ids].map(i => nodeById.value.get(i)).filter((n): n is GraphNode => !!n).sort((a, b) => b.degree - a.degree).slice(0, 8)
 })
-function spaceName(n: GraphNode) { return n.space_id ? spaceById.value.get(n.space_id)?.name ?? '' : n.kind === 'task' ? '任务' : n.kind === 'project' ? '项目' : '收藏文档' }
-function open(n: GraphNode) { void router.push(nodeHref(n)) }
+function spaceName(n: GraphNode) { return n.space_id ? spaceById.value.get(n.space_id)?.name ?? '' : n.kind === 'task' ? '任务' : n.kind === 'project' ? '项目' : n.kind === 'file' ? '图片' : '收藏文档' }
+function open(n: GraphNode) {
+  if (n.kind === 'file') { window.open(nodeHref(n), '_blank', 'noopener'); return }
+  void router.push(nodeHref(n))
+}
+const images = computed(() => note.data.value ? noteImages(note.data.value.body).slice(0, 6) : [])
 function searchNotes() { if (query.value.trim()) void router.push({ path: '/knowledge/notes', query: { q: query.value.trim() } }) }
 const sideQuery = ref('')
 function sideSearch() { if (sideQuery.value.trim()) void router.push({ path: '/knowledge/notes', query: { q: sideQuery.value.trim() } }) }
@@ -199,6 +208,7 @@ const error = computed(() => graph.error.value ?? spaces.error.value)
         <label class="kb-check"><input v-model="orphans" type="checkbox">孤立笔记</label>
         <label class="kb-check"><input v-model="allLabels" type="checkbox">显示全部标题</label>
         <label class="kb-check"><input v-model="resources" type="checkbox">任务与文档</label>
+        <label class="kb-check"><input v-model="showFiles" type="checkbox">显示图片</label>
         <span style="flex: 1" />
         <button type="button" class="kb-btn is-small kb-desktop-only" :aria-pressed="listView" @click="listView = !listView"><List aria-hidden="true" />{{ listView ? '图谱视图' : '列表视图' }}</button>
         <div v-if="!listView" class="kb-zoom" role="group" aria-label="缩放">
@@ -218,7 +228,7 @@ const error = computed(() => graph.error.value ?? spaces.error.value)
                 <tr v-for="n in listRows" :key="n.id">
                   <td><span style="display: inline-flex; align-items: center; gap: 6px"><span class="kb-dot is-small" :class="dotClass(n)" aria-hidden="true" /><RouterLink :to="nodeHref(n)">{{ n.title }}</RouterLink></span></td>
                   <td>{{ spaceName(n) }}</td>
-                  <td>{{ n.kind === 'note' && n.type ? NOTE_TYPE_LABELS[n.type] : n.kind === 'task' ? '任务' : n.kind === 'project' ? '项目' : '收藏文档' }}</td>
+                  <td>{{ n.kind === 'note' && n.type ? NOTE_TYPE_LABELS[n.type] : n.kind === 'task' ? '任务' : n.kind === 'project' ? '项目' : n.kind === 'file' ? '图片' : '收藏文档' }}</td>
                   <td class="kb-num">{{ n.degree }}</td>
                 </tr>
               </tbody>
@@ -271,7 +281,17 @@ const error = computed(() => graph.error.value ?? spaces.error.value)
           </dd>
           <dt>链接</dt><dd class="kb-num">链出 {{ note.data.value.links.length }} · 被链 {{ note.data.value.backlinks.length }}</dd>
         </dl>
+        <template v-else-if="selectedNode.kind === 'file'">
+          <a class="kb-thumbs" style="grid-template-columns: 1fr" :href="nodeHref(selectedNode)" target="_blank" rel="noopener"><img :src="nodeHref(selectedNode)" :alt="selectedNode.title"></a>
+          <p class="kb-meta" style="margin: 0">图片 · 被 {{ selectedNode.degree }} 篇笔记引用</p>
+        </template>
         <p v-else-if="selectedNode.kind !== 'note'" class="kb-meta" style="margin: 0">{{ selectedNode.kind === 'task' ? '任务' : selectedNode.kind === 'project' ? '项目' : '收藏文档' }} · 被 {{ selectedNode.degree }} 篇笔记链接</p>
+        <div v-if="images.length" class="kb-side-section">
+          <h3 style="font-size: 13px; font-weight: 600">图片</h3>
+          <div class="kb-thumbs" role="list" aria-label="这篇笔记里的图片">
+            <a v-for="img in images" :key="img.url" role="listitem" :href="img.url" target="_blank" rel="noopener" :title="img.alt"><img :src="img.url" :alt="img.alt" loading="lazy"></a>
+          </div>
+        </div>
         <div style="display: flex; gap: 8px">
           <RouterLink :to="nodeHref(selectedNode)" class="kb-btn is-primary" style="flex: 1">{{ selectedNode.kind === 'note' ? '打开笔记' : '打开' }}</RouterLink>
           <button v-if="selectedNode.space_id" type="button" class="kb-btn" style="flex: 1" :aria-pressed="focus === selectedNode.space_id" @click="focus = focus === selectedNode.space_id ? null : selectedNode.space_id">{{ focus === selectedNode.space_id ? '显示全部' : '只看它的知识库' }}</button>

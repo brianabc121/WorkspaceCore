@@ -152,6 +152,32 @@ class Settings(BaseSettings):
     # IM 消息投影的保留天数（方案第 5 节“有保留期”）；OpenIM 里的消息不受影响
     im_message_retention_days: int = Field(default=365, ge=7, le=3650)
 
+    # 知识库图片（T-0103，docs/v2/TIMELINE_PLAN.md 第 4 节）：主存储与可选副本。
+    # local 存在 file_dir（Compose 里是卷 kb-files）；r2 / oss 走 S3 兼容接口
+    # （自己签 SigV4，桶保持私有）。都没配置就存本地。图片一律经工作台读取，浏览器不直连对象存储
+    file_storage: Literal["local", "r2", "oss"] = "local"
+    file_storage_replica: Literal["none", "local", "r2", "oss"] = "none"
+    file_dir: str = "/data/kb-files"
+    file_max_mb: int = Field(default=10, ge=1, le=50)
+    file_quota_mb: int = Field(default=2048, ge=1)
+    file_storage_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
+    # Cloudflare R2：endpoint https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+    # （有辖区时加 .<JURISDICTION>），region auto，路径风格。
+    # r2_endpoint / r2_region 只在测试或别的 S3 兼容服务上覆盖默认值
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: SecretStr | None = None
+    r2_bucket: str = ""
+    r2_jurisdiction: str = ""
+    r2_endpoint: str = ""
+    r2_region: str = "auto"
+    # 阿里云 OSS：endpoint https://s3.oss-<region>.aliyuncs.com，只支持虚拟托管风格
+    oss_region: str = ""
+    oss_access_key_id: str = ""
+    oss_access_key_secret: SecretStr | None = None
+    oss_bucket: str = ""
+    oss_endpoint: str = ""
+
     @field_validator("agent_reflection_timezone")
     @classmethod
     def _iana_timezone(cls, value: str) -> str:
@@ -184,6 +210,8 @@ class Settings(BaseSettings):
         "agent_intranet_url",
         "agent_public_url",
         "openim_api_url",
+        "r2_endpoint",
+        "oss_endpoint",
     )
     @classmethod
     def _http_url_or_blank(cls, value: str) -> str:
@@ -210,6 +238,8 @@ class Settings(BaseSettings):
         "credential_encryption_keys_previous",
         "openim_secret",
         "openim_callback_path_token",
+        "r2_secret_access_key",
+        "oss_access_key_secret",
         mode="before",
     )
     @classmethod

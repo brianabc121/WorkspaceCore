@@ -2,8 +2,9 @@
 # 备份工作台数据库到加密的 restic 仓库（S6-04，规范 11.4）。make backup 与 CI 的 A15 验收共用。
 # 依据：docs/decisions/2026-10-31-sprint-6-backup-and-scan-verification.md 第 2 ~ 4 节。
 #
-# 步骤：pg_dump（custom 格式）→ pg_restore --list 确认归档完整 →（OpenIM 在运行时）导出 OpenIM 的 MongoDB 与 Garage
-#       → restic backup → forget（按 7/30/90 日保留）→ check。
+# 步骤：pg_dump（custom 格式）→ pg_restore --list 确认归档完整 → 打包知识库图片的本地存储（卷 kb-files，T-0103）
+#       →（OpenIM 在运行时）导出 OpenIM 的 MongoDB 与 Garage → restic backup → forget（按 7/30/90 日保留）→ check。
+# 图片存在 R2 / OSS 时由对象存储自己负责持久化（可再配一个副本），这里只备份本地存储。
 # 归档只在权限 700 的临时目录里存在，结束后删除。.env 不进备份：它保存解密钥匙，要单独保管。
 #
 # 配置（.env，shell 里的同名变量优先）：
@@ -43,6 +44,19 @@ server="$(docker compose exec -T postgres psql -U "$pg_user" -d "$pg_db" -tAc 's
 commit="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "归档完整：$entries 项，迁移版本 $revision"
 
+# 知识库图片（T-0103）：卷 kb-files 打包成 kb-files.tar；文件名就是内容的 SHA-256，恢复时按名字核对
+kb_files=0
+kb_volume="$(docker inspect "$(docker compose ps -q api 2>/dev/null | head -n 1)" \
+  --format '{{range .Mounts}}{{if eq .Destination "/data/kb-files"}}{{.Name}}{{end}}{{end}}' 2>/dev/null || true)"
+if [[ -n "$kb_volume" ]]; then
+  docker run --rm --network none -v "$kb_volume:/f:ro" "$OPENIM_ALPINE_IMAGE" \
+    tar -cf - -C /f --exclude './kb/_probe' --exclude '.upload-*' . > "$work/data/kb-files.tar"
+  kb_files="$(tar -tf "$work/data/kb-files.tar" | grep -c '^\./kb/[^/]*/[0-9a-f]\{64\}$' || true)"
+  echo "知识库图片（本地存储）：$kb_files 个文件"
+else
+  echo "警告：找不到 api 容器的 kb-files 卷，本次备份不含知识库图片的本地存储" >&2
+fi
+
 openim=false
 if openim_running "$openim_project"; then
   openim_dump "$openim_project" "$work/data"
@@ -53,7 +67,8 @@ elif [[ -n "$(env_value OPENIM_API_URL)" ]]; then
 fi
 cat > "$work/data/backup-info.json" <<EOF
 {"created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "database": "$pg_db", "alembic_revision": "$revision",
- "postgres_version": "$server", "archive_entries": $entries, "app_commit": "$commit", "openim": $openim}
+ "postgres_version": "$server", "archive_entries": $entries, "app_commit": "$commit", "openim": $openim,
+ "kb_files": $kb_files}
 EOF
 
 restic_init_if_needed

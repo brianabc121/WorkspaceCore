@@ -513,6 +513,8 @@ n8n 是独立的 Compose（`infra/n8n/compose.yaml`），加入 core 的 `integr
 ### 14.1 备份什么
 
 - **进备份**：工作台的 PostgreSQL 数据库（`pg_dump` custom 格式，备份时不用停服务），以及一份记录迁移版本与时间的 `backup-info.json`。
+- **知识库图片的本地存储也进备份**（卷 `kb-files`，第 19 节）：打包成 `kb-files.tar`；`make restore-verify` 解包后按文件名（内容的 SHA-256）逐个核对，数量与备份时一致。
+  图片存在 Cloudflare R2 / 阿里云 OSS 时由对象存储负责持久化，可以再配一个副本（`FILE_STORAGE_REPLICA`）。
 - **OpenIM 在运行时也进备份**（第 17.5 节）：MongoDB 的 `openim_v3` 库（`mongodump` 归档）与 Garage（元数据快照、节点身份与数据块）。
   OpenIM 的 Kafka、Redis、etcd 不备份：Kafka 只是中转，Redis 是缓存与在线令牌，etcd 只做服务发现。
 - **不进备份**：
@@ -856,3 +858,40 @@ sudo -E python3 tests/e2e/agents_acceptance.py --server-ca <签发入口证书�
   这段时间发给实例的消息插件不会补处理（工作台的消息投影不缺，周期对账也会补齐），需要的话重发一次。重启或升级 OpenIM 后看一眼运维页，确认实例重新上线。
 - **实例间私聊被拒收时，`message` 工具仍显示 done**：消息确实没有送达（before 回调拒收），只是插件没有把拒收反馈给模型。
 - **IM 令牌只在启动时领取**：实例每次启动都会让旧连接下线，所以只在启动时领取；每周的定时重启负责换新令牌。
+
+## 19. 知识库图片（T-0103）
+
+笔记里可以插入、粘贴、拖入图片（PNG / JPEG / GIF / WebP，单张默认 10 MB，每个工作空间默认 2 GB）。设计见 `docs/v2/TIMELINE_PLAN.md` 第 4 节，
+接口核验见 `docs/decisions/2026-11-04-timeline-kb-upgrade-verification.md` 第 3 节。
+
+### 19.1 存在哪里
+
+| 变量 | 含义 |
+|---|---|
+| `FILE_STORAGE` | 主存储：`local`（默认，卷 `kb-files`）/ `r2` / `oss`。写主存储成功就返回 |
+| `FILE_STORAGE_REPLICA` | 副本：`none`（默认）/ `local` / `r2` / `oss`。Worker 每分钟把新图片复制过去，失败重试；读主存储失败时读副本 |
+| `R2_ACCOUNT_ID`、`R2_BUCKET`、`R2_JURISDICTION`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY` | Cloudflare R2（S3 兼容接口，路径风格，region `auto`） |
+| `OSS_REGION`、`OSS_BUCKET`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`、`OSS_ENDPOINT` | 阿里云 OSS（S3 兼容接口，虚拟托管风格；`OSS_ENDPOINT` 只在需要覆盖默认的 `https://s3.oss-<地域>.aliyuncs.com` 时填） |
+| `FILE_MAX_MB`、`FILE_QUOTA_MB` | 单张上限与每个工作空间的总量 |
+
+- 配置方法：`bash scripts/deploy.sh connect` 的“知识库图片存储”一步（密钥当场输入，只写进 `.env`），或直接改 `.env` 后 `docker compose up -d api worker`。
+- 两个都配时一个做主存储、一个做副本，两边都有一份；用户主要在国内时主存储选 OSS、副本选 R2，反过来也行。
+- 桶要保持**私有**，给工作台的密钥只开这个桶的对象读写。图片一律经工作台读取（`GET /api/v1/knowledge/files/<id>`，按工作空间与角色校验），浏览器不直连对象存储。
+- 换了主存储以后，旧图片仍从写入时的存储读（数据库里记着），新图片写到新的主存储；后来才配副本时，Worker 会把以前的图片也补一份。
+
+### 19.2 自检与运维页
+
+- Worker 启动时和每天自检一次：对主存储与副本各写、读、删一个探测文件，失败写警告日志。
+- 运维页（owner / admin）显示主存储、副本、最近一次自检、本工作空间的用量与配额、待复制与复制失败的数量，可以点“自检”立即检查。
+- 自检失败的常见原因：密钥填错（`SignatureDoesNotMatch` / `InvalidAccessKeyId`）、地域与桶所在地域不一致（OSS）、桶名写错（`NoSuchBucket`）、R2 辖区没填。
+
+### 19.3 清理与备份
+
+- 保存笔记时记下它引用的图片（历史版本引用过的也算）；没有任何引用、上传超过 24 小时的图片每天 03:37（UTC）删除，主存储与副本都删。
+  笔记彻底删除（回收站 30 天后）后，它引用的图片在下一次清理时删除。
+- 本地存储随 `make backup` 备份、`make restore-verify` 校验（第 14 节）；R2 / OSS 上的图片不进 restic 备份。
+
+### 19.4 验收状态
+
+- SigV4 用 AWS 官方测试向量做单元测试；CI 在锁定的 Garage（`dxflrs/garage:v2.4.1`）上验证路径风格的读写删（`scripts/garage_s3_check.sh`）。
+- **真实的 R2 / OSS 账号还没有验收**（需要测试桶）：第一次配置后先在运维页点“自检”，通过后再让大家上传图片。

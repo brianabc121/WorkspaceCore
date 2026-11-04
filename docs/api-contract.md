@@ -166,6 +166,8 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 
 | 方法 | 路径 | 说明 | 状态 |
 |---|---|---|---|
+| GET | `/api/v1/operations/storage` | 知识库图片存储（owner / admin）：主存储、副本（名字、是否配置完整与缺少的变量、R2 / OSS 的桶地址、最近一次自检）、本工作空间的图片数 / 用量 / 配额、全部工作空间待复制与复制失败的数量；不返回密钥，本地存储不返回路径 | 已实现（T-0103） |
+| POST | `/api/v1/operations/storage/check` | 存储自检（owner / admin）：对主存储与副本各写、读、删一个探测对象，结果存进 Redis 并返回最新的 `StorageStatus`；Worker 启动时和每天也自检一次 | 已实现（T-0103） |
 | GET | `/api/v1/operations/services` | 核心服务、监控组件、集成与 n8n 的状态（没有部署的为 `not_configured`）；V2 另有 `kind = agents` 的 OpenIM 与本工作空间的 OpenClaw 实例（实例只对 owner / admin 列出） | 已实现（T-0035；V2 部分 T-0062） |
 | GET | `/api/v1/operations/metrics?range=&views=` | 预设指标视图，聚合好的数据点；不接受 PromQL；带 `sync` 与 `grafana_url` | 已实现（T-0035） |
 | GET / PATCH | `/api/v1/notifications` | 我的通知（游标分页、`unread_count`）/ 标为已读（`ids` 或 `all: true`） | 已实现（T-0036） |
@@ -274,7 +276,9 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | POST | `/api/v1/knowledge/notes/{note_id}/restore`、`/revert` | 从回收站恢复 / 退回到某一版（`to_version`） | 已实现（T-0098）；原来的 `/confirm`（人确认可信）随“人已确认”一起删除（T-0102） |
 | GET | `/api/v1/knowledge/notes/{note_id}/revisions[/{version}]` | 版本历史 / 某一版与上一版的逐行差异 | 已实现（T-0098） |
 | GET | `/api/v1/knowledge/notes/{note_id}/graph?depth=1\|2` | 局部图谱 | 已实现（T-0098） |
-| GET | `/api/v1/knowledge/graph` | 全局图谱：笔记、`[[链接]]`、链接到的任务 / 项目 / 书签；`space_id` 可多选，`resources=false` 只要笔记；超过 2000 篇时 `truncated` | 已实现（T-0098） |
+| GET | `/api/v1/knowledge/graph` | 全局图谱：笔记、`[[链接]]`、链接到的任务 / 项目 / 书签；`space_id` 可多选，`resources=false` 只要笔记；`files=true` 加上图片节点（`kind = file`，连到正文里引用它的笔记）；超过 2000 篇时 `truncated` | 已实现（T-0098；`files` 为 T-0103） |
+| POST | `/api/v1/knowledge/files` | 上传图片（member 以上）：请求体就是图片本身；只收 PNG / JPEG / GIF / WebP（按文件头判断，SVG 不收），单张不超过 `FILE_MAX_MB`、工作空间合计不超过 `FILE_QUOTA_MB`（413 `PAYLOAD_TOO_LARGE` / `QUOTA_EXCEEDED`，422 `UNSUPPORTED_IMAGE`）；JPEG 去掉 Exif 等元数据（保留方向）；同一工作空间同样的内容返回已有的那张。返回 `FileOut`（`url` 写进正文 `![说明](url)`）；存储没配置完整或不可用时 503 `STORAGE_NOT_CONFIGURED` / `STORAGE_UNAVAILABLE` | 已实现（T-0103） |
+| GET | `/api/v1/knowledge/files/{file_id}` | 读取图片：**不需要 `X-Workspace-Id`**，按图片所属的工作空间校验当前用户（viewer 以上），不是成员与不存在一样 404（笔记里的 `<img>` 由浏览器直接加载）。`Cache-Control: private`、`nosniff`、`ETag`（内容的 SHA-256，支持 `If-None-Match` → 304）；先读写入时的存储，失败再读主存储与副本，内容哈希对不上的跳过 | 已实现（T-0103） |
 | GET | `/api/v1/knowledge/changes` | 变更记录：每次改动（谁、何时、增删行数、理由、能否一键退回）与保护记录（`kind=guard`） | 已实现（T-0098） |
 | GET | `/api/v1/knowledge/trash` | 回收站 | 已实现（T-0098） |
 | DELETE | `/api/v1/knowledge/trash/{note_id}` | 彻底删除（admin，204） | 已实现（T-0098） |
