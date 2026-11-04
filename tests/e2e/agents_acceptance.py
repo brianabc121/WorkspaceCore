@@ -873,10 +873,13 @@ def scenario_16(c: Ctx) -> None:
     c.check("时间轴：甲调用 complete_task 直接完成任务（执行记录为 direct、不审批），这段结束（done）并分到 token",
             bool(done) and record.get("risk_level") == "direct" and record.get("status") == "succeeded"
             and only.get("end_reason") == "done" and (only.get("tokens") or {}).get("total", 0) > 0
-            and only.get("usage_reported") is True and not only.get("waits"),
+            and only.get("usage_reported") is True
+            # complete_task 不审批，这段里不会有它的等待；场景 9 故意留着一条甲的待审批，
+            # 它在甲之后的每一段里都算“等待审批”（时间轴的设计），所以只排除 complete_task 自己的
+            and bool(record) and not any(w["execution_id"] == record["id"] for w in only.get("waits", [])),
             json.dumps({"record": {k: record.get(k) for k in ("risk_level", "status")},
-                        "runs": [(r["end_reason"], (r.get("tokens") or {}).get("total"), len(r.get("waits", [])))
-                                 for r in runs]}, ensure_ascii=False))
+                        "runs": [(r["end_reason"], (r.get("tokens") or {}).get("total"),
+                                  [w["tool"] for w in r.get("waits", [])]) for r in runs]}, ensure_ascii=False))
 
     # 6. 时间轴接口（按项目）：甲的轨道上有这段，用量已上报
     # 用量记在上报那一分钟的整分钟上（可能早于这段开始的时刻），范围从这段开始前 5 分钟起
