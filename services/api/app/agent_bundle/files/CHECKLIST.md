@@ -6,7 +6,7 @@
 
 - [ ] **这个目录只给运行 OpenClaw 的用户读写**：`chown -R 1000:1000 . && chmod 700 .`（`state/` 是 OpenClaw 的配置与状态）；`myworkspace.env` 与 `tls/client.key`（外网模式）权限 600。
       里面有实例凭证；泄露后到工作台的实例页吊销并重新生成接入包。
-- [ ] `bin/` 下两个程序：**属主是运行 OpenClaw 的用户**（官方镜像里是 uid 1000）、权限 0755、不是符号链接（OC-0 ADR F8）：
+- [ ] `bin/` 下三个程序：**属主是运行 OpenClaw 的用户**（官方镜像里是 uid 1000）、权限 0755、不是符号链接（OC-0 ADR F8）：
       `chown -R 1000:1000 bin && chmod 0755 bin/*`
 - [ ] 插件（**第一次启动之前**）：核对 `@openim/openclaw-channel@0.3.3` 的 tarball sha256 是
       `3d10dca0edcba0ecdb0dc915e7cf1ddf5a8453165de13dec76bbe5ef85607643`，然后用一份临时的空配置安装
@@ -44,6 +44,9 @@
       `*/10 * * * * cd <本目录> && docker compose exec -T openclaw node openclaw.mjs secrets reload --json`
 - [ ] 每周重启一次，换上新的 IM 令牌（令牌只在启动时领取，OC-0 ADR F1）：
       `17 4 * * 1 cd <本目录> && docker compose restart openclaw`
+- [ ] 每分钟上报 token 用量（任务时间轴，T-0104）：在容器里调网关的 `sessions.usage`（只读），把每个会话今天的累计 token 发给工作台；
+      会话只报 key 的 SHA-256，不发消息内容。没配这一行时，工作台的时间轴显示“未上报”：
+      `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs`
 - [ ] 每晚复盘（知识库，T-0100）：OpenClaw 启动后在本目录运行一次 `sh setup-reflection.sh`。
       它用 `openclaw automations add` 建 OpenClaw 自己的定时任务（默认每天 22:00，提示词在 `reflection-prompt.md`）；
       重复运行只更新同一个任务。SSH 自动部署会自动运行这一步。

@@ -952,6 +952,8 @@ def test_v2_keeps_existing_enums_and_only_adds_event_topics() -> None:
         "im",
         "agents",
         "ai",
+        # 任务时间轴（T-0104）
+        "timeline",
     }
     provider = schemas["IntegrationOut"]["properties"]["provider"]  # type: ignore[index]
     assert provider["const"] == "github" or set(provider["enum"]) == {"github"}

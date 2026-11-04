@@ -2031,6 +2031,46 @@
         "title": "AppLoginUpsert",
         "type": "object"
       },
+      "ApprovalWait": {
+        "description": "这个实例的写操作从提交到有结果（批准、拒绝、过期）之间的时间。",
+        "properties": {
+          "end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "还在等待时为空",
+            "title": "End"
+          },
+          "execution_id": {
+            "format": "uuid",
+            "title": "Execution Id",
+            "type": "string"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "execution_id",
+          "tool",
+          "start",
+          "end"
+        ],
+        "title": "ApprovalWait",
+        "type": "object"
+      },
       "ApproveRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2052,6 +2092,75 @@
           }
         },
         "title": "ApproveRequest",
+        "type": "object"
+      },
+      "AssigneeInstance": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "description": "pending / online / offline（停用的实例不列出）",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status"
+        ],
+        "title": "AssigneeInstance",
+        "type": "object"
+      },
+      "AssigneeOptions": {
+        "description": "任务可以指派的执行者：本工作空间的成员与没有停用的实例。",
+        "properties": {
+          "instances": {
+            "items": {
+              "$ref": "#/components/schemas/AssigneeInstance"
+            },
+            "title": "Instances",
+            "type": "array"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/AssigneeUser"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "users",
+          "instances"
+        ],
+        "title": "AssigneeOptions",
+        "type": "object"
+      },
+      "AssigneeUser": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "display_name"
+        ],
+        "title": "AssigneeUser",
         "type": "object"
       },
       "AuditLogOut": {
@@ -6320,7 +6429,8 @@
                 "automations",
                 "im",
                 "agents",
-                "ai"
+                "ai",
+                "timeline"
               ],
               "type": "string"
             },
@@ -10844,6 +10954,71 @@
         "title": "SessionOut",
         "type": "object"
       },
+      "SessionTokens": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_read": {
+            "maximum": 10000000000000.0,
+            "minimum": 0.0,
+            "title": "Cache Read",
+            "type": "integer"
+          },
+          "cache_write": {
+            "maximum": 10000000000000.0,
+            "minimum": 0.0,
+            "title": "Cache Write",
+            "type": "integer"
+          },
+          "input": {
+            "maximum": 10000000000000.0,
+            "minimum": 0.0,
+            "title": "Input",
+            "type": "integer"
+          },
+          "output": {
+            "maximum": 10000000000000.0,
+            "minimum": 0.0,
+            "title": "Output",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input",
+          "output",
+          "cache_read",
+          "cache_write"
+        ],
+        "title": "SessionTokens",
+        "type": "object"
+      },
+      "SessionUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "description": "OpenClaw 会话 key 的 SHA-256（十六进制小写）；工作台不收会话 key 本身",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Session",
+            "type": "string"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionTokens"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这个会话当天的累计值；OpenClaw 正在刷新缓存时为 null，这次跳过"
+          }
+        },
+        "required": [
+          "session",
+          "usage"
+        ],
+        "title": "SessionUsage",
+        "type": "object"
+      },
       "SetupRequest": {
         "properties": {
           "display_name": {
@@ -11563,6 +11738,32 @@
       },
       "TaskOut": {
         "properties": {
+          "assignee_instance_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "执行者是 OpenClaw 实例时的实例 ID；与 assignee_user_id 二选一",
+            "title": "Assignee Instance Id"
+          },
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "执行者是工作空间成员时的用户 ID",
+            "title": "Assignee User Id"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -11613,6 +11814,19 @@
             "title": "Labels",
             "type": "array"
           },
+          "planned_start_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "计划开始时间（T-0104）",
+            "title": "Planned Start At"
+          },
           "priority": {
             "maximum": 5.0,
             "minimum": 0.0,
@@ -11623,6 +11837,19 @@
             "format": "uuid",
             "title": "Project Id",
             "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "第一次开始执行的时间；由执行记录维护",
+            "title": "Started At"
           },
           "title": {
             "title": "Title",
@@ -11649,6 +11876,10 @@
           "priority",
           "due_at",
           "labels",
+          "planned_start_at",
+          "started_at",
+          "assignee_user_id",
+          "assignee_instance_id",
           "version",
           "created_at",
           "updated_at"
@@ -11695,10 +11926,252 @@
         "title": "TaskPage",
         "type": "object"
       },
+      "TaskRunList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskRunOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "TaskRunList",
+        "type": "object"
+      },
+      "TaskRunOut": {
+        "properties": {
+          "end_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "done",
+                  "paused",
+                  "interrupted",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Reason"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "还在执行时为空",
+            "title": "Ended At"
+          },
+          "ended_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "系统结束（实例停用 / 离线、改了执行者）时为空",
+            "title": "Ended By"
+          },
+          "executor_kind": {
+            "enum": [
+              "user",
+              "instance"
+            ],
+            "title": "Executor Kind",
+            "type": "string"
+          },
+          "executor_name": {
+            "description": "开始时执行者的名字（成员离开、实例被删除后仍保留）",
+            "title": "Executor Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "instance_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instance Id"
+          },
+          "series": {
+            "description": "每 10 分钟的用量（只在执行记录接口里返回）",
+            "items": {
+              "$ref": "#/components/schemas/UsagePoint"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "started_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started By"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenCount"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这段时间里这个实例上报的 token 增量之和（按时间归属）；人的任务与没有上报时为空"
+          },
+          "tokens_shared": {
+            "description": "同一实例同时有几段在执行时平均分，界面标“≈”",
+            "title": "Tokens Shared",
+            "type": "boolean"
+          },
+          "usage_reported": {
+            "description": "这个实例上报过用量（旧接入包、上报失败时为 false）",
+            "title": "Usage Reported",
+            "type": "boolean"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "waits": {
+            "description": "落在这段里的等待审批",
+            "items": {
+              "$ref": "#/components/schemas/ApprovalWait"
+            },
+            "title": "Waits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "task_id",
+          "executor_kind",
+          "user_id",
+          "instance_id",
+          "executor_name",
+          "started_at",
+          "ended_at",
+          "end_reason",
+          "started_by",
+          "ended_by",
+          "tokens",
+          "tokens_shared",
+          "usage_reported",
+          "waits"
+        ],
+        "title": "TaskRunOut",
+        "type": "object"
+      },
+      "TaskRunStart": {
+        "additionalProperties": false,
+        "properties": {
+          "dispatch": {
+            "default": false,
+            "description": "true：执行者是实例时交给它执行——以当前管理员的 IM 账号给它发一条固定格式的消息（owner / admin）；false：人的任务开始执行（member 及以上）",
+            "title": "Dispatch",
+            "type": "boolean"
+          }
+        },
+        "title": "TaskRunStart",
+        "type": "object"
+      },
+      "TaskRunStop": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "description": "paused 暂停（人的任务）/ interrupted 中断 / cancelled 取消；实例执行的段要 owner / admin",
+            "enum": [
+              "paused",
+              "interrupted",
+              "cancelled"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "TaskRunStop",
+        "type": "object"
+      },
       "TaskUpdate": {
         "additionalProperties": false,
-        "description": "只发送要改的字段；due_at 显式传 null 表示清除截止时间，其余字段不能为 null。",
+        "description": "只发送要改的字段。\n\ndue_at、planned_start_at、assignee_user_id、assignee_instance_id 显式传 null 表示清除，\n其余字段不能为 null。执行者二选一：设了其中一个，另一个自动清除；两个都给非空值时返回 422。\n改执行者时，正在执行的一段记为中断（T-0104）。",
         "properties": {
+          "assignee_instance_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "执行者：本工作空间的 OpenClaw 实例（不能是已停用的）",
+            "title": "Assignee Instance Id"
+          },
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "执行者：工作空间成员",
+            "title": "Assignee User Id"
+          },
           "description": {
             "anyOf": [
               {
@@ -11753,6 +12226,18 @@
             ],
             "title": "Labels"
           },
+          "planned_start_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planned Start At"
+          },
           "priority": {
             "anyOf": [
               {
@@ -11805,6 +12290,410 @@
           "version"
         ],
         "title": "TaskUpdate",
+        "type": "object"
+      },
+      "TimelineOut": {
+        "properties": {
+          "group": {
+            "enum": [
+              "executor",
+              "project"
+            ],
+            "title": "Group",
+            "type": "string"
+          },
+          "now": {
+            "format": "date-time",
+            "title": "Now",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "range_end": {
+            "format": "date-time",
+            "title": "Range End",
+            "type": "string"
+          },
+          "range_start": {
+            "format": "date-time",
+            "title": "Range Start",
+            "type": "string"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineSegment"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/TimelineSummary"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineTask"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineTrack"
+            },
+            "title": "Tracks",
+            "type": "array"
+          },
+          "truncated": {
+            "description": "任务太多，只返回了最近的一部分",
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/TimelineUsage"
+          }
+        },
+        "required": [
+          "range_start",
+          "range_end",
+          "now",
+          "group",
+          "project_id",
+          "tracks",
+          "tasks",
+          "segments",
+          "usage",
+          "summary",
+          "truncated"
+        ],
+        "title": "TimelineOut",
+        "type": "object"
+      },
+      "TimelineSegment": {
+        "properties": {
+          "end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "执行段：还在执行时为空；计划片段：截止时间，没有截止时间时为空",
+            "title": "End"
+          },
+          "kind": {
+            "enum": [
+              "planned",
+              "run"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskRunOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "执行段的详情；计划片段为空"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "计划片段：计划开始；只有截止时间时为空（画截止标记）",
+            "title": "Start"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "track": {
+            "title": "Track",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "task_id",
+          "track",
+          "start",
+          "end",
+          "run"
+        ],
+        "title": "TimelineSegment",
+        "type": "object"
+      },
+      "TimelineSummary": {
+        "properties": {
+          "done": {
+            "description": "时间范围内完成的任务数",
+            "title": "Done",
+            "type": "integer"
+          },
+          "overdue": {
+            "description": "现在已过截止时间、还没完成的任务数",
+            "title": "Overdue",
+            "type": "integer"
+          },
+          "running": {
+            "description": "正在执行的段数",
+            "title": "Running",
+            "type": "integer"
+          },
+          "tokens": {
+            "description": "时间范围内的 token 合计（范围同 usage.scope）",
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "running",
+          "done",
+          "tokens",
+          "overdue"
+        ],
+        "title": "TimelineSummary",
+        "type": "object"
+      },
+      "TimelineTask": {
+        "properties": {
+          "assignee_instance_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Instance Id"
+          },
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee User Id"
+          },
+          "done": {
+            "title": "Done",
+            "type": "boolean"
+          },
+          "done_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done At"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "planned_start_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planned Start At"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "project_title": {
+            "title": "Project Title",
+            "type": "string"
+          },
+          "running": {
+            "description": "有一段正在执行",
+            "title": "Running",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "project_title",
+          "title",
+          "done",
+          "done_at",
+          "due_at",
+          "planned_start_at",
+          "started_at",
+          "assignee_user_id",
+          "assignee_instance_id",
+          "running"
+        ],
+        "title": "TimelineTask",
+        "type": "object"
+      },
+      "TimelineTrack": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "key": {
+            "description": "片段用它指向轨道，例如 instance:<id>、user:<id>、project:<id>",
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "user",
+              "instance",
+              "unassigned",
+              "project",
+              "former"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "实例的状态（pending / online / offline / disabled）",
+            "title": "Status"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "id",
+          "name",
+          "status"
+        ],
+        "title": "TimelineTrack",
+        "type": "object"
+      },
+      "TimelineUsage": {
+        "properties": {
+          "bucket_minutes": {
+            "title": "Bucket Minutes",
+            "type": "integer"
+          },
+          "buckets": {
+            "description": "只列出有用量的桶",
+            "items": {
+              "$ref": "#/components/schemas/UsagePoint"
+            },
+            "title": "Buckets",
+            "type": "array"
+          },
+          "reported": {
+            "description": "有实例上报过用量；为 false 时界面显示“未上报”",
+            "title": "Reported",
+            "type": "boolean"
+          },
+          "scope": {
+            "description": "workspace：本工作空间所有实例上报的全部 token（含不在任务里的对话）；project：只算这个项目的执行段按时间归属到的 token",
+            "enum": [
+              "workspace",
+              "project"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "total": {
+            "$ref": "#/components/schemas/TokenCount"
+          }
+        },
+        "required": [
+          "scope",
+          "bucket_minutes",
+          "reported",
+          "buckets",
+          "total"
+        ],
+        "title": "TimelineUsage",
         "type": "object"
       },
       "TodayTasksConfig": {
@@ -11921,6 +12810,40 @@
           "config"
         ],
         "title": "TodoSummaryWidgetUpdate",
+        "type": "object"
+      },
+      "TokenCount": {
+        "properties": {
+          "cache_read": {
+            "title": "Cache Read",
+            "type": "integer"
+          },
+          "cache_write": {
+            "title": "Cache Write",
+            "type": "integer"
+          },
+          "input": {
+            "title": "Input",
+            "type": "integer"
+          },
+          "output": {
+            "title": "Output",
+            "type": "integer"
+          },
+          "total": {
+            "description": "四项之和",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input",
+          "output",
+          "cache_read",
+          "cache_write",
+          "total"
+        ],
+        "title": "TokenCount",
         "type": "object"
       },
       "TrashItem": {
@@ -12064,6 +12987,82 @@
           "last_read_at"
         ],
         "title": "UsageOut",
+        "type": "object"
+      },
+      "UsagePoint": {
+        "properties": {
+          "start": {
+            "description": "这一桶的开始（UTC，按 bucket_minutes 对齐）",
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenCount"
+          }
+        },
+        "required": [
+          "start",
+          "tokens"
+        ],
+        "title": "UsagePoint",
+        "type": "object"
+      },
+      "UsageReport": {
+        "additionalProperties": false,
+        "properties": {
+          "day": {
+            "description": "累计值所属的日期（UTC）；只收今天和昨天",
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SessionUsage"
+            },
+            "maxItems": 500,
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "day",
+          "sessions"
+        ],
+        "title": "UsageReport",
+        "type": "object"
+      },
+      "UsageReportResult": {
+        "properties": {
+          "accepted": {
+            "description": "记下的会话数",
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "baseline": {
+            "description": "这个实例第一次上报：只记基准，不把之前的用量算进来",
+            "title": "Baseline",
+            "type": "boolean"
+          },
+          "skipped": {
+            "description": "usage 为 null 跳过的会话数",
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "tokens": {
+            "description": "这次算出的增量合计",
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accepted",
+          "skipped",
+          "tokens",
+          "baseline"
+        ],
+        "title": "UsageReportResult",
         "type": "object"
       },
       "UserOut": {
@@ -12495,6 +13494,73 @@
           }
         ],
         "summary": "取密钥（实例）",
+        "tags": [
+          "agent-api"
+        ]
+      }
+    },
+    "/agent-api/v1/usage": {
+      "post": {
+        "description": "每个 OpenClaw 会话当天（UTC）的累计 token；会话只报 key 的 SHA-256。工作台按（实例、日期、会话）算增量并记到这一分钟；usage 为 null 的会话跳过；实例第一次上报只记基准。每个实例每分钟最多 6 次。",
+        "operationId": "agent_usage",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageReportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          }
+        },
+        "security": [
+          {
+            "InstanceToken": []
+          }
+        ],
+        "summary": "上报 token 用量（实例的 usage-report，每分钟一次）",
         "tags": [
           "agent-api"
         ]
@@ -29633,6 +30699,213 @@
         ]
       }
     },
+    "/api/v1/tasks/assignees": {
+      "get": {
+        "description": "本工作空间的成员与没有停用的 OpenClaw 实例（名字与状态），供任务编辑器选择执行者。",
+        "operationId": "task_assignees",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssigneeOptions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "可以指派的执行者（viewer）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/timeline": {
+      "get": {
+        "description": "时间范围内的轨道（按执行者或按项目）、片段（计划 / 执行段，执行段带 token 与等待审批）、token 用量分桶与概况。from / to 默认是现在前后 12 小时，范围最长 31 天；project_id 只看这个项目（概况与 token 也只算这个项目）。token 按时间归属到执行段：同一实例同时有几段在执行时平均分（tokens_shared）。",
+        "operationId": "task_timeline",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group",
+            "required": false,
+            "schema": {
+              "default": "executor",
+              "enum": [
+                "executor",
+                "project"
+              ],
+              "title": "Group",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelineOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "任务时间轴（viewer）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
     "/api/v1/tasks/{task_id}": {
       "delete": {
         "description": "同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。任务已经不存在时同样返回 204。",
@@ -29982,6 +31255,395 @@
           }
         ],
         "summary": "修改任务（member，必须带 Idempotency-Key 与 version）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/runs": {
+      "get": {
+        "description": "最近 100 段，新的在前；实例执行的段带 token（按时间归属）、每 10 分钟的用量与等待审批。",
+        "operationId": "list_task_runs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRunList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "执行记录（viewer）",
+        "tags": [
+          "tasks"
+        ]
+      },
+      "post": {
+        "description": "同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。dispatch 为 true 时，以当前管理员的 IM 账号给执行者实例发一条固定格式的消息，发出后才开这一段；IM 结果不确定时返回 504 RESULT_UNKNOWN、不开段，用同一个 Idempotency-Key 重试即可（不会发两条）。409：TASK_DONE 任务已完成、RUN_ALREADY_OPEN 已有一段在执行、AGENT_TASK 执行者是实例、NO_AGENT_ASSIGNEE 执行者不是实例、AGENT_DISABLED / AGENT_OFFLINE 实例停用 / 不在线、IM_NOT_READY / IM_SEND_REJECTED；503 IM_UNAVAILABLE。",
+        "operationId": "start_task_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "每次用户提交生成一个新的 UUID；网络重试与查询结果时复用同一个",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "每次用户提交生成一个新的 UUID；网络重试与查询结果时复用同一个",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskRunStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "写操作结果未知（RESULT_UNKNOWN）：用同一个 Idempotency-Key 重发以查询结果"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "开始一段（人的任务：member；交给实例执行：owner / admin；必须带 Idempotency-Key）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/runs/{run_id}/stop": {
+      "post": {
+        "description": "已经结束的段原样返回（重试安全）。",
+        "operationId": "stop_task_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskRunStop"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "结束一段（人的任务：member；实例执行的段：owner / admin）",
         "tags": [
           "tasks"
         ]

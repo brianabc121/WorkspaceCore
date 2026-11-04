@@ -133,6 +133,12 @@ class TaskOut(BaseModel):
     priority: int = Field(ge=0, le=5)
     due_at: datetime | None
     labels: list[str]
+    planned_start_at: datetime | None = Field(description="计划开始时间（T-0104）")
+    started_at: datetime | None = Field(description="第一次开始执行的时间；由执行记录维护")
+    assignee_user_id: UUID | None = Field(description="执行者是工作空间成员时的用户 ID")
+    assignee_instance_id: UUID | None = Field(
+        description="执行者是 OpenClaw 实例时的实例 ID；与 assignee_user_id 二选一"
+    )
     version: str = Field(description="乐观并发用的不透明字符串；修改 / 删除时原样带回")
     created_at: datetime
     updated_at: datetime
@@ -156,25 +162,43 @@ class TaskCreate(_Strict):
         return self
 
 
+# 可以显式设为 null 的字段：清除截止时间、计划开始时间、执行者
+NULLABLE_TASK_FIELDS = frozenset(
+    {"due_at", "planned_start_at", "assignee_user_id", "assignee_instance_id"}
+)
+
+
 class TaskUpdate(_Strict):
-    """只发送要改的字段；due_at 显式传 null 表示清除截止时间，其余字段不能为 null。"""
+    """只发送要改的字段。
+
+    due_at、planned_start_at、assignee_user_id、assignee_instance_id 显式传 null 表示清除，
+    其余字段不能为 null。执行者二选一：设了其中一个，另一个自动清除；两个都给非空值时返回 422。
+    改执行者时，正在执行的一段记为中断（T-0104）。
+    """
 
     version: TaskVersion
     title: TaskTitle | None = None
     description: TaskDescription | None = None
     priority: Priority | None = None
     due_at: AwareDatetime | None = None
+    planned_start_at: AwareDatetime | None = None
     done: bool | None = None
     project_id: UUID | None = Field(default=None, description="移动到其他项目")
     labels: Labels | None = None
+    assignee_user_id: UUID | None = Field(default=None, description="执行者：工作空间成员")
+    assignee_instance_id: UUID | None = Field(
+        default=None, description="执行者：本工作空间的 OpenClaw 实例（不能是已停用的）"
+    )
 
     @model_validator(mode="after")
     def _has_change(self) -> Self:
         changed = self.model_fields_set - {"version"}
         if not changed:
             raise ValueError("至少要修改一项")
-        if any(getattr(self, name) is None for name in changed - {"due_at"}):
-            raise ValueError("只有 due_at 可以设为 null")
+        if any(getattr(self, name) is None for name in changed - NULLABLE_TASK_FIELDS):
+            raise ValueError("只有 due_at、planned_start_at 与执行者可以设为 null")
+        if self.assignee_user_id is not None and self.assignee_instance_id is not None:
+            raise ValueError("执行者只能是一个成员或一个实例")
         if self.labels is not None:
             self.labels = _dedupe(self.labels)
         return self

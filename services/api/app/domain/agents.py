@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import agent_bundle
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import ops_metrics
+from app.domain import ops_metrics, task_runs
 from app.domain.agent_ca import ClientCertificate, ensure_ca, issue_client_certificate
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
@@ -466,6 +466,8 @@ class AgentService:
         elif not enabled and instance.status != "disabled":
             instance.status = "disabled"
             instance.disabled_at = _now()
+            # 时间轴（T-0104）：它正在执行的段记为中断
+            await task_runs.interrupt_instance_runs(self.db, instance.id, at=instance.disabled_at)
         instance.version += 1
         await self.audit.record(
             "agents.instance.enabled" if enabled else "agents.instance.disabled",

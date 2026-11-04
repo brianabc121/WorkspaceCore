@@ -17,17 +17,18 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import idempotency
+from app.domain import idempotency, task_runs
 from app.domain.audit import AuditTrail
 from app.domain.auth import Actor
 from app.domain.connectors import ConnectorRuntime
 from app.domain.policy import WorkspaceAccess, not_found
-from app.models import IdempotencyRequest, Project, Task
+from app.models import AgentInstance, IdempotencyRequest, Project, Task, WorkspaceMember
 from app.repositories import integrations as integration_repo
 from app.repositories import tasks as repo
 from app.schemas.tasks import (
@@ -97,6 +98,10 @@ def task_out(task: Task) -> TaskOut:
         priority=task.priority,
         due_at=task.due_at,
         labels=list(task.labels),
+        planned_start_at=task.planned_start_at,
+        started_at=task.started_at,
+        assignee_user_id=task.assignee_user_id,
+        assignee_instance_id=task.assignee_instance_id,
         version=str(task.version),
         created_at=task.created_at,
         updated_at=task.updated_at,
@@ -137,6 +142,18 @@ def _in_progress() -> ApiError:
 
 def _reused() -> ApiError:
     return ApiError(409, "IDEMPOTENCY_KEY_REUSED", "同一个 Idempotency-Key 已用于不同的请求")
+
+
+def _bad_assignee(field: str, message: str) -> ApiError:
+    return ApiError(
+        422,
+        "VALIDATION_FAILED",
+        "请求参数校验失败",
+        details={"errors": [{"loc": ["body", field], "msg": message, "type": "value_error"}]},
+    )
+
+
+ASSIGNEE_FIELDS = ("assignee_user_id", "assignee_instance_id")
 
 
 Write = Callable[[], Awaitable[WriteResult]]
@@ -377,11 +394,29 @@ class TaskService:
             fields = sorted(body.model_fields_set - {"version"})
             if body.project_id is not None and body.project_id != task.project_id:
                 await self._project(access, body.project_id)
+            before = (task.assignee_user_id, task.assignee_instance_id)
+            await self._check_assignee(access, body)
+            now = datetime.now(UTC)
             for name in fields:
                 value = getattr(body, name)
                 if name == "done" and value != task.done:
-                    task.done_at = datetime.now(UTC) if value else None
+                    task.done_at = now if value else None
+                    if value:
+                        # 完成任务：正在执行的一段随之结束（智能体的任务经审批完成时也走这里）
+                        await task_runs.end_open_run(
+                            self.db, task, "done", by=context.user.id, at=now
+                        )
                 setattr(task, name, value)
+            # 执行者二选一：设了一个，另一个清除
+            if body.assignee_user_id is not None:
+                task.assignee_instance_id = None
+            if body.assignee_instance_id is not None:
+                task.assignee_user_id = None
+            if (task.assignee_user_id, task.assignee_instance_id) != before:
+                # 改了执行者：原执行者正在执行的一段记为中断
+                await task_runs.end_open_run(
+                    self.db, task, "interrupted", by=context.user.id, at=now
+                )
             task.version += 1
             await self.db.flush()
             await self.db.refresh(task)
@@ -397,6 +432,29 @@ class TaskService:
             body=body.model_dump(mode="json", exclude_unset=True),
             write=write,
         )
+
+    async def _check_assignee(self, access: WorkspaceAccess, body: TaskUpdate) -> None:
+        """执行者必须是本工作空间的成员，或本工作空间里没有停用的实例。"""
+        if body.assignee_user_id is not None:
+            member = await self.db.scalar(
+                select(WorkspaceMember.user_id).where(
+                    WorkspaceMember.workspace_id == access.workspace.id,
+                    WorkspaceMember.user_id == body.assignee_user_id,
+                )
+            )
+            if member is None:
+                raise _bad_assignee("assignee_user_id", "不是本工作空间的成员")
+        if body.assignee_instance_id is not None:
+            instance = await self.db.scalar(
+                select(AgentInstance).where(
+                    AgentInstance.workspace_id == access.workspace.id,
+                    AgentInstance.id == body.assignee_instance_id,
+                )
+            )
+            if instance is None:
+                raise _bad_assignee("assignee_instance_id", "不是本工作空间的实例")
+            if instance.status == "disabled":
+                raise _bad_assignee("assignee_instance_id", "这个实例已停用")
 
     async def delete_task(
         self,

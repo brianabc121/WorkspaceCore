@@ -6,6 +6,8 @@
 - `version` 用于乐观并发：每次修改加 1。
 - 迁移 0020 把之前从 Vikunja 同步来的项目、任务转成这两张表，ID 不变
   （收藏的关联与搜索索引照旧有效）。
+- 时间轴（T-0104，迁移 0027）：计划开始时间、执行者（成员或 OpenClaw 实例，二选一）、
+  第一次开始执行的时间（由执行记录 task_runs 维护，不参与 version）。
 """
 
 import uuid
@@ -77,6 +79,9 @@ class Task(Base):
             ondelete="CASCADE",
         ),
         CheckConstraint("priority BETWEEN 0 AND 5", name="priority"),
+        CheckConstraint(
+            "assignee_user_id IS NULL OR assignee_instance_id IS NULL", name="assignee"
+        ),
         Index("ix_tasks_workspace_done_due", "workspace_id", "done", "due_at"),
         Index("ix_tasks_project", "project_id"),
     )
@@ -94,6 +99,14 @@ class Task(Base):
     priority: Mapped[int] = mapped_column(SmallInteger, server_default=sql_text("0"))
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     labels: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=sql_text("'{}'::text[]"))
+    planned_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    assignee_instance_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="SET NULL")
+    )
     version: Mapped[int] = mapped_column(Integer, server_default=sql_text("1"))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()

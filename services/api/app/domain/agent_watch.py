@@ -59,6 +59,11 @@ async def mark_offline(redis: Redis, instance: AgentInstance, now: datetime | No
     )
 
 
+async def offline_since(redis: Redis, instance: AgentInstance, now: datetime) -> datetime:
+    """离线开始的时间；没有记录时从 now 开始计时（时间轴的“离线超过 10 分钟记为中断”也用它）。"""
+    return await _offline_since(redis, instance, now)
+
+
 async def _offline_since(redis: Redis, instance: AgentInstance, now: datetime) -> datetime:
     raw = await redis.get(OFFLINE_SINCE_KEY.format(instance_id=instance.id))
     if raw is not None:

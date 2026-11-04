@@ -6,6 +6,7 @@ docs/decisions/2026-10-30-sprint-3-tasks-contract.md 第 7 节；
 项目的写接口用整数 version 做乐观并发。
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -16,6 +17,7 @@ from pydantic import AwareDatetime, Field
 from app.api.deps import (
     authenticated,
     csrf_protected,
+    get_run_service,
     get_task_service,
     workspace_member,
     workspace_viewer,
@@ -23,6 +25,7 @@ from app.api.deps import (
 from app.domain.auth import AuthContext
 from app.domain.policy import WorkspaceAccess
 from app.domain.tasks import TaskService, WriteResult
+from app.domain.timeline import RunService
 from app.schemas.common import error_responses
 from app.schemas.tasks import (
     ProjectCreate,
@@ -39,6 +42,15 @@ from app.schemas.tasks import (
     TaskUpdate,
     TaskVersion,
 )
+from app.schemas.timeline import (
+    AssigneeOptions,
+    TaskRunList,
+    TaskRunOut,
+    TaskRunStart,
+    TaskRunStop,
+    TimelineGroup,
+    TimelineOut,
+)
 
 router = APIRouter(tags=["tasks"], dependencies=[Security(authenticated)])
 
@@ -46,6 +58,7 @@ Viewer = Annotated[WorkspaceAccess, Depends(workspace_viewer)]
 Member = Annotated[WorkspaceAccess, Depends(workspace_member)]
 Context = Annotated[AuthContext, Security(authenticated)]
 Service = Annotated[TaskService, Depends(get_task_service)]
+Runs = Annotated[RunService, Depends(get_run_service)]
 IdempotencyKey = Annotated[
     UUID,
     Header(
@@ -210,6 +223,43 @@ async def create_task(
 
 
 @router.get(
+    "/tasks/assignees",
+    summary="可以指派的执行者（viewer）",
+    description="本工作空间的成员与没有停用的 OpenClaw 实例（名字与状态），"
+    "供任务编辑器选择执行者。",
+    responses=_read_errors,
+)
+async def task_assignees(access: Viewer, runs: Runs) -> AssigneeOptions:
+    return await runs.assignees(access)
+
+
+@router.get(
+    "/tasks/timeline",
+    summary="任务时间轴（viewer）",
+    description="时间范围内的轨道（按执行者或按项目）、片段（计划 / 执行段，"
+    "执行段带 token 与等待审批）、token 用量分桶与概况。"
+    "from / to 默认是现在前后 12 小时，范围最长 31 天；"
+    "project_id 只看这个项目（概况与 token 也只算这个项目）。"
+    "token 按时间归属到执行段：同一实例同时有几段在执行时平均分（tokens_shared）。",
+    responses=_read_errors,
+)
+async def task_timeline(
+    access: Viewer,
+    runs: Runs,
+    range_from: Annotated[AwareDatetime | None, Query(alias="from")] = None,
+    range_to: Annotated[AwareDatetime | None, Query(alias="to")] = None,
+    project_id: UUID | None = None,
+    group: TimelineGroup = "executor",
+) -> TimelineOut:
+    now = datetime.now(UTC)
+    start = range_from or (
+        range_to - timedelta(hours=24) if range_to else now - timedelta(hours=12)
+    )
+    end = range_to or start + timedelta(hours=24)
+    return await runs.timeline(access, start=start, end=end, project_id=project_id, group=group)
+
+
+@router.get(
     "/tasks/{task_id}",
     summary="任务详情（viewer）",
     responses=_read_errors,
@@ -256,3 +306,58 @@ async def delete_task(
     version: Annotated[TaskVersion, Query()],
 ) -> Response:
     return _respond(await service.delete_task(context, access, task_id, idempotency_key, version))
+
+
+@router.get(
+    "/tasks/{task_id}/runs",
+    summary="执行记录（viewer）",
+    description="最近 100 段，新的在前；实例执行的段带 token（按时间归属）、"
+    "每 10 分钟的用量与等待审批。",
+    responses=_read_errors,
+)
+async def list_task_runs(access: Viewer, runs: Runs, task_id: UUID) -> TaskRunList:
+    return await runs.list_runs(access, task_id)
+
+
+@router.post(
+    "/tasks/{task_id}/runs",
+    status_code=status.HTTP_201_CREATED,
+    summary="开始一段（人的任务：member；交给实例执行：owner / admin；必须带 Idempotency-Key）",
+    description=_REPLAY
+    + "dispatch 为 true 时，以当前管理员的 IM 账号给执行者实例发一条固定格式的消息，"
+    "发出后才开这一段；IM 结果不确定时返回 504 RESULT_UNKNOWN、不开段，"
+    "用同一个 Idempotency-Key 重试即可（不会发两条）。"
+    "409：TASK_DONE 任务已完成、RUN_ALREADY_OPEN 已有一段在执行、AGENT_TASK 执行者是实例、"
+    "NO_AGENT_ASSIGNEE 执行者不是实例、AGENT_DISABLED / AGENT_OFFLINE 实例停用 / 不在线、"
+    "IM_NOT_READY / IM_SEND_REJECTED；503 IM_UNAVAILABLE。",
+    response_model=TaskRunOut,
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 429, 503, 504),
+)
+async def start_task_run(
+    access: Member,
+    context: Context,
+    runs: Runs,
+    task_id: UUID,
+    idempotency_key: IdempotencyKey,
+    body: TaskRunStart,
+) -> Response:
+    return _respond(await runs.start(context, access, task_id, idempotency_key, body))
+
+
+@router.post(
+    "/tasks/{task_id}/runs/{run_id}/stop",
+    summary="结束一段（人的任务：member；实例执行的段：owner / admin）",
+    description="已经结束的段原样返回（重试安全）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def stop_task_run(
+    access: Member,
+    context: Context,
+    runs: Runs,
+    task_id: UUID,
+    run_id: UUID,
+    body: TaskRunStop,
+) -> TaskRunOut:
+    return await runs.stop(context, access, task_id, run_id, body)

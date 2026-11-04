@@ -32,6 +32,7 @@ from app.domain.im import openim_client
 from app.domain.im_gateway import MAX_API_BODY_BYTES, ImGateway, blocked_body
 from app.domain.im_groups import send_relay_paused_notice
 from app.domain.ratelimit import FailureLimiter
+from app.domain.timeline import UsageService
 from app.integrations.base import ConnectorError
 from app.integrations.openim import PLATFORM_WEB, ObjectStore
 from app.jobs.queue import PROCESS_IM_INBOX
@@ -50,6 +51,7 @@ from app.schemas.openim_callbacks import (
     CallbackResponse,
     MsgCallback,
 )
+from app.schemas.timeline import UsageReport, UsageReportResult
 
 logger = logging.getLogger("app.im")
 
@@ -145,6 +147,23 @@ async def agent_heartbeat(
     principal: Principal, service: Service, body: HeartbeatRequest
 ) -> HeartbeatResponse:
     return await service.heartbeat(principal, body)
+
+
+@router.post(
+    "/usage",
+    summary="上报 token 用量（实例的 usage-report，每分钟一次）",
+    description="每个 OpenClaw 会话当天（UTC）的累计 token；会话只报 key 的 SHA-256。"
+    "工作台按（实例、日期、会话）算增量并记到这一分钟；usage 为 null 的会话跳过；"
+    "实例第一次上报只记基准。每个实例每分钟最多 6 次。",
+    responses=_errors,
+)
+async def agent_usage(
+    principal: Principal,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+    body: UsageReport,
+) -> UsageReportResult:
+    return await UsageService(db, redis).report(principal.instance, body)
 
 
 gateway = APIRouter(include_in_schema=False)

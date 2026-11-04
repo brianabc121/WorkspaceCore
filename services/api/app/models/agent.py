@@ -107,6 +107,8 @@ class AgentInstance(Base):
     # 最近一次签发的 IM 令牌何时到期（令牌只在实例启动时领取；到期前 7 天提醒，迁移 0018）
     im_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 最近一次收到 token 用量上报（接入包的 usage-report，迁移 0027）；为空表示没上报过
+    usage_reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()

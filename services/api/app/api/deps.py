@@ -39,6 +39,7 @@ from app.domain.operations import DeploymentHealth, OperationsService
 from app.domain.search import SearchService
 from app.domain.security import csrf_token_for, csrf_token_matches
 from app.domain.tasks import TaskService
+from app.domain.timeline import RunService
 from app.domain.workspaces import WorkspaceService
 from app.integrations.openim import OpenIMClient
 from app.jobs.queue import JobQueue
@@ -254,6 +255,15 @@ def get_ai_tool_service(
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> AiToolService:
     return AiToolService(db, settings, connectors, redis)
+
+
+def get_run_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    redis: Annotated[Redis, Depends(get_redis)],
+    im: Annotated[OpenIMClient | None, Depends(get_openim)],
+) -> RunService:
+    return RunService(db, settings, redis, im)
 
 
 def get_task_service(
