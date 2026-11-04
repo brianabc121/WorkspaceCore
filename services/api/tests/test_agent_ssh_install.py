@@ -65,6 +65,10 @@ case "$1" in
       # 每晚复盘（T-0100）：与 OpenClaw 2026.9.36 一样，同一个 declaration key 第二次是更新
       exec)
         if [ -f "$STATE/reflection_fail" ]; then echo "gateway not reachable" >&2; exit 1; fi
+        # 刚启动时网关还没就绪：第一次失败，之后成功
+        if [ -f "$STATE/reflection_fail_once" ]; then
+          rm "$STATE/reflection_fail_once"; echo "gateway not reachable" >&2; exit 1
+        fi
         if [ -f "$STATE/reflection" ]; then echo '{"created": false, "updated": true}'
         else touch "$STATE/reflection"; echo '{"created": true}'; fi ;;
     esac ;;
@@ -330,6 +334,9 @@ async def owner(make_client: ClientFactory, migrated_database_url: str) -> Async
 @pytest.fixture(autouse=True)
 def fast_online(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent_ssh_install, "ONLINE_POLL", 0.05)
+    # 复盘任务的重试：测试里不等 10 秒
+    monkeypatch.setattr(agent_ssh_install, "REFLECTION_TRIES", 3)
+    monkeypatch.setattr(agent_ssh_install, "REFLECTION_WAIT", 0)
 
 
 def _token(host: FakeHost) -> str:
@@ -531,6 +538,22 @@ async def test_reflection_failure_does_not_fail_the_install(owner: Owner, tmp_pa
     assert reflection["status"] == "skipped"
     assert "setup-reflection.sh" in (reflection["detail"] or "")
     assert state["target"]["installed_at"] is not None
+    # 网关一直没就绪：脚本按安装器给的次数重试后放弃
+    assert sum("automations add" in line for line in host.calls()) == 3
+    assert "网关一直没有就绪" in state["job"]["log"]
+
+
+async def test_reflection_waits_for_the_gateway(owner: Owner, tmp_path: Path) -> None:
+    """实例刚连上工作台时 OpenClaw 的网关可能还没就绪：重试到成功，步骤记为完成。"""
+    host = FakeHost(tmp_path)
+    (host.state / "reflection_fail_once").touch()
+    async with ssh_host(host) as (port, _):
+        instance_id, version = await owner.prepare(port)
+        state = await _install_ok(owner, host, instance_id, version)
+    reflection = next(s for s in state["job"]["steps"] if s["key"] == "reflection")
+    assert reflection["status"] == "done"
+    assert sum("automations add" in line for line in host.calls()) == 2
+    assert any("MYWS_REFLECTION_TRIES=3" in c for c in host.commands)
 
 
 async def test_root_account_uses_chown_and_no_sudo(owner: Owner, tmp_path: Path) -> None:

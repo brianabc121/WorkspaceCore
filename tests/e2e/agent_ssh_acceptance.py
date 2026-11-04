@@ -106,9 +106,10 @@ def reflection_jobs() -> list[dict[str, Any]]:
     if len(names) != 1:
         return []
     out = run("docker", "exec", names[0], "node", "openclaw.mjs", "automations", "list", "--json", "--all").stdout
-    if "{" not in out:
+    try:
+        jobs: list[dict[str, Any]] = json.loads(out[out.index("{"):]).get("jobs", [])
+    except ValueError:  # 没有 JSON（网关没就绪时输出的是错误说明）
         return []
-    jobs: list[dict[str, Any]] = json.loads(out[out.index("{"):])["jobs"]
     return [j for j in jobs if j.get("declarationKey") == "myworkspace-knowledge-reflection"]
 
 
@@ -199,12 +200,14 @@ def main() -> int:
     )
     report.check("sudo 把账号加入了 docker 组", "docker" in run("id", "-nG", user).stdout.split())
     jobs = reflection_jobs()
-    report.check(
+    ok = report.check(
         "建好了每晚复盘的定时任务（OpenClaw 里 1 个，0 22 * * *，Asia/Shanghai）",
         done["reflection"] == "done" and len(jobs) == 1 and jobs[0]["schedule"].get("expr") == "0 22 * * *"
         and jobs[0]["schedule"].get("tz") == "Asia/Shanghai",
         f"{step_detail(state, 'reflection')}；{len(jobs)} 个",
     )
+    if not ok:
+        print(state["job"].get("log", "")[-3000:], file=sys.stderr)
     seen = owner.request("GET", f"/api/v1/agents/instances/{instance['id']}", headers=headers).json()
     report.check("实例有心跳（last_seen_at）", bool(seen.get("last_seen_at")), str(seen.get("last_seen_at")))
     running = run("docker", "ps", "--filter", f"label=com.docker.compose.project={PROJECT}", "--format", "{{.Names}}")

@@ -147,9 +147,15 @@ def schedule_command(directory: str) -> str:
     )
 
 
-def reflection_command(directory: str) -> str:
-    """建（或更新）每晚复盘的 OpenClaw 定时任务：运行接入包里的 setup-reflection.sh（T-0100）。"""
-    return f"cd {q(directory)} && sh setup-reflection.sh"
+def reflection_command(directory: str, tries: int, wait: int) -> str:
+    """建（或更新）每晚复盘的 OpenClaw 定时任务：运行接入包里的 setup-reflection.sh（T-0100）。
+
+    刚启动的 OpenClaw 网关可能还没就绪，脚本按 tries / wait 重试。
+    """
+    return (
+        f"cd {q(directory)} && MYWS_REFLECTION_TRIES={int(tries)} "
+        f"MYWS_REFLECTION_WAIT={int(wait)} sh setup-reflection.sh"
+    )
 
 
 def unschedule_command() -> str:

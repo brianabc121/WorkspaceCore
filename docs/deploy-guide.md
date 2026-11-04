@@ -655,7 +655,8 @@ Docker 用官方软件源安装锁定版本，并把账号加入 docker 组。
    它用 `openclaw automations add` 在 OpenClaw 里建一个定时任务：每晚让智能体回顾当天的工作，把值得长期记住的写进工作台知识库。
    - 任务在独立会话里运行，不往 IM 发结果；
    - 提示词在 `reflection-prompt.md`；
-   - 重复运行只更新同一个任务（按 `--declaration-key` 识别），不会建出两个。
+   - 重复运行只更新同一个任务（按 `--declaration-key` 识别），不会建出两个；
+   - OpenClaw 刚启动时网关还没就绪，脚本每 10 秒重试一次，最多 4 分钟。
 
    时间由工作台 `.env` 的 `AGENT_REFLECTION_CRON`（默认 `0 22 * * *`）和 `AGENT_REFLECTION_TIMEZONE`（默认 `Asia/Shanghai`）决定，生成接入包时写进脚本。
    改了时间后，重新生成接入包，再运行一次脚本。

@@ -105,3 +105,6 @@
   - 新的独立会话（`sessionKey` 是 `agent:main:cron:<id>:run:<会话>`），约 10 秒跑完，结果 `deliveryStatus: not-requested`；
   - 用户消息是 `[cron:<id> <名字>] <提示词>`，后面接一段 OpenClaw 自带的英文前言（任务指令优先；任务不再需要时“在工具允许时删除它”，接入包禁用了定时任务工具，智能体删不了）。
   - CI 的场景 15 按这个格式认出复盘请求。
+- **网关就绪前建不成**：CI 的 SSH 部署验收里，镜像已缓存时整个安装约 20 秒；实例连上工作台的那一刻，OpenClaw 的网关还没就绪，`automations add` 失败。
+  - 所以 `setup-reflection.sh` 失败后每 10 秒重试，最多 24 次；
+  - SSH 部署把次数与间隔传给脚本（`MYWS_REFLECTION_TRIES` / `MYWS_REFLECTION_WAIT`），步骤超时按它们算。

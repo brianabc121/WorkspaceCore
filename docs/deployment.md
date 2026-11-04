@@ -682,6 +682,7 @@ OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式�
 4. 重新生成接入包会签发新凭证，旧凭证默认再保留 24 小时；客户端证书 90 天到期，到期前重新生成。
 5. 知识库的每晚复盘（T-0100）：OpenClaw 启动后在接入包目录里运行 `sh setup-reflection.sh`。
    - 它用 `openclaw automations add --declaration-key` 建定时任务，重复运行只更新；SSH 自动部署会自动执行这一步。
+   - OpenClaw 刚启动时网关还没就绪，脚本每 10 秒重试，最多 24 次（`MYWS_REFLECTION_TRIES` / `MYWS_REFLECTION_WAIT` 可改）。
    - 任务在独立会话里运行、不投递到 IM。工具范围不变，仍由接入包的 `openclaw.json` 限制（只有工作台工具与 IM 发消息）。
 
 ### 16.3 验收

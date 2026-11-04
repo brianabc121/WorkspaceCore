@@ -48,6 +48,10 @@ START_TIMEOUT = 300.0
 # 冷启动 2 ~ 4 分钟（doctor 联网检查插件更新，OC-0 ADR F5）；最多等 15 分钟
 ONLINE_TIMEOUT = 15 * 60.0
 ONLINE_POLL = 5.0
+# 每晚复盘任务（T-0100）：实例刚连上工作台时 OpenClaw 的网关可能还没就绪。
+# 脚本每 10 秒重试，最多 4 分钟
+REFLECTION_TRIES = 24
+REFLECTION_WAIT = 10
 # 启动时把上次没跑完的任务标为中断，最多等这么久（不拖慢 API 启动）
 RECOVER_TIMEOUT = 5.0
 # 自动安装 Docker 支持的发行版与架构（uname -m）；ADR 第 5.3 节
@@ -688,9 +692,12 @@ class Installer:
 
         建不成不算安装失败（实例已在线）：步骤记为跳过，原因在日志里，按 CHECKLIST 手动运行。
         """
-        await self.rec.step("reflection", "running")
+        await self.rec.step("reflection", "running", "等 OpenClaw 的网关就绪后建定时任务")
         result = await self._run(
-            conn, "每晚复盘任务", prov.reflection_command(directory), seconds=START_TIMEOUT
+            conn,
+            "每晚复盘任务",
+            prov.reflection_command(directory, REFLECTION_TRIES, REFLECTION_WAIT),
+            seconds=REFLECTION_TRIES * (REFLECTION_WAIT + 30) + 60,
         )
         if result.ok:
             updated = '"created": false' in result.stdout
