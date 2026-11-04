@@ -20,8 +20,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
+from app.domain import agent_im, task_claims
 from app.domain import notifications as notification_domain
-from app.domain import task_claims
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError
 from app.domain.automations import AutomationService
 from app.domain.calendar import CalendarService
@@ -68,6 +68,10 @@ from app.schemas.ai_tools import (
     GetTaskOutput,
     HostDay,
     HostDiskStatus,
+    ImListTargetsInput,
+    ImListTargetsOutput,
+    ImReadMessagesInput,
+    ImReadMessagesOutput,
     IssueItem,
     IssueText,
     KnowledgeSourceItem,
@@ -682,6 +686,16 @@ async def _action_status(call: ReadCall, args: GetActionStatusInput) -> ActionSt
     )
 
 
+async def _im_list_targets(call: ReadCall, args: ImListTargetsInput) -> ImListTargetsOutput:
+    """能私聊的管理员与所在的群（T-0117）。"""
+    return await agent_im.list_targets(call.db, call.redis, call.requester.instance, args)
+
+
+async def _im_read_messages(call: ReadCall, args: ImReadMessagesInput) -> ImReadMessagesOutput:
+    """只读自己的会话（T-0117）。"""
+    return await agent_im.read_messages(call.db, call.requester.instance, args)
+
+
 READ_HANDLERS: dict[str, ReadHandler] = {
     "search": _search,
     "list_tasks": _list_tasks,
@@ -699,4 +713,6 @@ READ_HANDLERS: dict[str, ReadHandler] = {
     "dashboard_overview": _dashboard_overview,
     "get_action_status": _action_status,
     "get_host_status": _host_status,
+    "im_list_targets": _im_list_targets,
+    "im_read_messages": _im_read_messages,
 }

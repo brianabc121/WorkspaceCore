@@ -682,6 +682,139 @@ class ListAgentsOutput(BaseModel):
     items: list[AgentItem]
 
 
+# ---------------------------------------------------------------- IM 会话目录（T-0117）
+
+# im_send 等工具的目标：user:<IM 用户 ID>（本工作空间的管理员）或 group:<群 ID>
+ImTarget = Annotated[
+    str, StringConstraints(min_length=6, max_length=72, pattern=r"^(user|group):[A-Za-z0-9_]+$")
+]
+
+
+class ImNameText(BaseModel):
+    name: str
+
+
+class ImMe(BaseModel):
+    im_user_id: str
+    im_ready: bool = Field(description="IM 账号已就绪；为 false 时还不能收发消息")
+    untrusted: ImNameText
+
+
+class ImDirectTarget(BaseModel):
+    target: str = Field(description="传给 im_send 的目标")
+    im_user_id: str
+    role: Literal["owner", "admin"]
+    conversation_id: str
+    last_message_at: datetime | None
+    replies_reach_you: bool | None = Field(
+        description="他回你的私聊你收不收得到（在不在接入包的白名单里）；null 表示无法判断"
+    )
+    note: str | None = None
+    untrusted: ImNameText
+
+
+class ImGroupMemberText(BaseModel):
+    name: str
+
+
+class ImGroupMemberItem(BaseModel):
+    im_user_id: str
+    kind: Literal["admin", "agent"]
+    is_you: bool
+    untrusted: ImGroupMemberText
+
+
+class ImGroupRules(BaseModel):
+    relay_enabled: bool = Field(description="允许智能体在群里 @ 其他智能体（接力）")
+    max_per_minute: int = Field(description="每个智能体在这个群里每分钟最多发几条")
+    max_agent_streak: int = Field(description="管理员不发言时，智能体最多连续发几条，之后暂停")
+
+
+class ImGroupState(BaseModel):
+    paused: bool = Field(description="智能体连续发言已达上限，暂停中；管理员发言后恢复")
+    agent_streak: int
+    remaining_this_minute: int
+
+
+class ImGroupText(BaseModel):
+    name: str
+    project_title: str | None
+
+
+class ImGroupTarget(BaseModel):
+    target: str = Field(description="传给 im_send 的目标")
+    group_id: str
+    conversation_id: str
+    project_id: UUID | None
+    rules: ImGroupRules
+    state: ImGroupState
+    members: list[ImGroupMemberItem]
+    mention_required: bool = Field(
+        True, description="群里只有 @ 你的消息你才会收到；要别人回你，就 @ 他"
+    )
+    last_message_at: datetime | None
+    untrusted: ImGroupText
+
+
+class ImListTargetsInput(_Strict):
+    kind: Literal["all", "direct", "group"] = "all"
+    query: Annotated[str, StringConstraints(strip_whitespace=True, max_length=64)] | None = Field(
+        default=None, description="按名字筛选（人名、群名、项目名）"
+    )
+
+
+class ImListTargetsOutput(BaseModel):
+    me: ImMe
+    direct: list[ImDirectTarget] = Field(description="能私聊的人：本工作空间的管理员")
+    groups: list[ImGroupTarget] = Field(description="你现在所在的群")
+    notes: list[str]
+
+
+class ImReadMessagesInput(_Strict):
+    target: ImTarget
+    limit: int = Field(20, ge=1, le=50)
+    before: UUID | None = Field(default=None, description="翻页：只读这条消息之前的")
+
+
+class ImAttachmentText(BaseModel):
+    name: str | None
+
+
+class ImAttachment(BaseModel):
+    kind: Literal["image", "file", "video"]
+    ref: str | None = Field(description="im_media:<ID>，可以在 im_send 里转发；没有时为 null")
+    mime: str | None
+    size: int | None
+    untrusted: ImAttachmentText
+
+
+class ImMessageText(BaseModel):
+    sender_name: str
+    text: str | None
+    truncated: bool = Field(description="正文超过 2000 字，只给了开头")
+
+
+class ImMessageItem(BaseModel):
+    id: UUID
+    sent_at: datetime
+    sender_im_id: str
+    sender_kind: Literal["admin", "agent", "system"]
+    is_you: bool
+    kind: Literal["text", "image", "file", "video", "other"]
+    mentions: list[str] = Field(description="这条消息 @ 了谁（IM 用户 ID）")
+    status: str
+    attachments: list[ImAttachment]
+    untrusted: ImMessageText
+
+
+class ImReadMessagesOutput(BaseModel):
+    target: str
+    conversation_id: str
+    items: list[ImMessageItem] = Field(description="按时间从早到晚")
+    has_more: bool
+    next_before: UUID | None = Field(description="还有更早的消息时，传给 before 继续读")
+
+
 class ClaimTaskOutput(BaseModel):
     status: Literal["claimed"] = "claimed"
     task_id: UUID
@@ -790,6 +923,22 @@ _READ: list[ToolSpec] = [
         GetHostStatusOutput,
         "读你自己所在服务器的状态（CPU、负载、内存、磁盘、网速与最近 24 小时概况），"
         "用来判断磁盘满、负载高这类问题；只能看你自己",
+    ),
+    _spec(
+        "im_list_targets",
+        "read",
+        ImListTargetsInput,
+        ImListTargetsOutput,
+        "列出你能主动发消息的对象：能私聊的管理员、你所在的群（成员、规则、是否暂停、"
+        "这一分钟还能发几条）。主动发消息前先用它找目标（target）",
+    ),
+    _spec(
+        "im_read_messages",
+        "read",
+        ImReadMessagesInput,
+        ImReadMessagesOutput,
+        "读你自己会话里最近的消息（和管理员的私聊、你所在的群里入群之后的消息），"
+        "主动发言前先看看大家在聊什么",
     ),
     _spec(
         "get_action_status",

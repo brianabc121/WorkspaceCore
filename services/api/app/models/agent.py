@@ -27,7 +27,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -104,6 +104,8 @@ class AgentInstance(Base):
     plugin_version: Mapped[str | None] = mapped_column(Text)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     bundle_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 签发接入包时写进 inboundWhitelist 的 IM 用户 ID（T-0117）；为空表示接入包签发得更早，无法判断
+    bundle_whitelist: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     # 最近一次签发的 IM 令牌何时到期（令牌只在实例启动时领取；到期前 7 天提醒，迁移 0018）
     im_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

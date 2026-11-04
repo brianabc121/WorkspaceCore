@@ -693,6 +693,7 @@ class AgentService:
             host = url.hostname or ""
             tunnel_target = f"{host}:{url.port or 443}"
             base = f"http://{host}:{self.settings.agent_tunnel_port}"
+        whitelist = await self._whitelist(instance.workspace_id)
         data = agent_bundle.build(
             agent_bundle.BundleInput(
                 instance_id=str(instance.id),
@@ -700,7 +701,7 @@ class AgentService:
                 network_mode=instance.network_mode,
                 token=issued.token,
                 base_url=base,
-                whitelist=await self._whitelist(instance.workspace_id),
+                whitelist=whitelist,
                 client_cert_pem=cert.cert_pem if cert else None,
                 client_key_pem=cert.key_pem if cert else None,
                 tunnel_target=tunnel_target,
@@ -717,6 +718,7 @@ class AgentService:
             now=now,
         )
         instance.bundle_issued_at = now
+        instance.bundle_whitelist = whitelist
         instance.version += 1
         await self.audit.record(
             "agents.bundle.issued",
