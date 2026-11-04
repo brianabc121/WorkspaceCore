@@ -246,12 +246,15 @@ class Instance:
 
     def request(self, method: str, url: str, *, token: str | None = None, body: Any = None,
                 headers: dict[str, str] | None = None) -> tuple[int, str]:
-        """从这台服务器上发 HTTP(S) 请求（经它自己的网络：内网入口直连，外网入口经本机隧道）。"""
+        """从这台服务器上发 HTTP(S) 请求（经它自己的网络：内网入口直连，外网入口经本机隧道）。
+
+        响应体最多取 200000 个字符：MCP 的 tools/list 列出全部工具定义，有几十 KB，截短了就解析不了
+        （T-0112 加了工具后超过了原来的 2000）；打印时各处自己再截短。"""
         script = (
             "const [u,m,t,b,h]=JSON.parse(process.argv[1]);"
             "const hd=Object.assign({'Content-Type':'application/json'},h||{});if(t)hd.Authorization='Bearer '+t;"
             "fetch(u,{method:m,headers:hd,body:b==null?undefined:JSON.stringify(b)})"
-            ".then(async r=>console.log(JSON.stringify([r.status,(await r.text()).slice(0,2000)])))"
+            ".then(async r=>console.log(JSON.stringify([r.status,(await r.text()).slice(0,200000)])))"
             ".catch(e=>console.log(JSON.stringify([0,String(e)])));"
         )
         out = self.exec("node", "-e", script, json.dumps([url, method, token, body, headers]), timeout=60).stdout
