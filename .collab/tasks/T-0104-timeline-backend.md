@@ -2,7 +2,7 @@
 id: T-0104
 title: 时间轴后端：计划开始、执行者、执行记录、交给智能体执行、token 上报与归属、时间轴接口（迁移 0027）
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: services/api,docs,scripts,tests/e2e
@@ -36,3 +36,4 @@ updated: 2026-11-04
 - 2026-11-04 03:57 UTC · claude · 开始任务
 - 2026-11-04 04:01 UTC · claude · 实现完成：迁移 0027（tasks 四个字段、task_runs、agent_usage_minutes / cursors、agent_instances.usage_reported_at）；任务的执行者与计划开始；执行记录接口（开始 / 交给实例执行 / 结束 / 列表）；完成、改执行者、停用、离线 10 分钟结束或中断；POST /agent-api/v1/usage；GET /api/v1/tasks/timeline；接入包 bin/usage-report.mjs、CHECKLIST、SSH 部署的每分钟 crontab；文档。与方案的偏差写在 TIMELINE_PLAN 2.4.1：消息里请智能体用 complete_task（锁定版本 update_task 不能改完成状态）；只有在线的实例能交给它执行；sessions.usage 用 mode=utc、limit=1000（默认只返回 50 行，已在锁定镜像的参数定义里核验）；第一次上报只记基准；TaskCreate 不加新字段（它也是 create_task 工具的入参）。
 - 2026-11-04 04:01 UTC · claude · 越界修改说明：契约变化（TaskOut 新字段、SSE 主题 timeline）必须同步前端才能保持 main 可用，所以改了 apps/web 的 schema.d.ts（生成）、features/events/useWorkspaceEvents.ts（新主题映射）、tests/sprint3-fixtures.ts（任务样例补字段）；没有其他前端改动，界面在 T-0105。另改 tests/e2e/agent_ssh_acceptance.py：SSH 部署的 crontab 从两行变三行。
+- 2026-11-04 04:14 UTC · claude · status in_progress → done：验收标准全部完成：后端全量 pytest 711 passed / 13 skipped，之后改动的文件重跑 73 passed；迁移 0027 升降级与 alembic check 通过；前端 lint / typecheck / 401 个测试 / build / check:api 通过。下一步 T-0105。
