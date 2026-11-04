@@ -814,11 +814,12 @@ def scenario_16(c: Ctx) -> None:
     tag = uuid.uuid4().hex[:6]
     # 1. 第一次上报只记基准（之前的对话不算进时间轴）
     first = usage_report(c.a)
-    seen = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}")
+    # 实例接口不返回 usage_reported_at（只在库里），直接查
+    reported = sql(f"SELECT usage_reported_at IS NOT NULL FROM workspace.agent_instances WHERE id = '{c.a.id}'")
     minutes = sql(f"SELECT count(*) FROM workspace.agent_usage_minutes WHERE instance_id = '{c.a.id}'")
     c.check("时间轴：甲第一次上报用量成功，只记基准、不计 token",
-            first.returncode == 0 and bool(seen.get("usage_reported_at")) and minutes == "0",
-            f"退出码 {first.returncode} {first.stderr.strip()[-300:]}；{minutes} 分钟")
+            first.returncode == 0 and reported == "t" and minutes == "0",
+            f"退出码 {first.returncode} {first.stderr.strip()[-300:]}；已上报 {reported}；{minutes} 分钟")
 
     # 2. 建任务、执行者设为甲，交给它执行：管理员的 IM 把任务发给甲，同时开一段
     project = c.owner.call("POST", "/api/v1/projects", {"title": f"时间轴验收 {tag}", "description": ""},
