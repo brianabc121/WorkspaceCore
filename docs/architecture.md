@@ -130,3 +130,18 @@ flowchart LR
   - 变更记录与回收站；
   - 项目 / 公共知识库主页与智能体主页；
   - 手机上换成底部导航。
+
+## 知识库图片与任务时间轴（`docs/v2/TIMELINE_PLAN.md`，T-0101 ~ T-0106）
+
+- **知识库图片**（T-0103）：笔记里的图片存到本地卷 `kb-files`、Cloudflare R2 或阿里云 OSS（`FILE_STORAGE`），可以再配一个副本（`FILE_STORAGE_REPLICA`）。
+  - 后端：`app/integrations/object_storage.py`（本地存储与自写 SigV4 的 S3 兼容客户端；R2 用路径风格，OSS 用虚拟主机风格）、`app/domain/knowledge_files.py`（上传、读取、引用、副本复制、清理、自检）。迁移 0026。
+  - Worker：每分钟复制待复制的图片，每天清理没有引用、超过 24 小时的图片，启动时与每天自检一次。
+  - 前端：编辑器插入 / 粘贴 / 拖入，阅读页放大，图谱的“显示图片”，运维页的存储面板。
+- **任务时间轴**（T-0104、T-0105）：任务有执行者（成员或 OpenClaw 实例）和计划开始；每一段执行记在 `task_runs`。
+  - 后端：`app/domain/task_runs.py`（开段 / 结段、中断、token 按时间归属）、`app/domain/timeline.py`（时间轴、执行记录、交给智能体执行、用量上报）。迁移 0027。
+  - 交给智能体执行：用管理员自己的 IM 账号给实例发一条任务消息，同时开一段；智能体用 `complete_task` 标完成，照旧审批。
+  - 用量：接入包里的 `usage-report.mjs` 每分钟（crontab）调本机 OpenClaw 网关的 `sessions.usage`，把每个会话的累计 token 报给 `POST /agent-api/v1/usage`；工作台按分钟记增量，再按时间归属到当时在执行的段。
+  - Worker：每分钟把停用、删除、离线超过 10 分钟的实例正在执行的段记为中断；每天删除 90 天前的用量。
+  - 前端：`/tasks/timeline`（`apps/web/src/features/timeline/`），任务页、项目页、任务详情都有入口；SSE 主题 `timeline` 让页面及时刷新。
+- **验收**：Compose CI 的 `timeline_browser.cjs`、`knowledge_browser.cjs`；agents CI 的场景 16（真实 OpenClaw 上报用量、交给智能体执行到审批完成）；ci-api 在锁定的 Garage 上验证 S3 兼容存储；A15 备份恢复核对本地图片。
+

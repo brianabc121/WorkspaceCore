@@ -107,6 +107,7 @@ sudo bash scripts/deploy.sh connect
 |---|---|---|
 | n8n（自动化） | `make n8n-up` → 建 owner 账号（随机密码）→ 建只读 API Key 与名为 `X-Workspace-Trigger` 的 Header Auth 凭据 → 在工作台建连接并测试 | n8n 账号密码加密保存到工作台「自动化」页（只有管理员看得到；后台运行时不写进日志）；之后自己搭工作流（Webhook 节点选这个凭据），再到工作台“自动化”页登记 |
 | OpenIM（「消息」页） | 构建打过补丁的 openim-server 镜像（第一次约 5 ~ 15 分钟，临时占用约 8 GB 磁盘；Docker Hub 限流时自动改用 `mirror.gcr.io` 再试）→ `make openim-up` → 在 `.env` 里填好 `OPENIM_API_URL`、`OPENIM_OBJECT_URL` 并重启 api、worker → 确认工作台连得上 | 内存少于 4 GB 时默认不装（另外占用约 1 GB）；OpenClaw 本身（接入入口与实例）按第 8.6 节配置 |
+| 知识库图片存储 | 问图片存哪里（本地 / Cloudflare R2 / 阿里云 OSS，可以再选一个做副本），R2 / OSS 的地域、桶名、密钥当场输入，只写进 `.env` → 重启 api、worker → 自检（写、读、删一个探测文件） | 先在 R2 / OSS 建一个**私有**桶和只能读写这个桶的密钥；不配就存本地（卷 `kb-files`，随备份）。详见手册第 19 节 |
 
 - 项目与任务由工作台自己管理，不需要接入（T-0082 移除了 Vikunja；从带 Vikunja 的旧版本升级见第 10 步）。
 - 接入以首次安装创建的管理员身份进行：Token 加密保存在工作台，操作写进审计日志，和在网页上配置一样。
@@ -381,6 +382,9 @@ make setup-token
 ### 8.1 项目与任务（不需要接入）
 
 项目与任务由工作台自己管理（2026-11-02 移除了 Vikunja，T-0082），不用部署任何组件；从带 Vikunja 的旧版本升级见第 10 步。
+
+任务页的“显示方式：时间轴”能看每个任务的执行段、计划、超时和等待审批（`/tasks/timeline`）。智能体执行的段要显示 token，
+需要 OpenClaw 服务器每分钟上报用量：SSH 自动部署会写好 crontab；手工接入见第 8.6 节的检查清单。时间轴显示“未上报”时按手册第 20.2 节排查。
 
 ### 8.2 GitHub（只读）
 
@@ -800,6 +804,7 @@ make up && make smoke
 | 安全扫描 / 性能基准 | `make scan` / `make perf`（手册第 15 节） |
 | 轮换加密密钥 | 手册第 6.1 节 |
 | 查看 n8n / OpenIM 日志 | `make n8n-logs` / `make openim-logs` |
+| 知识库图片存储自检 / 时间轴 token “未上报” | 运维页“知识库图片存储”点“自检” / 手册第 20.2 节 |
 
 “运维”页能看到各服务的状态；监控部署后还有请求量、延迟等预设指标。
 

@@ -895,5 +895,39 @@ sudo -E python3 tests/e2e/agents_acceptance.py --server-ca <签发入口证书�
 
 ### 19.4 验收状态
 
-- SigV4 用 AWS 官方测试向量做单元测试；CI 在锁定的 Garage（`dxflrs/garage:v2.4.1`）上验证路径风格的读写删（`scripts/garage_s3_check.sh`）。
+- SigV4 用 AWS 官方测试向量做单元测试。CI（ci-api）在锁定的 Garage（`dxflrs/garage:v2.4.1`）上验证（`scripts/garage_s3_check.sh`，T-0106）：
+  - 路径风格（R2 的寻址）与虚拟主机风格（OSS 的寻址；Garage 配 `root_domain`）的读写删、错误密钥的分类；
+  - 主存储 R2 + 副本 OSS：上传写主存储，Worker 复制到副本；主存储丢了文件、或主存储拒绝凭证时从副本读；清理时两边都删。
+- 浏览器验收（Compose CI 的 `knowledge_browser.cjs`）：上传、粘贴截图、阅读页显示与放大、图谱的图片节点、没有引用的图片被清理、运维页的张数；本地存储的备份恢复在 A15（第 14 节）。
 - **真实的 R2 / OSS 账号还没有验收**（需要测试桶）：第一次配置后先在运维页点“自检”，通过后再让大家上传图片。
+
+## 20. 任务时间轴（T-0104 ~ T-0106）
+
+页面 `/tasks/timeline`（任务页“显示方式：时间轴”、项目页“时间轴”、任务详情“在时间轴中查看”都能进），按执行者或按项目看每段执行、计划、超时、等待审批和 token。
+设计见 `docs/v2/TIMELINE_PLAN.md`，接口见 `docs/api-contract.md` 的“任务时间轴”。权限：看要 viewer，开始 / 暂停人的任务要 member，交给智能体执行、结束智能体的段要 owner / admin。
+
+### 20.1 token 从哪来
+
+- 每台 OpenClaw 服务器的 crontab 每分钟运行一次 `docker compose exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs`（SSH 自动部署会写好；手工接入按第 18.3 节）。
+  脚本调本机 OpenClaw 网关的只读方法 `sessions.usage`（今天和昨天，UTC），只把每个会话 key 的哈希与四个累计数（输入、输出、缓存读、缓存写）报给 `POST /agent-api/v1/usage`。
+- 工作台按会话算增量、记到上报的那一分钟；一个实例**第一次上报只记基准**（接入前的用量不算）。时间轴再把每分钟的 token 归到当时在执行的段：同一实例同时有几段时平均分，界面标“≈”。
+- 用量只保留 90 天，会话的累计值保留 3 天（每天的清理任务）。
+
+### 20.2 时间轴显示“未上报”
+
+1. 在 OpenClaw 服务器上看 crontab：`crontab -l` 里要有带 `usage-report.mjs` 的一行。2026-11-04 之前生成的接入包没有这一行，在实例页“重新部署”（SSH）或按第 18.3 节加上。
+2. 在接入包目录手动跑一次：`docker compose exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs; echo $?`。退出码 0 就是报上去了；否则看最后一行错误：
+   - `usage-report: sessions.usage failed`：OpenClaw 网关没起来，先看 `docker compose logs openclaw`；
+   - `usage-report: workspace returned 401`：实例凭证失效（实例被停用或凭证轮换过），重新下载接入包或重新部署；
+   - `usage-report: workspace returned 429`：每分钟超过 6 次，等一分钟再试。
+3. 第一次报上去之后只记基准，之后的对话才有 token。
+
+### 20.3 执行段的中断
+
+- 实例被停用或删除，它正在执行的段记为中断；实例离线超过 10 分钟，段结束在离线开始的时间（Worker 每分钟检查）。
+- 管理员也可以在时间轴或任务详情里“结束这段”。任务标为完成（智能体的 `complete_task` 经审批后）时这段自动结束。
+
+### 20.4 验收状态
+
+- Compose CI 的 `timeline_browser.cjs`：入口、全部 / 按项目、智能体执行过的一段与 token、开始暂停、拖动计划、执行记录、手机宽度、viewer 只读。
+- agents CI 场景 16：真实 OpenClaw 上报用量 → 交给智能体执行 → `complete_task` 审批 → 这段结束并分到 token；SSH 自动部署验收照 crontab 那一行跑一次上报。
