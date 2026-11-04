@@ -26,6 +26,8 @@ from app.models.dashboard import Dashboard, Widget
 from app.models.host import AgentHostSample, AgentHostState
 from app.models.identity import AuthSession, ExternalIdentity, User
 from app.models.im import (
+    AgentImOutbox,
+    AgentImRejection,
     ImAccount,
     ImContactGroup,
     ImContactGroupMember,
@@ -69,6 +71,8 @@ __all__ = [
     "AgentCredential",
     "AgentHostSample",
     "AgentHostState",
+    "AgentImOutbox",
+    "AgentImRejection",
     "AgentInstance",
     "AgentOpsAction",
     "AgentSecret",

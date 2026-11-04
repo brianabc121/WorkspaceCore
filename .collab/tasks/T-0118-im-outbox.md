@@ -30,3 +30,4 @@ updated: 2026-11-04
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-04 19:02 UTC · claude · 创建任务（owner: claude）
+- 2026-11-04 19:28 UTC · claude · 迁移 0034（agent_im_outbox、agent_im_rejections）；app/domain/agent_outbox.py：im_send（预检与回调同规则、幂等键、定时、限流排队、每小时 60 条）、投递（ex 带发件箱 ID、投影里先放“发送中”、退避重试、结果未知按投影对账）、im_cancel、im_outbox；before 回调拒收实例消息时后台记录，5002 的文字回复限额恢复后补发；Worker 每 5 秒投递、purge 30 / 7 天；实例页“发件记录”（接口 + OutboxPanel）；docs/AGENTS.md 例外四。tests/test_agent_outbox.py 5 个用例、tests/agents-outbox.test.ts 2 个用例通过；契约测试登记新工具。

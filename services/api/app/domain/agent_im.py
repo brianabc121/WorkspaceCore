@@ -211,7 +211,7 @@ async def list_targets(
                 )
             if not peer.has_account:
                 hints.append("这位管理员还没打开过 IM，消息要等他打开 IM 后才能看到")
-            note = "；".join(hints) or None
+            hint = "；".join(hints) or None
             direct.append(
                 ImDirectTarget(
                     target=f"user:{peer.im_user_id}",
@@ -220,7 +220,7 @@ async def list_targets(
                     conversation_id=cids[peer.im_user_id],
                     last_message_at=last.get(cids[peer.im_user_id]),
                     replies_reach_you=reach,
-                    note=note,
+                    hint=hint,
                     untrusted=ImNameText(name=peer.name),
                 )
             )
@@ -240,8 +240,23 @@ async def list_targets(
         ),
         direct=direct,
         groups=groups,
+        recent_rejections=await _recent_rejections(db, redis, instance),
+        sends_left_this_hour=await _sends_left(redis, instance),
         notes=notes,
     )
+
+
+async def _recent_rejections(db: AsyncSession, redis: Redis | None, instance: AgentInstance) -> int:
+    from app.domain import agent_outbox
+
+    ctx = agent_outbox.SendContext(db, None, redis, None)  # type: ignore[arg-type]
+    return await agent_outbox.AgentOutbox(ctx).recent_rejections(instance.id)
+
+
+async def _sends_left(redis: Redis | None, instance: AgentInstance) -> int:
+    from app.domain import agent_outbox
+
+    return await agent_outbox.sends_left(redis, instance.id)
 
 
 async def _groups(

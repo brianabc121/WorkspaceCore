@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import client_ip, get_agent_service, get_db, get_redis
 from app.core.errors import ApiError
-from app.domain import im_callbacks
+from app.domain import agent_outbox, im_callbacks
 from app.domain.agents import AgentPrincipal, AgentService
 from app.domain.host_metrics import HostService
 from app.domain.im import openim_client
@@ -450,4 +450,16 @@ async def _judge(
         background.add_task(
             _notify_relay_paused, request.app, request.app.state.sessionmaker, verdict.paused_group
         )
+    code = verdict.response.err_code
+    if code and msg.send_id.startswith("oc_"):
+        # 实例发的消息被拒收（T-0118）：回调先返回，再记录（失败不影响判断）
+        background.add_task(_record_rejection, request.app, msg, code)
     return verdict.response
+
+
+async def _record_rejection(app: Any, msg: MsgCallback, code: int) -> None:
+    try:
+        async with app.state.sessionmaker() as db:
+            await agent_outbox.record_rejection(db, app.state.redis, msg, code)
+    except Exception as error:
+        logger.warning("im rejection not recorded", extra={"error_type": type(error).__name__})

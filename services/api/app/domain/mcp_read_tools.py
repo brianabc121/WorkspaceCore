@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.domain import agent_im, task_claims
+from app.domain import agent_im, agent_outbox, task_claims
 from app.domain import notifications as notification_domain
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError
 from app.domain.automations import AutomationService
@@ -70,6 +70,8 @@ from app.schemas.ai_tools import (
     HostDiskStatus,
     ImListTargetsInput,
     ImListTargetsOutput,
+    ImOutboxInput,
+    ImOutboxOutput,
     ImReadMessagesInput,
     ImReadMessagesOutput,
     IssueItem,
@@ -696,6 +698,12 @@ async def _im_read_messages(call: ReadCall, args: ImReadMessagesInput) -> ImRead
     return await agent_im.read_messages(call.db, call.requester.instance, args)
 
 
+async def _im_outbox(call: ReadCall, args: ImOutboxInput) -> ImOutboxOutput:
+    """自己经 im_send 发的消息与被拒收的自动回复（T-0118）。"""
+    ctx = agent_outbox.SendContext(call.db, call.settings, call.redis, None)
+    return await agent_outbox.AgentOutbox(ctx).list(call.requester.instance.id, args)
+
+
 READ_HANDLERS: dict[str, ReadHandler] = {
     "search": _search,
     "list_tasks": _list_tasks,
@@ -715,4 +723,5 @@ READ_HANDLERS: dict[str, ReadHandler] = {
     "get_host_status": _host_status,
     "im_list_targets": _im_list_targets,
     "im_read_messages": _im_read_messages,
+    "im_outbox": _im_outbox,
 }

@@ -987,6 +987,10 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "get_action_status",
             # 服务器状态：只看自己（T-0113）
             "get_host_status",
+            # IM 会话目录、读自己的会话、发件记录（T-0117、T-0118）
+            "im_list_targets",
+            "im_read_messages",
+            "im_outbox",
             # 知识库（T-0098，docs/v2/KNOWLEDGE_PLAN.md 3.7）
             "knowledge_search",
             "knowledge_get",
@@ -1012,6 +1016,9 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "create_project",
             "add_to_project",
             "list_peers",
+            # 主动发消息：直接执行、不审批（人类 2026-11-04 决定，例外四，T-0118）
+            "im_send",
+            "im_cancel",
         },
     }
     for spec in TOOLS.values():

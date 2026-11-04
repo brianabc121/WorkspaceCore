@@ -49,6 +49,9 @@ class MsgCallback(_Lenient):
     sender_platform_id: int = Field(default=0, alias="senderPlatformID")
     at_user_list: list[str] | None = Field(default=None, alias="atUserList")
     send_time: int = Field(default=0, alias="sendTime", description="毫秒时间戳")
+    # 正文（JSON 字符串）与 MsgData.ex：只用于记录拒收、补发被限额拒收的回复（T-0118）
+    content: str = Field(default="", max_length=65536)
+    ex: str = Field(default="", max_length=4096)
 
 
 class UserStatusCallback(_Lenient):

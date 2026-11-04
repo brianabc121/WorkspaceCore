@@ -4,11 +4,12 @@
 只在接入包（zip）里出现一次；密钥只写不读。实现：OC-2（T-0054）。
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, Security, status
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -23,12 +24,14 @@ from app.api.deps import (
     workspace_admin,
     workspace_owner,
 )
+from app.domain import agent_outbox
 from app.domain.agent_ops import AgentOpsService
 from app.domain.agent_ssh import AgentSshService
 from app.domain.agents import AgentService
 from app.domain.auth import AuthContext
 from app.domain.host_metrics import HostService
-from app.domain.policy import WorkspaceAccess
+from app.domain.policy import WorkspaceAccess, not_found
+from app.models import AgentInstance
 from app.schemas.agents import (
     AgentInstanceCreate,
     AgentInstanceOut,
@@ -58,6 +61,7 @@ from app.schemas.agents import (
     SecretGrantsReplace,
     VersionBody,
 )
+from app.schemas.ai_tools import ImCancelInput, ImCancelOutput, ImOutboxInput, ImOutboxOutput
 from app.schemas.common import error_responses
 from app.schemas.host import HostRange, HostStatusOut, HostSummaryList
 
@@ -586,3 +590,63 @@ async def get_agent_ops_action(
     access: Admin, service: OpsService, instance_id: UUID, action_id: UUID
 ) -> AgentOpsActionOut:
     return await service.get(access, instance_id, action_id)
+
+
+# ---------------------------------------------------------------- 发件记录（T-0118）
+
+
+async def _own_instance(db: AsyncSession, access: WorkspaceAccess, instance_id: UUID) -> None:
+    found = await db.scalar(
+        select(AgentInstance.id).where(
+            AgentInstance.id == instance_id, AgentInstance.workspace_id == access.workspace.id
+        )
+    )
+    if found is None:
+        raise not_found()
+
+
+@router.get(
+    "/agents/instances/{instance_id}/outbox",
+    summary="智能体主动发的消息与被拒收的自动回复（admin）",
+    description="im_send 发的消息（已发出、排队、定时、被拒收及原因，最近 50 条）与"
+    "最近 7 天被 OpenIM 回调拒收的自动回复（T-0118，docs/v2/AGENT_MESSAGING_PLAN.md 第 4.6 节）。",
+    responses=_read_errors,
+)
+async def get_agent_outbox(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+    instance_id: UUID,
+    status_filter: Annotated[
+        Literal["all", "pending", "sent", "rejected", "failed"], Query(alias="status")
+    ] = "all",
+) -> ImOutboxOutput:
+    await _own_instance(db, access, instance_id)
+    ctx = agent_outbox.SendContext(db, request.app.state.settings, request.app.state.redis, None)
+    return await agent_outbox.AgentOutbox(ctx).list(
+        instance_id, ImOutboxInput(status=status_filter, limit=50)
+    )
+
+
+@router.post(
+    "/agents/instances/{instance_id}/outbox/cancel",
+    summary="取消智能体排队中或定时的消息（admin）",
+    description="已经发出的不能取消；不属于这个实例的 ID 原样放进 not_cancellable。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 422),
+)
+async def cancel_agent_outbox(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+    instance_id: UUID,
+    body: ImCancelInput,
+) -> ImCancelOutput:
+    await _own_instance(db, access, instance_id)
+    instance = await db.get(AgentInstance, instance_id)
+    if instance is None:
+        raise not_found()
+    ctx = agent_outbox.SendContext(db, request.app.state.settings, request.app.state.redis, None)
+    out = await agent_outbox.AgentOutbox(ctx).cancel(instance, body)
+    await db.commit()
+    return out

@@ -100,7 +100,7 @@ async def test_list_targets_direct_and_whitelist(env: ImEnv) -> None:
     by_id = {d["im_user_id"]: d for d in listed["direct"]}
     assert by_id[owner_im]["replies_reach_you"] is True
     second = by_id[admin_im_user_id(other)]
-    assert second["replies_reach_you"] is False and "重新签发接入包" in second["note"]
+    assert second["replies_reach_you"] is False and "重新签发接入包" in second["hint"]
     assert listed["groups"] == []
     # 普通成员不能私聊，不列出
     member = await add_user(env.database_url, "member@example.com", PASSWORD)

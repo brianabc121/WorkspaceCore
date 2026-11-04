@@ -36,13 +36,14 @@ from starlette.requests import Request
 from app import __version__
 from app.core.errors import ApiError
 from app.core.logging import request_id_var
-from app.domain import agent_projects, agent_tasks, knowledge_tools, ops_metrics
+from app.domain import agent_outbox, agent_projects, agent_tasks, knowledge_tools, ops_metrics
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.im import openim_client
 from app.domain.mcp_read_tools import READ_HANDLERS, ReadCall
 from app.domain.ratelimit import WindowLimiter
 from app.models import AgentInstance
 from app.schemas.ai_tools import (
+    IM_DIRECT_TOOL_NAMES,
     KNOWLEDGE_TOOL_NAMES,
     PROJECT_ADMIN_TOOL_NAMES,
     TOOLS,
@@ -79,7 +80,7 @@ def tool_definition(spec: ToolSpec) -> types.Tool:
             destructive_hint=spec.risk == "critical" or spec.name == "knowledge_delete",
             # 知识库写工具带幂等键：同一个键重试不会重复写入；领取、完成重复调用返回同样的结果
             idempotent_hint=spec.risk in ("read", "knowledge")
-            or spec.name in ("claim_task", "complete_task"),
+            or spec.name in ("claim_task", "complete_task", "im_send"),
             open_world_hint=False,
         ),
     )
@@ -209,6 +210,15 @@ async def _dispatch(
                     )
                 elif spec.name in PROJECT_ADMIN_TOOL_NAMES:
                     output = await agent_projects.run(
+                        service,
+                        requester,
+                        spec,
+                        raw,
+                        request_id=caller.request_id,
+                        im=openim_client(state.settings, state.connectors, state.redis),
+                    )
+                elif spec.name in IM_DIRECT_TOOL_NAMES:
+                    output = await agent_outbox.run(
                         service,
                         requester,
                         spec,

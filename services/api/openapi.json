@@ -5728,6 +5728,53 @@
         "title": "ImBadges",
         "type": "object"
       },
+      "ImCancelInput": {
+        "additionalProperties": false,
+        "properties": {
+          "message_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Message Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "message_ids"
+        ],
+        "title": "ImCancelInput",
+        "type": "object"
+      },
+      "ImCancelOutput": {
+        "properties": {
+          "cancelled": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Cancelled",
+            "type": "array"
+          },
+          "not_cancellable": {
+            "description": "已经发出、已结束或不是你的",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Not Cancellable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cancelled",
+          "not_cancellable"
+        ],
+        "title": "ImCancelOutput",
+        "type": "object"
+      },
       "ImContactGroupCreate": {
         "additionalProperties": false,
         "properties": {
@@ -6832,6 +6879,167 @@
         "title": "ImMessageSend",
         "type": "object"
       },
+      "ImOutboxItem": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "text",
+              "image",
+              "file",
+              "video"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "format": "uuid",
+            "title": "Message Id",
+            "type": "string"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "source": {
+            "enum": [
+              "tool",
+              "reply_retry",
+              "wakeup"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "scheduled",
+              "queued",
+              "sending",
+              "sent",
+              "rejected",
+              "failed",
+              "unknown",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "untrusted": {
+            "$ref": "#/components/schemas/ImOutboxText"
+          }
+        },
+        "required": [
+          "message_id",
+          "target",
+          "kind",
+          "status",
+          "source",
+          "created_at",
+          "sent_at",
+          "next_attempt_at",
+          "code",
+          "reason",
+          "untrusted"
+        ],
+        "title": "ImOutboxItem",
+        "type": "object"
+      },
+      "ImOutboxOutput": {
+        "properties": {
+          "items": {
+            "description": "你经 im_send 发的消息，最近的在前",
+            "items": {
+              "$ref": "#/components/schemas/ImOutboxItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "rejected_replies": {
+            "description": "最近 7 天你的自动回复被拒收的记录，最近的在前",
+            "items": {
+              "$ref": "#/components/schemas/ImRejectedReply"
+            },
+            "title": "Rejected Replies",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "rejected_replies"
+        ],
+        "title": "ImOutboxOutput",
+        "type": "object"
+      },
+      "ImOutboxText": {
+        "properties": {
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "ImOutboxText",
+        "type": "object"
+      },
       "ImPinCreate": {
         "additionalProperties": false,
         "properties": {
@@ -6932,6 +7140,45 @@
           "seq"
         ],
         "title": "ImReadRequest",
+        "type": "object"
+      },
+      "ImRejectedReply": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "integer"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "retried": {
+            "description": "工作台已在限额恢复后补发",
+            "title": "Retried",
+            "type": "boolean"
+          },
+          "untrusted": {
+            "$ref": "#/components/schemas/ImOutboxText"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "code",
+          "reason",
+          "retried",
+          "created_at",
+          "untrusted"
+        ],
+        "title": "ImRejectedReply",
         "type": "object"
       },
       "ImStatus": {
@@ -16685,6 +16932,233 @@
           }
         ],
         "summary": "一次运维动作的状态与脱敏后的输出（admin）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/outbox": {
+      "get": {
+        "description": "im_send 发的消息（已发出、排队、定时、被拒收及原因，最近 50 条）与最近 7 天被 OpenIM 回调拒收的自动回复（T-0118，docs/v2/AGENT_MESSAGING_PLAN.md 第 4.6 节）。",
+        "operationId": "get_agent_outbox",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "pending",
+                "sent",
+                "rejected",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImOutboxOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "智能体主动发的消息与被拒收的自动回复（admin）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/outbox/cancel": {
+      "post": {
+        "description": "已经发出的不能取消；不属于这个实例的 ID 原样放进 not_cancellable。",
+        "operationId": "cancel_agent_outbox",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImCancelInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImCancelOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "取消智能体排队中或定时的消息（admin）",
         "tags": [
           "agents"
         ]

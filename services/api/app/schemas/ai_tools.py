@@ -709,7 +709,7 @@ class ImDirectTarget(BaseModel):
     replies_reach_you: bool | None = Field(
         description="他回你的私聊你收不收得到（在不在接入包的白名单里）；null 表示无法判断"
     )
-    note: str | None = None
+    hint: str | None = Field(default=None, description="工作台给的提示（不是用户写的）")
     untrusted: ImNameText
 
 
@@ -767,6 +767,10 @@ class ImListTargetsOutput(BaseModel):
     me: ImMe
     direct: list[ImDirectTarget] = Field(description="能私聊的人：本工作空间的管理员")
     groups: list[ImGroupTarget] = Field(description="你现在所在的群")
+    recent_rejections: int = Field(
+        0, description="最近 24 小时你发的消息被拒收的条数（详情用 im_outbox）"
+    )
+    sends_left_this_hour: int = Field(description="这个小时还能用 im_send 发几条")
     notes: list[str]
 
 
@@ -813,6 +817,107 @@ class ImReadMessagesOutput(BaseModel):
     items: list[ImMessageItem] = Field(description="按时间从早到晚")
     has_more: bool
     next_before: UUID | None = Field(description="还有更早的消息时，传给 before 继续读")
+
+
+# ---------------------------------------------------------------- 主动发消息（T-0118）
+
+OutboxStatus = Literal[
+    "scheduled", "queued", "sending", "sent", "rejected", "failed", "unknown", "cancelled"
+]
+ClientKey = Annotated[
+    str, StringConstraints(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+]
+
+
+class ImSendInput(_Strict):
+    target: ImTarget = Field(description="im_list_targets 给的 target")
+    text: Annotated[str, StringConstraints(min_length=1, max_length=4000)] | None = None
+    mention: list[Annotated[str, StringConstraints(max_length=64)]] = Field(
+        default_factory=list,
+        max_length=20,
+        description="群里要 @ 的人（IM 用户 ID，来自 im_list_targets 的成员）；私聊必须为空",
+    )
+    send_at: AwareDatetime | None = Field(
+        default=None, description="定时发送（最早 1 分钟后，最远 30 天）；不给就立即发"
+    )
+    client_key: ClientKey | None = Field(
+        default=None,
+        description="幂等键：重试同一次发送时用同一个键，不会发出两次；不给时按内容自动生成",
+    )
+    if_rate_limited: Literal["queue", "fail"] = Field(
+        "queue", description="遇到每分钟上限时：queue 排队到限额恢复后发（最多等 10 分钟）"
+    )
+
+
+class ImSendResultItem(BaseModel):
+    message_id: UUID = Field(description="发件记录 ID（用于 im_outbox、im_cancel）")
+    part: int
+    kind: Literal["text", "image", "file", "video"]
+    status: OutboxStatus
+    sent_at: datetime | None
+    next_attempt_at: datetime | None = Field(description="排队、定时、重试中的预计时间")
+    code: int | None = Field(description="被拒收时的拒收码")
+    reason: str | None
+    retryable: bool = Field(description="换个时间或改一下内容后可以再发")
+    retry_after_seconds: int | None
+
+
+class ImSendOutput(BaseModel):
+    status: Literal["sent", "queued", "scheduled", "rejected", "failed", "partial"]
+    target: str
+    client_key: str
+    replayed: bool = Field(description="同一个幂等键之前已经发过，这里返回的是那一次的结果")
+    messages: list[ImSendResultItem]
+    hint: str | None = None
+
+
+class ImCancelInput(_Strict):
+    message_ids: list[UUID] = Field(min_length=1, max_length=20)
+
+
+class ImCancelOutput(BaseModel):
+    cancelled: list[UUID]
+    not_cancellable: list[UUID] = Field(description="已经发出、已结束或不是你的")
+
+
+class ImOutboxInput(_Strict):
+    status: Literal["all", "pending", "sent", "rejected", "failed"] = "all"
+    since: AwareDatetime | None = None
+    limit: int = Field(20, ge=1, le=50)
+
+
+class ImOutboxText(BaseModel):
+    text: str | None
+
+
+class ImOutboxItem(BaseModel):
+    message_id: UUID
+    target: str
+    kind: Literal["text", "image", "file", "video"]
+    status: OutboxStatus
+    source: Literal["tool", "reply_retry", "wakeup"]
+    created_at: datetime
+    sent_at: datetime | None
+    next_attempt_at: datetime | None
+    code: int | None
+    reason: str | None
+    untrusted: ImOutboxText
+
+
+class ImRejectedReply(BaseModel):
+    conversation_id: str
+    code: int
+    reason: str
+    retried: bool = Field(description="工作台已在限额恢复后补发")
+    created_at: datetime
+    untrusted: ImOutboxText
+
+
+class ImOutboxOutput(BaseModel):
+    items: list[ImOutboxItem] = Field(description="你经 im_send 发的消息，最近的在前")
+    rejected_replies: list[ImRejectedReply] = Field(
+        description="最近 7 天你的自动回复被拒收的记录，最近的在前"
+    )
 
 
 class ClaimTaskOutput(BaseModel):
@@ -941,6 +1046,14 @@ _READ: list[ToolSpec] = [
         "主动发言前先看看大家在聊什么",
     ),
     _spec(
+        "im_outbox",
+        "read",
+        ImOutboxInput,
+        ImOutboxOutput,
+        "查看你经 im_send 发的消息的状态（已发出、排队、定时、被拒收及原因），"
+        "以及最近被拒收的自动回复",
+    ),
+    _spec(
         "get_action_status",
         "read",
         GetActionStatusInput,
@@ -1037,6 +1150,25 @@ _PROJECT_ADMIN: list[ToolSpec] = [
         "列出本工作空间的智能体（名字、能力说明、在线、是否空闲），用来决定拉谁进项目",
     ),
 ]
+# 主动发消息（T-0118）：直接执行、不审批（docs/AGENTS.md 第 8 节例外四）
+_IM_DIRECT: list[ToolSpec] = [
+    _spec(
+        "im_send",
+        "direct",
+        ImSendInput,
+        ImSendOutput,
+        "主动发消息给管理员或你所在的群（直接发出，结果当场返回：已发出、排队或被拒收及原因）。"
+        "目标用 im_list_targets 给的 target；群里要别人回你就 mention 他。"
+        "重试同一次发送时用同一个 client_key。每小时最多 60 条",
+    ),
+    _spec(
+        "im_cancel",
+        "direct",
+        ImCancelInput,
+        ImCancelOutput,
+        "取消你排队中或定时的消息（已经发出的不能取消）",
+    ),
+]
 _KNOWLEDGE: list[ToolSpec] = [
     _knowledge("knowledge_search", KnowledgeSearchInput, KnowledgeSearchOutput),
     _knowledge("knowledge_get", KnowledgeGetInput, KnowledgeGetOutput),
@@ -1046,11 +1178,13 @@ _KNOWLEDGE: list[ToolSpec] = [
     _knowledge("knowledge_delete", KnowledgeDeleteInput, KnowledgeDeleteOutput),
 ]
 TOOLS: dict[str, ToolSpec] = {
-    spec.name: spec for spec in _READ + _WRITE + _CRITICAL + _DIRECT + _PROJECT_ADMIN + _KNOWLEDGE
+    spec.name: spec
+    for spec in _READ + _WRITE + _CRITICAL + _DIRECT + _PROJECT_ADMIN + _IM_DIRECT + _KNOWLEDGE
 }
 KNOWLEDGE_TOOL_NAMES = frozenset(spec.name for spec in _KNOWLEDGE)
 DIRECT_TOOL_NAMES = frozenset(spec.name for spec in _DIRECT)
 PROJECT_ADMIN_TOOL_NAMES = frozenset(spec.name for spec in _PROJECT_ADMIN)
+IM_DIRECT_TOOL_NAMES = frozenset(spec.name for spec in _IM_DIRECT)
 
 # 永远不做成工具（方案第 4.6 节）：集成凭证与设置、成员与角色、会话、工作台设置、
 # 实例与密钥管理、审计日志

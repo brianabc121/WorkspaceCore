@@ -295,6 +295,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/instances/{instance_id}/outbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 智能体主动发的消息与被拒收的自动回复（admin）
+         * @description im_send 发的消息（已发出、排队、定时、被拒收及原因，最近 50 条）与最近 7 天被 OpenIM 回调拒收的自动回复（T-0118，docs/v2/AGENT_MESSAGING_PLAN.md 第 4.6 节）。
+         */
+        get: operations["get_agent_outbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/outbox/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 取消智能体排队中或定时的消息（admin）
+         * @description 已经发出的不能取消；不属于这个实例的 ID 原样放进 not_cancellable。
+         */
+        post: operations["cancel_agent_outbox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/instances/{instance_id}/project-admin": {
         parameters: {
             query?: never;
@@ -4922,6 +4962,21 @@ export interface components {
              */
             pending_approvals: number;
         };
+        /** ImCancelInput */
+        ImCancelInput: {
+            /** Message Ids */
+            message_ids: string[];
+        };
+        /** ImCancelOutput */
+        ImCancelOutput: {
+            /** Cancelled */
+            cancelled: string[];
+            /**
+             * Not Cancellable
+             * @description 已经发出、已结束或不是你的
+             */
+            not_cancellable: string[];
+        };
         /** ImContactGroupCreate */
         ImContactGroupCreate: {
             /** Name */
@@ -5342,6 +5397,63 @@ export interface components {
              */
             upload_id?: string | null;
         };
+        /** ImOutboxItem */
+        ImOutboxItem: {
+            /** Code */
+            code: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "text" | "image" | "file" | "video";
+            /**
+             * Message Id
+             * Format: uuid
+             */
+            message_id: string;
+            /** Next Attempt At */
+            next_attempt_at: string | null;
+            /** Reason */
+            reason: string | null;
+            /** Sent At */
+            sent_at: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "tool" | "reply_retry" | "wakeup";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "scheduled" | "queued" | "sending" | "sent" | "rejected" | "failed" | "unknown" | "cancelled";
+            /** Target */
+            target: string;
+            untrusted: components["schemas"]["ImOutboxText"];
+        };
+        /** ImOutboxOutput */
+        ImOutboxOutput: {
+            /**
+             * Items
+             * @description 你经 im_send 发的消息，最近的在前
+             */
+            items: components["schemas"]["ImOutboxItem"][];
+            /**
+             * Rejected Replies
+             * @description 最近 7 天你的自动回复被拒收的记录，最近的在前
+             */
+            rejected_replies: components["schemas"]["ImRejectedReply"][];
+        };
+        /** ImOutboxText */
+        ImOutboxText: {
+            /** Text */
+            text: string | null;
+        };
         /** ImPinCreate */
         ImPinCreate: {
             /** Server Msg Id */
@@ -5391,6 +5503,26 @@ export interface components {
              * @description 读到的序号；只会增加，小于当前已读序号时不变
              */
             seq: number;
+        };
+        /** ImRejectedReply */
+        ImRejectedReply: {
+            /** Code */
+            code: number;
+            /** Conversation Id */
+            conversation_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Retried
+             * @description 工作台已在限额恢复后补发
+             */
+            retried: boolean;
+            untrusted: components["schemas"]["ImOutboxText"];
         };
         /** ImStatus */
         ImStatus: {
@@ -9993,6 +10125,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentOpsActionOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_agent_outbox: {
+        parameters: {
+            query?: {
+                status?: "all" | "pending" | "sent" | "rejected" | "failed";
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImOutboxOutput"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_agent_outbox: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImCancelInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImCancelOutput"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
