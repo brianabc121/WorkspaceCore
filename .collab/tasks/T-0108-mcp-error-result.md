@@ -36,3 +36,4 @@ T-0106 的 agents CI 日志里，甲第 6 次删除被拦下时 OpenClaw 记的�
 - 2026-11-04 06:21 UTC · claude · 开始任务
 - 2026-11-04 06:24 UTC · claude · 实现：mcp_tools.error_result 不再带 structured_content（错误码与说明在文字内容的 JSON 里），运维指标从文字内容取错误码；tests/helpers.py 加 tool_error（断言 isError、没有结构化内容），test_mcp_api / test_mcp_read_tools / test_oc6_security / test_knowledge_tools 改用它；agents 场景 15 检查被拦下的删除结果里有 DELETES_PAUSED；OC-1 契约 9.4、OC-5 ADR 改写错误格式并注明原因。检查：ruff、ruff format、mypy（270 个文件）、openapi 最新；MCP 与工具相关的 7 个测试文件 57 passed。场景 15 的新检查以本 PR 的 agents CI 为准。
 - 2026-11-04 06:24 UTC · claude · status in_progress → done：错误结果只用文字内容；测试、场景 15 与契约已更新
+- 2026-11-04 06:43 UTC · claude · agents CI 第一次运行：-32602 格式错误已经没有了（被拦下的删除，甲回复的是正常的工具结果）；新检查没过是因为它看的是假模型记录里的 last（最后一条消息），而 OpenClaw 在工具结果后面会补一条只含内部上下文的用户消息，done 回复又只截了工具结果的前 300 字（都是外部内容包装）。假模型记录加 tool 字段（最近一条工具结果的末尾 1500 字），检查改看它。

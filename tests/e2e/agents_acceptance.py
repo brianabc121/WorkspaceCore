@@ -781,7 +781,7 @@ def scenario_15(c: Ctx) -> None:
     c.check("知识库：删除自动暂停后通知管理员", any(n["type"] == "knowledge_delete_paused" for n in alerts))
     # 被拦下的那次，模型拿到的工具结果里有错误码（MCP 错误不带结构化内容，OpenClaw 的 MCP 客户端才不会把它当成
     # 格式错误丢掉，T-0108）
-    seen = [r.get("last", "") for r in c.model_calls(c.keys["a"], last_delete)]
+    seen = [r.get("tool", "") for r in c.model_calls(c.keys["a"], last_delete)]
     c.check("知识库：被拦下的删除，甲拿到的工具结果里有错误码 DELETES_PAUSED 和说明（不是 MCP 格式错误）",
             any("DELETES_PAUSED" in x for x in seen) and not any("does not match the tool's output schema" in x for x in seen),
             next((x[-300:] for x in seen if "error" in x.lower()), seen[-1][-300:] if seen else ""))
