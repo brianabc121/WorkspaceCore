@@ -124,11 +124,30 @@ class AgentInstanceOut(BaseModel):
         description="最近一次签发的 IM 令牌何时到期（实例每次启动时领取）；从未签发为 null",
     )
     disabled_at: datetime | None
+    project_admin: "ProjectAdminOut" = Field(
+        description="项目管理权限（T-0112）：打开后它能新建项目、把智能体拉进它建的项目"
+    )
     credentials: list[AgentCredentialOut] = Field(description="有效与最近吊销的凭证，新的在前")
     secret_grants: list[SecretGrantOut]
     version: int
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectAdminOut(BaseModel):
+    enabled: bool
+    granted_by: UUID | None = Field(description="打开的人；他做智能体建的项目群的群主")
+    granted_at: datetime | None
+
+
+class ProjectAdminPut(_Strict):
+    """打开或关闭项目管理权限（owner / admin）。关闭后它已经建的项目和拉进来的成员保留。"""
+
+    enabled: bool
+    version: Version
+
+
+AgentInstanceOut.model_rebuild()
 
 
 class AgentInstancePage(Page[AgentInstanceOut]):

@@ -194,6 +194,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/instances/{instance_id}/project-admin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 打开或关闭实例的项目管理权限（admin，乐观并发）
+         * @description 打开后这个实例的工具里多出 create_project / add_to_project / list_peers，直接执行、不审批（人类 2026-11-04 决定）；它建的项目群的群主是打开权限的人。关闭后它已经建的项目和拉进来的成员保留，只是不能再建、再拉。每次都写审计（T-0112）。
+         */
+        put: operations["put_project_admin"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/instances/{instance_id}/secret-grants": {
         parameters: {
             query?: never;
@@ -2676,6 +2696,8 @@ export interface components {
              * @description 实例上报的 openclaw-channel 版本
              */
             plugin_version: string | null;
+            /** @description 项目管理权限（T-0112）：打开后它能新建项目、把智能体拉进它建的项目 */
+            project_admin: components["schemas"]["ProjectAdminOut"];
             /**
              * Reported Version
              * @description 实例上报的 OpenClaw 版本
@@ -6242,6 +6264,31 @@ export interface components {
              */
             new_password: string;
         };
+        /** ProjectAdminOut */
+        ProjectAdminOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Granted At */
+            granted_at: string | null;
+            /**
+             * Granted By
+             * @description 打开的人；他做智能体建的项目群的群主
+             */
+            granted_by: string | null;
+        };
+        /**
+         * ProjectAdminPut
+         * @description 打开或关闭项目管理权限（owner / admin）。关闭后它已经建的项目和拉进来的成员保留。
+         */
+        ProjectAdminPut: {
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求带上读取时的版本
+             */
+            version: number;
+        };
         /**
          * ProjectAgentBrief
          * @description 项目的智能体成员（T-0110）：在项目知识库里有权限，有项目群时也在群里。
@@ -9114,6 +9161,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentInstanceOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_project_admin: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectAdminPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectAdminOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

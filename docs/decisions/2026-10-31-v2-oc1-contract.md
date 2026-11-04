@@ -334,6 +334,7 @@
 | 写 | `mark_notification_read` | `read_write` | viewer | `PendingApproval` |
 | 高危 | `delete_task`、`delete_calendar_event`、`trigger_automation` | `read_write` | member | `PendingApproval`；批准要二次认证 |
 | 直接执行（T-0111，人类 2026-11-04 决定） | `claim_task`、`release_task`、`complete_task`（2026-11-04 之前是写工具、要审批） | `read_write` | member | 各自的输出；执行记录 `risk_level = direct`，见 `docs/v2/AGENT_OPS_PLAN.md` 第 3、7 节 |
+| 直接执行，需项目管理权限（T-0112，人类 2026-11-04 决定） | `create_project`、`add_to_project`、`list_peers` | `read_write` | member | 各自的输出；只列给、只允许管理员打开了项目管理权限的实例（否则 `FORBIDDEN_CAPABILITY`） |
 
 - 实际角色取“登记人的角色”和“实例的 `max_role`”中较低的一个。
 - `calendar_agenda` 最多查 31 天；列表类工具 `limit` 最多 50。

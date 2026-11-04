@@ -600,6 +600,54 @@ class CompleteTaskInput(_Strict):
     )
 
 
+class CreateProjectInput(_Strict):
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    description: Annotated[str, StringConstraints(max_length=2000)] = ""
+    instance_ids: list[UUID] = Field(
+        default_factory=list,
+        max_length=20,
+        description="一开始就拉进项目的其他智能体（list_peers 里的 id）；你自己会自动加入",
+    )
+
+
+class AddProjectAgentsInput(_Strict):
+    project_id: UUID = Field(description="你自己建的项目")
+    instance_ids: list[UUID] = Field(min_length=1, max_length=20)
+
+
+class CreateProjectOutput(BaseModel):
+    status: Literal["created"] = "created"
+    project_id: UUID
+    agents: list[UUID] = Field(description="项目的智能体成员（含你自己）")
+    im_group: Literal["none", "pending", "ready"] = Field(
+        description="项目群：ready 已建好；pending 正在建（OpenIM 不可用时稍后重试）；"
+        "none 没有部署 IM"
+    )
+
+
+class AddProjectAgentsOutput(BaseModel):
+    project_id: UUID
+    added: list[UUID] = Field(description="这次新加入的智能体")
+    already: list[UUID] = Field(description="之前就是成员的智能体")
+
+
+class AgentText(_Untrusted):
+    name: str
+    description: str
+
+
+class AgentItem(BaseModel):
+    id: UUID
+    status: Literal["pending", "online", "offline", "disabled"]
+    idle: bool = Field(description="现在没有正在执行的任务")
+    can_write: bool = Field(description="scope 为 read_write（能领取、完成任务）")
+    untrusted: AgentText
+
+
+class ListAgentsOutput(BaseModel):
+    items: list[AgentItem]
+
+
 class ClaimTaskOutput(BaseModel):
     status: Literal["claimed"] = "claimed"
     task_id: UUID
@@ -772,6 +820,32 @@ _DIRECT: list[ToolSpec] = [
         "把执行者是你的任务标为完成（直接生效，可以附完成说明）；管理员觉得有问题会打回",
     ),
 ]
+# 项目管理（T-0112）：只有管理员打开了项目管理权限的实例才列出、才能调用
+_PROJECT_ADMIN: list[ToolSpec] = [
+    _spec(
+        "create_project",
+        "direct",
+        CreateProjectInput,
+        CreateProjectOutput,
+        "新建项目（直接生效，要管理员先给你开项目管理权限）：会建项目知识库和 IM 项目群，"
+        "你自己自动加入；可以同时拉其他智能体进来。每小时最多 5 个",
+    ),
+    _spec(
+        "add_to_project",
+        "direct",
+        AddProjectAgentsInput,
+        AddProjectAgentsOutput,
+        "把其他智能体拉进你自己建的项目（直接生效）：它们得到项目知识库读写权限并进项目群。"
+        "每小时最多 20 次",
+    ),
+    _spec(
+        "list_peers",
+        "direct",
+        EmptyInput,
+        ListAgentsOutput,
+        "列出本工作空间的智能体（名字、能力说明、在线、是否空闲），用来决定拉谁进项目",
+    ),
+]
 _KNOWLEDGE: list[ToolSpec] = [
     _knowledge("knowledge_search", KnowledgeSearchInput, KnowledgeSearchOutput),
     _knowledge("knowledge_get", KnowledgeGetInput, KnowledgeGetOutput),
@@ -781,10 +855,11 @@ _KNOWLEDGE: list[ToolSpec] = [
     _knowledge("knowledge_delete", KnowledgeDeleteInput, KnowledgeDeleteOutput),
 ]
 TOOLS: dict[str, ToolSpec] = {
-    spec.name: spec for spec in _READ + _WRITE + _CRITICAL + _DIRECT + _KNOWLEDGE
+    spec.name: spec for spec in _READ + _WRITE + _CRITICAL + _DIRECT + _PROJECT_ADMIN + _KNOWLEDGE
 }
 KNOWLEDGE_TOOL_NAMES = frozenset(spec.name for spec in _KNOWLEDGE)
 DIRECT_TOOL_NAMES = frozenset(spec.name for spec in _DIRECT)
+PROJECT_ADMIN_TOOL_NAMES = frozenset(spec.name for spec in _PROJECT_ADMIN)
 
 # 永远不做成工具（方案第 4.6 节）：集成凭证与设置、成员与角色、会话、工作台设置、
 # 实例与密钥管理、审计日志

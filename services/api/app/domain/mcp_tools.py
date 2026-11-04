@@ -11,6 +11,8 @@
   由知识库自己的保护措施兜底（docs/v2/KNOWLEDGE_PLAN.md 3.8）。
 - 领取 / 放弃 / 完成任务（claim_task / release_task / complete_task，风险等级 direct，T-0111）
   由 app/domain/agent_tasks.py 处理：直接执行、不审批（docs/v2/AGENT_OPS_PLAN.md 第 7 节）。
+- 项目管理（create_project / add_to_project / list_peers，T-0112）由
+  app/domain/agent_projects.py 处理：只列给、只允许打开了项目管理权限的实例，直接执行。
 - 错误：`isError: true`，文字内容是 `{"error": {"code", "message"}}` 的 JSON，不带结构化内容。
   OpenClaw 2026.9.36 带的 MCP SDK（1.32.1）客户端只要有 `structuredContent` 就按工具的
   outputSchema 校验，错误也不例外；带上就变成 -32602，智能体看不到错误码和说明（T-0108）。
@@ -34,7 +36,7 @@ from starlette.requests import Request
 from app import __version__
 from app.core.errors import ApiError
 from app.core.logging import request_id_var
-from app.domain import agent_tasks, knowledge_tools, ops_metrics
+from app.domain import agent_projects, agent_tasks, knowledge_tools, ops_metrics
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.im import openim_client
 from app.domain.mcp_read_tools import READ_HANDLERS, ReadCall
@@ -42,6 +44,7 @@ from app.domain.ratelimit import WindowLimiter
 from app.models import AgentInstance
 from app.schemas.ai_tools import (
     KNOWLEDGE_TOOL_NAMES,
+    PROJECT_ADMIN_TOOL_NAMES,
     TOOLS,
     ToolSpec,
 )
@@ -150,11 +153,15 @@ async def _list_tools(
     async with state.sessionmaker() as db:
         instance = await db.get(AgentInstance, caller.instance_id)
         scope = instance.scope if instance is not None else "read"
-    # 只列这个实例的权限范围里、已经实现的工具；角色是否够在调用时再检查（角色可能变化）
+        project_admin = instance is not None and instance.project_admin_enabled
+    # 只列这个实例的权限范围里、已经实现的工具；角色是否够在调用时再检查（角色可能变化）。
+    # 项目管理工具只列给打开了项目管理权限的实例（T-0112）
     tools = [
         tool_definition(spec)
         for spec in TOOLS.values()
-        if available(spec) and (spec.scope == "read" or scope == "read_write")
+        if available(spec)
+        and (spec.scope == "read" or scope == "read_write")
+        and (spec.name not in PROJECT_ADMIN_TOOL_NAMES or project_admin)
     ]
     return types.ListToolsResult(tools=tools)
 
@@ -199,6 +206,15 @@ async def _dispatch(
                 if spec.name in KNOWLEDGE_TOOL_NAMES:
                     output = await knowledge_tools.run(
                         service, requester, spec, raw, request_id=caller.request_id
+                    )
+                elif spec.name in PROJECT_ADMIN_TOOL_NAMES:
+                    output = await agent_projects.run(
+                        service,
+                        requester,
+                        spec,
+                        raw,
+                        request_id=caller.request_id,
+                        im=openim_client(state.settings, state.connectors, state.redis),
                     )
                 elif spec.risk == "direct":
                     output = await agent_tasks.run(

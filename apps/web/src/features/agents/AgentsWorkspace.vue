@@ -45,6 +45,10 @@ function revoke(instance: Schema['AgentInstanceOut'], credential: Schema['AgentC
   if (!window.confirm('立即吊销这份凭证？使用它的 OpenClaw 会马上失去访问权限。')) return
   void act(() => auth.api.POST('/api/v1/agents/instances/{instance_id}/credentials/{credential_id}/revoke', { params: { header, path: { ...path(instance), credential_id: credential.id } }, body: { version: instance.version } }), '凭证已吊销')
 }
+function projectAdmin(instance: Schema['AgentInstanceOut'], enabled: boolean) {
+  if (enabled && !window.confirm(`允许「${instance.name}」新建项目、把智能体拉进它建的项目？这些操作直接生效、不审批，每次都会通知管理员。`)) return
+  void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/project-admin', { params: { header, path: path(instance) }, body: { enabled, version: instance.version } }), enabled ? '已打开项目管理权限' : '已关闭项目管理权限')
+}
 function grants(instance: Schema['AgentInstanceOut'], list: Schema['SecretGrantIn'][]) {
   void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/secret-grants', { params: { header, path: path(instance) }, body: { grants: list, version: instance.version } }), '密钥授权已保存')
 }
@@ -67,7 +71,7 @@ function grants(instance: Schema['AgentInstanceOut'], list: Schema['SecretGrantI
   <div class="agent-list">
     <InstanceCard
       v-for="instance in items" :key="instance.id" :instance="instance" :secrets="secretItems" :busy="busy"
-      @edit="editing = instance" @toggle="toggle(instance)" @bundle="bundle(instance, $event)" @revoke="revoke(instance, $event)" @grants="grants(instance, $event)"
+      @edit="editing = instance" @toggle="toggle(instance)" @bundle="bundle(instance, $event)" @revoke="revoke(instance, $event)" @grants="grants(instance, $event)" @project-admin="projectAdmin(instance, $event)"
     />
   </div>
   <button v-if="instances.hasNextPage.value" type="button" class="secondary-button" :disabled="instances.isFetchingNextPage.value" @click="instances.fetchNextPage()">更多实例</button>

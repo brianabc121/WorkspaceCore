@@ -990,6 +990,51 @@ def scenario_17(c: Ctx) -> None:
             json.dumps(kinds, ensure_ascii=False))
 
 
+def scenario_18(c: Ctx) -> None:
+    """智能体建项目（T-0112）：没开权限时工具列表里没有 create_project、直接调用被拒；管理员给甲打开
+    项目管理权限后，甲建项目并把乙拉进来：项目知识库成员、真实 OpenIM 项目群里两个都在；关掉后再建被拒。"""
+    tag = uuid.uuid4().hex[:6]
+
+    def listed() -> set[str]:
+        status, text = c.a.request(
+            "POST", c.a.env("MYWS_MCP_URL"), token=c.a.env("MYWS_INSTANCE_TOKEN"),
+            body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            headers={"Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-11-25"})
+        return {t["name"] for t in json.loads(text)["result"]["tools"]} if status == 200 else set()
+
+    def set_admin(enabled: bool) -> dict[str, Any]:
+        current = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}")
+        result: dict[str, Any] = c.owner.call("PUT", f"/api/v1/agents/instances/{c.a.id}/project-admin",
+                                              {"enabled": enabled, "version": current["version"]})
+        return result
+
+    before = listed()
+    refused = mcp_call(c.a, "create_project", {"title": f"不该建出来 {tag}"})
+    c.check("智能体建项目：没开权限时甲的工具列表里没有 create_project，直接调用返回 FORBIDDEN_CAPABILITY",
+            "create_project" not in before and "claim_task" in before and tool_code(refused) == "FORBIDDEN_CAPABILITY",
+            tool_code(refused))
+    granted = set_admin(True)
+    try:
+        after = listed()
+        created = mcp_call(c.a, "create_project", {"title": f"智能体建的项目 {tag}", "instance_ids": [c.b.id]})
+        project_id = (created.get("structuredContent") or {}).get("project_id")
+        project = wait_for("项目群建好", lambda: (lambda p: p if p["im_group"]["status"] == "ready" else None)(
+            c.owner.call("GET", f"/api/v1/projects/{project_id}")), timeout=90) if project_id else {}
+        group = c.owner.call("GET", f"/api/v1/im/groups/{project['im_group']['group_id']}") if project else {}
+        in_group = {m.get("instance_id") for m in group.get("members", [])}
+        c.check("智能体建项目：打开权限后甲建项目并拉乙进来，两个都是项目成员，真实 OpenIM 项目群里两个都在，群主是开权限的管理员",
+                granted["enabled"] and "create_project" in after and not tool_code(created)
+                and {a["name"] for a in project.get("agents", [])} == {c.a.record["name"], c.b.record["name"]}
+                and {c.a.id, c.b.id} <= in_group and group.get("owner_im_id") == c.admin_im,
+                json.dumps({"code": tool_code(created), "agents": [a["name"] for a in project.get("agents", [])],
+                            "group": sorted(i for i in in_group if i)}, ensure_ascii=False))
+    finally:
+        set_admin(False)
+    again = mcp_call(c.a, "create_project", {"title": f"关掉之后 {tag}"})
+    c.check("智能体建项目：关掉权限后再建被拒（已建的项目保留）", tool_code(again) == "FORBIDDEN_CAPABILITY",
+            tool_code(again))
+
+
 def scenario_6(c: Ctx) -> None:
     """停用乙：取密钥失败、MCP 返回 401、IM 被强制下线。放在最后（停用后乙不再参与）。"""
     current = c.owner.call("GET", f"/api/v1/agents/instances/{c.b.id}")
@@ -1008,7 +1053,7 @@ def scenario_6(c: Ctx) -> None:
 SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "2": scenario_2, "3": scenario_3, "4": scenario_4, "5": scenario_5, "7": scenario_7, "8": scenario_8,
     "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "15": scenario_15,
-    "16": scenario_16, "17": scenario_17, "6": scenario_6,
+    "16": scenario_16, "17": scenario_17, "18": scenario_18, "6": scenario_6,
 }
 
 

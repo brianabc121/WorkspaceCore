@@ -122,6 +122,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET | `/api/v1/projects/{project_id}/agents` | 项目的智能体成员（viewer）：名字、说明、状态、对项目知识库的权限、是否已在项目群里，以及项目群状态 `im_group` | 已实现（T-0110） |
 | PUT / DELETE | `/api/v1/projects/{project_id}/agents/{instance_id}` | 让智能体加入 / 移出项目（owner / admin）：同步项目知识库权限（`project_agents`）与项目群成员；重复加入、移出不存在的成员不报错；停用的实例 422 | 已实现（T-0110） |
 | POST | `/api/v1/projects/{project_id}/im-group` | 建项目群 / 立即重试（owner / admin）：没有项目群时建一个（群主是自己），正在建的立即重试，已建好的重新同步；没有部署 OpenIM 时 409 `IM_NOT_CONFIGURED` | 已实现（T-0110） |
+| PUT | `/api/v1/agents/instances/{instance_id}/project-admin` | 打开或关闭实例的项目管理权限（owner / admin，`{enabled, version}` 乐观并发，审计）：打开后它的工具里多出 `create_project` / `add_to_project` / `list_peers`，直接执行；它建的项目群的群主是打开权限的人；关闭后已建的项目与成员保留。`AgentInstanceOut` 增加 `project_admin`（`enabled`、`granted_by`、`granted_at`） | 已实现（T-0112） |
 | GET / POST | `/api/v1/tasks` | 任务列表（`status` = `open` / `done` / `all`、`project_id`、`priority`、`due_before` / `due_after`、`q`、`sort`、游标分页）/ 创建任务（必须带 `Idempotency-Key`） | 已实现（T-0082） |
 | GET / PATCH / DELETE | `/api/v1/tasks/{task_id}` | 详情 / 修改（`Idempotency-Key` + `version`；可以改 `project_id` 移到别的项目）/ 删除（`Idempotency-Key` + `?version=`） | 已实现（T-0082） |
 

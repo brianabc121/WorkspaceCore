@@ -1002,7 +1002,15 @@ def test_v2_mcp_tools_match_the_plan() -> None:
         # 直接执行、不审批（人类 2026-11-03 决定）
         "knowledge": {"knowledge_write", "knowledge_delete"},
         # 领取 / 放弃 / 完成任务：直接执行、不审批（人类 2026-11-04 决定，T-0111）
-        "direct": {"claim_task", "release_task", "complete_task"},
+        "direct": {
+            "claim_task",
+            "release_task",
+            "complete_task",
+            # 项目管理：只给打开了项目管理权限的实例（T-0112）
+            "create_project",
+            "add_to_project",
+            "list_peers",
+        },
     }
     for spec in TOOLS.values():
         assert spec.name.isidentifier() and spec.name.islower()

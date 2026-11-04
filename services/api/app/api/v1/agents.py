@@ -15,6 +15,7 @@ from app.api.deps import (
     csrf_protected,
     get_agent_service,
     get_agent_ssh_service,
+    workspace_admin,
     workspace_owner,
 )
 from app.domain.agent_ssh import AgentSshService
@@ -39,6 +40,8 @@ from app.schemas.agents import (
     AgentSshTargetSet,
     AgentSshUninstall,
     BundleRequest,
+    ProjectAdminOut,
+    ProjectAdminPut,
     SecretAccessPage,
     SecretAccessResult,
     SecretGrantsReplace,
@@ -49,6 +52,7 @@ from app.schemas.common import error_responses
 router = APIRouter(tags=["agents"], dependencies=[Security(authenticated)])
 
 Owner = Annotated[WorkspaceAccess, Depends(workspace_owner)]
+Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
 Service = Annotated[AgentService, Depends(get_agent_service)]
 SshService = Annotated[AgentSshService, Depends(get_agent_ssh_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
@@ -136,6 +140,23 @@ async def update_agent_instance(
     access: Owner, request: Request, service: Service, instance_id: UUID, body: AgentInstanceUpdate
 ) -> AgentInstanceOut:
     return await service.update_instance(access, instance_id, body, client_ip=_ip(request, service))
+
+
+@router.put(
+    "/agents/instances/{instance_id}/project-admin",
+    summary="打开或关闭实例的项目管理权限（admin，乐观并发）",
+    description="打开后这个实例的工具里多出 create_project / add_to_project / list_peers，"
+    "直接执行、不审批（人类 2026-11-04 决定）；它建的项目群的群主是打开权限的人。"
+    "关闭后它已经建的项目和拉进来的成员保留，只是不能再建、再拉。每次都写审计（T-0112）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def put_project_admin(
+    access: Admin, request: Request, service: Service, instance_id: UUID, body: ProjectAdminPut
+) -> ProjectAdminOut:
+    return await service.set_project_admin(
+        access, instance_id, body, client_ip=_ip(request, service)
+    )
 
 
 @router.post(

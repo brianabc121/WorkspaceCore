@@ -320,6 +320,10 @@
             "description": "实例上报的 openclaw-channel 版本",
             "title": "Plugin Version"
           },
+          "project_admin": {
+            "$ref": "#/components/schemas/ProjectAdminOut",
+            "description": "项目管理权限（T-0112）：打开后它能新建项目、把智能体拉进它建的项目"
+          },
           "reported_version": {
             "anyOf": [
               {
@@ -386,6 +390,7 @@
           "last_seen_at",
           "bundle_issued_at",
           "disabled_at",
+          "project_admin",
           "credentials",
           "secret_grants",
           "version",
@@ -8951,6 +8956,68 @@
         "title": "PasswordChangeRequest",
         "type": "object"
       },
+      "ProjectAdminOut": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "granted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Granted At"
+          },
+          "granted_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "打开的人；他做智能体建的项目群的群主",
+            "title": "Granted By"
+          }
+        },
+        "required": [
+          "enabled",
+          "granted_by",
+          "granted_at"
+        ],
+        "title": "ProjectAdminOut",
+        "type": "object"
+      },
+      "ProjectAdminPut": {
+        "additionalProperties": false,
+        "description": "打开或关闭项目管理权限（owner / admin）。关闭后它已经建的项目和拉进来的成员保留。",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "version"
+        ],
+        "title": "ProjectAdminPut",
+        "type": "object"
+      },
       "ProjectAgentBrief": {
         "description": "项目的智能体成员（T-0110）：在项目知识库里有权限，有项目群时也在群里。",
         "properties": {
@@ -14904,6 +14971,135 @@
           }
         ],
         "summary": "启用实例（owner）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/project-admin": {
+      "put": {
+        "description": "打开后这个实例的工具里多出 create_project / add_to_project / list_peers，直接执行、不审批（人类 2026-11-04 决定）；它建的项目群的群主是打开权限的人。关闭后它已经建的项目和拉进来的成员保留，只是不能再建、再拉。每次都写审计（T-0112）。",
+        "operationId": "put_project_admin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectAdminPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectAdminOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "打开或关闭实例的项目管理权限（admin，乐观并发）",
         "tags": [
           "agents"
         ]

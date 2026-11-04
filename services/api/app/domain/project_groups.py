@@ -130,7 +130,7 @@ def mark_dirty(project: Project) -> None:
         project.im_group_status = "pending"
 
 
-def request_group(project: Project, owner_user_id: uuid.UUID) -> None:
+def request_group(project: Project, owner_user_id: uuid.UUID | None) -> None:
     """要一个项目群（新建项目时勾选，或旧项目补建）。已经在建或建好的只是重新同步。"""
     if project.im_group_status == "none":
         project.im_group_owner_id = owner_user_id

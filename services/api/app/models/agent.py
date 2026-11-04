@@ -109,6 +109,13 @@ class AgentInstance(Base):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # 最近一次收到 token 用量上报（接入包的 usage-report，迁移 0027）；为空表示没上报过
     usage_reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 项目管理权限（T-0112，迁移 0030）：管理员打开后它能新建项目、把智能体拉进它建的项目；
+    # project_admin_by 是打开的人（它建的项目群的群主），不参与 version
+    project_admin_enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    project_admin_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    project_admin_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()
