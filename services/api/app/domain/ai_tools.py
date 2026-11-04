@@ -334,7 +334,7 @@ class AiToolService:
         row.executed_at = _now()
         row.error_code = error_code
         self.db.add(row)
-        if spec.risk == "knowledge":
+        if spec.risk in ("knowledge", "direct"):
             events.mark(self.db, requester.workspace.id, "ai")
         await self.db.commit()
 

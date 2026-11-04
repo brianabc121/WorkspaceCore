@@ -57,7 +57,9 @@ from app.schemas.tasks import (
 from app.schemas.workspaces import Role
 
 # knowledge：知识库工具，直接执行、不审批（docs/v2/KNOWLEDGE_PLAN.md 3.7，人类 2026-11-03 决定）
-RiskLevel = Literal["read", "write", "critical", "knowledge"]
+# direct：领取 / 放弃 / 完成任务，直接执行、不审批
+# （docs/v2/AGENT_OPS_PLAN.md 第 7 节，人类 2026-11-04 决定）
+RiskLevel = Literal["read", "write", "critical", "knowledge", "direct"]
 ExecutionStatus = Literal[
     "pending_approval",
     "rejected",
@@ -203,6 +205,10 @@ class SearchOutput(BaseModel):
 class ListTasksInput(_Strict):
     status: TaskStatusFilter = "open"
     project_id: UUID | None = None
+    assigned_to_me: bool = Field(default=False, description="只看执行者是你的任务")
+    claimable: bool = Field(
+        default=False, description="只看你现在能用 claim_task 领取的任务（可自由接取、在范围内）"
+    )
     due_before: AwareDatetime | None = None
     due_after: AwareDatetime | None = None
     q: Annotated[str, StringConstraints(min_length=1, max_length=100)] | None = None
@@ -212,6 +218,21 @@ class ListTasksInput(_Strict):
 
 class TaskText(_Untrusted):
     title: str
+    assignee_name: str | None = Field(
+        default=None, description="执行者的显示名（成员只给显示名）；没有执行者时为 null"
+    )
+
+
+class TaskClaim(BaseModel):
+    """接取方式（T-0111）。"""
+
+    mode: Literal["assigned", "open"] = Field(
+        description="assigned 由管理员指派；open 可自由接取（没有执行者时用 claim_task 领取）"
+    )
+    scope: Literal["all", "project"] = Field(
+        description="自由接取的范围：全部智能体 / 只限项目成员"
+    )
+    claimable: bool = Field(description="你现在能领取（可自由接取、没有执行者、没完成、在范围内）")
 
 
 class TaskItem(BaseModel):
@@ -220,6 +241,13 @@ class TaskItem(BaseModel):
     done: bool
     priority: int
     due_at: datetime | None
+    assignee: Literal["me", "member", "instance", "none"] = Field(
+        description="执行者：me 是你自己；member 是工作空间成员；instance 是别的智能体；none 没有"
+    )
+    claim: TaskClaim
+    planned_start_at: datetime | None
+    started_at: datetime | None
+    running: bool = Field(description="现在有正在执行的一段")
     untrusted: TaskText
 
 
@@ -237,6 +265,10 @@ class TaskDetailText(_Untrusted):
     title: str
     description: str
     labels: list[str]
+    assignee_name: str | None = None
+    last_reopen_reason: str | None = Field(
+        default=None, description="最近一次被管理员打回的原因；没被打回过为 null"
+    )
 
 
 class TaskDetail(BaseModel):
@@ -246,6 +278,11 @@ class TaskDetail(BaseModel):
     done_at: datetime | None
     priority: int
     due_at: datetime | None
+    assignee: Literal["me", "member", "instance", "none"]
+    claim: TaskClaim
+    planned_start_at: datetime | None
+    started_at: datetime | None
+    running: bool
     untrusted: TaskDetailText
 
 
@@ -315,8 +352,27 @@ class EventItem(BaseModel):
     untrusted: EventText
 
 
+class DueTaskText(_Untrusted):
+    title: str
+    project: str
+
+
+class DueTaskItem(BaseModel):
+    """这段时间里有截止时间、还没完成的任务（日历上的待办，T-0111）。"""
+
+    id: UUID
+    project_id: UUID
+    due_at: datetime
+    assigned_to_me: bool
+    claimable: bool
+    untrusted: DueTaskText
+
+
 class CalendarAgendaOutput(BaseModel):
     items: list[EventItem]
+    due_tasks: list[DueTaskItem] = Field(
+        description="这段时间里有截止时间、还没完成的任务（最多 100 个，按截止时间排序）"
+    )
 
 
 class ListBookmarksInput(_Strict):
@@ -530,6 +586,42 @@ class TaskRef(_Strict):
     task_id: UUID
 
 
+class ReleaseTaskInput(_Strict):
+    task_id: UUID
+    reason: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+    ] = Field(description="为什么放弃（写进任务的动态，管理员能看到）")
+
+
+class CompleteTaskInput(_Strict):
+    task_id: UUID
+    note: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)] = Field(
+        default="", description="完成说明（可选，写进任务的动态）"
+    )
+
+
+class ClaimTaskOutput(BaseModel):
+    status: Literal["claimed"] = "claimed"
+    task_id: UUID
+    already_yours: bool = Field(description="之前已经是你的任务（重复调用）")
+    joined_project: bool = Field(
+        description="这次领取让你加入了任务所在的项目（能读写项目知识库，并被拉进项目群）"
+    )
+    next_step: str
+
+
+class ReleaseTaskOutput(BaseModel):
+    status: Literal["released"] = "released"
+    task_id: UUID
+
+
+class CompleteTaskOutput(BaseModel):
+    status: Literal["completed"] = "completed"
+    task_id: UUID
+    done_at: datetime | None
+    already_done: bool = Field(description="任务之前已经是完成状态（重复调用）")
+
+
 class EventRef(_Strict):
     event_id: UUID
 
@@ -578,10 +670,24 @@ def _knowledge(name: str, input_model: type[BaseModel], output_model: type[BaseM
 
 _READ: list[ToolSpec] = [
     _spec("search", "read", SearchInput, SearchOutput, "全局搜索任务、项目、书签、日程、仓库"),
-    _spec("list_tasks", "read", ListTasksInput, ListTasksOutput, "列出任务"),
+    _spec(
+        "list_tasks",
+        "read",
+        ListTasksInput,
+        ListTasksOutput,
+        "列出任务；assigned_to_me 只看分给你的，claimable 只看你能领取的",
+    ),
     _spec("get_task", "read", GetTaskInput, GetTaskOutput, "读取一个任务的详情"),
     _spec("list_projects", "read", EmptyInput, ListProjectsOutput, "列出项目"),
-    _spec("calendar_agenda", "read", CalendarAgendaInput, CalendarAgendaOutput, "读取日程"),
+    _spec(
+        "calendar_agenda",
+        "read",
+        CalendarAgendaInput,
+        CalendarAgendaOutput,
+        "读取日程，以及这段时间里有截止时间、还没完成的任务（日历上的待办）。"
+        "要新增待办：建一个带截止时间的任务（create_task 的 due_at），或建一个全天日程"
+        "（create_calendar_event 的 all_day）",
+    ),
     _spec("list_bookmarks", "read", ListBookmarksInput, ListBookmarksOutput, "列出书签"),
     _spec(
         "list_knowledge_sources", "read", EmptyInput, ListKnowledgeSourcesOutput, "列出知识库来源"
@@ -606,7 +712,6 @@ _READ: list[ToolSpec] = [
 _WRITE: list[ToolSpec] = [
     _spec("create_task", "write", TaskCreate, PendingApproval, "新建任务（需要审批）"),
     _spec("update_task", "write", UpdateTaskInput, PendingApproval, "修改任务（需要审批）"),
-    _spec("complete_task", "write", TaskRef, PendingApproval, "完成任务（需要审批）"),
     _spec(
         "create_calendar_event",
         "write",
@@ -643,6 +748,30 @@ _CRITICAL: list[ToolSpec] = [
         "触发白名单工作流（高危，需要审批和二次认证）",
     ),
 ]
+_DIRECT: list[ToolSpec] = [
+    _spec(
+        "claim_task",
+        "direct",
+        TaskRef,
+        ClaimTaskOutput,
+        "领取一个可自由接取的任务（直接生效）：先用 get_task 看描述，符合你的能力再领取；"
+        "你必须空闲（没有正在执行的任务），先到先得",
+    ),
+    _spec(
+        "release_task",
+        "direct",
+        ReleaseTaskInput,
+        ReleaseTaskOutput,
+        "放弃你自己领取的任务（直接生效，要写原因）；管理员指派的任务不能放弃",
+    ),
+    _spec(
+        "complete_task",
+        "direct",
+        CompleteTaskInput,
+        CompleteTaskOutput,
+        "把执行者是你的任务标为完成（直接生效，可以附完成说明）；管理员觉得有问题会打回",
+    ),
+]
 _KNOWLEDGE: list[ToolSpec] = [
     _knowledge("knowledge_search", KnowledgeSearchInput, KnowledgeSearchOutput),
     _knowledge("knowledge_get", KnowledgeGetInput, KnowledgeGetOutput),
@@ -651,8 +780,11 @@ _KNOWLEDGE: list[ToolSpec] = [
     _knowledge("knowledge_write", KnowledgeWriteInput, KnowledgeWriteOutput),
     _knowledge("knowledge_delete", KnowledgeDeleteInput, KnowledgeDeleteOutput),
 ]
-TOOLS: dict[str, ToolSpec] = {spec.name: spec for spec in _READ + _WRITE + _CRITICAL + _KNOWLEDGE}
+TOOLS: dict[str, ToolSpec] = {
+    spec.name: spec for spec in _READ + _WRITE + _CRITICAL + _DIRECT + _KNOWLEDGE
+}
 KNOWLEDGE_TOOL_NAMES = frozenset(spec.name for spec in _KNOWLEDGE)
+DIRECT_TOOL_NAMES = frozenset(spec.name for spec in _DIRECT)
 
 # 永远不做成工具（方案第 4.6 节）：集成凭证与设置、成员与角色、会话、工作台设置、
 # 实例与密钥管理、审计日志

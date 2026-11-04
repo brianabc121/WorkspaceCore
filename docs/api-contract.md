@@ -143,6 +143,9 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | PATCH | `/api/v1/tasks/{task_id}` | 增加 `planned_start_at`、`assignee_user_id`、`assignee_instance_id`（都可以设为 null 清除） | 已实现（T-0104） |
 | GET | `/api/v1/tasks/assignees` | 可以指派的执行者：本工作空间的成员（`id`、`display_name`）与没有停用的实例（`id`、`name`、`status`）；viewer。实例接口只给 owner，任务编辑器用这个 | 已实现（T-0104） |
 | GET | `/api/v1/tasks/timeline` | `from` / `to`（默认现在前后 12 小时，最长 31 天）、`project_id`、`group` = `executor`（默认）/ `project`；viewer | 已实现（T-0104） |
+| PATCH | `/api/v1/tasks/{task_id}` | 增加 `claim_mode`（`assigned` 指派 / `open` 可自由接取）与 `claim_scope`（`all` / `project`），只限 owner / admin（member 带这两项 403）；设为 `open` 时任务必须没有执行者、没有完成（否则 `409 TASK_NOT_OPENABLE`），保存后工作台用你的 IM 账号通知在线、空闲、可写、在范围内的智能体（重放不会重复通知）；设了执行者时自动回到 `assigned`。`TaskOut` 增加 `claim_mode`、`claim_scope`、`claimable` | 已实现（T-0111） |
+| GET | `/api/v1/tasks/{task_id}/events` | 任务的动态（viewer）：`opened` 设为自由接取 / `claimed` 领取 / `released` 放弃 / `completed` 完成 / `reopened` 打回，带当时的名字和 `note`（原因或完成说明，按纯文本显示），最多 100 条 | 已实现（T-0111） |
+| POST | `/api/v1/tasks/{task_id}/reopen` | 打回（owner / admin）：`{version, reason}`；已完成的任务回到进行中，执行者是智能体时开新的一段并用你的 IM 账号把原因发给它；原执行者停用或删除时放回未分配；没完成 `409 TASK_NOT_DONE`，版本不对 `409 VERSION_CONFLICT` | 已实现（T-0111） |
 | GET | `/api/v1/tasks/{task_id}/runs` | 执行记录，最近 100 段，新的在前；带 token、每 10 分钟用量（`series`）与等待审批；viewer | 已实现（T-0104） |
 | POST | `/api/v1/tasks/{task_id}/runs` | 开始一段，必须带 `Idempotency-Key`。`{"dispatch": false}`：人的任务开始（member）；`{"dispatch": true}`：交给执行者实例执行（owner / admin） | 已实现（T-0104） |
 | POST | `/api/v1/tasks/{task_id}/runs/{run_id}/stop` | 结束一段：`reason` = `paused` / `interrupted` / `cancelled`；已经结束的原样返回；实例执行的段要 owner / admin | 已实现（T-0104） |
@@ -153,7 +156,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 - **一段执行**（`TaskRunOut`）：`executor_kind`（`user` / `instance`）、`user_id` / `instance_id`、`executor_name`（开始时的名字）、`started_at`、`ended_at`、`end_reason`（`done` / `paused` / `interrupted` / `cancelled`）、`started_by`、`ended_by`（系统结束时为空）、`tokens`、`tokens_shared`、`usage_reported`、`waits`、`series`。
   - 同一个任务同时只有一段在执行（`409 RUN_ALREADY_OPEN`）；已完成的任务不能开始（`409 TASK_DONE`）。
   - 人的任务：没有执行者时，点“开始”的人成为执行者。执行者是实例时返回 `409 AGENT_TASK`。
-  - 交给实例执行：执行者必须是实例（`409 NO_AGENT_ASSIGNEE`）、没停用（`409 AGENT_DISABLED`）、在线（`409 AGENT_OFFLINE`）。工作台以**当前管理员自己的 IM 账号**发一条固定格式的消息（任务标题、`task_id`、截止时间，请它用 `get_task` 读详情、做完用 `complete_task` 标为完成），发出后才开段。
+  - 交给实例执行：执行者必须是实例（`409 NO_AGENT_ASSIGNEE`）、没停用（`409 AGENT_DISABLED`）、在线（`409 AGENT_OFFLINE`）。工作台以**当前管理员自己的 IM 账号**发一条固定格式的消息（任务标题、`task_id`、截止时间，请它用 `get_task` 读详情、做完用 `complete_task` 标为完成），发出后才开段。有项目群时，项目群里也发一条通知（T-0111，D6）。
     消息的 Idempotency-Key 由请求的键推出：同一个请求重试不会发两条；IM 结果不确定时返回 `504 RESULT_UNKNOWN`、不开段，用同一个键重试即可。IM 的其他错误照 IM 接口返回（`409 IM_NOT_READY` / `IM_SEND_REJECTED`、`503 IM_UNAVAILABLE`、`429`）。
   - 结束：人点暂停 / 结束；任务标为完成时结束为 `done`（智能体经审批完成也一样）；改执行者时记为 `interrupted`；实例停用时、或离线超过 10 分钟时（Worker 每分钟检查，结束在离线开始的时间）记为 `interrupted`。没有新增 MCP 写工具。
   - **token 按时间归属**：一段用的 token = 这个实例在这段时间里每分钟增量之和；上报有约一分钟延迟，一分钟 m 的增量归给与 [m − 1 分钟, m + 1 分钟) 重叠的段；同一实例同时有几段就平均分（`tokens_shared: true`，界面标“≈”）。人的任务、实例从没上报过时 `tokens` 为 null（`usage_reported: false`，界面显示“未上报”）。

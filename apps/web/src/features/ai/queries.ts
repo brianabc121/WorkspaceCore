@@ -39,7 +39,7 @@ export const STATUS_LABELS: Record<ExecutionStatus, string> = {
   succeeded: '已执行', failed: '执行失败', unknown: '结果未知', denied: '权限不够，已拒绝',
 }
 // knowledge：知识库工具，直接执行、不审批（T-0098）
-export const RISK_LABELS: Record<RiskLevel, string> = { read: '读取', write: '写操作', critical: '高危', knowledge: '知识库' }
+export const RISK_LABELS: Record<RiskLevel, string> = { read: '读取', write: '写操作', critical: '高危', knowledge: '知识库', direct: '直接执行' }
 
 export function aiError(error: unknown): string {
   if (!(error instanceof ApiError)) return '请求失败，请稍后重试。'

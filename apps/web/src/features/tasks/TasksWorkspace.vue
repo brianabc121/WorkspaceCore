@@ -201,6 +201,7 @@ const columns = computed(() => (board.value ? [{ title: '未完成', done: false
             <span class="task-context">{{ projectTitles.get(item.project_id) ?? '已归档的项目' }}<template v-if="item.labels.length"> · {{ item.labels.join(' · ') }}</template></span>
             <span v-if="item.priority" class="chip" :class="item.priority >= 3 ? 'chip-high' : ''">{{ priorities[item.priority] }}</span>
             <span class="chip" :class="`chip-due-${dueInfo(item.due_at, item.done).tone}`">{{ dueInfo(item.due_at, item.done).text }}</span>
+            <span v-if="item.claimable" class="chip">可自由接取</span>
             <span v-if="!writable" class="chip">{{ item.done ? '已完成' : '未完成' }}</span>
           </p>
         </div>

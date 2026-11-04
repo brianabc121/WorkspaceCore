@@ -330,9 +330,10 @@
 | 风险 | 工具 | 所需 scope | 最低角色 | 返回 |
 |---|---|---|---|---|
 | 读 | `search`、`list_tasks`、`get_task`、`list_projects`、`calendar_agenda`、`list_bookmarks`、`list_knowledge_sources`、`list_repos`、`list_issues`、`list_pull_requests`、`service_status`、`list_notifications`、`list_automations`、`dashboard_overview`、`get_action_status` | `read` | viewer | 各自的输出模型 |
-| 写 | `create_task`（`TaskCreate`）、`update_task`、`complete_task`、`create_calendar_event`（`CalendarEventCreate`）、`create_bookmark`（`BookmarkCreate`） | `read_write` | member | `PendingApproval` |
+| 写 | `create_task`（`TaskCreate`）、`update_task`、`create_calendar_event`（`CalendarEventCreate`）、`create_bookmark`（`BookmarkCreate`） | `read_write` | member | `PendingApproval` |
 | 写 | `mark_notification_read` | `read_write` | viewer | `PendingApproval` |
 | 高危 | `delete_task`、`delete_calendar_event`、`trigger_automation` | `read_write` | member | `PendingApproval`；批准要二次认证 |
+| 直接执行（T-0111，人类 2026-11-04 决定） | `claim_task`、`release_task`、`complete_task`（2026-11-04 之前是写工具、要审批） | `read_write` | member | 各自的输出；执行记录 `risk_level = direct`，见 `docs/v2/AGENT_OPS_PLAN.md` 第 3、7 节 |
 
 - 实际角色取“登记人的角色”和“实例的 `max_role`”中较低的一个。
 - `calendar_agenda` 最多查 31 天；列表类工具 `limit` 最多 50。

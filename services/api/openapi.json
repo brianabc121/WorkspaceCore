@@ -1683,7 +1683,8 @@
               "read",
               "write",
               "critical",
-              "knowledge"
+              "knowledge",
+              "direct"
             ],
             "title": "Risk Level",
             "type": "string"
@@ -11933,6 +11934,76 @@
         "title": "TaskCreate",
         "type": "object"
       },
+      "TaskEventList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskEventOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "TaskEventList",
+        "type": "object"
+      },
+      "TaskEventOut": {
+        "description": "任务的动态（T-0111）：设为自由接取、领取、放弃、完成、打回。",
+        "properties": {
+          "actor_kind": {
+            "enum": [
+              "user",
+              "instance",
+              "system"
+            ],
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "actor_name": {
+            "title": "Actor Name",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "opened",
+              "claimed",
+              "released",
+              "completed",
+              "reopened"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "description": "放弃 / 打回的原因或完成说明；来自人或智能体的文字，按纯文本显示",
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "actor_kind",
+          "actor_name",
+          "note",
+          "created_at"
+        ],
+        "title": "TaskEventOut",
+        "type": "object"
+      },
       "TaskOut": {
         "properties": {
           "assignee_instance_id": {
@@ -11960,6 +12031,29 @@
             ],
             "description": "执行者是工作空间成员时的用户 ID",
             "title": "Assignee User Id"
+          },
+          "claim_mode": {
+            "description": "接取方式（T-0111）：assigned 由管理员指派；open 可自由接取（空闲的智能体领取）",
+            "enum": [
+              "assigned",
+              "open"
+            ],
+            "title": "Claim Mode",
+            "type": "string"
+          },
+          "claim_scope": {
+            "description": "自由接取的范围：all 全部智能体 / project 只限项目成员",
+            "enum": [
+              "all",
+              "project"
+            ],
+            "title": "Claim Scope",
+            "type": "string"
+          },
+          "claimable": {
+            "description": "现在能被领取：open、没有执行者、没有完成",
+            "title": "Claimable",
+            "type": "boolean"
           },
           "created_at": {
             "format": "date-time",
@@ -12077,6 +12171,9 @@
           "started_at",
           "assignee_user_id",
           "assignee_instance_id",
+          "claim_mode",
+          "claim_scope",
+          "claimable",
           "version",
           "created_at",
           "updated_at"
@@ -12121,6 +12218,31 @@
           "items"
         ],
         "title": "TaskPage",
+        "type": "object"
+      },
+      "TaskReopen": {
+        "additionalProperties": false,
+        "description": "打回（owner / admin）：已完成的任务回到进行中，原因会发给执行的智能体。",
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "version": {
+            "description": "读取时的 version，原样带回；与当前版本不一致时返回 409",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "reason"
+        ],
+        "title": "TaskReopen",
         "type": "object"
       },
       "TaskRunList": {
@@ -12368,6 +12490,38 @@
             ],
             "description": "执行者：工作空间成员",
             "title": "Assignee User Id"
+          },
+          "claim_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "assigned",
+                  "open"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "接取方式（只限 owner / admin）：设为 open 时任务必须没有执行者、没有完成，工作台会通知符合条件的智能体；设了执行者时自动改回 assigned",
+            "title": "Claim Mode"
+          },
+          "claim_scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "all",
+                  "project"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "自由接取的范围（只限 owner / admin）",
+            "title": "Claim Scope"
           },
           "description": {
             "anyOf": [
@@ -16808,7 +16962,8 @@
                       "read",
                       "write",
                       "critical",
-                      "knowledge"
+                      "knowledge",
+                      "direct"
                     ],
                     "type": "string"
                   },
@@ -31909,6 +32064,216 @@
           }
         ],
         "summary": "修改任务（member，必须带 Idempotency-Key 与 version）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/events": {
+      "get": {
+        "description": "设为自由接取、领取、放弃、完成、打回（T-0111），最新的在前，最多 100 条。note 是原因或完成说明，来自人或智能体的文字，按纯文本显示。",
+        "operationId": "list_task_events",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskEventList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "任务的动态（viewer）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/reopen": {
+      "post": {
+        "description": "任务回到进行中（未完成、执行者不变）。执行者是智能体时开新的一段，并用你的 IM 账号把原因发给它；原执行者已停用或删除时任务放回未分配。原因写进任务的动态。没完成的任务返回 409 TASK_NOT_DONE（T-0111）。",
+        "operationId": "reopen_task",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskReopen"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "打回已完成的任务（admin，乐观并发）",
         "tags": [
           "tasks"
         ]

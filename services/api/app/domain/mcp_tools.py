@@ -9,6 +9,8 @@
 - 每次工具调用都按实例限流（每分钟 120 次）；写工具与高危工具只建待审批记录（A14），读工具也写记录。
 - 知识库工具（knowledge_*，T-0098）由 app/domain/knowledge_tools.py 处理：写入直接执行、不审批，
   由知识库自己的保护措施兜底（docs/v2/KNOWLEDGE_PLAN.md 3.8）。
+- 领取 / 放弃 / 完成任务（claim_task / release_task / complete_task，风险等级 direct，T-0111）
+  由 app/domain/agent_tasks.py 处理：直接执行、不审批（docs/v2/AGENT_OPS_PLAN.md 第 7 节）。
 - 错误：`isError: true`，文字内容是 `{"error": {"code", "message"}}` 的 JSON，不带结构化内容。
   OpenClaw 2026.9.36 带的 MCP SDK（1.32.1）客户端只要有 `structuredContent` 就按工具的
   outputSchema 校验，错误也不例外；带上就变成 -32602，智能体看不到错误码和说明（T-0108）。
@@ -32,8 +34,9 @@ from starlette.requests import Request
 from app import __version__
 from app.core.errors import ApiError
 from app.core.logging import request_id_var
-from app.domain import knowledge_tools, ops_metrics
+from app.domain import agent_tasks, knowledge_tools, ops_metrics
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
+from app.domain.im import openim_client
 from app.domain.mcp_read_tools import READ_HANDLERS, ReadCall
 from app.domain.ratelimit import WindowLimiter
 from app.models import AgentInstance
@@ -71,8 +74,9 @@ def tool_definition(spec: ToolSpec) -> types.Tool:
         annotations=types.ToolAnnotations(
             read_only_hint=spec.risk == "read",
             destructive_hint=spec.risk == "critical" or spec.name == "knowledge_delete",
-            # 知识库写工具带幂等键：同一个键重试不会重复写入
-            idempotent_hint=spec.risk in ("read", "knowledge"),
+            # 知识库写工具带幂等键：同一个键重试不会重复写入；领取、完成重复调用返回同样的结果
+            idempotent_hint=spec.risk in ("read", "knowledge")
+            or spec.name in ("claim_task", "complete_task"),
             open_world_hint=False,
         ),
     )
@@ -195,6 +199,15 @@ async def _dispatch(
                 if spec.name in KNOWLEDGE_TOOL_NAMES:
                     output = await knowledge_tools.run(
                         service, requester, spec, raw, request_id=caller.request_id
+                    )
+                elif spec.risk == "direct":
+                    output = await agent_tasks.run(
+                        service,
+                        requester,
+                        spec,
+                        raw,
+                        request_id=caller.request_id,
+                        im=openim_client(state.settings, state.connectors, state.redis),
                     )
                 elif spec.risk == "read":
                     output = await _read(service, requester, spec, raw, caller, state)

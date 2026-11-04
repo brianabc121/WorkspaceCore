@@ -234,6 +234,7 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 同一迁移里的其他变化：
 
 - **`ai_tool_executions.risk_level`**：CHECK 增加 `knowledge`（`knowledge_write` / `knowledge_delete` 直接执行，不进审批，人类 2026-11-03 决定）。
+- **`ai_tool_executions.risk_level`（迁移 0029）**：CHECK 再增加 `direct`（`claim_task` / `release_task` / `complete_task` 直接执行，不进审批，人类 2026-11-04 决定）；已有 `direct` 记录时迁移拒绝降级。
 - **搜索**：`knowledge_notes` 上的触发器 `search_index`（`search_trigger_note`）写 `search_documents`，`resource_type = note`、provider = `local`，
   `body` 是别名、标签加正文，`context` 是知识库名；软删除时移出索引。`search_rebuild()` 加上笔记。智能体的通用 `search` 工具不搜笔记（用 `knowledge_search`）。
 - **downgrade** 删除知识库相关的工具调用记录（`risk_level = knowledge`），恢复旧的 CHECK、`search_rebuild()`，删除触发器、函数、笔记的搜索文档和全部知识库表。
@@ -264,6 +265,8 @@ ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。
 |---|---|---|
 | `tasks` 新增 | `planned_start_at`、`started_at`、`assignee_user_id`、`assignee_instance_id` | 计划开始；第一次开始执行的时间（由执行记录维护，不改 `version`）；执行者是成员或实例，`ck_tasks_assignee` 保证最多一个。执行者被删除时置空（`ON DELETE SET NULL`），工作空间与角色由应用校验 |
 | `task_runs` | `id`、`workspace_id`、`task_id`、`executor_kind`、`user_id`、`instance_id`、`executor_name`、`started_at`、`ended_at`、`end_reason`、`started_by`、`ended_by`、`start_key`、`created_at` | 一段执行一行，随任务、工作空间级联删除。`executor_kind` ∈ `user` / `instance`；`end_reason` ∈ `done` / `paused` / `interrupted` / `cancelled`，与 `ended_at` 同时为空或同时有值（`ck_task_runs_ended`），`ended_at >= started_at`。部分唯一索引 `uq_task_runs_open`：同一个任务同时只有一段在执行。`start_key` 唯一：开始这段时的 Idempotency-Key。成员或实例被删除时 `user_id` / `instance_id` 置空，`executor_name` 保留开始时的名字 |
+| `tasks` 新增（T-0111，迁移 0029） | `claim_mode`、`claim_scope`、`claim_opened_by` | 接取方式：CHECK `claim_mode` ∈ `assigned`（管理员指派，默认）/ `open`（可自由接取），`claim_scope` ∈ `all` / `project`；`claim_opened_by` 是设为自由接取的人 → `users`（删除后置空），用他的 IM 账号通知智能体。部分索引 `ix_tasks_claimable`：`open`、没完成、没有执行者的任务 |
+| `task_events` | `id`、`workspace_id`、`task_id`、`kind`、`actor_kind`、`user_id`、`instance_id`、`actor_name`、`note`、`created_at` | 任务的动态，随任务、工作空间级联删除。CHECK `kind` ∈ `opened` / `claimed` / `released` / `completed` / `reopened`，`actor_kind` ∈ `user` / `instance` / `system`；`user_id`、`instance_id` 删除后置空，`actor_name` 保留当时的名字；`note` 是原因或完成说明（来自人或智能体，按不可信文字处理）。索引 `ix_task_events_task_created` |
 | `agent_usage_minutes` | `instance_id`、`minute`、`workspace_id`、`input`、`output`、`cache_read`、`cache_write` | 每个实例每分钟的 token 增量（bigint），主键 `(instance_id, minute)`，索引 `(workspace_id, minute)`。只存有增量的分钟。随实例、工作空间级联删除；Worker 每小时删除 90 天前的 |
 | `agent_usage_cursors` | `instance_id`、`day`、`session_hash`、`input`、`output`、`cache_read`、`cache_write`、`updated_at` | 每个实例、每天（UTC）、每个会话最后一次上报的累计值，主键 `(instance_id, day, session_hash)`，用来算增量。`session_hash` 是接入包算好的会话 key 的 SHA-256，工作台不存会话 key。Worker 删除 3 天前的 |
 | `agent_instances` 新增 | `usage_reported_at` | 最近一次收到用量上报；为空表示没上报过（时间轴显示“未上报”；第一次上报只记基准） |
