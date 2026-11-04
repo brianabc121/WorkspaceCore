@@ -829,8 +829,9 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
    `plugins.allow` 只有 `openclaw-channel`；不设置 `commands.ownerAllowFrom`；发图片 / 文件 / 视频的插件工具不可用；`requireMention: true`；
    `secrets audit` 没有明文；日志级别与保留期已设置（SDK 会把消息内容写进日志）。
 7. **定时任务**：每 10 分钟 `openclaw secrets reload`（轮换后的模型密钥不用重启就生效）；每周重启一次（换新的 IM 令牌）；
-   每分钟在容器里运行 `node /opt/myworkspace/bin/usage-report.mjs`，把 token 用量报给工作台（任务时间轴，T-0104；没配时时间轴显示“未上报”）。
-   SSH 部署自动写入这三行 crontab。
+   每分钟在容器里运行 `node /opt/myworkspace/bin/usage-report.mjs`，把 token 用量报给工作台（任务时间轴，T-0104；没配时时间轴显示“未上报”）；
+   每分钟在容器里运行 `node /opt/myworkspace/bin/host-report.mjs`，把服务器状态报给工作台（T-0113；没配时实例页的“服务器状态”显示“还没有收到”）。
+   SSH 部署自动写入这四行 crontab。
 8. **备份与回滚**：`openclaw backup create --verify` 能跑通；回滚要连同备份的状态一起恢复（降级不会撤销 OpenClaw 的迁移）。
 9. **确认**：工作台运维页里这个实例显示“正常”；IM 通讯录里出现这个实例并已互为好友，私聊能收到回复；
    停用实例后它取不到密钥、MCP 返回 401、IM 被强制下线。
@@ -932,3 +933,33 @@ sudo -E python3 tests/e2e/agents_acceptance.py --server-ca <签发入口证书�
 - Compose CI 的 `timeline_browser.cjs`：入口、全部 / 按项目、智能体执行过的一段与 token、开始暂停、拖动计划、执行记录、手机宽度、viewer 只读。
 - agents CI 场景 16：真实 OpenClaw 上报用量 → 交给智能体执行 → `complete_task` 直接完成 → 这段结束并分到 token；SSH 自动部署验收照 crontab 那一行跑一次上报。
 - agents CI 场景 17（T-0111）：设为自由接取 → 甲收到通知；甲、乙同时领取只成功一个；甲经模型领取、完成，管理员打回（原因发给甲），甲再完成。
+
+## 21. 服务器状态（T-0113）
+
+设计见 `docs/v2/AGENT_OPS_PLAN.md` 第 5 节，接口见 `docs/api-contract.md`。实例页每个实例显示 CPU、内存、磁盘三个小指示，超过阈值标红并写出原因；
+点“查看服务器状态”看当前值（CPU、内存、两个分区、网络、开机时长、最后上报时间）和最近 24 小时 / 7 天 / 30 天的每小时趋势（有悬停提示和表格视图）。只有 owner / admin 能看。
+
+### 21.1 数据从哪来
+
+- 每台 OpenClaw 服务器的 crontab 每分钟运行一次 `docker compose exec -T openclaw node /opt/myworkspace/bin/host-report.mjs`（SSH 自动部署会写好；手工接入按第 18.3 节或接入包的 CHECKLIST.md）。
+- 容器用 host 网络，读到的 `/proc` 是整台服务器的。两个分区：接入包目录所在的分区（OpenClaw 的会话和记忆）、容器根目录所在的分区（Docker 数据目录，镜像在这里）。
+  内存显示“受容器限制”时，表示 OpenClaw 容器有 cgroup 内存上限。
+- CPU 使用率和网速由两次上报的累计值之差算出：第一次上报、服务器重启（计数器变小）后的那一分钟为空，下一分钟就有。
+- 样本保留 30 天（每天的清理任务）。超过 3 分钟没有上报显示“数据过期”。
+
+### 21.2 告警
+
+Worker 每分钟检查一次，通知 owner / admin；同一实例同一类告警恢复前只提醒一次，恢复后再出现再提醒：
+
+- 磁盘可用低于 10%（任一分区）；
+- 内存可用低于 5%；
+- 15 分钟负载持续 15 分钟超过核心数的 2 倍；
+- 实例在线却 30 分钟没有上报服务器状态（实例离线时由离线提醒负责，不重复）。
+
+### 21.3 显示“还没有收到这台服务器的状态”
+
+1. 在 OpenClaw 服务器上看 crontab：`crontab -l` 里要有带 `host-report.mjs` 的一行。2026-11-04 之前生成的接入包没有这个脚本，在实例页“重新部署”（SSH）或重新下载接入包后加上这一行。
+2. 在接入包目录手动跑一次：`docker compose exec -T openclaw node /opt/myworkspace/bin/host-report.mjs; echo $?`。退出码 0 就是报上去了；否则看最后一行错误：
+   - `host-report: workspace returned 401`：实例凭证失效（实例被停用或凭证轮换过），重新下载接入包或重新部署；
+   - `host-report: workspace returned 422`：脚本版本与工作台不一致，重新下载接入包；
+   - `host-report: workspace returned 429`：每分钟超过 2 次，等一分钟再试。

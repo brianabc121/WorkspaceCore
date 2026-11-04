@@ -8,6 +8,8 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, Security, status
+from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
     authenticated,
@@ -15,11 +17,14 @@ from app.api.deps import (
     csrf_protected,
     get_agent_service,
     get_agent_ssh_service,
+    get_db,
+    get_redis,
     workspace_admin,
     workspace_owner,
 )
 from app.domain.agent_ssh import AgentSshService
 from app.domain.agents import AgentService
+from app.domain.host_metrics import HostService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.agents import (
     AgentInstanceCreate,
@@ -48,6 +53,7 @@ from app.schemas.agents import (
     VersionBody,
 )
 from app.schemas.common import error_responses
+from app.schemas.host import HostRange, HostStatusOut, HostSummaryList
 
 router = APIRouter(tags=["agents"], dependencies=[Security(authenticated)])
 
@@ -140,6 +146,38 @@ async def update_agent_instance(
     access: Owner, request: Request, service: Service, instance_id: UUID, body: AgentInstanceUpdate
 ) -> AgentInstanceOut:
     return await service.update_instance(access, instance_id, body, client_ip=_ip(request, service))
+
+
+@router.get(
+    "/agents/host-summary",
+    summary="各实例服务器状态的小指示（admin）",
+    description="CPU、内存、磁盘的当前使用率与正在提醒的告警；"
+    "没上报过的实例各项为 null（T-0113）。",
+    responses=_read_errors,
+)
+async def host_summary(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> HostSummaryList:
+    return await HostService(db, redis).summary(access)
+
+
+@router.get(
+    "/agents/instances/{instance_id}/host",
+    summary="实例的服务器状态（admin）",
+    description="当前值（超过 3 分钟没上报为 stale）与每小时的平均、峰值（24h / 7d / 30d）；"
+    "数值是整台服务器的（容器用 host 网络读宿主机的 /proc，T-0113）。",
+    responses=_read_errors,
+)
+async def host_status(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+    instance_id: UUID,
+    span: Annotated[HostRange, Query(alias="range")] = "24h",
+) -> HostStatusOut:
+    return await HostService(db, redis).status(access, instance_id, span)
 
 
 @router.put(

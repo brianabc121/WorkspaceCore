@@ -28,6 +28,7 @@ from app.api.deps import client_ip, get_agent_service, get_db, get_redis
 from app.core.errors import ApiError
 from app.domain import im_callbacks
 from app.domain.agents import AgentPrincipal, AgentService
+from app.domain.host_metrics import HostService
 from app.domain.im import openim_client
 from app.domain.im_gateway import MAX_API_BODY_BYTES, ImGateway, blocked_body
 from app.domain.im_groups import send_relay_paused_notice
@@ -45,6 +46,7 @@ from app.schemas.agents import (
     SecretResolveResponse,
 )
 from app.schemas.common import error_responses
+from app.schemas.host import HostReport, HostReportResult
 from app.schemas.openim_callbacks import (
     BEFORE_COMMANDS,
     MAX_CALLBACK_BYTES,
@@ -164,6 +166,24 @@ async def agent_usage(
     body: UsageReport,
 ) -> UsageReportResult:
     return await UsageService(db, redis).report(principal.instance, body)
+
+
+@router.post(
+    "/host-metrics",
+    summary="上报服务器状态（实例的 host-report，每分钟一次）",
+    description="CPU 核心数与负载、/proc/stat 的累计值、内存与 Swap、两个分区、"
+    "默认网卡的收发累计字节、"
+    "开机时长；只收数字，多余字段 422。工作台用两次上报之差算 CPU 使用率和网速。"
+    "每个实例每分钟最多 2 次（T-0113）。",
+    responses=_errors,
+)
+async def agent_host_metrics(
+    principal: Principal,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+    body: HostReport,
+) -> HostReportResult:
+    return await HostService(db, redis).report(principal.instance, body)
 
 
 gateway = APIRouter(include_in_schema=False)

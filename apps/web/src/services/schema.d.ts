@@ -21,6 +21,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent-api/v1/host-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 上报服务器状态（实例的 host-report，每分钟一次）
+         * @description CPU 核心数与负载、/proc/stat 的累计值、内存与 Swap、两个分区、默认网卡的收发累计字节、开机时长；只收数字，多余字段 422。工作台用两次上报之差算 CPU 使用率和网速。每个实例每分钟最多 2 次（T-0113）。
+         */
+        post: operations["agent_host_metrics"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-api/v1/im-token": {
         parameters: {
             query?: never;
@@ -75,6 +95,26 @@ export interface paths {
          * @description 每个 OpenClaw 会话当天（UTC）的累计 token；会话只报 key 的 SHA-256。工作台按（实例、日期、会话）算增量并记到这一分钟；usage 为 null 的会话跳过；实例第一次上报只记基准。每个实例每分钟最多 6 次。
          */
         post: operations["agent_usage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/host-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 各实例服务器状态的小指示（admin）
+         * @description CPU、内存、磁盘的当前使用率与正在提醒的告警；没上报过的实例各项为 null（T-0113）。
+         */
+        get: operations["host_summary"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -188,6 +228,26 @@ export interface paths {
         put?: never;
         /** 启用实例（owner） */
         post: operations["enable_agent_instance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/host": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 实例的服务器状态（admin）
+         * @description 当前值（超过 3 分钟没上报为 stale）与每小时的平均、峰值（24h / 7d / 30d）；数值是整台服务器的（容器用 host 网络读宿主机的 /proc，T-0113）。
+         */
+        get: operations["host_status"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4110,6 +4170,19 @@ export interface components {
             /** Total Estimate */
             total_estimate?: number | null;
         };
+        /** CpuIn */
+        CpuIn: {
+            /** Cores */
+            cores: number | null;
+            /** Idle Ticks */
+            idle_ticks: number | null;
+            /** Load */
+            load: number[] | null;
+            /** Model */
+            model: string | null;
+            /** Total Ticks */
+            total_ticks: number | null;
+        };
         /** DashboardCreate */
         DashboardCreate: {
             /** Title */
@@ -4219,6 +4292,31 @@ export interface components {
             sign: "+" | "-" | " ";
             /** Text */
             text: string;
+        };
+        /** DiskIn */
+        DiskIn: {
+            /** Free */
+            free: number | null;
+            /** Total */
+            total: number | null;
+        };
+        /** DiskOut */
+        DiskOut: {
+            /** Free */
+            free: number;
+            /** Total */
+            total: number;
+            /** Used */
+            used: number;
+            /** Used Percent */
+            used_percent: number;
+        };
+        /** DisksIn */
+        DisksIn: {
+            /** @description 接入包目录所在的分区（OpenClaw 的会话与记忆） */
+            data: components["schemas"]["DiskIn"] | null;
+            /** @description 容器根目录所在的分区（Docker 数据目录，镜像在这里） */
+            root: components["schemas"]["DiskIn"] | null;
         };
         /** ErrorBody */
         ErrorBody: {
@@ -4498,6 +4596,181 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
+        };
+        /** HostCurrent */
+        HostCurrent: {
+            /** Cores */
+            cores: number | null;
+            /** Cpu Model */
+            cpu_model: string | null;
+            /**
+             * Cpu Percent
+             * @description 两次上报之间的 CPU 使用率；第一次或计数器重置时为 null
+             */
+            cpu_percent: number | null;
+            data_disk: components["schemas"]["DiskOut"] | null;
+            /**
+             * Load
+             * @description 1 / 5 / 15 分钟负载
+             */
+            load: number[] | null;
+            /** Mem Available */
+            mem_available: number | null;
+            /**
+             * Mem Limit
+             * @description 容器的内存上限；有值时界面标注“受容器限制”
+             */
+            mem_limit: number | null;
+            /** Mem Total */
+            mem_total: number | null;
+            /** Mem Used */
+            mem_used: number | null;
+            /**
+             * Reported At
+             * Format: date-time
+             */
+            reported_at: string;
+            root_disk: components["schemas"]["DiskOut"] | null;
+            /**
+             * Rx Rate
+             * @description 下载速率（字节 / 秒）
+             */
+            rx_rate: number | null;
+            /**
+             * Stale
+             * @description 超过 3 分钟没有上报
+             */
+            stale: boolean;
+            /** Swap Total */
+            swap_total: number | null;
+            /** Swap Used */
+            swap_used: number | null;
+            /**
+             * Tx Rate
+             * @description 上传速率（字节 / 秒）
+             */
+            tx_rate: number | null;
+            /** Uptime Seconds */
+            uptime_seconds: number | null;
+        };
+        /**
+         * HostPoint
+         * @description 每小时一个点：平均与峰值。
+         */
+        HostPoint: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Cpu Avg */
+            cpu_avg: number | null;
+            /** Cpu Max */
+            cpu_max: number | null;
+            /**
+             * Data Avg
+             * @description 接入包目录所在分区的已用百分比
+             */
+            data_avg: number | null;
+            /**
+             * Load Avg
+             * @description 1 分钟负载的平均
+             */
+            load_avg: number | null;
+            /** Load Max */
+            load_max: number | null;
+            /**
+             * Mem Avg
+             * @description 内存已用百分比
+             */
+            mem_avg: number | null;
+            /** Mem Max */
+            mem_max: number | null;
+            /**
+             * Root Avg
+             * @description Docker 数据目录所在分区的已用百分比
+             */
+            root_avg: number | null;
+            /** Rx Avg */
+            rx_avg: number | null;
+            /** Rx Max */
+            rx_max: number | null;
+            /** Tx Avg */
+            tx_avg: number | null;
+            /** Tx Max */
+            tx_max: number | null;
+        };
+        /** HostReport */
+        HostReport: {
+            cpu: components["schemas"]["CpuIn"];
+            disks: components["schemas"]["DisksIn"];
+            memory: components["schemas"]["MemoryIn"];
+            network: components["schemas"]["NetworkIn"] | null;
+            /** Uptime Seconds */
+            uptime_seconds: number | null;
+        };
+        /** HostReportResult */
+        HostReportResult: {
+            /**
+             * Minute
+             * Format: date-time
+             * @description 样本记在这一分钟（UTC，整分钟）
+             */
+            minute: string;
+        };
+        /** HostStatusOut */
+        HostStatusOut: {
+            /**
+             * Alerts
+             * @description 正在提醒的告警
+             */
+            alerts: ("disk_low" | "memory_low" | "load_high" | "not_reporting")[];
+            current: components["schemas"]["HostCurrent"] | null;
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            instance_id: string;
+            /** Points */
+            points: components["schemas"]["HostPoint"][];
+            /**
+             * Range
+             * @enum {string}
+             */
+            range: "24h" | "7d" | "30d";
+            /**
+             * Reported
+             * @description 收到过上报；没有时界面提示“重新部署后可用”
+             */
+            reported: boolean;
+        };
+        /** HostSummaryItem */
+        HostSummaryItem: {
+            /** Alerts */
+            alerts: ("disk_low" | "memory_low" | "load_high" | "not_reporting")[];
+            /** Cpu Percent */
+            cpu_percent: number | null;
+            /**
+             * Disk Used Percent
+             * @description 两个分区里较高的已用百分比
+             */
+            disk_used_percent: number | null;
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            instance_id: string;
+            /** Mem Used Percent */
+            mem_used_percent: number | null;
+            /** Reported At */
+            reported_at: string | null;
+            /** Stale */
+            stale: boolean;
+        };
+        /** HostSummaryList */
+        HostSummaryList: {
+            /** Items */
+            items: components["schemas"]["HostSummaryItem"][];
         };
         /** ImBadges */
         ImBadges: {
@@ -5565,6 +5838,22 @@ export interface components {
              */
             role: "admin" | "member" | "viewer";
         };
+        /** MemoryIn */
+        MemoryIn: {
+            /** Available */
+            available: number;
+            /**
+             * Limit
+             * @description 容器的内存上限（cgroup）；没有上限为 null
+             */
+            limit: number | null;
+            /** Swap Free */
+            swap_free: number;
+            /** Swap Total */
+            swap_total: number;
+            /** Total */
+            total: number;
+        };
         /** MetricPoint */
         MetricPoint: {
             /**
@@ -5667,6 +5956,13 @@ export interface components {
              * @enum {string}
              */
             status: "ok" | "stale" | "unavailable" | "unauthorized";
+        };
+        /** NetworkIn */
+        NetworkIn: {
+            /** Rx Bytes */
+            rx_bytes: number | null;
+            /** Tx Bytes */
+            tx_bytes: number | null;
         };
         /** NoteConfig */
         NoteConfig: {
@@ -8463,6 +8759,57 @@ export interface operations {
             };
         };
     };
+    agent_host_metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostReport"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostReportResult"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     issue_agent_im_token: {
         parameters: {
             query?: never;
@@ -8603,6 +8950,65 @@ export interface operations {
             };
             /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    host_summary: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostSummaryList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9192,6 +9598,69 @@ export interface operations {
             };
             /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    host_status: {
+        parameters: {
+            query?: {
+                range?: "24h" | "7d" | "30d";
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostStatusOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

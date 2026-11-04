@@ -375,6 +375,40 @@ class CalendarAgendaOutput(BaseModel):
     )
 
 
+class HostDiskStatus(BaseModel):
+    total: int
+    free: int
+    used_percent: float
+
+
+class HostDay(BaseModel):
+    """最近 24 小时的概况（每小时平均里的最高值）。"""
+
+    cpu_max: float | None
+    load_max: float | None
+    mem_max: float | None
+    disk_max: float | None = Field(description="两个分区里较高的已用百分比")
+
+
+class GetHostStatusOutput(BaseModel):
+    """你自己所在服务器的状态（T-0113）：整台服务器的数值，不是只有你的容器。"""
+
+    reported: bool = Field(description="收到过上报；false 时让管理员重新部署接入包")
+    reported_at: datetime | None
+    stale: bool = Field(description="超过 3 分钟没有上报")
+    cores: int | None
+    cpu_percent: float | None
+    load: list[float] | None = Field(description="1 / 5 / 15 分钟负载")
+    mem_total: int | None
+    mem_available: int | None
+    data_disk: HostDiskStatus | None = Field(description="接入包目录（会话、记忆）所在的分区")
+    root_disk: HostDiskStatus | None = Field(description="Docker 数据目录所在的分区")
+    rx_rate: int | None = Field(description="下载速率（字节 / 秒）")
+    tx_rate: int | None = Field(description="上传速率（字节 / 秒）")
+    last_24h: HostDay
+    alerts: list[Literal["disk_low", "memory_low", "load_high", "not_reporting"]]
+
+
 class ListBookmarksInput(_Strict):
     q: Annotated[str, StringConstraints(min_length=1, max_length=100)] | None = None
     limit: int = Field(default=20, ge=1, le=50)
@@ -749,6 +783,14 @@ _READ: list[ToolSpec] = [
     ),
     _spec("list_automations", "read", EmptyInput, ListAutomationsOutput, "列出白名单工作流"),
     _spec("dashboard_overview", "read", EmptyInput, DashboardOverviewOutput, "首页概况数字"),
+    _spec(
+        "get_host_status",
+        "read",
+        EmptyInput,
+        GetHostStatusOutput,
+        "读你自己所在服务器的状态（CPU、负载、内存、磁盘、网速与最近 24 小时概况），"
+        "用来判断磁盘满、负载高这类问题；只能看你自己",
+    ),
     _spec(
         "get_action_status",
         "read",

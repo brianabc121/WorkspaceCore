@@ -4,16 +4,18 @@ import { useAuthStore } from '../../stores/auth'
 import type { Schema } from '../../services/api'
 import { agentError, downloadBundle, unique, useAgentSettings, useInstances, useSecrets } from './queries'
 import { useAgentAction } from './action'
+import { useHostSummary } from './host'
 import InstanceCard from './InstanceCard.vue'
 import InstanceForm from './InstanceForm.vue'
 import { useCreateIntent } from '../../composables/useCreateIntent'
 
 const auth = useAuthStore(), scope = auth.workspaceId!
-const settings = useAgentSettings(scope), instances = useInstances(scope), secrets = useSecrets(scope)
+const settings = useAgentSettings(scope), instances = useInstances(scope), secrets = useSecrets(scope), hostSummary = useHostSummary(scope)
 const { busy, error, notice, act, header } = useAgentAction(scope)
 const editing = ref<Schema['AgentInstanceOut'] | 'new' | null>(null)
 const items = computed(() => unique(instances.data.value?.pages))
 const secretItems = computed(() => unique(secrets.data.value?.pages))
+const hosts = computed(() => new Map((hostSummary.data.value?.items ?? []).map(item => [item.instance_id, item])))
 const path = (instance: Schema['AgentInstanceOut']) => ({ instance_id: instance.id })
 // 顶栏“创建 → 登记 OpenClaw 实例”（规范 §8.1）
 useCreateIntent(() => !busy.value, () => { editing.value = 'new' })
@@ -70,7 +72,7 @@ function grants(instance: Schema['AgentInstanceOut'], list: Schema['SecretGrantI
   <p v-else-if="!items.length" class="empty-state">还没有实例。点“登记实例”开始。</p>
   <div class="agent-list">
     <InstanceCard
-      v-for="instance in items" :key="instance.id" :instance="instance" :secrets="secretItems" :busy="busy"
+      v-for="instance in items" :key="instance.id" :instance="instance" :secrets="secretItems" :busy="busy" :host="hosts.get(instance.id)"
       @edit="editing = instance" @toggle="toggle(instance)" @bundle="bundle(instance, $event)" @revoke="revoke(instance, $event)" @grants="grants(instance, $event)" @project-admin="projectAdmin(instance, $event)"
     />
   </div>

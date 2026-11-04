@@ -666,7 +666,9 @@ class Installer:
             result = await self._run(conn, "定时任务", prov.schedule_command(directory), seconds=30)
             if not result.ok:
                 raise InstallFailed("schedule_failed", "写入 crontab 失败")
-            await self.rec.step("schedule", "done", "每分钟上报用量、每 10 分钟取密钥、每周一重启")
+            await self.rec.step(
+                "schedule", "done", "每分钟上报用量与服务器状态、每 10 分钟取密钥、每周一重启"
+            )
         else:
             await self.rec.step(
                 "schedule",

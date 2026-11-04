@@ -3731,6 +3731,89 @@
         "title": "ChangePage",
         "type": "object"
       },
+      "CpuIn": {
+        "additionalProperties": false,
+        "properties": {
+          "cores": {
+            "anyOf": [
+              {
+                "maximum": 4096.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cores"
+          },
+          "idle_ticks": {
+            "anyOf": [
+              {
+                "maximum": 4.611686018427388e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idle Ticks"
+          },
+          "load": {
+            "anyOf": [
+              {
+                "items": {
+                  "maximum": 100000.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                "maxItems": 3,
+                "minItems": 3,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "total_ticks": {
+            "anyOf": [
+              {
+                "maximum": 4.611686018427388e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Ticks"
+          }
+        },
+        "required": [
+          "cores",
+          "model",
+          "load",
+          "total_ticks",
+          "idle_ticks"
+        ],
+        "title": "CpuIn",
+        "type": "object"
+      },
       "DashboardCreate": {
         "additionalProperties": false,
         "properties": {
@@ -4031,6 +4114,104 @@
           "text"
         ],
         "title": "DiffLine",
+        "type": "object"
+      },
+      "DiskIn": {
+        "additionalProperties": false,
+        "properties": {
+          "free": {
+            "anyOf": [
+              {
+                "maximum": 7.205759403792794e+16,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "maximum": 7.205759403792794e+16,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "total",
+          "free"
+        ],
+        "title": "DiskIn",
+        "type": "object"
+      },
+      "DiskOut": {
+        "properties": {
+          "free": {
+            "title": "Free",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "used": {
+            "title": "Used",
+            "type": "integer"
+          },
+          "used_percent": {
+            "title": "Used Percent",
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "free",
+          "used",
+          "used_percent"
+        ],
+        "title": "DiskOut",
+        "type": "object"
+      },
+      "DisksIn": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiskIn"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "接入包目录所在的分区（OpenClaw 的会话与记忆）"
+          },
+          "root": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiskIn"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "容器根目录所在的分区（Docker 数据目录，镜像在这里）"
+          }
+        },
+        "required": [
+          "data",
+          "root"
+        ],
+        "title": "DisksIn",
         "type": "object"
       },
       "ErrorBody": {
@@ -4673,6 +4854,599 @@
           "server_time"
         ],
         "title": "HeartbeatResponse",
+        "type": "object"
+      },
+      "HostCurrent": {
+        "properties": {
+          "cores": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cores"
+          },
+          "cpu_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Model"
+          },
+          "cpu_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "两次上报之间的 CPU 使用率；第一次或计数器重置时为 null",
+            "title": "Cpu Percent"
+          },
+          "data_disk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiskOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "load": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1 / 5 / 15 分钟负载",
+            "title": "Load"
+          },
+          "mem_available": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Available"
+          },
+          "mem_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "容器的内存上限；有值时界面标注“受容器限制”",
+            "title": "Mem Limit"
+          },
+          "mem_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Total"
+          },
+          "mem_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Used"
+          },
+          "reported_at": {
+            "format": "date-time",
+            "title": "Reported At",
+            "type": "string"
+          },
+          "root_disk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiskOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rx_rate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下载速率（字节 / 秒）",
+            "title": "Rx Rate"
+          },
+          "stale": {
+            "description": "超过 3 分钟没有上报",
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "swap_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Swap Total"
+          },
+          "swap_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Swap Used"
+          },
+          "tx_rate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "上传速率（字节 / 秒）",
+            "title": "Tx Rate"
+          },
+          "uptime_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime Seconds"
+          }
+        },
+        "required": [
+          "reported_at",
+          "stale",
+          "cpu_model",
+          "cores",
+          "cpu_percent",
+          "load",
+          "mem_total",
+          "mem_available",
+          "mem_used",
+          "mem_limit",
+          "swap_total",
+          "swap_used",
+          "data_disk",
+          "root_disk",
+          "rx_rate",
+          "tx_rate",
+          "uptime_seconds"
+        ],
+        "title": "HostCurrent",
+        "type": "object"
+      },
+      "HostPoint": {
+        "description": "每小时一个点：平均与峰值。",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "cpu_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Avg"
+          },
+          "cpu_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Max"
+          },
+          "data_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "接入包目录所在分区的已用百分比",
+            "title": "Data Avg"
+          },
+          "load_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1 分钟负载的平均",
+            "title": "Load Avg"
+          },
+          "load_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load Max"
+          },
+          "mem_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "内存已用百分比",
+            "title": "Mem Avg"
+          },
+          "mem_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Max"
+          },
+          "root_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Docker 数据目录所在分区的已用百分比",
+            "title": "Root Avg"
+          },
+          "rx_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rx Avg"
+          },
+          "rx_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rx Max"
+          },
+          "tx_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Avg"
+          },
+          "tx_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Max"
+          }
+        },
+        "required": [
+          "at",
+          "cpu_avg",
+          "cpu_max",
+          "load_avg",
+          "load_max",
+          "mem_avg",
+          "mem_max",
+          "data_avg",
+          "root_avg",
+          "rx_avg",
+          "rx_max",
+          "tx_avg",
+          "tx_max"
+        ],
+        "title": "HostPoint",
+        "type": "object"
+      },
+      "HostReport": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu": {
+            "$ref": "#/components/schemas/CpuIn"
+          },
+          "disks": {
+            "$ref": "#/components/schemas/DisksIn"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/MemoryIn"
+          },
+          "network": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NetworkIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uptime_seconds": {
+            "anyOf": [
+              {
+                "maximum": 1099511627776.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime Seconds"
+          }
+        },
+        "required": [
+          "cpu",
+          "memory",
+          "disks",
+          "network",
+          "uptime_seconds"
+        ],
+        "title": "HostReport",
+        "type": "object"
+      },
+      "HostReportResult": {
+        "properties": {
+          "minute": {
+            "description": "样本记在这一分钟（UTC，整分钟）",
+            "format": "date-time",
+            "title": "Minute",
+            "type": "string"
+          }
+        },
+        "required": [
+          "minute"
+        ],
+        "title": "HostReportResult",
+        "type": "object"
+      },
+      "HostStatusOut": {
+        "properties": {
+          "alerts": {
+            "description": "正在提醒的告警",
+            "items": {
+              "enum": [
+                "disk_low",
+                "memory_low",
+                "load_high",
+                "not_reporting"
+              ],
+              "type": "string"
+            },
+            "title": "Alerts",
+            "type": "array"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HostCurrent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "instance_id": {
+            "format": "uuid",
+            "title": "Instance Id",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/HostPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "range": {
+            "enum": [
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "title": "Range",
+            "type": "string"
+          },
+          "reported": {
+            "description": "收到过上报；没有时界面提示“重新部署后可用”",
+            "title": "Reported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "instance_id",
+          "reported",
+          "current",
+          "range",
+          "points",
+          "alerts"
+        ],
+        "title": "HostStatusOut",
+        "type": "object"
+      },
+      "HostSummaryItem": {
+        "properties": {
+          "alerts": {
+            "items": {
+              "enum": [
+                "disk_low",
+                "memory_low",
+                "load_high",
+                "not_reporting"
+              ],
+              "type": "string"
+            },
+            "title": "Alerts",
+            "type": "array"
+          },
+          "cpu_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Percent"
+          },
+          "disk_used_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "两个分区里较高的已用百分比",
+            "title": "Disk Used Percent"
+          },
+          "instance_id": {
+            "format": "uuid",
+            "title": "Instance Id",
+            "type": "string"
+          },
+          "mem_used_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Used Percent"
+          },
+          "reported_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported At"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "instance_id",
+          "reported_at",
+          "stale",
+          "cpu_percent",
+          "mem_used_percent",
+          "disk_used_percent",
+          "alerts"
+        ],
+        "title": "HostSummaryItem",
+        "type": "object"
+      },
+      "HostSummaryList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HostSummaryItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "HostSummaryList",
         "type": "object"
       },
       "ImBadges": {
@@ -7171,6 +7945,58 @@
         "title": "MemberUpdate",
         "type": "object"
       },
+      "MemoryIn": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "maximum": 7.205759403792794e+16,
+            "minimum": 0.0,
+            "title": "Available",
+            "type": "integer"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "maximum": 7.205759403792794e+16,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "容器的内存上限（cgroup）；没有上限为 null",
+            "title": "Limit"
+          },
+          "swap_free": {
+            "maximum": 7.205759403792794e+16,
+            "minimum": 0.0,
+            "title": "Swap Free",
+            "type": "integer"
+          },
+          "swap_total": {
+            "maximum": 7.205759403792794e+16,
+            "minimum": 0.0,
+            "title": "Swap Total",
+            "type": "integer"
+          },
+          "total": {
+            "maximum": 7.205759403792794e+16,
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "available",
+          "swap_total",
+          "swap_free",
+          "limit"
+        ],
+        "title": "MemoryIn",
+        "type": "object"
+      },
       "MetricPoint": {
         "properties": {
           "at": {
@@ -7402,6 +8228,43 @@
           "retryable"
         ],
         "title": "ModuleStatus",
+        "type": "object"
+      },
+      "NetworkIn": {
+        "additionalProperties": false,
+        "properties": {
+          "rx_bytes": {
+            "anyOf": [
+              {
+                "maximum": 7.205759403792794e+16,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rx Bytes"
+          },
+          "tx_bytes": {
+            "anyOf": [
+              {
+                "maximum": 7.205759403792794e+16,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Bytes"
+          }
+        },
+        "required": [
+          "rx_bytes",
+          "tx_bytes"
+        ],
+        "title": "NetworkIn",
         "type": "object"
       },
       "NoteConfig": {
@@ -13793,6 +14656,73 @@
         ]
       }
     },
+    "/agent-api/v1/host-metrics": {
+      "post": {
+        "description": "CPU 核心数与负载、/proc/stat 的累计值、内存与 Swap、两个分区、默认网卡的收发累计字节、开机时长；只收数字，多余字段 422。工作台用两次上报之差算 CPU 使用率和网速。每个实例每分钟最多 2 次（T-0113）。",
+        "operationId": "agent_host_metrics",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostReportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          }
+        },
+        "security": [
+          {
+            "InstanceToken": []
+          }
+        ],
+        "summary": "上报服务器状态（实例的 host-report，每分钟一次）",
+        "tags": [
+          "agent-api"
+        ]
+      }
+    },
     "/agent-api/v1/im-token": {
       "post": {
         "description": "签发会让同一实例正在用的旧令牌连接下线（OC-0 F1），所以只在启动时调用；每个实例每小时最多 10 次。",
@@ -13981,6 +14911,87 @@
         "summary": "上报 token 用量（实例的 usage-report，每分钟一次）",
         "tags": [
           "agent-api"
+        ]
+      }
+    },
+    "/api/v1/agents/host-summary": {
+      "get": {
+        "description": "CPU、内存、磁盘的当前使用率与正在提醒的告警；没上报过的实例各项为 null（T-0113）。",
+        "operationId": "host_summary",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostSummaryList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "各实例服务器状态的小指示（admin）",
+        "tags": [
+          "agents"
         ]
       }
     },
@@ -14971,6 +15982,112 @@
           }
         ],
         "summary": "启用实例（owner）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/host": {
+      "get": {
+        "description": "当前值（超过 3 分钟没上报为 stale）与每小时的平均、峰值（24h / 7d / 30d）；数值是整台服务器的（容器用 host 网络读宿主机的 /proc，T-0113）。",
+        "operationId": "host_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "default": "24h",
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "title": "Range",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "实例的服务器状态（admin）",
         "tags": [
           "agents"
         ]

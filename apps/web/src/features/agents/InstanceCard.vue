@@ -4,8 +4,9 @@ import type { Schema } from '../../services/api'
 import { formatTime } from '../time'
 import { NETWORK, ROLE, SCOPE, STATUS } from './queries'
 import SshDeploy from './SshDeploy.vue'
+import HostStatus from './HostStatus.vue'
 
-const props = defineProps<{ instance: Schema['AgentInstanceOut']; secrets: Schema['AgentSecretOut'][]; busy: boolean }>()
+const props = defineProps<{ instance: Schema['AgentInstanceOut']; secrets: Schema['AgentSecretOut'][]; busy: boolean; host?: Schema['HostSummaryItem'] }>()
 const emit = defineEmits<{ edit: []; toggle: []; bundle: [previous: Schema['BundleRequest']['previous']]; revoke: [credential: Schema['AgentCredentialOut']]; grants: [grants: Schema['SecretGrantIn'][]]; projectAdmin: [enabled: boolean] }>()
 const previous = ref<'keep_24h' | 'revoke_now'>('keep_24h'), editingGrants = ref(false)
 const rows = ref<{ secret_id: string; ref_id: string }[]>([])
@@ -33,6 +34,7 @@ function saveGrants() { if (grantsValid.value) { emit('grants', rows.value.map(r
       <div v-if="instance.im_token_expires_at"><dt>IM 令牌</dt><dd>{{ formatTime(instance.im_token_expires_at) }} 到期（OpenClaw 每次启动时领取新的）</dd></div>
       <div><dt>接入包</dt><dd>{{ instance.bundle_issued_at ? `最近生成于 ${formatTime(instance.bundle_issued_at)}` : '还没有生成' }}</dd></div>
     </dl>
+    <HostStatus :instance="instance" :host="host" />
     <section class="agent-section" aria-label="项目管理权限">
       <div class="section-heading">
         <h3>项目管理权限：{{ instance.project_admin.enabled ? '已打开' : '关闭' }}</h3>

@@ -985,6 +985,8 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "list_automations",
             "dashboard_overview",
             "get_action_status",
+            # 服务器状态：只看自己（T-0113）
+            "get_host_status",
             # 知识库（T-0098，docs/v2/KNOWLEDGE_PLAN.md 3.7）
             "knowledge_search",
             "knowledge_get",

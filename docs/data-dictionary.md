@@ -272,5 +272,7 @@ ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。
 | `agent_usage_minutes` | `instance_id`、`minute`、`workspace_id`、`input`、`output`、`cache_read`、`cache_write` | 每个实例每分钟的 token 增量（bigint），主键 `(instance_id, minute)`，索引 `(workspace_id, minute)`。只存有增量的分钟。随实例、工作空间级联删除；Worker 每小时删除 90 天前的 |
 | `agent_usage_cursors` | `instance_id`、`day`、`session_hash`、`input`、`output`、`cache_read`、`cache_write`、`updated_at` | 每个实例、每天（UTC）、每个会话最后一次上报的累计值，主键 `(instance_id, day, session_hash)`，用来算增量。`session_hash` 是接入包算好的会话 key 的 SHA-256，工作台不存会话 key。Worker 删除 3 天前的 |
 | `agent_instances` 新增 | `usage_reported_at` | 最近一次收到用量上报；为空表示没上报过（时间轴显示“未上报”；第一次上报只记基准） |
+| `agent_host_samples`（T-0113，迁移 0031） | `instance_id`、`minute`、`workspace_id`、`cpu_percent`、`load1` / `load5` / `load15`、`cores`、`mem_total` / `mem_available`、`swap_total` / `swap_used`、`data_total` / `data_free`、`root_total` / `root_free`、`rx_rate` / `tx_rate` | 每个实例每分钟一条服务器状态样本，主键 `(instance_id, minute)`，随实例、工作空间级联删除；CPU 使用率与网速由两次上报的累计值之差算出，第一次或计数器变小时为空。保留 30 天（每天的清理任务） |
+| `agent_host_state`（T-0113，迁移 0031） | `instance_id`、`workspace_id`、`reported_at`、`cpu_model`、`total_ticks` / `idle_ticks`、`rx_bytes` / `tx_bytes`、`uptime_seconds`、`mem_limit`、`latest`（JSONB）、`alerts`（JSONB） | 每个实例一行：上一次的累计值（算差用）、CPU 型号、开机时长、容器内存上限、最近一次的当前值、正在提醒的告警及开始时间（同一类告警恢复前只提醒一次）；随实例、工作空间级联删除 |
 
 **downgrade** 删除三张表和新增的字段：执行记录与 token 用量随之删除（都是 0027 之后才有的数据）。

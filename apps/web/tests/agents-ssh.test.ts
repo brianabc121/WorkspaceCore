@@ -20,7 +20,8 @@ function setup(handler: (r: Request) => Response | Promise<Response | undefined>
     path(r) === '/api/v1/me' && r.method === 'GET' ? Response.json({ ...me, workspaces: [{ ...workspace, role: 'owner' }] }) :
     path(r) === '/api/v1/agents/settings' ? Response.json({ agents_enabled: true, updated_at: null, updated_by: null, version: 7 }) :
     path(r) === '/api/v1/agents/instances' ? Response.json({ items: [inst], next_cursor: null, total_estimate: 1 }) :
-    path(r) === '/api/v1/agents/secrets' ? Response.json({ items: [], next_cursor: null, total_estimate: 0 }) : undefined
+    path(r) === '/api/v1/agents/secrets' ? Response.json({ items: [], next_cursor: null, total_estimate: 0 }) :
+    path(r) === '/api/v1/agents/host-summary' ? Response.json({ items: [] }) : undefined
   ))
 }
 const json = async (requests: Request[], method: string, p: string) => {

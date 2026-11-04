@@ -47,6 +47,8 @@
 - [ ] 每分钟上报 token 用量（任务时间轴，T-0104）：在容器里调网关的 `sessions.usage`（只读），把每个会话今天的累计 token 发给工作台；
       会话只报 key 的 SHA-256，不发消息内容。没配这一行时，工作台的时间轴显示“未上报”：
       `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs`
+- [ ] 每分钟上报服务器状态（T-0113）：在容器里读 `/proc` 与磁盘统计（CPU 核心数与负载、内存、两个分区、默认网卡的收发字节、开机时长），只发数字，不发进程、文件名、IP。没配这一行时，实例页的“服务器状态”显示“未上报”：
+      `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/host-report.mjs`
 - [ ] 每晚复盘（知识库，T-0100）：OpenClaw 启动后在本目录运行一次 `sh setup-reflection.sh`。
       它用 `openclaw automations add` 建 OpenClaw 自己的定时任务（默认每天 22:00，提示词在 `reflection-prompt.md`）；
       重复运行只更新同一个任务。SSH 自动部署会自动运行这一步。
