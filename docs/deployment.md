@@ -829,8 +829,9 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
    `plugins.allow` 只有 `openclaw-channel`；不设置 `commands.ownerAllowFrom`；发图片 / 文件 / 视频的插件工具不可用；`requireMention: true`；
    `secrets audit` 没有明文；日志级别与保留期已设置（SDK 会把消息内容写进日志）。
 7. **定时任务**：每 10 分钟 `openclaw secrets reload`（轮换后的模型密钥不用重启就生效）；每周重启一次（换新的 IM 令牌）；
-   每分钟在容器里运行 `node /opt/myworkspace/bin/usage-report.mjs`，把 token 用量报给工作台（任务时间轴，T-0104；没配时时间轴显示“未上报”）。
-   SSH 部署自动写入这三行 crontab。
+   每分钟在容器里运行 `node /opt/myworkspace/bin/usage-report.mjs`，把 token 用量报给工作台（任务时间轴，T-0104；没配时时间轴显示“未上报”）；
+   每分钟在容器里运行 `node /opt/myworkspace/bin/host-report.mjs`，把服务器状态报给工作台（T-0113；没配时实例页的“服务器状态”显示“还没有收到”）。
+   SSH 部署自动写入这四行 crontab。
 8. **备份与回滚**：`openclaw backup create --verify` 能跑通；回滚要连同备份的状态一起恢复（降级不会撤销 OpenClaw 的迁移）。
 9. **确认**：工作台运维页里这个实例显示“正常”；IM 通讯录里出现这个实例并已互为好友，私聊能收到回复；
    停用实例后它取不到密钥、MCP 返回 401、IM 被强制下线。
@@ -932,3 +933,58 @@ sudo -E python3 tests/e2e/agents_acceptance.py --server-ca <签发入口证书�
 - Compose CI 的 `timeline_browser.cjs`：入口、全部 / 按项目、智能体执行过的一段与 token、开始暂停、拖动计划、执行记录、手机宽度、viewer 只读。
 - agents CI 场景 16：真实 OpenClaw 上报用量 → 交给智能体执行 → `complete_task` 直接完成 → 这段结束并分到 token；SSH 自动部署验收照 crontab 那一行跑一次上报。
 - agents CI 场景 17（T-0111）：设为自由接取 → 甲收到通知；甲、乙同时领取只成功一个；甲经模型领取、完成，管理员打回（原因发给甲），甲再完成。
+
+## 21. 服务器状态（T-0113）
+
+设计见 `docs/v2/AGENT_OPS_PLAN.md` 第 5 节，接口见 `docs/api-contract.md`。实例页每个实例显示 CPU、内存、磁盘三个小指示，超过阈值标红并写出原因；
+点“查看服务器状态”看当前值（CPU、内存、两个分区、网络、开机时长、最后上报时间）和最近 24 小时 / 7 天 / 30 天的每小时趋势（有悬停提示和表格视图）。只有 owner / admin 能看。
+
+### 21.1 数据从哪来
+
+- 每台 OpenClaw 服务器的 crontab 每分钟运行一次 `docker compose exec -T openclaw node /opt/myworkspace/bin/host-report.mjs`（SSH 自动部署会写好；手工接入按第 18.3 节或接入包的 CHECKLIST.md）。
+- 容器用 host 网络，读到的 `/proc` 是整台服务器的。两个分区：接入包目录所在的分区（OpenClaw 的会话和记忆）、容器根目录所在的分区（Docker 数据目录，镜像在这里）。
+  内存显示“受容器限制”时，表示 OpenClaw 容器有 cgroup 内存上限。
+- CPU 使用率和网速由两次上报的累计值之差算出：第一次上报、服务器重启（计数器变小）后的那一分钟为空，下一分钟就有。
+- 样本保留 30 天（每天的清理任务）。超过 3 分钟没有上报显示“数据过期”。
+
+### 21.2 告警
+
+Worker 每分钟检查一次，通知 owner / admin；同一实例同一类告警恢复前只提醒一次，恢复后再出现再提醒：
+
+- 磁盘可用低于 10%（任一分区）；
+- 内存可用低于 5%；
+- 15 分钟负载持续 15 分钟超过核心数的 2 倍；
+- 实例在线却 30 分钟没有上报服务器状态（实例离线时由离线提醒负责，不重复）。
+
+### 21.3 显示“还没有收到这台服务器的状态”
+
+1. 在 OpenClaw 服务器上看 crontab：`crontab -l` 里要有带 `host-report.mjs` 的一行。2026-11-04 之前生成的接入包没有这个脚本，在实例页“重新部署”（SSH）或重新下载接入包后加上这一行。
+2. 在接入包目录手动跑一次：`docker compose exec -T openclaw node /opt/myworkspace/bin/host-report.mjs; echo $?`。退出码 0 就是报上去了；否则看最后一行错误：
+   - `host-report: workspace returned 401`：实例凭证失效（实例被停用或凭证轮换过），重新下载接入包或重新部署；
+   - `host-report: workspace returned 422`：脚本版本与工作台不一致，重新下载接入包；
+   - `host-report: already reported this minute …, skipped`（退出码 0）：工作台每个实例每分钟只收 2 次，这一分钟已经报过（定时任务刚跑过），数据已是最新，不用处理。
+
+## 22. 远程运维动作（T-0114）
+
+设计见 `docs/v2/AGENT_OPS_PLAN.md` 第 6.1 节，接口见 `docs/api-contract.md`。实例页每个实例的“运维”里有六个按钮，经工作台的 SSH 通道（部署时确认的主机指纹 + 专用密钥）在接入包目录里执行：
+
+| 按钮 | 执行的命令 | 二次认证 |
+|---|---|---|
+| 查看状态 | `docker compose ps --all`、本项目容器的 `docker stats --no-stream`、`df -h <接入包目录> /`、`uptime` | 不需要 |
+| 查看日志 | `docker compose logs --no-color --tail 200 <openclaw / tunnel / image-proxy>` | 不需要（会写审计） |
+| 立即上报一次 | 在容器里运行 `usage-report.mjs` 与 `host-report.mjs` | 不需要 |
+| 重启 OpenClaw | `docker compose restart openclaw` | 再输一次登录密码 |
+| 重新拉起全部服务 | `docker compose up -d`（最多等 180 秒） | 再输一次登录密码 |
+| 清理无用镜像 | `docker image prune -f`（只删没在用的镜像） | 再输一次登录密码 |
+
+- 只适用于用 SSH 部署过、专用密钥还在的实例；手动接入的，先在实例页做一次 SSH 部署（原样重装接入包，会话和记忆在 `state/` 里保留）。吊销专用密钥后运维按钮不可用。
+- 同一实例同时只跑一个动作，部署、卸载、吊销进行中时也不能执行；工作台重启时进行中的动作记为“已中断”。
+- 输出脱敏后保存 7 天，在实例页“最近的运维记录”里查看；审计日志里有 `agents.ops.started` / `agents.ops.finished`（动作、退出码），没有输出。
+- 动作失败时看结果里的说明：`timeout`（超过 60 / 180 秒）、`host_key_changed`（服务器主机公钥变了，按第 18 节重新确认）、`auth_failed`（专用密钥被删，重新部署）、`client_key_invalid`（工作台的加密密钥换过，重新部署）。
+
+### 22.1 验收状态（T-0115）
+
+- agents CI 场景 17（自由接取：同时领取只成功一个、完成后打回再完成）、场景 18（项目管理权限：没开被拒，开了之后建项目、拉另一个实例进项目群）、场景 19（甲、乙的真实 OpenClaw 容器上报服务器状态，甲用 `get_host_status` 只读到自己的）。
+- SSH 部署验收（`agent_ssh_acceptance.py`）：照 crontab 那一行跑服务器状态上报；六个运维动作逐个执行，核对 `docker compose ps` / `docker stats` / `df` / `uptime` 的输出、日志脱敏、二次认证与审计；卸载后运维动作不可用。
+- 浏览器验收：`agent_ssh_browser.cjs`（运维面板：查看状态、立即上报、输密码重启；服务器状态面板与趋势；390px 宽度）、`sprint6_browser.cjs`（新建项目勾选实例与项目群、自由接取、领取、完成、打回与动态）。
+

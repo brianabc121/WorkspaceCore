@@ -32,6 +32,8 @@ watch(() => job.value?.status, (now, before) => {
   if (before !== 'running' || !now || now === 'running') return
   notice.value = ''
   void cache.invalidateQueries({ queryKey: ['agents', user, scope, 'instances'] })
+  // 部署 / 卸载后运维动作是否可用跟着变（T-0114）
+  void cache.invalidateQueries({ queryKey: ['agents', user, scope, 'ops', props.instance.id] })
 })
 
 // A password typed for one server must never be sent to another: clear it whenever the target's identity changes

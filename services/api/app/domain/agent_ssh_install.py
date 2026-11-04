@@ -18,6 +18,7 @@ import logging
 import re
 import uuid
 import zipfile
+from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -36,7 +37,13 @@ from app.domain.agents import AgentService, hash_token
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
 from app.integrations import ssh
-from app.models import AgentCredential, AgentInstance, AgentSshJob, AgentSshTarget
+from app.models import (
+    AgentCredential,
+    AgentInstance,
+    AgentOpsAction,
+    AgentSshJob,
+    AgentSshTarget,
+)
 
 logger = logging.getLogger("app.agent_ssh")
 
@@ -666,7 +673,9 @@ class Installer:
             result = await self._run(conn, "定时任务", prov.schedule_command(directory), seconds=30)
             if not result.ok:
                 raise InstallFailed("schedule_failed", "写入 crontab 失败")
-            await self.rec.step("schedule", "done", "每分钟上报用量、每 10 分钟取密钥、每周一重启")
+            await self.rec.step(
+                "schedule", "done", "每分钟上报用量与服务器状态、每 10 分钟取密钥、每周一重启"
+            )
         else:
             await self.rec.step(
                 "schedule",
@@ -999,6 +1008,10 @@ class SshJobRunner:
         # 已经提交、还没启动协程的任务（提交与启动之间别的请求不能把它当成失效的任务）
         self._reserved: set[uuid.UUID] = set()
 
+    @property
+    def sessionmaker(self) -> async_sessionmaker[AsyncSession]:
+        return self._sessionmaker
+
     def reserve(self, job_id: uuid.UUID) -> None:
         self._reserved.add(job_id)
 
@@ -1028,6 +1041,13 @@ class SshJobRunner:
         self._reserved.discard(job_id)
         task.add_done_callback(lambda _: self._tasks.pop(job_id, None))
 
+    def launch(self, key: uuid.UUID, coro: Coroutine[Any, Any, None]) -> None:
+        """运行其它借用 SSH 通道的后台协程（T-0114 的运维动作）；key 是那条记录的 ID。"""
+        task = asyncio.get_running_loop().create_task(coro, name=f"agent-ssh-task:{key}")
+        self._tasks[key] = task
+        self._reserved.discard(key)
+        task.add_done_callback(lambda _: self._tasks.pop(key, None))
+
     def running(self, job_id: uuid.UUID) -> bool:
         """本进程里有这个任务的协程（或刚提交、马上启动）。"""
         return job_id in self._tasks or job_id in self._reserved
@@ -1054,6 +1074,17 @@ class SshJobRunner:
                         error_message="工作台重启，任务中断；可以重新开始",
                         finished_at=func.now(),
                         updated_at=func.now(),
+                    )
+                )
+                # 运维动作（T-0114）同样在本进程里运行
+                await db.execute(
+                    update(AgentOpsAction)
+                    .where(AgentOpsAction.status == "running")
+                    .values(
+                        status="interrupted",
+                        error_code="interrupted",
+                        error_message="工作台重启，动作中断；可以重新执行",
+                        finished_at=func.now(),
                     )
                 )
                 await db.commit()

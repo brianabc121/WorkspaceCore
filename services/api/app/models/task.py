@@ -87,6 +87,10 @@ class Project(Base):
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
     im_group_error: Mapped[str | None] = mapped_column(Text)
+    # 智能体建的项目（T-0112，迁移 0030）：它只能把智能体拉进自己建的项目
+    created_by_instance: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="SET NULL")
+    )
 
 
 class Task(Base):

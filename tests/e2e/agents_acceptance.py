@@ -246,12 +246,15 @@ class Instance:
 
     def request(self, method: str, url: str, *, token: str | None = None, body: Any = None,
                 headers: dict[str, str] | None = None) -> tuple[int, str]:
-        """从这台服务器上发 HTTP(S) 请求（经它自己的网络：内网入口直连，外网入口经本机隧道）。"""
+        """从这台服务器上发 HTTP(S) 请求（经它自己的网络：内网入口直连，外网入口经本机隧道）。
+
+        响应体最多取 200000 个字符：MCP 的 tools/list 列出全部工具定义，有几十 KB，截短了就解析不了
+        （T-0112 加了工具后超过了原来的 2000）；打印时各处自己再截短。"""
         script = (
             "const [u,m,t,b,h]=JSON.parse(process.argv[1]);"
             "const hd=Object.assign({'Content-Type':'application/json'},h||{});if(t)hd.Authorization='Bearer '+t;"
             "fetch(u,{method:m,headers:hd,body:b==null?undefined:JSON.stringify(b)})"
-            ".then(async r=>console.log(JSON.stringify([r.status,(await r.text()).slice(0,2000)])))"
+            ".then(async r=>console.log(JSON.stringify([r.status,(await r.text()).slice(0,200000)])))"
             ".catch(e=>console.log(JSON.stringify([0,String(e)])));"
         )
         out = self.exec("node", "-e", script, json.dumps([url, method, token, body, headers]), timeout=60).stdout
@@ -990,6 +993,51 @@ def scenario_17(c: Ctx) -> None:
             json.dumps(kinds, ensure_ascii=False))
 
 
+def scenario_18(c: Ctx) -> None:
+    """智能体建项目（T-0112）：没开权限时工具列表里没有 create_project、直接调用被拒；管理员给甲打开
+    项目管理权限后，甲建项目并把乙拉进来：项目知识库成员、真实 OpenIM 项目群里两个都在；关掉后再建被拒。"""
+    tag = uuid.uuid4().hex[:6]
+
+    def listed() -> set[str]:
+        status, text = c.a.request(
+            "POST", c.a.env("MYWS_MCP_URL"), token=c.a.env("MYWS_INSTANCE_TOKEN"),
+            body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            headers={"Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-11-25"})
+        return {t["name"] for t in json.loads(text)["result"]["tools"]} if status == 200 else set()
+
+    def set_admin(enabled: bool) -> dict[str, Any]:
+        current = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}")
+        result: dict[str, Any] = c.owner.call("PUT", f"/api/v1/agents/instances/{c.a.id}/project-admin",
+                                              {"enabled": enabled, "version": current["version"]})
+        return result
+
+    before = listed()
+    refused = mcp_call(c.a, "create_project", {"title": f"不该建出来 {tag}"})
+    c.check("智能体建项目：没开权限时甲的工具列表里没有 create_project，直接调用返回 FORBIDDEN_CAPABILITY",
+            "create_project" not in before and "claim_task" in before and tool_code(refused) == "FORBIDDEN_CAPABILITY",
+            tool_code(refused))
+    granted = set_admin(True)
+    try:
+        after = listed()
+        created = mcp_call(c.a, "create_project", {"title": f"智能体建的项目 {tag}", "instance_ids": [c.b.id]})
+        project_id = (created.get("structuredContent") or {}).get("project_id")
+        project = wait_for("项目群建好", lambda: (lambda p: p if p["im_group"]["status"] == "ready" else None)(
+            c.owner.call("GET", f"/api/v1/projects/{project_id}")), timeout=90) if project_id else {}
+        group = c.owner.call("GET", f"/api/v1/im/groups/{project['im_group']['group_id']}") if project else {}
+        in_group = {m.get("instance_id") for m in group.get("members", [])}
+        c.check("智能体建项目：打开权限后甲建项目并拉乙进来，两个都是项目成员，真实 OpenIM 项目群里两个都在，群主是开权限的管理员",
+                granted["enabled"] and "create_project" in after and not tool_code(created)
+                and {a["name"] for a in project.get("agents", [])} == {c.a.record["name"], c.b.record["name"]}
+                and {c.a.id, c.b.id} <= in_group and group.get("owner_im_id") == c.admin_im,
+                json.dumps({"code": tool_code(created), "agents": [a["name"] for a in project.get("agents", [])],
+                            "group": sorted(i for i in in_group if i)}, ensure_ascii=False))
+    finally:
+        set_admin(False)
+    again = mcp_call(c.a, "create_project", {"title": f"关掉之后 {tag}"})
+    c.check("智能体建项目：关掉权限后再建被拒（已建的项目保留）", tool_code(again) == "FORBIDDEN_CAPABILITY",
+            tool_code(again))
+
+
 def scenario_6(c: Ctx) -> None:
     """停用乙：取密钥失败、MCP 返回 401、IM 被强制下线。放在最后（停用后乙不再参与）。"""
     current = c.owner.call("GET", f"/api/v1/agents/instances/{c.b.id}")
@@ -1005,10 +1053,38 @@ def scenario_6(c: Ctx) -> None:
     c.check("场景 6：乙的 IM 被强制下线", bool(status))
 
 
+def scenario_19(c: Ctx) -> None:
+    """服务器状态（T-0113）：甲、乙的真实 OpenClaw 容器各上报一次服务器指标；管理员看得到当前值与小指示；
+    甲用 get_host_status 只读到自己的，不能带参数看别的实例。"""
+    results = [i.exec("node", "/opt/myworkspace/bin/host-report.mjs", timeout=120, check=False) for i in (c.a, c.b)]
+    status = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}/host")
+    current = status.get("current") or {}
+    c.check("服务器状态：甲、乙的真实 OpenClaw 容器各上报一次，甲的当前值里有核心数、内存、两个分区与开机时长",
+            all(r.returncode == 0 for r in results) and status["reported"] is True
+            and (current.get("cores") or 0) >= 1 and (current.get("mem_total") or 0) > 0
+            and bool(current.get("data_disk")) and bool(current.get("root_disk")) and (current.get("uptime_seconds") or 0) > 0,
+            json.dumps({"exit": [r.returncode for r in results], "stderr": [r.stderr.strip()[-200:] for r in results],
+                        "current": {k: current.get(k) for k in ("cores", "mem_total", "load", "uptime_seconds")}},
+                       ensure_ascii=False))
+    summary = {x["instance_id"]: x for x in c.owner.call("GET", "/api/v1/agents/host-summary")["items"]}
+    c.check("服务器状态：实例列表的小指示里甲、乙都有内存与磁盘使用率",
+            all((summary.get(i.id) or {}).get("mem_used_percent") is not None
+                and (summary.get(i.id) or {}).get("disk_used_percent") is not None for i in (c.a, c.b)),
+            json.dumps(summary, ensure_ascii=False)[:600])
+    mine = mcp_call(c.a, "get_host_status", {})
+    data = mine.get("structuredContent") or {}
+    c.check("服务器状态：甲用 get_host_status 读到自己所在服务器的状态（只读工具）",
+            not mine.get("isError") and data.get("reported") is True and (data.get("cores") or 0) >= 1
+            and "last_24h" in data, json.dumps(mine, ensure_ascii=False)[:400])
+    other = mcp_call(c.a, "get_host_status", {"instance_id": c.b.id})
+    c.check("服务器状态：get_host_status 不接受参数，不能看别的实例", bool(other.get("isError")),
+            json.dumps(other, ensure_ascii=False)[:300])
+
+
 SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "2": scenario_2, "3": scenario_3, "4": scenario_4, "5": scenario_5, "7": scenario_7, "8": scenario_8,
     "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "15": scenario_15,
-    "16": scenario_16, "17": scenario_17, "6": scenario_6,
+    "16": scenario_16, "17": scenario_17, "18": scenario_18, "19": scenario_19, "6": scenario_6,
 }
 
 

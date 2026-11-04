@@ -11,9 +11,12 @@
 1. 主机公钥指纹与 sshd 的一致，确认后才能安装；
 2. 用密码安装：sudo 把账号加入 docker 组，专用密钥重新登录，接入包、插件、启动、定时任务，**真实的 OpenClaw 连上工作台**；
 3. 密码不出现在任务、目标服务器、审计记录里；authorized_keys 里是专用公钥；
-4. 不填密码重新部署（只用专用密钥）；
-5. 卸载（删除目录）：容器、定时任务、目录都没有了；
-6. 吊销：authorized_keys 里没有专用公钥了；删除目标服务器。
+4. 照 crontab 那几行运行一次用量与服务器状态上报（T-0106 / T-0113）；
+5. 远程运维动作（T-0114）：查看状态、查看日志、立即上报、重启、重新拉起、清理镜像逐个执行，
+   核对 docker compose 的输出格式、输出脱敏、二次认证、审计只记退出码；
+6. 不填密码重新部署（只用专用密钥）；
+7. 卸载（删除目录）：容器、定时任务、目录都没有了，运维动作不再可用；
+8. 吊销：authorized_keys 里没有专用公钥了；删除目标服务器。
 
 只依赖 Python 标准库、docker 与 ssh-keygen；用法：
   sudo -E python3 tests/e2e/agent_ssh_acceptance.py
@@ -22,6 +25,7 @@
 import json
 import os
 import pwd
+import re
 import subprocess
 import sys
 import tempfile
@@ -59,6 +63,43 @@ def fingerprint(public_key: str) -> str:
         return run("ssh-keygen", "-lf", handle.name).stdout.split()[1]
     finally:
         os.unlink(handle.name)
+
+
+def cron_command(cron: str, script: str) -> str:
+    """crontab 里带这个脚本的那一行的命令部分（去掉前 5 个时间字段与重定向）。"""
+    line = next((x for x in cron.splitlines() if script in x), "")
+    return line.split(None, 5)[5].split(" >/dev/null")[0] if line.count(" ") >= 5 else "false"
+
+
+class Ops:
+    """远程运维动作（T-0114）：执行一个动作并等它结束。"""
+
+    def __init__(self, owner: Client, headers: dict[str, str], instance_id: str) -> None:
+        self.owner = owner
+        self.headers = headers
+        self.path = f"/api/v1/agents/instances/{instance_id}/ops"
+
+    def state(self) -> dict[str, Any]:
+        data: dict[str, Any] = self.owner.request("GET", self.path, headers=self.headers).json()
+        return data
+
+    def start(self, body: dict[str, Any]) -> Any:
+        return self.owner.request("POST", self.path, body, headers=self.headers)
+
+    def run(self, body: dict[str, Any]) -> dict[str, Any]:
+        response = self.start(body)
+        if response.status != 202:
+            return {"status": f"HTTP {response.status}", "output": response.summary, "exit_code": None}
+        action_id = response.json()["id"]
+        deadline = time.monotonic() + 240
+        while time.monotonic() < deadline:
+            data: dict[str, Any] = self.owner.request(
+                "GET", f"{self.path}/{action_id}", headers=self.headers
+            ).json()
+            if data["status"] != "running":
+                return data
+            time.sleep(2)
+        return {"status": "timeout", "output": "", "exit_code": None}
 
 
 def sql_rows(query: str) -> str:
@@ -227,13 +268,13 @@ def main() -> int:
     report.check("登录密码不在任务、目标服务器、审计记录里", password not in dump and len(dump) > 0)
     cron = run("crontab", "-l", "-u", user).stdout
     if done["schedule"] == "done":
-        # 每 10 分钟取密钥、每分钟上报 token 用量（T-0104）、每周一重启
-        report.check("crontab 有三行带标记的定时任务", cron.count(MARKER) == 3, cron)
+        # 每 10 分钟取密钥、每分钟上报 token 用量（T-0104）与服务器状态（T-0113）、每周一重启
+        report.check("crontab 有四行带标记的定时任务", cron.count(MARKER) == 4, cron)
         report.check("crontab 里有每分钟的用量上报", "/opt/myworkspace/bin/usage-report.mjs" in cron, cron)
+        report.check("crontab 里有每分钟的服务器状态上报", "/opt/myworkspace/bin/host-report.mjs" in cron, cron)
         # 照 crontab 那一行以部署账号跑一次（T-0106）：真实 OpenClaw 的 sessions.usage 经接入网关送到工作台，
         # 实例记下第一次上报的时间（第一次只记基准，不计 token）
-        line = next((x for x in cron.splitlines() if "usage-report.mjs" in x), "")
-        command = line.split(None, 5)[5].split(" >/dev/null")[0] if line.count(" ") >= 5 else "false"
+        command = cron_command(cron, "usage-report.mjs")
         uploaded = run("sh", "-c", command, user=user)
         reported = sql_rows(
             f"SELECT usage_reported_at IS NOT NULL FROM workspace.agent_instances WHERE id = '{instance['id']}'"
@@ -243,6 +284,86 @@ def main() -> int:
             uploaded.returncode == 0 and reported == "t",
             f"{command}；退出码 {uploaded.returncode}；{uploaded.stderr.strip()[-300:]}；{reported}",
         )
+
+        # 服务器状态（T-0113）：容器里读宿主机的 /proc 与磁盘统计，经接入网关送到工作台
+        command = cron_command(cron, "host-report.mjs")
+        uploaded = run("sh", "-c", command, user=user)
+        host_status = owner.request(
+            "GET", f"/api/v1/agents/instances/{instance['id']}/host", headers=headers
+        ).json()
+        current = host_status.get("current") or {}
+        report.check(
+            "照 crontab 那一行运行一次服务器状态上报：工作台有 CPU、内存、两个分区与开机时长",
+            uploaded.returncode == 0 and host_status.get("reported") is True
+            and (current.get("cores") or 0) >= 1 and (current.get("mem_total") or 0) > 0
+            and (current.get("data_disk") or {}).get("total", 0) > 0
+            and (current.get("root_disk") or {}).get("total", 0) > 0
+            and (current.get("uptime_seconds") or 0) > 0,
+            f"{command}；退出码 {uploaded.returncode}；{uploaded.stderr.strip()[-300:]}；"
+            + json.dumps({k: current.get(k) for k in ("cores", "mem_total", "load", "uptime_seconds")}),
+        )
+
+    # ---------------------------------------------------------------- 远程运维动作（T-0114）
+    ops = Ops(owner, headers, instance["id"])
+    report.check("运维动作可用（用 SSH 部署过）", ops.state().get("available") is True)
+    status = ops.run({"action": "status"})
+    output = status.get("output") or ""
+    report.check(
+        "查看状态：docker compose ps 有 SERVICE 列与 openclaw、docker stats 有 CPU % 列、df 与 uptime",
+        status["status"] == "succeeded" and status["exit_code"] == 0 and "SERVICE" in output
+        and "openclaw" in output and "CPU %" in output and "Filesystem" in output
+        and "load average" in output,
+        output[-1500:],
+    )
+    token = next(
+        (x.split("=", 1)[1] for x in (install_dir / "myworkspace.env").read_text().splitlines()
+         if x.startswith("MYWS_INSTANCE_TOKEN=")),
+        "",
+    )
+    logs = ops.run({"action": "logs"})
+    output = logs.get("output") or ""
+    report.check(
+        "查看日志：OpenClaw 最近 200 行；输出里没有实例凭证与未脱敏的 mwa_ 令牌",
+        logs["status"] == "succeeded" and len(output) > 100 and bool(token) and token not in output
+        and re.search(r"mwa_(?!\*\*\*)[A-Za-z0-9]", output) is None,
+        output[-600:],
+    )
+    tunnel = ops.run({"action": "logs", "service": "tunnel"})
+    report.check("查看本机隧道的日志", tunnel["status"] == "succeeded", (tunnel.get("output") or "")[-300:])
+    upload = ops.run({"action": "report"})
+    report.check(
+        "立即上报一次：用量与服务器状态两个脚本都成功",
+        upload["status"] == "succeeded" and upload["exit_code"] == 0,
+        (upload.get("output") or "")[-600:],
+    )
+    refused = ops.start({"action": "restart"})
+    report.check(
+        "重启 OpenClaw 不带密码被拒（STEP_UP_REQUIRED）",
+        refused.status == 403 and "STEP_UP_REQUIRED" in refused.summary,
+        refused.summary,
+    )
+    for body, name in (
+        ({"action": "restart", "password": PASSWORD}, "重启 OpenClaw"),
+        ({"action": "up", "password": PASSWORD}, "重新拉起全部服务"),
+        ({"action": "prune", "password": PASSWORD}, "清理无用镜像"),
+    ):
+        result = ops.run(body)
+        report.check(
+            f"{name}：输入登录密码后执行成功（退出码 0）",
+            result["status"] == "succeeded" and result["exit_code"] == 0,
+            (result.get("output") or result.get("error_message") or "")[-600:],
+        )
+    alive = run("docker", "ps", "--filter", f"label=com.docker.compose.project={PROJECT}", "--format", "{{.Names}}")
+    report.check("重启与重新拉起后 OpenClaw 与本机隧道仍在运行", alive.stdout.count("\n") >= 2, alive.stdout.strip())
+    audits = sql_rows(
+        "SELECT count(*) FROM workspace.audit_logs WHERE action = 'agents.ops.finished'"
+        f" AND workspace_id = '{workspace}' AND metadata_redacted_json->>'exit_code' = '0'"
+    ).strip()
+    leaked = sql_rows(
+        "SELECT count(*) FROM workspace.audit_logs WHERE action LIKE 'agents.ops.%'"
+        f" AND workspace_id = '{workspace}' AND metadata_redacted_json::text LIKE '%Filesystem%'"
+    ).strip()
+    report.check("审计记下 7 个动作与退出码，不含输出", audits == "7" and leaked == "0", f"{audits} / {leaked}")
 
     # ---------------------------------------------------------------- 不填密码重新部署
     response = target.post("install", {"version": state["target"]["version"]})
@@ -264,7 +385,7 @@ def main() -> int:
         step_detail(state, "reflection"),
     )
     if done["schedule"] == "done":
-        report.check("定时任务没有重复", run("crontab", "-l", "-u", user).stdout.count(MARKER) == 3)
+        report.check("定时任务没有重复", run("crontab", "-l", "-u", user).stdout.count(MARKER) == 4)
 
     # ---------------------------------------------------------------- 卸载（删除目录）
     response = target.post("uninstall", {"version": state["target"]["version"], "remove_files": True})
@@ -277,6 +398,7 @@ def main() -> int:
     report.check("容器都删除了", left == "", left)
     report.check("接入包目录删除了", not install_dir.exists())
     report.check("定时任务删除了", MARKER not in run("crontab", "-l", "-u", user).stdout)
+    report.check("卸载后运维动作不再可用", ops.state().get("reason") == "not_deployed")
 
     # ---------------------------------------------------------------- 吊销专用密钥、删除目标服务器
     response = target.post("revoke", {"version": state["target"]["version"]})

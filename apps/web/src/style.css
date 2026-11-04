@@ -379,6 +379,64 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .agent-table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: .85rem; }
 .agent-table th, .agent-table td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); }
 @media (max-width: 760px) { .agent-card, .agent-switch { padding: 16px; } }
+/* 服务器状态（T-0113）。趋势图两种系列色亮暗两套都跑过 dataviz 配色检查（与知识库趋势图同一组）；第二个系列另加虚线。
+   超过阈值的指示用 --danger，同时写出“空间不足”等文字，不只靠颜色。 */
+:root { --chart-1: #2a78d6; --chart-2: #eb6834; --chart-grid: #eceef2; --chart-axis: #cfd5df; }
+:root[data-theme="dark"] { --chart-1: #3987e5; --chart-2: #d95926; --chart-grid: #262b39; --chart-axis: #3a4152; }
+.host-meters { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 16px; font-size: .85rem; }
+.host-meters li { display: grid; gap: 4px; min-width: 0; color: var(--muted); }
+.host-meters b { color: var(--text); font-weight: 600; }
+.host-meters li.is-danger, .host-card.is-danger .host-usage { color: var(--danger); }
+.host-bar { display: block; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.host-bar > span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.is-danger .host-bar > span { background: var(--danger); }
+.host-detail { display: grid; gap: 12px; min-width: 0; }
+.host-alerts { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; color: var(--danger); font-size: .9rem; }
+.host-alerts li { display: flex; align-items: center; gap: 8px; }
+.host-alert-icon { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid currentColor; font-size: .7rem; font-weight: 700; }
+.host-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.host-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+.host-card h4 { margin: 0; font-size: .8rem; color: var(--muted); font-weight: 600; }
+.host-card p { margin: 0; }
+.host-card b { color: var(--text); font-weight: 600; }
+.host-big { font-size: 1.15rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.host-range { justify-self: start; flex-wrap: wrap; }
+.host-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px 24px; }
+.host-chart { margin: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.host-chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: .85rem; }
+.host-chart-head strong + .form-help { margin-left: 6px; }
+.host-chart-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: .78rem; }
+.host-chart-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.host-chart-swatch { flex: none; display: inline-block; width: 14px; height: 0; border-top: 2px solid var(--chart-1); }
+.host-chart-swatch.is-2 { border-top: 2px dashed var(--chart-2); }
+.host-chart-empty { margin: 0; padding: 24px 0; text-align: center; }
+.host-chart-body { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 120px auto; column-gap: 8px; row-gap: 6px; }
+.host-chart-y { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; margin: -7px 0; font-size: .7rem; color: var(--muted); line-height: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.host-chart-plot { position: relative; min-width: 0; touch-action: pan-y; border-radius: 4px; }
+.host-chart-plot:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.host-chart-grid { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+.host-chart-grid span { height: 1px; background: var(--chart-grid); }
+.host-chart-grid span:last-child { background: var(--chart-axis); }
+.host-chart-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.host-chart-svg polyline { fill: none; stroke: var(--chart-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.host-chart-svg .is-2 polyline { stroke: var(--chart-2); stroke-dasharray: 5 4; }
+.host-chart-dot { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--chart-1); pointer-events: none; }
+.host-chart-dot.is-2 { background: var(--chart-2); }
+.host-chart-dot.is-active { width: 10px; height: 10px; margin: -5px 0 0 -5px; box-shadow: 0 0 0 2px var(--surface); }
+.host-chart-cross { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--chart-axis); pointer-events: none; }
+.host-chart-tip { position: absolute; z-index: 5; top: 0; min-width: 150px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 3px; font-size: .78rem; pointer-events: none; white-space: nowrap; }
+.host-chart-tip > span { display: flex; align-items: center; gap: 6px; }
+.host-chart-tip b { margin-left: auto; padding-left: 12px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.host-chart-x { grid-column: 2; display: flex; justify-content: space-between; font-size: .7rem; color: var(--muted); }
+.host-chart-table summary { cursor: pointer; color: var(--muted); font-size: .78rem; }
+@media (max-width: 520px) { .host-meters { grid-template-columns: minmax(0, 1fr); } }
+/* 运维动作（T-0114） */
+.ops-actions { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.ops-actions .form-field { margin: 0; }
+.ops-result { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; display: grid; gap: 6px; min-width: 0; }
+.ops-result p { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.ops-output { max-height: 360px; overflow: auto; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (forced-colors: active) { .host-chart-swatch, .host-chart-dot, .host-bar > span { forced-color-adjust: none; } }
 /* AI tool calls and approvals (V2 OC-5): approval center, activity log, IM approval cards. */
 .ai-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 12px; min-width: 0; }
 .ai-execution { padding: 16px; min-width: 0; overflow-wrap: anywhere; display: grid; gap: 8px; justify-items: start; }

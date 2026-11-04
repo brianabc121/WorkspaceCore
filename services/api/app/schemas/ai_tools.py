@@ -375,6 +375,40 @@ class CalendarAgendaOutput(BaseModel):
     )
 
 
+class HostDiskStatus(BaseModel):
+    total: int
+    free: int
+    used_percent: float
+
+
+class HostDay(BaseModel):
+    """最近 24 小时的概况（每小时平均里的最高值）。"""
+
+    cpu_max: float | None
+    load_max: float | None
+    mem_max: float | None
+    disk_max: float | None = Field(description="两个分区里较高的已用百分比")
+
+
+class GetHostStatusOutput(BaseModel):
+    """你自己所在服务器的状态（T-0113）：整台服务器的数值，不是只有你的容器。"""
+
+    reported: bool = Field(description="收到过上报；false 时让管理员重新部署接入包")
+    reported_at: datetime | None
+    stale: bool = Field(description="超过 3 分钟没有上报")
+    cores: int | None
+    cpu_percent: float | None
+    load: list[float] | None = Field(description="1 / 5 / 15 分钟负载")
+    mem_total: int | None
+    mem_available: int | None
+    data_disk: HostDiskStatus | None = Field(description="接入包目录（会话、记忆）所在的分区")
+    root_disk: HostDiskStatus | None = Field(description="Docker 数据目录所在的分区")
+    rx_rate: int | None = Field(description="下载速率（字节 / 秒）")
+    tx_rate: int | None = Field(description="上传速率（字节 / 秒）")
+    last_24h: HostDay
+    alerts: list[Literal["disk_low", "memory_low", "load_high", "not_reporting"]]
+
+
 class ListBookmarksInput(_Strict):
     q: Annotated[str, StringConstraints(min_length=1, max_length=100)] | None = None
     limit: int = Field(default=20, ge=1, le=50)
@@ -600,6 +634,54 @@ class CompleteTaskInput(_Strict):
     )
 
 
+class CreateProjectInput(_Strict):
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    description: Annotated[str, StringConstraints(max_length=2000)] = ""
+    instance_ids: list[UUID] = Field(
+        default_factory=list,
+        max_length=20,
+        description="一开始就拉进项目的其他智能体（list_peers 里的 id）；你自己会自动加入",
+    )
+
+
+class AddProjectAgentsInput(_Strict):
+    project_id: UUID = Field(description="你自己建的项目")
+    instance_ids: list[UUID] = Field(min_length=1, max_length=20)
+
+
+class CreateProjectOutput(BaseModel):
+    status: Literal["created"] = "created"
+    project_id: UUID
+    agents: list[UUID] = Field(description="项目的智能体成员（含你自己）")
+    im_group: Literal["none", "pending", "ready"] = Field(
+        description="项目群：ready 已建好；pending 正在建（OpenIM 不可用时稍后重试）；"
+        "none 没有部署 IM"
+    )
+
+
+class AddProjectAgentsOutput(BaseModel):
+    project_id: UUID
+    added: list[UUID] = Field(description="这次新加入的智能体")
+    already: list[UUID] = Field(description="之前就是成员的智能体")
+
+
+class AgentText(_Untrusted):
+    name: str
+    description: str
+
+
+class AgentItem(BaseModel):
+    id: UUID
+    status: Literal["pending", "online", "offline", "disabled"]
+    idle: bool = Field(description="现在没有正在执行的任务")
+    can_write: bool = Field(description="scope 为 read_write（能领取、完成任务）")
+    untrusted: AgentText
+
+
+class ListAgentsOutput(BaseModel):
+    items: list[AgentItem]
+
+
 class ClaimTaskOutput(BaseModel):
     status: Literal["claimed"] = "claimed"
     task_id: UUID
@@ -702,6 +784,14 @@ _READ: list[ToolSpec] = [
     _spec("list_automations", "read", EmptyInput, ListAutomationsOutput, "列出白名单工作流"),
     _spec("dashboard_overview", "read", EmptyInput, DashboardOverviewOutput, "首页概况数字"),
     _spec(
+        "get_host_status",
+        "read",
+        EmptyInput,
+        GetHostStatusOutput,
+        "读你自己所在服务器的状态（CPU、负载、内存、磁盘、网速与最近 24 小时概况），"
+        "用来判断磁盘满、负载高这类问题；只能看你自己",
+    ),
+    _spec(
         "get_action_status",
         "read",
         GetActionStatusInput,
@@ -772,6 +862,32 @@ _DIRECT: list[ToolSpec] = [
         "把执行者是你的任务标为完成（直接生效，可以附完成说明）；管理员觉得有问题会打回",
     ),
 ]
+# 项目管理（T-0112）：只有管理员打开了项目管理权限的实例才列出、才能调用
+_PROJECT_ADMIN: list[ToolSpec] = [
+    _spec(
+        "create_project",
+        "direct",
+        CreateProjectInput,
+        CreateProjectOutput,
+        "新建项目（直接生效，要管理员先给你开项目管理权限）：会建项目知识库和 IM 项目群，"
+        "你自己自动加入；可以同时拉其他智能体进来。每小时最多 5 个",
+    ),
+    _spec(
+        "add_to_project",
+        "direct",
+        AddProjectAgentsInput,
+        AddProjectAgentsOutput,
+        "把其他智能体拉进你自己建的项目（直接生效）：它们得到项目知识库读写权限并进项目群。"
+        "每小时最多 20 次",
+    ),
+    _spec(
+        "list_peers",
+        "direct",
+        EmptyInput,
+        ListAgentsOutput,
+        "列出本工作空间的智能体（名字、能力说明、在线、是否空闲），用来决定拉谁进项目",
+    ),
+]
 _KNOWLEDGE: list[ToolSpec] = [
     _knowledge("knowledge_search", KnowledgeSearchInput, KnowledgeSearchOutput),
     _knowledge("knowledge_get", KnowledgeGetInput, KnowledgeGetOutput),
@@ -781,10 +897,11 @@ _KNOWLEDGE: list[ToolSpec] = [
     _knowledge("knowledge_delete", KnowledgeDeleteInput, KnowledgeDeleteOutput),
 ]
 TOOLS: dict[str, ToolSpec] = {
-    spec.name: spec for spec in _READ + _WRITE + _CRITICAL + _DIRECT + _KNOWLEDGE
+    spec.name: spec for spec in _READ + _WRITE + _CRITICAL + _DIRECT + _PROJECT_ADMIN + _KNOWLEDGE
 }
 KNOWLEDGE_TOOL_NAMES = frozenset(spec.name for spec in _KNOWLEDGE)
 DIRECT_TOOL_NAMES = frozenset(spec.name for spec in _DIRECT)
+PROJECT_ADMIN_TOOL_NAMES = frozenset(spec.name for spec in _PROJECT_ADMIN)
 
 # 永远不做成工具（方案第 4.6 节）：集成凭证与设置、成员与角色、会话、工作台设置、
 # 实例与密钥管理、审计日志

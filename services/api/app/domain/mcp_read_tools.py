@@ -27,6 +27,7 @@ from app.domain.automations import AutomationService
 from app.domain.calendar import CalendarService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.developer import DeveloperService
+from app.domain.host_metrics import HostService
 from app.domain.knowledge import KnowledgeService
 from app.domain.knowledge_base import KnowledgeBase
 from app.domain.notifications import NotificationService
@@ -62,8 +63,11 @@ from app.schemas.ai_tools import (
     EventText,
     Freshness,
     GetActionStatusInput,
+    GetHostStatusOutput,
     GetTaskInput,
     GetTaskOutput,
+    HostDay,
+    HostDiskStatus,
     IssueItem,
     IssueText,
     KnowledgeSourceItem,
@@ -102,6 +106,7 @@ from app.schemas.ai_tools import (
     TaskItem,
     TaskText,
 )
+from app.schemas.host import DiskOut
 from app.schemas.integrations import SyncState
 from app.schemas.search import AgentSearchType
 from app.schemas.tasks import TaskOut
@@ -621,6 +626,45 @@ async def _dashboard_overview(call: ReadCall, args: EmptyInput) -> DashboardOver
     )
 
 
+async def _host_status(call: ReadCall, args: EmptyInput) -> GetHostStatusOutput:
+    """只看调用它的实例自己（T-0113，D5）。"""
+    status = await HostService(call.db, call.redis).status_of(call.requester.instance, "24h")
+    current = status.current
+
+    def disk(value: DiskOut | None) -> HostDiskStatus | None:
+        return (
+            HostDiskStatus(total=value.total, free=value.free, used_percent=value.used_percent)
+            if value is not None
+            else None
+        )
+
+    def top(values: list[float | None]) -> float | None:
+        known = [v for v in values if v is not None]
+        return max(known) if known else None
+
+    return GetHostStatusOutput(
+        reported=status.reported,
+        reported_at=current.reported_at if current else None,
+        stale=current.stale if current else True,
+        cores=current.cores if current else None,
+        cpu_percent=current.cpu_percent if current else None,
+        load=current.load if current else None,
+        mem_total=current.mem_total if current else None,
+        mem_available=current.mem_available if current else None,
+        data_disk=disk(current.data_disk) if current else None,
+        root_disk=disk(current.root_disk) if current else None,
+        rx_rate=current.rx_rate if current else None,
+        tx_rate=current.tx_rate if current else None,
+        last_24h=HostDay(
+            cpu_max=top([p.cpu_max for p in status.points]),
+            load_max=top([p.load_max for p in status.points]),
+            mem_max=top([p.mem_max for p in status.points]),
+            disk_max=top([p.data_avg for p in status.points] + [p.root_avg for p in status.points]),
+        ),
+        alerts=status.alerts,
+    )
+
+
 async def _action_status(call: ReadCall, args: GetActionStatusInput) -> ActionStatusOutput:
     service = AiToolService(call.db, call.settings, call.runtime, call.redis)
     row = await service.get_for_instance(call.requester.instance, args.action_id)
@@ -654,4 +698,5 @@ READ_HANDLERS: dict[str, ReadHandler] = {
     "list_automations": _list_automations,
     "dashboard_overview": _dashboard_overview,
     "get_action_status": _action_status,
+    "get_host_status": _host_status,
 }

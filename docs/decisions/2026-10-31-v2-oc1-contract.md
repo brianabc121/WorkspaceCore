@@ -334,9 +334,11 @@
 | 写 | `mark_notification_read` | `read_write` | viewer | `PendingApproval` |
 | 高危 | `delete_task`、`delete_calendar_event`、`trigger_automation` | `read_write` | member | `PendingApproval`；批准要二次认证 |
 | 直接执行（T-0111，人类 2026-11-04 决定） | `claim_task`、`release_task`、`complete_task`（2026-11-04 之前是写工具、要审批） | `read_write` | member | 各自的输出；执行记录 `risk_level = direct`，见 `docs/v2/AGENT_OPS_PLAN.md` 第 3、7 节 |
+| 直接执行，需项目管理权限（T-0112，人类 2026-11-04 决定） | `create_project`、`add_to_project`、`list_peers` | `read_write` | member | 各自的输出；只列给、只允许管理员打开了项目管理权限的实例（否则 `FORBIDDEN_CAPABILITY`） |
 
 - 实际角色取“登记人的角色”和“实例的 `max_role`”中较低的一个。
 - `calendar_agenda` 最多查 31 天；列表类工具 `limit` 最多 50。
+- 读工具 `get_host_status`（T-0113）：只返回调用它的实例自己的服务器状态（当前值与 24 小时的峰值、平均），帮助它判断磁盘满、负载高；没有看别的实例的工具。
 - **永远不做成工具**：集成凭证与设置、成员与角色、会话、工作台设置、实例与密钥管理、审计日志。
 
 ### 9.3 返回内容

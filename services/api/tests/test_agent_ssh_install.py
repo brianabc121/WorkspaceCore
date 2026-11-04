@@ -457,6 +457,7 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
         "bin/myworkspace-secret-resolver": 0o755,
         "bin/myworkspace-openclaw-start": 0o755,
         "bin/usage-report.mjs": 0o755,
+        "bin/host-report.mjs": 0o755,
         "tls/client.key": 0o600,
         "tls/client.crt": 0o644,
     }
@@ -465,14 +466,16 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     assert stat.S_IMODE(host.directory.stat().st_mode) == 0o700
     assert "tunnel:" in (host.directory / "compose.yaml").read_text()
 
-    # crontab：三行都带标记（每 10 分钟取密钥、每分钟上报用量、每周一重启）
+    # crontab：四行都带标记（每 10 分钟取密钥、每分钟上报用量与服务器状态、每周一重启）
     cron = (host.state / "crontab").read_text().splitlines()
-    assert len(cron) == 3
+    assert len(cron) == 4
     assert all(line.endswith(prov.CRON_MARKER) for line in cron)
     assert "secrets reload --json" in cron[0]
     assert cron[1].startswith("* * * * * ")
     assert "exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs" in cron[1]
-    assert "docker compose restart openclaw" in cron[2]
+    assert cron[2].startswith("* * * * * ")
+    assert "exec -T openclaw node /opt/myworkspace/bin/host-report.mjs" in cron[2]
+    assert "docker compose restart openclaw" in cron[3]
 
     # 密码不在任何表里（任务、目标服务器、审计）；任务日志里也没有令牌
     assert await _stored_anywhere(owner, PASSWORD) == 0
@@ -879,8 +882,8 @@ async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
         state = await _install_ok(owner, host, instance_id, version)
-        # 原有的一行 + 带标记的三行
-        assert len((host.state / "crontab").read_text().splitlines()) == 4
+        # 原有的一行 + 带标记的四行
+        assert len((host.state / "crontab").read_text().splitlines()) == 5
 
         # 卸载，保留目录
         response = await _post(

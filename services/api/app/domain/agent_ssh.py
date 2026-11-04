@@ -32,7 +32,7 @@ from app.domain.credentials import CredentialBox, CredentialError
 from app.domain.policy import WorkspaceAccess
 from app.domain.ratelimit import WindowLimiter
 from app.integrations import ssh
-from app.models import AgentInstance, AgentSshJob, AgentSshTarget
+from app.models import AgentInstance, AgentOpsAction, AgentSshJob, AgentSshTarget
 from app.schemas.agents import (
     AgentSshConfirm,
     AgentSshInstall,
@@ -188,6 +188,15 @@ class AgentSshService:
         API 只有一个进程：记录是 running、但本进程里没有它的协程（协程意外退出），
         就把它标为中断，不让它一直挡住后续操作（与启动时的处理相同）。
         """
+        # 运维动作（T-0114）进行中时也不能开始部署、卸载、吊销（同一条 SSH 通道）
+        action = await self.db.scalar(
+            select(AgentOpsAction.id).where(
+                AgentOpsAction.instance_id == target.instance_id,
+                AgentOpsAction.status == "running",
+            )
+        )
+        if action is not None and self.runner is not None and self.runner.running(action):
+            return True
         job = await self.db.scalar(
             select(AgentSshJob).where(
                 AgentSshJob.target_id == target.id, AgentSshJob.status == "running"

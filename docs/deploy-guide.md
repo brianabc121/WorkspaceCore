@@ -646,11 +646,12 @@ Docker 用官方软件源安装锁定版本，并把账号加入 docker 组。
    ```cron
    */10 * * * * cd /opt/myworkspace-agent && docker compose exec -T openclaw node openclaw.mjs secrets reload --json
    * * * * * cd /opt/myworkspace-agent && docker compose exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs
+   * * * * * cd /opt/myworkspace-agent && docker compose exec -T openclaw node /opt/myworkspace/bin/host-report.mjs
    17 4 * * 1 cd /opt/myworkspace-agent && docker compose restart openclaw
    ```
 
    第一行：工作台里轮换了模型密钥，10 分钟内生效，不用重启；第二行：每分钟把 token 用量报给工作台（任务时间轴；只报数字和会话的哈希，不报内容）；
-   第三行：每周重启一次，换新的 IM 令牌（令牌只在启动时领取）。
+   第三行：每分钟把服务器状态报给工作台（CPU、内存、磁盘、网速，只报数字）；第四行：每周重启一次，换新的 IM 令牌（令牌只在启动时领取）。
 
 6. **每晚复盘**（知识库，T-0100）：OpenClaw 启动后，在接入包目录里运行一次
 

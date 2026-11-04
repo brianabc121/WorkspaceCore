@@ -24,11 +24,13 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, dict_config
 from app.core.resources import create_engine
 from app.domain import (
+    agent_ops,
     agent_watch,
     alerts,
     approval_cards,
     automations,
     events,
+    host_metrics,
     im,
     im_projection,
     knowledge_files,
@@ -96,7 +98,15 @@ async def purge(ctx: dict[str, Any]) -> None:
         notes = await KnowledgeBase(db, context.settings).purge_expired()
         # 时间轴：90 天前的每分钟 token 用量、3 天前的累计值（T-0104）
         usage_minutes, usage_cursors = await timeline.purge_usage(db)
+        # 服务器状态：30 天前的样本（T-0113）
+        host_samples = await host_metrics.purge(db)
+        # 运维动作：7 天前的记录与脱敏后的输出（T-0114；审计里的记录保留）
+        ops_actions = await agent_ops.purge(db)
         await db.commit()
+    if ops_actions:
+        logger.info("agent ops actions purged", extra={"count": ops_actions})
+    if host_samples:
+        logger.info("host samples purged", extra={"count": host_samples})
     if usage_minutes or usage_cursors:
         logger.info(
             "agent usage purged", extra={"minutes": usage_minutes, "cursors": usage_cursors}
@@ -234,6 +244,13 @@ async def sync_project_groups(ctx: dict[str, Any]) -> int:
         return await project_groups.ProjectGroupSync(db, context.settings, client).run_due()
 
 
+async def check_host_alerts(ctx: dict[str, Any]) -> int:
+    """服务器状态告警（T-0113）：磁盘、内存、负载、在线却不上报；恢复前只提醒一次。"""
+    context = _sync(ctx)
+    async with context.sessions() as db:
+        return await host_metrics.check_alerts(db)
+
+
 async def replicate_files(ctx: dict[str, Any]) -> int:
     """知识库图片：把待复制的图片写到副本（T-0103）。没配置副本时什么也不做。"""
     context = _sync(ctx)
@@ -320,6 +337,7 @@ class WorkerSettings:
         cron(replicate_files, second=55, timeout=300),
         cron(close_stale_runs, second=20, timeout=60),
         cron(sync_project_groups, second=30, timeout=120),
+        cron(check_host_alerts, second=40, timeout=60),
         cron(cleanup_files, hour=3, minute=37, timeout=1800),
         cron(check_file_storage, hour=4, minute=13, run_at_startup=True, timeout=180),
     ]

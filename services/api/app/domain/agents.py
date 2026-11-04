@@ -65,6 +65,8 @@ from app.schemas.agents import (
     HeartbeatRequest,
     HeartbeatResponse,
     ImTokenResponse,
+    ProjectAdminOut,
+    ProjectAdminPut,
     SecretAccessOut,
     SecretAccessPage,
     SecretGrantOut,
@@ -329,6 +331,11 @@ class AgentService:
                 bundle_issued_at=i.bundle_issued_at,
                 im_token_expires_at=i.im_token_expires_at,
                 disabled_at=i.disabled_at,
+                project_admin=ProjectAdminOut(
+                    enabled=i.project_admin_enabled,
+                    granted_by=i.project_admin_by,
+                    granted_at=i.project_admin_at,
+                ),
                 credentials=by_instance[i.id],
                 secret_grants=grants_by[i.id],
                 version=i.version,
@@ -448,6 +455,43 @@ class AgentService:
         )
         await self.db.commit()
         return await self._one_out(instance)
+
+    async def set_project_admin(
+        self,
+        access: WorkspaceAccess,
+        instance_id: uuid.UUID,
+        body: ProjectAdminPut,
+        *,
+        client_ip: str,
+    ) -> ProjectAdminOut:
+        """打开或关闭实例的项目管理权限（T-0112，owner / admin）。
+
+        打开时记下是谁打开的：这个人做它建的项目群的群主。关闭后已经建的项目与成员保留。
+        """
+        instance = await self._instance(access, instance_id)
+        self._check_version(instance, body.version)
+        if instance.project_admin_enabled != body.enabled:
+            instance.project_admin_enabled = body.enabled
+            instance.project_admin_by = access.user_id if body.enabled else None
+            instance.project_admin_at = datetime.now(UTC) if body.enabled else None
+            instance.version += 1
+            await self.audit.record(
+                "agents.instance.project_admin_enabled"
+                if body.enabled
+                else "agents.instance.project_admin_disabled",
+                workspace_ids=[access.workspace.id],
+                actor_id=access.user_id,
+                resource_type="agent_instance",
+                resource_id=instance.id,
+                client_ip=client_ip,
+            )
+        await self.db.commit()
+        await self.db.refresh(instance)
+        return ProjectAdminOut(
+            enabled=instance.project_admin_enabled,
+            granted_by=instance.project_admin_by,
+            granted_at=instance.project_admin_at,
+        )
 
     async def set_enabled(
         self,

@@ -122,6 +122,12 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET | `/api/v1/projects/{project_id}/agents` | 项目的智能体成员（viewer）：名字、说明、状态、对项目知识库的权限、是否已在项目群里，以及项目群状态 `im_group` | 已实现（T-0110） |
 | PUT / DELETE | `/api/v1/projects/{project_id}/agents/{instance_id}` | 让智能体加入 / 移出项目（owner / admin）：同步项目知识库权限（`project_agents`）与项目群成员；重复加入、移出不存在的成员不报错；停用的实例 422 | 已实现（T-0110） |
 | POST | `/api/v1/projects/{project_id}/im-group` | 建项目群 / 立即重试（owner / admin）：没有项目群时建一个（群主是自己），正在建的立即重试，已建好的重新同步；没有部署 OpenIM 时 409 `IM_NOT_CONFIGURED` | 已实现（T-0110） |
+| PUT | `/api/v1/agents/instances/{instance_id}/project-admin` | 打开或关闭实例的项目管理权限（owner / admin，`{enabled, version}` 乐观并发，审计）：打开后它的工具里多出 `create_project` / `add_to_project` / `list_peers`，直接执行；它建的项目群的群主是打开权限的人；关闭后已建的项目与成员保留。`AgentInstanceOut` 增加 `project_admin`（`enabled`、`granted_by`、`granted_at`） | 已实现（T-0112） |
+| GET | `/api/v1/agents/host-summary` | 各实例服务器状态的小指示（owner / admin）：CPU、内存使用率，两个分区里较高的磁盘使用率，`stale`（超过 3 分钟没上报）与正在提醒的告警；没上报过的实例各项为 null | 已实现（T-0113） |
+| GET | `/api/v1/agents/instances/{instance_id}/host?range=24h\|7d\|30d` | 实例的服务器状态（owner / admin）：`reported`；`current` 当前值（CPU 型号、核心数、使用率、1 / 5 / 15 分钟负载，内存与 Swap、容器内存上限，接入包目录分区与 Docker 数据目录分区的总量 / 可用 / 已用百分比，上下行速率，开机时长，`stale`）；`points` 每小时的平均与峰值；`alerts`（`disk_low` / `memory_low` / `load_high` / `not_reporting`）。数值是整台服务器的（容器用 host 网络读宿主机的 `/proc`）；第一次上报和计数器变小（重启）时使用率与网速为 null | 已实现（T-0113） |
+| GET | `/api/v1/agents/instances/{instance_id}/ops` | 运维动作（owner / admin）：`available`（用 SSH 部署过、专用密钥还在；否则 `reason` = `not_deployed` / `key_missing`）、进行中的动作 `running`、最近 20 次记录（7 天内，不含输出） | 已实现（T-0114） |
+| POST | `/api/v1/agents/instances/{instance_id}/ops` | 执行一个固定动作（owner / admin，202）：`{action, service?, password?}`，`action` ∈ `status` 查看状态 / `logs` 查看日志（`service` ∈ `openclaw` / `tunnel` / `image-proxy`，最近 200 行）/ `report` 立即上报一次 / `restart` 重启 OpenClaw / `up` 重新拉起全部服务 / `prune` 清理无用镜像；后三个要带自己的登录密码（`403 STEP_UP_REQUIRED` / `STEP_UP_FAILED`，错太多次 429）。不接受命令文本。同一实例同时只跑一个（`409 AGENT_OPS_RUNNING`），部署 / 卸载进行中 `409 AGENT_SSH_JOB_RUNNING`，没用 SSH 部署过 `409 AGENT_OPS_UNAVAILABLE`。超时 60 秒，`up` 180 秒 | 已实现（T-0114） |
+| GET | `/api/v1/agents/instances/{instance_id}/ops/{action_id}` | 一次动作的状态、退出码与脱敏后的输出（令牌、密钥、`Authorization`、私钥块替换成 `***`，最多 64 KB，`truncated` 表示只保留了末尾）；过期（7 天）后 404 | 已实现（T-0114） |
 | GET / POST | `/api/v1/tasks` | 任务列表（`status` = `open` / `done` / `all`、`project_id`、`priority`、`due_before` / `due_after`、`q`、`sort`、游标分页）/ 创建任务（必须带 `Idempotency-Key`） | 已实现（T-0082） |
 | GET / PATCH / DELETE | `/api/v1/tasks/{task_id}` | 详情 / 修改（`Idempotency-Key` + `version`；可以改 `project_id` 移到别的项目）/ 删除（`Idempotency-Key` + `?version=`） | 已实现（T-0082） |
 
@@ -275,6 +281,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | POST | `/agent-api/v1/im-token` | 取 IM 令牌（只在启动时调用：签发会踢掉旧连接） | 已实现（T-0055） |
 | POST | `/agent-api/v1/heartbeat` | 上报 OpenClaw 与插件版本 | 已实现（T-0054） |
 | POST | `/agent-api/v1/usage` | 上报 token 用量（接入包的 `bin/usage-report.mjs`，每分钟一次）：`{"day": "YYYY-MM-DD", "sessions": [{"session": "<会话 key 的 SHA-256>", "usage": {"input", "output", "cache_read", "cache_write"} \| null}]}`，最多 500 个会话；只收今天和昨天（UTC），每个实例每分钟最多 6 次；返回 `accepted`、`skipped`、`tokens`、`baseline` | 已实现（T-0104） |
+| POST | `/agent-api/v1/host-metrics` | 上报服务器状态（接入包的 `bin/host-report.mjs`，每分钟一次）：`cpu`（`cores`、`model`、`load` 三个数、`/proc/stat` 的累计 `total_ticks` / `idle_ticks`）、`memory`（`total`、`available`、`swap_total`、`swap_free`、`limit`）、`disks.data` / `disks.root`（`total`、`free`）、`network`（默认路由网卡的累计 `rx_bytes` / `tx_bytes`）、`uptime_seconds`；只收数字，多余字段 422，数值有上下限；每个实例每分钟最多 2 次（`429`）。返回样本记在哪一分钟（UTC） | 已实现（T-0113） |
 | POST | `/mcp` | MCP 工具（不进 OpenAPI；工具清单见 `app/schemas/ai_tools.py` 的 `TOOLS`；只接受 POST） | 已实现（T-0057；审批卡片在第 3 批） |
 | GET / POST | `/im/ws`、`/im/api/{route}`、`/im/obj/m/{media_id}` | 接入网关（不进 OpenAPI；白名单见 V2 契约第 8 节；取图改为能力地址，见 OC-3 ADR 第 15 节） | 已实现（T-0055） |
 

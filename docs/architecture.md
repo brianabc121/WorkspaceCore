@@ -144,5 +144,13 @@ flowchart LR
   - 用量：接入包里的 `usage-report.mjs` 每分钟（crontab）调本机 OpenClaw 网关的 `sessions.usage`，把每个会话的累计 token 报给 `POST /agent-api/v1/usage`；工作台按分钟记增量，再按时间归属到当时在执行的段。
   - Worker：每分钟把停用、删除、离线超过 10 分钟的实例正在执行的段记为中断；每天删除 90 天前的用量。
   - 前端：`/tasks/timeline`（`apps/web/src/features/timeline/`），任务页、项目页、任务详情都有入口；SSE 主题 `timeline` 让页面及时刷新。
+- **服务器状态**（T-0113）：接入包的 `host-report.mjs` 每分钟（crontab）在 OpenClaw 容器里读宿主机的 `/proc` 与磁盘统计，只报数字，发给 `POST /agent-api/v1/host-metrics`。
+  - 后端：`app/domain/host_metrics.py`（两次之差算 CPU 使用率与网速、每分钟样本、每小时平均与峰值、告警）。迁移 0031（`agent_host_samples`、`agent_host_state`）。
+  - Worker：每分钟检查告警（磁盘、内存、负载、未上报；恢复前只提醒一次），每天删除 30 天前的样本。
+  - 智能体：只读工具 `get_host_status` 只返回调用它的实例自己的状态。
+  - 前端：实例卡片的 CPU / 内存 / 磁盘小指示与“服务器状态”（当前值、24 小时 / 7 天 / 30 天趋势、表格视图，`apps/web/src/features/agents/HostStatus.vue`）。
+- **远程运维动作**（T-0114）：经 SSH 部署时的通道（确认过的主机指纹 + 专用密钥）执行写死的六个动作（查看状态、查看日志、立即上报、重启 OpenClaw、重新拉起、清理镜像）。
+  - 后端：`app/domain/agent_ops.py`（命令、脱敏、后台执行，与 SSH 部署共用进程内的 `SshJobRunner`）、`app/domain/step_up.py`（二次认证，与审批共用）。迁移 0032（`agent_ops_actions`）。
+  - 前端：实例卡片的“运维”面板（`OpsPanel.vue`）。
 - **验收**：Compose CI 的 `timeline_browser.cjs`、`knowledge_browser.cjs`；agents CI 的场景 16（真实 OpenClaw 上报用量、交给智能体执行到审批完成）；ci-api 在锁定的 Garage 上验证 S3 兼容存储；A15 备份恢复核对本地图片。
 
