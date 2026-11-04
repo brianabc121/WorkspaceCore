@@ -17,7 +17,7 @@ export type Change = Schema['ChangeOut']
 export type Revision = Schema['RevisionOut']
 export type AgentKnowledge = Schema['AgentKnowledgeOut']
 export type SpaceActivity = Schema['SpaceActivity']
-export type ColorBy = 'space' | 'author' | 'confirmed'
+export type ColorBy = 'type' | 'space' | 'author'
 
 export const SPACE_KIND_LABELS: Record<SpaceKind, string> = { public: '公共', project: '项目', agent: '智能体' }
 export const NOTE_TYPE_LABELS: Record<NoteType, string> = {
@@ -25,6 +25,19 @@ export const NOTE_TYPE_LABELS: Record<NoteType, string> = {
   review: '复盘', preference: '偏好', glossary: '术语', record: '记录', plan: '计划', risk: '风险', design: '设计', template: '模板',
   correction: '收到的纠正',
 }
+// 图谱按类型着色（T-0102，docs/v2/TIMELINE_PLAN.md 3.1）：16 种类型按用途分 6 组，一组一个颜色。
+// 超过 8 种颜色人眼分不清，所以颜色只区分组；具体类型看图例、悬停提示与列表视图。
+export type TypeGroup = 'rule' | 'decision' | 'lesson' | 'project' | 'knowledge' | 'preference'
+export const TYPE_GROUPS: readonly { key: TypeGroup; label: string; types: readonly NoteType[] }[] = [
+  { key: 'rule', label: '规范与流程', types: ['rule', 'process', 'runbook', 'template'] },
+  { key: 'decision', label: '决策与计划', types: ['decision', 'plan', 'design'] },
+  { key: 'lesson', label: '经验与复盘', types: ['lesson', 'review', 'correction'] },
+  { key: 'project', label: '项目', types: ['brief', 'risk'] },
+  { key: 'knowledge', label: '知识', types: ['overview', 'glossary', 'record'] },
+  { key: 'preference', label: '偏好', types: ['preference'] },
+]
+const GROUP_OF = new Map(TYPE_GROUPS.flatMap(g => g.types.map(t => [t, g.key] as const)))
+export const typeGroupOf = (type: NoteType | null | undefined): TypeGroup => (type && GROUP_OF.get(type)) || 'knowledge'
 // 人能新建的类型：项目简报只在项目库里建一篇，《收到的纠正》由工作台维护
 export const EDITABLE_TYPES = (Object.keys(NOTE_TYPE_LABELS) as NoteType[]).filter(t => t !== 'correction')
 export const CHANGE_LABELS: Record<NonNullable<Change['change']>, string> = { create: '新建', update: '修改', delete: '删除', restore: '恢复', revert: '撤销', rename: '改名' }
@@ -137,7 +150,6 @@ export function useKb(scope: string) {
     update: (id: string, body: Schema['NoteUpdate']) => after((async () => dataOf(await c.auth.api.PATCH('/api/v1/knowledge/notes/{note_id}', { params: { header: c.header, path: path(id) }, body })))()),
     remove: (id: string, version: number, reason = '') => after((async () => { await c.auth.api.DELETE('/api/v1/knowledge/notes/{note_id}', { params: { header: c.header, path: path(id), query: { version, reason } } }) })()),
     restore: (id: string) => after((async () => dataOf(await c.auth.api.POST('/api/v1/knowledge/notes/{note_id}/restore', { params: { header: c.header, path: path(id) } })))()),
-    confirm: (id: string, version: number, confirmed: boolean) => after((async () => dataOf(await c.auth.api.POST('/api/v1/knowledge/notes/{note_id}/confirm', { params: { header: c.header, path: path(id) }, body: { version, confirmed } })))()),
     revert: (id: string, version: number, to_version: number, reason: string) => after((async () => dataOf(await c.auth.api.POST('/api/v1/knowledge/notes/{note_id}/revert', { params: { header: c.header, path: path(id) }, body: { version, to_version, reason } })))()),
     purge: (id: string) => after((async () => { await c.auth.api.DELETE('/api/v1/knowledge/trash/{note_id}', { params: { header: c.header, path: path(id) } }) })()),
     updateSpace: (id: string, body: Schema['SpaceUpdate']) => after((async () => dataOf(await c.auth.api.PATCH('/api/v1/knowledge/spaces/{space_id}', { params: { header: c.header, path: { space_id: id } }, body })))()),

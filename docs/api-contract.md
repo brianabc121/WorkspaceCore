@@ -271,7 +271,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | POST | `/api/v1/knowledge/notes` | 新建（201；同一库标题重复 `409 TITLE_TAKEN`） | 已实现（T-0098） |
 | GET / PATCH | `/api/v1/knowledge/notes/{note_id}` | 详情（含出链、反链、被智能体读的次数）/ 修改（可移动到别的库） | 已实现（T-0098） |
 | DELETE | `/api/v1/knowledge/notes/{note_id}?version=` | 放进回收站，30 天后 Worker 彻底删除（204） | 已实现（T-0098） |
-| POST | `/api/v1/knowledge/notes/{note_id}/restore`、`/confirm`、`/revert` | 从回收站恢复 / 人确认可信 / 退回到某一版（`to_version`） | 已实现（T-0098） |
+| POST | `/api/v1/knowledge/notes/{note_id}/restore`、`/revert` | 从回收站恢复 / 退回到某一版（`to_version`） | 已实现（T-0098）；原来的 `/confirm`（人确认可信）随“人已确认”一起删除（T-0102） |
 | GET | `/api/v1/knowledge/notes/{note_id}/revisions[/{version}]` | 版本历史 / 某一版与上一版的逐行差异 | 已实现（T-0098） |
 | GET | `/api/v1/knowledge/notes/{note_id}/graph?depth=1\|2` | 局部图谱 | 已实现（T-0098） |
 | GET | `/api/v1/knowledge/graph` | 全局图谱：笔记、`[[链接]]`、链接到的任务 / 项目 / 书签；`space_id` 可多选，`resources=false` 只要笔记；超过 2000 篇时 `truncated` | 已实现（T-0098） |

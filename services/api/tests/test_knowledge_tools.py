@@ -162,7 +162,6 @@ async def test_space_access_rules(env: Env) -> None:
     assert found["items"][0]["origin"] == {
         "by": "agent",
         "agent_name": "alpha",
-        "confirmed": False,
         "conflict": False,
         "external": False,
     }

@@ -98,6 +98,20 @@ const NOTE_URL = /\/knowledge\/notes\/[0-9a-f-]{36}$/
   check((await selected.getByRole('link', { name: '打开笔记' }).getAttribute('href')) === `/knowledge/notes/${flow.id}`, '所选笔记的“打开笔记”应指向这篇笔记')
   step('独立页面 /knowledge：功能条与知识图谱，点节点显示所选笔记')
 
+  // ---------------------------------------------------------------- 按类型着色与按类型筛选（T-0102）
+  check((await page.getByRole('combobox', { name: '着色' }).inputValue()) === 'type', '图谱默认应按类型着色')
+  check(await node.locator('circle').first().evaluate(c => c.classList.contains('f-g-rule')), '“流程”类型的笔记应是“规范与流程”组的颜色')
+  check((await page.getByRole('button', { name: new RegExp(`^${flowTitle}，笔记（流程）`) }).count()) === 1, '节点的说明应包含具体类型')
+  const legend = page.getByRole('group', { name: '按类型显示' })
+  check((await legend.innerText()).includes('规范 流程 操作手册 模板'), '图例应按组列出类型')
+  await page.getByRole('button', { name: '类型：全部' }).click()
+  await page.getByRole('group', { name: '按类型筛选' }).getByRole('checkbox', { name: /^流程\s*\d/ }).uncheck()
+  await node.waitFor({ state: 'detached' })
+  await page.getByRole('group', { name: '按类型筛选' }).getByRole('button', { name: '全部显示' }).click()
+  await node.waitFor()
+  check(!(await selected.innerText()).includes('人已确认'), '不应再显示“人已确认”')
+  step('图谱按类型着色（默认），图例按组列出类型，可按单个类型筛选；没有“人已确认”')
+
   // ---------------------------------------------------------------- 编辑器：[[ 补全、保存、链接解析、行内 #标签
   const mineTitle = `浏览器写的笔记 ${run}`
   await page.goto(`${base}/knowledge/notes/new?space=${pub.id}`)

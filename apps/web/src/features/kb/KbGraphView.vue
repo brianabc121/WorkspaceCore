@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { CircleAlert, CircleCheck, Info, List, Plus, Search, SquarePen, Waypoints } from '@lucide/vue'
+import { ChevronDown, CircleAlert, Info, List, Plus, Search, SquarePen, Waypoints } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
 import { errorMessage } from '../../services/api'
-import { CHANGE_LABELS, NOTE_TYPE_LABELS, SPACE_KIND_LABELS, authorLabel, useChanges, useGraph, useNote, useSpaces, type ColorBy, type GraphNode } from './api'
+import { CHANGE_LABELS, NOTE_TYPE_LABELS, SPACE_KIND_LABELS, TYPE_GROUPS, authorLabel, typeGroupOf, useChanges, useGraph, useNote, useSpaces, type ColorBy, type GraphNode, type NoteType, type TypeGroup } from './api'
 import { excerpt, isToday, nodeHref, statusOf, when } from './format'
 import KbForceGraph from './KbForceGraph.vue'
 import KbSpaceList from './KbSpaceList.vue'
@@ -35,8 +35,9 @@ const today = computed(() => {
   }
 })
 
-const query = ref(''), colorBy = ref<ColorBy>('space'), orphans = ref(true), allLabels = ref(false), listView = ref(false)
-const hidden = ref<string[]>([]), focus = ref<string | null>(typeof route.query.focus === 'string' ? route.query.focus : null), selected = ref<string | null>(null)
+const query = ref(''), colorBy = ref<ColorBy>('type'), orphans = ref(true), allLabels = ref(false), listView = ref(false)
+// hidden：按知识库类型隐藏（'resource' 是任务与文档）；hiddenTypes：按笔记类型隐藏（T-0102）
+const hidden = ref<string[]>([]), hiddenTypes = ref<NoteType[]>([]), focus = ref<string | null>(typeof route.query.focus === 'string' ? route.query.focus : null), selected = ref<string | null>(null)
 const nodes = computed(() => graph.data.value?.nodes ?? [])
 const nodeById = computed(() => new Map(nodes.value.map(n => [n.id, n])))
 watch(nodes, (list) => {
@@ -45,19 +46,71 @@ watch(nodes, (list) => {
   selected.value = notes.reduce<GraphNode | null>((best, n) => (!best || n.degree > best.degree ? n : best), null)?.id ?? null
 }, { immediate: true })
 const kindOf = (n: GraphNode) => n.kind === 'note' ? (n.space_kind ?? 'public') : 'resource'
-const legend = computed(() => (['project', 'agent', 'public', 'resource'] as const).map(k => ({
-  key: k, label: k === 'resource' ? '任务与文档' : SPACE_KIND_LABELS[k], count: nodes.value.filter(n => kindOf(n) === k).length,
-})).filter(k => k.count || k.key !== 'resource'))
+const shown = (n: GraphNode) => !hidden.value.includes(kindOf(n)) && !(n.kind === 'note' && n.type && hiddenTypes.value.includes(n.type))
+// 圆点颜色跟着“着色”走：类型（6 组）/ 知识库类型 / 作者；任务与文档一直是灰色
+function dotClass(n: GraphNode) {
+  if (n.kind !== 'note') return ''
+  if (colorBy.value === 'space') return `k-${n.space_kind ?? 'public'}`
+  if (colorBy.value === 'author') return n.author_kind === 'agent' ? 'k-agent' : n.author_kind === 'user' ? 'k-user' : ''
+  return `g-${typeGroupOf(n.type)}`
+}
+const typeCount = computed(() => {
+  const counts = new Map<NoteType, number>()
+  for (const n of nodes.value) if (n.kind === 'note' && n.type) counts.set(n.type, (counts.get(n.type) ?? 0) + 1)
+  return counts
+})
+type LegendItem = { key: string; dot: string; label: string; detail?: string; count: number; pressed?: boolean }
+const resourceItem = computed<LegendItem[]>(() => {
+  const count = nodes.value.filter(n => n.kind !== 'note').length
+  return count ? [{ key: 'resource', dot: '', label: '任务与文档', count, pressed: !hidden.value.includes('resource') }] : []
+})
+const legend = computed<LegendItem[]>(() => {
+  const notes = nodes.value.filter(n => n.kind === 'note')
+  if (colorBy.value === 'type') return [...TYPE_GROUPS.map(g => ({
+    key: `group:${g.key}`, dot: `g-${g.key}`, label: g.label, detail: g.types.map(t => NOTE_TYPE_LABELS[t]).join(' '),
+    count: g.types.reduce((sum, t) => sum + (typeCount.value.get(t) ?? 0), 0), pressed: g.types.some(t => !hiddenTypes.value.includes(t)),
+  })), ...resourceItem.value]
+  if (colorBy.value === 'author') return [
+    { key: 'user', dot: 'k-user', label: '人', count: notes.filter(n => n.author_kind === 'user').length },
+    { key: 'agent', dot: 'k-agent', label: '智能体', count: notes.filter(n => n.author_kind === 'agent').length },
+    { key: 'system', dot: '', label: '工作台', count: notes.filter(n => n.author_kind === 'system').length },
+  ].filter(k => k.count || k.key !== 'system').concat(resourceItem.value)
+  return [...(['project', 'agent', 'public'] as const).map(k => ({
+    key: k, dot: `k-${k}`, label: SPACE_KIND_LABELS[k], count: notes.filter(n => kindOf(n) === k).length, pressed: !hidden.value.includes(k),
+  })), ...resourceItem.value]
+})
+const legendLabel = computed(() => colorBy.value === 'type' ? '按类型显示' : colorBy.value === 'author' ? '作者图例' : '按知识库类型显示')
 function toggleKind(key: string) { hidden.value = hidden.value.includes(key) ? hidden.value.filter(k => k !== key) : [...hidden.value, key] }
+function setTypes(types: readonly NoteType[], visible: boolean) {
+  const rest = hiddenTypes.value.filter(t => !types.includes(t))
+  hiddenTypes.value = visible ? rest : [...rest, ...types]
+}
+function toggleLegend(item: LegendItem) {
+  if (item.key.startsWith('group:')) {
+    const group = TYPE_GROUPS.find(g => `group:${g.key}` === item.key)
+    if (group) setTypes(group.types, !item.pressed)
+  } else toggleKind(item.key)
+}
+const groupState = (key: TypeGroup) => {
+  const types = TYPE_GROUPS.find(g => g.key === key)!.types, off = types.filter(t => hiddenTypes.value.includes(t)).length
+  return { all: off === 0, some: off > 0 && off < types.length }
+}
+// 着色换了维度，按知识库类型的隐藏就看不到对应的图例了：清掉（任务与文档的开关一直在图例里）
+watch(colorBy, () => { hidden.value = hidden.value.filter(k => k === 'resource') })
+const filterOpen = ref(false), filterBox = ref<HTMLElement | null>(null)
+const filterLabel = computed(() => hiddenTypes.value.length ? `类型：隐藏 ${hiddenTypes.value.length} 种` : '类型：全部')
+function closeFilter(event: PointerEvent) { if (filterOpen.value && !filterBox.value?.contains(event.target as Node)) filterOpen.value = false }
+onMounted(() => document.addEventListener('pointerdown', closeFilter))
+onBeforeUnmount(() => document.removeEventListener('pointerdown', closeFilter))
 const edges = computed(() => graph.data.value?.edges ?? [])
 const degreeShown = computed(() => {
-  const visible = new Set(nodes.value.filter(n => !hidden.value.includes(kindOf(n))).map(n => n.id))
+  const visible = new Set(nodes.value.filter(shown).map(n => n.id))
   const count = edges.value.filter(e => visible.has(e.source) && visible.has(e.target)).length
   const linked = new Set(edges.value.flatMap(e => [e.source, e.target]))
   const orphanCount = nodes.value.filter(n => n.kind === 'note' && !linked.has(n.id)).length
   return { notes: [...visible].filter(id => nodeById.value.get(id)?.kind === 'note').length, edges: count, orphans: orphanCount }
 })
-const listRows = computed(() => [...nodes.value].filter(n => !hidden.value.includes(kindOf(n)) && (!query.value || n.title.toLowerCase().includes(query.value.toLowerCase()))).sort((a, b) => b.degree - a.degree))
+const listRows = computed(() => [...nodes.value].filter(n => shown(n) && (!query.value || n.title.toLowerCase().includes(query.value.toLowerCase()))).sort((a, b) => b.degree - a.degree))
 
 const graphRef = ref<InstanceType<typeof KbForceGraph> | null>(null)
 const selectedNode = computed(() => (selected.value ? nodeById.value.get(selected.value) : undefined) ?? null)
@@ -102,7 +155,7 @@ const error = computed(() => graph.error.value ?? spaces.error.value)
       </RouterLink>
       <p v-if="spaces.isPending.value" class="kb-meta" role="status">正在加载知识库…</p>
       <p v-else-if="spaces.error.value" class="kb-error" role="alert">{{ errorMessage(spaces.error.value) }}</p>
-      <KbSpaceList v-else class="kb-desktop-only" :spaces="spaceItems" :focus="focus" :total="graph.data.value?.total_notes" @focus="focus = $event" />
+      <KbSpaceList v-else class="kb-desktop-only" :spaces="spaceItems" :focus="focus" :total="graph.data.value?.total_notes" :dots="colorBy === 'space'" @focus="focus = $event" />
       <KbSpaceList v-if="spaceItems.length" class="kb-mobile-only" :spaces="spaceItems" links />
       <div v-if="recent.length" class="kb-divider" style="padding-top: 12px; display: flex; flex-direction: column; gap: 2px">
         <p class="kb-group-label" style="margin-top: 0">最近写入</p>
@@ -128,9 +181,21 @@ const error = computed(() => graph.error.value ?? spaces.error.value)
         </form>
         <label class="kb-check" style="color: var(--kb-muted)">着色
           <select v-model="colorBy" class="kb-select">
-            <option value="space">按知识库类型</option><option value="author">按作者（人 / 智能体）</option><option value="confirmed">按是否人已确认</option>
+            <option value="type">按类型</option><option value="space">按知识库</option><option value="author">按作者（人 / 智能体）</option>
           </select>
         </label>
+        <div ref="filterBox" class="kb-filter" @keydown.esc="filterOpen = false">
+          <button type="button" class="kb-btn is-small" :aria-expanded="filterOpen" aria-controls="kb-type-filter" @click="filterOpen = !filterOpen">{{ filterLabel }}<ChevronDown aria-hidden="true" /></button>
+          <div v-if="filterOpen" id="kb-type-filter" class="kb-filter-panel" role="group" aria-label="按类型筛选">
+            <div v-for="g in TYPE_GROUPS" :key="g.key" class="kb-filter-group">
+              <label class="kb-check"><input type="checkbox" :checked="groupState(g.key).all" :indeterminate="groupState(g.key).some" @change="setTypes(g.types, ($event.target as HTMLInputElement).checked)"><span class="kb-dot is-small" :class="`g-${g.key}`" aria-hidden="true" /><strong>{{ g.label }}</strong></label>
+              <div class="kb-filter-types">
+                <label v-for="t in g.types" :key="t" class="kb-check"><input type="checkbox" :checked="!hiddenTypes.includes(t)" @change="setTypes([t], ($event.target as HTMLInputElement).checked)">{{ NOTE_TYPE_LABELS[t] }}<span class="kb-num kb-meta">{{ typeCount.get(t) ?? 0 }}</span></label>
+              </div>
+            </div>
+            <button type="button" class="kb-btn is-small" :disabled="!hiddenTypes.length" @click="hiddenTypes = []">全部显示</button>
+          </div>
+        </div>
         <label class="kb-check"><input v-model="orphans" type="checkbox">孤立笔记</label>
         <label class="kb-check"><input v-model="allLabels" type="checkbox">显示全部标题</label>
         <label class="kb-check"><input v-model="resources" type="checkbox">任务与文档</label>
@@ -151,8 +216,8 @@ const error = computed(() => graph.error.value ?? spaces.error.value)
               <thead><tr><th scope="col">标题</th><th scope="col">知识库</th><th scope="col">类型</th><th scope="col" style="text-align: right">链接</th></tr></thead>
               <tbody>
                 <tr v-for="n in listRows" :key="n.id">
-                  <td><RouterLink :to="nodeHref(n)">{{ n.title }}</RouterLink></td>
-                  <td><span style="display: inline-flex; align-items: center; gap: 6px"><span class="kb-dot is-small" :class="n.kind === 'note' ? `k-${n.space_kind}` : ''" aria-hidden="true" />{{ spaceName(n) }}</span></td>
+                  <td><span style="display: inline-flex; align-items: center; gap: 6px"><span class="kb-dot is-small" :class="dotClass(n)" aria-hidden="true" /><RouterLink :to="nodeHref(n)">{{ n.title }}</RouterLink></span></td>
+                  <td>{{ spaceName(n) }}</td>
                   <td>{{ n.kind === 'note' && n.type ? NOTE_TYPE_LABELS[n.type] : n.kind === 'task' ? '任务' : n.kind === 'project' ? '项目' : '收藏文档' }}</td>
                   <td class="kb-num">{{ n.degree }}</td>
                 </tr>
@@ -161,23 +226,28 @@ const error = computed(() => graph.error.value ?? spaces.error.value)
             <p v-if="!listRows.length" class="kb-empty">没有符合条件的笔记。</p>
           </div>
         </template>
-        <KbForceGraph
-          v-else ref="graphRef" :graph="graph.data.value" :selected="selected" :query="query" :color-by="colorBy" :all-labels="allLabels" :orphans="orphans" :hidden="hidden" :focus-space="focus"
-          @select="selected = $event" @open="open"
-        >
-          <div v-if="graph.isPending.value" class="kb-graph-empty" role="status">正在加载图谱…</div>
-          <div v-else-if="!nodes.length" class="kb-graph-empty">
-            <Waypoints aria-hidden="true" style="width: 32px; height: 32px" />
-            <p style="margin: 0">还没有笔记。新建一篇，用 [[标题]] 链接到别的笔记，图谱就会长出来。</p>
-            <RouterLink v-if="canEdit" to="/knowledge/notes/new" class="kb-btn is-primary"><Plus aria-hidden="true" />新建笔记</RouterLink>
+        <template v-else>
+          <KbForceGraph
+            ref="graphRef" :graph="graph.data.value" :selected="selected" :query="query" :color-by="colorBy" :all-labels="allLabels" :orphans="orphans" :hidden="hidden" :hidden-types="hiddenTypes" :focus-space="focus"
+            @select="selected = $event" @open="open"
+          >
+            <div v-if="graph.isPending.value" class="kb-graph-empty" role="status">正在加载图谱…</div>
+            <div v-else-if="!nodes.length" class="kb-graph-empty">
+              <Waypoints aria-hidden="true" style="width: 32px; height: 32px" />
+              <p style="margin: 0">还没有笔记。新建一篇，用 [[标题]] 链接到别的笔记，图谱就会长出来。</p>
+              <RouterLink v-if="canEdit" to="/knowledge/notes/new" class="kb-btn is-primary"><Plus aria-hidden="true" />新建笔记</RouterLink>
+            </div>
+            <p v-if="nodes.length" class="kb-graph-hint">滚轮缩放 · 拖动平移 · 点圆点看详情，双击或回车打开</p>
+          </KbForceGraph>
+          <div v-if="nodes.length" class="kb-graph-legend" role="group" :aria-label="legendLabel">
+            <template v-for="k in legend" :key="k.key">
+              <button v-if="k.pressed !== undefined" type="button" :aria-pressed="k.pressed" @click="toggleLegend(k)">
+                <span class="kb-dot" :class="k.dot" aria-hidden="true" />{{ k.label }}<span v-if="k.detail" class="kb-legend-types">{{ k.detail }}</span><span class="kb-num" style="color: var(--kb-muted)">{{ k.count }}</span>
+              </button>
+              <span v-else class="kb-legend-item"><span class="kb-dot" :class="k.dot" aria-hidden="true" />{{ k.label }}<span class="kb-num" style="color: var(--kb-muted)">{{ k.count }}</span></span>
+            </template>
           </div>
-          <div v-if="nodes.length" class="kb-graph-legend" role="group" aria-label="按知识库类型显示">
-            <button v-for="k in legend" :key="k.key" type="button" :aria-pressed="!hidden.includes(k.key)" @click="toggleKind(k.key)">
-              <span class="kb-dot" :class="k.key === 'resource' ? '' : `k-${k.key}`" aria-hidden="true" />{{ k.label }}<span class="kb-num" style="color: var(--kb-muted)">{{ k.count }}</span>
-            </button>
-          </div>
-          <p v-if="nodes.length" class="kb-graph-hint">滚轮缩放 · 拖动平移 · 点圆点看详情，双击或回车打开</p>
-        </KbForceGraph>
+        </template>
         <p v-if="graph.data.value?.truncated" class="kb-meta" role="status" style="margin: 8px 0 0">笔记太多，图谱只画了其中 {{ nodes.filter(n => n.kind === 'note').length }} 篇（共 {{ graph.data.value.total_notes }} 篇）。可以在左栏只看一个知识库，或用列表视图。</p>
       </div>
     </main>
@@ -186,17 +256,16 @@ const error = computed(() => graph.error.value ?? spaces.error.value)
     <aside class="kb-aside" aria-label="所选笔记">
       <template v-if="selectedNode">
         <div style="display: flex; flex-direction: column; gap: 8px">
-          <span class="kb-chip" style="align-self: flex-start"><span class="kb-dot is-small" :class="selectedNode.kind === 'note' ? `k-${selectedNode.space_kind}` : ''" aria-hidden="true" />{{ selectedNode.kind === 'note' && selectedNode.space_kind ? SPACE_KIND_LABELS[selectedNode.space_kind] + ' · ' : '' }}{{ spaceName(selectedNode) }}</span>
+          <span class="kb-chip" style="align-self: flex-start"><span v-if="colorBy === 'space'" class="kb-dot is-small" :class="dotClass(selectedNode)" aria-hidden="true" />{{ selectedNode.kind === 'note' && selectedNode.space_kind ? SPACE_KIND_LABELS[selectedNode.space_kind] + ' · ' : '' }}{{ spaceName(selectedNode) }}</span>
           <h2 style="font-size: 19px; line-height: 1.35">{{ selectedNode.title }}</h2>
           <p v-if="note.data.value && excerpt(note.data.value.body)" style="margin: 0; color: var(--kb-muted); line-height: 1.6">{{ excerpt(note.data.value.body, 140) }}</p>
         </div>
         <dl v-if="note.data.value" class="kb-dl" style="grid-template-columns: 64px minmax(0, 1fr)">
-          <dt>类型</dt><dd>{{ NOTE_TYPE_LABELS[note.data.value.type] }}</dd>
+          <dt>类型</dt><dd style="display: flex; align-items: center; gap: 6px"><span v-if="colorBy === 'type'" class="kb-dot is-small" :class="`g-${typeGroupOf(note.data.value.type)}`" aria-hidden="true" />{{ NOTE_TYPE_LABELS[note.data.value.type] }}<span class="kb-meta">· {{ TYPE_GROUPS.find(g => g.key === typeGroupOf(note.data.value!.type))?.label }}</span></dd>
           <dt>作者</dt><dd>{{ authorLabel(note.data.value.updated_by) }}</dd>
           <dt>状态</dt>
           <dd style="display: flex; align-items: center; gap: 6px">
-            <CircleCheck v-if="statusOf(note.data.value).key === 'confirmed'" aria-hidden="true" style="width: 15px; height: 15px; stroke: var(--kb-good)" />
-            <CircleAlert v-else-if="statusOf(note.data.value).key === 'conflict'" aria-hidden="true" style="width: 15px; height: 15px; stroke: var(--kb-warning)" />
+            <CircleAlert v-if="statusOf(note.data.value).key === 'conflict'" aria-hidden="true" style="width: 15px; height: 15px; stroke: var(--kb-warning)" />
             <Info v-else aria-hidden="true" style="width: 15px; height: 15px; stroke: var(--kb-muted)" />
             {{ statusOf(note.data.value).label }}
           </dd>
@@ -211,7 +280,7 @@ const error = computed(() => graph.error.value ?? spaces.error.value)
           <h3 style="font-size: 13px; font-weight: 600">相连的笔记</h3>
           <div class="kb-list">
             <button v-for="m in neighbors" :key="m.id" type="button" class="kb-list-item" @click="selected = m.id" @dblclick="open(m)">
-              <span class="kb-dot is-small" :class="m.kind === 'note' ? `k-${m.space_kind}` : ''" aria-hidden="true" />
+              <span class="kb-dot is-small" :class="dotClass(m)" aria-hidden="true" />
               <span class="kb-grow">{{ m.title }}</span><span class="kb-meta">{{ spaceName(m) }}</span>
             </button>
           </div>

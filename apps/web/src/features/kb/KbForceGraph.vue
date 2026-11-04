@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type SimulationLinkDatum, type SimulationNodeDatum } from 'd3-force'
-import type { ColorBy, GraphNode, GraphOut } from './api'
+import { NOTE_TYPE_LABELS, typeGroupOf, type ColorBy, type GraphNode, type GraphOut } from './api'
 import { normalize } from './markdown'
 
 // 知识图谱（T-0099，方案 6.2）：d3-force 计算布局（固定迭代次数、初始位置确定，同样的数据每次画得一样），
 // SVG 画圆点和连线。滚轮 / 按钮缩放、拖动平移、悬停高亮相连的笔记、搜索定位。标题字号不随缩放变化。
+// 默认按类型分组着色（T-0102）；hiddenTypes 里的类型不画。
 const props = withDefaults(defineProps<{
   graph: GraphOut | undefined
   selected?: string | null
@@ -14,11 +15,12 @@ const props = withDefaults(defineProps<{
   allLabels?: boolean
   orphans?: boolean
   hidden?: string[]
+  hiddenTypes?: string[]
   focusSpace?: string | null
   center?: string | null
   compact?: boolean
   label?: string
-}>(), { selected: null, query: '', colorBy: 'space', allLabels: false, orphans: true, hidden: () => [], focusSpace: null, center: null, compact: false, label: '知识图谱' })
+}>(), { selected: null, query: '', colorBy: 'type', allLabels: false, orphans: true, hidden: () => [], hiddenTypes: () => [], focusSpace: null, center: null, compact: false, label: '知识图谱' })
 const emit = defineEmits<{ select: [id: string]; open: [node: GraphNode] }>()
 
 type Node = SimulationNodeDatum & { id: string; data: GraphNode; r: number; group: string }
@@ -35,10 +37,10 @@ const kindOf = (n: GraphNode) => n.kind === 'note' ? (n.space_kind ?? 'public') 
 function build() {
   const g = props.graph
   if (!g) { layout.value = { nodes: [], edges: [] }; return }
-  const hidden = new Set(props.hidden)
+  const hidden = new Set(props.hidden), hiddenTypes = new Set(props.hiddenTypes)
   const linked = new Set<string>()
   for (const e of g.edges) { linked.add(e.source); linked.add(e.target) }
-  const keep = g.nodes.filter(n => !hidden.has(kindOf(n)) && (props.orphans || linked.has(n.id) || n.id === props.center))
+  const keep = g.nodes.filter(n => !hidden.has(kindOf(n)) && !(n.kind === 'note' && n.type && hiddenTypes.has(n.type)) && (props.orphans || linked.has(n.id) || n.id === props.center))
   const byId = new Map<string, Node>()
   // 按知识库分组：每组一个圆周上的中心，力把同组的笔记拉在一起（效果图里三类知识库各成一团）
   const groups = [...new Set(keep.map(groupOf))]
@@ -127,8 +129,8 @@ const matches = (n: Node) => !!q.value && normalize(n.data.title).includes(q.val
 const fillClass = (n: Node) => {
   if (n.data.kind !== 'note') return 'f-resource'
   if (props.colorBy === 'author') return n.data.author_kind === 'agent' ? 'f-agent' : n.data.author_kind === 'system' ? 'f-resource' : 'f-user'
-  if (props.colorBy === 'confirmed') return n.data.confirmed || n.data.author_kind === 'user' ? 'f-confirmed' : 'f-pending'
-  return `f-${n.data.space_kind ?? 'public'}`
+  if (props.colorBy === 'space') return `f-${n.data.space_kind ?? 'public'}`
+  return `f-g-${typeGroupOf(n.data.type)}`
 }
 const drawn = computed(() => {
   const hv = hover.value, near = hv ? neighbors.value.get(hv) : null
@@ -148,7 +150,8 @@ const lines = computed(() => {
   return layout.value.edges.map(({ a, b }) => ({ key: a.id + '>' + b.id, a, b, hi: !!hv && (a.id === hv || b.id === hv), dim: (!!hv && a.id !== hv && b.id !== hv) || (!hv && !!q.value) }))
 })
 const focusable = computed(() => layout.value.nodes.length <= 250)
-const ariaFor = (n: Node) => `${n.data.title}，${n.data.kind === 'note' ? '笔记' : n.data.kind === 'task' ? '任务' : n.data.kind === 'project' ? '项目' : '收藏文档'}，${n.data.degree} 条链接`
+const kindLabel = (n: GraphNode) => n.kind === 'note' ? (n.type ? NOTE_TYPE_LABELS[n.type] : '笔记') : n.kind === 'task' ? '任务' : n.kind === 'project' ? '项目' : '收藏文档'
+const ariaFor = (n: Node) => `${n.data.title}，${n.data.kind === 'note' ? `笔记（${kindLabel(n.data)}）` : kindLabel(n.data)}，${n.data.degree} 条链接`
 
 function enter(n: Node) {
   hover.value = n.id
@@ -182,7 +185,7 @@ onMounted(() => {
   build()
 })
 onBeforeUnmount(() => observer?.disconnect())
-watch(() => [props.graph, props.orphans, props.hidden.join(','), props.center], build)
+watch(() => [props.graph, props.orphans, props.hidden.join(','), props.hiddenTypes.join(','), props.center], build)
 // 搜索定位：只有一个匹配时平移到它
 watch(q, (value) => {
   if (!value) return
@@ -212,7 +215,7 @@ watch(q, (value) => {
     </svg>
     <div v-if="tip && !compact" class="kb-graph-tip" :style="{ left: `${Math.min(tip.x + 14, size.w - 250)}px`, top: `${Math.max(tip.y - 10, 8)}px` }" role="status">
       <strong>{{ tip.node.data.title }}</strong>
-      <span class="kb-meta">{{ tip.node.data.kind === 'note' ? '笔记' : tip.node.data.kind === 'task' ? '任务' : tip.node.data.kind === 'project' ? '项目' : '收藏文档' }} · {{ tip.node.data.degree }} 条链接</span>
+      <span class="kb-meta">{{ kindLabel(tip.node.data) }} · {{ tip.node.data.degree }} 条链接</span>
     </div>
     <slot />
   </div>

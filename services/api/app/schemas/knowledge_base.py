@@ -148,7 +148,6 @@ class NoteSummary(BaseModel):
     folder: str
     tags: list[str]
     pinned: bool
-    confirmed: bool = Field(description="人已确认（检索时排在前面）")
     conflict: bool = Field(description="有冲突或重复提醒")
     source_kind: SourceKind
     updated_by: Author
@@ -202,8 +201,6 @@ class NoteOut(NoteSummary):
     body: str
     aliases: list[str]
     review_at: date | None
-    confirmed_by: Author | None
-    confirmed_at: datetime | None
     conflict_note: str | None
     created_by: Author
     created_at: datetime
@@ -243,11 +240,6 @@ class NoteUpdate(_Strict):
     reason: Reason = Field(
         default="", description="改动说明；改了智能体写的内容时会写回它的《收到的纠正》"
     )
-
-
-class ConfirmRequest(_Strict):
-    version: int
-    confirmed: bool
 
 
 class RevertRequest(_Strict):
@@ -310,7 +302,6 @@ class GraphNode(BaseModel):
     space_kind: SpaceKind | None
     type: NoteType | None
     author_kind: Literal["user", "agent", "system"] | None
-    confirmed: bool
     degree: int
 
 
