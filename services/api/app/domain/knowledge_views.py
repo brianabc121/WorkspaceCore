@@ -372,7 +372,6 @@ class KnowledgeService(KnowledgeBase):
             stmt = stmt.where(KnowledgeNote.type == note_type)
         stmt = stmt.order_by(
             _bucket(q),
-            KnowledgeNote.confirmed_at.is_(None),
             KnowledgeNote.source_kind == "external",
             KnowledgeNote.updated_at.desc(),
         ).limit(limit)

@@ -6,7 +6,8 @@ import type { Space } from './api'
 
 // 知识库分组（T-0099）：全部 / 公共 / 项目知识库 / 智能体知识库。
 // 图谱页里点一下只看这个知识库（其余变淡）；手机首页里是链接，打开知识库主页。
-const props = defineProps<{ spaces: Space[]; focus?: string | null; links?: boolean; total?: number }>()
+// dots：图谱不按知识库着色时不画知识库类型的圆点，免得和类型颜色混淆（T-0102）
+const props = withDefaults(defineProps<{ spaces: Space[]; focus?: string | null; links?: boolean; total?: number; dots?: boolean }>(), { focus: null, total: undefined, dots: true })
 const emit = defineEmits<{ focus: [id: string | null] }>()
 const groups = computed(() => [
   { label: '公共', items: props.spaces.filter(s => s.kind === 'public') },
@@ -44,7 +45,7 @@ export function spaceLink(space: SpaceType) {
           <span class="kb-stack kb-grow"><span>{{ s.name }}</span><span class="kb-meta">{{ detail(s) }}</span></span>
         </RouterLink>
         <button v-else type="button" class="kb-list-item" role="listitem" :aria-pressed="focus === s.id" :title="detail(s)" @click="emit('focus', focus === s.id ? null : s.id)">
-          <span class="kb-dot" :class="`k-${s.kind}`" aria-hidden="true" />
+          <span v-if="dots" class="kb-dot" :class="`k-${s.kind}`" aria-hidden="true" />
           <span class="kb-grow">{{ s.name }}</span><span class="kb-meta kb-num">{{ s.notes }}</span>
         </button>
       </template>

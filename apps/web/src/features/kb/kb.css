@@ -1,7 +1,9 @@
 /* 知识库（T-0099）：独立页面，按效果图 https://claude.ai/artifact/Lib1PcRket1qH18Bo5YwBv 实现。
    左侧功能条 + 各页面自己的栏；手机上去掉功能条，改为顶栏 + 底部导航。
    颜色是知识库自己的一套（亮 / 暗两套，跟随工作台主题）。三类知识库的颜色（项目蓝、智能体橙、公共绿）
-   在两种主题下都检查过色觉障碍下的区分度；文字只用文字色，颜色圆点只表示归属。 */
+   在两种主题下都检查过色觉障碍下的区分度；文字只用文字色，颜色圆点只表示归属。
+   图谱默认按类型着色（T-0102）：16 种类型分 6 组，--kb-g-*；亮色下（图谱底色 #ffffff）绿、黄、粉 3 个颜色不足 3:1，
+   靠图例文字、节点标题与列表视图补足，不只靠颜色。 */
 :root {
   --kb-bg: #f6f7f9; --kb-surface: #ffffff; --kb-surface-2: #f1f3f6; --kb-text: #1c2333; --kb-muted: #5d687b; --kb-line: #e3e6ec;
   --kb-accent: #4353d4; --kb-accent-strong: #2f3db0; --kb-accent-soft: #eceffe; --kb-on-accent: #ffffff; --kb-edge: #cfd5df;
@@ -10,6 +12,8 @@
   --kb-mark: #fff3c4; --kb-add: #e6f6e6; --kb-add-text: #0b5d0b; --kb-del: #fdecea; --kb-del-text: #8c1d18;
   --kb-shadow: 0 8px 24px rgb(28 35 51 / .12);
   --kb-chart-1: #2a78d6; --kb-chart-2: #eb6834; --kb-grid: #eceef2;
+  /* 图谱按类型着色的 6 组（T-0102，TIMELINE_PLAN 3.1；亮暗两套都跑过 dataviz 配色检查） */
+  --kb-g-rule: #2a78d6; --kb-g-decision: #eb6834; --kb-g-lesson: #1baf7a; --kb-g-project: #eda100; --kb-g-knowledge: #e87ba4; --kb-g-preference: #6250d6;
 }
 :root[data-theme="dark"] {
   --kb-bg: #10131a; --kb-surface: #181c26; --kb-surface-2: #212634; --kb-text: #eceff6; --kb-muted: #a2abbd; --kb-line: #2a3040;
@@ -19,6 +23,7 @@
   --kb-mark: #3d3519; --kb-add: #15301a; --kb-add-text: #8fdc8f; --kb-del: #3a1a1a; --kb-del-text: #ffb4ab;
   --kb-shadow: 0 8px 24px rgb(0 0 0 / .45);
   --kb-chart-1: #3987e5; --kb-chart-2: #d95926; --kb-grid: #262b39;
+  --kb-g-rule: #3987e5; --kb-g-decision: #d95926; --kb-g-lesson: #199e70; --kb-g-project: #c98500; --kb-g-knowledge: #d55181; --kb-g-preference: #9085e9;
 }
 
 .kb-app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; background: var(--kb-bg); color: var(--kb-text); font-size: 14px; line-height: 1.5; }
@@ -75,6 +80,9 @@
 .kb-dot { flex: none; display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--kb-resource); }
 .kb-dot.is-small { width: 8px; height: 8px; }
 .kb-dot.k-public { background: var(--kb-public); } .kb-dot.k-project { background: var(--kb-project); } .kb-dot.k-agent { background: var(--kb-agent); }
+.kb-dot.k-user { background: var(--kb-accent); }
+.kb-dot.g-rule { background: var(--kb-g-rule); } .kb-dot.g-decision { background: var(--kb-g-decision); } .kb-dot.g-lesson { background: var(--kb-g-lesson); }
+.kb-dot.g-project { background: var(--kb-g-project); } .kb-dot.g-knowledge { background: var(--kb-g-knowledge); } .kb-dot.g-preference { background: var(--kb-g-preference); }
 .kb-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 12px; background: var(--kb-surface-2); color: var(--kb-text); font-size: 12px; }
 .kb-tag { display: inline-flex; align-items: center; gap: 2px; padding: 1px 8px; border-radius: 10px; background: var(--kb-accent-soft); color: var(--kb-accent-strong); font-size: 12px; text-decoration: none; }
 :root[data-theme="dark"] .kb-tag { color: var(--kb-accent); }
@@ -146,11 +154,23 @@
 .kb-graph .kb-node.is-strong text { fill: var(--kb-text); font-weight: 600; }
 .kb-graph .kb-node.is-hub text { font-size: 13px; }
 .kb-graph .f-public { fill: var(--kb-public); } .kb-graph .f-project { fill: var(--kb-project); } .kb-graph .f-agent { fill: var(--kb-agent); } .kb-graph .f-resource { fill: var(--kb-resource); }
-.kb-graph .f-user { fill: var(--kb-accent); } .kb-graph .f-confirmed { fill: var(--kb-public); } .kb-graph .f-pending { fill: var(--kb-agent); }
-.kb-graph-legend { position: absolute; left: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border: 1px solid var(--kb-line); border-radius: 10px; background: var(--kb-surface); max-width: calc(100% - 24px); }
-.kb-graph-legend button { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 7px; background: var(--kb-surface-2); color: var(--kb-text); font-size: 12px; cursor: pointer; }
-.kb-graph-legend button[aria-pressed="false"] { background: transparent; color: var(--kb-muted); }
+.kb-graph .f-user { fill: var(--kb-accent); }
+.kb-graph .f-g-rule { fill: var(--kb-g-rule); } .kb-graph .f-g-decision { fill: var(--kb-g-decision); } .kb-graph .f-g-lesson { fill: var(--kb-g-lesson); }
+.kb-graph .f-g-project { fill: var(--kb-g-project); } .kb-graph .f-g-knowledge { fill: var(--kb-g-knowledge); } .kb-graph .f-g-preference { fill: var(--kb-g-preference); }
+/* 图例在图谱下方（不压住圆点）：类型 6 组带类型名，放在图上会盖住底部的笔记 */
+.kb-graph-legend { flex: none; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.kb-graph-legend button { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--kb-line); border-radius: 7px; background: var(--kb-surface); color: var(--kb-text); font-size: 12px; cursor: pointer; }
+.kb-graph-legend button[aria-pressed="false"] { background: transparent; border-style: dashed; color: var(--kb-muted); }
 .kb-graph-legend button[aria-pressed="false"] .kb-dot { opacity: .3; }
+.kb-graph-legend .kb-legend-types { color: var(--kb-muted); font-size: 11px; }
+.kb-graph-legend .kb-legend-item { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; font-size: 12px; }
+.kb-filter { position: relative; }
+.kb-filter-panel { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: 300px; max-width: calc(100vw - 32px); max-height: min(60vh, 460px); overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--kb-line); border-radius: 10px; background: var(--kb-surface); box-shadow: var(--kb-shadow); }
+.kb-filter-group { display: flex; flex-direction: column; gap: 4px; }
+.kb-filter-group .kb-check { gap: 6px; }
+.kb-filter-types { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 10px; padding-left: 22px; }
+.kb-filter-types .kb-num { margin-left: auto; }
+.kb-filter-panel > .kb-btn { align-self: flex-start; }
 .kb-graph-hint { position: absolute; right: 14px; bottom: 14px; margin: 0; font-size: 12px; color: var(--kb-muted); pointer-events: none; }
 .kb-graph-tip { position: absolute; z-index: 5; pointer-events: none; max-width: 240px; padding: 8px 10px; border: 1px solid var(--kb-line); border-radius: 8px; background: var(--kb-surface); box-shadow: var(--kb-shadow); font-size: 12px; }
 .kb-graph-tip strong { display: block; font-size: 13px; color: var(--kb-text); }
@@ -346,6 +366,10 @@
   .kb-graph-wrap { padding: 8px; }
   .kb-graph { min-height: 60vh; }
   .kb-graph-hint { display: none; }
+  .kb-graph-legend .kb-legend-types { display: none; }
+  .kb-toolbar { position: relative; }
+  .kb-filter { position: static; }
+  .kb-filter-panel { top: calc(100% - 4px); left: 12px; right: 12px; width: auto; max-width: none; }
   .kb-timeline li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .kb-editor-pane + .kb-editor-pane { display: none; }
   .kb-title-input { padding: 14px 16px 4px; font-size: 20px; }

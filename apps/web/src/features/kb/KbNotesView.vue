@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { CircleAlert, CircleCheck, Pin, Search, SquarePen, X } from '@lucide/vue'
+import { CircleAlert, Pin, Search, SquarePen, X } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
 import { EDITABLE_TYPES, NOTE_TYPE_LABELS, SPACE_KIND_LABELS, kbError, useNotes, useSpaces, type NoteFilters, type NoteType } from './api'
 import { when } from './format'
@@ -43,7 +43,7 @@ const newHref = computed(() => filters.value.space_id ? `/knowledge/notes/new?sp
       <KbTabs />
       <div class="kb-page" style="max-width: 920px">
         <div class="kb-hero kb-desktop-only">
-          <div><h1>笔记</h1><p class="kb-meta" style="margin: 4px 0 0">所有知识库里的笔记。人已确认的、置顶的排在前面。</p></div>
+          <div><h1>笔记</h1><p class="kb-meta" style="margin: 4px 0 0">所有知识库里的笔记。置顶的排在前面。</p></div>
           <RouterLink v-if="canEdit" :to="newHref" class="kb-btn is-primary"><SquarePen aria-hidden="true" />新建笔记</RouterLink>
         </div>
         <form class="kb-search" role="search" style="height: 42px; background: var(--kb-surface)" @submit.prevent="set('q', text.trim() || undefined)">
@@ -82,7 +82,6 @@ const newHref = computed(() => filters.value.space_id ? `/knowledge/notes/new?sp
                   <strong style="flex: 1; min-width: 0">{{ n.title }}</strong>
                   <Pin v-if="n.pinned" aria-label="置顶" style="width: 14px; height: 14px; color: var(--kb-muted)" />
                   <span v-if="n.conflict" class="kb-badge is-warning"><CircleAlert aria-hidden="true" />有冲突</span>
-                  <span v-else-if="n.confirmed" class="kb-badge is-good"><CircleCheck aria-hidden="true" />人已确认</span>
                 </span>
                 <span class="kb-meta" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px">
                   <span class="kb-dot is-small" :class="`k-${n.space_kind}`" aria-hidden="true" />{{ n.space_name }} · {{ NOTE_TYPE_LABELS[n.type] }} · {{ n.updated_by.name }}{{ n.updated_by.kind === 'agent' ? '（智能体）' : '' }} {{ when(n.updated_at) }}

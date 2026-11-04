@@ -487,7 +487,6 @@ class KnowledgeBase:
             folder=note.folder,
             tags=list(note.tags),
             pinned=note.pinned,
-            confirmed=note.confirmed_at is not None,
             conflict=note.conflict_note is not None,
             source_kind=note.source_kind,
             updated_by=self.author(note.updated_by_user, note.updated_by_instance, names),
@@ -511,7 +510,7 @@ class KnowledgeBase:
             .limit(1)
         )
         names = await self.authors(
-            (note.updated_by_user, note.created_by_user, note.confirmed_by),
+            (note.updated_by_user, note.created_by_user),
             (note.updated_by_instance, note.created_by_instance),
         )
         summary = self.summary(note, space, names)
@@ -520,10 +519,6 @@ class KnowledgeBase:
             body=note.body,
             aliases=list(note.aliases),
             review_at=note.review_at,
-            confirmed_by=(
-                self.author(note.confirmed_by, None, names) if note.confirmed_by else None
-            ),
-            confirmed_at=note.confirmed_at,
             conflict_note=note.conflict_note,
             created_by=self.author(note.created_by_user, note.created_by_instance, names),
             created_at=note.created_at,
@@ -998,7 +993,6 @@ class KnowledgeBase:
         note.updated_by_instance = editor.instance.id if editor.instance else None
         if editor.is_agent:
             note.source_kind = options.source_kind
-            note.confirmed_at = note.confirmed_by = None  # 智能体改过，人要重新确认
         else:
             note.conflict_note = None  # 人改过：冲突提醒由人处理了
         note.version += 1
@@ -1109,19 +1103,6 @@ class KnowledgeBase:
                 previous_agent, editor, note, state.space, "撤销了你对", reason, suffix="的修改"
             )
         await self._audit(editor, "knowledge_note.reverted", note, {"to_version": to_version})
-        return note
-
-    async def confirm(
-        self, editor: Editor, note: KnowledgeNote, version: int, confirmed: bool
-    ) -> KnowledgeNote:
-        if note.version != version:
-            raise await self._conflict(note)
-        if confirmed:
-            note.confirmed_by, note.confirmed_at = editor.user_id, _now()
-            note.conflict_note = None
-        else:
-            note.confirmed_by = note.confirmed_at = None
-        await self._audit(editor, "knowledge_note.confirmed", note, {"confirmed": confirmed})
         return note
 
     async def purge(self, editor: Editor, note: KnowledgeNote) -> None:
@@ -1486,7 +1467,6 @@ class KnowledgeBase:
                 author_kind="agent"
                 if n.updated_by_instance
                 else ("user" if n.updated_by_user else "system"),
-                confirmed=n.confirmed_at is not None,
                 degree=degree.get(n.id, 0),
             )
             for n in notes
@@ -1504,7 +1484,6 @@ class KnowledgeBase:
                     space_kind=None,
                     type=None,
                     author_kind=None,
-                    confirmed=False,
                     degree=degree.get(rid, 0),
                 )
             )

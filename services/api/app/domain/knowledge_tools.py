@@ -102,7 +102,6 @@ class _Context:
         return Origin(
             by=by,
             agent_name=names[1].get(note.updated_by_instance) if note.updated_by_instance else None,
-            confirmed=note.confirmed_at is not None,
             conflict=note.conflict_note is not None,
             external=note.source_kind == "external",
         )

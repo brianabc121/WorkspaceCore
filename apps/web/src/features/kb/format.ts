@@ -42,10 +42,9 @@ export function nodeHref(node: Pick<GraphNode, 'kind' | 'id'>) {
   return '/knowledge/docs'
 }
 
-export function statusOf(note: Pick<NoteSummary, 'confirmed' | 'conflict' | 'updated_by'>) {
+export function statusOf(note: Pick<NoteSummary, 'conflict' | 'updated_by'>) {
   if (note.conflict) return { key: 'conflict' as const, label: '有冲突提醒' }
-  if (note.confirmed) return { key: 'confirmed' as const, label: '人已确认' }
-  if (note.updated_by.kind === 'agent') return { key: 'agent' as const, label: '智能体写入，人还没确认' }
+  if (note.updated_by.kind === 'agent') return { key: 'agent' as const, label: '智能体写入' }
   return { key: 'human' as const, label: '人写的' }
 }
 export const byAgent = (author: Author | null | undefined) => author?.kind === 'agent'

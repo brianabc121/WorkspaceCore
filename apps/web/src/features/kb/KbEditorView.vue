@@ -25,7 +25,7 @@ const source = useNote(scope, noteId)
 const spaces = useSpaces(scope)
 const spaceItems = computed(() => spaces.data.value?.items ?? [])
 
-const title = ref(''), body = ref(''), reason = ref(''), confirmed = ref(false)
+const title = ref(''), body = ref(''), reason = ref('')
 const fields = reactive({ space_id: '', type: 'record' as NoteType, tags: [] as string[], aliases: [] as string[], folder: '', review_at: '', pinned: false })
 const base = ref<{ version: number; title: string; body: string } | null>(null)
 const loaded = ref(false), saving = ref(false), failure = ref(''), notice = ref('')
@@ -44,7 +44,7 @@ watch(mode, (m) => { try { localStorage.setItem('kb-editor-mode', m) } catch { /
 // ---------------------------------------------------------------- 初始化
 function load(note: Note | null) {
   if (note) {
-    title.value = note.title; body.value = note.body; confirmed.value = !!note.confirmed_at
+    title.value = note.title; body.value = note.body
     Object.assign(fields, { space_id: note.space_id, type: note.type, tags: [...note.tags], aliases: [...note.aliases], folder: note.folder, review_at: note.review_at ?? '', pinned: note.pinned })
     base.value = { version: note.version, title: note.title, body: note.body }
   } else {
@@ -198,7 +198,6 @@ async function save() {
       const moved = source.data.value && fields.space_id !== source.data.value.space_id ? { space_id: fields.space_id } : {}
       saved = await kb.update(noteId.value!, { version: base.value!.version, ...moved, ...payload() })
     }
-    if (confirmed.value !== !!saved.confirmed_at) saved = await kb.confirm(saved.id, saved.version, confirmed.value)
     dropDraft()
     snapshot.value = state()
     await router.push(`/knowledge/notes/${saved.id}`)
@@ -325,7 +324,6 @@ const heading = computed(() => isNew.value ? '新建笔记' : `编辑《${source
       <label class="kb-field">文件夹（可选）<input v-model="fields.folder" class="kb-input" maxlength="200" placeholder="例如 流程/发布"></label>
       <label class="kb-field">复核日期<input v-model="fields.review_at" class="kb-input" type="date"></label>
       <label class="kb-check"><input v-model="fields.pinned" type="checkbox">置顶（目录里排在前面）</label>
-      <label class="kb-check"><input v-model="confirmed" type="checkbox">标为“人已确认”（智能体检索时排在前面）</label>
       <label class="kb-field">这次修改的原因（可选，写进变更记录）<input v-model="reason" class="kb-input" maxlength="500"></label>
       <div v-if="outlineItems.length" class="kb-side-section kb-divider" style="padding-top: 12px">
         <h2>大纲</h2>

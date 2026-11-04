@@ -78,6 +78,44 @@ def test_migrations_upgrade_downgrade_on_empty_database(temp_database_url: str) 
     assert asyncio.run(_schema_state(temp_database_url)) == (True, {"pgcrypto", "pg_trgm"})
 
 
+async def _note_columns(database_url: str) -> dict[str, str]:
+    conn = await asyncpg.connect(asyncpg_dsn(database_url))
+    try:
+        rows = await conn.fetch(
+            "SELECT column_name, is_nullable FROM information_schema.columns "
+            "WHERE table_schema = 'workspace' AND table_name = 'knowledge_notes'"
+        )
+        fks = await conn.fetch(
+            "SELECT conname FROM pg_constraint "
+            "WHERE conrelid = 'workspace.knowledge_notes'::regclass AND contype = 'f'"
+        )
+    finally:
+        await conn.close()
+    columns = {row["column_name"]: row["is_nullable"] for row in rows}
+    columns.update({row["conname"]: "fk" for row in fks})
+    return columns
+
+
+def test_migration_0025_drops_note_confirmation(temp_database_url: str) -> None:
+    """T-0102：0025 删除“人已确认”的两列；降级加回空列与外键。"""
+    config = alembic_config(temp_database_url)
+
+    command.upgrade(config, "0025")
+    columns = asyncio.run(_note_columns(temp_database_url))
+    assert "confirmed_by" not in columns
+    assert "confirmed_at" not in columns
+    assert "fk_knowledge_notes_confirmed_by_users" not in columns
+
+    command.downgrade(config, "0024")
+    columns = asyncio.run(_note_columns(temp_database_url))
+    assert columns["confirmed_by"] == "YES"
+    assert columns["confirmed_at"] == "YES"
+    assert columns["fk_knowledge_notes_confirmed_by_users"] == "fk"
+
+    command.upgrade(config, "head")
+    command.check(config)
+
+
 async def _get_readyz(database_url: str, redis_url: str) -> httpx.Response:
     app = create_app(settings_for(database_url, redis_url))
     async with app.router.lifespan_context(app):

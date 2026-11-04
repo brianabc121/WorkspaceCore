@@ -8,7 +8,6 @@ import type { Schema } from '../src/services/api'
 
 // 知识库前端（T-0099）
 const path = (r: Request) => new URL(r.url).pathname
-const user = { kind: 'user' as const, id: 'user-a', name: '测试用户' }
 const agent = { kind: 'agent' as const, id: 'inst-a', name: 'ops-claw' }
 const publicSpace: Schema['SpaceOut'] = { id: 'space-public', kind: 'public', name: '公共知识库', description: '', project_id: null, instance_id: null, archived: false, agent_access: 'read_write', writes_enabled: true, deletes_paused_at: null, notes: 2, last_updated_at: '2026-11-03T10:00:00Z', brief_note_id: null, brief_version: null, agents: [], version: 1 }
 const projectSpace: Schema['SpaceOut'] = { ...publicSpace, id: 'space-p1', kind: 'project', name: '工作台 V2', project_id: 'project-a', agent_access: 'none', notes: 1, brief_note_id: 'note-brief', brief_version: 6, agents: [{ instance_id: 'inst-a', name: 'ops-claw', access: 'read_write', brief_version_read: 5, added_at: '2026-11-01T00:00:00Z' }] }
@@ -16,9 +15,9 @@ const agentSpace: Schema['SpaceOut'] = { ...publicSpace, id: 'space-a', kind: 'a
 const spaces = { items: [publicSpace, projectSpace, agentSpace] }
 const note: Schema['NoteOut'] = {
   id: 'note-1', space_id: 'space-public', space_kind: 'public', space_name: '公共知识库', title: '发布前检查清单', type: 'runbook', folder: '', tags: ['发布'], pinned: false,
-  confirmed: true, conflict: false, source_kind: 'human', updated_by: agent, updated_at: '2026-11-03T10:00:00Z', version: 4,
+  conflict: false, source_kind: 'human', updated_by: agent, updated_at: '2026-11-03T10:00:00Z', version: 4,
   body: '# 发布前检查清单\n\n- [x] CI 全绿\n- [ ] 按 [[数据库迁移约定]] 检查\n- [ ] 还没写的 [[新流程]]\n\n```\n[[代码里的不算]]\n```',
-  aliases: [], review_at: null, confirmed_by: user, confirmed_at: '2026-11-03T11:00:00Z', conflict_note: null, created_by: agent, created_at: '2026-11-01T00:00:00Z',
+  aliases: [], review_at: null, conflict_note: null, created_by: agent, created_at: '2026-11-01T00:00:00Z',
   deleted_at: null, purge_after: null, reason: '10 月那次漏了迁移检查', evidence: [],
   links: [{ text: '数据库迁移约定', note_id: 'note-2', title: '数据库迁移约定', space_name: '公共知识库', deleted: false, resource_type: null, resource_id: null }, { text: '新流程', note_id: null, title: null, space_name: null, deleted: false, resource_type: null, resource_id: null }],
   backlinks: [{ note_id: 'note-3', title: '工作台 V2 简报', space_id: 'space-p1', space_kind: 'project', space_name: '工作台 V2', snippet: '每次发布前按 [[发布前检查清单]] 逐项确认' }],
@@ -26,9 +25,9 @@ const note: Schema['NoteOut'] = {
 }
 const graph: Schema['GraphOut'] = {
   nodes: [
-    { id: 'note-1', kind: 'note', title: '发布前检查清单', space_id: 'space-public', space_kind: 'public', type: 'runbook', author_kind: 'agent', confirmed: true, degree: 2 },
-    { id: 'note-2', kind: 'note', title: '数据库迁移约定', space_id: 'space-public', space_kind: 'public', type: 'rule', author_kind: 'user', confirmed: false, degree: 1 },
-    { id: 'note-3', kind: 'note', title: '工作台 V2 简报', space_id: 'space-p1', space_kind: 'project', type: 'brief', author_kind: 'user', confirmed: false, degree: 1 },
+    { id: 'note-1', kind: 'note', title: '发布前检查清单', space_id: 'space-public', space_kind: 'public', type: 'runbook', author_kind: 'agent', degree: 2 },
+    { id: 'note-2', kind: 'note', title: '数据库迁移约定', space_id: 'space-public', space_kind: 'public', type: 'rule', author_kind: 'user', degree: 1 },
+    { id: 'note-3', kind: 'note', title: '工作台 V2 简报', space_id: 'space-p1', space_kind: 'project', type: 'brief', author_kind: 'user', degree: 1 },
   ],
   edges: [{ source: 'note-1', target: 'note-2' }, { source: 'note-3', target: 'note-1' }],
   truncated: false, total_notes: 3,
@@ -97,15 +96,60 @@ describe('知识库页面', () => {
     expect(screen.queryByRole('navigation', { name: '主导航' })).not.toBeInTheDocument()
     const groups = screen.getByRole('complementary', { name: '知识库分组' })
     await within(groups).findAllByText('工作台 V2')
-    const node = await screen.findByRole('button', { name: /^发布前检查清单，笔记，2 条链接/ })
+    const node = await screen.findByRole('button', { name: /^发布前检查清单，笔记（操作手册），2 条链接/ })
     await fireEvent.click(node)
     const panel = screen.getByRole('complementary', { name: '所选笔记' })
-    await within(panel).findByText('人已确认')
+    await within(panel).findByText('智能体写入')
+    expect(panel).toHaveTextContent('操作手册· 规范与流程')
+    expect(panel).not.toHaveTextContent('确认')
     expect(within(panel).getByRole('link', { name: '打开笔记' })).toHaveAttribute('href', '/knowledge/notes/note-1')
     // 列表视图（不依赖图形的替代视图）
     await fireEvent.click(screen.getAllByRole('button', { name: /列表视图/ })[0])
     expect(await screen.findByRole('table')).toBeVisible()
     expect(screen.getAllByRole('row')).toHaveLength(4)
+  })
+
+  it('colors the graph by type group by default, lists the types in the legend and filters by a single type', async () => {
+    kbApi()
+    await openApp('/knowledge')
+    const runbook = await screen.findByRole('button', { name: /^发布前检查清单，笔记（操作手册）/ })
+    expect(runbook.querySelector('circle')).toHaveClass('f-g-rule')
+    expect(screen.getByRole('button', { name: /^工作台 V2 简报，笔记（项目简报）/ }).querySelector('circle')).toHaveClass('f-g-project')
+    expect(screen.getByRole('combobox', { name: '着色' })).toHaveValue('type')
+    expect([...screen.getByRole('combobox', { name: '着色' }).querySelectorAll('option')].map(o => o.textContent)).toEqual(['按类型', '按知识库', '按作者（人 / 智能体）'])
+    const legend = screen.getByRole('group', { name: '按类型显示' })
+    const rules = within(legend).getByRole('button', { name: /规范与流程/ })
+    expect(rules).toHaveTextContent('规范与流程规范 流程 操作手册 模板2')
+    expect(within(legend).getAllByRole('button')).toHaveLength(6)
+    // 图例按组隐藏
+    await fireEvent.click(rules)
+    expect(rules).toHaveAttribute('aria-pressed', 'false')
+    await vi.waitFor(() => expect(screen.queryByRole('button', { name: /^发布前检查清单，/ })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /^工作台 V2 简报，/ })).toBeInTheDocument()
+    await fireEvent.click(rules)
+    await screen.findByRole('button', { name: /^发布前检查清单，/ })
+    // 按单个类型筛选
+    await fireEvent.click(screen.getByRole('button', { name: '类型：全部' }))
+    const filter = screen.getByRole('group', { name: '按类型筛选' })
+    await fireEvent.click(within(filter).getByRole('checkbox', { name: /^操作手册/ }))
+    expect(screen.getByRole('button', { name: '类型：隐藏 1 种' })).toBeInTheDocument()
+    await vi.waitFor(() => expect(screen.queryByRole('button', { name: /^发布前检查清单，/ })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /^数据库迁移约定，笔记（规范）/ })).toBeInTheDocument()
+    expect(within(filter).getByRole('checkbox', { name: /规范与流程/ })).toHaveProperty('indeterminate', true)
+    expect(rules).toHaveAttribute('aria-pressed', 'true')
+    // 列表视图也按筛选，显示具体类型
+    await fireEvent.click(screen.getAllByRole('button', { name: /列表视图/ })[0])
+    const table = await screen.findByRole('table')
+    expect(within(table).getAllByRole('row')).toHaveLength(3)
+    expect(table).toHaveTextContent('规范')
+    expect(table).not.toHaveTextContent('发布前检查清单')
+    await fireEvent.click(within(filter).getByRole('button', { name: '全部显示' }))
+    await vi.waitFor(() => expect(within(table).getAllByRole('row')).toHaveLength(4))
+    // 换成按作者着色，图例跟着换
+    await fireEvent.click(screen.getAllByRole('button', { name: /图谱视图/ })[0])
+    await fireEvent.update(screen.getByRole('combobox', { name: '着色' }), 'author')
+    expect(await screen.findByRole('group', { name: '作者图例' })).toHaveTextContent('人2')
+    expect(screen.getByRole('button', { name: /^发布前检查清单，/ }).querySelector('circle')).toHaveClass('f-agent')
   })
 
   it('shows a note with resolved links, backlinks, usage and moves it to the trash with its version', async () => {
@@ -130,7 +174,7 @@ describe('知识库页面', () => {
   })
 
   it('saves a new note with tags and the chosen space', async () => {
-    const requests = kbApi(async (r) => r.method === 'POST' && path(r) === '/api/v1/knowledge/notes' ? Response.json({ ...note, id: 'note-new', title: '新笔记', body: '', confirmed_at: null, confirmed_by: null }, { status: 201 }) : undefined)
+    const requests = kbApi(async (r) => r.method === 'POST' && path(r) === '/api/v1/knowledge/notes' ? Response.json({ ...note, id: 'note-new', title: '新笔记', body: '' }, { status: 201 }) : undefined)
     const { router } = await openApp('/knowledge/notes/new?space=space-p1&title=新笔记')
     await vi.waitFor(() => expect(screen.getByRole('textbox', { name: '标题' })).toHaveValue('新笔记'))
     expect(screen.getByLabelText('知识库')).toHaveValue('space-p1')

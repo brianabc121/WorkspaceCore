@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ArchiveRestore, CircleAlert, CircleCheck, Ellipsis, History, Pin, SquarePen, Trash2 } from '@lucide/vue'
+import { ArchiveRestore, CircleAlert, Ellipsis, History, Pin, SquarePen, Trash2 } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError, errorMessage } from '../../services/api'
 import ModalPanel from '../../components/ModalPanel.vue'
@@ -68,7 +68,6 @@ async function act(work: () => Promise<unknown>, done: string) {
     if (error instanceof ApiError && error.code === 'VERSION_CONFLICT') await query.refetch()
   } finally { busy.value = false }
 }
-const confirmToggle = () => note.value && act(() => kb.confirm(note.value!.id, note.value!.version, !note.value!.confirmed_at), note.value.confirmed_at ? '已取消“人已确认”' : '已标为人已确认')
 const deleting = ref(false), deleteReason = ref('')
 async function remove() {
   const n = note.value
@@ -135,7 +134,6 @@ const notFound = computed(() => query.error.value instanceof ApiError && query.e
           <button type="button" class="kb-icon-btn" aria-label="更多操作" :aria-expanded="more" @click="more = !more"><Ellipsis aria-hidden="true" /></button>
           <div v-if="more" class="kb-card" role="menu" style="position: absolute; right: 0; top: 40px; z-index: 20; min-width: 200px; padding: 6px; gap: 2px; box-shadow: var(--kb-shadow)" @keydown.esc="more = false">
             <button type="button" role="menuitem" class="kb-list-item" @click="copyLink">复制 [[链接]]</button>
-            <button v-if="canEdit && !note.deleted_at" type="button" role="menuitem" class="kb-list-item" :disabled="busy" @click="more = false; confirmToggle()">{{ note.confirmed_at ? '取消“人已确认”' : '标为人已确认' }}</button>
             <RouterLink :to="{ path: '/knowledge/graph' }" role="menuitem" class="kb-list-item" @click="more = false">在图谱中查看</RouterLink>
             <button v-if="canEdit && !note.deleted_at && note.type !== 'correction'" type="button" role="menuitem" class="kb-list-item" style="color: var(--kb-danger)" @click="more = false; deleting = true"><Trash2 aria-hidden="true" style="width: 16px; height: 16px" />删除（放进回收站）</button>
           </div>
@@ -153,7 +151,7 @@ const notFound = computed(() => query.error.value instanceof ApiError && query.e
         <div v-if="note.conflict_note" class="kb-notice is-warning" role="note"><CircleAlert aria-hidden="true" /><span class="kb-grow">{{ note.conflict_note }}。核对后编辑保存一次，提醒就会去掉。</span></div>
         <div v-if="note.type === 'brief'" class="kb-notice" role="note"><span class="kb-grow">这是项目简报：参与本项目的智能体接到任务时先读它。只有人能修改。</span></div>
         <details class="kb-mobile-only kb-card" style="padding: 10px 12px; flex-direction: column">
-          <summary class="kb-meta" style="cursor: pointer">{{ authorLabel(note.created_by) }} 写入{{ note.confirmed_by ? ` · ${note.confirmed_by.name} 已确认` : '' }} · 第 {{ note.version }} 版</summary>
+          <summary class="kb-meta" style="cursor: pointer">{{ authorLabel(note.created_by) }} 写入 · 第 {{ note.version }} 版</summary>
         </details>
         <dl class="kb-props kb-desktop-only" aria-label="笔记属性">
           <dt>类型</dt><dd>{{ NOTE_TYPE_LABELS[note.type] }}</dd>
@@ -163,10 +161,9 @@ const notFound = computed(() => query.error.value instanceof ApiError && query.e
           <dd><span class="kb-avatar" :class="{ 'is-user': note.created_by.kind !== 'agent' }" style="width: 22px; height: 22px; font-size: 11px" aria-hidden="true">{{ initial(note.created_by.name) }}</span>{{ authorLabel(note.created_by) }} 写入<template v-if="note.updated_by.name !== note.created_by.name || note.version > 1"> · {{ authorLabel(note.updated_by) }} {{ when(note.updated_at) }}修改</template></dd>
           <dt>状态</dt>
           <dd>
-            <span v-if="note.confirmed_by" class="kb-badge is-good"><CircleCheck aria-hidden="true" />{{ note.confirmed_by.name }} {{ when(note.confirmed_at) }}确认过</span>
-            <span v-else-if="note.updated_by.kind === 'agent'" class="kb-badge">智能体写入，人还没确认</span>
+            <span v-if="note.conflict_note" class="kb-badge is-warning"><CircleAlert aria-hidden="true" />有冲突提醒</span>
+            <span v-else-if="note.updated_by.kind === 'agent'" class="kb-badge">智能体写入</span>
             <span v-else class="kb-badge">人写的</span>
-            <button v-if="canEdit && !note.deleted_at" type="button" class="kb-btn is-small" :disabled="busy" @click="confirmToggle">{{ note.confirmed_at ? '取消确认' : '标为人已确认' }}</button>
           </dd>
           <template v-if="note.reason"><dt>写入原因</dt><dd>“{{ note.reason }}”</dd></template>
           <template v-if="note.evidence.length"><dt>依据</dt><dd><template v-for="e in note.evidence" :key="e.kind + e.id"><RouterLink v-if="evidenceHref(e)" :to="evidenceHref(e)!" class="kb-tag">{{ evidenceLabel[e.kind] }}</RouterLink><span v-else class="kb-badge">{{ evidenceLabel[e.kind] }} {{ e.id.slice(0, 8) }}</span></template></dd></template>

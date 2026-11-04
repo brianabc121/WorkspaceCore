@@ -204,8 +204,6 @@ class KnowledgeNote(Base):
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))
     review_at: Mapped[date | None] = mapped_column(Date)
     pinned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
-    confirmed_by: Mapped[uuid.UUID | None] = _user_fk()
-    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by_user: Mapped[uuid.UUID | None] = _user_fk()
     created_by_instance: Mapped[uuid.UUID | None] = _instance_fk()
     updated_by_user: Mapped[uuid.UUID | None] = _user_fk()

@@ -3610,25 +3610,6 @@
         "title": "ChangePage",
         "type": "object"
       },
-      "ConfirmRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "confirmed": {
-            "title": "Confirmed",
-            "type": "boolean"
-          },
-          "version": {
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "version",
-          "confirmed"
-        ],
-        "title": "ConfirmRequest",
-        "type": "object"
-      },
       "DashboardCreate": {
         "additionalProperties": false,
         "properties": {
@@ -4331,10 +4312,6 @@
             ],
             "title": "Author Kind"
           },
-          "confirmed": {
-            "title": "Confirmed",
-            "type": "boolean"
-          },
           "degree": {
             "title": "Degree",
             "type": "integer"
@@ -4424,7 +4401,6 @@
           "space_kind",
           "type",
           "author_kind",
-          "confirmed",
           "degree"
         ],
         "title": "GraphNode",
@@ -7388,33 +7364,6 @@
             "title": "Body",
             "type": "string"
           },
-          "confirmed": {
-            "description": "人已确认（检索时排在前面）",
-            "title": "Confirmed",
-            "type": "boolean"
-          },
-          "confirmed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confirmed At"
-          },
-          "confirmed_by": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Author"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "conflict": {
             "description": "有冲突或重复提醒",
             "title": "Conflict",
@@ -7597,7 +7546,6 @@
           "folder",
           "tags",
           "pinned",
-          "confirmed",
           "conflict",
           "source_kind",
           "updated_by",
@@ -7606,8 +7554,6 @@
           "body",
           "aliases",
           "review_at",
-          "confirmed_by",
-          "confirmed_at",
           "conflict_note",
           "created_by",
           "created_at",
@@ -7719,11 +7665,6 @@
       },
       "NoteSummary": {
         "properties": {
-          "confirmed": {
-            "description": "人已确认（检索时排在前面）",
-            "title": "Confirmed",
-            "type": "boolean"
-          },
           "conflict": {
             "description": "有冲突或重复提醒",
             "title": "Conflict",
@@ -7828,7 +7769,6 @@
           "folder",
           "tags",
           "pinned",
-          "confirmed",
           "conflict",
           "source_kind",
           "updated_by",
@@ -25289,135 +25229,6 @@
           }
         ],
         "summary": "修改笔记（member，乐观并发）",
-        "tags": [
-          "knowledge-base"
-        ]
-      }
-    },
-    "/api/v1/knowledge/notes/{note_id}/confirm": {
-      "post": {
-        "description": "人已确认的笔记在智能体检索时排在前面，并清除冲突提醒。",
-        "operationId": "confirm_note",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "note_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Note Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
-            "in": "header",
-            "name": "X-CSRF-Token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
-              "title": "X-Csrf-Token"
-            }
-          },
-          {
-            "description": "当前工作空间；不是成员时返回 404",
-            "in": "header",
-            "name": "X-Workspace-Id",
-            "required": true,
-            "schema": {
-              "description": "当前工作空间；不是成员时返回 404",
-              "format": "uuid",
-              "title": "X-Workspace-Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConfirmRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NoteOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
-          }
-        },
-        "security": [
-          {
-            "SessionCookie": []
-          }
-        ],
-        "summary": "标为人已确认 / 取消确认（member）",
         "tags": [
           "knowledge-base"
         ]

@@ -31,7 +31,6 @@ from app.schemas.common import error_responses
 from app.schemas.knowledge_base import (
     AgentKnowledgeOut,
     ChangePage,
-    ConfirmRequest,
     GraphOut,
     NoteCreate,
     NoteOut,
@@ -367,22 +366,6 @@ async def restore_note(
 ) -> NoteOut:
     note = await service.note(access.workspace.id, note_id, lock=True)
     await service.restore(_editor(access, context), note)
-    await service.db.commit()
-    return await service.note_out(await service.note(access.workspace.id, note_id))
-
-
-@router.post(
-    "/notes/{note_id}/confirm",
-    summary="标为人已确认 / 取消确认（member）",
-    description="人已确认的笔记在智能体检索时排在前面，并清除冲突提醒。",
-    dependencies=_write,
-    responses=_write_errors,
-)
-async def confirm_note(
-    access: Member, context: Context, service: Service, note_id: UUID, body: ConfirmRequest
-) -> NoteOut:
-    note = await service.note(access.workspace.id, note_id, lock=True)
-    await service.confirm(_editor(access, context), note, body.version, body.confirmed)
     await service.db.commit()
     return await service.note_out(await service.note(access.workspace.id, note_id))
 

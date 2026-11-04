@@ -1595,26 +1595,6 @@ export interface paths {
         patch: operations["update_note"];
         trace?: never;
     };
-    "/api/v1/knowledge/notes/{note_id}/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 标为人已确认 / 取消确认（member）
-         * @description 人已确认的笔记在智能体检索时排在前面，并清除冲突提醒。
-         */
-        post: operations["confirm_note"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/knowledge/notes/{note_id}/graph": {
         parameters: {
             query?: never;
@@ -3753,13 +3733,6 @@ export interface components {
             /** Total Estimate */
             total_estimate?: number | null;
         };
-        /** ConfirmRequest */
-        ConfirmRequest: {
-            /** Confirmed */
-            confirmed: boolean;
-            /** Version */
-            version: number;
-        };
         /** DashboardCreate */
         DashboardCreate: {
             /** Title */
@@ -4055,8 +4028,6 @@ export interface components {
         GraphNode: {
             /** Author Kind */
             author_kind: ("user" | "agent" | "system") | null;
-            /** Confirmed */
-            confirmed: boolean;
             /** Degree */
             degree: number;
             /**
@@ -5352,14 +5323,6 @@ export interface components {
             /** Body */
             body: string;
             /**
-             * Confirmed
-             * @description 人已确认（检索时排在前面）
-             */
-            confirmed: boolean;
-            /** Confirmed At */
-            confirmed_at: string | null;
-            confirmed_by: components["schemas"]["Author"] | null;
-            /**
              * Conflict
              * @description 有冲突或重复提醒
              */
@@ -5476,11 +5439,6 @@ export interface components {
         };
         /** NoteSummary */
         NoteSummary: {
-            /**
-             * Confirmed
-             * @description 人已确认（检索时排在前面）
-             */
-            confirmed: boolean;
             /**
              * Conflict
              * @description 有冲突或重复提醒
@@ -14989,82 +14947,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["NoteUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NoteOut"];
-                };
-            };
-            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    confirm_note: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
-                /** @description 当前工作空间；不是成员时返回 404 */
-                "X-Workspace-Id": string;
-            };
-            path: {
-                note_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ConfirmRequest"];
             };
         };
         responses: {
