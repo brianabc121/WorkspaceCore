@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Text, and_, case, func, literal, null, or_, select, union_all
+from sqlalchemy import Date, Text, and_, case, func, literal, null, or_, select, union_all
 from sqlalchemy.sql import ColumnElement
 
 from app.domain import knowledge_links as links
@@ -30,10 +30,13 @@ from app.schemas.knowledge_base import (
     AgentKnowledgeOut,
     AgentMetrics,
     AgentProjectOut,
+    AgentWeek,
     ChangeOut,
     ChangePage,
     NotePage,
     NoteSuggestion,
+    SpaceActivity,
+    SpaceWeek,
     TrashItem,
     TrashPage,
 )
@@ -377,6 +380,78 @@ class KnowledgeService(KnowledgeBase):
 
     # ---------------------------------------------------------------- 智能体知识库页
 
+    async def agent_weeks(self, instance_id: uuid.UUID, own_space: uuid.UUID) -> list[AgentWeek]:
+        weeks = _weeks()
+        start = weeks[0]
+        reads: dict[tuple[date, bool], int] = {}
+        stat = KnowledgeReadStat
+        week = func.date_trunc("week", stat.day).cast(Date)
+        # 按知识库分组再在这里归到“自己的 / 别的”：GROUP BY 里不能有带参数的比较表达式
+        for w, space, n in (
+            await self.db.execute(
+                select(week, KnowledgeNote.space_id, func.sum(stat.reads))
+                .join(KnowledgeNote, KnowledgeNote.id == stat.note_id)
+                .where(stat.instance_id == instance_id, stat.day >= start)
+                .group_by(week, KnowledgeNote.space_id)
+            )
+        ).all():
+            key = (w, space == own_space)
+            reads[key] = reads.get(key, 0) + int(n or 0)
+        r = KnowledgeNoteRevision
+        wk = func.date_trunc("week", r.created_at).cast(Date)
+        writes = {
+            w: int(n)
+            for w, n in (
+                await self.db.execute(
+                    select(wk, func.count())
+                    .where(
+                        r.author_instance == instance_id,
+                        r.change.in_(("create", "update", "rename")),
+                        r.created_at >= datetime.combine(start, datetime.min.time(), UTC),
+                    )
+                    .group_by(wk)
+                )
+            ).all()
+        }
+        return [
+            AgentWeek(
+                week_start=w,
+                reads_own=reads.get((w, True), 0),
+                reads_shared=reads.get((w, False), 0),
+                writes=writes.get(w, 0),
+            )
+            for w in weeks
+        ]
+
+    async def space_activity(self, workspace_id: uuid.UUID, space_id: uuid.UUID) -> SpaceActivity:
+        weeks = _weeks()
+        r = KnowledgeNoteRevision
+        wk = func.date_trunc("week", r.created_at).cast(Date)
+        counts: dict[tuple[date, bool], int] = {}
+        for w, by_agent, n in (
+            await self.db.execute(
+                select(wk, r.author_instance.is_not(None), func.count())
+                .join(KnowledgeNote, KnowledgeNote.id == r.note_id)
+                .where(
+                    KnowledgeNote.workspace_id == workspace_id,
+                    KnowledgeNote.space_id == space_id,
+                    r.change.in_(("create", "update", "rename", "revert")),
+                    or_(r.author_user.is_not(None), r.author_instance.is_not(None)),
+                    r.created_at >= datetime.combine(weeks[0], datetime.min.time(), UTC),
+                )
+                .group_by(wk, r.author_instance.is_not(None))
+            )
+        ).all():
+            counts[(w, bool(by_agent))] = int(n)
+        return SpaceActivity(
+            weeks=[
+                SpaceWeek(
+                    week_start=w, human=counts.get((w, False), 0), agent=counts.get((w, True), 0)
+                )
+                for w in weeks
+            ]
+        )
+
     async def agent_overview(self, instance: AgentInstance) -> AgentKnowledgeOut:
         own = await self.agent_space(instance)
         since = datetime.now(UTC) - timedelta(days=30)
@@ -487,7 +562,9 @@ class KnowledgeService(KnowledgeBase):
             ).all():
                 if project_id is not None:
                     brief_versions[project_id] = version
+        weekly = await self.agent_weeks(instance.id, own.id)
         return AgentKnowledgeOut(
+            weekly=weekly,
             instance_id=instance.id,
             name=instance.name,
             space_id=own.id,
@@ -517,3 +594,10 @@ class KnowledgeService(KnowledgeBase):
                 for pa, title, read_version in rows
             ],
         )
+
+
+def _weeks(count: int = 8) -> list[date]:
+    """近 count 周的周一（UTC），最早的在前；和 PostgreSQL 的 date_trunc('week') 一致。"""
+    today = datetime.now(UTC).date()
+    monday = today - timedelta(days=today.weekday())
+    return [monday - timedelta(weeks=i) for i in range(count - 1, -1, -1)]

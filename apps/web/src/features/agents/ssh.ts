@@ -32,6 +32,7 @@ export const SSH_STEP: Record<Schema['AgentSshJobStep']['key'], string> = {
   plugin: '安装 IM 插件',
   start: '启动 OpenClaw',
   schedule: '写入定时任务',
+  reflection: '建每晚复盘任务',
   online: '等待实例连上工作台',
   stop: '停止并删除容器',
   unschedule: '删除定时任务',

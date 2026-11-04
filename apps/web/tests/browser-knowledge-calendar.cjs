@@ -60,7 +60,7 @@ fs.mkdirSync(screenshots, { recursive: true });
     } catch (error) { errors.push(error.message); await route.fulfill({ status: 500, body: '{}' }); }
   });
   await context.addCookies([{ name: 'ws_csrf', value: 'browser-csrf', url: baseUrl }]);
-  await page.goto(baseUrl + '/knowledge'); await page.getByRole('heading', { name: '工作台发布说明' }).waitFor();
+  await page.goto(baseUrl + '/knowledge/docs'); await page.getByRole('heading', { name: '工作台发布说明' }).waitFor();
   await page.getByRole('button', { name: '新增收藏', exact: true }).click();
   await page.getByLabel('收藏标题', { exact: true }).fill('浏览器收藏'); await page.getByLabel('文档链接', { exact: true }).fill('https://docs.example.com/workspace/team/browser');
   await page.getByLabel('关联项目与任务', { exact: true }).selectOption(project.id); await page.getByRole('button', { name: '保存收藏', exact: true }).click();

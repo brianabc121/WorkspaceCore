@@ -278,7 +278,8 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET | `/api/v1/knowledge/changes` | 变更记录：每次改动（谁、何时、增删行数、理由、能否一键退回）与保护记录（`kind=guard`） | 已实现（T-0098） |
 | GET | `/api/v1/knowledge/trash` | 回收站 | 已实现（T-0098） |
 | DELETE | `/api/v1/knowledge/trash/{note_id}` | 彻底删除（admin，204） | 已实现（T-0098） |
-| GET | `/api/v1/knowledge/agents/{instance_id}` | 智能体主页：自己的库、参与的项目、近 7 天写 / 读 / 被纠正 / 被拦下的次数 | 已实现（T-0098） |
+| GET | `/api/v1/knowledge/agents/{instance_id}` | 智能体主页：自己的库、参与的项目、近 30 天写 / 读 / 被纠正 / 被拦下的次数；`weekly` 是近 8 周的趋势（T-0100） | 已实现（T-0098） |
+| GET | `/api/v1/knowledge/spaces/{space_id}/activity` | 近 8 周人与智能体的修改次数（新建、修改、改名、退回），按周一起算（UTC），最早的在前 | 已实现（T-0100） |
 
 **MCP 工具**（`/mcp`，工具清单见 `app/schemas/ai_tools.py`）：`knowledge_search`、`knowledge_get`、`knowledge_list`、`knowledge_brief`（风险级别 `read`），
 `knowledge_write`、`knowledge_delete`（风险级别 `knowledge`：**直接执行、不进审批**，人类 2026-11-03 决定；仍要通过实例的读写范围与角色检查）。
@@ -291,3 +292,21 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 - 全局搜索增加 `type=note`；SSE 增加主题 `knowledge`。
 - 新增错误码：`409 TITLE_TAKEN` / `NOTE_DELETED` / `NOT_IN_TRASH`、`422 NOTE_TOO_LARGE` / `SECRET_DETECTED` / `SPACE_FULL` / `MOVE_NOT_ALLOWED` / `SYSTEM_NOTE` / `REVISION_NOT_FOUND`、
   `403 READ_ONLY` / `WRITES_DISABLED` / `DELETES_PAUSED` / `BRIEF_HUMAN_ONLY`。
+
+### 认知对齐与自我提升（T-0100）
+
+方案 3.9、3.10。
+- **项目简报已读**：`knowledge_brief` 记下这个实例读到的版本，知识库主页显示谁没读最新版。
+  - knowledge_* 工具的 `notices` 在参与的项目有未读简报时提醒先读（最多 3 条）。提醒只带 `project_id` 和版本号，是工作台写的固定文字，不含人填的项目名。
+  - MCP `get_task` 的输出增加 `brief`：任务所属项目的简报版本 `version`、这个实例读到的 `read_version`、`unread`；项目没有简报或实例不参与时为 `null`。
+- **“现在发给它”**：管理员在项目知识库主页点按钮，前端用已有的 IM 接口，以管理员自己的账号把“去读最新简报”发给那个智能体。
+  - 先 `POST /api/v1/im/conversations {instance_id}`，再 `POST /api/v1/im/conversations/{id}/messages`，带 `Idempotency-Key`；同一个智能体、同一版简报重试用同一个键。
+  - 没有新接口：接入包的渠道只放行管理员的消息（K-0 核验 3.4），工作台不替管理员自动发。
+- **每晚复盘**：
+  - 接入包增加 `reflection-prompt.md`（提示词）和 `setup-reflection.sh`，后者用 `openclaw automations add --declaration-key myworkspace-knowledge-reflection` 建 OpenClaw 定时任务：独立会话、不投递，重复运行只更新。
+  - SSH 部署的步骤增加 `reflection`，在 `online` 之后执行；建不成记为 `skipped`，不算安装失败，CHECKLIST 给出手工命令。
+  - 时间由 `AGENT_REFLECTION_CRON`（默认 `0 22 * * *`）和 `AGENT_REFLECTION_TIMEZONE`（默认 `Asia/Shanghai`）设置，生成接入包时写进脚本。
+- **趋势**：`GET /api/v1/knowledge/spaces/{space_id}/activity`（上表）、`AgentKnowledgeOut.weekly`：
+  - 每周读自己知识库的次数 `reads_own`；
+  - 读项目、公共和别的智能体知识库的次数 `reads_shared`；
+  - 写入次数 `writes`。

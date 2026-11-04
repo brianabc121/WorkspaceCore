@@ -658,6 +658,149 @@ def scenario_13(c: Ctx) -> None:
     c.keys["a"] = new_key
 
 
+REFLECTION_KEY = "myworkspace-knowledge-reflection"
+
+
+def reflection_jobs(instance: Instance) -> list[dict[str, Any]]:
+    """OpenClaw 里每晚复盘的定时任务（按 declarationKey 找；automations list --json，T-0100）。"""
+    out = instance.exec("node", "openclaw.mjs", "automations", "list", "--json", "--all").stdout
+    jobs: list[dict[str, Any]] = json.loads(out[out.index("{"):])["jobs"]
+    return [j for j in jobs if j.get("declarationKey") == REFLECTION_KEY]
+
+
+def scenario_15(c: Ctx) -> None:
+    """知识库（T-0100，方案第 8 节之外新增）：甲直接读写删不审批、密钥拦截、人改动写回纠正、简报已读、删除过多自动暂停、每晚复盘任务。"""
+    tag = uuid.uuid4().hex[:6]
+    own = next(s for s in c.owner.call("GET", "/api/v1/knowledge/spaces")["items"]
+               if s["kind"] == "agent" and s["instance_id"] == c.a.id)
+
+    def kb(name: str, args: dict[str, Any]) -> str:
+        """经 IM 让甲调用一次 knowledge_* 工具（假模型 → Tool Search 的 tool_call → 工作台 MCP），等它回复结果。"""
+        since = time.time()
+        c.owner.send(c.conv_a, f"TOOL:myworkspace__{name} " + json.dumps(args, ensure_ascii=False))
+        done = wait_for(f"甲调用 {name}", lambda: [r for r in c.model_calls(c.keys["a"], since)
+                                                  if str(r["result"].get("content", "")).startswith("done:")], timeout=150)
+        return str(done[-1]["result"]["content"])
+
+    def notes(space_id: str) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = c.owner.call("GET", f"/api/v1/knowledge/notes?space_id={space_id}&limit=100")["items"]
+        return items
+
+    def executions(tool: str) -> list[dict[str, Any]]:
+        return [e for e in c.owner.call("GET", "/api/v1/ai/tool-executions?limit=100")["items"]
+                if e["tool_name"] == tool and e["instance_id"] == c.a.id]
+
+    # 1. 写入：直接生效，不生成待审批
+    title = f"验收发布步骤 {tag}"
+    kb("knowledge_write", {"space_id": own["id"], "title": title, "body": "1. 先跑迁移\n2. 再发布", "type": "process",
+                           "reason": "验收：把发布步骤记下来", "idempotency_key": str(uuid.uuid4())})
+    found = wait_for("甲写的笔记", lambda: [n for n in notes(own["id"]) if n["title"] == title], timeout=30)
+    note = c.owner.call("GET", f"/api/v1/knowledge/notes/{found[0]['id']}")
+    writes = executions("knowledge_write")
+    c.check("知识库：甲直接写进自己的知识库（不审批，风险等级 knowledge），作者是甲",
+            note["created_by"]["kind"] == "agent" and note["created_by"]["id"] == c.a.id
+            and bool(writes) and writes[0]["status"] == "succeeded" and writes[0]["risk_level"] == "knowledge",
+            json.dumps([(w["status"], w["risk_level"]) for w in writes[:3]], ensure_ascii=False))
+
+    # 2. 检索与读取：计入智能体主页的指标与每周趋势
+    kb("knowledge_search", {"query": title})
+    kb("knowledge_get", {"note_id": note["id"]})
+    info = c.owner.call("GET", f"/api/v1/knowledge/agents/{c.a.id}")
+    week = info["weekly"][-1]
+    c.check("知识库：检索与读取有记录，本周趋势里读自己的知识库、写入都计数",
+            info["metrics"]["searches"] >= 1 and info["metrics"]["reads"] >= 1 and week["reads_own"] >= 1 and week["writes"] >= 1,
+            json.dumps({"metrics": info["metrics"], "week": week}, ensure_ascii=False))
+
+    # 3. 密钥拦截：不保存，只记规则名（测试用的假密钥在运行时拼出来）
+    fake_key = "AKIA" + uuid.uuid4().hex[:16].upper()
+    secret_title = f"验收密钥 {tag}"
+    kb("knowledge_write", {"space_id": own["id"], "title": secret_title, "body": f"访问密钥 {fake_key}",
+                           "reason": "验收：密钥拦截", "idempotency_key": str(uuid.uuid4())})
+    guards = c.owner.call("GET", f"/api/v1/knowledge/changes?kind=guard&instance_id={c.a.id}")["items"]
+    c.check("知识库：内容里有密钥的写入被拦下，没有保存；拦截记录不含密钥原文",
+            any(g["guard"] == "secret_blocked" for g in guards) and not [n for n in notes(own["id"]) if n["title"] == secret_title]
+            and fake_key not in json.dumps(guards), json.dumps([g["detail"] for g in guards[:3]], ensure_ascii=False))
+
+    # 4. 人修改甲写的笔记：原因写回甲的《收到的纠正》
+    c.owner.call("PATCH", f"/api/v1/knowledge/notes/{note['id']}",
+                 {"version": note["version"], "body": "1. 先备份\n2. 再跑迁移\n3. 再发布", "reason": "验收：发布前要先备份"})
+    corrections = wait_for("《收到的纠正》", lambda: [n for n in notes(own["id"]) if n["type"] == "correction"], timeout=30)
+    body = c.owner.call("GET", f"/api/v1/knowledge/notes/{corrections[0]['id']}")["body"]
+    c.check("知识库：人修改甲写的笔记，原因写回甲的《收到的纠正》", "发布前要先备份" in body)
+    # 甲在人改过的版本上再改（带 note_id 与 base_version）；人一键撤销这次修改，原因同样写回
+    edited = c.owner.call("GET", f"/api/v1/knowledge/notes/{note['id']}")
+    kb("knowledge_write", {"space_id": own["id"], "note_id": note["id"], "base_version": edited["version"], "title": title,
+                           "body": "1. 直接发布", "type": "process", "reason": "验收：甲改坏了", "idempotency_key": str(uuid.uuid4())})
+    changed = c.owner.call("GET", f"/api/v1/knowledge/notes/{note['id']}")
+    c.owner.call("POST", f"/api/v1/knowledge/notes/{note['id']}/revert",
+                 {"version": changed["version"], "to_version": edited["version"], "reason": "验收：不能跳过备份"})
+    reverted = c.owner.call("GET", f"/api/v1/knowledge/notes/{note['id']}")
+    body = c.owner.call("GET", f"/api/v1/knowledge/notes/{corrections[0]['id']}")["body"]
+    c.check("知识库：甲的修改直接生效；人一键撤销后恢复到原来的内容，原因写回《收到的纠正》",
+            changed["version"] == edited["version"] + 1 and changed["body"] == "1. 直接发布"
+            and reverted["body"] == edited["body"] and "不能跳过备份" in body,
+            f"第 {edited['version']} → {changed['version']} → {reverted['version']} 版")
+
+    # 5. 项目简报：加入项目后显示未读；甲用 knowledge_brief 读过后显示已读最新版
+    project = c.owner.call("POST", "/api/v1/projects", {"title": f"知识库验收 {tag}", "description": ""},
+                           **{"Idempotency-Key": str(uuid.uuid4())})
+
+    def project_space() -> dict[str, Any] | None:
+        return next((s for s in c.owner.call("GET", "/api/v1/knowledge/spaces")["items"] if s["project_id"] == project["id"]), None)
+
+    space = wait_for("项目知识库", project_space, timeout=30)
+    c.owner.call("PUT", f"/api/v1/knowledge/spaces/{space['id']}/agents/{c.a.id}", {"access": "read_write"})
+    c.owner.call("POST", "/api/v1/knowledge/notes", {"space_id": space["id"], "title": f"知识库验收 {tag} 简报",
+                                                     "body": "目标：验收。规矩：发布前先备份。", "type": "brief"})
+    before = project_space() or {}
+    unread = [a["brief_version_read"] for a in before.get("agents", []) if a["instance_id"] == c.a.id]
+    kb("knowledge_brief", {"project_id": project["id"]})
+    after = project_space() or {}
+    read = [a["brief_version_read"] for a in after.get("agents", []) if a["instance_id"] == c.a.id]
+    c.check("知识库：简报写好后甲显示未读；甲用 knowledge_brief 读过后显示已读最新版",
+            unread == [None] and read == [after.get("brief_version")] and after.get("brief_version") is not None,
+            f"读之前 {unread}，读之后 {read}，最新第 {after.get('brief_version')} 版")
+
+    # 6. 删除：直接进回收站；1 小时内第 6 次被拦下，它的删除自动暂停并通知管理员
+    victims = [c.owner.call("POST", "/api/v1/knowledge/notes", {"space_id": own["id"], "title": f"验收待删 {i} {tag}",
+                                                               "body": "重复的记录，可以删"}) for i in range(6)]
+    for victim in victims:
+        kb("knowledge_delete", {"note_id": victim["id"], "base_version": victim["version"],
+                                "reason": "验收：清理重复的记录", "idempotency_key": str(uuid.uuid4())})
+    trashed = {t["id"] for t in c.owner.call("GET", "/api/v1/knowledge/trash?limit=100")["items"]}
+    paused = next(s for s in c.owner.call("GET", "/api/v1/knowledge/spaces")["items"] if s["id"] == own["id"])["deletes_paused_at"]
+    kept = c.owner.call("GET", f"/api/v1/knowledge/notes/{victims[-1]['id']}")
+    c.check("知识库：甲直接删除进回收站（不审批）；1 小时内第 6 次删除被拦下，它的删除自动暂停",
+            sum(v["id"] in trashed for v in victims[:5]) == 5 and kept["deleted_at"] is None and bool(paused),
+            f"回收站 {sum(v['id'] in trashed for v in victims)} 篇，暂停于 {paused}")
+    alerts = c.owner.call("GET", "/api/v1/notifications")["items"]
+    c.check("知识库：删除自动暂停后通知管理员", any(n["type"] == "knowledge_delete_paused" for n in alerts))
+
+    # 7. 每晚复盘：接入包的 setup-reflection.sh 建 OpenClaw 定时任务；再运行只更新（declarationKey），不重复
+    env = {**os.environ, "COMPOSE_PROJECT_NAME": c.a.project}
+    run("sh", "setup-reflection.sh", cwd=c.a.dir, env=env, timeout=180)
+    again = run("sh", "setup-reflection.sh", cwd=c.a.dir, env=env, timeout=180)
+    jobs = reflection_jobs(c.a)
+    job = jobs[0] if jobs else {}
+    c.check("每晚复盘：setup-reflection.sh 建好定时任务（0 22 * * *，Asia/Shanghai，独立会话、不投递）；再运行只更新、不重复",
+            len(jobs) == 1 and job["schedule"].get("expr") == "0 22 * * *" and job["schedule"].get("tz") == "Asia/Shanghai"
+            and job.get("sessionTarget") == "isolated" and "knowledge_search" in job["payload"].get("message", "")
+            and re.search(r'"created":\s*false', again.stdout) is not None,
+            f"{len(jobs)} 个；{json.dumps(job.get('schedule'), ensure_ascii=False)}")
+    since = time.time()
+    c.a.exec("node", "openclaw.mjs", "automations", "run", job["id"], "--wait", "--wait-timeout", "3m", timeout=240)
+    # OpenClaw 把定时任务的提示词作为 “[cron:<id> <名字>] <提示词>” 发给模型，后面再接一段英文前言
+    # （K-0 核验第 5 节）；假模型的 echo 回复是这段文字的开头，用它确认模型收到的是复盘提示词
+    marker = f"{REFLECTION_KEY}] 每晚复盘"
+    turns = wait_for("复盘调用模型", lambda: [r for r in c.model_calls(c.keys["a"], since)
+                                         if marker in str(r["result"].get("content", ""))], timeout=120)
+    offered = {name for r in c.model_calls(c.keys["a"], since) for name in r.get("tools") or []}
+    time.sleep(5)
+    c.check("每晚复盘：立即运行一次，甲按复盘提示词调用模型；工具仍只有 IM 发消息与工作台工具；不往 IM 发结果",
+            bool(turns) and offered <= AGENT_TOOLS and not c.from_sender(c.conv_a, c.a.im_user_id, marker),
+            ", ".join(sorted(offered)))
+
+
 def scenario_6(c: Ctx) -> None:
     """停用乙：取密钥失败、MCP 返回 401、IM 被强制下线。放在最后（停用后乙不再参与）。"""
     current = c.owner.call("GET", f"/api/v1/agents/instances/{c.b.id}")
@@ -675,7 +818,8 @@ def scenario_6(c: Ctx) -> None:
 
 SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "2": scenario_2, "3": scenario_3, "4": scenario_4, "5": scenario_5, "7": scenario_7, "8": scenario_8,
-    "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "6": scenario_6,
+    "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "15": scenario_15,
+    "6": scenario_6,
 }
 
 

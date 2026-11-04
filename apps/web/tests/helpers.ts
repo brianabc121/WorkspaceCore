@@ -32,6 +32,10 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (path === '/api/v1/audit-logs') return Response.json(emptyPage)
     if (/^\/api\/v1\/workspaces\/[^/]+\/members$/.test(path) && request.method === 'GET') return Response.json({ ...emptyPage, items: [{ user_id: me.user.id, email: me.user.email, display_name: me.user.display_name, role: 'owner', joined_at: '2026-10-30T00:00:00Z', you: true }] })
     if (path === '/api/v1/knowledge/resources' || path === '/api/v1/knowledge/sources' || path === '/api/v1/calendar/events') return Response.json(emptyPage)
+    // 知识库（T-0099）：默认没有笔记
+    if (path === '/api/v1/knowledge/spaces') return Response.json({ items: [] })
+    if (path === '/api/v1/knowledge/graph') return Response.json({ nodes: [], edges: [], truncated: false, total_notes: 0 })
+    if (path === '/api/v1/knowledge/notes' || path === '/api/v1/knowledge/changes' || path === '/api/v1/knowledge/trash') return Response.json(emptyPage)
     if (path === '/api/v1/dashboard/overview') return Response.json(overview)
     if (path === '/api/v1/tasks') return Response.json({ items: [task], next_cursor: null, total_estimate: 1 })
     if (path === '/api/v1/projects') return Response.json({ items: [project], next_cursor: null, total_estimate: 1 })

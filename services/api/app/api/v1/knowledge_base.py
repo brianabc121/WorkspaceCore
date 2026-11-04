@@ -43,6 +43,7 @@ from app.schemas.knowledge_base import (
     RevertRequest,
     RevisionDetail,
     RevisionList,
+    SpaceActivity,
     SpaceList,
     SpaceOut,
     SpaceUpdate,
@@ -157,6 +158,17 @@ async def update_space(
     )
     await service.db.commit()
     return (await service.space_outs([await service.space(access.workspace.id, space_id)]))[0]
+
+
+@router.get(
+    "/spaces/{space_id}/activity",
+    summary="知识库近 8 周的修改次数（viewer）",
+    description="按周（周一开始，UTC）统计人和智能体的新建、修改、改名、退回次数，最早的在前。",
+    responses=_read_errors,
+)
+async def space_activity(access: Viewer, service: Service, space_id: UUID) -> SpaceActivity:
+    await service.space(access.workspace.id, space_id)
+    return await service.space_activity(access.workspace.id, space_id)
 
 
 @router.put(

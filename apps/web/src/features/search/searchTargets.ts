@@ -4,7 +4,7 @@ export const searchTypes = { task: '任务', project: '项目', note: '笔记', 
 export type SearchType = keyof typeof searchTypes
 export function searchTarget(item: Schema['SearchResultOut']) {
   if (item.source_url && safeUrl(item.source_url)) return { href: item.source_url, external: true }
-  const paths: Record<SearchType, string> = { task: '/tasks', project: '/projects', note: '/knowledge', bookmark: '/knowledge', event: '/calendar', repo: '/developer', issue: '/developer', pull: '/developer' }
+  const paths: Record<SearchType, string> = { task: '/tasks', project: '/projects', note: '/knowledge/notes', bookmark: '/knowledge/docs', event: '/calendar', repo: '/developer', issue: '/developer', pull: '/developer' }
   const date = item.context ?? ''
   const validDate = /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date
   // 工作台自己的任务、项目（T-0082）：打开任务页并定位到这个任务 / 这个项目的任务

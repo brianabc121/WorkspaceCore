@@ -14,6 +14,7 @@ zip 里的文件：
 | `bin/myworkspace-openclaw-start` | 755 | 启动包装：取 IM 令牌、上报版本，再启动 OpenClaw |
 | `compose.yaml` | 644 | OpenClaw 服务器上的 Compose（锁定镜像，不开放端口） |
 | `CHECKLIST.md`、`README.md` | 644 | 部署检查清单与说明 |
+| `setup-reflection.sh`、`reflection-prompt.md` | 755 / 644 | 每晚复盘的定时任务（T-0100） |
 | `tls/client.crt`、`tls/client.key` | 644 / 600 | 外网模式：本机隧道出示的客户端证书 |
 
 模板文件放在 `app/agent_bundle/files/`：API 镜像只包含 services/api，
@@ -60,6 +61,9 @@ class BundleInput:
     # 入口主机名不在公网 DNS 里时，隧道容器把它映射到这个地址
     server_ca_pem: str | None = None
     tunnel_address: str | None = None
+    # 每晚复盘的定时任务（T-0100）：setup-reflection.sh 用的时间与时区
+    reflection_cron: str = "0 22 * * *"
+    reflection_timezone: str = "Asia/Shanghai"
 
 
 def _read(name: str) -> str:
@@ -243,6 +247,13 @@ def build(data: BundleInput, *, now: datetime | None = None) -> bytes:
             _add(zf, f"bin/{script}", _read(f"bin/{script}"), 0o755, now)
         _add(zf, "compose.yaml", _compose(data), 0o644, now)
         _add(zf, "CHECKLIST.md", _read("CHECKLIST.md"), 0o644, now)
+        _add(zf, "reflection-prompt.md", _read("reflection-prompt.md"), 0o644, now)
+        script = (
+            _read("setup-reflection.sh")
+            .replace("@CRON@", data.reflection_cron)
+            .replace("@TZ@", data.reflection_timezone)
+        )
+        _add(zf, "setup-reflection.sh", script, 0o755, now)
         _add(zf, "README.md", _readme(data, now), 0o644, now)
         if data.client_cert_pem and data.client_key_pem:
             _add(zf, "tls/client.crt", data.client_cert_pem, 0o644, now)

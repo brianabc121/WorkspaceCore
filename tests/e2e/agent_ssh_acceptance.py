@@ -99,6 +99,24 @@ class Target:
         sys.exit("任务超时")
 
 
+def reflection_jobs() -> list[dict[str, Any]]:
+    """目标服务器上 OpenClaw 里每晚复盘的定时任务（T-0100；按 declarationKey 找）。"""
+    names = run("docker", "ps", "--filter", f"label=com.docker.compose.project={PROJECT}",
+                "--filter", "label=com.docker.compose.service=openclaw", "--format", "{{.Names}}").stdout.split()
+    if len(names) != 1:
+        return []
+    out = run("docker", "exec", names[0], "node", "openclaw.mjs", "automations", "list", "--json", "--all").stdout
+    try:
+        jobs: list[dict[str, Any]] = json.loads(out[out.index("{"):]).get("jobs", [])
+    except ValueError:  # 没有 JSON（网关没就绪时输出的是错误说明）
+        return []
+    return [j for j in jobs if j.get("declarationKey") == "myworkspace-knowledge-reflection"]
+
+
+def step_detail(state: dict[str, Any], key: str) -> str:
+    return next((s.get("detail") or "" for s in state["job"]["steps"] if s["key"] == key), "")
+
+
 def steps(state: dict[str, Any]) -> dict[str, str]:
     return {step["key"]: step["status"] for step in state["job"]["steps"]}
 
@@ -181,6 +199,15 @@ def main() -> int:
         json.dumps(done, ensure_ascii=False),
     )
     report.check("sudo 把账号加入了 docker 组", "docker" in run("id", "-nG", user).stdout.split())
+    jobs = reflection_jobs()
+    ok = report.check(
+        "建好了每晚复盘的定时任务（OpenClaw 里 1 个，0 22 * * *，Asia/Shanghai）",
+        done["reflection"] == "done" and len(jobs) == 1 and jobs[0]["schedule"].get("expr") == "0 22 * * *"
+        and jobs[0]["schedule"].get("tz") == "Asia/Shanghai",
+        f"{step_detail(state, 'reflection')}；{len(jobs)} 个",
+    )
+    if not ok:
+        print(state["job"].get("log", "")[-3000:], file=sys.stderr)
     seen = owner.request("GET", f"/api/v1/agents/instances/{instance['id']}", headers=headers).json()
     report.check("实例有心跳（last_seen_at）", bool(seen.get("last_seen_at")), str(seen.get("last_seen_at")))
     running = run("docker", "ps", "--filter", f"label=com.docker.compose.project={PROJECT}", "--format", "{{.Names}}")
@@ -216,6 +243,11 @@ def main() -> int:
         json.dumps(again, ensure_ascii=False),
     )
     report.check("authorized_keys 里仍然只有一行", len(keys_file.read_text().splitlines()) == 1)
+    report.check(
+        "重新部署时复盘任务只更新、不重复",
+        again["reflection"] == "done" and "已有" in step_detail(state, "reflection") and len(reflection_jobs()) == 1,
+        step_detail(state, "reflection"),
+    )
     if done["schedule"] == "done":
         report.check("定时任务没有重复", run("crontab", "-l", "-u", user).stdout.count(MARKER) == 2)
 

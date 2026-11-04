@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mockApi, openApp, emptyPage, me, workspace, fail } from './helpers'
 import { bookmark, source } from './sprint4-fixtures'
 import { project, task } from './sprint3-fixtures'
+import { useAuthStore } from '../src/stores/auth'
 const path = (r: Request) => new URL(r.url).pathname
 function knowledge(override?: (r: Request) => Response | Promise<Response | undefined> | undefined) {
   return mockApi(async (r) => {
@@ -15,7 +16,7 @@ function knowledge(override?: (r: Request) => Response | Promise<Response | unde
 describe('知识入口与收藏', () => {
   it('shows only bookmark metadata and safe links without fetching AFFiNE', async () => {
     const requests = knowledge((r) => path(r) === '/api/v1/knowledge/resources' ? Response.json({ ...emptyPage, items: [{ ...bookmark, note: '<img src=x onerror=alert(1)>' }] }) : undefined)
-    await openApp('/knowledge')
+    await openApp('/knowledge/docs')
     expect(await screen.findByText('发布文档')).toBeVisible()
     expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeVisible()
     expect(document.querySelector('.knowledge-list img')).toBeNull()
@@ -28,7 +29,7 @@ describe('知识入口与收藏', () => {
       if (r.method === 'POST') { saved = true; return Response.json({ ...bookmark, title: '新文档' }, { status: 201 }) }
       if (saved && path(r) === '/api/v1/knowledge/resources') return Response.json({ ...emptyPage, items: [{ ...bookmark, title: '新文档' }] })
     })
-    await openApp('/knowledge'); await screen.findByText('发布文档')
+    await openApp('/knowledge/docs'); await screen.findByText('发布文档')
     await fireEvent.click(screen.getByRole('button', { name: '新增收藏' }))
     await fireEvent.update(screen.getByLabelText('收藏标题'), '新文档')
     await fireEvent.update(screen.getByLabelText('文档链接'), 'https://other.example.com/workspace/team/release')
@@ -51,7 +52,7 @@ describe('知识入口与收藏', () => {
       if (r.method === 'PATCH') return Response.json(bookmark)
       if (path(r) === '/api/v1/knowledge/resources') return Response.json({ ...emptyPage, items: [{ ...bookmark, owner_id: 'another-user', links: [linked, second] }] })
     })
-    await openApp('/knowledge'); await screen.findByText('发布文档')
+    await openApp('/knowledge/docs'); await screen.findByText('发布文档')
     await fireEvent.click(screen.getByRole('button', { name: '编辑收藏 发布文档' }))
     expect(screen.getByLabelText('收藏可见性')).toBeDisabled()
     expect([...(screen.getByLabelText('关联项目与任务') as HTMLSelectElement).selectedOptions].map((option) => option.value)).toEqual([linked.resource_id, second.resource_id])
@@ -68,7 +69,7 @@ describe('知识入口与收藏', () => {
       const next = new URL(r.url).searchParams.has('cursor')
       return Response.json({ ...emptyPage, items: [next ? { ...bookmark, id: 'next', title: '下一页文档' } : bookmark], next_cursor: next ? null : 'cursor+/=' })
     })
-    await openApp('/knowledge'); await screen.findByText('发布文档')
+    await openApp('/knowledge/docs'); await screen.findByText('发布文档')
     await fireEvent.click(screen.getByRole('button', { name: '加载更多收藏' }))
     expect(await screen.findByText('下一页文档')).toBeVisible()
     expect(new URL(requests.filter((r) => path(r).endsWith('/resources'))[1]!.url).searchParams.get('cursor')).toBe('cursor+/=')
@@ -80,7 +81,7 @@ describe('知识入口与收藏', () => {
   it('requires confirmation for bookmark deletion and sends its version', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const requests = knowledge((r) => r.method === 'DELETE' ? new Response(null, { status: 204 }) : undefined)
-    await openApp('/knowledge'); await screen.findByText('发布文档')
+    await openApp('/knowledge/docs'); await screen.findByText('发布文档')
     await fireEvent.click(screen.getByRole('button', { name: '删除收藏 发布文档' }))
     expect(requests.filter((r) => r.method === 'DELETE')).toHaveLength(0)
     confirm.mockReturnValue(true)
@@ -90,7 +91,7 @@ describe('知识入口与收藏', () => {
   })
   it('shows server validation reasons without echoing the rejected URL', async () => {
     knowledge((r) => r.method === 'POST' ? Response.json({ error: { code: 'VALIDATION_FAILED', message: 'rejected', request_id: 'req', details: { reason: 'not_a_document' } } }, { status: 422 }) : undefined)
-    await openApp('/knowledge'); await screen.findByText('发布文档')
+    await openApp('/knowledge/docs'); await screen.findByText('发布文档')
     await fireEvent.click(screen.getByRole('button', { name: '新增收藏' }))
     await fireEvent.update(screen.getByLabelText('收藏标题'), '新文档'); await fireEvent.update(screen.getByLabelText('文档链接'), bookmark.url)
     await fireEvent.click(screen.getByRole('button', { name: '保存收藏' }))
@@ -98,7 +99,7 @@ describe('知识入口与收藏', () => {
   })
   it('keeps conflicts locked until a successful reload closes the stale editor', async () => {
     const requests = knowledge((r) => r.method === 'PATCH' ? fail(409, 'VERSION_CONFLICT') : undefined)
-    await openApp('/knowledge'); await screen.findByText('发布文档')
+    await openApp('/knowledge/docs'); await screen.findByText('发布文档')
     await fireEvent.click(screen.getByRole('button', { name: '编辑收藏 发布文档' }))
     await fireEvent.update(screen.getByLabelText('收藏标题'), '冲突修改')
     await fireEvent.click(screen.getByRole('button', { name: '保存收藏' }))
@@ -111,7 +112,7 @@ describe('知识入口与收藏', () => {
   it('hides cached documents after access is revoked', async () => {
     let revoked = false
     knowledge((r) => path(r) === '/api/v1/knowledge/resources' && revoked ? fail(403, 'FORBIDDEN') : undefined)
-    await openApp('/knowledge'); await screen.findByText('发布文档')
+    await openApp('/knowledge/docs'); await screen.findByText('发布文档')
     revoked = true; await fireEvent.click(screen.getByRole('button', { name: '刷新收藏' }))
     await vi.waitFor(() => expect(screen.queryByText('发布文档')).not.toBeInTheDocument())
     expect(screen.getByRole('alert')).toHaveTextContent('没有查看')
@@ -123,10 +124,11 @@ describe('知识入口与收藏', () => {
       if (path(r) === '/api/v1/knowledge/resources') return Response.json({ ...emptyPage, items: [{ ...bookmark, title: r.headers.get('X-Workspace-Id') === 'workspace-b' ? 'B文档' : 'A文档' }] })
       if (r.method === 'PATCH') return new Promise<Response>((resolve) => { finish = resolve })
     })
-    await openApp('/knowledge'); await screen.findByText('A文档')
+    const { pinia } = await openApp('/knowledge/docs'); await screen.findByText('A文档')
     await fireEvent.click(screen.getByRole('button', { name: '编辑收藏 A文档' })); await fireEvent.update(screen.getByLabelText('收藏标题'), 'A修改')
     await fireEvent.click(screen.getByRole('button', { name: '保存收藏' })); await vi.waitFor(() => expect(finish).toBeDefined())
-    await fireEvent.update(screen.getByLabelText('当前工作空间'), 'workspace-b')
+    // 外部文档在独立的知识库页面里（T-0099），没有工作台侧栏的切换框；切换工作空间的效果相同
+    useAuthStore(pinia).selectWorkspace('workspace-b')
     expect(await screen.findByText('B文档')).toBeVisible(); finish!(Response.json(bookmark))
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(screen.queryByRole('button', { name: '新增收藏' })).not.toBeInTheDocument()
@@ -136,7 +138,7 @@ describe('知识入口与收藏', () => {
   it('configures the source and explains cascade deletion of all bookmarks', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const requests = knowledge((r) => r.method === 'PATCH' ? Response.json(source) : undefined)
-    await openApp('/knowledge'); await screen.findByText('发布文档')
+    await openApp('/knowledge/docs'); await screen.findByText('发布文档')
     await fireEvent.click(screen.getByRole('button', { name: '管理知识来源' }))
     await fireEvent.update(screen.getByLabelText('AFFiNE 外部地址'), 'https://docs.example.com/affine')
     await fireEvent.click(screen.getByRole('button', { name: '保存知识来源' }))

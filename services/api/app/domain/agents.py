@@ -665,6 +665,8 @@ class AgentService:
                 # 没有公网 DNS 的入口主机名映射到工作台地址（T-0088）
                 server_ca_pem=cert.ca_pem if cert and settings.agent_public_internal_ca else None,
                 tunnel_address=(settings.agent_public_address or None) if tunnel_target else None,
+                reflection_cron=settings.agent_reflection_cron,
+                reflection_timezone=settings.agent_reflection_timezone,
             ),
             now=now,
         )

@@ -661,6 +661,7 @@ OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式�
    | `AGENT_PUBLIC_ADDRESS` | `203.0.113.7` | 外网入口主机名不在公网 DNS 里时，OpenClaw 服务器访问工作台用的 IP；接入包的隧道容器把主机名映射到它（`extra_hosts`）。必须是 IP |
    | `AGENT_INGRESS_NET` | 默认 `172.31.250` | `agent-ingress` 网络的网段前三段：子网 `<值>.0/29`，agent-gateway 固定在 `<值>.2`。同一台机器上有别的 Docker 网络占用了这个网段时改它；`make restore-verify` 的临时环境自动用 `172.31.251` |
    | `AGENT_INGRESS_TRUSTED_PROXIES` | 默认 `<AGENT_INGRESS_NET>.2` | API 只信任这个地址写入的入口与证书请求头；一般不用改 |
+   | `AGENT_REFLECTION_CRON` / `AGENT_REFLECTION_TIMEZONE` | 默认 `0 22 * * *` / `Asia/Shanghai` | 每晚复盘定时任务的时间（5 段 cron 与 IANA 时区，启动时校验），生成接入包时写进 `setup-reflection.sh`（知识库，T-0100） |
 
 3. `docker compose up -d api`，让 api 读到新的变量。
 4. `make agents-up`：
@@ -679,6 +680,10 @@ OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式�
    - 外网模式：在接入包 `compose.yaml` 的 `tunnel` 命令里加 `--cacert=<CA 证书>`；
    - 内网模式：在 `myworkspace.env` 里设置 `NODE_EXTRA_CA_CERTS=<CA 证书>`；有 `image-proxy` 时在它的命令里也加 `--cacert=<CA 证书>`。
 4. 重新生成接入包会签发新凭证，旧凭证默认再保留 24 小时；客户端证书 90 天到期，到期前重新生成。
+5. 知识库的每晚复盘（T-0100）：OpenClaw 启动后在接入包目录里运行 `sh setup-reflection.sh`。
+   - 它用 `openclaw automations add --declaration-key` 建定时任务，重复运行只更新；SSH 自动部署会自动执行这一步。
+   - OpenClaw 刚启动时网关还没就绪，脚本每 10 秒重试，最多 24 次（`MYWS_REFLECTION_TRIES` / `MYWS_REFLECTION_WAIT` 可改）。
+   - 任务在独立会话里运行、不投递到 IM。工具范围不变，仍由接入包的 `openclaw.json` 限制（只有工作台工具与 IM 发消息）。
 
 ### 16.3 验收
 

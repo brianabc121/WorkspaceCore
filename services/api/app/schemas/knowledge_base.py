@@ -395,6 +395,27 @@ class AgentMetrics(BaseModel):
     blocked: int = Field(description="被保护措施拦下或暂停的次数")
 
 
+class AgentWeek(BaseModel):
+    """一周（周一开始）的读写次数（T-0100，智能体主页的趋势图）。"""
+
+    week_start: date
+    reads_own: int = Field(description="读自己知识库的次数")
+    reads_shared: int = Field(description="读项目、公共与别的智能体知识库的次数")
+    writes: int = Field(description="新建、修改、改名的次数（所有知识库）")
+
+
+class SpaceWeek(BaseModel):
+    week_start: date
+    human: int = Field(description="人新建、修改、改名、退回的次数")
+    agent: int = Field(description="智能体新建、修改、改名的次数")
+
+
+class SpaceActivity(BaseModel):
+    """近 8 周的修改次数（T-0100，知识库主页的趋势图），最早的在前。"""
+
+    weeks: list[SpaceWeek]
+
+
 class AgentKnowledgeOut(BaseModel):
     instance_id: UUID
     name: str
@@ -404,3 +425,4 @@ class AgentKnowledgeOut(BaseModel):
     corrections_unseen: int
     metrics: AgentMetrics
     projects: list[AgentProjectOut]
+    weekly: list[AgentWeek] = Field(description="近 8 周，最早的在前")

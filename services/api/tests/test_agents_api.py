@@ -521,8 +521,16 @@ async def test_bundle_carries_a_fresh_token_only_once(env: Env) -> None:
         "compose.yaml",
         "CHECKLIST.md",
         "README.md",
+        "setup-reflection.sh",
+        "reflection-prompt.md",
     }
     assert files["myworkspace.env"][1] == 0o600 and files["state/openclaw.json"][1] == 0o600
+    # 每晚复盘（T-0100）：按设置的时间与时区写进脚本，可执行
+    reflection = files["setup-reflection.sh"][0]
+    assert files["setup-reflection.sh"][1] == 0o755
+    assert '--cron "0 22 * * *" --tz "Asia/Shanghai"' in reflection
+    assert "--declaration-key myworkspace-knowledge-reflection" in reflection
+    assert "@" not in reflection.replace("@sha", "")
     assert files["bin/myworkspace-secret-resolver"][1] == 0o755
     token = _env_value(files, "MYWS_INSTANCE_TOKEN")
     assert _env_value(files, "MYWS_AGENT_API") == "https://10.0.0.5/agent-api"

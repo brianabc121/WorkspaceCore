@@ -9,6 +9,7 @@
     "sprint2:browser": "node sprint2_browser.cjs",
     "sprint3:browser": "node sprint3_browser.cjs",
     "sprint6:browser": "node sprint6_browser.cjs",
+    "knowledge:browser": "node knowledge_browser.cjs",
     "ssh:browser": "node agent_ssh_browser.cjs"
   },
   "devDependencies": {

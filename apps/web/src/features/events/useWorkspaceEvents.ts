@@ -5,7 +5,7 @@ import type { Schema } from '../../services/api'
 
 const families: Record<Schema['InvalidateEvent']['topics'][number], string[]> = {
   overview: ['overview', 'widgets'], tasks: ['tasks', 'task', 'knowledge-link-tasks', 'search'],
-  projects: ['projects', 'search'], knowledge: ['knowledge', 'knowledge-sources', 'related-docs', 'search'],
+  projects: ['projects', 'search'], knowledge: ['knowledge', 'knowledge-sources', 'related-docs', 'kb', 'search'],
   calendar: ['calendar', 'search'], developer: ['developer', 'search'], integrations: ['integrations'],
   notifications: ['notifications', 'overview'], operations: ['operations'],
   automations: ['automations', 'automation-connection', 'automation-runs'],

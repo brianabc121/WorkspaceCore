@@ -1803,6 +1803,26 @@ export interface paths {
         patch: operations["update_space"];
         trace?: never;
     };
+    "/api/v1/knowledge/spaces/{space_id}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 知识库近 8 周的修改次数（viewer）
+         * @description 按周（周一开始，UTC）统计人和智能体的新建、修改、改名、退回次数，最早的在前。
+         */
+        get: operations["space_activity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/knowledge/spaces/{space_id}/agents/{instance_id}": {
         parameters: {
             query?: never;
@@ -2471,6 +2491,11 @@ export interface components {
              * Format: uuid
              */
             space_id: string;
+            /**
+             * Weekly
+             * @description 近 8 周，最早的在前
+             */
+            weekly: components["schemas"]["AgentWeek"][];
             /** Writes Enabled */
             writes_enabled: boolean;
         };
@@ -2759,7 +2784,7 @@ export interface components {
              * Key
              * @enum {string}
              */
-            key: "connect" | "inspect" | "authorize_key" | "docker" | "reconnect" | "upload" | "pull" | "plugin" | "start" | "schedule" | "online" | "stop" | "unschedule" | "remove_files";
+            key: "connect" | "inspect" | "authorize_key" | "docker" | "reconnect" | "upload" | "pull" | "plugin" | "start" | "schedule" | "online" | "reflection" | "stop" | "unschedule" | "remove_files";
             /**
              * Status
              * @enum {string}
@@ -2893,6 +2918,32 @@ export interface components {
              * @description 目标服务器的当前版本号
              */
             version: number;
+        };
+        /**
+         * AgentWeek
+         * @description 一周（周一开始）的读写次数（T-0100，智能体主页的趋势图）。
+         */
+        AgentWeek: {
+            /**
+             * Reads Own
+             * @description 读自己知识库的次数
+             */
+            reads_own: number;
+            /**
+             * Reads Shared
+             * @description 读项目、公共与别的智能体知识库的次数
+             */
+            reads_shared: number;
+            /**
+             * Week Start
+             * Format: date
+             */
+            week_start: string;
+            /**
+             * Writes
+             * @description 新建、修改、改名的次数（所有知识库）
+             */
+            writes: number;
         };
         /** AiToolExecutionOut */
         AiToolExecutionOut: {
@@ -6781,6 +6832,14 @@ export interface components {
              */
             setup_required: boolean;
         };
+        /**
+         * SpaceActivity
+         * @description 近 8 周的修改次数（T-0100，知识库主页的趋势图），最早的在前。
+         */
+        SpaceActivity: {
+            /** Weeks */
+            weeks: components["schemas"]["SpaceWeek"][];
+        };
         /** SpaceAgentOut */
         SpaceAgentOut: {
             /**
@@ -6895,6 +6954,24 @@ export interface components {
              * @description 只对智能体库
              */
             writes_enabled?: boolean | null;
+        };
+        /** SpaceWeek */
+        SpaceWeek: {
+            /**
+             * Agent
+             * @description 智能体新建、修改、改名的次数
+             */
+            agent: number;
+            /**
+             * Human
+             * @description 人新建、修改、改名、退回的次数
+             */
+            human: number;
+            /**
+             * Week Start
+             * Format: date
+             */
+            week_start: string;
         };
         /** SyncRequestOut */
         SyncRequestOut: {
@@ -15846,6 +15923,58 @@ export interface operations {
             };
             /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    space_activity: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceActivity"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

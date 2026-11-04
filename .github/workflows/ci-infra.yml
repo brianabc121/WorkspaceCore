@@ -82,6 +82,9 @@ jobs:
       - name: Sprint 5 浏览器验收（运维页与首页运维组件、停掉 Prometheus 后显示过期、viewer 可读、不暴露监控地址）
         # 用 Sprint 5 接口级验收时启动的 prometheus；中途会临时停掉再启动它
         run: node tests/e2e/sprint5_browser.cjs
+      - name: 知识库浏览器验收（知识图谱、[[ 补全与链接、版本冲突三方合并、回收站、项目知识库主页与趋势图、手机宽度、viewer 只读）
+        # 不要求空库：每次新建工作台用户；笔记与项目经工作台接口建（T-0100）
+        run: node tests/e2e/knowledge_browser.cjs
       - name: 完整端到端冒烟（make smoke-full：全部读接口与页面、核心服务、SSE、写入往返、登出）
         # 不要求空库：用新的临时用户；新增的接口（openapi.json）与页面（navigation.ts）自动纳入
         run: make smoke-full
@@ -167,7 +170,7 @@ jobs:
             --intranet intranet.test:8443 --public public.test:9443
       - name: 启动 OpenIM（make openim-up）
         run: make openim-up
-      - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道）
+      - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道；场景 15 是知识库与每晚复盘（T-0100））
         run: |
           # 要以 root 运行：接入包目录交给容器里的 uid 1000（CHECKLIST.md 的做法）。
           # npm 缓存放到临时目录：用 runner 的 ~/.npm 会留下 root 所有的文件，后面的 npm ci 会因 EACCES 失败
