@@ -33,3 +33,4 @@ updated: 2026-11-04
 - 2026-11-04 02:21 UTC · claude · 开始任务
 - 2026-11-04 02:25 UTC · claude · 人类 2026-11-04 在对话中确认：迁移 0025 删除已有的“人已确认”记录可以合并（D-0004 第 3 节的例外，CI 全绿后合并）。
 - 2026-11-04 02:25 UTC · claude · status in_progress → done：完成（PR #145）：图谱按类型 6 组着色（默认）、图例在图下按组列类型、工具栏按单个类型筛选、悬停 / 列表 / 所选笔记显示具体类型；删除 confirm 接口、confirmed_* 字段、origin.confirmed、检索确认加权、笔记页确认按钮；迁移 0025（降级加回空列）。检查：ruff / mypy、pytest 667 passed 10 skipped；web lint / typecheck / 396 测试 / build / check:api；dataviz 配色亮（#ffffff，3 个对比度 WARN 靠文字补足）暗全过；本地真实后端浏览器 1440 / 1024 / 390 亮暗截图无错误无溢出。偏差：方案里的“只看人已确认”实际是着色选项，已删；图例从图上浮层移到图下。
+- 2026-11-04 02:26 UTC · claude · 越界说明：改了 tests/e2e/knowledge_browser.cjs（不在 paths 内），给 CI 的知识库浏览器验收加“按类型着色、按类型筛选、没有人已确认”的检查；该文件没有别人进行中的任务。
