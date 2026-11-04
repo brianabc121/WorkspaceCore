@@ -28,6 +28,7 @@ from app.domain.tasks import TaskService, WriteResult
 from app.domain.timeline import RunService
 from app.schemas.common import error_responses
 from app.schemas.tasks import (
+    ProjectAgentList,
     ProjectCreate,
     ProjectOut,
     ProjectPage,
@@ -107,6 +108,9 @@ async def list_projects(
     "/projects",
     status_code=status.HTTP_201_CREATED,
     summary="新建项目（member）",
+    description="owner / admin 可以同时选择加入的智能体（instance_ids）并建 IM 项目群（im_group），"
+    "member 带这两项时返回 403。OpenIM 暂时不可用时项目照常建好，im_group.status 为 pending，"
+    "Worker 每分钟重试（T-0110）。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 422),
 )
@@ -168,6 +172,59 @@ async def delete_project(
     version: Annotated[ProjectVersion, Query()],
 ) -> None:
     await service.delete_project(context, access, project_id, version)
+
+
+@router.get(
+    "/projects/{project_id}/agents",
+    summary="项目的智能体成员（viewer）",
+    description="加入项目的智能体能读写项目知识库、收到项目简报，有项目群时也在群里（T-0110）。",
+    responses=_read_errors,
+)
+async def list_project_agents(
+    access: Viewer, service: Service, project_id: UUID
+) -> ProjectAgentList:
+    return await service.list_project_agents(access, project_id)
+
+
+@router.put(
+    "/projects/{project_id}/agents/{instance_id}",
+    summary="让智能体加入项目（admin）",
+    description="同时得到项目知识库的读写权限，并被拉进项目群（有项目群时）。已经是成员时不变。"
+    "停用的实例返回 422；一个项目最多 50 个智能体。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def add_project_agent(
+    access: Member, context: Context, service: Service, project_id: UUID, instance_id: UUID
+) -> ProjectAgentList:
+    return await service.add_project_agent(context, access, project_id, instance_id)
+
+
+@router.delete(
+    "/projects/{project_id}/agents/{instance_id}",
+    summary="把智能体移出项目（admin）",
+    description="不再能读写项目知识库，也移出项目群；它已经领取的任务不受影响。不是成员时不变。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def remove_project_agent(
+    access: Member, context: Context, service: Service, project_id: UUID, instance_id: UUID
+) -> ProjectAgentList:
+    return await service.remove_project_agent(context, access, project_id, instance_id)
+
+
+@router.post(
+    "/projects/{project_id}/im-group",
+    summary="建项目群 / 立即重试（admin）",
+    description="没有项目群的项目（以前建的项目）建一个，群主是自己，成员是自己和已加入的智能体；"
+    "正在建群的立即重试；已建好的重新同步一次成员与群信息。没有部署 OpenIM 时返回 409。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def request_project_group(
+    access: Member, context: Context, service: Service, project_id: UUID
+) -> ProjectOut:
+    return await service.request_project_group(context, access, project_id)
 
 
 @router.get(

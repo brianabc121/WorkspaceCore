@@ -23,12 +23,13 @@ from app.api.deps import (
     workspace_viewer,
 )
 from app.core.errors import ApiError
+from app.domain import project_groups
 from app.domain.auth import AuthContext
 from app.domain.knowledge_base import Editor, NoteFields, SaveOptions
 from app.domain.knowledge_files import FileService, file_url
 from app.domain.knowledge_views import KnowledgeService
 from app.domain.policy import WorkspaceAccess, not_found
-from app.models import AgentInstance, KnowledgeFile, ProjectAgent
+from app.models import AgentInstance, KnowledgeFile, Project, ProjectAgent
 from app.schemas.common import error_responses
 from app.schemas.knowledge_base import (
     AgentKnowledgeOut,
@@ -208,6 +209,7 @@ async def put_participant(
         )
     else:
         row.access = body.access
+    await _members_changed(service, state.space.project_id)
     await service.audit.record(
         "knowledge_space.agent_added",
         workspace_ids=[access.workspace.id],
@@ -219,6 +221,13 @@ async def put_participant(
     )
     await service.db.commit()
     return (await service.space_outs([await service.space(access.workspace.id, space_id)]))[0]
+
+
+async def _members_changed(service: KnowledgeService, project_id: UUID) -> None:
+    """项目成员变了：项目群由 Worker 同步（T-0110）。"""
+    project = await service.db.get(Project, project_id, with_for_update=True)
+    if project is not None:
+        project_groups.mark_dirty(project)
 
 
 @router.delete(
@@ -235,6 +244,7 @@ async def delete_participant(
         row = await service.db.get(ProjectAgent, (state.space.project_id, instance_id))
         if row is not None:
             await service.db.delete(row)
+            await _members_changed(service, state.space.project_id)
             await service.audit.record(
                 "knowledge_space.agent_removed",
                 workspace_ids=[access.workspace.id],

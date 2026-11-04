@@ -59,8 +59,66 @@ describe('项目页面', () => {
     expect(await screen.findByText('已新建项目「新项目」')).toBeVisible()
     const post = requests.find((r) => r.method === 'POST')!
     expect(pathOf(post)).toBe('/api/v1/projects')
-    expect(await post.clone().json()).toEqual({ title: '新项目', description: '说明' })
+    // owner / admin 默认同时建 IM 项目群（T-0110）
+    expect(await post.clone().json()).toEqual({ title: '新项目', description: '说明', im_group: true })
     expect(await region('新项目')).toBeVisible()
+  })
+
+  it('lets an admin pick agents and the project group when creating (T-0110)', async () => {
+    const created = { ...project, id: 'p-new', title: '新项目' }
+    const requests = projectsApi((r) => {
+      if (pathOf(r) === '/api/v1/tasks/assignees') return Response.json({ users: [], instances: [{ id: 'i-a', name: '甲', status: 'online', description: '写代码' }, { id: 'i-b', name: '乙', status: 'offline', description: '' }] })
+      if (r.method === 'POST') return Response.json(created, { status: 201 })
+      return undefined
+    })
+    await openApp('/projects'); await region('发布计划')
+    await fireEvent.click(screen.getByRole('button', { name: '新建项目' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    const agentsBox = within(dialog).getByRole('group', { name: '加入的智能体' })
+    expect(within(agentsBox).getByText('写代码')).toBeVisible()
+    await fireEvent.click(await within(agentsBox).findByLabelText(/甲（在线）/))
+    await fireEvent.click(within(agentsBox).getByLabelText(/同时建 IM 项目群/))
+    await fireEvent.update(within(dialog).getByLabelText('项目名称'), '新项目')
+    await fireEvent.click(within(dialog).getByRole('button', { name: '创建项目' }))
+    await screen.findByText('已新建项目「新项目」')
+    const post = requests.find((r) => r.method === 'POST')!
+    expect(await post.clone().json()).toEqual({ title: '新项目', description: '', im_group: false, instance_ids: ['i-a'] })
+  })
+
+  it('shows project agents and the group state, and manages members (T-0110)', async () => {
+    const withAgents: Schema['ProjectOut'] = { ...project, agents: [{ instance_id: 'i-a', name: '甲', status: 'online' }], im_group: { status: 'pending', group_id: null, conversation_id: null, error: 'unavailable' } }
+    let group: Schema['ProjectImGroup'] = withAgents.im_group
+    const requests = projectsApi((r) => {
+      const path = pathOf(r)
+      if (path === '/api/v1/tasks/assignees') return Response.json({ users: [], instances: [{ id: 'i-a', name: '甲', status: 'online', description: '' }, { id: 'i-b', name: '乙', status: 'online', description: '' }] })
+      if (path === `/api/v1/projects/${project.id}/agents` && r.method === 'GET') return Response.json({ items: [{ instance_id: 'i-a', name: '甲', description: '写代码', status: 'online', access: 'read_write', in_group: false }], im_group: group })
+      if (path === `/api/v1/projects/${project.id}/agents/i-b` && r.method === 'PUT') return Response.json({ items: [], im_group: group })
+      if (path === `/api/v1/projects/${project.id}/im-group` && r.method === 'POST') { group = { status: 'ready', group_id: 'ws1', conversation_id: 'sg_ws1', error: null }; return Response.json({ ...withAgents, im_group: group }) }
+      return undefined
+    }, () => [withAgents])
+    await openApp('/projects')
+    const card = await region('发布计划')
+    expect(within(card).getByLabelText('发布计划 的智能体')).toHaveTextContent('智能体：甲 · 项目群还没建好')
+    await fireEvent.click(within(card).getByRole('button', { name: '项目 发布计划 的成员' }))
+    const dialog = await screen.findByRole('dialog', { name: '发布计划 的成员' })
+    expect(await within(dialog).findByText('写代码')).toBeVisible()
+    expect(within(dialog).getByText(/项目群还没建好：OpenIM 暂时不可用/)).toBeVisible()
+    await fireEvent.update(await within(dialog).findByLabelText('加入智能体'), 'i-b')
+    await fireEvent.click(within(dialog).getByRole('button', { name: '加入' }))
+    expect(await within(dialog).findByText('「乙」已加入项目')).toBeVisible()
+    expect(requests.some((r) => r.method === 'PUT' && pathOf(r).endsWith('/agents/i-b'))).toBe(true)
+    await fireEvent.click(within(dialog).getByRole('button', { name: '立即重试' }))
+    expect(await within(dialog).findByText('已重新同步项目群')).toBeVisible()
+    expect(await within(dialog).findByRole('link', { name: '打开项目群' })).toHaveAttribute('href', '/im?c=sg_ws1')
+  })
+
+  it('hides agent controls from members (T-0110)', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    projectsApi((r) => pathOf(r) === '/api/v1/me' ? Response.json({ ...me, workspaces: [{ ...workspace, role: 'member' }] }) : undefined)
+    await openApp('/projects'); await region('发布计划')
+    await fireEvent.click(screen.getByRole('button', { name: '新建项目' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    expect(within(dialog).queryByRole('group', { name: '加入的智能体' })).toBeNull()
   })
 
   it('renames with the version and only the changed fields', async () => {

@@ -100,6 +100,7 @@ class AssigneeInstance(BaseModel):
     id: UUID
     name: str
     status: str = Field(description="pending / online / offline（停用的实例不列出）")
+    description: str = Field(default="", description="实例的说明（能力说明，T-0110）")
 
 
 class AssigneeOptions(BaseModel):

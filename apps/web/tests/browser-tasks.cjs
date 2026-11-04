@@ -13,7 +13,7 @@ fs.mkdirSync(screenshots, { recursive: true });
   page.on('pageerror', (e) => errors.push(e.message));
   const time = '2026-10-30T00:00:00Z';
   // 工作台自己的项目与任务（T-0082 起，之前是 Vikunja 投影）
-  const project = { id: '66666666-6666-4666-8666-666666666666', title: '发布计划', description: '', archived: false, open_tasks: 1, done_tasks: 1, version: 1, created_at: time, updated_at: time };
+  const project = { id: '66666666-6666-4666-8666-666666666666', title: '发布计划', description: '', archived: false, open_tasks: 1, done_tasks: 1, agents: [], im_group: { status: 'none', group_id: null, conversation_id: null, error: null }, version: 1, created_at: time, updated_at: time };
   let projects = [project];
   const sample = { id: '88888888-8888-4888-8888-888888888888', project_id: project.id, title: '准备发布', description: '说明按纯文本显示 <b>不会渲染 HTML</b>', done: false, done_at: null, priority: 3, due_at: time, labels: ['发布'], version: 'opaque-original', created_at: time, updated_at: time };
   let tasks = [sample, { ...sample, id: '99999999-9999-4999-8999-999999999999', title: '检查发布说明', done: true, done_at: time, priority: 1 }];

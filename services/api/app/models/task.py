@@ -8,6 +8,8 @@
   （收藏的关联与搜索索引照旧有效）。
 - 时间轴（T-0104，迁移 0027）：计划开始时间、执行者（成员或 OpenClaw 实例，二选一）、
   第一次开始执行的时间（由执行记录 task_runs 维护，不参与 version）。
+- 项目群（T-0110，迁移 0028）：建群状态 none / pending / ready、群主、上一次失败的原因；
+  群本身在 im_groups（project_id）。这些列由 app/domain/project_groups.py 维护，不参与 version。
 """
 
 import uuid
@@ -47,12 +49,21 @@ def _updated_at() -> Mapped[datetime]:
     return mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+IM_GROUP_STATES = ("none", "pending", "ready")
+
+
 class Project(Base):
     __tablename__ = "projects"
     __table_args__ = (
         # 任务的复合外键引用 (workspace_id, id)
         UniqueConstraint("workspace_id", "id"),
         Index("ix_projects_workspace_archived", "workspace_id", "archived"),
+        CheckConstraint(f"im_group_status IN {IM_GROUP_STATES}", name="im_group_status"),
+        Index(
+            "ix_projects_im_group_pending",
+            "im_group_status",
+            postgresql_where=sql_text("im_group_status = 'pending'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
@@ -68,6 +79,11 @@ class Project(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
+    im_group_status: Mapped[str] = mapped_column(Text, server_default=sql_text("'none'"))
+    im_group_owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    im_group_error: Mapped[str | None] = mapped_column(Text)
 
 
 class Task(Base):

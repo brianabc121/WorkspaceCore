@@ -33,6 +33,7 @@ from app.domain import (
     im_projection,
     knowledge_files,
     notifications,
+    project_groups,
     sync,
     task_runs,
     timeline,
@@ -223,6 +224,16 @@ async def close_stale_runs(ctx: dict[str, Any]) -> int:
     return ended
 
 
+async def sync_project_groups(ctx: dict[str, Any]) -> int:
+    """项目群（T-0110）：建群或同步成员；OpenIM 不可用时下一分钟再试。没有部署 OpenIM 时不做。"""
+    context = _sync(ctx)
+    client = im.openim_client(context.settings, context.runtime, ctx["redis"])
+    if client is None:
+        return 0
+    async with context.sessions() as db:
+        return await project_groups.ProjectGroupSync(db, context.settings, client).run_due()
+
+
 async def replicate_files(ctx: dict[str, Any]) -> int:
     """知识库图片：把待复制的图片写到副本（T-0103）。没配置副本时什么也不做。"""
     context = _sync(ctx)
@@ -308,6 +319,7 @@ class WorkerSettings:
         cron(warn_agent_expiry, hour=1, minute=7, timeout=120),
         cron(replicate_files, second=55, timeout=300),
         cron(close_stale_runs, second=20, timeout=60),
+        cron(sync_project_groups, second=30, timeout=120),
         cron(cleanup_files, hour=3, minute=37, timeout=1800),
         cron(check_file_storage, hour=4, minute=13, run_at_startup=True, timeout=180),
     ]

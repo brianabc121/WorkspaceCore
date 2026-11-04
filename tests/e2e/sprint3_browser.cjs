@@ -173,8 +173,15 @@ const projectCard = (page, title) => page.getByRole('region', { name: `项目 ${
   await viewer.page.goto(`${base}/projects`)
   await projectCard(viewer.page, projectTitle).waitFor()
   check(await viewer.page.getByRole('button', { name: '新建项目' }).count() === 0, 'viewer 不应看到新建项目')
-  check(await projectCard(viewer.page, projectTitle).getByRole('button').count() === 0, 'viewer 不应看到项目的编辑、归档、删除')
-  step('viewer：能看任务和项目，没有新建、保存、删除入口')
+  const viewerCard = projectCard(viewer.page, projectTitle)
+  check(await viewerCard.getByRole('button', { name: /编辑|归档|恢复|删除/ }).count() === 0, 'viewer 不应看到项目的编辑、归档、删除')
+  // 项目成员（T-0110）：viewer 可以查看，但没有加入、移出、建项目群
+  await viewerCard.getByRole('button', { name: `项目 ${projectTitle} 的成员` }).click()
+  const members = viewer.page.getByRole('dialog', { name: `${projectTitle} 的成员` })
+  await members.getByRole('region', { name: '项目成员' }).waitFor()
+  check(await members.getByRole('button', { name: /加入|移出|建项目群|立即重试/ }).count() === 0, 'viewer 的成员弹窗不应有加入、移出、建群')
+  await viewer.page.keyboard.press('Escape')
+  step('viewer：能看任务、项目和项目成员，没有新建、保存、删除、管理成员入口')
 
   await browser.close()
   if (problems.length) throw new Error(`页面错误：${problems.join('; ')}`)

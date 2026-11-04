@@ -67,6 +67,32 @@ def _dedupe(labels: list[str]) -> list[str]:
 
 # ---------------------------------------------------------------- 项目
 
+ProjectGroupStatus = Literal["none", "pending", "ready"]
+InstanceStatus = Literal["pending", "online", "offline", "disabled"]
+MAX_PROJECT_AGENTS = 50
+
+
+class ProjectAgentBrief(BaseModel):
+    """项目的智能体成员（T-0110）：在项目知识库里有权限，有项目群时也在群里。"""
+
+    instance_id: UUID
+    name: str
+    status: InstanceStatus
+
+
+class ProjectImGroup(BaseModel):
+    """项目群（T-0110，docs/v2/AGENT_OPS_PLAN.md 第 2.2 节）。"""
+
+    status: ProjectGroupStatus = Field(
+        description="none 没有项目群；pending 正在建群或同步成员（OpenIM 不可用时每分钟重试）；"
+        "ready 已建好"
+    )
+    group_id: str | None = Field(description="OpenIM 的群 ID；还没建好时为 null")
+    conversation_id: str | None = Field(description="群会话 ID（sg_<群 ID>）")
+    error: str | None = Field(
+        description="pending 时上一次失败的原因（错误类别，如 unavailable、not_configured）"
+    )
+
 
 class ProjectOut(BaseModel):
     id: UUID
@@ -75,6 +101,8 @@ class ProjectOut(BaseModel):
     archived: bool
     open_tasks: int = Field(description="未完成任务数")
     done_tasks: int = Field(description="已完成任务数")
+    agents: list[ProjectAgentBrief] = Field(description="项目的智能体成员（T-0110）")
+    im_group: ProjectImGroup
     version: int
     created_at: datetime
     updated_at: datetime
@@ -87,6 +115,20 @@ class ProjectPage(Page[ProjectOut]):
 class ProjectCreate(_Strict):
     title: ProjectTitle
     description: ProjectDescription = ""
+    instance_ids: list[UUID] = Field(
+        default_factory=list,
+        max_length=MAX_PROJECT_AGENTS,
+        description="一开始就加入项目的智能体（只限 owner / admin；本工作空间里没有停用的实例）",
+    )
+    im_group: bool = Field(
+        default=False,
+        description="同时建 IM 项目群，群主是自己（只限 owner / admin；需要部署 OpenIM）",
+    )
+
+    @model_validator(mode="after")
+    def _unique_instances(self) -> Self:
+        self.instance_ids = list(dict.fromkeys(self.instance_ids))
+        return self
 
 
 class ProjectUpdate(_Strict):
@@ -105,6 +147,20 @@ class ProjectUpdate(_Strict):
         if any(getattr(self, name) is None for name in changed):
             raise ValueError("字段不能为 null")
         return self
+
+
+class ProjectAgentOut(BaseModel):
+    instance_id: UUID
+    name: str
+    description: str = Field(description="实例的说明（能力说明）")
+    status: InstanceStatus
+    access: Literal["read_write", "read"] = Field(description="对项目知识库的权限")
+    in_group: bool = Field(description="是否已在项目群里")
+
+
+class ProjectAgentList(BaseModel):
+    items: list[ProjectAgentOut]
+    im_group: ProjectImGroup
 
 
 class ProjectProgressOut(BaseModel):
