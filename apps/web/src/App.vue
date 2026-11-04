@@ -84,7 +84,7 @@ const standalone = computed(() => !!route.meta.standalone && !!auth.user)
               <span>{{ section.title }}</span><ChevronDown class="nav-chevron" aria-hidden="true" />
             </button>
             <div v-show="!collapsed.includes(section.title)" :id="section.id" class="nav-items">
-              <RouterLink v-for="item in section.items" :key="item.path" :to="item.path" class="nav-link" exact-active-class="is-active">
+              <RouterLink v-for="item in section.items" :key="item.path" :to="item.path" class="nav-link" exact-active-class="is-active" :class="{ 'is-active': item.path === '/tasks' && route.path === '/tasks/timeline' }">
                 <component :is="navIcon(item.path)" class="nav-icon" aria-hidden="true" /><span>{{ item.title }}</span>
               </RouterLink>
             </div>

@@ -88,6 +88,7 @@ const problem = computed(() => {
       <p class="form-help">未完成 {{ project.open_tasks }} · 已完成 {{ project.done_tasks }} · 更新于 {{ formatTime(project.updated_at) }}</p>
       <div class="form-actions">
         <RouterLink :to="{ path: '/tasks', query: { project_id: project.id } }">查看任务</RouterLink>
+        <RouterLink :to="{ path: '/tasks/timeline', query: { project: project.id } }">时间轴</RouterLink>
         <RouterLink :to="{ path: '/knowledge/docs', query: { linked_resource_id: project.id } }">相关文档</RouterLink>
         <template v-if="writable">
           <button class="secondary-button" :aria-label="`编辑项目 ${project.title}`" :disabled="busy || needsReload" @click="open(project)">编辑</button>
