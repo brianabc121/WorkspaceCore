@@ -351,7 +351,7 @@
 - 写工具和高危工具**立即返回** `PendingApproval {status:"pending_approval", action_id, summary, expires_at, deduplicated}`，此时**没有执行**。
 - 同一实例、同一工具、同样参数哈希的待审批请求去重（`deduplicated: true`）。
 - 每个实例同时最多 20 条待审批，超出返回 `TOO_MANY_PENDING`。
-- **错误**：MCP 结果 `isError: true`，结构化内容 `{"error": {"code", "message"}}`。`code` 的取值见 `ToolError`：
+- **错误**：MCP 结果 `isError: true`，文字内容是 `{"error": {"code", "message"}}` 的 JSON，**不带结构化内容**（2026-11-04 修订，T-0108：锁定的 OpenClaw 带的 MCP SDK 1.32.1 客户端会拿结构化内容对照工具的 outputSchema 校验，错误也不例外，带上就变成 -32602，智能体看不到错误码；见 `@modelcontextprotocol/sdk/dist/esm/client/index.js` 的 `callTool`）。`code` 的取值见 `ToolError`：
   - `FORBIDDEN_SCOPE`、`FORBIDDEN_ROLE`：同时写一条 `denied` 记录；
   - `NOT_FOUND`、`VALIDATION_FAILED`、`TOO_MANY_PENDING`、`RATE_LIMITED`、`EXTERNAL_UNAVAILABLE`。
 - **A14**：AI 发起未经审批的删除，`delete_task` 只返回 `pending_approval`，不执行，并留下记录。

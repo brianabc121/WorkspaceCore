@@ -9,7 +9,9 @@
 - 每次工具调用都按实例限流（每分钟 120 次）；写工具与高危工具只建待审批记录（A14），读工具也写记录。
 - 知识库工具（knowledge_*，T-0098）由 app/domain/knowledge_tools.py 处理：写入直接执行、不审批，
   由知识库自己的保护措施兜底（docs/v2/KNOWLEDGE_PLAN.md 3.8）。
-- 错误：`isError: true`，结构化内容 `{"error": {"code", "message"}}`。
+- 错误：`isError: true`，文字内容是 `{"error": {"code", "message"}}` 的 JSON，不带结构化内容。
+  OpenClaw 2026.9.36 带的 MCP SDK（1.32.1）客户端只要有 `structuredContent` 就按工具的
+  outputSchema 校验，错误也不例外；带上就变成 -32602，智能体看不到错误码和说明（T-0108）。
 """
 
 import asyncio
@@ -95,12 +97,25 @@ def _state(ctx: ServerRequestContext[Any, Any]) -> Any:
 
 
 def error_result(code: str, message: str) -> types.CallToolResult:
+    """工具错误：只用文字内容（不带 structured_content，见模块说明）。"""
     payload = {"error": {"code": code, "message": message}}
     return types.CallToolResult(
         content=[types.TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))],
-        structured_content=payload,
         is_error=True,
     )
+
+
+def error_code(result: types.CallToolResult) -> str:
+    """错误结果里的错误码（运维指标用）；解析不了时是 error。"""
+    for item in result.content:
+        if isinstance(item, types.TextContent):
+            try:
+                code = json.loads(item.text).get("error", {}).get("code")
+            except (ValueError, AttributeError):
+                continue
+            if code:
+                return str(code)
+    return "error"
 
 
 def _ok(output: BaseModel) -> types.CallToolResult:
@@ -148,8 +163,7 @@ async def _call_tool(
     tool = params.name if params.name in TOOLS else "unknown"
     outcome = "ok"
     if result.is_error:
-        error = (result.structured_content or {}).get("error") or {}
-        outcome = str(error.get("code") or "error").lower()
+        outcome = error_code(result).lower()
     await ops_metrics.bump(getattr(_state(ctx), "redis", None), "mcp_tool_calls", tool, outcome)
     return result
 

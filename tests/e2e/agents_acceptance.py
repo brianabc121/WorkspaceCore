@@ -766,7 +766,9 @@ def scenario_15(c: Ctx) -> None:
     # 6. 删除：直接进回收站；1 小时内第 6 次被拦下，它的删除自动暂停并通知管理员
     victims = [c.owner.call("POST", "/api/v1/knowledge/notes", {"space_id": own["id"], "title": f"验收待删 {i} {tag}",
                                                                "body": "重复的记录，可以删"}) for i in range(6)]
+    last_delete = 0.0
     for victim in victims:
+        last_delete = time.time()
         kb("knowledge_delete", {"note_id": victim["id"], "base_version": victim["version"],
                                 "reason": "验收：清理重复的记录", "idempotency_key": str(uuid.uuid4())})
     trashed = {t["id"] for t in c.owner.call("GET", "/api/v1/knowledge/trash?limit=100")["items"]}
@@ -777,6 +779,12 @@ def scenario_15(c: Ctx) -> None:
             f"回收站 {sum(v['id'] in trashed for v in victims)} 篇，暂停于 {paused}")
     alerts = c.owner.call("GET", "/api/v1/notifications")["items"]
     c.check("知识库：删除自动暂停后通知管理员", any(n["type"] == "knowledge_delete_paused" for n in alerts))
+    # 被拦下的那次，模型拿到的工具结果里有错误码（MCP 错误不带结构化内容，OpenClaw 的 MCP 客户端才不会把它当成
+    # 格式错误丢掉，T-0108）
+    seen = [r.get("last", "") for r in c.model_calls(c.keys["a"], last_delete)]
+    c.check("知识库：被拦下的删除，甲拿到的工具结果里有错误码 DELETES_PAUSED 和说明（不是 MCP 格式错误）",
+            any("DELETES_PAUSED" in x for x in seen) and not any("does not match the tool's output schema" in x for x in seen),
+            next((x[-300:] for x in seen if "error" in x.lower()), seen[-1][-300:] if seen else ""))
 
     # 7. 每晚复盘：接入包的 setup-reflection.sh 建 OpenClaw 定时任务；再运行只更新（declarationKey），不重复
     env = {**os.environ, "COMPOSE_PROJECT_NAME": c.a.project}

@@ -23,7 +23,7 @@ from pydantic import SecretStr
 
 from app.domain.im import admin_im_user_id
 from app.jobs import worker
-from tests.helpers import BOB, OWNER, ClientFactory, add_workspace, csrf, run_sql
+from tests.helpers import BOB, OWNER, ClientFactory, add_workspace, csrf, run_sql, tool_error
 from tests.test_ai_tools_api import call as request_action
 from tests.test_ai_tools_api import decide, execution
 from tests.test_approval_cards import Recording, request_bookmark
@@ -304,12 +304,12 @@ async def test_instances_cannot_approve_their_own_requests(env: Env) -> None:
     # MCP 没有审批工具；在发起时夹带字段被拒
     approve = await mcp_call(env, token, "approve", {"action_id": action_id})
     assert approve["isError"] is True
-    assert approve["structuredContent"]["error"]["code"] == "NOT_FOUND"
+    assert tool_error(approve)["code"] == "NOT_FOUND"
     smuggled = await mcp_call(
         env, token, "delete_task", {"task_id": task["id"], "approved": True, "password": "x"}
     )
     assert smuggled["isError"] is True
-    assert smuggled["structuredContent"]["error"]["code"] == "VALIDATION_FAILED"
+    assert tool_error(smuggled)["code"] == "VALIDATION_FAILED"
     # 查状态可以，改不了
     status = ok(await mcp_call(env, token, "get_action_status", {"action_id": action_id}))
     assert status["status"] == "pending_approval"
