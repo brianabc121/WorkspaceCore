@@ -19,7 +19,8 @@ function setup(handler?: (r: Request) => Response | Promise<Response | undefined
     path(r) === '/api/v1/agents/secrets' && r.method === 'GET' ? Response.json({ items: [secret], next_cursor: null, total_estimate: 1 }) :
     path(r) === '/api/v1/agents/secrets/accesses' ? Response.json({ items: [access], next_cursor: null, total_estimate: 1 }) :
     path(r) === '/api/v1/agents/instances/inst-a/ssh' && r.method === 'GET' ? Response.json({ target: null, job: null, warning: null }) :
-    path(r) === '/api/v1/agents/host-summary' ? Response.json({ items: [] }) : undefined
+    path(r) === '/api/v1/agents/host-summary' ? Response.json({ items: [] }) :
+    path(r).endsWith('/ops') && r.method === 'GET' ? Response.json({ available: false, reason: 'not_deployed', running: null, items: [] }) : undefined
   ))
 }
 afterEach(() => vi.restoreAllMocks())

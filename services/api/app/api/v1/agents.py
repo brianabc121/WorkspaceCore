@@ -15,6 +15,7 @@ from app.api.deps import (
     authenticated,
     client_ip,
     csrf_protected,
+    get_agent_ops_service,
     get_agent_service,
     get_agent_ssh_service,
     get_db,
@@ -22,8 +23,10 @@ from app.api.deps import (
     workspace_admin,
     workspace_owner,
 )
+from app.domain.agent_ops import AgentOpsService
 from app.domain.agent_ssh import AgentSshService
 from app.domain.agents import AgentService
+from app.domain.auth import AuthContext
 from app.domain.host_metrics import HostService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.agents import (
@@ -31,6 +34,9 @@ from app.schemas.agents import (
     AgentInstanceOut,
     AgentInstancePage,
     AgentInstanceUpdate,
+    AgentOpsActionOut,
+    AgentOpsRun,
+    AgentOpsState,
     AgentSecretCreate,
     AgentSecretOut,
     AgentSecretPage,
@@ -61,6 +67,7 @@ Owner = Annotated[WorkspaceAccess, Depends(workspace_owner)]
 Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
 Service = Annotated[AgentService, Depends(get_agent_service)]
 SshService = Annotated[AgentSshService, Depends(get_agent_ssh_service)]
+OpsService = Annotated[AgentOpsService, Depends(get_agent_ops_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 _write = [Depends(csrf_protected)]
@@ -522,3 +529,60 @@ async def delete_agent_secret(
     version: Annotated[int, Query(ge=1)],
 ) -> None:
     await service.delete_secret(access, secret_id, version=version, client_ip=_ip(request, service))
+
+
+# ---------------------------------------------------------------- 远程运维动作（T-0114）
+
+
+@router.get(
+    "/agents/instances/{instance_id}/ops",
+    summary="运维动作：是否可用、进行中的动作与最近记录（admin）",
+    description="只适用于用 SSH 部署过、专用密钥还在的实例（available）；"
+    "最近 20 次（7 天内），列表不含输出，输出看单条记录（T-0114）。",
+    responses=_read_errors,
+)
+async def get_agent_ops(access: Admin, service: OpsService, instance_id: UUID) -> AgentOpsState:
+    return await service.state(access, instance_id)
+
+
+@router.post(
+    "/agents/instances/{instance_id}/ops",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="执行一个固定的运维动作（admin）",
+    description="动作是写死的：status 查看状态、logs 查看日志"
+    "（最近 200 行，可选 openclaw / tunnel / image-proxy）、restart 重启 OpenClaw、"
+    "up 重新拉起全部服务、prune 清理无用镜像、"
+    "report 立即上报一次。restart / up / prune 要带自己的登录密码（没带 403 STEP_UP_REQUIRED，"
+    "错误 403 STEP_UP_FAILED，错太多次 429）。同一实例同时只跑一个动作（409 AGENT_OPS_RUNNING），"
+    "正在部署或卸载时 409 AGENT_SSH_JOB_RUNNING；没用 SSH 部署过 409 AGENT_OPS_UNAVAILABLE。"
+    "立即返回 running 的记录，进度与输出看 GET /ops/{action_id}；超时 60 秒，up 是 180 秒。"
+    "输出脱敏后保存 7 天；审计记下动作与退出码，不记输出。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 429, 503),
+)
+async def run_agent_ops(
+    access: Admin,
+    context: Annotated[AuthContext, Security(authenticated)],
+    request: Request,
+    service: OpsService,
+    instance_id: UUID,
+    body: AgentOpsRun,
+) -> AgentOpsActionOut:
+    return await service.run(
+        access,
+        context.user,
+        instance_id,
+        body,
+        client_ip=client_ip(request, request.app.state.settings),
+    )
+
+
+@router.get(
+    "/agents/instances/{instance_id}/ops/{action_id}",
+    summary="一次运维动作的状态与脱敏后的输出（admin）",
+    responses=_read_errors,
+)
+async def get_agent_ops_action(
+    access: Admin, service: OpsService, instance_id: UUID, action_id: UUID
+) -> AgentOpsActionOut:
+    return await service.get(access, instance_id, action_id)

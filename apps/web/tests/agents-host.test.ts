@@ -21,7 +21,8 @@ function setup(host: (r: Request) => Response | undefined, items: Schema['HostSu
       path(r) === '/api/v1/agents/instances' ? Response.json({ items: [instance], next_cursor: null, total_estimate: 1 }) :
       path(r) === '/api/v1/agents/secrets' ? Response.json({ items: [], next_cursor: null, total_estimate: 0 }) :
       path(r) === '/api/v1/agents/instances/inst-a/ssh' ? Response.json({ target: null, job: null, warning: null }) :
-      path(r) === '/api/v1/agents/host-summary' ? Response.json({ items }) : undefined))
+      path(r) === '/api/v1/agents/host-summary' ? Response.json({ items }) :
+      path(r).endsWith('/ops') ? Response.json({ available: false, reason: 'not_deployed', running: null, items: [] }) : undefined))
 }
 async function section() {
   await openApp('/agents')

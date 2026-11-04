@@ -963,3 +963,22 @@ Worker 每分钟检查一次，通知 owner / admin；同一实例同一类告�
    - `host-report: workspace returned 401`：实例凭证失效（实例被停用或凭证轮换过），重新下载接入包或重新部署；
    - `host-report: workspace returned 422`：脚本版本与工作台不一致，重新下载接入包；
    - `host-report: workspace returned 429`：每分钟超过 2 次，等一分钟再试。
+
+## 22. 远程运维动作（T-0114）
+
+设计见 `docs/v2/AGENT_OPS_PLAN.md` 第 6.1 节，接口见 `docs/api-contract.md`。实例页每个实例的“运维”里有六个按钮，经工作台的 SSH 通道（部署时确认的主机指纹 + 专用密钥）在接入包目录里执行：
+
+| 按钮 | 执行的命令 | 二次认证 |
+|---|---|---|
+| 查看状态 | `docker compose ps --all`、本项目容器的 `docker stats --no-stream`、`df -h <接入包目录> /`、`uptime` | 不需要 |
+| 查看日志 | `docker compose logs --no-color --tail 200 <openclaw / tunnel / image-proxy>` | 不需要（会写审计） |
+| 立即上报一次 | 在容器里运行 `usage-report.mjs` 与 `host-report.mjs` | 不需要 |
+| 重启 OpenClaw | `docker compose restart openclaw` | 再输一次登录密码 |
+| 重新拉起全部服务 | `docker compose up -d`（最多等 180 秒） | 再输一次登录密码 |
+| 清理无用镜像 | `docker image prune -f`（只删没在用的镜像） | 再输一次登录密码 |
+
+- 只适用于用 SSH 部署过、专用密钥还在的实例；手动接入的，先在实例页做一次 SSH 部署（原样重装接入包，会话和记忆在 `state/` 里保留）。吊销专用密钥后运维按钮不可用。
+- 同一实例同时只跑一个动作，部署、卸载、吊销进行中时也不能执行；工作台重启时进行中的动作记为“已中断”。
+- 输出脱敏后保存 7 天，在实例页“最近的运维记录”里查看；审计日志里有 `agents.ops.started` / `agents.ops.finished`（动作、退出码），没有输出。
+- 动作失败时看结果里的说明：`timeout`（超过 60 / 180 秒）、`host_key_changed`（服务器主机公钥变了，按第 18 节重新确认）、`auth_failed`（专用密钥被删，重新部署）、`client_key_invalid`（工作台的加密密钥换过，重新部署）。
+

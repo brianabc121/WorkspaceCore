@@ -668,6 +668,265 @@
         "title": "AgentMetrics",
         "type": "object"
       },
+      "AgentOpsActionOut": {
+        "properties": {
+          "action": {
+            "enum": [
+              "status",
+              "logs",
+              "restart",
+              "up",
+              "prune",
+              "report"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最后一条命令的退出码；连不上或超时时为空",
+            "title": "Exit Code"
+          },
+          "expires_at": {
+            "description": "记录与输出保留到这个时间（7 天）",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "脱敏后的输出（令牌、密钥、Authorization、私钥块已替换成 ***，最多 64 KB）；列表里为 null，详情接口里才有",
+            "title": "Output"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "enum": [
+                  "openclaw",
+                  "tunnel",
+                  "image-proxy"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "started_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started By"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed",
+              "interrupted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "输出超过 64 KB，只保留了末尾",
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "service",
+          "status",
+          "exit_code",
+          "output",
+          "truncated",
+          "error_code",
+          "error_message",
+          "started_by",
+          "started_at",
+          "finished_at",
+          "expires_at"
+        ],
+        "title": "AgentOpsActionOut",
+        "type": "object"
+      },
+      "AgentOpsRun": {
+        "additionalProperties": false,
+        "description": "执行一个固定的运维动作（AGENT_OPS_PLAN 6.1）。命令写死在工作台里，不接受任何命令文本。",
+        "properties": {
+          "action": {
+            "description": "status 查看状态、logs 查看日志、restart 重启 OpenClaw、up 重新拉起全部服务、prune 清理无用镜像、report 立即上报一次（用量与服务器状态）",
+            "enum": [
+              "status",
+              "logs",
+              "restart",
+              "up",
+              "prune",
+              "report"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "format": "password",
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "restart / up / prune 要再输一次自己的登录密码（二次认证）",
+            "title": "Password"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "enum": [
+                  "openclaw",
+                  "tunnel",
+                  "image-proxy"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "只用于 logs：看哪个服务的最近 200 行（默认 openclaw）",
+            "title": "Service"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "AgentOpsRun",
+        "type": "object"
+      },
+      "AgentOpsState": {
+        "properties": {
+          "available": {
+            "description": "用 SSH 部署过、专用密钥还在：可以执行运维动作",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "items": {
+            "description": "最近 20 次（7 天内），最近的在前",
+            "items": {
+              "$ref": "#/components/schemas/AgentOpsActionOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "not_deployed",
+                  "key_missing"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "不可用的原因：not_deployed 还没用 SSH 部署（手动接入的实例先做一次 SSH 部署）；key_missing 专用密钥已吊销",
+            "title": "Reason"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentOpsActionOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "进行中的动作（同一实例同时只有一个）"
+          }
+        },
+        "required": [
+          "available",
+          "reason",
+          "running",
+          "items"
+        ],
+        "title": "AgentOpsState",
+        "type": "object"
+      },
       "AgentProjectOut": {
         "properties": {
           "access": {
@@ -16088,6 +16347,344 @@
           }
         ],
         "summary": "实例的服务器状态（admin）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/ops": {
+      "get": {
+        "description": "只适用于用 SSH 部署过、专用密钥还在的实例（available）；最近 20 次（7 天内），列表不含输出，输出看单条记录（T-0114）。",
+        "operationId": "get_agent_ops",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentOpsState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "运维动作：是否可用、进行中的动作与最近记录（admin）",
+        "tags": [
+          "agents"
+        ]
+      },
+      "post": {
+        "description": "动作是写死的：status 查看状态、logs 查看日志（最近 200 行，可选 openclaw / tunnel / image-proxy）、restart 重启 OpenClaw、up 重新拉起全部服务、prune 清理无用镜像、report 立即上报一次。restart / up / prune 要带自己的登录密码（没带 403 STEP_UP_REQUIRED，错误 403 STEP_UP_FAILED，错太多次 429）。同一实例同时只跑一个动作（409 AGENT_OPS_RUNNING），正在部署或卸载时 409 AGENT_SSH_JOB_RUNNING；没用 SSH 部署过 409 AGENT_OPS_UNAVAILABLE。立即返回 running 的记录，进度与输出看 GET /ops/{action_id}；超时 60 秒，up 是 180 秒。输出脱敏后保存 7 天；审计记下动作与退出码，不记输出。",
+        "operationId": "run_agent_ops",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentOpsRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentOpsActionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "执行一个固定的运维动作（admin）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/ops/{action_id}": {
+      "get": {
+        "operationId": "get_agent_ops_action",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Action Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentOpsActionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "一次运维动作的状态与脱敏后的输出（admin）",
         "tags": [
           "agents"
         ]

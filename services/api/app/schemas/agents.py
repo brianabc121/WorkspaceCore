@@ -482,3 +482,57 @@ class AgentSshState(BaseModel):
     warning: str | None = Field(
         default=None, description="需要 owner 手动处理的事项（例如强制吊销时服务器上留下的公钥）"
     )
+
+
+# ---------------------------------------------------------------- 远程运维动作（T-0114）
+
+OpsAction = Literal["status", "logs", "restart", "up", "prune", "report"]
+OpsService = Literal["openclaw", "tunnel", "image-proxy"]
+OpsStatus = Literal["running", "succeeded", "failed", "interrupted"]
+
+
+class AgentOpsRun(_Strict):
+    """执行一个固定的运维动作（AGENT_OPS_PLAN 6.1）。命令写死在工作台里，不接受任何命令文本。"""
+
+    action: OpsAction = Field(
+        description="status 查看状态、logs 查看日志、restart 重启 OpenClaw、up 重新拉起全部服务、"
+        "prune 清理无用镜像、report 立即上报一次（用量与服务器状态）"
+    )
+    service: OpsService | None = Field(
+        default=None, description="只用于 logs：看哪个服务的最近 200 行（默认 openclaw）"
+    )
+    password: SecretStr | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description="restart / up / prune 要再输一次自己的登录密码（二次认证）",
+    )
+
+
+class AgentOpsActionOut(BaseModel):
+    id: UUID
+    action: OpsAction
+    service: OpsService | None
+    status: OpsStatus
+    exit_code: int | None = Field(description="最后一条命令的退出码；连不上或超时时为空")
+    output: str | None = Field(
+        description="脱敏后的输出（令牌、密钥、Authorization、私钥块已替换成 ***，最多 64 KB）；"
+        "列表里为 null，详情接口里才有"
+    )
+    truncated: bool = Field(description="输出超过 64 KB，只保留了末尾")
+    error_code: str | None
+    error_message: str | None
+    started_by: UUID | None
+    started_at: datetime
+    finished_at: datetime | None
+    expires_at: datetime = Field(description="记录与输出保留到这个时间（7 天）")
+
+
+class AgentOpsState(BaseModel):
+    available: bool = Field(description="用 SSH 部署过、专用密钥还在：可以执行运维动作")
+    reason: Literal["not_deployed", "key_missing"] | None = Field(
+        description="不可用的原因：not_deployed 还没用 SSH 部署"
+        "（手动接入的实例先做一次 SSH 部署）；key_missing 专用密钥已吊销"
+    )
+    running: AgentOpsActionOut | None = Field(description="进行中的动作（同一实例同时只有一个）")
+    items: list[AgentOpsActionOut] = Field(description="最近 20 次（7 天内），最近的在前")

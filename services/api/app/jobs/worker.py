@@ -24,6 +24,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, dict_config
 from app.core.resources import create_engine
 from app.domain import (
+    agent_ops,
     agent_watch,
     alerts,
     approval_cards,
@@ -99,7 +100,11 @@ async def purge(ctx: dict[str, Any]) -> None:
         usage_minutes, usage_cursors = await timeline.purge_usage(db)
         # 服务器状态：30 天前的样本（T-0113）
         host_samples = await host_metrics.purge(db)
+        # 运维动作：7 天前的记录与脱敏后的输出（T-0114；审计里的记录保留）
+        ops_actions = await agent_ops.purge(db)
         await db.commit()
+    if ops_actions:
+        logger.info("agent ops actions purged", extra={"count": ops_actions})
     if host_samples:
         logger.info("host samples purged", extra={"count": host_samples})
     if usage_minutes or usage_cursors:

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, origin_of
 from app.core.errors import ApiError
 from app.domain import policy
+from app.domain.agent_ops import AgentOpsService
 from app.domain.agent_ssh import AgentSshService
 from app.domain.agents import AgentService
 from app.domain.ai_tools import AiToolService
@@ -220,6 +221,16 @@ def get_agent_ssh_service(
 ) -> AgentSshService:
     # 安装任务在 API 进程内运行（T-0089 B2）；lifespan 里创建
     return AgentSshService(db, settings, redis, getattr(request.app.state, "ssh_jobs", None))
+
+
+def get_agent_ops_service(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> AgentOpsService:
+    # 运维动作与 SSH 部署共用进程内的 SshJobRunner（T-0114）
+    return AgentOpsService(db, settings, redis, getattr(request.app.state, "ssh_jobs", None))
 
 
 def get_automation_service(

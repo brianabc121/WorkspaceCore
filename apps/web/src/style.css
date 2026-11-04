@@ -430,6 +430,12 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .host-chart-x { grid-column: 2; display: flex; justify-content: space-between; font-size: .7rem; color: var(--muted); }
 .host-chart-table summary { cursor: pointer; color: var(--muted); font-size: .78rem; }
 @media (max-width: 520px) { .host-meters { grid-template-columns: minmax(0, 1fr); } }
+/* 运维动作（T-0114） */
+.ops-actions { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.ops-actions .form-field { margin: 0; }
+.ops-result { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; display: grid; gap: 6px; min-width: 0; }
+.ops-result p { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.ops-output { max-height: 360px; overflow: auto; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (forced-colors: active) { .host-chart-swatch, .host-chart-dot, .host-bar > span { forced-color-adjust: none; } }
 /* AI tool calls and approvals (V2 OC-5): approval center, activity log, IM approval cards. */
 .ai-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 12px; min-width: 0; }

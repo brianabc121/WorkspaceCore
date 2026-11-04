@@ -40,8 +40,7 @@ from app.domain.im import NOTICE_USER_ID, user_id_from_im
 from app.domain.knowledge import KnowledgeService
 from app.domain.notifications import NotificationService, notify_admins
 from app.domain.policy import WorkspaceAccess, has_role, not_found
-from app.domain.ratelimit import FailureLimiter
-from app.domain.security import verify_password
+from app.domain.step_up import verify_step_up
 from app.domain.tasks import TaskService, WriteResult
 from app.jobs.queue import SEND_APPROVAL_CARDS, JobQueue
 from app.models import (
@@ -77,9 +76,6 @@ from app.schemas.notifications import NotificationMark
 from app.schemas.tasks import TaskCreate, TaskUpdate
 from app.schemas.workspaces import Role
 
-# 高危操作二次认证：同一用户 15 分钟内输错 5 次后暂时不能再试
-STEP_UP_FAILURE_LIMIT = 5
-STEP_UP_WINDOW_SECONDS = 15 * 60
 logger = logging.getLogger("app.ai")
 
 SENSITIVE_MASK = "***"
@@ -772,25 +768,7 @@ class AiToolService:
         return row
 
     async def _step_up(self, context: AuthContext, body: ApproveRequest) -> None:
-        if body.password is None:
-            raise ApiError(403, "STEP_UP_REQUIRED", "高危操作需要重新输入密码")
-        limiter = (
-            FailureLimiter(self.redis, STEP_UP_WINDOW_SECONDS) if self.redis is not None else None
-        )
-        key = f"step_up_fail:{context.user.id}"
-        if limiter is not None:
-            retry = await limiter.retry_after({key: STEP_UP_FAILURE_LIMIT})
-            if retry is not None:
-                raise ApiError(
-                    429,
-                    "RATE_LIMITED",
-                    "密码错误次数过多，请稍后再试",
-                    headers={"Retry-After": str(retry)},
-                )
-        if not verify_password(context.user.password_hash, body.password.get_secret_value()):
-            if limiter is not None:
-                await limiter.record_failure([key])
-            raise ApiError(403, "STEP_UP_FAILED", "密码错误")
+        await verify_step_up(self.redis, context.user, body.password)
 
     async def _execute(
         self, approver: AuthContext, row: AiToolExecution, instance: AgentInstance | None

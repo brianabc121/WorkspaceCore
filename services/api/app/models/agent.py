@@ -378,3 +378,56 @@ class AgentSshJob(Base):
     started_at: Mapped[datetime] = _created()
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = _updated()
+
+
+OPS_ACTIONS = ("status", "logs", "restart", "up", "prune", "report")
+OPS_SERVICES = ("openclaw", "tunnel", "image-proxy")
+OPS_STATUSES = ("running", "succeeded", "failed", "interrupted")
+
+
+class AgentOpsAction(Base):
+    """对用 SSH 部署过的实例执行的一次固定运维动作（T-0114，AGENT_OPS_PLAN 6.1，迁移 0032）。
+
+    命令写死在工作台里（app/domain/agent_ops.py），不拼接输入；在 API 进程内运行，进程重启时
+    running 改为 interrupted。output 是脱敏后的输出（最多 64 KB），7 天后连同记录一起删除；
+    审计只记谁、什么时候、什么动作、退出码。
+    """
+
+    __tablename__ = "agent_ops_actions"
+    __table_args__ = (
+        CheckConstraint(f"action IN {OPS_ACTIONS}", name="action"),
+        CheckConstraint(f"service IS NULL OR service IN {OPS_SERVICES}", name="service"),
+        CheckConstraint(f"status IN {OPS_STATUSES}", name="status"),
+        ForeignKeyConstraint(
+            ["workspace_id", "instance_id"],
+            ["workspace.agent_instances.workspace_id", "workspace.agent_instances.id"],
+            ondelete="CASCADE",
+        ),
+        # 同一实例同时只有一个进行中的动作
+        Index(
+            "uq_agent_ops_actions_running",
+            "instance_id",
+            unique=True,
+            postgresql_where=text("status = 'running'"),
+        ),
+        Index("ix_agent_ops_actions_instance_started", "instance_id", "started_at"),
+        Index("ix_agent_ops_actions_expires_at", "expires_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    instance_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    action: Mapped[str] = mapped_column(Text)
+    service: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'running'"))
+    exit_code: Mapped[int | None] = mapped_column(Integer)
+    output: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    truncated: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    error_code: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    started_at: Mapped[datetime] = _created()
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

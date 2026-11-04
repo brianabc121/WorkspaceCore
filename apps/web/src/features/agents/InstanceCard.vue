@@ -5,6 +5,7 @@ import { formatTime } from '../time'
 import { NETWORK, ROLE, SCOPE, STATUS } from './queries'
 import SshDeploy from './SshDeploy.vue'
 import HostStatus from './HostStatus.vue'
+import OpsPanel from './OpsPanel.vue'
 
 const props = defineProps<{ instance: Schema['AgentInstanceOut']; secrets: Schema['AgentSecretOut'][]; busy: boolean; host?: Schema['HostSummaryItem'] }>()
 const emit = defineEmits<{ edit: []; toggle: []; bundle: [previous: Schema['BundleRequest']['previous']]; revoke: [credential: Schema['AgentCredentialOut']]; grants: [grants: Schema['SecretGrantIn'][]]; projectAdmin: [enabled: boolean] }>()
@@ -43,6 +44,7 @@ function saveGrants() { if (grantsValid.value) { emit('grants', rows.value.map(r
       <p class="form-help">打开后它可以用 create_project 新建项目、用 add_to_project 把其他智能体拉进它建的项目，直接生效、不审批，每次都会通知管理员；它建的项目群的群主是打开权限的人。关闭后它已经建的项目和成员保留。<template v-if="instance.project_admin.enabled && instance.project_admin.granted_at"> 打开于 {{ formatTime(instance.project_admin.granted_at) }}。</template></p>
     </section>
     <SshDeploy :instance="instance" />
+    <OpsPanel :instance="instance" />
     <section class="agent-section" aria-label="接入包">
       <h3>接入包</h3>
       <p class="form-help">每次生成都会签发新凭证，凭证只出现在这一次下载的 zip 里。{{ instance.network_mode === 'public' ? '外网模式同时签发 90 天的客户端证书；用上面的 SSH 自动部署时会自动生成，不用下载。' : '' }}</p>
