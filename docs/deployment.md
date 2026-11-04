@@ -962,7 +962,7 @@ Worker 每分钟检查一次，通知 owner / admin；同一实例同一类告�
 2. 在接入包目录手动跑一次：`docker compose exec -T openclaw node /opt/myworkspace/bin/host-report.mjs; echo $?`。退出码 0 就是报上去了；否则看最后一行错误：
    - `host-report: workspace returned 401`：实例凭证失效（实例被停用或凭证轮换过），重新下载接入包或重新部署；
    - `host-report: workspace returned 422`：脚本版本与工作台不一致，重新下载接入包；
-   - `host-report: workspace returned 429`：每分钟超过 2 次，等一分钟再试。
+   - `host-report: already reported this minute …, skipped`（退出码 0）：工作台每个实例每分钟只收 2 次，这一分钟已经报过（定时任务刚跑过），数据已是最新，不用处理。
 
 ## 22. 远程运维动作（T-0114）
 

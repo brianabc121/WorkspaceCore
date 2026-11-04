@@ -77,12 +77,13 @@ def test_parsers() -> None:
 
 class _Collector(BaseHTTPRequestHandler):
     seen: ClassVar[list[tuple[str, str, dict[str, Any]]]] = []
+    status: ClassVar[int] = 200
 
     def do_POST(self) -> None:
         length = int(self.headers["content-length"])
         body = json.loads(self.rfile.read(length))
         self.seen.append((self.path, self.headers.get("authorization", ""), body))
-        self.send_response(200)
+        self.send_response(self.status)
         self.end_headers()
 
     def log_message(self, *args: Any) -> None:
@@ -92,6 +93,7 @@ class _Collector(BaseHTTPRequestHandler):
 @pytest.fixture
 def server() -> Iterator[str]:
     _Collector.seen.clear()
+    _Collector.status = 200
     httpd = HTTPServer(("127.0.0.1", 0), _Collector)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -99,7 +101,7 @@ def server() -> Iterator[str]:
     httpd.shutdown()
 
 
-def test_main_posts_numbers_only(server: str, tmp_path: Path) -> None:
+def _fake_host(tmp_path: Path, server: str) -> dict[str, str]:
     proc = tmp_path / "proc"
     (proc / "net").mkdir(parents=True)
     (proc / "stat").write_text(STAT)
@@ -120,7 +122,12 @@ def test_main_posts_numbers_only(server: str, tmp_path: Path) -> None:
         "MYWS_DATA_PATH": str(tmp_path),
         "MYWS_ROOT_PATH": str(tmp_path),
     }
-    _node("await m.main(); console.log('null')", env=env)
+    return env
+
+
+def test_main_posts_numbers_only(server: str, tmp_path: Path) -> None:
+    env = _fake_host(tmp_path, server)
+    assert _node("console.log(JSON.stringify(await m.main()))", env=env) == "ok"
     [(path, auth, body)] = _Collector.seen
     assert path == "/agent-api/v1/host-metrics" and auth == "Bearer mwa_test"
     assert set(body) == {"cpu", "memory", "disks", "network", "uptime_seconds"}
@@ -133,3 +140,17 @@ def test_main_posts_numbers_only(server: str, tmp_path: Path) -> None:
     # 只有数字与 CPU 型号：没有网卡名、IP、路径
     flat = json.dumps(body)
     assert "eth0" not in flat and str(tmp_path) not in flat
+
+
+def test_rate_limited_minute_is_not_a_failure(server: str, tmp_path: Path) -> None:
+    """这一分钟已经报过（定时任务刚跑过，又点了“立即上报一次”）：工作台返回 429，脚本正常结束。"""
+    env = _fake_host(tmp_path, server)
+    _Collector.status = 429
+    assert _node("console.log(JSON.stringify(await m.main()))", env=env) == "rate_limited"
+    _Collector.status = 500
+    failed = _node(
+        "try { await m.main(); console.log('null') }"
+        " catch (e) { console.log(JSON.stringify(e.message)) }",
+        env=env,
+    )
+    assert failed == "workspace returned 500"

@@ -152,7 +152,12 @@ function post(path, body) {
     }
     const req = (url.protocol === "https:" ? https : http).request(url, opts, (res) => {
       res.resume();
-      res.on("end", () => (res.statusCode === 200 ? resolve() : reject(new Error(`workspace returned ${res.statusCode}`))));
+      res.on("end", () => {
+        if (res.statusCode === 200) return resolve("ok");
+        // 每个实例每分钟最多收 2 次：这一分钟已经报过（定时任务或“立即上报一次”），工作台的数据已是最新，不算失败
+        if (res.statusCode === 429) return resolve("rate_limited");
+        reject(new Error(`workspace returned ${res.statusCode}`));
+      });
     });
     req.on("timeout", () => req.destroy(new Error("timeout")));
     req.on("error", reject);
@@ -164,7 +169,11 @@ export async function main() {
   if (!process.env.MYWS_AGENT_API || !process.env.MYWS_INSTANCE_TOKEN) {
     throw new Error("MYWS_AGENT_API / MYWS_INSTANCE_TOKEN not set");
   }
-  await post("/v1/host-metrics", collect());
+  const result = await post("/v1/host-metrics", collect());
+  if (result === "rate_limited") {
+    process.stderr.write("host-report: already reported this minute (the workspace accepts 2 per minute), skipped\n");
+  }
+  return result;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
