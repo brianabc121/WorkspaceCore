@@ -31,6 +31,7 @@ from app.domain import (
     events,
     im,
     im_projection,
+    knowledge_files,
     notifications,
     sync,
 )
@@ -205,6 +206,39 @@ async def check_services(ctx: dict[str, Any]) -> list[str]:
     return await alerts.evaluate(ctx["redis"], _sync(ctx).sessions, items)
 
 
+async def replicate_files(ctx: dict[str, Any]) -> int:
+    """知识库图片：把待复制的图片写到副本（T-0103）。没配置副本时什么也不做。"""
+    context = _sync(ctx)
+    stores = knowledge_files.FileStores(context.settings)
+    async with context.sessions() as db:
+        done = await knowledge_files.replicate_pending(db, stores)
+        await db.commit()
+    if done:
+        logger.info("kb files replicated", extra={"count": done})
+    return done
+
+
+async def cleanup_files(ctx: dict[str, Any]) -> int:
+    """知识库图片：删除没有笔记引用、上传超过 24 小时的图片（T-0103）。"""
+    context = _sync(ctx)
+    stores = knowledge_files.FileStores(context.settings)
+    async with context.sessions() as db:
+        removed = await knowledge_files.cleanup_unreferenced(db, stores)
+        await db.commit()
+    if removed:
+        logger.info("kb files cleaned up", extra={"count": removed})
+    return removed
+
+
+async def check_file_storage(ctx: dict[str, Any]) -> bool:
+    """知识库图片存储自检：写、读、删一个探测对象；启动时和每天跑一次，失败写警告日志（T-0103）。"""
+    context = _sync(ctx)
+    results = await knowledge_files.run_checks(
+        knowledge_files.FileStores(context.settings), ctx["redis"]
+    )
+    return all(check.ok for check in results.values())
+
+
 async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -255,6 +289,9 @@ class WorkerSettings:
         cron(watch_agents, minute=set(range(2, 60, 5)), second=10, timeout=120),
         cron(reconcile_im_friends, minute=41, timeout=600),
         cron(warn_agent_expiry, hour=1, minute=7, timeout=120),
+        cron(replicate_files, second=55, timeout=300),
+        cron(cleanup_files, hour=3, minute=37, timeout=1800),
+        cron(check_file_storage, hour=4, minute=13, run_at_startup=True, timeout=180),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())
     on_startup = startup

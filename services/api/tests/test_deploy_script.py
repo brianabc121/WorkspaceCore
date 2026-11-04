@@ -884,3 +884,17 @@ def test_an_unsaved_n8n_password_goes_to_a_root_only_file_not_the_log(tmp_path: 
     assert "KEPT_WHILE_CONNECTING" in ok.stderr
     assert not file.exists()
     assert "已加密保存在工作台「自动化」页（日志里不显示）" in ok.stderr
+
+
+# ---------------------------------------------------------------- 知识库图片存储（T-0103）
+
+
+def test_storage_step_is_part_of_connect_and_keeps_secrets_out_of_answers() -> None:
+    # 前台问、后台自检；两个密钥只经 ask_secret 当场输入写进 .env，不进 ANS（ANS 会写进回答文件）
+    assert re.search(r"plan_connect\(\) \{.*?plan_storage\n", DEPLOY, re.DOTALL)
+    assert re.search(r"connect_components\(\) \{.*?connect_storage\n", DEPLOY, re.DOTALL)
+    assert 'secret="$(ask_secret "R2 Secret Access Key' in DEPLOY
+    assert 'secret="$(ask_secret "AccessKey Secret' in DEPLOY
+    secret_lines = [line for line in DEPLOY.splitlines() if "SECRET" in line and "ANS[" in line]
+    assert secret_lines == []
+    assert "connect_cmd storage-check" in DEPLOY

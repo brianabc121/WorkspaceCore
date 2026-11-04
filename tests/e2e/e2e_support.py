@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class Response:
     def __init__(self, status: int, body: bytes, headers: Any) -> None:
         self.status = status
+        self.body = body
         self.text = body.decode("utf-8", errors="replace")
         self.headers = headers
 
@@ -59,10 +60,13 @@ class Client:
         *,
         headers: dict[str, str] | None = None,
         csrf: bool = True,
+        raw: bytes | None = None,
     ) -> Response:
         all_headers = {"Accept": "application/json", **(headers or {})}
         data = None
-        if body is not None:
+        if raw is not None:  # 请求体原样发送（例如上传图片），Content-Type 由调用方给
+            data = raw
+        elif body is not None:
             data = json.dumps(body).encode()
             all_headers["Content-Type"] = "application/json"
         if method != "GET":

@@ -4,6 +4,7 @@ import { emptyPage, fail, mockApi, openApp } from './helpers'
 import { createRenderer, inlineTags, outline, parseTarget, stats } from '../src/features/kb/markdown'
 import { assemble, conflicts, threeWay } from '../src/features/kb/merge'
 import { excerpt } from '../src/features/kb/format'
+import { noteImages } from '../src/features/kb/api'
 import type { Schema } from '../src/services/api'
 
 // 知识库前端（T-0099）
@@ -64,6 +65,15 @@ describe('知识库 Markdown', () => {
     expect([...doc.querySelectorAll('a')].map(a => a.getAttribute('href'))).toEqual(['https://example.com', 'https://tracker.example/p.png'])
     expect(html).toContain('href="https://example.com" target="_blank" rel="noopener noreferrer nofollow"')
     expect(doc.querySelector('a.kb-image-link')?.textContent).toBe('图片：图')
+  })
+  it('shows workspace images inline and keeps every other image source out', () => {
+    const id = '0b5f9c1e-2d3a-4b5c-8d9e-0f1a2b3c4d5e'
+    const html = render(`![架构图](/api/v1/knowledge/files/${id}) ![外链](https://example.com/a.png) ![伪造](/api/v1/knowledge/files/../../etc)`)
+    const doc = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html')
+    const imgs = [...doc.querySelectorAll('img')]
+    expect(imgs.map(i => [i.getAttribute('src'), i.getAttribute('alt'), i.className])).toEqual([[`/api/v1/knowledge/files/${id}`, '架构图', 'kb-img']])
+    expect([...doc.querySelectorAll('a.kb-image-link')].map(a => a.textContent)).toEqual(['图片：外链', '图片：伪造'])
+    expect(noteImages(`a ![一](/api/v1/knowledge/files/${id}) b ![](/api/v1/knowledge/files/${id}) ![x](https://e.com/p.png)`)).toEqual([{ url: `/api/v1/knowledge/files/${id}`, alt: '一' }])
   })
   it('parses link targets, outline, inline tags and counts', () => {
     expect(parseTarget('工作台 V2/发布前检查清单#回滚|回滚')).toEqual({ text: '工作台 V2/发布前检查清单', display: '回滚', section: '回滚' })
@@ -185,6 +195,49 @@ describe('知识库页面', () => {
     const body = await requests.find(r => r.method === 'POST' && path(r) === '/api/v1/knowledge/notes')!.clone().json()
     expect(body).toMatchObject({ space_id: 'space-p1', title: '新笔记', tags: ['发布'], type: 'record' })
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/knowledge/notes/note-new'))
+  })
+
+  it('uploads an inserted image, links it in the note and explains a rejected one', async () => {
+    const fileId = '0b5f9c1e-2d3a-4b5c-8d9e-0f1a2b3c4d5e'
+    let uploads = 0
+    const requests = kbApi(async (r) => {
+      if (r.method !== 'POST' || path(r) !== '/api/v1/knowledge/files') return undefined
+      uploads += 1
+      if (uploads === 2) return Response.json({ error: { code: 'QUOTA_EXCEEDED', message: '这个工作空间的图片已用满 2048 MB', request_id: 'req', details: {} } }, { status: 413 })
+      return Response.json({ id: fileId, url: `/api/v1/knowledge/files/${fileId}`, mime: 'image/png', size: 4, width: 2, height: 1, created_at: '2026-11-04T00:00:00Z' }, { status: 201 })
+    })
+    await openApp('/knowledge/notes/new?space=space-public&title=带图')
+    await vi.waitFor(() => expect(screen.getByRole('textbox', { name: '标题' })).toHaveValue('带图'))
+    expect(screen.getByRole('button', { name: '插入图片' })).toBeVisible()
+    const input = document.querySelector<HTMLInputElement>('input[type=file]')!
+    expect(input.accept).toBe('image/png,image/jpeg,image/gif,image/webp')
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File(['\x89PNG'], '架构图.png', { type: 'image/png' })] })
+    await fireEvent.update(input)
+    await vi.waitFor(() => expect(document.querySelector('.cm-content')?.textContent).toContain(`![架构图](/api/v1/knowledge/files/${fileId})`))
+    const sent = requests.find(r => path(r) === '/api/v1/knowledge/files')!
+    expect(sent.headers.get('content-type')).toBe('image/png')
+    expect(await sent.clone().text()).toBe('\x89PNG')
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File(['GIF'], '第二张.gif', { type: 'image/gif' })] })
+    await fireEvent.update(input)
+    expect(await screen.findByRole('alert')).toHaveTextContent('第二张.gif：这个工作空间的图片已用满 2048 MB')
+    expect(document.querySelector('.cm-content')?.textContent).not.toContain('上传中')
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File(['<svg/>'], '图.svg', { type: 'image/svg+xml' })] })
+    await fireEvent.update(input)
+    expect(await screen.findByRole('alert')).toHaveTextContent('图.svg：只支持 PNG、JPEG、GIF、WebP 图片')
+    expect(uploads).toBe(2)
+  })
+
+  it('shows images in a note and enlarges them on click', async () => {
+    const fileId = '0b5f9c1e-2d3a-4b5c-8d9e-0f1a2b3c4d5e'
+    kbApi(r => path(r) === '/api/v1/knowledge/notes/note-1' && r.method === 'GET' ? Response.json({ ...note, body: `看图：\n\n![部署拓扑](/api/v1/knowledge/files/${fileId})` }) : undefined)
+    await openApp('/knowledge/notes/note-1')
+    const article = await screen.findByRole('article')
+    const img = await within(article).findByRole('button', { name: '放大图片：部署拓扑' })
+    expect(img).toHaveAttribute('src', `/api/v1/knowledge/files/${fileId}`)
+    await fireEvent.click(img)
+    const dialog = await screen.findByRole('dialog', { name: '部署拓扑' })
+    expect(within(dialog).getByRole('img', { name: '部署拓扑' })).toHaveAttribute('src', `/api/v1/knowledge/files/${fileId}`)
+    expect(within(dialog).getByRole('link', { name: '打开原图' })).toHaveAttribute('href', `/api/v1/knowledge/files/${fileId}`)
   })
 
   it('reports a version conflict and can save over it with the latest version', async () => {

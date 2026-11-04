@@ -30,8 +30,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
+from app.domain import knowledge_files, notifications, secret_scan
 from app.domain import knowledge_links as links
-from app.domain import notifications, secret_scan
 from app.domain.audit import AuditTrail
 from app.domain.policy import WorkspaceAccess, has_role, not_found
 from app.domain.ratelimit import WindowLimiter
@@ -39,6 +39,8 @@ from app.models import (
     AgentInstance,
     Bookmark,
     KnowledgeBriefRead,
+    KnowledgeFile,
+    KnowledgeFileRef,
     KnowledgeGuardEvent,
     KnowledgeLink,
     KnowledgeNote,
@@ -1185,6 +1187,8 @@ class KnowledgeBase:
                 )
                 .values(target_note_id=note.id)
             )
+        # 图片引用（T-0103）：正文里的本工作空间图片；历史版本引用过的保留
+        await knowledge_files.sync_refs(self.db, note.workspace_id, note.id, note.body)
 
     async def _find(
         self, workspace_id: uuid.UUID, key: str, space_id: uuid.UUID | None
@@ -1386,6 +1390,7 @@ class KnowledgeBase:
         center: uuid.UUID | None = None,
         depth: int = 1,
         include_resources: bool = True,
+        include_files: bool = False,
     ) -> GraphOut:
         spaces = await self.space_map(workspace_id)
         alive = and_(KnowledgeNote.workspace_id == workspace_id, KnowledgeNote.deleted_at.is_(None))
@@ -1486,6 +1491,42 @@ class KnowledgeBase:
                     author_kind=None,
                     degree=degree.get(rid, 0),
                 )
+            )
+        if include_files and ids:
+            # 图片节点（T-0103，“显示图片”）：正文里现在引用的图片，连到引用它的笔记
+            file_rows = (
+                await self.db.execute(
+                    select(
+                        KnowledgeFileRef.note_id,
+                        KnowledgeFile.id,
+                        KnowledgeFile.width,
+                        KnowledgeFile.height,
+                    )
+                    .join(KnowledgeFile, KnowledgeFile.id == KnowledgeFileRef.file_id)
+                    .where(KnowledgeFileRef.note_id.in_(ids), KnowledgeFileRef.current.is_(True))
+                )
+            ).all()
+            file_titles: dict[uuid.UUID, str] = {}
+            for note_id, file_id, width, height in file_rows:
+                file_titles[file_id] = f"图片 {width}×{height}"
+                edges.append(GraphEdge(source=note_id, target=file_id))
+                degree[note_id] = degree.get(note_id, 0) + 1
+                degree[file_id] = degree.get(file_id, 0) + 1
+            for node in nodes:
+                if node.kind == "note":
+                    node.degree = degree.get(node.id, 0)
+            nodes.extend(
+                GraphNode(
+                    id=file_id,
+                    kind="file",
+                    title=title,
+                    space_id=None,
+                    space_kind=None,
+                    type=None,
+                    author_kind=None,
+                    degree=degree.get(file_id, 0),
+                )
+                for file_id, title in file_titles.items()
             )
         return GraphOut(nodes=nodes, edges=edges, truncated=truncated, total_notes=total)
 

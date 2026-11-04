@@ -45,6 +45,8 @@ from app.models.integration import (
 from app.models.knowledge import Bookmark, KnowledgeSource, ResourceLink
 from app.models.knowledge_base import (
     KnowledgeBriefRead,
+    KnowledgeFile,
+    KnowledgeFileRef,
     KnowledgeGuardEvent,
     KnowledgeLink,
     KnowledgeNote,
@@ -97,6 +99,8 @@ __all__ = [
     "Integration",
     "IntegrationAccount",
     "KnowledgeBriefRead",
+    "KnowledgeFile",
+    "KnowledgeFileRef",
     "KnowledgeGuardEvent",
     "KnowledgeLink",
     "KnowledgeNote",

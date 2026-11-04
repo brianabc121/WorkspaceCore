@@ -19,9 +19,11 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import uuid
+import zlib
 from typing import Any
 
 from e2e_support import ROOT, Client, Report, default_base_url, env_value, parse_base_url
@@ -64,6 +66,25 @@ def check_openim(report: Report, backup_output: str, restore_output: str) -> Non
         "A15（V2）：恢复后 OpenIM 的消息、好友、群成员与会话数量和备份时一致且不为空",
         all(counts.get(name, 0) > 0 for name in ("msg", "friend", "group_member", "conversation")),
         json.dumps(counts, ensure_ascii=False),
+    )
+
+
+def tiny_png(run: str) -> bytes:
+    """一张 1×1 的 PNG；带上本次运行的标记，每次的内容（哈希）都不同。"""
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        crc = struct.pack(">I", zlib.crc32(kind + data))
+        return struct.pack(">I", len(data)) + kind + data + crc
+
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    pixels = zlib.compress(b"\x00\xff\x00\x00")
+    text = b"Comment\x00" + run.encode()
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"tEXt", text)
+        + chunk(b"IDAT", pixels)
+        + chunk(b"IEND", b"")
     )
 
 
@@ -138,6 +159,18 @@ def run_checks(
     )
     before = owner.request("GET", "/api/v1/dashboard/overview", headers=h).json() or {}
     saved = note_of(before, str(note.get("id")))
+    # 知识库图片（T-0103）：本地存储的图片也要随备份恢复
+    image = tiny_png(run)
+    uploaded = (
+        owner.request(
+            "POST",
+            "/api/v1/knowledge/files",
+            raw=image,
+            headers={**h, "Content-Type": "image/png"},
+        ).json()
+        or {}
+    )
+    report.check("准备数据：上传一张知识库图片", bool(uploaded.get("url")), str(uploaded)[:200])
     report.check(
         "准备数据：显示名、首页便签（含布局）与日程已写入",
         bool(saved) and saved["config"]["text"] == note_text and bool(event.get("id")),
@@ -229,6 +262,17 @@ def run_checks(
     )
     audit = restored.request("GET", "/api/v1/audit-logs?limit=50", headers=h).json() or {}
     report.check("A15 恢复后审计日志还在", len(audit.get("items", [])) > 0)
+    picture = restored.request("GET", str(uploaded.get("url")))
+    report.check(
+        "A15 恢复后知识库图片还在，内容与备份时一致（T-0103）",
+        picture.status == 200 and picture.body == image,
+        f"HTTP {picture.status}，{len(picture.body)} 字节",
+    )
+    report.check(
+        "restore-verify 核对了知识库图片的校验和",
+        "知识库图片检查：" in output and "0 个不一致" in output,
+        next((x for x in output.splitlines() if x.startswith("知识库图片检查")), ""),
+    )
 
     # ---------------------------------------------------------------- 6. 正在运行的栈不受影响
     live = (

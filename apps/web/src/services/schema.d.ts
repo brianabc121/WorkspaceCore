@@ -1515,6 +1515,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/knowledge/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 上传图片（member）
+         * @description 请求体就是图片本身；只接受 PNG、JPEG、GIF、WebP（按文件头判断，SVG 不收），不超过 FILE_MAX_MB（默认 10 MB），工作空间合计不超过 FILE_QUOTA_MB。JPEG 会去掉 Exif 等元数据（保留方向）；同样的内容只存一份，返回已有的那张。把返回的 url 写进笔记正文（`![说明](url)`）即可引用；没有笔记引用的图片 24 小时后清理。
+         */
+        post: operations["upload_file"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/files/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 读取图片（图片所属工作空间的 viewer 以上）
+         * @description 图片一律经工作台读取。不需要 X-Workspace-Id：按图片所属的工作空间校验当前用户，不是成员时与不存在一样返回 404（笔记里的 <img> 由浏览器直接加载，带不了请求头）。
+         */
+        get: operations["get_file"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/knowledge/graph": {
         parameters: {
             query?: never;
@@ -1928,6 +1968,46 @@ export interface paths {
         get: operations["list_services"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/operations/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 知识库图片存储的状态（owner / admin）
+         * @description 主存储、副本、最近一次自检、这个工作空间的用量与配额、待复制数量。不返回密钥；本地存储不返回路径。
+         */
+        get: operations["storage_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/operations/storage/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 知识库图片存储自检（owner / admin）
+         * @description 对主存储与副本各写一个探测对象、读回、删除；结果也显示在运维页。
+         */
+        post: operations["check_storage"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3922,6 +4002,41 @@ export interface components {
             /** Failed Jobs */
             failed_jobs: components["schemas"]["FailedJob"][];
         };
+        /**
+         * FileOut
+         * @description 上传的图片（T-0103）。在正文里写 `![说明](url)` 引用；读取经工作台，按工作空间与角色校验。
+         */
+        FileOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Height */
+            height: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Mime
+             * @enum {string}
+             */
+            mime: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+            /**
+             * Size
+             * @description 字节数（JPEG 去掉元数据之后）
+             */
+            size: number;
+            /**
+             * Url
+             * @description /api/v1/knowledge/files/<id>
+             */
+            url: string;
+            /** Width */
+            width: number;
+        };
         /** GitHubActivityConfig */
         GitHubActivityConfig: {
             /**
@@ -4037,9 +4152,10 @@ export interface components {
             id: string;
             /**
              * Kind
+             * @description file 是图片（只有 files=true 时返回，T-0103）
              * @enum {string}
              */
-            kind: "note" | "task" | "project" | "bookmark";
+            kind: "note" | "task" | "project" | "bookmark" | "file";
             /** Space Id */
             space_id: string | null;
             /** Space Kind */
@@ -6930,6 +7046,70 @@ export interface components {
              * Format: date
              */
             week_start: string;
+        };
+        /** StorageCheck */
+        StorageCheck: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Reason
+             * @description 失败原因：错误分类或 S3 错误码（如 SignatureDoesNotMatch）
+             */
+            reason?: string | null;
+        };
+        /** StorageLocation */
+        StorageLocation: {
+            /** @description 最近一次自检（写、读、删探测对象） */
+            check?: components["schemas"]["StorageCheck"] | null;
+            /** Configured */
+            configured: boolean;
+            /**
+             * Missing
+             * @description 没配置完整时缺少的环境变量
+             */
+            missing?: string[];
+            /**
+             * Name
+             * @enum {string}
+             */
+            name: "local" | "r2" | "oss";
+            /**
+             * Where
+             * @description R2 / OSS 为桶的地址（不含密钥）；本地存储不返回路径
+             */
+            where?: string | null;
+        };
+        /**
+         * StorageStatus
+         * @description 知识库图片存储（T-0103，owner / admin）。
+         */
+        StorageStatus: {
+            /** Failed Replication */
+            failed_replication: number;
+            /**
+             * Files
+             * @description 这个工作空间的图片数
+             */
+            files: number;
+            /**
+             * Pending Replication
+             * @description 全部工作空间里等待复制到副本的图片
+             */
+            pending_replication: number;
+            primary: components["schemas"]["StorageLocation"];
+            /** Quota Bytes */
+            quota_bytes: number;
+            replica: components["schemas"]["StorageLocation"] | null;
+            /**
+             * Used Bytes
+             * @description 这个工作空间已用的空间
+             */
+            used_bytes: number;
         };
         /** SyncRequestOut */
         SyncRequestOut: {
@@ -14565,11 +14745,168 @@ export interface operations {
             };
         };
     };
+    upload_file: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/gif": string;
+                "image/jpeg": string;
+                "image/png": string;
+                "image/webp": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求体过大（PAYLOAD_TOO_LARGE） */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_file: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 图片内容（Cache-Control: private；ETag 是内容的 SHA-256） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "image/gif": string;
+                    "image/jpeg": string;
+                    "image/png": string;
+                    "image/webp": string;
+                };
+            };
+            /** @description If-None-Match 命中 */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     graph: {
         parameters: {
             query?: {
                 space_id?: string[] | null;
                 resources?: boolean;
+                /** @description 显示图片：每张图片一个节点，连到引用它的笔记 */
+                files?: boolean;
             };
             header: {
                 /** @description 当前工作空间；不是成员时返回 404 */
@@ -16438,6 +16775,126 @@ export interface operations {
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    storage_status: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageStatus"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    check_storage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageStatus"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

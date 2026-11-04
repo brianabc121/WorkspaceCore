@@ -150,3 +150,33 @@ export function scrollToLine(view: EditorView, lineNumber: number) {
 export function setDoc(view: EditorView, doc: string) {
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc } })
 }
+
+// 粘贴、拖进编辑区的图片（T-0103）：交给 onFiles 上传；其余内容照常处理
+export function imageInput(onFiles: (files: File[], at: number) => void) {
+  const pick = (list: FileList | null | undefined) => [...(list ?? [])].filter(f => f.type.startsWith('image/'))
+  return EditorView.domEventHandlers({
+    paste(event, view) {
+      const files = pick(event.clipboardData?.files)
+      if (!files.length) return false
+      event.preventDefault()
+      onFiles(files, view.state.selection.main.head)
+      return true
+    },
+    drop(event, view) {
+      const files = pick(event.dataTransfer?.files)
+      if (!files.length) return false
+      event.preventDefault()
+      const at = view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? view.state.selection.main.head
+      onFiles(files, at)
+      return true
+    },
+  })
+}
+
+// 上传占位：插入一段唯一的占位文字，完成后换成图片链接，失败就删掉
+export function replaceText(view: EditorView, find: string, insert: string) {
+  const at = view.state.doc.toString().indexOf(find)
+  if (at < 0) return false
+  view.dispatch({ changes: { from: at, to: at + find.length, insert } })
+  return true
+}

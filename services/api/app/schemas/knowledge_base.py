@@ -296,7 +296,9 @@ class RevisionDetail(RevisionOut):
 
 class GraphNode(BaseModel):
     id: UUID
-    kind: Literal["note", "task", "project", "bookmark"]
+    kind: Literal["note", "task", "project", "bookmark", "file"] = Field(
+        description="file 是图片（只有 files=true 时返回，T-0103）"
+    )
     title: str
     space_id: UUID | None
     space_kind: SpaceKind | None
@@ -417,3 +419,15 @@ class AgentKnowledgeOut(BaseModel):
     metrics: AgentMetrics
     projects: list[AgentProjectOut]
     weekly: list[AgentWeek] = Field(description="近 8 周，最早的在前")
+
+
+class FileOut(BaseModel):
+    """上传的图片（T-0103）。在正文里写 `![说明](url)` 引用；读取经工作台，按工作空间与角色校验。"""
+
+    id: UUID
+    url: str = Field(description="/api/v1/knowledge/files/<id>")
+    mime: Literal["image/png", "image/jpeg", "image/gif", "image/webp"]
+    size: int = Field(description="字节数（JPEG 去掉元数据之后）")
+    width: int
+    height: int
+    created_at: datetime

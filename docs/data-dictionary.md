@@ -244,3 +244,14 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 检索不再按确认加权。**downgrade** 加回两列（全部为空）与外键，原来的确认记录不恢复。
 
 ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。
+
+### 迁移 `0026`（T-0103）
+
+知识库图片（`docs/v2/TIMELINE_PLAN.md` 第 4 节）。随工作空间级联删除；对象存储里的文件由 Worker 清理（工作空间被删时卷或桶里的 `kb/<workspace_id>/` 留着，运维自行清理）。
+
+| 表 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `knowledge_files` | `id`、`workspace_id`、`sha256`、`mime`、`size`、`width`、`height`、`storage`、`replica`、`replica_state`、`replica_attempts`、`replica_error`、`created_by_user`、`created_at` | 上传的图片。唯一 `(workspace_id, sha256)`：同一工作空间同一内容一行，对象 key 是 `kb/<workspace_id>/<sha256>`。`storage` ∈ `local` / `r2` / `oss`（写入时的主存储，换了主存储以后旧图片仍从原处读）；`replica_state` ∈ `none` / `pending` / `done` / `failed`，Worker 每分钟复制 `pending`（部分索引 `ix_knowledge_files_replica_pending`），失败 10 次标为 `failed`；`replica_error` 只记错误分类或 S3 错误码 |
+| `knowledge_file_refs` | `file_id`、`note_id`、`workspace_id`、`current`、`created_at` | 笔记引用了哪些图片，主键 `(file_id, note_id)`，随图片或笔记级联删除。保存笔记时按正文更新：正文里有的 `current = true`，以前引用过的保留为 `false`（版本历史里的图片不丢）。只记本工作空间的图片。没有任何引用、上传超过 24 小时的图片由 Worker 每天删除（主存储与副本都删） |
+
+**downgrade** 删除两张表，存储里的文件不动。

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { RouterLink, onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
-import { Bold, CircleAlert, Code, Heading, Italic, List, ListChecks, ListOrdered, Quote, Redo2, SlidersHorizontal, Strikethrough, Table, Undo2, X } from '@lucide/vue'
+import { Bold, CircleAlert, Code, Heading, ImagePlus, Italic, List, ListChecks, ListOrdered, Quote, Redo2, SlidersHorizontal, Strikethrough, Table, Undo2, X } from '@lucide/vue'
 import type { EditorView } from '@codemirror/view'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError } from '../../services/api'
 import ModalPanel from '../../components/ModalPanel.vue'
 import { useMediaQuery } from '../../composables/useMediaQuery'
-import { EDITABLE_TYPES, NOTE_TYPE_LABELS, SPACE_KIND_LABELS, authorLabel, kbError, useKb, useNote, useNotes, useSpaces, type Note, type NoteType } from './api'
-import { createEditor, insertBlock, insertText, linePrefix, runRedo, runUndo, scrollToLine, setDoc, wrap, type Suggestion } from './cm'
+import { EDITABLE_TYPES, IMAGE_TYPES, NOTE_TYPE_LABELS, SPACE_KIND_LABELS, authorLabel, kbError, useKb, useNote, useNotes, useSpaces, type Note, type NoteType } from './api'
+import { createEditor, imageInput, insertBlock, insertText, linePrefix, replaceText, runRedo, runUndo, scrollToLine, setDoc, wrap, type Suggestion } from './cm'
 import { createRenderer, inlineTags, normalize, outline, stats } from './markdown'
 import { assemble, conflicts, threeWay, unresolved, type MergeChunk } from './merge'
 import { when } from './format'
@@ -118,7 +118,39 @@ async function suggest(q: string): Promise<Suggestion[]> {
 }
 function mountEditor() {
   if (!host.value || view.value) return
-  view.value = createEditor(host.value, body.value, { onChange: (doc) => { body.value = doc }, suggest, tags: () => knownTags.value, onSave: () => void save() })
+  view.value = createEditor(host.value, body.value, { onChange: (doc) => { body.value = doc }, suggest, tags: () => knownTags.value, onSave: () => void save() }, [imageInput((files, at) => void uploadImages(files, at))])
+}
+
+// ---------------------------------------------------------------- 图片（T-0103）：插入、粘贴、拖入都上传
+const fileInput = ref<HTMLInputElement | null>(null), uploading = ref(0)
+let uploadSeq = 0
+const altOf = (file: File) => file.name.replace(/\.[^.]+$/, '').replace(/[[\]]/g, '').slice(0, 80) || '图片'
+async function uploadImages(files: File[], at?: number) {
+  const v = view.value
+  if (!v || !canEdit.value) return
+  failure.value = ''
+  for (const file of files) {
+    if (!IMAGE_TYPES.includes(file.type)) { failure.value = `${file.name}：只支持 PNG、JPEG、GIF、WebP 图片`; continue }
+    const token = `![上传中：${altOf(file)}…](uploading-${++uploadSeq})`
+    const pos = Math.min(at ?? v.state.selection.main.head, v.state.doc.length)
+    const line = v.state.doc.lineAt(pos)
+    const before = pos === line.from ? '' : '\n'
+    v.dispatch({ changes: { from: pos, insert: before + token + '\n' }, selection: { anchor: pos + before.length + token.length + 1 } })
+    at = undefined
+    uploading.value++
+    try {
+      const saved = await kb.upload(file)
+      if (!replaceText(v, token, `![${altOf(file)}](${saved.url})`)) insertText(v, `![${altOf(file)}](${saved.url})`)
+    } catch (error) {
+      if (!replaceText(v, token + '\n', '')) replaceText(v, token, '')
+      failure.value = `${file.name}：${kbError(error)}`
+    } finally { uploading.value-- }
+  }
+}
+function pickImages(event: Event) {
+  const input = event.target as HTMLInputElement, files = [...(input.files ?? [])]
+  input.value = ''
+  if (files.length) void uploadImages(files)
 }
 onMounted(() => { if (loaded.value) mountEditor() })
 onBeforeUnmount(() => { view.value?.destroy(); clearTimeout(draftTimer) })
@@ -141,6 +173,7 @@ const tools = computed(() => {
     { label: '表格', icon: Table, run: () => insertBlock(v, '| 列 1 | 列 2 |\n| --- | --- |\n|  |  |') },
     null,
     { label: '链接到笔记', text: '[[ ]]', run: () => insertText(v, '[[]]', 2) },
+    { label: '插入图片', icon: ImagePlus, run: () => fileInput.value?.click() },
     { label: '撤销', icon: Undo2, run: () => runUndo(v), keys: 'Ctrl/⌘ Z' },
     { label: '重做', icon: Redo2, run: () => runRedo(v) },
   ]
@@ -279,6 +312,8 @@ const heading = computed(() => isNew.value ? '新建笔记' : `编辑《${source
             <component :is="tool.icon" v-if="tool.icon" aria-hidden="true" /><span v-else aria-hidden="true">{{ tool.text }}</span>
           </button>
         </template>
+        <input ref="fileInput" class="kb-sr" type="file" :accept="IMAGE_TYPES.join(',')" multiple tabindex="-1" aria-hidden="true" @change="pickImages">
+        <span v-if="uploading" class="kb-meta" role="status" style="margin-left: 8px">正在上传 {{ uploading }} 张图片…</span>
       </div>
       <div class="kb-editor-wrap">
         <div v-show="mode !== 'read'" class="kb-editor-pane">
@@ -291,7 +326,7 @@ const heading = computed(() => isNew.value ? '新建笔记' : `编辑《${source
           <article class="kb-md"><h1>{{ title || '未命名' }}</h1><div v-html="preview" /></article>
         </div>
       </div>
-      <p class="kb-statusbar"><span>Markdown</span><span class="kb-num">{{ counts.words }} 字 · {{ counts.links }} 个链接</span><span class="kb-desktop-only">输入 [[ 链接笔记，行内 #标签 会并入标签</span><span class="kb-desktop-only">保存时生成新版本，可以随时退回</span></p>
+      <p class="kb-statusbar"><span>Markdown</span><span class="kb-num">{{ counts.words }} 字 · {{ counts.links }} 个链接</span><span class="kb-desktop-only">输入 [[ 链接笔记，行内 #标签 会并入标签，粘贴或拖入图片会上传</span><span class="kb-desktop-only">保存时生成新版本，可以随时退回</span></p>
     </main>
 
     <aside class="kb-aside" :class="{ 'is-mobile-sheet': showProps }" aria-label="笔记属性">

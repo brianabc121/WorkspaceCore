@@ -31,6 +31,7 @@ from app.domain.im_groups import ImGroupService
 from app.domain.im_service import ImService
 from app.domain.integrations import IntegrationService
 from app.domain.knowledge import KnowledgeService as BookmarkService
+from app.domain.knowledge_files import FileService
 from app.domain.knowledge_views import KnowledgeService
 from app.domain.members import MemberService
 from app.domain.notifications import NotificationService
@@ -135,6 +136,14 @@ def get_knowledge_base_service(
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> KnowledgeService:
     return KnowledgeService(db, settings)
+
+
+def get_file_service(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> FileService:
+    return FileService(db, settings, redis=request.app.state.redis)
 
 
 def get_calendar_service(

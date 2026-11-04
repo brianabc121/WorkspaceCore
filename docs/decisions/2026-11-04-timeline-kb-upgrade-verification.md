@@ -103,4 +103,8 @@
 - CI：
   - 在已锁定的 Garage `dxflrs/garage:v2.4.1`（S3 兼容，OpenIM 已在用）上验证路径风格的读写删；
   - SigV4 用 AWS 官方文档的测试向量做单元测试，包括虚拟托管风格的规范请求。
+- **实施结果（T-0103，2026-11-04）**：
+  - SigV4：`app/integrations/object_storage.py` 自己实现，三组 AWS 官方测试向量（SigV4 测试套件 `get-vanilla`、S3 文档的 GET Object 虚拟托管风格示例、PUT Object 路径编码示例）的签名逐字一致（`tests/test_object_storage.py`）。
+  - Garage `dxflrs/garage:v2.4.1`：路径风格的 PUT（含重复 PUT）/ GET / HEAD / DELETE、删除不存在的对象、错误密钥返回 403 并归为 `AUTH_FAILED`、按 R2 配置（endpoint / region 覆盖）建存储并自检，全部通过（`scripts/garage_s3_check.sh`，CI 的 ci-api 也跑）。
+  - 虚拟托管风格只有 SigV4 向量与假服务端的测试，没有在真实服务上跑过（Garage 默认不开虚拟托管域名）。
 - **TODO（T-0103 / T-0106）**：真实 R2 与 OSS 账号上的验收。要等人类提供测试桶，或在环境设置里放开 `developers.cloudflare.com`、`help.aliyun.com` 后补读完整文档。在那之前，这一条验收标准不勾选。

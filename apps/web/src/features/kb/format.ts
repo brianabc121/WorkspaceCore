@@ -39,6 +39,7 @@ export function nodeHref(node: Pick<GraphNode, 'kind' | 'id'>) {
   if (node.kind === 'note') return `/knowledge/notes/${node.id}`
   if (node.kind === 'task') return `/tasks?task=${encodeURIComponent(node.id)}`
   if (node.kind === 'project') return `/tasks?project_id=${encodeURIComponent(node.id)}`
+  if (node.kind === 'file') return `/api/v1/knowledge/files/${encodeURIComponent(node.id)}`
   return '/knowledge/docs'
 }
 

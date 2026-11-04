@@ -26,6 +26,19 @@ function seed(...args) {
   }).trim().split(/\s+/)
 }
 function check(condition, message) { if (!condition) throw new Error(message) }
+// 1×1 的 PNG；带上本次运行的标记，每次内容（哈希）不同
+function tinyPng(run) {
+  const { crc32 } = require('node:zlib')
+  const chunk = (type, data) => {
+    const head = Buffer.alloc(4); head.writeUInt32BE(data.length)
+    const body = Buffer.concat([Buffer.from(type), data])
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(body) >>> 0)
+    return Buffer.concat([head, body, crc])
+  }
+  const ihdr = Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0])
+  const idat = require('node:zlib').deflateSync(Buffer.from([0, 0x2a, 0x78, 0xd6]))
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('tEXt', Buffer.from(`Comment\0${run}`)), chunk('IDAT', idat), chunk('IEND', Buffer.alloc(0))])
+}
 
 // 页面里直接调用接口（带会话 Cookie、CSRF 与工作空间），用于准备数据
 async function api(page, workspace, method, pathname, body, extra = {}) {
@@ -192,6 +205,29 @@ const NOTE_URL = /\/knowledge\/notes\/[0-9a-f-]{36}$/
   await chart.getByRole('table').waitFor()
   check(await chart.getByRole('row').count() === 9, '趋势图的表格视图应有 8 周（加表头）')
   step('项目知识库主页：简报、每周修改的趋势图（悬停提示、表格视图）')
+
+  // ---------------------------------------------------------------- 图片（T-0103）：编辑器上传、阅读页显示与放大、图谱图片节点
+  const imageTitle = `带图的笔记 ${run}`
+  await page.goto(`${base}/knowledge/notes/new?space=${pub.id}`)
+  await page.getByRole('textbox', { name: '标题' }).waitFor()
+  await editorReady(page)
+  await page.getByRole('textbox', { name: '标题' }).fill(imageTitle)
+  await page.locator('.cm-content').click()
+  await page.keyboard.type('拓扑图：')
+  await page.locator('input[type=file]').setInputFiles({ name: '拓扑.png', mimeType: 'image/png', buffer: tinyPng(run) })
+  await page.waitForFunction(() => /!\[拓扑\]\(\/api\/v1\/knowledge\/files\/[0-9a-f-]{36}\)/.test(document.querySelector('.cm-content')?.textContent ?? ''), null, { timeout: 15000 })
+  await saveButton(page).click()
+  await page.waitForURL(/\/knowledge\/notes\/[0-9a-f-]{36}$/)
+  const picture = page.locator('article img.kb-img')
+  await picture.waitFor()
+  await page.waitForFunction(() => { const img = document.querySelector('article img.kb-img'); return !!img && img.complete && img.naturalWidth > 0 })
+  await picture.click()
+  await page.getByRole('dialog', { name: '拓扑' }).waitFor()
+  await page.keyboard.press('Escape')
+  await page.goto(`${base}/knowledge`)
+  await page.getByRole('checkbox', { name: '显示图片' }).check()
+  await page.locator('.kb-node rect.f-file').first().waitFor()
+  step('图片：编辑器上传后插入链接，阅读页显示并可放大，图谱“显示图片”有图片节点')
 
   // ---------------------------------------------------------------- 手机宽度：底部导航，不横向滚动
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'zh-CN', storageState: await context.storageState() })

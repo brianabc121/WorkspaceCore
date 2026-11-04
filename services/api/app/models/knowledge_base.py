@@ -363,3 +363,68 @@ class KnowledgeGuardEvent(Base):
     detail: Mapped[str] = mapped_column(Text)
     note_title: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+
+
+REPLICA_STATES = ("none", "pending", "done", "failed")
+
+
+class KnowledgeFile(Base):
+    """知识库图片（T-0103，docs/v2/TIMELINE_PLAN.md 第 4 节）。
+
+    同一工作空间、同一内容只存一份：对象 key 是 kb/<workspace_id>/<sha256>。
+    `storage` 是上传时写入的主存储（local / r2 / oss），换了主存储以后旧图片仍从原处读；
+    `replica_*` 是副本复制的状态（Worker 异步复制，失败重试）。
+    """
+
+    __tablename__ = "knowledge_files"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "sha256"),
+        CheckConstraint(f"replica_state IN {REPLICA_STATES}", name="replica_state"),
+        CheckConstraint("storage IN ('local', 'r2', 'oss')", name="storage"),
+        CheckConstraint("size > 0", name="size"),
+        Index(
+            "ix_knowledge_files_replica_pending",
+            "created_at",
+            postgresql_where=text("replica_state = 'pending'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    sha256: Mapped[str] = mapped_column(Text)
+    mime: Mapped[str] = mapped_column(Text)
+    size: Mapped[int] = mapped_column(Integer)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    storage: Mapped[str] = mapped_column(Text)
+    replica: Mapped[str | None] = mapped_column(Text)
+    replica_state: Mapped[str] = mapped_column(Text, server_default=text("'none'"))
+    replica_attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    replica_error: Mapped[str | None] = mapped_column(Text)
+    created_by_user: Mapped[uuid.UUID | None] = _user_fk()
+    created_at: Mapped[datetime] = _created_at()
+
+
+class KnowledgeFileRef(Base):
+    """笔记引用了哪些图片。历史版本里引用过的也保留（current = false），保证版本历史里的图片不丢；
+    笔记彻底删除时随之删除。没有任何引用、上传超过 24 小时的图片由 Worker 每天清理。"""
+
+    __tablename__ = "knowledge_file_refs"
+    __table_args__ = (
+        PrimaryKeyConstraint("file_id", "note_id"),
+        Index("ix_knowledge_file_refs_note", "note_id"),
+    )
+
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.knowledge_files.id", ondelete="CASCADE")
+    )
+    note_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.knowledge_notes.id", ondelete="CASCADE")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    current: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    created_at: Mapped[datetime] = _created_at()

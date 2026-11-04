@@ -17,6 +17,7 @@ export type Change = Schema['ChangeOut']
 export type Revision = Schema['RevisionOut']
 export type AgentKnowledge = Schema['AgentKnowledgeOut']
 export type SpaceActivity = Schema['SpaceActivity']
+export type KbFile = Schema['FileOut']
 export type ColorBy = 'type' | 'space' | 'author'
 
 export const SPACE_KIND_LABELS: Record<SpaceKind, string> = { public: '公共', project: '项目', agent: '智能体' }
@@ -87,12 +88,12 @@ export function useRevision(scope: string, id: Ref<string | null>, version: Ref<
     queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/knowledge/notes/{note_id}/revisions/{version}', { params: { header: c.header, path: { note_id: id.value!, version: version.value! } }, signal })) })
 }
 
-export function useGraph(scope: string, options: Ref<{ spaceIds: string[]; resources: boolean }>) {
+export function useGraph(scope: string, options: Ref<{ spaceIds: string[]; resources: boolean; files?: boolean }>) {
   const c = context(scope)
   return useQuery({
     queryKey: computed(() => kbKey(c.user, scope, 'graph', options.value)), enabled: computed(c.active),
     queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/knowledge/graph', {
-      params: { header: c.header, query: { resources: options.value.resources, ...(options.value.spaceIds.length ? { space_id: options.value.spaceIds } : {}) } }, signal })),
+      params: { header: c.header, query: { resources: options.value.resources, files: !!options.value.files, ...(options.value.spaceIds.length ? { space_id: options.value.spaceIds } : {}) } }, signal })),
   })
 }
 
@@ -154,6 +155,10 @@ export function useKb(scope: string) {
     purge: (id: string) => after((async () => { await c.auth.api.DELETE('/api/v1/knowledge/trash/{note_id}', { params: { header: c.header, path: path(id) } }) })()),
     updateSpace: (id: string, body: Schema['SpaceUpdate']) => after((async () => dataOf(await c.auth.api.PATCH('/api/v1/knowledge/spaces/{space_id}', { params: { header: c.header, path: { space_id: id } }, body })))()),
     putAgent: (spaceId: string, instanceId: string, access: 'read_write' | 'read') => after((async () => dataOf(await c.auth.api.PUT('/api/v1/knowledge/spaces/{space_id}/agents/{instance_id}', { params: { header: c.header, path: { space_id: spaceId, instance_id: instanceId } }, body: { access } })))()),
+    // 图片（T-0103）：请求体就是图片本身；类型、大小、配额由服务端核对
+    upload: async (file: Blob) => dataOf(await c.auth.api.POST('/api/v1/knowledge/files', {
+      params: { header: c.header }, body: file as unknown as string, bodySerializer: (raw: unknown) => raw as Blob, headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    })),
     removeAgent: (spaceId: string, instanceId: string) => after((async () => { await c.auth.api.DELETE('/api/v1/knowledge/spaces/{space_id}/agents/{instance_id}', { params: { header: c.header, path: { space_id: spaceId, instance_id: instanceId } } }) })()),
   }
 }
@@ -165,8 +170,21 @@ export function authorLabel(author: Author | null | undefined) {
 export const initial = (name: string) => (name.trim()[0] ?? '?').toUpperCase()
 
 // 知识库自己的错误码：服务端的说明是工作台写的中文，直接显示（其余的按通用说明）
-const KB_CODES = new Set(['TITLE_TAKEN', 'SECRET_DETECTED', 'NOTE_TOO_LARGE', 'SPACE_FULL', 'NOTE_DELETED', 'NOT_IN_TRASH', 'REVISION_NOT_FOUND', 'MOVE_NOT_ALLOWED', 'SYSTEM_NOTE', 'BRIEF_HUMAN_ONLY', 'READ_ONLY', 'WRITES_DISABLED', 'DELETES_PAUSED'])
+const KB_CODES = new Set(['TITLE_TAKEN', 'SECRET_DETECTED', 'NOTE_TOO_LARGE', 'SPACE_FULL', 'NOTE_DELETED', 'NOT_IN_TRASH', 'REVISION_NOT_FOUND', 'MOVE_NOT_ALLOWED', 'SYSTEM_NOTE', 'BRIEF_HUMAN_ONLY', 'READ_ONLY', 'WRITES_DISABLED', 'DELETES_PAUSED', 'UNSUPPORTED_IMAGE', 'PAYLOAD_TOO_LARGE', 'QUOTA_EXCEEDED', 'STORAGE_NOT_CONFIGURED', 'STORAGE_UNAVAILABLE', 'FILE_MISSING'])
 export function kbError(error: unknown) {
   if (error instanceof ApiError && KB_CODES.has(error.code) && error.message) return error.message
   return errorMessage(error)
+}
+
+// 图片（T-0103）：正文里引用的本工作空间图片
+export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+export const FILE_URL = /^\/api\/v1\/knowledge\/files\/[0-9a-fA-F-]{36}$/
+export function noteImages(body: string) {
+  const found: { url: string; alt: string }[] = []
+  const seen = new Set<string>()
+  for (const m of body.matchAll(/!\[([^\]]*)\]\((\/api\/v1\/knowledge\/files\/[0-9a-fA-F-]{36})\)/g)) {
+    if (seen.has(m[2])) continue
+    seen.add(m[2]); found.push({ url: m[2], alt: m[1] || '图片' })
+  }
+  return found
 }
