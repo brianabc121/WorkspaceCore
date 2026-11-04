@@ -339,7 +339,11 @@ async function download(page, click) {
   await page.getByLabel('执行者').selectOption('open')
   await page.getByLabel('谁可以领取').selectOption('project')
   await page.getByRole('button', { name: '保存任务' }).click()
-  await page.getByRole('region', { name: '任务动态' }).getByText(/可自由接取 · 只限项目成员/).waitFor()
+  // 保存成功后详情抽屉关闭，列表里这条任务带上“可自由接取”标记
+  await page.getByText('可自由接取', { exact: true }).first().waitFor()
+  const opened = await apiGet(page, workspace, `/api/v1/tasks/${created.body.id}`)
+  check(opened.claim_mode === 'open' && opened.claim_scope === 'project' && opened.claimable,
+    `任务应设为可自由接取、只限项目成员：${JSON.stringify({ mode: opened.claim_mode, scope: opened.claim_scope, claimable: opened.claimable })}`)
   const claimed = agentTool(instance.id, 'claim_task', { task_id: created.body.id })
   const completed = agentTool(instance.id, 'complete_task', { task_id: created.body.id, note: `浏览器验收完成 ${run}` })
   check(claimed.status === 'claimed' && completed.status === 'completed', `实例领取、完成应直接生效：${JSON.stringify({ claimed, completed })}`)
