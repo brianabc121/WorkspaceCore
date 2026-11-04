@@ -227,7 +227,9 @@ def main() -> int:
     report.check("登录密码不在任务、目标服务器、审计记录里", password not in dump and len(dump) > 0)
     cron = run("crontab", "-l", "-u", user).stdout
     if done["schedule"] == "done":
-        report.check("crontab 有两行带标记的定时任务", cron.count(MARKER) == 2, cron)
+        # 每 10 分钟取密钥、每分钟上报 token 用量（T-0104）、每周一重启
+        report.check("crontab 有三行带标记的定时任务", cron.count(MARKER) == 3, cron)
+        report.check("crontab 里有每分钟的用量上报", "/opt/myworkspace/bin/usage-report.mjs" in cron, cron)
 
     # ---------------------------------------------------------------- 不填密码重新部署
     response = target.post("install", {"version": state["target"]["version"]})
@@ -249,7 +251,7 @@ def main() -> int:
         step_detail(state, "reflection"),
     )
     if done["schedule"] == "done":
-        report.check("定时任务没有重复", run("crontab", "-l", "-u", user).stdout.count(MARKER) == 2)
+        report.check("定时任务没有重复", run("crontab", "-l", "-u", user).stdout.count(MARKER) == 3)
 
     # ---------------------------------------------------------------- 卸载（删除目录）
     response = target.post("uninstall", {"version": state["target"]["version"], "remove_files": True})

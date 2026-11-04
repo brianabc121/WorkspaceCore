@@ -61,6 +61,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent-api/v1/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 上报 token 用量（实例的 usage-report，每分钟一次）
+         * @description 每个 OpenClaw 会话当天（UTC）的累计 token；会话只报 key 的 SHA-256。工作台按（实例、日期、会话）算增量并记到这一分钟；usage 为 null 的会话跳过；实例第一次上报只记基准。每个实例每分钟最多 6 次。
+         */
+        post: operations["agent_usage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/instances": {
         parameters: {
             query?: never;
@@ -2158,6 +2178,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tasks/assignees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 可以指派的执行者（viewer）
+         * @description 本工作空间的成员与没有停用的 OpenClaw 实例（名字与状态），供任务编辑器选择执行者。
+         */
+        get: operations["task_assignees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 任务时间轴（viewer）
+         * @description 时间范围内的轨道（按执行者或按项目）、片段（计划 / 执行段，执行段带 token 与等待审批）、token 用量分桶与概况。from / to 默认是现在前后 12 小时，范围最长 31 天；project_id 只看这个项目（概况与 token 也只算这个项目）。token 按时间归属到执行段：同一实例同时有几段在执行时平均分（tokens_shared）。
+         */
+        get: operations["task_timeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tasks/{task_id}": {
         parameters: {
             query?: never;
@@ -2181,6 +2241,50 @@ export interface paths {
          * @description 同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。version 与当前版本不一致时返回 409 VERSION_CONFLICT，details.current 为最新的任务。
          */
         patch: operations["update_task"];
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 执行记录（viewer）
+         * @description 最近 100 段，新的在前；实例执行的段带 token（按时间归属）、每 10 分钟的用量与等待审批。
+         */
+        get: operations["list_task_runs"];
+        put?: never;
+        /**
+         * 开始一段（人的任务：member；交给实例执行：owner / admin；必须带 Idempotency-Key）
+         * @description 同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。dispatch 为 true 时，以当前管理员的 IM 账号给执行者实例发一条固定格式的消息，发出后才开这一段；IM 结果不确定时返回 504 RESULT_UNKNOWN、不开段，用同一个 Idempotency-Key 重试即可（不会发两条）。409：TASK_DONE 任务已完成、RUN_ALREADY_OPEN 已有一段在执行、AGENT_TASK 执行者是实例、NO_AGENT_ASSIGNEE 执行者不是实例、AGENT_DISABLED / AGENT_OFFLINE 实例停用 / 不在线、IM_NOT_READY / IM_SEND_REJECTED；503 IM_UNAVAILABLE。
+         */
+        post: operations["start_task_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/runs/{run_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 结束一段（人的任务：member；实例执行的段：owner / admin）
+         * @description 已经结束的段原样返回（重试安全）。
+         */
+        post: operations["stop_task_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/widgets/{widget_id}": {
@@ -3209,6 +3313,29 @@ export interface components {
              */
             version?: number | null;
         };
+        /**
+         * ApprovalWait
+         * @description 这个实例的写操作从提交到有结果（批准、拒绝、过期）之间的时间。
+         */
+        ApprovalWait: {
+            /**
+             * End
+             * @description 还在等待时为空
+             */
+            end: string | null;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /** Tool */
+            tool: string;
+        };
         /** ApproveRequest */
         ApproveRequest: {
             /**
@@ -3216,6 +3343,41 @@ export interface components {
              * @description 高危操作必须重新输入当前用户的密码（二次认证）
              */
             password?: string | null;
+        };
+        /** AssigneeInstance */
+        AssigneeInstance: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @description pending / online / offline（停用的实例不列出）
+             */
+            status: string;
+        };
+        /**
+         * AssigneeOptions
+         * @description 任务可以指派的执行者：本工作空间的成员与没有停用的实例。
+         */
+        AssigneeOptions: {
+            /** Instances */
+            instances: components["schemas"]["AssigneeInstance"][];
+            /** Users */
+            users: components["schemas"]["AssigneeUser"][];
+        };
+        /** AssigneeUser */
+        AssigneeUser: {
+            /** Display Name */
+            display_name: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
         };
         /** AuditLogOut */
         AuditLogOut: {
@@ -4921,7 +5083,7 @@ export interface components {
              * Topics
              * @description 需要重新拉取的数据范围
              */
-            topics: ("overview" | "tasks" | "projects" | "knowledge" | "calendar" | "developer" | "integrations" | "notifications" | "operations" | "automations" | "im" | "agents" | "ai")[];
+            topics: ("overview" | "tasks" | "projects" | "knowledge" | "calendar" | "developer" | "integrations" | "notifications" | "operations" | "automations" | "im" | "agents" | "ai" | "timeline")[];
             /**
              * Workspace Id
              * Format: uuid
@@ -6875,6 +7037,27 @@ export interface components {
             /** Last Seen At */
             last_seen_at: string | null;
         };
+        /** SessionTokens */
+        SessionTokens: {
+            /** Cache Read */
+            cache_read: number;
+            /** Cache Write */
+            cache_write: number;
+            /** Input */
+            input: number;
+            /** Output */
+            output: number;
+        };
+        /** SessionUsage */
+        SessionUsage: {
+            /**
+             * Session
+             * @description OpenClaw 会话 key 的 SHA-256（十六进制小写）；工作台不收会话 key 本身
+             */
+            session: string;
+            /** @description 这个会话当天的累计值；OpenClaw 正在刷新缓存时为 null，这次跳过 */
+            usage: components["schemas"]["SessionTokens"] | null;
+        };
         /** SetupRequest */
         SetupRequest: {
             /** Display Name */
@@ -7201,6 +7384,16 @@ export interface components {
         /** TaskOut */
         TaskOut: {
             /**
+             * Assignee Instance Id
+             * @description 执行者是 OpenClaw 实例时的实例 ID；与 assignee_user_id 二选一
+             */
+            assignee_instance_id: string | null;
+            /**
+             * Assignee User Id
+             * @description 执行者是工作空间成员时的用户 ID
+             */
+            assignee_user_id: string | null;
+            /**
              * Created At
              * Format: date-time
              */
@@ -7223,6 +7416,11 @@ export interface components {
             id: string;
             /** Labels */
             labels: string[];
+            /**
+             * Planned Start At
+             * @description 计划开始时间（T-0104）
+             */
+            planned_start_at: string | null;
             /** Priority */
             priority: number;
             /**
@@ -7230,6 +7428,11 @@ export interface components {
              * Format: uuid
              */
             project_id: string;
+            /**
+             * Started At
+             * @description 第一次开始执行的时间；由执行记录维护
+             */
+            started_at: string | null;
             /** Title */
             title: string;
             /**
@@ -7255,11 +7458,116 @@ export interface components {
             /** Total Estimate */
             total_estimate?: number | null;
         };
+        /** TaskRunList */
+        TaskRunList: {
+            /** Items */
+            items: components["schemas"]["TaskRunOut"][];
+        };
+        /** TaskRunOut */
+        TaskRunOut: {
+            /** End Reason */
+            end_reason: ("done" | "paused" | "interrupted" | "cancelled") | null;
+            /**
+             * Ended At
+             * @description 还在执行时为空
+             */
+            ended_at: string | null;
+            /**
+             * Ended By
+             * @description 系统结束（实例停用 / 离线、改了执行者）时为空
+             */
+            ended_by: string | null;
+            /**
+             * Executor Kind
+             * @enum {string}
+             */
+            executor_kind: "user" | "instance";
+            /**
+             * Executor Name
+             * @description 开始时执行者的名字（成员离开、实例被删除后仍保留）
+             */
+            executor_name: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Instance Id */
+            instance_id: string | null;
+            /**
+             * Series
+             * @description 每 10 分钟的用量（只在执行记录接口里返回）
+             */
+            series?: components["schemas"]["UsagePoint"][];
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Started By */
+            started_by: string | null;
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** @description 这段时间里这个实例上报的 token 增量之和（按时间归属）；人的任务与没有上报时为空 */
+            tokens: components["schemas"]["TokenCount"] | null;
+            /**
+             * Tokens Shared
+             * @description 同一实例同时有几段在执行时平均分，界面标“≈”
+             */
+            tokens_shared: boolean;
+            /**
+             * Usage Reported
+             * @description 这个实例上报过用量（旧接入包、上报失败时为 false）
+             */
+            usage_reported: boolean;
+            /** User Id */
+            user_id: string | null;
+            /**
+             * Waits
+             * @description 落在这段里的等待审批
+             */
+            waits: components["schemas"]["ApprovalWait"][];
+        };
+        /** TaskRunStart */
+        TaskRunStart: {
+            /**
+             * Dispatch
+             * @description true：执行者是实例时交给它执行——以当前管理员的 IM 账号给它发一条固定格式的消息（owner / admin）；false：人的任务开始执行（member 及以上）
+             * @default false
+             */
+            dispatch: boolean;
+        };
+        /** TaskRunStop */
+        TaskRunStop: {
+            /**
+             * Reason
+             * @description paused 暂停（人的任务）/ interrupted 中断 / cancelled 取消；实例执行的段要 owner / admin
+             * @enum {string}
+             */
+            reason: "paused" | "interrupted" | "cancelled";
+        };
         /**
          * TaskUpdate
-         * @description 只发送要改的字段；due_at 显式传 null 表示清除截止时间，其余字段不能为 null。
+         * @description 只发送要改的字段。
+         *
+         *     due_at、planned_start_at、assignee_user_id、assignee_instance_id 显式传 null 表示清除，
+         *     其余字段不能为 null。执行者二选一：设了其中一个，另一个自动清除；两个都给非空值时返回 422。
+         *     改执行者时，正在执行的一段记为中断（T-0104）。
          */
         TaskUpdate: {
+            /**
+             * Assignee Instance Id
+             * @description 执行者：本工作空间的 OpenClaw 实例（不能是已停用的）
+             */
+            assignee_instance_id?: string | null;
+            /**
+             * Assignee User Id
+             * @description 执行者：工作空间成员
+             */
+            assignee_user_id?: string | null;
             /** Description */
             description?: string | null;
             /** Done */
@@ -7268,6 +7576,8 @@ export interface components {
             due_at?: string | null;
             /** Labels */
             labels?: string[] | null;
+            /** Planned Start At */
+            planned_start_at?: string | null;
             /** Priority */
             priority?: number | null;
             /**
@@ -7282,6 +7592,174 @@ export interface components {
              * @description 读取时的 version，原样带回；与当前版本不一致时返回 409
              */
             version: string;
+        };
+        /** TimelineOut */
+        TimelineOut: {
+            /**
+             * Group
+             * @enum {string}
+             */
+            group: "executor" | "project";
+            /**
+             * Now
+             * Format: date-time
+             */
+            now: string;
+            /** Project Id */
+            project_id: string | null;
+            /**
+             * Range End
+             * Format: date-time
+             */
+            range_end: string;
+            /**
+             * Range Start
+             * Format: date-time
+             */
+            range_start: string;
+            /** Segments */
+            segments: components["schemas"]["TimelineSegment"][];
+            summary: components["schemas"]["TimelineSummary"];
+            /** Tasks */
+            tasks: components["schemas"]["TimelineTask"][];
+            /** Tracks */
+            tracks: components["schemas"]["TimelineTrack"][];
+            /**
+             * Truncated
+             * @description 任务太多，只返回了最近的一部分
+             */
+            truncated: boolean;
+            usage: components["schemas"]["TimelineUsage"];
+        };
+        /** TimelineSegment */
+        TimelineSegment: {
+            /**
+             * End
+             * @description 执行段：还在执行时为空；计划片段：截止时间，没有截止时间时为空
+             */
+            end: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "planned" | "run";
+            /** @description 执行段的详情；计划片段为空 */
+            run: components["schemas"]["TaskRunOut"] | null;
+            /**
+             * Start
+             * @description 计划片段：计划开始；只有截止时间时为空（画截止标记）
+             */
+            start: string | null;
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Track */
+            track: string;
+        };
+        /** TimelineSummary */
+        TimelineSummary: {
+            /**
+             * Done
+             * @description 时间范围内完成的任务数
+             */
+            done: number;
+            /**
+             * Overdue
+             * @description 现在已过截止时间、还没完成的任务数
+             */
+            overdue: number;
+            /**
+             * Running
+             * @description 正在执行的段数
+             */
+            running: number;
+            /**
+             * Tokens
+             * @description 时间范围内的 token 合计（范围同 usage.scope）
+             */
+            tokens: number;
+        };
+        /** TimelineTask */
+        TimelineTask: {
+            /** Assignee Instance Id */
+            assignee_instance_id: string | null;
+            /** Assignee User Id */
+            assignee_user_id: string | null;
+            /** Done */
+            done: boolean;
+            /** Done At */
+            done_at: string | null;
+            /** Due At */
+            due_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Planned Start At */
+            planned_start_at: string | null;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Project Title */
+            project_title: string;
+            /**
+             * Running
+             * @description 有一段正在执行
+             */
+            running: boolean;
+            /** Started At */
+            started_at: string | null;
+            /** Title */
+            title: string;
+        };
+        /** TimelineTrack */
+        TimelineTrack: {
+            /** Id */
+            id: string | null;
+            /**
+             * Key
+             * @description 片段用它指向轨道，例如 instance:<id>、user:<id>、project:<id>
+             */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "user" | "instance" | "unassigned" | "project" | "former";
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @description 实例的状态（pending / online / offline / disabled）
+             */
+            status: string | null;
+        };
+        /** TimelineUsage */
+        TimelineUsage: {
+            /** Bucket Minutes */
+            bucket_minutes: number;
+            /**
+             * Buckets
+             * @description 只列出有用量的桶
+             */
+            buckets: components["schemas"]["UsagePoint"][];
+            /**
+             * Reported
+             * @description 有实例上报过用量；为 false 时界面显示“未上报”
+             */
+            reported: boolean;
+            /**
+             * Scope
+             * @description workspace：本工作空间所有实例上报的全部 token（含不在任务里的对话）；project：只算这个项目的执行段按时间归属到的 token
+             * @enum {string}
+             */
+            scope: "workspace" | "project";
+            total: components["schemas"]["TokenCount"];
         };
         /** TodayTasksConfig */
         TodayTasksConfig: {
@@ -7340,6 +7818,22 @@ export interface components {
              * @enum {string}
              */
             widget_type: "todo_summary";
+        };
+        /** TokenCount */
+        TokenCount: {
+            /** Cache Read */
+            cache_read: number;
+            /** Cache Write */
+            cache_write: number;
+            /** Input */
+            input: number;
+            /** Output */
+            output: number;
+            /**
+             * Total
+             * @description 四项之和
+             */
+            total: number;
         };
         /** TrashItem */
         TrashItem: {
@@ -7407,6 +7901,50 @@ export interface components {
              * @description 近 30 天被智能体读取的次数
              */
             reads_30d: number;
+        };
+        /** UsagePoint */
+        UsagePoint: {
+            /**
+             * Start
+             * Format: date-time
+             * @description 这一桶的开始（UTC，按 bucket_minutes 对齐）
+             */
+            start: string;
+            tokens: components["schemas"]["TokenCount"];
+        };
+        /** UsageReport */
+        UsageReport: {
+            /**
+             * Day
+             * Format: date
+             * @description 累计值所属的日期（UTC）；只收今天和昨天
+             */
+            day: string;
+            /** Sessions */
+            sessions: components["schemas"]["SessionUsage"][];
+        };
+        /** UsageReportResult */
+        UsageReportResult: {
+            /**
+             * Accepted
+             * @description 记下的会话数
+             */
+            accepted: number;
+            /**
+             * Baseline
+             * @description 这个实例第一次上报：只记基准，不把之前的用量算进来
+             */
+            baseline: boolean;
+            /**
+             * Skipped
+             * @description usage 为 null 跳过的会话数
+             */
+            skipped: number;
+            /**
+             * Tokens
+             * @description 这次算出的增量合计
+             */
+            tokens: number;
         };
         /** UserOut */
         UserOut: {
@@ -7655,6 +8193,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SecretResolveResponse"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsageReport"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageReportResult"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -17582,6 +18171,111 @@ export interface operations {
             };
         };
     };
+    task_assignees: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssigneeOptions"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    task_timeline: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+                project_id?: string | null;
+                group?: "executor" | "project";
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelineOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_task: {
         parameters: {
             query?: never;
@@ -17738,6 +18432,240 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_task_runs: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskRunList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    start_task_run: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 每次用户提交生成一个新的 UUID；网络重试与查询结果时复用同一个 */
+                "Idempotency-Key": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskRunStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskRunOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 写操作结果未知（RESULT_UNKNOWN）：用同一个 Idempotency-Key 重发以查询结果 */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    stop_task_run: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                task_id: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskRunStop"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskRunOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

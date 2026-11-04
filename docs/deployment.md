@@ -821,14 +821,16 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 1. **准备**：Docker（含 Compose v2）；能访问模型服务商；能访问工作台的入口（内网模式经私网，外网模式经公网）；
    第一次安装插件时能访问 npm 仓库（插件的依赖从 npm 安装）；宿主机的 cron 或 systemd timer。
 2. **工作台**：密钥库录入模型密钥 → 实例页登记实例（网络模式、权限范围 `read` / `read_write`、最高角色）→ 授权密钥 → 下载接入包（凭证只出现这一次）。
-3. **安装**：解压到专用目录，属主改成容器里的 uid 1000，目录 700、`myworkspace.env` 与客户端私钥 600；`bin/` 下两个程序属主是运行用户、0755、不是符号链接。
+3. **安装**：解压到专用目录，属主改成容器里的 uid 1000，目录 700、`myworkspace.env` 与客户端私钥 600；`bin/` 下三个程序属主是运行用户、0755、不是符号链接。
 4. **插件**：核对 `@openim/openclaw-channel@0.3.3` 的 sha256，用临时的空配置安装（配置里已经写了插件提供的 `openim` 渠道，装好之前 OpenClaw 拒绝这份配置），然后 `docker compose up -d`；
    冷启动要 2 ~ 4 分钟。
 5. **模型**：`state/openclaw.json` 里的模型服务商换成实际使用的那一家，密钥 ID 与工作台的授权一致；不要写明文，也不要加 `_comment` 之类的键（OpenClaw 会判为无效配置）。
 6. **加固**：Gateway 只监听本机、不映射端口；`security audit --deep`、`doctor`、`health` 通过；`tools.exec.security = deny`，不挂 Docker socket；
    `plugins.allow` 只有 `openclaw-channel`；不设置 `commands.ownerAllowFrom`；发图片 / 文件 / 视频的插件工具不可用；`requireMention: true`；
    `secrets audit` 没有明文；日志级别与保留期已设置（SDK 会把消息内容写进日志）。
-7. **定时任务**：每 10 分钟 `openclaw secrets reload`（轮换后的模型密钥不用重启就生效）；每周重启一次（换新的 IM 令牌）。
+7. **定时任务**：每 10 分钟 `openclaw secrets reload`（轮换后的模型密钥不用重启就生效）；每周重启一次（换新的 IM 令牌）；
+   每分钟在容器里运行 `node /opt/myworkspace/bin/usage-report.mjs`，把 token 用量报给工作台（任务时间轴，T-0104；没配时时间轴显示“未上报”）。
+   SSH 部署自动写入这三行 crontab。
 8. **备份与回滚**：`openclaw backup create --verify` 能跑通；回滚要连同备份的状态一起恢复（降级不会撤销 OpenClaw 的迁移）。
 9. **确认**：工作台运维页里这个实例显示“正常”；IM 通讯录里出现这个实例并已互为好友，私聊能收到回复；
    停用实例后它取不到密钥、MCP 返回 401、IM 被强制下线。

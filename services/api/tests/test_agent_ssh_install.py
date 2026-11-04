@@ -456,6 +456,7 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
         "compose.yaml": 0o644,
         "bin/myworkspace-secret-resolver": 0o755,
         "bin/myworkspace-openclaw-start": 0o755,
+        "bin/usage-report.mjs": 0o755,
         "tls/client.key": 0o600,
         "tls/client.crt": 0o644,
     }
@@ -464,12 +465,14 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     assert stat.S_IMODE(host.directory.stat().st_mode) == 0o700
     assert "tunnel:" in (host.directory / "compose.yaml").read_text()
 
-    # crontab：两行都带标记
+    # crontab：三行都带标记（每 10 分钟取密钥、每分钟上报用量、每周一重启）
     cron = (host.state / "crontab").read_text().splitlines()
-    assert len(cron) == 2
+    assert len(cron) == 3
     assert all(line.endswith(prov.CRON_MARKER) for line in cron)
     assert "secrets reload --json" in cron[0]
-    assert "docker compose restart openclaw" in cron[1]
+    assert cron[1].startswith("* * * * * ")
+    assert "exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs" in cron[1]
+    assert "docker compose restart openclaw" in cron[2]
 
     # 密码不在任何表里（任务、目标服务器、审计）；任务日志里也没有令牌
     assert await _stored_anywhere(owner, PASSWORD) == 0
@@ -522,7 +525,7 @@ async def test_reinstall_without_password_reuses_key(owner: Owner, tmp_path: Pat
     assert len(handover) == 2
     assert handover[0] < reclaim[0] < handover[1]
     cron = (host.state / "crontab").read_text().splitlines()
-    assert len(cron) == 2, "重装时替换带标记的行，不重复"
+    assert len(cron) == len(prov.cron_lines(str(host.directory))), "重装时替换带标记的行，不重复"
     # 每晚复盘的定时任务：同名的已有就更新，不重复建（T-0100）
     reflection = next(s for s in second["job"]["steps"] if s["key"] == "reflection")
     assert reflection["status"] == "done" and "已更新" in (reflection["detail"] or "")
@@ -876,7 +879,8 @@ async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
         state = await _install_ok(owner, host, instance_id, version)
-        assert len((host.state / "crontab").read_text().splitlines()) == 3
+        # 原有的一行 + 带标记的三行
+        assert len((host.state / "crontab").read_text().splitlines()) == 4
 
         # 卸载，保留目录
         response = await _post(

@@ -12,6 +12,7 @@ zip 里的文件：
 | `state/openclaw.json` | 600 | OpenClaw 配置：加固基线、exec 密钥源、MCP、openim 渠道 |
 | `bin/myworkspace-secret-resolver` | 755 | exec SecretRef 的取密钥程序 |
 | `bin/myworkspace-openclaw-start` | 755 | 启动包装：取 IM 令牌、上报版本，再启动 OpenClaw |
+| `bin/usage-report.mjs` | 755 | 每分钟上报 token 用量（宿主机 crontab 在容器里运行，T-0104） |
 | `compose.yaml` | 644 | OpenClaw 服务器上的 Compose（锁定镜像，不开放端口） |
 | `CHECKLIST.md`、`README.md` | 644 | 部署检查清单与说明 |
 | `setup-reflection.sh`、`reflection-prompt.md` | 755 / 644 | 每晚复盘的定时任务（T-0100） |
@@ -38,6 +39,8 @@ GHOSTUNNEL_IMAGE = (
     "@sha256:e5248233863aadd36383a11c92360f2981141881ef05e38360a6ada8630d36b1"
 )
 _FILES = resources.files("app.agent_bundle") / "files"
+# bin/ 下的程序（权限 755）；usage-report.mjs 是每分钟的用量上报（T-0104）
+BIN_SCRIPTS = ("myworkspace-secret-resolver", "myworkspace-openclaw-start", "usage-report.mjs")
 
 
 @dataclass(frozen=True)
@@ -243,7 +246,7 @@ def build(data: BundleInput, *, now: datetime | None = None) -> bytes:
     with zipfile.ZipFile(buffer, "w") as zf:
         _add(zf, "myworkspace.env", _env(data), 0o600, now)
         _add(zf, "state/openclaw.json", _openclaw_json(data.whitelist), 0o600, now)
-        for script in ("myworkspace-secret-resolver", "myworkspace-openclaw-start"):
+        for script in BIN_SCRIPTS:
             _add(zf, f"bin/{script}", _read(f"bin/{script}"), 0o755, now)
         _add(zf, "compose.yaml", _compose(data), 0o644, now)
         _add(zf, "CHECKLIST.md", _read("CHECKLIST.md"), 0o644, now)

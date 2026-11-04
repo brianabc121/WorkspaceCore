@@ -131,6 +131,38 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 - 首页 `modules.tasks` 总是 `ok`（本地数据）；新工作空间的 `pending_tasks`、`active_projects` 是 0 而不是 null。
 - 删除了 `POST /api/v1/webhooks/vikunja/{integration_id}`；集成只剩 GitHub（`provider` 只能是 `github`），`IntegrationCheck.name` 去掉 `tasks_read`。
 
+### 任务时间轴（T-0104）
+
+方案见 `docs/v2/TIMELINE_PLAN.md` 第 2 节，核验见 `docs/decisions/2026-11-04-timeline-kb-upgrade-verification.md` 第 2 节。
+
+| 方法 | 路径 | 说明 | 状态 |
+|---|---|---|---|
+| PATCH | `/api/v1/tasks/{task_id}` | 增加 `planned_start_at`、`assignee_user_id`、`assignee_instance_id`（都可以设为 null 清除） | 已实现（T-0104） |
+| GET | `/api/v1/tasks/assignees` | 可以指派的执行者：本工作空间的成员（`id`、`display_name`）与没有停用的实例（`id`、`name`、`status`）；viewer。实例接口只给 owner，任务编辑器用这个 | 已实现（T-0104） |
+| GET | `/api/v1/tasks/timeline` | `from` / `to`（默认现在前后 12 小时，最长 31 天）、`project_id`、`group` = `executor`（默认）/ `project`；viewer | 已实现（T-0104） |
+| GET | `/api/v1/tasks/{task_id}/runs` | 执行记录，最近 100 段，新的在前；带 token、每 10 分钟用量（`series`）与等待审批；viewer | 已实现（T-0104） |
+| POST | `/api/v1/tasks/{task_id}/runs` | 开始一段，必须带 `Idempotency-Key`。`{"dispatch": false}`：人的任务开始（member）；`{"dispatch": true}`：交给执行者实例执行（owner / admin） | 已实现（T-0104） |
+| POST | `/api/v1/tasks/{task_id}/runs/{run_id}/stop` | 结束一段：`reason` = `paused` / `interrupted` / `cancelled`；已经结束的原样返回；实例执行的段要 owner / admin | 已实现（T-0104） |
+
+- `TaskOut` 增加 `planned_start_at`、`started_at`（第一次开始执行的时间，由执行记录维护，不改 `version`）、`assignee_user_id`、`assignee_instance_id`。
+  - 执行者二选一：设了一个，另一个自动清除；两个都给非空值、不是本工作空间的成员 / 实例、实例已停用时返回 422。
+  - 新建任务（`TaskCreate`）不变，计划开始与执行者用 PATCH 设：`TaskCreate` 也是智能体 `create_task` 工具的入参，不放宽它能写的字段。
+- **一段执行**（`TaskRunOut`）：`executor_kind`（`user` / `instance`）、`user_id` / `instance_id`、`executor_name`（开始时的名字）、`started_at`、`ended_at`、`end_reason`（`done` / `paused` / `interrupted` / `cancelled`）、`started_by`、`ended_by`（系统结束时为空）、`tokens`、`tokens_shared`、`usage_reported`、`waits`、`series`。
+  - 同一个任务同时只有一段在执行（`409 RUN_ALREADY_OPEN`）；已完成的任务不能开始（`409 TASK_DONE`）。
+  - 人的任务：没有执行者时，点“开始”的人成为执行者。执行者是实例时返回 `409 AGENT_TASK`。
+  - 交给实例执行：执行者必须是实例（`409 NO_AGENT_ASSIGNEE`）、没停用（`409 AGENT_DISABLED`）、在线（`409 AGENT_OFFLINE`）。工作台以**当前管理员自己的 IM 账号**发一条固定格式的消息（任务标题、`task_id`、截止时间，请它用 `get_task` 读详情、做完用 `complete_task` 标为完成），发出后才开段。
+    消息的 Idempotency-Key 由请求的键推出：同一个请求重试不会发两条；IM 结果不确定时返回 `504 RESULT_UNKNOWN`、不开段，用同一个键重试即可。IM 的其他错误照 IM 接口返回（`409 IM_NOT_READY` / `IM_SEND_REJECTED`、`503 IM_UNAVAILABLE`、`429`）。
+  - 结束：人点暂停 / 结束；任务标为完成时结束为 `done`（智能体经审批完成也一样）；改执行者时记为 `interrupted`；实例停用时、或离线超过 10 分钟时（Worker 每分钟检查，结束在离线开始的时间）记为 `interrupted`。没有新增 MCP 写工具。
+  - **token 按时间归属**：一段用的 token = 这个实例在这段时间里每分钟增量之和；上报有约一分钟延迟，一分钟 m 的增量归给与 [m − 1 分钟, m + 1 分钟) 重叠的段；同一实例同时有几段就平均分（`tokens_shared: true`，界面标“≈”）。人的任务、实例从没上报过时 `tokens` 为 null（`usage_reported: false`，界面显示“未上报”）。
+  - `waits`：这个实例的写操作（`write` / `critical`）从提交到有结果的时间，裁到这段的起止；还在等待且这段没结束时 `end` 为 null。
+- **时间轴**（`TimelineOut`）：`range_start`、`range_end`、`now`、`group`、`project_id`、`tracks`、`tasks`、`segments`、`usage`、`summary`、`truncated`。
+  - `tracks`：按执行者时是实例（看全部项目时包括没有任务的实例，停用的除外）、成员、`former:*`（执行者已不存在，按开始时的名字）、`unassigned`；按项目时每个项目一条。
+  - `segments`：`run`（执行段，带 `run`）与 `planned`（没开始、没完成、有计划开始或截止时间的任务：`start` 是计划开始，只有截止时间时为 null；`end` 是截止时间）。超时由前端按任务的 `due_at` 画。
+  - `usage`：`bucket_minutes` 自动选，最多 300 桶；`scope = workspace`（看全部项目）是本工作空间所有实例上报的全部 token（含不在任务里的对话），`scope = project` 只算这个项目的执行段归属到的 token；`buckets` 只列有用量的桶。
+  - `summary`：`running` 正在执行的段数、`done` 范围内完成的任务数、`tokens`（同 `usage.total.total`）、`overdue` 现在已过截止时间且没完成的任务数；选了项目时都只算这个项目。
+  - 执行段最多 2000 段、计划片段最多 1000 个，超过时 `truncated: true`。
+- SSE 新增主题 `timeline`：执行记录变化、收到用量上报（有增量时）都会发。
+
 ## Sprint 4 端点
 
 约定见 `docs/decisions/2026-10-30-sprint-4-knowledge-search-contract.md`。GitHub 与 AFFiNE 的核验结果见
@@ -236,6 +268,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | POST | `/agent-api/v1/secrets/resolve` | 取密钥：未授权与不存在都返回 `NOT_FOUND` | 已实现（T-0054） |
 | POST | `/agent-api/v1/im-token` | 取 IM 令牌（只在启动时调用：签发会踢掉旧连接） | 已实现（T-0055） |
 | POST | `/agent-api/v1/heartbeat` | 上报 OpenClaw 与插件版本 | 已实现（T-0054） |
+| POST | `/agent-api/v1/usage` | 上报 token 用量（接入包的 `bin/usage-report.mjs`，每分钟一次）：`{"day": "YYYY-MM-DD", "sessions": [{"session": "<会话 key 的 SHA-256>", "usage": {"input", "output", "cache_read", "cache_write"} \| null}]}`，最多 500 个会话；只收今天和昨天（UTC），每个实例每分钟最多 6 次；返回 `accepted`、`skipped`、`tokens`、`baseline` | 已实现（T-0104） |
 | POST | `/mcp` | MCP 工具（不进 OpenAPI；工具清单见 `app/schemas/ai_tools.py` 的 `TOOLS`；只接受 POST） | 已实现（T-0057；审批卡片在第 3 批） |
 | GET / POST | `/im/ws`、`/im/api/{route}`、`/im/obj/m/{media_id}` | 接入网关（不进 OpenAPI；白名单见 V2 契约第 8 节；取图改为能力地址，见 OC-3 ADR 第 15 节） | 已实现（T-0055） |
 

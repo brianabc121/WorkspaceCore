@@ -58,6 +58,7 @@ from app.models.knowledge_base import (
 from app.models.notification import Notification
 from app.models.search import SearchDocument
 from app.models.task import Project, Task
+from app.models.timeline import AgentUsageCursor, AgentUsageMinute, TaskRun
 from app.models.workspace import Workspace, WorkspaceMember
 
 __all__ = [
@@ -72,6 +73,8 @@ __all__ = [
     "AgentSettings",
     "AgentSshJob",
     "AgentSshTarget",
+    "AgentUsageCursor",
+    "AgentUsageMinute",
     "AiToolExecution",
     "AppLogin",
     "AuditLog",
@@ -115,6 +118,7 @@ __all__ = [
     "SearchDocument",
     "SyncCursor",
     "Task",
+    "TaskRun",
     "User",
     "Widget",
     "Workspace",

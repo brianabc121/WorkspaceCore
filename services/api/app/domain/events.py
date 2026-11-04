@@ -39,6 +39,7 @@ from app.models import (
     ProjectAgent,
     ResourceLink,
     Task,
+    TaskRun,
 )
 from app.schemas.notifications import EventTopic
 
@@ -65,7 +66,8 @@ def resource_topics(resource_type: str) -> tuple[EventTopic, ...]:
 _TOPICS: dict[type, Callable[[Any], Iterable[EventTopic]]] = {
     ExternalResource: lambda obj: resource_topics(obj.resource_type),
     Project: lambda _: ("projects", "tasks", "overview"),
-    Task: lambda _: ("tasks", "projects", "overview"),
+    Task: lambda _: ("tasks", "projects", "overview", "timeline"),
+    TaskRun: lambda _: ("tasks", "timeline"),
     CalendarEvent: lambda _: ("calendar", "overview"),
     Bookmark: lambda _: ("knowledge", "overview"),
     ResourceLink: lambda _: ("knowledge", "tasks"),

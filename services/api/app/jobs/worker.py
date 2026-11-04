@@ -34,6 +34,8 @@ from app.domain import (
     knowledge_files,
     notifications,
     sync,
+    task_runs,
+    timeline,
 )
 from app.domain.ai_tools import AiToolService
 from app.domain.connectors import ConnectorRuntime
@@ -91,7 +93,13 @@ async def purge(ctx: dict[str, Any]) -> None:
         )
         # 知识库回收站：放进回收站 30 天后彻底删除（T-0098）
         notes = await KnowledgeBase(db, context.settings).purge_expired()
+        # 时间轴：90 天前的每分钟 token 用量、3 天前的累计值（T-0104）
+        usage_minutes, usage_cursors = await timeline.purge_usage(db)
         await db.commit()
+    if usage_minutes or usage_cursors:
+        logger.info(
+            "agent usage purged", extra={"minutes": usage_minutes, "cursors": usage_cursors}
+        )
     if notes:
         logger.info("knowledge notes purged", extra={"count": notes})
     if removed:
@@ -206,6 +214,15 @@ async def check_services(ctx: dict[str, Any]) -> list[str]:
     return await alerts.evaluate(ctx["redis"], _sync(ctx).sessions, items)
 
 
+async def close_stale_runs(ctx: dict[str, Any]) -> int:
+    """时间轴（T-0104）：实例停用、删除或离线超过 10 分钟，它正在执行的段记为中断。"""
+    context = _sync(ctx)
+    async with context.sessions() as db:
+        ended = await task_runs.interrupt_stale_runs(db, ctx["redis"])
+        await db.commit()
+    return ended
+
+
 async def replicate_files(ctx: dict[str, Any]) -> int:
     """知识库图片：把待复制的图片写到副本（T-0103）。没配置副本时什么也不做。"""
     context = _sync(ctx)
@@ -290,6 +307,7 @@ class WorkerSettings:
         cron(reconcile_im_friends, minute=41, timeout=600),
         cron(warn_agent_expiry, hour=1, minute=7, timeout=120),
         cron(replicate_files, second=55, timeout=300),
+        cron(close_stale_runs, second=20, timeout=60),
         cron(cleanup_files, hour=3, minute=37, timeout=1800),
         cron(check_file_storage, hour=4, minute=13, run_at_startup=True, timeout=180),
     ]
