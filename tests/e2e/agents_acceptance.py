@@ -1050,10 +1050,38 @@ def scenario_6(c: Ctx) -> None:
     c.check("场景 6：乙的 IM 被强制下线", bool(status))
 
 
+def scenario_19(c: Ctx) -> None:
+    """服务器状态（T-0113）：甲、乙的真实 OpenClaw 容器各上报一次服务器指标；管理员看得到当前值与小指示；
+    甲用 get_host_status 只读到自己的，不能带参数看别的实例。"""
+    results = [i.exec("node", "/opt/myworkspace/bin/host-report.mjs", timeout=120, check=False) for i in (c.a, c.b)]
+    status = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}/host")
+    current = status.get("current") or {}
+    c.check("服务器状态：甲、乙的真实 OpenClaw 容器各上报一次，甲的当前值里有核心数、内存、两个分区与开机时长",
+            all(r.returncode == 0 for r in results) and status["reported"] is True
+            and (current.get("cores") or 0) >= 1 and (current.get("mem_total") or 0) > 0
+            and bool(current.get("data_disk")) and bool(current.get("root_disk")) and (current.get("uptime_seconds") or 0) > 0,
+            json.dumps({"exit": [r.returncode for r in results], "stderr": [r.stderr.strip()[-200:] for r in results],
+                        "current": {k: current.get(k) for k in ("cores", "mem_total", "load", "uptime_seconds")}},
+                       ensure_ascii=False))
+    summary = {x["instance_id"]: x for x in c.owner.call("GET", "/api/v1/agents/host-summary")["items"]}
+    c.check("服务器状态：实例列表的小指示里甲、乙都有内存与磁盘使用率",
+            all((summary.get(i.id) or {}).get("mem_used_percent") is not None
+                and (summary.get(i.id) or {}).get("disk_used_percent") is not None for i in (c.a, c.b)),
+            json.dumps(summary, ensure_ascii=False)[:600])
+    mine = mcp_call(c.a, "get_host_status", {})
+    data = mine.get("structuredContent") or {}
+    c.check("服务器状态：甲用 get_host_status 读到自己所在服务器的状态（只读工具）",
+            not mine.get("isError") and data.get("reported") is True and (data.get("cores") or 0) >= 1
+            and "last_24h" in data, json.dumps(mine, ensure_ascii=False)[:400])
+    other = mcp_call(c.a, "get_host_status", {"instance_id": c.b.id})
+    c.check("服务器状态：get_host_status 不接受参数，不能看别的实例", bool(other.get("isError")),
+            json.dumps(other, ensure_ascii=False)[:300])
+
+
 SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "2": scenario_2, "3": scenario_3, "4": scenario_4, "5": scenario_5, "7": scenario_7, "8": scenario_8,
     "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "15": scenario_15,
-    "16": scenario_16, "17": scenario_17, "18": scenario_18, "6": scenario_6,
+    "16": scenario_16, "17": scenario_17, "18": scenario_18, "19": scenario_19, "6": scenario_6,
 }
 
 

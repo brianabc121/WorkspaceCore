@@ -982,3 +982,9 @@ Worker 每分钟检查一次，通知 owner / admin；同一实例同一类告�
 - 输出脱敏后保存 7 天，在实例页“最近的运维记录”里查看；审计日志里有 `agents.ops.started` / `agents.ops.finished`（动作、退出码），没有输出。
 - 动作失败时看结果里的说明：`timeout`（超过 60 / 180 秒）、`host_key_changed`（服务器主机公钥变了，按第 18 节重新确认）、`auth_failed`（专用密钥被删，重新部署）、`client_key_invalid`（工作台的加密密钥换过，重新部署）。
 
+### 22.1 验收状态（T-0115）
+
+- agents CI 场景 17（自由接取：同时领取只成功一个、完成后打回再完成）、场景 18（项目管理权限：没开被拒，开了之后建项目、拉另一个实例进项目群）、场景 19（甲、乙的真实 OpenClaw 容器上报服务器状态，甲用 `get_host_status` 只读到自己的）。
+- SSH 部署验收（`agent_ssh_acceptance.py`）：照 crontab 那一行跑服务器状态上报；六个运维动作逐个执行，核对 `docker compose ps` / `docker stats` / `df` / `uptime` 的输出、日志脱敏、二次认证与审计；卸载后运维动作不可用。
+- 浏览器验收：`agent_ssh_browser.cjs`（运维面板：查看状态、立即上报、输密码重启；服务器状态面板与趋势；390px 宽度）、`sprint6_browser.cjs`（新建项目勾选实例与项目群、自由接取、领取、完成、打回与动态）。
+

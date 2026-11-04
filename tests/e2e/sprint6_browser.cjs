@@ -1,7 +1,9 @@
 // Sprint 6 V2 浏览器验收（T-0063；方案第 8 节的页面部分）：真实后端 + 真实 OpenIM 上的 OpenClaw 与 IM 页面——
 // 密钥库：添加密钥后页面上看不到明文 → 实例页：打开总开关、登记实例、授权密钥、下载接入包 →
 // 通讯录：登记的实例自动出现 → 单聊：发消息、经 OpenIM 回调投影后显示、导出会话 →
-// 建群（从顶栏“创建”菜单打开）：拉入实例、群信息栏里的防刷屏 → 审批：IM 里的审批卡片写明由谁触发，在卡片上批准并执行，
+// 建群（从顶栏“创建”菜单打开）：拉入实例、群信息栏里的防刷屏 →
+// 项目（T-0110 / T-0111）：新建项目时勾选实例并建 IM 项目群；任务设为可自由接取，实例领取并完成（应用代码，与 MCP 同一入口），
+// 管理员在任务详情里写原因打回，动态依次记下 → 审批：IM 里的审批卡片写明由谁触发，在卡片上批准并执行，
 // 审批中心显示结果与来源 → 右侧 AI 抽屉与实例对话 → 390px 宽度下无横向滚动 → member 看不到 IM / 实例页 →
 // 浏览器只访问工作台自己的地址（不直连 OpenIM），接口响应与页面里没有密钥明文。
 //
@@ -80,6 +82,56 @@ function requestApproval(instanceId, tool, args) {
   return execFileSync('docker', ['compose', 'exec', '-T', 'api', 'python', '-c', REQUEST_APPROVAL, instanceId, tool, JSON.stringify(args)], {
     cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
   }).trim().split(/\s+/)
+}
+
+// 在 api 容器里以实例的身份调用直接执行的工具（claim_task / complete_task，T-0111），与 MCP 请求同一个入口
+const AGENT_TOOL = `
+import asyncio, json, sys, uuid
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from app.core.config import get_settings
+from app.core.resources import create_engine, create_redis
+from app.domain import agent_tasks, events, im
+from app.domain.ai_tools import AiToolService
+from app.domain.connectors import ConnectorRuntime
+from app.integrations.http import CircuitBreaker
+from app.models import AgentInstance
+from app.schemas.ai_tools import TOOLS
+
+async def main():
+    settings = get_settings()
+    engine, redis = create_engine(settings), create_redis(settings)
+    runtime = ConnectorRuntime(settings, CircuitBreaker())
+    sessions = async_sessionmaker(engine, expire_on_commit=False, info=events.EventBus(redis).session_info())
+    try:
+        async with sessions() as db:
+            service = AiToolService(db, settings, runtime, redis)
+            instance = await db.get(AgentInstance, uuid.UUID(sys.argv[1]))
+            output = await agent_tasks.run(
+                service, await service.requester(instance), TOOLS[sys.argv[2]], json.loads(sys.argv[3]),
+                request_id=None, im=im.openim_client(settings, runtime, redis),
+            )
+        print(output.model_dump_json())
+    finally:
+        await redis.aclose()
+        await engine.dispose()
+
+asyncio.run(main())
+`
+function agentTool(instanceId, tool, args) {
+  return JSON.parse(execFileSync('docker', ['compose', 'exec', '-T', 'api', 'python', '-c', AGENT_TOOL, instanceId, tool, JSON.stringify(args)], {
+    cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim().split('\n').pop())
+}
+async function apiSend(page, workspace, method, pathname, body) {
+  return page.evaluate(async ({ workspace, method, pathname, body }) => {
+    const cookie = document.cookie.split('; ').find((c) => c.startsWith('ws_csrf=')) || ''
+    const response = await fetch(pathname, {
+      method,
+      headers: { 'X-Workspace-Id': workspace, 'Content-Type': 'application/json', 'X-CSRF-Token': decodeURIComponent(cookie.slice(8)), 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify(body),
+    })
+    return { status: response.status, body: await response.json() }
+  }, { workspace, method, pathname, body })
 }
 
 function consoleProblem(message) {
@@ -259,6 +311,51 @@ async function download(page, click) {
   await settings.getByLabel('单个实例每分钟最多（条）').waitFor()
   await settings.getByLabel('管理员不发言时，实例最多连续发言（条）').waitFor()
   step('建群：从顶栏“创建”菜单打开建群表单，拉入实例后会话列表出现群聊，群信息栏里有防刷屏上限')
+
+  // ---------------------------------------------------------------- 项目：勾选智能体、项目群（T-0110）；自由接取与打回（T-0111）
+  const projectTitle = `智能体项目${run}`
+  await page.goto(`${base}/projects`)
+  await page.getByRole('button', { name: '新建项目' }).click()
+  const projectForm = page.getByRole('form', { name: '项目设置' })
+  await projectForm.getByLabel('项目名称').fill(projectTitle)
+  await projectForm.getByLabel(new RegExp(`^${name}（`)).check()
+  await projectForm.getByLabel(/同时建 IM 项目群/).check()
+  await projectForm.getByRole('button', { name: '创建项目' }).click()
+  const projectCard = page.getByRole('region', { name: `项目 ${projectTitle}` })
+  await projectCard.waitFor()
+  check((await projectCard.getByLabel(`${projectTitle} 的智能体`).textContent()).includes(name), '项目卡片应列出新建时勾选的实例')
+  check(await reloadUntil(page, `${base}/projects`, projectCard.getByText(/项目群已建好/)), '项目群应在 90 秒内建好（真实 OpenIM）')
+  await projectCard.getByRole('button', { name: `项目 ${projectTitle} 的成员` }).click()
+  const members = page.getByRole('region', { name: '项目成员' })
+  await members.getByText(name).first().waitFor()
+  await page.keyboard.press('Escape')
+  const project = (await apiGet(page, workspace, '/api/v1/projects')).items.find((p) => p.title === projectTitle)
+  step('项目：新建时勾选实例并建 IM 项目群（群主是自己），卡片与成员弹窗里有这个实例，项目群已建好')
+
+  const taskTitle = `可领取任务${run}`
+  const created = await apiSend(page, workspace, 'POST', '/api/v1/tasks', { project_id: project.id, title: taskTitle })
+  check(created.status === 201, `建任务失败：${JSON.stringify(created.body)}`)
+  await page.goto(`${base}/tasks?task=${created.body.id}`)
+  await page.getByLabel('执行者').selectOption('open')
+  await page.getByLabel('谁可以领取').selectOption('project')
+  await page.getByRole('button', { name: '保存任务' }).click()
+  await page.getByRole('region', { name: '任务动态' }).getByText(/可自由接取 · 只限项目成员/).waitFor()
+  const claimed = agentTool(instance.id, 'claim_task', { task_id: created.body.id })
+  const completed = agentTool(instance.id, 'complete_task', { task_id: created.body.id, note: `浏览器验收完成 ${run}` })
+  check(claimed.status === 'claimed' && completed.status === 'completed', `实例领取、完成应直接生效：${JSON.stringify({ claimed, completed })}`)
+  await page.goto(`${base}/tasks?task=${created.body.id}`)
+  const claimPanel = page.getByRole('region', { name: '任务动态' })
+  await claimPanel.getByText(/完成了任务/).waitFor()
+  await claimPanel.getByText(`浏览器验收完成 ${run}`).waitFor()
+  const reopenForm = claimPanel.getByRole('form', { name: '打回任务' })
+  await reopenForm.getByLabel('打回原因').fill(`缺少回滚步骤 ${run}`)
+  await reopenForm.getByRole('button', { name: '打回到进行中' }).click()
+  await claimPanel.getByText(/打回了任务/).waitFor()
+  const events = (await apiGet(page, workspace, `/api/v1/tasks/${created.body.id}/events`)).items.map((e) => e.kind)
+  const reopened = await apiGet(page, workspace, `/api/v1/tasks/${created.body.id}`)
+  check(JSON.stringify(events) === JSON.stringify(['reopened', 'completed', 'claimed', 'opened']) && !reopened.done && reopened.assignee_instance_id === instance.id,
+    `打回后任务应回到进行中、仍由实例执行，动态依次记下：${JSON.stringify(events)}`)
+  step('自由接取：任务详情里设为可自由接取（只限项目成员），实例领取并完成（直接生效），管理员写原因打回，动态依次是设为可领取、领取、完成、打回')
 
   // ---------------------------------------------------------------- 审批卡片：写明由谁触发，在卡片上批准
   // 新建日程只写工作台自己的表，不依赖第三方服务
