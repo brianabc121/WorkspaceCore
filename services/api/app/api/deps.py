@@ -270,8 +270,9 @@ def get_task_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_app_settings)],
     connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
+    im: Annotated[OpenIMClient | None, Depends(get_openim)],
 ) -> TaskService:
-    return TaskService(db, settings, connectors)
+    return TaskService(db, settings, connectors, im)
 
 
 async def authenticated(

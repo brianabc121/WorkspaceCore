@@ -6,6 +6,8 @@
   重复请求原样返回第一次的结果（包括 404 / 409 这类确定的失败）。
 - 乐观并发：任务的 version 对外是不透明字符串（内部是整数），项目的 version 是整数。
 - 删除项目时它的任务一起删除；收藏指向它们的关联、搜索索引由数据库触发器清理（迁移 0020）。
+- 项目的智能体成员与项目群（T-0110）：见 app/domain/project_groups.py。写入提交后立即试一次
+  建群 / 同步，失败的由 Worker 每分钟重试。
 """
 
 import base64
@@ -23,16 +25,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import idempotency, task_runs
+from app.domain import idempotency, project_groups, task_runs
 from app.domain.audit import AuditTrail
 from app.domain.auth import Actor
 from app.domain.connectors import ConnectorRuntime
-from app.domain.policy import WorkspaceAccess, not_found
-from app.models import AgentInstance, IdempotencyRequest, Project, Task, WorkspaceMember
+from app.domain.policy import WorkspaceAccess, has_role, not_found
+from app.integrations.openim import OpenIMClient
+from app.models import (
+    AgentInstance,
+    IdempotencyRequest,
+    ImGroup,
+    Project,
+    Task,
+    WorkspaceMember,
+)
 from app.repositories import integrations as integration_repo
 from app.repositories import tasks as repo
 from app.schemas.tasks import (
+    MAX_PROJECT_AGENTS,
+    ProjectAgentBrief,
+    ProjectAgentList,
+    ProjectAgentOut,
     ProjectCreate,
+    ProjectImGroup,
     ProjectOut,
     ProjectPage,
     ProjectProgressList,
@@ -45,6 +60,7 @@ from app.schemas.tasks import (
     TaskStatusFilter,
     TaskUpdate,
 )
+from app.schemas.workspaces import Role
 
 
 @dataclass(frozen=True)
@@ -108,7 +124,12 @@ def task_out(task: Task) -> TaskOut:
     )
 
 
-def project_out(project: Project, counts: tuple[int, int] = (0, 0)) -> ProjectOut:
+def project_out(
+    project: Project,
+    counts: tuple[int, int] = (0, 0),
+    agents: Sequence[project_groups.Member] = (),
+    group: ImGroup | None = None,
+) -> ProjectOut:
     return ProjectOut(
         id=project.id,
         title=project.title,
@@ -116,10 +137,23 @@ def project_out(project: Project, counts: tuple[int, int] = (0, 0)) -> ProjectOu
         archived=project.archived,
         open_tasks=counts[0],
         done_tasks=counts[1],
+        agents=[
+            ProjectAgentBrief(
+                instance_id=m.instance.id,
+                name=m.instance.name,
+                status=m.instance.status,
+            )
+            for m in agents
+        ],
+        im_group=ProjectImGroup.model_validate(project_groups.group_outs(project, group)),
         version=project.version,
         created_at=project.created_at,
         updated_at=project.updated_at,
     )
+
+
+def _admin_only() -> ApiError:
+    return ApiError(403, "FORBIDDEN", "只有 owner / admin 能管理项目的智能体和项目群")
 
 
 def _version_conflict(current: Any, current_version: str | int) -> ApiError:
@@ -160,10 +194,17 @@ Write = Callable[[], Awaitable[WriteResult]]
 
 
 class TaskService:
-    def __init__(self, db: AsyncSession, settings: Settings, runtime: ConnectorRuntime) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        settings: Settings,
+        runtime: ConnectorRuntime,
+        im: OpenIMClient | None = None,
+    ) -> None:
         self.db = db
         self.settings = settings
         self.runtime = runtime
+        self.im = im
         self.audit = AuditTrail(db, settings)
 
     # ---------------------------------------------------------------- 读取
@@ -187,17 +228,25 @@ class TaskService:
             limit=limit + 1,
         )
         page = rows[:limit]
-        counts = await repo.task_counts_by_project(self.db, (p.id for p in page))
         return ProjectPage(
-            items=[project_out(p, counts.get(p.id, (0, 0))) for p in page],
+            items=await self._project_outs(page),
             next_cursor=_page_cursor(offset, limit, len(rows)),
             total_estimate=None,
         )
 
+    async def _project_outs(self, projects: Sequence[Project]) -> list[ProjectOut]:
+        ids = [p.id for p in projects]
+        counts = await repo.task_counts_by_project(self.db, ids)
+        agents = await project_groups.members(self.db, ids)
+        groups = await project_groups.live_groups(self.db, ids)
+        return [
+            project_out(p, counts.get(p.id, (0, 0)), agents.get(p.id, []), groups.get(p.id))
+            for p in projects
+        ]
+
     async def get_project(self, access: WorkspaceAccess, project_id: uuid.UUID) -> ProjectOut:
         project = await self._project(access, project_id)
-        counts = await repo.task_counts_by_project(self.db, [project.id])
-        return project_out(project, counts.get(project.id, (0, 0)))
+        return (await self._project_outs([project]))[0]
 
     async def project_progress(self, access: WorkspaceAccess, *, limit: int) -> ProjectProgressList:
         rows = await repo.project_progress(self.db, access.workspace.id, limit=limit)
@@ -490,6 +539,9 @@ class TaskService:
     async def create_project(
         self, context: Actor, access: WorkspaceAccess, body: ProjectCreate
     ) -> ProjectOut:
+        if (body.instance_ids or body.im_group) and not has_role(access.role, Role.admin):
+            raise _admin_only()
+        instances = await self._agents(access, body.instance_ids)
         project = Project(
             workspace_id=access.workspace.id,
             title=body.title,
@@ -498,10 +550,63 @@ class TaskService:
         )
         self.db.add(project)
         await self.db.flush()
-        await self._audit("project.created", context, access, "project", project.id, {})
+        await project_groups.add_agents(
+            self.db, project, [i.id for i in instances], added_by=context.user.id
+        )
+        wants_group = body.im_group and self.settings.openim_enabled
+        if wants_group:
+            project_groups.request_group(project, context.user.id)
+        await self._audit(
+            "project.created",
+            context,
+            access,
+            "project",
+            project.id,
+            {"agents": len(instances), "im_group": wants_group},
+        )
         await self.db.commit()
-        await self.db.refresh(project)
-        return project_out(project)
+        project_id = project.id
+        await self.sync_group(project_id)
+        return await self.get_project(access, project_id)
+
+    async def _agents(
+        self, access: WorkspaceAccess, instance_ids: Sequence[uuid.UUID]
+    ) -> list[AgentInstance]:
+        """本工作空间、没有停用的实例；不是的返回 422。"""
+        if not instance_ids:
+            return []
+        found = {
+            i.id: i
+            for i in await self.db.scalars(
+                select(AgentInstance).where(
+                    AgentInstance.workspace_id == access.workspace.id,
+                    AgentInstance.id.in_(instance_ids),
+                )
+            )
+        }
+        bad = [str(i) for i in instance_ids if i not in found or found[i].status == "disabled"]
+        if bad:
+            raise ApiError(
+                422,
+                "VALIDATION_FAILED",
+                "有实例不存在或已停用",
+                details={
+                    "errors": [
+                        {
+                            "loc": ["body", "instance_ids"],
+                            "msg": ",".join(bad),
+                            "type": "value_error",
+                        }
+                    ]
+                },
+            )
+        return [found[i] for i in instance_ids]
+
+    async def sync_group(self, project_id: uuid.UUID) -> None:
+        """写入提交之后立即试一次建群 / 同步；失败的（以及没有 IM 客户端时）留给 Worker。"""
+        if self.im is None:
+            return
+        await project_groups.ProjectGroupSync(self.db, self.settings, self.im).sync(project_id)
 
     async def update_project(
         self,
@@ -519,10 +624,13 @@ class TaskService:
         for name in fields:
             setattr(project, name, getattr(body, name))
         project.version += 1
+        # 改名、改说明、归档：项目群的群名与公告随之更新
+        project_groups.mark_dirty(project)
         await self._audit(
             "project.updated", context, access, "project", project.id, {"fields": fields}
         )
         await self.db.commit()
+        await self.sync_group(project_id)
         return await self.get_project(access, project_id)
 
     async def delete_project(
@@ -535,6 +643,7 @@ class TaskService:
             raise _version_conflict(current, project.version)
         counts = await repo.task_counts_by_project(self.db, [project.id])
         open_tasks, done_tasks = counts.get(project.id, (0, 0))
+        await project_groups.dismiss_for_project(self.db, self.im, project)
         await self.db.delete(project)  # 任务由外键级联删除
         await self._audit(
             "project.deleted",
@@ -545,3 +654,103 @@ class TaskService:
             {"tasks_deleted": open_tasks + done_tasks},
         )
         await self.db.commit()
+
+    # ---------------------------------------------------------------- 项目的智能体成员与项目群
+
+    async def list_project_agents(
+        self, access: WorkspaceAccess, project_id: uuid.UUID
+    ) -> ProjectAgentList:
+        project = await self._project(access, project_id)
+        found = (await project_groups.members(self.db, [project.id]))[project.id]
+        group = (await project_groups.live_groups(self.db, [project.id])).get(project.id)
+        in_group = (
+            (await project_groups.group_instance_ids(self.db, [group.id]))[group.id]
+            if group is not None
+            else set()
+        )
+        return ProjectAgentList(
+            items=[
+                ProjectAgentOut(
+                    instance_id=m.instance.id,
+                    name=m.instance.name,
+                    description=m.instance.description,
+                    status=m.instance.status,
+                    access=m.access,
+                    in_group=m.instance.id in in_group,
+                )
+                for m in found
+            ],
+            im_group=ProjectImGroup.model_validate(project_groups.group_outs(project, group)),
+        )
+
+    async def add_project_agent(
+        self,
+        context: Actor,
+        access: WorkspaceAccess,
+        project_id: uuid.UUID,
+        instance_id: uuid.UUID,
+    ) -> ProjectAgentList:
+        if not has_role(access.role, Role.admin):
+            raise _admin_only()
+        project = await self._project(access, project_id, lock=True)
+        instance = (await self._agents(access, [instance_id]))[0]
+        if await project_groups.member_count(self.db, project.id) >= MAX_PROJECT_AGENTS:
+            raise ApiError(422, "VALIDATION_FAILED", f"一个项目最多 {MAX_PROJECT_AGENTS} 个智能体")
+        added = await project_groups.add_agents(
+            self.db, project, [instance.id], added_by=context.user.id
+        )
+        if added:
+            await self._audit(
+                "project.agent_added",
+                context,
+                access,
+                "project",
+                project.id,
+                {"instance_id": str(instance.id)},
+            )
+        await self.db.commit()
+        await self.sync_group(project_id)
+        return await self.list_project_agents(access, project_id)
+
+    async def remove_project_agent(
+        self,
+        context: Actor,
+        access: WorkspaceAccess,
+        project_id: uuid.UUID,
+        instance_id: uuid.UUID,
+    ) -> ProjectAgentList:
+        """移出项目：不再能读写项目知识库，也移出项目群；它已经领取的任务不受影响。"""
+        if not has_role(access.role, Role.admin):
+            raise _admin_only()
+        project = await self._project(access, project_id, lock=True)
+        if await project_groups.remove_agent(self.db, project, instance_id):
+            await self._audit(
+                "project.agent_removed",
+                context,
+                access,
+                "project",
+                project.id,
+                {"instance_id": str(instance_id)},
+            )
+        await self.db.commit()
+        await self.sync_group(project_id)
+        return await self.list_project_agents(access, project_id)
+
+    async def request_project_group(
+        self, context: Actor, access: WorkspaceAccess, project_id: uuid.UUID
+    ) -> ProjectOut:
+        """建项目群（旧项目补建）或立即重试；已建好的重新同步一次。"""
+        if not has_role(access.role, Role.admin):
+            raise _admin_only()
+        if not self.settings.openim_enabled:
+            raise ApiError(409, "IM_NOT_CONFIGURED", "没有部署 OpenIM，不能建项目群")
+        project = await self._project(access, project_id, lock=True)
+        first = project.im_group_status == "none"
+        project_groups.request_group(project, context.user.id)
+        if first:
+            await self._audit(
+                "project.im_group_requested", context, access, "project", project.id, {}
+            )
+        await self.db.commit()
+        await self.sync_group(project_id)
+        return await self.get_project(access, project_id)

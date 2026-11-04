@@ -116,9 +116,12 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | 方法 | 路径 | 说明 | 状态 |
 |---|---|---|---|
 | GET | `/api/v1/projects` | 项目列表：默认不含已归档（`include_archived=true` 包含），`q` 按标题搜索，游标分页；每项带 `open_tasks` / `done_tasks` | 已实现（T-0082） |
-| POST | `/api/v1/projects` | 新建项目（`title` 最多 120 字，`description` 最多 2000 字）；不需要 Idempotency-Key | 已实现（T-0082） |
+| POST | `/api/v1/projects` | 新建项目（`title` 最多 120 字，`description` 最多 2000 字）；不需要 Idempotency-Key。owner / admin 可以带 `instance_ids`（一开始加入的智能体，最多 50 个，不能是停用的）和 `im_group: true`（同时建 IM 项目群），member 带这两项返回 403 | 已实现（T-0082，T-0110 加智能体与项目群） |
 | GET | `/api/v1/projects/progress` | 首页“项目进度”：未归档项目的未完成 / 已完成任务数（`limit` 最大 20） | 已实现（T-0064，T-0082 改为本地数据） |
-| GET / PATCH / DELETE | `/api/v1/projects/{project_id}` | 详情 / 改名、改说明、归档或恢复（带整数 `version`）/ 删除（`?version=`，连同它的全部任务，审计记下删除的任务数） | 已实现（T-0082） |
+| GET / PATCH / DELETE | `/api/v1/projects/{project_id}` | 详情 / 改名、改说明、归档或恢复（带整数 `version`）/ 删除（`?version=`，连同它的全部任务，审计记下删除的任务数） | 已实现（T-0082）；`ProjectOut` 带 `agents`（智能体成员）与 `im_group`（`status` none / pending / ready、`group_id`、`conversation_id`、`error`）；改名、改说明、归档同步到项目群，删除时先解散项目群（T-0110） |
+| GET | `/api/v1/projects/{project_id}/agents` | 项目的智能体成员（viewer）：名字、说明、状态、对项目知识库的权限、是否已在项目群里，以及项目群状态 `im_group` | 已实现（T-0110） |
+| PUT / DELETE | `/api/v1/projects/{project_id}/agents/{instance_id}` | 让智能体加入 / 移出项目（owner / admin）：同步项目知识库权限（`project_agents`）与项目群成员；重复加入、移出不存在的成员不报错；停用的实例 422 | 已实现（T-0110） |
+| POST | `/api/v1/projects/{project_id}/im-group` | 建项目群 / 立即重试（owner / admin）：没有项目群时建一个（群主是自己），正在建的立即重试，已建好的重新同步；没有部署 OpenIM 时 409 `IM_NOT_CONFIGURED` | 已实现（T-0110） |
 | GET / POST | `/api/v1/tasks` | 任务列表（`status` = `open` / `done` / `all`、`project_id`、`priority`、`due_before` / `due_after`、`q`、`sort`、游标分页）/ 创建任务（必须带 `Idempotency-Key`） | 已实现（T-0082） |
 | GET / PATCH / DELETE | `/api/v1/tasks/{task_id}` | 详情 / 修改（`Idempotency-Key` + `version`；可以改 `project_id` 移到别的项目）/ 删除（`Idempotency-Key` + `?version=`） | 已实现（T-0082） |
 

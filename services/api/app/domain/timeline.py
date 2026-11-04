@@ -474,7 +474,10 @@ class RunService:
         ).all()
         return AssigneeOptions(
             users=[AssigneeUser(id=uid, display_name=name) for uid, name in users],
-            instances=[AssigneeInstance(id=i.id, name=i.name, status=i.status) for i in instances],
+            instances=[
+                AssigneeInstance(id=i.id, name=i.name, status=i.status, description=i.description)
+                for i in instances
+            ],
         )
 
     # ---------------------------------------------------------------- 时间轴

@@ -2047,7 +2047,10 @@ export interface paths {
          */
         get: operations["list_projects"];
         put?: never;
-        /** 新建项目（member） */
+        /**
+         * 新建项目（member）
+         * @description owner / admin 可以同时选择加入的智能体（instance_ids）并建 IM 项目群（im_group），member 带这两项时返回 403。OpenIM 暂时不可用时项目照常建好，im_group.status 为 pending，Worker 每分钟重试（T-0110）。
+         */
         post: operations["create_project"];
         delete?: never;
         options?: never;
@@ -2095,6 +2098,70 @@ export interface paths {
          * @description 改名、改描述、归档 / 取消归档；version 与当前版本不一致时返回 409 VERSION_CONFLICT，details.current 为最新的项目。
          */
         patch: operations["update_project"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目的智能体成员（viewer）
+         * @description 加入项目的智能体能读写项目知识库、收到项目简报，有项目群时也在群里（T-0110）。
+         */
+        get: operations["list_project_agents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/agents/{instance_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 让智能体加入项目（admin）
+         * @description 同时得到项目知识库的读写权限，并被拉进项目群（有项目群时）。已经是成员时不变。停用的实例返回 422；一个项目最多 50 个智能体。
+         */
+        put: operations["add_project_agent"];
+        post?: never;
+        /**
+         * 把智能体移出项目（admin）
+         * @description 不再能读写项目知识库，也移出项目群；它已经领取的任务不受影响。不是成员时不变。
+         */
+        delete: operations["remove_project_agent"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/im-group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 建项目群 / 立即重试（admin）
+         * @description 没有项目群的项目（以前建的项目）建一个，群主是自己，成员是自己和已加入的智能体；正在建群的立即重试；已建好的重新同步一次成员与群信息。没有部署 OpenIM 时返回 409。
+         */
+        post: operations["request_project_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/search": {
@@ -3346,6 +3413,12 @@ export interface components {
         };
         /** AssigneeInstance */
         AssigneeInstance: {
+            /**
+             * Description
+             * @description 实例的说明（能力说明，T-0110）
+             * @default
+             */
+            description: string;
             /**
              * Id
              * Format: uuid
@@ -6129,6 +6202,61 @@ export interface components {
              */
             new_password: string;
         };
+        /**
+         * ProjectAgentBrief
+         * @description 项目的智能体成员（T-0110）：在项目知识库里有权限，有项目群时也在群里。
+         */
+        ProjectAgentBrief: {
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            instance_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "online" | "offline" | "disabled";
+        };
+        /** ProjectAgentList */
+        ProjectAgentList: {
+            im_group: components["schemas"]["ProjectImGroup"];
+            /** Items */
+            items: components["schemas"]["ProjectAgentOut"][];
+        };
+        /** ProjectAgentOut */
+        ProjectAgentOut: {
+            /**
+             * Access
+             * @description 对项目知识库的权限
+             * @enum {string}
+             */
+            access: "read_write" | "read";
+            /**
+             * Description
+             * @description 实例的说明（能力说明）
+             */
+            description: string;
+            /**
+             * In Group
+             * @description 是否已在项目群里
+             */
+            in_group: boolean;
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            instance_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "online" | "offline" | "disabled";
+        };
         /** ProjectCreate */
         ProjectCreate: {
             /**
@@ -6136,11 +6264,54 @@ export interface components {
              * @default
              */
             description: string;
+            /**
+             * Im Group
+             * @description 同时建 IM 项目群，群主是自己（只限 owner / admin；需要部署 OpenIM）
+             * @default false
+             */
+            im_group: boolean;
+            /**
+             * Instance Ids
+             * @description 一开始就加入项目的智能体（只限 owner / admin；本工作空间里没有停用的实例）
+             */
+            instance_ids?: string[];
             /** Title */
             title: string;
         };
+        /**
+         * ProjectImGroup
+         * @description 项目群（T-0110，docs/v2/AGENT_OPS_PLAN.md 第 2.2 节）。
+         */
+        ProjectImGroup: {
+            /**
+             * Conversation Id
+             * @description 群会话 ID（sg_<群 ID>）
+             */
+            conversation_id: string | null;
+            /**
+             * Error
+             * @description pending 时上一次失败的原因（错误类别，如 unavailable、not_configured）
+             */
+            error: string | null;
+            /**
+             * Group Id
+             * @description OpenIM 的群 ID；还没建好时为 null
+             */
+            group_id: string | null;
+            /**
+             * Status
+             * @description none 没有项目群；pending 正在建群或同步成员（OpenIM 不可用时每分钟重试）；ready 已建好
+             * @enum {string}
+             */
+            status: "none" | "pending" | "ready";
+        };
         /** ProjectOut */
         ProjectOut: {
+            /**
+             * Agents
+             * @description 项目的智能体成员（T-0110）
+             */
+            agents: components["schemas"]["ProjectAgentBrief"][];
             /** Archived */
             archived: boolean;
             /**
@@ -6160,6 +6331,7 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            im_group: components["schemas"]["ProjectImGroup"];
             /**
              * Open Tasks
              * @description 未完成任务数
@@ -17828,6 +18000,276 @@ export interface operations {
                 "application/json": components["schemas"]["ProjectUpdate"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_project_agents: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectAgentList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    add_project_agent: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                project_id: string;
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectAgentList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_project_agent: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                project_id: string;
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectAgentList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    request_project_group: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

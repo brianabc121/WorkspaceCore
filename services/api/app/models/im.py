@@ -77,6 +77,13 @@ class ImGroup(Base):
     __tablename__ = "im_groups"
     __table_args__ = (
         UniqueConstraint("group_id"),
+        # 每个项目最多一个没有解散的项目群（T-0110）
+        Index(
+            "uq_im_groups_project",
+            "project_id",
+            unique=True,
+            postgresql_where=text("project_id IS NOT NULL AND dismissed_at IS NULL"),
+        ),
         CheckConstraint("max_agent_streak BETWEEN 1 AND 50", name="max_agent_streak"),
         CheckConstraint("max_per_minute BETWEEN 1 AND 60", name="max_per_minute"),
     )
@@ -96,6 +103,10 @@ class ImGroup(Base):
     max_agent_streak: Mapped[int] = mapped_column(Integer, server_default=text("8"))
     max_per_minute: Mapped[int] = mapped_column(Integer, server_default=text("6"))
     dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 项目群（T-0110）：成员跟随项目的智能体成员，由 app/domain/project_groups.py 同步
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.projects.id", ondelete="SET NULL")
+    )
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()
