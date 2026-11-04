@@ -2310,6 +2310,46 @@ export interface paths {
         patch: operations["update_task"];
         trace?: never;
     };
+    "/api/v1/tasks/{task_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 任务的动态（viewer）
+         * @description 设为自由接取、领取、放弃、完成、打回（T-0111），最新的在前，最多 100 条。note 是原因或完成说明，来自人或智能体的文字，按纯文本显示。
+         */
+        get: operations["list_task_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 打回已完成的任务（admin，乐观并发）
+         * @description 任务回到进行中（未完成、执行者不变）。执行者是智能体时开新的一段，并用你的 IM 账号把原因发给它；原执行者已停用或删除时任务放回未分配。原因写进任务的动态。没完成的任务返回 409 TASK_NOT_DONE（T-0111）。
+         */
+        post: operations["reopen_task"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tasks/{task_id}/runs": {
         parameters: {
             query?: never;
@@ -3233,7 +3273,7 @@ export interface components {
              * Risk Level
              * @enum {string}
              */
-            risk_level: "read" | "write" | "critical" | "knowledge";
+            risk_level: "read" | "write" | "critical" | "knowledge" | "direct";
             source: components["schemas"]["ExecutionSource"];
             /**
              * Status
@@ -7553,6 +7593,44 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** TaskEventList */
+        TaskEventList: {
+            /** Items */
+            items: components["schemas"]["TaskEventOut"][];
+        };
+        /**
+         * TaskEventOut
+         * @description 任务的动态（T-0111）：设为自由接取、领取、放弃、完成、打回。
+         */
+        TaskEventOut: {
+            /**
+             * Actor Kind
+             * @enum {string}
+             */
+            actor_kind: "user" | "instance" | "system";
+            /** Actor Name */
+            actor_name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "opened" | "claimed" | "released" | "completed" | "reopened";
+            /**
+             * Note
+             * @description 放弃 / 打回的原因或完成说明；来自人或智能体的文字，按纯文本显示
+             */
+            note: string;
+        };
         /** TaskOut */
         TaskOut: {
             /**
@@ -7565,6 +7643,23 @@ export interface components {
              * @description 执行者是工作空间成员时的用户 ID
              */
             assignee_user_id: string | null;
+            /**
+             * Claim Mode
+             * @description 接取方式（T-0111）：assigned 由管理员指派；open 可自由接取（空闲的智能体领取）
+             * @enum {string}
+             */
+            claim_mode: "assigned" | "open";
+            /**
+             * Claim Scope
+             * @description 自由接取的范围：all 全部智能体 / project 只限项目成员
+             * @enum {string}
+             */
+            claim_scope: "all" | "project";
+            /**
+             * Claimable
+             * @description 现在能被领取：open、没有执行者、没有完成
+             */
+            claimable: boolean;
             /**
              * Created At
              * Format: date-time
@@ -7629,6 +7724,19 @@ export interface components {
             next_cursor?: string | null;
             /** Total Estimate */
             total_estimate?: number | null;
+        };
+        /**
+         * TaskReopen
+         * @description 打回（owner / admin）：已完成的任务回到进行中，原因会发给执行的智能体。
+         */
+        TaskReopen: {
+            /** Reason */
+            reason: string;
+            /**
+             * Version
+             * @description 读取时的 version，原样带回；与当前版本不一致时返回 409
+             */
+            version: string;
         };
         /** TaskRunList */
         TaskRunList: {
@@ -7740,6 +7848,16 @@ export interface components {
              * @description 执行者：工作空间成员
              */
             assignee_user_id?: string | null;
+            /**
+             * Claim Mode
+             * @description 接取方式（只限 owner / admin）：设为 open 时任务必须没有执行者、没有完成，工作台会通知符合条件的智能体；设了执行者时自动改回 assigned
+             */
+            claim_mode?: ("assigned" | "open") | null;
+            /**
+             * Claim Scope
+             * @description 自由接取的范围（只限 owner / admin）
+             */
+            claim_scope?: ("all" | "project") | null;
             /** Description */
             description?: string | null;
             /** Done */
@@ -10252,7 +10370,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: ("pending_approval" | "rejected" | "expired" | "executing" | "succeeded" | "failed" | "unknown" | "denied")[] | null;
-                risk_level?: ("read" | "write" | "critical" | "knowledge")[] | null;
+                risk_level?: ("read" | "write" | "critical" | "knowledge" | "direct")[] | null;
                 instance_id?: string | null;
                 tool_name?: string | null;
                 /** @description 上一页返回的 next_cursor */
@@ -18864,6 +18982,134 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["TaskUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_task_events: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskEventList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reopen_task: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskReopen"];
             };
         };
         responses: {

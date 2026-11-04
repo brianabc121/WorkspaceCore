@@ -10,7 +10,7 @@
 """
 
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast, get_args
@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.domain import notifications as notification_domain
+from app.domain import task_claims
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError
 from app.domain.automations import AutomationService
 from app.domain.calendar import CalendarService
@@ -33,7 +34,16 @@ from app.domain.operations import DeploymentHealth, OperationsService
 from app.domain.policy import WorkspaceAccess
 from app.domain.search import SearchService
 from app.domain.tasks import TaskService
-from app.models import CalendarEvent
+from app.models import (
+    AgentInstance,
+    CalendarEvent,
+    Project,
+    ProjectAgent,
+    Task,
+    TaskEvent,
+    TaskRun,
+    User,
+)
 from app.repositories import tasks as task_repo
 from app.schemas.ai_tools import (
     ActionStatusOutput,
@@ -45,6 +55,8 @@ from app.schemas.ai_tools import (
     CalendarAgendaInput,
     CalendarAgendaOutput,
     DashboardOverviewOutput,
+    DueTaskItem,
+    DueTaskText,
     EmptyInput,
     EventItem,
     EventText,
@@ -84,6 +96,7 @@ from app.schemas.ai_tools import (
     ServiceItem,
     ServiceStatusOutput,
     TaskBrief,
+    TaskClaim,
     TaskDetail,
     TaskDetailText,
     TaskItem,
@@ -91,9 +104,11 @@ from app.schemas.ai_tools import (
 )
 from app.schemas.integrations import SyncState
 from app.schemas.search import AgentSearchType
+from app.schemas.tasks import TaskOut
 
 # 没有分页参数的列表工具最多返回的条数（契约第 9.2 节：列表最多 50）
 LIST_CAP = 50
+DUE_TASKS_CAP = 100
 
 
 @dataclass(frozen=True)
@@ -168,7 +183,94 @@ async def _search(call: ReadCall, args: SearchInput) -> SearchOutput:
     )
 
 
+@dataclass(frozen=True)
+class _TaskView:
+    assignee: str
+    assignee_name: str | None
+    claim: TaskClaim
+    running: bool
+
+
+async def _my_projects(call: ReadCall) -> set[uuid.UUID]:
+    return set(
+        (
+            await call.db.scalars(
+                select(ProjectAgent.project_id).where(
+                    ProjectAgent.instance_id == call.requester.instance.id
+                )
+            )
+        ).all()
+    )
+
+
+async def _task_views(call: ReadCall, items: Sequence[TaskOut]) -> dict[uuid.UUID, _TaskView]:
+    """执行者（me / member / instance / none，成员只给显示名）、接取方式、是否在执行（T-0111）。"""
+    me = call.requester.instance.id
+    user_ids = {t.assignee_user_id for t in items if t.assignee_user_id}
+    instance_ids = {t.assignee_instance_id for t in items if t.assignee_instance_id}
+    users = (
+        {
+            uid: name
+            for uid, name in (
+                await call.db.execute(
+                    select(User.id, User.display_name).where(User.id.in_(user_ids))
+                )
+            ).all()
+        }
+        if user_ids
+        else {}
+    )
+    instances = (
+        {
+            iid: name
+            for iid, name in (
+                await call.db.execute(
+                    select(AgentInstance.id, AgentInstance.name).where(
+                        AgentInstance.id.in_(instance_ids)
+                    )
+                )
+            ).all()
+        }
+        if instance_ids
+        else {}
+    )
+    ids = [t.id for t in items]
+    running = (
+        set(
+            (
+                await call.db.scalars(
+                    select(TaskRun.task_id).where(
+                        TaskRun.task_id.in_(ids), TaskRun.ended_at.is_(None)
+                    )
+                )
+            ).all()
+        )
+        if ids
+        else set()
+    )
+    mine = await _my_projects(call)
+    views: dict[uuid.UUID, _TaskView] = {}
+    for t in items:
+        if t.assignee_instance_id == me:
+            kind, name = "me", instances.get(me)
+        elif t.assignee_instance_id is not None:
+            kind, name = "instance", instances.get(t.assignee_instance_id)
+        elif t.assignee_user_id is not None:
+            kind, name = "member", users.get(t.assignee_user_id)
+        else:
+            kind, name = "none", None
+        claimable = t.claimable and (t.claim_scope == "all" or t.project_id in mine)
+        views[t.id] = _TaskView(
+            assignee=kind,
+            assignee_name=name,
+            claim=TaskClaim(mode=t.claim_mode, scope=t.claim_scope, claimable=claimable),
+            running=t.id in running,
+        )
+    return views
+
+
 async def _list_tasks(call: ReadCall, args: ListTasksInput) -> ListTasksOutput:
+    me = call.requester.instance.id
     page = await call.tasks().list_tasks(
         call.access,
         status=args.status,
@@ -180,7 +282,10 @@ async def _list_tasks(call: ReadCall, args: ListTasksInput) -> ListTasksOutput:
         sort="due_at",
         cursor=args.cursor,
         limit=args.limit,
+        assignee_instance_id=me if args.assigned_to_me else None,
+        claimable_for=me if args.claimable else None,
     )
+    views = await _task_views(call, page.items)
     return ListTasksOutput(
         items=[
             TaskItem(
@@ -189,7 +294,12 @@ async def _list_tasks(call: ReadCall, args: ListTasksInput) -> ListTasksOutput:
                 done=t.done,
                 priority=t.priority,
                 due_at=t.due_at,
-                untrusted=TaskText(title=t.title),
+                assignee=views[t.id].assignee,
+                claim=views[t.id].claim,
+                planned_start_at=t.planned_start_at,
+                started_at=t.started_at,
+                running=views[t.id].running,
+                untrusted=TaskText(title=t.title, assignee_name=views[t.id].assignee_name),
             )
             for t in page.items
         ],
@@ -211,6 +321,13 @@ async def _get_task(call: ReadCall, args: GetTaskInput) -> GetTaskOutput:
             brief = TaskBrief(
                 project_id=b.project_id, version=b.version, read_version=b.read, unread=b.unread
             )
+    view = (await _task_views(call, [task]))[task.id]
+    reason = await call.db.scalar(
+        select(TaskEvent.note)
+        .where(TaskEvent.task_id == task.id, TaskEvent.kind == "reopened")
+        .order_by(TaskEvent.created_at.desc())
+        .limit(1)
+    )
     return GetTaskOutput(
         brief=brief,
         task=TaskDetail(
@@ -220,8 +337,17 @@ async def _get_task(call: ReadCall, args: GetTaskInput) -> GetTaskOutput:
             done_at=task.done_at,
             priority=task.priority,
             due_at=task.due_at,
+            assignee=view.assignee,
+            claim=view.claim,
+            planned_start_at=task.planned_start_at,
+            started_at=task.started_at,
+            running=view.running,
             untrusted=TaskDetailText(
-                title=task.title, description=task.description, labels=task.labels
+                title=task.title,
+                description=task.description,
+                labels=task.labels,
+                assignee_name=view.assignee_name,
+                last_reopen_reason=reason,
             ),
         ),
         freshness=local_freshness(),
@@ -258,8 +384,47 @@ async def _calendar_agenda(call: ReadCall, args: CalendarAgendaInput) -> Calenda
                 untrusted=EventText(title=e.title, location=e.location, description=e.description),
             )
             for e in page.items
-        ]
+        ],
+        due_tasks=await _due_tasks(call, args),
     )
+
+
+async def _due_tasks(call: ReadCall, args: CalendarAgendaInput) -> list[DueTaskItem]:
+    """这段时间里有截止时间、还没完成的任务（日历上的待办，T-0111）。"""
+    me = call.requester.instance.id
+    rows = (
+        await call.db.execute(
+            select(Task, Project.title)
+            .join(Project, Project.id == Task.project_id)
+            .where(
+                Task.workspace_id == call.requester.workspace.id,
+                Task.done.is_(False),
+                Task.due_at >= args.start,
+                Task.due_at < args.end,
+            )
+            .order_by(Task.due_at, Task.id)
+            .limit(DUE_TASKS_CAP)
+        )
+    ).all()
+    mine = await _my_projects(call)
+    items = []
+    for task, project in rows:
+        if task.due_at is None:  # pragma: no cover - 条件里已排除
+            continue
+        claimable = task_claims.claimable(task) and (
+            task.claim_scope == "all" or task.project_id in mine
+        )
+        items.append(
+            DueTaskItem(
+                id=task.id,
+                project_id=task.project_id,
+                due_at=task.due_at,
+                assigned_to_me=task.assignee_instance_id == me,
+                claimable=claimable,
+                untrusted=DueTaskText(title=task.title, project=project),
+            )
+        )
+    return items
 
 
 async def _list_bookmarks(call: ReadCall, args: ListBookmarksInput) -> ListBookmarksOutput:

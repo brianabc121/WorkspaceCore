@@ -5,10 +5,10 @@ from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ColumnElement, UnaryExpression, func, select
+from sqlalchemy import ColumnElement, UnaryExpression, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Project, Task
+from app.models import Project, ProjectAgent, Task
 
 
 def _escape_like(text: str) -> str:
@@ -96,8 +96,24 @@ async def list_tasks(
     sort: str,
     offset: int,
     limit: int,
+    assignee_instance_id: uuid.UUID | None = None,
+    claimable_for: uuid.UUID | None = None,
 ) -> Sequence[Task]:
     conditions: list[ColumnElement[bool]] = [Task.workspace_id == workspace_id]
+    if assignee_instance_id is not None:
+        conditions.append(Task.assignee_instance_id == assignee_instance_id)
+    if claimable_for is not None:
+        # 这个实例现在能领取的（T-0111）：可自由接取、没有执行者、没完成、在范围内
+        member = exists().where(
+            ProjectAgent.project_id == Task.project_id, ProjectAgent.instance_id == claimable_for
+        )
+        conditions += [
+            Task.claim_mode == "open",
+            Task.done.is_(False),
+            Task.assignee_user_id.is_(None),
+            Task.assignee_instance_id.is_(None),
+            or_(Task.claim_scope == "all", member),
+        ]
     if status != "all":
         conditions.append(Task.done.is_(status == "done"))
     if project_id is not None:

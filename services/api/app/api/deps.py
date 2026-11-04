@@ -271,8 +271,9 @@ def get_task_service(
     settings: Annotated[Settings, Depends(get_app_settings)],
     connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
     im: Annotated[OpenIMClient | None, Depends(get_openim)],
+    redis: Annotated[Redis, Depends(get_redis)],
 ) -> TaskService:
-    return TaskService(db, settings, connectors, im)
+    return TaskService(db, settings, connectors, im, redis)
 
 
 async def authenticated(

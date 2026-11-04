@@ -994,7 +994,6 @@ def test_v2_mcp_tools_match_the_plan() -> None:
         "write": {
             "create_task",
             "update_task",
-            "complete_task",
             "create_calendar_event",
             "create_bookmark",
             "mark_notification_read",
@@ -1002,6 +1001,8 @@ def test_v2_mcp_tools_match_the_plan() -> None:
         "critical": {"delete_task", "delete_calendar_event", "trigger_automation"},
         # 直接执行、不审批（人类 2026-11-03 决定）
         "knowledge": {"knowledge_write", "knowledge_delete"},
+        # 领取 / 放弃 / 完成任务：直接执行、不审批（人类 2026-11-04 决定，T-0111）
+        "direct": {"claim_task", "release_task", "complete_task"},
     }
     for spec in TOOLS.values():
         assert spec.name.isidentifier() and spec.name.islower()
@@ -1012,7 +1013,7 @@ def test_v2_mcp_tools_match_the_plan() -> None:
         if spec.risk == "read":
             assert spec.scope == "read" and spec.min_role == Role.viewer, spec.name
             assert spec.output_model is not PendingApproval, spec.name
-        elif spec.risk == "knowledge":  # 知识库写：直接执行，但仍要 read_write 与 member
+        elif spec.risk in ("knowledge", "direct"):  # 直接执行，但仍要 read_write 与 member
             assert spec.scope == "read_write" and spec.min_role == Role.member, spec.name
             assert spec.output_model is not PendingApproval, spec.name
             # OpenClaw 把工具描述截到 1200 个字符（K-0 核验 3.2）

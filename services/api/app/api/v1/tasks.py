@@ -36,8 +36,10 @@ from app.schemas.tasks import (
     ProjectUpdate,
     ProjectVersion,
     TaskCreate,
+    TaskEventList,
     TaskOut,
     TaskPage,
+    TaskReopen,
     TaskSort,
     TaskStatusFilter,
     TaskUpdate,
@@ -342,7 +344,36 @@ async def update_task(
     idempotency_key: IdempotencyKey,
     body: TaskUpdate,
 ) -> Response:
-    return _respond(await service.update_task(context, access, task_id, idempotency_key, body))
+    result = await service.update_task(context, access, task_id, idempotency_key, body)
+    # 设为自由接取：提交之后通知符合条件的智能体（T-0111；重放的请求不会再通知）
+    await service.announce_opened()
+    return _respond(result)
+
+
+@router.get(
+    "/tasks/{task_id}/events",
+    summary="任务的动态（viewer）",
+    description="设为自由接取、领取、放弃、完成、打回（T-0111），最新的在前，最多 100 条。"
+    "note 是原因或完成说明，来自人或智能体的文字，按纯文本显示。",
+    responses=_read_errors,
+)
+async def list_task_events(access: Viewer, service: Service, task_id: UUID) -> TaskEventList:
+    return await service.list_events(access, task_id)
+
+
+@router.post(
+    "/tasks/{task_id}/reopen",
+    summary="打回已完成的任务（admin，乐观并发）",
+    description="任务回到进行中（未完成、执行者不变）。执行者是智能体时开新的一段，"
+    "并用你的 IM 账号把原因发给它；原执行者已停用或删除时任务放回未分配。"
+    "原因写进任务的动态。没完成的任务返回 409 TASK_NOT_DONE（T-0111）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def reopen_task(
+    access: Member, context: Context, runs: Runs, task_id: UUID, body: TaskReopen
+) -> TaskOut:
+    return await runs.reopen(context, access, task_id, body)
 
 
 @router.delete(

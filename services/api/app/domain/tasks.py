@@ -19,13 +19,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import idempotency, project_groups, task_runs
+from app.domain import idempotency, project_groups, task_claims, task_runs
 from app.domain.audit import AuditTrail
 from app.domain.auth import Actor
 from app.domain.connectors import ConnectorRuntime
@@ -37,6 +38,8 @@ from app.models import (
     ImGroup,
     Project,
     Task,
+    TaskEvent,
+    User,
     WorkspaceMember,
 )
 from app.repositories import integrations as integration_repo
@@ -54,6 +57,8 @@ from app.schemas.tasks import (
     ProjectProgressOut,
     ProjectUpdate,
     TaskCreate,
+    TaskEventList,
+    TaskEventOut,
     TaskOut,
     TaskPage,
     TaskSort,
@@ -118,6 +123,9 @@ def task_out(task: Task) -> TaskOut:
         started_at=task.started_at,
         assignee_user_id=task.assignee_user_id,
         assignee_instance_id=task.assignee_instance_id,
+        claim_mode=task.claim_mode,
+        claim_scope=task.claim_scope,
+        claimable=task_claims.claimable(task),
         version=str(task.version),
         created_at=task.created_at,
         updated_at=task.updated_at,
@@ -200,12 +208,16 @@ class TaskService:
         settings: Settings,
         runtime: ConnectorRuntime,
         im: OpenIMClient | None = None,
+        redis: Redis | None = None,
     ) -> None:
         self.db = db
         self.settings = settings
         self.runtime = runtime
         self.im = im
+        self.redis = redis
         self.audit = AuditTrail(db, settings)
+        # 这次请求里设为自由接取的任务：提交之后通知符合条件的智能体（重放的请求不会再通知）
+        self.opened: list[uuid.UUID] = []
 
     # ---------------------------------------------------------------- 读取
 
@@ -270,6 +282,8 @@ class TaskService:
         sort: TaskSort,
         cursor: str | None,
         limit: int,
+        assignee_instance_id: uuid.UUID | None = None,
+        claimable_for: uuid.UUID | None = None,
     ) -> TaskPage:
         offset = decode_cursor(cursor)
         rows = await repo.list_tasks(
@@ -284,6 +298,8 @@ class TaskService:
             sort=sort,
             offset=offset,
             limit=limit + 1,
+            assignee_instance_id=assignee_instance_id,
+            claimable_for=claimable_for,
         )
         return TaskPage(
             items=[task_out(row) for row in rows[:limit]],
@@ -441,9 +457,13 @@ class TaskService:
                 current = task_out(task).model_dump(mode="json")
                 raise _version_conflict(current, str(task.version))
             fields = sorted(body.model_fields_set - {"version"})
+            claim_fields = {"claim_mode", "claim_scope"} & set(fields)
+            if claim_fields and not has_role(access.role, Role.admin):
+                raise ApiError(403, "FORBIDDEN", "只有 owner / admin 能设置任务的接取方式")
             if body.project_id is not None and body.project_id != task.project_id:
                 await self._project(access, body.project_id)
             before = (task.assignee_user_id, task.assignee_instance_id)
+            was_open = task.claim_mode == "open"
             await self._check_assignee(access, body)
             now = datetime.now(UTC)
             for name in fields:
@@ -466,6 +486,7 @@ class TaskService:
                 await task_runs.end_open_run(
                     self.db, task, "interrupted", by=context.user.id, at=now
                 )
+            await self._claim_mode(context, task, body, was_open=was_open)
             task.version += 1
             await self.db.flush()
             await self.db.refresh(task)
@@ -480,6 +501,65 @@ class TaskService:
             path=f"/api/v1/tasks/{task_id}",
             body=body.model_dump(mode="json", exclude_unset=True),
             write=write,
+        )
+
+    async def _claim_mode(
+        self, context: Actor, task: Task, body: TaskUpdate, *, was_open: bool
+    ) -> None:
+        """接取方式（T-0111）：设了执行者就回到指派；设为自由接取时任务必须没有执行者、没有完成。"""
+        assigned = body.assignee_user_id is not None or body.assignee_instance_id is not None
+        if assigned and body.claim_mode != "open":
+            task.claim_mode = "assigned"
+        if task.claim_mode != "open":
+            return
+        if task.done or task.assignee_user_id is not None or task.assignee_instance_id is not None:
+            raise ApiError(
+                409,
+                "TASK_NOT_OPENABLE",
+                "已完成或已有执行者的任务不能设为自由接取：先把执行者改回未分配",
+            )
+        if not was_open:
+            task.claim_opened_by = context.user.id
+            user = await self.db.get(User, context.user.id)
+            self.db.add(
+                task_claims.event(
+                    task,
+                    "opened",
+                    actor_kind="user",
+                    name=user.display_name if user is not None else "",
+                    user_id=context.user.id,
+                )
+            )
+            self.opened.append(task.id)
+
+    async def announce_opened(self) -> None:
+        """提交之后：通知符合条件的智能体有新的可领取任务（尽力而为）。"""
+        for task_id in self.opened:
+            await task_claims.announce(self.db, self.settings, self.redis, self.im, task_id)
+        self.opened.clear()
+
+    async def list_events(self, access: WorkspaceAccess, task_id: uuid.UUID) -> TaskEventList:
+        task = await self._task(access, task_id)
+        rows = (
+            await self.db.scalars(
+                select(TaskEvent)
+                .where(TaskEvent.task_id == task.id)
+                .order_by(TaskEvent.created_at.desc(), TaskEvent.id)
+                .limit(100)
+            )
+        ).all()
+        return TaskEventList(
+            items=[
+                TaskEventOut(
+                    id=r.id,
+                    kind=r.kind,
+                    actor_kind=r.actor_kind,
+                    actor_name=r.actor_name,
+                    note=r.note,
+                    created_at=r.created_at,
+                )
+                for r in rows
+            ]
         )
 
     async def _check_assignee(self, access: WorkspaceAccess, body: TaskUpdate) -> None:

@@ -18,6 +18,7 @@ agent-edge 网络访问工作台的接入入口（和真实部署一样，不能
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import io
 import json
 import os
@@ -817,8 +818,8 @@ def usage_report(instance: Instance) -> subprocess.CompletedProcess[str]:
 
 
 def scenario_16(c: Ctx) -> None:
-    """任务时间轴（T-0106）：甲真实上报 token 用量；交给甲执行（管理员的 IM 发任务）→ 甲调 complete_task 待审批 →
-    批准后任务完成、这段结束；时间轴显示这段的执行者、token 与等待审批。"""
+    """任务时间轴（T-0106，T-0111 改）：甲真实上报 token 用量；交给甲执行（管理员的 IM 发任务）→
+    甲调 complete_task 直接完成、这段结束；时间轴显示这段的执行者与 token。"""
     tag = uuid.uuid4().hex[:6]
     # 1. 第一次上报只记基准（之前的对话不算进时间轴）
     first = usage_report(c.a)
@@ -846,20 +847,7 @@ def scenario_16(c: Ctx) -> None:
             run_["executor_kind"] == "instance" and run_["instance_id"] == c.a.id and again["id"] == run_["id"]
             and len(sent) == 1 and bool(replied), f"{len(sent)} 条任务消息")
 
-    # 3. 甲调 complete_task：只生成待审批（完成照旧要审批）
-    c.owner.send(c.conv_a, "TOOL:myworkspace__complete_task " + json.dumps({"task_id": task["id"]}))
-
-    def pending() -> list[dict[str, Any]]:
-        return [e for e in c.owner.call("GET", "/api/v1/ai/tool-executions?status=pending_approval")["items"]
-                if e["tool_name"] == "complete_task" and e["instance_id"] == c.a.id
-                and e["arguments"].get("task_id") == task["id"]]
-
-    record = wait_for("complete_task 待审批", pending, timeout=150)[0]
-    running = c.owner.call("GET", f"/api/v1/tasks/{task['id']}")
-    c.check("时间轴：甲调用 complete_task 只生成待审批，任务还没完成、这段还在执行",
-            not running["done"] and running.get("started_at") is not None)
-
-    # 4. 这段还在执行时再上报：这期间的 token 按时间归属到这段。sessions.usage 有缓存，正在重新计算的会话
+    # 3. 这段还在执行时再上报：这期间的 token 按时间归属到这段。sessions.usage 有缓存，正在重新计算的会话
     #    这一次报空（脚本跳过），所以隔 12 秒再报（接口限每分钟 6 次），直到有用量入库
     reports: list[subprocess.CompletedProcess[str]] = []
 
@@ -873,18 +861,22 @@ def scenario_16(c: Ctx) -> None:
             all(r.returncode == 0 for r in reports) and usage > 0,
             f"上报 {len(reports)} 次，{usage} token；{reports[-1].stderr.strip()[-300:]}")
 
-    # 5. 批准（含二次认证）→ 任务完成 → 这段结束（done），等待审批落在这段里
-    approved = c.owner.call("POST", f"/api/v1/ai/tool-executions/{record['id']}/approve", {"password": PASSWORD},
-                            **{"If-Match": f'"{record["version"]}"'})
-    done = c.owner.call("GET", f"/api/v1/tasks/{task['id']}")
+    # 4. 甲调 complete_task：直接完成（T-0111，人类 2026-11-04 决定不再审批），这段结束（done）、分到 token
+    c.owner.send(c.conv_a, "TOOL:myworkspace__complete_task " + json.dumps({"task_id": task["id"]}))
+    done = wait_for("任务完成", lambda: (lambda t: t if t["done"] else None)(c.owner.call("GET", f"/api/v1/tasks/{task['id']}")),
+                    timeout=150)
     runs = c.owner.call("GET", f"/api/v1/tasks/{task['id']}/runs")["items"]
     only = runs[0] if len(runs) == 1 else {}
-    c.check("时间轴：批准后任务完成，这段结束（done），分到 token，等待审批记在这段里",
-            approved["status"] == "succeeded" and done["done"] and only.get("end_reason") == "done"
-            and (only.get("tokens") or {}).get("total", 0) > 0 and only.get("usage_reported") is True
-            and any(w["execution_id"] == record["id"] and w["end"] for w in only.get("waits", [])),
-            json.dumps({"status": approved["status"], "runs": [(r["end_reason"], (r.get("tokens") or {}).get("total"),
-                                                                 len(r.get("waits", []))) for r in runs]}, ensure_ascii=False))
+    record = next((e for e in c.owner.call("GET", "/api/v1/ai/tool-executions")["items"]
+                   if e["tool_name"] == "complete_task" and e["instance_id"] == c.a.id
+                   and e["arguments"].get("task_id") == task["id"]), {})
+    c.check("时间轴：甲调用 complete_task 直接完成任务（执行记录为 direct、不审批），这段结束（done）并分到 token",
+            bool(done) and record.get("risk_level") == "direct" and record.get("status") == "succeeded"
+            and only.get("end_reason") == "done" and (only.get("tokens") or {}).get("total", 0) > 0
+            and only.get("usage_reported") is True and not only.get("waits"),
+            json.dumps({"record": {k: record.get(k) for k in ("risk_level", "status")},
+                        "runs": [(r["end_reason"], (r.get("tokens") or {}).get("total"), len(r.get("waits", [])))
+                                 for r in runs]}, ensure_ascii=False))
 
     # 6. 时间轴接口（按项目）：甲的轨道上有这段，用量已上报
     # 用量记在上报那一分钟的整分钟上（可能早于这段开始的时刻），范围从这段开始前 5 分钟起
@@ -898,6 +890,101 @@ def scenario_16(c: Ctx) -> None:
             track.get("kind") == "instance" and track.get("id") == c.a.id and (segment.get("run") or {}).get("end_reason") == "done"
             and timeline["usage"]["reported"] and timeline["usage"]["scope"] == "project" and timeline["usage"]["total"]["total"] > 0,
             json.dumps({"track": track, "usage": timeline["usage"]["total"]}, ensure_ascii=False))
+
+
+def mcp_call(instance: Instance, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """从实例所在的服务器直接调一次 MCP 工具（不经模型）；返回 result。"""
+    status, text = instance.request(
+        "POST", instance.env("MYWS_MCP_URL"), token=instance.env("MYWS_INSTANCE_TOKEN"),
+        body={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}},
+        headers={"Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-11-25"})
+    if status != 200:
+        return {"isError": True, "status": status, "text": text[:300]}
+    result: dict[str, Any] = json.loads(text).get("result") or {}
+    return result
+
+
+def tool_code(result: dict[str, Any]) -> str:
+    """工具错误的错误码（错误只用文字内容返回，T-0108）；成功时为空串。"""
+    if not result.get("isError"):
+        return ""
+    try:
+        return str(json.loads(result["content"][0]["text"])["error"]["code"])
+    except (KeyError, IndexError, ValueError, TypeError):
+        return "?"
+
+
+def scenario_17(c: Ctx) -> None:
+    """自由接取（T-0111）：设为自由接取后甲收到通知；甲、乙同时领取只成功一个；甲经模型领取、完成，
+    管理员打回（原因发给甲、开新的一段），甲再完成；任务的动态记下全过程。"""
+    tag = uuid.uuid4().hex[:6]
+    project = c.owner.call("POST", "/api/v1/projects", {"title": f"自由接取验收 {tag}", "description": ""})
+
+    def new_task(title: str) -> dict[str, Any]:
+        task: dict[str, Any] = c.owner.call("POST", "/api/v1/tasks", {"project_id": project["id"], "title": title},
+                                            **{"Idempotency-Key": str(uuid.uuid4())})
+        return task
+
+    def open_task(task: dict[str, Any]) -> dict[str, Any]:
+        opened: dict[str, Any] = c.owner.call("PATCH", f"/api/v1/tasks/{task['id']}",
+                                              {"version": task["version"], "claim_mode": "open"},
+                                              **{"Idempotency-Key": str(uuid.uuid4())})
+        return opened
+
+    # 1. 并发领取：乙临时改成可写，甲、乙同时调 claim_task，只成功一个
+    race = open_task(new_task(f"并发领取 {tag}"))
+    current = c.owner.call("GET", f"/api/v1/agents/instances/{c.b.id}")
+    c.owner.call("PATCH", f"/api/v1/agents/instances/{c.b.id}", {"version": current["version"], "scope": "read_write"})
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda i: mcp_call(i, "claim_task", {"task_id": race["id"]}), (c.a, c.b)))
+        codes = sorted(tool_code(r) for r in results)
+        winner = c.a if not tool_code(results[0]) else c.b
+        claimed = c.owner.call("GET", f"/api/v1/tasks/{race['id']}")
+        c.check("自由接取：甲、乙同时领取同一个任务，只成功一个，另一个是 TASK_ALREADY_CLAIMED",
+                codes == ["", "TASK_ALREADY_CLAIMED"] and claimed["assignee_instance_id"] == winner.id,
+                json.dumps({"codes": codes}, ensure_ascii=False))
+        # 放回去：领到的那个空出来（后面甲要再领）
+        released = mcp_call(winner, "release_task", {"task_id": race["id"], "reason": "验收：放回去"})
+        c.check("自由接取：领到的一方可以放弃（写原因），任务重新可领", not tool_code(released),
+                json.dumps(released, ensure_ascii=False)[:300])
+    finally:
+        current = c.owner.call("GET", f"/api/v1/agents/instances/{c.b.id}")
+        c.owner.call("PATCH", f"/api/v1/agents/instances/{c.b.id}", {"version": current["version"], "scope": "read"})
+
+    # 2. 设为自由接取：甲（在线、空闲、可写）收到管理员 IM 发来的通知，乙（只读）不通知
+    task = open_task(new_task(f"整理值班表 {tag}"))
+    notice = wait_for("自由接取通知", lambda: [m for m in c.owner.messages(c.conv_a)
+                                         if m["sender_im_id"] == c.admin_im and task["id"] in (m.get("text") or "")
+                                         and "claim_task" in (m.get("text") or "")], timeout=60)
+    c.check("自由接取：设为可自由接取后，甲收到管理员 IM 发来的通知（含 task_id 与 claim_task）", len(notice) == 1)
+
+    # 3. 甲经模型领取 → 完成（直接生效）
+    c.owner.send(c.conv_a, "TOOL:myworkspace__claim_task " + json.dumps({"task_id": task["id"]}))
+    mine = wait_for("甲领取", lambda: (lambda t: t if t["assignee_instance_id"] == c.a.id else None)(
+        c.owner.call("GET", f"/api/v1/tasks/{task['id']}")), timeout=150)
+    c.owner.send(c.conv_a, "TOOL:myworkspace__complete_task " + json.dumps({"task_id": task["id"]}))
+    done = wait_for("甲完成", lambda: (lambda t: t if t["done"] else None)(
+        c.owner.call("GET", f"/api/v1/tasks/{task['id']}")), timeout=150)
+    c.check("自由接取：甲经真实 OpenClaw 调 claim_task 领取、complete_task 完成，都直接生效",
+            bool(mine) and bool(done) and done["assignee_instance_id"] == c.a.id)
+
+    # 4. 打回：原因发给甲，任务回到进行中、开新的一段；甲再完成
+    reopened = c.owner.call("POST", f"/api/v1/tasks/{task['id']}/reopen",
+                            {"version": done["version"], "reason": f"缺少交接人 {tag}"})
+    told = wait_for("打回消息", lambda: [m for m in c.owner.messages(c.conv_a)
+                                     if m["sender_im_id"] == c.admin_im and f"缺少交接人 {tag}" in (m.get("text") or "")],
+                    timeout=60)
+    open_runs = [r for r in c.owner.call("GET", f"/api/v1/tasks/{task['id']}/runs")["items"] if r["ended_at"] is None]
+    c.check("自由接取：管理员打回，任务回到进行中、给甲开新的一段，打回原因经 IM 发给甲",
+            not reopened["done"] and len(open_runs) == 1 and open_runs[0]["instance_id"] == c.a.id and bool(told))
+    c.owner.send(c.conv_a, "TOOL:myworkspace__complete_task " + json.dumps({"task_id": task["id"], "note": "已补交接人"}))
+    again = wait_for("甲再完成", lambda: (lambda t: t if t["done"] else None)(
+        c.owner.call("GET", f"/api/v1/tasks/{task['id']}")), timeout=150)
+    kinds = [e["kind"] for e in c.owner.call("GET", f"/api/v1/tasks/{task['id']}/events")["items"]]
+    c.check("自由接取：甲再次完成；任务的动态依次是 设为自由接取、领取、完成、打回、完成",
+            bool(again) and kinds == ["completed", "reopened", "completed", "claimed", "opened"],
+            json.dumps(kinds, ensure_ascii=False))
 
 
 def scenario_6(c: Ctx) -> None:
@@ -918,7 +1005,7 @@ def scenario_6(c: Ctx) -> None:
 SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "2": scenario_2, "3": scenario_3, "4": scenario_4, "5": scenario_5, "7": scenario_7, "8": scenario_8,
     "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "15": scenario_15,
-    "16": scenario_16, "6": scenario_6,
+    "16": scenario_16, "17": scenario_17, "6": scenario_6,
 }
 
 

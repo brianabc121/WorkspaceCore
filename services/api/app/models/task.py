@@ -10,6 +10,7 @@
   第一次开始执行的时间（由执行记录 task_runs 维护，不参与 version）。
 - 项目群（T-0110，迁移 0028）：建群状态 none / pending / ready、群主、上一次失败的原因；
   群本身在 im_groups（project_id）。这些列由 app/domain/project_groups.py 维护，不参与 version。
+- 接取方式（T-0111，迁移 0029）：指派或自由接取；动态记在 task_events（app/models/timeline.py）。
 """
 
 import uuid
@@ -50,6 +51,8 @@ def _updated_at() -> Mapped[datetime]:
 
 
 IM_GROUP_STATES = ("none", "pending", "ready")
+CLAIM_MODES = ("assigned", "open")
+CLAIM_SCOPES = ("all", "project")
 
 
 class Project(Base):
@@ -98,7 +101,17 @@ class Task(Base):
         CheckConstraint(
             "assignee_user_id IS NULL OR assignee_instance_id IS NULL", name="assignee"
         ),
+        CheckConstraint(f"claim_mode IN {CLAIM_MODES}", name="claim_mode"),
+        CheckConstraint(f"claim_scope IN {CLAIM_SCOPES}", name="claim_scope"),
         Index("ix_tasks_workspace_done_due", "workspace_id", "done", "due_at"),
+        Index(
+            "ix_tasks_claimable",
+            "workspace_id",
+            postgresql_where=sql_text(
+                "claim_mode = 'open' AND NOT done "
+                "AND assignee_user_id IS NULL AND assignee_instance_id IS NULL"
+            ),
+        ),
         Index("ix_tasks_project", "project_id"),
     )
 
@@ -122,6 +135,14 @@ class Task(Base):
     )
     assignee_instance_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.agent_instances.id", ondelete="SET NULL")
+    )
+    # 接取方式（T-0111，迁移 0029）：assigned 由管理员指派；open 可自由接取（没有执行者时
+    # 空闲的智能体用 claim_task 领取），范围 all 全部智能体 / project 只限项目成员；
+    # claim_opened_by 是设为自由接取的人（用他的 IM 账号通知智能体）
+    claim_mode: Mapped[str] = mapped_column(Text, server_default=sql_text("'assigned'"))
+    claim_scope: Mapped[str] = mapped_column(Text, server_default=sql_text("'all'"))
+    claim_opened_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
     version: Mapped[int] = mapped_column(Integer, server_default=sql_text("1"))
     created_at: Mapped[datetime] = _created_at()

@@ -33,6 +33,8 @@ from app.models.base import Base
 
 RUN_END_REASONS = ("done", "paused", "interrupted", "cancelled")
 EXECUTOR_KINDS = ("user", "instance")
+TASK_EVENT_KINDS = ("opened", "claimed", "released", "completed", "reopened")
+EVENT_ACTOR_KINDS = ("user", "instance", "system")
 
 
 class TaskRun(Base):
@@ -82,6 +84,42 @@ class TaskRun(Base):
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
     start_key: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TaskEvent(Base):
+    """任务的动态（T-0111，docs/v2/AGENT_OPS_PLAN.md 第 3 节）。
+
+    种类：设为自由接取、领取、放弃、完成、打回。
+
+    `note` 是放弃 / 打回的原因或完成说明（来自人或智能体的文字，按不可信数据显示）；
+    `actor_name` 是当时的名字，人离开、实例删除后仍能看出是谁。
+    """
+
+    __tablename__ = "task_events"
+    __table_args__ = (
+        CheckConstraint(f"kind IN {TASK_EVENT_KINDS}", name="kind"),
+        CheckConstraint(f"actor_kind IN {EVENT_ACTOR_KINDS}", name="actor_kind"),
+        Index("ix_task_events_task_created", "task_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspace.tasks.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(Text)
+    actor_kind: Mapped[str] = mapped_column(Text)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    instance_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="SET NULL")
+    )
+    actor_name: Mapped[str] = mapped_column(Text)
+    note: Mapped[str] = mapped_column(Text, server_default=text("''"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

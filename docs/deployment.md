@@ -925,9 +925,10 @@ sudo -E python3 tests/e2e/agents_acceptance.py --server-ca <签发入口证书�
 ### 20.3 执行段的中断
 
 - 实例被停用或删除，它正在执行的段记为中断；实例离线超过 10 分钟，段结束在离线开始的时间（Worker 每分钟检查）。
-- 管理员也可以在时间轴或任务详情里“结束这段”。任务标为完成（智能体的 `complete_task` 经审批后）时这段自动结束。
+- 管理员也可以在时间轴或任务详情里“结束这段”。任务标为完成（智能体的 `complete_task`，T-0111 起直接生效）时这段自动结束；管理员可以在任务详情里“打回到进行中”，原因经 IM 发给智能体并开新的一段。
 
 ### 20.4 验收状态
 
 - Compose CI 的 `timeline_browser.cjs`：入口、全部 / 按项目、智能体执行过的一段与 token、开始暂停、拖动计划、执行记录、手机宽度、viewer 只读。
-- agents CI 场景 16：真实 OpenClaw 上报用量 → 交给智能体执行 → `complete_task` 审批 → 这段结束并分到 token；SSH 自动部署验收照 crontab 那一行跑一次上报。
+- agents CI 场景 16：真实 OpenClaw 上报用量 → 交给智能体执行 → `complete_task` 直接完成 → 这段结束并分到 token；SSH 自动部署验收照 crontab 那一行跑一次上报。
+- agents CI 场景 17（T-0111）：设为自由接取 → 甲收到通知；甲、乙同时领取只成功一个；甲经模型领取、完成，管理员打回（原因发给甲），甲再完成。

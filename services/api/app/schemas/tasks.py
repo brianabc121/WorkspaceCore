@@ -54,6 +54,8 @@ ProjectTitle = Annotated[
 ProjectDescription = Annotated[str, StringConstraints(max_length=PROJECT_DESCRIPTION_MAX)]
 ProjectVersion = Annotated[int, Field(ge=1, description="读取时的版本；不一致时返回 409")]
 TaskStatusFilter = Literal["open", "done", "all"]
+ClaimMode = Literal["assigned", "open"]
+ClaimScope = Literal["all", "project"]
 TaskSort = Literal["due_at", "priority", "updated"]
 
 
@@ -195,6 +197,13 @@ class TaskOut(BaseModel):
     assignee_instance_id: UUID | None = Field(
         description="执行者是 OpenClaw 实例时的实例 ID；与 assignee_user_id 二选一"
     )
+    claim_mode: ClaimMode = Field(
+        description="接取方式（T-0111）：assigned 由管理员指派；open 可自由接取（空闲的智能体领取）"
+    )
+    claim_scope: ClaimScope = Field(
+        description="自由接取的范围：all 全部智能体 / project 只限项目成员"
+    )
+    claimable: bool = Field(description="现在能被领取：open、没有执行者、没有完成")
     version: str = Field(description="乐观并发用的不透明字符串；修改 / 删除时原样带回")
     created_at: datetime
     updated_at: datetime
@@ -202,6 +211,31 @@ class TaskOut(BaseModel):
 
 class TaskPage(Page[TaskOut]):
     pass
+
+
+TaskEventKind = Literal["opened", "claimed", "released", "completed", "reopened"]
+
+
+class TaskEventOut(BaseModel):
+    """任务的动态（T-0111）：设为自由接取、领取、放弃、完成、打回。"""
+
+    id: UUID
+    kind: TaskEventKind
+    actor_kind: Literal["user", "instance", "system"]
+    actor_name: str
+    note: str = Field(description="放弃 / 打回的原因或完成说明；来自人或智能体的文字，按纯文本显示")
+    created_at: datetime
+
+
+class TaskEventList(BaseModel):
+    items: list[TaskEventOut]
+
+
+class TaskReopen(_Strict):
+    """打回（owner / admin）：已完成的任务回到进行中，原因会发给执行的智能体。"""
+
+    version: TaskVersion
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
 
 class TaskCreate(_Strict):
@@ -244,6 +278,14 @@ class TaskUpdate(_Strict):
     assignee_user_id: UUID | None = Field(default=None, description="执行者：工作空间成员")
     assignee_instance_id: UUID | None = Field(
         default=None, description="执行者：本工作空间的 OpenClaw 实例（不能是已停用的）"
+    )
+    claim_mode: ClaimMode | None = Field(
+        default=None,
+        description="接取方式（只限 owner / admin）：设为 open 时任务必须没有执行者、没有完成，"
+        "工作台会通知符合条件的智能体；设了执行者时自动改回 assigned",
+    )
+    claim_scope: ClaimScope | None = Field(
+        default=None, description="自由接取的范围（只限 owner / admin）"
     )
 
     @model_validator(mode="after")

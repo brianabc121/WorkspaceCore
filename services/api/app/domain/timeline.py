@@ -32,13 +32,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import events, task_runs
+from app.domain import events, task_claims, task_runs
 from app.domain.audit import AuditTrail
 from app.domain.auth import Actor
 from app.domain.im_service import ImService
 from app.domain.policy import WorkspaceAccess, has_role, not_found
 from app.domain.ratelimit import WindowLimiter
-from app.domain.tasks import WriteResult
+from app.domain.tasks import WriteResult, task_out
 from app.integrations.openim import OpenIMClient
 from app.models import (
     AgentInstance,
@@ -52,6 +52,7 @@ from app.models import (
     WorkspaceMember,
 )
 from app.schemas.im import ImMessageSend
+from app.schemas.tasks import TaskOut, TaskReopen
 from app.schemas.timeline import (
     ApprovalWait,
     AssigneeInstance,
@@ -142,7 +143,8 @@ def dispatch_text(task: Task) -> str:
         f"请执行工作台任务「{task.title}」\n"
         f"task_id: {task.id}\n"
         f"{due}\n"
-        "先用 get_task 工具读任务详情；做完后用 complete_task 工具把它标为完成（需要管理员审批）。"
+        "先用 get_task 工具读任务详情；做完后用 complete_task 工具把它标为完成"
+        "（直接生效；管理员觉得还有问题会打回给你）。"
     )
 
 
@@ -418,7 +420,14 @@ class RunService:
         )
         self.db.add(run)
         task_runs.mark_started(task, now)
-        return await self._commit_start(context, access, run, key, "task.run.dispatched")
+        project_id, title = task.project_id, task.title
+        result = await self._commit_start(context, access, run, key, "task.run.dispatched")
+        if not result.replayed:
+            # D6：单聊之外，项目群里也发一条通知（尽力而为）
+            await task_claims.group_notice(
+                self.db, self.im, project_id, f"《{title}》已交给 {instance_name} 执行"
+            )
+        return result
 
     # ---------------------------------------------------------------- 结束
 
@@ -451,6 +460,100 @@ class RunService:
         else:
             await self.db.commit()
         return await self._out(run)
+
+    # ---------------------------------------------------------------- 打回（T-0111）
+
+    async def reopen(
+        self, context: Actor, access: WorkspaceAccess, task_id: uuid.UUID, body: TaskReopen
+    ) -> TaskOut:
+        """已完成的任务回到进行中（owner / admin，方案 3.6）。
+
+        执行者是智能体时给它开新的一段，并用打回人的 IM 账号把原因发给它；
+        原执行者已停用或删除时，任务放回“未分配”（接取方式回到指派）。
+        """
+        if not has_role(access.role, Role.admin):
+            raise ApiError(403, "FORBIDDEN", "只有 owner / admin 能打回任务")
+        task = await self._task(access, task_id, lock=True)
+        if str(task.version) != body.version:
+            raise ApiError(
+                409,
+                "VERSION_CONFLICT",
+                "内容已被其他操作修改，请刷新后重试",
+                details={
+                    "current_version": str(task.version),
+                    "current": task_out(task).model_dump(mode="json"),
+                },
+            )
+        if not task.done:
+            raise ApiError(409, "TASK_NOT_DONE", "只有已完成的任务可以打回")
+        now = _now()
+        task.done = False
+        task.done_at = None
+        task.version += 1
+        instance: AgentInstance | None = None
+        if task.assignee_instance_id is not None:
+            instance = await self.db.get(AgentInstance, task.assignee_instance_id)
+            if instance is None or instance.status == "disabled":
+                task.assignee_instance_id = None
+                task.claim_mode = "assigned"
+                instance = None
+        if instance is not None:
+            self.db.add(
+                TaskRun(
+                    workspace_id=access.workspace.id,
+                    task_id=task.id,
+                    executor_kind="instance",
+                    instance_id=instance.id,
+                    executor_name=instance.name,
+                    started_at=now,
+                    started_by=context.user.id,
+                )
+            )
+        user = await self.db.get(User, context.user.id)
+        record = task_claims.event(
+            task,
+            "reopened",
+            actor_kind="user",
+            name=user.display_name if user is not None else "",
+            user_id=context.user.id,
+            note=body.reason,
+        )
+        self.db.add(record)
+        await self.audit.record(
+            "task.reopened",
+            workspace_ids=[access.workspace.id],
+            actor_id=context.user.id,
+            resource_type="task",
+            resource_id=task.id,
+            metadata={"instance_id": str(instance.id) if instance is not None else None},
+            client_ip=context.client_ip,
+        )
+        await self.db.flush()
+        out = task_out(task)
+        instance_id, event_id, project_id = (
+            instance.id if instance is not None else None,
+            record.id,
+            task.project_id,
+        )
+        text = task_claims.reopen_text(task, body.reason)
+        title = task.title
+        await self.db.commit()
+        if instance_id is not None:
+            await task_claims.direct_message(
+                self.db,
+                self.settings,
+                self.redis,
+                self.im,
+                workspace_id=access.workspace.id,
+                sender_id=context.user.id,
+                instance_id=instance_id,
+                text=text,
+                key=task_claims.message_key("reopen", event_id),
+            )
+        await task_claims.group_notice(
+            self.db, self.im, project_id, f"《{title}》被打回：{body.reason}"
+        )
+        return out
 
     async def assignees(self, access: WorkspaceAccess) -> AssigneeOptions:
         """执行者的候选（实例接口只给 owner，这里给任务编辑器用；时间轴本来也显示这些名字）。"""
