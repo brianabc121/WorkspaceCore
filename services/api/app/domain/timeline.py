@@ -143,7 +143,8 @@ def dispatch_text(task: Task) -> str:
         f"请执行工作台任务「{task.title}」\n"
         f"task_id: {task.id}\n"
         f"{due}\n"
-        "先用 get_task 工具读任务详情；做完后用 complete_task 工具把它标为完成"
+        "先用 get_task 工具读任务详情、readme_get 读任务 README；做完后用 readme_update 更新"
+        "“进展与交接”，再用 complete_task 工具把它标为完成"
         "（直接生效；管理员觉得还有问题会打回给你）。"
     )
 

@@ -10,10 +10,14 @@ import { formatTime } from '../time'
 import TextField from '../../components/TextField.vue'
 import RelatedDocuments from '../knowledge/RelatedDocuments.vue'
 import TaskRuns from '../timeline/TaskRuns.vue'
+import TaskReadme from './TaskReadme.vue'
+import TaskIssues from './TaskIssues.vue'
 import TaskClaimPanel from './TaskClaimPanel.vue'
 import { useAssignees } from '../timeline/api'
 import { useAuthStore } from '../../stores/auth'
 const props = defineProps<{ task?: Schema['TaskOut']; projects: Schema['ProjectOut'][]; writable: boolean; locked: boolean }>()
+// 详情 / README（T-0122）：README 是任务导览，存在项目知识库里；讨论（T-0124）：关联的 Issue
+const view = ref<'detail' | 'readme' | 'discussion'>('detail')
 const emit = defineEmits<{ submit: [command: TaskCommand] }>()
 const labelsSchema = z.string().refine((v) => parseLabels(v).length <= LABELS_MAX, `最多 ${LABELS_MAX} 个标签`).refine((v) => parseLabels(v).every((l) => l.length <= LABEL_MAX), `每个标签不超过 ${LABEL_MAX} 字`)
 const validTime = (v: string) => !v || !Number.isNaN(new Date(v).getTime())
@@ -70,38 +74,51 @@ const submit = handleSubmit((value) => {
 function remove() { if (props.task && props.writable && !props.locked && window.confirm('确认删除此任务？此操作无法撤销。')) emit('submit', { method: 'DELETE', id: props.task.id, version: props.task.version }) }
 </script>
 <template>
-  <form aria-label="任务编辑" novalidate @submit.prevent="submit">
-    <fieldset :disabled="!writable || locked || isSubmitting">
-      <TextField name="title" label="任务标题" :maxlength="250" />
-      <label class="form-field">任务项目<select v-model="projectId" aria-label="任务项目"><option value="">{{ task ? '保留当前项目' : '请选择项目' }}</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.title }}</option></select></label>
-      <label class="form-field">任务描述<textarea v-model="description" maxlength="10000" rows="5"></textarea></label>
-      <label class="form-field">任务标签<input v-model="labels" maxlength="1100" placeholder="用逗号分隔，例如：周报，紧急" aria-describedby="task-labels-help"></label>
-      <p id="task-labels-help" class="form-help">最多 20 个标签。</p>
-      <label class="form-field">任务优先级<select v-model.number="priority" aria-label="任务优先级"><option v-for="(label, index) in priorities" :key="index" :value="index">{{ label }}</option></select></label>
-      <label class="form-field">截止时间<input v-model="due" type="datetime-local"></label>
-      <template v-if="task">
-        <label class="form-field">计划开始<input v-model="planned" type="datetime-local" aria-describedby="task-planned-help"></label>
-        <p id="task-planned-help" class="form-help">时间轴上从计划开始画到截止时间。</p>
-        <label class="form-field">执行者<select v-model="assignee" aria-label="执行者">
-          <option value="">未分配</option>
-          <option v-if="admin() || assignee === 'open'" value="open">可自由接取（空闲的智能体自主领取）</option>
-          <optgroup v-if="assignees.data.value?.users.length" label="成员"><option v-for="u in assignees.data.value.users" :key="u.id" :value="`user:${u.id}`">{{ u.display_name }}</option></optgroup>
-          <optgroup v-if="assignees.data.value?.instances.length" label="OpenClaw 实例"><option v-for="i in assignees.data.value.instances" :key="i.id" :value="`instance:${i.id}`">{{ i.name }}（{{ statusLabel[i.status] ?? i.status }}）</option></optgroup>
-          <option v-if="assignee && assignees.data.value && ![...assignees.data.value.users.map(u => `user:${u.id}`), ...assignees.data.value.instances.map(i => `instance:${i.id}`)].includes(assignee)" :value="assignee">当前执行者（已不可选）</option>
-        </select></label>
-        <label v-if="assignee === 'open'" class="form-field">谁可以领取<select v-model="scope" aria-label="谁可以领取" :disabled="!admin()"><option value="all">全部智能体</option><option value="project">只限项目成员</option></select></label>
-        <p v-if="assignee === 'open'" class="form-help">保存后，工作台用你的 IM 账号通知在线、空闲的智能体；它们看过描述觉得合适就会领取。</p>
-      </template>
-      <p v-else class="form-help">建好任务后可以设计划开始与执行者。</p>
-      <label v-if="task" class="check-field"><input v-model="done" type="checkbox">已完成任务</label>
-      <p v-if="message" role="status">{{ message }}</p>
-      <button v-if="writable" class="primary-button" :disabled="locked || isSubmitting">{{ task ? '保存任务' : '创建任务' }}</button>
-      <button v-if="writable && task" type="button" class="secondary-button" :disabled="locked" @click="remove">删除任务</button>
-    </fieldset>
-  </form>
-  <p v-if="!writable" class="form-help">当前角色只读。</p>
-  <p v-if="task?.done_at" class="form-help">完成于 {{ formatTime(task.done_at) }}</p>
-  <TaskRuns v-if="task" :key="`runs:${task.id}`" :task="task" :writable="writable" />
-  <TaskClaimPanel v-if="task" :key="`claim:${task.id}`" :task="task" />
-  <RelatedDocuments v-if="task" :key="task.id" :resource-id="task.id" />
+  <div v-if="task" class="kb-segment task-views" role="group" aria-label="任务详情视图">
+    <button type="button" class="secondary-button" :aria-pressed="view === 'detail'" @click="view = 'detail'">详情</button>
+    <button type="button" class="secondary-button" :aria-pressed="view === 'readme'" @click="view = 'readme'">README</button>
+    <button type="button" class="secondary-button" :aria-pressed="view === 'discussion'" @click="view = 'discussion'">讨论</button>
+  </div>
+  <TaskReadme v-if="task && view === 'readme'" :key="`readme:${task.id}`" :task-id="task.id" :writable="writable" />
+  <TaskIssues v-else-if="task && view === 'discussion'" :key="`issues:${task.id}`" :task-id="task.id" :project-id="task.project_id" :writable="writable" />
+  <template v-else>
+    <form aria-label="任务编辑" novalidate @submit.prevent="submit">
+      <fieldset :disabled="!writable || locked || isSubmitting">
+        <TextField name="title" label="任务标题" :maxlength="250" />
+        <label class="form-field">任务项目<select v-model="projectId" aria-label="任务项目"><option value="">{{ task ? '保留当前项目' : '请选择项目' }}</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.title }}</option></select></label>
+        <label class="form-field">任务描述<textarea v-model="description" maxlength="10000" rows="5"></textarea></label>
+        <label class="form-field">任务标签<input v-model="labels" maxlength="1100" placeholder="用逗号分隔，例如：周报，紧急" aria-describedby="task-labels-help"></label>
+        <p id="task-labels-help" class="form-help">最多 20 个标签。</p>
+        <label class="form-field">任务优先级<select v-model.number="priority" aria-label="任务优先级"><option v-for="(label, index) in priorities" :key="index" :value="index">{{ label }}</option></select></label>
+        <label class="form-field">截止时间<input v-model="due" type="datetime-local"></label>
+        <template v-if="task">
+          <label class="form-field">计划开始<input v-model="planned" type="datetime-local" aria-describedby="task-planned-help"></label>
+          <p id="task-planned-help" class="form-help">时间轴上从计划开始画到截止时间。</p>
+          <label class="form-field">执行者<select v-model="assignee" aria-label="执行者">
+            <option value="">未分配</option>
+            <option v-if="admin() || assignee === 'open'" value="open">可自由接取（空闲的智能体自主领取）</option>
+            <optgroup v-if="assignees.data.value?.users.length" label="成员"><option v-for="u in assignees.data.value.users" :key="u.id" :value="`user:${u.id}`">{{ u.display_name }}</option></optgroup>
+            <optgroup v-if="assignees.data.value?.instances.length" label="OpenClaw 实例"><option v-for="i in assignees.data.value.instances" :key="i.id" :value="`instance:${i.id}`">{{ i.name }}（{{ statusLabel[i.status] ?? i.status }}）</option></optgroup>
+            <option v-if="assignee && assignees.data.value && ![...assignees.data.value.users.map(u => `user:${u.id}`), ...assignees.data.value.instances.map(i => `instance:${i.id}`)].includes(assignee)" :value="assignee">当前执行者（已不可选）</option>
+          </select></label>
+          <label v-if="assignee === 'open'" class="form-field">谁可以领取<select v-model="scope" aria-label="谁可以领取" :disabled="!admin()"><option value="all">全部智能体</option><option value="project">只限项目成员</option></select></label>
+          <p v-if="assignee === 'open'" class="form-help">保存后，工作台用你的 IM 账号通知在线、空闲的智能体；它们看过描述觉得合适就会领取。</p>
+        </template>
+        <p v-else class="form-help">建好任务后可以设计划开始与执行者。</p>
+        <label v-if="task" class="check-field"><input v-model="done" type="checkbox">已完成任务</label>
+        <p v-if="message" role="status">{{ message }}</p>
+        <button v-if="writable" class="primary-button" :disabled="locked || isSubmitting">{{ task ? '保存任务' : '创建任务' }}</button>
+        <button v-if="writable && task" type="button" class="secondary-button" :disabled="locked" @click="remove">删除任务</button>
+      </fieldset>
+    </form>
+    <p v-if="!writable" class="form-help">当前角色只读。</p>
+    <p v-if="task?.done_at" class="form-help">完成于 {{ formatTime(task.done_at) }}</p>
+    <TaskRuns v-if="task" :key="`runs:${task.id}`" :task="task" :writable="writable" />
+    <TaskClaimPanel v-if="task" :key="`claim:${task.id}`" :task="task" />
+    <RelatedDocuments v-if="task" :key="task.id" :resource-id="task.id" />
+  </template>
 </template>
+
+<style scoped>
+.task-views { display: flex; gap: 8px; margin-bottom: 12px; }
+</style>

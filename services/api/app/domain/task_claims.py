@@ -122,7 +122,8 @@ def announce_text(task: Task, project: Project | None) -> str:
         f"task_id: {task.id}\n"
         f"所属项目：{project.title if project is not None else '（已删除）'}\n"
         f"{_due(task)}\n"
-        "先用 get_task 看任务描述，符合你的能力就用 claim_task 领取；不符合不用回复。"
+        "先用 get_task 看任务描述、readme_get 读任务 README，符合你的能力就用 claim_task 领取；"
+        "不符合不用回复。"
     )
 
 
@@ -131,7 +132,8 @@ def reopen_text(task: Task, reason: str) -> str:
         f"任务「{task.title}」被打回\n"
         f"task_id: {task.id}\n"
         f"原因：{reason}\n"
-        "请继续处理，做完再用 complete_task 把它标为完成。"
+        "请继续处理，做完先用 readme_update 更新任务 README 的“进展与交接”，"
+        "再用 complete_task 把它标为完成。"
     )
 
 

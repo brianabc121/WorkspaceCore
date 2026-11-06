@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import notifications, project_groups, task_claims, task_runs
+from app.domain import issues, notifications, project_groups, task_claims, task_runs
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.audit import AuditTrail
 from app.domain.ratelimit import WindowLimiter
@@ -128,7 +128,8 @@ async def _claim(ctx: _Ctx, args: TaskRef) -> tuple[ClaimTaskOutput, After]:
                 task_id=task.id,
                 already_yours=True,
                 joined_project=False,
-                next_step="这个任务已经是你的了：用 get_task 读详情，做完后用 complete_task。",
+                next_step="这个任务已经是你的了：用 readme_get 读任务 README，"
+                "做完后用 readme_update 更新“进展与交接”，再用 complete_task。",
             ),
             _nothing,
         )
@@ -176,13 +177,19 @@ async def _claim(ctx: _Ctx, args: TaskRef) -> tuple[ClaimTaskOutput, After]:
         if joined and ctx.im is not None:
             await project_groups.ProjectGroupSync(db, ctx.settings, ctx.im).sync(project_id)
 
+    # 领取成功直接带上任务 README（T-0122，方案 9.6）
+    from app.domain import readme_tools
+    from app.domain.readme import Readmes
+
+    note = await Readmes(db, ctx.settings).ensure_task(task)
     return (
         ClaimTaskOutput(
             task_id=task.id,
             already_yours=False,
             joined_project=joined,
-            next_step="已领取：用 get_task 读详情（有项目简报时先读简报），"
-            "做完后用 complete_task。",
+            readme=readme_tools.doc(note),
+            next_step="已领取：先读下面的任务 README 和项目简报，做完后用 readme_update 更新"
+            "“进展与交接”，再用 complete_task。",
         ),
         after,
     )
@@ -239,6 +246,14 @@ async def _complete(ctx: _Ctx, args: CompleteTaskInput) -> tuple[CompleteTaskOut
         return (
             CompleteTaskOutput(task_id=task.id, done_at=task.done_at, already_done=True),
             _nothing,
+        )
+    blockers = await issues.open_blockers(db, task.id)
+    if blockers:
+        numbers = "、".join(f"#{i.number}" for i in blockers[:10])
+        raise ToolCallError(
+            "TASK_BLOCKED",
+            f"这个任务还有未关闭的阻塞 Issue：{numbers}。先处理并关闭它们"
+            "（issue_get 读详情，issue_comment 说明进展），或者请管理员判断；管理员可以直接完成",
         )
     now = _now()
     task.done = True

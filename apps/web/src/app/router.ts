@@ -60,6 +60,11 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
         // 消息页（T-0095）、知识库（T-0099）是不带工作台侧栏和顶栏的独立页面
         meta: { title: item.title, description: item.description, admin: adminOnly.has(item.path), owner: ownerOnly.has(item.path), standalone: item.path === '/im' || item.path === '/knowledge' },
       })),
+      // 项目页（T-0122）：打开项目先看 README
+      { path: '/projects/:id', component: () => import('../pages/ProjectPage.vue'), meta: { title: '项目', description: '项目的导览：成员、沟通、任务概况与约定。' } },
+      // 项目里的 Issues（T-0124）：通知与搜索链到 /issues/:issue，正文里的 #编号 链到项目内编号
+      { path: '/issues/:issue', component: () => import('../pages/IssuePage.vue'), meta: { title: 'Issue', description: '项目里的议题：正文、评论与时间线。' } },
+      { path: '/projects/:project/issues/:number(\\d+)', component: () => import('../pages/IssuePage.vue'), meta: { title: 'Issue', description: '项目里的议题：正文、评论与时间线。' } },
       // 任务时间轴（T-0105）：任务页的一种显示方式，地址里带 project / date / scale / group / task
       { path: '/tasks/timeline', component: () => import('../pages/TaskTimelinePage.vue'), meta: { title: '任务时间轴', description: '每个执行者一条轨道：开始、结束、是否还在执行、消耗了多少 token。' } },
       // Notification links for AI approvals (OC-1 contract §6) use /approvals?id=…

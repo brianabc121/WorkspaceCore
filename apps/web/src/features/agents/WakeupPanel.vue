@@ -58,7 +58,7 @@ async function cancel(item: Wakeup) {
         <li v-for="item in data.items" :key="item.id">
           <span>
             {{ formatTime(item.run_at) }} · {{ REPEAT[item.repeat] }} · {{ label(item.target) }} · <span class="badge">{{ STATUS[item.status] }}</span>
-            · {{ item.source === 'agent' ? '它自己安排的' : '管理员建的' }}
+            · {{ item.source === 'agent' ? '它自己安排的' : item.source === 'issue' ? 'Issue 有新动态' : '管理员建的' }}
             <template v-if="item.last_error"> · <span class="form-help">{{ item.last_error }}</span></template>
             <span class="preserve-text"> · {{ item.prompt }}</span>
           </span>

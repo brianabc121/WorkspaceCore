@@ -48,6 +48,15 @@ from app.models.integration import (
     IntegrationAccount,
     SyncCursor,
 )
+from app.models.issue import (
+    Issue,
+    IssueAssignee,
+    IssueComment,
+    IssueEvent,
+    IssueMention,
+    IssueRead,
+    IssueTask,
+)
 from app.models.knowledge import Bookmark, KnowledgeSource, ResourceLink
 from app.models.knowledge_base import (
     KnowledgeBriefRead,
@@ -114,6 +123,13 @@ __all__ = [
     "ImWebhookInboxEvent",
     "Integration",
     "IntegrationAccount",
+    "Issue",
+    "IssueAssignee",
+    "IssueComment",
+    "IssueEvent",
+    "IssueMention",
+    "IssueRead",
+    "IssueTask",
     "KnowledgeBriefRead",
     "KnowledgeFile",
     "KnowledgeFileRef",

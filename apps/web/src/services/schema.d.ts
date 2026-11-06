@@ -1825,6 +1825,136 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/issue-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Issue 的类型与正文模板（viewer） */
+        get: operations["issue_templates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/issues/inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 我的 Issue 收件箱（viewer） */
+        get: operations["issue_inbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/issues/{issue_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Issue 详情（viewer） */
+        get: operations["get_issue"];
+        put?: never;
+        post?: never;
+        /** 删除 Issue（admin，进回收站） */
+        delete: operations["delete_issue"];
+        options?: never;
+        head?: never;
+        /**
+         * 修改 Issue（member，乐观并发）
+         * @description 改标题、正文、类型、标签、指派、关联任务；关闭要写原因（重复时写明重复哪一个）；锁定只有 owner / admin。
+         */
+        patch: operations["update_issue"];
+        trace?: never;
+    };
+    "/api/v1/issues/{issue_id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 评论（member）
+         * @description 可以回复某一条；`@名字` 提到项目里的人或智能体，`#编号` 链到同一项目的 Issue。
+         */
+        post: operations["create_comment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/issues/{issue_id}/comments/{comment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 编辑自己的评论（member） */
+        patch: operations["edit_comment"];
+        trace?: never;
+    };
+    "/api/v1/issues/{issue_id}/comments/{comment_id}/hide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 隐藏评论（admin，不物理删除） */
+        post: operations["hide_comment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/issues/{issue_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 记为已读（viewer）
+         * @description 只改当前用户自己的“读到哪里”，viewer 也可以；与其他写接口一样要 CSRF。
+         */
+        post: operations["read_issue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/knowledge/agents/{instance_id}": {
         parameters: {
             query?: never;
@@ -2529,6 +2659,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/issue-notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Issue 新开 / 关闭时在项目群里提示（admin，默认关闭） */
+        put: operations["put_issue_notices"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目的 Issues（viewer）
+         * @description 按最近动态排列；可以按状态、类型、标签、指派给我、提到我、关键词筛选。
+         */
+        get: operations["list_project_issues"];
+        put?: never;
+        /**
+         * 开 Issue（member）
+         * @description 按项目编号；正文为空且 use_template 时套用这种类型的模板。保存前过密钥扫描。
+         */
+        post: operations["create_issue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/issues/{number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 按项目内编号读 Issue（viewer）
+         * @description 正文和评论里的 `#编号` 链到这里。
+         */
+        get: operations["get_issue_by_number"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/readme": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目 README（viewer）
+         * @description 项目知识库里置顶的导览；还没有就按模板生成。自动部分随项目数据更新（1 分钟合并一次）。
+         */
+        get: operations["project_readme"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search": {
         parameters: {
             query?: never;
@@ -2687,6 +2898,43 @@ export interface paths {
          * @description 设为自由接取、领取、放弃、完成、打回（T-0111），最新的在前，最多 100 条。note 是原因或完成说明，来自人或智能体的文字，按纯文本显示。
          */
         get: operations["list_task_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 任务关联的 Issues（viewer） */
+        get: operations["task_issues"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/readme": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 任务 README（viewer）
+         * @description 项目知识库“任务导览”里这个任务的导览；还没有就按模板生成。
+         */
+        get: operations["task_readme"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2892,6 +3140,21 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Actor */
+        Actor: {
+            /**
+             * Id
+             * @description 用户 ID 或实例 ID；系统为空
+             */
+            id: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "user" | "instance" | "system";
+            /** Name */
+            name: string;
+        };
         /**
          * AgentCredentialOut
          * @description 凭证的元数据；令牌只存哈希，证书只存指纹，这里都不返回原文。
@@ -3802,7 +4065,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "agent" | "admin";
+            source: "agent" | "admin" | "issue";
             /**
              * Status
              * @enum {string}
@@ -4711,6 +4974,43 @@ export interface components {
             /** Total Estimate */
             total_estimate?: number | null;
         };
+        /** CommentCreate */
+        CommentCreate: {
+            /** Body */
+            body: string;
+            /** Reply To */
+            reply_to?: string | null;
+        };
+        /** CommentOut */
+        CommentOut: {
+            author: components["schemas"]["Actor"];
+            /**
+             * Body
+             * @description 被隐藏的评论为空
+             */
+            body: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Edited At */
+            edited_at: string | null;
+            /** Hidden */
+            hidden: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Reply To */
+            reply_to: string | null;
+        };
+        /** CommentUpdate */
+        CommentUpdate: {
+            /** Body */
+            body: string;
+        };
         /** CpuIn */
         CpuIn: {
             /** Cores */
@@ -5099,7 +5399,7 @@ export interface components {
             /** Title */
             title: string;
             /** Type */
-            type: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction") | null;
+            type: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme") | null;
         };
         /** GraphOut */
         GraphOut: {
@@ -6175,12 +6475,175 @@ export interface components {
              * Topics
              * @description 需要重新拉取的数据范围
              */
-            topics: ("overview" | "tasks" | "projects" | "knowledge" | "calendar" | "developer" | "integrations" | "notifications" | "operations" | "automations" | "im" | "agents" | "ai" | "timeline")[];
+            topics: ("overview" | "tasks" | "projects" | "knowledge" | "calendar" | "developer" | "integrations" | "notifications" | "operations" | "automations" | "im" | "agents" | "ai" | "timeline" | "issues")[];
             /**
              * Workspace Id
              * Format: uuid
              */
             workspace_id: string;
+        };
+        /** IssueCreate */
+        IssueCreate: {
+            /**
+             * Assignee Instance Ids
+             * @default []
+             */
+            assignee_instance_ids: string[];
+            /**
+             * Assignee User Ids
+             * @default []
+             */
+            assignee_user_ids: string[];
+            /**
+             * Body
+             * @default
+             */
+            body: string;
+            /**
+             * Kind
+             * @default other
+             * @enum {string}
+             */
+            kind: "question" | "proposal" | "bug" | "contract" | "handoff" | "review" | "blocker" | "other";
+            /**
+             * Labels
+             * @default []
+             */
+            labels: string[];
+            /**
+             * Task Ids
+             * @default []
+             */
+            task_ids: string[];
+            /** Title */
+            title: string;
+            /**
+             * Use Template
+             * @description 正文为空时套用这种类型的模板
+             * @default false
+             */
+            use_template: boolean;
+        };
+        /** IssueDetail */
+        IssueDetail: {
+            /**
+             * Agent Paused
+             * @description 连续 10 条评论来自智能体，智能体暂停评论（人评论后恢复）
+             */
+            agent_paused: boolean;
+            /** Assignees */
+            assignees: components["schemas"]["Actor"][];
+            author: components["schemas"]["Actor"];
+            /** Body */
+            body: string;
+            /**
+             * Can Close
+             * @description 当前查看的人能不能关闭 / 重新打开
+             */
+            can_close: boolean;
+            /**
+             * Can Moderate
+             * @description owner / admin：锁定、隐藏评论、删除
+             */
+            can_moderate: boolean;
+            /** Close Reason */
+            close_reason: ("resolved" | "wontfix" | "duplicate") | null;
+            /** Closed At */
+            closed_at: string | null;
+            /** Comment Count */
+            comment_count: number;
+            /** Comments */
+            comments: components["schemas"]["CommentOut"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Duplicate Of */
+            duplicate_of: string | null;
+            /** Events */
+            events: components["schemas"]["IssueEventOut"][];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "question" | "proposal" | "bug" | "contract" | "handoff" | "review" | "blocker" | "other";
+            /** Labels */
+            labels: string[];
+            /**
+             * Last Activity At
+             * Format: date-time
+             */
+            last_activity_at: string;
+            /** Locked */
+            locked: boolean;
+            /** Number */
+            number: number;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Pulls */
+            pulls: components["schemas"]["PullRef"][];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "closed";
+            /** Tasks */
+            tasks: components["schemas"]["IssueTaskRef"][];
+            /** Title */
+            title: string;
+            /**
+             * Unread
+             * @description 对当前查看的人：有没读过的动态
+             */
+            unread: boolean;
+            /** Version */
+            version: number;
+        };
+        /** IssueEventOut */
+        IssueEventOut: {
+            actor: components["schemas"]["Actor"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Data */
+            data: {
+                [key: string]: string | number | null;
+            };
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "opened" | "closed" | "reopened" | "assigned" | "unassigned" | "labeled" | "unlabeled" | "linked" | "unlinked" | "retitled" | "locked" | "unlocked" | "mentioned";
+        };
+        /** IssueList */
+        IssueList: {
+            /** Closed Count */
+            closed_count: number;
+            /** Items */
+            items: components["schemas"]["ProjectIssueOut"][];
+            /** Open Count */
+            open_count: number;
+        };
+        /** IssueNoticesPut */
+        IssueNoticesPut: {
+            /** Enabled */
+            enabled: boolean;
         };
         /** IssueOut */
         IssueOut: {
@@ -6271,6 +6734,65 @@ export interface components {
             sync: components["schemas"]["SyncState"];
             /** Total Estimate */
             total_estimate?: number | null;
+        };
+        /** IssueTaskRef */
+        IssueTaskRef: {
+            /** Done */
+            done: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Title */
+            title: string;
+        };
+        /** IssueTemplate */
+        IssueTemplate: {
+            /** Body */
+            body: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "question" | "proposal" | "bug" | "contract" | "handoff" | "review" | "blocker" | "other";
+            /** Label */
+            label: string;
+        };
+        /** IssueTemplates */
+        IssueTemplates: {
+            /** Items */
+            items: components["schemas"]["IssueTemplate"][];
+        };
+        /** IssueUpdate */
+        IssueUpdate: {
+            /** Assignee Instance Ids */
+            assignee_instance_ids?: string[] | null;
+            /** Assignee User Ids */
+            assignee_user_ids?: string[] | null;
+            /** Body */
+            body?: string | null;
+            /** Close Reason */
+            close_reason?: ("resolved" | "wontfix" | "duplicate") | null;
+            /**
+             * Duplicate Of
+             * @description 重复时写明重复哪一个（编号）
+             */
+            duplicate_of?: number | null;
+            /** Kind */
+            kind?: ("question" | "proposal" | "bug" | "contract" | "handoff" | "review" | "blocker" | "other") | null;
+            /** Labels */
+            labels?: string[] | null;
+            /** Locked */
+            locked?: boolean | null;
+            /** State */
+            state?: ("open" | "closed") | null;
+            /** Task Ids */
+            task_ids?: string[] | null;
+            /** Title */
+            title?: string | null;
+            /** Version */
+            version: number;
         };
         /** KnowledgeResourceOut */
         KnowledgeResourceOut: {
@@ -6705,7 +7227,7 @@ export interface components {
              * @default record
              * @enum {string}
              */
-            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction";
+            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme";
         };
         /** NoteOut */
         NoteOut: {
@@ -6780,7 +7302,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction";
+            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme";
             /**
              * Updated At
              * Format: date-time
@@ -6871,7 +7393,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction";
+            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme";
             /**
              * Updated At
              * Format: date-time
@@ -6909,7 +7431,7 @@ export interface components {
             /** Title */
             title?: string | null;
             /** Type */
-            type?: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction") | null;
+            type?: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme") | null;
             /** Version */
             version: number;
         };
@@ -7372,6 +7894,72 @@ export interface components {
              */
             status: "none" | "pending" | "ready";
         };
+        /** ProjectIssueOut */
+        ProjectIssueOut: {
+            /**
+             * Agent Paused
+             * @description 连续 10 条评论来自智能体，智能体暂停评论（人评论后恢复）
+             */
+            agent_paused: boolean;
+            /** Assignees */
+            assignees: components["schemas"]["Actor"][];
+            author: components["schemas"]["Actor"];
+            /** Close Reason */
+            close_reason: ("resolved" | "wontfix" | "duplicate") | null;
+            /** Closed At */
+            closed_at: string | null;
+            /** Comment Count */
+            comment_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Duplicate Of */
+            duplicate_of: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "question" | "proposal" | "bug" | "contract" | "handoff" | "review" | "blocker" | "other";
+            /** Labels */
+            labels: string[];
+            /**
+             * Last Activity At
+             * Format: date-time
+             */
+            last_activity_at: string;
+            /** Locked */
+            locked: boolean;
+            /** Number */
+            number: number;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "closed";
+            /** Tasks */
+            tasks: components["schemas"]["IssueTaskRef"][];
+            /** Title */
+            title: string;
+            /**
+             * Unread
+             * @description 对当前查看的人：有没读过的动态
+             */
+            unread: boolean;
+            /** Version */
+            version: number;
+        };
         /** ProjectOut */
         ProjectOut: {
             /**
@@ -7399,6 +7987,12 @@ export interface components {
              */
             id: string;
             im_group: components["schemas"]["ProjectImGroup"];
+            /**
+             * Issue Notices
+             * @description Issue 新开 / 关闭时在项目群里提示一行（T-0123，默认关闭）
+             * @default false
+             */
+            issue_notices: boolean;
             /**
              * Open Tasks
              * @description 未完成任务数
@@ -7590,6 +8184,22 @@ export interface components {
             /** Total Estimate */
             total_estimate?: number | null;
         };
+        /**
+         * PullRef
+         * @description 正文和评论里粘贴的 GitHub PR 链接。
+         *
+         *     仓库已接入工作台的 GitHub 集成时显示同步到的状态（只读，不访问 GitHub）。
+         */
+        PullRef: {
+            /** Merged */
+            merged: boolean;
+            /** State */
+            state: string | null;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+        };
         /** QuickLink */
         QuickLink: {
             /** Title */
@@ -7637,6 +8247,25 @@ export interface components {
              * @enum {string}
              */
             status: "ok" | "unavailable";
+        };
+        /**
+         * ReadmeOut
+         * @description 项目或任务的 README（T-0122，方案第 9 节）：知识库里的一篇 readme 笔记。
+         */
+        ReadmeOut: {
+            /**
+             * Auto Sections
+             * @description 还由工作台自动更新的部分（标记没被删掉的）；页面上标“自动更新”
+             */
+            auto_sections: string[];
+            note: components["schemas"]["NoteOut"];
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Task Id */
+            task_id: string | null;
         };
         /** RecentDocsConfig */
         RecentDocsConfig: {
@@ -8028,7 +8657,7 @@ export interface components {
              * Resource Type
              * @enum {string}
              */
-            resource_type: "task" | "project" | "bookmark" | "event" | "repo" | "issue" | "pull" | "note";
+            resource_type: "task" | "project" | "bookmark" | "event" | "repo" | "issue" | "pull" | "note" | "project_issue";
             /**
              * Source Url
              * @description 外部原生界面的链接；本地日历事件为 null
@@ -9375,10 +10004,10 @@ export interface components {
             run_at: string;
             /**
              * Source
-             * @description agent 是你自己安排的，admin 是管理员建的
+             * @description agent 是你自己安排的，admin 是管理员建的，issue 是 Issue 有新动态时工作台安排的
              * @enum {string}
              */
-            source: "agent" | "admin";
+            source: "agent" | "admin" | "issue";
             /**
              * Status
              * @enum {string}
@@ -17759,6 +18388,636 @@ export interface operations {
             };
         };
     };
+    issue_templates: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueTemplates"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    issue_inbox: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_issue: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_issue: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_issue: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IssueUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_comment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    edit_comment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                issue_id: string;
+                comment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    hide_comment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                issue_id: string;
+                comment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_issue: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     agent_knowledge: {
         parameters: {
             query?: never;
@@ -18253,6 +19512,8 @@ export interface operations {
                 resources?: boolean;
                 /** @description 显示图片：每张图片一个节点，连到引用它的笔记 */
                 files?: boolean;
+                /** @description 显示任务 README（数量多，默认不显示，T-0122） */
+                task_readmes?: boolean;
             };
             header: {
                 /** @description 当前工作空间；不是成员时返回 404 */
@@ -18306,7 +19567,7 @@ export interface operations {
             query?: {
                 space_id?: string | null;
                 folder?: string | null;
-                type?: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction") | null;
+                type?: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme") | null;
                 tag?: string | null;
                 author?: string | null;
                 q?: string | null;
@@ -20912,13 +22173,347 @@ export interface operations {
             };
         };
     };
+    put_issue_notices: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IssueNoticesPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueNoticesPut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_project_issues: {
+        parameters: {
+            query?: {
+                state?: ("open" | "closed") | null;
+                kind?: ("question" | "proposal" | "bug" | "contract" | "handoff" | "review" | "blocker" | "other") | null;
+                label?: string | null;
+                assigned_to_me?: boolean;
+                mentioned_me?: boolean;
+                q?: string | null;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_issue: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IssueCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_issue_by_number: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                project_id: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    project_readme: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadmeOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     search: {
         parameters: {
             query: {
                 /** @description 去掉首尾空白后 1–100 字 */
                 q: string;
                 /** @description 可重复；默认全部类型 */
-                types?: ("task" | "project" | "bookmark" | "event" | "repo" | "issue" | "pull" | "note")[] | null;
+                types?: ("task" | "project" | "bookmark" | "event" | "repo" | "issue" | "pull" | "note" | "project_issue")[] | null;
                 cursor?: string | null;
                 limit?: number;
             };
@@ -21529,6 +23124,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskEventList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    task_issues: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    task_readme: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadmeOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

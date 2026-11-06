@@ -437,7 +437,7 @@ class AgentImRejection(Base):
     created_at: Mapped[datetime] = _created()
 
 
-WAKEUP_SOURCES = ("agent", "admin")
+WAKEUP_SOURCES = ("agent", "admin", "issue")
 WAKEUP_REPEATS = ("none", "daily", "weekdays", "weekly")
 WAKEUP_STATUSES = ("pending", "running", "done", "failed", "cancelled")
 

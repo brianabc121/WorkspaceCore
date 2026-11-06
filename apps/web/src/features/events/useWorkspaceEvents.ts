@@ -12,6 +12,8 @@ const families: Record<Schema['InvalidateEvent']['topics'][number], string[]> = 
   im: ['im'], agents: ['agents'], ai: ['ai-tool-executions', 'im', 'timeline'],
   // 任务时间轴（T-0104）：执行记录与 token 用量
   timeline: ['timeline', 'task-runs'],
+  // 项目 Issues（T-0123）
+  issues: ['issues', 'search'],
 }
 // Backoff for rebuilding a stream the browser closed; reset after every successful open.
 const RETRY_BASE_MS = 1000, RETRY_MAX_MS = 30000

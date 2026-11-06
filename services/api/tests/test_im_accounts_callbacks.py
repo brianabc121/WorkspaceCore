@@ -8,6 +8,7 @@
   after 回调写收件箱并去重、其他命令放行。
 """
 
+import asyncio
 import json
 import secrets
 import uuid
@@ -19,6 +20,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
+from app.api import agent_api
 from app.domain import im as im_domain
 from app.domain.im import admin_im_user_id
 from app.domain.im_callbacks import IGNORED_KEY, STREAK_KEY
@@ -87,19 +89,29 @@ class ImEnv(Env):
 async def im_env(
     make_client: ClientFactory, database_url: str, *, setup: bool = True, **overrides: Any
 ) -> AsyncIterator[ImEnv]:
-    """setup=False 用于同一个数据库上的第二个应用（只测回调，不再首次安装）。"""
+    """setup=False 用于同一个数据库上的第二个应用（只测回调，不再首次安装）。
+
+    生产上 before 回调要在 1 秒内判断完（OpenIM 的回调超时）；CI 机器偶尔停顿超过 1 秒，
+    判断就成了 5009。这里的测试验证的是判断规则，所以放宽时限；超时本身拒收 5009 由
+    test_judge_timeout_fails_closed 单独覆盖。
+    """
     fake = FakeOpenIM()
-    async with make_client(**{**IM_SETTINGS, **overrides}) as client:
-        env = ImEnv(client, "", database_url)
-        env.fake = fake
-        env.app.state.connectors.transport = httpx.MockTransport(fake.handler)
-        if setup:
-            response = await client.post("/api/v1/setup", json=OWNER)
-            assert response.status_code == 201, response.text
-            env.workspace_id = response.json()["workspaces"][0]["id"]
-            me = await client.get("/api/v1/me")
-            env.owner_id = uuid.UUID(me.json()["user"]["id"])
-        yield env
+    saved = agent_api.JUDGE_TIMEOUT_SECONDS
+    agent_api.JUDGE_TIMEOUT_SECONDS = 30.0
+    try:
+        async with make_client(**{**IM_SETTINGS, **overrides}) as client:
+            env = ImEnv(client, "", database_url)
+            env.fake = fake
+            env.app.state.connectors.transport = httpx.MockTransport(fake.handler)
+            if setup:
+                response = await client.post("/api/v1/setup", json=OWNER)
+                assert response.status_code == 201, response.text
+                env.workspace_id = response.json()["workspaces"][0]["id"]
+                me = await client.get("/api/v1/me")
+                env.owner_id = uuid.UUID(me.json()["user"]["id"])
+            yield env
+    finally:
+        agent_api.JUDGE_TIMEOUT_SECONDS = saved
 
 
 @pytest.fixture
@@ -343,6 +355,18 @@ async def test_invalid_payload_is_rejected_and_policy_errors_fail_closed(
         "errDlt": "",
         "nextCode": 1,
     }
+
+
+async def test_judge_timeout_fails_closed(env: ImEnv, monkeypatch: pytest.MonkeyPatch) -> None:
+    """判断超过时限（生产上 1 秒）：拒收 5009，不放行。"""
+
+    async def slow(self: object, message: object) -> None:
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr("app.domain.im_callbacks.CallbackJudge.judge", slow)
+    monkeypatch.setattr(agent_api, "JUDGE_TIMEOUT_SECONDS", 0.05)
+    owner = admin_im_user_id(env.owner_id)
+    assert await env.verdict(SINGLE, msg("oc_x", recv_id=owner)) == 5009
 
 
 # ---------------------------------------------------------------- 回调：群聊

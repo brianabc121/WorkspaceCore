@@ -154,6 +154,7 @@ def project_out(
             for m in agents
         ],
         im_group=ProjectImGroup.model_validate(project_groups.group_outs(project, group)),
+        issue_notices=bool(project.issue_notices),
         version=project.version,
         created_at=project.created_at,
         updated_at=project.updated_at,
@@ -600,6 +601,10 @@ class TaskService:
             if str(task.version) != version:
                 current = task_out(task).model_dump(mode="json")
                 raise _version_conflict(current, str(task.version))
+            # 任务的 README 进回收站（T-0122，方案 9.2）
+            from app.domain.readme import Readmes
+
+            await Readmes(self.db, self.settings).trash_task(task.id)
             await self.db.delete(task)
             await self._audit("task.deleted", context, access, "task", task_id, {})
             return WriteResult(204, None)

@@ -861,6 +861,8 @@ class KnowledgeBase:
             raise ValueError("新建笔记必须有知识库和标题")
         state = await self.space(editor.workspace_id, fields.space_id)
         note_type = fields.type or "record"
+        if note_type == "readme":
+            raise _err(422, "SYSTEM_NOTE", "README 由工作台为每个项目和任务生成，不能新建这种类型")
         if editor.is_agent:
             await self._check_agent_write(editor, state, None, note_type)
         elif note_type == "correction":
@@ -957,6 +959,14 @@ class KnowledgeBase:
             raise _err(409, "NOTE_DELETED", "这篇笔记在回收站里，先恢复再修改")
         if note.version != version:
             raise await self._conflict(note)
+        if note.type == "readme" and fields.type not in (None, "readme"):
+            raise _err(422, "SYSTEM_NOTE", "README 由工作台维护，不能改成别的类型")
+        if note.type != "readme" and fields.type == "readme":
+            raise _err(422, "SYSTEM_NOTE", "README 由工作台生成，不能把笔记改成 README")
+        if note.type == "readme" and fields.space_id not in (None, note.space_id):
+            raise _err(422, "SYSTEM_NOTE", "README 跟着项目和任务走，不能移到别的知识库")
+        if note.type == "readme" and fields.folder is not None and fields.folder != note.folder:
+            raise _err(422, "SYSTEM_NOTE", "README 的位置由工作台维护，不能换文件夹")
         target_space = fields.space_id or note.space_id
         state = await self.space(editor.workspace_id, target_space)
         if editor.is_agent:
@@ -1028,6 +1038,10 @@ class KnowledgeBase:
             return note  # 已经在回收站：删除是幂等的
         if note.version != version:
             raise await self._conflict(note)
+        if note.type == "readme":
+            raise _err(
+                422, "SYSTEM_NOTE", "README 由工作台维护，不能删除；不需要的部分可以删掉文字"
+            )
         state = await self.space(editor.workspace_id, note.space_id)
         if editor.instance is not None:
             await self._check_agent_write(editor, state, note, None, deleting=True)
@@ -1391,6 +1405,7 @@ class KnowledgeBase:
         depth: int = 1,
         include_resources: bool = True,
         include_files: bool = False,
+        include_task_readmes: bool = False,
     ) -> GraphOut:
         spaces = await self.space_map(workspace_id)
         alive = and_(KnowledgeNote.workspace_id == workspace_id, KnowledgeNote.deleted_at.is_(None))
@@ -1419,6 +1434,9 @@ class KnowledgeBase:
                 if len(note_ids) > 200:
                     break
         stmt = select(KnowledgeNote).where(alive)
+        if not include_task_readmes and center is None:
+            # 任务 README 数量多，图谱默认不显示（T-0122，方案 9.2）
+            stmt = stmt.where(KnowledgeNote.task_id.is_(None))
         if note_ids is not None:
             stmt = stmt.where(KnowledgeNote.id.in_(note_ids))
         if space_ids:
