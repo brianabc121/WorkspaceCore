@@ -1,5 +1,5 @@
 import type { Component } from 'vue'
-import { Activity, BookOpen, Bot, CalendarDays, Code, FolderKanban, KeyRound, LayoutDashboard, Lock, MessageSquare, Plug, ScrollText, Settings, ShieldCheck, SquareCheckBig, Workflow } from '@lucide/vue'
+import { Activity, BookOpen, Bot, CalendarDays, Code, FolderKanban, KeyRound, LayoutDashboard, Lock, Mail, MailCheck, MessageSquare, Plug, ScrollText, Settings, ShieldCheck, SquareCheckBig, Workflow } from '@lucide/vue'
 
 // 侧栏每一项的图标（@lucide/vue，ISC 许可，T-0083）。没有登记的路径用总览的图标。
 const icons: Record<string, Component> = {
@@ -9,6 +9,7 @@ const icons: Record<string, Component> = {
   '/knowledge': BookOpen,
   '/calendar': CalendarDays,
   '/im': MessageSquare,
+  '/mail': Mail,
   '/developer': Code,
   '/operations': Activity,
   '/automations': Workflow,
@@ -17,6 +18,7 @@ const icons: Record<string, Component> = {
   '/settings': Settings,
   '/settings/integrations': Plug,
   '/settings/security': Lock,
+  '/settings/mail': MailCheck,
   '/agents/secrets': KeyRound,
   '/settings/audit': ScrollText,
 }
