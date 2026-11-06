@@ -1004,6 +1004,11 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "issue_list",
             "issue_get",
             "issue_inbox",
+            # Gmail 邮件：按实例的“查询邮件”开关（T-0129）
+            "mail_accounts",
+            "mail_search",
+            "mail_get",
+            "mail_thread",
         },
         "write": {
             "create_task",
@@ -1039,6 +1044,8 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "issue_create",
             "issue_comment",
             "issue_update",
+            # 发邮件：只给打开了发送权限的实例（例外七，T-0129）
+            "mail_send",
         },
     }
     for spec in TOOLS.values():

@@ -23,6 +23,7 @@ from pydantic import (
 )
 
 from app.schemas.common import Page
+from app.schemas.mail import AgentMailOut
 
 NetworkMode = Literal["intranet", "public"]
 InstanceStatus = Literal["pending", "online", "offline", "disabled"]
@@ -133,6 +134,9 @@ class AgentInstanceOut(BaseModel):
     )
     stop_others: "ProjectAdminOut" = Field(
         description="终止其他智能体任务的权限（T-0126）：打开后它能用 stop_agent_run 叫停别的智能体"
+    )
+    mail: AgentMailOut = Field(
+        description="邮件权限（T-0129）：查询邮件默认打开；发送邮件默认关闭，打开时要选收件人范围"
     )
     bundle_outdated: bool = Field(
         default=False,

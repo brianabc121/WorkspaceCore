@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import agent_bundle
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import ops_metrics, task_runs
+from app.domain import mail_format, notifications, ops_metrics, task_runs
 from app.domain.agent_ca import ClientCertificate, ensure_ca, issue_client_certificate
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
@@ -75,8 +75,38 @@ from app.schemas.agents import (
     SecretResolveError,
     SecretResolveResponse,
 )
+from app.schemas.mail import AgentMailOut, AgentMailPut
 
 logger = logging.getLogger("app.agents")
+
+
+def mail_out(instance: AgentInstance) -> AgentMailOut:
+    return AgentMailOut(
+        read_enabled=instance.mail_read_enabled,
+        send_enabled=instance.mail_send_enabled,
+        send_scope=instance.mail_send_scope,
+        recipients=list(instance.mail_send_recipients or []),
+        send_by=instance.mail_send_by,
+        send_at=instance.mail_send_at,
+        version=instance.version,
+    )
+
+
+def clean_mail_recipients(values: Sequence[str]) -> list[str]:
+    """收件人范围：完整地址（a@b.com）或域名（@b.com），小写、去重。"""
+    out: list[str] = []
+    for value in values:
+        entry = value.strip().lower()
+        if entry.startswith("@"):
+            ok = mail_format.valid_address("x" + entry)
+        else:
+            ok = mail_format.valid_address(entry)
+        if not ok:
+            raise ApiError(422, "VALIDATION_FAILED", f"不是有效的地址或域名：{value[:80]}")
+        if entry not in out:
+            out.append(entry)
+    return out
+
 
 TOKEN_PREFIX = "mwa_"  # noqa: S105 -- 令牌格式的前缀，不是密钥
 TOKEN_PREFIX_SHOWN = 12
@@ -346,6 +376,7 @@ class AgentService:
                     granted_by=i.stop_others_by,
                     granted_at=i.stop_others_at,
                 ),
+                mail=mail_out(i),
                 bundle_outdated=i.plugin_version is not None
                 and i.plugin_version != agent_bundle.PATCHED_PLUGIN_VERSION,
                 credentials=by_instance[i.id],
@@ -572,6 +603,81 @@ class AgentService:
             granted_by=instance.stop_others_by,
             granted_at=instance.stop_others_at,
         )
+
+    async def set_mail(
+        self,
+        access: WorkspaceAccess,
+        instance_id: uuid.UUID,
+        body: AgentMailPut,
+        *,
+        client_ip: str,
+    ) -> AgentMailOut:
+        """邮件权限（T-0129，docs/v2/MAIL_PLAN.md 第 5 节，owner / admin）：写审计；
+        打开发送时必须选收件人范围，并通知其他管理员。"""
+        instance = await self._instance(access, instance_id)
+        self._check_version(instance, body.version)
+        # 关掉发送时保留选过的收件人范围，下次打开时页面可以直接沿用
+        scope = body.send_scope
+        recipients = clean_mail_recipients(body.recipients) if scope == "listed" else []
+        if body.send_enabled:
+            if scope is None:
+                raise ApiError(422, "VALIDATION_FAILED", "打开发送邮件要选收件人范围")
+            if scope == "listed" and not recipients:
+                raise ApiError(
+                    422, "VALIDATION_FAILED", "选了“只限下列地址”就至少要填一个地址或域名"
+                )
+            if instance.scope != "read_write":
+                raise ApiError(
+                    422, "VALIDATION_FAILED", "这个实例的权限范围是只读，打开发送邮件也用不了"
+                )
+        newly_sending = body.send_enabled and not instance.mail_send_enabled
+        changed = (
+            instance.mail_read_enabled != body.read_enabled
+            or instance.mail_send_enabled != body.send_enabled
+            or instance.mail_send_scope != scope
+            or list(instance.mail_send_recipients or []) != recipients
+        )
+        if changed:
+            instance.mail_read_enabled = body.read_enabled
+            instance.mail_send_enabled = body.send_enabled
+            instance.mail_send_scope = scope
+            instance.mail_send_recipients = recipients
+            if newly_sending:
+                instance.mail_send_by = access.user_id
+                instance.mail_send_at = datetime.now(UTC)
+            elif not body.send_enabled:
+                instance.mail_send_by = None
+                instance.mail_send_at = None
+            instance.version += 1
+            await self.audit.record(
+                "agents.instance.mail_updated",
+                workspace_ids=[access.workspace.id],
+                actor_id=access.user_id,
+                resource_type="agent_instance",
+                resource_id=instance.id,
+                metadata={
+                    "read_enabled": body.read_enabled,
+                    "send_enabled": body.send_enabled,
+                    "send_scope": scope,
+                    "recipients": len(recipients),
+                },
+                client_ip=client_ip,
+            )
+            if newly_sending:
+                await notifications.notify_admins(
+                    self.db,
+                    access.workspace.id,
+                    type_="mail.agent_send_enabled",
+                    severity="warning",
+                    title=f"智能体「{instance.name}」获得了发送邮件的权限",
+                    body="收件人范围："
+                    + ("任何地址" if scope == "any" else "、".join(recipients[:10])),
+                    link="/agents",
+                    key=f"{instance.id}:{instance.version}",
+                )
+        await self.db.commit()
+        await self.db.refresh(instance)
+        return mail_out(instance)
 
     async def set_enabled(
         self,

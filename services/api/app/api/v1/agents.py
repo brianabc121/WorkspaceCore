@@ -78,6 +78,7 @@ from app.schemas.ai_tools import (
 )
 from app.schemas.common import error_responses
 from app.schemas.host import HostRange, HostStatusOut, HostSummaryList
+from app.schemas.mail import AgentMailOut, AgentMailPut
 
 router = APIRouter(tags=["agents"], dependencies=[Security(authenticated)])
 
@@ -249,6 +250,22 @@ async def put_stop_others(
     access: Admin, request: Request, service: Service, instance_id: UUID, body: ProjectAdminPut
 ) -> ProjectAdminOut:
     return await service.set_stop_others(access, instance_id, body, client_ip=_ip(request, service))
+
+
+@router.put(
+    "/agents/instances/{instance_id}/mail",
+    summary="设置实例的邮件权限（admin，乐观并发）",
+    description="查询邮件（mail_accounts / mail_search / mail_get / mail_thread，默认打开）与"
+    "发送邮件（mail_send，直接发出，docs/AGENTS.md 第 8 节例外七；默认关闭）。打开发送时必须选"
+    "收件人范围：any 任何地址，或 listed 只限 recipients 里的地址（a@b.com）或域名（@b.com）。"
+    "每次都写审计；打开发送时通知管理员（T-0129，docs/v2/MAIL_PLAN.md 第 5 节）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def put_agent_mail(
+    access: Admin, request: Request, service: Service, instance_id: UUID, body: AgentMailPut
+) -> AgentMailOut:
+    return await service.set_mail(access, instance_id, body, client_ip=_ip(request, service))
 
 
 @router.post(
