@@ -8,7 +8,7 @@ branch: claude/cool-wright-99qbbg
 paths: tests/e2e,.github/workflows,docs,services/api,apps/web,scripts
 depends_on: T-0103, T-0105
 created: 2026-11-04
-updated: 2026-11-04
+updated: 2026-11-06
 ---
 
 # T-0106 时间轴与知识库图片的验收与文档：真实 OpenClaw 用量上报、浏览器验收、S3 存储验收、威胁模型与部署文档
@@ -37,3 +37,4 @@ updated: 2026-11-04
 - 2026-11-04 05:26 UTC · claude · status in_progress → done：验收标准完成（agents 场景 16、SSH 上报、时间轴与图片浏览器验收、Garage 主存储 + 副本、文档）；真实 R2 / OSS 账号验收移到 T-0107
 - 2026-11-04 05:41 UTC · claude · agents CI 第一次运行：场景 16 只有“第一次上报只记基准”一项失败——实例接口不返回 usage_reported_at（只在库里），检查读不到；上报本身成功（退出码 0，没有用量分钟），后面交给甲执行、审批、token 归属、时间轴接口都通过。改成查库，与 SSH 验收一致。
 - 2026-11-04 05:55 UTC · claude · agents CI 第二次运行：只剩“按项目查看的用量合计”一项失败——用量记在上报那一分钟的整分钟上，这次上报与开段在同一分钟，查询从这段开始的时刻起，那一分钟被范围过滤掉（这段本身分到了 2 token）。界面按整天查不受影响；验收的查询起点放宽到开段前 5 分钟。
+- 2026-11-06 16:36 UTC · claude · PR #163 的 compose 在 16:34 UTC 失败于 timeline_browser.cjs 的 token 合计（83400 < 99000）：种子把 30 分钟用量放在 now-40 ~ now-11 分钟，上海时区 00:34 运行时跨过午夜，当天视图只合计 00:00 之后的 24 分钟（24×3300+10×(6+…+29)=83400，与页面一致）。每天 16:00 ~ 16:40 UTC 运行都会这样失败。改为种子返回用量开始时间，测试按落在这一天的分钟算期望值并要求相等。

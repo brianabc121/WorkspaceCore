@@ -98,7 +98,7 @@ const detail = (page) => page.getByRole('complementary', { name: '选中的任�
   await write(page, workspace, 'PATCH', `/api/v1/tasks/${human.id}`, { version: human.version, planned_start_at: iso(now - 30 * MIN), assignee_user_id: ownerId })
   const agentTask = await write(page, workspace, 'POST', '/api/v1/tasks', { project_id: projectA.id, title: `迁移预演 ${run}` })
   const instanceName = `e2e-claw-${run}`
-  seed('timeline', workspace, agentTask.id, instanceName)
+  const [, usageStart] = seed('timeline', workspace, agentTask.id, instanceName)
   const plannedStart = Math.ceil((now + 120 * MIN) / (15 * MIN)) * 15 * MIN
   const planned = await write(page, workspace, 'POST', '/api/v1/tasks', { project_id: projectB.id, title: `更新巡检脚本 ${run}`, due_at: iso(plannedStart + 60 * MIN) })
   await write(page, workspace, 'PATCH', `/api/v1/tasks/${planned.id}`, { version: planned.version, planned_start_at: iso(plannedStart) })
@@ -135,7 +135,11 @@ const detail = (page) => page.getByRole('complementary', { name: '选中的任�
   await detail(page).locator('dd').filter({ hasText: instanceName }).waitFor()
   const usage = await page.locator('.tl-usage').getAttribute('aria-label')
   const total = Number((usage ?? '').match(/合计 (\d+)/)?.[1] ?? 0)
-  check(total >= 30 * 3300, `token 轨道应显示上报的用量合计：${usage}`)
+  // 种子从 usageStart 起上报 30 分钟，每分钟 3300 + 10 × i 个 token；时间轴合计的是上海时区这一天里的分钟，
+  // 在上海午夜前后运行时这 30 分钟跨两天，只算落在这一天的那部分
+  let expected = 0
+  for (let i = 0; i < 30; i++) if (dayOf(Date.parse(usageStart) + i * MIN) === agentDay) expected += 3300 + 10 * i
+  check(expected > 0 && total === expected, `token 轨道应显示这一天上报的用量合计 ${expected}：${usage}`)
   const runs = (await api(page, workspace, 'GET', `/api/v1/tasks/${agentTask.id}/runs`)).items
   check(runs.length === 1 && runs[0].end_reason === 'done' && runs[0].tokens.total > 0, `智能体那段应已完成并分到 token：${JSON.stringify(runs)}`)
   const tokenText = (await detail(page).innerText()).replace(/\s+/g, ' ')
