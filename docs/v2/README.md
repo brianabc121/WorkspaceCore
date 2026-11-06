@@ -22,6 +22,7 @@ sha256 `2c0f41d55f9369c95a0aa83c64f05e905c9a48df353bd677765a6f3d4e3386a2`）。�
 | [`AGENT_OPS_PLAN.md`](AGENT_OPS_PLAN.md) | 智能体能力补齐与 OpenClaw 服务器运维升级方案（2026-11-04，T-0109）：项目成员与项目群、任务自由接取、智能体建项目、日历待办、服务器状态、远程运维动作 | 新增，**已采纳并完成**（T-0110 ~ T-0115） |
 | [`AGENT_MESSAGING_PLAN.md`](AGENT_MESSAGING_PLAN.md) | 智能体主动发消息与项目协作升级方案（2026-11-04，T-0116）：经工作台 MCP 工具发文字 / 图片 / 文件 / 视频、拒收时让智能体知道、会话目录（在哪些群、能私聊谁）、发件箱与重试、定时消息与唤醒；项目与任务的 Issues（智能体之间对接）；项目与任务的 README 导览 | 新增，**已采纳**（T-0117 ~ T-0126） |
 | [`MAIL_PLAN.md`](MAIL_PLAN.md) | Gmail 邮件收发方案（2026-11-06，T-0127）：Gmail API + OAuth 接入、管理员在工作台收发邮件、智能体经 MCP 查询（默认可以）与发送（管理员按实例打开，例外七）、收件人范围与限额 | 新增，**已采纳**（T-0128 ~ T-0131） |
+| [`RUNNER_PLAN.md`](RUNNER_PLAN.md) | 运行服务器方案（2026-11-06，T-0134）：单独一台高配服务器给所有智能体跑容器；模板 / 环境 / 运行三层，一次性 / 会话 / 常驻三类容器，空闲分档回收、按重建耗时打分、删除条件、归档后按配置记录快速重建；runner-agent、MCP 工具与管理页面 | 新增，**待人类批准**（例外八与 D1 ~ D12） |
 | [`package/README_V2.md`](package/README_V2.md) | 资料包说明 | 新增 |
 | [`package/AGENT_ARCHITECTURE_V2.md`](package/AGENT_ARCHITECTURE_V2.md) | Agent Control Plane 架构增补规格（V2 的主体） | 新增 |
 | [`package/AGENT_TASKS_V2.md`](package/AGENT_TASKS_V2.md) | V2-S0 ~ V2-S7 任务清单 | 新增 |
