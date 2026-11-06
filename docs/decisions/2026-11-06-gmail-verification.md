@@ -65,6 +65,13 @@ discovery 文档里的全部 OAuth 范围共 14 个；本方案只申请 `https:
 - 列表先 `messages.list` 再逐封 `messages.get?format=metadata`（metadataHeaders：From、To、Cc、Subject、Date），控制在每次最多 50 封，配额约 5 + 50 × 20 = 1005 单位，远低于每分钟 6000。
 - 读正文用 `format=full`（60 单位）；会话用 `threads.get`（full 时 120 单位）。
 
-## 6. 尚未核验
+## 6. 验收情况
 
-- 真实账号上的端到端（连接、搜索、发信、撤销）：需要人类建 OAuth 客户端并授权测试邮箱，按 `docs/deploy-guide.md` 的清单手工验收后补在这里。
+- **CI（T-0131）**：agents 任务的场景 23 用模拟 Google（`tests/e2e/fake_gmail_server.py`，复用后端测试的 `tests/fake_google.py`，
+  请求与响应形状按本记录第 2 ~ 4 节）跑完整流程：管理员设置 OAuth 客户端、经授权回调连接邮箱、两个真实 OpenClaw 实例的
+  查询 / 发送开关、甲经模型调 `mail_search`、发送的收件人范围、`mail_send` 发出的 RFC 2822 邮件、`client_key` 不重发、
+  发件记录与通知、断开时撤销授权。
+- **真实 Google 账号：尚未核验**（2026-11-06）。需要人类在 Google Cloud 建 OAuth 客户端并授权自己的邮箱，按
+  `docs/deploy-guide.md` 8.7 的清单手工验收（连接、搜索、读只有 HTML 的邮件、发信与回复进同一会话、智能体在允许的范围里发信、
+  断开后 Google 账号的“第三方应用”里授权已移除），结果补在这里。模拟服务与真实 Google 可能的差异：错误响应的细节字段、
+  `labels.list` 是否带未读数、发信上限的 429 与 Retry-After。

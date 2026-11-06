@@ -124,6 +124,11 @@ services:
       # .env 里用 WORKSPACE_GITHUB_API_URL：GitHub Actions 会在 shell 里设置 GITHUB_API_URL，
       # 而 Compose 插值时 shell 变量优先于 .env
       GITHUB_API_URL: ${WORKSPACE_GITHUB_API_URL:-https://api.github.com}
+      # Google OAuth 与 Gmail API 的地址（T-0128）；只有 CI 验收会改成模拟服务（tests/e2e/fake_gmail_server.py），
+      # 同时要把模拟服务的主机名加进 INTEGRATION_ALLOWED_HOSTS
+      GOOGLE_OAUTH_TOKEN_URL: ${GOOGLE_OAUTH_TOKEN_URL:-https://oauth2.googleapis.com/token}
+      GOOGLE_OAUTH_REVOKE_URL: ${GOOGLE_OAUTH_REVOKE_URL:-https://oauth2.googleapis.com/revoke}
+      GMAIL_API_URL: ${GMAIL_API_URL:-https://gmail.googleapis.com}
       # API 只能经 Caddy 访问，取 X-Forwarded-For 最右侧的地址作为客户端 IP（登录限流用）
       TRUST_FORWARDED_FOR: "true"
       # 可选监控（--profile monitoring）：留空表示没有部署，运维页显示 not_configured

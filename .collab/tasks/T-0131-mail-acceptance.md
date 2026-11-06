@@ -2,9 +2,9 @@
 id: T-0131
 title: Gmail 验收与文档：e2e（真实 OpenClaw + 假 Gmail）、契约与部署文档、人工验收清单
 owner: claude
-status: todo
+status: in_progress
 priority: P2
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web,docs,tests/e2e,infra
 depends_on: T-0129, T-0130
 created: 2026-11-06
@@ -29,3 +29,6 @@ updated: 2026-11-06
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-06 11:00 UTC · claude · 创建任务（owner: claude）
 - 2026-11-06 11:48 UTC · claude · 文档已补（api-contract、data-dictionary 迁移 0040、threat-model 四行、deploy-guide 8.7）。剩：agents CI 里真实 OpenClaw + 假 Gmail 的场景（tests/e2e 需要一个假 Gmail 服务与假模型的工具调用脚本），以及核验记录第 6 节的人工验收（要人类的 Google 账号）
+- 2026-11-06 12:44 UTC · claude · 开始任务
+- 2026-11-06 12:44 UTC · claude · e2e：tests/e2e/fake_gmail_server.py（模拟 Google，复用 tests/fake_google.py）、compose 的 GOOGLE_OAUTH_TOKEN_URL / GOOGLE_OAUTH_REVOKE_URL / GMAIL_API_URL（默认真实地址）、ci-infra agents 任务把它们指向 fake-gmail、agents_acceptance.py 场景 23。启用中途打开的 mail_send 按场景 18 / 22 的做法直接从实例的服务器调 MCP（不经模型）；mail_search 经真实 OpenClaw + 假模型调用。核验记录第 6 节如实写明真实账号尚未核验
+- 2026-11-06 12:44 UTC · claude · 越出 paths 的两处：compose.yaml（给 api 传三个 Google 地址，默认值不变）、.github/workflows/ci-infra.yml（agents 任务的 .env 指向模拟服务）。都是让 CI 能跑场景 23 所必需；没有别的进行中任务占用这两个文件
