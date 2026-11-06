@@ -5,6 +5,7 @@ export const navigation = [
   { path: '/knowledge', title: '知识库', section: '工作空间', description: '笔记与知识图谱：公共、项目、智能体三类知识库；AFFiNE 文档收藏在“外部文档”。' },
   { path: '/calendar', title: '日历', section: '工作空间', description: '工作空间共享日程与周视图。' },
   { path: '/im', title: '消息', section: '工作空间', description: '与 OpenClaw 实例单聊、群聊（owner 与 admin）。' },
+  { path: '/mail', title: '邮件', section: '工作空间', description: '查收、阅读、回复 Gmail 邮件（owner 与 admin）。' },
   { path: '/developer', title: '开发者', section: '连接与工具', description: 'GitHub 仓库、Issue、PR 与 Actions 只读视图。' },
   { path: '/operations', title: '运维', section: '连接与工具', description: '服务状态、预设指标与 Grafana 外链。' },
   { path: '/automations', title: '自动化', section: '连接与工具', description: '白名单 n8n 工作流：确认后触发，查看运行记录。' },
@@ -13,10 +14,11 @@ export const navigation = [
   { path: '/settings', title: '设置', section: '管理', description: '管理个人资料、工作空间与成员（成员由 owner / admin 管理）。' },
   { path: '/settings/integrations', title: '集成设置', section: '管理', description: '管理员配置 GitHub、测试权限与同步。' },
   { path: '/settings/security', title: '安全设置', section: '管理', description: '管理密码与登录会话。' },
+  { path: '/settings/mail', title: '邮件设置', section: '管理', description: '连接 Gmail 邮箱、设置 OAuth 客户端与智能体访问（owner 与 admin）。' },
   { path: '/agents/secrets', title: '密钥库', section: '管理', description: 'OpenClaw 实例使用的密钥与取用记录（owner）。' },
 ] as const
 
 // Pages only owner / admin can open; hidden from members and guarded by the router.
-export const adminOnly: ReadonlySet<string> = new Set(['/settings/integrations', '/im'])
+export const adminOnly: ReadonlySet<string> = new Set(['/settings/integrations', '/im', '/mail', '/settings/mail'])
 // Pages only the owner can open (the agents API is owner-only, OC-1 contract §3).
 export const ownerOnly: ReadonlySet<string> = new Set(['/agents', '/agents/secrets'])

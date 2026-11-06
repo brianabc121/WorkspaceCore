@@ -9,9 +9,10 @@ import OpsPanel from './OpsPanel.vue'
 import OutboxPanel from './OutboxPanel.vue'
 import WakeupPanel from './WakeupPanel.vue'
 import StopPanel from './StopPanel.vue'
+import MailSwitch from './MailSwitch.vue'
 
 const props = defineProps<{ instance: Schema['AgentInstanceOut']; secrets: Schema['AgentSecretOut'][]; busy: boolean; host?: Schema['HostSummaryItem']; names: Map<string, string> }>()
-const emit = defineEmits<{ edit: []; toggle: []; bundle: [previous: Schema['BundleRequest']['previous']]; revoke: [credential: Schema['AgentCredentialOut']]; grants: [grants: Schema['SecretGrantIn'][]]; projectAdmin: [enabled: boolean]; imMedia: [enabled: boolean]; stopOthers: [enabled: boolean] }>()
+const emit = defineEmits<{ edit: []; toggle: []; bundle: [previous: Schema['BundleRequest']['previous']]; revoke: [credential: Schema['AgentCredentialOut']]; grants: [grants: Schema['SecretGrantIn'][]]; projectAdmin: [enabled: boolean]; imMedia: [enabled: boolean]; stopOthers: [enabled: boolean]; mail: [body: Omit<Schema['AgentMailPut'], 'version'>] }>()
 const previous = ref<'keep_24h' | 'revoke_now'>('keep_24h'), editingGrants = ref(false)
 const rows = ref<{ secret_id: string; ref_id: string }[]>([])
 const active = computed(() => props.instance.credentials.filter(c => !c.revoked_at))
@@ -61,6 +62,7 @@ function saveGrants() { if (grantsValid.value) { emit('grants', rows.value.map(r
       </div>
       <p class="form-help">打开后它可以用 list_agent_runs 查看本工作空间的智能体在做什么、用 stop_agent_run 叫停别的智能体正在执行的任务（适合做协调的智能体），直接生效、不审批；不能叫停自己，每小时最多 10 次，每次都通知管理员。<template v-if="instance.stop_others.enabled && instance.stop_others.granted_at"> 打开于 {{ formatTime(instance.stop_others.granted_at) }}。</template></p>
     </section>
+    <MailSwitch :instance="instance" :busy="busy" @save="$emit('mail', $event)" />
     <SshDeploy :instance="instance" />
     <OpsPanel :instance="instance" />
     <OutboxPanel :instance="instance" />

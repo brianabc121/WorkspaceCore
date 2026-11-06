@@ -277,3 +277,16 @@ ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。
 | `agent_ops_actions`（T-0114，迁移 0032） | `id`、`workspace_id`、`instance_id`、`action`、`service`、`status`、`exit_code`、`output`、`truncated`、`error_code`、`error_message`、`started_by`、`started_at`、`finished_at`、`expires_at` | 一次运维动作：CHECK `action` ∈ `status` / `logs` / `restart` / `up` / `prune` / `report`，`service` 为空或 ∈ `openclaw` / `tunnel` / `image-proxy`，`status` ∈ `running` / `succeeded` / `failed` / `interrupted`；`output` 是脱敏后的输出（最多 64 KB）；部分唯一索引保证同一实例同时只有一个 `running`；`expires_at` = 开始时间 + 7 天，Worker 每天删除过期记录（审计保留）；随实例、工作空间级联删除，`started_by` → `users`（删除后置空） |
 
 **downgrade** 删除三张表和新增的字段：执行记录与 token 用量随之删除（都是 0027 之后才有的数据）。
+
+### 迁移 `0040`（T-0128）
+
+Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮件正文不入库。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `mail_oauth_clients` | `id`、`workspace_id`、`client_id`、`client_secret_ref`、`updated_by`、`version` | 每个工作空间一条（唯一 `workspace_id`）；`client_secret_ref` 是加密后的密钥（`enc:v1:`，加密用途绑定工作空间）；随工作空间级联删除，`updated_by` → `users`（删除后置空） |
+| `mail_accounts` | `id`、`workspace_id`、`email`、`display_name`、`scopes`、`refresh_token_ref`、`status`、`last_error`、`agents_allowed`、`agent_signature`、`connected_by`、`connected_at`、`version` | 连接的 Gmail 邮箱，唯一 `(workspace_id, email)`（断开后重新连接复用这一行）。`scopes` 只记实际授权的 `gmail.readonly` / `gmail.send`；`refresh_token_ref` 加密（用途绑定邮箱 ID），断开后清空；CHECK `status` ∈ `active` / `needs_reconnect` / `disconnected`；`agents_allowed`、`agent_signature` 默认 true。access token 只加密放 Redis（`mail_at:{id}`，按 `expires_in` 提前 60 秒过期），不入库 |
+| `mail_sends` | `id`、`workspace_id`、`account_id`、`actor_kind`、`user_id`、`instance_id`、`actor_name`、`sender`、`to_addresses`、`cc_addresses`、`bcc_count`、`subject`、`body_chars`、`reply_to_message_id`、`gmail_message_id`、`gmail_thread_id`、`status`、`error_code`、`client_key`、`created_at`、`finished_at` | 发件记录（人或智能体），**不存正文**（只记 `body_chars`），密送只记人数。CHECK `actor_kind` ∈ `user` / `instance`、`user_id` 与 `instance_id` 至多一个、`status` ∈ `sending` / `sent` / `failed` / `unknown`、主题 ≤ 200 字。部分唯一索引 `uq_mail_sends_client_key (instance_id, client_key)`：智能体的防重复键。索引按工作空间、实例与时间。邮箱、成员、实例删除后对应字段置空，`actor_name`、`sender` 保留当时的值 |
+| `agent_instances` 新增 | `mail_read_enabled`、`mail_send_enabled`、`mail_send_scope`、`mail_send_recipients`、`mail_send_by`、`mail_send_at` | 实例的邮件权限：查询默认 true、发送默认 false；CHECK `mail_send_scope` 为空或 ∈ `any` / `listed`，打开发送时必须有范围（`ck_agent_instances_mail_send_needs_scope`），收件人列表最多 50 条；`mail_send_by` → `users`（删除后置空） |
+
+**downgrade** 删除三张表和新增的字段（都是 0040 之后才有的数据）。

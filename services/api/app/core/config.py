@@ -124,6 +124,12 @@ class Settings(BaseSettings):
     # GitHub REST API 的地址（Sprint 4 契约第 6.1 节，固定为 api.github.com）；
     # 只有测试与 CI 验收会改成模拟服务，同时要把模拟服务的主机名加进 integration_allowed_hosts
     github_api_url: str = "https://api.github.com"
+    # Google OAuth 2.0 与 Gmail API 的地址（T-0128，核验记录 2026-11-06-gmail-verification.md）；
+    # 只有测试与 CI 验收会改成模拟服务（同样要把主机名加进 integration_allowed_hosts）
+    google_oauth_auth_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    google_oauth_token_url: str = "https://oauth2.googleapis.com/token"  # noqa: S105 - 公开地址
+    google_oauth_revoke_url: str = "https://oauth2.googleapis.com/revoke"
+    gmail_api_url: str = "https://gmail.googleapis.com"
 
     # 运维（Sprint 5 契约第 3 节）：都在内部网络，由部署配置，浏览器拿不到这些地址。
     # 为空表示没有部署对应组件（docker compose --profile monitoring 启用）

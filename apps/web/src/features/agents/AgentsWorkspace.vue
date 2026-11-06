@@ -60,6 +60,12 @@ function stopOthers(instance: Schema['AgentInstanceOut'], enabled: boolean) {
   if (enabled && !window.confirm(`允许「${instance.name}」叫停本工作空间里别的智能体正在执行的任务？叫停直接生效、不审批，每次都会通知管理员。`)) return
   void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/stop-others', { params: { header, path: path(instance) }, body: { enabled, version: instance.version } }), enabled ? '已打开终止其他智能体任务的权限' : '已关闭终止其他智能体任务的权限')
 }
+function mail(instance: Schema['AgentInstanceOut'], body: Omit<Schema['AgentMailPut'], 'version'>) {
+  const opening = body.send_enabled && !instance.mail.send_enabled
+  const range = body.send_scope === 'any' ? '任何地址' : (body.recipients ?? []).join('、')
+  if (opening && !window.confirm(`允许「${instance.name}」用工作台连接的 Gmail 邮箱发信（收件人范围：${range}）？发信直接生效、不审批，每封都会通知管理员。`)) return
+  void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/mail', { params: { header, path: path(instance) }, body: { ...body, version: instance.version } }), '邮件权限已保存')
+}
 function grants(instance: Schema['AgentInstanceOut'], list: Schema['SecretGrantIn'][]) {
   void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/secret-grants', { params: { header, path: path(instance) }, body: { grants: list, version: instance.version } }), '密钥授权已保存')
 }
@@ -82,7 +88,7 @@ function grants(instance: Schema['AgentInstanceOut'], list: Schema['SecretGrantI
   <div class="agent-list">
     <InstanceCard
       v-for="instance in items" :key="instance.id" :instance="instance" :secrets="secretItems" :busy="busy" :host="hosts.get(instance.id)" :names="names"
-      @edit="editing = instance" @toggle="toggle(instance)" @bundle="bundle(instance, $event)" @revoke="revoke(instance, $event)" @grants="grants(instance, $event)" @project-admin="projectAdmin(instance, $event)" @im-media="imMedia(instance, $event)" @stop-others="stopOthers(instance, $event)"
+      @edit="editing = instance" @toggle="toggle(instance)" @bundle="bundle(instance, $event)" @revoke="revoke(instance, $event)" @grants="grants(instance, $event)" @project-admin="projectAdmin(instance, $event)" @im-media="imMedia(instance, $event)" @stop-others="stopOthers(instance, $event)" @mail="mail(instance, $event)"
     />
   </div>
   <button v-if="instances.hasNextPage.value" type="button" class="secondary-button" :disabled="instances.isFetchingNextPage.value" @click="instances.fetchNextPage()">更多实例</button>

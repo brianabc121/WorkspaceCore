@@ -689,6 +689,27 @@ Docker 用官方软件源安装锁定版本，并把账号加入 docker 组。
 
 ---
 
+### 8.7 Gmail 邮件（可选，T-0128 ~ T-0130）
+
+工作台用 Gmail API + OAuth 连接你的 Gmail 邮箱：人在“邮件”页查收、阅读、回复；智能体经 MCP 工具查询（默认可以）和发信（默认不行，管理员按实例打开）。
+只申请“读取邮件”（`gmail.readonly`）和“发送邮件”（`gmail.send`）两个权限，不能删除或修改邮件。不需要改 `.env`。
+
+1. 在 [Google Cloud 控制台](https://console.cloud.google.com/) 建一个项目，启用 **Gmail API**；
+2. 配置 OAuth 同意屏幕：个人 Gmail 选“外部”，把要连接的邮箱加为测试用户；Google Workspace 可以选“内部”；
+3. 新建 OAuth 客户端，类型选 **Web 应用**，“已获授权的重定向 URI”填工作台“设置 → 邮件”页显示的地址，即 `<PUBLIC_BASE_URL>/api/v1/mail/oauth/callback`；
+4. 工作台“设置 → 邮件”：填客户端 ID 和密钥（加密保存，之后只显示“已设置”），点“连接 Gmail 邮箱”，在 Google 授权页勾选两个权限；
+5. 需要智能体用邮件时：在“设置 → 邮件”里确认邮箱“允许智能体访问”（默认允许），再到“OpenClaw 实例”页按实例设置邮件权限（查询默认打开；发送默认关闭，打开时选收件人范围）。
+
+注意：
+
+- 网络：浏览器要能打开 `accounts.google.com`；api 服务要能出站访问 `oauth2.googleapis.com` 与 `gmail.googleapis.com`（HTTPS 443）。
+- OAuth 同意屏幕是“外部”且发布状态为“测试”时，Google 签发的长期令牌 **7 天后失效**（核验记录第 2 节）：到期后邮箱显示“需要重新连接”，管理员会收到通知，重新点“连接 Gmail 邮箱”即可。
+  改成“正式发布”要按 Google 对 OAuth 应用的要求办理（`gmail.readonly` 属于 Google 限制较多的范围），本工作台不替你办理。
+- 用户撤销授权、改了 Gmail 账号密码、6 个月没用，长期令牌也会失效，处理方式同上。
+- 每个用户每分钟 6000 个 Gmail 配额单位、发信与 Gmail 本身的每日上限共用；超出时工作台返回“稍后再试”，不会自动重试发信。
+
+真实账号上的端到端还要人工验收一次（核验记录第 6 节）：连接、搜索、读信（含只有 HTML 的邮件）、发信与回复（会话里看得到）、智能体在允许的范围里发信、断开后 Google 账号的“第三方应用”里授权已移除。
+
 ## 9. 配置备份
 
 `make backup` 用 restic 把工作台数据库（以及正在运行的 OpenIM）加密备份到 `BACKUP_REPOSITORY`。

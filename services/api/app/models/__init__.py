@@ -70,6 +70,7 @@ from app.models.knowledge_base import (
     KnowledgeSpace,
     ProjectAgent,
 )
+from app.models.mail import MailAccount, MailOAuthClient, MailSend
 from app.models.notification import Notification
 from app.models.search import SearchDocument
 from app.models.task import Project, Task
@@ -140,6 +141,9 @@ __all__ = [
     "KnowledgeReadStat",
     "KnowledgeSource",
     "KnowledgeSpace",
+    "MailAccount",
+    "MailOAuthClient",
+    "MailSend",
     "Notification",
     "Project",
     "ProjectAgent",

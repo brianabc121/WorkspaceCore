@@ -43,6 +43,7 @@ from app.domain import (
     agent_tasks,
     issue_tools,
     knowledge_tools,
+    mail_tools,
     ops_metrics,
     readme_tools,
 )
@@ -55,6 +56,9 @@ from app.schemas.ai_tools import (
     IM_DIRECT_TOOL_NAMES,
     ISSUE_TOOL_NAMES,
     KNOWLEDGE_TOOL_NAMES,
+    MAIL_READ_TOOL_NAMES,
+    MAIL_SEND_TOOL_NAMES,
+    MAIL_TOOL_NAMES,
     PROJECT_ADMIN_TOOL_NAMES,
     README_TOOL_NAMES,
     STOP_TOOL_NAMES,
@@ -84,6 +88,7 @@ def available(spec: ToolSpec) -> bool:
         or spec.name in KNOWLEDGE_TOOL_NAMES
         or spec.name in README_TOOL_NAMES
         or spec.name in ISSUE_TOOL_NAMES
+        or spec.name in MAIL_TOOL_NAMES
     )
 
 
@@ -174,6 +179,8 @@ async def _list_tools(
         scope = instance.scope if instance is not None else "read"
         project_admin = instance is not None and instance.project_admin_enabled
         stop_others = instance is not None and instance.stop_others_enabled
+        mail_read = instance is not None and instance.mail_read_enabled
+        mail_send = instance is not None and instance.mail_send_enabled
     # 只列这个实例的权限范围里、已经实现的工具；角色是否够在调用时再检查（角色可能变化）。
     # 项目管理工具只列给打开了项目管理权限的实例（T-0112）
     tools = [
@@ -184,6 +191,9 @@ async def _list_tools(
         and (spec.name not in PROJECT_ADMIN_TOOL_NAMES or project_admin)
         # 终止其他智能体任务的工具只列给打开了这个权限的实例（T-0126）
         and (spec.name not in STOP_TOOL_NAMES or stop_others)
+        # 邮件（T-0129）：读工具按“查询邮件”开关（默认打开），mail_send 按“发送邮件”权限（例外七）
+        and (spec.name not in MAIL_READ_TOOL_NAMES or mail_read)
+        and (spec.name not in MAIL_SEND_TOOL_NAMES or mail_send)
     ]
     return types.ListToolsResult(tools=tools)
 
@@ -260,6 +270,10 @@ async def _dispatch(
                         raw,
                         request_id=caller.request_id,
                         im=openim_client(state.settings, state.connectors, state.redis),
+                    )
+                elif spec.name in MAIL_TOOL_NAMES:
+                    output = await mail_tools.run(
+                        service, requester, spec, raw, request_id=caller.request_id
                     )
                 elif spec.name in IM_DIRECT_TOOL_NAMES:
                     output = await agent_outbox.run(
