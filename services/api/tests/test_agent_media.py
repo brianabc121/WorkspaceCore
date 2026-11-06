@@ -163,6 +163,14 @@ async def test_image_and_text_file_are_sent_with_signed_ex(env: ImEnv) -> None:
     )
     assert sent["status"] == "sent"
     assert [m["kind"] for m in sent["messages"]] == ["text", "image", "file"]
+    # 执行记录里不放附件内容，只记长度
+    recorded = await run_sql(
+        env.database_url,
+        "SELECT arguments_display::text FROM workspace.ai_tool_executions"
+        " WHERE tool_name = 'im_send' AND status = 'succeeded'",
+    )
+    assert "一切正常" not in recorded and "iVBOR" not in recorded
+    assert "不记录" in recorded and "weekly.md" in recorded
     stored = [m for m in env.fake.messages[conv] if m["sendID"] == a["im_user_id"]]
     assert [m["contentType"] for m in stored] == [101, 102, 105]
     file_msg = _last(env, conv, a["im_user_id"])
@@ -211,6 +219,12 @@ async def test_blocked_types_secrets_and_private_urls(env: ImEnv) -> None:
     key = "-----BEGIN " + "PRIVATE KEY-----\nabc\n"  # 拼起来写，避免仓库扫描误报
     secret = await attempt({"text_content": key, "filename": "notes.txt"})
     assert secret["code"] == "ATTACHMENT_SECRET_BLOCKED"
+    leaked = await run_sql(
+        env.database_url,
+        "SELECT count(*) FROM workspace.ai_tool_executions"
+        " WHERE arguments_display::text LIKE '%PRIVATE KEY%'",
+    )
+    assert leaked == 0  # 被拦下的密钥也不进执行记录
     private = await attempt({"url": "http://127.0.0.1/secret"})
     assert private["code"] == "ATTACHMENT_FETCH_FAILED"
     redirected = await attempt({"url": f"http://{FILE_HOST}/moved"})
