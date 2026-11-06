@@ -87,6 +87,14 @@
 
 V2（禁用发消息工具后自动回复照常）、V3（系统事件进下一轮）由 `tests/e2e/agents_acceptance.py` 场景 2、3、11、20 在 CI 的 agents 任务里实测，结果补在下面。
 
+实测结果（PR 的 CI agents 任务，提交 84f4359，2026-11-06，真实 OpenIM v3.8.3-patch.18 + OpenClaw 2026.9.36 + 打补丁的 openclaw-channel 0.3.3，73 项全部通过）：
+
+| # | 结果 |
+|---|---|
+| 补丁 | 甲、乙的插件都打上补丁，重复运行只核对不改（`plugin_patch_applied` / `plugin_patch_already_applied`）；实例上报的插件版本是 `0.3.3+myworkspace.1`，实例页不再提示重新签发 |
+| V2 | 禁用 `message` 等四个工具后，模型拿到的工具只有 `sessions_yield`、`tool_call`、`tool_describe`、`tool_search`（工作台工具经 Tool Search）；私聊回复（场景 2）、群里 @ 才回复（场景 3）、实例之间私聊被拒（场景 11）都照常 |
+| V3 | 自动回复被每分钟上限拒收（5002）后，下一轮模型的上下文里出现补丁放回的系统事件：`System: [… UTC] [工作台] 你刚才在这个群聊里的回复没有发出（5002）：你在这个群里每分钟的条数已达上限。工作台会在限额恢复后补发这条回复（最多等 2 分钟），不要重复发同样的内容；…`；它没有自己触发一轮，而是进了同一个会话的下一轮；工作台在限额恢复后以甲的身份补发了这条回复（场景 20） |
+
 ### 6.2 终止正在执行的任务（T-0126，2026-11-06）
 
 在锁定镜像 `openclaw/openclaw:2026.9.36`（`70c40e4`）里核对：
@@ -106,3 +114,10 @@ V2（禁用发消息工具后自动回复照常）、V3（系统事件进下一�
 
 真实容器里的 `sessions.list` / `sessions.abort`（乙在一件事上反复调用工具，甲叫停后 `stop-runs.mjs` 中止至少一个会话、模型调用停下）
 由 `tests/e2e/agents_acceptance.py` 场景 22 在 CI 的 agents 任务里实测，结果补在下面。
+
+### 6.3 唤醒（T-0121，2026-11-06）
+
+V4 实测结果（同一次 CI，提交 84f4359）：接入包的 `wakeup.mjs` 在甲的容器里领取管理员建的唤醒，用
+`openclaw agent --session-key openim:group:<群 ID 小写> --message-file … --timeout 600 --json` 跑完一轮并报回 `done`；
+这一轮在群的会话里运行（模型收到的上下文里有群里之前的消息，消息条数 2 → 4），甲按提示词用 `im_send` 在群里发了言（场景 21）。
+会话键写法与 openclaw-channel 的 `openim:group:<gid>` / `openim:<sendID>`（小写）一致。
