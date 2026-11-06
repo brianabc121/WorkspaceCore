@@ -143,6 +143,16 @@ V1、V5、V6 实测结果（PR brianabc121/WorkspaceCore#161 的 CI agents 任�
 | 定时 | `send_at` 在 75 秒后：返回 `scheduled`，到点前会话里没有，到点后 Worker 发出一条 |
 | 断线排队 | 停掉 openim-server 时 `im_send` 返回 `queued`；启动后工作台补发，30 秒后会话里仍只有一条（不重复）；之后甲、乙重新上线 |
 
+Issues 与 README 的实测结果（同一 PR 的 CI agents 任务，提交 9697797，场景 25 全部通过）：
+
+| 项 | 结果 |
+|---|---|
+| README | 项目 README 自动列出成员甲、乙；甲经 `readme_update` 写进展与交接，直接生效；README 的沟通部分自动列出未关闭的 Issue |
+| Issue 唤醒与评论 | 接口约定 Issue 指派给甲（内网模式）→ 工作台排 Issue 唤醒 → `wakeup.mjs` 领到并叫醒甲，甲经真实 OpenClaw 的模型调 `issue_comment` 评论 |
+| 连续评论暂停 | 加上被唤醒时的那条，甲、乙交替评论满 10 条后，第 11 条返回 `ISSUE_PAUSED`；管理员评论后恢复 |
+| 阻塞 Issue | 未关闭的阻塞 Issue 让 `complete_task` 返回 `TASK_BLOCKED`；关闭后甲能完成 |
+| 浏览器验收 | `tests/e2e/readme_issues_browser.cjs` 在 CI 的 compose 任务里 8 项通过（README 角标、页面开 Issue、沟通部分列出与撤下、评论、关闭、手机宽度、viewer 只读） |
+
 **外网模式实例的模型用不了工作台的 MCP 工具（已查明，未修复，见任务 T-0133）**：
 
 - 现象：乙（外网模式）的 OpenClaw 日志 `[security] blocked URL fetch (mcp-http) targetOrigin=http://public.test:18443 reason=Blocked: resolves to private/internal/special-use IP address`，

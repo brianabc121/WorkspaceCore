@@ -2,7 +2,7 @@
 id: T-0132
 title: Gmail 多邮箱按智能体分配：迁移 0041、分配接口、工具只看分配的邮箱、设置页与实例卡片、e2e
 owner: claude
-status: in_progress
+status: done
 priority: P2
 branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web,docs,tests/e2e,CLAUDE.md
@@ -24,7 +24,7 @@ Gmail 支持连接多个邮箱，由管理员决定哪个邮箱分配给哪个�
 - [x] 页面：设置 → 邮件 每个邮箱“分配给智能体”；实例卡片“邮件权限”勾选能用的邮箱；前端测试
 - [x] e2e 场景 23：两个邮箱，按邮箱与按智能体分配，智能体只看到分配给自己的邮箱
 - [x] 文档：MAIL_PLAN 第 10 节、例外七措辞、api-contract、data-dictionary 0041、threat-model、deploy-guide 8.7
-- [ ] CI 全绿（含 agents 场景 23）
+- [x] CI 全绿（含 agents 场景 23）
 
 ## 背景 / 约束 / 参考
 - 人类 2026-11-06 在对话中要求：“这里的谷歌账号可以通过 workspace 平台的 web 端进行设置。接着 gmail 的邮箱需要具备多个邮箱的功能。管理员可以自己授权哪个邮箱分配给哪个智能体。以后改动的时候，需要设置的东西尽量放在 web 端。因为 ssh 终端的设置不适合政策用户操作”
@@ -36,3 +36,4 @@ Gmail 支持连接多个邮箱，由管理员决定哪个邮箱分配给哪个�
 - 2026-11-06 13:14 UTC · claude · 开始任务
 - 2026-11-06 13:14 UTC · claude · 人类在对话中指派（2026-11-06）：多邮箱 + 管理员按智能体分配 + 设置放在网页上。已实现迁移 0041、分配接口与工具过滤、设置页与实例卡片、e2e 场景 23 的两邮箱分配；‘设置尽量放在 web 端’记进 CLAUDE.md。CLAUDE.md 在 paths 里（Claude 专属说明由 claude 维护）。docs/AGENTS.md 例外七只改了一处措辞（‘邮箱的允许智能体访问’→‘管理员把这个邮箱分配给了这个实例’），按人类本次要求，越出 paths 的说明：docs 在 paths 内。
 - 2026-11-06 13:52 UTC · claude · PR #161 的 compose 检查失败在 sprint4_acceptance 的“手动同步排队 202”：13:44:00 整分时 CI 每分钟一次的周期对账正拿着同步锁，手动同步得到 409 SYNC_IN_PROGRESS（接口按契约行为），A10 因此没等到全量同步。main 上同一套验收是绿的。修验收脚本：遇到 SYNC_IN_PROGRESS 等 2 秒重排，最多 60 秒。
+- 2026-11-06 15:00 UTC · claude · status in_progress → done：PR #161 合并（593e27b），9697797 上全部检查通过，agents 场景 23（两个邮箱按邮箱与按智能体分配）通过。真实 Google 账号的人工验收仍等人类（deploy-guide 8.7）。
