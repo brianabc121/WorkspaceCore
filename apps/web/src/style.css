@@ -578,3 +578,6 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .mail-sends .mail-unknown { background: var(--accent-soft); }
 @media (max-width: 1100px) { .mail-layout { grid-template-columns: minmax(0, 1fr); } .mail-labels { grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); } }
 .mail-scope { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; display: grid; gap: 4px; margin: 0; }
+.mail-assign { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; display: grid; gap: 6px; margin: 0; min-width: 0; }
+.mail-assign-list { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.mail-assign .check-field, .mail-scope .check-field { overflow-wrap: anywhere; }

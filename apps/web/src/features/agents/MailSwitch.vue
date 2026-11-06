@@ -5,12 +5,15 @@ import { formatTime } from '../time'
 
 // 实例卡片里的“邮件权限”（T-0130，MAIL_PLAN 第 5 节）：查询邮件默认打开；发送邮件默认关闭，
 // 打开时必须选收件人范围（任何地址，或只限列出的地址 / 域名）。发送直接生效、不审批（例外七）。
-const props = defineProps<{ instance: Schema['AgentInstanceOut']; busy: boolean }>()
+// 能用哪些邮箱（T-0132）：管理员勾选；没分配邮箱时智能体看不到任何邮件。
+const props = defineProps<{ instance: Schema['AgentInstanceOut']; busy: boolean; mailboxes: Schema['MailAccountOut'][] }>()
 const emit = defineEmits<{ save: [body: Omit<Schema['AgentMailPut'], 'version'>] }>()
 const mail = computed(() => props.instance.mail)
 const read = ref(true), send = ref(false), scope = ref<'any' | 'listed'>('listed'), recipients = ref(''), error = ref('')
+const accountIds = ref<string[]>([])
 function reset() {
   read.value = mail.value.read_enabled; send.value = mail.value.send_enabled
+  accountIds.value = mail.value.accounts.map(a => a.id)
   scope.value = mail.value.send_scope ?? 'listed'; recipients.value = mail.value.recipients.join('\n'); error.value = ''
 }
 watch(mail, reset, { immediate: true })
@@ -18,7 +21,8 @@ const list = computed(() => recipients.value.split(/[\n,，;；\s]+/).map(s => s
 const valid = (entry: string) => /^(?:[^@\s]+)?@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(entry)
 const readOnly = computed(() => props.instance.scope !== 'read_write')
 const summary = computed(() => {
-  const parts = [mail.value.read_enabled ? '能查询邮件' : '不能查询邮件']
+  if (!mail.value.accounts.length) return '没有分配邮箱'
+  const parts = [`邮箱 ${mail.value.accounts.map(a => a.email).join('、')}`, mail.value.read_enabled ? '能查询邮件' : '不能查询邮件']
   if (mail.value.send_enabled) parts.push(mail.value.send_scope === 'any' ? '能发给任何地址' : `只能发给 ${mail.value.recipients.join('、')}`)
   else parts.push('不能发信')
   return parts.join('；')
@@ -29,7 +33,7 @@ function save() {
   if (send.value && scope.value === 'listed' && !entries.length) { error.value = '选了“只限下列地址”就至少要填一个地址或域名。'; return }
   const bad = entries.find(e => !valid(e))
   if (scope.value === 'listed' && bad) { error.value = `不是有效的地址或域名：${bad}`; return }
-  emit('save', { read_enabled: read.value, send_enabled: send.value, send_scope: scope.value, recipients: scope.value === 'listed' ? entries : [] })
+  emit('save', { read_enabled: read.value, send_enabled: send.value, send_scope: scope.value, recipients: scope.value === 'listed' ? entries : [], account_ids: accountIds.value })
 }
 </script>
 
@@ -37,6 +41,11 @@ function save() {
   <section class="agent-section" aria-label="邮件权限">
     <h3>邮件权限：{{ summary }}</h3>
     <form class="mail-form" @submit.prevent="save">
+      <fieldset class="mail-scope">
+        <legend>能用的邮箱</legend>
+        <p v-if="!mailboxes.length" class="form-help">还没有连接邮箱：在“设置 → 邮件”里连接。</p>
+        <label v-for="box in mailboxes" :key="box.id" class="check-field"><input v-model="accountIds" type="checkbox" :value="box.id" /> {{ box.email }}<template v-if="!box.can_send">（只能查收）</template></label>
+      </fieldset>
       <label class="check-field"><input v-model="read" type="checkbox" /> 允许查询邮件（mail_accounts / mail_search / mail_get / mail_thread）</label>
       <label class="check-field"><input v-model="send" type="checkbox" :disabled="readOnly && !mail.send_enabled" /> 允许发送邮件（mail_send，直接发出、不审批）</label>
       <template v-if="send">
@@ -50,6 +59,6 @@ function save() {
       <p v-if="error" role="alert" class="feedback">{{ error }}</p>
       <div class="form-actions"><button type="submit" class="secondary-button" :disabled="busy">保存邮件权限</button></div>
     </form>
-    <p class="form-help">只能用“设置 → 邮件”里允许智能体访问的邮箱，拿不到 Google 令牌，也不能删除或修改邮件。发信过密钥检查、每小时最多 10 封、每天 50 封，每封都写执行记录并通知管理员。<template v-if="readOnly"> 这个实例的工具权限是只读，打不开发送。</template><template v-if="mail.send_enabled && mail.send_at"> 发送权限打开于 {{ formatTime(mail.send_at) }}。</template></p>
+    <p class="form-help">只能用上面勾选的邮箱（也可以在“设置 → 邮件”里按邮箱分配），拿不到 Google 令牌，也不能删除或修改邮件。发信过密钥检查、每小时最多 10 封、每天 50 封，每封都写执行记录并通知管理员。<template v-if="readOnly"> 这个实例的工具权限是只读，打不开发送。</template><template v-if="mail.send_enabled && mail.send_at"> 发送权限打开于 {{ formatTime(mail.send_at) }}。</template></p>
   </section>
 </template>

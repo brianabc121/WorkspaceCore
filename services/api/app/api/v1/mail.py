@@ -15,6 +15,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query, Request, Response, Security, status
 from fastapi.responses import RedirectResponse
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -30,6 +31,7 @@ from app.api.deps import (
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain import mail as mail_domain
+from app.domain import mail_agents
 from app.domain.audit import AuditTrail
 from app.domain.auth import AuthContext
 from app.domain.connectors import ConnectorRuntime
@@ -37,12 +39,15 @@ from app.domain.mail import MailError, MailService, Sender
 from app.domain.mail_format import ParsedMessage
 from app.domain.policy import WorkspaceAccess, require_role
 from app.integrations import gmail
-from app.models import MailAccount, MailSend
+from app.models import AgentInstance, MailAccount, MailSend
 from app.schemas.common import error_responses
 from app.schemas.mail import (
+    MailAccountAgentsPut,
     MailAccountList,
     MailAccountOut,
     MailAccountPatch,
+    MailAgentList,
+    MailAgentRef,
     MailAttachmentOut,
     MailConnectIn,
     MailConnectOut,
@@ -85,7 +90,7 @@ def _no_store(response: Response) -> None:
     response.headers["Cache-Control"] = NO_STORE
 
 
-def account_out(account: MailAccount) -> MailAccountOut:
+def account_out(account: MailAccount, agents: list[MailAgentRef]) -> MailAccountOut:
     return MailAccountOut(
         id=account.id,
         email=account.email,
@@ -93,7 +98,7 @@ def account_out(account: MailAccount) -> MailAccountOut:
         status=account.status,
         can_read=gmail.SCOPE_READ in (account.scopes or []),
         can_send=gmail.SCOPE_SEND in (account.scopes or []),
-        agents_allowed=account.agents_allowed,
+        agents=agents,
         agent_signature=account.agent_signature,
         last_error=account.last_error,
         connected_at=account.connected_at,
@@ -306,15 +311,20 @@ async def list_mail_accounts(
     access: Admin, service: Service, response: Response
 ) -> MailAccountList:
     _no_store(response)
-    return MailAccountList(
-        items=[account_out(a) for a in await service.accounts(access.workspace.id)]
-    )
+    accounts = await service.accounts(access.workspace.id)
+    agents = await mail_agents.agents_by_account(service.db, [a.id for a in accounts])
+    return MailAccountList(items=[account_out(a, agents[a.id]) for a in accounts])
+
+
+async def _account_out(service: MailService, account: MailAccount) -> MailAccountOut:
+    agents = await mail_agents.agents_by_account(service.db, [account.id])
+    return account_out(account, agents[account.id])
 
 
 @router.patch(
     "/mail/accounts/{account_id}",
     summary="改邮箱的智能体设置（admin，乐观并发）",
-    description="agents_allowed：允许智能体访问这个邮箱；agent_signature：智能体发的信末尾加署名行。",
+    description="agent_signature：智能体发的信末尾加署名行。分配给哪些智能体见 PUT …/agents。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422),
 )
@@ -332,9 +342,6 @@ async def patch_mail_account(
     if body.version != account.version:
         raise MailError(409, "VERSION_CONFLICT", "邮箱设置已被别人修改，请刷新后再试")
     changes: dict[str, bool] = {}
-    if body.agents_allowed is not None and body.agents_allowed != account.agents_allowed:
-        account.agents_allowed = body.agents_allowed
-        changes["agents_allowed"] = body.agents_allowed
     if body.agent_signature is not None and body.agent_signature != account.agent_signature:
         account.agent_signature = body.agent_signature
         changes["agent_signature"] = body.agent_signature
@@ -350,7 +357,68 @@ async def patch_mail_account(
             client_ip=client_ip(request, service.settings),
         )
         await service.db.commit()
-    return account_out(account)
+    return await _account_out(service, account)
+
+
+@router.get(
+    "/mail/agents",
+    summary="可以分配邮箱的智能体实例（admin）",
+    description="只返回 ID 与名字，给 设置 → 邮件 的“分配给智能体”用（实例列表只有 owner 能看）。",
+    responses=error_responses(401, 403),
+)
+async def list_mail_agents(access: Admin, service: Service, response: Response) -> MailAgentList:
+    _no_store(response)
+    rows = await service.db.execute(
+        select(AgentInstance.id, AgentInstance.name)
+        .where(AgentInstance.workspace_id == access.workspace.id)
+        .order_by(AgentInstance.name, AgentInstance.id)
+    )
+    return MailAgentList(items=[MailAgentRef(id=i, name=n) for i, n in rows.all()])
+
+
+@router.put(
+    "/mail/accounts/{account_id}/agents",
+    summary="把邮箱分配给智能体（admin，整组替换，乐观并发）",
+    description=(
+        "instance_ids：能用这个邮箱的智能体实例。没分配的智能体看不到这个邮箱；"
+        "能不能查、能不能发仍按每个实例的邮件开关。变化的实例 version 也加 1。"
+    ),
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422),
+)
+async def put_mail_account_agents(
+    request: Request,
+    account_id: UUID,
+    access: Admin,
+    context: Context,
+    service: Service,
+    body: MailAccountAgentsPut,
+    response: Response,
+) -> MailAccountOut:
+    _no_store(response)
+    account = await service.account(access.workspace.id, account_id)
+    if body.version != account.version:
+        raise MailError(409, "VERSION_CONFLICT", "邮箱设置已被别人修改，请刷新后再试")
+    added, removed = await mail_agents.set_instances_for_account(
+        service.db, account, body.instance_ids, user_id=context.user.id
+    )
+    if added or removed:
+        account.version += 1
+        await AuditTrail(service.db, service.settings).record(
+            "mail.account_agents_updated",
+            workspace_ids=[access.workspace.id],
+            actor_id=context.user.id,
+            resource_type="mail_account",
+            resource_id=account.id,
+            metadata={
+                "email": account.email,
+                "added": [str(i.id) for i in added],
+                "removed": [str(i.id) for i in removed],
+            },
+            client_ip=client_ip(request, service.settings),
+        )
+        await service.db.commit()
+    return await _account_out(service, account)
 
 
 @router.delete(
@@ -358,7 +426,7 @@ async def patch_mail_account(
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     summary="断开邮箱（admin）",
-    description="尽力撤销 Google 授权并删除保存的令牌；发件记录保留。",
+    description="尽力撤销 Google 授权并删除保存的令牌，取消它对智能体的全部分配；发件记录保留。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 422),
 )
@@ -367,13 +435,15 @@ async def disconnect_mail_account(
 ) -> None:
     account = await service.account(access.workspace.id, account_id)
     await service.disconnect(account)
+    # 断开即取消全部分配：以后重新连接同一个邮箱，要重新分配给智能体
+    unassigned = await mail_agents.clear_account(service.db, account.id)
     await AuditTrail(service.db, service.settings).record(
         "mail.disconnected",
         workspace_ids=[access.workspace.id],
         actor_id=context.user.id,
         resource_type="mail_account",
         resource_id=account.id,
-        metadata={"email": account.email},
+        metadata={"email": account.email, "unassigned_agents": unassigned},
         client_ip=client_ip(request, service.settings),
     )
     await service.db.commit()

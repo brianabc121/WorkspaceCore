@@ -1550,7 +1550,8 @@ _MAIL_READ: list[ToolSpec] = [
         "read",
         MailAccountsInput,
         MailAccountsOutput,
-        "工作台连接的、允许智能体访问的 Gmail 邮箱，以及你能不能发信、能发给谁",
+        "管理员分配给你的 Gmail 邮箱（可能有多个，其他邮件工具用 account_id 指定），"
+        "以及你能不能发信、能发给谁",
     ),
     _spec(
         "mail_search",

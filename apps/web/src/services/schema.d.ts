@@ -2462,16 +2462,36 @@ export interface paths {
         post?: never;
         /**
          * 断开邮箱（admin）
-         * @description 尽力撤销 Google 授权并删除保存的令牌；发件记录保留。
+         * @description 尽力撤销 Google 授权并删除保存的令牌，取消它对智能体的全部分配；发件记录保留。
          */
         delete: operations["disconnect_mail_account"];
         options?: never;
         head?: never;
         /**
          * 改邮箱的智能体设置（admin，乐观并发）
-         * @description agents_allowed：允许智能体访问这个邮箱；agent_signature：智能体发的信末尾加署名行。
+         * @description agent_signature：智能体发的信末尾加署名行。分配给哪些智能体见 PUT …/agents。
          */
         patch: operations["patch_mail_account"];
+        trace?: never;
+    };
+    "/api/v1/mail/accounts/{account_id}/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 把邮箱分配给智能体（admin，整组替换，乐观并发）
+         * @description instance_ids：能用这个邮箱的智能体实例。没分配的智能体看不到这个邮箱；能不能查、能不能发仍按每个实例的邮件开关。变化的实例 version 也加 1。
+         */
+        put: operations["put_mail_account_agents"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/mail/accounts/{account_id}/labels": {
@@ -2583,6 +2603,26 @@ export interface paths {
          * @description 按时间顺序，最多最近 20 封。
          */
         get: operations["get_mail_thread"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mail/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 可以分配邮箱的智能体实例（admin）
+         * @description 只返回 ID 与名字，给 设置 → 邮件 的“分配给智能体”用（实例列表只有 owner 能看）。
+         */
+        get: operations["list_mail_agents"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3674,11 +3714,36 @@ export interface components {
             /** Writes Enabled */
             writes_enabled: boolean;
         };
+        /** AgentMailAccountRef */
+        AgentMailAccountRef: {
+            /**
+             * Can Send
+             * @description 授权里有 gmail.send
+             */
+            can_send: boolean;
+            /** Email */
+            email: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "needs_reconnect" | "disconnected";
+        };
         /**
          * AgentMailOut
-         * @description 实例的邮件开关（T-0129）。
+         * @description 实例的邮件开关（T-0129）与分配给它的邮箱（T-0132）。
          */
         AgentMailOut: {
+            /**
+             * Accounts
+             * @description 分配给这个实例的邮箱；邮件工具只看得到这些邮箱
+             */
+            accounts: components["schemas"]["AgentMailAccountRef"][];
             /** Read Enabled */
             read_enabled: boolean;
             /** Recipients */
@@ -3696,6 +3761,11 @@ export interface components {
         };
         /** AgentMailPut */
         AgentMailPut: {
+            /**
+             * Account Ids
+             * @description 分配给这个实例的邮箱（整组替换）；不填表示不变
+             */
+            account_ids?: string[] | null;
             /** Read Enabled */
             read_enabled: boolean;
             /**
@@ -7279,6 +7349,19 @@ export interface components {
              */
             password: string;
         };
+        /**
+         * MailAccountAgentsPut
+         * @description 把邮箱分配给哪些智能体实例（整组替换，T-0132）。
+         */
+        MailAccountAgentsPut: {
+            /** Instance Ids */
+            instance_ids: string[];
+            /**
+             * Version
+             * @description 邮箱的 version
+             */
+            version: number;
+        };
         /** MailAccountList */
         MailAccountList: {
             /** Items */
@@ -7292,10 +7375,10 @@ export interface components {
              */
             agent_signature: boolean;
             /**
-             * Agents Allowed
-             * @description 允许智能体访问这个邮箱
+             * Agents
+             * @description 分配了这个邮箱的智能体实例（T-0132）；没分配的智能体看不到这个邮箱
              */
-            agents_allowed: boolean;
+            agents: components["schemas"]["MailAgentRef"][];
             /**
              * Can Read
              * @description 授权里有 gmail.readonly
@@ -7334,10 +7417,26 @@ export interface components {
         MailAccountPatch: {
             /** Agent Signature */
             agent_signature?: boolean | null;
-            /** Agents Allowed */
-            agents_allowed?: boolean | null;
             /** Version */
             version: number;
+        };
+        /**
+         * MailAgentList
+         * @description 可以分配邮箱的智能体实例（admin 在 设置 → 邮件 里勾选用；只有 ID 与名字）。
+         */
+        MailAgentList: {
+            /** Items */
+            items: components["schemas"]["MailAgentRef"][];
+        };
+        /** MailAgentRef */
+        MailAgentRef: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
         };
         /** MailAttachmentOut */
         MailAttachmentOut: {
@@ -21958,6 +22057,82 @@ export interface operations {
             };
         };
     };
+    put_mail_account_agents: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailAccountAgentsPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailAccountOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_mail_labels: {
         parameters: {
             query?: never;
@@ -22557,6 +22732,56 @@ export interface operations {
             };
             /** @description 写操作结果未知（RESULT_UNKNOWN）：用同一个 Idempotency-Key 重发以查询结果 */
             504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_mail_agents: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailAgentList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

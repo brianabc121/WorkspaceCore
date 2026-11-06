@@ -1,8 +1,9 @@
 """Gmail 邮件（T-0128，docs/v2/MAIL_PLAN.md）。
 
 - mail_oauth_clients：每个工作空间一条，管理员填的 Google OAuth 客户端（client_secret 加密）。
-- mail_accounts：连接的 Gmail 邮箱：实际授权的范围、加密的 refresh token、状态、是否允许智能体访问、
+- mail_accounts：连接的 Gmail 邮箱：实际授权的范围、加密的 refresh token、状态、
   智能体发信是否加署名行。access token 不进数据库（加密后放 Redis，按 expires_in 过期）。
+- agent_mail_accounts：哪个邮箱分配给哪个智能体实例（T-0132）；智能体只看得到分配给它的邮箱。
 - mail_sends：发件记录（人或智能体）：收件人、主题、Gmail 返回的消息 / 会话 ID、状态；**不存正文**。
 """
 
@@ -14,6 +15,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Text,
@@ -65,6 +67,7 @@ class MailAccount(Base):
     __tablename__ = "mail_accounts"
     __table_args__ = (
         UniqueConstraint("workspace_id", "email"),
+        UniqueConstraint("workspace_id", "id"),
         CheckConstraint(f"status IN {ACCOUNT_STATUSES}", name="status"),
     )
 
@@ -76,7 +79,6 @@ class MailAccount(Base):
     refresh_token_ref: Mapped[str] = mapped_column(Text, server_default=text("''"))
     status: Mapped[str] = mapped_column(Text, server_default=text("'active'"))
     last_error: Mapped[str | None] = mapped_column(Text)
-    agents_allowed: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     agent_signature: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     connected_by: Mapped[uuid.UUID | None] = _user()
     connected_at: Mapped[datetime] = mapped_column(
@@ -87,6 +89,31 @@ class MailAccount(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class AgentMailAccount(Base):
+    """邮箱分配给智能体实例（T-0132）。复合外键保证两边属于同一个工作空间。"""
+
+    __tablename__ = "agent_mail_accounts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "instance_id"],
+            ["workspace.agent_instances.workspace_id", "workspace.agent_instances.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "account_id"],
+            ["workspace.mail_accounts.workspace_id", "workspace.mail_accounts.id"],
+            ondelete="CASCADE",
+        ),
+        Index("ix_agent_mail_accounts_account", "account_id"),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    instance_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    assigned_by: Mapped[uuid.UUID | None] = _user()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class MailSend(Base):

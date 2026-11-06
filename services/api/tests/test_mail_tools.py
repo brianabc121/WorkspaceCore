@@ -5,7 +5,8 @@
 - 开关：查询默认打开、发送默认关闭（mail_send 不列出、调用 FORBIDDEN_CAPABILITY）；
   管理员设置（乐观并发、收件人范围校验、只读实例不能打开发送、审计、通知）；关掉查询后读工具消失；
 - 读：mail_accounts / mail_search / mail_get / mail_thread，邮件内容都在 untrusted 里；
-  邮箱“不允许智能体访问”时看不到；
+- 多邮箱（T-0132）：邮箱按智能体分配（设置 → 邮件 与实例卡片两处、两边 version、审计），
+  智能体只看到分配给它的邮箱；多个时要指定 account_id；断开邮箱取消分配；
 - 发：收件人范围、署名行、执行记录不存正文、审计与通知、client_key 防重复、
   每小时限额、结果未知不重发并通知管理员、密钥拦截。
 """
@@ -55,22 +56,50 @@ async def env(
         yield env
 
 
-async def connect(env: ImEnv, google: FakeGoogle) -> dict[str, Any]:
-    saved = await env.client.put(
-        "/api/v1/mail/settings",
-        json={"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET},
-        headers=env.headers(write=True),
-    )
-    assert saved.status_code == 200, saved.text
+async def connect(env: ImEnv, google: FakeGoogle, email: str = MAILBOX) -> dict[str, Any]:
+    saved = await env.client.get("/api/v1/mail/settings", headers=env.headers())
+    if not saved.json()["configured"]:
+        put = await env.client.put(
+            "/api/v1/mail/settings",
+            json={"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET},
+            headers=env.headers(write=True),
+        )
+        assert put.status_code == 200, put.text
     started = await env.client.post(
         "/api/v1/mail/connect", json={}, headers=env.headers(write=True)
     )
-    query = google.consent(started.json()["authorize_url"], email=MAILBOX)
+    query = google.consent(started.json()["authorize_url"], email=email)
     done = await env.client.get("/api/v1/mail/oauth/callback", params=query)
     assert done.headers["location"] == "/settings/mail?mail=connected", done.text
+    return await mailbox(env, email)
+
+
+async def mailbox(env: ImEnv, email: str = MAILBOX) -> dict[str, Any]:
     accounts = await env.client.get("/api/v1/mail/accounts", headers=env.headers())
-    account: dict[str, Any] = accounts.json()["items"][0]
+    account: dict[str, Any] = next(a for a in accounts.json()["items"] if a["email"] == email)
     return account
+
+
+async def assign(
+    env: ImEnv, instance_ids: list[str], email: str = MAILBOX, expect: int = 200
+) -> Any:
+    """设置 → 邮件：把邮箱分配给这些实例（整组替换）。"""
+    box = await mailbox(env, email)
+    response = await env.client.put(
+        f"/api/v1/mail/accounts/{box['id']}/agents",
+        json={"version": box["version"], "instance_ids": instance_ids},
+        headers=env.headers(write=True),
+    )
+    assert response.status_code == expect, response.text
+    return response.json()
+
+
+async def ready(env: ImEnv, name: str) -> tuple[dict[str, Any], str]:
+    """登记好的智能体，并把默认邮箱分配给它。"""
+    instance, token = await _ready_agent(env, name)
+    box = await mailbox(env)
+    await assign(env, [a["id"] for a in box["agents"]] + [instance["id"]])
+    return instance, token
 
 
 async def set_mail(env: ImEnv, instance_id: str, expect: int = 200, **body: Any) -> Any:
@@ -114,6 +143,11 @@ async def test_defaults_and_switches(env: ImEnv, google: FakeGoogle) -> None:
     a, token = await _ready_agent(env, "甲")
     mail = (await env.instance(a["id"]))["mail"]
     assert mail["read_enabled"] is True and mail["send_enabled"] is False
+    # 新实例默认没有分配邮箱：读工具列出来，但看不到邮箱
+    assert mail["accounts"] == []
+    assert ok(await call(env, token, "mail_accounts", {}))["items"] == []
+    unassigned = tool_error(await call(env, token, "mail_search", {}))
+    assert unassigned["code"] == "NOT_FOUND" and "还没有给你分配" in unassigned["message"]
     names = await tool_names(env, token)
     assert names >= READ_TOOLS and "mail_send" not in names
     refused = await call(
@@ -183,7 +217,7 @@ async def test_defaults_and_switches(env: ImEnv, google: FakeGoogle) -> None:
 
 
 async def test_read_tools_keep_mail_untrusted(env: ImEnv, google: FakeGoogle) -> None:
-    _, token = await _ready_agent(env, "甲")
+    _, token = await ready(env, "甲")
     first = google.add_message(
         MAILBOX,
         sender="Mallory <m@evil.example>",
@@ -217,15 +251,9 @@ async def test_read_tools_keep_mail_untrusted(env: ImEnv, google: FakeGoogle) ->
     records = await executions(env, "mail_search")
     assert records[0]["status"] == "succeeded"
 
-    # 管理员关掉“允许智能体访问”：智能体看不到这个邮箱
-    listed = await env.client.get("/api/v1/mail/accounts", headers=env.headers())
-    box = listed.json()["items"][0]
-    patched = await env.client.patch(
-        f"/api/v1/mail/accounts/{box['id']}",
-        json={"version": box["version"], "agents_allowed": False},
-        headers=env.headers(write=True),
-    )
-    assert patched.status_code == 200
+    # 管理员取消分配：智能体看不到这个邮箱
+    box = await assign(env, [])
+    assert box["agents"] == []
     assert ok(await call(env, token, "mail_accounts", {}))["items"] == []
     hidden = await call(env, token, "mail_search", {})
     assert tool_error(hidden)["code"] == "NOT_FOUND"
@@ -235,11 +263,93 @@ async def test_read_tools_keep_mail_untrusted(env: ImEnv, google: FakeGoogle) ->
     assert tool_error(explicit)["code"] == "NOT_FOUND"
 
 
+async def test_mailboxes_are_assigned_per_agent(env: ImEnv, google: FakeGoogle) -> None:
+    """T-0132：多个邮箱，管理员决定哪个邮箱给哪个智能体；两处修改互相用 version 防覆盖。"""
+    second = "team.mail@gmail.com"
+    await connect(env, google, second)
+    a, token_a = await _ready_agent(env, "甲")
+    b, token_b = await _ready_agent(env, "乙")
+    first_box, second_box = await mailbox(env), await mailbox(env, second)
+    hello = google.add_message(second, subject="团队邮箱里的信")
+    choices = await env.client.get("/api/v1/mail/agents", headers=env.headers())
+    assert {x["name"] for x in choices.json()["items"]} == {"甲", "乙"}
+
+    # 设置 → 邮件：第一个邮箱给甲和乙；旧 version 409，不存在的实例 422
+    stale = await env.client.put(
+        f"/api/v1/mail/accounts/{first_box['id']}/agents",
+        json={"version": first_box["version"] + 1, "instance_ids": [a["id"]]},
+        headers=env.headers(write=True),
+    )
+    assert stale.status_code == 409
+    await assign(env, [a["id"], "00000000-0000-0000-0000-000000000000"], expect=422)
+    before = (await env.instance(a["id"]))["version"]
+    shared = await assign(env, [a["id"], b["id"]])
+    assert {x["name"] for x in shared["agents"]} == {"甲", "乙"}
+    assert shared["version"] == first_box["version"] + 1
+    assert (await env.instance(a["id"]))["version"] == before + 1  # 实例卡片要刷新
+
+    # 实例卡片：乙改成只用第二个邮箱（第一个邮箱的 version 也加 1）
+    moved = await set_mail(env, b["id"], account_ids=[second_box["id"]])
+    assert [x["email"] for x in moved["accounts"]] == [second]
+    assert [x["name"] for x in (await mailbox(env))["agents"]] == ["甲"]
+    assert (await mailbox(env))["version"] == shared["version"] + 1
+    assert [x["name"] for x in (await mailbox(env, second))["agents"]] == ["乙"]
+
+    # 智能体只看到分配给自己的邮箱
+    seen_a = ok(await call(env, token_a, "mail_accounts", {}))["items"]
+    assert [x["email"] for x in seen_a] == [MAILBOX]
+    seen_b = ok(await call(env, token_b, "mail_accounts", {}))["items"]
+    assert [x["email"] for x in seen_b] == [second]
+    other = await call(
+        env, token_a, "mail_get", {"account_id": second_box["id"], "message_id": hello["id"]}
+    )
+    assert tool_error(other)["code"] == "NOT_FOUND"
+    got = ok(await call(env, token_b, "mail_get", {"message_id": hello["id"]}))
+    assert got["message"]["untrusted"]["subject"] == "团队邮箱里的信"
+
+    # 甲有两个邮箱：不指定 account_id 时要求指定
+    both = await set_mail(env, a["id"], account_ids=[first_box["id"], second_box["id"]])
+    assert [x["email"] for x in both["accounts"]] == [MAILBOX, second]
+    ambiguous = tool_error(await call(env, token_a, "mail_search", {}))
+    assert ambiguous["code"] == "VALIDATION_FAILED" and "account_id" in ambiguous["message"]
+    found = ok(await call(env, token_a, "mail_search", {"account_id": second_box["id"]}))
+    assert [x["message_id"] for x in found["items"]] == [hello["id"]]
+
+    audits = await run_sql(
+        env.database_url,
+        "SELECT count(*) FROM workspace.audit_logs WHERE action = 'mail.account_agents_updated'",
+    )
+    assert audits == 1
+    added = await run_sql(
+        env.database_url,
+        "SELECT string_agg(metadata_redacted_json->>'accounts_added', ';' ORDER BY created_at)"
+        " FROM workspace.audit_logs WHERE action = 'agents.instance.mail_updated'",
+    )
+    assert added == f'["{second}"];["{second}"]'
+
+    # 断开第二个邮箱：分配全部取消；再分配已断开的邮箱 422
+    gone = await env.client.delete(
+        f"/api/v1/mail/accounts/{second_box['id']}", headers=env.headers(write=True)
+    )
+    assert gone.status_code == 204
+    assert (await env.instance(b["id"]))["mail"]["accounts"] == []
+    assert [x["email"] for x in ok(await call(env, token_a, "mail_accounts", {}))["items"]] == [
+        MAILBOX
+    ]
+    await set_mail(env, b["id"], 422, account_ids=[second_box["id"]])
+    left = await run_sql(
+        env.database_url,
+        "SELECT count(*) FROM workspace.agent_mail_accounts WHERE account_id = $1",
+        second_box["id"],
+    )
+    assert left == 0
+
+
 # ---------------------------------------------------------------- 发
 
 
 async def test_send_scope_signature_records_and_replay(env: ImEnv, google: FakeGoogle) -> None:
-    a, token = await _ready_agent(env, "甲")
+    a, token = await ready(env, "甲")
     await set_mail(
         env, a["id"], send_enabled=True, send_scope="listed", recipients=["@partner.com"]
     )
@@ -316,7 +426,7 @@ async def test_send_scope_signature_records_and_replay(env: ImEnv, google: FakeG
 
 
 async def test_reply_rate_limit_and_unknown(env: ImEnv, google: FakeGoogle) -> None:
-    a, token = await _ready_agent(env, "甲")
+    a, token = await ready(env, "甲")
     await set_mail(env, a["id"], send_enabled=True, send_scope="any")
     box = google.mailboxes[MAILBOX]
     original = google.add_message(
@@ -370,7 +480,7 @@ async def test_concurrent_client_key_returns_the_first_send(
     env: ImEnv, google: FakeGoogle, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """同一个 client_key 并发重试：第二个请求写记录时撞上唯一索引，返回第一次的结果，不重复发。"""
-    a, token = await _ready_agent(env, "甲")
+    a, token = await ready(env, "甲")
     await set_mail(env, a["id"], send_enabled=True, send_scope="any")
     args = {"to": ["a@example.com"], "subject": "只发一次", "body": "x", "client_key": "same-key"}
     first = ok(await send(env, token, **args))

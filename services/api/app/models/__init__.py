@@ -70,7 +70,7 @@ from app.models.knowledge_base import (
     KnowledgeSpace,
     ProjectAgent,
 )
-from app.models.mail import MailAccount, MailOAuthClient, MailSend
+from app.models.mail import AgentMailAccount, MailAccount, MailOAuthClient, MailSend
 from app.models.notification import Notification
 from app.models.search import SearchDocument
 from app.models.task import Project, Task
@@ -86,6 +86,7 @@ __all__ = [
     "AgentImOutbox",
     "AgentImRejection",
     "AgentInstance",
+    "AgentMailAccount",
     "AgentOpsAction",
     "AgentRunStop",
     "AgentSecret",

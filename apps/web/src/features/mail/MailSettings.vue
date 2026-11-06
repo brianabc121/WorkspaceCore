@@ -3,18 +3,20 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { formatTime } from '../time'
-import { CONNECT_RESULTS, mailError, useMailAccounts, useMailActions, useMailSettings, type MailAccount } from './api'
+import { CONNECT_RESULTS, mailError, useMailAccounts, useMailActions, useMailAgents, useMailSettings, type MailAccount } from './api'
+import MailAssign from './MailAssign.vue'
 
-// 设置 → 邮件（T-0130，MAIL_PLAN 第 6 节）：Google OAuth 客户端、连接 / 断开 Gmail 邮箱、
-// 邮箱的“允许智能体访问”与“智能体发信加署名”。授权回调跳回这里，结果在 ?mail=…。
+// 设置 → 邮件（T-0130，MAIL_PLAN 第 6 节）：Google OAuth 客户端、连接 / 断开 Gmail 邮箱（可以连多个）、
+// 每个邮箱分配给哪些智能体（T-0132）与“智能体发信加署名”。授权回调跳回这里，结果在 ?mail=…。
 const auth = useAuthStore(), scope = auth.workspaceId!
 const route = useRoute(), router = useRouter()
-const settings = useMailSettings(scope), accounts = useMailAccounts(scope), actions = useMailActions(scope)
+const settings = useMailSettings(scope), accounts = useMailAccounts(scope), agents = useMailAgents(scope), actions = useMailActions(scope)
 const clientId = ref(''), clientSecret = ref(''), loginHint = ref('')
 const busy = ref(false), error = ref(''), notice = ref(''), copied = ref(false)
 const result = ref(typeof route.query.mail === 'string' ? route.query.mail : '')
 const resultText = computed(() => (result.value ? CONNECT_RESULTS[result.value] ?? '连接没有完成，请重试。' : ''))
 const items = computed(() => accounts.data.value?.items ?? [])
+const agentItems = computed(() => agents.data.value?.items ?? [])
 watch(() => settings.data.value, (value) => { if (value && !clientId.value) clientId.value = value.client_id ?? '' }, { immediate: true })
 if (result.value) void router.replace({ query: { ...route.query, mail: undefined } })
 
@@ -40,10 +42,14 @@ async function copyRedirect() {
   if (!uri) return
   try { await navigator.clipboard.writeText(uri); copied.value = true; setTimeout(() => { copied.value = false }, 2000) } catch { error.value = '复制失败，请手动选中复制。' }
 }
-function toggle(account: MailAccount, field: 'agents_allowed' | 'agent_signature') {
-  const value = !account[field]
-  if (field === 'agents_allowed' && value && !window.confirm(`允许智能体访问 ${account.email}？查询邮件按每个实例的开关（默认打开），发信还要单独给实例打开。`)) return
-  void run(() => actions.patch(account, { [field]: value }), '邮箱设置已保存')
+function toggleSignature(account: MailAccount) {
+  void run(() => actions.patch(account, { agent_signature: !account.agent_signature }), '邮箱设置已保存')
+}
+function assign(account: MailAccount, instanceIds: string[]) {
+  const before = new Set(account.agents.map(a => a.id))
+  const added = agentItems.value.filter(a => instanceIds.includes(a.id) && !before.has(a.id)).map(a => a.name)
+  if (added.length && !window.confirm(`把 ${account.email} 分配给 ${added.join('、')}？它们能查这个邮箱的邮件（每个实例还有自己的查询开关）；发信还要在“OpenClaw 实例”页单独给实例打开。`)) return
+  void run(() => actions.assign(account, instanceIds), '邮箱分配已保存')
 }
 function disconnect(account: MailAccount) {
   if (!window.confirm(`断开 ${account.email}？会撤销 Google 授权并删除保存的令牌；发件记录保留。`)) return
@@ -72,10 +78,10 @@ const STATUS: Record<MailAccount['status'], string> = { active: '正常', needs_
   </section>
   <section class="panel form-panel" aria-label="Gmail 邮箱">
     <div class="section-heading"><h2>Gmail 邮箱</h2></div>
-    <p class="form-help">连接时会打开 Google 授权页：请勾选“查看您的电子邮件和设置”（查收）和“代表您发送电子邮件”（发信）。邮件内容不保存在工作台，每次实时从 Gmail 读取。</p>
+    <p class="form-help">可以连接多个 Gmail 邮箱：每次连接都会打开 Google 授权页并让你选账号，请勾选“查看您的电子邮件和设置”（查收）和“代表您发送电子邮件”（发信）。邮件内容不保存在工作台，每次实时从 Gmail 读取。新连接的邮箱默认不分配给任何智能体。</p>
     <form v-if="settings.data.value?.configured" class="mail-form mail-connect" @submit.prevent="connect">
       <label class="form-field"><span>要连接的邮箱（可不填）</span><input v-model="loginHint" type="email" autocomplete="email" placeholder="name@gmail.com" /></label>
-      <div class="form-actions"><button type="submit" class="primary-button" :disabled="busy">连接 Gmail 邮箱</button></div>
+      <div class="form-actions"><button type="submit" class="primary-button" :disabled="busy">{{ items.length ? '再连接一个 Gmail 邮箱' : '连接 Gmail 邮箱' }}</button></div>
     </form>
     <p v-else-if="settings.data.value" class="empty-state">先保存上面的 OAuth 客户端，再连接邮箱。</p>
     <p v-if="accounts.isPending.value" role="status">正在加载邮箱…</p>
@@ -89,11 +95,11 @@ const STATUS: Record<MailAccount['status'], string> = { active: '正常', needs_
         </div>
         <p v-if="account.status === 'needs_reconnect'" class="feedback" role="note">Google 授权已失效（{{ account.last_error ?? '已撤销或过期' }}）：点“连接 Gmail 邮箱”用同一个邮箱重新授权。</p>
         <p class="form-help">连接于 {{ formatTime(account.connected_at) }}。</p>
+        <MailAssign :account="account" :agents="agentItems" :busy="busy" @save="assign(account, $event)" />
         <div class="form-actions">
-          <button type="button" class="secondary-button" :disabled="busy" @click="toggle(account, 'agents_allowed')">{{ account.agents_allowed ? '不允许智能体访问' : '允许智能体访问' }}</button>
-          <button type="button" class="secondary-button" :disabled="busy" @click="toggle(account, 'agent_signature')">{{ account.agent_signature ? '智能体发信不加署名' : '智能体发信加署名' }}</button>
+          <button type="button" class="secondary-button" :disabled="busy" @click="toggleSignature(account)">{{ account.agent_signature ? '智能体发信不加署名' : '智能体发信加署名' }}</button>
         </div>
-        <p class="form-help">智能体访问：{{ account.agents_allowed ? '允许（每个实例还有自己的查询、发送开关，在“OpenClaw 实例”页设置）' : '不允许：智能体看不到这个邮箱' }}；智能体发的信{{ account.agent_signature ? '末尾加一行“由工作台智能体「名字」发送”' : '不加署名' }}。</p>
+        <p class="form-help">智能体发的信{{ account.agent_signature ? '末尾加一行“由工作台智能体「名字」发送”' : '不加署名' }}。每个智能体能不能查、能不能发，在“OpenClaw 实例”页的“邮件权限”里设置。</p>
       </li>
     </ul>
   </section>

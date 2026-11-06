@@ -1054,9 +1054,28 @@ async def run(
 
 
 def _record_args(arguments: dict[str, Any]) -> dict[str, Any]:
-    """执行记录里不放完整正文：只留前 200 字。"""
+    """执行记录里不放完整正文（只留前 200 字），也不放附件内容（方案第 6 节“不记附件内容”）：
+    data_base64 / text_content（包括视频封面的）只记长度，被密钥拦截的内容也就不会进执行记录。"""
     out = dict(arguments)
     text = out.get("text")
     if isinstance(text, str) and len(text) > 200:
         out["text"] = text[:200] + "…"
+    attachments = out.get("attachments")
+    if isinstance(attachments, list):
+        out["attachments"] = [_record_attachment(a) for a in attachments]
+    return out
+
+
+def _record_attachment(item: object) -> object:
+    if not isinstance(item, dict):
+        return item
+    out = dict(item)
+    data = out.get("data_base64")
+    if isinstance(data, str):
+        out["data_base64"] = f"（{len(data)} 个 base64 字符，不记录）"
+    content = out.get("text_content")
+    if isinstance(content, str):
+        out["text_content"] = f"（{len(content)} 字，不记录）"
+    if isinstance(out.get("cover"), dict):
+        out["cover"] = _record_attachment(out["cover"])
     return out

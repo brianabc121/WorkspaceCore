@@ -45,6 +45,17 @@ class MailConnectOut(BaseModel):
     authorize_url: str = Field(description="浏览器打开这个地址去 Google 授权；10 分钟内有效")
 
 
+class MailAgentRef(BaseModel):
+    id: UUID
+    name: str
+
+
+class MailAgentList(BaseModel):
+    """可以分配邮箱的智能体实例（admin 在 设置 → 邮件 里勾选用；只有 ID 与名字）。"""
+
+    items: list[MailAgentRef]
+
+
 class MailAccountOut(BaseModel):
     id: UUID
     email: str
@@ -52,7 +63,9 @@ class MailAccountOut(BaseModel):
     status: MailAccountStatus
     can_read: bool = Field(description="授权里有 gmail.readonly")
     can_send: bool = Field(description="授权里有 gmail.send")
-    agents_allowed: bool = Field(description="允许智能体访问这个邮箱")
+    agents: list[MailAgentRef] = Field(
+        description="分配了这个邮箱的智能体实例（T-0132）；没分配的智能体看不到这个邮箱"
+    )
     agent_signature: bool = Field(description="智能体发的信末尾加署名行")
     last_error: str | None
     connected_at: datetime
@@ -65,8 +78,14 @@ class MailAccountList(BaseModel):
 
 class MailAccountPatch(_Strict):
     version: int
-    agents_allowed: bool | None = None
     agent_signature: bool | None = None
+
+
+class MailAccountAgentsPut(_Strict):
+    """把邮箱分配给哪些智能体实例（整组替换，T-0132）。"""
+
+    version: int = Field(description="邮箱的 version")
+    instance_ids: Annotated[list[UUID], Field(max_length=200)]
 
 
 class MailLabelOut(BaseModel):
@@ -152,9 +171,19 @@ class MailSendList(BaseModel):
     items: list[MailSendOut]
 
 
-class AgentMailOut(BaseModel):
-    """实例的邮件开关（T-0129）。"""
+class AgentMailAccountRef(BaseModel):
+    id: UUID
+    email: str
+    status: MailAccountStatus
+    can_send: bool = Field(description="授权里有 gmail.send")
 
+
+class AgentMailOut(BaseModel):
+    """实例的邮件开关（T-0129）与分配给它的邮箱（T-0132）。"""
+
+    accounts: list[AgentMailAccountRef] = Field(
+        description="分配给这个实例的邮箱；邮件工具只看得到这些邮箱"
+    )
     read_enabled: bool
     send_enabled: bool
     send_scope: Literal["any", "listed"] | None
@@ -173,4 +202,7 @@ class AgentMailPut(_Strict):
     )
     recipients: Annotated[list[Address], Field(max_length=50)] = Field(
         default=[], description="地址（a@b.com）或域名（@b.com）；send_scope=listed 时用"
+    )
+    account_ids: Annotated[list[UUID], Field(max_length=50)] | None = Field(
+        default=None, description="分配给这个实例的邮箱（整组替换）；不填表示不变"
     )

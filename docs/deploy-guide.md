@@ -467,6 +467,11 @@ make n8n-up
 | 安全措施 | 只接受私网来源；实例令牌 | 实例令牌 + 客户端证书（接入包里自带，90 天到期） |
 | 防火墙 | 入口端口只对私网开放 | 入口端口对公网开放；OpenClaw 服务器只需出站 |
 
+> **已知问题（2026-11-06 查明，任务 T-0133 修复中）**：外网模式的实例能正常收发 IM，但它的模型**调不到工作台的工具**
+> （任务、知识库、发消息、Issue、邮件等）：OpenClaw 2026.9.36 的安全检查拦下了解析到本机回环地址的 MCP 地址，
+> 而外网模式正是经本机隧道（127.0.0.1）连工作台。详情见 `docs/decisions/2026-11-04-agent-messaging-verification.md` 6.4。
+> 在修好之前，需要智能体使用工作台工具的实例请用内网模式（两台服务器同一私网，或都装 Tailscale）。
+
 #### ① 部署 OpenIM（工作台服务器）
 
 ```bash
@@ -583,7 +588,8 @@ sudo bash scripts/deploy.sh connect
    失败时显示原因和命令输出（密码、令牌、私钥已替换成 `***`），处理后点**开始部署**重试。
 
 自动部署做的事和下面的手动步骤一样：接入包放在登录账号主目录下的 `~/myworkspace-openclaw/`（权限 700），
-插件版本与 sha256 锁定，定时任务写进这个账号的 crontab（行尾带 `# myworkspace-openclaw` 标记）。
+插件版本与 sha256 锁定，插件装好（或已经装过）之后都打上工作台的补丁（`bin/channel-patch.mjs`，进度里显示“这次打上了工作台的补丁”或“已打补丁”），
+定时任务写进这个账号的 crontab（行尾带 `# myworkspace-openclaw` 标记，包括第 ④ 步第 5 条的领取唤醒、领取终止令两行）。
 最后在 OpenClaw 里建“每晚复盘”定时任务（见第 ④ 步第 6 条）；建不成不算部署失败，这一步显示“跳过”，按第 ④ 步手动运行一次。
 Docker 用官方软件源安装锁定版本，并把账号加入 docker 组。
 
@@ -628,6 +634,15 @@ Docker 用官方软件源安装锁定版本，并把账号加入 docker 组。
 
    用一份临时的空配置安装，是因为正式配置里已经写了插件提供的 `openim` 渠道，插件装好之前 OpenClaw 会拒绝那份配置。
 
+   然后**打上工作台的补丁**（T-0120：自动回复被拒收时，把原因放回同一个会话，智能体下一轮看得到）：
+
+   ```bash
+   sudo docker compose run --rm --no-deps --entrypoint node openclaw /opt/myworkspace/bin/channel-patch.mjs
+   ```
+
+   输出 `plugin_patch_applied`（重复运行时是 `plugin_patch_already_applied`）才算成功。脚本核对插件文件与结果的 sha256：
+   退出码 7 表示插件文件不是 0.3.3 的原文件，8 表示结果不符，这两种情况都不会改文件。
+
 3. **模型**：默认用 OpenAI，不用改。用别的服务商时，修改 `state/openclaw.json` 里 `models.providers` 那一段
    （写法见 OpenClaw 的文档），`apiKey` 保持 `{ "source": "exec", "provider": "myworkspace", "id": "<ref_id>" }` 的形式，
    `id` 与第 ③ 步的 `ref_id` 一致。**不要写明文 Key**，也不要加 `_comment` 之类的说明键（OpenClaw 会判定整个配置无效）。
@@ -647,11 +662,16 @@ Docker 用官方软件源安装锁定版本，并把账号加入 docker 组。
    */10 * * * * cd /opt/myworkspace-agent && docker compose exec -T openclaw node openclaw.mjs secrets reload --json
    * * * * * cd /opt/myworkspace-agent && docker compose exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs
    * * * * * cd /opt/myworkspace-agent && docker compose exec -T openclaw node /opt/myworkspace/bin/host-report.mjs
+   * * * * * cd /opt/myworkspace-agent && docker compose exec -T openclaw node /opt/myworkspace/bin/wakeup.mjs
+   * * * * * cd /opt/myworkspace-agent && docker compose exec -T openclaw node /opt/myworkspace/bin/stop-runs.mjs
    17 4 * * 1 cd /opt/myworkspace-agent && docker compose restart openclaw
    ```
 
    第一行：工作台里轮换了模型密钥，10 分钟内生效，不用重启；第二行：每分钟把 token 用量报给工作台（任务时间轴；只报数字和会话的哈希，不报内容）；
-   第三行：每分钟把服务器状态报给工作台（CPU、内存、磁盘、网速，只报数字）；第四行：每周重启一次，换新的 IM 令牌（令牌只在启动时领取）。
+   第三行：每分钟把服务器状态报给工作台（CPU、内存、磁盘、网速，只报数字）；
+   第四行：每分钟领取到期的唤醒（T-0121），在容器里跑一轮再报回结果，同一时间只跑一个、一轮最多 10 分钟；没配这一行时唤醒不会执行，实例页一直显示“待执行”；
+   第五行：每分钟领取终止令（T-0126），用本机网关中止正在运行的会话；没有终止令时不调网关，没配这一行时只有“软停止”生效，终止令 10 分钟后记为过期；
+   第六行：每周重启一次，换新的 IM 令牌（令牌只在启动时领取）。
 
 6. **每晚复盘**（知识库，T-0100）：OpenClaw 启动后，在接入包目录里运行一次
 
@@ -679,6 +699,20 @@ Docker 用官方软件源安装锁定版本，并把账号加入 docker 组。
 - 「消息」页（独立页面，左上角菜单 → 通讯录）：通讯录里出现这个实例，私聊发一句话能收到回复（群聊里要 @ 它）；
 - 让它做一件要改数据的事（例如“帮我建一个任务：明天检查备份”），「AI 审批」页出现待审批的调用，批准后才会执行。
 
+#### 主动发消息、唤醒与终止任务（T-0117 ~ T-0126）
+
+智能体经工作台的 `im_send` 主动发消息、用 `schedule_wakeup` 安排唤醒、经 Issues 与 README 和其他智能体对接，都不用改工作台的 `.env`。OpenClaw 服务器这边要注意：
+
+- **T-0120 之前部署的实例要更新接入包**：新接入包带插件补丁、`wakeup.mjs` / `stop-runs.mjs`，并禁用了 OpenClaw 自带的 `message` 等发消息工具（主动发消息只走 `im_send`）。
+  - SSH 自动部署的：实例卡片上点**重新部署**，会打补丁、重写 crontab（包括新的两行）并重建容器；
+  - 手动部署的：重新生成接入包、替换文件，运行第 ④ 步第 2 条的打补丁命令，按第 5 条补上 `wakeup.mjs`、`stop-runs.mjs` 两行，再 `sudo docker compose up -d`（新凭证会让容器重建）。
+  - 实例页不再提示“旧接入包”、上报的插件版本是 `0.3.3+myworkspace.1` 就对了。没更新时：自动回复被拒收智能体不知道（只能自己查 `im_outbox`），唤醒不会执行，叫停只有软停止。
+- **按实例的开关**（「OpenClaw 实例」页的实例卡片，owner / admin，**默认都关闭**）：
+  - **附件权限**：打开后它能经 `im_send` 发图片（10 MB）、文件（20 MB）、视频（MP4 / MOV，50 MB）；关闭时只能发文字。
+  - **终止其他智能体任务的权限**：打开后它能用 `stop_agent_run` 叫停本工作空间里别的智能体（每小时 10 次，每次都通知管理员）。管理员自己随时可以在实例卡片或任务抽屉里“终止执行”，不需要这个开关。
+- 唤醒（管理员建的可以每天、工作日、每周重复）和终止记录也在实例卡片上管理；“发件记录”里能看到主动发的消息、排队与定时的、被拒收的原因，可以取消排队和定时的。
+- 管理员在「消息」页发文件、视频时，工作台的 Caddy 只给 `/api/v1/im/uploads` 放宽到 51 MB（其他路径仍是 10 MB）；工作台前面还有别的反向代理时，也要给这个路径放宽请求体上限。
+
 #### 日常维护
 
 - **重新生成接入包**会签发新凭证，旧凭证再保留 24 小时；外网模式的客户端证书 90 天到期，到期前重新生成并替换到 OpenClaw 服务器上
@@ -697,8 +731,12 @@ Docker 用官方软件源安装锁定版本，并把账号加入 docker 组。
 1. 在 [Google Cloud 控制台](https://console.cloud.google.com/) 建一个项目，启用 **Gmail API**；
 2. 配置 OAuth 同意屏幕：个人 Gmail 选“外部”，把要连接的邮箱加为测试用户；Google Workspace 可以选“内部”；
 3. 新建 OAuth 客户端，类型选 **Web 应用**，“已获授权的重定向 URI”填工作台“设置 → 邮件”页显示的地址，即 `<PUBLIC_BASE_URL>/api/v1/mail/oauth/callback`；
-4. 工作台“设置 → 邮件”：填客户端 ID 和密钥（加密保存，之后只显示“已设置”），点“连接 Gmail 邮箱”，在 Google 授权页勾选两个权限；
-5. 需要智能体用邮件时：在“设置 → 邮件”里确认邮箱“允许智能体访问”（默认允许），再到“OpenClaw 实例”页按实例设置邮件权限（查询默认打开；发送默认关闭，打开时选收件人范围）。
+4. 工作台“设置 → 邮件”：填客户端 ID 和密钥（加密保存，之后只显示“已设置”），点“连接 Gmail 邮箱”，在 Google 授权页选账号、勾选两个权限；
+   要连多个邮箱就再点“再连接一个 Gmail 邮箱”，每次都会让你选 Google 账号（每个邮箱都要是第 2 步的测试用户）；
+5. 需要智能体用邮件时：在“设置 → 邮件”每个邮箱的“分配给智能体”里勾选能用它的智能体（新连接的邮箱默认不分配给任何智能体），
+   或者在“OpenClaw 实例”页实例卡片的“邮件权限”里勾选它能用的邮箱；同一处还有查询（默认打开）和发送（默认关闭，打开时选收件人范围）两个开关。
+
+以上全部在网页上完成，不需要登录服务器或改配置文件（Google Cloud 控制台那几步在 Google 的网页上做）。
 
 注意：
 

@@ -2,10 +2,11 @@
 
 - 读（mail_accounts / mail_search / mail_get / mail_thread）：实例的“查询邮件”开关（默认打开）；
 - 发（mail_send）：实例的“发送邮件”开关（默认关闭，owner / admin 打开时必须选收件人范围），
-  直接发出、不审批，但必须经过：权限范围与角色、邮箱的“允许智能体访问”与 gmail.send 授权、
+  直接发出、不审批，但必须经过：权限范围与角色、邮箱分配给了这个实例（T-0132）与 gmail.send 授权、
   收件人范围、密钥拦截（MailService.send）、每小时 10 封 / 每天 50 封、client_key 24 小时防重复、
   署名行、执行记录（不存正文）、审计、通知管理员；结果未知时不自动重发。
-- 智能体只看到允许智能体访问的邮箱；拿不到 Google 令牌，也不能删除或修改邮件。
+- 智能体只看到管理员分配给它的邮箱（agent_mail_accounts）；拿不到 Google 令牌，
+  也不能删除或修改邮件。
 """
 
 import logging
@@ -24,7 +25,7 @@ from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validat
 from app.domain.audit import AuditTrail
 from app.domain.mail import MailError, MailService, Sender, can_send
 from app.domain.ratelimit import WindowLimiter
-from app.models import AgentInstance, MailAccount, MailSend
+from app.models import AgentInstance, AgentMailAccount, MailAccount, MailSend
 from app.schemas.ai_tools import MAIL_READ_TOOL_NAMES, ToolSpec
 from app.schemas.mail_tools import (
     MailAccountItem,
@@ -74,13 +75,15 @@ def _service(service: AiToolService) -> MailService:
 
 
 async def _accounts(service: AiToolService, requester: Requester) -> list[MailAccount]:
+    """分配给这个实例、没断开的邮箱（T-0132）。"""
     return list(
         await service.db.scalars(
             select(MailAccount)
+            .join(AgentMailAccount, AgentMailAccount.account_id == MailAccount.id)
             .where(
+                AgentMailAccount.instance_id == requester.instance.id,
                 MailAccount.workspace_id == requester.workspace.id,
                 MailAccount.status != "disconnected",
-                MailAccount.agents_allowed.is_(True),
             )
             .order_by(MailAccount.created_at)
         )
@@ -95,11 +98,13 @@ async def _account(
         found = next((a for a in accounts if a.id == account_id), None)
         if found is None:
             raise ToolCallError(
-                "NOT_FOUND", "没有这个邮箱，或不允许智能体访问；用 mail_accounts 查看"
+                "NOT_FOUND", "没有这个邮箱，或管理员没有把它分配给你；用 mail_accounts 查看"
             )
         return found
     if not accounts:
-        raise ToolCallError("NOT_FOUND", "工作台还没有连接允许智能体访问的 Gmail 邮箱")
+        raise ToolCallError(
+            "NOT_FOUND", "管理员还没有给你分配 Gmail 邮箱（在 设置 → 邮件 或实例卡片里分配）"
+        )
     if len(accounts) > 1:
         raise ToolCallError(
             "VALIDATION_FAILED", "有多个邮箱，请用 account_id 指定（见 mail_accounts）"
