@@ -78,6 +78,15 @@ class AgentInstance(Base):
         CheckConstraint(f"status IN {INSTANCE_STATUSES}", name="status"),
         CheckConstraint(f"scope IN {MCP_SCOPES}", name="scope"),
         CheckConstraint(f"max_role IN {MAX_ROLES}", name="max_role"),
+        # 打开发送邮件时必须选了收件人范围（T-0128）
+        CheckConstraint(
+            "mail_send_scope IS NULL OR mail_send_scope IN ('any', 'listed')",
+            name="mail_send_scope",
+        ),
+        CheckConstraint(
+            "NOT mail_send_enabled OR mail_send_scope IS NOT NULL", name="mail_send_needs_scope"
+        ),
+        CheckConstraint("cardinality(mail_send_recipients) <= 50", name="mail_send_recipients"),
         # 复合外键（凭证、授权）引用 (workspace_id, id)，保证子记录与实例在同一个工作空间
         UniqueConstraint("workspace_id", "id"),
         UniqueConstraint("im_user_id"),
@@ -130,6 +139,19 @@ class AgentInstance(Base):
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
     stop_others_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 邮件（T-0128 / T-0129，迁移 0040，docs/v2/MAIL_PLAN.md 第 5 节）：
+    # 查询默认打开，发送默认关闭；打开发送时必须选收件人范围：
+    # any（任何地址）或 listed（只限 mail_send_recipients 里的地址 / 域名）
+    mail_read_enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    mail_send_enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    mail_send_scope: Mapped[str | None] = mapped_column(Text)
+    mail_send_recipients: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    mail_send_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    mail_send_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()

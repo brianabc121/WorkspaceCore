@@ -18,6 +18,7 @@ from app.api.v1 import (
     issues,
     knowledge,
     knowledge_base,
+    mail,
     me,
     notifications,
     operations,
@@ -55,6 +56,7 @@ for module in (
     app_logins,
     agents,
     im,
+    mail,
     ai,
 ):
     router.include_router(module.router)
