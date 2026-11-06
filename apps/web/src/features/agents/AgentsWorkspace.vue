@@ -8,9 +8,12 @@ import { useHostSummary } from './host'
 import InstanceCard from './InstanceCard.vue'
 import InstanceForm from './InstanceForm.vue'
 import { useCreateIntent } from '../../composables/useCreateIntent'
+import { useMailAccounts } from '../mail/api'
 
 const auth = useAuthStore(), scope = auth.workspaceId!
 const settings = useAgentSettings(scope), instances = useInstances(scope), secrets = useSecrets(scope), hostSummary = useHostSummary(scope)
+const mailAccounts = useMailAccounts(scope)
+const mailboxes = computed(() => mailAccounts.data.value?.items ?? [])
 const { busy, error, notice, act, header } = useAgentAction(scope)
 const editing = ref<Schema['AgentInstanceOut'] | 'new' | null>(null)
 const items = computed(() => unique(instances.data.value?.pages))
@@ -63,7 +66,10 @@ function stopOthers(instance: Schema['AgentInstanceOut'], enabled: boolean) {
 function mail(instance: Schema['AgentInstanceOut'], body: Omit<Schema['AgentMailPut'], 'version'>) {
   const opening = body.send_enabled && !instance.mail.send_enabled
   const range = body.send_scope === 'any' ? '任何地址' : (body.recipients ?? []).join('、')
-  if (opening && !window.confirm(`允许「${instance.name}」用工作台连接的 Gmail 邮箱发信（收件人范围：${range}）？发信直接生效、不审批，每封都会通知管理员。`)) return
+  if (opening && !window.confirm(`允许「${instance.name}」用分配给它的 Gmail 邮箱发信（收件人范围：${range}）？发信直接生效、不审批，每封都会通知管理员。`)) return
+  const before = new Set(instance.mail.accounts.map(a => a.id))
+  const added = mailboxes.value.filter(m => (body.account_ids ?? []).includes(m.id) && !before.has(m.id)).map(m => m.email)
+  if (added.length && !window.confirm(`把邮箱 ${added.join('、')} 分配给「${instance.name}」？它能查这些邮箱的邮件。`)) return
   void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/mail', { params: { header, path: path(instance) }, body: { ...body, version: instance.version } }), '邮件权限已保存')
 }
 function grants(instance: Schema['AgentInstanceOut'], list: Schema['SecretGrantIn'][]) {
@@ -87,7 +93,7 @@ function grants(instance: Schema['AgentInstanceOut'], list: Schema['SecretGrantI
   <p v-else-if="!items.length" class="empty-state">还没有实例。点“登记实例”开始。</p>
   <div class="agent-list">
     <InstanceCard
-      v-for="instance in items" :key="instance.id" :instance="instance" :secrets="secretItems" :busy="busy" :host="hosts.get(instance.id)" :names="names"
+      v-for="instance in items" :key="instance.id" :instance="instance" :secrets="secretItems" :busy="busy" :host="hosts.get(instance.id)" :names="names" :mailboxes="mailboxes"
       @edit="editing = instance" @toggle="toggle(instance)" @bundle="bundle(instance, $event)" @revoke="revoke(instance, $event)" @grants="grants(instance, $event)" @project-admin="projectAdmin(instance, $event)" @im-media="imMedia(instance, $event)" @stop-others="stopOthers(instance, $event)" @mail="mail(instance, $event)"
     />
   </div>

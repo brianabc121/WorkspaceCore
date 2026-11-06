@@ -4,7 +4,8 @@
 revision 20261102、Google OAuth 2.0 网页服务器流程、配额与错误处理的官方文档）实现：
 
 - 授权：`https://accounts.google.com/o/oauth2/v2/auth`，`response_type=code`、`access_type=offline`、
-  `prompt=consent`、`include_granted_scopes=true`、`state`、PKCE `S256`；
+  `prompt=select_account consent`（每次都让管理员选 Google 账号，方便连接多个邮箱；
+  并重新同意以拿到 refresh token）、`include_granted_scopes=true`、`state`、PKCE `S256`；
 - 令牌：`POST https://oauth2.googleapis.com/token`（`authorization_code` / `refresh_token`），
   响应 `access_token`、`expires_in`、`refresh_token`（只在 offline 时）、`scope`、`token_type`；
 - 撤销：`POST https://oauth2.googleapis.com/revoke?token=…`，成功 200；
@@ -72,7 +73,8 @@ def authorize_url(
         "response_type": "code",
         "scope": " ".join(scopes),
         "access_type": "offline",
-        "prompt": "consent",
+        # prompt 是空格分隔的列表（核验记录第 2 节）：选账号 + 重新同意
+        "prompt": "select_account consent",
         "include_granted_scopes": "true",
         "state": state,
         "code_challenge": code_challenge,

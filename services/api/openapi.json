@@ -660,9 +660,52 @@
         "title": "AgentKnowledgeOut",
         "type": "object"
       },
-      "AgentMailOut": {
-        "description": "实例的邮件开关（T-0129）。",
+      "AgentMailAccountRef": {
         "properties": {
+          "can_send": {
+            "description": "授权里有 gmail.send",
+            "title": "Can Send",
+            "type": "boolean"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "needs_reconnect",
+              "disconnected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "status",
+          "can_send"
+        ],
+        "title": "AgentMailAccountRef",
+        "type": "object"
+      },
+      "AgentMailOut": {
+        "description": "实例的邮件开关（T-0129）与分配给它的邮箱（T-0132）。",
+        "properties": {
+          "accounts": {
+            "description": "分配给这个实例的邮箱；邮件工具只看得到这些邮箱",
+            "items": {
+              "$ref": "#/components/schemas/AgentMailAccountRef"
+            },
+            "title": "Accounts",
+            "type": "array"
+          },
           "read_enabled": {
             "title": "Read Enabled",
             "type": "boolean"
@@ -723,6 +766,7 @@
           }
         },
         "required": [
+          "accounts",
           "read_enabled",
           "send_enabled",
           "send_scope",
@@ -737,6 +781,23 @@
       "AgentMailPut": {
         "additionalProperties": false,
         "properties": {
+          "account_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "分配给这个实例的邮箱（整组替换）；不填表示不变",
+            "title": "Account Ids"
+          },
           "read_enabled": {
             "title": "Read Enabled",
             "type": "boolean"
@@ -9777,6 +9838,32 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "MailAccountAgentsPut": {
+        "additionalProperties": false,
+        "description": "把邮箱分配给哪些智能体实例（整组替换，T-0132）。",
+        "properties": {
+          "instance_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Instance Ids",
+            "type": "array"
+          },
+          "version": {
+            "description": "邮箱的 version",
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "instance_ids"
+        ],
+        "title": "MailAccountAgentsPut",
+        "type": "object"
+      },
       "MailAccountList": {
         "properties": {
           "items": {
@@ -9800,10 +9887,13 @@
             "title": "Agent Signature",
             "type": "boolean"
           },
-          "agents_allowed": {
-            "description": "允许智能体访问这个邮箱",
-            "title": "Agents Allowed",
-            "type": "boolean"
+          "agents": {
+            "description": "分配了这个邮箱的智能体实例（T-0132）；没分配的智能体看不到这个邮箱",
+            "items": {
+              "$ref": "#/components/schemas/MailAgentRef"
+            },
+            "title": "Agents",
+            "type": "array"
           },
           "can_read": {
             "description": "授权里有 gmail.readonly",
@@ -9865,7 +9955,7 @@
           "status",
           "can_read",
           "can_send",
-          "agents_allowed",
+          "agents",
           "agent_signature",
           "last_error",
           "connected_at",
@@ -9888,17 +9978,6 @@
             ],
             "title": "Agent Signature"
           },
-          "agents_allowed": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agents Allowed"
-          },
           "version": {
             "title": "Version",
             "type": "integer"
@@ -9908,6 +9987,42 @@
           "version"
         ],
         "title": "MailAccountPatch",
+        "type": "object"
+      },
+      "MailAgentList": {
+        "description": "可以分配邮箱的智能体实例（admin 在 设置 → 邮件 里勾选用；只有 ID 与名字）。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MailAgentRef"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MailAgentList",
+        "type": "object"
+      },
+      "MailAgentRef": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "MailAgentRef",
         "type": "object"
       },
       "MailAttachmentOut": {
@@ -36597,7 +36712,7 @@
     },
     "/api/v1/mail/accounts/{account_id}": {
       "delete": {
-        "description": "尽力撤销 Google 授权并删除保存的令牌；发件记录保留。",
+        "description": "尽力撤销 Google 授权并删除保存的令牌，取消它对智能体的全部分配；发件记录保留。",
         "operationId": "disconnect_mail_account",
         "parameters": [
           {
@@ -36697,7 +36812,7 @@
         ]
       },
       "patch": {
-        "description": "agents_allowed：允许智能体访问这个邮箱；agent_signature：智能体发的信末尾加署名行。",
+        "description": "agent_signature：智能体发的信末尾加署名行。分配给哪些智能体见 PUT …/agents。",
         "operationId": "patch_mail_account",
         "parameters": [
           {
@@ -36819,6 +36934,135 @@
           }
         ],
         "summary": "改邮箱的智能体设置（admin，乐观并发）",
+        "tags": [
+          "mail"
+        ]
+      }
+    },
+    "/api/v1/mail/accounts/{account_id}/agents": {
+      "put": {
+        "description": "instance_ids：能用这个邮箱的智能体实例。没分配的智能体看不到这个邮箱；能不能查、能不能发仍按每个实例的邮件开关。变化的实例 version 也加 1。",
+        "operationId": "put_mail_account_agents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailAccountAgentsPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailAccountOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "把邮箱分配给智能体（admin，整组替换，乐观并发）",
         "tags": [
           "mail"
         ]
@@ -37753,6 +37997,77 @@
           }
         ],
         "summary": "读一个会话（admin）",
+        "tags": [
+          "mail"
+        ]
+      }
+    },
+    "/api/v1/mail/agents": {
+      "get": {
+        "description": "只返回 ID 与名字，给 设置 → 邮件 的“分配给智能体”用（实例列表只有 owner 能看）。",
+        "operationId": "list_mail_agents",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailAgentList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "可以分配邮箱的智能体实例（admin）",
         "tags": [
           "mail"
         ]

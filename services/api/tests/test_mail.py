@@ -145,7 +145,7 @@ async def test_settings_and_connect(env: Env) -> None:
     assert url.startswith("https://accounts.google.com/o/oauth2/v2/auth?")
     params = {k: v[0] for k, v in parse_qs(urlsplit(url).query).items()}
     assert params["scope"].split() == [READ, SEND]
-    assert params["access_type"] == "offline" and params["prompt"] == "consent"
+    assert params["access_type"] == "offline" and params["prompt"] == "select_account consent"
     assert params["include_granted_scopes"] == "true"
     assert params["code_challenge_method"] == "S256" and len(params["code_challenge"]) == 43
     assert params["redirect_uri"] == f"{BASE_URL}/api/v1/mail/oauth/callback"
@@ -160,7 +160,7 @@ async def test_settings_and_connect(env: Env) -> None:
     account = await env.account()
     assert account["email"] == MAILBOX and account["status"] == "active"
     assert account["can_read"] is True and account["can_send"] is True
-    assert account["agents_allowed"] is True and account["agent_signature"] is True
+    assert account["agents"] == [] and account["agent_signature"] is True
     refresh = await run_sql(
         env.database_url, "SELECT refresh_token_ref FROM workspace.mail_accounts"
     )
@@ -469,17 +469,23 @@ async def test_patch_and_disconnect(env: Env) -> None:
     account = await env.ready()
     stale = await env.client.patch(
         env.url(account),
-        json={"version": account["version"] + 1, "agents_allowed": False},
+        json={"version": account["version"] + 1, "agent_signature": False},
         headers=env.headers(write=True),
     )
     assert stale.status_code == 409
+    removed = await env.client.patch(
+        env.url(account),
+        json={"version": account["version"], "agents_allowed": False},
+        headers=env.headers(write=True),
+    )
+    assert removed.status_code == 422  # 改成按智能体分配（T-0132），旧字段不再接受
     patched = await env.client.patch(
         env.url(account),
-        json={"version": account["version"], "agents_allowed": False, "agent_signature": False},
+        json={"version": account["version"], "agent_signature": False},
         headers=env.headers(write=True),
     )
     assert patched.status_code == 200
-    assert patched.json()["agents_allowed"] is False and patched.json()["agent_signature"] is False
+    assert patched.json()["agent_signature"] is False
     assert patched.json()["version"] == account["version"] + 1
 
     refresh_token = next(iter(env.fake.refresh_tokens))
@@ -510,6 +516,7 @@ async def test_roles_and_workspace_scope(env: Env) -> None:
             "/api/v1/mail/settings",
             "/api/v1/mail/accounts",
             "/api/v1/mail/sends",
+            "/api/v1/mail/agents",
             f"/api/v1/mail/accounts/{account['id']}/messages",
         ):
             response = await other.get(path, headers=member)
@@ -520,8 +527,20 @@ async def test_roles_and_workspace_scope(env: Env) -> None:
             headers={**member, **csrf(other)},
         )
         assert send.status_code == 403
-        # 自己是 owner 的另一个工作空间：看不到这个邮箱
+        assign = await other.put(
+            f"/api/v1/mail/accounts/{account['id']}/agents",
+            json={"version": account["version"], "instance_ids": []},
+            headers={**member, **csrf(other)},
+        )
+        assert assign.status_code == 403
+        # 自己是 owner 的另一个工作空间：看不到这个邮箱，也不能分配它
         own = {"X-Workspace-Id": str(other_workspace)}
         assert (await other.get("/api/v1/mail/accounts", headers=own)).json()["items"] == []
         hidden = await other.get(f"/api/v1/mail/accounts/{account['id']}/labels", headers=own)
         assert hidden.status_code == 404
+        foreign = await other.put(
+            f"/api/v1/mail/accounts/{account['id']}/agents",
+            json={"version": account["version"], "instance_ids": []},
+            headers={**own, **csrf(other)},
+        )
+        assert foreign.status_code == 404

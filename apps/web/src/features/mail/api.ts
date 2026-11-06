@@ -61,6 +61,13 @@ export function useMailAccounts(scope: string) {
     queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/mail/accounts', { params: { header: c.header }, signal })) })
 }
 
+// 设置 → 邮件的“分配给智能体”用：只有实例 ID 与名字（实例列表本身只有 owner 能看）
+export function useMailAgents(scope: string) {
+  const c = context(scope)
+  return useQuery({ queryKey: mailKey(c.user, scope, 'agents'), enabled: computed(c.enabled),
+    queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/mail/agents', { params: { header: c.header }, signal })) })
+}
+
 export function useMailList(scope: string, account: Ref<string>, filters: Ref<{ q: string; label: string; page: string | null }>) {
   const c = context(scope)
   return useQuery({
@@ -92,6 +99,8 @@ export function useMailSends(scope: string) {
 export function useMailActions(scope: string) {
   const c = context(scope), cache = useQueryClient(), api = c.auth.api, header = c.header
   const refresh = () => cache.invalidateQueries({ predicate: q => q.queryKey[0] === 'mail' && q.queryKey[1] === c.user && q.queryKey[2] === scope })
+  // 分配会改实例的 mail.accounts 与 version：实例页也要刷新
+  const refreshAll = () => cache.invalidateQueries({ predicate: q => ['mail', 'agents'].includes(String(q.queryKey[0])) && q.queryKey[1] === c.user && q.queryKey[2] === scope })
   return {
     refresh,
     async saveSettings(body: Schema['MailSettingsPut']) {
@@ -104,9 +113,13 @@ export function useMailActions(scope: string) {
       const saved = dataOf(await api.PATCH('/api/v1/mail/accounts/{account_id}', { params: { header, path: { account_id: account.id } }, body: { version: account.version, ...body } }))
       await refresh(); return saved
     },
+    async assign(account: MailAccount, instanceIds: string[]) {
+      const saved = dataOf(await api.PUT('/api/v1/mail/accounts/{account_id}/agents', { params: { header, path: { account_id: account.id } }, body: { version: account.version, instance_ids: instanceIds } }))
+      await refreshAll(); return saved
+    },
     async disconnect(account: MailAccount) {
       await api.DELETE('/api/v1/mail/accounts/{account_id}', { params: { header, path: { account_id: account.id } } })
-      await refresh()
+      await refreshAll()
     },
     async send(account: string, body: Schema['MailSendIn']) {
       try { return dataOf(await api.POST('/api/v1/mail/accounts/{account_id}/send', { params: { header, path: { account_id: account } }, body })) }

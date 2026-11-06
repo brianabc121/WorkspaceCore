@@ -233,3 +233,83 @@ async def test_worker_runs_heartbeat_job(redis_url: str) -> None:
     finally:
         await pool.delete(WORKER_HEARTBEAT_KEY)
         await pool.aclose()
+
+
+def test_migration_0041_assigns_allowed_mailboxes_to_existing_agents(
+    temp_database_url: str,
+) -> None:
+    """T-0132：0041 把“允许智能体访问”的邮箱分配给同一工作空间现有的全部实例，删掉 agents_allowed；
+    降级时有分配的邮箱 agents_allowed = true，其余 false。"""
+    config = alembic_config(temp_database_url)
+    command.upgrade(config, "0040")
+    asyncio.run(_seed_mailboxes(temp_database_url))
+
+    command.upgrade(config, "0041")
+    pairs = asyncio.run(
+        _fetch_one(
+            temp_database_url,
+            "SELECT array_agg(i.name || '/' || a.email ORDER BY i.name, a.email) AS pairs"
+            " FROM workspace.agent_mail_accounts m"
+            " JOIN workspace.agent_instances i ON i.id = m.instance_id"
+            " JOIN workspace.mail_accounts a ON a.id = m.account_id",
+        )
+    )["pairs"]
+    assert sorted(pairs) == sorted(["甲/allowed@gmail.com", "乙/allowed@gmail.com"])
+    columns = asyncio.run(
+        _fetch_one(
+            temp_database_url,
+            "SELECT array_agg(column_name::text) AS names FROM information_schema.columns"
+            " WHERE table_schema = 'workspace' AND table_name = 'mail_accounts'",
+        )
+    )["names"]
+    assert "agents_allowed" not in columns
+
+    command.downgrade(config, "0040")
+    allowed = asyncio.run(
+        _fetch_one(
+            temp_database_url,
+            "SELECT array_agg(email || '=' || agents_allowed::text ORDER BY email) AS rows"
+            " FROM workspace.mail_accounts",
+        )
+    )["rows"]
+    assert allowed == ["allowed@gmail.com=true", "closed@gmail.com=false", "denied@gmail.com=false"]
+    assert "agent_mail_accounts" not in asyncio.run(_tables(temp_database_url))
+
+    command.upgrade(config, "head")
+    command.check(config)
+
+
+async def _seed_mailboxes(database_url: str) -> None:
+    conn = await asyncpg.connect(asyncpg_dsn(database_url))
+    try:
+        user = await conn.fetchval(
+            "INSERT INTO workspace.users (email, display_name, password_hash)"
+            " VALUES ('a@example.com', 'A', 'x') RETURNING id"
+        )
+        workspace = await conn.fetchval(
+            "INSERT INTO workspace.workspaces (name, owner_id) VALUES ('W', $1) RETURNING id", user
+        )
+        for name in ("甲", "乙"):
+            await conn.execute(
+                "INSERT INTO workspace.agent_instances"
+                " (workspace_id, name, network_mode, im_user_id, im_nickname)"
+                " VALUES ($1, $2, 'public', $3, $2)",
+                workspace,
+                name,
+                f"oc_{name}",
+            )
+        for email, allowed, status in (
+            ("allowed@gmail.com", True, "active"),
+            ("denied@gmail.com", False, "active"),
+            ("closed@gmail.com", True, "disconnected"),
+        ):
+            await conn.execute(
+                "INSERT INTO workspace.mail_accounts (workspace_id, email, agents_allowed, status)"
+                " VALUES ($1, $2, $3, $4)",
+                workspace,
+                email,
+                allowed,
+                status,
+            )
+    finally:
+        await conn.close()

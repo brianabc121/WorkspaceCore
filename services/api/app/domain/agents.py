@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import agent_bundle
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import mail_format, notifications, ops_metrics, task_runs
+from app.domain import mail_agents, mail_format, notifications, ops_metrics, task_runs
 from app.domain.agent_ca import ClientCertificate, ensure_ca, issue_client_certificate
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
@@ -46,6 +46,7 @@ from app.models import (
     AgentSecretGrant,
     AgentSecretVersion,
     AgentSettings,
+    MailAccount,
     WorkspaceMember,
 )
 from app.schemas.agents import (
@@ -75,13 +76,14 @@ from app.schemas.agents import (
     SecretResolveError,
     SecretResolveResponse,
 )
-from app.schemas.mail import AgentMailOut, AgentMailPut
+from app.schemas.mail import AgentMailAccountRef, AgentMailOut, AgentMailPut
 
 logger = logging.getLogger("app.agents")
 
 
-def mail_out(instance: AgentInstance) -> AgentMailOut:
+def mail_out(instance: AgentInstance, accounts: list[AgentMailAccountRef]) -> AgentMailOut:
     return AgentMailOut(
+        accounts=accounts,
         read_enabled=instance.mail_read_enabled,
         send_enabled=instance.mail_send_enabled,
         send_scope=instance.mail_send_scope,
@@ -335,6 +337,7 @@ class AgentService:
                     last_used_ip=credential.last_used_ip,
                 )
             )
+        mailboxes = await mail_agents.accounts_by_instance(self.db, ids)
         grants_by: dict[uuid.UUID, list[SecretGrantOut]] = {i: [] for i in ids}
         for grant, secret_name in grants:
             grants_by[grant.instance_id].append(
@@ -376,7 +379,7 @@ class AgentService:
                     granted_by=i.stop_others_by,
                     granted_at=i.stop_others_at,
                 ),
-                mail=mail_out(i),
+                mail=mail_out(i, mailboxes[i.id]),
                 bundle_outdated=i.plugin_version is not None
                 and i.plugin_version != agent_bundle.PATCHED_PLUGIN_VERSION,
                 credentials=by_instance[i.id],
@@ -631,11 +634,18 @@ class AgentService:
                     422, "VALIDATION_FAILED", "这个实例的权限范围是只读，打开发送邮件也用不了"
                 )
         newly_sending = body.send_enabled and not instance.mail_send_enabled
+        added: list[MailAccount] = []
+        removed: list[MailAccount] = []
+        if body.account_ids is not None:
+            added, removed = await mail_agents.set_accounts_for_instance(
+                self.db, instance, body.account_ids, user_id=access.user_id
+            )
         changed = (
             instance.mail_read_enabled != body.read_enabled
             or instance.mail_send_enabled != body.send_enabled
             or instance.mail_send_scope != scope
             or list(instance.mail_send_recipients or []) != recipients
+            or bool(added or removed)
         )
         if changed:
             instance.mail_read_enabled = body.read_enabled
@@ -660,6 +670,8 @@ class AgentService:
                     "send_enabled": body.send_enabled,
                     "send_scope": scope,
                     "recipients": len(recipients),
+                    "accounts_added": [a.email for a in added],
+                    "accounts_removed": [a.email for a in removed],
                 },
                 client_ip=client_ip,
             )
@@ -677,7 +689,8 @@ class AgentService:
                 )
         await self.db.commit()
         await self.db.refresh(instance)
-        return mail_out(instance)
+        mailboxes = await mail_agents.accounts_by_instance(self.db, [instance.id])
+        return mail_out(instance, mailboxes[instance.id])
 
     async def set_enabled(
         self,

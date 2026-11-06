@@ -136,5 +136,5 @@ def test_pkce_and_authorize_url() -> None:
         state="s",
         code_challenge=challenge,
     )
-    assert "access_type=offline" in url and "prompt=consent" in url
+    assert "access_type=offline" in url and "prompt=select_account+consent" in url
     assert "gmail.readonly" in url and "gmail.send" in url and "login_hint" not in url

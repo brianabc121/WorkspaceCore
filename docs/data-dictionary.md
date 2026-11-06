@@ -285,8 +285,20 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 | 表 / 字段 | 主要字段 | 约束与说明 |
 |---|---|---|
 | `mail_oauth_clients` | `id`、`workspace_id`、`client_id`、`client_secret_ref`、`updated_by`、`version` | 每个工作空间一条（唯一 `workspace_id`）；`client_secret_ref` 是加密后的密钥（`enc:v1:`，加密用途绑定工作空间）；随工作空间级联删除，`updated_by` → `users`（删除后置空） |
-| `mail_accounts` | `id`、`workspace_id`、`email`、`display_name`、`scopes`、`refresh_token_ref`、`status`、`last_error`、`agents_allowed`、`agent_signature`、`connected_by`、`connected_at`、`version` | 连接的 Gmail 邮箱，唯一 `(workspace_id, email)`（断开后重新连接复用这一行）。`scopes` 只记实际授权的 `gmail.readonly` / `gmail.send`；`refresh_token_ref` 加密（用途绑定邮箱 ID），断开后清空；CHECK `status` ∈ `active` / `needs_reconnect` / `disconnected`；`agents_allowed`、`agent_signature` 默认 true。access token 只加密放 Redis（`mail_at:{id}`，按 `expires_in` 提前 60 秒过期），不入库 |
+| `mail_accounts` | `id`、`workspace_id`、`email`、`display_name`、`scopes`、`refresh_token_ref`、`status`、`last_error`、`agent_signature`、`connected_by`、`connected_at`、`version` | 连接的 Gmail 邮箱，唯一 `(workspace_id, email)`（断开后重新连接复用这一行）。`scopes` 只记实际授权的 `gmail.readonly` / `gmail.send`；`refresh_token_ref` 加密（用途绑定邮箱 ID），断开后清空；CHECK `status` ∈ `active` / `needs_reconnect` / `disconnected`；`agent_signature` 默认 true（原有的 `agents_allowed` 在 0041 删除）。access token 只加密放 Redis（`mail_at:{id}`，按 `expires_in` 提前 60 秒过期），不入库 |
 | `mail_sends` | `id`、`workspace_id`、`account_id`、`actor_kind`、`user_id`、`instance_id`、`actor_name`、`sender`、`to_addresses`、`cc_addresses`、`bcc_count`、`subject`、`body_chars`、`reply_to_message_id`、`gmail_message_id`、`gmail_thread_id`、`status`、`error_code`、`client_key`、`created_at`、`finished_at` | 发件记录（人或智能体），**不存正文**（只记 `body_chars`），密送只记人数。CHECK `actor_kind` ∈ `user` / `instance`、`user_id` 与 `instance_id` 至多一个、`status` ∈ `sending` / `sent` / `failed` / `unknown`、主题 ≤ 200 字。部分唯一索引 `uq_mail_sends_client_key (instance_id, client_key)`：智能体的防重复键。索引按工作空间、实例与时间。邮箱、成员、实例删除后对应字段置空，`actor_name`、`sender` 保留当时的值 |
 | `agent_instances` 新增 | `mail_read_enabled`、`mail_send_enabled`、`mail_send_scope`、`mail_send_recipients`、`mail_send_by`、`mail_send_at` | 实例的邮件权限：查询默认 true、发送默认 false；CHECK `mail_send_scope` 为空或 ∈ `any` / `listed`，打开发送时必须有范围（`ck_agent_instances_mail_send_needs_scope`），收件人列表最多 50 条；`mail_send_by` → `users`（删除后置空） |
 
 **downgrade** 删除三张表和新增的字段（都是 0040 之后才有的数据）。
+
+### 迁移 `0041`（T-0132）
+
+邮箱按智能体分配（`docs/v2/MAIL_PLAN.md` 第 10 节）。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `agent_mail_accounts` | `workspace_id`、`instance_id`、`account_id`、`assigned_by`、`created_at` | 哪个邮箱分配给哪个实例；主键 `(instance_id, account_id)`，索引 `account_id`。复合外键 `(workspace_id, instance_id)` → `agent_instances`、`(workspace_id, account_id)` → `mail_accounts`（保证同一个工作空间，随实例 / 邮箱级联删除）；`assigned_by` → `users`（删除后置空）。断开邮箱时删除它的分配 |
+| `mail_accounts` | 新增唯一 `(workspace_id, id)`；删除 `agents_allowed` | 唯一约束供上面的复合外键用 |
+
+升级时把 `agents_allowed = true` 且没断开的邮箱分配给同一工作空间现有的全部实例（升级前后智能体能看到的邮箱不变）。
+**downgrade** 加回 `agents_allowed`（有分配的邮箱为 true，其余 false），删除分配表与唯一约束；按实例的分配细节不保留。
