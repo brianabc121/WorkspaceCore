@@ -2529,6 +2529,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/readme": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目 README（viewer）
+         * @description 项目知识库里置顶的导览；还没有就按模板生成。自动部分随项目数据更新（1 分钟合并一次）。
+         */
+        get: operations["project_readme"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search": {
         parameters: {
             query?: never;
@@ -2687,6 +2707,26 @@ export interface paths {
          * @description 设为自由接取、领取、放弃、完成、打回（T-0111），最新的在前，最多 100 条。note 是原因或完成说明，来自人或智能体的文字，按纯文本显示。
          */
         get: operations["list_task_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/readme": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 任务 README（viewer）
+         * @description 项目知识库“任务导览”里这个任务的导览；还没有就按模板生成。
+         */
+        get: operations["task_readme"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5099,7 +5139,7 @@ export interface components {
             /** Title */
             title: string;
             /** Type */
-            type: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction") | null;
+            type: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme") | null;
         };
         /** GraphOut */
         GraphOut: {
@@ -6705,7 +6745,7 @@ export interface components {
              * @default record
              * @enum {string}
              */
-            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction";
+            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme";
         };
         /** NoteOut */
         NoteOut: {
@@ -6780,7 +6820,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction";
+            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme";
             /**
              * Updated At
              * Format: date-time
@@ -6871,7 +6911,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction";
+            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme";
             /**
              * Updated At
              * Format: date-time
@@ -6909,7 +6949,7 @@ export interface components {
             /** Title */
             title?: string | null;
             /** Type */
-            type?: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction") | null;
+            type?: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme") | null;
             /** Version */
             version: number;
         };
@@ -7637,6 +7677,25 @@ export interface components {
              * @enum {string}
              */
             status: "ok" | "unavailable";
+        };
+        /**
+         * ReadmeOut
+         * @description 项目或任务的 README（T-0122，方案第 9 节）：知识库里的一篇 readme 笔记。
+         */
+        ReadmeOut: {
+            /**
+             * Auto Sections
+             * @description 还由工作台自动更新的部分（标记没被删掉的）；页面上标“自动更新”
+             */
+            auto_sections: string[];
+            note: components["schemas"]["NoteOut"];
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Task Id */
+            task_id: string | null;
         };
         /** RecentDocsConfig */
         RecentDocsConfig: {
@@ -18253,6 +18312,8 @@ export interface operations {
                 resources?: boolean;
                 /** @description 显示图片：每张图片一个节点，连到引用它的笔记 */
                 files?: boolean;
+                /** @description 显示任务 README（数量多，默认不显示，T-0122） */
+                task_readmes?: boolean;
             };
             header: {
                 /** @description 当前工作空间；不是成员时返回 404 */
@@ -18306,7 +18367,7 @@ export interface operations {
             query?: {
                 space_id?: string | null;
                 folder?: string | null;
-                type?: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction") | null;
+                type?: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme") | null;
                 tag?: string | null;
                 author?: string | null;
                 q?: string | null;
@@ -20912,6 +20973,58 @@ export interface operations {
             };
         };
     };
+    project_readme: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadmeOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     search: {
         parameters: {
             query: {
@@ -21529,6 +21642,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskEventList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    task_readme: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadmeOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

@@ -450,9 +450,16 @@ async def graph(
     files: Annotated[
         bool, Query(description="显示图片：每张图片一个节点，连到引用它的笔记")
     ] = False,
+    task_readmes: Annotated[
+        bool, Query(description="显示任务 README（数量多，默认不显示，T-0122）")
+    ] = False,
 ) -> GraphOut:
     return await service.graph(
-        access.workspace.id, space_ids=space_id, include_resources=resources, include_files=files
+        access.workspace.id,
+        space_ids=space_id,
+        include_resources=resources,
+        include_files=files,
+        include_task_readmes=task_readmes,
     )
 
 

@@ -45,6 +45,7 @@ NoteType = Literal[
     "design",
     "template",
     "correction",
+    "readme",
 ]
 SourceKind = Literal["human", "observation", "task", "conversation", "external", "system"]
 ChangeKind = Literal["create", "update", "delete", "restore", "revert", "rename"]
@@ -431,3 +432,14 @@ class FileOut(BaseModel):
     width: int
     height: int
     created_at: datetime
+
+
+class ReadmeOut(BaseModel):
+    """项目或任务的 README（T-0122，方案第 9 节）：知识库里的一篇 readme 笔记。"""
+
+    note: NoteOut
+    project_id: UUID
+    task_id: UUID | None
+    auto_sections: list[str] = Field(
+        description="还由工作台自动更新的部分（标记没被删掉的）；页面上标“自动更新”"
+    )

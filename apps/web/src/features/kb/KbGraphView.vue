@@ -20,8 +20,9 @@ const graphOnly = computed(() => !!route.meta.kbGraphOnly)
 const spaces = useSpaces(scope)
 const spaceItems = computed(() => spaces.data.value?.items ?? [])
 const spaceById = computed(() => new Map(spaceItems.value.map(s => [s.id, s])))
-const resources = ref(true), showFiles = ref(false)
-const graph = useGraph(scope, computed(() => ({ spaceIds: [], resources: resources.value, files: showFiles.value })))
+const resources = ref(true), showFiles = ref(false), taskReadmes = ref(false)
+// 任务 README 数量多，默认不显示（T-0122，方案 9.2）
+const graph = useGraph(scope, computed(() => ({ spaceIds: [], resources: resources.value, files: showFiles.value, taskReadmes: taskReadmes.value })))
 const changes = useChanges(scope, ref({}))
 const recent = computed(() => (changes.data.value?.pages[0]?.items ?? []).filter(c => c.kind === 'revision' && c.note_id && !c.note_deleted && c.author.kind !== 'system').slice(0, 4))
 const today = computed(() => {
@@ -209,6 +210,7 @@ const error = computed(() => graph.error.value ?? spaces.error.value)
         <label class="kb-check"><input v-model="allLabels" type="checkbox">显示全部标题</label>
         <label class="kb-check"><input v-model="resources" type="checkbox">任务与文档</label>
         <label class="kb-check"><input v-model="showFiles" type="checkbox">显示图片</label>
+        <label class="kb-check"><input v-model="taskReadmes" type="checkbox">任务 README</label>
         <span style="flex: 1" />
         <button type="button" class="kb-btn is-small kb-desktop-only" :aria-pressed="listView" @click="listView = !listView"><List aria-hidden="true" />{{ listView ? '图谱视图' : '列表视图' }}</button>
         <div v-if="!listView" class="kb-zoom" role="group" aria-label="缩放">

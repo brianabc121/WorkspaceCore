@@ -24,7 +24,7 @@ export const SPACE_KIND_LABELS: Record<SpaceKind, string> = { public: '公共', 
 export const NOTE_TYPE_LABELS: Record<NoteType, string> = {
   overview: '概述', brief: '项目简报', decision: '决策', rule: '规范', process: '流程', runbook: '操作手册', lesson: '经验',
   review: '复盘', preference: '偏好', glossary: '术语', record: '记录', plan: '计划', risk: '风险', design: '设计', template: '模板',
-  correction: '收到的纠正',
+  correction: '收到的纠正', readme: 'README',
 }
 // 图谱按类型着色（T-0102，docs/v2/TIMELINE_PLAN.md 3.1）：16 种类型按用途分 6 组，一组一个颜色。
 // 超过 8 种颜色人眼分不清，所以颜色只区分组；具体类型看图例、悬停提示与列表视图。
@@ -33,14 +33,14 @@ export const TYPE_GROUPS: readonly { key: TypeGroup; label: string; types: reado
   { key: 'rule', label: '规范与流程', types: ['rule', 'process', 'runbook', 'template'] },
   { key: 'decision', label: '决策与计划', types: ['decision', 'plan', 'design'] },
   { key: 'lesson', label: '经验与复盘', types: ['lesson', 'review', 'correction'] },
-  { key: 'project', label: '项目', types: ['brief', 'risk'] },
+  { key: 'project', label: '项目', types: ['brief', 'readme', 'risk'] },
   { key: 'knowledge', label: '知识', types: ['overview', 'glossary', 'record'] },
   { key: 'preference', label: '偏好', types: ['preference'] },
 ]
 const GROUP_OF = new Map(TYPE_GROUPS.flatMap(g => g.types.map(t => [t, g.key] as const)))
 export const typeGroupOf = (type: NoteType | null | undefined): TypeGroup => (type && GROUP_OF.get(type)) || 'knowledge'
-// 人能新建的类型：项目简报只在项目库里建一篇，《收到的纠正》由工作台维护
-export const EDITABLE_TYPES = (Object.keys(NOTE_TYPE_LABELS) as NoteType[]).filter(t => t !== 'correction')
+// 人能新建的类型：项目简报只在项目库里建一篇，《收到的纠正》与 README 由工作台维护
+export const EDITABLE_TYPES = (Object.keys(NOTE_TYPE_LABELS) as NoteType[]).filter(t => t !== 'correction' && t !== 'readme')
 export const CHANGE_LABELS: Record<NonNullable<Change['change']>, string> = { create: '新建', update: '修改', delete: '删除', restore: '恢复', revert: '撤销', rename: '改名' }
 export const GUARD_LABELS: Record<NonNullable<Change['guard']>, string> = { secret_blocked: '拦下写入', delete_paused: '暂停删除', rate_limited: '写入限流', writes_disabled: '写入已关闭' }
 
@@ -88,13 +88,26 @@ export function useRevision(scope: string, id: Ref<string | null>, version: Ref<
     queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/knowledge/notes/{note_id}/revisions/{version}', { params: { header: c.header, path: { note_id: id.value!, version: version.value! } }, signal })) })
 }
 
-export function useGraph(scope: string, options: Ref<{ spaceIds: string[]; resources: boolean; files?: boolean }>) {
+export function useGraph(scope: string, options: Ref<{ spaceIds: string[]; resources: boolean; files?: boolean; taskReadmes?: boolean }>) {
   const c = context(scope)
   return useQuery({
     queryKey: computed(() => kbKey(c.user, scope, 'graph', options.value)), enabled: computed(c.active),
     queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/knowledge/graph', {
-      params: { header: c.header, query: { resources: options.value.resources, files: !!options.value.files, ...(options.value.spaceIds.length ? { space_id: options.value.spaceIds } : {}) } }, signal })),
+      params: { header: c.header, query: { resources: options.value.resources, files: !!options.value.files, task_readmes: !!options.value.taskReadmes, ...(options.value.spaceIds.length ? { space_id: options.value.spaceIds } : {}) } }, signal })),
   })
+}
+
+// 项目与任务的 README（T-0122）：知识库里的 readme 笔记；还没有时后端当场生成
+export type Readme = Schema['ReadmeOut']
+export function useProjectReadme(scope: string, id: Ref<string | null>) {
+  const c = context(scope)
+  return useQuery({ queryKey: computed(() => kbKey(c.user, scope, 'readme', 'project', id.value)), enabled: computed(() => c.active() && !!id.value),
+    queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/projects/{project_id}/readme', { params: { header: c.header, path: { project_id: id.value! } }, signal })) })
+}
+export function useTaskReadme(scope: string, id: Ref<string | null>) {
+  const c = context(scope)
+  return useQuery({ queryKey: computed(() => kbKey(c.user, scope, 'readme', 'task', id.value)), enabled: computed(() => c.active() && !!id.value),
+    queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/tasks/{task_id}/readme', { params: { header: c.header, path: { task_id: id.value! } }, signal })) })
 }
 
 export function useLocalGraph(scope: string, id: Ref<string | null>, depth: Ref<number>) {

@@ -996,6 +996,8 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "knowledge_get",
             "knowledge_list",
             "knowledge_brief",
+            # 项目与任务的 README（T-0122）
+            "readme_get",
         },
         "write": {
             "create_task",
@@ -1025,6 +1027,8 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             # 终止其他智能体的任务：只给打开了这个权限的实例（例外六，T-0126）
             "list_agent_runs",
             "stop_agent_run",
+            # 改 README 的非自动部分：直接执行（例外五，T-0122）
+            "readme_update",
         },
     }
     for spec in TOOLS.values():

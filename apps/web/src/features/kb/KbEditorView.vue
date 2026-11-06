@@ -196,7 +196,7 @@ function jump(line: number) { if (view.value && mode.value !== 'read') scrollToL
 
 // ---------------------------------------------------------------- 属性
 const space = computed(() => spaceItems.value.find(s => s.id === fields.space_id))
-const types = computed(() => EDITABLE_TYPES.filter(t => t !== 'brief' || space.value?.kind === 'project' || fields.type === 'brief'))
+const types = computed(() => fields.type === 'readme' ? ['readme' as NoteType] : EDITABLE_TYPES.filter(t => t !== 'brief' || space.value?.kind === 'project' || fields.type === 'brief'))
 const tagInput = ref(''), aliasInput = ref('')
 function addTag(raw = tagInput.value) {
   const tag = raw.replace(/^#/, '').trim().slice(0, 40)
@@ -332,15 +332,16 @@ const heading = computed(() => isNew.value ? '新建笔记' : `编辑《${source
     <aside class="kb-aside" :class="{ 'is-mobile-sheet': showProps }" aria-label="笔记属性">
       <h2 style="font-size: 15px">属性</h2>
       <label class="kb-field">知识库
-        <select v-model="fields.space_id" class="kb-select" :disabled="!canEdit">
+        <select v-model="fields.space_id" class="kb-select" :disabled="!canEdit || fields.type === 'readme'">
           <option v-for="s in spaceItems" :key="s.id" :value="s.id">{{ SPACE_KIND_LABELS[s.kind] }} · {{ s.name }}</option>
         </select>
       </label>
       <label class="kb-field">类型
-        <select v-model="fields.type" class="kb-select" :disabled="!canEdit || fields.type === 'correction'">
+        <select v-model="fields.type" class="kb-select" :disabled="!canEdit || fields.type === 'correction' || fields.type === 'readme'">
           <option v-for="t in types" :key="t" :value="t">{{ NOTE_TYPE_LABELS[t] }}</option>
         </select>
       </label>
+      <p v-if="fields.type === 'readme'" class="form-help" role="note">这是工作台生成的 README：<code>&lt;!-- myws:auto … --&gt;</code> 标记之间的部分会随数据自动更新，改了也会被覆盖；其余部分随便补充。删掉某个标记，那一块就不再自动更新。</p>
       <div class="kb-field">
         <span id="kb-tags-label">标签</span>
         <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center" role="group" aria-labelledby="kb-tags-label">

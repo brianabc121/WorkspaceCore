@@ -5392,7 +5392,8 @@
                   "risk",
                   "design",
                   "template",
-                  "correction"
+                  "correction",
+                  "readme"
                 ],
                 "type": "string"
               },
@@ -9427,7 +9428,8 @@
               "risk",
               "design",
               "template",
-              "correction"
+              "correction",
+              "readme"
             ],
             "title": "Type",
             "type": "string"
@@ -9611,7 +9613,8 @@
               "risk",
               "design",
               "template",
-              "correction"
+              "correction",
+              "readme"
             ],
             "title": "Type",
             "type": "string"
@@ -9837,7 +9840,8 @@
               "risk",
               "design",
               "template",
-              "correction"
+              "correction",
+              "readme"
             ],
             "title": "Type",
             "type": "string"
@@ -10012,7 +10016,8 @@
                   "risk",
                   "design",
                   "template",
-                  "correction"
+                  "correction",
+                  "readme"
                 ],
                 "type": "string"
               },
@@ -11729,6 +11734,47 @@
           "checks"
         ],
         "title": "ReadinessResponse",
+        "type": "object"
+      },
+      "ReadmeOut": {
+        "description": "项目或任务的 README（T-0122，方案第 9 节）：知识库里的一篇 readme 笔记。",
+        "properties": {
+          "auto_sections": {
+            "description": "还由工作台自动更新的部分（标记没被删掉的）；页面上标“自动更新”",
+            "items": {
+              "type": "string"
+            },
+            "title": "Auto Sections",
+            "type": "array"
+          },
+          "note": {
+            "$ref": "#/components/schemas/NoteOut"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "note",
+          "project_id",
+          "task_id",
+          "auto_sections"
+        ],
+        "title": "ReadmeOut",
         "type": "object"
       },
       "RecentDocsConfig": {
@@ -30615,6 +30661,18 @@
             }
           },
           {
+            "description": "显示任务 README（数量多，默认不显示，T-0122）",
+            "in": "query",
+            "name": "task_readmes",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "显示任务 README（数量多，默认不显示，T-0122）",
+              "title": "Task Readmes",
+              "type": "boolean"
+            }
+          },
+          {
             "description": "当前工作空间；不是成员时返回 404",
             "in": "header",
             "name": "X-Workspace-Id",
@@ -30741,7 +30799,8 @@
                     "risk",
                     "design",
                     "template",
-                    "correction"
+                    "correction",
+                    "readme"
                   ],
                   "type": "string"
                 },
@@ -35228,6 +35287,87 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/readme": {
+      "get": {
+        "description": "项目知识库里置顶的导览；还没有就按模板生成。自动部分随项目数据更新（1 分钟合并一次）。",
+        "operationId": "project_readme",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadmeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "项目 README（viewer）",
+        "tags": [
+          "readme"
+        ]
+      }
+    },
     "/api/v1/search": {
       "get": {
         "description": "中文按字面包含与相似度匹配（不分词），相关性有限；排序见契约第 8 节。",
@@ -36485,6 +36625,87 @@
         "summary": "任务的动态（viewer）",
         "tags": [
           "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/readme": {
+      "get": {
+        "description": "项目知识库“任务导览”里这个任务的导览；还没有就按模板生成。",
+        "operationId": "task_readme",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadmeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "任务 README（viewer）",
+        "tags": [
+          "readme"
         ]
       }
     },

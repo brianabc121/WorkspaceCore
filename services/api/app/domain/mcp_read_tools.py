@@ -339,8 +339,17 @@ async def _get_task(call: ReadCall, args: GetTaskInput) -> GetTaskOutput:
         .order_by(TaskEvent.created_at.desc())
         .limit(1)
     )
+    from app.domain import readme_tools
+    from app.domain.readme import Readmes
+
+    readme_note = None
+    if await readme_tools.readable(
+        call.db, call.settings, call.requester.instance, task.project_id
+    ):
+        readme_note = await Readmes(call.db, call.settings).task_note(task.id)
     return GetTaskOutput(
         brief=brief,
+        readme=readme_tools.ref(readme_note),
         task=TaskDetail(
             id=task.id,
             project_id=task.project_id,
@@ -369,9 +378,20 @@ async def _list_projects(call: ReadCall, args: EmptyInput) -> ListProjectsOutput
     page = await call.tasks().list_projects(
         call.access, include_archived=True, q=None, cursor=None, limit=LIST_CAP
     )
+    from app.domain import readme_tools
+    from app.domain.knowledge_base import KnowledgeBase
+    from app.domain.readme import readme_refs
+
+    joined = await KnowledgeBase(call.db, call.settings).participation(call.requester.instance.id)
+    refs = await readme_refs(call.db, [p.id for p in page.items if p.id in joined])
     return ListProjectsOutput(
         items=[
-            ProjectItem(id=p.id, archived=p.archived, untrusted=ProjectText(title=p.title))
+            ProjectItem(
+                id=p.id,
+                archived=p.archived,
+                readme=readme_tools.ref(refs.get(p.id)),
+                untrusted=ProjectText(title=p.title),
+            )
             for p in page.items
         ],
         freshness=local_freshness(),

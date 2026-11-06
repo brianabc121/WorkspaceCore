@@ -101,6 +101,7 @@ const problem = computed(() => {
       <p class="form-help">未完成 {{ project.open_tasks }} · 已完成 {{ project.done_tasks }} · 更新于 {{ formatTime(project.updated_at) }}</p>
       <p class="form-help" :aria-label="`${project.title} 的智能体`">智能体：{{ project.agents.length ? project.agents.map((a) => a.name).join('、') : '无' }} · {{ groupState(project.im_group).short }}</p>
       <div class="form-actions">
+        <RouterLink :to="`/projects/${project.id}`" :aria-label="`打开项目 ${project.title}`">打开</RouterLink>
         <RouterLink :to="{ path: '/tasks', query: { project_id: project.id } }">查看任务</RouterLink>
         <RouterLink :to="{ path: '/tasks/timeline', query: { project: project.id } }">时间轴</RouterLink>
         <RouterLink :to="{ path: '/knowledge/docs', query: { linked_resource_id: project.id } }">相关文档</RouterLink>

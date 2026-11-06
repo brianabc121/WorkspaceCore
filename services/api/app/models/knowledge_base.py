@@ -55,6 +55,7 @@ NOTE_TYPES = (
     "design",
     "template",
     "correction",
+    "readme",
 )
 SOURCE_KINDS = ("human", "observation", "task", "conversation", "external", "system")
 CHANGE_KINDS = ("create", "update", "delete", "restore", "revert", "rename")
@@ -180,6 +181,22 @@ class KnowledgeNote(Base):
             unique=True,
             postgresql_where=text("type = 'brief' AND deleted_at IS NULL"),
         ),
+        # README（T-0122）：每个任务最多一篇；每个知识库最多一篇项目 README（根目录、没有 task_id）
+        CheckConstraint("task_id IS NULL OR type = 'readme'", name="task_readme"),
+        Index(
+            "uq_knowledge_notes_task_readme",
+            "task_id",
+            unique=True,
+            postgresql_where=text("task_id IS NOT NULL AND deleted_at IS NULL"),
+        ),
+        Index(
+            "uq_knowledge_notes_project_readme",
+            "space_id",
+            unique=True,
+            postgresql_where=text(
+                "type = 'readme' AND task_id IS NULL AND folder = '' AND deleted_at IS NULL"
+            ),
+        ),
         Index("ix_knowledge_notes_workspace_updated", "workspace_id", "updated_at"),
         Index("ix_knowledge_notes_purge", "purge_after"),
         Index(
@@ -204,6 +221,10 @@ class KnowledgeNote(Base):
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))
     review_at: Mapped[date | None] = mapped_column(Date)
     pinned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # 任务 README 属于哪个任务（T-0122）；任务删除时置空，工作台同时把 README 放进回收站
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.tasks.id", ondelete="SET NULL")
+    )
     created_by_user: Mapped[uuid.UUID | None] = _user_fk()
     created_by_instance: Mapped[uuid.UUID | None] = _instance_fk()
     updated_by_user: Mapped[uuid.UUID | None] = _user_fk()

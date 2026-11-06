@@ -128,7 +128,8 @@ async def _claim(ctx: _Ctx, args: TaskRef) -> tuple[ClaimTaskOutput, After]:
                 task_id=task.id,
                 already_yours=True,
                 joined_project=False,
-                next_step="这个任务已经是你的了：用 get_task 读详情，做完后用 complete_task。",
+                next_step="这个任务已经是你的了：用 readme_get 读任务 README，"
+                "做完后用 readme_update 更新“进展与交接”，再用 complete_task。",
             ),
             _nothing,
         )
@@ -176,13 +177,19 @@ async def _claim(ctx: _Ctx, args: TaskRef) -> tuple[ClaimTaskOutput, After]:
         if joined and ctx.im is not None:
             await project_groups.ProjectGroupSync(db, ctx.settings, ctx.im).sync(project_id)
 
+    # 领取成功直接带上任务 README（T-0122，方案 9.6）
+    from app.domain import readme_tools
+    from app.domain.readme import Readmes
+
+    note = await Readmes(db, ctx.settings).ensure_task(task)
     return (
         ClaimTaskOutput(
             task_id=task.id,
             already_yours=False,
             joined_project=joined,
-            next_step="已领取：用 get_task 读详情（有项目简报时先读简报），"
-            "做完后用 complete_task。",
+            readme=readme_tools.doc(note),
+            next_step="已领取：先读下面的任务 README 和项目简报，做完后用 readme_update 更新"
+            "“进展与交接”，再用 complete_task。",
         ),
         after,
     )

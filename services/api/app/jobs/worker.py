@@ -39,6 +39,7 @@ from app.domain import (
     knowledge_files,
     notifications,
     project_groups,
+    readme,
     sync,
     task_runs,
     timeline,
@@ -249,6 +250,18 @@ async def close_stale_runs(ctx: dict[str, Any]) -> int:
     return ended
 
 
+async def refresh_readmes(ctx: dict[str, Any]) -> int:
+    """README（T-0122）：刷新数据变了的项目与任务 README，同一篇 1 分钟内最多一次。"""
+    context = _sync(ctx)
+    return await readme.process_due(context.sessions, context.settings, ctx["redis"])
+
+
+async def reconcile_readmes(ctx: dict[str, Any]) -> int:
+    """README（T-0122）：补建缺的（含迁移前已有的项目和任务），并把项目 README 排进刷新队列。"""
+    context = _sync(ctx)
+    return await readme.reconcile(context.sessions, context.settings, ctx["redis"])
+
+
 async def sync_project_groups(ctx: dict[str, Any]) -> int:
     """项目群（T-0110）：建群或同步成员；OpenIM 不可用时下一分钟再试。没有部署 OpenIM 时不做。"""
     context = _sync(ctx)
@@ -367,6 +380,8 @@ class WorkerSettings:
         cron(sync_project_groups, second=30, timeout=120),
         cron(check_host_alerts, second=40, timeout=60),
         cron(deliver_im_outbox, second=set(range(2, 60, 5)), timeout=60, unique=True),
+        cron(refresh_readmes, second={1, 21, 41}, timeout=60, unique=True),
+        cron(reconcile_readmes, minute={8, 38}, second=3, run_at_startup=True, timeout=600),
         cron(cleanup_files, hour=3, minute=37, timeout=1800),
         cron(check_file_storage, hour=4, minute=13, run_at_startup=True, timeout=180),
     ]

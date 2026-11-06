@@ -22,6 +22,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.domain import readme_marks
 from app.models import (
     Automation,
     AutomationConnection,
@@ -107,19 +108,25 @@ def _collect(session: Session, _context: Any) -> None:
         workspace_id = _workspace_of(obj)
         if topics_of is not None and workspace_id is not None:
             _pending(session).setdefault(workspace_id, set()).update(topics_of(obj))
+    # 哪些 README 要更新（T-0122）：同样提交后才登记
+    readme_marks.collect(session)
 
 
 @event.listens_for(Session, "after_commit")
 def _publish(session: Session) -> None:
     pending: dict[uuid.UUID, set[EventTopic]] = session.info.pop(_INFO_KEY, {})
+    readmes = readme_marks.pop(session)
     bus: EventBus | None = session.info.get(_BUS_KEY)
     if bus is not None and pending:
         bus.schedule({ws: frozenset(topics) for ws, topics in pending.items()})
+    if bus is not None and readmes:
+        bus.schedule_readmes(readmes)
 
 
 @event.listens_for(Session, "after_rollback")
 def _discard(session: Session) -> None:
     session.info.pop(_INFO_KEY, None)
+    readme_marks.discard(session)
 
 
 class EventBus:
@@ -140,6 +147,23 @@ class EventBus:
         except RuntimeError:
             return
         task = loop.create_task(self.publish(changes))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    def schedule_readmes(self, keys: set[str]) -> None:
+        """README 的刷新队列（T-0122）：写进 Redis，失败只记日志（每 30 分钟的对账会补上）。"""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        async def run() -> None:
+            try:
+                await readme_marks.push(self.redis, keys)
+            except Exception as error:
+                logger.warning("readme mark failed", extra={"error_type": type(error).__name__})
+
+        task = loop.create_task(run())
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
