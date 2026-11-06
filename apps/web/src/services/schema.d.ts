@@ -2697,6 +2697,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/issues/{number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 按项目内编号读 Issue（viewer）
+         * @description 正文和评论里的 `#编号` 链到这里。
+         */
+        get: operations["get_issue_by_number"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/readme": {
         parameters: {
             query?: never;
@@ -7964,6 +7984,12 @@ export interface components {
              */
             id: string;
             im_group: components["schemas"]["ProjectImGroup"];
+            /**
+             * Issue Notices
+             * @description Issue 新开 / 关闭时在项目群里提示一行（T-0123，默认关闭）
+             * @default false
+             */
+            issue_notices: boolean;
             /**
              * Open Tasks
              * @description 未完成任务数
@@ -22353,6 +22379,59 @@ export interface operations {
             };
             /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_issue_by_number: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                project_id: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssueDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

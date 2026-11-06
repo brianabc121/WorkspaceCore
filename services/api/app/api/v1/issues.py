@@ -8,7 +8,7 @@ owner / admin 能关闭任何 Issue、锁定、隐藏评论、删除（进回收
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, Security, status
+from fastapi import APIRouter, Depends, Path, Query, Request, Response, Security, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -155,6 +155,29 @@ async def create_issue(
     )
     await db.commit()
     await _notice(request, db, issue, f"#{issue.number} 新开：{issue.title}")
+    return await service.detail(who, issue)
+
+
+@router.get(
+    "/projects/{project_id}/issues/{number}",
+    summary="按项目内编号读 Issue（viewer）",
+    description="正文和评论里的 `#编号` 链到这里。",
+    responses=_read_errors,
+)
+async def get_issue_by_number(
+    access: Viewer,
+    context: Context,
+    db: Db,
+    settings: AppSettings,
+    request: Request,
+    project_id: UUID,
+    number: Annotated[int, Path(ge=1, le=9_999_999)],
+) -> IssueDetail:
+    service, who = _service(db, settings, request), _who(access, context)
+    await service.project(who, project_id)
+    issue = await service.by_number(who, project_id, number)
+    if issue is None:
+        raise not_found()
     return await service.detail(who, issue)
 
 

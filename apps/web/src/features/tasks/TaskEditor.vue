@@ -11,12 +11,13 @@ import TextField from '../../components/TextField.vue'
 import RelatedDocuments from '../knowledge/RelatedDocuments.vue'
 import TaskRuns from '../timeline/TaskRuns.vue'
 import TaskReadme from './TaskReadme.vue'
+import TaskIssues from './TaskIssues.vue'
 import TaskClaimPanel from './TaskClaimPanel.vue'
 import { useAssignees } from '../timeline/api'
 import { useAuthStore } from '../../stores/auth'
 const props = defineProps<{ task?: Schema['TaskOut']; projects: Schema['ProjectOut'][]; writable: boolean; locked: boolean }>()
-// 详情 / README（T-0122）：README 是任务导览，存在项目知识库里
-const view = ref<'detail' | 'readme'>('detail')
+// 详情 / README（T-0122）：README 是任务导览，存在项目知识库里；讨论（T-0124）：关联的 Issue
+const view = ref<'detail' | 'readme' | 'discussion'>('detail')
 const emit = defineEmits<{ submit: [command: TaskCommand] }>()
 const labelsSchema = z.string().refine((v) => parseLabels(v).length <= LABELS_MAX, `最多 ${LABELS_MAX} 个标签`).refine((v) => parseLabels(v).every((l) => l.length <= LABEL_MAX), `每个标签不超过 ${LABEL_MAX} 字`)
 const validTime = (v: string) => !v || !Number.isNaN(new Date(v).getTime())
@@ -76,8 +77,10 @@ function remove() { if (props.task && props.writable && !props.locked && window.
   <div v-if="task" class="kb-segment task-views" role="group" aria-label="任务详情视图">
     <button type="button" class="secondary-button" :aria-pressed="view === 'detail'" @click="view = 'detail'">详情</button>
     <button type="button" class="secondary-button" :aria-pressed="view === 'readme'" @click="view = 'readme'">README</button>
+    <button type="button" class="secondary-button" :aria-pressed="view === 'discussion'" @click="view = 'discussion'">讨论</button>
   </div>
   <TaskReadme v-if="task && view === 'readme'" :key="`readme:${task.id}`" :task-id="task.id" :writable="writable" />
+  <TaskIssues v-else-if="task && view === 'discussion'" :key="`issues:${task.id}`" :task-id="task.id" :project-id="task.project_id" :writable="writable" />
   <template v-else>
     <form aria-label="任务编辑" novalidate @submit.prevent="submit">
       <fieldset :disabled="!writable || locked || isSubmitting">

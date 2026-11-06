@@ -227,6 +227,18 @@ async def test_humans_number_mention_close_and_moderate(
         headers=env.headers(write=True),
     )
     assert put.status_code == 200 and put.json() == {"enabled": True}
+    shown = await env.client.get(f"/api/v1/projects/{project['id']}", headers=env.headers())
+    assert shown.json()["issue_notices"] is True
+    # 正文里的 #编号 按项目内编号读；删除的、不存在的 404
+    by_number = await env.client.get(
+        f"/api/v1/projects/{project['id']}/issues/2", headers=env.headers()
+    )
+    assert by_number.status_code == 200 and by_number.json()["title"] == "缺陷"
+    for number in (1, 99):
+        missing = await env.client.get(
+            f"/api/v1/projects/{project['id']}/issues/{number}", headers=env.headers()
+        )
+        assert missing.status_code == 404
     assert (
         await run_sql(
             env.database_url,

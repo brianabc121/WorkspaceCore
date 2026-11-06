@@ -12135,6 +12135,12 @@
           "im_group": {
             "$ref": "#/components/schemas/ProjectImGroup"
           },
+          "issue_notices": {
+            "default": false,
+            "description": "Issue 新开 / 关闭时在项目群里提示一行（T-0123，默认关闭）",
+            "title": "Issue Notices",
+            "type": "boolean"
+          },
           "open_tasks": {
             "description": "未完成任务数",
             "title": "Open Tasks",
@@ -37708,6 +37714,98 @@
           }
         ],
         "summary": "开 Issue（member）",
+        "tags": [
+          "issues"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/issues/{number}": {
+      "get": {
+        "description": "正文和评论里的 `#编号` 链到这里。",
+        "operationId": "get_issue_by_number",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "maximum": 9999999,
+              "minimum": 1,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "按项目内编号读 Issue（viewer）",
         "tags": [
           "issues"
         ]

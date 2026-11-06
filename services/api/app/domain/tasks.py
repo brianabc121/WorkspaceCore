@@ -154,6 +154,7 @@ def project_out(
             for m in agents
         ],
         im_group=ProjectImGroup.model_validate(project_groups.group_outs(project, group)),
+        issue_notices=bool(project.issue_notices),
         version=project.version,
         created_at=project.created_at,
         updated_at=project.updated_at,

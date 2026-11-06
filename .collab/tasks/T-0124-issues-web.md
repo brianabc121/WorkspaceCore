@@ -2,13 +2,13 @@
 id: T-0124
 title: Issues 页面：项目页 Issues 标签、任务抽屉讨论标签、通知、PR 状态
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web,docs,tests/e2e
 depends_on: T-0123
 created: 2026-11-04
-updated: 2026-11-04
+updated: 2026-11-06
 ---
 
 # T-0124 Issues 页面：项目页 Issues 标签、任务抽屉讨论标签、通知、PR 状态
@@ -27,3 +27,5 @@ updated: 2026-11-04
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-04 19:02 UTC · claude · 创建任务（owner: claude）
+- 2026-11-06 10:15 UTC · claude · 开始任务
+- 2026-11-06 10:15 UTC · claude · 页面完成：项目页加“Issues”标签（?tab=issues；未关闭 / 已关闭与数量、按类型 / 标签 / 指派给我 / 提到我 / 关键词筛选、未读标记、新建先选类型再套模板）；Issue 详情页 /issues/:id 与 /projects/:project/issues/:number（正文与评论用知识库的安全 Markdown 渲染，#编号 链到同一项目、@名字 标成提及，代码里的不算；评论与事件按时间合在一条时间线里；侧栏指派、标签、关联任务、PR 状态、参与者；关闭要选原因、重复要写编号；管理员锁定、隐藏评论、删除；打开时记为已读）；任务抽屉加“讨论”标签（关联的 Issue、阻塞提示、在这里新建自动关联任务）；管理员的项目群提示开关；通知与搜索链接到 /issues/:id；SSE 主题 issues 刷新。后端补了 GET /projects/{id}/issues/{number} 与 ProjectOut.issue_notices。apps/web/tests/issues-pages.test.ts 4 个。

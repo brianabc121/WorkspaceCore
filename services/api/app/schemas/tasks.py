@@ -105,6 +105,9 @@ class ProjectOut(BaseModel):
     done_tasks: int = Field(description="已完成任务数")
     agents: list[ProjectAgentBrief] = Field(description="项目的智能体成员（T-0110）")
     im_group: ProjectImGroup
+    issue_notices: bool = Field(
+        default=False, description="Issue 新开 / 关闭时在项目群里提示一行（T-0123，默认关闭）"
+    )
     version: int
     created_at: datetime
     updated_at: datetime
