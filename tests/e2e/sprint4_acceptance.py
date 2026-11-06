@@ -294,9 +294,16 @@ def run_checks(base: str, report: Report, tag: str, token: str) -> int:
     report.check("开发者页 sync 为 ok", issues["sync"]["status"] == "ok", str(issues["sync"]))
 
     def manual_sync() -> int:
-        return owner.request(
-            "POST", f"/api/v1/integrations/{integration_id}/sync", headers=ws
-        ).status
+        # CI 把对账设成每分钟一次：整分时 Worker 的周期同步正拿着同步锁，手动同步会得到
+        # 409 SYNC_IN_PROGRESS（契约第 4 节，接口行为正确）。这时等它做完再排，最多 60 秒
+        deadline = time.monotonic() + 60
+        while True:
+            response = owner.request(
+                "POST", f"/api/v1/integrations/{integration_id}/sync", headers=ws
+            )
+            if response.code != "SYNC_IN_PROGRESS" or time.monotonic() > deadline:
+                return response.status
+            time.sleep(2)
 
     # ------------------------------------------------ A10：GitHub 上删除的 Issue
     fake_call(
