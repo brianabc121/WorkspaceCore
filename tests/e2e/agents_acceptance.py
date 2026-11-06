@@ -1517,10 +1517,13 @@ def scenario_24(c: Ctx) -> None:
 def scenario_25(c: Ctx) -> None:
     """项目 README 与 Issues（T-0122 ~ T-0124；T-0125 验收）。
 
-    README 自动列出项目里的智能体，甲经 readme_update 写“进展与交接”；管理员开接口约定 Issue 指派给乙 →
-    工作台给乙排 Issue 唤醒，wakeup.mjs 叫醒乙、乙经真实 OpenClaw 调 issue_comment（假模型只会照指令调用工具，
-    所以在唤醒提示末尾附上调用指令）；智能体连续评论 10 条后暂停，管理员评论后恢复；README 的沟通部分列出这个 Issue；
-    阻塞 Issue 挡住 complete_task，关闭后能完成。"""
+    README 自动列出项目里的智能体，甲经 readme_update 写“进展与交接”；管理员开接口约定 Issue 指派给甲 →
+    工作台给甲排 Issue 唤醒，wakeup.mjs 叫醒甲、甲经真实 OpenClaw 调 issue_comment（假模型只会照指令调用工具，
+    所以在唤醒提示末尾附上调用指令）；甲、乙连续评论 10 条后暂停，管理员评论后恢复；README 的沟通部分列出这个 Issue；
+    阻塞 Issue 挡住 complete_task，关闭后能完成。
+
+    被唤醒的是甲：OpenClaw 启动时就取好了工具列表，乙是只读实例，中途改成读写后它的模型仍找不到 issue_comment
+    （与场景 18、22 相同），所以乙的评论直接调 MCP（用乙自己的凭证）。"""
     tag = uuid.uuid4().hex[:8]
     project = c.owner.call("POST", "/api/v1/projects", {"title": f"Issue 验收 {tag}", "description": ""},
                            **{"Idempotency-Key": str(uuid.uuid4())})
@@ -1544,24 +1547,24 @@ def scenario_25(c: Ctx) -> None:
     c.owner.call("PATCH", f"/api/v1/agents/instances/{c.b.id}", {"version": current["version"], "scope": "read_write"})
     try:
         issue = c.owner.call("POST", f"/api/v1/projects/{pid}/issues", {
-            "title": f"接口约定 {tag}", "body": "请乙确认字段。", "kind": "contract", "assignee_instance_ids": [c.b.id]})
-        wake = wait_for("乙的 Issue 唤醒", lambda: sql(
+            "title": f"接口约定 {tag}", "body": "请甲确认字段。", "kind": "contract", "assignee_instance_ids": [c.a.id]})
+        wake = wait_for("甲的 Issue 唤醒", lambda: sql(
             "SELECT id FROM workspace.agent_wakeups"
-            f" WHERE instance_id = '{c.b.id}' AND source = 'issue' AND status = 'pending'"), timeout=30)
+            f" WHERE instance_id = '{c.a.id}' AND source = 'issue' AND status = 'pending'"), timeout=30)
         directive = "TOOL:myworkspace__issue_comment " + json.dumps(
-            {"issue_id": issue["id"], "body": f"乙：字段已确认 {tag}"}, ensure_ascii=False)
+            {"issue_id": issue["id"], "body": f"甲：字段已确认 {tag}"}, ensure_ascii=False)
         # 唤醒本来在 5 分钟后：提前到现在，并在提示末尾附上调用指令
         sql_env(f"UPDATE workspace.agent_wakeups SET run_at = now(), prompt = prompt || E'\\n' || '{directive}'"
                 f" WHERE id = '{wake}'")
-        out = c.b.exec("node", "/opt/myworkspace/bin/wakeup.mjs", timeout=700, check=False)
+        out = c.a.exec("node", "/opt/myworkspace/bin/wakeup.mjs", timeout=700, check=False)
 
         def comments() -> list[dict[str, Any]]:
             return list(c.owner.call("GET", f"/api/v1/issues/{issue['id']}")["comments"])
 
-        mine = wait_for("乙在 Issue 里评论", lambda: [x for x in comments()
-                                                    if x["author"]["id"] == c.b.id and tag in (x["body"] or "")],
+        mine = wait_for("甲在 Issue 里评论", lambda: [x for x in comments()
+                                                    if x["author"]["id"] == c.a.id and tag in (x["body"] or "")],
                         timeout=120, interval=3)
-        c.check("场景 25：接口约定 Issue 指派给乙 → 工作台排 Issue 唤醒；wakeup.mjs 叫醒乙，乙经真实 OpenClaw 调 issue_comment 评论",
+        c.check("场景 25：接口约定 Issue 指派给甲 → 工作台排 Issue 唤醒；wakeup.mjs 叫醒甲，甲经真实 OpenClaw 调 issue_comment 评论",
                 bool(mine), (out.stderr or "")[-300:])
 
         # 智能体连续评论：到第 10 条暂停，管理员评论后恢复

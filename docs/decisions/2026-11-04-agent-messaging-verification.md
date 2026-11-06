@@ -122,7 +122,7 @@ V2（禁用发消息工具后自动回复照常）、V3（系统事件进下一�
 | 开关 | 没开权限时甲调用 `list_agent_runs` 返回 `FORBIDDEN_CAPABILITY`；打开后看得到乙（`is_you` 只标在自己身上） |
 | 智能体叫停 | 甲用 `stop_agent_run` 叫停乙，直接执行、返回 `stopping`；乙接下来的工具调用返回 `RUN_STOPPED`；乙的 `stop-runs.mjs` 领取终止令、调网关后报回 `done`（乙当时没有正在运行的会话，`aborted` 为 0），软停止随之解除；管理员收到“甲叫停了乙”的通知 |
 | 管理员叫停 | 甲在一件事上反复调用 `knowledge_search`，管理员叫停后它的下一次工具调用拿到 `RUN_STOPPED` 和原因；甲的 `stop-runs.mjs` 在容器里用 `sessions.list({activeOnly: true})` 找到正在运行的会话、`sessions.abort` 中止（`done`，`aborted` 为 1，领取到报回约 6 秒）；之后甲不再调用模型（模型调用次数 66 → 66，那一轮停下，排队的也清掉）；报回成功后解除软停止，甲的工具调用恢复 |
-| 未核对 | 乙（外网实例，public 模式）的模型经 Tool Search 调工作台工具时 OpenClaw 报 `Unknown tool id`（提交 3e9b6d5 的那次 CI），调用没到工作台；与终止无关，留给 T-0125 核对 |
+| 未核对 → 已查明（T-0125，见 6.4） | 乙（外网实例，public 模式）的模型经 Tool Search 调工作台工具时 OpenClaw 报 `Unknown tool id`（提交 3e9b6d5 的那次 CI），调用没到工作台；与终止无关。原因是 OpenClaw 的 SSRF 防护拦下了外网模式的 MCP 地址，见 6.4 |
 
 ### 6.3 唤醒（T-0121，2026-11-06）
 
@@ -130,3 +130,26 @@ V4 实测结果（同一次 CI，提交 84f4359）：接入包的 `wakeup.mjs` �
 `openclaw agent --session-key openim:group:<群 ID 小写> --message-file … --timeout 600 --json` 跑完一轮并报回 `done`；
 这一轮在群的会话里运行（模型收到的上下文里有群里之前的消息，消息条数 2 → 4），甲按提示词用 `im_send` 在群里发了言（场景 21）。
 会话键写法与 openclaw-channel 的 `openim:group:<gid>` / `openim:<sendID>`（小写）一致。
+
+### 6.4 附件、定时、断线排队与外网模式的 MCP（T-0125，2026-11-06）
+
+V1、V5、V6 实测结果（PR brianabc121/WorkspaceCore#161 的 CI agents 任务，提交 6d78f7a，真实 OpenIM v3.8.3-patch.18 + OpenClaw 2026.9.36，场景 24 全部通过）：
+
+| # | 结果 |
+|---|---|
+| V1 | 甲打开附件权限后经 `im_send` 一次发文字 + 图片 + 文件 + 视频，`status = sent`；管理员的会话里按顺序收到 `text`、`image`、`file`、`video` 四条（真实 OpenIM 接受实例身份发出的 102 / 105 / 104）。没打开附件权限时 `ATTACHMENT_FORBIDDEN` |
+| V5 | 文件与视频存进 OpenIM 对象存储（Garage）：管理员按附件下载文件，内容与发出时一致、`Content-Disposition: attachment`；视频读出时长 3 秒并带默认封面，`Range: bytes=0-15` 返回 206 与 16 字节。50 MB 的大文件没有在 CI 里实测（分片上传用的是图片已核验的同一个 `ObjectStore.upload`） |
+| V6 | 内联附件（`data_base64` 与 `text_content`）经实例的 MCP 请求送到工作台并发出；执行记录里只有长度（`不记录`），没有内容 |
+| 定时 | `send_at` 在 75 秒后：返回 `scheduled`，到点前会话里没有，到点后 Worker 发出一条 |
+| 断线排队 | 停掉 openim-server 时 `im_send` 返回 `queued`；启动后工作台补发，30 秒后会话里仍只有一条（不重复）；之后甲、乙重新上线 |
+
+**外网模式实例的模型用不了工作台的 MCP 工具（已查明，未修复，见任务 T-0133）**：
+
+- 现象：乙（外网模式）的 OpenClaw 日志 `[security] blocked URL fetch (mcp-http) targetOrigin=http://public.test:18443 reason=Blocked: resolves to private/internal/special-use IP address`，
+  接着 `[bundle-mcp] failed to start server "myworkspace"`，模型调 `myworkspace__*` 得到 `Unknown tool id`。场景 25 第一次（提交 6d78f7a）因此失败；之前的场景对乙都是直接调 MCP、不经模型，所以没暴露。
+- 原因（锁定镜像里的代码 `dist/mcp-http-fetch-*.mjs`、`dist/ssrf-*.mjs`）：MCP 的 HTTP 请求经 `fetchWithSsrFGuard`，配置的 MCP 地址的主机名被信任（`allowedOrigins`），
+  解析到私有地址（10 / 172.16 / 192.168）放行——所以内网模式的甲正常；但解析到回环地址（127.0.0.1）时，除非主机名本身是 `localhost`、`*.localhost` 或回环 IP，一律拦下
+  （`assertAllowedTrustedHostnameResolvedAddressesOrThrow`）。外网模式按设计把工作台外网域名在容器里指向 127.0.0.1（本机隧道），正好被拦。
+- 不能只把地址改成 `http://127.0.0.1:<端口>/mcp`：外网入口的 Caddy 按主机名分站点且开了双向证书，要求 Host 与 SNI 一致；
+  在锁定镜像里实测 undici 8.10.2 的 `fetch` 会忽略自定义的 `Host` 头（发出去的仍是 `127.0.0.1:<端口>`）。
+- 影响：外网模式实例收发 IM 正常（openclaw-channel 不走这个检查），但模型调不到任何工作台工具（任务、知识库、IM 发消息、Issue、邮件……）。内网模式不受影响。

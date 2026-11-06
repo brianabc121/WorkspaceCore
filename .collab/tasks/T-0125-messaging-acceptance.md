@@ -30,3 +30,4 @@ updated: 2026-11-06
 - 2026-11-04 19:02 UTC · claude · 创建任务（owner: claude）
 - 2026-11-06 13:54 UTC · claude · 开始任务
 - 2026-11-06 13:54 UTC · claude · 人类 2026-11-06 要求“继续”后开工。已完成（本地，等 PR #161 合并后提交）：文档（api-contract 消息 / 唤醒 / 终止 / README / Issues 五节、data-dictionary 0033~0039、threat-model 8 行、deploy-guide 8.6、versions）；修正执行记录存附件全文的问题（_record_args 只记长度，被密钥拦下的也不记）；agents 场景 24（附件、定时、OpenIM 停掉期间排队）、25（README、Issue 唤醒与评论、连续评论暂停、阻塞 Issue）；README / Issues 浏览器验收 readme_issues_browser.cjs（本机全部通过）。下一步：开 PR 跑 CI，按结果补核验记录的实测。
+- 2026-11-06 14:28 UTC · claude · PR #161 第一次 CI（6d78f7a）：场景 24 全部通过（V1、V5、V6、定时、断线排队实测，结果写进核验记录 6.4）；场景 25 失败在“乙被唤醒后评论”：乙是外网模式，OpenClaw 的 SSRF 防护拦下了解析到 127.0.0.1 的 MCP 地址，模型调不到任何工作台工具（之前对乙都是直接调 MCP，所以没暴露）。场景 25 改由内网模式的甲被唤醒并评论；外网模式的问题另建 T-0133，deploy-guide 加了已知问题提示。
