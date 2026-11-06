@@ -201,21 +201,23 @@ async def _dispatch(
         spec = TOOLS.get(params.name)
         if spec is None or not available(spec):
             return error_result("NOT_FOUND", "没有这个工具")
-        if state.redis is not None:
-            limiter = WindowLimiter(state.redis, 60)
-            if await limiter.hit(f"mcp_calls:{caller.instance_id}", CALLS_PER_MINUTE) is not None:
-                return error_result("RATE_LIMITED", "调用太频繁，请稍后再试")
         async with state.sessionmaker() as db:
+            # 软停止（T-0126）：被叫停后 5 分钟内的工具调用一律拒绝，让深陷的那一轮停下来。
+            # 放在限流前面：停不下来的那一轮往往正在刷调用，它该看到的是“被叫停”，不是“太频繁”
+            stopped = await agent_stops.soft_stop(db, state.redis, caller.instance_id)
+            if stopped is not None:
+                return error_result("RUN_STOPPED", stopped)
+            if state.redis is not None:
+                limiter = WindowLimiter(state.redis, 60)
+                key = f"mcp_calls:{caller.instance_id}"
+                if await limiter.hit(key, CALLS_PER_MINUTE) is not None:
+                    return error_result("RATE_LIMITED", "调用太频繁，请稍后再试")
             service = AiToolService(
                 db, state.settings, state.connectors, state.redis, jobs=state.jobs
             )
             instance = await db.get(AgentInstance, caller.instance_id)
             if instance is None:
                 return error_result("NOT_FOUND", "实例不存在")
-            # 软停止（T-0126）：被叫停后 5 分钟内的工具调用一律拒绝，让深陷的那一轮停下来
-            stopped = await agent_stops.soft_stop(db, state.redis, instance.id)
-            if stopped is not None:
-                return error_result("RUN_STOPPED", stopped)
             requester = await service.requester(instance)
             raw = dict(params.arguments or {})
             try:

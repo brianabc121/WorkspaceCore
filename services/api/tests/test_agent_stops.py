@@ -262,6 +262,28 @@ async def test_agent_stops_are_rate_limited(env: ImEnv) -> None:
     assert tool_error(limited)["code"] == "RATE_LIMITED"
 
 
+async def test_stopped_agent_is_told_so_even_when_rate_limited(
+    env: ImEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.domain import mcp_tools
+
+    monkeypatch.setattr(mcp_tools, "CALLS_PER_MINUTE", 2)
+    _, token_a = await _ready_agent(env, "甲")
+    b, token_b = await _ready_agent(env, "乙")
+    for _ in range(2):
+        assert ok(await call(env, token_a, "list_tasks", {})) is not None
+    assert tool_error(await call(env, token_a, "list_tasks", {}))["code"] == "RATE_LIMITED"
+    stopped = await env.client.post(
+        f"/api/v1/agents/instances/{b['id']}/stop",
+        json={"reason": "刷调用"},
+        headers=env.headers(write=True),
+    )
+    assert stopped.status_code == 201
+    # 停不下来的那一轮往往正在刷调用：它看到的是“被叫停”，不是“太频繁”
+    for _ in range(4):
+        assert tool_error(await call(env, token_b, "list_tasks", {}))["code"] == "RUN_STOPPED"
+
+
 async def test_admin_stop_expiry_and_failure(env: ImEnv) -> None:
     _, token_a = await _ready_agent(env, "甲")
     b, token_b = await _ready_agent(env, "乙")
