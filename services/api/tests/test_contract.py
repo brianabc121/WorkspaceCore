@@ -1019,6 +1019,9 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             # 主动发消息：直接执行、不审批（人类 2026-11-04 决定，例外四，T-0118）
             "im_send",
             "im_cancel",
+            # 唤醒：同样直接执行（例外四，T-0121）
+            "schedule_wakeup",
+            "cancel_wakeup",
         },
     }
     for spec in TOOLS.values():

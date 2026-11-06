@@ -967,11 +967,64 @@ class ImRejectedReply(BaseModel):
     untrusted: ImOutboxText
 
 
+class WakeupItem(BaseModel):
+    wakeup_id: UUID
+    source: Literal["agent", "admin"] = Field(
+        description="agent 是你自己安排的，admin 是管理员建的"
+    )
+    target: str | None = Field(description="在哪个会话里跑；null 是独立会话")
+    run_at: datetime
+    repeat: Literal["none", "daily", "weekdays", "weekly"]
+    status: Literal["pending", "running", "done", "failed", "cancelled"]
+    untrusted: ImOutboxText = Field(description="唤醒时要做的事（提示词）")
+
+
 class ImOutboxOutput(BaseModel):
     items: list[ImOutboxItem] = Field(description="你经 im_send 发的消息，最近的在前")
     rejected_replies: list[ImRejectedReply] = Field(
         description="最近 7 天你的自动回复被拒收的记录，最近的在前"
     )
+    wakeups: list[WakeupItem] = Field(
+        default_factory=list, description="还没执行的唤醒（你安排的和管理员建的），最早的在前"
+    )
+
+
+class ScheduleWakeupInput(_Strict):
+    prompt: Annotated[str, StringConstraints(min_length=1, max_length=2000)] = Field(
+        description="到点时要你做的事，会作为这一轮的消息交给你"
+    )
+    at: AwareDatetime | None = Field(
+        default=None, description="什么时候叫醒（最早 5 分钟后，最远 30 天）；和 in_minutes 二选一"
+    )
+    in_minutes: int | None = Field(default=None, ge=5, le=43200, description="多少分钟后叫醒")
+    target: ImTarget | None = Field(
+        default=None,
+        description="在哪个会话里跑（im_list_targets 给的 target，能看到那里之前的消息）；"
+        "不给就是独立会话",
+    )
+
+    @model_validator(mode="after")
+    def _when(self) -> Self:
+        if (self.at is None) == (self.in_minutes is None):
+            raise ValueError("at 和 in_minutes 只填一个")
+        return self
+
+
+class ScheduleWakeupOutput(BaseModel):
+    status: Literal["scheduled"] = "scheduled"
+    wakeup_id: UUID
+    run_at: datetime
+    target: str | None
+    pending: int = Field(description="你安排的、还没执行的唤醒数（最多 20 个）")
+
+
+class CancelWakeupInput(_Strict):
+    wakeup_id: UUID
+
+
+class CancelWakeupOutput(BaseModel):
+    status: Literal["cancelled"] = "cancelled"
+    wakeup_id: UUID
 
 
 class ClaimTaskOutput(BaseModel):
@@ -1222,6 +1275,23 @@ _IM_DIRECT: list[ToolSpec] = [
         ImCancelInput,
         ImCancelOutput,
         "取消你排队中或定时的消息（已经发出的不能取消）",
+    ),
+    # 唤醒（T-0121）：同样直接执行（例外四）
+    _spec(
+        "schedule_wakeup",
+        "direct",
+        ScheduleWakeupInput,
+        ScheduleWakeupOutput,
+        "安排一次唤醒：到点工作台叫醒你跑一轮，把 prompt 交给你"
+        "（例如“明早 9 点去项目群发昨天的进展”）。最早 5 分钟后、最远 30 天，最多 20 个待执行；"
+        "内容已经确定的提醒直接用 im_send 的 send_at",
+    ),
+    _spec(
+        "cancel_wakeup",
+        "direct",
+        CancelWakeupInput,
+        CancelWakeupOutput,
+        "取消你自己安排、还没执行的唤醒（管理员建的不能取消）；待执行的唤醒在 im_outbox 里",
     ),
 ]
 _KNOWLEDGE: list[ToolSpec] = [

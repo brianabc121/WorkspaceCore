@@ -435,3 +435,56 @@ class AgentImRejection(Base):
     preview: Mapped[str] = mapped_column(Text, server_default=text("''"))
     retried: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = _created()
+
+
+WAKEUP_SOURCES = ("agent", "admin")
+WAKEUP_REPEATS = ("none", "daily", "weekdays", "weekly")
+WAKEUP_STATUSES = ("pending", "running", "done", "failed", "cancelled")
+
+
+class AgentWakeup(Base):
+    """到点叫醒智能体跑一轮（T-0121，方案第 7.2 节）。
+
+    智能体自己安排（source = agent）或管理员在实例页建（source = admin，可以重复）。
+    接入包每分钟领取到期的唤醒，在 `session_key` 指定的会话里跑一轮；`target` 为空是独立会话。
+    """
+
+    __tablename__ = "agent_wakeups"
+    __table_args__ = (
+        CheckConstraint(f"source IN {WAKEUP_SOURCES}", name="source"),
+        CheckConstraint(f"repeat IN {WAKEUP_REPEATS}", name="repeat"),
+        CheckConstraint(f"status IN {WAKEUP_STATUSES}", name="status"),
+        CheckConstraint("char_length(prompt) BETWEEN 1 AND 2000", name="prompt"),
+        Index(
+            "ix_agent_wakeups_due",
+            "instance_id",
+            "run_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index("ix_agent_wakeups_instance_created", "instance_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="CASCADE")
+    )
+    source: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    target: Mapped[str | None] = mapped_column(Text)
+    session_key: Mapped[str] = mapped_column(Text)
+    prompt: Mapped[str] = mapped_column(Text)
+    run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    repeat: Mapped[str] = mapped_column(Text, server_default=text("'none'"))
+    time_zone: Mapped[str] = mapped_column(Text, server_default=text("'UTC'"))
+    status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
+    runs: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()

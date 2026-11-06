@@ -28,6 +28,7 @@ from app.models.identity import AuthSession, ExternalIdentity, User
 from app.models.im import (
     AgentImOutbox,
     AgentImRejection,
+    AgentWakeup,
     ImAccount,
     ImContactGroup,
     ImContactGroupMember,
@@ -84,6 +85,7 @@ __all__ = [
     "AgentSshTarget",
     "AgentUsageCursor",
     "AgentUsageMinute",
+    "AgentWakeup",
     "AiToolExecution",
     "AppLogin",
     "AuditLog",

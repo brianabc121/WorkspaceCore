@@ -7,6 +7,7 @@ import SshDeploy from './SshDeploy.vue'
 import HostStatus from './HostStatus.vue'
 import OpsPanel from './OpsPanel.vue'
 import OutboxPanel from './OutboxPanel.vue'
+import WakeupPanel from './WakeupPanel.vue'
 
 const props = defineProps<{ instance: Schema['AgentInstanceOut']; secrets: Schema['AgentSecretOut'][]; busy: boolean; host?: Schema['HostSummaryItem'] }>()
 const emit = defineEmits<{ edit: []; toggle: []; bundle: [previous: Schema['BundleRequest']['previous']]; revoke: [credential: Schema['AgentCredentialOut']]; grants: [grants: Schema['SecretGrantIn'][]]; projectAdmin: [enabled: boolean]; imMedia: [enabled: boolean] }>()
@@ -55,6 +56,7 @@ function saveGrants() { if (grantsValid.value) { emit('grants', rows.value.map(r
     <SshDeploy :instance="instance" />
     <OpsPanel :instance="instance" />
     <OutboxPanel :instance="instance" />
+    <WakeupPanel :instance="instance" />
     <section class="agent-section" aria-label="接入包">
       <h3>接入包</h3>
       <p class="form-help">每次生成都会签发新凭证，凭证只出现在这一次下载的 zip 里。{{ instance.network_mode === 'public' ? '外网模式同时签发 90 天的客户端证书；用上面的 SSH 自动部署时会自动生成，不用下载。' : '' }}</p>

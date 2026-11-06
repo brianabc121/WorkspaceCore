@@ -35,6 +35,7 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     // 知识库（T-0099）：默认没有笔记
     // 实例的发件记录（T-0118）：默认没有
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/outbox$/.test(path) && request.method === 'GET') return Response.json({ items: [], rejected_replies: [] })
+    if (/^\/api\/v1\/agents\/instances\/[^/]+\/wakeups$/.test(path) && request.method === 'GET') return Response.json({ items: [], targets: [] })
     if (path === '/api/v1/knowledge/spaces') return Response.json({ items: [] })
     if (path === '/api/v1/knowledge/graph') return Response.json({ nodes: [], edges: [], truncated: false, total_notes: 0 })
     if (path === '/api/v1/knowledge/notes' || path === '/api/v1/knowledge/changes' || path === '/api/v1/knowledge/trash') return Response.json(emptyPage)

@@ -26,6 +26,7 @@ from app.core.resources import create_engine
 from app.domain import (
     agent_ops,
     agent_outbox,
+    agent_wakeups,
     agent_watch,
     alerts,
     approval_cards,
@@ -105,7 +106,11 @@ async def purge(ctx: dict[str, Any]) -> None:
         ops_actions = await agent_ops.purge(db)
         # 发件箱 30 天、拒收记录 7 天（T-0118）
         outbox_rows, rejections = await agent_outbox.purge(db)
+        # 唤醒：结束 30 天以上的（T-0121）
+        wakeups = await agent_wakeups.purge(db)
         await db.commit()
+    if wakeups:
+        logger.info("agent wakeups purged", extra={"count": wakeups})
     if ops_actions:
         logger.info("agent ops actions purged", extra={"count": ops_actions})
     if outbox_rows or rejections:

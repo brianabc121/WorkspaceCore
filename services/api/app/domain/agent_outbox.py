@@ -29,7 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.domain import agent_im, agent_media, events, ops_metrics
+from app.domain import agent_im, agent_media, agent_wakeups, events, ops_metrics
 from app.domain.agent_ops import redact
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.im_callbacks import RATE_KEY
@@ -52,6 +52,7 @@ from app.models import (
     ImMessage,
 )
 from app.schemas.ai_tools import (
+    CancelWakeupInput,
     ImCancelInput,
     ImCancelOutput,
     ImOutboxInput,
@@ -62,6 +63,7 @@ from app.schemas.ai_tools import (
     ImSendInput,
     ImSendOutput,
     ImSendResultItem,
+    ScheduleWakeupInput,
     ToolSpec,
 )
 from app.schemas.openim_callbacks import MsgCallback
@@ -823,7 +825,11 @@ class AgentOutbox:
                         untrusted=ImOutboxText(text=r.preview or None),
                     )
                 )
-        return ImOutboxOutput(items=items, rejected_replies=replies)
+        return ImOutboxOutput(
+            items=items,
+            rejected_replies=replies,
+            wakeups=await agent_wakeups.pending_items(self.db, instance_id),
+        )
 
     async def recent_rejections(self, instance_id: uuid.UUID, hours: int = 24) -> int:
         since = _now() - timedelta(hours=hours)
@@ -1007,6 +1013,13 @@ async def run(
         if isinstance(parsed, ImSendInput):
             output: BaseModel = await outbox.send(requester.instance, parsed)
             summary = f"主动发消息：{parsed.target}（{output.status}）"  # type: ignore[attr-defined]
+        elif isinstance(parsed, ScheduleWakeupInput):
+            scheduled = await agent_wakeups.schedule(service.db, requester.instance, parsed)
+            output = scheduled
+            summary = f"安排唤醒：{scheduled.run_at.isoformat(timespec='minutes')}"
+        elif isinstance(parsed, CancelWakeupInput):
+            output = await agent_wakeups.cancel_own(service.db, requester.instance, parsed)
+            summary = "取消唤醒"
         else:
             if not isinstance(parsed, ImCancelInput):
                 raise ToolCallError("NOT_FOUND", "没有这个工具")

@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.api.deps import client_ip, get_agent_service, get_db, get_redis
 from app.api.media_http import media_response
 from app.core.errors import ApiError
-from app.domain import agent_outbox, im_callbacks
+from app.domain import agent_outbox, agent_wakeups, im_callbacks
 from app.domain.agents import AgentPrincipal, AgentService
 from app.domain.host_metrics import HostService
 from app.domain.im import openim_client
@@ -45,6 +45,10 @@ from app.schemas.agents import (
     ImTokenResponse,
     SecretResolveRequest,
     SecretResolveResponse,
+    WakeupClaimItem,
+    WakeupClaimResponse,
+    WakeupResult,
+    WakeupResultResponse,
 )
 from app.schemas.common import error_responses
 from app.schemas.host import HostReport, HostReportResult
@@ -185,6 +189,49 @@ async def agent_host_metrics(
     body: HostReport,
 ) -> HostReportResult:
     return await HostService(db, redis).report(principal.instance, body)
+
+
+@router.post(
+    "/wakeups/claim",
+    summary="领取到期的唤醒（实例的 wakeup.mjs，每分钟一次）",
+    description="领取即标为执行中，不会再发给别的请求；领取后 15 分钟没有结果记为失败（不重跑）。"
+    "每次最多 5 个，每个实例每分钟最多 6 次（T-0121，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.2 节）。",
+    responses=_errors,
+)
+async def claim_agent_wakeups(
+    principal: Principal,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> WakeupClaimResponse:
+    claimed = await agent_wakeups.claim(db, redis, principal.instance)
+    return WakeupClaimResponse(
+        items=[
+            WakeupClaimItem(id=w.id, session_key=w.session_key, message=message)
+            for w, message in claimed
+        ]
+    )
+
+
+@router.post(
+    "/wakeups/{wakeup_id}/result",
+    summary="报回唤醒的结果（实例的 wakeup.mjs）",
+    description="done 或 failed（附一行原因）；重复的唤醒排下一次。",
+    responses=error_responses(401, 404, 422),
+)
+async def report_agent_wakeup(
+    principal: Principal,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    wakeup_id: uuid.UUID,
+    body: WakeupResult,
+) -> WakeupResultResponse:
+    wakeup = await agent_wakeups.report(
+        db, principal.instance, wakeup_id, ok=body.status == "done", error=body.error
+    )
+    return WakeupResultResponse(
+        id=wakeup.id,
+        status=wakeup.status,
+        run_at=wakeup.run_at,
+    )
 
 
 gateway = APIRouter(include_in_schema=False)

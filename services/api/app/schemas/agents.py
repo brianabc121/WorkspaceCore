@@ -13,6 +13,7 @@ from uuid import UUID
 
 from pydantic import (
     AfterValidator,
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -544,3 +545,69 @@ class AgentOpsState(BaseModel):
     )
     running: AgentOpsActionOut | None = Field(description="进行中的动作（同一实例同时只有一个）")
     items: list[AgentOpsActionOut] = Field(description="最近 20 次（7 天内），最近的在前")
+
+
+# ---------------------------------------------------------------- 唤醒（T-0121）
+
+WakeupRepeat = Literal["none", "daily", "weekdays", "weekly"]
+
+
+class WakeupClaimItem(BaseModel):
+    id: UUID
+    session_key: str = Field(description="openclaw agent --session-key 的值")
+    message: str = Field(description="这一轮交给智能体的消息（说明 + 提示词）")
+
+
+class WakeupClaimResponse(BaseModel):
+    items: list[WakeupClaimItem] = Field(description="到期、刚领取的唤醒（最多 5 个）")
+
+
+class WakeupResult(_Strict):
+    status: Literal["done", "failed"]
+    error: Annotated[str, StringConstraints(max_length=300)] | None = None
+
+
+class WakeupResultResponse(BaseModel):
+    id: UUID
+    status: Literal["pending", "running", "done", "failed", "cancelled"]
+    run_at: datetime = Field(description="重复的唤醒是下一次的时间")
+
+
+class AgentWakeupCreate(_Strict):
+    prompt: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+    target: (
+        Annotated[
+            str,
+            StringConstraints(min_length=6, max_length=72, pattern=r"^(user|group):[A-Za-z0-9_]+$"),
+        ]
+        | None
+    ) = Field(default=None, description="在哪个会话里跑；null 是独立会话")
+    run_at: AwareDatetime
+    repeat: WakeupRepeat = "none"
+    time_zone: Annotated[str, StringConstraints(min_length=1, max_length=64)] = "UTC"
+
+
+class AgentWakeupOut(BaseModel):
+    id: UUID
+    source: Literal["agent", "admin"]
+    created_by: UUID | None
+    target: str | None
+    prompt: str
+    run_at: datetime
+    repeat: WakeupRepeat
+    time_zone: str
+    status: Literal["pending", "running", "done", "failed", "cancelled"]
+    runs: int
+    last_run_at: datetime | None
+    last_error: str | None
+    created_at: datetime
+
+
+class WakeupTarget(BaseModel):
+    target: str
+    label: str
+
+
+class AgentWakeupList(BaseModel):
+    items: list[AgentWakeupOut] = Field(description="待执行的在前，其余按时间倒序，最多 50 个")
+    targets: list[WakeupTarget] = Field(description="可以选的会话：和管理员的私聊、它所在的群")

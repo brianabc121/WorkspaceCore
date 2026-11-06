@@ -1129,10 +1129,36 @@ def scenario_20(c: Ctx) -> None:
             f"{instance['plugin_version']} / {instance['bundle_outdated']}")
 
 
+def scenario_21(c: Ctx) -> None:
+    """唤醒：管理员建一个唤醒，接入包的 wakeup.mjs 领取后在群的会话里叫醒甲，甲用 im_send 在群里发言（T-0121）。"""
+    conv, gid = c.group["conversation_id"], c.group["group_id"]
+    since = time.time()
+    created = c.owner.call("POST", f"/api/v1/agents/instances/{c.a.id}/wakeups", {
+        "prompt": im_send_tool(f"group:{gid}", "唤醒后的进展汇报"), "target": f"group:{gid}",
+        "run_at": datetime.now(UTC).isoformat(), "repeat": "none", "time_zone": "UTC"})
+    # 照 crontab 那一行运行一次（真实的 openclaw agent --session-key，核验 V4）
+    out = c.a.exec("node", "/opt/myworkspace/bin/wakeup.mjs", timeout=700, check=False)
+
+    def finished() -> dict[str, Any] | None:
+        items = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}/wakeups")["items"]
+        found = next((w for w in items if w["id"] == created["id"]), None)
+        return found if found and found["status"] in ("done", "failed") else None
+
+    state = wait_for("唤醒跑完", finished, timeout=120, interval=3)
+    c.check("场景 21：wakeup.mjs 领取唤醒、在容器里跑完一轮并报回（done）", state["status"] == "done",
+            f"{state['status']} {state.get('last_error')} {(out.stderr or '')[-300:]}")
+    posted = wait_for("甲在群里发言", lambda: c.from_sender(conv, c.a.im_user_id, "唤醒后的进展汇报"), timeout=120)
+    c.check("场景 21：唤醒后甲用 im_send 主动在群里发言", bool(posted))
+    turns = [r for r in c.model_calls(c.keys["a"], since) if "唤醒后的进展汇报" in (r.get("last_user") or "")]
+    c.check("场景 21：唤醒在群的会话里运行，模型看得到群里之前的消息（会话键写法，核验 V4）",
+            any(int(r.get("count") or 0) > 3 for r in turns), json.dumps([r.get("count") for r in turns]))
+
+
 SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "2": scenario_2, "3": scenario_3, "4": scenario_4, "5": scenario_5, "7": scenario_7, "8": scenario_8,
     "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "15": scenario_15,
-    "16": scenario_16, "17": scenario_17, "18": scenario_18, "19": scenario_19, "20": scenario_20, "6": scenario_6,
+    "16": scenario_16, "17": scenario_17, "18": scenario_18, "19": scenario_19, "20": scenario_20, "21": scenario_21,
+    "6": scenario_6,
 }
 
 

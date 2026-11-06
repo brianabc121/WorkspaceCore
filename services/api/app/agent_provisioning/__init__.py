@@ -130,7 +130,8 @@ def compose_command(directory: str, *args: str) -> str:
 
 def cron_lines(directory: str) -> list[str]:
     """每 10 分钟取一次轮换后的模型密钥；每周一重启换上新的 IM 令牌；
-    每分钟上报一次 token 用量（时间轴，T-0104）与服务器状态（T-0113）。见接入包 CHECKLIST.md。"""
+    每分钟上报一次 token 用量（时间轴，T-0104）与服务器状态（T-0113）、领取到期的唤醒（T-0121）。
+    见接入包 CHECKLIST.md。"""
     cd = f"cd {q(directory)}"
     return [
         f"*/10 * * * * {cd} && docker compose exec -T openclaw node openclaw.mjs secrets reload"
@@ -139,6 +140,8 @@ def cron_lines(directory: str) -> list[str]:
         f" /opt/myworkspace/bin/usage-report.mjs >/dev/null 2>&1 {CRON_MARKER}",
         f"* * * * * {cd} && docker compose exec -T openclaw node"
         f" /opt/myworkspace/bin/host-report.mjs >/dev/null 2>&1 {CRON_MARKER}",
+        f"* * * * * {cd} && docker compose exec -T openclaw node"
+        f" /opt/myworkspace/bin/wakeup.mjs >/dev/null 2>&1 {CRON_MARKER}",
         f"17 4 * * 1 {cd} && docker compose restart openclaw >/dev/null 2>&1 {CRON_MARKER}",
     ]
 

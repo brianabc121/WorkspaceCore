@@ -681,7 +681,9 @@ class Installer:
             if not result.ok:
                 raise InstallFailed("schedule_failed", "写入 crontab 失败")
             await self.rec.step(
-                "schedule", "done", "每分钟上报用量与服务器状态、每 10 分钟取密钥、每周一重启"
+                "schedule",
+                "done",
+                "每分钟上报用量与服务器状态、领取唤醒，每 10 分钟取密钥、每周一重启",
             )
         else:
             await self.rec.step(

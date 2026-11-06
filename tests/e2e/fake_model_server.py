@@ -113,6 +113,7 @@ class Handler(BaseHTTPRequestHandler):
         record = {"at": time.time(), "auth": self.headers.get("Authorization"),
                   "last_user": _since_user(messages)[0][-500:], "result": result,
                   "roles": [m.get("role") for m in messages[-6:]],
+                  "count": len(messages),
                   "last": _text(messages[-1].get("content"))[-800:] if messages else "",
                   # 最近一条工具结果的末尾（OpenClaw 会在工具结果后面再补一条只含内部上下文的用户消息，
                   # last 看不到它；工作台工具的错误码在结果的末尾，T-0108）

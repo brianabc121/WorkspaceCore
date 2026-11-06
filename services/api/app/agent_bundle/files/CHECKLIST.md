@@ -56,6 +56,10 @@
       `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs`
 - [ ] 每分钟上报服务器状态（T-0113）：在容器里读 `/proc` 与磁盘统计（CPU 核心数与负载、内存、两个分区、默认网卡的收发字节、开机时长），只发数字，不发进程、文件名、IP。没配这一行时，实例页的“服务器状态”显示“未上报”：
       `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/host-report.mjs`
+- [ ] 每分钟领取唤醒（T-0121）：工作台到点叫醒智能体跑一轮（它自己用 `schedule_wakeup` 安排的，或管理员在实例页建的）。
+      脚本领取到期的唤醒，在容器里运行 `openclaw agent --session-key <会话> --message-file <消息>`，再把结果报回工作台；
+      同一时间只跑一个，一轮最多 10 分钟。没配这一行时唤醒不会执行，实例页的唤醒一直显示“待执行”：
+      `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/wakeup.mjs`
 - [ ] 每晚复盘（知识库，T-0100）：OpenClaw 启动后在本目录运行一次 `sh setup-reflection.sh`。
       它用 `openclaw automations add` 建 OpenClaw 自己的定时任务（默认每天 22:00，提示词在 `reflection-prompt.md`）；
       重复运行只更新同一个任务。SSH 自动部署会自动运行这一步。

@@ -24,14 +24,15 @@ from app.api.deps import (
     workspace_admin,
     workspace_owner,
 )
-from app.domain import agent_outbox
+from app.domain import agent_im, agent_outbox, agent_wakeups
 from app.domain.agent_ops import AgentOpsService
 from app.domain.agent_ssh import AgentSshService
 from app.domain.agents import AgentService
+from app.domain.audit import AuditTrail
 from app.domain.auth import AuthContext
 from app.domain.host_metrics import HostService
 from app.domain.policy import WorkspaceAccess, not_found
-from app.models import AgentInstance
+from app.models import AgentInstance, AgentWakeup
 from app.schemas.agents import (
     AgentInstanceCreate,
     AgentInstanceOut,
@@ -53,6 +54,9 @@ from app.schemas.agents import (
     AgentSshState,
     AgentSshTargetSet,
     AgentSshUninstall,
+    AgentWakeupCreate,
+    AgentWakeupList,
+    AgentWakeupOut,
     BundleRequest,
     ProjectAdminOut,
     ProjectAdminPut,
@@ -60,8 +64,15 @@ from app.schemas.agents import (
     SecretAccessResult,
     SecretGrantsReplace,
     VersionBody,
+    WakeupTarget,
 )
-from app.schemas.ai_tools import ImCancelInput, ImCancelOutput, ImOutboxInput, ImOutboxOutput
+from app.schemas.ai_tools import (
+    ImCancelInput,
+    ImCancelOutput,
+    ImListTargetsInput,
+    ImOutboxInput,
+    ImOutboxOutput,
+)
 from app.schemas.common import error_responses
 from app.schemas.host import HostRange, HostStatusOut, HostSummaryList
 
@@ -664,3 +675,128 @@ async def cancel_agent_outbox(
     out = await agent_outbox.AgentOutbox(ctx).cancel(instance, body)
     await db.commit()
     return out
+
+
+# ---------------------------------------------------------------- 唤醒（T-0121）
+
+
+def _wakeup_out(w: AgentWakeup) -> AgentWakeupOut:
+    return AgentWakeupOut(
+        id=w.id,
+        source=w.source,
+        created_by=w.created_by,
+        target=w.target,
+        prompt=w.prompt,
+        run_at=w.run_at,
+        repeat=w.repeat,
+        time_zone=w.time_zone,
+        status=w.status,
+        runs=w.runs,
+        last_run_at=w.last_run_at,
+        last_error=w.last_error,
+        created_at=w.created_at,
+    )
+
+
+@router.get(
+    "/agents/instances/{instance_id}/wakeups",
+    summary="实例的唤醒与可选的会话（admin）",
+    description="待执行的在前；targets 是它能用的会话（和管理员的私聊、它所在的群），"
+    "建唤醒时选一个或不选（独立会话）。",
+    responses=_read_errors,
+)
+async def list_agent_wakeups(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+    instance_id: UUID,
+) -> AgentWakeupList:
+    await _own_instance(db, access, instance_id)
+    instance = await db.get(AgentInstance, instance_id)
+    if instance is None:
+        raise not_found()
+    listed = await agent_im.list_targets(
+        db, request.app.state.redis, instance, ImListTargetsInput()
+    )
+    targets = [
+        WakeupTarget(target=d.target, label=f"私聊 {d.untrusted.name}") for d in listed.direct
+    ]
+    targets += [
+        WakeupTarget(target=g.target, label=f"群 {g.untrusted.name}") for g in listed.groups
+    ]
+    items = await agent_wakeups.list_for_admin(db, instance_id)
+    return AgentWakeupList(items=[_wakeup_out(w) for w in items], targets=targets)
+
+
+@router.post(
+    "/agents/instances/{instance_id}/wakeups",
+    status_code=status.HTTP_201_CREATED,
+    summary="给实例建一个唤醒（admin）",
+    description="到点叫醒它跑一轮，把 prompt 交给它；"
+    "可以每天、工作日、每周重复（按 time_zone 的钟点）。最多 50 个待执行；写审计（T-0121）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def create_agent_wakeup(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+    instance_id: UUID,
+    body: AgentWakeupCreate,
+) -> AgentWakeupOut:
+    await _own_instance(db, access, instance_id)
+    instance = await db.get(AgentInstance, instance_id)
+    if instance is None:
+        raise not_found()
+    wakeup = await agent_wakeups.create_by_admin(
+        db,
+        instance,
+        user_id=access.user_id,
+        prompt=body.prompt,
+        target=body.target,
+        run_at=body.run_at,
+        repeat=body.repeat,
+        time_zone=body.time_zone,
+    )
+    await AuditTrail(db, request.app.state.settings).record(
+        "agents.wakeup.created",
+        workspace_ids=[access.workspace.id],
+        actor_id=access.user_id,
+        resource_type="agent_instance",
+        resource_id=instance_id,
+        metadata={"repeat": body.repeat, "target": body.target or "isolated"},
+        client_ip=client_ip(request, request.app.state.settings),
+    )
+    await db.commit()
+    await db.refresh(wakeup)
+    return _wakeup_out(wakeup)
+
+
+@router.post(
+    "/agents/instances/{instance_id}/wakeups/{wakeup_id}/cancel",
+    summary="取消实例的唤醒（admin）",
+    description="正在跑的这一轮停不下来；重复的唤醒不再排下一次。写审计。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def cancel_agent_wakeup(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+    instance_id: UUID,
+    wakeup_id: UUID,
+) -> AgentWakeupOut:
+    await _own_instance(db, access, instance_id)
+    wakeup = await agent_wakeups.cancel_by_admin(db, instance_id, wakeup_id)
+    await AuditTrail(db, request.app.state.settings).record(
+        "agents.wakeup.cancelled",
+        workspace_ids=[access.workspace.id],
+        actor_id=access.user_id,
+        resource_type="agent_instance",
+        resource_id=instance_id,
+        metadata={"source": wakeup.source},
+        client_ip=client_ip(request, request.app.state.settings),
+    )
+    await db.commit()
+    await db.refresh(wakeup)
+    return _wakeup_out(wakeup)
