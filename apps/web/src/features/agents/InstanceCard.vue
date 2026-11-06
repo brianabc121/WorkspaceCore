@@ -9,7 +9,7 @@ import OpsPanel from './OpsPanel.vue'
 import OutboxPanel from './OutboxPanel.vue'
 
 const props = defineProps<{ instance: Schema['AgentInstanceOut']; secrets: Schema['AgentSecretOut'][]; busy: boolean; host?: Schema['HostSummaryItem'] }>()
-const emit = defineEmits<{ edit: []; toggle: []; bundle: [previous: Schema['BundleRequest']['previous']]; revoke: [credential: Schema['AgentCredentialOut']]; grants: [grants: Schema['SecretGrantIn'][]]; projectAdmin: [enabled: boolean] }>()
+const emit = defineEmits<{ edit: []; toggle: []; bundle: [previous: Schema['BundleRequest']['previous']]; revoke: [credential: Schema['AgentCredentialOut']]; grants: [grants: Schema['SecretGrantIn'][]]; projectAdmin: [enabled: boolean]; imMedia: [enabled: boolean] }>()
 const previous = ref<'keep_24h' | 'revoke_now'>('keep_24h'), editingGrants = ref(false)
 const rows = ref<{ secret_id: string; ref_id: string }[]>([])
 const active = computed(() => props.instance.credentials.filter(c => !c.revoked_at))
@@ -43,6 +43,13 @@ function saveGrants() { if (grantsValid.value) { emit('grants', rows.value.map(r
         <button type="button" class="secondary-button" :disabled="busy || (disabled && !instance.project_admin.enabled)" @click="$emit('projectAdmin', !instance.project_admin.enabled)">{{ instance.project_admin.enabled ? '关闭项目管理权限' : '允许它新建项目、拉智能体进项目' }}</button>
       </div>
       <p class="form-help">打开后它可以用 create_project 新建项目、用 add_to_project 把其他智能体拉进它建的项目，直接生效、不审批，每次都会通知管理员；它建的项目群的群主是打开权限的人。关闭后它已经建的项目和成员保留。<template v-if="instance.project_admin.enabled && instance.project_admin.granted_at"> 打开于 {{ formatTime(instance.project_admin.granted_at) }}。</template></p>
+    </section>
+    <section class="agent-section" aria-label="附件权限">
+      <div class="section-heading">
+        <h3>附件权限：{{ instance.im_media.enabled ? '已打开' : '关闭' }}</h3>
+        <button type="button" class="secondary-button" :disabled="busy || (disabled && !instance.im_media.enabled)" @click="$emit('imMedia', !instance.im_media.enabled)">{{ instance.im_media.enabled ? '关闭附件权限' : '允许它发图片、文件、视频' }}</button>
+      </div>
+      <p class="form-help">打开后它可以用 im_send 发图片（10 MB）、文件（20 MB）、视频（MP4 / MOV，50 MB）：工作台识别类型、挡住可执行与网页类文件、检查密钥，每小时最多 30 个、每天 200 MB。文字不受影响。<template v-if="instance.im_media.enabled && instance.im_media.granted_at"> 打开于 {{ formatTime(instance.im_media.granted_at) }}。</template></p>
     </section>
     <SshDeploy :instance="instance" />
     <OpsPanel :instance="instance" />

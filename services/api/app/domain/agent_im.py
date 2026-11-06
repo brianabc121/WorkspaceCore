@@ -242,6 +242,8 @@ async def list_targets(
         groups=groups,
         recent_rejections=await _recent_rejections(db, redis, instance),
         sends_left_this_hour=await _sends_left(redis, instance),
+        attachments_enabled=instance.im_media_enabled,
+        attachments_left_this_hour=await _attachments_left(redis, instance),
         notes=notes,
     )
 
@@ -251,6 +253,14 @@ async def _recent_rejections(db: AsyncSession, redis: Redis | None, instance: Ag
 
     ctx = agent_outbox.SendContext(db, None, redis, None)  # type: ignore[arg-type]
     return await agent_outbox.AgentOutbox(ctx).recent_rejections(instance.id)
+
+
+async def _attachments_left(redis: Redis | None, instance: AgentInstance) -> int:
+    from app.domain import agent_media
+
+    if not instance.im_media_enabled:
+        return 0
+    return (await agent_media.quota_left(redis, instance.id))[0]
 
 
 async def _sends_left(redis: Redis | None, instance: AgentInstance) -> int:

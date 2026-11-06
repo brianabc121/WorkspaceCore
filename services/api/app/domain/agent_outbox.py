@@ -10,6 +10,7 @@
   拒收的文字回复在限额恢复后由工作台补发（最多等 2 分钟，每群每实例最多 3 条）。
 """
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -28,12 +29,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.domain import agent_im, events, ops_metrics
+from app.domain import agent_im, agent_media, events, ops_metrics
 from app.domain.agent_ops import redact
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.im_callbacks import RATE_KEY
-from app.domain.im_projection import EX_KEY, ex_for, resolve, sync_conversation
-from app.domain.ratelimit import WindowLimiter
+from app.domain.im_projection import EX_KEY, resolve, signed_ex, sync_conversation
 from app.integrations.base import ConnectorError
 from app.integrations.openim import (
     CONTENT_AT_TEXT,
@@ -43,7 +43,14 @@ from app.integrations.openim import (
     group_conversation_id,
     single_conversation_id,
 )
-from app.models import AgentImOutbox, AgentImRejection, AgentInstance, AgentSettings, ImMessage
+from app.models import (
+    AgentImOutbox,
+    AgentImRejection,
+    AgentInstance,
+    AgentSettings,
+    ImMedia,
+    ImMessage,
+)
 from app.schemas.ai_tools import (
     ImCancelInput,
     ImCancelOutput,
@@ -128,6 +135,8 @@ class SendContext:
     settings: Settings
     redis: Redis | None
     client: OpenIMClient | None
+    # 取附件网址用的 transport（只在测试里替换，与 Connector 共用）
+    transport: Any = None
 
 
 async def _rate_retry_after(redis: Redis | None, group_id: str, sender: str) -> int:
@@ -178,19 +187,22 @@ class AgentOutbox:
 
     async def send(self, instance: AgentInstance, parsed: ImSendInput) -> ImSendOutput:
         now = _now()
-        if not parsed.text:
-            raise ToolCallError("VALIDATION_FAILED", "text 不能为空")
+        if not parsed.text and not parsed.attachments:
+            raise ToolCallError("VALIDATION_FAILED", "text 与 attachments 至少要有一个")
         if instance.status == "disabled":
             raise ToolCallError("AGENT_DISABLED", "实例已停用")
         if not instance.im_ready:
             raise ToolCallError("IM_NOT_READY", "你的 IM 账号还没就绪，暂时不能发消息")
-        if self.ctx.client is None:
+        client = self.ctx.client
+        if client is None:
             raise ToolCallError("EXTERNAL_UNAVAILABLE", "IM 服务没有部署或暂时不可用")
         target = await agent_im.resolve_target(self.db, instance, parsed.target)
         mention = list(dict.fromkeys(parsed.mention))
         if mention:
             if target.group is None:
                 raise ToolCallError("VALIDATION_FAILED", "私聊不能 @ 人；mention 只能在群里用")
+            if not parsed.text:
+                raise ToolCallError("VALIDATION_FAILED", "@ 人要和文字一起发")
             members = await self._group_members(target)
             unknown = [m for m in mention if m not in members]
             if unknown:
@@ -208,53 +220,106 @@ class AgentOutbox:
                 "text": parsed.text,
                 "mention": mention,
                 "send_at": send_at.isoformat() if send_at else None,
+                "attachments": [a.model_dump(mode="json") for a in parsed.attachments],
             }
         )
         existing = await self._by_key(instance.id, key)
         if existing:
             return await self._replay(instance, parsed.target, key, request_hash, existing)
+        parts = (1 if parsed.text else 0) + len(parsed.attachments)
         if self.ctx.redis is not None:
-            retry = await WindowLimiter(self.ctx.redis, 3600).hit(
-                HOUR_KEY.format(instance_id=instance.id), SENDS_PER_HOUR
-            )
-            if retry is not None:
+            used = int(await self.ctx.redis.get(HOUR_KEY.format(instance_id=instance.id)) or 0)
+            if used + parts > SENDS_PER_HOUR:
                 raise ToolCallError(
-                    "RATE_LIMITED", f"每小时最多主动发 {SENDS_PER_HOUR} 条，{retry} 秒后再发"
+                    "RATE_LIMITED", f"每小时最多主动发 {SENDS_PER_HOUR} 条，稍后再发"
                 )
+        prepared: list[agent_media.Prepared] = []
+        if parsed.attachments:
+            sources = [
+                (
+                    agent_media.AttachmentSource(
+                        url=a.url,
+                        data_base64=a.data_base64,
+                        text_content=a.text_content,
+                        ref=a.ref,
+                        filename=a.filename,
+                        kind=a.kind,
+                    ),
+                    agent_media.AttachmentSource(
+                        url=a.cover.url, data_base64=a.cover.data_base64, ref=a.cover.ref
+                    )
+                    if a.cover
+                    else None,
+                )
+                for a in parsed.attachments
+            ]
+            try:
+                prepared = await agent_media.prepare(
+                    self.db,
+                    self.ctx.settings,
+                    self.ctx.redis,
+                    client,
+                    instance,
+                    sources,
+                    transport=self.ctx.transport,
+                )
+            except agent_media.AttachmentError as error:
+                await self.db.rollback()
+                raise ToolCallError(error.code, error.message) from None
+        if self.ctx.redis is not None:
+            async with self.ctx.redis.pipeline(transaction=True) as pipe:
+                pipe.incrby(HOUR_KEY.format(instance_id=instance.id), parts)
+                pipe.expire(HOUR_KEY.format(instance_id=instance.id), 3600, nx=True)
+                await pipe.execute()
         verdict = await precheck(self.ctx, instance, target, mention)
-        row = AgentImOutbox(
-            workspace_id=instance.workspace_id,
-            instance_id=instance.id,
-            target=parsed.target,
-            conversation_id=target.conversation_id,
-            client_key=key,
-            part=0,
-            request_hash=request_hash,
-            content_type=CONTENT_AT_TEXT if mention else CONTENT_TEXT,
-            content_json={"text": parsed.text, "atUserList": mention}
-            if mention
-            else {"content": parsed.text},
-            plain_text=parsed.text,
-            at_im_ids=mention,
-            status="queued",
-            source="tool",
-            if_rate_limited=parsed.if_rate_limited,
-            send_at=send_at or now,
-            next_attempt_at=send_at or now,
-        )
-        if verdict is not None:
-            code, retry_after = verdict
-            if code == 5002 and parsed.if_rate_limited == "queue" and send_at is None:
-                row.next_attempt_at = now + timedelta(seconds=retry_after or 10)
-                row.deadline_at = now + RATE_WAIT
-                row.error_code = "5002"
-            elif send_at is None or code != 5002:
-                row.status = "rejected"
-                row.error_code = str(code)
-                row.error_message = reason_for(code)[0]
-        elif send_at is not None:
-            row.status = "scheduled"
-        self.db.add(row)
+        contents: list[tuple[int, dict[str, Any], str | None, uuid.UUID | None]] = []
+        if parsed.text:
+            contents.append(
+                (
+                    CONTENT_AT_TEXT if mention else CONTENT_TEXT,
+                    {"text": parsed.text, "atUserList": mention}
+                    if mention
+                    else {"content": parsed.text},
+                    parsed.text,
+                    None,
+                )
+            )
+        contents += [(p.content_type, p.content_json, p.summary, p.media.id) for p in prepared]
+        rows: list[AgentImOutbox] = []
+        for part, (content_type, content, plain, media_id) in enumerate(contents):
+            row = AgentImOutbox(
+                workspace_id=instance.workspace_id,
+                instance_id=instance.id,
+                target=parsed.target,
+                conversation_id=target.conversation_id,
+                client_key=key,
+                part=part,
+                request_hash=request_hash,
+                content_type=content_type,
+                content_json=content,
+                plain_text=plain,
+                at_im_ids=mention if content_type == CONTENT_AT_TEXT else [],
+                media_id=media_id,
+                status="queued",
+                source="tool",
+                if_rate_limited=parsed.if_rate_limited,
+                send_at=send_at or now,
+                next_attempt_at=send_at or now,
+            )
+            if verdict is not None:
+                code, retry_after = verdict
+                if code == 5002 and parsed.if_rate_limited == "queue" and send_at is None:
+                    row.next_attempt_at = now + timedelta(seconds=retry_after or 10)
+                    row.deadline_at = now + RATE_WAIT
+                    row.error_code = "5002"
+                elif send_at is None or code != 5002:
+                    row.status = "rejected"
+                    row.error_code = str(code)
+                    row.error_message = reason_for(code)[0]
+            elif send_at is not None:
+                row.status = "scheduled"
+            self.db.add(row)
+            rows.append(row)
         try:
             await self.db.commit()
         except IntegrityError:
@@ -263,8 +328,8 @@ class AgentOutbox:
             return await self._replay(
                 instance, parsed.target, key, request_hash, await self._by_key(instance.id, key)
             )
-        await ops_metrics.bump(self.ctx.redis, "im_outbox", "created", row.status)
-        rows = [row]
+        for row in rows:
+            await ops_metrics.bump(self.ctx.redis, "im_outbox", "created", row.status)
         deadline = time.monotonic() + SYNC_BUDGET_SECONDS
         for item in rows:
             if item.status == "queued" and item.next_attempt_at <= _now():
@@ -412,6 +477,11 @@ class AgentOutbox:
             await self._fail_local(row)
             await self.db.commit()
             return
+        previous = await self._previous_pending(row)
+        if previous is not None:
+            row.next_attempt_at = max(previous.next_attempt_at, now) + timedelta(seconds=2)
+            await self.db.commit()
+            return
         if row.status == "unknown":
             if await self._resolve_unknown(row):
                 await self.db.commit()
@@ -432,15 +502,27 @@ class AgentOutbox:
         await self.db.commit()
         kind, _, ident = row.target.partition(":")
         try:
-            sent = await client.send_text(
-                send_id=instance.im_user_id,
-                text=row.plain_text or "",
-                recv_id=ident if kind == "user" else "",
-                group_id=ident if kind == "group" else "",
-                at_user_ids=row.at_im_ids,
-                sender_nickname=instance.im_nickname,
-                ex=ex_for(row.id),
-            )
+            ex = signed_ex(self._ex_secret(), row.id)
+            if row.content_type in (CONTENT_TEXT, CONTENT_AT_TEXT):
+                sent = await client.send_text(
+                    send_id=instance.im_user_id,
+                    text=row.plain_text or "",
+                    recv_id=ident if kind == "user" else "",
+                    group_id=ident if kind == "group" else "",
+                    at_user_ids=row.at_im_ids,
+                    sender_nickname=instance.im_nickname,
+                    ex=ex,
+                )
+            else:
+                sent = await client.send_elem(
+                    send_id=instance.im_user_id,
+                    content_type=row.content_type,
+                    content=row.content_json,
+                    recv_id=ident if kind == "user" else "",
+                    group_id=ident if kind == "group" else "",
+                    sender_nickname=instance.im_nickname,
+                    ex=ex,
+                )
         except OpenIMError as error:
             await self._after_error(row, instance, local, error)
             return
@@ -462,9 +544,46 @@ class AgentOutbox:
             if sent.client_msg_id:
                 refreshed.client_msg_id = sent.client_msg_id
             refreshed.sent_at = row.sent_at
+        await self._mark_media_used(row)
         events.mark(self.db, row.workspace_id, "im")
         await self.db.commit()
         await ops_metrics.bump(self.ctx.redis, "im_outbox", "sent", row.source)
+
+    def _ex_secret(self) -> str | None:
+        secret = self.ctx.settings.openim_secret if self.ctx.settings is not None else None
+        return secret.get_secret_value() if secret is not None else None
+
+    async def _mark_media_used(self, row: AgentImOutbox) -> None:
+        """附件发出后：媒体（视频连同封面）记为已用，归到这个会话（管理员与实例按会话取）。"""
+        ids: list[uuid.UUID] = []
+        if row.media_id is not None:
+            ids.append(row.media_id)
+        cover = row.content_json.get("snapshotUUID") if row.content_type == 104 else None
+        if cover:
+            with contextlib.suppress(ValueError):
+                ids.append(uuid.UUID(str(cover)))
+        if not ids:
+            return
+        await self.db.execute(
+            update(ImMedia)
+            .where(ImMedia.id.in_(ids), ImMedia.workspace_id == row.workspace_id)
+            .values(
+                status="used", conversation_id=row.conversation_id, server_msg_id=row.server_msg_id
+            )
+        )
+
+    async def _previous_pending(self, row: AgentImOutbox) -> AgentImOutbox | None:
+        """同一次发送里前一条还没结束：等它（一条一条按顺序发）。"""
+        if row.part == 0:
+            return None
+        return await self.db.scalar(
+            select(AgentImOutbox).where(
+                AgentImOutbox.instance_id == row.instance_id,
+                AgentImOutbox.client_key == row.client_key,
+                AgentImOutbox.part == row.part - 1,
+                AgentImOutbox.status.in_((*PENDING, "sending")),
+            )
+        )
 
     async def _reload(self, row_id: uuid.UUID) -> AgentImOutbox:
         row = await self.db.get(AgentImOutbox, row_id, with_for_update=True, populate_existing=True)
@@ -882,7 +1001,8 @@ async def run(
         await service.record_denied(requester, spec, arguments, denied, request_id=request_id)
         raise ToolCallError(denied, "这个实例没有权限调用这个工具")
     instance_id = requester.instance.id
-    outbox = AgentOutbox(SendContext(service.db, service.settings, service.redis, im))
+    transport = getattr(service.runtime, "transport", None)
+    outbox = AgentOutbox(SendContext(service.db, service.settings, service.redis, im, transport))
     try:
         if isinstance(parsed, ImSendInput):
             output: BaseModel = await outbox.send(requester.instance, parsed)

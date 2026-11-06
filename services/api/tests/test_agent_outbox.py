@@ -26,6 +26,8 @@ import pytest
 from app.domain import agent_outbox
 from app.domain.im import admin_im_user_id, openim_client
 from app.domain.im_callbacks import RATE_KEY, STREAK_KEY
+from app.domain.im_projection import verified_ex_key
+from tests import fake_openim
 from tests.helpers import run_sql, tool_error
 from tests.test_im_accounts_callbacks import GROUP, ImEnv, im_env, msg
 from tests.test_task_claims_api import agent, call, ok
@@ -101,7 +103,11 @@ async def test_send_to_admin_idempotent_and_recorded(env: ImEnv) -> None:
     conv = "si_" + "_".join(sorted([a["im_user_id"], owner]))
     delivered = _sent_by(env, conv, a["im_user_id"])
     assert len(delivered) == 1
-    assert json.loads(delivered[0]["ex"]) == {"myws_key": message["message_id"]}
+    ex = json.loads(delivered[0]["ex"])
+    assert ex["myws_key"] == message["message_id"]
+    # 工作台签名：回调据此认出是发件箱发的（T-0119）
+    key = verified_ex_key(fake_openim.SECRET, delivered[0]["ex"])
+    assert key == uuid.UUID(message["message_id"])
     local = await run_sql(
         env.database_url,
         "SELECT status FROM workspace.im_messages WHERE idempotency_key = $1",

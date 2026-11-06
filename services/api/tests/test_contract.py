@@ -1248,7 +1248,9 @@ async def test_v2_im_payload_rules(stub_client: httpx.AsyncClient) -> None:
             "文字带图片": {"kind": "text", "text": "hi", "upload_id": str(uuid.uuid4())},
             "图片缺上传": {"kind": "image"},
             "太长": {"kind": "text", "text": "x" * 4001},
-            "未知类型": {"kind": "file", "text": "hi"},
+            "文件缺上传": {"kind": "file"},
+            "视频带正文": {"kind": "video", "text": "hi", "upload_id": str(uuid.uuid4())},
+            "未知类型": {"kind": "sticker", "text": "hi"},
         }
     ):
         response = await stub_client.post(f"{conversation}/messages", json=body, headers=headers)

@@ -208,6 +208,20 @@ async def put_project_admin(
     )
 
 
+@router.put(
+    "/agents/instances/{instance_id}/im-media",
+    summary="打开或关闭实例的附件权限（admin，乐观并发）",
+    description="打开后这个实例能经 im_send 发图片、文件、视频（默认关闭，"
+    "docs/v2/AGENT_MESSAGING_PLAN.md 第 11 节 D3）；文字不受影响。每次都写审计（T-0119）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def put_im_media(
+    access: Admin, request: Request, service: Service, instance_id: UUID, body: ProjectAdminPut
+) -> ProjectAdminOut:
+    return await service.set_im_media(access, instance_id, body, client_ip=_ip(request, service))
+
+
 @router.post(
     "/agents/instances/{instance_id}/disable",
     summary="停用实例（owner）",

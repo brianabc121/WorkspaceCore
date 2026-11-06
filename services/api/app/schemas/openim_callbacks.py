@@ -76,7 +76,7 @@ class ImportFriendsCallback(_Lenient):
 
 
 # 拒收时的 errCode（方案第 4.5 节；OC-0 实测 errCode 5001 + nextCode 1 能拒收，插件不重试）
-RejectCode = Literal[5001, 5002, 5003, 5004, 5005, 5006, 5009]
+RejectCode = Literal[5001, 5002, 5003, 5004, 5005, 5006, 5007, 5009]
 REJECT_CODES: dict[int, str] = {
     5001: "RELAY_PAUSED",  # 管理员不发言时实例连续发言达到上限
     5002: "RELAY_RATE_LIMITED",  # 单个实例在这个群每分钟的条数达到上限
@@ -84,6 +84,7 @@ REJECT_CODES: dict[int, str] = {
     5004: "SENDER_DISABLED",  # 发送的实例已停用，或总开关已关闭
     5005: "NOT_ALLOWED",  # 跨工作空间、未知账号等其他不允许的情况
     5006: "RELAY_DISABLED",  # 这个群关闭了接力，实例的消息 @ 了其他实例
+    5007: "MEDIA_VIA_WORKSPACE_ONLY",  # 实例发附件没经过工作台（ex 里没有工作台签名，T-0119）
     5009: "POLICY_UNAVAILABLE",  # 工作台无法判断（Redis / 数据库不可用）：拒收，不放行
 }
 

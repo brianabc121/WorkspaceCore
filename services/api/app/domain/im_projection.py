@@ -17,6 +17,8 @@
 
 import base64
 import binascii
+import hashlib
+import hmac
 import json
 import logging
 import uuid
@@ -132,6 +134,34 @@ EX_KEY = "myws_key"
 def ex_for(key: uuid.UUID) -> str:
     """代发消息的 ex：带上 Idempotency-Key，结果未知时靠它找回。"""
     return json.dumps({EX_KEY: str(key)}, separators=(",", ":"))
+
+
+EX_SIG = "myws_sig"
+
+
+def _ex_sig(secret: str, key: uuid.UUID) -> str:
+    return hmac.new(secret.encode(), f"agent-ex:{key}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def signed_ex(secret: str | None, key: uuid.UUID) -> str:
+    """智能体经工作台发的消息：ex 里再带一个工作台签名（T-0119，回调据此放行附件）。"""
+    data = {EX_KEY: str(key)}
+    if secret:
+        data[EX_SIG] = _ex_sig(secret, key)
+    return json.dumps(data, separators=(",", ":"))
+
+
+def verified_ex_key(secret: str | None, raw: object) -> uuid.UUID | None:
+    """ex 里的发件箱 ID，只在签名正确时返回。"""
+    if not secret or not isinstance(raw, str) or not raw or len(raw) > 1024:
+        return None
+    try:
+        data = json.loads(raw)
+        key = uuid.UUID(str(data[EX_KEY]))
+        sig = str(data[EX_SIG])
+    except (ValueError, TypeError, KeyError):
+        return None
+    return key if hmac.compare_digest(sig, _ex_sig(secret, key)) else None
 
 
 def _key_from_ex(raw: object) -> uuid.UUID | None:

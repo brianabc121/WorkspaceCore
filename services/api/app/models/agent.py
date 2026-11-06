@@ -118,6 +118,12 @@ class AgentInstance(Base):
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
     project_admin_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 允许经 im_send 发图片、文件、视频（T-0119，迁移 0035；默认关闭，方案 D3）
+    im_media_enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    im_media_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    im_media_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()

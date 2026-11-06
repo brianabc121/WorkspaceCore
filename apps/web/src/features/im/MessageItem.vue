@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, toRef } from 'vue'
+import { computed, onBeforeUnmount, ref, toRef } from 'vue'
 import { Check, CircleAlert, CircleHelp, Clock, EllipsisVertical, Pin, PinOff, RotateCw } from '@lucide/vue'
 import type { Schema } from '../../services/api'
-import { useMediaUrl } from './media'
+import { downloadMedia, useMediaUrl, videoUrl } from './media'
 import { clockTime, colorIndex } from './format'
 import { usePopover } from './usePopover'
 import ApprovalCard from '../ai/ApprovalCard.vue'
@@ -11,8 +11,24 @@ import ChatAvatar from './ChatAvatar.vue'
 // 一条消息（T-0095）：自己的在右、别人的在左；群里显示发言人的名字与头像；时间与发送状态在气泡右下角。
 const props = defineProps<{ scope: string; message: Schema['ImMessageOut']; sender: string; mine: boolean; selfId?: string | null; group: boolean; first: boolean; last: boolean; canPin: boolean; canResend: boolean; locked: boolean }>()
 const emit = defineEmits<{ pin: []; unpin: []; resend: [] }>()
-const media = toRef(() => props.message.kind === 'image' ? props.message.image?.media_id ?? null : null)
+const media = toRef(() => props.message.kind === 'image' ? props.message.image?.media_id ?? null : props.message.kind === 'video' ? props.message.attachment?.cover_media_id ?? null : null)
 const { url, failed } = useMediaUrl(props.scope, media)
+const attachment = computed(() => props.message.attachment ?? null)
+const playing = ref<string | null>(null), mediaError = ref('')
+const sizeText = (size: number | null | undefined) => size == null ? '' : size >= 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`
+async function download() {
+  const item = attachment.value
+  if (!item?.media_id) return
+  mediaError.value = ''
+  try { await downloadMedia(props.scope, item.media_id, item.name ?? '文件') } catch { mediaError.value = '下载失败。' }
+}
+async function play() {
+  const item = attachment.value
+  if (!item?.media_id) return
+  mediaError.value = ''
+  try { playing.value = await videoUrl(props.scope, item.media_id) } catch { mediaError.value = '视频加载失败。' }
+}
+onBeforeUnmount(() => { if (playing.value) URL.revokeObjectURL(playing.value) })
 const mentionsMe = computed(() => !!props.selfId && props.message.at_im_ids.includes(props.selfId))
 const showName = computed(() => props.group && !props.mine && props.first)
 const showAvatar = computed(() => props.group && !props.mine)
@@ -39,6 +55,19 @@ function choose(action: 'pin' | 'unpin' | 'resend') { actions.close(); if (actio
         <p v-else-if="message.image?.external_url" class="chat-text chat-note">外部图片未加载：<span class="preserve-text">{{ message.image.external_url }}</span></p>
         <p v-else-if="failed" class="chat-text chat-note">图片加载失败。</p>
         <p v-else class="chat-text chat-note" role="status">正在加载图片…</p>
+      </template>
+      <template v-else-if="message.kind === 'file'">
+        <p class="chat-text chat-file-msg"><span class="preserve-text">{{ attachment?.name || '文件' }}</span><span v-if="attachment?.size" class="chat-note"> · {{ sizeText(attachment.size) }}</span></p>
+        <button v-if="attachment?.media_id" type="button" class="secondary-button" :aria-label="`下载 ${attachment.name || '文件'}`" @click="download">下载</button>
+        <p v-else-if="attachment?.external_url" class="chat-text chat-note">外部文件未加载：<span class="preserve-text">{{ attachment.external_url }}</span></p>
+        <p v-if="mediaError" class="chat-text chat-note" role="alert">{{ mediaError }}</p>
+      </template>
+      <template v-else-if="message.kind === 'video'">
+        <video v-if="playing" :src="playing" controls autoplay preload="metadata" class="chat-image" :aria-label="`${mine ? '我' : sender}发送的视频`"></video>
+        <img v-else-if="url" :src="url" :alt="`${mine ? '我' : sender}发送的视频封面`" class="chat-image" />
+        <button v-if="attachment?.media_id && !playing" type="button" class="secondary-button" @click="play">播放视频<template v-if="attachment.duration_seconds">（{{ attachment.duration_seconds }} 秒）</template></button>
+        <p v-else-if="!attachment?.media_id && attachment?.external_url" class="chat-text chat-note">外部视频未加载：<span class="preserve-text">{{ attachment.external_url }}</span></p>
+        <p v-if="mediaError" class="chat-text chat-note" role="alert">{{ mediaError }}</p>
       </template>
       <ApprovalCard v-else-if="message.kind === 'approval_card' && message.approval_execution_id" :scope="scope" :execution-id="message.approval_execution_id" :text="message.text" />
       <p v-else class="chat-text chat-note">暂不支持显示这类消息。</p>

@@ -247,6 +247,10 @@
             "title": "Id",
             "type": "string"
           },
+          "im_media": {
+            "$ref": "#/components/schemas/ProjectAdminOut",
+            "description": "附件权限（T-0119）：打开后它能经 im_send 发图片、文件、视频（默认关闭）"
+          },
           "im_nickname": {
             "title": "Im Nickname",
             "type": "string"
@@ -391,6 +395,7 @@
           "bundle_issued_at",
           "disabled_at",
           "project_admin",
+          "im_media",
           "credentials",
           "secret_grants",
           "version",
@@ -6550,6 +6555,105 @@
         "title": "ImImage",
         "type": "object"
       },
+      "ImMessageAttachment": {
+        "description": "文件（105）与视频（104）消息（T-0119）。",
+        "properties": {
+          "cover_media_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "视频封面（经 /im/media 显示）",
+            "title": "Cover Media Id"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "视频时长（秒）",
+            "title": "Duration Seconds"
+          },
+          "external_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "外部链接：前端不自动加载，只显示为链接",
+            "title": "External Url"
+          },
+          "media_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "在 OpenIM 对象存储里时，经 GET /im/media/{media_id} 下载或播放（带登录校验）",
+            "title": "Media Id"
+          },
+          "mime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          }
+        },
+        "required": [
+          "media_id",
+          "external_url",
+          "name",
+          "size",
+          "mime",
+          "duration_seconds",
+          "cover_media_id"
+        ],
+        "title": "ImMessageAttachment",
+        "type": "object"
+      },
       "ImMessageOut": {
         "properties": {
           "approval_execution_id": {
@@ -6571,6 +6675,16 @@
             },
             "title": "At Im Ids",
             "type": "array"
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImMessageAttachment"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "client_msg_id": {
             "title": "Client Msg Id",
@@ -6594,6 +6708,8 @@
             "enum": [
               "text",
               "image",
+              "file",
+              "video",
               "approval_card",
               "system",
               "unsupported"
@@ -6792,6 +6908,8 @@
             "enum": [
               "text",
               "image",
+              "file",
+              "video",
               "approval_card",
               "system",
               "unsupported"
@@ -6841,7 +6959,9 @@
           "kind": {
             "enum": [
               "text",
-              "image"
+              "image",
+              "file",
+              "video"
             ],
             "title": "Kind",
             "type": "string"
@@ -7281,6 +7401,17 @@
       },
       "ImUploadOut": {
         "properties": {
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
           "expires_at": {
             "description": "到期前没有用于发消息的上传会被删除",
             "format": "date-time",
@@ -7298,9 +7429,31 @@
             ],
             "title": "Height"
           },
+          "kind": {
+            "default": "image",
+            "enum": [
+              "image",
+              "file",
+              "video"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
           "mime": {
             "title": "Mime",
             "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "文件与视频的文件名",
+            "title": "Name"
           },
           "size": {
             "title": "Size",
@@ -16594,6 +16747,135 @@
           }
         ],
         "summary": "实例的服务器状态（admin）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/im-media": {
+      "put": {
+        "description": "打开后这个实例能经 im_send 发图片、文件、视频（默认关闭，docs/v2/AGENT_MESSAGING_PLAN.md 第 11 节 D3）；文字不受影响。每次都写审计（T-0119）。",
+        "operationId": "put_im_media",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectAdminPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectAdminOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "打开或关闭实例的附件权限（admin，乐观并发）",
         "tags": [
           "agents"
         ]
@@ -26737,6 +27019,7 @@
     },
     "/api/v1/im/media/{media_id}": {
       "get": {
+        "description": "图片内联显示；文件按附件下载；视频支持 Range（T-0119）。",
         "operationId": "get_im_media",
         "parameters": [
           {
@@ -26841,7 +27124,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "显示 OpenIM 对象存储里的图片（owner / admin）",
+        "summary": "显示 OpenIM 对象存储里的图片、文件、视频（owner / admin）",
         "tags": [
           "im"
         ]
@@ -26929,9 +27212,28 @@
     },
     "/api/v1/im/uploads": {
       "post": {
-        "description": "请求体就是图片本身；只接受 image/png, image/jpeg, image/gif, image/webp，不超过 10 MiB；服务端按内容核对类型，不只看 Content-Type。",
+        "description": "请求体就是文件本身；图片只接受 image/png, image/jpeg, image/gif, image/webp（10 MiB），文件 20 MiB，视频 MP4 / MOV 50 MiB；不允许可执行与网页类文件；服务端按内容核对类型，不只看 Content-Type（T-0119）。",
         "operationId": "upload_im_image",
         "parameters": [
+          {
+            "description": "文件名（文件与视频）",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "文件名（文件与视频）",
+              "title": "Name"
+            }
+          },
           {
             "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
             "in": "header",
@@ -27069,7 +27371,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "上传图片（owner / admin）",
+        "summary": "上传图片、文件或视频（owner / admin）",
         "tags": [
           "im"
         ]

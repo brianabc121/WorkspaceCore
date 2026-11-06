@@ -5,7 +5,7 @@ import type { Schema } from '../src/services/api'
 
 const at = '2026-11-01T04:00:00Z'
 const path = (r: Request) => new URL(r.url).pathname
-const instance = (over: Partial<Schema['AgentInstanceOut']> = {}): Schema['AgentInstanceOut'] => ({ id: 'inst-a', name: 'alpha', description: '机房 A', network_mode: 'public', scope: 'read', max_role: 'member', status: 'online', im_user_id: 'oc_a', im_nickname: '甲', im_ready: true, acting_user_id: 'user-a', last_seen_at: at, reported_version: '2026.9.36', plugin_version: '0.3.3', bundle_issued_at: at, im_token_expires_at: '2026-12-01T04:00:00Z', disabled_at: null, project_admin: { enabled: false, granted_by: null, granted_at: null }, version: 3, created_at: at, updated_at: at,
+const instance = (over: Partial<Schema['AgentInstanceOut']> = {}): Schema['AgentInstanceOut'] => ({ id: 'inst-a', name: 'alpha', description: '机房 A', network_mode: 'public', scope: 'read', max_role: 'member', status: 'online', im_user_id: 'oc_a', im_nickname: '甲', im_ready: true, acting_user_id: 'user-a', last_seen_at: at, reported_version: '2026.9.36', plugin_version: '0.3.3', bundle_issued_at: at, im_token_expires_at: '2026-12-01T04:00:00Z', disabled_at: null, project_admin: { enabled: false, granted_by: null, granted_at: null }, im_media: { enabled: false, granted_by: null, granted_at: null }, version: 3, created_at: at, updated_at: at,
   credentials: [{ id: 'cred-1', kind: 'token', ingress: 'public', token_prefix: 'mwa_abcd', cert_fingerprint: null, created_at: at, expires_at: null, last_used_at: at, last_used_ip: '203.0.113.5', revoked_at: null }],
   secret_grants: [{ ref_id: 'openai_api_key', secret_id: 'sec-1', secret_name: 'OpenAI' }], ...over })
 const secret: Schema['AgentSecretOut'] = { id: 'sec-1', name: 'OpenAI', kind: 'model_api_key', description: '', value_version: 2, last_rotated_at: at, grants: [{ instance_id: 'inst-a', instance_name: 'alpha', ref_id: 'openai_api_key' }], version: 5, created_at: at, updated_at: at }
@@ -65,6 +65,18 @@ describe('openclaw instances', () => {
     await vi.waitFor(() => expect(requests.some(r => r.method === 'PUT' && path(r).endsWith('/project-admin'))).toBe(true))
     expect(await requests.find(r => r.method === 'PUT' && path(r).endsWith('/project-admin'))!.clone().json()).toEqual({ enabled: true, version: 3 })
     expect(await screen.findByText('已打开项目管理权限')).toBeVisible()
+  })
+  it('turns on attachment sending after confirmation with the instance version (T-0119)', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const requests = setup(r => path(r) === '/api/v1/agents/instances/inst-a/im-media' && r.method === 'PUT' ? Response.json({ enabled: true, granted_by: 'user-a', granted_at: at }) : undefined)
+    await openApp('/agents')
+    const card = await screen.findByRole('article', { name: '实例：alpha' })
+    const section = within(card).getByRole('region', { name: '附件权限' })
+    expect(within(section).getByText('附件权限：关闭')).toBeVisible()
+    await fireEvent.click(within(section).getByRole('button', { name: '允许它发图片、文件、视频' }))
+    await vi.waitFor(() => expect(requests.some(r => r.method === 'PUT' && path(r).endsWith('/im-media'))).toBe(true))
+    expect(await requests.find(r => r.method === 'PUT' && path(r).endsWith('/im-media'))!.clone().json()).toEqual({ enabled: true, version: 3 })
+    expect(await screen.findByText('已打开附件权限')).toBeVisible()
   })
   it('downloads the bundle as bytes with the CSRF token and the chosen handling of old credentials', async () => {
     const created = vi.fn(() => 'blob:bundle'), click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)

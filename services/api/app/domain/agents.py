@@ -336,6 +336,11 @@ class AgentService:
                     granted_by=i.project_admin_by,
                     granted_at=i.project_admin_at,
                 ),
+                im_media=ProjectAdminOut(
+                    enabled=i.im_media_enabled,
+                    granted_by=i.im_media_by,
+                    granted_at=i.im_media_at,
+                ),
                 credentials=by_instance[i.id],
                 secret_grants=grants_by[i.id],
                 version=i.version,
@@ -491,6 +496,40 @@ class AgentService:
             enabled=instance.project_admin_enabled,
             granted_by=instance.project_admin_by,
             granted_at=instance.project_admin_at,
+        )
+
+    async def set_im_media(
+        self,
+        access: WorkspaceAccess,
+        instance_id: uuid.UUID,
+        body: ProjectAdminPut,
+        *,
+        client_ip: str,
+    ) -> ProjectAdminOut:
+        """打开或关闭实例的附件权限（T-0119，owner / admin，方案 D3）。每次都写审计。"""
+        instance = await self._instance(access, instance_id)
+        self._check_version(instance, body.version)
+        if instance.im_media_enabled != body.enabled:
+            instance.im_media_enabled = body.enabled
+            instance.im_media_by = access.user_id if body.enabled else None
+            instance.im_media_at = datetime.now(UTC) if body.enabled else None
+            instance.version += 1
+            await self.audit.record(
+                "agents.instance.im_media_enabled"
+                if body.enabled
+                else "agents.instance.im_media_disabled",
+                workspace_ids=[access.workspace.id],
+                actor_id=access.user_id,
+                resource_type="agent_instance",
+                resource_id=instance.id,
+                client_ip=client_ip,
+            )
+        await self.db.commit()
+        await self.db.refresh(instance)
+        return ProjectAdminOut(
+            enabled=instance.im_media_enabled,
+            granted_by=instance.im_media_by,
+            granted_at=instance.im_media_at,
         )
 
     async def set_enabled(

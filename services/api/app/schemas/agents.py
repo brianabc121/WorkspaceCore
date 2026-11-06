@@ -127,6 +127,9 @@ class AgentInstanceOut(BaseModel):
     project_admin: "ProjectAdminOut" = Field(
         description="项目管理权限（T-0112）：打开后它能新建项目、把智能体拉进它建的项目"
     )
+    im_media: "ProjectAdminOut" = Field(
+        description="附件权限（T-0119）：打开后它能经 im_send 发图片、文件、视频（默认关闭）"
+    )
     credentials: list[AgentCredentialOut] = Field(description="有效与最近吊销的凭证，新的在前")
     secret_grants: list[SecretGrantOut]
     version: int

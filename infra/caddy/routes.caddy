@@ -5,8 +5,13 @@
 encode @compressible zstd gzip
 
 # 请求体上限：防止超大请求拖垮后端（Webhook 等需要更大限制时单独放宽）
-request_body {
+# IM 上传（图片、文件、视频，T-0119）单独放宽到 51MB，接口自己再按类型限制
+@small_body not path /api/v1/im/uploads
+request_body @small_body {
 	max_size 10MB
+}
+request_body /api/v1/im/uploads {
+	max_size 51MB
 }
 
 header {

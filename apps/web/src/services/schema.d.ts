@@ -254,6 +254,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/instances/{instance_id}/im-media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 打开或关闭实例的附件权限（admin，乐观并发）
+         * @description 打开后这个实例能经 im_send 发图片、文件、视频（默认关闭，docs/v2/AGENT_MESSAGING_PLAN.md 第 11 节 D3）；文字不受影响。每次都写审计（T-0119）。
+         */
+        put: operations["put_im_media"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/instances/{instance_id}/ops": {
         parameters: {
             query?: never;
@@ -1470,7 +1490,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 显示 OpenIM 对象存储里的图片（owner / admin） */
+        /**
+         * 显示 OpenIM 对象存储里的图片、文件、视频（owner / admin）
+         * @description 图片内联显示；文件按附件下载；视频支持 Range（T-0119）。
+         */
         get: operations["get_im_media"];
         put?: never;
         post?: never;
@@ -1507,8 +1530,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 上传图片（owner / admin）
-         * @description 请求体就是图片本身；只接受 image/png, image/jpeg, image/gif, image/webp，不超过 10 MiB；服务端按内容核对类型，不只看 Content-Type。
+         * 上传图片、文件或视频（owner / admin）
+         * @description 请求体就是文件本身；图片只接受 image/png, image/jpeg, image/gif, image/webp（10 MiB），文件 20 MiB，视频 MP4 / MOV 50 MiB；不允许可执行与网页类文件；服务端按内容核对类型，不只看 Content-Type（T-0119）。
          */
         post: operations["upload_im_image"];
         delete?: never;
@@ -2800,6 +2823,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** @description 附件权限（T-0119）：打开后它能经 im_send 发图片、文件、视频（默认关闭） */
+            im_media: components["schemas"]["ProjectAdminOut"];
             /** Im Nickname */
             im_nickname: string;
             /**
@@ -5270,6 +5295,38 @@ export interface components {
             /** Width */
             width: number | null;
         };
+        /**
+         * ImMessageAttachment
+         * @description 文件（105）与视频（104）消息（T-0119）。
+         */
+        ImMessageAttachment: {
+            /**
+             * Cover Media Id
+             * @description 视频封面（经 /im/media 显示）
+             */
+            cover_media_id: string | null;
+            /**
+             * Duration Seconds
+             * @description 视频时长（秒）
+             */
+            duration_seconds: number | null;
+            /**
+             * External Url
+             * @description 外部链接：前端不自动加载，只显示为链接
+             */
+            external_url: string | null;
+            /**
+             * Media Id
+             * @description 在 OpenIM 对象存储里时，经 GET /im/media/{media_id} 下载或播放（带登录校验）
+             */
+            media_id: string | null;
+            /** Mime */
+            mime: string | null;
+            /** Name */
+            name: string | null;
+            /** Size */
+            size: number | null;
+        };
         /** ImMessageOut */
         ImMessageOut: {
             /**
@@ -5279,6 +5336,7 @@ export interface components {
             approval_execution_id: string | null;
             /** At Im Ids */
             at_im_ids: string[];
+            attachment?: components["schemas"]["ImMessageAttachment"] | null;
             /** Client Msg Id */
             client_msg_id: string;
             /** Conversation Id */
@@ -5288,7 +5346,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "text" | "image" | "approval_card" | "system" | "unsupported";
+            kind: "text" | "image" | "file" | "video" | "approval_card" | "system" | "unsupported";
             /** Pinned */
             pinned: boolean;
             /** Sender Im Id */
@@ -5363,7 +5421,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "text" | "image" | "approval_card" | "system" | "unsupported";
+            kind: "text" | "image" | "file" | "video" | "approval_card" | "system" | "unsupported";
             /** Sender Im Id */
             sender_im_id: string;
             /**
@@ -5388,7 +5446,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "text" | "image";
+            kind: "text" | "image" | "file" | "video";
             /** Text */
             text?: string | null;
             /**
@@ -5574,6 +5632,8 @@ export interface components {
         };
         /** ImUploadOut */
         ImUploadOut: {
+            /** Duration Seconds */
+            duration_seconds?: number | null;
             /**
              * Expires At
              * Format: date-time
@@ -5582,8 +5642,19 @@ export interface components {
             expires_at: string;
             /** Height */
             height: number | null;
+            /**
+             * Kind
+             * @default image
+             * @enum {string}
+             */
+            kind: "image" | "file" | "video";
             /** Mime */
             mime: string;
+            /**
+             * Name
+             * @description 文件与视频的文件名
+             */
+            name?: string | null;
             /** Size */
             size: number;
             /**
@@ -9930,6 +10001,82 @@ export interface operations {
             };
             /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_im_media: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectAdminPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectAdminOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15989,7 +16136,10 @@ export interface operations {
     };
     upload_im_image: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 文件名（文件与视频） */
+                name?: string | null;
+            };
             header: {
                 /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
                 "X-CSRF-Token"?: string | null;

@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 from app.schemas.common import Page
 
 ConversationKind = Literal["single", "group", "notice"]
-MessageKind = Literal["text", "image", "approval_card", "system", "unsupported"]
+MessageKind = Literal["text", "image", "file", "video", "approval_card", "system", "unsupported"]
 MessageStatus = Literal["sending", "sent", "failed", "unknown"]
 GroupMemberRole = Literal["owner", "member"]
 
@@ -78,6 +78,20 @@ class ImImage(BaseModel):
     height: int | None
 
 
+class ImMessageAttachment(BaseModel):
+    """文件（105）与视频（104）消息（T-0119）。"""
+
+    media_id: UUID | None = Field(
+        description="在 OpenIM 对象存储里时，经 GET /im/media/{media_id} 下载或播放（带登录校验）"
+    )
+    external_url: str | None = Field(description="外部链接：前端不自动加载，只显示为链接")
+    name: str | None
+    size: int | None
+    mime: str | None
+    duration_seconds: int | None = Field(description="视频时长（秒）")
+    cover_media_id: UUID | None = Field(description="视频封面（经 /im/media 显示）")
+
+
 class ImMessageOut(BaseModel):
     server_msg_id: str | None = Field(description="OpenIM 的消息 ID；发送中的本地消息为 null")
     client_msg_id: str
@@ -88,6 +102,7 @@ class ImMessageOut(BaseModel):
     kind: MessageKind
     text: str | None = Field(description="text 的正文；system 的说明；纯文本")
     image: ImImage | None
+    attachment: ImMessageAttachment | None = None
     at_im_ids: list[str]
     approval_execution_id: UUID | None = Field(
         description="审批卡片对应的工具调用；前端渲染成卡片，调用 /ai/tool-executions 接口"
@@ -102,7 +117,7 @@ class ImMessagePage(Page[ImMessageOut]):
 
 
 class ImMessageSend(_Strict):
-    kind: Literal["text", "image"]
+    kind: Literal["text", "image", "file", "video"]
     text: Annotated[str, StringConstraints(min_length=1, max_length=MAX_TEXT_LENGTH)] | None = None
     upload_id: UUID | None = Field(default=None, description="POST /im/uploads 返回的 upload_id")
     at_im_ids: list[ImUserId] = Field(
@@ -113,13 +128,16 @@ class ImMessageSend(_Strict):
     def _content(self) -> Self:
         if self.kind == "text" and (self.text is None or self.upload_id is not None):
             raise ValueError("文字消息只填 text")
-        if self.kind == "image" and (self.upload_id is None or self.text is not None):
-            raise ValueError("图片消息只填 upload_id")
+        if self.kind != "text" and (self.upload_id is None or self.text is not None):
+            raise ValueError("图片、文件、视频消息只填 upload_id")
         return self
 
 
 class ImUploadOut(BaseModel):
     upload_id: UUID
+    kind: Literal["image", "file", "video"] = "image"
+    name: str | None = Field(default=None, description="文件与视频的文件名")
+    duration_seconds: int | None = None
     mime: str
     size: int
     width: int | None

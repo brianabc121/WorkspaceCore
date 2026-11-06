@@ -25,6 +25,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import client_ip, get_agent_service, get_db, get_redis
+from app.api.media_http import media_response
 from app.core.errors import ApiError
 from app.domain import agent_outbox, im_callbacks
 from app.domain.agents import AgentPrincipal, AgentService
@@ -313,7 +314,7 @@ async def get_instance_media(
     redis: Annotated[Redis, Depends(get_redis)],
     thumb: bool = False,
 ) -> Response:
-    """实例取工作台发出的图片（只读）：只经接入入口，按能力地址认已发出的图片。"""
+    """实例取工作台发出的图片、文件、视频（只读）：只经接入入口，按能力地址认已发出的媒体。"""
     ingress, _ = _ingress(request)
     if ingress not in ("intranet", "public"):
         return Response(status_code=404)
@@ -332,10 +333,14 @@ async def get_instance_media(
     mime = content_type.split(";")[0].strip() if thumb else media.mime
     if not mime.startswith("image/"):
         mime = media.mime
-    return Response(
-        content=data,
-        media_type=mime,
-        headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+    # 文件按附件下载，视频支持 Range（T-0119）
+    return media_response(
+        data,
+        mime,
+        kind=media.kind if not thumb else "image",
+        file_name=media.file_name,
+        range_header=request.headers.get("range"),
+        cache="private, max-age=3600",
     )
 
 
@@ -435,8 +440,12 @@ async def _judge(
         msg = None
     if msg is None:
         return CallbackResponse.reject(5005)
+    settings = request.app.state.settings
     judge = im_callbacks.CallbackJudge(
-        db, redis, admin_user_id=request.app.state.settings.openim_admin_user_id
+        db,
+        redis,
+        admin_user_id=settings.openim_admin_user_id,
+        ex_secret=settings.openim_secret.get_secret_value() if settings.openim_secret else None,
     )
     try:
         async with asyncio.timeout(JUDGE_TIMEOUT_SECONDS):

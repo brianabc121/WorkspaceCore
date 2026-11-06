@@ -771,6 +771,10 @@ class ImListTargetsOutput(BaseModel):
         0, description="最近 24 小时你发的消息被拒收的条数（详情用 im_outbox）"
     )
     sends_left_this_hour: int = Field(description="这个小时还能用 im_send 发几条")
+    attachments_enabled: bool = Field(
+        False, description="能不能发图片、文件、视频（管理员按实例打开）"
+    )
+    attachments_left_this_hour: int = 0
     notes: list[str]
 
 
@@ -829,9 +833,59 @@ ClientKey = Annotated[
 ]
 
 
+class ImCoverIn(_Strict):
+    """视频封面：只能是图片；不给时用工作台的默认封面图。"""
+
+    url: Annotated[str, StringConstraints(max_length=2048)] | None = None
+    data_base64: Annotated[str, StringConstraints(max_length=700_000)] | None = None
+    ref: Annotated[str, StringConstraints(max_length=80)] | None = None
+
+    @model_validator(mode="after")
+    def _one_source(self) -> Self:
+        if sum(v is not None for v in (self.url, self.data_base64, self.ref)) != 1:
+            raise ValueError("封面要给 url、data_base64、ref 之一")
+        return self
+
+
+class ImAttachmentIn(_Strict):
+    """一个附件，只给一种来源（方案第 4.2 节）。不支持服务器上的本地文件。"""
+
+    url: Annotated[str, StringConstraints(max_length=2048)] | None = Field(
+        default=None, description="公网网址，由工作台去取（内网地址取不到）"
+    )
+    data_base64: Annotated[str, StringConstraints(max_length=700_000)] | None = Field(
+        default=None, description="你自己生成的小文件，最多 512 KB"
+    )
+    text_content: Annotated[str, StringConstraints(max_length=1_048_576)] | None = Field(
+        default=None,
+        description="把一段文字存成文件发出去（要带 filename，如 report.md），最多 1 MB",
+    )
+    ref: Annotated[str, StringConstraints(max_length=80)] | None = Field(
+        default=None, description="im_media:<ID>：你的会话里收到或发出过的图片、文件、视频"
+    )
+    filename: Annotated[str, StringConstraints(max_length=128)] | None = None
+    kind: Literal["auto", "image", "file", "video"] = Field(
+        "auto", description="默认按内容识别；图片 10 MB、文件 20 MB、视频（MP4 / MOV）50 MB"
+    )
+    cover: ImCoverIn | None = Field(default=None, description="视频封面（可选）")
+
+    @model_validator(mode="after")
+    def _one_source(self) -> Self:
+        sources = (self.url, self.data_base64, self.text_content, self.ref)
+        if sum(v is not None for v in sources) != 1:
+            raise ValueError("附件要给 url、data_base64、text_content、ref 之一")
+        return self
+
+
 class ImSendInput(_Strict):
     target: ImTarget = Field(description="im_list_targets 给的 target")
     text: Annotated[str, StringConstraints(min_length=1, max_length=4000)] | None = None
+    attachments: list[ImAttachmentIn] = Field(
+        default_factory=list,
+        max_length=4,
+        description="图片、文件、视频，每个算一条消息（先发文字再按顺序发附件）；"
+        "要管理员给你打开附件权限",
+    )
     mention: list[Annotated[str, StringConstraints(max_length=64)]] = Field(
         default_factory=list,
         max_length=20,

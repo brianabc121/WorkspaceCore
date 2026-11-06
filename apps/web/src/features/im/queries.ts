@@ -9,6 +9,15 @@ export type ConversationKind = Schema['ImConversationOut']['kind']
 export type Folder = { id: string; label: string; kind: ConversationKind | ''; group: string; count: number; muted: boolean }
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 export const UPLOAD_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
+// 文件与视频（T-0119）：服务端按内容识别并按类型限制大小，这里只先挡住明显不行的
+export const MAX_FILE_BYTES = 50 * 1024 * 1024
+const BLOCKED_FILE = /\.(exe|msi|bat|cmd|com|scr|ps1|vbs|js|sh|apk|dmg|jar|html?|xhtml|svgz?)$/i
+export function checkFileUpload(file: File): string | null {
+  if (BLOCKED_FILE.test(file.name)) return '不能发送可执行程序、脚本或网页类文件。'
+  if (file.size > MAX_FILE_BYTES) return '文件不能超过 50 MiB（视频 50 MiB、其他文件 20 MiB）。'
+  if (file.size === 0) return '文件是空的。'
+  return null
+}
 
 function context(scope: string) {
   const auth = useAuthStore(), user = auth.user?.id

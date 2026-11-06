@@ -24,8 +24,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain import notifications, ops_metrics
 from app.domain.im import NOTICE_USER_ID, is_im_admin, user_id_from_im
+from app.domain.im_projection import verified_ex_key
 from app.domain.ratelimit import WindowLimiter, _resolve
 from app.models import (
+    AgentImOutbox,
     AgentInstance,
     AgentSettings,
     ImGroup,
@@ -42,6 +44,8 @@ from app.schemas.openim_callbacks import (
 
 logger = logging.getLogger("app.im")
 
+# 实例可以直接（经插件）发的消息类型：文字、@ 文字、正在输入；其余的只能经工作台发（T-0119）
+TEXT_CONTENT_TYPES = frozenset({101, 106, 113})
 STREAK_KEY = "im_relay_streak:{group_id}"
 PAUSE_NOTIFIED_KEY = "im_relay_paused:{group_id}"
 RATE_KEY = "im_relay_rate:{group_id}:{sender}"
@@ -77,15 +81,20 @@ def _allow() -> Verdict:
 class CallbackJudge:
     """before 回调的同步判断。"""
 
-    def __init__(self, db: AsyncSession, redis: Redis, *, admin_user_id: str) -> None:
+    def __init__(
+        self, db: AsyncSession, redis: Redis, *, admin_user_id: str, ex_secret: str | None = None
+    ) -> None:
         self.db = db
         self.redis = redis
         self.system_ids = frozenset({admin_user_id, NOTICE_USER_ID})
+        self.ex_secret = ex_secret
 
     async def judge(self, msg: MsgCallback) -> Verdict:
         try:
             if msg.send_id in self.system_ids:
                 return _allow()
+            if msg.send_id.startswith("oc_") and msg.content_type not in TEXT_CONTENT_TYPES:
+                await self._check_media(msg)
             if msg.session_type == 1 and msg.recv_id and not msg.group_id:
                 await self._single(msg)
                 return _allow()
@@ -94,6 +103,24 @@ class CallbackJudge:
             raise Rejected(5005)
         except Rejected as rejected:
             return Verdict(CallbackResponse.reject(rejected.code))
+
+    async def _check_media(self, msg: MsgCallback) -> None:
+        """实例只能经工作台发附件（T-0119，方案第 6.4 节）：ex 里要有工作台签名，
+        而且对应一条这个实例正在发送的发件记录。"""
+        key = verified_ex_key(self.ex_secret, msg.ex)
+        if key is None:
+            raise Rejected(5007)
+        found = await self.db.scalar(
+            select(AgentImOutbox.id)
+            .join(AgentInstance, AgentInstance.id == AgentImOutbox.instance_id)
+            .where(
+                AgentImOutbox.id == key,
+                AgentImOutbox.status == "sending",
+                AgentInstance.im_user_id == msg.send_id,
+            )
+        )
+        if found is None:
+            raise Rejected(5007)
 
     # ------------------------------------------------------------------ 身份
 

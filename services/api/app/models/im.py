@@ -294,13 +294,21 @@ class ImContactGroupMember(Base):
 
 
 class ImMedia(Base):
-    """上传的图片：id 同时是 upload_id 与 media_id。"""
+    """上传的图片、文件、视频（T-0119 起）：id 同时是 upload_id 与 media_id。
+
+    管理员上传的记 uploaded_by，智能体经 im_send 发的记 instance_id；文件与视频的宽高为 0。
+    """
 
     __tablename__ = "im_media"
     __table_args__ = (
         UniqueConstraint("object_name"),
         CheckConstraint(f"status IN {MEDIA_STATUSES}", name="status"),
-        CheckConstraint("size > 0 AND width > 0 AND height > 0", name="dimensions"),
+        CheckConstraint(
+            "size > 0 AND width >= 0 AND height >= 0"
+            " AND (kind <> 'image' OR (width > 0 AND height > 0))",
+            name="dimensions",
+        ),
+        CheckConstraint("kind IN ('image', 'file', 'video')", name="kind"),
         Index(
             "ix_im_media_unused_expiry",
             "expires_at",
@@ -315,6 +323,13 @@ class ImMedia(Base):
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
+    instance_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="SET NULL")
+    )
+    kind: Mapped[str] = mapped_column(Text, server_default=text("'image'"))
+    file_name: Mapped[str | None] = mapped_column(Text)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    sha256: Mapped[str | None] = mapped_column(Text)
     mime: Mapped[str] = mapped_column(Text)
     size: Mapped[int] = mapped_column(Integer)
     width: Mapped[int] = mapped_column(Integer)
