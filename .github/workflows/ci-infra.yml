@@ -158,6 +158,11 @@ jobs:
           # OpenIM（docs/deployment.md 第 17 节）：api / worker 经 im 网络访问 OpenIM REST 与 Garage
           set_env OPENIM_API_URL http://openim-server:10002
           set_env OPENIM_OBJECT_URL http://garage:3900
+          # Gmail（T-0131，场景 23）：模拟 Google（tests/e2e/fake_gmail_server.py）在 integrations 网络里叫 fake-gmail
+          set_env GOOGLE_OAUTH_TOKEN_URL http://fake-gmail:8080/token
+          set_env GOOGLE_OAUTH_REVOKE_URL http://fake-gmail:8080/revoke
+          set_env GMAIL_API_URL http://fake-gmail:8080
+          set_env INTEGRATION_ALLOWED_HOSTS n8n,fake-gmail
           docker compose --profile agents config --quiet
       - name: 构建打过补丁的 OpenIM 镜像（make openim-build）
         run: make openim-build
@@ -173,7 +178,7 @@ jobs:
             --intranet intranet.test:8443 --public public.test:9443
       - name: 启动 OpenIM（make openim-up）
         run: make openim-up
-      - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道；场景 15 是知识库与每晚复盘（T-0100））
+      - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道；场景 15 是知识库与每晚复盘（T-0100），场景 23 是 Gmail（T-0131））
         run: |
           # 要以 root 运行：接入包目录交给容器里的 uid 1000（CHECKLIST.md 的做法）。
           # npm 缓存放到临时目录：用 runner 的 ~/.npm 会留下 root 所有的文件，后面的 npm ci 会因 EACCES 失败
