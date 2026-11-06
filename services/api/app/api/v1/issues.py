@@ -208,7 +208,9 @@ async def get_issue(
     "/issues/{issue_id}/read",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="记为已读（viewer）",
-    responses=_read_errors,
+    description="只改当前用户自己的“读到哪里”，viewer 也可以；与其他写接口一样要 CSRF。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404),
 )
 async def read_issue(
     access: Viewer,

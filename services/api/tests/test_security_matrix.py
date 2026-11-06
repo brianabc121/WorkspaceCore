@@ -35,7 +35,8 @@ PUBLIC = {
     ("POST", "/api/v1/auth/login"),
 }
 # viewer 也可以执行的写操作：只改自己的通知
-VIEWER_WRITES = {("PATCH", "/api/v1/notifications")}
+# 只改自己的已读状态：viewer 也可以（仍要会话与 CSRF）
+VIEWER_WRITES = {("PATCH", "/api/v1/notifications"), ("POST", "/api/v1/issues/{issue_id}/read")}
 CAROL = {"email": "carol@example.com", "password": "carol password 123456"}
 # 成员与角色在业务层检查的接口：空请求体会先得到 422（对任何工作空间都一样，不暴露是否存在）
 BODIES: dict[tuple[str, str], dict[str, Any]] = {

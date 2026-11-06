@@ -1944,7 +1944,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 记为已读（viewer） */
+        /**
+         * 记为已读（viewer）
+         * @description 只改当前用户自己的“读到哪里”，viewer 也可以；与其他写接口一样要 CSRF。
+         */
         post: operations["read_issue"];
         delete?: never;
         options?: never;
@@ -18958,6 +18961,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
                 /** @description 当前工作空间；不是成员时返回 404 */
                 "X-Workspace-Id": string;
             };
@@ -18977,6 +18982,15 @@ export interface operations {
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

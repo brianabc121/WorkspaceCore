@@ -194,7 +194,7 @@ def upgrade() -> None:
             name=op.f("fk_issues_author_instance_id_agent_instances"),
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_issues")),
-        sa.UniqueConstraint("project_id", "number", name=op.f("uq_issues_project_id")),
+        sa.UniqueConstraint("project_id", "number", name=op.f("uq_issues_project_id_number")),
         schema="workspace",
     )
     op.create_index(

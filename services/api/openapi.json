@@ -31664,6 +31664,7 @@
     },
     "/api/v1/issues/{issue_id}/read": {
       "post": {
+        "description": "只改当前用户自己的“读到哪里”，viewer 也可以；与其他写接口一样要 CSRF。",
         "operationId": "read_issue",
         "parameters": [
           {
@@ -31674,6 +31675,24 @@
               "format": "uuid",
               "title": "Issue Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
             }
           },
           {
@@ -31702,6 +31721,16 @@
               }
             },
             "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
           },
           "404": {
             "content": {
