@@ -115,6 +115,15 @@ V2（禁用发消息工具后自动回复照常）、V3（系统事件进下一�
 真实容器里的 `sessions.list` / `sessions.abort`（乙在一件事上反复调用工具，甲叫停后 `stop-runs.mjs` 中止至少一个会话、模型调用停下）
 由 `tests/e2e/agents_acceptance.py` 场景 22 在 CI 的 agents 任务里实测，结果补在下面。
 
+实测结果（PR 的 CI agents 任务，提交 22dff3a，2026-11-06，真实 OpenIM v3.8.3-patch.18 + OpenClaw 2026.9.36，场景 22 的 9 项与其余场景全部通过）：
+
+| # | 结果 |
+|---|---|
+| 开关 | 没开权限时甲调用 `list_agent_runs` 返回 `FORBIDDEN_CAPABILITY`；打开后看得到乙（`is_you` 只标在自己身上） |
+| 智能体叫停 | 甲用 `stop_agent_run` 叫停乙，直接执行、返回 `stopping`；乙接下来的工具调用返回 `RUN_STOPPED`；乙的 `stop-runs.mjs` 领取终止令、调网关后报回 `done`（乙当时没有正在运行的会话，`aborted` 为 0），软停止随之解除；管理员收到“甲叫停了乙”的通知 |
+| 管理员叫停 | 甲在一件事上反复调用 `knowledge_search`，管理员叫停后它的下一次工具调用拿到 `RUN_STOPPED` 和原因；甲的 `stop-runs.mjs` 在容器里用 `sessions.list({activeOnly: true})` 找到正在运行的会话、`sessions.abort` 中止（`done`，`aborted` 为 1，领取到报回约 6 秒）；之后甲不再调用模型（模型调用次数 66 → 66，那一轮停下，排队的也清掉）；报回成功后解除软停止，甲的工具调用恢复 |
+| 未核对 | 乙（外网实例，public 模式）的模型经 Tool Search 调工作台工具时 OpenClaw 报 `Unknown tool id`（提交 3e9b6d5 的那次 CI），调用没到工作台；与终止无关，留给 T-0125 核对 |
+
 ### 6.3 唤醒（T-0121，2026-11-06）
 
 V4 实测结果（同一次 CI，提交 84f4359）：接入包的 `wakeup.mjs` 在甲的容器里领取管理员建的唤醒，用
