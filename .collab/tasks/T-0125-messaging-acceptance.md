@@ -2,13 +2,13 @@
 id: T-0125
 title: 发消息、Issues 与 README 的真实 OpenClaw 验收与文档
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web,docs,tests/e2e,infra,.github
 depends_on: T-0119, T-0120, T-0121, T-0122, T-0124
 created: 2026-11-04
-updated: 2026-11-04
+updated: 2026-11-06
 ---
 
 # T-0125 发消息、Issues 与 README 的真实 OpenClaw 验收与文档
@@ -28,3 +28,5 @@ updated: 2026-11-04
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-04 19:02 UTC · claude · 创建任务（owner: claude）
+- 2026-11-06 13:54 UTC · claude · 开始任务
+- 2026-11-06 13:54 UTC · claude · 人类 2026-11-06 要求“继续”后开工。已完成（本地，等 PR #161 合并后提交）：文档（api-contract 消息 / 唤醒 / 终止 / README / Issues 五节、data-dictionary 0033~0039、threat-model 8 行、deploy-guide 8.6、versions）；修正执行记录存附件全文的问题（_record_args 只记长度，被密钥拦下的也不记）；agents 场景 24（附件、定时、OpenIM 停掉期间排队）、25（README、Issue 唤醒与评论、连续评论暂停、阻塞 Issue）；README / Issues 浏览器验收 readme_issues_browser.cjs（本机全部通过）。下一步：开 PR 跑 CI，按结果补核验记录的实测。

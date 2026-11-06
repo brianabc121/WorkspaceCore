@@ -57,6 +57,7 @@ CI 的 `ci-api.yml` 用与 1.1 节相同的 PostgreSQL、Redis 镜像（同一�
 OpenClaw 定时任务（每晚复盘）的 CLI 用法在同一个版本上核验过，见 `2026-11-03-knowledge-k0-verification.md` 第 3.3、5 节（T-0100，没有新增依赖）。
 OpenClaw 网关的 `sessions.usage`（任务时间轴的用量上报）也在同一个版本上核验过，见 `2026-11-04-timeline-kb-upgrade-verification.md` 第 2 节（T-0104，没有新增依赖）。
 服务器状态（T-0113）读的是 Linux 的 `/proc`（`stat`、`loadavg`、`meminfo`、`net/route`、`net/dev`、`uptime`）、`statfs` 与 cgroup 的内存上限，接入包脚本只用 Node 标准库；运维动作（T-0114）用 Docker Compose v2 与 Docker CLI 的标准子命令，输出在 agents CI 的 SSH 部署验收里用 `scripts/install-docker.sh` 装的锁定版本逐个核对（`2026-11-04-agent-ops-verification.md` 第 3 节）。两者都没有新增依赖。
+智能体主动发消息、唤醒与终止任务（T-0117 ~ T-0126）用到的 OpenIM `/msg/send_msg` 与图片 / 文件 / 视频元素、openclaw-channel 的 `deliver` 与会话键、OpenClaw 的 `enqueueSystemEvent`、`openclaw agent --session-key`、网关 `sessions.list` / `sessions.abort`，都在上表锁定的版本上核验过，见 `2026-11-04-agent-messaging-verification.md`（第 6 节是实施时的核对与 CI 实测）；没有新增依赖，只给插件打了一个小补丁（下表“工作台补丁”一行，补丁全文是接入包的 `bin/channel-patch.mjs`，在本仓库 `services/api/app/agent_bundle/files/bin/`）。
 Garage v2.4.1 同时用于知识库图片的 S3 兼容存储在 CI 里的验收（路径与虚拟主机风格、主存储 + 副本，`scripts/garage_s3_check.sh`，T-0103 / T-0106），工作台本身不部署它。
 OpenIM 的官方镜像有越权问题，已换成自建的补丁镜像（`2026-10-31-v2-oc3-openim-patched-image.md`）。自建镜像每次构建的 digest 不同，所以锁定的是全部构建输入。
 
@@ -64,6 +65,7 @@ OpenIM 的官方镜像有越权问题，已换成自建的补丁镜像（`2026-1
 |---|---|---|---|---|
 | OpenClaw 2026.9.36（extended-stable） | `openclaw/openclaw:2026.9.36` | `sha256:eefba69ec4a5fa596f3b1a8fac4f09525ce10435617a23f2a2090ddd3b6c1c2f` | MIT | 各 OpenClaw 服务器（`infra/openclaw/`） |
 | OpenIM 渠道插件 0.3.3 | `@openim/openclaw-channel@0.3.3`（npm） | tarball sha256 `3d10dca0edcba0ecdb0dc915e7cf1ddf5a8453165de13dec76bbe5ef85607643` | AGPL-3.0-only | 同上 |
+| 渠道插件的**工作台补丁**（T-0120；打过补丁的实例上报版本 `0.3.3+myworkspace.1`，否则实例页提示重新签发接入包） | 接入包的 `bin/channel-patch.mjs` 在安装后原地修改插件的 `dist/inbound.js`（只改 `deliver` 失败的分支） | `dist/inbound.js` 原文件 sha256 `5beb827deeb5cae9293fc7f363b97ba6a57bb548baf410039c544d4fa00a6cfc`；打补丁后 `36e2670f72a66ff95ea672e5456e61d0f3101384d26e12dabda489f07c9ce67d`（两者不符就不改 / 不写） | AGPL-3.0-only（同插件） | 同上；核验 `2026-11-04-agent-messaging-verification.md` 第 6.1 节。升级插件时要重新审查并更新补丁与这两个值 |
 | OpenIM Server v3.8.3-patch.18 **补丁镜像** | `my-workspace/openim-server:v3.8.3-patch.18-myws.2`（本机构建，不推送） | 上游提交 `120cee6d5783959a02ea1acfa414589fe5aae90f` + `infra/openim/patches/` | Apache-2.0 | `infra/openim/compose.yaml`；构建 `infra/openim/server/build.sh` |
 | 构建镜像 Go 1.26.9 | `golang:1.26.9-alpine3.24` | `sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade` | BSD-3-Clause | `infra/openim/server/Dockerfile`（只用于构建） |
 | 运行镜像 Alpine 3.24.2 | `alpine:3.24.2` | `sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6` | MIT（busybox 等为 GPL-2.0） | 同上（补丁镜像的基础） |

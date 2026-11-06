@@ -18,12 +18,14 @@ agent-edge 网络访问工作台的接入入口（和真实部署一样，不能
 from __future__ import annotations
 
 import argparse
+import base64
 import concurrent.futures
 import io
 import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -31,6 +33,7 @@ import time
 import urllib.parse
 import uuid
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -401,6 +404,12 @@ def im_send_tool(target: str, text: str) -> str:
 
 def sql(query: str) -> str:
     return compose_exec("postgres", "sh", "-c", f'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "{query}"').strip()
+
+
+def sql_env(query: str) -> str:
+    """查询里有双引号（例如 JSON）时用：经环境变量和标准输入交给 psql，不经 shell 引号。"""
+    return compose_exec("postgres", "sh", "-c", 'printf "%s" "$Q" | psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At',
+                        env={"Q": query}).strip()
 
 
 def openim_container() -> str:
@@ -1396,11 +1405,207 @@ def scenario_23(c: Ctx) -> None:
         gmail.stop()
 
 
+def png_bytes(width: int = 16, height: int = 12) -> bytes:
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+    rows = b"".join(b"\x00" + b"\x10\x20\x30" * width for _ in range(height))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+def mp4_bytes(seconds: int) -> bytes:
+    """只有 ftyp 与 moov/mvhd 的最小 MP4：工作台按 mvhd 读出时长（与 tests/test_agent_media.py 相同）。"""
+    ftyp = struct.pack(">I", 20) + b"ftypmp42" + b"\x00\x00\x00\x00" + b"mp42"
+    mvhd_body = b"\x00\x00\x00\x00" + struct.pack(">IIII", 0, 0, 1000, seconds * 1000) + b"\x00" * 80
+    mvhd = struct.pack(">I", 8 + len(mvhd_body)) + b"mvhd" + mvhd_body
+    moov = struct.pack(">I", 8 + len(mvhd)) + b"moov" + mvhd
+    return ftyp + moov + b"\x00" * 64
+
+
+def wait_online(c: Ctx) -> None:
+    """OpenIM 重启后 OpenClaw 要重连（已知上游行为见场景 12），等甲、乙都在线再往下跑。"""
+    wait_for("甲、乙重新上线", lambda: all(
+        {x["instance_id"]: x["status"] for x in c.owner.call("GET", "/api/v1/im/contacts")["items"]}.get(i.id) == "online"
+        for i in (c.a, c.b)), timeout=300, interval=5)
+
+
+def scenario_24(c: Ctx) -> None:
+    """主动发附件、定时消息、OpenIM 停掉期间排队（T-0118、T-0119；T-0125 验收，核验记录 V1、V5、V6）。
+
+    附件权限默认关闭；打开后甲经 im_send 发文字 + 图片 + 文件 + 视频，真实 OpenIM 上管理员收得到、文件按附件下载、
+    视频有时长并支持 Range；执行记录不存附件内容。定时消息到点才发。OpenIM 停掉时 im_send 返回 queued，
+    恢复后工作台补发且只有一条。中途打开的工具按场景 18、22 的做法直接调 MCP（用实例自己的凭证，不经模型）。"""
+    tag = uuid.uuid4().hex[:8]
+    target = f"user:{c.admin_im}"
+
+    def set_media(enabled: bool) -> None:
+        current = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}")
+        c.owner.call("PUT", f"/api/v1/agents/instances/{c.a.id}/im-media", {"enabled": enabled, "version": current["version"]})
+
+    def latest(n: int) -> list[dict[str, Any]]:
+        mine = [m for m in c.owner.messages(c.conv_a) if m["sender_im_id"] == c.a.im_user_id]
+        return list(reversed(mine[:n]))  # 接口按时间倒序
+
+    note = {"text_content": f"# 周报 {tag}\n一切正常\n", "filename": f"weekly-{tag}.md"}
+    refused = mcp_call(c.a, "im_send", {"target": target, "attachments": [note]})
+    set_media(True)
+    try:
+        sent = mcp_call(c.a, "im_send", {
+            "target": target, "text": f"附件验收 {tag}", "client_key": f"media-{tag}",
+            "attachments": [
+                {"data_base64": base64.b64encode(png_bytes()).decode(), "filename": f"chart-{tag}.png"},
+                note,
+                {"data_base64": base64.b64encode(mp4_bytes(3)).decode(), "filename": f"demo-{tag}.mp4"},
+            ]})
+        data = sent.get("structuredContent") or {}
+
+        def arrived() -> list[dict[str, Any]] | None:
+            last = latest(4)
+            kinds = [m["kind"] for m in last]
+            return last if kinds == ["text", "image", "file", "video"] and tag in (last[0].get("text") or "") else None
+
+        got = wait_for("甲发的文字与三个附件", arrived, timeout=120, interval=3)
+        c.check("场景 24：附件权限没打开时带附件被拒（ATTACHMENT_FORBIDDEN）；打开后甲经 im_send 发出文字、图片、文件、视频各一条",
+                tool_code(refused) == "ATTACHMENT_FORBIDDEN" and data.get("status") == "sent" and bool(got),
+                json.dumps({"refused": tool_code(refused), "status": data.get("status")}, ensure_ascii=False))
+        file_msg, video_msg = got[2], got[3]
+        download = c.owner.client.request("GET", f"/api/v1/im/media/{file_msg['attachment']['media_id']}",
+                                          headers=c.owner.headers)
+        ranged = c.owner.client.request("GET", f"/api/v1/im/media/{video_msg['attachment']['media_id']}",
+                                        headers={**c.owner.headers, "Range": "bytes=0-15"})
+        c.check("场景 24：真实 OpenIM 上文件按附件下载、内容一致；视频读出时长、支持 Range（核验记录 V1、V5、V6）",
+                download.status == 200 and download.body == note["text_content"].encode()
+                and "attachment" in (download.headers.get("Content-Disposition") or "")
+                and video_msg["attachment"]["duration_seconds"] == 3 and ranged.status == 206 and len(ranged.body) == 16,
+                json.dumps({"download": download.status, "video": video_msg["attachment"], "range": ranged.status},
+                           ensure_ascii=False)[:300])
+        recorded = sql("SELECT arguments_display::text FROM workspace.ai_tool_executions"
+                       f" WHERE tool_name = 'im_send' AND arguments_display::text LIKE '%media-{tag}%'")
+        c.check("场景 24：执行记录里没有附件内容，只记长度", bool(recorded) and "一切正常" not in recorded and "不记录" in recorded,
+                recorded[:200])
+
+        # 定时消息：到点前没发，到点后由 Worker 发出一次
+        at = (datetime.now(UTC) + timedelta(seconds=75)).isoformat()
+        later = mcp_call(c.a, "im_send", {"target": target, "text": f"定时消息 {tag}", "send_at": at,
+                                          "client_key": f"later-{tag}"})
+        early = c.from_sender(c.conv_a, c.a.im_user_id, f"定时消息 {tag}")
+        wait_for("定时消息发出", lambda: c.from_sender(c.conv_a, c.a.im_user_id, f"定时消息 {tag}"), timeout=200, interval=5)
+        c.check("场景 24：定时消息先是 scheduled、到点前没发，到点后发出一条",
+                (later.get("structuredContent") or {}).get("status") == "scheduled" and not early
+                and len(c.from_sender(c.conv_a, c.a.im_user_id, f"定时消息 {tag}")) == 1,
+                json.dumps(later.get("structuredContent") or later, ensure_ascii=False)[:300])
+    finally:
+        set_media(False)
+
+    # OpenIM 停掉期间发：返回 queued；恢复后工作台补发，只发一次
+    container = openim_container()
+    run("docker", "stop", container, timeout=180)
+    try:
+        queued = mcp_call(c.a, "im_send", {"target": target, "text": f"断线排队 {tag}", "client_key": f"queue-{tag}"})
+    finally:
+        run("docker", "start", container, timeout=180)
+    status = (queued.get("structuredContent") or {}).get("status")
+    wait_for("OpenIM 恢复后补发", lambda: c.from_sender(c.conv_a, c.a.im_user_id, f"断线排队 {tag}"), timeout=900, interval=10)
+    time.sleep(30)  # 再等几轮发件（每 5 秒一次），确认没有重复发
+    once = c.from_sender(c.conv_a, c.a.im_user_id, f"断线排队 {tag}")
+    c.check("场景 24：OpenIM 停掉时 im_send 返回 queued；恢复后工作台补发，会话里只有一条（不重复）",
+            status == "queued" and len(once) == 1, json.dumps({"status": status, "count": len(once)}))
+    wait_online(c)
+
+
+def scenario_25(c: Ctx) -> None:
+    """项目 README 与 Issues（T-0122 ~ T-0124；T-0125 验收）。
+
+    README 自动列出项目里的智能体，甲经 readme_update 写“进展与交接”；管理员开接口约定 Issue 指派给乙 →
+    工作台给乙排 Issue 唤醒，wakeup.mjs 叫醒乙、乙经真实 OpenClaw 调 issue_comment（假模型只会照指令调用工具，
+    所以在唤醒提示末尾附上调用指令）；智能体连续评论 10 条后暂停，管理员评论后恢复；README 的沟通部分列出这个 Issue；
+    阻塞 Issue 挡住 complete_task，关闭后能完成。"""
+    tag = uuid.uuid4().hex[:8]
+    project = c.owner.call("POST", "/api/v1/projects", {"title": f"Issue 验收 {tag}", "description": ""},
+                           **{"Idempotency-Key": str(uuid.uuid4())})
+    pid = project["id"]
+    for instance in (c.a, c.b):
+        c.owner.call("PUT", f"/api/v1/projects/{pid}/agents/{instance.id}")
+
+    def readme_body() -> str:
+        return str(c.owner.call("GET", f"/api/v1/projects/{pid}/readme")["note"]["body"])
+
+    names = (c.a.record["name"], c.b.record["name"])
+    members = wait_for("README 列出甲、乙", lambda: (lambda b: b if all(n in b for n in names) else None)(readme_body()),
+                       timeout=120, interval=5)
+    written = mcp_call(c.a, "readme_update", {"project_id": pid, "section": "进展与交接",
+                                              "text": f"甲：接口约定已起草 {tag}", "mode": "append"})
+    c.check("场景 25：README 自动列出项目里的甲、乙；甲经 readme_update 写进展与交接，直接生效",
+            bool(members) and tool_code(written) == "" and f"接口约定已起草 {tag}" in readme_body(),
+            tool_code(written) or "")
+
+    current = c.owner.call("GET", f"/api/v1/agents/instances/{c.b.id}")
+    c.owner.call("PATCH", f"/api/v1/agents/instances/{c.b.id}", {"version": current["version"], "scope": "read_write"})
+    try:
+        issue = c.owner.call("POST", f"/api/v1/projects/{pid}/issues", {
+            "title": f"接口约定 {tag}", "body": "请乙确认字段。", "kind": "contract", "assignee_instance_ids": [c.b.id]})
+        wake = wait_for("乙的 Issue 唤醒", lambda: sql(
+            "SELECT id FROM workspace.agent_wakeups"
+            f" WHERE instance_id = '{c.b.id}' AND source = 'issue' AND status = 'pending'"), timeout=30)
+        directive = "TOOL:myworkspace__issue_comment " + json.dumps(
+            {"issue_id": issue["id"], "body": f"乙：字段已确认 {tag}"}, ensure_ascii=False)
+        # 唤醒本来在 5 分钟后：提前到现在，并在提示末尾附上调用指令
+        sql_env(f"UPDATE workspace.agent_wakeups SET run_at = now(), prompt = prompt || E'\\n' || '{directive}'"
+                f" WHERE id = '{wake}'")
+        out = c.b.exec("node", "/opt/myworkspace/bin/wakeup.mjs", timeout=700, check=False)
+
+        def comments() -> list[dict[str, Any]]:
+            return list(c.owner.call("GET", f"/api/v1/issues/{issue['id']}")["comments"])
+
+        mine = wait_for("乙在 Issue 里评论", lambda: [x for x in comments()
+                                                    if x["author"]["id"] == c.b.id and tag in (x["body"] or "")],
+                        timeout=120, interval=3)
+        c.check("场景 25：接口约定 Issue 指派给乙 → 工作台排 Issue 唤醒；wakeup.mjs 叫醒乙，乙经真实 OpenClaw 调 issue_comment 评论",
+                bool(mine), (out.stderr or "")[-300:])
+
+        # 智能体连续评论：到第 10 条暂停，管理员评论后恢复
+        results = []
+        for i in range(12):
+            who = c.a if i % 2 == 0 else c.b
+            code = tool_code(mcp_call(who, "issue_comment", {"issue_id": issue["id"], "body": f"第 {i + 2} 条 {tag}"}))
+            results.append(code)
+            if code:
+                break
+        c.owner.call("POST", f"/api/v1/issues/{issue['id']}/comments", {"body": "管理员：先停一下，结论是按方案 A。"})
+        resumed = tool_code(mcp_call(c.a, "issue_comment", {"issue_id": issue["id"], "body": f"甲：收到 {tag}"}))
+        c.check("场景 25：智能体连续评论到 10 条后暂停（ISSUE_PAUSED）；管理员评论后恢复",
+                results[-1] == "ISSUE_PAUSED" and results.count("") == 9 and resumed == "", json.dumps(results))
+        listed = wait_for("README 沟通部分列出 Issue", lambda: (lambda b: b if f"#{issue['number']}" in b
+                                                                and f"接口约定 {tag}" in b else None)(readme_body()),
+                          timeout=120, interval=5)
+        c.check("场景 25：README 的沟通部分自动列出这个 Issue", bool(listed))
+
+        # 阻塞 Issue 挡住完成
+        task = c.owner.call("POST", "/api/v1/tasks", {"project_id": pid, "title": f"联调 {tag}"},
+                            **{"Idempotency-Key": str(uuid.uuid4())})
+        task = c.owner.call("PATCH", f"/api/v1/tasks/{task['id']}", {"version": task["version"], "assignee_instance_id": c.a.id},
+                            **{"Idempotency-Key": str(uuid.uuid4())})
+        blocker = c.owner.call("POST", f"/api/v1/projects/{pid}/issues", {
+            "title": f"测试环境没准备好 {tag}", "kind": "blocker", "task_ids": [task["id"]]})
+        blocked = tool_code(mcp_call(c.a, "complete_task", {"task_id": task["id"]}))
+        c.owner.call("PATCH", f"/api/v1/issues/{blocker['id']}",
+                     {"version": blocker["version"], "state": "closed", "close_reason": "resolved"})
+        done = tool_code(mcp_call(c.a, "complete_task", {"task_id": task["id"]}))
+        c.check("场景 25：没关闭的阻塞 Issue 挡住 complete_task（TASK_BLOCKED）；关闭后甲能完成",
+                blocked == "TASK_BLOCKED" and done == "", json.dumps({"blocked": blocked, "done": done}))
+    finally:
+        current = c.owner.call("GET", f"/api/v1/agents/instances/{c.b.id}")
+        c.owner.call("PATCH", f"/api/v1/agents/instances/{c.b.id}", {"version": current["version"], "scope": "read"})
+        # 这些评论给甲、乙排的 Issue 唤醒不再需要：取消，免得后面的场景被叫醒
+        sql("UPDATE workspace.agent_wakeups SET status = 'cancelled' WHERE source = 'issue' AND status = 'pending'")
+
+
 SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "2": scenario_2, "3": scenario_3, "4": scenario_4, "5": scenario_5, "7": scenario_7, "8": scenario_8,
     "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "15": scenario_15,
     "16": scenario_16, "17": scenario_17, "18": scenario_18, "19": scenario_19, "20": scenario_20, "21": scenario_21,
-    "22": scenario_22, "23": scenario_23, "6": scenario_6,
+    "22": scenario_22, "23": scenario_23, "25": scenario_25, "24": scenario_24, "6": scenario_6,
 }
 
 

@@ -278,6 +278,92 @@ ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。
 
 **downgrade** 删除三张表和新增的字段：执行记录与 token 用量随之删除（都是 0027 之后才有的数据）。
 
+### 迁移 `0033`（T-0117）
+
+IM 会话目录（`docs/v2/AGENT_MESSAGING_PLAN.md` 第 3.1 节）。方案原本写这一步不需要迁移，为了判断“管理员回你的私聊你收不收得到”加了一列。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `agent_instances` 新增 | `bundle_whitelist` | `text[]`，可空：签发接入包时写进 OpenClaw 配置 `inboundWhitelist` 的 IM 用户 ID（当时的 owner / admin 与全部实例）。`im_list_targets` 据此给出 `replies_reach_you`；为空表示接入包是本迁移之前签发的，无法判断 |
+
+**downgrade** 删除这一列。
+
+### 迁移 `0034`（T-0118）
+
+智能体的发件箱与拒收记录（方案第 5、6 节）。都随工作空间、实例级联删除。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `agent_im_outbox` | `id`、`workspace_id`、`instance_id`、`target`、`conversation_id`、`client_key`、`part`、`request_hash`、`content_type`、`content_json`（JSONB）、`plain_text`、`at_im_ids`、`media_id`、`status`、`source`、`if_rate_limited`、`send_at`、`next_attempt_at`、`deadline_at`、`attempts`、`error_code`、`error_message`、`server_msg_id`、`sent_at`、`created_at`、`updated_at` | 智能体经 `im_send` 主动发的消息，一条 OpenIM 消息一行（先文字、再每个附件各一行，`part` 从 0 起）。`target` 是 `user:<IM 用户 ID>` / `group:<群 ID>`；`content_type` 是 OpenIM 的消息类型（101 文字、106 @ 文字、102 图片、104 视频、105 文件），`content_json` 是要发的元素，`media_id` 指向 `im_media`（没有外键）。唯一 `(instance_id, client_key, part)`：同一个幂等键重试不会发出两次，`request_hash` 核对内容是否相同。CHECK `status` ∈ `scheduled` / `queued` / `sending` / `sent` / `rejected` / `failed` / `unknown` / `cancelled`，`source` ∈ `tool` / `reply_retry`（回调 5002 拒收后补发）/ `wakeup`，`if_rate_limited` ∈ `queue` / `fail`。`deadline_at` 是限流排队、补发的最晚时间；`error_code` 是拒收码或错误类别。部分索引 `ix_agent_im_outbox_due`（`next_attempt_at`，`status` ∈ `scheduled` / `queued` / `unknown`）供 Worker 取到期的；`ix_agent_im_outbox_instance_created`。发出时 `ex` 里带发件箱 ID，结果未知时据此在 `im_messages.idempotency_key` 里对账。已结束的行保留 30 天 |
+| `agent_im_rejections` | `id`、`workspace_id`、`instance_id`、`conversation_id`、`code`、`content_type`、`client_msg_id`、`preview`、`retried`、`created_at` | 实例发的消息被 before 回调拒收的记录（主要是插件发的自动回复；`im_send` 发的由发件箱自己记）。`preview` 只存脱敏后的前 120 字；`retried` 表示工作台已排队补发。唯一 `(instance_id, client_msg_id)`（回调重放不重复记）；索引 `(instance_id, created_at)`。保留 7 天 |
+
+**downgrade** 删除两张表（都是 0034 之后才有的数据）。
+
+### 迁移 `0035`（T-0119）
+
+IM 附件：文件与视频（方案第 4 节），以及实例的附件开关（D3）。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `im_media` 新增 | `kind`、`file_name`、`duration_seconds`、`sha256`、`instance_id` | 从“只有图片”扩展到图片 / 文件 / 视频：CHECK `kind` ∈ `image`（默认，已有的行）/ `file` / `video`；尺寸约束 `ck_im_media_dimensions` 放宽为 `size > 0`、宽高 ≥ 0，只有图片要求宽高 > 0（文件与视频宽高为 0）。`file_name` 是文件与视频显示的文件名，`duration_seconds` 是视频时长（从 `mvhd` 读出），`sha256` 是内容哈希。`instance_id` → `agent_instances`（删除后置空）：智能体经 `im_send` 发的附件（对象名 `myws/<工作空间>/agent/<ID>.<扩展名>`）；管理员上传的仍记 `uploaded_by` |
+| `agent_instances` 新增 | `im_media_enabled`、`im_media_by`、`im_media_at` | 附件权限：默认 false；打开的人 → `users`（删除后置空）与时间，关闭时清空。开关接口按实例的 `version` 乐观并发 |
+
+**downgrade** 先删除 `kind` 不是 `image` 的媒体行（文件与视频是 0035 之后才有的数据），再恢复原来的尺寸约束、删除新增的列与外键。
+
+### 迁移 `0036`（T-0121）
+
+唤醒（方案第 7.2 节）。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `agent_wakeups` | `id`、`workspace_id`、`instance_id`、`source`、`created_by`、`target`、`session_key`、`prompt`、`run_at`、`repeat`、`time_zone`、`status`、`runs`、`claimed_at`、`last_run_at`、`last_error`、`created_at`、`updated_at` | 到点叫醒智能体跑一轮；随工作空间、实例级联删除，`created_by` → `users`（删除后置空，管理员建的才有）。CHECK `source` ∈ `agent`（智能体用 `schedule_wakeup` 安排）/ `admin`（迁移 0039 再加 `issue`），`repeat` ∈ `none` / `daily` / `weekdays` / `weekly`（按 `time_zone` 的同一个钟点，默认 `UTC`），`status` ∈ `pending` / `running` / `done` / `failed` / `cancelled`，`prompt` 1 ~ 2000 字。`target` 为空是独立会话；`session_key` 是 OpenClaw 的会话键（与 openclaw-channel 的写法一致）。重复的唤醒每跑一次 `runs` 加 1、`run_at` 改成下一次；`last_error` 只存一行原因。部分索引 `ix_agent_wakeups_due`（`instance_id, run_at`，`status = pending`）、`ix_agent_wakeups_instance_created`。待执行的个数（智能体 20、管理员 50）由应用限制；领取后 15 分钟没有结果记为失败；结束 30 天后删除 |
+
+**downgrade** 删除这张表（都是 0036 之后才有的数据）。
+
+### 迁移 `0037`（T-0126）
+
+终止智能体正在执行的任务（方案第 7.3 节），以及实例的“终止其他智能体任务”开关（D20）。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `agent_run_stops` | `id`、`workspace_id`、`instance_id`、`requested_by`、`requested_by_instance`、`task_id`、`reason`、`status`、`soft_until`、`aborted`、`error`、`claimed_at`、`finished_at`、`created_at`、`updated_at` | 终止令；随工作空间与被叫停的实例级联删除。下令的人 `requested_by` → `users`、下令的智能体 `requested_by_instance` → `agent_instances`、`task_id` → `tasks`，都是删除后置空。CHECK `status` ∈ `pending` / `running` / `done` / `failed` / `expired`，`reason` 1 ~ 500 字。`soft_until` 是软停止的截止时间（下令后 5 分钟，期间这个实例的 MCP 调用返回 `RUN_STOPPED`）；`aborted` 是硬停止中止的会话数。10 分钟没被领取记为 `expired`，领取后 5 分钟没有结果记为 `failed`。索引 `(instance_id, created_at)`；已结束、下令超过 30 天的由 Worker 删除 |
+| `agent_instances` 新增 | `stop_others_enabled`、`stop_others_by`、`stop_others_at` | “终止其他智能体任务”的权限：默认 false；打开的人 → `users`（删除后置空）与时间，关闭时清空 |
+
+**downgrade** 删除这张表和新增的三列（都是 0037 之后才有的数据）。
+
+### 迁移 `0038`（T-0122）
+
+项目与任务的 README（方案第 9 节，D16）。已有的项目与任务由 Worker 补建，迁移里不写笔记。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `knowledge_notes.type` | — | CHECK `ck_knowledge_notes_type` 增加 `readme`（工作台生成，人和智能体不能新建这种类型、不能把它改成别的类型、不能移动或删除） |
+| `knowledge_notes` 新增 | `task_id` | 任务 README 属于哪个任务 → `tasks`（删除后置空；工作台同时把这篇 README 放进回收站）。CHECK `ck_knowledge_notes_task_readme`：只有 `readme` 才有 `task_id`。部分唯一索引 `uq_knowledge_notes_task_readme`（`task_id`，未删除）保证每个任务最多一篇；`uq_knowledge_notes_project_readme`（`space_id`，`type = readme`、没有 `task_id`、`folder = ''`、未删除）保证每个项目知识库最多一篇项目 README |
+
+**downgrade** 先删除全部 `readme` 笔记（连同版本与链接，外键级联；**人和智能体在 README 里补充的内容也一起删除**），再删除索引、约束与列，恢复原来的类型约束。
+
+### 迁移 `0039`（T-0123）
+
+项目里的 Issues（方案第 8 节）。人和智能体两种作者 / 参与者都用一对 `user_id` / `instance_id` 表示。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `issues` | `id`、`workspace_id`、`project_id`、`number`、`title`、`body`、`kind`、`labels`、`state`、`close_reason`、`duplicate_of`、`locked`、`author_user_id`、`author_instance_id`、`author_name`、`closed_at`、`agent_streak`、`comment_count`、`last_activity_at`、`deleted_at`、`version`、`created_at`、`updated_at` | 随工作空间、项目级联删除。唯一 `(project_id, number)`：按项目编号（开的时候锁住项目行取最大编号加一）。CHECK `kind` ∈ `question` / `proposal` / `bug` / `contract` / `handoff` / `review` / `blocker` / `other`，`state` ∈ `open` / `closed`，`close_reason` 为空或 ∈ `resolved` / `wontfix` / `duplicate`，而且关闭时必须有原因、打开时必须没有（`ck_issues_closed`）；标题 1 ~ 200 字、正文 ≤ 20000 字、标签 ≤ 10 个；作者最多一个（`ck_issues_one_author`），作者删除后置空、`author_name` 保留当时的名字；`duplicate_of` → `issues`（删除后置空）。`agent_streak` 是连续来自智能体的评论数（人评论后归零，到 10 暂停智能体评论）。`deleted_at` 是软删除。`version` 用于乐观并发。索引 `ix_issues_project_state`（`project_id, state, number`）、`ix_issues_workspace_activity` |
+| `issue_assignees` | `id`、`issue_id`、`user_id`、`instance_id`、`created_at` | 指派（人或智能体，`ck_issue_assignees_one` 保证恰好一个）；随 Issue、人、实例级联删除；部分唯一索引分别保证同一个人 / 同一个实例只指派一次；索引 `ix_issue_assignees_instance` |
+| `issue_tasks` | `issue_id`、`task_id`、`created_at` | Issue 与任务的关联，主键 `(issue_id, task_id)`，两边删除都级联；索引 `ix_issue_tasks_task` |
+| `issue_comments` | `id`、`workspace_id`、`issue_id`、`reply_to`、`body`、`author_user_id`、`author_instance_id`、`author_name`、`edited_at`、`hidden_at`、`hidden_by`、`created_at` | 评论，随工作空间、Issue 级联删除；CHECK 正文 1 ~ 10000 字、作者最多一个；`reply_to` → 同表（删除后置空）；隐藏只记 `hidden_at` / `hidden_by`（→ `users`，删除后置空），不物理删除。索引 `(issue_id, created_at)` |
+| `issue_events` | `id`、`workspace_id`、`issue_id`、`kind`、`actor_kind`、`user_id`、`instance_id`、`actor_name`、`data`（JSONB）、`created_at` | 时间线事件；CHECK `kind` ∈ `opened` / `closed` / `reopened` / `assigned` / `unassigned` / `labeled` / `unlabeled` / `linked` / `unlinked` / `retitled` / `locked` / `unlocked` / `mentioned`（在别的 Issue 里被 `#编号` 提到），`actor_kind` ∈ `user` / `instance` / `system`；人、实例删除后置空，`actor_name` 保留。索引 `(issue_id, created_at)` |
+| `issue_mentions` | `id`、`issue_id`、`comment_id`、`user_id`、`instance_id`、`created_at` | `@名字` 提到的人或智能体（恰好一个），`comment_id` 为空表示在 Issue 正文里；都是级联删除。索引 `(instance_id, created_at)`、`(user_id, created_at)`，用于收件箱 |
+| `issue_reads` | `id`、`issue_id`、`user_id`、`instance_id`、`read_at` | 每个参与者对每个 Issue 读到哪里（恰好一个，部分唯一索引）；用于未读与收件箱 |
+| `projects` 新增 | `issue_notices` | 默认 false：Issue 新开、关闭时在项目群里发一行提示 |
+| `agent_wakeups.source` | — | CHECK 增加 `issue`：Issue 有新动态时工作台安排的合并唤醒 |
+
+同一迁移里的其他变化：
+
+- **搜索**：`issues` 上的触发器 `search_index`（`search_trigger_issue` → `search_index_issue`）写 `search_documents`，`resource_type = project_issue`、provider = `local`，标题是“#编号 标题”，`body` 是标签加正文，`context` 是项目名；软删除时移出索引。`search_rebuild()` 加上 Issue。
+
+**downgrade** 恢复旧的 `search_rebuild()`，删除触发器、函数与 `project_issue` 的搜索文档，删除 `source = issue` 的唤醒并恢复 `agent_wakeups.source` 的约束，删除 `projects.issue_notices` 和全部 Issue 相关的表（都是 0039 之后才有的数据）。
+
 ### 迁移 `0040`（T-0128）
 
 Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮件正文不入库。
