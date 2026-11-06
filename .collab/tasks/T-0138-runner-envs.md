@@ -2,9 +2,9 @@
 id: T-0138
 title: 运行服务器 R3 环境与运行：env_* 工具、文件、限额、执行记录、实例运行环境权限（例外八）
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web,docs
 depends_on: T-0137
 created: 2026-11-06
@@ -17,9 +17,9 @@ updated: 2026-11-06
 智能体经 env_* 工具建、用、停、删环境并执行命令；实例卡片的运行环境权限（方案第 4、5、8、10 节，例外八）。
 
 ## 验收标准
-- [ ] env_find / env_create（先复用）/ env_exec（同步或运行编号 + 唤醒）/ env_run / env_files / env_setup / env_update / env_stop / env_release
-- [ ] 按智能体的选项生成容器参数，宿主保护不变
-- [ ] 限额、执行记录、审计、通知管理员；关掉权限后环境全部停止
+- [x] env_find / env_create（先复用）/ env_exec（同步或运行编号 + 唤醒）/ env_run / env_files / env_setup / env_update / env_stop / env_release
+- [x] 按智能体的选项生成容器参数，宿主保护不变
+- [x] 限额、执行记录、审计、通知管理员；关掉权限后环境全部停止
 - [ ] 实例卡片“运行环境权限”：开关、限额、可注入的密钥
 
 ## 背景 / 约束 / 参考
@@ -30,3 +30,5 @@ updated: 2026-11-06
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-06 22:14 UTC · claude · 创建任务（owner: claude）
 - 2026-11-06 22:15 UTC · claude · 人类 2026-11-06 在对话中指派：按修订后的运行服务器方案（D1、D2、D11 按人类决定，其余按推荐）全部落实。
+- 2026-11-06 23:07 UTC · claude · 开始任务
+- 2026-11-06 23:08 UTC · claude · 后端完成：env_find / env_create（先复用、once 跑完就删、files、from_environment、delete_when、共享到项目）/ env_exec（55 秒内同步返回，否则运行编号 + 结束后唤醒，行锁防止漏唤醒）/ env_run / env_files / env_setup / env_update / env_stop / env_release；容器参数由 runner-agent 按选项生成、宿主保护不变；限额（同时运行数、内存、CPU、磁盘、每小时 exec、每天时长、整台内存不超卖、kvm 与 gVisor 能力检查）、执行记录、审计、通知管理员；PUT /agents/instances/{id}/runner 关掉时停止全部环境。剩下：实例卡片上的开关与限额（页面，随 T-0140）。

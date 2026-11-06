@@ -72,6 +72,14 @@ from app.models.knowledge_base import (
 )
 from app.models.mail import AgentMailAccount, MailAccount, MailOAuthClient, MailSend
 from app.models.notification import Notification
+from app.models.runner import (
+    RunnerCommand,
+    RunnerDeleteCondition,
+    RunnerEnvironment,
+    RunnerHost,
+    RunnerRun,
+    RunnerTemplate,
+)
 from app.models.search import SearchDocument
 from app.models.task import Project, Task
 from app.models.timeline import AgentUsageCursor, AgentUsageMinute, TaskEvent, TaskRun
@@ -149,6 +157,12 @@ __all__ = [
     "Project",
     "ProjectAgent",
     "ResourceLink",
+    "RunnerCommand",
+    "RunnerDeleteCondition",
+    "RunnerEnvironment",
+    "RunnerHost",
+    "RunnerRun",
+    "RunnerTemplate",
     "SearchDocument",
     "SyncCursor",
     "Task",

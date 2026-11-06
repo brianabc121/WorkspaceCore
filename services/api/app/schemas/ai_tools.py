@@ -73,6 +73,25 @@ from app.schemas.mail_tools import (
     MailThreadInput,
     MailThreadOutput,
 )
+from app.schemas.runner import (
+    EnvCreateInput,
+    EnvCreateOutput,
+    EnvExecInput,
+    EnvFilesInput,
+    EnvFilesOutput,
+    EnvFindInput,
+    EnvFindOutput,
+    EnvIdInput,
+    EnvOutput,
+    EnvRunInput,
+    EnvSetupInput,
+    EnvUpdateInput,
+    RunnerTemplateSaveInput,
+    RunnerTemplateSaveOutput,
+    RunnerTemplatesInput,
+    RunnerTemplatesOutput,
+    RunOut,
+)
 from app.schemas.search import AgentSearchType
 from app.schemas.tasks import (
     Priority,
@@ -1592,6 +1611,97 @@ _MAIL_SEND: list[ToolSpec] = [
         "重试同一封信时用同一个 client_key；结果是 unknown 时不要再发，管理员会去 Gmail 确认",
     ),
 ]
+# 运行环境（T-0137 / T-0138，docs/v2/RUNNER_PLAN.md 第 10 节）：直接执行（例外八），
+# 只列给打开了“运行环境权限”的实例
+_RUNNER_NOTE = "宿主保护不变：不开特权、不挂 Docker socket 与宿主目录、到不了私有网段。"
+_RUNNER: list[ToolSpec] = [
+    _spec(
+        "runner_templates",
+        "read",
+        RunnerTemplatesInput,
+        RunnerTemplatesOutput,
+        "能用的环境模板：镜像、安装步骤、运行时、用户、网络、资源、构建状态与耗时、使用次数",
+    ),
+    _spec(
+        "runner_template_save",
+        "direct",
+        RunnerTemplateSaveInput,
+        RunnerTemplateSaveOutput,
+        "新建或修改你自己的模板（直接执行）：基础镜像、安装步骤（Dockerfile 里 FROM 之后的行）、"
+        "启动命令、运行时（gvisor / runc / kvm）、用户（user / root）、"
+        "网络（none / allowlist / all）与域名、资源、要保存的目录、密钥名称。"
+        "按任务需要自己决定，工作台照做；"
+        "保存后在运行服务器上构建，最多等 wait_seconds 秒返回构建结果。" + _RUNNER_NOTE,
+    ),
+    _spec(
+        "env_find",
+        "read",
+        EnvFindInput,
+        EnvFindOutput,
+        "按模板、reuse_key、用途找你自己的环境和共享给你的环境：状态、上次使用、"
+        "接下来会怎样（如空闲多久后停止）、再用要等多久。建新环境前先找",
+    ),
+    _spec(
+        "env_create",
+        "direct",
+        EnvCreateInput,
+        EnvCreateOutput,
+        "建环境（直接执行）：必须说明用途（purpose）和类别（lifetime：once 跑一次就删 / "
+        "session 接下来反复用 / persistent 里面有要长期保存的东西）。给 template，"
+        "或直接给 spec（至少 image）。同一件事用同一个 reuse_key，会先复用已有的环境；"
+        "一定要新建时 new=true 并写 new_reason。lifetime=once 必须带 command，建好就跑，跑完就删。"
+        "delete_when 登记删除条件。" + _RUNNER_NOTE,
+    ),
+    _spec(
+        "env_exec",
+        "direct",
+        EnvExecInput,
+        RunOut,
+        "在环境里执行命令（直接执行；参数数组，或一段 shell 脚本）。wait_seconds 内结束的直接返回"
+        "退出码和输出的最后 16 KB（已脱敏）；更久的先返回 run_id，结束后用唤醒叫醒你，"
+        "再用 env_run 看结果。超时（timeout_seconds）会停止这个环境（数据保留）。"
+        "环境停了会自动启动；每小时最多 120 次",
+    ),
+    _spec("env_run", "read", EnvRunInput, RunOut, "查一次运行的状态、退出码和输出（最后 16 KB）"),
+    _spec(
+        "env_files",
+        "direct",
+        EnvFilesInput,
+        EnvFilesOutput,
+        "列目录（list）、读（read）、写（write）环境 /workspace 下的文件；路径用相对路径，"
+        "文本用 text，二进制用 content_base64（单个文件最多 20 MB，经 MCP 时整个请求最多 32 MB）",
+    ),
+    _spec(
+        "env_setup",
+        "direct",
+        EnvSetupInput,
+        EnvOutput,
+        "登记或修改这个环境的初始化步骤（shell 命令，按顺序）：归档后重建时重放。只有创建者",
+    ),
+    _spec(
+        "env_update",
+        "direct",
+        EnvUpdateInput,
+        EnvOutput,
+        "改环境的用途、删除条件、共享范围（share=project 时给 project_id，只能是你参与的项目）。"
+        "只有创建者",
+    ),
+    _spec(
+        "env_stop",
+        "direct",
+        EnvIdInput,
+        EnvOutput,
+        "停止环境（释放内存，数据卷保留；下次 env_exec 自动启动）。只有创建者",
+    ),
+    _spec(
+        "env_release",
+        "direct",
+        EnvIdInput,
+        EnvOutput,
+        "我不用了：创建者调用会触发 released 删除条件（登记过就进入待删除，否则只停止）；"
+        "别人调用只表示不再使用共享的环境",
+    ),
+]
 _KNOWLEDGE: list[ToolSpec] = [
     _knowledge("knowledge_search", KnowledgeSearchInput, KnowledgeSearchOutput),
     _knowledge("knowledge_get", KnowledgeGetInput, KnowledgeGetOutput),
@@ -1614,6 +1724,7 @@ TOOLS: dict[str, ToolSpec] = {
     + _ISSUE
     + _MAIL_READ
     + _MAIL_SEND
+    + _RUNNER
 }
 KNOWLEDGE_TOOL_NAMES = frozenset(spec.name for spec in _KNOWLEDGE)
 DIRECT_TOOL_NAMES = frozenset(spec.name for spec in _DIRECT)
@@ -1625,6 +1736,7 @@ ISSUE_TOOL_NAMES = frozenset(spec.name for spec in _ISSUE)
 MAIL_READ_TOOL_NAMES = frozenset(spec.name for spec in _MAIL_READ)
 MAIL_SEND_TOOL_NAMES = frozenset(spec.name for spec in _MAIL_SEND)
 MAIL_TOOL_NAMES = MAIL_READ_TOOL_NAMES | MAIL_SEND_TOOL_NAMES
+RUNNER_TOOL_NAMES = frozenset(spec.name for spec in _RUNNER)
 
 # 永远不做成工具（方案第 4.6 节）：集成凭证与设置、成员与角色、会话、工作台设置、
 # 实例与密钥管理、审计日志

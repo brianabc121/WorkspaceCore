@@ -1,0 +1,26 @@
+# 运行服务器上的 runner-agent（T-0136，docs/v2/RUNNER_PLAN.md 第 9 节）。
+# 主动连工作台的接入入口，不开放任何端口；挂着本机 Docker socket（等同 root：运行服务器专用、可以随时重装）。
+# 环境容器由它建，只连各自的 internal 网络，出口经它内置的代理。
+name: myworkspace-runner
+services:
+  runner-agent:
+    image: __IMAGE__
+    container_name: myworkspace-runner-agent
+    restart: unless-stopped
+    working_dir: /opt
+    command: ["python", "-m", "runner_agent"]
+    env_file: [runner.env]
+    environment:
+      MYWS_RUNNER_SELF: myworkspace-runner-agent
+      MYWS_RUNNER_DISK_PATH: /host-docker
+      MYWS_RUNNER_HELPER_IMAGE: __IMAGE__
+    volumes:
+      - ./agent/runner_agent:/opt/runner_agent:ro
+      - ./tls:/tls:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker:/host-docker:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

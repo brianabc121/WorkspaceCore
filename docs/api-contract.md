@@ -551,3 +551,46 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 - 唤醒：智能体被提到、被指派，或它开的 / 指派给它的 Issue 有新评论时进收件箱，并合并成一次唤醒（`source = issue`，独立会话，5 分钟后执行；还没执行时只累加条数）。
   提示词只写“有 N 条 Issue 动态，请用 issue_inbox 查看”，不含别人写的内容。没配 `wakeup.mjs` 的实例只能在下次运行时自己查。
 - 与任务：`get_task` 带上关联的、未关闭的 Issue（`issues`）；`complete_task` 遇到关联的、未关闭的“阻塞”Issue 返回 `TASK_BLOCKED`（人照常可以完成）；`release_task` 的 `next_step` 提醒开“交接”Issue 或更新任务 README。
+
+## 运行服务器（T-0136 ~ T-0138）
+
+方案 `docs/v2/RUNNER_PLAN.md`，核验记录 `docs/decisions/2026-11-06-runner-verification.md`；`docs/AGENTS.md` 第 8 节例外八。
+管理员接口只给 owner / admin（member、viewer `403`），全部按当前工作空间过滤；V1 每个工作空间一台运行服务器。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /api/v1/runner/overview` | 运行服务器（`status` 超过 90 秒没有长轮询显示 `offline`、版本、`runtimes`、`kvm`、CPU / 内存 / 磁盘、最近一次对账汇总 `report`、生效的回收策略 `policy`、`version`）、按状态的环境数、每个实例的用量与限额、最近停止 / 删除的环境与原因 |
+| `POST /api/v1/runner/host` | 添加运行服务器：`name`、`ingress`（`intranet` / `public`）；只建记录，凭证在下载接入包时签发。已有一台 `409 RUNNER_EXISTS`；这个入口没配置 `409 AGENT_INGRESS_NOT_CONFIGURED`；审计 `runner.host_created` |
+| `POST /api/v1/runner/host/bundle` | 下载接入包（zip，`Cache-Control: no-store`）并签发新凭证（`mwr_` 开头，工作台只存 SHA-256），旧凭证立即失效；外网入口另签客户端证书（实例的内部 CA）。内容：`runner.env`（600）、`compose.yaml`（锁定 digest 的 python 镜像）、`agent/runner_agent/*.py`、`install.sh` / `install-docker.sh`（Docker 29.9.1）/ `install-gvisor.sh`（release-20261019.0，核对 sha512）、`tls/`、`CHECKLIST.md`；审计 `runner.host_reissued` |
+| `DELETE /api/v1/runner/host?version=` | 移除；还有没删除的环境 `409 RUNNER_HAS_ENVIRONMENTS`；审计 `runner.host_removed` |
+| `PUT /api/v1/runner/host/policy` | 回收策略覆盖值 `policy`（键见 `app/domain/runner_specs.py` 的 `DEFAULT_POLICY`，不认识的键 `422`）、`version`；审计 `runner.policy_updated` |
+| `GET /api/v1/runner/environments` | 环境列表：`state`、`instance_id`、`lifetime`、`include_deleted`；每项含智能体写的用途 `untrusted.purpose`、配置记录 `spec`、运行时 / 用户 / 网络、内存与磁盘占用、出口访问记录 `egress.hosts`（`域名:端口` → 次数、字节、拒绝次数）、删除条件、`next_step`、`wake_seconds`、`version` |
+| `POST /api/v1/runner/environments/{id}/actions` | `action` ∈ `start` / `stop` / `delete`（立即进入待删除）/ `pin` / `unpin`（保护：不被空闲回收），带 `version`；审计 `runner.environment_<action>` |
+| `GET /api/v1/runner/templates` | 模板（谁建的、`untrusted.description`、规格、构建状态与日志摘要、镜像 digest、构建耗时、镜像大小、使用次数） |
+| `PUT /api/v1/runner/templates` | 管理员新建 / 修改模板（`name` 只能是小写字母数字与 `._-`）：规格变了版本号加一并下发构建；修改带 `version`；审计 `runner.template_saved` |
+| `PUT /api/v1/runner/templates/{id}/status` | `active` / `disabled`，带 `version`；审计 `runner.template_status` |
+| `POST /api/v1/runner/templates/{id}/rebuild` | 重新构建；审计 `runner.template_rebuild` |
+| `GET /api/v1/runner/runs` | 运行记录：`environment_id`、`instance_id`、`limit`（≤ 200）；输出只返回最后 16 KB |
+| `GET /api/v1/runner/runs/{id}` | 一次运行的完整输出（最多 1 MB，已按注入的密钥值与密钥扫描脱敏，放在 `untrusted.output`） |
+| `GET /api/v1/agents/instances/{id}/runner` | 实例的运行环境权限：`enabled`、生效的 `limits`、可以注入的密钥（密钥库已授权给这个实例的名称）、`enabled_at`、`version`（实例的） |
+| `PUT /api/v1/agents/instances/{id}/runner` | `enabled`、`limits`（`envs`、`persistent`、`memory_mb`、`cpus`、`disk_gb`、`execs_per_hour`、`run_hours_per_day`；不认识的键 `422`）、`version`。只读实例打不开（`422`）；审计 `agents.instance.runner_updated`；打开时通知管理员 `runner.instance_enabled`；关掉时停止它所有运行中的环境 |
+
+**运行服务器接口**（只在接入入口开放，`/runner-api/v1/*`，Caddy 请求体上限 64 MB）：认证是运行服务器凭证 + 入口请求头
+（只在请求直接来自接入入口时采用；外网另要客户端证书指纹一致），失败一律 `401 RUNNER_UNAUTHORIZED`，外网入口每个 IP 15 分钟 10 次失败后 `429`。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `POST /runner-api/v1/poll` | 上报版本与容量（`runtimes`、`kvm`、CPU、内存、磁盘），长轮询领指令（`wait_seconds` ≤ 25，一次最多 10 条，`FOR UPDATE SKIP LOCKED` 后标为 `sent`）。需要注入密钥的指令（`create_env` / `start_env` / `exec`）**这时才解密**放进 `payload.secret_values`（不落库，每次写取密钥记录）；`no-store` |
+| `POST /runner-api/v1/commands/{id}/result` | `status`（`done` / `failed`）、`result`、`error`；重复回报只认第一次（`accepted: false`）；不是这台服务器的指令 `404` |
+| `POST /runner-api/v1/report` | 每分钟对账：带工作台标签的容器、数据卷、镜像与占用、没有标签的容器数（只计数）、出口访问记录。返回 `lost`（记录里有、实际没有：标为 `failed` 并通知管理员）与 `stray`（实际有、记录里没有：runner-agent 先停止、24 小时后删除） |
+
+指令：`build_template`、`create_env`、`start_env`、`stop_env`、`delete_env`、`exec`、`put_files`、`get_files`、`list_files`（`snapshot` / `restore` / `prune_images` 在 T-0139）。
+时限到了还没结果：能重发的（停止、删除、读文件）最多重发 3 次；`exec` 记为结果未知、不自动重跑（运行记 `unknown`，有唤醒时叫醒智能体）；建环境、构建模板记为失败。
+
+**MCP 工具**（只列给打开了运行环境权限的实例，关掉后调用 `FORBIDDEN_CAPABILITY`；直接执行、不审批）：
+
+- 读：`runner_templates`、`env_find`、`env_run`。
+- 写（风险级别 `direct`）：`runner_template_save`（保存后构建，最多等 `wait_seconds`）、`env_create`（必填 `purpose`、`lifetime`；`template` 或 `spec`；有安装步骤的规格要先建模板；同一个 `reuse_key` 先复用；`lifetime=once` 必须带 `command`，跑完就删；`delete_when`、`share=project`、`files`、`from_environment`）、
+  `env_exec`（`wait_seconds` 内结束直接返回退出码与输出的最后 16 KB，否则返回 `run_id`、结束后用唤醒叫醒；超时停止环境；每小时 120 次）、`env_files`（`list` / `read` / `write`，单个文件 20 MB；经 MCP 的请求体上限 32 MB）、`env_setup`、`env_update`、`env_stop`、`env_release`。
+- 用途、模板说明、命令输出在 `untrusted` 里。错误码：`RUNNER_UNAVAILABLE`（没有运行服务器或不在线）、`QUOTA_EXCEEDED`、`RESOURCE_BUSY`、`RATE_LIMITED`、`RUNNER_CAPABILITY`（例如没有 `/dev/kvm`、没装 gVisor）、
+  `TEMPLATE_NOT_READY`、`ENV_UNAVAILABLE`、`TIMEOUT`、`RUNNER_FAILED`、`FORBIDDEN`、`NOT_FOUND`、`VALIDATION_FAILED`、`PAYLOAD_TOO_LARGE`。

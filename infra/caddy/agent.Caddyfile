@@ -2,7 +2,7 @@
 # 与管理员入口（Caddyfile）分开的 Caddy：compose 的 agent-gateway 服务（--profile agents）。
 #
 # - 两个站点：内网入口（私网地址 + TLS，限定来源网段）与外网入口（公网域名 + 双向证书，信任工作台内部 CA）；
-# - 默认拒绝：只放行实例接口的路径，其余一律 404；
+# - 默认拒绝：只放行实例接口与运行服务器接口（/runner-api/v1/*，T-0136）的路径，其余一律 404；
 # - 先删掉客户端带来的 X-MyWS-* 请求头，再由这里写入入口与客户端证书指纹。API 只在请求直接来自
 #   本服务（AGENT_INGRESS_TRUSTED_PROXIES）时采用这两个请求头；
 # - 证书来自文件（/certs）：内网可用内部 CA 或 Tailscale 证书，外网用公网证书；
@@ -21,16 +21,41 @@ http://127.0.0.1:8099 {
 }
 
 (agent_routes) {
-	request_body {
-		max_size 1MB
-	}
+	# 请求体上限按路径分别设（外层设了上限，里面再放大也没用：外层的读取器先生效）
 	header -Server
 
 	request_header -X-MyWS-Ingress
 	request_header -X-MyWS-Client-Cert-SHA256
 
-	@agent path /mcp /agent-api/v1/*
+	@agent path /agent-api/v1/*
 	handle @agent {
+		request_body {
+			max_size 1MB
+		}
+		reverse_proxy api:8000 {
+			header_up X-MyWS-Ingress {args[0]}
+			header_up X-MyWS-Client-Cert-SHA256 {http.request.tls.client.fingerprint}
+		}
+	}
+
+	# MCP：运行环境的 env_files 可以带文件（单个 20 MB，base64 后约 27 MB），整个请求最多 32 MB（T-0137）
+	@mcp path /mcp
+	handle @mcp {
+		request_body {
+			max_size 32MB
+		}
+		reverse_proxy api:8000 {
+			header_up X-MyWS-Ingress {args[0]}
+			header_up X-MyWS-Client-Cert-SHA256 {http.request.tls.client.fingerprint}
+		}
+	}
+
+	# 运行服务器（T-0136）：长轮询领指令、回报结果（读文件最多 20 MB）、对账；凭证 mwr_
+	@runner path /runner-api/v1/*
+	handle @runner {
+		request_body {
+			max_size 64MB
+		}
 		reverse_proxy api:8000 {
 			header_up X-MyWS-Ingress {args[0]}
 			header_up X-MyWS-Client-Cert-SHA256 {http.request.tls.client.fingerprint}
@@ -90,6 +115,9 @@ http://127.0.0.1:8099 {
 	}
 
 	handle {
+		request_body {
+			max_size 1MB
+		}
 		respond 404
 	}
 }

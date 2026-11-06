@@ -388,3 +388,20 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 
 升级时把 `agents_allowed = true` 且没断开的邮箱分配给同一工作空间现有的全部实例（升级前后智能体能看到的邮箱不变）。
 **downgrade** 加回 `agents_allowed`（有分配的邮箱为 true，其余 false），删除分配表与唯一约束；按实例的分配细节不保留。
+
+### 迁移 `0042`（T-0136 ~ T-0139）
+
+运行服务器（`docs/v2/RUNNER_PLAN.md` 第 12 节）。只新增表与字段；环境、模板、运行都带工作空间（`environments` 用复合外键 `(workspace_id, host_id)` → `runner_hosts`）。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `runner_hosts` | `id`、`workspace_id`、`name`、`status`、`ingress`、`token_hash`、`token_prefix`、`cert_fingerprint`、`cpus`、`mem_bytes`、`disk_bytes`、`disk_free_bytes`、`kvm`、`runtimes`、`docker_version`、`agent_version`、`report`、`policy`、`last_seen_at`、`created_by`、`version` | 每个工作空间一台（唯一 `workspace_id`）；凭证只存 SHA-256（唯一）与前 12 个字符；CHECK `status` ∈ `pending` / `online` / `offline` / `disabled`、`ingress` ∈ `intranet` / `public`；`policy` 是回收策略的覆盖值 |
+| `runner_templates` | `id`、`workspace_id`、`name`、`description`、`owner_instance_id`、`created_by`、`status`、`revision`、`spec`、`build_status`、`build_error`、`build_log`、`image_ref`、`image_digest`、`image_bytes`、`build_seconds`、`built_at`、`last_used_at`、`use_count`、`version` | 唯一 `(workspace_id, name)`，名称 1 ~ 64 字；`spec` 是规整后的规格（镜像、安装步骤、运行时、用户、网络与域名、资源、环境变量、密钥**名称**、要保存的目录）；CHECK `status`、`build_status` ∈ `pending` / `building` / `ready` / `failed`；建立者是实例或用户（删除后置空） |
+| `runner_environments` | `id`、`workspace_id`、`host_id`、`template_id`、`template_revision`、`owner_instance_id`、`purpose`、`lifetime`、`reuse_key`、`state`、`state_reason`、`spec`、`setup`、`share`、`project_id`、`pinned`、`container_name`、`volume_name`、`network_name`、`snapshot_*`、`start_seconds`、`rebuild_seconds`、`use_count`、`mem_bytes`、`disk_bytes`、`egress`、时间字段、`delete_after`、`version` | `spec` 是**配置记录**（建这个环境时的完整规格与镜像 digest）；CHECK `lifetime` ∈ `once` / `session` / `persistent`、`state` ∈ `creating` / `running` / `stopped` / `archived` / `pending_delete` / `deleted` / `failed`、`share` ∈ `none` / `project`（共享时必须有 `project_id`）；索引 `(workspace_id, state)`、`(owner_instance_id, reuse_key)`；容器 / 数据卷 / 网络名是 `mw-env|vol|net-<12 位十六进制>` |
+| `runner_delete_conditions` | `id`、`environment_id`、`kind`、`ref_id`、`at`、`seconds`、`created_by_instance_id`、`fired_at` | 删除条件；CHECK `kind` ∈ `run_finished` / `task_done` / `issue_closed` / `project_archived` / `at` / `idle` / `released`；部分索引 `(kind, ref_id) WHERE fired_at IS NULL`；随环境级联删除 |
+| `runner_runs` | `id`、`workspace_id`、`environment_id`、`instance_id`、`command`、`status`、`exit_code`、`timeout_seconds`、`output`、`output_truncated`、`wake`、时间字段 | 一次命令：`command` 脱敏后记录；`output` 最多 1 MB（开头四分之一加结尾，脱敏）；CHECK `status` ∈ `queued` / `running` / `succeeded` / `failed` / `timeout` / `unknown` / `cancelled`；`wake` 表示结束后叫醒智能体 |
+| `runner_commands` | `id`、`workspace_id`、`host_id`、`kind`、`payload`、`status`、`result`、`error`、`attempts`、`environment_id`、`template_id`、`run_id`、`created_at`、`sent_at`、`finished_at`、`deadline_at` | 下发给 runner-agent 的指令（按 `id` 去重）；**`payload` 不含密钥值**（下发时才解密）；`get_files` 之外的 `result` 不存文件内容；CHECK `status` ∈ `pending` / `sent` / `done` / `failed` / `unknown` / `cancelled` |
+| `agent_instances` 新增 | `runner_enabled`、`runner_by`、`runner_at`、`runner_limits` | 运行环境权限（默认关闭）；`runner_limits` 是管理员改过的限额（空用默认值） |
+| `agent_wakeups.source` | 增加 `runner` | 长时间运行结束后叫醒智能体 |
+
+**downgrade** 删除 `source = runner` 的唤醒并恢复约束，删除新增的表与字段（都是 0042 之后才有的数据）。

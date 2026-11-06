@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request, Response
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app import __version__
-from app.api import agent_api, health, mcp
+from app.api import agent_api, health, mcp, runner_api
 from app.api import v1 as api_v1
 from app.api.deps import deployment_health
 from app.core.config import Settings, get_settings
@@ -112,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # V2 实例接口：只经接入入口到达（Caddy 管理员入口只转发 /api/*）
     app.include_router(agent_api.router)
     app.include_router(agent_api.gateway)
+    app.include_router(runner_api.router)
     app.include_router(mcp.router)
 
     @app.get("/metrics", include_in_schema=False)

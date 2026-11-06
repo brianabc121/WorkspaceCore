@@ -46,6 +46,7 @@ from app.domain import (
     mail_tools,
     ops_metrics,
     readme_tools,
+    runner_tools,
 )
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.im import openim_client
@@ -61,6 +62,7 @@ from app.schemas.ai_tools import (
     MAIL_TOOL_NAMES,
     PROJECT_ADMIN_TOOL_NAMES,
     README_TOOL_NAMES,
+    RUNNER_TOOL_NAMES,
     STOP_TOOL_NAMES,
     TOOLS,
     ToolSpec,
@@ -89,6 +91,7 @@ def available(spec: ToolSpec) -> bool:
         or spec.name in README_TOOL_NAMES
         or spec.name in ISSUE_TOOL_NAMES
         or spec.name in MAIL_TOOL_NAMES
+        or spec.name in RUNNER_TOOL_NAMES
     )
 
 
@@ -181,6 +184,7 @@ async def _list_tools(
         stop_others = instance is not None and instance.stop_others_enabled
         mail_read = instance is not None and instance.mail_read_enabled
         mail_send = instance is not None and instance.mail_send_enabled
+        runner = instance is not None and instance.runner_enabled
     # 只列这个实例的权限范围里、已经实现的工具；角色是否够在调用时再检查（角色可能变化）。
     # 项目管理工具只列给打开了项目管理权限的实例（T-0112）
     tools = [
@@ -194,6 +198,8 @@ async def _list_tools(
         # 邮件（T-0129）：读工具按“查询邮件”开关（默认打开），mail_send 按“发送邮件”权限（例外七）
         and (spec.name not in MAIL_READ_TOOL_NAMES or mail_read)
         and (spec.name not in MAIL_SEND_TOOL_NAMES or mail_send)
+        # 运行环境（T-0137）：只列给打开了“运行环境权限”的实例（例外八）
+        and (spec.name not in RUNNER_TOOL_NAMES or runner)
     ]
     return types.ListToolsResult(tools=tools)
 
@@ -273,6 +279,10 @@ async def _dispatch(
                     )
                 elif spec.name in MAIL_TOOL_NAMES:
                     output = await mail_tools.run(
+                        service, requester, spec, raw, request_id=caller.request_id
+                    )
+                elif spec.name in RUNNER_TOOL_NAMES:
+                    output = await runner_tools.run(
                         service, requester, spec, raw, request_id=caller.request_id
                     )
                 elif spec.name in IM_DIRECT_TOOL_NAMES:
