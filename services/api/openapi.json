@@ -213,6 +213,12 @@
             "description": "最近一次生成接入包的时间；从未生成为 null",
             "title": "Bundle Issued At"
           },
+          "bundle_outdated": {
+            "default": false,
+            "description": "已部署的实例还在用旧接入包，或插件没打工作台的补丁（上报的插件版本不是 0.3.3+myworkspace.1，T-0120）：重新签发接入包或经 SSH 重新部署",
+            "title": "Bundle Outdated",
+            "type": "boolean"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",

@@ -14,6 +14,7 @@ zip 里的文件：
 | `bin/myworkspace-openclaw-start` | 755 | 启动包装：取 IM 令牌、上报版本，再启动 OpenClaw |
 | `bin/usage-report.mjs` | 755 | 每分钟上报 token 用量（宿主机 crontab 在容器里运行，T-0104） |
 | `bin/host-report.mjs` | 755 | 每分钟上报服务器状态：CPU、内存、磁盘、网络的数字（T-0113） |
+| `bin/channel-patch.mjs` | 755 | 给插件打补丁：自动回复被拒收时把原因放回会话（T-0120） |
 | `compose.yaml` | 644 | OpenClaw 服务器上的 Compose（锁定镜像，不开放端口） |
 | `CHECKLIST.md`、`README.md` | 644 | 部署检查清单与说明 |
 | `setup-reflection.sh`、`reflection-prompt.md` | 755 / 644 | 每晚复盘的定时任务（T-0100） |
@@ -34,6 +35,9 @@ from typing import Any
 
 OPENCLAW_VERSION = "2026.9.36"
 PLUGIN_VERSION = "0.3.3"
+# 接入包的 channel-patch.mjs 打上的补丁（T-0120）；打过补丁的实例上报 "0.3.3+myworkspace.1"
+PLUGIN_PATCH = "myworkspace.1"
+PATCHED_PLUGIN_VERSION = f"{PLUGIN_VERSION}+{PLUGIN_PATCH}"
 # 外网模式的本机隧道（OC-2 第 4 部分核验：client 模式的 --listen / --target / --cert / --key）
 GHOSTUNNEL_IMAGE = (
     "ghostunnel/ghostunnel:v1.11.4"
@@ -41,12 +45,13 @@ GHOSTUNNEL_IMAGE = (
 )
 _FILES = resources.files("app.agent_bundle") / "files"
 # bin/ 下的程序（权限 755）；usage-report.mjs 是每分钟的用量上报（T-0104），
-# host-report.mjs 是每分钟的服务器状态上报（T-0113）
+# host-report.mjs 是每分钟的服务器状态上报（T-0113），channel-patch.mjs 给插件打补丁（T-0120）
 BIN_SCRIPTS = (
     "myworkspace-secret-resolver",
     "myworkspace-openclaw-start",
     "usage-report.mjs",
     "host-report.mjs",
+    "channel-patch.mjs",
 )
 
 
@@ -142,8 +147,8 @@ def _readme(data: BundleInput, generated_at: datetime) -> str:
         "## 部署",
         "",
         "1. 把整个目录放到 OpenClaw 服务器上，按 `CHECKLIST.md` 设置属主与权限；",
-        "2. 按 `CHECKLIST.md` 安装 `openclaw-channel` 插件，"
-        "并修改 `state/openclaw.json` 里的模型服务商；",
+        "2. 按 `CHECKLIST.md` 安装 `openclaw-channel` 插件并打上工作台的补丁"
+        "（`bin/channel-patch.mjs`），修改 `state/openclaw.json` 里的模型服务商；",
     ]
     if public:
         steps.append(

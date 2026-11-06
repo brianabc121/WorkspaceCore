@@ -655,10 +655,17 @@ class Installer:
         )
         if not result.ok:
             raise _script_failure(result, "plugin_failed", "安装 openclaw-channel 失败，详见日志")
-        if "plugin_already_installed" in result.stdout:
-            await self.rec.step("plugin", "skipped", f"已经安装 {prov.PLUGIN_PACKAGE}")
+        # 补丁（T-0120）：已经装好的插件也在这一步补上；
+        # 重新部署换了凭证，up -d 会重建容器，补丁随之生效
+        patched = "plugin_patch_applied" in result.stdout
+        if "plugin_already_installed" in result.stdout and not patched:
+            await self.rec.step("plugin", "skipped", f"已经安装 {prov.PLUGIN_PACKAGE}（已打补丁）")
+        elif "plugin_already_installed" in result.stdout:
+            await self.rec.step(
+                "plugin", "done", f"已经安装 {prov.PLUGIN_PACKAGE}，这次打上了工作台的补丁"
+            )
         else:
-            await self.rec.step("plugin", "done", prov.PLUGIN_PACKAGE)
+            await self.rec.step("plugin", "done", f"{prov.PLUGIN_PACKAGE}（已打补丁）")
 
         await self.rec.step("start", "running")
         result = await self._run(

@@ -3,7 +3,8 @@
 按脚本回复，不需要真实模型密钥。规则看最后一条 assistant 之后的 user 消息：
 - 含 `TOOL:<名字> <json>`：发出一次工具调用；工具名不在列表里而有 `tool_call` 时，经 Tool Search 的
   `tool_call` 间接调用（MCP 工具是这样暴露的）。收到工具结果后回复 `done: <结果前 300 字>`。
-- 前面再加 `REPEAT:<n>`：同一个工具调用连续发 n 次（每次收到结果后再发），然后回复 `done`。
+- 前面再加 `REPEAT:<n>`：同一个工具调用连续发 n 次（每次收到结果后再发），然后回复 `done`；
+  参数里的 `{n}` 换成第几次（从 1 开始），让每次的内容不同（im_send 按内容去重，T-0120）。
 - 其他：回复 `echo: <原文末尾>`。
 每个请求追加写入 FAKE_MODEL_LOG（JSON Lines，含 Authorization 请求头），验收脚本据此判断
 是哪个实例（各自的模型密钥不同）、用的是哪个密钥。只用标准库。用法：python3 -I fake_model_server.py [端口]
@@ -71,7 +72,7 @@ def decide(body: dict) -> dict:
     if done >= repeat:
         last = next((m for m in reversed(messages) if m.get("role") == "tool"), {})
         return {"content": "done: " + _text(last.get("content"))[:300]}
-    name, args = match.group(1), match.group(2) or "{}"
+    name, args = match.group(1), (match.group(2) or "{}").replace("{n}", str(done + 1))
     tools = [t.get("function", {}).get("name") for t in body.get("tools") or []]
     resolved = next((t for t in tools if t == name or (t or "").endswith("__" + name)), None)
     call_id = "call_" + uuid.uuid4().hex[:12]
@@ -117,7 +118,10 @@ class Handler(BaseHTTPRequestHandler):
                   # last 看不到它；工作台工具的错误码在结果的末尾，T-0108）
                   "tool": next((_text(m.get("content"))[-1500:] for m in reversed(messages)
                                 if m.get("role") == "tool"), ""),
-                  "tools": [t.get("function", {}).get("name") for t in body.get("tools") or []]}
+                  "tools": [t.get("function", {}).get("name") for t in body.get("tools") or []],
+                  # 工作台放回会话的系统事件（openclaw-channel 补丁，T-0120）：任何一条消息里带“[工作台]”的行
+                  "notes": [line.strip()[-300:] for m in messages for line in _text(m.get("content")).splitlines()
+                            if "[工作台]" in line][-5:]}
         with _lock, open(LOG, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
         created, cid, model = int(time.time()), "chatcmpl-" + uuid.uuid4().hex[:16], body.get("model", "fake-model")

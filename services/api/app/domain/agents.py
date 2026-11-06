@@ -341,6 +341,8 @@ class AgentService:
                     granted_by=i.im_media_by,
                     granted_at=i.im_media_at,
                 ),
+                bundle_outdated=i.plugin_version is not None
+                and i.plugin_version != agent_bundle.PATCHED_PLUGIN_VERSION,
                 credentials=by_instance[i.id],
                 secret_grants=grants_by[i.id],
                 version=i.version,

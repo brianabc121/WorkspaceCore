@@ -13,7 +13,12 @@
       （`state/openclaw.json` 里已经写了这个插件提供的 `openim` 渠道，插件装好之前 OpenClaw 认为这份配置无效、拒绝安装）：
       `echo '{}' > state/plugin-install.json && chown 1000:1000 state/plugin-install.json`
       `docker compose run --rm --no-deps -e OPENCLAW_CONFIG_PATH=/home/node/.openclaw/plugin-install.json --entrypoint node openclaw openclaw.mjs plugins install @openim/openclaw-channel@0.3.3 --force --accept-capabilities`
-      装好后再 `docker compose up -d`。升级插件前重新做 OC-0 ADR F9 的审查。
+      然后打上工作台的补丁（自动回复被拒收时把原因放回会话，智能体下一轮看得到；T-0120）：
+      `docker compose run --rm --no-deps --entrypoint node openclaw /opt/myworkspace/bin/channel-patch.mjs`
+      输出 `plugin_patch_applied`（或重复运行时的 `plugin_patch_already_applied`）才算成功；它核对原文件与结果的 sha256，
+      不是 0.3.3 的原文件就不改。装好后再 `docker compose up -d`。升级插件前重新做 OC-0 ADR F9 的审查，并更新补丁。
+- [ ] 已经部署过的实例（T-0120 之前）：换上新的接入包后同样运行上面的打补丁命令，再 `docker compose up -d`
+      （新凭证会让容器重建）。实例页不再提示“旧接入包”、上报的插件版本是 `0.3.3+myworkspace.1` 就对了。
 - [ ] `state/openclaw.json` 里的模型服务商换成实际使用的那一家；密钥 ID 与工作台密钥库里给这个实例的授权一致。
       `${VAR}` 由 OpenClaw 从进程环境（`myworkspace.env`）读取，不要把明文写进这个文件；也不要加 `_comment` 之类的说明键（OpenClaw 会判为无效配置）。
 - [ ] 冷启动要 2 ~ 4 分钟：启动时 doctor 会联网检查插件更新，没有外网时要等超时（OC-0 ADR F5）。
@@ -34,6 +39,8 @@
 - [ ] `plugins.allow` 只有 `openclaw-channel`；没有安装其他插件和技能。
 - [ ] **不设置 `commands.ownerAllowFrom`**：任何 IM 账号都不能在聊天里管理 OpenClaw（OC-0 ADR F6）。
 - [ ] `openim_send_image` / `openim_send_file` / `openim_send_video` 在 `tools.deny` 里（接入包默认已列入，不要删掉；OC-0 ADR F3）。
+- [ ] `message`、`conversations_send`、`conversations_turn`、`conversations_list` 在 `tools.deny` 里（T-0120）：
+      主动发消息只走工作台的 `im_send`（先用 `im_list_targets` 找目标），有发件记录、拒收原因、附件检查；自动回复不受影响。
 - [ ] `requireMention: true`；`inboundWhitelist` 是接入包生成时的管理员与本工作空间的实例（工作台的管理员或实例变化后重新生成接入包）。
 - [ ] `node openclaw.mjs secrets audit` 没有发现明文密钥。
 - [ ] 日志级别和保留期已设置：OpenIM SDK 会把消息内容写进日志（OC-0 ADR F7）。

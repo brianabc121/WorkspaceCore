@@ -1212,6 +1212,7 @@ _IM_DIRECT: list[ToolSpec] = [
         ImSendInput,
         ImSendOutput,
         "主动发消息给管理员或你所在的群（直接发出，结果当场返回：已发出、排队或被拒收及原因）。"
+        "主动发消息只能用这个工具（OpenClaw 自己的 message 等发消息工具已禁用）；"
         "目标用 im_list_targets 给的 target；群里要别人回你就 mention 他。"
         "重试同一次发送时用同一个 client_key。每小时最多 60 条",
     ),

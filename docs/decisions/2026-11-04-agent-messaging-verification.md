@@ -65,3 +65,24 @@
 | V4 | `openclaw agent --session-key … --message …` 在接入包容器里能跑；渠道会话的键怎么写；与正在处理的收消息同时发生时怎样 | 容器里运行，看假模型收到的上下文 |
 | V5 | OpenIM 对象存储分片上传 50 MB 文件；实例经接入入口取文件、视频 | `ObjectStore.upload`（图片已核验）+ 扩展后的 `/im/obj/m/{id}` |
 | V6 | 内联附件能经接入入口送到 `/mcp`：接入入口给实例的路由请求体上限是 1 MB（`infra/caddy/agent.Caddyfile` 的 `agent_routes`），512 KB 的附件 base64 后约 700 KB | 实测 |
+
+## 6. 实施时的核对记录
+
+### 6.1 openclaw-channel 补丁（T-0120，2026-11-06）
+
+在锁定版本上核对（本机 `npm pack @openim/openclaw-channel@0.3.3`）：
+
+| 项目 | 结果 |
+|---|---|
+| 发布包 sha256 | `3d10dca0edcba0ecdb0dc915e7cf1ddf5a8453165de13dec76bbe5ef85607643`，与 `docs/versions.md` 一致 |
+| `dist/inbound.js` 原文件 sha256 | `5beb827deeb5cae9293fc7f363b97ba6a57bb548baf410039c544d4fa00a6cfc` |
+| 补丁位置 | `processInboundMessage` 里 `dispatcherOptions.deliver` 的 `catch (e)`（原来只记 `[openim] deliver failed`）；`route`、`sessionKey`、`group` 都在这个闭包里，`api.runtime` 就是插件运行时 |
+| 打补丁后的 sha256 | `36e2670f72a66ff95ea672e5456e61d0f3101384d26e12dabda489f07c9ce67d`；`node --check` 通过；第二次运行只核对、不改 |
+| `enqueueSystemEvent` | OpenClaw 2026.9.36 镜像里 `/app/docs/plugins/sdk-runtime/state-and-system.md`：`api.runtime.system.enqueueSystemEvent(text, options)` 返回是否接受，带上解析好的 `agentId` 与 `sessionKey` 才走插件运行时的生命周期检查 |
+| 插件完整性检查 | 同一镜像 `/app/docs/plugins/manage-plugins.md`：能力审查只对声明的能力做哈希，不对可执行文件；本地路径安装没有记录的制品完整性。所以装好后在原地改 `dist/inbound.js` 不会触发重新审查；端到端验收里实测 |
+
+补丁做法：照旧安装核对过的原始 tarball，然后运行接入包的 `bin/channel-patch.mjs`：
+原文件 sha256 不对就不打（退出码 7），结果 sha256 不对就不写（8），已经打过只核对。
+新部署和已经部署的实例（插件已装、只差补丁）走同一步；SSH 重新部署时换了新凭证，`docker compose up -d` 会重建容器，补丁随之生效。
+
+V2（禁用发消息工具后自动回复照常）、V3（系统事件进下一轮）由 `tests/e2e/agents_acceptance.py` 场景 2、3、11、20 在 CI 的 agents 任务里实测，结果补在下面。

@@ -36,6 +36,7 @@ function saveGrants() { if (grantsValid.value) { emit('grants', rows.value.map(r
       <div v-if="instance.im_token_expires_at"><dt>IM 令牌</dt><dd>{{ formatTime(instance.im_token_expires_at) }} 到期（OpenClaw 每次启动时领取新的）</dd></div>
       <div><dt>接入包</dt><dd>{{ instance.bundle_issued_at ? `最近生成于 ${formatTime(instance.bundle_issued_at)}` : '还没有生成' }}</dd></div>
     </dl>
+    <p v-if="instance.bundle_outdated" class="form-help agent-notice" role="note">这个实例还在用旧的接入包，或者插件没有打上工作台的补丁：重新生成接入包部署（或用下面的 SSH 自动部署重新部署）后，它的自动回复被拒收时才会收到提醒，主动发消息也只走 im_send。</p>
     <HostStatus :instance="instance" :host="host" />
     <section class="agent-section" aria-label="项目管理权限">
       <div class="section-heading">

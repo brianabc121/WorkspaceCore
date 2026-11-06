@@ -2805,6 +2805,12 @@ export interface components {
              */
             bundle_issued_at: string | null;
             /**
+             * Bundle Outdated
+             * @description 已部署的实例还在用旧接入包，或插件没打工作台的补丁（上报的插件版本不是 0.3.3+myworkspace.1，T-0120）：重新签发接入包或经 SSH 重新部署
+             * @default false
+             */
+            bundle_outdated: boolean;
+            /**
              * Created At
              * Format: date-time
              */
