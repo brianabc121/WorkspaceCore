@@ -91,6 +91,8 @@ class Project(Base):
     created_by_instance: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.agent_instances.id", ondelete="SET NULL")
     )
+    # Issue 新开 / 关闭时在项目群里发一行提示（T-0123，方案 8.5；默认关闭，免得占群里的发言条数）
+    issue_notices: Mapped[bool] = mapped_column(Boolean, server_default=sql_text("false"))
 
 
 class Task(Base):

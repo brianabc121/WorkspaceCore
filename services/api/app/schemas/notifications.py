@@ -29,6 +29,8 @@ EventTopic = Literal[
     "ai",
     # 任务时间轴（T-0104）：执行记录与 token 用量
     "timeline",
+    # 项目 Issues（T-0123）：开、评论、关闭、指派
+    "issues",
 ]
 MAX_MARK_IDS = 100
 

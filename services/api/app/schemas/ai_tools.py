@@ -30,6 +30,21 @@ from app.schemas.agents import McpScope
 from app.schemas.calendar import CalendarEventCreate
 from app.schemas.common import Page
 from app.schemas.developer import GitHubStateFilter
+from app.schemas.issue_tools import (
+    IssueCommentInput,
+    IssueCommentOutput,
+    IssueCreateInput,
+    IssueCreateOutput,
+    IssueGetInput,
+    IssueGetOutput,
+    IssueInboxInput,
+    IssueInboxOutput,
+    IssueListInput,
+    IssueListOutput,
+    IssueUpdateInput,
+    IssueUpdateOutput,
+    TaskIssueRef,
+)
 from app.schemas.knowledge import BookmarkCreate
 from app.schemas.knowledge_tools import DESCRIPTIONS as KNOWLEDGE_DESCRIPTIONS
 from app.schemas.knowledge_tools import (
@@ -309,6 +324,10 @@ class GetTaskOutput(BaseModel):
     )
     readme: ReadmeRef | None = Field(
         default=None, description="任务 README：领取前先用 readme_get 读，交出或完成前更新它"
+    )
+    issues: list[TaskIssueRef] = Field(
+        default=[],
+        description="这个任务关联的、未关闭的 Issue（用 issue_get 读）；有“阻塞”的不能完成任务",
     )
     freshness: Freshness
 
@@ -1028,8 +1047,9 @@ class ImRejectedReply(BaseModel):
 
 class WakeupItem(BaseModel):
     wakeup_id: UUID
-    source: Literal["agent", "admin"] = Field(
-        description="agent 是你自己安排的，admin 是管理员建的"
+    source: Literal["agent", "admin", "issue"] = Field(
+        description="agent 是你自己安排的，admin 是管理员建的，"
+        "issue 是 Issue 有新动态时工作台安排的"
     )
     target: str | None = Field(description="在哪个会话里跑；null 是独立会话")
     run_at: datetime
@@ -1112,7 +1132,10 @@ class ClaimTaskOutput(BaseModel):
 class ReleaseTaskOutput(BaseModel):
     status: Literal["released"] = "released"
     task_id: UUID
-    next_step: str = "用 readme_update 在任务 README 的“进展与交接”里写下做到哪了、下一步是什么"
+    next_step: str = (
+        "用 readme_update 在任务 README 的“进展与交接”里写下做到哪了、下一步是什么；"
+        "需要别人接着做时，也可以用 issue_create 开一个“交接”（kind=handoff）Issue 并关联这个任务"
+    )
 
 
 class CompleteTaskOutput(BaseModel):
@@ -1346,6 +1369,7 @@ _DIRECT: list[ToolSpec] = [
         CompleteTaskInput,
         CompleteTaskOutput,
         "把执行者是你的任务标为完成（直接生效，可以附完成说明）；管理员觉得有问题会打回。"
+        "还有关联的、未关闭的“阻塞”Issue 时不能完成（TASK_BLOCKED）。"
         "完成前用 readme_update 在任务 README 的“进展与交接”里写下做了什么、怎么验证",
     ),
 ]
@@ -1393,6 +1417,59 @@ _README: list[ToolSpec] = [
         "改项目或任务 README 的一个非自动部分（直接生效）：按 ## 标题找，"
         "append 追加或 replace 替换，"
         "没有这一部分就加在最后；自动更新的部分（成员、状态等）改不了。交出或完成任务前更新“进展与交接”",
+    ),
+]
+# 项目里的 Issues（T-0123）：读是只读工具；开、评论、更新直接执行（docs/AGENTS.md 第 8 节例外五）
+_ISSUE: list[ToolSpec] = [
+    _spec(
+        "issue_list",
+        "read",
+        IssueListInput,
+        IssueListOutput,
+        "列出项目里的 Issue（议题：提问、提议、缺陷、接口约定、交接、评审请求、阻塞），"
+        "可以按状态、类型、标签、指派给我、提到我、关键词筛选",
+    ),
+    _spec(
+        "issue_get",
+        "read",
+        IssueGetInput,
+        IssueGetOutput,
+        "读一个 Issue：正文、评论（分页）、时间线、关联的任务与 PR；读完记为已读。"
+        "按 issue_id，或者项目加编号（#12）找",
+    ),
+    _spec(
+        "issue_inbox",
+        "read",
+        IssueInboxInput,
+        IssueInboxOutput,
+        "你的 Issue 收件箱：提到你的、指派给你的、你开的，有你没读过的动态，按时间排列。"
+        "被 Issue 动态唤醒时先看这里",
+    ),
+    _spec(
+        "issue_create",
+        "direct",
+        IssueCreateInput,
+        IssueCreateOutput,
+        "在你参与（读写）的项目里开 Issue（直接生效）：标题、正文（可以按类型套模板）、类型、标签、"
+        "指派（管理员或项目里的智能体）、关联本项目的任务。需要留档、要有人负责、要有结论的事用它，"
+        "即时沟通用 IM。正文用 @名字 提到人或智能体，#编号 引用别的 Issue；不要写密钥。"
+        "每小时最多 10 个",
+    ),
+    _spec(
+        "issue_comment",
+        "direct",
+        IssueCommentInput,
+        IssueCommentOutput,
+        "评论一个 Issue（直接生效），可以回复某一条。连续 10 条评论都来自智能体时暂停，"
+        "等人评论后恢复；锁定的 Issue 只有人能评论。每小时最多 60 条",
+    ),
+    _spec(
+        "issue_update",
+        "direct",
+        IssueUpdateInput,
+        IssueUpdateOutput,
+        "更新 Issue（直接生效）：关闭 / 重新打开（带原因，只能是你开的或指派给你的）、改标题、"
+        "改类型、加减标签、加减指派、关联 / 取消关联任务。不能锁定、隐藏或删除",
     ),
 ]
 # 终止其他智能体的任务（T-0126）：只有管理员打开了这个权限的实例才列出、才能调用（例外六）
@@ -1471,6 +1548,7 @@ TOOLS: dict[str, ToolSpec] = {
     + _IM_DIRECT
     + _KNOWLEDGE
     + _README
+    + _ISSUE
 }
 KNOWLEDGE_TOOL_NAMES = frozenset(spec.name for spec in _KNOWLEDGE)
 DIRECT_TOOL_NAMES = frozenset(spec.name for spec in _DIRECT)
@@ -1478,6 +1556,7 @@ PROJECT_ADMIN_TOOL_NAMES = frozenset(spec.name for spec in _PROJECT_ADMIN)
 IM_DIRECT_TOOL_NAMES = frozenset(spec.name for spec in _IM_DIRECT)
 STOP_TOOL_NAMES = frozenset(spec.name for spec in _STOP_OTHERS)
 README_TOOL_NAMES = frozenset(spec.name for spec in _README)
+ISSUE_TOOL_NAMES = frozenset(spec.name for spec in _ISSUE)
 
 # 永远不做成工具（方案第 4.6 节）：集成凭证与设置、成员与角色、会话、工作台设置、
 # 实例与密钥管理、审计日志

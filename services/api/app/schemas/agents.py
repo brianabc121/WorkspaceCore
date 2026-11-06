@@ -592,7 +592,7 @@ class AgentWakeupCreate(_Strict):
 
 class AgentWakeupOut(BaseModel):
     id: UUID
-    source: Literal["agent", "admin"]
+    source: Literal["agent", "admin", "issue"]
     created_by: UUID | None
     target: str | None
     prompt: str

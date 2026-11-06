@@ -29,11 +29,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.domain import knowledge_links as links
 from app.domain import readme_text as rt
+from app.domain.issues import KIND_LABELS as ISSUE_KIND_LABELS
 from app.domain.knowledge_base import KnowledgeBase, SaveOptions, _line_stats
 from app.domain.readme_marks import DIRTY_KEY, push
 from app.models import (
     AgentInstance,
     ImGroup,
+    Issue,
+    IssueTask,
     KnowledgeNote,
     KnowledgeSpace,
     Project,
@@ -232,6 +235,7 @@ class Readmes:
             lines.append("- 项目群：正在建")
         else:
             lines.append("- 项目群：还没有")
+        lines.extend(await self._issues(project))
         brief = (
             await self.db.execute(
                 select(KnowledgeNote.title, KnowledgeNote.version).where(
@@ -370,12 +374,63 @@ class Readmes:
         changed = await self._write(note, space, body=body, title=task_title(task))
         return Written(note, changed)
 
+    async def _issues(self, project: Project) -> list[str]:
+        """沟通里的 Issues：未关闭的数量与最近 5 个（T-0123）。"""
+        open_count = int(
+            await self.db.scalar(
+                select(func.count()).where(
+                    Issue.project_id == project.id,
+                    Issue.state == "open",
+                    Issue.deleted_at.is_(None),
+                )
+            )
+            or 0
+        )
+        if not open_count:
+            return ["- Issues：没有未关闭的（在项目页的 Issues 里开，智能体用 issue_create）"]
+        latest = (
+            await self.db.execute(
+                select(Issue.number, Issue.kind, Issue.title)
+                .where(
+                    Issue.project_id == project.id,
+                    Issue.state == "open",
+                    Issue.deleted_at.is_(None),
+                )
+                .order_by(Issue.last_activity_at.desc())
+                .limit(5)
+            )
+        ).all()
+        lines = [f"- Issues：未关闭 {open_count} 个，最近的："]
+        for number, kind, title in latest:
+            label = ISSUE_KIND_LABELS.get(kind, kind)
+            lines.append(f"  - #{number}（{label}）{_one_line(title, 80)}")
+        return lines
+
+    async def _discussion(self, task: Task) -> str:
+        rows = (
+            await self.db.execute(
+                select(Issue.number, Issue.kind, Issue.state, Issue.title)
+                .join(IssueTask, IssueTask.issue_id == Issue.id)
+                .where(IssueTask.task_id == task.id, Issue.deleted_at.is_(None))
+                .order_by(Issue.state.desc(), Issue.number)
+                .limit(20)
+            )
+        ).all()
+        if not rows:
+            return "- 还没有关联的 Issue"
+        lines = []
+        for number, kind, state, title in rows:
+            label = ISSUE_KIND_LABELS.get(kind, kind)
+            status = "未关闭" if state == "open" else "已关闭"
+            lines.append(f"- #{number}（{label}，{status}）{_one_line(title, 80)}")
+        return "\n".join(lines)
+
     async def task_sections(
         self, task: Task, project: Project, project_note: KnowledgeNote
     ) -> dict[str, str]:
         return {
             "状态": await self._status(task, project, project_note),
-            "讨论": "- 还没有关联的 Issue",
+            "讨论": await self._discussion(task),
             "执行记录": await self._history(task),
         }
 
@@ -552,6 +607,11 @@ class Readmes:
         if kind == "w":
             ids = await self.db.scalars(select(Project.id).where(Project.workspace_id == target))
             return [f"p:{i}" for i in ids]
+        if kind == "q":
+            ids = await self.db.scalars(
+                select(IssueTask.task_id).where(IssueTask.issue_id == target)
+            )
+            return [f"t:{i}" for i in ids]
         return []
 
 

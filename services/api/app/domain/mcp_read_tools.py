@@ -114,6 +114,7 @@ from app.schemas.ai_tools import (
 )
 from app.schemas.host import DiskOut
 from app.schemas.integrations import SyncState
+from app.schemas.issue_tools import TaskIssueRef, TaskIssueText
 from app.schemas.search import AgentSearchType
 from app.schemas.tasks import TaskOut
 
@@ -319,6 +320,26 @@ async def _list_tasks(call: ReadCall, args: ListTasksInput) -> ListTasksOutput:
     )
 
 
+async def _task_issues(call: ReadCall, task_id: uuid.UUID) -> list[TaskIssueRef]:
+    """任务关联的、未关闭的 Issue 与未读（T-0123，方案 8.5）。"""
+    from app.domain import issue_tools
+    from app.domain.issues import IssueService
+
+    service = IssueService(call.db, call.settings)
+    who = issue_tools.who_for(call.requester)
+    found = [i for i in await service.for_task(task_id) if i.state == "open"]
+    return [
+        TaskIssueRef(
+            issue_id=o.id,
+            number=o.number,
+            kind=o.kind,
+            unread=o.unread,
+            untrusted=TaskIssueText(title=o.title),
+        )
+        for o in await service.outs(who, found[:20])
+    ]
+
+
 async def _get_task(call: ReadCall, args: GetTaskInput) -> GetTaskOutput:
     service = call.tasks()
     task = await service.get_task(call.access, args.task_id)
@@ -343,13 +364,16 @@ async def _get_task(call: ReadCall, args: GetTaskInput) -> GetTaskOutput:
     from app.domain.readme import Readmes
 
     readme_note = None
+    linked: list[TaskIssueRef] = []
     if await readme_tools.readable(
         call.db, call.settings, call.requester.instance, task.project_id
     ):
         readme_note = await Readmes(call.db, call.settings).task_note(task.id)
+        linked = await _task_issues(call, task.id)
     return GetTaskOutput(
         brief=brief,
         readme=readme_tools.ref(readme_note),
+        issues=linked,
         task=TaskDetail(
             id=task.id,
             project_id=task.project_id,

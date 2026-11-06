@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import notifications, project_groups, task_claims, task_runs
+from app.domain import issues, notifications, project_groups, task_claims, task_runs
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.audit import AuditTrail
 from app.domain.ratelimit import WindowLimiter
@@ -246,6 +246,14 @@ async def _complete(ctx: _Ctx, args: CompleteTaskInput) -> tuple[CompleteTaskOut
         return (
             CompleteTaskOutput(task_id=task.id, done_at=task.done_at, already_done=True),
             _nothing,
+        )
+    blockers = await issues.open_blockers(db, task.id)
+    if blockers:
+        numbers = "、".join(f"#{i.number}" for i in blockers[:10])
+        raise ToolCallError(
+            "TASK_BLOCKED",
+            f"这个任务还有未关闭的阻塞 Issue：{numbers}。先处理并关闭它们"
+            "（issue_get 读详情，issue_comment 说明进展），或者请管理员判断；管理员可以直接完成",
         )
     now = _now()
     task.done = True

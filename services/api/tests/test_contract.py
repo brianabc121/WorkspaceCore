@@ -954,6 +954,8 @@ def test_v2_keeps_existing_enums_and_only_adds_event_topics() -> None:
         "ai",
         # 任务时间轴（T-0104）
         "timeline",
+        # 项目 Issues（T-0123）
+        "issues",
     }
     provider = schemas["IntegrationOut"]["properties"]["provider"]  # type: ignore[index]
     assert provider["const"] == "github" or set(provider["enum"]) == {"github"}
@@ -998,6 +1000,10 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "knowledge_brief",
             # 项目与任务的 README（T-0122）
             "readme_get",
+            # 项目里的 Issues（T-0123）
+            "issue_list",
+            "issue_get",
+            "issue_inbox",
         },
         "write": {
             "create_task",
@@ -1029,6 +1035,10 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "stop_agent_run",
             # 改 README 的非自动部分：直接执行（例外五，T-0122）
             "readme_update",
+            # 开 Issue、评论、更新：直接执行（例外五，T-0123）
+            "issue_create",
+            "issue_comment",
+            "issue_update",
         },
     }
     for spec in TOOLS.values():

@@ -337,7 +337,7 @@ async def claim(
     for wakeup in due:
         wakeup.status = "running"
         wakeup.claimed_at = now
-        by = "你自己" if wakeup.source == "agent" else "管理员"
+        by = {"agent": "你自己", "issue": "工作台（Issue 有新动态）"}.get(wakeup.source, "管理员")
         claimed.append((wakeup, message_for(wakeup, by)))
     await db.commit()
     return claimed

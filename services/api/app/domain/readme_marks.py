@@ -2,7 +2,8 @@
 
 只依赖模型，app/domain/events.py 在同一个 after_flush / after_commit 里调用
 （不经过知识库服务，避免循环导入）。
-键：p:项目、t:任务、s:知识库（简报、决定等笔记变了）、i:实例（改名、说明、权限）、w:工作空间（管理员变了）。
+键：p:项目、t:任务、s:知识库（简报、决定等笔记变了）、i:实例（改名、说明、权限）、w:工作空间（管理员变了）、
+q:Issue（标题、状态变了：展开成关联的任务，T-0123）。
 """
 
 import uuid
@@ -17,6 +18,8 @@ from sqlalchemy.orm import Session
 from app.models import (
     AgentInstance,
     ImGroup,
+    Issue,
+    IssueTask,
     KnowledgeNote,
     Project,
     ProjectAgent,
@@ -78,6 +81,14 @@ def _mark(found: set[str], obj: Any, *, new: bool, deleted: bool) -> None:
             found.add(f"i:{obj.id}")
     elif isinstance(obj, WorkspaceMember):
         found.add(f"w:{obj.workspace_id}")
+    elif isinstance(obj, Issue):
+        # 评论只改动态时间，不必刷新；开、关、改标题、改类型、删除才刷新
+        if new or deleted or _changed(obj, "state", "title", "kind", "deleted_at"):
+            found.add(f"p:{obj.project_id}")
+            if not new:
+                found.add(f"q:{obj.id}")
+    elif isinstance(obj, IssueTask):
+        found.add(f"t:{obj.task_id}")
 
 
 def pop(session: Session) -> set[str]:

@@ -41,6 +41,7 @@ from app.domain import (
     agent_projects,
     agent_stops,
     agent_tasks,
+    issue_tools,
     knowledge_tools,
     ops_metrics,
     readme_tools,
@@ -52,6 +53,7 @@ from app.domain.ratelimit import WindowLimiter
 from app.models import AgentInstance
 from app.schemas.ai_tools import (
     IM_DIRECT_TOOL_NAMES,
+    ISSUE_TOOL_NAMES,
     KNOWLEDGE_TOOL_NAMES,
     PROJECT_ADMIN_TOOL_NAMES,
     README_TOOL_NAMES,
@@ -81,6 +83,7 @@ def available(spec: ToolSpec) -> bool:
         or spec.name in READ_HANDLERS
         or spec.name in KNOWLEDGE_TOOL_NAMES
         or spec.name in README_TOOL_NAMES
+        or spec.name in ISSUE_TOOL_NAMES
     )
 
 
@@ -248,6 +251,15 @@ async def _dispatch(
                 elif spec.name in README_TOOL_NAMES:
                     output = await readme_tools.run(
                         service, requester, spec, raw, request_id=caller.request_id
+                    )
+                elif spec.name in ISSUE_TOOL_NAMES:
+                    output = await issue_tools.run(
+                        service,
+                        requester,
+                        spec,
+                        raw,
+                        request_id=caller.request_id,
+                        im=openim_client(state.settings, state.connectors, state.redis),
                     )
                 elif spec.name in IM_DIRECT_TOOL_NAMES:
                     output = await agent_outbox.run(
