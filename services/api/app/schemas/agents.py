@@ -131,6 +131,9 @@ class AgentInstanceOut(BaseModel):
     im_media: "ProjectAdminOut" = Field(
         description="附件权限（T-0119）：打开后它能经 im_send 发图片、文件、视频（默认关闭）"
     )
+    stop_others: "ProjectAdminOut" = Field(
+        description="终止其他智能体任务的权限（T-0126）：打开后它能用 stop_agent_run 叫停别的智能体"
+    )
     bundle_outdated: bool = Field(
         default=False,
         description="已部署的实例还在用旧接入包，或插件没打工作台的补丁（上报的插件版本不是"
@@ -611,3 +614,58 @@ class WakeupTarget(BaseModel):
 class AgentWakeupList(BaseModel):
     items: list[AgentWakeupOut] = Field(description="待执行的在前，其余按时间倒序，最多 50 个")
     targets: list[WakeupTarget] = Field(description="可以选的会话：和管理员的私聊、它所在的群")
+
+
+# ---------------------------------------------------------------- 终止正在执行的任务（T-0126）
+
+RunStopStatus = Literal["pending", "running", "done", "failed", "expired"]
+
+
+class AgentRunStopCreate(_Strict):
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    task_id: UUID | None = Field(
+        default=None, description="它正在执行的任务；给了就把这一段记为中断"
+    )
+
+
+class AgentRunStopOut(BaseModel):
+    id: UUID
+    instance_id: UUID
+    requested_by: UUID | None
+    requested_by_instance: UUID | None
+    task_id: UUID | None
+    reason: str
+    status: RunStopStatus = Field(
+        description="pending 等实例领取；running 实例在中止；done 已中止；failed 失败；"
+        "expired 10 分钟没被领取（实例不在线或接入包太旧，只有软停止生效）"
+    )
+    soft_until: datetime
+    aborted: int | None = Field(description="实例报回中止了几个会话")
+    error: str | None
+    created_at: datetime
+    finished_at: datetime | None
+
+
+class AgentRunStopList(BaseModel):
+    items: list[AgentRunStopOut] = Field(description="最近 20 次，新的在前")
+
+
+class StopClaimItem(BaseModel):
+    id: UUID
+
+
+class StopClaimResponse(BaseModel):
+    items: list[StopClaimItem] = Field(
+        description="待执行的终止令；实例中止所有正在运行的会话后逐个报回"
+    )
+
+
+class StopResult(_Strict):
+    status: Literal["done", "failed"]
+    aborted: int = Field(0, ge=0, le=1000)
+    error: Annotated[str, StringConstraints(max_length=300)] | None = None
+
+
+class StopResultResponse(BaseModel):
+    id: UUID
+    status: RunStopStatus

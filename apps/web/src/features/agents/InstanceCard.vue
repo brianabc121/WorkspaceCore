@@ -8,9 +8,10 @@ import HostStatus from './HostStatus.vue'
 import OpsPanel from './OpsPanel.vue'
 import OutboxPanel from './OutboxPanel.vue'
 import WakeupPanel from './WakeupPanel.vue'
+import StopPanel from './StopPanel.vue'
 
-const props = defineProps<{ instance: Schema['AgentInstanceOut']; secrets: Schema['AgentSecretOut'][]; busy: boolean; host?: Schema['HostSummaryItem'] }>()
-const emit = defineEmits<{ edit: []; toggle: []; bundle: [previous: Schema['BundleRequest']['previous']]; revoke: [credential: Schema['AgentCredentialOut']]; grants: [grants: Schema['SecretGrantIn'][]]; projectAdmin: [enabled: boolean]; imMedia: [enabled: boolean] }>()
+const props = defineProps<{ instance: Schema['AgentInstanceOut']; secrets: Schema['AgentSecretOut'][]; busy: boolean; host?: Schema['HostSummaryItem']; names: Map<string, string> }>()
+const emit = defineEmits<{ edit: []; toggle: []; bundle: [previous: Schema['BundleRequest']['previous']]; revoke: [credential: Schema['AgentCredentialOut']]; grants: [grants: Schema['SecretGrantIn'][]]; projectAdmin: [enabled: boolean]; imMedia: [enabled: boolean]; stopOthers: [enabled: boolean] }>()
 const previous = ref<'keep_24h' | 'revoke_now'>('keep_24h'), editingGrants = ref(false)
 const rows = ref<{ secret_id: string; ref_id: string }[]>([])
 const active = computed(() => props.instance.credentials.filter(c => !c.revoked_at))
@@ -53,10 +54,18 @@ function saveGrants() { if (grantsValid.value) { emit('grants', rows.value.map(r
       </div>
       <p class="form-help">打开后它可以用 im_send 发图片（10 MB）、文件（20 MB）、视频（MP4 / MOV，50 MB）：工作台识别类型、挡住可执行与网页类文件、检查密钥，每小时最多 30 个、每天 200 MB。文字不受影响。<template v-if="instance.im_media.enabled && instance.im_media.granted_at"> 打开于 {{ formatTime(instance.im_media.granted_at) }}。</template></p>
     </section>
+    <section class="agent-section" aria-label="终止其他智能体任务的权限">
+      <div class="section-heading">
+        <h3>终止其他智能体任务的权限：{{ instance.stop_others.enabled ? '已打开' : '关闭' }}</h3>
+        <button type="button" class="secondary-button" :disabled="busy || (disabled && !instance.stop_others.enabled)" @click="$emit('stopOthers', !instance.stop_others.enabled)">{{ instance.stop_others.enabled ? '关闭这个权限' : '允许它叫停别的智能体' }}</button>
+      </div>
+      <p class="form-help">打开后它可以用 list_agent_runs 查看本工作空间的智能体在做什么、用 stop_agent_run 叫停别的智能体正在执行的任务（适合做协调的智能体），直接生效、不审批；不能叫停自己，每小时最多 10 次，每次都通知管理员。<template v-if="instance.stop_others.enabled && instance.stop_others.granted_at"> 打开于 {{ formatTime(instance.stop_others.granted_at) }}。</template></p>
+    </section>
     <SshDeploy :instance="instance" />
     <OpsPanel :instance="instance" />
     <OutboxPanel :instance="instance" />
     <WakeupPanel :instance="instance" />
+    <StopPanel :instance="instance" :names="names" />
     <section class="agent-section" aria-label="接入包">
       <h3>接入包</h3>
       <p class="form-help">每次生成都会签发新凭证，凭证只出现在这一次下载的 zip 里。{{ instance.network_mode === 'public' ? '外网模式同时签发 90 天的客户端证书；用上面的 SSH 自动部署时会自动生成，不用下载。' : '' }}</p>

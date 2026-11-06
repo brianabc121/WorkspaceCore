@@ -1154,11 +1154,64 @@ def scenario_21(c: Ctx) -> None:
             any(int(r.get("count") or 0) > 3 for r in turns), json.dumps([r.get("count") for r in turns]))
 
 
+def scenario_22(c: Ctx) -> None:
+    """终止任务：甲有权限后叫停深陷在一件事里的乙，stop-runs.mjs 在乙的容器里中止会话（T-0126）。"""
+    def set_stop_others(enabled: bool) -> dict[str, Any]:
+        current = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}")
+        result: dict[str, Any] = c.owner.call("PUT", f"/api/v1/agents/instances/{c.a.id}/stop-others",
+                                              {"enabled": enabled, "version": current["version"]})
+        return result
+
+    denied = mcp_call(c.a, "list_agent_runs", {})
+    c.check("终止任务：没开权限时甲调用 list_agent_runs 被拒（FORBIDDEN_CAPABILITY）",
+            tool_code(denied) == "FORBIDDEN_CAPABILITY", tool_code(denied))
+    granted = set_stop_others(True)
+    try:
+        conv_b = c.owner.call("POST", "/api/v1/im/conversations", {"instance_id": c.b.id})["conversation_id"]
+        since = time.time()
+        # 乙在一件事上反复调用工具（每次参数不同，不触发重复调用的判断）
+        c.owner.send(conv_b, "REPEAT:500 TOOL:myworkspace__search " + json.dumps({"q": "进展 {n}"}, ensure_ascii=False))
+        wait_for("乙开始反复调用工具", lambda: len([r for r in c.model_calls(c.keys["b"], since)
+                                               if "tool_call" in r["result"]]) >= 3, timeout=150, interval=2)
+        runs = mcp_call(c.a, "list_agent_runs", {})
+        rows = {r["instance_id"]: r for r in (runs.get("structuredContent") or {}).get("items", [])}
+        c.check("终止任务：打开权限后甲用 list_agent_runs 看到乙（is_you 只标在自己身上）",
+                granted["enabled"] and not tool_code(runs) and rows.get(c.b.id, {}).get("is_you") is False
+                and rows.get(c.a.id, {}).get("is_you") is True, json.dumps(runs, ensure_ascii=False)[:400])
+        stopped = mcp_call(c.a, "stop_agent_run", {"instance_id": c.b.id, "reason": "同一件事反复调用工具，验收叫停"})
+        data = stopped.get("structuredContent") or {}
+        c.check("终止任务：甲用 stop_agent_run 叫停乙（直接执行、不审批）", data.get("status") == "stopping",
+                json.dumps(stopped, ensure_ascii=False)[:300])
+        stop_at = time.time()
+        refused = wait_for("乙的工具调用被拒", lambda: [r for r in c.model_calls(c.keys["b"], stop_at)
+                                                  if "RUN_STOPPED" in (r.get("tool") or "")], timeout=60, interval=1)
+        c.check("终止任务：乙接下来的工具调用返回 RUN_STOPPED，看得到是谁、为什么叫停（软停止）",
+                any("同一件事反复调用工具" in (r.get("tool") or "") for r in refused), (refused[0].get("tool") or "")[-300:])
+        # 照 crontab 那一行运行一次（真实的 sessions.list / sessions.abort，核验 6.2）
+        out = c.b.exec("node", "/opt/myworkspace/bin/stop-runs.mjs", timeout=120, check=False)
+        items = c.owner.call("GET", f"/api/v1/agents/instances/{c.b.id}/stops")["items"]
+        mine = next((s for s in items if s["id"] == data.get("stop_id")), {})
+        c.check("终止任务：乙的 stop-runs.mjs 领取终止令、在容器里中止正在运行的会话并报回（done，中止至少 1 个）",
+                out.returncode == 0 and mine.get("status") == "done" and (mine.get("aborted") or 0) >= 1,
+                json.dumps({"exit": out.returncode, "stderr": (out.stderr or "")[-300:], "stop": mine}, ensure_ascii=False))
+        time.sleep(5)  # 中止前已经发出的那一次模型调用
+        settled = len(c.model_calls(c.keys["b"], since))
+        time.sleep(20)
+        later = len(c.model_calls(c.keys["b"], since))
+        c.check("终止任务：中止后乙不再调用模型（那一轮停下了，排队的也清掉了）", later == settled, f"{settled} → {later}")
+        notified = sql("SELECT count(*) FROM workspace.notifications WHERE type = 'agent.run_stopped_by_agent'")
+        c.check("终止任务：管理员收到“甲叫停了乙”的通知", int(notified or 0) >= 1, notified)
+        again = mcp_call(c.b, "list_tasks", {})
+        c.check("终止任务：报回成功后解除软停止，乙的工具调用恢复", not tool_code(again), tool_code(again))
+    finally:
+        set_stop_others(False)
+
+
 SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "2": scenario_2, "3": scenario_3, "4": scenario_4, "5": scenario_5, "7": scenario_7, "8": scenario_8,
     "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "15": scenario_15,
     "16": scenario_16, "17": scenario_17, "18": scenario_18, "19": scenario_19, "20": scenario_20, "21": scenario_21,
-    "6": scenario_6,
+    "22": scenario_22, "6": scenario_6,
 }
 
 

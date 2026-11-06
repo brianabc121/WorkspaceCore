@@ -1022,6 +1022,9 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             # 唤醒：同样直接执行（例外四，T-0121）
             "schedule_wakeup",
             "cancel_wakeup",
+            # 终止其他智能体的任务：只给打开了这个权限的实例（例外六，T-0126）
+            "list_agent_runs",
+            "stop_agent_run",
         },
     }
     for spec in TOOLS.values():

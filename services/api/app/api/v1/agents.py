@@ -24,7 +24,7 @@ from app.api.deps import (
     workspace_admin,
     workspace_owner,
 )
-from app.domain import agent_im, agent_outbox, agent_wakeups
+from app.domain import agent_im, agent_outbox, agent_stops, agent_wakeups
 from app.domain.agent_ops import AgentOpsService
 from app.domain.agent_ssh import AgentSshService
 from app.domain.agents import AgentService
@@ -32,7 +32,7 @@ from app.domain.audit import AuditTrail
 from app.domain.auth import AuthContext
 from app.domain.host_metrics import HostService
 from app.domain.policy import WorkspaceAccess, not_found
-from app.models import AgentInstance, AgentWakeup
+from app.models import AgentInstance, AgentRunStop, AgentWakeup
 from app.schemas.agents import (
     AgentInstanceCreate,
     AgentInstanceOut,
@@ -41,6 +41,9 @@ from app.schemas.agents import (
     AgentOpsActionOut,
     AgentOpsRun,
     AgentOpsState,
+    AgentRunStopCreate,
+    AgentRunStopList,
+    AgentRunStopOut,
     AgentSecretCreate,
     AgentSecretOut,
     AgentSecretPage,
@@ -231,6 +234,21 @@ async def put_im_media(
     access: Admin, request: Request, service: Service, instance_id: UUID, body: ProjectAdminPut
 ) -> ProjectAdminOut:
     return await service.set_im_media(access, instance_id, body, client_ip=_ip(request, service))
+
+
+@router.put(
+    "/agents/instances/{instance_id}/stop-others",
+    summary="打开或关闭实例“终止其他智能体任务”的权限（admin，乐观并发）",
+    description="打开后这个实例能用 list_agent_runs / stop_agent_run 叫停本工作空间里别的智能体"
+    "（直接执行，docs/AGENTS.md 第 8 节例外六；默认关闭，AGENT_MESSAGING_PLAN 第 11 节 D20）。"
+    "每次都写审计（T-0126）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def put_stop_others(
+    access: Admin, request: Request, service: Service, instance_id: UUID, body: ProjectAdminPut
+) -> ProjectAdminOut:
+    return await service.set_stop_others(access, instance_id, body, client_ip=_ip(request, service))
 
 
 @router.post(
@@ -800,3 +818,81 @@ async def cancel_agent_wakeup(
     await db.commit()
     await db.refresh(wakeup)
     return _wakeup_out(wakeup)
+
+
+# ---------------------------------------------------------------- 终止正在执行的任务（T-0126）
+
+
+def _stop_out(stop: AgentRunStop) -> AgentRunStopOut:
+    return AgentRunStopOut(
+        id=stop.id,
+        instance_id=stop.instance_id,
+        requested_by=stop.requested_by,
+        requested_by_instance=stop.requested_by_instance,
+        task_id=stop.task_id,
+        reason=stop.reason,
+        status=stop.status,
+        soft_until=stop.soft_until,
+        aborted=stop.aborted,
+        error=stop.error,
+        created_at=stop.created_at,
+        finished_at=stop.finished_at,
+    )
+
+
+@router.post(
+    "/agents/instances/{instance_id}/stop",
+    status_code=status.HTTP_201_CREATED,
+    summary="终止实例正在执行的任务（admin）",
+    description="立即生效：接下来 5 分钟它调用工作台工具都返回 RUN_STOPPED；"
+    "1 分钟内接入包的 stop-runs.mjs 在它的 OpenClaw 里中止正在运行的会话"
+    "（sessions.abort，AGENT_MESSAGING_PLAN 第 7.3 节）。"
+    "给了 task_id 就把这个任务正在执行的一段记为中断，"
+    "任务仍归原执行者。写审计。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def stop_agent_run(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+    instance_id: UUID,
+    body: AgentRunStopCreate,
+) -> AgentRunStopOut:
+    await _own_instance(db, access, instance_id)
+    target = await db.get(AgentInstance, instance_id)
+    if target is None:
+        raise not_found()
+    stop = await agent_stops.create(
+        db,
+        target,
+        reason=body.reason,
+        task_id=body.task_id,
+        by_user=access.user_id,
+        by_instance=None,
+    )
+    await AuditTrail(db, request.app.state.settings).record(
+        "agents.run.stop_requested",
+        workspace_ids=[access.workspace.id],
+        actor_id=access.user_id,
+        resource_type="agent_instance",
+        resource_id=instance_id,
+        metadata={"task_id": str(body.task_id) if body.task_id else None},
+        client_ip=client_ip(request, request.app.state.settings),
+    )
+    await db.commit()
+    await db.refresh(stop)
+    await agent_stops.arm(request.app.state.redis, stop, "管理员")
+    return _stop_out(stop)
+
+
+@router.get(
+    "/agents/instances/{instance_id}/stops",
+    summary="实例最近的终止记录（admin）",
+    responses=_read_errors,
+)
+async def list_agent_stops(
+    access: Admin, db: Annotated[AsyncSession, Depends(get_db)], instance_id: UUID
+) -> AgentRunStopList:
+    await _own_instance(db, access, instance_id)
+    return AgentRunStopList(items=[_stop_out(s) for s in await agent_stops.recent(db, instance_id)])

@@ -531,6 +531,7 @@ async def test_bundle_carries_a_fresh_token_only_once(env: Env) -> None:
         "bin/host-report.mjs",
         "bin/channel-patch.mjs",
         "bin/wakeup.mjs",
+        "bin/stop-runs.mjs",
         "compose.yaml",
         "CHECKLIST.md",
         "README.md",
@@ -549,6 +550,7 @@ async def test_bundle_carries_a_fresh_token_only_once(env: Env) -> None:
     assert files["bin/host-report.mjs"][1] == 0o755
     assert files["bin/channel-patch.mjs"][1] == 0o755
     assert files["bin/wakeup.mjs"][1] == 0o755
+    assert files["bin/stop-runs.mjs"][1] == 0o755
     token = _env_value(files, "MYWS_INSTANCE_TOKEN")
     assert _env_value(files, "MYWS_AGENT_API") == "https://10.0.0.5/agent-api"
     assert _env_value(files, "OPENIM_WS_ADDR") == "wss://10.0.0.5/im/ws"

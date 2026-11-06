@@ -682,6 +682,52 @@ class ListAgentsOutput(BaseModel):
     items: list[AgentItem]
 
 
+# ---------------------------------------------------------------- 终止其他智能体的任务（T-0126）
+
+
+class RunningTaskText(_Untrusted):
+    title: str
+
+
+class RunningTask(BaseModel):
+    task_id: UUID
+    started_at: datetime
+    untrusted: RunningTaskText
+
+
+class AgentRunItem(BaseModel):
+    instance_id: UUID
+    status: Literal["pending", "online", "offline", "disabled"]
+    last_seen_at: datetime | None
+    running_tasks: list[RunningTask] = Field(description="正在执行的任务（时间轴上没结束的一段）")
+    stopping: bool = Field(description="已经被叫停、还在停止中")
+    is_you: bool
+    untrusted: AgentText
+
+
+class ListAgentRunsOutput(BaseModel):
+    items: list[AgentRunItem]
+
+
+class StopAgentRunInput(_Strict):
+    instance_id: UUID = Field(
+        description="要叫停的智能体（list_agent_runs 给的 instance_id，不能是你自己）"
+    )
+    task_id: UUID | None = Field(
+        default=None, description="它正在执行的任务；给了就把这一段记为中断"
+    )
+    reason: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+    ] = Field(description="为什么叫停（会转告它和管理员）")
+
+
+class StopAgentRunOutput(BaseModel):
+    status: Literal["stopping"] = "stopping"
+    stop_id: UUID
+    soft_until: datetime = Field(description="这之前它调用工作台工具都会被拒绝")
+    note: str
+
+
 # ---------------------------------------------------------------- IM 会话目录（T-0117）
 
 # im_send 等工具的目标：user:<IM 用户 ID>（本工作空间的管理员）或 group:<群 ID>
@@ -1257,6 +1303,26 @@ _PROJECT_ADMIN: list[ToolSpec] = [
         "列出本工作空间的智能体（名字、能力说明、在线、是否空闲），用来决定拉谁进项目",
     ),
 ]
+# 终止其他智能体的任务（T-0126）：只有管理员打开了这个权限的实例才列出、才能调用（例外六）
+_STOP_OTHERS: list[ToolSpec] = [
+    _spec(
+        "list_agent_runs",
+        "direct",
+        EmptyInput,
+        ListAgentRunsOutput,
+        "列出本工作空间的智能体正在执行的任务、最近在线时间、是否已被叫停，"
+        "用来判断谁深陷在一件事里（要管理员给你开“终止其他智能体任务”的权限）",
+    ),
+    _spec(
+        "stop_agent_run",
+        "direct",
+        StopAgentRunInput,
+        StopAgentRunOutput,
+        "叫停另一个智能体正在执行的任务（直接生效，不能叫停自己）："
+        "它接下来 5 分钟调用工作台工具都会被拒绝，1 分钟内它的 OpenClaw 会中止正在运行的会话。"
+        "说清原因；每小时最多 10 次，每次都通知管理员",
+    ),
+]
 # 主动发消息（T-0118）：直接执行、不审批（docs/AGENTS.md 第 8 节例外四）
 _IM_DIRECT: list[ToolSpec] = [
     _spec(
@@ -1304,12 +1370,20 @@ _KNOWLEDGE: list[ToolSpec] = [
 ]
 TOOLS: dict[str, ToolSpec] = {
     spec.name: spec
-    for spec in _READ + _WRITE + _CRITICAL + _DIRECT + _PROJECT_ADMIN + _IM_DIRECT + _KNOWLEDGE
+    for spec in _READ
+    + _WRITE
+    + _CRITICAL
+    + _DIRECT
+    + _PROJECT_ADMIN
+    + _STOP_OTHERS
+    + _IM_DIRECT
+    + _KNOWLEDGE
 }
 KNOWLEDGE_TOOL_NAMES = frozenset(spec.name for spec in _KNOWLEDGE)
 DIRECT_TOOL_NAMES = frozenset(spec.name for spec in _DIRECT)
 PROJECT_ADMIN_TOOL_NAMES = frozenset(spec.name for spec in _PROJECT_ADMIN)
 IM_DIRECT_TOOL_NAMES = frozenset(spec.name for spec in _IM_DIRECT)
+STOP_TOOL_NAMES = frozenset(spec.name for spec in _STOP_OTHERS)
 
 # 永远不做成工具（方案第 4.6 节）：集成凭证与设置、成员与角色、会话、工作台设置、
 # 实例与密钥管理、审计日志

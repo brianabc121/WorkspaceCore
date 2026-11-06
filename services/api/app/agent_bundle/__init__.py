@@ -16,6 +16,7 @@ zip 里的文件：
 | `bin/host-report.mjs` | 755 | 每分钟上报服务器状态：CPU、内存、磁盘、网络的数字（T-0113） |
 | `bin/channel-patch.mjs` | 755 | 给插件打补丁：自动回复被拒收时把原因放回会话（T-0120） |
 | `bin/wakeup.mjs` | 755 | 每分钟领取到期的唤醒，在容器里跑一轮（T-0121） |
+| `bin/stop-runs.mjs` | 755 | 每分钟领取终止令，中止正在运行的会话（T-0126） |
 | `compose.yaml` | 644 | OpenClaw 服务器上的 Compose（锁定镜像，不开放端口） |
 | `CHECKLIST.md`、`README.md` | 644 | 部署检查清单与说明 |
 | `setup-reflection.sh`、`reflection-prompt.md` | 755 / 644 | 每晚复盘的定时任务（T-0100） |
@@ -54,6 +55,7 @@ BIN_SCRIPTS = (
     "host-report.mjs",
     "channel-patch.mjs",
     "wakeup.mjs",
+    "stop-runs.mjs",
 )
 
 

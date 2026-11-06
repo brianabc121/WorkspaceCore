@@ -269,7 +269,7 @@ def main() -> int:
     cron = run("crontab", "-l", "-u", user).stdout
     if done["schedule"] == "done":
         # 每 10 分钟取密钥、每分钟上报 token 用量（T-0104）与服务器状态（T-0113）、每周一重启
-        report.check("crontab 有五行带标记的定时任务（含每分钟领取唤醒，T-0121）", cron.count(MARKER) == 5, cron)
+        report.check("crontab 有六行带标记的定时任务（含每分钟领取唤醒与终止令）", cron.count(MARKER) == 6, cron)
         report.check("crontab 里有每分钟的用量上报", "/opt/myworkspace/bin/usage-report.mjs" in cron, cron)
         report.check("crontab 里有每分钟的服务器状态上报", "/opt/myworkspace/bin/host-report.mjs" in cron, cron)
         # 照 crontab 那一行以部署账号跑一次（T-0106）：真实 OpenClaw 的 sessions.usage 经接入网关送到工作台，
@@ -385,7 +385,7 @@ def main() -> int:
         step_detail(state, "reflection"),
     )
     if done["schedule"] == "done":
-        report.check("定时任务没有重复", run("crontab", "-l", "-u", user).stdout.count(MARKER) == 5)
+        report.check("定时任务没有重复", run("crontab", "-l", "-u", user).stdout.count(MARKER) == 6)
 
     # ---------------------------------------------------------------- 卸载（删除目录）
     response = target.post("uninstall", {"version": state["target"]["version"], "remove_files": True})

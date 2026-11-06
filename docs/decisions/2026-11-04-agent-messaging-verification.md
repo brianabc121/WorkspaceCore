@@ -86,3 +86,23 @@
 新部署和已经部署的实例（插件已装、只差补丁）走同一步；SSH 重新部署时换了新凭证，`docker compose up -d` 会重建容器，补丁随之生效。
 
 V2（禁用发消息工具后自动回复照常）、V3（系统事件进下一轮）由 `tests/e2e/agents_acceptance.py` 场景 2、3、11、20 在 CI 的 agents 任务里实测，结果补在下面。
+
+### 6.2 终止正在执行的任务（T-0126，2026-11-06）
+
+在锁定镜像 `openclaw/openclaw:2026.9.36`（`70c40e4`）里核对：
+
+| 项目 | 结果 |
+|---|---|
+| 调网关的方式 | `node openclaw.mjs gateway call <method> --params <json> --json`（`openclaw gateway call --help`：`--params` 是 JSON 对象，默认超时 10 秒，`--json` 输出 JSON）；在容器里调本机网关，网关令牌不离开容器 |
+| 找正在运行的会话 | `/app/docs/gateway/protocol/rpc-bootstrap-and-events.md`：`sessions.list` 接受 `activeOnly: true`，只选当前正在运行或排队的会话（看运行时，不看存储的状态）；`global` / `unknown` 这两种会话行带着原始键和 `agentId`，要按 agent、key 一起认 |
+| 中止 | `/app/docs/gateway/protocol/rpc-session-control.md`：`sessions.abort` 传 `key`（可选 `runId`）中止该会话正在进行的工作；只传 key 的非 global 请求加 `clearQueued: true` 同时清掉它排队的后续消息；字面量 `global` 按 `chat.abort` 的归属规则处理，不做排队清理 |
+| 参数结构 | `dist` 里 `SessionsAbortParamsSchema` 是封闭对象：`key`、`runId`、`agentId`、`clearQueued` 都可选，别的字段拒收。所以 `global` / `unknown` 行传 `{key, agentId}`，其余传 `{key, clearQueued: true}` |
+| 一页的上限 | `activeOnly` 仍受分页限制；一个实例只跑一个 agent，正在运行的会话远少于一页，接入包只取第一页 |
+
+做法：工作台连不进实例的网关（只监听本机），所以分两层。软停止：下令后 5 分钟内这个实例调用工作台的任何 MCP 工具都返回 `RUN_STOPPED`
+（说明是谁、为什么叫停），深陷的那一轮拿不到任何工具结果；硬停止：接入包每分钟运行 `bin/stop-runs.mjs` 领取终止令，
+对 `sessions.list({activeOnly: true})` 列出的会话逐个 `sessions.abort`，报回中止了几个，成功后解除软停止。
+10 分钟没被领取记为过期（实例没更新接入包或不在线，只有软停止生效），领取后 5 分钟没有结果记为失败。
+
+真实容器里的 `sessions.list` / `sessions.abort`（乙在一件事上反复调用工具，甲叫停后 `stop-runs.mjs` 中止至少一个会话、模型调用停下）
+由 `tests/e2e/agents_acceptance.py` 场景 22 在 CI 的 agents 任务里实测，结果补在下面。

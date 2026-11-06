@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.api.deps import client_ip, get_agent_service, get_db, get_redis
 from app.api.media_http import media_response
 from app.core.errors import ApiError
-from app.domain import agent_outbox, agent_wakeups, im_callbacks
+from app.domain import agent_outbox, agent_stops, agent_wakeups, im_callbacks
 from app.domain.agents import AgentPrincipal, AgentService
 from app.domain.host_metrics import HostService
 from app.domain.im import openim_client
@@ -45,6 +45,10 @@ from app.schemas.agents import (
     ImTokenResponse,
     SecretResolveRequest,
     SecretResolveResponse,
+    StopClaimItem,
+    StopClaimResponse,
+    StopResult,
+    StopResultResponse,
     WakeupClaimItem,
     WakeupClaimResponse,
     WakeupResult,
@@ -232,6 +236,48 @@ async def report_agent_wakeup(
         status=wakeup.status,
         run_at=wakeup.run_at,
     )
+
+
+@router.post(
+    "/stops/claim",
+    summary="领取终止令（实例的 stop-runs.mjs，每分钟一次）",
+    description="领取即标为执行中；实例中止所有正在运行的会话（sessions.abort）后逐个报回。"
+    "10 分钟没被领取的记为过期，领取后 5 分钟没有结果的记为失败；"
+    "每个实例每分钟最多 6 次（T-0126）。",
+    responses=_errors,
+)
+async def claim_agent_stops(
+    principal: Principal,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> StopClaimResponse:
+    stops = await agent_stops.claim(db, redis, principal.instance)
+    return StopClaimResponse(items=[StopClaimItem(id=s.id) for s in stops])
+
+
+@router.post(
+    "/stops/{stop_id}/result",
+    summary="报回终止的结果（实例的 stop-runs.mjs）",
+    description="done 附中止的会话数，或 failed 附一行原因；done 之后解除软停止。",
+    responses=error_responses(401, 404, 422),
+)
+async def report_agent_stop(
+    principal: Principal,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+    stop_id: uuid.UUID,
+    body: StopResult,
+) -> StopResultResponse:
+    stop = await agent_stops.report(
+        db,
+        redis,
+        principal.instance,
+        stop_id,
+        ok=body.status == "done",
+        aborted=body.aborted,
+        error=body.error,
+    )
+    return StopResultResponse(id=stop.id, status=stop.status)
 
 
 gateway = APIRouter(include_in_schema=False)

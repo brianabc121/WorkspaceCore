@@ -2,9 +2,9 @@
 id: T-0126
 title: 终止正在执行的任务：MCP 软停止、接入包 stop-runs.mjs（sessions.list + sessions.abort）、终止其他智能体任务的开关、AGENTS.md 例外六
 owner: claude
-status: todo
+status: in_progress
 priority: P2
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web,docs,tests/e2e
 depends_on: T-0121
 created: 2026-11-06
@@ -34,3 +34,5 @@ updated: 2026-11-06
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-06 07:52 UTC · claude · 创建任务（owner: claude）
 - 2026-11-06 07:52 UTC · claude · 人类在对话中提出（2026-11-06）：“workspace平台可以通过mcp终止openclaw正在执行的某个任务，避免出现智能体深陷到一个任务里去；这个权利也需要做成一个开关，管理员可以赋予某个智能体终止其他智能体任务的权利”。已写进方案第 7.3 节（D20 ~ D22、例外六写法），排在 T-0121 之后（共用接入包每分钟的脚本与 crontab）。
+- 2026-11-06 08:15 UTC · claude · 开始任务
+- 2026-11-06 08:34 UTC · claude · 后端（迁移 0037、agent_stops 领域、MCP 软停止与 list_agent_runs / stop_agent_run、管理员 PUT stop-others / POST stop / GET stops、/agent-api/v1/stops 领取与报回、每日清理）、接入包 bin/stop-runs.mjs 与 crontab 行、前端（实例卡片的权限开关与“终止正在执行的任务”、任务抽屉与时间轴的“终止执行”）、测试（tests/test_agent_stops.py 5 个、test_stop_runs_script.py 5 个、web 4 个）、e2e 场景 22、核验记录 6.2 已完成。锁定镜像里核对了 gateway call、activeOnly、sessions.abort 参数（封闭对象含 agentId，global / unknown 行带 agentId）。等 CI agents 任务跑场景 22 后补结果、标 done。

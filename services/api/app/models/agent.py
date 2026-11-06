@@ -124,6 +124,12 @@ class AgentInstance(Base):
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
     im_media_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 允许终止其他智能体正在执行的任务（T-0126，迁移 0037；默认关闭，方案 D20）
+    stop_others_enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    stop_others_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    stop_others_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()
@@ -439,3 +445,49 @@ class AgentOpsAction(Base):
     started_at: Mapped[datetime] = _created()
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+RUN_STOP_STATUSES = ("pending", "running", "done", "failed", "expired")
+
+
+class AgentRunStop(Base):
+    """终止令（T-0126，方案第 7.3 节）：叫停一个实例正在执行的任务。
+
+    软停止：`soft_until` 之前这个实例的 MCP 工具调用返回 RUN_STOPPED；
+    硬停止：接入包的 stop-runs.mjs 领取后在容器里对正在运行的会话调 `sessions.abort`。
+    """
+
+    __tablename__ = "agent_run_stops"
+    __table_args__ = (
+        CheckConstraint(f"status IN {RUN_STOP_STATUSES}", name="status"),
+        CheckConstraint("char_length(reason) BETWEEN 1 AND 500", name="reason"),
+        Index("ix_agent_run_stops_instance_created", "instance_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="CASCADE")
+    )
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    requested_by_instance: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="SET NULL")
+    )
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.tasks.id", ondelete="SET NULL")
+    )
+    reason: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
+    soft_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    aborted: Mapped[int | None] = mapped_column(Integer)
+    error: Mapped[str | None] = mapped_column(Text)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()

@@ -118,6 +118,20 @@ describe('任务时间轴', () => {
 
   })
 
+  it('terminates a running agent run with a reason and the task id (T-0126)', async () => {
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValueOnce(null).mockReturnValueOnce(' 一直在重试同一个命令 ')
+    const requests = timelineApi({ override: (r) => (r.method === 'POST' && pathOf(r) === '/api/v1/agents/instances/inst-1/stop' ? Response.json({ id: 's-1', instance_id: 'inst-1', requested_by: 'user-a', requested_by_instance: null, task_id: '11111111-1111-4111-8111-111111111111', reason: '一直在重试同一个命令', status: 'pending', soft_until: iso(5), aborted: null, error: null, created_at: iso(0), finished_at: null }, { status: 201 }) : undefined) })
+    await openApp('/tasks/timeline?task=11111111-1111-4111-8111-111111111111')
+    const detail = await screen.findByRole('complementary', { name: '选中的任务' })
+    await fireEvent.click(await within(detail).findByRole('button', { name: '终止执行' }))
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(requests.some((r) => pathOf(r).endsWith('/stop'))).toBe(false) // 取消了
+    await fireEvent.click(within(detail).getByRole('button', { name: '终止执行' }))
+    expect(await within(detail).findByText(/已叫停：这一段记为中断/)).toBeVisible()
+    const stop = requests.find((r) => r.method === 'POST' && pathOf(r) === '/api/v1/agents/instances/inst-1/stop')!
+    expect(await stop.clone().json()).toEqual({ reason: '一直在重试同一个命令', task_id: '11111111-1111-4111-8111-111111111111' })
+  })
+
   it('keeps viewers read-only', async () => {
     timelineApi({ role: 'viewer' })
     await openApp('/tasks/timeline?task=22222222-2222-4222-8222-222222222222')
@@ -175,5 +189,26 @@ describe('任务详情的执行者与执行记录', () => {
     expect(body.assignee_instance_id).toBe('inst-1')
     expect(body.planned_start_at).toBe(new Date('2026-11-05T09:30').toISOString())
     expect(body).not.toHaveProperty('assignee_user_id')
+  })
+
+  it('terminates the agent run from the task drawer (T-0126)', async () => {
+    vi.spyOn(window, 'prompt').mockReturnValue('卡在同一个报错上')
+    const opened = { ...task, assignee_user_id: null, assignee_instance_id: 'inst-1' }
+    const requests = mockApi(async (r) => {
+      const path = pathOf(r)
+      if (path === '/api/v1/projects') return Response.json({ items: [project], next_cursor: null, total_estimate: null })
+      if (path === '/api/v1/tasks' && r.method === 'GET') return Response.json({ items: [opened], next_cursor: null, total_estimate: null })
+      if (path === `/api/v1/tasks/${task.id}` && r.method === 'GET') return Response.json(opened)
+      if (path === '/api/v1/tasks/assignees') return Response.json({ users: [], instances: [{ id: 'inst-1', name: 'ops-claw', status: 'online' }] })
+      if (path === `/api/v1/tasks/${task.id}/runs` && r.method === 'GET') return Response.json({ items: [run({ task_id: task.id })] })
+      if (path === '/api/v1/agents/instances/inst-1/stop' && r.method === 'POST') return Response.json({ id: 's-1', instance_id: 'inst-1', requested_by: 'user-a', requested_by_instance: null, task_id: task.id, reason: '卡在同一个报错上', status: 'pending', soft_until: iso(5), aborted: null, error: null, created_at: iso(0), finished_at: null }, { status: 201 })
+      return undefined
+    })
+    await openApp(`/tasks?task=${task.id}`)
+    const runs = await screen.findByRole('region', { name: '执行记录' })
+    await fireEvent.click(await within(runs).findByRole('button', { name: '终止执行' }))
+    expect(await within(runs).findByText(/已叫停：这一段记为中断/)).toBeVisible()
+    const stop = requests.find((r) => r.method === 'POST' && pathOf(r) === '/api/v1/agents/instances/inst-1/stop')!
+    expect(await stop.clone().json()).toEqual({ reason: '卡在同一个报错上', task_id: task.id })
   })
 })

@@ -341,6 +341,11 @@ class AgentService:
                     granted_by=i.im_media_by,
                     granted_at=i.im_media_at,
                 ),
+                stop_others=ProjectAdminOut(
+                    enabled=i.stop_others_enabled,
+                    granted_by=i.stop_others_by,
+                    granted_at=i.stop_others_at,
+                ),
                 bundle_outdated=i.plugin_version is not None
                 and i.plugin_version != agent_bundle.PATCHED_PLUGIN_VERSION,
                 credentials=by_instance[i.id],
@@ -532,6 +537,40 @@ class AgentService:
             enabled=instance.im_media_enabled,
             granted_by=instance.im_media_by,
             granted_at=instance.im_media_at,
+        )
+
+    async def set_stop_others(
+        self,
+        access: WorkspaceAccess,
+        instance_id: uuid.UUID,
+        body: ProjectAdminPut,
+        *,
+        client_ip: str,
+    ) -> ProjectAdminOut:
+        """打开或关闭“终止其他智能体任务”的权限（T-0126，owner / admin，方案 D20）。写审计。"""
+        instance = await self._instance(access, instance_id)
+        self._check_version(instance, body.version)
+        if instance.stop_others_enabled != body.enabled:
+            instance.stop_others_enabled = body.enabled
+            instance.stop_others_by = access.user_id if body.enabled else None
+            instance.stop_others_at = datetime.now(UTC) if body.enabled else None
+            instance.version += 1
+            await self.audit.record(
+                "agents.instance.stop_others_enabled"
+                if body.enabled
+                else "agents.instance.stop_others_disabled",
+                workspace_ids=[access.workspace.id],
+                actor_id=access.user_id,
+                resource_type="agent_instance",
+                resource_id=instance.id,
+                client_ip=client_ip,
+            )
+        await self.db.commit()
+        await self.db.refresh(instance)
+        return ProjectAdminOut(
+            enabled=instance.stop_others_enabled,
+            granted_by=instance.stop_others_by,
+            granted_at=instance.stop_others_at,
         )
 
     async def set_enabled(

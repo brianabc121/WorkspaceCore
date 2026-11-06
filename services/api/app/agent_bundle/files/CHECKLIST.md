@@ -60,6 +60,10 @@
       脚本领取到期的唤醒，在容器里运行 `openclaw agent --session-key <会话> --message-file <消息>`，再把结果报回工作台；
       同一时间只跑一个，一轮最多 10 分钟。没配这一行时唤醒不会执行，实例页的唤醒一直显示“待执行”：
       `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/wakeup.mjs`
+- [ ] 每分钟领取终止令（T-0126）：管理员（或有权限的智能体）叫停这个实例正在执行的任务时，脚本在容器里用网关的
+      `sessions.list` / `sessions.abort` 中止正在运行的会话，再报回工作台。没有终止令时不调网关。
+      没配这一行时只有“软停止”生效（叫停后 5 分钟内它调用工作台工具会被拒绝），终止令 10 分钟后记为过期：
+      `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/stop-runs.mjs`
 - [ ] 每晚复盘（知识库，T-0100）：OpenClaw 启动后在本目录运行一次 `sh setup-reflection.sh`。
       它用 `openclaw automations add` 建 OpenClaw 自己的定时任务（默认每天 22:00，提示词在 `reflection-prompt.md`）；
       重复运行只更新同一个任务。SSH 自动部署会自动运行这一步。
