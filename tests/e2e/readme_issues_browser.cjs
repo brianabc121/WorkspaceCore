@@ -95,7 +95,8 @@ async function waitReadme(page, projectId, text, present = true, timeout = 120_0
   // ---------------------------------------------------------------- README：打开项目先看 README，自动更新的部分带角标
   const project = await api(page, workspace, 'POST', '/api/v1/projects', { title: `README 验收 ${run}`, description: '浏览器验收' }, { 'Idempotency-Key': randomUUID() })
   await page.goto(`${base}/projects/${project.id}`)
-  await page.getByRole('heading', { level: 1, name: `README 验收 ${run}` }).waitFor()
+  // 只认页头：README 正文的第一行“# 项目名”渲染出来也是同名的 h1，README 先加载完时不限定范围会匹配到两个
+  await page.locator('.page-heading').getByRole('heading', { level: 1, name: `README 验收 ${run}` }).waitFor()
   await readme(page).waitFor()
   check(await page.getByRole('group', { name: '项目' }).getByRole('button', { name: 'README' }).getAttribute('aria-pressed') === 'true', '打开项目应先显示 README')
   const autoParts = await readme(page).locator('[aria-label^="自动更新："]').count()

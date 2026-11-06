@@ -44,6 +44,37 @@ def _raw(content_type: int, content: Any, **extra: Any) -> dict[str, Any]:
         (101, {"content": "你好"}, "你好", [], True),
         (106, {"text": "@A 看下", "atUserList": ["oc_a", 7]}, "@A 看下", ["oc_a"], True),
         (102, {"sourcePicture": {"url": "http://x/1.png", "width": 4}}, None, [], True),
+        (
+            105,
+            {
+                "uuid": "u1",
+                "sourceUrl": "http://x/im/obj/m/u1",
+                "fileName": "a.md",
+                "fileSize": 3,
+                "fileType": "text/markdown",
+            },
+            None,
+            [],
+            True,
+        ),
+        (
+            104,
+            {
+                "videoUUID": "v1",
+                "videoUrl": "http://x/v",
+                "videoType": "video/mp4",
+                "videoSize": 9,
+                "duration": 3,
+                "snapshotUUID": "c1",
+                "snapshotUrl": "http://x/c",
+                "snapshotWidth": 320,
+                "snapshotHeight": 180,
+                "snapshotSize": 5,
+            },
+            None,
+            [],
+            True,
+        ),
         (1201, {"detail": "{}"}, "已成为好友", [], False),
         (1509, {}, "有新成员被邀请入群", [], False),
         (1999, {}, "系统通知", [], False),
@@ -56,9 +87,16 @@ def test_parse_message_kinds(
     parsed = parse_message(_raw(content_type, content))
     assert parsed is not None
     assert (parsed.plain_text, parsed.at_im_ids) == (text, at)
-    # 只保留文字、@、图片的内容；通知与不支持的类型不存原始内容
+    # 保留文字、@、图片的内容与文件、视频的附件字段；通知与不支持的类型不存原始内容
     assert parsed.content == (content if kept else {})
     assert parsed.seq == 3 and parsed.sent_at.year == 2023
+
+
+def test_parse_message_keeps_only_attachment_fields() -> None:
+    file = parse_message(
+        _raw(105, {"uuid": "u1", "sourceUrl": "http://x/im/obj/m/u1", "extra": "x" * 9})
+    )
+    assert file is not None and file.content == {"uuid": "u1", "sourceUrl": "http://x/im/obj/m/u1"}
 
 
 def test_parse_message_rejects_placeholders_and_garbage() -> None:

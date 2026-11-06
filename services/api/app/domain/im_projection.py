@@ -39,9 +39,11 @@ from app.domain.sync import retry_delay
 from app.integrations.base import ConnectorError
 from app.integrations.openim import (
     CONTENT_AT_TEXT,
+    CONTENT_FILE,
     CONTENT_OA_NOTIFICATION,
     CONTENT_PICTURE,
     CONTENT_TEXT,
+    CONTENT_VIDEO,
     SESSION_NOTIFICATION,
     OpenIMClient,
     group_conversation_id,
@@ -185,6 +187,25 @@ def _oa_text(content: dict[str, Any]) -> str:
     return str(text)[:4000] if isinstance(text, str) else "系统通知"
 
 
+# 文件、视频只留下显示与下载要用的字段（链接、名称、大小、类型、时长、封面），其余字段不入库。
+# 不留的话，对账把这条消息补进投影时会把发件箱先写好的内容清空，附件就没有 media_id 了（T-0119）
+ATTACHMENT_FIELDS: dict[int, tuple[str, ...]] = {
+    CONTENT_FILE: ("uuid", "sourceUrl", "fileName", "fileSize", "fileType"),
+    CONTENT_VIDEO: (
+        "videoUUID",
+        "videoUrl",
+        "videoType",
+        "videoSize",
+        "duration",
+        "snapshotUUID",
+        "snapshotUrl",
+        "snapshotWidth",
+        "snapshotHeight",
+        "snapshotSize",
+    ),
+}
+
+
 def parse_message(raw: dict[str, Any]) -> ParsedMessage | None:
     """pull_msg_by_seq 返回的一条 MsgData；缺必要字段时返回 None。"""
     try:
@@ -214,6 +235,8 @@ def parse_message(raw: dict[str, Any]) -> ParsedMessage | None:
     stored: dict[str, Any] = (
         content if content_type in (CONTENT_TEXT, CONTENT_AT_TEXT, CONTENT_PICTURE) else {}
     )
+    if content_type in ATTACHMENT_FIELDS:
+        stored = {k: content[k] for k in ATTACHMENT_FIELDS[content_type] if k in content}
     if content_type == CONTENT_OA_NOTIFICATION and workspace_id_from_notice(sender) is not None:
         # 工作空间通知账号发的审批卡片：只记下记录 ID，状态以审批记录为准
         execution_id = execution_id_from_ex(raw.get("ex"))

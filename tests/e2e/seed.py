@@ -117,7 +117,7 @@ async def main():
                 await db.execute(update(Task).where(Task.id == task_id).values(
                     assignee_instance_id=instance.id, started_at=started, done=True, done_at=ended,
                 ))
-                print(instance.id)
+                print(instance.id, started.isoformat())
             elif command == "cleanup-files":
                 workspace_id = uuid.UUID(sys.argv[2])
                 await db.execute(update(KnowledgeFile).where(KnowledgeFile.workspace_id == workspace_id)
@@ -177,7 +177,8 @@ def bulk(workspace_id: str, user_id: str, tasks: int, notices: int) -> None:
 
 
 def seed_timeline(workspace_id: str, task_id: str, name: str) -> str:
-    return _run("timeline", workspace_id, task_id, name)[-1]
+    """返回“实例 ID 用量开始时间”：从开始起 30 分钟，第 i 分钟 3300 + 10 × i 个 token。"""
+    return " ".join(_run("timeline", workspace_id, task_id, name)[-2:])
 
 
 def cleanup_files(workspace_id: str) -> int:

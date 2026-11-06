@@ -24,9 +24,10 @@ import pytest
 from app.domain import agent_media
 from app.domain.im import admin_im_user_id
 from app.domain.im_projection import signed_ex
+from app.jobs import worker
 from tests import fake_openim
 from tests.helpers import run_sql, tool_error
-from tests.test_im_accounts_callbacks import GROUP, SINGLE, ImEnv, im_env, msg
+from tests.test_im_accounts_callbacks import GROUP, SINGLE, ImEnv, _worker_ctx, im_env, msg
 from tests.test_im_gateway import INTRANET
 from tests.test_im_media_api import png
 from tests.test_task_claims_api import agent, call, ok
@@ -355,3 +356,40 @@ async def test_admin_uploads_and_sends_a_file(env: ImEnv) -> None:
         headers={**env.headers(write=True), "Idempotency-Key": str(uuid.uuid4())},
     )
     assert mismatch.status_code == 422
+
+
+async def test_file_and_video_keep_their_links_after_projection(env: ImEnv) -> None:
+    """OpenIM 的消息补进投影后，文件、视频仍然带 media_id（管理员可下载）：投影不能把内容清空。"""
+    a, token = await _agent(env, "甲")
+    owner = admin_im_user_id(env.owner_id)
+    conv = await _open_dm(env, a["id"])
+    sent = ok(
+        await call(
+            env,
+            token,
+            "im_send",
+            {
+                "target": f"user:{owner}",
+                "attachments": [
+                    {"text_content": "# 周报\n", "filename": "weekly.md"},
+                    {"data_base64": base64.b64encode(mp4(3)).decode(), "filename": "demo.mp4"},
+                ],
+            },
+        )
+    )
+    assert [m["kind"] for m in sent["messages"]] == ["file", "video"]
+    await worker.reconcile_im(await _worker_ctx(env))
+    listed = await env.client.get(
+        f"/api/v1/im/conversations/{conv}/messages", headers=env.headers()
+    )
+    assert listed.status_code == 200
+    mine = [m for m in listed.json()["items"] if m["sender_im_id"] == a["im_user_id"]]
+    by_kind = {m["kind"]: m["attachment"] for m in mine}
+    assert set(by_kind) == {"file", "video"}
+    assert by_kind["file"]["media_id"] and by_kind["file"]["name"] == "weekly.md"
+    assert by_kind["video"]["media_id"] and by_kind["video"]["duration_seconds"] == 3
+    assert by_kind["video"]["cover_media_id"]
+    download = await env.client.get(
+        f"/api/v1/im/media/{by_kind['file']['media_id']}", headers=env.headers()
+    )
+    assert download.status_code == 200 and download.content == "# 周报\n".encode()
