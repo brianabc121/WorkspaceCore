@@ -3,11 +3,11 @@
 // 每个执行者（或项目）一条轨道，每段执行一个片段，颜色按项目；最下面一条是 token 用量。地址里带项目、日期、刻度、分组与选中的任务。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, MessageSquare, Pause, Play, Send, Square, X } from '@lucide/vue'
+import { AlertTriangle, ChevronLeft, ChevronRight, CircleStop, ExternalLink, MessageSquare, Pause, Play, Send, Square, X } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
 import { dataOf, type Schema } from '../../services/api'
 import { useProjects } from '../tasks/shared'
-import { useRunActions, useRuns, useTimeline, runError, type Group } from './api'
+import { TERMINATED, askStopReason, useRunActions, useRuns, useTimeline, runError, type Group } from './api'
 import { STATE_LABELS, SCALES, bars, clipOf, clock, compact, dayKey, duration, overdueBy, parseDay, projectColors, rangeOf, shift, startOfDay, ticks, tokenText, type Clip, type Scale } from './model'
 import './timeline.css'
 
@@ -137,6 +137,10 @@ async function act(run: () => Promise<unknown>, done: string) {
 const startHuman = () => act(() => actions.start(selectedTask.value, false), '已开始')
 const dispatch = () => act(() => actions.start(selectedTask.value, true), '已通过 IM 交给它执行')
 const stopRun = (reason: Schema['TaskRunStop']['reason']) => openRun.value && act(() => actions.stop(selectedTask.value, openRun.value!.id, reason), reason === 'paused' ? '已暂停' : '已结束这段')
+function terminate() {
+  const instanceId = openRun.value?.instance_id ?? selectedInfo.value?.assignee_instance_id, reason = instanceId ? askStopReason() : null
+  if (instanceId && reason) void act(() => actions.terminate(selectedTask.value, instanceId, reason), TERMINATED)
+}
 async function openChat() {
   const instance = selectedInfo.value?.assignee_instance_id ?? selectedRun.value?.instance_id
   if (!instance) return
@@ -388,6 +392,7 @@ const toTasks = computed(() => ({ path: '/tasks', query: projectId.value ? { pro
                 <template v-if="isAgentTask">
                   <button v-if="auth.canManage && !openRun" type="button" class="secondary-button" :disabled="busy" @click="dispatch"><Send :size="16" aria-hidden="true" />交给它执行</button>
                   <button v-if="auth.canManage && openRun" type="button" class="secondary-button" :disabled="busy" @click="stopRun('interrupted')"><Square :size="16" aria-hidden="true" />结束这段</button>
+                  <button v-if="auth.canManage && openRun" type="button" class="secondary-button im-danger" :disabled="busy" @click="terminate"><CircleStop :size="16" aria-hidden="true" />终止执行</button>
                 </template>
                 <template v-else-if="writable">
                   <button v-if="!openRun" type="button" class="secondary-button" :disabled="busy" @click="startHuman"><Play :size="16" aria-hidden="true" />开始</button>

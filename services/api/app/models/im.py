@@ -29,6 +29,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     Text,
     UniqueConstraint,
     func,
@@ -293,13 +294,21 @@ class ImContactGroupMember(Base):
 
 
 class ImMedia(Base):
-    """上传的图片：id 同时是 upload_id 与 media_id。"""
+    """上传的图片、文件、视频（T-0119 起）：id 同时是 upload_id 与 media_id。
+
+    管理员上传的记 uploaded_by，智能体经 im_send 发的记 instance_id；文件与视频的宽高为 0。
+    """
 
     __tablename__ = "im_media"
     __table_args__ = (
         UniqueConstraint("object_name"),
         CheckConstraint(f"status IN {MEDIA_STATUSES}", name="status"),
-        CheckConstraint("size > 0 AND width > 0 AND height > 0", name="dimensions"),
+        CheckConstraint(
+            "size > 0 AND width >= 0 AND height >= 0"
+            " AND (kind <> 'image' OR (width > 0 AND height > 0))",
+            name="dimensions",
+        ),
+        CheckConstraint("kind IN ('image', 'file', 'video')", name="kind"),
         Index(
             "ix_im_media_unused_expiry",
             "expires_at",
@@ -314,6 +323,13 @@ class ImMedia(Base):
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
+    instance_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="SET NULL")
+    )
+    kind: Mapped[str] = mapped_column(Text, server_default=text("'image'"))
+    file_name: Mapped[str | None] = mapped_column(Text)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    sha256: Mapped[str | None] = mapped_column(Text)
     mime: Mapped[str] = mapped_column(Text)
     size: Mapped[int] = mapped_column(Integer)
     width: Mapped[int] = mapped_column(Integer)
@@ -326,3 +342,149 @@ class ImMedia(Base):
     server_msg_id: Mapped[str | None] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created()
+
+
+OUTBOX_STATUSES = (
+    "scheduled",
+    "queued",
+    "sending",
+    "sent",
+    "rejected",
+    "failed",
+    "unknown",
+    "cancelled",
+)
+OUTBOX_SOURCES = ("tool", "reply_retry", "wakeup")
+OUTBOX_PENDING = ("scheduled", "queued", "unknown")
+
+
+class AgentImOutbox(Base):
+    """智能体经 im_send 主动发的消息（T-0118，方案第 6.1 节）：一条 OpenIM 消息一行。
+
+    `ex` 里写发件箱 ID，结果未知时按它在消息投影里对账（im_messages.idempotency_key）。
+    """
+
+    __tablename__ = "agent_im_outbox"
+    __table_args__ = (
+        CheckConstraint(f"status IN {OUTBOX_STATUSES}", name="status"),
+        CheckConstraint(f"source IN {OUTBOX_SOURCES}", name="source"),
+        CheckConstraint("if_rate_limited IN ('queue', 'fail')", name="if_rate_limited"),
+        UniqueConstraint("instance_id", "client_key", "part"),
+        Index(
+            "ix_agent_im_outbox_due",
+            "next_attempt_at",
+            postgresql_where=text("status IN ('scheduled', 'queued', 'unknown')"),
+        ),
+        Index("ix_agent_im_outbox_instance_created", "instance_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="CASCADE")
+    )
+    target: Mapped[str] = mapped_column(Text)
+    conversation_id: Mapped[str] = mapped_column(Text)
+    client_key: Mapped[str] = mapped_column(Text)
+    part: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
+    request_hash: Mapped[str] = mapped_column(Text)
+    content_type: Mapped[int] = mapped_column(Integer)
+    content_json: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    plain_text: Mapped[str | None] = mapped_column(Text)
+    at_im_ids: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))
+    media_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text, server_default=text("'tool'"))
+    if_rate_limited: Mapped[str] = mapped_column(Text, server_default=text("'queue'"))
+    send_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    error_code: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    server_msg_id: Mapped[str | None] = mapped_column(Text)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()
+
+
+class AgentImRejection(Base):
+    """实例发的消息被 before 回调拒收（T-0118，方案第 5.2 节），保留 7 天。"""
+
+    __tablename__ = "agent_im_rejections"
+    __table_args__ = (
+        UniqueConstraint("instance_id", "client_msg_id"),
+        Index("ix_agent_im_rejections_instance_created", "instance_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="CASCADE")
+    )
+    conversation_id: Mapped[str] = mapped_column(Text)
+    code: Mapped[int] = mapped_column(Integer)
+    content_type: Mapped[int] = mapped_column(Integer)
+    client_msg_id: Mapped[str] = mapped_column(Text)
+    preview: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    retried: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    created_at: Mapped[datetime] = _created()
+
+
+WAKEUP_SOURCES = ("agent", "admin")
+WAKEUP_REPEATS = ("none", "daily", "weekdays", "weekly")
+WAKEUP_STATUSES = ("pending", "running", "done", "failed", "cancelled")
+
+
+class AgentWakeup(Base):
+    """到点叫醒智能体跑一轮（T-0121，方案第 7.2 节）。
+
+    智能体自己安排（source = agent）或管理员在实例页建（source = admin，可以重复）。
+    接入包每分钟领取到期的唤醒，在 `session_key` 指定的会话里跑一轮；`target` 为空是独立会话。
+    """
+
+    __tablename__ = "agent_wakeups"
+    __table_args__ = (
+        CheckConstraint(f"source IN {WAKEUP_SOURCES}", name="source"),
+        CheckConstraint(f"repeat IN {WAKEUP_REPEATS}", name="repeat"),
+        CheckConstraint(f"status IN {WAKEUP_STATUSES}", name="status"),
+        CheckConstraint("char_length(prompt) BETWEEN 1 AND 2000", name="prompt"),
+        Index(
+            "ix_agent_wakeups_due",
+            "instance_id",
+            "run_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index("ix_agent_wakeups_instance_created", "instance_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="CASCADE")
+    )
+    source: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    target: Mapped[str | None] = mapped_column(Text)
+    session_key: Mapped[str] = mapped_column(Text)
+    prompt: Mapped[str] = mapped_column(Text)
+    run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    repeat: Mapped[str] = mapped_column(Text, server_default=text("'none'"))
+    time_zone: Mapped[str] = mapped_column(Text, server_default=text("'UTC'"))
+    status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
+    runs: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()

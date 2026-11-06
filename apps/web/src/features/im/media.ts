@@ -3,12 +3,27 @@ import { ApiError, type Schema } from '../../services/api'
 
 // /api/v1/im/media needs X-Workspace-Id, so <img src> cannot load it directly. The shared API client reads
 // bodies as text, which would corrupt images, so this uses fetch with the same-origin session cookie.
-export async function fetchMedia(scope: string, mediaId: string, signal?: AbortSignal): Promise<Blob> {
+export async function fetchMedia(scope: string, mediaId: string, signal?: AbortSignal, expect: 'image' | 'any' = 'image'): Promise<Blob> {
   const response = await fetch(new Request(`${window.location.origin}/api/v1/im/media/${encodeURIComponent(mediaId)}`, { credentials: 'same-origin', headers: { 'X-Workspace-Id': scope }, signal }))
   if (!response.ok) throw new Error(`media ${response.status}`)
   const blob = await response.blob()
-  if (!blob.type.startsWith('image/')) throw new Error('not an image')
+  if (expect === 'image' && !blob.type.startsWith('image/')) throw new Error('not an image')
   return blob
+}
+
+// 文件消息（T-0119）：取回后交给浏览器另存为；服务端一律按附件下载，这里只是带上工作空间头
+export async function downloadMedia(scope: string, mediaId: string, name: string): Promise<void> {
+  const blob = await fetchMedia(scope, mediaId, undefined, 'any')
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url; link.download = name; link.rel = 'noopener'
+  document.body.appendChild(link); link.click(); link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+// 视频消息（T-0119）：点“播放”时才取回，取回后用对象地址播放
+export async function videoUrl(scope: string, mediaId: string): Promise<string> {
+  return URL.createObjectURL(await fetchMedia(scope, mediaId, undefined, 'any'))
 }
 
 export function useMediaUrl(scope: string, mediaId: Ref<string | null>) {

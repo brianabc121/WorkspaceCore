@@ -4,11 +4,12 @@
 只在接入包（zip）里出现一次；密钥只写不读。实现：OC-2（T-0054）。
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, Security, status
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -23,12 +24,15 @@ from app.api.deps import (
     workspace_admin,
     workspace_owner,
 )
+from app.domain import agent_im, agent_outbox, agent_stops, agent_wakeups
 from app.domain.agent_ops import AgentOpsService
 from app.domain.agent_ssh import AgentSshService
 from app.domain.agents import AgentService
+from app.domain.audit import AuditTrail
 from app.domain.auth import AuthContext
 from app.domain.host_metrics import HostService
-from app.domain.policy import WorkspaceAccess
+from app.domain.policy import WorkspaceAccess, not_found
+from app.models import AgentInstance, AgentRunStop, AgentWakeup
 from app.schemas.agents import (
     AgentInstanceCreate,
     AgentInstanceOut,
@@ -37,6 +41,9 @@ from app.schemas.agents import (
     AgentOpsActionOut,
     AgentOpsRun,
     AgentOpsState,
+    AgentRunStopCreate,
+    AgentRunStopList,
+    AgentRunStopOut,
     AgentSecretCreate,
     AgentSecretOut,
     AgentSecretPage,
@@ -50,6 +57,9 @@ from app.schemas.agents import (
     AgentSshState,
     AgentSshTargetSet,
     AgentSshUninstall,
+    AgentWakeupCreate,
+    AgentWakeupList,
+    AgentWakeupOut,
     BundleRequest,
     ProjectAdminOut,
     ProjectAdminPut,
@@ -57,6 +67,14 @@ from app.schemas.agents import (
     SecretAccessResult,
     SecretGrantsReplace,
     VersionBody,
+    WakeupTarget,
+)
+from app.schemas.ai_tools import (
+    ImCancelInput,
+    ImCancelOutput,
+    ImListTargetsInput,
+    ImOutboxInput,
+    ImOutboxOutput,
 )
 from app.schemas.common import error_responses
 from app.schemas.host import HostRange, HostStatusOut, HostSummaryList
@@ -202,6 +220,35 @@ async def put_project_admin(
     return await service.set_project_admin(
         access, instance_id, body, client_ip=_ip(request, service)
     )
+
+
+@router.put(
+    "/agents/instances/{instance_id}/im-media",
+    summary="打开或关闭实例的附件权限（admin，乐观并发）",
+    description="打开后这个实例能经 im_send 发图片、文件、视频（默认关闭，"
+    "docs/v2/AGENT_MESSAGING_PLAN.md 第 11 节 D3）；文字不受影响。每次都写审计（T-0119）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def put_im_media(
+    access: Admin, request: Request, service: Service, instance_id: UUID, body: ProjectAdminPut
+) -> ProjectAdminOut:
+    return await service.set_im_media(access, instance_id, body, client_ip=_ip(request, service))
+
+
+@router.put(
+    "/agents/instances/{instance_id}/stop-others",
+    summary="打开或关闭实例“终止其他智能体任务”的权限（admin，乐观并发）",
+    description="打开后这个实例能用 list_agent_runs / stop_agent_run 叫停本工作空间里别的智能体"
+    "（直接执行，docs/AGENTS.md 第 8 节例外六；默认关闭，AGENT_MESSAGING_PLAN 第 11 节 D20）。"
+    "每次都写审计（T-0126）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def put_stop_others(
+    access: Admin, request: Request, service: Service, instance_id: UUID, body: ProjectAdminPut
+) -> ProjectAdminOut:
+    return await service.set_stop_others(access, instance_id, body, client_ip=_ip(request, service))
 
 
 @router.post(
@@ -586,3 +633,266 @@ async def get_agent_ops_action(
     access: Admin, service: OpsService, instance_id: UUID, action_id: UUID
 ) -> AgentOpsActionOut:
     return await service.get(access, instance_id, action_id)
+
+
+# ---------------------------------------------------------------- 发件记录（T-0118）
+
+
+async def _own_instance(db: AsyncSession, access: WorkspaceAccess, instance_id: UUID) -> None:
+    found = await db.scalar(
+        select(AgentInstance.id).where(
+            AgentInstance.id == instance_id, AgentInstance.workspace_id == access.workspace.id
+        )
+    )
+    if found is None:
+        raise not_found()
+
+
+@router.get(
+    "/agents/instances/{instance_id}/outbox",
+    summary="智能体主动发的消息与被拒收的自动回复（admin）",
+    description="im_send 发的消息（已发出、排队、定时、被拒收及原因，最近 50 条）与"
+    "最近 7 天被 OpenIM 回调拒收的自动回复（T-0118，docs/v2/AGENT_MESSAGING_PLAN.md 第 4.6 节）。",
+    responses=_read_errors,
+)
+async def get_agent_outbox(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+    instance_id: UUID,
+    status_filter: Annotated[
+        Literal["all", "pending", "sent", "rejected", "failed"], Query(alias="status")
+    ] = "all",
+) -> ImOutboxOutput:
+    await _own_instance(db, access, instance_id)
+    ctx = agent_outbox.SendContext(db, request.app.state.settings, request.app.state.redis, None)
+    return await agent_outbox.AgentOutbox(ctx).list(
+        instance_id, ImOutboxInput(status=status_filter, limit=50)
+    )
+
+
+@router.post(
+    "/agents/instances/{instance_id}/outbox/cancel",
+    summary="取消智能体排队中或定时的消息（admin）",
+    description="已经发出的不能取消；不属于这个实例的 ID 原样放进 not_cancellable。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 422),
+)
+async def cancel_agent_outbox(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+    instance_id: UUID,
+    body: ImCancelInput,
+) -> ImCancelOutput:
+    await _own_instance(db, access, instance_id)
+    instance = await db.get(AgentInstance, instance_id)
+    if instance is None:
+        raise not_found()
+    ctx = agent_outbox.SendContext(db, request.app.state.settings, request.app.state.redis, None)
+    out = await agent_outbox.AgentOutbox(ctx).cancel(instance, body)
+    await db.commit()
+    return out
+
+
+# ---------------------------------------------------------------- 唤醒（T-0121）
+
+
+def _wakeup_out(w: AgentWakeup) -> AgentWakeupOut:
+    return AgentWakeupOut(
+        id=w.id,
+        source=w.source,
+        created_by=w.created_by,
+        target=w.target,
+        prompt=w.prompt,
+        run_at=w.run_at,
+        repeat=w.repeat,
+        time_zone=w.time_zone,
+        status=w.status,
+        runs=w.runs,
+        last_run_at=w.last_run_at,
+        last_error=w.last_error,
+        created_at=w.created_at,
+    )
+
+
+@router.get(
+    "/agents/instances/{instance_id}/wakeups",
+    summary="实例的唤醒与可选的会话（admin）",
+    description="待执行的在前；targets 是它能用的会话（和管理员的私聊、它所在的群），"
+    "建唤醒时选一个或不选（独立会话）。",
+    responses=_read_errors,
+)
+async def list_agent_wakeups(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+    instance_id: UUID,
+) -> AgentWakeupList:
+    await _own_instance(db, access, instance_id)
+    instance = await db.get(AgentInstance, instance_id)
+    if instance is None:
+        raise not_found()
+    listed = await agent_im.list_targets(
+        db, request.app.state.redis, instance, ImListTargetsInput()
+    )
+    targets = [
+        WakeupTarget(target=d.target, label=f"私聊 {d.untrusted.name}") for d in listed.direct
+    ]
+    targets += [
+        WakeupTarget(target=g.target, label=f"群 {g.untrusted.name}") for g in listed.groups
+    ]
+    items = await agent_wakeups.list_for_admin(db, instance_id)
+    return AgentWakeupList(items=[_wakeup_out(w) for w in items], targets=targets)
+
+
+@router.post(
+    "/agents/instances/{instance_id}/wakeups",
+    status_code=status.HTTP_201_CREATED,
+    summary="给实例建一个唤醒（admin）",
+    description="到点叫醒它跑一轮，把 prompt 交给它；"
+    "可以每天、工作日、每周重复（按 time_zone 的钟点）。最多 50 个待执行；写审计（T-0121）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def create_agent_wakeup(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+    instance_id: UUID,
+    body: AgentWakeupCreate,
+) -> AgentWakeupOut:
+    await _own_instance(db, access, instance_id)
+    instance = await db.get(AgentInstance, instance_id)
+    if instance is None:
+        raise not_found()
+    wakeup = await agent_wakeups.create_by_admin(
+        db,
+        instance,
+        user_id=access.user_id,
+        prompt=body.prompt,
+        target=body.target,
+        run_at=body.run_at,
+        repeat=body.repeat,
+        time_zone=body.time_zone,
+    )
+    await AuditTrail(db, request.app.state.settings).record(
+        "agents.wakeup.created",
+        workspace_ids=[access.workspace.id],
+        actor_id=access.user_id,
+        resource_type="agent_instance",
+        resource_id=instance_id,
+        metadata={"repeat": body.repeat, "target": body.target or "isolated"},
+        client_ip=client_ip(request, request.app.state.settings),
+    )
+    await db.commit()
+    await db.refresh(wakeup)
+    return _wakeup_out(wakeup)
+
+
+@router.post(
+    "/agents/instances/{instance_id}/wakeups/{wakeup_id}/cancel",
+    summary="取消实例的唤醒（admin）",
+    description="正在跑的这一轮停不下来；重复的唤醒不再排下一次。写审计。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def cancel_agent_wakeup(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+    instance_id: UUID,
+    wakeup_id: UUID,
+) -> AgentWakeupOut:
+    await _own_instance(db, access, instance_id)
+    wakeup = await agent_wakeups.cancel_by_admin(db, instance_id, wakeup_id)
+    await AuditTrail(db, request.app.state.settings).record(
+        "agents.wakeup.cancelled",
+        workspace_ids=[access.workspace.id],
+        actor_id=access.user_id,
+        resource_type="agent_instance",
+        resource_id=instance_id,
+        metadata={"source": wakeup.source},
+        client_ip=client_ip(request, request.app.state.settings),
+    )
+    await db.commit()
+    await db.refresh(wakeup)
+    return _wakeup_out(wakeup)
+
+
+# ---------------------------------------------------------------- 终止正在执行的任务（T-0126）
+
+
+def _stop_out(stop: AgentRunStop) -> AgentRunStopOut:
+    return AgentRunStopOut(
+        id=stop.id,
+        instance_id=stop.instance_id,
+        requested_by=stop.requested_by,
+        requested_by_instance=stop.requested_by_instance,
+        task_id=stop.task_id,
+        reason=stop.reason,
+        status=stop.status,
+        soft_until=stop.soft_until,
+        aborted=stop.aborted,
+        error=stop.error,
+        created_at=stop.created_at,
+        finished_at=stop.finished_at,
+    )
+
+
+@router.post(
+    "/agents/instances/{instance_id}/stop",
+    status_code=status.HTTP_201_CREATED,
+    summary="终止实例正在执行的任务（admin）",
+    description="立即生效：接下来 5 分钟它调用工作台工具都返回 RUN_STOPPED；"
+    "1 分钟内接入包的 stop-runs.mjs 在它的 OpenClaw 里中止正在运行的会话"
+    "（sessions.abort，AGENT_MESSAGING_PLAN 第 7.3 节）。"
+    "给了 task_id 就把这个任务正在执行的一段记为中断，"
+    "任务仍归原执行者。写审计。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def stop_agent_run(
+    access: Admin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+    instance_id: UUID,
+    body: AgentRunStopCreate,
+) -> AgentRunStopOut:
+    await _own_instance(db, access, instance_id)
+    target = await db.get(AgentInstance, instance_id)
+    if target is None:
+        raise not_found()
+    stop = await agent_stops.create(
+        db,
+        target,
+        reason=body.reason,
+        task_id=body.task_id,
+        by_user=access.user_id,
+        by_instance=None,
+    )
+    await AuditTrail(db, request.app.state.settings).record(
+        "agents.run.stop_requested",
+        workspace_ids=[access.workspace.id],
+        actor_id=access.user_id,
+        resource_type="agent_instance",
+        resource_id=instance_id,
+        metadata={"task_id": str(body.task_id) if body.task_id else None},
+        client_ip=client_ip(request, request.app.state.settings),
+    )
+    await db.commit()
+    await db.refresh(stop)
+    await agent_stops.arm(request.app.state.redis, stop, "管理员")
+    return _stop_out(stop)
+
+
+@router.get(
+    "/agents/instances/{instance_id}/stops",
+    summary="实例最近的终止记录（admin）",
+    responses=_read_errors,
+)
+async def list_agent_stops(
+    access: Admin, db: Annotated[AsyncSession, Depends(get_db)], instance_id: UUID
+) -> AgentRunStopList:
+    await _own_instance(db, access, instance_id)
+    return AgentRunStopList(items=[_stop_out(s) for s in await agent_stops.recent(db, instance_id)])

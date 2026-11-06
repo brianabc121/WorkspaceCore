@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef, watch } from 'vue'
-import { ArrowLeft, AtSign, Bell, BellOff, EllipsisVertical, Download, PanelRight, Paperclip, Pin, PinOff, Send, X } from '@lucide/vue'
+import { ArrowLeft, AtSign, Bell, BellOff, EllipsisVertical, Download, FileUp, PanelRight, Paperclip, Pin, PinOff, Send, X } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError, dataOf, type Schema } from '../../services/api'
-import { STATUS_LABELS, checkUpload, chronological, imError, useGroup, useMessages, usePins } from './queries'
+import { STATUS_LABELS, checkFileUpload, checkUpload, chronological, imError, useGroup, useMessages, usePins } from './queries'
 import { useConversationActions } from './action'
 import { dayLabel, sameDay, within } from './format'
 import { usePopover } from './usePopover'
@@ -39,7 +39,7 @@ watch(() => messages.data.value, data => {
   pending.value = pending.value.filter(s => !idsOf(s.message).some(v => listed.has(v)))
 })
 const { busy, error, notice, act, active, refresh, setFlag, exportConversation } = useConversationActions(props.scope, () => id.value)
-const draft = ref(''), list = ref<HTMLElement | null>(null), picker = ref<HTMLInputElement | null>(null), box = ref<HTMLTextAreaElement | null>(null)
+const draft = ref(''), list = ref<HTMLElement | null>(null), picker = ref<HTMLInputElement | null>(null), filePicker = ref<HTMLInputElement | null>(null), box = ref<HTMLTextAreaElement | null>(null)
 // One Idempotency-Key per message being sent: retrying it after an unknown result can never send it twice.
 // The draft, each re-sent failed message and each image have their own key, so sending one never drops another's
 // key while its result is still unknown.
@@ -150,6 +150,24 @@ async function sendImage(event: Event) {
   })
   if (uploaded && upload) await send({ kind: 'image', upload_id: (upload as Schema['ImUploadOut']).upload_id, at_im_ids: [] }, { key: null })
 }
+async function sendFile(event: Event) {
+  const input = event.target as HTMLInputElement, file = input.files?.[0]
+  input.value = ''
+  if (!file || !canSend.value) return
+  if (busy.value) { error.value = '上一条消息还在发送，请稍后再选文件。'; return }
+  const problem = checkFileUpload(file)
+  if (problem) { error.value = problem; return }
+  let upload: Schema['ImUploadOut'] | null = null
+  const uploaded = await act(async () => {
+    upload = dataOf(await auth.api.POST('/api/v1/im/uploads', {
+      params: { header, query: { name: file.name } }, body: file as unknown as string, bodySerializer: (raw: unknown) => raw as File, headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    }))
+  })
+  if (uploaded && upload) {
+    const done = upload as Schema['ImUploadOut']
+    await send({ kind: done.kind ?? 'file', upload_id: done.upload_id, at_im_ids: [] }, { key: null })
+  }
+}
 const pin = (message: Schema['ImMessageOut']) => act(() => auth.api.POST('/api/v1/im/conversations/{conversation_id}/pins', { params: { header, path: { conversation_id: id.value } }, body: { server_msg_id: message.server_msg_id! } }), '已置顶这条消息')
 const unpin = (serverMsgId: string) => act(() => auth.api.DELETE('/api/v1/im/conversations/{conversation_id}/pins/{server_msg_id}', { params: { header, path: { conversation_id: id.value, server_msg_id: serverMsgId } } }), '已取消置顶')
 
@@ -157,7 +175,7 @@ const unpin = (serverMsgId: string) => act(() => auth.api.DELETE('/api/v1/im/con
 const pinned = computed(() => pins.data.value?.items ?? [])
 const pinIndex = ref(0)
 const currentPin = computed(() => pinned.value.length ? pinned.value[pinIndex.value % pinned.value.length] : null)
-const pinText = (item: { message: Schema['ImMessageOut'] }) => item.message.kind === 'image' ? '[图片]' : item.message.kind === 'approval_card' ? '[审批卡片]' : (item.message.text ?? '')
+const pinText = (item: { message: Schema['ImMessageOut'] }) => item.message.kind === 'image' ? '[图片]' : item.message.kind === 'file' ? `[文件] ${item.message.attachment?.name ?? ''}` : item.message.kind === 'video' ? '[视频]' : item.message.kind === 'approval_card' ? '[审批卡片]' : (item.message.text ?? '')
 // 置顶的消息不在已加载的消息里时，先往前加载（最多 10 页），仍找不到就把全文显示出来
 const MAX_PIN_PAGES = 10
 const findMessage = (serverMsgId: string) => list.value?.querySelector<HTMLElement>(`[data-msg="${CSS.escape(serverMsgId)}"]`) ?? null
@@ -269,6 +287,8 @@ const infoLabel = computed(() => props.conversation.kind === 'group' ? '群信�
             <span :id="`hint-${conversation.conversation_id}`" class="sr-only">{{ wide ? 'Enter 发送，Shift + Enter 换行' : 'Ctrl + Enter 发送' }}</span>
             <input ref="picker" type="file" accept="image/png,image/jpeg,image/gif,image/webp" class="chat-file" aria-label="选择图片" @change="sendImage" />
             <button type="button" class="chat-icon-button" :disabled="busy" aria-label="发送图片" @click="picker?.click()"><Paperclip aria-hidden="true" /></button>
+            <input ref="filePicker" type="file" class="chat-file" aria-label="选择文件或视频" @change="sendFile" />
+            <button type="button" class="chat-icon-button" :disabled="busy" aria-label="发送文件或视频" @click="filePicker?.click()"><FileUp aria-hidden="true" /></button>
           </div>
           <button type="submit" class="chat-send" :disabled="busy || !draft.trim()" aria-label="发送"><Send aria-hidden="true" /></button>
         </div>

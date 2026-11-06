@@ -987,6 +987,10 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "get_action_status",
             # 服务器状态：只看自己（T-0113）
             "get_host_status",
+            # IM 会话目录、读自己的会话、发件记录（T-0117、T-0118）
+            "im_list_targets",
+            "im_read_messages",
+            "im_outbox",
             # 知识库（T-0098，docs/v2/KNOWLEDGE_PLAN.md 3.7）
             "knowledge_search",
             "knowledge_get",
@@ -1012,6 +1016,15 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "create_project",
             "add_to_project",
             "list_peers",
+            # 主动发消息：直接执行、不审批（人类 2026-11-04 决定，例外四，T-0118）
+            "im_send",
+            "im_cancel",
+            # 唤醒：同样直接执行（例外四，T-0121）
+            "schedule_wakeup",
+            "cancel_wakeup",
+            # 终止其他智能体的任务：只给打开了这个权限的实例（例外六，T-0126）
+            "list_agent_runs",
+            "stop_agent_run",
         },
     }
     for spec in TOOLS.values():
@@ -1241,7 +1254,9 @@ async def test_v2_im_payload_rules(stub_client: httpx.AsyncClient) -> None:
             "文字带图片": {"kind": "text", "text": "hi", "upload_id": str(uuid.uuid4())},
             "图片缺上传": {"kind": "image"},
             "太长": {"kind": "text", "text": "x" * 4001},
-            "未知类型": {"kind": "file", "text": "hi"},
+            "文件缺上传": {"kind": "file"},
+            "视频带正文": {"kind": "video", "text": "hi", "upload_id": str(uuid.uuid4())},
+            "未知类型": {"kind": "sticker", "text": "hi"},
         }
     ):
         response = await stub_client.post(f"{conversation}/messages", json=body, headers=headers)

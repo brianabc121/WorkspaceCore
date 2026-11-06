@@ -55,10 +55,12 @@ case "$1" in
       run)
         cat > "$STATE/plugin-stdin"
         if [ -f "$STATE/plugin_fail" ]; then echo "plugin_sha256_mismatch 0000" >&2; exit 6; fi
-        # 与 install-plugin.sh 一致：已经装了锁定版本时只打印这一行
-        if [ -f "$STATE/plugin_installed" ]; then echo "plugin_already_installed 0.3.3"; exit 0; fi
-        touch "$STATE/plugin_installed"
-        echo "Installed plugin: openclaw-channel" ;;
+        # 与 install-plugin.sh 一致：已经装了锁定版本时只打印这一行、不再装；
+        # 补丁（T-0120）两种情况都打
+        if [ -f "$STATE/plugin_installed" ]; then echo "plugin_already_installed 0.3.3"
+        else touch "$STATE/plugin_installed"; echo "Installed plugin: openclaw-channel"; fi
+        if [ -f "$STATE/plugin_patched" ]; then echo "plugin_patch_already_applied"
+        else touch "$STATE/plugin_patched"; echo "plugin_patch_applied"; fi ;;
       up) touch "$STATE/up" ;;
       ps) echo "openclaw   running" ;;
       logs) echo "openclaw | token $(grep MYWS_INSTANCE_TOKEN myworkspace.env | cut -d= -f2)" ;;
@@ -377,6 +379,10 @@ def _steps(state: dict[str, Any]) -> dict[str, str]:
     return {step["key"]: step["status"] for step in state["job"]["steps"]}
 
 
+def _detail(state: dict[str, Any], key: str) -> str | None:
+    return next((s["detail"] for s in state["job"]["steps"] if s["key"] == key), None)
+
+
 async def _stored_anywhere(owner: Owner, value: str) -> int:
     count: int = await run_sql(
         owner.database_url,
@@ -448,6 +454,9 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     assert f'"{prov.PLUGIN_NAME}" "{agent_bundle.PLUGIN_VERSION}"' in plugin
     assert f'expected="{prov.PLUGIN_SHA256}"' in plugin
     assert "--force --accept-capabilities" in plugin
+    # 装好之后打工作台的补丁（T-0120）
+    assert "node /opt/myworkspace/bin/channel-patch.mjs" in plugin
+    assert "（已打补丁）" in (_detail(state, "plugin") or "")
 
     # 接入包：权限与 zip 里一致
     files = {
@@ -466,16 +475,20 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     assert stat.S_IMODE(host.directory.stat().st_mode) == 0o700
     assert "tunnel:" in (host.directory / "compose.yaml").read_text()
 
-    # crontab：四行都带标记（每 10 分钟取密钥、每分钟上报用量与服务器状态、每周一重启）
+    # crontab：六行都带标记（每 10 分钟取密钥、每分钟上报用量与服务器状态、
+    # 每分钟领取唤醒（T-0121）与终止令（T-0126）、每周一重启）
     cron = (host.state / "crontab").read_text().splitlines()
-    assert len(cron) == 4
+    assert len(cron) == 6
     assert all(line.endswith(prov.CRON_MARKER) for line in cron)
     assert "secrets reload --json" in cron[0]
     assert cron[1].startswith("* * * * * ")
     assert "exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs" in cron[1]
     assert cron[2].startswith("* * * * * ")
     assert "exec -T openclaw node /opt/myworkspace/bin/host-report.mjs" in cron[2]
-    assert "docker compose restart openclaw" in cron[3]
+    assert cron[3].startswith("* * * * * ")
+    assert "exec -T openclaw node /opt/myworkspace/bin/wakeup.mjs" in cron[3]
+    assert "exec -T openclaw node /opt/myworkspace/bin/stop-runs.mjs" in cron[4]
+    assert "docker compose restart openclaw" in cron[5]
 
     # 密码不在任何表里（任务、目标服务器、审计）；任务日志里也没有令牌
     assert await _stored_anywhere(owner, PASSWORD) == 0
@@ -497,6 +510,20 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
         owner.database_url, "SELECT client_key_ref FROM workspace.agent_ssh_targets"
     )
     assert ref.startswith("enc:v1:")
+
+
+async def test_redeploy_patches_a_plugin_installed_before_t0120(
+    owner: Owner, tmp_path: Path
+) -> None:
+    """T-0120 之前部署的实例：插件已经装了、还没打补丁；重新部署不重装插件，只补打补丁。"""
+    host = FakeHost(tmp_path)
+    (host.state / "plugin_installed").touch()
+    async with ssh_host(host) as (port, _):
+        instance_id, version = await owner.prepare(port)
+        state = await _install_ok(owner, host, instance_id, version)
+    assert _steps(state)["plugin"] == "done"
+    assert "这次打上了工作台的补丁" in (_detail(state, "plugin") or "")
+    assert (host.state / "plugin_patched").exists()
 
 
 async def test_reinstall_without_password_reuses_key(owner: Owner, tmp_path: Path) -> None:
@@ -882,8 +909,8 @@ async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
         state = await _install_ok(owner, host, instance_id, version)
-        # 原有的一行 + 带标记的四行
-        assert len((host.state / "crontab").read_text().splitlines()) == 5
+        # 原有的一行 + 带标记的六行
+        assert len((host.state / "crontab").read_text().splitlines()) == 7
 
         # 卸载，保留目录
         response = await _post(

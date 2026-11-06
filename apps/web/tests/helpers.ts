@@ -33,6 +33,9 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (/^\/api\/v1\/workspaces\/[^/]+\/members$/.test(path) && request.method === 'GET') return Response.json({ ...emptyPage, items: [{ user_id: me.user.id, email: me.user.email, display_name: me.user.display_name, role: 'owner', joined_at: '2026-10-30T00:00:00Z', you: true }] })
     if (path === '/api/v1/knowledge/resources' || path === '/api/v1/knowledge/sources' || path === '/api/v1/calendar/events') return Response.json(emptyPage)
     // 知识库（T-0099）：默认没有笔记
+    // 实例的发件记录（T-0118）：默认没有
+    if (/^\/api\/v1\/agents\/instances\/[^/]+\/outbox$/.test(path) && request.method === 'GET') return Response.json({ items: [], rejected_replies: [] })
+    if (/^\/api\/v1\/agents\/instances\/[^/]+\/wakeups$/.test(path) && request.method === 'GET') return Response.json({ items: [], targets: [] })
     if (path === '/api/v1/knowledge/spaces') return Response.json({ items: [] })
     if (path === '/api/v1/knowledge/graph') return Response.json({ nodes: [], edges: [], truncated: false, total_notes: 0 })
     if (path === '/api/v1/knowledge/notes' || path === '/api/v1/knowledge/changes' || path === '/api/v1/knowledge/trash') return Response.json(emptyPage)

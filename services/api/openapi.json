@@ -213,6 +213,12 @@
             "description": "最近一次生成接入包的时间；从未生成为 null",
             "title": "Bundle Issued At"
           },
+          "bundle_outdated": {
+            "default": false,
+            "description": "已部署的实例还在用旧接入包，或插件没打工作台的补丁（上报的插件版本不是 0.3.3+myworkspace.1，T-0120）：重新签发接入包或经 SSH 重新部署",
+            "title": "Bundle Outdated",
+            "type": "boolean"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -246,6 +252,10 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "im_media": {
+            "$ref": "#/components/schemas/ProjectAdminOut",
+            "description": "附件权限（T-0119）：打开后它能经 im_send 发图片、文件、视频（默认关闭）"
           },
           "im_nickname": {
             "title": "Im Nickname",
@@ -363,6 +373,10 @@
             "title": "Status",
             "type": "string"
           },
+          "stop_others": {
+            "$ref": "#/components/schemas/ProjectAdminOut",
+            "description": "终止其他智能体任务的权限（T-0126）：打开后它能用 stop_agent_run 叫停别的智能体"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -391,6 +405,8 @@
           "bundle_issued_at",
           "disabled_at",
           "project_admin",
+          "im_media",
+          "stop_others",
           "credentials",
           "secret_grants",
           "version",
@@ -1008,6 +1024,179 @@
           "reads"
         ],
         "title": "AgentReads",
+        "type": "object"
+      },
+      "AgentRunStopCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "它正在执行的任务；给了就把这一段记为中断",
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "AgentRunStopCreate",
+        "type": "object"
+      },
+      "AgentRunStopList": {
+        "properties": {
+          "items": {
+            "description": "最近 20 次，新的在前",
+            "items": {
+              "$ref": "#/components/schemas/AgentRunStopOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AgentRunStopList",
+        "type": "object"
+      },
+      "AgentRunStopOut": {
+        "properties": {
+          "aborted": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "实例报回中止了几个会话",
+            "title": "Aborted"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "instance_id": {
+            "format": "uuid",
+            "title": "Instance Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
+          "requested_by_instance": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By Instance"
+          },
+          "soft_until": {
+            "format": "date-time",
+            "title": "Soft Until",
+            "type": "string"
+          },
+          "status": {
+            "description": "pending 等实例领取；running 实例在中止；done 已中止；failed 失败；expired 10 分钟没被领取（实例不在线或接入包太旧，只有软停止生效）",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed",
+              "expired"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "id",
+          "instance_id",
+          "requested_by",
+          "requested_by_instance",
+          "task_id",
+          "reason",
+          "status",
+          "soft_until",
+          "aborted",
+          "error",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "AgentRunStopOut",
         "type": "object"
       },
       "AgentSecretCreate": {
@@ -1761,6 +1950,210 @@
           "version"
         ],
         "title": "AgentSshUninstall",
+        "type": "object"
+      },
+      "AgentWakeupCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "prompt": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "repeat": {
+            "default": "none",
+            "enum": [
+              "none",
+              "daily",
+              "weekdays",
+              "weekly"
+            ],
+            "title": "Repeat",
+            "type": "string"
+          },
+          "run_at": {
+            "format": "date-time",
+            "title": "Run At",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "maxLength": 72,
+                "minLength": 6,
+                "pattern": "^(user|group):[A-Za-z0-9_]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "在哪个会话里跑；null 是独立会话",
+            "title": "Target"
+          },
+          "time_zone": {
+            "default": "UTC",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Time Zone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt",
+          "run_at"
+        ],
+        "title": "AgentWakeupCreate",
+        "type": "object"
+      },
+      "AgentWakeupList": {
+        "properties": {
+          "items": {
+            "description": "待执行的在前，其余按时间倒序，最多 50 个",
+            "items": {
+              "$ref": "#/components/schemas/AgentWakeupOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "targets": {
+            "description": "可以选的会话：和管理员的私聊、它所在的群",
+            "items": {
+              "$ref": "#/components/schemas/WakeupTarget"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "targets"
+        ],
+        "title": "AgentWakeupList",
+        "type": "object"
+      },
+      "AgentWakeupOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "repeat": {
+            "enum": [
+              "none",
+              "daily",
+              "weekdays",
+              "weekly"
+            ],
+            "title": "Repeat",
+            "type": "string"
+          },
+          "run_at": {
+            "format": "date-time",
+            "title": "Run At",
+            "type": "string"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "source": {
+            "enum": [
+              "agent",
+              "admin"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "time_zone": {
+            "title": "Time Zone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "created_by",
+          "target",
+          "prompt",
+          "run_at",
+          "repeat",
+          "time_zone",
+          "status",
+          "runs",
+          "last_run_at",
+          "last_error",
+          "created_at"
+        ],
+        "title": "AgentWakeupOut",
         "type": "object"
       },
       "AgentWeek": {
@@ -5728,6 +6121,53 @@
         "title": "ImBadges",
         "type": "object"
       },
+      "ImCancelInput": {
+        "additionalProperties": false,
+        "properties": {
+          "message_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Message Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "message_ids"
+        ],
+        "title": "ImCancelInput",
+        "type": "object"
+      },
+      "ImCancelOutput": {
+        "properties": {
+          "cancelled": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Cancelled",
+            "type": "array"
+          },
+          "not_cancellable": {
+            "description": "已经发出、已结束或不是你的",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Not Cancellable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cancelled",
+          "not_cancellable"
+        ],
+        "title": "ImCancelOutput",
+        "type": "object"
+      },
       "ImContactGroupCreate": {
         "additionalProperties": false,
         "properties": {
@@ -6503,6 +6943,105 @@
         "title": "ImImage",
         "type": "object"
       },
+      "ImMessageAttachment": {
+        "description": "文件（105）与视频（104）消息（T-0119）。",
+        "properties": {
+          "cover_media_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "视频封面（经 /im/media 显示）",
+            "title": "Cover Media Id"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "视频时长（秒）",
+            "title": "Duration Seconds"
+          },
+          "external_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "外部链接：前端不自动加载，只显示为链接",
+            "title": "External Url"
+          },
+          "media_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "在 OpenIM 对象存储里时，经 GET /im/media/{media_id} 下载或播放（带登录校验）",
+            "title": "Media Id"
+          },
+          "mime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          }
+        },
+        "required": [
+          "media_id",
+          "external_url",
+          "name",
+          "size",
+          "mime",
+          "duration_seconds",
+          "cover_media_id"
+        ],
+        "title": "ImMessageAttachment",
+        "type": "object"
+      },
       "ImMessageOut": {
         "properties": {
           "approval_execution_id": {
@@ -6524,6 +7063,16 @@
             },
             "title": "At Im Ids",
             "type": "array"
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImMessageAttachment"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "client_msg_id": {
             "title": "Client Msg Id",
@@ -6547,6 +7096,8 @@
             "enum": [
               "text",
               "image",
+              "file",
+              "video",
               "approval_card",
               "system",
               "unsupported"
@@ -6745,6 +7296,8 @@
             "enum": [
               "text",
               "image",
+              "file",
+              "video",
               "approval_card",
               "system",
               "unsupported"
@@ -6794,7 +7347,9 @@
           "kind": {
             "enum": [
               "text",
-              "image"
+              "image",
+              "file",
+              "video"
             ],
             "title": "Kind",
             "type": "string"
@@ -6830,6 +7385,175 @@
           "kind"
         ],
         "title": "ImMessageSend",
+        "type": "object"
+      },
+      "ImOutboxItem": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "text",
+              "image",
+              "file",
+              "video"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "format": "uuid",
+            "title": "Message Id",
+            "type": "string"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "source": {
+            "enum": [
+              "tool",
+              "reply_retry",
+              "wakeup"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "scheduled",
+              "queued",
+              "sending",
+              "sent",
+              "rejected",
+              "failed",
+              "unknown",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "untrusted": {
+            "$ref": "#/components/schemas/ImOutboxText"
+          }
+        },
+        "required": [
+          "message_id",
+          "target",
+          "kind",
+          "status",
+          "source",
+          "created_at",
+          "sent_at",
+          "next_attempt_at",
+          "code",
+          "reason",
+          "untrusted"
+        ],
+        "title": "ImOutboxItem",
+        "type": "object"
+      },
+      "ImOutboxOutput": {
+        "properties": {
+          "items": {
+            "description": "你经 im_send 发的消息，最近的在前",
+            "items": {
+              "$ref": "#/components/schemas/ImOutboxItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "rejected_replies": {
+            "description": "最近 7 天你的自动回复被拒收的记录，最近的在前",
+            "items": {
+              "$ref": "#/components/schemas/ImRejectedReply"
+            },
+            "title": "Rejected Replies",
+            "type": "array"
+          },
+          "wakeups": {
+            "description": "还没执行的唤醒（你安排的和管理员建的），最早的在前",
+            "items": {
+              "$ref": "#/components/schemas/WakeupItem"
+            },
+            "title": "Wakeups",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "rejected_replies"
+        ],
+        "title": "ImOutboxOutput",
+        "type": "object"
+      },
+      "ImOutboxText": {
+        "properties": {
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "ImOutboxText",
         "type": "object"
       },
       "ImPinCreate": {
@@ -6934,6 +7658,45 @@
         "title": "ImReadRequest",
         "type": "object"
       },
+      "ImRejectedReply": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "integer"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "retried": {
+            "description": "工作台已在限额恢复后补发",
+            "title": "Retried",
+            "type": "boolean"
+          },
+          "untrusted": {
+            "$ref": "#/components/schemas/ImOutboxText"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "code",
+          "reason",
+          "retried",
+          "created_at",
+          "untrusted"
+        ],
+        "title": "ImRejectedReply",
+        "type": "object"
+      },
       "ImStatus": {
         "properties": {
           "account_ready": {
@@ -7034,6 +7797,17 @@
       },
       "ImUploadOut": {
         "properties": {
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
           "expires_at": {
             "description": "到期前没有用于发消息的上传会被删除",
             "format": "date-time",
@@ -7051,9 +7825,31 @@
             ],
             "title": "Height"
           },
+          "kind": {
+            "default": "image",
+            "enum": [
+              "image",
+              "file",
+              "video"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
           "mime": {
             "title": "Mime",
             "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "文件与视频的文件名",
+            "title": "Name"
           },
           "size": {
             "title": "Size",
@@ -12796,6 +13592,100 @@
         "title": "SpaceWeek",
         "type": "object"
       },
+      "StopClaimItem": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "StopClaimItem",
+        "type": "object"
+      },
+      "StopClaimResponse": {
+        "properties": {
+          "items": {
+            "description": "待执行的终止令；实例中止所有正在运行的会话后逐个报回",
+            "items": {
+              "$ref": "#/components/schemas/StopClaimItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "StopClaimResponse",
+        "type": "object"
+      },
+      "StopResult": {
+        "additionalProperties": false,
+        "properties": {
+          "aborted": {
+            "default": 0,
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Aborted",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "status": {
+            "enum": [
+              "done",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "StopResult",
+        "type": "object"
+      },
+      "StopResultResponse": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed",
+              "expired"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "StopResultResponse",
+        "type": "object"
+      },
       "StorageCheck": {
         "properties": {
           "checked_at": {
@@ -14652,6 +15542,201 @@
         "title": "VersionBody",
         "type": "object"
       },
+      "WakeupClaimItem": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "message": {
+            "description": "这一轮交给智能体的消息（说明 + 提示词）",
+            "title": "Message",
+            "type": "string"
+          },
+          "session_key": {
+            "description": "openclaw agent --session-key 的值",
+            "title": "Session Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "session_key",
+          "message"
+        ],
+        "title": "WakeupClaimItem",
+        "type": "object"
+      },
+      "WakeupClaimResponse": {
+        "properties": {
+          "items": {
+            "description": "到期、刚领取的唤醒（最多 5 个）",
+            "items": {
+              "$ref": "#/components/schemas/WakeupClaimItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "WakeupClaimResponse",
+        "type": "object"
+      },
+      "WakeupItem": {
+        "properties": {
+          "repeat": {
+            "enum": [
+              "none",
+              "daily",
+              "weekdays",
+              "weekly"
+            ],
+            "title": "Repeat",
+            "type": "string"
+          },
+          "run_at": {
+            "format": "date-time",
+            "title": "Run At",
+            "type": "string"
+          },
+          "source": {
+            "description": "agent 是你自己安排的，admin 是管理员建的",
+            "enum": [
+              "agent",
+              "admin"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "在哪个会话里跑；null 是独立会话",
+            "title": "Target"
+          },
+          "untrusted": {
+            "$ref": "#/components/schemas/ImOutboxText",
+            "description": "唤醒时要做的事（提示词）"
+          },
+          "wakeup_id": {
+            "format": "uuid",
+            "title": "Wakeup Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "wakeup_id",
+          "source",
+          "target",
+          "run_at",
+          "repeat",
+          "status",
+          "untrusted"
+        ],
+        "title": "WakeupItem",
+        "type": "object"
+      },
+      "WakeupResult": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "status": {
+            "enum": [
+              "done",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "WakeupResult",
+        "type": "object"
+      },
+      "WakeupResultResponse": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "run_at": {
+            "description": "重复的唤醒是下一次的时间",
+            "format": "date-time",
+            "title": "Run At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "run_at"
+        ],
+        "title": "WakeupResultResponse",
+        "type": "object"
+      },
+      "WakeupTarget": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "label"
+        ],
+        "title": "WakeupTarget",
+        "type": "object"
+      },
       "WebhookRegistration": {
         "properties": {
           "mode": {
@@ -15106,6 +16191,142 @@
         ]
       }
     },
+    "/agent-api/v1/stops/claim": {
+      "post": {
+        "description": "领取即标为执行中；实例中止所有正在运行的会话（sessions.abort）后逐个报回。10 分钟没被领取的记为过期，领取后 5 分钟没有结果的记为失败；每个实例每分钟最多 6 次（T-0126）。",
+        "operationId": "claim_agent_stops",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StopClaimResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          }
+        },
+        "security": [
+          {
+            "InstanceToken": []
+          }
+        ],
+        "summary": "领取终止令（实例的 stop-runs.mjs，每分钟一次）",
+        "tags": [
+          "agent-api"
+        ]
+      }
+    },
+    "/agent-api/v1/stops/{stop_id}/result": {
+      "post": {
+        "description": "done 附中止的会话数，或 failed 附一行原因；done 之后解除软停止。",
+        "operationId": "report_agent_stop",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stop_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Stop Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StopResult"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StopResultResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "InstanceToken": []
+          }
+        ],
+        "summary": "报回终止的结果（实例的 stop-runs.mjs）",
+        "tags": [
+          "agent-api"
+        ]
+      }
+    },
     "/agent-api/v1/usage": {
       "post": {
         "description": "每个 OpenClaw 会话当天（UTC）的累计 token；会话只报 key 的 SHA-256。工作台按（实例、日期、会话）算增量并记到这一分钟；usage 为 null 的会话跳过；实例第一次上报只记基准。每个实例每分钟最多 6 次。",
@@ -15168,6 +16389,142 @@
           }
         ],
         "summary": "上报 token 用量（实例的 usage-report，每分钟一次）",
+        "tags": [
+          "agent-api"
+        ]
+      }
+    },
+    "/agent-api/v1/wakeups/claim": {
+      "post": {
+        "description": "领取即标为执行中，不会再发给别的请求；领取后 15 分钟没有结果记为失败（不重跑）。每次最多 5 个，每个实例每分钟最多 6 次（T-0121，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.2 节）。",
+        "operationId": "claim_agent_wakeups",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WakeupClaimResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          }
+        },
+        "security": [
+          {
+            "InstanceToken": []
+          }
+        ],
+        "summary": "领取到期的唤醒（实例的 wakeup.mjs，每分钟一次）",
+        "tags": [
+          "agent-api"
+        ]
+      }
+    },
+    "/agent-api/v1/wakeups/{wakeup_id}/result": {
+      "post": {
+        "description": "done 或 failed（附一行原因）；重复的唤醒排下一次。",
+        "operationId": "report_agent_wakeup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "wakeup_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Wakeup Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WakeupResult"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WakeupResultResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "InstanceToken": []
+          }
+        ],
+        "summary": "报回唤醒的结果（实例的 wakeup.mjs）",
         "tags": [
           "agent-api"
         ]
@@ -16352,6 +17709,135 @@
         ]
       }
     },
+    "/api/v1/agents/instances/{instance_id}/im-media": {
+      "put": {
+        "description": "打开后这个实例能经 im_send 发图片、文件、视频（默认关闭，docs/v2/AGENT_MESSAGING_PLAN.md 第 11 节 D3）；文字不受影响。每次都写审计（T-0119）。",
+        "operationId": "put_im_media",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectAdminPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectAdminOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "打开或关闭实例的附件权限（admin，乐观并发）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
     "/api/v1/agents/instances/{instance_id}/ops": {
       "get": {
         "description": "只适用于用 SSH 部署过、专用密钥还在的实例（available）；最近 20 次（7 天内），列表不含输出，输出看单条记录（T-0114）。",
@@ -16685,6 +18171,233 @@
           }
         ],
         "summary": "一次运维动作的状态与脱敏后的输出（admin）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/outbox": {
+      "get": {
+        "description": "im_send 发的消息（已发出、排队、定时、被拒收及原因，最近 50 条）与最近 7 天被 OpenIM 回调拒收的自动回复（T-0118，docs/v2/AGENT_MESSAGING_PLAN.md 第 4.6 节）。",
+        "operationId": "get_agent_outbox",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "pending",
+                "sent",
+                "rejected",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImOutboxOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "智能体主动发的消息与被拒收的自动回复（admin）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/outbox/cancel": {
+      "post": {
+        "description": "已经发出的不能取消；不属于这个实例的 ID 原样放进 not_cancellable。",
+        "operationId": "cancel_agent_outbox",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImCancelInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImCancelOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "取消智能体排队中或定时的消息（admin）",
         "tags": [
           "agents"
         ]
@@ -17845,6 +19558,701 @@
           }
         ],
         "summary": "卸载服务器上的 OpenClaw（owner）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/stop": {
+      "post": {
+        "description": "立即生效：接下来 5 分钟它调用工作台工具都返回 RUN_STOPPED；1 分钟内接入包的 stop-runs.mjs 在它的 OpenClaw 里中止正在运行的会话（sessions.abort，AGENT_MESSAGING_PLAN 第 7.3 节）。给了 task_id 就把这个任务正在执行的一段记为中断，任务仍归原执行者。写审计。",
+        "operationId": "stop_agent_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRunStopCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunStopOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "终止实例正在执行的任务（admin）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/stop-others": {
+      "put": {
+        "description": "打开后这个实例能用 list_agent_runs / stop_agent_run 叫停本工作空间里别的智能体（直接执行，docs/AGENTS.md 第 8 节例外六；默认关闭，AGENT_MESSAGING_PLAN 第 11 节 D20）。每次都写审计（T-0126）。",
+        "operationId": "put_stop_others",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectAdminPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectAdminOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "打开或关闭实例“终止其他智能体任务”的权限（admin，乐观并发）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/stops": {
+      "get": {
+        "operationId": "list_agent_stops",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunStopList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "实例最近的终止记录（admin）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/wakeups": {
+      "get": {
+        "description": "待执行的在前；targets 是它能用的会话（和管理员的私聊、它所在的群），建唤醒时选一个或不选（独立会话）。",
+        "operationId": "list_agent_wakeups",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWakeupList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "实例的唤醒与可选的会话（admin）",
+        "tags": [
+          "agents"
+        ]
+      },
+      "post": {
+        "description": "到点叫醒它跑一轮，把 prompt 交给它；可以每天、工作日、每周重复（按 time_zone 的钟点）。最多 50 个待执行；写审计（T-0121）。",
+        "operationId": "create_agent_wakeup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentWakeupCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWakeupOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "给实例建一个唤醒（admin）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/wakeups/{wakeup_id}/cancel": {
+      "post": {
+        "description": "正在跑的这一轮停不下来；重复的唤醒不再排下一次。写审计。",
+        "operationId": "cancel_agent_wakeup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wakeup_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Wakeup Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWakeupOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "取消实例的唤醒（admin）",
         "tags": [
           "agents"
         ]
@@ -26263,6 +28671,7 @@
     },
     "/api/v1/im/media/{media_id}": {
       "get": {
+        "description": "图片内联显示；文件按附件下载；视频支持 Range（T-0119）。",
         "operationId": "get_im_media",
         "parameters": [
           {
@@ -26367,7 +28776,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "显示 OpenIM 对象存储里的图片（owner / admin）",
+        "summary": "显示 OpenIM 对象存储里的图片、文件、视频（owner / admin）",
         "tags": [
           "im"
         ]
@@ -26455,9 +28864,28 @@
     },
     "/api/v1/im/uploads": {
       "post": {
-        "description": "请求体就是图片本身；只接受 image/png, image/jpeg, image/gif, image/webp，不超过 10 MiB；服务端按内容核对类型，不只看 Content-Type。",
+        "description": "请求体就是文件本身；图片只接受 image/png, image/jpeg, image/gif, image/webp（10 MiB），文件 20 MiB，视频 MP4 / MOV 50 MiB；不允许可执行与网页类文件；服务端按内容核对类型，不只看 Content-Type（T-0119）。",
         "operationId": "upload_im_image",
         "parameters": [
+          {
+            "description": "文件名（文件与视频）",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "文件名（文件与视频）",
+              "title": "Name"
+            }
+          },
           {
             "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
             "in": "header",
@@ -26595,7 +29023,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "上传图片（owner / admin）",
+        "summary": "上传图片、文件或视频（owner / admin）",
         "tags": [
           "im"
         ]

@@ -336,6 +336,18 @@ class AgentService:
                     granted_by=i.project_admin_by,
                     granted_at=i.project_admin_at,
                 ),
+                im_media=ProjectAdminOut(
+                    enabled=i.im_media_enabled,
+                    granted_by=i.im_media_by,
+                    granted_at=i.im_media_at,
+                ),
+                stop_others=ProjectAdminOut(
+                    enabled=i.stop_others_enabled,
+                    granted_by=i.stop_others_by,
+                    granted_at=i.stop_others_at,
+                ),
+                bundle_outdated=i.plugin_version is not None
+                and i.plugin_version != agent_bundle.PATCHED_PLUGIN_VERSION,
                 credentials=by_instance[i.id],
                 secret_grants=grants_by[i.id],
                 version=i.version,
@@ -491,6 +503,74 @@ class AgentService:
             enabled=instance.project_admin_enabled,
             granted_by=instance.project_admin_by,
             granted_at=instance.project_admin_at,
+        )
+
+    async def set_im_media(
+        self,
+        access: WorkspaceAccess,
+        instance_id: uuid.UUID,
+        body: ProjectAdminPut,
+        *,
+        client_ip: str,
+    ) -> ProjectAdminOut:
+        """打开或关闭实例的附件权限（T-0119，owner / admin，方案 D3）。每次都写审计。"""
+        instance = await self._instance(access, instance_id)
+        self._check_version(instance, body.version)
+        if instance.im_media_enabled != body.enabled:
+            instance.im_media_enabled = body.enabled
+            instance.im_media_by = access.user_id if body.enabled else None
+            instance.im_media_at = datetime.now(UTC) if body.enabled else None
+            instance.version += 1
+            await self.audit.record(
+                "agents.instance.im_media_enabled"
+                if body.enabled
+                else "agents.instance.im_media_disabled",
+                workspace_ids=[access.workspace.id],
+                actor_id=access.user_id,
+                resource_type="agent_instance",
+                resource_id=instance.id,
+                client_ip=client_ip,
+            )
+        await self.db.commit()
+        await self.db.refresh(instance)
+        return ProjectAdminOut(
+            enabled=instance.im_media_enabled,
+            granted_by=instance.im_media_by,
+            granted_at=instance.im_media_at,
+        )
+
+    async def set_stop_others(
+        self,
+        access: WorkspaceAccess,
+        instance_id: uuid.UUID,
+        body: ProjectAdminPut,
+        *,
+        client_ip: str,
+    ) -> ProjectAdminOut:
+        """打开或关闭“终止其他智能体任务”的权限（T-0126，owner / admin，方案 D20）。写审计。"""
+        instance = await self._instance(access, instance_id)
+        self._check_version(instance, body.version)
+        if instance.stop_others_enabled != body.enabled:
+            instance.stop_others_enabled = body.enabled
+            instance.stop_others_by = access.user_id if body.enabled else None
+            instance.stop_others_at = datetime.now(UTC) if body.enabled else None
+            instance.version += 1
+            await self.audit.record(
+                "agents.instance.stop_others_enabled"
+                if body.enabled
+                else "agents.instance.stop_others_disabled",
+                workspace_ids=[access.workspace.id],
+                actor_id=access.user_id,
+                resource_type="agent_instance",
+                resource_id=instance.id,
+                client_ip=client_ip,
+            )
+        await self.db.commit()
+        await self.db.refresh(instance)
+        return ProjectAdminOut(
+            enabled=instance.stop_others_enabled,
+            granted_by=instance.stop_others_by,
+            granted_at=instance.stop_others_at,
         )
 
     async def set_enabled(
@@ -693,6 +773,7 @@ class AgentService:
             host = url.hostname or ""
             tunnel_target = f"{host}:{url.port or 443}"
             base = f"http://{host}:{self.settings.agent_tunnel_port}"
+        whitelist = await self._whitelist(instance.workspace_id)
         data = agent_bundle.build(
             agent_bundle.BundleInput(
                 instance_id=str(instance.id),
@@ -700,7 +781,7 @@ class AgentService:
                 network_mode=instance.network_mode,
                 token=issued.token,
                 base_url=base,
-                whitelist=await self._whitelist(instance.workspace_id),
+                whitelist=whitelist,
                 client_cert_pem=cert.cert_pem if cert else None,
                 client_key_pem=cert.key_pem if cert else None,
                 tunnel_target=tunnel_target,
@@ -717,6 +798,7 @@ class AgentService:
             now=now,
         )
         instance.bundle_issued_at = now
+        instance.bundle_whitelist = whitelist
         instance.version += 1
         await self.audit.record(
             "agents.bundle.issued",

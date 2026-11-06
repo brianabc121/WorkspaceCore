@@ -18,6 +18,7 @@ from app.api.deps import (
     get_im_service,
     workspace_admin,
 )
+from app.api.media_http import media_response
 from app.core.errors import ApiError
 from app.domain.im_groups import ImGroupService
 from app.domain.im_service import ImService
@@ -25,7 +26,6 @@ from app.domain.policy import WorkspaceAccess
 from app.schemas.common import error_responses
 from app.schemas.im import (
     IMAGE_TYPES,
-    MAX_IMAGE_BYTES,
     ConversationId,
     GroupId,
     ImBadges,
@@ -279,50 +279,60 @@ async def export_im_conversation(
 @router.post(
     "/im/uploads",
     status_code=status.HTTP_201_CREATED,
-    summary="上传图片（owner / admin）",
-    description=f"请求体就是图片本身；只接受 {', '.join(IMAGE_TYPES)}，"
-    f"不超过 {MAX_IMAGE_BYTES // (1024 * 1024)} MiB；服务端按内容核对类型，不只看 Content-Type。",
+    summary="上传图片、文件或视频（owner / admin）",
+    description=f"请求体就是文件本身；图片只接受 {', '.join(IMAGE_TYPES)}（10 MiB），"
+    "文件 20 MiB，视频 MP4 / MOV 50 MiB；不允许可执行与网页类文件；"
+    "服务端按内容核对类型，不只看 Content-Type（T-0119）。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 413, 422, 503),
     openapi_extra={"requestBody": _IMAGE_BODY},
 )
-async def upload_im_image(request: Request, access: Admin, service: Service) -> ImUploadOut:
+async def upload_im_image(
+    request: Request,
+    access: Admin,
+    service: Service,
+    name: Annotated[str | None, Query(max_length=128, description="文件名（文件与视频）")] = None,
+) -> ImUploadOut:
     declared = request.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > MAX_IMAGE_BYTES:
+    if declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES:
         raise _too_large()
     body = bytearray()
     async for chunk in request.stream():
         body += chunk
-        if len(body) > MAX_IMAGE_BYTES:
+        if len(body) > MAX_UPLOAD_BYTES:
             raise _too_large()
-    return await service.upload(access, bytes(body))
+    return await service.upload(access, bytes(body), name)
+
+
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
 def _too_large() -> ApiError:
     return ApiError(
         413,
         "PAYLOAD_TOO_LARGE",
-        f"图片不能超过 {MAX_IMAGE_BYTES // (1024 * 1024)} MiB",
+        f"上传的文件不能超过 {MAX_UPLOAD_BYTES // (1024 * 1024)} MiB",
     )
 
 
 @router.get(
     "/im/media/{media_id}",
-    summary="显示 OpenIM 对象存储里的图片（owner / admin）",
+    summary="显示 OpenIM 对象存储里的图片、文件、视频（owner / admin）",
     responses={200: _IMAGE_RESPONSE, **_read_errors},
     response_model=None,
 )
-async def get_im_media(access: Admin, service: Service, media_id: UUID) -> Response:
-    data, mime = await service.media(access, media_id)
-    return Response(
-        content=data,
-        media_type=mime,
-        headers={
-            "Cache-Control": "private, max-age=300",
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "default-src 'none'; sandbox",
-            "Content-Disposition": "inline",
-        },
+async def get_im_media(
+    access: Admin, service: Service, request: Request, media_id: UUID
+) -> Response:
+    """图片内联显示；文件按附件下载；视频支持 Range（T-0119）。"""
+    data, mime, media = await service.media(access, media_id)
+    return media_response(
+        data,
+        mime,
+        kind=media.kind,
+        file_name=media.file_name,
+        range_header=request.headers.get("range"),
+        cache="private, max-age=300",
     )
 
 

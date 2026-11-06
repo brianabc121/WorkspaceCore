@@ -142,8 +142,12 @@ async def test_upload_validates_content_and_size(env: ImEnv) -> None:
 
     svg = await _upload(env, b"<svg onload='alert(1)'/>", content_type="image/svg+xml")
     assert svg.status_code == 422
-    big = await _upload(env, b"\x89PNG\r\n\x1a\n" + b"\x00" * (10 * 1024 * 1024))
-    assert big.status_code == 413
+    # 图片不能超过 10 MiB（文件 20 MiB、视频 50 MiB，见 test_agent_media.py）
+    big = await _upload(env, png() + b"\x00" * (10 * 1024 * 1024))
+    assert big.status_code == 413, big.text
+    # 请求体超过 50 MiB：边读边断开
+    huge = await _upload(env, b"\x00" * (50 * 1024 * 1024 + 1))
+    assert huge.status_code == 413
     env.fake.refuse = True
     assert (await _upload(env, png())).status_code == 503
 

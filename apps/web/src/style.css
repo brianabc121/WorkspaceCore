@@ -372,6 +372,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .agent-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 16px; margin: 12px 0; }
 .agent-facts dt { color: var(--muted); font-size: .8rem; }
 .agent-facts dd { margin: 2px 0 0; }
+.agent-notice { background: var(--warning-soft); color: var(--warning); border-radius: 6px; padding: 8px 12px; }
 .agent-section { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; display: grid; gap: 8px; }
 .agent-section h3 { margin: 0; font-size: 1rem; }
 .ssh-steps li[data-status="running"] .badge { color: var(--accent); border-color: var(--accent); }

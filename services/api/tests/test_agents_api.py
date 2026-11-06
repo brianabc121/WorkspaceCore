@@ -476,6 +476,15 @@ async def test_heartbeat_reports_versions(env: Env) -> None:
     assert (current["reported_version"], current["plugin_version"]) == ("2026.9.36", "0.3.3")
     assert current["last_seen_at"] is not None
     assert current["credentials"][0]["last_used_at"] is not None
+    # 插件没打补丁（旧接入包）：实例页提示重新签发（T-0120）；打过补丁的上报 0.3.3+myworkspace.1
+    assert current["bundle_outdated"] is True
+    response = await env.client.post(
+        "/agent-api/v1/heartbeat",
+        json={"openclaw_version": "2026.9.36", "plugin_version": "0.3.3+myworkspace.1"},
+        headers=agent_headers(token),
+    )
+    assert response.status_code == 200
+    assert (await env.instance(instance["id"]))["bundle_outdated"] is False
 
 
 # ---------------------------------------------------------------- 接入包与内部 CA
@@ -520,6 +529,9 @@ async def test_bundle_carries_a_fresh_token_only_once(env: Env) -> None:
         "bin/myworkspace-openclaw-start",
         "bin/usage-report.mjs",
         "bin/host-report.mjs",
+        "bin/channel-patch.mjs",
+        "bin/wakeup.mjs",
+        "bin/stop-runs.mjs",
         "compose.yaml",
         "CHECKLIST.md",
         "README.md",
@@ -536,6 +548,9 @@ async def test_bundle_carries_a_fresh_token_only_once(env: Env) -> None:
     assert files["bin/myworkspace-secret-resolver"][1] == 0o755
     assert files["bin/usage-report.mjs"][1] == 0o755
     assert files["bin/host-report.mjs"][1] == 0o755
+    assert files["bin/channel-patch.mjs"][1] == 0o755
+    assert files["bin/wakeup.mjs"][1] == 0o755
+    assert files["bin/stop-runs.mjs"][1] == 0o755
     token = _env_value(files, "MYWS_INSTANCE_TOKEN")
     assert _env_value(files, "MYWS_AGENT_API") == "https://10.0.0.5/agent-api"
     assert _env_value(files, "OPENIM_WS_ADDR") == "wss://10.0.0.5/im/ws"
@@ -555,6 +570,9 @@ async def test_bundle_carries_a_fresh_token_only_once(env: Env) -> None:
     # 插件的发图片 / 文件 / 视频工具默认禁用（OC-0 F3；方案第 6.2 节）
     media = {"openim_send_image", "openim_send_file", "openim_send_video"}
     assert media <= set(config["tools"]["deny"])
+    # 主动发消息只走 im_send（T-0120，方案第 6.6 节 D1）
+    send = {"message", "conversations_send", "conversations_turn", "conversations_list"}
+    assert send <= set(config["tools"]["deny"])
     # 锁定版本的 OpenClaw 把未知的键（例如 _comment）判为无效配置（T-0059 用真实 OpenClaw 验收发现）
     assert not [key for key in config if key.startswith("_")]
     assert config["plugins"] == {

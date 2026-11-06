@@ -62,10 +62,24 @@ for (let attempt = 1; attempt <= 5; attempt += 1) {
   }
 }
 
+// 插件打上了接入包的补丁（bin/channel-patch.mjs，T-0120）时，上报的版本带 "+myworkspace.1"；
+// 工作台据此在实例页提示旧部署重新签发接入包
+const PATCH_MARKER = "myworkspace-patch:T-0120";
+function pluginVersion() {
+  const version = process.env.MYWS_PLUGIN_VERSION;
+  if (!version) return undefined;
+  try {
+    const inbound = readFileSync("/home/node/.openclaw/extensions/openclaw-channel/dist/inbound.js", "utf8");
+    if (inbound.includes(PATCH_MARKER)) return `${version}+myworkspace.1`;
+  } catch { /* 插件不在默认位置：照原样上报 */ }
+  return version;
+}
+
 // 上报版本（失败不影响启动）：工作台的实例页显示 OpenClaw 与插件版本
 if (process.env.MYWS_OPENCLAW_VERSION) {
   const report = { openclaw_version: process.env.MYWS_OPENCLAW_VERSION };
-  if (process.env.MYWS_PLUGIN_VERSION) report.plugin_version = process.env.MYWS_PLUGIN_VERSION;
+  const plugin = pluginVersion();
+  if (plugin) report.plugin_version = plugin;
   await post("/v1/heartbeat", report, 5000).catch((e) => process.stderr.write(`myworkspace-openclaw-start: heartbeat failed: ${e.message}\n`));
 }
 

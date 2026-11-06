@@ -36,15 +36,24 @@ from starlette.requests import Request
 from app import __version__
 from app.core.errors import ApiError
 from app.core.logging import request_id_var
-from app.domain import agent_projects, agent_tasks, knowledge_tools, ops_metrics
+from app.domain import (
+    agent_outbox,
+    agent_projects,
+    agent_stops,
+    agent_tasks,
+    knowledge_tools,
+    ops_metrics,
+)
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.im import openim_client
 from app.domain.mcp_read_tools import READ_HANDLERS, ReadCall
 from app.domain.ratelimit import WindowLimiter
 from app.models import AgentInstance
 from app.schemas.ai_tools import (
+    IM_DIRECT_TOOL_NAMES,
     KNOWLEDGE_TOOL_NAMES,
     PROJECT_ADMIN_TOOL_NAMES,
+    STOP_TOOL_NAMES,
     TOOLS,
     ToolSpec,
 )
@@ -79,7 +88,7 @@ def tool_definition(spec: ToolSpec) -> types.Tool:
             destructive_hint=spec.risk == "critical" or spec.name == "knowledge_delete",
             # 知识库写工具带幂等键：同一个键重试不会重复写入；领取、完成重复调用返回同样的结果
             idempotent_hint=spec.risk in ("read", "knowledge")
-            or spec.name in ("claim_task", "complete_task"),
+            or spec.name in ("claim_task", "complete_task", "im_send"),
             open_world_hint=False,
         ),
     )
@@ -154,6 +163,7 @@ async def _list_tools(
         instance = await db.get(AgentInstance, caller.instance_id)
         scope = instance.scope if instance is not None else "read"
         project_admin = instance is not None and instance.project_admin_enabled
+        stop_others = instance is not None and instance.stop_others_enabled
     # 只列这个实例的权限范围里、已经实现的工具；角色是否够在调用时再检查（角色可能变化）。
     # 项目管理工具只列给打开了项目管理权限的实例（T-0112）
     tools = [
@@ -162,6 +172,8 @@ async def _list_tools(
         if available(spec)
         and (spec.scope == "read" or scope == "read_write")
         and (spec.name not in PROJECT_ADMIN_TOOL_NAMES or project_admin)
+        # 终止其他智能体任务的工具只列给打开了这个权限的实例（T-0126）
+        and (spec.name not in STOP_TOOL_NAMES or stop_others)
     ]
     return types.ListToolsResult(tools=tools)
 
@@ -189,11 +201,17 @@ async def _dispatch(
         spec = TOOLS.get(params.name)
         if spec is None or not available(spec):
             return error_result("NOT_FOUND", "没有这个工具")
-        if state.redis is not None:
-            limiter = WindowLimiter(state.redis, 60)
-            if await limiter.hit(f"mcp_calls:{caller.instance_id}", CALLS_PER_MINUTE) is not None:
-                return error_result("RATE_LIMITED", "调用太频繁，请稍后再试")
         async with state.sessionmaker() as db:
+            # 软停止（T-0126）：被叫停后 5 分钟内的工具调用一律拒绝，让深陷的那一轮停下来。
+            # 放在限流前面：停不下来的那一轮往往正在刷调用，它该看到的是“被叫停”，不是“太频繁”
+            stopped = await agent_stops.soft_stop(db, state.redis, caller.instance_id)
+            if stopped is not None:
+                return error_result("RUN_STOPPED", stopped)
+            if state.redis is not None:
+                limiter = WindowLimiter(state.redis, 60)
+                key = f"mcp_calls:{caller.instance_id}"
+                if await limiter.hit(key, CALLS_PER_MINUTE) is not None:
+                    return error_result("RATE_LIMITED", "调用太频繁，请稍后再试")
             service = AiToolService(
                 db, state.settings, state.connectors, state.redis, jobs=state.jobs
             )
@@ -209,6 +227,19 @@ async def _dispatch(
                     )
                 elif spec.name in PROJECT_ADMIN_TOOL_NAMES:
                     output = await agent_projects.run(
+                        service,
+                        requester,
+                        spec,
+                        raw,
+                        request_id=caller.request_id,
+                        im=openim_client(state.settings, state.connectors, state.redis),
+                    )
+                elif spec.name in STOP_TOOL_NAMES:
+                    output = await agent_stops.run(
+                        service, requester, spec, raw, request_id=caller.request_id
+                    )
+                elif spec.name in IM_DIRECT_TOOL_NAMES:
+                    output = await agent_outbox.run(
                         service,
                         requester,
                         spec,

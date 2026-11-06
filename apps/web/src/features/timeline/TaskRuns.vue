@@ -1,11 +1,12 @@
 <script setup lang="ts">
 // 任务详情里的执行记录（T-0105，方案 2.6）：开始 / 暂停（人的任务）、交给它执行 / 结束这段（实例，owner / admin）、
 // 每段的时间、结束原因、token 与等待审批，以及“在时间轴中查看”。
+// 智能体正在执行时还可以“终止执行”（T-0126）：叫停它正在运行的会话，这一段记为中断，任务仍归它。
 import { computed, ref } from 'vue'
-import { Pause, Play, Send, Square } from '@lucide/vue'
+import { CircleStop, Pause, Play, Send, Square } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
 import type { Schema } from '../../services/api'
-import { useRunActions, useRuns, runError } from './api'
+import { TERMINATED, askStopReason, useRunActions, useRuns, runError } from './api'
 import { STATE_LABELS, clock, dayKey, duration, tokenText } from './model'
 const props = defineProps<{ task: Schema['TaskOut']; writable: boolean }>()
 const auth = useAuthStore(), scope = auth.workspaceId!
@@ -22,6 +23,10 @@ async function act(run: () => Promise<unknown>, done: string) {
 }
 const start = () => act(() => actions.start(props.task.id, agent.value), agent.value ? '已通过 IM 交给它执行' : '已开始')
 const stop = (reason: Schema['TaskRunStop']['reason']) => open.value && act(() => actions.stop(props.task.id, open.value!.id, reason), reason === 'paused' ? '已暂停' : '已结束这段')
+function terminate() {
+  const instanceId = open.value?.instance_id ?? props.task.assignee_instance_id, reason = instanceId ? askStopReason() : null
+  if (instanceId && reason) void act(() => actions.terminate(props.task.id, instanceId, reason), TERMINATED)
+}
 const when = computed(() => props.task.started_at ?? props.task.planned_start_at ?? props.task.due_at)
 const timelineLink = computed(() => ({ path: '/tasks/timeline', query: { task: props.task.id, project: props.task.project_id, ...(when.value ? { date: dayKey(new Date(when.value)) } : {}) } }))
 const waited = (r: Schema['TaskRunOut']) => r.waits.reduce((sum, w) => sum + ((w.end ? Date.parse(w.end) : Date.now()) - Date.parse(w.start)), 0)
@@ -35,6 +40,7 @@ const waited = (r: Schema['TaskRunOut']) => r.waits.reduce((sum, w) => sum + ((w
         <template v-if="agent">
           <button v-if="auth.canManage && !open" type="button" class="secondary-button" :disabled="busy || runs.isPending.value" @click="start"><Send :size="16" aria-hidden="true" />交给它执行</button>
           <button v-if="auth.canManage && open" type="button" class="secondary-button" :disabled="busy" @click="stop('interrupted')"><Square :size="16" aria-hidden="true" />结束这段</button>
+          <button v-if="auth.canManage && open" type="button" class="secondary-button im-danger" :disabled="busy" @click="terminate"><CircleStop :size="16" aria-hidden="true" />终止执行</button>
           <span v-if="!auth.canManage" class="form-help">执行者是智能体：由 owner / admin 交给它执行。</span>
         </template>
         <template v-else-if="writable">
@@ -44,6 +50,7 @@ const waited = (r: Schema['TaskRunOut']) => r.waits.reduce((sum, w) => sum + ((w
       </template>
       <RouterLink :to="timelineLink">在时间轴中查看</RouterLink>
     </div>
+    <p v-if="agent && auth.canManage && open && !task.done" class="form-help">“结束这段”只记下这一段结束；“终止执行”还会叫停它正在运行的会话（它深陷在这件事里时用）。</p>
     <p v-if="agent && auth.canManage && !open && !task.done" class="form-help">会以你的 IM 账号给它发一条消息：任务标题、task_id 与截止时间，请它读详情、做完后标为完成（完成要审批）。</p>
     <p v-if="message" class="form-help" role="status">{{ message }}</p>
     <p v-if="failure" class="feedback" role="alert">{{ failure }}</p>

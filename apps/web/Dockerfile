@@ -41,4 +41,9 @@ server {
 }
 EOF
 COPY --from=build /app/dist /usr/share/nginx/html
+# 基础镜像（锁定 digest）还没换上修复版本的系统包：构建时只升级 trivy 报出已有修复的那几个
+# （2026-11-06：zlib 1.3.2-r0 → 1.3.2-r1，CVE-2026-85091）。上游出新构建后改 digest、删掉这一步。
+USER root
+RUN apk upgrade --no-cache zlib
+USER 101
 EXPOSE 8080

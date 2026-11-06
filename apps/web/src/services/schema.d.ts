@@ -81,6 +81,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent-api/v1/stops/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 领取终止令（实例的 stop-runs.mjs，每分钟一次）
+         * @description 领取即标为执行中；实例中止所有正在运行的会话（sessions.abort）后逐个报回。10 分钟没被领取的记为过期，领取后 5 分钟没有结果的记为失败；每个实例每分钟最多 6 次（T-0126）。
+         */
+        post: operations["claim_agent_stops"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-api/v1/stops/{stop_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 报回终止的结果（实例的 stop-runs.mjs）
+         * @description done 附中止的会话数，或 failed 附一行原因；done 之后解除软停止。
+         */
+        post: operations["report_agent_stop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-api/v1/usage": {
         parameters: {
             query?: never;
@@ -95,6 +135,46 @@ export interface paths {
          * @description 每个 OpenClaw 会话当天（UTC）的累计 token；会话只报 key 的 SHA-256。工作台按（实例、日期、会话）算增量并记到这一分钟；usage 为 null 的会话跳过；实例第一次上报只记基准。每个实例每分钟最多 6 次。
          */
         post: operations["agent_usage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-api/v1/wakeups/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 领取到期的唤醒（实例的 wakeup.mjs，每分钟一次）
+         * @description 领取即标为执行中，不会再发给别的请求；领取后 15 分钟没有结果记为失败（不重跑）。每次最多 5 个，每个实例每分钟最多 6 次（T-0121，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.2 节）。
+         */
+        post: operations["claim_agent_wakeups"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-api/v1/wakeups/{wakeup_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 报回唤醒的结果（实例的 wakeup.mjs）
+         * @description done 或 failed（附一行原因）；重复的唤醒排下一次。
+         */
+        post: operations["report_agent_wakeup"];
         delete?: never;
         options?: never;
         head?: never;
@@ -254,6 +334,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/instances/{instance_id}/im-media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 打开或关闭实例的附件权限（admin，乐观并发）
+         * @description 打开后这个实例能经 im_send 发图片、文件、视频（默认关闭，docs/v2/AGENT_MESSAGING_PLAN.md 第 11 节 D3）；文字不受影响。每次都写审计（T-0119）。
+         */
+        put: operations["put_im_media"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/instances/{instance_id}/ops": {
         parameters: {
             query?: never;
@@ -289,6 +389,46 @@ export interface paths {
         get: operations["get_agent_ops_action"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/outbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 智能体主动发的消息与被拒收的自动回复（admin）
+         * @description im_send 发的消息（已发出、排队、定时、被拒收及原因，最近 50 条）与最近 7 天被 OpenIM 回调拒收的自动回复（T-0118，docs/v2/AGENT_MESSAGING_PLAN.md 第 4.6 节）。
+         */
+        get: operations["get_agent_outbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/outbox/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 取消智能体排队中或定时的消息（admin）
+         * @description 已经发出的不能取消；不属于这个实例的 ID 原样放进 not_cancellable。
+         */
+        post: operations["cancel_agent_outbox"];
         delete?: never;
         options?: never;
         head?: never;
@@ -431,6 +571,107 @@ export interface paths {
          * @description 只用专用密钥登录：停止并删除容器、删掉工作台写入 crontab 的定时任务；remove_files=true 时同时删除接入包目录（含实例凭证与 OpenClaw 的会话、记忆，不可恢复）。不卸载 Docker，不吊销专用公钥与实例凭证。进度看 GET /ssh 的 job。没有专用公钥时 409 AGENT_SSH_KEY_MISSING；已经有进行中的任务时 409 AGENT_SSH_JOB_RUNNING。
          */
         post: operations["uninstall_agent_ssh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 终止实例正在执行的任务（admin）
+         * @description 立即生效：接下来 5 分钟它调用工作台工具都返回 RUN_STOPPED；1 分钟内接入包的 stop-runs.mjs 在它的 OpenClaw 里中止正在运行的会话（sessions.abort，AGENT_MESSAGING_PLAN 第 7.3 节）。给了 task_id 就把这个任务正在执行的一段记为中断，任务仍归原执行者。写审计。
+         */
+        post: operations["stop_agent_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/stop-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 打开或关闭实例“终止其他智能体任务”的权限（admin，乐观并发）
+         * @description 打开后这个实例能用 list_agent_runs / stop_agent_run 叫停本工作空间里别的智能体（直接执行，docs/AGENTS.md 第 8 节例外六；默认关闭，AGENT_MESSAGING_PLAN 第 11 节 D20）。每次都写审计（T-0126）。
+         */
+        put: operations["put_stop_others"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/stops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 实例最近的终止记录（admin） */
+        get: operations["list_agent_stops"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/wakeups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 实例的唤醒与可选的会话（admin）
+         * @description 待执行的在前；targets 是它能用的会话（和管理员的私聊、它所在的群），建唤醒时选一个或不选（独立会话）。
+         */
+        get: operations["list_agent_wakeups"];
+        put?: never;
+        /**
+         * 给实例建一个唤醒（admin）
+         * @description 到点叫醒它跑一轮，把 prompt 交给它；可以每天、工作日、每周重复（按 time_zone 的钟点）。最多 50 个待执行；写审计（T-0121）。
+         */
+        post: operations["create_agent_wakeup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/wakeups/{wakeup_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 取消实例的唤醒（admin）
+         * @description 正在跑的这一轮停不下来；重复的唤醒不再排下一次。写审计。
+         */
+        post: operations["cancel_agent_wakeup"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1430,7 +1671,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 显示 OpenIM 对象存储里的图片（owner / admin） */
+        /**
+         * 显示 OpenIM 对象存储里的图片、文件、视频（owner / admin）
+         * @description 图片内联显示；文件按附件下载；视频支持 Range（T-0119）。
+         */
         get: operations["get_im_media"];
         put?: never;
         post?: never;
@@ -1467,8 +1711,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 上传图片（owner / admin）
-         * @description 请求体就是图片本身；只接受 image/png, image/jpeg, image/gif, image/webp，不超过 10 MiB；服务端按内容核对类型，不只看 Content-Type。
+         * 上传图片、文件或视频（owner / admin）
+         * @description 请求体就是文件本身；图片只接受 image/png, image/jpeg, image/gif, image/webp（10 MiB），文件 20 MiB，视频 MP4 / MOV 50 MiB；不允许可执行与网页类文件；服务端按内容核对类型，不只看 Content-Type（T-0119）。
          */
         post: operations["upload_im_image"];
         delete?: never;
@@ -2742,6 +2986,12 @@ export interface components {
              */
             bundle_issued_at: string | null;
             /**
+             * Bundle Outdated
+             * @description 已部署的实例还在用旧接入包，或插件没打工作台的补丁（上报的插件版本不是 0.3.3+myworkspace.1，T-0120）：重新签发接入包或经 SSH 重新部署
+             * @default false
+             */
+            bundle_outdated: boolean;
+            /**
              * Created At
              * Format: date-time
              */
@@ -2760,6 +3010,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** @description 附件权限（T-0119）：打开后它能经 im_send 发图片、文件、视频（默认关闭） */
+            im_media: components["schemas"]["ProjectAdminOut"];
             /** Im Nickname */
             im_nickname: string;
             /**
@@ -2818,6 +3070,8 @@ export interface components {
              * @enum {string}
              */
             status: "pending" | "online" | "offline" | "disabled";
+            /** @description 终止其他智能体任务的权限（T-0126）：打开后它能用 stop_agent_run 叫停别的智能体 */
+            stop_others: components["schemas"]["ProjectAdminOut"];
             /**
              * Updated At
              * Format: date-time
@@ -3063,6 +3317,70 @@ export interface components {
             name: string;
             /** Reads */
             reads: number;
+        };
+        /** AgentRunStopCreate */
+        AgentRunStopCreate: {
+            /** Reason */
+            reason: string;
+            /**
+             * Task Id
+             * @description 它正在执行的任务；给了就把这一段记为中断
+             */
+            task_id?: string | null;
+        };
+        /** AgentRunStopList */
+        AgentRunStopList: {
+            /**
+             * Items
+             * @description 最近 20 次，新的在前
+             */
+            items: components["schemas"]["AgentRunStopOut"][];
+        };
+        /** AgentRunStopOut */
+        AgentRunStopOut: {
+            /**
+             * Aborted
+             * @description 实例报回中止了几个会话
+             */
+            aborted: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Error */
+            error: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            instance_id: string;
+            /** Reason */
+            reason: string;
+            /** Requested By */
+            requested_by: string | null;
+            /** Requested By Instance */
+            requested_by_instance: string | null;
+            /**
+             * Soft Until
+             * Format: date-time
+             */
+            soft_until: string;
+            /**
+             * Status
+             * @description pending 等实例领取；running 实例在中止；done 已中止；failed 失败；expired 10 分钟没被领取（实例不在线或接入包太旧，只有软停止生效）
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed" | "expired";
+            /** Task Id */
+            task_id: string | null;
         };
         /** AgentSecretCreate */
         AgentSecretCreate: {
@@ -3408,6 +3726,92 @@ export interface components {
              * @description 目标服务器的当前版本号
              */
             version: number;
+        };
+        /** AgentWakeupCreate */
+        AgentWakeupCreate: {
+            /** Prompt */
+            prompt: string;
+            /**
+             * Repeat
+             * @default none
+             * @enum {string}
+             */
+            repeat: "none" | "daily" | "weekdays" | "weekly";
+            /**
+             * Run At
+             * Format: date-time
+             */
+            run_at: string;
+            /**
+             * Target
+             * @description 在哪个会话里跑；null 是独立会话
+             */
+            target?: string | null;
+            /**
+             * Time Zone
+             * @default UTC
+             */
+            time_zone: string;
+        };
+        /** AgentWakeupList */
+        AgentWakeupList: {
+            /**
+             * Items
+             * @description 待执行的在前，其余按时间倒序，最多 50 个
+             */
+            items: components["schemas"]["AgentWakeupOut"][];
+            /**
+             * Targets
+             * @description 可以选的会话：和管理员的私聊、它所在的群
+             */
+            targets: components["schemas"]["WakeupTarget"][];
+        };
+        /** AgentWakeupOut */
+        AgentWakeupOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last Error */
+            last_error: string | null;
+            /** Last Run At */
+            last_run_at: string | null;
+            /** Prompt */
+            prompt: string;
+            /**
+             * Repeat
+             * @enum {string}
+             */
+            repeat: "none" | "daily" | "weekdays" | "weekly";
+            /**
+             * Run At
+             * Format: date-time
+             */
+            run_at: string;
+            /** Runs */
+            runs: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "agent" | "admin";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed" | "cancelled";
+            /** Target */
+            target: string | null;
+            /** Time Zone */
+            time_zone: string;
         };
         /**
          * AgentWeek
@@ -4922,6 +5326,21 @@ export interface components {
              */
             pending_approvals: number;
         };
+        /** ImCancelInput */
+        ImCancelInput: {
+            /** Message Ids */
+            message_ids: string[];
+        };
+        /** ImCancelOutput */
+        ImCancelOutput: {
+            /** Cancelled */
+            cancelled: string[];
+            /**
+             * Not Cancellable
+             * @description 已经发出、已结束或不是你的
+             */
+            not_cancellable: string[];
+        };
         /** ImContactGroupCreate */
         ImContactGroupCreate: {
             /** Name */
@@ -5215,6 +5634,38 @@ export interface components {
             /** Width */
             width: number | null;
         };
+        /**
+         * ImMessageAttachment
+         * @description 文件（105）与视频（104）消息（T-0119）。
+         */
+        ImMessageAttachment: {
+            /**
+             * Cover Media Id
+             * @description 视频封面（经 /im/media 显示）
+             */
+            cover_media_id: string | null;
+            /**
+             * Duration Seconds
+             * @description 视频时长（秒）
+             */
+            duration_seconds: number | null;
+            /**
+             * External Url
+             * @description 外部链接：前端不自动加载，只显示为链接
+             */
+            external_url: string | null;
+            /**
+             * Media Id
+             * @description 在 OpenIM 对象存储里时，经 GET /im/media/{media_id} 下载或播放（带登录校验）
+             */
+            media_id: string | null;
+            /** Mime */
+            mime: string | null;
+            /** Name */
+            name: string | null;
+            /** Size */
+            size: number | null;
+        };
         /** ImMessageOut */
         ImMessageOut: {
             /**
@@ -5224,6 +5675,7 @@ export interface components {
             approval_execution_id: string | null;
             /** At Im Ids */
             at_im_ids: string[];
+            attachment?: components["schemas"]["ImMessageAttachment"] | null;
             /** Client Msg Id */
             client_msg_id: string;
             /** Conversation Id */
@@ -5233,7 +5685,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "text" | "image" | "approval_card" | "system" | "unsupported";
+            kind: "text" | "image" | "file" | "video" | "approval_card" | "system" | "unsupported";
             /** Pinned */
             pinned: boolean;
             /** Sender Im Id */
@@ -5308,7 +5760,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "text" | "image" | "approval_card" | "system" | "unsupported";
+            kind: "text" | "image" | "file" | "video" | "approval_card" | "system" | "unsupported";
             /** Sender Im Id */
             sender_im_id: string;
             /**
@@ -5333,7 +5785,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "text" | "image";
+            kind: "text" | "image" | "file" | "video";
             /** Text */
             text?: string | null;
             /**
@@ -5341,6 +5793,68 @@ export interface components {
              * @description POST /im/uploads 返回的 upload_id
              */
             upload_id?: string | null;
+        };
+        /** ImOutboxItem */
+        ImOutboxItem: {
+            /** Code */
+            code: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "text" | "image" | "file" | "video";
+            /**
+             * Message Id
+             * Format: uuid
+             */
+            message_id: string;
+            /** Next Attempt At */
+            next_attempt_at: string | null;
+            /** Reason */
+            reason: string | null;
+            /** Sent At */
+            sent_at: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "tool" | "reply_retry" | "wakeup";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "scheduled" | "queued" | "sending" | "sent" | "rejected" | "failed" | "unknown" | "cancelled";
+            /** Target */
+            target: string;
+            untrusted: components["schemas"]["ImOutboxText"];
+        };
+        /** ImOutboxOutput */
+        ImOutboxOutput: {
+            /**
+             * Items
+             * @description 你经 im_send 发的消息，最近的在前
+             */
+            items: components["schemas"]["ImOutboxItem"][];
+            /**
+             * Rejected Replies
+             * @description 最近 7 天你的自动回复被拒收的记录，最近的在前
+             */
+            rejected_replies: components["schemas"]["ImRejectedReply"][];
+            /**
+             * Wakeups
+             * @description 还没执行的唤醒（你安排的和管理员建的），最早的在前
+             */
+            wakeups?: components["schemas"]["WakeupItem"][];
+        };
+        /** ImOutboxText */
+        ImOutboxText: {
+            /** Text */
+            text: string | null;
         };
         /** ImPinCreate */
         ImPinCreate: {
@@ -5392,6 +5906,26 @@ export interface components {
              */
             seq: number;
         };
+        /** ImRejectedReply */
+        ImRejectedReply: {
+            /** Code */
+            code: number;
+            /** Conversation Id */
+            conversation_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Retried
+             * @description 工作台已在限额恢复后补发
+             */
+            retried: boolean;
+            untrusted: components["schemas"]["ImOutboxText"];
+        };
         /** ImStatus */
         ImStatus: {
             /**
@@ -5442,6 +5976,8 @@ export interface components {
         };
         /** ImUploadOut */
         ImUploadOut: {
+            /** Duration Seconds */
+            duration_seconds?: number | null;
             /**
              * Expires At
              * Format: date-time
@@ -5450,8 +5986,19 @@ export interface components {
             expires_at: string;
             /** Height */
             height: number | null;
+            /**
+             * Kind
+             * @default image
+             * @enum {string}
+             */
+            kind: "image" | "file" | "video";
             /** Mime */
             mime: string;
+            /**
+             * Name
+             * @description 文件与视频的文件名
+             */
+            name?: string | null;
             /** Size */
             size: number;
             /**
@@ -7922,6 +8469,50 @@ export interface components {
              */
             week_start: string;
         };
+        /** StopClaimItem */
+        StopClaimItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+        };
+        /** StopClaimResponse */
+        StopClaimResponse: {
+            /**
+             * Items
+             * @description 待执行的终止令；实例中止所有正在运行的会话后逐个报回
+             */
+            items: components["schemas"]["StopClaimItem"][];
+        };
+        /** StopResult */
+        StopResult: {
+            /**
+             * Aborted
+             * @default 0
+             */
+            aborted: number;
+            /** Error */
+            error?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "done" | "failed";
+        };
+        /** StopResultResponse */
+        StopResultResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed" | "expired";
+        };
         /** StorageCheck */
         StorageCheck: {
             /**
@@ -8744,6 +9335,104 @@ export interface components {
              */
             version: number;
         };
+        /** WakeupClaimItem */
+        WakeupClaimItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Message
+             * @description 这一轮交给智能体的消息（说明 + 提示词）
+             */
+            message: string;
+            /**
+             * Session Key
+             * @description openclaw agent --session-key 的值
+             */
+            session_key: string;
+        };
+        /** WakeupClaimResponse */
+        WakeupClaimResponse: {
+            /**
+             * Items
+             * @description 到期、刚领取的唤醒（最多 5 个）
+             */
+            items: components["schemas"]["WakeupClaimItem"][];
+        };
+        /** WakeupItem */
+        WakeupItem: {
+            /**
+             * Repeat
+             * @enum {string}
+             */
+            repeat: "none" | "daily" | "weekdays" | "weekly";
+            /**
+             * Run At
+             * Format: date-time
+             */
+            run_at: string;
+            /**
+             * Source
+             * @description agent 是你自己安排的，admin 是管理员建的
+             * @enum {string}
+             */
+            source: "agent" | "admin";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed" | "cancelled";
+            /**
+             * Target
+             * @description 在哪个会话里跑；null 是独立会话
+             */
+            target: string | null;
+            /** @description 唤醒时要做的事（提示词） */
+            untrusted: components["schemas"]["ImOutboxText"];
+            /**
+             * Wakeup Id
+             * Format: uuid
+             */
+            wakeup_id: string;
+        };
+        /** WakeupResult */
+        WakeupResult: {
+            /** Error */
+            error?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "done" | "failed";
+        };
+        /** WakeupResultResponse */
+        WakeupResultResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Run At
+             * Format: date-time
+             * @description 重复的唤醒是下一次的时间
+             */
+            run_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed" | "cancelled";
+        };
+        /** WakeupTarget */
+        WakeupTarget: {
+            /** Label */
+            label: string;
+            /** Target */
+            target: string;
+        };
         /** WebhookRegistration */
         WebhookRegistration: {
             /**
@@ -9045,6 +9734,106 @@ export interface operations {
             };
         };
     };
+    claim_agent_stops: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopClaimResponse"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    report_agent_stop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stop_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StopResult"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopResultResponse"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     agent_usage: {
         parameters: {
             query?: never;
@@ -9087,6 +9876,106 @@ export interface operations {
             };
             /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    claim_agent_wakeups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WakeupClaimResponse"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    report_agent_wakeup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                wakeup_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WakeupResult"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WakeupResultResponse"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9816,6 +10705,82 @@ export interface operations {
             };
         };
     };
+    put_im_media: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectAdminPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectAdminOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_agent_ops: {
         parameters: {
             query?: never;
@@ -9993,6 +10958,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentOpsActionOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_agent_outbox: {
+        parameters: {
+            query?: {
+                status?: "all" | "pending" | "sent" | "rejected" | "failed";
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImOutboxOutput"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_agent_outbox: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImCancelInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImCancelOutput"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -10734,6 +11829,429 @@ export interface operations {
             };
             /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    stop_agent_run: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentRunStopCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunStopOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_stop_others: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectAdminPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectAdminOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_agent_stops: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunStopList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_agent_wakeups: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentWakeupList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_agent_wakeup: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentWakeupCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentWakeupOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_agent_wakeup: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+                wakeup_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentWakeupOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15727,7 +17245,10 @@ export interface operations {
     };
     upload_im_image: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 文件名（文件与视频） */
+                name?: string | null;
+            };
             header: {
                 /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
                 "X-CSRF-Token"?: string | null;

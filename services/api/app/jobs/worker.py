@@ -25,6 +25,9 @@ from app.core.logging import configure_logging, dict_config
 from app.core.resources import create_engine
 from app.domain import (
     agent_ops,
+    agent_outbox,
+    agent_stops,
+    agent_wakeups,
     agent_watch,
     alerts,
     approval_cards,
@@ -102,9 +105,21 @@ async def purge(ctx: dict[str, Any]) -> None:
         host_samples = await host_metrics.purge(db)
         # 运维动作：7 天前的记录与脱敏后的输出（T-0114；审计里的记录保留）
         ops_actions = await agent_ops.purge(db)
+        # 发件箱 30 天、拒收记录 7 天（T-0118）
+        outbox_rows, rejections = await agent_outbox.purge(db)
+        # 唤醒：结束 30 天以上的（T-0121）
+        wakeups = await agent_wakeups.purge(db)
+        # 终止令：结束 30 天以上的（T-0126）
+        await agent_stops.purge(db)
         await db.commit()
+    if wakeups:
+        logger.info("agent wakeups purged", extra={"count": wakeups})
     if ops_actions:
         logger.info("agent ops actions purged", extra={"count": ops_actions})
+    if outbox_rows or rejections:
+        logger.info(
+            "agent im outbox purged", extra={"outbox": outbox_rows, "rejections": rejections}
+        )
     if host_samples:
         logger.info("host samples purged", extra={"count": host_samples})
     if usage_minutes or usage_cursors:
@@ -244,6 +259,19 @@ async def sync_project_groups(ctx: dict[str, Any]) -> int:
         return await project_groups.ProjectGroupSync(db, context.settings, client).run_due()
 
 
+async def deliver_im_outbox(ctx: dict[str, Any]) -> int:
+    """智能体主动发的消息（T-0118）：发到期的、重试、对账结果未知的。没有部署 OpenIM 时不做。"""
+    context = _sync(ctx)
+    client = im.openim_client(context.settings, context.runtime, ctx["redis"])
+    if client is None:
+        return 0
+    async with context.sessions() as db:
+        outbox = agent_outbox.AgentOutbox(
+            agent_outbox.SendContext(db, context.settings, ctx["redis"], client)
+        )
+        return await outbox.deliver_due()
+
+
 async def check_host_alerts(ctx: dict[str, Any]) -> int:
     """服务器状态告警（T-0113）：磁盘、内存、负载、在线却不上报；恢复前只提醒一次。"""
     context = _sync(ctx)
@@ -338,6 +366,7 @@ class WorkerSettings:
         cron(close_stale_runs, second=20, timeout=60),
         cron(sync_project_groups, second=30, timeout=120),
         cron(check_host_alerts, second=40, timeout=60),
+        cron(deliver_im_outbox, second=set(range(2, 60, 5)), timeout=60, unique=True),
         cron(cleanup_files, hour=3, minute=37, timeout=1800),
         cron(check_file_storage, hour=4, minute=13, run_at_startup=True, timeout=180),
     ]

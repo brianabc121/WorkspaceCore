@@ -48,6 +48,8 @@ function sender(message: Schema['ImMessageOut']) {
 }
 function text(message: Schema['ImMessageOut']) {
   if (message.kind === 'image') return '[图片]'
+  if (message.kind === 'file') return `[文件] ${message.attachment?.name ?? ''}`
+  if (message.kind === 'video') return '[视频]'
   if (message.kind === 'approval_card') return '[审批卡片]'
   return message.text ?? ''
 }

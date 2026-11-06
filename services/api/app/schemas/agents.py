@@ -13,6 +13,7 @@ from uuid import UUID
 
 from pydantic import (
     AfterValidator,
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -126,6 +127,17 @@ class AgentInstanceOut(BaseModel):
     disabled_at: datetime | None
     project_admin: "ProjectAdminOut" = Field(
         description="项目管理权限（T-0112）：打开后它能新建项目、把智能体拉进它建的项目"
+    )
+    im_media: "ProjectAdminOut" = Field(
+        description="附件权限（T-0119）：打开后它能经 im_send 发图片、文件、视频（默认关闭）"
+    )
+    stop_others: "ProjectAdminOut" = Field(
+        description="终止其他智能体任务的权限（T-0126）：打开后它能用 stop_agent_run 叫停别的智能体"
+    )
+    bundle_outdated: bool = Field(
+        default=False,
+        description="已部署的实例还在用旧接入包，或插件没打工作台的补丁（上报的插件版本不是"
+        " 0.3.3+myworkspace.1，T-0120）：重新签发接入包或经 SSH 重新部署",
     )
     credentials: list[AgentCredentialOut] = Field(description="有效与最近吊销的凭证，新的在前")
     secret_grants: list[SecretGrantOut]
@@ -536,3 +548,124 @@ class AgentOpsState(BaseModel):
     )
     running: AgentOpsActionOut | None = Field(description="进行中的动作（同一实例同时只有一个）")
     items: list[AgentOpsActionOut] = Field(description="最近 20 次（7 天内），最近的在前")
+
+
+# ---------------------------------------------------------------- 唤醒（T-0121）
+
+WakeupRepeat = Literal["none", "daily", "weekdays", "weekly"]
+
+
+class WakeupClaimItem(BaseModel):
+    id: UUID
+    session_key: str = Field(description="openclaw agent --session-key 的值")
+    message: str = Field(description="这一轮交给智能体的消息（说明 + 提示词）")
+
+
+class WakeupClaimResponse(BaseModel):
+    items: list[WakeupClaimItem] = Field(description="到期、刚领取的唤醒（最多 5 个）")
+
+
+class WakeupResult(_Strict):
+    status: Literal["done", "failed"]
+    error: Annotated[str, StringConstraints(max_length=300)] | None = None
+
+
+class WakeupResultResponse(BaseModel):
+    id: UUID
+    status: Literal["pending", "running", "done", "failed", "cancelled"]
+    run_at: datetime = Field(description="重复的唤醒是下一次的时间")
+
+
+class AgentWakeupCreate(_Strict):
+    prompt: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+    target: (
+        Annotated[
+            str,
+            StringConstraints(min_length=6, max_length=72, pattern=r"^(user|group):[A-Za-z0-9_]+$"),
+        ]
+        | None
+    ) = Field(default=None, description="在哪个会话里跑；null 是独立会话")
+    run_at: AwareDatetime
+    repeat: WakeupRepeat = "none"
+    time_zone: Annotated[str, StringConstraints(min_length=1, max_length=64)] = "UTC"
+
+
+class AgentWakeupOut(BaseModel):
+    id: UUID
+    source: Literal["agent", "admin"]
+    created_by: UUID | None
+    target: str | None
+    prompt: str
+    run_at: datetime
+    repeat: WakeupRepeat
+    time_zone: str
+    status: Literal["pending", "running", "done", "failed", "cancelled"]
+    runs: int
+    last_run_at: datetime | None
+    last_error: str | None
+    created_at: datetime
+
+
+class WakeupTarget(BaseModel):
+    target: str
+    label: str
+
+
+class AgentWakeupList(BaseModel):
+    items: list[AgentWakeupOut] = Field(description="待执行的在前，其余按时间倒序，最多 50 个")
+    targets: list[WakeupTarget] = Field(description="可以选的会话：和管理员的私聊、它所在的群")
+
+
+# ---------------------------------------------------------------- 终止正在执行的任务（T-0126）
+
+RunStopStatus = Literal["pending", "running", "done", "failed", "expired"]
+
+
+class AgentRunStopCreate(_Strict):
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    task_id: UUID | None = Field(
+        default=None, description="它正在执行的任务；给了就把这一段记为中断"
+    )
+
+
+class AgentRunStopOut(BaseModel):
+    id: UUID
+    instance_id: UUID
+    requested_by: UUID | None
+    requested_by_instance: UUID | None
+    task_id: UUID | None
+    reason: str
+    status: RunStopStatus = Field(
+        description="pending 等实例领取；running 实例在中止；done 已中止；failed 失败；"
+        "expired 10 分钟没被领取（实例不在线或接入包太旧，只有软停止生效）"
+    )
+    soft_until: datetime
+    aborted: int | None = Field(description="实例报回中止了几个会话")
+    error: str | None
+    created_at: datetime
+    finished_at: datetime | None
+
+
+class AgentRunStopList(BaseModel):
+    items: list[AgentRunStopOut] = Field(description="最近 20 次，新的在前")
+
+
+class StopClaimItem(BaseModel):
+    id: UUID
+
+
+class StopClaimResponse(BaseModel):
+    items: list[StopClaimItem] = Field(
+        description="待执行的终止令；实例中止所有正在运行的会话后逐个报回"
+    )
+
+
+class StopResult(_Strict):
+    status: Literal["done", "failed"]
+    aborted: int = Field(0, ge=0, le=1000)
+    error: Annotated[str, StringConstraints(max_length=300)] | None = None
+
+
+class StopResultResponse(BaseModel):
+    id: UUID
+    status: RunStopStatus

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fireEvent, screen, within } from '@testing-library/vue'
 import { mockApi, openApp, fail, me, workspace } from './helpers'
-import { checkUpload, chronological, imError } from '../src/features/im/queries'
+import { checkFileUpload, checkUpload, chronological, imError } from '../src/features/im/queries'
 import { ApiError, type Schema } from '../src/services/api'
 
 const at = '2026-11-01T04:00:00Z'
@@ -424,5 +424,64 @@ describe('im review fixes (T-0095)', () => {
     await fireEvent.click(await within(chat).findByRole('button', { name: '置顶消息：第 1 条' }))
     await vi.waitFor(() => expect(requests.some(r => new URL(r.url).searchParams.get('cursor') === 'c1')).toBe(true))
     await vi.waitFor(() => expect(container.querySelector('[data-msg="srv-1"]')).not.toBeNull())
+  })
+})
+
+describe('im files and videos (T-0119)', () => {
+  const file = (over: Partial<NonNullable<Schema['ImMessageOut']['attachment']>> = {}): NonNullable<Schema['ImMessageOut']['attachment']> => ({ media_id: 'file-1', external_url: null, name: '周报.pdf', size: 2048, mime: 'application/pdf', duration_seconds: null, cover_media_id: null, ...over })
+  it('checks files before uploading', () => {
+    expect(checkFileUpload(new File(['x'], 'run.sh'))).toContain('可执行')
+    expect(checkFileUpload(new File([], 'a.txt'))).toContain('空')
+    expect(checkFileUpload(new File(['x'], 'a.csv'))).toBeNull()
+  })
+  it('downloads a workspace file with the workspace header and never loads external files', async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:file-1', revokeObjectURL: () => undefined }))
+    const requests = setup(r => path(r) === '/api/v1/im/media/file-1' ? new Response(new Blob(['%PDF'], { type: 'application/octet-stream' })) : undefined,
+      [conversation()], [message(2, { kind: 'file', text: null, attachment: file({ media_id: null, external_url: 'https://evil.example.test/x.pdf' }) }), message(1, { kind: 'file', text: null, attachment: file() })])
+    await openApp('/im?c=si_alpha')
+    const chat = await screen.findByRole('region', { name: '与甲的会话' })
+    expect(await within(chat).findByRole('button', { name: '下载 周报.pdf' })).toBeVisible()
+    expect(within(chat).getByText(/外部文件未加载/)).toBeVisible()
+    await fireEvent.click(within(chat).getByRole('button', { name: '下载 周报.pdf' }))
+    await vi.waitFor(() => expect(click).toHaveBeenCalled())
+    const media = requests.find(r => path(r) === '/api/v1/im/media/file-1')!
+    expect(media.headers.get('X-Workspace-Id')).toBe('workspace-a')
+    expect(requests.some(r => r.url.includes('evil.example.test'))).toBe(false)
+  })
+  it('plays a video only after the play button is pressed', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:video-1', revokeObjectURL: () => undefined }))
+    const requests = setup(r => path(r) === '/api/v1/im/media/video-1' ? new Response(new Blob(['mp4'], { type: 'video/mp4' })) : undefined,
+      [conversation()], [message(1, { kind: 'video', text: null, attachment: file({ media_id: 'video-1', name: 'demo.mp4', mime: 'video/mp4', duration_seconds: 12 }) })])
+    await openApp('/im?c=si_alpha')
+    const chat = await screen.findByRole('region', { name: '与甲的会话' })
+    const play = await within(chat).findByRole('button', { name: /播放视频（12 秒）/ })
+    expect(requests.some(r => path(r) === '/api/v1/im/media/video-1')).toBe(false)
+    await fireEvent.click(play)
+    expect(await within(chat).findByLabelText('甲发送的视频')).toHaveAttribute('src', 'blob:video-1')
+  })
+  it('uploads a file with its name and sends it as a file message', async () => {
+    const requests = setup(r =>
+      path(r) === '/api/v1/im/uploads' ? Response.json({ upload_id: 'up-1', kind: 'file', name: 'plan.csv', duration_seconds: null, mime: 'text/csv', size: 8, width: null, height: null, expires_at: at }, { status: 201 }) :
+      path(r).endsWith('/messages') && r.method === 'POST' ? Response.json(message(4, { kind: 'file', text: null, sender_im_id: self, sender_instance_id: null, status: 'sending', attachment: file({ media_id: 'up-1', name: 'plan.csv' }) }), { status: 202 }) : undefined)
+    await openApp('/im?c=si_alpha')
+    const chat = await screen.findByRole('region', { name: '与甲的会话' })
+    const input = within(chat).getByLabelText('选择文件或视频') as HTMLInputElement
+    await fireEvent.change(input, { target: { files: [new File(['a,b\n1,2\n'], 'plan.csv', { type: 'text/csv' })] } })
+    await vi.waitFor(() => expect(requests.some(r => path(r).endsWith('/messages') && r.method === 'POST')).toBe(true))
+    const upload = requests.find(r => path(r) === '/api/v1/im/uploads')!
+    expect(new URL(upload.url).searchParams.get('name')).toBe('plan.csv')
+    const sent = requests.find(r => path(r).endsWith('/messages') && r.method === 'POST')!
+    expect(await sent.clone().json()).toEqual({ kind: 'file', upload_id: 'up-1', at_im_ids: [] })
+    expect(sent.headers.get('Idempotency-Key')).toBeTruthy()
+  })
+  it('blocks scripts before uploading', async () => {
+    const requests = setup()
+    await openApp('/im?c=si_alpha')
+    const chat = await screen.findByRole('region', { name: '与甲的会话' })
+    const input = within(chat).getByLabelText('选择文件或视频') as HTMLInputElement
+    await fireEvent.change(input, { target: { files: [new File(['echo'], 'run.sh')] } })
+    expect(await within(chat).findByRole('alert')).toHaveTextContent('可执行')
+    expect(requests.some(r => path(r) === '/api/v1/im/uploads')).toBe(false)
   })
 })

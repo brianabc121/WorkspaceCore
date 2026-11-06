@@ -15,6 +15,7 @@ const { busy, error, notice, act, header } = useAgentAction(scope)
 const editing = ref<Schema['AgentInstanceOut'] | 'new' | null>(null)
 const items = computed(() => unique(instances.data.value?.pages))
 const secretItems = computed(() => unique(secrets.data.value?.pages))
+const names = computed(() => new Map(items.value.map(i => [i.id, i.name])))
 const hosts = computed(() => new Map((hostSummary.data.value?.items ?? []).map(item => [item.instance_id, item])))
 const path = (instance: Schema['AgentInstanceOut']) => ({ instance_id: instance.id })
 // 顶栏“创建 → 登记 OpenClaw 实例”（规范 §8.1）
@@ -51,6 +52,14 @@ function projectAdmin(instance: Schema['AgentInstanceOut'], enabled: boolean) {
   if (enabled && !window.confirm(`允许「${instance.name}」新建项目、把智能体拉进它建的项目？这些操作直接生效、不审批，每次都会通知管理员。`)) return
   void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/project-admin', { params: { header, path: path(instance) }, body: { enabled, version: instance.version } }), enabled ? '已打开项目管理权限' : '已关闭项目管理权限')
 }
+function imMedia(instance: Schema['AgentInstanceOut'], enabled: boolean) {
+  if (enabled && !window.confirm(`允许「${instance.name}」经 im_send 发图片、文件、视频？工作台会检查类型、大小和密钥，直接发出、不审批。`)) return
+  void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/im-media', { params: { header, path: path(instance) }, body: { enabled, version: instance.version } }), enabled ? '已打开附件权限' : '已关闭附件权限')
+}
+function stopOthers(instance: Schema['AgentInstanceOut'], enabled: boolean) {
+  if (enabled && !window.confirm(`允许「${instance.name}」叫停本工作空间里别的智能体正在执行的任务？叫停直接生效、不审批，每次都会通知管理员。`)) return
+  void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/stop-others', { params: { header, path: path(instance) }, body: { enabled, version: instance.version } }), enabled ? '已打开终止其他智能体任务的权限' : '已关闭终止其他智能体任务的权限')
+}
 function grants(instance: Schema['AgentInstanceOut'], list: Schema['SecretGrantIn'][]) {
   void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/secret-grants', { params: { header, path: path(instance) }, body: { grants: list, version: instance.version } }), '密钥授权已保存')
 }
@@ -72,8 +81,8 @@ function grants(instance: Schema['AgentInstanceOut'], list: Schema['SecretGrantI
   <p v-else-if="!items.length" class="empty-state">还没有实例。点“登记实例”开始。</p>
   <div class="agent-list">
     <InstanceCard
-      v-for="instance in items" :key="instance.id" :instance="instance" :secrets="secretItems" :busy="busy" :host="hosts.get(instance.id)"
-      @edit="editing = instance" @toggle="toggle(instance)" @bundle="bundle(instance, $event)" @revoke="revoke(instance, $event)" @grants="grants(instance, $event)" @project-admin="projectAdmin(instance, $event)"
+      v-for="instance in items" :key="instance.id" :instance="instance" :secrets="secretItems" :busy="busy" :host="hosts.get(instance.id)" :names="names"
+      @edit="editing = instance" @toggle="toggle(instance)" @bundle="bundle(instance, $event)" @revoke="revoke(instance, $event)" @grants="grants(instance, $event)" @project-admin="projectAdmin(instance, $event)" @im-media="imMedia(instance, $event)" @stop-others="stopOthers(instance, $event)"
     />
   </div>
   <button v-if="instances.hasNextPage.value" type="button" class="secondary-button" :disabled="instances.isFetchingNextPage.value" @click="instances.fetchNextPage()">更多实例</button>

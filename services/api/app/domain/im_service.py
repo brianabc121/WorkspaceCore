@@ -30,10 +30,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain import events, idempotency
+from app.domain.agent_media import (
+    CONTENT_FILE,
+    CONTENT_VIDEO,
+    DEFAULT_COVER,
+    LIMITS,
+    AttachmentError,
+    detect,
+    element_for,
+    safe_file_name,
+    store_media,
+)
 from app.domain.audit import AuditTrail
 from app.domain.im import ImAccounts, admin_im_user_id, im_unavailable
 from app.domain.im_projection import ex_for, resolve, sync_conversation
-from app.domain.images import sniff
 from app.domain.policy import WorkspaceAccess
 from app.domain.ratelimit import WindowLimiter
 from app.integrations.base import ConnectorError
@@ -71,6 +81,7 @@ from app.schemas.im import (
     ImConversationPage,
     ImConversationUpdate,
     ImImage,
+    ImMessageAttachment,
     ImMessageOut,
     ImMessagePage,
     ImMessagePinList,
@@ -135,6 +146,10 @@ def message_kind(row: ImMessage) -> MessageKind:
         return "approval_card"
     if row.content_type == CONTENT_PICTURE:
         return "image"
+    if row.content_type == CONTENT_FILE:
+        return "file"
+    if row.content_type == CONTENT_VIDEO:
+        return "video"
     if row.content_type >= 1000:
         return "system"
     return "unsupported"
@@ -146,37 +161,6 @@ _MEDIA_PATH = re.compile(
 )
 THUMB_SIZE = 256
 UPLOADS_PER_MINUTE = 30
-
-
-def media_url(base: str, media_id: uuid.UUID, *, thumb: bool = False) -> str:
-    return f"{base}/im/obj/m/{media_id}" + ("?thumb=1" if thumb else "")
-
-
-def picture_elem(media: ImMedia, base: str) -> dict[str, Any]:
-    """OpenIM 的 PictureElem：原图与大图是同一个地址，缩略图带 thumb=1（最长边 256）。"""
-    scale = min(1.0, THUMB_SIZE / max(media.width, media.height))
-
-    def info(url: str, width: int, height: int) -> dict[str, Any]:
-        return {
-            "uuid": str(media.id),
-            "type": media.mime,
-            "size": media.size,
-            "width": width,
-            "height": height,
-            "url": url,
-        }
-
-    full = media_url(base, media.id)
-    return {
-        "sourcePath": "",
-        "sourcePicture": info(full, media.width, media.height),
-        "bigPicture": info(full, media.width, media.height),
-        "snapshotPicture": info(
-            media_url(base, media.id, thumb=True),
-            max(1, round(media.width * scale)),
-            max(1, round(media.height * scale)),
-        ),
-    }
 
 
 def _image(row: ImMessage) -> ImImage | None:
@@ -203,6 +187,52 @@ def _image(row: ImMessage) -> ImImage | None:
     )
 
 
+def _media_link(url: object) -> tuple[uuid.UUID | None, str | None]:
+    if not isinstance(url, str) or len(url) > 2048:
+        return None, None
+    match = _MEDIA_PATH.search(urlsplit(url).path)
+    if match:
+        return uuid.UUID(match.group(1)), None
+    return None, url if url.startswith(("https://", "http://")) else None
+
+
+def _int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _str(value: object) -> str | None:
+    return value[:256] if isinstance(value, str) and value else None
+
+
+def _attachment(row: ImMessage) -> ImMessageAttachment | None:
+    """文件与视频消息：工作台发出的给 media_id；其他只给外部链接（T-0119）。"""
+    content = row.content_json or {}
+    if row.content_type == CONTENT_FILE:
+        media_id, external = _media_link(content.get("sourceUrl"))
+        return ImMessageAttachment(
+            media_id=media_id,
+            external_url=external,
+            name=_str(content.get("fileName")),
+            size=_int(content.get("fileSize")),
+            mime=_str(content.get("fileType")),
+            duration_seconds=None,
+            cover_media_id=None,
+        )
+    if row.content_type == CONTENT_VIDEO:
+        media_id, external = _media_link(content.get("videoUrl"))
+        cover, _ = _media_link(content.get("snapshotUrl"))
+        return ImMessageAttachment(
+            media_id=media_id,
+            external_url=external,
+            name=None,
+            size=_int(content.get("videoSize")),
+            mime=_str(content.get("videoType")),
+            duration_seconds=_int(content.get("duration")),
+            cover_media_id=cover,
+        )
+    return None
+
+
 def message_out(row: ImMessage, *, pinned: bool) -> ImMessageOut:
     return ImMessageOut(
         server_msg_id=row.server_msg_id,
@@ -214,6 +244,7 @@ def message_out(row: ImMessage, *, pinned: bool) -> ImMessageOut:
         kind=message_kind(row),
         text=row.plain_text if message_kind(row) in ("text", "system", "approval_card") else None,
         image=_image(row),
+        attachment=_attachment(row),
         at_im_ids=list(row.at_im_ids or []),
         approval_execution_id=_approval_execution_id(row),
         status=row.status,
@@ -226,6 +257,10 @@ def _preview(row: ImMessage) -> ImMessagePreview:
     kind = message_kind(row)
     if kind == "image":
         text = "[图片]"
+    elif kind == "file":
+        text = f"[文件] {_str((row.content_json or {}).get('fileName')) or ''}".strip()[:100]
+    elif kind == "video":
+        text = "[视频]"
     elif kind == "unsupported":
         text = "暂不支持的消息"
     else:
@@ -677,7 +712,14 @@ class ImService:
     ) -> SendResult:
         user_id = self._user_id(access)
         conversation = await self._conversation(access, conversation_id)
-        media = await self._media_for_send(access, body.upload_id) if body.kind == "image" else None
+        media = await self._media_for_send(access, body.upload_id) if body.kind != "text" else None
+        if media is not None and media.kind != body.kind:
+            raise ApiError(
+                422,
+                "VALIDATION_FAILED",
+                f"上传的是{ {'image': '图片', 'file': '文件', 'video': '视频'}.get(media.kind) }，"
+                f"kind 应为 {media.kind}",
+            )
         recv_id, group_id, members = await self._target(conversation)
         if body.at_im_ids and not group_id:
             raise ApiError(
@@ -725,17 +767,21 @@ class ImService:
             await self.db.commit()
             raise im_unavailable()
         sender = admin_im_user_id(user_id)
+        cover: ImMedia | None = None
+        if media is not None and media.kind == "video":
+            cover = await self._default_cover(access)
+        content_type, content = (
+            element_for(media, self.settings.im_object_base_url, cover)
+            if media is not None
+            else (CONTENT_AT_TEXT if body.at_im_ids else CONTENT_TEXT, {})
+        )
         local = ImMessage(
             workspace_id=access.workspace.id,
             conversation_id=conversation_id,
             client_msg_id=f"myws-{key}",
             sender_im_id=sender,
-            content_type=CONTENT_PICTURE
-            if media is not None
-            else (CONTENT_AT_TEXT if body.at_im_ids else CONTENT_TEXT),
-            content_json=picture_elem(media, self.settings.im_object_base_url)
-            if media is not None
-            else {},
+            content_type=content_type,
+            content_json=content,
             plain_text=body.text,
             at_im_ids=list(body.at_im_ids),
             status="sending",
@@ -747,11 +793,12 @@ class ImService:
         await self.db.commit()
         try:
             if media is not None:
-                sent = await self.client.send_picture(
+                sent = await self.client.send_elem(
                     send_id=sender,
+                    content_type=content_type,
+                    content=local.content_json,
                     recv_id=recv_id,
                     group_id=group_id,
-                    picture=local.content_json,
                     ex=ex_for(key),
                 )
             else:
@@ -772,10 +819,11 @@ class ImService:
         if sent.send_time_ms > 0:
             local.sent_at = datetime.fromtimestamp(sent.send_time_ms / 1000, UTC)
         local.status = "sent"
-        if media is not None:
-            media.status = "used"
-            media.conversation_id = conversation_id
-            media.server_msg_id = local.server_msg_id
+        for used in (media, cover):
+            if used is not None:
+                used.status = "used"
+                used.conversation_id = conversation_id
+                used.server_msg_id = local.server_msg_id
         out = message_out(local, pinned=False).model_dump(mode="json")
         if record is not None:
             idempotency.succeed(record, 202, out)
@@ -866,8 +914,14 @@ class ImService:
             raise im_unavailable()
         return ObjectStore(self.client)
 
-    async def upload(self, access: WorkspaceAccess, data: bytes) -> ImUploadOut:
-        """上传图片（请求体就是图片）。类型与尺寸按内容识别，不看 Content-Type。"""
+    async def upload(
+        self, access: WorkspaceAccess, data: bytes, name: str | None = None
+    ) -> ImUploadOut:
+        """上传图片、文件或视频（请求体就是文件本身，T-0119 起）。
+
+        类型按内容识别，不看 Content-Type；不允许可执行与网页类；
+        图片 10 MB、文件 20 MB、视频（MP4 / MOV）50 MB。
+        """
         user_id = self._user_id(access)
         store = self._object_store()
         if self.redis is not None:
@@ -881,18 +935,24 @@ class ImService:
                     "上传过于频繁，请稍后再试",
                     headers={"Retry-After": str(retry)},
                 )
-        info = sniff(data)
-        if info is None:
+        try:
+            detected = detect(data, name)
+        except AttachmentError as error:
             raise ApiError(
                 422,
                 "VALIDATION_FAILED",
-                "只支持 PNG、JPEG、GIF、WebP 图片",
-                details={"errors": [{"loc": ["body"], "msg": "不是支持的图片"}]},
+                error.message,
+                details={"errors": [{"loc": ["body"], "msg": error.message}]},
+            ) from None
+        limit = LIMITS[detected.kind]
+        if not data or len(data) > limit:
+            raise ApiError(
+                413, "PAYLOAD_TOO_LARGE", f"{detected.kind} 不能超过 {limit // (1024 * 1024)} MiB"
             )
         media_id = uuid.uuid4()
-        object_name = f"myws/{access.workspace.id}/{media_id}.{info.ext}"
+        object_name = f"myws/{access.workspace.id}/{media_id}.{detected.ext}"
         try:
-            await store.upload(object_name, data, info.mime)
+            await store.upload(object_name, data, detected.mime)
         except ConnectorError as error:
             logger.warning("im upload failed", extra={"error_kind": error.kind})
             raise im_unavailable() from error
@@ -900,10 +960,15 @@ class ImService:
             id=media_id,
             workspace_id=access.workspace.id,
             uploaded_by=user_id,
-            mime=info.mime,
+            kind=detected.kind,
+            file_name=safe_file_name(name, f"附件.{detected.ext}")
+            if detected.kind != "image"
+            else None,
+            duration_seconds=detected.duration_seconds,
+            mime=detected.mime,
             size=len(data),
-            width=info.width,
-            height=info.height,
+            width=detected.width,
+            height=detected.height,
             object_name=object_name,
             expires_at=datetime.now(UTC) + timedelta(minutes=self.settings.im_upload_ttl_minutes),
         )
@@ -911,12 +976,32 @@ class ImService:
         await self.db.commit()
         return ImUploadOut(
             upload_id=media.id,
+            kind=detected.kind,
+            name=media.file_name,
             mime=media.mime,
             size=media.size,
-            width=media.width,
-            height=media.height,
+            width=media.width or None,
+            height=media.height or None,
+            duration_seconds=media.duration_seconds,
             expires_at=media.expires_at,
         )
+
+    async def _default_cover(self, access: WorkspaceAccess) -> ImMedia:
+        """视频的默认封面（方案第 11 节 D9）：每次发视频传一张小图。"""
+        if self.client is None:
+            raise im_unavailable()
+        try:
+            return await store_media(
+                self.db,
+                self.client,
+                workspace_id=access.workspace.id,
+                data=DEFAULT_COVER,
+                detected=detect(DEFAULT_COVER, None, "image"),
+                file_name=None,
+                user_id=self._user_id(access),
+            )
+        except AttachmentError as error:
+            raise im_unavailable() from error
 
     async def _media_for_send(
         self, access: WorkspaceAccess, upload_id: uuid.UUID | None
@@ -937,8 +1022,8 @@ class ImService:
 
     async def media(
         self, access: WorkspaceAccess, media_id: uuid.UUID, *, thumb: bool = False
-    ) -> tuple[bytes, str]:
-        """显示图片：上传者本人，或能看到图片所在会话的管理员。"""
+    ) -> tuple[bytes, str, ImMedia]:
+        """显示图片、文件、视频：上传者本人，或能看到它所在会话的管理员。"""
         user_id = self._user_id(access)
         media = await self.db.scalar(
             select(ImMedia).where(
@@ -976,7 +1061,7 @@ class ImService:
         mime = media.mime if not thumb else content_type.split(";")[0].strip()
         if not mime.startswith("image/"):
             mime = media.mime
-        return data, mime
+        return data, mime, media
 
     # ---------------------------------------------------------------- 消息置顶
 

@@ -337,6 +337,29 @@ class OpenIMClient:
             ex=ex,
         )
 
+    async def send_elem(
+        self,
+        *,
+        send_id: str,
+        content_type: int,
+        content: Mapping[str, Any],
+        recv_id: str = "",
+        group_id: str = "",
+        sender_nickname: str = "",
+        ex: str = "",
+    ) -> SentMessage:
+        """图片（102）、视频（104）、文件（105）：content 是对应的元素（`pkg/apistruct/msg.go`，
+        核验记录 2.1）。"""
+        return await self._send(
+            send_id=send_id,
+            recv_id=recv_id,
+            group_id=group_id,
+            content=content,
+            content_type=content_type,
+            sender_nickname=sender_nickname,
+            ex=ex,
+        )
+
     async def send_text(
         self,
         *,

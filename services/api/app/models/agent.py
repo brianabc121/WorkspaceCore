@@ -27,7 +27,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -104,6 +104,8 @@ class AgentInstance(Base):
     plugin_version: Mapped[str | None] = mapped_column(Text)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     bundle_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 签发接入包时写进 inboundWhitelist 的 IM 用户 ID（T-0117）；为空表示接入包签发得更早，无法判断
+    bundle_whitelist: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     # 最近一次签发的 IM 令牌何时到期（令牌只在实例启动时领取；到期前 7 天提醒，迁移 0018）
     im_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -116,6 +118,18 @@ class AgentInstance(Base):
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
     project_admin_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 允许经 im_send 发图片、文件、视频（T-0119，迁移 0035；默认关闭，方案 D3）
+    im_media_enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    im_media_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    im_media_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 允许终止其他智能体正在执行的任务（T-0126，迁移 0037；默认关闭，方案 D20）
+    stop_others_enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    stop_others_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    stop_others_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()
@@ -431,3 +445,49 @@ class AgentOpsAction(Base):
     started_at: Mapped[datetime] = _created()
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+RUN_STOP_STATUSES = ("pending", "running", "done", "failed", "expired")
+
+
+class AgentRunStop(Base):
+    """终止令（T-0126，方案第 7.3 节）：叫停一个实例正在执行的任务。
+
+    软停止：`soft_until` 之前这个实例的 MCP 工具调用返回 RUN_STOPPED；
+    硬停止：接入包的 stop-runs.mjs 领取后在容器里对正在运行的会话调 `sessions.abort`。
+    """
+
+    __tablename__ = "agent_run_stops"
+    __table_args__ = (
+        CheckConstraint(f"status IN {RUN_STOP_STATUSES}", name="status"),
+        CheckConstraint("char_length(reason) BETWEEN 1 AND 500", name="reason"),
+        Index("ix_agent_run_stops_instance_created", "instance_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="CASCADE")
+    )
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    requested_by_instance: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="SET NULL")
+    )
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.tasks.id", ondelete="SET NULL")
+    )
+    reason: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
+    soft_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    aborted: Mapped[int | None] = mapped_column(Integer)
+    error: Mapped[str | None] = mapped_column(Text)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()

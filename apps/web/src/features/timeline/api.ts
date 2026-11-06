@@ -71,8 +71,20 @@ export function useRunActions(scope: string) {
     try { return dataOf(await auth.api.POST('/api/v1/tasks/{task_id}/runs/{run_id}/stop', { params: { header, path: { task_id: taskId, run_id: runId } }, body: { reason } })) }
     finally { void refresh() }
   }
-  return { start, stop, refresh }
+  // 终止执行（T-0126，AGENT_MESSAGING_PLAN 7.3）：叫停实例正在运行的会话，这一段记为中断，任务仍归它
+  async function terminate(taskId: string, instanceId: string, reason: string) {
+    try { return dataOf(await auth.api.POST('/api/v1/agents/instances/{instance_id}/stop', { params: { header, path: { instance_id: instanceId } }, body: { reason, task_id: taskId } })) }
+    finally { void refresh() }
+  }
+  return { start, stop, terminate, refresh }
 }
+
+// 终止执行前问一句原因（它会看到）；取消或留空返回 null
+export function askStopReason(): string | null {
+  const reason = window.prompt('叫停它正在执行的这个任务：写一句原因（它会看到）。接下来 5 分钟它调用工作台工具都会被拒绝，1 分钟内它的 OpenClaw 会中止正在运行和排队的会话；任务仍归它。', '在任务详情里叫停')
+  return reason?.trim() ? reason.trim() : null
+}
+export const TERMINATED = '已叫停：这一段记为中断，1 分钟内中止它正在运行的会话'
 
 // 时间轴相关的错误说明
 const MESSAGES: Record<string, string> = {

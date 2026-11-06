@@ -8,6 +8,7 @@ from app.models.agent import (
     AgentCredential,
     AgentInstance,
     AgentOpsAction,
+    AgentRunStop,
     AgentSecret,
     AgentSecretAccess,
     AgentSecretGrant,
@@ -26,6 +27,9 @@ from app.models.dashboard import Dashboard, Widget
 from app.models.host import AgentHostSample, AgentHostState
 from app.models.identity import AuthSession, ExternalIdentity, User
 from app.models.im import (
+    AgentImOutbox,
+    AgentImRejection,
+    AgentWakeup,
     ImAccount,
     ImContactGroup,
     ImContactGroupMember,
@@ -69,8 +73,11 @@ __all__ = [
     "AgentCredential",
     "AgentHostSample",
     "AgentHostState",
+    "AgentImOutbox",
+    "AgentImRejection",
     "AgentInstance",
     "AgentOpsAction",
+    "AgentRunStop",
     "AgentSecret",
     "AgentSecretAccess",
     "AgentSecretGrant",
@@ -80,6 +87,7 @@ __all__ = [
     "AgentSshTarget",
     "AgentUsageCursor",
     "AgentUsageMinute",
+    "AgentWakeup",
     "AiToolExecution",
     "AppLogin",
     "AuditLog",

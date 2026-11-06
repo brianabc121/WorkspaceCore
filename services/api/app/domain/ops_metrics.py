@@ -59,6 +59,17 @@ COUNTERS: dict[str, CounterSpec] = {
     "im_reconcile_filled": CounterSpec(
         "workspace_im_reconcile_filled_messages", "周期对账补进投影的消息条数（回调丢失或延迟时）"
     ),
+    "im_outbox": CounterSpec(
+        "workspace_im_outbox_events",
+        "智能体主动发消息（T-0118）：event 为 created / sent / rejected，"
+        "detail 为状态、来源或拒收码",
+        ("event", "detail"),
+    ),
+    "im_reply_rejections": CounterSpec(
+        "workspace_im_reply_rejections",
+        "实例的自动回复被 before 回调拒收的次数，按拒收码",
+        ("code",),
+    ),
 }
 
 
