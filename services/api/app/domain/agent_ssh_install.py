@@ -36,6 +36,7 @@ from app.domain.agent_ssh import agent_ssh_context
 from app.domain.agents import AgentService, hash_token
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
+from app.domain.host_metrics import drop_if_empty_auto
 from app.integrations import ssh
 from app.models import (
     AgentCredential,
@@ -755,12 +756,18 @@ class Installer:
             deployment.install_dir = directory
             deployment.installed_at = _now()
             deployment.version += 1
-            # 经 SSH 部署的实例归到这台服务器（以部署为准，不再按指纹自动改）
+            # 经 SSH 部署的实例归到这台服务器（以部署为准，不再按指纹自动改）；
+            # 部署过程中按指纹自动建的那台空了就删掉
+            previous = await db.scalar(
+                select(AgentInstance.server_id).where(AgentInstance.id == self.target.instance_id)
+            )
             await db.execute(
                 update(AgentInstance)
                 .where(AgentInstance.id == self.target.instance_id)
                 .values(server_id=target.server_id, server_manual=True)
             )
+            if previous != target.server_id:
+                await drop_if_empty_auto(db, previous)
             await db.commit()
 
     async def _reflection(self, conn: asyncssh.SSHClientConnection, directory: str) -> None:

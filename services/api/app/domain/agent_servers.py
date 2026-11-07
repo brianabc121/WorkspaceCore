@@ -37,7 +37,7 @@ from app.domain.agent_ssh import (
 )
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
-from app.domain.host_metrics import STALE_AFTER, HostService, _percent_used
+from app.domain.host_metrics import STALE_AFTER, HostService, _percent_used, drop_if_empty_auto
 from app.domain.policy import WorkspaceAccess
 from app.domain.ratelimit import WindowLimiter
 from app.integrations import ssh
@@ -1072,6 +1072,9 @@ class AgentServerService:
         instance.server_id = server.id if server is not None else None
         instance.server_manual = server is not None
         instance.version += 1
+        await self.db.flush()
+        if previous != instance.server_id:
+            await drop_if_empty_auto(self.db, previous)
         await self.audit.record(
             "agents.instance.server_assigned",
             workspace_ids=[instance.workspace_id],

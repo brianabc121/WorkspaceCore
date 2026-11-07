@@ -53,14 +53,18 @@
 盐按工作空间固定（`sha256("myworkspace-host-salt\0" + 工作空间 ID)`）：`boot_id` 是 122 位随机数，哈希不能反推，
 不同工作空间的指纹对不上；不用会轮换的凭证密钥，换密钥后指纹不变。
 
-## 3. 待 CI 实测（T-0148）
+## 3. CI 实测（T-0148，PR brianabc121/WorkspaceCore#169 的 agents 任务）
+
+GitHub Actions 的 `ubuntu-24.04` runner（Ubuntu 默认 cgroup v2 统一层级；从 80d287b 起 SSH 部署验收打印 `/sys/fs/cgroup` 的文件系统类型），
+Docker 由 `install-docker.sh` 按锁定版本安装，真实 sshd、真实 OpenClaw 2026.9.36。
 
 | 项 | 结果 |
 |---|---|
-| cgroup v2 的 `cpu.stat`、`memory.current`、`memory.max`、`memory.stat`、`pids.current` | （T-0148 补） |
-| 真实 OpenClaw 在项目网络里：IM 长连接、MCP、密钥领取、用量上报、`wakeup.mjs` / `stop-runs.mjs` | （T-0148 补） |
-| 外网实例的隧道（ghostunnel）用自己的 hosts 文件连到入口 | （T-0148 补） |
-| 同一台机器上两个实例都上线、卸载一个不影响另一个 | （T-0148 补） |
-| 一个空闲 OpenClaw 的内存与磁盘占用 | （T-0148 补） |
-| 真实的 `net` 服务：SSH 部署后 OpenClaw、隧道是 `container:<net>`，`net` 在 `<项目>_default` 网络上；资源上限进了容器（`Memory`、`NanoCpus`） | 本 PR 的 CI（`agent_ssh_acceptance.py`）实测后补 |
-| agents 验收里甲、乙在同一台机器上，按指纹归到同一台服务器；甲读得到自己容器的用量 | 本 PR 的 CI（场景 19）实测后补 |
+| 自己容器的 cgroup：`cpu.stat`、`memory.current`、`memory.max`、`memory.stat`、`pids.current` | 通过。两个实例各读各的：甲 `mem_bytes` 979935232、`mem_limit` 3221225472（= 设置的 3072 MiB）、`pids` 52、`cpu_cores` 0.237；乙 `mem_bytes` 1048616960、`mem_limit` 空（没设上限）、`pids` 78、`cpu_cores` 1.402（第二次上报才有 CPU，两次之差）。commit 96a8d1c |
+| 真实 OpenClaw 在项目网络里：IM 长连接、MCP、密钥领取、用量上报、`wakeup.mjs` / `stop-runs.mjs` | 通过。agents 场景（两个真实实例，`patch_compose` 用占位容器持有命名空间）全部通过；SSH 部署的两个实例都“连上了工作台”（心跳、取密钥），照 crontab 那几行跑用量与服务器状态上报成功。commit e9ce4b3、96a8d1c |
+| 外网实例的隧道（ghostunnel）用自己的 hosts 文件连到入口 | 通过。自动接入验收：`tls/hosts` 把入口主机名映射到 `AGENT_PUBLIC_ADDRESS`，在实例自己的命名空间里经隧道取到密钥、心跳 200；宿主上连不到隧道端口。commit e9ce4b3 |
+| 同一台机器上两个实例都上线、卸载一个不影响另一个 | 通过。准备一次（五步、一次密码）后部署甲、乙都不用密码；`authorized_keys` 只有一行；各六行带自己标记的定时任务；甲的重启、重新拉起、重新部署不动乙的容器（容器 ID 不变）；卸载甲（删除目录）后乙的容器、目录、定时任务都在；乙还在时不能移除服务器；卸载乙后上一级目录一起删掉，吊销、移除成功。commit 96a8d1c |
+| 一个空闲 OpenClaw 的内存与磁盘占用 | 内存约 0.93 ~ 1.0 GiB（上面两个实例，刚上线、只跑了一次假模型对话）；数据目录大小每 10 分钟算一次，验收时间内还没有值 |
+| 真实的 `net` 服务：SSH 部署后 OpenClaw、隧道是 `container:<net>`，`net` 在 `<项目>_default` 网络上；资源上限进了容器（`Memory`、`NanoCpus`） | 通过。两个实例的 `net` 各在自己的 `myworkspace-openclaw-<短号>_default` 上、不是宿主网络，OpenClaw 与隧道都是 `container:<自己的 net>`，两个 `net` 不同；甲 `Memory` 3221225472、`NanoCpus` 1500000000，乙都是 0。commit e9ce4b3、96a8d1c |
+| agents 验收里甲、乙在同一台机器上，按指纹归到同一台服务器；甲读得到自己容器的用量 | 通过（场景 19）：两个实例归到同一台自动识别的服务器；甲 `available` true、`mem_bytes` 1634299904、`pids` 59。commit e9ce4b3 |
+| SSH 部署的实例与整机数据归到那台 SSH 服务器 | 96a8d1c 上**发现问题**：部署过程中定时任务先上报，按指纹自动建了一台“自动识别的服务器”；部署完实例归到 SSH 服务器后，SSH 服务器（还没有指纹）接不过来，整机数据不记。已修：手动指定 / 部署的那台还没有指纹时接过指纹，自动建的那台并过来、删掉（`host_metrics._absorb`），部署结束与手动指定时原来那台自动识别的空了就删（`drop_if_empty_auto`）；单元测试 `test_ssh_server_takes_over_fingerprint_from_auto_server`。以本 PR 最后一次 agents 任务为准 |

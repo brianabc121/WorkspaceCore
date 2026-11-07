@@ -270,6 +270,45 @@ async def test_manual_assignment_is_kept(env: ImEnv) -> None:
         assert row.latest["data_free"] == 50 * GB  # 对不上的整机数据不记到这台
 
 
+async def test_ssh_server_takes_over_fingerprint_from_auto_server(env: ImEnv) -> None:
+    """部署过程中定时任务先上报、按指纹自动建了一台；部署完实例归到 SSH 服务器后，
+    那台 SSH 服务器（还没有指纹）接过指纹，自动建的那台并过来、删掉（T-0147，agents CI 发现）。"""
+    a, _ = await agent(env, "甲")
+    b, _ = await agent(env, "乙")
+    ta, tb = await env.issue_token(a["id"]), await env.issue_token(b["id"])
+    await report(env, ta, body(key=KEY_A))
+    await report(env, tb, body(key=KEY_A))
+    auto = await server_of(env, a["id"])
+    assert auto is not None and await server_of(env, b["id"]) == auto
+    ssh = uuid.uuid4()
+    await run_sql(
+        env.database_url,
+        "INSERT INTO workspace.agent_servers (id, workspace_id, name, kind)"
+        " VALUES ($1, $2, '验收服务器', 'ssh')",
+        ssh,
+        uuid.UUID(env.workspace_id),
+    )
+    # 部署完：甲归到 SSH 服务器（以部署为准）；乙还在自动识别的那台
+    await run_sql(
+        env.database_url,
+        "UPDATE workspace.agent_instances SET server_id = $2, server_manual = true WHERE id = $1",
+        uuid.UUID(a["id"]),
+        ssh,
+    )
+    await shift(env, 60)
+    await report(env, ta, body(key=KEY_A, data_free=7 * GB))
+    # SSH 服务器接过指纹、记下整机数据；乙并过来（不是手动指定的）；自动识别的那台删掉
+    assert await server_of(env, a["id"]) == str(ssh) and await server_of(env, b["id"]) == str(ssh)
+    gone = "SELECT count(*) FROM workspace.agent_servers WHERE id = $1"
+    assert await count(env, gone, uuid.UUID(auto)) == 0
+    async with env.app.state.sessionmaker() as db:
+        row = await db.get(AgentServer, ssh)
+        assert row is not None and row.machine_key == KEY_A
+        assert row.latest["data_free"] == 7 * GB
+    shown = await status(env, b["id"])
+    assert shown["server"]["id"] == str(ssh) and shown["current"] is not None
+
+
 async def test_server_alerts_once_until_recovered(env: ImEnv) -> None:
     a, _ = await agent(env, "甲")
     b, _ = await agent(env, "乙")

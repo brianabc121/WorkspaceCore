@@ -188,6 +188,19 @@ class HostService:
         if not left:
             await self.db.delete(old)
 
+    async def _absorb(self, old: AgentServer, new: AgentServer) -> None:
+        """自动识别的那台其实就是 new（同一个指纹）：实例都并到 new，删掉 old（先让出指纹）。"""
+        await self.db.execute(
+            update(AgentInstance)
+            .where(AgentInstance.server_id == old.id)
+            .values(server_id=new.id)
+            .execution_options(synchronize_session=False)
+        )
+        old.machine_key = None
+        await self.db.flush()
+        await self.db.delete(old)
+        await self.db.flush()
+
     async def _server_for(
         self, instance: AgentInstance, key: str | None, uptime: int | None, now: datetime
     ) -> tuple[AgentServer, bool]:
@@ -217,7 +230,11 @@ class HostService:
             current.machine_key is None or _rebooted(current, uptime, now)
         )
         if instance.server_manual and current is not None:
-            if by_key is None and adopt:
+            if adopt and (by_key is None or (by_key.kind == "auto" and by_key.id != current.id)):
+                # 部署到 SSH 服务器（或手动指定）的那台还没有指纹：接过这个指纹。部署过程中
+                # 定时任务先上报、已经按指纹自动建了一台的，把那台的实例并过来、删掉那台
+                if by_key is not None:
+                    await self._absorb(by_key, current)
                 current.machine_key = key
                 return current, True
             # 指纹对不上管理员指定的那台：整机数据不记，只记这个实例自己的
@@ -650,6 +667,20 @@ class HostService:
 
 
 # ---------------------------------------------------------------- Worker：清理与告警
+
+
+async def drop_if_empty_auto(db: AsyncSession, server_id: uuid.UUID | None) -> None:
+    """实例部署到或手动指定到别的服务器之后，原来那台自动识别的服务器空了就删掉（T-0147）。"""
+    if server_id is None:
+        return
+    server = await db.get(AgentServer, server_id)
+    if server is None or server.kind != "auto":
+        return
+    left = await db.scalar(
+        select(func.count()).select_from(AgentInstance).where(AgentInstance.server_id == server_id)
+    )
+    if not left:
+        await db.delete(server)
 
 
 async def purge(db: AsyncSession, now: datetime | None = None) -> int:
