@@ -112,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # V2 实例接口：只经接入入口到达（Caddy 管理员入口只转发 /api/*）
     app.include_router(agent_api.router)
     app.include_router(agent_api.gateway)
+    app.include_router(api_v1.news.internal)
     app.include_router(runner_api.router)
     app.include_router(mcp.router)
 

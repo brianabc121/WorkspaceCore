@@ -160,6 +160,12 @@ class ImQuickChatConfig(_Strict):
     )
 
 
+class NewsBriefingConfig(_Strict):
+    """T-0154：首页的“今日早报”（docs/v2/NEWS_PLAN.md 第 7 节）：最新一份的时间、标题和开头几行。"""
+
+    lines: int = Field(default=6, ge=2, le=20, description="显示正文开头几行")
+
+
 class _WidgetBody(_Strict):
     layout: WidgetLayout
 
@@ -224,6 +230,11 @@ class ImQuickChatWidgetCreate(_WidgetBody):
     config: ImQuickChatConfig = Field(default_factory=ImQuickChatConfig)
 
 
+class NewsBriefingWidgetCreate(_WidgetBody):
+    widget_type: Literal["news_briefing"]
+    config: NewsBriefingConfig = Field(default_factory=NewsBriefingConfig)
+
+
 WidgetCreate = Annotated[
     QuickLinksWidgetCreate
     | NoteWidgetCreate
@@ -236,7 +247,8 @@ WidgetCreate = Annotated[
     | ApiLatencyWidgetCreate
     | NotificationsWidgetCreate
     | ProjectProgressWidgetCreate
-    | ImQuickChatWidgetCreate,
+    | ImQuickChatWidgetCreate
+    | NewsBriefingWidgetCreate,
     Field(discriminator="widget_type"),
 ]
 
@@ -305,6 +317,11 @@ class ImQuickChatWidgetUpdate(_WidgetUpdateBody):
     config: ImQuickChatConfig
 
 
+class NewsBriefingWidgetUpdate(_WidgetUpdateBody):
+    widget_type: Literal["news_briefing"]
+    config: NewsBriefingConfig
+
+
 WidgetUpdate = Annotated[
     QuickLinksWidgetUpdate
     | NoteWidgetUpdate
@@ -317,7 +334,8 @@ WidgetUpdate = Annotated[
     | ApiLatencyWidgetUpdate
     | NotificationsWidgetUpdate
     | ProjectProgressWidgetUpdate
-    | ImQuickChatWidgetUpdate,
+    | ImQuickChatWidgetUpdate
+    | NewsBriefingWidgetUpdate,
     Field(
         discriminator="widget_type",
         description="修改配置；widget_type 必须与现有类型相同（类型不能修改）",
@@ -331,7 +349,7 @@ class WidgetOut(BaseModel):
     widget_type: str = Field(
         description="当前版本内置：quick_links、note、todo_summary、today_tasks、"
         "calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications、"
-        "project_progress、im_quick_chat；"
+        "project_progress、im_quick_chat、news_briefing；"
         "也可能是已不再支持的旧类型，前端应显示安全的错误卡片"
     )
     config: dict[str, Any] = Field(description="该类型的配置；前端按自己的 Registry 再校验一次")

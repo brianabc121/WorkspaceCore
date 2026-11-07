@@ -35,7 +35,7 @@ NewsNow / RSS / 大模型 / 推送渠道（外网）
           │  └──────────── 共享卷 trendradar-config ◄────── api / worker 生成配置文件
           │ 通用 Webhook（news 内部网络）                             ▲
           ▼                                                          │ news 内部网络
-   api：POST /api/v1/news/ingest/<token> → 早报入库、通知            api / worker：MCP 客户端（只调允许的工具）
+   api：POST /internal/news/ingest/<token> → 早报入库、通知          api / worker：MCP 客户端（只调允许的工具）
                                                                      ▲
                                               智能体 news_* 只读工具、早报页面、首页面板
 ```
@@ -54,7 +54,7 @@ NewsNow / RSS / 大模型 / 推送渠道（外网）
 |---|---|---|
 | 启用 | `notification.enabled`、生成 / 清空配置 | 关闭时生成“不抓取、不推送”的配置 |
 | 推送时间（1~3 个，半小时为单位，默认 07:30） | `timeline.yaml` 的 `custom` 时间段 | 时间段 `[t, t+30min)`，`once.push`、`once.analyze`，`report_mode: daily`；其余时间只抓取 |
-| 时区（默认 Asia/Shanghai） | `app.timezone` | 决定推送时间与“今天”的日期 |
+| 时区（默认 Asia/Shanghai；部署时在 `.env` 的 `TRENDRADAR_TZ` 设置，网页上只读） | `app.timezone` 与两个容器的 `TZ` | 决定推送时间与“今天”的日期；MCP 按容器时区算“今天”，所以不能在网页上改（核验记录第 7 节） |
 | 早报方式 A / B，方案 B 选一个智能体实例 | A：时间段推送；B：时间段不推送，由工作台调智能体 | 第 5 节 |
 | 兴趣主题（名称、关键词、必含词、每组最多条数、给 AI 的描述） | `frequency_words.txt` 的 `[WORD_GROUPS]`；`ai_interests.txt` | 关键词支持 `/正则/`；偏好学习会调整条数（第 8 节） |
 | 全局排除词 | `frequency_words.txt` 的 `[GLOBAL_FILTER]` | 上游的 `!词` 实际是全局的，所以只做全局排除 |
@@ -70,10 +70,12 @@ AI 提示词文件来自上游（GPL-3.0，不放进本仓库）：部署时按�
 ## 5. 早报
 
 - **方案 A（默认）**：到推送时间那次运行，TrendRadar 做全天汇总 + AI 分析，推到所选渠道和工作台。工作台的接收接口
-  `POST /api/v1/news/ingest/<token>`（只在 `news` 网络里可达；token 32 字节随机，加密保存）按“[第 i/N 批次]”把多批拼成一份，
-  存入 `news_briefings`，给工作空间的 owner 发一条站内通知（“今日早报已送达”）。
+  `POST /internal/news/ingest/<token>`（Caddy 只转发 `/api/*`，这个地址只在 `news` 网络里可达；token 32 字节随机，加密保存）
+  按“[第 i/N 批次]”把多批拼成一份，存入 `news_briefings`，给工作空间的 owner 发一条站内通知（“今日早报已送达”）。
+  标题以“【工作台】”开头的是工作台自己经 TrendRadar 推的（测试推送、方案 B），接收时忽略。
 - **方案 B**：到推送时间，worker 在“每日早报”项目里建一个任务（执行者 = 选定的智能体，说明里写兴趣、格式和要用的工具），
-  照“交给智能体执行”发给它。智能体用 `news_*` 工具取新闻，用 `readme_update` 把早报写进任务 README 的「早报」部分，
+  再给这个实例安排一个立即执行的**唤醒**（`agent_wakeups.source = news`，T-0121 的机制：接入包每分钟领取，在独立会话里跑一轮；
+  不需要管理员的 IM 账号）。智能体用 `news_*` 工具取新闻，用 `readme_update` 把早报写进任务 README 的「早报」部分，
   再 `complete_task`（都是已有的、不用审批的工具：例外二、例外五）。任务完成时工作台取出这一部分存为早报，
   并经 TrendRadar MCP 的 `send_notification` 推到所选渠道（这是工作台自己调用，不开放给智能体）。90 分钟没完成记为失败并通知 owner。
 - 两种方式的早报都在“早报”页面和首页面板里看，保留全部历史。
@@ -97,7 +99,7 @@ MCP 返回的错误按 `error.code` 归类（如没有数据）。工作台网�
 
 - **早报**（导航新增，`/news`）：今天（最新一份早报 + 每个兴趣主题今天的条目）、往期、热榜（按平台）、RSS、搜索、收藏。
   条目可以“收藏”或“不感兴趣”（可顺手把标题里的某个词加进全局排除）。成员与访客都能看；设置只有 owner 能改。
-- **首页面板**：新组件“今日早报”，显示最新一份的时间、标题和开头几行，点开进早报页。
+- **首页面板**：新组件 `news_briefing`“今日早报”（配置：显示开头几行），显示最新一份的时间、标题和开头几行，点开进早报页。
 - **设置 → 新闻早报**：第 4 节的全部设置、状态（TrendRadar 是否在线、最近一次抓取、最近一份早报、配置写入时间与错误）、
   “发一条测试推送”、方案 B 的“现在生成一份”、学到的偏好（第 8 节）。
 
@@ -114,9 +116,10 @@ MCP 返回的错误按 `error.code` 归类（如没有数据）。工作台网�
 
 | 表 | 内容 |
 |---|---|
-| `news_settings` | 每个工作空间一行：启用（全部署唯一）、时区、推送时间、早报方式、智能体实例、平台、NewsNow 地址、RSS 源、兴趣主题、全局排除词、筛选方式、大模型（模型、地址、Key 引用）、推送渠道（非密字段 + 加密的凭证引用）、接收 token 引用、配置版本与写入时间 / 错误、乐观锁 `version` |
+| `news_settings` | 每个工作空间一行：启用（全部署唯一）、推送时间、早报方式、智能体实例、平台、NewsNow 地址、RSS 源、兴趣主题、全局排除词、筛选方式、大模型（模型、地址、Key 引用）、推送渠道（非密字段 + 加密的凭证引用）、接收 token 引用、配置版本与写入时间 / 错误、乐观锁 `version` |
 | `news_briefings` | 早报：日期、来源（trendradar / agent）、标题、正文（Markdown，≤ 200 KB）、已收批数 / 总批数、状态（receiving / complete / failed）、方案 B 的任务 |
 | `news_feedback` | 收藏 / 不感兴趣（唯一：工作空间 + 用户 + 类型 + 链接） |
+| `agent_wakeups.source` | 增加 `news`（方案 B 的唤醒） |
 
 密钥（大模型 Key、推送凭证、接收 token）用现有的凭证加密，纳入密钥轮换（`credential_rotation`）。
 

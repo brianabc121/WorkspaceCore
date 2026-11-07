@@ -73,6 +73,19 @@ from app.schemas.mail_tools import (
     MailThreadInput,
     MailThreadOutput,
 )
+from app.schemas.news_tools import DESCRIPTIONS as NEWS_DESCRIPTIONS
+from app.schemas.news_tools import (
+    NewsBriefingInput,
+    NewsBriefingOutput,
+    NewsByDateInput,
+    NewsLatestInput,
+    NewsListOutput,
+    NewsRelatedInput,
+    NewsRssInput,
+    NewsSearchInput,
+    NewsTrendingInput,
+    NewsTrendingOutput,
+)
 from app.schemas.runner import (
     EnvCreateInput,
     EnvCreateOutput,
@@ -1074,9 +1087,10 @@ class ImRejectedReply(BaseModel):
 
 class WakeupItem(BaseModel):
     wakeup_id: UUID
-    source: Literal["agent", "admin", "issue"] = Field(
+    source: Literal["agent", "admin", "issue", "runner", "news"] = Field(
         description="agent 是你自己安排的，admin 是管理员建的，"
-        "issue 是 Issue 有新动态时工作台安排的"
+        "issue 是 Issue 有新动态时工作台安排的，runner 是运行环境的命令有结果时工作台安排的，"
+        "news 是到了写每日早报的时间（新闻早报方案 B）"
     )
     target: str | None = Field(description="在哪个会话里跑；null 是独立会话")
     run_at: datetime
@@ -1693,6 +1707,19 @@ _KNOWLEDGE: list[ToolSpec] = [
     _knowledge("knowledge_write", KnowledgeWriteInput, KnowledgeWriteOutput),
     _knowledge("knowledge_delete", KnowledgeDeleteInput, KnowledgeDeleteOutput),
 ]
+# 新闻早报（T-0153，docs/v2/NEWS_PLAN.md 第 6 节）：只读，只列给启用了早报的工作空间的实例
+_NEWS: list[ToolSpec] = [
+    _spec(name, "read", input_model, output_model, NEWS_DESCRIPTIONS[name])
+    for name, input_model, output_model in (
+        ("news_latest", NewsLatestInput, NewsListOutput),
+        ("news_search", NewsSearchInput, NewsListOutput),
+        ("news_by_date", NewsByDateInput, NewsListOutput),
+        ("news_trending", NewsTrendingInput, NewsTrendingOutput),
+        ("news_rss", NewsRssInput, NewsListOutput),
+        ("news_related", NewsRelatedInput, NewsListOutput),
+        ("news_briefing", NewsBriefingInput, NewsBriefingOutput),
+    )
+]
 TOOLS: dict[str, ToolSpec] = {
     spec.name: spec
     for spec in _READ
@@ -1708,6 +1735,7 @@ TOOLS: dict[str, ToolSpec] = {
     + _MAIL_READ
     + _MAIL_SEND
     + _RUNNER
+    + _NEWS
 }
 KNOWLEDGE_TOOL_NAMES = frozenset(spec.name for spec in _KNOWLEDGE)
 DIRECT_TOOL_NAMES = frozenset(spec.name for spec in _DIRECT)
@@ -1720,6 +1748,7 @@ MAIL_READ_TOOL_NAMES = frozenset(spec.name for spec in _MAIL_READ)
 MAIL_SEND_TOOL_NAMES = frozenset(spec.name for spec in _MAIL_SEND)
 MAIL_TOOL_NAMES = MAIL_READ_TOOL_NAMES | MAIL_SEND_TOOL_NAMES
 RUNNER_TOOL_NAMES = frozenset(spec.name for spec in _RUNNER)
+NEWS_TOOL_NAMES = frozenset(spec.name for spec in _NEWS)
 
 # 永远不做成工具（方案第 4.6 节）：集成凭证与设置、成员与角色、会话、工作台设置、
 # 实例与密钥管理、审计日志

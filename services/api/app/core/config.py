@@ -184,6 +184,24 @@ class Settings(BaseSettings):
     oss_bucket: str = ""
     oss_endpoint: str = ""
 
+    # 新闻早报（T-0153，docs/v2/NEWS_PLAN.md）：TrendRadar 两个容器只在内部网络 news 里。
+    # trendradar_mcp_url 为空表示没有部署 TrendRadar：设置页显示“未部署”，智能体看不到 news_* 工具
+    trendradar_mcp_url: str = ""
+    # 生成的 TrendRadar 配置文件写到这里（Compose 的卷 trendradar-config；
+    # TrendRadar 只读挂载为 /app/config）
+    news_config_dir: str = "/var/lib/workspace/trendradar"
+    # TrendRadar 把早报推给工作台用的地址前缀（news 网络里的 api）
+    news_ingest_base_url: str = "http://api:8000"
+    # 设置里填的地址（RSS、自建 NewsNow、推送 Webhook、大模型接口）解析到私有地址时只允许这些主机名
+    # （逗号分隔）；只有验收用的模拟服务需要，其余私有、回环、链路本地地址与没有点的主机名一律拒绝
+    news_allowed_hosts: str = ""
+    news_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
+    # 方案 B：智能体多少分钟内没写完早报就记为失败
+    news_agent_timeout_minutes: int = Field(default=90, ge=10, le=600)
+    # 早报的时区（推送时间、“今天”的日期）。TrendRadar 的 MCP 按容器时区算“今天”，
+    # 所以与两个 TrendRadar 容器的 TZ 一起由部署设置（.env 的 TRENDRADAR_TZ），网页上只读
+    news_timezone: str = "Asia/Shanghai"
+
     @field_validator("agent_reflection_timezone")
     @classmethod
     def _iana_timezone(cls, value: str) -> str:
@@ -193,6 +211,15 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AGENT_REFLECTION_TIMEZONE 要用 IANA 时区名，例如 Asia/Shanghai"
             ) from error
+        return value
+
+    @field_validator("news_timezone")
+    @classmethod
+    def _news_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise ValueError("TRENDRADAR_TZ 要用 IANA 时区名，例如 Asia/Shanghai") from error
         return value
 
     @field_validator("agent_reflection_cron")
@@ -216,6 +243,8 @@ class Settings(BaseSettings):
         "agent_intranet_url",
         "agent_public_url",
         "openim_api_url",
+        "trendradar_mcp_url",
+        "news_ingest_base_url",
         "r2_endpoint",
         "oss_endpoint",
     )
@@ -330,6 +359,10 @@ class Settings(BaseSettings):
                 except ValueError:
                     raise ValueError("必须是逗号分隔的 IP 地址或网段") from None
         return value
+
+    @property
+    def allowed_news_hosts(self) -> frozenset[str]:
+        return frozenset(h.strip().lower() for h in self.news_allowed_hosts.split(",") if h.strip())
 
     @property
     def allowed_integration_hosts(self) -> frozenset[str]:

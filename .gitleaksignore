@@ -30,3 +30,7 @@ f9dc628f737a3acdc623f65c15cc77609e3074fb:infra/openim/patches/0004-deps-upgrade-
 c5f5b9ab8d9be1bc6178136656112ee037e51355:services/api/tests/test_agent_ops_api.py:curl-auth-header:288
 c5f5b9ab8d9be1bc6178136656112ee037e51355:services/api/tests/test_agent_ops_api.py:jwt:292
 c5f5b9ab8d9be1bc6178136656112ee037e51355:services/api/tests/test_agent_ops_api.py:private-key:293
+# 新闻早报配置生成测试（T-0153）里的假值：ntfy 主题 my-topic、接收地址里的 token “tok”，不是凭据
+f5a9137f73da43353733db11a492ceab8bc3cb8d:services/api/tests/test_news_config.py:generic-api-key:52
+f5a9137f73da43353733db11a492ceab8bc3cb8d:services/api/tests/test_news_config.py:generic-api-key:76
+f5a9137f73da43353733db11a492ceab8bc3cb8d:services/api/tests/test_news_config.py:generic-api-key:103

@@ -86,3 +86,26 @@ RSS 地址、大模型接口（LiteLLM）、推送渠道（各 Webhook、api.tel
 4. 早报正文要靠推送拿：工作台把自己的接收地址作为通用 Webhook 的第一个地址，分批接收后拼成一份早报入库。
 5. 定时运行固定每 30 分钟一次，推送时间以半小时为单位，用 timeline 的自定义时间段与 `once` 实现。
 6. AI 提示词文件来自上游，**不放进本仓库**（GPL-3.0）：部署时按锁定提交下载并校验 sha256，写进配置卷。
+
+## 7. 接入后的本地实测（T-0152 / T-0153，2026-11-07）
+
+用 `infra/trendradar/compose.yaml`（锁定的两个镜像）与工作台的配置生成器（`app/domain/news_config.py`）实际跑了一遍，
+外部依赖换成 `tests/e2e/fake_news_server.py`：
+
+| 项 | 结果 |
+|---|---|
+| 权限 | 配置文件属主 10001、0640；两个容器 `cap_drop: ALL` + `group_add: ["10001"]` 能读，MCP 只读根文件系统正常 |
+| 提示词 | `scripts/trendradar-prompts.sh` 从 `raw.githubusercontent.com` 按提交 `ceabb027…` 下载 5 个文件，sha256 与 `infra/trendradar/prompts.sha256` 一致；再运行一次直接跳过 |
+| 一次运行 | 抓 3 个平台 11 条 → 关键词筛选留下 4 条（“八卦”“绯闻”被全局排除）+ RSS 1 条 → AI 分析（假模型）→ 推到 ntfy 与通用 Webhook（工作台的接收地址在第一个），`period_executions` 记下 `push_1` |
+| 通用 Webhook | 一批时 `{"title": "全天汇总", "content": "<Markdown>"}`，没有批次头；多批时每批开头 `**[第 i/N 批次]**`（`notification/batch.py` 的 wework 格式），工作台按这个拼接 |
+| MCP | `search_news`、`get_latest_news`、`get_system_status` 直接读同一个输出卷；结果有缓存（改关键词后 `get_trending_topics` 不会马上变），所以“改关键词后条目随之变化”的验收看下一次运行的早报 |
+| LiteLLM | 1.82.6 每次启动会去 `raw.githubusercontent.com` 取模型价格表：compose 里设 `LITELLM_LOCAL_MODEL_COST_MAP=True` 后不再访问 |
+| 推送标记 | 工作台经 `send_notification` 推的消息标题以“【工作台】”开头，推回接收地址时不入库 |
+| 时区 | MCP 用容器本地时间（`datetime.now()`）算“今天”，`get_latest_news`、`get_latest_rss` 没有日期参数；抓取容器按配置的 `app.timezone` 给数据分日期。容器默认 UTC 时，北京时间 0~8 点 MCP 找的是“昨天”的文件（实测 `未找到 2026-11-07 的 news 数据`，而数据在 `2026-11-08.db`）。上游 compose 给两个容器都设 `TZ=Asia/Shanghai`；本项目改为部署级设置 `.env` 的 `TRENDRADAR_TZ`（两个容器的 `TZ` 与工作台的 `NEWS_TIMEZONE` 共用），网页上只读 |
+| `search_news` | 有命中时结果在 `data`、RSS 在 `rss`；热榜没有命中时直接返回 `{"results": [], "message": "未找到匹配的新闻…"}`，即使 `include_rss=true` 也不带 RSS。所以工作台的搜索与 `news_search` 工具另用 `search_rss`（结果在 `data`）查 RSS |
+| `send_notification` | 每次调用都重新读配置文件：网页保存设置后马上测试推送，用的就是新的渠道（实测改 ntfy 的 topic 后推到新 topic） |
+| 推送去重 | 同一个推送时间段一天只推一次（`今天已推送过，跳过`），记录在输出卷里；所以验收在全新的输出卷上跑，“改关键词后”的那次用单独的输出卷 |
+
+CI（`ci-infra` 的 `news` job）在 Compose 全栈上重复这些步骤：`tests/e2e/news_acceptance.py` 验证入库、通知、页面接口、
+智能体工具与“改关键词后下一次运行跟着变”，`tests/e2e/news_browser.cjs` 验证设置页、测试推送、早报页各标签、收藏与不感兴趣、
+首页面板、手机宽度与 viewer 只读。两个脚本 2026-11-08 在本机 Compose 全栈（真实 TrendRadar 6.11.0 / MCP 4.1.1）上全部通过。

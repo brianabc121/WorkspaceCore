@@ -30,6 +30,8 @@ EventTopic = Literal[
     "timeline",
     # 项目 Issues（T-0123）：开、评论、关闭、指派
     "issues",
+    # 新闻早报（T-0153）：早报送达、设置与收藏变化
+    "news",
 ]
 MAX_MARK_IDS = 100
 

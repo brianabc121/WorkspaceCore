@@ -171,6 +171,34 @@ async def notify_admins(
     return added
 
 
+async def notify_owners(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    *,
+    type_: str,
+    severity: str,
+    title: str,
+    body: str,
+    link: str | None,
+    key: str,
+) -> int:
+    """发给工作空间的 owner（例如新闻早报送达，T-0153）；key 是事件的标识（只发一次）。"""
+    added = await repo.add_for_roles(
+        db,
+        workspace_id=workspace_id,
+        roles=("owner",),
+        type_=type_,
+        severity=severity,
+        title=title,
+        body=body,
+        link=link,
+        source_key=f"{type_}:{key}",
+    )
+    if added:
+        events.mark(db, workspace_id, "notifications", "overview")
+    return added
+
+
 async def notify_user(
     db: AsyncSession,
     workspace_id: uuid.UUID,

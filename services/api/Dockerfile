@@ -26,10 +26,13 @@ FROM python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed
 RUN apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade apt libapt-pkg7.0 zlib1g \
     && rm -rf /var/lib/apt/lists/*
-# 知识库图片的本地存储（T-0103）：Compose 把卷 kb-files 挂到 /data/kb-files；新卷继承这个目录的属主
+# 知识库图片的本地存储（T-0103）：Compose 把卷 kb-files 挂到 /data/kb-files；新卷继承这个目录的属主。
+# 新闻早报（T-0152）：卷 trendradar-config 挂到 /var/lib/workspace/trendradar，TrendRadar 以 10001 组只读
 RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --home-dir /app --shell /usr/sbin/nologin app \
-    && mkdir -p /data/kb-files && chown app:app /data/kb-files && chmod 700 /data/kb-files
+    && mkdir -p /data/kb-files && chown app:app /data/kb-files && chmod 700 /data/kb-files \
+    && mkdir -p /var/lib/workspace/trendradar \
+    && chown app:app /var/lib/workspace/trendradar && chmod 750 /var/lib/workspace/trendradar
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build --chown=root:root /app /app
 ENV PATH=/opt/venv/bin:$PATH \

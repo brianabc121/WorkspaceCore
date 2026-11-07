@@ -28,11 +28,13 @@ from app.domain.agent_ssh import agent_ssh_context
 from app.domain.agents import agent_secret_context
 from app.domain.connectors import account_context
 from app.domain.credentials import CredentialBox, CredentialError
+from app.domain.news import secret_context as news_context
 from app.models import (
     AgentCa,
     AgentSecretVersion,
     AgentSshTarget,
     IntegrationAccount,
+    NewsSettings,
 )
 
 _PREFIX = "enc:v1:"
@@ -73,6 +75,25 @@ FIELDS: tuple[SealedField, ...] = (
         AgentSshTarget,
         "client_key_ref",
         lambda row: agent_ssh_context(row.id),
+    ),
+    # 新闻早报（T-0153）：大模型 Key、推送凭证、接收 token；主键是 workspace_id
+    SealedField(
+        "news_settings.ai_key_ref",
+        NewsSettings,
+        "ai_key_ref",
+        lambda row: news_context(row.workspace_id, "ai_key"),
+    ),
+    SealedField(
+        "news_settings.channel_secrets_ref",
+        NewsSettings,
+        "channel_secrets_ref",
+        lambda row: news_context(row.workspace_id, "channels"),
+    ),
+    SealedField(
+        "news_settings.ingest_token_ref",
+        NewsSettings,
+        "ingest_token_ref",
+        lambda row: news_context(row.workspace_id, "ingest"),
     ),
 )
 
@@ -118,16 +139,19 @@ async def _rotate_field(
     column = getattr(model, spec.column)
     table: Table = model.__table__
     keep_updated_at = {"updated_at": table.c.updated_at} if "updated_at" in table.c else {}
+    # 单列主键（多数表是 id，news_settings 是 workspace_id）
+    (key_column,) = table.primary_key.columns
+    key = getattr(model, key_column.key)
     last_id: uuid.UUID | None = None
     while True:
         stmt = (
             select(model)
             .where(column.like(f"{_PREFIX}%"), column.notlike(f"{_PREFIX}{box.key_id}:%"))
-            .order_by(model.id)
+            .order_by(key)
             .limit(BATCH)
         )
         if last_id is not None:
-            stmt = stmt.where(model.id > last_id)
+            stmt = stmt.where(key > last_id)
         rows = (await db.execute(stmt)).scalars().all()
         if not rows:
             break
@@ -144,11 +168,16 @@ async def _rotate_field(
                 continue
             result = await db.execute(
                 update(table)
-                .where(and_(table.c.id == row.id, table.c[spec.column] == old))
+                .where(
+                    and_(
+                        key_column == getattr(row, key_column.key),
+                        table.c[spec.column] == old,
+                    )
+                )
                 .values({spec.column: new, **keep_updated_at})
             )
             report.rotated += result.rowcount or 0  # type: ignore[attr-defined]
-        last_id = rows[-1].id
+        last_id = getattr(rows[-1], key_column.key)
         db.expunge_all()
         if not dry_run:
             await db.commit()

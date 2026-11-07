@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.domain import github_sync, im
 from app.domain.connectors import ConnectorRuntime, sync_state
+from app.domain.news import news_client
 from app.domain.policy import WorkspaceAccess, has_role
 from app.integrations.base import ConnectorError
 from app.integrations.http import ConnectorHttp, OutboundPolicy, host_of
@@ -135,6 +136,7 @@ _NAMES = {
     "prometheus": "Prometheus",
     "grafana": "Grafana",
     "openim": "OpenIM",
+    "trendradar": "TrendRadar（新闻早报）",
 }
 # 回调收件箱里等待超过这么久还没处理完的事件，说明 Worker 处理不过来或卡住了
 INBOX_STUCK_AFTER = timedelta(minutes=5)
@@ -229,6 +231,28 @@ class DeploymentHealth:
     async def openim(self) -> ServiceStatusOut:
         """OpenIM（V2）：用 imAdmin 令牌查一次通知账号是否存在，证明 REST 与 secret 都可用。"""
         return await self._cached("openim", self._openim)
+
+    async def trendradar(self) -> ServiceStatusOut:
+        """新闻早报（T-0152）：TrendRadar MCP 能否连通（只读的 get_system_status）。"""
+        return await self._cached("trendradar", self._trendradar)
+
+    async def _trendradar(self) -> ServiceStatusOut:
+        if not self.settings.trendradar_mcp_url:
+            return _status(
+                "trendradar",
+                "integration",
+                "not_configured",
+                reason="not_deployed",
+                provider="trendradar",
+            )
+        client = news_client(self.settings, self.runtime)
+
+        async def probe() -> None:
+            await client.call("get_system_status", {})
+
+        limit = self.settings.news_timeout_seconds + 1
+        result = await self._timed("trendradar", "integration", probe, limit)
+        return result.model_copy(update={"provider": "trendradar"})
 
     async def _openim(self) -> ServiceStatusOut:
         client = im.openim_client(self.settings, self.runtime, self.redis)
@@ -400,6 +424,7 @@ class OperationsService:
         core, monitoring = await asyncio.gather(self.health.core(), self.health.monitoring())
         items = [*core, *monitoring, *await self._integrations(access.workspace.id)]
         items.append(await self._openim())
+        items.append(await self.health.trendradar())
         if has_role(access.role, Role.admin):
             items.extend(await self._agents(access.workspace.id))
         return ServiceStatusList(items=items, generated_at=now)

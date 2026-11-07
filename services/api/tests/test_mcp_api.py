@@ -17,7 +17,7 @@ from pydantic import SecretStr
 from app.domain import mcp_tools
 from app.domain.agents import AgentService
 from app.models import AgentInstance
-from app.schemas.ai_tools import RUNNER_TOOL_NAMES, TOOLS
+from app.schemas.ai_tools import NEWS_TOOL_NAMES, RUNNER_TOOL_NAMES, TOOLS
 from tests.helpers import OWNER, tool_error
 from tests.workspace_support import Env, app_of, open_env
 
@@ -154,7 +154,7 @@ async def test_initialize_and_tool_list_follow_the_instance_scope(env: Env) -> N
     assert {tool["name"] for tool in read_only} == {
         name
         for name, spec in TOOLS.items()
-        if spec.risk == "read" and name not in RUNNER_TOOL_NAMES
+        if spec.risk == "read" and name not in RUNNER_TOOL_NAMES | NEWS_TOOL_NAMES
     }
 
 

@@ -243,6 +243,7 @@ def test_widget_types_are_a_discriminated_union() -> None:
         "notifications",
         "project_progress",
         "im_quick_chat",
+        "news_briefing",
     }
 
 
@@ -831,6 +832,8 @@ def test_v2_keeps_existing_enums_and_only_adds_event_topics() -> None:
         "timeline",
         # 项目 Issues（T-0123）
         "issues",
+        # 新闻早报（T-0153）
+        "news",
     }
     provider = schemas["IntegrationOut"]["properties"]["provider"]  # type: ignore[index]
     assert provider["const"] == "github" or set(provider["enum"]) == {"github"}
@@ -887,6 +890,14 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "runner_templates",
             "env_find",
             "env_run",
+            # 新闻早报：只给启用了早报的工作空间的实例（T-0153）
+            "news_latest",
+            "news_search",
+            "news_by_date",
+            "news_trending",
+            "news_rss",
+            "news_related",
+            "news_briefing",
         },
         "write": {
             "create_task",
