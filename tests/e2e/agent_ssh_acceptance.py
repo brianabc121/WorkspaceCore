@@ -354,6 +354,8 @@ def main() -> int:  # noqa: PLR0915 -- 一条完整的验收流程，按页面�
         report.check(f"{label}的 net、OpenClaw 与本机隧道在运行（Compose 项目带它的短号）", len(agent.containers()) >= 3)
         report.check(f"{label}的目录只给账号自己（700），state/ 交给了 uid 1000",
                      (agent.dir.stat().st_mode & 0o777) == 0o700 and (agent.dir / "state").stat().st_uid == 1000)
+    # 核验记录第 3 节：这台机器的 cgroup 版本（cgroup2fs 是 v2 统一层级，tmpfs 是 v1），只记录不判断
+    print(f"信息  /sys/fs/cgroup 的文件系统：{run('stat', '-fc', '%T', '/sys/fs/cgroup').stdout.strip()}", flush=True)
     # 每个实例自己的网络命名空间（D1 A）：各自的 net 在各自项目的网络上，OpenClaw 与隧道加入自己的 net
     layout: dict[str, dict[str, list[str]]] = {}
     for agent in agents:
