@@ -493,14 +493,14 @@ async def test_concurrent_overviews_queue_instead_of_timing_out(make_client: Cli
 
         class _Counting:
             name = "tasks"
-            timeout_seconds = 0.5
+            timeout_seconds = 1.0
 
             async def fetch(self, workspace_id: uuid.UUID) -> ModuleResult:
                 nonlocal running, peak
                 running += 1
                 peak = max(peak, running)
                 checked_out.append(engine.pool.checkedout())
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.15)
                 running -= 1
                 ok = ModuleStatus(status="ok", as_of=None, retryable=False, reason=None)
                 return ModuleResult(status=ok)
@@ -512,12 +512,13 @@ async def test_concurrent_overviews_queue_instead_of_timing_out(make_client: Cli
         assert single.status_code == 200
         assert checked_out == [0]  # 本请求的只读事务已经结束，连接还给了连接池
         responses = await asyncio.gather(
-            *(client.get("/api/v1/dashboard/overview", headers=headers) for _ in range(6))
+            *(client.get("/api/v1/dashboard/overview", headers=headers) for _ in range(16))
         )
-    assert [r.status_code for r in responses] == [200] * 6
-    # 每次聚合 0.2 秒、最多 2 个同时进行：最后的请求排队约 0.4 秒，
-    # 加上执行已超过模块的 0.5 秒超时，仍然是 ok
-    assert [r.json()["modules"]["tasks"]["status"] for r in responses] == ["ok"] * 6
+    assert [r.status_code for r in responses] == [200] * 16
+    # 每次聚合 0.15 秒、最多 2 个同时进行：最后的请求排队约 1.05 秒，加上执行（共约 1.2 秒）
+    # 已超过模块的 1 秒超时，仍然是 ok。执行本身离超时有 0.85 秒余量：CI 机器忙时
+    # 事件循环会慢一些，原来 0.5 秒超时、0.2 秒执行只留 0.3 秒，在 main 上偶发超时（T-0156）
+    assert [r.json()["modules"]["tasks"]["status"] for r in responses] == ["ok"] * 16
     assert peak == 2
 
 
