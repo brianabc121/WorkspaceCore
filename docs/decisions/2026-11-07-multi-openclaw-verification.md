@@ -55,7 +55,7 @@
 
 ## 3. CI 实测（T-0148，PR brianabc121/WorkspaceCore#169 的 agents 任务）
 
-GitHub Actions 的 `ubuntu-24.04` runner（Ubuntu 默认 cgroup v2 统一层级；从 80d287b 起 SSH 部署验收打印 `/sys/fs/cgroup` 的文件系统类型），
+GitHub Actions 的 `ubuntu-24.04` runner：**cgroup v2**（SSH 部署验收打印 `/sys/fs/cgroup` 的文件系统类型为 `cgroup2fs`，commit 80d287b），
 Docker 由 `install-docker.sh` 按锁定版本安装，真实 sshd、真实 OpenClaw 2026.9.36。
 
 | 项 | 结果 |
@@ -67,4 +67,5 @@ Docker 由 `install-docker.sh` 按锁定版本安装，真实 sshd、真实 Open
 | 一个空闲 OpenClaw 的内存与磁盘占用 | 内存约 0.93 ~ 1.0 GiB（上面两个实例，刚上线、只跑了一次假模型对话）；数据目录大小每 10 分钟算一次，验收时间内还没有值 |
 | 真实的 `net` 服务：SSH 部署后 OpenClaw、隧道是 `container:<net>`，`net` 在 `<项目>_default` 网络上；资源上限进了容器（`Memory`、`NanoCpus`） | 通过。两个实例的 `net` 各在自己的 `myworkspace-openclaw-<短号>_default` 上、不是宿主网络，OpenClaw 与隧道都是 `container:<自己的 net>`，两个 `net` 不同；甲 `Memory` 3221225472、`NanoCpus` 1500000000，乙都是 0。commit e9ce4b3、96a8d1c |
 | agents 验收里甲、乙在同一台机器上，按指纹归到同一台服务器；甲读得到自己容器的用量 | 通过（场景 19）：两个实例归到同一台自动识别的服务器；甲 `available` true、`mem_bytes` 1634299904、`pids` 59。commit e9ce4b3 |
+| 重新部署后的每晚复盘任务（OpenClaw 网关冷启动） | 96a8d1c 上重新部署甲后 50 秒就更新好（“已有”）；80d287b 上同一步 4 分半（24 次 × 10 秒）网关还没就绪，记为跳过（实例已在线，不算部署失败）。机器上有两个实例加全栈（4 核）时冷启动会超过原来的 4 分钟，重试窗口改为 10 分钟（`REFLECTION_TRIES` 60）；验收在这一步没成时打印任务日志与 OpenClaw 日志 |
 | SSH 部署的实例与整机数据归到那台 SSH 服务器 | 96a8d1c 上**发现问题**：部署过程中定时任务先上报，按指纹自动建了一台“自动识别的服务器”；部署完实例归到 SSH 服务器后，SSH 服务器（还没有指纹）接不过来，整机数据不记。已修：手动指定 / 部署的那台还没有指纹时接过指纹，自动建的那台并过来、删掉（`host_metrics._absorb`），部署结束与手动指定时原来那台自动识别的空了就删（`drop_if_empty_auto`）；单元测试 `test_ssh_server_takes_over_fingerprint_from_auto_server`。以本 PR 最后一次 agents 任务为准 |

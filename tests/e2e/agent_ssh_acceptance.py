@@ -516,12 +516,16 @@ def main() -> int:  # noqa: PLR0915 -- 一条完整的验收流程，按页面�
         show_job(state)
         return report.finish()
     again = steps(state)
-    report.check(
+    if not report.check(
         "重新部署跳过装公钥、Docker 与已经装好的插件；复盘任务只更新、不重复",
         again["authorize_key"] == "skipped" and again["docker"] == "skipped" and again["plugin"] == "skipped"
         and "已有" in step_detail(state, "reflection") and len(reflection_jobs(a.project)) == 1,
         json.dumps(again, ensure_ascii=False),
-    )
+    ):
+        # 复盘任务没建成时把任务日志与 OpenClaw 的日志打出来，看网关为什么没就绪
+        show_job(state)
+        logs = run("docker", "compose", "-p", a.project, "logs", "--no-color", "--tail=80", "openclaw")
+        print(logs.stdout[-6000:], logs.stderr[-1000:], file=sys.stderr)
     report.check("重新部署甲没有碰到乙的容器", b.containers("openclaw") == b_before)
     if scheduled:
         report.check("定时任务没有重复（各六行）", all(len(x.cron_lines(user)) == 6 for x in agents))
