@@ -249,19 +249,39 @@ class Docker:
         self.call("DELETE", f"/images/{urllib.parse.quote(ref, safe='')}", ok=(200, 404, 409))
 
     # ------------------------------------------------------------------ 网络与数据卷
-    def create_network(self, name: str, labels: dict[str, str], *, internal: bool) -> str:
-        created = self.json(
-            "POST",
-            "/networks/create",
-            body={"Name": name, "Driver": "bridge", "Internal": internal, "Labels": labels},
-        )
+    def create_network(
+        self, name: str, labels: dict[str, str], *, internal: bool, subnet: str | None = None
+    ) -> str:
+        body: dict[str, Any] = {
+            "Name": name,
+            "Driver": "bridge",
+            "Internal": internal,
+            "Labels": labels,
+        }
+        if subnet:
+            body["IPAM"] = {"Driver": "default", "Config": [{"Subnet": subnet}]}
+        created = self.json("POST", "/networks/create", body=body)
         return str(created["Id"])
 
-    def connect_network(self, network: str, container: str, aliases: list[str]) -> None:
+    def inspect_network(self, name: str) -> dict[str, Any] | None:
+        try:
+            result: dict[str, Any] = self.json("GET", f"/networks/{name}")
+        except DockerError as error:
+            if error.status == 404:
+                return None
+            raise
+        return result
+
+    def connect_network(
+        self, network: str, container: str, aliases: list[str], *, ip: str | None = None
+    ) -> None:
+        endpoint: dict[str, Any] = {"Aliases": aliases}
+        if ip:
+            endpoint["IPAMConfig"] = {"IPv4Address": ip}
         self.call(
             "POST",
             f"/networks/{network}/connect",
-            body={"Container": container, "EndpointConfig": {"Aliases": aliases}},
+            body={"Container": container, "EndpointConfig": endpoint},
             ok=(200, 403),  # 403：已经连着
         )
 

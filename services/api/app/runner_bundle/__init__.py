@@ -18,6 +18,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib import resources
+from urllib.parse import urlsplit
 
 from app import runner_agent
 
@@ -41,6 +42,8 @@ class RunnerBundleInput:
     ca_pem: str | None = None
     client_cert_pem: str | None = None
     client_key_pem: str | None = None
+    # 入口主机名不在公网 DNS 里（没有配置域名，T-0088）：在 runner-agent 容器里映射到这个地址
+    address: str | None = None
 
 
 def _add(zf: zipfile.ZipFile, name: str, content: str, mode: int, when: datetime) -> None:
@@ -65,12 +68,24 @@ def _env(data: RunnerBundleInput) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _compose(data: RunnerBundleInput) -> str:
+    text = (_FILES / "compose.yaml").read_text().replace("__IMAGE__", AGENT_IMAGE)
+    host = urlsplit(data.url).hostname
+    hosts = (
+        "    # 入口主机名不在公网 DNS 里：指向工作台服务器\n"
+        f'    extra_hosts: ["{host}:{data.address}"]\n'
+        if data.address and host
+        else ""
+    )
+    return text.replace("    # @EXTRA_HOSTS@\n", hosts)
+
+
 def build(data: RunnerBundleInput, *, now: datetime | None = None) -> bytes:
     now = now or datetime.now(UTC)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as zf:
         _add(zf, "runner.env", _env(data), 0o600, now)
-        compose = (_FILES / "compose.yaml").read_text().replace("__IMAGE__", AGENT_IMAGE)
+        compose = _compose(data)
         _add(zf, "compose.yaml", compose, 0o644, now)
         for module in AGENT_MODULES:
             source = (_AGENT / f"{module}.py").read_text()

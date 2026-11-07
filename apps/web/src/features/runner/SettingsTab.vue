@@ -4,6 +4,7 @@ import { dataOf, type Schema } from '../../services/api'
 import { useAuthStore } from '../../stores/auth'
 import { formatTime } from '../time'
 import { HOST_STATUS, POLICY_FIELDS, downloadRunnerBundle, useRunnerAction } from './api'
+import RunnerSshDeploy from './RunnerSshDeploy.vue'
 
 // 设置（RUNNER_PLAN 第 9、11 节）：添加、重新部署（重新下载接入包，旧凭证立即失效）、移除运行服务器；
 // 回收策略（各类别时长、水位、快照上限），保存带版本号，防止两个人同时改。
@@ -71,13 +72,15 @@ async function savePolicy() {
         <div><dt>凭证</dt><dd class="num">{{ host.token_prefix ? `${host.token_prefix}…` : '还没有签发' }}</dd></div>
         <div><dt>最近连接</dt><dd>{{ host.last_seen_at ? formatTime(host.last_seen_at) : '从未' }}</dd></div>
       </dl>
-      <p class="form-help">部署：下载接入包，传到运行服务器上解压，以 root 运行 <code>install.sh</code>（装 Docker 29.9.1、gVisor release-20261019.0 并核对 sha512、启动 runner-agent）。升级 runner-agent 也是重新下载接入包再运行一次，容器与数据卷不受影响。</p>
+      <p class="form-help">推荐用下面的“通过 SSH 部署”在页面上完成。也可以手动：下载接入包，传到运行服务器上解压，以 root 运行 <code>install.sh</code>（装 Docker 29.9.1、gVisor release-20261019.0 并核对 sha512、启动 runner-agent）。升级 runner-agent 也是重新部署一次，容器与数据卷不受影响。</p>
       <div class="form-actions">
-        <button type="button" class="primary-button" :disabled="busy" @click="bundle">{{ host.last_seen_at ? '重新部署：下载新的接入包' : '下载接入包' }}</button>
+        <button type="button" class="secondary-button" :disabled="busy" @click="bundle">{{ host.last_seen_at ? '手动重新部署：下载新的接入包' : '手动部署：下载接入包' }}</button>
         <button type="button" class="secondary-button im-danger" :disabled="busy" @click="remove">移除运行服务器</button>
       </div>
     </template>
   </section>
+
+  <RunnerSshDeploy v-if="host" />
 
   <form v-if="host" class="panel runner-card runner-form" aria-label="回收策略" @submit.prevent="savePolicy">
     <h2>回收策略</h2>

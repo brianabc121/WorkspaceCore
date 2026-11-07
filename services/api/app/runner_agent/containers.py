@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from typing import Any
 
@@ -66,10 +67,24 @@ def user_ids(payload: dict[str, Any]) -> tuple[int, int]:
     return (0, 0) if payload.get("user") == "root" else (1000, 1000)
 
 
-def proxy_env(network_mode: str) -> list[str]:
+LABEL_FIXED_SUBNET = "myworkspace.fixed_subnet"
+
+
+def proxy_address(subnet: str) -> str:
+    """环境网络里出口代理的固定地址：网段的最后一个可用地址（环境容器从网段开头分配，不会撞上）。
+
+    gVisor 用自己的网络栈，访问不到 Docker 内置的 DNS（127.0.0.11，靠宿主 iptables 转发），
+    所以环境按 IP 找出口代理；地址固定，runner-agent 重建后重新接入网络也不变。"""
+    network = ipaddress.ip_network(subnet, strict=False)
+    if network.version != 4 or network.prefixlen > 29:
+        raise ParamError(f"环境网络的网段不合适：{subnet}")
+    return str(network.broadcast_address - 1)
+
+
+def proxy_env(network_mode: str, address: str | None = None) -> list[str]:
     if network_mode == "none":
         return []
-    url = f"http://{PROXY_ALIAS}:{PROXY_PORT}"
+    url = f"http://{address or PROXY_ALIAS}:{PROXY_PORT}"
     no_proxy = "localhost,127.0.0.1,::1"
     return [
         f"HTTP_PROXY={url}",
@@ -81,7 +96,9 @@ def proxy_env(network_mode: str) -> list[str]:
     ]
 
 
-def env_list(payload: dict[str, Any], extra: dict[str, Any] | None = None) -> list[str]:
+def env_list(
+    payload: dict[str, Any], extra: dict[str, Any] | None = None, *, proxy: str | None = None
+) -> list[str]:
     out: list[str] = []
     merged: dict[str, Any] = dict(payload.get("env") or {})
     merged.update(extra or {})
@@ -101,12 +118,16 @@ def env_list(payload: dict[str, Any], extra: dict[str, Any] | None = None) -> li
             continue
         out.append(f"{key}={str(value)[:4096]}")
     out.append(f"HOME={HOME}")
-    out.extend(proxy_env(str(payload.get("network_mode") or "none")))
+    out.extend(proxy_env(str(payload.get("network_mode") or "none"), proxy))
     return out
 
 
-def container_config(payload: dict[str, Any], *, host_memory: int | None = None) -> dict[str, Any]:
-    """环境容器的 /containers/create 请求体。"""
+def container_config(
+    payload: dict[str, Any], *, host_memory: int | None = None, proxy: str | None = None
+) -> dict[str, Any]:
+    """环境容器的 /containers/create 请求体。
+
+    proxy：出口代理在环境网络里的固定地址（runner-agent 自己算的，不来自指令）。"""
     image = payload.get("image")
     if not isinstance(image, str) or not image or len(image) > 512:
         raise ParamError("镜像不合法")
@@ -157,6 +178,9 @@ def container_config(payload: dict[str, Any], *, host_memory: int | None = None)
         "LogConfig": {"Type": "json-file", "Config": {"max-size": "10m", "max-file": "2"}},
         "RestartPolicy": {"Name": "no"},
     }
+    if proxy:
+        # 也给 egress 这个名字写进 /etc/hosts：gVisor 里没有 Docker 内置 DNS
+        host_config["ExtraHosts"] = [f"{PROXY_ALIAS}:{ipaddress.ip_address(proxy)}"]
     if runtime == "kvm":
         host_config["Devices"] = [
             {"PathOnHost": "/dev/kvm", "PathInContainer": "/dev/kvm", "CgroupPermissions": "rwm"}
@@ -164,7 +188,7 @@ def container_config(payload: dict[str, Any], *, host_memory: int | None = None)
     config: dict[str, Any] = {
         "Image": image,
         "User": USERS[user],
-        "Env": env_list(payload),
+        "Env": env_list(payload, proxy=proxy),
         "Labels": {**labels(payload), LABEL_LIFETIME: str(payload.get("lifetime") or "session")},
         "HostConfig": host_config,
         # 不设 WorkingDir：镜像里没有 /workspace 时 Docker 会按 root 建它并把属主复制到空数据卷上
@@ -234,6 +258,7 @@ def exec_workdir(relative: Any) -> str:
 __all__ = [
     "KEEPALIVE",
     "LABEL_ENV",
+    "LABEL_FIXED_SUBNET",
     "LABEL_LIFETIME",
     "LABEL_ROLE",
     "LABEL_RUNNER",
@@ -248,6 +273,7 @@ __all__ = [
     "exec_workdir",
     "helper_config",
     "labels",
+    "proxy_address",
     "secret_command",
     "user_ids",
 ]

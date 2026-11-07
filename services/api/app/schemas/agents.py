@@ -470,6 +470,8 @@ SshJobStepKey = Literal[
     "stop",
     "unschedule",
     "remove_files",
+    # 运行服务器的部署（T-0136）：以 root 运行接入包里的 install.sh
+    "install",
 ]
 
 

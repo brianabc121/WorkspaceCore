@@ -2,13 +2,13 @@
 id: T-0135
 title: 运行服务器 R0 核验：Docker Engine 29.9 接口与行为、gVisor release-20261019.0 安装与实测
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: docs,services/api/app/runner_agent,services/api/tests
 depends_on: T-0134
 created: 2026-11-06
-updated: 2026-11-06
+updated: 2026-11-07
 ---
 
 # T-0135 运行服务器 R0 核验：Docker Engine 29.9 接口与行为、gVisor release-20261019.0 安装与实测
@@ -19,8 +19,8 @@ updated: 2026-11-06
 ## 验收标准
 - [x] Docker Engine 29.9 的接口与行为本地实测（网络、数据卷、助手容器存取文件、exec、资源与安全参数、stats、system df、kvm 设备报错）
 - [x] gVisor release-20261019.0 的安装方式按官方文档、发布包 sha512 记下
-- [ ] gVisor 下的行为在 CI 实测并补进核验记录（随 T-0141）
-- [ ] 核验记录 docs/decisions/2026-11-06-runner-verification.md
+- [x] gVisor 下的行为在 CI 实测并补进核验记录（随 T-0141）
+- [x] 核验记录 docs/decisions/2026-11-06-runner-verification.md
 
 ## 背景 / 约束 / 参考
 - 方案：`docs/v2/RUNNER_PLAN.md`（人类 2026-11-06 批准：D1 一个运行环境权限、D2 runner-agent、D11 不预设场景，其余按推荐）
@@ -32,3 +32,6 @@ updated: 2026-11-06
 - 2026-11-06 22:15 UTC · claude · 人类 2026-11-06 在对话中指派：按修订后的运行服务器方案（D1、D2、D11 按人类决定，其余按推荐）全部落实。
 - 2026-11-06 22:15 UTC · claude · 开始任务
 - 2026-11-06 23:08 UTC · claude · runner-agent 的指令处理在本地 Docker 29.9.2（runc）上实测通过（核验记录第 4 节）：建环境、身份与密钥文件、退出码、出口代理拒绝路径、进程数上限、exec 超时停止、输出上限、文件读写、停止启动、删除、模板构建（经典构建器连 internal 网络）。实测发现两处已改：代理监听要先 shutdown 再 close；拒绝时状态行只用 ASCII。gVisor 下的行为与放行路径仍待 T-0141 在 CI 实测（第 5 节）。
+- 2026-11-07 01:49 UTC · claude · gVisor 第一次 CI 实测（PR #167 的 agents 任务）：安装与 runsc 注册、gvisor 容器（内核 4.19.0-gvisor）、模板、一次性与会话环境都通过；出口代理不通——gVisor 访问不到 Docker 内置 DNS（官方 FAQ #docker-bridge），环境解析不了 egress。runner-agent 改成环境网络固定网段、自己用固定地址、环境按 IP 找代理（hosts 里也写 egress），本地 runc 实测通过；结果写进核验记录第 5 节，第二轮 CI 结果待补。
+- 2026-11-07 02:23 UTC · claude · 第二轮 CI（b319455）gVisor 全部通过：按 IP 走出口代理（放行 200、拒绝 403、直连不通）、两种运行时、重装不重启 Docker；结果补进核验记录第 5 节，方案第 9 节按实测修订。四项验收都已完成。
+- 2026-11-07 02:23 UTC · claude · status in_progress → done：核验记录完成：Docker Engine 本地实测 + gVisor release-20261019.0 的 CI 实测

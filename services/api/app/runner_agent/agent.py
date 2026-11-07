@@ -329,9 +329,54 @@ class Agent:
             raise CommandError("runner-agent 没能连进环境网络（出口代理不可用）")
         return address
 
-    def _attach_proxy(self, env_id: str, network: str, policy: Policy) -> None:
-        self.docker.connect_network(network, self.self_id, [c.PROXY_ALIAS])
-        self.proxy.listen(env_id, self._self_ip(network), policy)
+    def _fixed_proxy(self, network: str) -> str | None:
+        """固定网段的环境网络里出口代理的地址；旧的（自动网段）网络返回 None，只能靠别名找代理。"""
+        info = self.docker.inspect_network(network) or {}
+        if (info.get("Labels") or {}).get(c.LABEL_FIXED_SUBNET) != "1":
+            return None
+        configs = (info.get("IPAM") or {}).get("Config") or []
+        subnets = [str(x.get("Subnet")) for x in configs if ":" not in str(x.get("Subnet") or ":")]
+        return c.proxy_address(subnets[0]) if subnets else None
+
+    def _env_network(self, network: str, labels: dict[str, str]) -> None:
+        """环境的 internal 网络，网段固定：先让 Docker 自动分配一个不和本机冲突的网段，
+        再用这个网段重建（成为“指定网段”的网络），runner-agent 才能在里面用固定地址。
+        gVisor 访问不到 Docker 内置的 DNS，环境只能按 IP 找出口代理（核验记录第 5 节）。"""
+        if self.docker.inspect_network(network) is not None:
+            return
+        fixed = {**labels, c.LABEL_FIXED_SUBNET: "1"}
+        for _ in range(3):
+            try:
+                self.docker.create_network(network, labels, internal=True)
+            except DockerError as error:
+                if error.status != 409:
+                    raise
+                return
+            info = self.docker.inspect_network(network) or {}
+            configs = (info.get("IPAM") or {}).get("Config") or []
+            subnets = [str(x.get("Subnet") or "") for x in configs]
+            subnet = next((n for n in subnets if n and ":" not in n), "")
+            self.docker.remove_network(network)
+            if not subnet:
+                raise CommandError("Docker 没有给环境网络分配网段")
+            try:
+                self.docker.create_network(network, fixed, internal=True, subnet=subnet)
+                return
+            except DockerError as error:
+                if error.status == 409 and self.docker.inspect_network(network) is not None:
+                    return
+                logger.warning("按网段 %s 重建环境网络失败，重试：%s", subnet, error)
+        raise CommandError("没能建好环境网络（网段冲突）")
+
+    def _attach_proxy(self, env_id: str, network: str, policy: Policy) -> str | None:
+        """接入环境网络，在 runner-agent 的地址上开出口代理；返回固定地址（旧网络为 None）。"""
+        fixed = self._fixed_proxy(network)
+        self.docker.connect_network(network, self.self_id, [c.PROXY_ALIAS], ip=fixed)
+        address = self._self_ip(network)
+        if fixed and address != fixed:
+            raise CommandError(f"runner-agent 在环境网络里的地址是 {address}，不是固定的 {fixed}")
+        self.proxy.listen(env_id, address, policy)
+        return fixed
 
     def _policy(self, payload: dict[str, Any]) -> Policy:
         return Policy(
@@ -458,14 +503,9 @@ class Agent:
         volume = c.check_name(p.get("volume"), "vol")
         network = c.check_name(p.get("network"), "net")
         image = self._image_for(p)
-        net_labels = c.labels(p)
-        try:
-            self.docker.create_network(network, net_labels, internal=True)
-        except DockerError as error:
-            if error.status != 409:
-                raise
+        self._env_network(network, c.labels(p))
         policy = self._policy(p)
-        self._attach_proxy(env_id, network, policy)
+        proxy = self._attach_proxy(env_id, network, policy)  # 固定地址：写进环境的代理变量与 hosts
         existed = self.docker.inspect(container) is not None
         if not existed:
             self.docker.create_volume(volume, c.labels(p))
@@ -487,7 +527,7 @@ class Agent:
             files = p.get("files") or []
             if files:
                 self._put(p, files)
-            config = c.container_config(p, host_memory=None)
+            config = c.container_config(p, host_memory=None, proxy=proxy)
             config["Labels"].update(
                 {
                     "myworkspace.network": policy.mode,

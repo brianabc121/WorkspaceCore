@@ -304,8 +304,9 @@ runner-agent 只执行工作台下发的固定指令；容器参数由 runner-ag
 
 ### 8.3 网络
 
-- 每个环境一个 `internal` Docker 网络：直连外网不通（实测 `Network is unreachable`）；runner-agent 以别名 `egress` 连进这个网络，
-  环境里的 `HTTP_PROXY` / `HTTPS_PROXY` 指向它（实测同一网络里按别名可达）。
+- 每个环境一个 `internal` Docker 网络：直连外网不通（实测 `Network is unreachable`）；runner-agent 以固定地址（网段的最后一个可用地址）
+  连进这个网络，环境里的 `HTTP_PROXY` / `HTTPS_PROXY` 直接写这个 IP，`/etc/hosts` 里也有 `egress`。
+  （T-0141 修订：gVisor 访问不到 Docker 内置的 DNS，按别名找不到代理，核验记录第 5 节；网络先自动分配网段、再按这个网段重建，地址才能固定。）
 - 出口代理按环境的网络选项判断：`none` 全部拒绝；`allowlist` 只放行列表里的域名（支持 `*.example.com`）；`all` 放行任何公网地址。
   无论哪种，代理先解析域名，**只连已经检查过的公网 IP**（防止 DNS 重绑定），私有网段一律拒绝。访问记录（域名、端口、字节数、放行与否）上报工作台。
 - V1 只支持经代理的 HTTP / HTTPS（`CONNECT`）；pip、npm、apt、git over https、浏览器、安卓模拟器（`-http-proxy`）都能用。
@@ -359,7 +360,7 @@ runner-agent 只执行工作台下发的固定指令；容器参数由 runner-ag
 ### 9.1 已实测的 Docker 行为（Docker 29.9.2，API 1.56，runc）
 
 资源与安全参数按值生效；exec 的多路复用流能拆出 stdout + stderr，退出码正确，uid 1000、CapEff 为 0；
-未启动的助手容器能读写数据卷里的文件，属主正确；`internal` 网络直连外网不通，同一网络里按别名能访问出口代理；
+未启动的助手容器能读写数据卷里的文件，属主正确；`internal` 网络直连外网不通，同一网络里按别名能访问出口代理（runc；gVisor 下要按 IP，见上一节）；
 exec 超时按时返回；输出超过上限保留开头与结尾；进程数上限生效（`Cannot fork`）；stats 一次性读到内存与 CPU；`/system/df` 给出数据卷占用；
 按标签列出与删除干净；镜像不存在时 404；没有 `/dev/kvm` 时返回 `no such file or directory`。gVisor 下的同一套行为在 CI 里实测（T-0141）。
 

@@ -167,6 +167,17 @@ jobs:
           set_env GMAIL_API_URL http://fake-gmail:8080
           set_env INTEGRATION_ALLOWED_HOSTS n8n,fake-gmail
           docker compose --profile agents config --quiet
+      # T-0141：场景 26 把这台 runner 当运行服务器。接入包的 install-gvisor.sh 第一次安装时会重启 Docker，
+      # 所以在启动任何服务之前用同一个脚本装好（核对 sha512）；之后 install.sh 再运行时 Docker 已认得 runsc，不再重启
+      - name: 安装 gVisor release-20261019.0（运行服务器验收用，接入包里的同一个脚本）
+        run: |
+          sudo bash services/api/app/runner_bundle/files/install-gvisor.sh
+          image="$(python3 -c 'import sys; sys.path.insert(0, "services/api"); from app.runner_bundle import AGENT_IMAGE; print(AGENT_IMAGE)')"
+          docker info --format '{{json .Runtimes}}'
+          echo "宿主内核：$(uname -r)"
+          docker run --rm --runtime=runsc --network none "$image" \
+            python -c 'import os, platform; print("gVisor 里的内核：", os.uname().release, platform.machine())'
+          docker run --rm --runtime=runsc --network none "$image" sh -c 'dmesg 2>&1 | head -n 3' || true
       - name: 构建打过补丁的 OpenIM 镜像（make openim-build）
         run: make openim-build
       - name: 构建并启动（make up）
@@ -181,7 +192,7 @@ jobs:
             --intranet intranet.test:8443 --public public.test:9443
       - name: 启动 OpenIM（make openim-up）
         run: make openim-up
-      - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道；场景 15 是知识库与每晚复盘（T-0100），场景 23 是 Gmail（T-0131））
+      - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道；场景 15 是知识库与每晚复盘（T-0100），场景 23 是 Gmail（T-0131），场景 26 是运行服务器（T-0141））
         run: |
           # 要以 root 运行：接入包目录交给容器里的 uid 1000（CHECKLIST.md 的做法）。
           # npm 缓存放到临时目录：用 runner 的 ~/.npm 会留下 root 所有的文件，后面的 npm ci 会因 EACCES 失败
@@ -244,10 +255,15 @@ jobs:
       # T-0090：同一台“新服务器”（上一步已卸载并吊销），这次全程在网页上操作
       - name: SSH 自动部署浏览器验收（实例页填写服务器、核对指纹、输入一次密码、跟着进度到上线、卸载、吊销、手机宽度）
         run: node tests/e2e/agent_ssh_browser.cjs
+      # T-0141：同一台“新服务器”（上一步已卸载并吊销 OpenClaw），这次在网页上把它部署成运行服务器（外网入口：
+      # 内部 CA + 地址映射，原样的接入包）；场景 26 已用接入包手动部署验收过环境与运行，这里验收页面与 SSH 部署
+      - name: 运行服务器浏览器验收（添加运行服务器、SSH 部署到上线、总览显示 gVisor、各标签、卸载、吊销、手机宽度）
+        run: node tests/e2e/runner_browser.cjs
       - name: 失败时输出服务状态与日志
         if: failure()
         run: |
           sudo tail -n 80 "$RUNNER_TEMP/sshd.log" 2>/dev/null || true
+          docker logs --tail 200 myworkspace-runner-agent 2>&1 || true
           docker compose --profile agents ps -a
           docker compose --profile agents logs --no-color --tail=200
           docker compose -p my-workspace-openim -f infra/openim/compose.yaml --env-file .env logs --no-color --tail=150 || true

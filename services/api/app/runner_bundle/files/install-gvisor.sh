@@ -26,6 +26,12 @@ else
   fi
   tar --zstd -xf "$tmp/gvisor.tar.zstd" -C /usr/local/bin
 fi
+# 重装（SSH 再部署一次、升级接入包）时 Docker 已经认得 runsc：不再重启 Docker，
+# 以免停掉这台服务器上正在运行的环境（runsc 每次建容器时才调用，换了二进制不用重启）
+if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"runsc"'; then
+  echo "gvisor_ready ${release}"
+  exit 0
+fi
 /usr/local/bin/runsc install
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   systemctl restart docker

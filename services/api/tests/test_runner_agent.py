@@ -272,3 +272,76 @@ def test_tar_of_writes_parent_directories_with_the_same_owner() -> None:
         members = {m.name: m for m in tar.getmembers()}
     assert members["a"].isdir() and members["a/b"].isdir()
     assert all((m.uid, m.gid) == (1000, 1000) for m in members.values())
+
+
+def _bundle_compose(**extra: Any) -> str:
+    import zipfile
+
+    from app import runner_bundle
+
+    data = runner_bundle.build(
+        runner_bundle.RunnerBundleInput(
+            host_name="runner-1",
+            url="https://agent-gateway.myworkspace.internal:9443",
+            token="mwr_x",  # noqa: S106 - 测试值
+            block=[],
+            **extra,
+        )
+    )
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        return zf.read("myworkspace-runner/compose.yaml").decode()
+
+
+def test_bundle_maps_ingress_host_without_dns() -> None:
+    """外网入口没有域名（内部主机名 + 工作台地址，T-0088）：容器里把主机名指向工作台。"""
+    mapped = _bundle_compose(address="203.0.113.7")
+    assert 'extra_hosts: ["agent-gateway.myworkspace.internal:203.0.113.7"]' in mapped
+    plain = _bundle_compose()
+    assert "extra_hosts" not in plain and "@EXTRA_HOSTS@" not in plain
+    assert "@EXTRA_HOSTS@" not in mapped
+
+
+def test_proxy_address_is_fixed_inside_the_env_network() -> None:
+    """gVisor 访问不到 Docker 内置 DNS：环境按 IP 找出口代理，地址取网段最后一个可用地址。"""
+    from app.runner_agent import containers as c
+
+    assert c.proxy_address("172.24.0.0/16") == "172.24.255.254"
+    assert c.proxy_address("192.168.48.0/20") == "192.168.63.254"
+    for bad in ("fd00::/64", "10.0.0.0/30"):
+        try:
+            c.proxy_address(bad)
+        except c.ParamError:
+            continue
+        raise AssertionError(bad)
+
+
+def test_container_config_points_the_env_at_the_proxy_ip() -> None:
+    from app.runner_agent import containers as c
+
+    payload = {
+        "env_id": "e1",
+        "workspace_id": "w1",
+        "container": "mw-env-0123456789ab",
+        "volume": "mw-vol-0123456789ab",
+        "network": "mw-net-0123456789ab",
+        "image": "python:3.12-slim",
+        "runtime": "gvisor",
+        "user": "user",
+        "network_mode": "allowlist",
+        "domains": ["pypi.org"],
+        "memory_mb": 256,
+        "cpus": 1,
+        "pids": 256,
+        "env": {"HTTPS_PROXY": "http://evil:1"},
+    }
+    config = c.container_config(payload, proxy="172.24.255.254")
+    assert "HTTPS_PROXY=http://172.24.255.254:3128" in config["Env"]
+    assert "https_proxy=http://172.24.255.254:3128" in config["Env"]
+    assert not any("evil" in item for item in config["Env"])  # 智能体给的代理变量不采用
+    assert config["HostConfig"]["ExtraHosts"] == ["egress:172.24.255.254"]
+    # 旧网络（自动网段）：仍按别名找代理，不写 hosts
+    legacy = c.container_config(payload)
+    assert (
+        "HTTPS_PROXY=http://egress:3128" in legacy["Env"]
+        and "ExtraHosts" not in legacy["HostConfig"]
+    )

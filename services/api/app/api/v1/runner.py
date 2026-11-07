@@ -19,10 +19,19 @@ from app.api.deps import (
     get_db,
     get_redis,
     workspace_admin,
+    workspace_owner,
 )
 from app.core.config import Settings
 from app.domain.policy import WorkspaceAccess
 from app.domain.runner_admin import RunnerAdmin
+from app.domain.runner_ssh import RunnerSshService
+from app.schemas.agents import (
+    AgentSshConfirm,
+    AgentSshInstall,
+    AgentSshRevoke,
+    AgentSshState,
+    AgentSshTargetSet,
+)
 from app.schemas.common import error_responses
 from app.schemas.runner import (
     AgentRunnerOut,
@@ -36,6 +45,7 @@ from app.schemas.runner import (
     RunnerPolicyPut,
     RunnerRunAdminOut,
     RunnerRunList,
+    RunnerSshUninstall,
     RunnerTemplateAdminOut,
     RunnerTemplateAdminSave,
     RunnerTemplateList,
@@ -45,6 +55,7 @@ from app.schemas.runner import (
 router = APIRouter(tags=["runner"], dependencies=[Security(authenticated)])
 
 Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
+Owner = Annotated[WorkspaceAccess, Depends(workspace_owner)]
 _write = [Depends(csrf_protected)]
 _read_errors = error_responses(401, 403, 404, 422)
 _write_errors = error_responses(401, 403, 404, 409, 422)
@@ -65,6 +76,23 @@ def get_runner_admin(
 
 
 Service = Annotated[RunnerAdmin, Depends(get_runner_admin)]
+
+
+def get_runner_ssh(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> RunnerSshService:
+    # 部署任务与 OpenClaw 的 SSH 自动部署共用 API 进程里的任务管理（lifespan 里创建）
+    return RunnerSshService(db, settings, redis, getattr(request.app.state, "ssh_jobs", None))
+
+
+SshService = Annotated[RunnerSshService, Depends(get_runner_ssh)]
+
+
+def _ip(request: Request) -> str:
+    return client_ip(request, request.app.state.settings)
 
 
 @router.get("/runner/overview", summary="运行服务器总览（admin）", responses=_read_errors)
@@ -276,3 +304,102 @@ async def put_agent_runner(
     return await service.set_instance_runner(
         access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
     )
+
+
+# ---------------------------------------------------------------- SSH 自动部署（T-0136）
+
+_ssh_errors = error_responses(401, 403, 404, 409, 422, 429, 503)
+
+
+@router.get(
+    "/runner/host/ssh", summary="运行服务器的 SSH 自动部署（owner）", responses=_read_errors
+)
+async def get_runner_ssh_state(access: Owner, service: SshService) -> AgentSshState:
+    return await service.state(access)
+
+
+@router.put(
+    "/runner/host/ssh",
+    summary="填写或更换运行服务器的 SSH 地址，读取主机公钥（owner）",
+    description="与 OpenClaw 实例的 SSH 自动部署相同：只读取主机公钥、不登录，返回 SHA256 指纹；"
+    "owner 在服务器上核对后调用 /ssh/confirm。每个用户每分钟最多探测 10 次。",
+    dependencies=_write,
+    responses=_ssh_errors,
+)
+async def set_runner_ssh(
+    access: Owner, request: Request, service: SshService, body: AgentSshTargetSet
+) -> AgentSshState:
+    return await service.set_target(access, body, client_ip=_ip(request))
+
+
+@router.post(
+    "/runner/host/ssh/confirm",
+    summary="确认主机公钥指纹（owner）",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def confirm_runner_ssh(
+    access: Owner, request: Request, service: SshService, body: AgentSshConfirm
+) -> AgentSshState:
+    return await service.confirm(access, body, client_ip=_ip(request))
+
+
+@router.post(
+    "/runner/host/ssh/install",
+    summary="部署或重新部署运行服务器（owner）",
+    description="上传接入包到 ~/myworkspace-runner（签发新凭证，旧的立即失效），"
+    "以 root 运行 install.sh（Docker 29.9.1、gVisor release-20261019.0、runner-agent），"
+    "等 runner-agent 连上工作台。"
+    "不是 root 账号时用 sudo，要填登录密码（只用这一次，不保存）。返回 202，进度看 GET /ssh。",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=_write,
+    responses=_ssh_errors,
+)
+async def install_runner_ssh(
+    access: Owner, request: Request, service: SshService, body: AgentSshInstall
+) -> AgentSshState:
+    return await service.install(access, body, client_ip=_ip(request))
+
+
+@router.post(
+    "/runner/host/ssh/uninstall",
+    summary="卸载运行服务器上的 runner-agent（owner）",
+    description="停止 runner-agent，可选删除接入包目录；"
+    "还有没删除的环境时 409 RUNNER_HAS_ENVIRONMENTS。Docker 与 gVisor 保留。返回 202。",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=_write,
+    responses=_ssh_errors,
+)
+async def uninstall_runner_ssh(
+    access: Owner, request: Request, service: SshService, body: RunnerSshUninstall
+) -> AgentSshState:
+    return await service.uninstall(access, body, client_ip=_ip(request))
+
+
+@router.post(
+    "/runner/host/ssh/revoke",
+    summary="吊销工作台的专用密钥（owner）",
+    dependencies=_write,
+    responses=_ssh_errors,
+)
+async def revoke_runner_ssh(
+    access: Owner, request: Request, service: SshService, body: AgentSshRevoke
+) -> AgentSshState:
+    return await service.revoke(access, body, client_ip=_ip(request))
+
+
+@router.delete(
+    "/runner/host/ssh",
+    summary="删除运行服务器的 SSH 地址（owner）",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def delete_runner_ssh(
+    access: Owner,
+    request: Request,
+    service: SshService,
+    version: Annotated[int, Query(ge=1)],
+) -> Response:
+    await service.remove(access, version=version, client_ip=_ip(request))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
