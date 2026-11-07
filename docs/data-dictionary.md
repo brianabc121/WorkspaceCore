@@ -442,3 +442,16 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 
 **downgrade** 回到 0044 的结构，同样不保留数据：删除三张新表与新增的列，重建空的 `agent_host_samples`（服务器上的实例不受影响，下一次上报重新写入）。
 
+### 迁移 `0046`（T-0144 / T-0145 / T-0147）
+
+一台服务器部署多个 OpenClaw 的 SSH 部分（`docs/v2/MULTI_OPENCLAW_PLAN.md` 第 4、8 节）：SSH 登录信息与专用密钥按服务器（一台一把，D7），每个实例的部署单独记。人类 2026-11-07 确认还没有部署过（D5），**不迁移旧数据**：升级前删除按实例的 SSH 目标、SSH 任务与运维记录。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `agent_ssh_targets` 改 | 去掉 `instance_id`、`install_dir`、`installed_at`；新增 `server_id`、`prepared_at` | 每台 SSH 服务器一条：`server_id` → `agent_servers`（级联删除），唯一；`prepared_at` 是准备好（专用公钥装上、Docker 可用、专用密钥能登录）的时间。其余列（地址、主机公钥、确认、专用私钥引用）不变，**登录密码从不保存** |
+| `agent_deployments`（新） | `id`、`workspace_id`、`instance_id`、`server_id`、`install_dir`、`installed_at`、`version`、`created_by`、时间字段 | 实例部署在哪台服务器、哪个目录（`~/myworkspace-openclaw/<实例短号>`）；复合外键 `(workspace_id, instance_id)` → `agent_instances`（级联删除），唯一 `instance_id`（一个实例同时只部署在一台服务器上）；`server_id` → `agent_servers`（RESTRICT：还有部署的服务器不能删）；索引 `server_id`；`created_by` → `users`（删除后置空）。卸载成功后删除 |
+| `agent_ssh_jobs` 改 | `instance_id` 可空；CHECK `kind` ∈ `prepare` / `install` / `uninstall` | 准备服务器的任务没有实例；部分唯一索引 `(target_id) WHERE status = 'running'` 不变，即同一台服务器同时只有一个 SSH 任务 |
+| `agent_ops_actions` 改 | 新增 `server_id`；`instance_id` 可空；CHECK `action` 增加 `containers` | `server_id` → `agent_servers`（级联删除）；CHECK `instance_scope`：服务器级动作（`prune`、`containers`）的 `instance_id` 为空，其余必须有实例；部分唯一索引改为 `(server_id) WHERE status = 'running'`（同一台服务器同时只有一个进行中的动作）；索引 `(server_id, started_at)` |
+
+**downgrade** 回到 0045 的结构，同样不保留这些记录：删除 `agent_deployments`，SSH 目标、任务与运维记录清空后改回按实例的列。
+

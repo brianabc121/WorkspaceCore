@@ -1,4 +1,4 @@
-"""SSH 自动部署 B1（T-0089）：目标服务器、主机公钥的探测与确认。
+"""SSH 部署 B1（T-0089；一台服务器多个实例后按服务器，T-0145）：添加服务器、主机公钥的探测与确认。
 
 用进程内的 asyncssh 服务器（127.0.0.1 随机端口）当目标；测试打开 agent_ssh_allow_loopback。
 """
@@ -76,27 +76,40 @@ class Owner:
         data: dict[str, Any] = response.json()
         return data
 
-    async def put(self, instance_id: str, **body: Any) -> httpx.Response:
+    async def create(self, **body: Any) -> httpx.Response:
+        return await self.client.post(
+            "/api/v1/agents/servers",
+            json={"name": "服务器 A", "username": "deploy", **body},
+            headers=self.headers(),
+        )
+
+    async def address(self, server_id: str, **body: Any) -> httpx.Response:
         return await self.client.put(
-            f"/api/v1/agents/instances/{instance_id}/ssh",
+            f"/api/v1/agents/servers/{server_id}/address",
             json={"username": "deploy", **body},
             headers=self.headers(),
         )
 
-    async def state(self, instance_id: str) -> dict[str, Any]:
+    async def detail(self, server_id: str) -> dict[str, Any]:
         response = await self.client.get(
-            f"/api/v1/agents/instances/{instance_id}/ssh", headers=self.headers()
+            f"/api/v1/agents/servers/{server_id}", headers=self.headers()
         )
         assert response.status_code == 200, response.text
         data: dict[str, Any] = response.json()
         return data
 
-    async def confirm(self, instance_id: str, version: int, fingerprint: str) -> httpx.Response:
+    async def confirm(self, server_id: str, version: int, fingerprint: str) -> httpx.Response:
         return await self.client.post(
-            f"/api/v1/agents/instances/{instance_id}/ssh/confirm",
+            f"/api/v1/agents/servers/{server_id}/confirm",
             json={"version": version, "fingerprint": fingerprint},
             headers=self.headers(),
         )
+
+    async def servers(self) -> dict[str, Any]:
+        response = await self.client.get("/api/v1/agents/servers", headers=self.headers())
+        assert response.status_code == 200, response.text
+        data: dict[str, Any] = response.json()
+        return data
 
 
 @pytest.fixture
@@ -148,120 +161,113 @@ async def test_hostnames_resolve_once_and_are_checked() -> None:
 
 
 async def test_probe_shows_the_fingerprint_and_confirm_pins_it(owner: Owner) -> None:
-    instance = await owner.instance()
-    assert (await owner.state(instance["id"])) == {"target": None, "job": None, "warning": None}
+    assert (await owner.servers()) == {"items": [], "unassigned": []}
     async with ssh_server() as (port, host_key):
-        response = await owner.put(instance["id"], host="LOCALHOST", port=port)
-    assert response.status_code == 200, response.text
-    target = response.json()["target"]
+        response = await owner.create(host="LOCALHOST", port=port)
+    assert response.status_code == 201, response.text
+    server = response.json()["server"]
+    ssh_info = server["ssh"]
     fingerprint = host_key.get_fingerprint("sha256")
-    assert target["host_key_fingerprint"] == fingerprint and fingerprint.startswith("SHA256:")
-    assert target["host"] == "localhost" and target["address"] in {"127.0.0.1", "::1"}
-    assert target["port"] == port and target["username"] == "deploy"
-    assert target["host_key_algorithm"] == "ssh-ed25519"
-    assert target["host_key_confirmed"] is False and target["client_key_installed"] is False
+    assert server["kind"] == "ssh" and server["name"] == "服务器 A"
+    assert ssh_info["host_key_fingerprint"] == fingerprint and fingerprint.startswith("SHA256:")
+    assert ssh_info["host"] == "localhost" and ssh_info["address"] in {"127.0.0.1", "::1"}
+    assert ssh_info["port"] == port and ssh_info["username"] == "deploy"
+    assert ssh_info["host_key_algorithm"] == "ssh-ed25519"
+    assert ssh_info["host_key_confirmed"] is False and ssh_info["client_key_installed"] is False
     stored = await run_sql(owner_db(owner), "SELECT host_key FROM workspace.agent_ssh_targets")
     assert stored == " ".join(host_key.export_public_key().decode().split()[:2])
+    listed = await owner.servers()
+    assert [s["id"] for s in listed["items"]] == [server["id"]]
 
     # 指纹不一致：拒绝（例如页面显示的不是 owner 在服务器上核对的那一个）
     other = asyncssh.generate_private_key("ssh-ed25519").get_fingerprint("sha256")
-    mismatch = await owner.confirm(instance["id"], target["version"], other)
+    mismatch = await owner.confirm(server["id"], server["version"], other)
     assert mismatch.status_code == 409
     assert mismatch.json()["error"]["code"] == "AGENT_SSH_FINGERPRINT_MISMATCH"
-    stale = await owner.confirm(instance["id"], target["version"] + 5, fingerprint)
+    stale = await owner.confirm(server["id"], server["version"] + 5, fingerprint)
     assert stale.status_code == 409 and stale.json()["error"]["code"] == "VERSION_CONFLICT"
 
-    confirmed = await owner.confirm(instance["id"], target["version"], fingerprint)
+    confirmed = await owner.confirm(server["id"], server["version"], fingerprint)
     assert confirmed.status_code == 200, confirmed.text
-    after = confirmed.json()["target"]
-    assert after["host_key_confirmed"] is True and after["host_key_confirmed_at"]
-    assert after["version"] == target["version"] + 1
+    after = confirmed.json()["server"]
+    assert after["ssh"]["host_key_confirmed"] is True and after["ssh"]["host_key_confirmed_at"]
+    assert after["version"] == server["version"] + 1
 
-    # 更换服务器（端口变了）：要带版本号；重新探测后确认作废
+    # 更换地址（端口变了）：要带版本号；重新探测后确认作废
     async with ssh_server() as (port2, key2):
-        missing = await owner.put(instance["id"], host="127.0.0.1", port=port2)
-        assert missing.status_code == 409
-        replaced = await owner.put(
-            instance["id"], host="127.0.0.1", port=port2, version=after["version"]
+        replaced = await owner.address(
+            server["id"], host="127.0.0.1", port=port2, version=after["version"]
         )
     assert replaced.status_code == 200, replaced.text
-    again = replaced.json()["target"]
-    assert again["host_key_fingerprint"] == key2.get_fingerprint("sha256")
-    assert again["host_key_confirmed"] is False
+    again = replaced.json()["server"]
+    assert again["ssh"]["host_key_fingerprint"] == key2.get_fingerprint("sha256")
+    assert again["ssh"]["host_key_confirmed"] is False
 
     actions = await run_sql(
         owner_db(owner),
         "SELECT string_agg(action, ',' ORDER BY created_at) FROM workspace.audit_logs"
-        " WHERE action LIKE 'agents.ssh.%'",
+        " WHERE action LIKE 'agents.server.%'",
     )
-    assert actions == ("agents.ssh.target_set,agents.ssh.host_key_confirmed,agents.ssh.target_set")
+    assert actions == (
+        "agents.server.created,agents.server.host_key_confirmed,agents.server.address_set"
+    )
 
     removed = await owner.client.delete(
-        f"/api/v1/agents/instances/{instance['id']}/ssh",
+        f"/api/v1/agents/servers/{server['id']}",
         params={"version": again["version"]},
         headers=owner.headers(),
     )
     assert removed.status_code == 204
-    assert (await owner.state(instance["id"])) == {"target": None, "job": None, "warning": None}
+    assert (await owner.servers()) == {"items": [], "unassigned": []}
+
+
+async def test_the_same_server_cannot_be_added_twice(owner: Owner) -> None:
+    async with ssh_server() as (port, _):
+        first = await owner.create(host="127.0.0.1", port=port)
+        assert first.status_code == 201
+        again = await owner.create(host="127.0.0.1", port=port, name="又一台")
+        assert again.status_code == 409
+        assert again.json()["error"]["code"] == "AGENT_SERVER_EXISTS"
+        other_user = await owner.create(host="127.0.0.1", port=port, username="ops")
+        assert other_user.status_code == 201
 
 
 async def test_unreachable_and_refused_targets(owner: Owner) -> None:
-    instance = await owner.instance()
-    refused = await owner.put(instance["id"], host="127.0.0.1", port=_free_port())
+    refused = await owner.create(host="127.0.0.1", port=_free_port())
     assert refused.status_code == 503
     assert refused.json()["error"]["code"] == "AGENT_SSH_UNREACHABLE"
     assert refused.json()["error"]["details"]["reason"] == "refused"
-    dns = await owner.put(instance["id"], host="no-such-host.invalid")
+    dns = await owner.create(host="no-such-host.invalid")
     assert dns.status_code == 503 and dns.json()["error"]["details"]["reason"] == "dns"
-    assert (await owner.state(instance["id"])) == {"target": None, "job": None, "warning": None}
+    assert (await owner.servers())["items"] == []
 
 
 async def test_loopback_is_refused_outside_tests(make_client: ClientFactory) -> None:
     async with make_client(**{**SETTINGS, "agent_ssh_allow_loopback": False}) as client:
         setup = await client.post("/api/v1/setup", json=OWNER)
         owner = Owner(client, setup.json()["workspaces"][0]["id"])
-        instance = await owner.instance()
         for host in ("127.0.0.1", "localhost", "169.254.169.254"):
-            response = await owner.put(instance["id"], host=host)
+            response = await owner.create(host=host)
             assert response.status_code == 422, host
             assert response.json()["error"]["code"] == "AGENT_SSH_ADDRESS_NOT_ALLOWED"
 
 
-async def test_only_public_mode_enabled_instances(owner: Owner) -> None:
-    intranet = await owner.instance("intranet")
-    response = await owner.put(intranet["id"], host="127.0.0.1")
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "AGENT_SSH_PUBLIC_ONLY"
-    public = await owner.instance()
-    await owner.client.post(
-        f"/api/v1/agents/instances/{public['id']}/disable",
-        json={"version": public["version"]},
-        headers=owner.headers(),
-    )
-    disabled = await owner.put(public["id"], host="127.0.0.1")
-    assert disabled.status_code == 409 and disabled.json()["error"]["code"] == "AGENT_DISABLED"
-
-
 async def test_invalid_input_is_rejected(owner: Owner) -> None:
-    instance = await owner.instance()
     for body in (
         {"host": "bad host", "port": 22},
         {"host": "a" * 254, "port": 22},
         {"host": "example.com", "port": 0},
         {"host": "example.com", "port": 22, "username": "root; rm -rf /"},
         {"host": "example.com", "port": 22, "password": "x"},
+        {"host": "example.com", "port": 22, "name": ""},
     ):
-        response = await owner.put(instance["id"], **body)
+        response = await owner.create(**body)
         assert response.status_code == 422, body
 
 
 async def test_probes_are_rate_limited(owner: Owner) -> None:
-    instance = await owner.instance()
     port = _free_port()
-    codes = [
-        (await owner.put(instance["id"], host="127.0.0.1", port=port)).status_code
-        for _ in range(11)
-    ]
+    codes = [(await owner.create(host="127.0.0.1", port=port)).status_code for _ in range(11)]
     assert codes[:10] == [503] * 10 and codes[10] == 429
 
 
@@ -272,16 +278,17 @@ async def test_only_the_owner_and_only_in_its_workspace(
         setup = await client.post("/api/v1/setup", json=OWNER)
         workspace = setup.json()["workspaces"][0]["id"]
         owner = Owner(client, workspace)
-        instance = await owner.instance()
         user = await add_user(migrated_database_url, ADMIN["email"], ADMIN["password"])
         await add_member(migrated_database_url, uuid.UUID(workspace), user, "admin")
         assert (await admin_client.post("/api/v1/auth/login", json=ADMIN)).status_code == 200
         admin = Owner(admin_client, workspace)
-        path = f"/api/v1/agents/instances/{instance['id']}/ssh"
-        assert (await admin_client.get(path, headers=admin.headers())).status_code == 403
-        assert (await admin.put(instance["id"], host="127.0.0.1")).status_code == 403
-        # 别的工作空间的实例：404
-        unknown = await owner.put(str(uuid.uuid4()), host="127.0.0.1")
+        listed = await admin_client.get("/api/v1/agents/servers", headers=admin.headers())
+        assert listed.status_code == 403
+        assert (await admin.create(host="127.0.0.1")).status_code == 403
+        # 别的工作空间的服务器：404
+        unknown = await owner.client.get(
+            f"/api/v1/agents/servers/{uuid.uuid4()}", headers=owner.headers()
+        )
         assert unknown.status_code == 404
 
 
@@ -296,16 +303,15 @@ def owner_db(owner: Owner) -> str:
 async def test_confirming_during_a_replacement_never_pins_the_new_key(
     owner: Owner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """更换服务器的探测进行中，另一个请求确认了旧指纹：更换必须失败，旧确认不能落到新公钥上。"""
-    instance = await owner.instance()
+    """更换地址的探测进行中，另一个请求确认了旧指纹：更换必须失败，旧确认不能落到新公钥上。"""
     async with ssh_server() as (port, old_key):
-        first = (await owner.put(instance["id"], host="127.0.0.1", port=port)).json()["target"]
+        first = (await owner.create(host="127.0.0.1", port=port)).json()["server"]
     new_key = asyncssh.generate_private_key("ssh-ed25519")
     confirmed: list[int] = []
 
     async def probe_while_confirming(address: str, port: int) -> ssh.HostKey:
         response = await owner.confirm(
-            instance["id"], first["version"], old_key.get_fingerprint("sha256")
+            first["id"], first["version"], old_key.get_fingerprint("sha256")
         )
         confirmed.append(response.status_code)
         return ssh.HostKey(
@@ -315,20 +321,19 @@ async def test_confirming_during_a_replacement_never_pins_the_new_key(
         )
 
     monkeypatch.setattr(ssh, "probe_host_key", probe_while_confirming)
-    replaced = await owner.put(
-        instance["id"], host="127.0.0.1", port=port + 1, version=first["version"]
+    replaced = await owner.address(
+        first["id"], host="127.0.0.1", port=port + 1, version=first["version"]
     )
     assert confirmed == [200]
     assert replaced.status_code == 409, replaced.text
     assert replaced.json()["error"]["code"] == "VERSION_CONFLICT"
-    target = (await owner.state(instance["id"]))["target"]
-    assert target["host_key_fingerprint"] == old_key.get_fingerprint("sha256")
-    assert target["port"] == port and target["host_key_confirmed"] is True
+    info = (await owner.detail(first["id"]))["server"]["ssh"]
+    assert info["host_key_fingerprint"] == old_key.get_fingerprint("sha256")
+    assert info["port"] == port and info["host_key_confirmed"] is True
 
 
 async def test_hostnames_with_overlong_labels_are_rejected(owner: Owner) -> None:
-    instance = await owner.instance()
-    response = await owner.put(instance["id"], host="a" * 64 + ".com")
+    response = await owner.create(host="a" * 64 + ".com")
     assert response.status_code == 422, response.text
     with pytest.raises(ssh.SshError) as caught:
         await ssh.resolve("a" * 64 + ".com", 22)

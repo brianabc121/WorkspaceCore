@@ -37,6 +37,9 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     // 实例的发件记录（T-0118）：默认没有
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/outbox$/.test(path) && request.method === 'GET') return Response.json({ items: [], rejected_replies: [] })
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/wakeups$/.test(path) && request.method === 'GET') return Response.json({ items: [], targets: [] })
+    // OpenClaw 服务器（T-0147）：默认没有服务器，实例没有部署
+    if (path === '/api/v1/agents/servers' && request.method === 'GET') return Response.json({ items: [], unassigned: [] })
+    if (/^\/api\/v1\/agents\/instances\/[^/]+\/deployment$/.test(path) && request.method === 'GET') return Response.json({ deployment: null, server: null, job: null, capacity_warning: null })
     // 实例的运行环境权限（T-0140）：默认关闭
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/runner$/.test(path) && request.method === 'GET') return Response.json(runnerOff)
     if (path === '/api/v1/knowledge/spaces') return Response.json({ items: [] })

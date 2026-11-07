@@ -5,35 +5,41 @@ import { useAuthStore } from '../../stores/auth'
 import { ApiError, dataOf, type Schema } from '../../services/api'
 import { formatTime } from '../time'
 import { useAgentAction } from './action'
-import { OPS_ACTION, OPS_HELP, OPS_SERVICE, OPS_STATUS, OPS_STEP_UP, opsError, opsKey, opsUnavailable, useAgentOps, useOpsAction, type OpsAction, type OpsService } from './ops'
+import { OPS_ACTION, OPS_DIRECT, OPS_HELP, OPS_SERVICE, OPS_STATUS, OPS_STEP_UP, opsError, opsKey, opsUnavailable, useAgentOps, useOpsAction, type OpsAction, type OpsKind, type OpsService } from './ops'
 
-// 实例卡片里的“运维”（T-0114）：固定的运维动作，经工作台的 SSH 通道执行；输出脱敏后保存 7 天。
-// 重启、重新拉起、清理镜像要再输一次自己的登录密码；同一实例同时只跑一个动作。
-const props = defineProps<{ instance: Schema['AgentInstanceOut'] }>()
+// “运维”（T-0114；一台服务器多个实例后分成实例级与服务器级，T-0145）：固定的运维动作，经工作台的 SSH 通道执行；
+// 输出脱敏后保存 7 天。实例级只作用于这个实例的目录与 Compose 项目（查看状态、日志、立即上报、重启、重新拉起）；
+// 服务器级作用于整台服务器（查看全部容器、清理无用镜像）。重启、重新拉起、清理镜像要再输一次自己的登录密码；
+// 同一台服务器同时只跑一个动作。
+const props = defineProps<{ kind: OpsKind; targetId: string }>()
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id, cache = useQueryClient()
-const ops = useAgentOps(scope, () => props.instance.id)
+const ops = useAgentOps(scope, props.kind, () => props.targetId)
 const selected = ref<string | null>(null)
-const detail = useOpsAction(scope, () => props.instance.id, () => selected.value)
+const detail = useOpsAction(scope, props.kind, () => props.targetId, () => selected.value)
 const { busy, error, notice, failure, act, refresh, header } = useAgentAction(scope, opsError)
 const service = ref<OpsService>('openclaw'), confirming = ref<OpsAction | null>(null), password = ref('')
 const state = computed(() => ops.data.value)
 const running = computed(() => state.value?.running ?? null)
 const shown = computed(() => detail.data.value?.id === selected.value ? detail.data.value : null)
-const path = computed(() => ({ instance_id: props.instance.id }))
-const direct: OpsAction[] = ['status', 'logs', 'report']
+const direct = computed(() => OPS_DIRECT[props.kind]), stepUp = computed(() => OPS_STEP_UP[props.kind])
 
 // 打开面板时有动作在跑：直接看它的进度
 watch(running, now => { if (now && !selected.value) selected.value = now.id }, { immediate: true })
 // 看着的动作结束了：刷新列表（状态、退出码）
 watch(() => shown.value?.status, (now, before) => {
-  if (before === 'running' && now && now !== 'running') void cache.invalidateQueries({ queryKey: opsKey(user, scope, props.instance.id) })
+  if (before === 'running' && now && now !== 'running') void cache.invalidateQueries({ queryKey: opsKey(user, scope, props.kind, props.targetId) })
 })
 
 async function start(action: OpsAction, secret?: string) {
   let started: Schema['AgentOpsActionOut'] | undefined
-  const body: Schema['AgentOpsRun'] = { action, ...(action === 'logs' ? { service: service.value } : {}), ...(secret ? { password: secret } : {}) }
   const ok = await act(async () => {
-    started = dataOf(await auth.api.POST('/api/v1/agents/instances/{instance_id}/ops', { params: { header, path: path.value }, body }))
+    if (props.kind === 'server') {
+      const body: Schema['ServerOpsRun'] = { action: action as Schema['ServerOpsRun']['action'], ...(secret ? { password: secret } : {}) }
+      started = dataOf(await auth.api.POST('/api/v1/agents/servers/{server_id}/ops', { params: { header, path: { server_id: props.targetId } }, body }))
+    } else {
+      const body: Schema['AgentOpsRun'] = { action: action as Schema['AgentOpsRun']['action'], ...(action === 'logs' ? { service: service.value } : {}), ...(secret ? { password: secret } : {}) }
+      started = dataOf(await auth.api.POST('/api/v1/agents/instances/{instance_id}/ops', { params: { header, path: { instance_id: props.targetId } }, body }))
+    }
   }, `已开始：${OPS_ACTION[action]}`)
   if (ok && started) selected.value = started.id
   else if (failure.value instanceof ApiError && failure.value.code === 'WRITE_UNKNOWN') void refresh()
@@ -51,18 +57,18 @@ async function confirm() {
 </script>
 
 <template>
-  <section class="agent-section ops-panel" aria-label="运维">
-    <h3>运维</h3>
+  <section :class="kind === 'server' ? 'panel ops-panel' : 'agent-section ops-panel'" :aria-label="kind === 'server' ? '服务器运维' : '运维'">
+    <h3>{{ kind === 'server' ? '服务器运维' : '运维' }}</h3>
     <p v-if="ops.isPending.value" role="status">正在加载…</p>
     <p v-else-if="ops.error.value" role="alert">{{ opsError(ops.error.value) }}</p>
     <template v-else-if="state">
       <p v-if="!state.available" class="form-help">{{ opsUnavailable(state.reason) }}</p>
       <template v-else>
-        <p class="form-help">命令写死在工作台里，只作用于这个实例的接入包目录；输出脱敏后保存 7 天，每次都写审计。</p>
+        <p class="form-help">{{ kind === 'server' ? '命令写死在工作台里，作用于整台服务器；输出脱敏后保存 7 天，每次都写审计。单个实例的重启、日志在实例卡片里。' : '命令写死在工作台里，只作用于这个实例的目录与 Compose 项目，同一台服务器上的其他实例不受影响；输出脱敏后保存 7 天，每次都写审计。清理镜像在“服务器”页。' }}</p>
         <div class="ops-actions">
-          <label class="form-field"><span>日志来源</span><select v-model="service"><option v-for="(label, key) in OPS_SERVICE" :key="key" :value="key">{{ label }}</option></select></label>
+          <label v-if="kind === 'instance'" class="form-field"><span>日志来源</span><select v-model="service"><option v-for="(label, key) in OPS_SERVICE" :key="key" :value="key">{{ label }}</option></select></label>
           <button v-for="action in direct" :key="action" type="button" class="secondary-button" :title="OPS_HELP[action]" :disabled="busy || !!running" @click="start(action)">{{ OPS_ACTION[action] }}</button>
-          <button v-for="action in OPS_STEP_UP" :key="action" type="button" class="secondary-button im-danger" :title="OPS_HELP[action]" :disabled="busy || !!running" @click="ask(action)">{{ OPS_ACTION[action] }}</button>
+          <button v-for="action in stepUp" :key="action" type="button" class="secondary-button im-danger" :title="OPS_HELP[action]" :disabled="busy || !!running" @click="ask(action)">{{ OPS_ACTION[action] }}</button>
         </div>
         <form v-if="confirming" class="im-group-form ops-confirm" :aria-label="`确认：${OPS_ACTION[confirming]}`" @submit.prevent="confirm">
           <p><strong>{{ OPS_ACTION[confirming] }}</strong>（{{ OPS_HELP[confirming] }}）：输入你的登录密码确认。</p>

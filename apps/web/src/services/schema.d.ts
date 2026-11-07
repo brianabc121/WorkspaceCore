@@ -277,6 +277,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/instances/{instance_id}/deploy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 部署到服务器（owner）
+         * @description 把实例部署到一台 SSH 服务器：签发新的接入包，只替换这个实例自己的目录（~/myworkspace-openclaw/<实例短号>）与 Compose 项目，同一台服务器上的其他实例不受影响。服务器还没准备时要带登录密码；已经部署在另一台服务器上 409 AGENT_DEPLOYED_ELSEWHERE；只支持外网模式（409 AGENT_SSH_PUBLIC_ONLY）。剩余内存或磁盘不多时 capacity_warning 提醒（D4：不拦）。进度看 GET /deployment 的 job。
+         */
+        post: operations["deploy_agent_instance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/deployment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 实例部署在哪台服务器（owner）
+         * @description 部署记录（目录、时间）、所在的服务器（部署、自动识别或手动指定）、这个实例最近一次部署或卸载任务。
+         */
+        get: operations["get_agent_deployment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/instances/{instance_id}/disable": {
         parameters: {
             query?: never;
@@ -409,7 +449,7 @@ export interface paths {
         put?: never;
         /**
          * 执行一个固定的运维动作（admin）
-         * @description 动作是写死的：status 查看状态、logs 查看日志（最近 200 行，可选 openclaw / tunnel / image-proxy）、restart 重启 OpenClaw、up 重新拉起全部服务、prune 清理无用镜像、report 立即上报一次。restart / up / prune 要带自己的登录密码（没带 403 STEP_UP_REQUIRED，错误 403 STEP_UP_FAILED，错太多次 429）。同一实例同时只跑一个动作（409 AGENT_OPS_RUNNING），正在部署或卸载时 409 AGENT_SSH_JOB_RUNNING；没用 SSH 部署过 409 AGENT_OPS_UNAVAILABLE。立即返回 running 的记录，进度与输出看 GET /ops/{action_id}；超时 60 秒，up 是 180 秒。输出脱敏后保存 7 天；审计记下动作与退出码，不记输出。
+         * @description 动作是写死的：status 查看状态、logs 查看日志（最近 200 行，可选 openclaw / tunnel / image-proxy）、restart 重启 OpenClaw、up 重新拉起这个实例的全部服务、report 立即上报一次；清理镜像在服务器上做（POST /agents/servers/{server_id}/ops）。restart / up 要带自己的登录密码（没带 403 STEP_UP_REQUIRED，错误 403 STEP_UP_FAILED，错太多次 429）。同一台服务器同时只跑一个动作（409 AGENT_OPS_RUNNING），正在部署或卸载时 409 AGENT_SSH_JOB_RUNNING；没部署到 SSH 服务器 409 AGENT_OPS_UNAVAILABLE。立即返回 running 的记录，进度与输出看 GET /ops/{action_id}；超时 60 秒，up 是 180 秒。输出脱敏后保存 7 天；审计记下动作与退出码，不记输出。
          */
         post: operations["run_agent_ops"];
         delete?: never;
@@ -533,105 +573,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agents/instances/{instance_id}/ssh": {
+    "/api/v1/agents/instances/{instance_id}/server": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** SSH 自动部署的目标服务器（owner） */
-        get: operations["get_agent_ssh"];
+        get?: never;
         /**
-         * 填写或更换目标服务器，读取主机公钥（owner）
-         * @description 解析地址（拒绝回环、链路本地、组播等地址），连到 SSH 端口只读取主机公钥、不登录，返回 SHA256 指纹；owner 核对后调用 /ssh/confirm 确认。只支持外网模式的实例。连不上时 503 AGENT_SSH_UNREACHABLE（details.reason：dns / timeout / refused / unreachable / handshake）；地址不允许时 422 AGENT_SSH_ADDRESS_NOT_ALLOWED；已经装了专用公钥时 409 AGENT_SSH_KEY_INSTALLED。每个用户每分钟最多探测 10 次。
+         * 手动指定实例所在的服务器（owner，乐观并发）
+         * @description 手动部署的实例按上报的服务器指纹自动识别；这里可以手动指定（以手动为准，D3），server_id 为 null 时改回自动识别。经 SSH 部署的实例以部署为准（409 AGENT_DEPLOYED）。
          */
-        put: operations["set_agent_ssh"];
+        put: operations["assign_agent_server"];
         post?: never;
-        /**
-         * 删除目标服务器（owner）
-         * @description 已经装了工作台的专用公钥时要先吊销（409 AGENT_SSH_KEY_INSTALLED）。
-         */
-        delete: operations["delete_agent_ssh"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/agents/instances/{instance_id}/ssh/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 确认主机公钥的指纹（owner）
-         * @description 指纹必须与探测时读到的一致（409 AGENT_SSH_FINGERPRINT_MISMATCH）；确认后，之后的连接只接受这把主机公钥。
-         */
-        post: operations["confirm_agent_ssh"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/agents/instances/{instance_id}/ssh/install": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 开始自动安装 OpenClaw（owner）
-         * @description 主机公钥已确认、外网接入入口已配置、实例启用且是外网模式时，新建安装任务并立即返回；进度看 GET /ssh 的 job（steps、脱敏后的 log）。登录密码只用于这一次（登录、装专用公钥、需要时用 sudo 装 Docker），不保存；已经装了专用公钥、且 Docker 可以直接使用时可以不填。主机公钥未确认时 409 AGENT_SSH_HOST_KEY_UNCONFIRMED；已经有进行中的任务时 409 AGENT_SSH_JOB_RUNNING；外网入口未配置时 409 AGENT_INGRESS_NOT_CONFIGURED。
-         */
-        post: operations["install_agent_ssh"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/agents/instances/{instance_id}/ssh/revoke": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 吊销专用密钥（owner）
-         * @description 用专用密钥登录，从服务器的 ~/.ssh/authorized_keys 删掉这把公钥，再删除工作台保存的私钥；之后可以更换或删除目标服务器。连不上服务器时 503 AGENT_SSH_UNREACHABLE（details.reason）；force=true 时仍然删除工作台保存的私钥，返回的 warning 说明要手动删除的那一行公钥。
-         */
-        post: operations["revoke_agent_ssh"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/agents/instances/{instance_id}/ssh/uninstall": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 卸载服务器上的 OpenClaw（owner）
-         * @description 只用专用密钥登录：停止并删除容器、删掉工作台写入 crontab 的定时任务；remove_files=true 时同时删除接入包目录（含实例凭证与 OpenClaw 的会话、记忆，不可恢复）。不卸载 Docker，不吊销专用公钥与实例凭证。进度看 GET /ssh 的 job。没有专用公钥时 409 AGENT_SSH_KEY_MISSING；已经有进行中的任务时 409 AGENT_SSH_JOB_RUNNING。
-         */
-        post: operations["uninstall_agent_ssh"];
         delete?: never;
         options?: never;
         head?: never;
@@ -689,6 +644,26 @@ export interface paths {
         get: operations["list_agent_stops"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/undeploy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 从服务器上卸载实例（owner）
+         * @description 只用专用密钥：停止这个实例的容器、删掉它的定时任务，可选删除它的目录（不可恢复）。同一台服务器上的其他实例不受影响；不卸载 Docker，不吊销专用公钥。
+         */
+        post: operations["undeploy_agent_instance"];
         delete?: never;
         options?: never;
         head?: never;
@@ -809,6 +784,173 @@ export interface paths {
          * @description 新值立即生效，旧值不再下发；实例最迟在下一次 secrets reload（每 10 分钟）时换上。
          */
         post: operations["rotate_agent_secret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * OpenClaw 服务器列表（owner）
+         * @description 每台服务器：类型（ssh 管理员添加 / auto 按上报的服务器指纹自动识别）、SSH 信息、整机当前的 CPU / 内存 / 磁盘 / 15 分钟负载、上面有几个实例与几个在线、正在提醒的告警；以及还没有归属任何服务器的实例（docs/v2/MULTI_OPENCLAW_PLAN.md 第 7.1 节）。
+         */
+        get: operations["list_agent_servers"];
+        put?: never;
+        /**
+         * 添加一台服务器（owner）
+         * @description 只解析地址并读取主机公钥（不登录），返回 SHA256 指纹；owner 在服务器上核对后调用 /confirm 确认。每个用户每分钟最多探测 10 次（429）；连不上 503 AGENT_SSH_UNREACHABLE；同一个地址、端口和账号已经添加过 409 AGENT_SERVER_EXISTS。审计 agents.server.created。
+         */
+        post: operations["create_agent_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/servers/{server_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 服务器详情（owner）
+         * @description 整机当前值与每小时趋势（24h / 7d / 30d）、这台服务器上的每个智能体（自己的 CPU、内存、进程数、数据目录、网速、最近一小时 token、正在执行的任务）、最近一次 SSH 任务（第 7.2 节）。
+         */
+        get: operations["get_agent_server"];
+        put?: never;
+        post?: never;
+        /**
+         * 移除服务器（owner）
+         * @description SSH 服务器要先卸载上面的实例（409 AGENT_SERVER_HAS_DEPLOYMENTS）、吊销专用密钥（409 AGENT_SSH_KEY_INSTALLED）；自动识别的服务器直接移除，上面的实例改为未归属（下一次上报会重新识别）。
+         */
+        delete: operations["delete_agent_server"];
+        options?: never;
+        head?: never;
+        /** 改服务器名称（owner，乐观并发） */
+        patch: operations["rename_agent_server"];
+        trace?: never;
+    };
+    "/api/v1/agents/servers/{server_id}/address": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 更换服务器地址或账号（owner）
+         * @description 重新读取主机公钥，要重新确认；已经装了工作台的专用公钥时先吊销（409 AGENT_SSH_KEY_INSTALLED）。
+         */
+        put: operations["set_agent_server_address"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/servers/{server_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 确认主机公钥指纹（owner）
+         * @description 指纹必须与探测时读到的一致（409 AGENT_SSH_FINGERPRINT_MISMATCH）；之后工作台只接受这把主机公钥。
+         */
+        post: operations["confirm_agent_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/servers/{server_id}/ops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 服务器级运维动作：是否可用、进行中的动作与最近记录（admin） */
+        get: operations["get_server_ops"];
+        put?: never;
+        /**
+         * 对整台服务器执行固定的运维动作（admin）
+         * @description containers 查看这台服务器上所有工作台项目的容器与资源占用（docker compose ls、docker stats）；prune 清理无用镜像（要带自己的登录密码）。与这台服务器上的实例级动作、部署任务互斥（T-0145，docs/v2/MULTI_OPENCLAW_PLAN.md 第 8 节）。
+         */
+        post: operations["run_server_ops"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/servers/{server_id}/ops/{action_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 一次服务器级运维动作的状态与脱敏后的输出（admin） */
+        get: operations["get_server_ops_action"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/servers/{server_id}/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 准备服务器（owner）
+         * @description 用一次登录密码装上工作台的专用公钥（每台服务器一把，D7）、需要时用 sudo 安装 Docker；密码不保存。之后在这台服务器上部署实例不用再输密码。进度看服务器详情的 job。同一台服务器同时只有一个任务（409 AGENT_SSH_JOB_RUNNING）。
+         */
+        post: operations["prepare_agent_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/servers/{server_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 吊销这台服务器的专用密钥（owner）
+         * @description 用专用密钥登录，从服务器的 ~/.ssh/authorized_keys 删掉这把公钥，再删除工作台保存的私钥；服务器连不上时 force=true 只删除工作台保存的私钥（warning 里提示手动删除那一行）。吊销后这台服务器上的实例不能再经工作台运维或卸载，要重新准备服务器。
+         */
+        post: operations["revoke_agent_server"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3930,6 +4072,54 @@ export interface components {
              */
             token_prefix: string | null;
         };
+        /**
+         * AgentDeployIn
+         * @description 把实例部署到一台 SSH 服务器（只替换这个实例自己的目录与 Compose 项目）。
+         */
+        AgentDeployIn: {
+            /**
+             * Password
+             * @description 服务器还没准备（没装专用公钥）时必填，只用这一次；准备好的服务器不用填
+             */
+            password?: string | null;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+            /**
+             * Version
+             * @description 实例的当前版本号
+             */
+            version: number;
+        };
+        /** AgentDeploymentOut */
+        AgentDeploymentOut: {
+            /** Install Dir */
+            install_dir: string | null;
+            /** Installed At */
+            installed_at: string | null;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+            /** Version */
+            version: number;
+        };
+        /** AgentDeploymentState */
+        AgentDeploymentState: {
+            /**
+             * Capacity Warning
+             * @description 部署前的容量提醒（D4：不设硬上限，剩余内存或磁盘不多时提醒）
+             */
+            capacity_warning?: string | null;
+            deployment: components["schemas"]["AgentDeploymentOut"] | null;
+            /** @description 这个实例最近一次部署或卸载任务 */
+            job: components["schemas"]["AgentSshJobOut"] | null;
+            /** @description 所在的服务器（部署或自动识别、手动指定） */
+            server: components["schemas"]["AgentServerOut"] | null;
+        };
         /** AgentInstanceCreate */
         AgentInstanceCreate: {
             /**
@@ -4367,7 +4557,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "status" | "logs" | "restart" | "up" | "prune" | "report";
+            action: "status" | "logs" | "restart" | "up" | "prune" | "report" | "containers";
             /** Error Code */
             error_code: string | null;
             /** Error Message */
@@ -4390,6 +4580,11 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /**
+             * Instance Id
+             * @description 实例级动作的实例；服务器级为 null
+             */
+            instance_id?: string | null;
             /**
              * Output
              * @description 脱敏后的输出（令牌、密钥、Authorization、私钥块已替换成 ***，最多 64 KB）；列表里为 null，详情接口里才有
@@ -4417,15 +4612,15 @@ export interface components {
         };
         /**
          * AgentOpsRun
-         * @description 执行一个固定的运维动作（AGENT_OPS_PLAN 6.1）。命令写死在工作台里，不接受任何命令文本。
+         * @description 对一个实例执行固定的运维动作（AGENT_OPS_PLAN 6.1）。命令写死，不接受任何命令文本。
          */
         AgentOpsRun: {
             /**
              * Action
-             * @description status 查看状态、logs 查看日志、restart 重启 OpenClaw、up 重新拉起全部服务、prune 清理无用镜像、report 立即上报一次（用量与服务器状态）
+             * @description status 查看状态、logs 查看日志、restart 重启 OpenClaw、up 重新拉起这个实例的全部服务、report 立即上报一次（用量与服务器状态）；清理镜像在服务器上做
              * @enum {string}
              */
-            action: "status" | "logs" | "restart" | "up" | "prune" | "report";
+            action: "status" | "logs" | "restart" | "up" | "report";
             /**
              * Password
              * @description restart / up / prune 要再输一次自己的登录密码（二次认证）
@@ -4441,7 +4636,7 @@ export interface components {
         AgentOpsState: {
             /**
              * Available
-             * @description 用 SSH 部署过、专用密钥还在：可以执行运维动作
+             * @description 部署到了一台 SSH 服务器、专用密钥还在：可以执行运维动作
              */
             available: boolean;
             /**
@@ -4451,10 +4646,10 @@ export interface components {
             items: components["schemas"]["AgentOpsActionOut"][];
             /**
              * Reason
-             * @description 不可用的原因：not_deployed 还没用 SSH 部署（手动接入的实例先做一次 SSH 部署）；key_missing 专用密钥已吊销
+             * @description 不可用的原因：not_deployed 还没部署到服务器（手动接入的实例先部署到一台服务器）；key_missing 这台服务器的专用密钥已吊销
              */
             reason: ("not_deployed" | "key_missing") | null;
-            /** @description 进行中的动作（同一实例同时只有一个） */
+            /** @description 这台服务器上进行中的动作（同一台服务器同时只有一个） */
             running: components["schemas"]["AgentOpsActionOut"] | null;
         };
         /**
@@ -4727,6 +4922,180 @@ export interface components {
              */
             version: number;
         };
+        /**
+         * AgentServerAddress
+         * @description 更换地址或账号：重新读取主机公钥，要重新确认；已经装了专用公钥时先吊销。
+         */
+        AgentServerAddress: {
+            /** Host */
+            host: string;
+            /**
+             * Port
+             * @default 22
+             */
+            port: number;
+            /** Username */
+            username: string;
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求带上读取时的版本
+             */
+            version: number;
+        };
+        /**
+         * AgentServerAssign
+         * @description 手动指定实例所在的服务器（手动部署的实例）；null 表示改回按指纹自动识别。
+         */
+        AgentServerAssign: {
+            /** Server Id */
+            server_id: string | null;
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求带上读取时的版本
+             */
+            version: number;
+        };
+        /**
+         * AgentServerCreate
+         * @description 添加一台服务器：工作台只读取它的主机公钥（不登录），等 owner 核对指纹后确认。
+         */
+        AgentServerCreate: {
+            /**
+             * Host
+             * @description 服务器的 IP 或域名
+             */
+            host: string;
+            /** Name */
+            name: string;
+            /**
+             * Port
+             * @default 22
+             */
+            port: number;
+            /**
+             * Username
+             * @description SSH 账号；之后用 sudo 安装 Docker（需要时）
+             */
+            username: string;
+        };
+        /** AgentServerDetail */
+        AgentServerDetail: {
+            /** Agents */
+            agents: components["schemas"]["ServerAgentRow"][];
+            /** @description 整机的当前值 */
+            current: components["schemas"]["HostCurrent"] | null;
+            /** @description 这台服务器上最近一次 SSH 任务 */
+            job: components["schemas"]["AgentSshJobOut"] | null;
+            /**
+             * Points
+             * @description 整机每小时的平均与峰值
+             */
+            points: components["schemas"]["HostPoint"][];
+            /**
+             * Range
+             * @enum {string}
+             */
+            range: "24h" | "7d" | "30d";
+            server: components["schemas"]["AgentServerOut"];
+            /** Warning */
+            warning?: string | null;
+        };
+        /** AgentServerList */
+        AgentServerList: {
+            /** Items */
+            items: components["schemas"]["AgentServerOut"][];
+            /**
+             * Unassigned
+             * @description 还没有归属任何服务器的实例
+             */
+            unassigned: components["schemas"]["UnassignedInstance"][];
+        };
+        /** AgentServerOut */
+        AgentServerOut: {
+            /** Alerts */
+            alerts: ("disk_low" | "memory_low" | "load_high" | "not_reporting")[];
+            /** Cores */
+            cores: number | null;
+            /** Cpu Percent */
+            cpu_percent: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Disk Used Percent
+             * @description 两个分区里较高的已用百分比
+             */
+            disk_used_percent: number | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Instances Online */
+            instances_online: number;
+            /** Instances Total */
+            instances_total: number;
+            /**
+             * Kind
+             * @description auto 按上报的服务器指纹自动识别（手动部署的实例）；ssh 管理员添加、经 SSH 部署
+             * @enum {string}
+             */
+            kind: "auto" | "ssh";
+            /** Load15 */
+            load15: number | null;
+            /** Mem Total */
+            mem_total: number | null;
+            /** Mem Used Percent */
+            mem_used_percent: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Reported At
+             * @description 最近一次有实例上报整机数据的时间
+             */
+            reported_at: string | null;
+            ssh: components["schemas"]["ServerSshOut"] | null;
+            /**
+             * Stale
+             * @description 超过 3 分钟没有任何实例上报
+             */
+            stale: boolean;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
+        /**
+         * AgentServerPrepare
+         * @description 准备服务器：用一次登录密码装上工作台的专用公钥、需要时用 sudo 安装 Docker。密码不保存。
+         */
+        AgentServerPrepare: {
+            /**
+             * Password
+             * Format: password
+             */
+            password: string;
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求带上读取时的版本
+             */
+            version: number;
+        };
+        /** AgentServerUpdate */
+        AgentServerUpdate: {
+            /** Name */
+            name: string;
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求带上读取时的版本
+             */
+            version: number;
+        };
         /** AgentSettingsOut */
         AgentSettingsOut: {
             /** Agents Enabled */
@@ -4792,9 +5161,10 @@ export interface components {
             id: string;
             /**
              * Kind
+             * @description prepare 准备服务器（装专用公钥、装 Docker）；install 部署一个实例；uninstall 卸载一个实例
              * @enum {string}
              */
-            kind: "install" | "uninstall";
+            kind: "prepare" | "install" | "uninstall";
             /**
              * Log
              * @description 命令输出的末尾（最多 64 KB），密码、令牌、私钥已替换成 ***
@@ -4944,20 +5314,17 @@ export interface components {
              */
             version?: number | null;
         };
-        /**
-         * AgentSshUninstall
-         * @description 卸载：只用专用密钥。停止容器、删掉工作台写入的定时任务；可选删除接入包目录。
-         */
-        AgentSshUninstall: {
+        /** AgentUndeployIn */
+        AgentUndeployIn: {
             /**
              * Remove Files
-             * @description 同时删除服务器上的接入包目录（含实例凭证、OpenClaw 的会话与记忆），不可恢复
+             * @description 同时删除服务器上这个实例的目录（含实例凭证、OpenClaw 的会话与记忆），不可恢复
              * @default false
              */
             remove_files: boolean;
             /**
              * Version
-             * @description 目标服务器的当前版本号
+             * @description 实例的当前版本号
              */
             version: number;
         };
@@ -10689,6 +11056,16 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** RunningTaskRef */
+        RunningTaskRef: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Title */
+            title: string;
+        };
         /**
          * SearchPage
          * @description total_estimate 恒为 null。
@@ -10869,6 +11246,63 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /**
+         * ServerAgentRow
+         * @description 服务器详情里每个智能体一行。
+         */
+        ServerAgentRow: {
+            /** Alerts */
+            alerts: ("mem_near_limit" | "restarting" | "cpu_hog")[];
+            /** Cpus */
+            cpus: number | null;
+            /**
+             * Deployed
+             * @description 经 SSH 部署在这台服务器上（不是只按指纹识别的）
+             */
+            deployed: boolean;
+            /** Install Dir */
+            install_dir: string | null;
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            instance_id: string;
+            /** @description 这个智能体自己的当前用量；没上报过为 null */
+            load: components["schemas"]["AgentLoad"] | null;
+            /** Mem Limit Mb */
+            mem_limit_mb: number | null;
+            /** Name */
+            name: string;
+            /** @description 正在执行的任务（时间轴上没结束的一段） */
+            running_task: components["schemas"]["RunningTaskRef"] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "online" | "offline" | "disabled";
+            /**
+             * Tokens 1H
+             * @description 最近一小时的 token 用量（输入 + 输出）
+             */
+            tokens_1h: number;
+        };
+        /**
+         * ServerOpsRun
+         * @description 对整台服务器执行固定的运维动作（T-0145）：查看全部容器、清理无用镜像。
+         */
+        ServerOpsRun: {
+            /**
+             * Action
+             * @description containers 查看这台服务器上所有工作台项目的容器与资源占用、prune 清理无用镜像
+             * @enum {string}
+             */
+            action: "prune" | "containers";
+            /**
+             * Password
+             * @description prune 要再输一次自己的登录密码（二次认证）
+             */
+            password?: string | null;
+        };
         /** ServerRef */
         ServerRef: {
             /**
@@ -10878,6 +11312,43 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+        };
+        /** ServerSshOut */
+        ServerSshOut: {
+            /**
+             * Address
+             * @description 探测时解析出的地址；之后都连这个地址
+             */
+            address: string;
+            /** Client Key Fingerprint */
+            client_key_fingerprint: string | null;
+            /**
+             * Client Key Installed
+             * @description 这台服务器上装了工作台的专用公钥
+             */
+            client_key_installed: boolean;
+            /** Host */
+            host: string;
+            /** Host Key Algorithm */
+            host_key_algorithm: string;
+            /** Host Key Confirmed */
+            host_key_confirmed: boolean;
+            /** Host Key Confirmed At */
+            host_key_confirmed_at: string | null;
+            /**
+             * Host Key Fingerprint
+             * @description SHA256 指纹，格式与 ssh-keygen -lf 相同
+             */
+            host_key_fingerprint: string;
+            /** Port */
+            port: number;
+            /**
+             * Prepared At
+             * @description 准备好（专用公钥、Docker 可用）的时间
+             */
+            prepared_at: string | null;
+            /** Username */
+            username: string;
         };
         /**
          * ServiceHealthConfig
@@ -11969,6 +12440,21 @@ export interface components {
             params?: {
                 [key: string]: unknown;
             };
+        };
+        /** UnassignedInstance */
+        UnassignedInstance: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "online" | "offline" | "disabled";
         };
         /** UsageOut */
         UsageOut: {
@@ -13200,6 +13686,152 @@ export interface operations {
             };
         };
     };
+    deploy_agent_instance: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentDeployIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentDeploymentState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_agent_deployment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentDeploymentState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     disable_agent_instance: {
         parameters: {
             query?: never;
@@ -14288,68 +14920,7 @@ export interface operations {
             };
         };
     };
-    get_agent_ssh: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 当前工作空间；不是成员时返回 404 */
-                "X-Workspace-Id": string;
-            };
-            path: {
-                instance_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentSshState"];
-                };
-            };
-            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    set_agent_ssh: {
+    assign_agent_server: {
         parameters: {
             query?: never;
             header: {
@@ -14365,7 +14936,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentSshTargetSet"];
+                "application/json": components["schemas"]["AgentServerAssign"];
             };
         };
         responses: {
@@ -14375,7 +14946,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentSshState"];
+                    "application/json": components["schemas"]["AgentDeploymentState"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -14416,427 +14987,6 @@ export interface operations {
             };
             /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
             422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    delete_agent_ssh: {
-        parameters: {
-            query: {
-                version: number;
-            };
-            header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
-                /** @description 当前工作空间；不是成员时返回 404 */
-                "X-Workspace-Id": string;
-            };
-            path: {
-                instance_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    confirm_agent_ssh: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
-                /** @description 当前工作空间；不是成员时返回 404 */
-                "X-Workspace-Id": string;
-            };
-            path: {
-                instance_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgentSshConfirm"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentSshState"];
-                };
-            };
-            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    install_agent_ssh: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
-                /** @description 当前工作空间；不是成员时返回 404 */
-                "X-Workspace-Id": string;
-            };
-            path: {
-                instance_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgentSshInstall"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentSshState"];
-                };
-            };
-            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    revoke_agent_ssh: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
-                /** @description 当前工作空间；不是成员时返回 404 */
-                "X-Workspace-Id": string;
-            };
-            path: {
-                instance_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgentSshRevoke"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentSshState"];
-                };
-            };
-            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    uninstall_agent_ssh: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
-                /** @description 当前工作空间；不是成员时返回 404 */
-                "X-Workspace-Id": string;
-            };
-            path: {
-                instance_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgentSshUninstall"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentSshState"];
-                };
-            };
-            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
-            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15050,6 +15200,91 @@ export interface operations {
             };
             /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    undeploy_agent_instance: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentUndeployIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentDeploymentState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15687,6 +15922,916 @@ export interface operations {
             };
             /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_agent_servers: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentServerList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_agent_server: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentServerCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentServerDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_agent_server: {
+        parameters: {
+            query?: {
+                range?: "24h" | "7d" | "30d";
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentServerDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_agent_server: {
+        parameters: {
+            query: {
+                version: number;
+            };
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    rename_agent_server: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentServerUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentServerOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_agent_server_address: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentServerAddress"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentServerDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    confirm_agent_server: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSshConfirm"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentServerDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_server_ops: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentOpsState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_server_ops: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerOpsRun"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentOpsActionOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_server_ops_action: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                server_id: string;
+                action_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentOpsActionOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    prepare_agent_server: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentServerPrepare"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentServerDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revoke_agent_server: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSshRevoke"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentServerDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

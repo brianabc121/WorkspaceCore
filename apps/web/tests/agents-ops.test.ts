@@ -17,7 +17,6 @@ function setup(handler: (r: Request) => Response | Promise<Response | undefined>
     path(r) === '/api/v1/agents/settings' ? Response.json({ agents_enabled: true, updated_at: null, updated_by: null, version: 7 }) :
     path(r) === '/api/v1/agents/instances' ? Response.json({ items: [instance], next_cursor: null, total_estimate: 1 }) :
     path(r) === '/api/v1/agents/secrets' ? Response.json({ items: [], next_cursor: null, total_estimate: 0 }) :
-    path(r) === '/api/v1/agents/instances/inst-a/ssh' ? Response.json({ target: null, job: null, warning: null }) :
     path(r) === '/api/v1/agents/host-summary' ? Response.json({ items: [] }) : undefined
   ))
 }
@@ -104,10 +103,10 @@ describe('agent ops panel', () => {
     expect(await within(ops).findByText('earlier output')).toBeVisible()
   })
 
-  it('explains that manual instances need an SSH deployment first', async () => {
+  it('explains that manual instances need to be deployed to a server first', async () => {
     setup(r => path(r) === '/api/v1/agents/instances/inst-a/ops' ? Response.json(state({ available: false, reason: 'not_deployed' })) : undefined)
     const ops = await panel()
-    expect(await within(ops).findByText(/只适用于用 SSH 部署过的实例/)).toBeVisible()
+    expect(await within(ops).findByText(/只适用于部署到 SSH 服务器的实例/)).toBeVisible()
     expect(within(ops).queryByRole('button', { name: '查看状态' })).not.toBeInTheDocument()
   })
 })

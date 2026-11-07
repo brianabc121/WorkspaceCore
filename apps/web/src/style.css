@@ -371,7 +371,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .agent-card h2 { margin: 0; font-size: 1.1rem; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .agent-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 16px; margin: 12px 0; }
 .agent-facts dt { color: var(--muted); font-size: .8rem; }
-.agent-facts dd { margin: 2px 0 0; }
+.agent-facts dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .agent-notice { background: var(--warning-soft); color: var(--warning); border-radius: 6px; padding: 8px 12px; }
 .agent-section { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; display: grid; gap: 8px; }
 .agent-section h3 { margin: 0; font-size: 1rem; }
@@ -400,8 +400,8 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 @media (max-width: 760px) { .runner-card { padding: 16px; } }
 /* 服务器状态（T-0113）。趋势图两种系列色亮暗两套都跑过 dataviz 配色检查（与知识库趋势图同一组）；第二个系列另加虚线。
    超过阈值的指示用 --danger，同时写出“空间不足”等文字，不只靠颜色。 */
-:root { --chart-1: #2a78d6; --chart-2: #eb6834; --chart-grid: #eceef2; --chart-axis: #cfd5df; }
-:root[data-theme="dark"] { --chart-1: #3987e5; --chart-2: #d95926; --chart-grid: #262b39; --chart-axis: #3a4152; }
+:root { --chart-1: #2a78d6; --chart-2: #eb6834; --chart-3: #1baf7a; --chart-4: #eda100; --chart-5: #e87ba4; --chart-6: #008300; --chart-7: #6250d6; --chart-8: #e34948; --chart-other: #8a8f98; --chart-grid: #eceef2; --chart-axis: #cfd5df; }
+:root[data-theme="dark"] { --chart-1: #3987e5; --chart-2: #d95926; --chart-3: #199e70; --chart-4: #c98500; --chart-5: #d55181; --chart-6: #008300; --chart-7: #9085e9; --chart-8: #e66767; --chart-other: #7b818c; --chart-grid: #262b39; --chart-axis: #3a4152; }
 .host-meters { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 16px; font-size: .85rem; }
 .host-meters li { display: grid; gap: 4px; min-width: 0; color: var(--muted); }
 .host-meters b { color: var(--text); font-weight: 600; }
@@ -449,6 +449,50 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .host-chart-x { grid-column: 2; display: flex; justify-content: space-between; font-size: .7rem; color: var(--muted); }
 .host-chart-table summary { cursor: pointer; color: var(--muted); font-size: .78rem; }
 @media (max-width: 520px) { .host-meters { grid-template-columns: minmax(0, 1fr); } }
+/* OpenClaw 服务器（T-0147）：列表、详情、每个智能体占整机的份额（堆叠条，8 个分类色亮暗两套都在 dataviz 的相邻配对检查里通过；
+   超过 8 个合并成中性灰，系统与其他程序用斜纹，段间 2px 间隔），智能体表格可排序，手机宽度下横向滚动。 */
+.agent-tabs { margin-bottom: 16px; }
+.server-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.server-card { padding: 14px 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.server-card h2 { margin: 0; font-size: 1rem; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.server-card p { margin: 0; }
+.server-detail { display: grid; gap: 16px; min-width: 0; }
+.server-detail > .panel { padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.server-detail h2, .server-detail h3 { margin: 0; }
+.server-shares { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px 24px; }
+.share-bar { margin: 0; display: grid; gap: 8px; min-width: 0; }
+.share-track { display: flex; gap: 2px; height: 14px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.share-segment { flex: none; height: 100%; min-width: 2px; background: var(--chart-1); }
+.share-segment:first-child { border-radius: 4px 0 0 4px; }
+.share-segment:last-child { border-radius: 0 4px 4px 0; }
+.share-segment:only-child { border-radius: 4px; }
+.share-legend { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 16px; font-size: .8rem; color: var(--muted); }
+.share-legend li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.share-legend b { margin-left: auto; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.share-swatch { flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--chart-1); }
+.share-segment.is-2, .share-swatch.is-2 { background: var(--chart-2); }
+.share-segment.is-3, .share-swatch.is-3 { background: var(--chart-3); }
+.share-segment.is-4, .share-swatch.is-4 { background: var(--chart-4); }
+.share-segment.is-5, .share-swatch.is-5 { background: var(--chart-5); }
+.share-segment.is-6, .share-swatch.is-6 { background: var(--chart-6); }
+.share-segment.is-7, .share-swatch.is-7 { background: var(--chart-7); }
+.share-segment.is-8, .share-swatch.is-8 { background: var(--chart-8); }
+.share-segment.is-other, .share-swatch.is-other { background: var(--chart-other); }
+.share-segment.is-system, .share-swatch.is-system { background: repeating-linear-gradient(135deg, var(--chart-axis) 0 3px, transparent 3px 6px); border: 1px solid var(--chart-axis); }
+.server-table-scroll { position: relative; overflow-x: auto; min-width: 0; }
+.server-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.server-table th, .server-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; white-space: nowrap; }
+.server-table td.is-num, .server-table th.is-num { text-align: right; font-variant-numeric: tabular-nums; }
+.server-table th button { all: unset; cursor: pointer; font-weight: 600; display: inline-flex; gap: 4px; align-items: center; }
+.server-table th button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.server-table tr.is-selected td { background: var(--accent-soft); }
+.server-table .is-danger { color: var(--danger); }
+.server-agent-name { display: inline-flex; align-items: center; gap: 6px; }
+.agent-load { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .85rem; color: var(--muted); }
+.agent-load b { color: var(--text); font-weight: 600; }
+.agent-load .is-danger { color: var(--danger); }
+@media (max-width: 520px) { .server-list { grid-template-columns: minmax(0, 1fr); } .server-detail > .panel { padding: 12px; } }
+@media (forced-colors: active) { .share-segment, .share-swatch { forced-color-adjust: none; } }
 /* 运维动作（T-0114） */
 .ops-actions { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
 .ops-actions .form-field { margin: 0; }

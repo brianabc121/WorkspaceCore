@@ -55,6 +55,9 @@ STEPS = (
     "reflection",
 )
 
+# 准备服务器的步骤（T-0145）：部署实例的前五步；之后在这台服务器上部署实例不用再输密码
+PREPARE_STEPS = STEPS[:5]
+
 # 卸载任务的步骤（ADR 第 6 节）
 UNINSTALL_STEPS = ("connect", "inspect", "stop", "unschedule", "remove_files")
 

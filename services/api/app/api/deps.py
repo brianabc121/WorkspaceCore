@@ -17,7 +17,7 @@ from app.core.config import Settings, origin_of
 from app.core.errors import ApiError
 from app.domain import policy
 from app.domain.agent_ops import AgentOpsService
-from app.domain.agent_ssh import AgentSshService
+from app.domain.agent_servers import AgentServerService
 from app.domain.agents import AgentService
 from app.domain.ai_tools import AiToolService
 from app.domain.app_logins import AppLoginService
@@ -213,14 +213,14 @@ def get_agent_service(
     return AgentService(db, settings, redis, im)
 
 
-def get_agent_ssh_service(
+def get_agent_server_service(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_app_settings)],
     redis: Annotated[Redis, Depends(get_redis)],
-) -> AgentSshService:
-    # 安装任务在 API 进程内运行（T-0089 B2）；lifespan 里创建
-    return AgentSshService(db, settings, redis, getattr(request.app.state, "ssh_jobs", None))
+) -> AgentServerService:
+    # 准备服务器、部署 / 卸载实例在 API 进程内运行（T-0089 B2、T-0145）；lifespan 里创建
+    return AgentServerService(db, settings, redis, getattr(request.app.state, "ssh_jobs", None))
 
 
 def get_agent_ops_service(

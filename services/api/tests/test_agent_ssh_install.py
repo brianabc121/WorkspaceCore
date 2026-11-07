@@ -260,6 +260,8 @@ class Owner:
         self.client = client
         self.workspace = workspace
         self.database_url = database_url
+        self.servers = {}
+        self.by_port = {}
 
     @property
     def app(self) -> FastAPI:
@@ -281,42 +283,124 @@ class Owner:
         assert response.status_code == 201, response.text
         return str(response.json()["id"])
 
-    async def state(self, instance_id: str) -> dict[str, Any]:
-        response = await self.client.get(
-            f"/api/v1/agents/instances/{instance_id}/ssh", headers=self.headers()
-        )
+    # 一台服务器多个实例后（T-0145）：SSH 信息在服务器上，实例的目录在部署记录里。
+    # 下面把它们拼回“目标服务器”的样子（target：主机公钥、专用密钥、目录、服务器的版本号），
+    # 这个文件里的部署流程断言不用改。
+    servers: dict[str, str]
+    by_port: dict[int, dict[str, Any]]
+
+    async def _get(self, path: str) -> dict[str, Any]:
+        response = await self.client.get(path, headers=self.headers())
         assert response.status_code == 200, response.text
         data: dict[str, Any] = response.json()
         return data
 
+    async def instance_version(self, instance_id: str) -> int:
+        return int((await self._get(f"/api/v1/agents/instances/{instance_id}"))["version"])
+
+    async def server_version(self, instance_id: str) -> int:
+        server = await self._get(f"/api/v1/agents/servers/{self.servers[instance_id]}")
+        return int(server["server"]["version"])
+
+    async def target(self, instance_id: str) -> dict[str, Any] | None:
+        server_id = self.servers.get(instance_id)
+        if server_id is None:
+            return None
+        detail = await self.client.get(
+            f"/api/v1/agents/servers/{server_id}", headers=self.headers()
+        )
+        if detail.status_code == 404:
+            return None
+        server = detail.json()["server"]
+        deployment = (await self._get(f"/api/v1/agents/instances/{instance_id}/deployment"))[
+            "deployment"
+        ]
+        return {
+            **server["ssh"],
+            "install_dir": deployment["install_dir"] if deployment else None,
+            "installed_at": deployment["installed_at"] if deployment else None,
+            "version": server["version"],
+        }
+
+    async def state(self, instance_id: str) -> dict[str, Any]:
+        deployment = await self._get(f"/api/v1/agents/instances/{instance_id}/deployment")
+        job = deployment["job"]
+        if job is None and instance_id in self.servers:
+            detail = await self.client.get(
+                f"/api/v1/agents/servers/{self.servers[instance_id]}", headers=self.headers()
+            )
+            if detail.status_code == 200:
+                job = detail.json()["job"]
+        return {"target": await self.target(instance_id), "job": job, "warning": None}
+
+    async def add_server(self, port: int, *, username: str = "deploy") -> dict[str, Any]:
+        if port in self.by_port:
+            return self.by_port[port]
+        response = await self.client.post(
+            "/api/v1/agents/servers",
+            json={
+                "name": f"服务器 {port}",
+                "host": "127.0.0.1",
+                "port": port,
+                "username": username,
+            },
+            headers=self.headers(),
+        )
+        assert response.status_code == 201, response.text
+        server: dict[str, Any] = response.json()["server"]
+        self.by_port[port] = server
+        return server
+
     async def prepare(self, port: int, *, confirm: bool = True) -> tuple[str, int]:
         instance_id = await self.instance()
-        response = await self.client.put(
-            f"/api/v1/agents/instances/{instance_id}/ssh",
-            json={"host": "127.0.0.1", "port": port, "username": "deploy"},
-            headers=self.headers(),
-        )
-        assert response.status_code == 200, response.text
-        target = response.json()["target"]
-        if not confirm:
-            return instance_id, int(target["version"])
-        response = await self.client.post(
-            f"/api/v1/agents/instances/{instance_id}/ssh/confirm",
-            json={"version": target["version"], "fingerprint": target["host_key_fingerprint"]},
-            headers=self.headers(),
-        )
-        assert response.status_code == 200, response.text
-        return instance_id, int(response.json()["target"]["version"])
+        server = await self.add_server(port)
+        self.servers[instance_id] = server["id"]
+        current = (await self._get(f"/api/v1/agents/servers/{server['id']}"))["server"]
+        if confirm and not current["ssh"]["host_key_confirmed"]:
+            response = await self.client.post(
+                f"/api/v1/agents/servers/{server['id']}/confirm",
+                json={
+                    "version": current["version"],
+                    "fingerprint": current["ssh"]["host_key_fingerprint"],
+                },
+                headers=self.headers(),
+            )
+            assert response.status_code == 200, response.text
+            current = response.json()["server"]
+        return instance_id, int(current["version"])
+
+    async def _instance_version_for(self, instance_id: str, version: int) -> int:
+        """测试里传的是服务器的版本号：对得上就用实例当前的版本号，对不上就故意给错的。"""
+        current = await self.instance_version(instance_id)
+        return current if version == await self.server_version(instance_id) else current + 1000
 
     async def install(
-        self, instance_id: str, version: int, password: str | None = PASSWORD
+        self, instance_id: str, version: int, password: str | None = PASSWORD, **extra: Any
     ) -> httpx.Response:
-        body: dict[str, Any] = {"version": version}
+        body: dict[str, Any] = {
+            "server_id": self.servers[instance_id],
+            "version": await self._instance_version_for(instance_id, version),
+            **extra,
+        }
         if password is not None:
             body["password"] = password
         return await self.client.post(
-            f"/api/v1/agents/instances/{instance_id}/ssh/install",
+            f"/api/v1/agents/instances/{instance_id}/deploy",
             json=body,
+            headers=self.headers(),
+        )
+
+    async def replace(self, instance_id: str, **body: Any) -> httpx.Response:
+        return await self.client.put(
+            f"/api/v1/agents/servers/{self.servers[instance_id]}/address",
+            json={"host": "127.0.0.1", "username": "deploy", **body},
+            headers=self.headers(),
+        )
+
+    async def remove(self, instance_id: str, version: int) -> httpx.Response:
+        return await self.client.delete(
+            f"/api/v1/agents/servers/{self.servers[instance_id]}",
+            params={"version": version},
             headers=self.headers(),
         )
 
@@ -740,11 +824,7 @@ async def test_preconditions(owner: Owner, tmp_path: Path) -> None:
         response = await owner.install(instance_id, version + 5)
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "VERSION_CONFLICT"
-        response = await owner.client.post(
-            f"/api/v1/agents/instances/{instance_id}/ssh/install",
-            json={"version": version, "password": PASSWORD, "extra": 1},
-            headers=owner.headers(),
-        )
+        response = await owner.install(instance_id, version, extra=1)
         assert response.status_code == 422
     assert host.logins == []
 
@@ -762,18 +842,10 @@ async def test_one_running_job_per_target(
         again = await owner.install(instance_id, version)
         assert again.status_code == 409
         assert again.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
-        response = await owner.client.delete(
-            f"/api/v1/agents/instances/{instance_id}/ssh",
-            params={"version": version},
-            headers=owner.headers(),
-        )
+        response = await owner.remove(instance_id, version)
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
-        response = await owner.client.put(
-            f"/api/v1/agents/instances/{instance_id}/ssh",
-            json={"host": "127.0.0.1", "port": port, "username": "other", "version": version},
-            headers=owner.headers(),
-        )
+        response = await owner.replace(instance_id, port=port, username="other", version=version)
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
 
@@ -807,11 +879,7 @@ async def test_install_during_a_replacement_blocks_the_replacement(
         )
 
     monkeypatch.setattr(ssh, "probe_host_key", probe_while_installing)
-    replaced = await owner.client.put(
-        f"/api/v1/agents/instances/{instance_id}/ssh",
-        json={"host": "127.0.0.1", "port": port + 1, "username": "deploy", "version": version},
-        headers=owner.headers(),
-    )
+    replaced = await owner.replace(instance_id, port=port + 1, version=version)
     assert installs == [202]
     assert replaced.status_code == 409, replaced.text
     assert replaced.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
@@ -897,8 +965,8 @@ async def test_admin_cannot_install(owner: Owner, make_client: ClientFactory) ->
     async with make_client(**SETTINGS) as other:
         assert (await other.post("/api/v1/auth/login", json=admin)).status_code == 200
         response = await other.post(
-            f"/api/v1/agents/instances/{instance_id}/ssh/install",
-            json={"version": 1, "password": PASSWORD},
+            f"/api/v1/agents/instances/{instance_id}/deploy",
+            json={"server_id": str(uuid.uuid4()), "version": 1, "password": PASSWORD},
             headers={"X-Workspace-Id": owner.workspace, **csrf(other)},
         )
     assert response.status_code == 403
@@ -907,12 +975,44 @@ async def test_admin_cannot_install(owner: Owner, make_client: ClientFactory) ->
 # ---------------------------------------------------------------- 卸载与吊销（B3）
 
 
-async def _post(
-    owner: Owner, instance_id: str, action: str, body: dict[str, Any]
-) -> httpx.Response:
-    return await owner.client.post(
-        f"/api/v1/agents/instances/{instance_id}/ssh/{action}", json=body, headers=owner.headers()
-    )
+class _Compat:
+    """新接口的响应拼回旧的样子（target / job / warning）。"""
+
+    def __init__(self, response: httpx.Response, data: dict[str, Any]) -> None:
+        self.status_code = response.status_code
+        self.text = response.text
+        self._data = data
+
+    def json(self) -> dict[str, Any]:
+        return self._data
+
+
+async def _post(owner: Owner, instance_id: str, action: str, body: dict[str, Any]) -> _Compat:
+    """卸载走实例的 /undeploy，吊销走服务器的 /revoke（T-0145）。"""
+    if action == "uninstall":
+        payload = {
+            "version": await owner._instance_version_for(instance_id, body["version"]),
+            **{k: v for k, v in body.items() if k != "version"},
+        }
+        response = await owner.client.post(
+            f"/api/v1/agents/instances/{instance_id}/undeploy",
+            json=payload,
+            headers=owner.headers(),
+        )
+    else:
+        response = await owner.client.post(
+            f"/api/v1/agents/servers/{owner.servers[instance_id]}/{action}",
+            json=body,
+            headers=owner.headers(),
+        )
+    data = response.json()
+    if response.status_code < 300:
+        data = {
+            "job": data.get("job"),
+            "warning": data.get("warning"),
+            "target": await owner.target(instance_id),
+        }
+    return _Compat(response, data)
 
 
 async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -> None:
@@ -982,11 +1082,7 @@ async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -
         assert stat.S_IMODE((host.home / ".ssh" / "authorized_keys").stat().st_mode) == 0o600
 
         # 吊销之后可以删除目标服务器
-        response = await owner.client.delete(
-            f"/api/v1/agents/instances/{instance_id}/ssh",
-            params={"version": revoked["target"]["version"]},
-            headers=owner.headers(),
-        )
+        response = await owner.remove(instance_id, revoked["target"]["version"])
         assert response.status_code == 204, response.text
     ref = await run_sql(owner.database_url, "SELECT count(*) FROM workspace.agent_ssh_targets")
     assert ref == 0
@@ -994,13 +1090,14 @@ async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -
         owner.database_url,
         "SELECT string_agg(action || ':'"
         " || coalesce(metadata_redacted_json->>'remote_removed', ''), ',' ORDER BY created_at)"
-        " FROM workspace.audit_logs WHERE action LIKE 'agents.ssh.%'",
+        " FROM workspace.audit_logs"
+        " WHERE action LIKE 'agents.ssh.%' OR action LIKE 'agents.server.%'",
     )
     for action in (
         "agents.ssh.uninstall_started:",
         "agents.ssh.uninstall_succeeded:",
-        "agents.ssh.key_revoked:true",
-        "agents.ssh.target_removed:",
+        "agents.server.key_revoked:true",
+        "agents.server.removed:",
     ):
         assert action in actions, actions
     assert fingerprint
@@ -1010,10 +1107,12 @@ async def test_uninstall_and_revoke_need_the_key(owner: Owner, tmp_path: Path) -
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
-        for action in ("uninstall", "revoke"):
-            response = await _post(owner, instance_id, action, {"version": version})
-            assert response.status_code == 409, response.text
-            assert response.json()["error"]["code"] == "AGENT_SSH_KEY_MISSING"
+        # 还没部署到这台服务器：没有可卸载的；服务器还没准备：没有可吊销的专用密钥
+        response = await _post(owner, instance_id, "uninstall", {"version": version})
+        assert response.status_code == 404, response.text
+        response = await _post(owner, instance_id, "revoke", {"version": version})
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "AGENT_SSH_KEY_MISSING"
     assert host.logins == []
 
 
@@ -1037,7 +1136,7 @@ async def test_revoke_when_server_is_gone(owner: Owner, tmp_path: Path) -> None:
     remote = await run_sql(
         owner.database_url,
         "SELECT metadata_redacted_json->>'remote_removed' FROM workspace.audit_logs"
-        " WHERE action = 'agents.ssh.key_revoked'",
+        " WHERE action = 'agents.server.key_revoked'",
     )
     assert remote == "false"
     ref = await run_sql(

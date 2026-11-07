@@ -146,9 +146,7 @@ class RunnerAdmin:
         if self.settings.agent_public_address:
             names.append(self.settings.agent_public_address)
         targets = await self.db.scalars(
-            select(AgentSshTarget.host)
-            .join(AgentInstance, AgentInstance.id == AgentSshTarget.instance_id)
-            .where(AgentInstance.workspace_id == workspace_id)
+            select(AgentSshTarget.host).where(AgentSshTarget.workspace_id == workspace_id)
         )
         names.extend(str(t) for t in targets if t)
         return sorted(set(names))

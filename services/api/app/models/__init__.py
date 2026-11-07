@@ -6,6 +6,7 @@
 from app.models.agent import (
     AgentCa,
     AgentCredential,
+    AgentDeployment,
     AgentInstance,
     AgentOpsAction,
     AgentRunStop,
@@ -97,6 +98,7 @@ __all__ = [
     "NAMING_CONVENTION",
     "AgentCa",
     "AgentCredential",
+    "AgentDeployment",
     "AgentHostState",
     "AgentImOutbox",
     "AgentImRejection",

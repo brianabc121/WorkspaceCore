@@ -219,7 +219,7 @@
 | 查看日志 | OpenClaw 容器最近 200 行日志；也可以选隧道、取图代理的日志 | 不需要（日志可能含对话片段，只给 owner / admin，并写审计） |
 | 重启 OpenClaw | `docker compose restart openclaw` | 需要 |
 | 重新拉起全部服务 | `docker compose up -d` | 需要 |
-| 清理无用镜像 | `docker image prune -f`（只删没在用的镜像，回收磁盘） | 需要 |
+| 清理无用镜像 | `docker image prune -f`（只删没在用的镜像，回收磁盘）。一台服务器多个实例后改为服务器级动作（T-0145，`docs/v2/MULTI_OPENCLAW_PLAN.md` 第 8 节），在服务器详情里；同在那里的还有“查看全部容器”（`docker compose ls --all`、`docker ps`、`docker stats --no-stream`） | 需要 |
 | 立即上报一次 | 在容器里运行用量与服务器指标两个上报脚本 | 不需要 |
 | 重新部署 / 卸载 / 吊销 | 已有，不变 | 已有规则 |
 

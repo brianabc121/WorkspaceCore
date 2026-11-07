@@ -67,6 +67,29 @@ async def run_ok(owner: Owner, instance_id: str, body: dict[str, Any]) -> dict[s
     return await finished(owner, instance_id, response.json()["id"])
 
 
+def server_ops_url(server_id: str, suffix: str = "") -> str:
+    return f"/api/v1/agents/servers/{server_id}/ops{suffix}"
+
+
+async def server_run_ok(owner: Owner, server_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """服务器级的动作（T-0145）：清理镜像、查看全部容器。"""
+    response = await owner.client.post(
+        server_ops_url(server_id), json=body, headers=owner.headers()
+    )
+    assert response.status_code == 202, response.text
+    action_id = response.json()["id"]
+    for _ in range(400):
+        current = await owner.client.get(
+            server_ops_url(server_id, f"/{action_id}"), headers=owner.headers()
+        )
+        assert current.status_code == 200, current.text
+        data: dict[str, Any] = current.json()
+        if data["status"] != "running":
+            return data
+        await asyncio.sleep(0.05)
+    raise AssertionError("运维动作 20 秒内没有结束")
+
+
 def slow_docker(host: FakeHost) -> None:
     """$STATE/slow 存在时假的 docker 先睡 2 秒（模拟一个还没结束的动作）。"""
     path = host.bin / "docker"
@@ -142,10 +165,18 @@ async def test_dangerous_actions_need_the_password(owner: Owner, tmp_path: Path)
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         instance_id = await deployed(owner, host, port)
-        for action in ("restart", "up", "prune"):
+        server_id = owner.servers[instance_id]
+        for action in ("restart", "up"):
             missing = await run(owner, instance_id, {"action": action})
             assert missing.status_code == 403
             assert missing.json()["error"]["code"] == "STEP_UP_REQUIRED"
+        # 清理镜像是服务器级的（T-0145）：实例上不接受，服务器上同样要二次认证
+        assert (await run(owner, instance_id, {"action": "prune"})).status_code == 422
+        missing = await owner.client.post(
+            server_ops_url(server_id), json={"action": "prune"}, headers=owner.headers()
+        )
+        assert missing.status_code == 403
+        assert missing.json()["error"]["code"] == "STEP_UP_REQUIRED"
         wrong = await run(owner, instance_id, {"action": "restart", "password": "not my password"})
         assert wrong.status_code == 403 and wrong.json()["error"]["code"] == "STEP_UP_FAILED"
         done = await run_ok(
@@ -153,10 +184,16 @@ async def test_dangerous_actions_need_the_password(owner: Owner, tmp_path: Path)
         )
         assert done["status"] == "succeeded"
         assert "docker compose restart openclaw" in "\n".join(host.calls())
-        pruned = await run_ok(
-            owner, instance_id, {"action": "prune", "password": OWNER["password"]}
+        pruned = await server_run_ok(
+            owner, server_id, {"action": "prune", "password": OWNER["password"]}
         )
         assert pruned["status"] == "succeeded" and "docker image prune -f" in pruned["output"]
+        assert pruned["instance_id"] is None
+        listed = await server_run_ok(owner, server_id, {"action": "containers"})
+        assert listed["status"] == "succeeded" and "docker compose ls --all" in listed["output"]
+        state = (await owner.client.get(server_ops_url(server_id), headers=owner.headers())).json()
+        assert state["available"] is True
+        assert [item["action"] for item in state["items"]] == ["containers", "prune"]
         # 服务名只用于查看日志；不接受命令文本
         bad = await run(owner, instance_id, {"action": "status", "service": "openclaw"})
         assert bad.status_code == 422
@@ -263,12 +300,21 @@ async def test_unavailable_without_ssh_deploy_and_purge(owner: Owner, tmp_path: 
 async def test_restart_interrupts_running_actions(owner: Owner) -> None:
     instance_id = await owner.instance()
     now = datetime.now(UTC)
+    server_id = uuid.uuid4()
     await run_sql(
         owner.database_url,
-        "INSERT INTO workspace.agent_ops_actions (workspace_id, instance_id, action, status,"
-        " started_at, expires_at) VALUES ($1, $2, 'status', 'running', $3, $4)",
+        "INSERT INTO workspace.agent_servers (id, workspace_id, name, kind)"
+        " VALUES ($1, $2, 's', 'auto')",
+        server_id,
+        uuid.UUID(owner.workspace),
+    )
+    await run_sql(
+        owner.database_url,
+        "INSERT INTO workspace.agent_ops_actions (workspace_id, instance_id, server_id, action,"
+        " status, started_at, expires_at) VALUES ($1, $2, $3, 'status', 'running', $4, $5)",
         uuid.UUID(owner.workspace),
         uuid.UUID(instance_id),
+        server_id,
         now,
         now + timedelta(days=7),
     )
@@ -330,4 +376,6 @@ def test_commands_are_fixed_and_quoted() -> None:
         agent_ops.commands("logs", "openclaw; id", directory)
     with pytest.raises(ValueError):
         agent_ops.commands("shell", None, directory)
+    # 服务器级的动作不用实例目录
+    assert agent_ops.commands("containers", None, "")[0] == "docker compose ls --all"
     assert agent_ops.timeout_for("up") == 180 and agent_ops.timeout_for("restart") == 60

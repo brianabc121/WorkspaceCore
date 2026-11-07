@@ -17,8 +17,8 @@ from app.api.deps import (
     client_ip,
     csrf_protected,
     get_agent_ops_service,
+    get_agent_server_service,
     get_agent_service,
-    get_agent_ssh_service,
     get_db,
     get_redis,
     workspace_admin,
@@ -26,7 +26,7 @@ from app.api.deps import (
 )
 from app.domain import agent_im, agent_outbox, agent_stops, agent_wakeups
 from app.domain.agent_ops import AgentOpsService
-from app.domain.agent_ssh import AgentSshService
+from app.domain.agent_servers import AgentServerService
 from app.domain.agents import AgentService
 from app.domain.audit import AuditTrail
 from app.domain.auth import AuthContext
@@ -34,6 +34,8 @@ from app.domain.host_metrics import HostService
 from app.domain.policy import WorkspaceAccess, not_found
 from app.models import AgentInstance, AgentRunStop, AgentWakeup
 from app.schemas.agents import (
+    AgentDeployIn,
+    AgentDeploymentState,
     AgentInstanceCreate,
     AgentInstanceOut,
     AgentInstancePage,
@@ -51,14 +53,19 @@ from app.schemas.agents import (
     AgentSecretPage,
     AgentSecretRotate,
     AgentSecretUpdate,
+    AgentServerAddress,
+    AgentServerAssign,
+    AgentServerCreate,
+    AgentServerDetail,
+    AgentServerList,
+    AgentServerOut,
+    AgentServerPrepare,
+    AgentServerUpdate,
     AgentSettingsOut,
     AgentSettingsUpdate,
     AgentSshConfirm,
-    AgentSshInstall,
     AgentSshRevoke,
-    AgentSshState,
-    AgentSshTargetSet,
-    AgentSshUninstall,
+    AgentUndeployIn,
     AgentWakeupCreate,
     AgentWakeupList,
     AgentWakeupOut,
@@ -68,6 +75,7 @@ from app.schemas.agents import (
     SecretAccessPage,
     SecretAccessResult,
     SecretGrantsReplace,
+    ServerOpsRun,
     VersionBody,
     WakeupTarget,
 )
@@ -87,7 +95,7 @@ router = APIRouter(tags=["agents"], dependencies=[Security(authenticated)])
 Owner = Annotated[WorkspaceAccess, Depends(workspace_owner)]
 Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
 Service = Annotated[AgentService, Depends(get_agent_service)]
-SshService = Annotated[AgentSshService, Depends(get_agent_ssh_service)]
+ServerService = Annotated[AgentServerService, Depends(get_agent_server_service)]
 OpsService = Annotated[AgentOpsService, Depends(get_agent_ops_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
@@ -95,6 +103,10 @@ _write = [Depends(csrf_protected)]
 _read_errors = error_responses(401, 403, 404, 422)
 _write_errors = error_responses(401, 403, 404, 409, 422)
 _im_errors = error_responses(401, 403, 404, 409, 422, 503)
+
+
+def _server_ip(request: Request) -> str:
+    return client_ip(request, request.app.state.settings)
 
 
 def _ip(request: Request, service: AgentService) -> str:
@@ -341,151 +353,225 @@ async def issue_agent_bundle(
     )
 
 
-# ---------------------------------------------------------------- SSH 自动部署（T-0089）
+# ---------------------------------------------------------------- OpenClaw 服务器（T-0145、T-0147）
 
 
 @router.get(
-    "/agents/instances/{instance_id}/ssh",
-    summary="SSH 自动部署的目标服务器（owner）",
+    "/agents/servers",
+    summary="OpenClaw 服务器列表（owner）",
+    description="每台服务器：类型（ssh 管理员添加 / auto 按上报的服务器指纹自动识别）、SSH 信息、"
+    "整机当前的 CPU / 内存 / 磁盘 / 15 分钟负载、上面有几个实例与几个在线、正在提醒的告警；"
+    "以及还没有归属任何服务器的实例（docs/v2/MULTI_OPENCLAW_PLAN.md 第 7.1 节）。",
     responses=_read_errors,
 )
-async def get_agent_ssh(access: Owner, service: SshService, instance_id: UUID) -> AgentSshState:
-    return await service.state(access, instance_id)
+async def list_agent_servers(access: Owner, service: ServerService) -> AgentServerList:
+    return await service.list_servers(access)
+
+
+@router.post(
+    "/agents/servers",
+    status_code=status.HTTP_201_CREATED,
+    summary="添加一台服务器（owner）",
+    description="只解析地址并读取主机公钥（不登录），返回 SHA256 指纹；owner 在服务器上核对后调用 "
+    "/confirm 确认。每个用户每分钟最多探测 10 次（429）；连不上 503 AGENT_SSH_UNREACHABLE；"
+    "同一个地址、端口和账号已经添加过 409 AGENT_SERVER_EXISTS。审计 agents.server.created。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 409, 422, 429, 503),
+)
+async def create_agent_server(
+    access: Owner, request: Request, service: ServerService, body: AgentServerCreate
+) -> AgentServerDetail:
+    return await service.create(access, body, client_ip=_server_ip(request))
+
+
+@router.get(
+    "/agents/servers/{server_id}",
+    summary="服务器详情（owner）",
+    description="整机当前值与每小时趋势（24h / 7d / 30d）、这台服务器上的每个智能体"
+    "（自己的 CPU、内存、进程数、数据目录、网速、最近一小时 token、正在执行的任务）、"
+    "最近一次 SSH 任务（第 7.2 节）。",
+    responses=_read_errors,
+)
+async def get_agent_server(
+    access: Owner,
+    service: ServerService,
+    server_id: UUID,
+    span: Annotated[HostRange, Query(alias="range")] = "24h",
+) -> AgentServerDetail:
+    return await service.detail(access, server_id, span)
+
+
+@router.patch(
+    "/agents/servers/{server_id}",
+    summary="改服务器名称（owner，乐观并发）",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def rename_agent_server(
+    access: Owner,
+    request: Request,
+    service: ServerService,
+    server_id: UUID,
+    body: AgentServerUpdate,
+) -> AgentServerOut:
+    return await service.rename(access, server_id, body, client_ip=_server_ip(request))
 
 
 @router.put(
-    "/agents/instances/{instance_id}/ssh",
-    summary="填写或更换目标服务器，读取主机公钥（owner）",
-    description="解析地址（拒绝回环、链路本地、组播等地址），连到 SSH 端口只读取主机公钥、不登录，"
-    "返回 SHA256 指纹；owner 核对后调用 /ssh/confirm 确认。只支持外网模式的实例。"
-    "连不上时 503 AGENT_SSH_UNREACHABLE（details.reason：dns / timeout / refused / unreachable / "
-    "handshake）；地址不允许时 422 AGENT_SSH_ADDRESS_NOT_ALLOWED；已经装了专用公钥时 409 "
-    "AGENT_SSH_KEY_INSTALLED。每个用户每分钟最多探测 10 次。",
+    "/agents/servers/{server_id}/address",
+    summary="更换服务器地址或账号（owner）",
+    description="重新读取主机公钥，要重新确认；已经装了工作台的专用公钥时先吊销"
+    "（409 AGENT_SSH_KEY_INSTALLED）。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422, 429, 503),
 )
-async def set_agent_ssh(
+async def set_agent_server_address(
     access: Owner,
     request: Request,
-    service: SshService,
-    instance_id: UUID,
-    body: AgentSshTargetSet,
-) -> AgentSshState:
-    return await service.set_target(
-        access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
-    )
+    service: ServerService,
+    server_id: UUID,
+    body: AgentServerAddress,
+) -> AgentServerDetail:
+    return await service.set_address(access, server_id, body, client_ip=_server_ip(request))
 
 
 @router.post(
-    "/agents/instances/{instance_id}/ssh/confirm",
-    summary="确认主机公钥的指纹（owner）",
+    "/agents/servers/{server_id}/confirm",
+    summary="确认主机公钥指纹（owner）",
     description="指纹必须与探测时读到的一致（409 AGENT_SSH_FINGERPRINT_MISMATCH）；"
-    "确认后，之后的连接只接受这把主机公钥。",
+    "之后工作台只接受这把主机公钥。",
     dependencies=_write,
     responses=_write_errors,
 )
-async def confirm_agent_ssh(
-    access: Owner,
-    request: Request,
-    service: SshService,
-    instance_id: UUID,
-    body: AgentSshConfirm,
-) -> AgentSshState:
-    return await service.confirm(
-        access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
-    )
+async def confirm_agent_server(
+    access: Owner, request: Request, service: ServerService, server_id: UUID, body: AgentSshConfirm
+) -> AgentServerDetail:
+    return await service.confirm(access, server_id, body, client_ip=_server_ip(request))
 
 
 @router.post(
-    "/agents/instances/{instance_id}/ssh/install",
+    "/agents/servers/{server_id}/prepare",
     status_code=status.HTTP_202_ACCEPTED,
-    summary="开始自动安装 OpenClaw（owner）",
-    description="主机公钥已确认、外网接入入口已配置、实例启用且是外网模式时，新建安装任务并立即返回；"
-    "进度看 GET /ssh 的 job（steps、脱敏后的 log）。登录密码只用于这一次（登录、装专用公钥、"
-    "需要时用 sudo 装 Docker），不保存；已经装了专用公钥、且 Docker 可以直接使用时可以不填。"
-    "主机公钥未确认时 409 AGENT_SSH_HOST_KEY_UNCONFIRMED；已经有进行中的任务时 409 "
-    "AGENT_SSH_JOB_RUNNING；外网入口未配置时 409 AGENT_INGRESS_NOT_CONFIGURED。",
+    summary="准备服务器（owner）",
+    description="用一次登录密码装上工作台的专用公钥（每台服务器一把，D7）、"
+    "需要时用 sudo 安装 Docker；"
+    "密码不保存。之后在这台服务器上部署实例不用再输密码。进度看服务器详情的 job。"
+    "同一台服务器同时只有一个任务（409 AGENT_SSH_JOB_RUNNING）。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422, 503),
 )
-async def install_agent_ssh(
+async def prepare_agent_server(
     access: Owner,
     request: Request,
-    service: SshService,
-    instance_id: UUID,
-    body: AgentSshInstall,
-) -> AgentSshState:
-    return await service.install(
-        access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
-    )
+    service: ServerService,
+    server_id: UUID,
+    body: AgentServerPrepare,
+) -> AgentServerDetail:
+    return await service.prepare(access, server_id, body, client_ip=_server_ip(request))
 
 
 @router.post(
-    "/agents/instances/{instance_id}/ssh/uninstall",
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="卸载服务器上的 OpenClaw（owner）",
-    description="只用专用密钥登录：停止并删除容器、删掉工作台写入 crontab 的定时任务；"
-    "remove_files=true 时同时删除接入包目录（含实例凭证与 OpenClaw 的会话、记忆，不可恢复）。"
-    "不卸载 Docker，不吊销专用公钥与实例凭证。进度看 GET /ssh 的 job。"
-    "没有专用公钥时 409 AGENT_SSH_KEY_MISSING；已经有进行中的任务时 409 AGENT_SSH_JOB_RUNNING。",
-    dependencies=_write,
-    responses=error_responses(401, 403, 404, 409, 422, 503),
-)
-async def uninstall_agent_ssh(
-    access: Owner,
-    request: Request,
-    service: SshService,
-    instance_id: UUID,
-    body: AgentSshUninstall,
-) -> AgentSshState:
-    return await service.uninstall(
-        access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
-    )
-
-
-@router.post(
-    "/agents/instances/{instance_id}/ssh/revoke",
-    summary="吊销专用密钥（owner）",
+    "/agents/servers/{server_id}/revoke",
+    summary="吊销这台服务器的专用密钥（owner）",
     description="用专用密钥登录，从服务器的 ~/.ssh/authorized_keys 删掉这把公钥，"
-    "再删除工作台保存的私钥；之后可以更换或删除目标服务器。"
-    "连不上服务器时 503 AGENT_SSH_UNREACHABLE（details.reason）；force=true 时仍然删除"
-    "工作台保存的私钥，返回的 warning 说明要手动删除的那一行公钥。",
+    "再删除工作台保存的私钥；"
+    "服务器连不上时 force=true 只删除工作台保存的私钥（warning 里提示手动删除那一行）。"
+    "吊销后这台服务器上的实例不能再经工作台运维或卸载，要重新准备服务器。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422, 503),
 )
-async def revoke_agent_ssh(
-    access: Owner,
-    request: Request,
-    service: SshService,
-    instance_id: UUID,
-    body: AgentSshRevoke,
-) -> AgentSshState:
-    return await service.revoke(
-        access, instance_id, body, client_ip=client_ip(request, request.app.state.settings)
-    )
+async def revoke_agent_server(
+    access: Owner, request: Request, service: ServerService, server_id: UUID, body: AgentSshRevoke
+) -> AgentServerDetail:
+    return await service.revoke(access, server_id, body, client_ip=_server_ip(request))
 
 
 @router.delete(
-    "/agents/instances/{instance_id}/ssh",
+    "/agents/servers/{server_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="删除目标服务器（owner）",
-    description="已经装了工作台的专用公钥时要先吊销（409 AGENT_SSH_KEY_INSTALLED）。",
+    summary="移除服务器（owner）",
+    description="SSH 服务器要先卸载上面的实例（409 AGENT_SERVER_HAS_DEPLOYMENTS）、"
+    "吊销专用密钥（409 AGENT_SSH_KEY_INSTALLED）；自动识别的服务器直接移除，"
+    "上面的实例改为未归属（下一次上报会重新识别）。",
     dependencies=_write,
     responses=_write_errors,
 )
-async def delete_agent_ssh(
+async def delete_agent_server(
     access: Owner,
     request: Request,
-    service: SshService,
-    instance_id: UUID,
+    service: ServerService,
+    server_id: UUID,
     version: Annotated[int, Query(ge=1)],
 ) -> None:
-    await service.remove(
-        access,
-        instance_id,
-        version=version,
-        client_ip=client_ip(request, request.app.state.settings),
-    )
+    await service.remove(access, server_id, version=version, client_ip=_server_ip(request))
+
+
+@router.get(
+    "/agents/instances/{instance_id}/deployment",
+    summary="实例部署在哪台服务器（owner）",
+    description="部署记录（目录、时间）、所在的服务器（部署、自动识别或手动指定）、"
+    "这个实例最近一次部署或卸载任务。",
+    responses=_read_errors,
+)
+async def get_agent_deployment(
+    access: Owner, service: ServerService, instance_id: UUID
+) -> AgentDeploymentState:
+    return await service.deployment_state(access, instance_id)
+
+
+@router.post(
+    "/agents/instances/{instance_id}/deploy",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="部署到服务器（owner）",
+    description="把实例部署到一台 SSH 服务器：签发新的接入包，只替换这个实例自己的目录"
+    "（~/myworkspace-openclaw/<实例短号>）与 Compose 项目，同一台服务器上的其他实例不受影响。"
+    "服务器还没准备时要带登录密码；已经部署在另一台服务器上 409 AGENT_DEPLOYED_ELSEWHERE；"
+    "只支持外网模式（409 AGENT_SSH_PUBLIC_ONLY）。剩余内存或磁盘不多时 capacity_warning 提醒"
+    "（D4：不拦）。进度看 GET /deployment 的 job。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 503),
+)
+async def deploy_agent_instance(
+    access: Owner, request: Request, service: ServerService, instance_id: UUID, body: AgentDeployIn
+) -> AgentDeploymentState:
+    return await service.deploy(access, instance_id, body, client_ip=_server_ip(request))
+
+
+@router.post(
+    "/agents/instances/{instance_id}/undeploy",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="从服务器上卸载实例（owner）",
+    description="只用专用密钥：停止这个实例的容器、删掉它的定时任务，可选删除它的目录"
+    "（不可恢复）。同一台服务器上的其他实例不受影响；不卸载 Docker，不吊销专用公钥。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 503),
+)
+async def undeploy_agent_instance(
+    access: Owner,
+    request: Request,
+    service: ServerService,
+    instance_id: UUID,
+    body: AgentUndeployIn,
+) -> AgentDeploymentState:
+    return await service.undeploy(access, instance_id, body, client_ip=_server_ip(request))
+
+
+@router.put(
+    "/agents/instances/{instance_id}/server",
+    summary="手动指定实例所在的服务器（owner，乐观并发）",
+    description="手动部署的实例按上报的服务器指纹自动识别；这里可以手动指定（以手动为准，D3），"
+    "server_id 为 null 时改回自动识别。经 SSH 部署的实例以部署为准（409 AGENT_DEPLOYED）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def assign_agent_server(
+    access: Owner,
+    request: Request,
+    service: ServerService,
+    instance_id: UUID,
+    body: AgentServerAssign,
+) -> AgentDeploymentState:
+    return await service.assign(access, instance_id, body, client_ip=_server_ip(request))
 
 
 @router.post(
@@ -633,10 +719,11 @@ async def get_agent_ops(access: Admin, service: OpsService, instance_id: UUID) -
     summary="执行一个固定的运维动作（admin）",
     description="动作是写死的：status 查看状态、logs 查看日志"
     "（最近 200 行，可选 openclaw / tunnel / image-proxy）、restart 重启 OpenClaw、"
-    "up 重新拉起全部服务、prune 清理无用镜像、"
-    "report 立即上报一次。restart / up / prune 要带自己的登录密码（没带 403 STEP_UP_REQUIRED，"
-    "错误 403 STEP_UP_FAILED，错太多次 429）。同一实例同时只跑一个动作（409 AGENT_OPS_RUNNING），"
-    "正在部署或卸载时 409 AGENT_SSH_JOB_RUNNING；没用 SSH 部署过 409 AGENT_OPS_UNAVAILABLE。"
+    "up 重新拉起这个实例的全部服务、report 立即上报一次；清理镜像在服务器上做"
+    "（POST /agents/servers/{server_id}/ops）。restart / up 要带自己的登录密码"
+    "（没带 403 STEP_UP_REQUIRED，错误 403 STEP_UP_FAILED，错太多次 429）。"
+    "同一台服务器同时只跑一个动作（409 AGENT_OPS_RUNNING），正在部署或卸载时 "
+    "409 AGENT_SSH_JOB_RUNNING；没部署到 SSH 服务器 409 AGENT_OPS_UNAVAILABLE。"
     "立即返回 running 的记录，进度与输出看 GET /ops/{action_id}；超时 60 秒，up 是 180 秒。"
     "输出脱敏后保存 7 天；审计记下动作与退出码，不记输出。",
     dependencies=_write,
@@ -668,6 +755,49 @@ async def get_agent_ops_action(
     access: Admin, service: OpsService, instance_id: UUID, action_id: UUID
 ) -> AgentOpsActionOut:
     return await service.get(access, instance_id, action_id)
+
+
+@router.get(
+    "/agents/servers/{server_id}/ops",
+    summary="服务器级运维动作：是否可用、进行中的动作与最近记录（admin）",
+    responses=_read_errors,
+)
+async def get_server_ops(access: Admin, service: OpsService, server_id: UUID) -> AgentOpsState:
+    return await service.server_state(access, server_id)
+
+
+@router.post(
+    "/agents/servers/{server_id}/ops",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="对整台服务器执行固定的运维动作（admin）",
+    description="containers 查看这台服务器上所有工作台项目的容器与资源占用（docker compose ls、"
+    "docker stats）；prune 清理无用镜像（要带自己的登录密码）。与这台服务器上的实例级动作、"
+    "部署任务互斥（T-0145，docs/v2/MULTI_OPENCLAW_PLAN.md 第 8 节）。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 429, 503),
+)
+async def run_server_ops(
+    access: Admin,
+    context: Annotated[AuthContext, Security(authenticated)],
+    request: Request,
+    service: OpsService,
+    server_id: UUID,
+    body: ServerOpsRun,
+) -> AgentOpsActionOut:
+    return await service.server_run(
+        access, context.user, server_id, body, client_ip=_server_ip(request)
+    )
+
+
+@router.get(
+    "/agents/servers/{server_id}/ops/{action_id}",
+    summary="一次服务器级运维动作的状态与脱敏后的输出（admin）",
+    responses=_read_errors,
+)
+async def get_server_ops_action(
+    access: Admin, service: OpsService, server_id: UUID, action_id: UUID
+) -> AgentOpsActionOut:
+    return await service.server_get(access, server_id, action_id)
 
 
 # ---------------------------------------------------------------- 发件记录（T-0118）

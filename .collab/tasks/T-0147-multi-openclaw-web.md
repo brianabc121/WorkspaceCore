@@ -2,9 +2,9 @@
 id: T-0147
 title: 多实例 M4 页面：服务器列表与详情（整机、智能体表格、占用对比、单个智能体趋势）、实例卡片、部署到服务器、运维拆分
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: apps/web,services/api,docs
 depends_on: T-0145, T-0146
 created: 2026-11-07
@@ -30,3 +30,5 @@ updated: 2026-11-07
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-07 03:23 UTC · claude · 创建任务（owner: claude）
 - 2026-11-07 03:23 UTC · claude · 人类 2026-11-07 在对话中指派：多实例服务器方案按决定全部落实（D5、D6 不考虑旧部署，其余按推荐）。
+- 2026-11-07 05:29 UTC · claude · 开始任务
+- 2026-11-07 05:30 UTC · claude · 页面：/agents?tab=servers 服务器列表与详情（整机当前值与趋势、每个智能体 CPU / 内存份额堆叠条、可排序智能体表格与单个智能体趋势、SSH 与专用密钥、服务器运维）；实例卡片：部署到服务器面板（替换 SshDeploy）、资源上限、它自己的负载与所在服务器；8 个分类色亮暗都过了 dataviz 检查；1280 / 390 宽度无横向滚动（mock 数据截图核对）。web lint / typecheck / build / vitest 通过。

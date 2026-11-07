@@ -1,24 +1,25 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { Schema } from '../../services/api'
-import { RANGE, RANGE_HOURS, hourLabel, load, percent, rate, type HostRange } from './host'
+import { RANGE, RANGE_HOURS, bytes, hourLabel, load, percent, rate, type HostRange } from './host'
 
 // 服务器状态的趋势图（T-0113）：每小时一个点。按 dataviz 规范：一张图一条轴（CPU 使用率和负载分两张图），
 // 两个系列用固定顺序的两种颜色（--chart-1 蓝、--chart-2 橙，亮暗两套都跑过色觉检查），第二个系列再加虚线，
 // 不只靠颜色区分；有图例；缺数据的小时断开不连线；悬停或键盘左右键逐小时看数值；“以表格查看”给读屏和不看颜色的人。
-type Key = Exclude<keyof Schema['HostPoint'], 'at'>
-export type HostSeries = { key: Key; label: string }
-const props = defineProps<{ title: string; note?: string; kind: 'percent' | 'load' | 'rate'; series: HostSeries[]; extra?: HostSeries[]; points: Schema['HostPoint'][]; range: HostRange }>()
+// 整机与单个智能体的趋势共用这张图（T-0147）：点是每小时一个，键是数值字段名
+type Row = { at: string } & { [key: string]: string | number | null | undefined }
+export type HostSeries = { key: string; label: string }
+const props = defineProps<{ title: string; note?: string; kind: 'percent' | 'load' | 'rate' | 'bytes'; series: HostSeries[]; extra?: HostSeries[]; points: Row[]; range: HostRange }>()
+const num = (r: Row | null | undefined, key: string): number | null => { const v = r?.[key]; return typeof v === 'number' ? v : null }
 
 const HOUR = 3_600_000, W = 1000
-const format = (value: number | null | undefined) => props.kind === 'percent' ? percent(value) : props.kind === 'load' ? load(value) : rate(value)
+const format = (value: number | null | undefined) => props.kind === 'percent' ? percent(value) : props.kind === 'load' ? load(value) : props.kind === 'bytes' ? bytes(value) : rate(value)
 const rows = computed(() => [...props.points].map(p => ({ ...p, t: Date.parse(p.at) })).sort((a, b) => a.t - b.t))
 const end = computed(() => Math.max(Math.ceil(Date.now() / HOUR) * HOUR, (rows.value.at(-1)?.t ?? 0) + HOUR))
 const start = computed(() => end.value - RANGE_HOURS[props.range] * HOUR)
 const x = (t: number) => ((t - start.value) / (end.value - start.value)) * W
-const values = computed(() => rows.value.flatMap(r => props.series.map(s => r[s.key])).filter((v): v is number => v !== null && v !== undefined))
+const values = computed(() => rows.value.flatMap(r => props.series.map(s => num(r, s.key))).filter((v): v is number => v !== null))
 
-// 轴的最大值：百分比固定 100；其余取 1、2、5 × 10ⁿ 里不小于最大值的那个（网速先换成 KB、MB…再取）
+// 轴的最大值：百分比固定 100；其余取 1、2、5 × 10ⁿ 里不小于最大值的那个（网速、字节数先换成 KB、MB…再取）
 function nice(max: number): number {
   const p = 10 ** Math.floor(Math.log10(max))
   return [1, 2, 5, 10].map(f => f * p).find(v => v >= max) ?? 10 * p
@@ -39,9 +40,9 @@ const segments = computed(() => props.series.map(s => {
   const out: { t: number; v: number }[][] = []
   let current: { t: number; v: number }[] = [], last = -Infinity
   for (const r of rows.value) {
-    const v = r[s.key]
-    if (v === null || v === undefined || r.t - last > HOUR + 60_000) { if (current.length) out.push(current); current = [] }
-    if (v !== null && v !== undefined) current.push({ t: r.t, v })
+    const v = num(r, s.key)
+    if (v === null || r.t - last > HOUR + 60_000) { if (current.length) out.push(current); current = [] }
+    if (v !== null) current.push({ t: r.t, v })
     last = r.t
   }
   if (current.length) out.push(current)
@@ -81,7 +82,7 @@ const tipStyle = computed(() => {
 })
 const summary = computed(() => {
   const last = rows.value.at(-1)
-  return `${props.title}，最近 ${RANGE[props.range]}，每小时一个点。` + (last ? `最近一小时 ${props.series.map(s => `${s.label} ${format(last[s.key])}`).join('，')}。` : '') + '用左右方向键逐小时查看。'
+  return `${props.title}，最近 ${RANGE[props.range]}，每小时一个点。` + (last ? `最近一小时 ${props.series.map(s => `${s.label} ${format(num(last, s.key))}`).join('，')}。` : '') + '用左右方向键逐小时查看。'
 })
 const tableOpen = ref(false)
 const tableRows = computed(() => tableOpen.value ? [...rows.value].reverse() : [])
@@ -111,12 +112,12 @@ const tableRows = computed(() => tableOpen.value ? [...rows.value].reverse() : [
         <template v-if="point">
           <span class="host-chart-cross" :style="{ left: left(point.t) }" aria-hidden="true" />
           <template v-for="(s, i) in series" :key="`mark-${s.key}`">
-            <span v-if="point[s.key] !== null" class="host-chart-dot is-active" :class="`is-${i + 1}`" :style="{ left: left(point.t), top: `${y(point[s.key] ?? 0)}%` }" aria-hidden="true" />
+            <span v-if="num(point, s.key) !== null" class="host-chart-dot is-active" :class="`is-${i + 1}`" :style="{ left: left(point.t), top: `${y(num(point, s.key) ?? 0)}%` }" aria-hidden="true" />
           </template>
           <div class="host-chart-tip" :style="tipStyle" role="status">
             <strong>{{ hourLabel(point.at) }}</strong>
-            <span v-for="(s, i) in series" :key="s.key"><span class="host-chart-swatch" :class="`is-${i + 1}`" aria-hidden="true" />{{ s.label }}<b>{{ format(point[s.key]) }}</b></span>
-            <span v-for="s in extra ?? []" :key="s.key" class="form-help">{{ s.label }}<b>{{ format(point[s.key]) }}</b></span>
+            <span v-for="(s, i) in series" :key="s.key"><span class="host-chart-swatch" :class="`is-${i + 1}`" aria-hidden="true" />{{ s.label }}<b>{{ format(num(point, s.key)) }}</b></span>
+            <span v-for="s in extra ?? []" :key="s.key" class="form-help">{{ s.label }}<b>{{ format(num(point, s.key)) }}</b></span>
           </div>
         </template>
       </div>
@@ -128,7 +129,7 @@ const tableRows = computed(() => tableOpen.value ? [...rows.value].reverse() : [
         <table>
           <caption>{{ title }} · 每小时，最近的在前</caption>
           <thead><tr><th scope="col">时间</th><th v-for="s in [...series, ...(extra ?? [])]" :key="s.key" scope="col">{{ s.label }}</th></tr></thead>
-          <tbody><tr v-for="r in tableRows" :key="r.at"><th scope="row"><time :datetime="r.at">{{ hourLabel(r.at) }}</time></th><td v-for="s in [...series, ...(extra ?? [])]" :key="s.key">{{ format(r[s.key]) }}</td></tr></tbody>
+          <tbody><tr v-for="r in tableRows" :key="r.at"><th scope="row"><time :datetime="r.at">{{ hourLabel(r.at) }}</time></th><td v-for="s in [...series, ...(extra ?? [])]" :key="s.key">{{ format(num(r, s.key)) }}</td></tr></tbody>
         </table>
       </div>
     </details>
