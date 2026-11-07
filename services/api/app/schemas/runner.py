@@ -409,7 +409,14 @@ class RunnerEnvAdminOut(EnvOut):
     mem_bytes: int | None
     disk_bytes: int | None
     egress: dict[str, Any]
-    retention_score: float | None
+    retention_score: float | None = Field(
+        description="保留分（分低的先回收）；只算运行中与已停止的环境，无穷大时为 null"
+    )
+    retention_infinite: bool = Field(
+        False, description="保留分无穷大：常驻环境的数据超过快照上限，只停止、不自动归档"
+    )
+    snapshot_at: datetime | None = None
+    snapshot_bytes: int | None = None
     started_at: datetime | None
     stopped_at: datetime | None
     archived_at: datetime | None
@@ -444,8 +451,15 @@ class RunnerTemplateAdminSave(_Strict):
     version: int | None = None
 
 
+class RunnerTemplateAdminOut(RunnerTemplateOut):
+    """管理员页面上的模板：多了乐观并发的版本号与构建日志的结尾（已脱敏）。"""
+
+    version: int
+    build_log: str | None = Field(None, description="构建日志的结尾（最多 20000 字，已脱敏）")
+
+
 class RunnerTemplateList(BaseModel):
-    items: list[RunnerTemplateOut]
+    items: list[RunnerTemplateAdminOut]
 
 
 class RunnerTemplateStatus(_Strict):

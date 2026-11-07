@@ -14,6 +14,7 @@ export const me: Schema['MeResponse'] = { user: { id: 'user-a', email: 'test@exa
 export const session: Schema['SessionOut'] = { id: 'session-a', current: true, created_at: '2026-10-30T00:00:00Z', expires_at: '2026-11-30T00:00:00Z', last_seen_at: null }
 export const emptyPage = { items: [], next_cursor: null, total_estimate: null }
 export const noLogins: Schema['AppLoginList'] = { items: [{ app: 'n8n', configured: false, username: null, password_set: false, login_url: null, updated_at: null, version: null }] }
+export const runnerOff: Schema['AgentRunnerOut'] = { enabled: false, limits: { envs: 3, persistent: 2, memory_mb: 16384, cpus: 8, disk_gb: 100, execs_per_hour: 120, run_hours_per_day: 8 }, secrets: [], enabled_at: null, version: 1 }
 export const fail = (status: number, code: string) => Response.json({ error: { code, message: '请求失败', request_id: 'req-test', details: {} } }, { status })
 export function mockApi(handler?: (request: Request) => Response | Promise<Response | undefined> | undefined) {
   const requests: Request[] = []
@@ -36,6 +37,8 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     // 实例的发件记录（T-0118）：默认没有
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/outbox$/.test(path) && request.method === 'GET') return Response.json({ items: [], rejected_replies: [] })
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/wakeups$/.test(path) && request.method === 'GET') return Response.json({ items: [], targets: [] })
+    // 实例的运行环境权限（T-0140）：默认关闭
+    if (/^\/api\/v1\/agents\/instances\/[^/]+\/runner$/.test(path) && request.method === 'GET') return Response.json(runnerOff)
     if (path === '/api/v1/knowledge/spaces') return Response.json({ items: [] })
     if (path === '/api/v1/knowledge/graph') return Response.json({ nodes: [], edges: [], truncated: false, total_notes: 0 })
     if (path === '/api/v1/knowledge/notes' || path === '/api/v1/knowledge/changes' || path === '/api/v1/knowledge/trash') return Response.json(emptyPage)

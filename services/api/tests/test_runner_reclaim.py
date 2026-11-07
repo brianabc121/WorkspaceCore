@@ -353,6 +353,8 @@ async def test_retention_score_and_output_purge(env: Env) -> None:
     listed = await env.client.get("/api/v1/runner/environments", headers=env.headers())
     score = listed.json()["items"][0]["retention_score"]
     assert isinstance(score, float) and score > 0
+    assert listed.json()["items"][0]["retention_infinite"] is False
+    assert listed.json()["items"][0]["snapshot_at"] is None
     stored = await get_env(env, created["id"])
     now = specs.now()
     fresh = runner_reclaim.retention_score(stored, 10, now, snapshot_max_bytes=5 * 1024**3)

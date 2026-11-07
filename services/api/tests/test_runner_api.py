@@ -533,6 +533,23 @@ async def test_templates_build_on_the_runner(env: Env) -> None:
     assert tool_error(other)["code"] == "FORBIDDEN"
     listed = await env.client.get("/api/v1/runner/templates", headers=env.headers())
     assert [t["name"] for t in listed.json()["items"]] == ["py-tests"]
+    # 管理员页面：带版本号与构建日志，改状态按版本号防并发
+    item = listed.json()["items"][0]
+    assert isinstance(item["version"], int) and "build_log" in item
+    stale = await env.client.put(
+        f"/api/v1/runner/templates/{item['id']}/status",
+        json={"status": "disabled", "version": item["version"] - 1},
+        headers=env.headers(write=True),
+    )
+    assert stale.status_code == 409
+    disabled = await env.client.put(
+        f"/api/v1/runner/templates/{item['id']}/status",
+        json={"status": "disabled", "version": item["version"]},
+        headers=env.headers(write=True),
+    )
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()["status"] == "disabled"
+    assert disabled.json()["version"] == item["version"] + 1
 
 
 async def test_report_marks_lost_and_stray_containers(env: Env) -> None:

@@ -36,9 +36,9 @@ from app.schemas.runner import (
     RunnerPolicyPut,
     RunnerRunAdminOut,
     RunnerRunList,
+    RunnerTemplateAdminOut,
     RunnerTemplateAdminSave,
     RunnerTemplateList,
-    RunnerTemplateOut,
     RunnerTemplateStatus,
 )
 
@@ -165,8 +165,9 @@ async def list_runner_environments(
 @router.post(
     "/runner/environments/{environment_id}/actions",
     summary="操作环境（admin，乐观并发）",
-    description="start / stop / delete（立即进入待删除，下一轮回收时删除）/ "
-    "pin / unpin（保护：不被空闲回收）。",
+    description="start / stop / archive（常驻先做快照）/ delete（立即进入待删除，下一轮回收时删除；"
+    "常驻先做快照）/ keep（撤销待删除）/ restore（归档的重建、已删除的常驻从快照恢复）/ "
+    "pin / unpin（保护：不被自动回收）。",
     dependencies=_write,
     responses=_write_errors,
 )
@@ -194,7 +195,7 @@ async def list_runner_templates(access: Admin, service: Service) -> RunnerTempla
 )
 async def save_runner_template(
     access: Admin, service: Service, body: RunnerTemplateAdminSave
-) -> RunnerTemplateOut:
+) -> RunnerTemplateAdminOut:
     return await service.save_template(access, body)
 
 
@@ -206,7 +207,7 @@ async def save_runner_template(
 )
 async def put_runner_template_status(
     access: Admin, service: Service, template_id: UUID, body: RunnerTemplateStatus
-) -> RunnerTemplateOut:
+) -> RunnerTemplateAdminOut:
     return await service.set_template_status(access, template_id, body)
 
 
@@ -218,7 +219,7 @@ async def put_runner_template_status(
 )
 async def rebuild_runner_template(
     access: Admin, service: Service, template_id: UUID
-) -> RunnerTemplateOut:
+) -> RunnerTemplateAdminOut:
     return await service.rebuild_template(access, template_id)
 
 

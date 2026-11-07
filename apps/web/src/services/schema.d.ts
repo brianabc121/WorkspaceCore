@@ -3091,7 +3091,7 @@ export interface paths {
         put?: never;
         /**
          * 操作环境（admin，乐观并发）
-         * @description start / stop / delete（立即进入待删除，下一轮回收时删除）/ pin / unpin（保护：不被空闲回收）。
+         * @description start / stop / archive（常驻先做快照）/ delete（立即进入待删除，下一轮回收时删除；常驻先做快照）/ keep（撤销待删除）/ restore（归档的重建、已删除的常驻从快照恢复）/ pin / unpin（保护：不被自动回收）。
          */
         post: operations["runner_environment_action"];
         delete?: never;
@@ -9783,7 +9783,16 @@ export interface components {
             pinned: boolean;
             /** Project Id */
             project_id: string | null;
-            /** Retention Score */
+            /**
+             * Retention Infinite
+             * @description 保留分无穷大：常驻环境的数据超过快照上限，只停止、不自动归档
+             * @default false
+             */
+            retention_infinite: boolean;
+            /**
+             * Retention Score
+             * @description 保留分（分低的先回收）；只算运行中与已停止的环境，无穷大时为 null
+             */
             retention_score: number | null;
             /** Reuse Key */
             reuse_key: string | null;
@@ -9797,6 +9806,10 @@ export interface components {
              * @enum {string}
              */
             share: "none" | "project";
+            /** Snapshot At */
+            snapshot_at?: string | null;
+            /** Snapshot Bytes */
+            snapshot_bytes?: number | null;
             spec: components["schemas"]["RunnerSpecOut"];
             /** Started At */
             started_at: string | null;
@@ -10235,28 +10248,18 @@ export interface components {
              */
             user: "user" | "root";
         };
-        /** RunnerTemplateAdminSave */
-        RunnerTemplateAdminSave: {
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /** Name */
-            name: string;
-            spec: components["schemas"]["RunnerSpecIn"];
-            /** Version */
-            version?: number | null;
-        };
-        /** RunnerTemplateList */
-        RunnerTemplateList: {
-            /** Items */
-            items: components["schemas"]["RunnerTemplateOut"][];
-        };
-        /** RunnerTemplateOut */
-        RunnerTemplateOut: {
+        /**
+         * RunnerTemplateAdminOut
+         * @description 管理员页面上的模板：多了乐观并发的版本号与构建日志的结尾（已脱敏）。
+         */
+        RunnerTemplateAdminOut: {
             /** Build Error */
             build_error: string | null;
+            /**
+             * Build Log
+             * @description 构建日志的结尾（最多 20000 字，已脱敏）
+             */
+            build_log?: string | null;
             /** Build Seconds */
             build_seconds: number | null;
             /**
@@ -10301,6 +10304,26 @@ export interface components {
             updated_at: string;
             /** Use Count */
             use_count: number;
+            /** Version */
+            version: number;
+        };
+        /** RunnerTemplateAdminSave */
+        RunnerTemplateAdminSave: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Name */
+            name: string;
+            spec: components["schemas"]["RunnerSpecIn"];
+            /** Version */
+            version?: number | null;
+        };
+        /** RunnerTemplateList */
+        RunnerTemplateList: {
+            /** Items */
+            items: components["schemas"]["RunnerTemplateAdminOut"][];
         };
         /** RunnerTemplateStatus */
         RunnerTemplateStatus: {
@@ -26357,7 +26380,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunnerTemplateOut"];
+                    "application/json": components["schemas"]["RunnerTemplateAdminOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -26429,7 +26452,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunnerTemplateOut"];
+                    "application/json": components["schemas"]["RunnerTemplateAdminOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -26505,7 +26528,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunnerTemplateOut"];
+                    "application/json": components["schemas"]["RunnerTemplateAdminOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
