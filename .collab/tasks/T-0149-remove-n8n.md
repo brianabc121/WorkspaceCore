@@ -1,10 +1,10 @@
 ---
 id: T-0149
 title: 按人类要求完整移除 n8n 工作流
-owner: codex
+owner: claude
 status: in_progress
 priority: P1
-branch: codex/T-0149-remove-n8n
+branch: claude/cool-wright-99qbbg
 paths: apps/web,services/api,infra,scripts,tests/e2e,.github/workflows/ci-infra.yml,compose.yaml,compose.https.yaml,Makefile,.env.example,.gitignore,.gitleaksignore,README.md,docs
 depends_on:
 created: 2026-11-07
@@ -31,3 +31,5 @@ updated: 2026-11-07
 - 2026-11-07 06:24 UTC · codex · 创建任务（owner: unassigned）
 - 2026-11-07 06:24 UTC · human · owner unassigned → codex：人类在本聊天明确要求完整移除n8n及所有相关内容；环境重建后T0142已被主干其他工作使用，本项恢复为T0149，不覆盖已有任务。
 - 2026-11-07 06:24 UTC · codex · 开始任务
+- 2026-11-07 11:49 UTC · human · owner codex → claude：人类在对话中指派：codex 的 T-0149 由 claude 接手做完；要求删除 n8n、不再使用（含迁移 0047 删除 n8n 的连接、白名单、执行记录与登录账号，已在对话中说明不可恢复）
+- 2026-11-07 11:50 UTC · claude · 接手：并入 codex 分支（4ec9062），迁移 0047 改接 0046、冲突已解决；下一步重新生成 openapi.json 与 schema.d.ts、修剩余测试、清理残留引用、补 docs/verification/T-0149.md
