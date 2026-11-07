@@ -17,7 +17,7 @@ from pydantic import SecretStr
 from app.domain import mcp_tools
 from app.domain.agents import AgentService
 from app.models import AgentInstance
-from app.schemas.ai_tools import TOOLS
+from app.schemas.ai_tools import RUNNER_TOOL_NAMES, TOOLS
 from tests.helpers import OWNER, tool_error
 from tests.workspace_support import Env, app_of, open_env
 
@@ -151,7 +151,9 @@ async def test_initialize_and_tool_list_follow_the_instance_scope(env: Env) -> N
     assert delete["annotations"]["destructiveHint"] is True
     read_only = (await rpc(env, reader, "tools/list")).json()["result"]["tools"]
     assert {tool["name"] for tool in read_only} == {
-        name for name, spec in TOOLS.items() if spec.risk == "read"
+        name
+        for name, spec in TOOLS.items()
+        if spec.risk == "read" and name not in RUNNER_TOOL_NAMES
     }
 
 

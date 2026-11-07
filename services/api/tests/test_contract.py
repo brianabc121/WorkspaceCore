@@ -1009,6 +1009,10 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "mail_search",
             "mail_get",
             "mail_thread",
+            # 运行环境：只给打开了运行环境权限的实例（例外八，T-0137）
+            "runner_templates",
+            "env_find",
+            "env_run",
         },
         "write": {
             "create_task",
@@ -1046,6 +1050,15 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "issue_update",
             # 发邮件：只给打开了发送权限的实例（例外七，T-0129）
             "mail_send",
+            # 运行环境：建、用、停、删自己的容器环境，自己定义模板（例外八，T-0137 / T-0138）
+            "runner_template_save",
+            "env_create",
+            "env_exec",
+            "env_files",
+            "env_setup",
+            "env_update",
+            "env_stop",
+            "env_release",
         },
     }
     for spec in TOOLS.values():
@@ -1078,6 +1091,8 @@ def test_v2_mcp_outputs_keep_free_text_under_untrusted() -> None:
         if isinstance(props, dict):
             leaked = free_text & {k for k in props if k != "untrusted"}
             if schema.get("title") == "AutomationParam":  # 参数名受格式限制，由管理员登记
+                leaked -= {"name"}
+            if schema.get("title") == "RunnerTemplateOut":  # 模板名受格式限制（小写字母数字）
                 leaked -= {"name"}
             assert not leaked, (schema.get("title"), leaked)
             for key, sub in props.items():

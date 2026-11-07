@@ -40,6 +40,7 @@ from app.domain import (
     notifications,
     project_groups,
     readme,
+    runner_reclaim,
     sync,
     task_runs,
     timeline,
@@ -292,6 +293,28 @@ async def check_host_alerts(ctx: dict[str, Any]) -> int:
         return await host_metrics.check_alerts(db)
 
 
+async def runner_tick(ctx: dict[str, Any]) -> int:
+    """运行服务器（T-0136、T-0139）：指令时限、在线、删除条件、空闲分档、资源水位、清理。"""
+    context = _sync(ctx)
+    async with context.sessions() as db:
+        result = await runner_reclaim.tick(db, context.settings, ctx["redis"])
+    if result.changed or result.offline:
+        logger.info(
+            "runner tick",
+            extra={
+                "expired": result.expired,
+                "retried": result.retried,
+                "offline": len(result.offline),
+                "stopped": result.stopped,
+                "archived": result.archived,
+                "pending_delete": result.pending_delete,
+                "deleted": result.deleted,
+                "purged": result.purged,
+            },
+        )
+    return result.changed
+
+
 async def replicate_files(ctx: dict[str, Any]) -> int:
     """知识库图片：把待复制的图片写到副本（T-0103）。没配置副本时什么也不做。"""
     context = _sync(ctx)
@@ -384,6 +407,7 @@ class WorkerSettings:
         cron(reconcile_readmes, minute={8, 38}, second=3, run_at_startup=True, timeout=600),
         cron(cleanup_files, hour=3, minute=37, timeout=1800),
         cron(check_file_storage, hour=4, minute=13, run_at_startup=True, timeout=180),
+        cron(runner_tick, second=12, timeout=60, unique=True),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())
     on_startup = startup

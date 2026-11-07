@@ -23,6 +23,7 @@ from app.api.v1 import (
     notifications,
     operations,
     readme,
+    runner,
     search,
     setup,
     tasks,
@@ -57,6 +58,7 @@ for module in (
     agents,
     im,
     mail,
+    runner,
     ai,
 ):
     router.include_router(module.router)

@@ -133,6 +133,24 @@ async def ensure_ca(
 def issue_client_certificate(
     ca: AgentCa, box: CredentialBox, instance: AgentInstance, *, now: datetime | None = None
 ) -> ClientCertificate:
+    return issue_certificate(
+        ca,
+        box,
+        common_name=instance.im_user_id,
+        uri=f"urn:myworkspace:agent-instance:{instance.id}",
+        now=now,
+    )
+
+
+def issue_certificate(
+    ca: AgentCa,
+    box: CredentialBox,
+    *,
+    common_name: str,
+    uri: str,
+    now: datetime | None = None,
+) -> ClientCertificate:
+    """客户端证书：实例与运行服务器（T-0136）共用同一个内部 CA。"""
     now = now or datetime.now(UTC)
     ca_cert, ca_key = _ca_signer(ca, box)
     key = ec.generate_private_key(ec.SECP256R1())
@@ -143,7 +161,7 @@ def issue_client_certificate(
             x509.Name(
                 [
                     x509.NameAttribute(NameOID.ORGANIZATION_NAME, "My Workspace"),
-                    x509.NameAttribute(NameOID.COMMON_NAME, instance.im_user_id),
+                    x509.NameAttribute(NameOID.COMMON_NAME, common_name),
                 ]
             )
         )
@@ -169,9 +187,7 @@ def issue_client_certificate(
         )
         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
         .add_extension(
-            x509.SubjectAlternativeName(
-                [x509.UniformResourceIdentifier(f"urn:myworkspace:agent-instance:{instance.id}")]
-            ),
+            x509.SubjectAlternativeName([x509.UniformResourceIdentifier(uri)]),
             critical=False,
         )
         .add_extension(

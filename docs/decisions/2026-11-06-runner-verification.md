@@ -2,7 +2,7 @@
 
 > 规则（`docs/AGENTS.md` 第 8 节）：第三方接口必须在锁定版本上核验，不按名称猜。
 > 本记录分两部分：Docker Engine 的接口与行为在本会话自己的 Docker 上实测（第 2 节）；
-> gVisor 的安装方式按官方文档（第 3 节），运行行为在 CI 的运行服务器验收里实测（第 4 节，T-0141 跑完后补结果）。
+> gVisor 的安装方式按官方文档（第 3 节），runner-agent 在本地 Docker（runc）上的实测见第 4 节；gVisor 下的运行行为在 CI 的运行服务器验收里实测（第 5 节，T-0141 跑完后补结果）。
 
 ## 1. 锁定的版本
 
@@ -57,7 +57,50 @@
 
 运行服务器的自动部署按上面的方式装 release-20261019.0，核对 sha512 后再解压。
 
-## 4. 待 CI 实测（T-0141）
+## 4. runner-agent 在本地 Docker 上的实测（T-0136 ~ T-0138，runc）
+
+runner-agent 的代码（`app/runner_agent/`）放进锁定 digest 的 `python:3.12.15-slim-trixie` 容器、挂本会话自己的 Docker socket（与生产一样），
+直接调用各条指令的处理函数，环境用 `runc`、`user`、`allowlist`（只放行 `example.com`）、256 MB / 1 核 / 256 个进程：
+
+| 项 | 结果 |
+|---|---|
+| `create_env`：建网络、数据卷（助手容器改属主）、写初始文件、建并启动容器、写密钥 | 通过，0.53 秒；镜像 digest 记下 |
+| 环境里的身份 | `id -u` = 1000，`CapEff` 全 0，`HOME=/workspace/.home`，`/workspace` 属主 1000，可写 |
+| 密钥文件 | `/run/secrets/tok`：内容正确，`-rw------- 1000 1000`（tmpfs 的 `uid`/`gid`/`mode` 选项生效） |
+| 退出码与 stderr | `exit 3` → 3，stdout 与 stderr 都在输出里 |
+| 出口代理 | 不在名单的域名 `403`、私有地址 `403`、直连外网 `Network is unreachable`；名单里的 `example.com` 在本会话解析不了（沙箱没有外部 DNS），返回 `502 cannot resolve`，放行路径在 CI 实测 |
+| 进程数上限 | `Cannot fork` |
+| exec 超时 3 秒 | 3.0 秒返回 `timed_out`，容器随即停止（`exited`）；下一次 exec 自动启动并重新写入密钥 |
+| 输出上限 | 1.6 MB 输出保留开头 256 KB 与结尾，合计约 1 MB，标记 `truncated` |
+| 文件 | `put_files`、`get_files`、`list_files`（助手容器 + `find`）正确；不存在的文件返回明确原因 |
+| `stop_env` → `start_env` | 通过，启动后密钥重新写入 |
+| `delete_env` | 容器、数据卷、网络都删除 |
+| `build_template`（经典构建器，`networkmode` = 只连出口代理的 internal 网络） | 4.5 秒构建成功；RUN 步骤里直连外网不通、`HTTP_PROXY` 构建参数生效（另测） |
+| `ADD https://…` 的安装步骤 | 拒绝（daemon 在宿主网络上下载，会绕过出口代理） |
+
+两处在实测里改进：
+
+1. **代理的监听要先 `shutdown` 再 `close`**：只 `close` 时阻塞在 `accept()` 的线程还占着端口，同一地址再监听报 `Address already in use`（环境停止后再启动、删掉后新建网络分到同一个地址时都会遇到）。
+2. 代理拒绝时的**状态行只用 ASCII**（客户端按 latin-1 显示状态行），中文原因放在正文里。
+
+### 4.1 快照、归档、重建与镜像清理（T-0139，同样的方式，2026-11-07）
+
+常驻环境写进三个文件（`data/db.txt`、`cfg/sub/a.json`、`tmp/junk.txt`），要保存的目录是 `data`、`cfg/sub` 与一个不存在的 `missing`，块大小故意设成 4 KB：
+
+| 项 | 结果 |
+|---|---|
+| `snapshot`（环境已停止；助手容器 `GET /containers/{id}/archive?path=/workspace/<目录>` 流式读出，按块上传） | 通过：`data`、`cfg/sub` 各 1 块 2560 字节，`missing` 记为 `missing: true`；容器标签带类别 `myworkspace.lifetime=persistent` |
+| `archive_env` | 容器、数据卷、网络都删除（`volume_gone` 为空） |
+| 重建 `create_env`（带 `snapshot` 与初始化步骤） | 0.86 秒；`data/db.txt`、`cfg/sub/a.json` 内容一致，属主 1000；没保存的 `tmp/` 不存在；初始化步骤重放（`setup.txt`）；恢复后的目录可写 |
+| `delete_env` | 删干净 |
+| 模板镜像被清理后建环境（`template_build`） | 先按模板重新构建（2.6 秒），环境里看得到构建出的文件 |
+| `prune_images`（`keep` 为空） | 删掉带工作台标签的模板镜像 `myworkspace/tpl-…:1`；之后镜像不存在 |
+| 收尾 | 带 `myworkspace.runner` 标签的容器、数据卷都是 0 |
+
+工作台这边（`tests/test_runner_reclaim.py`，真实 PostgreSQL / Redis，测试代替 runner-agent）：快照块用这份快照自己的数据密钥（AES-256-GCM，附加数据“快照 ID:块号”）加密后存进对象存储，
+落盘的内容里找不到明文；数据密钥用凭证密钥封存（用途绑定快照 ID）；改动一个字节解密失败（`SNAPSHOT_CORRUPT`）。
+
+## 5. 待 CI 实测（T-0141）
 
 本会话下载并运行 gVisor 的二进制被权限策略拦下，gVisor 下的行为改在 CI 的运行服务器验收里实测（GitHub 的 runner 上按第 3 节安装）。
 要实测的项：`--runtime=runsc` 的环境容器能启动；exec 的输出与退出码；内部网络里经出口代理访问外网、直连不通；

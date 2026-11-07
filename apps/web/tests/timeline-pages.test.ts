@@ -1,6 +1,6 @@
 // 任务时间轴（T-0105）：页面、按项目查看、选中详情与操作、入口；任务详情的执行者与执行记录。
 import { fireEvent, screen, within } from '@testing-library/vue'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fail, me, mockApi, openApp, workspace } from './helpers'
 import { project, task } from './sprint3-fixtures'
 import type { Schema } from '../src/services/api'
@@ -43,7 +43,9 @@ function timelineApi(options: { role?: string; data?: () => Schema['TimelineOut'
     return undefined
   })
 }
-afterEach(() => { vi.restoreAllMocks() })
+// 时间轴按本地的一天显示：固定在当天中午，免得临近午夜时“一小时后”的计划落到第二天（只假 Date，计时器照常）
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(2026, 10, 6, 12, 0)) })
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('任务时间轴', () => {
   it('shows tracks, clips, usage and the summary', async () => {

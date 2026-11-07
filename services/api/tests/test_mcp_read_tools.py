@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from app.schemas.ai_tools import TOOLS
+from app.schemas.ai_tools import RUNNER_TOOL_NAMES, TOOLS
 from tests.helpers import csrf, tool_error
 from tests.test_mcp_api import SETTINGS, call, issue_token, new_instance, records, rpc
 from tests.workspace_support import Env, open_env
@@ -60,7 +60,12 @@ def outside_untrusted(value: Any) -> list[str]:
 async def test_all_read_tools_are_listed_for_a_read_only_instance(env: Env) -> None:
     token = await issue_token(env, await new_instance(env, scope="read", name="reader"))
     listed = (await rpc(env, token, "tools/list")).json()["result"]["tools"]
-    expected = {name for name, spec in TOOLS.items() if spec.risk == "read"}
+    # 运行环境的读工具只列给打开了运行环境权限的实例（例外八，T-0137）
+    expected = {
+        name
+        for name, spec in TOOLS.items()
+        if spec.risk == "read" and name not in RUNNER_TOOL_NAMES
+    }
     assert {tool["name"] for tool in listed} == expected
     assert all(tool["annotations"]["readOnlyHint"] for tool in listed)
 

@@ -152,6 +152,15 @@ class AgentInstance(Base):
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
     mail_send_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 运行环境权限（T-0138，迁移 0042，docs/v2/RUNNER_PLAN.md 例外八）：
+    # 打开后直接执行 runner_* / env_*；runner_limits 是管理员改过的限额
+    # （空则用默认值，见 app/domain/runner_specs.py）
+    runner_enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    runner_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    runner_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    runner_limits: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()

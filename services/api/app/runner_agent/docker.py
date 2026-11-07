@@ -82,15 +82,32 @@ def frames(stream: Iterator[bytes]) -> Iterator[tuple[int, bytes]]:
 
 
 def tar_of(files: dict[str, bytes], *, uid: int = 0, gid: int = 0, mode: int = 0o644) -> bytes:
-    """把 {相对路径: 内容} 打成 tar（put_archive 用）。"""
+    """把 {相对路径: 内容} 打成 tar（put_archive 用）。
+
+    中间目录也写进去（属主同文件）：否则 Docker 解包时按 root 建目录，uid 1000 写不进去。
+    """
     out = io.BytesIO()
+    now = int(time.time())
+    seen: set[str] = set()
     with tarfile.open(fileobj=out, mode="w") as tar:
         for name, content in files.items():
+            parts = name.split("/")[:-1]
+            for depth in range(1, len(parts) + 1):
+                folder = "/".join(parts[:depth])
+                if folder in seen:
+                    continue
+                seen.add(folder)
+                entry = tarfile.TarInfo(folder)
+                entry.type = tarfile.DIRTYPE
+                entry.mode = 0o755
+                entry.uid, entry.gid = uid, gid
+                entry.mtime = now
+                tar.addfile(entry)
             info = tarfile.TarInfo(name)
             info.size = len(content)
             info.mode = mode
             info.uid, info.gid = uid, gid
-            info.mtime = int(time.time())
+            info.mtime = now
             tar.addfile(info, io.BytesIO(content))
     return out.getvalue()
 
@@ -203,13 +220,26 @@ class Docker:
         return result
 
     def build(
-        self, dockerfile: str, tag: str, labels: dict[str, str], *, timeout: float = 3600
+        self,
+        dockerfile: str,
+        tag: str,
+        labels: dict[str, str],
+        *,
+        network: str | None = None,
+        build_args: dict[str, str] | None = None,
+        timeout: float = 3600,
     ) -> list[dict[str, Any]]:
+        """经典构建器（API 默认）：RUN 步骤的容器连在 network 上（实测支持自定义网络名）。"""
         context = tar_of({"Dockerfile": dockerfile.encode()})
+        query: dict[str, Any] = {"t": tag, "labels": labels, "rm": 1, "forcerm": 1, "pull": 1}
+        if network:
+            query["networkmode"] = network
+        if build_args:
+            query["buildargs"] = build_args
         return self._stream_json(
             "POST",
             "/build",
-            query={"t": tag, "labels": labels, "rm": 1, "forcerm": 1},
+            query=query,
             raw=context,
             content_type="application/x-tar",
             timeout=timeout,
@@ -233,6 +263,14 @@ class Docker:
             f"/networks/{network}/connect",
             body={"Container": container, "EndpointConfig": {"Aliases": aliases}},
             ok=(200, 403),  # 403：已经连着
+        )
+
+    def disconnect_network(self, network: str, container: str) -> None:
+        self.call(
+            "POST",
+            f"/networks/{network}/disconnect",
+            body={"Container": container, "Force": True},
+            ok=(200, 404),
         )
 
     def remove_network(self, name: str) -> None:
@@ -268,6 +306,34 @@ class Docker:
         """等容器退出，返回退出码。"""
         result = self.json("POST", f"/containers/{container}/wait", timeout=timeout)
         return int(result.get("StatusCode", -1))
+
+    def logs(self, container: str, *, limit: int = 2 * 1024 * 1024) -> bytes:
+        """已退出的容器的标准输出（多路复用流，只取 stdout）。"""
+        conn, response = self._send(
+            "GET", f"/containers/{container}/logs", query={"stdout": 1, "stderr": 0}, timeout=120
+        )
+        out = bytearray()
+        try:
+            if response.status != 200:
+                raise DockerError(response.status, _message(response.read()))
+
+            def chunks() -> Iterator[bytes]:
+                while chunk := response.read1(65536):
+                    yield chunk
+
+            for kind, data in frames(chunks()):
+                if kind == 1:
+                    out += data
+                if len(out) > limit:
+                    break
+        finally:
+            conn.close()
+        return bytes(out[:limit])
+
+    def all_containers(self) -> list[dict[str, Any]]:
+        """不加过滤（只用来数一数没有工作台标签的容器，不对它们做任何操作）。"""
+        result: list[dict[str, Any]] = self.json("GET", "/containers/json", query={"all": 1})
+        return result
 
     def inspect(self, container: str) -> dict[str, Any] | None:
         try:
@@ -318,6 +384,49 @@ class Docker:
             raise DockerError(413, f"超过 {limit} 字节")
         return data
 
+    def stream_archive(self, container: str, path: str, *, chunk: int) -> Iterator[bytes]:
+        """按块读出一个路径的 tar 流（快照用，不整块放进内存）。路径不存在时抛 404。"""
+        conn, response = self._send(
+            "GET", f"/containers/{container}/archive", query={"path": path}, timeout=600
+        )
+        try:
+            if response.status != 200:
+                raise DockerError(response.status, _message(response.read()))
+            buffer = b""
+            while data := response.read(min(chunk, 1024 * 1024)):
+                buffer += data
+                while len(buffer) >= chunk:
+                    yield buffer[:chunk]
+                    buffer = buffer[chunk:]
+            if buffer:
+                yield buffer
+        finally:
+            conn.close()
+
+    def put_archive_stream(self, container: str, path: str, chunks: Iterator[bytes]) -> None:
+        """把 tar 流分块上传（Transfer-Encoding: chunked，实测 Docker 29.9 支持）。"""
+        conn = _UnixConnection(self.socket_path, 600)
+        try:
+            conn.request(
+                "PUT",
+                _url(f"/containers/{container}/archive", {"path": path}),
+                body=chunks,
+                headers={"Content-Type": "application/x-tar"},
+                encode_chunked=True,
+            )
+            response = conn.getresponse()
+            data = response.read()
+        finally:
+            conn.close()
+        if response.status != 200:
+            raise DockerError(response.status, _message(data))
+
+    def images(self, label: str) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = self.json(
+            "GET", "/images/json", query={"filters": {"label": [label]}}
+        )
+        return result
+
     def put_archive(self, container: str, path: str, tar: bytes) -> None:
         self.call(
             "PUT",
@@ -342,7 +451,8 @@ class Docker:
     ) -> ExecResult:
         """在运行中的容器里执行命令并等它结束。
 
-        输出超过 limit 只保留开头；超时返回 exit_code=None（进程可能还在跑，由调用方停掉容器）。
+        输出超过 limit 时保留开头四分之一和结尾（中间换成一行省略说明）；
+        超时返回 exit_code=None（进程可能还在跑，由调用方停掉容器）。
         """
         body: dict[str, Any] = {"Cmd": cmd, "AttachStdout": True, "AttachStderr": True}
         if user:
@@ -384,11 +494,21 @@ class Docker:
                         return
                     yield chunk
 
+            head_limit = limit // 4
+            tail = bytearray()
             for _kind, data in frames(chunks()):
-                if len(output) < limit:
-                    output += data[: limit - len(output)]
-                if len(output) >= limit and data:
-                    truncated = truncated or len(output) + len(data) > limit
+                if len(output) < head_limit:
+                    take = head_limit - len(output)
+                    output += data[:take]
+                    data = data[take:]
+                if data:
+                    tail += data
+                    if len(tail) > limit - head_limit:
+                        truncated = True
+                        del tail[: len(tail) - (limit - head_limit)]
+            if truncated:
+                output += "\n...[中间省略]...\n".encode()
+            output += tail
         finally:
             conn.close()
         seconds = time.monotonic() - started
