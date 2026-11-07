@@ -8,6 +8,7 @@ import OperationsCard from './OperationsCard.vue'
 import NotificationsCard from './NotificationsCard.vue'
 import ProjectProgressCard from './ProjectProgressCard.vue'
 import ImQuickChatCard from './ImQuickChatCard.vue'
+import NewsBriefingCard from './NewsBriefingCard.vue'
 
 export const safeUrl = (value: string) => {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password } catch { return false }
@@ -29,6 +30,8 @@ const apiLatency = z.object({ range: z.enum(['1h', '6h', '24h']).default('1h'), 
 const notifications = z.object({ limit: z.number().int().min(1).max(20).default(5), unread_only: z.boolean().default(true) }).strict()
 const projectProgress = z.object({ limit: z.number().int().min(1).max(20).default(5) }).strict()
 const imQuickChat = z.object({ instance_id: z.string().uuid().nullable().default(null) }).strict()
+// 今日早报（T-0154）：显示正文开头几行
+const newsBriefing = z.object({ lines: z.number().int().min(2).max(20).default(6) }).strict()
 const shape = { layout: layoutSchema }
 export const widgetSchema = z.discriminatedUnion('widget_type', [
   z.object({ ...shape, widget_type: z.literal('notifications'), config: notifications.prefault({}) }).strict(),
@@ -43,6 +46,7 @@ export const widgetSchema = z.discriminatedUnion('widget_type', [
   z.object({ ...shape, widget_type: z.literal('api_latency'), config: apiLatency.prefault({}) }).strict(),
   z.object({ ...shape, widget_type: z.literal('project_progress'), config: projectProgress.prefault({}) }).strict(),
   z.object({ ...shape, widget_type: z.literal('im_quick_chat'), config: imQuickChat.prefault({}) }).strict(),
+  z.object({ ...shape, widget_type: z.literal('news_briefing'), config: newsBriefing.prefault({}) }).strict(),
 ])
 export type WidgetValue = z.output<typeof widgetSchema>
 export type WidgetType = WidgetValue['widget_type']
@@ -59,6 +63,7 @@ export const registry: Record<WidgetType, WidgetDefinition> = {
   recent_docs: { type: 'recent_docs', title: '最近文档', defaultSize: { w: 6, h: 4 }, configSchema: tasks, component: markRaw(ResourceCard), refreshPolicy: 'manual', requiredCapability: 'knowledge' },
   project_progress: { type: 'project_progress', title: '项目进度', defaultSize: { w: 6, h: 4 }, configSchema: projectProgress, component: markRaw(ProjectProgressCard), refreshPolicy: 'manual', requiredCapability: 'tasks' },
   im_quick_chat: { type: 'im_quick_chat', title: '快捷提问（IM）', defaultSize: { w: 6, h: 4 }, configSchema: imQuickChat, component: markRaw(ImQuickChatCard), refreshPolicy: 'manual' },
+  news_briefing: { type: 'news_briefing', title: '今日早报', defaultSize: { w: 6, h: 4 }, configSchema: newsBriefing, component: markRaw(NewsBriefingCard), refreshPolicy: 'manual' },
   calendar_agenda: { type: 'calendar_agenda', title: '近期日程', defaultSize: { w: 6, h: 4 }, configSchema: agenda, component: markRaw(ResourceCard), refreshPolicy: 'manual', requiredCapability: 'calendar' },
 }
 export function parseWidget(widget: Schema['WidgetOut']): WidgetValue | null {

@@ -13,6 +13,8 @@ const families: Record<Schema['InvalidateEvent']['topics'][number], string[]> = 
   timeline: ['timeline', 'task-runs'],
   // 项目 Issues（T-0123）
   issues: ['issues', 'search'],
+  // 新闻早报（T-0153）：早报送达、设置与收藏变化（早报页、设置页与首页的“今日早报”都以 'news' 开头）
+  news: ['news'],
 }
 // Backoff for rebuilding a stream the browser closed; reset after every successful open.
 const RETRY_BASE_MS = 1000, RETRY_MAX_MS = 30000
