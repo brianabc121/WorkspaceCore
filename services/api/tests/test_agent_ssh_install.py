@@ -1082,8 +1082,8 @@ async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -
         assert stat.S_IMODE((host.home / ".ssh" / "authorized_keys").stat().st_mode) == 0o600
 
         # 吊销之后可以删除目标服务器
-        response = await owner.remove(instance_id, revoked["target"]["version"])
-        assert response.status_code == 204, response.text
+        removed = await owner.remove(instance_id, revoked["target"]["version"])
+        assert removed.status_code == 204, removed.text
     ref = await run_sql(owner.database_url, "SELECT count(*) FROM workspace.agent_ssh_targets")
     assert ref == 0
     actions = await run_sql(
@@ -1162,8 +1162,8 @@ async def test_revoke_and_uninstall_wait_for_a_running_job(
             response = await _post(owner, instance_id, action, {"version": version})
             assert response.status_code == 409, response.text
             assert response.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
-        response = await owner.install(instance_id, version, password=None)
-        assert response.status_code == 409
+        busy = await owner.install(instance_id, version, password=None)
+        assert busy.status_code == 409
     assert len(host.authorized()) == 1
 
 
