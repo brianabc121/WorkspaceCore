@@ -602,13 +602,13 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 
 | 方法与路径 | 说明 |
 |---|---|
-| `GET /api/v1/news/today` | viewer。今天（按设置的时区）最新一份早报 + 每个兴趣主题今天的条目（经 MCP 查 `get_news_by_date` 与 `get_latest_rss`，按主题关键词、必含词、排除词匹配；当前用户标了不感兴趣的不在这里）。TrendRadar 连不上时 `unavailable=true`，早报照常返回 |
+| `GET /api/v1/news/today` | viewer。今天（按部署的时区 `TRENDRADAR_TZ`）最新一份早报 + 每个兴趣主题今天的条目（经 MCP 查 `get_news_by_date` 与 `get_latest_rss`，按主题关键词、必含词、排除词匹配；当前用户标了不感兴趣的不在这里）。TrendRadar 连不上时 `unavailable=true`，早报照常返回 |
 | `GET /api/v1/news/status` | viewer。`deployed`、`enabled`、`online`（MCP `get_system_status`）、`latest_data_date`、`latest_briefing_at`、`rendered_at`、`render_error` |
 | `GET /api/v1/news/briefings?cursor&limit` | viewer。往期早报（`excerpt` 是正文开头的纯文字），游标分页 |
 | `GET /api/v1/news/briefings/{id}` | viewer。一份早报：`local_date`、`slot`、`source`（`trendradar` / `agent`）、`title`、`content`（Markdown，按安全模式渲染）、`status`（`receiving` / `complete` / `pending` / `failed`）、`parts` / `total_parts`、`error`、`task_id` |
 | `GET /api/v1/news/hot?platform&limit` | viewer。最新一批热榜（MCP `get_latest_news`）；`platform` 只能是核验过的 11 个 id |
 | `GET /api/v1/news/rss?feed&days&limit` | viewer。最近几天的 RSS（MCP `get_latest_rss`） |
-| `GET /api/v1/news/search?q&days&include_rss&limit` | viewer。按关键词搜热榜（可含 RSS；MCP `search_news`，日期范围按设置的时区） |
+| `GET /api/v1/news/search?q&days&include_rss&limit` | viewer。按关键词搜热榜（MCP `search_news`）与 RSS（`search_rss`；`search_news` 在热榜没有命中时不带 RSS），日期范围按部署的时区 |
 | 条目 | `title`、`url`、`mobile_url`（只保留 http(s) 链接，别的整条丢掉）、`source_type`（`hotlist` / `rss`）、`source_id`、`source_name`、`rank`、`time`、`summary`、`topic`（命中的主题）、`favorite_id`、`dismissed`；没有数据时 `items=[]` 且有 `message` |
 | `GET /api/v1/news/feedback?kind&cursor&limit` | viewer。我的收藏 / 不感兴趣 |
 | `POST /api/v1/news/feedback` | member（`201`）。`kind`（`favorite` / `dismiss`）、`url`（http(s)）、`title`、`source_type`、`source_id`、`source_name`、`topic`；同一条重复提交返回同一条记录；收藏与不感兴趣互斥。`exclude_word`（只有 owner，否则 `403`）把一个词加进全局排除并重新生成配置文件，审计 `news.exclusion_added` |

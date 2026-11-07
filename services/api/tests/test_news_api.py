@@ -375,6 +375,7 @@ async def test_today_hot_rss_search(env: ImEnv, trendradar: FakeTrendRadar) -> N
     assert rss["items"][0]["source_type"] == "rss" and rss["items"][0]["summary"]
     found = (await env.client.get("/api/v1/news/search?q=Claude", headers=env.headers())).json()
     assert [i["title"] for i in found["items"]] == ["Claude 发布新的编程能力"]
+    assert [name for name, _ in trendradar.calls[-2:]] == ["search_news", "search_rss"]
 
     trendradar.missing.add("get_latest_news")
     empty = (await env.client.get("/api/v1/news/hot", headers=env.headers())).json()
@@ -514,8 +515,9 @@ async def test_agent_news_tools(env: ImEnv, trendradar: FakeTrendRadar) -> None:
     found = ok(await call(env, token, "news_search", {"query": "AI", "days": 7}))
     titles = [i["untrusted"]["title"] for i in found["items"]]
     assert "英伟达财报超预期，AI 芯片需求强劲" in titles and "AI 钓鱼链接" not in titles
-    name, args = trendradar.calls[-1]
-    assert name == "search_news" and set(args["date_range"]) == {"start", "end"}
+    called = dict(trendradar.calls[-2:])
+    assert set(called["search_news"]["date_range"]) == {"start", "end"}
+    assert called["search_rss"]["keyword"] == "AI"  # RSS 单独查（search_news 不命中时不带 RSS）
     trending = ok(await call(env, token, "news_trending", {}))
     assert trending["topics"][0]["untrusted"]["keyword"] == "AI"
     rss = ok(await call(env, token, "news_rss", {"days": 3}))

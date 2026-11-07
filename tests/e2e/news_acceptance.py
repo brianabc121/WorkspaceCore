@@ -103,7 +103,6 @@ def settings_body(version: int, topics: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "version": version,
         "enabled": True,
-        "timezone": "Asia/Shanghai",
         "push_times": slots(),
         "briefing_mode": "trendradar",
         "platforms": ["zhihu", "weibo", "wallstreetcn-hot", "cls-hot"],
@@ -221,7 +220,8 @@ def main() -> int:
     saved = client.request(
         "PUT", "/api/v1/news/settings", settings_body(current["version"], AI_TOPICS), headers=headers
     )
-    report.check("网页上保存设置并启用", saved.status == 200, saved.summary)
+    if not report.check("网页上保存设置并启用", saved.status == 200, saved.summary):
+        return report.finish()
     body = saved.json()
     text = json.dumps(body, ensure_ascii=False)
     report.check(

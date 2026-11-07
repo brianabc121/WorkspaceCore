@@ -1159,6 +1159,9 @@ class NewsService:
     async def search(
         self, access: WorkspaceAccess, q: str, days: int, include_rss: bool, limit: int
     ) -> NewsItemList:
+        row = await self._enabled_for(access.workspace.id)
+        if not self.deployed or row is None:
+            return NewsItemList(items=[], unavailable=False, message="早报没有启用")
         today = self.local_today()
         args = {
             "query": q,
@@ -1168,10 +1171,21 @@ class NewsService:
             },
             "limit": limit,
             "include_url": True,
-            "include_rss": include_rss,
-            "rss_limit": min(limit, 20),
         }
-        return await self._page_query(access, "search_news", args)
+        items, message, unavailable = await self._query("search_news", args)
+        if include_rss:
+            # search_news 的 include_rss 在热榜没有命中时直接返回、不带 RSS
+            # （MCP 4.1.1 实测），所以 RSS 单独查
+            rss_args = {"keyword": q, "days": days, "limit": limit, "include_summary": True}
+            rss, rss_message, rss_down = await self._query("search_rss", rss_args, rss=True)
+            items += rss
+            unavailable = unavailable and rss_down
+            message = None if items else (message or rss_message)
+        return NewsItemList(
+            items=await self._decorate(access, items, topics_of(row), row.exclusions),
+            unavailable=unavailable,
+            message=message,
+        )
 
     async def today(self, access: WorkspaceAccess) -> NewsTodayOut:
         row = await self._enabled_for(access.workspace.id)

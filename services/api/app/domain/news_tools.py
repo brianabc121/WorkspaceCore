@@ -122,10 +122,20 @@ async def news_search(call: ReadCall, args: NewsSearchInput) -> NewsListOutput:
         "date_range": _range(call, args.days),
         "limit": args.limit,
         "include_url": True,
-        "include_rss": args.include_rss,
-        "rss_limit": min(args.limit, 20),
     }
-    return await _list(service, "search_news", params, args.limit * 2)
+    found = await _list(service, "search_news", params, args.limit)
+    if not args.include_rss:
+        return found
+    # search_news 在热榜没有命中时不带 RSS（MCP 4.1.1 实测），RSS 单独用 search_rss 查
+    rss_params = {
+        "keyword": args.query,
+        "days": args.days,
+        "limit": args.limit,
+        "include_summary": True,
+    }
+    rss = await _list(service, "search_rss", rss_params, args.limit, rss=True)
+    items = found.items + rss.items
+    return NewsListOutput(items=items, hint=None if items else _NO_DATA)
 
 
 async def news_by_date(call: ReadCall, args: NewsByDateInput) -> NewsListOutput:

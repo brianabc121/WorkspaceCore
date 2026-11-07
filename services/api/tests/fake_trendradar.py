@@ -81,10 +81,16 @@ class FakeTrendRadar:
                 items = [i for i in HOT if i["platform"] in args["platforms"]]
             return {"success": True, "data": items[: args.get("limit", 50)]}
         if name == "search_news":
+            # 与真实的 MCP 4.1.1 一样：热榜没有命中时直接返回 results=[]，不带 RSS
             query = str(args.get("query") or "").lower()
             data = [i for i in HOT if query in i["title"].lower()]
+            if not data:
+                return {"success": True, "results": [], "total": 0, "message": "未找到匹配的新闻"}
             rss = [i for i in RSS if query in i["title"].lower()] if args.get("include_rss") else []
             return {"success": True, "data": data, "rss": rss}
+        if name == "search_rss":
+            keyword = str(args.get("keyword") or "").lower()
+            return {"success": True, "data": [i for i in RSS if keyword in i["title"].lower()]}
         if name == "get_latest_rss":
             return {"success": True, "data": RSS}
         if name == "get_trending_topics":

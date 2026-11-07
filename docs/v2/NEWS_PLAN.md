@@ -54,7 +54,7 @@ NewsNow / RSS / 大模型 / 推送渠道（外网）
 |---|---|---|
 | 启用 | `notification.enabled`、生成 / 清空配置 | 关闭时生成“不抓取、不推送”的配置 |
 | 推送时间（1~3 个，半小时为单位，默认 07:30） | `timeline.yaml` 的 `custom` 时间段 | 时间段 `[t, t+30min)`，`once.push`、`once.analyze`，`report_mode: daily`；其余时间只抓取 |
-| 时区（默认 Asia/Shanghai） | `app.timezone` | 决定推送时间与“今天”的日期 |
+| 时区（默认 Asia/Shanghai；部署时在 `.env` 的 `TRENDRADAR_TZ` 设置，网页上只读） | `app.timezone` 与两个容器的 `TZ` | 决定推送时间与“今天”的日期；MCP 按容器时区算“今天”，所以不能在网页上改（核验记录第 7 节） |
 | 早报方式 A / B，方案 B 选一个智能体实例 | A：时间段推送；B：时间段不推送，由工作台调智能体 | 第 5 节 |
 | 兴趣主题（名称、关键词、必含词、每组最多条数、给 AI 的描述） | `frequency_words.txt` 的 `[WORD_GROUPS]`；`ai_interests.txt` | 关键词支持 `/正则/`；偏好学习会调整条数（第 8 节） |
 | 全局排除词 | `frequency_words.txt` 的 `[GLOBAL_FILTER]` | 上游的 `!词` 实际是全局的，所以只做全局排除 |
@@ -116,7 +116,7 @@ MCP 返回的错误按 `error.code` 归类（如没有数据）。工作台网�
 
 | 表 | 内容 |
 |---|---|
-| `news_settings` | 每个工作空间一行：启用（全部署唯一）、时区、推送时间、早报方式、智能体实例、平台、NewsNow 地址、RSS 源、兴趣主题、全局排除词、筛选方式、大模型（模型、地址、Key 引用）、推送渠道（非密字段 + 加密的凭证引用）、接收 token 引用、配置版本与写入时间 / 错误、乐观锁 `version` |
+| `news_settings` | 每个工作空间一行：启用（全部署唯一）、推送时间、早报方式、智能体实例、平台、NewsNow 地址、RSS 源、兴趣主题、全局排除词、筛选方式、大模型（模型、地址、Key 引用）、推送渠道（非密字段 + 加密的凭证引用）、接收 token 引用、配置版本与写入时间 / 错误、乐观锁 `version` |
 | `news_briefings` | 早报：日期、来源（trendradar / agent）、标题、正文（Markdown，≤ 200 KB）、已收批数 / 总批数、状态（receiving / complete / failed）、方案 B 的任务 |
 | `news_feedback` | 收藏 / 不感兴趣（唯一：工作空间 + 用户 + 类型 + 链接） |
 | `agent_wakeups.source` | 增加 `news`（方案 B 的唤醒） |

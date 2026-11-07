@@ -101,5 +101,11 @@ RSS 地址、大模型接口（LiteLLM）、推送渠道（各 Webhook、api.tel
 | MCP | `search_news`、`get_latest_news`、`get_system_status` 直接读同一个输出卷；结果有缓存（改关键词后 `get_trending_topics` 不会马上变），所以“改关键词后条目随之变化”的验收看下一次运行的早报 |
 | LiteLLM | 1.82.6 每次启动会去 `raw.githubusercontent.com` 取模型价格表：compose 里设 `LITELLM_LOCAL_MODEL_COST_MAP=True` 后不再访问 |
 | 推送标记 | 工作台经 `send_notification` 推的消息标题以“【工作台】”开头，推回接收地址时不入库 |
+| 时区 | MCP 用容器本地时间（`datetime.now()`）算“今天”，`get_latest_news`、`get_latest_rss` 没有日期参数；抓取容器按配置的 `app.timezone` 给数据分日期。容器默认 UTC 时，北京时间 0~8 点 MCP 找的是“昨天”的文件（实测 `未找到 2026-11-07 的 news 数据`，而数据在 `2026-11-08.db`）。上游 compose 给两个容器都设 `TZ=Asia/Shanghai`；本项目改为部署级设置 `.env` 的 `TRENDRADAR_TZ`（两个容器的 `TZ` 与工作台的 `NEWS_TIMEZONE` 共用），网页上只读 |
+| `search_news` | 有命中时结果在 `data`、RSS 在 `rss`；热榜没有命中时直接返回 `{"results": [], "message": "未找到匹配的新闻…"}`，即使 `include_rss=true` 也不带 RSS。所以工作台的搜索与 `news_search` 工具另用 `search_rss`（结果在 `data`）查 RSS |
+| `send_notification` | 每次调用都重新读配置文件：网页保存设置后马上测试推送，用的就是新的渠道（实测改 ntfy 的 topic 后推到新 topic） |
+| 推送去重 | 同一个推送时间段一天只推一次（`今天已推送过，跳过`），记录在输出卷里；所以验收在全新的输出卷上跑，“改关键词后”的那次用单独的输出卷 |
 
-CI（`ci-infra` 的 `news` job，`tests/e2e/news_acceptance.py`）在 Compose 全栈上重复这些步骤并验证入库、通知、页面接口、智能体工具与“改关键词后下一次运行跟着变”。
+CI（`ci-infra` 的 `news` job）在 Compose 全栈上重复这些步骤：`tests/e2e/news_acceptance.py` 验证入库、通知、页面接口、
+智能体工具与“改关键词后下一次运行跟着变”，`tests/e2e/news_browser.cjs` 验证设置页、测试推送、早报页各标签、收藏与不感兴趣、
+首页面板、手机宽度与 viewer 只读。两个脚本 2026-11-08 在本机 Compose 全栈（真实 TrendRadar 6.11.0 / MCP 4.1.1）上全部通过。

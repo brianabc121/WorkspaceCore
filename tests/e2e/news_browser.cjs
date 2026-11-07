@@ -179,8 +179,9 @@ const item = (scope, title) => scope.getByRole('listitem', { name: title, exact:
   const notes = await api(page, workspace, 'GET', '/api/v1/notifications')
   const note = notes.body.items.find((n) => n.title === '今日早报已送达')
   check(note, 'owner 应收到“今日早报已送达”')
-  const latest = (await api(page, workspace, 'GET', '/api/v1/news/briefings?limit=1')).body.items[0]
-  check(latest.status === 'complete' && latest.parts === 2, `早报应拼成完整的一份：${JSON.stringify(latest)}`)
+  const latestId = (await api(page, workspace, 'GET', '/api/v1/news/briefings?limit=1')).body.items[0].id
+  const latest = (await api(page, workspace, 'GET', `/api/v1/news/briefings/${latestId}`)).body
+  check(latest.status === 'complete' && latest.parts === 2 && latest.total_parts === 2, `早报应拼成完整的一份：${JSON.stringify(latest).slice(0, 300)}`)
   step('TrendRadar 推来的两批拼成一份完整早报，owner 收到通知')
 
   // ---------------------------------------------------------------- 早报页：今天

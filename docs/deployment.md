@@ -974,6 +974,7 @@ AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendra
 | `TRENDRADAR_MCP_URL` | 空 | 留空表示没有部署：设置页显示“未部署”，智能体看不到 `news_*` 工具 |
 | `TRENDRADAR_CRON` | `*/30 * * * *` | 定时运行；推送时间以半小时为单位，每个时间段里正好有一次运行。只有验收时改成每分钟 |
 | `NEWS_ALLOWED_HOSTS` | 空 | 设置页填的地址解析到内网时只允许这些主机名；一般留空 |
+| `TRENDRADAR_TZ` | `Asia/Shanghai` | 早报的时区：两个 TrendRadar 容器的 `TZ` 与工作台的 `NEWS_TIMEZONE`。TrendRadar 的查询服务按容器时区算“今天”，所以只在部署时设置，网页上只读；改了要重新 `make up` 与 `make trendradar-up` |
 
 ### 23.4 日常
 
