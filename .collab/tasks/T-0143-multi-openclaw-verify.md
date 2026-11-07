@@ -33,3 +33,4 @@ updated: 2026-11-07
 - 2026-11-07 03:23 UTC · claude · 人类 2026-11-07 在对话中指派：多实例服务器方案按决定全部落实（D5、D6 不考虑旧部署，其余按推荐）。
 - 2026-11-07 03:25 UTC · claude · 开始任务
 - 2026-11-07 03:25 UTC · claude · 本地 Docker（cgroup v1）实测：boot_id、cgroup v1 的 CPU / 内存 / 进程数、项目网络里只看到自己的网卡、回环隔离、共用网络命名空间与各挂各的 hosts 文件都成立；写进核验记录第 2 节。cgroup v2、真实 OpenClaw 在项目网络里的行为、隧道、两个实例共存、空闲占用留给 CI（T-0148），见第 3 节。
+- 2026-11-07 04:08 UTC · claude · 实施 T-0145 时补测（核验记录 2.1、2.2 节）：主容器崩溃后加入它网络命名空间的容器会断网（docker compose restart 会一起重启，崩溃不会），所以改为每个实例一个只运行 sleep 的 net 服务持有命名空间，OpenClaw、隧道、取图代理都加入它（验收标准第一条的 service:openclaw 改为 service:net）；compose run --no-deps 要先 up -d net；host-report.mjs 在锁定镜像里读 cgroup v1 的值与宿主机 HMAC 一致。还差：cgroup v2、真实 OpenClaw 在 net 命名空间里的 IM / MCP / 隧道、两个实例共存与空闲占用——本 PR 的 CI（agents 场景 19、SSH 部署验收）先测一部分，其余在 T-0148。

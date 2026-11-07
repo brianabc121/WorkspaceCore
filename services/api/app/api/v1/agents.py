@@ -38,6 +38,8 @@ from app.schemas.agents import (
     AgentInstanceOut,
     AgentInstancePage,
     AgentInstanceUpdate,
+    AgentLimits,
+    AgentLimitsPut,
     AgentOpsActionOut,
     AgentOpsRun,
     AgentOpsState,
@@ -177,8 +179,8 @@ async def update_agent_instance(
 @router.get(
     "/agents/host-summary",
     summary="各实例服务器状态的小指示（admin）",
-    description="CPU、内存、磁盘的当前使用率与正在提醒的告警；"
-    "没上报过的实例各项为 null（T-0113）。",
+    description="所在服务器整机的 CPU、内存、磁盘使用率与告警，"
+    "以及这个智能体自己的 CPU、内存与告警；没上报过的实例各项为 null（T-0113、T-0146）。",
     responses=_read_errors,
 )
 async def host_summary(
@@ -192,8 +194,9 @@ async def host_summary(
 @router.get(
     "/agents/instances/{instance_id}/host",
     summary="实例的服务器状态（admin）",
-    description="当前值（超过 3 分钟没上报为 stale）与每小时的平均、峰值（24h / 7d / 30d）；"
-    "数值是整台服务器的（容器用 host 网络读宿主机的 /proc，T-0113）。",
+    description="所在服务器整机的当前值（超过 3 分钟没上报为 stale）与每小时的平均、峰值"
+    "（24h / 7d / 30d），以及这个智能体自己容器的当前值与趋势（T-0113、T-0146）。"
+    "整机网速是这台服务器上各实例之和（每个实例有自己的网卡）。",
     responses=_read_errors,
 )
 async def host_status(
@@ -235,6 +238,21 @@ async def put_im_media(
     access: Admin, request: Request, service: Service, instance_id: UUID, body: ProjectAdminPut
 ) -> ProjectAdminOut:
     return await service.set_im_media(access, instance_id, body, client_ip=_ip(request, service))
+
+
+@router.put(
+    "/agents/instances/{instance_id}/limits",
+    summary="设置实例的资源上限（admin，乐观并发）",
+    description="OpenClaw 容器的内存（MiB）与 CPU（核）上限，null 表示不限制（默认，"
+    "docs/v2/MULTI_OPENCLAW_PLAN.md 第 3.3 节 D2）。写进接入包的 compose.yaml，"
+    "重新部署这个实例后生效。每次修改都写审计（T-0145）。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def put_limits(
+    access: Admin, request: Request, service: Service, instance_id: UUID, body: AgentLimitsPut
+) -> AgentLimits:
+    return await service.set_limits(access, instance_id, body, client_ip=_ip(request, service))
 
 
 @router.put(

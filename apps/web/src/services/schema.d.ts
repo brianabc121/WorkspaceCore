@@ -190,7 +190,7 @@ export interface paths {
         };
         /**
          * 各实例服务器状态的小指示（admin）
-         * @description CPU、内存、磁盘的当前使用率与正在提醒的告警；没上报过的实例各项为 null（T-0113）。
+         * @description 所在服务器整机的 CPU、内存、磁盘使用率与告警，以及这个智能体自己的 CPU、内存与告警；没上报过的实例各项为 null（T-0113、T-0146）。
          */
         get: operations["host_summary"];
         put?: never;
@@ -323,7 +323,7 @@ export interface paths {
         };
         /**
          * 实例的服务器状态（admin）
-         * @description 当前值（超过 3 分钟没上报为 stale）与每小时的平均、峰值（24h / 7d / 30d）；数值是整台服务器的（容器用 host 网络读宿主机的 /proc，T-0113）。
+         * @description 所在服务器整机的当前值（超过 3 分钟没上报为 stale）与每小时的平均、峰值（24h / 7d / 30d），以及这个智能体自己容器的当前值与趋势（T-0113、T-0146）。整机网速是这台服务器上各实例之和（每个实例有自己的网卡）。
          */
         get: operations["host_status"];
         put?: never;
@@ -347,6 +347,26 @@ export interface paths {
          * @description 打开后这个实例能经 im_send 发图片、文件、视频（默认关闭，docs/v2/AGENT_MESSAGING_PLAN.md 第 11 节 D3）；文字不受影响。每次都写审计（T-0119）。
          */
         put: operations["put_im_media"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 设置实例的资源上限（admin，乐观并发）
+         * @description OpenClaw 容器的内存（MiB）与 CPU（核）上限，null 表示不限制（默认，docs/v2/MULTI_OPENCLAW_PLAN.md 第 3.3 节 D2）。写进接入包的 compose.yaml，重新部署这个实例后生效。每次修改都写审计（T-0145）。
+         */
+        put: operations["put_limits"];
         post?: never;
         delete?: never;
         options?: never;
@@ -4001,6 +4021,8 @@ export interface components {
             im_user_id: string;
             /** Last Seen At */
             last_seen_at: string | null;
+            /** @description OpenClaw 容器的资源上限（T-0145，D2）：默认不限制，改了重新部署后生效 */
+            limits?: components["schemas"]["AgentLimits"];
             /** @description 邮件权限（T-0129）：查询邮件默认打开；发送邮件默认关闭，打开时要选收件人范围 */
             mail: components["schemas"]["AgentMailOut"];
             /**
@@ -4036,6 +4058,17 @@ export interface components {
             scope: "read" | "read_write";
             /** Secret Grants */
             secret_grants: components["schemas"]["SecretGrantOut"][];
+            /**
+             * Server Id
+             * @description 所在的服务器（T-0144）：按上报的服务器指纹自动识别，或管理员指定
+             */
+            server_id?: string | null;
+            /**
+             * Server Manual
+             * @description 管理员手动指定过所在服务器
+             * @default false
+             */
+            server_manual: boolean;
             /**
              * Status
              * @description pending 待接入；online / offline 以 OpenIM 上下线回调为准；disabled 已停用
@@ -4118,6 +4151,98 @@ export interface components {
             weekly: components["schemas"]["AgentWeek"][];
             /** Writes Enabled */
             writes_enabled: boolean;
+        };
+        /** AgentLimits */
+        AgentLimits: {
+            /**
+             * Cpus
+             * @description CPU 上限（核，可以是小数）；null 表示不限制
+             */
+            cpus: number | null;
+            /**
+             * Mem Limit Mb
+             * @description 内存上限（MiB）；null 表示不限制
+             */
+            mem_limit_mb: number | null;
+        };
+        /**
+         * AgentLimitsPut
+         * @description 设置资源上限（owner / admin）。写进接入包的 compose.yaml，重新部署这个实例后生效。
+         */
+        AgentLimitsPut: {
+            /** Cpus */
+            cpus: number | null;
+            /** Mem Limit Mb */
+            mem_limit_mb: number | null;
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求带上读取时的版本
+             */
+            version: number;
+        };
+        /**
+         * AgentLoad
+         * @description 这个智能体（自己的 OpenClaw 容器）的当前用量。
+         */
+        AgentLoad: {
+            /**
+             * Available
+             * @description 读得到 cgroup；false 时界面显示“无法获取”
+             */
+            available: boolean;
+            /**
+             * Cpu Cores
+             * @description 占用几个核（两次上报之间的平均）
+             */
+            cpu_cores: number | null;
+            /**
+             * Cpu Percent
+             * @description 占整台服务器 CPU 的百分比
+             */
+            cpu_percent: number | null;
+            /**
+             * Data Bytes
+             * @description 数据目录（会话、记忆、插件）大小，每 10 分钟更新
+             */
+            data_bytes: number | null;
+            /** Data Truncated */
+            data_truncated: boolean;
+            /**
+             * Mem Bytes
+             * @description 内存已用（不含可回收的缓存）
+             */
+            mem_bytes: number | null;
+            /**
+             * Mem Limit
+             * @description 内存上限；没设上限时为 null（界面显示 / 整机总量）
+             */
+            mem_limit: number | null;
+            /**
+             * Mem Total
+             * @description 整台服务器的内存总量
+             */
+            mem_total: number | null;
+            /** Pids */
+            pids: number | null;
+            /**
+             * Reported At
+             * Format: date-time
+             */
+            reported_at: string;
+            /**
+             * Restarts 1H
+             * @description 最近一小时容器重启了几次
+             */
+            restarts_1h: number;
+            /** Rx Rate */
+            rx_rate: number | null;
+            /**
+             * Stale
+             * @description 超过 3 分钟没有上报
+             */
+            stale: boolean;
+            /** Tx Rate */
+            tx_rate: number | null;
         };
         /** AgentMailAccountRef */
         AgentMailAccountRef: {
@@ -4331,6 +4456,41 @@ export interface components {
             reason: ("not_deployed" | "key_missing") | null;
             /** @description 进行中的动作（同一实例同时只有一个） */
             running: components["schemas"]["AgentOpsActionOut"] | null;
+        };
+        /**
+         * AgentPoint
+         * @description 这个智能体每小时一个点：平均与峰值。
+         */
+        AgentPoint: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Cores Avg */
+            cores_avg: number | null;
+            /**
+             * Cpu Avg
+             * @description 占整台服务器 CPU 的百分比
+             */
+            cpu_avg: number | null;
+            /** Cpu Max */
+            cpu_max: number | null;
+            /**
+             * Mem Avg
+             * @description 内存已用（字节）
+             */
+            mem_avg: number | null;
+            /** Mem Max */
+            mem_max: number | null;
+            /** Rx Avg */
+            rx_avg: number | null;
+            /** Rx Max */
+            rx_max: number | null;
+            /** Tx Avg */
+            tx_avg: number | null;
+            /** Tx Max */
+            tx_max: number | null;
         };
         /** AgentProjectOut */
         AgentProjectOut: {
@@ -5822,6 +5982,35 @@ export interface components {
             /** Body */
             body: string;
         };
+        /**
+         * ContainerIn
+         * @description 这个实例自己容器的 cgroup（v2 或 v1）与数据目录大小。
+         */
+        ContainerIn: {
+            /**
+             * Cpu Usec
+             * @description CPU 用量累计（微秒）；容器重启后从 0 开始
+             */
+            cpu_usec: number | null;
+            /**
+             * Data Bytes
+             * @description 数据目录（state/）大小；每 10 分钟报一次，其他时候为 null
+             */
+            data_bytes?: number | null;
+            /**
+             * Data Truncated
+             * @description 文件太多，只累加了前 20 万个
+             * @default false
+             */
+            data_truncated: boolean;
+            /**
+             * Mem Bytes
+             * @description 内存已用（不含可回收的文件缓存）
+             */
+            mem_bytes: number | null;
+            /** Pids */
+            pids: number | null;
+        };
         /** CpuIn */
         CpuIn: {
             /** Cores */
@@ -6275,7 +6464,7 @@ export interface components {
             mem_available: number | null;
             /**
              * Mem Limit
-             * @description 容器的内存上限；有值时界面标注“受容器限制”
+             * @description 整台服务器恒为 null（T-0146 起）；每个智能体自己的上限见 agent.mem_limit
              */
             mem_limit: number | null;
             /** Mem Total */
@@ -6290,7 +6479,7 @@ export interface components {
             root_disk: components["schemas"]["DiskOut"] | null;
             /**
              * Rx Rate
-             * @description 下载速率（字节 / 秒）
+             * @description 下载速率（字节 / 秒）：这台服务器上各实例之和（每个实例有自己的网卡）
              */
             rx_rate: number | null;
             /**
@@ -6304,7 +6493,7 @@ export interface components {
             swap_used: number | null;
             /**
              * Tx Rate
-             * @description 上传速率（字节 / 秒）
+             * @description 上传速率（字节 / 秒）：各实例之和
              */
             tx_rate: number | null;
             /** Uptime Seconds */
@@ -6359,9 +6548,17 @@ export interface components {
         };
         /** HostReport */
         HostReport: {
+            /** @description 读不到 cgroup 时缺省：这个智能体的负载显示“无法获取” */
+            container?: components["schemas"]["ContainerIn"] | null;
             cpu: components["schemas"]["CpuIn"];
             disks: components["schemas"]["DisksIn"];
+            /**
+             * Host Key
+             * @description 服务器指纹：boot_id 的 HMAC-SHA256（盐来自接入包），同一台服务器上的实例相同
+             */
+            host_key?: string | null;
             memory: components["schemas"]["MemoryIn"];
+            /** @description 这个实例自己网卡的收发累计字节 */
             network: components["schemas"]["NetworkIn"] | null;
             /** Uptime Seconds */
             uptime_seconds: number | null;
@@ -6377,18 +6574,34 @@ export interface components {
         };
         /** HostStatusOut */
         HostStatusOut: {
+            /** @description 这个智能体自己的用量 */
+            agent: components["schemas"]["AgentLoad"] | null;
+            /**
+             * Agent Alerts
+             * @description 这个智能体正在提醒的告警
+             */
+            agent_alerts: ("mem_near_limit" | "restarting" | "cpu_hog")[];
+            /**
+             * Agent Points
+             * @description 这个智能体的趋势
+             */
+            agent_points: components["schemas"]["AgentPoint"][];
             /**
              * Alerts
-             * @description 正在提醒的告警
+             * @description 整台服务器正在提醒的告警
              */
             alerts: ("disk_low" | "memory_low" | "load_high" | "not_reporting")[];
+            /** @description 整台服务器的当前值 */
             current: components["schemas"]["HostCurrent"] | null;
             /**
              * Instance Id
              * Format: uuid
              */
             instance_id: string;
-            /** Points */
+            /**
+             * Points
+             * @description 整台服务器的趋势
+             */
             points: components["schemas"]["HostPoint"][];
             /**
              * Range
@@ -6400,12 +6613,28 @@ export interface components {
              * @description 收到过上报；没有时界面提示“重新部署后可用”
              */
             reported: boolean;
+            /** @description 所在的服务器（自动识别或管理员指定） */
+            server: components["schemas"]["ServerRef"] | null;
         };
         /** HostSummaryItem */
         HostSummaryItem: {
+            /** Agent Alerts */
+            agent_alerts: ("mem_near_limit" | "restarting" | "cpu_hog")[];
+            /**
+             * Agent Cpu Percent
+             * @description 这个智能体占整台服务器 CPU 的百分比
+             */
+            agent_cpu_percent: number | null;
+            /** Agent Mem Bytes */
+            agent_mem_bytes: number | null;
+            /** Agent Mem Limit */
+            agent_mem_limit: number | null;
             /** Alerts */
             alerts: ("disk_low" | "memory_low" | "load_high" | "not_reporting")[];
-            /** Cpu Percent */
+            /**
+             * Cpu Percent
+             * @description 整台服务器的 CPU 使用率
+             */
             cpu_percent: number | null;
             /**
              * Disk Used Percent
@@ -6417,10 +6646,15 @@ export interface components {
              * Format: uuid
              */
             instance_id: string;
-            /** Mem Used Percent */
+            /**
+             * Mem Used Percent
+             * @description 整台服务器的内存已用百分比
+             */
             mem_used_percent: number | null;
             /** Reported At */
             reported_at: string | null;
+            /** Server Id */
+            server_id: string | null;
             /** Stale */
             stale: boolean;
         };
@@ -10635,6 +10869,16 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** ServerRef */
+        ServerRef: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+        };
         /**
          * ServiceHealthConfig
          * @description Sprint 5：组件调用 GET /operations/services（Sprint 5 契约第 7.2 节）。
@@ -13207,6 +13451,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectAdminOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_limits: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentLimitsPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLimits"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

@@ -12,10 +12,11 @@
 远端命令里的路径都经过 `shlex.quote`；密码只从标准输入传给 `sudo -S`，不出现在命令行里。
 """
 
+import re
 import shlex
 from importlib import resources
 
-from app.agent_bundle import OPENCLAW_VERSION, PLUGIN_VERSION
+from app.agent_bundle import OPENCLAW_VERSION, PLUGIN_VERSION, short_id
 
 # 与接入包 compose.yaml 锁定的镜像相同（测试核对）
 OPENCLAW_IMAGE = (
@@ -28,11 +29,13 @@ PLUGIN_PACKAGE = f"{PLUGIN_NAME}@{PLUGIN_VERSION}"
 PLUGIN_SHA256 = "3d10dca0edcba0ecdb0dc915e7cf1ddf5a8453165de13dec76bbe5ef85607643"
 # 官方镜像里运行 OpenClaw 的用户（node）
 OPENCLAW_UID = 1000
-# 接入包在登录账号主目录下的位置；安装用的临时文件在另一个目录，用完删除
-INSTALL_DIR_NAME = "myworkspace-openclaw"
+# 接入包在登录账号主目录下的位置：每个实例一个子目录 ~/myworkspace-openclaw/<实例短号>
+# （docs/v2/MULTI_OPENCLAW_PLAN.md 第 3.1 节）；安装用的临时文件在另一个目录，用完删除
+INSTALL_ROOT_NAME = "myworkspace-openclaw"
 STAGING_DIR_NAME = ".myworkspace-install"
-# crontab 里本工作台写入的行都带这个标记；重装时先删掉带标记的行再写
-CRON_MARKER = "# myworkspace-openclaw"
+# crontab 里本工作台为一个实例写入的行，行尾都是这个实例的标记；重装时只删行尾正好是自己标记的行
+CRON_TAG = "# mw-openclaw:"
+_INSTALL_DIR = re.compile(rf"/{INSTALL_ROOT_NAME}/[0-9a-f]{{12}}$")
 # 交给 uid 1000 的子目录（OpenClaw 的状态、取密钥程序、隧道证书）
 OWNED_DIRS = ("state", "bin", "tls")
 
@@ -74,6 +77,18 @@ def plugin_script() -> str:
 
 def q(value: str) -> str:
     return shlex.quote(value)
+
+
+def install_dir(home: str, instance_id: str) -> str:
+    return f"{home.rstrip('/')}/{INSTALL_ROOT_NAME}/{short_id(instance_id)}"
+
+
+def staging_dir(home: str, instance_id: str) -> str:
+    return f"{home.rstrip('/')}/{STAGING_DIR_NAME}-{short_id(instance_id)}"
+
+
+def cron_marker(instance_id: str) -> str:
+    return CRON_TAG + short_id(instance_id)
 
 
 def authorize_key_command(public_key: str) -> str:
@@ -128,31 +143,46 @@ def compose_command(directory: str, *args: str) -> str:
     return f"cd {q(directory)} && docker compose " + " ".join(args)
 
 
-def cron_lines(directory: str) -> list[str]:
+def cron_lines(directory: str, instance_id: str) -> list[str]:
     """每 10 分钟取一次轮换后的模型密钥；每周一重启换上新的 IM 令牌；
     每分钟上报一次 token 用量（时间轴，T-0104）与服务器状态（T-0113）、
-    领取到期的唤醒（T-0121）与终止令（T-0126）。见接入包 CHECKLIST.md。"""
+    领取到期的唤醒（T-0121）与终止令（T-0126）。见接入包 CHECKLIST.md。
+
+    每行末尾是这个实例的标记；同一台服务器上的其他实例各有自己的标记。"""
     cd = f"cd {q(directory)}"
+    marker = cron_marker(instance_id)
     return [
         f"*/10 * * * * {cd} && docker compose exec -T openclaw node openclaw.mjs secrets reload"
-        f" --json >/dev/null 2>&1 {CRON_MARKER}",
+        f" --json >/dev/null 2>&1 {marker}",
         f"* * * * * {cd} && docker compose exec -T openclaw node"
-        f" /opt/myworkspace/bin/usage-report.mjs >/dev/null 2>&1 {CRON_MARKER}",
+        f" /opt/myworkspace/bin/usage-report.mjs >/dev/null 2>&1 {marker}",
         f"* * * * * {cd} && docker compose exec -T openclaw node"
-        f" /opt/myworkspace/bin/host-report.mjs >/dev/null 2>&1 {CRON_MARKER}",
+        f" /opt/myworkspace/bin/host-report.mjs >/dev/null 2>&1 {marker}",
         f"* * * * * {cd} && docker compose exec -T openclaw node"
-        f" /opt/myworkspace/bin/wakeup.mjs >/dev/null 2>&1 {CRON_MARKER}",
+        f" /opt/myworkspace/bin/wakeup.mjs >/dev/null 2>&1 {marker}",
         f"* * * * * {cd} && docker compose exec -T openclaw node"
-        f" /opt/myworkspace/bin/stop-runs.mjs >/dev/null 2>&1 {CRON_MARKER}",
-        f"17 4 * * 1 {cd} && docker compose restart openclaw >/dev/null 2>&1 {CRON_MARKER}",
+        f" /opt/myworkspace/bin/stop-runs.mjs >/dev/null 2>&1 {marker}",
+        f"{restart_schedule(instance_id)} {cd} && docker compose restart openclaw"
+        f" >/dev/null 2>&1 {marker}",
     ]
 
 
-def schedule_command(directory: str) -> str:
-    """替换当前账号 crontab 里带标记的行（没有 crontab 时新建）。"""
-    lines = " ".join(q(line) for line in cron_lines(directory))
+def restart_schedule(instance_id: str) -> str:
+    """每周一凌晨重启的时间：按实例短号错开（3:00 ~ 5:59），同一台服务器上的实例不同时冷启动。"""
+    value = int(short_id(instance_id), 16)
+    return f"{value % 60} {3 + (value // 60) % 3} * * 1"
+
+
+def _not_mine(instance_id: str) -> str:
+    """去掉行尾正好是这个实例标记的行（标记里只有字母、数字、#、冒号和空格，不需要转义）。"""
+    return f"grep -v -- {q(cron_marker(instance_id) + '$')}"
+
+
+def schedule_command(directory: str, instance_id: str) -> str:
+    """替换当前账号 crontab 里这个实例的行（没有 crontab 时新建），其他行保留。"""
+    lines = " ".join(q(line) for line in cron_lines(directory, instance_id))
     return (
-        f"{{ crontab -l 2>/dev/null | grep -vF {q(CRON_MARKER)}; printf '%s\\n' {lines}; }}"
+        f"{{ crontab -l 2>/dev/null | {_not_mine(instance_id)}; printf '%s\\n' {lines}; }}"
         " | crontab -"
     )
 
@@ -168,9 +198,9 @@ def reflection_command(directory: str, tries: int, wait: int) -> str:
     )
 
 
-def unschedule_command() -> str:
-    """删掉当前账号 crontab 里带标记的行，其他行保留。"""
-    return f"crontab -l 2>/dev/null | grep -vF {q(CRON_MARKER)} | crontab -"
+def unschedule_command(instance_id: str) -> str:
+    """删掉当前账号 crontab 里这个实例的行，其他行（包括同一台服务器上其他实例的）保留。"""
+    return f"crontab -l 2>/dev/null | {_not_mine(instance_id)} | crontab -"
 
 
 # 按字段找这把公钥：awk 默认按连续的空格 / 制表符分字段，行首带选项、两字段之间是制表符或多个空格、
@@ -195,7 +225,11 @@ def revoke_key_command(public_key: str) -> str:
 
 
 def remove_dir_command(directory: str) -> str:
-    """删除接入包目录（只接受 <主目录>/myworkspace-openclaw 这一种路径）。"""
-    if not directory.endswith("/" + INSTALL_DIR_NAME):
+    """删除一个实例的接入包目录（只接受 <主目录>/myworkspace-openclaw/<实例短号> 这一种路径）。
+
+    删完后上一级目录空了就一起删掉（rmdir 只删空目录，别的实例还在时什么也不做）。
+    """
+    if not _INSTALL_DIR.search(directory) or "/../" in directory:
         raise ValueError("只能删除接入包目录")
-    return f"rm -rf -- {q(directory)}"
+    parent = directory.rsplit("/", 1)[0]
+    return f"rm -rf -- {q(directory)} && {{ rmdir -- {q(parent)} 2>/dev/null || true; }}"

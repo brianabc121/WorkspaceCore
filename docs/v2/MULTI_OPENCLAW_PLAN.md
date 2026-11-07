@@ -45,7 +45,7 @@
 
 | 项 | 新的做法 |
 |---|---|
-| 目录 | `~/myworkspace-openclaw/<实例短号>/`（实例 ID 前 8 位，例如 `~/myworkspace-openclaw/d06d9d48/`），里面结构不变（`bin/`、`state/`、`myworkspace.env`、`compose.yaml`） |
+| 目录 | `~/myworkspace-openclaw/<实例短号>/`（实例 ID 去掉连字符的前 12 位，例如 `~/myworkspace-openclaw/d06d9d481234/`），里面结构不变（`bin/`、`state/`、`myworkspace.env`、`compose.yaml`） |
 | Compose 项目名 | `myworkspace-openclaw-<实例短号>` |
 | 容器名 | 由 Compose 按项目名生成，不写死 |
 | 定时任务标记 | `# mw-openclaw:<实例短号>`；写入、删除只匹配自己这一行的标记（见 3.4） |
@@ -59,7 +59,9 @@
 **推荐 A：每个实例自己的网络命名空间。**
 
 - OpenClaw 容器用 Compose 默认的项目网络（bridge），不再用 `network_mode: host`；
-- 外网模式的本机隧道、内网模式的取图代理用 `network_mode: "service:openclaw"`，和 OpenClaw 共用这个实例的网络命名空间。
+- 外网模式的本机隧道、内网模式的取图代理和 OpenClaw 共用这个实例的网络命名空间。
+  命名空间由一个只运行 `sleep` 的 `net` 服务持有（同一个锁定镜像，不另外下载），OpenClaw、隧道、取图代理都用 `network_mode: "service:net"` 加入：
+  实测主容器崩溃后加入它的容器会断网（核验记录第 2.1 节），所以不让经常重启的 OpenClaw 当主容器；`net` 在 Compose 自己的项目网络上。
   所以它们仍然监听 `127.0.0.1:18443`，接入包里的地址都不用改；
 - 每个实例的回环地址只属于它自己：端口不会冲突，一个实例也连不到另一个实例的网关和隧道（第 11 节）；
 - 共用网络命名空间的容器也共用 `/etc/hosts`。OpenClaw 要把工作台外网域名指向 `127.0.0.1`（经本机隧道），隧道自己却要连真实地址。
@@ -93,6 +95,7 @@
 
 - 每行末尾的标记带实例短号：`# mw-openclaw:<实例短号>`；
 - 写入时只删“行尾正好是这个标记”的旧行（用 `grep -v` 匹配行尾，不再用子串匹配），不会误删别的实例；
+- 每周一的重启按实例短号错开在 3:00 ~ 5:59，同一台服务器上的实例不同时冷启动；
 - 不再使用旧标记 `# myworkspace-openclaw`（还没有部署过，不用兼容）。
 
 ## 4. 部署（全部在页面上完成）
@@ -129,7 +132,7 @@
 **推荐**：自动识别，管理员可以改。
 
 - 服务器状态上报带上 `boot_id` 的哈希。`boot_id` 来自 `/proc/sys/kernel/random/boot_id`：同一个内核相同，各容器读到的都一样，机器重启后会变；
-- 哈希用工作空间密钥做 HMAC，不报原值；
+- 哈希是 HMAC-SHA256，盐按工作空间固定（接入包的 `MYWS_HOST_SALT`），不报原值（`boot_id` 是 122 位随机数，哈希不能反推，不同工作空间对不上）；
 - 两个实例的哈希相同，就是同一台服务器（同一时刻同一个内核）。没归属的实例会自动归到这台服务器，或者新建一个“手动部署的服务器”；
 - 机器重启后，这台机器上所有实例的哈希一起变。工作台按“同一台服务器上的实例一起换了新哈希”来跟着更新，不会拆成两台；
 - 管理员可以在页面上手动改归属。手动改过的以手动为准。
@@ -179,7 +182,7 @@
 | 表 | 内容 |
 |---|---|
 | `agent_servers`（新） | 工作空间、名称、地址、端口、账号、主机公钥与指纹、专用密钥（引用密钥库）、`host_key` 哈希、版本号、时间 |
-| `agent_instances`（加列） | `server_id`（可空，删服务器时置空）、`server_assigned`（手动指定 / 自动识别）、`mem_limit_mb`、`cpus` |
+| `agent_instances`（加列） | `server_id`（可空，删服务器时置空）、`server_manual`（手动指定 / 自动识别）、`mem_limit_mb`、`cpus` |
 | `agent_ssh_targets` → `agent_deployments`（改名改结构） | 每个实例在服务器上的部署：`instance_id`、`server_id`、目录、项目名、部署时间、接入包版本。密钥、指纹从这里挪到 `agent_servers` |
 | `agent_ssh_jobs` | 加 `server_id`。准备服务器、吊销密钥是服务器级任务，部署、卸载是实例级任务 |
 | `agent_server_samples`（新） | 服务器 + 分钟唯一：整机的 CPU、负载、内存、Swap、两个分区、网速。保留 30 天 |
@@ -275,7 +278,7 @@
 
 | 项 | 做法 |
 |---|---|
-| OpenClaw 2026.9.36 在项目网络（bridge）里运行 | IM 长连接、MCP、密钥领取、用量上报、`wakeup.mjs` / `stop-runs.mjs` 调网关都正常；隧道和取图代理用 `service:openclaw` 共用网络命名空间后，`127.0.0.1:18443` 照常可用 |
+| OpenClaw 2026.9.36 在项目网络（bridge）里运行 | IM 长连接、MCP、密钥领取、用量上报、`wakeup.mjs` / `stop-runs.mjs` 调网关都正常；隧道和取图代理与 OpenClaw 一起加入 `net` 服务的网络命名空间后，`127.0.0.1:18443` 照常可用 |
 | 两个实例在同一台机器上 | 两个 Compose 项目同时运行、互不影响；卸载一个，另一个不受影响；一个实例的容器连不到另一个的回环端口 |
 | cgroup 指标 | 锁定镜像以 `node` 用户、去掉全部 capability 运行时，能读 `cpu.stat`、`memory.current`、`memory.stat`、`pids.current`（v2）以及 v1 的对应文件；在 Ubuntu 22.04 / 24.04、Debian 12 的默认 Docker 上实测 |
 | `boot_id` | 容器里读到的与宿主机相同，两个容器相同，重启后变化 |

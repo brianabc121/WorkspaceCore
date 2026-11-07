@@ -8,6 +8,7 @@ chown、crontab（记录参数、模拟结果），所以 authorized_keys、cron
 
 import asyncio
 import hashlib
+import re
 import secrets
 import stat
 import subprocess
@@ -170,7 +171,10 @@ class FakeHost:
 
     @property
     def directory(self) -> Path:
-        return self.home / prov.INSTALL_DIR_NAME
+        """这个实例的接入包目录：~/myworkspace-openclaw/<实例短号>（测试里一台服务器只部署一个）。"""
+        root = self.home / prov.INSTALL_ROOT_NAME
+        found = sorted(root.iterdir()) if root.is_dir() else []
+        return found[0] if found else root / "not-installed"
 
     def authorized(self) -> list[str]:
         path = self.home / ".ssh" / "authorized_keys"
@@ -433,7 +437,12 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     assert "sudo true" in calls
     assert "install-docker user=deploy" in calls
     assert (host.state / "install-docker.sh").read_text() == prov.script("install-docker.sh")
-    assert not (host.home / prov.STAGING_DIR_NAME).exists(), "安装脚本用完要删除"
+    assert not [p for p in host.home.iterdir() if p.name.startswith(prov.STAGING_DIR_NAME)], (
+        "安装脚本用完要删除"
+    )
+    # 每个实例一个目录：~/myworkspace-openclaw/<实例 ID 去掉连字符的前 12 位>
+    assert re.fullmatch(r"[0-9a-f]{12}", host.directory.name)
+    assert host.directory.parent == host.home / "myworkspace-openclaw"
     # uid 既不是 0 也不是 1000：用锁定镜像里的 chown 把 state/、bin/、tls/ 交给 uid 1000
     handover = [c for c in calls if c.startswith("docker run") and "1000:1000" in c]
     assert len(handover) == 1
@@ -443,6 +452,10 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     assert "docker compose pull --quiet" in calls
     assert "docker compose run --rm --no-deps -T --entrypoint sh openclaw -s" in calls
     assert "docker compose up -d" in calls
+    # 安装插件前先起这个实例的网络（net 服务）：插件要联网下载依赖
+    assert calls.index("docker compose up -d net") < calls.index(
+        "docker compose run --rm --no-deps -T --entrypoint sh openclaw -s"
+    )
     # 每晚复盘（T-0100）：OpenClaw 上线后用接入包里的脚本建定时任务
     assert any(
         "docker compose exec -T openclaw node openclaw.mjs automations add" in c for c in calls
@@ -473,13 +486,15 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     for name, mode in files.items():
         assert stat.S_IMODE((host.directory / name).stat().st_mode) == mode, name
     assert stat.S_IMODE(host.directory.stat().st_mode) == 0o700
-    assert "tunnel:" in (host.directory / "compose.yaml").read_text()
+    compose = (host.directory / "compose.yaml").read_text()
+    assert "tunnel:" in compose and f"name: myworkspace-openclaw-{host.directory.name}" in compose
+    assert "network_mode: host" not in compose
 
     # crontab：六行都带标记（每 10 分钟取密钥、每分钟上报用量与服务器状态、
     # 每分钟领取唤醒（T-0121）与终止令（T-0126）、每周一重启）
     cron = (host.state / "crontab").read_text().splitlines()
     assert len(cron) == 6
-    assert all(line.endswith(prov.CRON_MARKER) for line in cron)
+    assert all(line.endswith(f"# mw-openclaw:{host.directory.name}") for line in cron)
     assert "secrets reload --json" in cron[0]
     assert cron[1].startswith("* * * * * ")
     assert "exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs" in cron[1]
@@ -555,7 +570,7 @@ async def test_reinstall_without_password_reuses_key(owner: Owner, tmp_path: Pat
     assert len(handover) == 2
     assert handover[0] < reclaim[0] < handover[1]
     cron = (host.state / "crontab").read_text().splitlines()
-    assert len(cron) == len(prov.cron_lines(str(host.directory))), "重装时替换带标记的行，不重复"
+    assert len(cron) == 6, "重装时替换这个实例的行，不重复"
     # 每晚复盘的定时任务：同名的已有就更新，不重复建（T-0100）
     reflection = next(s for s in second["job"]["steps"] if s["key"] == "reflection")
     assert reflection["status"] == "done" and "已更新" in (reflection["detail"] or "")
@@ -1079,21 +1094,76 @@ def test_parse_inspect_rejects_bad_home() -> None:
     assert info.root
 
 
-def test_remove_dir_only_accepts_the_bundle_directory() -> None:
-    with pytest.raises(ValueError):
-        prov.remove_dir_command("/home/deploy")
-    assert prov.remove_dir_command("/root/" + prov.INSTALL_DIR_NAME) == (
-        "rm -rf -- /root/myworkspace-openclaw"
+INSTANCE = "d06d9d48-1234-4abc-8def-0123456789ab"
+OTHER = "0f0f0f0f-aaaa-4bbb-8ccc-0123456789ab"
+
+
+def test_remove_dir_only_accepts_an_instance_directory() -> None:
+    for bad in (
+        "/home/deploy",
+        "/root/myworkspace-openclaw",
+        "/root/myworkspace-openclaw/../x",
+        "/root/myworkspace-openclaw/d06d9d481234/state",
+    ):
+        with pytest.raises(ValueError):
+            prov.remove_dir_command(bad)
+    directory = prov.install_dir("/root", INSTANCE)
+    assert directory == "/root/myworkspace-openclaw/d06d9d481234"
+    assert prov.remove_dir_command(directory) == (
+        "rm -rf -- /root/myworkspace-openclaw/d06d9d481234"
+        " && { rmdir -- /root/myworkspace-openclaw 2>/dev/null || true; }"
     )
 
 
 def test_commands_quote_paths() -> None:
-    directory = "/home/a b/$(x)/" + prov.INSTALL_DIR_NAME
-    assert "'/home/a b/$(x)/myworkspace-openclaw'" in prov.compose_command(directory, "up", "-d")
+    directory = prov.install_dir("/home/a b/$(x)", INSTANCE)
+    quoted = "'/home/a b/$(x)/myworkspace-openclaw/d06d9d481234'"
+    assert quoted in prov.compose_command(directory, "up", "-d")
     assert prov.reclaim_command(directory, uid=0, gid=0) is None
     assert prov.handover_command(directory, uid=prov.OPENCLAW_UID) is None
-    for line in prov.cron_lines(directory):
-        assert "'/home/a b/$(x)/myworkspace-openclaw'" in line
+    for line in prov.cron_lines(directory, INSTANCE):
+        assert quoted in line and line.endswith(" # mw-openclaw:d06d9d481234")
+    assert (
+        prov.staging_dir("/home/deploy/", INSTANCE)
+        == "/home/deploy/.myworkspace-install-d06d9d481234"
+    )
+
+
+def test_cron_only_touches_own_lines(tmp_path: Path) -> None:
+    """同一台服务器上的多个实例：重新部署、卸载只改行尾正好是自己标记的行，别的实例和用户自己的行保留。"""
+    bin_dir, state = tmp_path / "bin", tmp_path / "state"
+    bin_dir.mkdir()
+    state.mkdir()
+    (bin_dir / "crontab").write_text(_CRONTAB)
+    (bin_dir / "crontab").chmod(0o755)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "STATE": str(state)}
+    mine = prov.install_dir("/home/deploy", INSTANCE)
+    other = prov.install_dir("/home/deploy", OTHER)
+    user_line = "5 * * * * echo '# mw-openclaw:d06d9d481234 not at the end'"
+
+    def sh(command: str) -> None:
+        subprocess.run(["/bin/sh", "-c", command], env=env, check=True)  # noqa: S603
+
+    (state / "crontab").write_text(user_line + "\n")
+    sh(prov.schedule_command(other, OTHER))
+    sh(prov.schedule_command(mine, INSTANCE))
+    sh(prov.schedule_command(mine, INSTANCE))  # 重新部署：不重复
+    lines = (state / "crontab").read_text().splitlines()
+    assert lines[0] == user_line and len(lines) == 13
+    assert sum(line.endswith("# mw-openclaw:d06d9d481234") for line in lines) == 6
+    assert sum(line.endswith("# mw-openclaw:0f0f0f0faaaa") for line in lines) == 6
+    sh(prov.unschedule_command(INSTANCE))
+    lines = (state / "crontab").read_text().splitlines()
+    assert lines[0] == user_line and len(lines) == 7
+    assert all("d06d9d481234" not in line for line in lines[1:])
+
+
+def test_weekly_restart_is_staggered() -> None:
+    first, second = prov.restart_schedule(INSTANCE), prov.restart_schedule(OTHER)
+    for value in (first, second):
+        minute, hour, *rest = value.split()
+        assert 0 <= int(minute) < 60 and 3 <= int(hour) <= 5 and rest == ["*", "*", "1"]
+    assert first != second
 
 
 def test_pins_match_bundle_and_docs() -> None:

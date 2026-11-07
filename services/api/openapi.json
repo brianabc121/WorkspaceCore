@@ -333,6 +333,10 @@
             ],
             "title": "Last Seen At"
           },
+          "limits": {
+            "$ref": "#/components/schemas/AgentLimits",
+            "description": "OpenClaw 容器的资源上限（T-0145，D2）：默认不限制，改了重新部署后生效"
+          },
           "mail": {
             "$ref": "#/components/schemas/AgentMailOut",
             "description": "邮件权限（T-0129）：查询邮件默认打开；发送邮件默认关闭，打开时要选收件人范围"
@@ -402,6 +406,25 @@
             },
             "title": "Secret Grants",
             "type": "array"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "所在的服务器（T-0144）：按上报的服务器指纹自动识别，或管理员指定",
+            "title": "Server Id"
+          },
+          "server_manual": {
+            "default": false,
+            "description": "管理员手动指定过所在服务器",
+            "title": "Server Manual",
+            "type": "boolean"
           },
           "status": {
             "description": "pending 待接入；online / offline 以 OpenIM 上下线回调为准；disabled 已停用",
@@ -658,6 +681,237 @@
           "weekly"
         ],
         "title": "AgentKnowledgeOut",
+        "type": "object"
+      },
+      "AgentLimits": {
+        "properties": {
+          "cpus": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CPU 上限（核，可以是小数）；null 表示不限制",
+            "title": "Cpus"
+          },
+          "mem_limit_mb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "内存上限（MiB）；null 表示不限制",
+            "title": "Mem Limit Mb"
+          }
+        },
+        "required": [
+          "mem_limit_mb",
+          "cpus"
+        ],
+        "title": "AgentLimits",
+        "type": "object"
+      },
+      "AgentLimitsPut": {
+        "additionalProperties": false,
+        "description": "设置资源上限（owner / admin）。写进接入包的 compose.yaml，重新部署这个实例后生效。",
+        "properties": {
+          "cpus": {
+            "anyOf": [
+              {
+                "maximum": 256.0,
+                "minimum": 0.1,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpus"
+          },
+          "mem_limit_mb": {
+            "anyOf": [
+              {
+                "maximum": 1048576.0,
+                "minimum": 256.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Limit Mb"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mem_limit_mb",
+          "cpus",
+          "version"
+        ],
+        "title": "AgentLimitsPut",
+        "type": "object"
+      },
+      "AgentLoad": {
+        "description": "这个智能体（自己的 OpenClaw 容器）的当前用量。",
+        "properties": {
+          "available": {
+            "description": "读得到 cgroup；false 时界面显示“无法获取”",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "cpu_cores": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "占用几个核（两次上报之间的平均）",
+            "title": "Cpu Cores"
+          },
+          "cpu_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "占整台服务器 CPU 的百分比",
+            "title": "Cpu Percent"
+          },
+          "data_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "数据目录（会话、记忆、插件）大小，每 10 分钟更新",
+            "title": "Data Bytes"
+          },
+          "data_truncated": {
+            "title": "Data Truncated",
+            "type": "boolean"
+          },
+          "mem_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "内存已用（不含可回收的缓存）",
+            "title": "Mem Bytes"
+          },
+          "mem_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "内存上限；没设上限时为 null（界面显示 / 整机总量）",
+            "title": "Mem Limit"
+          },
+          "mem_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "整台服务器的内存总量",
+            "title": "Mem Total"
+          },
+          "pids": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pids"
+          },
+          "reported_at": {
+            "format": "date-time",
+            "title": "Reported At",
+            "type": "string"
+          },
+          "restarts_1h": {
+            "description": "最近一小时容器重启了几次",
+            "title": "Restarts 1H",
+            "type": "integer"
+          },
+          "rx_rate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rx Rate"
+          },
+          "stale": {
+            "description": "超过 3 分钟没有上报",
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "tx_rate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Rate"
+          }
+        },
+        "required": [
+          "reported_at",
+          "stale",
+          "available",
+          "cpu_cores",
+          "cpu_percent",
+          "mem_bytes",
+          "mem_limit",
+          "mem_total",
+          "pids",
+          "data_bytes",
+          "data_truncated",
+          "rx_rate",
+          "tx_rate",
+          "restarts_1h"
+        ],
+        "title": "AgentLoad",
         "type": "object"
       },
       "AgentMailAccountRef": {
@@ -1170,6 +1424,131 @@
           "items"
         ],
         "title": "AgentOpsState",
+        "type": "object"
+      },
+      "AgentPoint": {
+        "description": "这个智能体每小时一个点：平均与峰值。",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "cores_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cores Avg"
+          },
+          "cpu_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "占整台服务器 CPU 的百分比",
+            "title": "Cpu Avg"
+          },
+          "cpu_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Max"
+          },
+          "mem_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "内存已用（字节）",
+            "title": "Mem Avg"
+          },
+          "mem_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Max"
+          },
+          "rx_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rx Avg"
+          },
+          "rx_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rx Max"
+          },
+          "tx_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Avg"
+          },
+          "tx_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Max"
+          }
+        },
+        "required": [
+          "at",
+          "cpu_avg",
+          "cpu_max",
+          "cores_avg",
+          "mem_avg",
+          "mem_max",
+          "rx_avg",
+          "rx_max",
+          "tx_avg",
+          "tx_max"
+        ],
+        "title": "AgentPoint",
         "type": "object"
       },
       "AgentProjectOut": {
@@ -4801,6 +5180,80 @@
         "title": "CommentUpdate",
         "type": "object"
       },
+      "ContainerIn": {
+        "additionalProperties": false,
+        "description": "这个实例自己容器的 cgroup（v2 或 v1）与数据目录大小。",
+        "properties": {
+          "cpu_usec": {
+            "anyOf": [
+              {
+                "maximum": 4.611686018427388e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CPU 用量累计（微秒）；容器重启后从 0 开始",
+            "title": "Cpu Usec"
+          },
+          "data_bytes": {
+            "anyOf": [
+              {
+                "maximum": 7.205759403792794e+16,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "数据目录（state/）大小；每 10 分钟报一次，其他时候为 null",
+            "title": "Data Bytes"
+          },
+          "data_truncated": {
+            "default": false,
+            "description": "文件太多，只累加了前 20 万个",
+            "title": "Data Truncated",
+            "type": "boolean"
+          },
+          "mem_bytes": {
+            "anyOf": [
+              {
+                "maximum": 7.205759403792794e+16,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "内存已用（不含可回收的文件缓存）",
+            "title": "Mem Bytes"
+          },
+          "pids": {
+            "anyOf": [
+              {
+                "maximum": 4194304.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pids"
+          }
+        },
+        "required": [
+          "cpu_usec",
+          "mem_bytes",
+          "pids"
+        ],
+        "title": "ContainerIn",
+        "type": "object"
+      },
       "CpuIn": {
         "additionalProperties": false,
         "properties": {
@@ -6021,7 +6474,7 @@
                 "type": "null"
               }
             ],
-            "description": "容器的内存上限；有值时界面标注“受容器限制”",
+            "description": "整台服务器恒为 null（T-0146 起）；每个智能体自己的上限见 agent.mem_limit",
             "title": "Mem Limit"
           },
           "mem_total": {
@@ -6070,7 +6523,7 @@
                 "type": "null"
               }
             ],
-            "description": "下载速率（字节 / 秒）",
+            "description": "下载速率（字节 / 秒）：这台服务器上各实例之和（每个实例有自己的网卡）",
             "title": "Rx Rate"
           },
           "stale": {
@@ -6109,7 +6562,7 @@
                 "type": "null"
               }
             ],
-            "description": "上传速率（字节 / 秒）",
+            "description": "上传速率（字节 / 秒）：各实例之和",
             "title": "Tx Rate"
           },
           "uptime_seconds": {
@@ -6312,11 +6765,35 @@
       "HostReport": {
         "additionalProperties": false,
         "properties": {
+          "container": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContainerIn"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "读不到 cgroup 时缺省：这个智能体的负载显示“无法获取”"
+          },
           "cpu": {
             "$ref": "#/components/schemas/CpuIn"
           },
           "disks": {
             "$ref": "#/components/schemas/DisksIn"
+          },
+          "host_key": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "服务器指纹：boot_id 的 HMAC-SHA256（盐来自接入包），同一台服务器上的实例相同",
+            "title": "Host Key"
           },
           "memory": {
             "$ref": "#/components/schemas/MemoryIn"
@@ -6329,7 +6806,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "这个实例自己网卡的收发累计字节"
           },
           "uptime_seconds": {
             "anyOf": [
@@ -6372,8 +6850,40 @@
       },
       "HostStatusOut": {
         "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentLoad"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这个智能体自己的用量"
+          },
+          "agent_alerts": {
+            "description": "这个智能体正在提醒的告警",
+            "items": {
+              "enum": [
+                "mem_near_limit",
+                "restarting",
+                "cpu_hog"
+              ],
+              "type": "string"
+            },
+            "title": "Agent Alerts",
+            "type": "array"
+          },
+          "agent_points": {
+            "description": "这个智能体的趋势",
+            "items": {
+              "$ref": "#/components/schemas/AgentPoint"
+            },
+            "title": "Agent Points",
+            "type": "array"
+          },
           "alerts": {
-            "description": "正在提醒的告警",
+            "description": "整台服务器正在提醒的告警",
             "items": {
               "enum": [
                 "disk_low",
@@ -6394,7 +6904,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "整台服务器的当前值"
           },
           "instance_id": {
             "format": "uuid",
@@ -6402,6 +6913,7 @@
             "type": "string"
           },
           "points": {
+            "description": "整台服务器的趋势",
             "items": {
               "$ref": "#/components/schemas/HostPoint"
             },
@@ -6421,21 +6933,82 @@
             "description": "收到过上报；没有时界面提示“重新部署后可用”",
             "title": "Reported",
             "type": "boolean"
+          },
+          "server": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServerRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "所在的服务器（自动识别或管理员指定）"
           }
         },
         "required": [
           "instance_id",
           "reported",
+          "server",
           "current",
           "range",
           "points",
-          "alerts"
+          "alerts",
+          "agent",
+          "agent_points",
+          "agent_alerts"
         ],
         "title": "HostStatusOut",
         "type": "object"
       },
       "HostSummaryItem": {
         "properties": {
+          "agent_alerts": {
+            "items": {
+              "enum": [
+                "mem_near_limit",
+                "restarting",
+                "cpu_hog"
+              ],
+              "type": "string"
+            },
+            "title": "Agent Alerts",
+            "type": "array"
+          },
+          "agent_cpu_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这个智能体占整台服务器 CPU 的百分比",
+            "title": "Agent Cpu Percent"
+          },
+          "agent_mem_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Mem Bytes"
+          },
+          "agent_mem_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Mem Limit"
+          },
           "alerts": {
             "items": {
               "enum": [
@@ -6458,6 +7031,7 @@
                 "type": "null"
               }
             ],
+            "description": "整台服务器的 CPU 使用率",
             "title": "Cpu Percent"
           },
           "disk_used_percent": {
@@ -6486,6 +7060,7 @@
                 "type": "null"
               }
             ],
+            "description": "整台服务器的内存已用百分比",
             "title": "Mem Used Percent"
           },
           "reported_at": {
@@ -6500,6 +7075,18 @@
             ],
             "title": "Reported At"
           },
+          "server_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Id"
+          },
           "stale": {
             "title": "Stale",
             "type": "boolean"
@@ -6507,12 +7094,17 @@
         },
         "required": [
           "instance_id",
+          "server_id",
           "reported_at",
           "stale",
           "cpu_percent",
           "mem_used_percent",
           "disk_used_percent",
-          "alerts"
+          "alerts",
+          "agent_cpu_percent",
+          "agent_mem_bytes",
+          "agent_mem_limit",
+          "agent_alerts"
         ],
         "title": "HostSummaryItem",
         "type": "object"
@@ -16935,6 +17527,25 @@
         "title": "SecretResolveResponse",
         "type": "object"
       },
+      "ServerRef": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ServerRef",
+        "type": "object"
+      },
       "ServiceHealthConfig": {
         "additionalProperties": false,
         "description": "Sprint 5：组件调用 GET /operations/services（Sprint 5 契约第 7.2 节）。",
@@ -20572,7 +21183,7 @@
     },
     "/api/v1/agents/host-summary": {
       "get": {
-        "description": "CPU、内存、磁盘的当前使用率与正在提醒的告警；没上报过的实例各项为 null（T-0113）。",
+        "description": "所在服务器整机的 CPU、内存、磁盘使用率与告警，以及这个智能体自己的 CPU、内存与告警；没上报过的实例各项为 null（T-0113、T-0146）。",
         "operationId": "host_summary",
         "parameters": [
           {
@@ -21645,7 +22256,7 @@
     },
     "/api/v1/agents/instances/{instance_id}/host": {
       "get": {
-        "description": "当前值（超过 3 分钟没上报为 stale）与每小时的平均、峰值（24h / 7d / 30d）；数值是整台服务器的（容器用 host 网络读宿主机的 /proc，T-0113）。",
+        "description": "所在服务器整机的当前值（超过 3 分钟没上报为 stale）与每小时的平均、峰值（24h / 7d / 30d），以及这个智能体自己容器的当前值与趋势（T-0113、T-0146）。整机网速是这台服务器上各实例之和（每个实例有自己的网卡）。",
         "operationId": "host_status",
         "parameters": [
           {
@@ -21873,6 +22484,135 @@
           }
         ],
         "summary": "打开或关闭实例的附件权限（admin，乐观并发）",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/limits": {
+      "put": {
+        "description": "OpenClaw 容器的内存（MiB）与 CPU（核）上限，null 表示不限制（默认，docs/v2/MULTI_OPENCLAW_PLAN.md 第 3.3 节 D2）。写进接入包的 compose.yaml，重新部署这个实例后生效。每次修改都写审计（T-0145）。",
+        "operationId": "put_limits",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentLimitsPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentLimits"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "设置实例的资源上限（admin，乐观并发）",
         "tags": [
           "agents"
         ]

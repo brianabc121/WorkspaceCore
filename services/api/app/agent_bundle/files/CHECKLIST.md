@@ -4,6 +4,11 @@
 
 ## 安装
 
+- [ ] **每个实例一个目录**：`~/myworkspace-openclaw/<实例短号>/`（README.md 里写了这个实例的短号与 Compose 项目名）。
+      一台服务器可以放多个实例：每个实例是一个 Compose 项目（`compose.yaml` 第一行的 `name`），有自己的网络，
+      互相连不到对方的本机地址；共享的只有 Docker、镜像缓存、登录账号与 crontab。
+- [ ] 工作台地址要从容器里访问得到：OpenClaw 不再用宿主网络，**不能是 `127.0.0.1` / `localhost`**，
+      宿主机 `/etc/hosts` 里的名字在容器里也查不到（内网地址请用 IP 或内网 DNS 里的名字）。
 - [ ] **这个目录只给运行 OpenClaw 的用户读写**：`chown -R 1000:1000 . && chmod 700 .`（`state/` 是 OpenClaw 的配置与状态）；`myworkspace.env` 与 `tls/client.key`（外网模式）权限 600。
       里面有实例凭证；泄露后到工作台的实例页吊销并重新生成接入包。
 - [ ] `bin/` 下三个程序：**属主是运行 OpenClaw 的用户**（官方镜像里是 uid 1000）、权限 0755、不是符号链接（OC-0 ADR F8）：
@@ -12,6 +17,7 @@
       `3d10dca0edcba0ecdb0dc915e7cf1ddf5a8453165de13dec76bbe5ef85607643`，然后用一份临时的空配置安装
       （`state/openclaw.json` 里已经写了这个插件提供的 `openim` 渠道，插件装好之前 OpenClaw 认为这份配置无效、拒绝安装）：
       `echo '{}' > state/plugin-install.json && chown 1000:1000 state/plugin-install.json`
+      先起这个实例的网络（`net` 服务，安装插件要联网）：`docker compose up -d net`
       `docker compose run --rm --no-deps -e OPENCLAW_CONFIG_PATH=/home/node/.openclaw/plugin-install.json --entrypoint node openclaw openclaw.mjs plugins install @openim/openclaw-channel@0.3.3 --force --accept-capabilities`
       然后打上工作台的补丁（自动回复被拒收时把原因放回会话，智能体下一轮看得到；T-0120）：
       `docker compose run --rm --no-deps --entrypoint node openclaw /opt/myworkspace/bin/channel-patch.mjs`
@@ -23,12 +29,17 @@
       `${VAR}` 由 OpenClaw 从进程环境（`myworkspace.env`）读取，不要把明文写进这个文件；也不要加 `_comment` 之类的说明键（OpenClaw 会判为无效配置）。
 - [ ] 冷启动要 2 ~ 4 分钟：启动时 doctor 会联网检查插件更新，没有外网时要等超时（OC-0 ADR F5）。
 
+- [ ] 网络：`net` 服务只运行 `sleep`，持有这个实例的网络命名空间；`openclaw`、`tunnel`、`image-proxy` 用
+      `network_mode: "service:net"` 加入，共用 127.0.0.1。不要单独停掉 `net`（加入它的容器会断网，要连同它们一起重启）。
 - [ ] 外网模式：`tunnel` 服务（本机隧道）在 127.0.0.1:18443 监听，用 `tls/` 里的客户端证书连工作台外网入口；
-      工作台外网入口的域名在 OpenClaw 容器里解析到 127.0.0.1（`compose.yaml` 的 `extra_hosts`）。
+      工作台外网入口的域名在这个实例里解析到 127.0.0.1（`net` 服务的 `extra_hosts`），
+      隧道自己挂 `tls/hosts` 当 `/etc/hosts`，连真实的入口地址。
       入口用私有 CA 签发的证书时，在 `tunnel` 的命令里加 `--cacert=<CA 证书>`；接入包里有 `tls/ca.pem`（入口证书由工作台内部 CA 签发）时已经配好，不用改。
       客户端证书 90 天到期，到期前重新生成接入包。
 - [ ] 内网模式、且工作台也有外网入口时：`image-proxy` 服务（本机取图代理）在 127.0.0.1:18443 监听，
-      不带客户端证书转发到工作台内网入口，只用于取工作台发来的图片；外网入口的域名在 OpenClaw 容器里解析到 127.0.0.1。
+      不带客户端证书转发到工作台内网入口，只用于取工作台发来的图片；外网入口的域名在这个实例里解析到 127.0.0.1。
+- [ ] 资源上限（可选）：在工作台的实例设置里填内存、CPU 上限，重新部署后 `openclaw` 服务带上 `mem_limit` / `cpus`；
+      没填就不限制。
       内网入口用私有 CA 签发的证书时，在 `image-proxy` 的命令里加 `--cacert=<CA 证书>`。
 
 ## 加固
@@ -47,6 +58,9 @@
 
 ## 定时任务（宿主机 cron 或 systemd timer）
 
+每一行末尾加上这个实例的标记 `# mw-openclaw:<实例短号>`；同一台服务器上的多个实例各有各的几行，
+重新部署时只替换行尾正好是自己标记的那几行（SSH 自动部署就是这样做的）。
+
 - [ ] 每 10 分钟取一次轮换后的模型密钥（OC-0 已核验，不用重启）：
       `*/10 * * * * cd <本目录> && docker compose exec -T openclaw node openclaw.mjs secrets reload --json`
 - [ ] 每周重启一次，换上新的 IM 令牌（令牌只在启动时领取，OC-0 ADR F1）：
@@ -54,7 +68,10 @@
 - [ ] 每分钟上报 token 用量（任务时间轴，T-0104）：在容器里调网关的 `sessions.usage`（只读），把每个会话今天的累计 token 发给工作台；
       会话只报 key 的 SHA-256，不发消息内容。没配这一行时，工作台的时间轴显示“未上报”：
       `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs`
-- [ ] 每分钟上报服务器状态（T-0113）：在容器里读 `/proc` 与磁盘统计（CPU 核心数与负载、内存、两个分区、默认网卡的收发字节、开机时长），只发数字，不发进程、文件名、IP。没配这一行时，实例页的“服务器状态”显示“未上报”：
+- [ ] 每分钟上报服务器状态（T-0113、T-0146）：在容器里读 `/proc` 与磁盘统计（整台服务器的 CPU 核心数与负载、内存、两个分区、开机时长），
+      这个实例自己容器的 cgroup（CPU 用量、内存、进程数）、数据目录大小（每 10 分钟一次）、自己网卡的收发字节，
+      以及服务器指纹（`boot_id` 的 HMAC，盐是 `MYWS_HOST_SALT`，不报原值；同一台服务器上的实例指纹相同）。
+      只发数字，不发进程、文件名、IP。没配这一行时，实例页的“服务器状态”显示“未上报”：
       `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/host-report.mjs`
 - [ ] 每分钟领取唤醒（T-0121）：工作台到点叫醒智能体跑一轮（它自己用 `schedule_wakeup` 安排的，或管理员在实例页建的）。
       脚本领取到期的唤醒，在容器里运行 `openclaw agent --session-key <会话> --message-file <消息>`，再把结果报回工作台；

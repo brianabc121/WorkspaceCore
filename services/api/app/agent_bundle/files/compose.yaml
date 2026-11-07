@@ -1,9 +1,26 @@
 # OpenClaw 服务器上的 Compose 文件（My Workspace 接入包生成）。在接入包解压目录里运行：
 #   docker compose up -d
 # 镜像锁定 OpenClaw extended-stable（docs/versions.md 第 1.5 节）；不挂载 Docker socket，不开放端口。
-name: myworkspace-openclaw
+# 一台服务器可以有多个实例：每个实例一个目录、一个 Compose 项目、一个自己的网络
+# （docs/v2/MULTI_OPENCLAW_PLAN.md 第 3 节），互相连不到对方的回环地址。
+name: @PROJECT@
 
 services:
+  # 这个实例的网络命名空间：只运行 sleep 的小容器（同一个锁定镜像，不另外下载）。
+  # 其他服务用 network_mode: "service:net" 加入，共用 127.0.0.1；它几乎不重启，
+  # OpenClaw 重启或崩溃时本机隧道不受影响（主容器重启后加入的容器会断网，已实测）
+  net:
+    image: openclaw/openclaw:2026.9.36@sha256:eefba69ec4a5fa596f3b1a8fac4f09525ce10435617a23f2a2090ddd3b6c1c2f
+    restart: unless-stopped
+    entrypoint: ["tini", "--", "sleep", "infinity"]
+    user: node
+    read_only: true
+    healthcheck:
+      disable: true
+    # @NET_HOSTS@
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
   openclaw:
     image: openclaw/openclaw:2026.9.36@sha256:eefba69ec4a5fa596f3b1a8fac4f09525ce10435617a23f2a2090ddd3b6c1c2f
     restart: unless-stopped
@@ -24,8 +41,8 @@ services:
       - ./bin:/opt/myworkspace/bin:ro
       # OpenClaw 的配置与状态（会话、记忆）；state/openclaw.json 由接入包提供
       - ./state:/home/node/.openclaw
-    # 与 OC-0 核验时一致；外网模式的本机隧道监听宿主机的 127.0.0.1
-    network_mode: host
+    network_mode: "service:net"
+    # @LIMITS@
     # @PUBLIC_OPENCLAW@
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]

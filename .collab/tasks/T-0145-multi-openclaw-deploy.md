@@ -2,9 +2,9 @@
 id: T-0145
 title: 多实例 M2 接入包与部署：每个实例的目录 / 项目 / 网络 / 资源上限 / 定时任务；服务器的添加、准备、吊销、移除；部署到服务器、卸载只碰自己
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api,docs,tests/e2e,apps/web
 depends_on: T-0144
 created: 2026-11-07
@@ -31,3 +31,5 @@ updated: 2026-11-07
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-07 03:23 UTC · claude · 创建任务（owner: claude）
 - 2026-11-07 03:23 UTC · claude · 人类 2026-11-07 在对话中指派：多实例服务器方案按决定全部落实（D5、D6 不考虑旧部署，其余按推荐）。
+- 2026-11-07 04:08 UTC · claude · 开始任务
+- 2026-11-07 04:08 UTC · claude · 接入包部分（本 PR）：每个实例 ~/myworkspace-openclaw/<12 位短号>/、项目 myworkspace-openclaw-<短号>、net 服务持有网络命名空间（项目自己的网络，不再用宿主网络）、隧道挂自己的 tls/hosts、可选 mem_limit / cpus（PUT /agents/instances/{id}/limits，写审计）、定时任务行尾标记 # mw-openclaw:<短号>（grep -v 只匹配行尾）、每周重启按短号错开 3:00 ~ 5:59；SSH 部署按实例的目录 / 临时目录 / 标记，装插件前先 up -d net，卸载只删自己的目录（上一级空了一起删）。CHECKLIST、部署指南、威胁模型已更新；agents 验收的 patch_compose 与 SSH 部署验收已改。下一步（PR-B）：服务器的添加 / 准备 / 吊销 / 移除、部署到服务器、运维拆分、页面。

@@ -18,6 +18,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -87,6 +88,10 @@ class AgentInstance(Base):
             "NOT mail_send_enabled OR mail_send_scope IS NOT NULL", name="mail_send_needs_scope"
         ),
         CheckConstraint("cardinality(mail_send_recipients) <= 50", name="mail_send_recipients"),
+        CheckConstraint(
+            "mem_limit_mb IS NULL OR mem_limit_mb BETWEEN 256 AND 1048576", name="mem_limit"
+        ),
+        CheckConstraint("cpus IS NULL OR (cpus >= 0.1 AND cpus <= 256)", name="cpus"),
         # 复合外键（凭证、授权）引用 (workspace_id, id)，保证子记录与实例在同一个工作空间
         UniqueConstraint("workspace_id", "id"),
         UniqueConstraint("im_user_id"),
@@ -161,6 +166,14 @@ class AgentInstance(Base):
     )
     runner_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     runner_limits: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    # 多实例（T-0144，迁移 0045，docs/v2/MULTI_OPENCLAW_PLAN.md）：所在的服务器；
+    # server_manual=true 表示管理员指定（不再按机器指纹自动改）；资源上限写进接入包的 compose.yaml
+    server_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.agent_servers.id", ondelete="SET NULL")
+    )
+    server_manual: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    mem_limit_mb: Mapped[int | None] = mapped_column(Integer)
+    cpus: Mapped[float | None] = mapped_column(Float)
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()

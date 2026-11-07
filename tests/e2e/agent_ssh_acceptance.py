@@ -39,8 +39,11 @@ from seed import create_user
 
 PASSWORD = "e2e ssh provisioning passphrase"  # noqa: S105 -- 只用于本脚本临时创建的工作台账号
 SECRET_VALUE = "sk-ssh-acceptance-" + uuid.uuid4().hex
-PROJECT = "myworkspace-openclaw"
-MARKER = "# myworkspace-openclaw"
+# 每个实例一个目录、一个 Compose 项目、一组带自己标记的定时任务（docs/v2/MULTI_OPENCLAW_PLAN.md 第 3 节）；
+# 实例建好后按它的短号（实例 ID 去掉连字符的前 12 位）填上
+INSTALL_ROOT = "myworkspace-openclaw"
+PROJECT = ""
+MARKER = ""
 INSTALL_TIMEOUT = 25 * 60
 
 
@@ -176,7 +179,7 @@ def main() -> int:
     user, password = env("SSH_TARGET_USER"), env("SSH_TARGET_PASSWORD")
     host_key = Path(env("SSH_HOST_KEY_PUB")).read_text(encoding="utf-8").strip()
     home = Path(pwd.getpwnam(user).pw_dir)
-    install_dir = home / PROJECT
+    global PROJECT, MARKER  # noqa: PLW0603 -- 实例建好后才知道短号
     keys_file = home / ".ssh" / "authorized_keys"
     report = Report()
 
@@ -194,6 +197,18 @@ def main() -> int:
     instance = owner.request(
         "POST", "/api/v1/agents/instances", {"name": "SSH 部署", "network_mode": "public"}, headers=headers
     ).json()
+    short = instance["id"].replace("-", "")[:12]
+    PROJECT, MARKER = f"myworkspace-openclaw-{short}", f"# mw-openclaw:{short}"
+    install_dir = home / INSTALL_ROOT / short
+    # 资源上限（T-0145，D2）：写进 compose.yaml，部署后 OpenClaw 容器的 cgroup 里能看到
+    limited = owner.request(
+        "PUT",
+        f"/api/v1/agents/instances/{instance['id']}/limits",
+        {"version": instance["version"], "mem_limit_mb": 3072, "cpus": 1.5},
+        headers=headers,
+    )
+    report.check("设置资源上限（内存 3072 MiB、CPU 1.5 核）", limited.status == 200, limited.summary)
+    instance["version"] += 1
     owner.request(
         "PUT",
         f"/api/v1/agents/instances/{instance['id']}/secret-grants",
@@ -252,7 +267,30 @@ def main() -> int:
     seen = owner.request("GET", f"/api/v1/agents/instances/{instance['id']}", headers=headers).json()
     report.check("实例有心跳（last_seen_at）", bool(seen.get("last_seen_at")), str(seen.get("last_seen_at")))
     running = run("docker", "ps", "--filter", f"label=com.docker.compose.project={PROJECT}", "--format", "{{.Names}}")
-    report.check("OpenClaw 与本机隧道在运行", running.stdout.count("\n") >= 2, running.stdout.strip())
+    report.check("实例网络（net）、OpenClaw 与本机隧道在运行（Compose 项目带实例短号）",
+                 running.stdout.count("\n") >= 3, running.stdout.strip())
+    # 每个实例自己的网络命名空间（D1 A）：net 在项目自己的网络上，OpenClaw 与隧道加入 net
+    layout = {}
+    for service in ("net", "openclaw", "tunnel"):
+        names = run("docker", "ps", "--filter", f"label=com.docker.compose.project={PROJECT}",
+                    "--filter", f"label=com.docker.compose.service={service}", "--format", "{{.ID}}").stdout.split()
+        inspect = run("docker", "inspect", "-f",
+                      "{{.HostConfig.NetworkMode}} {{range $k, $v := .NetworkSettings.Networks}}{{$k}},{{end}}"
+                      " {{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}", *names[:1]).stdout.split()
+        layout[service] = inspect
+    net_id = run("docker", "ps", "-q", "--no-trunc", "--filter", f"label=com.docker.compose.project={PROJECT}",
+                 "--filter", "label=com.docker.compose.service=net").stdout.strip()
+    report.check(
+        "net 在这个项目自己的网络上（不是宿主网络），OpenClaw 与隧道用 container:<net> 加入",
+        len(layout["net"]) >= 2 and f"{PROJECT}_default," in layout["net"][1] and layout["net"][0] != "host"
+        and all(layout[s][:1] == [f"container:{net_id}"] for s in ("openclaw", "tunnel")),
+        json.dumps(layout),
+    )
+    report.check(
+        "OpenClaw 容器带上了资源上限（3 GiB、1.5 核）",
+        layout["openclaw"][-2:] == [str(3072 << 20), "1500000000"],
+        json.dumps(layout["openclaw"]),
+    )
     keys = keys_file.read_text(encoding="utf-8").splitlines()
     report.check(
         "authorized_keys 里是工作台的专用公钥（指纹一致）",
@@ -292,6 +330,15 @@ def main() -> int:
             "GET", f"/api/v1/agents/instances/{instance['id']}/host", headers=headers
         ).json()
         current = host_status.get("current") or {}
+        me = host_status.get("agent") or {}
+        # 这个智能体自己容器的 cgroup（T-0146）：CI 的 Ubuntu 是 cgroup v2，核验记录第 3 节
+        report.check(
+            "服务器状态上报带上这个智能体自己的用量：读得到 cgroup，内存、进程数有值，内存上限是 3 GiB；"
+            "所在服务器按指纹自动识别",
+            me.get("available") is True and (me.get("mem_bytes") or 0) > 0 and (me.get("pids") or 0) > 0
+            and me.get("mem_limit") == 3072 << 20 and bool(host_status.get("server")),
+            json.dumps({"agent": me, "server": host_status.get("server")}, ensure_ascii=False),
+        )
         report.check(
             "照 crontab 那一行运行一次服务器状态上报：工作台有 CPU、内存、两个分区与开机时长",
             uploaded.returncode == 0 and host_status.get("reported") is True
@@ -396,7 +443,8 @@ def main() -> int:
         return report.finish()
     left = run("docker", "ps", "-a", "--filter", f"label=com.docker.compose.project={PROJECT}", "-q").stdout.strip()
     report.check("容器都删除了", left == "", left)
-    report.check("接入包目录删除了", not install_dir.exists())
+    report.check("接入包目录删除了（上一级 myworkspace-openclaw/ 空了也一起删掉）",
+                 not install_dir.exists() and not (home / INSTALL_ROOT).exists())
     report.check("定时任务删除了", MARKER not in run("crontab", "-l", "-u", user).stdout)
     report.check("卸载后运维动作不再可用", ops.state().get("reason") == "not_deployed")
 

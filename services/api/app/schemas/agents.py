@@ -145,9 +145,31 @@ class AgentInstanceOut(BaseModel):
     )
     credentials: list[AgentCredentialOut] = Field(description="有效与最近吊销的凭证，新的在前")
     secret_grants: list[SecretGrantOut]
+    server_id: UUID | None = Field(
+        default=None,
+        description="所在的服务器（T-0144）：按上报的服务器指纹自动识别，或管理员指定",
+    )
+    server_manual: bool = Field(default=False, description="管理员手动指定过所在服务器")
+    limits: "AgentLimits" = Field(
+        default_factory=lambda: AgentLimits(mem_limit_mb=None, cpus=None),
+        description="OpenClaw 容器的资源上限（T-0145，D2）：默认不限制，改了重新部署后生效",
+    )
     version: int
     created_at: datetime
     updated_at: datetime
+
+
+class AgentLimits(BaseModel):
+    mem_limit_mb: int | None = Field(description="内存上限（MiB）；null 表示不限制")
+    cpus: float | None = Field(description="CPU 上限（核，可以是小数）；null 表示不限制")
+
+
+class AgentLimitsPut(_Strict):
+    """设置资源上限（owner / admin）。写进接入包的 compose.yaml，重新部署这个实例后生效。"""
+
+    mem_limit_mb: Annotated[int, Field(ge=256, le=1 << 20)] | None
+    cpus: Annotated[float, Field(ge=0.1, le=256)] | None
+    version: Version
 
 
 class ProjectAdminOut(BaseModel):

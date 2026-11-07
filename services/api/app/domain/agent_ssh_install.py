@@ -489,7 +489,7 @@ class Installer:
             )
             if not check.ok:
                 raise InstallFailed("sudo_denied", "这个账号不能使用 sudo（或密码不对）")
-        staging = f"{info.home}/{prov.STAGING_DIR_NAME}"
+        staging = prov.staging_dir(info.home, str(self.target.instance_id))
         path = f"{staging}/install-docker.sh"
         await self._run(
             conn, "准备安装脚本", f"mkdir -p {prov.q(staging)} && chmod 700 {prov.q(staging)}"
@@ -547,7 +547,7 @@ class Installer:
             if used is not None:
                 break
             if loop.time() >= deadline:
-                directory = f"{self.home}/{prov.INSTALL_DIR_NAME}"
+                directory = prov.install_dir(self.home, str(self.target.instance_id))
                 for label, args in (
                     ("容器状态", ("ps",)),
                     ("OpenClaw 日志", ("logs", "--tail", "60", "openclaw")),
@@ -618,7 +618,7 @@ class Installer:
                 conn.close()
 
     async def _deploy(self, conn: asyncssh.SSHClientConnection, info: HostInfo) -> None:
-        directory = f"{info.home}/{prov.INSTALL_DIR_NAME}"
+        directory = prov.install_dir(info.home, str(self.target.instance_id))
         await self.rec.step("upload", "running")
         files = await self._issue_bundle()
         for value in bundle_secrets(files):
@@ -650,6 +650,12 @@ class Installer:
             result = await self._run(conn, "目录交给 uid 1000", handover, seconds=START_TIMEOUT)
             if not result.ok:
                 raise InstallFailed("plugin_failed", "无法把 state/、bin/、tls/ 交给 uid 1000")
+        # 安装插件要联网：先起这个实例的网络命名空间（net 服务，只运行 sleep）
+        result = await self._run(
+            conn, "启动实例网络", prov.compose_command(directory, "up", "-d", "net"), seconds=120
+        )
+        if not result.ok:
+            raise InstallFailed("plugin_failed", "无法启动这个实例的网络（net 服务），详见日志")
         result = await self._run(
             conn,
             "安装 openclaw-channel",
@@ -683,7 +689,12 @@ class Installer:
 
         if info.crontab:
             await self.rec.step("schedule", "running")
-            result = await self._run(conn, "定时任务", prov.schedule_command(directory), seconds=30)
+            result = await self._run(
+                conn,
+                "定时任务",
+                prov.schedule_command(directory, str(self.target.instance_id)),
+                seconds=30,
+            )
             if not result.ok:
                 raise InstallFailed("schedule_failed", "写入 crontab 失败")
             await self.rec.step(
@@ -755,7 +766,7 @@ class Uninstaller(Installer):
             conn = await self._connect(key=key)
             await self.rec.step("connect", "done", "专用密钥登录")
             info = await self._inspect(conn)
-            directory = f"{info.home}/{prov.INSTALL_DIR_NAME}"
+            directory = prov.install_dir(info.home, str(self.target.instance_id))
 
             await self.rec.step("stop", "running")
             present = await self._run(
@@ -777,11 +788,14 @@ class Uninstaller(Installer):
             if info.crontab:
                 await self.rec.step("unschedule", "running")
                 result = await self._run(
-                    conn, "删除定时任务", prov.unschedule_command(), seconds=30
+                    conn,
+                    "删除定时任务",
+                    prov.unschedule_command(str(self.target.instance_id)),
+                    seconds=30,
                 )
                 if not result.ok:
                     raise InstallFailed("schedule_failed", "修改 crontab 失败")
-                await self.rec.step("unschedule", "done", "已删除带标记的定时任务")
+                await self.rec.step("unschedule", "done", "已删除这个实例的定时任务")
             else:
                 await self.rec.step("unschedule", "skipped", "服务器上没有 crontab")
 

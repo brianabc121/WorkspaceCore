@@ -24,7 +24,12 @@ from app.models.automation import Automation, AutomationConnection, AutomationRu
 from app.models.base import NAMING_CONVENTION, Base
 from app.models.calendar import CalendarEvent
 from app.models.dashboard import Dashboard, Widget
-from app.models.host import AgentHostSample, AgentHostState
+from app.models.host import (
+    AgentHostState,
+    AgentInstanceSample,
+    AgentServer,
+    AgentServerSample,
+)
 from app.models.identity import AuthSession, ExternalIdentity, User
 from app.models.im import (
     AgentImOutbox,
@@ -92,11 +97,11 @@ __all__ = [
     "NAMING_CONVENTION",
     "AgentCa",
     "AgentCredential",
-    "AgentHostSample",
     "AgentHostState",
     "AgentImOutbox",
     "AgentImRejection",
     "AgentInstance",
+    "AgentInstanceSample",
     "AgentMailAccount",
     "AgentOpsAction",
     "AgentRunStop",
@@ -104,6 +109,8 @@ __all__ = [
     "AgentSecretAccess",
     "AgentSecretGrant",
     "AgentSecretVersion",
+    "AgentServer",
+    "AgentServerSample",
     "AgentSettings",
     "AgentSshJob",
     "AgentSshTarget",
