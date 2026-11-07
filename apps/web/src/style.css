@@ -459,6 +459,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .server-detail { display: grid; gap: 16px; min-width: 0; }
 .server-detail > .panel { padding: 16px; display: grid; gap: 12px; min-width: 0; }
 .server-detail h2, .server-detail h3 { margin: 0; }
+.server-detail code { overflow-wrap: anywhere; }
 .server-shares { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px 24px; }
 .share-bar { margin: 0; display: grid; gap: 8px; min-width: 0; }
 .share-track { display: flex; gap: 2px; height: 14px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
