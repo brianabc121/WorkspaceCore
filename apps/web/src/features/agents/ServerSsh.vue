@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import { useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError, dataOf, type Schema } from '../../services/api'
 import { formatTime } from '../time'
 import { useAgentAction } from './action'
+import { serversKey } from './servers'
 import { HOST_PATTERN, USERNAME_PATTERN, hostKeyCommand, sshError } from './ssh'
 import SshJob from './SshJob.vue'
 
@@ -11,7 +13,7 @@ import SshJob from './SshJob.vue'
 // → 之后部署实例不用密码；更换地址、吊销专用密钥、移除服务器。密码只随一次请求发出，不保存。
 const props = defineProps<{ detail: Schema['AgentServerDetail'] }>()
 const emit = defineEmits<{ removed: [] }>()
-const auth = useAuthStore(), scope = auth.workspaceId!
+const auth = useAuthStore(), scope = auth.workspaceId!, cache = useQueryClient()
 const { busy, error, notice, failure, act, refresh, header } = useAgentAction(scope, sshError)
 const server = computed(() => props.detail.server)
 const ssh = computed(() => server.value.ssh)
@@ -74,9 +76,13 @@ async function remove() {
     ? `移除「${server.value.name}」？上面的实例改为未归属，下一次上报时会重新自动识别。`
     : `移除服务器「${server.value.name}」？工作台不再保存它的地址与主机公钥。`)) return
   password.value = ''
-  // 删除成功就回到列表，再刷新：刷新时这台服务器的详情是 404，详情页会卸载本组件，之后再发的事件会被丢掉
+  // 删除成功就先从列表的缓存里去掉它、回到列表，再刷新：刷新时这台服务器的详情是 404，
+  // 详情页会卸载本组件，之后再发的事件会被丢掉；列表重新取回之前也不该还显示它
+  const id = server.value.id, list = serversKey(auth.user?.id, scope)
   const ok = await act(async () => {
     await auth.api.DELETE('/api/v1/agents/servers/{server_id}', { params: { header, path: path.value, query: { version: server.value.version } } })
+    await cache.cancelQueries({ queryKey: list })
+    cache.setQueryData<Schema['AgentServerList']>(list, old => old && { ...old, items: old.items.filter(s => s.id !== id) })
     emit('removed')
   }, '服务器已移除')
   if (!ok) settle()

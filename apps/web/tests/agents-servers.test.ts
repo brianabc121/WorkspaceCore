@@ -182,8 +182,12 @@ describe('servers tab', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const s = server({ ssh: ssh({ host_key_confirmed: true, host_key_confirmed_at: at, prepared_at: at }), version: 6 })
     let removed = false
-    const requests = setup(r => {
-      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json({ items: removed ? [] : [s], unassigned: [] })
+    const requests = setup(async r => {
+      // 移除后列表要过一会儿才取回来：回到列表时也不能还显示它
+      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') {
+        if (removed) await new Promise(done => setTimeout(done, 1500))
+        return Response.json({ items: removed ? [] : [s], unassigned: [] })
+      }
       if (path(r) === '/api/v1/agents/servers/srv-1' && r.method === 'DELETE') { removed = true; return new Response(null, { status: 204 }) }
       // 移除后再读详情是 404：页面也要回到服务器列表
       if (path(r) === '/api/v1/agents/servers/srv-1' && r.method === 'GET') return removed ? fail(404, 'NOT_FOUND') : Response.json(detail(s, { agents: [row('inst-a', 'alpha', { deployed: false, load: null })] }))
