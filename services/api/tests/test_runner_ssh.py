@@ -241,6 +241,16 @@ async def test_failed_install_script_and_uninstall(owner: Owner, tmp_path: Path)
 
 
 async def test_only_the_owner_deploys(owner: Owner, make_client: ClientFactory) -> None:
+    # 还没有添加运行服务器：读状态是“没有目标服务器”（200），填写地址要先添加（404）
+    empty = await owner.client.get("/api/v1/runner/host/ssh", headers=owner.headers())
+    assert empty.status_code == 200, empty.text
+    assert empty.json() == {"target": None, "job": None, "warning": None}
+    early = await owner.client.put(
+        "/api/v1/runner/host/ssh",
+        json={"host": "203.0.113.20", "port": 22, "username": "root"},
+        headers=owner.headers(),
+    )
+    assert early.status_code == 404, early.text
     created = await owner.client.post(
         "/api/v1/runner/host",
         json={"name": "运行服务器", "ingress": "intranet"},

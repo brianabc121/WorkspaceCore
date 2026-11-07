@@ -564,7 +564,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST /api/v1/runner/host/bundle` | 下载接入包（zip，`Cache-Control: no-store`）并签发新凭证（`mwr_` 开头，工作台只存 SHA-256），旧凭证立即失效；外网入口另签客户端证书（实例的内部 CA）。内容：`runner.env`（600）、`compose.yaml`（锁定 digest 的 python 镜像）、`agent/runner_agent/*.py`、`install.sh` / `install-docker.sh`（Docker 29.9.1）/ `install-gvisor.sh`（release-20261019.0，核对 sha512）、`tls/`、`CHECKLIST.md`；审计 `runner.host_reissued` |
 | `DELETE /api/v1/runner/host?version=` | 移除；还有没删除的环境 `409 RUNNER_HAS_ENVIRONMENTS`；审计 `runner.host_removed` |
 | `PUT /api/v1/runner/host/policy` | 回收策略覆盖值 `policy`（键见 `app/domain/runner_specs.py` 的 `DEFAULT_POLICY`，不认识的键 `422`）、`version`；审计 `runner.policy_updated` |
-| `GET /api/v1/runner/host/ssh` | 通过 SSH 部署运行服务器（**owner**，T-0136）：目标服务器与最近一次部署 / 卸载任务（结构与 OpenClaw 实例的 SSH 自动部署相同：`AgentSshState`）；还没有运行服务器 `404` |
+| `GET /api/v1/runner/host/ssh` | 通过 SSH 部署运行服务器（**owner**，T-0136）：目标服务器与最近一次部署 / 卸载任务（结构与 OpenClaw 实例的 SSH 自动部署相同：`AgentSshState`）；还没有运行服务器时 `target`、`job` 都是 `null`（写接口要先添加运行服务器，否则 `404`） |
 | `PUT /api/v1/runner/host/ssh` | 填写或更换 SSH 地址、账号：只读取主机公钥（不登录），返回 SHA256 指纹；更换要带 `version`；每个用户每分钟最多探测 10 次（`429`）；连不上 `503 AGENT_SSH_UNREACHABLE`；已装专用公钥 `409 AGENT_SSH_KEY_INSTALLED`；审计 `runner.ssh.target_set` |
 | `POST /api/v1/runner/host/ssh/confirm` | owner 在服务器上核对后确认指纹（`version`、`fingerprint`）；审计 `runner.ssh.host_key_confirmed` |
 | `POST /api/v1/runner/host/ssh/install` | 部署 / 重新部署（`202`）：`version`、`password`（只随这一次请求，不保存；第一次必填，不是 root 账号时每次都要，因为 `install.sh` 用 sudo 运行）。步骤 connect → inspect → authorize_key → upload（签发新凭证、上传接入包到 `~/myworkspace-runner`）→ install（以 root 运行 `install.sh`）→ online（runner-agent 用新凭证连上）；日志里密码、凭证、私钥替换成 `***`；审计 `runner.ssh.install_started` / `install_succeeded` / `install_failed` |

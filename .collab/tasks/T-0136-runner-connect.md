@@ -36,3 +36,4 @@ updated: 2026-11-07
 - 2026-11-07 00:10 UTC · claude · runner-agent 本机磁盘告急保护随 T-0139 完成（使用率超过 95% 停止一次性运行，工作台掉线也生效）；剩“SSH 部署运行服务器（页面）”，随 T-0140 做
 - 2026-11-07 00:59 UTC · claude · SSH 部署运行服务器完成：迁移 0044（runner_ssh_targets / runner_ssh_jobs）；app/domain/runner_ssh.py 复用 T-0089 的 SSH 流程（连接、核对指纹、授权专用公钥、上传接入包（不保存密钥与证书私钥）、sudo 或 root 运行 install.sh、等运行服务器上线）、卸载（有环境时拒绝）、吊销；/api/v1/runner/host/ssh*（只有 owner）；运行服务器 → 设置 页面上的 SSH 部署面板（RunnerSshDeploy.vue）；tests/test_runner_ssh.py 与 runner-pages 测试。paths 加 apps/web（面板）。
 - 2026-11-07 00:59 UTC · claude · status in_progress → done：四项验收都已完成；真实 Docker + gVisor 的端到端验收在 T-0141
+- 2026-11-07 01:28 UTC · claude · CI 的完整冒烟（全部读接口返回 200）发现：还没有运行服务器时 GET /api/v1/runner/host/ssh 返回 404。改成返回空状态（target、job 为 null），写接口仍然 404；加了测试。

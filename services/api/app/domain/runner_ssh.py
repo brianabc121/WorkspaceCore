@@ -168,7 +168,11 @@ class RunnerSshService:
         return AgentSshState(target=_out(target), job=_job_out(job) if job else None)
 
     async def state(self, access: WorkspaceAccess) -> AgentSshState:
-        return await self._state(await self._target(await self._host(access)))
+        # 还没有添加运行服务器时也是“没有目标服务器”（读接口不返回 404，写接口仍然要先添加）
+        host: RunnerHost | None = await self.db.scalar(
+            select(RunnerHost).where(RunnerHost.workspace_id == access.workspace.id)
+        )
+        return await self._state(await self._target(host) if host else None)
 
     async def _record(
         self,
