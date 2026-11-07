@@ -2,7 +2,7 @@
 id: T-0150
 title: 时间轴浏览器验收：暂停后的状态改为精确匹配（main 上 ci-infra compose 偶发失败）
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: tests/e2e/timeline_browser.cjs
@@ -20,8 +20,8 @@ main 上 f339233（PR brianabc121/WorkspaceCore#169 合并）的 ci-infra compos
 改为精确匹配状态提示，不依赖渲染先后。
 
 ## 验收标准
-- [ ] 暂停一步只匹配状态提示（精确文字），片段那一行同时出现也不报错
-- [ ] ci-infra compose 任务通过
+- [x] 暂停一步只匹配状态提示（精确文字），片段那一行同时出现也不报错
+- [x] ci-infra compose 任务通过
 
 ## 背景 / 约束 / 参考
 测试来自 T-0106（已完成）；PR brianabc121/WorkspaceCore#169 没有改这个文件。
@@ -30,3 +30,4 @@ main 上 f339233（PR brianabc121/WorkspaceCore#169 合并）的 ci-infra compos
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-07 09:32 UTC · claude · 创建任务（owner: claude）
 - 2026-11-07 09:32 UTC · claude · 开始任务
+- 2026-11-07 09:32 UTC · claude · status in_progress → done：完成：暂停一步改为精确匹配状态提示；以本 PR 的 ci-infra compose 为准
