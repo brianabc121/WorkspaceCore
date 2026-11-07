@@ -1,5 +1,7 @@
 # V2 OC-5：MCP 工具调用记录与审批的实现决定
 
+> n8n 相关内容已由 `docs/decisions/2026-11-07-remove-n8n.md`（T-0149）取代，仅保留历史设计、版本与验收证据；相关端点、工具、安装与账号操作已退役。其余模块的内容仍按各自后续文档执行。当前接口与部署方式见 `docs/api-contract.md`、`docs/deployment.md`。
+
 - 状态：accepted
 - 日期：2026-11-01
 - 作者：claude（协作任务 T-0057，OC-5 第 1 批）

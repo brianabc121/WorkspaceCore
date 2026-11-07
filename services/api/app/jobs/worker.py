@@ -31,7 +31,6 @@ from app.domain import (
     agent_watch,
     alerts,
     approval_cards,
-    automations,
     events,
     host_metrics,
     im,
@@ -134,12 +133,6 @@ async def purge(ctx: dict[str, Any]) -> None:
         logger.info("notifications purged", extra={"count": removed})
     if im_messages or im_events:
         logger.info("im purged", extra={"messages": im_messages, "inbox_events": im_events})
-
-
-async def reconcile_automations(ctx: dict[str, Any]) -> int:
-    """n8n 执行记录对账（Sprint 5 契约第 6.4 节）：状态、错误摘要与结果通知。"""
-    context = _sync(ctx)
-    return await automations.reconcile_all(context.sessions, context.settings, context.runtime)
 
 
 async def provision_im(ctx: dict[str, Any]) -> int:
@@ -389,7 +382,6 @@ class WorkerSettings:
         cron(reconcile, minute=RECONCILE_MINUTES, timeout=900),
         cron(purge, minute=17),
         cron(check_services, second=45, timeout=60),
-        cron(reconcile_automations, second=15, timeout=120),
         cron(provision_im, minute=set(range(4, 60, 5)), second=40, timeout=120),
         cron(process_im_inbox, second=50, timeout=120),
         cron(reconcile_im, second={5, 35}, timeout=60),

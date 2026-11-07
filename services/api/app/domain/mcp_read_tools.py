@@ -23,7 +23,6 @@ from app.core.config import Settings
 from app.domain import agent_im, agent_outbox, task_claims
 from app.domain import notifications as notification_domain
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError
-from app.domain.automations import AutomationService
 from app.domain.calendar import CalendarService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.developer import DeveloperService
@@ -48,9 +47,6 @@ from app.models import (
 from app.repositories import tasks as task_repo
 from app.schemas.ai_tools import (
     ActionStatusOutput,
-    AutomationItem,
-    AutomationParam,
-    AutomationText,
     BookmarkItem,
     BookmarkText,
     CalendarAgendaInput,
@@ -79,7 +75,6 @@ from app.schemas.ai_tools import (
     IssueText,
     KnowledgeSourceItem,
     KnowledgeSourceText,
-    ListAutomationsOutput,
     ListBookmarksInput,
     ListBookmarksOutput,
     ListIssuesInput,
@@ -630,26 +625,6 @@ async def _list_notifications(
     )
 
 
-async def _list_automations(call: ReadCall, args: EmptyInput) -> ListAutomationsOutput:
-    page = await AutomationService(call.db, call.settings, call.runtime).list_automations(
-        call.access, cursor=None, limit=LIST_CAP
-    )
-    return ListAutomationsOutput(
-        items=[
-            AutomationItem(
-                id=a.id,
-                enabled=a.enabled,
-                params=[
-                    AutomationParam(name=p.name, type=p.type, required=p.required) for p in a.params
-                ],
-                last_run_status=a.last_run.status if a.last_run else None,
-                untrusted=AutomationText(name=a.name, description=a.description),
-            )
-            for a in page.items
-        ]
-    )
-
-
 async def _dashboard_overview(call: ReadCall, args: EmptyInput) -> DashboardOverviewOutput:
     """首页概况的几个数字。未知时为 null，不以 0 冒充；“今天”按 UTC 计算。"""
     access = call.access
@@ -778,7 +753,6 @@ READ_HANDLERS: dict[str, ReadHandler] = {
     "list_pull_requests": _list_pulls,
     "service_status": _service_status,
     "list_notifications": _list_notifications,
-    "list_automations": _list_automations,
     "dashboard_overview": _dashboard_overview,
     "get_action_status": _action_status,
     "get_host_status": _host_status,

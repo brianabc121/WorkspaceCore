@@ -5,7 +5,7 @@ import { mockApi, openApp, workspace } from './helpers'
 const pages = [
   ['/', '总览'], ['/tasks', '任务'], ['/projects', '项目'], ['/knowledge', '知识库'],
   ['/calendar', '日历'], ['/developer', '开发者'], ['/operations', '运维'],
-  ['/automations', '自动化'], ['/ai', 'AI 审批'], ['/settings', '设置'],
+  ['/ai', 'AI 审批'], ['/settings', '设置'],
   ['/settings/integrations', '集成设置'], ['/settings/security', '安全设置'],
 ]
 async function open(path = '/') {
@@ -76,6 +76,21 @@ describe('工程骨架', () => {
     await open('/missing')
     expect(screen.getByRole('heading', { name: '页面未找到' })).toBeVisible()
     expect(screen.getByRole('link', { name: '返回总览' })).toHaveAttribute('href', '/')
+  })
+  it('keeps native tools in navigation without the retired workflows page', async () => {
+    await open()
+    const nav = screen.getByRole('navigation', { name: '主导航' })
+    expect(within(nav).queryByRole('link', { name: '自动化' })).not.toBeInTheDocument()
+    expect(within(nav).getByRole('link', { name: '运维' })).toHaveAttribute('href', '/operations')
+    expect(within(nav).getByRole('link', { name: 'AI 审批' })).toHaveAttribute('href', '/ai')
+    expect(within(nav).getByRole('link', { name: '运行服务器' })).toHaveAttribute('href', '/runner')
+  })
+  it('treats a bookmarked workflows address as a missing page without loading retired APIs', async () => {
+    const requests = mockApi()
+    const { router } = await open('/automations')
+    expect(screen.getByRole('heading', { name: '页面未找到' })).toBeVisible()
+    expect(router.currentRoute.value.path).toBe('/automations')
+    expect(requests.some(request => /^\/api\/v1\/(automations|app-logins)(\/|$)/.test(new URL(request.url).pathname))).toBe(false)
   })
   it('toggles and persists the theme', async () => {
     await open()

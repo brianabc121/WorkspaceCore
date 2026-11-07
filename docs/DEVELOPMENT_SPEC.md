@@ -2,6 +2,8 @@
 
 > 版本：1.0.0 | 文档日期：2026-10-30 | 状态：可供 Codex 分阶段实施 | 目标：单人优先、可扩展多用户、自托管
 >
+> **2026-11-07 修订（T-0149）**：n8n 工作流、连接与登录账号功能已移除，见 `docs/decisions/2026-11-07-remove-n8n.md`。
+>
 > **V2.0 修订（2026-10-31，人类批准）**：
 > - AI 部分改为由 **OpenClaw**（多实例，部署在其他服务器）承担；
 > - 工作台负责 OpenClaw 实例与接入凭证、集中密钥、基于 **OpenIM** 的管理员端 IM、MCP 工具与审批。
@@ -18,7 +20,7 @@
 
 ### 1.1 目标
 
-建立自主可控的个人工作操作系统：统一首页、任务/项目、文档入口、日历、GitHub、运维、通知、搜索、自动化、AI 辅助（V2：由 OpenClaw 智能体承担，管理员通过工作台 IM 与之沟通）。高频工作在本系统内原生操作，低频复杂编辑进入专业系统，所有系统由 Connector/BFF 集成。
+建立自主可控的个人工作操作系统：统一首页、任务/项目、文档入口、日历、GitHub、运维、通知、搜索、AI 辅助（V2：由 OpenClaw 智能体承担，管理员通过工作台 IM 与之沟通）。高频工作在本系统内原生操作，低频复杂编辑进入专业系统，所有系统由 Connector/BFF 集成。
 
 ### 1.2 技术边界
 
@@ -28,7 +30,6 @@
 - 日程：V1 工作台本地日程为主源；任务截止日期作为只读派生事件（T-0082）；外部 CalDAV 同步推迟到 V1.1。
 - GitHub：V1 仅只读仓库、Issue、PR、Actions 汇总；写权限后期审批开放。
 - 监控：V1 只读指标和告警；不能在监控面板直接执行 Shell 或 Docker 管理操作。
-- n8n：V1 列表、执行状态及受控 Webhook；不在工作台复制完整流程设计器。
 - AI（V2）：
   - 模型、对话、记忆、智能体运行由 **OpenClaw** 承担，可以有多个实例，分布在其他服务器上；
   - 工作台不自建模型兼容层，也不保存对话正文；
@@ -68,7 +69,6 @@
 | 身份 | V1 单用户本地账号 + HttpOnly Session | 身份抽象 OIDC-ready；V1.1 Authentik |
 | 反向代理 | Caddy | HTTPS，开发环境可不启用 TLS |
 | 指标 | Prometheus + Grafana | 按 profile 可选启动 |
-| 自动化 | n8n 独立部署 | Webhook 和受控执行 |
 | AI（V2） | OpenClaw（锁定 extended-stable 维护线）+ 工作台 MCP 工具服务器 | 模型由 OpenClaw 接入，不绑定单一厂商；工具与审批的权限判断只在工作台 |
 | IM（V2） | OpenIM Server（锁定版本与 digest）+ `@openim/openclaw-channel` | 工作台后端中转；OpenIM 只在内部网络，OpenClaw 经工作台接入入口连接 |
 | CI | GitHub Actions | lint / typecheck / tests / migrations / build |
@@ -141,7 +141,6 @@ flowchart TD
     Connect --> AFFiNE[AFFiNE - deep link only V1]
     Connect --> GitHub[GitHub]
     Connect --> Monitor[Prometheus/Grafana]
-    Connect --> N8N[n8n]
     Connect --> OpenIM["OpenIM（V2，内部网络）"]
     Agents["OpenClaw 实例（V2，其他服务器）"] -- "MCP / 取密钥 / IM（主动连回）" --> Ingress["接入入口：内网 / 外网（双向证书）"]
     Ingress --> API
@@ -178,7 +177,6 @@ flowchart TD
 | 本地日历 | Workspace | 全量 | 本地 API |
 | GitHub 代码/Issue | GitHub | 状态投影 | V1 只读 |
 | 监控时间序列 | Prometheus | 当前指标缓存 | 只读 |
-| 自动化定义 | n8n | ID/运行状态/关联 | n8n 接口 |
 | AI 对话（V2） | OpenIM（IM 消息） | 管理员视角的会话与消息投影、置顶、免打扰、分组 | 工作台 IM 接口（后端中转） |
 | AI 工具调用与审批（V2） | Workspace | 全量 + 留存策略 | 本地 API / MCP |
 | OpenClaw 实例、接入凭证、密钥（V2） | Workspace | 全量（凭证只存哈希，密钥加密） | 本地 API |
@@ -208,7 +206,6 @@ flowchart TD
 16. `sync_cursors(id,integration_id,resource_type,cursor_value,last_success_at,last_error,updated_at)`。
 17. `outbox_events(id,workspace_id,event_type,payload_json,status,attempts,next_retry_at,created_at)`。
 18. `idempotency_requests(id,workspace_id,actor_id,idempotency_key,request_fingerprint,status,response_code,response_json,created_at,expires_at)`：unique actor+key。
-19. `automation_runs(id,workspace_id,integration_id,provider_run_id,status,started_at,finished_at,metadata_json)`。
 20. ~~`ai_conversations`~~、21. ~~`ai_messages`~~：**V2 不建**。对话就是 IM 消息，由 OpenIM 保存，工作台只做投影（见下方 V2 实体）。
 22. `ai_tool_executions(id,workspace_id,instance_id,acting_user_id,tool_name,risk_level,arguments_redacted_json,arguments_hash,status,expires_at,decided_by,decided_at,executed_at,result_summary,error_text,version,request_id)`：V2 按实例记录 MCP 工具调用与审批。
 23. `audit_logs(id,workspace_id,actor_id,action,resource_type,resource_id,metadata_redacted_json,ip_hash,created_at)`：追加写，避免存原始敏感数据。
@@ -332,8 +329,6 @@ CREATE INDEX ix_webhook_pending ON workspace.webhook_inbox(next_retry_at)
 | GET | `/api/v1/developer/issues` | Issue | viewer |
 | GET | `/api/v1/operations/services` | 服务状态 | viewer |
 | GET | `/api/v1/operations/metrics` | 预设安全指标 | viewer |
-| GET | `/api/v1/automations` | n8n 流程/运行 | viewer |
-| POST | `/api/v1/automations/{id}/trigger` | 触发允许流程 | member + policy |
 | — | ~~`/api/v1/ai/conversations`~~、~~`/api/v1/ai/conversations/{id}/messages`~~ | **V2 取消**，对话走 IM | — |
 | GET/POST/PATCH | `/api/v1/agents/instances[...]` | V2：OpenClaw 实例登记、停用、轮换、接入包 | owner |
 | GET/POST | `/api/v1/agents/secrets[...]` | V2：密钥库（只写不读）与授权 | owner |
@@ -431,19 +426,13 @@ class WritableConnector(Connector, Protocol):
 - 详细请求日志目标保留 7 天，与长期聚合指标分开；在隐私设置中可禁用请求路径的敏感参数。
 - Grafana 仍负责复杂查询和告警配置，本系统只展示可用摘要和外链。
 
-### 7.5 n8n
-
-- n8n 默认作为独立服务和 Webhook 接收端，工作台仅管理白名单工作流 ID、执行状态和受控触发。
-- 不将 n8n 管理 Token 下发到浏览器；工作流运行记录持久化错误摘要但不保存完整第三方敏感 payload。
-- 对外商业托管或让其他客户配置工作流前重新核验 n8n 许可证。
-
 ## 8. Web 界面规范
 
 ### 8.1 桌面布局
 
 左侧 220~260px 导航，顶栏 56~64px（全局搜索、创建、通知、用户），中央响应式 12 列 Widget Grid，右侧 320~420px 可收起 AI/详情抽屉。小屏幕侧栏折叠；移动端展示单列小组件。
 
-主要页面：`/`、`/tasks`、`/projects`、`/knowledge`、`/calendar`、`/developer`、`/operations`、`/automations`、`/settings`、`/settings/integrations`、`/settings/security`；V2 新增 `/im`（通讯录为 `/im?view=contacts`）、`/agents`、`/agents/secrets`、`/ai`（审批中心；调用记录为 `/ai?view=activity`，旧地址 `/approvals` 重定向到这里），首页 AIQuickAsk 组件改为 IM 快捷入口（组件类型 `im_quick_chat`）。（2026-11-01 按实现更新，人类同意；T-0064）
+主要页面：`/`、`/tasks`、`/projects`、`/knowledge`、`/calendar`、`/developer`、`/operations`、`/settings`、`/settings/integrations`、`/settings/security`；V2 新增 `/im`（通讯录为 `/im?view=contacts`）、`/agents`、`/agents/secrets`、`/ai`（审批中心；调用记录为 `/ai?view=activity`，旧地址 `/approvals` 重定向到这里），首页 AIQuickAsk 组件改为 IM 快捷入口（组件类型 `im_quick_chat`）。（2026-11-01 按实现更新，人类同意；T-0064）
 
 ### 8.2 Widget 插件规范
 
@@ -515,7 +504,7 @@ type WidgetDefinition<TConfig> = {
 
 ### 11.1 Core Compose 最小服务
 
-`web`、`api`、`worker`、`postgres`、`redis`、`caddy`。生产数据库使用强密码和独立持久卷。支持 `docker compose --profile monitoring ...` 启用可选服务；AFFiNE/n8n 各自单独 Compose 安装并通过受控网络连通（Vikunja 已于 T-0082 移除）。V2：OpenIM 用 `infra/openim/` 的独立 Compose 项目，部署在工作台所在服务器；OpenClaw 部署在其他服务器，按 `infra/openclaw/` 的接入包配置。
+`web`、`api`、`worker`、`postgres`、`redis`、`caddy`。生产数据库使用强密码和独立持久卷。支持 `docker compose --profile monitoring ...` 启用可选服务；AFFiNE 由用户自行部署（Vikunja 已于 T-0082 移除）。V2：OpenIM 用 `infra/openim/` 的独立 Compose 项目，部署在工作台所在服务器；OpenClaw 部署在其他服务器，按 `infra/openclaw/` 的接入包配置。
 
 ### 11.2 环境变量示例
 
@@ -573,9 +562,9 @@ LOG_LEVEL=INFO
 
 **范围**：AFFiNE 深链接及收藏，本地日历，跨资源搜索投影，GitHub 只读。**DoD**：无未授权文档正文抓取；搜索结果只显示可见资源；GitHub rate-limit 有清晰降级。
 
-### Sprint 5：运维、通知、n8n
+### Sprint 5：运维、通知
 
-**范围**：服务状态、预设 Prometheus 指标、Grafana 外链、消息通知、SSE、n8n 白名单触发。**DoD**：不向浏览器暴露 Prometheus 管理端/Secret；失败明确显示 stale；触发自动化有审计记录。
+**范围**：服务状态、预设 Prometheus 指标、Grafana 外链、消息通知、SSE。**DoD**：不向浏览器暴露 Prometheus 管理端/Secret；失败明确显示 stale。
 
 ### Sprint 6：AI、强化、安全发布
 
@@ -654,7 +643,6 @@ AI 部分按 `docs/v2/TRANSFORMATION_PLAN.md` 第 9 节的 OC-0 ~ OC-7 实施。
 - AFFiNE 官方 Compose：https://docs.affine.pro/self-host-affine/references/docker-compose-yml
 - AFFiNE 配置：https://docs.affine.pro/self-host-affine/install/configuration
 - AFFiNE GitHub：https://github.com/toeverything/AFFiNE
-- n8n GitHub：https://github.com/n8n-io/n8n
 - Authentik：https://docs.goauthentik.io/
 - GitHub REST：https://docs.github.com/en/rest
 - FastAPI：https://fastapi.tiangolo.com/

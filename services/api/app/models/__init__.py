@@ -19,9 +19,7 @@ from app.models.agent import (
     AgentSshTarget,
 )
 from app.models.ai import AiToolExecution
-from app.models.app_login import AppLogin
 from app.models.audit import AuditLog
-from app.models.automation import Automation, AutomationConnection, AutomationRun
 from app.models.base import NAMING_CONVENTION, Base
 from app.models.calendar import CalendarEvent
 from app.models.dashboard import Dashboard, Widget
@@ -120,12 +118,8 @@ __all__ = [
     "AgentUsageMinute",
     "AgentWakeup",
     "AiToolExecution",
-    "AppLogin",
     "AuditLog",
     "AuthSession",
-    "Automation",
-    "AutomationConnection",
-    "AutomationRun",
     "Base",
     "Bookmark",
     "CalendarEvent",

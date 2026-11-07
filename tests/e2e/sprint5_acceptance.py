@@ -1,27 +1,17 @@
 #!/usr/bin/env python3
-"""Sprint 5 全栈验收（T-0040）：Compose 全栈 + Prometheus（--profile monitoring）+ 模拟 n8n。
+"""Sprint 5 全栈验收（T-0040）：Compose 全栈 + Prometheus（--profile monitoring）。
 
-DoD 见 docs/DEVELOPMENT_SPEC.md 第 13 节，验收场景见第 15 节（接口级部分；浏览器部分在
-sprint5_browser.cjs）：
-
-- DoD“不向浏览器暴露 Prometheus 管理端 / Secret”：
-  - Prometheus 没有发布端口；经 Caddy 访问 /metrics 只得到前端页面；
-  - 指标接口只返回预设视图，不接受 PromQL；
-  - n8n 的 API Key 与共享密钥在任何响应里都不出现。
-- DoD“失败明确显示 stale”：停掉 Prometheus 后，指标返回之前的结果并标为 stale，
-  运维页显示 down；模拟 n8n 不可用后，连接显示 stale。
-- DoD“触发自动化有审计记录”：受理、策略拒绝的触发都有 automation.triggered，只记参数名。
-- 自动化白名单与幂等：未登记的工作流 422、未声明的参数 422、同一个 Idempotency-Key 只触发一次。
-- 通知去重：同一次执行失败只通知一次。
-- A16（接口级）：SSE 推送失效事件；断开期间的变化按 Last-Event-ID 补发，重新拉取得到最新数据。
+保留运维、通知和 SSE 的接口级验收，浏览器部分在 sprint5_browser.cjs：
+- Prometheus 不发布端口；指标只返回预设视图、不接受 PromQL、不暴露内部地址。
+- Prometheus 不可用时返回缓存并标为 stale，运维页显示 down，恢复后返回正常数据。
+- 通知按事件标识去重，标为已读后未读数更新。
+- A16：SSE 推送失效事件；断开后按 Last-Event-ID 补发，重新拉取得到最新数据。
 - S5-05：Prometheus 保留 7 天；访问日志不记录查询串。
 
-模拟 n8n（fake_n8n_server.py）复用后端测试的内存版 n8n，运行在 api 镜像里，加入 integrations 网络，
-别名 fake-n8n。前提：Compose 全栈已启动并迁移，.env 里 INTEGRATION_ALLOWED_HOSTS 含 fake-n8n，
-PROMETHEUS_URL=http://prometheus:9090，并已启动 prometheus（docker compose --profile monitoring up -d prometheus）。
-不要求空库：每次运行用新的工作台用户。
+前提：Compose 全栈已启动并迁移，.env 里 PROMETHEUS_URL=http://prometheus:9090，
+并已启动 prometheus（docker compose --profile monitoring up -d prometheus）。
+不要求空库：每次运行用新的工作台用户。只依赖 Python 标准库。
 用法：python3 tests/e2e/sprint5_acceptance.py [--base-url http://127.0.0.1:8080]
-只依赖 Python 标准库，共用工具在同目录的 e2e_support.py、seed.py。
 """
 
 import argparse
@@ -31,8 +21,6 @@ import socket
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -44,19 +32,11 @@ from e2e_support import (
     Report,
     compose_exec,
     default_base_url,
-    env_value,
     parse_base_url,
 )
-from seed import create_user
+from seed import create_user, notify
 
 PASSWORD = "e2e sprint5 passphrase"  # noqa: S105 -- 只用于本脚本临时创建的测试账号
-FAKE_NAME = "ws-e2e-fake-n8n"
-FAKE_PORT = 18091
-API_KEY = "n8n_api_e2e_" + uuid.uuid4().hex
-TRIGGER_SECRET = "e2e-trigger-" + uuid.uuid4().hex
-WORKFLOW = "wfE2eReport01"
-PATH = "e2e-report"
-RECONCILE_WAIT = 80  # Worker 每分钟第 15 秒对账：等过一轮
 
 
 def run(*args: str, check: bool = True) -> str:
@@ -66,44 +46,6 @@ def run(*args: str, check: bool = True) -> str:
     if check and result.returncode != 0:
         raise RuntimeError(f"{' '.join(args[:3])} 失败：{result.stderr.strip()[-400:]}")
     return result.stdout.strip()
-
-
-def project_name() -> str:
-    return env_value("COMPOSE_PROJECT_NAME") or "my-workspace"
-
-
-def start_fake() -> None:
-    run("docker", "rm", "-f", FAKE_NAME, check=False)
-    api = run("docker", "compose", "ps", "-q", "api")
-    image = run("docker", "inspect", "--format", "{{.Config.Image}}", api)
-    run(
-        "docker", "run", "-d", "--name", FAKE_NAME,
-        "-p", f"127.0.0.1:{FAKE_PORT}:8080",
-        "-e", f"FAKE_N8N_API_KEY={API_KEY}",
-        "-e", f"FAKE_N8N_SECRET={TRIGGER_SECRET}",
-        "-v", f"{ROOT}/services/api/tests:/fake/tests:ro",
-        "-v", f"{ROOT}/tests/e2e/fake_n8n_server.py:/fake/server.py:ro",
-        "--entrypoint", "python", image, "/fake/server.py",
-    )
-    run("docker", "network", "connect", "--alias", "fake-n8n", f"{project_name()}_integrations", FAKE_NAME)
-
-
-def fake_call(method: str, path: str, body: Any = None) -> Any:
-    data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{FAKE_PORT}{path}", data=data, method=method,
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
-        raw = response.read()
-    return json.loads(raw) if raw else None
-
-
-def fake_ready() -> bool:
-    try:
-        return fake_call("GET", "/_fake/stats") is not None
-    except (OSError, urllib.error.URLError):
-        return False
 
 
 def wait_for(predicate: Callable[[], Any], timeout: float, interval: float = 2.0) -> Any:
@@ -168,20 +110,16 @@ def main() -> int:
     base = parse_base_url(args.base_url)
     report = Report()
     print(f"Sprint 5 全栈验收：{base}")
-    start_fake()
-    if not wait_for(fake_ready, 30, 1):
-        sys.exit("模拟 n8n 没有就绪")
     try:
         run_checks(base, report)
     finally:
-        run("docker", "rm", "-f", FAKE_NAME, check=False)
         run("docker", "compose", "--profile", "monitoring", "start", "prometheus", check=False)
     return report.finish()
 
 
 def run_checks(base: str, report: Report) -> None:
     email = f"e2e-s5-{uuid.uuid4().hex[:8]}@example.com"
-    _, ws, _ = create_user(email, "Sprint 5", PASSWORD)
+    user_id, ws, _ = create_user(email, "Sprint 5", PASSWORD)
     owner = login(base, email)
     h = {"X-Workspace-Id": ws}
 
@@ -241,100 +179,23 @@ def run_checks(base: str, report: Report) -> None:
     logs = run("docker", "compose", "logs", "--no-color", "--since", "2m", "api")
     report.check("S5-05 访问日志不记录查询串", marker not in logs)
 
-    # ---------------------------------------------------------------- n8n 连接与白名单
-    fake_call("POST", "/_fake/control", {"add_workflow": {"id": WORKFLOW, "path": PATH}})
-    put = owner.request(
-        "PUT", "/api/v1/automations/connection",
-        {"base_url": "http://fake-n8n:8080", "api_key": API_KEY, "trigger_secret": TRIGGER_SECRET},
-        headers=h,
-    )
-    tested = owner.request("POST", "/api/v1/automations/connection/test", headers=h)
-    report.check("S5-04 n8n 连接测试通过", tested.status == 200 and tested.json()["ok"], tested.summary)
-    report.check(
-        "DoD n8n 的 API Key 与共享密钥不出现在响应里",
-        API_KEY not in put.text + tested.text and TRIGGER_SECRET not in put.text + tested.text,
-    )
-    params = [
-        {"name": "recipient", "label": "收件人", "type": "string", "required": True, "sensitive": True},
-        {"name": "days", "label": "天数", "type": "number"},
-    ]
-    created = owner.request(
-        "POST", "/api/v1/automations",
-        {"name": "验收日报", "workflow_id": WORKFLOW, "webhook_path": PATH, "params": params}, headers=h,
-    )
-    automation = created.json() or {}
-    report.check("S5-04 登记白名单工作流", created.status == 201 and automation.get("workflow_active") is True, created.summary)
-    unknown_wf = owner.request(
-        "POST", "/api/v1/automations",
-        {"name": "x", "workflow_id": "wfNotInN8n", "webhook_path": "other"}, headers=h,
-    )
-    report.check("S5-04 n8n 里没有的工作流不能登记（422）", unknown_wf.status == 422, unknown_wf.summary)
-    trigger_path = f"/api/v1/automations/{automation.get('id')}/trigger"
-    undeclared = owner.request(
-        "POST", trigger_path, {"params": {"recipient": "a@example.com", "cc": "x"}},
-        headers={**h, "Idempotency-Key": str(uuid.uuid4())},
-    )
-    report.check("S5-04 未声明的参数 → 422", undeclared.status == 422, undeclared.summary)
-
-    # ---------------------------------------------------------------- 触发、幂等、审计
-    key = str(uuid.uuid4())
-    body = {"params": {"recipient": "boss@example.com", "days": 7}}
-    fake_call("POST", "/_fake/control", {"next_status": "error"})
-    first = owner.request("POST", trigger_path, body, headers={**h, "Idempotency-Key": key})
-    again = owner.request("POST", trigger_path, body, headers={**h, "Idempotency-Key": key})
-    stats = fake_call("GET", "/_fake/stats")
-    report.check(
-        "S5-04 同一个 Idempotency-Key 只触发一次",
-        first.status == 202 and again.status == 202 and first.json()["id"] == again.json()["id"]
-        and stats["triggers"] == 1,
-        f"{first.summary} / {again.summary} / n8n 收到 {stats['triggers']} 次",
-    )
-    report.check(
-        "S5-04 n8n 只收到声明过的参数",
-        stats["bodies"] and stats["bodies"][0]["params"] == body["params"],
-    )
-    run_id = (first.json() or {}).get("id")
-
-    def finished() -> Any:
-        runs = owner.request("GET", f"/api/v1/automations/{automation.get('id')}/runs", headers=h).json()["items"]
-        return runs if runs and runs[0]["status"] == "error" else None
-
-    runs = wait_for(finished, RECONCILE_WAIT)
-    report.check(
-        "S5-04 对账后执行记录为 error，只有遮蔽后的错误摘要",
-        bool(runs) and runs[0]["id"] == run_id and (runs[0]["error_summary"] or "").startswith("工作流在节点"),
-        str(runs and runs[0]["error_summary"]),
-    )
-    time.sleep(RECONCILE_WAIT)  # 再过一轮对账：同一次失败不应该再通知
-    notes = owner.request("GET", "/api/v1/notifications", headers=h).json()["items"]
-    failed = [n for n in notes if n["type"] == "automation_failed"]
-    report.check("通知去重：同一次执行失败只通知一次", len(failed) == 1, str(len(failed)))
-    disabled = owner.request(
-        "PATCH", f"/api/v1/automations/{automation.get('id')}",
-        {"version": automation.get("version"), "enabled": False}, headers=h,
-    )
-    rejected = owner.request(
-        "POST", trigger_path, body, headers={**h, "Idempotency-Key": str(uuid.uuid4())}
-    )
-    report.check(
-        "S5-04 停用的白名单拒绝触发（409 disabled）",
-        disabled.status == 200 and rejected.status == 409
-        and rejected.json()["error"]["details"]["reason"] == "disabled",
-        rejected.summary,
-    )
-    audit = owner.request("GET", "/api/v1/audit-logs?limit=100", headers=h)
-    triggered = [a for a in audit.json()["items"] if a["action"] == "automation.triggered"]
-    outcomes = sorted(a["metadata"]["outcome"] for a in triggered)
-    report.check(
-        "DoD 每次触发都有审计记录（受理与拒绝）",
-        "queued" in outcomes and "rejected:disabled" in outcomes,
-        str(outcomes),
-    )
-    everything = json.dumps([audit.json(), runs, notes], ensure_ascii=False)
-    report.check(
-        "DoD 审计、执行记录、通知里没有参数值与密钥",
-        "boss@example.com" not in everything and API_KEY not in everything and TRIGGER_SECRET not in everything,
-    )
+    # ---------------------------------------------------------------- 通知：同一事件去重、已读状态
+    notice_key = f"sprint5-{uuid.uuid4().hex}"
+    for _ in range(2):
+        notify(ws, user_id, notice_key, "验收通知")
+    notes = owner.request("GET", "/api/v1/notifications", headers=h).json()
+    notices = [item for item in notes["items"] if item["title"] == "验收通知"]
+    report.check("S5-03 同一个通知事件只写入一次", len(notices) == 1 and notes["unread_count"] == 1)
+    if notices:
+        marked = owner.request(
+            "PATCH", "/api/v1/notifications", {"ids": [notices[0]["id"]]}, headers=h,
+        )
+        unread = owner.request("GET", "/api/v1/notifications?unread_only=true", headers=h).json()
+        report.check(
+            "S5-03 标为已读后未读数与列表更新",
+            marked.status == 200 and unread["unread_count"] == 0 and not unread["items"],
+            marked.summary,
+        )
 
     # ---------------------------------------------------------------- DoD：失败明确显示 stale
     run("docker", "compose", "--profile", "monitoring", "stop", "prometheus")
@@ -350,19 +211,8 @@ def run_checks(base: str, report: Report) -> None:
     )
     report.check("DoD 运维页显示 Prometheus 不可用", bool(down))
     run("docker", "compose", "--profile", "monitoring", "start", "prometheus")
-    fake_call("POST", "/_fake/control", {"down": True})
-
-    def n8n_stale() -> Any:
-        page = owner.request("GET", "/api/v1/automations", headers=h).json()
-        return page if page["connection"]["status"] == "stale" else None
-
-    page = wait_for(n8n_stale, RECONCILE_WAIT)
-    report.check(
-        "DoD n8n 不可用：白名单照常显示，连接标为 stale",
-        bool(page) and len(page["items"]) == 1,
-        str(page and page["connection"]),
-    )
-    fake_call("POST", "/_fake/control", {"down": False})
+    recovered = wait_for(metrics_ready, 60)
+    report.check("DoD Prometheus 恢复后指标不再过期", bool(recovered))
 
     # ---------------------------------------------------------------- A16（接口级）
     stream = Stream(base, owner, ws)
@@ -402,15 +252,6 @@ def run_checks(base: str, report: Report) -> None:
     reset = reset_stream.next_event(10)
     reset_stream.close()
     report.check("A16 无法续传时发 reset（要求重新拉取全部数据）", bool(reset) and reset["data"]["reset"] is True)
-
-    # 收尾：停用本次的 n8n 连接。模拟服务随脚本结束而删除，留着启用的连接
-    # 会让 Worker 每分钟对账失败；按主机计数的熔断器打开后，
-    # 之后的浏览器验收连同一个主机（fake-n8n）也会被拒绝
-    current = owner.request("GET", "/api/v1/automations/connection", headers=h).json()
-    owner.request(
-        "PUT", "/api/v1/automations/connection",
-        {"version": current["version"], "enabled": False}, headers=h,
-    )
 
 
 if __name__ == "__main__":

@@ -144,7 +144,7 @@ flowchart LR
 
 | 位置 | 内容 | 由谁维护 |
 |---|---|---|
-| 服务器 A | 现有工作台 Compose（不变）。另外新增：<br/>- **OpenIM 单独的 Compose 项目**（`infra/openim/compose.yaml`，做法和 `infra/n8n/` 一样）；<br/>- Caddy 的两个接入入口 | claude 写配置，人类部署 |
+| 服务器 A | 现有工作台 Compose（不变）。另外新增：<br/>- **OpenIM 单独的 Compose 项目**（`infra/openim/compose.yaml`）；<br/>- Caddy 的两个接入入口 | claude 写配置，人类部署 |
 | 各 OpenClaw 服务器 | OpenClaw（锁定 extended-stable 版本）、`openclaw-channel` 插件（锁定版本）、取密钥小程序；外网模式还有隧道小程序。参考配置放在 `infra/openclaw/` | claude 写参考配置和检查清单，人类部署 |
 
 **OpenIM 要部署的组件**：

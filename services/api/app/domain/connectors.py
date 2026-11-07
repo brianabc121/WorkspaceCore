@@ -83,7 +83,7 @@ class ConnectorRuntime:
 def api_error(error: ConnectorError) -> ApiError:
     """契约第 8 节：工作台的 401 只表示自己的会话无效，
 
-    所以外部服务（GitHub、n8n）的鉴权失败用 502。
+    所以外部服务（GitHub）的鉴权失败用 502。
     """
     if error.kind == "AUTH_FAILED" and error.resource_level:
         return ApiError(403, "EXTERNAL_FORBIDDEN", "外部服务拒绝访问该资源")

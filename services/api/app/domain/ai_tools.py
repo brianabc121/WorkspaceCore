@@ -32,7 +32,6 @@ from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain import events
 from app.domain.auth import AuthContext
-from app.domain.automations import AutomationService
 from app.domain.calendar import CalendarService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.credentials import CredentialBox, CredentialError
@@ -47,7 +46,6 @@ from app.models import (
     AgentInstance,
     AgentSettings,
     AiToolExecution,
-    Automation,
     CalendarEvent,
     ImConversation,
     ImGroup,
@@ -69,7 +67,6 @@ from app.schemas.ai_tools import (
     ToolSpec,
     UpdateTaskInput,
 )
-from app.schemas.automations import TriggerRequest
 from app.schemas.calendar import CalendarEventCreate
 from app.schemas.knowledge import BookmarkCreate
 from app.schemas.notifications import NotificationMark
@@ -78,7 +75,6 @@ from app.schemas.workspaces import Role
 
 logger = logging.getLogger("app.ai")
 
-SENSITIVE_MASK = "***"
 # 审批中心（前端 T-0056）里定位到这条记录
 APPROVAL_LINK = "/approvals?id={id}"
 # 推断 source 时只看最近这么久内收到的消息
@@ -164,7 +160,6 @@ class _Target:
 
     title: str = ""
     version: str | None = None
-    sensitive: tuple[str, ...] = ()
 
 
 class AiToolService:
@@ -273,7 +268,7 @@ class AiToolService:
             arguments,
             status="denied",
             summary=f"拒绝调用 {spec.name}：权限不够",
-            display=_display(arguments, (), mask_all=spec.name == "trigger_automation"),
+            display=arguments,
             source=source,
             request_id=request_id,
         )
@@ -380,8 +375,7 @@ class AiToolService:
             arguments,
             status="pending_approval",
             summary=_summary(spec.name, parsed, target),
-            display=_display(arguments, target.sensitive),
-            stored=self._seal(arguments, target.sensitive, row_id),
+            stored=arguments,
             row_id=row_id,
             source=source or await self.infer_source(requester.instance),
             request_id=request_id,
@@ -414,24 +408,6 @@ class AiToolService:
                 "approval card job not enqueued",
                 extra={"execution_id": str(execution_id), "error_type": type(error).__name__},
             )
-
-    def _seal(
-        self, arguments: dict[str, Any], sensitive: tuple[str, ...], row_id: uuid.UUID
-    ) -> dict[str, Any]:
-        """敏感参数的取值加密后再存（绑定到这条记录），数据库与备份里没有明文。"""
-        params = arguments.get("params")
-        if not sensitive or not isinstance(params, dict) or not params.keys() & set(sensitive):
-            return arguments
-        if self.box is None:
-            raise ToolCallError("EXTERNAL_UNAVAILABLE", "未配置凭证加密密钥，不能保存敏感参数")
-        box = self.box
-        sealed = {
-            k: {SEALED_KEY: box.seal(json.dumps(v), context=f"ai_tool_execution:{row_id}:{k}")}
-            if k in sensitive
-            else v
-            for k, v in params.items()
-        }
-        return {**arguments, "params": sealed}
 
     def arguments_intact(self, row: AiToolExecution) -> bool:
         """存下的参数与发起时算出的哈希一致：数据库里的参数被改过就不执行。
@@ -542,20 +518,6 @@ class AiToolService:
                 if event is None:
                     raise not_found()
                 return _Target(title=event.title, version=str(event.version))
-            if tool == "trigger_automation":
-                automation: Automation | None = await self.db.scalar(
-                    select(Automation).where(
-                        Automation.id == ref["automation_id"],
-                        Automation.workspace_id == requester.workspace.id,
-                        Automation.deleted_at.is_(None),
-                    )
-                )
-                if automation is None:
-                    raise not_found()
-                sensitive = tuple(
-                    str(p.get("name")) for p in automation.params_json if p.get("sensitive")
-                )
-                return _Target(title=automation.name, sensitive=sensitive)
         except ApiError as error:
             if error.status_code == 404:
                 raise ToolCallError("NOT_FOUND", "要操作的对象不存在") from None
@@ -774,6 +736,10 @@ class AiToolService:
         self, approver: AuthContext, row: AiToolExecution, instance: AgentInstance | None
     ) -> tuple[str, str | None, str | None]:
         """以登记人的身份执行；返回 (状态, 结果说明, 错误码)。"""
+        spec = TOOLS.get(row.tool_name)
+        executor = _EXECUTORS.get(row.tool_name)
+        if spec is None or executor is None:
+            return "failed", "这个工具已不可用，没有执行", "NOT_FOUND"
         if not self.arguments_intact(row):
             logger.warning(
                 "ai tool arguments do not match their hash", extra={"execution_id": str(row.id)}
@@ -785,7 +751,6 @@ class AiToolService:
         if settings is not None and not settings.agents_enabled:
             return "failed", "总开关已关闭", "AGENT_DISABLED"
         requester = await self.requester(instance)
-        spec = TOOLS[row.tool_name]
         denied = self.check(requester, spec)
         if denied is not None or requester.acting_user is None:
             return "failed", "登记人或实例的权限已不够", denied or "FORBIDDEN_ROLE"
@@ -796,7 +761,6 @@ class AiToolService:
             token="",
             client_ip=approver.client_ip,
         )
-        executor = _EXECUTORS[row.tool_name]
         try:
             summary = await executor(self, context, requester.access(), row)
         except ApiError as error:
@@ -941,20 +905,6 @@ async def _mark_read(
     return f"已标记 {result.updated} 条通知为已读"
 
 
-async def _trigger(
-    s: AiToolService, ctx: AuthContext, access: WorkspaceAccess, row: AiToolExecution
-) -> str:
-    arguments = s.unsealed(row)
-    automation_id = uuid.UUID(arguments["automation_id"])
-    body = TriggerRequest.model_validate({"params": arguments.get("params", {})})
-    run = await AutomationService(s.db, s.settings, s.runtime).trigger(
-        ctx, access, automation_id, row.id, body
-    )
-    if run.status == "unknown":
-        raise ApiError(504, "RESULT_UNKNOWN", "结果未知")
-    return f"已触发工作流（运行状态：{run.status}）"
-
-
 _EXECUTORS: dict[str, Executor] = {
     "create_task": _create_task,
     "update_task": _update_task,
@@ -964,7 +914,6 @@ _EXECUTORS: dict[str, Executor] = {
     "delete_calendar_event": _delete_event,
     "create_bookmark": _create_bookmark,
     "mark_notification_read": _mark_read,
-    "trigger_automation": _trigger,
 }
 
 
@@ -999,20 +948,7 @@ def _summary(tool: str, parsed: BaseModel, target: _Target) -> str:
         return f"新建书签「{_clip(data['title'])}」"
     if tool == "mark_notification_read":
         return f"把 {len(data['ids'])} 条通知标为已读"
-    if tool == "trigger_automation":
-        return f"触发工作流「{title}」"
     return tool
-
-
-def _display(
-    arguments: dict[str, Any], sensitive: tuple[str, ...], *, mask_all: bool = False
-) -> dict[str, Any]:
-    """给人看的参数：敏感参数换成 ***；mask_all 时全部参数值都换掉（没查过哪些是敏感的）。"""
-    params = arguments.get("params")
-    if not isinstance(params, dict) or not (sensitive or mask_all):
-        return arguments
-    masked = {k: SENSITIVE_MASK if mask_all or k in sensitive else v for k, v in params.items()}
-    return {**arguments, "params": masked}
 
 
 def validation_message(error: ValidationError) -> str:

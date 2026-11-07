@@ -24,14 +24,14 @@ MetricUnit = Literal["requests_per_second", "seconds", "ratio", "count"]
 class ServiceStatusOut(BaseModel):
     id: str = Field(
         description="稳定的标识：核心服务为 api、worker、postgres、redis；"
-        "监控为 prometheus、grafana；集成为 integration:<集成 UUID>；n8n 连接为 n8n；"
+        "监控为 prometheus、grafana；集成为 integration:<集成 UUID>；"
         "V2 为 openim 与 agent:<实例 UUID>（实例只对 owner / admin 列出）"
     )
     name: str
     kind: ServiceKind
     provider: str | None = Field(
         default=None,
-        description="集成的类型（github / n8n），OpenClaw 实例为 openclaw；其他服务为 null",
+        description="集成的类型（github），OpenClaw 实例为 openclaw；其他服务为 null",
     )
     status: ServiceState = Field(
         description="ok 正常；degraded 可用但有问题（限流、部分检查失败）；down 不可用；"

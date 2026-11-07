@@ -24,7 +24,6 @@ import KnowledgePage from '../pages/KnowledgePage.vue'
 import CalendarPage from '../pages/CalendarPage.vue'
 import DeveloperPage from '../pages/DeveloperPage.vue'
 import OperationsPage from '../pages/OperationsPage.vue'
-import AutomationsPage from '../pages/AutomationsPage.vue'
 import ImPage from '../pages/ImPage.vue'
 import AgentsPage from '../pages/AgentsPage.vue'
 import SecretsPage from '../pages/SecretsPage.vue'
@@ -59,7 +58,7 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
         path: item.path,
         // 知识库（T-0099）是带子页面的独立页面：图谱、笔记、编辑器、知识库主页、变更记录、外部文档
         ...(item.path === '/knowledge' ? { children: knowledgeRoutes } : {}),
-        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/automations': AutomationsPage, '/im': ImPage, '/agents': AgentsPage, '/agents/secrets': SecretsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage, '/mail': MailPage, '/settings/mail': MailSettingsPage, '/runner': RunnerPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
+        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/im': ImPage, '/agents': AgentsPage, '/agents/secrets': SecretsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage, '/mail': MailPage, '/settings/mail': MailSettingsPage, '/runner': RunnerPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
         // 消息页（T-0095）、知识库（T-0099）是不带工作台侧栏和顶栏的独立页面
         meta: { title: item.title, description: item.description, admin: adminOnly.has(item.path), owner: ownerOnly.has(item.path), standalone: item.path === '/im' || item.path === '/knowledge' },
       })),

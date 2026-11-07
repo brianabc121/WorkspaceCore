@@ -20,9 +20,7 @@ from app.domain.agent_ops import AgentOpsService
 from app.domain.agent_servers import AgentServerService
 from app.domain.agents import AgentService
 from app.domain.ai_tools import AiToolService
-from app.domain.app_logins import AppLoginService
 from app.domain.auth import AuthContext, AuthService
-from app.domain.automations import AutomationService
 from app.domain.calendar import CalendarService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.dashboards import DashboardService
@@ -231,22 +229,6 @@ def get_agent_ops_service(
 ) -> AgentOpsService:
     # 运维动作与 SSH 部署共用进程内的 SshJobRunner（T-0114）
     return AgentOpsService(db, settings, redis, getattr(request.app.state, "ssh_jobs", None))
-
-
-def get_automation_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    settings: Annotated[Settings, Depends(get_app_settings)],
-    connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
-) -> AutomationService:
-    return AutomationService(db, settings, connectors)
-
-
-def get_app_login_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    settings: Annotated[Settings, Depends(get_app_settings)],
-    connectors: Annotated[ConnectorRuntime, Depends(get_connectors)],
-) -> AppLoginService:
-    return AppLoginService(db, settings, connectors)
 
 
 def get_notification_service(db: Annotated[AsyncSession, Depends(get_db)]) -> NotificationService:

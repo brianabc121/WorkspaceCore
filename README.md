@@ -24,7 +24,6 @@ OpenClaw AI 实例——管理员在工作台里和实例聊天，实例的每�
 | 开发者 | 指定 GitHub 仓库的 Issue、PR、Actions 最近运行（只读、限流感知） |
 | 搜索 | 跨任务、项目、仓库、Issue / PR、收藏、日程搜索，只返回你有权看到的内容 |
 | 运维 | 服务状态、Prometheus 预设指标、Grafana 外链（监控为可选部署） |
-| 自动化 | 白名单内的 n8n 工作流：确认后触发、查看运行记录（可选部署） |
 | 通知 | 通知中心与实时推送（SSE），首页通知组件 |
 | 设置 | 个人资料、工作空间、成员管理、集成、安全（密码与会话）、审计日志 |
 | 全局创建 | 顶栏“创建”菜单：按角色列出新建任务、日程、文档收藏、群聊、成员、OpenClaw 实例，选中后直接打开对应页面的新建表单 |
@@ -47,7 +46,6 @@ flowchart LR
     K --> R
     A -. 只读 .-> G[GitHub API]
     A -. 可选 .-> M[Prometheus / Grafana]
-    A -. 可选 .-> N[n8n]
     A -. V2 可选 .-> O[OpenIM]
     X[OpenClaw 实例<br/>其他服务器] -->|双向证书 / 内网| Y[接入入口 agent-gateway]
     Y --> A
@@ -56,7 +54,7 @@ flowchart LR
 
 - 后端是模块化单体（BFF）：FastAPI + Pydantic 2 + SQLAlchemy 2（async）+ Alembic，后台作业用 ARQ（Redis）。
 - 前端：Vue 3 + TypeScript + Vite，Tailwind CSS 4 + shadcn-vue（reka-ui），TanStack Query、Pinia、GridStack、Zod；接口类型由 OpenAPI 生成。
-- 部署：Docker Compose。core 6 个服务；n8n、OpenIM 各自独立的 Compose 项目；监控是可选 profile。
+- 部署：Docker Compose。core 6 个服务；OpenIM 独立的 Compose 项目；监控是可选 profile。
 
 更多见 [`docs/architecture.md`](docs/architecture.md)。
 
@@ -91,7 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 提示 `curl: command not found`（Debian 最小安装常见）时，先运行 `apt-get update && apt-get install -y curl ca-certificates`。
 
 按步骤的教程：**[`docs/deploy-guide.md`](docs/deploy-guide.md)**——准备服务器、安装 Docker、生成 `.env`、域名与自动 HTTPS、
-创建管理员、接入 GitHub / 监控 / n8n / OpenClaw、配置异地备份与恢复演练、升级与回滚、常见问题。
+创建管理员、接入 GitHub / 监控 / OpenClaw、配置异地备份与恢复演练、升级与回滚、常见问题。
 
 要点：
 
@@ -151,7 +149,7 @@ make test          # pytest、Vitest
 | `apps/web/` | Vue 3 前端 |
 | `compose.yaml`、`compose.https.yaml` | core 服务编排（可选监控 `--profile monitoring`、接入入口 `--profile agents`）；HTTPS 域名模式 |
 | `infra/caddy/` | 统一入口与 OpenClaw 接入入口的 Caddy 配置 |
-| `infra/n8n/`、`infra/openim/`、`infra/monitoring/` | 独立部署的 n8n、OpenIM 与监控配置 |
+| `infra/openim/`、`infra/monitoring/` | 独立部署的 OpenIM 与监控配置 |
 | `infra/openclaw/` | OpenClaw 服务器端的说明 |
 | `scripts/` | 冒烟、备份恢复、安全扫描、`.env` 生成等脚本 |
 | `tests/e2e/`、`tests/perf/` | 全栈验收、浏览器验收、完整冒烟与性能基准 |
@@ -169,5 +167,5 @@ make test          # pytest、Vitest
 
 ## 许可证
 
-本仓库代码以 [Apache License 2.0](LICENSE) 发布。部署时用到的第三方组件各有许可证（例如 Grafana 为 AGPL-3.0，n8n 为 Sustainable Use License，
+本仓库代码以 [Apache License 2.0](LICENSE) 发布。部署时用到的第三方组件各有许可证（例如 Grafana 为 AGPL-3.0，
 Redis 7.4 为 RSALv2 / SSPLv1）：自托管自用没有问题，对外提供服务或分发前请先看 [`docs/versions.md`](docs/versions.md) 第 5 节。

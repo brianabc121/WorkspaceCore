@@ -100,7 +100,6 @@ third_party_images() {
   project="$(env_value COMPOSE_PROJECT_NAME my-workspace)"
   {
     docker compose --profile monitoring --profile agents config --images
-    WORKSPACE_PROJECT="$project" docker compose -p "$project-n8n" -f infra/n8n/compose.yaml --env-file .env config --images
     # V2（方案第 7 节）：OpenIM 的依赖镜像；openim-server 是本仓库按补丁构建的（my-workspace/…），由 ci-openim 扫描
     WORKSPACE_PROJECT="$project" docker compose -p "$project-openim" -f infra/openim/compose.yaml --env-file .env config --images \
       | grep -v '^my-workspace/'

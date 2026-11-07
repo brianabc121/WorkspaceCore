@@ -424,14 +424,13 @@ def test_deploy_pulls_before_starting() -> None:
     for target, start in (
         ("pull", "make up"),
         ("openim-pull", "make -s openim-up"),
-        ("n8n-pull", "make -s n8n-up"),
     ):
         assert f"pull_images {target} " in DEPLOY, target
         assert DEPLOY.index(f"pull_images {target} ") < DEPLOY.index(
             start, DEPLOY.index(f"pull_images {target} ")
         ), target
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    for target in ("pull", "openim-pull", "n8n-pull"):
+    for target in ("pull", "openim-pull"):
         assert re.search(rf"^{target}: env ##", makefile, re.MULTILINE), target
     assert "grep -vx openim-server" in makefile
 
@@ -469,7 +468,7 @@ def test_answers_round_trip_without_executing_anything(tmp_path: Path) -> None:
         tmp_path,
         "deploy_dir_init\n"
         "DOMAIN=ws.example.com EMAIL=ops@example.com BASE_URL=https://ws.example.com\n"
-        f"ANS[N8N_DOMAIN]='$(touch {marker})'\nANS[OPENIM]=n\nANS[N8N_EMAIL]=''\n"
+        f"ANS[INGRESS_HOST]='$(touch {marker})'\nANS[OPENIM]=n\nANS[STORAGE_REGION]=''\n"
         "answers_save\n",
     )
     file = tmp_path / "root/.deploy/answers.env"
@@ -483,8 +482,8 @@ def test_answers_round_trip_without_executing_anything(tmp_path: Path) -> None:
         '  printf "%s=[%s]\\n" "$k" "${ANS[$k]}"\ndone\n'
         'echo "DOMAIN=$DOMAIN EMAIL=$EMAIL BASE_URL=$BASE_URL"\n',
     ).stdout
-    assert f"N8N_DOMAIN=[$(touch {marker})]" in out
-    assert "N8N_EMAIL=[]" in out and "OPENIM=[n]" in out
+    assert f"INGRESS_HOST=[$(touch {marker})]" in out
+    assert "STORAGE_REGION=[]" in out and "OPENIM=[n]" in out
     assert "lower_case" not in out
     assert "DOMAIN=ws.example.com EMAIL=ops@example.com BASE_URL=https://ws.example.com" in out
     assert not marker.exists()
@@ -511,16 +510,16 @@ def test_questions_are_asked_up_front_and_never_in_the_background(tmp_path: Path
         'confirm() { echo "ASKED $1"; return 0; }\nask() { echo "ASKED $1"; }\nPHASE=run\n'
         "ANS[OPENIM]=n\nANS[INGRESS_HOST]=-\n"
         'decide OPENIM "部署 OpenIM？" y && echo OPENIM=yes || echo OPENIM=no\n'
-        'decide N8N "部署 n8n？" y && echo N8N=yes || echo N8N=no\n'
+        'decide STORAGE "配置图片存储？" y && echo STORAGE=yes || echo STORAGE=no\n'
         'decide INGRESS "配置接入入口？" n && echo INGRESS=yes || echo INGRESS=no\n'
         'choose host INGRESS_HOST "域名" "ws.example.com"; echo "host=$host"\n'
-        'choose email N8N_EMAIL "邮箱" "ops@example.com"; echo "email=$email"\n',
+        'choose region STORAGE_REGION "地域" "test-region"; echo "region=$region"\n',
     )
     assert "ASKED" not in run.stdout
-    assert "OPENIM=no" in run.stdout and "N8N=yes" in run.stdout and "INGRESS=no" in run.stdout
-    assert "host=-" in run.stdout and "email=ops@example.com" in run.stdout
-    assert "没有事先回答「部署 n8n？」，按默认：是" in run.stderr
-    assert "没有事先回答「邮箱」，按默认：ops@example.com" in run.stderr
+    assert "OPENIM=no" in run.stdout and "STORAGE=yes" in run.stdout and "INGRESS=no" in run.stdout
+    assert "host=-" in run.stdout and "region=test-region" in run.stdout
+    assert "没有事先回答「配置图片存储？」，按默认：是" in run.stderr
+    assert "没有事先回答「地域」，按默认：test-region" in run.stderr
 
 
 def test_plan_components_records_every_choice(tmp_path: Path) -> None:
@@ -539,16 +538,12 @@ def test_plan_components_records_every_choice(tmp_path: Path) -> None:
         "plan_components\n"
         'for k in $(printf "%s\\n" "${!ANS[@]}" | sort); do\n'
         '  printf "%s=%s\\n" "$k" "${ANS[$k]}"\ndone\n',
-        # n8n：是、邮箱默认；对外：是、域名默认；OpenIM：否；接入入口：是、没有域名、IP
-        stdin="y\n\ny\n\nn\ny\n-\n203.0.113.9\n",
+        # OpenIM：否；接入入口：是、没有域名、IP
+        stdin="n\ny\n-\n203.0.113.9\n",
         env={"PATH": f"{bin_dir}:{os.environ['PATH']}"},
     ).stdout
     answers = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
     assert answers == {
-        "N8N": "y",
-        "N8N_EMAIL": "ops@example.com",
-        "N8N_EXPOSE": "y",
-        "N8N_DOMAIN": "n8n.ws.example.com",
         "OPENIM": "n",
         "INGRESS": "y",
         "INGRESS_HOST": "-",
@@ -578,7 +573,7 @@ connect_status() {
 }
 plan_install() {
   DOMAIN=ws.example.com EMAIL=ops@example.com BASE_URL=https://ws.example.com
-  decide N8N "部署 n8n？" y
+  decide OPENIM "部署 OpenIM？" y
   plan_summary
 }
 do_install() {
@@ -682,7 +677,7 @@ def test_deploy_runs_in_the_background_and_waits_for_the_web_setup(tmp_path: Pat
     assert "setup-token-123456" not in text
     assert "已经创建管理员" in text and "全部完成" in text
     answers = (root / ".deploy/answers.env").read_text()
-    assert "N8N=y" in answers and "SITE_DOMAIN=ws.example.com" in answers
+    assert "OPENIM=y" in answers and "SITE_DOMAIN=ws.example.com" in answers
     assert (root / ".deploy/answers.env").stat().st_mode & 0o777 == 0o600
     assert log.stat().st_mode & 0o777 == 0o600
 
@@ -850,42 +845,6 @@ def test_state_writes_from_both_sides_do_not_overwrite_each_other(tmp_path: Path
     assert out == ["60", "300"]
 
 
-def test_an_unsaved_n8n_password_goes_to_a_root_only_file_not_the_log(tmp_path: Path) -> None:
-    """后台生成的 n8n 密码：接入完成前只在只有 root 能读的文件里，接入成功后删除，不进日志。"""
-    body = (
-        "deploy_dir_init\nPHASE=run\nANS[N8N]=y\nANS[N8N_EMAIL]=ops@example.com\n"
-        "pull_images() { :; }\nmake() { :; }\n"
-        "connect_cmd() {\n"
-        '  case $1 in n8n-owner) echo "owner=$OWNER" ;;\n'
-        "    n8n) cat >/dev/null\n"
-        "      [[ -f $(credential_file n8n) ]] && echo KEPT_WHILE_CONNECTING >&2\n"
-        '      return "$RC" ;; esac\n'
-        "}\n"
-        'connect_n8n none ""\n'
-    )
-    file = tmp_path / "root/.deploy/n8n-credential.txt"
-    todo = tmp_path / "root/.deploy/todo"
-    # 接入失败（例如 owner 已创建、登录失败）：密码留在文件里，列为待办
-    failed = _shell(tmp_path, body, env={"RC": "1", "OWNER": "none"})
-    assert "KEPT_WHILE_CONNECTING" in failed.stderr
-    assert file.stat().st_mode & 0o777 == 0o600
-    password = file.read_text().split("密码：", 1)[1].strip()
-    assert len(password) >= 20
-    assert password not in failed.stderr and password not in failed.stdout
-    assert str(file) in todo.read_text()
-    # 再次运行时 owner 已经存在：待办指向那个文件，而不是要一个从未拿到的密码
-    todo.unlink()
-    again = _shell(tmp_path, body, env={"RC": "1", "OWNER": "exists"})
-    assert str(file) in todo.read_text()
-    assert password not in again.stderr and password not in again.stdout
-    # 接入成功：密码已加密保存在工作台，文件删除，日志里只说去哪里看
-    file.unlink()
-    ok = _shell(tmp_path, body, env={"RC": "0", "OWNER": "none"})
-    assert "KEPT_WHILE_CONNECTING" in ok.stderr
-    assert not file.exists()
-    assert "已加密保存在工作台「自动化」页（日志里不显示）" in ok.stderr
-
-
 # ---------------------------------------------------------------- 知识库图片存储（T-0103）
 
 
@@ -898,3 +857,140 @@ def test_storage_step_is_part_of_connect_and_keeps_secrets_out_of_answers() -> N
     secret_lines = [line for line in DEPLOY.splitlines() if "SECRET" in line and "ANS[" in line]
     assert secret_lines == []
     assert "connect_cmd storage-check" in DEPLOY
+
+
+# ---------------------------------------------------------------- 停用旧的 n8n（T-0149）
+# 测试只调用假的 Docker；站点内容来自旧 write_app_site 的完整生成模板。
+
+LEGACY_SITE = (
+    "# 由 scripts/deploy.sh connect 生成（T-0078）：n8n 的对外入口。"
+    "删除本文件并重启 caddy 即取消对外\n"
+    "automation.example.com {\n"
+    "\tencode zstd gzip\n"
+    "\treverse_proxy n8n:5678\n"
+    "\theader {\n"
+    '\t\tStrict-Transport-Security "max-age=31536000"\n'
+    "\t\tX-Content-Type-Options nosniff\n"
+    "\t\tReferrer-Policy strict-origin-when-cross-origin\n"
+    "\t\t-Server\n"
+    "\t}\n"
+    "}\n"
+)
+
+
+def _retire_n8n(
+    tmp_path: Path,
+    *,
+    site: str | None = LEGACY_SITE,
+    project: str = "my-workspace",
+    exported_project: str = "",
+    fail: str = "",
+    symlink: bool = False,
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    root = tmp_path / "root"
+    sites = root / "infra/caddy/apps-enabled"
+    sites.mkdir(parents=True)
+    (root / ".env").write_text(f"COMPOSE_PROJECT_NAME={project}\nKEEP=unchanged\n")
+    (root / ".deploy").mkdir()
+    (root / ".deploy/n8n-credential.txt").write_text("old credential\n")
+    (root / "legacy-volume").write_text("old workflow data\n")
+    if site is not None:
+        if symlink:
+            (root / "custom-site").write_text(site)
+            (sites / "n8n.caddy").symlink_to(root / "custom-site")
+        else:
+            (sites / "n8n.caddy").write_text(site)
+    (sites / "custom.caddy").write_text("custom.example.com {}\n")
+    log = tmp_path / "docker.log"
+    result = _shell(
+        tmp_path,
+        r"""
+docker() {
+  printf '%s\n' "$*" >> "$LOG"
+  local query="ps -aq --filter label=com.docker.compose.project=$EXPECTED-n8n"
+  query+=" --filter label=com.docker.compose.service="
+  case "$*" in
+    "${query}n8n")
+      [[ $FAIL == discover ]] && return 1
+      echo legacy-service ;;
+    "${query}volume-init") echo legacy-init ;;
+    "rm -f legacy-service" | "rm -f legacy-init") [[ $FAIL != remove ]] ;;
+    *) return 90 ;;
+  esac
+}
+retire_n8n
+""",
+        env={
+            "LOG": str(log),
+            "EXPECTED": exported_project or project or "my-workspace",
+            "COMPOSE_PROJECT_NAME": exported_project,
+            "FAIL": fail,
+        },
+        check=False,
+    )
+    return result, log.read_text().splitlines()
+
+
+@pytest.mark.parametrize(
+    ("project", "exported_project"),
+    [("", ""), ("my-workspace", ""), ("custom", ""), ("custom", "exported")],
+)
+def test_retire_n8n_only_removes_known_service_containers_and_generated_site(
+    tmp_path: Path, project: str, exported_project: str
+) -> None:
+    result, calls = _retire_n8n(tmp_path, project=project, exported_project=exported_project)
+    assert result.returncode == 0, result.stderr
+    name = exported_project or project or "my-workspace"
+    assert calls == [
+        f"ps -aq --filter label=com.docker.compose.project={name}-n8n "
+        "--filter label=com.docker.compose.service=n8n",
+        "rm -f legacy-service",
+        f"ps -aq --filter label=com.docker.compose.project={name}-n8n "
+        "--filter label=com.docker.compose.service=volume-init",
+        "rm -f legacy-init",
+    ]
+    root = tmp_path / "root"
+    assert not (root / "infra/caddy/apps-enabled/n8n.caddy").exists()
+    assert (root / "infra/caddy/apps-enabled/custom.caddy").read_text() == "custom.example.com {}\n"
+    assert (root / "legacy-volume").read_text() == "old workflow data\n"
+    assert (root / ".deploy/n8n-credential.txt").read_text() == "old credential\n"
+    assert (root / ".env").read_text() == f"COMPOSE_PROJECT_NAME={project}\nKEEP=unchanged\n"
+
+
+@pytest.mark.parametrize(
+    ("site", "symlink"),
+    [
+        ("custom.example.com { reverse_proxy custom:80 }\n", False),
+        (LEGACY_SITE.replace("n8n:5678", "custom:80"), False),
+        (LEGACY_SITE, True),
+        (LEGACY_SITE + "custom.example.com {\n\trespond custom\n}\n", False),
+        (LEGACY_SITE.replace("\tencode zstd gzip\n", "\tencode zstd gzip\n\tlog\n"), False),
+    ],
+)
+def test_retire_n8n_preserves_unknown_site_files_and_symlinks(
+    tmp_path: Path, site: str, symlink: bool
+) -> None:
+    result, _ = _retire_n8n(tmp_path, site=site, symlink=symlink)
+    assert result.returncode == 0, result.stderr
+    path = tmp_path / "root/infra/caddy/apps-enabled/n8n.caddy"
+    assert path.read_text() == site
+    assert path.is_symlink() == symlink
+
+
+@pytest.mark.parametrize("fail", ["discover", "remove"])
+def test_retire_n8n_reports_docker_failure_and_preserves_data(tmp_path: Path, fail: str) -> None:
+    result, calls = _retire_n8n(tmp_path, fail=fail)
+    assert result.returncode == 1
+    assert "请检查 Docker 后重试" in result.stderr
+    assert (tmp_path / "root/legacy-volume").read_text() == "old workflow data\n"
+    assert (tmp_path / "root/infra/caddy/apps-enabled/n8n.caddy").read_text() == LEGACY_SITE
+    assert all("volume" not in call and "network" not in call for call in calls)
+
+
+def test_retire_n8n_without_a_legacy_deployment_is_a_noop(tmp_path: Path) -> None:
+    result = _shell(
+        tmp_path,
+        "docker() { [[ $1 == ps ]]; }\nretire_n8n\n",
+        env={"COMPOSE_PROJECT_NAME": ""},
+    )
+    assert result.stdout == result.stderr == ""

@@ -38,9 +38,9 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 |---|---|
 | 1 部署 | 首次安装；已经装过时重新检查并修复（不会丢数据） |
 | 2 升级 | 先加密备份数据库（`make backup`）与 `.env`，再拉取新代码、补 `.env` 新变量、重建、迁移、检查 |
-| 3 清空 | 删除本项目全部容器、网络与数据卷（包括 n8n、OpenIM 的，以及以前部署过的 Vikunja 的），可选先备份；可选同时删除代码目录（其中的本机备份 `backups/` 与 `.env` 先移到 `/var/backups/my-workspace-<时间>/` 保留）；要输入项目名确认 |
+| 3 清空 | 删除本项目全部容器、网络与数据卷（包括 OpenIM 的，以及以前部署过的 Vikunja 的；历史 n8n 数据另行保留），可选先备份；可选同时删除代码目录（其中的本机备份 `backups/` 与 `.env` 先移到 `/var/backups/my-workspace-<时间>/` 保留）；要输入项目名确认 |
 | 4 状态 | 后台任务的进度（等首次安装时显示安装凭据；失败时显示原因）、服务状态、本机与 HTTPS 健康检查 |
-| 5 接入组件 | 接入 n8n，部署 OpenIM，配置 OpenClaw 接入入口；GitHub 在网页上接入（第 8.2 节） |
+| 5 接入组件 | 部署 OpenIM，配置 OpenClaw 接入入口；GitHub 在网页上接入（第 8.2 节） |
 | 6 日志 | 后台任务的日志；任务还在运行时接着显示 |
 
 ### 先问完，再在后台运行（T-0094）
@@ -49,7 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 所以部署、升级、接入组件都分两段：
 
 1. **前台（大约一分钟）**：先检查系统、域名解析、80 / 443 端口，然后把**所有**要你回答的问题一次问完——三个参数（见下表）、
-   要不要部署 n8n / OpenIM / OpenClaw 接入入口和它们的参数、防火墙要不要放行等，最后显示汇总让你确认。
+   要不要部署 OpenIM / OpenClaw 接入入口和它们的参数、防火墙要不要放行等，最后显示汇总让你确认。
    回答保存在 `/srv/my-workspace/.deploy/answers.env`（权限 600，**不含任何密码**）。
 2. **后台**：确认后，脚本作为系统服务在后台运行（`systemd-run`，服务名 `my-workspace-deploy`；没有 systemd 时用 `setsid nohup`），
    **一个问题都不再问**，输出写进 `/srv/my-workspace/.deploy/deploy.log`。终端接着显示日志：
@@ -58,12 +58,11 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
      也可以再运行一次原来那条 `curl … | sudo bash`，它发现已经有任务在运行，会直接接着显示进度，不会开始第二次部署；
    - **网页上的首次安装不用回终端按回车**：服务启动后，后台每隔几秒检测一次，你在浏览器里建好管理员，它就自动接着接入组件
      （最多等 24 小时）。终端和 `status` 会显示网址与安装凭据；**安装凭据不写进日志**。
-3. 后台跑完会列出**需要你处理的事项**（例如以前装过的 n8n 已经有 owner 账号、接入要输入它的密码：这类需要密码的事后台不做，
-   提示你在终端运行 `deploy.sh connect` 当场输入）。失败时 `status` 显示原因和日志的最后几行；处理后**重新运行同样的命令**，
+3. 后台跑完会列出**需要你处理的事项**。失败时 `status` 显示原因和日志的最后几行；处理后**重新运行同样的命令**，
    它会问是否沿用上次的回答，已完成的步骤会很快跳过。
 
 > - 无人值守（例如云服务器的初始化脚本）：`--domain … --email … --yes` 给出三个参数，其余按默认回答；
->   或者写一个回答文件（格式同 `answers.env`，例如 `N8N=y`、`OPENIM=n`）用 `--answers 文件` 传入；
+>   或者写一个回答文件（格式同 `answers.env`，例如 `OPENIM=n`）用 `--answers 文件` 传入；
 > - 拉取镜像失败（网络超时）时自动重试 3 次，已经下载的部分不会重新下载；Docker Hub 的匿名拉取次数限制
 >   （`429 toomanyrequests`）不重试，等一小时或 `docker login` 后重新运行；
 > - 调试时可以加 `--foreground`：不转到后台，在当前终端边问边做（SSH 断开会中断）；
@@ -91,10 +90,10 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 - 写入 `APP_ENV=production`、`COMPOSE_FILE=compose.yaml:compose.https.yaml`、域名、邮箱与 `PUBLIC_BASE_URL`；
 - 检查域名解析、80 / 443 是否被占用（例如 nginx）、ufw 是否放行；
 - `make up` → `make migrate`（数据库密码和 `.env` 不一致时自动同步）→ `make smoke` → 用 GET 检查 `https://<域名>/healthz`；
-- 还没创建管理员时，终端和 `status` 显示网址与安装凭据；你在浏览器建好管理员后，后台自动检测到并按前台的选择接入 n8n、部署 OpenIM、
+- 还没创建管理员时，终端和 `status` 显示网址与安装凭据；你在浏览器建好管理员后，后台自动检测到并按前台的选择部署 OpenIM、
   配置 OpenClaw 接入入口（见下一节）。GitHub 在网页上接入（第 8.2 节）。
 
-### 自动接入 n8n、OpenIM
+### 自动部署 OpenIM 与配置组件
 
 要不要接入这些组件，在部署开头（前台）就问好了；后台在你通过浏览器「首次安装」创建管理员后自动接入，不用回终端。
 以后随时可以单独运行（菜单第 5 项，同样是先问完再在后台运行）：
@@ -105,7 +104,6 @@ sudo bash scripts/deploy.sh connect
 
 | 组件 | 脚本自动做的事 | 需要你做的 |
 |---|---|---|
-| n8n（自动化） | `make n8n-up` → 建 owner 账号（随机密码）→ 建只读 API Key 与名为 `X-Workspace-Trigger` 的 Header Auth 凭据 → 在工作台建连接并测试 | n8n 账号密码加密保存到工作台「自动化」页（只有管理员看得到；后台运行时不写进日志）；之后自己搭工作流（Webhook 节点选这个凭据），再到工作台“自动化”页登记 |
 | OpenIM（「消息」页） | 构建打过补丁的 openim-server 镜像（第一次约 5 ~ 15 分钟，临时占用约 8 GB 磁盘；Docker Hub 限流时自动改用 `mirror.gcr.io` 再试）→ `make openim-up` → 在 `.env` 里填好 `OPENIM_API_URL`、`OPENIM_OBJECT_URL` 并重启 api、worker → 确认工作台连得上 | 内存少于 4 GB 时默认不装（另外占用约 1 GB）；OpenClaw 本身（接入入口与实例）按第 8.6 节配置 |
 | 知识库图片存储 | 问图片存哪里（本地 / Cloudflare R2 / 阿里云 OSS，可以再选一个做副本），R2 / OSS 的地域、桶名、密钥当场输入，只写进 `.env` → 重启 api、worker → 自检（写、读、删一个探测文件） | 先在 R2 / OSS 建一个**私有**桶和只能读写这个桶的密钥；不配就存本地（卷 `kb-files`，随备份）。详见手册第 19 节 |
 
@@ -114,31 +112,9 @@ sudo bash scripts/deploy.sh connect
 - 密码和 Token 不出现在命令行参数和日志里。
 - 已经接入的组件不会重复配置。
 - **GitHub 不在脚本里接入**：在工作台网页上配置（第 8.2 节），脚本只显示它的状态和设置页的地址。
-- n8n owner 已经存在时需要它的密码：运行 `connect` 时在前台当场询问并接入，密码不带到后台；
-  部署（install）的后台遇到这种情况会跳过，列为待办。
-- 登录成功的 n8n 账号密码加密保存到工作台：管理员在「自动化」页的「登录账号」卡片里点「显示密码」
-  或「复制密码」（每次都写审计日志），也可以在那里修改。之前已经接入、还没保存的，再运行 `connect` 时（前台）会问一次，
-  输入账号密码（脚本先登录核对）后保存；也可以直接在页面上填写。member、viewer 看不到这张卡片。
-- 无人值守（`--yes`）时按默认回答：接入 n8n，OpenIM 看内存与磁盘决定，不配置 OpenClaw 接入入口。
-- 最后显示接入状态：「已接入」「未接入」，或者已保存但用不了的原因（凭证失效、暂时连不上等），以及 n8n 的打开地址。
+- 无人值守（`--yes`）时按默认回答：OpenIM 看内存与磁盘决定，不配置 OpenClaw 接入入口。
+- 最后显示接入状态：「已接入」「未接入」，或者已保存但用不了的原因（凭证失效、暂时连不上等）。
 - 依据和实测记录见 [`decisions/2026-11-02-deploy-connect.md`](decisions/2026-11-02-deploy-connect.md)。
-
-#### 用子域名打开 n8n（可选）
-
-默认 n8n 的管理界面只绑定服务器本机，工作台里「打开 n8n 编辑器」指向 `http://localhost:5678`，
-要先建 SSH 隧道（第 8 节开头）才能打开。启用了域名与 HTTPS 时，部署或 `connect` 开头会问要不要用子域名对外打开：
-
-1. 先在域名服务商那里加一条 A 记录，指向这台服务器，例如 `n8n.workspace.example.com`；
-2. 运行 `sudo bash scripts/deploy.sh connect`，问到「用子域名经 HTTPS 对外打开 n8n？」时回答 `y`，
-   域名直接回车用建议值（`n8n.<SITE_DOMAIN>`）或输入自己的。
-
-脚本会：在 `infra/caddy/apps-enabled/` 生成 Caddy 站点（自动申请证书，转发到容器）；把 `.env` 的 `N8N_DOMAIN`、
-`N8N_PUBLIC_URL` 改成新地址，同时设 `N8N_SECURE_COOKIE=true`、`N8N_PROXY_HOPS=1`；
-重启 n8n 与 Caddy（先校验配置，不通过就撤销，工作台不受影响）；更新工作台里的打开链接；最后检查 HTTPS。
-
-- 公开后 n8n 的登录页暴露在公网。n8n 的 owner 能编辑和运行工作流，权限很大：用脚本生成的随机密码或同样强的密码，
-  在 n8n 设置里开启两步验证；不需要时再运行 `connect`，在域名提示处输入 `-` 取消对外。
-- 已经公开的，再运行 `connect` 时回车保持原样；无人值守（`--yes`）时沿用 `.env` 里的设置。
 
 已经有代码时，在代码目录里直接运行，也可以直接指定动作：
 
@@ -154,7 +130,7 @@ sudo bash scripts/deploy.sh install --domain workspace.example.com --email you@e
 
 清空在无人值守时还必须加 `--confirm my-workspace`；连代码目录一起删除再加 `--delete-dir`。全部选项见 `sudo bash scripts/deploy.sh --help`。
 
-脚本部署工作台本身，并可以自动接入 n8n、部署 OpenIM（上一节）；GitHub 在网页上接入（第 8.2 节）；监控、OpenClaw（AI 运维助手，第 8.6 节）等其他可选组件以及异地备份，仍按第 8、9 步配置。
+脚本部署工作台本身，并可以部署 OpenIM（上一节）；GitHub 在网页上接入（第 8.2 节）；监控、OpenClaw（AI 运维助手，第 8.6 节）等其他可选组件以及异地备份，仍按第 8、9 步配置。
 脚本跑完后，下面第 1 ~ 7 步都已完成。想了解每一步做了什么、或者手动部署，就按下面的步骤来。
 
 ---
@@ -165,7 +141,7 @@ sudo bash scripts/deploy.sh install --domain workspace.example.com --email you@e
 |---|---|---|
 | **最小** | 工作台本身（Caddy、前端、API、Worker、PostgreSQL、Redis） | 先试用：首页、项目与任务、日历、通知、收藏、成员管理 |
 | **常用** | 最小 + GitHub（只读）+ 监控（Prometheus / Grafana） | 日常使用 |
-| **完整** | 常用 + n8n（自动化）+ OpenIM 与 OpenClaw（V2：管理员与 AI 实例的 IM、写操作审批） | 需要 AI 运维助手 |
+| **完整** | 常用 + OpenIM 与 OpenClaw（V2：管理员与 AI 实例的 IM、写操作审批） | 需要 AI 运维助手 |
 
 可选组件都可以以后再加，不影响已有数据。建议先按“最小”跑通第 1 ~ 7 步，再到第 8 步逐个添加。
 
@@ -258,7 +234,7 @@ make env
 
 然后**马上把 `.env` 备份到服务器以外的地方**（例如密码管理器）。它里面有：
 
-- `CREDENTIAL_ENCRYPTION_KEY`：加密已保存的第三方凭证（GitHub Token、n8n API Key 等），**丢了就解不开**；
+- `CREDENTIAL_ENCRYPTION_KEY`：加密已保存的第三方凭证（GitHub Token 等），**丢了就解不开**；
 - `BACKUP_PASSWORD`：备份仓库的密码，**丢了备份就打不开**；
 - `SESSION_SECRET`、`SETUP_TOKEN` 等。
 
@@ -375,9 +351,9 @@ make setup-token
 
 > 下面几个组件的管理界面默认只绑定服务器本机（`127.0.0.1`），不对外。从你自己的电脑访问时用 SSH 隧道最安全，例如：
 > ```
-> ssh -L 3000:127.0.0.1:3000 -L 5678:127.0.0.1:5678 <用户>@<服务器>
+> ssh -L 3000:127.0.0.1:3000 <用户>@<服务器>
 > ```
-> 然后在本机浏览器打开 `http://localhost:3000`（Grafana）、`http://localhost:5678`（n8n）。
+> 然后在本机浏览器打开 `http://localhost:3000`（Grafana）。
 
 ### 8.1 项目与任务（不需要接入）
 
@@ -427,21 +403,6 @@ make up
 
 “运维”页里 Prometheus、Grafana 显示“正常”。Grafana 用 `admin` 和 `.env` 里的 `GRAFANA_ADMIN_PASSWORD` 登录，
 预置的仪表盘在 “My Workspace” 文件夹。细节见手册第 12 节。
-
-### 8.5 n8n（自动化）
-
-> 一键脚本可以自动完成第 1、2 步和第 3 步的连接（不含登记工作流）：`sudo bash scripts/deploy.sh connect`。
-
-```bash
-make n8n-up
-```
-
-1. 确认 `.env` 的 `INTEGRATION_ALLOWED_HOSTS` 里有 `n8n`（新生成的 `.env` 默认就是 `n8n`），然后 `make up`；
-2. 打开 n8n 编辑器，创建 owner 账号；创建只读的 API Key（`workflow:list`、`workflow:read`、`execution:list`、`execution:read`）
-   和名为 `X-Workspace-Trigger` 的 Header Auth 凭据；工作流用 Webhook 节点开头；
-3. 工作台“自动化”页：填连接（`base_url` 为 `http://n8n:5678`），测试连接，登记白名单工作流。
-
-`N8N_ENCRYPTION_KEY` 要和备份分开保存。完整步骤见手册第 12.4 节。
 
 ### 8.6 OpenClaw（AI 运维助手，V2，可选）
 
@@ -845,7 +806,7 @@ set -a && . /etc/my-workspace/backup.env && set +a && make restore-verify
 
 它在另一个独立的 Compose 项目里恢复最新快照、迁移、冒烟检查后删除，正在运行的服务不受影响。
 
-n8n、AFFiNE 是独立部署的，各自备份（手册第 14.1 节）。服务器损坏后的真实恢复步骤见手册第 14.5 节——
+AFFiNE 是独立部署的，另行备份（手册第 14.1 节）。服务器损坏后的真实恢复步骤见手册第 14.5 节——
 那时需要第 4 步里另外保存的 `.env`。
 
 ---
@@ -881,9 +842,13 @@ make up && make smoke
 ```
 
 - `make env` 只补上新增的变量，不改已有的值；
-- 先构建、再迁移：迁移通常只新增对象，旧版本在迁移期间照常服务（`0020` 例外：它删除 Vikunja 的数据，迁移期间旧版本的任务页可能出错，`make up` 换上新版本后恢复）；
+- 先构建、再迁移：迁移通常只新增对象，旧版本在迁移期间照常服务（`0020` 与 `0047`（T-0149）例外：分别移除 Vikunja 投影与 n8n 数据，迁移期间旧版本的相关页面可能出错，`make up` 换上新版本后恢复）；
 - 出问题时按手册第 5.3 节回滚：没有新迁移就 `git checkout <旧提交>` 再 `make up`；有新迁移先用新代码 `alembic downgrade` 到升级前的版本；
   更严重时从升级前的快照恢复。
+
+**从带 n8n 的旧版本升级**（T-0149）：先保存工作台数据库备份。迁移 `0047` 删除工作台保存的连接、白名单、执行记录、登录账号与 `automation.trigger` 幂等记录；downgrade 只恢复空表，恢复原数据需要升级前的备份。
+部署 / 升级脚本只停用能够确认属于旧部署的容器与对外站点，**保留旧服务的数据卷、网络、`.env` 与初始凭据文件**；工作台的清空动作也不会自动删除历史 n8n 数据卷。清空时如需删除代码目录，先另外保存仍需要的初始凭据文件。
+自定义部署由管理员自行检查处理，详细边界见手册第 5.1 节与 `docs/decisions/2026-11-07-remove-n8n.md`。
 
 **从带 Vikunja 的旧版本升级**（T-0082）：迁移 `0020` 把已经同步到工作台的 Vikunja 项目与任务转成工作台自己的数据
 （ID 不变，收藏关联与搜索照常），然后删除 Vikunja 集成与 Webhook 收件箱。只转换工作台里已有的同步结果，
@@ -909,7 +874,7 @@ make up && make smoke
 | 备份 / 恢复演练 | `make backup` / `make restore-verify` |
 | 安全扫描 / 性能基准 | `make scan` / `make perf`（手册第 15 节） |
 | 轮换加密密钥 | 手册第 6.1 节 |
-| 查看 n8n / OpenIM 日志 | `make n8n-logs` / `make openim-logs` |
+| 查看 OpenIM 日志 | `make openim-logs` |
 | 知识库图片存储自检 / 时间轴 token “未上报” | 运维页“知识库图片存储”点“自检” / 手册第 20.2 节 |
 
 “运维”页能看到各服务的状态；监控部署后还有请求量、延迟等预设指标。

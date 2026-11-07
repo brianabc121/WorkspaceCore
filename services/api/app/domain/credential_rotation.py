@@ -26,15 +26,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.agent_ca import agent_ca_context
 from app.domain.agent_ssh import agent_ssh_context
 from app.domain.agents import agent_secret_context
-from app.domain.app_logins import password_context
 from app.domain.connectors import account_context
 from app.domain.credentials import CredentialBox, CredentialError
 from app.models import (
     AgentCa,
     AgentSecretVersion,
     AgentSshTarget,
-    AppLogin,
-    AutomationConnection,
     IntegrationAccount,
 )
 
@@ -52,28 +49,12 @@ class SealedField:
     context: Callable[[Any], str]
 
 
-def _automation(kind: str) -> Callable[[Any], str]:
-    return lambda row: f"automation_connection:{row.id}:{kind}"
-
-
 FIELDS: tuple[SealedField, ...] = (
     SealedField(
         "integration_accounts.credential_ref",
         IntegrationAccount,
         "credential_ref",
         lambda row: account_context(row.id),
-    ),
-    SealedField(
-        "automation_connections.api_key_ref",
-        AutomationConnection,
-        "api_key_ref",
-        _automation("api_key"),
-    ),
-    SealedField(
-        "automation_connections.trigger_secret_ref",
-        AutomationConnection,
-        "trigger_secret_ref",
-        _automation("trigger_secret"),
     ),
     SealedField(
         "agent_secret_versions.ciphertext_ref",
@@ -92,12 +73,6 @@ FIELDS: tuple[SealedField, ...] = (
         AgentSshTarget,
         "client_key_ref",
         lambda row: agent_ssh_context(row.id),
-    ),
-    SealedField(
-        "app_logins.password_ref",
-        AppLogin,
-        "password_ref",
-        lambda row: password_context(row.id),
     ),
 )
 

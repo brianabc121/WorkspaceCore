@@ -9,7 +9,7 @@
 // 4. 实时连接：SSE 能建立（200 + text/event-stream）
 // 5. 写入往返：新建日程 → 日历页显示 → 删除；首页加一个便签组件 → 首页显示 → 删除
 // 6. 登出后接口返回 401，页面回到登录
-// 没有配置 GitHub、n8n、Prometheus 时，相关页面应显示“未配置”而不是报错，这也在检查范围内。
+// 没有配置 GitHub、Prometheus 时，相关页面应显示“未配置”而不是报错，这也在检查范围内。
 //
 // 账号：设置 SMOKE_EMAIL / SMOKE_PASSWORD 时用这个已有账号（生产环境用专门的冒烟账号，它要是工作空间的 owner 或 admin）；
 // 否则用同目录的 seed.py 在 api 容器里新建一个临时用户（本机与 CI）。写入的数据在检查结束时删除。
@@ -52,7 +52,7 @@ function readOperations(workspace, dashboard, role) {
     if (role !== 'owner' && (op.summary || '').includes('（owner')) { skipped.push(route); continue }
     const params = op.parameters || []
     const unknown = params.filter((p) => p.in === 'path' && !(p.name in known))
-    if (unknown.length) { skipped.push(route); continue }  // 需要具体资源 ID（任务、自动化）：由各 Sprint 验收覆盖
+    if (unknown.length) { skipped.push(route); continue }  // 需要具体资源 ID（项目、任务）：由各 Sprint 验收覆盖
     let url = route.replace(/\{([a-z_]+)\}/g, (_, name) => known[name])
     const search = params.filter((p) => p.in === 'query' && p.required).map((p) => `${p.name}=${encodeURIComponent(query[p.name])}`)
     if (search.length) url += `?${search.join('&')}`

@@ -145,7 +145,7 @@
 - 项目与任务由工作台自己管理（人类 2026-11-02 决定移除 Vikunja，T-0082）；AFFiNE V1 仅深链接与收藏，不猜测内容读写 API。
 - 工作台 Owns User/Workspace/Project/Task/Widget/Calendar/Mapping/Notification/Audit/Knowledge（知识库笔记，人类 2026-11-03 决定）。
 - 第三方服务故障可降级；Webhook Inbox + 周期对账双保险。
-- 核心 Compose 优先，n8n/AFFiNE/Monitoring 可选部署，生产禁止浮动 latest 镜像。
+- 核心 Compose 优先，AFFiNE/Monitoring 可选部署（人类2026-11-07要求移除工作流服务，T-0149），生产禁止浮动 latest 镜像。
 
 ### V2 补充规则（2026-10-31，人类批准；来自 V2 资料包，按 `docs/v2/TRANSFORMATION_PLAN.md` 调整）
 - 实现 AI、OpenClaw、IM 相关模块前，先读 `docs/v2/TRANSFORMATION_PLAN.md`；与本规范冲突时以它为准。
