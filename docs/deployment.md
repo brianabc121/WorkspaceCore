@@ -44,7 +44,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | 命令 | 作用 |
 |---|---|
 | `sudo bash scripts/deploy.sh` | 一键部署 / 升级 / 清空 / 查看状态（菜单；部署只问 `SITE_DOMAIN`、`ACME_EMAIL`、`PUBLIC_BASE_URL`），见部署教程开头的「一键脚本」 |
-| `sudo bash scripts/deploy.sh connect` | 首次安装后自动接入 n8n、部署 OpenIM、配置 OpenClaw 接入入口（菜单第 5 项）；接入在 api 容器里用 `python -m app.commands.connect` 完成，见部署教程「自动接入 n8n、OpenIM」。GitHub 在网页上接入（第 10 节） |
+| `sudo bash scripts/deploy.sh connect` | 首次安装后部署 OpenIM、配置 OpenClaw 接入入口（菜单第 5 项）；组件状态检查在 api 容器里用 `python -m app.commands.connect` 完成，见部署教程「自动部署 OpenIM 与配置组件」。GitHub 在网页上接入（第 10 节） |
 | `make env` | 从 `.env.example` 生成 `.env`，随机填写数据库密码、会话密钥等；`.env` 已存在则不改，只补新增的变量。每次都检查 `.env`（占位符、加密密钥格式、生产环境会话密钥长度、Windows 换行），有问题就列出并以非零状态退出，`make up` 不会开始构建 |
 | `make up` | 构建镜像并启动 6 个服务，等待全部健康检查通过（最多 300 秒） |
 | `make migrate` | 在运行中的 `api` 容器里执行 `alembic upgrade head` |
@@ -59,7 +59,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 
 | 服务 | 镜像 | 作用 | 网络 | 对外端口 |
 |---|---|---|---|---|
-| caddy | `caddy:2.11.7-alpine` | 统一入口：路由、安全响应头、请求体限制 | frontend + integrations | `127.0.0.1:8080`（可配置） |
+| caddy | `caddy:2.11.7-alpine` | 统一入口：路由、安全响应头、请求体限制 | frontend | `127.0.0.1:8080`（可配置） |
 | web | `my-workspace-web:local`（`apps/web/Dockerfile`） | 前端静态文件（nginx，非 root） | frontend | 无 |
 | api | `my-workspace-api:local`（`services/api/Dockerfile`） | FastAPI BFF（非 root） | backend + frontend + integrations + monitoring | 无 |
 | worker | 同 api 镜像 | ARQ 后台作业 | backend + integrations + egress | 无 |
@@ -69,8 +69,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | grafana（可选） | `grafana/grafana:13.2.5` | 仪表盘与告警（外链） | monitoring + monitoring-public | `127.0.0.1:3000`（可配置） |
 
 - `backend` 是内部网络（不通外网）；数据库和 Redis 只在这个网络里，宿主机和外网都连不到。
-- `integrations` 也是内部网络，只有 caddy、api、worker 加入，供独立部署的第三方服务（n8n，见第 12.4 节）与工作台互通；
-  第三方服务碰不到 backend 里的数据库和 Redis。
+- `integrations` 是 api、worker 使用的内部连接网络，用于显式允许的内网 Connector；允许主机列表默认留空。第三方服务碰不到 backend 里的数据库和 Redis。
 - `egress` 只有 worker 加入，用来访问外部托管的服务（GitHub 的周期同步要访问 `https://api.github.com`）；
   api 经 `frontend` 出网。出站地址仍由 Connector 的 SSRF 检查限制（私有地址只允许 `INTEGRATION_ALLOWED_HOSTS` 里的主机）。
 - `monitoring` 是内部网络，只有 api、prometheus、grafana 加入；`monitoring-public` 只用来发布 Grafana 的端口。
@@ -96,7 +95,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | `SETUP_TOKEN` | 首次安装凭据（`make setup-token` 查看）；未配置时首次安装一律拒绝 | 随机 |
 | `CREDENTIAL_ENCRYPTION_KEY` | 第三方连接凭证与密钥库的加密密钥（64 位十六进制）；格式错误时 API 拒绝启动。**丢失后已保存的凭证无法解密**，请与数据库备份分开保存；更换按第 6.1 节轮换 | 随机 |
 | `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS` | 轮换期间保留的旧密钥（逗号分隔，只用于解密）；平时为空 | 空 |
-| `INTEGRATION_ALLOWED_HOSTS` | 允许工作台访问的内网主机名，逗号分隔。第三方服务的地址解析到私有 / 内网 / 链路本地地址时一律拒绝（SSRF 防护），除非主机名在这里 | `n8n` |
+| `INTEGRATION_ALLOWED_HOSTS` | 允许工作台访问的内网主机名，逗号分隔。第三方服务的地址解析到私有 / 内网 / 链路本地地址时一律拒绝（SSRF 防护），除非主机名在这里 | 空 |
 | `PROMETHEUS_URL` / `GRAFANA_URL` | 可选监控的内部地址（第 12 节）；留空表示没有部署，运维页显示“未部署” | 空 |
 | `GRAFANA_DASHBOARD_URL` | 运维页 Grafana 外链（浏览器访问的地址） | 空 |
 | `GRAFANA_ADMIN_PASSWORD` | Grafana 管理员密码；为空时 Grafana 拒绝启动 | 随机 |
@@ -163,13 +162,13 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 4. `git fetch && git checkout <新版本的 tag 或提交>`，然后 `make env`：只补上新增的变量，不改已有的值。
 5. `docker compose build`：先构建新镜像，旧容器照常服务。
 6. `docker compose run --rm --no-deps -T api alembic upgrade head`：用新镜像执行迁移，此时旧版本仍在运行。
-   - 迁移通常只新增对象（第 5.2 节），旧代码不受影响；`0020` 例外（见下面「从带 Vikunja 的旧版本升级」）。
+   - 迁移通常只新增对象（第 5.2 节），旧代码不受影响；`0020` 与 `0047`（T-0149）的移除迁移例外（见下面的旧版本升级说明）。
 7. `make up`：用新镜像重建容器，等待全部健康检查通过。
 8. `make smoke`。装了 `tests/e2e` 的依赖时再跑 `make smoke-full`。
 9. 登录核对首页、任务、日历等常用页面，查看运维页的服务状态。
 
-n8n 等独立部署的组件分开升级：
-- 先各自备份（n8n 备份数据卷与 `N8N_ENCRYPTION_KEY`）；
+OpenIM 等独立部署的组件分开升级：
+- 先按第 14、17 节备份各自的数据；
 - 再改 `infra/*/compose.yaml` 里的 tag + digest，按对应的核验 ADR 重新验证。
 
 **从带 Vikunja 的旧版本升级**（T-0082，`docs/decisions/2026-11-02-remove-vikunja.md`）：
@@ -184,17 +183,24 @@ n8n 等独立部署的组件分开升级：
   有 `infra/caddy/apps-enabled/vikunja.caddy` 就删掉，再 `docker compose restart caddy`。
 - 降级到 `0020` 之前只恢复表结构（第 5.2 节），工作台的项目与任务会被删除；以前的数据还在 Vikunja 的数据卷里。
 
+**从带 n8n 的旧版本升级**（T-0149，`docs/decisions/2026-11-07-remove-n8n.md`）：
+
+- 升级前保存工作台数据库备份。迁移 `0047` 删除工作台保存的连接、白名单、执行记录、登录账号与 `automation.trigger` 幂等记录；回滚需要升级前的备份，downgrade 只恢复空表。
+- `deploy.sh install` / `upgrade` 只停用已知旧 Compose 项目（`<core 项目名>-n8n`，默认 `my-workspace-n8n`）中标记为 `n8n` / `volume-init` 的容器，并只删除完整匹配旧脚本生成模板、未经修改的 n8n Caddy 站点。自定义或附加过其他站点内容的文件保留；当前 Caddy 配置不再加载应用站点目录。
+- 安装 / 升级退役时，旧服务的**全部数据卷、网络、`.env` 与初始凭据文件保留**；清空工作台也不自动清除历史 n8n 数据卷。使用清空的删除代码目录选项前，先另外保存仍需要的初始凭据文件。未知或自定义部署由管理员自行检查处理。工作台不再读取旧 `N8N_*` 设置，也不再保存或显示这些服务的凭据。
+- 该迁移不修改 n8n 自己的数据库或工作流；如需保留其独立使用能力，先另外保存旧服务的数据与解密密钥。
+
 ### 5.2 数据库迁移的约定
 
 - 迁移 `0001` ~ `0019` 都**只新增**表、索引、触发器或可空列（`0014` 给 `im_messages` 加了一列，`0018` 给 `agent_instances` 加了一列），每个都有 downgrade。
   `0020`（T-0082）是例外：转换 Vikunja 投影为工作台自己的项目与任务，删除 Vikunja 集成、`webhook_inbox` 表与 `integrations.webhook_secret_ref`；
-  downgrade 只恢复结构、不恢复数据（人类确认后合并）。
+  downgrade 只恢复结构、不恢复数据（人类确认后合并）。`0047`（T-0149）也是删除 n8n 数据的收缩迁移，降级只能恢复空表（见移除说明）。
   CI 每次都跑 `upgrade head → downgrade base → upgrade head`（`ci-api.yml`），恢复演练也会在恢复出来的数据上执行 `upgrade head`。
 - 以后的迁移继续遵守“先扩展、后收缩”：
   - 新版本只加表、加列（可为空或有默认值），旧代码照常运行；
   - 删列、改类型、改名分两次发布：先让代码不再使用，下一次发布再删除。
 - **会改写或删除已有数据的迁移不可逆**：downgrade 无法找回数据。这类迁移要写明，并由人类决定后再合并（D-0004 第 3 节）；回滚只能从备份恢复。
-- downgrade 会删除这次迁移新增的表，**连同其中的数据**。例如退回 `0009` 会删除自动化的连接、白名单与执行记录。
+- downgrade 会删除这次迁移新增的表，**连同其中的数据**。例如退回 `0008` 会删除迁移 `0009` 新建的通知表与通知记录。
 
 ### 5.3 回滚
 
@@ -229,7 +235,7 @@ n8n 等独立部署的组件分开升级：
   最右侧的地址计数）。如果绕过 Caddy 直接暴露 API，必须去掉这个设置，否则客户端可以伪造 IP 绕过限流。
 - **备份**：把 `BACKUP_REPOSITORY` 配成异地仓库，定时运行 `make backup`，每月运行一次 `make restore-verify` 演练（第 14 节）。
 - **版本锁定**：所有镜像都是 tag + digest（`docs/versions.md`）。不要改成 `latest`；升级按第 5 节和 `docs/release-checklist.md` 进行。
-- **许可证**：Grafana 是 AGPL-3.0，n8n 是 Sustainable Use License，Redis 7.4 是 RSALv2 / SSPLv1。
+- **许可证**：Grafana 是 AGPL-3.0，Redis 7.4 是 RSALv2 / SSPLv1。
   自托管自用没有问题；要对外提供服务或分发之前，先看 `docs/versions.md` 第 5 节。
 - **发布前**：按 `docs/release-checklist.md` 逐项检查（CI、扫描、版本锁定、备份演练、`.env` 与密钥轮换、性能、回滚方案）。
 
@@ -245,7 +251,7 @@ n8n 等独立部署的组件分开升级：
    docker compose exec -T api python -m app.commands.rotate_credentials --dry-run
    docker compose exec -T api python -m app.commands.rotate_credentials
    ```
-   覆盖集成凭证、集成的 Webhook 密钥、n8n 的 API Key 与共享密钥、OpenClaw 密钥库、内部 CA 私钥。
+   覆盖现有集成凭证、OpenClaw 密钥库与内部 CA 私钥。
    可以重复运行；只改密文，不改记录的 `updated_at` 和版本号。
 4. 输出“仍是旧密钥：0；失败：0”（退出码 0）之后，**再等 15 分钟**（AI 待审批的最长有效期）：待审批记录里加密的敏感参数与参数校验用的密钥
    不在第 3 步的范围内，第 2 步之前创建的待审批要靠旧密钥才能批准执行。然后清空 `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS`，再 `docker compose up -d api worker`。
@@ -342,7 +348,7 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
   英文支持词干，例如 deploy 能找到 deploying。
 
 
-## 12. 监控与自动化（Sprint 5，可选组件）
+## 12. 监控（Sprint 5，可选组件）
 
 版本与核验结果见 `docs/decisions/2026-10-31-prometheus-grafana-n8n-verification.md`，
 接口约定见 `docs/decisions/2026-10-31-sprint-5-operations-automations-contract.md` 第 3 节。
@@ -422,62 +428,6 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
   需要严格的“7 天”时，在宿主机的日志收集里按时间清理。
 - 指标在 Prometheus 里保留 7 天。长期趋势请在 Grafana 里另行配置聚合或远端存储（不在 V1 范围）。
 
-### 12.4 n8n（自动化，可选）
-
-> 用子域名经 HTTPS 对外打开 n8n 编辑器：设置 `N8N_DOMAIN`（同时 `N8N_PUBLIC_URL=https://<域名>/`、`N8N_SECURE_COOKIE=true`、
-> `N8N_PROXY_HOPS=1`），并在 `infra/caddy/apps-enabled/` 生成站点；`scripts/deploy.sh connect` 会询问并自动完成（T-0078）。
-
-n8n 是独立的 Compose（`infra/n8n/compose.yaml`），加入 core 的 `integrations` 网络。
-接口约定见 Sprint 5 契约第 6 节，触发与执行记录的实测见 `docs/decisions/2026-10-31-n8n-trigger-and-execution-verification.md`。
-
-1. 启动：
-
-   ```bash
-   make up
-   ```
-
-   ```bash
-   make n8n-up
-   ```
-
-   `make env` 会随机生成 `N8N_ENCRYPTION_KEY`，请与数据库备份分开保存。
-2. 允许工作台访问 n8n：在 `.env` 的 `INTEGRATION_ALLOWED_HOSTS` 里加上 `n8n`（新生成的 `.env` 默认就是 `n8n`），然后 `make up`。
-3. 打开编辑器（默认 `http://localhost:5678/`），创建 owner 账号，然后：
-   - **API Key**：Settings → n8n API → Create an API key，只勾选 `workflow:list`、`workflow:read`、`execution:list`、`execution:read`。
-     工作台不会尝试写入，所以测试连接发现不了权限过大的 Key，请只勾选这四项。
-   - **共享密钥**：新建 Header Auth 凭据，Name 填 `X-Workspace-Trigger`，Value 用一段随机字符串（至少 16 个字符）。
-   - **工作流**：以 Webhook 节点开头：
-     - HTTP Method 为 `POST`；
-     - Path 是一个固定的名字（只用字母、数字、`-`、`_`）；
-     - Authentication 选 Header Auth，并选上面的凭据；
-     - Respond 选 Immediately。
-     保存并激活。
-4. 在工作台的自动化页（admin）：
-   - 填写连接：`base_url` 为 `http://n8n:5678`，`public_url` 为浏览器打开编辑器的地址，再填 API Key 与共享密钥；
-   - 测试连接；
-   - 登记白名单：工作流 ID 在编辑器地址栏的 `/workflow/<ID>` 里，Webhook 路径就是上面的 Path，并声明参数。
-5. 工作流收到的请求体是 `{"workspace_run_id": "<执行记录 ID>", "params": {…}}`。
-   - 在 n8n 里用 `{{ $json.body.params.<参数名> }}` 读取参数；
-   - 只有登记时声明过的参数才会发过来。
-
-注意：
-
-- **版本**：工作台读不到 n8n 的版本号（n8n 不提供）。测试连接时会给出警告，请确认部署的是核验过的 2.45.7，`infra/n8n/compose.yaml` 已按 digest 锁定。
-- **执行记录**：Worker 每分钟对账一次。
-  - 按触发请求的 `traceparent` 找到对应的 n8n 执行；
-  - 失败时只读 n8n 遮蔽后的节点名与错误类型作为摘要，错误正文请到编辑器里看。
-  - 触发后 15 分钟仍找不到对应执行的，标为“无法确认是否执行”，并通知触发者。
-- **重复执行**：触发请求结果未知（超时、连接中断）时不会自动重发。同一个 Idempotency-Key 的重复请求只会返回原来的执行记录。
-- **执行数据**：n8n 自己保存的执行数据由 n8n 管理，工作台不读取、不保存参数与输出。需要时在 n8n 里设置执行数据的保留期与遮蔽策略。
-
-- **n8n**（`n8nio/n8n:2.45.7`）
-  - 必须设 `N8N_LISTEN_ADDRESS=0.0.0.0`：没有 IPv6 的网络里，默认的 `::` 会让容器直接退出。
-  - 健康检查用 `/healthz/readiness`：`/healthz` 在数据库迁移完成前就返回 ok。
-  - 固定 `N8N_ENCRYPTION_KEY`，丢失后已存的凭据无法解密。
-  - 给工作台用的 API Key 只勾选 `workflow:list`、`workflow:read`、`execution:list`、`execution:read`。
-  - 白名单工作流用 Webhook 节点加 Header Auth 作为入口。
-  - n8n 采用 Sustainable Use License：对外商业托管或让其他客户配置工作流之前，要重新核验许可证。
-
 ## 13. 通知与实时更新（Sprint 5）
 
 约定见 `docs/decisions/2026-10-31-sprint-5-operations-automations-contract.md` 第 4、5 节。
@@ -485,8 +435,7 @@ n8n 是独立的 Compose（`infra/n8n/compose.yaml`），加入 core 的 `integr
 - **通知**存在 PostgreSQL 的 `notifications` 表（迁移 0009）。
   - 来源：
     - 集成授权失效、无法连接、恢复，以及 GitHub 限流，发给工作空间的 owner / admin；
-    - 服务健康告警（见下）；
-    - 自动化的执行结果，发给触发者（T-0037）。
+    - 服务健康告警（见下）。
   - 同一件事一小时内只通知一次。
   - 保留期：已读的保留 `NOTIFICATION_RETENTION_DAYS` 天（默认 90），未读的保留两倍时间。Worker 每小时第 17 分钟清理。
 - **服务健康告警**（S5-02）：
@@ -521,8 +470,7 @@ n8n 是独立的 Compose（`infra/n8n/compose.yaml`），加入 core 的 `integr
   - `.env`：里面有解密凭证的 `CREDENTIAL_ENCRYPTION_KEY`、会话密钥和备份仓库的密码。
     把它和备份分开保管（例如放进密码管理器），**不要只留在这台服务器上**。丢了它，备份里保存的第三方凭证就无法解密，备份本身也打不开。
   - Redis：只有缓存、任务队列、SSE 事件与限流计数，丢失后会自动重建；会话与幂等记录都在 PostgreSQL 里。
-  - 独立部署的组件各自备份：n8n 备份它的数据卷与 `N8N_ENCRYPTION_KEY`；
-    AFFiNE 的 PostgreSQL、storage、config 要一起备份（第 9 节）。
+  - 独立部署的 AFFiNE 另行备份：PostgreSQL、storage、config 要一起备份（第 9 节）。
 
 ### 14.2 配置（`.env`）
 
@@ -587,7 +535,7 @@ S3 仓库的凭据（`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_DEFAUL
 
 - 需要：`deps` 要 `uv` 与 `npm`；`secrets` 与 `images` 要 Docker。`images` 要先构建镜像（`make up`），
   第三方镜像的清单取自 compose 文件，所以还要有 `.env`。
-- 第三方镜像清单（V2 起）：core 与 monitoring、agents 两个 profile、n8n、OpenIM 的依赖组件，
+- 第三方镜像清单（V2 起）：core 与 monitoring、agents 两个 profile、OpenIM 的依赖组件，
   以及 OpenClaw 服务器上运行的 OpenClaw 与 ghostunnel（取自接入包模板）。OpenIM 的补丁镜像由 `ci-openim` 构建后扫描，有修复的严重漏洞就失败。
 - trivy 的漏洞库缓存在 `~/.cache/trivy`（约 1 GB，`TRIVY_CACHE_DIR` 可改）；`SCAN_THIRD_PARTY=0` 只扫描本仓库的镜像。
 - 出网经过 TLS 代理的环境：设置 `SSL_CERT_FILE` 指向代理的 CA，脚本会把它挂进 trivy 容器；`HTTPS_PROXY` 等变量原样传入。
@@ -612,7 +560,7 @@ S3 仓库的凭据（`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_DEFAUL
 
 - 默认用 `tests/e2e/seed.py` 在 api 容器里新建一个临时用户（本机与 CI）。
 - 在已经部署的环境里检查时，设置 `SMOKE_EMAIL` / `SMOKE_PASSWORD` 使用一个专门的冒烟账号（工作空间的 owner 或 admin）；写入的测试数据在结束时删除。
-- 没有配置 GitHub、n8n、Prometheus 时，相关页面显示“未配置”，冒烟照样通过。
+- 没有配置 GitHub、Prometheus 时，相关页面显示“未配置”，冒烟照样通过。
 
 ### 15.3 性能基准：`make perf`
 
@@ -699,7 +647,7 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 ## 17. OpenIM（V2 管理员端 IM 的后端，独立部署）
 
 管理员在工作台里和 OpenClaw 实例聊天，消息经 OpenIM 中转。OpenIM 是**独立的 Compose 项目**（`infra/openim/compose.yaml`），
-和 n8n 一样加入 core 创建的网络。设计见 `docs/v2/TRANSFORMATION_PLAN.md` 第 4.4、6.1 节；
+加入 core 创建的 `im` / `agent-im` 网络。设计见 `docs/v2/TRANSFORMATION_PLAN.md` 第 4.4、6.1 节；
 补丁镜像、接入方式与实测见 `docs/decisions/2026-10-31-v2-oc3-openim-patched-image.md`（第 16 节是部署）。
 
 ### 17.1 网络与地址

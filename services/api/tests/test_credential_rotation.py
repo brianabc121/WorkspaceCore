@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.domain.agent_ssh import agent_ssh_context
 from app.domain.agents import agent_secret_context
-from app.domain.app_logins import password_context
 from app.domain.connectors import account_context
 from app.domain.credential_rotation import rotate
 from app.domain.credentials import CredentialBox
@@ -18,7 +17,6 @@ from app.models import (
     AgentSecret,
     AgentSecretVersion,
     AgentSshTarget,
-    AppLogin,
     Integration,
     IntegrationAccount,
 )
@@ -61,16 +59,6 @@ async def _seed(url: str, box: CredentialBox) -> dict[str, uuid.UUID]:
                     ciphertext_ref=box.seal("sk-1", context=agent_secret_context(secret_id, 1)),
                 )
             )
-            login_id = uuid.uuid4()
-            db.add(
-                AppLogin(
-                    id=login_id,
-                    workspace_id=workspace,
-                    app="n8n",
-                    username="workspace",
-                    password_ref=box.seal("pw", context=password_context(login_id)),
-                )
-            )
             # SSH 自动部署的专用私钥（T-0089 B2）
             instance_id, target_id = uuid.uuid4(), uuid.uuid4()
             db.add(
@@ -104,7 +92,6 @@ async def _seed(url: str, box: CredentialBox) -> dict[str, uuid.UUID]:
                 "integration": integration_id,
                 "account": account_id,
                 "secret": secret_id,
-                "login": login_id,
                 "target": target_id,
             }
     finally:
@@ -125,16 +112,15 @@ async def test_rotation_reencrypts_every_sealed_field(migrated_database_url: str
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
             dry = await rotate(db, box, dry_run=True)
-            assert dry.remaining_old == 4 and dry.failed == 0
+            assert dry.remaining_old == 3 and dry.failed == 0
             report = await rotate(db, box)
             assert report.remaining_old == 0 and report.failed == 0
-            assert sum(f.rotated for f in report.fields.values()) == 4
+            assert sum(f.rotated for f in report.fields.values()) == 3
             again = await rotate(db, box)  # 可以重复运行
             assert sum(f.rotated for f in again.fields.values()) == 0
             account = (await db.execute(select(IntegrationAccount))).scalar_one()
             integration = (await db.execute(select(Integration))).scalar_one()
             version = (await db.execute(select(AgentSecretVersion))).scalar_one()
-            login = (await db.execute(select(AppLogin))).scalar_one()
             target = (await db.execute(select(AgentSshTarget))).scalar_one()
     finally:
         await engine.dispose()
@@ -149,8 +135,6 @@ async def test_rotation_reencrypts_every_sealed_field(migrated_database_url: str
         version.ciphertext_ref or "", context=agent_secret_context(ids["secret"], 1)
     )
     assert secret.get_secret_value() == "sk-1"
-    password = box.resolve(login.password_ref or "", context=password_context(ids["login"]))
-    assert password.get_secret_value() == "pw"
     key = box.resolve(target.client_key_ref or "", context=agent_ssh_context(ids["target"]))
     assert key.get_secret_value() == "private key"
     # 重新加密对业务不可见：不改 updated_at

@@ -12,13 +12,9 @@ NPM ?= npm
 PYTHON ?= $(shell command -v python3.12 2>/dev/null || command -v python3 2>/dev/null || echo python3)
 COMPOSE ?= docker compose
 HAS_WEB := $(wildcard $(WEB_DIR)/package.json)
-# 独立部署的组件（n8n、OpenIM）：项目名与 core 分开，并告诉它 core 的项目名以加入 core 的网络
+# 独立部署的 OpenIM：项目名与 core 分开，并告诉它 core 的项目名以加入 core 的网络
 # （T-0082 移除了 Vikunja，项目与任务由工作台自己管理）
 WORKSPACE_PROJECT := $(or $(COMPOSE_PROJECT_NAME),my-workspace)
-# 可选的 n8n（infra/n8n/compose.yaml），加入 core 的 integrations 网络
-N8N_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-n8n \
-	-f infra/n8n/compose.yaml --env-file .env
-N8N_URL := $(or $(shell sed -n 's/^N8N_PUBLIC_URL=//p' .env 2>/dev/null),http://localhost:5678/)
 # 独立部署的 OpenIM（infra/openim/compose.yaml），加入 core 的 im 网络；部署了 OpenClaw 接入入口（agent-im 网络存在）时
 # 再叠加 compose.agents.yaml。用 shell 的 $$(...) 在执行时判断，不用 $(shell)：make 会在执行前展开整个命令
 OPENIM_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-openim \
@@ -35,7 +31,7 @@ endef
 .PHONY: help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke openapi setup-token \
 	lint lint-api lint-web format test test-api test-web build-web backup restore-verify \
 	smoke-full perf scan \
-	n8n-up n8n-down n8n-logs n8n-pull agent-ca agents-up pull openim-pull \
+	agent-ca agents-up pull openim-pull \
 	openim-build openim-up openim-down openim-logs
 
 help: ## 列出可用命令
@@ -119,19 +115,6 @@ openim-down: ## 停止 OpenIM；保留数据卷
 
 openim-logs: ## 跟踪 OpenIM 日志（Ctrl+C 退出）
 	$(OPENIM_COMPOSE) logs -f --tail=100
-
-n8n-pull: env ## 拉取 n8n 的镜像
-	$(N8N_COMPOSE) pull
-
-n8n-up: env ## 启动独立部署的 n8n（自动化，可选）；需要先 make up
-	$(N8N_COMPOSE) up -d --wait --wait-timeout 300
-	@echo "n8n 编辑器：$(N8N_URL)  首次打开时创建 owner 账号；工作台的接入步骤见 docs/deployment.md 第 12.4 节"
-
-n8n-down: ## 停止 n8n；保留数据卷
-	$(N8N_COMPOSE) down
-
-n8n-logs: ## 跟踪 n8n 日志（Ctrl+C 退出）
-	$(N8N_COMPOSE) logs -f --tail=100
 
 smoke: ## 经 Caddy 检查健康、就绪、前端页面与安全响应头
 	scripts/smoke.sh http://127.0.0.1:$(HTTP_PORT)

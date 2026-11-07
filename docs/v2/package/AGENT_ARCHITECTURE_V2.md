@@ -26,7 +26,6 @@ flowchart TD
   CX --> CR[Codex Worker isolated git worktrees]
   O --> V[Vikunja Connector]
   O --> G[GitHub Connector / PRs]
-  O --> N[n8n workflows optional]
   OC --> EVENTS[Event normalizer]
   CX --> EVENTS
   CLOUD --> EVENTS

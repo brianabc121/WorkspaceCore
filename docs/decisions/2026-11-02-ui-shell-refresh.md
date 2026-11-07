@@ -1,5 +1,7 @@
 # 2026-11-02 界面外框重做：图标、侧栏分组、精简顶栏、账户菜单（T-0083）
 
+> 后续变更（T-0149）：本文记录的自动化页面已随 n8n 移除；相关截图与扫描结果仅保留为当时的 UI 验证，当前页面范围见 `docs/architecture.md`。
+
 - 状态：accepted（人类 2026-11-02 在对话中要求“重新优化整个工作台的 UI 以及功能”；方案与细节由 claude 决定）
 - 关联：`apps/web/src/App.vue`、`apps/web/src/style.css`、`apps/web/src/app/navIcons.ts`、
   `apps/web/src/components/AccountMenu.vue`、`apps/web/src/composables/useCollapsedSections.ts`、`apps/web/src/features/time.ts`

@@ -7,6 +7,16 @@ import { useAuthStore } from '../src/stores/auth'
 import { registry, parseWidget } from '../src/widgets/registry'
 
 describe('notifications', () => {
+  it('opens an old workflow notification in the normal missing-page view', async () => {
+    const requests = mockApi(r => path(r) === '/api/v1/notifications' ? Response.json({ ...notifications, items: [{ ...notification, link: '/automations', title: '历史通知' }] }) : undefined)
+    const { router } = await openApp('/')
+    await fireEvent.click(await screen.findByRole('button', { name: '通知，2 条未读' }))
+    const list = await screen.findByRole('region', { name: '通知列表' })
+    await fireEvent.click(within(list).getByRole('link', { name: '历史通知' }))
+    expect(await screen.findByRole('heading', { name: '页面未找到' })).toBeVisible()
+    expect(router.currentRoute.value.path).toBe('/automations')
+    expect(requests.some(request => /^\/api\/v1\/(automations|app-logins)(\/|$)/.test(path(request)))).toBe(false)
+  })
   it('keeps original list/overview read timestamps when count patch succeeds but subsequent reads fail', async () => {
     let failed = false
     mockApi(r => {

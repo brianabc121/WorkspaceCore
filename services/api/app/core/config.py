@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     agent_im_object_base_url: str = ""
 
     # 第三方集成（Sprint 3 契约第 4.3 节）：解析到私有地址时只允许这些主机名（逗号分隔），
-    # 例如 Compose 中独立部署的 n8n；其余私有、回环、链路本地地址一律拒绝（SSRF 防护）
+    # 例如独立部署的内部集成服务；其余私有、回环、链路本地地址一律拒绝（SSRF 防护）
     integration_allowed_hosts: str = ""
     connector_connect_timeout_seconds: float = Field(default=3.0, gt=0, le=30)
     connector_read_timeout_seconds: float = Field(default=10.0, gt=0, le=60)

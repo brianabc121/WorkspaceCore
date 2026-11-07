@@ -144,7 +144,8 @@ async def test_initialize_and_tool_list_follow_the_instance_scope(env: Env) -> N
 
     listed = (await rpc(env, writer, "tools/list")).json()["result"]["tools"]
     names = {tool["name"] for tool in listed}
-    assert {"create_task", "delete_task", "trigger_automation", "get_action_status"} <= names
+    assert {"create_task", "delete_task", "get_action_status"} <= names
+    assert {"list_automations", "trigger_automation"}.isdisjoint(names)
     bookmark = next(tool for tool in listed if tool["name"] == "create_bookmark")
     assert bookmark["inputSchema"]["additionalProperties"] is False
     delete = next(tool for tool in listed if tool["name"] == "delete_task")
@@ -196,6 +197,10 @@ async def test_tool_errors_use_is_error_with_a_code(env: Env) -> None:
     unknown = await call(env, token, "list_members", {})
     assert unknown["isError"] is True
     assert tool_error(unknown)["code"] == "NOT_FOUND"
+    for removed in ("list_automations", "trigger_automation"):
+        retired = await call(env, token, removed, {})
+        assert retired["isError"] is True
+        assert tool_error(retired)["code"] == "NOT_FOUND"
     invalid = await call(env, token, "create_bookmark", {"url": "https://a.test", "extra": 1})
     assert tool_error(invalid)["code"] == "VALIDATION_FAILED"
     missing = await call(env, token, "delete_task", {"task_id": str(uuid.uuid4())})

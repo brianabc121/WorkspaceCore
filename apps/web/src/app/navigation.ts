@@ -8,7 +8,6 @@ export const navigation = [
   { path: '/mail', title: '邮件', section: '工作空间', description: '查收、阅读、回复 Gmail 邮件（owner 与 admin）。' },
   { path: '/developer', title: '开发者', section: '连接与工具', description: 'GitHub 仓库、Issue、PR 与 Actions 只读视图。' },
   { path: '/operations', title: '运维', section: '连接与工具', description: '服务状态、预设指标与 Grafana 外链。' },
-  { path: '/automations', title: '自动化', section: '连接与工具', description: '白名单 n8n 工作流：确认后触发，查看运行记录。' },
   { path: '/agents', title: 'OpenClaw 实例', section: '连接与工具', description: '登记实例、接入包、凭证与密钥授权（owner）。' },
   { path: '/runner', title: '运行服务器', section: '连接与工具', description: '智能体执行命令的容器服务器：环境、模板、运行记录与回收策略（owner 与 admin）。' },
   { path: '/ai', title: 'AI 审批', section: '连接与工具', description: '审批 OpenClaw 实例的写操作，查看每一次工具调用。' },

@@ -1,5 +1,7 @@
 # 2026-11-02 移除 Vikunja，项目与任务由工作台自己管理（T-0082）
 
+> 后续变更：本文记录 T-0082 当时的决定。文中剩余的 n8n 登录账号后来由 `docs/decisions/2026-11-07-remove-n8n.md`（T-0149）移除；原 Vikunja 移除决定与迁移历史保留。
+
 - 状态：accepted（人类 2026-11-02 在对话中决定；技术细节由 claude 决定）
 - 取代：`2026-10-30-vikunja-2.7.1-verification.md`、`2026-10-30-sprint-3-tasks-contract.md`
   （保留为历史记录）；`2026-11-02-deploy-connect.md` 里 Vikunja 的部分；`2026-11-02-app-logins.md` 里 Vikunja 的部分

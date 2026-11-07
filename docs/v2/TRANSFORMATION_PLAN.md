@@ -149,7 +149,7 @@ flowchart LR
   - 每次取用都写审计：实例、ID、版本、来源 IP、结果；按实例限流。
 - **加密密钥可轮换**：
   - 密文带加密密钥版本；新增版本后后台重新加密；旧版本在全部重新加密完之前保留；
-  - 这项改造同时覆盖现有的集成凭证（GitHub、n8n；当时还有 Vikunja，T-0082 已移除）。
+  - 这项改造同时覆盖现有的集成凭证（GitHub；历史上的 Vikunja 与 n8n 凭证已分别于 T-0082、T-0149 移除）。
 - **OpenClaw 那边**：
   - 模型密钥：用 exec SecretRef 调取密钥小程序；
   - MCP 请求头：直接用实例凭证（`${MYWS_INSTANCE_TOKEN}`），因为这个配置项不支持 SecretRef；
@@ -223,9 +223,9 @@ flowchart LR
 
 | 风险 | 工具 |
 |---|---|
-| 读 | `search`、`list_tasks`、`get_task`、`list_projects`、`calendar_agenda`、`list_bookmarks`、`list_knowledge_sources`、`list_repos`、`list_issues`、`list_pull_requests`、`service_status`、`list_notifications`、`list_automations`、`dashboard_overview`、`get_action_status` |
+| 读 | `search`、`list_tasks`、`get_task`、`list_projects`、`calendar_agenda`、`list_bookmarks`、`list_knowledge_sources`、`list_repos`、`list_issues`、`list_pull_requests`、`service_status`、`list_notifications`、`dashboard_overview`、`get_action_status` |
 | 写 | `create_task`、`update_task`、`complete_task`、`create_calendar_event`、`create_bookmark`、`mark_notification_read` |
-| 高危 | `delete_task`、`delete_calendar_event`、`trigger_automation` |
+| 高危 | `delete_task`、`delete_calendar_event` |
 | 知识库读 | `knowledge_search`、`knowledge_get`、`knowledge_list`、`knowledge_brief` |
 | 知识库写（直接执行，不审批） | `knowledge_write`、`knowledge_delete`（删除进回收站） |
 
@@ -291,7 +291,7 @@ flowchart LR
 ### 6.1 服务器 A
 
 - **OpenIM**：
-  - 放在 `infra/openim/compose.yaml`，用单独的 Compose 项目，做法和 `infra/n8n/` 一样；
+  - 放在 `infra/openim/compose.yaml`，用单独的 Compose 项目；
   - 镜像全部锁定 tag 加 digest；
   - **密码和 `secret` 全部随机生成**，默认值 `openIM123` 不允许出现，`make env` 时生成；
   - `bitnamilegacy/*` 镜像在 OC-0 评估换成各组件的官方镜像；

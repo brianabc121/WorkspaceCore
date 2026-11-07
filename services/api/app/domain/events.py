@@ -24,9 +24,6 @@ from sqlalchemy.orm import Session
 
 from app.domain import readme_marks
 from app.models import (
-    Automation,
-    AutomationConnection,
-    AutomationRun,
     Bookmark,
     CalendarEvent,
     ExternalResource,
@@ -85,9 +82,6 @@ _TOPICS: dict[type, Callable[[Any], Iterable[EventTopic]]] = {
     Issue: lambda _: ("issues",),
     IssueComment: lambda _: ("issues",),
     IssueEvent: lambda _: ("issues",),
-    Automation: lambda _: ("automations",),
-    AutomationRun: lambda _: ("automations",),
-    AutomationConnection: lambda _: ("automations", "operations", "overview"),
 }
 
 

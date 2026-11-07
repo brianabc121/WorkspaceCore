@@ -17,7 +17,7 @@ coverage/
 .env.*
 !.env.example
 
-# deploy.sh connect 生成的 n8n 对外站点（含本机的域名，不提交）
+# 历史部署留下的第三方应用站点（含本机域名，不提交；升级只清理已知生成文件）
 infra/caddy/apps-enabled/*.caddy
 
 # 本地数据与备份

@@ -1,10 +1,12 @@
 # 2026-11-02 在工作台保存并显示 Vikunja、n8n 的登录账号（T-0080）
 
+> 已被取代：Vikunja 登录账号由 T-0082 移除，n8n 登录账号与整个 app-logins 模块由 `docs/decisions/2026-11-07-remove-n8n.md`（T-0149）移除。下文保留原决定与验证，不是当前账号管理功能。
+
 - 状态：accepted（claude，任务范围内的技术决策）
 - 关联：`2026-11-02-deploy-connect.md`（第 2.4 条由本决定修改）、`services/api/app/domain/app_logins.py`、
   `apps/web/src/features/app-logins/AppLoginCard.vue`、迁移 `0019`
 
-> 其中 Vikunja 的部分（「项目」页的登录账号卡片、`app = vikunja`）已由 `2026-11-02-remove-vikunja.md`（T-0082）移除；现在只保存 n8n 的登录账号。
+> 其中 Vikunja 的部分（「项目」页的登录账号卡片、`app = vikunja`）已由 `2026-11-02-remove-vikunja.md`（T-0082）移除；剩余的 n8n 登录账号后续由 T-0149 移除。
 
 ## 1. 背景
 

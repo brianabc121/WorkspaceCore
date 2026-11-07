@@ -27,7 +27,7 @@
 - Vikunja 是任务主源；AFFiNE V1 仅深链接与收藏，不猜测内容读写 API。
 - 工作台 Owns User/Workspace/Widget/Calendar/Mapping/Notification/Audit。
 - 第三方服务故障可降级；Webhook Inbox + 周期对账双保险。
-- 核心 Compose 优先，n8n/AFFiNE/Monitoring 可选部署，生产禁止浮动 latest 镜像。
+- 核心 Compose 优先，AFFiNE/Monitoring 可选部署，生产禁止浮动 latest 镜像。
 
 ## V2 Agent Control Plane 补充强制规则
 - 实现 AI/Agent 模块前必须阅读 `AGENT_ARCHITECTURE_V2.md` 和 `AGENT_TASKS_V2.md`，V2 章节优先。

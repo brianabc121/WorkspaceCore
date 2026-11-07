@@ -2,6 +2,7 @@
 # 只忽略这一处；同一个文件里以后再出现的密钥仍然会让扫描失败。新增条目前确认它不是真实凭据，并在上面一行写明理由。
 # 核验记录见 docs/decisions/2026-10-31-sprint-6-backup-and-scan-verification.md 第 5.3、8 节。
 
+# 下列指纹针对历史提交；对应功能或测试已删除时仍需保留，扫描范围包含整个 Git 历史。
 # 模拟 n8n 的触发密钥：只在测试进程里使用的固定假值
 d0b0cd6011522b708fdd33cfed5a92c30d305ba0:services/api/tests/fake_n8n.py:generic-api-key:20
 # 自动化接口测试给模拟 n8n 设置的假密钥

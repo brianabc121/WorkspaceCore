@@ -25,12 +25,11 @@ jobs:
           # Sprint 4 验收用模拟 GitHub（tests/e2e/fake_github_server.py），CI 里没有真实 GitHub Token。
           # 不能用 GITHUB_API_URL：Actions 在 shell 里设置了它，Compose 插值时优先于 .env
           echo "WORKSPACE_GITHUB_API_URL=http://fake-github:8080" >> .env
-          # Sprint 5 验收：Prometheus（--profile monitoring，只启动 prometheus）与模拟 n8n
-          # （tests/e2e/fake_n8n_server.py）；CI 里没有真实 n8n 的凭据，Grafana 不在 CI 里启动
+          # Sprint 5 验收：Prometheus（--profile monitoring，只启动 prometheus）；Grafana 不在 CI 里启动
           sed -i 's#^PROMETHEUS_URL=.*#PROMETHEUS_URL=http://prometheus:9090#' .env
           grep -q '^PROMETHEUS_URL=http://prometheus:9090$' .env
-          sed -i 's/^INTEGRATION_ALLOWED_HOSTS=.*/INTEGRATION_ALLOWED_HOSTS=fake-github,fake-n8n/' .env
-          grep -q '^INTEGRATION_ALLOWED_HOSTS=fake-github,fake-n8n$' .env
+          sed -i 's/^INTEGRATION_ALLOWED_HOSTS=.*/INTEGRATION_ALLOWED_HOSTS=fake-github/' .env
+          grep -q '^INTEGRATION_ALLOWED_HOSTS=fake-github$' .env
       - name: docker compose config
         run: |
           docker compose config --quiet
@@ -56,9 +55,8 @@ jobs:
         run: python3 tests/e2e/sprint4_acceptance.py
       - name: 启动 Prometheus 3.15.1（--profile monitoring，只启动 prometheus）
         run: docker compose --profile monitoring up -d --wait --wait-timeout 120 prometheus
-      - name: Sprint 5 全栈验收（DoD / S5-01 ~ S5-05 / A16，接口级，Prometheus + 模拟 n8n）
-        # 模拟 n8n 在 api 镜像里运行并加入 integrations 网络；要等两轮自动化对账（约 3 分钟），
-        # 中途会临时停掉 prometheus
+      - name: Sprint 5 全栈验收（DoD / S5-01 ~ S5-05 / A16，接口级，Prometheus）
+        # 中途会临时停掉 prometheus，验证指标过期和恢复
         run: python3 tests/e2e/sprint5_acceptance.py
       - uses: actions/setup-node@v5
         with:
@@ -165,7 +163,7 @@ jobs:
           set_env GOOGLE_OAUTH_TOKEN_URL http://fake-gmail:8080/token
           set_env GOOGLE_OAUTH_REVOKE_URL http://fake-gmail:8080/revoke
           set_env GMAIL_API_URL http://fake-gmail:8080
-          set_env INTEGRATION_ALLOWED_HOSTS n8n,fake-gmail
+          set_env INTEGRATION_ALLOWED_HOSTS fake-gmail
           docker compose --profile agents config --quiet
       # T-0141：场景 26 把这台 runner 当运行服务器。接入包的 install-gvisor.sh 第一次安装时会重启 Docker，
       # 所以在启动任何服务之前用同一个脚本装好（核对 sha512）；之后 install.sh 再运行时 Docker 已认得 runsc，不再重启

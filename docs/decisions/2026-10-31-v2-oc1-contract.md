@@ -1,5 +1,7 @@
 # V2 接口契约（OC-1）：实例、密钥库、IM、工具审批、实例接口、MCP 工具、OpenIM 回调
 
+> T-0149 已移除本文中的 n8n 工具 `list_automations`、`trigger_automation`；其描述仅保留为历史契约，不能再列出、申请或执行。其余 V2 功能按后续契约执行，见 `docs/api-contract.md` 与 `docs/decisions/2026-11-07-remove-n8n.md`。
+
 - 状态：accepted
 - 日期：2026-10-31
 - 作者：claude（协作任务 T-0053）

@@ -1,5 +1,7 @@
 # Prometheus 3.15.1 / Grafana 13.2.5 / n8n 2.45.7 核验（T-0033，Sprint 5）
 
+> n8n 相关内容已由 `docs/decisions/2026-11-07-remove-n8n.md`（T-0149）取代，仅保留历史设计、版本与验收证据；相关端点、工具、安装与账号操作已退役。其余模块的内容仍按各自后续文档执行。当前接口与部署方式见 `docs/api-contract.md`、`docs/deployment.md`。
+
 - 日期：2026-10-31
 - 作者：claude（T-0033）
 - 状态：已核验（未核验的项逐条标注）
