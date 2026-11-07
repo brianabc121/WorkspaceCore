@@ -55,6 +55,8 @@ from app.schemas.agents import (
     AgentInstanceOut,
     AgentInstancePage,
     AgentInstanceUpdate,
+    AgentLimits,
+    AgentLimitsPut,
     AgentSecretCreate,
     AgentSecretOut,
     AgentSecretPage,
@@ -384,6 +386,9 @@ class AgentService:
                 and i.plugin_version != agent_bundle.PATCHED_PLUGIN_VERSION,
                 credentials=by_instance[i.id],
                 secret_grants=grants_by[i.id],
+                server_id=i.server_id,
+                server_manual=i.server_manual,
+                limits=AgentLimits(mem_limit_mb=i.mem_limit_mb, cpus=i.cpus),
                 version=i.version,
                 created_at=i.created_at,
                 updated_at=i.updated_at,
@@ -572,6 +577,39 @@ class AgentService:
             granted_by=instance.im_media_by,
             granted_at=instance.im_media_at,
         )
+
+    async def set_limits(
+        self,
+        access: WorkspaceAccess,
+        instance_id: uuid.UUID,
+        body: AgentLimitsPut,
+        *,
+        client_ip: str,
+    ) -> AgentLimits:
+        """设置 OpenClaw 容器的内存、CPU 上限（T-0145，D2）。写审计；重新部署后生效。"""
+        instance = await self._instance(access, instance_id)
+        self._check_version(instance, body.version)
+        cpus = round(body.cpus, 2) if body.cpus is not None else None
+        if (instance.mem_limit_mb, instance.cpus) != (body.mem_limit_mb, cpus):
+            await self.audit.record(
+                "agents.instance.limits_updated",
+                workspace_ids=[access.workspace.id],
+                actor_id=access.user_id,
+                resource_type="agent_instance",
+                resource_id=instance.id,
+                metadata={
+                    "mem_limit_mb": body.mem_limit_mb,
+                    "cpus": cpus,
+                    "previous": {"mem_limit_mb": instance.mem_limit_mb, "cpus": instance.cpus},
+                },
+                client_ip=client_ip,
+            )
+            instance.mem_limit_mb = body.mem_limit_mb
+            instance.cpus = cpus
+            instance.version += 1
+        await self.db.commit()
+        await self.db.refresh(instance)
+        return AgentLimits(mem_limit_mb=instance.mem_limit_mb, cpus=instance.cpus)
 
     async def set_stop_others(
         self,
@@ -913,6 +951,10 @@ class AgentService:
                 tunnel_address=(settings.agent_public_address or None) if tunnel_target else None,
                 reflection_cron=settings.agent_reflection_cron,
                 reflection_timezone=settings.agent_reflection_timezone,
+                # 一台服务器多个实例（T-0145 / T-0146）：服务器指纹的盐与资源上限
+                host_salt=agent_bundle.host_salt(str(instance.workspace_id)),
+                mem_limit_mb=instance.mem_limit_mb,
+                cpus=instance.cpus,
             ),
             now=now,
         )

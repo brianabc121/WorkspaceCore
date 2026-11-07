@@ -453,8 +453,26 @@ class HostDay(BaseModel):
     disk_max: float | None = Field(description="两个分区里较高的已用百分比")
 
 
+class HostAgentUsage(BaseModel):
+    """你自己（你的 OpenClaw 容器）的用量。"""
+
+    available: bool = Field(description="读得到容器的 cgroup；false 时下面都是 null")
+    cpu_cores: float | None = Field(description="占用几个核")
+    cpu_percent: float | None = Field(description="占整台服务器 CPU 的百分比")
+    mem_bytes: int | None = Field(description="内存已用（不含可回收的缓存）")
+    mem_limit: int | None = Field(description="管理员给你设的内存上限；null 表示没设")
+    pids: int | None
+    data_bytes: int | None = Field(description="你的数据目录（会话、记忆、插件）大小")
+    rx_rate: int | None = Field(description="你自己的下载速率（字节 / 秒）")
+    tx_rate: int | None = Field(description="你自己的上传速率（字节 / 秒）")
+    alerts: list[Literal["mem_near_limit", "restarting", "cpu_hog"]]
+
+
 class GetHostStatusOutput(BaseModel):
-    """你自己所在服务器的状态（T-0113）：整台服务器的数值，不是只有你的容器。"""
+    """你自己所在服务器的状态（T-0113）与你自己的用量（T-0146）。
+
+    整台服务器的数值包括这台服务器上的所有进程；看不到同一台服务器上其他实例的名字和用量。
+    """
 
     reported: bool = Field(description="收到过上报；false 时让管理员重新部署接入包")
     reported_at: datetime | None
@@ -466,10 +484,11 @@ class GetHostStatusOutput(BaseModel):
     mem_available: int | None
     data_disk: HostDiskStatus | None = Field(description="接入包目录（会话、记忆）所在的分区")
     root_disk: HostDiskStatus | None = Field(description="Docker 数据目录所在的分区")
-    rx_rate: int | None = Field(description="下载速率（字节 / 秒）")
-    tx_rate: int | None = Field(description="上传速率（字节 / 秒）")
+    rx_rate: int | None = Field(description="下载速率（字节 / 秒），这台服务器上各实例之和")
+    tx_rate: int | None = Field(description="上传速率（字节 / 秒），这台服务器上各实例之和")
     last_24h: HostDay
     alerts: list[Literal["disk_low", "memory_low", "load_high", "not_reporting"]]
+    me: HostAgentUsage | None = Field(description="你自己的用量；还没有上报过时为 null")
 
 
 class ListBookmarksInput(_Strict):

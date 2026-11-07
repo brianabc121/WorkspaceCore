@@ -145,7 +145,7 @@
 | pull | `docker compose pull --quiet` | 专用密钥 |
 | plugin | `state/`、`bin/`、`tls/` 交给 uid 1000（root 用 chown；uid 1000 不用改；其他账号用锁定镜像里的 chown，`--network none --user 0`）；`docker compose run --rm --no-deps -T --entrypoint sh openclaw -s` 读入 `install-plugin.sh`：`npm pack --ignore-scripts` 锁定版本、核对 sha256、用临时的空配置安装（与 CHECKLIST 相同） | 专用密钥 |
 | start | `docker compose up -d` | 专用密钥 |
-| schedule | 当前用户的 crontab：每 10 分钟 `secrets reload`、每周一重启（行尾带 `# myworkspace-openclaw` 标记，重装时先删掉带标记的行）；没有 crontab 时跳过并提示手动配置 | 专用密钥 |
+| schedule | 当前用户的 crontab：每 10 分钟 `secrets reload`、每周一重启（行尾带 `# myworkspace-openclaw` 标记，重装时先删掉带标记的行；T-0145 起改为每个实例自己的标记 `# mw-openclaw:<实例短号>`，只删行尾正好是自己标记的行）；没有 crontab 时跳过并提示手动配置 | 专用密钥 |
 | online | 等这次签发的实例凭证第一次被使用（`last_used_at`，即新部署的 OpenClaw 连上了工作台），最多 15 分钟；超时时把 `docker compose ps` 与最后 60 行日志（脱敏）写进任务日志 | — |
 
 成功后记下 `install_dir`、`installed_at`。
@@ -185,7 +185,7 @@ PATH 里是假的 docker、sudo、bash、chown、crontab；覆盖完整安装、
 - stop：接入包目录里有 `compose.yaml` 时 `docker compose down --remove-orphans`；
 - unschedule：删掉 crontab 里带 `# myworkspace-openclaw` 标记的行，其他行保留；
 - remove_files（可选，不可恢复）：账号既不是 root 也不是 uid 1000 时先用锁定镜像里的 chown 收回属主，再
-  `rm -rf -- <主目录>/myworkspace-openclaw`（只接受这一种路径）；
+  `rm -rf -- <主目录>/myworkspace-openclaw`（只接受这一种路径；T-0145 起是 `<主目录>/myworkspace-openclaw/<实例短号>`，上一级空了一起删）；
 - 不卸载 Docker，不吊销专用公钥与实例凭证（实例页可以吊销凭证）；成功后清空 `installed_at`，删了目录时清空 `install_dir`。
 
 ### 6.2 吊销专用密钥

@@ -1,12 +1,17 @@
 #!/usr/bin/env node
-// 服务器状态上报（T-0113，My Workspace docs/v2/AGENT_OPS_PLAN.md 第 5 节）。
-// 宿主机 crontab 每分钟在 OpenClaw 容器里运行一次：
+// 服务器状态上报（T-0113、T-0146，My Workspace docs/v2/AGENT_OPS_PLAN.md 第 5 节、
+// docs/v2/MULTI_OPENCLAW_PLAN.md 第 5 节）。宿主机 crontab 每分钟在 OpenClaw 容器里运行一次：
 //   * * * * * cd <接入包目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/host-report.mjs
-// 读容器里的 /proc 与文件系统统计（network_mode: host，读到的是整台服务器的数值，
-// 已在锁定镜像上实测，核验 ADR 2026-11-04 第 1 节），发给工作台 POST /agent-api/v1/host-metrics。
+// 发给工作台 POST /agent-api/v1/host-metrics：
+// - 整台服务器：/proc/stat、/proc/loadavg、/proc/meminfo、/proc/uptime 与两个分区的统计
+//   （这些在容器里读到的就是整台服务器的数值，核验 ADR 2026-11-04 第 1 节、2026-11-07 第 2 节）；
+// - 这个实例：自己容器的 cgroup（CPU 用量、内存、进程数）、数据目录大小（每 10 分钟一次）、
+//   自己网卡的收发字节（每个实例有自己的网络命名空间）；
+// - 服务器指纹：boot_id 的 HMAC（盐是 MYWS_HOST_SALT），同一台服务器上的实例相同，不报原值。
 // 只报数字：不报进程、文件名、环境变量、IP 地址；网卡名只用来找默认路由那块网卡，不上报。
 // CPU 使用率和网速由工作台用两次上报的累计值之差算出。只用 Node 标准库。
-import { readFileSync, statfsSync } from "node:fs";
+import { createHmac } from "node:crypto";
+import { lstatSync, readdirSync, readFileSync, statfsSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import os from "node:os";
@@ -93,6 +98,76 @@ function tryRead(path) {
   try { return read(path); } catch { return null; }
 }
 
+// 只有一个数字的 cgroup 文件
+function cgroupNumber(text) {
+  if (text == null) return null;
+  const value = Number(text.trim());
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+// memory.stat 之类“键 值”格式的文件
+export function keyValues(text) {
+  const values = {};
+  for (const line of (text ?? "").split("\n")) {
+    const [key, value] = line.trim().split(/\s+/);
+    if (key && value !== undefined && Number.isFinite(Number(value))) values[key] = Number(value);
+  }
+  return values;
+}
+
+// 自己容器的 cgroup：v2（/sys/fs/cgroup/cgroup.controllers 存在）或 v1（每个控制器一个目录）。
+// 内存已用 = 当前用量 − 可回收的文件缓存（inactive_file），与 docker stats 的算法相同
+export function containerUsage(sys) {
+  const root = `${sys}/fs/cgroup`;
+  const v2 = tryRead(`${root}/cgroup.controllers`) != null;
+  let usec = null, current = null, inactive = 0, pids = null;
+  if (v2) {
+    usec = keyValues(tryRead(`${root}/cpu.stat`)).usage_usec ?? null;
+    current = cgroupNumber(tryRead(`${root}/memory.current`));
+    inactive = keyValues(tryRead(`${root}/memory.stat`)).inactive_file ?? 0;
+    pids = cgroupNumber(tryRead(`${root}/pids.current`));
+  } else {
+    const ns = cgroupNumber(tryRead(`${root}/cpuacct/cpuacct.usage`));
+    usec = ns == null ? null : Math.floor(ns / 1000);
+    current = cgroupNumber(tryRead(`${root}/memory/memory.usage_in_bytes`));
+    inactive = keyValues(tryRead(`${root}/memory/memory.stat`)).total_inactive_file ?? 0;
+    pids = cgroupNumber(tryRead(`${root}/pids/pids.current`));
+  }
+  if (usec == null && current == null && pids == null) return null;
+  return {
+    cpu_usec: num(usec),
+    mem_bytes: current == null ? null : num(Math.max(current - inactive, 0)),
+    pids: num(pids),
+  };
+}
+
+// 数据目录（会话、记忆、插件）的大小：累加普通文件的大小，不跟随符号链接；最多看 MAX_FILES 个文件
+export const MAX_FILES = 200000;
+export function directorySize(path, limit = MAX_FILES) {
+  let bytes = 0, files = 0;
+  const stack = [path];
+  while (stack.length) {
+    const dir = stack.pop();
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      const full = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) { stack.push(full); continue; }
+      if (!entry.isFile()) continue;
+      if (++files > limit) return { bytes: num(bytes), truncated: true };
+      try { bytes += lstatSync(full).size; } catch { /* 刚被删掉的文件 */ }
+    }
+  }
+  return { bytes: num(bytes), truncated: false };
+}
+
+// 服务器指纹：boot_id（同一个内核相同，重启后变）的 HMAC-SHA256，盐来自接入包
+export function hostKey(bootId, salt) {
+  const id = (bootId ?? "").trim();
+  if (!salt || !/^[0-9a-f-]{36}$/.test(id)) return null;
+  return createHmac("sha256", salt).update(id).digest("hex");
+}
+
 function disk(path) {
   try {
     const s = statfsSync(path);
@@ -102,7 +177,7 @@ function disk(path) {
   }
 }
 
-export function collect() {
+export function collect(now = new Date()) {
   const cpus = os.cpus();
   const stat = tryRead(`${PROC()}/stat`);
   const mem = meminfo(read(`${PROC()}/meminfo`));
@@ -130,6 +205,22 @@ export function collect() {
     disks: { data: disk(process.env.MYWS_DATA_PATH || DATA_PATH), root: disk(process.env.MYWS_ROOT_PATH || "/") },
     network: bytes ? { rx_bytes: num(bytes.rx), tx_bytes: num(bytes.tx) } : null,
     uptime_seconds: num(uptime),
+    container: container(now),
+    host_key: hostKey(tryRead(`${PROC()}/sys/kernel/random/boot_id`), process.env.MYWS_HOST_SALT),
+  };
+}
+
+function container(now) {
+  const usage = containerUsage(SYS());
+  if (!usage) return null;
+  // 数据目录大小每 10 分钟算一次（文件多时要遍历一阵）；其他分钟不报，工作台沿用上一次的值
+  const size = now.getUTCMinutes() % 10 === 0 || process.env.MYWS_DATA_SIZE === "1"
+    ? directorySize(process.env.MYWS_DATA_PATH || DATA_PATH)
+    : null;
+  return {
+    ...usage,
+    data_bytes: size ? size.bytes : null,
+    data_truncated: size ? size.truncated : false,
   };
 }
 

@@ -23,6 +23,7 @@ from pydantic import (
 )
 
 from app.schemas.common import Page
+from app.schemas.host import AgentLoad, HostCurrent, HostPoint
 from app.schemas.mail import AgentMailOut
 
 NetworkMode = Literal["intranet", "public"]
@@ -145,9 +146,31 @@ class AgentInstanceOut(BaseModel):
     )
     credentials: list[AgentCredentialOut] = Field(description="有效与最近吊销的凭证，新的在前")
     secret_grants: list[SecretGrantOut]
+    server_id: UUID | None = Field(
+        default=None,
+        description="所在的服务器（T-0144）：按上报的服务器指纹自动识别，或管理员指定",
+    )
+    server_manual: bool = Field(default=False, description="管理员手动指定过所在服务器")
+    limits: "AgentLimits" = Field(
+        default_factory=lambda: AgentLimits(mem_limit_mb=None, cpus=None),
+        description="OpenClaw 容器的资源上限（T-0145，D2）：默认不限制，改了重新部署后生效",
+    )
     version: int
     created_at: datetime
     updated_at: datetime
+
+
+class AgentLimits(BaseModel):
+    mem_limit_mb: int | None = Field(description="内存上限（MiB）；null 表示不限制")
+    cpus: float | None = Field(description="CPU 上限（核，可以是小数）；null 表示不限制")
+
+
+class AgentLimitsPut(_Strict):
+    """设置资源上限（owner / admin）。写进接入包的 compose.yaml，重新部署这个实例后生效。"""
+
+    mem_limit_mb: Annotated[int, Field(ge=256, le=1 << 20)] | None
+    cpus: Annotated[float, Field(ge=0.1, le=256)] | None
+    version: Version
 
 
 class ProjectAdminOut(BaseModel):
@@ -483,7 +506,10 @@ class AgentSshJobStep(BaseModel):
 
 class AgentSshJobOut(BaseModel):
     id: UUID
-    kind: Literal["install", "uninstall"]
+    kind: Literal["prepare", "install", "uninstall"] = Field(
+        description="prepare 准备服务器（装专用公钥、装 Docker）；install 部署一个实例；"
+        "uninstall 卸载一个实例"
+    )
     status: Literal["running", "succeeded", "failed", "interrupted"]
     steps: list[AgentSshJobStep]
     log: str = Field(description="命令输出的末尾（最多 64 KB），密码、令牌、私钥已替换成 ***")
@@ -504,17 +530,21 @@ class AgentSshState(BaseModel):
 
 # ---------------------------------------------------------------- 远程运维动作（T-0114）
 
-OpsAction = Literal["status", "logs", "restart", "up", "prune", "report"]
+OpsAction = Literal["status", "logs", "restart", "up", "prune", "report", "containers"]
+# 实例级与服务器级（T-0145）：清理无用镜像、查看全部容器作用于整台服务器
+InstanceOpsAction = Literal["status", "logs", "restart", "up", "report"]
+ServerOpsAction = Literal["prune", "containers"]
 OpsService = Literal["openclaw", "tunnel", "image-proxy"]
 OpsStatus = Literal["running", "succeeded", "failed", "interrupted"]
 
 
 class AgentOpsRun(_Strict):
-    """执行一个固定的运维动作（AGENT_OPS_PLAN 6.1）。命令写死在工作台里，不接受任何命令文本。"""
+    """对一个实例执行固定的运维动作（AGENT_OPS_PLAN 6.1）。命令写死，不接受任何命令文本。"""
 
-    action: OpsAction = Field(
-        description="status 查看状态、logs 查看日志、restart 重启 OpenClaw、up 重新拉起全部服务、"
-        "prune 清理无用镜像、report 立即上报一次（用量与服务器状态）"
+    action: InstanceOpsAction = Field(
+        description="status 查看状态、logs 查看日志、restart 重启 OpenClaw、"
+        "up 重新拉起这个实例的全部服务、report 立即上报一次（用量与服务器状态）；"
+        "清理镜像在服务器上做"
     )
     service: OpsService | None = Field(
         default=None, description="只用于 logs：看哪个服务的最近 200 行（默认 openclaw）"
@@ -527,9 +557,24 @@ class AgentOpsRun(_Strict):
     )
 
 
+class ServerOpsRun(_Strict):
+    """对整台服务器执行固定的运维动作（T-0145）：查看全部容器、清理无用镜像。"""
+
+    action: ServerOpsAction = Field(
+        description="containers 查看这台服务器上所有工作台项目的容器与资源占用、prune 清理无用镜像"
+    )
+    password: SecretStr | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description="prune 要再输一次自己的登录密码（二次认证）",
+    )
+
+
 class AgentOpsActionOut(BaseModel):
     id: UUID
     action: OpsAction
+    instance_id: UUID | None = Field(default=None, description="实例级动作的实例；服务器级为 null")
     service: OpsService | None
     status: OpsStatus
     exit_code: int | None = Field(description="最后一条命令的退出码；连不上或超时时为空")
@@ -547,12 +592,14 @@ class AgentOpsActionOut(BaseModel):
 
 
 class AgentOpsState(BaseModel):
-    available: bool = Field(description="用 SSH 部署过、专用密钥还在：可以执行运维动作")
+    available: bool = Field(description="部署到了一台 SSH 服务器、专用密钥还在：可以执行运维动作")
     reason: Literal["not_deployed", "key_missing"] | None = Field(
-        description="不可用的原因：not_deployed 还没用 SSH 部署"
-        "（手动接入的实例先做一次 SSH 部署）；key_missing 专用密钥已吊销"
+        description="不可用的原因：not_deployed 还没部署到服务器"
+        "（手动接入的实例先部署到一台服务器）；key_missing 这台服务器的专用密钥已吊销"
     )
-    running: AgentOpsActionOut | None = Field(description="进行中的动作（同一实例同时只有一个）")
+    running: AgentOpsActionOut | None = Field(
+        description="这台服务器上进行中的动作（同一台服务器同时只有一个）"
+    )
     items: list[AgentOpsActionOut] = Field(description="最近 20 次（7 天内），最近的在前")
 
 
@@ -675,3 +722,163 @@ class StopResult(_Strict):
 class StopResultResponse(BaseModel):
     id: UUID
     status: RunStopStatus
+
+
+# ---------------------------------------------------------------- OpenClaw 服务器（T-0145、T-0147）
+
+ServerName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
+class AgentServerCreate(_Strict):
+    """添加一台服务器：工作台只读取它的主机公钥（不登录），等 owner 核对指纹后确认。"""
+
+    name: ServerName
+    host: SshHost = Field(description="服务器的 IP 或域名")
+    port: int = Field(default=22, ge=1, le=65535)
+    username: SshUsername = Field(description="SSH 账号；之后用 sudo 安装 Docker（需要时）")
+
+
+class AgentServerUpdate(_Strict):
+    name: ServerName
+    version: Version
+
+
+class AgentServerAddress(_Strict):
+    """更换地址或账号：重新读取主机公钥，要重新确认；已经装了专用公钥时先吊销。"""
+
+    host: SshHost
+    port: int = Field(default=22, ge=1, le=65535)
+    username: SshUsername
+    version: Version
+
+
+class AgentServerPrepare(_Strict):
+    """准备服务器：用一次登录密码装上工作台的专用公钥、需要时用 sudo 安装 Docker。密码不保存。"""
+
+    version: Version
+    password: SecretStr = Field(min_length=1, max_length=1024)
+
+
+class ServerSshOut(BaseModel):
+    host: str
+    address: str = Field(description="探测时解析出的地址；之后都连这个地址")
+    port: int
+    username: str
+    host_key_algorithm: str
+    host_key_fingerprint: str = Field(description="SHA256 指纹，格式与 ssh-keygen -lf 相同")
+    host_key_confirmed: bool
+    host_key_confirmed_at: datetime | None
+    client_key_installed: bool = Field(description="这台服务器上装了工作台的专用公钥")
+    client_key_fingerprint: str | None
+    prepared_at: datetime | None = Field(description="准备好（专用公钥、Docker 可用）的时间")
+
+
+class AgentServerOut(BaseModel):
+    id: UUID
+    name: str
+    kind: Literal["auto", "ssh"] = Field(
+        description="auto 按上报的服务器指纹自动识别（手动部署的实例）；ssh 管理员添加、经 SSH 部署"
+    )
+    ssh: ServerSshOut | None
+    reported_at: datetime | None = Field(description="最近一次有实例上报整机数据的时间")
+    stale: bool = Field(description="超过 3 分钟没有任何实例上报")
+    cores: int | None
+    cpu_percent: float | None
+    load15: float | None
+    mem_total: int | None
+    mem_used_percent: float | None
+    disk_used_percent: float | None = Field(description="两个分区里较高的已用百分比")
+    instances_total: int
+    instances_online: int
+    alerts: list[Literal["disk_low", "memory_low", "load_high", "not_reporting"]]
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class UnassignedInstance(BaseModel):
+    id: UUID
+    name: str
+    status: InstanceStatus
+
+
+class AgentServerList(BaseModel):
+    items: list[AgentServerOut]
+    unassigned: list[UnassignedInstance] = Field(description="还没有归属任何服务器的实例")
+
+
+class RunningTaskRef(BaseModel):
+    id: UUID
+    title: str
+
+
+class ServerAgentRow(BaseModel):
+    """服务器详情里每个智能体一行。"""
+
+    instance_id: UUID
+    name: str
+    status: InstanceStatus
+    deployed: bool = Field(description="经 SSH 部署在这台服务器上（不是只按指纹识别的）")
+    install_dir: str | None
+    mem_limit_mb: int | None
+    cpus: float | None
+    load: AgentLoad | None = Field(description="这个智能体自己的当前用量；没上报过为 null")
+    alerts: list[Literal["mem_near_limit", "restarting", "cpu_hog"]]
+    tokens_1h: int = Field(description="最近一小时的 token 用量（输入 + 输出）")
+    running_task: RunningTaskRef | None = Field(
+        description="正在执行的任务（时间轴上没结束的一段）"
+    )
+
+
+class AgentServerDetail(BaseModel):
+    server: AgentServerOut
+    current: HostCurrent | None = Field(description="整机的当前值")
+    range: Literal["24h", "7d", "30d"]
+    points: list[HostPoint] = Field(description="整机每小时的平均与峰值")
+    agents: list[ServerAgentRow]
+    job: AgentSshJobOut | None = Field(description="这台服务器上最近一次 SSH 任务")
+    warning: str | None = None
+
+
+class AgentDeployIn(_Strict):
+    """把实例部署到一台 SSH 服务器（只替换这个实例自己的目录与 Compose 项目）。"""
+
+    server_id: UUID
+    version: Version = Field(description="实例的当前版本号")
+    password: SecretStr | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1024,
+        description="服务器还没准备（没装专用公钥）时必填，只用这一次；准备好的服务器不用填",
+    )
+
+
+class AgentUndeployIn(_Strict):
+    version: Version = Field(description="实例的当前版本号")
+    remove_files: bool = Field(
+        default=False,
+        description="同时删除服务器上这个实例的目录（含实例凭证、OpenClaw 的会话与记忆），不可恢复",
+    )
+
+
+class AgentServerAssign(_Strict):
+    """手动指定实例所在的服务器（手动部署的实例）；null 表示改回按指纹自动识别。"""
+
+    server_id: UUID | None
+    version: Version
+
+
+class AgentDeploymentOut(BaseModel):
+    server_id: UUID
+    install_dir: str | None
+    installed_at: datetime | None
+    version: int
+
+
+class AgentDeploymentState(BaseModel):
+    deployment: AgentDeploymentOut | None
+    server: AgentServerOut | None = Field(description="所在的服务器（部署或自动识别、手动指定）")
+    job: AgentSshJobOut | None = Field(description="这个实例最近一次部署或卸载任务")
+    capacity_warning: str | None = Field(
+        default=None, description="部署前的容量提醒（D4：不设硬上限，剩余内存或磁盘不多时提醒）"
+    )

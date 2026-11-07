@@ -1,26 +1,7 @@
-import { computed } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
-import { useAuthStore } from '../../stores/auth'
-import { ApiError, dataOf, type Schema } from '../../services/api'
+import { ApiError, type Schema } from '../../services/api'
 import { agentError } from './queries'
 
-// SSH automatic deployment of an OpenClaw instance (T-0089 backend, ADR 2026-11-03-openclaw-ssh-provisioning).
-// The key starts with 'agents' so writes and the SSE topic refresh it; while a job runs, poll its progress.
-export function sshKey(user: string | undefined, scope: string, instanceId: string) {
-  return ['agents', user, scope, 'ssh', instanceId] as const
-}
-
-export function useAgentSsh(scope: string, instanceId: () => string, enabled: () => boolean) {
-  const auth = useAuthStore(), user = auth.user?.id
-  const active = () => user === auth.user?.id && scope === auth.workspaceId
-  return useQuery({
-    queryKey: computed(() => sshKey(user, scope, instanceId())),
-    enabled: computed(() => active() && auth.isOwner && enabled()),
-    queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/agents/instances/{instance_id}/ssh', { params: { header: { 'X-Workspace-Id': scope }, path: { instance_id: instanceId() } }, signal })),
-    refetchInterval: query => query.state.data?.job?.status === 'running' ? 2000 : false,
-  })
-}
-
+// SSH 部署的步骤、状态与错误文字（T-0089；一台服务器多个实例后由 servers.ts 使用，T-0147）。
 export const SSH_STEP: Record<Schema['AgentSshJobStep']['key'], string> = {
   connect: '连接服务器',
   inspect: '读取服务器信息',
@@ -45,7 +26,7 @@ export const SSH_STEP_STATUS: Record<Schema['AgentSshJobStep']['status'], string
 export const SSH_JOB_STATUS: Record<Schema['AgentSshJobOut']['status'], string> = {
   running: '进行中', succeeded: '成功', failed: '失败', interrupted: '已中断',
 }
-export const SSH_JOB_KIND: Record<Schema['AgentSshJobOut']['kind'], string> = { install: '部署', uninstall: '卸载' }
+export const SSH_JOB_KIND: Record<Schema['AgentSshJobOut']['kind'], string> = { prepare: '准备服务器', install: '部署', uninstall: '卸载' }
 
 // The command that prints the same SHA256 fingerprint on the server itself (ssh-keygen -lf).
 export function hostKeyCommand(algorithm: string): string {
@@ -75,17 +56,23 @@ export function sshError(error: unknown): string {
   }
   const messages: Record<string, string> = {
     AGENT_SSH_ADDRESS_NOT_ALLOWED: '不能连接这个地址：回环、链路本地、组播等地址不允许，请填写服务器的 IP 或域名。',
-    AGENT_SSH_PUBLIC_ONLY: 'SSH 自动部署只支持外网模式的实例。',
-    AGENT_SSH_KEY_INSTALLED: '这台服务器上装着工作台的专用公钥：先吊销专用密钥，再更换或删除服务器。',
+    AGENT_SSH_PUBLIC_ONLY: '部署到服务器只支持外网模式的实例；内网模式请生成接入包手动部署。',
+    AGENT_SSH_KEY_INSTALLED: '这台服务器上装着工作台的专用公钥：先吊销专用密钥，再更换地址或移除服务器。',
     AGENT_SSH_FINGERPRINT_MISMATCH: '指纹与读到的不一致：请重新读取主机公钥后再核对。',
     AGENT_SSH_HOST_KEY_UNCONFIRMED: '先核对并确认服务器的主机公钥指纹。',
-    AGENT_SSH_JOB_RUNNING: '这台服务器正在部署或卸载，结束后再操作。',
-    AGENT_SSH_KEY_MISSING: '这台服务器上没有工作台的专用公钥（还没部署过，或者已经吊销）。',
+    AGENT_SSH_JOB_RUNNING: '这台服务器正在准备、部署或卸载，结束后再操作。',
+    AGENT_SSH_KEY_MISSING: '这台服务器上没有工作台的专用公钥（还没准备，或者已经吊销）：先准备服务器。',
     AGENT_SSH_KEY_INVALID: '工作台保存的专用私钥无法解密（加密密钥可能换过）。',
+    AGENT_OPS_RUNNING: '这台服务器正在执行运维动作，结束后再操作。',
+    AGENT_SERVER_EXISTS: '这台服务器（同一个地址、端口和账号）已经添加过了。',
+    AGENT_SERVER_HAS_DEPLOYMENTS: '这台服务器上还有部署的实例：先卸载它们，再吊销专用密钥、移除服务器。',
+    AGENT_SERVER_NOT_SSH: '这台服务器是按上报自动识别的，不能经 SSH 部署：先添加一台 SSH 服务器。',
+    AGENT_DEPLOYED_ELSEWHERE: '这个实例已经部署在另一台服务器上：先在那里卸载，再部署到这台。',
+    AGENT_DEPLOYED: '这个实例是经 SSH 部署的，所在服务器以部署为准；要换服务器先卸载。',
     AGENT_INGRESS_NOT_CONFIGURED: '外网接入入口还没有配置：在工作台服务器上运行 sudo bash scripts/deploy.sh connect，问到“配置接入入口？”时回答 y。',
     AGENT_DISABLED: '实例已停用，启用后才能部署。',
     EXTERNAL_UNAVAILABLE: '暂时不能执行：密钥库未配置加密密钥（CREDENTIAL_ENCRYPTION_KEY），或者部署任务暂时不可用，请稍后重试。',
-    VALIDATION_FAILED: '输入不符合要求：检查地址、端口、账号；第一次部署要填写登录密码。',
+    VALIDATION_FAILED: '输入不符合要求：检查名称、地址、端口、账号；服务器还没准备时要填写登录密码。',
     WRITE_UNKNOWN: '连接中断，结果未知：已刷新状态，确认后再决定是否重试。',
   }
   return messages[error.code] ?? agentError(error)

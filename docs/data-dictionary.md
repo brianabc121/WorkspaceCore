@@ -272,7 +272,7 @@ ORM 模型与迁移的一致性由集成测试中的 `alembic check` 保证。
 | `agent_usage_minutes` | `instance_id`、`minute`、`workspace_id`、`input`、`output`、`cache_read`、`cache_write` | 每个实例每分钟的 token 增量（bigint），主键 `(instance_id, minute)`，索引 `(workspace_id, minute)`。只存有增量的分钟。随实例、工作空间级联删除；Worker 每小时删除 90 天前的 |
 | `agent_usage_cursors` | `instance_id`、`day`、`session_hash`、`input`、`output`、`cache_read`、`cache_write`、`updated_at` | 每个实例、每天（UTC）、每个会话最后一次上报的累计值，主键 `(instance_id, day, session_hash)`，用来算增量。`session_hash` 是接入包算好的会话 key 的 SHA-256，工作台不存会话 key。Worker 删除 3 天前的 |
 | `agent_instances` 新增 | `usage_reported_at` | 最近一次收到用量上报；为空表示没上报过（时间轴显示“未上报”；第一次上报只记基准） |
-| `agent_host_samples`（T-0113，迁移 0031） | `instance_id`、`minute`、`workspace_id`、`cpu_percent`、`load1` / `load5` / `load15`、`cores`、`mem_total` / `mem_available`、`swap_total` / `swap_used`、`data_total` / `data_free`、`root_total` / `root_free`、`rx_rate` / `tx_rate` | 每个实例每分钟一条服务器状态样本，主键 `(instance_id, minute)`，随实例、工作空间级联删除；CPU 使用率与网速由两次上报的累计值之差算出，第一次或计数器变小时为空。保留 30 天（每天的清理任务） |
+| `agent_host_samples`（T-0113，迁移 0031；**迁移 0045 删除**，见下文「迁移 `0045`」） | `instance_id`、`minute`、`workspace_id`、`cpu_percent`、`load1` / `load5` / `load15`、`cores`、`mem_total` / `mem_available`、`swap_total` / `swap_used`、`data_total` / `data_free`、`root_total` / `root_free`、`rx_rate` / `tx_rate` | 每个实例每分钟一条服务器状态样本，主键 `(instance_id, minute)`，随实例、工作空间级联删除；CPU 使用率与网速由两次上报的累计值之差算出，第一次或计数器变小时为空。保留 30 天（每天的清理任务） |
 | `agent_host_state`（T-0113，迁移 0031） | `instance_id`、`workspace_id`、`reported_at`、`cpu_model`、`total_ticks` / `idle_ticks`、`rx_bytes` / `tx_bytes`、`uptime_seconds`、`mem_limit`、`latest`（JSONB）、`alerts`（JSONB） | 每个实例一行：上一次的累计值（算差用）、CPU 型号、开机时长、容器内存上限、最近一次的当前值、正在提醒的告警及开始时间（同一类告警恢复前只提醒一次）；随实例、工作空间级联删除 |
 | `agent_ops_actions`（T-0114，迁移 0032） | `id`、`workspace_id`、`instance_id`、`action`、`service`、`status`、`exit_code`、`output`、`truncated`、`error_code`、`error_message`、`started_by`、`started_at`、`finished_at`、`expires_at` | 一次运维动作：CHECK `action` ∈ `status` / `logs` / `restart` / `up` / `prune` / `report`，`service` 为空或 ∈ `openclaw` / `tunnel` / `image-proxy`，`status` ∈ `running` / `succeeded` / `failed` / `interrupted`；`output` 是脱敏后的输出（最多 64 KB）；部分唯一索引保证同一实例同时只有一个 `running`；`expires_at` = 开始时间 + 7 天，Worker 每天删除过期记录（审计保留）；随实例、工作空间级联删除，`started_by` → `users`（删除后置空） |
 
@@ -426,3 +426,32 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 | `runner_ssh_jobs` | `id`、`workspace_id`、`host_id`、`target_id`、`kind`、`status`、`steps`、`log`、`error_code`、`error_message`、`started_by`、`started_at`、`finished_at`、`updated_at` | CHECK `kind` ∈ `install` / `uninstall`、`status` ∈ `running` / `succeeded` / `failed` / `interrupted`；部分唯一索引 `(target_id) WHERE status = 'running'`（同一目标同时一个任务）；`log` 是命令输出的结尾（最多 64 KB），密码、运行服务器凭证、私钥已替换成 `***`；API 重启时 `running` 改为 `interrupted` |
 
 **downgrade** 删除这两张表（服务器上已装的 runner-agent 与专用公钥不受影响）。
+
+### 迁移 `0045`（T-0144 / T-0146）
+
+一台服务器部署多个 OpenClaw（`docs/v2/MULTI_OPENCLAW_PLAN.md` 第 6 节）。人类 2026-11-07 确认还没有部署过（D5、D6），**不迁移旧数据**：按实例的旧样本表直接删除，由服务器级与实例级两张样本表代替。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `agent_servers`（新） | `id`、`workspace_id`、`name`、`kind`、`machine_key`、`reported_at`、`cpu_model`、`uptime_seconds`、`latest`（JSONB）、`alerts`（JSONB）、`version`、时间字段 | 一台 OpenClaw 服务器；CHECK `kind` ∈ `auto`（按上报的服务器指纹自动识别）/ `ssh`（管理员添加，T-0145）；部分唯一索引 `uq_agent_servers_machine (workspace_id, machine_key) WHERE machine_key IS NOT NULL`。`machine_key` 是 `boot_id` 的 HMAC-SHA256（盐按工作空间，接入包的 `MYWS_HOST_SALT`），**不存 `boot_id` 原值**；机器重启后跟着换。`latest` / `reported_at` 是整机最近一次的数值，`alerts` 是整机正在提醒的告警；随工作空间级联删除 |
+| `agent_server_samples`（新） | `server_id`、`minute`、`workspace_id`、`cpu_percent`、`load1` / `load5` / `load15`、`cores`、`mem_total` / `mem_available`、`swap_total` / `swap_used`、`data_total` / `data_free`、`root_total` / `root_free` | 主键 `(server_id, minute)`：同一台服务器上的每个实例都会报，先到的写入、后到的忽略；索引 `minute`；随服务器、工作空间级联删除；保留 30 天。**没有网速**：每个实例有自己的网卡，整机网速是同一分钟各实例网速之和（读的时候从下表算） |
+| `agent_instance_samples`（新） | `instance_id`、`minute`、`workspace_id`、`server_id`、`cpu_cores`、`cpu_percent`、`mem_bytes`、`mem_limit`、`pids`、`data_bytes`、`rx_rate`、`tx_rate` | 每个实例每分钟一条自己容器的样本（cgroup v2 / v1）：CPU 核数与占整机的百分比、内存已用（不含可回收的文件缓存）与上限、进程数、数据目录大小、自己网卡的速率；主键 `(instance_id, minute)`，同一分钟再报就覆盖；索引 `minute`、`(server_id, minute)`；随实例、工作空间级联删除，`server_id` → `agent_servers`（删除后置空）；保留 30 天 |
+| `agent_host_state` 新增 | `cpu_usec`、`machine_key`、`container`（JSONB） | 容器 CPU 用量累计（微秒，算差用；变小记一次容器重启）、这个实例看到的服务器指纹、自己容器的当前值（含数据目录大小与最近一小时的重启时间）；原有的 `alerts` 改为只记这个实例的告警（`mem_near_limit` / `restarting` / `cpu_hog`），整机告警在 `agent_servers.alerts` |
+| `agent_instances` 新增 | `server_id`、`server_manual`、`mem_limit_mb`、`cpus` | 所在服务器 → `agent_servers`（删除后置空）；`server_manual` 默认 false，为 true 时按管理员指定、不再按指纹自动改；资源上限（D2：默认 null 不限制），CHECK `mem_limit`：null 或 256 ~ 1048576（MiB），CHECK `cpus`：null 或 0.1 ~ 256，写进接入包的 `compose.yaml`，重新部署后生效 |
+| `agent_host_samples` | — | 删除（D6） |
+
+**downgrade** 回到 0044 的结构，同样不保留数据：删除三张新表与新增的列，重建空的 `agent_host_samples`（服务器上的实例不受影响，下一次上报重新写入）。
+
+### 迁移 `0046`（T-0144 / T-0145 / T-0147）
+
+一台服务器部署多个 OpenClaw 的 SSH 部分（`docs/v2/MULTI_OPENCLAW_PLAN.md` 第 4、8 节）：SSH 登录信息与专用密钥按服务器（一台一把，D7），每个实例的部署单独记。人类 2026-11-07 确认还没有部署过（D5），**不迁移旧数据**：升级前删除按实例的 SSH 目标、SSH 任务与运维记录。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `agent_ssh_targets` 改 | 去掉 `instance_id`、`install_dir`、`installed_at`；新增 `server_id`、`prepared_at` | 每台 SSH 服务器一条：`server_id` → `agent_servers`（级联删除），唯一；`prepared_at` 是准备好（专用公钥装上、Docker 可用、专用密钥能登录）的时间。其余列（地址、主机公钥、确认、专用私钥引用）不变，**登录密码从不保存** |
+| `agent_deployments`（新） | `id`、`workspace_id`、`instance_id`、`server_id`、`install_dir`、`installed_at`、`version`、`created_by`、时间字段 | 实例部署在哪台服务器、哪个目录（`~/myworkspace-openclaw/<实例短号>`）；复合外键 `(workspace_id, instance_id)` → `agent_instances`（级联删除），唯一 `instance_id`（一个实例同时只部署在一台服务器上）；`server_id` → `agent_servers`（RESTRICT：还有部署的服务器不能删）；索引 `server_id`；`created_by` → `users`（删除后置空）。卸载成功后删除 |
+| `agent_ssh_jobs` 改 | `instance_id` 可空；CHECK `kind` ∈ `prepare` / `install` / `uninstall` | 准备服务器的任务没有实例；部分唯一索引 `(target_id) WHERE status = 'running'` 不变，即同一台服务器同时只有一个 SSH 任务 |
+| `agent_ops_actions` 改 | 新增 `server_id`；`instance_id` 可空；CHECK `action` 增加 `containers` | `server_id` → `agent_servers`（级联删除）；CHECK `instance_scope`：服务器级动作（`prune`、`containers`）的 `instance_id` 为空，其余必须有实例；部分唯一索引改为 `(server_id) WHERE status = 'running'`（同一台服务器同时只有一个进行中的动作）；索引 `(server_id, started_at)` |
+
+**downgrade** 回到 0045 的结构，同样不保留这些记录：删除 `agent_deployments`，SSH 目标、任务与运维记录清空后改回按实例的列。
+

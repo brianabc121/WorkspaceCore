@@ -231,14 +231,23 @@ def test_bundle_carries_the_internal_ca_and_address_mapping() -> None:
     assert files["tls/ca.pem"] == ("CA PEM", 0o644)
     compose = files["compose.yaml"][0]
     tunnel = _service(compose, "tunnel")
-    assert "    network_mode: host" in tunnel
-    # 隧道按主机名发 SNI 并校验证书；主机名不在公网 DNS 里，映射到工作台服务器
-    assert f'    extra_hosts: ["{INTERNAL}:203.0.113.7"]' in tunnel
+    # 每个实例自己的网络命名空间（net 服务），隧道与 OpenClaw 都加入它，不再用宿主网络
+    assert '    network_mode: "service:net"' in tunnel
+    assert '    network_mode: "service:net"' in _service(compose, "openclaw")
+    assert "network_mode: host" not in compose
+    # 隧道按主机名发 SNI 并校验证书；主机名不在公网 DNS 里，写在隧道自己的 hosts 里指向工作台服务器
+    assert files["tls/hosts"] == (
+        "# 本机隧道自己的 hosts（My Workspace 接入包生成，只读挂到隧道容器的 /etc/hosts）\n"
+        "127.0.0.1\tlocalhost\n::1\tlocalhost ip6-localhost ip6-loopback\n"
+        f"203.0.113.7\t{INTERNAL}\n",
+        0o644,
+    )
+    assert "      - ./tls/hosts:/etc/hosts:ro" in tunnel and "extra_hosts" not in tunnel
     assert f"      - --target={INTERNAL}:9443\n" in tunnel
     assert "      - --cacert=/tls/ca.pem\n" in tunnel
     assert "      - ./tls:/tls:ro" in tunnel
-    # OpenClaw 容器仍然把入口主机名解析到本机隧道
-    assert f'    extra_hosts: ["{INTERNAL}:127.0.0.1"]' in _service(compose, "openclaw")
+    # 实例共用的 hosts（net 服务）把入口主机名解析到本机隧道，OpenClaw 用它
+    assert f'    extra_hosts: ["{INTERNAL}:127.0.0.1"]' in _service(compose, "net")
     assert "tls/ca.pem 校验" in compose
 
 
@@ -247,6 +256,8 @@ def test_bundle_without_internal_ca_keeps_the_system_trust_store() -> None:
     assert "tls/ca.pem" not in files
     tunnel = _service(files["compose.yaml"][0], "tunnel")
     assert "extra_hosts" not in tunnel and "--cacert" not in tunnel
+    # 有公网 DNS：隧道自己的 hosts 只有 localhost，照常查 DNS
+    assert INTERNAL not in files["tls/hosts"][0]
 
 
 def test_intranet_bundle_never_gets_the_ca() -> None:

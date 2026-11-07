@@ -5,6 +5,7 @@ import type { Schema } from '../../services/api'
 import { agentError, downloadBundle, unique, useAgentSettings, useInstances, useSecrets } from './queries'
 import { useAgentAction } from './action'
 import { useHostSummary } from './host'
+import { useServers } from './servers'
 import InstanceCard from './InstanceCard.vue'
 import InstanceForm from './InstanceForm.vue'
 import { useCreateIntent } from '../../composables/useCreateIntent'
@@ -20,6 +21,9 @@ const items = computed(() => unique(instances.data.value?.pages))
 const secretItems = computed(() => unique(secrets.data.value?.pages))
 const names = computed(() => new Map(items.value.map(i => [i.id, i.name])))
 const hosts = computed(() => new Map((hostSummary.data.value?.items ?? []).map(item => [item.instance_id, item])))
+const servers = useServers(scope)
+const serverNames = computed(() => new Map((servers.data.value?.items ?? []).map(s => [s.id, s.name])))
+const serverName = (instance: Schema['AgentInstanceOut']) => { const id = hosts.value.get(instance.id)?.server_id ?? instance.server_id; return id ? serverNames.value.get(id) : undefined }
 const path = (instance: Schema['AgentInstanceOut']) => ({ instance_id: instance.id })
 // 顶栏“创建 → 登记 OpenClaw 实例”（规范 §8.1）
 useCreateIntent(() => !busy.value, () => { editing.value = 'new' })
@@ -93,7 +97,7 @@ function grants(instance: Schema['AgentInstanceOut'], list: Schema['SecretGrantI
   <p v-else-if="!items.length" class="empty-state">还没有实例。点“登记实例”开始。</p>
   <div class="agent-list">
     <InstanceCard
-      v-for="instance in items" :key="instance.id" :instance="instance" :secrets="secretItems" :busy="busy" :host="hosts.get(instance.id)" :names="names" :mailboxes="mailboxes"
+      v-for="instance in items" :key="instance.id" :instance="instance" :secrets="secretItems" :busy="busy" :host="hosts.get(instance.id)" :names="names" :mailboxes="mailboxes" :server-name="serverName(instance)"
       @edit="editing = instance" @toggle="toggle(instance)" @bundle="bundle(instance, $event)" @revoke="revoke(instance, $event)" @grants="grants(instance, $event)" @project-admin="projectAdmin(instance, $event)" @im-media="imMedia(instance, $event)" @stop-others="stopOthers(instance, $event)" @mail="mail(instance, $event)"
     />
   </div>

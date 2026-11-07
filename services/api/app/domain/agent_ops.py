@@ -9,7 +9,9 @@
   进程重启时 running 改为 interrupted；
 - 输出先脱敏（令牌、密钥、Authorization、私钥块）再存，最多 64 KB，7 天后删除；
 - 审计：谁、什么时候、对哪个实例、做了什么动作、退出码；不记输出原文。
-- 只适用于用 SSH 部署过的实例（agent_ssh_targets.install_dir 有值、专用密钥还在）。
+- 只适用于部署到 SSH 服务器上的实例（agent_deployments 有目录、服务器的专用密钥还在）；
+  一台服务器多个实例后（T-0145）：清理镜像、查看全部容器是服务器级的动作，
+  同一台服务器同时只跑一个动作。
 """
 
 import asyncio
@@ -18,9 +20,10 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import asyncssh
+from pydantic import SecretStr
 from redis.asyncio import Redis
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -35,8 +38,16 @@ from app.domain.credentials import CredentialBox, CredentialError
 from app.domain.policy import WorkspaceAccess
 from app.domain.step_up import verify_step_up
 from app.integrations import ssh
-from app.models import AgentInstance, AgentOpsAction, AgentSshJob, AgentSshTarget, User
-from app.schemas.agents import AgentOpsActionOut, AgentOpsRun, AgentOpsState
+from app.models import (
+    AgentDeployment,
+    AgentInstance,
+    AgentOpsAction,
+    AgentServer,
+    AgentSshJob,
+    AgentSshTarget,
+    User,
+)
+from app.schemas.agents import AgentOpsActionOut, AgentOpsRun, AgentOpsState, ServerOpsRun
 
 if TYPE_CHECKING:
     from app.domain.agent_ssh_install import SshJobRunner
@@ -57,6 +68,7 @@ ACTION_NAMES = {
     "up": "重新拉起全部服务",
     "prune": "清理无用镜像",
     "report": "立即上报一次",
+    "containers": "查看全部容器",
 }
 
 # ---------------------------------------------------------------- 脱敏
@@ -115,7 +127,8 @@ class Output:
 
 
 def commands(action: str, service: str | None, directory: str) -> list[str]:
-    """每个动作对应的命令。directory 是部署时记下的接入包目录（经 shlex.quote）。"""
+    """每个动作对应的命令。directory 是部署时记下的这个实例的接入包目录（经 shlex.quote）；
+    服务器级的动作（prune、containers）不用目录。"""
     compose = prov.compose_command
     cd = f"cd {prov.q(directory)}"
     report = ("node", "/opt/myworkspace/bin/")
@@ -137,6 +150,18 @@ def commands(action: str, service: str | None, directory: str) -> list[str]:
         return [compose(directory, "up", "-d")]
     if action == "prune":
         return ["docker image prune -f"]
+    if action == "containers":
+        # 这台服务器上所有工作台的 Compose 项目（每个实例一个）与它们的资源占用
+        label = "label=com.docker.compose.project"
+        return [
+            "docker compose ls --all",
+            f"docker ps --all --filter {label} --format"
+            " 'table {{.Label \"com.docker.compose.project\"}}\\t{{.Names}}\\t{{.Status}}'",
+            f'ids=$(docker ps -q --filter {label}) && if [ -n "$ids" ];'
+            " then docker stats --no-stream $ids; else echo '没有运行中的容器'; fi",
+            "df -h /",
+            "uptime",
+        ]
     if action == "report":
         return [
             compose(directory, "exec", "-T", "openclaw", report[0], report[1] + "usage-report.mjs"),
@@ -157,6 +182,7 @@ def to_out(row: AgentOpsAction, *, with_output: bool = False) -> AgentOpsActionO
         {
             "id": row.id,
             "action": row.action,
+            "instance_id": row.instance_id,
             "service": row.service,
             "status": row.status,
             "exit_code": row.exit_code,
@@ -172,8 +198,25 @@ def to_out(row: AgentOpsAction, *, with_output: bool = False) -> AgentOpsActionO
     )
 
 
-def unavailable_reason(target: AgentSshTarget | None) -> str | None:
-    if target is None or not target.install_dir or target.host_key_confirmed_at is None:
+def unavailable_reason(
+    deployment: AgentDeployment | None, target: AgentSshTarget | None
+) -> str | None:
+    """实例级动作能不能执行：部署到了一台 SSH 服务器（有目录）、主机公钥确认过、专用密钥还在。"""
+    if (
+        deployment is None
+        or not deployment.install_dir
+        or target is None
+        or target.host_key_confirmed_at is None
+    ):
+        return "not_deployed"
+    if target.client_key_ref is None:
+        return "key_missing"
+    return None
+
+
+def server_unavailable_reason(target: AgentSshTarget | None) -> str | None:
+    """服务器级动作能不能执行：经 SSH 添加、主机公钥确认过、专用密钥还在。"""
+    if target is None or target.host_key_confirmed_at is None:
         return "not_deployed"
     if target.client_key_ref is None:
         return "key_missing"
@@ -185,6 +228,17 @@ def _interrupt(row: AgentOpsAction, message: str) -> None:
     row.error_code = "interrupted"
     row.error_message = message
     row.finished_at = datetime.now(UTC)
+
+
+def _unavailable(reason: str | None) -> ApiError:
+    return ApiError(
+        409,
+        "AGENT_OPS_UNAVAILABLE",
+        "只适用于部署到 SSH 服务器上的实例：先在“服务器”里添加服务器并部署"
+        if reason == "not_deployed"
+        else "这台服务器的专用密钥已吊销：重新准备服务器后才能执行运维动作",
+        details={"reason": reason},
+    )
 
 
 class AgentOpsService:
@@ -212,25 +266,43 @@ class AgentOpsService:
             raise ApiError(404, "NOT_FOUND", "实例不存在")
         return instance
 
-    async def _target(
-        self, instance: AgentInstance, *, lock: bool = False
-    ) -> AgentSshTarget | None:
-        query = select(AgentSshTarget).where(
-            AgentSshTarget.instance_id == instance.id,
-            AgentSshTarget.workspace_id == instance.workspace_id,
+    async def _server(self, access: WorkspaceAccess, server_id: uuid.UUID) -> AgentServer:
+        server = await self.db.scalar(
+            select(AgentServer).where(
+                AgentServer.id == server_id, AgentServer.workspace_id == access.workspace.id
+            )
         )
+        if server is None:
+            raise ApiError(404, "NOT_FOUND", "服务器不存在")
+        return server
+
+    async def _target(self, server_id: uuid.UUID, *, lock: bool = False) -> AgentSshTarget | None:
+        query = select(AgentSshTarget).where(AgentSshTarget.server_id == server_id)
         if lock:
             query = query.with_for_update().execution_options(populate_existing=True)
         return await self.db.scalar(query)
 
+    async def _deployment(
+        self, instance: AgentInstance, *, lock: bool = False
+    ) -> tuple[AgentDeployment | None, AgentSshTarget | None]:
+        deployment = await self.db.scalar(
+            select(AgentDeployment).where(
+                AgentDeployment.instance_id == instance.id,
+                AgentDeployment.workspace_id == instance.workspace_id,
+            )
+        )
+        if deployment is None:
+            return None, None
+        return deployment, await self._target(deployment.server_id, lock=lock)
+
     def _alive(self, key: uuid.UUID) -> bool:
         return self.runner is not None and self.runner.running(key)
 
-    async def _running(self, instance: AgentInstance) -> AgentOpsAction | None:
-        """进行中的动作；记录是 running、但本进程里没有它的协程（意外退出）时标为中断。"""
+    async def _running(self, server_id: uuid.UUID) -> AgentOpsAction | None:
+        """这台服务器上进行中的动作；记录是 running、但本进程里没有它的协程时标为中断。"""
         row = await self.db.scalar(
             select(AgentOpsAction)
-            .where(AgentOpsAction.instance_id == instance.id, AgentOpsAction.status == "running")
+            .where(AgentOpsAction.server_id == server_id, AgentOpsAction.status == "running")
             .execution_options(populate_existing=True)
         )
         if row is None or self._alive(row.id):
@@ -245,27 +317,26 @@ class AgentOpsService:
                 AgentSshJob.target_id == target.id, AgentSshJob.status == "running"
             )
         )
-        # 本进程里没有协程的安装任务由 AgentSshService 标为中断；这里只看是否还在跑
+        # 本进程里没有协程的部署任务由 AgentServerService 标为中断；这里只看是否还在跑
         return job is not None and self._alive(job)
 
-    async def state(self, access: WorkspaceAccess, instance_id: uuid.UUID) -> AgentOpsState:
-        instance = await self._instance(access, instance_id)
-        target = await self._target(instance)
-        running = await self._running(instance)
-        rows = (
-            await self.db.scalars(
-                select(AgentOpsAction)
-                .where(
-                    AgentOpsAction.instance_id == instance.id,
-                    AgentOpsAction.expires_at > datetime.now(UTC),
+    async def _history(self, *conditions: Any) -> list[AgentOpsAction]:
+        return list(
+            (
+                await self.db.scalars(
+                    select(AgentOpsAction)
+                    .where(*conditions, AgentOpsAction.expires_at > datetime.now(UTC))
+                    .order_by(AgentOpsAction.started_at.desc())
+                    .limit(HISTORY)
+                    .execution_options(populate_existing=True)
                 )
-                .order_by(AgentOpsAction.started_at.desc())
-                .limit(HISTORY)
-                .execution_options(populate_existing=True)
-            )
-        ).all()
-        await self.db.commit()
-        reason = unavailable_reason(target)
+            ).all()
+        )
+
+    @staticmethod
+    def _state(
+        reason: str | None, running: AgentOpsAction | None, rows: list[AgentOpsAction]
+    ) -> AgentOpsState:
         return AgentOpsState.model_validate(
             {
                 "available": reason is None,
@@ -275,13 +346,26 @@ class AgentOpsService:
             }
         )
 
+    # ---------------------------------------------------------------- 实例级
+
+    async def state(self, access: WorkspaceAccess, instance_id: uuid.UUID) -> AgentOpsState:
+        instance = await self._instance(access, instance_id)
+        deployment, target = await self._deployment(instance)
+        running = await self._running(deployment.server_id) if deployment else None
+        rows = await self._history(AgentOpsAction.instance_id == instance.id)
+        await self.db.commit()
+        return self._state(unavailable_reason(deployment, target), running, rows)
+
     async def get(
         self, access: WorkspaceAccess, instance_id: uuid.UUID, action_id: uuid.UUID
     ) -> AgentOpsActionOut:
         instance = await self._instance(access, instance_id)
+        return await self._get(action_id, AgentOpsAction.instance_id == instance.id)
+
+    async def _get(self, action_id: uuid.UUID, scope: Any) -> AgentOpsActionOut:
         row = await self.db.scalar(
             select(AgentOpsAction)
-            .where(AgentOpsAction.id == action_id, AgentOpsAction.instance_id == instance.id)
+            .where(AgentOpsAction.id == action_id, scope)
             .execution_options(populate_existing=True)
         )
         if row is None or row.expires_at <= datetime.now(UTC):
@@ -305,37 +389,100 @@ class AgentOpsService:
         if body.service is not None and body.action != "logs":
             raise ApiError(422, "VALIDATION_FAILED", "只有查看日志可以选服务")
         instance = await self._instance(access, instance_id)
-        target = await self._target(instance, lock=True)
-        reason = unavailable_reason(target)
+        deployment, target = await self._deployment(instance, lock=True)
+        reason = unavailable_reason(deployment, target)
+        if reason is not None or target is None or deployment is None:
+            raise _unavailable(reason)
+        service = (body.service or "openclaw") if body.action == "logs" else None
+        return await self._start(
+            access,
+            user,
+            target,
+            action=body.action,
+            service=service,
+            password=body.password,
+            instance=instance,
+            client_ip=client_ip,
+        )
+
+    # ---------------------------------------------------------------- 服务器级
+
+    async def server_state(self, access: WorkspaceAccess, server_id: uuid.UUID) -> AgentOpsState:
+        server = await self._server(access, server_id)
+        target = await self._target(server.id)
+        running = await self._running(server.id)
+        rows = await self._history(
+            AgentOpsAction.server_id == server.id, AgentOpsAction.instance_id.is_(None)
+        )
+        await self.db.commit()
+        return self._state(server_unavailable_reason(target), running, rows)
+
+    async def server_get(
+        self, access: WorkspaceAccess, server_id: uuid.UUID, action_id: uuid.UUID
+    ) -> AgentOpsActionOut:
+        server = await self._server(access, server_id)
+        return await self._get(action_id, AgentOpsAction.server_id == server.id)
+
+    async def server_run(
+        self,
+        access: WorkspaceAccess,
+        user: User,
+        server_id: uuid.UUID,
+        body: ServerOpsRun,
+        *,
+        client_ip: str,
+    ) -> AgentOpsActionOut:
+        if self.runner is None:
+            raise ApiError(503, "EXTERNAL_UNAVAILABLE", "运维动作暂时不可用，请稍后重试")
+        server = await self._server(access, server_id)
+        target = await self._target(server.id, lock=True)
+        reason = server_unavailable_reason(target)
         if reason is not None or target is None:
-            raise ApiError(
-                409,
-                "AGENT_OPS_UNAVAILABLE",
-                "只适用于用 SSH 部署过的实例：先在实例页做一次 SSH 部署"
-                if reason == "not_deployed"
-                else "专用密钥已吊销：重新做一次 SSH 部署后才能执行运维动作",
-                details={"reason": reason},
-            )
+            raise _unavailable(reason)
+        return await self._start(
+            access,
+            user,
+            target,
+            action=body.action,
+            service=None,
+            password=body.password,
+            instance=None,
+            client_ip=client_ip,
+        )
+
+    # ---------------------------------------------------------------- 开始执行
+
+    async def _start(
+        self,
+        access: WorkspaceAccess,
+        user: User,
+        target: AgentSshTarget,
+        *,
+        action: str,
+        service: str | None,
+        password: SecretStr | None,
+        instance: AgentInstance | None,
+        client_ip: str,
+    ) -> AgentOpsActionOut:
+        assert self.runner is not None  # noqa: S101 - 调用方已检查
         if self.settings.credential_encryption_key is None:
             raise ApiError(503, "EXTERNAL_UNAVAILABLE", "密钥库未配置加密密钥")
-        if body.action in STEP_UP_ACTIONS:
+        if action in STEP_UP_ACTIONS:
             await verify_step_up(
-                self.redis,
-                user,
-                body.password,
-                message=f"{ACTION_NAMES[body.action]}需要重新输入密码",
+                self.redis, user, password, message=f"{ACTION_NAMES[action]}需要重新输入密码"
             )
         if await self._job_running(target):
             raise ApiError(409, "AGENT_SSH_JOB_RUNNING", "这台服务器正在部署或卸载，结束后再操作")
-        if await self._running(instance) is not None:
-            raise ApiError(409, "AGENT_OPS_RUNNING", "这个实例正在执行另一个运维动作，结束后再操作")
+        busy = ApiError(409, "AGENT_OPS_RUNNING", "这台服务器正在执行另一个运维动作，结束后再操作")
+        if await self._running(target.server_id) is not None:
+            raise busy
         now = datetime.now(UTC)
-        service = (body.service or "openclaw") if body.action == "logs" else None
         row = AgentOpsAction(
             id=uuid.uuid4(),
-            workspace_id=instance.workspace_id,
-            instance_id=instance.id,
-            action=body.action,
+            workspace_id=target.workspace_id,
+            instance_id=instance.id if instance is not None else None,
+            server_id=target.server_id,
+            action=action,
             service=service,
             status="running",
             output="",
@@ -347,11 +494,16 @@ class AgentOpsService:
         self.db.add(row)
         await self.audit.record(
             "agents.ops.started",
-            workspace_ids=[instance.workspace_id],
+            workspace_ids=[target.workspace_id],
             actor_id=access.user_id,
-            resource_type="agent_instance",
-            resource_id=instance.id,
-            metadata={"action": body.action, "service": service, "action_id": str(row.id)},
+            resource_type="agent_instance" if instance is not None else "agent_server",
+            resource_id=instance.id if instance is not None else target.server_id,
+            metadata={
+                "action": action,
+                "service": service,
+                "action_id": str(row.id),
+                "server_id": str(target.server_id),
+            },
             client_ip=client_ip,
         )
         # 提交前先登记：提交之后、启动协程之前，别的请求不会把它当成失效的动作
@@ -361,9 +513,7 @@ class AgentOpsService:
         except IntegrityError as error:
             self.runner.release(row.id)
             await self.db.rollback()
-            raise ApiError(
-                409, "AGENT_OPS_RUNNING", "这个实例正在执行另一个运维动作，结束后再操作"
-            ) from error
+            raise busy from error
         except BaseException:
             self.runner.release(row.id)
             raise
@@ -381,7 +531,8 @@ class _Plan:
     action: str
     service: str | None
     workspace_id: uuid.UUID
-    instance_id: uuid.UUID
+    instance_id: uuid.UUID | None
+    server_id: uuid.UUID
     started_by: uuid.UUID | None
     target_id: uuid.UUID
     address: str
@@ -389,7 +540,7 @@ class _Plan:
     username: str
     host_key: str
     client_key_ref: str
-    directory: str
+    directory: str | None
 
 
 async def _plan(db: AsyncSession, action_id: uuid.UUID) -> tuple[_Plan | None, str | None]:
@@ -398,20 +549,32 @@ async def _plan(db: AsyncSession, action_id: uuid.UUID) -> tuple[_Plan | None, s
         return None, None
     target = await db.scalar(
         select(AgentSshTarget).where(
-            AgentSshTarget.instance_id == row.instance_id,
+            AgentSshTarget.server_id == row.server_id,
             AgentSshTarget.workspace_id == row.workspace_id,
         )
     )
-    if target is None or unavailable_reason(target) is not None:
-        return None, "这台服务器已不再是 SSH 部署状态（目标服务器被删除、卸载或专用密钥被吊销）"
-    assert target.install_dir is not None  # noqa: S101 - unavailable_reason 已检查
-    assert target.client_key_ref is not None  # noqa: S101
+    directory: str | None = None
+    if row.instance_id is not None:
+        deployment = await db.scalar(
+            select(AgentDeployment).where(
+                AgentDeployment.instance_id == row.instance_id,
+                AgentDeployment.server_id == row.server_id,
+            )
+        )
+        if unavailable_reason(deployment, target) is not None:
+            return None, "这个实例已不在这台服务器上（被卸载），或服务器的专用密钥被吊销"
+        assert deployment is not None  # noqa: S101 - unavailable_reason 已检查
+        directory = deployment.install_dir
+    elif server_unavailable_reason(target) is not None:
+        return None, "这台服务器的专用密钥被吊销，或服务器被移除"
+    assert target is not None and target.client_key_ref is not None  # noqa: S101
     return (
         _Plan(
             action=row.action,
             service=row.service,
             workspace_id=row.workspace_id,
             instance_id=row.instance_id,
+            server_id=row.server_id,
             started_by=row.started_by,
             target_id=target.id,
             address=target.address,
@@ -419,7 +582,7 @@ async def _plan(db: AsyncSession, action_id: uuid.UUID) -> tuple[_Plan | None, s
             username=target.username,
             host_key=target.host_key,
             client_key_ref=target.client_key_ref,
-            directory=target.install_dir,
+            directory=directory,
         ),
         None,
     )
@@ -436,7 +599,7 @@ async def _execute(settings: Settings, plan: _Plan, out: Output) -> int:
     conn = await ssh.connect(plan.address, plan.port, plan.username, plan.host_key, client_key=key)
     exit_code = 0
     try:
-        for command in commands(plan.action, plan.service, plan.directory):
+        for command in commands(plan.action, plan.service, plan.directory or ""):
             out.write(f"$ {command}")
             result = await ssh.run(conn, command, seconds=timeout_for(plan.action))
             out.write(result.stdout)
@@ -545,8 +708,8 @@ async def _finish(
                 "agents.ops.finished",
                 workspace_ids=[row.workspace_id],
                 actor_id=row.started_by,
-                resource_type="agent_instance",
-                resource_id=row.instance_id,
+                resource_type="agent_instance" if row.instance_id else "agent_server",
+                resource_id=row.instance_id or row.server_id,
                 metadata={
                     "action": row.action,
                     "service": row.service,

@@ -164,6 +164,7 @@
   - 手动接入的按 CHECKLIST 加一行；
   - 旧接入包重新部署后才有。
 - 读的都是容器里的 `/proc` 与文件系统统计。已在锁定镜像上实测：`node` 用户、host 网络、去掉全部 capability 时，读到的值与宿主机一致（核验 ADR 第 1 节）。
+  （一台服务器多个实例后改为每个实例自己的网络，CPU、负载、内存仍是整台服务器的，网卡是这个实例自己的；见 `docs/v2/MULTI_OPENCLAW_PLAN.md` 第 5 节。）
   - **CPU**：核心数、型号；1 / 5 / 15 分钟负载（`/proc/loadavg`）；使用率由 `/proc/stat` 的累计值算出（工作台用两次上报之差计算）。
   - **内存**：`MemTotal`、`MemAvailable`，已用 = 总量 − 可用；另报 Swap 的总量与已用。
   - **磁盘**：两个分区的总量、已用、可用。一个是接入包目录所在的分区，OpenClaw 的会话和记忆在这里；另一个是 Docker 数据目录所在的分区（容器根目录），镜像在这里。
@@ -218,7 +219,7 @@
 | 查看日志 | OpenClaw 容器最近 200 行日志；也可以选隧道、取图代理的日志 | 不需要（日志可能含对话片段，只给 owner / admin，并写审计） |
 | 重启 OpenClaw | `docker compose restart openclaw` | 需要 |
 | 重新拉起全部服务 | `docker compose up -d` | 需要 |
-| 清理无用镜像 | `docker image prune -f`（只删没在用的镜像，回收磁盘） | 需要 |
+| 清理无用镜像 | `docker image prune -f`（只删没在用的镜像，回收磁盘）。一台服务器多个实例后改为服务器级动作（T-0145，`docs/v2/MULTI_OPENCLAW_PLAN.md` 第 8 节），在服务器详情里；同在那里的还有“查看全部容器”（`docker compose ls --all`、`docker ps`、`docker stats --no-stream`） | 需要 |
 | 立即上报一次 | 在容器里运行用量与服务器指标两个上报脚本 | 不需要 |
 | 重新部署 / 卸载 / 吊销 | 已有，不变 | 已有规则 |
 

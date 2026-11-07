@@ -36,9 +36,11 @@ from app.domain.agent_ssh import agent_ssh_context
 from app.domain.agents import AgentService, hash_token
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
+from app.domain.host_metrics import drop_if_empty_auto
 from app.integrations import ssh
 from app.models import (
     AgentCredential,
+    AgentDeployment,
     AgentInstance,
     AgentOpsAction,
     AgentSshJob,
@@ -56,9 +58,10 @@ START_TIMEOUT = 300.0
 # 冷启动 2 ~ 4 分钟（doctor 联网检查插件更新，OC-0 ADR F5）；最多等 15 分钟
 ONLINE_TIMEOUT = 15 * 60.0
 ONLINE_POLL = 5.0
-# 每晚复盘任务（T-0100）：实例刚连上工作台时 OpenClaw 的网关可能还没就绪。
-# 脚本每 10 秒重试，最多 4 分钟
-REFLECTION_TRIES = 24
+# 每晚复盘任务（T-0100）：实例刚连上工作台时 OpenClaw 的网关可能还没就绪（冷启动 2 ~ 4 分钟）。
+# 脚本每 10 秒重试，最多 10 分钟：一台服务器上有多个实例时冷启动更慢（T-0148 的 CI 里
+# 两个实例加全栈在 4 核机器上，重新部署后 4 分半还没就绪）；只在慢的时候多等，实例已经在线
+REFLECTION_TRIES = 60
 REFLECTION_WAIT = 10
 # 启动时把上次没跑完的任务标为中断，最多等这么久（不拖慢 API 启动）
 RECOVER_TIMEOUT = 5.0
@@ -210,6 +213,13 @@ class Target:
     host_key: str
     client_key_ref: str | None
     host_key_confirmed: bool
+    # 一台服务器多个实例（T-0145）：OpenClaw 服务器的 ID；准备服务器的任务里 instance_id 也填它
+    # （只用作审计的资源 ID）。运行服务器的部署不用这个字段
+    server_id: uuid.UUID | None = None
+
+    @property
+    def deploys_instance(self) -> bool:
+        return self.server_id is None or self.kind != "prepare"
 
 
 @dataclass(frozen=True)
@@ -351,7 +361,12 @@ class Installer:
         )
 
     def key_comment(self) -> str:
-        """专用公钥在 authorized_keys 里的注释（运行服务器的部署另有前缀）。"""
+        """专用公钥在 authorized_keys 里的注释（运行服务器的部署另有前缀）。
+
+        一台 OpenClaw 服务器一把专用密钥（D7），注释带服务器 ID 的前 8 位。
+        """
+        if self.target.server_id is not None:
+            return f"myworkspace-server-{str(self.target.server_id)[:8]}"
         return f"myworkspace-agent-{str(self.target.instance_id)[:8]}"
 
     def _box(self) -> CredentialBox:
@@ -431,8 +446,8 @@ class Installer:
                 "agents.ssh.key_authorized",
                 workspace_ids=[target.workspace_id],
                 actor_id=self.target.started_by,
-                resource_type="agent_instance",
-                resource_id=target.instance_id,
+                resource_type="agent_server",
+                resource_id=target.server_id,
                 metadata={"client_key_fingerprint": key.get_fingerprint("sha256")},
                 client_ip=self.client_ip,
             )
@@ -489,7 +504,7 @@ class Installer:
             )
             if not check.ok:
                 raise InstallFailed("sudo_denied", "这个账号不能使用 sudo（或密码不对）")
-        staging = f"{info.home}/{prov.STAGING_DIR_NAME}"
+        staging = prov.staging_dir(info.home, str(self.target.instance_id))
         path = f"{staging}/install-docker.sh"
         await self._run(
             conn, "准备安装脚本", f"mkdir -p {prov.q(staging)} && chmod 700 {prov.q(staging)}"
@@ -547,7 +562,7 @@ class Installer:
             if used is not None:
                 break
             if loop.time() >= deadline:
-                directory = f"{self.home}/{prov.INSTALL_DIR_NAME}"
+                directory = prov.install_dir(self.home, str(self.target.instance_id))
                 for label, args in (
                     ("容器状态", ("ps",)),
                     ("OpenClaw 日志", ("logs", "--tail", "60", "openclaw")),
@@ -612,13 +627,28 @@ class Installer:
             if not check.ok:
                 raise InstallFailed("docker_unavailable", "专用密钥登录后仍然不能使用 Docker")
             await self.rec.step("reconnect", "done", "专用密钥登录，Docker 可用")
-            await self._deploy(conn, info)
+            await self._mark_prepared()
+            if self.target.deploys_instance:
+                await self._deploy(conn, info)
         finally:
             if conn is not None:
                 conn.close()
 
+    async def _mark_prepared(self) -> None:
+        """专用公钥装好、Docker 可用：这台服务器准备好了（之后部署实例不用再输密码）。"""
+        async with self.sessionmaker() as db:
+            target = await db.get(AgentSshTarget, self.target.target_id, with_for_update=True)
+            if target is None:
+                raise JobGone
+            if not self._unchanged(target):
+                raise InstallFailed("target_changed", "服务器的地址在任务期间被更换，已停止")
+            if target.prepared_at is None:
+                target.prepared_at = _now()
+                target.version += 1
+            await db.commit()
+
     async def _deploy(self, conn: asyncssh.SSHClientConnection, info: HostInfo) -> None:
-        directory = f"{info.home}/{prov.INSTALL_DIR_NAME}"
+        directory = prov.install_dir(info.home, str(self.target.instance_id))
         await self.rec.step("upload", "running")
         files = await self._issue_bundle()
         for value in bundle_secrets(files):
@@ -650,6 +680,12 @@ class Installer:
             result = await self._run(conn, "目录交给 uid 1000", handover, seconds=START_TIMEOUT)
             if not result.ok:
                 raise InstallFailed("plugin_failed", "无法把 state/、bin/、tls/ 交给 uid 1000")
+        # 安装插件要联网：先起这个实例的网络命名空间（net 服务，只运行 sleep）
+        result = await self._run(
+            conn, "启动实例网络", prov.compose_command(directory, "up", "-d", "net"), seconds=120
+        )
+        if not result.ok:
+            raise InstallFailed("plugin_failed", "无法启动这个实例的网络（net 服务），详见日志")
         result = await self._run(
             conn,
             "安装 openclaw-channel",
@@ -683,7 +719,12 @@ class Installer:
 
         if info.crontab:
             await self.rec.step("schedule", "running")
-            result = await self._run(conn, "定时任务", prov.schedule_command(directory), seconds=30)
+            result = await self._run(
+                conn,
+                "定时任务",
+                prov.schedule_command(directory, str(self.target.instance_id)),
+                seconds=30,
+            )
             if not result.ok:
                 raise InstallFailed("schedule_failed", "写入 crontab 失败")
             await self.rec.step(
@@ -705,10 +746,29 @@ class Installer:
             if target is None:
                 raise JobGone
             if not self._unchanged(target):
-                raise InstallFailed("target_changed", "目标服务器在安装期间被更换，已停止")
-            target.install_dir = directory
-            target.installed_at = _now()
-            target.version += 1
+                raise InstallFailed("target_changed", "服务器的地址在部署期间被更换，已停止")
+            deployment = await db.scalar(
+                select(AgentDeployment)
+                .where(AgentDeployment.instance_id == self.target.instance_id)
+                .with_for_update()
+            )
+            if deployment is None or deployment.server_id != target.server_id:
+                raise InstallFailed("deployment_changed", "部署记录在部署期间被改动，已停止")
+            deployment.install_dir = directory
+            deployment.installed_at = _now()
+            deployment.version += 1
+            # 经 SSH 部署的实例归到这台服务器（以部署为准，不再按指纹自动改）；
+            # 部署过程中按指纹自动建的那台空了就删掉
+            previous = await db.scalar(
+                select(AgentInstance.server_id).where(AgentInstance.id == self.target.instance_id)
+            )
+            await db.execute(
+                update(AgentInstance)
+                .where(AgentInstance.id == self.target.instance_id)
+                .values(server_id=target.server_id, server_manual=True)
+            )
+            if previous != target.server_id:
+                await drop_if_empty_auto(db, previous)
             await db.commit()
 
     async def _reflection(self, conn: asyncssh.SSHClientConnection, directory: str) -> None:
@@ -755,7 +815,7 @@ class Uninstaller(Installer):
             conn = await self._connect(key=key)
             await self.rec.step("connect", "done", "专用密钥登录")
             info = await self._inspect(conn)
-            directory = f"{info.home}/{prov.INSTALL_DIR_NAME}"
+            directory = prov.install_dir(info.home, str(self.target.instance_id))
 
             await self.rec.step("stop", "running")
             present = await self._run(
@@ -777,11 +837,14 @@ class Uninstaller(Installer):
             if info.crontab:
                 await self.rec.step("unschedule", "running")
                 result = await self._run(
-                    conn, "删除定时任务", prov.unschedule_command(), seconds=30
+                    conn,
+                    "删除定时任务",
+                    prov.unschedule_command(str(self.target.instance_id)),
+                    seconds=30,
                 )
                 if not result.ok:
                     raise InstallFailed("schedule_failed", "修改 crontab 失败")
-                await self.rec.step("unschedule", "done", "已删除带标记的定时任务")
+                await self.rec.step("unschedule", "done", "已删除这个实例的定时任务")
             else:
                 await self.rec.step("unschedule", "skipped", "服务器上没有 crontab")
 
@@ -816,11 +879,26 @@ class Uninstaller(Installer):
             if target is None:
                 raise JobGone
             if not self._unchanged(target):
-                raise InstallFailed("target_changed", "目标服务器在卸载期间被更换，已停止")
-            target.installed_at = None
-            if removed:
-                target.install_dir = None
-            target.version += 1
+                raise InstallFailed("target_changed", "服务器的地址在卸载期间被更换，已停止")
+            deployment = await db.scalar(
+                select(AgentDeployment)
+                .where(AgentDeployment.instance_id == self.target.instance_id)
+                .with_for_update()
+            )
+            if deployment is not None and removed:
+                # 目录删掉了：这台服务器上不再有这个实例（之后按指纹自动识别）
+                await db.delete(deployment)
+                await db.execute(
+                    update(AgentInstance)
+                    .where(
+                        AgentInstance.id == self.target.instance_id,
+                        AgentInstance.server_id == target.server_id,
+                    )
+                    .values(server_id=None, server_manual=False)
+                )
+            elif deployment is not None:
+                deployment.installed_at = None
+                deployment.version += 1
             await db.commit()
 
 
@@ -843,7 +921,8 @@ async def _load(sessionmaker: async_sessionmaker[AsyncSession], job_id: uuid.UUI
         job_id=job.id,
         kind=job.kind,
         target_id=target.id,
-        instance_id=target.instance_id,
+        # 准备服务器的任务没有实例：审计的资源 ID 用服务器
+        instance_id=job.instance_id or target.server_id,
         workspace_id=target.workspace_id,
         started_by=job.started_by,
         address=target.address,
@@ -852,6 +931,7 @@ async def _load(sessionmaker: async_sessionmaker[AsyncSession], job_id: uuid.UUI
         host_key=target.host_key,
         client_key_ref=target.client_key_ref,
         host_key_confirmed=target.host_key_confirmed_at is not None,
+        server_id=target.server_id,
     )
 
 
@@ -939,22 +1019,28 @@ async def run_job(
     client_ip: str | None = None,
     remove_files: bool = False,
 ) -> None:
-    """后台协程：安装或卸载（按任务记录的 kind）。"""
+    """后台协程：准备服务器、部署或卸载实例（按任务记录的 kind）。"""
     try:
         target = await _load(sessionmaker, job_id)
     except JobGone:
         return
     password = secret.get()
+    steps = {
+        "prepare": prov.PREPARE_STEPS,
+        "install": prov.STEPS,
+    }.get(target.kind, prov.UNINSTALL_STEPS)
     recorder = JobRecorder(
         sessionmaker,
         job_id,
         [password.get_secret_value()] if password is not None else [],
-        steps=prov.STEPS if target.kind == "install" else prov.UNINSTALL_STEPS,
+        steps=steps,
     )
     del password
-    label = "安装" if target.kind == "install" else "卸载"
+    label = {"prepare": "准备", "install": "部署"}.get(target.kind, "卸载")
+    # 准备服务器的审计记在服务器上，部署 / 卸载记在实例上
+    audit = ("agents.ssh", "agent_server" if target.kind == "prepare" else "agent_instance")
     try:
-        if target.kind == "install":
+        if target.kind in ("prepare", "install"):
             await Installer(sessionmaker, settings, recorder, target, client_ip=client_ip).run(
                 secret
             )
@@ -975,6 +1061,7 @@ async def run_job(
                 code="interrupted",
                 message=f"工作台停止，{label}中断；可以重新开始",
                 client_ip=client_ip,
+                audit=audit,
             )
         )
         raise
@@ -988,6 +1075,7 @@ async def run_job(
             code=error.code,
             message=error.message,
             client_ip=client_ip,
+            audit=audit,
         )
     except ssh.SshError as error:
         await _finish(
@@ -999,6 +1087,7 @@ async def run_job(
             code=error.reason,
             message=error.message,
             client_ip=client_ip,
+            audit=audit,
         )
     except Exception:
         # 不带异常文本写进任务（可能含远端输出）；完整堆栈只在服务日志里，堆栈不含局部变量
@@ -1012,10 +1101,17 @@ async def run_job(
             code="internal_error",
             message="工作台内部错误，详见服务日志",
             client_ip=client_ip,
+            audit=audit,
         )
     else:
         await _finish(
-            sessionmaker, settings, recorder, target, status="succeeded", client_ip=client_ip
+            sessionmaker,
+            settings,
+            recorder,
+            target,
+            status="succeeded",
+            client_ip=client_ip,
+            audit=audit,
         )
 
 

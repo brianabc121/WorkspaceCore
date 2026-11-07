@@ -8,6 +8,7 @@ chown、crontab（记录参数、模拟结果），所以 authorized_keys、cron
 
 import asyncio
 import hashlib
+import re
 import secrets
 import stat
 import subprocess
@@ -170,7 +171,10 @@ class FakeHost:
 
     @property
     def directory(self) -> Path:
-        return self.home / prov.INSTALL_DIR_NAME
+        """这个实例的接入包目录：~/myworkspace-openclaw/<实例短号>（测试里一台服务器只部署一个）。"""
+        root = self.home / prov.INSTALL_ROOT_NAME
+        found = sorted(root.iterdir()) if root.is_dir() else []
+        return found[0] if found else root / "not-installed"
 
     def authorized(self) -> list[str]:
         path = self.home / ".ssh" / "authorized_keys"
@@ -256,6 +260,8 @@ class Owner:
         self.client = client
         self.workspace = workspace
         self.database_url = database_url
+        self.servers = {}
+        self.by_port = {}
 
     @property
     def app(self) -> FastAPI:
@@ -277,42 +283,124 @@ class Owner:
         assert response.status_code == 201, response.text
         return str(response.json()["id"])
 
-    async def state(self, instance_id: str) -> dict[str, Any]:
-        response = await self.client.get(
-            f"/api/v1/agents/instances/{instance_id}/ssh", headers=self.headers()
-        )
+    # 一台服务器多个实例后（T-0145）：SSH 信息在服务器上，实例的目录在部署记录里。
+    # 下面把它们拼回“目标服务器”的样子（target：主机公钥、专用密钥、目录、服务器的版本号），
+    # 这个文件里的部署流程断言不用改。
+    servers: dict[str, str]
+    by_port: dict[int, dict[str, Any]]
+
+    async def _get(self, path: str) -> dict[str, Any]:
+        response = await self.client.get(path, headers=self.headers())
         assert response.status_code == 200, response.text
         data: dict[str, Any] = response.json()
         return data
 
+    async def instance_version(self, instance_id: str) -> int:
+        return int((await self._get(f"/api/v1/agents/instances/{instance_id}"))["version"])
+
+    async def server_version(self, instance_id: str) -> int:
+        server = await self._get(f"/api/v1/agents/servers/{self.servers[instance_id]}")
+        return int(server["server"]["version"])
+
+    async def target(self, instance_id: str) -> dict[str, Any] | None:
+        server_id = self.servers.get(instance_id)
+        if server_id is None:
+            return None
+        detail = await self.client.get(
+            f"/api/v1/agents/servers/{server_id}", headers=self.headers()
+        )
+        if detail.status_code == 404:
+            return None
+        server = detail.json()["server"]
+        deployment = (await self._get(f"/api/v1/agents/instances/{instance_id}/deployment"))[
+            "deployment"
+        ]
+        return {
+            **server["ssh"],
+            "install_dir": deployment["install_dir"] if deployment else None,
+            "installed_at": deployment["installed_at"] if deployment else None,
+            "version": server["version"],
+        }
+
+    async def state(self, instance_id: str) -> dict[str, Any]:
+        deployment = await self._get(f"/api/v1/agents/instances/{instance_id}/deployment")
+        job = deployment["job"]
+        if job is None and instance_id in self.servers:
+            detail = await self.client.get(
+                f"/api/v1/agents/servers/{self.servers[instance_id]}", headers=self.headers()
+            )
+            if detail.status_code == 200:
+                job = detail.json()["job"]
+        return {"target": await self.target(instance_id), "job": job, "warning": None}
+
+    async def add_server(self, port: int, *, username: str = "deploy") -> dict[str, Any]:
+        if port in self.by_port:
+            return self.by_port[port]
+        response = await self.client.post(
+            "/api/v1/agents/servers",
+            json={
+                "name": f"服务器 {port}",
+                "host": "127.0.0.1",
+                "port": port,
+                "username": username,
+            },
+            headers=self.headers(),
+        )
+        assert response.status_code == 201, response.text
+        server: dict[str, Any] = response.json()["server"]
+        self.by_port[port] = server
+        return server
+
     async def prepare(self, port: int, *, confirm: bool = True) -> tuple[str, int]:
         instance_id = await self.instance()
-        response = await self.client.put(
-            f"/api/v1/agents/instances/{instance_id}/ssh",
-            json={"host": "127.0.0.1", "port": port, "username": "deploy"},
-            headers=self.headers(),
-        )
-        assert response.status_code == 200, response.text
-        target = response.json()["target"]
-        if not confirm:
-            return instance_id, int(target["version"])
-        response = await self.client.post(
-            f"/api/v1/agents/instances/{instance_id}/ssh/confirm",
-            json={"version": target["version"], "fingerprint": target["host_key_fingerprint"]},
-            headers=self.headers(),
-        )
-        assert response.status_code == 200, response.text
-        return instance_id, int(response.json()["target"]["version"])
+        server = await self.add_server(port)
+        self.servers[instance_id] = server["id"]
+        current = (await self._get(f"/api/v1/agents/servers/{server['id']}"))["server"]
+        if confirm and not current["ssh"]["host_key_confirmed"]:
+            response = await self.client.post(
+                f"/api/v1/agents/servers/{server['id']}/confirm",
+                json={
+                    "version": current["version"],
+                    "fingerprint": current["ssh"]["host_key_fingerprint"],
+                },
+                headers=self.headers(),
+            )
+            assert response.status_code == 200, response.text
+            current = response.json()["server"]
+        return instance_id, int(current["version"])
+
+    async def _instance_version_for(self, instance_id: str, version: int) -> int:
+        """测试里传的是服务器的版本号：对得上就用实例当前的版本号，对不上就故意给错的。"""
+        current = await self.instance_version(instance_id)
+        return current if version == await self.server_version(instance_id) else current + 1000
 
     async def install(
-        self, instance_id: str, version: int, password: str | None = PASSWORD
+        self, instance_id: str, version: int, password: str | None = PASSWORD, **extra: Any
     ) -> httpx.Response:
-        body: dict[str, Any] = {"version": version}
+        body: dict[str, Any] = {
+            "server_id": self.servers[instance_id],
+            "version": await self._instance_version_for(instance_id, version),
+            **extra,
+        }
         if password is not None:
             body["password"] = password
         return await self.client.post(
-            f"/api/v1/agents/instances/{instance_id}/ssh/install",
+            f"/api/v1/agents/instances/{instance_id}/deploy",
             json=body,
+            headers=self.headers(),
+        )
+
+    async def replace(self, instance_id: str, **body: Any) -> httpx.Response:
+        return await self.client.put(
+            f"/api/v1/agents/servers/{self.servers[instance_id]}/address",
+            json={"host": "127.0.0.1", "username": "deploy", **body},
+            headers=self.headers(),
+        )
+
+    async def remove(self, instance_id: str, version: int) -> httpx.Response:
+        return await self.client.delete(
+            f"/api/v1/agents/servers/{self.servers[instance_id]}",
+            params={"version": version},
             headers=self.headers(),
         )
 
@@ -433,7 +521,12 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     assert "sudo true" in calls
     assert "install-docker user=deploy" in calls
     assert (host.state / "install-docker.sh").read_text() == prov.script("install-docker.sh")
-    assert not (host.home / prov.STAGING_DIR_NAME).exists(), "安装脚本用完要删除"
+    assert not [p for p in host.home.iterdir() if p.name.startswith(prov.STAGING_DIR_NAME)], (
+        "安装脚本用完要删除"
+    )
+    # 每个实例一个目录：~/myworkspace-openclaw/<实例 ID 去掉连字符的前 12 位>
+    assert re.fullmatch(r"[0-9a-f]{12}", host.directory.name)
+    assert host.directory.parent == host.home / "myworkspace-openclaw"
     # uid 既不是 0 也不是 1000：用锁定镜像里的 chown 把 state/、bin/、tls/ 交给 uid 1000
     handover = [c for c in calls if c.startswith("docker run") and "1000:1000" in c]
     assert len(handover) == 1
@@ -443,6 +536,10 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     assert "docker compose pull --quiet" in calls
     assert "docker compose run --rm --no-deps -T --entrypoint sh openclaw -s" in calls
     assert "docker compose up -d" in calls
+    # 安装插件前先起这个实例的网络（net 服务）：插件要联网下载依赖
+    assert calls.index("docker compose up -d net") < calls.index(
+        "docker compose run --rm --no-deps -T --entrypoint sh openclaw -s"
+    )
     # 每晚复盘（T-0100）：OpenClaw 上线后用接入包里的脚本建定时任务
     assert any(
         "docker compose exec -T openclaw node openclaw.mjs automations add" in c for c in calls
@@ -473,13 +570,15 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     for name, mode in files.items():
         assert stat.S_IMODE((host.directory / name).stat().st_mode) == mode, name
     assert stat.S_IMODE(host.directory.stat().st_mode) == 0o700
-    assert "tunnel:" in (host.directory / "compose.yaml").read_text()
+    compose = (host.directory / "compose.yaml").read_text()
+    assert "tunnel:" in compose and f"name: myworkspace-openclaw-{host.directory.name}" in compose
+    assert "network_mode: host" not in compose
 
     # crontab：六行都带标记（每 10 分钟取密钥、每分钟上报用量与服务器状态、
     # 每分钟领取唤醒（T-0121）与终止令（T-0126）、每周一重启）
     cron = (host.state / "crontab").read_text().splitlines()
     assert len(cron) == 6
-    assert all(line.endswith(prov.CRON_MARKER) for line in cron)
+    assert all(line.endswith(f"# mw-openclaw:{host.directory.name}") for line in cron)
     assert "secrets reload --json" in cron[0]
     assert cron[1].startswith("* * * * * ")
     assert "exec -T openclaw node /opt/myworkspace/bin/usage-report.mjs" in cron[1]
@@ -555,7 +654,7 @@ async def test_reinstall_without_password_reuses_key(owner: Owner, tmp_path: Pat
     assert len(handover) == 2
     assert handover[0] < reclaim[0] < handover[1]
     cron = (host.state / "crontab").read_text().splitlines()
-    assert len(cron) == len(prov.cron_lines(str(host.directory))), "重装时替换带标记的行，不重复"
+    assert len(cron) == 6, "重装时替换这个实例的行，不重复"
     # 每晚复盘的定时任务：同名的已有就更新，不重复建（T-0100）
     reflection = next(s for s in second["job"]["steps"] if s["key"] == "reflection")
     assert reflection["status"] == "done" and "已更新" in (reflection["detail"] or "")
@@ -725,11 +824,7 @@ async def test_preconditions(owner: Owner, tmp_path: Path) -> None:
         response = await owner.install(instance_id, version + 5)
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "VERSION_CONFLICT"
-        response = await owner.client.post(
-            f"/api/v1/agents/instances/{instance_id}/ssh/install",
-            json={"version": version, "password": PASSWORD, "extra": 1},
-            headers=owner.headers(),
-        )
+        response = await owner.install(instance_id, version, extra=1)
         assert response.status_code == 422
     assert host.logins == []
 
@@ -747,18 +842,10 @@ async def test_one_running_job_per_target(
         again = await owner.install(instance_id, version)
         assert again.status_code == 409
         assert again.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
-        response = await owner.client.delete(
-            f"/api/v1/agents/instances/{instance_id}/ssh",
-            params={"version": version},
-            headers=owner.headers(),
-        )
+        response = await owner.remove(instance_id, version)
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
-        response = await owner.client.put(
-            f"/api/v1/agents/instances/{instance_id}/ssh",
-            json={"host": "127.0.0.1", "port": port, "username": "other", "version": version},
-            headers=owner.headers(),
-        )
+        response = await owner.replace(instance_id, port=port, username="other", version=version)
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
 
@@ -792,11 +879,7 @@ async def test_install_during_a_replacement_blocks_the_replacement(
         )
 
     monkeypatch.setattr(ssh, "probe_host_key", probe_while_installing)
-    replaced = await owner.client.put(
-        f"/api/v1/agents/instances/{instance_id}/ssh",
-        json={"host": "127.0.0.1", "port": port + 1, "username": "deploy", "version": version},
-        headers=owner.headers(),
-    )
+    replaced = await owner.replace(instance_id, port=port + 1, version=version)
     assert installs == [202]
     assert replaced.status_code == 409, replaced.text
     assert replaced.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
@@ -882,8 +965,8 @@ async def test_admin_cannot_install(owner: Owner, make_client: ClientFactory) ->
     async with make_client(**SETTINGS) as other:
         assert (await other.post("/api/v1/auth/login", json=admin)).status_code == 200
         response = await other.post(
-            f"/api/v1/agents/instances/{instance_id}/ssh/install",
-            json={"version": 1, "password": PASSWORD},
+            f"/api/v1/agents/instances/{instance_id}/deploy",
+            json={"server_id": str(uuid.uuid4()), "version": 1, "password": PASSWORD},
             headers={"X-Workspace-Id": owner.workspace, **csrf(other)},
         )
     assert response.status_code == 403
@@ -892,12 +975,44 @@ async def test_admin_cannot_install(owner: Owner, make_client: ClientFactory) ->
 # ---------------------------------------------------------------- 卸载与吊销（B3）
 
 
-async def _post(
-    owner: Owner, instance_id: str, action: str, body: dict[str, Any]
-) -> httpx.Response:
-    return await owner.client.post(
-        f"/api/v1/agents/instances/{instance_id}/ssh/{action}", json=body, headers=owner.headers()
-    )
+class _Compat:
+    """新接口的响应拼回旧的样子（target / job / warning）。"""
+
+    def __init__(self, response: httpx.Response, data: dict[str, Any]) -> None:
+        self.status_code = response.status_code
+        self.text = response.text
+        self._data = data
+
+    def json(self) -> dict[str, Any]:
+        return self._data
+
+
+async def _post(owner: Owner, instance_id: str, action: str, body: dict[str, Any]) -> _Compat:
+    """卸载走实例的 /undeploy，吊销走服务器的 /revoke（T-0145）。"""
+    if action == "uninstall":
+        payload = {
+            "version": await owner._instance_version_for(instance_id, body["version"]),
+            **{k: v for k, v in body.items() if k != "version"},
+        }
+        response = await owner.client.post(
+            f"/api/v1/agents/instances/{instance_id}/undeploy",
+            json=payload,
+            headers=owner.headers(),
+        )
+    else:
+        response = await owner.client.post(
+            f"/api/v1/agents/servers/{owner.servers[instance_id]}/{action}",
+            json=body,
+            headers=owner.headers(),
+        )
+    data = response.json()
+    if response.status_code < 300:
+        data = {
+            "job": data.get("job"),
+            "warning": data.get("warning"),
+            "target": await owner.target(instance_id),
+        }
+    return _Compat(response, data)
 
 
 async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -> None:
@@ -967,25 +1082,22 @@ async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -
         assert stat.S_IMODE((host.home / ".ssh" / "authorized_keys").stat().st_mode) == 0o600
 
         # 吊销之后可以删除目标服务器
-        response = await owner.client.delete(
-            f"/api/v1/agents/instances/{instance_id}/ssh",
-            params={"version": revoked["target"]["version"]},
-            headers=owner.headers(),
-        )
-        assert response.status_code == 204, response.text
+        removed = await owner.remove(instance_id, revoked["target"]["version"])
+        assert removed.status_code == 204, removed.text
     ref = await run_sql(owner.database_url, "SELECT count(*) FROM workspace.agent_ssh_targets")
     assert ref == 0
     actions = await run_sql(
         owner.database_url,
         "SELECT string_agg(action || ':'"
         " || coalesce(metadata_redacted_json->>'remote_removed', ''), ',' ORDER BY created_at)"
-        " FROM workspace.audit_logs WHERE action LIKE 'agents.ssh.%'",
+        " FROM workspace.audit_logs"
+        " WHERE action LIKE 'agents.ssh.%' OR action LIKE 'agents.server.%'",
     )
     for action in (
         "agents.ssh.uninstall_started:",
         "agents.ssh.uninstall_succeeded:",
-        "agents.ssh.key_revoked:true",
-        "agents.ssh.target_removed:",
+        "agents.server.key_revoked:true",
+        "agents.server.removed:",
     ):
         assert action in actions, actions
     assert fingerprint
@@ -995,10 +1107,12 @@ async def test_uninstall_and_revoke_need_the_key(owner: Owner, tmp_path: Path) -
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
-        for action in ("uninstall", "revoke"):
-            response = await _post(owner, instance_id, action, {"version": version})
-            assert response.status_code == 409, response.text
-            assert response.json()["error"]["code"] == "AGENT_SSH_KEY_MISSING"
+        # 还没部署到这台服务器：没有可卸载的；服务器还没准备：没有可吊销的专用密钥
+        response = await _post(owner, instance_id, "uninstall", {"version": version})
+        assert response.status_code == 404, response.text
+        response = await _post(owner, instance_id, "revoke", {"version": version})
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "AGENT_SSH_KEY_MISSING"
     assert host.logins == []
 
 
@@ -1022,7 +1136,7 @@ async def test_revoke_when_server_is_gone(owner: Owner, tmp_path: Path) -> None:
     remote = await run_sql(
         owner.database_url,
         "SELECT metadata_redacted_json->>'remote_removed' FROM workspace.audit_logs"
-        " WHERE action = 'agents.ssh.key_revoked'",
+        " WHERE action = 'agents.server.key_revoked'",
     )
     assert remote == "false"
     ref = await run_sql(
@@ -1048,8 +1162,8 @@ async def test_revoke_and_uninstall_wait_for_a_running_job(
             response = await _post(owner, instance_id, action, {"version": version})
             assert response.status_code == 409, response.text
             assert response.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
-        response = await owner.install(instance_id, version, password=None)
-        assert response.status_code == 409
+        busy = await owner.install(instance_id, version, password=None)
+        assert busy.status_code == 409
     assert len(host.authorized()) == 1
 
 
@@ -1079,21 +1193,76 @@ def test_parse_inspect_rejects_bad_home() -> None:
     assert info.root
 
 
-def test_remove_dir_only_accepts_the_bundle_directory() -> None:
-    with pytest.raises(ValueError):
-        prov.remove_dir_command("/home/deploy")
-    assert prov.remove_dir_command("/root/" + prov.INSTALL_DIR_NAME) == (
-        "rm -rf -- /root/myworkspace-openclaw"
+INSTANCE = "d06d9d48-1234-4abc-8def-0123456789ab"
+OTHER = "0f0f0f0f-aaaa-4bbb-8ccc-0123456789ab"
+
+
+def test_remove_dir_only_accepts_an_instance_directory() -> None:
+    for bad in (
+        "/home/deploy",
+        "/root/myworkspace-openclaw",
+        "/root/myworkspace-openclaw/../x",
+        "/root/myworkspace-openclaw/d06d9d481234/state",
+    ):
+        with pytest.raises(ValueError):
+            prov.remove_dir_command(bad)
+    directory = prov.install_dir("/root", INSTANCE)
+    assert directory == "/root/myworkspace-openclaw/d06d9d481234"
+    assert prov.remove_dir_command(directory) == (
+        "rm -rf -- /root/myworkspace-openclaw/d06d9d481234"
+        " && { rmdir -- /root/myworkspace-openclaw 2>/dev/null || true; }"
     )
 
 
 def test_commands_quote_paths() -> None:
-    directory = "/home/a b/$(x)/" + prov.INSTALL_DIR_NAME
-    assert "'/home/a b/$(x)/myworkspace-openclaw'" in prov.compose_command(directory, "up", "-d")
+    directory = prov.install_dir("/home/a b/$(x)", INSTANCE)
+    quoted = "'/home/a b/$(x)/myworkspace-openclaw/d06d9d481234'"
+    assert quoted in prov.compose_command(directory, "up", "-d")
     assert prov.reclaim_command(directory, uid=0, gid=0) is None
     assert prov.handover_command(directory, uid=prov.OPENCLAW_UID) is None
-    for line in prov.cron_lines(directory):
-        assert "'/home/a b/$(x)/myworkspace-openclaw'" in line
+    for line in prov.cron_lines(directory, INSTANCE):
+        assert quoted in line and line.endswith(" # mw-openclaw:d06d9d481234")
+    assert (
+        prov.staging_dir("/home/deploy/", INSTANCE)
+        == "/home/deploy/.myworkspace-install-d06d9d481234"
+    )
+
+
+def test_cron_only_touches_own_lines(tmp_path: Path) -> None:
+    """同一台服务器上的多个实例：重新部署、卸载只改行尾正好是自己标记的行，别的实例和用户自己的行保留。"""
+    bin_dir, state = tmp_path / "bin", tmp_path / "state"
+    bin_dir.mkdir()
+    state.mkdir()
+    (bin_dir / "crontab").write_text(_CRONTAB)
+    (bin_dir / "crontab").chmod(0o755)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "STATE": str(state)}
+    mine = prov.install_dir("/home/deploy", INSTANCE)
+    other = prov.install_dir("/home/deploy", OTHER)
+    user_line = "5 * * * * echo '# mw-openclaw:d06d9d481234 not at the end'"
+
+    def sh(command: str) -> None:
+        subprocess.run(["/bin/sh", "-c", command], env=env, check=True)  # noqa: S603
+
+    (state / "crontab").write_text(user_line + "\n")
+    sh(prov.schedule_command(other, OTHER))
+    sh(prov.schedule_command(mine, INSTANCE))
+    sh(prov.schedule_command(mine, INSTANCE))  # 重新部署：不重复
+    lines = (state / "crontab").read_text().splitlines()
+    assert lines[0] == user_line and len(lines) == 13
+    assert sum(line.endswith("# mw-openclaw:d06d9d481234") for line in lines) == 6
+    assert sum(line.endswith("# mw-openclaw:0f0f0f0faaaa") for line in lines) == 6
+    sh(prov.unschedule_command(INSTANCE))
+    lines = (state / "crontab").read_text().splitlines()
+    assert lines[0] == user_line and len(lines) == 7
+    assert all("d06d9d481234" not in line for line in lines[1:])
+
+
+def test_weekly_restart_is_staggered() -> None:
+    first, second = prov.restart_schedule(INSTANCE), prov.restart_schedule(OTHER)
+    for value in (first, second):
+        minute, hour, *rest = value.split()
+        assert 0 <= int(minute) < 60 and 3 <= int(hour) <= 5 and rest == ["*", "*", "1"]
+    assert first != second
 
 
 def test_pins_match_bundle_and_docs() -> None:

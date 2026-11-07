@@ -21,11 +21,17 @@ zip 里的文件：
 | `CHECKLIST.md`、`README.md` | 644 | 部署检查清单与说明 |
 | `setup-reflection.sh`、`reflection-prompt.md` | 755 / 644 | 每晚复盘的定时任务（T-0100） |
 | `tls/client.crt`、`tls/client.key` | 644 / 600 | 外网模式：本机隧道出示的客户端证书 |
+| `tls/hosts` | 644 | 外网模式：本机隧道自己的 hosts（只读挂到隧道容器的 /etc/hosts） |
+
+一台服务器可以有多个实例（docs/v2/MULTI_OPENCLAW_PLAN.md 第 3 节）：每个实例的目录是
+`~/myworkspace-openclaw/<实例短号>/`，Compose 项目名 `myworkspace-openclaw-<实例短号>`，
+OpenClaw 与本机隧道 / 取图代理共用这个实例自己的网络命名空间（`net` 服务）。
 
 模板文件放在 `app/agent_bundle/files/`：API 镜像只包含 services/api，
 所以不放在仓库的 infra/openclaw。
 """
 
+import hashlib
 import io
 import json
 import secrets
@@ -59,6 +65,35 @@ BIN_SCRIPTS = (
 )
 
 
+# 实例短号：实例 ID 去掉连字符的前 12 位（目录名、Compose 项目名、定时任务标记都用它）
+SHORT_ID_LENGTH = 12
+PROJECT_PREFIX = "myworkspace-openclaw-"
+# 内存上限至少 256 MiB、CPU 上限 0.1 ~ 256 核（与 agent_instances 的 CHECK 约束一致）
+MEM_LIMIT_MIN_MB = 256
+MEM_LIMIT_MAX_MB = 1 << 20
+CPUS_MIN = 0.1
+CPUS_MAX = 256.0
+
+
+def short_id(instance_id: str) -> str:
+    value = instance_id.replace("-", "").lower()
+    if len(value) < SHORT_ID_LENGTH or any(c not in "0123456789abcdef" for c in value):
+        raise ValueError("实例 ID 不是 UUID")
+    return value[:SHORT_ID_LENGTH]
+
+
+def project_name(instance_id: str) -> str:
+    return PROJECT_PREFIX + short_id(instance_id)
+
+
+def host_salt(workspace_id: str) -> str:
+    """服务器指纹（boot_id 的 HMAC）用的盐：每个工作空间一个，固定不变。
+
+    boot_id 本身是 122 位随机数，哈希不能反推；按工作空间加盐，不同工作空间的指纹对不上。
+    """
+    return hashlib.sha256(f"myworkspace-host-salt\x00{workspace_id}".encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class BundleInput:
     instance_id: str
@@ -83,6 +118,11 @@ class BundleInput:
     # 每晚复盘的定时任务（T-0100）：setup-reflection.sh 用的时间与时区
     reflection_cron: str = "0 22 * * *"
     reflection_timezone: str = "Asia/Shanghai"
+    # 服务器指纹的盐（host_salt）；空表示不报指纹
+    host_salt: str = ""
+    # OpenClaw 容器的资源上限（D2：默认不设）
+    mem_limit_mb: int | None = None
+    cpus: float | None = None
 
 
 def _read(name: str) -> str:
@@ -135,6 +175,14 @@ def _env(data: BundleInput) -> str:
         "# 启动包装脚本上报给工作台的版本（与 compose.yaml 锁定的镜像、安装的插件一致）",
         f"MYWS_OPENCLAW_VERSION={OPENCLAW_VERSION}",
         f"MYWS_PLUGIN_VERSION={PLUGIN_VERSION}",
+        *(
+            [
+                "# 服务器状态上报：识别同一台服务器上的实例（boot_id 的 HMAC，不报原值）",
+                f"MYWS_HOST_SALT={data.host_salt}",
+            ]
+            if data.host_salt
+            else []
+        ),
     ]
     return "\n".join(lines) + "\n"
 
@@ -150,7 +198,9 @@ def _readme(data: BundleInput, generated_at: datetime) -> str:
         "",
         "## 部署",
         "",
-        "1. 把整个目录放到 OpenClaw 服务器上，按 `CHECKLIST.md` 设置属主与权限；",
+        "1. 把整个目录放到 OpenClaw 服务器上的"
+        f" `~/myworkspace-openclaw/{short_id(data.instance_id)}/`"
+        "（一台服务器可以放多个实例，每个实例一个目录），按 `CHECKLIST.md` 设置属主与权限；",
         "2. 按 `CHECKLIST.md` 安装 `openclaw-channel` 插件并打上工作台的补丁"
         "（`bin/channel-patch.mjs`），修改 `state/openclaw.json` 里的模型服务商；",
     ]
@@ -160,7 +210,9 @@ def _readme(data: BundleInput, generated_at: datetime) -> str:
             "在 127.0.0.1 上转发到工作台的外网入口（隧道配置见工作台文档，OC-2 第 4 部分）；"
         )
     steps += [
-        f"{4 if public else 3}. `docker compose up -d`，冷启动要 2 ~ 4 分钟；",
+        f"{4 if public else 3}. `docker compose up -d`"
+        f"（Compose 项目名 `{project_name(data.instance_id)}`），"
+        "冷启动要 2 ~ 4 分钟；",
         f"{5 if public else 4}. 在工作台的实例页确认状态变为“在线”，并在 IM 里私聊它。",
         "",
         "重新生成接入包会签发新凭证：旧凭证默认再保留 24 小时，到期前换上新的接入包并重启。",
@@ -169,15 +221,18 @@ def _readme(data: BundleInput, generated_at: datetime) -> str:
     return "\n".join(steps)
 
 
-def _image_proxy(data: BundleInput) -> tuple[str, str] | None:
-    """内网实例的本机取图代理：在 OpenClaw 里把外网域名指向 127.0.0.1，转发到内网入口。"""
+def _image_proxy(data: BundleInput) -> tuple[str, str, str] | None:
+    """内网实例的本机取图代理：在这个实例里把外网域名指向 127.0.0.1，转发到内网入口。
+
+    返回（net 服务的 hosts、openclaw 服务的补充、image-proxy 服务）。
+    """
     if not data.image_proxy_host or not data.image_proxy_target:
         return None
-    openclaw = (
-        "    # 图片地址用的是工作台的外网域名：在容器里指向本机代理（转发到内网入口）\n"
+    net = (
+        "    # 图片地址用的是工作台的外网域名：在这个实例里指向本机代理（转发到内网入口）\n"
         f'    extra_hosts: ["{data.image_proxy_host}:127.0.0.1"]\n'
-        "    depends_on: [image-proxy]\n"
     )
+    openclaw = "    depends_on: [image-proxy]\n"
     service = f"""
   # 本机取图代理：在 127.0.0.1:{data.tunnel_port} 接收明文，用 TLS（不带客户端证书）转发到
   # 工作台内网入口。校验服务器证书用系统信任库；内网入口用私有 CA 时，加上 --cacert 指向那张 CA 证书
@@ -185,7 +240,7 @@ def _image_proxy(data: BundleInput) -> tuple[str, str] | None:
     image: {GHOSTUNNEL_IMAGE}
     restart: unless-stopped
     user: "1000:1000"
-    network_mode: host
+    network_mode: "service:net"
     command:
       - client
       - --listen=127.0.0.1:{data.tunnel_port}
@@ -194,37 +249,61 @@ def _image_proxy(data: BundleInput) -> tuple[str, str] | None:
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
 """
-    return openclaw, service
+    return net, openclaw, service
+
+
+def _tunnel_hosts(data: BundleInput) -> str:
+    """本机隧道自己的 hosts：实例共用的那份把入口域名指向 127.0.0.1（给 OpenClaw 用），
+    隧道要连真实的入口。入口主机名不在公网 DNS 里时写上工作台地址，否则照常查 DNS。"""
+    lines = [
+        "# 本机隧道自己的 hosts（My Workspace 接入包生成，只读挂到隧道容器的 /etc/hosts）",
+        "127.0.0.1\tlocalhost",
+        "::1\tlocalhost ip6-localhost ip6-loopback",
+    ]
+    host = _tunnel_host(data)
+    if data.tunnel_address and host:
+        lines.append(f"{data.tunnel_address}\t{host}")
+    return "\n".join(lines) + "\n"
+
+
+def _limits(data: BundleInput) -> str:
+    lines: list[str] = []
+    if data.mem_limit_mb is not None:
+        if not MEM_LIMIT_MIN_MB <= data.mem_limit_mb <= MEM_LIMIT_MAX_MB:
+            raise ValueError("内存上限超出范围")
+        lines.append(f"    mem_limit: {int(data.mem_limit_mb)}m\n")
+    if data.cpus is not None:
+        if not CPUS_MIN <= data.cpus <= CPUS_MAX:
+            raise ValueError("CPU 上限超出范围")
+        lines.append(f'    cpus: "{round(data.cpus, 2):g}"\n')
+    if not lines:
+        return ""
+    return "    # 资源上限（在工作台的实例设置里修改，重新部署这个实例后生效）\n" + "".join(lines)
 
 
 def _compose(data: BundleInput) -> str:
-    text = _read("compose.yaml")
+    text = (
+        _read("compose.yaml")
+        .replace("@PROJECT@", project_name(data.instance_id))
+        .replace("    # @LIMITS@\n", _limits(data))
+    )
     host = _tunnel_host(data)
     proxy = _image_proxy(data)
     if proxy is not None:
-        return text.replace("    # @PUBLIC_OPENCLAW@\n", proxy[0]).replace(
-            "# @PUBLIC_SERVICES@\n", proxy[1]
+        net, openclaw, service = proxy
+    elif data.tunnel_target and host:
+        net = (
+            "    # 工作台外网入口的域名在这个实例里指向本机隧道（隧道自己挂另一份 hosts）\n"
+            f'    extra_hosts: ["{host}:127.0.0.1"]\n'
         )
-    if not data.tunnel_target or not host:
-        return text.replace("    # @PUBLIC_OPENCLAW@\n", "").replace("# @PUBLIC_SERVICES@\n", "")
-    openclaw = (
-        "    # 工作台外网入口的域名在容器里指向本机隧道\n"
-        f'    extra_hosts: ["{host}:127.0.0.1"]\n'
-        "    depends_on: [tunnel]\n"
-    )
-    trust = (
-        "入口证书由工作台内部 CA 签发：用 tls/ca.pem 校验（接入包自带）"
-        if data.server_ca_pem
-        else "校验服务器证书用系统信任库；外网入口用私有 CA 时，加上 --cacert 指向那张 CA 证书"
-    )
-    hosts = (
-        "    # 入口主机名不在公网 DNS 里：指向工作台服务器\n"
-        f'    extra_hosts: ["{host}:{data.tunnel_address}"]\n'
-        if data.tunnel_address
-        else ""
-    )
-    cacert = "      - --cacert=/tls/ca.pem\n" if data.server_ca_pem else ""
-    tunnel = f"""
+        openclaw = "    depends_on: [tunnel]\n"
+        trust = (
+            "入口证书由工作台内部 CA 签发：用 tls/ca.pem 校验（接入包自带）"
+            if data.server_ca_pem
+            else "校验服务器证书用系统信任库；外网入口用私有 CA 时，加上 --cacert 指向那张 CA 证书"
+        )
+        cacert = "      - --cacert=/tls/ca.pem\n" if data.server_ca_pem else ""
+        service = f"""
   # 本机隧道：在 127.0.0.1:{data.tunnel_port} 接收明文，
   # 用 tls/ 里的客户端证书（双向证书）转发到工作台外网入口。
   # {trust}
@@ -232,8 +311,8 @@ def _compose(data: BundleInput) -> str:
     image: {GHOSTUNNEL_IMAGE}
     restart: unless-stopped
     user: "1000:1000"
-    network_mode: host
-{hosts}    command:
+    network_mode: "service:net"
+    command:
       - client
       - --listen=127.0.0.1:{data.tunnel_port}
       - --target={data.tunnel_target}
@@ -241,11 +320,17 @@ def _compose(data: BundleInput) -> str:
       - --key=/tls/client.key
 {cacert}    volumes:
       - ./tls:/tls:ro
+      # 自己的 hosts：实例共用的那份把入口域名指向 127.0.0.1（给 OpenClaw 用）
+      - ./tls/hosts:/etc/hosts:ro
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
 """
-    return text.replace("    # @PUBLIC_OPENCLAW@\n", openclaw).replace(
-        "# @PUBLIC_SERVICES@\n", tunnel
+    else:
+        net = openclaw = service = ""
+    return (
+        text.replace("    # @NET_HOSTS@\n", net)
+        .replace("    # @PUBLIC_OPENCLAW@\n", openclaw)
+        .replace("# @PUBLIC_SERVICES@\n", service)
     )
 
 
@@ -279,6 +364,8 @@ def build(data: BundleInput, *, now: datetime | None = None) -> bytes:
             _add(zf, "tls/client.key", data.client_key_pem, 0o600, now)
         if data.server_ca_pem and data.tunnel_target:
             _add(zf, "tls/ca.pem", data.server_ca_pem, 0o644, now)
+        if data.tunnel_target and not data.image_proxy_host:
+            _add(zf, "tls/hosts", _tunnel_hosts(data), 0o644, now)
     return buffer.getvalue()
 
 

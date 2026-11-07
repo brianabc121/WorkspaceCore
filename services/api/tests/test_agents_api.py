@@ -25,6 +25,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from fastapi import FastAPI
 from pydantic import SecretStr
 
+from app import agent_bundle
 from app.core.config import Settings
 from app.domain.agents import AgentService
 from app.models import AgentInstance
@@ -555,7 +556,17 @@ async def test_bundle_carries_a_fresh_token_only_once(env: Env) -> None:
     assert _env_value(files, "MYWS_AGENT_API") == "https://10.0.0.5/agent-api"
     assert _env_value(files, "OPENIM_WS_ADDR") == "wss://10.0.0.5/im/ws"
     compose = files["compose.yaml"][0]
-    assert "\n  tunnel:" not in compose and "@PUBLIC" not in compose
+    assert (
+        "\n  tunnel:" not in compose
+        and "@PUBLIC" not in compose
+        and "@" not in compose.replace("@sha256", "")
+    )
+    # 一台服务器多个实例（T-0145）：项目名带实例短号，自己的网络（net 服务），默认不限资源
+    short = instance["id"].replace("-", "")[:12]
+    assert f"name: myworkspace-openclaw-{short}\n" in compose and "\n  net:\n" in compose
+    assert "network_mode: host" not in compose and "mem_limit" not in compose
+    assert _env_value(files, "MYWS_HOST_SALT") == agent_bundle.host_salt(env.workspace_id)
+    assert f"~/myworkspace-openclaw/{short}/" in files["README.md"][0]
     # 工作台也有外网入口：内网实例的本机取图代理（不带客户端证书）把外网域名转发到内网入口
     assert "\n  image-proxy:" in compose and "--disable-authentication" in compose
     assert "--target=10.0.0.5:443" in compose and "--listen=127.0.0.1:18443" in compose
@@ -659,13 +670,15 @@ async def test_public_bundle_trusts_the_internal_ca_when_the_ingress_uses_it(
         assert files["tls/ca.pem"] == (ca_pem, 0o644)
         assert "PRIVATE KEY" not in files["tls/ca.pem"][0]
         compose = files["compose.yaml"][0]
-        assert f'extra_hosts: ["{host}:203.0.113.7"]' in compose
+        # 隧道自己的 hosts 把主机名映射到工作台地址；实例共用的那份指向本机隧道
+        assert f"203.0.113.7\t{host}" in files["tls/hosts"][0]
         assert f'extra_hosts: ["{host}:127.0.0.1"]' in compose
         assert f"--target={host}:9443" in compose and "--cacert=/tls/ca.pem" in compose
         assert _env_value(files, "MYWS_AGENT_API") == f"http://{host}:18443/agent-api"
         # 内网实例不带 CA，也没有地址映射
         intranet = _unzip(await _bundle(env, (await env.create_instance())["id"]))
         assert "tls/ca.pem" not in intranet and "203.0.113.7" not in intranet["compose.yaml"][0]
+        assert "tls/hosts" not in intranet
 
 
 async def test_bundle_is_refused_for_disabled_or_unconfigured_instances(

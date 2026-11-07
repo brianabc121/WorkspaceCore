@@ -6,7 +6,7 @@ import type { Schema } from '../src/services/api'
 // T-0114：实例卡片里的“运维”面板（固定动作、二次认证、输出、记录）。
 const at = '2026-11-04T04:00:00Z'
 const path = (r: Request) => new URL(r.url).pathname
-const instance: Schema['AgentInstanceOut'] = { id: 'inst-a', name: 'alpha', description: '', network_mode: 'public', scope: 'read', max_role: 'member', status: 'online', im_user_id: 'oc_a', im_nickname: '甲', im_ready: true, acting_user_id: 'user-a', last_seen_at: at, reported_version: '2026.9.36', plugin_version: '0.3.3', bundle_issued_at: at, im_token_expires_at: null, disabled_at: null, project_admin: { enabled: false, granted_by: null, granted_at: null }, im_media: { enabled: false, granted_by: null, granted_at: null }, stop_others: { enabled: false, granted_by: null, granted_at: null }, mail: { accounts: [], read_enabled: true, send_enabled: false, send_scope: null, recipients: [], send_by: null, send_at: null, version: 3 }, bundle_outdated: false, version: 3, created_at: at, updated_at: at, credentials: [], secret_grants: [] }
+const instance: Schema['AgentInstanceOut'] = { id: 'inst-a', name: 'alpha', description: '', network_mode: 'public', scope: 'read', max_role: 'member', status: 'online', im_user_id: 'oc_a', im_nickname: '甲', im_ready: true, acting_user_id: 'user-a', last_seen_at: at, reported_version: '2026.9.36', plugin_version: '0.3.3', bundle_issued_at: at, im_token_expires_at: null, disabled_at: null, project_admin: { enabled: false, granted_by: null, granted_at: null }, im_media: { enabled: false, granted_by: null, granted_at: null }, stop_others: { enabled: false, granted_by: null, granted_at: null }, mail: { accounts: [], read_enabled: true, send_enabled: false, send_scope: null, recipients: [], send_by: null, send_at: null, version: 3 }, bundle_outdated: false, server_id: null, server_manual: false, limits: { mem_limit_mb: null, cpus: null }, version: 3, created_at: at, updated_at: at, credentials: [], secret_grants: [] }
 const action = (over: Partial<Schema['AgentOpsActionOut']> = {}): Schema['AgentOpsActionOut'] => ({ id: 'op-1', action: 'status', service: null, status: 'succeeded', exit_code: 0, output: null, truncated: false, error_code: null, error_message: null, started_by: 'user-a', started_at: at, finished_at: at, expires_at: '2026-11-11T04:00:00Z', ...over })
 const state = (over: Partial<Schema['AgentOpsState']> = {}): Schema['AgentOpsState'] => ({ available: true, reason: null, running: null, items: [], ...over })
 const fail = (status: number, code: string) => Response.json({ error: { code, message: 'x', request_id: 'req', details: {} } }, { status })
@@ -17,7 +17,6 @@ function setup(handler: (r: Request) => Response | Promise<Response | undefined>
     path(r) === '/api/v1/agents/settings' ? Response.json({ agents_enabled: true, updated_at: null, updated_by: null, version: 7 }) :
     path(r) === '/api/v1/agents/instances' ? Response.json({ items: [instance], next_cursor: null, total_estimate: 1 }) :
     path(r) === '/api/v1/agents/secrets' ? Response.json({ items: [], next_cursor: null, total_estimate: 0 }) :
-    path(r) === '/api/v1/agents/instances/inst-a/ssh' ? Response.json({ target: null, job: null, warning: null }) :
     path(r) === '/api/v1/agents/host-summary' ? Response.json({ items: [] }) : undefined
   ))
 }
@@ -104,10 +103,10 @@ describe('agent ops panel', () => {
     expect(await within(ops).findByText('earlier output')).toBeVisible()
   })
 
-  it('explains that manual instances need an SSH deployment first', async () => {
+  it('explains that manual instances need to be deployed to a server first', async () => {
     setup(r => path(r) === '/api/v1/agents/instances/inst-a/ops' ? Response.json(state({ available: false, reason: 'not_deployed' })) : undefined)
     const ops = await panel()
-    expect(await within(ops).findByText(/只适用于用 SSH 部署过的实例/)).toBeVisible()
+    expect(await within(ops).findByText(/只适用于部署到 SSH 服务器的实例/)).toBeVisible()
     expect(within(ops).queryByRole('button', { name: '查看状态' })).not.toBeInTheDocument()
   })
 })

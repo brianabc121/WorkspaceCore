@@ -14,9 +14,9 @@ from app.domain.connectors import account_context
 from app.domain.credential_rotation import rotate
 from app.domain.credentials import CredentialBox
 from app.models import (
-    AgentInstance,
     AgentSecret,
     AgentSecretVersion,
+    AgentServer,
     AgentSshTarget,
     AppLogin,
     Integration,
@@ -71,24 +71,15 @@ async def _seed(url: str, box: CredentialBox) -> dict[str, uuid.UUID]:
                     password_ref=box.seal("pw", context=password_context(login_id)),
                 )
             )
-            # SSH 自动部署的专用私钥（T-0089 B2）
-            instance_id, target_id = uuid.uuid4(), uuid.uuid4()
-            db.add(
-                AgentInstance(
-                    id=instance_id,
-                    workspace_id=workspace,
-                    name="SSH",
-                    network_mode="public",
-                    im_user_id="bot_rotation",
-                    im_nickname="SSH",
-                )
-            )
+            # 服务器的 SSH 专用私钥（T-0089 B2；一台服务器一把，T-0145）
+            server_id, target_id = uuid.uuid4(), uuid.uuid4()
+            db.add(AgentServer(id=server_id, workspace_id=workspace, name="SSH", kind="ssh"))
             await db.flush()
             db.add(
                 AgentSshTarget(
                     id=target_id,
                     workspace_id=workspace,
-                    instance_id=instance_id,
+                    server_id=server_id,
                     host="203.0.113.5",
                     address="203.0.113.5",
                     port=22,

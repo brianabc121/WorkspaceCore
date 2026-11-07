@@ -308,11 +308,15 @@ class Instance:
 def patch_compose(text: str, *, holder: str, ingress_ip: str, intranet: str, public: str) -> str:
     """接入包的 compose.yaml → 验收环境：
 
-    - 所有服务共用这台“服务器”的网络命名空间（占位容器），代替 network_mode: host；
+    - 接入包自己的 net 服务（持有这个实例的网络命名空间）换成验收脚本的占位容器：
+      它接在入口与假模型的网络上，代替 Compose 默认的项目网络（真实的 net 服务由 SSH 部署验收实测）；
     - 同一个命名空间只有一份 hosts，extra_hosts 改由占位容器提供；
     - 隧道与取图代理直连入口 IP，用 --override-server-name 校验证书，--cacert 信任测试 CA。
     """
-    text = text.replace("network_mode: host", f'network_mode: "container:{holder}"')
+    head, rest = text.split("services:\n", 1)
+    assert "\n  openclaw:\n" in rest, "接入包 compose.yaml 里没有 openclaw 服务"
+    text = head + "services:\n  openclaw:\n" + rest.split("\n  openclaw:\n", 1)[1]
+    text = text.replace('network_mode: "service:net"', f'network_mode: "container:{holder}"')
     text = re.sub(r"\n    extra_hosts: \[[^\]]*\]", "", text)
     for hostport in (public, intranet):
         host, port = hostport.rsplit(":", 1)
@@ -1097,6 +1101,14 @@ def scenario_19(c: Ctx) -> None:
             json.dumps({"exit": [r.returncode for r in results], "stderr": [r.stderr.strip()[-200:] for r in results],
                         "current": {k: current.get(k) for k in ("cores", "mem_total", "load", "uptime_seconds")}},
                        ensure_ascii=False))
+    other_status = c.owner.call("GET", f"/api/v1/agents/instances/{c.b.id}/host")
+    me = status.get("agent") or {}
+    c.check("服务器状态（T-0146）：甲、乙在同一台机器上，按服务器指纹（boot_id 的 HMAC）归到同一台服务器",
+            bool(status.get("server")) and (status.get("server") or {}).get("id") == (other_status.get("server") or {}).get("id"),
+            json.dumps([status.get("server"), other_status.get("server")], ensure_ascii=False))
+    c.check("服务器状态（T-0146）：甲自己容器的用量读得到（cgroup 的内存、进程数）",
+            me.get("available") is True and (me.get("mem_bytes") or 0) > 0 and (me.get("pids") or 0) > 0,
+            json.dumps(me, ensure_ascii=False))
     summary = {x["instance_id"]: x for x in c.owner.call("GET", "/api/v1/agents/host-summary")["items"]}
     c.check("服务器状态：实例列表的小指示里甲、乙都有内存与磁盘使用率",
             all((summary.get(i.id) or {}).get("mem_used_percent") is not None
@@ -1104,9 +1116,10 @@ def scenario_19(c: Ctx) -> None:
             json.dumps(summary, ensure_ascii=False)[:600])
     mine = mcp_call(c.a, "get_host_status", {})
     data = mine.get("structuredContent") or {}
-    c.check("服务器状态：甲用 get_host_status 读到自己所在服务器的状态（只读工具）",
+    c.check("服务器状态：甲用 get_host_status 读到自己所在服务器的状态与自己的用量（只读工具），没有乙的名字",
             not mine.get("isError") and data.get("reported") is True and (data.get("cores") or 0) >= 1
-            and "last_24h" in data, json.dumps(mine, ensure_ascii=False)[:400])
+            and "last_24h" in data and ((data.get("me") or {}).get("mem_bytes") or 0) > 0
+            and "乙" not in json.dumps(data, ensure_ascii=False), json.dumps(mine, ensure_ascii=False)[:400])
     other = mcp_call(c.a, "get_host_status", {"instance_id": c.b.id})
     c.check("服务器状态：get_host_status 不接受参数，不能看别的实例", bool(other.get("isError")),
             json.dumps(other, ensure_ascii=False)[:300])

@@ -66,6 +66,7 @@ from app.schemas.ai_tools import (
     GetHostStatusOutput,
     GetTaskInput,
     GetTaskOutput,
+    HostAgentUsage,
     HostDay,
     HostDiskStatus,
     ImListTargetsInput,
@@ -677,7 +678,7 @@ async def _dashboard_overview(call: ReadCall, args: EmptyInput) -> DashboardOver
 
 
 async def _host_status(call: ReadCall, args: EmptyInput) -> GetHostStatusOutput:
-    """只看调用它的实例自己（T-0113，D5）。"""
+    """只看调用它的实例自己（T-0113，D5）：所在服务器的整机数值与自己容器的用量（T-0146）。"""
     status = await HostService(call.db, call.redis).status_of(call.requester.instance, "24h")
     current = status.current
 
@@ -712,6 +713,22 @@ async def _host_status(call: ReadCall, args: EmptyInput) -> GetHostStatusOutput:
             disk_max=top([p.data_avg for p in status.points] + [p.root_avg for p in status.points]),
         ),
         alerts=status.alerts,
+        me=(
+            HostAgentUsage(
+                available=status.agent.available,
+                cpu_cores=status.agent.cpu_cores,
+                cpu_percent=status.agent.cpu_percent,
+                mem_bytes=status.agent.mem_bytes,
+                mem_limit=status.agent.mem_limit,
+                pids=status.agent.pids,
+                data_bytes=status.agent.data_bytes,
+                rx_rate=status.agent.rx_rate,
+                tx_rate=status.agent.tx_rate,
+                alerts=status.agent_alerts,
+            )
+            if status.agent is not None
+            else None
+        ),
     )
 
 

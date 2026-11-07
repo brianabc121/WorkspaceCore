@@ -18,6 +18,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -87,6 +88,10 @@ class AgentInstance(Base):
             "NOT mail_send_enabled OR mail_send_scope IS NOT NULL", name="mail_send_needs_scope"
         ),
         CheckConstraint("cardinality(mail_send_recipients) <= 50", name="mail_send_recipients"),
+        CheckConstraint(
+            "mem_limit_mb IS NULL OR mem_limit_mb BETWEEN 256 AND 1048576", name="mem_limit"
+        ),
+        CheckConstraint("cpus IS NULL OR (cpus >= 0.1 AND cpus <= 256)", name="cpus"),
         # 复合外键（凭证、授权）引用 (workspace_id, id)，保证子记录与实例在同一个工作空间
         UniqueConstraint("workspace_id", "id"),
         UniqueConstraint("im_user_id"),
@@ -161,6 +166,14 @@ class AgentInstance(Base):
     )
     runner_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     runner_limits: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    # 多实例（T-0144，迁移 0045，docs/v2/MULTI_OPENCLAW_PLAN.md）：所在的服务器；
+    # server_manual=true 表示管理员指定（不再按机器指纹自动改）；资源上限写进接入包的 compose.yaml
+    server_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.agent_servers.id", ondelete="SET NULL")
+    )
+    server_manual: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    mem_limit_mb: Mapped[int | None] = mapped_column(Integer)
+    cpus: Mapped[float | None] = mapped_column(Float)
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()
@@ -324,30 +337,31 @@ class AgentCa(Base):
 
 
 class AgentSshTarget(Base):
-    """通过 SSH 自动部署实例的目标服务器（T-0089）：每个实例最多一台。
+    """一台 OpenClaw 服务器的 SSH 登录信息（T-0089；T-0145 起按服务器，迁移 0046）。
+
+    与 agent_servers 一一对应（kind=ssh）。一台服务器一把专用密钥（D7），上面的实例都用它：
 
     - 主机公钥先探测、owner 核对指纹并确认后才固定（host_key_confirmed_at），
       之后的连接只接受这把公钥；
-    - 登录密码从不保存；安装时生成的专用私钥以 `enc:v1:` 引用保存（client_key_ref，B2），
+    - 登录密码从不保存；准备服务器时生成的专用私钥以 `enc:v1:` 引用保存（client_key_ref），
       用途绑定到这条记录（agent_ssh:<id>）。
+
+    每个实例部署在哪个目录记在 agent_deployments。
     """
 
     __tablename__ = "agent_ssh_targets"
     __table_args__ = (
         CheckConstraint("port BETWEEN 1 AND 65535", name="port"),
-        ForeignKeyConstraint(
-            ["workspace_id", "instance_id"],
-            ["workspace.agent_instances.workspace_id", "workspace.agent_instances.id"],
-            ondelete="CASCADE",
-        ),
-        UniqueConstraint("instance_id"),
+        UniqueConstraint("server_id"),
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
     )
-    instance_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.agent_servers.id", ondelete="CASCADE")
+    )
     # owner 填写的主机名或 IP，以及探测时解析出的地址（之后都连这个地址）
     host: Mapped[str] = mapped_column(Text)
     address: Mapped[str] = mapped_column(Text)
@@ -362,7 +376,42 @@ class AgentSshTarget(Base):
     )
     client_key_ref: Mapped[str | None] = mapped_column(Text)
     client_public_key: Mapped[str | None] = mapped_column(Text)
-    # 安装完成后（B2，迁移 0022）：接入包所在的目录与完成时间
+    # 准备好（专用公钥装上、Docker 可用）的时间
+    prepared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()
+
+
+class AgentDeployment(Base):
+    """一个实例部署在哪台服务器、哪个目录（T-0145，迁移 0046）。
+
+    开始部署时建；部署成功后记下目录与时间；卸载并删除目录后删掉这一行。
+    服务器上还有部署记录时不能移除那台服务器。
+    """
+
+    __tablename__ = "agent_deployments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "instance_id"],
+            ["workspace.agent_instances.workspace_id", "workspace.agent_instances.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("instance_id"),
+        Index("ix_agent_deployments_server_id", "server_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    instance_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.agent_servers.id", ondelete="RESTRICT")
+    )
     install_dir: Mapped[str | None] = mapped_column(Text)
     installed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
@@ -373,12 +422,15 @@ class AgentSshTarget(Base):
     updated_at: Mapped[datetime] = _updated()
 
 
-SSH_JOB_KINDS = ("install", "uninstall")
+# prepare：迁移 0046（T-0145，准备服务器：装专用公钥、装 Docker）
+SSH_JOB_KINDS = ("prepare", "install", "uninstall")
 SSH_JOB_STATUSES = ("running", "succeeded", "failed", "interrupted")
 
 
 class AgentSshJob(Base):
-    """一次通过 SSH 的安装或卸载（T-0089 B2 / B3）。
+    """一次通过 SSH 的准备服务器、部署实例或卸载实例（T-0089 B2 / B3；T-0145）。
+
+    同一台服务器同时只有一个进行中的任务（部署也一个一个来）；准备服务器的任务没有实例。
 
     在 API 进程内运行；进程重启时 running 改为 interrupted。
 
@@ -407,7 +459,7 @@ class AgentSshJob(Base):
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
-    instance_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    instance_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     target_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspace.agent_ssh_targets.id", ondelete="CASCADE")
     )
@@ -425,13 +477,19 @@ class AgentSshJob(Base):
     updated_at: Mapped[datetime] = _updated()
 
 
-OPS_ACTIONS = ("status", "logs", "restart", "up", "prune", "report")
+OPS_ACTIONS = ("status", "logs", "restart", "up", "prune", "report", "containers")
+# 服务器级的动作（T-0145）：作用于整台服务器，不属于某个实例
+SERVER_OPS_ACTIONS = ("prune", "containers")
 OPS_SERVICES = ("openclaw", "tunnel", "image-proxy")
 OPS_STATUSES = ("running", "succeeded", "failed", "interrupted")
 
 
 class AgentOpsAction(Base):
     """对用 SSH 部署过的实例执行的一次固定运维动作（T-0114，AGENT_OPS_PLAN 6.1，迁移 0032）。
+
+    一台服务器多个实例后（T-0145，迁移 0046）：每条都记在服务器上（server_id）；清理镜像、
+    查看全部容器是服务器级的（没有实例）。同一台服务器同时只有一个进行中的动作，
+    与这台服务器上的部署任务也互斥。
 
     命令写死在工作台里（app/domain/agent_ops.py），不拼接输入；在 API 进程内运行，进程重启时
     running 改为 interrupted。output 是脱敏后的输出（最多 64 KB），7 天后连同记录一起删除；
@@ -443,25 +501,32 @@ class AgentOpsAction(Base):
         CheckConstraint(f"action IN {OPS_ACTIONS}", name="action"),
         CheckConstraint(f"service IS NULL OR service IN {OPS_SERVICES}", name="service"),
         CheckConstraint(f"status IN {OPS_STATUSES}", name="status"),
+        CheckConstraint(
+            f"instance_id IS NOT NULL OR action IN {SERVER_OPS_ACTIONS}", name="instance_scope"
+        ),
         ForeignKeyConstraint(
             ["workspace_id", "instance_id"],
             ["workspace.agent_instances.workspace_id", "workspace.agent_instances.id"],
             ondelete="CASCADE",
         ),
-        # 同一实例同时只有一个进行中的动作
+        # 同一台服务器同时只有一个进行中的动作
         Index(
             "uq_agent_ops_actions_running",
-            "instance_id",
+            "server_id",
             unique=True,
             postgresql_where=text("status = 'running'"),
         ),
         Index("ix_agent_ops_actions_instance_started", "instance_id", "started_at"),
+        Index("ix_agent_ops_actions_server_started", "server_id", "started_at"),
         Index("ix_agent_ops_actions_expires_at", "expires_at"),
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
-    instance_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    instance_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.agent_servers.id", ondelete="CASCADE")
+    )
     action: Mapped[str] = mapped_column(Text)
     service: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, server_default=text("'running'"))
