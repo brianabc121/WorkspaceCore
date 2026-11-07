@@ -2,9 +2,9 @@
 id: T-0143
 title: 多实例 M0 核验：OpenClaw 2026.9.36 在每个实例自己的网络里运行、两个实例共存、cgroup 指标、boot_id
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: docs,services/api/app/agent_bundle,services/api/tests,tests/e2e
 depends_on: T-0142
 created: 2026-11-07
@@ -31,3 +31,5 @@ updated: 2026-11-07
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-07 03:23 UTC · claude · 创建任务（owner: claude）
 - 2026-11-07 03:23 UTC · claude · 人类 2026-11-07 在对话中指派：多实例服务器方案按决定全部落实（D5、D6 不考虑旧部署，其余按推荐）。
+- 2026-11-07 03:25 UTC · claude · 开始任务
+- 2026-11-07 03:25 UTC · claude · 本地 Docker（cgroup v1）实测：boot_id、cgroup v1 的 CPU / 内存 / 进程数、项目网络里只看到自己的网卡、回环隔离、共用网络命名空间与各挂各的 hosts 文件都成立；写进核验记录第 2 节。cgroup v2、真实 OpenClaw 在项目网络里的行为、隧道、两个实例共存、空闲占用留给 CI（T-0148），见第 3 节。
