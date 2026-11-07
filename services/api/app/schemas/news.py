@@ -8,7 +8,6 @@
 from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
     AfterValidator,
@@ -158,7 +157,6 @@ class NewsSettingsIn(BaseModel):
         ge=0, description="GET 返回的 version（还没保存过是 0）；不一致时 409 VERSION_CONFLICT"
     )
     enabled: bool
-    timezone: Annotated[str, StringConstraints(min_length=1, max_length=64)] = "Asia/Shanghai"
     push_times: list[PushTime] = Field(
         min_length=1, max_length=3, description="每天推送的时间，半小时为单位"
     )
@@ -178,15 +176,6 @@ class NewsSettingsIn(BaseModel):
     ai_analysis: bool = True
     ai_translation: bool = False
     channels: dict[ChannelId, NewsChannelIn] = Field(default_factory=dict)
-
-    @field_validator("timezone")
-    @classmethod
-    def _zone(cls, value: str) -> str:
-        try:
-            ZoneInfo(value)
-        except (ZoneInfoNotFoundError, ValueError) as error:
-            raise ValueError("要用 IANA 时区名，例如 Asia/Shanghai") from error
-        return value
 
     @model_validator(mode="after")
     def _unique(self) -> "NewsSettingsIn":
@@ -234,7 +223,9 @@ class NewsLearnedOut(BaseModel):
 class NewsSettingsOut(BaseModel):
     workspace_id: UUID
     enabled: bool
-    timezone: str
+    timezone: str = Field(
+        description="时区（部署时设置：.env 的 TRENDRADAR_TZ，与 TrendRadar 容器一致；网页上只读）"
+    )
     push_times: list[str]
     briefing_mode: BriefingMode
     agent_instance_id: UUID | None

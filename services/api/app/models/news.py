@@ -55,7 +55,6 @@ class NewsSettings(Base):
         ForeignKey("workspace.workspaces.id", ondelete="CASCADE"), primary_key=True
     )
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
-    timezone: Mapped[str] = mapped_column(Text, server_default=text("'Asia/Shanghai'"))
     push_times: Mapped[list[str]] = mapped_column(
         JSONB, server_default=text("'[\"07:30\"]'::jsonb")
     )

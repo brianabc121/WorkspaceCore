@@ -198,6 +198,9 @@ class Settings(BaseSettings):
     news_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
     # 方案 B：智能体多少分钟内没写完早报就记为失败
     news_agent_timeout_minutes: int = Field(default=90, ge=10, le=600)
+    # 早报的时区（推送时间、“今天”的日期）。TrendRadar 的 MCP 按容器时区算“今天”，
+    # 所以与两个 TrendRadar 容器的 TZ 一起由部署设置（.env 的 TRENDRADAR_TZ），网页上只读
+    news_timezone: str = "Asia/Shanghai"
 
     @field_validator("agent_reflection_timezone")
     @classmethod
@@ -208,6 +211,15 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AGENT_REFLECTION_TIMEZONE 要用 IANA 时区名，例如 Asia/Shanghai"
             ) from error
+        return value
+
+    @field_validator("news_timezone")
+    @classmethod
+    def _news_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise ValueError("TRENDRADAR_TZ 要用 IANA 时区名，例如 Asia/Shanghai") from error
         return value
 
     @field_validator("agent_reflection_cron")

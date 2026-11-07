@@ -87,7 +87,7 @@ class NewsToolItem(BaseModel):
 
 class NewsListOutput(BaseModel):
     items: list[NewsToolItem]
-    note: str | None = Field(default=None, description="没有数据等说明")
+    hint: str | None = Field(default=None, description="没有数据等说明（工作台自己的文字）")
 
 
 class NewsKeywordText(BaseModel):
@@ -102,7 +102,7 @@ class NewsTrendingTopic(BaseModel):
 
 class NewsTrendingOutput(BaseModel):
     topics: list[NewsTrendingTopic]
-    note: str | None = None
+    hint: str | None = None
 
 
 class NewsBriefingText(BaseModel):
@@ -121,7 +121,7 @@ class NewsBriefingItem(BaseModel):
 
 class NewsBriefingOutput(BaseModel):
     briefing: NewsBriefingItem | None
-    note: str | None = None
+    hint: str | None = None
 
 
 DESCRIPTIONS = {

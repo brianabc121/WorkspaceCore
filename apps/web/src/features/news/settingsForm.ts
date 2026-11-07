@@ -11,7 +11,7 @@ export type ChannelDraft = {
   secrets: Record<string, SecretDraft>
 }
 export type NewsForm = {
-  enabled: boolean; timezone: string; push_times: string[]; briefing_mode: 'trendradar' | 'agent'; agent_instance_id: string
+  enabled: boolean; push_times: string[]; briefing_mode: 'trendradar' | 'agent'; agent_instance_id: string
   platforms: PlatformId[]; newsnow_api_url: string; feeds: FeedDraft[]; topics: TopicDraft[]; exclusions: string
   filter_method: 'keyword' | 'ai'; ai_model: string; ai_api_base: string; ai_api_key: SecretDraft; ai_analysis: boolean; ai_translation: boolean
   channels: Record<ChannelId, ChannelDraft>
@@ -58,7 +58,7 @@ export function toForm(s: NewsSettings): NewsForm {
     } satisfies ChannelDraft]
   })) as Record<ChannelId, ChannelDraft>
   return {
-    enabled: s.enabled, timezone: s.timezone, push_times: s.push_times.length ? [...s.push_times] : ['07:30'], briefing_mode: s.briefing_mode,
+    enabled: s.enabled, push_times: s.push_times.length ? [...s.push_times] : ['07:30'], briefing_mode: s.briefing_mode,
     agent_instance_id: s.agent_instance_id ?? '', platforms: s.platforms.filter((p): p is PlatformId => PLATFORMS.some(x => x.id === p)),
     newsnow_api_url: s.newsnow_api_url, feeds: s.feeds.map(f => ({ ...f })),
     topics: s.topics.map(t => ({ name: t.name, keywords: joinWords(t.keywords ?? []), required: joinWords(t.required ?? []), max_items: t.max_items, description: t.description, enabled: t.enabled })),
@@ -86,7 +86,7 @@ export function buildBody(form: NewsForm, version: number): NewsSettingsBody {
     }]
   }))
   return {
-    version, enabled: form.enabled, timezone: form.timezone.trim(), push_times: [...new Set(form.push_times)],
+    version, enabled: form.enabled, push_times: [...new Set(form.push_times)],
     briefing_mode: form.briefing_mode, agent_instance_id: form.briefing_mode === 'agent' ? form.agent_instance_id || null : null,
     platforms: [...form.platforms], newsnow_api_url: form.newsnow_api_url.trim(),
     feeds: form.feeds.map(f => ({ id: f.id.trim(), name: f.name.trim(), url: f.url.trim(), enabled: f.enabled, max_age_days: Number(f.max_age_days) || 0 })),
@@ -102,7 +102,6 @@ export function checkForm(form: NewsForm, secretsSet: (channel: ChannelId) => st
   const problems: string[] = []
   if (!form.push_times.length) problems.push('至少要有一个推送时间。')
   if (new Set(form.push_times).size !== form.push_times.length) problems.push('推送时间不能重复。')
-  if (!form.timezone.trim()) problems.push('请填写时区。')
   if (form.briefing_mode === 'agent' && !form.agent_instance_id) problems.push('方案 B 要选一个智能体实例。')
   const names = new Set<string>()
   form.topics.forEach((t, i) => {
@@ -139,7 +138,7 @@ export function checkForm(form: NewsForm, secretsSet: (channel: ChannelId) => st
 
 // 422 的字段错误：error.details.errors[].loc / msg → “兴趣主题第 1 个 · 关键词：至少写一个关键词”
 const FIELDS: Record<string, string> = {
-  version: '版本', enabled: '启用', timezone: '时区', push_times: '推送时间', briefing_mode: '早报方式', agent_instance_id: '智能体实例',
+  version: '版本', enabled: '启用', push_times: '推送时间', briefing_mode: '早报方式', agent_instance_id: '智能体实例',
   platforms: '热榜平台', newsnow_api_url: '自建 NewsNow 地址', exclusions: '全局排除词', filter_method: '筛选方式', ai_model: '模型',
   ai_api_base: '接口地址', ai_api_key: 'API Key', ai_analysis: 'AI 分析', ai_translation: '翻译',
 }

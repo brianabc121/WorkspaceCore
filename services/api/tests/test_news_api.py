@@ -37,7 +37,6 @@ AI_KEY = "sk-news-secret-123"
 TOPIC_SECRET = "secret-topic-abc"  # noqa: S105 - 测试用的假值
 BODY: dict[str, Any] = {
     "enabled": True,
-    "timezone": "Asia/Shanghai",
     "push_times": ["07:30"],
     "briefing_mode": "trendradar",
     "platforms": ["zhihu", "weibo", "wallstreetcn-hot"],
@@ -216,7 +215,7 @@ async def test_settings_validation(env: ImEnv) -> None:
         {"channels": {"ntfy": {"enabled": True, "secrets": {"password": "x"}}}},
         {"briefing_mode": "agent"},
         {"push_times": ["07:15"]},
-        {"timezone": "Mars/Base"},
+        {"timezone": "Asia/Tokyo"},  # 时区由部署设置，网页上改不了
         {"topics": [{"name": "[坏]", "keywords": ["x"]}]},
         {"ai_model": "gpt-4o"},
     ):

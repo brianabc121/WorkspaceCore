@@ -12668,13 +12668,6 @@
             "title": "Push Times",
             "type": "array"
           },
-          "timezone": {
-            "default": "Asia/Shanghai",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Timezone",
-            "type": "string"
-          },
           "topics": {
             "items": {
               "$ref": "#/components/schemas/NewsTopicIn"
@@ -12848,6 +12841,7 @@
             "type": "boolean"
           },
           "timezone": {
+            "description": "时区（部署时设置：.env 的 TRENDRADAR_TZ，与 TrendRadar 容器一致；网页上只读）",
             "title": "Timezone",
             "type": "string"
           },

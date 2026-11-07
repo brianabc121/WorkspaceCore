@@ -93,17 +93,17 @@ async def _list(
 ) -> NewsListOutput:
     payload = await _payload(service, tool, args)
     if payload is None:
-        return NewsListOutput(items=[], note=_NO_DATA)
+        return NewsListOutput(items=[], hint=_NO_DATA)
     items = [_item(i) for i in parse_items(payload, rss=rss)][:limit]
-    return NewsListOutput(items=items, note=None if items else _NO_DATA)
+    return NewsListOutput(items=items, hint=None if items else _NO_DATA)
 
 
-def local_today(row: NewsSettings) -> date:
-    return datetime.now(UTC).astimezone(ZoneInfo(row.timezone)).date()
+def local_today(zone: str) -> date:
+    return datetime.now(UTC).astimezone(ZoneInfo(zone)).date()
 
 
-def _range(row: NewsSettings, days: int) -> dict[str, str]:
-    today = local_today(row)
+def _range(call: ReadCall, days: int) -> dict[str, str]:
+    today = local_today(call.settings.news_timezone)
     return {"start": (today - timedelta(days=days - 1)).isoformat(), "end": today.isoformat()}
 
 
@@ -116,10 +116,10 @@ async def news_latest(call: ReadCall, args: NewsLatestInput) -> NewsListOutput:
 
 
 async def news_search(call: ReadCall, args: NewsSearchInput) -> NewsListOutput:
-    service, row = await _setup(call)
+    service, _ = await _setup(call)
     params = {
         "query": args.query,
-        "date_range": _range(row, args.days),
+        "date_range": _range(call, args.days),
         "limit": args.limit,
         "include_url": True,
         "include_rss": args.include_rss,
@@ -157,7 +157,7 @@ async def news_trending(call: ReadCall, args: NewsTrendingInput) -> NewsTrending
                 untrusted=NewsKeywordText(keyword=raw["keyword"][:100]),
             )
         )
-    return NewsTrendingOutput(topics=topics[: args.top_n], note=None if topics else _NO_DATA)
+    return NewsTrendingOutput(topics=topics[: args.top_n], hint=None if topics else _NO_DATA)
 
 
 async def news_rss(call: ReadCall, args: NewsRssInput) -> NewsListOutput:
@@ -169,10 +169,10 @@ async def news_rss(call: ReadCall, args: NewsRssInput) -> NewsListOutput:
 
 
 async def news_related(call: ReadCall, args: NewsRelatedInput) -> NewsListOutput:
-    service, row = await _setup(call)
+    service, _ = await _setup(call)
     params = {
         "reference_title": args.title,
-        "date_range": _range(row, args.days),
+        "date_range": _range(call, args.days),
         "limit": args.limit,
         "include_url": True,
     }
@@ -180,11 +180,11 @@ async def news_related(call: ReadCall, args: NewsRelatedInput) -> NewsListOutput
 
 
 async def news_briefing(call: ReadCall, args: NewsBriefingInput) -> NewsBriefingOutput:
-    service, row = await _setup(call)
-    day = args.day or local_today(row)
+    service, _ = await _setup(call)
+    day = args.day or local_today(call.settings.news_timezone)
     briefing: NewsBriefing | None = await service.latest_briefing(call.access.workspace.id, day)
     if briefing is None:
-        return NewsBriefingOutput(briefing=None, note=f"{day.isoformat()} 还没有早报")
+        return NewsBriefingOutput(briefing=None, hint=f"{day.isoformat()} 还没有早报")
     return NewsBriefingOutput(
         briefing=NewsBriefingItem(
             briefing_id=briefing.id,

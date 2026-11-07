@@ -9146,11 +9146,6 @@ export interface components {
              * @description 每天推送的时间，半小时为单位
              */
             push_times: string[];
-            /**
-             * Timezone
-             * @default Asia/Shanghai
-             */
-            timezone: string;
             /** Topics */
             topics?: components["schemas"]["NewsTopicIn"][];
             /**
@@ -9227,7 +9222,10 @@ export interface components {
              * @description 另一个工作空间已经启用了早报（一个部署只能有一个）
              */
             taken_by_other: boolean;
-            /** Timezone */
+            /**
+             * Timezone
+             * @description 时区（部署时设置：.env 的 TRENDRADAR_TZ，与 TrendRadar 容器一致；网页上只读）
+             */
             timezone: string;
             /** Topics */
             topics: components["schemas"]["NewsTopicIn"][];

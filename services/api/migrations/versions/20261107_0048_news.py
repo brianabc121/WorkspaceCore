@@ -82,7 +82,6 @@ def upgrade() -> None:
         "news_settings",
         sa.Column("workspace_id", sa.UUID(), nullable=False),
         sa.Column("enabled", sa.Boolean(), server_default=sa.text("false"), nullable=False),
-        sa.Column("timezone", sa.Text(), server_default=sa.text("'Asia/Shanghai'"), nullable=False),
         sa.Column(
             "push_times",
             postgresql.JSONB(astext_type=sa.Text()),

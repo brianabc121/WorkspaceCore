@@ -60,6 +60,8 @@ x-api-env: &api-env
   TRENDRADAR_MCP_URL: ${TRENDRADAR_MCP_URL:-}
   # 设置页填的地址（RSS、自建 NewsNow、推送 Webhook）解析到内网时只允许这些主机名；只有验收用的模拟服务需要
   NEWS_ALLOWED_HOSTS: ${NEWS_ALLOWED_HOSTS:-}
+  # 早报的时区：与 infra/trendradar/compose.yaml 里两个 TrendRadar 容器的 TZ 是同一个变量
+  NEWS_TIMEZONE: ${TRENDRADAR_TZ:-Asia/Shanghai}
 
 services:
   postgres:

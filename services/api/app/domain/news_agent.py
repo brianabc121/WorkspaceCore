@@ -198,7 +198,7 @@ async def generate_now(service: NewsService, workspace_id: uuid.UUID) -> NewsBri
     )
     if pending is not None:
         raise ApiError(409, "BRIEFING_PENDING", "已经有一份早报正在写")
-    local = _now().astimezone(ZoneInfo(row.timezone))
+    local = _now().astimezone(service.zone)
     briefing = await start(service.db, service.settings, row, local.date(), f"{local:%H:%M}")
     await service.db.commit()
     await service.db.refresh(briefing)
@@ -222,7 +222,7 @@ async def _failed(db: AsyncSession, workspace_id: uuid.UUID, briefing: NewsBrief
 async def schedule_due(db: AsyncSession, settings: Settings, row: NewsSettings) -> int:
     if row.briefing_mode != "agent" or row.agent_instance_id is None:
         return 0
-    local = _now().astimezone(ZoneInfo(row.timezone))
+    local = _now().astimezone(ZoneInfo(settings.news_timezone))
     slot = slot_for(local, row.push_times)
     if not slot:
         return 0
@@ -319,8 +319,8 @@ async def expire_receiving(db: AsyncSession, row: NewsSettings) -> int:
     return len(stale)
 
 
-def _relearn_due(row: NewsSettings) -> bool:
-    local = _now().astimezone(ZoneInfo(row.timezone))
+def _relearn_due(row: NewsSettings, zone: ZoneInfo) -> bool:
+    local = _now().astimezone(zone)
     if (local.hour, local.minute) < RELEARN_AT:
         return False
     computed = (row.learned or {}).get("computed_at")
@@ -347,7 +347,7 @@ async def tick(
     stats["collected"] = await collect(service, row)
     await db.commit()
     config_missing = not (Path(settings.news_config_dir) / "config.yaml").exists()
-    if service.deployed and (config_missing or _relearn_due(row)):
+    if service.deployed and (config_missing or _relearn_due(row, service.zone)):
         row = await service.enabled_row()
         if row is not None:
             await service.relearn_and_render()

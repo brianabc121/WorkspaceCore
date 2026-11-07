@@ -21,7 +21,8 @@ export function plainLines(content: string, count: number): string[] {
       line = line
         .replace(/^#{1,6}\s+/, '').replace(/^(>\s?)+/, '').replace(/^([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?/, '')
         .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-        .replace(/<[^>]*>/g, '').replace(/(\*\*|__|~~|`)/g, '').replace(/(^|\s)[*_]([^*_]+)[*_](?=\s|$|[，。！？、,.!?])/g, '$1$2')
+        .replace(/<[^>]*>/g, '').replace(/(\*\*|~~|`)/g, '').replace(/(^|[^\w])__(.+?)__(?![\w])/g, '$1$2')
+        .replace(/(^|\s)[*_]([^*_]+)[*_](?=\s|$|[，。！？、,.!?])/g, '$1$2')
         .replace(/^\|\s*|\s*\|$/g, '').replace(/\s*\|\s*/g, ' · ')
         .trim()
     }

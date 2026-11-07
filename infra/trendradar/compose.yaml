@@ -55,6 +55,8 @@ services:
     image: wantcat/trendradar:6.11.0@sha256:3effcb5cedf5c385b50a6a32cd2599cbdbf54c9d8c52c0403406e356f88df80b
     environment:
       RUN_MODE: cron
+      # 时区：数据按它分日期存放、决定推送时间段；与工作台（NEWS_TIMEZONE）同一个值
+      TZ: ${TRENDRADAR_TZ:-Asia/Shanghai}
       # 固定每 30 分钟一次：推送时间段是半小时（timeline.yaml），每个时间段里正好有一次运行。验收时改成每分钟
       CRON_SCHEDULE: ${TRENDRADAR_CRON:-*/30 * * * *}
       IMMEDIATE_RUN: "true"
@@ -78,6 +80,9 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    environment:
+      # MCP 按容器时区算“今天”（get_latest_news 等没有日期参数）：必须与抓取容器、工作台一致
+      TZ: ${TRENDRADAR_TZ:-Asia/Shanghai}
     volumes:
       - trendradar-config:/app/config:ro
       - trendradar-output:/app/output:ro

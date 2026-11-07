@@ -419,7 +419,6 @@ class NewsService:
         return NewsSettings(
             workspace_id=workspace_id,
             enabled=False,
-            timezone="Asia/Shanghai",
             push_times=["07:30"],
             briefing_mode="trendradar",
             agent_instance_id=None,
@@ -497,7 +496,7 @@ class NewsService:
         return NewsSettingsOut(
             workspace_id=row.workspace_id,
             enabled=row.enabled,
-            timezone=row.timezone,
+            timezone=self.settings.news_timezone,
             push_times=list(row.push_times),
             briefing_mode=row.briefing_mode,
             agent_instance_id=row.agent_instance_id,
@@ -623,7 +622,6 @@ class NewsService:
             if plain.get("enabled") and not all(kept.get(f) for f in _required_secrets(name)):
                 raise _invalid(["channels", name], "启用的渠道要填好凭证")
         row.enabled = body.enabled
-        row.timezone = body.timezone
         row.push_times = sorted(body.push_times)
         row.briefing_mode = body.briefing_mode
         row.agent_instance_id = body.agent_instance_id
@@ -688,7 +686,7 @@ class NewsService:
         scores = (row.learned or {}).get("topic_scores") or {}
         return cfg.RenderInput(
             enabled=row.enabled,
-            timezone=row.timezone,
+            timezone=self.settings.news_timezone,
             push_times=list(row.push_times),
             briefing_mode=row.briefing_mode,
             platforms=list(row.platforms),
@@ -948,7 +946,7 @@ class NewsService:
             return "ignored"
         index, total, text = split_batch(content)
         now = _now()
-        local = now.astimezone(ZoneInfo(row.timezone))
+        local = now.astimezone(self.zone)
         current = await self.db.scalar(
             select(NewsBriefing)
             .where(
@@ -1071,8 +1069,12 @@ class NewsService:
         ).limit(1)
         return await self.db.scalar(stmt)
 
-    def local_today(self, row: NewsSettings) -> date:
-        return _now().astimezone(ZoneInfo(row.timezone)).date()
+    @property
+    def zone(self) -> ZoneInfo:
+        return ZoneInfo(self.settings.news_timezone)
+
+    def local_today(self) -> date:
+        return _now().astimezone(self.zone).date()
 
     # ------------------------------------------------------------ 热榜、RSS、搜索（MCP）
 
@@ -1157,9 +1159,7 @@ class NewsService:
     async def search(
         self, access: WorkspaceAccess, q: str, days: int, include_rss: bool, limit: int
     ) -> NewsItemList:
-        row = await self._enabled_for(access.workspace.id)
-        tz = ZoneInfo(row.timezone) if row is not None else UTC
-        today = _now().astimezone(tz).date()
+        today = self.local_today()
         args = {
             "query": q,
             "date_range": {
@@ -1183,7 +1183,7 @@ class NewsService:
                 unavailable=False,
                 message="早报没有启用",
             )
-        day = self.local_today(row)
+        day = self.local_today()
         briefing = await self.latest_briefing(access.workspace.id, day)
         topics = [t for t in topics_of(row) if t.enabled]
         if not self.deployed:

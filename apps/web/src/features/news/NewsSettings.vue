@@ -26,7 +26,6 @@ const outdated = computed(() => !!current.value && !!form.value && current.value
 const choices = computed(() => (current.value?.platform_choices.length ? current.value.platform_choices : PLATFORMS))
 const instances = computed(() => agents.data.value ?? [])
 const missingInstance = computed(() => !!form.value?.agent_instance_id && !instances.value.some(i => i.id === form.value!.agent_instance_id))
-const timezones = (() => { try { return Intl.supportedValuesOf('timeZone') } catch { return ['Asia/Shanghai', 'UTC'] } })()
 const secretsSet = (id: ChannelId) => current.value?.channels[id]?.secrets_set ?? []
 const ONLINE = computed(() => {
   const s = status.data.value
@@ -120,10 +119,7 @@ const sourceName = (type: string) => (type === 'rss' ? 'RSS' : '热榜')
             <h2>基本</h2>
             <label class="check-field"><input v-model="form.enabled" type="checkbox" />启用新闻早报</label>
             <p class="form-help">关闭时 TrendRadar 不抓取、不推送；早报页仍能看往期。</p>
-            <div class="news-grid">
-              <label class="form-field"><span>时区</span><input v-model="form.timezone" list="news-timezones" maxlength="64" placeholder="Asia/Shanghai" /></label>
-            </div>
-            <datalist id="news-timezones"><option v-for="zone in timezones" :key="zone" :value="zone" /></datalist>
+            <p class="form-help">时区：<strong>{{ current.timezone }}</strong>（推送时间与“今天”按这个时区算；部署时在 <code>.env</code> 的 <code>TRENDRADAR_TZ</code> 里设置，与 TrendRadar 容器一致）。</p>
             <div class="form-field">
               <span>推送时间（1~3 个，半小时为单位）</span>
               <div class="news-times">

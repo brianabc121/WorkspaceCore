@@ -212,7 +212,7 @@ def main() -> int:
     _, workspace_id, _ = create_user(email, "早报验收", PASSWORD)
     client = Client(base)
     login = client.request("POST", "/api/v1/auth/login", {"email": email, "password": PASSWORD})
-    report.check("owner 登录", login.status == 200, login.summary())
+    report.check("owner 登录", login.status == 200, login.summary)
     headers = {"X-Workspace-Id": workspace_id}
 
     status = client.request("GET", "/api/v1/news/status", headers=headers).json()
@@ -221,7 +221,7 @@ def main() -> int:
     saved = client.request(
         "PUT", "/api/v1/news/settings", settings_body(current["version"], AI_TOPICS), headers=headers
     )
-    report.check("网页上保存设置并启用", saved.status == 200, saved.summary())
+    report.check("网页上保存设置并启用", saved.status == 200, saved.summary)
     body = saved.json()
     text = json.dumps(body, ensure_ascii=False)
     report.check(
@@ -319,8 +319,18 @@ def main() -> int:
     report.check(
         "接收地址经 Caddy 访问不到",
         outside.status != 200 or b'"result"' not in outside.body,
-        outside.summary(),
+        outside.summary,
     )
+
+    # 一个部署只有一个工作空间能启用早报：关掉，接下来的浏览器验收用它自己的新工作空间启用
+    current = client.request("GET", "/api/v1/news/settings", headers=headers).json()
+    off = client.request(
+        "PUT",
+        "/api/v1/news/settings",
+        settings_body(current["version"], FINANCE_TOPICS) | {"enabled": False},
+        headers=headers,
+    )
+    report.check("关闭早报后配置文件改成不推送", off.status == 200 and off.json()["render_error"] == "")
     run("docker", "rm", "-f", FAKE, check=False)
     return report.finish()
 
