@@ -61,6 +61,40 @@ class Workspace:
             )
         return http.client.HTTPConnection(self.host, self.port, timeout=timeout)
 
+    def put_bytes(self, path: str, data: bytes, *, timeout: float = 300) -> None:
+        self._raw("PUT", path, data, timeout)
+
+    def get_bytes(self, path: str, *, timeout: float = 300) -> bytes:
+        return self._raw("GET", path, None, timeout)
+
+    def _raw(self, method: str, path: str, data: bytes | None, timeout: float) -> bytes:
+        conn = self._connection(timeout)
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "User-Agent": f"myworkspace-runner-agent/{VERSION}",
+        }
+        if data is not None:
+            headers["Content-Type"] = "application/octet-stream"
+        try:
+            conn.request(method, f"{self.base}/runner-api/v1{path}", body=data, headers=headers)
+            response = conn.getresponse()
+            raw = response.read()
+        except (OSError, http.client.HTTPException) as error:
+            raise WorkspaceError(0, "NETWORK", str(error)[:300]) from None
+        finally:
+            conn.close()
+        if response.status >= 400:
+            try:
+                detail = json.loads(raw).get("error") or {}
+            except (ValueError, AttributeError):
+                detail = {}
+            raise WorkspaceError(
+                response.status,
+                str(detail.get("code") or "HTTP_ERROR"),
+                str(detail.get("message") or raw[:200]),
+            )
+        return raw
+
     def post(self, path: str, body: dict[str, Any], *, timeout: float = 30) -> Any:
         data = json.dumps(body, separators=(",", ":")).encode()
         conn = self._connection(timeout)

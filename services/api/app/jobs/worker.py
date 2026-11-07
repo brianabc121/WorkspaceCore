@@ -294,14 +294,11 @@ async def check_host_alerts(ctx: dict[str, Any]) -> int:
 
 
 async def runner_tick(ctx: dict[str, Any]) -> int:
-    """运行服务器（T-0136）：指令时限、运行服务器在线、空闲停止、删除条件与到期删除。"""
+    """运行服务器（T-0136、T-0139）：指令时限、在线、删除条件、空闲分档、资源水位、清理。"""
     context = _sync(ctx)
     async with context.sessions() as db:
         result = await runner_reclaim.tick(db, context.settings, ctx["redis"])
-    changed = (
-        result.expired + result.retried + result.stopped + result.pending_delete + result.deleted
-    )
-    if changed or result.offline:
+    if result.changed or result.offline:
         logger.info(
             "runner tick",
             extra={
@@ -309,11 +306,13 @@ async def runner_tick(ctx: dict[str, Any]) -> int:
                 "retried": result.retried,
                 "offline": len(result.offline),
                 "stopped": result.stopped,
+                "archived": result.archived,
                 "pending_delete": result.pending_delete,
                 "deleted": result.deleted,
+                "purged": result.purged,
             },
         )
-    return changed
+    return result.changed
 
 
 async def replicate_files(ctx: dict[str, Any]) -> int:

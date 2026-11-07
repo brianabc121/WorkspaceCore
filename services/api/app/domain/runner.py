@@ -37,6 +37,7 @@ from app.models import (
     RunnerEnvironment,
     RunnerHost,
     RunnerRun,
+    RunnerSnapshot,
     RunnerTemplate,
 )
 from app.schemas.runner import (
@@ -62,6 +63,7 @@ DEADLINES: dict[str, int] = {
     "start_env": 600,
     "stop_env": 120,
     "delete_env": 300,
+    "archive_env": 300,
     "list_files": 120,
     "get_files": 300,
     "put_files": 300,
@@ -69,7 +71,9 @@ DEADLINES: dict[str, int] = {
     "restore": 3600,
     "prune_images": 600,
 }
-RETRYABLE = frozenset({"stop_env", "delete_env", "list_files", "get_files", "prune_images"})
+RETRYABLE = frozenset(
+    {"stop_env", "delete_env", "archive_env", "list_files", "get_files", "prune_images"}
+)
 MAX_ATTEMPTS = 3
 ONLINE_SECONDS = 90  # 这么久没有长轮询就算不在线
 LIVE_STATES = ("creating", "running", "stopped")
@@ -559,6 +563,12 @@ class Runner:
                 "RUNNER_CAPABILITY",
                 "运行服务器没有 /dev/kvm（需要开启硬件虚拟化）；可以换 runc 或 gvisor",
             )
+        # 磁盘告急（第 6.4 节）：拒绝新建，先等回收
+        policy = specs.policy_for(host.policy)
+        total = int((host.report or {}).get("disk_bytes") or host.disk_bytes or 0)
+        free = int((host.report or {}).get("disk_free_bytes") or host.disk_free_bytes or 0)
+        if total and 1 - free / total > policy["disk_emergency"]:
+            raise RunnerError("RESOURCE_BUSY", "运行服务器磁盘告急，暂停新建环境；稍后再试")
         # 整台服务器：内存按上限累计，不超卖（留 10% 给系统）
         if host.mem_bytes:
             used = await self.db.scalars(
@@ -568,7 +578,18 @@ class Runner:
                 )
             )
             total = sum(int(s.get("memory_mb", 0)) for s in used) + spec["memory_mb"]
-            if total * 1024 * 1024 > host.mem_bytes * 0.9:
+            over = total * 1024 * 1024 - int(host.mem_bytes * 0.9)
+            if over > 0:
+                # 先按保留分停掉空闲的环境腾地方（停止要等 runner-agent 做完，这次仍然返回忙）
+                from app.domain.runner_reclaim import make_room
+
+                stopped = await make_room(self, host, over)
+                if stopped:
+                    await self.db.commit()
+                    raise RunnerError(
+                        "RESOURCE_BUSY",
+                        f"运行服务器内存不够：已按保留分停止 {stopped} 个空闲环境，约 30 秒后再试",
+                    )
                 raise RunnerError(
                     "RESOURCE_BUSY", "运行服务器的内存已经分配满了；稍后再试，或调小 memory_mb"
                 )
@@ -611,8 +632,8 @@ class Runner:
     ) -> RunnerEnvironment | None:
         viewer = Viewer(instance.workspace_id, instance=instance)
         for env in await self.find(viewer, reuse_key=reuse_key):
-            # 归档的环境要先按配置记录重建（T-0139），这里只复用还在的
-            if env.state not in ("running", "stopped", "creating"):
+            # 归档的也复用：用到时按配置记录重建
+            if env.state not in ("running", "stopped", "creating", "archived"):
                 continue
             if template_id is not None and env.template_id != template_id:
                 continue
@@ -682,6 +703,8 @@ class Runner:
                 run = None
                 if command is not None:
                     run = await self.start_run(instance, found, command, body.timeout_seconds)
+                elif found.state == "archived":
+                    await self.rebuild(found, "复用，自动重建")
                 await self.db.commit()
                 return found, True, "已复用同一个 reuse_key 的环境", run
         if body.new and not (body.new_reason or "").strip():
@@ -810,10 +833,20 @@ class Runner:
         *,
         files: list[dict[str, str]] | None = None,
         source: RunnerEnvironment | None = None,
-        snapshot: str | None = None,
+        snapshot: dict[str, Any] | None = None,
+        template: RunnerTemplate | None = None,
     ) -> dict[str, Any]:
         spec = env.spec
         image = spec.get("template_image") or spec["image"]
+        build = None
+        if template is not None and template.spec.get("steps") and spec.get("template_image"):
+            # 模板镜像被清理后，runner-agent 按这些信息先重新构建再建环境（重建时用）
+            build = {
+                "template_id": str(template.id),
+                "image": template.spec["image"],
+                "steps": list(template.spec.get("steps") or []),
+                "tag": spec["template_image"],
+            }
         return {
             "env_id": str(env.id),
             "workspace_id": str(env.workspace_id),
@@ -835,14 +868,15 @@ class Runner:
             "copy_from_volume": source.volume_name if source is not None else None,
             "setup": list(env.setup or []),
             "snapshot": snapshot,
+            "template_build": build,
+            "lifetime": env.lifetime,
         }
 
     def runtime_payload(self, env: RunnerEnvironment) -> dict[str, Any]:
         """启动、执行时让 runner-agent 补齐的信息（容器停着就先启动、再注入密钥、登记出口策略）。"""
         payload = self.create_payload(env)
-        payload.pop("files")
-        payload.pop("copy_from_volume")
-        payload.pop("snapshot")
+        for key in ("files", "copy_from_volume", "snapshot", "template_build", "setup"):
+            payload.pop(key)
         return payload
 
     async def touch(self, env: RunnerEnvironment) -> None:
@@ -856,13 +890,16 @@ class Runner:
         command: list[str],
         timeout_seconds: int,
     ) -> RunnerRun:
-        if env.state in ("archived", "pending_delete", "deleted", "failed"):
-            raise RunnerError(
-                "ENV_UNAVAILABLE", f"环境现在是 {env.state}，不能执行（归档的用 env_create 重建）"
-            )
+        if env.state in ("pending_delete", "deleted", "failed"):
+            raise RunnerError("ENV_UNAVAILABLE", f"环境现在是 {env.state}，不能执行")
         host = await self.db.get(RunnerHost, env.host_id)
         if host is None:
             raise RunnerError("RUNNER_UNAVAILABLE", "运行服务器已移除")
+        extra = 0
+        if env.state == "archived":
+            # 归档的环境按配置记录重建（恢复快照、重放初始化步骤），exec 排在重建之后
+            await self.rebuild(env, "有人使用，自动重建")
+            extra = 3600
         run = RunnerRun(
             id=uuid.uuid4(),
             workspace_id=env.workspace_id,
@@ -875,7 +912,7 @@ class Runner:
         await self.db.flush()
         payload = self.runtime_payload(env)
         payload.update({"run_id": str(run.id), "cmd": command, "timeout": timeout_seconds})
-        self.enqueue(host, "exec", payload, env=env, run=run, seconds=timeout_seconds + 180)
+        self.enqueue(host, "exec", payload, env=env, run=run, seconds=timeout_seconds + 180 + extra)
         env.last_used_at = specs.now()
         return run
 
@@ -913,12 +950,24 @@ class Runner:
         )
         env.state_reason = reason
 
-    async def delete(self, env: RunnerEnvironment, reason: str) -> None:
-        """删容器、网络与数据卷（不做快照；常驻环境的快照在回收里先做）。"""
+    async def delete(self, env: RunnerEnvironment, reason: str, *, snapshot: bool = True) -> None:
+        """删容器、网络与数据卷。常驻环境先做快照（保留 30 天，可以从页面恢复）。"""
         if env.state == "deleted":
             return
         host = await self.db.get(RunnerHost, env.host_id)
-        if host is not None and env.state != "archived":
+        archived = self.was_archived(env)
+        if (
+            snapshot
+            and host is not None
+            and env.lifetime == "persistent"
+            and not archived
+            and env.state not in ("failed", "creating")
+            and not await self._fresh_snapshot(env)
+        ):
+            await self.start_snapshot(host, env, then="delete")
+            env.state_reason = reason
+            return
+        if host is not None and not archived:
             self.enqueue(
                 host,
                 "delete_env",
@@ -933,13 +982,123 @@ class Runner:
         else:
             env.state = "deleted"
             env.deleted_at = specs.now()
+            await self._keep_snapshots(env)
         env.state_reason = reason
+
+    @staticmethod
+    def was_archived(env: RunnerEnvironment) -> bool:
+        """已经归档（容器与数据卷都删了）：归档状态，或者归档以后进入了待删除。"""
+        return env.state == "archived" or (
+            env.state == "pending_delete" and env.archived_at is not None
+        )
+
+    # ------------------------------------------------------------------ 快照、归档与重建（T-0139）
+
+    async def _fresh_snapshot(self, env: RunnerEnvironment) -> bool:
+        """有没有比最近一次使用更新、已就绪的快照。"""
+        if not env.snapshot_key or env.snapshot_at is None:
+            return False
+        return env.snapshot_at >= env.last_used_at
+
+    async def latest_snapshot(self, env: RunnerEnvironment) -> RunnerSnapshot | None:
+        result: RunnerSnapshot | None = await self.db.scalar(
+            select(RunnerSnapshot)
+            .where(RunnerSnapshot.environment_id == env.id, RunnerSnapshot.status == "ready")
+            .order_by(RunnerSnapshot.created_at.desc())
+            .limit(1)
+        )
+        return result
+
+    async def start_snapshot(self, host: RunnerHost, env: RunnerEnvironment, *, then: str) -> None:
+        """常驻环境做快照（环境先停下来，数据一致），完成后接着 archive 或 delete。"""
+        from app.domain.runner_snapshots import PART_BYTES, SnapshotStore
+
+        pending = await self.db.scalar(
+            select(RunnerCommand.id).where(
+                RunnerCommand.environment_id == env.id,
+                RunnerCommand.kind == "snapshot",
+                RunnerCommand.status.in_(("pending", "sent")),
+            )
+        )
+        if pending is not None:
+            return
+        if env.state in ("running", "creating"):
+            self.enqueue(
+                host, "stop_env", {"env_id": str(env.id), "container": env.container_name}, env=env
+            )
+        snapshot = SnapshotStore(self.db, self.settings).begin(env)
+        await self.db.flush()
+        policy = specs.policy_for(host.policy)
+        self.enqueue(
+            host,
+            "snapshot",
+            {
+                "env_id": str(env.id),
+                "snapshot_id": str(snapshot.id),
+                "volume": env.volume_name,
+                "user": env.spec.get("user", "user"),
+                "paths": list(env.spec.get("persist") or []) or ["."],
+                "part_bytes": PART_BYTES,
+                "max_bytes": int(policy["snapshot_max_gb"] * 1024**3),
+                "then": then,
+            },
+            env=env,
+        )
+
+    async def archive(self, env: RunnerEnvironment, reason: str) -> bool:
+        """归档：常驻环境先做快照；会话、一次性的直接删容器与数据卷，只留配置记录。"""
+        if env.state not in ("running", "stopped") or env.pinned:
+            return False
+        host = await self.db.get(RunnerHost, env.host_id)
+        if host is None:
+            return False
+        env.state_reason = reason
+        if env.lifetime == "persistent" and not await self._fresh_snapshot(env):
+            await self.start_snapshot(host, env, then="archive")
+            return True
+        self.enqueue(
+            host,
+            "archive_env",
+            {
+                "env_id": str(env.id),
+                "container": env.container_name,
+                "volume": env.volume_name,
+                "network": env.network_name,
+            },
+            env=env,
+        )
+        return True
+
+    async def rebuild(self, env: RunnerEnvironment, reason: str) -> None:
+        """按配置记录重建：模板镜像（被清理了就先重建）→ 恢复快照 → 重放初始化步骤 → 启动。"""
+        host = await self.online_host(env.workspace_id)
+        snapshot_info: dict[str, Any] | None = None
+        if env.lifetime == "persistent":
+            snapshot = await self.latest_snapshot(env)
+            if snapshot is not None:
+                snapshot_info = {
+                    "id": str(snapshot.id),
+                    "entries": list(snapshot.entries),
+                    "parts": snapshot.parts,
+                }
+        template = await self.db.get(RunnerTemplate, env.template_id) if env.template_id else None
+        env.state = "creating"
+        env.state_reason = reason
+        self.enqueue(
+            host,
+            "create_env",
+            self.create_payload(env, snapshot=snapshot_info, template=template),
+            env=env,
+            seconds=DEADLINES["create_env"] + (DEADLINES["restore"] if snapshot_info else 0),
+        )
 
     async def files(self, instance: AgentInstance, body: EnvFilesInput) -> EnvFilesOutput:
         viewer = Viewer(instance.workspace_id, instance=instance)
         env = await self.env(viewer, body.environment_id)
         host = await self.online_host(instance.workspace_id)
-        if env.state not in ("running", "stopped"):
+        if env.state == "archived":
+            await self.rebuild(env, "读写文件，自动重建")
+        elif env.state not in ("running", "stopped"):
             raise RunnerError("ENV_UNAVAILABLE", f"环境现在是 {env.state}，不能读写文件")
         try:
             path = specs.clean_relative(body.path, allow_root=body.action == "list")
@@ -997,6 +1156,8 @@ class Runner:
         env = await self.env(viewer, body.environment_id)
         if env.owner_instance_id != instance.id:
             raise RunnerError("FORBIDDEN", "只有建这个环境的智能体能改它")
+        if body.keep:
+            await self.keep(env, "创建者撤销删除")
         if body.purpose is not None:
             env.purpose = body.purpose
         if body.share is not None:
@@ -1101,6 +1262,44 @@ class Runner:
         env.state = "pending_delete"
         env.state_reason = reason
         env.delete_after = specs.later(grace)
+        if env.lifetime == "persistent":
+            hours = round(grace / 3600)
+            await notifications.notify_admins(
+                self.db,
+                env.workspace_id,
+                type_="runner.environment_pending_delete",
+                severity="warning",
+                title="常驻环境将被删除",
+                body=f"{env.purpose}：{reason}；{hours} 小时后删除"
+                "（先做快照，保留 30 天），可以撤销",
+                link="/runner?tab=environments",
+                key=f"{env.id}:pending_delete",
+            )
+            if env.owner_instance_id is not None:
+                self.db.add(
+                    AgentWakeup(
+                        id=uuid.uuid4(),
+                        workspace_id=env.workspace_id,
+                        instance_id=env.owner_instance_id,
+                        source="runner",
+                        target=None,
+                        session_key=f"runner:env:{env.id}",
+                        prompt=(
+                            f"[工作台] 你的常驻环境 {env.id} 因为“{reason}”进入待删除，"
+                            f"{hours} 小时后删除（先做快照）。"
+                            "还要用就调用 env_update 并设置 keep=true。"
+                        ),
+                        run_at=specs.now(),
+                    )
+                )
+
+    async def keep(self, env: RunnerEnvironment, reason: str) -> None:
+        """撤销待删除：回到停止状态，删除条件里已经触发的不再生效。"""
+        if env.state != "pending_delete":
+            raise RunnerError("VALIDATION_FAILED", "这个环境不在待删除状态")
+        env.state = "archived" if env.archived_at is not None else "stopped"
+        env.delete_after = None
+        env.state_reason = reason
 
     # ------------------------------------------------------------------ 运行
 
@@ -1179,6 +1378,7 @@ class Runner:
                     env.state = "running"
                     env.state_reason = None
                 env.started_at = specs.now()
+                env.archived_at = None  # 重建好了：又有容器与数据卷
                 seconds = result.get("seconds")
                 if isinstance(seconds, int | float):
                     if kind == "create_env":
@@ -1202,12 +1402,82 @@ class Runner:
         elif kind == "delete_env" and env is not None and ok:
             env.state = "deleted"
             env.deleted_at = specs.now()
+            await self._keep_snapshots(env)
+        elif kind == "archive_env" and env is not None and ok:
+            env.state = "archived"
+            env.archived_at = specs.now()
+            env.mem_bytes = None
         elif kind == "exec" and command.run_id is not None:
             await self._finish_run(command, ok, result, error, env)
         elif kind == "snapshot" and env is not None:
-            from app.domain.runner_reclaim import after_snapshot  # 回收（T-0139）
+            await self._after_snapshot(env, command, ok, result, error)
 
-            await after_snapshot(self, env, command, ok, result, error)
+    async def _keep_snapshots(self, env: RunnerEnvironment) -> None:
+        """环境删除后，它的快照再保留 archive_retention_days 天（可以从页面恢复）。"""
+        host = await self.db.get(RunnerHost, env.host_id)
+        days = specs.policy_for(host.policy if host else None)["archive_retention_days"]
+        for snapshot in await self.db.scalars(
+            select(RunnerSnapshot).where(
+                RunnerSnapshot.environment_id == env.id, RunnerSnapshot.status == "ready"
+            )
+        ):
+            snapshot.expires_at = specs.later(days * 86400)
+
+    async def _after_snapshot(
+        self,
+        env: RunnerEnvironment,
+        command: RunnerCommand,
+        ok: bool,
+        result: dict[str, Any],
+        error: str | None,
+    ) -> None:
+        snapshot_id = command.payload.get("snapshot_id")
+        snapshot = (
+            await self.db.get(RunnerSnapshot, uuid.UUID(str(snapshot_id))) if snapshot_id else None
+        )
+        then = str(command.payload.get("then") or "")
+        if not ok or snapshot is None:
+            if snapshot is not None:
+                snapshot.status = "failed"
+                snapshot.error = (error or "快照失败")[:500]
+            # 快照做不出来：不归档、不删除（数据重建不出来），只停着，通知管理员
+            if env.state == "pending_delete":
+                env.state = "stopped"
+                env.delete_after = None
+            action = "删除" if then == "delete" else "归档"
+            env.state_reason = f"快照失败，没有{action}：{(error or '')[:200]}"
+            await notifications.notify_admins(
+                self.db,
+                env.workspace_id,
+                type_="runner.snapshot_failed",
+                severity="warning",
+                title="常驻环境的快照失败",
+                body=f"{env.purpose}：{(error or '')[:200]}；环境保持停止，没有归档或删除",
+                link="/runner?tab=environments",
+                key=f"{env.id}:snapshot:{command.id}",
+            )
+            return
+        snapshot.status = "ready"
+        snapshot.entries = list(result.get("entries") or [])
+        snapshot.parts = int(result.get("parts") or 0)
+        snapshot.bytes = int(result.get("bytes") or 0)
+        snapshot.ready_at = specs.now()
+        env.snapshot_key = str(snapshot.id)
+        env.snapshot_bytes = snapshot.bytes
+        env.snapshot_at = specs.now()
+        host = await self.db.get(RunnerHost, env.host_id)
+        if host is None:
+            return
+        target = {
+            "env_id": str(env.id),
+            "container": env.container_name,
+            "volume": env.volume_name,
+            "network": env.network_name,
+        }
+        if then == "archive":
+            self.enqueue(host, "archive_env", target, env=env)
+        elif then == "delete":
+            self.enqueue(host, "delete_env", target, env=env)
 
     async def _fail_pending_runs(self, env: RunnerEnvironment, reason: str) -> None:
         runs = await self.db.scalars(

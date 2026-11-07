@@ -2,7 +2,8 @@
 
 - `POST /runner-api/v1/poll`：长轮询（最多 25 秒）领指令，同时上报容量；
 - `POST /runner-api/v1/commands/{id}/result`：回报一条指令的结果（重复回报只认第一次）；
-- `POST /runner-api/v1/report`：每分钟对账。
+- `POST /runner-api/v1/report`：每分钟对账；
+- `PUT|GET /runner-api/v1/snapshots/{id}/parts/{n}`：常驻环境快照的分块上传与恢复（T-0139）。
 认证：运行服务器凭证（`mwr_`）+ 接入入口写入的入口请求头（外网另需客户端证书指纹），
 只在请求直接来自接入入口时采用这些请求头。认证失败一律 401 RUNNER_UNAUTHORIZED。
 """
@@ -11,14 +12,17 @@ import asyncio
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Request, Response, Security
+from fastapi import APIRouter, Path, Request, Response, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.agent_api import CERT_HEADER, INGRESS_HEADER, _from_ingress_proxy
 from app.api.deps import client_ip
+from app.core.errors import ApiError
 from app.domain.runner_hosts import RunnerHosts, unauthorized
-from app.models import RunnerHost
+from app.domain.runner_snapshots import MAX_PARTS, PART_BYTES, SnapshotStore
+from app.models import RunnerEnvironment, RunnerHost, RunnerSnapshot
 from app.schemas.common import error_responses
 from app.schemas.runner import (
     RunnerCommandResult,
@@ -134,3 +138,75 @@ async def report(
         result = await hosts.report(host, body)
         await db.commit()
     return result
+
+
+# ---------------------------------------------------------------- 快照（T-0139）
+
+PART_HEADROOM = 64 * 1024
+
+
+async def _snapshot_for(
+    db: AsyncSession, host: RunnerHost, snapshot_id: uuid.UUID
+) -> RunnerSnapshot:
+    """只认这台运行服务器上的环境的快照；别的一律当不存在。"""
+    snapshot = await db.get(RunnerSnapshot, snapshot_id)
+    env = await db.get(RunnerEnvironment, snapshot.environment_id) if snapshot else None
+    if snapshot is None or env is None or env.host_id != host.id:
+        raise ApiError(404, "NOT_FOUND", "没有这份快照")
+    return snapshot
+
+
+@router.put(
+    "/snapshots/{snapshot_id}/parts/{index}",
+    summary="上传快照的一块（运行服务器）",
+    description="请求体是原始字节（最多 16 MB）；工作台用这份快照的数据密钥加密后存到对象存储。",
+    responses=error_responses(401, 404, 409, 422, 503),
+)
+async def put_snapshot_part(
+    request: Request,
+    credentials: RunnerCredentials,
+    snapshot_id: uuid.UUID,
+    index: Annotated[int, Path(ge=0, lt=MAX_PARTS)],
+) -> ResultAccepted:
+    app = request.app
+    async with app.state.sessionmaker() as db:
+        hosts = RunnerHosts(db, app.state.settings, app.state.redis)
+        host = await _authenticate(request, credentials, hosts)
+        snapshot = await _snapshot_for(db, host, snapshot_id)
+        # 先认证、再读请求体（最多 16 MB 加一点余量）
+        data = bytearray()
+        async for chunk in request.stream():
+            data += chunk
+            if len(data) > PART_BYTES + PART_HEADROOM:
+                raise ApiError(413, "PAYLOAD_TOO_LARGE", "每块最多 16 MB")
+        await SnapshotStore(db, app.state.settings).put_part(snapshot, index, bytes(data))
+        await db.commit()
+    return ResultAccepted(accepted=True)
+
+
+@router.get(
+    "/snapshots/{snapshot_id}/parts/{index}",
+    summary="下载快照的一块（运行服务器，重建时恢复）",
+    response_class=Response,
+    responses={
+        200: {"content": {"application/octet-stream": {}}, "description": "解密后的原始字节"},
+        **error_responses(401, 404, 409, 422, 503),
+    },
+)
+async def get_snapshot_part(
+    request: Request,
+    credentials: RunnerCredentials,
+    snapshot_id: uuid.UUID,
+    index: Annotated[int, Path(ge=0, lt=MAX_PARTS)],
+) -> Response:
+    app = request.app
+    async with app.state.sessionmaker() as db:
+        hosts = RunnerHosts(db, app.state.settings, app.state.redis)
+        host = await _authenticate(request, credentials, hosts)
+        snapshot = await _snapshot_for(db, host, snapshot_id)
+        data = await SnapshotStore(db, app.state.settings).get_part(snapshot, index)
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "no-store"},
+    )

@@ -277,6 +277,7 @@ class EnvUpdateInput(_Strict):
     delete_when: list[str] | None = Field(None, max_length=20)
     share: Share | None = None
     project_id: UUID | None = None
+    keep: bool | None = Field(None, description="true：撤销待删除（常驻环境 24 小时宽限期内）")
 
 
 class EnvIdInput(_Strict):
@@ -422,7 +423,7 @@ class RunnerEnvAdminList(BaseModel):
 
 
 class RunnerEnvAction(_Strict):
-    action: Literal["start", "stop", "delete", "pin", "unpin"]
+    action: Literal["start", "stop", "archive", "delete", "keep", "restore", "pin", "unpin"]
     version: int
 
 

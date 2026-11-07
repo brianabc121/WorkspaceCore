@@ -17,6 +17,7 @@ LABEL_ENV = "myworkspace.env"
 LABEL_WORKSPACE = "myworkspace.workspace"
 LABEL_TEMPLATE = "myworkspace.template"
 LABEL_ROLE = "myworkspace.role"
+LABEL_LIFETIME = "myworkspace.lifetime"
 
 RUNTIMES = {"gvisor": "runsc", "runc": "runc", "kvm": "runc"}
 USERS = {"user": "1000:1000", "root": "0:0"}
@@ -164,7 +165,7 @@ def container_config(payload: dict[str, Any], *, host_memory: int | None = None)
         "Image": image,
         "User": USERS[user],
         "Env": env_list(payload),
-        "Labels": labels(payload),
+        "Labels": {**labels(payload), LABEL_LIFETIME: str(payload.get("lifetime") or "session")},
         "HostConfig": host_config,
         # 不设 WorkingDir：镜像里没有 /workspace 时 Docker 会按 root 建它并把属主复制到空数据卷上
         # （实测），uid 1000 就写不进去了。exec 时再设工作目录
@@ -233,6 +234,7 @@ def exec_workdir(relative: Any) -> str:
 __all__ = [
     "KEEPALIVE",
     "LABEL_ENV",
+    "LABEL_LIFETIME",
     "LABEL_ROLE",
     "LABEL_RUNNER",
     "LABEL_TEMPLATE",

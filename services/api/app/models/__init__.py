@@ -78,6 +78,7 @@ from app.models.runner import (
     RunnerEnvironment,
     RunnerHost,
     RunnerRun,
+    RunnerSnapshot,
     RunnerTemplate,
 )
 from app.models.search import SearchDocument
@@ -162,6 +163,7 @@ __all__ = [
     "RunnerEnvironment",
     "RunnerHost",
     "RunnerRun",
+    "RunnerSnapshot",
     "RunnerTemplate",
     "SearchDocument",
     "SyncCursor",

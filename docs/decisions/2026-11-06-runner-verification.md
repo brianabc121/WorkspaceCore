@@ -83,6 +83,23 @@ runner-agent 的代码（`app/runner_agent/`）放进锁定 digest 的 `python:3
 1. **代理的监听要先 `shutdown` 再 `close`**：只 `close` 时阻塞在 `accept()` 的线程还占着端口，同一地址再监听报 `Address already in use`（环境停止后再启动、删掉后新建网络分到同一个地址时都会遇到）。
 2. 代理拒绝时的**状态行只用 ASCII**（客户端按 latin-1 显示状态行），中文原因放在正文里。
 
+### 4.1 快照、归档、重建与镜像清理（T-0139，同样的方式，2026-11-07）
+
+常驻环境写进三个文件（`data/db.txt`、`cfg/sub/a.json`、`tmp/junk.txt`），要保存的目录是 `data`、`cfg/sub` 与一个不存在的 `missing`，块大小故意设成 4 KB：
+
+| 项 | 结果 |
+|---|---|
+| `snapshot`（环境已停止；助手容器 `GET /containers/{id}/archive?path=/workspace/<目录>` 流式读出，按块上传） | 通过：`data`、`cfg/sub` 各 1 块 2560 字节，`missing` 记为 `missing: true`；容器标签带类别 `myworkspace.lifetime=persistent` |
+| `archive_env` | 容器、数据卷、网络都删除（`volume_gone` 为空） |
+| 重建 `create_env`（带 `snapshot` 与初始化步骤） | 0.86 秒；`data/db.txt`、`cfg/sub/a.json` 内容一致，属主 1000；没保存的 `tmp/` 不存在；初始化步骤重放（`setup.txt`）；恢复后的目录可写 |
+| `delete_env` | 删干净 |
+| 模板镜像被清理后建环境（`template_build`） | 先按模板重新构建（2.6 秒），环境里看得到构建出的文件 |
+| `prune_images`（`keep` 为空） | 删掉带工作台标签的模板镜像 `myworkspace/tpl-…:1`；之后镜像不存在 |
+| 收尾 | 带 `myworkspace.runner` 标签的容器、数据卷都是 0 |
+
+工作台这边（`tests/test_runner_reclaim.py`，真实 PostgreSQL / Redis，测试代替 runner-agent）：快照块用这份快照自己的数据密钥（AES-256-GCM，附加数据“快照 ID:块号”）加密后存进对象存储，
+落盘的内容里找不到明文；数据密钥用凭证密钥封存（用途绑定快照 ID）；改动一个字节解密失败（`SNAPSHOT_CORRUPT`）。
+
 ## 5. 待 CI 实测（T-0141）
 
 本会话下载并运行 gVisor 的二进制被权限策略拦下，gVisor 下的行为改在 CI 的运行服务器验收里实测（GitHub 的 runner 上按第 3 节安装）。

@@ -384,6 +384,49 @@ class Docker:
             raise DockerError(413, f"超过 {limit} 字节")
         return data
 
+    def stream_archive(self, container: str, path: str, *, chunk: int) -> Iterator[bytes]:
+        """按块读出一个路径的 tar 流（快照用，不整块放进内存）。路径不存在时抛 404。"""
+        conn, response = self._send(
+            "GET", f"/containers/{container}/archive", query={"path": path}, timeout=600
+        )
+        try:
+            if response.status != 200:
+                raise DockerError(response.status, _message(response.read()))
+            buffer = b""
+            while data := response.read(min(chunk, 1024 * 1024)):
+                buffer += data
+                while len(buffer) >= chunk:
+                    yield buffer[:chunk]
+                    buffer = buffer[chunk:]
+            if buffer:
+                yield buffer
+        finally:
+            conn.close()
+
+    def put_archive_stream(self, container: str, path: str, chunks: Iterator[bytes]) -> None:
+        """把 tar 流分块上传（Transfer-Encoding: chunked，实测 Docker 29.9 支持）。"""
+        conn = _UnixConnection(self.socket_path, 600)
+        try:
+            conn.request(
+                "PUT",
+                _url(f"/containers/{container}/archive", {"path": path}),
+                body=chunks,
+                headers={"Content-Type": "application/x-tar"},
+                encode_chunked=True,
+            )
+            response = conn.getresponse()
+            data = response.read()
+        finally:
+            conn.close()
+        if response.status != 200:
+            raise DockerError(response.status, _message(data))
+
+    def images(self, label: str) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = self.json(
+            "GET", "/images/json", query={"filters": {"label": [label]}}
+        )
+        return result
+
     def put_archive(self, container: str, path: str, tar: bytes) -> None:
         self.call(
             "PUT",

@@ -405,3 +405,13 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 | `agent_wakeups.source` | 增加 `runner` | 长时间运行结束后叫醒智能体 |
 
 **downgrade** 删除 `source = runner` 的唤醒并恢复约束，删除新增的表与字段（都是 0042 之后才有的数据）。
+
+### 迁移 `0043`（T-0139）
+
+常驻环境的快照（`docs/v2/RUNNER_PLAN.md` 第 6.5 节）。只新增一张表。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `runner_snapshots` | `id`、`workspace_id`、`environment_id`、`status`、`key_ref`、`store`、`entries`、`parts`、`bytes`、`error`、`created_at`、`ready_at`、`expires_at` | “要保存的目录”打成 tar、分块（≤ 16 MB）加密后存在对象存储（`store` 是 `local` 或 S3 兼容，key `runner/<工作空间>/<快照>/<块号>`）；`key_ref` 是这份快照的数据密钥（AES-256-GCM），用凭证密钥封存、用途绑定快照 ID，**不存明文**；`entries` 是每个目录的起始块、块数与字节数；CHECK `status` ∈ `uploading` / `ready` / `failed` / `deleted`；索引 `(environment_id, created_at)`、`(expires_at)`；随环境、工作空间级联删除。环境删除后快照保留 `archive_retention_days`（默认 30）天，到期由每分钟检查删掉对象存储里的块 |
+
+**downgrade** 删除这张表；对象存储里已有的快照块不会自动删除（都在前缀 `runner/<工作空间 ID>/` 下，需要时按前缀手动清理）。

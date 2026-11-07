@@ -19,7 +19,7 @@ import socket
 import tarfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -41,6 +41,7 @@ STRAY_DELETE_SECONDS = 24 * 3600
 HELPER_MAX_AGE = 3600
 DONE_KEEP = 200
 LIST_MAX_ENTRIES = 1000
+DISK_EMERGENCY = 0.95
 # 改变环境状态的指令：同一个环境里按下发顺序一条一条执行；
 # exec 与文件读写等前面的这类指令做完再开始，彼此之间可以并行（停止不用等长时间运行的 exec）
 LIFECYCLE = frozenset(
@@ -456,9 +457,7 @@ class Agent:
         container = c.check_name(p.get("container"), "env")
         volume = c.check_name(p.get("volume"), "vol")
         network = c.check_name(p.get("network"), "net")
-        if p.get("snapshot"):
-            raise CommandError("从快照恢复还没有实现（T-0139）")
-        image = self._ensure_image(str(p.get("image") or ""))
+        image = self._image_for(p)
         net_labels = c.labels(p)
         try:
             self.docker.create_network(network, net_labels, internal=True)
@@ -482,6 +481,9 @@ class Agent:
                 )
             else:
                 self._run_helper(p, mount, ["chown", f"{uid}:{gid}", "/workspace"])
+            snapshot = p.get("snapshot")
+            if snapshot:
+                self._restore(p, snapshot)
             files = p.get("files") or []
             if files:
                 self._put(p, files)
@@ -514,6 +516,116 @@ class Agent:
             "image_digest": digests[0] if digests else str(image.get("Id") or ""),
             "existed": existed,
         }
+
+    def _image_for(self, p: dict[str, Any]) -> dict[str, Any]:
+        """环境的镜像；模板镜像被清理了就按模板重新构建（重建归档的环境时）。"""
+        image = str(p.get("image") or "")
+        found = self.docker.image(image)
+        if found is not None:
+            return found
+        build = p.get("template_build")
+        if build and image.startswith("myworkspace/tpl-"):
+            self.do_build_template({**build, "tag": image, "revision": 0})
+            built = self.docker.image(image)
+            if built is None:
+                raise CommandError("模板镜像重新构建后仍然找不到")
+            return built
+        return self._ensure_image(image)
+
+    def _restore(self, p: dict[str, Any], snapshot: dict[str, Any]) -> None:
+        """从快照恢复：逐块下载（工作台解密后下发），流式写回新的数据卷。"""
+        volume = c.check_name(p.get("volume"), "vol")
+        snapshot_id = str(snapshot.get("id") or "")
+        uid, gid = c.user_ids(p)
+        mount = [{"Source": volume, "Target": "/workspace"}]
+        for entry in snapshot.get("entries") or []:
+            path = str(entry.get("path") or ".")
+            if entry.get("missing"):
+                continue
+            if path.startswith("/") or ".." in path.split("/"):
+                raise CommandError(f"快照里的路径不合法：{path[:100]}")
+            parent = os.path.dirname(path) if path != "." else ""
+            if parent:
+                # 路径作为参数传入（不拼进脚本）；新建的每一级目录都改成环境用户
+                script = (
+                    'cd /workspace && mkdir -p -- "$2" && d="$2"; '
+                    'while [ -n "$d" ] && [ "$d" != "." ]; do chown "$1" -- "$d"; '
+                    'd=$(dirname -- "$d"); done'
+                )
+                self._run_helper(p, mount, ["sh", "-c", script, "sh", f"{uid}:{gid}", parent])
+            first = int(entry.get("first", 0))
+            count = int(entry.get("parts", 0))
+
+            def chunks(start: int = first, total: int = count) -> Iterator[bytes]:
+                for index in range(start, start + total):
+                    yield self.workspace.get_bytes(f"/snapshots/{snapshot_id}/parts/{index}")
+
+            name = self._helper(p, mount, None)
+            try:
+                target = f"/workspace/{parent}".rstrip("/") or "/workspace"
+                self.docker.put_archive_stream(name, target, chunks())
+            finally:
+                self.docker.remove(name)
+
+    def do_snapshot(self, p: dict[str, Any]) -> dict[str, Any]:
+        """常驻环境的快照：要保存的目录按 tar 流读出、分块上传（环境已停止，数据一致）。"""
+        volume = c.check_name(p.get("volume"), "vol")
+        snapshot_id = str(p.get("snapshot_id") or "")
+        part_bytes = int(p.get("part_bytes") or 16 * 1024 * 1024)
+        max_bytes = int(p.get("max_bytes") or 5 * 1024**3)
+        name = self._helper(p, [{"Source": volume, "Target": "/workspace", "ReadOnly": True}], None)
+        entries: list[dict[str, Any]] = []
+        index = 0
+        total = 0
+        try:
+            for raw in p.get("paths") or ["."]:
+                path = str(raw).strip("/") or "."
+                if ".." in path.split("/"):
+                    raise CommandError(f"要保存的目录不合法：{path[:100]}")
+                first = index
+                size = 0
+                try:
+                    for chunk in self.docker.stream_archive(
+                        name, f"/workspace/{path}", chunk=part_bytes
+                    ):
+                        total += len(chunk)
+                        size += len(chunk)
+                        if total > max_bytes:
+                            raise CommandError(
+                                f"快照超过上限（{max_bytes // 1024**3} GB）；调小要保存的目录"
+                            )
+                        self.workspace.put_bytes(f"/snapshots/{snapshot_id}/parts/{index}", chunk)
+                        index += 1
+                except DockerError as error:
+                    if error.status != 404:
+                        raise
+                    entries.append({"path": path, "missing": True, "first": first, "parts": 0})
+                    continue
+                entries.append(
+                    {"path": path, "first": first, "parts": index - first, "bytes": size}
+                )
+        except WorkspaceError as error:
+            raise CommandError(f"上传快照失败：{error.message}") from None
+        finally:
+            self.docker.remove(name)
+        return {"entries": entries, "parts": index, "bytes": total}
+
+    def do_archive_env(self, p: dict[str, Any]) -> dict[str, Any]:
+        """归档：删掉容器、网络与数据卷（配置记录和快照在工作台）。"""
+        return self.do_delete_env(p)
+
+    def do_prune_images(self, p: dict[str, Any]) -> dict[str, Any]:
+        """清理没人用的模板镜像（只看带工作台模板标签的镜像；正在用的 Docker 会拒绝删除）。"""
+        keep = {str(k) for k in p.get("keep") or []}
+        removed: list[str] = []
+        for image in self.docker.images(c.LABEL_TEMPLATE):
+            tags = [str(t) for t in image.get("RepoTags") or [] if t]
+            if any(tag in keep for tag in tags):
+                continue
+            for tag in tags or [str(image.get("Id"))]:
+                self.docker.remove_image(tag)
+                removed.append(tag)
+        return {"removed": removed[:200]}
 
     def do_start_env(self, p: dict[str, Any]) -> dict[str, Any]:
         started = time.monotonic()
@@ -699,6 +811,8 @@ class Agent:
         everything = self.docker.all_containers()
         unlabeled = sum(1 for i in everything if not (i.get("Labels") or {}).get(c.LABEL_RUNNER))
         stat = os.statvfs(self.config.disk_path)
+        if stat.f_blocks and 1 - stat.f_bavail / stat.f_blocks > DISK_EMERGENCY:
+            self._disk_emergency(labeled)
         mem_total, mem_free = _meminfo()
         body = {
             "containers": envs,
@@ -721,6 +835,15 @@ class Agent:
         for env_id in self.proxy.envs() - live - {BUILD_ENV}:
             self.proxy.close(env_id)
         return result
+
+    def _disk_emergency(self, labeled: list[dict[str, Any]]) -> None:
+        """磁盘告急（> 95%）：本机直接停止一次性运行，工作台掉线也守得住。"""
+        for item in labeled:
+            labels = item.get("Labels") or {}
+            if labels.get(c.LABEL_LIFETIME) == "once" and item.get("State") == "running":
+                name = str((item.get("Names") or ["/"])[0]).lstrip("/")
+                logger.warning("磁盘告急，停止一次性环境 %s", name)
+                self.docker.stop(name, seconds=5)
 
     def _handle_stray(self, names: list[str]) -> None:
         """记录外的容器（都带工作台标签）：先停止，停了 24 小时以上的删除。"""

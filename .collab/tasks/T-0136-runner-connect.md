@@ -8,7 +8,7 @@ branch: claude/cool-wright-99qbbg
 paths: services/api,infra,docs,tests/e2e
 depends_on: T-0135
 created: 2026-11-06
-updated: 2026-11-06
+updated: 2026-11-07
 ---
 
 # T-0136 运行服务器 R1 接入：迁移 0042、runner-agent、/runner-api 协议、SSH 部署运行服务器
@@ -18,7 +18,7 @@ updated: 2026-11-06
 
 ## 验收标准
 - [x] 迁移 0042（运行服务器、模板、环境、删除条件、运行、指令，实例新列）与升级 / 降级测试
-- [ ] runner-agent：标准库实现，按 id 去重执行指令，对账只认带标签的，断线时本机守住超时与磁盘
+- [x] runner-agent：标准库实现，按 id 去重执行指令，对账只认带标签的，断线时本机守住超时与磁盘
 - [x] 出口代理：none / allowlist / all，只连检查过的公网 IP，私有网段拒绝
 - [x] /runner-api/v1/* 与接入入口路径；运行服务器凭证（mwr_）
 - [ ] SSH 部署运行服务器：Docker + gVisor + runner-agent，页面上完成
@@ -33,3 +33,4 @@ updated: 2026-11-06
 - 2026-11-06 22:15 UTC · claude · 人类 2026-11-06 在对话中指派：按修订后的运行服务器方案（D1、D2、D11 按人类决定，其余按推荐）全部落实。
 - 2026-11-06 23:07 UTC · claude · 开始任务
 - 2026-11-06 23:08 UTC · claude · 后端完成（PR-A）：迁移 0042（升降级与 alembic check 通过）；app/runner_agent（docker、containers、proxy、client、agent、__main__）；/runner-api/v1/poll|commands/{id}/result|report（凭证 mwr_ + 入口请求头，外网要证书指纹）；接入包 app/runner_bundle（compose、install.sh、install-gvisor.sh 核对 sha512）；Caddy 接入入口加 /runner-api/v1/*（64 MB）与 /mcp（32 MB），实测上限生效；worker 每分钟 runner_tick（指令时限、离线、空闲停止、删除条件 at/idle、到期删除）。剩下：SSH 部署运行服务器（页面，随 T-0140）；磁盘告急的本机保护（随 T-0139 水位）。
+- 2026-11-07 00:10 UTC · claude · runner-agent 本机磁盘告急保护随 T-0139 完成（使用率超过 95% 停止一次性运行，工作台掉线也生效）；剩“SSH 部署运行服务器（页面）”，随 T-0140 做

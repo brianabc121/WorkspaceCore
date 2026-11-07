@@ -303,3 +303,37 @@ class RunnerCommand(Base):
     sent_at: Mapped[datetime | None] = _when()
     finished_at: Mapped[datetime | None] = _when()
     deadline_at: Mapped[datetime | None] = _when()
+
+
+SNAPSHOT_STATUSES = ("uploading", "ready", "failed", "deleted")
+
+
+class RunnerSnapshot(Base):
+    """常驻环境的快照（T-0139，方案第 6.5 节）：要保存的目录打包、分块加密存到对象存储。
+
+    每块用这份快照自己的数据密钥（AES-256-GCM）加密，数据密钥用工作台的凭证密钥封存（`key_ref`）；
+    `entries` 是清单（每个目录的块数与字节数）。环境删除后快照保留到 `expires_at`。
+    """
+
+    __tablename__ = "runner_snapshots"
+    __table_args__ = (
+        CheckConstraint(f"status IN {SNAPSHOT_STATUSES}", name="status"),
+        Index("ix_runner_snapshots_environment", "environment_id", "created_at"),
+        Index("ix_runner_snapshots_expires", "expires_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = _workspace()
+    environment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.runner_environments.id", ondelete="CASCADE")
+    )
+    status: Mapped[str] = mapped_column(Text, server_default=text("'uploading'"))
+    key_ref: Mapped[str] = mapped_column(Text)
+    store: Mapped[str] = mapped_column(Text)
+    entries: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    parts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    bytes: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()
+    ready_at: Mapped[datetime | None] = _when()
+    expires_at: Mapped[datetime | None] = _when()

@@ -6,6 +6,7 @@
 - 实例卡片上的“运行环境权限”：开关、限额；关掉时停止它所有运行中的环境。
 """
 
+import math
 import uuid
 from typing import Any
 from urllib.parse import urlsplit
@@ -17,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import runner_bundle
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import notifications
+from app.domain import notifications, runner_reclaim
 from app.domain import runner_specs as specs
 from app.domain.audit import AuditTrail
 from app.domain.policy import WorkspaceAccess, not_found
@@ -240,6 +241,7 @@ class RunnerAdmin:
         templates: dict[uuid.UUID, str],
         conditions: dict[uuid.UUID, list[str]],
         policy: dict[str, float],
+        score: float | None = None,
     ) -> RunnerEnvAdminOut:
         base = await self.runner.env_out(
             env, viewer, names=names, templates=templates, conditions=conditions, policy=policy
@@ -252,7 +254,7 @@ class RunnerAdmin:
             mem_bytes=env.mem_bytes,
             disk_bytes=env.disk_bytes,
             egress=dict(env.egress or {}),
-            retention_score=None,
+            retention_score=None if score is None or math.isinf(score) else score,
             started_at=env.started_at,
             stopped_at=env.stopped_at,
             archived_at=env.archived_at,
@@ -278,8 +280,13 @@ class RunnerAdmin:
         conditions = await self.runner.conditions([e.id for e in envs])
         host = await self.runner.host(access.workspace.id)
         policy = specs.policy_for(host.policy if host else None)
+        live = [e for e in envs if e.state in ("running", "stopped")]
+        ranked = await runner_reclaim.scores(self.db, live, policy) if live else {}
         return [
-            await self._env_admin_out(e, viewer, names, templates, conditions, policy) for e in envs
+            await self._env_admin_out(
+                e, viewer, names, templates, conditions, policy, ranked.get(e.id)
+            )
+            for e in envs
         ]
 
     async def environments(
@@ -334,6 +341,15 @@ class RunnerAdmin:
             elif body.action == "delete":
                 await self.runner.mark_pending_delete(env, "管理员删除")
                 env.delete_after = specs.now()
+            elif body.action == "archive":
+                if not await self.runner.archive(env, "管理员归档"):
+                    raise ApiError(
+                        409, "ENV_UNAVAILABLE", f"环境现在是 {env.state}（或被保护），不能归档"
+                    )
+            elif body.action == "keep":
+                await self.runner.keep(env, "管理员撤销删除")
+            elif body.action == "restore":
+                await self._restore(env)
             elif body.action in ("pin", "unpin"):
                 env.pinned = body.action == "pin"
         except RunnerError as error:
@@ -350,6 +366,20 @@ class RunnerAdmin:
         await self.db.commit()
         await self.db.refresh(env)
         return (await self._outs(access, [env]))[0]
+
+    async def _restore(self, env: RunnerEnvironment) -> None:
+        """恢复：归档的按配置记录重建；已删除的常驻环境在快照保留期内也能恢复。"""
+        if env.state == "archived":
+            await self.runner.rebuild(env, "管理员恢复")
+            return
+        if env.state == "deleted" and env.lifetime == "persistent":
+            if await self.runner.latest_snapshot(env) is None:
+                raise ApiError(409, "SNAPSHOT_NOT_FOUND", "这个环境没有可用的快照了")
+            env.deleted_at = None
+            env.state = "archived"
+            await self.runner.rebuild(env, "管理员从快照恢复")
+            return
+        raise ApiError(409, "ENV_UNAVAILABLE", f"环境现在是 {env.state}，不需要恢复")
 
     # ---------------------------------------------------------------- 模板
     async def templates(self, access: WorkspaceAccess) -> RunnerTemplateList:
