@@ -74,10 +74,12 @@ async function remove() {
     ? `移除「${server.value.name}」？上面的实例改为未归属，下一次上报时会重新自动识别。`
     : `移除服务器「${server.value.name}」？工作台不再保存它的地址与主机公钥。`)) return
   password.value = ''
+  // 删除成功就回到列表，再刷新：刷新时这台服务器的详情是 404，详情页会卸载本组件，之后再发的事件会被丢掉
   const ok = await act(async () => {
     await auth.api.DELETE('/api/v1/agents/servers/{server_id}', { params: { header, path: path.value, query: { version: server.value.version } } })
+    emit('removed')
   }, '服务器已移除')
-  if (ok) emit('removed'); else settle()
+  if (!ok) settle()
 }
 </script>
 

@@ -178,6 +178,26 @@ describe('servers tab', () => {
     expect(await within(keys).findByText(/手动删除这一行：ssh-ed25519 AAAA myworkspace/)).toBeVisible()
   })
 
+  it('removes a revoked server and returns to the list even though its detail is gone', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const s = server({ ssh: ssh({ host_key_confirmed: true, host_key_confirmed_at: at, prepared_at: at }), version: 6 })
+    let removed = false
+    const requests = setup(r => {
+      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json({ items: removed ? [] : [s], unassigned: [] })
+      if (path(r) === '/api/v1/agents/servers/srv-1' && r.method === 'DELETE') { removed = true; return new Response(null, { status: 204 }) }
+      // 移除后再读详情是 404：页面也要回到服务器列表
+      if (path(r) === '/api/v1/agents/servers/srv-1' && r.method === 'GET') return removed ? fail(404, 'NOT_FOUND') : Response.json(detail(s, { agents: [row('inst-a', 'alpha', { deployed: false, load: null })] }))
+    })
+    await openApp('/agents?tab=servers&server=srv-1')
+    const keys = await screen.findByRole('region', { name: 'SSH 与专用密钥' })
+    const prepare = await within(keys).findByRole('form', { name: '准备服务器' })
+    await fireEvent.click(within(prepare).getByRole('button', { name: '移除服务器' }))
+    await vi.waitFor(() => expect(requests.some(r => r.method === 'DELETE' && path(r) === '/api/v1/agents/servers/srv-1' && new URL(r.url).searchParams.get('version') === '6')).toBe(true))
+    expect(await screen.findByRole('button', { name: '添加服务器' })).toBeVisible()
+    expect(screen.queryByRole('article', { name: '服务器：香港 4 核' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'SSH 与专用密钥' })).toBeNull()
+  })
+
   it('explains probe failures and the rate limit when adding a server', async () => {
     let attempt = 0
     setup(r => {
