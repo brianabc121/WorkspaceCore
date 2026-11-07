@@ -20,9 +20,11 @@ COPY app ./app
 
 FROM python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 # 基础镜像（锁定 digest）还没换上修复版本的系统包：构建时只升级 trivy 报出已有修复的那几个
-# （2026-11-06：apt / libapt-pkg7.0 3.0.3 → 3.0.4，CVE-2026-109518）。上游出新构建后改 digest、删掉这一步。
+# （2026-11-06：apt / libapt-pkg7.0 3.0.3 → 3.0.4，CVE-2026-109518；
+#   2026-11-07：zlib1g → 1:1.3.dfsg+really1.3.1-1+deb13u1，CVE-2026-76844 / CVE-2026-85091）。
+# 上游出新构建后改 digest、删掉这一步。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends --only-upgrade apt libapt-pkg7.0 \
+    && apt-get install -y --no-install-recommends --only-upgrade apt libapt-pkg7.0 zlib1g \
     && rm -rf /var/lib/apt/lists/*
 # 知识库图片的本地存储（T-0103）：Compose 把卷 kb-files 挂到 /data/kb-files；新卷继承这个目录的属主
 RUN groupadd --system --gid 10001 app \
