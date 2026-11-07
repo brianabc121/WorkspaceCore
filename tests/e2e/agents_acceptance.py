@@ -1707,7 +1707,7 @@ def get(url):
     try:
         return str(urllib.request.urlopen(url, timeout=30).status)
     except Exception as error:
-        return type(error).__name__
+        return type(error).__name__ + ": " + str(error)[:160]
 print("allowed", get("https://pypi.org/simple/pip/"))
 print("denied", get("https://example.com/"))
 probe = socket.socket()
@@ -1716,7 +1716,7 @@ try:
     probe.connect(("1.1.1.1", 443))
     print("direct open")
 except OSError as error:
-    print("direct blocked", type(error).__name__)
+    print("direct blocked", type(error).__name__, error)
 EOF"""
 
 
@@ -1733,6 +1733,10 @@ def scenario_26(c: Ctx) -> None:
         c.check("场景 26：接入包原样以 root 运行 install.sh，runner-agent 上线，Docker 认得 runsc（gVisor）",
                 "runner_agent_started" in log and "runsc" in host["runtimes"],
                 json.dumps({"runtimes": host["runtimes"], "docker": host["docker_version"], "log": log[-300:]}, ensure_ascii=False))
+        # 会话环境的待删除宽限期默认 5 分钟：验收里改成 1 分钟（管理员的回收策略接口）
+        policy = c.owner.call("PUT", "/api/v1/runner/host/policy", {"version": host["version"], "policy": {"grace_minutes": 1}})
+        c.check("场景 26：管理员改回收策略（会话环境的待删除宽限期 1 分钟）", policy["policy"].get("grace_minutes") == 1,
+                json.dumps(policy["policy"], ensure_ascii=False)[:300])
 
         # 1. 模板：甲自己定义（镜像、安装步骤），在运行服务器上构建
         saved = mcp_call(c.a, "runner_template_save", {
@@ -1788,13 +1792,15 @@ def scenario_26(c: Ctx) -> None:
                 json.dumps({"reused": again.get("reused"), "run": ran.get("status"), "runtime": env_runtime(session_id)}, ensure_ascii=False))
         egress = site.exec(session_id, EGRESS_PROBE)
         out = dict(line.split(" ", 1) for line in egress["untrusted"]["output"].splitlines() if " " in line)
-        c.check("场景 26：gvisor 环境（allowlist）经 runner-agent 的出口代理访问放行的域名（200），别的域名被拒，直连外网不通",
-                out.get("allowed") == "200" and out.get("denied") != "200" and out.get("direct", "").startswith("blocked"),
+        c.check("场景 26：gvisor 环境（allowlist）按 IP 经 runner-agent 的出口代理访问放行的域名（200），别的域名被代理拒绝（403），直连外网不通",
+                out.get("allowed") == "200" and "403" in out.get("denied", "") and out.get("direct", "").startswith("blocked"),
                 json.dumps(out, ensure_ascii=False))
         c.owner.call("PATCH", f"/api/v1/issues/{issue['id']}", {"version": issue["version"], "state": "closed", "close_reason": "resolved"})
+        pending = site.wait_state(session_id, "pending_delete", "deleted", timeout=180)
         closed = site.wait_state(session_id, "deleted", timeout=300)
-        c.check("场景 26：管理员关闭 Issue 后（删除条件 issue_closed）会话环境删除，容器不在",
-                closed.get("state") == "deleted" and not env_containers(session_id), closed.get("state_reason") or "")
+        c.check("场景 26：管理员关闭 Issue 后（删除条件 issue_closed）会话环境进入待删除，宽限期过后删除，容器不在",
+                "issue_closed" in (pending.get("state_reason") or "") and closed.get("state") == "deleted"
+                and not env_containers(session_id), pending.get("state_reason") or "")
 
         # 4. 常驻环境（runc）：停止后再用自动启动；归档后再用从快照重建、重放初始化步骤
         made = structured(mcp_call(c.a, "env_create", {

@@ -100,12 +100,37 @@ runner-agent 的代码（`app/runner_agent/`）放进锁定 digest 的 `python:3
 工作台这边（`tests/test_runner_reclaim.py`，真实 PostgreSQL / Redis，测试代替 runner-agent）：快照块用这份快照自己的数据密钥（AES-256-GCM，附加数据“快照 ID:块号”）加密后存进对象存储，
 落盘的内容里找不到明文；数据密钥用凭证密钥封存（用途绑定快照 ID）；改动一个字节解密失败（`SNAPSHOT_CORRUPT`）。
 
-## 5. 待 CI 实测（T-0141）
+## 5. gVisor 下的实测（T-0141，CI 的 agents 任务）
 
-本会话下载并运行 gVisor 的二进制被权限策略拦下，gVisor 下的行为改在 CI 的运行服务器验收里实测（GitHub 的 runner 上按第 3 节安装）。
-要实测的项：`--runtime=runsc` 的环境容器能启动；exec 的输出与退出码；内部网络里经出口代理访问外网、直连不通；
-数据卷经助手容器读写；资源限制；`runsc` 与 `runc` 两种运行时都能用。结果补在下面。
+GitHub 的 `ubuntu-latest` runner（宿主内核 `7.0.0-1017-azure`，Docker 28.0.4）上，用接入包里的 `install-gvisor.sh` 安装 release-20261019.0
+（sha512 核对通过，`runsc install` 输出 `Runtime runsc not found: adding`，随后 `docker info` 的运行时里有 `runsc`，平台 `systrap`、网络 `sandbox`）。
+场景 26 在这台 runner 上原样运行接入包的 `install.sh`、启动 runner-agent，再经工作台下发指令。
 
 | 项 | 结果 |
 |---|---|
-| （T-0141 跑完后补） | |
+| `--runtime=runsc` 的容器 | 能启动；里面看到的内核是 `4.19.0-gvisor`（宿主是 `7.0.0-1017-azure`），`dmesg` 第一行 `Starting gVisor...` |
+| 模板构建（经典构建器，runc） | 成功，记下镜像 digest |
+| 一次性环境（gvisor，用模板）| 跑完测试、输出与退出码正确（`42`），随即删除，容器不在 |
+| 会话环境（gvisor）| 建好；同一个 `reuse_key` 复用；`env_files` 经助手容器写入、`env_exec` 读出；容器的 `HostConfig.Runtime` 是 `runsc` |
+| 出口代理（gvisor，allowlist） | **第一次实测不通**：放行与不放行的域名都返回 `URLError`。原因见下 |
+| 删除条件 `issue_closed` | 关闭 Issue 后进入待删除（会话环境默认宽限 5 分钟），验收原来只等了 5 分钟；改成先把宽限期设成 1 分钟再验收 |
+
+**gVisor 与 Docker 内置 DNS**：环境容器原来经别名 `egress` 找 runner-agent 的出口代理，靠的是 Docker 用户自定义网络的内置 DNS
+（`127.0.0.11`，由宿主在容器网络命名空间里的 iptables 规则转发）。gVisor 用自己的网络栈（`--network=sandbox`），这些规则对它不起作用，
+官方 FAQ 的 “DNS doesn't work on a Docker user defined bridge network, including Docker Compose”
+（[gvisor.dev 的 FAQ `#docker-bridge`](https://gvisor.dev/docs/user_guide/faq/#docker-bridge)，源文件
+[g3doc/user_guide/FAQ.md](https://github.com/google/gvisor/blob/master/g3doc/user_guide/FAQ.md)，2026-11-07 读取；相关 issue #7469）写明：
+runsc 的网络与宿主隔离，访问不到 `127.0.0.11` 上的内置 DNS，容器名和公网域名都解析不了；绕开的办法之一是直接用 IP。所以 gVisor 环境解析不了 `egress`，代理连不上（runc 环境不受影响，本地实测是通的）。
+
+改法（T-0141，runner-agent）：
+1. 环境网络改成“固定网段”：先让 Docker 自动分配一个不和本机冲突的网段，再用这个网段重建（网络标签 `myworkspace.fixed_subnet=1`）；
+2. runner-agent 接入时用固定地址：网段的最后一个可用地址（环境容器从网段开头分配，不会撞上）；runner-agent 重建后重新接入，地址不变；
+3. 环境容器的 `HTTP(S)_PROXY` 直接写这个 IP，`/etc/hosts` 里也写上 `egress`（`ExtraHosts`）；智能体给的代理变量仍然不采用。
+
+本地 Docker（runc）实测：网络按固定网段重建、`Internal=true`；runner-agent 在 `x.x.255.254`，环境在 `x.x.0.2`；
+环境里 `getent hosts egress` 得到这个地址；不在名单的域名被代理拒绝（`403 Forbidden by workspace egress policy`），名单里的域名走到代理
+（本会话没有外部 DNS，`502 cannot resolve host`）；断开后重新接入地址不变；删除环境时网络一起删除。gVisor 下的结果以下一轮 CI 为准，补在下面。
+
+| 项（第二轮 CI） | 结果 |
+|---|---|
+| （跑完后补） | |
