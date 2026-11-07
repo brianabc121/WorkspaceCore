@@ -1,0 +1,91 @@
+# 新闻早报：TrendRadar 6.11.0（抓取 + 筛选 + AI 简报 + 推送）与 MCP 4.1.1（只读查询）的独立 Compose（T-0152）。
+#
+# 依据：docs/v2/NEWS_PLAN.md 第 3、10、11 节；版本与运行方式见 docs/decisions/2026-11-07-trendradar-verification.md。
+#   - 镜像锁定 digest（上游的 docker-compose.yml 用浮动的 latest，不照搬）；
+#   - 配置文件由工作台按网页上的设置生成，写进 core 的卷 trendradar-config，这里只读挂载为 /app/config；
+#   - AI 提示词文件来自上游（GPL-3.0，不放进本仓库）：make trendradar-prompts 按锁定的提交下载、校验 sha256 后写进同一个卷。
+#
+# 用法（在仓库根目录；一键部署脚本 deploy.sh 的可选组件“新闻早报”会自动做这些）：
+#   make up                  先启动工作台：本项目要加入它创建的 news 网络与 trendradar-config 卷
+#   make trendradar-up       下载提示词、拉镜像、启动；第一次会提示在 .env 里设置 TRENDRADAR_MCP_URL
+#   make trendradar-down     停止（保留抓到的数据）
+#
+# 网络：
+#   - news（core，internal）：只有 api、worker 与这里的两个容器。MCP（3333）与抓取容器自带的静态文件服务（8080）
+#     都没有鉴权，所以不发布任何端口，也不加入别的网络；工作台的 MCP 客户端只调白名单里的工具；
+#   - egress（本项目）：两个容器出网（NewsNow、RSS、大模型、推送渠道），别的服务不在这里。
+#
+# 权限：上游镜像以 root 运行。配置文件属于 api 的 app 用户（10001），权限 0640：这里不给 root 任何 capability
+# （没有 DAC_OVERRIDE 时 root 也要按文件权限读），而是加入 10001 组来读。
+
+name: my-workspace-trendradar
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-trendradar: &trendradar
+  restart: unless-stopped
+  group_add: ["10001"]
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging: *logging
+
+networks:
+  egress: {}
+  # core（compose.yaml）创建的网络与卷；core 的项目名不是 my-workspace 时用 WORKSPACE_PROJECT 指定
+  news:
+    external: true
+    name: ${WORKSPACE_PROJECT:-my-workspace}_news
+
+volumes:
+  # 抓到的数据（每天一个 SQLite 文件与 HTML 报告），按配置保留 30 天；都是公开数据，不进备份
+  trendradar-output: {}
+  trendradar-config:
+    external: true
+    name: ${WORKSPACE_PROJECT:-my-workspace}_trendradar-config
+
+services:
+  trendradar:
+    <<: *trendradar
+    image: wantcat/trendradar:6.11.0@sha256:3effcb5cedf5c385b50a6a32cd2599cbdbf54c9d8c52c0403406e356f88df80b
+    environment:
+      RUN_MODE: cron
+      # 固定每 30 分钟一次：推送时间段是半小时（timeline.yaml），每个时间段里正好有一次运行。验收时改成每分钟
+      CRON_SCHEDULE: ${TRENDRADAR_CRON:-*/30 * * * *}
+      IMMEDIATE_RUN: "true"
+      # LiteLLM 1.82.6 默认每次启动从 raw.githubusercontent.com 取模型价格表：用镜像里自带的（核验记录第 5 节）
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+    volumes:
+      - trendradar-config:/app/config:ro
+      - trendradar-output:/app/output
+    healthcheck:
+      # 入口脚本在定时任务之外启动一个静态文件服务（8080）：能连上说明进程正常
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    networks: [news, egress]
+
+  trendradar-mcp:
+    <<: *trendradar
+    image: wantcat/trendradar-mcp:4.1.1@sha256:12cdc3dcf9d76079ad57e8fc3aa0f3b322ee99fd163f5fd6b79ee43174ebdabf
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - trendradar-config:/app/config:ro
+      - trendradar-output:/app/output:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 3333), 3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # 查询要用到抓取容器联网；send_notification（方案 B 与测试推送，只由工作台调用）要连推送渠道
+    networks: [news, egress]

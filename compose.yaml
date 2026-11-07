@@ -55,6 +55,11 @@ x-api-env: &api-env
   OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
   OSS_BUCKET: ${OSS_BUCKET:-}
   OSS_ENDPOINT: ${OSS_ENDPOINT:-}
+  # 新闻早报（T-0152 / T-0153，docs/v2/NEWS_PLAN.md）：独立部署的 TrendRadar（infra/trendradar/compose.yaml，
+  # make trendradar-up）。留空表示没有部署：设置页显示“未部署”，智能体看不到 news_* 工具
+  TRENDRADAR_MCP_URL: ${TRENDRADAR_MCP_URL:-}
+  # 设置页填的地址（RSS、自建 NewsNow、推送 Webhook）解析到内网时只允许这些主机名；只有验收用的模拟服务需要
+  NEWS_ALLOWED_HOSTS: ${NEWS_ALLOWED_HOSTS:-}
 
 services:
   postgres:
@@ -139,6 +144,8 @@ services:
       LOG_REQUEST_PATH: ${LOG_REQUEST_PATH:-path}
     volumes:
       - kb-files:/data/kb-files
+      # 新闻早报：生成的 TrendRadar 配置文件写在这里（TrendRadar 只读挂载同一个卷）
+      - trendradar-config:/var/lib/workspace/trendradar
     depends_on:
       postgres:
         condition: service_healthy
@@ -151,8 +158,9 @@ services:
       retries: 10
       start_period: 10s
     # frontend 网络供 caddy 访问，也给 Connector 访问外网；integrations 供显式允许的内网 Connector 服务使用；
-    # monitoring 供 Prometheus 抓取 /metrics、api 检查 Prometheus / Grafana 是否就绪；im 连到 OpenIM
-    networks: [backend, frontend, integrations, monitoring, agent-ingress, im]
+    # monitoring 供 Prometheus 抓取 /metrics、api 检查 Prometheus / Grafana 是否就绪；im 连到 OpenIM；
+    # news 连到 TrendRadar（MCP 查询；TrendRadar 把早报推到 /internal/news/ingest/<token>）
+    networks: [backend, frontend, integrations, monitoring, agent-ingress, im, news]
     logging: *logging
 
   worker:
@@ -172,9 +180,10 @@ services:
       API_INTERNAL_URL: http://api:8000
       PROMETHEUS_URL: ${PROMETHEUS_URL:-}
       GRAFANA_URL: ${GRAFANA_URL:-}
-    # 知识库图片：副本复制与每日清理也要读写本地存储
+    # 知识库图片：副本复制与每日清理也要读写本地存储；新闻早报：每天重新生成 TrendRadar 的配置文件
     volumes:
       - kb-files:/data/kb-files
+      - trendradar-config:/var/lib/workspace/trendradar
     depends_on:
       postgres:
         condition: service_healthy
@@ -188,8 +197,8 @@ services:
       start_period: 15s
     # Worker 经 integrations 访问同机部署的第三方服务，经 egress 访问外部托管的服务（GitHub 周期同步）；
     # 出站地址仍由 Connector 的 SSRF 检查限制；monitoring 用于健康告警检查 Prometheus / Grafana；
-    # im 用于 IM 对账、账号登记
-    networks: [backend, integrations, egress, monitoring, im]
+    # im 用于 IM 对账、账号登记；news 用于新闻早报（方案 B 收早报后经 TrendRadar 推送）
+    networks: [backend, integrations, egress, monitoring, im, news]
     logging: *logging
 
   web:
@@ -388,6 +397,10 @@ networks:
   # 由 agent-gateway 创建，所以要先 make agents-up 再 make openim-up
   agent-im:
     internal: true
+  # 新闻早报（infra/trendradar/compose.yaml，独立项目）：只有 api、worker 与 trendradar、trendradar-mcp 加入。
+  # MCP 与 TrendRadar 的静态文件服务都没有鉴权，所以 internal、不发布端口；TrendRadar 经自己项目的网络出网
+  news:
+    internal: true
 
 volumes:
   postgres-data:
@@ -399,3 +412,5 @@ volumes:
   prometheus-data:
   grafana-data:
   agent-caddy-data:
+  # 新闻早报：工作台生成的 TrendRadar 配置文件与部署时下载的 AI 提示词（make trendradar-prompts）
+  trendradar-config:

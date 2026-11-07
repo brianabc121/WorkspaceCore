@@ -2,9 +2,9 @@
 id: T-0155
 title: 新闻早报 N4 验收：CI 真实 TrendRadar + 模拟数据源与模型、浏览器验收
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: tests/e2e,.github/workflows,docs
 depends_on: T-0152, T-0153, T-0154
 created: 2026-11-07
@@ -30,3 +30,5 @@ updated: 2026-11-07
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-07 16:07 UTC · claude · 创建任务（owner: claude）
+- 2026-11-07 16:55 UTC · claude · 开始任务
+- 2026-11-07 16:55 UTC · claude · CI 新增 news job 与 tests/e2e/news_acceptance.py（真实 TrendRadar + 模拟服务）；浏览器验收 news_browser.cjs 等前端完成后写

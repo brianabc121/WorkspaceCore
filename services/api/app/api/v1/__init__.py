@@ -18,6 +18,7 @@ from app.api.v1 import (
     knowledge_base,
     mail,
     me,
+    news,
     notifications,
     operations,
     readme,
@@ -56,5 +57,6 @@ for module in (
     mail,
     runner,
     ai,
+    news,
 ):
     router.include_router(module.router)

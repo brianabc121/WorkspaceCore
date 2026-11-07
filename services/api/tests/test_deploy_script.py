@@ -538,8 +538,8 @@ def test_plan_components_records_every_choice(tmp_path: Path) -> None:
         "plan_components\n"
         'for k in $(printf "%s\\n" "${!ANS[@]}" | sort); do\n'
         '  printf "%s=%s\\n" "$k" "${ANS[$k]}"\ndone\n',
-        # OpenIM：否；接入入口：是、没有域名、IP
-        stdin="n\ny\n-\n203.0.113.9\n",
+        # OpenIM：否；接入入口：是、没有域名、IP；新闻早报：是
+        stdin="n\ny\n-\n203.0.113.9\ny\n",
         env={"PATH": f"{bin_dir}:{os.environ['PATH']}"},
     ).stdout
     answers = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
@@ -548,6 +548,7 @@ def test_plan_components_records_every_choice(tmp_path: Path) -> None:
         "INGRESS": "y",
         "INGRESS_HOST": "-",
         "INGRESS_ADDRESS": "203.0.113.9",
+        "NEWS": "y",
     }
 
 

@@ -125,6 +125,61 @@ jobs:
         if: always()
         run: make down
 
+  # 新闻早报（T-0155，docs/v2/NEWS_PLAN.md 第 12 节）：真实的 TrendRadar 6.11.0 与 MCP 4.1.1（锁定 digest），
+  # 外部依赖（NewsNow、RSS、大模型、推送接收）换成 tests/e2e/fake_news_server.py；与 compose job 并行。
+  news:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: 生成 .env（新闻早报：部署了 TrendRadar、每分钟运行一次、允许模拟服务的主机名）
+        run: |
+          make env
+          sed -i 's#^TRENDRADAR_MCP_URL=.*#TRENDRADAR_MCP_URL=http://trendradar-mcp:3333/mcp#' .env
+          sed -i 's/^TRENDRADAR_CRON=.*/TRENDRADAR_CRON=* * * * */' .env
+          sed -i 's/^NEWS_ALLOWED_HOSTS=.*/NEWS_ALLOWED_HOSTS=fake-news/' .env
+          grep -q '^TRENDRADAR_MCP_URL=http://trendradar-mcp:3333/mcp$' .env
+          grep -q '^NEWS_ALLOWED_HOSTS=fake-news$' .env
+      - name: docker compose config（core 与 TrendRadar）
+        run: |
+          docker compose config --quiet
+          WORKSPACE_PROJECT=my-workspace docker compose -p my-workspace-trendradar \
+            -f infra/trendradar/compose.yaml --env-file .env config --quiet
+      - name: 构建并启动（make up）
+        run: make up
+      - name: 数据库迁移（make migrate）
+        run: make migrate
+      - name: 启动新闻早报（make trendradar-pull、make trendradar-up：按锁定的提交下载并校验 AI 提示词）
+        run: |
+          make trendradar-pull
+          make trendradar-up
+      - name: 新闻早报全栈验收（设置 → 配置文件 → 抓取筛选 AI 分析推送 → 入库通知；MCP 查询与智能体工具；改关键词；不对外暴露）
+        run: python3 tests/e2e/news_acceptance.py
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22.23.4'
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+      - name: 安装浏览器验收依赖（Playwright 版本由 tests/e2e 的锁文件固定）
+        working-directory: tests/e2e
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: 新闻早报浏览器验收（设置页、早报页各标签、收藏与不感兴趣、首页面板、手机宽度、viewer 只读）
+        run: node tests/e2e/news_browser.cjs
+      - name: 失败时输出服务状态与日志
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail=200 api worker
+          WORKSPACE_PROJECT=my-workspace docker compose -p my-workspace-trendradar \
+            -f infra/trendradar/compose.yaml --env-file .env logs --no-color --tail=200
+      - name: 停止服务
+        if: always()
+        run: |
+          make trendradar-down || true
+          make down
+
   # V2 OpenClaw（T-0059，OC-7）：接入入口验收（Caddy 接入入口 + 本机隧道 + 双向证书），
   # 然后是多实例端到端（OpenIM + 两个真实 OpenClaw 实例 + 假模型，方案第 8 节）。
   # 与 compose job 并行；测试证书在这里生成，用完即丢。

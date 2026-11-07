@@ -290,12 +290,21 @@ monitored = pytest.fixture(name="monitored")(_ops_fixture(**MONITORING))
 async def test_services_without_monitoring(ops: Ops) -> None:
     data = await ops.get("/api/v1/operations/services")
     ids = [item["id"] for item in data["items"]]
-    assert ids == ["api", "worker", "postgres", "redis", "prometheus", "grafana", "openim"]
+    assert ids == [
+        "api",
+        "worker",
+        "postgres",
+        "redis",
+        "prometheus",
+        "grafana",
+        "openim",
+        "trendradar",
+    ]
     items = {item["id"]: item for item in data["items"]}
     assert items["api"]["status"] == "ok"
     assert items["postgres"]["status"] == "ok" and items["redis"]["status"] == "ok"
     assert (items["worker"]["status"], items["worker"]["reason"]) == ("unknown", "no_heartbeat")
-    for name in ("prometheus", "grafana", "openim"):
+    for name in ("prometheus", "grafana", "openim", "trendradar"):
         assert items[name]["status"] == "not_configured", name
     kinds = {"core", "monitoring", "integration", "agents"}
     assert all(item["kind"] in kinds for item in data["items"])

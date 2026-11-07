@@ -2,9 +2,9 @@
 id: T-0153
 title: 新闻早报 N2 后端：迁移 0048、设置与密钥、配置生成、接收早报、MCP 客户端与 news_* 工具、反馈与偏好学习、方案 B
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api,docs
 depends_on: T-0151
 created: 2026-11-07
@@ -30,3 +30,5 @@ updated: 2026-11-07
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-07 16:07 UTC · claude · 创建任务（owner: claude）
+- 2026-11-07 16:55 UTC · claude · 开始任务
+- 2026-11-07 16:55 UTC · claude · 后端完成：迁移 0048（三张表 + agent_wakeups.source 增加 news）、设置与密钥（加密、只回已设置、全部署唯一启用）、配置文件生成、接收早报 /internal/news/ingest/<token>（分批拼接、通知 owner）、今天/往期/热榜/RSS/搜索/收藏接口、偏好学习、方案 B（任务 + 唤醒，完成后入库并经 MCP 推送、90 分钟超时）、news_* 只读工具、首页组件 news_briefing、运维页 TrendRadar、密钥轮换。测试：test_news_config 17、test_news_api 13、test_news_migration 1 通过；前端（T-0154）进行中

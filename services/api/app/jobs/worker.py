@@ -36,6 +36,7 @@ from app.domain import (
     im,
     im_projection,
     knowledge_files,
+    news_agent,
     notifications,
     project_groups,
     readme,
@@ -286,6 +287,16 @@ async def check_host_alerts(ctx: dict[str, Any]) -> int:
         return await host_metrics.check_alerts(db)
 
 
+async def news_tick(ctx: dict[str, Any]) -> int:
+    """新闻早报（T-0153）：方案 B 到点建任务、收早报、超时；补写配置文件；每天重新计算偏好。"""
+    context = _sync(ctx)
+    async with context.sessions() as db:
+        stats = await news_agent.tick(db, context.settings, context.runtime, ctx["redis"])
+    if any(stats.values()):
+        logger.info("news tick", extra=stats)
+    return sum(stats.values())
+
+
 async def runner_tick(ctx: dict[str, Any]) -> int:
     """运行服务器（T-0136、T-0139）：指令时限、在线、删除条件、空闲分档、资源水位、清理。"""
     context = _sync(ctx)
@@ -400,6 +411,7 @@ class WorkerSettings:
         cron(cleanup_files, hour=3, minute=37, timeout=1800),
         cron(check_file_storage, hour=4, minute=13, run_at_startup=True, timeout=180),
         cron(runner_tick, second=12, timeout=60, unique=True),
+        cron(news_tick, second=33, timeout=120, unique=True),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())
     on_startup = startup

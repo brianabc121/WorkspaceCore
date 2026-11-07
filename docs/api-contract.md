@@ -594,3 +594,38 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
   新建时整台服务器的内存不够：先按保留分停掉空闲的环境，这次返回 `RESOURCE_BUSY`（“已按保留分停止 N 个空闲环境，约 30 秒后再试”）；腾不出来、或磁盘超过 95% 时也是 `RESOURCE_BUSY`。
 - 用途、模板说明、命令输出在 `untrusted` 里。错误码：`RUNNER_UNAVAILABLE`（没有运行服务器或不在线）、`QUOTA_EXCEEDED`、`RESOURCE_BUSY`、`RATE_LIMITED`、`RUNNER_CAPABILITY`（例如没有 `/dev/kvm`、没装 gVisor）、
   `TEMPLATE_NOT_READY`、`ENV_UNAVAILABLE`、`TIMEOUT`、`RUNNER_FAILED`、`FORBIDDEN`、`NOT_FOUND`、`VALIDATION_FAILED`、`PAYLOAD_TOO_LARGE`。
+
+## 新闻早报（T-0153）
+
+方案 `docs/v2/NEWS_PLAN.md`，核验记录 `docs/decisions/2026-11-07-trendradar-verification.md`。整个部署只有一个 TrendRadar：
+同一时刻只能有一个工作空间启用。没有部署（`TRENDRADAR_MCP_URL` 为空）时设置照样能保存，`deployed=false`，不写配置文件。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /api/v1/news/today` | viewer。今天（按设置的时区）最新一份早报 + 每个兴趣主题今天的条目（经 MCP 查 `get_news_by_date` 与 `get_latest_rss`，按主题关键词、必含词、排除词匹配；当前用户标了不感兴趣的不在这里）。TrendRadar 连不上时 `unavailable=true`，早报照常返回 |
+| `GET /api/v1/news/status` | viewer。`deployed`、`enabled`、`online`（MCP `get_system_status`）、`latest_data_date`、`latest_briefing_at`、`rendered_at`、`render_error` |
+| `GET /api/v1/news/briefings?cursor&limit` | viewer。往期早报（`excerpt` 是正文开头的纯文字），游标分页 |
+| `GET /api/v1/news/briefings/{id}` | viewer。一份早报：`local_date`、`slot`、`source`（`trendradar` / `agent`）、`title`、`content`（Markdown，按安全模式渲染）、`status`（`receiving` / `complete` / `pending` / `failed`）、`parts` / `total_parts`、`error`、`task_id` |
+| `GET /api/v1/news/hot?platform&limit` | viewer。最新一批热榜（MCP `get_latest_news`）；`platform` 只能是核验过的 11 个 id |
+| `GET /api/v1/news/rss?feed&days&limit` | viewer。最近几天的 RSS（MCP `get_latest_rss`） |
+| `GET /api/v1/news/search?q&days&include_rss&limit` | viewer。按关键词搜热榜（可含 RSS；MCP `search_news`，日期范围按设置的时区） |
+| 条目 | `title`、`url`、`mobile_url`（只保留 http(s) 链接，别的整条丢掉）、`source_type`（`hotlist` / `rss`）、`source_id`、`source_name`、`rank`、`time`、`summary`、`topic`（命中的主题）、`favorite_id`、`dismissed`；没有数据时 `items=[]` 且有 `message` |
+| `GET /api/v1/news/feedback?kind&cursor&limit` | viewer。我的收藏 / 不感兴趣 |
+| `POST /api/v1/news/feedback` | member（`201`）。`kind`（`favorite` / `dismiss`）、`url`（http(s)）、`title`、`source_type`、`source_id`、`source_name`、`topic`；同一条重复提交返回同一条记录；收藏与不感兴趣互斥。`exclude_word`（只有 owner，否则 `403`）把一个词加进全局排除并重新生成配置文件，审计 `news.exclusion_added` |
+| `DELETE /api/v1/news/feedback/{id}` | member（`204`）。只能删自己的，别人的 `404` |
+| `GET /api/v1/news/settings` | admin。设置（还没保存过返回默认值，`version=0`）；密钥只回 `ai_api_key_set` 与每个渠道的 `secrets_set`；`platform_choices`、`taken_by_other`、`learned`（主题分数与调整后的条数、建议关掉的来源） |
+| `PUT /api/v1/news/settings` | owner。整份设置 + `version`（不一致 `409 VERSION_CONFLICT`）。另一个工作空间已启用 `409 NEWS_TAKEN`。地址（RSS、NewsNow、大模型接口、推送 Webhook、ntfy 服务器）只允许公网 http(s)：回环、私有、链路本地、没有点的主机名 `422`（`NEWS_ALLOWED_HOSTS` 例外）。`ai_api_key` 不给表示不改、空字符串清除；渠道的 `secrets` 同理；启用的渠道缺凭证 `422`。保存后重新计算偏好、按启用的工作空间重新生成配置文件；审计 `news.settings_updated`（不含密钥） |
+| `POST /api/v1/news/settings/test-push` | owner。经 TrendRadar MCP `send_notification` 推到启用的渠道（标题以“【工作台】”开头），返回每个渠道的结果；`409 NEWS_DISABLED` / `NO_CHANNELS`，`503 NEWS_NOT_DEPLOYED` / `EXTERNAL_UNAVAILABLE`，`504 RESULT_UNKNOWN`；审计 `news.test_push` |
+| `POST /api/v1/news/briefings/generate` | owner（`201`）。方案 B：现在建任务、叫醒智能体写一份；`409 NEWS_DISABLED` / `NOT_AGENT_MODE` / `BRIEFING_PENDING` |
+
+**接收早报**（内部网络，不经 Caddy）：`POST /internal/news/ingest/{token}`，TrendRadar 通用 Webhook 的每一批
+`{"title": "<报告类型>", "content": "<Markdown>"}`。token 不对、没有启用一律 `404`；单批超过 64 KB `413`；每个工作空间每分钟 60 批（`429`）。
+按 `**[第 i/N 批次]**` 拼接：第 1 批开始新的一份（上一份没收齐的记为 `failed`），重复批次返回 `duplicate`，缺批在正文里注明；
+收齐后 `status=complete`、通知 owner（`news_briefing`）。标题以“【工作台】”开头的返回 `ignored`。正文最多 20 万字。
+
+**MCP 工具**（只读、不审批；只列给启用了早报、部署了 TrendRadar 的工作空间的实例，否则调用 `NOT_FOUND`）：
+`news_latest`、`news_search`、`news_by_date`（最多 31 天）、`news_trending`、`news_rss`、`news_related`、`news_briefing`。
+标题、链接、来源名、摘要、早报正文放在 `untrusted` 里；TrendRadar 连不上 `EXTERNAL_UNAVAILABLE`。工作台只转发白名单里的 TrendRadar 只读工具，
+`trigger_crawl`、`send_notification`、`read_article` 等不开放。
+
+**SSE 主题** `news`：早报送达、设置与收藏变化。**首页组件** `news_briefing`（`config.lines` 2 ~ 20）。

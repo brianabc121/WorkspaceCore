@@ -938,3 +938,46 @@ Worker 每分钟检查一次，通知 owner / admin；同一实例同一类告�
 - SSH 部署验收（`agent_ssh_acceptance.py`）：照 crontab 那一行跑服务器状态上报；六个运维动作逐个执行，核对 `docker compose ps` / `docker stats` / `df` / `uptime` 的输出、日志脱敏、二次认证与审计；卸载后运维动作不可用。
 - 浏览器验收：`agent_ssh_browser.cjs`（运维面板：查看状态、立即上报、输密码重启；服务器状态面板与趋势；390px 宽度）、`sprint6_browser.cjs`（新建项目勾选实例与项目群、自由接取、领取、完成、打回与动态）。
 
+
+## 23. 新闻早报（TrendRadar，T-0152）
+
+方案 `docs/v2/NEWS_PLAN.md`，版本核验 `docs/decisions/2026-11-07-trendradar-verification.md`。可选组件：
+TrendRadar 6.11.0（抓取、筛选、AI 简报、推送）与它的 MCP 4.1.1（只读查询）是独立的 Compose 项目
+`infra/trendradar/compose.yaml`（项目名 `my-workspace-trendradar`），镜像锁定 digest。
+
+### 23.1 网络、卷与权限
+
+| 对象 | 说明 |
+|---|---|
+| 网络 `news`（core，internal） | 只有 api、worker、trendradar、trendradar-mcp。MCP（3333）与抓取容器自带的静态文件服务（8080）没有鉴权：不发布端口，也不加入别的网络 |
+| 网络 `egress`（TrendRadar 项目） | 两个 TrendRadar 容器出网：NewsNow、RSS、大模型、推送渠道 |
+| 卷 `trendradar-config`（core） | api、worker 读写挂在 `/var/lib/workspace/trendradar`，写入网页设置生成的 `config.yaml`、`frequency_words.txt`、`timeline.yaml`、`ai_interests.txt`（属主 app 用户 10001，0640）；TrendRadar 两个容器只读挂成 `/app/config`，以 10001 组读取（`group_add`，不给任何 capability） |
+| 卷 `trendradar-output`（TrendRadar 项目） | 抓到的数据，保留 30 天；都是公开数据，不进备份。早报、设置、反馈在工作台数据库里，随 `make backup` 备份 |
+
+AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendradar-prompts` 按锁定的提交下载 5 个文件，逐个校验
+`infra/trendradar/prompts.sha256` 后写进配置卷（`raw.githubusercontent.com`，可以重复运行）。
+早报（方案 A）由 TrendRadar 的通用 Webhook 推到 `http://api:8000/internal/news/ingest/<token>`：Caddy 只转发 `/api/*`，这个地址在外面访问不到。
+
+### 23.2 部署步骤
+
+一键部署脚本 `deploy.sh` 的可选组件“新闻早报”会自动做这些；手动部署时：
+
+1. `make up`（创建 `news` 网络与配置卷）。
+2. `make trendradar-pull`，再 `make trendradar-up`：下载提示词；配置文件还没有时先让 api 写一份“不抓取、不推送”的配置；启动两个容器并等健康。
+3. 第一次部署时在 `.env` 里设置 `TRENDRADAR_MCP_URL=http://trendradar-mcp:3333/mcp`，再 `make up` 让 api、worker 生效。
+4. 在网页 **设置 → 新闻早报** 里启用、选平台、写兴趣、填大模型和推送渠道，点“发一条测试推送”。以后的修改都在网页上，不用重启。
+
+### 23.3 变量
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `TRENDRADAR_MCP_URL` | 空 | 留空表示没有部署：设置页显示“未部署”，智能体看不到 `news_*` 工具 |
+| `TRENDRADAR_CRON` | `*/30 * * * *` | 定时运行；推送时间以半小时为单位，每个时间段里正好有一次运行。只有验收时改成每分钟 |
+| `NEWS_ALLOWED_HOSTS` | 空 | 设置页填的地址解析到内网时只允许这些主机名；一般留空 |
+
+### 23.4 日常
+
+- `make trendradar-logs` 看抓取、AI 分析、推送；运维问题先看设置页的状态（TrendRadar 是否在线、最近一次抓取、配置文件写入时间与错误）。
+- 配置文件被删或卷是新的：worker 每分钟检查，缺了就重新生成；每天本地时间 03:10 之后按收藏 / 不感兴趣重新计算偏好并生成一次。
+- 升级 TrendRadar：改 `infra/trendradar/compose.yaml` 的 digest 与 `scripts/trendradar-prompts.sh` 的提交、`prompts.sha256`，并按核验记录重新核对配置格式与 MCP 工具。
+- 停用：`make trendradar-down`；网页上关掉早报会生成“不抓取、不推送”的配置。

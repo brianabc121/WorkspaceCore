@@ -36,7 +36,7 @@ REPO_URL="${WORKSPACE_REPO:-https://github.com/brianabc121/WorkspaceCore.git}"
 DEFAULT_DIR="${WORKSPACE_DIR:-/srv/my-workspace}"
 PROJECT="my-workspace"
 # $PROJECT-vikunja：T-0082 移除了 Vikunja；留在列表里，uninstall 时还能清理以前部署的
-OPTIONAL_PROJECTS=("$PROJECT-vikunja" "$PROJECT-openim")
+OPTIONAL_PROJECTS=("$PROJECT-vikunja" "$PROJECT-openim" "$PROJECT-trendradar")
 BACKUP_ENV_FILE="/etc/my-workspace/backup.env"
 
 ACTION="" DIR="" REF="" DOMAIN="" EMAIL="" BASE_URL="" ASSUME_YES=0 CONFIRM="" ENV_CHOICE="" DIR_CHOICE="" AFTER_PULL="" ROOT=""
@@ -1118,6 +1118,57 @@ upgrade_openim() {
   return 0
 }
 
+# ---------------------------------------------------------------- 新闻早报（TrendRadar，T-0152）
+# 独立的 Compose 项目（infra/trendradar/compose.yaml）：TrendRadar 抓取、筛选、AI 简报、推送，MCP 给工作台查询。
+# 兴趣、大模型 Key、推送渠道都在网页「设置 → 新闻早报」里设置，这里只负责部署（docs/deployment.md 第 23 节）。
+NEWS_PROMPT="部署新闻早报（TrendRadar）？（每天定时把热榜与 RSS 整理成早报推到手机；另外占用约 300 MB 内存；兴趣与推送渠道在网页上设置）"
+news_running() { [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME:-$PROJECT}-trendradar" 2>/dev/null)" ]]; }
+
+plan_news() {
+  if news_running; then ok "新闻早报（TrendRadar）：已部署"; return 0; fi
+  decide NEWS "$NEWS_PROMPT" y || true
+}
+
+# 让 api、worker 连上 TrendRadar：.env 里的地址为空时填上，再重启 api、worker
+news_env() {
+  local want=http://trendradar-mcp:3333/mcp current
+  current="$(env_get TRENDRADAR_MCP_URL)"
+  if [[ -n $current ]]; then
+    [[ $current == "$want" ]] || info "TRENDRADAR_MCP_URL 已经设置为 $current，保持不变"
+    return 0
+  fi
+  env_set TRENDRADAR_MCP_URL "$want"
+  info "已在 .env 里设置 TRENDRADAR_MCP_URL，重启 api、worker 让它生效"
+  (cd "$ROOT" && make -s up </dev/null)
+}
+
+connect_news() {
+  step "新闻早报（TrendRadar：每天定时推送早报，可选）"
+  if news_running && [[ -n $(env_get TRENDRADAR_MCP_URL) ]]; then
+    ok "已部署：在网页「设置 → 新闻早报」里设置兴趣、大模型与推送渠道"; return 0
+  fi
+  if ! news_running; then
+    decide NEWS "$NEWS_PROMPT" y || { info "跳过；以后运行 deploy.sh connect"; return 0; }
+  fi
+  pull_images trendradar-pull "新闻早报（TrendRadar）" || true
+  if ! (cd "$ROOT" && make -s trendradar-up </dev/null); then
+    warn "TrendRadar 没有启动成功（见上面的输出）：运行 make trendradar-logs 查看日志；下载 AI 提示词要能访问 raw.githubusercontent.com"
+    return 0
+  fi
+  news_env || { warn "api、worker 没有重启成功（见上面的输出）"; return 0; }
+  ok "新闻早报已部署：到网页「设置 → 新闻早报」里启用，填兴趣、大模型 Key 与推送渠道"
+  return 0
+}
+
+# 升级：已经部署了新闻早报时，按新版本锁定的镜像与提示词重新启动
+upgrade_news() {
+  news_running || return 0
+  step "新闻早报（TrendRadar）"
+  pull_images trendradar-pull "新闻早报（TrendRadar）" || true
+  (cd "$ROOT" && make -s trendradar-up </dev/null) || warn "TrendRadar 没有启动成功：运行 make trendradar-logs 查看日志"
+  return 0
+}
+
 # 仅用于停用历史部署的站点，不再生成或挂载第三方应用的公网入口。
 app_site_file() { printf '%s\n' "$ROOT/infra/caddy/apps-enabled/$1.caddy"; }
 restart_caddy_with_apps() {
@@ -1279,7 +1330,7 @@ connect_storage() {
 }
 
 connect_components() {
-  step "接入组件：GitHub（只读）、OpenIM（消息）、OpenClaw 接入入口、知识库图片存储；项目与任务由工作台自己管理"
+  step "接入组件：GitHub（只读）、OpenIM（消息）、OpenClaw 接入入口、知识库图片存储、新闻早报；项目与任务由工作台自己管理"
   compose ps --status running --services </dev/null 2>/dev/null | grep -qx api || { warn "api 没有运行，先部署（install）"; return 0; }
   wait_for_setup || return 0
   local status
@@ -1289,11 +1340,13 @@ connect_components() {
   connect_openim "$(status_of openim "$status")"
   connect_agent_ingress
   connect_storage
+  connect_news
   status="$(connect_status)"
   step "接入状态"
   info "GitHub：$(status_label "$(status_of github "$status")")"
   info "OpenIM：$(openim_label "$(status_of openim "$status")")"
   info "OpenClaw 接入入口：$(public_url_of AGENT_PUBLIC_URL 未配置)"
+  info "新闻早报：$(news_running && echo 已部署 || echo 未部署)"
   info "以后要接入或重试：bash $ROOT/scripts/deploy.sh connect（GitHub 在工作台「集成设置」里接入）"
 }
 
@@ -1385,6 +1438,7 @@ plan_components() {
       ;;
   esac
   plan_ingress "$site"
+  plan_news
 }
 
 plan_ingress() {
@@ -1586,6 +1640,7 @@ do_upgrade() {
   retire_n8n
   retire_vikunja
   upgrade_openim
+  upgrade_news
   step "升级完成：$(git -C "$ROOT" log -1 --format='%h %cs %s')"
   if [[ $AFTER_PULL != "$(git -C "$ROOT" rev-parse HEAD)" ]]; then
     info "回滚：没有新迁移时 git -C $ROOT checkout $(git -C "$ROOT" rev-parse --short "$AFTER_PULL") 后再 make up；有新迁移见 docs/deployment.md 第 5.3 节"

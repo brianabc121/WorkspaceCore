@@ -44,6 +44,7 @@ from app.domain import (
     issue_tools,
     knowledge_tools,
     mail_tools,
+    news_tools,
     ops_metrics,
     readme_tools,
     runner_tools,
@@ -60,6 +61,7 @@ from app.schemas.ai_tools import (
     MAIL_READ_TOOL_NAMES,
     MAIL_SEND_TOOL_NAMES,
     MAIL_TOOL_NAMES,
+    NEWS_TOOL_NAMES,
     PROJECT_ADMIN_TOOL_NAMES,
     README_TOOL_NAMES,
     RUNNER_TOOL_NAMES,
@@ -185,6 +187,9 @@ async def _list_tools(
         mail_read = instance is not None and instance.mail_read_enabled
         mail_send = instance is not None and instance.mail_send_enabled
         runner = instance is not None and instance.runner_enabled
+        news = instance is not None and await news_tools.news_enabled(
+            db, state.settings, instance.workspace_id
+        )
     # 只列这个实例的权限范围里、已经实现的工具；角色是否够在调用时再检查（角色可能变化）。
     # 项目管理工具只列给打开了项目管理权限的实例（T-0112）
     tools = [
@@ -200,6 +205,8 @@ async def _list_tools(
         and (spec.name not in MAIL_SEND_TOOL_NAMES or mail_send)
         # 运行环境（T-0137）：只列给打开了“运行环境权限”的实例（例外八）
         and (spec.name not in RUNNER_TOOL_NAMES or runner)
+        # 新闻早报（T-0153）：只列给启用了早报的工作空间的实例
+        and (spec.name not in NEWS_TOOL_NAMES or news)
     ]
     return types.ListToolsResult(tools=tools)
 

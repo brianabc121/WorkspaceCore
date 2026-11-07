@@ -105,6 +105,7 @@ sudo bash scripts/deploy.sh connect
 | 组件 | 脚本自动做的事 | 需要你做的 |
 |---|---|---|
 | OpenIM（「消息」页） | 构建打过补丁的 openim-server 镜像（第一次约 5 ~ 15 分钟，临时占用约 8 GB 磁盘；Docker Hub 限流时自动改用 `mirror.gcr.io` 再试）→ `make openim-up` → 在 `.env` 里填好 `OPENIM_API_URL`、`OPENIM_OBJECT_URL` 并重启 api、worker → 确认工作台连得上 | 内存少于 4 GB 时默认不装（另外占用约 1 GB）；OpenClaw 本身（接入入口与实例）按第 8.6 节配置 |
+| 新闻早报（TrendRadar） | 拉取锁定版本的 TrendRadar 镜像 → 下载并校验 AI 提示词 → `make trendradar-up` → 在 `.env` 里填好 `TRENDRADAR_MCP_URL` 并重启 api、worker | 部署后在网页「设置 → 新闻早报」里启用：选平台、写兴趣关键词、填大模型 Key 和推送渠道（飞书、钉钉、企业微信、Telegram、邮件、ntfy、Bark、Slack、通用 Webhook），点“发一条测试推送”。另外占用约 300 MB 内存；详见手册第 23 节 |
 | 知识库图片存储 | 问图片存哪里（本地 / Cloudflare R2 / 阿里云 OSS，可以再选一个做副本），R2 / OSS 的地域、桶名、密钥当场输入，只写进 `.env` → 重启 api、worker → 自检（写、读、删一个探测文件） | 先在 R2 / OSS 建一个**私有**桶和只能读写这个桶的密钥；不配就存本地（卷 `kb-files`，随备份）。详见手册第 19 节 |
 
 - 项目与任务由工作台自己管理，不需要接入（T-0082 移除了 Vikunja；从带 Vikunja 的旧版本升级见第 10 步）。
@@ -112,7 +113,7 @@ sudo bash scripts/deploy.sh connect
 - 密码和 Token 不出现在命令行参数和日志里。
 - 已经接入的组件不会重复配置。
 - **GitHub 不在脚本里接入**：在工作台网页上配置（第 8.2 节），脚本只显示它的状态和设置页的地址。
-- 无人值守（`--yes`）时按默认回答：OpenIM 看内存与磁盘决定，不配置 OpenClaw 接入入口。
+- 无人值守（`--yes`）时按默认回答：OpenIM 看内存与磁盘决定，不配置 OpenClaw 接入入口，部署新闻早报（之后在网页上启用）。
 - 最后显示接入状态：「已接入」「未接入」，或者已保存但用不了的原因（凭证失效、暂时连不上等）。
 - 依据和实测记录见 [`decisions/2026-11-02-deploy-connect.md`](decisions/2026-11-02-deploy-connect.md)。
 

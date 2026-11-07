@@ -55,7 +55,7 @@ async def test_services_show_openim_and_the_workspace_instances(env: ImEnv) -> N
         uuid.UUID(a["id"]),
     )
     items = await services(env.client, env.workspace_id)
-    assert list(items)[-3:] == ["openim", f"agent:{a['id']}", f"agent:{b['id']}"]
+    assert list(items)[-4:] == ["openim", "trendradar", f"agent:{a['id']}", f"agent:{b['id']}"]
     assert (items["openim"]["kind"], items["openim"]["status"]) == ("agents", "ok")
     first = items[f"agent:{a['id']}"]
     assert (first["name"], first["kind"], first["provider"]) == ("A 甲", "agents", "openclaw")

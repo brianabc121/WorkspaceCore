@@ -21,6 +21,9 @@ OPENIM_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPAC
 	-f infra/openim/compose.yaml \
 	$$(docker network inspect $(WORKSPACE_PROJECT)_agent-im >/dev/null 2>&1 && echo -f infra/openim/compose.agents.yaml) \
 	--env-file .env
+# 新闻早报（T-0152）：独立部署的 TrendRadar（infra/trendradar/compose.yaml），加入 core 的 news 网络与 trendradar-config 卷
+TRENDRADAR_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-trendradar \
+	-f infra/trendradar/compose.yaml --env-file .env
 # 读取 .env 里的 HTTP_PORT（没有时用 8080），供 make smoke 使用
 HTTP_PORT := $(or $(shell sed -n 's/^HTTP_PORT=//p' .env 2>/dev/null),8080)
 
@@ -32,7 +35,8 @@ endef
 	lint lint-api lint-web format test test-api test-web build-web backup restore-verify \
 	smoke-full perf scan \
 	agent-ca agents-up pull openim-pull \
-	openim-build openim-up openim-down openim-logs
+	openim-build openim-up openim-down openim-logs \
+	trendradar-pull trendradar-prompts trendradar-up trendradar-down trendradar-logs
 
 help: ## 列出可用命令
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-15s %s\n", $$1, $$2}'
@@ -115,6 +119,30 @@ openim-down: ## 停止 OpenIM；保留数据卷
 
 openim-logs: ## 跟踪 OpenIM 日志（Ctrl+C 退出）
 	$(OPENIM_COMPOSE) logs -f --tail=100
+
+trendradar-pull: env ## 拉取新闻早报 TrendRadar 的镜像（锁定 digest）
+	$(TRENDRADAR_COMPOSE) pull
+
+trendradar-prompts: ## 下载 TrendRadar 的 AI 提示词（锁定的上游提交，校验 sha256）写进配置卷；需要先 make up
+	scripts/trendradar-prompts.sh $(WORKSPACE_PROJECT)_trendradar-config
+
+trendradar-up: env ## 启动新闻早报（TrendRadar 与它的 MCP）；需要先 make up（一键脚本：deploy.sh 的可选组件）
+	@docker network inspect $(WORKSPACE_PROJECT)_news >/dev/null 2>&1 || \
+		{ echo "缺少 core 的 news 网络：请先 make up" >&2; exit 1; }
+	scripts/trendradar-prompts.sh $(WORKSPACE_PROJECT)_trendradar-config
+	@# 配置文件由工作台生成；还没有时先让 api 写一份“不抓取、不推送”的配置，TrendRadar 才能启动
+	@$(COMPOSE) exec -T api test -f /var/lib/workspace/trendradar/config.yaml 2>/dev/null || \
+		$(COMPOSE) exec -T api python -m app.commands.news_config >/dev/null
+	$(TRENDRADAR_COMPOSE) up -d --wait --wait-timeout 300
+	@grep -q '^TRENDRADAR_MCP_URL=.' .env || { \
+		echo "TrendRadar 已启动。第一次部署时在 .env 里设置 TRENDRADAR_MCP_URL=http://trendradar-mcp:3333/mcp，"; \
+		echo "再运行 make up 让 api、worker 生效；然后在网页“设置 → 新闻早报”里启用。步骤见 docs/deployment.md"; }
+
+trendradar-down: ## 停止新闻早报；保留抓到的数据
+	$(TRENDRADAR_COMPOSE) down
+
+trendradar-logs: ## 跟踪 TrendRadar 日志（Ctrl+C 退出）
+	$(TRENDRADAR_COMPOSE) logs -f --tail=100
 
 smoke: ## 经 Caddy 检查健康、就绪、前端页面与安全响应头
 	scripts/smoke.sh http://127.0.0.1:$(HTTP_PORT)

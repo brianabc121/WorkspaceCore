@@ -2738,6 +2738,233 @@ export interface paths {
         patch: operations["update_me"];
         trace?: never;
     };
+    "/api/v1/news/briefings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 往期早报（viewer，按时间倒序） */
+        get: operations["list_briefings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/news/briefings/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 方案 B：现在让智能体写一份早报（owner）
+         * @description 在“每日早报”项目里建任务并叫醒选定的实例。409：NEWS_DISABLED、NOT_AGENT_MODE、BRIEFING_PENDING（已经有一份在写）。
+         */
+        post: operations["generate_briefing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/news/briefings/{briefing_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 一份早报（viewer） */
+        get: operations["get_briefing"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/news/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 我的收藏 / 不感兴趣（viewer） */
+        get: operations["list_feedback"];
+        put?: never;
+        /**
+         * 收藏或不感兴趣（member；同一条重复提交返回同一条记录）
+         * @description 收藏与不感兴趣互斥：标了一个就去掉另一个。exclude_word 把一个词加进全局排除（只有 owner 能用，随后重新生成配置文件）。
+         */
+        post: operations["add_feedback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/news/feedback/{feedback_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 取消收藏 / 不感兴趣（member，只能删自己的） */
+        delete: operations["remove_feedback"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/news/hot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 最新一批热榜（viewer）
+         * @description 可以只看一个平台；链接只保留 http(s)。
+         */
+        get: operations["news_hot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/news/rss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 最近几天的 RSS 条目（viewer） */
+        get: operations["news_rss"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/news/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 按关键词搜热榜（可含 RSS）（viewer） */
+        get: operations["news_search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/news/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 新闻早报设置（admin）
+         * @description 密钥只回“已设置”（ai_api_key_set、channels.*.secrets_set）。还没保存过时返回默认值，version 为 0。
+         */
+        get: operations["get_settings"];
+        /**
+         * 保存新闻早报设置（owner，乐观并发）
+         * @description 保存后按启用的工作空间重新生成 TrendRadar 的配置文件（下一次运行生效）。409：VERSION_CONFLICT 版本不一致；NEWS_TAKEN 另一个工作空间已经启用了早报（一个部署只有一个 TrendRadar）。地址只允许公网 http(s)。
+         */
+        put: operations["put_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/news/settings/test-push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 经 TrendRadar 发一条测试推送（owner）
+         * @description 推到所有启用的渠道，返回每个渠道的结果。503 NEWS_NOT_DEPLOYED / EXTERNAL_UNAVAILABLE；409 NEWS_DISABLED / NO_CHANNELS；504 RESULT_UNKNOWN。
+         */
+        post: operations["test_push"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/news/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** TrendRadar 与早报的状态（viewer） */
+        get: operations["news_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/news/today": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 今天：最新一份早报 + 每个兴趣主题今天的条目（viewer）
+         * @description 条目来自 TrendRadar（经 MCP 查询）；TrendRadar 连不上时 unavailable 为 true，早报照常返回。当前用户标了“不感兴趣”的条目不在这里。
+         */
+        get: operations["news_today"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications": {
         parameters: {
             query?: never;
@@ -5225,7 +5452,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "agent" | "admin" | "issue";
+            source: "agent" | "admin" | "issue" | "runner" | "news";
             /**
              * Status
              * @enum {string}
@@ -5938,7 +6165,7 @@ export interface components {
              * Widgets
              * @description 可选：创建时一并加入的组件（用于导入布局 JSON），整体在一个事务里完成
              */
-            widgets?: (components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"] | components["schemas"]["ServiceHealthWidgetCreate"] | components["schemas"]["ApiLatencyWidgetCreate"] | components["schemas"]["NotificationsWidgetCreate"] | components["schemas"]["ProjectProgressWidgetCreate"] | components["schemas"]["ImQuickChatWidgetCreate"])[];
+            widgets?: (components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"] | components["schemas"]["ServiceHealthWidgetCreate"] | components["schemas"]["ApiLatencyWidgetCreate"] | components["schemas"]["NotificationsWidgetCreate"] | components["schemas"]["ProjectProgressWidgetCreate"] | components["schemas"]["ImQuickChatWidgetCreate"] | components["schemas"]["NewsBriefingWidgetCreate"])[];
         };
         /** DashboardOut */
         DashboardOut: {
@@ -7431,7 +7658,7 @@ export interface components {
              * Topics
              * @description 需要重新拉取的数据范围
              */
-            topics: ("overview" | "tasks" | "projects" | "knowledge" | "calendar" | "developer" | "integrations" | "notifications" | "operations" | "im" | "agents" | "ai" | "timeline" | "issues")[];
+            topics: ("overview" | "tasks" | "projects" | "knowledge" | "calendar" | "developer" | "integrations" | "notifications" | "operations" | "im" | "agents" | "ai" | "timeline" | "issues" | "news")[];
             /**
              * Workspace Id
              * Format: uuid
@@ -8443,6 +8670,689 @@ export interface components {
             rx_bytes: number | null;
             /** Tx Bytes */
             tx_bytes: number | null;
+        };
+        /**
+         * NewsBriefingConfig
+         * @description T-0154：首页的“今日早报”（docs/v2/NEWS_PLAN.md 第 7 节）：最新一份的时间、标题和开头几行。
+         */
+        NewsBriefingConfig: {
+            /**
+             * Lines
+             * @description 显示正文开头几行
+             * @default 6
+             */
+            lines: number;
+        };
+        /** NewsBriefingOut */
+        NewsBriefingOut: {
+            /**
+             * Content
+             * @description Markdown；按安全模式渲染（不执行 HTML）
+             */
+            content: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Error */
+            error: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Local Date
+             * Format: date
+             */
+            local_date: string;
+            /** Parts */
+            parts: number;
+            /**
+             * Slot
+             * @description 推送时间 HH:MM；方案 A 收到时不在推送时间段里则为空
+             */
+            slot: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "trendradar" | "agent";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "receiving" | "complete" | "pending" | "failed";
+            /** Task Id */
+            task_id: string | null;
+            /** Title */
+            title: string;
+            /** Total Parts */
+            total_parts: number | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** NewsBriefingPage */
+        NewsBriefingPage: {
+            /** Items */
+            items: components["schemas"]["NewsBriefingSummary"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** NewsBriefingSummary */
+        NewsBriefingSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Excerpt
+             * @description 正文开头（纯文字，约 200 字）
+             */
+            excerpt: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Local Date
+             * Format: date
+             */
+            local_date: string;
+            /** Slot */
+            slot: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "trendradar" | "agent";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "receiving" | "complete" | "pending" | "failed";
+            /** Title */
+            title: string;
+        };
+        /** NewsBriefingWidgetCreate */
+        NewsBriefingWidgetCreate: {
+            config?: components["schemas"]["NewsBriefingConfig"];
+            layout: components["schemas"]["WidgetLayout"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "news_briefing";
+        };
+        /** NewsBriefingWidgetUpdate */
+        NewsBriefingWidgetUpdate: {
+            config: components["schemas"]["NewsBriefingConfig"];
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "news_briefing";
+        };
+        /**
+         * NewsChannelIn
+         * @description 一个推送渠道。明文设置只对相应渠道有意义；
+         *     密钥放在 secrets 里（不给的字段不改，空字符串清除）。
+         */
+        NewsChannelIn: {
+            /**
+             * Chat Id
+             * @description Telegram
+             * @default
+             */
+            chat_id: string;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * From Addr
+             * @description 邮件：发件地址
+             * @default
+             */
+            from_addr: string;
+            /**
+             * Msg Type
+             * @description 企业微信
+             * @default markdown
+             * @enum {string}
+             */
+            msg_type: "markdown" | "text";
+            /**
+             * Secrets
+             * @description 密钥字段：飞书 / 钉钉 / 企业微信 / Slack 的 webhook_url，Telegram 的 bot_token，邮件的 password，ntfy 的 topic 与 token，Bark 的 url，通用 Webhook 的 url。不给的字段保持不变，空字符串表示清除
+             */
+            secrets?: {
+                [key: string]: string;
+            };
+            /**
+             * Server Url
+             * @description ntfy 服务器（默认 https://ntfy.sh）
+             * @default
+             */
+            server_url: string;
+            /**
+             * Smtp Port
+             * @description 邮件：SMTP 端口
+             */
+            smtp_port?: number | null;
+            /**
+             * Smtp Server
+             * @description 邮件：SMTP 服务器（留空按发件地址自动识别）
+             * @default
+             */
+            smtp_server: string;
+            /**
+             * To Addr
+             * @description 邮件：收件地址，多个用逗号分隔
+             * @default
+             */
+            to_addr: string;
+        };
+        /** NewsChannelOut */
+        NewsChannelOut: {
+            /** Chat Id */
+            chat_id: string;
+            /** Enabled */
+            enabled: boolean;
+            /** From Addr */
+            from_addr: string;
+            /**
+             * Msg Type
+             * @enum {string}
+             */
+            msg_type: "markdown" | "text";
+            /**
+             * Secrets Set
+             * @description 已经设置了的密钥字段（值不回传）
+             */
+            secrets_set: string[];
+            /** Server Url */
+            server_url: string;
+            /** Smtp Port */
+            smtp_port: number | null;
+            /** Smtp Server */
+            smtp_server: string;
+            /** To Addr */
+            to_addr: string;
+        };
+        /** NewsFeedIn */
+        NewsFeedIn: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /**
+             * Max Age Days
+             * @description 只看最近几天的；0 用默认 3 天
+             * @default 0
+             */
+            max_age_days: number;
+            /** Name */
+            name: string;
+            /** Url */
+            url: string;
+        };
+        /** NewsFeedbackIn */
+        NewsFeedbackIn: {
+            /**
+             * Exclude Word
+             * @description 不感兴趣时顺手加进全局排除词（只有 owner 能用）
+             */
+            exclude_word?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "favorite" | "dismiss";
+            /**
+             * Source Id
+             * @default
+             */
+            source_id: string;
+            /**
+             * Source Name
+             * @default
+             */
+            source_name: string;
+            /**
+             * Source Type
+             * @enum {string}
+             */
+            source_type: "hotlist" | "rss";
+            /** Title */
+            title: string;
+            /**
+             * Topic
+             * @default
+             */
+            topic: string;
+            /** Url */
+            url: string;
+        };
+        /** NewsFeedbackOut */
+        NewsFeedbackOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "favorite" | "dismiss";
+            /** Source Id */
+            source_id: string;
+            /** Source Name */
+            source_name: string;
+            /**
+             * Source Type
+             * @enum {string}
+             */
+            source_type: "hotlist" | "rss";
+            /** Title */
+            title: string;
+            /** Topic */
+            topic: string;
+            /** Url */
+            url: string;
+        };
+        /** NewsFeedbackPage */
+        NewsFeedbackPage: {
+            /** Items */
+            items: components["schemas"]["NewsFeedbackOut"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** NewsItemList */
+        NewsItemList: {
+            /** Items */
+            items: components["schemas"]["NewsItemOut"][];
+            /**
+             * Message
+             * @description 没有数据、暂时不可用等说明
+             */
+            message: string | null;
+            /**
+             * Unavailable
+             * @description TrendRadar 暂时连不上
+             */
+            unavailable: boolean;
+        };
+        /** NewsItemOut */
+        NewsItemOut: {
+            /** Dismissed */
+            dismissed: boolean;
+            /**
+             * Favorite Id
+             * @description 当前用户收藏了这条时是收藏记录的 ID
+             */
+            favorite_id: string | null;
+            /** Mobile Url */
+            mobile_url: string | null;
+            /** Rank */
+            rank: number | null;
+            /** Source Id */
+            source_id: string;
+            /** Source Name */
+            source_name: string;
+            /**
+             * Source Type
+             * @enum {string}
+             */
+            source_type: "hotlist" | "rss";
+            /** Summary */
+            summary: string | null;
+            /**
+             * Time
+             * @description 抓取或发布时间（TrendRadar 的本地时间文字）
+             */
+            time: string | null;
+            /** Title */
+            title: string;
+            /**
+             * Topic
+             * @description 命中的兴趣主题
+             */
+            topic: string | null;
+            /** Url */
+            url: string;
+        };
+        /** NewsLearnedOut */
+        NewsLearnedOut: {
+            /** Computed At */
+            computed_at: string | null;
+            /**
+             * Source Suggestions
+             * @description 被“不感兴趣”很多次（≥ 5 次且多于收藏）的来源：建议关掉，不自动关
+             */
+            source_suggestions: components["schemas"]["NewsSourceSuggestion"][];
+            /** Topics */
+            topics: components["schemas"]["NewsTopicLearned"][];
+        };
+        /** NewsPlatformChoice */
+        NewsPlatformChoice: {
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "toutiao" | "baidu" | "wallstreetcn-hot" | "thepaper" | "bilibili-hot-search" | "cls-hot" | "ifeng" | "tieba" | "weibo" | "douyin" | "zhihu";
+            /** Name */
+            name: string;
+        };
+        /** NewsPushResult */
+        NewsPushResult: {
+            /** Channel */
+            channel: string;
+            /** Detail */
+            detail: string;
+            /** Ok */
+            ok: boolean;
+        };
+        /** NewsPushTestOut */
+        NewsPushTestOut: {
+            /** Results */
+            results: components["schemas"]["NewsPushResult"][];
+        };
+        /** NewsSettingsIn */
+        NewsSettingsIn: {
+            /**
+             * Agent Instance Id
+             * @description 方案 B 写早报的智能体实例
+             */
+            agent_instance_id?: string | null;
+            /**
+             * Ai Analysis
+             * @default true
+             */
+            ai_analysis: boolean;
+            /**
+             * Ai Api Base
+             * @default
+             */
+            ai_api_base: string;
+            /**
+             * Ai Api Key
+             * @description 不给表示不改；空字符串表示清除
+             */
+            ai_api_key?: string | null;
+            /**
+             * Ai Model
+             * @default
+             */
+            ai_model: string;
+            /**
+             * Ai Translation
+             * @default false
+             */
+            ai_translation: boolean;
+            /**
+             * Briefing Mode
+             * @default trendradar
+             * @enum {string}
+             */
+            briefing_mode: "trendradar" | "agent";
+            /** Channels */
+            channels?: {
+                [key: string]: components["schemas"]["NewsChannelIn"];
+            };
+            /** Enabled */
+            enabled: boolean;
+            /** Exclusions */
+            exclusions?: string[];
+            /** Feeds */
+            feeds?: components["schemas"]["NewsFeedIn"][];
+            /**
+             * Filter Method
+             * @default keyword
+             * @enum {string}
+             */
+            filter_method: "keyword" | "ai";
+            /**
+             * Newsnow Api Url
+             * @description 自建 NewsNow 的地址；留空用公共接口
+             * @default
+             */
+            newsnow_api_url: string;
+            /** Platforms */
+            platforms?: ("toutiao" | "baidu" | "wallstreetcn-hot" | "thepaper" | "bilibili-hot-search" | "cls-hot" | "ifeng" | "tieba" | "weibo" | "douyin" | "zhihu")[];
+            /**
+             * Push Times
+             * @description 每天推送的时间，半小时为单位
+             */
+            push_times: string[];
+            /**
+             * Timezone
+             * @default Asia/Shanghai
+             */
+            timezone: string;
+            /** Topics */
+            topics?: components["schemas"]["NewsTopicIn"][];
+            /**
+             * Version
+             * @description GET 返回的 version（还没保存过是 0）；不一致时 409 VERSION_CONFLICT
+             */
+            version: number;
+        };
+        /** NewsSettingsOut */
+        NewsSettingsOut: {
+            /** Agent Instance Id */
+            agent_instance_id: string | null;
+            /** Ai Analysis */
+            ai_analysis: boolean;
+            /** Ai Api Base */
+            ai_api_base: string;
+            /** Ai Api Key Set */
+            ai_api_key_set: boolean;
+            /** Ai Model */
+            ai_model: string;
+            /** Ai Translation */
+            ai_translation: boolean;
+            /**
+             * Briefing Mode
+             * @enum {string}
+             */
+            briefing_mode: "trendradar" | "agent";
+            /** Channels */
+            channels: {
+                [key: string]: components["schemas"]["NewsChannelOut"];
+            };
+            /**
+             * Config Rev
+             * @description 生成配置文件的次数
+             */
+            config_rev: number;
+            /**
+             * Deployed
+             * @description 这个部署有没有 TrendRadar
+             */
+            deployed: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /** Exclusions */
+            exclusions: string[];
+            /** Feeds */
+            feeds: components["schemas"]["NewsFeedIn"][];
+            /**
+             * Filter Method
+             * @enum {string}
+             */
+            filter_method: "keyword" | "ai";
+            learned: components["schemas"]["NewsLearnedOut"];
+            /** Newsnow Api Url */
+            newsnow_api_url: string;
+            /** Platform Choices */
+            platform_choices: components["schemas"]["NewsPlatformChoice"][];
+            /** Platforms */
+            platforms: string[];
+            /** Push Times */
+            push_times: string[];
+            /**
+             * Render Error
+             * @description 最近一次写入失败的原因；成功为空
+             */
+            render_error: string;
+            /**
+             * Rendered At
+             * @description 最近一次写入配置文件的时间
+             */
+            rendered_at: string | null;
+            /**
+             * Taken By Other
+             * @description 另一个工作空间已经启用了早报（一个部署只能有一个）
+             */
+            taken_by_other: boolean;
+            /** Timezone */
+            timezone: string;
+            /** Topics */
+            topics: components["schemas"]["NewsTopicIn"][];
+            /** Updated At */
+            updated_at: string | null;
+            /** Version */
+            version: number;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /** NewsSourceSuggestion */
+        NewsSourceSuggestion: {
+            /** Dismisses */
+            dismisses: number;
+            /** Favorites */
+            favorites: number;
+            /** Source Id */
+            source_id: string;
+            /** Source Name */
+            source_name: string;
+            /**
+             * Source Type
+             * @enum {string}
+             */
+            source_type: "hotlist" | "rss";
+        };
+        /** NewsStatusOut */
+        NewsStatusOut: {
+            /** Deployed */
+            deployed: boolean;
+            /**
+             * Enabled
+             * @description 当前工作空间是否启用了早报
+             */
+            enabled: boolean;
+            /** Error */
+            error: string | null;
+            /** Latest Briefing At */
+            latest_briefing_at: string | null;
+            /**
+             * Latest Data Date
+             * @description 最近一次抓到数据的日期
+             */
+            latest_data_date: string | null;
+            /**
+             * Online
+             * @description TrendRadar 能否连通；没有部署或没启用时为 null
+             */
+            online: boolean | null;
+            /** Render Error */
+            render_error: string;
+            /** Rendered At */
+            rendered_at: string | null;
+        };
+        /** NewsTodayOut */
+        NewsTodayOut: {
+            briefing: components["schemas"]["NewsBriefingOut"] | null;
+            /** Message */
+            message: string | null;
+            /** Topics */
+            topics: components["schemas"]["NewsTopicItems"][];
+            /** Unavailable */
+            unavailable: boolean;
+        };
+        /** NewsTopicIn */
+        NewsTopicIn: {
+            /**
+             * Description
+             * @description 给 AI 筛选看的一句话兴趣说明
+             * @default
+             */
+            description: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Keywords
+             * @description 任意一个出现就算这个主题；`/正则/` 写法按正则匹配
+             */
+            keywords?: string[];
+            /**
+             * Max Items
+             * @description 每天最多几条；0 不限
+             * @default 10
+             */
+            max_items: number;
+            /** Name */
+            name: string;
+            /**
+             * Required
+             * @description 必须同时出现
+             */
+            required?: string[];
+        };
+        /** NewsTopicItems */
+        NewsTopicItems: {
+            /** Items */
+            items: components["schemas"]["NewsItemOut"][];
+            /** Name */
+            name: string;
+        };
+        /** NewsTopicLearned */
+        NewsTopicLearned: {
+            /**
+             * Adjusted Max Items
+             * @description 按偏好调整后写进配置的条数
+             */
+            adjusted_max_items: number;
+            /**
+             * Max Items
+             * @description 设置里的每天条数
+             */
+            max_items: number;
+            /** Name */
+            name: string;
+            /**
+             * Score
+             * @description 最近 60 天：收藏数 − 不感兴趣数
+             */
+            score: number;
         };
         /** NoteConfig */
         NoteConfig: {
@@ -12073,10 +12983,10 @@ export interface components {
             run_at: string;
             /**
              * Source
-             * @description agent 是你自己安排的，admin 是管理员建的，issue 是 Issue 有新动态时工作台安排的
+             * @description agent 是你自己安排的，admin 是管理员建的，issue 是 Issue 有新动态时工作台安排的，runner 是运行环境的命令有结果时工作台安排的，news 是到了写每日早报的时间（新闻早报方案 B）
              * @enum {string}
              */
-            source: "agent" | "admin" | "issue";
+            source: "agent" | "admin" | "issue" | "runner" | "news";
             /**
              * Status
              * @enum {string}
@@ -12183,7 +13093,7 @@ export interface components {
             version: number;
             /**
              * Widget Type
-             * @description 当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications、project_progress、im_quick_chat；也可能是已不再支持的旧类型，前端应显示安全的错误卡片
+             * @description 当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications、project_progress、im_quick_chat、news_briefing；也可能是已不再支持的旧类型，前端应显示安全的错误卡片
              */
             widget_type: string;
         };
@@ -17688,7 +18598,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"] | components["schemas"]["ServiceHealthWidgetCreate"] | components["schemas"]["ApiLatencyWidgetCreate"] | components["schemas"]["NotificationsWidgetCreate"] | components["schemas"]["ProjectProgressWidgetCreate"] | components["schemas"]["ImQuickChatWidgetCreate"];
+                "application/json": components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"] | components["schemas"]["ServiceHealthWidgetCreate"] | components["schemas"]["ApiLatencyWidgetCreate"] | components["schemas"]["NotificationsWidgetCreate"] | components["schemas"]["ProjectProgressWidgetCreate"] | components["schemas"]["ImQuickChatWidgetCreate"] | components["schemas"]["NewsBriefingWidgetCreate"];
             };
         };
         responses: {
@@ -24502,6 +25412,846 @@ export interface operations {
             };
         };
     };
+    list_briefings: {
+        parameters: {
+            query?: {
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsBriefingPage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    generate_briefing: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsBriefingOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_briefing: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                briefing_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsBriefingOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_feedback: {
+        parameters: {
+            query?: {
+                kind?: "favorite" | "dismiss";
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsFeedbackPage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    add_feedback: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewsFeedbackIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsFeedbackOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_feedback: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    news_hot: {
+        parameters: {
+            query?: {
+                platform?: ("toutiao" | "baidu" | "wallstreetcn-hot" | "thepaper" | "bilibili-hot-search" | "cls-hot" | "ifeng" | "tieba" | "weibo" | "douyin" | "zhihu") | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsItemList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    news_rss: {
+        parameters: {
+            query?: {
+                feed?: string | null;
+                days?: number;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsItemList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    news_search: {
+        parameters: {
+            query: {
+                q: string;
+                days?: number;
+                include_rss?: boolean;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsItemList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_settings: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsSettingsOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_settings: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewsSettingsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsSettingsOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    test_push: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsPushTestOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 写操作结果未知（RESULT_UNKNOWN）：用同一个 Idempotency-Key 重发以查询结果 */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    news_status: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsStatusOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    news_today: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsTodayOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_notifications: {
         parameters: {
             query?: {
@@ -28427,7 +30177,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QuickLinksWidgetUpdate"] | components["schemas"]["NoteWidgetUpdate"] | components["schemas"]["TodoSummaryWidgetUpdate"] | components["schemas"]["TodayTasksWidgetUpdate"] | components["schemas"]["CalendarAgendaWidgetUpdate"] | components["schemas"]["RecentDocsWidgetUpdate"] | components["schemas"]["GitHubActivityWidgetUpdate"] | components["schemas"]["ServiceHealthWidgetUpdate"] | components["schemas"]["ApiLatencyWidgetUpdate"] | components["schemas"]["NotificationsWidgetUpdate"] | components["schemas"]["ProjectProgressWidgetUpdate"] | components["schemas"]["ImQuickChatWidgetUpdate"];
+                "application/json": components["schemas"]["QuickLinksWidgetUpdate"] | components["schemas"]["NoteWidgetUpdate"] | components["schemas"]["TodoSummaryWidgetUpdate"] | components["schemas"]["TodayTasksWidgetUpdate"] | components["schemas"]["CalendarAgendaWidgetUpdate"] | components["schemas"]["RecentDocsWidgetUpdate"] | components["schemas"]["GitHubActivityWidgetUpdate"] | components["schemas"]["ServiceHealthWidgetUpdate"] | components["schemas"]["ApiLatencyWidgetUpdate"] | components["schemas"]["NotificationsWidgetUpdate"] | components["schemas"]["ProjectProgressWidgetUpdate"] | components["schemas"]["ImQuickChatWidgetUpdate"] | components["schemas"]["NewsBriefingWidgetUpdate"];
             };
         };
         responses: {

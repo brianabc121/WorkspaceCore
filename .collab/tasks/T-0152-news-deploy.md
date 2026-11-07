@@ -2,9 +2,9 @@
 id: T-0152
 title: 新闻早报 N1 部署：TrendRadar compose、news 内部网络与配置卷、提示词下载、Make、deploy.sh
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: infra/trendradar,compose.yaml,Makefile,scripts,.env.example,docs
 depends_on: T-0151
 created: 2026-11-07
@@ -29,3 +29,5 @@ updated: 2026-11-07
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-07 16:07 UTC · claude · 创建任务（owner: claude）
+- 2026-11-07 16:55 UTC · claude · 开始任务
+- 2026-11-07 16:55 UTC · claude · infra/trendradar/compose.yaml（锁定 digest、news 内部网络、cap_drop ALL + group_add 10001）、scripts/trendradar-prompts.sh（锁定提交 + sha256）、Make 目标、core 网络与卷、api 镜像目录、deploy.sh 可选组件“新闻早报”、部署手册第 23 节。本地实测整条链路通过（见核验记录第 7 节）

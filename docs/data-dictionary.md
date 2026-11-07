@@ -470,3 +470,16 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 **downgrade** 按旧结构恢复上述四张空表（`app_logins` 仍只允许 `n8n`），不恢复旧连接、凭据、工作流记录或触发幂等记录。要恢复移除前的数据，必须使用升级前的备份。历史迁移 `0010`、`0019`、`0020` 保持原样，仍可从空库走完整迁移链。
 
 该迁移只影响工作台自己的数据库，不修改独立 n8n 服务的数据卷或工作流。旧通知与审计证据按各自的留存规则保留。
+
+### 迁移 `0048`（T-0153）
+
+新闻早报（`docs/v2/NEWS_PLAN.md` 第 9 节）。只新增，不改已有数据。
+
+| 表 / 对象 | 字段 | 说明 |
+|---|---|---|
+| `news_settings` | `workspace_id`（主键，级联删除）、`enabled`、`timezone`、`push_times`（JSONB，`HH:MM`）、`briefing_mode`（CHECK `trendradar` / `agent`）、`agent_instance_id`（置空删除）、`platforms`、`newsnow_api_url`、`feeds`、`topics`、`exclusions`（JSONB）、`filter_method`（CHECK `keyword` / `ai`）、`ai_model`、`ai_api_base`、`ai_key_ref`、`ai_analysis`、`ai_translation`、`channels`（JSONB，明文设置）、`channel_secrets_ref`、`ingest_token_ref`、`config_rev`、`rendered_at`、`render_error`、`learned`（JSONB）、`updated_by`、`version`、时间戳 | 部分唯一索引 `uq_news_settings_enabled (enabled) WHERE enabled`：整个部署同时只有一个工作空间启用。三个 `*_ref` 是 `enc:v1:` 密文引用（用途 `news_settings:<工作空间>:<ai_key / channels / ingest>`），纳入密钥轮换 |
+| `news_briefings` | `id`、`workspace_id`（级联删除）、`local_date`、`slot`、`source`（CHECK `trendradar` / `agent`）、`title`、`content`、`parts`、`total_parts`、`status`（CHECK `receiving` / `complete` / `pending` / `failed`）、`task_id`（置空删除）、`error`、时间戳 | 索引 `(workspace_id, created_at)`；部分唯一索引 `(task_id) WHERE task_id IS NOT NULL` |
+| `news_feedback` | `id`、`workspace_id`、`user_id`（都级联删除）、`kind`（CHECK `favorite` / `dismiss`）、`url`、`title`、`source_type`（CHECK `hotlist` / `rss`）、`source_id`、`source_name`、`topic`、`created_at` | 唯一 `(workspace_id, user_id, kind, url)`；索引 `(workspace_id, created_at)` |
+| `agent_wakeups.source` | CHECK 增加 `news` | 方案 B 的唤醒 |
+
+**downgrade** 删除 `news` 唤醒，CHECK 改回，删除三张表。
