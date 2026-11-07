@@ -1,5 +1,7 @@
 # API 契约
 
+> T-0149：n8n 工作流与应用登录账号接口已移除；历史契约中的相关端点、首页模块与工具不再可用，见 `docs/decisions/2026-11-07-remove-n8n.md`。
+
 > 状态：Sprint 1 ~ 5 端点已全部实现；V2（OpenClaw、IM、审批）的端点已在 OC-1 声明，实现中。完整规范见 `docs/DEVELOPMENT_SPEC.md` 第 6 节。
 > **机器可读的接口以 `services/api/openapi.json` 为准**（`make openapi` 由代码生成，CI 检查一致性），前端据此生成类型。
 > Sprint 1 的 Cookie、CSRF、工作空间上下文、错误码等约定见 `docs/decisions/2026-10-30-sprint-1-auth-contract.md`。
@@ -197,7 +199,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET | `/api/v1/developer/repos`、`/issues`、`/pulls`、`/runs` | GitHub 投影（带 `sync`；限流时 `reason: rate_limited` 与 `retry_at`） | 已实现（T-0028） |
 | GET | `/api/v1/search?q=` | 跨资源搜索（只返回当前用户可见、未删除的资源） | 已实现（T-0029） |
 
-- 已有接口只增不改：
+- 保留的聚合接口与组件：
   - `IntegrationOut.repositories`、`IntegrationTestResult.repositories`；
   - `SyncState.retry_at`、`ModuleStatus.retry_at`；
   - 首页 `modules` 增加 `calendar`、`knowledge`、`github`；
@@ -207,30 +209,22 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 
 ## Sprint 5 端点
 
-约定见 `docs/decisions/2026-10-31-sprint-5-operations-automations-contract.md`。Prometheus、Grafana、n8n 的核验结果见
+约定见 `docs/decisions/2026-10-31-sprint-5-operations-automations-contract.md`。Prometheus、Grafana 的核验结果见
 `docs/decisions/2026-10-31-prometheus-grafana-n8n-verification.md`。除 SSE 外都需要 `X-Workspace-Id`。
 
 | 方法 | 路径 | 说明 | 状态 |
 |---|---|---|---|
 | GET | `/api/v1/operations/storage` | 知识库图片存储（owner / admin）：主存储、副本（名字、是否配置完整与缺少的变量、R2 / OSS 的桶地址、最近一次自检）、本工作空间的图片数 / 用量 / 配额、全部工作空间待复制与复制失败的数量；不返回密钥，本地存储不返回路径 | 已实现（T-0103） |
 | POST | `/api/v1/operations/storage/check` | 存储自检（owner / admin）：对主存储与副本各写、读、删一个探测对象，结果存进 Redis 并返回最新的 `StorageStatus`；Worker 启动时和每天也自检一次 | 已实现（T-0103） |
-| GET | `/api/v1/operations/services` | 核心服务、监控组件、集成与 n8n 的状态（没有部署的为 `not_configured`）；V2 另有 `kind = agents` 的 OpenIM 与本工作空间的 OpenClaw 实例（实例只对 owner / admin 列出） | 已实现（T-0035；V2 部分 T-0062） |
+| GET | `/api/v1/operations/services` | 核心服务、监控组件与集成的状态（没有部署的为 `not_configured`）；V2 另有 `kind = agents` 的 OpenIM 与本工作空间的 OpenClaw 实例（实例只对 owner / admin 列出） | 已实现（T-0035；V2 部分 T-0062） |
 | GET | `/api/v1/operations/metrics?range=&views=` | 预设指标视图，聚合好的数据点；不接受 PromQL；带 `sync` 与 `grafana_url` | 已实现（T-0035） |
 | GET / PATCH | `/api/v1/notifications` | 我的通知（游标分页、`unread_count`）/ 标为已读（`ids` 或 `all: true`） | 已实现（T-0036） |
 | GET | `/api/v1/events/stream?workspace_id=` | SSE：只发 `event: invalidate` 失效提示；`Last-Event-ID` 续传，无法续传时 `reset: true`；连接太多时 `429` | 已实现（T-0036） |
-| GET / PUT | `/api/v1/automations/connection` | n8n 连接（admin；API Key 与共享密钥只写不读） | 已实现（T-0037） |
-| POST | `/api/v1/automations/connection/test` | 测试 n8n 连接（不触发工作流） | 已实现（T-0037） |
-| GET / POST | `/api/v1/automations` | 白名单工作流与最近一次执行 / 登记（admin） | 已实现（T-0037） |
-| PATCH / DELETE | `/api/v1/automations/{automation_id}` | 修改 / 移出白名单（admin，乐观并发；执行记录保留） | 已实现（T-0037） |
-| POST | `/api/v1/automations/{automation_id}/trigger` | 触发（member，策略校验，必须带 `Idempotency-Key`；结果未知时为 `unknown`，不自动重发） | 已实现（T-0037） |
-| GET | `/api/v1/automations/{automation_id}/runs` | 执行记录（只有状态与错误摘要） | 已实现（T-0037） |
 
-- 已有接口只增不改：
-  - 首页 `modules` 增加 `operations`、`automations`；`summary.unread_notifications` 从 T-0036 起返回实际值；
+- 保留的聚合接口与组件：
+  - 首页 `modules` 增加 `operations`；`summary.unread_notifications` 从 T-0036 起返回实际值；
   - 组件类型增加 `service_health`、`api_latency`、`notifications`；
-  - `IntegrationCheck.name`、集成的 `provider` 不加值：n8n 连接单独放在 `/automations/connection`。
 - SSE 的事件类型在前端用 `components["schemas"]["InvalidateEvent"]`；开始推送之前的错误是普通 JSON。
-- 新增错误码：`409 AUTOMATION_UNAVAILABLE`（`details.reason`）、`409 AUTOMATION_EXISTS`（`details.existing_id`）。
 
 ## V2 端点（OpenClaw 实例、密钥库、IM、工具审批）
 
@@ -295,22 +289,10 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | POST | `/agent-api/v1/stops/claim`、`/stops/{stop_id}/result` | 领取终止令 / 报回结果（接入包的 `bin/stop-runs.mjs`），见“终止正在执行的任务”一节 | 已实现（T-0126） |
 
 - OpenIM 回调 `/internal/openim/{path_token}/{command}` 只走内部网络，不进 OpenAPI（V2 契约第 10 节）。
-- 已有接口只增不改：SSE 的 `topics` 增加 `im`、`agents`、`ai`。
+- 保留的聚合接口与组件：SSE 的 `topics` 增加 `im`、`agents`、`ai`。
 - 新增错误码：`409 AGENT_SECRET_EXISTS` / `AGENT_INGRESS_NOT_CONFIGURED`、`401 AGENT_UNAUTHORIZED`、`403 STEP_UP_REQUIRED` / `STEP_UP_FAILED`、`409 AGENT_DISABLED` / `IM_NOT_READY` /
   `IM_SEND_REJECTED` / `PIN_LIMIT_REACHED` / `EXECUTION_NOT_PENDING` / `CONTACT_GROUP_EXISTS`（OC-3 补充）、
   `503 IM_UNAVAILABLE`（V2 契约第 12 节）。
-
-## n8n 登录账号（T-0080；T-0082 去掉了 Vikunja）
-
-约定见 `docs/decisions/2026-11-02-app-logins.md`。都要 `X-Workspace-Id`，只给 owner / admin（member、viewer `403`）；
-响应都带 `Cache-Control: no-store`。
-
-| 方法 | 路径 | 说明 | 状态 |
-|---|---|---|---|
-| GET | `/api/v1/app-logins` | 固定一项（`n8n`；T-0082 前还有 `vikunja`）：用户名、`password_set`、`login_url`、`version`；**不含密码**；没保存时 `configured = false` | 已实现（T-0080） |
-| PUT | `/api/v1/app-logins/{app}` | 新建（必须给 `username`）或修改（必须带 `version`）；`password` 不填表示不改 | 已实现（T-0080） |
-| POST | `/api/v1/app-logins/{app}/reveal` | 返回明文密码；要 CSRF，每次写审计 `app_login.revealed`；没保存密码时 `404` | 已实现（T-0080） |
-| DELETE | `/api/v1/app-logins/{app}?version=` | 删除保存的账号（不影响 n8n 里的账号） | 已实现（T-0080） |
 
 ## 知识库（T-0098）
 

@@ -154,8 +154,6 @@ async def test_unconfigured_integrations_say_so(env: Env) -> None:
         result = ok(await call(env, token, tool, {}))
         assert result["items"] == []
         assert result["freshness"]["status"] == "not_configured"
-    automations = ok(await call(env, token, "list_automations", {}))
-    assert automations["items"] == []
 
 
 async def test_operations_notifications_and_overview(env: Env) -> None:

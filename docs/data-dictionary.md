@@ -1,7 +1,7 @@
 # 数据字典
 
-> 状态：Sprint 6 之后（迁移到 `0020`）。目标实体清单见 `docs/DEVELOPMENT_SPEC.md` 第 5 节（V2 见 `docs/v2/TRANSFORMATION_PLAN.md` 第 5 节）；本文记录**已经迁移**的数据库对象。
-> 迁移 `0001` ~ `0019` 都只新增对象，都有 downgrade；`0011` ~ `0019` 没有改动 `0010` 及以前的表。加列只有两处，都可空、无默认值：`0014` 给 `0013` 新建的 `im_messages` 加 `idempotency_key`，`0018` 给 `0011` 新建的 `agent_instances` 加 `im_token_expires_at`。`0020`（T-0082，移除 Vikunja）是例外：新建 `projects` / `tasks` 并转换 Vikunja 的投影，删除 `webhook_inbox` 表、`integrations.webhook_secret_ref` 列与 Vikunja 的数据，downgrade 只恢复结构、不恢复数据（见「迁移 `0020`」）。升级与回退的做法见 `docs/deployment.md` 第 5 节。
+> 状态：2026-11-07，迁移到 `0047`（T-0149）。目标实体清单见 `docs/DEVELOPMENT_SPEC.md` 第 5 节（V2 见 `docs/v2/TRANSFORMATION_PLAN.md` 第 5 节）；本文记录**已经迁移**的数据库对象。
+> 迁移 `0001` ~ `0019` 都只新增对象，都有 downgrade；`0011` ~ `0019` 没有改动 `0010` 及以前的表。加列只有两处，都可空、无默认值：`0014` 给 `0013` 新建的 `im_messages` 加 `idempotency_key`，`0018` 给 `0011` 新建的 `agent_instances` 加 `im_token_expires_at`。`0020`（T-0082，移除 Vikunja）是例外：新建 `projects` / `tasks` 并转换 Vikunja 的投影，删除 `webhook_inbox` 表、`integrations.webhook_secret_ref` 列与 Vikunja 的数据，downgrade 只恢复结构、不恢复数据（见「迁移 `0020`」）。`0047`（T-0149，移除 n8n）删除退役的工作流与登录账号表及相应的触发幂等记录，downgrade 也只恢复空表（见「迁移 `0047`」）。升级与回退的做法见 `docs/deployment.md` 第 5 节。
 
 ## 约定
 
@@ -108,7 +108,9 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 |---|---|---|
 | `notifications` | `id`、`workspace_id`、`user_id`、`type`、`severity`、`title`、`body`、`link`、`source_key`、`read_at`、`created_at` | 通知中心，每个收件人一行。`(user_id, workspace_id, source_key)` 在 `source_key` 非空时唯一，同一事件不会重复通知；`ix_notifications_unread` 是只含未读的部分索引（未读数）；`ix_notifications_recipient_created` 用于按时间分页；随用户、工作空间级联删除。`title` / `body` 按纯文本显示，不含 Token 与第三方 payload |
 
-### 迁移 `0010`（S5-04）
+### 迁移 `0010`（S5-04，历史结构；T-0149 已移除）
+
+以下三表只用于解释历史迁移；迁移 `0047` 后不保留连接、白名单或执行记录，见 `docs/decisions/2026-11-07-remove-n8n.md`。
 
 | 表 | 主要字段 | 约束与说明 |
 |---|---|---|
@@ -132,10 +134,8 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 方案第 5 节要求给已有凭证密文加 `key_version` 列，实际没有加：`enc:v1:<key_id>:…` 引用本身带着加密密钥的 ID。`python -m app.commands.rotate_credentials` 按它找出用旧密钥加密的记录，逐条重新加密，不改 `updated_at` 与 `version`。覆盖的列：
 - `integration_accounts.credential_ref`；
 - `integrations.webhook_secret_ref`（`0020` 删除了这一列）；
-- `automation_connections.api_key_ref`、`trigger_secret_ref`；
 - `agent_secret_versions.ciphertext_ref`；
-- `agent_ca.key_ref`；
-- `app_logins.password_ref`（迁移 `0019` 新增）。
+- `agent_ca.key_ref`。
 
 步骤见 `docs/deployment.md` 第 6.1 节。
 
@@ -187,7 +187,9 @@ GitHub 集成复用 `integrations`、`integration_accounts`、`external_resource
 |---|---|---|
 | `agent_instances`（新增列） | `im_token_expires_at` | 可空，无默认值。实例启动时领取 IM 令牌，工作台按 OpenIM 返回的 `expireTimeSeconds` 记下到期时间（令牌有效期 30 天）；Worker 每天检查，到期前 7 天提醒管理员（`agent_im_token_expiring`）。每周的定时重启会换新令牌、刷新这一列 |
 
-### 迁移 `0019`（T-0080）
+### 迁移 `0019`（T-0080，历史结构；T-0149 已移除）
+
+`app_logins` 已在迁移 `0047` 中随 n8n 移除；以下描述记录原迁移，不代表当前可用的账号存储。
 
 | 表 | 主要字段 | 约束与说明 |
 |---|---|---|
@@ -455,3 +457,16 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 
 **downgrade** 回到 0045 的结构，同样不保留这些记录：删除 `agent_deployments`，SSH 目标、任务与运维记录清空后改回按实例的列。
 
+### 迁移 `0047`（T-0149）
+
+移除 n8n 工作流与应用登录账号（`docs/decisions/2026-11-07-remove-n8n.md`）。这是删除数据的收缩迁移，升级前必须保存工作台数据库备份。
+
+| 对象 | 升级行为 |
+|---|---|
+| `automation_runs`、`automations`、`automation_connections` | 删除表及其记录，包括执行历史、白名单、连接和加密的 API Key / 触发密钥 |
+| `app_logins` | 删除表及其账号和加密密码；T-0082 后该表只允许 n8n |
+| `idempotency_requests` | 只删除操作为 `automation.trigger` 的幂等记录；保留其他操作 |
+
+**downgrade** 按旧结构恢复上述四张空表（`app_logins` 仍只允许 `n8n`），不恢复旧连接、凭据、工作流记录或触发幂等记录。要恢复移除前的数据，必须使用升级前的备份。历史迁移 `0010`、`0019`、`0020` 保持原样，仍可从空库走完整迁移链。
+
+该迁移只影响工作台自己的数据库，不修改独立 n8n 服务的数据卷或工作流。旧通知与审计证据按各自的留存规则保留。

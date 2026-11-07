@@ -15,5 +15,3 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:?在 .env 里设置 ACME_EMAIL（Let's Encrypt 联系邮箱）}
     volumes:
       - ./infra/caddy/https.Caddyfile:/etc/caddy/Caddyfile:ro
-      # n8n 的对外子域名（可选，deploy.sh connect 生成；目录为空时不对外）
-      - ./infra/caddy/apps-enabled:/etc/caddy/apps:ro

@@ -25,7 +25,7 @@
 - [ ] `make scan` 通过（或最新的 `ci-security` 成功）：依赖没有高危或严重漏洞，git 历史里没有密钥，本仓库的镜像没有已修复的高危漏洞
 - [ ] 查看第三方镜像的报告（`scripts/security-scan.sh images` 的“只报告”部分）：
   - [ ] **Caddy**（对外入口）：上游有没有包含修复的新版本；有就按第 4 节升级
-  - [ ] PostgreSQL、Redis、Prometheus、Grafana、n8n、restic：上游有没有修复版本；暂不升级的写明原因
+  - [ ] PostgreSQL、Redis、Prometheus、Grafana、restic：上游有没有修复版本；暂不升级的写明原因
 - [ ] `.gitleaksignore` 新增的条目都写明了理由，不是真实凭据
 
 ## 3. 版本锁定
@@ -45,7 +45,7 @@
 - [ ] 本月做过恢复演练：`make restore-verify` 通过，记下快照 ID、耗时与结果
 - [ ] 升级前刚做过 `make backup`，快照 ID 已填在上面的发布记录里
 - [ ] `.env` 有一份单独保管的副本（不和备份放在一起），`BACKUP_PASSWORD` 也单独保管
-- [ ] n8n 等独立组件已各自备份（`docs/deployment.md` 第 5.1 节）
+- [ ] 独立部署的 AFFiNE 已另行备份（`docs/deployment.md` 第 5.1 节）
 
 ## 5. 配置与密钥（`.env`）
 
@@ -56,7 +56,7 @@
 - [ ] `INTEGRATION_ALLOWED_HOSTS` 只包含确实需要访问的内部主机
 - [ ] 监控地址（`PROMETHEUS_URL`、`GRAFANA_URL`）只在内部网络可达
 - [ ] **密钥轮换**（按计划，或怀疑泄露时立即执行）：
-  - [ ] GitHub、n8n 的 Token / API Key：先在对方系统里生成新的，再到工作台的集成设置里替换，然后作废旧的
+  - [ ] GitHub 的 Token：先在对方系统里生成新的，再到工作台的集成设置里替换，然后作废旧的
   - [ ] `SESSION_SECRET`：
     - 修改后已有会话的 CSRF Token 全部失效，所有用户要重新登录后才能保存修改；
     - 审计日志里的 IP 哈希从此换了密钥，新旧记录不能互相对照。
@@ -81,7 +81,7 @@
 - [ ] 按 `docs/deployment.md` 第 5.1 节升级：先构建、再用新镜像迁移、最后 `make up`
 - [ ] 迁移都只新增对象；有不可逆的迁移时，已得到人类确认并写明回滚只能从备份恢复（第 5.2 节）
 - [ ] `make smoke` 通过；`make smoke-full` 通过（或用 `SMOKE_EMAIL` / `SMOKE_PASSWORD` 指定的冒烟账号）
-- [ ] 登录核对：首页组件、任务、日历、知识库、开发者、运维、通知、自动化都能打开，运维页的核心服务都是“正常”
+- [ ] 登录核对：首页组件、任务、日历、知识库、开发者、运维、通知都能打开，运维页的核心服务都是“正常”
 - [ ] 运维页“知识库图片存储”自检通过（配了 R2 / OSS 时主存储与副本都要通过）；任务时间轴能打开，接了 OpenClaw 的实例 token 不是“未上报”（`docs/deployment.md` 第 19、20 节）
 - [ ] 实例页每个接了 OpenClaw 的实例都有服务器状态（不是“还没有收到”）；用 SSH 部署的实例在“运维”里“查看状态”成功（第 21、22 节）
 - [ ] 回滚方案已确认：上一个版本的提交、升级前的迁移版本、快照 ID 都已记下（第 5.3 节）

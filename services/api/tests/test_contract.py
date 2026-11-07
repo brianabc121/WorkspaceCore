@@ -3,7 +3,6 @@ Sprint 2（…-sprint-2-dashboard-contract.md）、Sprint 3（…-sprint-3-tasks
 Sprint 4（…-sprint-4-knowledge-search-contract.md）、
 Sprint 5（…-sprint-5-operations-automations-contract.md）、
 V2 OC-1（…-v2-oc1-contract.md）、
-n8n 登录账号（2026-11-02-app-logins.md）；
 工作台自己的项目与任务（2026-11-02-remove-vikunja.md）。"""
 
 import json
@@ -21,8 +20,6 @@ from app.api.deps import (
     authenticated,
     get_agent_service,
     get_ai_tool_service,
-    get_app_login_service,
-    get_automation_service,
     get_calendar_service,
     get_db,
     get_developer_service,
@@ -118,15 +115,6 @@ SPRINT_5_ENDPOINTS = {
     ("get", "/api/v1/notifications"),
     ("patch", "/api/v1/notifications"),
     ("get", "/api/v1/events/stream"),
-    ("get", "/api/v1/automations/connection"),
-    ("put", "/api/v1/automations/connection"),
-    ("post", "/api/v1/automations/connection/test"),
-    ("get", "/api/v1/automations"),
-    ("post", "/api/v1/automations"),
-    ("patch", "/api/v1/automations/{automation_id}"),
-    ("delete", "/api/v1/automations/{automation_id}"),
-    ("post", "/api/v1/automations/{automation_id}/trigger"),
-    ("get", "/api/v1/automations/{automation_id}/runs"),
 }
 V2_ADMIN_ENDPOINTS = {
     ("get", "/api/v1/agents/settings"),
@@ -179,12 +167,6 @@ V2_ADMIN_ENDPOINTS = {
     ("post", "/api/v1/ai/tool-executions/{execution_id}/reject"),
 }
 
-APP_LOGIN_ENDPOINTS = {
-    ("get", "/api/v1/app-logins"),
-    ("put", "/api/v1/app-logins/{app}"),
-    ("post", "/api/v1/app-logins/{app}/reveal"),
-    ("delete", "/api/v1/app-logins/{app}"),
-}
 
 V2_AGENT_ENDPOINTS = {
     ("post", "/agent-api/v1/secrets/resolve"),
@@ -224,7 +206,6 @@ def test_all_sprint_endpoints_are_declared() -> None:
         | SPRINT_5_ENDPOINTS
         | V2_ADMIN_ENDPOINTS
         | V2_AGENT_ENDPOINTS
-        | APP_LOGIN_ENDPOINTS
     )
 
 
@@ -356,10 +337,8 @@ def any_role(app: FastAPI) -> None:
         get_search_service,
         get_operations_service,
         get_notification_service,
-        get_automation_service,
         get_agent_service,
         get_ai_tool_service,
-        get_app_login_service,
     ):
         app.dependency_overrides[service] = _ShapeOnlyService
 
@@ -704,31 +683,11 @@ def test_event_stream_is_documented_as_server_sent_events() -> None:
     assert set(event) == {"workspace_id", "topics", "reset", "at"}  # 只有失效提示，没有数据
 
 
-def test_automation_secrets_are_write_only() -> None:
-    upsert = _properties("AutomationConnectionUpsert")
-    for field in ("api_key", "trigger_secret"):
-        variants = upsert[field]["anyOf"]
-        assert variants[0]["writeOnly"] is True, field
-    out = _properties("AutomationConnectionOut")
-    assert not {"api_key", "trigger_secret"} & set(out)
-    assert {"api_key_set", "trigger_secret_set", "tested_version"} <= set(out)
-    run = _properties("AutomationRunOut")
-    assert not {"payload", "result", "data", "params"} & set(run)  # 只存错误摘要（规范 7.5）
-
-
 def test_metrics_do_not_accept_queries() -> None:
     """浏览器只能选预设视图与时间范围，不能提交 PromQL（核验 ADR 第 3 节）。"""
     params = _operation("get", "/api/v1/operations/metrics")["parameters"]
     assert isinstance(params, list)
     assert {p["name"] for p in params} == {"range", "views", "X-Workspace-Id"}
-
-
-def test_automation_trigger_requires_an_idempotency_key_header() -> None:
-    params = _operation("post", "/api/v1/automations/{automation_id}/trigger")["parameters"]
-    assert isinstance(params, list)
-    header = next(p for p in params if p["name"] == "Idempotency-Key")
-    assert header["in"] == "header" and header["required"]
-    assert header["schema"]["format"] == "uuid"
 
 
 @pytest.mark.usefixtures("any_role")
@@ -790,89 +749,6 @@ async def test_event_stream_rules(stub_client: httpx.AsyncClient) -> None:
     invalid = await stub_client.get("/api/v1/events/stream", params={"workspace_id": "1"})
     assert invalid.status_code == 422
     # 成员校验、补发与重置的行为见 tests/test_notifications_api.py（T-0036）
-
-
-@pytest.mark.usefixtures("any_role")
-async def test_automation_connection_rules_do_not_echo_secrets(
-    stub_client: httpx.AsyncClient,
-) -> None:
-    short_key = "n8n_api_short"
-    path = "/api/v1/automations/connection"
-    key = "n8n_api_" + "k" * 24
-    secret = "trigger-secret-0123456789"  # noqa: S105  测试用的假值
-    base = {"base_url": "http://n8n:5678", "api_key": key, "trigger_secret": secret}
-    wrong = await stub_client.put(path, json={**base, "api_key": short_key}, headers=WORKSPACE)
-    assert wrong.status_code == 422
-    assert short_key not in wrong.text
-    cases: dict[str, dict[str, object]] = {
-        "什么都没改": {},
-        "只有版本": {"version": 1},
-        "地址带凭据": {**base, "base_url": "http://admin:pw@n8n:5678"},
-        "地址带查询": {**base, "base_url": "http://n8n:5678/?a=1"},
-        "密钥太短": {**base, "trigger_secret": "short"},
-        "多余字段": {**base, "owner_password": "x"},
-    }
-    for name, body in cases.items():
-        response = await stub_client.put(path, json=body, headers=WORKSPACE)
-        assert response.status_code == 422, name
-        assert "pw@" not in response.text
-    ok = await stub_client.put(path, json=base, headers=WORKSPACE)
-    assert ok.status_code == 501
-    tested = await stub_client.post(f"{path}/test", headers=WORKSPACE)
-    assert tested.status_code == 501
-
-
-@pytest.mark.usefixtures("any_role")
-async def test_automation_payload_rules(stub_client: httpx.AsyncClient) -> None:
-    base: dict[str, object] = {
-        "name": "发送日报",
-        "workflow_id": "aB3dE5fG7hJ9kL1m",
-        "webhook_path": "daily-report",
-        "params": [{"name": "recipient", "label": "收件人", "type": "string", "sensitive": True}],
-    }
-    param = {"name": "x", "label": "X", "type": "string"}
-    cases: dict[str, dict[str, object]] = {
-        "完整网址": {**base, "webhook_path": "https://n8n.example.com/webhook/daily"},
-        "路径穿越": {**base, "webhook_path": "../rest/workflows"},
-        "工作流 ID": {**base, "workflow_id": "a/b"},
-        "参数名": {**base, "params": [{**param, "name": "Bad-Name"}]},
-        "参数类型": {**base, "params": [{**param, "type": "object"}]},
-        "参数太多": {**base, "params": [{**param, "name": f"p{i}"} for i in range(21)]},
-        "多余字段": {**base, "headers": {"X-Any": "1"}},
-    }
-    for name, body in cases.items():
-        response = await stub_client.post("/api/v1/automations", json=body, headers=WORKSPACE)
-        assert response.status_code == 422, name
-    created = await stub_client.post("/api/v1/automations", json=base, headers=WORKSPACE)
-    assert created.status_code == 501
-    path = f"/api/v1/automations/{uuid.uuid4()}"
-    nothing = await stub_client.patch(path, json={"version": 1}, headers=WORKSPACE)
-    assert nothing.status_code == 422
-    renamed = await stub_client.patch(path, json={"version": 1, "name": "周报"}, headers=WORKSPACE)
-    assert renamed.status_code == 501
-    no_version = await stub_client.delete(path, headers=WORKSPACE)
-    assert no_version.status_code == 422
-    for listing in ["/api/v1/automations", f"{path}/runs"]:
-        response = await stub_client.get(listing, headers=WORKSPACE)
-        assert response.status_code == 501, listing
-
-
-@pytest.mark.usefixtures("any_role")
-async def test_automation_trigger_rules(stub_client: httpx.AsyncClient) -> None:
-    path = f"/api/v1/automations/{uuid.uuid4()}/trigger"
-    body = {"params": {"recipient": "me@example.com"}}
-    missing = await stub_client.post(path, json=body, headers=WORKSPACE)
-    assert missing.status_code == 422
-    assert ["header", "Idempotency-Key"] in [
-        e["loc"] for e in missing.json()["error"]["details"]["errors"]
-    ]
-    headers = {**WORKSPACE, "Idempotency-Key": str(uuid.uuid4())}
-    extra = await stub_client.post(path, json={**body, "workflow_id": "other"}, headers=headers)
-    assert extra.status_code == 422  # 只能触发白名单里登记的工作流
-    accepted = await stub_client.post(path, json=body, headers=headers)
-    assert accepted.status_code == 501  # 参数按声明校验在 T-0037
-    empty = await stub_client.post(path, json={}, headers=headers)
-    assert empty.status_code == 501
 
 
 # ---------------------------------------------------------------- V2 OC-1 契约
@@ -948,7 +824,6 @@ def test_v2_keeps_existing_enums_and_only_adds_event_topics() -> None:
         "integrations",
         "notifications",
         "operations",
-        "automations",
         "im",
         "agents",
         "ai",
@@ -984,7 +859,6 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "list_pull_requests",
             "service_status",
             "list_notifications",
-            "list_automations",
             "dashboard_overview",
             "get_action_status",
             # 服务器状态：只看自己（T-0113）
@@ -1021,7 +895,7 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "create_bookmark",
             "mark_notification_read",
         },
-        "critical": {"delete_task", "delete_calendar_event", "trigger_automation"},
+        "critical": {"delete_task", "delete_calendar_event"},
         # 直接执行、不审批（人类 2026-11-03 决定）
         "knowledge": {"knowledge_write", "knowledge_delete"},
         # 领取 / 放弃 / 完成任务：直接执行、不审批（人类 2026-11-04 决定，T-0111）
@@ -1090,8 +964,6 @@ def test_v2_mcp_outputs_keep_free_text_under_untrusted() -> None:
         props = schema.get("properties")
         if isinstance(props, dict):
             leaked = free_text & {k for k in props if k != "untrusted"}
-            if schema.get("title") == "AutomationParam":  # 参数名受格式限制，由管理员登记
-                leaked -= {"name"}
             if schema.get("title") == "RunnerTemplateOut":  # 模板名受格式限制（小写字母数字）
                 leaked -= {"name"}
             assert not leaked, (schema.get("title"), leaked)
@@ -1342,49 +1214,3 @@ async def test_v2_openim_callback_route_rules(stub_client: httpx.AsyncClient) ->
     # 没有部署 OpenIM（未配置地址与口令）时回调地址不存在（契约第 10 节；实现见 T-0055）
     missing = await stub_client.post(f"/internal/openim/{token}/callbackAfterUserOnlineCommand")
     assert missing.status_code == 404
-
-
-# ---------------------------------------------------------------- n8n 登录账号（T-0080）
-
-
-def test_app_logins_use_the_session_and_only_reveal_returns_the_password() -> None:
-    paths = json.loads(render())["paths"]
-    for method, path in APP_LOGIN_ENDPOINTS:
-        assert paths[path][method]["security"] == [{"SessionCookie": []}], path
-    upsert = _properties("AppLoginUpsert")
-    assert upsert["password"]["anyOf"][0]["writeOnly"] is True
-    for name in ("AppLoginOut", "AppLoginList"):
-        assert "password" not in _properties(name), name
-    assert "password_set" in _properties("AppLoginOut")
-    assert set(_properties("AppLoginSecret")) == {"app", "username", "password"}
-
-
-@pytest.mark.usefixtures("any_role")
-async def test_app_login_payload_rules(stub_client: httpx.AsyncClient) -> None:
-    secret = "typed password"  # noqa: S105  测试用的假值
-    cases: dict[str, tuple[str, dict[str, object]]] = {
-        "不认识的应用": ("grafana", {"username": "admin"}),
-        "已移除的应用": ("vikunja", {"username": "admin"}),
-        "什么都没改": ("n8n", {}),
-        "只有版本": ("n8n", {"version": 1}),
-        "用户名为空": ("n8n", {"username": "   "}),
-        "密码为空": ("n8n", {"username": "a@example.com", "password": ""}),
-        "多余字段": ("n8n", {"username": "a@example.com", "url": "http://x"}),
-        "版本不对": ("n8n", {"version": 0, "password": secret}),
-    }
-    for name, (app, body) in cases.items():
-        response = await stub_client.put(f"/api/v1/app-logins/{app}", json=body, headers=WORKSPACE)
-        assert response.status_code == 422, name
-        assert secret not in response.text, name
-    ok = await stub_client.put(
-        "/api/v1/app-logins/n8n",
-        json={"username": "workspace", "password": secret},
-        headers=WORKSPACE,
-    )
-    assert ok.status_code == 501
-    revealed = await stub_client.post("/api/v1/app-logins/n8n/reveal", headers=WORKSPACE)
-    assert revealed.status_code == 501
-    unknown = await stub_client.post("/api/v1/app-logins/grafana/reveal", headers=WORKSPACE)
-    assert unknown.status_code == 422
-    no_version = await stub_client.delete("/api/v1/app-logins/n8n", headers=WORKSPACE)
-    assert no_version.status_code == 422

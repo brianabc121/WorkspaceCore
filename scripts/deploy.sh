@@ -10,10 +10,10 @@
 #
 # 部署、升级、接入组件分两段（T-0094）：
 #   1. 前台：把需要你回答的问题一次问完——SITE_DOMAIN、ACME_EMAIL、PUBLIC_BASE_URL（默认 https://<域名>），
-#      要不要部署 n8n / OpenIM / OpenClaw 接入入口及其参数、防火墙等；回答保存在 <代码目录>/.deploy/answers.env（不含密码）；
+#      要不要部署 OpenIM / OpenClaw 接入入口及其参数、防火墙等；回答保存在 <代码目录>/.deploy/answers.env（不含密码）；
 #   2. 后台：作为系统服务（systemd-run，没有 systemd 时 setsid nohup）运行，不再提问，输出写进 .deploy/deploy.log：
 #      安装缺少的工具与 Docker → 生成 .env（随机密钥）→ 启用 HTTPS 与生产模式 → make up → 迁移 → 冒烟检查 → 检查 HTTPS →
-#      等你在浏览器完成「首次安装」创建管理员（自动检测，不用回终端按回车）→ 按第 1 段的选择接入 n8n、部署 OpenIM、
+#      等你在浏览器完成「首次安装」创建管理员（自动检测，不用回终端按回车）→ 按第 1 段的选择部署 OpenIM、
 #      配置 OpenClaw 接入入口（T-0076、T-0088）。GitHub 在工作台「集成设置」页面上接入（T-0091）。
 # 前台接着显示日志；按 Ctrl+C、SSH 断开都不影响后台。之后查看：deploy.sh status（进度、安装凭据、失败原因）、
 # deploy.sh logs（日志）。失败后重新运行同样的命令，会问是否沿用上次的回答。
@@ -36,7 +36,7 @@ REPO_URL="${WORKSPACE_REPO:-https://github.com/brianabc121/WorkspaceCore.git}"
 DEFAULT_DIR="${WORKSPACE_DIR:-/srv/my-workspace}"
 PROJECT="my-workspace"
 # $PROJECT-vikunja：T-0082 移除了 Vikunja；留在列表里，uninstall 时还能清理以前部署的
-OPTIONAL_PROJECTS=("$PROJECT-vikunja" "$PROJECT-n8n" "$PROJECT-openim")
+OPTIONAL_PROJECTS=("$PROJECT-vikunja" "$PROJECT-openim")
 BACKUP_ENV_FILE="/etc/my-workspace/backup.env"
 
 ACTION="" DIR="" REF="" DOMAIN="" EMAIL="" BASE_URL="" ASSUME_YES=0 CONFIRM="" ENV_CHOICE="" DIR_CHOICE="" AFTER_PULL="" ROOT=""
@@ -88,7 +88,7 @@ as_root() { if (( EUID == 0 )); then "$@"; elif command -v sudo >/dev/null; then
 #   2. 后台：作为系统服务（systemd-run；没有 systemd 时 setsid nohup）运行，一个问题都不再问，输出写进日志。
 # 网页上的“首次安装”（创建管理员）由后台自动检测，不需要回到终端按回车。前台只是显示日志：
 # 按 Ctrl+C、断开 SSH 都不影响部署；之后运行 deploy.sh status（进度）或 deploy.sh logs（日志）。
-# 回答文件只有参数与选择，不含任何密码；需要密码的少数情况（例如 n8n 已经有 owner）后台跳过并列为待办。
+# 回答文件只有参数与选择，不含任何密码。
 PHASE=direct        # direct：边问边做（--foreground、CI）；plan：前台提问；run：后台运行
 FOREGROUND=0
 ANSWERS_PATH=""
@@ -794,9 +794,8 @@ remind_backup_env() {
 }
 
 # ---------------------------------------------------------------- 接入组件（T-0076）
-# 管理员在浏览器里创建好之后，自动接入 n8n（项目与任务由工作台自己管理，T-0082）。真正的接入在 api 容器里由
-# app/commands/connect.py 完成（和网页同一套服务：凭证加密保存、写审计、要求管理员角色）。
-# 密码只经标准输入传给容器，不出现在命令行参数里。
+# 管理员在浏览器里创建好之后，接入 OpenIM、OpenClaw 与知识库图片存储。
+# 工作台侧的配置由 api 容器里的 app/commands/connect.py 完成（要求管理员角色）。
 # GitHub 在工作台「集成设置」页面上接入（T-0091）：生成 Token 的链接、读取可访问的仓库都在网页上，这里只显示状态。
 
 connect_cmd() { compose exec -T api python -m app.commands.connect "$@"; }
@@ -805,39 +804,12 @@ connect_status() { connect_cmd status </dev/null 2>/dev/null || true; }
 status_of() { sed -n "s/^$1=//p" <<<"$2" | head -1; }
 public_url_of() { local v; v="$(env_get "$1")"; v="${v:-$2}"; printf '%s\n' "${v%/}"; }
 
-# n8n 的密码规则：8 ~ 64 位，至少一个数字和一个大写字母
-random_password() {
-  "$PY" -c 'import secrets, string; a = string.ascii_letters + string.digits; print("Ws" + "".join(secrets.choice(a) for _ in range(20)) + "7")'
-}
-
 ask_secret() {
   local answer=""
   if (( ASSUME_YES )) || ! interactive; then printf '\n'; return; fi
   read -r -s -p "$1: " answer || true
   printf '\n' >&2
   printf '%s\n' "$answer"
-}
-
-show_credential() {
-  warn "$1 的登录信息如下，建议存进密码管理器；工作台「$6」页也能查看（只有管理员看得到）："
-  info "  地址：$2"
-  info "  账号：$3"
-  if [[ $PHASE == run ]]; then info "  密码：已加密保存在工作台「$6」页（日志里不显示）"; else info "  密码：$4"; fi
-  info "  管理界面只绑定服务器本机，从自己的电脑访问用 SSH 隧道：ssh -L $5:127.0.0.1:$5 <用户>@<服务器>"
-}
-
-# 后台生成的初始密码不能写进日志，接入成功后才加密保存在工作台。在那之前先写进只有 root 能读的文件
-# （credential_file 名称 → 路径；keep_credential_file 名称 地址 账号 密码），接入成功后删除，
-# 这样接入失败、或者后台在中途被中断（例如服务器重启）也不会丢掉密码
-credential_file() { printf '%s\n' "$(deploy_dir)/$1-credential.txt"; }
-keep_credential_file() {
-  local file
-  file="$(credential_file "$1")"
-  (umask 077 && printf '地址：%s\n账号：%s\n密码：%s\n' "$2" "$3" "$4" >"$file")
-  chmod 600 "$file"
-}
-credential_todo() {
-  todo_add "$1 的账号已经创建但没有接入完成：账号与密码在 $(credential_file "$1")（只有 root 能读）。记进密码管理器后删除这个文件，再运行 bash $ROOT/scripts/deploy.sh connect"
 }
 
 # 集成状态（app/schemas/integrations.py 的 IntegrationStatus；none 是 connect status 表示还没有集成）的中文说明
@@ -857,22 +829,6 @@ status_label() {
 show_state() {
   if [[ $1 == active ]]; then ok "已接入"
   else warn "已保存但现在不可用：$(status_label "$1")。到工作台「$2」页查看原因、重新测试连接"
-  fi
-}
-
-# 已经接入、但工作台还没保存登录账号（T-0080 之前接入的）：问一次要不要补上。先登录一次核对密码
-offer_save_login() {
-  local app="$1" title="$2" page="$3" saved="$4" user_prompt="$5" default_user="$6" user password
-  [[ $saved == none ]] || return 0
-  if [[ $PHASE == run ]] || (( ASSUME_YES )) || ! interactive; then return 0; fi
-  confirm "工作台还没有保存 $title 的登录账号，现在保存吗？（管理员可以在「$page」页查看、复制）" y || return 0
-  user="$(ask "$user_prompt" "$default_user")"
-  password="$(ask_secret "$title 的密码（输入不显示，直接回车跳过）")"
-  [[ -n $password ]] || { info "跳过"; return 0; }
-  if printf '%s\n' "$password" | connect_cmd save-login --app "$app" --username "$user"; then
-    ok "已保存：到工作台「$page」页查看"
-  else
-    warn "没有保存（见上面的输出）：也可以直接在工作台「$page」页填写"
   fi
 }
 
@@ -937,176 +893,6 @@ connect_github() {
     info "还没有接入。GitHub 在工作台网页上接入：管理员打开「管理 → 集成设置」（$page），"
     info "点「新建 GitHub 连接」，按页面上的步骤生成只读 Token、勾选要同步的仓库，保存后会自动检查权限并开始同步"
   fi
-  return 0
-}
-
-connect_n8n() {
-  local state="$1" login="${2:-}" email password created=0 url owner
-  step "n8n（自动化，可选）"
-  if [[ -n $state && $state != none ]]; then
-    show_state "$state" "自动化"
-    offer_save_login n8n n8n 自动化 "$login" "n8n owner 的登录邮箱" "$(env_get ACME_EMAIL)"
-    return 0
-  fi
-  decide N8N "部署 n8n 并自动接入？（另外占用约 1 GB 内存）" y || { info "跳过"; return 0; }
-  pull_images n8n-pull "n8n" || true
-  (cd "$ROOT" && make -s n8n-up </dev/null) || { warn "n8n 没有启动（见上面的输出），跳过"; return 0; }
-  url="$(public_url_of N8N_PUBLIC_URL http://localhost:5678)"
-  owner="$(connect_cmd n8n-owner </dev/null 2>/dev/null || true)"
-  if [[ $owner == owner=exists && $PHASE == run ]]; then
-    if [[ -f $(credential_file n8n) ]]; then credential_todo n8n; else
-      todo_add "n8n 已经有 owner 账号，接入要它的密码：在终端运行 bash $ROOT/scripts/deploy.sh connect（当场输入，不保存）"
-    fi
-    return 0
-  elif [[ $owner == owner=exists ]]; then
-    email="$(ask "n8n 已经有 owner 账号，输入它的邮箱" "$(env_get ACME_EMAIL)")"
-    password="$(ask_secret "n8n owner 的密码（直接回车跳过）")"
-    [[ -n $password ]] || { info "跳过 n8n"; return 0; }
-  elif [[ $owner == owner=none ]]; then
-    choose email N8N_EMAIL "n8n owner 账号的邮箱" "$(env_get ACME_EMAIL)"
-    password="$(random_password)"
-    created=1
-  else
-    warn "读不到 n8n 的状态，跳过"; return 0
-  fi
-  # 后台：connect 先创建 owner、再登录、最后才把密码加密保存到工作台，中间任何一步失败或中断，密码都还没保存
-  local keep=0 connected_ok=0
-  if (( created )) && [[ $PHASE == run ]]; then keep=1; keep_credential_file n8n "$url" "$email" "$password"; fi
-  if printf '%s\n' "$password" | connect_cmd n8n --owner-email "$email" --public-url "$url"; then
-    ok "n8n 已接入：工作流的 Webhook 节点选 Header Auth 凭据 X-Workspace-Trigger，再到工作台「自动化」页登记"
-    connected_ok=1
-  else
-    warn "n8n 没有接入成功（见上面的输出）：修好后重新运行 deploy.sh connect，或到工作台「自动化」页手动配置"
-  fi
-  (( created )) || return 0
-  if (( keep && ! connected_ok )); then
-    credential_todo n8n
-  else
-    if (( keep )); then rm -f "$(credential_file n8n)"; fi
-    show_credential "n8n" "$url" "$email" "$password" "$(env_get N8N_PORT | grep . || echo 5678)" "自动化"
-  fi
-  return 0
-}
-
-# ---------------------------------------------------------------- n8n 的对外子域名（T-0078）
-# 默认只在服务器本机开放（SSH 隧道）。设置 N8N_DOMAIN 后，在 infra/caddy/apps-enabled/ 生成 Caddy 站点
-# （写入具体域名），Caddy 自动申请证书并转发到 integrations 网络里的容器；同时改公开地址、更新工作台里的打开链接。
-APPS_DIR="infra/caddy/apps-enabled"
-app_site_file() { printf '%s\n' "$ROOT/$APPS_DIR/$1.caddy"; }
-
-write_app_site() {
-  local name="$1" domain="$2" upstream="$3"
-  mkdir -p "$ROOT/$APPS_DIR"
-  cat >"$(app_site_file "$name")" <<EOF
-# 由 scripts/deploy.sh connect 生成（T-0078）：$name 的对外入口。删除本文件并重启 caddy 即取消对外
-$domain {
-	encode zstd gzip
-	reverse_proxy $upstream
-	header {
-		Strict-Transport-Security "max-age=31536000"
-		X-Content-Type-Options nosniff
-		Referrer-Policy strict-origin-when-cross-origin
-		-Server
-	}
-}
-EOF
-}
-
-# choose_domain <名称> <显示名> <变量> <建议> → 选定的域名（空 = 不对外）；无人值守时沿用 .env 里的设置
-choose_domain() {
-  local title="$2" key="$3" suggest="$4" current answer=""
-  current="$(env_get "$key")"
-  if [[ -v ANS[$key] ]]; then printf '%s\n' "${ANS[$key]}"; return; fi
-  if [[ $PHASE == run ]] || (( ASSUME_YES )) || ! interactive; then printf '%s\n' "$current"; return; fi
-  if [[ -n $current ]]; then
-    answer="$(ask "$title 的对外域名（回车保持 $current；输入 - 取消对外）" "$current")"
-    [[ $answer == "-" ]] && answer=""
-  elif confirm "用子域名经 HTTPS 对外打开 $title？（登录页会暴露在公网；不打开时只能经 SSH 隧道访问）" n; then
-    answer="$(ask "$title 的对外域名（先在域名服务商那里把它解析到本机）" "$suggest")"
-  fi
-  printf '%s' "$answer" | tr '[:upper:]' '[:lower:]' | sed -E 's#^https?://##; s#/.*$##'
-  printf '\n'
-}
-
-# apply_app_domain <名称> <显示名> <域名变量> <地址变量> <本机地址> <上游> <域名> → 0 表示有变化
-apply_app_domain() {
-  local name="$1" title="$2" key="$3" url_key="$4" local_url="$5" upstream="$6" domain="$7" file
-  file="$(app_site_file "$name")"
-  if [[ -z $domain ]]; then
-    [[ -n $(env_get "$key") || -f $file ]] || return 1
-    rm -f "$file"
-    env_set "$key" ""
-    env_set "$url_key" "$local_url"
-    info "$title 取消对外：只能在服务器本机访问（SSH 隧道）"
-    return 0
-  fi
-  if ! valid_domain "$domain" || [[ $domain == "$(env_get SITE_DOMAIN)" ]]; then
-    warn "「$domain」不能用作 $title 的域名（要是一个单独的子域名），保持原样"
-    return 1
-  fi
-  if [[ -f $file ]] && grep -qx "$domain {" "$file" && [[ $(env_get "$key") == "$domain" ]]; then return 1; fi
-  write_app_site "$name" "$domain" "$upstream"
-  env_set "$key" "$domain"
-  env_set "$url_key" "https://$domain/"
-  [[ -n "$( (getent ahosts "$domain" 2>/dev/null || true) | head -1)" ]] \
-    || warn "$domain 还没有解析：在域名服务商那里加 A 记录指向本机，证书会在解析生效后自动申请"
-  ok "$title 的对外地址：https://$domain"
-  return 0
-}
-
-# 先校验再重启：admin 接口关闭，新站点要重启 caddy 才生效；配置有错时撤销生成的站点，不让整个工作台停掉
-restart_caddy_with_apps() {
-  compose up -d --no-deps caddy </dev/null >/dev/null 2>&1 || true
-  if compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile </dev/null >/dev/null 2>&1; then
-    compose restart caddy </dev/null >/dev/null && return 0
-  fi
-  return 1
-}
-
-check_app_https() {
-  local url="$1" _ code=""
-  for _ in $(seq 1 18); do
-    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || true)"
-    [[ $code =~ ^(200|204|301|302)$ ]] && { ok "$url 可以访问"; return 0; }
-    sleep 5
-  done
-  warn "$url 暂时访问不到（状态码：${code:-无}）：多半是 DNS 还没生效或证书还在申请，Caddy 会自动重试"
-}
-
-connected() { [[ -n $1 && $1 != none ]]; }
-
-expose_apps() {
-  local status="$1" site n8n_changed=0 domain
-  step "n8n 的对外访问"
-  if [[ $(env_get COMPOSE_FILE) != *compose.https.yaml* ]]; then
-    info "没有启用域名与 HTTPS，n8n 只能在服务器本机访问（SSH 隧道）"
-    return 0
-  fi
-  site="$(env_get SITE_DOMAIN)"
-  if connected "$(status_of n8n "$status")" || [[ -n $(env_get N8N_DOMAIN) ]]; then
-    domain="$(choose_domain n8n n8n N8N_DOMAIN "n8n.$site")"
-    if apply_app_domain n8n n8n N8N_DOMAIN N8N_PUBLIC_URL \
-      "http://localhost:$(env_get N8N_PORT | grep . || echo 5678)/" n8n:5678 "$domain"; then n8n_changed=1; fi
-    # 经 HTTPS 反向代理访问：Cookie 只走 HTTPS，并按 X-Forwarded-For 识别客户端；取消对外时恢复
-    if [[ -n $(env_get N8N_DOMAIN) ]]; then env_set N8N_SECURE_COOKIE true; env_set N8N_PROXY_HOPS 1
-    else env_set N8N_SECURE_COOKIE false; env_set N8N_PROXY_HOPS 0
-    fi
-  fi
-  if (( ! n8n_changed )); then
-    info "对外访问设置没有变化"
-    return 0
-  fi
-  # 让新地址生效：重建 n8n（读取新的公开地址），校验后重启 Caddy，再更新工作台里的打开链接
-  (cd "$ROOT" && make -s n8n-up </dev/null) || warn "n8n 没有重启成功（见上面的输出）"
-  if ! restart_caddy_with_apps; then
-    warn "Caddy 配置校验没有通过，撤销刚生成的对外站点（工作台不受影响）"
-    rm -f "$(app_site_file n8n)"
-    restart_caddy_with_apps || warn "Caddy 重启失败：运行 docker compose logs caddy 查看原因"
-    return 0
-  fi
-  connect_cmd public-urls --n8n "$(public_url_of N8N_PUBLIC_URL http://localhost:5678)" </dev/null \
-    || warn "工作台里的打开链接没有更新（见上面的输出）"
-  if [[ -n $(env_get N8N_DOMAIN) ]]; then check_app_https "https://$(env_get N8N_DOMAIN)/healthz"; fi
   return 0
 }
 
@@ -1332,6 +1118,57 @@ upgrade_openim() {
   return 0
 }
 
+# 仅用于停用历史部署的站点，不再生成或挂载第三方应用的公网入口。
+app_site_file() { printf '%s\n' "$ROOT/infra/caddy/apps-enabled/$1.caddy"; }
+restart_caddy_with_apps() {
+  compose up -d --no-deps caddy </dev/null >/dev/null 2>&1 || true
+  if compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile </dev/null >/dev/null 2>&1; then
+    compose restart caddy </dev/null >/dev/null && return 0
+  fi
+  return 1
+}
+
+# ---------------------------------------------------------------- 旧的 n8n（T-0149）
+# 只停用本项目旧 Compose 中已知的服务，保留全部数据卷、网络、.env 和初始账号文件。
+# 站点必须逐字节匹配旧生成模板；有任何人工增改就保留，不依赖已删除的 Compose 文件。
+retire_n8n() {
+  local core name service containers site domain
+  core="${COMPOSE_PROJECT_NAME:-$(env_get COMPOSE_PROJECT_NAME)}"
+  name="${core:-$PROJECT}-n8n"
+  for service in n8n volume-init; do
+    containers="$(docker ps -aq --filter "label=com.docker.compose.project=$name" \
+      --filter "label=com.docker.compose.service=$service" 2>/dev/null)" \
+      || die "读不到旧 n8n 服务的状态，升级已停止：请检查 Docker 后重试"
+    if [[ -n $containers ]]; then
+      # shellcheck disable=SC2086 # 只含 docker 返回的容器 ID，按空白分开传入；不加 -v，保留全部卷
+      docker rm -f $containers >/dev/null || die "没能停用旧 n8n 服务：请检查 Docker 后重试"
+      ok "已停止并删除旧 n8n 的 $service 容器；数据卷与网络保留"
+    fi
+  done
+  site="$(app_site_file n8n)"
+  if [[ -f $site && ! -L $site ]]; then
+    domain="$(sed -n '2s/ {$//p' "$site")"
+    if valid_domain "$domain" && cmp -s "$site" <(cat <<EOF
+# 由 scripts/deploy.sh connect 生成（T-0078）：n8n 的对外入口。删除本文件并重启 caddy 即取消对外
+$domain {
+	encode zstd gzip
+	reverse_proxy n8n:5678
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+EOF
+    ); then
+      rm -f "$site"
+      ok "已删除旧 n8n 的生成站点；Caddy 已不再加载第三方应用站点目录"
+    fi
+  fi
+  return 0
+}
+
 # ---------------------------------------------------------------- 旧的 Vikunja（T-0082）
 # 项目与任务改由工作台自己管理（迁移 0020 已把同步过来的项目、任务转成工作台自己的数据）：
 # 升级时停掉并删除以前部署的 Vikunja 容器与对外站点，数据卷保留，打印手动删除的命令。
@@ -1442,24 +1279,21 @@ connect_storage() {
 }
 
 connect_components() {
-  step "接入组件：GitHub（只读）、n8n（自动化）、OpenIM（消息）、OpenClaw 接入入口、知识库图片存储；项目与任务由工作台自己管理"
+  step "接入组件：GitHub（只读）、OpenIM（消息）、OpenClaw 接入入口、知识库图片存储；项目与任务由工作台自己管理"
   compose ps --status running --services </dev/null 2>/dev/null | grep -qx api || { warn "api 没有运行，先部署（install）"; return 0; }
   wait_for_setup || return 0
   local status
   status="$(connect_status)"
   info "以管理员 $(status_of user "$status") 的身份接入：凭证加密保存在工作台，操作写入审计日志"
   connect_github "$(status_of github "$status")"
-  connect_n8n "$(status_of n8n "$status")" "$(status_of n8n_login "$status")"
   connect_openim "$(status_of openim "$status")"
   connect_agent_ingress
   connect_storage
   status="$(connect_status)"
-  expose_apps "$status"
   step "接入状态"
-  info "GitHub：$(status_label "$(status_of github "$status")")　n8n：$(status_label "$(status_of n8n "$status")")"
+  info "GitHub：$(status_label "$(status_of github "$status")")"
   info "OpenIM：$(openim_label "$(status_of openim "$status")")"
   info "OpenClaw 接入入口：$(public_url_of AGENT_PUBLIC_URL 未配置)"
-  info "n8n 打开地址：$(public_url_of N8N_PUBLIC_URL http://localhost:5678)"
   info "以后要接入或重试：bash $ROOT/scripts/deploy.sh connect（GitHub 在工作台「集成设置」里接入）"
 }
 
@@ -1523,26 +1357,17 @@ plan_backup_password() {
   decide REUSE_BACKUP_PASSWORD "找到之前的 .env（$saved）。新 .env 沿用其中的 BACKUP_PASSWORD？之前的备份用它加密，沿用才能继续备份到同一个仓库、并从中恢复" y || true
 }
 
-n8n_running() { [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME:-$PROJECT}-n8n" 2>/dev/null)" ]]; }
 api_running() { command -v docker >/dev/null && compose ps --status running --services </dev/null 2>/dev/null | grep -qx api; }
 domain_ok() { valid_domain "$1"; }
 email_ok() { valid_email "$1"; }
 ip_ok() { valid_ip "$1"; }
 
-# 可选组件：n8n（及对外子域名）、OpenIM、OpenClaw 接入入口
+# 可选组件：OpenIM、OpenClaw 接入入口
 plan_components() {
-  local status="" state site https=0 default mem_kb free_kb dir email
+  local status="" state site default mem_kb free_kb dir
   api_running && status="$(connect_status)"
   site="${DOMAIN:-$(env_get SITE_DOMAIN)}"
-  [[ $ACTION == install || $(env_get COMPOSE_FILE) == *compose.https.yaml* ]] && https=1
   step "可选组件：现在选好，后台按选择自动部署、接入"
-  state="$(status_of n8n "$status")"
-  if connected "$state"; then
-    ok "n8n：已接入"
-  elif decide N8N "部署 n8n 并自动接入？（自动化；另外占用约 1 GB 内存）" y; then
-    plan_value email N8N_EMAIL "n8n owner 账号的邮箱" "${EMAIL:-$(env_get ACME_EMAIL)}" email_ok
-  fi
-  if (( https )) && { connected "$state" || [[ ${ANS[N8N]:-} == y ]]; }; then plan_app_domain "$site"; fi
   state="$(status_of openim "$status")"
   case "$state" in
     ok) ok "OpenIM：已部署" ;;
@@ -1560,26 +1385,6 @@ plan_components() {
       ;;
   esac
   plan_ingress "$site"
-}
-
-plan_app_domain() {
-  local site="$1" current domain
-  current="$(env_get N8N_DOMAIN)"
-  while :; do
-    if [[ -n $current ]]; then
-      choose domain N8N_DOMAIN "n8n 的对外域名（回车保持 $current；输入 - 取消对外）" "$current"
-    elif decide N8N_EXPOSE "用子域名经 HTTPS 对外打开 n8n？（登录页会暴露在公网；不打开时只能经 SSH 隧道访问）" n; then
-      choose domain N8N_DOMAIN "n8n 的对外域名（先在域名服务商那里把它解析到本机）" "n8n.$site"
-    else
-      ANS[N8N_DOMAIN]=""; return 0
-    fi
-    domain="$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]' | sed -E 's#^https?://##; s#/.*$##')"
-    [[ $domain == - ]] && { ANS[N8N_DOMAIN]=""; return 0; }
-    if valid_domain "$domain" && [[ $domain != "$site" ]]; then ANS[N8N_DOMAIN]="$domain"; return 0; fi
-    warn "「$domain」不能用作 n8n 的域名（要是一个单独的子域名）"
-    unset "ANS[N8N_DOMAIN]"
-    if (( ASSUME_YES )) || ! interactive; then die "n8n 的对外域名无效：$domain"; fi
-  done
 }
 
 plan_ingress() {
@@ -1636,30 +1441,10 @@ plan_connect() {
   step "接入组件前先把问题问完：之后在后台运行"
   if [[ $(status_of setup "$status") != "done" ]]; then
     info "还没有创建管理员：后台会等你在浏览器完成「首次安装」后再接入"
-  else
-    plan_connect_now "$status"
   fi
   plan_storage
   plan_components
   plan_summary
-}
-
-# 需要输入密码的接入当场在前台做完，密码不带到后台
-plan_connect_now() {
-  local status="$1" n8n owner
-  n8n="$(status_of n8n "$status")"
-  if connected "$n8n"; then
-    PHASE=direct offer_save_login n8n n8n 自动化 "$(status_of n8n_login "$status")" "n8n owner 的登录邮箱" "$(env_get ACME_EMAIL)"
-  elif n8n_running; then
-    owner="$(connect_cmd n8n-owner </dev/null 2>/dev/null || true)"
-    if [[ $owner == owner=exists ]]; then
-      info "n8n 已经有 owner 账号：现在输入它的邮箱和密码完成接入（密码只在这一步使用，不会带到后台）"
-      ANS[N8N]=y
-      PHASE=direct connect_n8n none ""
-      ANS[N8N]=n
-    fi
-  fi
-  return 0
 }
 
 plan_upgrade() {
@@ -1685,10 +1470,6 @@ answer_label() {
     UFW_WEB) echo "防火墙放行 80 / 443" ;;
     REGENERATE_ENV) echo "重新生成 .env" ;;
     REUSE_BACKUP_PASSWORD) echo "沿用之前的 BACKUP_PASSWORD" ;;
-    N8N) echo "部署并接入 n8n" ;;
-    N8N_EMAIL) echo "n8n owner 邮箱" ;;
-    N8N_EXPOSE) echo "n8n 用子域名对外" ;;
-    N8N_DOMAIN) echo "n8n 对外域名" ;;
     OPENIM) echo "部署 OpenIM" ;;
     INGRESS) echo "配置 OpenClaw 接入入口" ;;
     INGRESS_HOST) echo "接入入口的域名（- 表示用 IP）" ;;
@@ -1706,7 +1487,7 @@ plan_summary() {
   step "确认设置（保存到 $(deploy_dir)/answers.env，权限 600，不含密码）"
   [[ -n $DOMAIN ]] && info "域名：$DOMAIN　证书邮箱：$EMAIL　访问地址：$BASE_URL"
   for key in DOCKER_INSTALL COMPOSE_INSTALL DNS_CONTINUE UFW_WEB REGENERATE_ENV REUSE_BACKUP_PASSWORD \
-    N8N N8N_EMAIL N8N_DOMAIN OPENIM INGRESS INGRESS_HOST INGRESS_ADDRESS UFW_AGENT UPGRADE UPGRADE_TO REBUILD; do
+    OPENIM INGRESS INGRESS_HOST INGRESS_ADDRESS UFW_AGENT UPGRADE UPGRADE_TO REBUILD; do
     [[ -v ANS[$key] ]] || continue
     value="${ANS[$key]}"
     case "$value" in y) value=是 ;; n) value=否 ;; "") value="（不设置）" ;; esac
@@ -1729,6 +1510,7 @@ do_install() {
   migrate
   smoke
   check_https
+  retire_n8n
   step "部署完成：$(git -C "$ROOT" rev-parse --short HEAD)"
   show_setup
   connect_components
@@ -1801,6 +1583,7 @@ do_upgrade() {
   migrate
   smoke
   [[ $BASE_URL == https://* ]] && check_https
+  retire_n8n
   retire_vikunja
   upgrade_openim
   step "升级完成：$(git -C "$ROOT" log -1 --format='%h %cs %s')"
@@ -1985,7 +1768,7 @@ ${C_B}My Workspace 部署脚本${C_0}（代码目录：$ROOT）
   2) 升级到最新版本（自动备份、迁移、检查）
   3) 清空项目（删除全部容器与数据，可选同时删除代码目录）
   4) 查看状态与后台任务的进度
-  5) 接入组件：n8n、OpenIM、OpenClaw 接入入口（GitHub 在网页上接入）
+  5) 接入组件：OpenIM、OpenClaw 接入入口（GitHub 在网页上接入）
   6) 查看部署日志
   0) 退出
 EOF

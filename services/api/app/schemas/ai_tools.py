@@ -626,29 +626,6 @@ class ListNotificationsOutput(BaseModel):
     unread_count: int
 
 
-class AutomationParam(BaseModel):
-    name: str = Field(description="管理员登记的参数名（标识符格式），不是外部文字")
-    type: Literal["string", "number", "boolean"]
-    required: bool
-
-
-class AutomationText(_Untrusted):
-    name: str
-    description: str
-
-
-class AutomationItem(BaseModel):
-    id: UUID
-    enabled: bool
-    params: list[AutomationParam]
-    last_run_status: str | None
-    untrusted: AutomationText
-
-
-class ListAutomationsOutput(BaseModel):
-    items: list[AutomationItem]
-
-
 class DashboardOverviewOutput(BaseModel):
     """未知时为 null，不以 0 冒充。"""
 
@@ -1246,11 +1223,6 @@ class MarkNotificationsReadInput(_Strict):
     ids: list[UUID] = Field(min_length=1, max_length=50)
 
 
-class TriggerAutomationInput(_Strict):
-    automation_id: UUID
-    params: dict[str, str | float | bool] = Field(default_factory=dict)
-
-
 # ---------------------------------------------------------------- 工具清单
 
 
@@ -1315,7 +1287,6 @@ _READ: list[ToolSpec] = [
     _spec(
         "list_notifications", "read", ListNotificationsInput, ListNotificationsOutput, "列出通知"
     ),
-    _spec("list_automations", "read", EmptyInput, ListAutomationsOutput, "列出白名单工作流"),
     _spec("dashboard_overview", "read", EmptyInput, DashboardOverviewOutput, "首页概况数字"),
     _spec(
         "get_host_status",
@@ -1387,13 +1358,6 @@ _CRITICAL: list[ToolSpec] = [
         EventRef,
         PendingApproval,
         "删除日程（高危，需要审批和二次认证）",
-    ),
-    _spec(
-        "trigger_automation",
-        "critical",
-        TriggerAutomationInput,
-        PendingApproval,
-        "触发白名单工作流（高危，需要审批和二次认证）",
     ),
 ]
 _DIRECT: list[ToolSpec] = [

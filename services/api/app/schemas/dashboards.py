@@ -423,7 +423,7 @@ class DashboardOverview(BaseModel):
     summary: OverviewSummary
     modules: dict[str, ModuleStatus] = Field(
         description="按模块名索引：tasks（Sprint 3）、calendar、knowledge、github（Sprint 4）、"
-        "operations、automations（Sprint 5）；单个模块失败只影响对应组件"
+        "operations（Sprint 5）；单个模块失败只影响对应组件"
     )
     today_tasks: list[TaskBrief]
     generated_at: datetime

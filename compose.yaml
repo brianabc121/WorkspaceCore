@@ -118,8 +118,8 @@ services:
       OPENIM_CALLBACK_ALLOWED_CIDRS: ${OPENIM_CALLBACK_ALLOWED_CIDRS:-${IM_NET:-172.31.252}.2/32}
       # 写进图片消息的取图地址前缀；留空时按 AGENT_PUBLIC_URL / AGENT_INTRANET_URL 推出（OC-3 ADR 第 15 节）
       AGENT_IM_OBJECT_BASE_URL: ${AGENT_IM_OBJECT_BASE_URL:-}
-      # Connector 默认拒绝私有地址（SSRF 防护）；这里显式允许 integrations 网络里的 n8n 容器
-      INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-n8n}
+      # Connector 默认拒绝私有地址（SSRF 防护）；只允许显式配置的内网主机
+      INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-}
       # GitHub REST API 的地址；只有 CI 验收会改成模拟服务（Sprint 4 契约第 6.1 节）。
       # .env 里用 WORKSPACE_GITHUB_API_URL：GitHub Actions 会在 shell 里设置 GITHUB_API_URL，
       # 而 Compose 插值时 shell 变量优先于 .env
@@ -150,7 +150,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
-    # frontend 网络供 caddy 访问，也给 Connector 访问外网；integrations 连到独立部署的第三方服务（n8n）；
+    # frontend 网络供 caddy 访问，也给 Connector 访问外网；integrations 供显式允许的内网 Connector 服务使用；
     # monitoring 供 Prometheus 抓取 /metrics、api 检查 Prometheus / Grafana 是否就绪；im 连到 OpenIM
     networks: [backend, frontend, integrations, monitoring, agent-ingress, im]
     logging: *logging
@@ -161,10 +161,10 @@ services:
     command: ["arq", "app.jobs.worker.WorkerSettings", "--custom-log-dict", "app.jobs.worker.LOG_CONFIG"]
     environment:
       <<: *api-env
-      # Worker 做周期对账（GitHub、n8n）：同样要解密凭证、遵守出站允许列表
+      # Worker 做周期对账（GitHub）：同样要解密凭证、遵守出站允许列表
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS: ${CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS:-}
-      INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-n8n}
+      INTEGRATION_ALLOWED_HOSTS: ${INTEGRATION_ALLOWED_HOSTS:-}
       # 周期对账的间隔（分钟，1–30）
       RECONCILE_INTERVAL_MINUTES: ${RECONCILE_INTERVAL_MINUTES:-5}
       GITHUB_API_URL: ${WORKSPACE_GITHUB_API_URL:-https://api.github.com}
@@ -235,8 +235,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
-    # integrations：HTTPS 模式下 n8n 的对外子域名由 caddy 经此转发到 n8n 容器（T-0078）
-    networks: [frontend, integrations]
+    networks: [frontend]
     logging: *logging
 
   # ---------------------------------------------------------------- OpenClaw 接入入口（--profile agents）
@@ -356,7 +355,7 @@ networks:
   backend:
     internal: true
   frontend: {}
-  # 与独立部署的第三方服务（infra/n8n/compose.yaml）互通的受控网络：只有 api、worker、caddy 加入，
+  # Connector 与显式允许的内网服务互通的受控网络：只有 api、worker 加入，
   # 第三方服务碰不到 backend 里的 PostgreSQL / Redis；internal 表示这个网络本身不提供出网
   integrations:
     internal: true

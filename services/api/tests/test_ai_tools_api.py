@@ -12,36 +12,20 @@
 
 import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import httpx
 import pytest
 
-from app.domain.ai_tools import AiToolService, ToolCallError, arguments_hash
+from app.domain.ai_tools import AiToolService, ToolCallError
 from app.domain.im import admin_im_user_id
 from app.integrations.openim import single_conversation_id
 from app.models import AgentInstance
 from app.schemas.ai_tools import TOOLS, PendingApproval
-from tests.fake_n8n import FakeN8n
-from tests.helpers import BOB, OWNER, ClientFactory, csrf, run_sql
-from tests.test_automations_api import CONNECTION, REPORT, SETTINGS
+from tests.helpers import BOB, OWNER, csrf, run_sql
 from tests.workspace_support import Env, app_of, open_env
 
 pytestmark = pytest.mark.integration
-
-
-@dataclass
-class N8nEnv:
-    """只接内存版 n8n 的环境（测工作流的敏感参数）。"""
-
-    client: httpx.AsyncClient
-    workspace_id: str
-    database_url: str
-    fake: FakeN8n
-
-    def headers(self, *, write: bool = False) -> dict[str, str]:
-        return {"X-Workspace-Id": self.workspace_id, **(csrf(self.client) if write else {})}
 
 
 @pytest.fixture
@@ -52,7 +36,7 @@ async def env(make_client: Any, migrated_database_url: str) -> AsyncIterator[Env
         yield value
 
 
-async def new_instance(env: Env | N8nEnv, *, scope: str = "read_write", name: str = "alpha") -> str:
+async def new_instance(env: Env, *, scope: str = "read_write", name: str = "alpha") -> str:
     response = await env.client.post(
         "/api/v1/agents/instances",
         json={"name": name, "network_mode": "intranet", "scope": scope, "max_role": "member"},
@@ -63,9 +47,7 @@ async def new_instance(env: Env | N8nEnv, *, scope: str = "read_write", name: st
     return instance_id
 
 
-async def call(
-    env: Env | N8nEnv, instance_id: str, tool: str, args: dict[str, Any]
-) -> PendingApproval:
+async def call(env: Env, instance_id: str, tool: str, args: dict[str, Any]) -> PendingApproval:
     """直接调用领域服务（经 /mcp 的调用见 tests/test_mcp_api.py）。"""
     app = app_of(env.client)
     async with app.state.sessionmaker() as db:
@@ -76,12 +58,12 @@ async def call(
         return await service.request(requester, TOOLS[tool], args)
 
 
-async def execution(env: Env | N8nEnv, action_id: uuid.UUID) -> httpx.Response:
+async def execution(env: Env, action_id: uuid.UUID) -> httpx.Response:
     return await env.client.get(f"/api/v1/ai/tool-executions/{action_id}", headers=env.headers())
 
 
 async def decide(
-    env: Env | N8nEnv,
+    env: Env,
     action_id: uuid.UUID,
     verb: str,
     version: int | str,
@@ -224,6 +206,31 @@ async def test_expired_and_rejected_actions_cannot_be_approved(env: Env) -> None
         assert purged is True
 
 
+async def test_legacy_workflow_approval_fails_closed(env: Env) -> None:
+    instance = await new_instance(env)
+    pending = await call(
+        env, instance, "create_bookmark", {"url": "https://legacy.test/", "title": "legacy"}
+    )
+    # 模拟升级前留在数据库里的审批；移除后仍可查看与处理，但不能再执行。
+    await run_sql(
+        env.database_url,
+        "UPDATE workspace.ai_tool_executions SET tool_name = 'trigger_automation',"
+        " risk_level = 'critical' WHERE id = $1",
+        pending.action_id,
+    )
+    approved = await decide(env, pending.action_id, "approve", 1, {"password": OWNER["password"]})
+    assert approved.status_code == 200, approved.text
+    assert (approved.json()["status"], approved.json()["error_code"]) == ("failed", "NOT_FOUND")
+    purged = await run_sql(
+        env.database_url,
+        "SELECT arguments IS NULL FROM workspace.ai_tool_executions WHERE id = $1",
+        pending.action_id,
+    )
+    assert purged is True
+    assert (await execution(env, pending.action_id)).json()["status"] == "failed"
+    assert await env.titles() == ["写周报"]
+
+
 async def test_execution_fails_when_the_task_changed_after_the_request(env: Env) -> None:
     instance = await new_instance(env)
     task = await env.task_by_title("写周报")
@@ -286,81 +293,6 @@ async def test_failed_execution_after_a_rollback_still_records_the_result(env: E
     assert (body["status"], body["error_code"]) == ("failed", "VERSION_CONFLICT")
     assert body["version"] == 3 and approved.headers["etag"] == '"3"'
     assert (await execution(env, pending.action_id)).json()["status"] == "failed"
-
-
-# ---------------------------------------------------------------- 工作流的敏感参数
-
-
-@pytest.fixture
-async def n8n(make_client: ClientFactory, migrated_database_url: str) -> AsyncIterator[N8nEnv]:
-    fake = FakeN8n()
-    fake.add_workflow("wfReport01", path="daily-report")
-    async with make_client(**SETTINGS) as client:
-        cast(Any, client._transport).app.state.connectors.transport = httpx.MockTransport(
-            fake.handler
-        )
-        setup = await client.post("/api/v1/setup", json=OWNER)
-        assert setup.status_code == 201
-        value = N8nEnv(client, setup.json()["workspaces"][0]["id"], migrated_database_url, fake)
-        put = await client.put(
-            "/api/v1/automations/connection", json=CONNECTION, headers=value.headers(write=True)
-        )
-        assert put.status_code == 200, put.text
-        tested = await client.post(
-            "/api/v1/automations/connection/test", headers=value.headers(write=True)
-        )
-        assert tested.status_code == 200 and tested.json()["ok"], tested.text
-        yield value
-
-
-async def test_sensitive_parameters_are_sealed_until_execution(n8n: N8nEnv) -> None:
-    created = await n8n.client.post(
-        "/api/v1/automations", json=REPORT, headers=n8n.headers(write=True)
-    )
-    assert created.status_code == 201, created.text
-    automation_id = created.json()["id"]
-    instance = await new_instance(n8n)
-    args = {"automation_id": automation_id, "params": {"recipient": "boss@example.com", "days": 3}}
-    pending = await call(n8n, instance, "trigger_automation", args)
-    stored, display, digest = [
-        await run_sql(n8n.database_url, sql, pending.action_id)
-        for sql in (
-            "SELECT arguments::text FROM workspace.ai_tool_executions WHERE id = $1",
-            "SELECT arguments_display::text FROM workspace.ai_tool_executions WHERE id = $1",
-            "SELECT arguments_hash FROM workspace.ai_tool_executions WHERE id = $1",
-        )
-    ]
-    # 待审批期间：敏感参数加密保存，展示版本是 ***，哈希是 HMAC（不能用明文 SHA-256 反推）
-    assert "boss@example.com" not in stored and "enc:v1:" in stored
-    assert "boss@example.com" not in display and '"recipient": "***"' in display
-    assert digest != arguments_hash("trigger_automation", args)
-    detail = (await execution(n8n, pending.action_id)).json()
-    assert detail["arguments"]["params"] == {"recipient": "***", "days": 3}
-    same = await call(n8n, instance, "trigger_automation", args)
-    assert same.deduplicated is True and same.action_id == pending.action_id
-    other = {**args, "params": {"recipient": "cfo@example.com", "days": 3}}
-    assert (await call(n8n, instance, "trigger_automation", other)).deduplicated is False
-
-    approved = await decide(n8n, pending.action_id, "approve", 1, {"password": OWNER["password"]})
-    assert approved.status_code == 200, approved.text
-    assert approved.json()["status"] == "succeeded", approved.json()
-    # 执行时用的是解密后的原值；执行完清空完整参数，只留脱敏版本
-    assert n8n.fake.received[-1]["body"]["params"] == {"recipient": "boss@example.com", "days": 3}
-    after = await run_sql(
-        n8n.database_url,
-        "SELECT arguments FROM workspace.ai_tool_executions WHERE id = $1",
-        pending.action_id,
-    )
-    assert after is None
-
-    reader = await new_instance(n8n, scope="read", name="reader")
-    with pytest.raises(ToolCallError):
-        await call(n8n, reader, "trigger_automation", args)
-    denied = await n8n.client.get(
-        "/api/v1/ai/tool-executions", params={"status": "denied"}, headers=n8n.headers()
-    )
-    [record] = denied.json()["items"]
-    assert record["arguments"]["params"] == {"recipient": "***", "days": "***"}
 
 
 async def test_the_worker_expires_overdue_approvals(env: Env) -> None:

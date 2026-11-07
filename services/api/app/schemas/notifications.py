@@ -22,7 +22,6 @@ EventTopic = Literal[
     "integrations",
     "notifications",
     "operations",
-    "automations",
     # V2（OC-1 契约第 11 节）：IM 会话与消息、实例状态、工具调用与审批
     "im",
     "agents",
@@ -39,8 +38,7 @@ class NotificationOut(BaseModel):
     id: UUID
     type: str = Field(
         description="机器可读的类型，取值会随功能增加，例如 service_down、service_recovered、"
-        "integration_unauthorized、integration_rate_limited、automation_failed、"
-        "automation_succeeded；前端遇到不认识的类型按普通通知显示"
+        "integration_unauthorized、integration_rate_limited；前端遇到不认识的类型按普通通知显示"
     )
     severity: NotificationSeverity
     title: str

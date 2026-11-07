@@ -8,7 +8,6 @@ const families: Record<Schema['InvalidateEvent']['topics'][number], string[]> = 
   projects: ['projects', 'search'], knowledge: ['knowledge', 'knowledge-sources', 'related-docs', 'kb', 'search'],
   calendar: ['calendar', 'search'], developer: ['developer', 'search'], integrations: ['integrations'],
   notifications: ['notifications', 'overview'], operations: ['operations'],
-  automations: ['automations', 'automation-connection', 'automation-runs'],
   im: ['im'], agents: ['agents'], ai: ['ai-tool-executions', 'im', 'timeline'],
   // 任务时间轴（T-0104）：执行记录与 token 用量
   timeline: ['timeline', 'task-runs'],
