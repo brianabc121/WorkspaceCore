@@ -10,6 +10,7 @@ services:
     working_dir: /opt
     command: ["python", "-m", "runner_agent"]
     env_file: [runner.env]
+    # @EXTRA_HOSTS@
     environment:
       MYWS_RUNNER_SELF: myworkspace-runner-agent
       MYWS_RUNNER_DISK_PATH: /host-docker

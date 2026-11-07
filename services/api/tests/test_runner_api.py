@@ -80,6 +80,7 @@ async def add_host(env: Env) -> str:
         compose = zf.read("myworkspace-runner/compose.yaml").decode()
         assert "@sha256:" in compose and "__IMAGE__" not in compose
         assert "privileged" not in compose
+        assert "extra_hosts" not in compose and "@EXTRA_HOSTS@" not in compose  # 内网入口不映射
         runner_env = zf.read("myworkspace-runner/runner.env").decode()
         info = zf.getinfo("myworkspace-runner/runner.env")
         assert (info.external_attr >> 16) & 0o777 == 0o600

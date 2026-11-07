@@ -774,7 +774,8 @@ Docker 用官方软件源安装锁定版本，并把账号加入 docker 组。
 
 - runner-agent 挂着这台服务器的 Docker socket，等同 root：这台机器当成可以随时重装的；工作台只碰带工作台标签的容器、数据卷与网络。
 - 环境的出口只经 runner-agent 的出口代理（HTTP / HTTPS），私有网段、本机、云厂商元数据地址、工作台与 OpenClaw 服务器永远到不了。
-- 重新部署 runner-agent（升级）不影响环境容器与数据卷。
+- 重新部署 runner-agent（升级）不影响环境容器与数据卷：只有第一次装 gVisor 时重启一次 Docker，之后 Docker 已认得 runsc 就不再重启。
+- 选外网入口而工作台没有配置域名（入口用内部主机名，第 8.6 节）时，接入包的 `compose.yaml` 已把入口主机名指向工作台服务器的地址（`AGENT_PUBLIC_ADDRESS`），与 OpenClaw 接入包一样，不用改服务器的 hosts。
 
 ## 9. 配置备份
 

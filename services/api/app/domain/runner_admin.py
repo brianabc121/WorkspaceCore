@@ -123,6 +123,10 @@ class RunnerAdmin:
                 ca_pem=ca,
                 client_cert_pem=cert[0] if cert else None,
                 client_key_pem=cert[1] if cert else None,
+                # 外网入口没有域名时，接入包把入口主机名映射到工作台地址（与 OpenClaw 接入包一致）
+                address=(self.settings.agent_public_address or None)
+                if host.ingress == "public"
+                else None,
             )
         )
         await self.db.commit()

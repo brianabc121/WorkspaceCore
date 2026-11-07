@@ -92,12 +92,18 @@ class Owner:
         return response.json()
 
     def bundle(self, instance_id: str) -> dict[str, bytes]:
+        current = self.call("GET", f"/api/v1/agents/instances/{instance_id}")
+        files = self.zip(f"/api/v1/agents/instances/{instance_id}/bundle",
+                         {"version": current["version"], "previous": "keep_24h"})
+        return {name: content for name, (content, _) in files.items()}
+
+    def zip(self, path: str, body: Any = None) -> dict[str, tuple[bytes, int]]:
+        """POST 下载 zip（接入包）：文件名 → (内容, 权限位)。"""
         import urllib.request
 
-        current = self.call("GET", f"/api/v1/agents/instances/{instance_id}")
         request = urllib.request.Request(  # noqa: S310 - base_url 已限定为 http(s)
-            f"{self.client.base_url}/api/v1/agents/instances/{instance_id}/bundle",
-            data=json.dumps({"version": current["version"], "previous": "keep_24h"}).encode(),
+            f"{self.client.base_url}{path}",
+            data=json.dumps(body).encode() if body is not None else b"",
             method="POST",
             headers={
                 "Content-Type": "application/json",
@@ -107,7 +113,7 @@ class Owner:
             },
         )
         with self.client.opener.open(request) as response, zipfile.ZipFile(io.BytesIO(response.read())) as zf:
-            return {name: zf.read(name) for name in zf.namelist()}
+            return {info.filename: (zf.read(info), (info.external_attr >> 16) & 0o777) for info in zf.infolist()}
 
     def messages(self, conversation: str) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = self.call("GET", f"/api/v1/im/conversations/{conversation}/messages")["items"]
@@ -1604,11 +1610,241 @@ def scenario_25(c: Ctx) -> None:
         sql("UPDATE workspace.agent_wakeups SET status = 'cancelled' WHERE source = 'issue' AND status = 'pending'")
 
 
+# ---------------------------------------------------------------- 运行服务器（T-0141，docs/v2/RUNNER_PLAN.md）
+
+
+def runner_image() -> str:
+    """接入包锁定的 python 镜像：runner-agent、助手容器都用它；验收里的环境也用它（不用再拉别的镜像）。"""
+    sys.path.insert(0, str(ROOT / "services" / "api"))
+    from app.runner_bundle import AGENT_IMAGE  # noqa: PLC0415 - 只用标准库
+
+    return str(AGENT_IMAGE)
+
+
+def env_containers(env_id: str) -> list[str]:
+    return run("docker", "ps", "-aq", "--filter", f"label=myworkspace.env={env_id}",
+               "--filter", "label=myworkspace.role=env").stdout.split()
+
+
+def env_runtime(env_id: str) -> str:
+    ids = env_containers(env_id)
+    return run("docker", "inspect", "-f", "{{.HostConfig.Runtime}}", ids[0]).stdout.strip() if ids else ""
+
+
+def structured(result: dict[str, Any]) -> dict[str, Any]:
+    data: dict[str, Any] = result.get("structuredContent") or {}
+    return data
+
+
+class RunnerSite:
+    """CI 的 runner 本身当运行服务器：登记（内网入口）、下载接入包、照 CHECKLIST.md 以 root 运行 install.sh。
+
+    接入包原样使用，只改验收环境的两处：tls/ca.pem 换成签发入口测试证书的 CA；runner-agent 加入 agent-edge 网络，
+    入口主机名指向 agent-gateway（真实部署里由内网 DNS 解析）。gVisor 在 CI 里提前装好（install-gvisor.sh 会重启 Docker）。"""
+
+    def __init__(self, c: Ctx) -> None:
+        self.c = c
+        self.dir = c.workdir / "runner"
+
+    def install(self) -> tuple[dict[str, Any], str]:
+        c = self.c
+        c.owner.call("POST", "/api/v1/runner/host", {"name": "ci-runner", "ingress": "intranet"})
+        for name, (content, mode) in c.owner.zip("/api/v1/runner/host/bundle").items():
+            path = self.dir / name.split("/", 1)[1]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+            path.chmod(mode or 0o644)
+        shutil.copy(c.args.server_ca, self.dir / "tls" / "ca.pem")
+        edge = detect_network("agent-edge")
+        host = c.args.intranet.rsplit(":", 1)[0]
+        compose = (self.dir / "compose.yaml").read_text().replace(
+            "    env_file: [runner.env]\n",
+            f'    env_file: [runner.env]\n    extra_hosts: ["{host}:{gateway_ip(edge)}"]\n    networks: [default, edge]\n', 1)
+        (self.dir / "compose.yaml").write_text(compose + f"\nnetworks:\n  edge:\n    external: true\n    name: {edge}\n")
+        out = run("bash", str(self.dir / "install.sh"), cwd=self.dir, timeout=900, check=False)
+        log = (out.stdout + out.stderr)[-1500:]
+        online = wait_for("运行服务器上线", lambda: (lambda h: h if h and h["status"] == "online" else None)(
+            c.owner.call("GET", "/api/v1/runner/overview")["host"]), timeout=240, interval=3)
+        return online, log
+
+    def env(self, env_id: str) -> dict[str, Any]:
+        items = self.c.owner.call("GET", f"/api/v1/runner/environments?include_deleted=true&instance_id={self.c.a.id}")["items"]
+        found = [e for e in items if e["id"] == env_id]
+        return found[0] if found else {}
+
+    def wait_state(self, env_id: str, *states: str, timeout: float = 240) -> dict[str, Any]:
+        return wait_for(f"环境 {env_id} 变成 {'/'.join(states)}",
+                        lambda: (lambda e: e if e.get("state") in states else None)(self.env(env_id)),
+                        timeout=timeout, interval=3)
+
+    def finished(self, run_id: str, timeout: float = 300) -> dict[str, Any]:
+        def probe() -> dict[str, Any] | None:
+            data = structured(mcp_call(self.c.a, "env_run", {"run_id": run_id}))
+            return data if data.get("status") not in (None, "queued", "running") else None
+        return wait_for(f"运行 {run_id} 结束", probe, timeout=timeout, interval=3)
+
+    def exec(self, env_id: str, script: str, timeout: float = 300) -> dict[str, Any]:
+        data = structured(mcp_call(self.c.a, "env_exec", {"environment_id": env_id, "command": script}))
+        if data.get("run_id") and data.get("status") in ("queued", "running"):
+            data = self.finished(data["run_id"], timeout)
+        return data
+
+    def teardown(self) -> None:
+        if (self.dir / "compose.yaml").exists():
+            run("docker", "compose", "-f", str(self.dir / "compose.yaml"), "down", cwd=self.dir, check=False, timeout=180)
+        # 这台 runner 上带运行服务器标签的容器、数据卷、网络都是本次验收建的
+        for kind in ("container", "volume", "network"):
+            ids = run("docker", kind, "ls", "-q", *(["-a"] if kind == "container" else []),
+                      "--filter", "label=myworkspace.runner=1", check=False).stdout.split()
+            if ids:
+                run("docker", kind, "rm", *(["-f"] if kind != "network" else []), *ids, check=False, timeout=180)
+
+
+# 出口：HTTPS_PROXY 指向 runner-agent 的出口代理（环境只连 internal 网络）；放行的域名通，别的被代理拒绝，直连不通
+EGRESS_PROBE = """python - <<'EOF'
+import socket, urllib.request
+def get(url):
+    try:
+        return str(urllib.request.urlopen(url, timeout=30).status)
+    except Exception as error:
+        return type(error).__name__
+print("allowed", get("https://pypi.org/simple/pip/"))
+print("denied", get("https://example.com/"))
+probe = socket.socket()
+probe.settimeout(5)
+try:
+    probe.connect(("1.1.1.1", 443))
+    print("direct open")
+except OSError as error:
+    print("direct blocked", type(error).__name__)
+EOF"""
+
+
+def scenario_26(c: Ctx) -> None:
+    """运行服务器（T-0141）：真实 Docker + gVisor + runner-agent；甲经真实 OpenClaw 用 env_create 跑一次性测试，
+    跑完即删；会话环境登记 issue_closed，管理员关闭 Issue 后删除；常驻环境（runc）停止后再用自动启动、
+    管理员归档后再用从快照重建并重放初始化步骤；gvisor 与 runc 都能跑。"""
+    tag = uuid.uuid4().hex[:6]
+    site = RunnerSite(c)
+    image = runner_image()
+    kernel = os.uname().release
+    try:
+        host, log = site.install()
+        c.check("场景 26：接入包原样以 root 运行 install.sh，runner-agent 上线，Docker 认得 runsc（gVisor）",
+                "runner_agent_started" in log and "runsc" in host["runtimes"],
+                json.dumps({"runtimes": host["runtimes"], "docker": host["docker_version"], "log": log[-300:]}, ensure_ascii=False))
+
+        # 1. 模板：甲自己定义（镜像、安装步骤），在运行服务器上构建
+        saved = mcp_call(c.a, "runner_template_save", {
+            "name": f"py-{tag}", "description": "验收：一次性测试",
+            "spec": {"image": image, "steps": [f"RUN echo built-{tag} > /built.txt"], "lifetime": "once"},
+            "wait_seconds": 50})
+        template = wait_for("模板构建完成", lambda: (lambda t: t if t and t["build_status"] in ("ready", "failed") else None)(
+            next((t for t in structured(mcp_call(c.a, "runner_templates", {})).get("items", [])
+                  if t["name"] == f"py-{tag}"), None)), timeout=300, interval=5)
+        c.check("场景 26：甲经 runner_template_save 定义模板，运行服务器构建成功并记下镜像 digest",
+                tool_code(saved) == "" and template["build_status"] == "ready" and bool(template["image_digest"]),
+                json.dumps({"code": tool_code(saved), "status": template["build_status"], "error": template["build_error"]}, ensure_ascii=False))
+
+        # 2. 一次性测试（gvisor，默认）：经真实 OpenClaw（假模型照指令调 env_create），跑完即删
+        script = "uname -r; cat /built.txt; python -c 'print(6*7)'"
+        c.owner.send(c.conv_a, "TOOL:myworkspace__env_create " + json.dumps({
+            "purpose": f"跑一次测试 {tag}", "lifetime": "once", "template": f"py-{tag}", "command": script,
+            "timeout_seconds": 300}, ensure_ascii=False))
+
+        def once_run() -> dict[str, Any] | None:
+            items = c.owner.call("GET", f"/api/v1/runner/runs?instance_id={c.a.id}")["items"]
+            done = [r for r in items if f"built-{tag}" in (r["untrusted"]["output"] or "") and r["status"] == "succeeded"]
+            return done[0] if done else None
+
+        first = wait_for("一次性运行结束", once_run, timeout=300, interval=5)
+        lines = first["untrusted"]["output"].split()
+        gone = site.wait_state(first["environment_id"], "deleted")
+        c.check("场景 26：甲经真实 OpenClaw 调 env_create（once）：用模板建环境、跑完测试（输出 42），环境随即删除、容器不在",
+                lines[-1] == "42" and gone["state"] == "deleted" and not env_containers(first["environment_id"]),
+                json.dumps({"output": lines, "state": gone.get("state")}, ensure_ascii=False))
+        gvisor_kernel = lines[0]
+
+        # 3. 会话环境：登记 issue_closed，管理员关闭 Issue 后删除；同一个 reuse_key 先复用
+        project = c.owner.call("POST", "/api/v1/projects", {"title": f"运行服务器验收 {tag}", "description": ""},
+                               **{"Idempotency-Key": str(uuid.uuid4())})
+        c.owner.call("PUT", f"/api/v1/projects/{project['id']}/agents/{c.a.id}")
+        issue = c.owner.call("POST", f"/api/v1/projects/{project['id']}/issues", {
+            "title": f"复现 bug {tag}", "body": "在环境里复现。", "kind": "bug"})
+        body = {"purpose": f"复现 Issue {tag}", "lifetime": "session",
+                "spec": {"image": image, "network": "allowlist", "domains": ["pypi.org"]},
+                "reuse_key": f"issue-{tag}", "delete_when": [f"issue_closed:{issue['id']}"]}
+        created = structured(mcp_call(c.a, "env_create", body))
+        session_id = created["environment"]["id"]
+        site.wait_state(session_id, "running")
+        again = structured(mcp_call(c.a, "env_create", body))
+        wrote = structured(mcp_call(c.a, "env_files", {"environment_id": session_id, "action": "write",
+                                                       "path": "repro/steps.txt", "text": f"steps-{tag}"}))
+        ran = site.exec(session_id, "uname -r; cat repro/steps.txt")
+        c.check("场景 26：会话环境（gvisor）建好后同一个 reuse_key 复用；env_files 写入、env_exec 读出；容器的运行时是 runsc",
+                again.get("reused") is True and again["environment"]["id"] == session_id and wrote.get("written") is True
+                and ran.get("status") == "succeeded" and f"steps-{tag}" in ran["untrusted"]["output"]
+                and env_runtime(session_id) == "runsc",
+                json.dumps({"reused": again.get("reused"), "run": ran.get("status"), "runtime": env_runtime(session_id)}, ensure_ascii=False))
+        egress = site.exec(session_id, EGRESS_PROBE)
+        out = dict(line.split(" ", 1) for line in egress["untrusted"]["output"].splitlines() if " " in line)
+        c.check("场景 26：gvisor 环境（allowlist）经 runner-agent 的出口代理访问放行的域名（200），别的域名被拒，直连外网不通",
+                out.get("allowed") == "200" and out.get("denied") != "200" and out.get("direct", "").startswith("blocked"),
+                json.dumps(out, ensure_ascii=False))
+        c.owner.call("PATCH", f"/api/v1/issues/{issue['id']}", {"version": issue["version"], "state": "closed", "close_reason": "resolved"})
+        closed = site.wait_state(session_id, "deleted", timeout=300)
+        c.check("场景 26：管理员关闭 Issue 后（删除条件 issue_closed）会话环境删除，容器不在",
+                closed.get("state") == "deleted" and not env_containers(session_id), closed.get("state_reason") or "")
+
+        # 4. 常驻环境（runc）：停止后再用自动启动；归档后再用从快照重建、重放初始化步骤
+        made = structured(mcp_call(c.a, "env_create", {
+            "purpose": f"常驻服务 {tag}", "lifetime": "persistent", "reuse_key": f"svc-{tag}",
+            "spec": {"image": image, "runtime": "runc", "persist": ["data"]}}))
+        keep_id = made["environment"]["id"]
+        site.wait_state(keep_id, "running")
+        wrote = site.exec(keep_id, f"uname -r; mkdir -p data && echo kept-{tag} > data/note.txt")
+        runc_kernel = (wrote.get("untrusted") or {}).get("output", "").split()[:1]
+        setup = mcp_call(c.a, "env_setup", {"environment_id": keep_id, "steps": [f"echo setup-{tag} > /tmp/setup.txt"]})
+        c.check("场景 26：gvisor 与 runc 都能跑：gvisor 环境里看到的内核不是宿主的，runc 环境里是宿主的",
+                gvisor_kernel != kernel and runc_kernel == [kernel] and env_runtime(keep_id) == "runc" and tool_code(setup) == "",
+                json.dumps({"host": kernel, "gvisor": gvisor_kernel, "runc": runc_kernel}, ensure_ascii=False))
+
+        stopped = structured(mcp_call(c.a, "env_stop", {"environment_id": keep_id}))
+        site.wait_state(keep_id, "stopped")
+        woke = site.exec(keep_id, "cat data/note.txt")
+        c.check("场景 26：常驻环境 env_stop 后停止；再 env_exec 自动启动，数据还在",
+                bool(stopped) and woke.get("status") == "succeeded" and f"kept-{tag}" in woke["untrusted"]["output"],
+                json.dumps({"run": woke.get("status")}, ensure_ascii=False))
+
+        current = site.env(keep_id)
+        c.owner.call("POST", f"/api/v1/runner/environments/{keep_id}/actions", {"action": "archive", "version": current["version"]})
+        archived = site.wait_state(keep_id, "archived", timeout=300)
+        no_container = not env_containers(keep_id)
+        rebuilt = site.exec(keep_id, "cat data/note.txt; cat /tmp/setup.txt", timeout=600)
+        after = site.env(keep_id)
+        c.check("场景 26：管理员归档常驻环境（先快照、删容器）；再 env_exec 从快照重建、重放初始化步骤，数据还在",
+                archived.get("state") == "archived" and bool(archived.get("snapshot_at")) and no_container
+                and rebuilt.get("status") == "succeeded" and f"kept-{tag}" in rebuilt["untrusted"]["output"]
+                and f"setup-{tag}" in rebuilt["untrusted"]["output"] and after.get("state") == "running",
+                json.dumps({"run": rebuilt.get("status"), "output": (rebuilt.get("untrusted") or {}).get("output", "")[-200:],
+                            "state": after.get("state")}, ensure_ascii=False))
+
+        current = site.env(keep_id)
+        c.owner.call("POST", f"/api/v1/runner/environments/{keep_id}/actions", {"action": "delete", "version": current["version"]})
+        removed = site.wait_state(keep_id, "deleted", timeout=300)
+        c.check("场景 26：管理员删除常驻环境后容器不在，记录保留",
+                removed.get("state") == "deleted" and not env_containers(keep_id), removed.get("state_reason") or "")
+    finally:
+        if c.report.failures:
+            print(run("docker", "logs", "--tail", "120", "myworkspace-runner-agent", check=False).stderr[-6000:], file=sys.stderr)
+        site.teardown()
+
+
 SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "2": scenario_2, "3": scenario_3, "4": scenario_4, "5": scenario_5, "7": scenario_7, "8": scenario_8,
     "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "15": scenario_15,
     "16": scenario_16, "17": scenario_17, "18": scenario_18, "19": scenario_19, "20": scenario_20, "21": scenario_21,
-    "22": scenario_22, "23": scenario_23, "25": scenario_25, "24": scenario_24, "6": scenario_6,
+    "22": scenario_22, "23": scenario_23, "25": scenario_25, "24": scenario_24, "26": scenario_26, "6": scenario_6,
 }
 
 
@@ -1641,6 +1877,11 @@ def setup(args: argparse.Namespace, report: Report, base: str) -> Ctx:
                                                                  "max_role": "admin", "im_nickname": name})
         owner.call("PUT", f"/api/v1/agents/instances/{record['id']}/secret-grants", {
             "version": record["version"], "grants": [{"secret_id": secret["id"], "ref_id": "model_api_key"}]})
+        if label == "a":
+            # 场景 26（运行服务器）：OpenClaw 启动时就取好了工具列表，所以在甲启动前打开运行环境权限
+            switch = owner.call("GET", f"/api/v1/agents/instances/{record['id']}/runner")
+            owner.call("PUT", f"/api/v1/agents/instances/{record['id']}/runner",
+                       {"version": switch["version"], "enabled": True})
         instance = Instance(label, mode, owner.call("GET", f"/api/v1/agents/instances/{record['id']}"), workdir)
         instances.append(instance)
         instance.materialize(owner.bundle(record["id"]), server_ca=args.server_ca, ingress_ip=ingress_ip,

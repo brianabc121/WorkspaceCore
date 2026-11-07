@@ -272,3 +272,30 @@ def test_tar_of_writes_parent_directories_with_the_same_owner() -> None:
         members = {m.name: m for m in tar.getmembers()}
     assert members["a"].isdir() and members["a/b"].isdir()
     assert all((m.uid, m.gid) == (1000, 1000) for m in members.values())
+
+
+def _bundle_compose(**extra: Any) -> str:
+    import zipfile
+
+    from app import runner_bundle
+
+    data = runner_bundle.build(
+        runner_bundle.RunnerBundleInput(
+            host_name="runner-1",
+            url="https://agent-gateway.myworkspace.internal:9443",
+            token="mwr_x",  # noqa: S106 - 测试值
+            block=[],
+            **extra,
+        )
+    )
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        return zf.read("myworkspace-runner/compose.yaml").decode()
+
+
+def test_bundle_maps_ingress_host_without_dns() -> None:
+    """外网入口没有域名（内部主机名 + 工作台地址，T-0088）：容器里把主机名指向工作台。"""
+    mapped = _bundle_compose(address="203.0.113.7")
+    assert 'extra_hosts: ["agent-gateway.myworkspace.internal:203.0.113.7"]' in mapped
+    plain = _bundle_compose()
+    assert "extra_hosts" not in plain and "@EXTRA_HOSTS@" not in plain
+    assert "@EXTRA_HOSTS@" not in mapped
