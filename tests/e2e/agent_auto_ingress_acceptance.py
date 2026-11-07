@@ -10,8 +10,9 @@
 检查：
 1. 外网接入包附带内部 CA（tls/ca.pem，与 make agent-ca 导出的一致），隧道带 --cacert；
    入口主机名不在公网 DNS 里时，隧道容器把它映射到 AGENT_PUBLIC_ADDRESS；
-2. 不改接入包，只启动其中的 tunnel 服务（ghostunnel，按主机名发 SNI、用 tls/ca.pem 校验入口）：
-   经本机隧道取到密钥、心跳成功——OpenClaw 服务器上不需要任何手动配置；
+2. 不改接入包，只启动其中的 tunnel 服务（ghostunnel，按主机名发 SNI、用 tls/ca.pem 校验入口；
+   它与 net 服务共用这个实例自己的网络命名空间）：在这个命名空间里经本机隧道取到密钥、心跳成功
+   ——OpenClaw 服务器上不需要任何手动配置；
 3. 入口证书：内部 CA 签发、SAN 是入口主机名。
 
 只依赖 Python 标准库与 docker；用法：
@@ -31,7 +32,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from agent_ingress_acceptance import bundle, env_of, plain_request
+from agent_ingress_acceptance import bundle, env_of
 from e2e_support import ROOT, Client, Report, default_base_url, parse_base_url
 from seed import create_user
 
@@ -54,6 +55,29 @@ def server_certificate(address: str, host: str, port: int, cafile: str) -> dict:
     with socket.create_connection((address, port), timeout=10) as raw:
         with context.wrap_socket(raw, server_hostname=host) as tls:
             return tls.getpeercert() or {}
+
+
+def netns_request(
+    compose_cmd: list[str], url: str, method: str, *, token: str, body: object
+) -> tuple[int, str]:
+    """在这个实例自己的网络命名空间里发请求（经 net 服务里的 node，与 OpenClaw 连本机隧道的路径一样：
+    入口域名在 net 的 hosts 里指向 127.0.0.1）。隧道不对宿主开放端口，宿主上连不到。"""
+    script = (
+        "const [u,m,t,b]=JSON.parse(process.argv[1]);"
+        "fetch(u,{method:m,headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},"
+        "body:JSON.stringify(b)})"
+        ".then(async r=>console.log(JSON.stringify([r.status,(await r.text()).slice(0,2000)])))"
+        ".catch(e=>console.log(JSON.stringify([0,String(e)])));"
+    )
+    out = subprocess.run(
+        [*compose_cmd, "exec", "-T", "net", "node", "-e", script, json.dumps([url, method, token, body])],
+        capture_output=True, text=True, timeout=60,
+    )
+    lines = out.stdout.strip().splitlines()
+    if not lines:
+        return 0, out.stderr.strip()[-300:]
+    status, text = json.loads(lines[-1])
+    return int(status), str(text)
 
 
 def main() -> int:
@@ -109,8 +133,9 @@ def main() -> int:
     )
     if address:
         report.check(
-            "入口主机名不在公网 DNS 里：隧道容器把它映射到 AGENT_PUBLIC_ADDRESS",
-            f'    extra_hosts: ["{host}:{address}"]\n' in compose,
+            "入口主机名不在公网 DNS 里：隧道自己的 hosts 把它映射到 AGENT_PUBLIC_ADDRESS",
+            f"{address}\t{host}\n" in files.get("tls/hosts", "")
+            and "      - ./tls/hosts:/etc/hosts:ro\n" in compose,
             address,
         )
 
@@ -130,26 +155,23 @@ def main() -> int:
         up = subprocess.run([*compose_cmd, "up", "-d", "tunnel"], capture_output=True, text=True)
         report.check("docker compose up -d tunnel（接入包未修改）", up.returncode == 0, up.stderr.strip()[-300:])
         try:
-            tunnel_hostport = f"{host}:{urlsplit(env_of(files, 'MYWS_AGENT_API')).port}"
+            tunnel = f"http://{host}:{urlsplit(env_of(files, 'MYWS_AGENT_API')).port}"
             status, text = 0, ""
             for _ in range(30):
-                try:
-                    status, text = plain_request(
-                        tunnel_hostport, "POST", "/agent-api/v1/secrets/resolve",
-                        token=token, body={"ids": ["openai_api_key"]},
-                    )
-                    if status:
-                        break
-                except OSError:
-                    pass
+                status, text = netns_request(
+                    compose_cmd, f"{tunnel}/agent-api/v1/secrets/resolve", "POST",
+                    token=token, body={"ids": ["openai_api_key"]},
+                )
+                if status:
+                    break
                 time.sleep(1)
             report.check(
                 "经本机隧道取到密钥（隧道用 tls/ca.pem 校验内部 CA 签发的入口证书）",
                 status == 200 and json.loads(text).get("values", {}).get("openai_api_key") == SECRET_VALUE,
-                f"{status}",
+                f"{status} {text[:200] if status != 200 else ''}",
             )
-            status, _ = plain_request(
-                tunnel_hostport, "POST", "/agent-api/v1/heartbeat", token=token,
+            status, _ = netns_request(
+                compose_cmd, f"{tunnel}/agent-api/v1/heartbeat", "POST", token=token,
                 body={"openclaw_version": "2026.9.36", "plugin_version": "0.3.3"},
             )
             report.check("经本机隧道心跳成功", status == 200, f"{status}")
