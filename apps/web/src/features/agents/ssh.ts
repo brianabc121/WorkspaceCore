@@ -37,6 +37,7 @@ export const SSH_STEP: Record<Schema['AgentSshJobStep']['key'], string> = {
   stop: '停止并删除容器',
   unschedule: '删除定时任务',
   remove_files: '删除接入包目录',
+  install: '运行安装脚本（Docker、gVisor、runner-agent）',
 }
 export const SSH_STEP_STATUS: Record<Schema['AgentSshJobStep']['status'], string> = {
   pending: '等待', running: '进行中', done: '完成', skipped: '跳过', failed: '失败',

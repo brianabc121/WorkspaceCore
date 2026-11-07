@@ -101,6 +101,10 @@ class RunnerAdmin:
     async def bundle(self, access: WorkspaceAccess) -> tuple[str, bytes]:
         """接入包：每次下载都换新凭证（旧的立即失效）。"""
         host = await self._host(access)
+        return await self.bundle_for(host, access.user_id)
+
+    async def bundle_for(self, host: RunnerHost, actor_id: uuid.UUID | None) -> tuple[str, bytes]:
+        """签发新凭证并生成接入包（页面下载与 SSH 自动部署共用）；提交事务。"""
         url = (
             self.settings.agent_public_url
             if host.ingress == "public"
@@ -108,14 +112,14 @@ class RunnerAdmin:
         )
         if not url:
             raise ApiError(409, "AGENT_INGRESS_NOT_CONFIGURED", "接入入口还没有配置")
-        token, cert = await self.hosts.reissue(host, access.user_id)
+        token, cert = await self.hosts.reissue(host, actor_id)
         ca = cert[2] if cert else await self.hosts.server_ca()
         data = runner_bundle.build(
             runner_bundle.RunnerBundleInput(
                 host_name=host.name,
                 url=url.rstrip("/"),
                 token=token,
-                block=await self._block_list(access.workspace.id),
+                block=await self._block_list(host.workspace_id),
                 ca_pem=ca,
                 client_cert_pem=cert[0] if cert else None,
                 client_key_pem=cert[1] if cert else None,

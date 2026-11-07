@@ -247,3 +247,56 @@ describe('instance runner permission', () => {
     expect(within(section).getByText(/工具权限是只读，打不开/)).toBeVisible()
   })
 })
+
+describe('通过 SSH 部署运行服务器', () => {
+  const target = (over: Partial<Schema['AgentSshTargetOut']> = {}): Schema['AgentSshTargetOut'] => ({
+    host: '203.0.113.20', address: '203.0.113.20', port: 22, username: 'deploy', host_key_algorithm: 'ssh-ed25519', host_key_fingerprint: 'SHA256:abc123',
+    host_key_confirmed: false, host_key_confirmed_at: null, client_key_installed: false, client_key_fingerprint: null, install_dir: null, installed_at: null,
+    version: 1, created_at: at, updated_at: at, ...over,
+  })
+  const job = (over: Partial<Schema['AgentSshJobOut']> = {}): Schema['AgentSshJobOut'] => ({
+    id: 'job-1', kind: 'install', status: 'running', log: '', error_code: null, error_message: null, started_at: at, finished_at: null, updated_at: at,
+    steps: [{ key: 'connect', status: 'done', detail: null }, { key: 'install', status: 'running', detail: '安装 Docker 与 gVisor' }, { key: 'online', status: 'pending', detail: null }], ...over,
+  })
+
+  it('probes the host key, confirms the fingerprint and deploys with a one-time password', async () => {
+    let state: Schema['AgentSshState'] = { target: null, job: null, warning: null }
+    const requests = setup(r => {
+      const p = path(r)
+      if (p === '/api/v1/runner/host/ssh' && r.method === 'GET') return Response.json(state)
+      if (p === '/api/v1/runner/host/ssh' && r.method === 'PUT') { state = { target: target(), job: null, warning: null }; return Response.json(state) }
+      if (p === '/api/v1/runner/host/ssh/confirm') { state = { target: target({ host_key_confirmed: true, version: 2 }), job: null, warning: null }; return Response.json(state) }
+      if (p === '/api/v1/runner/host/ssh/install') { state = { target: target({ host_key_confirmed: true, version: 2 }), job: job(), warning: null }; return Response.json(state, { status: 202 }) }
+      return undefined
+    }, { role: 'owner' })
+    await openApp('/runner?tab=settings')
+    const panel = await screen.findByRole('region', { name: '通过 SSH 部署' })
+    const form = await within(panel).findByRole('form', { name: '运行服务器的 SSH 地址' })
+    await fireEvent.update(within(form).getByLabelText('服务器 IP 或域名 *'), '203.0.113.20')
+    await fireEvent.update(within(form).getByLabelText('SSH 账号 *'), 'deploy')
+    await fireEvent.click(within(form).getByRole('button', { name: '读取主机公钥' }))
+    expect(await within(panel).findByTestId('runner-ssh-fingerprint')).toHaveTextContent('SHA256:abc123')
+    await within(panel).findByText('已读取主机公钥：请在服务器上核对指纹')
+    expect(within(panel).getByText('ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub')).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: '确认指纹' })).toBeDisabled()
+    await fireEvent.click(within(panel).getByLabelText(/我已在服务器上核对/))
+    await vi.waitFor(() => expect(within(panel).getByRole('button', { name: '确认指纹' })).toBeEnabled())
+    await fireEvent.click(within(panel).getByRole('button', { name: '确认指纹' }))
+    const deploy = await within(panel).findByRole('form', { name: '部署运行服务器' })
+    await fireEvent.update(within(deploy).getByLabelText('登录密码 *'), 'server pw')
+    await vi.waitFor(() => expect(within(deploy).getByRole('button', { name: '开始部署' })).toBeEnabled())
+    await fireEvent.click(within(deploy).getByRole('button', { name: '开始部署' }))
+    expect(await within(panel).findByRole('region', { name: '部署进度' })).toHaveTextContent('运行安装脚本（Docker、gVisor、runner-agent）')
+    const install = requests.find(r => path(r) === '/api/v1/runner/host/ssh/install')!
+    expect(await install.clone().json()).toEqual({ version: 2, password: 'server pw' })
+    const put = requests.find(r => path(r) === '/api/v1/runner/host/ssh' && r.method === 'PUT')!
+    expect(await put.clone().json()).toEqual({ host: '203.0.113.20', port: 22, username: 'deploy' })
+  })
+
+  it('is owner only', async () => {
+    setup()
+    await openApp('/runner?tab=settings')
+    const panel = await screen.findByRole('region', { name: '通过 SSH 部署' })
+    expect(within(panel).getByText(/只有 owner 能通过 SSH 部署/)).toBeVisible()
+  })
+})

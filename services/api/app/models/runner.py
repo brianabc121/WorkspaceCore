@@ -337,3 +337,100 @@ class RunnerSnapshot(Base):
     created_at: Mapped[datetime] = _created()
     ready_at: Mapped[datetime | None] = _when()
     expires_at: Mapped[datetime | None] = _when()
+
+
+SSH_JOB_KINDS = ("install", "uninstall")
+SSH_JOB_STATUSES = ("running", "succeeded", "failed", "interrupted")
+
+
+class RunnerSshTarget(Base):
+    """通过 SSH 自动部署运行服务器的目标（T-0136，方案第 9 节）：每台运行服务器最多一个。
+
+    与 OpenClaw 实例的 `agent_ssh_targets` 一样：主机公钥先探测、owner 核对指纹并确认后才固定；
+    登录密码从不保存；安装时生成的专用私钥以 `enc:v1:` 引用保存（用途绑定 runner_ssh:<id>）。
+    """
+
+    __tablename__ = "runner_ssh_targets"
+    __table_args__ = (
+        CheckConstraint("port BETWEEN 1 AND 65535", name="port"),
+        ForeignKeyConstraint(
+            ["workspace_id", "host_id"],
+            ["workspace.runner_hosts.workspace_id", "workspace.runner_hosts.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("host_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = _workspace()
+    host_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    host: Mapped[str] = mapped_column(Text)
+    address: Mapped[str] = mapped_column(Text)
+    port: Mapped[int] = mapped_column(Integer)
+    username: Mapped[str] = mapped_column(Text)
+    host_key_algorithm: Mapped[str] = mapped_column(Text)
+    host_key: Mapped[str] = mapped_column(Text)
+    host_key_fingerprint: Mapped[str] = mapped_column(Text)
+    host_key_confirmed_at: Mapped[datetime | None] = _when()
+    host_key_confirmed_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    client_key_ref: Mapped[str | None] = mapped_column(Text)
+    client_public_key: Mapped[str | None] = mapped_column(Text)
+    install_dir: Mapped[str | None] = mapped_column(Text)
+    installed_at: Mapped[datetime | None] = _when()
+    version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RunnerSshJob(Base):
+    """一次通过 SSH 的部署或卸载（T-0136）。在 API 进程内运行；进程重启时 running 改为 interrupted。
+
+    steps：[{key, status, detail}]；log：命令输出的末尾，已脱敏（密码、令牌、私钥不会出现）。
+    """
+
+    __tablename__ = "runner_ssh_jobs"
+    __table_args__ = (
+        CheckConstraint(f"kind IN {SSH_JOB_KINDS}", name="kind"),
+        CheckConstraint(f"status IN {SSH_JOB_STATUSES}", name="status"),
+        ForeignKeyConstraint(
+            ["workspace_id", "host_id"],
+            ["workspace.runner_hosts.workspace_id", "workspace.runner_hosts.id"],
+            ondelete="CASCADE",
+        ),
+        # 同一台目标服务器同时只有一个进行中的任务
+        Index(
+            "uq_runner_ssh_jobs_running",
+            "target_id",
+            unique=True,
+            postgresql_where=text("status = 'running'"),
+        ),
+        Index("ix_runner_ssh_jobs_target_started", "target_id", "started_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = _workspace()
+    host_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    target_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.runner_ssh_targets.id", ondelete="CASCADE")
+    )
+    kind: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'running'"))
+    steps: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    log: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    error_code: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
+    started_at: Mapped[datetime] = _created()
+    finished_at: Mapped[datetime | None] = _when()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 Runtime = Literal["gvisor", "runc", "kvm"]
 RunUser = Literal["user", "root"]
@@ -483,6 +483,24 @@ class RunnerOverview(BaseModel):
     environments: dict[str, int]
     instances: list[RunnerInstanceUsage]
     recent: list[dict[str, Any]]
+
+
+class RunnerSshUninstall(_Strict):
+    """卸载运行服务器：停止 runner-agent，可选删除接入包目录。
+
+    要 root：不是 root 账号就填登录密码（只用这一次）。
+    """
+
+    version: int = Field(description="目标服务器的当前版本号")
+    remove_files: bool = Field(
+        default=False, description="同时删除服务器上的接入包目录（含运行服务器凭证）"
+    )
+    password: SecretStr | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1024,
+        description="SSH 登录密码（用 sudo 停止 runner-agent）；root 账号不用填",
+    )
 
 
 class AgentRunnerOut(BaseModel):

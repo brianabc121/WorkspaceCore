@@ -43,6 +43,7 @@ from app.models import (
     AgentOpsAction,
     AgentSshJob,
     AgentSshTarget,
+    RunnerSshJob,
 )
 
 logger = logging.getLogger("app.agent_ssh")
@@ -119,9 +120,12 @@ class JobRecorder:
         job_id: uuid.UUID,
         secrets: list[str] | None = None,
         steps: tuple[str, ...] = prov.STEPS,
+        model: Any = AgentSshJob,
     ) -> None:
         self.sessionmaker = sessionmaker
         self.job_id = job_id
+        # 任务表：OpenClaw 实例是 agent_ssh_jobs，运行服务器（T-0136）是 runner_ssh_jobs，列相同
+        self.model = model
         self.steps: list[dict[str, Any]] = [
             {"key": key, "status": "pending", "detail": None} for key in steps
         ]
@@ -175,8 +179,8 @@ class JobRecorder:
     async def flush(self, **values: Any) -> None:
         async with self.sessionmaker() as db:
             result = await db.execute(
-                update(AgentSshJob)
-                .where(AgentSshJob.id == self.job_id, AgentSshJob.status == "running")
+                update(self.model)
+                .where(self.model.id == self.job_id, self.model.status == "running")
                 .values(
                     steps=copy.deepcopy(self.steps),
                     log=self.log,
@@ -346,6 +350,10 @@ class Installer:
             and target.host_key_confirmed_at is not None
         )
 
+    def key_comment(self) -> str:
+        """专用公钥在 authorized_keys 里的注释（运行服务器的部署另有前缀）。"""
+        return f"myworkspace-agent-{str(self.target.instance_id)[:8]}"
+
     def _box(self) -> CredentialBox:
         try:
             return CredentialBox.from_settings(self.settings)
@@ -436,9 +444,7 @@ class Installer:
         await self.rec.step("authorize_key", "running")
         fresh = key is None
         if key is None:
-            key = asyncssh.generate_private_key(
-                "ssh-ed25519", comment=f"myworkspace-agent-{str(self.target.instance_id)[:8]}"
-            )
+            key = asyncssh.generate_private_key("ssh-ed25519", comment=self.key_comment())
         public = key.export_public_key().decode().strip()
         result = await self._run(
             conn, "安装专用公钥", prov.authorize_key_command(public), seconds=30
@@ -859,8 +865,12 @@ async def _finish(
     code: str | None = None,
     message: str | None = None,
     client_ip: str | None = None,
+    audit: tuple[str, str] = ("agents.ssh", "agent_instance"),
 ) -> None:
-    """写回结果；数据库出错时只记日志（任务记录保持 running，由下一次操作或重启标为中断）。"""
+    """写回结果；数据库出错时只记日志（任务记录保持 running，由下一次操作或重启标为中断）。
+
+    audit：审计事件的前缀与资源类型（运行服务器的部署是 runner.ssh / runner_host）。
+    """
     try:
         await _write_result(
             sessionmaker,
@@ -871,6 +881,7 @@ async def _finish(
             code=code,
             message=message,
             client_ip=client_ip,
+            audit=audit,
         )
     except (OSError, SQLAlchemyError) as error:
         logger.warning(
@@ -889,6 +900,7 @@ async def _write_result(
     code: str | None = None,
     message: str | None = None,
     client_ip: str | None = None,
+    audit: tuple[str, str] = ("agents.ssh", "agent_instance"),
 ) -> None:
     current = recorder.current
     for step in recorder.steps:
@@ -907,10 +919,10 @@ async def _write_result(
         return
     async with sessionmaker() as db:
         await AuditTrail(db, settings).record(
-            f"agents.ssh.{target.kind}_{status}",
+            f"{audit[0]}.{target.kind}_{status}",
             workspace_ids=[target.workspace_id],
             actor_id=target.started_by,
-            resource_type="agent_instance",
+            resource_type=audit[1],
             resource_id=target.instance_id,
             metadata={"job_id": str(target.job_id), "error_code": code},
             client_ip=client_ip,
@@ -1094,6 +1106,18 @@ class SshJobRunner:
                         error_code="interrupted",
                         error_message="工作台重启，动作中断；可以重新执行",
                         finished_at=func.now(),
+                    )
+                )
+                # 运行服务器的部署（T-0136）也在本进程里运行
+                await db.execute(
+                    update(RunnerSshJob)
+                    .where(RunnerSshJob.status == "running")
+                    .values(
+                        status="interrupted",
+                        error_code="interrupted",
+                        error_message="工作台重启，任务中断；可以重新开始",
+                        finished_at=func.now(),
+                        updated_at=func.now(),
                     )
                 )
                 await db.commit()

@@ -415,3 +415,14 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 | `runner_snapshots` | `id`、`workspace_id`、`environment_id`、`status`、`key_ref`、`store`、`entries`、`parts`、`bytes`、`error`、`created_at`、`ready_at`、`expires_at` | “要保存的目录”打成 tar、分块（≤ 16 MB）加密后存在对象存储（`store` 是 `local` 或 S3 兼容，key `runner/<工作空间>/<快照>/<块号>`）；`key_ref` 是这份快照的数据密钥（AES-256-GCM），用凭证密钥封存、用途绑定快照 ID，**不存明文**；`entries` 是每个目录的起始块、块数与字节数；CHECK `status` ∈ `uploading` / `ready` / `failed` / `deleted`；索引 `(environment_id, created_at)`、`(expires_at)`；随环境、工作空间级联删除。环境删除后快照保留 `archive_retention_days`（默认 30）天，到期由每分钟检查删掉对象存储里的块 |
 
 **downgrade** 删除这张表；对象存储里已有的快照块不会自动删除（都在前缀 `runner/<工作空间 ID>/` 下，需要时按前缀手动清理）。
+
+### 迁移 `0044`（T-0136）
+
+页面上通过 SSH 部署运行服务器（`docs/v2/RUNNER_PLAN.md` 第 9 节），与 OpenClaw 实例的 `agent_ssh_targets` / `agent_ssh_jobs`（迁移 0021 ~ 0023）列相同，只是挂在运行服务器上。只新增两张表。
+
+| 表 / 字段 | 主要字段 | 约束与说明 |
+|---|---|---|
+| `runner_ssh_targets` | `id`、`workspace_id`、`host_id`、`host`、`address`、`port`、`username`、`host_key_algorithm`、`host_key`、`host_key_fingerprint`、`host_key_confirmed_at/_by`、`client_key_ref`、`client_public_key`、`install_dir`、`installed_at`、`version`、`created_by`、时间字段 | 复合外键 `(workspace_id, host_id)` → `runner_hosts`（级联删除）；唯一 `host_id`（每台运行服务器最多一个）；CHECK `port` 1 ~ 65535；**登录密码从不保存**；工作台专用私钥以 `enc:v1:` 引用保存，用途绑定 `runner_ssh:<id>` |
+| `runner_ssh_jobs` | `id`、`workspace_id`、`host_id`、`target_id`、`kind`、`status`、`steps`、`log`、`error_code`、`error_message`、`started_by`、`started_at`、`finished_at`、`updated_at` | CHECK `kind` ∈ `install` / `uninstall`、`status` ∈ `running` / `succeeded` / `failed` / `interrupted`；部分唯一索引 `(target_id) WHERE status = 'running'`（同一目标同时一个任务）；`log` 是命令输出的结尾（最多 64 KB），密码、运行服务器凭证、私钥已替换成 `***`；API 重启时 `running` 改为 `interrupted` |
+
+**downgrade** 删除这两张表（服务器上已装的 runner-agent 与专用公钥不受影响）。

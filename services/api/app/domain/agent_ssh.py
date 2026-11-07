@@ -32,7 +32,14 @@ from app.domain.credentials import CredentialBox, CredentialError
 from app.domain.policy import WorkspaceAccess
 from app.domain.ratelimit import WindowLimiter
 from app.integrations import ssh
-from app.models import AgentInstance, AgentOpsAction, AgentSshJob, AgentSshTarget
+from app.models import (
+    AgentInstance,
+    AgentOpsAction,
+    AgentSshJob,
+    AgentSshTarget,
+    RunnerSshJob,
+    RunnerSshTarget,
+)
 from app.schemas.agents import (
     AgentSshConfirm,
     AgentSshInstall,
@@ -88,7 +95,7 @@ def _client_fingerprint(public_key: str | None) -> str | None:
         return None
 
 
-def _job_out(job: AgentSshJob) -> AgentSshJobOut:
+def _job_out(job: AgentSshJob | RunnerSshJob) -> AgentSshJobOut:
     return AgentSshJobOut(
         id=job.id,
         kind=job.kind,
@@ -103,7 +110,7 @@ def _job_out(job: AgentSshJob) -> AgentSshJobOut:
     )
 
 
-def _out(target: AgentSshTarget) -> AgentSshTargetOut:
+def _out(target: AgentSshTarget | RunnerSshTarget) -> AgentSshTargetOut:
     return AgentSshTargetOut(
         host=target.host,
         address=target.address,

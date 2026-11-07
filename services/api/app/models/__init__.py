@@ -79,6 +79,8 @@ from app.models.runner import (
     RunnerHost,
     RunnerRun,
     RunnerSnapshot,
+    RunnerSshJob,
+    RunnerSshTarget,
     RunnerTemplate,
 )
 from app.models.search import SearchDocument
@@ -164,6 +166,8 @@ __all__ = [
     "RunnerHost",
     "RunnerRun",
     "RunnerSnapshot",
+    "RunnerSshJob",
+    "RunnerSshTarget",
     "RunnerTemplate",
     "SearchDocument",
     "SyncCursor",
