@@ -177,7 +177,8 @@ const detail = (page) => page.getByRole('complementary', { name: '选中的任�
   step('手机宽度（390）：正在执行的卡片，点开是底部面板；天 / 小时刻度不横向滚动')
 
   await detail(page).getByRole('button', { name: '暂停' }).click()
-  await detail(page).getByText('已暂停').waitFor()
+  // 精确匹配状态提示：执行片段那一行（“16:57–16:57 · 已暂停”）也含这几个字，可能同时出现
+  await detail(page).getByText('已暂停', { exact: true }).waitFor()
   humanRuns = (await api(page, workspace, 'GET', `/api/v1/tasks/${human.id}/runs`)).items
   check(humanRuns.length === 1 && humanRuns[0].ended_at && humanRuns[0].end_reason === 'paused', `暂停后这段应结束：${JSON.stringify(humanRuns)}`)
   await page.getByRole('button', { name: new RegExp(`^整理发布说明 ${run}，已暂停`) }).waitFor()
