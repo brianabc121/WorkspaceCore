@@ -380,6 +380,24 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .agent-table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: .85rem; }
 .agent-table th, .agent-table td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); }
 @media (max-width: 760px) { .agent-card, .agent-switch { padding: 16px; } }
+/* 运行服务器页（T-0140）：手机宽度下各块都能换行，不横向滚动（输出、命令按字折行，宽表格在 .table-scroll 里） */
+.runner-tabs { flex-wrap: wrap; margin-bottom: 12px; }
+.runner-tabs [aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+.runner-card { padding: 20px; margin: 12px 0; min-width: 0; overflow-wrap: anywhere; display: grid; gap: 8px; }
+.runner-card h2, .runner-card h3 { margin: 0; font-size: 1.05rem; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.runner-meters { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.runner-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.runner-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.runner-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 12px; align-items: end; }
+.runner-actions { flex-wrap: wrap; }
+.runner-card .section-heading { margin: 0; flex-wrap: wrap; align-items: flex-start; }
+.runner-card .section-heading > h2, .runner-card .section-heading > h3 { flex: 1 1 260px; min-width: 0; }
+.runner-card .section-heading .runner-title { color: var(--text); font-size: inherit; }
+.runner-form { gap: 12px; }
+.runner-output { margin: 0; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--surface-2); border-radius: 6px; padding: 8px 12px; font-size: .8rem; }
+.runner-tail { max-height: 160px; }
+.runner-command { white-space: pre-wrap; word-break: break-all; font-size: .85rem; }
+@media (max-width: 760px) { .runner-card { padding: 16px; } }
 /* 服务器状态（T-0113）。趋势图两种系列色亮暗两套都跑过 dataviz 配色检查（与知识库趋势图同一组）；第二个系列另加虚线。
    超过阈值的指示用 --danger，同时写出“空间不足”等文字，不只靠颜色。 */
 :root { --chart-1: #2a78d6; --chart-2: #eb6834; --chart-grid: #eceef2; --chart-axis: #cfd5df; }

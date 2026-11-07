@@ -46,9 +46,9 @@ from app.schemas.runner import (
     RunnerPolicyPut,
     RunnerRunAdminOut,
     RunnerRunList,
+    RunnerTemplateAdminOut,
     RunnerTemplateAdminSave,
     RunnerTemplateList,
-    RunnerTemplateOut,
     RunnerTemplateStatus,
 )
 
@@ -255,6 +255,9 @@ class RunnerAdmin:
             disk_bytes=env.disk_bytes,
             egress=dict(env.egress or {}),
             retention_score=None if score is None or math.isinf(score) else score,
+            retention_infinite=score is not None and math.isinf(score),
+            snapshot_at=env.snapshot_at,
+            snapshot_bytes=env.snapshot_bytes,
             started_at=env.started_at,
             stopped_at=env.stopped_at,
             archived_at=env.archived_at,
@@ -382,19 +385,28 @@ class RunnerAdmin:
         raise ApiError(409, "ENV_UNAVAILABLE", f"环境现在是 {env.state}，不需要恢复")
 
     # ---------------------------------------------------------------- 模板
+    async def _template_out(
+        self,
+        template: RunnerTemplate,
+        viewer: Viewer,
+        owners: dict[uuid.UUID, str] | None = None,
+    ) -> RunnerTemplateAdminOut:
+        base = await self.runner.template_out(template, viewer, owners)
+        return RunnerTemplateAdminOut(
+            **base.model_dump(), version=template.version, build_log=template.build_log or None
+        )
+
     async def templates(self, access: WorkspaceAccess) -> RunnerTemplateList:
         viewer = Viewer(access.workspace.id, user_id=access.user_id)
         rows = await self.runner.templates(access.workspace.id)
         owners = await self.runner.owner_names(
             {t.owner_instance_id for t in rows if t.owner_instance_id}
         )
-        return RunnerTemplateList(
-            items=[await self.runner.template_out(t, viewer, owners) for t in rows]
-        )
+        return RunnerTemplateList(items=[await self._template_out(t, viewer, owners) for t in rows])
 
     async def save_template(
         self, access: WorkspaceAccess, body: RunnerTemplateAdminSave
-    ) -> RunnerTemplateOut:
+    ) -> RunnerTemplateAdminOut:
         viewer = Viewer(access.workspace.id, user_id=access.user_id)
         try:
             template, _created = await self.runner.save_template(
@@ -408,7 +420,7 @@ class RunnerAdmin:
             raise _error(error) from None
         await self.db.commit()
         await self.db.refresh(template)
-        return await self.runner.template_out(template, viewer)
+        return await self._template_out(template, viewer)
 
     async def _template(self, access: WorkspaceAccess, template_id: uuid.UUID) -> RunnerTemplate:
         template = await self.db.scalar(
@@ -423,7 +435,7 @@ class RunnerAdmin:
 
     async def set_template_status(
         self, access: WorkspaceAccess, template_id: uuid.UUID, body: RunnerTemplateStatus
-    ) -> RunnerTemplateOut:
+    ) -> RunnerTemplateAdminOut:
         template = await self._template(access, template_id)
         if template.version != body.version:
             raise ApiError(409, "VERSION_CONFLICT", "模板已被修改，请刷新后重试")
@@ -439,13 +451,13 @@ class RunnerAdmin:
         )
         await self.db.commit()
         await self.db.refresh(template)
-        return await self.runner.template_out(
+        return await self._template_out(
             template, Viewer(access.workspace.id, user_id=access.user_id)
         )
 
     async def rebuild_template(
         self, access: WorkspaceAccess, template_id: uuid.UUID
-    ) -> RunnerTemplateOut:
+    ) -> RunnerTemplateAdminOut:
         template = await self._template(access, template_id)
         try:
             host = await self.runner.online_host(access.workspace.id)
@@ -476,7 +488,7 @@ class RunnerAdmin:
         )
         await self.db.commit()
         await self.db.refresh(template)
-        return await self.runner.template_out(
+        return await self._template_out(
             template, Viewer(access.workspace.id, user_id=access.user_id)
         )
 

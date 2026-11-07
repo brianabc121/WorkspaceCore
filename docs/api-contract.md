@@ -564,9 +564,9 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST /api/v1/runner/host/bundle` | 下载接入包（zip，`Cache-Control: no-store`）并签发新凭证（`mwr_` 开头，工作台只存 SHA-256），旧凭证立即失效；外网入口另签客户端证书（实例的内部 CA）。内容：`runner.env`（600）、`compose.yaml`（锁定 digest 的 python 镜像）、`agent/runner_agent/*.py`、`install.sh` / `install-docker.sh`（Docker 29.9.1）/ `install-gvisor.sh`（release-20261019.0，核对 sha512）、`tls/`、`CHECKLIST.md`；审计 `runner.host_reissued` |
 | `DELETE /api/v1/runner/host?version=` | 移除；还有没删除的环境 `409 RUNNER_HAS_ENVIRONMENTS`；审计 `runner.host_removed` |
 | `PUT /api/v1/runner/host/policy` | 回收策略覆盖值 `policy`（键见 `app/domain/runner_specs.py` 的 `DEFAULT_POLICY`，不认识的键 `422`）、`version`；审计 `runner.policy_updated` |
-| `GET /api/v1/runner/environments` | 环境列表：`state`、`instance_id`、`lifetime`、`include_deleted`；每项含智能体写的用途 `untrusted.purpose`、配置记录 `spec`、运行时 / 用户 / 网络、内存与磁盘占用、出口访问记录 `egress.hosts`（`域名:端口` → 次数、字节、拒绝次数）、删除条件、`next_step`、`wake_seconds`、保留分 `retention_score`（分低的先回收；`null` 表示无穷大：常驻环境的数据超过快照上限、重建不出来，只会被停止、不会被自动归档）、快照大小与时间、归档时间、`version` |
+| `GET /api/v1/runner/environments` | 环境列表：`state`、`instance_id`、`lifetime`、`include_deleted`；每项含智能体写的用途 `untrusted.purpose`、配置记录 `spec`、运行时 / 用户 / 网络、内存与磁盘占用、出口访问记录 `egress.hosts`（`域名:端口` → 次数、字节、拒绝次数）、删除条件、`next_step`、`wake_seconds`、保留分 `retention_score`（分低的先回收；只算运行中与已停止的环境）与 `retention_infinite`（无穷大：常驻环境的数据超过快照上限、重建不出来，只会被停止、不会被自动归档）、快照大小与时间、归档时间、`version` |
 | `POST /api/v1/runner/environments/{id}/actions` | `action` ∈ `start` / `stop` / `archive`（常驻先停止、做快照，完成后才归档；被保护的 `409`）/ `delete`（立即进入待删除；常驻先做快照，快照保留 30 天）/ `keep`（撤销待删除：回到停止，归档过的回到归档）/ `restore`（归档的按配置记录重建；已删除的常驻环境在快照保留期内从快照恢复，没有快照 `409 SNAPSHOT_NOT_FOUND`）/ `pin` / `unpin`（保护：不被自动回收），带 `version`；审计 `runner.environment_<action>` |
-| `GET /api/v1/runner/templates` | 模板（谁建的、`untrusted.description`、规格、构建状态与日志摘要、镜像 digest、构建耗时、镜像大小、使用次数） |
+| `GET /api/v1/runner/templates` | 模板（`RunnerTemplateAdminOut`：谁建的、`untrusted.description`、规格、构建状态、构建日志的结尾 `build_log`（最多 20000 字，已脱敏）、镜像 digest、构建耗时、镜像大小、使用次数、乐观并发的 `version`）；新建、修改、改状态、重新构建都返回同样的结构 |
 | `PUT /api/v1/runner/templates` | 管理员新建 / 修改模板（`name` 只能是小写字母数字与 `._-`）：规格变了版本号加一并下发构建；修改带 `version`；审计 `runner.template_saved` |
 | `PUT /api/v1/runner/templates/{id}/status` | `active` / `disabled`，带 `version`；审计 `runner.template_status` |
 | `POST /api/v1/runner/templates/{id}/rebuild` | 重新构建；审计 `runner.template_rebuild` |

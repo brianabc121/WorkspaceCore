@@ -14975,6 +14975,12 @@
             ],
             "title": "Project Id"
           },
+          "retention_infinite": {
+            "default": false,
+            "description": "保留分无穷大：常驻环境的数据超过快照上限，只停止、不自动归档",
+            "title": "Retention Infinite",
+            "type": "boolean"
+          },
           "retention_score": {
             "anyOf": [
               {
@@ -14984,6 +14990,7 @@
                 "type": "null"
               }
             ],
+            "description": "保留分（分低的先回收）；只算运行中与已停止的环境，无穷大时为 null",
             "title": "Retention Score"
           },
           "reuse_key": {
@@ -15013,6 +15020,29 @@
             ],
             "title": "Share",
             "type": "string"
+          },
+          "snapshot_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot At"
+          },
+          "snapshot_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Bytes"
           },
           "spec": {
             "$ref": "#/components/schemas/RunnerSpecOut"
@@ -16208,61 +16238,8 @@
         "title": "RunnerSpecOut",
         "type": "object"
       },
-      "RunnerTemplateAdminSave": {
-        "additionalProperties": false,
-        "properties": {
-          "description": {
-            "default": "",
-            "maxLength": 500,
-            "title": "Description",
-            "type": "string"
-          },
-          "name": {
-            "maxLength": 64,
-            "minLength": 1,
-            "pattern": "^[a-z0-9][a-z0-9._-]*$",
-            "title": "Name",
-            "type": "string"
-          },
-          "spec": {
-            "$ref": "#/components/schemas/RunnerSpecIn"
-          },
-          "version": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Version"
-          }
-        },
-        "required": [
-          "name",
-          "spec"
-        ],
-        "title": "RunnerTemplateAdminSave",
-        "type": "object"
-      },
-      "RunnerTemplateList": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/RunnerTemplateOut"
-            },
-            "title": "Items",
-            "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "title": "RunnerTemplateList",
-        "type": "object"
-      },
-      "RunnerTemplateOut": {
+      "RunnerTemplateAdminOut": {
+        "description": "管理员页面上的模板：多了乐观并发的版本号与构建日志的结尾（已脱敏）。",
         "properties": {
           "build_error": {
             "anyOf": [
@@ -16274,6 +16251,18 @@
               }
             ],
             "title": "Build Error"
+          },
+          "build_log": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "构建日志的结尾（最多 20000 字，已脱敏）",
+            "title": "Build Log"
           },
           "build_seconds": {
             "anyOf": [
@@ -16375,6 +16364,10 @@
           "use_count": {
             "title": "Use Count",
             "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
           }
         },
         "required": [
@@ -16393,9 +16386,64 @@
           "image_mb",
           "use_count",
           "last_used_at",
-          "updated_at"
+          "updated_at",
+          "version"
         ],
-        "title": "RunnerTemplateOut",
+        "title": "RunnerTemplateAdminOut",
+        "type": "object"
+      },
+      "RunnerTemplateAdminSave": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9._-]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/RunnerSpecIn"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "name",
+          "spec"
+        ],
+        "title": "RunnerTemplateAdminSave",
+        "type": "object"
+      },
+      "RunnerTemplateList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunnerTemplateAdminOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "RunnerTemplateList",
         "type": "object"
       },
       "RunnerTemplateStatus": {
@@ -43284,7 +43332,7 @@
     },
     "/api/v1/runner/environments/{environment_id}/actions": {
       "post": {
-        "description": "start / stop / delete（立即进入待删除，下一轮回收时删除）/ pin / unpin（保护：不被空闲回收）。",
+        "description": "start / stop / archive（常驻先做快照）/ delete（立即进入待删除，下一轮回收时删除；常驻先做快照）/ keep（撤销待删除）/ restore（归档的重建、已删除的常驻从快照恢复）/ pin / unpin（保护：不被自动回收）。",
         "operationId": "runner_environment_action",
         "parameters": [
           {
@@ -44297,7 +44345,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RunnerTemplateOut"
+                  "$ref": "#/components/schemas/RunnerTemplateAdminOut"
                 }
               }
             },
@@ -44415,7 +44463,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RunnerTemplateOut"
+                  "$ref": "#/components/schemas/RunnerTemplateAdminOut"
                 }
               }
             },
@@ -44543,7 +44591,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RunnerTemplateOut"
+                  "$ref": "#/components/schemas/RunnerTemplateAdminOut"
                 }
               }
             },
