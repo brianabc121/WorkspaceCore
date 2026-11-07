@@ -129,8 +129,17 @@ runsc 的网络与宿主隔离，访问不到 `127.0.0.11` 上的内置 DNS，�
 
 本地 Docker（runc）实测：网络按固定网段重建、`Internal=true`；runner-agent 在 `x.x.255.254`，环境在 `x.x.0.2`；
 环境里 `getent hosts egress` 得到这个地址；不在名单的域名被代理拒绝（`403 Forbidden by workspace egress policy`），名单里的域名走到代理
-（本会话没有外部 DNS，`502 cannot resolve host`）；断开后重新接入地址不变；删除环境时网络一起删除。gVisor 下的结果以下一轮 CI 为准，补在下面。
+（本会话没有外部 DNS，`502 cannot resolve host`）；断开后重新接入地址不变；删除环境时网络一起删除。gVisor 下的结果见下表。
+
+第二轮 CI（PR #167，提交 `b319455`，agents 任务 2026-11-07 01:49–02:20 UTC）全部通过：
 
 | 项（第二轮 CI） | 结果 |
 |---|---|
-| （跑完后补） | |
+| 接入包原样以 root 运行 `install.sh` | runner-agent 上线；`install-gvisor.sh` 发现 Docker 已认得 runsc，**没有重启 Docker**（前面启动的整套服务不受影响） |
+| 出口代理（gvisor，allowlist，按 IP） | 放行的 `pypi.org` → `200`；不放行的 `example.com` → `403 Forbidden by workspace egress policy`；直连 `1.1.1.1:443` → `[Errno 101] Network is unreachable` |
+| 删除条件 `issue_closed` | 关闭 Issue 后进入待删除（原因“删除条件触发：issue_closed”），宽限期（验收设为 1 分钟）过后删除，容器不在 |
+| gvisor 与 runc | gvisor 环境的内核 `4.19.0-gvisor`，runc 环境是宿主的 `7.0.0-1017-azure`；容器的 `HostConfig.Runtime` 分别是 `runsc`、`runc` |
+| 常驻环境（runc）停止后再用 | `env_stop` 后停止；`env_exec` 自动启动，数据还在 |
+| 归档后重建 | 管理员归档（先快照、删容器）；`env_exec` 从快照重建、重放初始化步骤：`/workspace/data` 里的文件还在，初始化步骤写的文件也在，环境回到运行中 |
+| 管理员删除常驻环境 | 容器不在，记录保留 |
+| 页面上 SSH 部署（外网入口：内部 CA + 地址映射，原样的接入包） | 读取主机公钥并核对指纹 → 输入一次密码 → 6 步到上线；总览显示 runsc；卸载（sudo 再输一次密码）、吊销、删除 SSH 地址、移除运行服务器；密码只出现在部署与卸载两个请求里 |
