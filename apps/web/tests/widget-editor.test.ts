@@ -1,9 +1,12 @@
 import { fireEvent, render, screen } from '@testing-library/vue'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import WidgetEditor from '../src/features/dashboard/WidgetEditor.vue'
 import { widget } from './dashboard-fixtures'
 
 describe('组件编辑器的默认布局', () => {
+  // 编辑器按模块启用状态（stores/modules.ts）筛选组件类型（T-0159）
+  beforeEach(() => { setActivePinia(createPinia()) })
   it.each([
     [0, 0],
     [996, 996],
