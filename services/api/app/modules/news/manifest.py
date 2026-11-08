@@ -31,6 +31,7 @@ MANIFEST = ModuleManifest(
     event_topics=("news",),
     widgets=("news_briefing",),
     sealed_fields="app.modules.news.sealed:SEALED_FIELDS",
+    on_toggle="app.modules.news.hooks:on_toggle",
     service_checks=(
         ServiceCheckSpec("trendradar", "TrendRadar（新闻早报）", "app.modules.news.health:probe"),
     ),

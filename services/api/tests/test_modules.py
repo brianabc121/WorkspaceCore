@@ -26,6 +26,7 @@ from tests.helpers import add_member, add_user, run_sql, tool_error
 from tests.test_agent_projects_api import tool_names
 from tests.test_im_accounts_callbacks import ImEnv
 from tests.test_news_api import (  # noqa: F401 - 复用早报测试的环境（fixture 按名字注入）
+    conf,
     env,
     fake_dns,
     ingest_token,
@@ -139,6 +140,8 @@ async def test_disabling_news_turns_off_pages_tools_jobs_and_ingest(env: ImEnv) 
 
     disabled = await _toggle(env, "news", False)
     assert disabled["enabled"] is False
+    # 停用钩子重新生成了 TrendRadar 配置：不抓取、不推送
+    assert conf(env)["notification"]["enabled"] is False
 
     page = await env.client.get("/api/v1/news/today", headers=env.headers())
     assert page.status_code == 404
@@ -161,7 +164,13 @@ async def test_disabling_news_turns_off_pages_tools_jobs_and_ingest(env: ImEnv) 
 
     # 再启用：设置原样还在，工具和接收地址恢复
     assert (await _toggle(env, "news", True))["enabled"] is True
-    assert await settings(env) == before
+    assert conf(env)["notification"]["enabled"] is True
+    # 设置原样还在（重新生成配置文件只改 config_rev 与时间戳）
+    volatile = {"config_rev", "rendered_at", "updated_at"}
+    after = await settings(env)
+    assert {k: v for k, v in after.items() if k not in volatile} == {
+        k: v for k, v in before.items() if k not in volatile
+    }
     assert "news_latest" in await tool_names(env, agent_token)
     assert (await push(env, token, "当前榜单", "恢复了")).json() == {"result": "ok"}
 

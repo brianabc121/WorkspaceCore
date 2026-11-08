@@ -9116,7 +9116,8 @@
                 "timeline",
                 "issues",
                 "news",
-                "modules"
+                "modules",
+                "navigation"
               ],
               "type": "string"
             },
@@ -11734,6 +11735,236 @@
           "enabled"
         ],
         "title": "ModuleUpdate",
+        "type": "object"
+      },
+      "NavPage": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "link",
+              "page",
+              "note",
+              "dashboard",
+              "embed"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "min_role": {
+            "$ref": "#/components/schemas/Role",
+            "default": "viewer",
+            "description": "至少什么角色能在侧栏看到"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "page：以 / 开头的站内路径",
+            "title": "Path"
+          },
+          "section": {
+            "pattern": "^(workspace|tools|admin|apps|custom-[a-z0-9][a-z0-9-]{0,39})$",
+            "title": "Section",
+            "type": "string"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "note / dashboard：笔记或仪表盘的 id",
+            "title": "Target Id"
+          },
+          "title": {
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "link / embed：http(s) 地址",
+            "title": "Url"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "section",
+          "kind"
+        ],
+        "title": "NavPage",
+        "type": "object"
+      },
+      "NavSection": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "分组 id；引用时写 custom-<id>",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "NavSection",
+        "type": "object"
+      },
+      "NavigationIn": {
+        "additionalProperties": false,
+        "properties": {
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/NavPage"
+            },
+            "maxItems": 50,
+            "title": "Pages",
+            "type": "array"
+          },
+          "placements": {
+            "additionalProperties": {
+              "pattern": "^(workspace|tools|admin|apps|custom-[a-z0-9][a-z0-9-]{0,39})$",
+              "type": "string"
+            },
+            "description": "已有页面挪到哪个分组：{站内路径: 分组}",
+            "maxProperties": 100,
+            "propertyNames": {
+              "maxLength": 200
+            },
+            "title": "Placements",
+            "type": "object"
+          },
+          "section_order": {
+            "description": "分组顺序；没列出的排在后面",
+            "items": {
+              "pattern": "^(workspace|tools|admin|apps|custom-[a-z0-9][a-z0-9-]{0,39})$",
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Section Order",
+            "type": "array"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/NavSection"
+            },
+            "maxItems": 12,
+            "title": "Sections",
+            "type": "array"
+          },
+          "version": {
+            "description": "读到的版本；不一致返回 409 VERSION_CONFLICT",
+            "minimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "NavigationIn",
+        "type": "object"
+      },
+      "NavigationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "can_manage": {
+            "description": "当前用户能否修改（只有 owner）",
+            "title": "Can Manage",
+            "type": "boolean"
+          },
+          "embed_origins": {
+            "description": "部署允许嵌入的来源（.env 的 EMBED_ORIGINS）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Embed Origins",
+            "type": "array"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/NavPage"
+            },
+            "maxItems": 50,
+            "title": "Pages",
+            "type": "array"
+          },
+          "placements": {
+            "additionalProperties": {
+              "pattern": "^(workspace|tools|admin|apps|custom-[a-z0-9][a-z0-9-]{0,39})$",
+              "type": "string"
+            },
+            "description": "已有页面挪到哪个分组：{站内路径: 分组}",
+            "maxProperties": 100,
+            "propertyNames": {
+              "maxLength": 200
+            },
+            "title": "Placements",
+            "type": "object"
+          },
+          "section_order": {
+            "description": "分组顺序；没列出的排在后面",
+            "items": {
+              "pattern": "^(workspace|tools|admin|apps|custom-[a-z0-9][a-z0-9-]{0,39})$",
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Section Order",
+            "type": "array"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/NavSection"
+            },
+            "maxItems": 12,
+            "title": "Sections",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "embed_origins",
+          "can_manage"
+        ],
+        "title": "NavigationOut",
         "type": "object"
       },
       "NetworkIn": {
@@ -43058,6 +43289,194 @@
         "summary": "启用或停用一个模块（owner）",
         "tags": [
           "modules"
+        ]
+      }
+    },
+    "/api/v1/navigation": {
+      "get": {
+        "description": "零代码页面只返回当前用户角色能看到的。还没改过时返回空布局，version=0。",
+        "operationId": "get_navigation",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "侧栏布局：自定义分组、页面挪分组、零代码页面（viewer）",
+        "tags": [
+          "navigation"
+        ]
+      },
+      "put": {
+        "description": "version 与当前不一致返回 409 VERSION_CONFLICT。外部链接只允许 http(s)；嵌入页只允许部署设置 EMBED_ORIGINS 里的来源；笔记、仪表盘必须属于当前工作空间。",
+        "operationId": "put_navigation",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NavigationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "保存侧栏布局（owner，整份替换）",
+        "tags": [
+          "navigation"
         ]
       }
     },

@@ -31,7 +31,7 @@ define skip_web
 	@echo "跳过前端：$(WEB_DIR)/package.json 尚不存在"
 endef
 
-.PHONY: help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke openapi setup-token \
+.PHONY: module-new help env setup dev dev-api dev-web up down ps logs migrate migrate-local smoke openapi setup-token \
 	lint lint-api lint-web format test test-api test-web build-web backup restore-verify \
 	smoke-full perf scan \
 	agent-ca agents-up pull openim-pull \
@@ -155,6 +155,10 @@ perf: ## 性能基准：基础 API 与首页的 P50/P95/P99，对比规范第 12
 
 scan: ## 安全扫描：依赖漏洞、密钥泄露、容器镜像（scripts/security-scan.sh；镜像扫描要先 make up）
 	scripts/security-scan.sh
+
+module-new: ## 新建插拔式模块骨架：make module-new key=finance name=记账 [description=一句话说明]（docs/modules/README.md）
+	@test -n "$(key)" -a -n "$(name)" || (echo "用法：make module-new key=finance name=记账" && exit 1)
+	python3 scripts/new_module.py --key "$(key)" --name "$(name)" --description "$(description)"
 
 openapi: ## 由后端代码生成 services/api/openapi.json（前端据此生成类型）
 	cd $(API_DIR) && $(UV) run python -m scripts.export_openapi

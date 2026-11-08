@@ -483,3 +483,26 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 | `agent_wakeups.source` | CHECK 增加 `news` | 方案 B 的唤醒 |
 
 **downgrade** 删除 `news` 唤醒，CHECK 改回，删除三张表。
+
+### 迁移 `0049`（T-0159）
+
+插拔式模块的启用记录（`docs/modules/README.md`）。只新增，不改已有数据；没有记录时按模块清单的 `default_enabled`，
+所以已有工作空间不需要回填（新闻早报默认启用，行为不变）。
+
+| 表 / 对象 | 字段 | 说明 |
+|---|---|---|
+| `workspace_modules` | `workspace_id`（级联删除）+ `module_key`（主键，CHECK `^[a-z][a-z0-9_]{1,31}$`）、`enabled`、`updated_by`（置空删除）、`updated_at` | owner 在应用中心启用 / 停用时写一行；停用不删除模块自己的数据 |
+
+**downgrade** 删除这张表（只丢失“停用了哪些模块”的记录）。
+
+新闻早报的三张表（迁移 `0048`）属于模块 `news`，模型在 `services/api/app/modules/news/models.py`。
+
+### 迁移 `0050`（T-0161）
+
+侧栏布局（`docs/v2/MODULES_PLAN.md` 第 2 节）。只新增；没有记录时用默认侧栏。
+
+| 表 / 对象 | 字段 | 说明 |
+|---|---|---|
+| `workspace_navigation` | `workspace_id`（主键，级联删除）、`layout`（JSONB：`sections`、`pages`、`placements`、`section_order`，接口层校验）、`version`、`updated_by`（置空删除）、`updated_at` | 自定义分组、页面挪分组、零代码页面（外部链接、站内页面、知识库笔记、仪表盘、嵌入页） |
+
+**downgrade** 删除这张表（自定义的分组和零代码页面会丢失）。

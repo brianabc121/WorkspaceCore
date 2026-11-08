@@ -82,6 +82,10 @@ class ModuleManifest:
     # 凭证轮换（app/domain/credential_rotation.py）要处理的加密列：指向 SealedField 元组
     sealed_fields: str | None = None
     service_checks: tuple[ServiceCheckSpec, ...] = ()
+    # 启用 / 停用之后调用（已提交）：
+    # ``async def on_toggle(db, settings, runtime, workspace_id, enabled)``，
+    # 例如新闻早报停用后重新生成 TrendRadar 配置文件、不再推送。失败只记日志，不影响开关本身
+    on_toggle: str | None = None
 
     def targets(self) -> list[str]:
         """清单里所有 ``包.模块:属性`` 形式的导入路径（一致性检查用）。"""
@@ -92,6 +96,7 @@ class ModuleManifest:
             self.tool_handlers,
             self.tools_visible,
             self.sealed_fields,
+            self.on_toggle,
             *(c.target for c in self.crons),
             *(s.probe for s in self.service_checks),
         ]

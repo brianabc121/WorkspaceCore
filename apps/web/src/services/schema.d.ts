@@ -2775,6 +2775,30 @@ export interface paths {
         patch: operations["update_module"];
         trace?: never;
     };
+    "/api/v1/navigation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 侧栏布局：自定义分组、页面挪分组、零代码页面（viewer）
+         * @description 零代码页面只返回当前用户角色能看到的。还没改过时返回空布局，version=0。
+         */
+        get: operations["get_navigation"];
+        /**
+         * 保存侧栏布局（owner，整份替换）
+         * @description version 与当前不一致返回 409 VERSION_CONFLICT。外部链接只允许 http(s)；嵌入页只允许部署设置 EMBED_ORIGINS 里的来源；笔记、仪表盘必须属于当前工作空间。
+         */
+        put: operations["put_navigation"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/news/briefings": {
         parameters: {
             query?: never;
@@ -7695,7 +7719,7 @@ export interface components {
              * Topics
              * @description 需要重新拉取的数据范围
              */
-            topics: ("overview" | "tasks" | "projects" | "knowledge" | "calendar" | "developer" | "integrations" | "notifications" | "operations" | "im" | "agents" | "ai" | "timeline" | "issues" | "news" | "modules")[];
+            topics: ("overview" | "tasks" | "projects" | "knowledge" | "calendar" | "developer" | "integrations" | "notifications" | "operations" | "im" | "agents" | "ai" | "timeline" | "issues" | "news" | "modules" | "navigation")[];
             /**
              * Workspace Id
              * Format: uuid
@@ -8769,6 +8793,105 @@ export interface components {
         ModuleUpdate: {
             /** Enabled */
             enabled: boolean;
+        };
+        /** NavPage */
+        NavPage: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "link" | "page" | "note" | "dashboard" | "embed";
+            /**
+             * @description 至少什么角色能在侧栏看到
+             * @default viewer
+             */
+            min_role: components["schemas"]["Role"];
+            /**
+             * Path
+             * @description page：以 / 开头的站内路径
+             */
+            path?: string | null;
+            /** Section */
+            section: string;
+            /**
+             * Target Id
+             * @description note / dashboard：笔记或仪表盘的 id
+             */
+            target_id?: string | null;
+            /** Title */
+            title: string;
+            /**
+             * Url
+             * @description link / embed：http(s) 地址
+             */
+            url?: string | null;
+        };
+        /** NavSection */
+        NavSection: {
+            /**
+             * Id
+             * @description 分组 id；引用时写 custom-<id>
+             */
+            id: string;
+            /** Title */
+            title: string;
+        };
+        /** NavigationIn */
+        NavigationIn: {
+            /** Pages */
+            pages?: components["schemas"]["NavPage"][];
+            /**
+             * Placements
+             * @description 已有页面挪到哪个分组：{站内路径: 分组}
+             */
+            placements?: {
+                [key: string]: string;
+            };
+            /**
+             * Section Order
+             * @description 分组顺序；没列出的排在后面
+             */
+            section_order?: string[];
+            /** Sections */
+            sections?: components["schemas"]["NavSection"][];
+            /**
+             * Version
+             * @description 读到的版本；不一致返回 409 VERSION_CONFLICT
+             */
+            version: number;
+        };
+        /** NavigationOut */
+        NavigationOut: {
+            /**
+             * Can Manage
+             * @description 当前用户能否修改（只有 owner）
+             */
+            can_manage: boolean;
+            /**
+             * Embed Origins
+             * @description 部署允许嵌入的来源（.env 的 EMBED_ORIGINS）
+             */
+            embed_origins: string[];
+            /** Pages */
+            pages?: components["schemas"]["NavPage"][];
+            /**
+             * Placements
+             * @description 已有页面挪到哪个分组：{站内路径: 分组}
+             */
+            placements?: {
+                [key: string]: string;
+            };
+            /**
+             * Section Order
+             * @description 分组顺序；没列出的排在后面
+             */
+            section_order?: string[];
+            /** Sections */
+            sections?: components["schemas"]["NavSection"][];
+            /** Version */
+            version: number;
         };
         /** NetworkIn */
         NetworkIn: {
@@ -25594,6 +25717,130 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModuleOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_navigation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NavigationOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_navigation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NavigationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NavigationOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

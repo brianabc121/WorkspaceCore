@@ -14,11 +14,13 @@ from app.api.deps import (
     client_ip,
     csrf_protected,
     get_app_settings,
+    get_connectors,
     get_db,
     workspace_owner,
     workspace_viewer,
 )
 from app.core.config import Settings
+from app.domain.connectors import ConnectorRuntime
 from app.domain.policy import WorkspaceAccess
 from app.modules.service import ModuleService
 from app.schemas.common import error_responses
@@ -33,8 +35,9 @@ Owner = Annotated[WorkspaceAccess, Depends(workspace_owner)]
 def get_module_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_app_settings)],
+    runtime: Annotated[ConnectorRuntime, Depends(get_connectors)],
 ) -> ModuleService:
-    return ModuleService(db, settings)
+    return ModuleService(db, settings, runtime)
 
 
 Service = Annotated[ModuleService, Depends(get_module_service)]

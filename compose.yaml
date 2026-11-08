@@ -102,6 +102,8 @@ services:
       <<: *api-env
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      # 侧栏“嵌入页”允许的来源（T-0161）；caddy 的 CSP frame-src 用同一个变量
+      EMBED_ORIGINS: ${EMBED_ORIGINS:-}
       SESSION_SECRET: ${SESSION_SECRET:?请先运行 make env 生成 .env}
       # 未配置时首次安装接口一律拒绝；make setup-token 查看
       SETUP_TOKEN: ${SETUP_TOKEN:-}
@@ -223,6 +225,9 @@ services:
     ports:
       # 默认只绑定本机。用域名对外提供 HTTPS 时加上 compose.https.yaml（发布 80/443，见 docs/deploy-guide.md 第 5 步）
       - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
+    environment:
+      # 侧栏“嵌入页”允许的来源（空格或逗号分隔都可以，Caddyfile 里只做文本替换；T-0161）
+      EMBED_ORIGINS: ${EMBED_ORIGINS:-}
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./infra/caddy/routes.caddy:/etc/caddy/routes.caddy:ro

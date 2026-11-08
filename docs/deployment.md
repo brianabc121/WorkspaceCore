@@ -91,6 +91,7 @@ curl -i http://localhost:8080/api/v1/setup -H 'Content-Type: application/json' -
 | `DATABASE_URL` / `REDIS_URL` | **只在本机直接运行 API 时**使用，Compose 内不读取 | 指向 localhost |
 | `PUBLIC_BASE_URL` | 浏览器访问工作台的地址；登录、安装等写请求的 `Origin` 必须是它或下面的可信来源 | `http://localhost:8080` |
 | `CORS_ALLOWED_ORIGINS` | 其他可信来源，逗号分隔（例如用 IP 访问时的 `http://127.0.0.1:8080`） | `http://127.0.0.1:8080` |
+| `EMBED_ORIGINS` | 侧栏“嵌入页”允许嵌入的网站，`https://host[:port]`，多个用空格分隔（例如 `https://grafana.example.com`）。网页上添加嵌入页时只能选这里列出的来源；改完要重启 api 和 caddy（`docker compose up -d api caddy`） | 空（不允许嵌入） |
 | `SESSION_SECRET` | 计算 CSRF Token 的密钥；生产环境必填且至少 32 个字符。轮换后所有人需要重新登录 | 随机 |
 | `SETUP_TOKEN` | 首次安装凭据（`make setup-token` 查看）；未配置时首次安装一律拒绝 | 随机 |
 | `CREDENTIAL_ENCRYPTION_KEY` | 第三方连接凭证与密钥库的加密密钥（64 位十六进制）；格式错误时 API 拒绝启动。**丢失后已保存的凭证无法解密**，请与数据库备份分开保存；更换按第 6.1 节轮换 | 随机 |

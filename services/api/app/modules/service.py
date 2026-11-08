@@ -6,10 +6,11 @@
 - 启用 / 停用写审计日志，并发出 modules 事件让前端刷新导航。
 """
 
+import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +26,7 @@ from app.schemas.modules import ModuleList, ModuleOut
 from app.schemas.workspaces import Role
 
 MODULE_DISABLED = "MODULE_DISABLED"
+logger = logging.getLogger("app.modules")
 
 
 def disabled_error() -> ApiError:
@@ -72,9 +74,11 @@ async def visible_tool_modules(
 
 
 class ModuleService:
-    def __init__(self, db: AsyncSession, settings: Settings) -> None:
+    def __init__(self, db: AsyncSession, settings: Settings, runtime: Any = None) -> None:
         self.db = db
         self.settings = settings
+        # ConnectorRuntime：交给模块的 on_toggle（例如新闻早报重新生成配置文件）
+        self.runtime = runtime
 
     def _out(self, manifest: ModuleManifest, enabled: bool, access: WorkspaceAccess) -> ModuleOut:
         missing = registry.missing_requirements(manifest, self.settings)
@@ -127,7 +131,11 @@ class ModuleService:
             await self.db.execute(
                 statement.on_conflict_do_update(
                     index_elements=[WorkspaceModule.workspace_id, WorkspaceModule.module_key],
-                    set_={"enabled": enabled, "updated_by": access.user_id},
+                    set_={
+                        "enabled": enabled,
+                        "updated_by": access.user_id,
+                        "updated_at": func.now(),
+                    },
                 )
             )
             await AuditTrail(self.db, self.settings).record(
@@ -141,4 +149,20 @@ class ModuleService:
             )
             events.mark(self.db, workspace_id, "modules", "overview")
             await self.db.commit()
+            await self._on_toggle(manifest, workspace_id, enabled)
         return self._out(manifest, enabled, access)
+
+    async def _on_toggle(
+        self, manifest: ModuleManifest, workspace_id: uuid.UUID, enabled: bool
+    ) -> None:
+        if manifest.on_toggle is None:
+            return
+        try:
+            hook: Any = registry.resolve(manifest.on_toggle)
+            await hook(self.db, self.settings, self.runtime, workspace_id, enabled)
+        except Exception as error:  # 开关已经生效；钩子失败只记日志
+            await self.db.rollback()
+            logger.warning(
+                "module toggle hook failed",
+                extra={"module": manifest.key, "error_type": type(error).__name__},
+            )

@@ -19,6 +19,7 @@ from app.api.v1 import (
     mail,
     me,
     modules,
+    navigation,
     notifications,
     operations,
     readme,
@@ -60,6 +61,7 @@ for module in (
     runner,
     ai,
     modules,
+    navigation,
 ):
     router.include_router(module.router)
 
