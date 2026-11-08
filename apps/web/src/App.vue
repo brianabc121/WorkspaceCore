@@ -4,7 +4,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { Building2, ChevronDown, ExternalLink, Menu, Moon, Sparkles, Sun } from '@lucide/vue'
 import { canSee, navigation } from './app/navigation'
 import { buildSidebar } from './app/sidebar'
-import { useNavigationLayout } from './features/navigation/api'
+import { useNavigationStore } from './stores/navigation'
 import { useThemeStore } from './stores/theme'
 import { useAuthStore } from './stores/auth'
 import { useModulesStore } from './stores/modules'
@@ -56,8 +56,8 @@ function closeMenu(event: KeyboardEvent) {
 // 侧栏分组可以折叠（记在本机）；打开某一页时自动展开它所在的分组
 const { collapsed, toggle: toggleSection } = useCollapsedSections()
 // 分组与顺序按 owner 设置的侧栏布局（T-0161）；布局读不到时就是默认侧栏
-const layout = useNavigationLayout()
-const sections = computed(() => buildSidebar(visibleNavigation.value, layout.data.value, auth.currentWorkspace?.role).map((section, index) => ({ ...section, id: `nav-section-${index}` })))
+const layout = useNavigationStore()
+const sections = computed(() => buildSidebar(visibleNavigation.value, layout.layout, auth.currentWorkspace?.role).map((section, index) => ({ ...section, id: `nav-section-${index}` })))
 // 路由还没解析完（START_LOCATION，matched 为空）时不算在任何分组里，免得把“工作空间”误展开
 const currentEntry = computed(() => {
   if (!route.matched.length) return undefined

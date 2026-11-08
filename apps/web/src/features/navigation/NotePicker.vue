@@ -18,6 +18,7 @@ const selectedId = computed(() => props.modelValue)
 const selected = useNote(scope, selectedId)
 const picked = ref<string | null>(null)
 const selectedTitle = computed(() => picked.value ?? selected.data.value?.title ?? null)
+function search() { q.value = input.value.trim() }
 function choose(note: { id: string; title: string }) {
   picked.value = note.title
   emit('update:modelValue', note.id)
@@ -29,10 +30,10 @@ function choose(note: { id: string; title: string }) {
   <fieldset class="note-picker" :disabled="disabled">
     <legend>笔记</legend>
     <p class="form-help">已选：<strong v-if="selectedTitle">{{ selectedTitle }}</strong><template v-else-if="modelValue && selected.error.value">（笔记不存在或已删除）</template><template v-else>还没有选</template></p>
-    <form class="note-picker-search" role="search" aria-label="搜索笔记" @submit.prevent="q = input.trim()">
-      <label class="form-field"><span>关键词</span><input v-model="input" type="search" maxlength="100" placeholder="笔记标题或正文里的词"></label>
-      <button type="submit" class="secondary-button">搜索</button>
-    </form>
+    <div class="note-picker-search" role="search" aria-label="搜索笔记">
+      <label class="form-field"><span>关键词</span><input v-model="input" type="search" maxlength="100" placeholder="笔记标题或正文里的词" @keydown.enter.prevent="search"></label>
+      <button type="button" class="secondary-button" @click="search">搜索</button>
+    </div>
     <p v-if="results.isPending.value" role="status">正在搜索…</p>
     <p v-else-if="results.error.value" role="alert">{{ errorMessage(results.error.value) }}</p>
     <p v-else-if="!results.data.value?.length" class="form-help">没有找到笔记。</p>

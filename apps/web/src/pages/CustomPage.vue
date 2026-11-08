@@ -5,20 +5,20 @@ import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../services/api'
 import { safeUrl } from '../widgets/registry'
 import { hasRole, pageTarget } from '../app/sidebar'
-import { useNavigationLayout } from '../features/navigation/api'
+import { useNavigationStore } from '../stores/navigation'
 import CustomDashboard from '../features/navigation/CustomDashboard.vue'
 
 // 侧栏里的零代码页面（T-0161）：/p/<id> 显示仪表盘或嵌入页。
 // 嵌入页用带沙箱的 iframe，不发 Referer；来源由部署设置 EMBED_ORIGINS 限定（Caddy 的 CSP frame-src 同样只放行这些来源）。
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
-const layout = useNavigationLayout()
+const layout = useNavigationStore()
 const page = computed(() => {
   const id = String(route.params.id ?? '')
-  return layout.data.value?.pages?.find((item) => item.id === id && hasRole(auth.currentWorkspace?.role, item.min_role)) ?? null
+  return layout.layout?.pages?.find((item) => item.id === id && hasRole(auth.currentWorkspace?.role, item.min_role)) ?? null
 })
 const url = computed(() => (page.value?.url && safeUrl(page.value.url) ? page.value.url : null))
 const origin = computed(() => { try { return url.value ? new URL(url.value).origin : '' } catch { return '' } })
-const listed = computed(() => (layout.data.value?.embed_origins ?? []).includes(origin.value))
+const listed = computed(() => (layout.layout?.embed_origins ?? []).includes(origin.value))
 // 站内页面、笔记从旧书签打开 /p/<id> 时直接转过去
 watch(page, (value) => {
   const to = value && (value.kind === 'page' || value.kind === 'note') ? pageTarget(value).to : null
@@ -27,8 +27,8 @@ watch(page, (value) => {
 </script>
 
 <template>
-  <p v-if="layout.isPending.value" role="status">正在加载…</p>
-  <div v-else-if="layout.error.value && !layout.data.value" class="data-state"><p role="alert">{{ errorMessage(layout.error.value) }}</p><button type="button" class="secondary-button" @click="layout.refetch()">重试</button></div>
+  <p v-if="!layout.loaded" role="status">正在加载…</p>
+  <div v-else-if="layout.error && !layout.layout" class="data-state"><p role="alert">{{ errorMessage(layout.error) }}</p><button type="button" class="secondary-button" @click="layout.refresh()">重试</button></div>
   <section v-else-if="!page" class="panel empty-state">
     <h1>页面不存在或你没有权限</h1>
     <p>这个页面可能已经从侧栏删除，或者只有更高的角色才能看到。</p>

@@ -2,6 +2,7 @@ import { onUnmounted, ref, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { useModulesStore } from '../../stores/modules'
+import { useNavigationStore } from '../../stores/navigation'
 import { moduleEvents, type ModuleTopic } from '../../modules/registry'
 import type { Schema } from '../../services/api'
 
@@ -19,18 +20,18 @@ const core: Record<Exclude<Topic, ModuleTopic>, string[]> = {
   issues: ['issues', 'search'],
   // 模块启用 / 停用（T-0159）：启用状态由 modules store 重新读取（见 invalidate），首页组件跟着刷新
   modules: ['overview', 'widgets'],
-  // 侧栏分组（T-0161）
-  navigation: ['navigation'],
+  // 侧栏布局（T-0161）：在 navigation store 里，由 invalidate 重新读取
+  navigation: [],
 }
 const families: Partial<Record<Topic, readonly string[]>> = { ...core, ...moduleEvents }
 // Backoff for rebuilding a stream the browser closed; reset after every successful open.
 const RETRY_BASE_MS = 1000, RETRY_MAX_MS = 30000
 export function useWorkspaceEvents() {
-  const auth = useAuthStore(), modules = useModulesStore(), cache = useQueryClient(), available = ref(false)
+  const auth = useAuthStore(), modules = useModulesStore(), navigation = useNavigationStore(), cache = useQueryClient(), available = ref(false)
   let close = () => {}
   const refresh = () => {
     const user = auth.user?.id, scope = auth.workspaceId
-    if (user && scope) { void cache.invalidateQueries({ predicate: q => q.queryKey[1] === user && q.queryKey[2] === scope }); void modules.refresh() }
+    if (user && scope) { void cache.invalidateQueries({ predicate: q => q.queryKey[1] === user && q.queryKey[2] === scope }); void modules.refresh(); void navigation.refresh() }
   }
   watch(() => [auth.user?.id, auth.workspaceId], ([user, scope]) => {
     close(); available.value = false
@@ -53,6 +54,7 @@ export function useWorkspaceEvents() {
       if (!data || data.workspace_id !== scope || !Array.isArray(data.topics) || typeof data.at !== 'string' || (data.reset !== undefined && typeof data.reset !== 'boolean')) return
       if (data.reset) { refresh(); return }
       if (data.topics.includes('modules')) void modules.refresh()
+      if (data.topics.includes('navigation')) void navigation.refresh()
       const prefixes = new Set(data.topics.flatMap(topic => typeof topic === 'string' ? families[topic] ?? [] : []))
       if (prefixes.size) void cache.invalidateQueries({ predicate: q => q.queryKey[1] === user && q.queryKey[2] === scope && prefixes.has(String(q.queryKey[0])) })
     }

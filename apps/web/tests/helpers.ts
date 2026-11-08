@@ -16,6 +16,7 @@ export const emptyPage = { items: [], next_cursor: null, total_estimate: null }
 export const runnerOff: Schema['AgentRunnerOut'] = { enabled: false, limits: { envs: 3, persistent: 2, memory_mb: 16384, cpus: 8, disk_gb: 100, execs_per_hour: 120, run_hours_per_day: 8 }, secrets: [], enabled_at: null, version: 1 }
 // 插拔式模块（T-0159）：默认只有新闻早报，已启用
 export const newsModule: Schema['ModuleOut'] = { key: 'news', name: '新闻早报', description: '每天的新闻早报、热榜、RSS、搜索与收藏；智能体可以查新闻。依赖 TrendRadar。', version: '1.0.0', enabled: true, default_enabled: true, ready: true, missing: [], depends_on: [], dependents: [], tools: ['news_latest', 'news_search', 'news_briefing'], widgets: ['news_briefing'], can_manage: true }
+export const emptyNavigation: Schema['NavigationOut'] = { version: 0, sections: [], pages: [], placements: {}, section_order: [], embed_origins: [], can_manage: true }
 export const fail = (status: number, code: string) => Response.json({ error: { code, message: '请求失败', request_id: 'req-test', details: {} } }, { status })
 export function mockApi(handler?: (request: Request) => Response | Promise<Response | undefined> | undefined) {
   const requests: Request[] = []
@@ -29,6 +30,8 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (path === '/api/v1/auth/sessions') return Response.json({ ...emptyPage, items: [session] })
     if (path === '/api/v1/notifications') return Response.json({ ...emptyPage, unread_count: 0 })
     if (path === '/api/v1/modules' && request.method === 'GET') return Response.json({ items: [newsModule] })
+    // 侧栏布局（T-0161）：默认没有保存过
+    if (path === '/api/v1/navigation' && request.method === 'GET') return Response.json(emptyNavigation)
     if (path === '/api/v1/im/badges') return Response.json({ im_unread: 0, pending_approvals: 0 })
     if (path === '/api/v1/search') return Response.json(emptyPage)
     if (path === '/api/v1/ai/tool-executions') return Response.json({ ...emptyPage, pending_count: 0 })
