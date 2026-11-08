@@ -33,7 +33,7 @@ from app.models.base import Base
 
 RUN_END_REASONS = ("done", "paused", "interrupted", "cancelled")
 EXECUTOR_KINDS = ("user", "instance")
-TASK_EVENT_KINDS = ("opened", "claimed", "released", "completed", "reopened")
+TASK_EVENT_KINDS = ("opened", "claimed", "released", "completed", "reopened", "reviewed")
 EVENT_ACTOR_KINDS = ("user", "instance", "system")
 
 
@@ -90,7 +90,7 @@ class TaskRun(Base):
 class TaskEvent(Base):
     """任务的动态（T-0111，docs/v2/AGENT_OPS_PLAN.md 第 3 节）。
 
-    种类：设为自由接取、领取、放弃、完成、打回。
+    种类：设为自由接取、领取、放弃、完成、打回、确认结果（T-0163）。
 
     `note` 是放弃 / 打回的原因或完成说明（来自人或智能体的文字，按不可信数据显示）；
     `actor_name` 是当时的名字，人离开、实例删除后仍能看出是谁。

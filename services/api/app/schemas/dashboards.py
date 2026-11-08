@@ -166,6 +166,30 @@ class NewsBriefingConfig(_Strict):
     lines: int = Field(default=6, ge=2, le=20, description="显示正文开头几行")
 
 
+class WorkSummaryConfig(_Strict):
+    """T-0163：首页“工作概况”的五个数字（docs/v2/HOME_PLAN.md 第 1 节）：
+    待办、进行中、已完成待查看、阻塞（GET /tasks/progress），近期提醒（GET /calendar/events）。"""
+
+    reminder_days: int = Field(
+        default=2, ge=1, le=14, description="“近期提醒”数从现在到第几天结束的日程（2 = 今天和明天）"
+    )
+
+
+class TaskProgressConfig(_Strict):
+    """T-0163：首页“任务进展”（GET /tasks/progress）：按状态分页签的任务表。"""
+
+    limit: int = Field(default=7, ge=1, le=20)
+
+
+class MyTodosConfig(_Strict):
+    """T-0163：首页“我的待办”（GET /tasks?assignee=me）。
+
+    执行者是自己的未完成任务，可以勾选完成、添加。
+    """
+
+    limit: int = Field(default=5, ge=1, le=20)
+
+
 class _WidgetBody(_Strict):
     layout: WidgetLayout
 
@@ -235,6 +259,21 @@ class NewsBriefingWidgetCreate(_WidgetBody):
     config: NewsBriefingConfig = Field(default_factory=NewsBriefingConfig)
 
 
+class WorkSummaryWidgetCreate(_WidgetBody):
+    widget_type: Literal["work_summary"]
+    config: WorkSummaryConfig = Field(default_factory=WorkSummaryConfig)
+
+
+class TaskProgressWidgetCreate(_WidgetBody):
+    widget_type: Literal["task_progress"]
+    config: TaskProgressConfig = Field(default_factory=TaskProgressConfig)
+
+
+class MyTodosWidgetCreate(_WidgetBody):
+    widget_type: Literal["my_todos"]
+    config: MyTodosConfig = Field(default_factory=MyTodosConfig)
+
+
 WidgetCreate = Annotated[
     QuickLinksWidgetCreate
     | NoteWidgetCreate
@@ -248,7 +287,10 @@ WidgetCreate = Annotated[
     | NotificationsWidgetCreate
     | ProjectProgressWidgetCreate
     | ImQuickChatWidgetCreate
-    | NewsBriefingWidgetCreate,
+    | NewsBriefingWidgetCreate
+    | WorkSummaryWidgetCreate
+    | TaskProgressWidgetCreate
+    | MyTodosWidgetCreate,
     Field(discriminator="widget_type"),
 ]
 
@@ -322,6 +364,21 @@ class NewsBriefingWidgetUpdate(_WidgetUpdateBody):
     config: NewsBriefingConfig
 
 
+class WorkSummaryWidgetUpdate(_WidgetUpdateBody):
+    widget_type: Literal["work_summary"]
+    config: WorkSummaryConfig
+
+
+class TaskProgressWidgetUpdate(_WidgetUpdateBody):
+    widget_type: Literal["task_progress"]
+    config: TaskProgressConfig
+
+
+class MyTodosWidgetUpdate(_WidgetUpdateBody):
+    widget_type: Literal["my_todos"]
+    config: MyTodosConfig
+
+
 WidgetUpdate = Annotated[
     QuickLinksWidgetUpdate
     | NoteWidgetUpdate
@@ -335,7 +392,10 @@ WidgetUpdate = Annotated[
     | NotificationsWidgetUpdate
     | ProjectProgressWidgetUpdate
     | ImQuickChatWidgetUpdate
-    | NewsBriefingWidgetUpdate,
+    | NewsBriefingWidgetUpdate
+    | WorkSummaryWidgetUpdate
+    | TaskProgressWidgetUpdate
+    | MyTodosWidgetUpdate,
     Field(
         discriminator="widget_type",
         description="修改配置；widget_type 必须与现有类型相同（类型不能修改）",
@@ -349,7 +409,7 @@ class WidgetOut(BaseModel):
     widget_type: str = Field(
         description="当前版本内置：quick_links、note、todo_summary、today_tasks、"
         "calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications、"
-        "project_progress、im_quick_chat、news_briefing；"
+        "project_progress、im_quick_chat、news_briefing、work_summary、task_progress、my_todos；"
         "也可能是已不再支持的旧类型，前端应显示安全的错误卡片"
     )
     config: dict[str, Any] = Field(description="该类型的配置；前端按自己的 Registry 再校验一次")
@@ -384,6 +444,15 @@ class DashboardCreate(_Strict):
 class WidgetPlacement(_Strict):
     widget_id: UUID
     layout: WidgetLayout
+
+
+class DashboardReset(_Strict):
+    """恢复默认首页（T-0163）：删掉这个仪表盘的全部组件，换成默认首页布局。
+
+    见 docs/v2/HOME_PLAN.md 第 4 节。
+    """
+
+    version: Version
 
 
 class DashboardUpdate(_Strict):

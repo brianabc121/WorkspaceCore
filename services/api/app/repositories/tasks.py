@@ -5,10 +5,19 @@ from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ColumnElement, UnaryExpression, exists, func, or_, select
+from sqlalchemy import ColumnElement, UnaryExpression, and_, case, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Project, ProjectAgent, Task
+from app.models import (
+    AgentInstance,
+    Issue,
+    IssueTask,
+    Project,
+    ProjectAgent,
+    Task,
+    TaskRun,
+    User,
+)
 
 
 def _escape_like(text: str) -> str:
@@ -98,10 +107,13 @@ async def list_tasks(
     limit: int,
     assignee_instance_id: uuid.UUID | None = None,
     claimable_for: uuid.UUID | None = None,
+    assignee_user_id: uuid.UUID | None = None,
 ) -> Sequence[Task]:
     conditions: list[ColumnElement[bool]] = [Task.workspace_id == workspace_id]
     if assignee_instance_id is not None:
         conditions.append(Task.assignee_instance_id == assignee_instance_id)
+    if assignee_user_id is not None:
+        conditions.append(Task.assignee_user_id == assignee_user_id)
     if claimable_for is not None:
         # 这个实例现在能领取的（T-0111）：可自由接取、没有执行者、没完成、在范围内
         member = exists().where(
@@ -191,3 +203,102 @@ async def titles_by_id(db: AsyncSession, project_ids: Iterable[uuid.UUID]) -> di
         return {}
     rows = await db.execute(select(Project.id, Project.title).where(Project.id.in_(ids)))
     return {project_id: title for project_id, title in rows}
+
+
+# ---------------------------------------------------------------- 首页任务进展（T-0163）
+
+PROGRESS_ORDER = ("review", "blocked", "in_progress", "todo")
+
+
+def _open_blockers(task_id: Any) -> Any:
+    """任务关联的、未关闭的阻塞 Issue 数（与 issues.open_blockers 同样的条件）。"""
+    return (
+        select(func.count())
+        .select_from(Issue)
+        .join(IssueTask, IssueTask.issue_id == Issue.id)
+        .where(
+            IssueTask.task_id == task_id,
+            Issue.kind == "blocker",
+            Issue.state == "open",
+            Issue.deleted_at.is_(None),
+        )
+        .correlate(Task)
+        .scalar_subquery()
+    )
+
+
+def _progress_base(workspace_id: uuid.UUID) -> Any:
+    """未归档项目里、首页要显示的任务（未完成的，以及已完成待查看的）和它们的状态。"""
+    running = exists().where(TaskRun.task_id == Task.id, TaskRun.ended_at.is_(None))
+    status = case(
+        (and_(Task.done.is_(False), _open_blockers(Task.id) > 0), "blocked"),
+        (Task.done.is_(True), "review"),
+        (or_(running, Task.started_at.is_not(None)), "in_progress"),
+        else_="todo",
+    )
+    return (
+        select(Task.id.label("task_id"), status.label("status"))
+        .join(Project, Project.id == Task.project_id)
+        .where(
+            Task.workspace_id == workspace_id,
+            Project.archived.is_(False),
+            or_(Task.done.is_(False), Task.review_pending.is_(True)),
+        )
+        .subquery()
+    )
+
+
+async def progress_counts(db: AsyncSession, workspace_id: uuid.UUID) -> dict[str, int]:
+    base = _progress_base(workspace_id)
+    rows = (await db.execute(select(base.c.status, func.count()).group_by(base.c.status))).all()
+    counts = {key: 0 for key in PROGRESS_ORDER}
+    counts.update({str(status): int(count) for status, count in rows})
+    return counts
+
+
+async def progress_items(
+    db: AsyncSession, workspace_id: uuid.UUID, *, status: str, limit: int
+) -> list[tuple[Task, str, str, str | None, str | None]]:
+    """一页任务：(任务, 项目名, 状态, 执行者是成员时的名字, 执行者是实例时的名字)。"""
+    base = _progress_base(workspace_id)
+    rank = case({key: index for index, key in enumerate(PROGRESS_ORDER)}, value=base.c.status)
+    stmt = (
+        select(Task, Project.title, base.c.status, User.display_name, AgentInstance.name)
+        .join(base, base.c.task_id == Task.id)
+        .join(Project, Project.id == Task.project_id)
+        .outerjoin(User, User.id == Task.assignee_user_id)
+        .outerjoin(AgentInstance, AgentInstance.id == Task.assignee_instance_id)
+    )
+    if status != "all":
+        stmt = stmt.where(base.c.status == status)
+    stmt = stmt.order_by(rank, Task.updated_at.desc(), Task.id).limit(limit)
+    return [
+        (task, str(title), str(state), user, instance)
+        for task, title, state, user, instance in (await db.execute(stmt)).all()
+    ]
+
+
+async def first_blockers(
+    db: AsyncSession, task_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, tuple[Issue, int]]:
+    """每个任务第一个（编号最小的）未关闭阻塞 Issue，以及一共几条。"""
+    if not task_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(IssueTask.task_id, Issue)
+            .join(Issue, Issue.id == IssueTask.issue_id)
+            .where(
+                IssueTask.task_id.in_(list(task_ids)),
+                Issue.kind == "blocker",
+                Issue.state == "open",
+                Issue.deleted_at.is_(None),
+            )
+            .order_by(IssueTask.task_id, Issue.number)
+        )
+    ).all()
+    found: dict[uuid.UUID, tuple[Issue, int]] = {}
+    for task_id, issue in rows:
+        first, count = found.get(task_id, (issue, 0))
+        found[task_id] = (first, count + 1)
+    return found

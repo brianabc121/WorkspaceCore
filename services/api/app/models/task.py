@@ -11,6 +11,8 @@
 - 项目群（T-0110，迁移 0028）：建群状态 none / pending / ready、群主、上一次失败的原因；
   群本身在 im_groups（project_id）。这些列由 app/domain/project_groups.py 维护，不参与 version。
 - 接取方式（T-0111，迁移 0029）：指派或自由接取；动态记在 task_events（app/models/timeline.py）。
+- 待查看（T-0163，迁移 0051）：智能体用 complete_task 完成时置真；owner / admin 确认结果、打回，
+  或人改了完成状态时清掉。首页“任务进展”的“已完成待查看”就是它（docs/v2/HOME_PLAN.md 第 2 节）。
 """
 
 import uuid
@@ -119,6 +121,11 @@ class Task(Base):
             ),
         ),
         Index("ix_tasks_project", "project_id"),
+        Index(
+            "ix_tasks_review_pending",
+            "workspace_id",
+            postgresql_where=sql_text("review_pending"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
@@ -150,6 +157,8 @@ class Task(Base):
     claim_opened_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
+    # 待查看（T-0163）：智能体完成后等人确认结果；不参与“打回”以外的流程
+    review_pending: Mapped[bool] = mapped_column(Boolean, server_default=sql_text("false"))
     version: Mapped[int] = mapped_column(Integer, server_default=sql_text("1"))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()

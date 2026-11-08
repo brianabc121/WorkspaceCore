@@ -1,6 +1,9 @@
-"""新工作空间的默认“首页”仪表盘与入门组件（契约 ADR 第 3 节）。
+"""新工作空间的默认“首页”仪表盘与组件。
 
-与迁移 0004 为已有工作空间补建的内容一致；这里不依赖认证模块，首次安装也可以直接调用。
+T-0163 起按首页效果图（docs/v2/HOME_PLAN.md 第 4 节）：
+工作概况、任务进展、AI 新闻速览、我的待办、提醒与日程。
+迁移 0052 把从没改过的旧默认首页（迁移 0004 的四个入门组件）换成这一套；“恢复默认首页”也用它。
+这里不依赖认证模块，首次安装也可以直接调用。
 """
 
 import uuid
@@ -10,13 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Dashboard
 from app.repositories import dashboards as dashboard_repo
 from app.schemas.dashboards import (
-    NoteConfig,
-    NoteWidgetCreate,
-    QuickLinksWidgetCreate,
-    TodayTasksWidgetCreate,
-    TodoSummaryWidgetCreate,
+    CalendarAgendaWidgetCreate,
+    MyTodosWidgetCreate,
+    NewsBriefingWidgetCreate,
+    TaskProgressWidgetCreate,
     WidgetCreate,
     WidgetLayout,
+    WorkSummaryWidgetCreate,
 )
 
 DEFAULT_DASHBOARD_TITLE = "首页"
@@ -30,16 +33,11 @@ def _layout(x: int, y: int, w: int, h: int, mobile_y: int) -> WidgetLayout:
 
 def starter_widgets() -> list[WidgetCreate]:
     return [
-        NoteWidgetCreate(
-            widget_type="note",
-            config=NoteConfig(
-                text="欢迎使用 My Workspace。进入编辑模式后可以拖动、调整或添加组件。"
-            ),
-            layout=_layout(0, 0, 6, 3, 0),
-        ),
-        QuickLinksWidgetCreate(widget_type="quick_links", layout=_layout(6, 0, 6, 3, 3)),
-        TodoSummaryWidgetCreate(widget_type="todo_summary", layout=_layout(0, 3, 4, 3, 6)),
-        TodayTasksWidgetCreate(widget_type="today_tasks", layout=_layout(4, 3, 8, 4, 9)),
+        WorkSummaryWidgetCreate(widget_type="work_summary", layout=_layout(0, 0, 12, 2, 0)),
+        TaskProgressWidgetCreate(widget_type="task_progress", layout=_layout(0, 2, 8, 7, 2)),
+        NewsBriefingWidgetCreate(widget_type="news_briefing", layout=_layout(8, 2, 4, 7, 14)),
+        MyTodosWidgetCreate(widget_type="my_todos", layout=_layout(0, 9, 8, 5, 9)),
+        CalendarAgendaWidgetCreate(widget_type="calendar_agenda", layout=_layout(8, 9, 4, 5, 21)),
     ]
 
 

@@ -5170,6 +5170,7 @@
                   "calendar_agenda": "#/components/schemas/CalendarAgendaWidgetCreate",
                   "github_activity": "#/components/schemas/GitHubActivityWidgetCreate",
                   "im_quick_chat": "#/components/schemas/ImQuickChatWidgetCreate",
+                  "my_todos": "#/components/schemas/MyTodosWidgetCreate",
                   "news_briefing": "#/components/schemas/NewsBriefingWidgetCreate",
                   "note": "#/components/schemas/NoteWidgetCreate",
                   "notifications": "#/components/schemas/NotificationsWidgetCreate",
@@ -5177,8 +5178,10 @@
                   "quick_links": "#/components/schemas/QuickLinksWidgetCreate",
                   "recent_docs": "#/components/schemas/RecentDocsWidgetCreate",
                   "service_health": "#/components/schemas/ServiceHealthWidgetCreate",
+                  "task_progress": "#/components/schemas/TaskProgressWidgetCreate",
                   "today_tasks": "#/components/schemas/TodayTasksWidgetCreate",
-                  "todo_summary": "#/components/schemas/TodoSummaryWidgetCreate"
+                  "todo_summary": "#/components/schemas/TodoSummaryWidgetCreate",
+                  "work_summary": "#/components/schemas/WorkSummaryWidgetCreate"
                 },
                 "propertyName": "widget_type"
               },
@@ -5221,6 +5224,15 @@
                 },
                 {
                   "$ref": "#/components/schemas/NewsBriefingWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/WorkSummaryWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/TaskProgressWidgetCreate"
+                },
+                {
+                  "$ref": "#/components/schemas/MyTodosWidgetCreate"
                 }
               ]
             },
@@ -5337,6 +5349,23 @@
           "generated_at"
         ],
         "title": "DashboardOverview",
+        "type": "object"
+      },
+      "DashboardReset": {
+        "additionalProperties": false,
+        "description": "恢复默认首页（T-0163）：删掉这个仪表盘的全部组件，换成默认首页布局。\n\n见 docs/v2/HOME_PLAN.md 第 4 节。",
+        "properties": {
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "DashboardReset",
         "type": "object"
       },
       "DashboardUpdate": {
@@ -11737,6 +11766,69 @@
         "title": "ModuleUpdate",
         "type": "object"
       },
+      "MyTodosConfig": {
+        "additionalProperties": false,
+        "description": "T-0163：首页“我的待办”（GET /tasks?assignee=me）。\n\n执行者是自己的未完成任务，可以勾选完成、添加。",
+        "properties": {
+          "limit": {
+            "default": 5,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "MyTodosConfig",
+        "type": "object"
+      },
+      "MyTodosWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/MyTodosConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "my_todos",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "MyTodosWidgetCreate",
+        "type": "object"
+      },
+      "MyTodosWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/MyTodosConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "my_todos",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "MyTodosWidgetUpdate",
+        "type": "object"
+      },
       "NavPage": {
         "additionalProperties": false,
         "properties": {
@@ -15024,6 +15116,100 @@
           "new_password"
         ],
         "title": "PasswordChangeRequest",
+        "type": "object"
+      },
+      "ProgressBlocker": {
+        "properties": {
+          "count": {
+            "description": "未关闭的阻塞 Issue 共几条",
+            "title": "Count",
+            "type": "integer"
+          },
+          "issue_id": {
+            "format": "uuid",
+            "title": "Issue Id",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "title": {
+            "description": "阻塞 Issue 的标题；来自人或智能体，按纯文本显示",
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "issue_id",
+          "number",
+          "title",
+          "count"
+        ],
+        "title": "ProgressBlocker",
+        "type": "object"
+      },
+      "ProgressCounts": {
+        "properties": {
+          "all": {
+            "description": "四种状态合计（已完成且已确认的不算）",
+            "title": "All",
+            "type": "integer"
+          },
+          "blocked": {
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "in_progress": {
+            "title": "In Progress",
+            "type": "integer"
+          },
+          "review": {
+            "description": "已完成待查看",
+            "title": "Review",
+            "type": "integer"
+          },
+          "todo": {
+            "title": "Todo",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "all",
+          "todo",
+          "in_progress",
+          "review",
+          "blocked"
+        ],
+        "title": "ProgressCounts",
+        "type": "object"
+      },
+      "ProgressExecutor": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "user",
+              "instance"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "name"
+        ],
+        "title": "ProgressExecutor",
         "type": "object"
       },
       "ProjectAdminOut": {
@@ -20494,6 +20680,19 @@
       "TaskCreate": {
         "additionalProperties": false,
         "properties": {
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "执行者（T-0163，首页“添加待办”指派给自己）：必须是本工作空间的成员",
+            "title": "Assignee User Id"
+          },
           "description": {
             "default": "",
             "description": "纯文本（可以写 Markdown）；前端按纯文本显示，不渲染 HTML",
@@ -20568,7 +20767,7 @@
         "type": "object"
       },
       "TaskEventOut": {
-        "description": "任务的动态（T-0111）：设为自由接取、领取、放弃、完成、打回。",
+        "description": "任务的动态（T-0111）：设为自由接取、领取、放弃、完成、打回、确认结果（T-0163）。",
         "properties": {
           "actor_kind": {
             "enum": [
@@ -20599,7 +20798,8 @@
               "claimed",
               "released",
               "completed",
-              "reopened"
+              "reopened",
+              "reviewed"
             ],
             "title": "Kind",
             "type": "string"
@@ -20746,6 +20946,11 @@
             "title": "Project Id",
             "type": "string"
           },
+          "review_pending": {
+            "description": "已完成待查看（T-0163）：智能体完成后等 owner / admin 确认结果或打回",
+            "title": "Review Pending",
+            "type": "boolean"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -20791,6 +20996,7 @@
           "claim_mode",
           "claim_scope",
           "claimable",
+          "review_pending",
           "version",
           "created_at",
           "updated_at"
@@ -20837,6 +21043,180 @@
         "title": "TaskPage",
         "type": "object"
       },
+      "TaskProgressConfig": {
+        "additionalProperties": false,
+        "description": "T-0163：首页“任务进展”（GET /tasks/progress）：按状态分页签的任务表。",
+        "properties": {
+          "limit": {
+            "default": 7,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "TaskProgressConfig",
+        "type": "object"
+      },
+      "TaskProgressItem": {
+        "properties": {
+          "blocker": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProgressBlocker"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "阻塞时第一个未关闭的阻塞 Issue"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProgressExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "执行者；没有指派时为 null"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "project_title": {
+            "title": "Project Title",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "todo",
+              "in_progress",
+              "review",
+              "blocked"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "project_id",
+          "project_title",
+          "status",
+          "executor",
+          "due_at",
+          "updated_at",
+          "blocker"
+        ],
+        "title": "TaskProgressItem",
+        "type": "object"
+      },
+      "TaskProgressOut": {
+        "properties": {
+          "attention": {
+            "description": "需要关注：待查看 + 阻塞",
+            "title": "Attention",
+            "type": "integer"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ProgressCounts"
+          },
+          "items": {
+            "description": "按状态筛选后的一页；全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前",
+            "items": {
+              "$ref": "#/components/schemas/TaskProgressItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "counts",
+          "attention",
+          "items"
+        ],
+        "title": "TaskProgressOut",
+        "type": "object"
+      },
+      "TaskProgressWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/TaskProgressConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "task_progress",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "TaskProgressWidgetCreate",
+        "type": "object"
+      },
+      "TaskProgressWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/TaskProgressConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "task_progress",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "TaskProgressWidgetUpdate",
+        "type": "object"
+      },
       "TaskReopen": {
         "additionalProperties": false,
         "description": "打回（owner / admin）：已完成的任务回到进行中，原因会发给执行的智能体。",
@@ -20860,6 +21240,24 @@
           "reason"
         ],
         "title": "TaskReopen",
+        "type": "object"
+      },
+      "TaskReview": {
+        "additionalProperties": false,
+        "description": "确认结果（owner / admin，T-0163）：已完成待查看的任务不再出现在首页的“待查看”里。",
+        "properties": {
+          "version": {
+            "description": "读取时的 version，原样带回；与当前版本不一致时返回 409",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "TaskReview",
         "type": "object"
       },
       "TaskRunList": {
@@ -22396,7 +22794,7 @@
             "type": "integer"
           },
           "widget_type": {
-            "description": "当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications、project_progress、im_quick_chat、news_briefing；也可能是已不再支持的旧类型，前端应显示安全的错误卡片",
+            "description": "当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications、project_progress、im_quick_chat、news_briefing、work_summary、task_progress、my_todos；也可能是已不再支持的旧类型，前端应显示安全的错误卡片",
             "title": "Widget Type",
             "type": "string"
           }
@@ -22431,6 +22829,70 @@
           "layout"
         ],
         "title": "WidgetPlacement",
+        "type": "object"
+      },
+      "WorkSummaryConfig": {
+        "additionalProperties": false,
+        "description": "T-0163：首页“工作概况”的五个数字（docs/v2/HOME_PLAN.md 第 1 节）：\n待办、进行中、已完成待查看、阻塞（GET /tasks/progress），近期提醒（GET /calendar/events）。",
+        "properties": {
+          "reminder_days": {
+            "default": 2,
+            "description": "“近期提醒”数从现在到第几天结束的日程（2 = 今天和明天）",
+            "maximum": 14.0,
+            "minimum": 1.0,
+            "title": "Reminder Days",
+            "type": "integer"
+          }
+        },
+        "title": "WorkSummaryConfig",
+        "type": "object"
+      },
+      "WorkSummaryWidgetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/WorkSummaryConfig"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/WidgetLayout"
+          },
+          "widget_type": {
+            "const": "work_summary",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout",
+          "widget_type"
+        ],
+        "title": "WorkSummaryWidgetCreate",
+        "type": "object"
+      },
+      "WorkSummaryWidgetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/WorkSummaryConfig"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求必须带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          },
+          "widget_type": {
+            "const": "work_summary",
+            "title": "Widget Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "widget_type",
+          "config"
+        ],
+        "title": "WorkSummaryWidgetUpdate",
         "type": "object"
       },
       "WorkspaceOut": {
@@ -31276,6 +31738,135 @@
         ]
       }
     },
+    "/api/v1/dashboards/{dashboard_id}/reset": {
+      "post": {
+        "description": "删掉这个仪表盘的全部组件，换成默认首页的组件（工作概况、任务进展、AI 新闻速览、我的待办、提醒与日程，T-0163）；前端先二次确认。version 不一致时 409 VERSION_CONFLICT。",
+        "operationId": "reset_dashboard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dashboard_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Dashboard Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DashboardReset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "恢复默认首页布局（member，乐观并发）",
+        "tags": [
+          "dashboards"
+        ]
+      }
+    },
     "/api/v1/dashboards/{dashboard_id}/widgets": {
       "get": {
         "operationId": "list_widgets",
@@ -31409,6 +32000,7 @@
                     "calendar_agenda": "#/components/schemas/CalendarAgendaWidgetCreate",
                     "github_activity": "#/components/schemas/GitHubActivityWidgetCreate",
                     "im_quick_chat": "#/components/schemas/ImQuickChatWidgetCreate",
+                    "my_todos": "#/components/schemas/MyTodosWidgetCreate",
                     "news_briefing": "#/components/schemas/NewsBriefingWidgetCreate",
                     "note": "#/components/schemas/NoteWidgetCreate",
                     "notifications": "#/components/schemas/NotificationsWidgetCreate",
@@ -31416,8 +32008,10 @@
                     "quick_links": "#/components/schemas/QuickLinksWidgetCreate",
                     "recent_docs": "#/components/schemas/RecentDocsWidgetCreate",
                     "service_health": "#/components/schemas/ServiceHealthWidgetCreate",
+                    "task_progress": "#/components/schemas/TaskProgressWidgetCreate",
                     "today_tasks": "#/components/schemas/TodayTasksWidgetCreate",
-                    "todo_summary": "#/components/schemas/TodoSummaryWidgetCreate"
+                    "todo_summary": "#/components/schemas/TodoSummaryWidgetCreate",
+                    "work_summary": "#/components/schemas/WorkSummaryWidgetCreate"
                   },
                   "propertyName": "widget_type"
                 },
@@ -31460,6 +32054,15 @@
                   },
                   {
                     "$ref": "#/components/schemas/NewsBriefingWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/WorkSummaryWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TaskProgressWidgetCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MyTodosWidgetCreate"
                   }
                 ],
                 "title": "Body"
@@ -49984,6 +50587,25 @@
             }
           },
           {
+            "description": "me：只看执行者是当前用户的任务（首页“我的待办”，T-0163）",
+            "in": "query",
+            "name": "assignee",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "me",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "me：只看执行者是当前用户的任务（首页“我的待办”，T-0163）",
+              "title": "Assignee"
+            }
+          },
+          {
             "description": "当前工作空间；不是成员时返回 404",
             "in": "header",
             "name": "X-Workspace-Id",
@@ -50244,6 +50866,106 @@
           }
         ],
         "summary": "可以指派的执行者（viewer）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/progress": {
+      "get": {
+        "description": "未归档项目里任务的四种状态（T-0163，docs/v2/HOME_PLAN.md 第 2 节）：阻塞（未完成且有未关闭的阻塞 Issue）、已完成待查看（智能体完成、等 owner / admin 确认）、进行中（有正在执行的一段或开始过）、待办（其余未完成的）。返回各状态的数量和按状态筛选的一页；全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前。已完成且已确认的任务不出现。",
+        "operationId": "task_progress",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "todo",
+                "in_progress",
+                "review",
+                "blocked"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 7,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProgressOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "首页任务进展（viewer）",
         "tags": [
           "tasks"
         ]
@@ -51110,6 +51832,135 @@
         ]
       }
     },
+    "/api/v1/tasks/{task_id}/review": {
+      "post": {
+        "description": "智能体完成的任务处于“已完成待查看”（review_pending）；看过结果后确认，任务动态记一条“确认了结果”（T-0163）。不在待查看时原样返回；要返工用“打回”。",
+        "operationId": "review_task",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskReview"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "确认任务结果（admin，乐观并发）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
     "/api/v1/tasks/{task_id}/runs": {
       "get": {
         "description": "最近 100 段，新的在前；实例执行的段带 token（按时间归属）、每 10 分钟的用量与等待审批。",
@@ -51655,6 +52506,7 @@
                     "calendar_agenda": "#/components/schemas/CalendarAgendaWidgetUpdate",
                     "github_activity": "#/components/schemas/GitHubActivityWidgetUpdate",
                     "im_quick_chat": "#/components/schemas/ImQuickChatWidgetUpdate",
+                    "my_todos": "#/components/schemas/MyTodosWidgetUpdate",
                     "news_briefing": "#/components/schemas/NewsBriefingWidgetUpdate",
                     "note": "#/components/schemas/NoteWidgetUpdate",
                     "notifications": "#/components/schemas/NotificationsWidgetUpdate",
@@ -51662,8 +52514,10 @@
                     "quick_links": "#/components/schemas/QuickLinksWidgetUpdate",
                     "recent_docs": "#/components/schemas/RecentDocsWidgetUpdate",
                     "service_health": "#/components/schemas/ServiceHealthWidgetUpdate",
+                    "task_progress": "#/components/schemas/TaskProgressWidgetUpdate",
                     "today_tasks": "#/components/schemas/TodayTasksWidgetUpdate",
-                    "todo_summary": "#/components/schemas/TodoSummaryWidgetUpdate"
+                    "todo_summary": "#/components/schemas/TodoSummaryWidgetUpdate",
+                    "work_summary": "#/components/schemas/WorkSummaryWidgetUpdate"
                   },
                   "propertyName": "widget_type"
                 },
@@ -51706,6 +52560,15 @@
                   },
                   {
                     "$ref": "#/components/schemas/NewsBriefingWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/WorkSummaryWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TaskProgressWidgetUpdate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MyTodosWidgetUpdate"
                   }
                 ],
                 "title": "Body"

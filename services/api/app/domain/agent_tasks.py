@@ -258,6 +258,8 @@ async def _complete(ctx: _Ctx, args: CompleteTaskInput) -> tuple[CompleteTaskOut
     now = _now()
     task.done = True
     task.done_at = now
+    # 等 owner / admin 查看结果（首页“已完成待查看”，T-0163）
+    task.review_pending = True
     await task_runs.end_open_run(db, task, "done", by=None, at=now)
     task.version += 1
     db.add(

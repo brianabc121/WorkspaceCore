@@ -52,7 +52,7 @@ from app.models import (
     WorkspaceMember,
 )
 from app.schemas.im import ImMessageSend
-from app.schemas.tasks import TaskOut, TaskReopen
+from app.schemas.tasks import TaskOut, TaskReopen, TaskReview
 from app.schemas.timeline import (
     ApprovalWait,
     AssigneeInstance,
@@ -490,6 +490,7 @@ class RunService:
         now = _now()
         task.done = False
         task.done_at = None
+        task.review_pending = False
         task.version += 1
         instance: AgentInstance | None = None
         if task.assignee_instance_id is not None:
@@ -554,6 +555,59 @@ class RunService:
         await task_claims.group_notice(
             self.db, self.im, project_id, f"《{title}》被打回：{body.reason}"
         )
+        return out
+
+    # ---------------------------------------------------------------- 确认结果（T-0163）
+
+    async def review(
+        self, context: Actor, access: WorkspaceAccess, task_id: uuid.UUID, body: TaskReview
+    ) -> TaskOut:
+        """智能体完成的任务“已完成待查看”：owner / admin 看过结果后确认。
+
+        见 docs/v2/HOME_PLAN.md 第 2 节。
+
+        不在待查看时原样返回（重复点击、别人已经确认过都不报错）；版本不一致时 409。
+        """
+        if not has_role(access.role, Role.admin):
+            raise ApiError(403, "FORBIDDEN", "只有 owner / admin 能确认任务结果")
+        task = await self._task(access, task_id, lock=True)
+        if not task.review_pending:
+            out = task_out(task)
+            await self.db.commit()
+            return out
+        if str(task.version) != body.version:
+            raise ApiError(
+                409,
+                "VERSION_CONFLICT",
+                "内容已被其他操作修改，请刷新后重试",
+                details={
+                    "current_version": str(task.version),
+                    "current": task_out(task).model_dump(mode="json"),
+                },
+            )
+        task.review_pending = False
+        task.version += 1
+        user = await self.db.get(User, context.user.id)
+        self.db.add(
+            task_claims.event(
+                task,
+                "reviewed",
+                actor_kind="user",
+                name=user.display_name if user is not None else "",
+                user_id=context.user.id,
+            )
+        )
+        await self.audit.record(
+            "task.reviewed",
+            workspace_ids=[access.workspace.id],
+            actor_id=context.user.id,
+            resource_type="task",
+            resource_id=task.id,
+            client_ip=context.client_ip,
+        )
+        await self.db.flush()
+        out = task_out(task)
+        await self.db.commit()
         return out
 
     async def assignees(self, access: WorkspaceAccess) -> AssigneeOptions:

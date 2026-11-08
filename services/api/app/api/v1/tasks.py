@@ -28,6 +28,7 @@ from app.domain.tasks import TaskService, WriteResult
 from app.domain.timeline import RunService
 from app.schemas.common import error_responses
 from app.schemas.tasks import (
+    ProgressFilter,
     ProjectAgentList,
     ProjectCreate,
     ProjectOut,
@@ -35,11 +36,14 @@ from app.schemas.tasks import (
     ProjectProgressList,
     ProjectUpdate,
     ProjectVersion,
+    TaskAssigneeFilter,
     TaskCreate,
     TaskEventList,
     TaskOut,
     TaskPage,
+    TaskProgressOut,
     TaskReopen,
+    TaskReview,
     TaskSort,
     TaskStatusFilter,
     TaskUpdate,
@@ -247,9 +251,14 @@ async def list_tasks(
     sort: TaskSort = "due_at",
     cursor: Cursor = None,
     limit: Limit = 30,
+    assignee: Annotated[
+        TaskAssigneeFilter | None,
+        Query(description="me：只看执行者是当前用户的任务（首页“我的待办”，T-0163）"),
+    ] = None,
 ) -> TaskPage:
     return await service.list_tasks(
         access,
+        assignee_user_id=access.user_id if assignee == "me" else None,
         status=status_filter,
         project_id=project_id,
         priorities=priority,
@@ -279,6 +288,24 @@ async def create_task(
     body: TaskCreate,
 ) -> Response:
     return _respond(await service.create_task(context, access, idempotency_key, body))
+
+
+@router.get(
+    "/tasks/progress",
+    summary="首页任务进展（viewer）",
+    description="未归档项目里任务的四种状态（T-0163，docs/v2/HOME_PLAN.md 第 2 节）："
+    "阻塞（未完成且有未关闭的阻塞 Issue）、已完成待查看（智能体完成、等 owner / admin 确认）、"
+    "进行中（有正在执行的一段或开始过）、待办（其余未完成的）。返回各状态的数量和按状态筛选的一页；"
+    "全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前。已完成且已确认的任务不出现。",
+    responses=_read_errors,
+)
+async def task_progress(
+    access: Viewer,
+    service: Service,
+    status_filter: Annotated[ProgressFilter, Query(alias="status")] = "all",
+    limit: Annotated[int, Query(ge=1, le=20)] = 7,
+) -> TaskProgressOut:
+    return await service.progress(access, status=status_filter, limit=limit)
 
 
 @router.get(
@@ -374,6 +401,20 @@ async def reopen_task(
     access: Member, context: Context, runs: Runs, task_id: UUID, body: TaskReopen
 ) -> TaskOut:
     return await runs.reopen(context, access, task_id, body)
+
+
+@router.post(
+    "/tasks/{task_id}/review",
+    summary="确认任务结果（admin，乐观并发）",
+    description="智能体完成的任务处于“已完成待查看”（review_pending）；看过结果后确认，"
+    "任务动态记一条“确认了结果”（T-0163）。不在待查看时原样返回；要返工用“打回”。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def review_task(
+    access: Member, context: Context, runs: Runs, task_id: UUID, body: TaskReview
+) -> TaskOut:
+    return await runs.review(context, access, task_id, body)
 
 
 @router.delete(

@@ -1260,6 +1260,26 @@ export interface paths {
         patch: operations["update_dashboard"];
         trace?: never;
     };
+    "/api/v1/dashboards/{dashboard_id}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 恢复默认首页布局（member，乐观并发）
+         * @description 删掉这个仪表盘的全部组件，换成默认首页的组件（工作概况、任务进展、AI 新闻速览、我的待办、提醒与日程，T-0163）；前端先二次确认。version 不一致时 409 VERSION_CONFLICT。
+         */
+        post: operations["reset_dashboard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dashboards/{dashboard_id}/widgets": {
         parameters: {
             query?: never;
@@ -3739,6 +3759,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tasks/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 首页任务进展（viewer）
+         * @description 未归档项目里任务的四种状态（T-0163，docs/v2/HOME_PLAN.md 第 2 节）：阻塞（未完成且有未关闭的阻塞 Issue）、已完成待查看（智能体完成、等 owner / admin 确认）、进行中（有正在执行的一段或开始过）、待办（其余未完成的）。返回各状态的数量和按状态筛选的一页；全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前。已完成且已确认的任务不出现。
+         */
+        get: operations["task_progress"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tasks/timeline": {
         parameters: {
             query?: never;
@@ -3855,6 +3895,26 @@ export interface paths {
          * @description 任务回到进行中（未完成、执行者不变）。执行者是智能体时开新的一段，并用你的 IM 账号把原因发给它；原执行者已停用或删除时任务放回未分配。原因写进任务的动态。没完成的任务返回 409 TASK_NOT_DONE（T-0111）。
          */
         post: operations["reopen_task"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 确认任务结果（admin，乐观并发）
+         * @description 智能体完成的任务处于“已完成待查看”（review_pending）；看过结果后确认，任务动态记一条“确认了结果”（T-0163）。不在待查看时原样返回；要返工用“打回”。
+         */
+        post: operations["review_task"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6226,7 +6286,7 @@ export interface components {
              * Widgets
              * @description 可选：创建时一并加入的组件（用于导入布局 JSON），整体在一个事务里完成
              */
-            widgets?: (components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"] | components["schemas"]["ServiceHealthWidgetCreate"] | components["schemas"]["ApiLatencyWidgetCreate"] | components["schemas"]["NotificationsWidgetCreate"] | components["schemas"]["ProjectProgressWidgetCreate"] | components["schemas"]["ImQuickChatWidgetCreate"] | components["schemas"]["NewsBriefingWidgetCreate"])[];
+            widgets?: (components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"] | components["schemas"]["ServiceHealthWidgetCreate"] | components["schemas"]["ApiLatencyWidgetCreate"] | components["schemas"]["NotificationsWidgetCreate"] | components["schemas"]["ProjectProgressWidgetCreate"] | components["schemas"]["ImQuickChatWidgetCreate"] | components["schemas"]["NewsBriefingWidgetCreate"] | components["schemas"]["WorkSummaryWidgetCreate"] | components["schemas"]["TaskProgressWidgetCreate"] | components["schemas"]["MyTodosWidgetCreate"])[];
         };
         /** DashboardOut */
         DashboardOut: {
@@ -6283,6 +6343,19 @@ export interface components {
             today_tasks: components["schemas"]["TaskBrief"][];
             /** Widgets */
             widgets: components["schemas"]["WidgetOut"][];
+        };
+        /**
+         * DashboardReset
+         * @description 恢复默认首页（T-0163）：删掉这个仪表盘的全部组件，换成默认首页布局。
+         *
+         *     见 docs/v2/HOME_PLAN.md 第 4 节。
+         */
+        DashboardReset: {
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
         };
         /** DashboardUpdate */
         DashboardUpdate: {
@@ -8794,6 +8867,43 @@ export interface components {
             /** Enabled */
             enabled: boolean;
         };
+        /**
+         * MyTodosConfig
+         * @description T-0163：首页“我的待办”（GET /tasks?assignee=me）。
+         *
+         *     执行者是自己的未完成任务，可以勾选完成、添加。
+         */
+        MyTodosConfig: {
+            /**
+             * Limit
+             * @default 5
+             */
+            limit: number;
+        };
+        /** MyTodosWidgetCreate */
+        MyTodosWidgetCreate: {
+            config?: components["schemas"]["MyTodosConfig"];
+            layout: components["schemas"]["WidgetLayout"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "my_todos";
+        };
+        /** MyTodosWidgetUpdate */
+        MyTodosWidgetUpdate: {
+            config: components["schemas"]["MyTodosConfig"];
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "my_todos";
+        };
         /** NavPage */
         NavPage: {
             /** Id */
@@ -10140,6 +10250,60 @@ export interface components {
              * Format: password
              */
             new_password: string;
+        };
+        /** ProgressBlocker */
+        ProgressBlocker: {
+            /**
+             * Count
+             * @description 未关闭的阻塞 Issue 共几条
+             */
+            count: number;
+            /**
+             * Issue Id
+             * Format: uuid
+             */
+            issue_id: string;
+            /** Number */
+            number: number;
+            /**
+             * Title
+             * @description 阻塞 Issue 的标题；来自人或智能体，按纯文本显示
+             */
+            title: string;
+        };
+        /** ProgressCounts */
+        ProgressCounts: {
+            /**
+             * All
+             * @description 四种状态合计（已完成且已确认的不算）
+             */
+            all: number;
+            /** Blocked */
+            blocked: number;
+            /** In Progress */
+            in_progress: number;
+            /**
+             * Review
+             * @description 已完成待查看
+             */
+            review: number;
+            /** Todo */
+            todo: number;
+        };
+        /** ProgressExecutor */
+        ProgressExecutor: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "user" | "instance";
+            /** Name */
+            name: string;
         };
         /** ProjectAdminOut */
         ProjectAdminOut: {
@@ -12463,6 +12627,11 @@ export interface components {
         /** TaskCreate */
         TaskCreate: {
             /**
+             * Assignee User Id
+             * @description 执行者（T-0163，首页“添加待办”指派给自己）：必须是本工作空间的成员
+             */
+            assignee_user_id?: string | null;
+            /**
              * Description
              * @description 纯文本（可以写 Markdown）；前端按纯文本显示，不渲染 HTML
              * @default
@@ -12496,7 +12665,7 @@ export interface components {
         };
         /**
          * TaskEventOut
-         * @description 任务的动态（T-0111）：设为自由接取、领取、放弃、完成、打回。
+         * @description 任务的动态（T-0111）：设为自由接取、领取、放弃、完成、打回、确认结果（T-0163）。
          */
         TaskEventOut: {
             /**
@@ -12520,7 +12689,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "opened" | "claimed" | "released" | "completed" | "reopened";
+            kind: "opened" | "claimed" | "released" | "completed" | "reopened" | "reviewed";
             /**
              * Note
              * @description 放弃 / 打回的原因或完成说明；来自人或智能体的文字，按纯文本显示
@@ -12592,6 +12761,11 @@ export interface components {
              */
             project_id: string;
             /**
+             * Review Pending
+             * @description 已完成待查看（T-0163）：智能体完成后等 owner / admin 确认结果或打回
+             */
+            review_pending: boolean;
+            /**
              * Started At
              * @description 第一次开始执行的时间；由执行记录维护
              */
@@ -12622,12 +12796,105 @@ export interface components {
             total_estimate?: number | null;
         };
         /**
+         * TaskProgressConfig
+         * @description T-0163：首页“任务进展”（GET /tasks/progress）：按状态分页签的任务表。
+         */
+        TaskProgressConfig: {
+            /**
+             * Limit
+             * @default 7
+             */
+            limit: number;
+        };
+        /** TaskProgressItem */
+        TaskProgressItem: {
+            /** @description 阻塞时第一个未关闭的阻塞 Issue */
+            blocker: components["schemas"]["ProgressBlocker"] | null;
+            /** Due At */
+            due_at: string | null;
+            /** @description 执行者；没有指派时为 null */
+            executor: components["schemas"]["ProgressExecutor"] | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Project Title */
+            project_title: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "todo" | "in_progress" | "review" | "blocked";
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** TaskProgressOut */
+        TaskProgressOut: {
+            /**
+             * Attention
+             * @description 需要关注：待查看 + 阻塞
+             */
+            attention: number;
+            counts: components["schemas"]["ProgressCounts"];
+            /**
+             * Items
+             * @description 按状态筛选后的一页；全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前
+             */
+            items: components["schemas"]["TaskProgressItem"][];
+        };
+        /** TaskProgressWidgetCreate */
+        TaskProgressWidgetCreate: {
+            config?: components["schemas"]["TaskProgressConfig"];
+            layout: components["schemas"]["WidgetLayout"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "task_progress";
+        };
+        /** TaskProgressWidgetUpdate */
+        TaskProgressWidgetUpdate: {
+            config: components["schemas"]["TaskProgressConfig"];
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "task_progress";
+        };
+        /**
          * TaskReopen
          * @description 打回（owner / admin）：已完成的任务回到进行中，原因会发给执行的智能体。
          */
         TaskReopen: {
             /** Reason */
             reason: string;
+            /**
+             * Version
+             * @description 读取时的 version，原样带回；与当前版本不一致时返回 409
+             */
+            version: string;
+        };
+        /**
+         * TaskReview
+         * @description 确认结果（owner / admin，T-0163）：已完成待查看的任务不再出现在首页的“待查看”里。
+         */
+        TaskReview: {
             /**
              * Version
              * @description 读取时的 version，原样带回；与当前版本不一致时返回 409
@@ -13320,7 +13587,7 @@ export interface components {
             version: number;
             /**
              * Widget Type
-             * @description 当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications、project_progress、im_quick_chat、news_briefing；也可能是已不再支持的旧类型，前端应显示安全的错误卡片
+             * @description 当前版本内置：quick_links、note、todo_summary、today_tasks、calendar_agenda、recent_docs、github_activity、service_health、api_latency、notifications、project_progress、im_quick_chat、news_briefing、work_summary、task_progress、my_todos；也可能是已不再支持的旧类型，前端应显示安全的错误卡片
              */
             widget_type: string;
         };
@@ -13332,6 +13599,43 @@ export interface components {
              * Format: uuid
              */
             widget_id: string;
+        };
+        /**
+         * WorkSummaryConfig
+         * @description T-0163：首页“工作概况”的五个数字（docs/v2/HOME_PLAN.md 第 1 节）：
+         *     待办、进行中、已完成待查看、阻塞（GET /tasks/progress），近期提醒（GET /calendar/events）。
+         */
+        WorkSummaryConfig: {
+            /**
+             * Reminder Days
+             * @description “近期提醒”数从现在到第几天结束的日程（2 = 今天和明天）
+             * @default 2
+             */
+            reminder_days: number;
+        };
+        /** WorkSummaryWidgetCreate */
+        WorkSummaryWidgetCreate: {
+            config?: components["schemas"]["WorkSummaryConfig"];
+            layout: components["schemas"]["WidgetLayout"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "work_summary";
+        };
+        /** WorkSummaryWidgetUpdate */
+        WorkSummaryWidgetUpdate: {
+            config: components["schemas"]["WorkSummaryConfig"];
+            /**
+             * Version
+             * @description 乐观并发版本号；写请求必须带上读取时的版本
+             */
+            version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            widget_type: "work_summary";
         };
         /** WorkspaceOut */
         WorkspaceOut: {
@@ -18757,6 +19061,82 @@ export interface operations {
             };
         };
     };
+    reset_dashboard: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                dashboard_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardReset"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_widgets: {
         parameters: {
             query?: never;
@@ -18825,7 +19205,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"] | components["schemas"]["ServiceHealthWidgetCreate"] | components["schemas"]["ApiLatencyWidgetCreate"] | components["schemas"]["NotificationsWidgetCreate"] | components["schemas"]["ProjectProgressWidgetCreate"] | components["schemas"]["ImQuickChatWidgetCreate"] | components["schemas"]["NewsBriefingWidgetCreate"];
+                "application/json": components["schemas"]["QuickLinksWidgetCreate"] | components["schemas"]["NoteWidgetCreate"] | components["schemas"]["TodoSummaryWidgetCreate"] | components["schemas"]["TodayTasksWidgetCreate"] | components["schemas"]["CalendarAgendaWidgetCreate"] | components["schemas"]["RecentDocsWidgetCreate"] | components["schemas"]["GitHubActivityWidgetCreate"] | components["schemas"]["ServiceHealthWidgetCreate"] | components["schemas"]["ApiLatencyWidgetCreate"] | components["schemas"]["NotificationsWidgetCreate"] | components["schemas"]["ProjectProgressWidgetCreate"] | components["schemas"]["ImQuickChatWidgetCreate"] | components["schemas"]["NewsBriefingWidgetCreate"] | components["schemas"]["WorkSummaryWidgetCreate"] | components["schemas"]["TaskProgressWidgetCreate"] | components["schemas"]["MyTodosWidgetCreate"];
             };
         };
         responses: {
@@ -29678,6 +30058,8 @@ export interface operations {
                 /** @description 上一页返回的 next_cursor */
                 cursor?: string | null;
                 limit?: number;
+                /** @description me：只看执行者是当前用户的任务（首页“我的待办”，T-0163） */
+                assignee?: "me" | null;
             };
             header: {
                 /** @description 当前工作空间；不是成员时返回 404 */
@@ -29821,6 +30203,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssigneeOptions"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    task_progress: {
+        parameters: {
+            query?: {
+                status?: "all" | "todo" | "in_progress" | "review" | "blocked";
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProgressOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -30344,6 +30779,82 @@ export interface operations {
             };
         };
     };
+    review_task: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskReview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_task_runs: {
         parameters: {
             query?: never;
@@ -30655,7 +31166,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QuickLinksWidgetUpdate"] | components["schemas"]["NoteWidgetUpdate"] | components["schemas"]["TodoSummaryWidgetUpdate"] | components["schemas"]["TodayTasksWidgetUpdate"] | components["schemas"]["CalendarAgendaWidgetUpdate"] | components["schemas"]["RecentDocsWidgetUpdate"] | components["schemas"]["GitHubActivityWidgetUpdate"] | components["schemas"]["ServiceHealthWidgetUpdate"] | components["schemas"]["ApiLatencyWidgetUpdate"] | components["schemas"]["NotificationsWidgetUpdate"] | components["schemas"]["ProjectProgressWidgetUpdate"] | components["schemas"]["ImQuickChatWidgetUpdate"] | components["schemas"]["NewsBriefingWidgetUpdate"];
+                "application/json": components["schemas"]["QuickLinksWidgetUpdate"] | components["schemas"]["NoteWidgetUpdate"] | components["schemas"]["TodoSummaryWidgetUpdate"] | components["schemas"]["TodayTasksWidgetUpdate"] | components["schemas"]["CalendarAgendaWidgetUpdate"] | components["schemas"]["RecentDocsWidgetUpdate"] | components["schemas"]["GitHubActivityWidgetUpdate"] | components["schemas"]["ServiceHealthWidgetUpdate"] | components["schemas"]["ApiLatencyWidgetUpdate"] | components["schemas"]["NotificationsWidgetUpdate"] | components["schemas"]["ProjectProgressWidgetUpdate"] | components["schemas"]["ImQuickChatWidgetUpdate"] | components["schemas"]["NewsBriefingWidgetUpdate"] | components["schemas"]["WorkSummaryWidgetUpdate"] | components["schemas"]["TaskProgressWidgetUpdate"] | components["schemas"]["MyTodosWidgetUpdate"];
             };
         };
         responses: {
