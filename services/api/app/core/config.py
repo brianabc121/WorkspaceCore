@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # 对外访问地址与额外可信来源（逗号分隔），用于 CSRF 的 Origin / Referer 校验
     public_base_url: str = "http://localhost:8080"
     cors_allowed_origins: str = ""
+    # 侧栏“嵌入页”允许的来源（空格分隔的 https://host[:port]）；
+    # Caddy 的 CSP frame-src 用同一个变量（T-0161）
+    embed_origins: str = ""
     # 计算 CSRF Token 的密钥；生产环境必填
     session_secret: SecretStr | None = None
     # 首次安装凭据；未配置时首次安装接口一律拒绝
@@ -359,6 +362,12 @@ class Settings(BaseSettings):
                 except ValueError:
                     raise ValueError("必须是逗号分隔的 IP 地址或网段") from None
         return value
+
+    @property
+    def allowed_embed_origins(self) -> list[str]:
+        """嵌入页允许的来源：去掉末尾的 /，只保留 https 的。"""
+        origins = (o.rstrip("/").lower() for o in re.split(r"[\s,]+", self.embed_origins) if o)
+        return sorted({o for o in origins if o.startswith("https://") and "/" not in o[8:]})
 
     @property
     def allowed_news_hosts(self) -> frozenset[str]:

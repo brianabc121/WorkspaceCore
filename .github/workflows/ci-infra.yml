@@ -28,6 +28,9 @@ jobs:
           # Sprint 5 验收：Prometheus（--profile monitoring，只启动 prometheus）；Grafana 不在 CI 里启动
           sed -i 's#^PROMETHEUS_URL=.*#PROMETHEUS_URL=http://prometheus:9090#' .env
           grep -q '^PROMETHEUS_URL=http://prometheus:9090$' .env
+          # 插拔式模块与侧栏验收（T-0161）：嵌入页的来源（Caddy 的 CSP frame-src 与接口校验共用）
+          sed -i 's#^EMBED_ORIGINS=.*#EMBED_ORIGINS=https://example.com#' .env
+          grep -q '^EMBED_ORIGINS=https://example.com$' .env
           sed -i 's/^INTEGRATION_ALLOWED_HOSTS=.*/INTEGRATION_ALLOWED_HOSTS=fake-github/' .env
           grep -q '^INTEGRATION_ALLOWED_HOSTS=fake-github$' .env
       - name: docker compose config
@@ -89,6 +92,9 @@ jobs:
       - name: README 与 Issues 浏览器验收（README 自动更新的部分、页面上开 Issue、沟通部分自动列出、评论与关闭、手机宽度、viewer 只读）
         # 不要求空库：每次新建工作台用户；智能体读写 README、评论 Issue 在 agents 任务的场景 25（真实 OpenClaw，T-0125）
         run: node tests/e2e/readme_issues_browser.cjs
+      - name: 插拔式模块与侧栏浏览器验收（应用中心停用 / 启用新闻早报、功能未启用页、自定义分组与页面、嵌入页与 CSP、member 只读、手机宽度）
+        # 不要求空库：每次新建工作台用户（T-0159 ~ T-0161）
+        run: node tests/e2e/modules_browser.cjs
       - name: 完整端到端冒烟（make smoke-full：全部读接口与页面、核心服务、SSE、写入往返、登出）
         # 不要求空库：用新的临时用户；新增的接口（openapi.json）与页面（navigation.ts）自动纳入
         run: make smoke-full

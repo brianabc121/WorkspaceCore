@@ -1,9 +1,14 @@
 import { onUnmounted, ref, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
+import { useModulesStore } from '../../stores/modules'
+import { useNavigationStore } from '../../stores/navigation'
+import { moduleEvents, type ModuleTopic } from '../../modules/registry'
 import type { Schema } from '../../services/api'
 
-const families: Record<Schema['InvalidateEvent']['topics'][number], string[]> = {
+type Topic = Schema['InvalidateEvent']['topics'][number]
+// 核心功能的主题 → 要刷新的查询键前缀；插拔式模块的主题写在模块的 events 里（T-0159），这里必须覆盖其余所有主题
+const core: Record<Exclude<Topic, ModuleTopic>, string[]> = {
   overview: ['overview', 'widgets'], tasks: ['tasks', 'task', 'knowledge-link-tasks', 'search'],
   projects: ['projects', 'search'], knowledge: ['knowledge', 'knowledge-sources', 'related-docs', 'kb', 'search'],
   calendar: ['calendar', 'search'], developer: ['developer', 'search'], integrations: ['integrations'],
@@ -13,17 +18,20 @@ const families: Record<Schema['InvalidateEvent']['topics'][number], string[]> = 
   timeline: ['timeline', 'task-runs'],
   // 项目 Issues（T-0123）
   issues: ['issues', 'search'],
-  // 新闻早报（T-0153）：早报送达、设置与收藏变化（早报页、设置页与首页的“今日早报”都以 'news' 开头）
-  news: ['news'],
+  // 模块启用 / 停用（T-0159）：启用状态由 modules store 重新读取（见 invalidate），首页组件跟着刷新
+  modules: ['overview', 'widgets'],
+  // 侧栏布局（T-0161）：在 navigation store 里，由 invalidate 重新读取
+  navigation: [],
 }
+const families: Partial<Record<Topic, readonly string[]>> = { ...core, ...moduleEvents }
 // Backoff for rebuilding a stream the browser closed; reset after every successful open.
 const RETRY_BASE_MS = 1000, RETRY_MAX_MS = 30000
 export function useWorkspaceEvents() {
-  const auth = useAuthStore(), cache = useQueryClient(), available = ref(false)
+  const auth = useAuthStore(), modules = useModulesStore(), navigation = useNavigationStore(), cache = useQueryClient(), available = ref(false)
   let close = () => {}
   const refresh = () => {
     const user = auth.user?.id, scope = auth.workspaceId
-    if (user && scope) void cache.invalidateQueries({ predicate: q => q.queryKey[1] === user && q.queryKey[2] === scope })
+    if (user && scope) { void cache.invalidateQueries({ predicate: q => q.queryKey[1] === user && q.queryKey[2] === scope }); void modules.refresh(); void navigation.refresh() }
   }
   watch(() => [auth.user?.id, auth.workspaceId], ([user, scope]) => {
     close(); available.value = false
@@ -45,6 +53,8 @@ export function useWorkspaceEvents() {
       try { data = JSON.parse((event as MessageEvent<string>).data) } catch { return }
       if (!data || data.workspace_id !== scope || !Array.isArray(data.topics) || typeof data.at !== 'string' || (data.reset !== undefined && typeof data.reset !== 'boolean')) return
       if (data.reset) { refresh(); return }
+      if (data.topics.includes('modules')) void modules.refresh()
+      if (data.topics.includes('navigation')) void navigation.refresh()
       const prefixes = new Set(data.topics.flatMap(topic => typeof topic === 'string' ? families[topic] ?? [] : []))
       if (prefixes.size) void cache.invalidateQueries({ predicate: q => q.queryKey[1] === user && q.queryKey[2] === scope && prefixes.has(String(q.queryKey[0])) })
     }

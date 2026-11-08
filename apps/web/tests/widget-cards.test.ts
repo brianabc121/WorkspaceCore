@@ -1,11 +1,12 @@
 import { render as baseRender, screen } from '@testing-library/vue'
 import { describe, expect, it } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { createPinia } from 'pinia'
 import WidgetFrame from '../src/widgets/WidgetFrame.vue'
 import { widget, overview } from './dashboard-fixtures'
-// 任务组件里有指向任务页的链接（T-0085），需要一个路由
+// 任务组件里有指向任务页的链接（T-0085），需要一个路由；组件框按模块启用状态显示（T-0159），需要 Pinia
 const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: { template: '<div />' } }] })
-const render: typeof baseRender = (component, options) => baseRender(component, { ...options, global: { ...options?.global, plugins: [router, ...(options?.global?.plugins ?? [])] } })
+const render: typeof baseRender = (component, options) => baseRender(component, { ...options, global: { ...options?.global, plugins: [router, createPinia(), ...(options?.global?.plugins ?? [])] } })
 describe('独立组件状态', () => {
   it('renders note markup as inert text', () => {
     render(WidgetFrame, { props: { widget: { ...widget, config: { text: '<img src=x onerror=alert(1)>' } } } })

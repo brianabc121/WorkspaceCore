@@ -32,6 +32,10 @@ EventTopic = Literal[
     "issues",
     # 新闻早报（T-0153）：早报送达、设置与收藏变化
     "news",
+    # 插拔式模块（T-0159）：模块启用 / 停用，前端刷新侧栏
+    "modules",
+    # 侧栏布局（T-0161）：自定义分组、零代码页面
+    "navigation",
 ]
 MAX_MARK_IDS = 100
 

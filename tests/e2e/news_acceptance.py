@@ -139,12 +139,12 @@ from types import SimpleNamespace
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.config import get_settings
 from app.core.resources import create_engine
-from app.domain import news_tools
 from app.domain.connectors import ConnectorRuntime
-from app.domain.news import news_client
 from app.integrations.base import ConnectorError
 from app.integrations.http import CircuitBreaker
-from app.schemas.news_tools import NewsBriefingInput, NewsLatestInput, NewsSearchInput
+from app.modules.news import tool_handlers as news_tools
+from app.modules.news.service import news_client
+from app.modules.news.tool_schemas import NewsBriefingInput, NewsLatestInput, NewsSearchInput
 
 async def main():
     settings = get_settings()

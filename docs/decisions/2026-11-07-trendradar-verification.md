@@ -89,7 +89,7 @@ RSS 地址、大模型接口（LiteLLM）、推送渠道（各 Webhook、api.tel
 
 ## 7. 接入后的本地实测（T-0152 / T-0153，2026-11-07）
 
-用 `infra/trendradar/compose.yaml`（锁定的两个镜像）与工作台的配置生成器（`app/domain/news_config.py`）实际跑了一遍，
+用 `infra/trendradar/compose.yaml`（锁定的两个镜像）与工作台的配置生成器（`app/domain/news_config.py`，现为 `app/modules/news/config.py`）实际跑了一遍，
 外部依赖换成 `tests/e2e/fake_news_server.py`：
 
 | 项 | 结果 |

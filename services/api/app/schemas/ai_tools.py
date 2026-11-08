@@ -11,7 +11,6 @@ MCP 服务器（POST /mcp，OC-5 实现）按 TOOLS 注册工具：工具名、�
 参数与返回的 JSON Schema 都来自这里。
 """
 
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Literal, Self
 from uuid import UUID
@@ -26,7 +25,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.schemas.agents import McpScope
+from app.modules.registry import tool_specs as module_tool_specs
 from app.schemas.calendar import CalendarEventCreate
 from app.schemas.common import Page
 from app.schemas.developer import GitHubStateFilter
@@ -73,19 +72,6 @@ from app.schemas.mail_tools import (
     MailThreadInput,
     MailThreadOutput,
 )
-from app.schemas.news_tools import DESCRIPTIONS as NEWS_DESCRIPTIONS
-from app.schemas.news_tools import (
-    NewsBriefingInput,
-    NewsBriefingOutput,
-    NewsByDateInput,
-    NewsLatestInput,
-    NewsListOutput,
-    NewsRelatedInput,
-    NewsRssInput,
-    NewsSearchInput,
-    NewsTrendingInput,
-    NewsTrendingOutput,
-)
 from app.schemas.runner import (
     EnvCreateInput,
     EnvCreateOutput,
@@ -113,12 +99,11 @@ from app.schemas.tasks import (
     TaskStatusFilter,
     TaskTitle,
 )
+from app.schemas.tool_spec import RiskLevel as RiskLevel
+from app.schemas.tool_spec import ToolSpec as ToolSpec
+from app.schemas.tool_spec import make_spec
 from app.schemas.workspaces import Role
 
-# knowledge：知识库工具，直接执行、不审批（docs/v2/KNOWLEDGE_PLAN.md 3.7，人类 2026-11-03 决定）
-# direct：领取 / 放弃 / 完成任务，直接执行、不审批
-# （docs/v2/AGENT_OPS_PLAN.md 第 7 节，人类 2026-11-04 决定）
-RiskLevel = Literal["read", "write", "critical", "knowledge", "direct"]
 ExecutionStatus = Literal[
     "pending_approval",
     "rejected",
@@ -1240,28 +1225,7 @@ class MarkNotificationsReadInput(_Strict):
 # ---------------------------------------------------------------- 工具清单
 
 
-@dataclass(frozen=True)
-class ToolSpec:
-    name: str
-    risk: RiskLevel
-    scope: McpScope
-    min_role: Role
-    input_model: type[BaseModel]
-    output_model: type[BaseModel]
-    description: str
-
-
-def _spec(
-    name: str,
-    risk: RiskLevel,
-    input_model: type[BaseModel],
-    output_model: type[BaseModel],
-    description: str,
-    min_role: Role | None = None,
-) -> ToolSpec:
-    scope: McpScope = "read" if risk == "read" else "read_write"
-    role = min_role or (Role.viewer if risk == "read" else Role.member)
-    return ToolSpec(name, risk, scope, role, input_model, output_model, description)
+_spec = make_spec
 
 
 def _knowledge(name: str, input_model: type[BaseModel], output_model: type[BaseModel]) -> ToolSpec:
@@ -1707,19 +1671,6 @@ _KNOWLEDGE: list[ToolSpec] = [
     _knowledge("knowledge_write", KnowledgeWriteInput, KnowledgeWriteOutput),
     _knowledge("knowledge_delete", KnowledgeDeleteInput, KnowledgeDeleteOutput),
 ]
-# 新闻早报（T-0153，docs/v2/NEWS_PLAN.md 第 6 节）：只读，只列给启用了早报的工作空间的实例
-_NEWS: list[ToolSpec] = [
-    _spec(name, "read", input_model, output_model, NEWS_DESCRIPTIONS[name])
-    for name, input_model, output_model in (
-        ("news_latest", NewsLatestInput, NewsListOutput),
-        ("news_search", NewsSearchInput, NewsListOutput),
-        ("news_by_date", NewsByDateInput, NewsListOutput),
-        ("news_trending", NewsTrendingInput, NewsTrendingOutput),
-        ("news_rss", NewsRssInput, NewsListOutput),
-        ("news_related", NewsRelatedInput, NewsListOutput),
-        ("news_briefing", NewsBriefingInput, NewsBriefingOutput),
-    )
-]
 TOOLS: dict[str, ToolSpec] = {
     spec.name: spec
     for spec in _READ
@@ -1735,7 +1686,8 @@ TOOLS: dict[str, ToolSpec] = {
     + _MAIL_READ
     + _MAIL_SEND
     + _RUNNER
-    + _NEWS
+    # 插拔式模块的工具（docs/modules/README.md）：由各模块清单的 tools 提供
+    + list(module_tool_specs())
 }
 KNOWLEDGE_TOOL_NAMES = frozenset(spec.name for spec in _KNOWLEDGE)
 DIRECT_TOOL_NAMES = frozenset(spec.name for spec in _DIRECT)
@@ -1748,7 +1700,6 @@ MAIL_READ_TOOL_NAMES = frozenset(spec.name for spec in _MAIL_READ)
 MAIL_SEND_TOOL_NAMES = frozenset(spec.name for spec in _MAIL_SEND)
 MAIL_TOOL_NAMES = MAIL_READ_TOOL_NAMES | MAIL_SEND_TOOL_NAMES
 RUNNER_TOOL_NAMES = frozenset(spec.name for spec in _RUNNER)
-NEWS_TOOL_NAMES = frozenset(spec.name for spec in _NEWS)
 
 # 永远不做成工具（方案第 4.6 节）：集成凭证与设置、成员与角色、会话、工作台设置、
 # 实例与密钥管理、审计日志

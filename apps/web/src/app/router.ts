@@ -2,8 +2,10 @@ import { createRouter, createWebHistory, type RouteRecordRaw, type RouterHistory
 import { watch } from 'vue'
 import type { Pinia } from 'pinia'
 import { QueryClient } from '@tanstack/vue-query'
-import { adminOnly, navigation, ownerOnly } from './navigation'
+import { navigation, type NavItem } from './navigation'
+import { moduleRoutes } from '../modules/registry'
 import { useAuthStore } from '../stores/auth'
+import { useModulesStore } from '../stores/modules'
 import { isCreateIntentCleanup } from '../composables/useCreateIntent'
 import AuthPage from '../pages/AuthPage.vue'
 import ConnectionErrorPage from '../pages/ConnectionErrorPage.vue'
@@ -28,8 +30,8 @@ import ImPage from '../pages/ImPage.vue'
 import AgentsPage from '../pages/AgentsPage.vue'
 import SecretsPage from '../pages/SecretsPage.vue'
 import AiPage from '../pages/AiPage.vue'
-import NewsPage from '../pages/NewsPage.vue'
-import NewsSettingsPage from '../pages/NewsSettingsPage.vue'
+import AppCenterPage from '../pages/AppCenterPage.vue'
+import NavigationSettingsPage from '../pages/NavigationSettingsPage.vue'
 
 // 知识库的子页面按需加载（编辑器、图谱的依赖较大）。旧的书签链接（?linked_resource_id=、?create=1）转到“外部文档”
 const knowledgeRoutes: RouteRecordRaw[] = [
@@ -46,8 +48,12 @@ const knowledgeRoutes: RouteRecordRaw[] = [
   { path: 'docs', component: () => import('../features/kb/KbDocsView.vue'), meta: { title: '外部文档', kbSection: 'docs' } },
 ]
 
+// 侧栏项的标题、说明与角色要求（admin = owner / admin，owner = 只有 owner）
+const navMeta = (item: NavItem) => ({ title: item.title, description: item.description, admin: item.minRole === 'admin', owner: item.minRole === 'owner' })
+
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHistory(), queryClient = new QueryClient()) {
   const auth = useAuthStore(pinia)
+  const modules = useModulesStore(pinia)
   const router = createRouter({
     history,
     routes: [
@@ -56,14 +62,21 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
       { path: '/connection-error', component: ConnectionErrorPage, meta: { title: '连接失败', public: true } },
       { path: '/forbidden', component: UnauthorizedPage, meta: { title: '无权访问' } },
       { path: '/settings/audit', component: AuditPage, meta: { title: '审计日志', admin: true } },
-      ...navigation.map((item) => ({
+      ...navigation.filter((item) => !item.module).map((item) => ({
         path: item.path,
         // 知识库（T-0099）是带子页面的独立页面：图谱、笔记、编辑器、知识库主页、变更记录、外部文档
         ...(item.path === '/knowledge' ? { children: knowledgeRoutes } : {}),
-        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/im': ImPage, '/agents': AgentsPage, '/agents/secrets': SecretsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage, '/mail': MailPage, '/settings/mail': MailSettingsPage, '/runner': RunnerPage, '/news': NewsPage, '/settings/news': NewsSettingsPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
+        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/im': ImPage, '/agents': AgentsPage, '/agents/secrets': SecretsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/modules': AppCenterPage, '/settings/navigation': NavigationSettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage, '/mail': MailPage, '/settings/mail': MailSettingsPage, '/runner': RunnerPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
         // 消息页（T-0095）、知识库（T-0099）是不带工作台侧栏和顶栏的独立页面
-        meta: { title: item.title, description: item.description, admin: adminOnly.has(item.path), owner: ownerOnly.has(item.path), standalone: item.path === '/im' || item.path === '/knowledge' },
+        meta: { ...navMeta(item), standalone: item.path === '/im' || item.path === '/knowledge' },
       })),
+      // 插拔式模块的页面（T-0159）：按需加载；标题、说明与角色要求取自模块同一地址的侧栏项
+      ...moduleRoutes.map((route) => {
+        const item = navigation.find((entry) => entry.path === route.path)
+        return { ...route, meta: { ...(item ? navMeta(item) : {}), ...route.meta } } as RouteRecordRaw
+      }),
+      // 侧栏里的零代码页面（T-0161）：仪表盘与嵌入页；标题取侧栏布局里的名字
+      { path: '/p/:id', component: () => import('../pages/CustomPage.vue'), meta: { title: '页面' } },
       // 项目页（T-0122）：打开项目先看 README
       { path: '/projects/:id', component: () => import('../pages/ProjectPage.vue'), meta: { title: '项目', description: '项目的导览：成员、沟通、任务概况与约定。' } },
       // 项目里的 Issues（T-0124）：通知与搜索链到 /issues/:issue，正文里的 #编号 链到项目内编号
@@ -86,6 +99,8 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
     if (to.path === '/setup' || to.path === '/login') return '/'
     if (to.meta.admin && !auth.canManage) return '/forbidden'
     if (to.meta.owner && !auth.isOwner) return '/forbidden'
+    // 模块页面先等启用状态读完，停用时 App.vue 原地显示“功能未启用”，不会先闪出页面
+    if (to.meta.module) await modules.ready()
     return true
   })
   watch(() => auth.user?.id, (user, previous) => {

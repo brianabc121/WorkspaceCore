@@ -25,12 +25,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.domain import github_sync, im
 from app.domain.connectors import ConnectorRuntime, sync_state
-from app.domain.news import news_client
 from app.domain.policy import WorkspaceAccess, has_role
 from app.integrations.base import ConnectorError
 from app.integrations.http import ConnectorHttp, OutboundPolicy, host_of
 from app.integrations.prometheus import PrometheusClient
 from app.models import AgentInstance, ImWebhookInboxEvent, Integration
+from app.modules import registry
+from app.modules import service as modules
+from app.modules.base import ServiceCheckSpec
 from app.repositories import integrations as integration_repo
 from app.schemas.integrations import SyncState
 from app.schemas.operations import (
@@ -136,7 +138,8 @@ _NAMES = {
     "prometheus": "Prometheus",
     "grafana": "Grafana",
     "openim": "OpenIM",
-    "trendradar": "TrendRadar（新闻早报）",
+    # 插拔式模块的服务检查（清单的 service_checks）
+    **registry.service_names(),
 }
 # 回调收件箱里等待超过这么久还没处理完的事件，说明 Worker 处理不过来或卡住了
 INBOX_STUCK_AFTER = timedelta(minutes=5)
@@ -232,27 +235,23 @@ class DeploymentHealth:
         """OpenIM（V2）：用 imAdmin 令牌查一次通知账号是否存在，证明 REST 与 secret 都可用。"""
         return await self._cached("openim", self._openim)
 
-    async def trendradar(self) -> ServiceStatusOut:
-        """新闻早报（T-0152）：TrendRadar MCP 能否连通（只读的 get_system_status）。"""
-        return await self._cached("trendradar", self._trendradar)
+    async def module_check(self, check: ServiceCheckSpec) -> ServiceStatusOut:
+        """插拔式模块声明的外部服务（例如新闻早报的 TrendRadar）：能否连通。"""
+        return await self._cached(check.service_id, lambda: self._module_check(check))
 
-    async def _trendradar(self) -> ServiceStatusOut:
-        if not self.settings.trendradar_mcp_url:
+    async def _module_check(self, check: ServiceCheckSpec) -> ServiceStatusOut:
+        made = registry.resolve(check.probe)(self.settings, self.runtime)
+        if made is None:
             return _status(
-                "trendradar",
+                check.service_id,
                 "integration",
                 "not_configured",
                 reason="not_deployed",
-                provider="trendradar",
+                provider=check.service_id,
             )
-        client = news_client(self.settings, self.runtime)
-
-        async def probe() -> None:
-            await client.call("get_system_status", {})
-
-        limit = self.settings.news_timeout_seconds + 1
-        result = await self._timed("trendradar", "integration", probe, limit)
-        return result.model_copy(update={"provider": "trendradar"})
+        probe, limit = made
+        result = await self._timed(check.service_id, "integration", probe, limit)
+        return result.model_copy(update={"provider": check.service_id})
 
     async def _openim(self) -> ServiceStatusOut:
         client = im.openim_client(self.settings, self.runtime, self.redis)
@@ -424,7 +423,11 @@ class OperationsService:
         core, monitoring = await asyncio.gather(self.health.core(), self.health.monitoring())
         items = [*core, *monitoring, *await self._integrations(access.workspace.id)]
         items.append(await self._openim())
-        items.append(await self.health.trendradar())
+        # 插拔式模块的外部服务：只列这个工作空间启用了的模块
+        enabled = await modules.enabled_keys(self.db, access.workspace.id)
+        for manifest, check in registry.service_checks():
+            if manifest.key in enabled:
+                items.append(await self.health.module_check(check))
         if has_role(access.role, Role.admin):
             items.extend(await self._agents(access.workspace.id))
         return ServiceStatusList(items=items, generated_at=now)

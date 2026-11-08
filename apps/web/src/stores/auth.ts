@@ -15,10 +15,13 @@ export const useAuthStore = defineStore('auth', () => {
   const isOwner = computed(() => currentWorkspace.value?.role === 'owner')
   let pending: Promise<void> | null = null
   let sessionVersion = 0
+  // 接口返回 MODULE_DISABLED（模块刚被停用）时加一，模块启用状态（stores/modules.ts）据此重新读取
+  const moduleDisabledSignal = ref(0)
   function clearSession() { sessionVersion++; user.value = null; workspaces.value = []; workspaceId.value = null }
-  const api = createApi({ workspaceId: () => workspaceId.value, sessionVersion: () => sessionVersion, onUnauthorized: clearSession })
+  const onModuleDisabled = () => { moduleDisabledSignal.value++ }
+  const api = createApi({ workspaceId: () => workspaceId.value, sessionVersion: () => sessionVersion, onUnauthorized: clearSession, onModuleDisabled })
   // For the few requests that wait on another server (SSH probe and key revocation: up to ~25 s when it does not answer).
-  const slowApi = createApi({ workspaceId: () => workspaceId.value, sessionVersion: () => sessionVersion, onUnauthorized: clearSession, timeoutMs: 60000 })
+  const slowApi = createApi({ workspaceId: () => workspaceId.value, sessionVersion: () => sessionVersion, onUnauthorized: clearSession, onModuleDisabled, timeoutMs: 60000 })
   function acceptSession(me: Schema['MeResponse']) {
     sessionVersion++
     user.value = me.user
@@ -55,5 +58,5 @@ export const useAuthStore = defineStore('auth', () => {
     await api.POST('/api/v1/auth/password', { body })
     sessionVersion++
   }
-  return { user, workspaces, workspaceId, currentWorkspace, canManage, isOwner, setupRequired, initialized, loading, initializationError, api, slowApi, initialize, acceptSession, clearSession, selectWorkspace, login, setup, logout, changePassword }
+  return { user, workspaces, workspaceId, currentWorkspace, canManage, isOwner, setupRequired, initialized, loading, initializationError, moduleDisabledSignal, api, slowApi, initialize, acceptSession, clearSession, selectWorkspace, login, setup, logout, changePassword }
 })

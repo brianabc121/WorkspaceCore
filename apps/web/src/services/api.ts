@@ -18,6 +18,11 @@ export function isAccessError(error: unknown) {
   return error instanceof ApiError && [401, 403, 404].includes(error.status)
 }
 
+/** 插拔式模块在当前工作空间停用了（404 MODULE_DISABLED）：显示“功能已停用”，不要当成普通错误 */
+export function isModuleDisabled(error: unknown) {
+  return error instanceof ApiError && error.code === 'MODULE_DISABLED'
+}
+
 export function errorMessage(error: unknown): string {
   if (!(error instanceof ApiError)) return '请求失败，请稍后重试。'
   const messages: Record<string, string> = {
@@ -52,6 +57,7 @@ export function errorMessage(error: unknown): string {
     EXTERNAL_VALIDATION_FAILED: '外部服务拒绝了输入内容，请检查后重试。',
     INTEGRATION_UNAUTHORIZED: '外部服务的 Token 已失效或权限不足，请管理员更新连接。',
     EXTERNAL_UNAVAILABLE: '外部服务暂不可用，请稍后重试。',
+    MODULE_DISABLED: '这个功能在当前工作空间没有启用。',
   }
   if (error.status === 429 || error.code === 'EXTERNAL_RATE_LIMITED') return error.retryAfter === null ? '请求过于频繁，请稍后重试。' : `请求过于频繁，请在 ${error.retryAfter} 秒后重试。`
   return messages[error.code] ?? '请求失败，请稍后重试。'
@@ -62,7 +68,7 @@ function csrfCookie() {
   try { return value ? decodeURIComponent(value) : null } catch { return null }
 }
 
-export function createApi(options: { workspaceId?: () => string | null; sessionVersion?: () => number; onUnauthorized?: () => void; timeoutMs?: number } = {}) {
+export function createApi(options: { workspaceId?: () => string | null; sessionVersion?: () => number; onUnauthorized?: () => void; onModuleDisabled?: () => void; timeoutMs?: number } = {}) {
   const client = createClient<paths>({
     // The origin is never configurable; all operation paths come from our OpenAPI.
     baseUrl: window.location.origin,
@@ -87,6 +93,7 @@ export function createApi(options: { workspaceId?: () => string | null; sessionV
           const seconds = retry !== null && /^\d+$/.test(retry) ? Number(retry) : null
           const error = new ApiError(response.status, detail.code ?? 'HTTP_ERROR', detail.message ?? '请求失败', detail.request_id ?? response.headers.get('X-Request-ID'), seconds, detail.details)
           if (response.status === 401 && new URL(request.url).pathname !== '/api/v1/auth/login') options.onUnauthorized?.()
+          if (error.code === 'MODULE_DISABLED') options.onModuleDisabled?.()
           throw error
         }
         return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers })

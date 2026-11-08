@@ -9,12 +9,12 @@ from typing import Any
 import httpx
 import pytest
 
-from app.domain import news_config as cfg
-from app.domain.news import check_url, match_topic, safe_link, slot_for, split_batch
 from app.integrations.base import ConnectorError
 from app.integrations.http import ConnectorHttp, OutboundPolicy
-from app.integrations.trendradar import TrendRadarClient
-from app.schemas.news import NewsTopicIn
+from app.modules.news import config as cfg
+from app.modules.news.client import TrendRadarClient
+from app.modules.news.schemas import NewsTopicIn
+from app.modules.news.service import check_url, match_topic, safe_link, slot_for, split_batch
 from tests.fake_trendradar import HOST, URL, FakeTrendRadar
 
 
@@ -271,7 +271,7 @@ async def test_client_notify_sends_only_given_channels() -> None:
 
 
 def test_tool_error_text_is_validation() -> None:
-    from app.integrations.trendradar import tool_payload
+    from app.modules.news.client import tool_payload
 
     with pytest.raises(ConnectorError) as caught:
         tool_payload(

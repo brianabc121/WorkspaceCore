@@ -24,6 +24,7 @@ from app.domain.credentials import CredentialBox
 from app.domain.operations import ServiceCache
 from app.integrations.http import CircuitBreaker
 from app.jobs.queue import ArqJobQueue
+from app.modules import registry
 
 logger = logging.getLogger("app")
 
@@ -112,7 +113,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # V2 实例接口：只经接入入口到达（Caddy 管理员入口只转发 /api/*）
     app.include_router(agent_api.router)
     app.include_router(agent_api.gateway)
-    app.include_router(api_v1.news.internal)
+    # 插拔式模块的内部接口（docs/modules/README.md）：只在内部网络里，模块自己负责认证
+    for _manifest, internal in registry.internal_routers():
+        app.include_router(internal)
     app.include_router(runner_api.router)
     app.include_router(mcp.router)
 

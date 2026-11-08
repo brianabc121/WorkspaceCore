@@ -75,7 +75,8 @@ from app.models.knowledge_base import (
     ProjectAgent,
 )
 from app.models.mail import AgentMailAccount, MailAccount, MailOAuthClient, MailSend
-from app.models.news import NewsBriefing, NewsFeedback, NewsSettings
+from app.models.module import WorkspaceModule
+from app.models.navigation import WorkspaceNavigation
 from app.models.notification import Notification
 from app.models.runner import (
     RunnerCommand,
@@ -160,9 +161,6 @@ __all__ = [
     "MailAccount",
     "MailOAuthClient",
     "MailSend",
-    "NewsBriefing",
-    "NewsFeedback",
-    "NewsSettings",
     "Notification",
     "Project",
     "ProjectAgent",
@@ -185,4 +183,11 @@ __all__ = [
     "Widget",
     "Workspace",
     "WorkspaceMember",
+    "WorkspaceModule",
+    "WorkspaceNavigation",
 ]
+
+# 模块自己的表（docs/modules/README.md）：由模块注册表导入，Alembic 与测试都能看到
+from app.modules.registry import import_models as _import_module_models
+
+_import_module_models()

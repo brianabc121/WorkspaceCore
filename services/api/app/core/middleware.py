@@ -3,7 +3,7 @@
 import logging
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
@@ -25,9 +25,8 @@ _PROBE_PATHS = frozenset({"/healthz", "/readyz"})
 _SECRET_PATH_PARAMS: dict[str, frozenset[str]] = {
     "/internal/openim/{path_token}/{command}": frozenset({"{path_token}"}),
     "/im/obj/m/{media_id}": frozenset({"{media_id}"}),
-    # 新闻早报的接收地址：拿到 token 就能推早报进来（T-0153）
-    "/internal/news/ingest/{token}": frozenset({"{token}"}),
 }
+# 插拔式模块在清单里声明的（secret_path_params），例如新闻早报的接收地址 token
 REDACTED = "***"
 
 
@@ -90,7 +89,7 @@ def _route_template(request: Request) -> str:
 
 def _redact_path(path: str, route: str) -> str:
     """把路径里属于凭证的段换成 ***；路由模板与实际路径按段一一对应（见 _route_template）。"""
-    secret = _SECRET_PATH_PARAMS.get(route)
+    secret = _SECRET_PATH_PARAMS.get(route) or _module_secret_params().get(route)
     if not secret:
         return path
     actual = path.split("/")
@@ -98,6 +97,13 @@ def _redact_path(path: str, route: str) -> str:
     if len(actual) != len(template):
         return route
     return "/".join(REDACTED if t in secret else a for a, t in zip(actual, template, strict=True))
+
+
+def _module_secret_params() -> Mapping[str, frozenset[str]]:
+    # 在用到时才导入注册表：app.core 不在导入时依赖模块
+    from app.modules import registry
+
+    return registry.secret_path_params()
 
 
 def install_middleware(app: FastAPI) -> None:

@@ -595,9 +595,30 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 - 用途、模板说明、命令输出在 `untrusted` 里。错误码：`RUNNER_UNAVAILABLE`（没有运行服务器或不在线）、`QUOTA_EXCEEDED`、`RESOURCE_BUSY`、`RATE_LIMITED`、`RUNNER_CAPABILITY`（例如没有 `/dev/kvm`、没装 gVisor）、
   `TEMPLATE_NOT_READY`、`ENV_UNAVAILABLE`、`TIMEOUT`、`RUNNER_FAILED`、`FORBIDDEN`、`NOT_FOUND`、`VALIDATION_FAILED`、`PAYLOAD_TOO_LARGE`。
 
+## 插拔式模块（T-0159）
+
+开发指南 `docs/modules/README.md`，决定见 `docs/decisions/2026-11-08-feature-modules.md`。模块按工作空间启用；
+模块自己的页面接口都挂在 `/api/v1/<key>/...`，宿主给每个接口加启用检查。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /api/v1/modules` | viewer。所有模块与在当前工作空间的状态：`key`、`name`、`description`、`version`、`enabled`、`default_enabled`、`ready`（部署前提是否满足）、`missing`（没设置的 `.env` 变量名）、`depends_on`、`dependents`、`tools`（给智能体的工具）、`widgets`（首页小组件类型）、`can_manage`（只有 owner 为 true） |
+| `PATCH /api/v1/modules/{key}` | owner。`{"enabled": true/false}`（多余字段 `422`；`key` 格式不对 `422`，不存在 `404`）。依赖的模块没启用、或有启用的模块依赖它时 `409 MODULE_DEPENDENCY`。状态真的变化时审计 `module.enabled` / `module.disabled` 并发 `modules`、`overview` 事件；重复设置同一个值不再记审计。停用不删除模块数据，再启用就恢复 |
+| 模块接口 | 模块在请求头的工作空间里停用时，模块的所有页面接口返回 `404 MODULE_DISABLED`（先做成员检查：不是成员仍是 `404 NOT_FOUND`）。智能体工具不再列出，调用返回 `NOT_FOUND`；运维页不显示该模块的外部服务；模块自己的内部接口与定时任务也停止（新闻早报的接收地址返回 `404`） |
+
+## 侧栏布局与零代码页面（T-0161）
+
+每个工作空间一份布局：自定义分组、把已有页面挪到别的分组、零代码页面。分组 key：内置 `workspace` / `tools` / `admin` / `apps`，
+自定义 `custom-<id>`。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /api/v1/navigation` | viewer。`version`（还没改过是 0）、`sections`、`pages`（只返回当前角色能看到的，按 `min_role`）、`placements`（`{站内路径: 分组}`）、`section_order`、`embed_origins`（部署允许嵌入的来源）、`can_manage`（只有 owner 为 true） |
+| `PUT /api/v1/navigation` | owner。整份替换 + `version`（不一致 `409 VERSION_CONFLICT`）。最多 12 个分组、50 个页面、100 条挪动。页面 `kind`：`link`（`url`，只允许 http(s)、不能带账号密码，新窗口打开）、`page`（`path`，以 `/` 开头的站内路径）、`note` / `dashboard`（`target_id`，必须属于当前工作空间）、`embed`（`url`，来源必须在 `.env` 的 `EMBED_ORIGINS` 里且不是工作台自己，页面上用带沙箱的 iframe 显示）。引用不存在的分组、重复 id、多余字段都 `422`。审计 `navigation.updated`，发 `navigation` 事件 |
+
 ## 新闻早报（T-0153）
 
-方案 `docs/v2/NEWS_PLAN.md`，核验记录 `docs/decisions/2026-11-07-trendradar-verification.md`。整个部署只有一个 TrendRadar：
+方案 `docs/v2/NEWS_PLAN.md`，核验记录 `docs/decisions/2026-11-07-trendradar-verification.md`。新闻早报是插拔式模块 `news`（默认启用，owner 可在应用中心停用，停用后下面的接口都是 `404 MODULE_DISABLED`）。整个部署只有一个 TrendRadar：
 同一时刻只能有一个工作空间启用。没有部署（`TRENDRADAR_MCP_URL` 为空）时设置照样能保存，`deployed=false`，不写配置文件。
 
 | 方法与路径 | 说明 |

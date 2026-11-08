@@ -15,8 +15,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.config import get_settings
 from app.core.resources import create_engine
 from app.domain.connectors import ConnectorRuntime
-from app.domain.news import NewsService
 from app.integrations.http import CircuitBreaker
+from app.modules.news.service import NewsService
 
 
 async def run() -> str:
