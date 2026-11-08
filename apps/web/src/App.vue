@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { Building2, ChevronDown, Menu, Moon, Sparkles, Sun } from '@lucide/vue'
+import { Building2, ChevronDown, ExternalLink, Menu, Moon, Sparkles, Sun } from '@lucide/vue'
 import { canSee, navigation } from './app/navigation'
-import { navIcon } from './app/navIcons'
+import { buildSidebar } from './app/sidebar'
+import { useNavigationLayout } from './features/navigation/api'
 import { useThemeStore } from './stores/theme'
 import { useAuthStore } from './stores/auth'
 import { useModulesStore } from './stores/modules'
@@ -54,10 +55,20 @@ function closeMenu(event: KeyboardEvent) {
 }
 // 侧栏分组可以折叠（记在本机）；打开某一页时自动展开它所在的分组
 const { collapsed, toggle: toggleSection } = useCollapsedSections()
-const sections = computed(() => [...new Set(visibleNavigation.value.map((item) => item.section))].map((title, index) => ({ title, id: `nav-section-${index}`, items: visibleNavigation.value.filter((entry) => entry.section === title) })))
+// 分组与顺序按 owner 设置的侧栏布局（T-0161）；布局读不到时就是默认侧栏
+const layout = useNavigationLayout()
+const sections = computed(() => buildSidebar(visibleNavigation.value, layout.data.value, auth.currentWorkspace?.role).map((section, index) => ({ ...section, id: `nav-section-${index}` })))
 // 路由还没解析完（START_LOCATION，matched 为空）时不算在任何分组里，免得把“工作空间”误展开
-const currentEntry = computed(() => (route.matched.length ? visibleNavigation.value.find((entry) => entry.path === route.path) : undefined))
-const pageTitle = computed(() => String(route.meta.title ?? 'My Workspace'))
+const currentEntry = computed(() => {
+  if (!route.matched.length) return undefined
+  for (const section of sections.value) {
+    const item = section.items.find((entry) => entry.to === route.path)
+    if (item) return { section: section.title, title: item.title }
+  }
+  return undefined
+})
+// 零代码页面（/p/:id）的标题取侧栏里的名字
+const pageTitle = computed(() => String((route.path.startsWith('/p/') ? currentEntry.value?.title : undefined) ?? route.meta.title ?? 'My Workspace'))
 watch(() => route.path, () => { menuOpen.value = false })
 watch(() => currentEntry.value?.section, (section) => { if (section && collapsed.value.includes(section)) toggleSection(section) }, { immediate: true })
 watch(pageTitle, (title) => { document.title = `${title} · My Workspace` }, { immediate: true })
@@ -89,14 +100,19 @@ const standalone = computed(() => !!route.meta.standalone && !!auth.user)
           <span v-else class="workspace-name">{{ auth.currentWorkspace.name }}</span>
         </div>
         <nav aria-label="主导航" class="sidebar-nav">
-          <div v-for="section in sections" :key="section.title" class="nav-section">
+          <div v-for="section in sections" :key="section.key" class="nav-section">
             <button class="nav-label" type="button" :aria-expanded="!collapsed.includes(section.title)" :aria-controls="section.id" @click="toggleSection(section.title)">
               <span>{{ section.title }}</span><ChevronDown class="nav-chevron" aria-hidden="true" />
             </button>
             <div v-show="!collapsed.includes(section.title)" :id="section.id" class="nav-items">
-              <RouterLink v-for="item in section.items" :key="item.path" :to="item.path" class="nav-link" exact-active-class="is-active" :class="{ 'is-active': item.path === '/tasks' && route.path === '/tasks/timeline' }">
-                <component :is="navIcon(item.path)" class="nav-icon" aria-hidden="true" /><span>{{ item.title }}</span>
-              </RouterLink>
+              <template v-for="item in section.items" :key="item.key">
+                <a v-if="item.href" :href="item.href" target="_blank" rel="noopener noreferrer" class="nav-link">
+                  <component :is="item.icon" class="nav-icon" aria-hidden="true" /><span>{{ item.title }}</span><ExternalLink class="nav-external" aria-hidden="true" /><span class="sr-only">（在新窗口打开）</span>
+                </a>
+                <RouterLink v-else-if="item.to" :to="item.to" class="nav-link" exact-active-class="is-active" :class="{ 'is-active': item.to === '/tasks' && route.path === '/tasks/timeline' }">
+                  <component :is="item.icon" class="nav-icon" aria-hidden="true" /><span>{{ item.title }}</span>
+                </RouterLink>
+              </template>
             </div>
           </div>
         </nav>

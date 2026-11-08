@@ -18,6 +18,7 @@ const core: NavEntry[] = [
   { path: '/ai', title: 'AI 审批', section: '连接与工具', description: '审批 OpenClaw 实例的写操作，查看每一次工具调用。' },
   { path: '/settings', title: '设置', section: '管理', description: '管理个人资料、工作空间与成员（成员由 owner / admin 管理）。' },
   { path: '/settings/modules', title: '应用中心', section: '管理', description: '按工作空间启用或停用功能模块（owner 修改，admin 只读）。', minRole: 'admin' },
+  { path: '/settings/navigation', title: '侧栏与页面', section: '管理', description: '自定义侧栏分组、把页面挪到别的分组、添加链接、笔记、仪表盘和嵌入页（owner 修改，admin 只读）。', minRole: 'admin' },
   { path: '/settings/integrations', title: '集成设置', section: '管理', description: '管理员配置 GitHub、测试权限与同步。', minRole: 'admin' },
   { path: '/settings/security', title: '安全设置', section: '管理', description: '管理密码与登录会话。' },
   { path: '/settings/mail', title: '邮件设置', section: '管理', description: '连接 Gmail 邮箱、设置 OAuth 客户端与智能体访问（owner 与 admin）。', minRole: 'admin' },
