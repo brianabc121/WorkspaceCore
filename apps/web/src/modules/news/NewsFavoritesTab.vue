@@ -3,8 +3,8 @@ import { computed, ref } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 import DataState from '../../components/DataState.vue'
 import { safeUrl } from '../../widgets/registry'
-import { unique } from '../agents/queries'
-import { formatTime } from '../time'
+import { unique } from '../../features/agents/queries'
+import { formatTime } from '../../features/time'
 import { newsError, useNewsActions, useNewsFavorites, type NewsFeedback } from './api'
 
 // 收藏：我收藏过的条目（只看得到自己的），可以取消收藏

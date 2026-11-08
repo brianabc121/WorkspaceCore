@@ -4,13 +4,14 @@ import { useRouter } from 'vue-router'
 import { useInfiniteQuery } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { useDashboardSearch } from '../../stores/dashboardSearch'
-import { adminOnly, navigation, ownerOnly } from '../../app/navigation'
+import { useModulesStore } from '../../stores/modules'
+import { canSee, navigation } from '../../app/navigation'
 import { dataOf, errorMessage, isAccessError } from '../../services/api'
 import { parseWidget, registry } from '../../widgets/registry'
 import { formatTime } from '../time'
 import { searchTypes, searchTarget, type SearchType } from './searchTargets'
 import ModalPanel from '../../components/ModalPanel.vue'
-const emit = defineEmits<{ close: [] }>(), auth = useAuthStore(), dashboard = useDashboardSearch(), router = useRouter()
+const emit = defineEmits<{ close: [] }>(), auth = useAuthStore(), dashboard = useDashboardSearch(), modules = useModulesStore(), router = useRouter()
 const scope = auth.workspaceId!, user = auth.user?.id, header = { 'X-Workspace-Id': scope }
 const input = ref(''), q = ref(''), type = ref<SearchType | ''>(''), results = ref<HTMLElement | null>(null)
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -30,7 +31,7 @@ const remote = computed(() => !ready.value || denied.value ? [] : [...new Map((q
 const groups = computed(() => (Object.keys(searchTypes) as SearchType[]).map((kind) => ({ kind, title: searchTypes[kind], items: remote.value.filter((item) => item.resource_type === kind) })).filter((group) => group.items.length))
 const providers = { github: 'GitHub', affine: 'AFFiNE', local: '工作台' }
 const entries = computed(() => [
-  ...navigation.filter((entry) => (!adminOnly.has(entry.path) || auth.canManage) && (!ownerOnly.has(entry.path) || auth.isOwner)).map((entry) => ({ label: entry.title, detail: '', path: entry.path })),
+  ...navigation.filter((entry) => canSee(entry, auth) && modules.isEnabled(entry.module)).map((entry) => ({ label: entry.title, detail: '', path: entry.path })),
   ...(auth.canManage ? [{ label: '审计日志', detail: '', path: '/settings/audit' }] : []),
   ...(denied.value ? [] : dashboard.widgets.flatMap((widget) => {
     const value = parseWidget(widget)

@@ -2,7 +2,7 @@
 import { computed, toRef } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 import DataState from '../../components/DataState.vue'
-import { unique } from '../agents/queries'
+import { unique } from '../../features/agents/queries'
 import NewsBriefingView from './NewsBriefingView.vue'
 import { BRIEFING_SOURCE, BRIEFING_STATUS, newsError, useNewsBriefing, useNewsBriefings } from './api'
 import { briefingWhen } from './format'

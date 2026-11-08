@@ -7,7 +7,7 @@ import { ApiError, dataOf, errorMessage, type Schema } from '../../services/api'
 // - 早报、热榜、RSS、搜索、收藏：成员与访客都能看；收藏 / 不感兴趣要 member（访客不显示按钮，后端也会拒绝）。
 // - 设置：owner 与 admin 能看，只有 owner 能改、能发测试推送、能让智能体现在写一份。
 // 条目的标题、链接、来源名都来自第三方：页面按纯文字显示，早报正文按安全模式渲染（features/kb/markdown.ts）。
-// 查询键都以 'news' 开头，SSE 的 news 主题刷新它们（useWorkspaceEvents）。
+// 查询键都以 'news' 开头，SSE 的 news 主题刷新它们（index.ts 的 events）。
 export type NewsItem = Schema['NewsItemOut']
 export type NewsItemList = Schema['NewsItemList']
 export type NewsBriefing = Schema['NewsBriefingOut']

@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { useAuthStore } from '../stores/auth'
-import { dataOf, isAccessError } from '../services/api'
-import { BRIEFING_STATUS, newsError, newsKey } from '../features/news/api'
-import { briefingWhen, plainLines } from '../features/news/format'
-import type { WidgetValue } from './registry'
-import '../features/news/news.css'
+import { useAuthStore } from '../../stores/auth'
+import { dataOf, isAccessError, isModuleDisabled } from '../../services/api'
+import { BRIEFING_STATUS, newsError, newsKey } from './api'
+import { briefingWhen, plainLines } from './format'
+import type { BriefingWidgetConfig } from './index'
+import './news.css'
 
 // 今日早报（T-0154，NEWS_PLAN 第 7 节）：最新一份早报的时间、标题和正文开头几行（纯文字，去掉 Markdown），点开进早报页。
-const props = defineProps<{ value: WidgetValue }>()
+const props = defineProps<{ value: { config: BriefingWidgetConfig } }>()
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id
 const header = { 'X-Workspace-Id': scope }
-const lines = computed(() => (props.value.widget_type === 'news_briefing' ? props.value.config.lines : 6))
+const lines = computed(() => props.value.config.lines)
 const active = () => user === auth.user?.id && scope === auth.workspaceId
 const latest = useQuery({
   queryKey: newsKey(user, scope, 'briefings', 'latest'), enabled: computed(active),
@@ -30,6 +30,7 @@ const error = computed(() => latest.error.value ?? (detail.data.value ? null : d
 
 <template>
   <p v-if="latest.isPending.value" role="status" class="card-state">正在加载早报…</p>
+  <p v-else-if="error && isModuleDisabled(error)" class="card-state">功能已停用：新闻早报在当前工作空间没有启用。</p>
   <p v-else-if="error && isAccessError(error)" class="card-state">无权查看早报，请重新登录或联系管理员。</p>
   <div v-else-if="error" class="card-state"><p role="alert">{{ newsError(error) }}</p><button type="button" class="secondary-button" @click="latest.refetch(); detail.refetch()">重试</button></div>
   <div v-else-if="!summary" class="news-widget">

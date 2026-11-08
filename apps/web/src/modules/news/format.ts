@@ -1,4 +1,4 @@
-import { createRenderer } from '../kb/markdown'
+import { createRenderer } from '../../features/kb/markdown'
 import type { NewsBriefing, NewsBriefingSummary } from './api'
 
 // 早报正文（Markdown，来自 TrendRadar 或智能体）→ 消毒后的 HTML：沿用知识库的安全渲染

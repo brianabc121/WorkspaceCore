@@ -2,8 +2,8 @@
 import { computed } from 'vue'
 import { BRIEFING_SOURCE, BRIEFING_STATUS, type NewsBriefing } from './api'
 import { briefingHtml, briefingWhen } from './format'
-import { formatTime } from '../time'
-import '../kb/kb.css'
+import { formatTime } from '../../features/time'
+import '../../features/kb/kb.css'
 
 // 一份早报：标题、日期与推送时间、状态、正文（Markdown 按安全模式渲染，不执行 HTML）
 const props = defineProps<{ briefing: NewsBriefing }>()

@@ -2,10 +2,11 @@
 import { computed, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { Building2, ChevronDown, Menu, Moon, Sparkles, Sun } from '@lucide/vue'
-import { adminOnly, navigation, ownerOnly } from './app/navigation'
+import { canSee, navigation } from './app/navigation'
 import { navIcon } from './app/navIcons'
 import { useThemeStore } from './stores/theme'
 import { useAuthStore } from './stores/auth'
+import { useModulesStore } from './stores/modules'
 import { errorMessage } from './services/api'
 import HeaderSearch from './components/HeaderSearch.vue'
 import HeaderNotifications from './components/HeaderNotifications.vue'
@@ -14,6 +15,7 @@ import AppDrawer from './components/AppDrawer.vue'
 import CreateMenu from './components/CreateMenu.vue'
 import AccountMenu from './components/AccountMenu.vue'
 import BottomNav from './components/BottomNav.vue'
+import ModuleDisabledPage from './pages/ModuleDisabledPage.vue'
 import { useMediaQuery } from './composables/useMediaQuery'
 import { useDrawerStore } from './stores/drawer'
 import { useWorkspaceEvents } from './features/events/useWorkspaceEvents'
@@ -23,11 +25,18 @@ const route = useRoute()
 const theme = useThemeStore()
 const auth = useAuthStore()
 const drawer = useDrawerStore()
+const modules = useModulesStore()
 useWorkspaceEvents()
 const logoutError = ref('')
 const loggingOut = ref(false)
 type Entry = { path: string; title: string; section: string }
-const visibleNavigation = computed<Entry[]>(() => (auth.canManage ? [...navigation, { path: '/settings/audit', title: '审计日志', section: '管理' }] : navigation.filter((entry) => !adminOnly.has(entry.path))).filter((entry) => auth.isOwner || !ownerOnly.has(entry.path)))
+// 按角色过滤；停用的插拔式模块的入口不显示（T-0159）
+const visibleNavigation = computed<Entry[]>(() => [
+  ...navigation.filter((entry) => canSee(entry, auth) && modules.isEnabled(entry.module)),
+  ...(auth.canManage ? [{ path: '/settings/audit', title: '审计日志', section: '管理' }] : []),
+])
+// 当前页面属于停用的模块：原地显示“功能未启用”（地址不变，再启用就恢复）
+const disabledModule = computed(() => (auth.user && route.meta.module && !modules.isEnabled(route.meta.module) ? route.meta.module : null))
 async function logout() {
   if (loggingOut.value) return
   loggingOut.value = true
@@ -63,6 +72,7 @@ const standalone = computed(() => !!route.meta.standalone && !!auth.user)
 <template>
   <template v-if="standalone">
     <p v-if="auth.loading" role="status" class="standalone-status">正在连接工作空间…</p>
+    <main v-else-if="disabledModule" id="main-content"><ModuleDisabledPage :module-key="disabledModule" /></main>
     <RouterView v-else />
   </template>
   <template v-else>
@@ -116,6 +126,7 @@ const standalone = computed(() => !!route.meta.standalone && !!auth.user)
         <main id="main-content" tabindex="-1">
           <p v-if="logoutError" role="alert" class="feedback">{{ logoutError }}</p>
           <p v-if="auth.loading" role="status">正在连接工作空间…</p>
+          <ModuleDisabledPage v-else-if="disabledModule" :module-key="disabledModule" />
           <RouterView v-else />
         </main>
         <footer class="page-footer">My Workspace · 自托管个人工作台</footer>
