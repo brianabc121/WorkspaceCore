@@ -11,6 +11,7 @@
 - 密钥轮换包括新闻的三个字段。
 """
 
+import base64
 import json
 import uuid
 from collections.abc import AsyncIterator
@@ -63,6 +64,26 @@ BODY: dict[str, Any] = {
 @pytest.fixture
 def trendradar() -> FakeTrendRadar:
     return FakeTrendRadar()
+
+
+# 保存设置时会解析填的主机名（resolve_public）：测试里不访问真实 DNS
+_DNS = {
+    "evil.example.com": ["10.0.0.5"],  # 公网域名却指向内网
+    "rebind.example.com": ["93.184.216.34", "127.0.0.1"],
+}
+
+
+@pytest.fixture(autouse=True)
+def fake_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.integrations import http
+    from app.integrations.base import ConnectorError
+
+    async def resolve(host: str, port: int) -> list[str]:
+        if host == "nxdomain.example.com":
+            raise ConnectorError("UNAVAILABLE", "无法解析服务地址", reason="dns_failed")
+        return _DNS.get(host, ["93.184.216.34"])
+
+    monkeypatch.setattr(http, "_resolve", resolve)
 
 
 @pytest.fixture
@@ -218,6 +239,25 @@ async def test_settings_validation(env: ImEnv) -> None:
         {"timezone": "Asia/Tokyo"},  # 时区由部署设置，网页上改不了
         {"topics": [{"name": "[坏]", "keywords": ["x"]}]},
         {"ai_model": "gpt-4o"},
+        # IPv4 的简写（C 库解析成 127.0.0.1 / 10.0.0.1）、解析到内网的域名、解析不了的域名
+        {"feeds": [{"id": "x", "name": "x", "url": "http://127.1/rss"}]},
+        {"newsnow_api_url": "http://0177.0.0.1"},
+        {"feeds": [{"id": "x", "name": "x", "url": "https://evil.example.com/rss"}]},
+        {"ai_api_base": "https://rebind.example.com/v1"},
+        {"ai_api_base": "https://nxdomain.example.com/v1"},
+        # 邮件的 SMTP 服务器同样不能指向内部服务
+        {
+            "channels": {
+                "email": {
+                    "enabled": True,
+                    "from_addr": "a@example.com",
+                    "to_addr": "b@example.com",
+                    "smtp_server": "api",
+                    "smtp_port": 8000,
+                    "secrets": {"password": "x"},
+                }
+            }
+        },
     ):
         current = await settings(env)
         response = await env.client.put(
@@ -226,6 +266,20 @@ async def test_settings_validation(env: ImEnv) -> None:
             headers=env.headers(write=True),
         )
         assert response.status_code == 422, (overrides, response.text)
+
+
+async def test_unreadable_channel_secrets_can_be_replaced(env: ImEnv) -> None:
+    await save(env)
+    # 换了加密密钥又没留旧密钥：存的渠道凭证解不开
+    await run_sql(
+        env.database_url,
+        "UPDATE workspace.news_settings SET channel_secrets_ref = 'enc:v1:broken'",
+    )
+    shown = await settings(env)
+    assert shown["channels"]["ntfy"]["secrets_set"] == []
+    # 页面上显示“未设置”，重新填了就能保存（不是 500）
+    saved = await save(env)
+    assert saved["channels"]["ntfy"]["secrets_set"] == ["topic"]
 
 
 async def test_settings_permissions(env: ImEnv) -> None:
@@ -327,6 +381,11 @@ async def test_ingest_assembles_batches_and_notifies_owner(env: ImEnv) -> None:
     assert "全天汇总" in body["title"]
     notes = await env.client.get("/api/v1/notifications", headers=env.headers())
     assert [n["title"] for n in notes.json()["items"]].count("今日早报已送达") == 1
+    # 游标来自客户端：乱写的、不带时区的都是 422，不是 500
+    for raw in (b"not json", json.dumps(["2026-01-01T00:00:00", str(uuid.uuid4())]).encode()):
+        cursor = base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+        bad = await env.client.get(f"/api/v1/news/briefings?cursor={cursor}", headers=env.headers())
+        assert bad.status_code == 422, bad.text
 
     too_big = await push(env, token, "全天汇总", "x" * 70_000)
     assert too_big.status_code == 413
@@ -375,7 +434,7 @@ async def test_today_hot_rss_search(env: ImEnv, trendradar: FakeTrendRadar) -> N
     assert rss["items"][0]["source_type"] == "rss" and rss["items"][0]["summary"]
     found = (await env.client.get("/api/v1/news/search?q=Claude", headers=env.headers())).json()
     assert [i["title"] for i in found["items"]] == ["Claude 发布新的编程能力"]
-    assert [name for name, _ in trendradar.calls[-2:]] == ["search_news", "search_rss"]
+    assert {name for name, _ in trendradar.calls[-2:]} == {"search_news", "search_rss"}
 
     trendradar.missing.add("get_latest_news")
     empty = (await env.client.get("/api/v1/news/hot", headers=env.headers())).json()
@@ -638,6 +697,23 @@ async def test_agent_mode_writes_briefing(env: ImEnv, trendradar: FakeTrendRadar
     assert "90 分钟内没有写完" in failed
     notes = await env.client.get("/api/v1/notifications", headers=env.headers())
     assert "今日早报没有生成" in [n["title"] for n in notes.json()["items"]]
+
+
+async def test_generate_now_counts_as_the_current_push_slot(
+    env: ImEnv, trendradar: FakeTrendRadar
+) -> None:
+    created, _ = await agent(env, "写早报的")
+    slot = _slot_now()
+    await save(env, briefing_mode="agent", agent_instance_id=created["id"], push_times=[slot])
+    generated = await env.client.post(
+        "/api/v1/news/briefings/generate", headers=env.headers(write=True)
+    )
+    assert generated.status_code == 201, generated.text
+    assert generated.json()["slot"] == slot
+    # 到点的定时不再另写一份（同一时间段、而且还有一份在写）
+    assert (await _tick(env))["scheduled"] == 0
+    count = await run_sql(env.database_url, "SELECT count(*)::text FROM workspace.news_briefings")
+    assert count == "1"
 
 
 async def test_tick_rewrites_missing_config(env: ImEnv) -> None:

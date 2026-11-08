@@ -614,7 +614,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST /api/v1/news/feedback` | member（`201`）。`kind`（`favorite` / `dismiss`）、`url`（http(s)）、`title`、`source_type`、`source_id`、`source_name`、`topic`；同一条重复提交返回同一条记录；收藏与不感兴趣互斥。`exclude_word`（只有 owner，否则 `403`）把一个词加进全局排除并重新生成配置文件，审计 `news.exclusion_added` |
 | `DELETE /api/v1/news/feedback/{id}` | member（`204`）。只能删自己的，别人的 `404` |
 | `GET /api/v1/news/settings` | admin。设置（还没保存过返回默认值，`version=0`）；密钥只回 `ai_api_key_set` 与每个渠道的 `secrets_set`；`platform_choices`、`taken_by_other`、`learned`（主题分数与调整后的条数、建议关掉的来源） |
-| `PUT /api/v1/news/settings` | owner。整份设置 + `version`（不一致 `409 VERSION_CONFLICT`）。另一个工作空间已启用 `409 NEWS_TAKEN`。地址（RSS、NewsNow、大模型接口、推送 Webhook、ntfy 服务器）只允许公网 http(s)：回环、私有、链路本地、没有点的主机名 `422`（`NEWS_ALLOWED_HOSTS` 例外）。`ai_api_key` 不给表示不改、空字符串清除；渠道的 `secrets` 同理；启用的渠道缺凭证 `422`。保存后重新计算偏好、按启用的工作空间重新生成配置文件；审计 `news.settings_updated`（不含密钥） |
+| `PUT /api/v1/news/settings` | owner。整份设置 + `version`（不一致 `409 VERSION_CONFLICT`）。另一个工作空间已启用 `409 NEWS_TAKEN`。地址（RSS、NewsNow、大模型接口、推送 Webhook、ntfy 服务器）只允许公网 http(s)，邮件的 SMTP 服务器同样检查：回环、私有、链路本地、IPv4 简写、没有点的主机名，以及解析到这些地址或解析不了的域名都 `422`（`NEWS_ALLOWED_HOSTS` 例外）。存的渠道凭证解不开时（换了加密密钥）按未设置处理，重新填就能保存。`ai_api_key` 不给表示不改、空字符串清除；渠道的 `secrets` 同理；启用的渠道缺凭证 `422`。保存后重新计算偏好、按启用的工作空间重新生成配置文件；审计 `news.settings_updated`（不含密钥） |
 | `POST /api/v1/news/settings/test-push` | owner。经 TrendRadar MCP `send_notification` 推到启用的渠道（标题以“【工作台】”开头），返回每个渠道的结果；`409 NEWS_DISABLED` / `NO_CHANNELS`，`503 NEWS_NOT_DEPLOYED` / `EXTERNAL_UNAVAILABLE`，`504 RESULT_UNKNOWN`；审计 `news.test_push` |
 | `POST /api/v1/news/briefings/generate` | owner（`201`）。方案 B：现在建任务、叫醒智能体写一份；`409 NEWS_DISABLED` / `NOT_AGENT_MODE` / `BRIEFING_PENDING` |
 

@@ -126,7 +126,8 @@ def window(start: str, minutes: int = WINDOW_MINUTES) -> tuple[str, str]:
 
 
 def adjusted_topics(topics: Sequence[Topic], learned: Learned) -> list[Topic]:
-    """按偏好学习调整：分数高的主题排前面、条数上调（最多 +10），分数低的下调（最少 3 条）。
+    """按偏好学习调整：分数高的主题排前面、条数上调（最多 +10），分数低的下调
+    （最少 3 条；本来就设得不到 3 条的不再往下调，也不会被调多）。
 
     max_items 为 0 表示不限，保持不变；同分保持原来的顺序。
     """
@@ -137,7 +138,8 @@ def adjusted_topics(topics: Sequence[Topic], learned: Learned) -> list[Topic]:
         score = int(learned.topic_scores.get(t.name, 0))
         items = t.max_items
         if items > 0 and score:
-            items = max(TOPIC_MIN_ITEMS, items + max(-items, min(TOPIC_MAX_BONUS, score)))
+            floor = min(TOPIC_MIN_ITEMS, items)
+            items = max(floor, items + max(-items, min(TOPIC_MAX_BONUS, score)))
         out.append(
             (
                 -score,
