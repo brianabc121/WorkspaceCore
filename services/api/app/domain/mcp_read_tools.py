@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.domain import agent_im, agent_outbox, news_tools, task_claims
+from app.domain import agent_im, agent_outbox, task_claims
 from app.domain import notifications as notification_domain
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError
 from app.domain.calendar import CalendarService
@@ -44,6 +44,7 @@ from app.models import (
     TaskRun,
     User,
 )
+from app.modules import registry
 from app.repositories import tasks as task_repo
 from app.schemas.ai_tools import (
     ActionStatusOutput,
@@ -759,6 +760,6 @@ READ_HANDLERS: dict[str, ReadHandler] = {
     "im_list_targets": _im_list_targets,
     "im_read_messages": _im_read_messages,
     "im_outbox": _im_outbox,
-    # 新闻早报（T-0153）：只列给启用了早报的工作空间的实例（mcp_tools._list_tools）
-    **news_tools.HANDLERS,
+    # 插拔式模块的读工具（docs/modules/README.md）：只列给启用了模块的工作空间的实例（mcp_tools）
+    **registry.read_handlers(),
 }

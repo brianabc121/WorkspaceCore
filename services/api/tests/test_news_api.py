@@ -23,9 +23,9 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
-from app.domain import news_agent
 from app.domain.credential_rotation import rotate
 from app.domain.credentials import CredentialBox
+from app.modules.news import agent as news_agent
 from tests.fake_trendradar import HOST, URL, FakeTrendRadar
 from tests.helpers import OWNER, add_member, add_user, add_workspace, run_sql, tool_error
 from tests.test_agent_projects_api import tool_names

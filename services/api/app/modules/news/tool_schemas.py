@@ -11,7 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from app.schemas.news import FeedId, PlatformId
+from app.modules.news.schemas import FeedId, PlatformId
 
 NEWS_LIMIT = 50
 

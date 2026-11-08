@@ -2738,6 +2738,43 @@ export interface paths {
         patch: operations["update_me"];
         trace?: never;
     };
+    "/api/v1/modules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 模块列表与在当前工作空间的启用状态（viewer） */
+        get: operations["list_modules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 启用或停用一个模块（owner）
+         * @description 停用不删除模块的数据，再启用就恢复。依赖的模块没启用、或有启用的模块依赖它时返回 409。
+         */
+        patch: operations["update_module"];
+        trace?: never;
+    };
     "/api/v1/news/briefings": {
         parameters: {
             query?: never;
@@ -7658,7 +7695,7 @@ export interface components {
              * Topics
              * @description 需要重新拉取的数据范围
              */
-            topics: ("overview" | "tasks" | "projects" | "knowledge" | "calendar" | "developer" | "integrations" | "notifications" | "operations" | "im" | "agents" | "ai" | "timeline" | "issues" | "news")[];
+            topics: ("overview" | "tasks" | "projects" | "knowledge" | "calendar" | "developer" | "integrations" | "notifications" | "operations" | "im" | "agents" | "ai" | "timeline" | "issues" | "news" | "modules")[];
             /**
              * Workspace Id
              * Format: uuid
@@ -8636,6 +8673,70 @@ export interface components {
             /** Y */
             y: number;
         };
+        /** ModuleList */
+        ModuleList: {
+            /** Items */
+            items: components["schemas"]["ModuleOut"][];
+        };
+        /** ModuleOut */
+        ModuleOut: {
+            /**
+             * Can Manage
+             * @description 当前用户能否启用 / 停用（只有 owner）
+             */
+            can_manage: boolean;
+            /**
+             * Default Enabled
+             * @description 没有启用 / 停用记录时的默认值
+             */
+            default_enabled: boolean;
+            /**
+             * Dependents
+             * @description 依赖本模块的模块：它们启用时不能停用本模块
+             */
+            dependents: string[];
+            /**
+             * Depends On
+             * @description 依赖的模块：它们都启用时才能启用本模块
+             */
+            depends_on: string[];
+            /** Description */
+            description: string;
+            /**
+             * Enabled
+             * @description 在当前工作空间是否启用
+             */
+            enabled: boolean;
+            /**
+             * Key
+             * @description 模块标识；接口前缀、表名前缀、工具名前缀都用它
+             */
+            key: string;
+            /**
+             * Missing
+             * @description 没满足的部署前提（.env 里的变量名）
+             */
+            missing: string[];
+            /** Name */
+            name: string;
+            /**
+             * Ready
+             * @description 部署前提是否满足；不满足时模块页面显示“未部署”
+             */
+            ready: boolean;
+            /**
+             * Tools
+             * @description 模块给智能体的工具
+             */
+            tools: string[];
+            /** Version */
+            version: string;
+            /**
+             * Widgets
+             * @description 模块提供的首页小组件类型
+             */
+            widgets: string[];
+        };
         /** ModuleStatus */
         ModuleStatus: {
             /**
@@ -8663,6 +8764,11 @@ export interface components {
              * @enum {string}
              */
             status: "ok" | "stale" | "unavailable" | "unauthorized";
+        };
+        /** ModuleUpdate */
+        ModuleUpdate: {
+            /** Enabled */
+            enabled: boolean;
         };
         /** NetworkIn */
         NetworkIn: {
@@ -25410,6 +25516,133 @@ export interface operations {
             };
         };
     };
+    list_modules: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_module: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                /** @description 模块 key */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModuleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_briefings: {
         parameters: {
             query?: {
@@ -25468,10 +25701,10 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
                 /** @description 当前工作空间；不是成员时返回 404 */
                 "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -25645,10 +25878,10 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
                 /** @description 当前工作空间；不是成员时返回 404 */
                 "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -25710,10 +25943,10 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
                 /** @description 当前工作空间；不是成员时返回 404 */
                 "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
             };
             path: {
                 feedback_id: string;
@@ -25992,10 +26225,10 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
                 /** @description 当前工作空间；不是成员时返回 404 */
                 "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -26066,10 +26299,10 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
                 /** @description 当前工作空间；不是成员时返回 404 */
                 "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
             };
             path?: never;
             cookie?: never;

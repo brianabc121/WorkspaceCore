@@ -27,13 +27,11 @@ from app.api.deps import (
 )
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import news_agent
 from app.domain.auth import AuthContext
 from app.domain.connectors import ConnectorRuntime
-from app.domain.news import MAX_BATCH_BYTES, NewsService
 from app.domain.policy import WorkspaceAccess
-from app.schemas.common import error_responses
-from app.schemas.news import (
+from app.modules.news import agent as news_agent
+from app.modules.news.schemas import (
     FeedbackKind,
     NewsBriefingOut,
     NewsBriefingPage,
@@ -48,6 +46,8 @@ from app.schemas.news import (
     NewsTodayOut,
     PlatformId,
 )
+from app.modules.news.service import MAX_BATCH_BYTES, NewsService
+from app.schemas.common import error_responses
 
 router = APIRouter(tags=["news"], dependencies=[Security(authenticated)])
 internal = APIRouter(include_in_schema=False)

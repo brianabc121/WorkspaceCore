@@ -44,7 +44,6 @@ from app.domain import (
     issue_tools,
     knowledge_tools,
     mail_tools,
-    news_tools,
     ops_metrics,
     readme_tools,
     runner_tools,
@@ -54,6 +53,8 @@ from app.domain.im import openim_client
 from app.domain.mcp_read_tools import READ_HANDLERS, ReadCall
 from app.domain.ratelimit import WindowLimiter
 from app.models import AgentInstance
+from app.modules import registry
+from app.modules import service as modules
 from app.schemas.ai_tools import (
     IM_DIRECT_TOOL_NAMES,
     ISSUE_TOOL_NAMES,
@@ -61,7 +62,6 @@ from app.schemas.ai_tools import (
     MAIL_READ_TOOL_NAMES,
     MAIL_SEND_TOOL_NAMES,
     MAIL_TOOL_NAMES,
-    NEWS_TOOL_NAMES,
     PROJECT_ADMIN_TOOL_NAMES,
     README_TOOL_NAMES,
     RUNNER_TOOL_NAMES,
@@ -187,9 +187,13 @@ async def _list_tools(
         mail_read = instance is not None and instance.mail_read_enabled
         mail_send = instance is not None and instance.mail_send_enabled
         runner = instance is not None and instance.runner_enabled
-        news = instance is not None and await news_tools.news_enabled(
-            db, state.settings, instance.workspace_id
+        # 插拔式模块的工具（docs/modules/README.md）：模块在实例的工作空间里启用才列出
+        visible_modules = (
+            await modules.visible_tool_modules(db, state.settings, instance.workspace_id)
+            if instance is not None
+            else set()
         )
+    owners = registry.tool_owners()
     # 只列这个实例的权限范围里、已经实现的工具；角色是否够在调用时再检查（角色可能变化）。
     # 项目管理工具只列给打开了项目管理权限的实例（T-0112）
     tools = [
@@ -205,8 +209,7 @@ async def _list_tools(
         and (spec.name not in MAIL_SEND_TOOL_NAMES or mail_send)
         # 运行环境（T-0137）：只列给打开了“运行环境权限”的实例（例外八）
         and (spec.name not in RUNNER_TOOL_NAMES or runner)
-        # 新闻早报（T-0153）：只列给启用了早报的工作空间的实例
-        and (spec.name not in NEWS_TOOL_NAMES or news)
+        and (spec.name not in owners or owners[spec.name] in visible_modules)
     ]
     return types.ListToolsResult(tools=tools)
 
@@ -251,6 +254,10 @@ async def _dispatch(
             instance = await db.get(AgentInstance, caller.instance_id)
             if instance is None:
                 return error_result("NOT_FOUND", "实例不存在")
+            # 插拔式模块的工具：模块在实例的工作空间里停用后不能再调用（和没列出时一样）
+            owner = registry.tool_owners().get(spec.name)
+            if owner is not None and not await modules.is_enabled(db, instance.workspace_id, owner):
+                return error_result("NOT_FOUND", "没有这个工具")
             requester = await service.requester(instance)
             raw = dict(params.arguments or {})
             try:

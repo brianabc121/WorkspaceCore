@@ -40,7 +40,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain import events
-from app.domain import news_config as cfg
 from app.domain.audit import AuditTrail
 from app.domain.auth import Actor
 from app.domain.connectors import ConnectorRuntime
@@ -50,9 +49,12 @@ from app.domain.policy import WorkspaceAccess, has_role
 from app.domain.ratelimit import WindowLimiter
 from app.integrations.base import ConnectorError
 from app.integrations.http import ConnectorHttp, OutboundPolicy, host_of
-from app.integrations.trendradar import TrendRadarClient
-from app.models import AgentInstance, NewsBriefing, NewsFeedback, NewsSettings
-from app.schemas.news import (
+from app.models import AgentInstance
+from app.modules import service as modules
+from app.modules.news import config as cfg
+from app.modules.news.client import TrendRadarClient
+from app.modules.news.models import NewsBriefing, NewsFeedback, NewsSettings
+from app.modules.news.schemas import (
     NewsBriefingOut,
     NewsBriefingPage,
     NewsBriefingSummary,
@@ -445,7 +447,11 @@ class NewsService:
         return await self.db.scalar(stmt)
 
     async def enabled_row(self) -> NewsSettings | None:
-        return await self.db.scalar(select(NewsSettings).where(NewsSettings.enabled.is_(True)))
+        """打开了早报的那个工作空间的设置；模块在那个工作空间停用时当作没有打开。"""
+        row = await self.db.scalar(select(NewsSettings).where(NewsSettings.enabled.is_(True)))
+        if row is None or not await modules.is_enabled(self.db, row.workspace_id, "news"):
+            return None
+        return row
 
     @staticmethod
     def defaults(workspace_id: uuid.UUID) -> NewsSettings:

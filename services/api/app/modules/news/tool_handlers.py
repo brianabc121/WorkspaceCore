@@ -15,10 +15,10 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from app.domain.ai_tools import ToolCallError
-from app.domain.news import NewsService, parse_items
 from app.integrations.base import ConnectorError
-from app.models import NewsBriefing, NewsSettings
-from app.schemas.news_tools import (
+from app.modules.news.models import NewsBriefing, NewsSettings
+from app.modules.news.service import NewsService, parse_items
+from app.modules.news.tool_schemas import (
     NewsBriefingInput,
     NewsBriefingItem,
     NewsBriefingOutput,

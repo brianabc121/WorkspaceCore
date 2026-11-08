@@ -31,7 +31,17 @@ from app.core.errors import ApiError
 from app.domain import agent_wakeups, events, project_groups
 from app.domain import readme_text as rt
 from app.domain.connectors import ConnectorRuntime
-from app.domain.news import (
+from app.domain.notifications import notify_owners
+from app.domain.readme import Readmes
+from app.models import (
+    AgentInstance,
+    AgentWakeup,
+    Project,
+    Task,
+)
+from app.modules.news.models import NewsBriefing, NewsSettings
+from app.modules.news.schemas import NewsBriefingOut
+from app.modules.news.service import (
     MAX_BRIEFING_CHARS,
     RECEIVE_WINDOW,
     NewsService,
@@ -39,17 +49,6 @@ from app.domain.news import (
     slot_for,
     topics_of,
 )
-from app.domain.notifications import notify_owners
-from app.domain.readme import Readmes
-from app.models import (
-    AgentInstance,
-    AgentWakeup,
-    NewsBriefing,
-    NewsSettings,
-    Project,
-    Task,
-)
-from app.schemas.news import NewsBriefingOut
 
 logger = logging.getLogger("app.news")
 

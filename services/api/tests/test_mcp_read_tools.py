@@ -14,7 +14,8 @@ from typing import Any
 
 import pytest
 
-from app.schemas.ai_tools import NEWS_TOOL_NAMES, RUNNER_TOOL_NAMES, TOOLS
+from app.modules import registry
+from app.schemas.ai_tools import RUNNER_TOOL_NAMES, TOOLS
 from tests.helpers import csrf, tool_error
 from tests.test_mcp_api import SETTINGS, call, issue_token, new_instance, records, rpc
 from tests.workspace_support import Env, open_env
@@ -65,7 +66,7 @@ async def test_all_read_tools_are_listed_for_a_read_only_instance(env: Env) -> N
     expected = {
         name
         for name, spec in TOOLS.items()
-        if spec.risk == "read" and name not in RUNNER_TOOL_NAMES | NEWS_TOOL_NAMES
+        if spec.risk == "read" and name not in RUNNER_TOOL_NAMES | set(registry.tool_owners())
     }
     assert {tool["name"] for tool in listed} == expected
     assert all(tool["annotations"]["readOnlyHint"] for tool in listed)

@@ -1,6 +1,6 @@
 """业务接口 /api/v1。各领域的路由在这里汇总。"""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api.v1 import (
     agents,
@@ -18,7 +18,7 @@ from app.api.v1 import (
     knowledge_base,
     mail,
     me,
-    news,
+    modules,
     notifications,
     operations,
     readme,
@@ -28,6 +28,8 @@ from app.api.v1 import (
     tasks,
     workspaces,
 )
+from app.modules import registry
+from app.modules.deps import require_module
 from app.schemas.common import error_responses
 
 # 在路由层统一声明 422：否则带参数的接口在 OpenAPI 里会用 FastAPI 默认的
@@ -57,6 +59,10 @@ for module in (
     mail,
     runner,
     ai,
-    news,
+    modules,
 ):
     router.include_router(module.router)
+
+# 插拔式模块的页面接口（docs/modules/README.md）：每个路由都加上启用检查
+for manifest, module_router in registry.routers():
+    router.include_router(module_router, dependencies=[Depends(require_module(manifest.key))])

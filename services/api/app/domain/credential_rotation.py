@@ -28,13 +28,11 @@ from app.domain.agent_ssh import agent_ssh_context
 from app.domain.agents import agent_secret_context
 from app.domain.connectors import account_context
 from app.domain.credentials import CredentialBox, CredentialError
-from app.domain.news import secret_context as news_context
 from app.models import (
     AgentCa,
     AgentSecretVersion,
     AgentSshTarget,
     IntegrationAccount,
-    NewsSettings,
 )
 
 _PREFIX = "enc:v1:"
@@ -75,25 +73,6 @@ FIELDS: tuple[SealedField, ...] = (
         AgentSshTarget,
         "client_key_ref",
         lambda row: agent_ssh_context(row.id),
-    ),
-    # 新闻早报（T-0153）：大模型 Key、推送凭证、接收 token；主键是 workspace_id
-    SealedField(
-        "news_settings.ai_key_ref",
-        NewsSettings,
-        "ai_key_ref",
-        lambda row: news_context(row.workspace_id, "ai_key"),
-    ),
-    SealedField(
-        "news_settings.channel_secrets_ref",
-        NewsSettings,
-        "channel_secrets_ref",
-        lambda row: news_context(row.workspace_id, "channels"),
-    ),
-    SealedField(
-        "news_settings.ingest_token_ref",
-        NewsSettings,
-        "ingest_token_ref",
-        lambda row: news_context(row.workspace_id, "ingest"),
     ),
 )
 
@@ -185,6 +164,13 @@ async def _rotate_field(
     return report
 
 
+def all_fields() -> tuple[SealedField, ...]:
+    """宿主自己的加密列 + 各插拔式模块在清单里声明的（sealed_fields）。"""
+    from app.modules import registry  # 模块的 sealed_fields 会导入本文件的 SealedField
+
+    return FIELDS + registry.sealed_fields()
+
+
 async def rotate(db: AsyncSession, box: CredentialBox, *, dry_run: bool = False) -> RotationReport:
-    reports = {spec.name: await _rotate_field(db, box, spec, dry_run) for spec in FIELDS}
+    reports = {spec.name: await _rotate_field(db, box, spec, dry_run) for spec in all_fields()}
     return RotationReport(current_key_id=box.key_id, fields=reports)
