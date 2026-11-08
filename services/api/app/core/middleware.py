@@ -25,6 +25,8 @@ _PROBE_PATHS = frozenset({"/healthz", "/readyz"})
 _SECRET_PATH_PARAMS: dict[str, frozenset[str]] = {
     "/internal/openim/{path_token}/{command}": frozenset({"{path_token}"}),
     "/im/obj/m/{media_id}": frozenset({"{media_id}"}),
+    # 新闻早报的接收地址：拿到 token 就能推早报进来（T-0153）
+    "/internal/news/ingest/{token}": frozenset({"{token}"}),
 }
 REDACTED = "***"
 

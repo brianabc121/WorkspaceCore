@@ -125,6 +125,19 @@ def test_learning_reorders_and_adjusts_items() -> None:
     assert "不想看：八卦、绯闻" in interests
 
 
+def test_learning_never_raises_small_topics_on_dislike() -> None:
+    small = [
+        cfg.Topic("小", ["x"], (), 1),
+        cfg.Topic("两条", ["y"], (), 2),
+        cfg.Topic("不限", ["z"], (), 0),
+    ]
+    disliked = cfg.adjusted_topics(small, cfg.Learned({"小": -5, "两条": -1, "不限": -5}))
+    # 不感兴趣只会让条数变少或不变：本来不到 3 条的保持原样，不限的仍然不限
+    assert {t.name: t.max_items for t in disliked} == {"小": 1, "两条": 2, "不限": 0}
+    liked = cfg.adjusted_topics(small, cfg.Learned({"小": 2}))
+    assert liked[0].max_items == 3
+
+
 def test_timeline_custom_periods() -> None:
     text = cfg.render_timeline(_input())
     assert "  default:\n    collect: true\n    analyze: false" in text

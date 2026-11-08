@@ -23,7 +23,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -199,7 +199,9 @@ async def generate_now(service: NewsService, workspace_id: uuid.UUID) -> NewsBri
     if pending is not None:
         raise ApiError(409, "BRIEFING_PENDING", "已经有一份早报正在写")
     local = _now().astimezone(service.zone)
-    briefing = await start(service.db, service.settings, row, local.date(), f"{local:%H:%M}")
+    # 在推送时间段里点的，算这个时间段的那一份（到点不再另写）；时间段外的按点击时间记
+    slot = slot_for(local, row.push_times) or f"{local:%H:%M}"
+    briefing = await start(service.db, service.settings, row, local.date(), slot)
     await service.db.commit()
     await service.db.refresh(briefing)
     return briefing_out(briefing)
@@ -226,13 +228,18 @@ async def schedule_due(db: AsyncSession, settings: Settings, row: NewsSettings) 
     slot = slot_for(local, row.push_times)
     if not slot:
         return 0
+    # 这个时间段已经写过，或者还有一份（例如“现在生成一份”）正在写：同一时间只写一份
     exists = await db.scalar(
-        select(NewsBriefing.id).where(
+        select(NewsBriefing.id)
+        .where(
             NewsBriefing.workspace_id == row.workspace_id,
             NewsBriefing.source == "agent",
-            NewsBriefing.local_date == local.date(),
-            NewsBriefing.slot == slot,
+            or_(
+                (NewsBriefing.local_date == local.date()) & (NewsBriefing.slot == slot),
+                NewsBriefing.status == "pending",
+            ),
         )
+        .limit(1)
     )
     if exists is not None:
         return 0

@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hmac
 import ipaddress
@@ -135,19 +136,18 @@ def _invalid(loc: Sequence[str | int], message: str) -> ApiError:
     )
 
 
-def check_url(url: str, allowed: frozenset[str], loc: Sequence[str | int]) -> str:
-    """设置里填的地址由 TrendRadar 访问：只允许 http(s)，拒绝回环、链路本地、私有地址
+# 只由数字（或 0x 十六进制）组成的“主机名”：127.1、0177.0.0.1、0x7f.1 这类 IPv4 的简写，
+# ipaddress 不认，但 TrendRadar 用的 C 库解析器会把它们当成 IP（例如 127.1 → 127.0.0.1）
+_NUMERIC_HOST = re.compile(r"(?:0x[0-9a-f]*|[0-9]+)(?:\.(?:0x[0-9a-f]*|[0-9]*))*")
+
+
+def check_host(host: str, allowed: frozenset[str], loc: Sequence[str | int]) -> None:
+    """设置里填的主机由 TrendRadar 访问：拒绝回环、链路本地、私有地址、IPv4 的简写
     与没有点的主机名（内部服务的名字）；部署时允许的主机名（NEWS_ALLOWED_HOSTS，
-    只给验收的模拟服务）除外。"""
-    url = url.strip()
-    if not url:
-        return ""
-    parts = urlsplit(url)
-    host = (parts.hostname or "").lower()
-    if parts.scheme not in ("http", "https") or not host or parts.username or parts.password:
-        raise _invalid(loc, "必须是不带用户名密码的 http(s) 地址")
-    if host in allowed:
-        return url
+    只给验收的模拟服务）除外。主机名解析到哪里由 resolve_public 检查。"""
+    host = host.strip().lower().strip("[]")
+    if not host or host in allowed:
+        return
     try:
         literal = ipaddress.ip_address(host)
     except ValueError:
@@ -155,14 +155,45 @@ def check_url(url: str, allowed: frozenset[str], loc: Sequence[str | int]) -> st
     if literal is not None:
         if not literal.is_global:
             raise _invalid(loc, "不能指向内网、回环或链路本地地址")
-        return url
+        return
+    if _NUMERIC_HOST.fullmatch(host):
+        raise _invalid(loc, "IP 地址要用完整的标准写法（例如 203.0.113.10）")
     if (
         "." not in host
         or host == "localhost"
         or host.endswith((".localhost", ".local", ".internal", ".lan", ".home.arpa"))
     ):
         raise _invalid(loc, "主机名必须是公网域名")
+
+
+def check_url(url: str, allowed: frozenset[str], loc: Sequence[str | int]) -> str:
+    """设置里填的地址：只允许不带用户名密码的 http(s)，主机按 check_host 检查。"""
+    url = url.strip()
+    if not url:
+        return ""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if parts.scheme not in ("http", "https") or not host or parts.username or parts.password:
+        raise _invalid(loc, "必须是不带用户名密码的 http(s) 地址")
+    check_host(host, allowed, loc)
     return url
+
+
+async def resolve_public(host: str, allowed: frozenset[str], loc: Sequence[str | int]) -> None:
+    """保存时把主机名解析一遍：解析到内网、回环或链路本地地址的拒绝（例如指向 127.0.0.1 的域名），
+    与工作台自己的出站检查（OutboundPolicy）同一套规则。TrendRadar 访问时会再解析，
+    之后才改指向内网的域名（DNS 重绑定）挡不住，见 docs/threat-model.md。"""
+    host = host.strip().lower().strip("[]")
+    if not host:
+        return
+    try:
+        await OutboundPolicy(allowed).check(
+            f"http://[{host}]/" if ":" in host else f"http://{host}/"
+        )
+    except ConnectorError as error:
+        if error.reason == "dns_failed":
+            raise _invalid(loc, "解析不了这个主机名，请检查拼写") from error
+        raise _invalid(loc, "这个主机名解析到了内网、回环或链路本地地址") from error
 
 
 def safe_link(url: object) -> str:
@@ -235,7 +266,10 @@ def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
     try:
         raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
         at, row_id = json.loads(raw)
-        return datetime.fromisoformat(at), uuid.UUID(row_id)
+        created_at = datetime.fromisoformat(at)
+        if created_at.tzinfo is None:  # 游标来自客户端；不带时区的时间不能与 timestamptz 比较
+            raise ValueError("cursor without timezone")
+        return created_at, uuid.UUID(row_id)
     except (ValueError, TypeError) as error:
         raise ApiError(
             422,
@@ -575,10 +609,19 @@ class NewsService:
                 details={"current_version": current},
             )
         allowed = self.settings.allowed_news_hosts
-        newsnow = check_url(body.newsnow_api_url, allowed, ["newsnow_api_url"])
-        api_base = check_url(body.ai_api_base, allowed, ["ai_api_base"])
+        # 保存前把填的主机名都解析一遍（resolve_public）：(主机, 出错时指向的字段)
+        to_resolve: list[tuple[str, list[str | int]]] = []
+
+        def url_field(url: str, loc: list[str | int]) -> str:
+            checked = check_url(url, allowed, loc)
+            if checked:
+                to_resolve.append((host_of(checked), loc))
+            return checked
+
+        newsnow = url_field(body.newsnow_api_url, ["newsnow_api_url"])
+        api_base = url_field(body.ai_api_base, ["ai_api_base"])
         feeds = [
-            {**f.model_dump(), "url": check_url(f.url, allowed, ["feeds", i, "url"])}
+            {**f.model_dump(), "url": url_field(f.url, ["feeds", i, "url"])}
             for i, f in enumerate(body.feeds)
         ]
         for i, f in enumerate(feeds):
@@ -592,7 +635,14 @@ class NewsService:
             row = self.defaults(workspace_id)
             row.version = 0
             self.db.add(row)
-        old_secrets = self.channel_secrets(row) if row.channel_secrets_ref else {}
+        try:
+            old_secrets = self.channel_secrets(row) if row.channel_secrets_ref else {}
+        except (CredentialError, ValueError):
+            # 解不开（换了加密密钥又没留旧密钥）：当作没设置过，页面上显示“未设置”，重新填就能保存
+            logger.warning(
+                "news channel secrets unreadable", extra={"workspace_id": str(workspace_id)}
+            )
+            old_secrets = {}
         channels: dict[str, dict[str, Any]] = {}
         new_secrets: dict[str, dict[str, str]] = {}
         given_by_name: dict[str, Any] = {str(k): v for k, v in body.channels.items()}
@@ -603,15 +653,19 @@ class NewsService:
                 plain = dict(row.channels.get(name) or {})
             else:
                 plain = given.model_dump(exclude={"secrets"})
-                plain["server_url"] = check_url(
-                    given.server_url, allowed, ["channels", name, "server_url"]
-                )
+                plain["server_url"] = url_field(given.server_url, ["channels", name, "server_url"])
+                if plain.get("smtp_server"):
+                    # 邮件的 SMTP 服务器同样由 TrendRadar 连接，规则与地址一样
+                    smtp_loc: list[str | int] = ["channels", name, "smtp_server"]
+                    plain["smtp_server"] = str(plain["smtp_server"]).strip()
+                    check_host(plain["smtp_server"], allowed, smtp_loc)
+                    to_resolve.append((plain["smtp_server"], smtp_loc))
                 for field_name, value in given.secrets.items():
                     if field_name not in cfg.CHANNEL_SECRETS[name]:
                         raise _invalid(["channels", name, "secrets", field_name], "没有这个字段")
                     value = value.strip()
                     if value and field_name in _URL_SECRETS:
-                        value = check_url(value, allowed, ["channels", name, "secrets", field_name])
+                        value = url_field(value, ["channels", name, "secrets", field_name])
                     if value:
                         kept[field_name] = value
                     else:
@@ -621,6 +675,8 @@ class NewsService:
                 new_secrets[name] = kept
             if plain.get("enabled") and not all(kept.get(f) for f in _required_secrets(name)):
                 raise _invalid(["channels", name], "启用的渠道要填好凭证")
+        for host, loc in dict(reversed(to_resolve)).items():  # 同一个主机只解析一次
+            await resolve_public(host, allowed, loc)
         row.enabled = body.enabled
         row.push_times = sorted(body.push_times)
         row.briefing_mode = body.briefing_mode
@@ -1172,13 +1228,17 @@ class NewsService:
             "limit": limit,
             "include_url": True,
         }
-        items, message, unavailable = await self._query("search_news", args)
-        if include_rss:
+        if not include_rss:
+            items, message, unavailable = await self._query("search_news", args)
+        else:
             # search_news 的 include_rss 在热榜没有命中时直接返回、不带 RSS
-            # （MCP 4.1.1 实测），所以 RSS 单独查
+            # （MCP 4.1.1 实测），所以 RSS 单独查，与热榜同时查
             rss_args = {"keyword": q, "days": days, "limit": limit, "include_summary": True}
-            rss, rss_message, rss_down = await self._query("search_rss", rss_args, rss=True)
-            items += rss
+            (items, message, unavailable), (rss, rss_message, rss_down) = await asyncio.gather(
+                self._query("search_news", args),
+                self._query("search_rss", rss_args, rss=True),
+            )
+            items = items + rss
             unavailable = unavailable and rss_down
             message = None if items else (message or rss_message)
         return NewsItemList(
@@ -1207,10 +1267,11 @@ class NewsService:
                 unavailable=True,
                 message="这个部署没有安装 TrendRadar",
             )
-        hot, message, unavailable = await self._query(
-            "get_news_by_date", {"limit": TODAY_LIMIT, "include_url": True}
+        # 热榜与 RSS 同时查（各自一个 MCP 会话），TrendRadar 慢时页面最多等一次超时
+        (hot, message, unavailable), (rss, _, rss_down) = await asyncio.gather(
+            self._query("get_news_by_date", {"limit": TODAY_LIMIT, "include_url": True}),
+            self._query("get_latest_rss", {"days": 1, "limit": 200}, rss=True),
         )
-        rss, _, rss_down = await self._query("get_latest_rss", {"days": 1, "limit": 200}, rss=True)
         decorated = await self._decorate(access, hot + rss, topics, row.exclusions)
         grouped: dict[str, list[NewsItemOut]] = {t.name: [] for t in topics}
         seen: set[str] = set()
@@ -1246,7 +1307,7 @@ class NewsService:
             )
         )
         if existing is None:
-            existing = NewsFeedback(
+            candidate = NewsFeedback(
                 workspace_id=access.workspace.id,
                 user_id=access.user_id,
                 kind=body.kind,
@@ -1257,7 +1318,22 @@ class NewsService:
                 source_name=body.source_name,
                 topic=body.topic,
             )
-            self.db.add(existing)
+            try:
+                # 单独的保存点：并发的同一条反馈只让这一步失败，不影响后面的排除词等修改
+                async with self.db.begin_nested():
+                    self.db.add(candidate)
+                existing = candidate
+            except IntegrityError:
+                existing = await self.db.scalar(
+                    select(NewsFeedback).where(
+                        NewsFeedback.workspace_id == access.workspace.id,
+                        NewsFeedback.user_id == access.user_id,
+                        NewsFeedback.kind == body.kind,
+                        NewsFeedback.url == body.url,
+                    )
+                )
+                if existing is None:
+                    raise
             # 收藏与不感兴趣互斥：标了一个就去掉另一个
             other = "dismiss" if body.kind == "favorite" else "favorite"
             opposite = await self.db.scalar(
@@ -1286,21 +1362,6 @@ class NewsService:
                     metadata={"word": body.exclude_word},
                     client_ip=getattr(actor, "client_ip", None),
                 )
-        try:
-            await self.db.flush()
-        except IntegrityError:
-            # 并发的同一条反馈：已经有了，按幂等处理
-            await self.db.rollback()
-            existing = await self.db.scalar(
-                select(NewsFeedback).where(
-                    NewsFeedback.workspace_id == access.workspace.id,
-                    NewsFeedback.user_id == access.user_id,
-                    NewsFeedback.kind == body.kind,
-                    NewsFeedback.url == body.url,
-                )
-            )
-            if existing is None:
-                raise
         events.mark(self.db, access.workspace.id, "news")
         await self.db.commit()
         await self.db.refresh(existing)
