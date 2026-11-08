@@ -18,12 +18,12 @@ updated: 2026-11-08
 并补全文档，让以后的代理新增功能时能直接照文档插拔。本任务负责方案落库、ADR、开发指南、脚手架和代理入口说明。
 
 ## 验收标准
-- [ ] `docs/v2/MODULES_PLAN.md`：方案（含人类未填的 D1~D7 按建议执行的记录）
-- [ ] `docs/decisions/` 下的 ADR：模块清单、注册表、启用表、迁移仍是一条链等决定
-- [ ] `docs/modules/README.md`：新增 / 停用 / 移除模块的分步指南、清单字段说明、检查清单
-- [ ] `services/api/app/modules/README.md`、`apps/web/src/modules/README.md`：代码旁的简要说明，指向指南
-- [ ] `make module-new key=... name=...` 脚手架生成前后端骨架并登记到注册表
-- [ ] CLAUDE.md 指向指南；`.claude/skills/new-module/SKILL.md` 给 Claude 代理用
+- [x] `docs/v2/MODULES_PLAN.md`：方案（含人类未填的 D1~D7 按建议执行的记录）
+- [x] `docs/decisions/` 下的 ADR：模块清单、注册表、启用表、迁移仍是一条链等决定
+- [x] `docs/modules/README.md`：新增 / 停用 / 移除模块的分步指南、清单字段说明、检查清单
+- [x] `services/api/app/modules/README.md`、`apps/web/src/modules/README.md`：代码旁的简要说明，指向指南
+- [x] `make module-new key=... name=...` 脚手架生成前后端骨架并登记到注册表
+- [x] CLAUDE.md 指向指南；`.claude/skills/new-module/SKILL.md` 给 Claude 代理用
 
 ## 背景 / 约束 / 参考
 方案：https://claude.ai/artifact/AqLi7VYg8UaQVmpWxfibmj（落库后见 `docs/v2/MODULES_PLAN.md`）
