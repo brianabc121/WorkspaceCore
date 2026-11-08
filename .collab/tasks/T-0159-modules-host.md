@@ -2,7 +2,7 @@
 id: T-0159
 title: 插拔式模块（二）：模块宿主——清单、注册表、启用表、/modules 接口、应用中心
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web,tests/e2e
@@ -34,3 +34,4 @@ updated: 2026-11-08
 - 2026-11-08 12:57 UTC · claude · 创建任务（owner: claude）
 - 2026-11-08 12:58 UTC · claude · 开始任务
 - 2026-11-08 14:04 UTC · claude · 越界说明：除 services/api、apps/web、tests/e2e 外，还改了 compose.yaml、.env.example、infra/caddy/routes.caddy（EMBED_ORIGINS 与 CSP frame-src，T-0161 嵌入页需要）、.github/workflows/ci-infra.yml（compose job 设 EMBED_ORIGINS 并跑 modules_browser.cjs）、Makefile 与 scripts/new_module.py（T-0158 脚手架）。没有碰别人进行中的任务（inbox 第 6 节为空）。
+- 2026-11-08 14:10 UTC · claude · status in_progress → done：模块宿主：清单、注册表、迁移 0049、/api/v1/modules、启用检查、工具/任务/运维/凭证轮换/脱敏从清单接、on_toggle 钩子；前端注册表、应用中心、功能未启用页；后端全量 939 passed，前端 494 passed

@@ -2,7 +2,7 @@
 id: T-0161
 title: 插拔式模块（四）：侧栏自定义分组与零代码页面
 owner: claude
-status: in_progress
+status: done
 priority: P2
 branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web,tests/e2e
@@ -29,3 +29,4 @@ updated: 2026-11-08
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-08 12:57 UTC · claude · 创建任务（owner: claude）
 - 2026-11-08 14:04 UTC · claude · 开始任务
+- 2026-11-08 14:10 UTC · claude · status in_progress → done：侧栏布局：迁移 0050、/api/v1/navigation、侧栏与页面设置页、/p/:id 嵌入与仪表盘页；EMBED_ORIGINS 与 CSP；本地全栈 modules_browser.cjs 通过

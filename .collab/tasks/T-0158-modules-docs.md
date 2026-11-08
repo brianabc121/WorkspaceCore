@@ -2,7 +2,7 @@
 id: T-0158
 title: 插拔式模块（一）：方案、ADR 与新增模块指南（给以后的代理照着加功能）
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: docs,CLAUDE.md,.claude,scripts,Makefile
@@ -32,3 +32,4 @@ updated: 2026-11-08
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-08 12:57 UTC · claude · 创建任务（owner: claude）
 - 2026-11-08 12:58 UTC · claude · 开始任务
+- 2026-11-08 14:10 UTC · claude · status in_progress → done：模块开发指南 docs/modules/README.md、方案 MODULES_PLAN、ADR、make module-new 脚手架（实测生成的骨架测试通过后删除）、CLAUDE.md 指引与 new-module 技能

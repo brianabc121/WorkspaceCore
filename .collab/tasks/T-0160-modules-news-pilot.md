@@ -2,7 +2,7 @@
 id: T-0160
 title: 插拔式模块（三）：新闻早报迁成模块（试点）
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web,tests/e2e
@@ -30,3 +30,4 @@ updated: 2026-11-08
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-08 12:57 UTC · claude · 创建任务（owner: claude）
 - 2026-11-08 12:58 UTC · claude · 开始任务
+- 2026-11-08 14:10 UTC · claude · status in_progress → done：新闻早报迁到 app/modules/news 与 src/modules/news；停用后接口、工具、任务、接收地址、推送都停止，再启用数据还在（test_modules.py）
