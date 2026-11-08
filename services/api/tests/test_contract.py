@@ -834,6 +834,9 @@ def test_v2_keeps_existing_enums_and_only_adds_event_topics() -> None:
         "issues",
         # 新闻早报（T-0153）
         "news",
+        # 插拔式模块的启用 / 停用（T-0159）、侧栏布局（T-0161）
+        "modules",
+        "navigation",
     }
     provider = schemas["IntegrationOut"]["properties"]["provider"]  # type: ignore[index]
     assert provider["const"] == "github" or set(provider["enum"]) == {"github"}

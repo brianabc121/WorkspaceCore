@@ -158,7 +158,7 @@ scan: ## 安全扫描：依赖漏洞、密钥泄露、容器镜像（scripts/sec
 
 module-new: ## 新建插拔式模块骨架：make module-new key=finance name=记账 [description=一句话说明]（docs/modules/README.md）
 	@test -n "$(key)" -a -n "$(name)" || (echo "用法：make module-new key=finance name=记账" && exit 1)
-	python3 scripts/new_module.py --key "$(key)" --name "$(name)" --description "$(description)"
+	$(PYTHON) scripts/new_module.py --key "$(key)" --name "$(name)" --description "$(description)"
 
 openapi: ## 由后端代码生成 services/api/openapi.json（前端据此生成类型）
 	cd $(API_DIR) && $(UV) run python -m scripts.export_openapi
