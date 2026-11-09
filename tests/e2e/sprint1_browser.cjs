@@ -84,7 +84,8 @@ async function logout(page) {
   await addForm.getByLabel(/初始密码/).fill(newcomer.password)
   await addForm.getByRole('button', { name: '添加成员' }).click()
   await laptop.getByText(/已创建账号并加入/).waitFor()
-  const row = laptop.getByRole('listitem', { name: `成员：${newcomer.name}` })
+  // 成员表的一行（T-0189 设置页改版：成员列表改成表格）
+  const row = laptop.getByRole('row', { name: `成员：${newcomer.name}` })
   await row.waitFor()
   const guest = await (await browser.newContext()).newPage()
   await guest.goto(`${base}/login`)
@@ -116,7 +117,8 @@ async function logout(page) {
   await laptop.getByRole('button', { name: '撤销会话', exact: true }).click()
   await laptop.getByRole('dialog').getByRole('button', { name: '确认撤销' }).click()
   await laptop.getByText('会话已撤销').waitFor()
-  const remaining = await laptop.locator('.record-list li strong').allTextContents()
+  // 会话列表每一项的名称是“当前会话”或“其他会话 尾号”（T-0193 安全设置改版）
+  const remaining = await laptop.getByRole('region', { name: '登录会话' }).getByRole('listitem').evaluateAll((items) => items.map((item) => item.getAttribute('aria-label')))
   if (remaining.join() !== '当前会话') throw new Error(`撤销后会话列表应只剩当前会话：${remaining}`)
   await phone.goto(`${base}/settings`)
   await phone.waitForURL(/\/login/)

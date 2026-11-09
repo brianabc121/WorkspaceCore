@@ -2,9 +2,9 @@
 id: T-0199
 title: AI 审批与管理区（验收）：八页浏览器验收、截图与文档
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: tests/e2e,.github/workflows/ci-infra.yml,docs
 depends_on: T-0189, T-0190, T-0191, T-0192, T-0193, T-0194, T-0195, T-0196, T-0197, T-0198
 created: 2026-11-09
@@ -27,3 +27,4 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 12:51 UTC · claude · 创建任务（owner: claude）
+- 2026-11-09 13:22 UTC · claude · 开始任务
