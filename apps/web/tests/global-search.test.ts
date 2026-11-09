@@ -30,10 +30,10 @@ describe('跨资源全局搜索', () => {
     await openApp('/calendar?date=2026-10-30'); await screen.findByLabelText('查看日期')
     await openSearch(); await fireEvent.click(await screen.findByRole('link', { name: /needle event/ }))
     await vi.waitFor(() => expect(screen.getByLabelText('查看日期')).toHaveValue('2026-11-08'))
-    expect(screen.getByText(/2026-11-02 — 2026-11-08/)).toBeVisible()
+    expect(screen.getByRole('heading', { level: 2, name: '2026年11月2日—8日' })).toBeVisible()
     date = '2026-12-04'; await openSearch(); await fireEvent.click(await screen.findByRole('link', { name: /needle event/ }))
     await vi.waitFor(() => expect(screen.getByLabelText('查看日期')).toHaveValue('2026-12-04'))
-    expect(screen.getByText(/2026-11-30 — 2026-12-06/)).toBeVisible()
+    expect(screen.getByRole('heading', { level: 2, name: '2026年11月30日—12月6日' })).toBeVisible()
   })
   it('hides cached local widget content when BFF search denies workspace access', async () => {
     mockApi((r) => path(r) === '/api/v1/search' ? fail(403, 'FORBIDDEN') : undefined)
