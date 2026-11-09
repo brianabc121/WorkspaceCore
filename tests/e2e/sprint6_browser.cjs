@@ -225,7 +225,8 @@ async function download(page, click) {
   check(await valueInput.getAttribute('type') === 'password', '密钥值输入框应为密码框')
   await valueInput.fill(SECRET_VALUE)
   await secretDialog.getByRole('button', { name: '保存' }).click()
-  await page.getByRole('article', { name: `密钥：${secretName}` }).waitFor()
+  // 密钥列表改成表格（T-0196）：名称那一格是行标题
+  await page.getByRole('rowheader', { name: secretName }).waitFor()
   check(!(await page.content()).includes(SECRET_VALUE), '保存后页面上不应出现密钥明文')
   step('密钥库：添加密钥（密码框输入），保存后页面上只有名称与版本，没有明文')
 
