@@ -86,7 +86,7 @@ a.news-widget-title:hover { color: var(--accent); }
 .nws-panel { display: grid; gap: 16px; min-width: 0; }
 .nws-panel .form-field { margin: 8px 0; gap: 6px; }
 .nws-panel .form-field > span, .nws-panel .form-field > label:not(.check-field) { font-size: .85rem; font-weight: 600; }
-.nws-panel .form-field > .check-field { margin: 2px 0; }
+.nws-panel .form-field > .check-field { margin: 2px 0; font-size: .9rem; font-weight: 400; }
 .nws-panel .form-field > input, .nws-panel .form-field > select, .nws-panel .form-field > textarea { width: 100%; }
 .nws-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 0 14px; }
 .nws-full { grid-column: 1 / -1; }
