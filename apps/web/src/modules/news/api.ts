@@ -5,7 +5,7 @@ import { ApiError, dataOf, errorMessage, type Schema } from '../../services/api'
 
 // 新闻早报（T-0153，docs/v2/NEWS_PLAN.md 第 4、5、7、8 节）。
 // - 早报、热榜、RSS、搜索、收藏：成员与访客都能看；收藏 / 不感兴趣要 member（访客不显示按钮，后端也会拒绝）。
-// - 设置：owner 与 admin 能看，只有 owner 能改、能发测试推送、能让智能体现在写一份。
+// - 设置：owner 与 admin 能看，只有 owner 能改、能发测试推送、能让智能体现在写一份（T-0195：有未保存更改时先保存）。
 // 条目的标题、链接、来源名都来自第三方：页面按纯文字显示，早报正文按安全模式渲染（features/kb/markdown.ts）。
 // 查询键都以 'news' 开头，SSE 的 news 主题刷新它们（index.ts 的 events）。
 export type NewsItem = Schema['NewsItemOut']
@@ -53,11 +53,11 @@ export const BRIEFING_SOURCE: Record<NewsBriefing['source'], string> = { trendra
 
 // 工作台自己写的说明（不含外部内容）
 const MESSAGES: Record<string, string> = {
-  VERSION_CONFLICT: '设置已被别人修改：请点“重新加载”拿到最新的设置，再改一次。',
+  VERSION_CONFLICT: '设置已被别人修改：这里没保存的更改还在；请点“重新加载”拿到最新的设置，再改一次。',
   NEWS_TAKEN: '另一个工作空间已经启用了早报（一个部署只能有一个），这里不能启用。',
   NEWS_DISABLED: '先启用早报并保存设置。',
-  NO_CHANNELS: '还没有启用任何推送渠道：先在“推送渠道”里启用一个并保存。',
-  NOT_AGENT_MODE: '只有方案 B（智能体写早报）能现在生成：先把早报方式改成方案 B 并保存。',
+  NO_CHANNELS: '还没有启用任何推送渠道：先在“模型与渠道”里启用一个并保存。',
+  NOT_AGENT_MODE: '只有“智能体写早报”方式能现在生成：先把早报方式改成它并保存。',
   BRIEFING_PENDING: '已经有一份早报正在写，等它完成或失败后再试。',
   NEWS_NOT_DEPLOYED: '这个部署没有安装 TrendRadar（新闻早报），不能推送。',
   RESULT_UNKNOWN: '推送结果未知：请稍后看看各渠道有没有收到，不要马上重发。',
