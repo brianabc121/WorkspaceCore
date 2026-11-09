@@ -119,7 +119,7 @@ async function refresh() {
               <tr v-for="s in shown" :key="s.id" :aria-selected="selected === s.id" @click="open(s.id)">
                 <th scope="row" data-label="服务器"><span class="asv-name"><ServerIcon aria-hidden="true" /><span>{{ s.name }}</span></span><span v-if="s.kind === 'auto'" class="badge">自动识别</span></th>
                 <td data-label="连接地址" class="asv-endpoint">{{ s.ssh ? endpoint(s.ssh.host, s.ssh.port) : '—' }}</td>
-                <td data-label="系统 / 资源">{{ resources(s) }}</td>
+                <td data-label="系统 / 资源" class="asv-nowrap">{{ resources(s) }}</td>
                 <td data-label="初始化状态"><span class="asv-state" :class="`tone-${initStatus(s).tone}`">{{ initStatus(s).label }}</span></td>
                 <td data-label="连接状态"><span class="asv-state" :class="`tone-${connectionStatus(s).tone}`">{{ connectionStatus(s).label }}</span></td>
                 <td data-label="智能体">{{ s.instances_total }} 个<span class="asv-sub">{{ s.instances_online }} 个消息在线</span></td>

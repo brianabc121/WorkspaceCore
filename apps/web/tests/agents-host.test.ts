@@ -24,7 +24,7 @@ function setup(host: (r: Request) => Response | undefined, items: Schema['HostSu
       path(r).endsWith('/ops') ? Response.json({ available: false, reason: 'not_deployed', running: null, items: [] }) : undefined))
 }
 async function section() {
-  await openApp('/agents')
+  await openApp('/agents?instance=inst-a')
   const card = await screen.findByRole('article', { name: '实例：alpha' })
   return within(card).getByRole('region', { name: '负载' })
 }

@@ -19,9 +19,9 @@ defineProps<{ rows: AgentRow[] }>()
         <tr v-for="row in rows" :key="row.instance_id">
           <th scope="row" data-label="智能体"><span class="asv-name"><Bot aria-hidden="true" />{{ row.name }}</span></th>
           <td data-label="部署状态"><span class="asv-state" :class="`tone-${DEPLOYMENT_STATE[row.deployment_state].tone}`">{{ DEPLOYMENT_STATE[row.deployment_state].label }}</span></td>
-          <td data-label="消息连接">{{ IM_STATUS[row.status] }}</td>
+          <td data-label="消息连接" class="asv-nowrap">{{ IM_STATUS[row.status] }}</td>
           <td data-label="部署项目"><code v-if="row.deployment_project" class="asv-code">{{ row.deployment_project }}</code><template v-else>—</template></td>
-          <td data-label="资源上限">{{ limitText(row.cpus, row.mem_limit_mb) }}</td>
+          <td data-label="资源上限" class="asv-nowrap">{{ limitText(row.cpus, row.mem_limit_mb) }}</td>
           <td data-label="最新任务">
             <template v-if="row.latest_job">{{ SSH_JOB_KIND[row.latest_job.kind] }} · {{ SSH_JOB_STATUS[row.latest_job.status] }}<span class="asv-sub">{{ formatTime(row.latest_job.finished_at ?? row.latest_job.started_at) }}</span></template>
             <template v-else>—</template>

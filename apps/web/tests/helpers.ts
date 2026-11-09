@@ -8,6 +8,7 @@ import { createAppRouter } from '../src/app/router'
 import type { Schema } from '../src/services/api'
 import { overview } from './dashboard-fixtures'
 import { task, project, integration } from './sprint3-fixtures'
+import { overviewOf } from './agents-fixtures'
 
 export const workspace: Schema['WorkspaceOut'] = { id: 'workspace-a', name: '个人空间', role: 'owner', created_at: '2026-10-30T00:00:00Z', updated_at: '2026-10-30T00:00:00Z' }
 export const me: Schema['MeResponse'] = { user: { id: 'user-a', email: 'test@example.com', display_name: '测试用户', created_at: '2026-10-30T00:00:00Z' }, workspaces: [workspace] }
@@ -28,6 +29,15 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (response) return response
     const path = new URL(request.url).pathname
     if (path === '/api/v1/setup/status') return Response.json({ setup_required: false })
+    // OpenClaw 智能体总览与单个实例（T-0182）：测试没单独给出时，用同一个测试的实例列表拼出来（summary 按这些实例统计）
+    const single = /^\/api\/v1\/agents\/instances\/([^/]+)$/.exec(path)
+    if ((path === '/api/v1/agents/overview' || single) && request.method === 'GET') {
+      const listed = await handler?.(new Request(new URL('/api/v1/agents/instances', request.url)))
+      const items = listed?.ok ? ((await listed.json()) as Schema['AgentInstancePage']).items : []
+      if (!single) return Response.json(overviewOf(items))
+      const found = items.find(item => item.id === single[1])
+      return found ? Response.json(found) : fail(404, 'NOT_FOUND')
+    }
     if (path === '/api/v1/me' && request.method === 'GET') return Response.json(me)
     if (path === '/api/v1/auth/sessions') return Response.json({ ...emptyPage, items: [session] })
     if (path === '/api/v1/notifications') return Response.json({ ...emptyPage, unread_count: 0 })

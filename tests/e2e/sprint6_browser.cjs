@@ -238,7 +238,7 @@ async function download(page, click) {
     await toggle.click()
     await page.getByRole('button', { name: '关闭总开关' }).waitFor()
   }
-  await page.getByRole('button', { name: '登记实例' }).click()
+  await page.getByRole('button', { name: '手动登记 / 接入' }).click()
   const register = page.getByRole('dialog', { name: '登记 OpenClaw 实例' })
   await register.getByLabel('名称 *').fill(name)
   await register.getByLabel(/内网：经私网地址/).check()
@@ -246,11 +246,13 @@ async function download(page, click) {
   await register.getByRole('button', { name: '登记' }).click()
   const card = page.getByRole('article', { name: `实例：${name}` })
   await card.waitFor()
+  // 登记后页面打开它的详情（/agents?instance=…，T-0182）：之后刷新都回到这个详情
+  const detailUrl = page.url()
   await card.getByText('等待接入').waitFor()
-  check(await reloadUntil(page, `${base}/agents`, card.getByText(/^IM 账号$/)), '实例卡片应显示 IM 账号')
+  check(await reloadUntil(page, detailUrl, card.getByText(/^IM 账号$/)), '实例卡片应显示 IM 账号')
   const instance = (await apiGet(page, workspace, '/api/v1/agents/instances')).items.find((i) => i.name === name)
   check(instance && instance.im_user_id.startsWith('oc_'), `登记后应分配 IM 账号：${JSON.stringify(instance)}`)
-  check(await reloadUntil(page, `${base}/agents`, card.locator('h2', { hasNotText: 'IM 准备中' })), '实例的 IM 账号应在一分钟内就绪')
+  check(await reloadUntil(page, detailUrl, card.locator('h2', { hasNotText: 'IM 准备中' })), '实例的 IM 账号应在一分钟内就绪')
   const bundle = await download(page, () => card.getByRole('button', { name: '生成并下载接入包' }).click())
   files.push(bundle.path)
   check(bundle.name.endsWith('.zip') && fs.readFileSync(bundle.path).subarray(0, 2).toString() === 'PK', `接入包应是 zip：${bundle.name}`)
@@ -422,7 +424,7 @@ async function download(page, click) {
   check(await noHorizontalScroll(page), '390px 宽度下打开 AI 抽屉不应出现横向滚动')
   await sheet.getByRole('button', { name: '关闭对话框' }).click()
   await sheet.waitFor({ state: 'detached' })
-  for (const route of ['/im', '/agents', '/agents/secrets', '/ai']) {
+  for (const route of ['/im', '/agents', '/agent-servers', '/agents/secrets', '/ai']) {
     await page.goto(`${base}${route}`)
     await page.getByRole('heading', { level: 1 }).waitFor()
     await page.waitForLoadState('networkidle')
@@ -433,7 +435,7 @@ async function download(page, click) {
 
   // ---------------------------------------------------------------- member：看不到 IM 与实例页
   const member = await login(browser, memberEmail, problems, traffic)
-  for (const label of ['消息', 'OpenClaw 实例', '密钥库']) {
+  for (const label of ['消息', 'OpenClaw 智能体', '智能体服务器', '密钥库']) {
     check(await member.page.getByRole('link', { name: label, exact: true }).count() === 0, `member 不应看到“${label}”入口`)
   }
   await member.page.goto(`${base}/im`)
@@ -453,7 +455,7 @@ async function download(page, click) {
 
   // 收尾：在页面上停用本次的实例（它不会真的连上来）
   page.once('dialog', (dialog) => dialog.accept())
-  await page.goto(`${base}/agents`)
+  await page.goto(detailUrl)
   await page.getByRole('article', { name: `实例：${name}` }).getByRole('button', { name: '停用' }).click()
   await page.getByRole('article', { name: `实例：${name}` }).getByText('已停用').waitFor()
   step('收尾：在实例页停用本次登记的实例')

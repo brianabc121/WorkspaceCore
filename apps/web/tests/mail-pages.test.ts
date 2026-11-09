@@ -179,7 +179,7 @@ describe('instance mail permission', () => {
     const requests = agents(r => (path(r) === '/api/v1/agents/instances/inst-a/mail' && r.method === 'PUT'
       ? Response.json({ accounts: [{ id: 'acc-1', email: account.email, status: 'active', can_send: true }], read_enabled: true, send_enabled: true, send_scope: 'listed', recipients: ['@partner.com'], send_by: 'user-a', send_at: at, version: 4 })
       : undefined))
-    await openApp('/agents')
+    await openApp('/agents?instance=inst-a')
     const card = await screen.findByRole('article', { name: '实例：alpha' })
     const section = within(card).getByRole('region', { name: '邮件权限' })
     expect(within(section).getByText('邮件权限：没有分配邮箱')).toBeVisible()

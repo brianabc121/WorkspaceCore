@@ -226,7 +226,7 @@ describe('instance runner permission', () => {
     const requests = agents(instance(), r => (path(r) === '/api/v1/agents/instances/inst-a/runner' && r.method === 'PUT'
       ? Response.json({ ...runnerOff, enabled: true, limits: { ...runnerOff.limits, envs: 5 }, enabled_at: at, version: 2 })
       : undefined))
-    await openApp('/agents')
+    await openApp('/agents?instance=inst-a')
     const card = await screen.findByRole('article', { name: '实例：alpha' })
     const section = within(card).getByRole('region', { name: '运行环境权限' })
     expect(await within(section).findByText('运行环境权限：关闭')).toBeVisible()
@@ -241,7 +241,7 @@ describe('instance runner permission', () => {
 
   it('cannot be opened for a read-only instance', async () => {
     agents(instance({ scope: 'read' }))
-    await openApp('/agents')
+    await openApp('/agents?instance=inst-a')
     const section = within(await screen.findByRole('article', { name: '实例：alpha' })).getByRole('region', { name: '运行环境权限' })
     expect(await within(section).findByRole('button', { name: '允许它在运行服务器上建环境、执行命令' })).toBeDisabled()
     expect(within(section).getByText(/工具权限是只读，打不开/)).toBeVisible()

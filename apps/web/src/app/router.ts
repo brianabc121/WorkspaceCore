@@ -7,6 +7,7 @@ import { moduleRoutes } from '../modules/registry'
 import { useAuthStore } from '../stores/auth'
 import { useModulesStore } from '../stores/modules'
 import { isCreateIntentCleanup } from '../composables/useCreateIntent'
+import { forgetDeployment } from '../features/agents/deploymentRequests'
 import AuthPage from '../pages/AuthPage.vue'
 import ConnectionErrorPage from '../pages/ConnectionErrorPage.vue'
 import UnauthorizedPage from '../pages/UnauthorizedPage.vue'
@@ -134,6 +135,8 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
   })
   watch(() => auth.user?.id, (user, previous) => {
     if (user !== previous) queryClient.clear()
+    // 登出或换了用户：清掉浏览器里记着的未完成部署请求（T-0182）；刚打开页面（之前没有用户）时保留，用来刷新后找回
+    if (previous && user !== previous) forgetDeployment()
     if (!user && auth.initialized && router.currentRoute.value.matched.length && !router.currentRoute.value.meta.public) {
       void router.replace({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } })
     }

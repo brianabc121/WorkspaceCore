@@ -18,8 +18,8 @@ export function createGroups(role: Schema['WorkspaceOut']['role'] | undefined): 
     groups.push({ label: '管理', items: [
       { label: '新建群聊', path: '/im', hint: '与 OpenClaw 实例' },
       { label: '添加成员', path: '/settings', hint: '工作空间' },
-      // 智能体服务器是独立页面（T-0181）：添加服务器
-      ...(role === 'owner' ? [{ label: '登记 OpenClaw 实例', path: '/agents', hint: '接入包' }, { label: '添加智能体服务器', path: '/agent-servers', hint: 'IP、账号与密码' }] : []),
+      // 智能体服务器与 OpenClaw 智能体分成两页后（T-0181 / T-0182）：部署智能体、添加服务器；手动登记在智能体页的次要操作里
+      ...(role === 'owner' ? [{ label: '部署 OpenClaw 智能体', path: '/agents', hint: '选择服务器' }, { label: '添加智能体服务器', path: '/agent-servers', hint: 'IP、账号与密码' }] : []),
     ] })
   }
   return groups
