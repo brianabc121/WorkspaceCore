@@ -1,0 +1,40 @@
+/* 设置页（T-0189，效果图 02）：资料卡、成员表与添加表单、角色说明 */
+.st-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px; align-items: stretch; }
+.st-card { align-content: start; }
+.st-card h2 { font-size: 1.15rem; }
+.st-card .primary-button { min-width: 140px; }
+.st-identity { display: flex; align-items: flex-start; gap: 18px; min-width: 0; }
+.st-fields { flex: 1 1 auto; display: grid; gap: 10px; min-width: 0; }
+.st-fields .form-field { margin: 0; }
+.st-fields .form-field input { width: 100%; }
+.st-readonly { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.st-label { flex-basis: 100%; color: var(--muted); font-size: .84rem; }
+.st-value { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+
+.st-rule { display: flex; align-items: flex-start; gap: 6px; }
+.st-rule svg { width: 15px; height: 15px; flex: none; margin-top: 2px; }
+.st-member { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.st-member > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.st-email { overflow-wrap: anywhere; }
+.st-member-table select { max-width: 100%; }
+.st-member-table .asv-link:disabled { opacity: .55; cursor: not-allowed; }
+
+.st-add { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.st-add h3 { font-size: .98rem; }
+.st-add .form-help { margin: 0; }
+.st-add-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
+.st-add-row .form-field { flex: 1 1 200px; margin: 0; min-width: 0; }
+.st-add-row .form-field input, .st-add-row .form-field select { width: 100%; }
+.st-add-row .check-field { flex: none; padding-bottom: 8px; }
+.st-add-row .primary-button { flex: none; }
+
+.st-roles { display: grid; gap: 0; margin: 0; }
+.st-roles > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
+.st-roles > div:first-child { border-top: 0; }
+.st-roles dd { margin: 0; color: var(--muted); font-size: .86rem; overflow-wrap: anywhere; }
+
+@media (max-width: 760px) {
+  .st-identity { gap: 12px; }
+  .st-roles > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .st-add-row .primary-button { width: 100%; }
+}

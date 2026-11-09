@@ -61,7 +61,9 @@ const navMeta = (item: NavItem) => ({ title: item.title, description: item.descr
 // 宽版内容区：任务、项目、日历、邮件（四页改造），开发者、运维（二批四页改造，T-0176 / T-0177），
 // 智能体服务器、OpenClaw 智能体（T-0181 / T-0182）。列表与详情并列；其他页面宽度不变。
 // 知识库是独立页面，自己的布局；早报是模块，在模块路由里声明
-const WIDE_PAGES = new Set(['/tasks', '/projects', '/calendar', '/mail', '/developer', '/operations', '/agent-servers', '/agents', '/runner'])
+// 管理区八页（T-0189，方案 docs/v2/ai-admin-redesign）也是宽页面；新闻早报设置在模块路由的 meta 里登记
+const ADMIN_PAGES = ['/ai', '/settings', '/settings/integrations', '/settings/security', '/settings/mail', '/agents/secrets', '/settings/audit']
+const WIDE_PAGES = new Set(['/tasks', '/projects', '/calendar', '/mail', '/developer', '/operations', '/agent-servers', '/agents', '/runner', ...ADMIN_PAGES])
 
 // 旧链接（T-0147 的两个标签）：/agents?tab=servers&server=… 换成独立的服务器页（只带有效的 server 与 range），
 // /agents?tab=instances 去掉 tab、保留其余参数（例如 instance）。都用 replace，后退不会回到旧地址
