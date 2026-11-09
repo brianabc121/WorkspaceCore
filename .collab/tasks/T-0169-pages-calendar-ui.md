@@ -21,7 +21,7 @@ updated: 2026-11-09
 - [x] 读取范围内的全部日程（`useAllPages` 跟着 next_cursor 读完，超过 100 条不漏），夏令时切换日不错位（`calendar-week-layout.test.ts`）
 - [x] 点日程先看详情，再“编辑日程”；没有关联项目的接口时不放“查看关联项目”按钮
 - [x] 删除旧日历样式；前端检查通过
-- [ ] 浏览器验收（sprint4）与截图
+- [x] 浏览器验收（sprint4：先看详情再编辑 / 删除，viewer 只读）与截图
 
 ## 背景 / 约束 / 参考
 方案 `docs/v2/pages-redesign/`（规范 `docs/superpowers/specs/2026-11-08-workspace-four-pages-design.md`，计划 `docs/superpowers/plans/2026-11-08-workspace-four-pages-redesign.md`），效果图在 `assets/`。人类 2026-11-09 在对话中要求「按照效果图和设计文档进行全部落实」。

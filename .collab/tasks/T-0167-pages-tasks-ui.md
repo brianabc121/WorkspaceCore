@@ -22,7 +22,7 @@ updated: 2026-11-09
 - [x] ≥1440px 右侧详情面板，更窄时用原来的抽屉；详情里阻塞原因（修改 / 解除）、待查看（完成说明、标为已查看、查看 README），打开不会自动标记
 - [x] 阻塞原因、完成说明按纯文本显示；viewer 看不到写操作按钮（服务端仍校验）
 - [x] 单元测试 `task-workspace-redesign.test.ts` 等；lint / typecheck / vitest / build / check:api 通过
-- [ ] 浏览器验收（sprint3 / sprint6 / timeline / home 脚本）与亮暗、桌面 / 手机截图
+- [x] 浏览器验收（本地全栈：home / sprint3 / timeline 通过；sprint6 需要 OpenIM，由 CI agents job 跑）与亮暗、桌面 / 手机截图
 
 ## 背景 / 约束 / 参考
 方案 `docs/v2/pages-redesign/`（规范 `docs/superpowers/specs/2026-11-08-workspace-four-pages-design.md`，计划 `docs/superpowers/plans/2026-11-08-workspace-four-pages-redesign.md`），效果图在 `assets/`。人类 2026-11-09 在对话中要求「按照效果图和设计文档进行全部落实」。

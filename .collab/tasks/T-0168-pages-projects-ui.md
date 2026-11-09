@@ -22,7 +22,7 @@ updated: 2026-11-09
 - [x] 筛选：全部 / 需要关注 / 已归档，搜索，按名称或最近更新排序；分页加载
 - [x] 最近动态按纯文本显示，读取失败只在动态区提示，不影响卡片
 - [x] 单元测试 `project-workspace-redesign.test.ts`、`projects-page.test.ts`；前端检查通过
-- [ ] 浏览器验收与截图
+- [x] 浏览器验收（sprint3：改名、归档、删除；菜单选一项后收起）与截图
 
 ## 背景 / 约束 / 参考
 方案 `docs/v2/pages-redesign/`（规范 `docs/superpowers/specs/2026-11-08-workspace-four-pages-design.md`，计划 `docs/superpowers/plans/2026-11-08-workspace-four-pages-redesign.md`），效果图在 `assets/`。人类 2026-11-09 在对话中要求「按照效果图和设计文档进行全部落实」。

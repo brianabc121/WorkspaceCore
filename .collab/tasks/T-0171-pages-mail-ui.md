@@ -23,7 +23,7 @@ updated: 2026-11-09
 - [x] 没有归档、删除、标记未读、转发等 Gmail 写操作按钮（只有 gmail.readonly + gmail.send）；“有附件”筛选因搜索语法无法核验暂不做
 - [x] ≥1440px 三栏，更窄时阅读器为抽屉（焦点锁定、Esc 关闭），手机全屏并有“返回列表”
 - [x] `mail-aggregate-pages.test.ts`、`mail-pages.test.ts`；前端检查通过
-- [ ] 四页统一验收：浏览器脚本、四页亮暗与桌面 / 手机截图、两种邮件范围截图
+- [x] 四页统一验收：新增 `tests/e2e/mail_browser.cjs`（真实后端 + 模拟 Google，接入 ci-infra agents job），四页亮暗与桌面 / 手机截图、两种邮件范围截图
 
 ## 背景 / 约束 / 参考
 方案 `docs/v2/pages-redesign/`（规范 `docs/superpowers/specs/2026-11-08-workspace-four-pages-design.md`，计划 `docs/superpowers/plans/2026-11-08-workspace-four-pages-redesign.md`），效果图在 `assets/`。人类 2026-11-09 在对话中要求「按照效果图和设计文档进行全部落实」。
