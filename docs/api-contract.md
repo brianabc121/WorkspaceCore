@@ -260,7 +260,8 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET | `/api/v1/agents/deployments/requests/{request_id}` | 部署请求收据：`{request_id, state: processing \| accepted \| failed \| interrupted, instance, deployment, error_code}`。只能查自己在这个工作空间发出的部署请求（别人的、别的空间的、别的接口用过的键都是 `404`）；从幂等记录的安全上下文找实例与任务，不返回请求原文。`processing` 还在处理（不同于任务 running）；`accepted` 已接纳，进度看 `deployment.job`；`failed` 被拒绝、没建实例（`error_code`）；`interrupted` 处理到一半退出、什么都没建（超过 2 分钟的处理中），可以用同一个 `request_id` 重发。记录保留 24 小时，过期 `404` | 已实现（T-0180） |
 | GET | `/api/v1/agents/overview` | 智能体总览（`?server_id&q&status&cursor&limit`，limit 1–100，游标同实例列表）：`summary`（`total` / `online` / `offline` / `pending` / `disabled` / `deploying` 最近一次任务是进行中的部署 / `attention` 最近一次部署失败或中断、或没停用但离线，去重），只按 `server_id` / `q` 统计全部实例，不套用 `status`、不受分页影响；`items`（`instance`、`server` 部署记录优先其次手动 / 自动归属，未归属为 null、`deployment`（含 `runtime_installed`）、`latest_job`、`deployment_project`）、`next_cursor`、`generated_at`。`server_id` 按同样的归属规则筛；`q` 按名称包含（`%` `_` 按字面）。只读本地记录、批量查询：不连 SSH、不调 OpenIM，不输出容器状态（离线 / 停用不等于容器停止） | 已实现（T-0180） |
 | PUT | `/api/v1/agents/instances/{instance_id}/server` | 手动指定所在服务器（乐观并发，`{server_id \| null, version}`）：手动部署的实例按上报的服务器指纹自动识别，认错时可以指定（以手动为准，D3）；`null` 改回自动识别。经 SSH 部署的实例以部署为准（`409 AGENT_DEPLOYED`）；审计 `agents.instance.server_assigned` | 已实现（T-0147） |
-| GET / POST | `/api/v1/agents/secrets` | 密钥列表 / 新增（只写不读） | 已实现（T-0054） |
+| GET / POST | `/api/v1/agents/secrets` | 密钥列表 / 新增（只写不读）；列表支持 `q`（名称或说明，字面包含）、`kind` 筛选，先筛选后分页，返回全量匹配数 `total`，游标绑定筛选条件 | 已实现（T-0054；筛选与 total：T-0196） |
+| GET | `/api/v1/agents/secrets/{secret_id}` | 单个密钥的元数据（名称、类型、值版本、最近轮换、授权对象；不含值、密文或历史值），只给 owner | 已实现（T-0196） |
 | GET | `/api/v1/agents/secrets/accesses` | 取密钥记录 | 已实现（T-0054） |
 | PATCH / DELETE | `/api/v1/agents/secrets/{secret_id}` | 改名称与说明 / 删除 | 已实现（T-0054） |
 | POST | `/api/v1/agents/secrets/{secret_id}/rotate` | 轮换值（旧值不再下发） | 已实现（T-0054） |
@@ -279,7 +280,8 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | PUT | `/api/v1/im/groups/{group_id}/policy` | 防刷屏设置（允许接力、连续条数、每分钟条数） | 已实现（T-0055） |
 | GET | `/api/v1/im/contacts` | 通讯录（没有删除好友） | 已实现（T-0055） |
 | GET / POST / PATCH / DELETE / PUT | `/api/v1/im/contact-groups[/{contact_group_id}[/members]]` | 分组 | 已实现（T-0055） |
-| GET | `/api/v1/ai/tool-executions[/{execution_id}]` | 工具调用记录与待审批（member 及以下只看自己的） | 已实现（T-0057） |
+| GET | `/api/v1/ai/tool-executions[/{execution_id}]` | 工具调用记录与待审批（member 及以下只看自己的）；列表另有 `period`（24h / 7d / all）与 `sort`（created_desc / expires_asc），游标绑定条件；`pending_count` 只统计调用者能看到的记录 | 已实现（T-0057；period / sort：T-0190） |
+| GET | `/api/v1/ai/tool-executions/summary` | 审批汇总：有效待审批、3 分钟内到期、高危待审批、执行异常（failed / unknown），`as_of` 与可见范围内的智能体 / 工具筛选项；按 `period`（默认 all）与智能体、风险、工具统计，只读 | 已实现（T-0190） |
 | POST | `/api/v1/ai/tool-executions/{execution_id}/approve`、`/reject` | 审批（必须带 `If-Match`；高危操作要重新输入密码） | 已实现（T-0057） |
 
 **实例接口**（只在接入入口；`Authorization: Bearer <实例令牌>`，外网另需客户端证书；失败一律 `401 AGENT_UNAUTHORIZED`）：
