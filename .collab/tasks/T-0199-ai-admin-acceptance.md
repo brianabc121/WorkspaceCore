@@ -29,3 +29,4 @@ updated: 2026-11-09
 - 2026-11-09 12:51 UTC · claude · 创建任务（owner: claude）
 - 2026-11-09 13:22 UTC · claude · 开始任务
 - 2026-11-09 14:43 UTC · claude · 全量后端 1124 passed / 15 skipped；前端 74 文件 725 测试、lint / typecheck / build / check:api 通过；核验记录写好（d2e460c）。下一步：#181 合并后 rebase、开 PR、等 ci-infra 浏览器验收
+- 2026-11-09 15:10 UTC · claude · CI secrets：gitleaks 报 4ecda88 里审计测试的 3 处假凭据（tok-SECRET-123、hunter2-SECRET，用来验证导出去掉凭据键），按惯例把指纹登记进 .gitleaksignore（越界改动：安全扫描的误报清单）；本地对 HEAD 历史 456 个提交重扫 no leaks found
