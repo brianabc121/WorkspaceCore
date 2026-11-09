@@ -1113,8 +1113,31 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 工具调用记录与待审批（viewer；member 及以下只看自己的） */
+        /**
+         * 工具调用记录与待审批（viewer；member 及以下只看自己的）
+         * @description sort=expires_asc 按到期时间升序（没有到期时间的排最后，同分按创建时间、ID 升序），缺省 created_desc 按创建时间倒序。next_cursor 绑定当前的筛选、时间范围、排序与用户，换了条件再用旧游标返回 422；不带 period / sort 时旧格式游标仍可用。pending_count 是当前用户可见范围内未过期的待审批总数，不随筛选变化。
+         */
         get: operations["list_tool_executions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/tool-executions/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 审批汇总与可选筛选项（viewer；member 及以下只算自己的）
+         * @description 待审批、3 分钟内到期、高危待审批与执行异常（failed / unknown）的数量，都只算 period 内发起、并符合 instance_id / risk_level / tool_name 的调用；不接收 status。instances / tools 只按可见范围与 period 给出，不受其他条件影响。只读：不批准、不执行，也不触发过期清理（已到期的按 as_of 排除）。
+         */
+        get: operations["get_tool_execution_summary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6199,6 +6222,59 @@ export interface components {
              */
             writes: number;
         };
+        /**
+         * AiExecutionSummaryOut
+         * @description 审批中心的汇总卡片与筛选项；只在当前用户可见范围内按 SQL 聚合，不看列表翻到第几页。
+         */
+        AiExecutionSummaryOut: {
+            /**
+             * As Of
+             * Format: date-time
+             * @description 统计时服务端的当前时间（UTC），前端用它校正倒计时
+             */
+            as_of: string;
+            /**
+             * Critical Pending Count
+             * @description 待审批中风险等级为 critical 的
+             */
+            critical_pending_count: number;
+            /**
+             * Exception Count
+             * @description 执行异常：状态为 failed 或 unknown；rejected / expired / denied 不算
+             */
+            exception_count: number;
+            /**
+             * Expiring Count
+             * @description 待审批中 expires_at 不晚于 as_of + expiring_window_seconds 的（即将到期）
+             */
+            expiring_count: number;
+            /**
+             * Expiring Window Seconds
+             * @description “即将到期”的窗口，固定 180 秒
+             */
+            expiring_window_seconds: number;
+            /**
+             * Instances
+             * @description 可选的实例：可见范围、时间范围内有调用记录且实例仍存在（ID 非空）的；不受其他已选条件影响
+             */
+            instances: components["schemas"]["ExecutionInstanceOption"][];
+            /**
+             * Pending Count
+             * @description 待审批：status 为 pending_approval 且 expires_at 晚于 as_of
+             */
+            pending_count: number;
+            /**
+             * Period
+             * @description 统计的时间范围：created_at 不早于 as_of 减去 24 小时 / 7 天；all 不限。四个计数都只算这个范围内发起的调用
+             * @enum {string}
+             */
+            period: "24h" | "7d" | "all";
+            /**
+             * Tools
+             * @description 可选的工具名：可见范围、时间范围内出现过的；不受其他已选条件影响
+             */
+            tools: string[];
+        };
         /** AiToolExecutionOut */
         AiToolExecutionOut: {
             /** Acting User Id */
@@ -6285,7 +6361,7 @@ export interface components {
             next_cursor?: string | null;
             /**
              * Pending Count
-             * @description 当前工作空间待审批的总数
+             * @description 当前用户可见范围内未过期的待审批总数（owner / admin 为整个工作空间，member / viewer 只算以自己身份执行的）；不随本次筛选变化
              */
             pending_count: number;
             /** Total Estimate */
@@ -7116,6 +7192,19 @@ export interface components {
              * @enum {string}
              */
             kind: "task" | "project" | "note" | "conversation" | "message" | "bookmark";
+        };
+        /** ExecutionInstanceOption */
+        ExecutionInstanceOption: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Name
+             * @description 这个实例 ID 最近一条调用记录里的名称
+             */
+            name: string;
         };
         /**
          * ExecutionSource
@@ -19709,6 +19798,10 @@ export interface operations {
                 risk_level?: ("read" | "write" | "critical" | "knowledge" | "direct")[] | null;
                 instance_id?: string | null;
                 tool_name?: string | null;
+                /** @description 按 created_at 只看这段时间内发起的调用（相对服务端当前时间，UTC）；缺省 all 不限 */
+                period?: "24h" | "7d" | "all";
+                /** @description 排序，缺省 created_desc */
+                sort?: "created_desc" | "expires_asc";
                 /** @description 上一页返回的 next_cursor */
                 cursor?: string | null;
                 limit?: number;
@@ -19729,6 +19822,62 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiToolExecutionPage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_tool_execution_summary: {
+        parameters: {
+            query?: {
+                /** @description 按 created_at 只看这段时间内发起的调用（相对服务端当前时间，UTC）；缺省 all 不限 */
+                period?: "24h" | "7d" | "all";
+                risk_level?: ("read" | "write" | "critical" | "knowledge" | "direct")[] | null;
+                instance_id?: string | null;
+                tool_name?: string | null;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiExecutionSummaryOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

@@ -4061,6 +4061,81 @@
         "title": "AgentWeek",
         "type": "object"
       },
+      "AiExecutionSummaryOut": {
+        "description": "审批中心的汇总卡片与筛选项；只在当前用户可见范围内按 SQL 聚合，不看列表翻到第几页。",
+        "properties": {
+          "as_of": {
+            "description": "统计时服务端的当前时间（UTC），前端用它校正倒计时",
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "critical_pending_count": {
+            "description": "待审批中风险等级为 critical 的",
+            "title": "Critical Pending Count",
+            "type": "integer"
+          },
+          "exception_count": {
+            "description": "执行异常：状态为 failed 或 unknown；rejected / expired / denied 不算",
+            "title": "Exception Count",
+            "type": "integer"
+          },
+          "expiring_count": {
+            "description": "待审批中 expires_at 不晚于 as_of + expiring_window_seconds 的（即将到期）",
+            "title": "Expiring Count",
+            "type": "integer"
+          },
+          "expiring_window_seconds": {
+            "description": "“即将到期”的窗口，固定 180 秒",
+            "title": "Expiring Window Seconds",
+            "type": "integer"
+          },
+          "instances": {
+            "description": "可选的实例：可见范围、时间范围内有调用记录且实例仍存在（ID 非空）的；不受其他已选条件影响",
+            "items": {
+              "$ref": "#/components/schemas/ExecutionInstanceOption"
+            },
+            "title": "Instances",
+            "type": "array"
+          },
+          "pending_count": {
+            "description": "待审批：status 为 pending_approval 且 expires_at 晚于 as_of",
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "period": {
+            "description": "统计的时间范围：created_at 不早于 as_of 减去 24 小时 / 7 天；all 不限。四个计数都只算这个范围内发起的调用",
+            "enum": [
+              "24h",
+              "7d",
+              "all"
+            ],
+            "title": "Period",
+            "type": "string"
+          },
+          "tools": {
+            "description": "可选的工具名：可见范围、时间范围内出现过的；不受其他已选条件影响",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pending_count",
+          "expiring_count",
+          "critical_pending_count",
+          "exception_count",
+          "as_of",
+          "period",
+          "expiring_window_seconds",
+          "instances",
+          "tools"
+        ],
+        "title": "AiExecutionSummaryOut",
+        "type": "object"
+      },
       "AiToolExecutionOut": {
         "properties": {
           "acting_user_id": {
@@ -4298,7 +4373,7 @@
             "title": "Next Cursor"
           },
           "pending_count": {
-            "description": "当前工作空间待审批的总数",
+            "description": "当前用户可见范围内未过期的待审批总数（owner / admin 为整个工作空间，member / viewer 只算以自己身份执行的）；不随本次筛选变化",
             "title": "Pending Count",
             "type": "integer"
           },
@@ -6405,6 +6480,26 @@
           "id"
         ],
         "title": "Evidence",
+        "type": "object"
+      },
+      "ExecutionInstanceOption": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "这个实例 ID 最近一条调用记录里的名称",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ExecutionInstanceOption",
         "type": "object"
       },
       "ExecutionSource": {
@@ -32817,6 +32912,7 @@
     },
     "/api/v1/ai/tool-executions": {
       "get": {
+        "description": "sort=expires_asc 按到期时间升序（没有到期时间的排最后，同分按创建时间、ID 升序），缺省 created_desc 按创建时间倒序。next_cursor 绑定当前的筛选、时间范围、排序与用户，换了条件再用旧游标返回 422；不带 period / sort 时旧格式游标仍可用。pending_count 是当前用户可见范围内未过期的待审批总数，不随筛选变化。",
         "operationId": "list_tool_executions",
         "parameters": [
           {
@@ -32907,6 +33003,39 @@
                 }
               ],
               "title": "Tool Name"
+            }
+          },
+          {
+            "description": "按 created_at 只看这段时间内发起的调用（相对服务端当前时间，UTC）；缺省 all 不限",
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "按 created_at 只看这段时间内发起的调用（相对服务端当前时间，UTC）；缺省 all 不限",
+              "enum": [
+                "24h",
+                "7d",
+                "all"
+              ],
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "description": "排序，缺省 created_desc",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created_desc",
+              "description": "排序，缺省 created_desc",
+              "enum": [
+                "created_desc",
+                "expires_asc"
+              ],
+              "title": "Sort",
+              "type": "string"
             }
           },
           {
@@ -33001,6 +33130,155 @@
           }
         ],
         "summary": "工具调用记录与待审批（viewer；member 及以下只看自己的）",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/ai/tool-executions/summary": {
+      "get": {
+        "description": "待审批、3 分钟内到期、高危待审批与执行异常（failed / unknown）的数量，都只算 period 内发起、并符合 instance_id / risk_level / tool_name 的调用；不接收 status。instances / tools 只按可见范围与 period 给出，不受其他条件影响。只读：不批准、不执行，也不触发过期清理（已到期的按 as_of 排除）。",
+        "operationId": "get_tool_execution_summary",
+        "parameters": [
+          {
+            "description": "按 created_at 只看这段时间内发起的调用（相对服务端当前时间，UTC）；缺省 all 不限",
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "按 created_at 只看这段时间内发起的调用（相对服务端当前时间，UTC）；缺省 all 不限",
+              "enum": [
+                "24h",
+                "7d",
+                "all"
+              ],
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "risk_level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "read",
+                      "write",
+                      "critical",
+                      "knowledge",
+                      "direct"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Risk Level"
+            }
+          },
+          {
+            "in": "query",
+            "name": "instance_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Instance Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tool_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "pattern": "^[a-z_]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tool Name"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiExecutionSummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "审批汇总与可选筛选项（viewer；member 及以下只算自己的）",
         "tags": [
           "ai"
         ]
