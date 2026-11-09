@@ -1,0 +1,147 @@
+/* 集成设置页（T-0192，效果图 03）：连接状态条、同步状态卡、仓库权限核验表、修复步骤与右侧连接配置。
+   颜色只用主题变量（亮 / 暗主题自动跟随）；状态都有文字，不只靠颜色。长仓库名在自己的格子里换行。 */
+
+.ig-feedback { display: grid; gap: 8px; justify-items: start; }
+.ig-feedback .feedback { margin: 0; justify-self: stretch; }
+
+/* 授权失效：页首提示 + 重新连接 */
+.ig-reconnect { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.ig-reconnect p { display: flex; align-items: flex-start; gap: 8px; margin: 0; flex: 1 1 260px; min-width: 0; color: var(--text); white-space: normal; }
+.ig-reconnect p svg { width: 18px; height: 18px; flex: none; margin-top: 2px; color: var(--danger); }
+
+/* 连接状态条 + 同步状态（同一个 section，旧的浏览器验收按 .integration-card 找按钮） */
+.ig-overview.integration-card { margin: 0; display: grid; gap: 16px; min-width: 0; }
+.ig-overview.integration-card dd { margin: 0; }
+.ig-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 12px 18px; container: ig-bar / inline-size; }
+.ig-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-weight: 700; }
+.ig-name > svg { width: 22px; height: 22px; flex: none; color: var(--text); }
+.ig-name h2 { font-size: 1.05rem; font-weight: 700; overflow-wrap: anywhere; }
+.ig-provider { white-space: nowrap; }
+.ig-fact { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: .88rem; min-width: 0; }
+.ig-fact svg { width: 16px; height: 16px; flex: none; }
+.ig-fact time { color: var(--text); }
+/* 一行放得下时用竖线分隔；换行时不留孤立的竖线 */
+@container ig-bar (min-width: 700px) {
+  .ig-bar > .ig-fact { padding-left: 18px; border-left: 1px solid var(--line); }
+}
+
+.ig-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ig-tiles .ag-tile { box-shadow: none; }
+.ig-tiles .ag-tile dd small { display: block; flex-basis: 100%; color: var(--muted); font-size: .76rem; font-weight: 400; }
+.ig-tiles .ig-tile-text dd { font-size: 1.02rem; line-height: 1.35; color: var(--tone); }
+.ig-tiles .ig-tile-text.tone-muted dd { color: var(--text); }
+.ig-tiles .ig-tile-text dd small { font-weight: 600; color: var(--tone); }
+.ig-tiles .ig-tile-text.tone-muted dd small { color: var(--muted); font-weight: 400; }
+.ig-sync-notice .feedback { --tone: var(--warning); margin: 0; border-color: color-mix(in srgb, var(--tone) 40%, var(--line)); background: color-mix(in srgb, var(--tone) 9%, var(--surface)); color: var(--text); }
+.ig-sync-notice.tone-red .feedback { --tone: var(--danger); }
+.ig-sync-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.ig-sync-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.ig-sync-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 120px; }
+.ig-sync-actions svg { width: 16px; height: 16px; }
+.ig-note { display: flex; align-items: flex-start; gap: 6px; margin: 0; flex: 1 1 260px; min-width: 0; color: var(--muted); font-size: .86rem; overflow-wrap: anywhere; }
+.ig-note svg { width: 16px; height: 16px; flex: none; margin-top: 2px; }
+
+/* 测试连接结果 */
+.ig-checks h3 { font-size: .95rem; overflow-wrap: anywhere; }
+.ig-check-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ig-check-list li { --tone: var(--muted); display: flex; align-items: flex-start; gap: 8px; font-size: .88rem; min-width: 0; overflow-wrap: anywhere; }
+.ig-check-list li svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--tone); }
+.ig-check-repo { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.ig-check-repo > p { margin: 0; font-size: .86rem; font-weight: 600; color: var(--tone, var(--muted)); }
+.ig-warning { margin: 0; padding: 8px 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--line)); background: var(--warning-soft); font-size: .86rem; overflow-wrap: anywhere; }
+:is(.ig-check-list li, .ig-check-repo > p, .ig-check, .ig-chip).tone-green { --tone: var(--success); }
+:is(.ig-check-list li, .ig-check-repo > p, .ig-check, .ig-chip).tone-red { --tone: var(--danger); }
+:is(.ig-check-list li, .ig-check-repo > p, .ig-check, .ig-chip).tone-amber { --tone: var(--warning); }
+:is(.ig-check-list li, .ig-check-repo > p, .ig-check, .ig-chip).tone-blue { --tone: var(--accent); }
+:is(.ig-check-list li, .ig-check-repo > p, .ig-check, .ig-chip).tone-muted { --tone: var(--muted); }
+
+/* 仓库权限核验表 */
+.ig-table tbody tr { cursor: default; }
+.ig-table tbody tr:hover td, .ig-table tbody tr:hover th { background: none; }
+.ig-table thead th { white-space: nowrap; }
+.ig-table thead th, .ig-table tbody td, .ig-table tbody th[scope="row"] { padding-left: 8px; padding-right: 8px; }
+.ig-table tbody th[scope="row"] { min-width: 13em; }
+.ig-table .asv-name { font-weight: 600; }
+.ig-check { --tone: var(--muted); display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 0 9px; border-radius: 12px; font-size: .8rem; font-weight: 600; white-space: nowrap; color: var(--tone); background: color-mix(in srgb, var(--tone) 11%, var(--surface)); }
+.ig-check svg { width: 14px; height: 14px; flex: none; }
+.ig-check.tone-muted { background: var(--surface-2); font-weight: 500; }
+.ig-table-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.ig-table-foot .asv-link svg { width: 15px; height: 15px; }
+.ig-inline-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.ig-inline-error p { margin: 0; }
+
+/* 修复步骤：编号 · 标题 · 说明 */
+.ig-steps li { display: grid; grid-template-columns: 22px minmax(0, 15em) minmax(0, 1fr); align-items: baseline; gap: 4px 14px; padding: 8px 0; border-top: 1px solid var(--line); }
+.ig-steps li:first-child { border-top: 0; padding-top: 0; }
+.ig-steps li::before { align-self: center; }
+.ig-steps li strong { font-size: .92rem; overflow-wrap: anywhere; }
+.ig-steps li span { color: var(--muted); font-size: .86rem; overflow-wrap: anywhere; }
+.ig-steps li a { color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+@container (max-width: 620px) {
+  /* 表格改成卡片时，四项排成一行、结论单独一行 */
+  .mg-section .ig-table.asv-table tbody tr { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .mg-section .ig-table.asv-table td[data-label="结果"] { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+  .mg-section .ig-table.asv-table td[data-label="结果"]::before { margin: 0; }
+  .ig-steps li { grid-template-columns: 22px minmax(0, 1fr); }
+  .ig-steps li span { grid-column: 2; }
+  .ig-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ig-tiles .ig-tile-text { grid-column: 1 / -1; }
+}
+
+@container (max-width: 400px) {
+  .mg-section .ig-table.asv-table tbody tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 右侧：GitHub 连接配置 */
+.ig-config { align-content: start; }
+.ig-config-title { display: inline-flex; align-items: center; gap: 8px; }
+.ig-config-title svg { width: 20px; height: 20px; flex: none; }
+.ig-facts { display: grid; gap: 12px; margin: 0; }
+.ig-facts > div { display: grid; gap: 4px; min-width: 0; }
+.ig-facts dt { color: var(--muted); font-size: .82rem; font-weight: 600; }
+.ig-facts dd { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; overflow-wrap: anywhere; min-width: 0; }
+.ig-repo-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; min-width: 0; }
+.ig-repo-list li { font-size: .9rem; overflow-wrap: anywhere; }
+.ig-chip { --tone: var(--muted); display: inline-flex; align-items: center; min-height: 24px; padding: 0 10px; border-radius: 12px; font-size: .78rem; font-weight: 600; white-space: nowrap; color: var(--tone); background: color-mix(in srgb, var(--tone) 12%, var(--surface)); }
+.ig-token-link { justify-self: center; }
+.ig-token-link svg { width: 15px; height: 15px; }
+
+.ig-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 12px; }
+.ig-form .form-field { margin: 0; gap: 6px; }
+.ig-form .form-field input { width: 100%; }
+.ig-form .form-help { margin: 0; }
+.ig-form .setup-steps { margin: 0; overflow-wrap: anywhere; }
+.ig-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.ig-label { font-size: .85rem; font-weight: 600; }
+.ig-help { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+.ig-help svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.ig-wide { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
+.ig-wide svg { width: 16px; height: 16px; }
+.ig-form .ig-picker { display: block; margin: 0; max-height: 280px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.ig-picker legend { padding: 0 4px; font-size: .85rem; font-weight: 600; }
+.ig-picker .check-field { margin: 6px 0; align-items: flex-start; overflow-wrap: anywhere; }
+.ig-picker .check-field input { margin-top: 3px; flex: none; }
+.ig-picker .check-field span { min-width: 0; }
+.ig-unlisted { color: var(--warning); font-size: .74rem; white-space: nowrap; }
+.ig-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ig-switch > span { display: grid; gap: 2px; min-width: 0; }
+.ig-switch label { font-size: .85rem; font-weight: 600; }
+.ig-switch small { color: var(--muted); font-size: .76rem; }
+.ig-switch input[role="switch"] { appearance: none; flex: none; position: relative; width: 44px; height: 24px; margin: 0; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); cursor: pointer; transition: background-color .15s ease; }
+.ig-switch input[role="switch"]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px #00000040; transition: transform .15s ease; }
+.ig-switch input[role="switch"]:checked { background: var(--accent); border-color: var(--accent); }
+.ig-switch input[role="switch"]:checked::after { transform: translateX(20px); }
+.ig-form-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.ig-form-actions .primary-button { font-weight: 600; }
+
+/* 窄屏编辑时，把右侧的配置一栏挪到正文前面，不用滚到页底 */
+@media (max-width: 1179px) {
+  .ig-editing .mg-aside { order: -1; }
+}
+@media (max-width: 760px) {
+  .ig-bar { padding: 12px; }
+  .ig-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ig-tiles .ig-tile-text { grid-column: 1 / -1; }
+  .ig-sync-actions { width: 100%; }
+  .ig-sync-actions button { flex: 1 1 0; min-width: 0; }
+}

@@ -1,10 +1,11 @@
 import { fireEvent, screen, within } from '@testing-library/vue'
 import { describe, expect, it, vi } from 'vitest'
 import { mockApi, openApp, emptyPage, fail, me, workspace } from './helpers'
-import { github, checked } from './github-fixtures'
+import { github, checked, developerRoutes } from './github-fixtures'
 const path = (r: Request) => new URL(r.url).pathname
+// 集成设置页还会读取仓库投影与逐仓库权限快照（T-0192），用开发者页的默认样例
 function settings(override?: (r: Request) => Response | Promise<Response> | undefined) {
-  return mockApi(async (r) => await override?.(r) ?? (path(r) === '/api/v1/integrations' ? Response.json({ ...emptyPage, items: [github] }) : undefined))
+  return mockApi(async (r) => await override?.(r) ?? (path(r) === '/api/v1/integrations' ? Response.json({ ...emptyPage, items: [github] }) : developerRoutes(path(r))))
 }
 describe('GitHub 集成设置', () => {
   it('creates a fine-grained connection with deduplicated repositories', async () => {
@@ -22,7 +23,9 @@ describe('GitHub 集成设置', () => {
     expect(await write.clone().json()).toMatchObject({ provider: 'github', api_token: 'github_pat_synthetic-token', repositories: ['team/workbench', 'team/api'] })
     expect(await write.clone().json()).not.toHaveProperty('base_url')
     expect(write.headers.get('X-Workspace-Id')).toBe('workspace-a')
-    await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    // 保存后编辑表单关闭（T-0192 起表单在右侧一栏，不再是对话框）
+    await vi.waitFor(() => expect(screen.queryByLabelText('GitHub Token')).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(document.body).not.toHaveTextContent('github_pat_synthetic-token')
   })
   it('guides token creation, lists accessible repositories and checks permissions right after saving', async () => {
@@ -68,8 +71,9 @@ describe('GitHub 集成设置', () => {
   it('lists repositories with the saved token and reports GitHub errors', async () => {
     let reject = true
     const requests = settings((r) => path(r) === '/api/v1/integrations/github/repositories' ? (reject ? fail(502, 'INTEGRATION_UNAUTHORIZED') : Response.json({ repositories: ['team/workbench', 'team/new'], complete: false })) : undefined)
-    await openApp('/settings/integrations'); await screen.findByText(github.name)
-    await fireEvent.click(within(screen.getByRole('heading', { name: github.name }).closest('section')!).getByRole('button', { name: '修改连接' }))
+    // T-0192：修改连接在页头，名称同时出现在状态条与右侧配置里
+    await openApp('/settings/integrations'); await screen.findByRole('heading', { name: github.name })
+    await fireEvent.click(screen.getByRole('button', { name: '修改连接' }))
     await fireEvent.click(screen.getByRole('button', { name: '读取可访问的仓库' }))
     expect(await screen.findByRole('alert')).toBeVisible()
     reject = false
@@ -83,7 +87,7 @@ describe('GitHub 集成设置', () => {
   })
   it('shows each repository and four permission checks with actionable codes', async () => {
     settings((r) => path(r).endsWith('/test') ? Response.json(checked) : undefined)
-    await openApp('/settings/integrations'); await screen.findByText(github.name)
+    await openApp('/settings/integrations'); await screen.findByRole('heading', { name: github.name })
     await fireEvent.click(within(screen.getByRole('heading', { name: github.name }).closest('section')!).getByRole('button', { name: '测试连接' }))
     const results = await screen.findByRole('region', { name: '连接检查结果' })
     expect(within(results).getByText('team/workbench')).toBeVisible()
@@ -94,9 +98,9 @@ describe('GitHub 集成设置', () => {
   })
   it('edits repositories without replaying saved token or URLs', async () => {
     const requests = settings((r) => r.method === 'PATCH' ? Response.json(github) : undefined)
-    await openApp('/settings/integrations'); await screen.findByText(github.name)
-    await fireEvent.click(within(screen.getByRole('heading', { name: github.name }).closest('section')!).getByRole('button', { name: '修改连接' }))
-    expect(screen.getByLabelText('GitHub Token')).toHaveValue('')
+    await openApp('/settings/integrations'); await screen.findByRole('heading', { name: github.name })
+    await fireEvent.click(screen.getByRole('button', { name: '修改连接' }))
+    expect(screen.getByLabelText('更换细粒度 Token')).toHaveValue('')
     await fireEvent.update(screen.getByLabelText('GitHub 仓库列表'), 'team/new')
     await fireEvent.click(screen.getByRole('button', { name: '保存 GitHub 连接' }))
     await vi.waitFor(() => expect(requests.some((r) => r.method === 'PATCH')).toBe(true))
@@ -110,12 +114,14 @@ describe('GitHub 集成设置', () => {
   })
   it('hides cached settings and closes editor after write access loss', async () => {
     settings((r) => r.method === 'PATCH' ? fail(403, 'FORBIDDEN') : undefined)
-    await openApp('/settings/integrations'); await screen.findByText(github.name)
-    await fireEvent.click(within(screen.getByRole('heading', { name: github.name }).closest('section')!).getByRole('button', { name: '修改连接' }))
+    await openApp('/settings/integrations'); await screen.findByRole('heading', { name: github.name })
+    await fireEvent.click(screen.getByRole('button', { name: '修改连接' }))
     await fireEvent.update(screen.getByLabelText('GitHub 仓库列表'), 'team/new')
     await fireEvent.click(screen.getByRole('button', { name: '保存 GitHub 连接' }))
-    await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(screen.queryByText(github.name)).not.toBeInTheDocument()
+    await vi.waitFor(() => expect(screen.queryByLabelText('GitHub 仓库列表')).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent(github.name)
+    expect(screen.queryByRole('table', { name: '仓库权限核验' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重新加载连接' })).toBeVisible()
   })
 })

@@ -28,3 +28,4 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 12:51 UTC · claude · 创建任务（owner: claude）
+- 2026-11-09 13:36 UTC · claude · 集成设置页按效果图 03 改版完成（分支 b5-b2）：连接状态条、同步状态卡、逐仓库四项权限核验（只来自本页测试结果或 GET developer/repos/{id}/permissions，未核验写“未核验”）、修复权限步骤、右侧连接配置（Token 只写不回显、留空保留、只收 github_pat_、最多 20 仓库忽略大小写去重）；刷新状态只读，测试连接 / 手动同步分开；限流显示 retry_at，失权隐藏旧结果并提示重新连接。新增 tests/github-integration-redesign.test.ts（8 例），旧 github-settings 测试只改了结构变化的选择器。前端 lint / typecheck / 全量 vitest 通过；状态保持，待合并方收尾。
