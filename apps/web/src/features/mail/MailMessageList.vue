@@ -5,7 +5,7 @@ import { ApiError } from '../../services/api'
 import { CATEGORIES, FILTERS, mailError, mailKeyOf, type MailAccount, type MailFilter, type MailItem, type MailPage } from './api'
 import { accountName, accountProblem, accountTag, parseSender, shortTime, toneOf } from './format'
 
-// 邮件页中栏（T-0171，效果图 04 / 05）：搜索（提示作用范围）、全部 / 未读 / 有附件、邮件列表（每行标明所属邮箱）、
+// 邮件页中栏（T-0171，效果图 04 / 05）：搜索（提示作用范围）、全部 / 未读、邮件列表（每行标明所属邮箱）、
 // “已加载 N 封 · 加载更多”。总数只在服务端给了估算时显示“约 N 封”，部分邮箱失败时不显示总数。
 const props = defineProps<{
   items: MailItem[]

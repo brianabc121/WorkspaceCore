@@ -20,9 +20,10 @@ export const SEND_STATUS: Record<MailSend['status'], string> = { sending: '发�
 export const CATEGORIES: { id: string; name: string }[] = [
   { id: '', name: '全部邮件' }, { id: 'INBOX', name: '收件箱' }, { id: 'STARRED', name: '星标' }, { id: 'SENT', name: '已发送' },
 ]
-// 列表上方的筛选：拼在 Gmail 搜索语法后面（is:unread / has:attachment）
+// 列表上方的筛选：拼在 Gmail 搜索语法后面。is:unread 见 Gmail API discovery（revision 20261102）messages.list 的 q 参数示例。
+// TODO：“有附件”（has:attachment）要等能核对 Gmail 搜索语法的官方页面（support.google.com/mail/answer/7190，本环境访问被拦）后再加。
 export const FILTERS = [
-  { id: 'all', name: '全部', term: '' }, { id: 'unread', name: '未读', term: 'is:unread' }, { id: 'attachment', name: '有附件', term: 'has:attachment' },
+  { id: 'all', name: '全部', term: '' }, { id: 'unread', name: '未读', term: 'is:unread' },
 ] as const
 export type MailFilter = (typeof FILTERS)[number]['id']
 // 选中的一封邮件：消息 / 会话 ID 只在所属邮箱里唯一，所以总带着 accountId
