@@ -32,3 +32,4 @@ updated: 2026-11-09
 - 2026-11-09 10:14 UTC · claude · 开始任务
 - 2026-11-09 10:14 UTC · claude · 名称改为容器服务器（导航、页头、通知与提示文字；/runner 与接口不变）；主机条、统计卡（overview 全量）、容器总览（服务端搜索 / 筛选 / 排序 / 每页 50、匹配总数）、智能体用量；containerMetrics 统一读数口径；旧 ?tab=environments 替换到总览；container-metrics 8、container-server-pages 9 个测试；前端全量 66 文件 641 通过，lint / typecheck / build 通过；390–1440 亮暗截图自查无横向滚动
 - 2026-11-09 10:14 UTC · claude · status in_progress → done：容器首屏与智能体用量完成
+- 2026-11-09 10:20 UTC · claude · 越界说明：apps/web/src/features/agents/ServerInitializationPanel.vue（T-0181 的文件，#180 合并后在主干）里两处“运行服务器”的提示文字改成“容器服务器”，只改文案，不改逻辑
