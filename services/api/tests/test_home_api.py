@@ -1,11 +1,10 @@
 """首页改版（T-0163，docs/v2/HOME_PLAN.md）：真实 PostgreSQL / Redis。
 
-- 任务进展：四种状态（阻塞 / 待查看 / 进行中 / 待办）的判断、数量、排序、筛选，
-  归档项目与已确认的不算
+- 任务进展：四种状态（待查看 / 阻塞 / 进行中 / 待办，T-0166 起与任务页同一判定）的数量、
+  排序、筛选，归档项目与已查看的不算；待查看按当前用户
 - 我的待办：assignee=me；新建任务可以直接指派给自己（必须是成员）
-- 确认结果：只给 owner / admin；动态与审计；不在待查看时原样返回；版本冲突；
-  改完成状态会清掉待查看
 - 默认首页：新工作空间是效果图的五个组件；恢复默认首页
+（标为已查看、阻塞的完整规则见 test_task_work_states.py）
 """
 
 import uuid
@@ -29,25 +28,25 @@ async def env(make_client: ClientFactory, migrated_database_url: str) -> AsyncIt
         yield value
 
 
-async def mark_review(env: Env, task_id: str) -> None:
-    """模拟智能体用 complete_task 完成（智能体那条路径见 test_task_claims_api）。"""
+async def agent_done(env: Env, task_id: str) -> None:
+    """模拟智能体用 complete_task 完成：新的完成轮次（智能体那条路径见 test_task_claims_api）。"""
     await run_sql(
         env.database_url,
-        "UPDATE workspace.tasks SET done = true, done_at = now(), review_pending = true, "
-        "version = version + 1 WHERE id = $1",
+        "UPDATE workspace.tasks SET done = true, done_at = now(), "
+        "completion_seq = completion_seq + 1, version = version + 1 WHERE id = $1",
         uuid.UUID(task_id),
     )
 
 
-async def add_blocker(env: Env, project_id: str, task_id: str, title: str) -> dict[str, Any]:
-    response = await env.client.post(
-        f"/api/v1/projects/{project_id}/issues",
-        json={"title": title, "kind": "blocker", "task_ids": [task_id]},
-        headers=env.headers(write=True),
+async def block(env: Env, task: dict[str, Any], reason: str) -> dict[str, Any]:
+    response = await env.client.patch(
+        f"/api/v1/tasks/{task['id']}/block",
+        json={"version": task["version"], "blocked": True, "reason": reason},
+        headers=env.headers(write=True, key=uuid.uuid4()),
     )
-    assert response.status_code == 201, response.text
-    issue: dict[str, Any] = response.json()
-    return issue
+    assert response.status_code == 200, response.text
+    updated: dict[str, Any] = response.json()
+    return updated
 
 
 async def start_run(env: Env, task: dict[str, Any]) -> None:
@@ -79,27 +78,23 @@ async def test_progress_statuses_counts_order_and_filters(env: Env) -> None:
     await env.update_project(old["id"], {"version": old["version"], "archived": True})
 
     await start_run(env, running)
-    await mark_review(env, review["id"])
-    first = await add_blocker(env, work["id"], blocked["id"], "等待补充访问权限")
-    await add_blocker(env, work["id"], blocked["id"], "等待依赖任务完成")
+    await agent_done(env, review["id"])
+    await block(env, blocked, "等待补充 GitHub 仓库访问权限")
 
     data = await progress(env)
-    assert data["counts"] == {"all": 4, "todo": 1, "in_progress": 1, "review": 1, "blocked": 1}
+    assert data["counts"] == {"all": 4, "todo": 1, "running": 1, "awaiting_view": 1, "blocked": 1}
     assert data["attention"] == 2
     statuses = [(item["title"], item["status"]) for item in data["items"]]
     assert statuses == [
-        ("首页改版方案", "review"),
+        ("首页改版方案", "awaiting_view"),
         ("GitHub 集成验证", "blocked"),
-        ("新闻早报整理", "in_progress"),
+        ("新闻早报整理", "running"),
         ("整理本周工作计划", "todo"),
     ]
     by_title = {item["title"]: item for item in data["items"]}
-    assert by_title["GitHub 集成验证"]["blocker"] == {
-        "issue_id": first["id"],
-        "number": first["number"],
-        "title": "等待补充访问权限",
-        "count": 2,
-    }
+    blocker = by_title["GitHub 集成验证"]["blocker"]
+    assert blocker["reason"] == "等待补充 GitHub 仓库访问权限"
+    assert blocker["blocked_by"] == str(env.owner_id) and blocker["blocked_by_name"]
     assert by_title["新闻早报整理"]["executor"]["kind"] == "user"
     assert by_title["新闻早报整理"]["executor"]["id"] == str(env.owner_id)
     assert by_title["新闻早报整理"]["project_title"] == "工作"
@@ -110,11 +105,20 @@ async def test_progress_statuses_counts_order_and_filters(env: Env) -> None:
     assert [item["title"] for item in only_blocked["items"]] == ["GitHub 集成验证"]
     assert only_blocked["counts"]["all"] == 4
     limited = await progress(env, limit=2)
-    assert [item["status"] for item in limited["items"]] == ["review", "blocked"]
+    assert [item["status"] for item in limited["items"]] == ["awaiting_view", "blocked"]
 
-    # 阻塞优先于进行中；关掉阻塞 Issue 后回到原来的状态
-    await add_blocker(env, work["id"], running["id"], "等一下")
+    # 阻塞优先于进行中；标为已查看后待查看的离开首页
+    current = await env.task_by_title("新闻早报整理")
+    await block(env, current, "等一下")
     assert (await progress(env))["counts"]["blocked"] == 2
+    seen = await env.task_by_title("首页改版方案")
+    viewed = await env.client.put(
+        f"/api/v1/tasks/{seen['id']}/result-view",
+        json={"completion_seq": seen["completion_seq"]},
+        headers=env.headers(write=True),
+    )
+    assert viewed.status_code == 200, viewed.text
+    assert (await progress(env))["counts"]["awaiting_view"] == 0
 
 
 async def test_progress_validation_and_viewer_access(env: Env) -> None:
@@ -147,58 +151,6 @@ async def test_my_todos_and_create_with_assignee(env: Env) -> None:
     async with env.member("home-member@example.com", "member") as member:
         theirs = await member.get("/api/v1/tasks", params={"assignee": "me"}, headers=env.headers())
         assert theirs.status_code == 200 and theirs.json()["items"] == []
-
-
-async def test_review_permissions_events_and_clearing(env: Env) -> None:
-    work = await env.add_project("工作")
-    task = await env.add_task(work["id"], "部署检查报告")
-    await mark_review(env, task["id"])
-    current = await env.task_by_title("部署检查报告")
-    assert current["review_pending"] is True
-
-    async with env.member("home-reviewer@example.com", "member") as member:
-        denied = await member.post(
-            f"/api/v1/tasks/{task['id']}/review",
-            json={"version": current["version"]},
-            headers={**env.headers(), **csrf(member)},
-        )
-        assert denied.status_code == 403
-
-    stale = await env.client.post(
-        f"/api/v1/tasks/{task['id']}/review",
-        json={"version": "1"},
-        headers=env.headers(write=True),
-    )
-    assert stale.status_code == 409 and stale.json()["error"]["code"] == "VERSION_CONFLICT"
-
-    response = await env.client.post(
-        f"/api/v1/tasks/{task['id']}/review",
-        json={"version": current["version"]},
-        headers=env.headers(write=True),
-    )
-    assert response.status_code == 200, response.text
-    reviewed = response.json()
-    assert reviewed["review_pending"] is False and reviewed["done"] is True
-    again = await env.client.post(
-        f"/api/v1/tasks/{task['id']}/review",
-        json={"version": current["version"]},
-        headers=env.headers(write=True),
-    )
-    assert again.status_code == 200 and again.json()["version"] == reviewed["version"]
-    events = (await env.get(f"/api/v1/tasks/{task['id']}/events"))["items"]
-    assert events[0]["kind"] == "reviewed"
-    audits = await run_sql(
-        env.database_url,
-        "SELECT count(*) FROM workspace.audit_logs WHERE action = 'task.reviewed'",
-    )
-    assert audits == 1
-    assert (await progress(env))["counts"]["review"] == 0
-
-    # 人改完成状态也清掉待查看
-    await mark_review(env, task["id"])
-    current = await env.task_by_title("部署检查报告")
-    undone = await env.update_task(task["id"], {"version": current["version"], "done": False})
-    assert undone.status_code == 200 and undone.json()["review_pending"] is False
 
 
 async def test_new_workspace_home_and_reset(env: Env) -> None:

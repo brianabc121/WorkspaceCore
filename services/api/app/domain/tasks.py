@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import idempotency, project_groups, task_claims, task_runs
+from app.domain import idempotency, project_groups, task_claims, task_runs, task_state
 from app.domain.audit import AuditTrail
 from app.domain.auth import Actor
 from app.domain.connectors import ConnectorRuntime
@@ -46,10 +46,11 @@ from app.repositories import integrations as integration_repo
 from app.repositories import tasks as repo
 from app.schemas.tasks import (
     MAX_PROJECT_AGENTS,
-    ProgressBlocker,
     ProgressCounts,
     ProgressExecutor,
     ProgressFilter,
+    ProjectActivityItem,
+    ProjectActivityPage,
     ProjectAgentBrief,
     ProjectAgentList,
     ProjectAgentOut,
@@ -59,7 +60,12 @@ from app.schemas.tasks import (
     ProjectPage,
     ProjectProgressList,
     ProjectProgressOut,
+    ProjectSummary,
+    ProjectTaskStates,
     ProjectUpdate,
+    TaskActiveRun,
+    TaskBlock,
+    TaskBlocker,
     TaskCreate,
     TaskEventList,
     TaskEventOut,
@@ -67,9 +73,12 @@ from app.schemas.tasks import (
     TaskPage,
     TaskProgressItem,
     TaskProgressOut,
+    TaskResultView,
     TaskSort,
     TaskStatusFilter,
+    TaskSummary,
     TaskUpdate,
+    WorkStateFilter,
 )
 from app.schemas.workspaces import Role
 
@@ -110,11 +119,54 @@ def decode_cursor(cursor: str | None) -> int:
     return offset
 
 
+def _encode_activity_cursor(created_at: datetime, event_id: uuid.UUID) -> str:
+    raw = json.dumps({"t": created_at.isoformat(), "id": str(event_id)}).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_activity_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
+    """项目动态的游标：上一页最后一条的 (时间, ID)。"""
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        data = json.loads(base64.urlsafe_b64decode(padded.encode()))
+        moment = datetime.fromisoformat(str(data["t"]))
+        if moment.tzinfo is None:
+            raise ValueError("naive")
+        return moment, uuid.UUID(str(data["id"]))
+    except (binascii.Error, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        raise _bad_cursor() from None
+
+
 def _page_cursor(offset: int, limit: int, fetched: int) -> str | None:
     return encode_cursor(offset + limit) if fetched > limit else None
 
 
-def task_out(task: Task) -> TaskOut:
+def _blocker_out(blocker: task_state.Blocker) -> TaskBlocker:
+    return TaskBlocker(
+        reason=blocker.reason,
+        blocked_at=blocker.blocked_at,
+        blocked_by=blocker.blocked_by,
+        blocked_by_name=blocker.blocked_by_name,
+    )
+
+
+def task_out(task: Task, state: task_state.TaskState | None = None) -> TaskOut:
+    """任务的对外形状。state 是当前用户的状态（task_state.load_states）；
+    没有用户上下文的地方（例如智能体工具的冲突详情）不传，按任务本身的字段给出保守值。"""
+    if state is None:
+        state = task_state.TaskState(
+            work_state=task_state.classify(task, viewed=task.completion_seq == 0, running=False),
+            result_viewed=task.completion_seq == 0,
+            active_run=None,
+            blocker=task_state.Blocker(
+                reason=task.blocked_reason or "",
+                blocked_at=task.blocked_at,
+                blocked_by=task.blocked_by,
+                blocked_by_name=None,
+            )
+            if task.blocked_at is not None
+            else None,
+        )
     return TaskOut(
         id=task.id,
         project_id=task.project_id,
@@ -132,7 +184,18 @@ def task_out(task: Task) -> TaskOut:
         claim_mode=task.claim_mode,
         claim_scope=task.claim_scope,
         claimable=task_claims.claimable(task),
-        review_pending=task.review_pending,
+        work_state=state.work_state,
+        completion_seq=task.completion_seq,
+        result_viewed=state.result_viewed,
+        active_run=TaskActiveRun(
+            id=state.active_run.id,
+            executor_kind="instance" if state.active_run.executor_kind == "instance" else "user",
+            executor_name=state.active_run.executor_name,
+            started_at=state.active_run.started_at,
+        )
+        if state.active_run is not None
+        else None,
+        blocker=_blocker_out(state.blocker) if state.blocker is not None else None,
         version=str(task.version),
         created_at=task.created_at,
         updated_at=task.updated_at,
@@ -144,6 +207,8 @@ def project_out(
     counts: tuple[int, int] = (0, 0),
     agents: Sequence[project_groups.Member] = (),
     group: ImGroup | None = None,
+    states: dict[str, int] | None = None,
+    latest_task: datetime | None = None,
 ) -> ProjectOut:
     return ProjectOut(
         id=project.id,
@@ -152,6 +217,14 @@ def project_out(
         archived=project.archived,
         open_tasks=counts[0],
         done_tasks=counts[1],
+        task_states=ProjectTaskStates(
+            **{key: (states or {}).get(key, 0) for key in task_state.WORK_STATES}
+        )
+        if states is not None
+        else None,
+        last_activity_at=max(project.updated_at, latest_task)
+        if latest_task is not None
+        else project.updated_at,
         agents=[
             ProjectAgentBrief(
                 instance_id=m.instance.id,
@@ -166,6 +239,11 @@ def project_out(
         created_at=project.created_at,
         updated_at=project.updated_at,
     )
+
+
+def _viewer(access: WorkspaceAccess) -> uuid.UUID:
+    """按谁的查看状态判定任务状态：当前用户；没有用户上下文时按“谁都还没查看”。"""
+    return access.user_id or task_state.NO_USER
 
 
 def _admin_only() -> ApiError:
@@ -237,6 +315,9 @@ class TaskService:
         q: str | None,
         cursor: str | None,
         limit: int,
+        archived_only: bool = False,
+        attention_only: bool = False,
+        sort: str = "title",
     ) -> ProjectPage:
         offset = decode_cursor(cursor)
         rows = await repo.list_projects(
@@ -246,27 +327,102 @@ class TaskService:
             q=q,
             offset=offset,
             limit=limit + 1,
+            archived_only=archived_only,
+            attention_for=_viewer(access) if attention_only else None,
+            sort=sort,
         )
         page = rows[:limit]
         return ProjectPage(
-            items=await self._project_outs(page),
+            items=await self._project_outs(page, _viewer(access)),
             next_cursor=_page_cursor(offset, limit, len(rows)),
             total_estimate=None,
         )
 
-    async def _project_outs(self, projects: Sequence[Project]) -> list[ProjectOut]:
+    async def _project_outs(
+        self, projects: Sequence[Project], user_id: uuid.UUID | None = None
+    ) -> list[ProjectOut]:
         ids = [p.id for p in projects]
         counts = await repo.task_counts_by_project(self.db, ids)
         agents = await project_groups.members(self.db, ids)
         groups = await project_groups.live_groups(self.db, ids)
+        states: dict[uuid.UUID, dict[str, int]] | None = None
+        latest: dict[uuid.UUID, datetime] = {}
+        if user_id is not None:
+            states, latest = await repo.project_task_states(self.db, ids, user_id)
         return [
-            project_out(p, counts.get(p.id, (0, 0)), agents.get(p.id, []), groups.get(p.id))
+            project_out(
+                p,
+                counts.get(p.id, (0, 0)),
+                agents.get(p.id, []),
+                groups.get(p.id),
+                states.get(p.id, {}) if states is not None else None,
+                latest.get(p.id),
+            )
             for p in projects
         ]
 
     async def get_project(self, access: WorkspaceAccess, project_id: uuid.UUID) -> ProjectOut:
         project = await self._project(access, project_id)
-        return (await self._project_outs([project]))[0]
+        return (await self._project_outs([project], _viewer(access)))[0]
+
+    async def project_summary(
+        self,
+        access: WorkspaceAccess,
+        *,
+        completed_after: datetime,
+        completed_before: datetime,
+    ) -> ProjectSummary:
+        """项目页顶部的三个数（T-0166，规范第 5 节）。"""
+        if completed_before <= completed_after:
+            raise ApiError(422, "VALIDATION_FAILED", "completed_before 必须晚于 completed_after")
+        active, attention, completed = await repo.project_summary(
+            self.db,
+            access.workspace.id,
+            _viewer(access),
+            completed_after=completed_after,
+            completed_before=completed_before,
+        )
+        return ProjectSummary(
+            active=active, attention=attention, completed=completed, as_of=datetime.now(UTC)
+        )
+
+    async def project_activity(
+        self,
+        access: WorkspaceAccess,
+        *,
+        project_id: uuid.UUID | None,
+        cursor: str | None,
+        limit: int,
+    ) -> ProjectActivityPage:
+        """项目页“最近动态”（T-0166）：任务动态（设为可领取、领取、完成、打回、阻塞……），新的在前。"""
+        if project_id is not None:
+            await self._project(access, project_id)
+        before = _decode_activity_cursor(cursor) if cursor else None
+        rows = await repo.project_activity(
+            self.db, access.workspace.id, project_id=project_id, before=before, limit=limit + 1
+        )
+        page = rows[:limit]
+        items = [
+            ProjectActivityItem(
+                id=event.id,
+                kind=event.kind,
+                actor_kind=event.actor_kind,
+                actor_name=event.actor_name,
+                note=event.note,
+                task_id=event.task_id,
+                task_title=task_title,
+                project_id=pid,
+                project_title=project_title,
+                created_at=event.created_at,
+            )
+            for event, task_title, pid, project_title in page
+        ]
+        next_cursor = (
+            _encode_activity_cursor(page[-1][0].created_at, page[-1][0].id)
+            if len(rows) > limit and page
+            else None
+        )
+        return ProjectActivityPage(items=items, next_cursor=next_cursor)
 
     async def project_progress(self, access: WorkspaceAccess, *, limit: int) -> ProjectProgressList:
         rows = await repo.project_progress(self.db, access.workspace.id, limit=limit)
@@ -293,6 +449,7 @@ class TaskService:
         assignee_instance_id: uuid.UUID | None = None,
         claimable_for: uuid.UUID | None = None,
         assignee_user_id: uuid.UUID | None = None,
+        work_state: WorkStateFilter | None = None,
     ) -> TaskPage:
         offset = decode_cursor(cursor)
         rows = await repo.list_tasks(
@@ -310,24 +467,62 @@ class TaskService:
             assignee_instance_id=assignee_instance_id,
             claimable_for=claimable_for,
             assignee_user_id=assignee_user_id,
+            work_state=work_state,
+            user_id=_viewer(access),
         )
         return TaskPage(
-            items=[task_out(row) for row in rows[:limit]],
+            items=await self._outs(rows[:limit], _viewer(access)),
             next_cursor=_page_cursor(offset, limit, len(rows)),
             total_estimate=None,
         )
 
+    async def _outs(self, tasks: Sequence[Task], user_id: uuid.UUID) -> list[TaskOut]:
+        """一页任务及它们对这个用户的状态（固定三次查询，不随条数增加）。"""
+        states = await task_state.load_states(self.db, tasks, user_id)
+        return [task_out(task, states[task.id]) for task in tasks]
+
+    async def _out(self, task: Task, user_id: uuid.UUID) -> TaskOut:
+        return (await self._outs([task], user_id))[0]
+
     async def get_task(self, access: WorkspaceAccess, task_id: uuid.UUID) -> TaskOut:
-        return task_out(await self._task(access, task_id))
+        return await self._out(await self._task(access, task_id), _viewer(access))
+
+    async def summary(
+        self,
+        access: WorkspaceAccess,
+        *,
+        project_id: uuid.UUID | None,
+        priorities: Sequence[int] | None,
+        due_before: datetime | None,
+        due_after: datetime | None,
+        q: str | None,
+        assignee_user_id: uuid.UUID | None = None,
+        assignee_instance_id: uuid.UUID | None = None,
+    ) -> TaskSummary:
+        """任务页筛选标签的计数（T-0166）：与列表同样的筛选，不套用所选状态。"""
+        conditions = repo.task_conditions(
+            workspace_id=access.workspace.id,
+            project_id=project_id,
+            priorities=priorities,
+            due_before=due_before,
+            due_after=due_after,
+            q=q,
+            assignee_user_id=assignee_user_id,
+            assignee_instance_id=assignee_instance_id,
+        )
+        counts = await repo.state_counts(self.db, conditions, _viewer(access))
+        values = {key: counts.get(key, 0) for key in task_state.WORK_STATES}
+        return TaskSummary(**values, total=sum(values.values()), as_of=datetime.now(UTC))
 
     async def progress(
         self, access: WorkspaceAccess, *, status: ProgressFilter, limit: int
     ) -> TaskProgressOut:
-        """首页“任务进展”（T-0163，docs/v2/HOME_PLAN.md 第 2 节）：四种状态的数量与一页条目。"""
-        counts = await repo.progress_counts(self.db, access.workspace.id)
-        rows = await repo.progress_items(self.db, access.workspace.id, status=status, limit=limit)
-        blocked = [task.id for task, _, state, _, _ in rows if state == "blocked"]
-        blockers = await repo.first_blockers(self.db, blocked)
+        """首页“任务进展”（T-0163；T-0166 起与任务页同一判定）：四种状态的数量与一页条目。"""
+        counts = await repo.progress_counts(self.db, access.workspace.id, _viewer(access))
+        rows = await repo.progress_items(
+            self.db, access.workspace.id, _viewer(access), status=status, limit=limit
+        )
+        states = await task_state.load_states(self.db, [row[0] for row in rows], _viewer(access))
         items: list[TaskProgressItem] = []
         for task, project_title, state, user_name, instance_name in rows:
             executor: ProgressExecutor | None = None
@@ -339,7 +534,7 @@ class TaskService:
                 executor = ProgressExecutor(
                     kind="instance", id=task.assignee_instance_id, name=instance_name or ""
                 )
-            found = blockers.get(task.id)
+            blocker = states[task.id].blocker
             items.append(
                 TaskProgressItem(
                     id=task.id,
@@ -350,19 +545,12 @@ class TaskService:
                     executor=executor,
                     due_at=task.due_at,
                     updated_at=task.updated_at,
-                    blocker=ProgressBlocker(
-                        issue_id=found[0].id,
-                        number=found[0].number,
-                        title=found[0].title,
-                        count=found[1],
-                    )
-                    if found
-                    else None,
+                    blocker=_blocker_out(blocker) if blocker is not None else None,
                 )
             )
         return TaskProgressOut(
             counts=ProgressCounts(all=sum(counts.values()), **counts),
-            attention=counts["review"] + counts["blocked"],
+            attention=counts["awaiting_view"] + counts["blocked"],
             items=items,
         )
 
@@ -490,7 +678,8 @@ class TaskService:
             await self.db.flush()
             await self.db.refresh(task)
             await self._audit("task.created", context, access, "task", task.id, {})
-            return WriteResult(201, task_out(task).model_dump(mode="json"))
+            out = await self._out(task, context.user.id)
+            return WriteResult(201, out.model_dump(mode="json"))
 
         return await self._idempotent(
             context,
@@ -509,11 +698,16 @@ class TaskService:
         task_id: uuid.UUID,
         key: uuid.UUID,
         body: TaskUpdate,
+        *,
+        self_viewed: bool = True,
     ) -> WriteResult:
+        """修改任务。self_viewed：本人手动完成时同时把这一轮记为本人已查看（T-0166）；
+        智能体的完成经审批执行时传 False，审批人仍会看到“待查看”。"""
+
         async def write() -> WriteResult:
             task = await self._task(access, task_id, lock=True)
             if str(task.version) != body.version:
-                current = task_out(task).model_dump(mode="json")
+                current = (await self._out(task, context.user.id)).model_dump(mode="json")
                 raise _version_conflict(current, str(task.version))
             fields = sorted(body.model_fields_set - {"version"})
             claim_fields = {"claim_mode", "claim_scope"} & set(fields)
@@ -525,18 +719,23 @@ class TaskService:
             was_open = task.claim_mode == "open"
             await self._check_assignee(access, body)
             now = datetime.now(UTC)
+            done_change: bool | None = None
             for name in fields:
                 value = getattr(body, name)
-                if name == "done" and value != task.done:
-                    task.done_at = now if value else None
-                    # 人改了完成状态：不再等人查看（T-0163）
-                    task.review_pending = False
-                    if value:
-                        # 完成任务：正在执行的一段随之结束（智能体的任务经审批完成时也走这里）
-                        await task_runs.end_open_run(
-                            self.db, task, "done", by=context.user.id, at=now
-                        )
+                if name == "done":
+                    if value != task.done:
+                        done_change = bool(value)
+                    continue
                 setattr(task, name, value)
+            if done_change is True:
+                # 完成：新的一轮、清除阻塞、结束正在执行的一段、记“完成”动态（T-0166：
+                # 人与智能体的完成入口都这样做；智能体的任务经审批完成时也走这里）
+                task_state.mark_done(task, now)
+                await task_runs.end_open_run(self.db, task, "done", by=context.user.id, at=now)
+                self.db.add(await self._user_event(task, "completed", context.user.id))
+            elif done_change is False:
+                task_state.mark_reopened(task)
+                self.db.add(await self._user_event(task, "reopened", context.user.id))
             # 执行者二选一：设了一个，另一个清除
             if body.assignee_user_id is not None:
                 task.assignee_instance_id = None
@@ -551,8 +750,11 @@ class TaskService:
             task.version += 1
             await self.db.flush()
             await self.db.refresh(task)
+            if done_change is True and self_viewed:
+                await task_state.mark_viewed(self.db, task, context.user.id)
             await self._audit("task.updated", context, access, "task", task.id, {"fields": fields})
-            return WriteResult(200, task_out(task).model_dump(mode="json"))
+            out = await self._out(task, context.user.id)
+            return WriteResult(200, out.model_dump(mode="json"))
 
         return await self._idempotent(
             context,
@@ -563,6 +765,98 @@ class TaskService:
             body=body.model_dump(mode="json", exclude_unset=True),
             write=write,
         )
+
+    async def _user_event(
+        self, task: Task, kind: str, user_id: uuid.UUID, note: str = ""
+    ) -> TaskEvent:
+        user = await self.db.get(User, user_id)
+        return task_claims.event(
+            task,
+            kind,
+            actor_kind="user",
+            name=user.display_name if user is not None else "",
+            user_id=user_id,
+            note=note,
+        )
+
+    async def block_task(
+        self,
+        context: Actor,
+        access: WorkspaceAccess,
+        task_id: uuid.UUID,
+        key: uuid.UUID,
+        body: TaskBlock,
+    ) -> WriteResult:
+        """标记 / 解除阻塞（T-0166，member）。标记不会停止正在执行的一段，解除也不会重新开始；
+        已完成的任务不能标阻塞（409 TASK_DONE）。状态没变时原样返回（不加 version）。"""
+
+        async def write() -> WriteResult:
+            task = await self._task(access, task_id, lock=True)
+            if str(task.version) != body.version:
+                current = (await self._out(task, context.user.id)).model_dump(mode="json")
+                raise _version_conflict(current, str(task.version))
+            if body.blocked and task.done:
+                raise ApiError(409, "TASK_DONE", "已完成的任务不能标记阻塞")
+            now = datetime.now(UTC)
+            changed = False
+            if body.blocked and (task.blocked_at is None or task.blocked_reason != body.reason):
+                task_state.set_block(task, body.reason, context.user.id, now)
+                self.db.add(await self._user_event(task, "blocked", context.user.id, body.reason))
+                changed = True
+            elif not body.blocked and task.blocked_at is not None:
+                task_state.clear_block(task)
+                self.db.add(await self._user_event(task, "unblocked", context.user.id))
+                changed = True
+            if changed:
+                task.version += 1
+                await self.db.flush()
+                await self.db.refresh(task)
+                await self._audit(
+                    "task.blocked" if body.blocked else "task.unblocked",
+                    context,
+                    access,
+                    "task",
+                    task.id,
+                    {},
+                )
+            out = await self._out(task, context.user.id)
+            return WriteResult(200, out.model_dump(mode="json"))
+
+        return await self._idempotent(
+            context,
+            access,
+            key,
+            method="PATCH",
+            path=f"/api/v1/tasks/{task_id}/block",
+            body=body.model_dump(mode="json"),
+            write=write,
+        )
+
+    async def view_result(
+        self, access: WorkspaceAccess, task_id: uuid.UUID, body: TaskResultView
+    ) -> TaskOut:
+        """标为已查看（T-0166，viewer 也可以）：只标当前用户、当前这一轮。
+
+        轮次已变化（重新打开、又完成了一次）或任务现在没完成时返回 409 COMPLETION_CHANGED，
+        details.current 是最新的任务，不会把新结果误标为已查看。重复调用同一轮是幂等的。
+        """
+        if access.user_id is None:
+            raise ApiError(403, "FORBIDDEN", "只有成员本人能标记已查看")
+        task = await self._task(access, task_id, lock=True)
+        if not task.done or task.completion_seq != body.completion_seq:
+            current = (await self._out(task, _viewer(access))).model_dump(mode="json")
+            await self.db.rollback()
+            raise ApiError(
+                409,
+                "COMPLETION_CHANGED",
+                "任务的完成结果已经变化，请看最新结果后再标记",
+                details={"current": current},
+            )
+        await task_state.mark_viewed(self.db, task, access.user_id)
+        await self.db.flush()
+        out = await self._out(task, _viewer(access))
+        await self.db.commit()
+        return out
 
     async def _claim_mode(
         self, context: Actor, task: Task, body: TaskUpdate, *, was_open: bool
@@ -662,7 +956,7 @@ class TaskService:
             if task is None:
                 return WriteResult(204, None)  # 已经不存在：删除是幂等的
             if str(task.version) != version:
-                current = task_out(task).model_dump(mode="json")
+                current = (await self._out(task, context.user.id)).model_dump(mode="json")
                 raise _version_conflict(current, str(task.version))
             # 任务的 README 进回收站（T-0122，方案 9.2）
             from app.domain.readme import Readmes

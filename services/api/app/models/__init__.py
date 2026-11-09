@@ -90,7 +90,7 @@ from app.models.runner import (
     RunnerTemplate,
 )
 from app.models.search import SearchDocument
-from app.models.task import Project, Task
+from app.models.task import Project, Task, TaskResultRead
 from app.models.timeline import AgentUsageCursor, AgentUsageMinute, TaskEvent, TaskRun
 from app.models.workspace import Workspace, WorkspaceMember
 
@@ -178,6 +178,7 @@ __all__ = [
     "SyncCursor",
     "Task",
     "TaskEvent",
+    "TaskResultRead",
     "TaskRun",
     "User",
     "Widget",

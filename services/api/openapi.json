@@ -15118,55 +15118,24 @@
         "title": "PasswordChangeRequest",
         "type": "object"
       },
-      "ProgressBlocker": {
-        "properties": {
-          "count": {
-            "description": "未关闭的阻塞 Issue 共几条",
-            "title": "Count",
-            "type": "integer"
-          },
-          "issue_id": {
-            "format": "uuid",
-            "title": "Issue Id",
-            "type": "string"
-          },
-          "number": {
-            "title": "Number",
-            "type": "integer"
-          },
-          "title": {
-            "description": "阻塞 Issue 的标题；来自人或智能体，按纯文本显示",
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "issue_id",
-          "number",
-          "title",
-          "count"
-        ],
-        "title": "ProgressBlocker",
-        "type": "object"
-      },
       "ProgressCounts": {
         "properties": {
           "all": {
-            "description": "四种状态合计（已完成且已确认的不算）",
+            "description": "四种状态合计（已完成且已查看的不算）",
             "title": "All",
+            "type": "integer"
+          },
+          "awaiting_view": {
+            "description": "已完成待查看（按当前用户）",
+            "title": "Awaiting View",
             "type": "integer"
           },
           "blocked": {
             "title": "Blocked",
             "type": "integer"
           },
-          "in_progress": {
-            "title": "In Progress",
-            "type": "integer"
-          },
-          "review": {
-            "description": "已完成待查看",
-            "title": "Review",
+          "running": {
+            "title": "Running",
             "type": "integer"
           },
           "todo": {
@@ -15177,8 +15146,8 @@
         "required": [
           "all",
           "todo",
-          "in_progress",
-          "review",
+          "running",
+          "awaiting_view",
           "blocked"
         ],
         "title": "ProgressCounts",
@@ -15210,6 +15179,112 @@
           "name"
         ],
         "title": "ProgressExecutor",
+        "type": "object"
+      },
+      "ProjectActivityItem": {
+        "properties": {
+          "actor_kind": {
+            "enum": [
+              "user",
+              "instance",
+              "system"
+            ],
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "actor_name": {
+            "title": "Actor Name",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "opened",
+              "claimed",
+              "released",
+              "completed",
+              "reopened",
+              "reviewed",
+              "blocked",
+              "unblocked"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "description": "原因或说明；来自人或智能体，按纯文本显示",
+            "title": "Note",
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "project_title": {
+            "title": "Project Title",
+            "type": "string"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "task_title": {
+            "title": "Task Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "actor_kind",
+          "actor_name",
+          "note",
+          "task_id",
+          "task_title",
+          "project_id",
+          "project_title",
+          "created_at"
+        ],
+        "title": "ProjectActivityItem",
+        "type": "object"
+      },
+      "ProjectActivityPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectActivityItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ProjectActivityPage",
         "type": "object"
       },
       "ProjectAdminOut": {
@@ -15662,7 +15737,7 @@
             "type": "string"
           },
           "done_tasks": {
-            "description": "已完成任务数",
+            "description": "已完成任务数（含当前用户还没查看的；进度 = done / (open + done)）",
             "title": "Done Tasks",
             "type": "integer"
           },
@@ -15680,10 +15755,34 @@
             "title": "Issue Notices",
             "type": "boolean"
           },
+          "last_activity_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近更新：项目本身或其中任务最后一次修改的时间（T-0166）",
+            "title": "Last Activity At"
+          },
           "open_tasks": {
             "description": "未完成任务数",
             "title": "Open Tasks",
             "type": "integer"
+          },
+          "task_states": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectTaskStates"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "五种状态各几项，按当前用户的查看状态（T-0166）；没读到时为 null，不是 0"
           },
           "title": {
             "title": "Title",
@@ -15861,6 +15960,73 @@
           "config"
         ],
         "title": "ProjectProgressWidgetUpdate",
+        "type": "object"
+      },
+      "ProjectSummary": {
+        "description": "项目页顶部的三个数（规范第 5 节）。",
+        "properties": {
+          "active": {
+            "description": "未归档项目数（项目没有独立的进行中状态，不叫“进行中”）",
+            "title": "Active",
+            "type": "integer"
+          },
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "attention": {
+            "description": "需要关注：未归档、当前用户有待查看或有明确阻塞的项目",
+            "title": "Attention",
+            "type": "integer"
+          },
+          "completed": {
+            "description": "时间窗内完成、现在仍是已完成的任务数（按 done_at；不是完整的历史完成事件数）",
+            "title": "Completed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active",
+          "attention",
+          "completed",
+          "as_of"
+        ],
+        "title": "ProjectSummary",
+        "type": "object"
+      },
+      "ProjectTaskStates": {
+        "description": "项目里任务的五种状态各几项（与任务页同一判定；待查看按当前用户）。",
+        "properties": {
+          "awaiting_view": {
+            "title": "Awaiting View",
+            "type": "integer"
+          },
+          "blocked": {
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "integer"
+          },
+          "todo": {
+            "title": "Todo",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "todo",
+          "running",
+          "awaiting_view",
+          "blocked",
+          "done"
+        ],
+        "title": "ProjectTaskStates",
         "type": "object"
       },
       "ProjectUpdate": {
@@ -20633,6 +20799,116 @@
         "title": "SyncState",
         "type": "object"
       },
+      "TaskActiveRun": {
+        "properties": {
+          "executor_kind": {
+            "enum": [
+              "user",
+              "instance"
+            ],
+            "title": "Executor Kind",
+            "type": "string"
+          },
+          "executor_name": {
+            "title": "Executor Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "executor_kind",
+          "executor_name",
+          "started_at"
+        ],
+        "title": "TaskActiveRun",
+        "type": "object"
+      },
+      "TaskBlock": {
+        "additionalProperties": false,
+        "description": "标记 / 解除阻塞（T-0166，member）：标记不会停止正在执行的一段，解除也不会自动重新开始。",
+        "properties": {
+          "blocked": {
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "reason": {
+            "default": "",
+            "description": "blocked 为 true 时必填（1–2000 字）",
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          },
+          "version": {
+            "description": "读取时的 version，原样带回；与当前版本不一致时返回 409",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "blocked"
+        ],
+        "title": "TaskBlock",
+        "type": "object"
+      },
+      "TaskBlocker": {
+        "properties": {
+          "blocked_at": {
+            "format": "date-time",
+            "title": "Blocked At",
+            "type": "string"
+          },
+          "blocked_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "标记阻塞的成员；已删除时为 null",
+            "title": "Blocked By"
+          },
+          "blocked_by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked By Name"
+          },
+          "reason": {
+            "description": "阻塞原因；人写的文字，按纯文本显示",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "blocked_at",
+          "blocked_by",
+          "blocked_by_name"
+        ],
+        "title": "TaskBlocker",
+        "type": "object"
+      },
       "TaskBrief": {
         "description": "今日任务条目（工作台自己的任务，T-0082 起没有外部链接）。",
         "properties": {
@@ -20799,7 +21075,9 @@
               "released",
               "completed",
               "reopened",
-              "reviewed"
+              "reviewed",
+              "blocked",
+              "unblocked"
             ],
             "title": "Kind",
             "type": "string"
@@ -20823,6 +21101,17 @@
       },
       "TaskOut": {
         "properties": {
+          "active_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskActiveRun"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "正在执行的一段；没有时为 null"
+          },
           "assignee_instance_id": {
             "anyOf": [
               {
@@ -20849,6 +21138,17 @@
             "description": "执行者是工作空间成员时的用户 ID",
             "title": "Assignee User Id"
           },
+          "blocker": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskBlocker"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "阻塞原因；没有阻塞时为 null"
+          },
           "claim_mode": {
             "description": "接取方式（T-0111）：assigned 由管理员指派；open 可自由接取（空闲的智能体领取）",
             "enum": [
@@ -20871,6 +21171,13 @@
             "description": "现在能被领取：open、没有执行者、没有完成",
             "title": "Claimable",
             "type": "boolean"
+          },
+          "completion_seq": {
+            "default": 0,
+            "description": "完成轮次：每次未完成→完成加 1；标为已查看时原样带回",
+            "minimum": 0.0,
+            "title": "Completion Seq",
+            "type": "integer"
           },
           "created_at": {
             "format": "date-time",
@@ -20946,9 +21253,10 @@
             "title": "Project Id",
             "type": "string"
           },
-          "review_pending": {
-            "description": "已完成待查看（T-0163）：智能体完成后等 owner / admin 确认结果或打回",
-            "title": "Review Pending",
+          "result_viewed": {
+            "default": false,
+            "description": "当前用户看过这一轮完成结果（历史任务、未完成过的任务为 true）",
+            "title": "Result Viewed",
             "type": "boolean"
           },
           "started_at": {
@@ -20977,6 +21285,19 @@
             "description": "乐观并发用的不透明字符串；修改 / 删除时原样带回",
             "title": "Version",
             "type": "string"
+          },
+          "work_state": {
+            "default": "todo",
+            "description": "任务对当前用户的状态（T-0166）：todo 待办 / running 进行中（有正在执行的一段）/ blocked 阻塞（有人写了原因）/ awaiting_view 已完成待查看（当前用户还没看这一轮结果）/ done 已完成",
+            "enum": [
+              "todo",
+              "running",
+              "awaiting_view",
+              "blocked",
+              "done"
+            ],
+            "title": "Work State",
+            "type": "string"
           }
         },
         "required": [
@@ -20996,7 +21317,6 @@
           "claim_mode",
           "claim_scope",
           "claimable",
-          "review_pending",
           "version",
           "created_at",
           "updated_at"
@@ -21063,13 +21383,13 @@
           "blocker": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ProgressBlocker"
+                "$ref": "#/components/schemas/TaskBlocker"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "阻塞时第一个未关闭的阻塞 Issue"
+            "description": "阻塞原因；没有阻塞时为 null"
           },
           "due_at": {
             "anyOf": [
@@ -21111,8 +21431,8 @@
           "status": {
             "enum": [
               "todo",
-              "in_progress",
-              "review",
+              "running",
+              "awaiting_view",
               "blocked"
             ],
             "title": "Status",
@@ -21242,22 +21562,21 @@
         "title": "TaskReopen",
         "type": "object"
       },
-      "TaskReview": {
+      "TaskResultView": {
         "additionalProperties": false,
-        "description": "确认结果（owner / admin，T-0163）：已完成待查看的任务不再出现在首页的“待查看”里。",
+        "description": "标为已查看（T-0166）：只标当前用户，带回读到的完成轮次。",
         "properties": {
-          "version": {
-            "description": "读取时的 version，原样带回；与当前版本不一致时返回 409",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Version",
-            "type": "string"
+          "completion_seq": {
+            "description": "读取任务时的 completion_seq；已变化时返回 409",
+            "minimum": 1.0,
+            "title": "Completion Seq",
+            "type": "integer"
           }
         },
         "required": [
-          "version"
+          "completion_seq"
         ],
-        "title": "TaskReview",
+        "title": "TaskResultView",
         "type": "object"
       },
       "TaskRunList": {
@@ -21474,6 +21793,53 @@
           "reason"
         ],
         "title": "TaskRunStop",
+        "type": "object"
+      },
+      "TaskSummary": {
+        "description": "任务页筛选标签的计数（T-0166）：与列表用同一组筛选条件，但不套用所选状态。",
+        "properties": {
+          "as_of": {
+            "description": "统计时间",
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "awaiting_view": {
+            "title": "Awaiting View",
+            "type": "integer"
+          },
+          "blocked": {
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "integer"
+          },
+          "todo": {
+            "title": "Todo",
+            "type": "integer"
+          },
+          "total": {
+            "description": "五种状态合计",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "todo",
+          "running",
+          "awaiting_view",
+          "blocked",
+          "done",
+          "total",
+          "as_of"
+        ],
+        "title": "TaskSummary",
         "type": "object"
       },
       "TaskUpdate": {
@@ -46089,7 +46455,7 @@
     },
     "/api/v1/projects": {
       "get": {
-        "description": "默认不含已归档的项目；每个项目带未完成 / 已完成任务数。",
+        "description": "默认不含已归档的项目；每个项目带未完成 / 已完成任务数，以及按当前用户查看状态的五种任务状态计数与最近更新时间（T-0166）。attention_only 只看需要你关注的（有你待查看或明确阻塞的任务），archived_only 只看已归档的；sort=updated 按最近更新排。",
         "operationId": "list_projects",
         "parameters": [
           {
@@ -46149,6 +46515,40 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "attention_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Attention Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "archived_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Archived Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "title",
+              "enum": [
+                "title",
+                "updated"
+              ],
+              "title": "Sort",
+              "type": "string"
             }
           },
           {
@@ -46324,6 +46724,125 @@
         ]
       }
     },
+    "/api/v1/projects/activity": {
+      "get": {
+        "description": "任务动态（设为可领取、领取、放弃、完成、打回、标记 / 解除阻塞），新的在前；project_id 不填时是全部项目。note 来自人或智能体，按纯文本显示（T-0166）。",
+        "operationId": "project_activity",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectActivityPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "项目的最近动态（viewer）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
     "/api/v1/projects/progress": {
       "get": {
         "description": "未归档项目的未完成 / 已完成任务数，供首页“项目进度”组件使用；有未完成任务的项目在前。",
@@ -46402,6 +46921,97 @@
           }
         ],
         "summary": "项目进度（viewer）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/projects/summary": {
+      "get": {
+        "description": "未归档项目数；其中需要你关注的项目数（有你待查看或明确阻塞的任务）；[completed_after, completed_before) 内完成、现在仍是已完成的任务数（按 done_at，不是完整的历史完成事件数）。时间窗由前端按显示时区算好（例如本周一 00:00 到下周一 00:00）。",
+        "operationId": "project_summary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "completed_after",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Completed After",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "completed_before",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Completed Before",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "项目页顶部的统计（viewer）",
         "tags": [
           "tasks"
         ]
@@ -50432,7 +51042,7 @@
     },
     "/api/v1/tasks": {
       "get": {
-        "description": "看板视图由前端按 done 分列。",
+        "description": "看板视图由前端按 done 分列。work_state 按当前用户的状态筛选（T-0166，与 status 取交集；按状态看时传 status=all）；assignee_user_id 与 assignee_instance_id 只能给一个。",
         "operationId": "list_tasks",
         "parameters": [
           {
@@ -50603,6 +51213,63 @@
               ],
               "description": "me：只看执行者是当前用户的任务（首页“我的待办”，T-0163）",
               "title": "Assignee"
+            }
+          },
+          {
+            "in": "query",
+            "name": "work_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "todo",
+                    "running",
+                    "awaiting_view",
+                    "blocked",
+                    "done"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Work State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assignee_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Assignee User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assignee_instance_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Assignee Instance Id"
             }
           },
           {
@@ -50873,7 +51540,7 @@
     },
     "/api/v1/tasks/progress": {
       "get": {
-        "description": "未归档项目里任务的四种状态（T-0163，docs/v2/HOME_PLAN.md 第 2 节）：阻塞（未完成且有未关闭的阻塞 Issue）、已完成待查看（智能体完成、等 owner / admin 确认）、进行中（有正在执行的一段或开始过）、待办（其余未完成的）。返回各状态的数量和按状态筛选的一页；全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前。已完成且已确认的任务不出现。",
+        "description": "未归档项目里任务的四种状态（与任务页同一判定，T-0166）：已完成待查看（按当前用户）、阻塞（有人写了原因）、进行中（有正在执行的一段）、待办。返回各状态的数量和按状态筛选的一页；全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前。已完成且已查看的任务不出现。",
         "operationId": "task_progress",
         "parameters": [
           {
@@ -50885,8 +51552,8 @@
               "enum": [
                 "all",
                 "todo",
-                "in_progress",
-                "review",
+                "running",
+                "awaiting_view",
                 "blocked"
               ],
               "title": "Status",
@@ -50966,6 +51633,218 @@
           }
         ],
         "summary": "首页任务进展（viewer）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/summary": {
+      "get": {
+        "description": "与任务列表同样的筛选（不含 status / work_state），返回五种状态各几项与合计，供任务页的状态筛选标签使用（T-0166）。“已完成待查看”按当前用户的查看状态统计。",
+        "operationId": "task_summary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "priority",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "maximum": 5,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Priority"
+            }
+          },
+          {
+            "in": "query",
+            "name": "due_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Due Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "due_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Due After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assignee",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "me",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Assignee"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assignee_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Assignee User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assignee_instance_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Assignee Instance Id"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "任务状态计数（viewer）",
         "tags": [
           "tasks"
         ]
@@ -51461,6 +52340,147 @@
         ]
       }
     },
+    "/api/v1/tasks/{task_id}/block": {
+      "patch": {
+        "description": "同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。blocked=true 时必须写原因（1–2000 字）；false 清除原因。标记阻塞不会停止正在执行的一段，解除也不会自动重新开始；阻塞的任务不能被新领取或开始执行。已完成的任务返回 409 TASK_DONE；version 不一致返回 409 VERSION_CONFLICT（T-0166）。",
+        "operationId": "block_task",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "每次用户提交生成一个新的 UUID；网络重试与查询结果时复用同一个",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "每次用户提交生成一个新的 UUID；网络重试与查询结果时复用同一个",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskBlock"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "标记 / 解除阻塞（member，必须带 Idempotency-Key 与 version）",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
     "/api/v1/tasks/{task_id}/events": {
       "get": {
         "description": "设为自由接取、领取、放弃、完成、打回（T-0111），最新的在前，最多 100 条。note 是原因或完成说明，来自人或智能体的文字，按纯文本显示。",
@@ -51832,10 +52852,10 @@
         ]
       }
     },
-    "/api/v1/tasks/{task_id}/review": {
-      "post": {
-        "description": "智能体完成的任务处于“已完成待查看”（review_pending）；看过结果后确认，任务动态记一条“确认了结果”（T-0163）。不在待查看时原样返回；要返工用“打回”。",
-        "operationId": "review_task",
+    "/api/v1/tasks/{task_id}/result-view": {
+      "put": {
+        "description": "把当前这一轮完成结果记为你已查看，只影响你自己（T-0166）。带回读取任务时的 completion_seq；任务已重新打开或又完成了一次时返回 409 COMPLETION_CHANGED，details.current 是最新的任务。同一轮重复调用是幂等的。打开任务详情不会自动标记。",
+        "operationId": "view_task_result",
         "parameters": [
           {
             "in": "path",
@@ -51882,7 +52902,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TaskReview"
+                "$ref": "#/components/schemas/TaskResultView"
               }
             }
           },
@@ -51955,7 +52975,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "确认任务结果（admin，乐观并发）",
+        "summary": "标为已查看（viewer）",
         "tags": [
           "tasks"
         ]

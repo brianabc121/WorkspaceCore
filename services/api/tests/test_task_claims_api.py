@@ -263,11 +263,11 @@ async def test_release_and_complete(env: ImEnv) -> None:
     assert done["status"] == "completed" and done["already_done"] is False
     current = await get_task(env, task["id"])
     assert current["done"] is True
-    # 智能体完成的任务等人查看（首页“已完成待查看”，T-0163）
-    assert current["review_pending"] is True
+    # 智能体完成的任务：新的完成轮次，成员们查看前是“已完成待查看”（T-0166）
+    assert current["work_state"] == "awaiting_view" and current["completion_seq"] == 1
     progress = (await env.client.get("/api/v1/tasks/progress", headers=env.headers())).json()
-    assert progress["counts"]["review"] >= 1
-    assert any(i["id"] == task["id"] and i["status"] == "review" for i in progress["items"])
+    assert progress["counts"]["awaiting_view"] >= 1
+    assert any(i["id"] == task["id"] and i["status"] == "awaiting_view" for i in progress["items"])
     assert sorted(r["end_reason"] for r in await runs(env, task["id"])) == ["done", "paused"]
     events = (
         await env.client.get(f"/api/v1/tasks/{task['id']}/events", headers=env.headers())
@@ -298,7 +298,7 @@ async def test_reopen_sends_reason_and_opens_new_run(env: ImEnv) -> None:
     assert response.status_code == 200, response.text
     reopened = response.json()
     assert reopened["done"] is False and reopened["assignee_instance_id"] == a["id"]
-    assert reopened["review_pending"] is False
+    assert reopened["work_state"] == "running" and reopened["completion_seq"] == 1
     open_runs = [r for r in await runs(env, task["id"]) if r["ended_at"] is None]
     assert len(open_runs) == 1 and open_runs[0]["instance_id"] == a["id"]
     messages = texts_to(env, a["im_user_id"])
@@ -378,3 +378,26 @@ async def test_claim_posts_to_project_group(env: ImEnv) -> None:
     assert any("甲 领取了《整理发布说明》" in t for t in group_texts(env))
     ok(await call(env, token_a, "complete_task", {"task_id": task["id"]}))
     assert any("甲 完成了《整理发布说明》" in t for t in group_texts(env))
+
+
+async def test_blocked_task_cannot_be_claimed(env: ImEnv) -> None:
+    """明确阻塞的任务不能被新领取；解除后恢复原来的领取规则（T-0166）。"""
+    _, token = await agent(env, "丙")
+    _, task = await project_and_task(env)
+    task = await patch(env, task, claim_mode="open")
+    response = await env.client.patch(
+        f"/api/v1/tasks/{task['id']}/block",
+        json={"version": task["version"], "blocked": True, "reason": "等发布窗口"},
+        headers={**env.headers(write=True), "Idempotency-Key": str(uuid.uuid4())},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["work_state"] == "blocked"
+    refused = tool_error(await call(env, token, "claim_task", {"task_id": task["id"]}))
+    assert refused["code"] == "TASK_BLOCKED"
+    unblocked = await env.client.patch(
+        f"/api/v1/tasks/{task['id']}/block",
+        json={"version": response.json()["version"], "blocked": False},
+        headers={**env.headers(write=True), "Idempotency-Key": str(uuid.uuid4())},
+    )
+    assert unblocked.status_code == 200, unblocked.text
+    ok(await call(env, token, "claim_task", {"task_id": task["id"]}))

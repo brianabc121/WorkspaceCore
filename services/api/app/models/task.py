@@ -11,8 +11,10 @@
 - 项目群（T-0110，迁移 0028）：建群状态 none / pending / ready、群主、上一次失败的原因；
   群本身在 im_groups（project_id）。这些列由 app/domain/project_groups.py 维护，不参与 version。
 - 接取方式（T-0111，迁移 0029）：指派或自由接取；动态记在 task_events（app/models/timeline.py）。
-- 待查看（T-0163，迁移 0051）：智能体用 complete_task 完成时置真；owner / admin 确认结果、打回，
-  或人改了完成状态时清掉。首页“任务进展”的“已完成待查看”就是它（docs/v2/HOME_PLAN.md 第 2 节）。
+- 任务状态（T-0166，迁移 0053，docs/v2/pages-redesign 规范第 4.2 节）：
+  completion_seq 是完成轮次（历史任务 0；每次未完成→完成加 1）；每个人查看结果的记录在
+  task_result_reads（每用户每任务一行，seen_completion_seq）；明确阻塞记 blocked_at / reason / by。
+  状态判定集中在 app/domain/task_state.py。迁移 0051 的 review_pending 由它们取代并删除。
 """
 
 import uuid
@@ -121,10 +123,15 @@ class Task(Base):
             ),
         ),
         Index("ix_tasks_project", "project_id"),
+        # 复合外键的目标：查看记录（task_result_reads）与任务必须在同一个工作空间
+        UniqueConstraint("workspace_id", "id"),
+        CheckConstraint("(blocked_at IS NULL) = (blocked_reason IS NULL)", name="blocked_pair"),
+        CheckConstraint("char_length(blocked_reason) <= 2000", name="blocked_reason_length"),
+        CheckConstraint("completion_seq >= 0", name="completion_seq"),
         Index(
-            "ix_tasks_review_pending",
+            "ix_tasks_blocked",
             "workspace_id",
-            postgresql_where=sql_text("review_pending"),
+            postgresql_where=sql_text("blocked_at IS NOT NULL"),
         ),
     )
 
@@ -157,11 +164,47 @@ class Task(Base):
     claim_opened_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
-    # 待查看（T-0163）：智能体完成后等人确认结果；不参与“打回”以外的流程
-    review_pending: Mapped[bool] = mapped_column(Boolean, server_default=sql_text("false"))
+    # 完成轮次（T-0166）：每次未完成→完成加 1；历史任务 0（视为已查看）。不参与 version 以外的流程
+    completion_seq: Mapped[int] = mapped_column(Integer, server_default=sql_text("0"))
+    # 明确阻塞（T-0166）：有人写了原因；完成时清除。不停止远端执行，也不自动重启
+    blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    blocked_reason: Mapped[str | None] = mapped_column(Text)
+    blocked_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL")
+    )
     version: Mapped[int] = mapped_column(Integer, server_default=sql_text("1"))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
+
+
+class TaskResultRead(Base):
+    """某个成员查看过某个任务哪一轮完成结果（T-0166，规范第 4.2、4.3 节）。
+
+    每用户每任务一行；seen_completion_seq 不小于任务当前 completion_seq 时，这一轮对他已查看。
+    复合外键保证任务与成员关系都在同一个工作空间；成员离开工作空间或任务删除时随之删除。
+    """
+
+    __tablename__ = "task_result_reads"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "task_id"],
+            ["workspace.tasks.workspace_id", "workspace.tasks.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "user_id"],
+            ["workspace.workspace_members.workspace_id", "workspace.workspace_members.user_id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("seen_completion_seq >= 0", name="seen_completion_seq"),
+        Index("ix_task_result_reads_user", "workspace_id", "user_id"),
+    )
+
+    task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    seen_completion_seq: Mapped[int] = mapped_column(Integer)
+    viewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

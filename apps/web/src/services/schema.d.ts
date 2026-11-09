@@ -3153,7 +3153,7 @@ export interface paths {
         };
         /**
          * 项目列表（viewer）
-         * @description 默认不含已归档的项目；每个项目带未完成 / 已完成任务数。
+         * @description 默认不含已归档的项目；每个项目带未完成 / 已完成任务数，以及按当前用户查看状态的五种任务状态计数与最近更新时间（T-0166）。attention_only 只看需要你关注的（有你待查看或明确阻塞的任务），archived_only 只看已归档的；sort=updated 按最近更新排。
          */
         get: operations["list_projects"];
         put?: never;
@@ -3162,6 +3162,26 @@ export interface paths {
          * @description owner / admin 可以同时选择加入的智能体（instance_ids）并建 IM 项目群（im_group），member 带这两项时返回 403。OpenIM 暂时不可用时项目照常建好，im_group.status 为 pending，Worker 每分钟重试（T-0110）。
          */
         post: operations["create_project"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目的最近动态（viewer）
+         * @description 任务动态（设为可领取、领取、放弃、完成、打回、标记 / 解除阻塞），新的在前；project_id 不填时是全部项目。note 来自人或智能体，按纯文本显示（T-0166）。
+         */
+        get: operations["project_activity"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3180,6 +3200,26 @@ export interface paths {
          * @description 未归档项目的未完成 / 已完成任务数，供首页“项目进度”组件使用；有未完成任务的项目在前。
          */
         get: operations["project_progress"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目页顶部的统计（viewer）
+         * @description 未归档项目数；其中需要你关注的项目数（有你待查看或明确阻塞的任务）；[completed_after, completed_before) 内完成、现在仍是已完成的任务数（按 done_at，不是完整的历史完成事件数）。时间窗由前端按显示时区算好（例如本周一 00:00 到下周一 00:00）。
+         */
+        get: operations["project_summary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3724,7 +3764,7 @@ export interface paths {
         };
         /**
          * 任务列表（viewer）
-         * @description 看板视图由前端按 done 分列。
+         * @description 看板视图由前端按 done 分列。work_state 按当前用户的状态筛选（T-0166，与 status 取交集；按状态看时传 status=all）；assignee_user_id 与 assignee_instance_id 只能给一个。
          */
         get: operations["list_tasks"];
         put?: never;
@@ -3768,9 +3808,29 @@ export interface paths {
         };
         /**
          * 首页任务进展（viewer）
-         * @description 未归档项目里任务的四种状态（T-0163，docs/v2/HOME_PLAN.md 第 2 节）：阻塞（未完成且有未关闭的阻塞 Issue）、已完成待查看（智能体完成、等 owner / admin 确认）、进行中（有正在执行的一段或开始过）、待办（其余未完成的）。返回各状态的数量和按状态筛选的一页；全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前。已完成且已确认的任务不出现。
+         * @description 未归档项目里任务的四种状态（与任务页同一判定，T-0166）：已完成待查看（按当前用户）、阻塞（有人写了原因）、进行中（有正在执行的一段）、待办。返回各状态的数量和按状态筛选的一页；全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前。已完成且已查看的任务不出现。
          */
         get: operations["task_progress"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 任务状态计数（viewer）
+         * @description 与任务列表同样的筛选（不含 status / work_state），返回五种状态各几项与合计，供任务页的状态筛选标签使用（T-0166）。“已完成待查看”按当前用户的查看状态统计。
+         */
+        get: operations["task_summary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3822,6 +3882,26 @@ export interface paths {
          * @description 同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。version 与当前版本不一致时返回 409 VERSION_CONFLICT，details.current 为最新的任务。
          */
         patch: operations["update_task"];
+        trace?: never;
+    };
+    "/api/v1/tasks/{task_id}/block": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 标记 / 解除阻塞（member，必须带 Idempotency-Key 与 version）
+         * @description 同一个 Idempotency-Key 的重复请求原样返回第一次的结果，响应头带 Idempotent-Replayed: true。blocked=true 时必须写原因（1–2000 字）；false 清除原因。标记阻塞不会停止正在执行的一段，解除也不会自动重新开始；阻塞的任务不能被新领取或开始执行。已完成的任务返回 409 TASK_DONE；version 不一致返回 409 VERSION_CONFLICT（T-0166）。
+         */
+        patch: operations["block_task"];
         trace?: never;
     };
     "/api/v1/tasks/{task_id}/events": {
@@ -3901,7 +3981,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/tasks/{task_id}/review": {
+    "/api/v1/tasks/{task_id}/result-view": {
         parameters: {
             query?: never;
             header?: never;
@@ -3909,12 +3989,12 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
         /**
-         * 确认任务结果（admin，乐观并发）
-         * @description 智能体完成的任务处于“已完成待查看”（review_pending）；看过结果后确认，任务动态记一条“确认了结果”（T-0163）。不在待查看时原样返回；要返工用“打回”。
+         * 标为已查看（viewer）
+         * @description 把当前这一轮完成结果记为你已查看，只影响你自己（T-0166）。带回读取任务时的 completion_seq；任务已重新打开或又完成了一次时返回 409 COMPLETION_CHANGED，details.current 是最新的任务。同一轮重复调用是幂等的。打开任务详情不会自动标记。
          */
-        post: operations["review_task"];
+        put: operations["view_task_result"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -10251,42 +10331,22 @@ export interface components {
              */
             new_password: string;
         };
-        /** ProgressBlocker */
-        ProgressBlocker: {
-            /**
-             * Count
-             * @description 未关闭的阻塞 Issue 共几条
-             */
-            count: number;
-            /**
-             * Issue Id
-             * Format: uuid
-             */
-            issue_id: string;
-            /** Number */
-            number: number;
-            /**
-             * Title
-             * @description 阻塞 Issue 的标题；来自人或智能体，按纯文本显示
-             */
-            title: string;
-        };
         /** ProgressCounts */
         ProgressCounts: {
             /**
              * All
-             * @description 四种状态合计（已完成且已确认的不算）
+             * @description 四种状态合计（已完成且已查看的不算）
              */
             all: number;
+            /**
+             * Awaiting View
+             * @description 已完成待查看（按当前用户）
+             */
+            awaiting_view: number;
             /** Blocked */
             blocked: number;
-            /** In Progress */
-            in_progress: number;
-            /**
-             * Review
-             * @description 已完成待查看
-             */
-            review: number;
+            /** Running */
+            running: number;
             /** Todo */
             todo: number;
         };
@@ -10304,6 +10364,57 @@ export interface components {
             kind: "user" | "instance";
             /** Name */
             name: string;
+        };
+        /** ProjectActivityItem */
+        ProjectActivityItem: {
+            /**
+             * Actor Kind
+             * @enum {string}
+             */
+            actor_kind: "user" | "instance" | "system";
+            /** Actor Name */
+            actor_name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "opened" | "claimed" | "released" | "completed" | "reopened" | "reviewed" | "blocked" | "unblocked";
+            /**
+             * Note
+             * @description 原因或说明；来自人或智能体，按纯文本显示
+             */
+            note: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Project Title */
+            project_title: string;
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Task Title */
+            task_title: string;
+        };
+        /** ProjectActivityPage */
+        ProjectActivityPage: {
+            /** Items */
+            items: components["schemas"]["ProjectActivityItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
         };
         /** ProjectAdminOut */
         ProjectAdminOut: {
@@ -10517,7 +10628,7 @@ export interface components {
             description: string;
             /**
              * Done Tasks
-             * @description 已完成任务数
+             * @description 已完成任务数（含当前用户还没查看的；进度 = done / (open + done)）
              */
             done_tasks: number;
             /**
@@ -10533,10 +10644,17 @@ export interface components {
              */
             issue_notices: boolean;
             /**
+             * Last Activity At
+             * @description 最近更新：项目本身或其中任务最后一次修改的时间（T-0166）
+             */
+            last_activity_at?: string | null;
+            /**
              * Open Tasks
              * @description 未完成任务数
              */
             open_tasks: number;
+            /** @description 五种状态各几项，按当前用户的查看状态（T-0166）；没读到时为 null，不是 0 */
+            task_states?: components["schemas"]["ProjectTaskStates"] | null;
             /** Title */
             title: string;
             /**
@@ -10615,6 +10733,48 @@ export interface components {
              * @enum {string}
              */
             widget_type: "project_progress";
+        };
+        /**
+         * ProjectSummary
+         * @description 项目页顶部的三个数（规范第 5 节）。
+         */
+        ProjectSummary: {
+            /**
+             * Active
+             * @description 未归档项目数（项目没有独立的进行中状态，不叫“进行中”）
+             */
+            active: number;
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /**
+             * Attention
+             * @description 需要关注：未归档、当前用户有待查看或有明确阻塞的项目
+             */
+            attention: number;
+            /**
+             * Completed
+             * @description 时间窗内完成、现在仍是已完成的任务数（按 done_at；不是完整的历史完成事件数）
+             */
+            completed: number;
+        };
+        /**
+         * ProjectTaskStates
+         * @description 项目里任务的五种状态各几项（与任务页同一判定；待查看按当前用户）。
+         */
+        ProjectTaskStates: {
+            /** Awaiting View */
+            awaiting_view: number;
+            /** Blocked */
+            blocked: number;
+            /** Done */
+            done: number;
+            /** Running */
+            running: number;
+            /** Todo */
+            todo: number;
         };
         /**
          * ProjectUpdate
@@ -12610,6 +12770,65 @@ export interface components {
              */
             status: "ok" | "stale" | "unavailable" | "unauthorized" | "not_configured";
         };
+        /** TaskActiveRun */
+        TaskActiveRun: {
+            /**
+             * Executor Kind
+             * @enum {string}
+             */
+            executor_kind: "user" | "instance";
+            /** Executor Name */
+            executor_name: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+        };
+        /**
+         * TaskBlock
+         * @description 标记 / 解除阻塞（T-0166，member）：标记不会停止正在执行的一段，解除也不会自动重新开始。
+         */
+        TaskBlock: {
+            /** Blocked */
+            blocked: boolean;
+            /**
+             * Reason
+             * @description blocked 为 true 时必填（1–2000 字）
+             * @default
+             */
+            reason: string;
+            /**
+             * Version
+             * @description 读取时的 version，原样带回；与当前版本不一致时返回 409
+             */
+            version: string;
+        };
+        /** TaskBlocker */
+        TaskBlocker: {
+            /**
+             * Blocked At
+             * Format: date-time
+             */
+            blocked_at: string;
+            /**
+             * Blocked By
+             * @description 标记阻塞的成员；已删除时为 null
+             */
+            blocked_by: string | null;
+            /** Blocked By Name */
+            blocked_by_name: string | null;
+            /**
+             * Reason
+             * @description 阻塞原因；人写的文字，按纯文本显示
+             */
+            reason: string;
+        };
         /**
          * TaskBrief
          * @description 今日任务条目（工作台自己的任务，T-0082 起没有外部链接）。
@@ -12689,7 +12908,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "opened" | "claimed" | "released" | "completed" | "reopened" | "reviewed";
+            kind: "opened" | "claimed" | "released" | "completed" | "reopened" | "reviewed" | "blocked" | "unblocked";
             /**
              * Note
              * @description 放弃 / 打回的原因或完成说明；来自人或智能体的文字，按纯文本显示
@@ -12698,6 +12917,8 @@ export interface components {
         };
         /** TaskOut */
         TaskOut: {
+            /** @description 正在执行的一段；没有时为 null */
+            active_run?: components["schemas"]["TaskActiveRun"] | null;
             /**
              * Assignee Instance Id
              * @description 执行者是 OpenClaw 实例时的实例 ID；与 assignee_user_id 二选一
@@ -12708,6 +12929,8 @@ export interface components {
              * @description 执行者是工作空间成员时的用户 ID
              */
             assignee_user_id: string | null;
+            /** @description 阻塞原因；没有阻塞时为 null */
+            blocker?: components["schemas"]["TaskBlocker"] | null;
             /**
              * Claim Mode
              * @description 接取方式（T-0111）：assigned 由管理员指派；open 可自由接取（空闲的智能体领取）
@@ -12725,6 +12948,12 @@ export interface components {
              * @description 现在能被领取：open、没有执行者、没有完成
              */
             claimable: boolean;
+            /**
+             * Completion Seq
+             * @description 完成轮次：每次未完成→完成加 1；标为已查看时原样带回
+             * @default 0
+             */
+            completion_seq: number;
             /**
              * Created At
              * Format: date-time
@@ -12761,10 +12990,11 @@ export interface components {
              */
             project_id: string;
             /**
-             * Review Pending
-             * @description 已完成待查看（T-0163）：智能体完成后等 owner / admin 确认结果或打回
+             * Result Viewed
+             * @description 当前用户看过这一轮完成结果（历史任务、未完成过的任务为 true）
+             * @default false
              */
-            review_pending: boolean;
+            result_viewed: boolean;
             /**
              * Started At
              * @description 第一次开始执行的时间；由执行记录维护
@@ -12782,6 +13012,13 @@ export interface components {
              * @description 乐观并发用的不透明字符串；修改 / 删除时原样带回
              */
             version: string;
+            /**
+             * Work State
+             * @description 任务对当前用户的状态（T-0166）：todo 待办 / running 进行中（有正在执行的一段）/ blocked 阻塞（有人写了原因）/ awaiting_view 已完成待查看（当前用户还没看这一轮结果）/ done 已完成
+             * @default todo
+             * @enum {string}
+             */
+            work_state: "todo" | "running" | "awaiting_view" | "blocked" | "done";
         };
         /** TaskPage */
         TaskPage: {
@@ -12808,8 +13045,8 @@ export interface components {
         };
         /** TaskProgressItem */
         TaskProgressItem: {
-            /** @description 阻塞时第一个未关闭的阻塞 Issue */
-            blocker: components["schemas"]["ProgressBlocker"] | null;
+            /** @description 阻塞原因；没有阻塞时为 null */
+            blocker: components["schemas"]["TaskBlocker"] | null;
             /** Due At */
             due_at: string | null;
             /** @description 执行者；没有指派时为 null */
@@ -12830,7 +13067,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "todo" | "in_progress" | "review" | "blocked";
+            status: "todo" | "running" | "awaiting_view" | "blocked";
             /** Title */
             title: string;
             /**
@@ -12891,15 +13128,15 @@ export interface components {
             version: string;
         };
         /**
-         * TaskReview
-         * @description 确认结果（owner / admin，T-0163）：已完成待查看的任务不再出现在首页的“待查看”里。
+         * TaskResultView
+         * @description 标为已查看（T-0166）：只标当前用户，带回读到的完成轮次。
          */
-        TaskReview: {
+        TaskResultView: {
             /**
-             * Version
-             * @description 读取时的 version，原样带回；与当前版本不一致时返回 409
+             * Completion Seq
+             * @description 读取任务时的 completion_seq；已变化时返回 409
              */
-            version: string;
+            completion_seq: number;
         };
         /** TaskRunList */
         TaskRunList: {
@@ -12991,6 +13228,33 @@ export interface components {
              * @enum {string}
              */
             reason: "paused" | "interrupted" | "cancelled";
+        };
+        /**
+         * TaskSummary
+         * @description 任务页筛选标签的计数（T-0166）：与列表用同一组筛选条件，但不套用所选状态。
+         */
+        TaskSummary: {
+            /**
+             * As Of
+             * Format: date-time
+             * @description 统计时间
+             */
+            as_of: string;
+            /** Awaiting View */
+            awaiting_view: number;
+            /** Blocked */
+            blocked: number;
+            /** Done */
+            done: number;
+            /** Running */
+            running: number;
+            /** Todo */
+            todo: number;
+            /**
+             * Total
+             * @description 五种状态合计
+             */
+            total: number;
         };
         /**
          * TaskUpdate
@@ -27462,6 +27726,9 @@ export interface operations {
                 /** @description 上一页返回的 next_cursor */
                 cursor?: string | null;
                 limit?: number;
+                attention_only?: boolean;
+                archived_only?: boolean;
+                sort?: "title" | "updated";
             };
             header: {
                 /** @description 当前工作空间；不是成员时返回 404 */
@@ -27575,6 +27842,61 @@ export interface operations {
             };
         };
     };
+    project_activity: {
+        parameters: {
+            query?: {
+                project_id?: string | null;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectActivityPage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     project_progress: {
         parameters: {
             query?: {
@@ -27596,6 +27918,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectProgressList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    project_summary: {
+        parameters: {
+            query: {
+                completed_after: string;
+                completed_before: string;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSummary"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -30060,6 +30435,9 @@ export interface operations {
                 limit?: number;
                 /** @description me：只看执行者是当前用户的任务（首页“我的待办”，T-0163） */
                 assignee?: "me" | null;
+                work_state?: ("todo" | "running" | "awaiting_view" | "blocked" | "done") | null;
+                assignee_user_id?: string | null;
+                assignee_instance_id?: string | null;
             };
             header: {
                 /** @description 当前工作空间；不是成员时返回 404 */
@@ -30237,7 +30615,7 @@ export interface operations {
     task_progress: {
         parameters: {
             query?: {
-                status?: "all" | "todo" | "in_progress" | "review" | "blocked";
+                status?: "all" | "todo" | "running" | "awaiting_view" | "blocked";
                 limit?: number;
             };
             header: {
@@ -30256,6 +30634,65 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskProgressOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    task_summary: {
+        parameters: {
+            query?: {
+                project_id?: string | null;
+                priority?: number[] | null;
+                due_before?: string | null;
+                due_after?: string | null;
+                q?: string | null;
+                assignee?: "me" | null;
+                assignee_user_id?: string | null;
+                assignee_instance_id?: string | null;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskSummary"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -30547,6 +30984,84 @@ export interface operations {
             };
         };
     };
+    block_task: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 每次用户提交生成一个新的 UUID；网络重试与查询结果时复用同一个 */
+                "Idempotency-Key": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskBlock"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_task_events: {
         parameters: {
             query?: never;
@@ -30779,7 +31294,7 @@ export interface operations {
             };
         };
     };
-    review_task: {
+    view_task_result: {
         parameters: {
             query?: never;
             header: {
@@ -30795,7 +31310,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TaskReview"];
+                "application/json": components["schemas"]["TaskResultView"];
             };
         };
         responses: {
