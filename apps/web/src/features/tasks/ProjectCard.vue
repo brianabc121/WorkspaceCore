@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { Bot, Eye, FolderKanban, MoreHorizontal, PlayCircle, TriangleAlert } from '@lucide/vue'
 import type { Schema } from '../../services/api'
 import { relativeTime } from '../../widgets/home/format'
@@ -22,6 +22,13 @@ const flags = computed(() => {
   ].filter((f) => f.show)
 })
 const attention = computed(() => !!states.value && states.value.awaiting_view + states.value.blocked > 0)
+
+// “更多操作”菜单：选了一项、按 Esc 或点到菜单外面都收起
+const menu = ref<HTMLDetailsElement | null>(null)
+const closeMenu = () => { if (menu.value) menu.value.open = false }
+const outside = (event: PointerEvent) => { if (menu.value?.open && !menu.value.contains(event.target as Node)) closeMenu() }
+document.addEventListener('pointerdown', outside)
+onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 </script>
 
 <template>
@@ -33,9 +40,9 @@ const attention = computed(() => !!states.value && states.value.awaiting_view + 
         <p v-if="project.description" class="project-description">{{ project.description }}</p>
       </div>
       <span v-if="project.archived" class="badge">已归档</span>
-      <details class="project-menu">
+      <details ref="menu" class="project-menu" @keydown.esc="closeMenu">
         <summary :aria-label="`项目 ${project.title} 的更多操作`"><MoreHorizontal aria-hidden="true" /></summary>
-        <div class="project-menu-list">
+        <div class="project-menu-list" @click="closeMenu">
           <RouterLink :to="{ path: '/tasks/timeline', query: { project: project.id } }">时间轴</RouterLink>
           <RouterLink :to="{ path: '/knowledge/docs', query: { linked_resource_id: project.id } }">相关文档</RouterLink>
           <template v-if="writable">

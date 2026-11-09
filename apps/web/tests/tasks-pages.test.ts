@@ -80,7 +80,7 @@ describe('任务页面', () => {
     await screen.findByRole('button', { name: '准备发布' })
     await fireEvent.update(screen.getByLabelText('筛选项目'), project.id)
     await fireEvent.update(screen.getByLabelText('筛选优先级'), '3')
-    await fireEvent.update(screen.getByLabelText('截止时间'), 'upcoming')
+    await fireEvent.update(screen.getByLabelText('筛选截止时间'), 'upcoming')
     await vi.waitFor(() => expect(requests.filter((r) => pathOf(r) === '/api/v1/tasks')).toHaveLength(4))
     const query = new URL(requests.filter((r) => pathOf(r) === '/api/v1/tasks')[3]!.url).searchParams
     expect(query.get('status')).toBe('open'); expect(query.get('project_id')).toBe(project.id)

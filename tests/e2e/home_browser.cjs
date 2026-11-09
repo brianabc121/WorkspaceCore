@@ -206,14 +206,15 @@ const noHorizontalScroll = (page) => page.evaluate(() => document.documentElemen
   check(await viewer.page.getByRole('button', { name: '添加待办' }).count() === 0, 'viewer 不应看到“添加待办”')
   check(await viewer.page.getByRole('button', { name: '添加提醒' }).count() === 0, 'viewer 不应看到“添加提醒”')
   check(await viewer.page.getByRole('button', { name: '自定义首页', exact: true }).count() === 0, 'viewer 不应看到“自定义首页”')
-  await waitTile(viewer.page, 'awaiting_view', '1')
+  // 别人完成的任务对 viewer 都是待查看：智能体做完的方案 + owner 自己勾掉的那条待办（owner 已查看不影响 viewer）
+  await waitTile(viewer.page, 'awaiting_view', '2')
   const fresh = (await api(viewer.page, workspace, 'GET', `/api/v1/tasks/${blocked.id}`)).body
   const denied = await api(viewer.page, workspace, 'PATCH', `/api/v1/tasks/${blocked.id}/block`, { version: fresh.version, blocked: false }, idem())
   check(denied.status === 403, `viewer 解除阻塞应 403，实际 ${denied.status}`)
   const reviewNow = (await api(viewer.page, workspace, 'GET', `/api/v1/tasks/${review.id}`)).body
   const viewed = await api(viewer.page, workspace, 'PUT', `/api/v1/tasks/${review.id}/result-view`, { completion_seq: reviewNow.completion_seq })
   check(viewed.status === 200, `viewer 标为已查看（只标自己）应 200，实际 ${viewed.status}`)
-  step('viewer 看得到任务进展，没有添加待办 / 添加提醒 / 自定义首页；自己的待查看仍是 1 并可标为已查看，解除阻塞 403')
+  step('viewer 看得到任务进展，没有添加待办 / 添加提醒 / 自定义首页；自己的待查看是 2（别人完成的两项）并可标为已查看，解除阻塞 403')
 
   await browser.close()
   if (problems.length) throw new Error(`页面错误：${problems.join('; ')}`)

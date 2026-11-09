@@ -61,6 +61,19 @@ describe('项目页（四页改造）', () => {
     expect(within(activity).getByRole('link', { name: 'GitHub集成验证' })).toHaveAttribute('href', '/tasks?task=t1')
   })
 
+  it('closes the “more actions” menu after choosing an item or pressing Escape', async () => {
+    api()
+    await openApp('/projects')
+    const card = await screen.findByRole('region', { name: '项目 Workspace改版' })
+    const menu = card.querySelector('details')!
+    menu.open = true
+    await fireEvent.click(within(card).getByRole('button', { name: '编辑项目 Workspace改版' }))
+    expect(menu.open).toBe(false)
+    menu.open = true
+    await fireEvent.keyDown(menu, { key: 'Escape' })
+    expect(menu.open).toBe(false)
+  })
+
   it('keeps project cards visible when the activity cannot be read', async () => {
     api((r) => pathOf(r) === '/api/v1/projects/activity' ? fail(503, 'HTTP_ERROR') : undefined)
     await openApp('/projects')

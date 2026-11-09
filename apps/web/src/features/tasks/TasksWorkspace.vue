@@ -221,7 +221,7 @@ const showPanel = computed(() => wide.value && !!opened.value)
           <optgroup v-if="assignees.data.value?.instances.length" label="智能体"><option v-for="i in assignees.data.value.instances" :key="i.id" :value="`instance:${i.id}`">{{ i.name }}</option></optgroup>
         </select>
         <select v-model="form.priority" aria-label="筛选优先级" @change="apply"><option value="">全部优先级</option><option v-for="(label, index) in priorities" :key="index" :value="String(index)">{{ label }}</option></select>
-        <select v-model="form.due" aria-label="截止时间" @change="apply"><option value="">全部截止时间</option><option value="today">今天截止</option><option value="overdue">已逾期</option><option value="upcoming">未来 7 天</option></select>
+        <select v-model="form.due" aria-label="筛选截止时间" @change="apply"><option value="">全部截止时间</option><option value="today">今天截止</option><option value="overdue">已逾期</option><option value="upcoming">未来 7 天</option></select>
         <select v-model="form.sort" aria-label="排序" @change="apply"><option value="due_at">按截止时间</option><option value="priority">按优先级</option><option value="updated">最近更新</option></select>
         <button type="button" class="shell-icon" aria-label="刷新任务" title="刷新任务" :disabled="query.isFetching.value" @click="query.refetch(); summary.refetch()"><RefreshCw aria-hidden="true" /></button>
       </form>

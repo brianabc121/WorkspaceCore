@@ -42,12 +42,12 @@ describe('任务页的快速操作', () => {
     await openApp('/tasks'); await screen.findByRole('button', { name: '准备发布' })
     const chips = screen.getByRole('group', { name: '按状态筛选任务' })
     expect(within(chips).getByRole('button', { name: /^全部/ })).toHaveAttribute('aria-pressed', 'true')
-    await fireEvent.update(screen.getByLabelText('截止时间'), 'today')
+    await fireEvent.update(screen.getByLabelText('筛选截止时间'), 'today')
     await vi.waitFor(() => expect(listRequests(requests)).toHaveLength(2))
     let query = new URL(listRequests(requests)[1]!.url).searchParams
     expect(query.get('status')).toBe('open')
     expect(new Date(query.get('due_before')!).getTime() - new Date(query.get('due_after')!).getTime()).toBeGreaterThanOrEqual(23 * 36e5)
-    await fireEvent.update(screen.getByLabelText('截止时间'), '')
+    await fireEvent.update(screen.getByLabelText('筛选截止时间'), '')
     await fireEvent.click(within(chips).getByRole('button', { name: /^阻塞/ }))
     await vi.waitFor(() => expect(listRequests(requests)).toHaveLength(4))
     query = new URL(listRequests(requests)[3]!.url).searchParams
@@ -92,7 +92,7 @@ describe('任务页的快速操作', () => {
     await openApp('/tasks'); await screen.findByRole('button', { name: '准备发布' })
     const form = screen.getByRole('form', { name: '快速添加任务' })
     expect(within(form).getByLabelText('添加到项目')).toHaveValue(project.id)
-    await fireEvent.update(screen.getByLabelText('截止时间'), 'today')
+    await fireEvent.update(screen.getByLabelText('筛选截止时间'), 'today')
     await fireEvent.update(within(form).getByLabelText('快速添加'), '  写周报 ')
     await fireEvent.update(within(form).getByLabelText('添加到项目'), '77777777-7777-4777-8777-777777777778')
     await fireEvent.submit(form)
