@@ -39,7 +39,8 @@
 | `legacy_key_cleanup_state` | text，默认 `not_needed` | `not_needed` / `pending` / `done` / `manual_required`；有 `client_key_ref` 或 `client_public_key` 的旧记录回填 `pending` |
 
 `agent_deployments.runtime_installed`（bool，null）：部署成功 true、卸载容器保留目录 false；旧记录 null（未知），不凭
-`installed_at` 推断。写入在 T-0180 完成，之前的新部署也是 null（成功数保守地给 null + `deployment_counts_partial`）。
+`installed_at` 推断。T-0180 起部署成功与卸载保留目录时写入；失败不覆盖之前的真实证据；迁移前的旧记录仍是 null，
+它们所在服务器的成功数是 null + `deployment_counts_partial`（不当成 0）。
 
 `client_key_ref` / `client_public_key` 暂留为迁移兼容列：新逻辑不读取旧私钥来登录，显式退役成功后才清空；本轮不 DROP。
 加密密钥轮换（`app.commands.rotate_credentials`）已登记 `agent_ssh_targets.login_password_ref`：只重新加密，不改
@@ -56,9 +57,9 @@
 | `POST /agents/servers/{id}/prepare` | `{version}`（不再收密码）；没保存密码 `409 AGENT_SERVER_CREDENTIAL_REQUIRED`，解不开 `409 AGENT_SERVER_CREDENTIAL_UNREADABLE`；任务全程用保存的密码（第 8 节） | T-0178 改输入；T-0179 全程密码 |
 | `POST /agents/servers/{id}/legacy-key-cleanup` | `{version}`：密码登录、只删本记录那一把公钥；成功 `done`，服务器上失败 `200` + `manual_required` + `warning`（第 8.3 节） | T-0179 已实现 |
 | `POST /agents/servers/{id}/revoke` | 旧专用密钥的吊销入口：一律 `410 AGENT_SSH_KEY_AUTH_RETIRED` | T-0179 退役 |
-| `POST /agents/deployments` | 一次点击新建并部署，`request_id` = `Idempotency-Key` | 契约已定，501（只先校验两者一致），T-0180 |
-| `GET /agents/deployments/requests/{request_id}` | 部署请求收据 | 契约已定，501，T-0180 |
-| `GET /agents/overview` | 智能体总览（summary / items / next_cursor / generated_at） | 契约已定，501，T-0180 |
+| `POST /agents/deployments` | 一次点击新建并部署，`request_id` = `Idempotency-Key`（第 10 节） | T-0180 已实现 |
+| `GET /agents/deployments/requests/{request_id}` | 部署请求收据（第 10 节） | T-0180 已实现 |
+| `GET /agents/overview` | 智能体总览（summary / items / next_cursor / generated_at，第 10 节） | T-0180 已实现 |
 
 服务器的四个写接口（添加、替换密码、测试连接、更换地址）接受**可选**的 `Idempotency-Key`：记录只在成功时与业务写入同一事务
 提交，内容只有操作名与服务器 ID；重放返回这台服务器**现在**的详情（`Idempotent-Replayed: true`），不缓存响应正文、不再连接服务器；
@@ -201,3 +202,23 @@
 - T-0179：初始化步骤是 connect / inspect / docker / reconnect / workspace / verify（`SshJobStepKey` 增加 `workspace`、`verify`，约定写的 “connect／inspect／docker／reconnect 及新增 workspace／verify”）；装过 Docker 才重新登录（已有可用的 Docker 时 reconnect 记为跳过）。部署任务不再包含 authorize_key / docker / reconnect，只做环境预检。
 - T-0179：旧公钥退役在服务器上失败一律记为 `manual_required`（不区分“稍后重试”的 pending），这样服务器已经连不上时仍能删除；`pending` 只表示还没做过退役。新增错误码 `AGENT_SERVER_NO_LEGACY_KEY`、`AGENT_SERVER_LEGACY_KEY_PENDING`、`AGENT_SERVER_CONNECTION_FAILED`（最近一次检测主机公钥变化 / 密码被拒时拒绝部署）；`410` 加进统一错误响应说明。
 - T-0179：旧的部署接口（`POST /agents/instances/{id}/deploy`）也要求服务器 `deployable`（含初始化就绪），与一次点击新建并部署共用 `AgentServerService.accept_deployment`。
+
+## 10. 一次点击部署、收据与总览（T-0180）
+
+- 事务：`AgentDeploymentService.create`（`app/domain/agent_deployments.py`）先用现有幂等模块登记“处理中”并提交（并发的
+  同一个键看得到，回 `409 IDEMPOTENCY_IN_PROGRESS`）；然后一个业务事务：锁服务器行 → 版本、总开关、外网入口、
+  `deployable_target`（同部署接口的规则）→ `AgentService.create_instance_record`（只 flush）→ `apply_limits` →
+  `AgentServerService.accept_deployment`（部署记录 + 任务 + 审计 + `runner.reserve`）→ 幂等记录改成 succeeded、context 只加
+  `instance_id` / `job_id` / `server_id` → **一处** `commit_job`（失败 `release` 进程内登记、回滚）→ `launch` → OpenIM 注册。
+  原来会各自提交的 `create_instance` / `deploy` 改为调用这些不提交的内部函数，公开行为不变。
+- 幂等：同键同内容已接纳 → 返回同一个实例与现在的部署状态（`Idempotent-Replayed`），不再建、不重启；同键不同内容
+  `IDEMPOTENCY_KEY_REUSED`；前提不满足 → 记 failed，重发得到同样的错误；提交前崩溃 → 什么都没建，记录停在处理中，
+  2 分钟后收据 `interrupted`，同一个键重发重新执行（`begin` 的 unknown 分支，执行时锁住那条记录）；提交后响应丢失 →
+  收据 / 重发找到同一个实例。同一台服务器不同键并发：服务器行锁让后来者看到进行中的任务 → `409`；进程内检查被绕过时
+  `agent_ssh_jobs` 每台一个进行中任务的部分唯一索引让整个事务回滚、`release` 登记，不留实例。
+- 收据：按 (操作者, 键) 读幂等记录，再核对工作空间与 `op = agents.deployment.create`；只返回 ID 解析出的实例与部署状态。
+- 总览：`AgentOverviewService.list`（`app/domain/agent_overview.py`）只读本地记录；summary 一条聚合查询（按
+  `coalesce(部署记录的服务器, 实例的归属)` 与名称筛选，不套用 status），列表与凭证 / 部署 / 最近任务 / 服务器都按批查询，
+  查询次数不随行数增加（测试比较 1 行与 9 行的语句数）。偏移游标沿用实例列表。
+- 偏差：总开关关闭用现有错误码 `AGENT_DISABLED`（`details.reason = agents_disabled`）；收据的 `interrupted` 带
+  `error_code = interrupted`；`attention` 里的“部署失败”按最近一次任务（部署）失败 / 中断计算，失败的卸载不算。

@@ -192,7 +192,7 @@ export interface paths {
         put?: never;
         /**
          * 新建智能体并部署到服务器（owner，必须带 Idempotency-Key）
-         * @description 一次点击：在同一个事务里登记实例（外网模式、read / member）、设置资源上限、建部署记录与部署任务，提交后开始部署。request_id 必须与 Idempotency-Key 相同；同一个键的重复请求返回同一个实例与任务；不接受地址、密码、镜像、目录或权限开关。服务器要已保存密码、确认指纹、初始化就绪且没有进行中的任务。
+         * @description 一次点击：在同一个事务里登记实例（外网模式、read / member）、设置资源上限、建部署记录与部署任务，提交后开始部署。request_id 必须与 Idempotency-Key 相同；同一个键的重复请求返回同一个实例与任务；不接受地址、密码、镜像、目录或权限开关。服务器要已保存密码、确认指纹、初始化就绪且没有进行中的任务（错误码同部署接口：AGENT_SERVER_NOT_SSH / AGENT_SERVER_CREDENTIAL_REQUIRED / AGENT_SERVER_CREDENTIAL_UNREADABLE / AGENT_SSH_HOST_KEY_UNCONFIRMED / AGENT_SERVER_CONNECTION_FAILED / AGENT_SERVER_NOT_INITIALIZED / AGENT_SSH_JOB_RUNNING）；服务器版本过期 409 VERSION_CONFLICT；总开关关闭 409 AGENT_DISABLED；外网接入入口没配置 409 AGENT_INGRESS_NOT_CONFIGURED。前提不满足时什么都不建，收据记为 failed、同一个键重发得到同样的错误。重发已接纳的请求返回同一个实例与它现在的部署状态（响应头 Idempotent-Replayed: true），不再建、不重启任务；同一个键仍在处理时 409 IDEMPOTENCY_IN_PROGRESS，换了请求内容 409 IDEMPOTENCY_KEY_REUSED。部署任务后来失败不影响收据（accepted），实例保留，用 POST /agents/instances/{id}/deploy 继续。
          */
         post: operations["create_agent_deployment"];
         delete?: never;
@@ -210,7 +210,7 @@ export interface paths {
         };
         /**
          * 查询部署请求的收据（owner）
-         * @description 响应丢失或刷新后按 request_id 找回同一个实例与部署任务；只能查自己在这个工作空间里发出的部署请求。找不到（或记录已过期）时 404：请查询现有实例，不要换新的 request_id 重建。
+         * @description 响应丢失或刷新后按 request_id 找回同一个实例与部署任务；只能查自己在这个工作空间里发出的部署请求。state：processing 命令还在处理；accepted 已接纳（任务进度看 deployment.job）；failed 命令被拒绝、没有创建实例（error_code）；interrupted 处理中断、什么都没建（可以用同一个 request_id 重发）。找不到（或记录已过期，24 小时）时 404：请查询现有实例，不要换新的 request_id 重建。
          */
         get: operations["get_agent_deployment_request"];
         put?: never;

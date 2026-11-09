@@ -16,7 +16,9 @@ from app.api.deps import (
     authenticated,
     client_ip,
     csrf_protected,
+    get_agent_deployment_service,
     get_agent_ops_service,
+    get_agent_overview_service,
     get_agent_server_service,
     get_agent_service,
     get_db,
@@ -24,9 +26,11 @@ from app.api.deps import (
     workspace_admin,
     workspace_owner,
 )
-from app.core.errors import ApiError, not_implemented
+from app.core.errors import ApiError
 from app.domain import agent_im, agent_outbox, agent_stops, agent_wakeups
+from app.domain.agent_deployments import AgentDeploymentService
 from app.domain.agent_ops import AgentOpsService
+from app.domain.agent_overview import AgentOverviewService
 from app.domain.agent_servers import AgentServerService
 from app.domain.agents import AgentService
 from app.domain.audit import AuditTrail
@@ -106,6 +110,8 @@ Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
 Service = Annotated[AgentService, Depends(get_agent_service)]
 ServerService = Annotated[AgentServerService, Depends(get_agent_server_service)]
 OpsService = Annotated[AgentOpsService, Depends(get_agent_ops_service)]
+DeploymentService = Annotated[AgentDeploymentService, Depends(get_agent_deployment_service)]
+OverviewService = Annotated[AgentOverviewService, Depends(get_agent_overview_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
 IdempotencyKey = Annotated[
@@ -170,8 +176,7 @@ async def update_agent_settings(
 
 
 # ---------------------------------------------------------------- 智能体总览与一键部署（T-0180）
-# 契约已定（docs/v2/agent-servers-redesign/ 的接口与迁移约定第 5、6 节）；实现见 T-0180。
-# 静态路径写在带 UUID 的路径之前。
+# docs/v2/agent-servers-redesign/ 的接口与迁移约定第 5、6 节。静态路径写在带 UUID 的路径之前。
 
 
 @router.get(
@@ -184,6 +189,7 @@ async def update_agent_settings(
 )
 async def get_agent_overview(
     access: Owner,
+    service: OverviewService,
     server_id: Annotated[UUID | None, Query(description="只看这台服务器上的实例")] = None,
     q: Annotated[
         str | None, Query(min_length=1, max_length=100, description="按实例名称搜索")
@@ -194,8 +200,9 @@ async def get_agent_overview(
     cursor: Cursor = None,
     limit: Limit = 50,
 ) -> AgentOverviewOut:
-    # TODO(T-0180)：AgentOverviewService.list（批量读取实例、部署、归属与任务）
-    raise not_implemented("T-0180")
+    return await service.list(
+        access, server_id=server_id, q=q, status=instance_status, cursor=cursor, limit=limit
+    )
 
 
 @router.post(
@@ -205,32 +212,53 @@ async def get_agent_overview(
     description="一次点击：在同一个事务里登记实例（外网模式、read / member）、设置资源上限、"
     "建部署记录与部署任务，提交后开始部署。request_id 必须与 Idempotency-Key 相同；"
     "同一个键的重复请求返回同一个实例与任务；不接受地址、密码、镜像、目录或权限开关。"
-    "服务器要已保存密码、确认指纹、初始化就绪且没有进行中的任务。",
+    "服务器要已保存密码、确认指纹、初始化就绪且没有进行中的任务（错误码同部署接口："
+    "AGENT_SERVER_NOT_SSH / AGENT_SERVER_CREDENTIAL_REQUIRED / "
+    "AGENT_SERVER_CREDENTIAL_UNREADABLE / AGENT_SSH_HOST_KEY_UNCONFIRMED / "
+    "AGENT_SERVER_CONNECTION_FAILED / AGENT_SERVER_NOT_INITIALIZED / "
+    "AGENT_SSH_JOB_RUNNING）；服务器版本过期 409 VERSION_CONFLICT；总开关关闭 409 AGENT_DISABLED；"
+    "外网接入入口没配置 409 AGENT_INGRESS_NOT_CONFIGURED。"
+    "前提不满足时什么都不建，收据记为 failed、"
+    "同一个键重发得到同样的错误。重发已接纳的请求返回同一个实例与它现在的部署状态"
+    "（响应头 Idempotent-Replayed: true），不再建、不重启任务；同一个键仍在处理时 "
+    "409 IDEMPOTENCY_IN_PROGRESS，换了请求内容 409 IDEMPOTENCY_KEY_REUSED。"
+    "部署任务后来失败不影响收据（accepted），实例保留，"
+    "用 POST /agents/instances/{id}/deploy 继续。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422, 503),
 )
 async def create_agent_deployment(
-    access: Owner, idempotency_key: IdempotencyKey, body: AgentDeploymentCreateIn
+    access: Owner,
+    request: Request,
+    response: Response,
+    service: DeploymentService,
+    idempotency_key: IdempotencyKey,
+    body: AgentDeploymentCreateIn,
 ) -> AgentDeploymentCreateOut:
     if body.request_id != idempotency_key:
         raise ApiError(422, "VALIDATION_FAILED", "request_id 必须与 Idempotency-Key 相同")
-    # TODO(T-0180)：AgentDeploymentService.create
-    # （一处提交：实例、限额、部署记录、任务、幂等上下文）
-    raise not_implemented("T-0180")
+    out, replayed = await service.create(
+        access, body, client_ip=_server_ip(request), path=request.url.path
+    )
+    if replayed:
+        response.headers["Idempotent-Replayed"] = "true"
+    return out
 
 
 @router.get(
     "/agents/deployments/requests/{request_id}",
     summary="查询部署请求的收据（owner）",
     description="响应丢失或刷新后按 request_id 找回同一个实例与部署任务；只能查自己在这个工作空间里"
-    "发出的部署请求。找不到（或记录已过期）时 404：请查询现有实例，不要换新的 request_id 重建。",
+    "发出的部署请求。state：processing 命令还在处理；accepted 已接纳（任务进度看 deployment.job）；"
+    "failed 命令被拒绝、没有创建实例（error_code）；interrupted 处理中断、什么都没建"
+    "（可以用同一个 request_id 重发）。找不到（或记录已过期，24 小时）时 404：请查询现有实例，"
+    "不要换新的 request_id 重建。",
     responses=_read_errors,
 )
 async def get_agent_deployment_request(
-    access: Owner, request_id: UUID
+    access: Owner, service: DeploymentService, request_id: UUID
 ) -> AgentDeploymentRequestOut:
-    # TODO(T-0180)：AgentDeploymentService.receipt（从幂等记录的安全上下文解析实例与任务）
-    raise not_implemented("T-0180")
+    return await service.receipt(access, request_id)
 
 
 # ---------------------------------------------------------------- 实例

@@ -254,8 +254,8 @@ def _server_out(
     )
     block = _block_reason(ssh_target, initialization, facts.busy, readable)
     stats = facts.stats
-    # TODO(T-0180)：部署成功 / 卸载保留目录时写 runtime_installed；在那之前新部署的记录
-    # 也算“运行状态未知”，成功数保守地给 null
+    # 部署成功写 runtime_installed=true、卸载保留目录写 false（T-0180）；
+    # 还有 installed_at 有值而运行状态未知（null）的旧记录时，成功数保守地给 null
     partial = stats.unknown > 0
     return AgentServerOut(
         id=server.id,
@@ -363,6 +363,16 @@ def _block_error(reason: DeployBlockReason) -> ApiError:
 def _legacy_key_present(target: AgentSshTarget) -> bool:
     """旧方案（一次密码 + 专用密钥）的专用公钥 / 私钥引用还在。"""
     return target.client_key_ref is not None or bool(target.client_public_key)
+
+
+def deployment_out(deployment: AgentDeployment) -> AgentDeploymentOut:
+    return AgentDeploymentOut(
+        server_id=deployment.server_id,
+        install_dir=deployment.install_dir,
+        installed_at=deployment.installed_at,
+        runtime_installed=deployment.runtime_installed,
+        version=deployment.version,
+    )
 
 
 def _connection_snapshot(target: AgentSshTarget) -> tuple[object, ...]:
@@ -679,6 +689,33 @@ class AgentServerService:
         facts = await self._facts([server.id], {server.id: target} if target else {})
         return _server_out(server, target, facts[server.id], _now(), self._box_or_none())
 
+    async def servers_out(
+        self, server_ids: list[uuid.UUID], now: datetime
+    ) -> dict[uuid.UUID, AgentServerOut]:
+        """一批服务器的输出（批量查询，总览用）。调用方保证这些服务器属于当前工作空间。"""
+        if not server_ids:
+            return {}
+        servers = list(
+            (await self.db.scalars(select(AgentServer).where(AgentServer.id.in_(server_ids)))).all()
+        )
+        targets = {
+            t.server_id: t
+            for t in (
+                await self.db.scalars(
+                    select(AgentSshTarget).where(AgentSshTarget.server_id.in_(server_ids))
+                )
+            ).all()
+        }
+        facts = await self._facts([s.id for s in servers], targets)
+        box = self._box_or_none()
+        return {s.id: _server_out(s, targets.get(s.id), facts[s.id], now, box) for s in servers}
+
+    async def server_of(
+        self, access: WorkspaceAccess, server_id: uuid.UUID, *, lock: bool = False
+    ) -> AgentServer:
+        """当前工作空间里的这台服务器（别的空间的 404）。"""
+        return await self._server(access, server_id, lock=lock)
+
     async def list_servers(self, access: WorkspaceAccess) -> AgentServerList:
         now = _now()
         servers = list(
@@ -887,17 +924,7 @@ class AgentServerService:
         )
         job = await self._latest_job(None, instance_id=instance.id)
         return AgentDeploymentState(
-            deployment=(
-                AgentDeploymentOut(
-                    server_id=deployment.server_id,
-                    install_dir=deployment.install_dir,
-                    installed_at=deployment.installed_at,
-                    runtime_installed=deployment.runtime_installed,
-                    version=deployment.version,
-                )
-                if deployment
-                else None
-            ),
+            deployment=deployment_out(deployment) if deployment else None,
             server=await self._out(server) if server is not None else None,
             job=_job_out(job) if job else None,
             capacity_warning=warning,
@@ -1294,7 +1321,7 @@ class AgentServerService:
         await self.db.refresh(server)
         return await self._detail(server)
 
-    def _ready_to_run(self) -> None:
+    def ready_to_run(self) -> None:
         if self.runner is None:
             raise ApiError(503, "EXTERNAL_UNAVAILABLE", "部署任务暂时不可用，请稍后重试")
         if self.settings.credential_encryption_key is None:
@@ -1311,7 +1338,7 @@ class AgentServerService:
         """初始化服务器（T-0179）：后台任务用保存的登录密码登录，缺 Docker 才按锁定脚本安装，
         准备平台受控的部署根目录并做最终检查。不建实例、不发接入包、不装公钥；可以重复执行。
         """
-        self._ready_to_run()
+        self.ready_to_run()
         server = await self._server(access, server_id, lock=True)
         target = await self._ssh_target(server)
         if body.version != server.version:
@@ -1332,8 +1359,8 @@ class AgentServerService:
             metadata={"host": target.host, "port": target.port, "username": target.username},
             client_ip=client_ip,
         )
-        await self._commit_job(job)
-        self._launch(job, revision=revision, client_ip=client_ip)
+        await self.commit_job(job)
+        self.launch(job, revision=revision, client_ip=client_ip)
         await self.db.refresh(server)
         return await self._detail(server)
 
@@ -1347,9 +1374,9 @@ class AgentServerService:
         metadata: dict[str, object],
         client_ip: str,
     ) -> AgentSshJob:
-        """新建任务（running）、写审计并在进程内登记；不提交、不启动（调用方一处提交后 `_launch`）。
+        """新建任务（running）、写审计并在进程内登记；不提交、不启动（调用方一处提交后 `launch`）。
 
-        调用方已锁行并检查过没有进行中的任务。提交失败时要 `release_job`（`_commit_job` 会做）。
+        调用方已锁行并检查过没有进行中的任务。提交失败时要 `release_job`（`commit_job` 会做）。
         任务里不放密码：登录时按 `credential_revision` 解密保存的密码。
         """
         assert self.runner is not None  # noqa: S101 - 调用方已检查
@@ -1365,6 +1392,13 @@ class AgentServerService:
             started_by=access.user_id,
         )
         self.db.add(job)
+        try:
+            # 先写入任务：同一台服务器上已经有进行中的任务时（部分唯一索引）在这里就失败，
+            # 整个事务回滚（一次点击部署时连同刚登记的实例），不会留下半个实例
+            await self.db.flush()
+        except IntegrityError as error:
+            await self.db.rollback()
+            raise _job_running() from error
         await self.audit.record(
             f"agents.ssh.{kind}_started",
             workspace_ids=[target.workspace_id],
@@ -1388,7 +1422,7 @@ class AgentServerService:
         if self.runner is not None:
             self.runner.release(job.id)
 
-    async def _commit_job(self, job: AgentSshJob) -> None:
+    async def commit_job(self, job: AgentSshJob) -> None:
         """提交接纳的任务；同一台服务器上同时开始了另一个任务（部分唯一索引）时 409。"""
         try:
             await self.db.commit()
@@ -1400,7 +1434,7 @@ class AgentServerService:
             self.release_job(job)
             raise
 
-    def _launch(
+    def launch(
         self,
         job: AgentSshJob,
         *,
@@ -1593,7 +1627,7 @@ class AgentServerService:
 
     # ---------------------------------------------------------------- 实例
 
-    def _capacity_warning(self, server: AgentServer) -> str | None:
+    def capacity_warning(self, server: AgentServer) -> str | None:
         """D4：不设每台的实例上限；剩余内存或磁盘不多时提醒（不拦）。"""
         latest = server.latest or {}
         notes = []
@@ -1667,10 +1701,10 @@ class AgentServerService:
         """接纳一次部署：检查前提，建部署记录（没有时）与部署任务并在进程内登记。
 
         不提交、不启动：调用方（旧的部署接口、一次点击新建并部署）在同一个事务里一处提交
-        （`_commit_job`），提交之后再 `_launch`。前提不满足时抛出接口错误，什么都不写。
+        （`commit_job`），提交之后再 `launch`。前提不满足时抛出接口错误，什么都不写。
         调用方已锁住实例（新建的实例不用锁）与服务器。返回任务与接纳时的凭证版本。
         """
-        self._ready_to_run()
+        self.ready_to_run()
         if instance.status == "disabled":
             raise _disabled()
         self.check_ingress(instance)
@@ -1724,15 +1758,15 @@ class AgentServerService:
         只替换这个实例自己的目录与 Compose 项目；用服务器上保存的登录密码（body.password 已弃用、
         忽略、不回显）；服务器要已初始化、可以部署（与一次点击新建并部署同一套接纳逻辑）。
         """
-        self._ready_to_run()
+        self.ready_to_run()
         instance = await self._instance(access, instance_id, lock=True)
         if body.version != instance.version:
             raise _version_conflict(instance.version)
         server = await self._server(access, body.server_id, lock=True)
         job, revision = await self.accept_deployment(access, instance, server, client_ip=client_ip)
-        warning = self._capacity_warning(server)
-        await self._commit_job(job)
-        self._launch(job, revision=revision, client_ip=client_ip)
+        warning = self.capacity_warning(server)
+        await self.commit_job(job)
+        self.launch(job, revision=revision, client_ip=client_ip)
         await self.db.refresh(instance)
         return await self.deployment_state_of(instance, warning=warning)
 
@@ -1746,7 +1780,7 @@ class AgentServerService:
     ) -> AgentDeploymentState:
         """卸载这个实例（T-0179 起用保存的登录密码）：停止它的容器、删掉它的定时任务，
         可选删除它的目录。同一台服务器上的其他实例不受影响。"""
-        self._ready_to_run()
+        self.ready_to_run()
         instance = await self._instance(access, instance_id, lock=True)
         if body.version != instance.version:
             raise _version_conflict(instance.version)
@@ -1775,8 +1809,8 @@ class AgentServerService:
             metadata={"host": target.host, "port": target.port, "remove_files": body.remove_files},
             client_ip=client_ip,
         )
-        await self._commit_job(job)
-        self._launch(job, revision=revision, client_ip=client_ip, remove_files=body.remove_files)
+        await self.commit_job(job)
+        self.launch(job, revision=revision, client_ip=client_ip, remove_files=body.remove_files)
         await self.db.refresh(instance)
         return await self.deployment_state_of(instance)
 
