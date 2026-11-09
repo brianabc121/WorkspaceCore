@@ -2,9 +2,9 @@
 id: T-0183
 title: 智能体服务器（六）：真实 SSH / Docker 一机两实例验收、浏览器与 Runner 回归、文档
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: tests/e2e,.github/workflows/ci-infra.yml,docs
 depends_on: T-0182
 created: 2026-11-09
@@ -29,3 +29,5 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 06:30 UTC · claude · 创建任务（owner: claude）
+- 2026-11-09 09:19 UTC · claude · 开始任务
+- 2026-11-09 09:19 UTC · claude · 验收脚本、浏览器脚本与文档已写（3fac93e 等），按核验修了三处业务问题（5c3ae8e）；等 CI agents job 在真实 sshd + Docker 上跑

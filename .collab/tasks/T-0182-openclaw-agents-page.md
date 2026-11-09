@@ -2,9 +2,9 @@
 id: T-0182
 title: 智能体服务器（五）：“OpenClaw 智能体”页面、选择服务器部署的抽屉、详情与恢复
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: apps/web/src/pages/AgentsPage.vue,apps/web/src/features/agents,apps/web/tests
 depends_on: T-0181
 created: 2026-11-09
@@ -30,3 +30,4 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 06:30 UTC · claude · 创建任务（owner: claude）
+- 2026-11-09 09:19 UTC · claude · 开始任务

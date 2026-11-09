@@ -2,9 +2,9 @@
 id: T-0180
 title: 智能体服务器（三）：一次点击部署（幂等收据）、智能体总览与服务器部署归属
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: services/api/app/domain/agent_deployments.py,services/api/app/domain/agent_overview.py,services/api/app/domain/agents.py,services/api/app/domain/agent_servers.py,services/api/app/domain/agent_ssh_install.py,services/api/app/api/v1/agents.py,services/api/app/api/deps.py,services/api/app/schemas/agents.py,services/api/tests,services/api/openapi.json,apps/web/src/services/schema.d.ts
 depends_on: T-0179
 created: 2026-11-09
@@ -30,3 +30,4 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 06:30 UTC · claude · 创建任务（owner: claude）
+- 2026-11-09 09:19 UTC · claude · 开始任务
