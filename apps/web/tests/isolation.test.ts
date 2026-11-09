@@ -61,6 +61,7 @@ describe('会话与工作空间隔离', () => {
     await vi.waitFor(() => expect(finish).toBeDefined())
     await fireEvent.update(screen.getByLabelText('当前密码'), 'old-password')
     await fireEvent.update(screen.getByLabelText('新密码'), 'new-password-123')
+    await fireEvent.update(screen.getByLabelText('确认新密码'), 'new-password-123')
     await fireEvent.submit(screen.getByRole('form', { name: '修改密码' }))
     await screen.findByText('密码已更新，其他会话已撤销')
     finish!(fail(401, 'UNAUTHORIZED'))

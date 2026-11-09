@@ -2,7 +2,7 @@
 id: T-0189
 title: AI 审批与管理区（B1）：设置页与共享管理布局
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: apps/web/src/components/management,apps/web/src/pages/SettingsPage.vue,apps/web/src/features/ProfileForm.vue,apps/web/src/features/WorkspaceForm.vue,apps/web/src/features/MembersPanel.vue,apps/web/src/app,apps/web/tests
@@ -17,11 +17,11 @@ updated: 2026-11-09
 把设置页改成效果图 02 的布局，并提供后面七页共用的管理页外壳（标题、说明、操作区、侧栏）。方案见 `docs/v2/ai-admin-redesign/`（八页规范、接口约定、三个子计划、8 张效果图）；人类在对话中要求“根据效果图和开发文档进行全面落实”。（计划 B1）
 
 ## 验收标准
-- [ ] 共享 `ManagementPage` / `ManagementSection`（主干已有等价组件就复用），只管布局，不发请求
-- [ ] 个人资料、工作空间各自保存；邮箱只读；本人角色显示；成员表与添加（已有账户或显式“同时创建账号”），不说成已发邀请
-- [ ] owner 不可修改 / 移除，admin 不能改 admin；USER_NOT_FOUND、角色冲突、失权给具体反馈；dirty 不被刷新抹掉
-- [ ] 快捷入口指向安全设置、侧栏与页面、应用中心、首页布局导入导出；角色说明
-- [ ] 八页登记为宽页面，不改其他页面；members / auth 回归与新增行为测试通过
+- [x] 共享 `ManagementPage` / `ManagementSection`（主干已有等价组件就复用），只管布局，不发请求
+- [x] 个人资料、工作空间各自保存；邮箱只读；本人角色显示；成员表与添加（已有账户或显式“同时创建账号”），不说成已发邀请
+- [x] owner 不可修改 / 移除，admin 不能改 admin；USER_NOT_FOUND、角色冲突、失权给具体反馈；dirty 不被刷新抹掉
+- [x] 快捷入口指向安全设置、侧栏与页面、应用中心、首页布局导入导出；角色说明
+- [x] 八页登记为宽页面，不改其他页面；members / auth 回归与新增行为测试通过
 
 ## 背景 / 约束 / 参考
 （可选）
@@ -31,3 +31,4 @@ updated: 2026-11-09
 - 2026-11-09 12:51 UTC · claude · 创建任务（owner: claude）
 - 2026-11-09 12:52 UTC · claude · 开始任务：人类在对话中要求按 codex 的 AI 审批与管理区方案全面落实
 - 2026-11-09 13:03 UTC · claude · 共享 ManagementPage / ManagementSection（只管布局，复用 workspace-pages 与 agents-pages 样式；面板变窄时表格改卡片）、设置页按效果图 02（资料 / 工作空间各自保存、成员与角色表、添加成员不说邀请、快捷入口与角色说明）、八页登记为宽页面（新闻设置在模块路由 meta）；members 测试改用表格行，新增 settings-redesign 5 个用例；前端 67 文件 646 测试、lint、typecheck 通过；截图 1440/1280/768/390 亮暗无横向滚动
+- 2026-11-09 13:08 UTC · claude · status in_progress → done：共享管理布局与设置页完成（34e7994）

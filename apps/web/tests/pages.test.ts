@@ -92,6 +92,7 @@ describe('Sprint 1 页面', () => {
     await screen.findByText('当前会话')
     await fireEvent.update(screen.getByLabelText('当前密码'), 'old-password')
     await fireEvent.update(screen.getByLabelText('新密码'), 'new-password-123')
+    await fireEvent.update(screen.getByLabelText('确认新密码'), 'new-password-123')
     await fireEvent.submit(screen.getByRole('form', { name: '修改密码' }))
     expect(await screen.findByText('密码已更新，其他会话已撤销')).toBeVisible()
     expect(screen.getByLabelText('当前密码')).toHaveValue('')
