@@ -14,6 +14,9 @@ export type MailItem = Schema['MailAggregateItem']
 export type MailPage = Schema['MailAggregatePage']
 export type MailAccountState = Schema['MailAggregateAccount']
 
+// 邮箱自身的状态（设置页的邮箱表与详情）：需要重新连接与已断开分开显示，不和“正常”混在一起
+export const ACCOUNT_STATUS: Record<MailAccount['status'], string> = { active: '正常', needs_reconnect: '需要重新连接', disconnected: '已断开' }
+export const ACCOUNT_TONE: Record<MailAccount['status'], string> = { active: 'tone-green', needs_reconnect: 'tone-amber', disconnected: 'tone-muted' }
 export const SEND_STATUS: Record<MailSend['status'], string> = { sending: '发送中', sent: '已发出', failed: '失败', unknown: '结果未知' }
 // 邮件分类：只放 Gmail 系统标签里有查询入口的只读分类（“全部邮件”不含垃圾邮件与垃圾箱）。
 // 草稿、已删除没有查询入口，本轮不展示；Gmail 只有 readonly + send 授权，不能归档、删除、标记。
@@ -55,6 +58,9 @@ export function mailError(error: unknown): string {
   if (error instanceof ApiError && error.code === 'VALIDATION_FAILED' && error.message) return error.message
   return errorMessage(error)
 }
+
+// 乐观并发冲突（409 VERSION_CONFLICT）：页面提示重新核对，不自动用新 version 重发、不覆盖别人的修改
+export const isVersionConflict = (error: unknown) => error instanceof ApiError && error.status === 409 && error.code === 'VERSION_CONFLICT'
 
 function context(scope: string) {
   const auth = useAuthStore(), user = auth.user?.id
@@ -144,21 +150,27 @@ export function useMailActions(scope: string) {
   const refresh = () => cache.invalidateQueries({ predicate: q => q.queryKey[0] === 'mail' && q.queryKey[1] === c.user && q.queryKey[2] === scope })
   // 分配会改实例的 mail.accounts 与 version：实例页也要刷新
   const refreshAll = () => cache.invalidateQueries({ predicate: q => ['mail', 'agents'].includes(String(q.queryKey[0])) && q.queryKey[1] === c.user && q.queryKey[2] === scope })
+  // 保存成功后先把返回的邮箱写回列表缓存：同一个邮箱接着做的另一项保存（署名之后分配、分配之后署名）
+  // 马上用返回的最新 version，不等列表重新取回（T-0194）。返回值里没有令牌或密钥。
+  const remember = (saved: MailAccount) => cache.setQueryData<Schema['MailAccountList']>(mailKey(c.user, scope, 'accounts'),
+    old => (old ? { ...old, items: old.items.map(item => (item.id === saved.id ? saved : item)) } : old))
   return {
     refresh,
     async saveSettings(body: Schema['MailSettingsPut']) {
-      const saved = dataOf(await api.PUT('/api/v1/mail/settings', { params: { header }, body })); await refresh(); return saved
+      // 返回值只有“密钥是否已设置”，不含密钥本身，可以放进缓存
+      const saved = dataOf(await api.PUT('/api/v1/mail/settings', { params: { header }, body }))
+      cache.setQueryData(mailKey(c.user, scope, 'settings'), saved); await refresh(); return saved
     },
     async connect(loginHint: string) {
       return dataOf(await api.POST('/api/v1/mail/connect', { params: { header }, body: loginHint ? { login_hint: loginHint } : {} })).authorize_url
     },
     async patch(account: MailAccount, body: Omit<Schema['MailAccountPatch'], 'version'>) {
       const saved = dataOf(await api.PATCH('/api/v1/mail/accounts/{account_id}', { params: { header, path: { account_id: account.id } }, body: { version: account.version, ...body } }))
-      await refresh(); return saved
+      remember(saved); await refresh(); return saved
     },
     async assign(account: MailAccount, instanceIds: string[]) {
       const saved = dataOf(await api.PUT('/api/v1/mail/accounts/{account_id}/agents', { params: { header, path: { account_id: account.id } }, body: { version: account.version, instance_ids: instanceIds } }))
-      await refreshAll(); return saved
+      remember(saved); await refreshAll(); return saved
     },
     async disconnect(account: MailAccount) {
       await api.DELETE('/api/v1/mail/accounts/{account_id}', { params: { header, path: { account_id: account.id } } })

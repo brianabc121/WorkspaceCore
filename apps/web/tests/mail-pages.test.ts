@@ -45,6 +45,8 @@ describe('mail settings', () => {
     expect(await screen.findByRole('heading', { level: 1, name: '邮件设置' })).toBeVisible()
     const client = await screen.findByRole('region', { name: 'Google OAuth 客户端' })
     expect(await within(client).findByText(settings.redirect_uri)).toBeVisible()
+    // 改版（T-0194）：已配置的客户端点“修改客户端”才打开表单
+    await fireEvent.click(within(client).getByRole('button', { name: '修改客户端' }))
     await fireEvent.update(within(client).getByLabelText('客户端密钥'), 'GOCSPX-typed-secret')
     await fireEvent.click(within(client).getByRole('button', { name: '保存 OAuth 客户端' }))
     await screen.findByText('OAuth 客户端已保存')
@@ -52,9 +54,11 @@ describe('mail settings', () => {
     expect(await put.clone().json()).toEqual({ client_id: settings.client_id, client_secret: 'GOCSPX-typed-secret', version: 1 })
     expect(document.body).not.toHaveTextContent('GOCSPX-typed-secret')
 
-    const box = screen.getByRole('region', { name: 'Gmail 邮箱' })
+    // 改版（T-0194）：页头“连接邮箱”打开连接表单
+    await fireEvent.click(screen.getByRole('button', { name: '连接邮箱' }))
+    const box = screen.getByRole('form', { name: '连接 Gmail 邮箱' })
     await fireEvent.update(within(box).getByLabelText('要连接的邮箱（可不填）'), 'owner.mail@gmail.com')
-    await fireEvent.click(within(box).getByRole('button', { name: '再连接一个 Gmail 邮箱' }))
+    await fireEvent.click(within(box).getByRole('button', { name: '前往 Google 授权' }))
     await vi.waitFor(() => expect(assign).toHaveBeenCalledWith('https://accounts.google.com/o/oauth2/v2/auth?state=s'))
     const connect = requests.find(r => path(r) === '/api/v1/mail/connect')!
     expect(await connect.clone().json()).toEqual({ login_hint: 'owner.mail@gmail.com' })
@@ -72,10 +76,11 @@ describe('mail settings', () => {
     const { router } = await openApp('/settings/mail?mail=MAIL_SCOPE_MISSING')
     expect(await screen.findByText(/没有授权读取邮件/)).toBeVisible()
     await vi.waitFor(() => expect(router.currentRoute.value.query.mail).toBeUndefined())
-    const box = screen.getByRole('region', { name: 'Gmail 邮箱' })
-    expect(within(box).getByRole('button', { name: '再连接一个 Gmail 邮箱' })).toBeVisible()
-    const item = await screen.findByRole('listitem', { name: `邮箱：${account.email}` })
-    const assign = within(item).getByRole('group', { name: `分配 ${account.email} 给智能体` })
+    expect(screen.getByRole('button', { name: '连接邮箱' })).toBeEnabled()
+    // 改版（T-0194）：邮箱在表格里一行，分配、署名、断开在右侧的所选邮箱里（默认选中第一个）
+    expect(await screen.findByRole('row', { name: `邮箱：${account.email}` })).toBeVisible()
+    const item = await screen.findByRole('complementary', { name: '所选邮箱' })
+    const assign = await within(item).findByRole('group', { name: `分配 ${account.email} 给智能体` })
     expect(within(assign).getByText(/还没有分配给智能体/)).toBeVisible()
     const save = within(assign).getByRole('button', { name: '保存分配' })
     expect(save).toBeDisabled()
@@ -86,12 +91,14 @@ describe('mail settings', () => {
     const put = requests.find(r => r.method === 'PUT' && path(r).endsWith('/agents'))!
     expect(await put.clone().json()).toEqual({ version: 2, instance_ids: ['inst-a'] })
 
-    await fireEvent.click(within(item).getByRole('button', { name: '智能体发信不加署名' }))
+    const signature = within(item).getByRole('switch', { name: '智能体发信署名' })
+    expect(signature).toHaveAttribute('aria-checked', 'true')
+    await fireEvent.click(signature)
     await screen.findByText('邮箱设置已保存')
     const patch = requests.find(r => r.method === 'PATCH')!
     expect(path(patch)).toBe('/api/v1/mail/accounts/acc-1')
     expect(await patch.clone().json()).toEqual({ version: 2, agent_signature: false })
-    await fireEvent.click(within(item).getByRole('button', { name: '断开' }))
+    await fireEvent.click(within(item).getByRole('button', { name: '断开邮箱' }))
     await screen.findByText('邮箱已断开')
     expect(requests.some(r => r.method === 'DELETE' && path(r) === '/api/v1/mail/accounts/acc-1')).toBe(true)
   })

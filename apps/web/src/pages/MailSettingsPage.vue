@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { useAuthStore } from '../stores/auth'
+import ManagementPage from '../components/management/ManagementPage.vue'
 import MailSettings from '../features/mail/MailSettings.vue'
+
+// 邮件设置（T-0194，效果图 05）：owner / admin。按用户与工作空间重建，换空间不串上一个空间的邮箱与草稿
 const auth = useAuthStore()
 </script>
-<template><div class="page-heading"><h1>邮件设置</h1><p>设置 Google OAuth 客户端，连接或断开 Gmail 邮箱（可以连多个），把邮箱分配给智能体。</p></div><MailSettings v-if="auth.canManage" :key="`${auth.user?.id}:${auth.workspaceId}`" /><p v-else role="alert">只有 owner / admin 能设置邮件。</p></template>
+
+<template>
+  <MailSettings v-if="auth.canManage" :key="`${auth.user?.id}:${auth.workspaceId}`" />
+  <ManagementPage v-else title="邮件设置"><p role="alert">只有 owner / admin 能设置邮件。</p></ManagementPage>
+</template>
