@@ -144,7 +144,7 @@ const item = (scope, title) => scope.getByRole('listitem', { name: title, exact:
   let panel = await settingsTab('基本与时间')
   await panel.getByLabel('启用新闻早报').check()
   const slot = quietSlot()
-  await panel.getByLabel('推送时间 1').selectOption(slot)
+  await panel.getByLabel('推送时间 1', { exact: true }).selectOption(slot)
   panel = await settingsTab('新闻来源')
   await panel.getByLabel('自建 NewsNow 地址（可不填，留空用公共接口）').fill('http://fake-news:8080/api/s')
   await panel.getByRole('button', { name: '添加 RSS 源' }).click()
@@ -154,7 +154,8 @@ const item = (scope, title) => scope.getByRole('listitem', { name: title, exact:
   await feed.getByLabel('地址').fill('http://fake-news:8080/rss/tech.xml')
   panel = await settingsTab('兴趣主题')
   check(await panel.getByRole('group', { name: '兴趣主题 1' }).getByLabel('名称').inputValue() === 'AI 与大模型', '新工作空间应带默认的兴趣主题')
-  await panel.getByLabel(/^全局排除词/).fill('八卦\n绯闻')
+  // “全局排除词”既是分区名又是文本框的标签开头：按文本框找
+  await panel.getByRole('textbox', { name: /^全局排除词/ }).fill('八卦\n绯闻')
   panel = await settingsTab('模型与渠道')
   await panel.locator('details.nws-channel summary', { hasText: 'ntfy' }).click()
   const ntfy = panel.getByRole('group', { name: '推送渠道：ntfy' })

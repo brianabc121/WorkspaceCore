@@ -30,3 +30,4 @@ updated: 2026-11-09
 - 2026-11-09 13:22 UTC · claude · 开始任务
 - 2026-11-09 14:43 UTC · claude · 全量后端 1124 passed / 15 skipped；前端 74 文件 725 测试、lint / typecheck / build / check:api 通过；核验记录写好（d2e460c）。下一步：#181 合并后 rebase、开 PR、等 ci-infra 浏览器验收
 - 2026-11-09 15:10 UTC · claude · CI secrets：gitleaks 报 4ecda88 里审计测试的 3 处假凭据（tok-SECRET-123、hunter2-SECRET，用来验证导出去掉凭据键），按惯例把指纹登记进 .gitleaksignore（越界改动：安全扫描的误报清单）；本地对 HEAD 历史 456 个提交重扫 no leaks found
+- 2026-11-09 15:15 UTC · claude · CI news：news_browser 第 157 行 getByLabel(/^全局排除词/) 同时匹配分区与文本框（严格模式失败），改为按文本框找；推送时间 1 加 exact（有第二个推送时间时还会匹配“删除推送时间 1”）。用 vite + 模拟接口按脚本原样跑设置页到“ntfy：成功”通过
