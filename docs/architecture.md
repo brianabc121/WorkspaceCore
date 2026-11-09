@@ -146,7 +146,12 @@ flowchart LR
   - 智能体：只读工具 `get_host_status` 返回调用它的实例所在服务器的整机数值和它自己的用量，看不到同一台服务器上的其他实例。
   - 接入包布局（T-0145）：每个实例一个目录 `~/myworkspace-openclaw/<实例短号>/`、一个 Compose 项目 `myworkspace-openclaw-<实例短号>`、一个自己的网络（`net` 服务持有网络命名空间，OpenClaw 与本机隧道 / 取图代理加入它）；定时任务行尾带 `# mw-openclaw:<实例短号>`。
   - 前端：实例卡片的 CPU / 内存 / 磁盘小指示与“服务器状态”（当前值、24 小时 / 7 天 / 30 天趋势、表格视图，`apps/web/src/features/agents/HostStatus.vue`）。
-- **远程运维动作**（T-0114）：经 SSH 部署时的通道（确认过的主机指纹 + 专用密钥）执行写死的六个动作（查看状态、查看日志、立即上报、重启 OpenClaw、重新拉起、清理镜像）。
+- **智能体服务器与 OpenClaw 智能体**（T-0178 ~ T-0182）：两个独立页面。“智能体服务器”（`/agent-servers`）用 IP、端口、账号、密码添加服务器，
+  密码加密保存（CredentialBox，用途 `agent_server_password:<记录 ID>`，只写不读），核对主机指纹后测试连接、初始化；
+  “OpenClaw 智能体”（`/agents`）选一台已初始化的服务器一次点击部署（`POST /agents/deployments`，request_id 即 Idempotency-Key，可查收据），
+  总览 `GET /agents/overview`。所有 OpenClaw 服务器的 SSH 动作只用保存的密码登录（`app/domain/agent_server_ssh.py`），
+  不再生成、安装或使用专用密钥；旧公钥经 `legacy-key-cleanup` 定向退役。ADR `docs/decisions/2026-11-09-agent-server-password-auth.md`。
+- **远程运维动作**（T-0114）：经 SSH 部署时的通道（确认过的主机指纹 + 专用密钥；自 T-0179 起改为保存的登录密码，见 ADR 2026-11-09-agent-server-password-auth）执行写死的六个动作（查看状态、查看日志、立即上报、重启 OpenClaw、重新拉起、清理镜像）。
   - 后端：`app/domain/agent_ops.py`（命令、脱敏、后台执行，与 SSH 部署共用进程内的 `SshJobRunner`）、`app/domain/step_up.py`（二次认证，与审批共用）。迁移 0032（`agent_ops_actions`）。
   - 前端：实例卡片的“运维”面板（`OpsPanel.vue`）。
 - **验收**：Compose CI 的 `timeline_browser.cjs`、`knowledge_browser.cjs`；agents CI 的场景 16（真实 OpenClaw 上报用量、交给智能体执行到审批完成）；ci-api 在锁定的 Garage 上验证 S3 兼容存储；A15 备份恢复核对本地图片。

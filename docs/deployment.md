@@ -252,7 +252,7 @@ OpenIM 等独立部署的组件分开升级：
    docker compose exec -T api python -m app.commands.rotate_credentials --dry-run
    docker compose exec -T api python -m app.commands.rotate_credentials
    ```
-   覆盖现有集成凭证、OpenClaw 密钥库与内部 CA 私钥。
+   覆盖现有集成凭证、OpenClaw 密钥库、智能体服务器保存的 SSH 登录密码（T-0178，只重新加密，不改凭证版本）与内部 CA 私钥。
    可以重复运行；只改密文，不改记录的 `updated_at` 和版本号。
 4. 输出“仍是旧密钥：0；失败：0”（退出码 0）之后，**再等 15 分钟**（AI 待审批的最长有效期）：待审批记录里加密的敏感参数与参数校验用的密钥
    不在第 3 步的范围内，第 2 步之前创建的待审批要靠旧密钥才能批准执行。然后清空 `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS`，再 `docker compose up -d api worker`。
@@ -622,7 +622,10 @@ OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式�
 
 ### 16.2 接入一台 OpenClaw 服务器
 
-1. 工作台的实例页：登记实例，选网络模式和权限，授权密钥，下载接入包（zip，凭证只出现这一次）；
+1. 工作台的「OpenClaw 智能体」页：“手动登记 / 接入”，选网络模式和权限，授权密钥，下载接入包（zip，凭证只出现这一次）；
+   外网模式也可以不下载接入包：在「智能体服务器」页用 IP、端口、账号、密码添加服务器，核对指纹、测试连接、初始化，
+   再在「OpenClaw 智能体」页选它“部署智能体”，工作台用保存的（加密的）登录密码经 SSH 完成下面第 2 步
+   （部署教程第 8.6 节 ③+；`docs/decisions/2026-11-09-agent-server-password-auth.md`）；
 2. 在 OpenClaw 服务器上解压，按里面的 `CHECKLIST.md` 设置属主、权限、插件和定时任务，然后 `docker compose up -d`；
    - 外网模式会同时启动 `tunnel` 服务：本机隧道，用接入包里的客户端证书连外网入口；
    - 内网模式、且工作台也配置了外网入口时，会同时启动 `image-proxy` 服务：本机取图代理（不带客户端证书），
@@ -769,7 +772,8 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 
 1. **准备**：Docker（含 Compose v2）；能访问模型服务商；能访问工作台的入口（内网模式经私网，外网模式经公网）；
    第一次安装插件时能访问 npm 仓库（插件的依赖从 npm 安装）；宿主机的 cron 或 systemd timer。
-2. **工作台**：密钥库录入模型密钥 → 实例页登记实例（网络模式、权限范围 `read` / `read_write`、最高角色）→ 授权密钥 → 下载接入包（凭证只出现这一次）。
+2. **工作台**：密钥库录入模型密钥 → 「OpenClaw 智能体」页“手动登记 / 接入”（网络模式、权限范围 `read` / `read_write`、最高角色）→ 授权密钥 → 下载接入包（凭证只出现这一次）。
+   外网模式经「智能体服务器」页添加并初始化服务器后，可以直接“部署智能体”，第 3 ~ 7 条由工作台完成。
 3. **安装**：解压到专用目录，属主改成容器里的 uid 1000，目录 700、`myworkspace.env` 与客户端私钥 600；`bin/` 下三个程序属主是运行用户、0755、不是符号链接。
 4. **插件**：核对 `@openim/openclaw-channel@0.3.3` 的 sha256，用临时的空配置安装（配置里已经写了插件提供的 `openim` 渠道，装好之前 OpenClaw 拒绝这份配置），然后 `docker compose up -d`；
    冷启动要 2 ~ 4 分钟。
@@ -917,27 +921,30 @@ Worker 每分钟检查一次，通知 owner / admin；同一实例同一类告�
 
 ## 22. 远程运维动作（T-0114）
 
-设计见 `docs/v2/AGENT_OPS_PLAN.md` 第 6.1 节，接口见 `docs/api-contract.md`。实例页每个实例的“运维”里有六个按钮，经工作台的 SSH 通道（部署时确认的主机指纹 + 专用密钥）在接入包目录里执行：
+设计见 `docs/v2/AGENT_OPS_PLAN.md` 第 6.1 节，接口见 `docs/api-contract.md`。「OpenClaw 智能体」页每个智能体详情的“运维”里有五个按钮、服务器详情的“服务器运维”里有两个，经工作台的 SSH 通道（确认过的主机指纹 + 这台服务器保存的登录密码；T-0179 起不再用专用密钥，`docs/decisions/2026-11-09-agent-server-password-auth.md`）在接入包目录里执行：
 
 | 按钮 | 执行的命令 | 二次认证 |
 |---|---|---|
 | 查看状态 | `docker compose ps --all`、本项目容器的 `docker stats --no-stream`、`df -h <接入包目录> /`、`uptime` | 不需要 |
 | 查看日志 | `docker compose logs --no-color --tail 200 <openclaw / tunnel / image-proxy>` | 不需要（会写审计） |
 | 立即上报一次 | 在容器里运行 `usage-report.mjs` 与 `host-report.mjs` | 不需要 |
-| 重启 OpenClaw | `docker compose restart openclaw` | 再输一次登录密码 |
-| 重新拉起全部服务 | `docker compose up -d`（最多等 180 秒） | 再输一次登录密码 |
-| 清理无用镜像 | `docker image prune -f`（只删没在用的镜像） | 再输一次登录密码 |
+| 重启 OpenClaw | `docker compose restart openclaw` | 再输一次工作台登录密码 |
+| 重新拉起全部服务 | `docker compose up -d`（最多等 180 秒） | 再输一次工作台登录密码 |
+| 清理无用镜像（服务器级） | `docker image prune -f`（只删没在用的镜像） | 再输一次工作台登录密码 |
+| 查看全部容器（服务器级） | `docker compose ls --all`、`docker ps`、`docker stats --no-stream` | 不需要 |
 
-- 只适用于用 SSH 部署过、专用密钥还在的实例；手动接入的，先在实例页做一次 SSH 部署（原样重装接入包，会话和记忆在 `state/` 里保留）。吊销专用密钥后运维按钮不可用。
-- 同一实例同时只跑一个动作，部署、卸载、吊销进行中时也不能执行；工作台重启时进行中的动作记为“已中断”。
+- 只适用于经工作台部署到服务器的实例（有部署记录与目录），而且这台服务器保存了能解开的登录密码、主机指纹已确认；
+  T-0179 之前添加的服务器先在「智能体服务器」页补充登录密码。手动接入的，先部署一次（原样重装接入包，会话和记忆在 `state/` 里保留）。
+- 二次认证校验的是**工作台账号**的登录密码，不是服务器的 SSH 密码（填 SSH 密码会被拒绝，`STEP_UP_FAILED`）。
+- 同一台服务器同时只跑一个动作，初始化、部署、卸载进行中时也不能执行（旧公钥退役期间要等它结束）；工作台重启时进行中的动作记为“已中断”。
 - 输出脱敏后保存 7 天，在实例页“最近的运维记录”里查看；审计日志里有 `agents.ops.started` / `agents.ops.finished`（动作、退出码），没有输出。
-- 动作失败时看结果里的说明：`timeout`（超过 60 / 180 秒）、`host_key_changed`（服务器主机公钥变了，按第 18 节重新确认）、`auth_failed`（专用密钥被删，重新部署）、`client_key_invalid`（工作台的加密密钥换过，重新部署）。
+- 动作失败时看结果里的说明：`timeout`（超过 60 / 180 秒）、`host_key_changed`（服务器主机公钥变了：核对后更换地址重新确认）、`auth_failed`（服务器拒绝了保存的密码：在服务器页更新登录密码）、`credential_unreadable`（工作台的加密密钥换过：重新填写登录密码）、`credential_changed`（动作开始后密码被替换，重新执行即可）。
 
 ### 22.1 验收状态（T-0115）
 
 - agents CI 场景 17（自由接取：同时领取只成功一个、完成后打回再完成）、场景 18（项目管理权限：没开被拒，开了之后建项目、拉另一个实例进项目群）、场景 19（甲、乙的真实 OpenClaw 容器上报服务器状态，甲用 `get_host_status` 只读到自己的）。
-- SSH 部署验收（`agent_ssh_acceptance.py`）：照 crontab 那一行跑服务器状态上报；六个运维动作逐个执行，核对 `docker compose ps` / `docker stats` / `df` / `uptime` 的输出、日志脱敏、二次认证与审计；卸载后运维动作不可用。
-- 浏览器验收：`agent_ssh_browser.cjs`（运维面板：查看状态、立即上报、输密码重启；服务器状态面板与趋势；390px 宽度）、`sprint6_browser.cjs`（新建项目勾选实例与项目群、自由接取、领取、完成、打回与动态）。
+- SSH 部署验收（`agent_ssh_acceptance.py`）：照 crontab 那一行跑服务器状态上报；运维动作逐个执行，核对 `docker compose ps` / `docker stats` / `df` / `uptime` 的输出、日志脱敏、二次认证（工作台密码通过、SSH 密码被拒）与审计；卸载后运维动作不可用。T-0183 起全程用保存的登录密码，覆盖范围见 `docs/verification/T-0183-agent-server-passwords.md`。
+- 浏览器验收：`agent_ssh_browser.cjs`（智能体服务器页添加、核对指纹、测试连接、初始化；智能体页选服务器部署；运维面板：查看状态、立即上报、输工作台密码重启；服务器详情的负载与已部署清单；390px 宽度）、`sprint6_browser.cjs`（新建项目勾选实例与项目群、自由接取、领取、完成、打回与动态）。
 
 
 ## 23. 新闻早报（TrendRadar，T-0152）
