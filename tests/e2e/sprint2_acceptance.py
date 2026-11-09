@@ -113,10 +113,6 @@ def main() -> int:
         and overview.get("today_tasks") == [],
         str(overview.get("summary")),
     )
-    report.check(
-        "便签与快捷链接照常返回",
-        {"note", "quick_links"} <= {w["widget_type"] for w in widgets},
-    )
     listed = alice.request("GET", "/api/v1/dashboards", headers=in_workspace).json() or {}
     report.check(
         "仪表盘列表只有默认首页",
@@ -124,18 +120,31 @@ def main() -> int:
     )
 
     dashboard_id = str(dashboard.get("id"))
-    version = int(dashboard.get("version", 0))
+    # T-0164 起默认首页没有便签：先加一个，下面的权限、版本冲突与审计检查都用它
+    note_body = {
+        "widget_type": "note",
+        "config": {"text": "验收用便签"},
+        "layout": {"desktop": {"x": 0, "y": 14, "w": 4, "h": 2}, "mobile": {"y": 24, "h": 2}},
+    }
+    added = alice.request(
+        "POST", f"/api/v1/dashboards/{dashboard_id}/widgets", note_body, headers=in_workspace
+    )
+    report.check("添加便签组件 → 201", added.status == 201, added.summary)
+    overview = alice.request("GET", "/api/v1/dashboard/overview", headers=in_workspace).json() or {}
+    widgets = overview.get("widgets") or []
+    version = int((overview.get("dashboard") or {}).get("version", 0))
     by_type = {w["widget_type"]: w for w in widgets}
     note = by_type.get("note") or {}
 
     # ---------------------------------------------------------------- A04 保存并刷新布局
     saved = copy.deepcopy(layouts(overview))
+    last_mobile = max(layout["mobile"]["y"] for layout in saved.values())
     for widget_id, layout in saved.items():
         # 整体下移一行并左右对调：桌面端 x 变为 12 - x - w，移动端顺序反转
         desktop = layout["desktop"]
         desktop["x"] = 12 - desktop["x"] - desktop["w"]
         desktop["y"] += 1
-        layout["mobile"]["y"] = 20 - layout["mobile"]["y"]
+        layout["mobile"]["y"] = last_mobile - layout["mobile"]["y"]
         saved[widget_id] = layout
     placements = [{"widget_id": wid, "layout": layout} for wid, layout in saved.items()]
     body: dict[str, Any] = {"version": version, "layout": placements}

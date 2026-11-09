@@ -154,6 +154,9 @@ def prepare(base: str) -> tuple[dict[str, str], list[tuple[str, str, int]]]:
         ("本周日程", f"/api/v1/calendar/events?{week}", BASIC_MS),
         ("通知", "/api/v1/notifications", BASIC_MS),
         ("首页聚合（缓存命中）", "/api/v1/dashboard/overview", DASHBOARD_MS),
+        # 首页“工作概况 / 任务进展”（T-0163）：按状态统计全部任务，与首页同一预算
+        ("首页任务进展", "/api/v1/tasks/progress", DASHBOARD_MS),
+        ("我的待办", "/api/v1/tasks?assignee=me", BASIC_MS),
     ]
     return headers, endpoints
 

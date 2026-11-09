@@ -95,6 +95,9 @@ jobs:
       - name: 插拔式模块与侧栏浏览器验收（应用中心停用 / 启用新闻早报、功能未启用页、自定义分组与页面、嵌入页与 CSP、member 只读、手机宽度）
         # 不要求空库：每次新建工作台用户（T-0159 ~ T-0161）
         run: node tests/e2e/modules_browser.cjs
+      - name: 首页浏览器验收（工作概况、任务进展与确认结果、我的待办、提醒与日程、恢复默认首页、viewer 只读、手机宽度）
+        # 不要求空库：每次新建工作台用户；没有真实 OpenClaw，“智能体完成的任务”由 seed.py review 写入（T-0165）
+        run: node tests/e2e/home_browser.cjs
       - name: 完整端到端冒烟（make smoke-full：全部读接口与页面、核心服务、SSE、写入往返、登出）
         # 不要求空库：用新的临时用户；新增的接口（openapi.json）与页面（navigation.ts）自动纳入
         run: make smoke-full

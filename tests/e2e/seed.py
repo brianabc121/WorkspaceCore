@@ -15,6 +15,8 @@
   python3 tests/e2e/seed.py timeline <工作空间ID> <任务ID> <实例名>
       时间轴浏览器验收（T-0106）：一个实例（Compose 验收里没有真实 OpenClaw）、它在这个任务上
       40 分钟前到 10 分钟前完成的一段执行，以及这段时间每分钟上报的 token；任务标为完成。输出实例 ID
+  python3 tests/e2e/seed.py review <工作空间ID> <任务ID> <实例名>
+      首页验收（T-0165）：一个实例完成了这个任务（与 complete_task 一样置“已完成待查看”、记完成动态）。输出实例 ID
   python3 tests/e2e/seed.py cleanup-files <工作空间ID>
       知识库图片清理（T-0106）：把这个工作空间的图片的上传时间改到 2 天前，再运行 Worker 的每日清理，
       输出删掉的张数（没有笔记引用的才会删）
@@ -38,7 +40,7 @@ from sqlalchemy import update
 from app.domain import dashboard_defaults, events, knowledge_files, notifications
 from app.domain.security import hash_password
 from app.models import (
-    AgentInstance, AgentUsageMinute, KnowledgeFile, Project, Task, TaskRun, Widget, WorkspaceMember,
+    AgentInstance, AgentUsageMinute, KnowledgeFile, Project, Task, TaskEvent, TaskRun, Widget, WorkspaceMember,
 )
 from app.repositories import users, workspaces
 
@@ -118,6 +120,25 @@ async def main():
                     assignee_instance_id=instance.id, started_at=started, done=True, done_at=ended,
                 ))
                 print(instance.id, started.isoformat())
+            elif command == "review":
+                # 智能体用 complete_task 完成任务（T-0163）：实例、执行者、完成、待查看、完成说明
+                workspace_id, task_id, name = uuid.UUID(sys.argv[2]), uuid.UUID(sys.argv[3]), sys.argv[4]
+                now = datetime.now(UTC)
+                instance = AgentInstance(
+                    workspace_id=workspace_id, name=name, network_mode="intranet", status="online",
+                    im_user_id="oc_" + uuid.uuid4().hex, im_nickname=name, im_ready=True, last_seen_at=now,
+                )
+                db.add(instance)
+                await db.flush()
+                await db.execute(update(Task).where(Task.id == task_id).values(
+                    assignee_instance_id=instance.id, started_at=now - timedelta(minutes=30), done=True,
+                    done_at=now, review_pending=True, version=Task.version + 1,
+                ))
+                db.add(TaskEvent(
+                    workspace_id=workspace_id, task_id=task_id, kind="completed", actor_kind="instance",
+                    instance_id=instance.id, actor_name=name, note="方案已写进任务 README", created_at=now,
+                ))
+                print(instance.id)
             elif command == "cleanup-files":
                 workspace_id = uuid.UUID(sys.argv[2])
                 await db.execute(update(KnowledgeFile).where(KnowledgeFile.workspace_id == workspace_id)
@@ -181,6 +202,11 @@ def seed_timeline(workspace_id: str, task_id: str, name: str) -> str:
     return " ".join(_run("timeline", workspace_id, task_id, name)[-2:])
 
 
+def seed_review(workspace_id: str, task_id: str, name: str) -> str:
+    """返回实例 ID：这个实例完成了任务，任务处于“已完成待查看”。"""
+    return _run("review", workspace_id, task_id, name)[-1]
+
+
 def cleanup_files(workspace_id: str) -> int:
     return int(_run("cleanup-files", workspace_id)[-1])
 
@@ -204,6 +230,8 @@ def main(argv: list[str]) -> int:
             print(seed_timeline(workspace_id, task_id, name))
         case ["cleanup-files", workspace_id]:
             print(cleanup_files(workspace_id))
+        case ["review", workspace_id, task_id, name]:
+            print(seed_review(workspace_id, task_id, name))
         case _:
             sys.exit(__doc__)
     return 0

@@ -616,6 +616,20 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `GET /api/v1/navigation` | viewer。`version`（还没改过是 0）、`sections`、`pages`（只返回当前角色能看到的，按 `min_role`）、`placements`（`{站内路径: 分组}`）、`section_order`、`embed_origins`（部署允许嵌入的来源）、`can_manage`（只有 owner 为 true） |
 | `PUT /api/v1/navigation` | owner。整份替换 + `version`（不一致 `409 VERSION_CONFLICT`）。最多 12 个分组、50 个页面、100 条挪动。页面 `kind`：`link`（`url`，只允许 http(s)、不能带账号密码，新窗口打开）、`page`（`path`，以 `/` 开头的站内路径）、`note` / `dashboard`（`target_id`，必须属于当前工作空间）、`embed`（`url`，来源必须在 `.env` 的 `EMBED_ORIGINS` 里且不是工作台自己，页面上用带沙箱的 iframe 显示）。引用不存在的分组、重复 id、多余字段都 `422`。审计 `navigation.updated`，发 `navigation` 事件 |
 
+## 首页改版（T-0163）
+
+方案 `docs/v2/HOME_PLAN.md`（首页效果图“工作总览”）。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /api/v1/tasks/progress?status=&limit=` | viewer。`status`：`all`（默认）/ `todo` / `in_progress` / `review` / `blocked`；`limit` 1–20（默认 7）。未归档项目里任务的四种状态：阻塞（未完成且有未关闭的阻塞 Issue，优先）、已完成待查看（`review_pending`）、进行中（有正在执行的一段或开始过）、待办（其余未完成的）。返回 `counts`（`all` / `todo` / `in_progress` / `review` / `blocked`）、`attention`（待查看 + 阻塞）、`items`（`id`、`title`、`project_id`、`project_title`、`status`、`executor`（`kind` user / instance、`id`、`name`，没有指派为 null）、`due_at`、`updated_at`、`blocker`（第一个未关闭的阻塞 Issue：`issue_id`、`number`、`title`、`count`））。全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前；已完成且已确认的任务不出现 |
+| `GET /api/v1/tasks?assignee=me` | viewer。只看执行者是当前用户的任务（首页“我的待办”与 `status=open` 一起用） |
+| `POST /api/v1/tasks` | 新增可选字段 `assignee_user_id`：必须是本工作空间成员（否则 `422`），首页“添加待办”指派给自己 |
+| `POST /api/v1/tasks/{id}/review` | owner / admin。`{"version"}`。确认智能体完成的任务的结果：`review_pending` 变 false、版本 +1、动态记 `reviewed`（确认了结果）、审计 `task.reviewed`。不在待查看时原样返回 `200`；版本不一致 `409 VERSION_CONFLICT`；member / viewer `403` |
+| `TaskOut.review_pending` | 智能体用 `complete_task` 完成时为 true；确认结果、打回（`/reopen`）、人改完成状态（`PATCH done`）都会清掉 |
+| `POST /api/v1/dashboards/{id}/reset` | member（能编辑仪表盘的人）。`{"version"}`。删掉这个仪表盘的全部组件，换成默认首页的五个组件（工作概况、任务进展、AI 新闻速览、我的待办、提醒与日程），版本 +1，审计 `dashboard.reset`；版本不一致 `409` |
+| 组件类型 | 新增 `work_summary`（`reminder_days` 1–14，默认 2）、`task_progress`（`limit` 1–20，默认 7）、`my_todos`（`limit` 1–20，默认 5）；`calendar_agenda` 前端改为“提醒与日程”时间轴，`news_briefing` 改为“AI 新闻速览”（今天早报的主题，`GET /api/v1/news/today`） |
+
 ## 新闻早报（T-0153）
 
 方案 `docs/v2/NEWS_PLAN.md`，核验记录 `docs/decisions/2026-11-07-trendradar-verification.md`。新闻早报是插拔式模块 `news`（默认启用，owner 可在应用中心停用，停用后下面的接口都是 `404 MODULE_DISABLED`）。整个部署只有一个 TrendRadar：
