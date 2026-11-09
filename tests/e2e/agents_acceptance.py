@@ -1676,8 +1676,13 @@ class RunnerSite:
         (self.dir / "compose.yaml").write_text(compose + f"\nnetworks:\n  edge:\n    external: true\n    name: {edge}\n")
         out = run("bash", str(self.dir / "install.sh"), cwd=self.dir, timeout=900, check=False)
         log = (out.stdout + out.stderr)[-1500:]
-        online = wait_for("运行服务器上线", lambda: (lambda h: h if h and h["status"] == "online" else None)(
-            c.owner.call("GET", "/api/v1/runner/overview")["host"]), timeout=240, interval=3)
+        try:
+            online = wait_for("运行服务器上线", lambda: (lambda h: h if h and h["status"] == "online" else None)(
+                c.owner.call("GET", "/api/v1/runner/overview")["host"]), timeout=240, interval=3)
+        except Exception:
+            # 没上线时 install.sh 的输出是唯一线索（agent 自己的日志在场景结束时打印）
+            print(f"install.sh 退出码 {out.returncode}，输出末尾：\n{log}", file=sys.stderr)
+            raise
         return online, log
 
     def env(self, env_id: str) -> dict[str, Any]:
@@ -1751,6 +1756,7 @@ def scenario_26(c: Ctx) -> None:
     site = RunnerSite(c)
     image = runner_image()
     kernel = os.uname().release
+    finished = False
     try:
         host, log = site.install()
         c.check("场景 26：接入包原样以 root 运行 install.sh，runner-agent 上线，Docker 认得 runsc（gVisor）",
@@ -1905,8 +1911,10 @@ def scenario_26(c: Ctx) -> None:
         removed = site.wait_state(keep_id, "deleted", timeout=300)
         c.check("场景 26：管理员删除常驻环境后容器不在，记录保留",
                 removed.get("state") == "deleted" and not env_containers(keep_id), removed.get("state_reason") or "")
+        finished = True
     finally:
-        if c.report.failures:
+        # 中途抛异常（例如 agent 没上线）时失败还没记进 report，也要打出 agent 日志
+        if not finished or c.report.failures:
             print(run("docker", "logs", "--tail", "120", "myworkspace-runner-agent", check=False).stderr[-6000:], file=sys.stderr)
         site.teardown()
 
