@@ -124,6 +124,8 @@ p { line-height: 1.7; }
 .theme-button, .icon-button { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; color: var(--muted); font-size: .8rem; }
 .menu-toggle { display: none; }
 main { width: 100%; max-width: 1340px; padding: 28px 32px; margin: 0 auto; flex: 1; }
+/* 任务、项目、日历、邮件四页的宽版内容区（四页改造）：列表与详情并列 */
+main.is-wide { max-width: 1880px; }
 .eyebrow { font-size: .7rem; color: var(--accent); font-weight: 600; letter-spacing: .08em; margin-bottom: 10px; }
 .page-heading { margin-bottom: 20px; }
 .page-heading p { color: var(--muted); margin-top: 4px; font-size: .86rem; line-height: 1.6; max-width: 72ch; }

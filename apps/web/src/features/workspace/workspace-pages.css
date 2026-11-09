@@ -1,0 +1,93 @@
+/* 任务、项目、日历、邮件四页共用的视觉基础（四页改造，效果图 01–05；风格沿用首页 home.css）。
+   颜色都取主题变量（亮 / 暗主题自动跟随）；状态同时有图标与文字，不只靠颜色。 */
+
+/* 页头：标题 + 一句说明 + 右侧操作 */
+.ws-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 14px 24px; flex-wrap: wrap; margin-bottom: 18px; }
+.ws-header h1 { font-size: 1.6rem; letter-spacing: .01em; }
+.ws-header p { color: var(--muted); margin-top: 6px; font-size: .9rem; }
+.ws-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ws-actions .primary-button, .ws-actions .secondary-button { display: inline-flex; align-items: center; gap: 6px; }
+.ws-actions svg, .ws-icon-button svg { width: 16px; height: 16px; }
+.ws-meta { color: var(--muted); font-size: .84rem; white-space: nowrap; }
+
+/* 白底面板：细边框、12px 圆角 */
+.ws-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); min-width: 0; }
+.ws-panel-body { padding: 16px 18px; }
+.ws-panel-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 1.05rem; font-weight: 700; }
+
+/* 分段切换（列表 / 看板 / 时间轴；月 / 周 / 日程；网格 / 列表） */
+.ws-segment { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.ws-segment > a, .ws-segment > button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font-size: .88rem; text-decoration: none; cursor: pointer; }
+.ws-segment > a:hover, .ws-segment > button:hover { background: var(--surface-2); }
+.ws-segment > [aria-current="page"], .ws-segment > [aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.ws-segment svg { width: 16px; height: 16px; }
+
+/* 筛选标签（带服务端计数） */
+.ws-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.ws-chip { --tone: var(--muted); display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: .88rem; cursor: pointer; }
+.ws-chip svg { width: 16px; height: 16px; color: var(--tone); }
+.ws-chip:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.ws-chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.ws-chip[aria-pressed="true"] svg { color: currentColor; }
+.ws-chip-count { font-variant-numeric: tabular-nums; font-weight: 600; }
+.ws-chip.tone-amber { --tone: var(--chart-4); }
+.ws-chip.tone-red { --tone: var(--danger); }
+.ws-chip.tone-blue { --tone: var(--accent); }
+.ws-chip.tone-green { --tone: var(--success); }
+
+/* 工具栏：搜索 + 下拉筛选 */
+.ws-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.ws-search { position: relative; flex: 1 1 220px; min-width: 0; max-width: 340px; }
+.ws-search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--muted); pointer-events: none; }
+.ws-search input { width: 100%; padding-left: 32px; }
+.ws-toolbar select { width: auto; min-width: 120px; max-width: 200px; }
+
+/* 状态标签：图标 + 文字 */
+.ws-state { --tone: var(--muted); display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border-radius: 12px; font-size: .78rem; font-weight: 600; white-space: nowrap;
+  background: color-mix(in srgb, var(--tone) 12%, var(--surface)); color: var(--tone); }
+.ws-state svg { width: 14px; height: 14px; }
+.ws-state.state-todo { --tone: var(--muted); }
+.ws-state.state-running { --tone: var(--accent); }
+.ws-state.state-awaiting_view { --tone: var(--warning); }
+.ws-state.state-blocked { --tone: var(--danger); }
+.ws-state.state-done { --tone: var(--success); }
+
+/* 宽表：只在自身区域横向滚动，不撑宽整页 */
+.ws-table-wrap { overflow-x: auto; }
+.ws-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .9rem; }
+.ws-table thead th { background: var(--surface-2); color: var(--muted); font-weight: 600; font-size: .8rem; text-align: left; padding: 9px 12px; white-space: nowrap; }
+.ws-table thead th:first-child { border-radius: 8px 0 0 8px; }
+.ws-table thead th:last-child { border-radius: 0 8px 8px 0; }
+.ws-table tbody td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.ws-table tbody tr { cursor: pointer; }
+.ws-table tbody tr:hover td { background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
+.ws-table tbody tr[aria-selected="true"] td { background: var(--accent-soft); }
+
+/* 列表 + 详情两栏；1440 以下详情改抽屉（由页面决定） */
+.ws-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 420px); gap: 16px; align-items: start; }
+@media (max-width: 1439px) { .ws-split { grid-template-columns: minmax(0, 1fr); } }
+
+/* 详情侧栏 */
+.ws-detail { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 14px; }
+.ws-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ws-detail-head h2 { font-size: 1.2rem; line-height: 1.3; overflow-wrap: anywhere; }
+.ws-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; font-size: .9rem; }
+.ws-facts dt { color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.ws-facts dt svg { width: 15px; height: 15px; }
+.ws-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ws-callout { --tone: var(--danger); border: 1px solid color-mix(in srgb, var(--tone) 35%, var(--line)); background: color-mix(in srgb, var(--tone) 8%, var(--surface)); border-radius: 10px; padding: 12px 14px; }
+.ws-callout strong { display: inline-flex; align-items: center; gap: 6px; color: var(--tone); }
+.ws-callout strong svg { width: 16px; height: 16px; }
+.ws-callout p { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ws-callout.tone-amber { --tone: var(--warning); }
+.ws-callout.tone-blue { --tone: var(--accent); }
+
+/* 空状态 / 加载 / 错误 */
+.ws-state-line { color: var(--muted); padding: 18px 4px; text-align: center; }
+
+/* 手机：页头与工具栏单列 */
+@media (max-width: 760px) {
+  .ws-header { align-items: flex-start; }
+  .ws-search { max-width: none; flex-basis: 100%; }
+  .ws-toolbar select { flex: 1 1 calc(50% - 10px); max-width: none; }
+}
