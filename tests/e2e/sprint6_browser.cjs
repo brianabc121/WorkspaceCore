@@ -336,7 +336,7 @@ async function download(page, click) {
   const created = await apiSend(page, workspace, 'POST', '/api/v1/tasks', { project_id: project.id, title: taskTitle })
   check(created.status === 201, `建任务失败：${JSON.stringify(created.body)}`)
   await page.goto(`${base}/tasks?task=${created.body.id}`)
-  await page.getByLabel('执行者').selectOption('open')
+  await page.getByLabel('执行者', { exact: true }).selectOption('open')
   await page.getByLabel('谁可以领取').selectOption('project')
   await page.getByRole('button', { name: '保存任务' }).click()
   // 保存成功后详情抽屉关闭，列表里这条任务带上“可自由接取”标记
