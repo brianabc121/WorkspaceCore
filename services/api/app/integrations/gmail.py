@@ -9,8 +9,10 @@ revision 20261102、Google OAuth 2.0 网页服务器流程、配额与错误处�
 - 令牌：`POST https://oauth2.googleapis.com/token`（`authorization_code` / `refresh_token`），
   响应 `access_token`、`expires_in`、`refresh_token`（只在 offline 时）、`scope`、`token_type`；
 - 撤销：`POST https://oauth2.googleapis.com/revoke?token=…`，成功 200；
-- Gmail：`gmail/v1/users/me/{profile,labels,messages,messages/{id},threads/{id},
-  messages/{id}/attachments/{id},messages/send}`。
+- Gmail：`gmail/v1/users/me/{profile,labels,labels/{id},messages,messages/{id},threads/{id},
+  messages/{id}/attachments/{id},messages/send}`（`labels/{id}` 是 `users.labels.get`，
+  discovery 文档 revision 20261102：范围含 gmail.readonly，`Label.messagesUnread`
+  是未读数；T-0170）。
 
 错误归类：401 → AUTH_FAILED；403 的 `rateLimitExceeded` / `userRateLimitExceeded` /
 `dailyLimitExceeded` 与 429 → RATE_LIMITED（带 Retry-After）；其他 403 → AUTH_FAILED
@@ -304,6 +306,10 @@ class GmailClient:
         data = await self._get("/labels")
         labels = data.get("labels")
         return [x for x in labels if isinstance(x, dict)] if isinstance(labels, list) else []
+
+    async def label(self, label_id: str) -> dict[str, Any]:
+        """`users.labels.get`：单个标签，带 messagesTotal / messagesUnread 等计数（T-0170）。"""
+        return await self._get(f"/labels/{_safe_id(label_id)}")
 
     async def list_messages(
         self,

@@ -2676,6 +2676,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mail/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 全部邮箱或单个邮箱的邮件（admin，聚合读取）
+         * @description 不填 account_id：读全部已连接的邮箱，按 Gmail internalDate 倒序合并成一批（同一时间按 account_id、id 排序，时间未知的放最后；不跨邮箱去重）。填了只读这个邮箱。每个邮箱每批最多 per_account_limit 封；“全部邮件”（不填 label）不含垃圾邮件与垃圾箱。全部邮箱模式下 label 只能是系统标签，自定义标签要指定邮箱。accounts 是每个邮箱的状态：一个邮箱失败不影响其他邮箱。next_cursor 加载下一批（15 分钟内有效）；邮箱范围、q、label、per_account_limit 变了旧游标 422 MAIL_CURSOR_MISMATCH，过期 422 MAIL_CURSOR_EXPIRED。读信、会话、附件、回复仍用 /mail/accounts/{account_id}/… 的接口，必须带所属邮箱。
+         */
+        get: operations["list_mail_messages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mail/oauth/callback": {
         parameters: {
             query?: never;
@@ -8460,6 +8480,122 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+        };
+        /**
+         * MailAggregateAccount
+         * @description 这一批里每个邮箱的读取结果。
+         */
+        MailAggregateAccount: {
+            /**
+             * Account Id
+             * Format: uuid
+             */
+            account_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Email */
+            email: string;
+            /**
+             * Error Code
+             * @description 读取失败时的错误码（工作台自己的）
+             */
+            error_code: string | null;
+            /**
+             * Exhausted
+             * @description 这个邮箱在当前条件下已经没有更多邮件
+             */
+            exhausted: boolean;
+            /**
+             * Loaded
+             * @description 这一批返回了这个邮箱的几封
+             */
+            loaded: number;
+            /**
+             * Retry At
+             * @description 限流时建议的重试时间
+             */
+            retry_at: string | null;
+            /**
+             * Status
+             * @description ok 正常（可能是空的）；needs_reconnect 授权失效或缺读取范围；rate_limited Gmail 限流（见 retry_at）；unavailable 暂时读不到；pending 这一批没轮到或没读完，加载更多时继续
+             * @enum {string}
+             */
+            status: "ok" | "needs_reconnect" | "rate_limited" | "unavailable" | "pending";
+            /**
+             * Unread
+             * @description 收件箱未读数（Gmail labels.get INBOX 的 messagesUnread）；没有依据时为空
+             */
+            unread: number | null;
+        };
+        /**
+         * MailAggregateItem
+         * @description 一封邮件的摘要，带上所属邮箱：消息 / 会话 ID 只在同一个邮箱里唯一。
+         */
+        MailAggregateItem: {
+            /** Account Display Name */
+            account_display_name: string;
+            /** Account Email */
+            account_email: string;
+            /**
+             * Account Id
+             * Format: uuid
+             * @description 所属邮箱；读信、会话、附件、回复都要带上它
+             */
+            account_id: string;
+            /** Cc */
+            cc: string;
+            /** Date */
+            date: string | null;
+            /** Id */
+            id: string;
+            /** Labels */
+            labels: string[];
+            /**
+             * Sender
+             * @description From 头（原样，外部输入）
+             */
+            sender: string;
+            /** Snippet */
+            snippet: string;
+            /** Subject */
+            subject: string;
+            /** Thread Id */
+            thread_id: string;
+            /** To */
+            to: string;
+            /** Unread */
+            unread: boolean;
+        };
+        /** MailAggregatePage */
+        MailAggregatePage: {
+            /** Accounts */
+            accounts: components["schemas"]["MailAggregateAccount"][];
+            /**
+             * Items
+             * @description 这一批的邮件：按 Gmail internalDate 倒序，同一时间按 account_id、id 排序，时间未知的放最后；不跨邮箱去重
+             */
+            items: components["schemas"]["MailAggregateItem"][];
+            /**
+             * Next Cursor
+             * @description 加载更多用的游标（15 分钟内有效）；没有更多时为空
+             */
+            next_cursor: string | null;
+            /**
+             * Outcome
+             * @description ok 全部邮箱正常（items 为空就是真的没有邮件）；partial 部分邮箱失败或没读完；pending 没有一个邮箱读完，加载更多继续；all_failed 全部读取失败；no_access 全部需要重新连接；no_accounts 没有已连接的邮箱
+             * @enum {string}
+             */
+            outcome: "ok" | "partial" | "pending" | "all_failed" | "no_access" | "no_accounts";
+            /**
+             * Partial
+             * @description 有邮箱不是 ok
+             */
+            partial: boolean;
+            /**
+             * Total Estimate
+             * @description Gmail 估算的总数之和；有邮箱失败或没读完时为空（不给假的总数）
+             */
+            total_estimate: number | null;
         };
         /** MailAttachmentOut */
         MailAttachmentOut: {
@@ -25938,6 +26074,71 @@ export interface operations {
             };
             /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_mail_messages: {
+        parameters: {
+            query?: {
+                account_id?: string | null;
+                q?: string | null;
+                label?: string | null;
+                cursor?: string | null;
+                per_account_limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailAggregatePage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

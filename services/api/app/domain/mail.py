@@ -46,6 +46,7 @@ LIST_LIMIT = 50
 THREAD_LIMIT = 20
 ATTACHMENT_LIMIT = 25 * 1024 * 1024
 _METADATA = ("From", "To", "Cc", "Subject", "Date")
+METADATA_HEADERS = _METADATA
 
 
 class MailError(ApiError):
@@ -316,8 +317,11 @@ class MailService:
         await self.db.commit()
 
     async def _call(self, account: MailAccount, action: Any) -> Any:
-        """用 access token 调 Gmail；401 时刷新一次再试。"""
-        http = self.runtime.http(f"mail:{account.workspace_id}")
+        """用 access token 调 Gmail；401 时刷新一次再试。
+
+        熔断按邮箱计数（T-0170）：一个邮箱连续失败不连累同一工作空间的其他邮箱。
+        """
+        http = self.runtime.http(f"mail:{account.workspace_id}:{account.id}")
         token = await self._access_token(account)
         try:
             return await action(gmail.GmailClient(http, token, self.settings.gmail_api_url))
@@ -480,6 +484,15 @@ class MailService:
         content: bytes = await self._call(account, action)
         return content
 
+    async def read_with(self, account: MailAccount, action: Any) -> Any:
+        """给多邮箱聚合（mail_aggregate.py）用的小粒度读取：检查能读，再按 `_call` 的规则调 Gmail。
+
+        action 只拿到 GmailClient，不碰数据库会话；拿令牌、401 时刷新、授权失效时标记，
+        都在这个服务自己的会话里依次进行。action 可能因为 401 被重跑一次，要能接着上次的进度做。
+        """
+        self._need_read(account)
+        return await self._call(account, action)
+
     def _need_read(self, account: MailAccount) -> None:
         if account.status != "active":
             raise _err(409, "MAIL_RECONNECT", f"邮箱 {account.email} 需要重新连接")
@@ -617,6 +630,7 @@ class MailService:
 __all__ = [
     "LIST_LIMIT",
     "MAX_RECIPIENTS",
+    "METADATA_HEADERS",
     "Listing",
     "MailError",
     "MailService",

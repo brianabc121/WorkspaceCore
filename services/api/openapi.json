@@ -10556,6 +10556,255 @@
         "title": "MailAgentRef",
         "type": "object"
       },
+      "MailAggregateAccount": {
+        "description": "这一批里每个邮箱的读取结果。",
+        "properties": {
+          "account_id": {
+            "format": "uuid",
+            "title": "Account Id",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "读取失败时的错误码（工作台自己的）",
+            "title": "Error Code"
+          },
+          "exhausted": {
+            "description": "这个邮箱在当前条件下已经没有更多邮件",
+            "title": "Exhausted",
+            "type": "boolean"
+          },
+          "loaded": {
+            "description": "这一批返回了这个邮箱的几封",
+            "title": "Loaded",
+            "type": "integer"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "限流时建议的重试时间",
+            "title": "Retry At"
+          },
+          "status": {
+            "description": "ok 正常（可能是空的）；needs_reconnect 授权失效或缺读取范围；rate_limited Gmail 限流（见 retry_at）；unavailable 暂时读不到；pending 这一批没轮到或没读完，加载更多时继续",
+            "enum": [
+              "ok",
+              "needs_reconnect",
+              "rate_limited",
+              "unavailable",
+              "pending"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "unread": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "收件箱未读数（Gmail labels.get INBOX 的 messagesUnread）；没有依据时为空",
+            "title": "Unread"
+          }
+        },
+        "required": [
+          "account_id",
+          "email",
+          "display_name",
+          "status",
+          "error_code",
+          "loaded",
+          "exhausted",
+          "unread",
+          "retry_at"
+        ],
+        "title": "MailAggregateAccount",
+        "type": "object"
+      },
+      "MailAggregateItem": {
+        "description": "一封邮件的摘要，带上所属邮箱：消息 / 会话 ID 只在同一个邮箱里唯一。",
+        "properties": {
+          "account_display_name": {
+            "title": "Account Display Name",
+            "type": "string"
+          },
+          "account_email": {
+            "title": "Account Email",
+            "type": "string"
+          },
+          "account_id": {
+            "description": "所属邮箱；读信、会话、附件、回复都要带上它",
+            "format": "uuid",
+            "title": "Account Id",
+            "type": "string"
+          },
+          "cc": {
+            "title": "Cc",
+            "type": "string"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "sender": {
+            "description": "From 头（原样，外部输入）",
+            "title": "Sender",
+            "type": "string"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          },
+          "unread": {
+            "title": "Unread",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "thread_id",
+          "sender",
+          "to",
+          "cc",
+          "subject",
+          "date",
+          "snippet",
+          "unread",
+          "labels",
+          "account_id",
+          "account_email",
+          "account_display_name"
+        ],
+        "title": "MailAggregateItem",
+        "type": "object"
+      },
+      "MailAggregatePage": {
+        "properties": {
+          "accounts": {
+            "items": {
+              "$ref": "#/components/schemas/MailAggregateAccount"
+            },
+            "title": "Accounts",
+            "type": "array"
+          },
+          "items": {
+            "description": "这一批的邮件：按 Gmail internalDate 倒序，同一时间按 account_id、id 排序，时间未知的放最后；不跨邮箱去重",
+            "items": {
+              "$ref": "#/components/schemas/MailAggregateItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "加载更多用的游标（15 分钟内有效）；没有更多时为空",
+            "title": "Next Cursor"
+          },
+          "outcome": {
+            "description": "ok 全部邮箱正常（items 为空就是真的没有邮件）；partial 部分邮箱失败或没读完；pending 没有一个邮箱读完，加载更多继续；all_failed 全部读取失败；no_access 全部需要重新连接；no_accounts 没有已连接的邮箱",
+            "enum": [
+              "ok",
+              "partial",
+              "pending",
+              "all_failed",
+              "no_access",
+              "no_accounts"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "partial": {
+            "description": "有邮箱不是 ok",
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Gmail 估算的总数之和；有邮箱失败或没读完时为空（不给假的总数）",
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items",
+          "accounts",
+          "outcome",
+          "partial",
+          "next_cursor",
+          "total_estimate"
+        ],
+        "title": "MailAggregatePage",
+        "type": "object"
+      },
       "MailAttachmentOut": {
         "properties": {
           "attachment_id": {
@@ -43530,6 +43779,170 @@
           }
         ],
         "summary": "开始连接 Gmail 邮箱（admin）",
+        "tags": [
+          "mail"
+        ]
+      }
+    },
+    "/api/v1/mail/messages": {
+      "get": {
+        "description": "不填 account_id：读全部已连接的邮箱，按 Gmail internalDate 倒序合并成一批（同一时间按 account_id、id 排序，时间未知的放最后；不跨邮箱去重）。填了只读这个邮箱。每个邮箱每批最多 per_account_limit 封；“全部邮件”（不填 label）不含垃圾邮件与垃圾箱。全部邮箱模式下 label 只能是系统标签，自定义标签要指定邮箱。accounts 是每个邮箱的状态：一个邮箱失败不影响其他邮箱。next_cursor 加载下一批（15 分钟内有效）；邮箱范围、q、label、per_account_limit 变了旧游标 422 MAIL_CURSOR_MISMATCH，过期 422 MAIL_CURSOR_EXPIRED。读信、会话、附件、回复仍用 /mail/accounts/{account_id}/… 的接口，必须带所属邮箱。",
+        "operationId": "list_mail_messages",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Label"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 16,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_account_limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Per Account Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailAggregatePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "全部邮箱或单个邮箱的邮件（admin，聚合读取）",
         "tags": [
           "mail"
         ]
