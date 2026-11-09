@@ -100,8 +100,22 @@ const NOTE_URL = /\/knowledge\/notes\/[0-9a-f-]{36}$/
   const flow = await api(page, workspace, 'POST', '/api/v1/knowledge/notes', { space_id: pub.id, title: flowTitle, body: '1. 备份\n2. 迁移\n3. 发布', type: 'process' })
   await api(page, workspace, 'POST', '/api/v1/knowledge/notes', { space_id: projectSpace.id, title: `知识库浏览器 ${run} 简报`, body: `目标：浏览器验收。流程见 [[${flowTitle}]]`, type: 'brief' })
 
-  // ---------------------------------------------------------------- 独立页面与知识图谱
+  // ---------------------------------------------------------------- 知识总览（T-0173）：/knowledge 的统计来自服务端，旧的 ?focus= 进完整图谱
   await page.goto(`${base}/knowledge`)
+  await page.getByRole('navigation', { name: '知识库功能' }).waitFor()
+  const monday = new Date(); monday.setHours(0, 0, 0, 0); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7))
+  const nextMonday = new Date(monday); nextMonday.setDate(nextMonday.getDate() + 7)
+  const totals = (await api(page, workspace, 'GET', `/api/v1/knowledge/overview?updated_after=${encodeURIComponent(monday.toISOString())}&updated_before=${encodeURIComponent(nextMonday.toISOString())}`)).summary
+  const noteStat = page.getByRole('group', { name: `笔记：${totals.note_count.toLocaleString('zh-CN')} 篇` })
+  await noteStat.waitFor()
+  check(await page.getByRole('group', { name: `本周更新：${totals.updated_note_count.toLocaleString('zh-CN')} 篇` }).count() === 1, '总览的“本周更新”应是服务端统计')
+  check(await page.getByRole('region', { name: '最近更新' }).getByRole('button', { name: flowTitle }).count() === 1, '最近更新里应有刚写的笔记')
+  await page.goto(`${base}/knowledge?focus=${pub.id}`)
+  await page.waitForURL((url) => url.pathname === '/knowledge/graph' && url.searchParams.get('focus') === pub.id)
+  step('知识总览 /knowledge：四项统计与服务端一致、最近更新；旧链接 /knowledge?focus= 转到完整图谱')
+
+  // ---------------------------------------------------------------- 独立页面与知识图谱
+  await page.goto(`${base}/knowledge/graph`)
   await page.getByRole('navigation', { name: '知识库功能' }).waitFor()
   check(await page.getByRole('navigation', { name: '主导航' }).count() === 0, '知识库是独立页面，不应显示工作台的主导航')
   const node = page.getByRole('button', { name: new RegExp(`^${flowTitle}，笔记`) })
@@ -109,7 +123,7 @@ const NOTE_URL = /\/knowledge\/notes\/[0-9a-f-]{36}$/
   await node.click()
   const selected = page.getByRole('complementary', { name: '所选笔记' })
   check((await selected.getByRole('link', { name: '打开笔记' }).getAttribute('href')) === `/knowledge/notes/${flow.id}`, '所选笔记的“打开笔记”应指向这篇笔记')
-  step('独立页面 /knowledge：功能条与知识图谱，点节点显示所选笔记')
+  step('独立页面 /knowledge/graph：功能条与知识图谱，点节点显示所选笔记')
 
   // ---------------------------------------------------------------- 按类型着色与按类型筛选（T-0102）
   check((await page.getByRole('combobox', { name: '着色' }).inputValue()) === 'type', '图谱默认应按类型着色')
@@ -224,7 +238,7 @@ const NOTE_URL = /\/knowledge\/notes\/[0-9a-f-]{36}$/
   await picture.click()
   await page.getByRole('dialog', { name: '拓扑' }).waitFor()
   await page.keyboard.press('Escape')
-  await page.goto(`${base}/knowledge`)
+  await page.goto(`${base}/knowledge/graph`)
   await page.getByRole('checkbox', { name: '显示图片' }).check()
   await page.locator('.kb-node rect.f-file').first().waitFor()
   step('图片：编辑器上传后插入链接，阅读页显示并可放大，图谱“显示图片”有图片节点')
@@ -276,7 +290,7 @@ const NOTE_URL = /\/knowledge\/notes\/[0-9a-f-]{36}$/
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'zh-CN', storageState: await context.storageState() })
   const phone = await mobile.newPage()
   watch(phone, problems)
-  for (const url of ['/knowledge', `/knowledge/notes/${flow.id}`, `/knowledge/spaces/${projectSpace.id}`, '/knowledge/changes']) {
+  for (const url of ['/knowledge', '/knowledge/graph', `/knowledge/notes/${flow.id}`, `/knowledge/spaces/${projectSpace.id}`, '/knowledge/changes']) {
     await phone.goto(base + url)
     await phone.getByRole('navigation', { name: '知识库导航' }).waitFor()
     await phone.waitForLoadState('networkidle')

@@ -91,7 +91,7 @@ const loop = computed(() => m.value ? [
                 <p class="kb-meta" style="margin: 0">参与项目：{{ info.projects.length ? info.projects.map(p => p.title).join('、') : '还没有' }}</p>
               </div>
             </div>
-            <div class="kb-actions"><RouterLink :to="{ path: '/knowledge', query: { focus: info.space_id } }" class="kb-btn"><Waypoints aria-hidden="true" />在图谱中查看</RouterLink></div>
+            <div class="kb-actions"><RouterLink :to="{ path: '/knowledge/graph', query: { focus: info.space_id } }" class="kb-btn"><Waypoints aria-hidden="true" />在图谱中查看</RouterLink></div>
           </header>
           <p v-if="failure" class="kb-error" role="alert">{{ failure }}</p>
           <p v-if="message" class="kb-notice" role="status">{{ message }}</p>

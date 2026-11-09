@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type SimulationLinkDatum, type SimulationNodeDatum } from 'd3-force'
+import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type Simulation, type SimulationLinkDatum, type SimulationNodeDatum } from 'd3-force'
 import { NOTE_TYPE_LABELS, typeGroupOf, type ColorBy, type GraphNode, type GraphOut } from './api'
 import { normalize } from './markdown'
 
@@ -34,7 +34,12 @@ const tip = ref<{ x: number; y: number; node: Node } | null>(null)
 const groupOf = (n: GraphNode) => n.kind === 'note' ? (n.space_id ?? 'none') : 'resources'
 const kindOf = (n: GraphNode) => n.kind === 'note' ? (n.space_kind ?? 'public') : n.kind === 'file' ? 'file' : 'resource'
 
+// 当前的力模拟：同步算完固定步数就停（不在后台跑定时器）；重新布局与卸载时再停一次、断开引用（T-0173）
+let sim: Simulation<Node, undefined> | null = null
+function dispose() { sim?.stop(); sim?.on('tick', null).on('end', null); sim = null }
+
 function build() {
+  dispose()
   const g = props.graph
   if (!g) { layout.value = { nodes: [], edges: [] }; return }
   const hidden = new Set(props.hidden), hiddenTypes = new Set(props.hiddenTypes)
@@ -53,7 +58,7 @@ function build() {
     const a = byId.get(e.source), b = byId.get(e.target)
     if (a && b && a !== b) links.push({ source: a, target: b, a, b })
   }
-  const sim = forceSimulation(nodes)
+  const current = forceSimulation(nodes)
     .force('link', forceLink<Node, SimulationLinkDatum<Node>>(links).distance(props.compact ? 78 : 64).strength(0.6))
     .force('charge', forceManyBody<Node>().strength(props.compact ? -320 : -110).distanceMax(400))
     .force('collide', forceCollide<Node>(n => n.r + (props.compact ? 22 : 6)))
@@ -62,7 +67,8 @@ function build() {
     .stop()
   if (props.center) { const c = byId.get(props.center); if (c) { c.fx = 0; c.fy = 0 } }
   const ticks = Math.min(400, 120 + nodes.length * 2)
-  for (let i = 0; i < ticks; i++) sim.tick()
+  for (let i = 0; i < ticks; i++) current.tick()
+  sim = current
   layout.value = { nodes, edges: links.map(l => ({ a: l.a, b: l.b })) }
   fit()
 }
@@ -185,7 +191,7 @@ onMounted(() => {
   }
   build()
 })
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => { observer?.disconnect(); observer = null; dispose() })
 watch(() => [props.graph, props.orphans, props.hidden.join(','), props.hiddenTypes.join(','), props.center], build)
 // 搜索定位：只有一个匹配时平移到它
 watch(q, (value) => {

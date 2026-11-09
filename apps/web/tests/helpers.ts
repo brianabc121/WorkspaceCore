@@ -51,6 +51,8 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/runner$/.test(path) && request.method === 'GET') return Response.json(runnerOff)
     if (path === '/api/v1/knowledge/spaces') return Response.json({ items: [] })
     if (path === '/api/v1/knowledge/graph') return Response.json({ nodes: [], edges: [], truncated: false, total_notes: 0 })
+    // 知识总览（T-0173）：默认没有笔记
+    if (path === '/api/v1/knowledge/overview') return Response.json({ summary: { note_count: 0, space_count: 0, link_count: 0, updated_note_count: 0 }, recent_notes: [], generated_at: '2026-11-03T10:00:00Z' })
     if (path === '/api/v1/knowledge/notes' || path === '/api/v1/knowledge/changes' || path === '/api/v1/knowledge/trash') return Response.json(emptyPage)
     if (path === '/api/v1/dashboard/overview') return Response.json(overview)
     // 首页改版（T-0164）：任务进展默认没有任务，今天没有早报主题

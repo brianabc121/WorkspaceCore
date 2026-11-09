@@ -22,6 +22,23 @@ export const dateLabel = (value: string | null | undefined) => {
 }
 export const isToday = (value: string, now = new Date()) => new Date(value).toDateString() === now.toDateString()
 
+/** 时间点（T-0173）：统计时间等，写出具体时刻，不用“刚刚”“几分钟前”掩盖数据的时间。 */
+export function stamp(value: string, now = new Date()) {
+  const at = new Date(value)
+  const hm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+  if (at.toDateString() === now.toDateString()) return `今天 ${hm}`
+  return at.getFullYear() === now.getFullYear() ? `${at.getMonth() + 1} 月 ${at.getDate()} 日 ${hm}` : `${at.getFullYear()} 年 ${at.getMonth() + 1} 月 ${at.getDate()} 日 ${hm}`
+}
+
+/** 本周（T-0173）：显示时区（浏览器）的周一 00:00 到下周一 00:00，转成带时区的 UTC 时间传给知识总览。 */
+export function weekWindow(now = new Date()) {
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
+  const end = new Date(start)
+  end.setDate(end.getDate() + 7)
+  return { updated_after: start.toISOString(), updated_before: end.toISOString() }
+}
+
 // 正文摘要：去掉 Markdown 记号与 [[ ]]，取前若干字
 export function excerpt(body: string, length = 120) {
   const text = body

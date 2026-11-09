@@ -1,4 +1,4 @@
-import { computed, type Ref } from 'vue'
+import { computed, toValue, type MaybeRefOrGetter, type Ref } from 'vue'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError, dataOf, errorMessage, type Schema } from '../../services/api'
@@ -18,6 +18,8 @@ export type Revision = Schema['RevisionOut']
 export type AgentKnowledge = Schema['AgentKnowledgeOut']
 export type SpaceActivity = Schema['SpaceActivity']
 export type KbFile = Schema['FileOut']
+export type KnowledgeOverview = Schema['KnowledgeOverviewOut']
+export type KnowledgeOverviewSummary = Schema['KnowledgeOverviewSummary']
 export type ColorBy = 'type' | 'space' | 'author'
 
 export const SPACE_KIND_LABELS: Record<SpaceKind, string> = { public: '公共', project: '项目', agent: '智能体' }
@@ -94,6 +96,21 @@ export function useGraph(scope: string, options: Ref<{ spaceIds: string[]; resou
     queryKey: computed(() => kbKey(c.user, scope, 'graph', options.value)), enabled: computed(c.active),
     queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/knowledge/graph', {
       params: { header: c.header, query: { resources: options.value.resources, files: !!options.value.files, task_readmes: !!options.value.taskReadmes, ...(options.value.spaceIds.length ? { space_id: options.value.spaceIds } : {}) } }, signal })),
+  })
+}
+
+// 知识总览（T-0173，二批四页改造规范 4.1、4.2）：服务端的全量统计与最近更新的笔记。
+// 查询键带用户、工作空间、知识库与时间窗；请求参数取自查询键，迟到的旧响应只会落进它自己的键，不会显示到新范围上
+export type KnowledgeOverviewFilters = { space_id?: string; updated_after: string; updated_before: string; recent_limit?: number }
+export function useKnowledgeOverview(scope: string, filters: MaybeRefOrGetter<KnowledgeOverviewFilters>) {
+  const c = context(scope)
+  return useQuery({
+    queryKey: computed(() => kbKey(c.user, scope, 'overview', { ...toValue(filters) })), enabled: computed(c.active),
+    queryFn: async ({ queryKey, signal }) => {
+      const f = queryKey[4] as KnowledgeOverviewFilters
+      const query = { updated_after: f.updated_after, updated_before: f.updated_before, ...(f.space_id ? { space_id: f.space_id } : {}), ...(f.recent_limit ? { recent_limit: f.recent_limit } : {}) }
+      return dataOf(await c.auth.api.GET('/api/v1/knowledge/overview', { params: { header: c.header, query }, signal }))
+    },
   })
 }
 

@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { ArrowLeft, BookMarked, Bot, FileText, FolderKanban, History, Library, Moon, Sun, Waypoints } from '@lucide/vue'
+import { ArrowLeft, BookMarked, Bot, FileText, FolderKanban, History, LayoutDashboard, Library, Moon, Sun, Waypoints } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import '../features/kb/kb.css'
 
-// 知识库（T-0099）：独立页面，不套工作台的侧栏与顶栏。左侧功能条切换图谱、笔记、项目 / 智能体知识库、变更记录、外部文档；
-// 手机上功能条换成底部导航（知识库、图谱、笔记、变更）。各子页面见 router.ts 的 knowledgeRoutes。
+// 知识库（T-0099）：独立页面，不套工作台的侧栏与顶栏。左侧功能条切换总览、笔记、图谱、项目 / 智能体知识库、变更记录、外部文档；
+// 手机上功能条换成底部导航（知识库、图谱、笔记、变更）：“知识库”是总览（统计、知识库列表、最近更新，T-0173）。
+// 各子页面见 router.ts 的 knowledgeRoutes。
 const auth = useAuthStore(), theme = useThemeStore(), route = useRoute()
-const section = computed(() => String(route.meta.kbSection ?? 'graph'))
+const section = computed(() => String(route.meta.kbSection ?? 'overview'))
 const rail = [
+  { id: 'overview', to: '/knowledge', label: '知识总览', icon: LayoutDashboard },
   { id: 'notes', to: '/knowledge/notes', label: '笔记', icon: FileText },
-  { id: 'graph', to: '/knowledge', label: '知识图谱', icon: Waypoints },
+  { id: 'graph', to: '/knowledge/graph', label: '知识图谱', icon: Waypoints },
   { id: 'spaces', to: '/knowledge/spaces', label: '项目知识库', icon: FolderKanban },
   { id: 'agents', to: '/knowledge/agents', label: '智能体知识库', icon: Bot },
   { id: 'changes', to: '/knowledge/changes', label: '变更记录', icon: History },
@@ -24,7 +26,7 @@ const mobile = [
   { id: 'notes', to: '/knowledge/notes', label: '笔记', icon: FileText, active: () => section.value === 'notes' },
   { id: 'changes', to: '/knowledge/changes', label: '变更', icon: History, active: () => section.value === 'changes' },
 ]
-const isActive = (id: string) => id === 'graph' ? section.value === 'graph' : section.value === id
+const isActive = (id: string) => section.value === id
 watch(() => route.meta.title, (title) => { document.title = `${String(title ?? '知识库')} · My Workspace` }, { immediate: true })
 </script>
 

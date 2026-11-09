@@ -388,3 +388,96 @@
 .kb-thumbs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .kb-thumbs a { display: block; aspect-ratio: 1; border: 1px solid var(--kb-line); border-radius: 6px; overflow: hidden; background: var(--kb-surface-2); }
 .kb-thumbs img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ---------------------------------------------------------------- 知识总览（T-0173，二批四页改造效果图 01）
+   /knowledge：左栏知识库导航 + 主区（统计、局部关联与所选笔记、最近更新）。卡片 12px 圆角，颜色都取 --kb-*（亮暗两套）。
+   ≥1280 关联与详情并排；更窄时上下排；手机（≤760）只留统计、知识库列表与最近更新。 */
+.kb-ov { box-sizing: border-box; width: 100%; max-width: 1520px; margin: 0 auto; padding: 22px 24px 32px; display: flex; flex-direction: column; gap: 16px; }
+.kb-ov-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 20px; }
+.kb-ov-head h1 { font-size: 24px; font-weight: 700; line-height: 1.25; }
+.kb-ov-head .kb-meta { margin: 4px 0 0; font-size: 13px; }
+.kb-ov-scope { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; }
+.kb-ov-scope .kb-btn svg { width: 14px; height: 14px; }
+.kb-ov-subtitle { font-size: 16px; font-weight: 700; }
+.kb-ov-stats-wrap { display: flex; flex-direction: column; gap: 6px; }
+.kb-ov-stats { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.kb-ov-stat { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 14px 16px; border: 1px solid var(--kb-line); border-radius: 12px; background: var(--kb-surface); }
+.kb-ov-stat-icon { flex: none; width: 40px; height: 40px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: var(--kb-accent-soft); color: var(--kb-accent); }
+.kb-ov-stat-icon svg { width: 20px; height: 20px; }
+.kb-ov-stat-value { font-size: 26px; font-weight: 700; line-height: 1.15; color: var(--kb-text); white-space: nowrap; }
+.kb-ov-stat-value small { margin-left: 4px; font-size: 13px; font-weight: 500; color: var(--kb-muted); }
+.kb-ov-stat-label { font-size: 13px; color: var(--kb-muted); }
+.kb-ov-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; }
+.kb-ov-note.is-error { padding: 8px 12px; border-radius: 8px; background: var(--kb-del); color: var(--kb-del-text); font-size: 13px; }
+.kb-ov-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); gap: 16px; align-items: stretch; }
+.kb-ov-card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.kb-ov-card-head h2 { font-size: 16px; font-weight: 700; }
+.kb-ov-card-head .kb-meta { margin: 4px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.kb-ov-badge { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 10px; background: var(--kb-accent-soft); color: var(--kb-accent-strong); font-size: 12px; font-weight: 600; }
+:root[data-theme="dark"] .kb-ov-badge { color: var(--kb-accent); }
+.kb-ov-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.kb-ov-tools .kb-check { min-height: 30px; gap: 6px; }
+.kb-ov-tools .kb-select { min-height: 30px; }
+.kb-ov-zoom-icon { width: 15px; height: 15px; vertical-align: middle; }
+.kb-ov-graph-box { position: relative; height: 380px; border: 1px solid var(--kb-line); border-radius: 10px; background: var(--kb-bg); overflow: hidden; }
+.kb-ov-graph-box .kb-graph { min-height: 0; height: 100%; border: 0; border-radius: 0; background: transparent; }
+.kb-ov-graph-state { margin: 0; padding: 56px 16px; border: 1px dashed var(--kb-line); border-radius: 10px; text-align: center; color: var(--kb-muted); }
+.kb-ov-graph-alone svg { width: 28px; height: 28px; }
+.kb-ov-graph-alone p { margin: 0; max-width: 320px; }
+.kb-ov-graph-list { margin: 0; padding: 4px 0; list-style: none; max-height: 380px; overflow-y: auto; border: 1px solid var(--kb-line); border-radius: 10px; }
+.kb-ov-graph-list li { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-bottom: 1px solid var(--kb-line); font-size: 13px; }
+.kb-ov-graph-list li:last-child { border-bottom: 0; }
+.kb-ov-graph-list .kb-grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-ov-graph-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.kb-ov-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; }
+.kb-ov-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.kb-ov-full svg { width: 15px; height: 15px; }
+.kb-ov-link { min-width: 0; max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--kb-text) !important; font: inherit; font-weight: 500; text-align: left; text-decoration: none; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-ov-link:hover { color: var(--kb-accent) !important; text-decoration: underline; }
+.kb-ov-link[aria-pressed="true"] { color: var(--kb-accent) !important; font-weight: 700; }
+.kb-ov-row-icon { flex: none; width: 16px; height: 16px; color: var(--kb-muted); }
+.kb-ov-detail { gap: 14px; }
+.kb-ov-detail-head { display: flex; align-items: flex-start; gap: 10px; }
+.kb-ov-detail-head svg { flex: none; width: 20px; height: 20px; margin-top: 3px; color: var(--kb-muted); }
+.kb-ov-detail-head h2 { font-size: 19px; line-height: 1.35; overflow-wrap: anywhere; }
+.kb-ov-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.kb-ov-facts { grid-template-columns: 64px minmax(0, 1fr); gap: 6px 12px; }
+.kb-ov-excerpt { margin: 0; font-size: 13.5px; line-height: 1.7; overflow-wrap: anywhere; }
+.kb-ov-detail .kb-list-item { min-height: 34px; }
+.kb-ov-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.kb-ov-actions .kb-btn { flex: 1 1 120px; }
+.kb-ov-side-links { display: flex; flex-direction: column; gap: 2px; padding-top: 10px; }
+.kb-ov-side-links svg { flex: none; width: 16px; height: 16px; color: var(--kb-muted); }
+.kb-ov-recent { gap: 10px; }
+.kb-ov-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
+.kb-ov-table thead th { padding: 8px 12px; background: var(--kb-surface-2); color: var(--kb-muted); font-size: 12px; font-weight: 600; text-align: left; white-space: nowrap; }
+.kb-ov-table thead th:first-child { border-radius: 8px 0 0 8px; }
+.kb-ov-table thead th:last-child { border-radius: 0 8px 8px 0; }
+.kb-ov-table tbody td { padding: 8px 12px; border-bottom: 1px solid var(--kb-line); vertical-align: middle; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-ov-table tbody tr:last-child td { border-bottom: 0; }
+.kb-ov-table tbody tr:hover td { background: color-mix(in srgb, var(--kb-accent) 5%, var(--kb-surface)); }
+.kb-ov-table tbody tr.is-selected td { background: var(--kb-accent-soft); }
+.kb-ov-table .kb-ov-col-space { width: 24%; }
+.kb-ov-table .kb-ov-col-author { width: 20%; }
+.kb-ov-table .kb-ov-col-time { width: 15%; color: var(--kb-muted); }
+.kb-ov-table .kb-chip { max-width: 100%; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-ov-title-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.kb-ov-open { width: 28px; height: 28px; }
+.kb-ov-open svg { width: 15px; height: 15px; }
+.kb-ov-row-meta { display: none; }
+@media (max-width: 1279px) { .kb-ov-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 1100px) { .kb-ov-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kb-ov-table .kb-ov-col-author { display: none; } }
+@media (max-width: 760px) {
+  .kb-ov { padding: 14px 16px 24px; gap: 14px; }
+  .kb-ov-scope { margin-top: 0; }
+  .kb-ov-stats { gap: 10px; }
+  .kb-ov-stat { gap: 10px; padding: 12px; }
+  .kb-ov-stat-icon { width: 32px; height: 32px; border-radius: 8px; }
+  .kb-ov-stat-icon svg { width: 17px; height: 17px; }
+  .kb-ov-stat-value { font-size: 21px; }
+  .kb-ov-mobile-spaces { padding: 12px; gap: 6px; }
+  .kb-ov-table thead { display: none; }
+  .kb-ov-table .kb-ov-col-space, .kb-ov-table .kb-ov-col-time { display: none; }
+  .kb-ov-table tbody td { padding: 10px 4px; white-space: normal; }
+  .kb-ov-row-meta { display: block; margin: 2px 0 0 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

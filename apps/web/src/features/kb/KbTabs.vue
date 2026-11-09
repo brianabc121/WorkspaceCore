@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { Waypoints, X } from '@lucide/vue'
+import { LayoutDashboard, Waypoints, X } from '@lucide/vue'
 import { useOpenTabs } from './tabs'
 
-// 标签栏：知识图谱固定在最前，后面是最近打开的笔记
+// 标签栏：总览与知识图谱固定在最前（T-0173），后面是最近打开的笔记
 const { tabs, close } = useOpenTabs()
 const route = useRoute(), router = useRouter()
 function remove(id: string) {
@@ -15,7 +15,8 @@ function remove(id: string) {
 
 <template>
   <nav class="kb-tabs" aria-label="打开的页面">
-    <RouterLink to="/knowledge" class="kb-tab is-fixed" :class="{ 'is-active': route.meta.kbSection === 'graph' }" :aria-current="route.meta.kbSection === 'graph' ? 'page' : undefined"><Waypoints aria-hidden="true" />知识图谱</RouterLink>
+    <RouterLink to="/knowledge" class="kb-tab is-fixed" :class="{ 'is-active': route.meta.kbSection === 'overview' }" :aria-current="route.meta.kbSection === 'overview' ? 'page' : undefined"><LayoutDashboard aria-hidden="true" />总览</RouterLink>
+    <RouterLink to="/knowledge/graph" class="kb-tab is-fixed" :class="{ 'is-active': route.meta.kbSection === 'graph' }" :aria-current="route.meta.kbSection === 'graph' ? 'page' : undefined"><Waypoints aria-hidden="true" />知识图谱</RouterLink>
     <span v-for="tab in tabs" :key="tab.id" class="kb-tab" :class="{ 'is-active': route.params.id === tab.id }">
       <RouterLink :to="`/knowledge/notes/${tab.id}`" :aria-current="route.params.id === tab.id ? 'page' : undefined" style="color: inherit; text-decoration: none; max-width: 180px; overflow: hidden; text-overflow: ellipsis">{{ tab.title }}</RouterLink>
       <button type="button" class="kb-tab-close" :aria-label="`关闭 ${tab.title}`" @click="remove(tab.id)"><X aria-hidden="true" /></button>
