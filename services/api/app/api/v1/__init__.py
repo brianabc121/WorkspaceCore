@@ -18,6 +18,7 @@ from app.api.v1 import (
     knowledge_base,
     mail,
     me,
+    model_connections,
     modules,
     navigation,
     notifications,
@@ -60,6 +61,7 @@ for module in (
     mail,
     runner,
     ai,
+    model_connections,
     modules,
     navigation,
 ):
