@@ -48,9 +48,9 @@ OLD_WIDGETS: list[Widget] = [
 NEW_WIDGETS: list[Widget] = [
     ("work_summary", {"reminder_days": 2}, _layout(0, 0, 12, 2, 0)),
     ("task_progress", {"limit": 7}, _layout(0, 2, 8, 7, 2)),
-    ("news_briefing", {"lines": 6}, _layout(8, 2, 4, 7, 14)),
-    ("my_todos", {"limit": 5}, _layout(0, 9, 8, 5, 9)),
-    ("calendar_agenda", {"days": 7, "limit": 5}, _layout(8, 9, 4, 5, 21)),
+    ("news_briefing", {"lines": 6}, _layout(8, 2, 4, 6, 13)),
+    ("my_todos", {"limit": 5}, _layout(0, 9, 8, 4, 9)),
+    ("calendar_agenda", {"days": 7, "limit": 5}, _layout(8, 8, 4, 5, 19)),
 ]
 
 

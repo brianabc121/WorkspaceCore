@@ -382,39 +382,96 @@ describe('news page', () => {
   })
 })
 
-describe('今日早报 widget', () => {
+describe('AI 新闻速览 widget', () => {
+  // 首页效果图（T-0164）：原“今日早报”改为按兴趣主题的速览；没有主题数据时退回早报开头几行
   it('registers news_briefing with its default and limits', () => {
-    expect(registry.news_briefing.title).toBe('今日早报')
+    expect(registry.news_briefing.title).toBe('AI 新闻速览')
     expect(registry.news_briefing.configSchema.parse({})).toEqual({ lines: 6 })
     expect(parseWidget({ ...widget, widget_type: 'news_briefing', config: { lines: 1 } })).toBeNull()
     expect(parseWidget({ ...widget, widget_type: 'news_briefing', config: { lines: 21 } })).toBeNull()
   })
 
-  it('shows the time, title and the first lines as plain text and links to the news page', async () => {
+  it('lists today\'s topics with plain-text summaries and safe source links', async () => {
+    const card: Schema['WidgetOut'] = { ...widget, id: 'w-news', widget_type: 'news_briefing', config: {} }
+    const topics = [
+      { name: '人工智能 <b>x</b>', items: [item(), item({ title: '第二条 <i>新闻</i>', source_name: '微博', url: 'https://weibo.example.com/2' }), item({ title: '恶意', source_name: '恶意源', url: 'javascript:alert(1)' })] },
+      { name: '空主题', items: [] },
+      { name: '芯片', items: [item({ title: '芯片新规', summary: '模拟摘要：芯片出口新规发布', source_name: '华尔街见闻', url: 'https://wallstreetcn.example.com/1' })] },
+    ]
+    mockApi(r => {
+      const p = path(r)
+      if (p === '/api/v1/dashboard/overview') return Response.json({ ...overview, widgets: [card] })
+      if (p === '/api/v1/news/today') return Response.json({ briefing: { ...briefing, content: '# 要闻\n\n**✨ AI 热点分析**\n\n内容' }, topics, unavailable: false, message: null })
+      if (p === '/api/v1/news/briefings') return Response.json({ items: [summary()], next_cursor: null })
+      return undefined
+    })
+    const { router } = await openApp('/')
+    const article = await screen.findByRole('article', { name: 'AI 新闻速览' })
+    const list = await within(article).findByRole('list', { name: '今日新闻主题' })
+    const entries = within(list).getAllByRole('listitem')
+    expect(entries).toHaveLength(2)
+    expect(within(entries[0]!).getByRole('heading', { name: '人工智能 <b>x</b>' })).toBeVisible()
+    expect(entries[0]).toHaveTextContent('01')
+    expect(entries[0]).toHaveTextContent('OpenAI 发布新模型；第二条 <i>新闻</i>')
+    expect(article.querySelector('b, i')).toBeNull()
+    const zhihu = within(entries[0]!).getByRole('link', { name: '知乎' })
+    expect(zhihu).toHaveAttribute('href', 'https://news.example.com/1')
+    expect(zhihu).toHaveAttribute('target', '_blank')
+    expect(zhihu).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(within(entries[0]!).getByRole('link', { name: '微博' })).toHaveAttribute('href', 'https://weibo.example.com/2')
+    expect(within(entries[0]!).queryByRole('link', { name: '恶意源' })).toBeNull()
+    expect(entries[1]).toHaveTextContent('02')
+    expect(entries[1]).toHaveTextContent('模拟摘要：芯片出口新规发布')
+    // 标题栏：带大模型分析的早报显示“AI 整理”，以及早报的日期与推送时间
+    expect(within(article).getByText('AI 整理')).toBeVisible()
+    expect(within(article).getByText('11月7日 07:30')).toBeVisible()
+    await fireEvent.click(within(article).getByRole('link', { name: '阅读完整早报' }))
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/news'))
+  })
+
+  it('falls back to the first lines of today\'s briefing as plain text when there are no topics', async () => {
     const card: Schema['WidgetOut'] = { ...widget, id: 'w-news', widget_type: 'news_briefing', config: { lines: 3 } }
     mockApi(r => {
       const p = path(r)
       if (p === '/api/v1/dashboard/overview') return Response.json({ ...overview, widgets: [card] })
+      if (p === '/api/v1/news/today') return Response.json({ briefing: { ...briefing, content: '# 今日要闻\n\n- **第一条**：<b>大模型</b>发布\n- [第二条](https://example.com/2)\n\n---\n\n第三段\n第四段' }, topics: [], unavailable: false, message: null })
       if (p === '/api/v1/news/briefings') return Response.json({ items: [summary()], next_cursor: null })
-      if (p === '/api/v1/news/briefings/b1') return Response.json({ ...briefing, content: '# 今日要闻\n\n- **第一条**：<b>大模型</b>发布\n- [第二条](https://example.com/2)\n\n---\n\n第三段\n第四段' })
       return undefined
     })
     const { router } = await openApp('/')
-    const article = await screen.findByRole('article', { name: '今日早报' })
+    const article = await screen.findByRole('article', { name: 'AI 新闻速览' })
     const lines = await within(article).findByRole('list', { name: '早报开头' })
     await vi.waitFor(() => expect(within(lines).getAllByRole('listitem').map(li => li.textContent)).toEqual(['今日要闻', '第一条：大模型发布', '第二条']))
     expect(article.querySelector('b')).toBeNull()
-    expect(within(article).getByText('2026/11/07 07:30')).toBeVisible()
-    await fireEvent.click(within(article).getByRole('link', { name: '今日早报' }))
+    expect(within(article).getByText('今日早报')).toBeVisible()
+    expect(within(article).getByText('11月7日 07:30')).toBeVisible()
+    // 没有大模型分析：不标“AI 整理”
+    expect(within(article).queryByText('AI 整理')).toBeNull()
+    await fireEvent.click(within(article).getByRole('link', { name: '阅读完整早报' }))
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/news'))
+  })
+
+  it('falls back to the latest briefing excerpt when today has none', async () => {
+    const card: Schema['WidgetOut'] = { ...widget, id: 'w-news', widget_type: 'news_briefing', config: {} }
+    mockApi(r => {
+      const p = path(r)
+      if (p === '/api/v1/dashboard/overview') return Response.json({ ...overview, widgets: [card] })
+      if (p === '/api/v1/news/briefings') return Response.json({ items: [summary({ excerpt: '昨天的要闻' })], next_cursor: null })
+      return undefined
+    })
+    await openApp('/')
+    const article = await screen.findByRole('article', { name: 'AI 新闻速览' })
+    const lines = await within(article).findByRole('list', { name: '早报开头' })
+    expect(within(lines).getAllByRole('listitem').map(li => li.textContent)).toEqual(['昨天的要闻'])
   })
 
   it('explains when there is no briefing yet', async () => {
     const card: Schema['WidgetOut'] = { ...widget, id: 'w-news', widget_type: 'news_briefing', config: {} }
     mockApi(r => (path(r) === '/api/v1/dashboard/overview' ? Response.json({ ...overview, widgets: [card] }) : path(r) === '/api/v1/news/briefings' ? Response.json({ items: [], next_cursor: null }) : undefined))
     await openApp('/')
-    const article = await screen.findByRole('article', { name: '今日早报' })
+    const article = await screen.findByRole('article', { name: 'AI 新闻速览' })
     expect(await within(article).findByText(/还没有早报/)).toBeVisible()
+    expect(within(article).getByRole('link', { name: '打开早报页' })).toHaveAttribute('href', '/news')
   })
 })
 

@@ -12,7 +12,7 @@ const invalid = ref(false)
 // 停用的插拔式模块的组件不列出（编辑已有组件时保留它自己的类型）；模块组件的填写说明来自模块（T-0159）
 const modules = useModulesStore()
 const definitions = computed(() => Object.values(registry).filter((definition) => definition.type === props.widget?.widget_type || modules.isEnabled(definition.module)))
-const help = computed(() => ['文本便签填写 text；常用链接填写 links（title / http(s) url）；今日任务与最近文档填写 limit（1–20）；近期日程填写 days（1–14）与 limit（1–20）；GitHub 动态填写 kind（runs / pulls / issues）与 limit（1–20）；服务状态填写 limit（1–20）；API 延迟填写 range（1h / 6h / 24h）与 quantile（p50 / p95 / p99）；通知填写 limit（1–20）与 unread_only（true / false）', ...definitions.value.flatMap((definition) => (definition.help ? [definition.help] : []))].join('；') + '。')
+const help = computed(() => ['文本便签填写 text；常用链接填写 links（title / http(s) url）；今日任务与最近文档填写 limit（1–20）；提醒与日程填写 days（1–14）与 limit（1–20）；GitHub 动态填写 kind（runs / pulls / issues）与 limit（1–20）；服务状态填写 limit（1–20）；API 延迟填写 range（1h / 6h / 24h）与 quantile（p50 / p95 / p99）；通知填写 limit（1–20）与 unread_only（true / false）', ...definitions.value.flatMap((definition) => (definition.help ? [definition.help] : []))].join('；') + '。')
 function changeType() { config.value = JSON.stringify(registry[type.value].configSchema.parse({}), null, 2) }
 function parse(): WidgetValue | null {
   try {

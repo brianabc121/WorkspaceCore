@@ -9,9 +9,25 @@ import LayoutFields from '../../widgets/LayoutFields.vue'
 import WidgetEditor from './WidgetEditor.vue'
 import DataState from '../../components/DataState.vue'
 import ModalPanel from '../../components/ModalPanel.vue'
-import { Ellipsis, RefreshCw } from '@lucide/vue'
+import { Ellipsis, LayoutDashboard, RefreshCw } from '@lucide/vue'
+import { useQueryClient } from '@tanstack/vue-query'
+import { useAuthStore } from '../../stores/auth'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+// 首页页头（T-0164，首页效果图）：标题、问候语、更新时间、刷新、自定义首页（进入编辑模式）
+defineProps<{ heading: string; greeting: string }>()
 const model = reactive(useDashboard())
+const auth = useAuthStore(), cache = useQueryClient()
+const updated = computed(() => (model.updatedAt ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(model.updatedAt) : ''))
+// 刷新：首页聚合之外，各组件自己读的数据（任务进展、我的待办、日程、早报）也一起重新读取
+async function refreshAll() {
+  const scope = auth.workspaceId
+  // 提醒与日程（calendar … 'widget'）已由 reload 刷新，这里不再重复读取
+  await Promise.all([model.reload(), cache.invalidateQueries({ predicate: (q) => ['task-progress', 'tasks', 'calendar', 'news', 'projects'].includes(String(q.queryKey[0])) && q.queryKey[2] === scope && q.queryKey[3] !== 'widget' })])
+}
+function addWidget() {
+  if (model.dirty && !window.confirm('添加组件将放弃未保存的布局，继续吗？')) return
+  model.failure = null; editor.value = 'new'
+}
 const mobile = ref(window.matchMedia?.('(max-width: 760px)').matches ?? false)
 const media = window.matchMedia?.('(max-width: 760px)')
 const setMobile = () => { mobile.value = media?.matches ?? false }
@@ -57,14 +73,19 @@ function closeEditor() { if (!model.pending) { editor.value = null; if (!model.b
 </script>
 <template>
   <section aria-label="仪表盘">
-    <div id="dashboard-tools" class="dashboard-toolbar">
-      <div class="dashboard-title"><h2>{{ model.dashboard?.title ?? '首页' }}</h2><span v-if="model.dashboard" class="form-help">版本 {{ model.dashboard.version }}</span></div>
-      <div class="form-actions">
-        <button type="button" class="shell-icon" aria-label="刷新首页" title="刷新首页" :disabled="model.pending || model.fetching" @click="model.reload"><RefreshCw aria-hidden="true" /></button>
+    <header id="dashboard-tools" class="home-header">
+      <div><h1>{{ heading }}</h1><p>{{ greeting }}</p></div>
+      <div class="home-actions">
+        <span v-if="updated && !model.editing" class="home-updated">更新于 {{ updated }}</span>
+        <button v-if="!model.editing" type="button" class="secondary-button" aria-label="刷新首页" title="刷新首页" :disabled="model.pending || model.fetching" @click="refreshAll"><RefreshCw aria-hidden="true" />刷新</button>
         <template v-if="model.dashboard && !model.loading && !model.denied">
-          <button v-if="model.canEdit && !model.editing" class="secondary-button" :disabled="model.pending || model.blocked || model.widgets.length >= 50" @click="model.failure = null; editor = 'new'">添加组件</button>
-          <button v-if="model.canEdit && !model.editing" class="primary-button" :disabled="model.pending || model.fetching || model.blocked || !!model.queryError" @click="model.beginEdit">编辑布局</button>
-          <template v-if="model.editing"><button class="primary-button" :disabled="model.pending || model.blocked || !model.dirty" @click="model.saveLayout">{{ model.pending ? '正在保存…' : '保存布局' }}</button><button class="secondary-button" :disabled="model.pending" @click="model.editing = false; model.dirty = false">取消编辑</button></template>
+          <button v-if="model.canEdit && !model.editing" type="button" class="secondary-button" :disabled="model.pending || model.fetching || model.blocked || !!model.queryError" @click="model.beginEdit"><LayoutDashboard aria-hidden="true" />自定义首页</button>
+          <template v-if="model.editing">
+            <span class="home-updated">{{ model.dashboard.title }} · 版本 {{ model.dashboard.version }}</span>
+            <button class="secondary-button" :disabled="model.pending || model.blocked || model.widgets.length >= 50" @click="addWidget">添加组件</button>
+            <button class="primary-button" :disabled="model.pending || model.blocked || !model.dirty" @click="model.saveLayout">{{ model.pending ? '正在保存…' : '保存布局' }}</button>
+            <button class="secondary-button" :disabled="model.pending" @click="model.editing = false; model.dirty = false">取消编辑</button>
+          </template>
           <select v-if="model.choices.length" aria-label="选择仪表盘" :value="model.dashboard.id" :disabled="model.pending || model.blocked" @change="model.choose(($event.target as HTMLSelectElement).value)"><option v-for="choice in model.choices" :key="choice.id" :value="choice.id">{{ choice.title }}{{ choice.is_default ? ' · 首页' : '' }}</option></select>
           <DropdownMenu>
             <DropdownMenuTrigger class="shell-icon" aria-label="更多仪表盘操作" title="更多"><Ellipsis aria-hidden="true" /></DropdownMenuTrigger>
@@ -73,11 +94,12 @@ function closeEditor() { if (!model.pending) { editor.value = null; if (!model.b
               <DropdownMenuItem v-if="model.canEdit" :disabled="model.pending || model.dirty || model.blocked" @select="chosen = () => openTools('import')">导入 JSON</DropdownMenuItem>
               <DropdownMenuItem :disabled="model.pending || model.dirty || model.blocked" @select="model.loadChoices">选择仪表盘</DropdownMenuItem>
               <DropdownMenuItem v-if="model.canEdit && !model.dashboard.is_default" :disabled="model.pending || model.dirty || model.blocked" @select="model.makeDefault">设为首页</DropdownMenuItem>
+              <DropdownMenuItem v-if="model.canEdit" :disabled="model.pending || model.blocked" @select="chosen = () => model.resetDashboard()">恢复默认首页</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </template>
       </div>
-    </div>
+    </header>
     <p v-if="model.error && !mode && !editor" role="alert" class="feedback">{{ model.error }}</p>
     <p v-if="model.notice" role="status" class="feedback">{{ model.notice }}</p>
     <button v-if="model.blocked" class="secondary-button" :disabled="model.pending" @click="model.reload">重新加载最新版本</button>

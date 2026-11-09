@@ -29,7 +29,8 @@ from seed import add_corrupt_widget, add_member, create_user
 PASSWORD = "e2e sprint2 passphrase"  # noqa: S105 -- 只用于本脚本临时创建的测试账号
 # 首页聚合的总耗时上限（契约 ADR 第 8 节，DASHBOARD_OVERVIEW_TIMEOUT_SECONDS 的默认值）
 OVERVIEW_BUDGET_SECONDS = 3.0
-STARTER_TYPES = ["note", "quick_links", "todo_summary", "today_tasks"]
+# 默认首页（T-0163，docs/v2/HOME_PLAN.md 第 4 节）
+STARTER_TYPES = ["work_summary", "task_progress", "news_briefing", "calendar_agenda", "my_todos"]
 # 用来确认错误响应和审计日志不回显输入内容的标记
 ECHO_MARK = "e2e-should-not-echo"
 
@@ -95,7 +96,7 @@ def main() -> int:
     )
     widgets = overview.get("widgets") or []
     report.check(
-        "默认首页带 4 个入门组件（按桌面端从上到下、从左到右）",
+        "默认首页带 5 个组件（按桌面端从上到下、从左到右）",
         [w["widget_type"] for w in widgets] == STARTER_TYPES,
         ", ".join(w["widget_type"] for w in widgets),
     )

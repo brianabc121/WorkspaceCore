@@ -79,8 +79,8 @@ async def test_setup_creates_the_default_dashboard_with_starter_widgets(home: Ho
         "work_summary",
         "task_progress",
         "news_briefing",
-        "my_todos",
         "calendar_agenda",
+        "my_todos",
     ]
     # T-0082：任务是工作台自己的数据，不需要先接入外部服务
     assert data["modules"]["tasks"]["status"] == "ok"
@@ -403,10 +403,10 @@ async def test_unknown_types_in_storage_do_not_break_the_page(home: Home) -> Non
     data = await home.overview()
     legacy = next(w for w in data["widgets"] if w["widget_type"] == "legacy_widget")
     assert legacy["config"] == {"anything": [1, 2]}
-    # 无法解析的布局紧接着放在其余组件下方（默认首页桌面端到第 14 行、移动端到第 26 行）
+    # 无法解析的布局紧接着放在其余组件下方（默认首页桌面端到第 13 行、移动端到第 24 行）
     assert legacy["layout"] == {
-        "desktop": {"x": 0, "y": 14, "w": 4, "h": 3},
-        "mobile": {"y": 26, "h": 3},
+        "desktop": {"x": 0, "y": 13, "w": 4, "h": 3},
+        "mobile": {"y": 24, "h": 3},
     }
     assert data["widgets"][-1]["id"] == legacy["id"]
     assert len(data["widgets"]) == STARTERS + 1

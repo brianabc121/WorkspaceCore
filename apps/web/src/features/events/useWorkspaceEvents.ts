@@ -9,15 +9,16 @@ import type { Schema } from '../../services/api'
 type Topic = Schema['InvalidateEvent']['topics'][number]
 // 核心功能的主题 → 要刷新的查询键前缀；插拔式模块的主题写在模块的 events 里（T-0159），这里必须覆盖其余所有主题
 const core: Record<Exclude<Topic, ModuleTopic>, string[]> = {
-  overview: ['overview', 'widgets'], tasks: ['tasks', 'task', 'knowledge-link-tasks', 'search'],
+  // task-progress：首页“工作概况 / 任务进展”（T-0164），任务、执行记录、阻塞 Issue 变化都要刷新
+  overview: ['overview', 'widgets'], tasks: ['tasks', 'task', 'knowledge-link-tasks', 'search', 'task-progress'],
   projects: ['projects', 'search'], knowledge: ['knowledge', 'knowledge-sources', 'related-docs', 'kb', 'search'],
   calendar: ['calendar', 'search'], developer: ['developer', 'search'], integrations: ['integrations'],
   notifications: ['notifications', 'overview'], operations: ['operations'],
   im: ['im'], agents: ['agents'], ai: ['ai-tool-executions', 'im', 'timeline'],
   // 任务时间轴（T-0104）：执行记录与 token 用量
-  timeline: ['timeline', 'task-runs'],
+  timeline: ['timeline', 'task-runs', 'task-progress'],
   // 项目 Issues（T-0123）
-  issues: ['issues', 'search'],
+  issues: ['issues', 'search', 'task-progress'],
   // 模块启用 / 停用（T-0159）：启用状态由 modules store 重新读取（见 invalidate），首页组件跟着刷新
   modules: ['overview', 'widgets'],
   // 侧栏布局（T-0161）：在 navigation store 里，由 invalidate 重新读取

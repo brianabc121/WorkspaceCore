@@ -35,9 +35,9 @@ def starter_widgets() -> list[WidgetCreate]:
     return [
         WorkSummaryWidgetCreate(widget_type="work_summary", layout=_layout(0, 0, 12, 2, 0)),
         TaskProgressWidgetCreate(widget_type="task_progress", layout=_layout(0, 2, 8, 7, 2)),
-        NewsBriefingWidgetCreate(widget_type="news_briefing", layout=_layout(8, 2, 4, 7, 14)),
-        MyTodosWidgetCreate(widget_type="my_todos", layout=_layout(0, 9, 8, 5, 9)),
-        CalendarAgendaWidgetCreate(widget_type="calendar_agenda", layout=_layout(8, 9, 4, 5, 21)),
+        NewsBriefingWidgetCreate(widget_type="news_briefing", layout=_layout(8, 2, 4, 6, 13)),
+        MyTodosWidgetCreate(widget_type="my_todos", layout=_layout(0, 9, 8, 4, 9)),
+        CalendarAgendaWidgetCreate(widget_type="calendar_agenda", layout=_layout(8, 8, 4, 5, 19)),
     ]
 
 

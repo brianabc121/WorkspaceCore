@@ -16,7 +16,8 @@ describe('工程骨架', () => {
   // 知识库（T-0099）与消息页一样是独立页面，没有工作台的侧栏，单独在 kb-pages.test.ts 里测
   it.each(pages.filter(([path]) => path !== '/knowledge'))('renders the %s page and navigation', async (path, label) => {
     await open(path)
-    expect(screen.getByRole('heading', { level: 1, name: label })).toBeVisible()
+    // 首页的标题是“工作总览”（T-0164，首页效果图），侧栏里仍叫“总览”
+    expect(screen.getByRole('heading', { level: 1, name: path === '/' ? '工作总览' : label })).toBeVisible()
     const nav = screen.getByRole('navigation', { name: '主导航' })
     for (const [href, name] of pages) {
       expect(nav.querySelector(`a[href="${href}"]`)).toHaveTextContent(name!)
