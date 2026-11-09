@@ -163,6 +163,59 @@ async def connect(
         raise _classify(error) from error
 
 
+async def connect_password_only(
+    address: str, port: int, username: str, host_key: str, password: str
+) -> asyncssh.SSHClientConnection:
+    """OpenClaw 服务器的登录（T-0178）：只用密码，按固定的主机公钥。
+
+    与 `connect` 不同，这里把其他认证方式都显式关掉（asyncssh 2.24.1 的参数，已在锁定版本的
+    SSHClientConnectionOptions 上核对）：
+
+    - `client_keys=None`、`public_key_auth=False`：不做公钥认证，也不去读 ~/.ssh 下的默认私钥；
+    - `agent_path=None`、`agent_forwarding=False`：不用运行环境里的 ssh-agent，也不转发；
+    - `host_based_auth=False`、`gss_host=None`、`gss_kex=False`、`gss_auth=False`：
+      不做基于主机的认证与 GSS（Kerberos）；
+    - `preferred_auth` 只有 keyboard-interactive 与 password；`disable_trivial_auth=True`：
+      服务器不真正校验凭证（none 认证、没有提示的 keyboard-interactive）就当作失败；
+    - `config=[]`：不读 ~/.ssh/config；`known_hosts` 只放确认过的那把主机公钥。
+    """
+    pinned = asyncssh.import_public_key(host_key)
+    try:
+        return await asyncssh.connect(
+            address,
+            port,
+            username=username,
+            known_hosts=([pinned], [], []),
+            config=[],
+            agent_path=None,
+            agent_forwarding=False,
+            client_keys=None,
+            public_key_auth=False,
+            host_based_auth=False,
+            gss_host=None,
+            gss_kex=False,
+            gss_auth=False,
+            kbdint_auth=True,
+            password_auth=True,
+            password=password,
+            preferred_auth="keyboard-interactive,password",
+            disable_trivial_auth=True,
+            connect_timeout=CONNECT_TIMEOUT,
+            login_timeout=CONNECT_TIMEOUT,
+            keepalive_interval=15,
+        )
+    except asyncssh.HostKeyNotVerifiable as error:
+        raise SshError(
+            "host_key_changed", "服务器的主机公钥与确认过的不一致：可能被冒充，已停止连接"
+        ) from error
+    except asyncssh.PermissionDenied as error:
+        raise SshError(
+            "auth_failed", "登录被拒绝：检查账号与密码，以及服务器是否允许密码登录"
+        ) from error
+    except (TimeoutError, OSError, asyncssh.Error) as error:
+        raise _classify(error) from error
+
+
 async def run(
     conn: asyncssh.SSHClientConnection,
     command: str,

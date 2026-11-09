@@ -1,30 +1,51 @@
-"""OpenClaw 服务器：添加、核对指纹、准备、部署实例、卸载、吊销、移除（T-0145、T-0147）。
+"""OpenClaw 服务器：添加、核对指纹、保存密码、测试连接、初始化、部署实例、卸载、吊销、移除。
 
-设计见 docs/v2/MULTI_OPENCLAW_PLAN.md 第 4、7、8 节。一台服务器上可以有多个实例：
+设计见 docs/v2/MULTI_OPENCLAW_PLAN.md 第 4、7、8 节（T-0145、T-0147）与
+docs/v2/agent-servers-redesign/ 的接口与迁移约定（T-0178）。一台服务器上可以有多个实例：
 
-- 服务器只核对一次主机指纹、只装一把工作台的专用密钥（D7）；
-  登录密码只在“准备服务器”时用一次，不保存；
+- 服务器用 IP / 端口 / 账号 / 密码添加，登录密码加密保存、只写不读
+  （app/domain/agent_server_credentials.py，ADR 2026-11-09-agent-server-password-auth）；
+  主机指纹只核对一次，核对之前密码不会发给服务器；
 - 部署实例只替换这个实例自己的目录与 Compose 项目，卸载也只碰自己（agent_deployments）；
 - 同一台服务器同时只有一个 SSH 任务（部署也一个一个来），与这台服务器上的运维动作互斥；
+  替换密码、更换地址也要等这台服务器上没有任务；
 - 手动部署的实例按上报的服务器指纹自动归到“自动识别的服务器”（app/domain/host_metrics.py），
   管理员可以手动指定（server_manual）；
-- 只有 owner 可以使用（与实例接口一致）；每一步写审计。探测主机公钥会对外发起连接，按用户限流。
+- 只有 owner 可以使用（与实例接口一致）；每一步写审计（不含密码）。探测主机公钥、测试连接
+  会对外发起连接，按用户限流。
+
+过渡说明（T-0179 之前）：初始化 / 部署仍走 agent_ssh_install 里旧的“密码阶段 + 专用密钥”流程，
+只是密码改从保存的密文读取；卸载、运维仍用旧专用密钥。见各处的 TODO(T-0179)。
 """
 
+import hashlib
+import hmac
 import uuid
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import asyncssh
-from pydantic import SecretStr
+from pydantic import BaseModel, SecretStr
 from redis.asyncio import Redis
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import agent_provisioning as prov
+from app.agent_bundle import project_name
 from app.core.config import Settings
 from app.core.errors import ApiError
+from app.domain import agent_server_ssh, idempotency
+from app.domain.agent_server_credentials import (
+    ServerCredentialError,
+    credential_required,
+    password_readable,
+    resolve_server_password,
+    seal_server_password,
+)
 from app.domain.agent_ssh import (
     PROBES_PER_MINUTE,
     _client_fingerprint,
@@ -50,9 +71,11 @@ from app.models import (
     AgentSshJob,
     AgentSshTarget,
     AgentUsageMinute,
+    IdempotencyRequest,
     Task,
     TaskRun,
 )
+from app.repositories import integrations as integration_repo
 from app.schemas.agents import (
     AgentDeployIn,
     AgentDeploymentOut,
@@ -60,16 +83,23 @@ from app.schemas.agents import (
     AgentServerAddress,
     AgentServerAssign,
     AgentServerCreate,
+    AgentServerCredentialsIn,
     AgentServerDetail,
     AgentServerList,
     AgentServerOut,
     AgentServerPrepare,
+    AgentServerSummary,
+    AgentServerTestIn,
     AgentServerUpdate,
     AgentSshConfirm,
     AgentSshRevoke,
     AgentUndeployIn,
+    ConnectionStatus,
+    DeployBlockReason,
+    InitializationStatus,
     RunningTaskRef,
     ServerAgentRow,
+    ServerAgentState,
     ServerSshOut,
     UnassignedInstance,
 )
@@ -87,7 +117,24 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _ssh_out(target: AgentSshTarget) -> ServerSshOut:
+_CONNECTION_STATUSES: frozenset[str] = frozenset(
+    {"connected", "auth_failed", "unreachable", "host_key_changed", "credential_unreadable"}
+)
+
+
+def _connection_status(target: AgentSshTarget, readable: bool) -> ConnectionStatus:
+    """连接状态：没保存密码 / 密钥不对优先；其余按最近一次显式检测，没检测过是 unknown。"""
+    if target.login_password_ref is None:
+        return "credentials_required"
+    if not readable:
+        return "credential_unreadable"
+    reason = target.last_connection_reason
+    if reason in _CONNECTION_STATUSES:
+        return reason  # type: ignore[return-value]
+    return "unknown"
+
+
+def _ssh_out(target: AgentSshTarget, readable: bool) -> ServerSshOut:
     return ServerSshOut(
         host=target.host,
         address=target.address,
@@ -97,17 +144,95 @@ def _ssh_out(target: AgentSshTarget) -> ServerSshOut:
         host_key_fingerprint=target.host_key_fingerprint,
         host_key_confirmed=target.host_key_confirmed_at is not None,
         host_key_confirmed_at=target.host_key_confirmed_at,
+        password_set=target.login_password_ref is not None,
+        credential_revision=target.credential_revision,
+        connection_status=_connection_status(target, readable),
+        last_connection_at=target.last_connection_at,
+        legacy_key_cleanup_state=target.legacy_key_cleanup_state,
+        # 迁移兼容（已弃用）：旧方案的专用公钥还在不在；不参与是否可以部署的判断
         client_key_installed=target.client_key_ref is not None,
         client_key_fingerprint=_client_fingerprint(target.client_public_key),
         prepared_at=target.prepared_at,
     )
 
 
+def _initialization(target: AgentSshTarget, job: AgentSshJob | None) -> InitializationStatus:
+    """初始化状态：由 prepared_at 与最近一次初始化任务推导（不另建一套状态机）。
+
+    最近的任务进行中 → initializing；
+    最近的任务失败 / 中断、且之后没有成功过 → failed / interrupted；
+    有 prepared_at → ready；其余 not_initialized。
+    """
+    if job is not None and job.status == "running":
+        return "initializing"
+    if (
+        job is not None
+        and job.status in {"failed", "interrupted"}
+        and (target.prepared_at is None or target.prepared_at < job.started_at)
+    ):
+        return "failed" if job.status == "failed" else "interrupted"
+    return "ready" if target.prepared_at is not None else "not_initialized"
+
+
+_INIT_BLOCKS: dict[str, DeployBlockReason] = {
+    "not_initialized": "not_initialized",
+    "initializing": "initializing",
+    "failed": "initialization_failed",
+    "interrupted": "initialization_interrupted",
+}
+
+
+@dataclass(frozen=True)
+class _DeploymentStats:
+    """一台服务器上部署记录的汇总（T-0178；口径见接口与迁移约定第 3 节）。"""
+
+    managed: int = 0
+    successful: int = 0
+    unknown: int = 0
+    mem_limit_mb: int = 0
+    mem_unlimited: int = 0
+    cpus: float = 0.0
+    cpus_unlimited: int = 0
+
+
+@dataclass(frozen=True)
+class _ServerFacts:
+    counts: tuple[int, int] = (0, 0)
+    prepare_job: AgentSshJob | None = None
+    busy: bool = False
+    stats: _DeploymentStats = field(default_factory=_DeploymentStats)
+
+
+def _block_reason(
+    target: AgentSshTarget | None,
+    initialization: InitializationStatus | None,
+    busy: bool,
+    readable: bool,
+) -> DeployBlockReason | None:
+    """不能部署的第一个原因（只是本地判断，GET 不连服务器；实际部署前仍会真实检查）。"""
+    if target is None or initialization is None:
+        return "not_ssh"
+    if target.login_password_ref is None:
+        return "credentials_required"
+    if not readable or target.last_connection_reason == "credential_unreadable":
+        return "credential_unreadable"
+    if target.host_key_confirmed_at is None:
+        return "host_key_unconfirmed"
+    if target.last_connection_reason in {"host_key_changed", "auth_failed"}:
+        return target.last_connection_reason  # type: ignore[return-value]
+    if initialization != "ready":
+        return _INIT_BLOCKS[initialization]
+    if busy:
+        return "busy"
+    return None
+
+
 def _server_out(
     server: AgentServer,
     target: AgentSshTarget | None,
-    counts: tuple[int, int],
+    facts: _ServerFacts,
     now: datetime,
+    box: CredentialBox | None,
 ) -> AgentServerOut:
     latest = server.latest or {}
     disks = [
@@ -118,11 +243,21 @@ def _server_out(
         )
         if used is not None
     ]
+    ssh_target = target if server.kind == "ssh" else None
+    readable = ssh_target is not None and password_readable(box, ssh_target.login_password_ref)
+    initialization = (
+        _initialization(ssh_target, facts.prepare_job) if ssh_target is not None else None
+    )
+    block = _block_reason(ssh_target, initialization, facts.busy, readable)
+    stats = facts.stats
+    # TODO(T-0180)：部署成功 / 卸载保留目录时写 runtime_installed；在那之前新部署的记录
+    # 也算“运行状态未知”，成功数保守地给 null
+    partial = stats.unknown > 0
     return AgentServerOut(
         id=server.id,
         name=server.name,
         kind="ssh" if server.kind == "ssh" else "auto",
-        ssh=_ssh_out(target) if target is not None else None,
+        ssh=_ssh_out(target, readable) if target is not None else None,
         reported_at=server.reported_at,
         stale=server.reported_at is None or now - server.reported_at > STALE_AFTER,
         cores=latest.get("cores"),
@@ -131,13 +266,85 @@ def _server_out(
         mem_total=latest.get("mem_total"),
         mem_used_percent=_percent_used(latest.get("mem_total"), latest.get("mem_available")),
         disk_used_percent=max(disks) if disks else None,
-        instances_total=counts[0],
-        instances_online=counts[1],
+        instances_total=facts.counts[0],
+        instances_online=facts.counts[1],
         alerts=sorted((server.alerts or {}).keys()),
+        initialization_status=initialization,
+        deployable=block is None,
+        deploy_block_reason=block,
+        managed_deployments=stats.managed,
+        successful_deployments=None if partial else stats.successful,
+        deployment_counts_partial=partial,
+        allocated_mem_limit_mb=None if stats.mem_unlimited else stats.mem_limit_mb,
+        allocated_cpus=None if stats.cpus_unlimited else round(stats.cpus, 2),
+        has_unlimited_limits=bool(stats.mem_unlimited or stats.cpus_unlimited),
         version=server.version,
         created_at=server.created_at,
         updated_at=server.updated_at,
     )
+
+
+def _summary(items: list[AgentServerOut], now: datetime) -> AgentServerSummary:
+    ssh_items = [s for s in items if s.kind == "ssh" and s.ssh is not None]
+    partial = any(s.deployment_counts_partial for s in items)
+    return AgentServerSummary(
+        server_count=len(items),
+        ready_count=sum(1 for s in ssh_items if s.initialization_status == "ready"),
+        successful_deployments=(
+            None if partial else sum(s.successful_deployments or 0 for s in items)
+        ),
+        not_initialized_count=sum(
+            1 for s in ssh_items if s.initialization_status == "not_initialized"
+        ),
+        needs_credentials_count=sum(1 for s in ssh_items if s.ssh and not s.ssh.password_set),
+        deployment_counts_partial=partial,
+        generated_at=now,
+    )
+
+
+def _agent_state(deployment: AgentDeployment | None, job: AgentSshJob | None) -> ServerAgentState:
+    """服务器详情里一个智能体的部署状态（没有真实容器检测，不输出“已停止”之类的推断）。"""
+    if deployment is None:
+        return "associated"
+    if job is not None and job.kind == "install":
+        if job.status == "running":
+            return "deploying"
+        if job.status in {"failed", "interrupted"}:
+            return "failed" if job.status == "failed" else "interrupted"
+    if deployment.runtime_installed is False:
+        return "retained"
+    if deployment.installed_at is not None:
+        return "deployed"
+    if job is not None and job.status == "running":
+        return "deploying"
+    return "failed"
+
+
+def _connection_snapshot(target: AgentSshTarget) -> tuple[object, ...]:
+    """决定“连的是哪台机器、用哪个密码”的字段；检测前后不一致时不写检测结果。"""
+    return (
+        target.address,
+        target.port,
+        target.username,
+        target.host_key,
+        target.host_key_confirmed_at is not None,
+        target.credential_revision,
+    )
+
+
+def _default_name(host: str, port: int) -> str:
+    """名称省略时用 host:port（IPv6 加方括号），超过 100 字符截断。"""
+    name = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+    return name[:100]
+
+
+@dataclass(frozen=True)
+class _Receipt:
+    """带 Idempotency-Key 的服务器写请求：成功时与业务写入一起记下（只存服务器 ID）。"""
+
+    key: uuid.UUID
+    fingerprint: str
+    op: str
 
 
 def _disabled() -> ApiError:
@@ -157,6 +364,130 @@ class AgentServerService:
         self.redis = redis
         self.runner = runner
         self.audit = AuditTrail(db, settings)
+        self._receipt: _Receipt | None = None
+
+    # ---------------------------------------------------------------- 加密与幂等
+
+    def _box_or_none(self) -> CredentialBox | None:
+        try:
+            return CredentialBox.from_settings(self.settings)
+        except CredentialError:
+            return None
+
+    def _require_box(self) -> CredentialBox:
+        box = self._box_or_none()
+        if box is None:
+            raise ApiError(503, "EXTERNAL_UNAVAILABLE", "密钥库未配置加密密钥")
+        return box
+
+    def _saved_password(self, target: AgentSshTarget) -> SecretStr:
+        """过渡用（TODO(T-0179)：后台任务登录时再按版本解密）：现在就取出保存的密码交给任务。"""
+        try:
+            return resolve_server_password(
+                self._require_box(), target, expected_revision=target.credential_revision
+            )
+        except ServerCredentialError as error:
+            raise error.api() from error
+
+    def _fingerprint(self, access: WorkspaceAccess, method: str, path: str, body: BaseModel) -> str:
+        """请求指纹：密码换成 HMAC（工作台密钥派生的子密钥），不把可撞库的明文摘要存进幂等记录。"""
+        data = body.model_dump(mode="json")
+        secrets = {name: value for name, value in body if isinstance(value, SecretStr)}
+        if secrets:
+            salt = self._require_box().derive_key("agent-server-idempotency")
+            for name, value in secrets.items():
+                digest = hmac.new(salt, value.get_secret_value().encode(), hashlib.sha256)
+                data[name] = f"hmac:{digest.hexdigest()}"
+        return idempotency.fingerprint(access.workspace.id, method, path, data)
+
+    async def idempotent(
+        self,
+        access: WorkspaceAccess,
+        key: uuid.UUID | None,
+        *,
+        op: str,
+        method: str,
+        path: str,
+        body: BaseModel,
+        run: Callable[[], Awaitable[AgentServerDetail]],
+    ) -> tuple[AgentServerDetail, bool]:
+        """服务器写接口的可选 Idempotency-Key（契约第 1 节）。返回 (详情, 是否重放)。
+
+        记录只在成功时与业务写入一起提交，内容只有操作名与服务器 ID；
+        重放返回这台服务器现在的详情（不缓存响应正文，也不再次连接服务器）。
+        失败的请求不留记录，可以用同一个键重试。
+        """
+        actor_id = access.user_id
+        if key is None or actor_id is None:
+            return await run(), False
+        fingerprint = self._fingerprint(access, method, path, body)
+        record = await integration_repo.get_idempotency(self.db, actor_id=actor_id, key=key)
+        if record is not None and record.expires_at <= _now():
+            await integration_repo.delete_idempotency(self.db, record.id)
+            await self.db.commit()
+            record = None
+        if record is not None:
+            if record.request_fingerprint != fingerprint:
+                await self.db.rollback()
+                raise ApiError(
+                    409, "IDEMPOTENCY_KEY_REUSED", "同一个 Idempotency-Key 已用于不同的请求"
+                )
+            server_id = record.context_json.get("server_id")
+            if record.status != "succeeded" or not isinstance(server_id, str):
+                await self.db.rollback()
+                raise ApiError(
+                    409,
+                    "IDEMPOTENCY_IN_PROGRESS",
+                    "同一个请求仍在处理，请稍后再查询",
+                    headers={"Retry-After": "1"},
+                )
+            await self.db.commit()
+            server = await self._server(access, uuid.UUID(server_id))
+            return await self._detail(server), True
+        self._receipt = _Receipt(key=key, fingerprint=fingerprint, op=op)
+        try:
+            return await run(), False
+        finally:
+            self._receipt = None
+
+    def _stamp(self, access: WorkspaceAccess, server_id: uuid.UUID, status_code: int) -> None:
+        """有 Idempotency-Key 时，把“成功、服务器 ID”与业务写入放进同一个事务。"""
+        receipt = self._receipt
+        if receipt is None:
+            return
+        now = _now()
+        self.db.add(
+            IdempotencyRequest(
+                workspace_id=access.workspace.id,
+                actor_id=access.user_id,
+                idempotency_key=receipt.key,
+                request_fingerprint=receipt.fingerprint,
+                status="succeeded",
+                response_code=status_code,
+                response_json={"body": {"server_id": str(server_id)}},
+                context_json={
+                    "op": receipt.op,
+                    "server_id": str(server_id),
+                    "started_at": now.isoformat(),
+                },
+                expires_at=now + idempotency.RETENTION,
+            )
+        )
+
+    async def _commit(self) -> None:
+        try:
+            await self.db.commit()
+        except IntegrityError as error:
+            await self.db.rollback()
+            if self._receipt is None or "idempotency_requests" not in str(error.orig):
+                raise
+            # 并发的同一个请求（同一个键）先提交了：这一个的写入随事务回滚
+            raise ApiError(
+                409,
+                "IDEMPOTENCY_IN_PROGRESS",
+                "同一个请求仍在处理，请稍后再查询",
+                headers={"Retry-After": "1"},
+            ) from None
 
     # ---------------------------------------------------------------- 读取
 
@@ -214,11 +545,93 @@ class AgentServerService:
         )
         return {row[0]: (int(row[1]), int(row[2])) for row in rows.all() if row[0] is not None}
 
-    async def _out(self, server: AgentServer) -> AgentServerOut:
-        counts = await self._counts([server.id])
-        return _server_out(
-            server, await self._target(server), counts.get(server.id, (0, 0)), _now()
+    async def _facts(
+        self, server_ids: list[uuid.UUID], targets: dict[uuid.UUID, AgentSshTarget]
+    ) -> dict[uuid.UUID, _ServerFacts]:
+        """一批服务器的实例数、最近一次初始化任务、是否有进行中的任务、部署记录汇总（批量查询）。"""
+        if not server_ids:
+            return {}
+        counts = await self._counts(server_ids)
+        target_ids = [t.id for t in targets.values()]
+        prepare_jobs: dict[uuid.UUID, AgentSshJob] = {}
+        busy_targets: set[uuid.UUID] = set()
+        if target_ids:
+            prepare_jobs = {
+                job.target_id: job
+                for job in (
+                    await self.db.scalars(
+                        select(AgentSshJob)
+                        .where(AgentSshJob.target_id.in_(target_ids), AgentSshJob.kind == "prepare")
+                        .ext(distinct_on(AgentSshJob.target_id))
+                        .order_by(AgentSshJob.target_id, AgentSshJob.started_at.desc())
+                        .execution_options(populate_existing=True)
+                    )
+                ).all()
+            }
+            busy_targets = set(
+                (
+                    await self.db.scalars(
+                        select(AgentSshJob.target_id).where(
+                            AgentSshJob.target_id.in_(target_ids), AgentSshJob.status == "running"
+                        )
+                    )
+                ).all()
+            )
+        busy_servers = set(
+            (
+                await self.db.scalars(
+                    select(AgentOpsAction.server_id).where(
+                        AgentOpsAction.server_id.in_(server_ids),
+                        AgentOpsAction.status == "running",
+                    )
+                )
+            ).all()
         )
+        installed = AgentDeployment.installed_at.is_not(None)
+        stats = {
+            row[0]: _DeploymentStats(
+                managed=int(row[1]),
+                successful=int(row[2]),
+                unknown=int(row[3]),
+                mem_limit_mb=int(row[4] or 0),
+                mem_unlimited=int(row[5]),
+                cpus=float(row[6] or 0),
+                cpus_unlimited=int(row[7]),
+            )
+            for row in (
+                await self.db.execute(
+                    select(
+                        AgentDeployment.server_id,
+                        func.count(),
+                        func.count().filter(installed, AgentDeployment.runtime_installed.is_(True)),
+                        func.count().filter(installed, AgentDeployment.runtime_installed.is_(None)),
+                        func.sum(AgentInstance.mem_limit_mb),
+                        func.count().filter(AgentInstance.mem_limit_mb.is_(None)),
+                        func.sum(AgentInstance.cpus),
+                        func.count().filter(AgentInstance.cpus.is_(None)),
+                    )
+                    .join(AgentInstance, AgentInstance.id == AgentDeployment.instance_id)
+                    .where(AgentDeployment.server_id.in_(server_ids))
+                    .group_by(AgentDeployment.server_id)
+                )
+            ).all()
+        }
+        facts = {}
+        for server_id in server_ids:
+            target = targets.get(server_id)
+            facts[server_id] = _ServerFacts(
+                counts=counts.get(server_id, (0, 0)),
+                prepare_job=prepare_jobs.get(target.id) if target is not None else None,
+                busy=server_id in busy_servers
+                or (target is not None and target.id in busy_targets),
+                stats=stats.get(server_id, _DeploymentStats()),
+            )
+        return facts
+
+    async def _out(self, server: AgentServer) -> AgentServerOut:
+        target = await self._target(server)
+        facts = await self._facts([server.id], {server.id: target} if target else {})
+        return _server_out(server, target, facts[server.id], _now(), self._box_or_none())
 
     async def list_servers(self, access: WorkspaceAccess) -> AgentServerList:
         now = _now()
@@ -244,7 +657,9 @@ class AgentServerService:
             if ids
             else {}
         )
-        counts = await self._counts(ids)
+        facts = await self._facts(ids, targets)
+        box = self._box_or_none()
+        items = [_server_out(s, targets.get(s.id), facts[s.id], now, box) for s in servers]
         unassigned = (
             await self.db.execute(
                 select(AgentInstance.id, AgentInstance.name, AgentInstance.status)
@@ -256,9 +671,8 @@ class AgentServerService:
             )
         ).all()
         return AgentServerList(
-            items=[
-                _server_out(s, targets.get(s.id), counts.get(s.id, (0, 0)), now) for s in servers
-            ],
+            summary=_summary(items, now),
+            items=items,
             unassigned=[
                 UnassignedInstance(id=row[0], name=row[1], status=row[2]) for row in unassigned
             ],
@@ -333,6 +747,18 @@ class AgentServerService:
                 )
             ).all()
         }
+        jobs = {
+            job.instance_id: job
+            for job in (
+                await self.db.scalars(
+                    select(AgentSshJob)
+                    .where(AgentSshJob.instance_id.in_(ids))
+                    .ext(distinct_on(AgentSshJob.instance_id))
+                    .order_by(AgentSshJob.instance_id, AgentSshJob.started_at.desc())
+                    .execution_options(populate_existing=True)
+                )
+            ).all()
+        }
         running: dict[uuid.UUID, RunningTaskRef] = {}
         for instance_id, task_id, title in (
             await self.db.execute(
@@ -348,12 +774,16 @@ class AgentServerService:
         for instance in instances:
             state = states.get(instance.id)
             deployment = deployments.get(instance.id)
+            job = jobs.get(instance.id)
             rows.append(
                 ServerAgentRow(
                     instance_id=instance.id,
                     name=instance.name,
                     status=instance.status,
                     deployed=deployment is not None,
+                    deployment_state=_agent_state(deployment, job),
+                    latest_job=_job_out(job) if job else None,
+                    deployment_project=project_name(str(instance.id)) if deployment else None,
                     install_dir=deployment.install_dir if deployment else None,
                     mem_limit_mb=instance.mem_limit_mb,
                     cpus=instance.cpus,
@@ -416,6 +846,7 @@ class AgentServerService:
                     server_id=deployment.server_id,
                     install_dir=deployment.install_dir,
                     installed_at=deployment.installed_at,
+                    runtime_installed=deployment.runtime_installed,
                     version=deployment.version,
                 )
                 if deployment
@@ -507,13 +938,21 @@ class AgentServerService:
     async def create(
         self, access: WorkspaceAccess, body: AgentServerCreate, *, client_ip: str
     ) -> AgentServerDetail:
-        """添加一台服务器：解析地址、读取主机公钥（不登录）。确认要另外一步。"""
+        """添加一台服务器：解析地址、读取主机公钥（不登录），加密保存登录密码。
+
+        确认指纹是另外一步；确认之前密码不会发给服务器（这里只做密钥交换、读主机公钥）。
+        """
+        box = self._require_box()
         address, key = await self._probe(access, body.host, body.port)
         await self._duplicate(access, address, body.port, body.username, skip=uuid.uuid4())
-        server = AgentServer(workspace_id=access.workspace.id, name=body.name, kind="ssh")
+        name = body.name or _default_name(body.host, body.port)
+        server = AgentServer(workspace_id=access.workspace.id, name=name, kind="ssh")
         self.db.add(server)
         await self.db.flush()
+        # 密文的用途绑定到这条记录：先定下 ID 再加密
+        target_id = uuid.uuid4()
         target = AgentSshTarget(
+            id=target_id,
             workspace_id=access.workspace.id,
             server_id=server.id,
             host=body.host,
@@ -523,6 +962,9 @@ class AgentServerService:
             host_key_algorithm=key.algorithm,
             host_key=key.public_key,
             host_key_fingerprint=key.fingerprint,
+            login_password_ref=seal_server_password(box, target_id, body.login_password),
+            credential_revision=1,
+            legacy_key_cleanup_state="not_needed",
             created_by=access.user_id,
             version=1,
         )
@@ -534,16 +976,19 @@ class AgentServerService:
             resource_type="agent_server",
             resource_id=server.id,
             metadata={
-                "name": body.name,
+                "name": name,
                 "host": body.host,
                 "address": address,
                 "port": body.port,
                 "username": body.username,
                 "host_key_fingerprint": key.fingerprint,
+                "login_saved": True,
+                "auth_revision": 1,
             },
             client_ip=client_ip,
         )
-        await self.db.commit()
+        self._stamp(access, server.id, 201)
+        await self._commit()
         await self.db.refresh(server)
         return await self._detail(server)
 
@@ -582,29 +1027,24 @@ class AgentServerService:
         *,
         client_ip: str,
     ) -> AgentServerDetail:
-        """更换地址或账号：重新读取主机公钥，要重新确认。已经装了专用公钥时先吊销。"""
+        """更换地址、端口或账号（连同登录密码）：重新读取主机公钥，要重新确认，环境要重新初始化。
+
+        还有部署记录时拒绝：不能把原有实例挂到另一台机器上（不做隐式迁移）。
+        旧方案的专用公钥还在时先吊销（TODO(T-0179)：改为先完成旧公钥退役）。
+        """
+        box = self._require_box()
         server = await self._server(access, server_id)
         target = await self._ssh_target(server, lock=False)
         if body.version != server.version:
             raise _version_conflict(server.version)
-        if target.client_key_ref is not None:
-            raise ApiError(
-                409,
-                "AGENT_SSH_KEY_INSTALLED",
-                "这台服务器上已经装了工作台的专用公钥：先吊销，再更换地址",
-            )
+        await self._check_replaceable(server, target)
         # 探测要几秒：探测完再锁行、重新检查（旧指纹的确认绝不能落到新公钥上）
         address, key = await self._probe(access, body.host, body.port)
         server = await self._server(access, server_id, lock=True)
         target = await self._ssh_target(server)
         if body.version != server.version:
             raise _version_conflict(server.version)
-        if target.client_key_ref is not None:
-            raise ApiError(
-                409,
-                "AGENT_SSH_KEY_INSTALLED",
-                "这台服务器上已经装了工作台的专用公钥：先吊销，再更换地址",
-            )
+        await self._check_replaceable(server, target)
         if await self._busy(target):
             raise _job_running()
         await self._duplicate(access, address, body.port, body.username, skip=target.id)
@@ -618,6 +1058,10 @@ class AgentServerService:
         target.host_key_confirmed_at = None
         target.host_key_confirmed_by = None
         target.prepared_at = None
+        target.login_password_ref = seal_server_password(box, target.id, body.login_password)
+        target.credential_revision += 1
+        target.last_connection_at = None
+        target.last_connection_reason = None
         target.version += 1
         server.version += 1
         await self.audit.record(
@@ -632,12 +1076,131 @@ class AgentServerService:
                 "port": body.port,
                 "username": body.username,
                 "host_key_fingerprint": key.fingerprint,
+                "login_saved": True,
+                "auth_revision": target.credential_revision,
             },
             client_ip=client_ip,
         )
-        await self.db.commit()
+        self._stamp(access, server.id, 200)
+        await self._commit()
         await self.db.refresh(server)
         return await self._detail(server)
+
+    async def _check_replaceable(self, server: AgentServer, target: AgentSshTarget) -> None:
+        if target.client_key_ref is not None:
+            raise ApiError(
+                409,
+                "AGENT_SSH_KEY_INSTALLED",
+                "这台服务器上已经装了工作台的专用公钥：先吊销，再更换地址",
+            )
+        deployed = await self.db.scalar(
+            select(func.count())
+            .select_from(AgentDeployment)
+            .where(AgentDeployment.server_id == server.id)
+        )
+        if deployed:
+            raise ApiError(
+                409,
+                "AGENT_SERVER_HAS_DEPLOYMENTS",
+                "这台服务器上还有部署的实例：先卸载它们，或者把新机器添加成另一台服务器",
+                details={"deployments": int(deployed)},
+            )
+
+    async def set_credentials(
+        self,
+        access: WorkspaceAccess,
+        server_id: uuid.UUID,
+        body: AgentServerCredentialsIn,
+        *,
+        client_ip: str,
+    ) -> AgentServerDetail:
+        """替换保存的登录密码：凭证版本加 1、连接状态改回未知；保留初始化记录与实例。
+
+        这台服务器上有进行中的任务或运维动作时拒绝（原密码不变），之后要重新测试连接。
+        """
+        box = self._require_box()
+        server = await self._server(access, server_id, lock=True)
+        target = await self._ssh_target(server)
+        if body.version != server.version:
+            raise _version_conflict(server.version)
+        if await self._busy(target):
+            raise _job_running()
+        replaced = target.login_password_ref is not None
+        target.login_password_ref = seal_server_password(box, target.id, body.login_password)
+        target.credential_revision += 1
+        target.last_connection_at = None
+        target.last_connection_reason = None
+        target.version += 1
+        server.version += 1
+        await self.audit.record(
+            "agents.server.credentials_set",
+            workspace_ids=[server.workspace_id],
+            actor_id=access.user_id,
+            resource_type="agent_server",
+            resource_id=server.id,
+            metadata={"replaced": replaced, "auth_revision": target.credential_revision},
+            client_ip=client_ip,
+        )
+        self._stamp(access, server.id, 200)
+        await self._commit()
+        await self.db.refresh(server)
+        return await self._detail(server)
+
+    async def test_connection(
+        self,
+        access: WorkspaceAccess,
+        server_id: uuid.UUID,
+        body: AgentServerTestIn,
+        *,
+        client_ip: str,
+    ) -> AgentServerDetail:
+        """测试连接：按固定的主机公钥、用保存的密码登录，只读检查账号权限与环境。
+
+        不安装 Docker、不建容器、不写 authorized_keys。登录不了（密码错误、连不上、主机公钥变化、
+        密码解不开）记在连接状态里、返回 200；版本过期、没确认指纹、没保存密码仍是接口错误。
+        """
+        box = self._require_box()
+        server = await self._server(access, server_id)
+        target = await self._ssh_target(server, lock=False)
+        if body.version != server.version:
+            raise _version_conflict(server.version)
+        if target.host_key_confirmed_at is None:
+            raise ApiError(
+                409, "AGENT_SSH_HOST_KEY_UNCONFIRMED", "先核对并确认服务器的主机公钥指纹"
+            )
+        if target.login_password_ref is None:
+            raise credential_required().api()
+        await self._check_probe_rate(access)
+        seen = _connection_snapshot(target)
+        revision = target.credential_revision
+        # 连接与检查要几秒到几十秒：不占着数据库事务
+        await self.db.commit()
+        try:
+            check = await agent_server_ssh.check_agent_server(
+                target, box, expected_revision=revision
+            )
+        except ServerCredentialError as error:
+            raise error.api() from error
+        server = await self._server(access, server_id, lock=True)
+        target = await self._ssh_target(server)
+        if _connection_snapshot(target) != seen:
+            # 检测期间地址、账号、主机公钥或密码被改了：结果属于旧的连接信息，不写
+            raise _version_conflict(server.version)
+        target.last_connection_at = _now()
+        target.last_connection_reason = check.reason
+        await self.audit.record(
+            "agents.server.connection_tested",
+            workspace_ids=[server.workspace_id],
+            actor_id=access.user_id,
+            resource_type="agent_server",
+            resource_id=server.id,
+            metadata={"result": check.reason, "auth_revision": revision},
+            client_ip=client_ip,
+        )
+        self._stamp(access, server.id, 200)
+        await self._commit()
+        await self.db.refresh(server)
+        return await self._detail(server, warning=check.warning)
 
     async def confirm(
         self,
@@ -691,7 +1254,11 @@ class AgentServerService:
         *,
         client_ip: str,
     ) -> AgentServerDetail:
-        """准备服务器：用一次登录密码装上专用公钥、需要时用 sudo 安装 Docker（只跑前五步）。"""
+        """初始化服务器：用保存的登录密码登录、需要时用 sudo 安装 Docker（只跑前五步）。
+
+        TODO(T-0179)：任务里仍是旧流程（密码阶段装专用公钥、之后用专用密钥重连）；
+        改成全程密码登录、不装公钥，任务在登录时按 credential_revision 解密。
+        """
         self._ready_to_run()
         server = await self._server(access, server_id, lock=True)
         target = await self._ssh_target(server)
@@ -701,6 +1268,7 @@ class AgentServerService:
             raise ApiError(
                 409, "AGENT_SSH_HOST_KEY_UNCONFIRMED", "先核对并确认服务器的主机公钥指纹"
             )
+        password = self._saved_password(target)
         if await self._busy(target):
             raise _job_running()
         await self._start_job(
@@ -708,8 +1276,13 @@ class AgentServerService:
             target,
             kind="prepare",
             instance_id=None,
-            password=body.password,
-            metadata={"host": target.host, "port": target.port, "username": target.username},
+            password=password,
+            metadata={
+                "host": target.host,
+                "port": target.port,
+                "username": target.username,
+                "auth_revision": target.credential_revision,
+            },
             client_ip=client_ip,
         )
         await self.db.refresh(server)
@@ -787,6 +1360,9 @@ class AgentServerService:
 
         服务器连不上时，force=true 只删除工作台保存的私钥，并提示 owner 手动删除那一行。
         吊销后这台服务器上的实例不能再经工作台运维或卸载，要重新准备服务器。
+
+        TODO(T-0179)：旧密钥登录退役后这里返回 410 AGENT_SSH_KEY_AUTH_RETIRED，
+        由 legacy-key-cleanup（密码登录、定向删除）取代。
         """
         server = await self._server(access, server_id, lock=True)
         target = await self._ssh_target(server)
@@ -968,12 +1544,10 @@ class AgentServerService:
             raise ApiError(
                 409, "AGENT_SSH_HOST_KEY_UNCONFIRMED", "先核对并确认服务器的主机公钥指纹"
             )
-        if body.password is None and target.client_key_ref is None:
-            raise ApiError(
-                422,
-                "VALIDATION_FAILED",
-                "这台服务器还没准备：先准备服务器，或填写登录密码",
-            )
+        # body.password 已弃用、忽略：密码只从服务器保存的密文读取。
+        # TODO(T-0179)：过渡期仍沿用旧流程——旧专用密钥还在时用它登录，否则用保存的密码
+        # （任务里仍会装专用公钥）；改成全程密码登录，并要求服务器已初始化。
+        password = self._saved_password(target) if target.client_key_ref is None else None
         if await self._busy(target):
             raise _job_running()
         if deployment is None:
@@ -990,7 +1564,7 @@ class AgentServerService:
             target,
             kind="install",
             instance_id=instance.id,
-            password=body.password,
+            password=password,
             metadata={
                 "host": target.host,
                 "port": target.port,
@@ -1010,7 +1584,10 @@ class AgentServerService:
         *,
         client_ip: str,
     ) -> AgentDeploymentState:
-        """卸载这个实例：只用专用密钥。停止它的容器、删掉它的定时任务，可选删除它的目录。"""
+        """卸载这个实例：只用专用密钥。停止它的容器、删掉它的定时任务，可选删除它的目录。
+
+        TODO(T-0179)：改用保存的登录密码（connect_agent_server），不再要求旧专用密钥。
+        """
         self._ready_to_run()
         instance = await self._instance(access, instance_id, lock=True)
         if body.version != instance.version:

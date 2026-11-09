@@ -333,9 +333,12 @@ class Owner:
                 job = detail.json()["job"]
         return {"target": await self.target(instance_id), "job": job, "warning": None}
 
-    async def add_server(self, port: int, *, username: str = "deploy") -> dict[str, Any]:
+    async def add_server(
+        self, port: int, *, username: str = "deploy", password: str = PASSWORD
+    ) -> dict[str, Any]:
         if port in self.by_port:
             return self.by_port[port]
+        # T-0178：添加服务器时就加密保存登录密码（之后部署 / 初始化都用保存的密码）
         response = await self.client.post(
             "/api/v1/agents/servers",
             json={
@@ -343,6 +346,7 @@ class Owner:
                 "host": "127.0.0.1",
                 "port": port,
                 "username": username,
+                "login_password": password,
             },
             headers=self.headers(),
         )
@@ -351,9 +355,11 @@ class Owner:
         self.by_port[port] = server
         return server
 
-    async def prepare(self, port: int, *, confirm: bool = True) -> tuple[str, int]:
+    async def prepare(
+        self, port: int, *, confirm: bool = True, password: str = PASSWORD
+    ) -> tuple[str, int]:
         instance_id = await self.instance()
-        server = await self.add_server(port)
+        server = await self.add_server(port, password=password)
         self.servers[instance_id] = server["id"]
         current = (await self._get(f"/api/v1/agents/servers/{server['id']}"))["server"]
         if confirm and not current["ssh"]["host_key_confirmed"]:
@@ -377,6 +383,7 @@ class Owner:
     async def install(
         self, instance_id: str, version: int, password: str | None = PASSWORD, **extra: Any
     ) -> httpx.Response:
+        """部署。password 是已弃用的字段（T-0178 起忽略，用服务器上保存的密码），保留它检查兼容。"""
         body: dict[str, Any] = {
             "server_id": self.servers[instance_id],
             "version": await self._instance_version_for(instance_id, version),
@@ -393,7 +400,7 @@ class Owner:
     async def replace(self, instance_id: str, **body: Any) -> httpx.Response:
         return await self.client.put(
             f"/api/v1/agents/servers/{self.servers[instance_id]}/address",
-            json={"host": "127.0.0.1", "username": "deploy", **body},
+            json={"host": "127.0.0.1", "username": "deploy", "login_password": PASSWORD, **body},
             headers=self.headers(),
         )
 
@@ -721,10 +728,11 @@ async def test_docker_already_usable_skips_install(owner: Owner, tmp_path: Path)
 
 
 async def test_wrong_password_fails_without_key(owner: Owner, tmp_path: Path) -> None:
+    """保存的登录密码不对（T-0178 起请求里的 password 已弃用、被忽略）：登录失败，不装公钥。"""
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
-        instance_id, version = await owner.prepare(port)
-        response = await owner.install(instance_id, version, password="wrong password 1")  # noqa: S106
+        instance_id, version = await owner.prepare(port, password="wrong password 1")  # noqa: S106
+        response = await owner.install(instance_id, version, password=PASSWORD)
         assert response.status_code == 202
         state = await owner.finished(instance_id)
     job = state["job"]
@@ -817,10 +825,13 @@ async def test_preconditions(owner: Owner, tmp_path: Path) -> None:
         assert response.json()["error"]["code"] == "AGENT_SSH_HOST_KEY_UNCONFIRMED"
 
         instance_id, version = await owner.prepare(port)
+        # 没有保存登录密码（T-0178 之前添加的旧服务器）：要先补录密码
+        await run_sql(
+            owner.database_url, "UPDATE workspace.agent_ssh_targets SET login_password_ref = NULL"
+        )
         response = await owner.install(instance_id, version, password=None)
-        assert response.status_code == 422
-        # 与全项目的输入错误同一个错误码（T-0090 的网页按它提示）
-        assert response.json()["error"]["code"] == "VALIDATION_FAILED"
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "AGENT_SERVER_CREDENTIAL_REQUIRED"
         response = await owner.install(instance_id, version + 5)
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "VERSION_CONFLICT"
@@ -847,7 +858,8 @@ async def test_one_running_job_per_target(
         assert response.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
         response = await owner.replace(instance_id, port=port, username="other", version=version)
         assert response.status_code == 409
-        assert response.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
+        # T-0178：这个实例的部署记录已经建好，更换地址先被“有部署记录”拦下（不改目标）
+        assert response.json()["error"]["code"] == "AGENT_SERVER_HAS_DEPLOYMENTS"
 
     # 工作台重启：还是 running 的任务标为中断
     runner = SshJobRunner(owner.app.state.sessionmaker, owner.app.state.settings)
@@ -882,7 +894,8 @@ async def test_install_during_a_replacement_blocks_the_replacement(
     replaced = await owner.replace(instance_id, port=port + 1, version=version)
     assert installs == [202]
     assert replaced.status_code == 409, replaced.text
-    assert replaced.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
+    # 探测之后锁行重新检查：安装已经建了部署记录（T-0178 起先报这个，任务也在进行）
+    assert replaced.json()["error"]["code"] == "AGENT_SERVER_HAS_DEPLOYMENTS"
     target = (await owner.state(instance_id))["target"]
     assert target["port"] == port
     assert target["host_key_confirmed"] is True

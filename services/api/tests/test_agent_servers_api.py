@@ -104,22 +104,25 @@ async def test_prepare_once_then_deploy_two_instances(owner: Owner, tmp_path: Pa
     (host.state / "crontab").write_text("0 1 * * * echo keep-me\n")
     async with ssh_host(host) as (port, _):
         server = await _confirmed_server(owner, port)
-        # 没准备、也不带密码：不能部署
         first = await owner.instance()
+        # 初始化不再接受密码（T-0178：用添加服务器时保存的密码）
         code, refused = await _json(
-            owner,
-            "POST",
-            f"/api/v1/agents/instances/{first}/deploy",
-            json={"server_id": server["id"], "version": await owner.instance_version(first)},
-        )
-        assert code == 422 and refused["error"]["code"] == "VALIDATION_FAILED"
-
-        # 准备服务器：一次密码，只跑前五步
-        code, started = await _json(
             owner,
             "POST",
             f"/api/v1/agents/servers/{server['id']}/prepare",
             json={"version": server["version"], "password": PASSWORD},
+        )
+        assert code == 422 and refused["error"]["code"] == "VALIDATION_FAILED"
+        assert server["initialization_status"] == "not_initialized"
+        assert server["deploy_block_reason"] == "not_initialized"
+
+        # 初始化服务器：用保存的密码，只跑前五步
+        # TODO(T-0179)：任务里仍是旧流程（装专用公钥）；改成全程密码登录后更新下面的断言
+        code, started = await _json(
+            owner,
+            "POST",
+            f"/api/v1/agents/servers/{server['id']}/prepare",
+            json={"version": server["version"]},
         )
         assert code == 202, started
         detail = await _server_job(owner, server["id"])
@@ -127,6 +130,8 @@ async def test_prepare_once_then_deploy_two_instances(owner: Owner, tmp_path: Pa
         assert [s["key"] for s in detail["job"]["steps"]] == list(prov.PREPARE_STEPS)
         ssh_info = detail["server"]["ssh"]
         assert ssh_info["client_key_installed"] is True and ssh_info["prepared_at"]
+        assert detail["server"]["initialization_status"] == "ready"
+        assert detail["server"]["deployable"] is True
         assert host.logins.count("password") == 1 and len(host.authorized()) == 1
         assert not (host.home / prov.INSTALL_ROOT_NAME).exists()
 
@@ -150,14 +155,30 @@ async def test_prepare_once_then_deploy_two_instances(owner: Owner, tmp_path: Pa
         _, detail = await _json(owner, "GET", f"/api/v1/agents/servers/{server['id']}")
         rows = {row["instance_id"]: row for row in detail["agents"]}
         assert set(rows) == {first, second} and all(r["deployed"] for r in rows.values())
+        assert all(r["deployment_state"] == "deployed" for r in rows.values())
+        assert all(r["latest_job"]["kind"] == "install" for r in rows.values())
+        assert rows[first]["deployment_project"] == (
+            "myworkspace-openclaw-" + first.replace("-", "")[:12]
+        )
         assert detail["server"]["instances_total"] == 2
+        assert detail["server"]["managed_deployments"] == 2
+        # TODO(T-0180)：部署成功写 runtime_installed 之后，这里是 2、partial 为 false
+        assert detail["server"]["successful_deployments"] is None
+        assert detail["server"]["deployment_counts_partial"] is True
+        assert detail["server"]["has_unlimited_limits"] is True
 
         # 已经部署在这台上：不能再部署到另一台
         code, created = await _json(
             owner,
             "POST",
             "/api/v1/agents/servers",
-            json={"name": "另一台", "host": "127.0.0.1", "port": port, "username": "ops"},
+            json={
+                "name": "另一台",
+                "host": "127.0.0.1",
+                "port": port,
+                "username": "ops",
+                "login_password": PASSWORD,
+            },
         )
         assert code == 201, created
         code, elsewhere = await _json(
@@ -236,6 +257,13 @@ async def test_manual_assignment_and_auto_server_removal(owner: Owner) -> None:
     assert shown["server_manual"] is True
     _, listed = await _json(owner, "GET", "/api/v1/agents/servers")
     assert listed["unassigned"] == [] and listed["items"][0]["instances_total"] == 1
+    # 自动识别的服务器：没有 SSH，初始化“不适用”，不能选它部署，也不计入待初始化
+    auto_out = listed["items"][0]
+    assert auto_out["initialization_status"] is None and auto_out["deployable"] is False
+    assert auto_out["deploy_block_reason"] == "not_ssh" and auto_out["ssh"] is None
+    assert listed["summary"]["server_count"] == 1
+    assert listed["summary"]["not_initialized_count"] == 0
+    assert listed["summary"]["needs_credentials_count"] == 0
     # 别的工作空间的服务器：404
     code, _ = await _json(
         owner,

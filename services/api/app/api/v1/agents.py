@@ -7,7 +7,7 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, Security, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, Security, status
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ from app.api.deps import (
     workspace_admin,
     workspace_owner,
 )
+from app.core.errors import ApiError, not_implemented
 from app.domain import agent_im, agent_outbox, agent_stops, agent_wakeups
 from app.domain.agent_ops import AgentOpsService
 from app.domain.agent_servers import AgentServerService
@@ -35,6 +36,9 @@ from app.domain.policy import WorkspaceAccess, not_found
 from app.models import AgentInstance, AgentRunStop, AgentWakeup
 from app.schemas.agents import (
     AgentDeployIn,
+    AgentDeploymentCreateIn,
+    AgentDeploymentCreateOut,
+    AgentDeploymentRequestOut,
     AgentDeploymentState,
     AgentInstanceCreate,
     AgentInstanceOut,
@@ -45,6 +49,7 @@ from app.schemas.agents import (
     AgentOpsActionOut,
     AgentOpsRun,
     AgentOpsState,
+    AgentOverviewOut,
     AgentRunStopCreate,
     AgentRunStopList,
     AgentRunStopOut,
@@ -56,10 +61,13 @@ from app.schemas.agents import (
     AgentServerAddress,
     AgentServerAssign,
     AgentServerCreate,
+    AgentServerCredentialsIn,
     AgentServerDetail,
+    AgentServerLegacyCleanupIn,
     AgentServerList,
     AgentServerOut,
     AgentServerPrepare,
+    AgentServerTestIn,
     AgentServerUpdate,
     AgentSettingsOut,
     AgentSettingsUpdate,
@@ -70,6 +78,7 @@ from app.schemas.agents import (
     AgentWakeupList,
     AgentWakeupOut,
     BundleRequest,
+    InstanceStatus,
     ProjectAdminOut,
     ProjectAdminPut,
     SecretAccessPage,
@@ -99,6 +108,22 @@ ServerService = Annotated[AgentServerService, Depends(get_agent_server_service)]
 OpsService = Annotated[AgentOpsService, Depends(get_agent_ops_service)]
 Cursor = Annotated[str | None, Query(max_length=512, description="上一页返回的 next_cursor")]
 Limit = Annotated[int, Query(ge=1, le=100)]
+IdempotencyKey = Annotated[
+    UUID,
+    Header(
+        alias="Idempotency-Key",
+        description="这次提交的 UUID；网络重试与查询结果时复用同一个",
+    ),
+]
+OptionalIdempotencyKey = Annotated[
+    UUID | None,
+    Header(
+        alias="Idempotency-Key",
+        description="可选：带上时同一个键的重复请求返回这台服务器现在的详情"
+        "（响应头 Idempotent-Replayed: true），不会再写一次、也不会再连接服务器；"
+        "不同请求内容用同一个键 409 IDEMPOTENCY_KEY_REUSED",
+    ),
+]
 _write = [Depends(csrf_protected)]
 _read_errors = error_responses(401, 403, 404, 422)
 _write_errors = error_responses(401, 403, 404, 409, 422)
@@ -142,6 +167,70 @@ async def update_agent_settings(
     access: Owner, request: Request, service: Service, body: AgentSettingsUpdate
 ) -> AgentSettingsOut:
     return await service.update_settings(access, body, client_ip=_ip(request, service))
+
+
+# ---------------------------------------------------------------- 智能体总览与一键部署（T-0180）
+# 契约已定（docs/v2/agent-servers-redesign/ 的接口与迁移约定第 5、6 节）；实现见 T-0180。
+# 静态路径写在带 UUID 的路径之前。
+
+
+@router.get(
+    "/agents/overview",
+    summary="OpenClaw 智能体总览（owner）",
+    description="全部实例及其所在服务器、部署记录、最近一次部署 / 卸载任务与 Compose 项目名；"
+    "summary 按 server_id / q 统计全部实例（不套用 status 筛选、不受分页影响）。"
+    "只读本地记录：不连 SSH、不调 OpenIM；消息在线、最近心跳与容器运行状态分别表达。",
+    responses=_read_errors,
+)
+async def get_agent_overview(
+    access: Owner,
+    server_id: Annotated[UUID | None, Query(description="只看这台服务器上的实例")] = None,
+    q: Annotated[
+        str | None, Query(min_length=1, max_length=100, description="按实例名称搜索")
+    ] = None,
+    instance_status: Annotated[
+        InstanceStatus | None, Query(alias="status", description="按连接状态筛选列表")
+    ] = None,
+    cursor: Cursor = None,
+    limit: Limit = 50,
+) -> AgentOverviewOut:
+    # TODO(T-0180)：AgentOverviewService.list（批量读取实例、部署、归属与任务）
+    raise not_implemented("T-0180")
+
+
+@router.post(
+    "/agents/deployments",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="新建智能体并部署到服务器（owner，必须带 Idempotency-Key）",
+    description="一次点击：在同一个事务里登记实例（外网模式、read / member）、设置资源上限、"
+    "建部署记录与部署任务，提交后开始部署。request_id 必须与 Idempotency-Key 相同；"
+    "同一个键的重复请求返回同一个实例与任务；不接受地址、密码、镜像、目录或权限开关。"
+    "服务器要已保存密码、确认指纹、初始化就绪且没有进行中的任务。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 503),
+)
+async def create_agent_deployment(
+    access: Owner, idempotency_key: IdempotencyKey, body: AgentDeploymentCreateIn
+) -> AgentDeploymentCreateOut:
+    if body.request_id != idempotency_key:
+        raise ApiError(422, "VALIDATION_FAILED", "request_id 必须与 Idempotency-Key 相同")
+    # TODO(T-0180)：AgentDeploymentService.create
+    # （一处提交：实例、限额、部署记录、任务、幂等上下文）
+    raise not_implemented("T-0180")
+
+
+@router.get(
+    "/agents/deployments/requests/{request_id}",
+    summary="查询部署请求的收据（owner）",
+    description="响应丢失或刷新后按 request_id 找回同一个实例与部署任务；只能查自己在这个工作空间里"
+    "发出的部署请求。找不到（或记录已过期）时 404：请查询现有实例，不要换新的 request_id 重建。",
+    responses=_read_errors,
+)
+async def get_agent_deployment_request(
+    access: Owner, request_id: UUID
+) -> AgentDeploymentRequestOut:
+    # TODO(T-0180)：AgentDeploymentService.receipt（从幂等记录的安全上下文解析实例与任务）
+    raise not_implemented("T-0180")
 
 
 # ---------------------------------------------------------------- 实例
@@ -368,20 +457,45 @@ async def list_agent_servers(access: Owner, service: ServerService) -> AgentServ
     return await service.list_servers(access)
 
 
+def _replayed(response: Response, result: tuple[AgentServerDetail, bool]) -> AgentServerDetail:
+    detail, replayed = result
+    if replayed:
+        response.headers["Idempotent-Replayed"] = "true"
+    return detail
+
+
 @router.post(
     "/agents/servers",
     status_code=status.HTTP_201_CREATED,
     summary="添加一台服务器（owner）",
-    description="只解析地址并读取主机公钥（不登录），返回 SHA256 指纹；owner 在服务器上核对后调用 "
-    "/confirm 确认。每个用户每分钟最多探测 10 次（429）；连不上 503 AGENT_SSH_UNREACHABLE；"
+    description="填 IP / 端口（默认 22）/ 账号 / 登录密码，名称可选（省略时用 host:port）。"
+    "只解析地址并读取主机公钥（不登录），返回 SHA256 指纹；登录密码加密保存、任何接口都不返回，"
+    "owner 在服务器上核对指纹并调用 /confirm 之前不会发给服务器。"
+    "每个用户每分钟最多探测 10 次（429）；连不上 503 AGENT_SSH_UNREACHABLE；"
     "同一个地址、端口和账号已经添加过 409 AGENT_SERVER_EXISTS。审计 agents.server.created。",
     dependencies=_write,
     responses=error_responses(401, 403, 409, 422, 429, 503),
 )
 async def create_agent_server(
-    access: Owner, request: Request, service: ServerService, body: AgentServerCreate
+    access: Owner,
+    request: Request,
+    response: Response,
+    service: ServerService,
+    body: AgentServerCreate,
+    idempotency_key: OptionalIdempotencyKey = None,
 ) -> AgentServerDetail:
-    return await service.create(access, body, client_ip=_server_ip(request))
+    return _replayed(
+        response,
+        await service.idempotent(
+            access,
+            idempotency_key,
+            op="agents.server.create",
+            method="POST",
+            path=request.url.path,
+            body=body,
+            run=lambda: service.create(access, body, client_ip=_server_ip(request)),
+        ),
+    )
 
 
 @router.get(
@@ -420,19 +534,124 @@ async def rename_agent_server(
 @router.put(
     "/agents/servers/{server_id}/address",
     summary="更换服务器地址或账号（owner）",
-    description="重新读取主机公钥，要重新确认；已经装了工作台的专用公钥时先吊销"
-    "（409 AGENT_SSH_KEY_INSTALLED）。",
+    description="连同登录密码一起替换：重新读取主机公钥，要重新确认，环境要重新初始化。"
+    "还有部署记录时 409 AGENT_SERVER_HAS_DEPLOYMENTS（不能把原有实例挂到新机器上）；"
+    "已经装了旧方案的专用公钥时先吊销（409 AGENT_SSH_KEY_INSTALLED）；"
+    "这台服务器上有进行中的任务时 409 AGENT_SSH_JOB_RUNNING。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422, 429, 503),
 )
 async def set_agent_server_address(
     access: Owner,
     request: Request,
+    response: Response,
     service: ServerService,
     server_id: UUID,
     body: AgentServerAddress,
+    idempotency_key: OptionalIdempotencyKey = None,
 ) -> AgentServerDetail:
-    return await service.set_address(access, server_id, body, client_ip=_server_ip(request))
+    return _replayed(
+        response,
+        await service.idempotent(
+            access,
+            idempotency_key,
+            op="agents.server.address_set",
+            method="PUT",
+            path=request.url.path,
+            body=body,
+            run=lambda: service.set_address(access, server_id, body, client_ip=_server_ip(request)),
+        ),
+    )
+
+
+@router.put(
+    "/agents/servers/{server_id}/credentials",
+    summary="替换服务器的登录密码（owner）",
+    description="加密保存新密码，凭证版本加 1，连接状态改回 unknown；保留初始化记录与已部署的实例"
+    "（不停止、不重装）。之后请调用 /test-connection 重新检测。"
+    "版本过期 409 VERSION_CONFLICT；这台服务器上有进行中的任务或运维动作时 "
+    "409 AGENT_SSH_JOB_RUNNING，原密码不变。审计 agents.server.credentials_set（不含密码）。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 503),
+)
+async def set_agent_server_credentials(
+    access: Owner,
+    request: Request,
+    response: Response,
+    service: ServerService,
+    server_id: UUID,
+    body: AgentServerCredentialsIn,
+    idempotency_key: OptionalIdempotencyKey = None,
+) -> AgentServerDetail:
+    return _replayed(
+        response,
+        await service.idempotent(
+            access,
+            idempotency_key,
+            op="agents.server.credentials_set",
+            method="PUT",
+            path=request.url.path,
+            body=body,
+            run=lambda: service.set_credentials(
+                access, server_id, body, client_ip=_server_ip(request)
+            ),
+        ),
+    )
+
+
+@router.post(
+    "/agents/servers/{server_id}/test-connection",
+    summary="测试服务器连接（owner）",
+    description="按确认过的主机公钥、用保存的密码登录，只读检查系统、架构、账号、"
+    "Docker / Compose / sudo（需要时用同一个密码经标准输入验证 sudo）。"
+    "不安装 Docker、不建容器、不写 authorized_keys。"
+    "登录结果写进 ssh.connection_status（connected / auth_failed / unreachable / "
+    "host_key_changed / credential_unreadable），返回 200；需要处理的环境问题在 warning 里。"
+    "没确认指纹 409 AGENT_SSH_HOST_KEY_UNCONFIRMED；没保存密码 409 "
+    "AGENT_SERVER_CREDENTIAL_REQUIRED；与探测共用每分钟 10 次的限流（429）。"
+    "审计 agents.server.connection_tested。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 429, 503),
+)
+async def run_agent_server_connection_test(
+    access: Owner,
+    request: Request,
+    response: Response,
+    service: ServerService,
+    server_id: UUID,
+    body: AgentServerTestIn,
+    idempotency_key: OptionalIdempotencyKey = None,
+) -> AgentServerDetail:
+    return _replayed(
+        response,
+        await service.idempotent(
+            access,
+            idempotency_key,
+            op="agents.server.connection_tested",
+            method="POST",
+            path=request.url.path,
+            body=body,
+            run=lambda: service.test_connection(
+                access, server_id, body, client_ip=_server_ip(request)
+            ),
+        ),
+    )
+
+
+@router.post(
+    "/agents/servers/{server_id}/legacy-key-cleanup",
+    summary="退役旧的专用公钥（owner）",
+    description="用保存的登录密码登录（不用旧私钥），从 ~/.ssh/authorized_keys 只删掉本工作台那一条"
+    "公钥，其他行保持；成功后清空工作台保存的旧私钥引用并审计。服务器连不上或拒绝写入时保留 "
+    "pending / manual_required 与原因，不报告清理完成。",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 422, 503),
+)
+async def cleanup_agent_server_legacy_key(
+    access: Owner, server_id: UUID, body: AgentServerLegacyCleanupIn
+) -> AgentServerDetail:
+    # TODO(T-0179)：AgentServerService.cleanup_legacy_key（密码登录、定向删除、成功后清空旧引用）
+    raise not_implemented("T-0179")
 
 
 @router.post(
@@ -452,10 +671,10 @@ async def confirm_agent_server(
 @router.post(
     "/agents/servers/{server_id}/prepare",
     status_code=status.HTTP_202_ACCEPTED,
-    summary="准备服务器（owner）",
-    description="用一次登录密码装上工作台的专用公钥（每台服务器一把，D7）、"
-    "需要时用 sudo 安装 Docker；"
-    "密码不保存。之后在这台服务器上部署实例不用再输密码。进度看服务器详情的 job。"
+    summary="初始化服务器（owner）",
+    description="用保存的登录密码登录，需要时用 sudo（同一个密码）安装 Docker；"
+    "进度看服务器详情的 job。没保存密码 409 AGENT_SERVER_CREDENTIAL_REQUIRED，"
+    "密码解不开 409 AGENT_SERVER_CREDENTIAL_UNREADABLE；"
     "同一台服务器同时只有一个任务（409 AGENT_SSH_JOB_RUNNING）。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422, 503),
@@ -525,7 +744,8 @@ async def get_agent_deployment(
     summary="部署到服务器（owner）",
     description="把实例部署到一台 SSH 服务器：签发新的接入包，只替换这个实例自己的目录"
     "（~/myworkspace-openclaw/<实例短号>）与 Compose 项目，同一台服务器上的其他实例不受影响。"
-    "服务器还没准备时要带登录密码；已经部署在另一台服务器上 409 AGENT_DEPLOYED_ELSEWHERE；"
+    "登录密码用服务器上保存的（请求里的 password 已弃用、忽略；没保存时 409 "
+    "AGENT_SERVER_CREDENTIAL_REQUIRED）；已经部署在另一台服务器上 409 AGENT_DEPLOYED_ELSEWHERE；"
     "只支持外网模式（409 AGENT_SSH_PUBLIC_ONLY）。剩余内存或磁盘不多时 capacity_warning 提醒"
     "（D4：不拦）。进度看 GET /deployment 的 job。",
     dependencies=_write,
