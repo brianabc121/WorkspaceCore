@@ -56,4 +56,64 @@
 本地全量：`pytest -q tests`（真实 PostgreSQL / Redis，`REQUIRE_INTEGRATION=1`）→ **1124 passed、15 skipped**，用时 47 分 35 秒。
 15 个跳过是需要外部服务的用例（与此前的全量运行相同）。没有失败。
 
-CI 结果在 PR 的检查跑完后补在下面。
+### CI（提交 93b5bd0，12 项检查全部成功）
+
+ci-infra 运行 42650540143：compose、agents、news 三个作业的日志里都没有 `##[error]`，也没有以“失败”开头的行。与八页相关的浏览器验收输出（原文）如下。
+
+compose 作业，`sprint1_browser.cjs`（设置、安全、审计）：
+
+```
+通过  登出后访问 /settings 被引导登录，登录后回到 /settings
+通过  修改显示名与工作空间名称
+通过  成员管理：创建账号并加入（viewer），对方登录后看不到成员管理、工作空间名称只读；改为 member；移出后对方立即失去访问
+通过  在另一台设备登录后撤销它的会话，该设备被引导重新登录
+通过  审计日志显示 12 条记录（含撤销会话、修改设置、首次安装、成员的加入 / 改角色 / 移出）
+全部通过（页面无错误）
+```
+
+compose 作业，`sprint4_browser.cjs`（集成设置）：
+
+```
+通过  设置页接入 GitHub：生成 Token 的链接、读取可访问的仓库并勾选，保存后自动检查权限通过，页面不显示 Token
+通过  A17：GitHub 限流时开发者页显示“限流中”与预计恢复时间，列表照常显示
+全部通过（页面无错误）
+```
+
+compose 作业，`make smoke-full`：
+
+```
+通过  全部读接口返回 200：80 个（需要具体资源 ID 或 owner 角色的 50 个由各 Sprint 验收覆盖）
+通过  全部页面能打开、标题正确：/、/tasks、/projects、/knowledge、/calendar、/im、/mail、/developer、/operations、/agent-servers、/agents、/runner、/ai、/settings、/settings/modules、/settings/navigation、/settings/integrations、/settings/security、/settings/mail、/agents/secrets、/settings/audit
+完整冒烟全部通过（39.1 秒）
+```
+
+agents 作业，`sprint6_browser.cjs`（密钥库、AI 审批）：
+
+```
+通过  密钥库：添加密钥（密码框输入），保存后页面上只有名称与版本，没有明文
+通过  审批卡片：IM 的“审批通知”会话里出现卡片，写明“由 Owner 触发”，在卡片上批准后显示“执行成功”
+通过  审批中心：详情显示“执行成功”（已新建日程「浏览器验收日程 3e883716」）、触发者 Owner（私聊它）与 IM 会话链接
+通过  390px 宽度下 AI 抽屉改为侧滑面板；IM、OpenClaw 智能体、智能体服务器、密钥库、AI 审批页无横向滚动
+通过  安全：浏览器的 644 个请求都指向工作台自己的地址，447 个接口响应里没有密钥明文与内部地址
+全部通过（页面无错误）
+```
+
+agents 作业，`mail_browser.cjs`：邮件页 6 步全部通过（“邮件页浏览器验收通过（页面无错误）”）。
+
+news 作业，`news_browser.cjs`（新闻早报设置）：
+
+```
+通过  设置页（五个标签）：启用、推送时间 03:00、自建 NewsNow、RSS 源、排除词、ntfy；保存后写进 TrendRadar 的配置文件，密钥只显示“已设置”，状态显示 TrendRadar 在线
+通过  测试推送：经 TrendRadar MCP 发到 ntfy，页面显示每个渠道的结果
+通过  手机宽度（390）：早报页各标签与设置页不横向滚动
+通过  viewer：能看早报、热榜等；看不到收藏、不感兴趣与设置，后端同样拒绝
+新闻早报浏览器验收通过
+```
+
+CI 第一次真跑时发现并修好的问题（都在验收脚本或扫描清单里，页面代码没有改）：
+
+- **secrets**：gitleaks 把审计测试里故意放的假凭据（`tok-SECRET-123`、`hunter2-SECRET`，用来验证导出时会去掉）当成了密钥。按惯例把这 3 处的指纹登记进 `.gitleaksignore`。
+- **news，第一处**：`getByLabel(/^全局排除词/)` 同时匹配到“全局排除词”分区和文本框，改成按文本框找。“推送时间 1”加了精确匹配，否则有第二个推送时间时会同时匹配到“删除推送时间 1”按钮。
+- **news，第二处**：设置页新加的局部变量 `panel` 遮住了脚本顶部的 `panel(page)` 辅助函数，改名为 `settingsPanel`。
+
+推送前，用 vite 开发服务器 + 模拟接口按脚本原样跑过设置页那一段；`sprint1_browser` 的设置 / 成员 / 安全 / 审计几步也这样预跑过。
