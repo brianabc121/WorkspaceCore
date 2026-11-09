@@ -2283,6 +2283,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/knowledge/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 知识总览：统计与最近更新（viewer）
+         * @description 知识库首页的四个数与最近更新的笔记（二批四页改造规范 4.2）。不填 space_id 是这个工作空间的全部知识库（含已归档的），填了只统计这个知识库；别的工作空间的或不存在的知识库 404。统计是全量的，不受图谱 2000 篇上限与分页影响。[updated_after, updated_before) 只决定 updated_note_count（例如本周一 00:00 到下周一 00:00，由前端按显示时区算好后带时区传入），不截掉总数与最近更新。只读：不写版本、审计与智能体的阅读用量。
+         */
+        get: operations["knowledge_overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/knowledge/resources": {
         parameters: {
             query?: never;
@@ -8210,6 +8230,47 @@ export interface components {
             title?: string | null;
             /** Version */
             version: number;
+        };
+        /** KnowledgeOverviewOut */
+        KnowledgeOverviewOut: {
+            /**
+             * Generated At
+             * Format: date-time
+             * @description 统计时间（服务器，UTC）
+             */
+            generated_at: string;
+            /**
+             * Recent Notes
+             * @description 最近更新的笔记，按 updated_at、id 倒序，每篇一次；不含正文，不受时间窗限制
+             */
+            recent_notes: components["schemas"]["NoteSummary"][];
+            summary: components["schemas"]["KnowledgeOverviewSummary"];
+        };
+        /**
+         * KnowledgeOverviewSummary
+         * @description 知识总览的四个数（二批四页改造规范 4.2）：全量统计，不受图谱 2000 篇上限与分页影响。
+         */
+        KnowledgeOverviewSummary: {
+            /**
+             * Link Count
+             * @description 笔记之间的关联数：两端都是未删除笔记的 [[链接]]，按有向 (源, 目标) 去重，不含指向自己的；选了知识库时至少一端在这个知识库。指向任务、项目、书签与图片的不算
+             */
+            link_count: number;
+            /**
+             * Note Count
+             * @description 所选范围内未删除的笔记数
+             */
+            note_count: number;
+            /**
+             * Space Count
+             * @description 所选范围内的知识库数（含已归档、没有笔记的）；选了知识库时为 1
+             */
+            space_count: number;
+            /**
+             * Updated Note Count
+             * @description updated_at 落在 [updated_after, updated_before) 内的不同笔记数（不是修改次数）
+             */
+            updated_note_count: number;
         };
         /** KnowledgeResourceOut */
         KnowledgeResourceOut: {
@@ -24221,6 +24282,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RevisionDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    knowledge_overview: {
+        parameters: {
+            query: {
+                /** @description 时间窗起点（含），必须带时区 */
+                updated_after: string;
+                /** @description 时间窗终点（不含），必须带时区且晚于起点 */
+                updated_before: string;
+                space_id?: string | null;
+                /** @description 最近更新返回几篇 */
+                recent_limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeOverviewOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

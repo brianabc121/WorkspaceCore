@@ -11,7 +11,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, Security, status
-from pydantic import AfterValidator
+from pydantic import AfterValidator, AwareDatetime
 
 from app.api.deps import (
     authenticated,
@@ -36,6 +36,7 @@ from app.schemas.knowledge_base import (
     ChangePage,
     FileOut,
     GraphOut,
+    KnowledgeOverviewOut,
     NoteCreate,
     NoteOut,
     NotePage,
@@ -431,6 +432,40 @@ async def local_graph(
 ) -> GraphOut:
     await service.note(access.workspace.id, note_id)
     return await service.graph(access.workspace.id, center=note_id, depth=depth)
+
+
+# ---------------------------------------------------------------- 知识总览（T-0172）
+
+
+@router.get(
+    "/overview",
+    summary="知识总览：统计与最近更新（viewer）",
+    description="知识库首页的四个数与最近更新的笔记（二批四页改造规范 4.2）。"
+    "不填 space_id 是这个工作空间的全部知识库（含已归档的），填了只统计这个知识库；"
+    "别的工作空间的或不存在的知识库 404。统计是全量的，不受图谱 2000 篇上限与分页影响。"
+    "[updated_after, updated_before) 只决定 updated_note_count（例如本周一 00:00 到下周一 00:00，"
+    "由前端按显示时区算好后带时区传入），不截掉总数与最近更新。只读：不写版本、审计与智能体的阅读用量。",
+    responses=_read_errors,
+)
+async def knowledge_overview(
+    access: Viewer,
+    service: Service,
+    updated_after: Annotated[AwareDatetime, Query(description="时间窗起点（含），必须带时区")],
+    updated_before: Annotated[
+        AwareDatetime, Query(description="时间窗终点（不含），必须带时区且晚于起点")
+    ],
+    space_id: UUID | None = None,
+    recent_limit: Annotated[int, Query(ge=1, le=20, description="最近更新返回几篇")] = 6,
+) -> KnowledgeOverviewOut:
+    result = await service.overview(
+        access,
+        space_id=space_id,
+        updated_after=updated_after,
+        updated_before=updated_before,
+        recent_limit=recent_limit,
+    )
+    await service.db.commit()  # 只提交补建的知识库（ensure_spaces），没有别的写入
+    return result
 
 
 # ---------------------------------------------------------------- 图谱、变更记录、回收站

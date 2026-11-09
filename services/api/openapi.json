@@ -10005,6 +10005,71 @@
         "title": "IssueUpdate",
         "type": "object"
       },
+      "KnowledgeOverviewOut": {
+        "properties": {
+          "generated_at": {
+            "description": "统计时间（服务器，UTC）",
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "recent_notes": {
+            "description": "最近更新的笔记，按 updated_at、id 倒序，每篇一次；不含正文，不受时间窗限制",
+            "items": {
+              "$ref": "#/components/schemas/NoteSummary"
+            },
+            "title": "Recent Notes",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/KnowledgeOverviewSummary"
+          }
+        },
+        "required": [
+          "summary",
+          "recent_notes",
+          "generated_at"
+        ],
+        "title": "KnowledgeOverviewOut",
+        "type": "object"
+      },
+      "KnowledgeOverviewSummary": {
+        "description": "知识总览的四个数（二批四页改造规范 4.2）：全量统计，不受图谱 2000 篇上限与分页影响。",
+        "properties": {
+          "link_count": {
+            "description": "笔记之间的关联数：两端都是未删除笔记的 [[链接]]，按有向 (源, 目标) 去重，不含指向自己的；选了知识库时至少一端在这个知识库。指向任务、项目、书签与图片的不算",
+            "minimum": 0.0,
+            "title": "Link Count",
+            "type": "integer"
+          },
+          "note_count": {
+            "description": "所选范围内未删除的笔记数",
+            "minimum": 0.0,
+            "title": "Note Count",
+            "type": "integer"
+          },
+          "space_count": {
+            "description": "所选范围内的知识库数（含已归档、没有笔记的）；选了知识库时为 1",
+            "minimum": 0.0,
+            "title": "Space Count",
+            "type": "integer"
+          },
+          "updated_note_count": {
+            "description": "updated_at 落在 [updated_after, updated_before) 内的不同笔记数（不是修改次数）",
+            "minimum": 0.0,
+            "title": "Updated Note Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "note_count",
+          "space_count",
+          "link_count",
+          "updated_note_count"
+        ],
+        "title": "KnowledgeOverviewSummary",
+        "type": "object"
+      },
       "KnowledgeResourceOut": {
         "properties": {
           "affine_workspace_id": {
@@ -40762,6 +40827,132 @@
           }
         ],
         "summary": "某一版的全文与差异（viewer）",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
+    "/api/v1/knowledge/overview": {
+      "get": {
+        "description": "知识库首页的四个数与最近更新的笔记（二批四页改造规范 4.2）。不填 space_id 是这个工作空间的全部知识库（含已归档的），填了只统计这个知识库；别的工作空间的或不存在的知识库 404。统计是全量的，不受图谱 2000 篇上限与分页影响。[updated_after, updated_before) 只决定 updated_note_count（例如本周一 00:00 到下周一 00:00，由前端按显示时区算好后带时区传入），不截掉总数与最近更新。只读：不写版本、审计与智能体的阅读用量。",
+        "operationId": "knowledge_overview",
+        "parameters": [
+          {
+            "description": "时间窗起点（含），必须带时区",
+            "in": "query",
+            "name": "updated_after",
+            "required": true,
+            "schema": {
+              "description": "时间窗起点（含），必须带时区",
+              "format": "date-time",
+              "title": "Updated After",
+              "type": "string"
+            }
+          },
+          {
+            "description": "时间窗终点（不含），必须带时区且晚于起点",
+            "in": "query",
+            "name": "updated_before",
+            "required": true,
+            "schema": {
+              "description": "时间窗终点（不含），必须带时区且晚于起点",
+              "format": "date-time",
+              "title": "Updated Before",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "space_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Space Id"
+            }
+          },
+          {
+            "description": "最近更新返回几篇",
+            "in": "query",
+            "name": "recent_limit",
+            "required": false,
+            "schema": {
+              "default": 6,
+              "description": "最近更新返回几篇",
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Recent Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "知识总览：统计与最近更新（viewer）",
         "tags": [
           "knowledge-base"
         ]
