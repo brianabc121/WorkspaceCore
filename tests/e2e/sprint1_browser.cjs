@@ -84,7 +84,8 @@ async function logout(page) {
   await addForm.getByLabel(/初始密码/).fill(newcomer.password)
   await addForm.getByRole('button', { name: '添加成员' }).click()
   await laptop.getByText(/已创建账号并加入/).waitFor()
-  const row = laptop.getByRole('listitem', { name: `成员：${newcomer.name}` })
+  // 成员表的一行（T-0189 设置页改版：成员列表改成表格）
+  const row = laptop.getByRole('row', { name: `成员：${newcomer.name}` })
   await row.waitFor()
   const guest = await (await browser.newContext()).newPage()
   await guest.goto(`${base}/login`)
@@ -116,15 +117,18 @@ async function logout(page) {
   await laptop.getByRole('button', { name: '撤销会话', exact: true }).click()
   await laptop.getByRole('dialog').getByRole('button', { name: '确认撤销' }).click()
   await laptop.getByText('会话已撤销').waitFor()
-  const remaining = await laptop.locator('.record-list li strong').allTextContents()
+  // 会话列表每一项的名称是“当前会话”或“其他会话 尾号”（T-0193 安全设置改版）
+  const remaining = await laptop.getByRole('region', { name: '登录会话' }).getByRole('listitem').evaluateAll((items) => items.map((item) => item.getAttribute('aria-label')))
   if (remaining.join() !== '当前会话') throw new Error(`撤销后会话列表应只剩当前会话：${remaining}`)
   await phone.goto(`${base}/settings`)
   await phone.waitForURL(/\/login/)
   step('在另一台设备登录后撤销它的会话，该设备被引导重新登录')
 
   await laptop.goto(`${base}/settings/audit`)
-  await laptop.locator('.record-list li').first().waitFor()
-  const actions = await laptop.locator('.record-list li strong').allTextContents()
+  // T-0198 审计改版：事件表（默认最近 7 天），每行事件名下面是原始 action；未收录的事件直接显示原名
+  const events = laptop.getByRole('region', { name: '事件记录' })
+  await events.locator('tbody tr').first().waitFor()
+  const actions = (await events.locator('tbody code.au-action, tbody code.au-raw').allTextContents()).map((text) => text.trim())
   for (const action of ['auth.session_revoked', 'workspace.updated', 'user.updated', 'setup.completed', 'workspace.member_added', 'workspace.member_role_changed', 'workspace.member_removed']) {
     if (!actions.includes(action)) throw new Error(`审计日志缺少 ${action}：${actions}`)
   }

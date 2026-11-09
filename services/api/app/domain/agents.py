@@ -11,7 +11,10 @@ OpenIM 相关的动作（OC-3，app/domain/im.py）：登记实例后注册 IM �
 实例启动时取 IM 令牌（每小时最多 10 次）。没有部署 OpenIM 时这些动作都跳过。
 """
 
+import base64
+import binascii
 import hashlib
+import json
 import logging
 import secrets
 import uuid
@@ -21,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
 from redis.asyncio import Redis
-from sqlalchemy import delete, select, update
+from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -75,6 +78,7 @@ from app.schemas.agents import (
     SecretGrantOut,
     SecretGrantRef,
     SecretGrantsReplace,
+    SecretKind,
     SecretResolveError,
     SecretResolveResponse,
 )
@@ -171,6 +175,53 @@ def _version_conflict(current: int) -> ApiError:
         "内容已被其他操作修改，请刷新后重试",
         details={"current_version": current},
     )
+
+
+def _bad_cursor() -> ApiError:
+    return ApiError(
+        422,
+        "VALIDATION_FAILED",
+        "请求参数校验失败",
+        details={
+            "errors": [{"loc": ["query", "cursor"], "msg": "游标无效", "type": "value_error"}]
+        },
+    )
+
+
+def _secret_list_key(workspace_id: uuid.UUID, q: str | None, kind: str | None) -> str:
+    """密钥列表游标绑定的范围：工作空间与 q / kind；换了任何一项，旧游标都不能接着用。"""
+    raw = json.dumps(["agent_secrets", str(workspace_id), q, kind])
+    return hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+
+def _encode_secret_cursor(offset: int, key: str) -> str:
+    raw = json.dumps({"o": offset, "k": key}, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_secret_cursor(cursor: str | None, key: str, *, filtered: bool) -> int:
+    """取出偏移量。旧版游标只有偏移量、没有筛选摘要：只在不带 q / kind 时继续可用。"""
+    if not cursor:
+        return 0
+    try:
+        data = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+    except (ValueError, binascii.Error):
+        raise _bad_cursor() from None
+    if not isinstance(data, dict):
+        raise _bad_cursor()
+    bound = data.get("k")
+    if bound != key and not (bound is None and not filtered):
+        raise _bad_cursor()
+    offset = data.get("o")
+    if not isinstance(offset, int) or isinstance(offset, bool) or not 0 <= offset <= 1_000_000:
+        raise _bad_cursor()
+    return offset
+
+
+def _like_pattern(text: str) -> str:
+    """字面包含的 ILIKE 模式：% _ 和反斜杠（转义符）本身都按普通字符匹配。"""
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 def _unauthorized() -> ApiError:
@@ -1104,6 +1155,7 @@ class AgentService:
         return secret
 
     async def _secrets_out(self, secrets_: Sequence[AgentSecret]) -> list[AgentSecretOut]:
+        """转换成接口输出：一条查询批量读取这些密钥的全部授权（不逐个密钥查询）。"""
         ids = [s.id for s in secrets_]
         refs: dict[uuid.UUID, list[SecretGrantRef]] = {i: [] for i in ids}
         if ids:
@@ -1112,7 +1164,7 @@ class AgentService:
                     select(AgentSecretGrant, AgentInstance.name)
                     .join(AgentInstance, AgentInstance.id == AgentSecretGrant.instance_id)
                     .where(AgentSecretGrant.secret_id.in_(ids))
-                    .order_by(AgentInstance.name)
+                    .order_by(AgentInstance.name, AgentSecretGrant.ref_id, AgentInstance.id)
                 )
             ).all()
             for grant, instance_name in rows:
@@ -1140,23 +1192,59 @@ class AgentService:
         ]
 
     async def list_secrets(
-        self, access: WorkspaceAccess, *, cursor: str | None, limit: int
+        self,
+        access: WorkspaceAccess,
+        *,
+        cursor: str | None,
+        limit: int,
+        q: str | None = None,
+        kind: SecretKind | None = None,
     ) -> AgentSecretPage:
-        offset = decode_cursor(cursor)
+        """按名称排序的密钥列表（只有元数据）。
+
+        q 是名称或说明的字面包含（不区分大小写），kind 是类型；两者在本工作空间内、分页之前生效，
+        total 是同样条件下的全量匹配数（SQL 计数）。游标绑定工作空间与条件，换条件要从第一页开始。
+        """
+        q = q or None
+        key = _secret_list_key(access.workspace.id, q, kind)
+        offset = _decode_secret_cursor(cursor, key, filtered=q is not None or kind is not None)
+        conditions: list[ColumnElement[bool]] = [AgentSecret.workspace_id == access.workspace.id]
+        if q is not None:
+            pattern = _like_pattern(q)
+            conditions.append(
+                or_(
+                    AgentSecret.name.ilike(pattern, escape="\\"),
+                    AgentSecret.description.ilike(pattern, escape="\\"),
+                )
+            )
+        if kind is not None:
+            conditions.append(AgentSecret.kind == kind)
+        total = await self.db.scalar(
+            select(func.count()).select_from(AgentSecret).where(*conditions)
+        )
         rows = (
             await self.db.scalars(
                 select(AgentSecret)
-                .where(AgentSecret.workspace_id == access.workspace.id)
+                .where(*conditions)
                 .order_by(AgentSecret.name, AgentSecret.id)
                 .offset(offset)
                 .limit(limit + 1)
             )
         ).all()
+        matched = int(total or 0)
         return AgentSecretPage(
             items=await self._secrets_out(rows[:limit]),
-            next_cursor=encode_cursor(offset + limit) if len(rows) > limit else None,
-            total_estimate=None,
+            next_cursor=_encode_secret_cursor(offset + limit, key) if len(rows) > limit else None,
+            total_estimate=matched,
+            total=matched,
         )
+
+    async def get_secret_metadata(
+        self, access: WorkspaceAccess, secret_id: uuid.UUID
+    ) -> AgentSecretOut:
+        """单个密钥的元数据：名称、类型、说明、值版本、轮换时间与授权；从不含值、密文或历史值。"""
+        secret = await self._secret(access, secret_id)
+        return (await self._secrets_out([secret]))[0]
 
     def _seal(self, secret_id: uuid.UUID, value_version: int, value: str) -> str:
         return self._box().seal(value, context=agent_secret_context(secret_id, value_version))

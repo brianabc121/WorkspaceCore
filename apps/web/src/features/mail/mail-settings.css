@@ -1,0 +1,100 @@
+/* 邮件设置（T-0194，效果图 docs/v2/ai-admin-redesign/assets/05）：OAuth 客户端卡片、邮箱账户表、所选邮箱一栏。
+   布局沿用管理区外壳（management.css）与 workspace-pages / agents-pages 的表格、状态标签；颜色只用主题变量。 */
+
+/* 面板标题里的图标与状态 */
+.ms-client .mg-section-head h2, .ms-accounts .mg-section-head h2 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.ms-client-icon { flex: none; display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--accent); }
+.ms-client-icon svg { width: 18px; height: 18px; }
+.ms-attention { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 10px; border-radius: 13px; background: var(--warning-soft); color: var(--warning); font-size: .8rem; font-weight: 600; }
+.ms-attention svg { width: 15px; height: 15px; flex: none; }
+
+/* OAuth 客户端 */
+.ms-facts { display: grid; margin: 0; }
+.ms-facts > div { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); align-items: center; gap: 4px 16px; padding: 9px 0; border-top: 1px solid var(--line); min-width: 0; }
+.ms-facts > div:first-child { border-top: 0; padding-top: 0; }
+.ms-facts dt { color: var(--muted); font-size: .88rem; }
+.ms-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ms-copy { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.ms-copy code { flex: 1 1 auto; min-width: 0; font-size: .86rem; overflow-wrap: anywhere; }
+.ms-copy .icon-button { flex: none; display: inline-flex; align-items: center; padding: 6px; }
+.ms-copy .icon-button svg { width: 16px; height: 16px; }
+.ms-client-form, .ms-connect { display: grid; gap: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
+.ms-client-form .form-help, .ms-connect .form-help { margin: 0 0 4px; }
+.ms-form-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
+.ms-form-row .form-field { flex: 1 1 240px; margin: 0; min-width: 0; }
+.ms-form-row .form-field input { width: 100%; }
+.ms-form-row .form-field > span { font-size: .85rem; font-weight: 600; }
+.ms-form-row .form-actions { flex: none; }
+
+/* 邮箱账户表 */
+.ms-table .asv-name { align-items: flex-start; }
+.ms-table .asv-name svg { margin-top: 2px; }
+.ms-email { min-width: 0; overflow-wrap: anywhere; }
+.ms-table .asv-state + .asv-sub { margin-top: 3px; }
+.ms-none { color: var(--muted); }
+.ms-row-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+/* 署名列只显示状态（在右侧所选邮箱里修改）：小号开关样式 + 文字 */
+.ms-flag { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: .84rem; white-space: nowrap; }
+.ms-flag-track { position: relative; flex: none; width: 30px; height: 18px; border-radius: 9px; background: var(--line); }
+.ms-flag-track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow); }
+.ms-flag.is-on { color: var(--text); }
+.ms-flag.is-on .ms-flag-track { background: var(--accent); }
+.ms-flag.is-on .ms-flag-track::after { transform: translateX(12px); }
+
+/* 所选邮箱 */
+.ms-panel { padding: 18px 20px; display: grid; gap: 14px; min-width: 0; align-content: start; }
+.ms-panel-empty p { margin: 0; color: var(--muted); font-size: .9rem; }
+.ms-panel-head { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; min-width: 0; }
+/* 邮箱地址放得下就和状态同一行，放不下时状态换到下一行，地址太长才在中间断开 */
+.ms-panel-head h2 { flex: 1 1 auto; min-width: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
+.ms-panel-head h2:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.ms-panel > .asv-sub { margin-top: -8px; }
+.ms-panel .ws-callout p { white-space: normal; font-size: .86rem; }
+.ms-block { display: grid; gap: 8px; min-width: 0; padding-top: 14px; border-top: 1px solid var(--line); }
+.ms-block h3 { font-size: 1rem; }
+.ms-block .form-help { margin: 0; }
+.ms-scopes { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.ms-scopes li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; }
+.ms-scopes li svg { width: 18px; height: 18px; flex: none; }
+.ms-scope-state { font-size: .8rem; font-weight: 500; color: var(--muted); }
+.ms-scopes .is-ok svg, .ms-scopes .is-ok .ms-scope-state { color: var(--success); }
+.ms-scopes .is-warn svg, .ms-scopes .is-warn .ms-scope-state { color: var(--warning); }
+.ms-scopes .is-off { color: var(--muted); }
+
+.ms-assign { margin: 0; border: 0; border-top: 1px solid var(--line); min-inline-size: 0; }
+.ms-assign legend { float: left; width: 100%; padding: 0; margin-bottom: 8px; }
+.ms-assign legend + * { clear: both; }
+.ms-summary { margin: 0; font-size: .86rem; overflow-wrap: anywhere; }
+.ms-assign-list { display: grid; gap: 2px; }
+.ms-assign-list .check-field { margin: 0; padding: 5px 0; overflow-wrap: anywhere; }
+.ms-assign .feedback { margin: 0; }
+.ms-wide { width: 100%; font-weight: 600; }
+.ms-instances { margin: -6px 0 0; }
+.ms-instances .asv-link svg { width: 15px; height: 15px; }
+
+.ms-signature-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ms-switch { flex: none; display: inline-flex; align-items: center; border: 0; background: none; padding: 4px 0; }
+.ms-switch-track { position: relative; width: 42px; height: 24px; border-radius: 12px; background: var(--line); transition: background .15s; }
+.ms-switch-thumb { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow); transition: transform .15s; }
+.ms-switch[aria-checked="true"] .ms-switch-track { background: var(--accent); }
+.ms-switch[aria-checked="true"] .ms-switch-thumb { transform: translateX(18px); }
+.ms-switch:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 14px; }
+@media (prefers-reduced-motion: reduce) { .ms-switch-track, .ms-switch-thumb { transition: none; } }
+
+.ms-panel-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ms-panel-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.ms-panel-actions svg { width: 16px; height: 16px; flex: none; }
+.ms-panel-actions .im-danger { justify-self: stretch; color: var(--danger); }
+.ms-notes ul { margin: 0; padding-left: 16px; display: grid; gap: 4px; list-style: disc; }
+
+/* 卡片本身窄（手机、平板竖排）时，客户端信息的名称放到值上面 */
+@container (max-width: 460px) {
+  .ms-facts > div { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .ms-panel { padding: 12px; }
+  .ms-form-row .form-actions { width: 100%; }
+}
+@media (max-width: 420px) {
+  .ms-panel-actions { grid-template-columns: minmax(0, 1fr); }
+}

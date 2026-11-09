@@ -18,7 +18,7 @@ export default defineModule({
   routes: [
     // 早报阅读页（T-0174）用宽版内容区：正文 + 右侧栏（宿主的 main.is-wide）
     { path: '/news', component: () => import('./NewsPage.vue'), meta: { wide: true } },
-    { path: '/settings/news', component: () => import('./NewsSettingsPage.vue') },
+    { path: '/settings/news', component: () => import('./NewsSettingsPage.vue'), meta: { wide: true } },
   ],
   widgets: [
     // 首页“AI 新闻速览”（T-0164，原“今日早报”）：今天早报的兴趣主题；没有主题数据时显示正文开头 lines 行

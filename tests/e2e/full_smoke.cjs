@@ -62,6 +62,8 @@ function readOperations(workspace, dashboard, role) {
     if (unknown.length) { skipped.push(route); continue }  // 需要具体资源 ID（项目、任务）：由各 Sprint 验收覆盖
     let url = route.replace(/\{([a-z_]+)\}/g, (_, name) => known[name])
     const search = params.filter((p) => p.in === 'query' && p.required).map((p) => `${p.name}=${encodeURIComponent(query[p.name])}`)
+    // 审计导出（T-0197）：时间范围在服务端校验为必填（最长 31 天），参数本身在契约里是可选的；返回 CSV
+    if (route === '/api/v1/audit-logs/export') search.push(`after=${encodeURIComponent(query.start)}`, `before=${encodeURIComponent(query.end)}`)
     if (search.length) url += `?${search.join('&')}`
     operations.push(url)
   }

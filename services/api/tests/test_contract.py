@@ -131,6 +131,7 @@ V2_ADMIN_ENDPOINTS = {
     ("get", "/api/v1/agents/secrets"),
     ("post", "/api/v1/agents/secrets"),
     ("get", "/api/v1/agents/secrets/accesses"),
+    ("get", "/api/v1/agents/secrets/{secret_id}"),
     ("patch", "/api/v1/agents/secrets/{secret_id}"),
     ("post", "/api/v1/agents/secrets/{secret_id}/rotate"),
     ("delete", "/api/v1/agents/secrets/{secret_id}"),

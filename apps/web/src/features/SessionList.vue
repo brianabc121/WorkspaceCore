@@ -6,10 +6,13 @@ import { dataOf, isAccessError, type Schema } from '../services/api'
 import { useAction } from './forms'
 import DataState from '../components/DataState.vue'
 import ActionFeedback from '../components/ActionFeedback.vue'
-import { formatTime } from './time'
+import { Laptop, RefreshCw } from '@lucide/vue'
+import SessionRow from './security/SessionRow.vue'
 const auth = useAuthStore()
+// 账户级：查询键按用户，不跟着工作空间变；只能撤销自己的会话（服务端按当前用户查）
 const query = useQuery({ queryKey: computed(() => ['sessions', auth.user?.id]), queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/auth/sessions', { signal })), enabled: computed(() => !!auth.user) })
 const selected = ref<Schema['SessionOut'] | null>(null)
+const counts = computed(() => { const items = query.data.value?.items ?? []; const current = items.filter((s) => s.current).length; return { total: items.length, current, other: items.length - current } })
 const cancelButton = ref<HTMLButtonElement | null>(null)
 let trigger: HTMLElement | null = null
 const { pending, error, notice, run } = useAction()
@@ -40,14 +43,17 @@ async function revoke() {
 }
 </script>
 <template>
-  <section class="panel form-panel">
-    <div class="section-heading"><h2>登录会话</h2><button class="secondary-button" :disabled="query.isFetching.value" @click="query.refetch()">刷新会话</button></div>
+  <section class="ws-panel mg-section sc-sessions" aria-label="登录会话">
+    <div class="mg-section-head">
+      <div class="mg-section-title">
+        <h2 class="sc-title"><span class="sc-icon" aria-hidden="true"><Laptop /></span><span>登录会话<template v-if="query.data.value"> · {{ counts.total }}</template></span></h2>
+        <p v-if="query.data.value" class="form-help">当前 {{ counts.current }} · 其他 {{ counts.other }}</p>
+      </div>
+      <div class="mg-section-actions"><button type="button" class="secondary-button" :disabled="query.isFetching.value" @click="query.refetch()"><RefreshCw aria-hidden="true" />刷新会话</button></div>
+    </div>
     <DataState :loading="query.isPending.value" :error="query.error.value" :empty="!query.data.value?.items.length" empty-text="暂无登录会话" :stale="!!query.data.value && !isAccessError(query.error.value)" @retry="query.refetch()" />
-    <ul v-if="query.data.value && !isAccessError(query.error.value)" class="record-list">
-      <li v-for="session in query.data.value.items" :key="session.id">
-        <div><strong>{{ session.current ? '当前会话' : '其他会话' }}</strong><p>创建：{{ formatTime(session.created_at) }}</p><p>最近活动：{{ formatTime(session.last_seen_at) }}</p><p>到期：{{ formatTime(session.expires_at) }}</p></div>
-        <button class="secondary-button" :disabled="pending" @click="confirm(session, $event)">{{ session.current ? '撤销当前会话' : '撤销会话' }}</button>
-      </li>
+    <ul v-if="query.data.value && !isAccessError(query.error.value)" class="sc-session-list">
+      <SessionRow v-for="session in query.data.value.items" :key="session.id" :session="session" :busy="pending" @revoke="confirm" />
     </ul>
     <ActionFeedback :error="selected ? '' : error" :notice="notice" />
     <div v-if="selected" class="dialog-backdrop" @keydown.esc="cancel" @keydown="trapFocus">

@@ -1,13 +1,16 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 import ApprovalActions from './ApprovalActions.vue'
 import { RISK_LABELS, STATUS_LABELS, aiError, useExecution } from './queries'
 
 // Approval card in IM (sent by the workspace notification account). The card text is only a hint; the current
 // state and the decision come from /ai/tool-executions, so replying "同意" in the chat never approves anything.
+// After a decision the card shows the record's real status (approval ≠ success); the full arguments are in the center.
 const props = defineProps<{ scope: string; executionId: string; text: string | null }>()
 const auth = useAuthStore()
 const execution = useExecution(props.scope, () => props.executionId)
+const notice = ref('')
 </script>
 
 <template>
@@ -19,7 +22,8 @@ const execution = useExecution(props.scope, () => props.executionId)
         <span class="badge" :class="`ai-status-${execution.data.value.status}`">{{ STATUS_LABELS[execution.data.value.status] }}</span>
       </p>
       <p class="form-help">实例 {{ execution.data.value.instance_name }}<template v-if="execution.data.value.source.triggered_by_name"> · 由 {{ execution.data.value.source.triggered_by_name }} 触发</template> · <RouterLink :to="{ path: '/ai', query: { id: execution.data.value.id } }">在审批中心查看参数</RouterLink></p>
-      <ApprovalActions v-if="execution.data.value.status === 'pending_approval' && auth.canManage" :key="execution.data.value.version" :scope="scope" :execution="execution.data.value" />
+      <ApprovalActions v-if="execution.data.value.status === 'pending_approval' && auth.canManage" :key="execution.data.value.version" :scope="scope" :execution="execution.data.value" @notice="notice = $event" />
+      <p v-else-if="notice" role="status" class="note-text">{{ notice }}</p>
     </template>
     <template v-else>
       <p v-if="text" class="preserve-text">{{ text }}</p>

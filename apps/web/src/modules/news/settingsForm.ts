@@ -1,8 +1,9 @@
 import { ApiError } from '../../services/api'
 import { CHANNELS, PLATFORMS, channelName, type ChannelId, type NewsSettings, type NewsSettingsBody, type PlatformId } from './api'
 
-// 设置 → 新闻早报的表单（T-0153，NEWS_PLAN 第 4 节）。
+// 设置 → 新闻早报的表单（T-0153，NEWS_PLAN 第 4 节；T-0195 拆成五个标签共用的一份草稿）。
 // 密钥只写不读：输入框留空 = 不改（PUT 里不带这个字段）；点“清除” = 发送空字符串；填了才发送新值。
+// 各标签的子组件只读这份草稿、发出局部修改（FormPatch），由设置页合并；子组件自己不保存。
 export type SecretDraft = { value: string; clear: boolean }
 export type FeedDraft = { id: string; name: string; url: string; enabled: boolean; max_age_days: number }
 export type TopicDraft = { name: string; keywords: string; required: string; max_items: number; description: string; enabled: boolean }
@@ -16,6 +17,8 @@ export type NewsForm = {
   filter_method: 'keyword' | 'ai'; ai_model: string; ai_api_base: string; ai_api_key: SecretDraft; ai_analysis: boolean; ai_translation: boolean
   channels: Record<ChannelId, ChannelDraft>
 }
+/** 子组件发出的局部修改：替换草稿里的这些字段 */
+export type FormPatch = Partial<NewsForm>
 
 export const MAX_PUSH_TIMES = 3, MAX_FEEDS = 30, MAX_TOPICS = 20
 // 推送时间：半小时为单位
@@ -95,6 +98,12 @@ export function buildBody(form: NewsForm, version: number): NewsSettingsBody {
     ...(key !== undefined ? { ai_api_key: key } : {}),
     ai_analysis: form.ai_analysis, ai_translation: form.ai_translation, channels,
   }
+}
+
+/** 两份草稿保存出来是否一样（“有未保存更改”）：按要提交的内容比较，热榜平台不计顺序 */
+export function sameForm(a: NewsForm, b: NewsForm): boolean {
+  const key = (form: NewsForm) => { const body = buildBody(form, 0); return JSON.stringify({ ...body, platforms: [...(body.platforms ?? [])].sort() }) }
+  return key(a) === key(b)
 }
 
 // 提交前在页面上先查一遍明显的问题（服务端还会再校验）

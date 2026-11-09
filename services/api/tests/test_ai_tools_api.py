@@ -255,8 +255,9 @@ async def test_members_see_only_their_own_records(env: Env) -> None:
             "/api/v1/ai/tool-executions", headers={"X-Workspace-Id": env.workspace_id}
         )
         assert listed.status_code == 200, listed.text
-        # 列表只有以自己身份执行的记录；pending_count 按契约是全工作空间的待审批总数
-        assert listed.json()["items"] == [] and listed.json()["pending_count"] == 1
+        # 列表只有以自己身份执行的记录；pending_count 也只算自己可见的（T-0190 收紧，
+        # 以前是全工作空间的待审批总数，会把别人的统计泄露给 member / viewer）
+        assert listed.json()["items"] == [] and listed.json()["pending_count"] == 0
         forbidden = await other.post(
             f"/api/v1/ai/tool-executions/{uuid.uuid4()}/approve",
             json={},

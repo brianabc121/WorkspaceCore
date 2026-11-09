@@ -7,6 +7,8 @@ import DataState from '../components/DataState.vue'
 import ActionFeedback from '../components/ActionFeedback.vue'
 import { formatTime } from './time'
 import { useCreateIntent } from '../composables/useCreateIntent'
+import { RefreshCw, UserPlus, Info } from '@lucide/vue'
+import { ROLE_NAMES, initialOf } from '../components/management/roles'
 
 // Workspace members (spec §9.2, T-0064). admin manages member / viewer; granting, revoking or removing admin
 // is owner-only; the owner cannot be changed. The server enforces all of this — the page only hides choices.
@@ -14,7 +16,7 @@ type Member = Schema['MemberOut']
 type Assignable = Schema['MemberUpdate']['role']
 const props = defineProps<{ workspaceId: string }>()
 const auth = useAuthStore()
-const ROLE_LABELS: Record<Member['role'], string> = { owner: 'owner', admin: 'admin', member: 'member', viewer: 'viewer' }
+const ROLE_LABELS: Record<Member['role'], string> = { owner: `${ROLE_NAMES.owner} owner`, admin: `${ROLE_NAMES.admin} admin`, member: `${ROLE_NAMES.member} member`, viewer: `${ROLE_NAMES.viewer} viewer` }
 const assignable = computed<Assignable[]>(() => auth.isOwner ? ['admin', 'member', 'viewer'] : ['member', 'viewer'])
 const query = useQuery({
   queryKey: computed(() => ['members', auth.user?.id, props.workspaceId]),
@@ -24,7 +26,9 @@ const query = useQuery({
 const busy = ref(false), error = ref(''), notice = ref('')
 // 顶栏“创建 → 添加成员”（规范 §8.1）：把焦点移到添加成员表单的邮箱框
 const emailInput = ref<HTMLInputElement | null>(null)
-useCreateIntent(() => true, () => { void nextTick(() => { emailInput.value?.focus(); emailInput.value?.scrollIntoView?.({ block: 'center' }) }) })
+const focusAdd = () => { void nextTick(() => { emailInput.value?.focus(); emailInput.value?.scrollIntoView?.({ block: 'center' }) }) }
+useCreateIntent(() => true, focusAdd)
+const count = computed(() => query.data.value?.items.length ?? null)
 const form = reactive({ email: '', role: 'member' as Assignable, create: false, display_name: '', password: '' })
 // Server messages for these codes already say what to do; other errors use the shared wording.
 const OWN_MESSAGES = new Set(['MEMBER_EXISTS', 'USER_EXISTS', 'FORBIDDEN'])
@@ -59,35 +63,52 @@ function remove(m: Member) {
 </script>
 
 <template>
-  <section class="panel form-panel" aria-label="成员">
-    <div class="section-heading"><h2>成员</h2><button type="button" class="secondary-button" :disabled="query.isFetching.value" @click="query.refetch()">刷新成员</button></div>
-    <p class="form-help">{{ auth.isOwner ? 'owner 可以授予或收回 admin。' : 'admin 可以管理 member 与 viewer；授予或收回 admin 需要 owner。' }}owner 不能被修改或移除。</p>
+  <section class="ws-panel mg-section st-members" aria-label="成员">
+    <div class="mg-section-head">
+      <div class="mg-section-title">
+        <h2>成员与角色<template v-if="count !== null"> · {{ count }}</template></h2>
+        <p class="form-help st-rule"><Info aria-hidden="true" />{{ auth.isOwner ? '所有者可以授予或收回管理员；管理员管理成员与访客。' : '管理员管理成员与访客；授予或收回管理员需要所有者。' }}所有者不能被修改或移出。</p>
+      </div>
+      <div class="mg-section-actions">
+        <button type="button" class="secondary-button" :disabled="query.isFetching.value" @click="query.refetch()"><RefreshCw aria-hidden="true" />刷新</button>
+        <button type="button" class="primary-button" @click="focusAdd"><UserPlus aria-hidden="true" />添加成员</button>
+      </div>
+    </div>
     <DataState :loading="query.isPending.value" :error="query.error.value" :empty="!query.data.value?.items.length" empty-text="暂无成员" :stale="!!query.data.value && !isAccessError(query.error.value)" @retry="query.refetch()" />
-    <ul v-if="query.data.value && !isAccessError(query.error.value)" class="record-list">
-      <li v-for="m in query.data.value.items" :key="m.user_id" :aria-label="`成员：${m.display_name}`">
-        <div><strong>{{ m.display_name }}</strong><template v-if="m.you">（你）</template><p>{{ m.email }}</p><p>加入：{{ formatTime(m.joined_at) }}</p></div>
-        <div class="form-actions">
-          <label v-if="canEdit(m)" class="form-field"><span>角色</span>
-            <select :value="m.role" :disabled="busy" @change="changeRole(m, ($event.target as HTMLSelectElement).value as Assignable)">
+    <table v-if="query.data.value?.items.length && !isAccessError(query.error.value)" class="ws-table asv-table st-member-table">
+      <caption class="sr-only">工作空间成员</caption>
+      <thead><tr><th scope="col">成员</th><th scope="col">邮箱</th><th scope="col">角色</th><th scope="col">操作</th></tr></thead>
+      <tbody>
+        <tr v-for="m in query.data.value.items" :key="m.user_id" :aria-label="`成员：${m.display_name}`">
+          <th scope="row"><span class="st-member"><span class="mg-avatar is-small" aria-hidden="true">{{ initialOf(m.display_name, m.email) }}</span><span>{{ m.display_name }}<span v-if="m.you">（你）</span><span class="asv-sub">加入：{{ formatTime(m.joined_at) }}</span></span></span></th>
+          <td data-label="邮箱" class="st-email">{{ m.email }}</td>
+          <td data-label="角色">
+            <select v-if="canEdit(m)" :value="m.role" :disabled="busy" aria-label="角色" @change="changeRole(m, ($event.target as HTMLSelectElement).value as Assignable)">
               <option v-for="r in assignable" :key="r" :value="r">{{ ROLE_LABELS[r] }}</option>
             </select>
-          </label>
-          <span v-else class="badge">{{ ROLE_LABELS[m.role] }}</span>
-          <button v-if="canEdit(m)" type="button" class="secondary-button" :disabled="busy" @click="remove(m)">移出</button>
-        </div>
-      </li>
-    </ul>
-    <form class="im-group-form" aria-label="添加成员" @submit.prevent="add">
+            <span v-else class="mg-role" :class="`is-${m.role}`">{{ ROLE_NAMES[m.role] }} <small>{{ m.role }}</small></span>
+          </td>
+          <td data-label="操作" class="asv-link-cell">
+            <button v-if="canEdit(m)" type="button" class="asv-link" :disabled="busy" @click="remove(m)">移出</button>
+            <span v-else class="asv-sub">不可修改</span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <form class="st-add" aria-label="添加成员" @submit.prevent="add">
       <h3>添加成员</h3>
-      <label class="form-field"><span>邮箱 *</span><input ref="emailInput" v-model="form.email" type="email" required maxlength="254" autocomplete="off" /></label>
-      <label class="form-field"><span>角色</span><select v-model="form.role"><option v-for="r in assignable" :key="r" :value="r">{{ ROLE_LABELS[r] }}</option></select></label>
-      <label class="check-field"><input v-model="form.create" type="checkbox" /> 同时创建账号（这个邮箱还没有账号时）</label>
-      <template v-if="form.create">
+      <div class="st-add-row mg-stack-narrow">
+        <label class="form-field"><span>邮箱 *</span><input ref="emailInput" v-model="form.email" type="email" required maxlength="254" autocomplete="off" placeholder="name@example.com" /></label>
+        <label class="form-field"><span>角色</span><select v-model="form.role"><option v-for="r in assignable" :key="r" :value="r">{{ ROLE_LABELS[r] }}</option></select></label>
+        <label class="check-field"><input v-model="form.create" type="checkbox" /> 同时创建账号</label>
+        <button type="submit" class="primary-button" :disabled="busy || !form.email.trim() || (form.create && !form.display_name.trim())">{{ busy ? '正在提交…' : '添加成员' }}</button>
+      </div>
+      <p class="form-help">添加的是已有账号；这个邮箱还没有账号时，选上“同时创建账号”再填写显示名与初始密码（不会发送邀请邮件）。</p>
+      <div v-if="form.create" class="st-add-row mg-stack-narrow">
         <label class="form-field"><span>显示名 *</span><input v-model="form.display_name" required maxlength="64" /></label>
         <label class="form-field"><span>初始密码 *（至少 12 个字符）</span><input v-model="form.password" type="password" required minlength="12" maxlength="128" autocomplete="new-password" /></label>
-      </template>
+      </div>
       <ActionFeedback :error="error" :notice="notice" />
-      <button type="submit" class="primary-button" :disabled="busy || !form.email.trim() || (form.create && !form.display_name.trim())">{{ busy ? '正在提交…' : '添加成员' }}</button>
     </form>
   </section>
 </template>

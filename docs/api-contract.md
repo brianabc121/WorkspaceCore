@@ -69,7 +69,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET | `/api/v1/auth/sessions` | 我的会话 | 已实现（T-0011） |
 | DELETE | `/api/v1/auth/sessions/{session_id}` | 撤销会话 | 已实现（T-0011） |
 | POST | `/api/v1/auth/password` | 修改密码 | 已实现（T-0011） |
-| GET | `/api/v1/audit-logs` | 审计日志（需 `X-Workspace-Id`，owner / admin） | 已实现（T-0011） |
+| GET | `/api/v1/audit-logs` | 审计日志（需 `X-Workspace-Id`，owner / admin）；筛选、详情与 CSV 导出见“审计查询与导出（T-0197）” | 已实现（T-0011、T-0197） |
 
 请求头约定：写请求带 `X-CSRF-Token`（值取自 `ws_csrf` Cookie）；工作空间范围的请求带 `X-Workspace-Id`。
 
@@ -260,7 +260,8 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET | `/api/v1/agents/deployments/requests/{request_id}` | 部署请求收据：`{request_id, state: processing \| accepted \| failed \| interrupted, instance, deployment, error_code}`。只能查自己在这个工作空间发出的部署请求（别人的、别的空间的、别的接口用过的键都是 `404`）；从幂等记录的安全上下文找实例与任务，不返回请求原文。`processing` 还在处理（不同于任务 running）；`accepted` 已接纳，进度看 `deployment.job`；`failed` 被拒绝、没建实例（`error_code`）；`interrupted` 处理到一半退出、什么都没建（超过 2 分钟的处理中），可以用同一个 `request_id` 重发。记录保留 24 小时，过期 `404` | 已实现（T-0180） |
 | GET | `/api/v1/agents/overview` | 智能体总览（`?server_id&q&status&cursor&limit`，limit 1–100，游标同实例列表）：`summary`（`total` / `online` / `offline` / `pending` / `disabled` / `deploying` 最近一次任务是进行中的部署 / `attention` 最近一次部署失败或中断、或没停用但离线，去重），只按 `server_id` / `q` 统计全部实例，不套用 `status`、不受分页影响；`items`（`instance`、`server` 部署记录优先其次手动 / 自动归属，未归属为 null、`deployment`（含 `runtime_installed`）、`latest_job`、`deployment_project`）、`next_cursor`、`generated_at`。`server_id` 按同样的归属规则筛；`q` 按名称包含（`%` `_` 按字面）。只读本地记录、批量查询：不连 SSH、不调 OpenIM，不输出容器状态（离线 / 停用不等于容器停止） | 已实现（T-0180） |
 | PUT | `/api/v1/agents/instances/{instance_id}/server` | 手动指定所在服务器（乐观并发，`{server_id \| null, version}`）：手动部署的实例按上报的服务器指纹自动识别，认错时可以指定（以手动为准，D3）；`null` 改回自动识别。经 SSH 部署的实例以部署为准（`409 AGENT_DEPLOYED`）；审计 `agents.instance.server_assigned` | 已实现（T-0147） |
-| GET / POST | `/api/v1/agents/secrets` | 密钥列表 / 新增（只写不读） | 已实现（T-0054） |
+| GET / POST | `/api/v1/agents/secrets` | 密钥列表 / 新增（只写不读）；列表支持 `q`（名称或说明，字面包含）、`kind` 筛选，先筛选后分页，返回全量匹配数 `total`，游标绑定筛选条件 | 已实现（T-0054；筛选与 total：T-0196） |
+| GET | `/api/v1/agents/secrets/{secret_id}` | 单个密钥的元数据（名称、类型、值版本、最近轮换、授权对象；不含值、密文或历史值），只给 owner | 已实现（T-0196） |
 | GET | `/api/v1/agents/secrets/accesses` | 取密钥记录 | 已实现（T-0054） |
 | PATCH / DELETE | `/api/v1/agents/secrets/{secret_id}` | 改名称与说明 / 删除 | 已实现（T-0054） |
 | POST | `/api/v1/agents/secrets/{secret_id}/rotate` | 轮换值（旧值不再下发） | 已实现（T-0054） |
@@ -279,7 +280,8 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | PUT | `/api/v1/im/groups/{group_id}/policy` | 防刷屏设置（允许接力、连续条数、每分钟条数） | 已实现（T-0055） |
 | GET | `/api/v1/im/contacts` | 通讯录（没有删除好友） | 已实现（T-0055） |
 | GET / POST / PATCH / DELETE / PUT | `/api/v1/im/contact-groups[/{contact_group_id}[/members]]` | 分组 | 已实现（T-0055） |
-| GET | `/api/v1/ai/tool-executions[/{execution_id}]` | 工具调用记录与待审批（member 及以下只看自己的） | 已实现（T-0057） |
+| GET | `/api/v1/ai/tool-executions[/{execution_id}]` | 工具调用记录与待审批（member 及以下只看自己的）；列表另有 `period`（24h / 7d / all）与 `sort`（created_desc / expires_asc），游标绑定条件；`pending_count` 只统计调用者能看到的记录 | 已实现（T-0057；period / sort：T-0190） |
+| GET | `/api/v1/ai/tool-executions/summary` | 审批汇总：有效待审批、3 分钟内到期、高危待审批、执行异常（failed / unknown），`as_of` 与可见范围内的智能体 / 工具筛选项；按 `period`（默认 all）与智能体、风险、工具统计，只读 | 已实现（T-0190） |
 | POST | `/api/v1/ai/tool-executions/{execution_id}/approve`、`/reject` | 审批（必须带 `If-Match`；高危操作要重新输入密码） | 已实现（T-0057） |
 
 **实例接口**（只在接入入口；`Authorization: Bearer <实例令牌>`，外网另需客户端证书；失败一律 `401 AGENT_UNAUTHORIZED`）：
@@ -695,3 +697,21 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 `trigger_crawl`、`send_notification`、`read_article` 等不开放。
 
 **SSE 主题** `news`：早报送达、设置与收藏变化。**首页组件** `news_briefing`（`config.lines` 2 ~ 20）。
+
+## 审计查询与导出（T-0197）
+
+方案 `docs/v2/ai-admin-redesign/`（接口约定第 5 节）。全部 owner / admin，按 `X-Workspace-Id`；member / viewer `403`，非成员 `404`。
+只读：审计记录仍然只追加（数据库触发器拒绝 UPDATE），没有删除或修改记录的接口；列表与详情不写审计。
+不属于任何工作空间的记录（`workspace_id` 为空）永远不出现。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /api/v1/audit-logs` | 原接口加筛选，仍是 `Page`（`limit` 默认 30、1–100，`cursor`，`total_estimate` 为 null）。`after` / `before`（带时区、成对，`after` 含、`before` 不含且 `after < before`）、`actor_id` 或 `system_only=true`（只看 `actor_id` 为空的系统事件，二者互斥）、`action`（精确）或 `action_prefix`（按字面的前缀，二者互斥，≤128）、`resource_type`（≤64）、`q`（1–100，按字面、不区分大小写匹配 `action` / `resource_type` / `resource_id` 与 metadata 顶层的 `name` / `title`，以及内置事件的中文名；不搜 IP 哈希与其他 metadata）。筛选都在 SQL 里、分页之前生效。`next_cursor` 带签名，绑定工作空间与筛选条件：换了条件或篡改 `422 VALIDATION_FAILED`，从第一页重新加载 |
+| `GET /api/v1/audit-logs/{id}` | 一条记录（`AuditLogView`）；别的工作空间或没有工作空间的记录 `404` |
+| `GET /api/v1/audit-logs/export` | 同样的筛选，必须给 `after` 与 `before`，最长 31 天，不接受 `cursor` / `limit`（`422`）。读本次请求事务开始之前的记录，最多 10000 行：超出 `422 AUDIT_EXPORT_TOO_LARGE`（`details.limit=10000`），不截断。`text/csv; charset=utf-8`、UTF-8 BOM、`Content-Disposition: attachment; filename="audit-logs-YYYYMMDD-YYYYMMDD.csv"`（UTC 日期）、`Cache-Control: no-store`。列：`id`、`created_at_utc`（ISO，`Z` 结尾）、`action`、`action_label`、`actor_id`、`actor_label`、`resource_type`、`resource_id`、`resource_current_name`、`metadata_json`。去掉前导空白后以 `=` `+` `-` `@` 开头、或以制表符 / 回车开头的单元格前面加 `'`。`metadata_json` 再过一遍脱敏，并去掉 IP 类（`ip`、`client_ip`、`source_ip`、`ip_hash` 等）与凭据类的键。生成后在同一个事务里记 `audit.export_generated`：操作者、时间范围、截止点、行数与过滤摘要（搜索词只记“用了”，不记原文；不记文件内容） |
+
+`AuditLogView` 在 `AuditLogOut` 之外多三个可为 null 的字段，都只在当前权限内补充：
+`action_label`（内置事件的中文名，未知事件为 null，界面显示原 action；“已发起”类事件不写成成功）、
+`actor_label`（当前工作空间成员的显示名；`actor_id` 为空是“系统”；已不是成员为 null，显示 ID）、
+`resource_current_name`（对象“现在”的名称，不是当时的快照；只查本地表、批量查：`user`、`workspace`、`project`、`task`、`integration`、`agent_instance`，以及只有 owner 能看到的 `agent_secret`、`agent_server`；对象已删除、不在本工作空间或无权读取为 null）。
+列表与详情的 `metadata` 是写入时脱敏的内容，再过一遍脱敏并去掉 IP 类的键；没有通用的“结果”字段，不补前后值或 IP。

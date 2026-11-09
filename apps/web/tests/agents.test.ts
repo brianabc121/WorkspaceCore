@@ -16,8 +16,9 @@ function setup(handler?: (r: Request) => Response | Promise<Response | undefined
     path(r) === '/api/v1/me' && r.method === 'GET' ? Response.json({ ...me, workspaces: [{ ...workspace, role }] }) :
     path(r) === '/api/v1/agents/settings' && r.method === 'GET' ? Response.json({ agents_enabled: true, updated_at: null, updated_by: null, version: 7 }) :
     path(r) === '/api/v1/agents/instances' && r.method === 'GET' ? Response.json({ items: [instance()], next_cursor: null, total_estimate: 1 }) :
-    path(r) === '/api/v1/agents/secrets' && r.method === 'GET' ? Response.json({ items: [secret], next_cursor: null, total_estimate: 1 }) :
+    path(r) === '/api/v1/agents/secrets' && r.method === 'GET' ? Response.json({ items: [secret], next_cursor: null, total: 1, total_estimate: 1 }) :
     path(r) === '/api/v1/agents/secrets/accesses' ? Response.json({ items: [access], next_cursor: null, total_estimate: 1 }) :
+    path(r) === '/api/v1/agents/secrets/sec-1' && r.method === 'GET' ? Response.json(secret) :
     path(r) === '/api/v1/agents/instances/inst-a/ssh' && r.method === 'GET' ? Response.json({ target: null, job: null, warning: null }) :
     path(r) === '/api/v1/agents/host-summary' ? Response.json({ items: [] }) :
     path(r).endsWith('/ops') && r.method === 'GET' ? Response.json({ available: false, reason: 'not_deployed', running: null, items: [] }) : undefined
@@ -140,7 +141,8 @@ describe('secret vault', () => {
       if (path(r).endsWith('/rotate')) return Response.json({ ...secret, value_version: 3, version: 6 })
     })
     await openApp('/agents/secrets')
-    expect(await screen.findByRole('article', { name: '密钥：OpenAI' })).toBeVisible()
+    // T-0196：密钥列表改成表格，轮换在右侧详情里，取用记录在自己的标签里
+    expect(await screen.findByRole('row', { name: /OpenAI/ })).toBeVisible()
     await fireEvent.click(screen.getByRole('button', { name: '添加密钥' }))
     let dialog = await screen.findByRole('dialog', { name: '添加密钥' })
     await fireEvent.update(within(dialog).getByLabelText(/^名称/), 'Backup key')
@@ -151,15 +153,18 @@ describe('secret vault', () => {
     await vi.waitFor(() => expect(requests.some(r => r.method === 'POST' && path(r) === '/api/v1/agents/secrets')).toBe(true))
     expect(await requests.find(r => r.method === 'POST' && path(r) === '/api/v1/agents/secrets')!.clone().json()).toEqual({ name: 'Backup key', kind: 'model_api_key', description: '', value: 'sk-secret-value' })
     expect(screen.queryByText('sk-secret-value')).not.toBeInTheDocument()
-    await fireEvent.click(within(screen.getByRole('article', { name: '密钥：OpenAI' })).getByRole('button', { name: '轮换' }))
-    dialog = await screen.findByRole('dialog', { name: '轮换：OpenAI' })
-    await fireEvent.update(within(dialog).getByLabelText('新值 *'), 'sk-new')
-    await fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await fireEvent.click(within(screen.getByRole('region', { name: '密钥列表' })).getByRole('button', { name: '管理：OpenAI' }))
+    const detail = await screen.findByRole('region', { name: '密钥详情' })
+    await fireEvent.click(await within(detail).findByRole('button', { name: '轮换密钥' }))
+    dialog = within(detail).getByRole('form', { name: '轮换密钥' })
+    await fireEvent.update(within(dialog).getByLabelText('新值'), 'sk-new')
+    await fireEvent.click(within(dialog).getByRole('button', { name: '确认轮换' }))
     await vi.waitFor(() => expect(requests.some(r => path(r).endsWith('/rotate'))).toBe(true))
     expect(await requests.find(r => path(r).endsWith('/rotate'))!.clone().json()).toEqual({ value: 'sk-new', version: 5 })
-    const log = screen.getByRole('region', { name: '取用记录' })
-    expect(within(log).getByRole('cell', { name: 'openai_api_key' })).toBeVisible()
-    await fireEvent.update(within(log).getByLabelText('实例'), 'inst-a')
+    await fireEvent.click(screen.getByRole('tab', { name: '取用记录' }))
+    const log = await screen.findByRole('region', { name: '取用记录' })
+    expect(await within(log).findByRole('cell', { name: 'openai_api_key' })).toBeVisible()
+    await fireEvent.update(within(log).getByLabelText('智能体'), 'inst-a')
     await vi.waitFor(() => expect(requests.some(r => path(r) === '/api/v1/agents/secrets/accesses' && new URL(r.url).searchParams.get('instance_id') === 'inst-a')).toBe(true))
   })
 })

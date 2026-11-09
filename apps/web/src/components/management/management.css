@@ -1,0 +1,67 @@
+/* 管理区八页共用的布局（T-0189，效果图 docs/v2/ai-admin-redesign/assets/01–08）：
+   页头下的上下文标签、正文 + 右侧一栏、面板头。颜色只用主题变量，亮 / 暗主题自动跟随。 */
+
+.mg-page { min-width: 0; }
+.mg-title { min-width: 0; }
+.mg-context { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.mg-tag { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 12px; border-radius: 14px; background: var(--accent-soft); color: var(--text); font-size: .84rem; font-weight: 600; overflow-wrap: anywhere; }
+.mg-tag svg { width: 15px; height: 15px; flex: none; color: var(--accent); }
+.mg-role { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 10px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); font-size: .8rem; font-weight: 600; white-space: nowrap; }
+.mg-role small { color: var(--muted); font-weight: 400; font-size: .76rem; }
+.mg-role.is-admin { background: color-mix(in srgb, var(--chart-2, var(--accent)) 14%, var(--surface)); }
+.mg-role.is-member { background: color-mix(in srgb, var(--success) 12%, var(--surface)); color: var(--success); }
+.mg-role.is-viewer { background: color-mix(in srgb, var(--warning) 14%, var(--surface)); color: var(--warning); }
+
+/* 正文 + 右侧一栏：窄屏时侧栏排到正文下面 */
+.mg-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+.mg-main, .mg-aside { display: grid; gap: 16px; min-width: 0; align-content: start; }
+@media (min-width: 1180px) {
+  .mg-body.has-aside { grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); }
+}
+
+/* 面板 */
+.mg-section { padding: 16px 18px; display: grid; gap: 12px; min-width: 0; align-content: start; container-type: inline-size; }
+.mg-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; }
+.mg-section-title { flex: 1 1 280px; min-width: 0; }
+.mg-section-head h2 { font-size: 1.1rem; overflow-wrap: anywhere; }
+.mg-section-head .form-help { margin: 4px 0 0; }
+.mg-section-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mg-section-actions :is(.primary-button, .secondary-button), .mg-inline-button { display: inline-flex; align-items: center; gap: 6px; }
+.mg-section-actions svg, .mg-inline-button svg { width: 16px; height: 16px; }
+.mg-hint { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--surface-2); color: var(--muted); font-size: .84rem; overflow-wrap: anywhere; }
+.mg-hint svg { width: 16px; height: 16px; flex: none; margin-top: 2px; }
+
+/* 首字母头像 */
+.mg-avatar { --tone: var(--accent); flex: none; display: inline-grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: color-mix(in srgb, var(--tone) 14%, var(--surface)); color: var(--tone); font-size: 1.6rem; font-weight: 700; }
+.mg-avatar.is-square { border-radius: 14px; background: var(--accent); color: var(--accent-text); }
+.mg-avatar.is-small { width: 28px; height: 28px; font-size: .82rem; }
+
+/* 快捷入口与说明列表 */
+.mg-links { list-style: none; margin: 0; padding: 0; display: grid; }
+.mg-links li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); min-width: 0; }
+.mg-links li:first-child { border-top: 0; }
+.mg-links li > svg { width: 20px; height: 20px; flex: none; color: var(--muted); }
+.mg-links li > div { flex: 1 1 auto; min-width: 0; }
+.mg-links strong { display: block; font-size: .92rem; }
+.mg-links .asv-sub { margin-top: 2px; }
+.mg-links a { flex: none; }
+
+/* 面板本身变窄（侧栏展开的平板、详情一栏打开时）：表格改成一行一张卡片，与手机宽度的做法相同 */
+@container (max-width: 620px) {
+  .mg-section .asv-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .mg-section .asv-table, .mg-section .asv-table tbody { display: block; width: 100%; }
+  .mg-section .asv-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; padding: 12px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 10px; }
+  .mg-section .asv-table tbody th[scope="row"], .mg-section .asv-table tbody td { display: block; padding: 0; border: 0; min-width: 0; }
+  .mg-section .asv-table tbody th[scope="row"] { grid-column: 1 / -1; }
+  .mg-section .asv-table tbody tr:hover td, .mg-section .asv-table tbody tr:hover th { background: none; }
+  .mg-section .asv-table tbody tr[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .mg-section .asv-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 2px; color: var(--muted); font-size: .74rem; font-weight: 400; }
+  .mg-section .asv-table .asv-link-cell { grid-column: 1 / -1; }
+  .mg-section .asv-table .asv-nowrap { white-space: normal; }
+  .mg-stack-narrow > * { flex-basis: 100% !important; }
+}
+
+@media (max-width: 760px) {
+  .mg-section { padding: 12px; }
+  .mg-avatar { width: 52px; height: 52px; font-size: 1.3rem; }
+}

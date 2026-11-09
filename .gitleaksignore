@@ -34,3 +34,7 @@ c5f5b9ab8d9be1bc6178136656112ee037e51355:services/api/tests/test_agent_ops_api.p
 f5a9137f73da43353733db11a492ceab8bc3cb8d:services/api/tests/test_news_config.py:generic-api-key:52
 f5a9137f73da43353733db11a492ceab8bc3cb8d:services/api/tests/test_news_config.py:generic-api-key:76
 f5a9137f73da43353733db11a492ceab8bc3cb8d:services/api/tests/test_news_config.py:generic-api-key:103
+# 审计导出 / 查询测试里故意放进 metadata 的假凭据（tok-SECRET-123、hunter2-SECRET），用来验证列表与 CSV 导出会去掉凭据类的键（T-0197）
+4ecda8875c6633af3877c3ed72d5f8b1c4c039c6:services/api/tests/test_audit_export.py:generic-api-key:274
+4ecda8875c6633af3877c3ed72d5f8b1c4c039c6:services/api/tests/test_audit_export.py:generic-api-key:276
+4ecda8875c6633af3877c3ed72d5f8b1c4c039c6:services/api/tests/test_audit_queries.py:generic-api-key:519

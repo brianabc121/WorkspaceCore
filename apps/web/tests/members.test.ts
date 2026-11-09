@@ -16,7 +16,7 @@ function setup(role: Schema['WorkspaceOut']['role'], handler?: (r: Request) => R
       path(r) === '/api/v1/me' && r.method === 'GET' ? Response.json({ ...me, workspaces: [{ ...workspace, role }] }) :
       path(r) === MEMBERS && r.method === 'GET' ? Response.json({ items, next_cursor: null, total_estimate: items.length }) : undefined))
 }
-const row = (name: string) => screen.findByRole('listitem', { name: `成员：${name}` })
+const row = (name: string) => screen.findByRole('row', { name: `成员：${name}` })
 afterEach(() => vi.restoreAllMocks())
 
 describe('members', () => {
@@ -31,7 +31,7 @@ describe('members', () => {
     expect(within(await row('测试用户')).queryByLabelText('角色')).not.toBeInTheDocument()
     expect(within(await row('测试用户')).getByText('（你）')).toBeVisible()
     const bob = await row('Bob')
-    expect(within(bob).getByRole('option', { name: 'admin' })).toBeInTheDocument()
+    expect(within(bob).getByRole('option', { name: '管理员 admin' })).toBeInTheDocument()
     await fireEvent.update(within(bob).getByLabelText('角色'), 'member')
     await vi.waitFor(() => expect(requests.some(r => r.method === 'PATCH')).toBe(true))
     const patch = requests.find(r => r.method === 'PATCH')!
@@ -50,8 +50,8 @@ describe('members', () => {
     expect(within(await row('Bob')).queryByLabelText('角色')).not.toBeInTheDocument()
     expect(within(await row('Bob')).queryByRole('button', { name: '移出' })).not.toBeInTheDocument()
     const carol = await row('Carol')
-    expect(within(carol).queryByRole('option', { name: 'admin' })).not.toBeInTheDocument()
-    expect(within(screen.getByRole('form', { name: '添加成员' })).queryByRole('option', { name: 'admin' })).not.toBeInTheDocument()
+    expect(within(carol).queryByRole('option', { name: '管理员 admin' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('form', { name: '添加成员' })).queryByRole('option', { name: '管理员 admin' })).not.toBeInTheDocument()
   })
 
   it('adds existing accounts and creates new ones with an initial password', async () => {

@@ -781,7 +781,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 密钥列表（owner，不含明文） */
+        /**
+         * 密钥列表（owner，不含明文）
+         * @description 按名称排序。q 按名称或说明字面包含搜索（不区分大小写，% 与 _ 按普通字符），kind 按类型筛选；条件在本工作空间内、分页之前生效，total 是同样条件下的全量匹配数。游标绑定工作空间与条件：换了 q / kind 要从第一页开始，用旧游标请求返回 422。
+         */
         get: operations["list_agent_secrets"];
         put?: never;
         /** 新增密钥（owner，只写不读） */
@@ -816,7 +819,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * 密钥详情（owner，只有元数据）
+         * @description 名称、类型、说明、当前值版本、最近轮换时间与授权（实例与 ref_id）；从不返回值、密文引用或历史值。不在本工作空间或不存在时 404。
+         */
+        get: operations["get_agent_secret"];
         put?: never;
         post?: never;
         /**
@@ -1106,8 +1113,31 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 工具调用记录与待审批（viewer；member 及以下只看自己的） */
+        /**
+         * 工具调用记录与待审批（viewer；member 及以下只看自己的）
+         * @description sort=expires_asc 按到期时间升序（没有到期时间的排最后，同分按创建时间、ID 升序），缺省 created_desc 按创建时间倒序。next_cursor 绑定当前的筛选、时间范围、排序与用户，换了条件再用旧游标返回 422；不带 period / sort 时旧格式游标仍可用。pending_count 是当前用户可见范围内未过期的待审批总数，不随筛选变化。
+         */
         get: operations["list_tool_executions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/tool-executions/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 审批汇总与可选筛选项（viewer；member 及以下只算自己的）
+         * @description 待审批、3 分钟内到期、高危待审批与执行异常（failed / unknown）的数量，都只算 period 内发起、并符合 instance_id / risk_level / tool_name 的调用；不接收 status。instances / tools 只按可见范围与 period 给出，不受其他条件影响。只读：不批准、不执行，也不触发过期清理（已到期的按 as_of 排除）。
+         */
+        get: operations["get_tool_execution_summary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1177,8 +1207,51 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 工作空间审计日志（owner / admin） */
+        /**
+         * 工作空间审计日志（owner / admin）
+         * @description 新的在前。所有筛选都在服务端、分页之前生效；next_cursor 绑定工作空间与筛选条件，换了条件要从第一页重新加载（旧游标 422）。不返回全量总数（total_estimate 为 null）。列表与详情不写审计。
+         */
         get: operations["list_audit_logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit-logs/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 导出审计日志为 CSV（owner / admin）
+         * @description 与列表同样的筛选；必须给出 after 与 before，最长 31 天，不接受 cursor 与 limit。读取请求时刻之前符合条件的记录，最多 10000 行：超出时 422 AUDIT_EXPORT_TOO_LARGE（不截断），请缩小范围。生成后记一条审计 audit.export_generated（只有时间范围、行数与过滤摘要，不含搜索词与文件内容）。
+         */
+        get: operations["export_audit_logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit-logs/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 一条审计记录（owner / admin）
+         * @description 不在当前工作空间（含不属于任何工作空间的记录）时 404。
+         */
+        get: operations["get_audit_log"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5500,6 +5573,11 @@ export interface components {
              * @description 下一页游标；没有更多数据时为 null
              */
             next_cursor?: string | null;
+            /**
+             * Total
+             * @description 同样 q / kind 条件下的全部匹配数（服务端计数，不受分页影响）；total_estimate 与它相同
+             */
+            total: number;
             /** Total Estimate */
             total_estimate?: number | null;
         };
@@ -6187,6 +6265,59 @@ export interface components {
              */
             writes: number;
         };
+        /**
+         * AiExecutionSummaryOut
+         * @description 审批中心的汇总卡片与筛选项；只在当前用户可见范围内按 SQL 聚合，不看列表翻到第几页。
+         */
+        AiExecutionSummaryOut: {
+            /**
+             * As Of
+             * Format: date-time
+             * @description 统计时服务端的当前时间（UTC），前端用它校正倒计时
+             */
+            as_of: string;
+            /**
+             * Critical Pending Count
+             * @description 待审批中风险等级为 critical 的
+             */
+            critical_pending_count: number;
+            /**
+             * Exception Count
+             * @description 执行异常：状态为 failed 或 unknown；rejected / expired / denied 不算
+             */
+            exception_count: number;
+            /**
+             * Expiring Count
+             * @description 待审批中 expires_at 不晚于 as_of + expiring_window_seconds 的（即将到期）
+             */
+            expiring_count: number;
+            /**
+             * Expiring Window Seconds
+             * @description “即将到期”的窗口，固定 180 秒
+             */
+            expiring_window_seconds: number;
+            /**
+             * Instances
+             * @description 可选的实例：可见范围、时间范围内有调用记录且实例仍存在（ID 非空）的；不受其他已选条件影响
+             */
+            instances: components["schemas"]["ExecutionInstanceOption"][];
+            /**
+             * Pending Count
+             * @description 待审批：status 为 pending_approval 且 expires_at 晚于 as_of
+             */
+            pending_count: number;
+            /**
+             * Period
+             * @description 统计的时间范围：created_at 不早于 as_of 减去 24 小时 / 7 天；all 不限。四个计数都只算这个范围内发起的调用
+             * @enum {string}
+             */
+            period: "24h" | "7d" | "all";
+            /**
+             * Tools
+             * @description 可选的工具名：可见范围、时间范围内出现过的；不受其他已选条件影响
+             */
+            tools: string[];
+        };
         /** AiToolExecutionOut */
         AiToolExecutionOut: {
             /** Acting User Id */
@@ -6273,7 +6404,7 @@ export interface components {
             next_cursor?: string | null;
             /**
              * Pending Count
-             * @description 当前工作空间待审批的总数
+             * @description 当前用户可见范围内未过期的待审批总数（owner / admin 为整个工作空间，member / viewer 只算以自己身份执行的）；不随本次筛选变化
              */
             pending_count: number;
             /** Total Estimate */
@@ -6393,18 +6524,33 @@ export interface components {
              */
             id: string;
         };
-        /** AuditLogOut */
-        AuditLogOut: {
+        /**
+         * AuditLogView
+         * @description 列表与详情（T-0197）：在原记录之外补充显示名，全部只在当前权限内解析。
+         *
+         *     审计没有通用的“结果”字段，也不补前后值或 IP；metadata 是写入时脱敏过的附加信息。
+         */
+        AuditLogView: {
             /**
              * Action
              * @description 例如 auth.login_succeeded、workspace.updated
              */
             action: string;
             /**
+             * Action Label
+             * @description 内置事件的中文名；未知事件为 null，按 action 原样显示
+             */
+            action_label?: string | null;
+            /**
              * Actor Id
              * @description 执行者；系统事件为 null
              */
             actor_id: string | null;
+            /**
+             * Actor Label
+             * @description 操作者在当前工作空间的显示名；actor_id 为 null 时是“系统”；已不是成员（被移出或账号已删）时为 null，按 actor_id 显示
+             */
+            actor_label?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -6422,6 +6568,11 @@ export interface components {
             metadata: {
                 [key: string]: unknown;
             };
+            /**
+             * Resource Current Name
+             * @description 对象“现在”的名称，不是记录当时的快照；只在你现在能读这个对象时给出，对象已删除、不在本工作空间或无权读取时为 null（例如密钥名只有 owner 能看到）
+             */
+            resource_current_name?: string | null;
             /** Resource Id */
             resource_id: string | null;
             /** Resource Type */
@@ -7104,6 +7255,19 @@ export interface components {
              * @enum {string}
              */
             kind: "task" | "project" | "note" | "conversation" | "message" | "bookmark";
+        };
+        /** ExecutionInstanceOption */
+        ExecutionInstanceOption: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Name
+             * @description 这个实例 ID 最近一条调用记录里的名称
+             */
+            name: string;
         };
         /**
          * ExecutionSource
@@ -10942,10 +11106,10 @@ export interface components {
             /** Unread Notifications */
             unread_notifications: number | null;
         };
-        /** Page[AuditLogOut] */
-        Page_AuditLogOut_: {
+        /** Page[AuditLogView] */
+        Page_AuditLogView_: {
             /** Items */
-            items: components["schemas"]["AuditLogOut"][];
+            items: components["schemas"]["AuditLogView"][];
             /**
              * Next Cursor
              * @description 下一页游标；没有更多数据时为 null
@@ -17886,6 +18050,10 @@ export interface operations {
     list_agent_secrets: {
         parameters: {
             query?: {
+                /** @description 按名称或说明搜索（字面包含）；不能含 NUL 字符 */
+                q?: string | null;
+                /** @description 只看这种类型的密钥 */
+                kind?: ("model_api_key" | "api_token" | "generic") | null;
                 /** @description 上一页返回的 next_cursor */
                 cursor?: string | null;
                 limit?: number;
@@ -18046,6 +18214,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SecretAccessPage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_agent_secret: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                secret_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSecretOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -19632,6 +19861,10 @@ export interface operations {
                 risk_level?: ("read" | "write" | "critical" | "knowledge" | "direct")[] | null;
                 instance_id?: string | null;
                 tool_name?: string | null;
+                /** @description 按 created_at 只看这段时间内发起的调用（相对服务端当前时间，UTC）；缺省 all 不限 */
+                period?: "24h" | "7d" | "all";
+                /** @description 排序，缺省 created_desc */
+                sort?: "created_desc" | "expires_asc";
                 /** @description 上一页返回的 next_cursor */
                 cursor?: string | null;
                 limit?: number;
@@ -19652,6 +19885,62 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiToolExecutionPage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_tool_execution_summary: {
+        parameters: {
+            query?: {
+                /** @description 按 created_at 只看这段时间内发起的调用（相对服务端当前时间，UTC）；缺省 all 不限 */
+                period?: "24h" | "7d" | "all";
+                risk_level?: ("read" | "write" | "critical" | "knowledge" | "direct")[] | null;
+                instance_id?: string | null;
+                tool_name?: string | null;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiExecutionSummaryOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -19905,6 +20194,22 @@ export interface operations {
             query?: {
                 limit?: number;
                 cursor?: string | null;
+                /** @description 起点（含），必须带时区；与 before 一起给出 */
+                after?: string | null;
+                /** @description 终点（不含），必须带时区，且晚于 after */
+                before?: string | null;
+                /** @description 只看这个操作者；不能与 system_only=true 同时使用 */
+                actor_id?: string | null;
+                /** @description 只看系统事件（actor_id 为 null） */
+                system_only?: boolean;
+                /** @description 事件名精确匹配；不能与 action_prefix 同时使用 */
+                action?: string | null;
+                /** @description 事件名前缀（按字面，% 与 _ 不是通配符） */
+                action_prefix?: string | null;
+                /** @description 对象类型精确匹配 */
+                resource_type?: string | null;
+                /** @description 关键词（按字面、不区分大小写）：匹配 action、resource_type、resource_id、metadata 里的 name / title，以及内置事件的中文名；不搜 IP 哈希与其他 metadata */
+                q?: string | null;
             };
             header: {
                 /** @description 当前工作空间；不是成员时返回 404 */
@@ -19921,7 +20226,144 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Page_AuditLogOut_"];
+                    "application/json": components["schemas"]["Page_AuditLogView_"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    export_audit_logs: {
+        parameters: {
+            query?: {
+                /** @description 起点（含），必须带时区；与 before 一起给出 */
+                after?: string | null;
+                /** @description 终点（不含），必须带时区，且晚于 after */
+                before?: string | null;
+                /** @description 只看这个操作者；不能与 system_only=true 同时使用 */
+                actor_id?: string | null;
+                /** @description 只看系统事件（actor_id 为 null） */
+                system_only?: boolean;
+                /** @description 事件名精确匹配；不能与 action_prefix 同时使用 */
+                action?: string | null;
+                /** @description 事件名前缀（按字面，% 与 _ 不是通配符） */
+                action_prefix?: string | null;
+                /** @description 对象类型精确匹配 */
+                resource_type?: string | null;
+                /** @description 关键词（按字面、不区分大小写）：匹配 action、resource_type、resource_id、metadata 里的 name / title，以及内置事件的中文名；不搜 IP 哈希与其他 metadata */
+                q?: string | null;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UTF-8（带 BOM）CSV：id、created_at_utc、action、action_label、actor_id、actor_label、resource_type、resource_id、resource_current_name、metadata_json。以 = + - @、制表符或回车开头的单元格前面加 '，按文本显示；不含 IP、IP 哈希与凭据。Cache-Control: no-store */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_audit_log: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogView"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

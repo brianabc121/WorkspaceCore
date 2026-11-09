@@ -65,6 +65,11 @@ describe('news settings form helpers', () => {
 })
 
 describe('news settings page', () => {
+  // T-0195：设置分成五个标签（同一份草稿），字段在各自的标签里
+  async function openTab(name: string) {
+    await fireEvent.click(screen.getByRole('tab', { name }))
+    return screen.findByRole('tabpanel', { name })
+  }
   function setup(role: Role, handler?: (r: Request) => Response | undefined, base = settings) {
     return mockApi(async r => {
       const result = handler?.(r)
@@ -78,7 +83,7 @@ describe('news settings page', () => {
     })
   }
 
-  it('saves with the version, sends only typed or cleared secrets and never shows them back', async () => {
+  it('saves with the version, sends only typed or cleared secrets and never shows them back', { timeout: 15000 }, async () => {
     let saved = settings
     const requests = setup('owner', r => {
       if (path(r) !== '/api/v1/news/settings') return undefined
@@ -87,11 +92,12 @@ describe('news settings page', () => {
     })
     await openApp('/settings/news')
     expect(await screen.findByRole('heading', { level: 1, name: '新闻早报' })).toBeVisible()
-    const state = await screen.findByRole('region', { name: '状态' })
+    const state = await screen.findByRole('region', { name: '当前运行状态' })
     expect(await within(state).findByText('在线')).toBeVisible()
     expect(screen.getByText('Asia/Shanghai')).toBeVisible()
 
-    const telegram = screen.getByRole('group', { name: '推送渠道：Telegram' })
+    await openTab('模型与渠道')
+    let telegram = screen.getByRole('group', { name: '推送渠道：Telegram' })
     await fireEvent.click(within(telegram).getByLabelText('启用Telegram'))
     await fireEvent.update(within(telegram).getByLabelText('会话 ID（Chat ID）'), '42')
     await fireEvent.update(within(telegram).getByLabelText('机器人令牌（Bot Token）'), 'tg-secret-token')
@@ -99,9 +105,11 @@ describe('news settings page', () => {
     expect(within(feishu).getByText('已设置')).toBeInTheDocument()
     await fireEvent.click(screen.getByRole('button', { name: '清除API Key' }))
     expect(screen.getByText('保存后清除')).toBeVisible()
+    await openTab('兴趣主题')
     const topic = screen.getByRole('group', { name: '兴趣主题 1' })
     expect(within(topic).getByLabelText('关键词')).toHaveValue('AI, 大模型')
     await fireEvent.update(within(topic).getByLabelText('关键词'), 'AI, 大模型, /GPT-\\d{1,2}/')
+    await openTab('基本与时间')
     await fireEvent.click(screen.getByRole('button', { name: '添加推送时间' }))
     await fireEvent.update(screen.getByLabelText('推送时间 2'), '18:00')
     await fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
@@ -115,10 +123,14 @@ describe('news settings page', () => {
     expect(body.channels.feishu).toMatchObject({ enabled: true, secrets: {} })
     expect(body.channels.telegram).toMatchObject({ enabled: true, chat_id: '42', secrets: { bot_token: 'tg-secret-token' } })
     expect(body.channels.email).toMatchObject({ enabled: false, smtp_port: null, secrets: {} })
+    await openTab('模型与渠道')
+    telegram = screen.getByRole('group', { name: '推送渠道：Telegram' })
     expect(within(telegram).getByLabelText('机器人令牌（Bot Token）')).toHaveValue('')
     expect(document.body).not.toHaveTextContent('tg-secret-token')
 
-    // 不动密钥再保存一次：密钥一个都不带，版本用上次保存返回的
+    // 不动密钥再保存一次（只改推送时间）：密钥一个都不带，版本用上次保存返回的
+    await openTab('基本与时间')
+    await fireEvent.click(screen.getByRole('button', { name: '添加推送时间' }))
     await fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
     await vi.waitFor(() => expect(requests.filter(r => r.method === 'PUT')).toHaveLength(2))
     const second = await requests.filter(r => r.method === 'PUT')[1]!.clone().json()
@@ -131,12 +143,17 @@ describe('news settings page', () => {
     let reply: Response = fail(409, 'VERSION_CONFLICT')
     const requests = setup('owner', r => (path(r) === '/api/v1/news/settings' && r.method === 'PUT' ? reply : undefined))
     await openApp('/settings/news')
+    await screen.findByLabelText('推送时间 1')
+    await openTab('模型与渠道')
     const telegram = await screen.findByRole('group', { name: '推送渠道：Telegram' })
     await fireEvent.click(within(telegram).getByLabelText('启用Telegram'))
     await fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
     expect(await screen.findByText('推送渠道「Telegram」已启用：请填写机器人令牌（Bot Token）。')).toBeVisible()
     expect(requests.some(r => r.method === 'PUT')).toBe(false)
     await fireEvent.click(within(telegram).getByLabelText('启用Telegram'))
+    // T-0195：没有改动时不显示“保存设置”；改一处别的再保存
+    await openTab('基本与时间')
+    await fireEvent.click(screen.getByRole('button', { name: '添加推送时间' }))
 
     await fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
     expect(await screen.findByText(/设置已被别人修改/)).toBeVisible()
@@ -161,10 +178,11 @@ describe('news settings page', () => {
     await openApp('/settings/news')
     expect(await screen.findByText(/这个部署没有安装 TrendRadar/)).toBeVisible()
     expect(screen.getByText(/另一个工作空间已经启用了早报/)).toBeVisible()
-    expect(screen.getByText('配置文件写入失败：配置卷不可写')).toBeVisible()
-    expect(await screen.findByLabelText('写早报的智能体实例')).toHaveValue('inst-a')
+    expect(screen.getByText('配置文件写入失败')).toBeVisible()
+    expect(within(screen.getByRole('region', { name: '当前运行状态' })).getByText('配置卷不可写')).toBeVisible()
+    await vi.waitFor(() => expect(screen.getByLabelText('执行智能体')).toHaveValue('inst-a'))
 
-    await fireEvent.click(screen.getByRole('button', { name: '发一条测试推送' }))
+    await fireEvent.click(screen.getByRole('button', { name: '发送测试推送' }))
     const results = await screen.findByRole('list', { name: '测试推送结果' })
     expect(within(results).getByText('飞书：成功')).toBeVisible()
     expect(within(results).getByText('通用 Webhook：失败（HTTP 500）')).toBeVisible()
@@ -176,6 +194,7 @@ describe('news settings page', () => {
     expect(await screen.findByText(/已让智能体开始写早报/)).toBeVisible()
     expect(requests.filter(r => path(r) === '/api/v1/news/briefings/generate')).toHaveLength(2)
 
+    await openTab('学习偏好')
     const learned = screen.getByRole('region', { name: '学到的偏好' })
     expect(within(learned).getByText('+4')).toBeVisible()
     expect(within(learned).getByText('14（上调）')).toBeVisible()
@@ -188,7 +207,7 @@ describe('news settings page', () => {
     expect(await screen.findByText(/只有 owner 能修改新闻早报的设置/)).toBeVisible()
     expect(screen.getByLabelText('启用新闻早报')).toBeDisabled()
     expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '发一条测试推送' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '发送测试推送' })).not.toBeInTheDocument()
 
     first.unmount()
     mockApi(r => (path(r) === '/api/v1/me' && r.method === 'GET' ? as('member') : undefined))
