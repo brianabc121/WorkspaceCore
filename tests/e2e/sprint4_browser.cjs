@@ -1,6 +1,6 @@
 // Sprint 4 浏览器验收（T-0032）：真实后端上的知识入口、日历、GitHub 与全局搜索——
 // 配置 AFFiNE 地址 → 新增收藏并关联任务 → 任务抽屉显示相关文档 → 日历新建 / 编辑 →
-// 首页“最近文档”“近期日程”显示真实数据 → 连接 GitHub → 开发者页 → 限流提示 →
+// 首页“最近文档”“提醒与日程”显示真实数据 → 连接 GitHub → 开发者页 → 限流提示 →
 // 顶栏搜索框命中并跳转 → viewer 只读 → 删除日程与收藏后页面与搜索都不再出现。
 // GitHub 用模拟服务（fake_github_server.py，与 sprint4_acceptance.py 相同），.env 需要
 // WORKSPACE_GITHUB_API_URL=http://fake-github:8080，INTEGRATION_ALLOWED_HOSTS 含 fake-github。
@@ -156,7 +156,7 @@ async function noHorizontalScroll(page) {
   seed('member', workspace, viewerId, 'viewer')
   const taskTitle = `浏览器关联任务 ${run}`
   workspaceTask(workspace, taskTitle)
-  // 明天（显示时区）上午 10 点：落在首页“近期日程”的 7 天窗口里
+  // 明天（显示时区）上午 10 点：落在首页“提醒与日程”的 7 天窗口里
   const tomorrow = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE }).format(new Date(Date.now() + 86400000))
 
   const browser = await chromium.launch()
@@ -236,19 +236,25 @@ async function noHorizontalScroll(page) {
   check(saved.location === '三楼会议室' && saved.version === 2, '编辑应保存地点并递增版本')
   step(`日历：新建并编辑日程，时间按 ${ZONE} 换算后保存`)
 
-  // ---------------------------------------------------------------- 首页“最近文档”“近期日程”（规范 8.3）
+  // ---------------------------------------------------------------- 首页“最近文档”“提醒与日程”（规范 8.3）
   const widgets = [
     { widget_type: 'recent_docs', config: { limit: 5 }, layout: { desktop: { x: 0, y: 8, w: 6, h: 4 }, mobile: { y: 13, h: 4 } } },
     { widget_type: 'calendar_agenda', config: { days: 7, limit: 5 }, layout: { desktop: { x: 6, y: 8, w: 6, h: 4 }, mobile: { y: 17, h: 4 } } },
   ]
+  const ids = []
   for (const widget of widgets) {
     const created = await api(page, workspace, 'POST', `/api/v1/dashboards/${dashboard}/widgets`, widget)
     check(created.status === 201, `添加组件失败：${created.status} ${JSON.stringify(created.body).slice(0, 200)}`)
+    ids.push(created.body.id)
   }
   await page.goto(`${base}/`)
-  await page.getByRole('article', { name: '最近文档' }).getByText(title).waitFor()
-  await page.getByRole('article', { name: '近期日程' }).getByText(`${eventTitle} 改`).waitFor()
-  step('首页“最近文档”“近期日程”组件显示真实数据')
+  // 默认首页已经有一个“提醒与日程”（T-0164），按新建组件的 ID 定位，避免与它重名
+  const [docsCard, agendaCard] = ids.map((id) => page.locator(`article[data-widget-id="${id}"]`))
+  check(await docsCard.getAttribute('aria-label') === '最近文档', '首页组件应叫“最近文档”')
+  check(await agendaCard.getAttribute('aria-label') === '提醒与日程', '日程组件应叫“提醒与日程”（T-0164）')
+  await docsCard.getByText(title).waitFor()
+  await agendaCard.getByText(`${eventTitle} 改`).waitFor()
+  step('首页“最近文档”“提醒与日程”组件显示真实数据')
 
   // ---------------------------------------------------------------- 连接 GitHub（S4-04，模拟 GitHub）
   const token = 'github_pat_e2e_' + randomBytes(20).toString('hex')
