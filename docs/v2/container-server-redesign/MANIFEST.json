@@ -1,0 +1,60 @@
+{
+  "package": "workspace-container-server-redesign",
+  "created_at": "2026-11-09T15:27:13.882058+08:00",
+  "kind": "design_and_development_plan_only",
+  "repository": "brianabc121/WorkspaceCore",
+  "source_of_truth": {
+    "ref": "origin/main",
+    "commit": "e0176b59ffcf2ae3e630d4d1b0f75addcf4b1f6c",
+    "includes_pull_requests": [
+      177,
+      178,
+      179
+    ]
+  },
+  "pages": [
+    "容器服务器"
+  ],
+  "implementation_tasks": 5,
+  "business_code_modified": false,
+  "implementation_tests_run": false,
+  "pull_request_created": false,
+  "image": {
+    "path": "assets/01-container-server.png",
+    "width": 1585,
+    "height": 992
+  },
+  "package_validation": {
+    "markdown_links": 11,
+    "plan_tasks": 5,
+    "source_image_matches": 1
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 4404,
+      "sha256": "685fb0813d4d82d463d67f57df0cd3a9d9925c9246fa13ddabdcd2ed3b1a62c8"
+    },
+    {
+      "path": "assets/01-container-server.png",
+      "bytes": 1682154,
+      "sha256": "37d43dfb149e8c2006957d2c47f374db338104bee78c5ccabafffc250e1f2448"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-09-container-server-redesign.md",
+      "bytes": 21161,
+      "sha256": "079cf1b8bb06d53c8fc1786618bfe19b1698dd93e0b82c59088abc0e2ad6d181"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-09-container-server-contract.md",
+      "bytes": 11310,
+      "sha256": "3cb0692a921c8e9632d3d0f8118f04652fddce42d4a24feb9cbf648d242fc45f"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-09-container-server-design.md",
+      "bytes": 10552,
+      "sha256": "4eea2598338dc48f8e6f7ed2950115884dd5c535f780cc0e781b8930aefa14b8"
+    }
+  ],
+  "hash_scope": "All payload files; MANIFEST.json itself is excluded."
+}
