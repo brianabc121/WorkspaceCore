@@ -24,17 +24,36 @@ export function useInstances(scope: string) {
     getNextPageParam: p => p.next_cursor ?? undefined })
 }
 
-export function useSecrets(scope: string) {
+// 密钥库（T-0196，契约第 4 节）：q / kind 在服务端筛选、分页之前生效，筛选条件进查询键——换条件就是另一条查询、从第一页开始，
+// 旧条件的游标不会拼进新条件。queryFn 从查询键取条件，游标与条件总是同一组。只留元数据字段，值永远不进缓存。
+export type SecretFilters = { q?: string; kind?: Schema['AgentSecretOut']['kind'] }
+export const secretMeta = (s: Schema['AgentSecretOut']): Schema['AgentSecretOut'] => ({
+  id: s.id, name: s.name, kind: s.kind, description: s.description, value_version: s.value_version, last_rotated_at: s.last_rotated_at,
+  grants: s.grants.map(g => ({ instance_id: g.instance_id, instance_name: g.instance_name, ref_id: g.ref_id })),
+  version: s.version, created_at: s.created_at, updated_at: s.updated_at,
+})
+export function useSecrets(scope: string, filters: () => SecretFilters = () => ({})) {
   const c = context(scope)
-  return useInfiniteQuery({ queryKey: ['agents', c.user, scope, 'secrets'], enabled: c.enabled, initialPageParam: null as string | null,
-    queryFn: async ({ pageParam, signal }) => dataOf(await c.auth.api.GET('/api/v1/agents/secrets', { params: { header: c.header, query: { limit: 50, ...(pageParam ? { cursor: pageParam } : {}) } }, signal })),
+  return useInfiniteQuery({ queryKey: computed(() => ['agents', c.user, scope, 'secrets', filters()] as const), enabled: c.enabled, initialPageParam: null as string | null,
+    queryFn: async ({ queryKey, pageParam, signal }) => {
+      const page = dataOf(await c.auth.api.GET('/api/v1/agents/secrets', { params: { header: c.header, query: { limit: 50, ...queryKey[4], ...(pageParam ? { cursor: pageParam } : {}) } }, signal }))
+      return { ...page, items: page.items.map(secretMeta) }
+    },
     getNextPageParam: p => p.next_cursor ?? undefined })
 }
 
-export function useSecretAccesses(scope: string, filter: () => { instance_id?: string; result?: Schema['SecretAccessOut']['result'] }) {
+/** 单个密钥的元数据（选中项不在已取回的列表页里也能读；不存在或跨空间 404） */
+export function useSecret(scope: string, secretId: () => string | null) {
   const c = context(scope)
-  return useInfiniteQuery({ queryKey: computed(() => ['agents', c.user, scope, 'accesses', filter()]), enabled: c.enabled, initialPageParam: null as string | null,
-    queryFn: async ({ pageParam, signal }) => dataOf(await c.auth.api.GET('/api/v1/agents/secrets/accesses', { params: { header: c.header, query: { limit: 50, ...filter(), ...(pageParam ? { cursor: pageParam } : {}) } }, signal })),
+  return useQuery({ queryKey: computed(() => ['agents', c.user, scope, 'secret', secretId()] as const), enabled: computed(() => c.enabled.value && !!secretId()), retry: false,
+    queryFn: async ({ queryKey, signal }) => secretMeta(dataOf(await c.auth.api.GET('/api/v1/agents/secrets/{secret_id}', { params: { header: c.header, path: { secret_id: queryKey[4]! } }, signal }))) })
+}
+
+export type AccessFilters = { secret_id?: string; instance_id?: string; result?: Schema['SecretAccessOut']['result']; limit?: number }
+export function useSecretAccesses(scope: string, filter: () => AccessFilters) {
+  const c = context(scope)
+  return useInfiniteQuery({ queryKey: computed(() => ['agents', c.user, scope, 'accesses', filter()] as const), enabled: c.enabled, initialPageParam: null as string | null,
+    queryFn: async ({ queryKey, pageParam, signal }) => dataOf(await c.auth.api.GET('/api/v1/agents/secrets/accesses', { params: { header: c.header, query: { limit: 50, ...queryKey[4], ...(pageParam ? { cursor: pageParam } : {}) } }, signal })),
     getNextPageParam: p => p.next_cursor ?? undefined })
 }
 

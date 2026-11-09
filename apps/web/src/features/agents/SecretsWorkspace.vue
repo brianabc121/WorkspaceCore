@@ -1,103 +1,154 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter, type LocationQuery } from 'vue-router'
+import { useQueryClient } from '@tanstack/vue-query'
+import { Info, Plus, RefreshCw, Search } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
-import type { Schema } from '../../services/api'
-import { formatTime } from '../time'
+import { dataOf, type Schema } from '../../services/api'
+import { useMediaQuery } from '../../composables/useMediaQuery'
+import ManagementPage from '../../components/management/ManagementPage.vue'
+import ManagementSection from '../../components/management/ManagementSection.vue'
+import ActionFeedback from '../../components/ActionFeedback.vue'
+import DrawerDetail from '../../components/DrawerDetail.vue'
 import ModalPanel from '../../components/ModalPanel.vue'
-import { SECRET_KIND, agentError, unique, useInstances, useSecretAccesses, useSecrets } from './queries'
+import { SECRET_KIND, unique, useSecrets, type SecretFilters } from './queries'
 import { useAgentAction } from './action'
+import { secretError } from './secrets'
+import SecretCatalogTable from './SecretCatalogTable.vue'
+import SecretDetailPanel from './SecretDetailPanel.vue'
+import SecretAccessLog from './SecretAccessLog.vue'
+import './secrets.css'
 
-// Values are write-only: the page never shows a stored value, only names, versions and who fetched them.
-const auth = useAuthStore(), scope = auth.workspaceId!
-const secrets = useSecrets(scope), instances = useInstances(scope)
-const filter = reactive<{ instance_id: string; result: '' | Schema['SecretAccessOut']['result'] }>({ instance_id: '', result: '' })
-const accesses = useSecretAccesses(scope, () => ({ ...(filter.instance_id ? { instance_id: filter.instance_id } : {}), ...(filter.result ? { result: filter.result } : {}) }))
-const { busy, error, notice, act, header } = useAgentAction(scope)
-const items = computed(() => unique(secrets.data.value?.pages)), instanceItems = computed(() => unique(instances.data.value?.pages))
-const accessItems = computed(() => unique(accesses.data.value?.pages))
-type Dialog = { mode: 'new' } | { mode: 'edit' | 'rotate'; secret: Schema['AgentSecretOut'] }
-const dialog = ref<Dialog | null>(null)
+// 密钥库（T-0196，效果图 07；规范第 10 节、契约第 4 节）：密钥列表与取用记录两个标签，选中的密钥在右侧详情（1440 以下放进右侧抽屉）。
+// 地址里只有 ?tab=accesses 与 ?secret=<id>：刷新、通知链接、后退都能回到同一处。名称 / 说明搜索与类型筛选在服务端、跨所有分页，
+// 标题里的数是服务端 total；换条件就是另一条查询，旧条件的页不会拼进来。只有元数据：值只写不读，新值只在输入框里。
+// 只有 owner 能进这个页面（路由规则），服务端同样只给 owner。
+type Tab = 'list' | 'accesses'
+const TABS: { key: Tab; name: string }[] = [{ key: 'list', name: '密钥列表' }, { key: 'accesses', name: '取用记录' }]
+const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id
+const route = useRoute(), router = useRouter(), cache = useQueryClient()
+const wide = typeof window.matchMedia === 'function' ? useMediaQuery('(min-width: 1440px)') : ref(false)
+
+const tab = computed<Tab>(() => (route.query.tab === 'accesses' ? 'accesses' : 'list'))
+const selected = computed(() => (typeof route.query.secret === 'string' && route.query.secret ? route.query.secret : null))
+function update(patch: Record<string, string | undefined>, push = false) {
+  const query: LocationQuery = { ...route.query }
+  for (const [k, v] of Object.entries(patch)) { if (v === undefined || v === '') delete query[k]; else query[k] = v }
+  void (push ? router.push({ query }) : router.replace({ query }))
+}
+
+// 搜索停顿 300 毫秒再查；空白不发 q（服务端要求 1–100 个字符）
+const search = ref(''), q = ref(''), kind = ref<'' | Schema['AgentSecretOut']['kind']>('')
+let timer: ReturnType<typeof setTimeout> | undefined
+watch(search, value => { clearTimeout(timer); timer = setTimeout(() => { q.value = value.trim().slice(0, 100) }, 300) })
+onBeforeUnmount(() => clearTimeout(timer))
+const filters = computed<SecretFilters>(() => ({ ...(q.value ? { q: q.value } : {}), ...(kind.value ? { kind: kind.value } : {}) }))
+const filtered = computed(() => !!(filters.value.q || filters.value.kind))
+const secrets = useSecrets(scope, () => filters.value)
+const items = computed(() => unique(secrets.data.value?.pages))
+const total = computed(() => secrets.data.value?.pages.at(-1)?.total)
+
+// 详情：宽屏右侧一栏，窄屏抽屉；关掉后焦点回到打开它的那一行
+let opener: HTMLElement | null = null
+function select(id: string, row: HTMLElement | null) { opener = row; if (id !== selected.value) update({ secret: id }, true) }
+async function close() {
+  const id = selected.value
+  update({ secret: undefined })
+  const back = opener
+  opener = null
+  await nextTick()
+  if (back?.isConnected) back.querySelector<HTMLElement>('button')?.focus()
+  else if (id) document.querySelector<HTMLElement>(`tr[data-secret="${CSS.escape(id)}"] button`)?.focus()
+}
+const { busy, error, notice, act, header } = useAgentAction(scope, secretError)
+function deleted(name: string) {
+  update({ secret: undefined })
+  error.value = ''
+  notice.value = `密钥「${name}」已删除`
+}
+// 详情里的“查看全部取用记录”：切到取用记录标签并按这个密钥筛选；窄屏收起抽屉，免得挡住列表
+const accessSecret = ref<{ id: string; name: string } | null>(null)
+function showAccesses(secret: { id: string; name: string }) {
+  accessSecret.value = secret
+  update({ tab: 'accesses', secret: wide.value ? selected.value ?? undefined : undefined })
+}
+
+const refreshing = computed(() => secrets.isFetching.value)
+function refresh() {
+  void cache.invalidateQueries({ predicate: query => query.queryKey[0] === 'agents' && query.queryKey[1] === user && query.queryKey[2] === scope && ['secrets', 'secret', 'accesses', 'instances'].includes(String(query.queryKey[3])) })
+}
+
+// 添加密钥：值只在这个对话框的输入框里，提交或关闭就清空
+const creating = ref(false)
 const form = reactive({ name: '', kind: 'model_api_key' as Schema['AgentSecretOut']['kind'], description: '', value: '' })
 const SECRET_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/
-const RESULT = { ok: '成功', not_found: '未授权或不存在', rate_limited: '过于频繁' } as const
-
-function open(next: Dialog) {
-  dialog.value = next
-  const s = next.mode === 'new' ? null : next.secret
-  Object.assign(form, { name: s?.name ?? '', kind: s?.kind ?? 'model_api_key', description: s?.description ?? '', value: '' })
-}
-async function submit() {
-  const d = dialog.value
-  if (!d) return
-  const ok = await act(() => {
-    if (d.mode === 'new') return auth.api.POST('/api/v1/agents/secrets', { params: { header }, body: { name: form.name.trim(), kind: form.kind, description: form.description.trim(), value: form.value } })
-    const path = { secret_id: d.secret.id }
-    if (d.mode === 'rotate') return auth.api.POST('/api/v1/agents/secrets/{secret_id}/rotate', { params: { header, path }, body: { value: form.value, version: d.secret.version } })
-    return auth.api.PATCH('/api/v1/agents/secrets/{secret_id}', { params: { header, path }, body: { name: form.name.trim(), description: form.description.trim(), version: d.secret.version } })
-  }, { new: '密钥已保存', edit: '密钥信息已保存', rotate: '密钥已轮换，实例下次取用时拿到新值' }[d.mode])
+const valid = computed(() => SECRET_NAME.test(form.name.trim()) && form.value.length > 0)
+function openCreate() { Object.assign(form, { name: '', kind: 'model_api_key', description: '', value: '' }); error.value = ''; notice.value = ''; creating.value = true }
+function closeCreate() { creating.value = false; form.value = '' }
+async function create() {
+  if (!valid.value || busy.value) return
+  const body = { name: form.name.trim(), kind: form.kind, description: form.description.trim(), value: form.value }
   form.value = ''
-  if (ok) dialog.value = null
+  let id = ''
+  const ok = await act(async () => { id = dataOf(await auth.api.POST('/api/v1/agents/secrets', { params: { header }, body })).id }, '密钥已保存')
+  if (!ok) return
+  creating.value = false
+  if (id) update({ tab: undefined, secret: id }, true)
 }
-function remove(secret: Schema['AgentSecretOut']) {
-  const used = secret.grants.length ? `它还授权给了 ${secret.grants.map(g => g.instance_name).join('、')}，删除后这些实例取不到它。` : ''
-  if (!window.confirm(`删除密钥「${secret.name}」？${used}`)) return
-  void act(() => auth.api.DELETE('/api/v1/agents/secrets/{secret_id}', { params: { header, path: { secret_id: secret.id }, query: { version: secret.version } } }), '密钥已删除')
-}
-const valid = computed(() => {
-  const d = dialog.value
-  if (!d) return false
-  if (d.mode !== 'rotate' && !SECRET_NAME.test(form.name.trim())) return false
-  return d.mode === 'edit' || form.value.length > 0
-})
+onBeforeUnmount(() => { form.value = '' })
 </script>
 
 <template>
-  <div class="section-heading"><p class="form-help">密钥只写不读：保存后页面上看不到明文，只有名称、版本与取用记录。授权在“OpenClaw 实例”页设置。</p><button type="button" class="primary-button" :disabled="busy" @click="open({ mode: 'new' })">添加密钥</button></div>
-  <p v-if="error && !dialog" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
-  <p v-if="secrets.isPending.value" role="status">正在加载密钥…</p>
-  <p v-else-if="secrets.error.value" role="alert">{{ agentError(secrets.error.value) }}</p>
-  <p v-else-if="!items.length" class="empty-state">还没有密钥。</p>
-  <div class="agent-list">
-    <article v-for="s in items" :key="s.id" class="panel agent-card" :aria-label="`密钥：${s.name}`">
-      <div class="section-heading">
-        <h2>{{ s.name }} <span class="badge">{{ SECRET_KIND[s.kind] }}</span> <span class="badge">第 {{ s.value_version }} 版</span></h2>
-        <div class="form-actions"><button type="button" class="secondary-button" :disabled="busy" @click="open({ mode: 'edit', secret: s })">编辑</button><button type="button" class="secondary-button" :disabled="busy" @click="open({ mode: 'rotate', secret: s })">轮换</button><button type="button" class="secondary-button im-danger" :disabled="busy" @click="remove(s)">删除</button></div>
+  <ManagementPage title="密钥库" description="管理智能体可取用的密钥、授权对象与取用记录。只有 owner 可以管理。">
+    <template #actions>
+      <button type="button" class="secondary-button" :disabled="refreshing" @click="refresh"><RefreshCw aria-hidden="true" />刷新</button>
+      <button type="button" class="primary-button" :disabled="busy" @click="openCreate"><Plus aria-hidden="true" />添加密钥</button>
+    </template>
+
+    <div class="asv-layout sk-layout" :class="{ 'has-side': !!selected && wide }">
+      <div class="asv-main">
+        <p class="sk-banner"><Info aria-hidden="true" />密钥保存后不可回显，支持轮换为新值。</p>
+        <ActionFeedback :error="creating ? '' : error" :notice="notice" />
+        <div class="sk-tabs" role="tablist" aria-label="密钥库">
+          <button v-for="t in TABS" :key="t.key" type="button" role="tab" :aria-selected="tab === t.key" @click="update({ tab: t.key === 'list' ? undefined : t.key })">{{ t.name }}</button>
+        </div>
+        <div role="tabpanel" :aria-label="TABS.find(t => t.key === tab)?.name">
+          <ManagementSection v-if="tab === 'list'" title="密钥列表" description="名称、版本与授权可查看，密钥原文不可读取。">
+            <template #title>密钥列表<template v-if="typeof total === 'number'"> · {{ total }}</template></template>
+            <div class="ws-toolbar">
+              <label class="ws-search"><Search aria-hidden="true" /><span class="sr-only">按名称或说明搜索</span><input v-model="search" type="search" placeholder="名称或说明" maxlength="100" /></label>
+              <select v-model="kind" aria-label="按类型筛选"><option value="">全部类型</option><option v-for="(label, value) in SECRET_KIND" :key="value" :value="value">{{ label }}</option></select>
+            </div>
+            <p v-if="secrets.isPending.value" role="status" class="ws-state-line">正在加载密钥…</p>
+            <div v-else-if="secrets.error.value && !items.length" class="ws-state-line"><p role="alert">{{ secretError(secrets.error.value) }}</p><button type="button" class="secondary-button" @click="secrets.refetch()">重试</button></div>
+            <p v-else-if="!items.length" class="ws-state-line">{{ filtered ? '没有符合条件的密钥。' : '还没有密钥。点右上角“添加密钥”保存第一个。' }}</p>
+            <SecretCatalogTable v-else :items="items" :selected="selected" @select="select" />
+            <footer v-if="items.length" class="asv-foot ag-foot">
+              <span>已显示 {{ items.length }} 个<template v-if="typeof total === 'number'">，共 {{ total }} 个</template><template v-if="filtered">（符合当前条件）</template><template v-if="secrets.error.value"> · 刷新失败，显示的是上次取回的数据</template></span>
+              <button v-if="secrets.hasNextPage.value" type="button" class="secondary-button" :disabled="secrets.isFetchingNextPage.value" @click="secrets.fetchNextPage()">加载更多密钥</button>
+            </footer>
+          </ManagementSection>
+          <SecretAccessLog v-else :secret="accessSecret" @clear-secret="accessSecret = null" />
+        </div>
       </div>
-      <p v-if="s.description" class="preserve-text">{{ s.description }}</p>
-      <p class="form-help">最近轮换：{{ formatTime(s.last_rotated_at) }}</p>
-      <p v-if="s.grants.length">授权给：<span v-for="g in s.grants" :key="g.instance_id + g.ref_id" class="badge">{{ g.instance_name }} · {{ g.ref_id }}</span></p>
-      <p v-else class="form-help">还没有授权给任何实例。</p>
-    </article>
-  </div>
-  <button v-if="secrets.hasNextPage.value" type="button" class="secondary-button" @click="secrets.fetchNextPage()">更多密钥</button>
-  <section class="panel agent-switch" aria-label="取用记录">
-    <h2>取用记录</h2>
-    <div class="im-group-add">
-      <label class="form-field"><span>实例</span><select v-model="filter.instance_id"><option value="">全部实例</option><option v-for="i in instanceItems" :key="i.id" :value="i.id">{{ i.name }}</option></select></label>
-      <label class="form-field"><span>结果</span><select v-model="filter.result"><option value="">全部结果</option><option v-for="(label, value) in RESULT" :key="value" :value="value">{{ label }}</option></select></label>
+      <div v-if="selected && wide" class="ws-panel asv-side sk-side">
+        <SecretDetailPanel :key="selected" :secret-id="selected" aside @close="close" @deleted="deleted" @accesses="showAccesses" />
+      </div>
     </div>
-    <p v-if="accesses.isPending.value" role="status">正在加载记录…</p>
-    <p v-else-if="accesses.error.value" role="alert">{{ agentError(accesses.error.value) }}</p>
-    <p v-else-if="!accessItems.length" class="empty-state">没有取用记录。</p>
-    <div v-else class="table-scroll">
-      <table class="agent-table">
-        <caption class="form-help">实例取密钥的记录（明文不记录）</caption>
-        <thead><tr><th scope="col">时间</th><th scope="col">实例</th><th scope="col">ref_id</th><th scope="col">结果</th><th scope="col">版本</th><th scope="col">来源</th></tr></thead>
-        <tbody><tr v-for="a in accessItems" :key="a.id"><td>{{ formatTime(a.at) }}</td><td>{{ a.instance_name }}</td><td><code>{{ a.ref_id }}</code></td><td>{{ RESULT[a.result] }}</td><td>{{ a.value_version ?? '—' }}</td><td>{{ a.source_ip ?? '—' }}</td></tr></tbody>
-      </table>
-    </div>
-    <button v-if="accesses.hasNextPage.value" type="button" class="secondary-button" @click="accesses.fetchNextPage()">更多记录</button>
-  </section>
-  <ModalPanel v-if="dialog" :title="dialog.mode === 'new' ? '添加密钥' : dialog.mode === 'rotate' ? `轮换：${dialog.secret.name}` : `编辑：${dialog.secret.name}`" :busy="busy" @close="dialog = null">
-    <form class="im-group-form" autocomplete="off" @submit.prevent="submit">
-      <template v-if="dialog.mode !== 'rotate'">
+    <DrawerDetail v-if="selected && !wide" title="密钥详情" @close="close">
+      <SecretDetailPanel :key="selected" :secret-id="selected" @close="close" @deleted="deleted" @accesses="showAccesses" />
+    </DrawerDetail>
+
+    <ModalPanel v-if="creating" title="添加密钥" :busy="busy" @close="closeCreate">
+      <form class="im-group-form" autocomplete="off" @submit.prevent="create">
         <label class="form-field"><span>名称 *（字母、数字、空格、点、下划线、连字符）</span><input v-model="form.name" required maxlength="64" autofocus /></label>
-        <label v-if="dialog.mode === 'new'" class="form-field"><span>类型</span><select v-model="form.kind"><option v-for="(label, value) in SECRET_KIND" :key="value" :value="value">{{ label }}</option></select></label>
+        <label class="form-field"><span>类型（创建后不能改）</span><select v-model="form.kind"><option v-for="(label, value) in SECRET_KIND" :key="value" :value="value">{{ label }}</option></select></label>
         <label class="form-field"><span>说明</span><textarea v-model="form.description" rows="2" maxlength="500" /></label>
-      </template>
-      <label v-if="dialog.mode !== 'edit'" class="form-field"><span>{{ dialog.mode === 'rotate' ? '新值 *' : '值 *' }}</span><input v-model="form.value" type="password" required autocomplete="new-password" spellcheck="false" /></label>
-      <p v-if="error" role="alert">{{ error }}</p>
-      <div class="form-actions"><button type="submit" class="primary-button" :disabled="busy || !valid">保存</button><button type="button" class="secondary-button" :disabled="busy" @click="dialog = null">取消</button></div>
-    </form>
-  </ModalPanel>
+        <label class="form-field"><span>值 *</span><input v-model="form.value" type="password" required autocomplete="new-password" spellcheck="false" /></label>
+        <p class="form-help">保存后页面上不再显示这个值，只能轮换为新值。授权在智能体详情里设置。</p>
+        <p v-if="error" role="alert">{{ error }}</p>
+        <div class="form-actions"><button type="submit" class="primary-button" :disabled="busy || !valid">保存</button><button type="button" class="secondary-button" :disabled="busy" @click="closeCreate">取消</button></div>
+      </form>
+    </ModalPanel>
+  </ManagementPage>
 </template>
