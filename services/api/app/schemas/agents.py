@@ -495,6 +495,10 @@ SshJobStepKey = Literal[
     "remove_files",
     # 运行服务器的部署（T-0136）：以 root 运行接入包里的 install.sh
     "install",
+    # OpenClaw 服务器的初始化（T-0179）：准备平台受控的部署根目录、最终检查
+    # （Docker、目录可写、能连到工作台的接入地址）
+    "workspace",
+    "verify",
 ]
 
 
@@ -507,8 +511,9 @@ class AgentSshJobStep(BaseModel):
 class AgentSshJobOut(BaseModel):
     id: UUID
     kind: Literal["prepare", "install", "uninstall"] = Field(
-        description="prepare 准备服务器（装专用公钥、装 Docker）；install 部署一个实例；"
-        "uninstall 卸载一个实例"
+        description="prepare 初始化服务器（OpenClaw 服务器：connect / inspect / docker / "
+        "reconnect / workspace / verify，全程用保存的密码，不装公钥）；install 部署一个实例；"
+        "uninstall 卸载一个实例。运行服务器的部署仍有 authorize_key 步骤"
     )
     status: Literal["running", "succeeded", "failed", "interrupted"]
     steps: list[AgentSshJobStep]

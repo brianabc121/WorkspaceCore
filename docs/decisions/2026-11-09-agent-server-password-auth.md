@@ -53,8 +53,9 @@
 | `PUT /agents/servers/{id}/credentials` | `{version, login_password}`：替换密码、revision + 1、连接状态回到 unknown；保留 `prepared_at` 与实例；同机有任务 / 运维动作 `409 AGENT_SSH_JOB_RUNNING`（原密码不变） | T-0178 已实现 |
 | `POST /agents/servers/{id}/test-connection` | `{version}`：固定指纹 + 密码登录，只读检查环境（`inspect.sh`），需要时用同一个密码验证 sudo；登录结果写进 `ssh.connection_status`，环境问题在 `warning`；不装 Docker、不建容器、不写 authorized_keys；与探测共用每分钟 10 次限流 | T-0178 已实现 |
 | `PUT /agents/servers/{id}/address` | 加必填 `login_password`；有部署记录 `409 AGENT_SERVER_HAS_DEPLOYMENTS`；重新探测、取消确认、清空初始化与连接状态 | T-0178 已实现 |
-| `POST /agents/servers/{id}/prepare` | `{version}`（不再收密码）；没保存密码 `409 AGENT_SERVER_CREDENTIAL_REQUIRED`，解不开 `409 AGENT_SERVER_CREDENTIAL_UNREADABLE` | T-0178 改输入；任务改全程密码在 T-0179 |
-| `POST /agents/servers/{id}/legacy-key-cleanup` | `{version}`：密码登录、只删本工作台那一行公钥 | 契约已定，501，T-0179 |
+| `POST /agents/servers/{id}/prepare` | `{version}`（不再收密码）；没保存密码 `409 AGENT_SERVER_CREDENTIAL_REQUIRED`，解不开 `409 AGENT_SERVER_CREDENTIAL_UNREADABLE`；任务全程用保存的密码（第 8 节） | T-0178 改输入；T-0179 全程密码 |
+| `POST /agents/servers/{id}/legacy-key-cleanup` | `{version}`：密码登录、只删本记录那一把公钥；成功 `done`，服务器上失败 `200` + `manual_required` + `warning`（第 8.3 节） | T-0179 已实现 |
+| `POST /agents/servers/{id}/revoke` | 旧专用密钥的吊销入口：一律 `410 AGENT_SSH_KEY_AUTH_RETIRED` | T-0179 退役 |
 | `POST /agents/deployments` | 一次点击新建并部署，`request_id` = `Idempotency-Key` | 契约已定，501（只先校验两者一致），T-0180 |
 | `GET /agents/deployments/requests/{request_id}` | 部署请求收据 | 契约已定，501，T-0180 |
 | `GET /agents/overview` | 智能体总览（summary / items / next_cursor / generated_at） | 契约已定，501，T-0180 |
@@ -123,15 +124,73 @@
 | sudo 密码进入命令行或日志 | 只经标准输入；任务日志对密码做替换（`JobRecorder`）；测试连接不记录命令输出 |
 | SSH 密码与工作台账号密码混用 | 两个字段、两个用途：运维二次认证仍校验工作台账号密码；服务器密码不进接入包、不注入容器、不授权给智能体 |
 
-## 8. 过渡期（T-0178 合并到同一交付分支、T-0179 之前）仍走旧路径的地方
+## 8. 最终切换边界（T-0179）
 
-- `agent_ssh_install.Installer.run`：初始化 / 部署任务仍是“密码阶段 + `authorize_key` 装专用公钥 + 专用密钥重连”。T-0178 只把密码
-  来源从请求体换成保存的密文（接口层 `_saved_password` 解密后交给协程）；部署时旧专用私钥还在就仍用它登录。
-- `Uninstaller.uninstall`、`AgentServerService.undeploy`、`revoke` / `_remove_remote_key`、`agent_ops.py`（`unavailable_reason`、
-  `_connect` 用 `client_key_ref`）仍用旧专用密钥。
-- 这些在 T-0179 改为 `agent_server_ssh.connect_agent_server`（全程密码、按 revision 解密），旧 `revoke` 返回
-  `410 AGENT_SSH_KEY_AUTH_RETIRED`，新增 `legacy-key-cleanup`。新 API 与新页面整体配套后才合并（方案 README），
-  不单独合并 T-0178。
+### 8.1 OpenClaw 服务器上每个 SSH 动作怎么登录
+
+全部经 `app/domain/agent_server_ssh.connect_agent_server`（第 5 节的 `connect_password_only`）：只用保存的密码、
+固定主机公钥；不生成、不安装、不读取 SSH 客户端密钥。旧方案留下的专用私钥（`client_key_ref`）连后台任务都不进
+（`agent_ssh_install._load` 不加载它）。
+
+| 动作 | 入口 | 登录 | 凭证版本 |
+|---|---|---|---|
+| 测试连接 | `AgentServerService.test_connection` | 请求里同步登录 | 请求开始时读到的 `credential_revision` |
+| 初始化 | `AgentServerInstaller.prepare`（`kind=prepare`） | 后台任务登录 connect；装过 Docker 后 reconnect 再登录一次 | 接纳任务时记下、传给 `SshJobRunner.start(expected_revision=…)` |
+| 部署 / 重新部署 / 失败后继续 | `AgentServerInstaller.deploy`（`kind=install`） | 后台任务登录一次 | 同上 |
+| 卸载 | `AgentServerUninstaller.uninstall`（`kind=uninstall`） | 后台任务登录一次 | 同上 |
+| 实例级运维（status / logs / report / restart / up） | `agent_ops.run_action` | 后台协程登录一次 | 接纳动作时记下、传给 `run_action(expected_revision=…)` |
+| 服务器级运维（containers / prune） | 同上 | 同上 | 同上 |
+| 旧公钥退役 | `AgentServerService.cleanup_legacy_key` | 请求里同步登录（持有服务器行锁，总时限 60 秒） | 请求开始时读到的版本 |
+
+- 每次登录前重新读这台服务器的 SSH 记录：地址、端口、账号、主机公钥变了或取消了确认就停止（`target_changed` /
+  `host_key_unconfirmed`）；`credential_revision` 与接纳时不同就停止（`credential_changed`），不拿新密码完成旧意图；
+  没保存 / 解不开分别是 `credential_required` / `credential_unreadable`。错误、日志、审计里没有密码或密文
+  （任务日志对解出的密码做替换）。
+- sudo 用同一个密码，只经标准输入（`sudo -S -p '' -k`）；需要另外的 sudo 密码或交互式验证（MFA）时 `sudo_denied`
+  明确失败，不算初始化完成。
+- 运维的二次认证（`restart` / `up` / `prune` 的 `body.password`）仍校验**工作台账号**密码；把服务器密码填进去会被拒。
+- `AgentOpsState.reason`：`not_deployed` / `host_key_unconfirmed` / `credential_missing` / `credential_unreadable`
+  （只看本地记录，不解密、不连接）；`key_missing` 不再返回（Literal 里保留、已弃用）。
+
+### 8.2 初始化与部署的步骤
+
+- 初始化（`PREPARE_STEPS`）：connect → inspect → docker（已经能用就跳过、沿用现有版本，不升级；缺了才按锁定脚本
+  `install-docker.sh` 安装或加入 docker 组）→ reconnect（只有装过 Docker 才重新用密码登录确认 docker 组生效）→
+  workspace（`mkdir -p ~/myworkspace-openclaw`，平台受控的部署根目录）→ verify（`verify.sh`：Docker / Compose
+  可用、部署根目录可写、能连到 `AGENT_PUBLIC_URL` 的主机端口——只建一次 TCP 连接；没有 bash / timeout / nc 时
+  只记“没能检查”，连不上 `ingress_unreachable`）。成功后 `prepared_at` 更新为这次的时间。不建实例、不发接入包、
+  不写 authorized_keys、不全局 prune；可以重复执行。
+- 部署（`STEPS`）：connect → inspect（环境预检：Docker 不能直接用就 `docker_unavailable`，提示重新初始化，
+  不自己装）→ upload → pull → plugin → start → schedule → online → reflection。接口先要求服务器
+  `deployable`（第 4 节同一套规则，包括初始化就绪），否则 `409`（`AGENT_SERVER_NOT_INITIALIZED` 等）。
+- 部署成功写 `runtime_installed=true`；卸载保留目录写 `installed_at=null`、`runtime_installed=false`；删除目录时删掉部署
+  记录；失败不改部署记录（保留之前的真实证据）。
+- 运行服务器（Runner）的 `runner_ssh.RunnerInstaller` 继续继承公共的 `Installer`（命令执行、只读检查、
+  `_authorize` 装专用公钥、按 `runner_ssh:<ID>` 解密专用私钥），流程不变；OpenClaw 的 `AgentServerInstaller`
+  覆盖并禁用 `_existing_key` / `_save_key` / `_authorize` / 带密钥的 `_connect`。
+
+### 8.3 旧专用公钥的退役
+
+- `legacy-key-cleanup`：要求保存了能解开的密码、主机公钥已确认、同机没有任务；用密码登录，执行
+  `revoke_key_command`（按“类型 公钥数据”匹配本记录 `client_public_key` 那一把，行首选项、空白、注释不同也算；
+  别的用户、运行服务器的公钥保留；删完再查一遍，还在就算失败）。
+- 成功：清空 `client_key_ref` / `client_public_key`，`legacy_key_cleanup_state=done`，审计
+  `agents.server.legacy_key_cleaned`（只记指纹）。
+- 服务器上失败（连不上、登录被拒、主机公钥变化、写不进）：保留旧引用，记为 `manual_required`，响应 `200` 的
+  `warning` 给出原因与要手动删除的那一行，审计 `agents.server.legacy_key_cleanup_failed`；可以重试（`manual_required`
+  也接受）。本地问题（密文解不开、密码刚被替换）返回 `409`，什么都不改。绝不拿旧私钥回退。
+- 删除服务器：还有部署记录 `409 AGENT_SERVER_HAS_DEPLOYMENTS`；旧公钥还是 `pending` 时
+  `409 AGENT_SERVER_LEGACY_KEY_PENDING`（先补密码、做一次退役；服务器已经连不上时退役记为 `manual_required`，
+  之后可以删除，那一行由 owner 手动删）。不删容器、不改 sshd。
+- 更换地址：不再因为旧公钥拒绝；那一行留在原来的机器上、工作台再也连不上它，清掉旧引用并记为
+  `manual_required`，`warning` 给出要在原机器上手动删除的那一行。
+- 旧的 `POST /agents/servers/{id}/revoke`：`410 AGENT_SSH_KEY_AUTH_RETIRED`，不再用旧私钥登录。
+
+### 8.4 不变
+
+主机身份校验、mTLS 客户端证书与实例令牌、工作台密钥库与 CredentialBox、运行服务器的 SSH 流程、一机多实例的
+目录 / Compose 项目 / 网络隔离。已有实例不停、不重装；旧服务器补录密码后即可初始化、部署、卸载、运维，
+旧公钥按 8.3 显式退役。
 
 ## 9. 与约定的偏差
 
@@ -139,3 +198,6 @@
 - `deploy_block_reason` 用固定枚举（约定写的是 `str | null`），便于前端强类型。
 - 服务器写接口的 `Idempotency-Key` 是可选的（现有服务器写接口以 `version` 乐观并发为主）；`POST /agents/deployments` 必须带。
 - 测试连接不改服务器的 `version`（检测结果是观测，不是配置）；替换密码、更换地址仍加 1。
+- T-0179：初始化步骤是 connect / inspect / docker / reconnect / workspace / verify（`SshJobStepKey` 增加 `workspace`、`verify`，约定写的 “connect／inspect／docker／reconnect 及新增 workspace／verify”）；装过 Docker 才重新登录（已有可用的 Docker 时 reconnect 记为跳过）。部署任务不再包含 authorize_key / docker / reconnect，只做环境预检。
+- T-0179：旧公钥退役在服务器上失败一律记为 `manual_required`（不区分“稍后重试”的 pending），这样服务器已经连不上时仍能删除；`pending` 只表示还没做过退役。新增错误码 `AGENT_SERVER_NO_LEGACY_KEY`、`AGENT_SERVER_LEGACY_KEY_PENDING`、`AGENT_SERVER_CONNECTION_FAILED`（最近一次检测主机公钥变化 / 密码被拒时拒绝部署）；`410` 加进统一错误响应说明。
+- T-0179：旧的部署接口（`POST /agents/instances/{id}/deploy`）也要求服务器 `deployable`（含初始化就绪），与一次点击新建并部署共用 `AgentServerService.accept_deployment`。

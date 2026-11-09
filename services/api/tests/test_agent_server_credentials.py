@@ -824,11 +824,6 @@ async def test_contract_stubs_are_declared_but_not_implemented(owner: Owner) -> 
         ),
         ("GET", f"/api/v1/agents/deployments/requests/{request_id}", {}),
         ("GET", "/api/v1/agents/overview", {"params": {"q": "甲", "status": "online"}}),
-        (
-            "POST",
-            f"/api/v1/agents/servers/{uuid.uuid4()}/legacy-key-cleanup",
-            {"json": {"version": 1}},
-        ),
     ):
         response = await _call(owner, method, path, **kwargs)
         assert response.status_code == 501, (path, response.text)

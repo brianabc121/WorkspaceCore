@@ -1,9 +1,10 @@
-"""SSH 自动部署 B2（T-0089）：安装任务。
+"""SSH 自动部署 B2（T-0089）：初始化、部署、卸载任务（T-0179 起全程用保存的登录密码）。
 
 目标服务器是进程内的 asyncssh 服务器（127.0.0.1 随机端口，密码与公钥登录、SFTP）。
 它把收到的命令交给本机的 /bin/sh 在临时目录里真正执行，PATH 里是假的 docker、sudo、bash、
-chown、crontab（记录参数、模拟结果），所以 authorized_keys、crontab、上传的文件都是真实写出来的；
-只有只读检查（`sh -s` 读入 inspect.sh）由测试直接给出结果，方便模拟不同的服务器。
+chown、crontab、timeout（记录参数、模拟结果），所以 authorized_keys、crontab、上传的文件都是
+真实写出来的；只有只读检查（`sh -s` 读入 inspect.sh）由测试直接给出结果，方便模拟不同的服务器。
+初始化最后一步的检查（verify.sh）真的在 /bin/sh 里运行；连工作台接入地址用的是假的 timeout。
 """
 
 import asyncio
@@ -102,6 +103,12 @@ exec /bin/bash "$@"
 _CHOWN = r"""#!/bin/sh
 echo "chown $*" >> "$FAKE_LOG"
 """
+# 初始化最后一步检查能否连到工作台的接入地址（verify.sh 用 timeout + bash 建一次 TCP 连接）
+_TIMEOUT = r"""#!/bin/sh
+echo "timeout $*" >> "$FAKE_LOG"
+if [ -f "$STATE/ingress_fail" ]; then exit 1; fi
+exit 0
+"""
 _CRONTAB = r"""#!/bin/sh
 case "$1" in
   -l)
@@ -128,6 +135,7 @@ class FakeHost:
             "bash": _BASH,
             "chown": _CHOWN,
             "crontab": _CRONTAB,
+            "timeout": _TIMEOUT,
         }.items():
             (self.bin / name).write_text(body)
             (self.bin / name).chmod(0o755)
@@ -356,8 +364,15 @@ class Owner:
         return server
 
     async def prepare(
-        self, port: int, *, confirm: bool = True, password: str = PASSWORD
+        self,
+        port: int,
+        *,
+        confirm: bool = True,
+        password: str = PASSWORD,
+        initialize: bool = True,
     ) -> tuple[str, int]:
+        """新建一个实例、添加（或复用）这台服务器并确认指纹；initialize 时再初始化服务器
+        （T-0179：部署前服务器要已初始化）。返回 (实例 ID, 服务器的版本号)。"""
         instance_id = await self.instance()
         server = await self.add_server(port, password=password)
         self.servers[instance_id] = server["id"]
@@ -373,7 +388,28 @@ class Owner:
             )
             assert response.status_code == 200, response.text
             current = response.json()["server"]
+        if confirm and initialize and current["initialization_status"] != "ready":
+            job = await self.initialize(server["id"])
+            assert job["status"] == "succeeded", job
+            current = (await self._get(f"/api/v1/agents/servers/{server['id']}"))["server"]
         return instance_id, int(current["version"])
+
+    async def initialize(self, server_id: str) -> dict[str, Any]:
+        """初始化服务器（POST /prepare）并等它结束，返回任务。"""
+        current = (await self._get(f"/api/v1/agents/servers/{server_id}"))["server"]
+        response = await self.client.post(
+            f"/api/v1/agents/servers/{server_id}/prepare",
+            json={"version": current["version"]},
+            headers=self.headers(),
+        )
+        assert response.status_code == 202, response.text
+        for _ in range(600):
+            detail = await self._get(f"/api/v1/agents/servers/{server_id}")
+            job: dict[str, Any] = detail["job"]
+            if job["kind"] == "prepare" and job["status"] != "running":
+                return job
+            await asyncio.sleep(0.05)
+        raise AssertionError("初始化 30 秒内没有结束")
 
     async def _instance_version_for(self, instance_id: str, version: int) -> int:
         """测试里传的是服务器的版本号：对得上就用实例当前的版本号，对不上就故意给错的。"""
@@ -493,44 +529,59 @@ async def _stored_anywhere(owner: Owner, value: str) -> int:
     return count
 
 
-# ---------------------------------------------------------------- 完整安装
+# ---------------------------------------------------------------- 初始化 + 部署（T-0179：全程密码）
 
 
-async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: Path) -> None:
+async def test_initialize_then_deploy_with_the_saved_password(owner: Owner, tmp_path: Path) -> None:
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
-        instance_id, version = await owner.prepare(port)
+        instance_id, version = await owner.prepare(port, initialize=False)
+        prepare = await owner.initialize(owner.servers[instance_id])
+        assert prepare["status"] == "succeeded", prepare
+        assert [s["key"] for s in prepare["steps"]] == list(prov.PREPARE_STEPS)
+        assert {s["key"]: s["status"] for s in prepare["steps"]} == {
+            key: "done" for key in prov.PREPARE_STEPS
+        }
+        # 初始化不建实例目录、不发接入包、不装公钥
+        root = host.home / prov.INSTALL_ROOT_NAME
+        assert root.is_dir() and list(root.iterdir()) == []
+        assert host.authorized() == []
+        verify = next(s for s in prepare["steps"] if s["key"] == "verify")
+        assert "agent.example.com:9443" in (verify["detail"] or "")
+        calls = host.calls()
+        # 先检查 sudo（密码从标准输入），再用 root 运行 Docker 安装脚本，把登录账号加入 docker 组
+        assert "sudo true" in calls
+        assert "install-docker user=deploy" in calls
+        assert (host.state / "install-docker.sh").read_text() == prov.script("install-docker.sh")
+        assert not [p for p in host.home.iterdir() if p.name.startswith(prov.STAGING_DIR_NAME)], (
+            "安装脚本用完要删除"
+        )
+        assert any(
+            c.startswith("timeout 10 bash -c") and "agent.example.com 9443" in c for c in calls
+        )
+        # 装过 Docker：重新用密码登录一次（docker 组生效）
+        assert host.logins == ["password", "password"]
         state = await _install_ok(owner, host, instance_id, version)
 
     assert _steps(state) == {key: "done" for key in prov.STEPS}
     target = state["target"]
-    assert target["client_key_installed"] is True
-    assert target["client_key_fingerprint"].startswith("SHA256:")
+    assert target["auth_method"] == "password" and target["client_key_installed"] is False
+    assert target["client_key_fingerprint"] is None
     assert target["install_dir"] == str(host.directory)
     assert target["installed_at"] is not None
+    deployment = (await owner._get(f"/api/v1/agents/instances/{instance_id}/deployment"))[
+        "deployment"
+    ]
+    assert deployment["runtime_installed"] is True
 
-    # 密码只用于第一次登录；之后（重新登录）都用专用密钥
-    assert host.logins[0] == "password"
-    assert "publickey" in host.logins
-    assert host.logins.index("publickey") > 0
-    assert "password" not in host.logins[1:]
-    # authorized_keys 里只有工作台的专用公钥一行，与保存的指纹一致
-    keys = host.authorized()
-    assert len(keys) == 1
-    assert (
-        asyncssh.import_public_key(keys[0]).get_fingerprint("sha256")
-        == (target["client_key_fingerprint"])
-    )
-    assert stat.S_IMODE((host.home / ".ssh" / "authorized_keys").stat().st_mode) == 0o600
+    # 全程用密码登录，从来没有尝试公钥；服务器上没有工作台的公钥
+    assert set(host.logins) == {"password"} and len(host.logins) == 3
+    assert host.authorized() == []
+    assert not (host.home / ".ssh").exists()
 
     calls = host.calls()
-    # 先检查 sudo（密码从标准输入），再用 root 运行 Docker 安装脚本，把登录账号加入 docker 组
-    assert "sudo true" in calls
-    assert "install-docker user=deploy" in calls
-    assert (host.state / "install-docker.sh").read_text() == prov.script("install-docker.sh")
-    assert not [p for p in host.home.iterdir() if p.name.startswith(prov.STAGING_DIR_NAME)], (
-        "安装脚本用完要删除"
-    )
+    # 部署不再装 Docker
+    assert calls.count("install-docker user=deploy") == 1
     # 每个实例一个目录：~/myworkspace-openclaw/<实例 ID 去掉连字符的前 12 位>
     assert re.fullmatch(r"[0-9a-f]{12}", host.directory.name)
     assert host.directory.parent == host.home / "myworkspace-openclaw"
@@ -580,6 +631,10 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
     compose = (host.directory / "compose.yaml").read_text()
     assert "tunnel:" in compose and f"name: myworkspace-openclaw-{host.directory.name}" in compose
     assert "network_mode: host" not in compose
+    # 服务器的登录密码不进接入包
+    for path in host.directory.rglob("*"):
+        if path.is_file():
+            assert PASSWORD.encode() not in path.read_bytes(), path
 
     # crontab：六行都带标记（每 10 分钟取密钥、每分钟上报用量与服务器状态、
     # 每分钟领取唤醒（T-0121）与终止令（T-0126）、每周一重启）
@@ -606,16 +661,18 @@ async def test_install_with_password_then_dedicated_key(owner: Owner, tmp_path: 
         " WHERE action LIKE 'agents.%'",
     )
     for action in (
+        "agents.ssh.prepare_started",
+        "agents.ssh.prepare_succeeded",
         "agents.ssh.install_started",
-        "agents.ssh.key_authorized",
         "agents.bundle.issued",
         "agents.ssh.install_succeeded",
     ):
         assert action in actions
+    assert "key_authorized" not in actions
     ref = await run_sql(
         owner.database_url, "SELECT client_key_ref FROM workspace.agent_ssh_targets"
     )
-    assert ref.startswith("enc:v1:")
+    assert ref is None
 
 
 async def test_redeploy_patches_a_plugin_installed_before_t0120(
@@ -632,26 +689,21 @@ async def test_redeploy_patches_a_plugin_installed_before_t0120(
     assert (host.state / "plugin_patched").exists()
 
 
-async def test_reinstall_without_password_reuses_key(owner: Owner, tmp_path: Path) -> None:
+async def test_redeploy_reuses_the_instance_directory(owner: Owner, tmp_path: Path) -> None:
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
-        first = await _install_ok(owner, host, instance_id, version)
-        fingerprint = first["target"]["client_key_fingerprint"]
+        await _install_ok(owner, host, instance_id, version)
         (host.state / "up").unlink()
         logins = len(host.logins)
-        second = await _install_ok(
-            owner, host, instance_id, first["target"]["version"], password=None
-        )
+        # 请求里的 password 已弃用、忽略：仍用保存的密码
+        second = await _install_ok(owner, host, instance_id, version, password=None)
 
     steps = _steps(second)
-    assert steps["authorize_key"] == "skipped"
-    assert steps["docker"] == "skipped"
-    # 已经装了锁定版本的插件：不再重装（OpenClaw 运行过后带 --force 重装会被拒绝）
+    # 已经安装了锁定版本的插件：不再重装（OpenClaw 运行过后带 --force 重装会被拒绝）
     assert steps["plugin"] == "skipped"
-    assert second["target"]["client_key_fingerprint"] == fingerprint
-    assert "password" not in host.logins[logins:]
-    assert len(host.authorized()) == 1
+    assert host.logins[logins:] == ["password"]
+    assert host.authorized() == []
     # 重装前先把 state/、bin/、tls/ 收回给登录账号（1001），装完再交给 1000
     calls = host.calls()
     runs = [c for c in calls if c.startswith("docker run")]
@@ -713,60 +765,103 @@ async def test_docker_already_usable_skips_install(owner: Owner, tmp_path: Path)
     host = FakeHost(tmp_path, uid="1000", gid="1000", crontab="no")
     (host.state / "docker_ok").touch()
     async with ssh_host(host) as (port, _):
-        instance_id, version = await owner.prepare(port)
+        instance_id, version = await owner.prepare(port, initialize=False)
+        prepare = await owner.initialize(owner.servers[instance_id])
         state = await _install_ok(owner, host, instance_id, version)
+    init_steps = {s["key"]: s["status"] for s in prepare["steps"]}
+    # 已有可用的 Docker：沿用、不升级，也不用重新登录
+    assert init_steps["docker"] == "skipped" and init_steps["reconnect"] == "skipped"
+    assert init_steps["workspace"] == "done" and init_steps["verify"] == "done"
     steps = _steps(state)
-    assert steps["docker"] == "skipped"
     assert steps["schedule"] == "skipped"
     calls = host.calls()
     assert not any(c.startswith(("sudo", "install-docker", "chown")) for c in calls)
+    assert not any("prune" in c for c in calls)
     # uid 1000：不用改属主
     assert not any(c.startswith("docker run") for c in calls)
+    # 初始化一次登录、部署一次登录
+    assert host.logins == ["password", "password"]
 
 
 # ---------------------------------------------------------------- 失败
 
 
 async def test_wrong_password_fails_without_key(owner: Owner, tmp_path: Path) -> None:
-    """保存的登录密码不对（T-0178 起请求里的 password 已弃用、被忽略）：登录失败，不装公钥。"""
+    """保存的登录密码不对：初始化在 connect 一步失败，不装公钥、不回退到别的凭证。"""
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
-        instance_id, version = await owner.prepare(port, password="wrong password 1")  # noqa: S106
-        response = await owner.install(instance_id, version, password=PASSWORD)
-        assert response.status_code == 202
-        state = await owner.finished(instance_id)
-    job = state["job"]
+        instance_id, _ = await owner.prepare(
+            port,
+            password="wrong password 1",  # noqa: S106
+            initialize=False,
+        )
+        job = await owner.initialize(owner.servers[instance_id])
+        server = (await owner._get(f"/api/v1/agents/servers/{owner.servers[instance_id]}"))[
+            "server"
+        ]
     assert job["status"] == "failed"
     assert job["error_code"] == "auth_failed"
-    assert _steps(state)["connect"] == "failed"
-    assert state["target"]["client_key_installed"] is False
+    assert {s["key"]: s["status"] for s in job["steps"]}["connect"] == "failed"
+    assert server["initialization_status"] == "failed" and server["deployable"] is False
+    assert server["ssh"]["client_key_installed"] is False
     assert host.authorized() == []
+    assert set(host.logins) == {"password-denied"}
     assert await _stored_anywhere(owner, "wrong password 1") == 0
 
 
 async def test_sudo_denied(owner: Owner, tmp_path: Path) -> None:
+    """需要另外的 sudo 密码（或交互式验证）：在 docker 一步明确失败，不算初始化完成。"""
     host = FakeHost(tmp_path)
     (host.state / "sudo_password").write_text("another password")
     async with ssh_host(host) as (port, _):
-        instance_id, version = await owner.prepare(port)
-        response = await owner.install(instance_id, version)
-        assert response.status_code == 202
-        state = await owner.finished(instance_id)
-    assert state["job"]["error_code"] == "sudo_denied"
-    assert _steps(state)["docker"] == "failed"
-    # 专用公钥在装 Docker 之前就装好了：修好 sudo 之后可以重新部署
-    assert state["target"]["client_key_installed"] is True
+        instance_id, _ = await owner.prepare(port, initialize=False)
+        job = await owner.initialize(owner.servers[instance_id])
+        server = (await owner._get(f"/api/v1/agents/servers/{owner.servers[instance_id]}"))[
+            "server"
+        ]
+    assert job["error_code"] == "sudo_denied"
+    assert "不支持" in job["error_message"]
+    steps = {s["key"]: s["status"] for s in job["steps"]}
+    assert steps["docker"] == "failed" and steps["workspace"] == "pending"
+    assert server["ssh"]["prepared_at"] is None
+    assert server["initialization_status"] == "failed"
+    assert host.authorized() == []
 
 
 async def test_unsupported_os_without_docker(owner: Owner, tmp_path: Path) -> None:
     host = FakeHost(tmp_path, os_id="centos", os_version="9")
     async with ssh_host(host) as (port, _):
-        instance_id, version = await owner.prepare(port)
-        await owner.install(instance_id, version)
-        state = await owner.finished(instance_id)
-    assert state["job"]["error_code"] == "unsupported_os"
-    assert "手动安装 Docker" in state["job"]["error_message"]
+        instance_id, _ = await owner.prepare(port, initialize=False)
+        job = await owner.initialize(owner.servers[instance_id])
+    assert job["error_code"] == "unsupported_os"
+    assert "手动安装 Docker" in job["error_message"]
     assert not any(c.startswith("install-docker") for c in host.calls())
+
+
+async def test_unreachable_ingress_fails_the_initialization(owner: Owner, tmp_path: Path) -> None:
+    host = FakeHost(tmp_path)
+    (host.state / "docker_ok").touch()
+    (host.state / "ingress_fail").touch()
+    async with ssh_host(host) as (port, _):
+        instance_id, _ = await owner.prepare(port, initialize=False)
+        job = await owner.initialize(owner.servers[instance_id])
+    assert job["error_code"] == "ingress_unreachable"
+    assert "agent.example.com:9443" in job["error_message"]
+    assert {s["key"]: s["status"] for s in job["steps"]}["verify"] == "failed"
+
+
+async def test_deploy_needs_docker_usable_now(owner: Owner, tmp_path: Path) -> None:
+    """初始化之后 Docker 又不能用了：部署在环境预检（inspect）失败，不自己去装 Docker。"""
+    host = FakeHost(tmp_path)
+    async with ssh_host(host) as (port, _):
+        instance_id, version = await owner.prepare(port)
+        (host.state / "docker_ok").unlink()
+        response = await owner.install(instance_id, version)
+        assert response.status_code == 202, response.text
+        state = await owner.finished(instance_id)
+    assert state["job"]["error_code"] == "docker_unavailable"
+    assert _steps(state)["inspect"] == "failed" and _steps(state)["upload"] == "pending"
+    assert host.calls().count("install-docker user=deploy") == 1
 
 
 async def test_plugin_checksum_failure(owner: Owner, tmp_path: Path) -> None:
@@ -799,18 +894,23 @@ async def test_not_online_reports_logs_redacted(
     assert _token(host) not in job["log"]
     assert "token ***" in job["log"]
     assert state["target"]["installed_at"] is None
+    deployment = (await owner._get(f"/api/v1/agents/instances/{instance_id}/deployment"))[
+        "deployment"
+    ]
+    assert deployment["runtime_installed"] is None, "失败不写运行证据"
 
 
 async def test_host_key_changed_is_refused(owner: Owner, tmp_path: Path) -> None:
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
+    logins = len(host.logins)
     # 同一个端口换了一把主机公钥（例如被冒充）：不登录、不发送密码
     async with ssh_host(host, port=port):
         await owner.install(instance_id, version)
         state = await owner.finished(instance_id)
     assert state["job"]["error_code"] == "host_key_changed"
-    assert host.logins == []
+    assert len(host.logins) == logins
 
 
 # ---------------------------------------------------------------- 前提与并发
@@ -824,12 +924,25 @@ async def test_preconditions(owner: Owner, tmp_path: Path) -> None:
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "AGENT_SSH_HOST_KEY_UNCONFIRMED"
 
+        # 确认了指纹、还没初始化：不能部署（T-0179：初始化是独立的一步）
+        instance_id, version = await owner.prepare(port, initialize=False)
+        response = await owner.install(instance_id, version)
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "AGENT_SERVER_NOT_INITIALIZED"
+        assert response.json()["error"]["details"]["reason"] == "not_initialized"
+        assert host.logins == []
+
         instance_id, version = await owner.prepare(port)
         # 没有保存登录密码（T-0178 之前添加的旧服务器）：要先补录密码
         await run_sql(
             owner.database_url, "UPDATE workspace.agent_ssh_targets SET login_password_ref = NULL"
         )
+        logins = len(host.logins)
         response = await owner.install(instance_id, version, password=None)
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "AGENT_SERVER_CREDENTIAL_REQUIRED"
+        # 请求里的 password 已弃用：不会拿它登录
+        response = await owner.install(instance_id, version, password=PASSWORD)
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "AGENT_SERVER_CREDENTIAL_REQUIRED"
         response = await owner.install(instance_id, version + 5)
@@ -837,18 +950,22 @@ async def test_preconditions(owner: Owner, tmp_path: Path) -> None:
         assert response.json()["error"]["code"] == "VERSION_CONFLICT"
         response = await owner.install(instance_id, version, extra=1)
         assert response.status_code == 422
-    assert host.logins == []
+    assert len(host.logins) == logins
+    jobs = await run_sql(
+        owner.database_url, "SELECT count(*) FROM workspace.agent_ssh_jobs WHERE kind = 'install'"
+    )
+    assert jobs == 0
 
 
 async def test_one_running_job_per_target(
     owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # 任务不真正运行：停在 running（本进程认为它在跑），检查进行中时的限制
-    monkeypatch.setattr(SshJobRunner, "start", lambda self, *a, **k: None)
-    monkeypatch.setattr(SshJobRunner, "running", lambda self, job_id: True)
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
+        # 任务不真正运行：停在 running（本进程认为它在跑），检查进行中时的限制
+        monkeypatch.setattr(SshJobRunner, "start", lambda self, *a, **k: None)
+        monkeypatch.setattr(SshJobRunner, "running", lambda self, job_id: True)
         assert (await owner.install(instance_id, version)).status_code == 202
         again = await owner.install(instance_id, version)
         assert again.status_code == 409
@@ -874,11 +991,11 @@ async def test_install_during_a_replacement_blocks_the_replacement(
 ) -> None:
     """更换服务器的探测进行中，另一个请求对原目标开始了安装：更换必须失败（409），
     不能在安装进行中改写目标（否则任务会把密码发给新服务器）。"""
-    monkeypatch.setattr(SshJobRunner, "start", lambda self, *a, **k: None)
-    monkeypatch.setattr(SshJobRunner, "running", lambda self, job_id: True)
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
+    monkeypatch.setattr(SshJobRunner, "start", lambda self, *a, **k: None)
+    monkeypatch.setattr(SshJobRunner, "running", lambda self, job_id: True)
     other = asyncssh.generate_private_key("ssh-ed25519")
     installs: list[int] = []
 
@@ -906,6 +1023,7 @@ async def test_job_refuses_a_target_that_changed(owner: Owner, tmp_path: Path) -
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
+        logins = len(host.logins)
         runner = owner.app.state.ssh_jobs
         original = runner.start
 
@@ -927,25 +1045,54 @@ async def test_job_refuses_a_target_that_changed(owner: Owner, tmp_path: Path) -
         finally:
             runner.start = original
     assert state["job"]["error_code"] == "host_key_unconfirmed"
-    assert host.logins == []
+    assert len(host.logins) == logins
 
 
-async def test_authorized_keys_without_trailing_newline(owner: Owner, tmp_path: Path) -> None:
-    """已有的 authorized_keys 最后一行没有换行符：专用公钥要另起一行，原来的公钥不受影响。"""
+async def test_password_replaced_after_acceptance_stops_the_job(
+    owner: Owner, tmp_path: Path
+) -> None:
+    """任务接纳之后、登录之前密码被替换（绕过接口的改动）：按接纳时的版本解密失败，不拿新密码登录。"""
+    host = FakeHost(tmp_path)
+    async with ssh_host(host) as (port, _):
+        instance_id, version = await owner.prepare(port)
+        logins = len(host.logins)
+        runner = owner.app.state.ssh_jobs
+        original = runner.start
+
+        def start_after_replace(job_id: uuid.UUID, *args: Any, **kwargs: Any) -> None:
+            async def later() -> None:
+                await run_sql(
+                    owner.database_url,
+                    "UPDATE workspace.agent_ssh_targets"
+                    " SET credential_revision = credential_revision + 1",
+                )
+                original(job_id, *args, **kwargs)
+
+            runner.reserve(job_id)
+            asyncio.get_running_loop().create_task(later())
+
+        runner.start = start_after_replace
+        try:
+            assert (await owner.install(instance_id, version)).status_code == 202
+            state = await owner.finished(instance_id)
+        finally:
+            runner.start = original
+    assert state["job"]["error_code"] == "credential_changed"
+    assert _steps(state)["connect"] == "failed"
+    assert len(host.logins) == logins
+
+
+async def test_existing_authorized_keys_are_never_touched(owner: Owner, tmp_path: Path) -> None:
+    """服务器上已有的 authorized_keys（最后一行没有换行符）：初始化、部署都不改它。"""
     host = FakeHost(tmp_path)
     existing = asyncssh.generate_private_key("ssh-ed25519").export_public_key().decode().strip()
     (host.home / ".ssh").mkdir(mode=0o700)
     (host.home / ".ssh" / "authorized_keys").write_text(existing)  # 没有末尾换行
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
-        state = await _install_ok(owner, host, instance_id, version)
-    lines = host.authorized()
-    assert len(lines) == 2
-    assert lines[0] == existing
-    assert (
-        asyncssh.import_public_key(lines[1]).get_fingerprint("sha256")
-        == (state["target"]["client_key_fingerprint"])
-    )
+        await _install_ok(owner, host, instance_id, version)
+    assert (host.home / ".ssh" / "authorized_keys").read_text() == existing
+    assert "publickey" not in host.logins
 
 
 async def test_stale_running_job_does_not_block(
@@ -985,7 +1132,7 @@ async def test_admin_cannot_install(owner: Owner, make_client: ClientFactory) ->
     assert response.status_code == 403
 
 
-# ---------------------------------------------------------------- 卸载与吊销（B3）
+# ---------------------------------------------------------------- 卸载（B3）与旧的吊销入口
 
 
 class _Compat:
@@ -1001,7 +1148,7 @@ class _Compat:
 
 
 async def _post(owner: Owner, instance_id: str, action: str, body: dict[str, Any]) -> _Compat:
-    """卸载走实例的 /undeploy，吊销走服务器的 /revoke（T-0145）。"""
+    """卸载走实例的 /undeploy，旧的吊销走服务器的 /revoke（T-0179 起 410）。"""
     if action == "uninstall":
         payload = {
             "version": await owner._instance_version_for(instance_id, body["version"]),
@@ -1028,7 +1175,7 @@ async def _post(owner: Owner, instance_id: str, action: str, body: dict[str, Any
     return _Compat(response, data)
 
 
-async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -> None:
+async def test_uninstall_with_the_saved_password_then_remove(owner: Owner, tmp_path: Path) -> None:
     host = FakeHost(tmp_path)
     other_key = asyncssh.generate_private_key("ssh-ed25519").export_public_key().decode().strip()
     (host.home / ".ssh").mkdir(mode=0o700)
@@ -1039,6 +1186,7 @@ async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -
         state = await _install_ok(owner, host, instance_id, version)
         # 原有的一行 + 带标记的六行
         assert len((host.state / "crontab").read_text().splitlines()) == 7
+        logins = len(host.logins)
 
         # 卸载，保留目录
         response = await _post(
@@ -1055,12 +1203,18 @@ async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -
             "unschedule": "done",
             "remove_files": "skipped",
         }
+        assert host.logins[logins:] == ["password"]
         assert "docker compose down --remove-orphans" in host.calls()
         assert (host.state / "crontab").read_text().splitlines() == ["0 1 * * * echo keep-me"]
         assert host.directory.exists()
         assert state["target"]["installed_at"] is None
         assert state["target"]["install_dir"] == str(host.directory)
-        assert state["target"]["client_key_installed"] is True
+        deployment = (await owner._get(f"/api/v1/agents/instances/{instance_id}/deployment"))[
+            "deployment"
+        ]
+        assert deployment["runtime_installed"] is False, "卸载容器、保留目录"
+        server = await owner._get(f"/api/v1/agents/servers/{owner.servers[instance_id]}")
+        assert server["agents"][0]["deployment_state"] == "retained"
 
         # 再卸载一次，删除目录（uid 1001：先用镜像里的 chown 收回属主）
         response = await _post(
@@ -1081,84 +1235,53 @@ async def test_uninstall_then_revoke_then_remove(owner: Owner, tmp_path: Path) -
         )
         assert state["target"]["install_dir"] is None
 
-        # 吊销：服务器上只删掉专用公钥这一行
-        fingerprint = state["target"]["client_key_fingerprint"]
+        # 旧的吊销入口已退役：410，不登录
+        logins = len(host.logins)
         response = await _post(
             owner, instance_id, "revoke", {"version": state["target"]["version"]}
         )
-        assert response.status_code == 200, response.text
-        revoked = response.json()
-        assert revoked["warning"] is None
-        assert revoked["target"]["client_key_installed"] is False
-        assert revoked["target"]["client_key_fingerprint"] is None
+        assert response.status_code == 410, response.text
+        assert response.json()["error"]["code"] == "AGENT_SSH_KEY_AUTH_RETIRED"
+        assert len(host.logins) == logins
         assert host.authorized() == [other_key]
-        assert stat.S_IMODE((host.home / ".ssh" / "authorized_keys").stat().st_mode) == 0o600
 
-        # 吊销之后可以删除目标服务器
-        removed = await owner.remove(instance_id, revoked["target"]["version"])
+        # 没有部署记录、没有旧公钥：可以删除服务器
+        removed = await owner.remove(instance_id, state["target"]["version"])
         assert removed.status_code == 204, removed.text
     ref = await run_sql(owner.database_url, "SELECT count(*) FROM workspace.agent_ssh_targets")
     assert ref == 0
     actions = await run_sql(
         owner.database_url,
-        "SELECT string_agg(action || ':'"
-        " || coalesce(metadata_redacted_json->>'remote_removed', ''), ',' ORDER BY created_at)"
-        " FROM workspace.audit_logs"
+        "SELECT string_agg(action, ',' ORDER BY created_at) FROM workspace.audit_logs"
         " WHERE action LIKE 'agents.ssh.%' OR action LIKE 'agents.server.%'",
     )
     for action in (
-        "agents.ssh.uninstall_started:",
-        "agents.ssh.uninstall_succeeded:",
-        "agents.server.key_revoked:true",
-        "agents.server.removed:",
+        "agents.ssh.uninstall_started",
+        "agents.ssh.uninstall_succeeded",
+        "agents.server.removed",
     ):
         assert action in actions, actions
-    assert fingerprint
+    assert "key_revoked" not in actions
 
 
-async def test_uninstall_and_revoke_need_the_key(owner: Owner, tmp_path: Path) -> None:
+async def test_uninstall_needs_a_deployment_and_revoke_is_retired(
+    owner: Owner, tmp_path: Path
+) -> None:
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
-        instance_id, version = await owner.prepare(port)
-        # 还没部署到这台服务器：没有可卸载的；服务器还没准备：没有可吊销的专用密钥
+        instance_id, version = await owner.prepare(port, initialize=False)
+        # 还没部署到这台服务器：没有可卸载的；旧的吊销入口：410
         response = await _post(owner, instance_id, "uninstall", {"version": version})
         assert response.status_code == 404, response.text
         response = await _post(owner, instance_id, "revoke", {"version": version})
-        assert response.status_code == 409, response.text
-        assert response.json()["error"]["code"] == "AGENT_SSH_KEY_MISSING"
+        assert response.status_code == 410, response.text
+        assert response.json()["error"]["code"] == "AGENT_SSH_KEY_AUTH_RETIRED"
+        response = await _post(owner, instance_id, "revoke", {"version": version, "force": True})
+        assert response.status_code == 410, response.text
     assert host.logins == []
 
 
-async def test_revoke_when_server_is_gone(owner: Owner, tmp_path: Path) -> None:
-    host = FakeHost(tmp_path)
-    async with ssh_host(host) as (port, _):
-        instance_id, version = await owner.prepare(port)
-        state = await _install_ok(owner, host, instance_id, version)
-    version = state["target"]["version"]
-    # 服务器已经关了：不强制时拒绝，并保留专用私钥
-    response = await _post(owner, instance_id, "revoke", {"version": version})
-    assert response.status_code == 503, response.text
-    assert response.json()["error"]["code"] == "AGENT_SSH_UNREACHABLE"
-    assert (await owner.state(instance_id))["target"]["client_key_installed"] is True
-    # 强制：只删除工作台保存的私钥，提示手动删除服务器上的那一行
-    response = await _post(owner, instance_id, "revoke", {"version": version, "force": True})
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["target"]["client_key_installed"] is False
-    assert host.authorized()[0] in data["warning"]
-    remote = await run_sql(
-        owner.database_url,
-        "SELECT metadata_redacted_json->>'remote_removed' FROM workspace.audit_logs"
-        " WHERE action = 'agents.server.key_revoked'",
-    )
-    assert remote == "false"
-    ref = await run_sql(
-        owner.database_url, "SELECT client_key_ref FROM workspace.agent_ssh_targets"
-    )
-    assert ref is None
-
-
-async def test_revoke_and_uninstall_wait_for_a_running_job(
+async def test_uninstall_waits_for_a_running_job(
     owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     host = FakeHost(tmp_path)
@@ -1171,13 +1294,12 @@ async def test_revoke_and_uninstall_wait_for_a_running_job(
         assert (
             await _post(owner, instance_id, "uninstall", {"version": version})
         ).status_code == 202
-        for action in ("revoke", "uninstall"):
-            response = await _post(owner, instance_id, action, {"version": version})
-            assert response.status_code == 409, response.text
-            assert response.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
+        response = await _post(owner, instance_id, "uninstall", {"version": version})
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "AGENT_SSH_JOB_RUNNING"
         busy = await owner.install(instance_id, version, password=None)
         assert busy.status_code == 409
-    assert len(host.authorized()) == 1
+    assert host.authorized() == []
 
 
 # ---------------------------------------------------------------- 单元

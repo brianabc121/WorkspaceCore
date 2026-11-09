@@ -1,4 +1,4 @@
-"""OpenClaw 服务器：添加、核对指纹、保存密码、测试连接、初始化、部署实例、卸载、吊销、移除。
+"""OpenClaw 服务器：添加、核对指纹、保存密码、测试连接、初始化、部署实例、卸载、旧公钥退役、移除。
 
 设计见 docs/v2/MULTI_OPENCLAW_PLAN.md 第 4、7、8 节（T-0145、T-0147）与
 docs/v2/agent-servers-redesign/ 的接口与迁移约定（T-0178）。一台服务器上可以有多个实例：
@@ -11,22 +11,25 @@ docs/v2/agent-servers-redesign/ 的接口与迁移约定（T-0178）。一台服
   替换密码、更换地址也要等这台服务器上没有任务；
 - 手动部署的实例按上报的服务器指纹自动归到“自动识别的服务器”（app/domain/host_metrics.py），
   管理员可以手动指定（server_manual）；
-- 只有 owner 可以使用（与实例接口一致）；每一步写审计（不含密码）。探测主机公钥、测试连接
-  会对外发起连接，按用户限流。
-
-过渡说明（T-0179 之前）：初始化 / 部署仍走 agent_ssh_install 里旧的“密码阶段 + 专用密钥”流程，
-只是密码改从保存的密文读取；卸载、运维仍用旧专用密钥。见各处的 TODO(T-0179)。
+- 只有 owner 可以使用（与实例接口一致）；每一步写审计（不含密码）。探测主机公钥、测试连接、
+  旧公钥退役会对外发起连接，按用户限流；
+- 初始化、部署、卸载（agent_ssh_install 的后台任务）与运维（agent_ops）全程用保存的登录密码登录
+  （T-0179）：接口只检查密码已保存、可以解密，任务登录时才按接纳时的凭证版本解密；
+  不生成、不安装、不读取 SSH 客户端密钥。旧方案装在服务器上的专用公钥用 `cleanup_legacy_key`
+  （密码登录、只删那一行）退役，旧的 `revoke` 返回 410；
+- 一次点击新建并部署（app/domain/agent_deployments.py，T-0180）与旧的部署接口共用
+  `accept_deployment`（检查前提、建部署记录与任务并登记，不提交、不启动）。
 """
 
+import asyncio
 import hashlib
 import hmac
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
-import asyncssh
 from pydantic import BaseModel, SecretStr
 from redis.asyncio import Redis
 from sqlalchemy import func, select, update
@@ -42,8 +45,8 @@ from app.domain import agent_server_ssh, idempotency
 from app.domain.agent_server_credentials import (
     ServerCredentialError,
     credential_required,
+    credential_unreadable,
     password_readable,
-    resolve_server_password,
     seal_server_password,
 )
 from app.domain.agent_ssh import (
@@ -51,11 +54,10 @@ from app.domain.agent_ssh import (
     _client_fingerprint,
     _job_out,
     _job_running,
-    _key_missing,
     _unreachable,
     _version_conflict,
-    agent_ssh_context,
 )
+from app.domain.agent_ssh_install import job_steps
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
 from app.domain.host_metrics import STALE_AFTER, HostService, _percent_used, drop_if_empty_auto
@@ -85,6 +87,7 @@ from app.schemas.agents import (
     AgentServerCreate,
     AgentServerCredentialsIn,
     AgentServerDetail,
+    AgentServerLegacyCleanupIn,
     AgentServerList,
     AgentServerOut,
     AgentServerPrepare,
@@ -92,7 +95,6 @@ from app.schemas.agents import (
     AgentServerTestIn,
     AgentServerUpdate,
     AgentSshConfirm,
-    AgentSshRevoke,
     AgentUndeployIn,
     ConnectionStatus,
     DeployBlockReason,
@@ -111,6 +113,8 @@ if TYPE_CHECKING:
 # 部署前的容量提醒（D4：不设硬上限，只提醒）
 MEMORY_WARN_BYTES = 2 << 30
 DISK_WARN_PERCENT = 85.0
+# 旧公钥退役（T-0179）：登录 + 改 authorized_keys 的总时限（期间持有这台服务器的行锁）
+LEGACY_CLEANUP_TIMEOUT = 60.0
 
 
 def _now() -> datetime:
@@ -320,6 +324,47 @@ def _agent_state(deployment: AgentDeployment | None, job: AgentSshJob | None) ->
     return "failed"
 
 
+def _block_error(reason: DeployBlockReason) -> ApiError:
+    """不能部署的原因 → 接口错误（实际部署前的检查；GET 只返回原因）。"""
+    if reason == "not_ssh":
+        return ApiError(
+            409, "AGENT_SERVER_NOT_SSH", "这台服务器是按上报自动识别的，不能经 SSH 部署"
+        )
+    if reason == "credentials_required":
+        return credential_required().api()
+    if reason == "credential_unreadable":
+        return credential_unreadable().api()
+    if reason == "host_key_unconfirmed":
+        return ApiError(409, "AGENT_SSH_HOST_KEY_UNCONFIRMED", "先核对并确认服务器的主机公钥指纹")
+    if reason in {"host_key_changed", "auth_failed"}:
+        return ApiError(
+            409,
+            "AGENT_SERVER_CONNECTION_FAILED",
+            "最近一次连接检测失败（主机公钥与确认过的不一致）：先核对服务器后重新添加"
+            if reason == "host_key_changed"
+            else "最近一次连接检测登录被拒绝：先更新登录密码并重新测试连接",
+            details={"reason": reason},
+        )
+    if reason == "busy":
+        return _job_running()
+    return ApiError(
+        409,
+        "AGENT_SERVER_NOT_INITIALIZED",
+        {
+            "not_initialized": "这台服务器还没有初始化：先在服务器页初始化",
+            "initializing": "这台服务器正在初始化，结束后再部署",
+            "initialization_failed": "最近一次初始化失败：处理后重新初始化",
+            "initialization_interrupted": "最近一次初始化中断：重新初始化",
+        }.get(reason, "这台服务器的环境还没有就绪"),
+        details={"reason": reason},
+    )
+
+
+def _legacy_key_present(target: AgentSshTarget) -> bool:
+    """旧方案（一次密码 + 专用密钥）的专用公钥 / 私钥引用还在。"""
+    return target.client_key_ref is not None or bool(target.client_public_key)
+
+
 def _connection_snapshot(target: AgentSshTarget) -> tuple[object, ...]:
     """决定“连的是哪台机器、用哪个密码”的字段；检测前后不一致时不写检测结果。"""
     return (
@@ -380,14 +425,15 @@ class AgentServerService:
             raise ApiError(503, "EXTERNAL_UNAVAILABLE", "密钥库未配置加密密钥")
         return box
 
-    def _saved_password(self, target: AgentSshTarget) -> SecretStr:
-        """过渡用（TODO(T-0179)：后台任务登录时再按版本解密）：现在就取出保存的密码交给任务。"""
-        try:
-            return resolve_server_password(
-                self._require_box(), target, expected_revision=target.credential_revision
-            )
-        except ServerCredentialError as error:
-            raise error.api() from error
+    def _require_password(self, target: AgentSshTarget) -> None:
+        """要经 SSH 登录的操作：服务器已保存登录密码、当前配置能解开（不在这里解密）。
+
+        真正解密在登录时（后台任务按接纳时的凭证版本）；密文损坏要到那时才发现。
+        """
+        if target.login_password_ref is None:
+            raise credential_required().api()
+        if not password_readable(self._box_or_none(), target.login_password_ref):
+            raise credential_unreadable().api()
 
     def _fingerprint(self, access: WorkspaceAccess, method: str, path: str, body: BaseModel) -> str:
         """请求指纹：密码换成 HMAC（工作台密钥派生的子密钥），不把可撞库的明文摘要存进幂等记录。"""
@@ -824,9 +870,9 @@ class AgentServerService:
         self, access: WorkspaceAccess, instance_id: uuid.UUID
     ) -> AgentDeploymentState:
         instance = await self._instance(access, instance_id)
-        return await self._deployment_state(instance)
+        return await self.deployment_state_of(instance)
 
-    async def _deployment_state(
+    async def deployment_state_of(
         self, instance: AgentInstance, *, warning: str | None = None
     ) -> AgentDeploymentState:
         deployment = await self.db.scalar(
@@ -1030,7 +1076,8 @@ class AgentServerService:
         """更换地址、端口或账号（连同登录密码）：重新读取主机公钥，要重新确认，环境要重新初始化。
 
         还有部署记录时拒绝：不能把原有实例挂到另一台机器上（不做隐式迁移）。
-        旧方案的专用公钥还在时先吊销（TODO(T-0179)：改为先完成旧公钥退役）。
+        旧方案的专用公钥还没退役时不拒绝（T-0179）：那一行留在原来的机器上，工作台再也连不上它，
+        清掉工作台里的旧引用、记为 manual_required，并在 warning 里给出要手动删除的那一行。
         """
         box = self._require_box()
         server = await self._server(access, server_id)
@@ -1062,6 +1109,12 @@ class AgentServerService:
         target.credential_revision += 1
         target.last_connection_at = None
         target.last_connection_reason = None
+        left = target.client_public_key if _legacy_key_present(target) else None
+        left_fingerprint = _client_fingerprint(left)
+        if _legacy_key_present(target):
+            target.client_key_ref = None
+            target.client_public_key = None
+            target.legacy_key_cleanup_state = "manual_required"
         target.version += 1
         server.version += 1
         await self.audit.record(
@@ -1078,21 +1131,22 @@ class AgentServerService:
                 "host_key_fingerprint": key.fingerprint,
                 "login_saved": True,
                 "auth_revision": target.credential_revision,
+                "legacy_key_left": left_fingerprint,
             },
             client_ip=client_ip,
         )
         self._stamp(access, server.id, 200)
         await self._commit()
         await self.db.refresh(server)
-        return await self._detail(server)
+        warning = None
+        if left:
+            warning = (
+                "原来那台机器上还留着旧方案装的工作台专用公钥，工作台已不再连接它："
+                f"请在原机器的 ~/.ssh/authorized_keys 里手动删除这一行：{left}"
+            )
+        return await self._detail(server, warning=warning)
 
     async def _check_replaceable(self, server: AgentServer, target: AgentSshTarget) -> None:
-        if target.client_key_ref is not None:
-            raise ApiError(
-                409,
-                "AGENT_SSH_KEY_INSTALLED",
-                "这台服务器上已经装了工作台的专用公钥：先吊销，再更换地址",
-            )
         deployed = await self.db.scalar(
             select(func.count())
             .select_from(AgentDeployment)
@@ -1254,10 +1308,8 @@ class AgentServerService:
         *,
         client_ip: str,
     ) -> AgentServerDetail:
-        """初始化服务器：用保存的登录密码登录、需要时用 sudo 安装 Docker（只跑前五步）。
-
-        TODO(T-0179)：任务里仍是旧流程（密码阶段装专用公钥、之后用专用密钥重连）；
-        改成全程密码登录、不装公钥，任务在登录时按 credential_revision 解密。
+        """初始化服务器（T-0179）：后台任务用保存的登录密码登录，缺 Docker 才按锁定脚本安装，
+        准备平台受控的部署根目录并做最终检查。不建实例、不发接入包、不装公钥；可以重复执行。
         """
         self._ready_to_run()
         server = await self._server(access, server_id, lock=True)
@@ -1268,27 +1320,24 @@ class AgentServerService:
             raise ApiError(
                 409, "AGENT_SSH_HOST_KEY_UNCONFIRMED", "先核对并确认服务器的主机公钥指纹"
             )
-        password = self._saved_password(target)
+        self._require_password(target)
         if await self._busy(target):
             raise _job_running()
-        await self._start_job(
+        revision = target.credential_revision
+        job = await self._new_job(
             access,
             target,
             kind="prepare",
             instance_id=None,
-            password=password,
-            metadata={
-                "host": target.host,
-                "port": target.port,
-                "username": target.username,
-                "auth_revision": target.credential_revision,
-            },
+            metadata={"host": target.host, "port": target.port, "username": target.username},
             client_ip=client_ip,
         )
+        await self._commit_job(job)
+        self._launch(job, revision=revision, client_ip=client_ip)
         await self.db.refresh(server)
         return await self._detail(server)
 
-    async def _start_job(
+    async def _new_job(
         self,
         access: WorkspaceAccess,
         target: AgentSshTarget,
@@ -1297,17 +1346,13 @@ class AgentServerService:
         instance_id: uuid.UUID | None,
         metadata: dict[str, object],
         client_ip: str,
-        password: SecretStr | None = None,
-        remove_files: bool = False,
     ) -> AgentSshJob:
-        """新建任务（running）并交给进程内的后台协程；调用方已锁行并检查过没有进行中的任务。
+        """新建任务（running）、写审计并在进程内登记；不提交、不启动（调用方一处提交后 `_launch`）。
 
-        密码只交给协程（`SshJobRunner.start`），不写进任务记录、审计或日志。
+        调用方已锁行并检查过没有进行中的任务。提交失败时要 `release_job`（`_commit_job` 会做）。
+        任务里不放密码：登录时按 `credential_revision` 解密保存的密码。
         """
         assert self.runner is not None  # noqa: S101 - 调用方已检查
-        steps = {"prepare": prov.PREPARE_STEPS, "install": prov.STEPS}.get(
-            kind, prov.UNINSTALL_STEPS
-        )
         job = AgentSshJob(
             id=uuid.uuid4(),
             workspace_id=target.workspace_id,
@@ -1315,7 +1360,7 @@ class AgentServerService:
             target_id=target.id,
             kind=kind,
             status="running",
-            steps=[{"key": key, "status": "pending", "detail": None} for key in steps],
+            steps=[{"key": key, "status": "pending", "detail": None} for key in job_steps(kind)],
             log="",
             started_by=access.user_id,
         )
@@ -1329,123 +1374,176 @@ class AgentServerService:
             metadata={
                 **metadata,
                 "server_id": str(target.server_id),
-                "with_password": password is not None,
+                "auth": "saved_password",
+                "auth_revision": target.credential_revision,
             },
             client_ip=client_ip,
         )
         # 提交前先登记：提交之后、启动协程之前，别的请求不会把它当成失效的任务
         self.runner.reserve(job.id)
+        return job
+
+    def release_job(self, job: AgentSshJob) -> None:
+        """接纳了、但没能提交的任务：取消进程内的登记。"""
+        if self.runner is not None:
+            self.runner.release(job.id)
+
+    async def _commit_job(self, job: AgentSshJob) -> None:
+        """提交接纳的任务；同一台服务器上同时开始了另一个任务（部分唯一索引）时 409。"""
         try:
             await self.db.commit()
         except IntegrityError as error:
-            # 部分唯一索引：另一个请求同时在这台服务器上开始了任务
-            self.runner.release(job.id)
+            self.release_job(job)
             await self.db.rollback()
             raise _job_running() from error
         except BaseException:
-            self.runner.release(job.id)
+            self.release_job(job)
             raise
-        self.runner.start(job.id, password, client_ip=client_ip, remove_files=remove_files)
-        return job
 
-    async def revoke(
+    def _launch(
+        self,
+        job: AgentSshJob,
+        *,
+        revision: int,
+        client_ip: str,
+        remove_files: bool = False,
+    ) -> None:
+        """提交之后启动后台任务；登录时按 revision 解密保存的密码（被替换过就停止）。"""
+        assert self.runner is not None  # noqa: S101 - 调用方已检查
+        self.runner.start(
+            job.id, client_ip=client_ip, remove_files=remove_files, expected_revision=revision
+        )
+
+    async def revoke(self) -> NoReturn:
+        """旧 OpenClaw 专用密钥的吊销入口已退役（T-0179）：不能悄悄用旧私钥做最后一次登录。"""
+        raise ApiError(
+            410,
+            "AGENT_SSH_KEY_AUTH_RETIRED",
+            "工作台不再用 SSH 密钥登录 OpenClaw 服务器：补录登录密码后，"
+            "用“旧公钥退役”（POST /agents/servers/{server_id}/legacy-key-cleanup）"
+            "以密码登录、只删掉本工作台那一条公钥",
+            details={"replacement": "legacy-key-cleanup"},
+        )
+
+    async def cleanup_legacy_key(
         self,
         access: WorkspaceAccess,
         server_id: uuid.UUID,
-        body: AgentSshRevoke,
+        body: AgentServerLegacyCleanupIn,
         *,
         client_ip: str,
     ) -> AgentServerDetail:
-        """吊销专用密钥：用它登录，从 authorized_keys 删掉这一行，再删除工作台保存的私钥。
+        """旧公钥定向退役（T-0179）：用保存的登录密码登录，只删掉 authorized_keys 里本记录那把公钥。
 
-        服务器连不上时，force=true 只删除工作台保存的私钥，并提示 owner 手动删除那一行。
-        吊销后这台服务器上的实例不能再经工作台运维或卸载，要重新准备服务器。
-
-        TODO(T-0179)：旧密钥登录退役后这里返回 410 AGENT_SSH_KEY_AUTH_RETIRED，
-        由 legacy-key-cleanup（密码登录、定向删除）取代。
+        - 前提：保存了密码且能解开、主机公钥已确认、这台服务器没有进行中的任务或运维动作；
+        - 成功：清空旧私钥引用与公钥、记为 done 并审计；
+        - 服务器上失败（连不上、登录被拒、主机公钥变化、写不进 authorized_keys）：保留旧引用，
+          记为 manual_required，warning 里说明原因与要手动删除的那一行（可以稍后重试）；
+          绝不拿旧私钥登录作回退。
+        登录与改文件期间持有这台服务器与 SSH 记录的行锁（有总时限），同机的任务、运维、改密码、
+        改地址都要等它结束（多个 API 进程之间同样有效）。
         """
+        box = self._require_box()
         server = await self._server(access, server_id, lock=True)
         target = await self._ssh_target(server)
         if body.version != server.version:
             raise _version_conflict(server.version)
-        if target.client_key_ref is None or not target.client_public_key:
-            raise _key_missing()
+        public = target.client_public_key
+        fingerprint = _client_fingerprint(public)
+        if public is None or fingerprint is None:
+            raise ApiError(
+                409,
+                "AGENT_SERVER_NO_LEGACY_KEY",
+                "这台服务器没有需要退役的旧专用公钥"
+                if not _legacy_key_present(target)
+                else "工作台没有记下旧公钥本身，无法定向清理：请在服务器的 ~/.ssh/authorized_keys"
+                " 里手动删除注释以 myworkspace-server- 开头的那一行",
+            )
+        if target.host_key_confirmed_at is None:
+            raise ApiError(
+                409, "AGENT_SSH_HOST_KEY_UNCONFIRMED", "先核对并确认服务器的主机公钥指纹"
+            )
+        self._require_password(target)
         if await self._busy(target):
             raise _job_running()
-        public = target.client_public_key
-        reason: str | None = None
+        await self._check_probe_rate(access)
+        revision = target.credential_revision
+        failure: ssh.SshError | None = None
+        reached = False
         try:
-            await self._remove_remote_key(target, public)
+            async with asyncio.timeout(LEGACY_CLEANUP_TIMEOUT):
+                conn = await agent_server_ssh.connect_agent_server(
+                    target, box, expected_revision=revision
+                )
+                reached = True
+                try:
+                    result = await ssh.run(conn, prov.revoke_key_command(public), seconds=30)
+                finally:
+                    conn.close()
+            if not result.ok:
+                failure = ssh.SshError(
+                    "command_failed", "写不进 ~/.ssh/authorized_keys（或删除后仍能找到这把公钥）"
+                )
+        except ServerCredentialError as error:
+            # 本地问题（密文解不开 / 刚被替换）：什么都不改
+            await self.db.rollback()
+            raise error.api() from error
+        except TimeoutError:
+            failure = ssh.SshError("timeout", "连接或执行超时")
         except ssh.SshError as error:
-            if not body.force:
-                raise _unreachable(error) from error
-            reason = error.reason
-        except (CredentialError, asyncssh.KeyImportError) as error:
-            if not body.force:
-                raise ApiError(
-                    409, "AGENT_SSH_KEY_INVALID", "专用私钥无法解密；可以强制删除工作台保存的私钥"
-                ) from error
-            reason = "client_key_invalid"
-        target.client_key_ref = None
-        target.client_public_key = None
-        target.prepared_at = None
+            failure = error
+        target.last_connection_at = _now()
+        target.last_connection_reason = (
+            "connected"
+            if failure is None or reached
+            else agent_server_ssh.connection_reason(failure)
+        )
+        warning: str | None = None
+        metadata: dict[str, object] = {
+            "client_key_fingerprint": fingerprint,
+            "auth_revision": revision,
+        }
+        if failure is None:
+            target.client_key_ref = None
+            target.client_public_key = None
+            target.legacy_key_cleanup_state = "done"
+            action = "agents.server.legacy_key_cleaned"
+        else:
+            target.legacy_key_cleanup_state = "manual_required"
+            action = "agents.server.legacy_key_cleanup_failed"
+            metadata["reason"] = failure.reason
+            warning = (
+                f"没能从服务器上删除旧公钥（{failure.message}）：可以稍后重试，"
+                f"或在服务器的 ~/.ssh/authorized_keys 里手动删除这一行：{public}"
+            )
         target.version += 1
         server.version += 1
         await self.audit.record(
-            "agents.server.key_revoked",
+            action,
             workspace_ids=[server.workspace_id],
             actor_id=access.user_id,
             resource_type="agent_server",
             resource_id=server.id,
-            metadata={
-                "client_key_fingerprint": _client_fingerprint(public),
-                "remote_removed": reason is None,
-                "reason": reason,
-            },
+            metadata=metadata,
             client_ip=client_ip,
         )
         await self.db.commit()
         await self.db.refresh(server)
-        warning = None
-        if reason is not None:
-            warning = (
-                f"没能连上服务器（{reason}），只删除了工作台保存的私钥；"
-                f"请在服务器的 ~/.ssh/authorized_keys 里手动删除这一行：{public}"
-            )
         return await self._detail(server, warning=warning)
-
-    async def _remove_remote_key(self, target: AgentSshTarget, public: str) -> None:
-        box = CredentialBox.from_settings(self.settings)
-        secret = box.resolve(target.client_key_ref or "", context=agent_ssh_context(target.id))
-        key = asyncssh.import_private_key(secret.get_secret_value())
-        conn = await ssh.connect(
-            target.address, target.port, target.username, target.host_key, client_key=key
-        )
-        try:
-            result = await ssh.run(conn, prov.revoke_key_command(public), seconds=30)
-        finally:
-            conn.close()
-        if not result.ok:
-            raise ssh.SshError("command_failed", "从 authorized_keys 删除专用公钥失败")
 
     async def remove(
         self, access: WorkspaceAccess, server_id: uuid.UUID, *, version: int, client_ip: str
     ) -> None:
-        """移除服务器。SSH 服务器要先卸载上面的实例、吊销专用密钥；
+        """移除服务器。SSH 服务器要先卸载上面的实例（没有部署记录）、没有进行中的任务；
+        旧方案的专用公钥还没退役（pending）时先完成退役（退役失败、记为 manual_required 后可以移除，
+        那一行由 owner 手动删除）。不删容器、不改 sshd。
         自动识别的服务器直接移除，上面的实例改为“未归属”（下一次上报会重新识别）。"""
         server = await self._server(access, server_id, lock=True)
         if version != server.version:
             raise _version_conflict(server.version)
         target = await self._target(server, lock=True)
-        if target is not None:
-            if await self._busy(target):
-                raise _job_running()
-            if target.client_key_ref is not None:
-                raise ApiError(
-                    409,
-                    "AGENT_SSH_KEY_INSTALLED",
-                    "这台服务器上已经装了工作台的专用公钥：先吊销，再移除",
-                )
+        if target is not None and await self._busy(target):
+            raise _job_running()
         deployed = await self.db.scalar(
             select(func.count())
             .select_from(AgentDeployment)
@@ -1458,6 +1556,18 @@ class AgentServerService:
                 "这台服务器上还有部署的实例：先卸载它们",
                 details={"deployments": int(deployed)},
             )
+        if (
+            target is not None
+            and _legacy_key_present(target)
+            and target.legacy_key_cleanup_state != "manual_required"
+        ):
+            raise ApiError(
+                409,
+                "AGENT_SERVER_LEGACY_KEY_PENDING",
+                "这台服务器上还留着旧方案装的工作台专用公钥：先补录登录密码并完成“旧公钥退役”"
+                "（服务器连不上时，退役会给出要手动删除的那一行，之后就可以移除）",
+                details={"legacy_key_cleanup_state": target.legacy_key_cleanup_state},
+            )
         await self.db.execute(
             update(AgentInstance)
             .where(AgentInstance.server_id == server.id)
@@ -1469,7 +1579,13 @@ class AgentServerService:
             actor_id=access.user_id,
             resource_type="agent_server",
             resource_id=server.id,
-            metadata={"name": server.name, "kind": server.kind},
+            metadata={
+                "name": server.name,
+                "kind": server.kind,
+                "legacy_key_left": _client_fingerprint(target.client_public_key)
+                if target is not None
+                else None,
+            },
             client_ip=client_ip,
         )
         await self.db.delete(server)
@@ -1496,21 +1612,34 @@ class AgentServerService:
             + "：一个空闲的 OpenClaw 约占 1 GiB 内存，部署前确认够用"
         )
 
-    async def deploy(
-        self,
-        access: WorkspaceAccess,
-        instance_id: uuid.UUID,
-        body: AgentDeployIn,
-        *,
-        client_ip: str,
-    ) -> AgentDeploymentState:
-        """把实例部署到一台 SSH 服务器：只替换这个实例自己的目录与 Compose 项目。"""
-        self._ready_to_run()
-        instance = await self._instance(access, instance_id, lock=True)
-        if body.version != instance.version:
-            raise _version_conflict(instance.version)
-        if instance.status == "disabled":
-            raise _disabled()
+    async def _latest_prepare(self, target: AgentSshTarget) -> AgentSshJob | None:
+        return await self.db.scalar(
+            select(AgentSshJob)
+            .where(AgentSshJob.target_id == target.id, AgentSshJob.kind == "prepare")
+            .order_by(AgentSshJob.started_at.desc())
+            .limit(1)
+            .execution_options(populate_existing=True)
+        )
+
+    async def deployable_target(self, server: AgentServer) -> AgentSshTarget:
+        """部署前的检查（调用方已锁住服务器）：锁住 SSH 记录，不能部署就抛出第一个原因。
+
+        与 GET 返回的 deploy_block_reason 同一套规则（`_block_reason`），只是这里会把本进程里已经
+        不在运行的 running 任务标为中断（`_busy`）。连接状态 unknown 不阻止：任务里仍会真实检查。
+        """
+        target = await self._target(server, lock=True)
+        if target is None:
+            raise _block_error("not_ssh")
+        busy = await self._busy(target)
+        initialization = _initialization(target, await self._latest_prepare(target))
+        readable = password_readable(self._box_or_none(), target.login_password_ref)
+        block = _block_reason(target, initialization, busy, readable)
+        if block is not None:
+            raise _block_error(block)
+        return target
+
+    def check_ingress(self, instance: AgentInstance) -> None:
+        """部署到服务器走外网模式（ADR 第 3.1 节），外网接入入口要已经配置。"""
         if instance.network_mode != "public":
             # 部署到任意一台服务器走外网模式（ADR 第 3.1 节）：服务器通常不在工作台的私网里
             raise ApiError(
@@ -1526,7 +1655,25 @@ class AgentServerService:
                 "外网接入入口还没有配置（AGENT_PUBLIC_URL）",
                 details={"network_mode": instance.network_mode},
             )
-        server = await self._server(access, body.server_id, lock=True)
+
+    async def accept_deployment(
+        self,
+        access: WorkspaceAccess,
+        instance: AgentInstance,
+        server: AgentServer,
+        *,
+        client_ip: str,
+    ) -> tuple[AgentSshJob, int]:
+        """接纳一次部署：检查前提，建部署记录（没有时）与部署任务并在进程内登记。
+
+        不提交、不启动：调用方（旧的部署接口、一次点击新建并部署）在同一个事务里一处提交
+        （`_commit_job`），提交之后再 `_launch`。前提不满足时抛出接口错误，什么都不写。
+        调用方已锁住实例（新建的实例不用锁）与服务器。返回任务与接纳时的凭证版本。
+        """
+        self._ready_to_run()
+        if instance.status == "disabled":
+            raise _disabled()
+        self.check_ingress(instance)
         deployment = await self.db.scalar(
             select(AgentDeployment)
             .where(AgentDeployment.instance_id == instance.id)
@@ -1539,17 +1686,7 @@ class AgentServerService:
                 "这个实例已经部署在另一台服务器上：先在那台服务器上卸载",
                 details={"server_id": str(deployment.server_id)},
             )
-        target = await self._ssh_target(server)
-        if target.host_key_confirmed_at is None:
-            raise ApiError(
-                409, "AGENT_SSH_HOST_KEY_UNCONFIRMED", "先核对并确认服务器的主机公钥指纹"
-            )
-        # body.password 已弃用、忽略：密码只从服务器保存的密文读取。
-        # TODO(T-0179)：过渡期仍沿用旧流程——旧专用密钥还在时用它登录，否则用保存的密码
-        # （任务里仍会装专用公钥）；改成全程密码登录，并要求服务器已初始化。
-        password = self._saved_password(target) if target.client_key_ref is None else None
-        if await self._busy(target):
-            raise _job_running()
+        target = await self.deployable_target(server)
         if deployment is None:
             deployment = AgentDeployment(
                 workspace_id=instance.workspace_id,
@@ -1558,13 +1695,12 @@ class AgentServerService:
                 created_by=access.user_id,
             )
             self.db.add(deployment)
-        warning = self._capacity_warning(server)
-        await self._start_job(
+        revision = target.credential_revision
+        job = await self._new_job(
             access,
             target,
             kind="install",
             instance_id=instance.id,
-            password=password,
             metadata={
                 "host": target.host,
                 "port": target.port,
@@ -1573,8 +1709,32 @@ class AgentServerService:
             },
             client_ip=client_ip,
         )
+        return job, revision
+
+    async def deploy(
+        self,
+        access: WorkspaceAccess,
+        instance_id: uuid.UUID,
+        body: AgentDeployIn,
+        *,
+        client_ip: str,
+    ) -> AgentDeploymentState:
+        """把已有的实例部署（或重新部署、失败后继续）到一台 SSH 服务器。
+
+        只替换这个实例自己的目录与 Compose 项目；用服务器上保存的登录密码（body.password 已弃用、
+        忽略、不回显）；服务器要已初始化、可以部署（与一次点击新建并部署同一套接纳逻辑）。
+        """
+        self._ready_to_run()
+        instance = await self._instance(access, instance_id, lock=True)
+        if body.version != instance.version:
+            raise _version_conflict(instance.version)
+        server = await self._server(access, body.server_id, lock=True)
+        job, revision = await self.accept_deployment(access, instance, server, client_ip=client_ip)
+        warning = self._capacity_warning(server)
+        await self._commit_job(job)
+        self._launch(job, revision=revision, client_ip=client_ip)
         await self.db.refresh(instance)
-        return await self._deployment_state(instance, warning=warning)
+        return await self.deployment_state_of(instance, warning=warning)
 
     async def undeploy(
         self,
@@ -1584,10 +1744,8 @@ class AgentServerService:
         *,
         client_ip: str,
     ) -> AgentDeploymentState:
-        """卸载这个实例：只用专用密钥。停止它的容器、删掉它的定时任务，可选删除它的目录。
-
-        TODO(T-0179)：改用保存的登录密码（connect_agent_server），不再要求旧专用密钥。
-        """
+        """卸载这个实例（T-0179 起用保存的登录密码）：停止它的容器、删掉它的定时任务，
+        可选删除它的目录。同一台服务器上的其他实例不受影响。"""
         self._ready_to_run()
         instance = await self._instance(access, instance_id, lock=True)
         if body.version != instance.version:
@@ -1605,21 +1763,22 @@ class AgentServerService:
             raise ApiError(
                 409, "AGENT_SSH_HOST_KEY_UNCONFIRMED", "先核对并确认服务器的主机公钥指纹"
             )
-        if target.client_key_ref is None:
-            raise _key_missing()
+        self._require_password(target)
         if await self._busy(target):
             raise _job_running()
-        await self._start_job(
+        revision = target.credential_revision
+        job = await self._new_job(
             access,
             target,
             kind="uninstall",
             instance_id=instance.id,
-            remove_files=body.remove_files,
             metadata={"host": target.host, "port": target.port, "remove_files": body.remove_files},
             client_ip=client_ip,
         )
+        await self._commit_job(job)
+        self._launch(job, revision=revision, client_ip=client_ip, remove_files=body.remove_files)
         await self.db.refresh(instance)
-        return await self._deployment_state(instance)
+        return await self.deployment_state_of(instance)
 
     async def assign(
         self,
@@ -1666,4 +1825,4 @@ class AgentServerService:
         )
         await self.db.commit()
         await self.db.refresh(instance)
-        return await self._deployment_state(instance)
+        return await self.deployment_state_of(instance)

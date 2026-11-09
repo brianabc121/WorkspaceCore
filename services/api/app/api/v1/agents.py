@@ -536,8 +536,9 @@ async def rename_agent_server(
     summary="更换服务器地址或账号（owner）",
     description="连同登录密码一起替换：重新读取主机公钥，要重新确认，环境要重新初始化。"
     "还有部署记录时 409 AGENT_SERVER_HAS_DEPLOYMENTS（不能把原有实例挂到新机器上）；"
-    "已经装了旧方案的专用公钥时先吊销（409 AGENT_SSH_KEY_INSTALLED）；"
-    "这台服务器上有进行中的任务时 409 AGENT_SSH_JOB_RUNNING。",
+    "这台服务器上有进行中的任务时 409 AGENT_SSH_JOB_RUNNING。"
+    "旧方案的专用公钥还没退役时不拒绝：那一行留在原来的机器上，工作台清掉旧引用、"
+    "legacy_key_cleanup_state 记为 manual_required，warning 里给出要手动删除的那一行。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422, 429, 503),
 )
@@ -641,17 +642,26 @@ async def run_agent_server_connection_test(
 @router.post(
     "/agents/servers/{server_id}/legacy-key-cleanup",
     summary="退役旧的专用公钥（owner）",
-    description="用保存的登录密码登录（不用旧私钥），从 ~/.ssh/authorized_keys 只删掉本工作台那一条"
-    "公钥，其他行保持；成功后清空工作台保存的旧私钥引用并审计。服务器连不上或拒绝写入时保留 "
-    "pending / manual_required 与原因，不报告清理完成。",
+    description="用保存的登录密码登录（不用旧私钥），从 ~/.ssh/authorized_keys 只删掉本工作台那一把"
+    "公钥（按类型与公钥数据匹配），其他行（别的用户、运行服务器的公钥）保持；成功后清空工作台保存的"
+    "旧私钥引用、legacy_key_cleanup_state 记为 done 并审计 agents.server.legacy_key_cleaned。"
+    "服务器上失败（连不上、登录被拒、主机公钥变化、写不进 authorized_keys）时返回 200：保留旧引用、"
+    "记为 manual_required，warning 里是原因与要手动删除的那一行（可以稍后重试），"
+    "审计 agents.server.legacy_key_cleanup_failed；绝不用旧私钥回退。"
+    "没有旧公钥 409 AGENT_SERVER_NO_LEGACY_KEY；没保存密码 409 AGENT_SERVER_CREDENTIAL_REQUIRED；"
+    "解不开 409 AGENT_SERVER_CREDENTIAL_UNREADABLE；没确认指纹 409 AGENT_SSH_HOST_KEY_UNCONFIRMED；"
+    "同机有任务 409 AGENT_SSH_JOB_RUNNING；与测试连接共用每分钟 10 次的限流（429）。",
     dependencies=_write,
-    responses=error_responses(401, 403, 404, 409, 422, 503),
+    responses=error_responses(401, 403, 404, 409, 422, 429, 503),
 )
 async def cleanup_agent_server_legacy_key(
-    access: Owner, server_id: UUID, body: AgentServerLegacyCleanupIn
+    access: Owner,
+    request: Request,
+    service: ServerService,
+    server_id: UUID,
+    body: AgentServerLegacyCleanupIn,
 ) -> AgentServerDetail:
-    # TODO(T-0179)：AgentServerService.cleanup_legacy_key（密码登录、定向删除、成功后清空旧引用）
-    raise not_implemented("T-0179")
+    return await service.cleanup_legacy_key(access, server_id, body, client_ip=_server_ip(request))
 
 
 @router.post(
@@ -672,8 +682,13 @@ async def confirm_agent_server(
     "/agents/servers/{server_id}/prepare",
     status_code=status.HTTP_202_ACCEPTED,
     summary="初始化服务器（owner）",
-    description="用保存的登录密码登录，需要时用 sudo（同一个密码）安装 Docker；"
-    "进度看服务器详情的 job。没保存密码 409 AGENT_SERVER_CREDENTIAL_REQUIRED，"
+    description="后台任务用保存的登录密码登录（只用密码，固定主机公钥）：只读检查；缺 Docker 才按"
+    "锁定脚本安装（需要时用同一个密码经标准输入 sudo，已有的 Docker 沿用、不升级）；装过就重新登录"
+    "确认 docker 组生效；准备平台受控的部署根目录；最后检查 Docker、目录与工作台接入地址。"
+    "不建实例、不发接入包、不写 authorized_keys，可以重复执行；成功后 ssh.prepared_at 更新。"
+    "进度看服务器详情的 job（步骤 connect / inspect / docker / reconnect / workspace / verify）。"
+    "没确认指纹 409 AGENT_SSH_HOST_KEY_UNCONFIRMED；"
+    "没保存密码 409 AGENT_SERVER_CREDENTIAL_REQUIRED，"
     "密码解不开 409 AGENT_SERVER_CREDENTIAL_UNREADABLE；"
     "同一台服务器同时只有一个任务（409 AGENT_SSH_JOB_RUNNING）。",
     dependencies=_write,
@@ -691,27 +706,29 @@ async def prepare_agent_server(
 
 @router.post(
     "/agents/servers/{server_id}/revoke",
-    summary="吊销这台服务器的专用密钥（owner）",
-    description="用专用密钥登录，从服务器的 ~/.ssh/authorized_keys 删掉这把公钥，"
-    "再删除工作台保存的私钥；"
-    "服务器连不上时 force=true 只删除工作台保存的私钥（warning 里提示手动删除那一行）。"
-    "吊销后这台服务器上的实例不能再经工作台运维或卸载，要重新准备服务器。",
+    summary="已退役：吊销专用密钥（owner）",
+    description="T-0179 起工作台不再用 SSH 密钥登录 OpenClaw 服务器：一律返回 "
+    "410 AGENT_SSH_KEY_AUTH_RETIRED，不会再用旧私钥登录。补录登录密码后用 "
+    "POST /agents/servers/{server_id}/legacy-key-cleanup 定向删除旧公钥。",
     dependencies=_write,
-    responses=error_responses(401, 403, 404, 409, 422, 503),
+    responses=error_responses(401, 403, 410, 422),
+    deprecated=True,
 )
 async def revoke_agent_server(
-    access: Owner, request: Request, service: ServerService, server_id: UUID, body: AgentSshRevoke
+    access: Owner, service: ServerService, server_id: UUID, body: AgentSshRevoke
 ) -> AgentServerDetail:
-    return await service.revoke(access, server_id, body, client_ip=_server_ip(request))
+    await service.revoke()
 
 
 @router.delete(
     "/agents/servers/{server_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="移除服务器（owner）",
-    description="SSH 服务器要先卸载上面的实例（409 AGENT_SERVER_HAS_DEPLOYMENTS）、"
-    "吊销专用密钥（409 AGENT_SSH_KEY_INSTALLED）；自动识别的服务器直接移除，"
-    "上面的实例改为未归属（下一次上报会重新识别）。",
+    description="SSH 服务器要先卸载上面的实例（409 AGENT_SERVER_HAS_DEPLOYMENTS）、没有进行中的任务"
+    "（409 AGENT_SSH_JOB_RUNNING）；旧方案的专用公钥还没退役（pending）时 409 "
+    "AGENT_SERVER_LEGACY_KEY_PENDING：先补录密码并完成旧公钥退役（服务器连不上时退役记为 "
+    "manual_required、给出要手动删除的那一行，之后可以移除）。不删容器、不改 sshd。"
+    "自动识别的服务器直接移除，上面的实例改为未归属（下一次上报会重新识别）。",
     dependencies=_write,
     responses=_write_errors,
 )
@@ -744,10 +761,16 @@ async def get_agent_deployment(
     summary="部署到服务器（owner）",
     description="把实例部署到一台 SSH 服务器：签发新的接入包，只替换这个实例自己的目录"
     "（~/myworkspace-openclaw/<实例短号>）与 Compose 项目，同一台服务器上的其他实例不受影响。"
-    "登录密码用服务器上保存的（请求里的 password 已弃用、忽略；没保存时 409 "
-    "AGENT_SERVER_CREDENTIAL_REQUIRED）；已经部署在另一台服务器上 409 AGENT_DEPLOYED_ELSEWHERE；"
+    "同一个实例的重新部署、失败后继续都用这个接口（不新建实例）；与一次点击新建并部署共用接纳逻辑。"
+    "登录密码用服务器上保存的（请求里的 password 已弃用、忽略、不回显）；服务器要可以部署："
+    "不是 SSH 服务器 409 AGENT_SERVER_NOT_SSH、没保存密码 409 AGENT_SERVER_CREDENTIAL_REQUIRED、"
+    "解不开 409 AGENT_SERVER_CREDENTIAL_UNREADABLE、没确认指纹 409 AGENT_SSH_HOST_KEY_UNCONFIRMED、"
+    "最近一次连接检测主机公钥变化 / 密码被拒 409 AGENT_SERVER_CONNECTION_FAILED、"
+    "没初始化好 409 AGENT_SERVER_NOT_INITIALIZED（details.reason）、同机有任务 409 "
+    "AGENT_SSH_JOB_RUNNING；已经部署在另一台服务器上 409 AGENT_DEPLOYED_ELSEWHERE；"
     "只支持外网模式（409 AGENT_SSH_PUBLIC_ONLY）。剩余内存或磁盘不多时 capacity_warning 提醒"
-    "（D4：不拦）。进度看 GET /deployment 的 job。",
+    "（D4：不拦）。进度看 GET /deployment 的 job（connect / inspect / upload / pull / plugin / "
+    "start / schedule / online / reflection）；成功后部署记录的 runtime_installed 为 true。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422, 503),
 )
@@ -761,8 +784,11 @@ async def deploy_agent_instance(
     "/agents/instances/{instance_id}/undeploy",
     status_code=status.HTTP_202_ACCEPTED,
     summary="从服务器上卸载实例（owner）",
-    description="只用专用密钥：停止这个实例的容器、删掉它的定时任务，可选删除它的目录"
-    "（不可恢复）。同一台服务器上的其他实例不受影响；不卸载 Docker，不吊销专用公钥。",
+    description="用服务器上保存的登录密码登录（T-0179，不用 SSH 密钥）：停止这个实例的容器、"
+    "删掉它的定时任务，可选删除它的目录（不可恢复）。同一台服务器上的其他实例不受影响；"
+    "不卸载 Docker、不改 authorized_keys。保留目录时部署记录的 runtime_installed 记为 false。"
+    "没保存密码 409 AGENT_SERVER_CREDENTIAL_REQUIRED，解不开 409 "
+    "AGENT_SERVER_CREDENTIAL_UNREADABLE；同机有任务 409 AGENT_SSH_JOB_RUNNING。",
     dependencies=_write,
     responses=error_responses(401, 403, 404, 409, 422, 503),
 )
