@@ -44,8 +44,8 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     // 实例的发件记录（T-0118）：默认没有
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/outbox$/.test(path) && request.method === 'GET') return Response.json({ items: [], rejected_replies: [] })
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/wakeups$/.test(path) && request.method === 'GET') return Response.json({ items: [], targets: [] })
-    // OpenClaw 服务器（T-0147）：默认没有服务器，实例没有部署
-    if (path === '/api/v1/agents/servers' && request.method === 'GET') return Response.json({ items: [], unassigned: [] })
+    // 智能体服务器（T-0147、T-0181）：默认没有服务器，实例没有部署
+    if (path === '/api/v1/agents/servers' && request.method === 'GET') return Response.json({ items: [], unassigned: [], summary: { server_count: 0, ready_count: 0, successful_deployments: 0, not_initialized_count: 0, needs_credentials_count: 0, deployment_counts_partial: false, generated_at: '2026-11-09T00:00:00Z' } })
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/deployment$/.test(path) && request.method === 'GET') return Response.json({ deployment: null, server: null, job: null, capacity_warning: null })
     // 实例的运行环境权限（T-0140）：默认关闭
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/runner$/.test(path) && request.method === 'GET') return Response.json(runnerOff)

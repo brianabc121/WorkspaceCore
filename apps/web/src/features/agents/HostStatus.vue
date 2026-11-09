@@ -53,7 +53,7 @@ const bar = (value: number | null | undefined) => ({ width: `${Math.min(100, Mat
       <button type="button" class="secondary-button" :aria-expanded="open" @click="open = !open">{{ open ? '收起负载' : '查看负载' }}</button>
     </div>
     <p class="form-help">
-      所在服务器：<RouterLink v-if="serverId && server" :to="{ path: '/agents', query: { tab: 'servers', server: serverId } }">{{ server }}</RouterLink><template v-else>还没有识别（第一次上报后自动归到服务器）</template>
+      所在服务器：<RouterLink v-if="serverId && server" :to="{ path: '/agent-servers', query: { server: serverId } }">{{ server }}</RouterLink><template v-else>还没有识别（第一次上报后自动归到服务器）</template>
     </p>
     <ul v-if="own.length" class="host-meters" aria-label="这个智能体的当前用量">
       <li v-for="m in own" :key="m.key" :class="{ 'is-danger': m.danger }">

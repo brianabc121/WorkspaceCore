@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory, type RouteRecordRaw, type RouterHistory } from 'vue-router'
+import { createRouter, createWebHistory, type RouteLocationNormalized, type RouteRecordRaw, type RouterHistory } from 'vue-router'
 import { watch } from 'vue'
 import type { Pinia } from 'pinia'
 import { QueryClient } from '@tanstack/vue-query'
@@ -28,6 +28,7 @@ import DeveloperPage from '../pages/DeveloperPage.vue'
 import OperationsPage from '../pages/OperationsPage.vue'
 import ImPage from '../pages/ImPage.vue'
 import AgentsPage from '../pages/AgentsPage.vue'
+import AgentServersPage from '../pages/AgentServersPage.vue'
 import SecretsPage from '../pages/SecretsPage.vue'
 import AiPage from '../pages/AiPage.vue'
 import AppCenterPage from '../pages/AppCenterPage.vue'
@@ -56,9 +57,26 @@ const knowledgeRoutes: RouteRecordRaw[] = [
 // 侧栏项的标题、说明与角色要求（admin = owner / admin，owner = 只有 owner）
 const navMeta = (item: NavItem) => ({ title: item.title, description: item.description, admin: item.minRole === 'admin', owner: item.minRole === 'owner' })
 
-// 宽版内容区：任务、项目、日历、邮件（四页改造），开发者、运维（二批四页改造，T-0176 / T-0177）。
-// 列表与详情并列；其他页面宽度不变。知识库是独立页面，自己的布局；早报是模块，在模块路由里声明
-const WIDE_PAGES = new Set(['/tasks', '/projects', '/calendar', '/mail', '/developer', '/operations'])
+// 宽版内容区：任务、项目、日历、邮件（四页改造），开发者、运维（二批四页改造，T-0176 / T-0177），
+// 智能体服务器、OpenClaw 智能体（T-0181 / T-0182）。列表与详情并列；其他页面宽度不变。
+// 知识库是独立页面，自己的布局；早报是模块，在模块路由里声明
+const WIDE_PAGES = new Set(['/tasks', '/projects', '/calendar', '/mail', '/developer', '/operations', '/agent-servers', '/agents'])
+
+// 旧链接（T-0147 的两个标签）：/agents?tab=servers&server=… 换成独立的服务器页（只带有效的 server 与 range），
+// /agents?tab=instances 去掉 tab、保留其余参数（例如 instance）。都用 replace，后退不会回到旧地址
+const HOST_RANGES = ['24h', '7d', '30d']
+export function legacyAgentsRedirect(to: RouteLocationNormalized) {
+  if (to.path !== '/agents' || to.query.tab === undefined) return null
+  if (to.query.tab === 'servers') {
+    const query: Record<string, string> = {}
+    if (typeof to.query.server === 'string' && to.query.server) query.server = to.query.server
+    if (typeof to.query.range === 'string' && HOST_RANGES.includes(to.query.range)) query.range = to.query.range
+    return { path: '/agent-servers', query, hash: to.hash, replace: true }
+  }
+  const query = { ...to.query }
+  delete query.tab
+  return { path: '/agents', query, hash: to.hash, replace: true }
+}
 
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHistory(), queryClient = new QueryClient()) {
   const auth = useAuthStore(pinia)
@@ -75,7 +93,7 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
         path: item.path,
         // 知识库（T-0099）是带子页面的独立页面：总览、图谱、笔记、编辑器、知识库主页、变更记录、外部文档
         ...(item.path === '/knowledge' ? { children: knowledgeRoutes } : {}),
-        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/im': ImPage, '/agents': AgentsPage, '/agents/secrets': SecretsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/modules': AppCenterPage, '/settings/navigation': NavigationSettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage, '/mail': MailPage, '/settings/mail': MailSettingsPage, '/runner': RunnerPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
+        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/im': ImPage, '/agents': AgentsPage, '/agent-servers': AgentServersPage, '/agents/secrets': SecretsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/modules': AppCenterPage, '/settings/navigation': NavigationSettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage, '/mail': MailPage, '/settings/mail': MailSettingsPage, '/runner': RunnerPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
         // 消息页（T-0095）、知识库（T-0099）是不带工作台侧栏和顶栏的独立页面
         meta: { ...navMeta(item), standalone: item.path === '/im' || item.path === '/knowledge', wide: WIDE_PAGES.has(item.path) },
       })),
@@ -101,6 +119,8 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
   })
   router.beforeEach(async (to) => {
     if (to.path === '/connection-error') return true
+    const legacy = legacyAgentsRedirect(to)
+    if (legacy) return legacy
     try { await auth.initialize() }
     catch { return { path: '/connection-error', query: { redirect: to.fullPath } } }
     if (auth.setupRequired) return to.path === '/setup' ? true : '/setup'

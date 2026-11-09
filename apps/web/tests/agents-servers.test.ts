@@ -1,30 +1,19 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fireEvent, screen, within } from '@testing-library/vue'
 import { mockApi, openApp, me, workspace } from './helpers'
+import { GB, at, current, deploymentState as deployment, detail, fail, instance, job, load, overviewOf, path, readyServer, row, server, serverList, ssh } from './agents-fixtures'
 import type { Schema } from '../src/services/api'
 
-// T-0147：“服务器”标签（添加、核对指纹、准备、详情、每个智能体的份额与表格）与实例卡片的“部署到服务器”。
-const at = '2026-11-07T04:00:00Z'
-const GB = 1024 ** 3
-const path = (r: Request) => new URL(r.url).pathname
-const instance = (over: Partial<Schema['AgentInstanceOut']> = {}): Schema['AgentInstanceOut'] => ({ id: 'inst-a', name: 'alpha', description: '', network_mode: 'public', scope: 'read', max_role: 'member', status: 'pending', im_user_id: 'oc_a', im_nickname: '甲', im_ready: true, acting_user_id: 'user-a', last_seen_at: null, reported_version: null, plugin_version: null, bundle_issued_at: null, im_token_expires_at: null, disabled_at: null, project_admin: { enabled: false, granted_by: null, granted_at: null }, im_media: { enabled: false, granted_by: null, granted_at: null }, stop_others: { enabled: false, granted_by: null, granted_at: null }, mail: { accounts: [], read_enabled: true, send_enabled: false, send_scope: null, recipients: [], send_by: null, send_at: null, version: 3 }, bundle_outdated: false, server_id: null, server_manual: false, limits: { mem_limit_mb: null, cpus: null }, version: 3, created_at: at, updated_at: at, credentials: [], secret_grants: [], ...over })
-const ssh = (over: Partial<Schema['ServerSshOut']> = {}): Schema['ServerSshOut'] => ({ host: 'oc.example.com', address: '203.0.113.10', port: 2222, username: 'deploy', host_key_algorithm: 'ssh-ed25519', host_key_fingerprint: 'SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG', host_key_confirmed: false, host_key_confirmed_at: null, client_key_installed: false, client_key_fingerprint: null, prepared_at: null, auth_method: 'password', password_set: true, credential_revision: 1, connection_status: 'unknown', last_connection_at: null, legacy_key_cleanup_state: 'not_needed', ...over })
-const server = (over: Partial<Schema['AgentServerOut']> = {}): Schema['AgentServerOut'] => ({ id: 'srv-1', name: '香港 4 核', kind: 'ssh', ssh: ssh(), reported_at: null, stale: true, cores: null, cpu_percent: null, load15: null, mem_total: null, mem_used_percent: null, disk_used_percent: null, instances_total: 0, instances_online: 0, alerts: [], initialization_status: 'not_initialized', deployable: false, deploy_block_reason: 'not_initialized', managed_deployments: 0, successful_deployments: 0, deployment_counts_partial: false, allocated_mem_limit_mb: 0, allocated_cpus: 0, has_unlimited_limits: false, version: 1, created_at: at, updated_at: at, ...over })
-const PREPARE = ['connect', 'inspect', 'authorize_key', 'docker', 'reconnect'] as const
-const job = (kind: Schema['AgentSshJobOut']['kind'], status: Schema['AgentSshJobOut']['status'], over: Partial<Schema['AgentSshJobOut']> = {}): Schema['AgentSshJobOut'] => ({ id: `job-${kind}`, kind, status, log: '$ sudo -S true\npassword=***', error_code: null, error_message: null, started_at: at, finished_at: status === 'running' ? null : at, updated_at: at,
-  steps: PREPARE.map((key, i) => ({ key, status: status === 'succeeded' ? 'done' : i < 2 ? 'done' : i === 2 ? 'running' : 'pending', detail: null })), ...over })
-const detail = (s: Schema['AgentServerOut'], over: Partial<Schema['AgentServerDetail']> = {}): Schema['AgentServerDetail'] => ({ server: s, current: null, range: '24h', points: [], agents: [], job: null, warning: null, ...over })
-const load = (over: Partial<Schema['AgentLoad']> = {}): Schema['AgentLoad'] => ({ reported_at: at, stale: false, available: true, cpu_cores: 1, cpu_percent: 25, mem_bytes: 4 * GB, mem_limit: null, mem_total: 16 * GB, pids: 30, data_bytes: GB, data_truncated: false, rx_rate: 1024, tx_rate: 512, restarts_1h: 0, ...over })
-const row = (id: string, name: string, over: Partial<Schema['ServerAgentRow']> = {}): Schema['ServerAgentRow'] => ({ instance_id: id, name, status: 'online', deployed: true, deployment_state: 'deployed', latest_job: null, deployment_project: null, install_dir: `/home/deploy/myworkspace-openclaw/${id}`, mem_limit_mb: null, cpus: null, load: load(), alerts: [], tokens_1h: 0, running_task: null, ...over })
-const current: Schema['HostCurrent'] = { reported_at: at, stale: false, cpu_model: 'Test CPU', cores: 4, cpu_percent: 60, load: [1, 1, 1], mem_total: 16 * GB, mem_available: 4 * GB, mem_used: 12 * GB, mem_limit: null, swap_total: 0, swap_used: 0, data_disk: { total: 100 * GB, free: 50 * GB, used: 50 * GB, used_percent: 50 }, root_disk: { total: 100 * GB, free: 50 * GB, used: 50 * GB, used_percent: 50 }, rx_rate: 2048, tx_rate: 1024, uptime_seconds: 86400 }
-const deployment = (over: Partial<Schema['AgentDeploymentState']> = {}): Schema['AgentDeploymentState'] => ({ deployment: null, server: null, job: null, capacity_warning: null, ...over })
-const fail = (status: number, code: string, details: Record<string, unknown> = {}, headers: Record<string, string> = {}) => Response.json({ error: { code, message: 'x', request_id: 'req', details } }, { status, headers })
+// T-0147 / T-0181：服务器详情（整机与每个智能体的份额、表格、趋势、运维、移除、更换地址）与实例详情里的“部署到服务器”。
+// 添加服务器、连接测试、初始化与旧服务器补密码见 agent-server-redesign.test.ts。
+const list = (items: Schema['AgentServerOut'][]) => serverList(items)
 
 function setup(handler: (r: Request) => Response | Promise<Response | undefined> | undefined, inst: Schema['AgentInstanceOut'] = instance()) {
   return mockApi(async r => await handler(r) ?? (
     path(r) === '/api/v1/me' && r.method === 'GET' ? Response.json({ ...me, workspaces: [{ ...workspace, role: 'owner' }] }) :
     path(r) === '/api/v1/agents/settings' ? Response.json({ agents_enabled: true, updated_at: null, updated_by: null, version: 7 }) :
     path(r) === '/api/v1/agents/instances' ? Response.json({ items: [inst], next_cursor: null, total_estimate: 1 }) :
+    path(r) === '/api/v1/agents/overview' ? Response.json(overviewOf([inst])) :
     path(r) === '/api/v1/agents/secrets' ? Response.json({ items: [], next_cursor: null, total_estimate: 0 }) :
     path(r) === '/api/v1/agents/host-summary' ? Response.json({ items: [] }) :
     path(r).endsWith('/ops') && r.method === 'GET' ? Response.json({ available: false, reason: 'not_deployed', running: null, items: [] }) : undefined
@@ -35,93 +24,31 @@ const json = async (requests: Request[], method: string, p: string) => {
   return await requests.filter(r => r.method === method && path(r) === p).at(-1)!.clone().json() as unknown
 }
 async function deployPanel() {
-  await openApp('/agents')
+  await openApp('/agents?instance=inst-a')
   const card = await screen.findByRole('article', { name: '实例：alpha' })
   return within(card).getByRole('region', { name: '部署到服务器' })
 }
 afterEach(() => vi.restoreAllMocks())
 
-describe('servers tab', () => {
-  it('adds a server with its login password, confirms its fingerprint and prepares it', async () => {
-    let current = server(), polls = 0
-    let state = detail(current)
-    const requests = setup(async r => {
-      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json({ items: polls ? [current] : [], unassigned: [{ id: 'inst-a', name: 'alpha', status: 'pending' }] })
-      if (path(r) === '/api/v1/agents/servers' && r.method === 'POST') { polls++; return Response.json(state, { status: 201 }) }
-      if (path(r) === '/api/v1/agents/servers/srv-1' && r.method === 'GET') { polls++; return Response.json(state) }
-      if (path(r) === '/api/v1/agents/servers/srv-1/confirm') {
-        current = server({ ssh: ssh({ host_key_confirmed: true, host_key_confirmed_at: at }), version: 2 }); state = detail(current)
-        return Response.json(state)
-      }
-      if (path(r) === '/api/v1/agents/servers/srv-1/prepare') {
-        const running = detail(current, { job: job('prepare', 'running') })
-        // 下一次取详情时任务已经结束
-        current = server({ ssh: ssh({ host_key_confirmed: true, host_key_confirmed_at: at, client_key_installed: true, client_key_fingerprint: 'SHA256:client', prepared_at: at }), version: 3 })
-        state = detail(current, { job: job('prepare', 'succeeded') })
-        return Response.json(running, { status: 202 })
-      }
-    })
-    await openApp('/agents?tab=servers')
-    expect(await screen.findByText(/还没有服务器/)).toBeVisible()
-    const unassigned = screen.getByRole('region', { name: '还没归属服务器的实例' })
-    expect(within(unassigned).getByText('alpha · 等待接入')).toBeVisible()
-    await fireEvent.click(screen.getByRole('button', { name: '添加服务器' }))
-    const form = screen.getByRole('form', { name: '添加服务器' })
-    const probe = within(form).getByRole('button', { name: '读取主机公钥' })
-    await fireEvent.update(within(form).getByLabelText('名称 *'), '香港 4 核')
-    await fireEvent.update(within(form).getByLabelText('服务器 IP 或域名 *'), ' oc.example.com ')
-    await fireEvent.update(within(form).getByLabelText('SSH 端口 *'), '2222')
-    await fireEvent.update(within(form).getByLabelText('SSH 账号 *'), 'bad user')
-    expect(probe).toBeDisabled()
-    await fireEvent.update(within(form).getByLabelText('SSH 账号 *'), 'deploy')
-    expect(probe).toBeDisabled()
-    // T-0178：添加时就填登录密码（加密保存、只写不读）
-    const secret = within(form).getByLabelText('登录密码 *') as HTMLInputElement
-    expect(secret).toHaveAttribute('type', 'password')
-    await fireEvent.update(secret, 'hunter2-secret')
-    await fireEvent.click(probe)
-    expect(await json(requests, 'POST', '/api/v1/agents/servers')).toEqual({ name: '香港 4 核', host: 'oc.example.com', port: 2222, username: 'deploy', login_password: 'hunter2-secret' })
-
-    // 添加后进入详情：核对指纹
-    const keys = await screen.findByRole('region', { name: 'SSH 与专用密钥' })
-    const check = await within(keys).findByRole('group', { name: '核对主机公钥' })
-    expect(within(check).getByText('SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG')).toBeVisible()
-    expect(within(check).getByText('ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub')).toBeVisible()
-    const confirm = within(check).getByRole('button', { name: '确认指纹' })
-    expect(confirm).toBeDisabled()
-    await fireEvent.click(within(check).getByLabelText(/我已在服务器上核对/))
-    await fireEvent.click(confirm)
-    expect(await json(requests, 'POST', '/api/v1/agents/servers/srv-1/confirm')).toEqual({ version: 1, fingerprint: 'SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG' })
-
-    // 准备服务器：用保存的密码，请求里不再带密码
-    const prepare = await within(keys).findByRole('form', { name: '准备服务器' })
-    expect(within(prepare).queryByLabelText('登录密码 *')).not.toBeInTheDocument()
-    await fireEvent.click(within(prepare).getByRole('button', { name: '准备服务器' }))
-    expect(await json(requests, 'POST', '/api/v1/agents/servers/srv-1/prepare')).toEqual({ version: 2 })
-    expect(await within(keys).findByText(/服务器已准备好：之后在这台服务器上部署实例不用再输密码/, {}, { timeout: 4000 })).toBeVisible()
-    expect(within(keys).getByText(/已装在服务器上（SHA256:client）/)).toBeVisible()
-    expect(within(keys).getByText(/password=\*\*\*/)).toBeInTheDocument()
-    const bodies = await Promise.all(requests.filter(r => r.method !== 'GET').map(r => r.clone().text()))
-    expect(bodies.filter(b => b.includes('hunter2-secret'))).toHaveLength(1)
-    expect(document.body.innerHTML).not.toContain('hunter2-secret')
-  })
-
+describe('server detail', () => {
   it('shows the whole server, each agent’s share, a sortable agents table and one agent’s trend', async () => {
-    const s = server({ ssh: ssh({ host_key_confirmed: true, host_key_confirmed_at: at, client_key_installed: true, prepared_at: at }), reported_at: at, stale: false, cores: 4, cpu_percent: 60, mem_total: 16 * GB, mem_used_percent: 75, disk_used_percent: 50, instances_total: 2, instances_online: 2 })
+    const s = readyServer({ name: '香港 4 核', reported_at: at, stale: false, cores: 4, cpu_percent: 60, mem_total: 16 * GB, mem_used_percent: 75, disk_used_percent: 50, instances_total: 2, instances_online: 2 })
     const agents = [
       row('inst-a', 'alpha', { load: load({ cpu_percent: 10, mem_bytes: 2 * GB }), tokens_1h: 5000, running_task: { id: 't-1', title: '写周报' } }),
       row('inst-b', 'beta', { load: load({ cpu_percent: 30, mem_bytes: 6 * GB, mem_limit: 6.2 * GB }), alerts: ['mem_near_limit'], tokens_1h: 100 }),
     ]
     const requests = setup(r => {
-      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json({ items: [s], unassigned: [] })
+      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json(list([s]))
       if (path(r) === '/api/v1/agents/servers/srv-1') return Response.json(detail(s, { current, agents }))
       if (path(r) === '/api/v1/agents/instances/inst-b/host') return Response.json({ instance_id: 'inst-b', reported: true, server: { id: 'srv-1', name: s.name }, current, range: '24h', points: [], alerts: [], agent: agents[1].load, agent_points: [{ at, cpu_avg: 30, cpu_max: 50, cores_avg: 1.2, mem_avg: 6 * GB, mem_max: 6.1 * GB, rx_avg: 1, rx_max: 2, tx_avg: 1, tx_max: 2 }], agent_alerts: ['mem_near_limit'] })
     })
-    await openApp('/agents?tab=servers')
-    const card = await screen.findByRole('article', { name: '服务器：香港 4 核' })
-    expect(within(card).getByText(/2 个智能体，2 个在线 · 4 核/)).toBeVisible()
-    expect(within(card).getByText(/CPU/)).toHaveTextContent('CPU 60%')
-    await fireEvent.click(within(card).getByRole('button', { name: '查看详情' }))
+    const { router } = await openApp('/agent-servers')
+    const servers = await within(await screen.findByRole('region', { name: '服务器列表' })).findByRole('table')
+    const line = within(servers).getByRole('row', { name: /香港 4 核/ })
+    expect(line).toHaveTextContent('2 个2 个消息在线')
+    expect(line).toHaveTextContent('4 核 / 16 GB')
+    await fireEvent.click(within(line).getByRole('button', { name: '查看：香港 4 核' }))
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agent-servers?server=srv-1'))
 
     const whole = await screen.findByRole('region', { name: '整机负载' })
     // 堆叠条：每个智能体占整机多少；颜色按名字的固定顺序，系统与其他程序单列
@@ -130,8 +57,12 @@ describe('servers tab', () => {
     const mem = within(whole).getByText('内存：每个智能体占多少').closest('figure')!
     expect(within(mem).getByText('alpha').closest('li')).toHaveTextContent('alpha13%（2.0 GB）')
     expect(within(mem).getByText('系统与其他程序').closest('li')).toHaveTextContent('25%（4.0 GB）')
+    // 趋势范围记在地址栏（?range=），刷新、分享后还在
+    await fireEvent.click(within(whole).getByRole('button', { name: '最近 7 天' }))
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agent-servers?server=srv-1&range=7d'))
+    await vi.waitFor(() => expect(requests.some(r => path(r) === '/api/v1/agents/servers/srv-1' && new URL(r.url).searchParams.get('range') === '7d')).toBe(true))
 
-    const table = within(screen.getByRole('region', { name: '这台服务器上的智能体' })).getByRole('table')
+    const table = within(screen.getByRole('region', { name: '各智能体负载' })).getByRole('table')
     const names = () => within(table).getAllByRole('row').slice(1).map(r => within(r).getAllByRole('rowheader')[0].textContent?.trim())
     // 默认按 CPU 从高到低
     expect(names()).toEqual(['beta', 'alpha'])
@@ -150,91 +81,83 @@ describe('servers tab', () => {
     expect(await within(trend).findByText('CPU（占整机）')).toBeVisible()
     // 服务器级运维：查看全部容器、清理镜像
     expect(screen.getByRole('region', { name: '服务器运维' })).toBeVisible()
-    // 返回列表
-    await fireEvent.click(screen.getByRole('button', { name: '← 返回服务器列表' }))
-    expect(await screen.findByRole('article', { name: '服务器：香港 4 核' })).toBeVisible()
+    // 关闭详情，回到列表
+    await fireEvent.click(screen.getByRole('button', { name: '关闭服务器详情' }))
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agent-servers'))
+    expect(screen.queryByRole('region', { name: '整机负载' })).toBeNull()
   })
 
-  it('revokes with a forced fallback and refuses to remove a server that still has agents', async () => {
+  it('removes a server and returns to the list even though its detail is gone', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const s = server({ ssh: ssh({ host_key_confirmed: true, host_key_confirmed_at: at, client_key_installed: true, prepared_at: at }), version: 4 })
-    const requests = setup(r => {
-      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json({ items: [s], unassigned: [] })
-      if (path(r) === '/api/v1/agents/servers/srv-1' && r.method === 'GET') return Response.json(detail(s, { agents: [row('inst-a', 'alpha')] }))
-      if (path(r) === '/api/v1/agents/servers/srv-1/revoke') {
-        return r.clone().json().then((body: { force: boolean }) => body.force
-          ? Response.json(detail(server({ ssh: ssh({ host_key_confirmed: true, prepared_at: at }), version: 5 }), { warning: '没能连上服务器（timeout），只删除了工作台保存的私钥；请在服务器的 ~/.ssh/authorized_keys 里手动删除这一行：ssh-ed25519 AAAA myworkspace' }))
-          : fail(503, 'AGENT_SSH_UNREACHABLE', { reason: 'timeout' }))
-      }
-    })
-    await openApp('/agents?tab=servers&server=srv-1')
-    const keys = await screen.findByRole('region', { name: 'SSH 与专用密钥' })
-    const manage = await within(keys).findByRole('group', { name: '吊销与移除' })
-    expect(within(manage).getByText(/上面还有 1 个经工作台部署的实例/)).toBeVisible()
-    await fireEvent.click(within(manage).getByRole('button', { name: '吊销专用密钥' }))
-    expect(await json(requests, 'POST', '/api/v1/agents/servers/srv-1/revoke')).toEqual({ version: 4, force: false })
-    expect(await within(keys).findByText(/连接超时：检查 IP 与端口/)).toBeVisible()
-    await fireEvent.click(within(keys).getByRole('button', { name: /强制吊销/ }))
-    await vi.waitFor(() => expect(requests.filter(r => path(r) === '/api/v1/agents/servers/srv-1/revoke')).toHaveLength(2))
-    expect(await requests.filter(r => path(r) === '/api/v1/agents/servers/srv-1/revoke')[1].clone().json()).toEqual({ version: 4, force: true })
-    expect(await within(keys).findByText(/手动删除这一行：ssh-ed25519 AAAA myworkspace/)).toBeVisible()
-  })
-
-  it('removes a revoked server and returns to the list even though its detail is gone', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const s = server({ ssh: ssh({ host_key_confirmed: true, host_key_confirmed_at: at, prepared_at: at }), version: 6 })
+    const s = readyServer({ name: '香港 4 核', version: 6 })
     let removed = false
     const requests = setup(async r => {
       // 移除后列表要过一会儿才取回来：回到列表时也不能还显示它
       if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') {
         if (removed) await new Promise(done => setTimeout(done, 1500))
-        return Response.json({ items: removed ? [] : [s], unassigned: [] })
+        return Response.json(list(removed ? [] : [s]))
       }
       if (path(r) === '/api/v1/agents/servers/srv-1' && r.method === 'DELETE') { removed = true; return new Response(null, { status: 204 }) }
       // 移除后再读详情是 404：页面也要回到服务器列表
-      if (path(r) === '/api/v1/agents/servers/srv-1' && r.method === 'GET') return removed ? fail(404, 'NOT_FOUND') : Response.json(detail(s, { agents: [row('inst-a', 'alpha', { deployed: false, load: null })] }))
+      if (path(r) === '/api/v1/agents/servers/srv-1' && r.method === 'GET') return removed ? fail(404, 'NOT_FOUND') : Response.json(detail(s, { agents: [row('inst-a', 'alpha', { deployed: false, deployment_state: 'associated', load: null })] }))
     })
-    await openApp('/agents?tab=servers&server=srv-1')
-    const keys = await screen.findByRole('region', { name: 'SSH 与专用密钥' })
-    const prepare = await within(keys).findByRole('form', { name: '准备服务器' })
-    await fireEvent.click(within(prepare).getByRole('button', { name: '移除服务器' }))
+    const { router } = await openApp('/agent-servers?server=srv-1')
+    const panel = await screen.findByRole('region', { name: '连接与初始化' })
+    await fireEvent.click(within(panel).getByRole('button', { name: '移除服务器' }))
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('不会停止或删除服务器上的任何容器'))
     await vi.waitFor(() => expect(requests.some(r => r.method === 'DELETE' && path(r) === '/api/v1/agents/servers/srv-1' && new URL(r.url).searchParams.get('version') === '6')).toBe(true))
-    expect(await screen.findByRole('button', { name: '添加服务器' })).toBeVisible()
-    expect(screen.queryByRole('article', { name: '服务器：香港 4 核' })).toBeNull()
-    expect(screen.queryByRole('region', { name: 'SSH 与专用密钥' })).toBeNull()
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agent-servers'))
+    expect(screen.queryByRole('region', { name: '连接与初始化' })).toBeNull()
+    expect(screen.queryByRole('row', { name: /香港 4 核/ })).toBeNull()
   })
 
-  it('explains probe failures and the rate limit when adding a server', async () => {
-    let attempt = 0
+  it('does not offer to move or remove a server that still has platform deployments', async () => {
+    const s = readyServer({ managed_deployments: 1, version: 4 })
     setup(r => {
-      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json({ items: [], unassigned: [] })
-      if (path(r) === '/api/v1/agents/servers' && r.method === 'POST') return ++attempt === 1 ? fail(503, 'AGENT_SSH_UNREACHABLE', { reason: 'refused' }) : attempt === 2 ? fail(409, 'AGENT_SERVER_EXISTS') : fail(429, 'RATE_LIMITED', {}, { 'Retry-After': '42' })
+      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json(list([s]))
+      if (path(r) === '/api/v1/agents/servers/srv-1' && r.method === 'GET') return Response.json(detail(s, { agents: [row('inst-a', 'alpha')] }))
     })
-    await openApp('/agents?tab=servers')
-    await fireEvent.click(await screen.findByRole('button', { name: '添加服务器' }))
-    const form = screen.getByRole('form', { name: '添加服务器' })
-    await fireEvent.update(within(form).getByLabelText('名称 *'), 'a')
-    await fireEvent.update(within(form).getByLabelText('服务器 IP 或域名 *'), '203.0.113.10')
-    await fireEvent.update(within(form).getByLabelText('SSH 账号 *'), 'root')
-    await fireEvent.update(within(form).getByLabelText('登录密码 *'), 'pw')
-    await fireEvent.click(within(form).getByRole('button', { name: '读取主机公钥' }))
-    expect(await within(form).findByText(/连接被拒绝：这个端口上没有 SSH 服务/)).toBeVisible()
-    await fireEvent.click(within(form).getByRole('button', { name: '读取主机公钥' }))
-    expect(await within(form).findByText(/已经添加过了/)).toBeVisible()
-    await fireEvent.click(within(form).getByRole('button', { name: '读取主机公钥' }))
-    expect(await within(form).findByText(/请 42 秒后重试/)).toBeVisible()
+    await openApp('/agent-servers?server=srv-1')
+    const panel = await screen.findByRole('region', { name: '连接与初始化' })
+    expect(within(panel).getByRole('button', { name: '移除服务器' })).toBeDisabled()
+    expect(within(panel).getByRole('button', { name: '更换地址' })).toBeDisabled()
+    expect(within(panel).getByText(/有 1 条平台部署记录/)).toBeVisible()
+  })
+
+  it('changes the address with the password and asks to check the new fingerprint', async () => {
+    const s = server({ ssh: ssh({ host_key_confirmed: true, host_key_confirmed_at: at }), deploy_block_reason: 'not_initialized', version: 3 })
+    const moved = server({ ssh: ssh({ host: '198.51.100.20', address: '198.51.100.20', port: 2200, username: 'ops' }), version: 4 })
+    const requests = setup(r => {
+      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json(list([s]))
+      if (path(r) === '/api/v1/agents/servers/srv-1' && r.method === 'GET') return Response.json(detail(s))
+      if (path(r) === '/api/v1/agents/servers/srv-1/address') return Response.json(detail(moved))
+    })
+    await openApp('/agent-servers?server=srv-1')
+    const panel = await screen.findByRole('region', { name: '连接与初始化' })
+    await fireEvent.click(within(panel).getByRole('button', { name: '更换地址' }))
+    const form = await screen.findByRole('form', { name: '更换地址' })
+    expect(within(form).getByLabelText('IP 地址 *')).toHaveValue('203.0.113.10')
+    await fireEvent.update(within(form).getByLabelText('IP 地址 *'), '198.51.100.20')
+    await fireEvent.update(within(form).getByLabelText('SSH 端口 *'), '2200')
+    await fireEvent.update(within(form).getByLabelText('登录账号 *'), 'ops')
+    await fireEvent.update(within(form).getByLabelText('登录密码 *'), 'new-pw')
+    await fireEvent.click(within(form).getByRole('button', { name: '保存并测试连接' }))
+    expect(await json(requests, 'PUT', '/api/v1/agents/servers/srv-1/address')).toEqual({ host: '198.51.100.20', port: 2200, username: 'ops', login_password: 'new-pw', version: 3 })
+    // 新地址的指纹要重新核对，之前不会测试
+    expect(await screen.findByRole('group', { name: '核对主机指纹' })).toBeVisible()
+    expect(requests.some(r => path(r).endsWith('/test-connection'))).toBe(false)
   })
 })
 
 describe('deploy to a server', () => {
-  const ready = server({ ssh: ssh({ host_key_confirmed: true, host_key_confirmed_at: at, client_key_installed: true, prepared_at: at }), instances_total: 1 })
-  const fresh = server({ id: 'srv-2', name: '新加坡 2 核', ssh: ssh({ host: 'sg.example.com', host_key_confirmed: true, host_key_confirmed_at: at }) })
+  const ready = readyServer({ name: '香港 4 核', instances_total: 1 })
+  const fresh = server({ id: 'srv-2', name: '新加坡 2 核', ssh: ssh({ host: 'sg.example.com', host_key_confirmed: true, host_key_confirmed_at: at }), deploy_block_reason: 'not_initialized' })
   const pending = server({ id: 'srv-3', name: '还没核对' })
 
-  it('deploys to a prepared server without a password and follows the job; an unprepared one asks once', async () => {
+  it('deploys to an initialized server with its saved password (never asks for one) and follows the job', async () => {
     let state = deployment(), calls = 0
     const requests = setup(r => {
-      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json({ items: [ready, fresh, pending], unassigned: [] })
+      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json(list([ready, fresh, pending]))
       if (path(r) === '/api/v1/agents/instances/inst-a/deployment') { calls++; return Response.json(state) }
       if (path(r) === '/api/v1/agents/instances/inst-a/deploy') {
         const running = deployment({ server: ready, job: job('install', 'running', { steps: [{ key: 'upload', status: 'running', detail: null }, { key: 'online', status: 'pending', detail: null }] }), capacity_warning: '这台服务器剩余内存不多（可用 1.2 GB）：再部署一个实例可能会变慢。' })
@@ -245,44 +168,43 @@ describe('deploy to a server', () => {
     const panel = await deployPanel()
     const form = await within(panel).findByRole('form', { name: '部署' })
     const select = within(form).getByLabelText('部署到') as HTMLSelectElement
-    // 只列出确认过指纹的 SSH 服务器，默认选已准备的
-    expect([...select.options].map(o => o.textContent)).toEqual(['香港 4 核（已准备，1 个实例）', '新加坡 2 核（还没准备，要输一次密码）'])
+    // 只列出服务端判断可以部署的服务器（已初始化、确认过指纹、有密码）；不在这里要密码或初始化
+    expect([...select.options].map(o => o.textContent)).toEqual(['香港 4 核（已就绪，1 个实例）'])
     expect(select.value).toBe('srv-1')
-    expect(within(form).queryByLabelText('登录密码 *')).not.toBeInTheDocument()
-    // 选没准备的服务器要输密码；换回来密码清空
-    await fireEvent.update(select, 'srv-2')
-    const password = within(form).getByLabelText('登录密码 *') as HTMLInputElement
-    expect(within(form).getByRole('button', { name: '部署到这台服务器' })).toBeDisabled()
-    await fireEvent.update(password, 'password-for-sg')
-    await fireEvent.update(select, 'srv-1')
-    expect(within(form).queryByLabelText('登录密码 *')).not.toBeInTheDocument()
-    await fireEvent.update(select, 'srv-2')
-    expect((within(form).getByLabelText('登录密码 *') as HTMLInputElement).value).toBe('')
-    await fireEvent.update(select, 'srv-1')
+    expect(within(panel).queryByLabelText(/密码/)).not.toBeInTheDocument()
     await fireEvent.click(within(form).getByRole('button', { name: '部署到这台服务器' }))
     expect(await json(requests, 'POST', '/api/v1/agents/instances/inst-a/deploy')).toEqual({ server_id: 'srv-1', version: 3 })
     expect(await within(panel).findByText(/剩余内存不多/)).toBeVisible()
     expect(await within(panel).findByText('部署完成，实例已连上工作台。', {}, { timeout: 4000 })).toBeVisible()
     expect(calls).toBeGreaterThanOrEqual(2)
     expect(within(panel).getByText('/home/deploy/myworkspace-openclaw/0123456789ab')).toBeVisible()
-    expect(within(panel).getByRole('link', { name: '香港 4 核' })).toHaveAttribute('href', '/agents?tab=servers&server=srv-1')
-    const bodies = await Promise.all(requests.filter(r => r.method !== 'GET').map(r => r.clone().text()))
-    expect(bodies.some(b => b.includes('password-for-sg'))).toBe(false)
+    expect(within(panel).getByRole('link', { name: '香港 4 核' })).toHaveAttribute('href', '/agent-servers?server=srv-1')
   })
 
-  it('undeploys with removal of its own directory only', async () => {
+  it('points to the servers page when no server can be deployed to', async () => {
+    setup(r => path(r) === '/api/v1/agents/servers' && r.method === 'GET' ? Response.json(list([fresh, pending])) : undefined)
+    const panel = await deployPanel()
+    expect(await within(panel).findByText(/还没有可以部署的服务器/)).toBeVisible()
+    expect(within(panel).getByRole('link', { name: '智能体服务器' })).toHaveAttribute('href', '/agent-servers')
+    expect(within(panel).queryByLabelText(/密码/)).not.toBeInTheDocument()
+  })
+
+  it('continues a failed deployment on the same server and undeploys with removal of its own directory only', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const deployed = deployment({ server: ready, deployment: { server_id: 'srv-1', install_dir: '/home/deploy/myworkspace-openclaw/0123456789ab', installed_at: at, runtime_installed: true, version: 2 } })
+    const failed = deployment({ server: ready, deployment: { server_id: 'srv-1', install_dir: '/home/deploy/myworkspace-openclaw/0123456789ab', installed_at: null, runtime_installed: null, version: 2 }, job: job('install', 'failed', { error_code: 'AGENT_SSH_ONLINE_TIMEOUT', error_message: '等了 10 分钟实例没有连上工作台', steps: [{ key: 'start', status: 'done', detail: null }, { key: 'online', status: 'failed', detail: null }] }) })
     const requests = setup(r => {
-      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json({ items: [ready], unassigned: [] })
-      if (path(r) === '/api/v1/agents/instances/inst-a/deployment') return Response.json(deployed)
-      if (path(r) === '/api/v1/agents/instances/inst-a/undeploy') return Response.json(deployment({ ...deployed, job: job('uninstall', 'running', { steps: [{ key: 'stop', status: 'running', detail: null }] }) }), { status: 202 })
+      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json(list([ready]))
+      if (path(r) === '/api/v1/agents/instances/inst-a/deployment') return Response.json(failed)
+      if (path(r) === '/api/v1/agents/instances/inst-a/deploy') return Response.json(deployment({ ...failed, job: job('install', 'running') }), { status: 202 })
+      if (path(r) === '/api/v1/agents/instances/inst-a/undeploy') return Response.json(deployment({ ...failed, job: job('uninstall', 'running', { steps: [{ key: 'stop', status: 'running', detail: null }] }) }), { status: 202 })
     }, instance({ server_id: 'srv-1', server_manual: true, version: 5 }))
     const panel = await deployPanel()
     const form = await within(panel).findByRole('form', { name: '部署' })
     expect(within(form).queryByLabelText('部署到')).not.toBeInTheDocument()
-    expect(within(form).getByRole('button', { name: '重新部署' })).toBeEnabled()
-    const group = within(panel).getByRole('group', { name: '卸载' })
+    expect(within(panel).getByText(/等了 10 分钟实例没有连上工作台/)).toBeVisible()
+    await fireEvent.click(within(form).getByRole('button', { name: '继续部署' }))
+    expect(await json(requests, 'POST', '/api/v1/agents/instances/inst-a/deploy')).toEqual({ server_id: 'srv-1', version: 5 })
+    const group = await within(panel).findByRole('group', { name: '卸载' })
     await fireEvent.click(within(group).getByLabelText(/同时删除这个实例的目录/))
     await fireEvent.click(within(group).getByRole('button', { name: '从服务器上卸载' }))
     expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('同一台服务器上的其他实例不受影响'))
@@ -290,11 +212,12 @@ describe('deploy to a server', () => {
   })
 
   it('lets a manually deployed intranet instance be assigned to a server, and back to automatic', async () => {
-    const auto = server({ id: 'srv-auto', name: '自动识别的服务器（beta）', kind: 'auto', ssh: null })
+    const auto = server({ id: 'srv-auto', name: '自动识别的服务器（beta）', kind: 'auto', ssh: null, initialization_status: null, deploy_block_reason: 'not_ssh' })
     let inst = instance({ network_mode: 'intranet' })
     const requests = setup(async r => {
       if (path(r) === '/api/v1/agents/instances' && r.method === 'GET') return Response.json({ items: [inst], next_cursor: null, total_estimate: 1 })
-      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json({ items: [ready, auto], unassigned: [] })
+      if (path(r) === '/api/v1/agents/overview') return Response.json(overviewOf([inst]))
+      if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json(list([ready, auto]))
       if (path(r) === '/api/v1/agents/instances/inst-a/deployment') return Response.json(deployment({ server: inst.server_id ? auto : null }))
       if (path(r) === '/api/v1/agents/instances/inst-a/server') {
         const body = await r.clone().json() as { server_id: string | null }
@@ -326,7 +249,7 @@ describe('deploy to a server', () => {
     const requests = setup(r => {
       if (path(r) === '/api/v1/agents/instances/inst-a/limits') return Response.json({ mem_limit_mb: 2048, cpus: 1.5 })
     })
-    await openApp('/agents')
+    await openApp('/agents?instance=inst-a')
     const card = await screen.findByRole('article', { name: '实例：alpha' })
     const limits = within(card).getByRole('region', { name: '资源上限' })
     expect(within(limits).getByText('资源上限：不限制')).toBeVisible()

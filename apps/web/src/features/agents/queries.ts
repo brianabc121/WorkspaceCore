@@ -43,6 +43,8 @@ export function unique<T extends { id: string }>(pages: { items: T[] }[] | undef
 }
 
 export const STATUS = { pending: '等待接入', online: '在线', offline: '离线', disabled: '已停用' } as const
+// 列表与服务器页的“连接状态”：消息在线以 OpenIM 上下线为准，不代表容器在运行（改造规范第 3.3 节）
+export const IM_STATUS = { pending: '待接入', online: '消息在线', offline: '离线', disabled: '已停用' } as const
 export const NETWORK = { intranet: '内网', public: '外网' } as const
 export const SCOPE = { read: '只读', read_write: '读写（写操作要审批）' } as const
 export const ROLE = { admin: 'admin', member: 'member', viewer: 'viewer' } as const
@@ -60,6 +62,7 @@ export function agentError(error: unknown): string {
     FORBIDDEN: '只有 owner 可以管理 OpenClaw 实例与密钥库。',
     NOT_FOUND: '记录不存在，或你已无权访问。',
     WRITE_UNKNOWN: '连接中断，结果未知。接入包可能已经签发：刷新后看凭证列表，需要时重新生成（旧凭证会按选择保留或吊销）。',
+    NOT_IMPLEMENTED: '这项功能的服务端还没有就绪，请稍后再试。',
   }
   return messages[error.code] ?? (error.status === 0 ? '网络连接失败，请检查连接后重试。' : '请求失败，请稍后重试。')
 }

@@ -13,6 +13,7 @@ const icons: Record<string, Component> = {
   '/mail': Mail,
   '/developer': Code,
   '/operations': Activity,
+  '/agent-servers': Server,
   '/agents': Bot,
   '/runner': Server,
   '/ai': ShieldCheck,
