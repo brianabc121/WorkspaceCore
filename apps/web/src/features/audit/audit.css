@@ -1,0 +1,85 @@
+/* 审计日志（T-0198，效果图 docs/v2/ai-admin-redesign/assets/08）：筛选条、事件记录表、事件详情。
+   布局沿用管理区外壳（management.css）与 workspace-pages / agents-pages 的表格；颜色只用主题变量，亮 / 暗主题自动跟随。 */
+
+/* 筛选条 */
+.au-filters { display: grid; gap: 6px; min-width: 0; }
+.au-toolbar { align-items: stretch; }
+.au-select { display: flex; flex: 1 1 150px; min-width: 0; max-width: 200px; }
+.au-select select { width: 100%; max-width: none; min-width: 0; text-overflow: ellipsis; }
+.au-search { flex: 3 1 220px; max-width: none; }
+.au-reset { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.au-reset svg { width: 15px; height: 15px; }
+.au-hint { margin: 0; font-size: .8rem; }
+
+/* 事件记录 */
+.au-events .mg-section-head h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.au-count { color: var(--muted); font-size: .86rem; font-weight: 400; font-variant-numeric: tabular-nums; }
+.au-empty-hint { margin: 0; text-align: center; }
+.au-table td, .au-table th { vertical-align: middle; }
+.au-table thead th:last-child { text-align: right; }
+.au-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.au-actor { min-width: 5em; overflow-wrap: anywhere; }
+.au-system { color: var(--muted); }
+.au-actor .au-id { white-space: nowrap; }
+.au-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .84em; overflow-wrap: anywhere; }
+.au-table tbody th.au-event { font-weight: 400; min-width: 14em; }
+.au-event-line { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.au-event-icon { flex: none; width: 18px; height: 18px; margin-top: 2px; color: var(--muted); }
+.au-event-text { display: grid; gap: 1px; min-width: 0; }
+.au-event-title { font-weight: 600; overflow-wrap: anywhere; }
+code.au-event-title, .au-raw { font-size: .86rem; }
+.au-action { font-size: .76rem; overflow-wrap: anywhere; }
+.au-object { min-width: 8em; overflow-wrap: anywhere; }
+.au-object-name { margin-right: 6px; }
+.au-tag { display: inline-flex; align-items: center; min-height: 20px; padding: 0 8px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); font-size: .72rem; font-weight: 600; white-space: nowrap; vertical-align: middle; }
+.au-tag.is-muted { background: var(--surface-2); color: var(--muted); font-weight: 500; }
+.au-none { color: var(--muted); font-size: .86rem; }
+.au-table .asv-link-cell { text-align: right; white-space: nowrap; }
+.au-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
+.au-foot .form-help { margin: 0; }
+.au-foot .au-more { min-width: 120px; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); font-weight: 600; }
+
+/* 面板变窄时表格改成卡片（management.css）：事件放在卡片最上面 */
+@container (max-width: 620px) {
+  .mg-section .au-table tbody th.au-event { order: -1; }
+  .mg-section .au-table .asv-link-cell { text-align: left; }
+  .mg-section .au-table .au-time { white-space: normal; }
+}
+
+/* 事件详情：宽屏右侧一栏，窄屏在右侧抽屉里 */
+.au-side { position: sticky; top: 16px; }
+.au-detail { display: grid; gap: 14px; min-width: 0; }
+.au-detail-head h2 { font-size: 1.2rem; }
+.au-detail-title { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.au-detail-title > div { display: grid; gap: 2px; min-width: 0; }
+.au-detail-icon { flex: none; display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); }
+.au-detail-icon svg { width: 22px; height: 22px; }
+.au-detail-name { font-size: 1.15rem; font-weight: 700; overflow-wrap: anywhere; }
+.au-facts { display: grid; margin: 0; min-width: 0; }
+.au-facts > div { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 4px 14px; padding: 9px 0; border-top: 1px solid var(--line); min-width: 0; }
+.au-facts > div:first-child { border-top: 0; }
+.au-facts dt { color: var(--muted); font-size: .88rem; }
+.au-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; display: grid; gap: 2px; justify-items: start; }
+.au-facts code { font-size: .86rem; overflow-wrap: anywhere; }
+.au-inline { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.au-related { justify-self: start; }
+.au-related svg { width: 15px; height: 15px; }
+.au-block { display: grid; gap: 8px; min-width: 0; padding-top: 14px; border-top: 1px solid var(--line); }
+.au-block h3 { font-size: 1rem; font-weight: 700; }
+.au-block .form-help { margin: 0; }
+.au-info > div { grid-template-columns: 7em minmax(0, 1fr); }
+.au-info dd { white-space: pre-wrap; }
+.au-raw-block { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.au-raw-block summary { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; list-style: none; }
+.au-raw-block summary::-webkit-details-marker { display: none; }
+.au-raw-block summary svg { width: 16px; height: 16px; transition: transform .15s; transform: rotate(-90deg); }
+.au-raw-block[open] summary svg { transform: none; }
+.au-raw-block summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.au-json { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); font-size: .8rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+.au-state { display: grid; gap: 10px; justify-items: center; }
+.au-state p { margin: 0; }
+
+@media (max-width: 760px) {
+  .au-select { flex: 1 1 calc(50% - 10px); max-width: none; }
+  .au-search { flex-basis: 100%; }
+}
