@@ -387,17 +387,19 @@ async function download(page, click) {
   await page.getByRole('region', { name: '与审批通知的会话' }).getByText(/由 Owner 触发/).waitFor()
   check(await noticeChat.getByRole('textbox', { name: '消息', exact: true }).count() === 0, '审批通知会话不能发消息')
   await cardBox.getByRole('button', { name: '批准并执行' }).click()
-  await cardBox.getByText('已执行').waitFor({ timeout: 30000 })
-  step('审批卡片：IM 的“审批通知”会话里出现卡片，写明“由 Owner 触发”，在卡片上批准后显示“已执行”')
+  // T-0191：状态文字由“已执行”改为“执行成功”（批准不等于执行成功，要等真实结果）
+  await cardBox.getByText('执行成功').waitFor({ timeout: 30000 })
+  step('审批卡片：IM 的“审批通知”会话里出现卡片，写明“由 Owner 触发”，在卡片上批准后显示“执行成功”')
 
   await page.goto(`${base}/ai?view=activity&id=${actionId}`)
-  const record = page.getByRole('listitem').filter({ hasText: '已执行' }).first()
-  await record.waitFor()
-  await record.getByText(/Owner 私聊它/).waitFor()
+  // T-0191 审批中心改版：?id= 打开右侧“审批详情”（不在当前列表里也会按 ID 读取）
+  const record = page.getByRole('region', { name: '审批详情' })
+  await record.getByText('执行成功').first().waitFor()
+  await record.getByText('私聊它').waitFor()
   await record.getByRole('link', { name: 'IM 会话' }).waitFor()
   const done = await apiGet(page, workspace, `/api/v1/ai/tool-executions/${actionId}`)
   check(done.status === 'succeeded' && done.source.triggered_by_name === 'Owner', `批准后应执行成功并记下触发者：${done.status} ${done.error_code}`)
-  step(`审批中心：记录显示“已执行”（${done.result_summary}）、来源“Owner 私聊它”与 IM 会话链接`)
+  step(`审批中心：详情显示“执行成功”（${done.result_summary}）、触发者 Owner（私聊它）与 IM 会话链接`)
 
   // ---------------------------------------------------------------- 右侧 AI 抽屉（规范 §8.1，T-0066）
   await page.goto(`${base}/`)
