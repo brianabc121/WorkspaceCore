@@ -51,8 +51,9 @@ const knowledgeRoutes: RouteRecordRaw[] = [
 // 侧栏项的标题、说明与角色要求（admin = owner / admin，owner = 只有 owner）
 const navMeta = (item: NavItem) => ({ title: item.title, description: item.description, admin: item.minRole === 'admin', owner: item.minRole === 'owner' })
 
-// 任务、项目、日历、邮件四页用宽版内容区（四页改造）：列表与详情并列；其他页面宽度不变
-const WIDE_PAGES = new Set(['/tasks', '/projects', '/calendar', '/mail'])
+// 宽版内容区：任务、项目、日历、邮件（四页改造），开发者、运维（二批四页改造，T-0176 / T-0177）。
+// 列表与详情并列；其他页面宽度不变。知识库是独立页面，自己的布局；早报是模块，在模块路由里声明
+const WIDE_PAGES = new Set(['/tasks', '/projects', '/calendar', '/mail', '/developer', '/operations'])
 
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHistory(), queryClient = new QueryClient()) {
   const auth = useAuthStore(pinia)
