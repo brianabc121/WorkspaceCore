@@ -12,12 +12,13 @@
 - summary 由工作台按参数生成，不采用 AI 给的文字。
 """
 
+import base64
 import hashlib
 import hmac
 import json
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -25,6 +26,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
 from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,11 +59,16 @@ from app.models import (
 )
 from app.schemas.ai_tools import (
     APPROVAL_TTL,
+    EXPIRING_WINDOW,
     MAX_PENDING_PER_INSTANCE,
     TOOLS,
+    AiExecutionSummaryOut,
     AiToolExecutionOut,
     AiToolExecutionPage,
     ApproveRequest,
+    ExecutionInstanceOption,
+    ExecutionPeriod,
+    ExecutionSort,
     ExecutionSource,
     PendingApproval,
     ToolSpec,
@@ -81,6 +88,12 @@ APPROVAL_LINK = "/approvals?id={id}"
 SOURCE_WINDOW = timedelta(minutes=10)
 SEALED_KEY = "$sealed"
 _UNKNOWN_CODES = frozenset({"RESULT_UNKNOWN", "WRITE_UNKNOWN"})
+# 审批中心的“执行异常”：执行了但失败或结果未知；rejected / expired / denied 没有执行，不算
+EXCEPTION_STATUSES = ("failed", "unknown")
+# 时间范围按 created_at 往回数；all 不限
+_PERIODS: dict[str, timedelta] = {"24h": timedelta(hours=24), "7d": timedelta(days=7)}
+# 绑定了条件的游标前缀；没有前缀的是旧格式（创建时间|ID）
+_CURSOR_V2 = "v2."
 
 
 class ToolCallError(Exception):
@@ -524,7 +537,7 @@ class AiToolService:
             raise
         return _Target()
 
-    # ---------------------------------------------------------------- 管理员：列表与详情
+    # ---------------------------------------------------------------- 管理员：列表、汇总与详情
 
     def _visible(self, access: WorkspaceAccess) -> list[Any]:
         clauses: list[Any] = [AiToolExecution.workspace_id == access.workspace.id]
@@ -542,50 +555,140 @@ class AiToolService:
         tool_name: str | None,
         cursor: str | None,
         limit: int,
+        period: ExecutionPeriod = "all",
+        sort: ExecutionSort = "created_desc",
     ) -> AiToolExecutionPage:
+        """调用记录（契约第 2.2 节）。
+
+        - period 按 created_at、相对服务端当前时间计算，翻页之间窗口随请求时刻移动，不冻结快照；
+        - sort=expires_asc：expires_at 升序、空值最后，同分再按 created_at、id 升序；
+        - 游标绑定空间、请求的用户与可见范围、筛选、时间范围与排序，条件不符 422；
+          旧格式游标只在不带新条件（period=all、sort=created_desc）时可用；
+        - pending_count 是可见范围内未过期的待审批总数，不随本次筛选变化。
+        """
         await self._expire_due(access.workspace.id)
-        clauses = self._visible(access)
-        if statuses:
-            clauses.append(AiToolExecution.status.in_(statuses))
-        if risks:
-            clauses.append(AiToolExecution.risk_level.in_(risks))
-        if instance_id:
-            clauses.append(AiToolExecution.instance_id == instance_id)
-        if tool_name:
-            clauses.append(AiToolExecution.tool_name == tool_name)
+        now = _now()
+        clauses = [
+            *self._visible(access),
+            *_since(period, now),
+            *_filters(statuses=statuses, risks=risks, instance_id=instance_id, tool_name=tool_name),
+        ]
+        binding = _binding(
+            access,
+            statuses=statuses,
+            risks=risks,
+            instance_id=instance_id,
+            tool_name=tool_name,
+            period=period,
+            sort=sort,
+        )
         if cursor:
-            created, row_id = _decode_cursor(cursor)
-            clauses.append(
-                (AiToolExecution.created_at < created)
-                | ((AiToolExecution.created_at == created) & (AiToolExecution.id < row_id))
+            legacy = period == "all" and sort == "created_desc"
+            clauses.append(_after(_decode_cursor(cursor, binding, legacy=legacy), sort))
+        order = (
+            (
+                AiToolExecution.expires_at.asc().nulls_last(),
+                AiToolExecution.created_at.asc(),
+                AiToolExecution.id.asc(),
             )
+            if sort == "expires_asc"
+            else (AiToolExecution.created_at.desc(), AiToolExecution.id.desc())
+        )
         rows = list(
             await self.db.scalars(
-                select(AiToolExecution)
-                .where(*clauses)
-                .order_by(AiToolExecution.created_at.desc(), AiToolExecution.id.desc())
-                .limit(limit + 1)
+                select(AiToolExecution).where(*clauses).order_by(*order).limit(limit + 1)
             )
         )
-        pending = await self.pending_count(access.workspace.id)
+        pending = await self.db.scalar(
+            select(func.count())
+            .select_from(AiToolExecution)
+            .where(*self._visible(access), _pending_at(now))
+        )
         more = len(rows) > limit
         rows = rows[:limit]
         return AiToolExecutionPage(
             items=[to_out(row) for row in rows],
-            next_cursor=_encode_cursor(rows[-1]) if more else None,
+            next_cursor=_encode_cursor(rows[-1], binding) if more else None,
             total_estimate=None,
-            pending_count=pending,
+            pending_count=int(pending or 0),
+        )
+
+    async def summary(
+        self,
+        access: WorkspaceAccess,
+        *,
+        period: ExecutionPeriod,
+        instance_id: uuid.UUID | None,
+        risks: Sequence[str] | None,  # 类里的 list 是上面的方法名，这里用 Sequence
+        tool_name: str | None,
+    ) -> AiExecutionSummaryOut:
+        """审批中心的汇总卡片与筛选项（契约第 2.1 节）。
+
+        - 只读：不写库、不调用 _expire_due、不投递作业；已到期但还没被清理的待审批
+          用 expires_at > as_of 显式排除。
+        - 范围是 _visible（owner / admin 整个工作空间，member / viewer 只算以自己身份执行的）
+          加 period。period 按 created_at 同样作用于四个计数：待审批只有 15 分钟有效期，
+          24h / 7d 实际上包含全部有效待审批，卡片口径统一为“此期间发起的调用”。
+        - 计数再叠加 instance / risk / tool 条件；筛选项只用可见范围 + period，不被已选条件锁死。
+          实例选项只取 ID 仍在的记录，名称是该 ID 最近一条记录的名称；被删实例（ID 为 null）
+          的记录照常计数，但不进选项，也不会把它的名称算到别的实例上。
+        - 全部用 SQL 聚合，不数列表的某一页。
+        """
+        now = _now()
+        scope = [*self._visible(access), *_since(period, now)]
+        pending = _pending_at(now)
+        pending_count, expiring, critical, exceptions = (
+            await self.db.execute(
+                select(
+                    func.count().filter(pending),
+                    func.count().filter(
+                        pending, AiToolExecution.expires_at <= now + EXPIRING_WINDOW
+                    ),
+                    func.count().filter(pending, AiToolExecution.risk_level == "critical"),
+                    func.count().filter(AiToolExecution.status.in_(EXCEPTION_STATUSES)),
+                ).where(
+                    *scope,
+                    *_filters(
+                        statuses=None, risks=risks, instance_id=instance_id, tool_name=tool_name
+                    ),
+                )
+            )
+        ).one()
+        latest = (
+            select(AiToolExecution.instance_id, AiToolExecution.instance_name)
+            .where(*scope, AiToolExecution.instance_id.is_not(None))
+            .ext(distinct_on(AiToolExecution.instance_id))
+            .order_by(
+                AiToolExecution.instance_id,
+                AiToolExecution.created_at.desc(),
+                AiToolExecution.id.desc(),
+            )
+        )
+        instances = [
+            ExecutionInstanceOption(id=instance, name=name)
+            for instance, name in (await self.db.execute(latest)).all()
+            if instance is not None
+        ]
+        tools = await self.db.scalars(select(AiToolExecution.tool_name).where(*scope).distinct())
+        return AiExecutionSummaryOut(
+            pending_count=pending_count,
+            expiring_count=expiring,
+            critical_pending_count=critical,
+            exception_count=exceptions,
+            as_of=now,
+            period=period,
+            expiring_window_seconds=int(EXPIRING_WINDOW.total_seconds()),
+            # 排序在 Python 里做：不依赖数据库的排序规则
+            instances=sorted(instances, key=lambda option: (option.name, str(option.id))),
+            tools=sorted(tools),
         )
 
     async def pending_count(self, workspace_id: uuid.UUID) -> int:
+        """整个工作空间未过期的待审批数（MCP 首页概况用；审批中心按可见范围另算）。"""
         count = await self.db.scalar(
             select(func.count())
             .select_from(AiToolExecution)
-            .where(
-                AiToolExecution.workspace_id == workspace_id,
-                AiToolExecution.status == "pending_approval",
-                AiToolExecution.expires_at > _now(),
-            )
+            .where(AiToolExecution.workspace_id == workspace_id, _pending_at(_now()))
         )
         return int(count or 0)
 
@@ -1003,18 +1106,146 @@ def to_out(row: AiToolExecution) -> AiToolExecutionOut:
     )
 
 
-def _encode_cursor(row: AiToolExecution) -> str:
-    return f"{row.created_at.isoformat()}|{row.id}"
+def _pending_at(now: datetime) -> Any:
+    """有效的待审批：还没到期（expires_at = now 已经算到期）。"""
+    return and_(AiToolExecution.status == "pending_approval", AiToolExecution.expires_at > now)
 
 
-def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
+def _since(period: ExecutionPeriod, now: datetime) -> list[Any]:
+    """时间范围：created_at 不早于 now 减去窗口（含边界）；all 不限。
+
+    不设上界：数据库时钟略快时，刚发起的调用 created_at 可能比 now 晚一点，也要算进来。
+    """
+    window = _PERIODS.get(period)
+    return [] if window is None else [AiToolExecution.created_at >= now - window]
+
+
+def _filters(
+    *,
+    statuses: Sequence[str] | None,
+    risks: Sequence[str] | None,
+    instance_id: uuid.UUID | None,
+    tool_name: str | None,
+) -> list[Any]:
+    clauses: list[Any] = []
+    if statuses:
+        clauses.append(AiToolExecution.status.in_(statuses))
+    if risks:
+        clauses.append(AiToolExecution.risk_level.in_(risks))
+    if instance_id:
+        clauses.append(AiToolExecution.instance_id == instance_id)
+    if tool_name:
+        clauses.append(AiToolExecution.tool_name == tool_name)
+    return clauses
+
+
+@dataclass(frozen=True)
+class _Position:
+    """游标指向的上一页最后一条。"""
+
+    created_at: datetime
+    id: uuid.UUID
+    expires_at: datetime | None = None
+
+
+def _binding(
+    access: WorkspaceAccess,
+    *,
+    statuses: Sequence[str] | None,
+    risks: Sequence[str] | None,
+    instance_id: uuid.UUID | None,
+    tool_name: str | None,
+    period: ExecutionPeriod,
+    sort: ExecutionSort,
+) -> str:
+    """游标绑定的条件摘要。只用来发现“换了条件还拿旧游标”，不是授权凭据：可见范围每次都重新校验。"""
+    canonical = json.dumps(
+        {
+            "workspace": str(access.workspace.id),
+            "user": str(access.user_id),
+            "all": has_role(access.role, Role.admin),
+            "status": sorted(set(statuses or [])),
+            "risk": sorted(set(risks or [])),
+            "instance": str(instance_id) if instance_id else None,
+            "tool": tool_name,
+            "period": period,
+            "sort": sort,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()[:32]
+
+
+def _encode_cursor(row: AiToolExecution, binding: str) -> str:
+    payload = {
+        "c": row.created_at.isoformat(),
+        "i": str(row.id),
+        "e": row.expires_at.isoformat() if row.expires_at else None,
+        "b": binding,
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode()
+    return _CURSOR_V2 + base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _decode_cursor(cursor: str, binding: str, *, legacy: bool) -> _Position:
+    if not cursor.startswith(_CURSOR_V2):
+        if not legacy:
+            raise _cursor_error("游标与当前的时间范围或排序不符，请从第一页重新加载")
+        try:
+            created, row_id = cursor.split("|", 1)
+            return _Position(
+                created_at=_aware(datetime.fromisoformat(created)), id=uuid.UUID(row_id)
+            )
+        except ValueError:
+            raise _cursor_error("游标无效") from None
     try:
-        created, row_id = cursor.split("|", 1)
-        return datetime.fromisoformat(created), uuid.UUID(row_id)
-    except ValueError:
-        raise ApiError(
-            422,
-            "VALIDATION_FAILED",
-            "请求参数校验失败",
-            details={"errors": [{"loc": ["query", "cursor"], "msg": "游标无效"}]},
-        ) from None
+        body = cursor.removeprefix(_CURSOR_V2)
+        data = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+        position = _Position(
+            created_at=_aware(datetime.fromisoformat(data["c"])),
+            id=uuid.UUID(data["i"]),
+            expires_at=_aware(datetime.fromisoformat(data["e"])) if data["e"] else None,
+        )
+        bound = data["b"]
+    except (ValueError, KeyError, TypeError):
+        raise _cursor_error("游标无效") from None
+    if bound != binding:
+        raise _cursor_error("筛选、排序或可见范围变了，旧的游标不能再用：请从第一页重新加载")
+    return position
+
+
+def _after(position: _Position, sort: ExecutionSort) -> Any:
+    """keyset：排在游标那一条之后的记录。"""
+    if sort == "created_desc":
+        return or_(
+            AiToolExecution.created_at < position.created_at,
+            and_(
+                AiToolExecution.created_at == position.created_at,
+                AiToolExecution.id < position.id,
+            ),
+        )
+    later = or_(
+        AiToolExecution.created_at > position.created_at,
+        and_(AiToolExecution.created_at == position.created_at, AiToolExecution.id > position.id),
+    )
+    if position.expires_at is None:
+        return and_(AiToolExecution.expires_at.is_(None), later)
+    return or_(
+        AiToolExecution.expires_at > position.expires_at,
+        and_(AiToolExecution.expires_at == position.expires_at, later),
+        AiToolExecution.expires_at.is_(None),
+    )
+
+
+def _cursor_error(message: str) -> ApiError:
+    return ApiError(
+        422,
+        "VALIDATION_FAILED",
+        "请求参数校验失败",
+        details={"errors": [{"loc": ["query", "cursor"], "msg": message}]},
+    )

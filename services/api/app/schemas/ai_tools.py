@@ -114,7 +114,12 @@ ExecutionStatus = Literal[
     "unknown",
     "denied",
 ]
+# 审批中心的时间范围（按 created_at，“此期间发起的调用”）与列表排序（T-0190）
+ExecutionPeriod = Literal["24h", "7d", "all"]
+ExecutionSort = Literal["created_desc", "expires_asc"]
 APPROVAL_TTL = timedelta(minutes=15)
+# 汇总里“即将到期”的窗口
+EXPIRING_WINDOW = timedelta(seconds=180)
 MAX_PENDING_PER_INSTANCE = 20
 MAX_AGENDA_SPAN = timedelta(days=31)
 
@@ -168,7 +173,43 @@ class AiToolExecutionOut(BaseModel):
 
 
 class AiToolExecutionPage(Page[AiToolExecutionOut]):
-    pending_count: int = Field(description="当前工作空间待审批的总数")
+    pending_count: int = Field(
+        description="当前用户可见范围内未过期的待审批总数（owner / admin 为整个工作空间，"
+        "member / viewer 只算以自己身份执行的）；不随本次筛选变化"
+    )
+
+
+class ExecutionInstanceOption(BaseModel):
+    id: UUID
+    name: str = Field(description="这个实例 ID 最近一条调用记录里的名称")
+
+
+class AiExecutionSummaryOut(BaseModel):
+    """审批中心的汇总卡片与筛选项；只在当前用户可见范围内按 SQL 聚合，不看列表翻到第几页。"""
+
+    pending_count: int = Field(
+        description="待审批：status 为 pending_approval 且 expires_at 晚于 as_of"
+    )
+    expiring_count: int = Field(
+        description="待审批中 expires_at 不晚于 as_of + expiring_window_seconds 的（即将到期）"
+    )
+    critical_pending_count: int = Field(description="待审批中风险等级为 critical 的")
+    exception_count: int = Field(
+        description="执行异常：状态为 failed 或 unknown；rejected / expired / denied 不算"
+    )
+    as_of: datetime = Field(description="统计时服务端的当前时间（UTC），前端用它校正倒计时")
+    period: ExecutionPeriod = Field(
+        description="统计的时间范围：created_at 不早于 as_of 减去 24 小时 / 7 天；all 不限。"
+        "四个计数都只算这个范围内发起的调用"
+    )
+    expiring_window_seconds: int = Field(description="“即将到期”的窗口，固定 180 秒")
+    instances: list[ExecutionInstanceOption] = Field(
+        description="可选的实例：可见范围、时间范围内有调用记录且实例仍存在（ID 非空）的；"
+        "不受其他已选条件影响"
+    )
+    tools: list[str] = Field(
+        description="可选的工具名：可见范围、时间范围内出现过的；不受其他已选条件影响"
+    )
 
 
 class ApproveRequest(_Strict):

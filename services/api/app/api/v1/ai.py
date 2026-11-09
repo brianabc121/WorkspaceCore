@@ -23,9 +23,12 @@ from app.domain.ai_tools import AiToolService, parse_if_match, to_out
 from app.domain.auth import AuthContext
 from app.domain.policy import WorkspaceAccess
 from app.schemas.ai_tools import (
+    AiExecutionSummaryOut,
     AiToolExecutionOut,
     AiToolExecutionPage,
     ApproveRequest,
+    ExecutionPeriod,
+    ExecutionSort,
     ExecutionStatus,
     RejectRequest,
     RiskLevel,
@@ -46,6 +49,15 @@ IfMatch = Annotated[
         description="GET 返回的 ETag（就是 version）；与当前版本不一致时返回 409 VERSION_CONFLICT",
     ),
 ]
+Risks = Annotated[list[RiskLevel] | None, Query()]
+ToolName = Annotated[str | None, Query(max_length=64, pattern=r"^[a-z_]+$")]
+Period = Annotated[
+    ExecutionPeriod,
+    Query(
+        description="按 created_at 只看这段时间内发起的调用（相对服务端当前时间，UTC）；"
+        "缺省 all 不限"
+    ),
+]
 Service = Annotated[AiToolService, Depends(get_ai_tool_service)]
 Context = Annotated[AuthContext, Security(authenticated)]
 _write = [Depends(csrf_protected)]
@@ -58,15 +70,21 @@ def _etag(response: Response, version: int) -> None:
 @router.get(
     "/ai/tool-executions",
     summary="工具调用记录与待审批（viewer；member 及以下只看自己的）",
+    description="sort=expires_asc 按到期时间升序（没有到期时间的排最后，同分按创建时间、ID 升序），"
+    "缺省 created_desc 按创建时间倒序。next_cursor 绑定当前的筛选、时间范围、排序与用户，"
+    "换了条件再用旧游标返回 422；不带 period / sort 时旧格式游标仍可用。"
+    "pending_count 是当前用户可见范围内未过期的待审批总数，不随筛选变化。",
     responses=error_responses(401, 404, 422),
 )
 async def list_tool_executions(
     access: Viewer,
     service: Service,
     status_filter: Annotated[list[ExecutionStatus] | None, Query(alias="status")] = None,
-    risk_level: Annotated[list[RiskLevel] | None, Query()] = None,
+    risk_level: Risks = None,
     instance_id: UUID | None = None,
-    tool_name: Annotated[str | None, Query(max_length=64, pattern=r"^[a-z_]+$")] = None,
+    tool_name: ToolName = None,
+    period: Period = "all",
+    sort: Annotated[ExecutionSort, Query(description="排序，缺省 created_desc")] = "created_desc",
     cursor: Cursor = None,
     limit: Limit = 50,
 ) -> AiToolExecutionPage:
@@ -78,6 +96,35 @@ async def list_tool_executions(
         tool_name=tool_name,
         cursor=cursor,
         limit=limit,
+        period=period,
+        sort=sort,
+    )
+
+
+# 静态路径要在 /{execution_id} 之前注册
+@router.get(
+    "/ai/tool-executions/summary",
+    summary="审批汇总与可选筛选项（viewer；member 及以下只算自己的）",
+    description="待审批、3 分钟内到期、高危待审批与执行异常（failed / unknown）的数量，"
+    "都只算 period 内发起、并符合 instance_id / risk_level / tool_name 的调用；"
+    "不接收 status。instances / tools 只按可见范围与 period 给出，不受其他条件影响。"
+    "只读：不批准、不执行，也不触发过期清理（已到期的按 as_of 排除）。",
+    responses=error_responses(401, 404, 422),
+)
+async def get_tool_execution_summary(
+    access: Viewer,
+    service: Service,
+    period: Period = "all",
+    risk_level: Risks = None,
+    instance_id: UUID | None = None,
+    tool_name: ToolName = None,
+) -> AiExecutionSummaryOut:
+    return await service.summary(
+        access,
+        period=period,
+        instance_id=instance_id,
+        risks=list(risk_level) if risk_level else None,
+        tool_name=tool_name,
     )
 
 
