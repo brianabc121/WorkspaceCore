@@ -120,9 +120,9 @@ async def test_lifecycle_states_and_personal_view(env: Env) -> None:
     assert unblocked.json()["blocker"] is None
 
     # 本人手动完成：新的一轮，本人已查看；完成清除阻塞、结束执行段
-    current = await block(env, unblocked.json(), True, "又卡住了")
-    assert current.status_code == 200
-    done = await env.update_task(item["id"], {"version": current.json()["version"], "done": True})
+    reblocked = await block(env, unblocked.json(), True, "又卡住了")
+    assert reblocked.status_code == 200
+    done = await env.update_task(item["id"], {"version": reblocked.json()["version"], "done": True})
     assert done.status_code == 200, done.text
     data = done.json()
     assert data["work_state"] == "done" and data["completion_seq"] == 1

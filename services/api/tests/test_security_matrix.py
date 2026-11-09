@@ -35,7 +35,8 @@ PUBLIC = {
     ("POST", "/api/v1/auth/login"),
 }
 # viewer 也可以执行的写操作：只改自己的通知
-# 只改自己的已读状态：viewer 也可以（仍要会话与 CSRF）；任务结果的“标为已查看”只写自己的记录（T-0166）
+# 只改自己的已读状态：viewer 也可以（仍要会话与 CSRF）；
+# 任务结果的“标为已查看”也只写自己的记录（T-0166）
 VIEWER_WRITES = {
     ("PATCH", "/api/v1/notifications"),
     ("POST", "/api/v1/issues/{issue_id}/read"),
