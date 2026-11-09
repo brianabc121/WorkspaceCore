@@ -481,7 +481,8 @@ async def test_withheld_states_and_rate_limited_cache(ctx: Ctx) -> None:
     assert empty["summary"]["repo_count"] is None and empty["repos"]["items"] == []
     assert (await ctx.get(repo_id=str(uuid.uuid4()))).status_code == 404
 
-    until = (NOW + timedelta(minutes=10)).isoformat()
+    # 按现在的时间算：NOW 是导入时定的，全量测试跑到这里可能已经过了十几分钟（限流早已过期）
+    until = (datetime.now(UTC) + timedelta(minutes=10)).isoformat()
     integration = await seed.integration(ws, ["org/app"], settings={"rate_limited_until": until})
     app = await seed.repo(ws, integration, "org/app")
     await seed.child(ws, integration, app, "org/app", "issue", "缓存的问题", **issue())
