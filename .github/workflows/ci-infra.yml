@@ -293,7 +293,7 @@ jobs:
       - name: 接入入口自动配置验收（原样的接入包：内部 CA + 地址映射，经本机隧道连回工作台）
         run: sudo -E python3 tests/e2e/agent_auto_ingress_acceptance.py
       # T-0089 B3：把 runner 自己当成一台“新服务器”——另起一个 sshd（2222），账号要 sudo 密码、不在 docker 组，
-      # 工作台经外网入口的地址（AGENT_PUBLIC_ADDRESS）连过来，从密码登录一路装到真实的 OpenClaw 上线
+      # 工作台经外网入口的地址（AGENT_PUBLIC_ADDRESS）连过来，全程用保存的（加密的）登录密码，从初始化一路部署到真实的 OpenClaw 上线（T-0183）
       - name: SSH 自动部署验收准备（本机 sshd：专用账号，sudo 要密码，不在 docker 组）
         run: |
           command -v /usr/sbin/sshd >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq openssh-server >/dev/null; }
@@ -315,12 +315,12 @@ jobs:
           sudo /usr/sbin/sshd -f "$D/sshd_config" -E "$RUNNER_TEMP/sshd.log"
           { echo "SSH_TARGET_HOST=$ADDR"; echo "SSH_TARGET_PORT=2222"; echo "SSH_TARGET_USER=mwdeploy"; \
             echo "SSH_HOST_KEY_PUB=$D/host_ed25519.pub"; } >> "$GITHUB_ENV"
-      - name: SSH 自动部署验收（指纹确认、密码换专用密钥、sudo 加入 docker 组、真实 OpenClaw 上线、重装、卸载、吊销）
+      - name: 智能体服务器 SSH 验收（四项添加、密码加密保存、指纹确认、错误密码、初始化加入 docker 组、一次点击部署两个真实 OpenClaw、重部署、保留数据卸载、旧公钥退役）
         run: sudo -E python3 tests/e2e/agent_ssh_acceptance.py
-      # T-0090：同一台“新服务器”（上一步已卸载并吊销），这次全程在网页上操作
-      - name: SSH 自动部署浏览器验收（实例页填写服务器、核对指纹、输入一次密码、跟着进度到上线、卸载、吊销、手机宽度）
+      # T-0090 / T-0183：同一台“新服务器”（上一步已卸载、移除服务器并恢复 authorized_keys），这次全程在网页上操作
+      - name: 智能体服务器浏览器验收（服务器页四项添加、核对指纹、测试连接、初始化，智能体页选服务器部署到上线、运维、卸载、移除、手机宽度）
         run: node tests/e2e/agent_ssh_browser.cjs
-      # T-0141：同一台“新服务器”（上一步已卸载并吊销 OpenClaw），这次在网页上把它部署成运行服务器（外网入口：
+      # T-0141：同一台“新服务器”（上一步已卸载 OpenClaw 并移除服务器），这次在网页上把它部署成运行服务器（外网入口：
       # 内部 CA + 地址映射，原样的接入包）；场景 26 已用接入包手动部署验收过环境与运行，这里验收页面与 SSH 部署
       - name: 运行服务器浏览器验收（添加运行服务器、SSH 部署到上线、总览显示 gVisor、各标签、卸载、吊销、手机宽度）
         run: node tests/e2e/runner_browser.cjs
