@@ -3,4 +3,5 @@ import { useAuthStore } from '../stores/auth'
 import ProjectsWorkspace from '../features/tasks/ProjectsWorkspace.vue'
 const auth = useAuthStore()
 </script>
-<template><div class="page-heading"><h1>项目</h1><p>在工作台里新建和管理项目；删除项目会一起删除它的任务。</p></div><ProjectsWorkspace v-if="auth.workspaceId" :key="`${auth.user?.id}:${auth.workspaceId}`" /><p v-else>暂无工作空间。</p></template>
+<!-- 项目页（T-0168）：页头、统计、筛选、卡片与最近动态都在 ProjectsWorkspace 里 -->
+<template><ProjectsWorkspace v-if="auth.workspaceId" :key="`${auth.user?.id}:${auth.workspaceId}`" /><template v-else><div class="page-heading"><h1>项目</h1></div><p>暂无工作空间。</p></template></template>

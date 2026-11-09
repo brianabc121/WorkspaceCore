@@ -1,0 +1,50 @@
+/* 任务页（T-0167，效果图 01-tasks）：列表 + 右侧详情。共用部分在 features/workspace/workspace-pages.css */
+.tasks-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+.tasks-layout.has-detail { grid-template-columns: minmax(0, 1fr) minmax(360px, 440px); }
+.tasks-main { padding: 14px 16px; container-type: inline-size; }
+.tasks-toolbar { margin-bottom: 12px; }
+.tasks-toolbar .ws-search { max-width: 280px; }
+.tasks-main .quick-add { box-shadow: none; margin-bottom: 12px; }
+
+.tasks-table .col-check { width: 36px; padding-right: 0; }
+.tasks-table .col-title { min-width: 200px; }
+.tasks-table .col-title .task-title { font-weight: 600; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.tasks-table .col-title .chip { margin-left: 8px; }
+.task-labels { display: block; color: var(--muted); font-size: .8rem; margin-top: 2px; }
+.tasks-table td { white-space: nowrap; }
+.tasks-table td.col-title { white-space: normal; }
+.tasks-table tbody tr[data-state="done"] .task-title { color: var(--muted); }
+.task-executor { display: inline-flex; align-items: center; gap: 6px; }
+.task-executor::before { content: ""; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--line); flex: none; }
+.task-executor.is-agent::before { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.task-priority { display: inline-flex; align-items: center; gap: 5px; }
+.task-priority svg { width: 14px; height: 14px; }
+.task-priority.priority-urgent { color: var(--danger); font-weight: 600; }
+.task-priority.priority-high { color: var(--danger); }
+.task-priority.priority-mid { color: var(--warning); }
+.task-priority.priority-low { color: var(--success); }
+.task-priority.priority-none { color: var(--muted); }
+.due-overdue { color: var(--danger); font-weight: 600; }
+.due-today { color: var(--accent); font-weight: 600; }
+.due-none { color: var(--muted); }
+.tasks-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; color: var(--muted); font-size: .86rem; flex-wrap: wrap; }
+
+/* 右侧详情 */
+.tasks-side { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.tasks-side-title { font-size: 1.15rem; margin-bottom: 10px; }
+.task-detail { display: flex; flex-direction: column; gap: 14px; }
+.task-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.task-detail-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
+.task-detail-title h2 { font-size: 1.2rem; line-height: 1.3; overflow-wrap: anywhere; }
+.task-detail .ws-callout .form-actions { margin-top: 10px; }
+.task-detail .ws-callout textarea { width: 100%; }
+.task-running { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: .9rem; }
+.task-running svg { width: 16px; height: 16px; }
+
+/* 窄的列表区：先藏项目、优先级列；更窄时只留标题、状态、截止 */
+@container (max-width: 860px) { .tasks-table .col-project, .tasks-table .col-priority { display: none; } }
+@container (max-width: 560px) { .tasks-table .col-executor { display: none; } .tasks-table td, .tasks-table th { padding: 9px 8px; } }
+@media (max-width: 760px) {
+  .tasks-main { padding: 12px; }
+  .task-board { grid-template-columns: minmax(0, 1fr); }
+}

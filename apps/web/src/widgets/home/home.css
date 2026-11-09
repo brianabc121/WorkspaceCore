@@ -57,7 +57,7 @@
 .progress-task { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; }
 .progress-icon { flex: none; display: grid; place-items: center; width: 22px; height: 22px; color: var(--muted); }
 .progress-icon svg { width: 18px; height: 18px; }
-.progress-icon.status-in_progress { color: var(--accent); }
+.progress-icon.status-running { color: var(--accent); }
 .progress-icon.status-blocked { color: var(--danger); }
 .progress-title-wrap { display: grid; gap: 1px; min-width: 0; }
 .progress-title { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -67,8 +67,8 @@
 .progress-owner { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .status-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 12px; font-size: .76rem; font-weight: 600; white-space: nowrap; background: var(--surface-2); color: var(--muted); }
 .status-chip svg { width: 13px; height: 13px; }
-.status-chip.status-review { background: var(--warning-soft); color: var(--warning); }
-.status-chip.status-in_progress { background: var(--accent-soft); color: var(--accent); }
+.status-chip.status-awaiting_view { background: var(--warning-soft); color: var(--warning); }
+.status-chip.status-running { background: var(--accent-soft); color: var(--accent); }
 .status-chip.status-blocked { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); color: var(--danger); }
 .progress-action a { color: var(--accent); font-weight: 600; white-space: nowrap; }
 .progress-empty { padding: 18px 4px; }

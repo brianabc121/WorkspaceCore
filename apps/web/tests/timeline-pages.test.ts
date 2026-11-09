@@ -148,7 +148,7 @@ describe('任务时间轴', () => {
     timelineApi({ override: (r) => (pathOf(r) === '/api/v1/tasks' ? Response.json({ items: [task], next_cursor: null, total_estimate: null }) : undefined) })
     const { router } = await openApp('/tasks?project_id=' + project.id)
     await screen.findByRole('button', { name: task.title })
-    await fireEvent.click(within(screen.getByRole('group', { name: '显示方式' })).getByRole('button', { name: '时间轴' }))
+    await fireEvent.click(within(screen.getByRole('group', { name: '显示方式' })).getByRole('link', { name: '时间轴' }))
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/tasks/timeline'))
     expect(router.currentRoute.value.query.project).toBe(project.id)
     await router.push('/projects')

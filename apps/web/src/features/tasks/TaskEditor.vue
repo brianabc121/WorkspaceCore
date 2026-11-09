@@ -17,7 +17,8 @@ import { useAssignees } from '../timeline/api'
 import { useAuthStore } from '../../stores/auth'
 const props = defineProps<{ task?: Schema['TaskOut']; projects: Schema['ProjectOut'][]; writable: boolean; locked: boolean }>()
 // 详情 / README（T-0122）：README 是任务导览，存在项目知识库里；讨论（T-0124）：关联的 Issue
-const view = ref<'detail' | 'readme' | 'discussion'>('detail')
+// 详情 / README / 讨论：外面（任务详情侧栏的“查看结果”）可以切换（T-0167）
+const view = defineModel<'detail' | 'readme' | 'discussion'>('view', { default: 'detail' })
 const emit = defineEmits<{ submit: [command: TaskCommand] }>()
 const labelsSchema = z.string().refine((v) => parseLabels(v).length <= LABELS_MAX, `最多 ${LABELS_MAX} 个标签`).refine((v) => parseLabels(v).every((l) => l.length <= LABEL_MAX), `每个标签不超过 ${LABEL_MAX} 字`)
 const validTime = (v: string) => !v || !Number.isNaN(new Date(v).getTime())

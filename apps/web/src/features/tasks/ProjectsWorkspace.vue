@@ -1,32 +1,47 @@
 <script setup lang="ts">
 // 项目管理（T-0082）：工作台自己的项目，member 及以上可以新建、改名、归档、删除；viewer 只读。
+// 项目页改造（T-0168，效果图 02-projects；规范第 5 节）：顶部三个数（未归档、需要关注、本周完成）、
+// 未归档 / 需要关注 / 已归档筛选、搜索、排序、网格 / 列表，卡片用真实的状态计数，下面是最近动态。
 // 写接口用整数 version 做乐观并发：别处改过时返回 409，提示重新加载。删除项目会一起删除它的任务。
 // 智能体成员与项目群（T-0110）：owner / admin 新建项目时可以勾选智能体并建 IM 项目群，卡片上管理成员。
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useQueryClient } from '@tanstack/vue-query'
+import { CheckCircle2, FolderKanban, LayoutGrid, List, Plus, RefreshCw, Search, TriangleAlert } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError, errorMessage, isAccessError, type Schema } from '../../services/api'
 import { useResourceMutation } from '../resources/mutation'
 import { useCreateIntent } from '../../composables/useCreateIntent'
-import { useProjects } from './shared'
-import { formatTime } from '../time'
+import { useProjectList, useProjectSummary, type ProjectListFilters } from './projectQueries'
+import { relativeTime } from '../../widgets/home/format'
 import { useAssignees } from '../timeline/api'
-import { groupState } from './projectAgents'
 import DataState from '../../components/DataState.vue'
 import ModalPanel from '../../components/ModalPanel.vue'
 import ProjectAgentsPanel from './ProjectAgentsPanel.vue'
+import ProjectCard from './ProjectCard.vue'
+import ProjectActivityList from './ProjectActivityList.vue'
+import '../workspace/workspace-pages.css'
+import './projects.css'
 
 type Project = Schema['ProjectOut']
 const TITLE_MAX = 120, DESCRIPTION_MAX = 2000
 const auth = useAuthStore(), scope = auth.workspaceId!, header = { 'X-Workspace-Id': scope }
-const showArchived = ref(false)
-const query = useProjects(scope, showArchived)
+const filters = ref<ProjectListFilters>({ scope: 'active', q: '', sort: 'updated' })
+const search = ref('')
+const query = useProjectList(scope, filters)
+const summary = useProjectSummary(scope)
+const grid = ref(true)
+function applySearch() { filters.value = { ...filters.value, q: search.value } }
+function refreshAll() { void query.refetch(); void summary.refetch() }
 const mutation = useResourceMutation(scope, ['projects', 'tasks', 'task', 'overview', 'search'])
+const cache = useQueryClient()
+watch(mutation.message, (text) => { if (text) void cache.invalidateQueries({ predicate: (q) => ['project-summary', 'project-activity'].includes(String(q.queryKey[0])) && q.queryKey[2] === scope }) })
 const { busy, needsReload, error, message } = mutation
 const blocked = computed(() => mutation.accessDenied.value || isAccessError(query.error.value))
 const items = computed(() => blocked.value ? [] : query.data.value?.pages.flatMap((p) => p.items) ?? [])
 const writable = computed(() => !!auth.currentWorkspace && auth.currentWorkspace.role !== 'viewer' && !blocked.value)
-// 完成进度（T-0084）：已完成 / 全部；没有任务时是 0
-const percent = (project: Project) => { const total = project.open_tasks + project.done_tasks; return total ? Math.round((project.done_tasks / total) * 100) : 0 }
+// 列表视图里的进度：没有任务时不显示百分比
+const percent = (project: Project) => { const total = project.open_tasks + project.done_tasks; return total ? `${project.done_tasks}/${total} · ${Math.round((project.done_tasks / total) * 100)}%` : '尚无任务' }
+const count = (value: number | undefined) => (value === undefined ? '—' : String(value))
 const editing = ref<Project | 'new' | null>(null), title = ref(''), description = ref(''), validation = ref('')
 // 智能体与 IM 只开放给 owner / admin（member 新建项目照旧）
 const admin = computed(() => writable.value && ['owner', 'admin'].includes(auth.currentWorkspace?.role ?? ''))
@@ -82,40 +97,64 @@ const problem = computed(() => {
 })
 </script>
 <template>
-  <div class="task-toolbar">
-    <div class="form-actions">
-      <label class="check-field"><input v-model="showArchived" type="checkbox">显示已归档的项目</label>
-      <button class="secondary-button" :disabled="query.isFetching.value" @click="query.refetch()">刷新项目</button>
+  <div class="ws-header">
+    <div><h1>项目</h1><p>项目进展、待处理事项与协作成员，一处掌握。</p></div>
+    <div class="ws-actions">
+      <button type="button" class="secondary-button" :disabled="query.isFetching.value" aria-label="刷新项目" @click="refreshAll"><RefreshCw aria-hidden="true" />刷新</button>
+      <button v-if="writable" type="button" class="primary-button" :disabled="busy || needsReload" @click="open('new')"><Plus aria-hidden="true" />新建项目</button>
     </div>
-    <button v-if="writable" class="primary-button" :disabled="busy || needsReload" @click="open('new')">新建项目</button>
   </div>
+
+  <ul class="project-summary" aria-label="项目统计">
+    <li class="ws-panel tone-blue"><FolderKanban aria-hidden="true" /><span>未归档项目</span><strong>{{ count(summary.data.value?.active) }}</strong></li>
+    <li class="ws-panel tone-red"><TriangleAlert aria-hidden="true" /><span>需要关注</span><strong>{{ count(summary.data.value?.attention) }}</strong></li>
+    <li class="ws-panel tone-green" title="本周一 00:00 起完成、现在仍是已完成的任务（不是完整的历史完成次数）"><CheckCircle2 aria-hidden="true" /><span>本周完成</span><strong>{{ count(summary.data.value?.completed) }}</strong><span>项</span></li>
+  </ul>
+  <p v-if="summary.error.value" role="alert" class="feedback">统计暂时读不到：{{ errorMessage(summary.error.value) }}</p>
+
+  <div class="project-toolbar">
+    <div class="ws-chips" role="group" aria-label="筛选项目">
+      <button type="button" class="ws-chip" :aria-pressed="filters.scope === 'active'" @click="filters = { ...filters, scope: 'active' }">未归档<span class="ws-chip-count">{{ count(summary.data.value?.active) }}</span></button>
+      <button type="button" class="ws-chip tone-red" :aria-pressed="filters.scope === 'attention'" @click="filters = { ...filters, scope: 'attention' }">需要关注<span class="ws-chip-count">{{ count(summary.data.value?.attention) }}</span></button>
+      <button type="button" class="ws-chip" :aria-pressed="filters.scope === 'archived'" @click="filters = { ...filters, scope: 'archived' }">已归档</button>
+    </div>
+    <form class="ws-toolbar" role="search" aria-label="搜索项目" @submit.prevent="applySearch">
+      <label class="ws-search"><Search aria-hidden="true" /><input v-model="search" type="search" maxlength="100" placeholder="搜索项目" aria-label="搜索项目" @change="applySearch"></label>
+      <select v-model="filters.sort" aria-label="排序"><option value="updated">排序：最近更新</option><option value="title">排序：名称</option></select>
+      <div class="ws-segment" role="group" aria-label="显示方式">
+        <button type="button" :aria-pressed="grid" aria-label="网格" @click="grid = true"><LayoutGrid aria-hidden="true" /></button>
+        <button type="button" :aria-pressed="!grid" aria-label="列表" @click="grid = false"><List aria-hidden="true" /></button>
+      </div>
+    </form>
+  </div>
+
   <p v-if="problem && !editing" role="alert" class="feedback">{{ problem }}</p>
   <p v-if="message" role="status" class="feedback">{{ message }}</p>
   <button v-if="needsReload" class="secondary-button" :disabled="busy" @click="mutation.reload()">重新加载项目</button>
-  <DataState :loading="query.isPending.value" :error="query.error.value" :empty="!items.length" :empty-text="writable ? '还没有项目，点「新建项目」开始。' : '还没有项目。'" @retry="query.refetch()" />
-  <div class="project-grid">
-    <section v-for="project in items" :key="project.id" class="panel form-panel integration-card project-card" role="region" :aria-label="`项目 ${project.title}`">
-      <div class="section-heading"><h2>{{ project.title }}</h2><span v-if="project.archived" class="badge">已归档</span></div>
-      <p v-if="project.description" class="note-text">{{ project.description }}</p>
-      <div class="progress-row"><div class="progress-track" role="progressbar" :aria-label="`${project.title} 完成进度`" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="percent(project)"><span :style="{ width: `${percent(project)}%` }"></span></div><span class="progress-value">{{ percent(project) }}%</span></div>
-      <p class="form-help">未完成 {{ project.open_tasks }} · 已完成 {{ project.done_tasks }} · 更新于 {{ formatTime(project.updated_at) }}</p>
-      <p class="form-help" :aria-label="`${project.title} 的智能体`">智能体：{{ project.agents.length ? project.agents.map((a) => a.name).join('、') : '无' }} · {{ groupState(project.im_group).short }}</p>
-      <div class="form-actions">
-        <RouterLink :to="`/projects/${project.id}`" :aria-label="`打开项目 ${project.title}`">打开</RouterLink>
-        <RouterLink :to="{ path: '/tasks', query: { project_id: project.id } }">查看任务</RouterLink>
-        <RouterLink :to="{ path: '/tasks/timeline', query: { project: project.id } }">时间轴</RouterLink>
-        <RouterLink :to="{ path: '/knowledge/docs', query: { linked_resource_id: project.id } }">相关文档</RouterLink>
-        <button class="secondary-button" :aria-label="`项目 ${project.title} 的成员`" @click="managing = project">成员</button>
-        <template v-if="writable">
-          <button class="secondary-button" :aria-label="`编辑项目 ${project.title}`" :disabled="busy || needsReload" @click="open(project)">编辑</button>
-          <button class="secondary-button" :aria-label="`${project.archived ? '恢复' : '归档'}项目 ${project.title}`" :disabled="busy || needsReload" @click="archive(project)">{{ project.archived ? '恢复' : '归档' }}</button>
-          <button class="secondary-button" :aria-label="`删除项目 ${project.title}`" :disabled="busy || needsReload" @click="remove(project)">删除</button>
-        </template>
-      </div>
-    </section>
+  <DataState :loading="query.isPending.value" :error="query.error.value" :empty="!items.length" :empty-text="filters.scope === 'attention' ? '没有需要你关注的项目。' : filters.scope === 'archived' ? '没有已归档的项目。' : writable ? '还没有项目，点「新建项目」开始。' : '还没有项目。'" @retry="query.refetch()" />
+  <div v-if="grid" class="project-grid">
+    <ProjectCard v-for="project in items" :key="project.id" :project="project" :writable="writable" :busy="busy || needsReload" @edit="open(project)" @archive="archive(project)" @remove="remove(project)" @members="managing = project" />
+  </div>
+  <div v-else class="ws-panel ws-table-wrap">
+    <table class="ws-table project-table">
+      <thead><tr><th scope="col">项目</th><th scope="col">进度</th><th scope="col">进行中</th><th scope="col">待查看</th><th scope="col">阻塞</th><th scope="col">智能体</th><th scope="col">最近更新</th></tr></thead>
+      <tbody>
+        <tr v-for="project in items" :key="project.id">
+          <td><RouterLink :to="`/projects/${project.id}`">{{ project.title }}</RouterLink><span v-if="project.archived" class="badge">已归档</span></td>
+          <td>{{ percent(project) }}</td>
+          <td>{{ project.task_states?.running ?? '—' }}</td>
+          <td>{{ project.task_states?.awaiting_view ?? '—' }}</td>
+          <td>{{ project.task_states?.blocked ?? '—' }}</td>
+          <td>{{ project.agents.map((a) => a.name).join('、') || '无' }}</td>
+          <td>{{ project.last_activity_at ? relativeTime(project.last_activity_at) : '—' }}</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
   <button v-if="query.hasNextPage.value" class="secondary-button" :disabled="query.isFetching.value" @click="query.fetchNextPage()">加载更多项目</button>
   <p v-if="!writable && !blocked" class="form-help">当前角色只读。</p>
+
+  <ProjectActivityList :scope="scope" />
   <ModalPanel v-if="editing" :title="editing === 'new' ? '新建项目' : '编辑项目'" :busy="busy" @close="!busy && (editing = null)">
     <form aria-label="项目设置" novalidate @submit.prevent="save">
       <label class="form-field">项目名称<input v-model="title" :disabled="busy" :maxlength="TITLE_MAX" autocomplete="off" autofocus></label>

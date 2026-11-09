@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/vue'
+import { fireEvent, screen, within } from '@testing-library/vue'
 import { describe, expect, it, vi } from 'vitest'
 import { mockApi, openApp, me, workspace, fail } from './helpers'
 import { project, task } from './sprint3-fixtures'
@@ -25,11 +25,12 @@ describe('任务页面', () => {
     expect(await screen.findByRole('button', { name: '第二页任务' })).toBeVisible()
     const read = requests.filter((r) => pathOf(r) === '/api/v1/tasks')
     expect(new URL(read[1]!.url).searchParams.get('cursor')).toBe('opaque+/=cursor')
-    await fireEvent.update(screen.getByLabelText('任务状态'), 'done')
-    await fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+    await fireEvent.click(within(screen.getByRole('group', { name: '按状态筛选任务' })).getByRole('button', { name: /^已完成\s*(\d+|—)$/ }))
     await vi.waitFor(() => expect(screen.queryByRole('button', { name: '第二页任务' })).not.toBeInTheDocument())
     const last = requests.filter((r) => pathOf(r) === '/api/v1/tasks').at(-1)!
     expect(new URL(last.url).searchParams.has('cursor')).toBe(false)
+    expect(new URL(last.url).searchParams.get('work_state')).toBe('done')
+    expect(new URL(last.url).searchParams.get('status')).toBe('all')
   })
   it('does not show an old workspace write result in the newly selected workspace', async () => {
     let finish: ((r: Response) => void) | undefined
@@ -67,7 +68,8 @@ describe('任务页面', () => {
   it('renders task list and board with the project and labels', async () => {
     tasksApi(); await openApp('/tasks')
     expect(await screen.findByRole('button', { name: '准备发布' })).toBeVisible()
-    expect(await screen.findByText('发布计划 · 发布')).toBeVisible()
+    expect(await screen.findByRole('cell', { name: '发布计划' })).toBeVisible()
+    expect(screen.getByText('发布')).toBeVisible()
     expect(document.body).not.toHaveTextContent('Vikunja')
     await fireEvent.click(screen.getByRole('button', { name: '看板' }))
     expect(screen.getByRole('region', { name: '未完成' })).toBeVisible()
@@ -76,15 +78,16 @@ describe('任务页面', () => {
   it('sends filters to the server and resets the paging cursor', async () => {
     const requests = tasksApi(); await openApp('/tasks')
     await screen.findByRole('button', { name: '准备发布' })
-    await fireEvent.update(screen.getByLabelText('任务状态'), 'done')
     await fireEvent.update(screen.getByLabelText('筛选项目'), project.id)
-    await fireEvent.update(screen.getByLabelText('最低截止时间'), '2026-10-01T10:00')
-    await fireEvent.update(screen.getByLabelText('优先级筛选'), '3')
-    await fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
-    await vi.waitFor(() => expect(requests.filter((r) => pathOf(r) === '/api/v1/tasks')).toHaveLength(2))
-    const query = new URL(requests.filter((r) => pathOf(r) === '/api/v1/tasks')[1]!.url).searchParams
-    expect(query.get('status')).toBe('done'); expect(query.get('project_id')).toBe(project.id)
+    await fireEvent.update(screen.getByLabelText('筛选优先级'), '3')
+    await fireEvent.update(screen.getByLabelText('截止时间'), 'upcoming')
+    await vi.waitFor(() => expect(requests.filter((r) => pathOf(r) === '/api/v1/tasks')).toHaveLength(4))
+    const query = new URL(requests.filter((r) => pathOf(r) === '/api/v1/tasks')[3]!.url).searchParams
+    expect(query.get('status')).toBe('open'); expect(query.get('project_id')).toBe(project.id)
     expect(query.getAll('priority')).toEqual(['3']); expect(query.has('due_after')).toBe(true); expect(query.has('cursor')).toBe(false)
+    // 状态计数用同一组筛选，但不带状态
+    const summary = new URL(requests.filter((r) => pathOf(r) === '/api/v1/tasks/summary').at(-1)!.url).searchParams
+    expect(summary.get('project_id')).toBe(project.id); expect(summary.has('status')).toBe(false); expect(summary.has('work_state')).toBe(false)
   })
   it('saves an edit made while the task refetches in the background', async () => {
     // T-0049：SSE 失效触发的重新拉取期间点“保存任务”，提交不能被静默丢掉

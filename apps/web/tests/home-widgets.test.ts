@@ -50,7 +50,7 @@ describe('工作概况 widget', () => {
     const events = [1, 2, 3].map((n) => ({ id: `e${n}`, title: `日程${n}`, all_day: false, start_at: new Date(2026, 10, 9 + n, 9).toISOString(), end_at: new Date(2026, 10, 9 + n, 10).toISOString(), start_date: null, end_date: null, timezone: 'UTC', description: '', location: '', owner_id: null, version: 1, created_at: now.toISOString(), updated_at: now.toISOString() }))
     const requests = mockApi((r) => {
       if (path(r) === '/api/v1/dashboard/overview') return Response.json(home(card('w-summary', 'work_summary')))
-      if (path(r) === '/api/v1/tasks/progress') return Response.json({ counts: { all: 17, todo: 8, in_progress: 4, review: 3, blocked: 2 }, attention: 5, items: [] })
+      if (path(r) === '/api/v1/tasks/progress') return Response.json({ counts: { all: 17, todo: 8, running: 4, awaiting_view: 3, blocked: 2 }, attention: 5, items: [] })
       if (path(r) === '/api/v1/calendar/events') return Response.json({ items: events, next_cursor: null, total_estimate: 3 })
       return undefined
     })
@@ -59,8 +59,8 @@ describe('工作概况 widget', () => {
     expect(article).toHaveClass('is-bare')
     expect(article).not.toHaveClass('panel')
     const tiles = within(article).getByRole('list', { name: '工作概况' })
-    await vi.waitFor(() => expect(within(tiles).getByRole('link', { name: /待办事项\s*8/ })).toHaveAttribute('href', '/tasks'))
-    expect(within(tiles).getByRole('link', { name: /进行中\s*4/ })).toHaveAttribute('href', '/tasks/timeline')
+    await vi.waitFor(() => expect(within(tiles).getByRole('link', { name: /待办事项\s*8/ })).toHaveAttribute('href', '/tasks?state=todo'))
+    expect(within(tiles).getByRole('link', { name: /进行中\s*4/ })).toHaveAttribute('href', '/tasks?state=running')
     expect(within(tiles).getByRole('link', { name: /已完成待查看\s*3/ })).toBeVisible()
     expect(within(tiles).getByRole('link', { name: /阻塞任务\s*2/ })).toBeVisible()
     await vi.waitFor(() => expect(within(tiles).getByRole('link', { name: /近期提醒\s*3/ })).toHaveAttribute('href', '/calendar'))
@@ -86,9 +86,9 @@ describe('工作概况 widget', () => {
 describe('任务进展 widget', () => {
   const item = (over: Partial<Schema['TaskProgressItem']>): Schema['TaskProgressItem'] => ({ id: 't', title: '任务', project_id: project.id, project_title: 'Workspace', status: 'todo', executor: null, due_at: null, updated_at: new Date().toISOString(), blocker: null, ...over })
   const items = [
-    item({ id: 'review-1', title: '首页改版方案', status: 'review', executor: { kind: 'instance', id: 'i1', name: '设计助手' } }),
-    item({ id: 'blocked-1', title: 'GitHub集成验证', status: 'blocked', executor: { kind: 'instance', id: 'i2', name: '开发助手' }, blocker: { issue_id: 'issue-1', number: 3, title: '等待补充访问权限 <b>x</b>', count: 2 } }),
-    item({ id: 'running-1', title: '新闻早报整理', status: 'in_progress', executor: { kind: 'instance', id: 'i3', name: '资讯助手' } }),
+    item({ id: 'review-1', title: '首页改版方案', status: 'awaiting_view', executor: { kind: 'instance', id: 'i1', name: '设计助手' } }),
+    item({ id: 'blocked-1', title: 'GitHub集成验证', status: 'blocked', executor: { kind: 'instance', id: 'i2', name: '开发助手' }, blocker: { reason: '等待补充访问权限 <b>x</b>', blocked_at: new Date().toISOString(), blocked_by: 'user-a', blocked_by_name: 'brian' } }),
+    item({ id: 'running-1', title: '新闻早报整理', status: 'running', executor: { kind: 'instance', id: 'i3', name: '资讯助手' } }),
     item({ id: 'todo-1', title: '整理本周工作计划', status: 'todo', executor: { kind: 'user', id: 'user-a', name: 'brian' } }),
   ]
   it('shows the attention badge, status tabs and one action per row', async () => {
@@ -96,7 +96,7 @@ describe('任务进展 widget', () => {
       if (path(r) === '/api/v1/dashboard/overview') return Response.json(home(card('w-progress', 'task_progress')))
       if (path(r) === '/api/v1/tasks/progress') {
         const status = new URL(r.url).searchParams.get('status')
-        return Response.json({ counts: { all: 4, todo: 1, in_progress: 1, review: 1, blocked: 1 }, attention: 2, items: status === 'blocked' ? [items[1]] : items })
+        return Response.json({ counts: { all: 4, todo: 1, running: 1, awaiting_view: 1, blocked: 1 }, attention: 2, items: status === 'blocked' ? [items[1]] : items })
       }
       return undefined
     })
@@ -108,13 +108,13 @@ describe('任务进展 widget', () => {
     expect(within(tabs).getByRole('button', { name: /全部/ })).toHaveAttribute('aria-pressed', 'true')
     const table = within(article).getByRole('table')
     expect(within(table).getAllByRole('row')).toHaveLength(5)
-    // 阻塞 Issue 的标题来自人或智能体：按纯文本显示
-    expect(within(table).getByText('等待补充访问权限 <b>x</b>（共 2 个阻塞）')).toBeVisible()
+    // 阻塞原因来自人：按纯文本显示
+    expect(within(table).getByText('等待补充访问权限 <b>x</b>')).toBeVisible()
     expect(table.querySelector('b')).toBeNull()
     expect(within(table).getByText('设计助手')).toBeVisible()
     expect(within(table).getByText('已完成 · 待查看')).toBeVisible()
     expect(within(table).getByRole('link', { name: '查看结果：首页改版方案' })).toHaveAttribute('href', '/tasks?task=review-1')
-    expect(within(table).getByRole('link', { name: '处理阻塞：GitHub集成验证' })).toHaveAttribute('href', '/issues/issue-1')
+    expect(within(table).getByRole('link', { name: '处理阻塞：GitHub集成验证' })).toHaveAttribute('href', '/tasks?task=blocked-1')
     expect(within(table).getByRole('link', { name: '查看进展：新闻早报整理' })).toHaveAttribute('href', `/tasks/timeline?task=running-1&project=${project.id}`)
     expect(within(table).getByRole('link', { name: '打开任务：整理本周工作计划' })).toHaveAttribute('href', '/tasks?task=todo-1')
     expect(within(article).getByRole('link', { name: '查看全部 4 项任务' })).toHaveAttribute('href', '/tasks')

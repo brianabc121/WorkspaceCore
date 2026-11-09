@@ -37,24 +37,25 @@ describe('智能视图的时间范围', () => {
 })
 
 describe('任务页的快速操作', () => {
-  it('switches views and sends the matching filters', async () => {
+  it('filters by state chips, due range and sort, and sends the matching parameters', async () => {
     const requests = tasksApi()
     await openApp('/tasks'); await screen.findByRole('button', { name: '准备发布' })
-    const views = screen.getByRole('group', { name: '任务视图' })
-    expect(within(views).getByRole('button', { name: '全部' })).toHaveAttribute('aria-pressed', 'true')
-    await fireEvent.click(within(views).getByRole('button', { name: '今天' }))
+    const chips = screen.getByRole('group', { name: '按状态筛选任务' })
+    expect(within(chips).getByRole('button', { name: /^全部/ })).toHaveAttribute('aria-pressed', 'true')
+    await fireEvent.update(screen.getByLabelText('截止时间'), 'today')
     await vi.waitFor(() => expect(listRequests(requests)).toHaveLength(2))
     let query = new URL(listRequests(requests)[1]!.url).searchParams
     expect(query.get('status')).toBe('open')
     expect(new Date(query.get('due_before')!).getTime() - new Date(query.get('due_after')!).getTime()).toBeGreaterThanOrEqual(23 * 36e5)
-    expect(within(views).getByRole('button', { name: '今天' })).toHaveAttribute('aria-pressed', 'true')
-    await fireEvent.click(within(views).getByRole('button', { name: '已完成' }))
-    await vi.waitFor(() => expect(listRequests(requests)).toHaveLength(3))
-    query = new URL(listRequests(requests)[2]!.url).searchParams
-    expect(query.get('status')).toBe('done'); expect(query.has('due_after')).toBe(false); expect(query.has('due_before')).toBe(false)
-    await fireEvent.update(screen.getByLabelText('排序'), 'priority')
+    await fireEvent.update(screen.getByLabelText('截止时间'), '')
+    await fireEvent.click(within(chips).getByRole('button', { name: /^阻塞/ }))
     await vi.waitFor(() => expect(listRequests(requests)).toHaveLength(4))
-    expect(new URL(listRequests(requests)[3]!.url).searchParams.get('sort')).toBe('priority')
+    query = new URL(listRequests(requests)[3]!.url).searchParams
+    expect(query.get('status')).toBe('all'); expect(query.get('work_state')).toBe('blocked'); expect(query.has('due_after')).toBe(false)
+    expect(within(chips).getByRole('button', { name: /^阻塞/ })).toHaveAttribute('aria-pressed', 'true')
+    await fireEvent.update(screen.getByLabelText('排序'), 'priority')
+    await vi.waitFor(() => expect(listRequests(requests)).toHaveLength(5))
+    expect(new URL(listRequests(requests)[4]!.url).searchParams.get('sort')).toBe('priority')
   })
 
   it('completes a task from the list with its version and keeps the new version for the next toggle', async () => {
@@ -91,7 +92,7 @@ describe('任务页的快速操作', () => {
     await openApp('/tasks'); await screen.findByRole('button', { name: '准备发布' })
     const form = screen.getByRole('form', { name: '快速添加任务' })
     expect(within(form).getByLabelText('添加到项目')).toHaveValue(project.id)
-    await fireEvent.click(within(screen.getByRole('group', { name: '任务视图' })).getByRole('button', { name: '今天' }))
+    await fireEvent.update(screen.getByLabelText('截止时间'), 'today')
     await fireEvent.update(within(form).getByLabelText('快速添加'), '  写周报 ')
     await fireEvent.update(within(form).getByLabelText('添加到项目'), '77777777-7777-4777-8777-777777777778')
     await fireEvent.submit(form)
@@ -147,7 +148,7 @@ describe('任务页的快速操作', () => {
   it('highlights overdue tasks', async () => {
     tasksApi(undefined, () => [{ ...task, due_at: '2020-01-01T08:00:00Z' }])
     await openApp('/tasks')
-    expect(await screen.findByText(/^逾期 · /)).toHaveClass('chip-due-overdue')
+    expect(await screen.findByText(/^逾期 · /)).toHaveClass('due-overdue')
   })
 
   it('gives viewers no checkboxes, quick add or dragging', async () => {
@@ -155,7 +156,7 @@ describe('任务页的快速操作', () => {
     await openApp('/tasks'); await screen.findByRole('button', { name: '准备发布' })
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
     expect(screen.queryByRole('form', { name: '快速添加任务' })).not.toBeInTheDocument()
-    expect(screen.getByText('未完成', { selector: '.chip' })).toBeVisible()
+    expect(screen.getByText('待办', { selector: '.ws-state' })).toBeVisible()
     await fireEvent.click(screen.getByRole('button', { name: '看板' }))
     expect(within(screen.getByRole('region', { name: '未完成' })).getByRole('button', { name: '准备发布' }).closest('article')).toHaveAttribute('draggable', 'false')
   })
@@ -166,6 +167,8 @@ describe('项目进度', () => {
     mockApi((r) => pathOf(r) === '/api/v1/projects' ? Response.json({ items: [{ ...project, open_tasks: 1, done_tasks: 3 }, { ...project, id: 'p2', title: '空项目', open_tasks: 0, done_tasks: 0 }], next_cursor: null, total_estimate: null }) : undefined)
     await openApp('/projects')
     expect(await screen.findByRole('progressbar', { name: '发布计划 完成进度' })).toHaveAttribute('aria-valuenow', '75')
-    expect(screen.getByRole('progressbar', { name: '空项目 完成进度' })).toHaveAttribute('aria-valuenow', '0')
+    // 没有任务的项目不画进度条，也不显示 100% 或 0%（规范第 5 节）
+    expect(screen.queryByRole('progressbar', { name: '空项目 完成进度' })).toBeNull()
+    expect(within(screen.getByRole('region', { name: '项目 空项目' })).getByText('尚无任务')).toBeVisible()
   })
 })
