@@ -284,10 +284,16 @@ async def _sync_repo(
         state.access[full_name] = denied
         existing = await repo.repo_by_name(db, integration.id, full_name)
         if existing is not None:
-            existing.metadata_json = {**existing.metadata_json, "access": denied}
+            # 仓库本身看不到：三类子资源都不可用（denied_kinds 供开发者总览判断哪些数字未知）
+            existing.metadata_json = {
+                **existing.metadata_json,
+                "access": denied,
+                "denied_kinds": list(repo.CHILD_TYPES),
+            }
             await repo.tombstone_children(db, integration.id, existing.id)
         return
     access = "ok"
+    denied_kinds: list[str] = []
     repo_row = await save_repo(db, integration, response.data, access)
     for kind in (repo.ISSUE, repo.PULL, repo.RUN):
         try:
@@ -296,10 +302,15 @@ async def _sync_repo(
             if (denied := _denied(error)) is None:
                 raise
             access = "missing_permission"
+            denied_kinds.append(kind)
             await repo.tombstone_children(db, integration.id, repo_row.id, [kind])
     state.access[full_name] = access
     if access != "ok":
-        repo_row.metadata_json = {**repo_row.metadata_json, "access": access}
+        repo_row.metadata_json = {
+            **repo_row.metadata_json,
+            "access": access,
+            "denied_kinds": denied_kinds,
+        }
 
 
 async def _sync_kind(

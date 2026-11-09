@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import github_sync, sync_lock
+from app.domain import events, github_sync, sync_lock
+from app.domain import github_permission_evidence as evidence
 from app.domain.audit import AuditTrail
 from app.domain.auth import Actor
 from app.domain.connectors import (
@@ -203,8 +204,12 @@ class IntegrationService:
         if integration.version != body.version:
             raise _version_conflict(integration.version)
         fields = body.model_fields_set - {"version"}
+        # 逐仓库权限快照（T-0175）：Token、仓库清单、启停变化后旧结果不再代表当前配置
+        stale_evidence = False
         if body.repositories is not None:
             # 不需要重新测试；下一次同步按新列表进行，移出的仓库写 tombstone
+            before = sorted(name.lower() for name in github_sync.repositories(integration))
+            stale_evidence = before != sorted(name.lower() for name in body.repositories)
             integration.settings_json = {
                 **integration.settings_json,
                 "repositories": list(body.repositories),
@@ -233,15 +238,20 @@ class IntegrationService:
             )
             account.user_id = context.user.id
             reset = True
+            stale_evidence = True
         if "token_expires_at" in fields and account is not None:
             account.expires_at = body.token_expires_at
         if reset and integration.status != "disabled":
             integration.status = "pending"
         if "enabled" in fields and body.enabled is not None:
             if not body.enabled:
+                stale_evidence = stale_evidence or integration.status != "disabled"
                 integration.status = "disabled"
             elif integration.status == "disabled":
                 integration.status = "pending"  # 重新启用：需要再测试一次
+                stale_evidence = True
+        if stale_evidence and evidence.clear(integration):
+            events.mark(self.db, access.workspace.id, "developer")
         integration.version += 1
         await self.audit.record(
             "integration.updated",
@@ -317,6 +327,8 @@ class IntegrationService:
         checks: list[IntegrationCheck] = []
         warnings: list[str] = []
         repo_checks: list[RepositoryCheck] = []
+        # 每个仓库实际得到的检查结果（中途失败时也只有已经执行的那几项），存成权限快照
+        obtained: dict[str, list[RepositoryPermissionCheck]] = {}
         failure: ConnectorError | None = None
         try:
             first = await client.get_repo(names[0]) if names else None
@@ -328,7 +340,8 @@ class IntegrationService:
             if first is not None and first.oauth_scopes:
                 warnings.append("这是经典 Token，权限过大；请改用细粒度 Personal Access Token")
             for name in names:
-                repo_checks.append(await _check_repository(client, name))
+                results = obtained.setdefault(name, [])
+                repo_checks.append(await _check_repository(client, name, results))
         except ConnectorError as error:
             failure = error
             checks += _failed_github_checks(error, already=len(checks))
@@ -336,10 +349,17 @@ class IntegrationService:
         ok = failure is None and all(r.ok for r in repo_checks)
         if integration.status != "disabled":
             integration.status = "active" if failure is None else _status_after_failure(failure)
+        tested_at = datetime.now(UTC)
         integration.settings_json = {
             **integration.settings_json,
-            "last_tested_at": datetime.now(UTC).isoformat(),
+            "last_tested_at": tested_at.isoformat(),
         }
+        if failure is not None and _status_after_failure(failure) == "unauthorized":
+            evidence.clear(integration)  # Token 被拒：旧的权限结果不能再显示
+        else:
+            # 限流 / 不可用时只记已得到的结果；本次没检查到的仓库保留旧快照与旧时间
+            evidence.record(integration, obtained, checked_at=tested_at)
+        events.mark(self.db, access.workspace.id, "developer")
         integration.version += 1
         await self.audit.record(
             "integration.tested",
@@ -430,9 +450,13 @@ _GITHUB_PROBES: tuple[
 )
 
 
-async def _check_repository(client: GitHubClient, full_name: str) -> RepositoryCheck:
-    """逐项读一条记录；缺少权限（403）或看不到（404）只记在这个仓库上。"""
-    results: list[RepositoryPermissionCheck] = []
+async def _check_repository(
+    client: GitHubClient, full_name: str, results: list[RepositoryPermissionCheck]
+) -> RepositoryCheck:
+    """逐项读一条记录；缺少权限（403）或看不到（404）只记在这个仓库上。
+
+    结果逐项追加到 results：限流等整体失败时抛出，调用方仍能拿到已经执行的那几项（T-0175）。
+    """
     for name, suffix in _GITHUB_PROBES:
         try:
             await client.probe(f"/repos/{full_name}{suffix}")

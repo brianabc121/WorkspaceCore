@@ -197,6 +197,8 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | POST | `/api/v1/integrations`（`provider: github`） | 新建 GitHub 集成：细粒度 Token（`github_pat_`）+ 要同步的仓库 | 已实现（T-0028） |
 | POST | `/api/v1/integrations/github/repositories` | 列出 Token 能访问的仓库供网页勾选（admin）：新 Token 只用这一次、不保存；不给 Token 时用已保存的 | 已实现（T-0091） |
 | GET | `/api/v1/developer/repos`、`/issues`、`/pulls`、`/runs` | GitHub 投影（带 `sync`；限流时 `reason: rate_limited` 与 `retry_at`） | 已实现（T-0028） |
+| GET | `/api/v1/developer/overview` | 开发者总览（viewer）：所选仓库范围的已同步统计（仓库 / 开放 Issue / 开放 PR / 时间窗内失败运行，不能确定时为 `null` 并标 `partial`）、仓库概览（分页，游标绑定工作空间、集成与筛选）、开放 PR（已请求审查的在前，不推断审查结果，不关联 CI）、失败运行与最近更新（`time_basis` 标明“更新于 / 同步于”）。只读本地投影，不访问 GitHub、不触发同步或测试连接；Token 被拒 / 未配置时不返回记录 | 已实现（T-0175） |
+| GET | `/api/v1/developer/repos/{repo_id}/permissions` | 仓库四项读权限的核验快照（viewer）：管理员上次测试连接时实际得到的结果与 `checked_at`，没有执行的项不出现（未核验），不从 `Repo.access` 推导；Token / 仓库清单 / 启停变化时清除，Token 被拒时不返回 | 已实现（T-0175） |
 | GET | `/api/v1/search?q=` | 跨资源搜索（只返回当前用户可见、未删除的资源） | 已实现（T-0029） |
 
 - 保留的聚合接口与组件：

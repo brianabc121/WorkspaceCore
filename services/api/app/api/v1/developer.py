@@ -15,10 +15,13 @@ from app.domain.developer import DeveloperService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.common import error_responses
 from app.schemas.developer import (
+    DeveloperOverviewOut,
     GitHubStateFilter,
     IssuePage,
+    OverviewRange,
     PullPage,
     RepoPage,
+    RepositoryPermissionEvidenceOut,
     RunConclusionFilter,
     RunPage,
     RunStatusFilter,
@@ -110,3 +113,48 @@ async def list_runs(
         cursor=cursor,
         limit=limit,
     )
+
+
+@router.get(
+    "/developer/overview",
+    summary="开发者总览（viewer，读本地投影）",
+    description="所选仓库范围的已同步统计、仓库概览（分页）、开放 PR、时间窗内失败运行与最近更新。"
+    "只读本地 GitHub 投影：不访问 GitHub，不触发同步或测试连接。统计不能确定时为 null 并标 partial"
+    "（缺少权限 / 仓库不可见 / 从未成功同步 / 失败运行缺时间），不当成 0。"
+    "range 只控制失败运行的时间窗（按 GitHub 更新时间）；开放 Issue / PR 是当前状态。"
+    "Token 被拒、未配置或停用时不返回任何记录，统计为 null；"
+    "被限流时照常返回缓存并在 sync 里带 retry_at。"
+    "cursor 只能在同一工作空间、集成与筛选条件下使用，否则 422。",
+    responses=_read_errors,
+)
+async def developer_overview(
+    access: Viewer,
+    service: Service,
+    repo_id: UUID | None = None,
+    q: Annotated[
+        str | None, Query(min_length=1, max_length=100, description="仓库名称包含")
+    ] = None,
+    window: Annotated[
+        OverviewRange, Query(alias="range", description="失败运行的时间窗：24h / 7d")
+    ] = "7d",
+    cursor: Cursor = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 12,
+) -> DeveloperOverviewOut:
+    return await service.overview(
+        access, repo_id=repo_id, q=q, window=window, cursor=cursor, limit=limit
+    )
+
+
+@router.get(
+    "/developer/repos/{repo_id}/permissions",
+    summary="仓库的读权限核验快照（viewer）",
+    description="管理员上次“测试连接”时这个仓库四项读权限（metadata / issues / pull_requests / "
+    "actions）的实际结果与核验时间；没有执行的项不出现在 checks 里（未核验），"
+    "不从 Repo.access 推导。"
+    "只读快照，不触发测试连接。仓库不在当前仓库清单里时 404；Token 被拒或未配置时不返回旧结果。",
+    responses=_read_errors,
+)
+async def repository_permissions(
+    access: Viewer, service: Service, repo_id: UUID
+) -> RepositoryPermissionEvidenceOut:
+    return await service.repository_permissions(access, repo_id)
