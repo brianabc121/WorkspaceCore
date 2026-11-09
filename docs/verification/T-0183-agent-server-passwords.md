@@ -84,4 +84,14 @@ CI `.github/workflows/ci-infra.yml` 的 `agents` job（GitHub `ubuntu-latest`，
 
 ## 6. 结果
 
-待 CI 运行后填写（运行编号、各步骤退出码、`agent_ssh_acceptance.py` 的“全部通过 / N 项失败”、浏览器验收输出）。
+CI 运行：ci-infra [42592666997](https://github.com/brianabc121/WorkspaceCore/actions/runs/42592666997)（提交 `3387bf6`，与之后的 `264dacd` 只差一个开发者总览测试文件的时间修复，业务代码相同），
+agents 任务 129077765983 成功（09:20–10:00 UTC）；同一次提交的 ci-api、Web CI、ci-security、collab 也全部成功。
+
+| 步骤 | 结果 |
+|---|---|
+| 多实例端到端（含场景 26 运行服务器回归） | 成功（09:28–09:46） |
+| `agent_ssh_acceptance.py`（真实 sshd + Docker，一台服务器两个真实 OpenClaw） | “全部通过”（09:48–09:56）：密码加密保存（库里是 `enc:v1:` 密文）、指纹确认前测试连接 / 初始化 / 部署都 409、错误密码 `auth_failed` 且部署被拒不建实例、初始化 6 步（connect / inspect / docker / reconnect / workspace / verify，最终检查连到 `10.1.1.123:9443`）、再初始化跳过 Docker、一次点击部署甲（同一 request_id 重放返回同一实例，收据 accepted）、甲部署中部署乙 409 同机互斥（收据 failed、没有实例）、甲乙都连上工作台且各有自己的网络命名空间与资源上限、全程 authorized_keys 不变、运维二次认证只认工作台密码、重新部署跳过已装插件、保留数据卸载后 runtime_installed=false 且不再提供运维、旧公钥退役只删那一行、密码不在任务 / 服务器 / 部署 / 运维 / 审计 / 幂等记录里 |
+| `agent_ssh_browser.cjs` | “全部通过（页面无错误）”（09:56–09:59）：四项添加、核对指纹后测试连接、初始化 6 步、旧链接 `/agents?tab=servers` 换到 `/agent-servers`、部署抽屉预选服务器且没有 IP / 密码输入、部署 9 步到上线、运维、卸载、移除、390px 无横向滚动、密码只随“添加服务器”一个请求发出 |
+| `runner_browser.cjs`（Runner 仍用专用密钥流程） | “全部通过（页面无错误）”（09:59–10:00） |
+
+第 5 节的三处问题已在 `5c3ae8e` 修复，CI 的验收在修复之后运行。
