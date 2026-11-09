@@ -1,11 +1,15 @@
-"""通过 SSH 自动部署 OpenClaw 的安装任务（T-0089 B2）。
+"""通过 SSH 部署 OpenClaw 的后台任务（T-0089 B2；T-0145 一台服务器多个实例；T-0179 全程密码登录）。
 
-设计见 docs/decisions/2026-11-03-openclaw-ssh-provisioning.md 第 5 节：
+设计见 docs/decisions/2026-11-03-openclaw-ssh-provisioning.md 第 5 节，OpenClaw 服务器的登录方式由
+docs/decisions/2026-11-09-agent-server-password-auth.md 取代：
 
-- 任务在 API 进程内的后台协程里运行（API 只有一个进程）。登录密码只作为这个协程的参数存在
-  （`SecretStr`），不写数据库、不进 Redis、不写日志；
-  密码阶段（登录、装公钥、装 Docker）一结束就丢掉并断开；
-- 之后都用专用密钥登录；专用私钥加密保存（用途 `agent_ssh:<目标 id>`）；
+- 任务在 API 进程内的后台协程里运行（API 只有一个进程）；
+- OpenClaw 服务器（`AgentServerInstaller` / `AgentServerUninstaller`）：初始化、部署、卸载
+  都用服务器上加密保存的登录密码，每次登录前才按任务开始时的凭证版本解密；
+  不生成、不安装、不读取 SSH 客户端密钥。
+  任务记录、日志、审计里没有密码或密文（日志里出现就替换成 ***）；
+- 运行服务器（`runner_ssh.RunnerInstaller`，T-0136）复用这里的公共部分（`Installer`），
+  仍是“一次密码 + 专用密钥”，不受影响；
 - 每一步的状态写进 `agent_ssh_jobs.steps`，命令输出的末尾一段脱敏后写进 `log`；
 - 每次写库都用新的短会话（任务可能跑十几分钟，不长时间占着连接）；
   任务所在的实例或目标服务器被删掉时（行不见了）安静地结束。
@@ -32,7 +36,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app import agent_provisioning as prov
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain.agent_ssh import agent_ssh_context
+from app.domain.agent_server_credentials import (
+    ServerCredentialError,
+    credential_changed,
+    resolve_server_password,
+)
 from app.domain.agents import AgentService, hash_token
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
@@ -95,7 +103,7 @@ class JobGone(Exception):
 
 
 class OneTimePassword:
-    """登录密码只在密码阶段使用：用完 clear()，之后任务里不再有对它的引用。"""
+    """登录密码只在密码阶段使用：用完 clear()，之后任务里不再有对它的引用（运行服务器的部署用）。"""
 
     def __init__(self, value: SecretStr | None) -> None:
         self._value = value
@@ -216,10 +224,9 @@ class Target:
     # 一台服务器多个实例（T-0145）：OpenClaw 服务器的 ID；准备服务器的任务里 instance_id 也填它
     # （只用作审计的资源 ID）。运行服务器的部署不用这个字段
     server_id: uuid.UUID | None = None
-
-    @property
-    def deploys_instance(self) -> bool:
-        return self.server_id is None or self.kind != "prepare"
+    # OpenClaw 服务器（T-0179）：任务开始时登录密码的版本；每次登录前核对，变了就停止。
+    # 运行服务器不用这个字段
+    credential_revision: int | None = None
 
 
 @dataclass(frozen=True)
@@ -329,10 +336,19 @@ def _script_failure(result: ssh.CommandResult, default_code: str, default: str) 
     return InstallFailed(default_code, default)
 
 
-# ---------------------------------------------------------------- 安装
+# ---------------------------------------------------------------- 公共部分
 
 
 class Installer:
+    """经 SSH 执行任务的公共部分：执行命令并记日志、只读检查、确认目标服务器没有被更换。
+
+    OpenClaw 服务器（`AgentServerInstaller`，T-0179 起全程用保存的登录密码）与运行服务器
+    （`runner_ssh.RunnerInstaller`，仍是“一次密码 + 专用密钥”，T-0136）共用。
+    专用密钥相关的方法（`key_comment` / `_existing_key` / `_save_key` / `_authorize`）
+    只给运行服务器用：
+    运行服务器的子类提供 `_existing_key` / `_save_key`，OpenClaw 服务器的子类把它们全部禁用。
+    """
+
     def __init__(
         self,
         sessionmaker: async_sessionmaker[AsyncSession],
@@ -361,13 +377,8 @@ class Installer:
         )
 
     def key_comment(self) -> str:
-        """专用公钥在 authorized_keys 里的注释（运行服务器的部署另有前缀）。
-
-        一台 OpenClaw 服务器一把专用密钥（D7），注释带服务器 ID 的前 8 位。
-        """
-        if self.target.server_id is not None:
-            return f"myworkspace-server-{str(self.target.server_id)[:8]}"
-        return f"myworkspace-agent-{str(self.target.instance_id)[:8]}"
+        """专用公钥在 authorized_keys 里的注释（运行服务器的子类覆盖）。"""
+        return f"myworkspace-{str(self.target.instance_id)[:8]}"
 
     def _box(self) -> CredentialBox:
         try:
@@ -417,45 +428,17 @@ class Installer:
         return info
 
     def _existing_key(self) -> asyncssh.SSHKey | None:
-        ref = self.target.client_key_ref
-        if ref is None:
-            return None
-        try:
-            secret = self._box().resolve(ref, context=agent_ssh_context(self.target.target_id))
-            return asyncssh.import_private_key(secret.get_secret_value())
-        except (CredentialError, asyncssh.KeyImportError) as error:
-            raise InstallFailed(
-                "client_key_invalid", "专用私钥无法解密，请吊销后重新部署"
-            ) from error
+        """已保存的专用私钥（运行服务器的子类提供；用途绑定各自的记录）。"""
+        raise NotImplementedError
 
     async def _save_key(self, key: asyncssh.SSHKey, public: str) -> None:
-        box = self._box()
-        sealed = box.seal(
-            key.export_private_key().decode(), context=agent_ssh_context(self.target.target_id)
-        )
-        async with self.sessionmaker() as db:
-            target = await db.get(AgentSshTarget, self.target.target_id, with_for_update=True)
-            if target is None:
-                raise JobGone
-            if not self._unchanged(target):
-                raise InstallFailed("target_changed", "目标服务器在安装期间被更换，已停止")
-            target.client_key_ref = sealed
-            target.client_public_key = public
-            target.version += 1
-            await AuditTrail(db, self.settings).record(
-                "agents.ssh.key_authorized",
-                workspace_ids=[target.workspace_id],
-                actor_id=self.target.started_by,
-                resource_type="agent_server",
-                resource_id=target.server_id,
-                metadata={"client_key_fingerprint": key.get_fingerprint("sha256")},
-                client_ip=self.client_ip,
-            )
-            await db.commit()
+        """加密保存新生成的专用私钥（运行服务器的子类提供）。"""
+        raise NotImplementedError
 
     async def _authorize(
         self, conn: asyncssh.SSHClientConnection, key: asyncssh.SSHKey | None
     ) -> asyncssh.SSHKey:
+        """装专用公钥（运行服务器的部署）：没有就生成一把，写进 authorized_keys 后加密保存私钥。"""
         await self.rec.step("authorize_key", "running")
         fresh = key is None
         if key is None:
@@ -476,34 +459,189 @@ class Installer:
         )
         return key
 
-    async def _docker(
-        self, conn: asyncssh.SSHClientConnection, info: HostInfo, password: SecretStr | None
-    ) -> None:
-        if info.docker_ready:
-            await self.rec.step("docker", "skipped", "已经可以使用 Docker 与 Compose")
-            return
-        await self.rec.step("docker", "running")
-        if password is None:
+
+# ---------------------------------------------------------------- OpenClaw 服务器（T-0179）
+
+
+_CREDENTIAL_CODES = {
+    "credentials_required": "credential_required",
+    "credential_unreadable": "credential_unreadable",
+    "credential_changed": "credential_changed",
+}
+
+
+def _credential_failed(error: ServerCredentialError) -> InstallFailed:
+    """保存的登录密码不能用（没保存 / 解不开 / 任务开始后被替换）：任务失败，不回退到别的凭证。"""
+    return InstallFailed(
+        _CREDENTIAL_CODES.get(error.reason, "credential_unreadable"), error.message
+    )
+
+
+class AgentServerInstaller(Installer):
+    """OpenClaw 服务器的初始化与部署：全程用保存的登录密码登录（T-0179）。
+
+    - 每次登录前重新读取服务器的 SSH 记录：地址、账号、主机公钥被更换或取消确认就停止；
+      按任务开始时的凭证版本（`credential_revision`）解密密码，密码中途被替换就停止；
+    - 登录只用 `agent_server_ssh.connect_agent_server`（只用密码、固定主机公钥，不用 ssh-agent、
+      默认私钥或 ~/.ssh/config）；不生成、不安装、不读取 SSH 客户端密钥（旧方案留下的专用私钥
+      连任务记录都不进，见 `_load`）；
+    - sudo 用同一个登录密码，只经标准输入；需要另外的 sudo 密码或交互式验证（MFA）的服务器明确失败。
+    """
+
+    @property
+    def revision(self) -> int:
+        revision = self.target.credential_revision
+        if revision is None:  # 任务入口总会填；没有就当作密码已变
+            raise _credential_failed(credential_changed())
+        return revision
+
+    async def _current(self) -> AgentSshTarget:
+        """这台服务器现在的 SSH 记录（每次登录前读）。被删了安静结束；被更换了停止。"""
+        async with self.sessionmaker() as db:
+            target = await db.get(AgentSshTarget, self.target.target_id, populate_existing=True)
+        if target is None:
+            raise JobGone
+        if not self._unchanged(target):
             raise InstallFailed(
-                "docker_unavailable", "这个账号现在不能使用 Docker：请填写登录密码重新部署"
+                "target_changed", "服务器的地址、账号或主机公钥在任务期间被更换，已停止"
             )
+        return target
+
+    async def _password(self, target: AgentSshTarget | None = None) -> SecretStr:
+        """临用时解密保存的登录密码（按任务开始时的凭证版本）；之后写日志时替换成 ***。"""
+        current = target if target is not None else await self._current()
+        try:
+            password = resolve_server_password(
+                self._box(), current, expected_revision=self.revision
+            )
+        except ServerCredentialError as error:
+            raise _credential_failed(error) from error
+        self.rec.add_secret(password.get_secret_value())
+        return password
+
+    async def _login(self) -> asyncssh.SSHClientConnection:
+        """用保存的登录密码登录（只用密码，按确认过的主机公钥）。"""
+        # 延迟导入：agent_server_ssh 引用了本模块的 HostInfo / parse_inspect
+        from app.domain import agent_server_ssh
+
+        target = await self._current()
+        await self._password(target)
+        try:
+            return await agent_server_ssh.connect_agent_server(
+                target, self._box(), expected_revision=self.revision
+            )
+        except ServerCredentialError as error:
+            raise _credential_failed(error) from error
+
+    async def _connect(
+        self, *, password: SecretStr | None = None, key: asyncssh.SSHKey | None = None
+    ) -> asyncssh.SSHClientConnection:
+        # OpenClaw 服务器不接受外部给的密码或密钥：只用保存的密码
+        if password is not None or key is not None:
+            raise InstallFailed("internal_error", "OpenClaw 服务器只用保存的登录密码登录")
+        return await self._login()
+
+    def _existing_key(self) -> asyncssh.SSHKey | None:
+        raise InstallFailed("internal_error", "OpenClaw 服务器不使用 SSH 客户端密钥")
+
+    async def _save_key(self, key: asyncssh.SSHKey, public: str) -> None:
+        raise InstallFailed("internal_error", "OpenClaw 服务器不使用 SSH 客户端密钥")
+
+    async def _authorize(
+        self, conn: asyncssh.SSHClientConnection, key: asyncssh.SSHKey | None
+    ) -> asyncssh.SSHKey:
+        raise InstallFailed("internal_error", "OpenClaw 服务器不安装 SSH 公钥")
+
+    def _check_confirmed(self) -> None:
+        if not self.target.host_key_confirmed:
+            # 接口里已经检查过；任务开始时再确认一次，未确认的主机公钥绝不用来登录
+            raise InstallFailed("host_key_unconfirmed", "服务器的主机公钥还没有确认")
+
+    async def _connect_step(self) -> asyncssh.SSHClientConnection:
+        await self.rec.step("connect", "running")
+        conn = await self._login()
+        await self.rec.step(
+            "connect", "done", "用保存的登录密码登录（主机公钥已固定，不使用 SSH 密钥）"
+        )
+        return conn
+
+    # ---------------------------------------------------------------- 初始化
+
+    async def prepare(self) -> None:
+        """初始化服务器：只准备基础环境与平台受控的部署根目录，不建实例、不发接入包、不装公钥。"""
+        self._check_confirmed()
+        conn: asyncssh.SSHClientConnection | None = None
+        try:
+            conn = await self._connect_step()
+            info = await self._inspect(conn)
+            self.home = info.home
+            installed = await self._docker(conn, info)
+            if installed:
+                # 新会话里 docker 组才生效：断开后重新用密码登录
+                await self.rec.step("reconnect", "running")
+                conn.close()
+                await conn.wait_closed()
+                conn = None
+                conn = await self._login()
+                check = await self._run(
+                    conn,
+                    "检查 Docker",
+                    "docker info --format '{{.ServerVersion}}' && docker compose version --short",
+                    seconds=60,
+                )
+                if not check.ok:
+                    raise InstallFailed(
+                        "docker_unavailable", "重新登录后仍然不能使用 Docker（docker 组没有生效）"
+                    )
+                await self.rec.step("reconnect", "done", "重新用密码登录，Docker 可用")
+            else:
+                await self.rec.step("reconnect", "skipped", "Docker 本来就可以使用，不用重新登录")
+            root = prov.deploy_root(info.home)
+            await self.rec.step("workspace", "running")
+            result = await self._run(conn, "准备部署目录", f"mkdir -p {prov.q(root)}", seconds=30)
+            if not result.ok:
+                raise InstallFailed("workspace_failed", f"无法创建部署目录 {root}")
+            await self.rec.step("workspace", "done", f"{root}（每个智能体在下面一个子目录）")
+            await self._verify(conn, root)
+            await self._mark_prepared()
+        finally:
+            if conn is not None:
+                conn.close()
+
+    async def _docker(self, conn: asyncssh.SSHClientConnection, info: HostInfo) -> bool:
+        """缺 Docker / Compose（或账号用不了）才按锁定脚本安装或配置；已经能用就沿用，不升级。
+
+        返回是否执行了安装脚本（之后要重新登录，docker 组才生效）。
+        """
+        if info.docker_ready:
+            await self.rec.step(
+                "docker", "skipped", "已经可以使用 Docker 与 Compose（沿用现有版本，不升级）"
+            )
+            return False
+        await self.rec.step("docker", "running")
         if (not info.docker or not info.compose) and not info.supported:
             raise InstallFailed(
                 "unsupported_os",
                 "自动安装 Docker 只支持 Ubuntu 22.04 / 24.04、Debian 12（amd64、arm64）；"
-                "请先手动安装 Docker 与 Compose 插件，再重新部署",
+                "请先手动安装 Docker 与 Compose 插件，再重新初始化",
             )
-        secret = password.get_secret_value() + "\n"
+        secret: str | None = None
         if not info.root:
             if not info.sudo:
                 raise InstallFailed(
-                    "sudo_unavailable", "服务器上没有 sudo，无法以 root 安装 Docker"
+                    "sudo_unavailable", "服务器上没有 sudo，无法以 root 安装或配置 Docker"
                 )
+            secret = (await self._password()).get_secret_value() + "\n"
             check = await self._run(
                 conn, "检查 sudo", "sudo -S -p '' -k true", stdin=secret, seconds=30
             )
             if not check.ok:
-                raise InstallFailed("sudo_denied", "这个账号不能使用 sudo（或密码不对）")
+                raise InstallFailed(
+                    "sudo_denied",
+                    "这个账号不能用登录密码执行 sudo：需要另外的 sudo 密码"
+                    "或交互式验证（MFA）的服务器不支持自动初始化；请让这个账号能用登录密码 sudo，"
+                    "或先手动安装 Docker 并把账号加入 docker 组",
+                )
         staging = prov.staging_dir(info.home, str(self.target.instance_id))
         path = f"{staging}/install-docker.sh"
         await self._run(
@@ -519,15 +657,99 @@ class Installer:
                 conn,
                 "安装 Docker",
                 command if info.root else f"sudo -S -p '' -k {command}",
-                stdin=None if info.root else secret,
+                stdin=secret,
                 seconds=DOCKER_TIMEOUT,
             )
         finally:
+            secret = None
             await self._run(conn, "删除安装脚本", f"rm -rf {prov.q(staging)}", log=False)
         if not result.ok:
             raise _script_failure(result, "docker_install_failed", "安装 Docker 失败，详见日志")
         version = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
         await self.rec.step("docker", "done", f"Docker {version}".strip())
+        return True
+
+    async def _verify(self, conn: asyncssh.SSHClientConnection, root: str) -> None:
+        """最终检查：Docker 可用、部署目录可写、能连到工作台的外网接入地址。"""
+        await self.rec.step("verify", "running")
+        ingress = prov.ingress_target(self.settings.agent_public_url)
+        if ingress is not None and self.settings.agent_public_address:
+            # 入口主机名不在公网 DNS 里（没有域名，用 agent-gateway.myworkspace.internal）时，
+            # 接入包的本机隧道直接连这个地址（agent_bundle._tunnel_hosts）；这里按同样的地址检查
+            ingress = (self.settings.agent_public_address, ingress[1])
+        result = await self._run(
+            conn,
+            "检查环境",
+            prov.verify_command(root, ingress),
+            stdin=prov.script("verify.sh"),
+            seconds=60,
+        )
+        values = _key_values(result.stdout)
+        if not result.ok or not values:
+            raise InstallFailed("verify_failed", "最终检查没有完成，详见日志")
+        if values.get("docker") != "yes" or values.get("compose") != "yes":
+            raise InstallFailed("docker_unavailable", "Docker 或 Compose 插件不能使用")
+        if values.get("workspace") != "yes":
+            raise InstallFailed("workspace_failed", f"部署目录 {root} 不可写")
+        notes = ["Docker 可用", "部署目录可写"]
+        reach = values.get("ingress")
+        if reach == "no" and ingress is not None:
+            raise InstallFailed(
+                "ingress_unreachable",
+                f"服务器连不上工作台的接入地址 {ingress[0]}:{ingress[1]}："
+                "检查服务器的出站网络、防火墙与 DNS",
+            )
+        if reach == "yes" and ingress is not None:
+            notes.append(f"能连到工作台的接入地址 {ingress[0]}:{ingress[1]}")
+        elif ingress is None:
+            notes.append("工作台还没有配置外网接入入口（AGENT_PUBLIC_URL），部署前要先配置")
+        else:
+            notes.append("服务器上没有 bash / timeout 或 nc，没能检查能否连到工作台的接入地址")
+        await self.rec.step("verify", "done", "；".join(notes))
+
+    async def _mark_prepared(self) -> None:
+        """初始化成功：记下时间（之后可以在这台服务器上部署实例）。"""
+        async with self.sessionmaker() as db:
+            target = await db.get(AgentSshTarget, self.target.target_id, with_for_update=True)
+            if target is None:
+                raise JobGone
+            if not self._unchanged(target):
+                raise InstallFailed("target_changed", "服务器的地址在任务期间被更换，已停止")
+            if target.credential_revision != self.revision:
+                raise _credential_failed(credential_changed())
+            target.prepared_at = _now()
+            target.version += 1
+            await db.commit()
+
+    # ---------------------------------------------------------------- 部署
+
+    async def deploy(self) -> None:
+        """部署一个实例：环境预检（服务器要已初始化），只替换这个实例自己的目录与 Compose 项目。"""
+        self._check_confirmed()
+        conn: asyncssh.SSHClientConnection | None = None
+        try:
+            conn = await self._connect_step()
+            await self.rec.step("inspect", "running")
+            result = await self._run(conn, "检查服务器", "sh -s", stdin=prov.script("inspect.sh"))
+            if not result.ok:
+                raise InstallFailed("inspect_failed", "读取服务器信息失败")
+            info = parse_inspect(result.stdout)
+            if not info.docker_ready:
+                raise InstallFailed(
+                    "docker_unavailable",
+                    "这个账号现在不能直接使用 Docker 与 Compose：先在“智能体服务器”页重新初始化",
+                )
+            await self.rec.step(
+                "inspect",
+                "done",
+                f"{info.os_id} {info.os_version} {info.arch}，账号 {info.user}（uid {info.uid}）；"
+                "Docker 可以直接使用",
+            )
+            self.home = info.home
+            await self._deploy(conn, info)
+        finally:
+            if conn is not None:
+                conn.close()
 
     async def _issue_bundle(self) -> dict[str, tuple[bytes, int]]:
         async with self.sessionmaker() as db:
@@ -579,73 +801,6 @@ class Installer:
             await self.rec.flush()
             await asyncio.sleep(ONLINE_POLL)
         await self.rec.step("online", "done", "实例已连上工作台")
-
-    async def run(self, secret: OneTimePassword) -> None:
-        if not self.target.host_key_confirmed:
-            # 接口里已经检查过；任务开始时再确认一次，未确认的主机公钥绝不用来登录
-            raise InstallFailed("host_key_unconfirmed", "服务器的主机公钥还没有确认")
-        key = self._existing_key()
-        password = secret.get()
-        if password is None and key is None:
-            raise InstallFailed("password_required", "第一次部署需要登录密码")
-        conn: asyncssh.SSHClientConnection | None = None
-        try:
-            await self.rec.step("connect", "running")
-            if password is not None:
-                conn = await self._connect(password=password)
-            else:
-                conn = await self._connect(key=key)
-            await self.rec.step(
-                "connect", "done", "密码登录（只用这一次）" if password else "专用密钥登录"
-            )
-            info = await self._inspect(conn)
-            self.home = info.home
-            if password is not None:
-                key = await self._authorize(conn, key)
-            else:
-                await self.rec.step("authorize_key", "skipped", "专用公钥已经装好")
-            await self._docker(conn, info, password)
-            if password is not None:
-                # 密码阶段结束：丢掉密码、断开密码连接，改用专用密钥重新登录
-                # （新会话里 docker 组才生效）
-                self.rec.forget(password.get_secret_value())
-                secret.clear()
-                password = None
-                conn.close()
-                await conn.wait_closed()
-                conn = None
-                await self.rec.step("reconnect", "running")
-                conn = await self._connect(key=key)
-            else:
-                await self.rec.step("reconnect", "running")
-            check = await self._run(
-                conn,
-                "检查 Docker",
-                "docker info --format '{{.ServerVersion}}' && docker compose version --short",
-                seconds=60,
-            )
-            if not check.ok:
-                raise InstallFailed("docker_unavailable", "专用密钥登录后仍然不能使用 Docker")
-            await self.rec.step("reconnect", "done", "专用密钥登录，Docker 可用")
-            await self._mark_prepared()
-            if self.target.deploys_instance:
-                await self._deploy(conn, info)
-        finally:
-            if conn is not None:
-                conn.close()
-
-    async def _mark_prepared(self) -> None:
-        """专用公钥装好、Docker 可用：这台服务器准备好了（之后部署实例不用再输密码）。"""
-        async with self.sessionmaker() as db:
-            target = await db.get(AgentSshTarget, self.target.target_id, with_for_update=True)
-            if target is None:
-                raise JobGone
-            if not self._unchanged(target):
-                raise InstallFailed("target_changed", "服务器的地址在任务期间被更换，已停止")
-            if target.prepared_at is None:
-                target.prepared_at = _now()
-                target.version += 1
-            await db.commit()
 
     async def _deploy(self, conn: asyncssh.SSHClientConnection, info: HostInfo) -> None:
         directory = prov.install_dir(info.home, str(self.target.instance_id))
@@ -756,6 +911,8 @@ class Installer:
                 raise InstallFailed("deployment_changed", "部署记录在部署期间被改动，已停止")
             deployment.install_dir = directory
             deployment.installed_at = _now()
+            # 真实证据（T-0180）：这次部署成功、容器装着（不代表此刻仍在运行）
+            deployment.runtime_installed = True
             deployment.version += 1
             # 经 SSH 部署的实例归到这台服务器（以部署为准，不再按指纹自动改）；
             # 部署过程中按指纹自动建的那台空了就删掉
@@ -796,24 +953,18 @@ class Installer:
             )
 
 
-class Uninstaller(Installer):
-    """卸载（B3）：只用专用密钥。停止容器、删掉 crontab 里带标记的行，需要时删除接入包目录。
+class AgentServerUninstaller(AgentServerInstaller):
+    """卸载（B3；T-0179 起用保存的登录密码）：停止容器、删掉 crontab 里带标记的行，需要时删除目录。
 
-    不碰 Docker 本身、专用公钥（另有吊销）和实例凭证（实例页可以吊销）。
+    不碰 Docker 本身、authorized_keys 与实例凭证（实例页可以吊销）。
     """
 
     async def uninstall(self, *, remove_files: bool) -> None:
-        if not self.target.host_key_confirmed:
-            raise InstallFailed("host_key_unconfirmed", "服务器的主机公钥还没有确认")
-        key = self._existing_key()
-        if key is None:
-            raise InstallFailed("client_key_missing", "这台服务器上没有工作台的专用公钥")
+        self._check_confirmed()
         conn: asyncssh.SSHClientConnection | None = None
         removed = False
         try:
-            await self.rec.step("connect", "running")
-            conn = await self._connect(key=key)
-            await self.rec.step("connect", "done", "专用密钥登录")
+            conn = await self._connect_step()
             info = await self._inspect(conn)
             directory = prov.install_dir(info.home, str(self.target.instance_id))
 
@@ -897,15 +1048,30 @@ class Uninstaller(Installer):
                     .values(server_id=None, server_manual=False)
                 )
             elif deployment is not None:
+                # 容器卸载了、目录保留（T-0180 的 retained）：真实证据是“容器不在了”
                 deployment.installed_at = None
+                deployment.runtime_installed = False
                 deployment.version += 1
             await db.commit()
+
+
+def _key_values(stdout: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in stdout.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            values[key.strip()] = value.strip()
+    return values
 
 
 # ---------------------------------------------------------------- 任务入口
 
 
-async def _load(sessionmaker: async_sessionmaker[AsyncSession], job_id: uuid.UUID) -> Target:
+async def _load(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    job_id: uuid.UUID,
+    expected_revision: int | None = None,
+) -> Target:
     async with sessionmaker() as db:
         row = (
             await db.execute(
@@ -929,9 +1095,14 @@ async def _load(sessionmaker: async_sessionmaker[AsyncSession], job_id: uuid.UUI
         port=target.port,
         username=target.username,
         host_key=target.host_key,
-        client_key_ref=target.client_key_ref,
+        # T-0179：旧方案留下的专用私钥从不进 OpenClaw 服务器的任务（只用保存的密码登录）
+        client_key_ref=None,
         host_key_confirmed=target.host_key_confirmed_at is not None,
         server_id=target.server_id,
+        # 接纳任务时记下的版本优先（任务开始前密码被替换也会发现）
+        credential_revision=(
+            expected_revision if expected_revision is not None else target.credential_revision
+        ),
     )
 
 
@@ -1010,42 +1181,40 @@ async def _write_result(
         await db.commit()
 
 
+def job_steps(kind: str) -> tuple[str, ...]:
+    """OpenClaw 服务器各类任务的步骤（与任务记录里预先写好的一致）。"""
+    return {"prepare": prov.PREPARE_STEPS, "install": prov.STEPS}.get(kind, prov.UNINSTALL_STEPS)
+
+
 async def run_job(
     sessionmaker: async_sessionmaker[AsyncSession],
     settings: Settings,
     job_id: uuid.UUID,
-    secret: OneTimePassword,
     *,
     client_ip: str | None = None,
     remove_files: bool = False,
+    expected_revision: int | None = None,
 ) -> None:
-    """后台协程：准备服务器、部署或卸载实例（按任务记录的 kind）。"""
+    """后台协程：初始化服务器、部署或卸载实例（按任务记录的 kind），全程用保存的登录密码。"""
     try:
-        target = await _load(sessionmaker, job_id)
+        target = await _load(sessionmaker, job_id, expected_revision)
     except JobGone:
         return
-    password = secret.get()
-    steps = {
-        "prepare": prov.PREPARE_STEPS,
-        "install": prov.STEPS,
-    }.get(target.kind, prov.UNINSTALL_STEPS)
-    recorder = JobRecorder(
-        sessionmaker,
-        job_id,
-        [password.get_secret_value()] if password is not None else [],
-        steps=steps,
-    )
-    del password
-    label = {"prepare": "准备", "install": "部署"}.get(target.kind, "卸载")
-    # 准备服务器的审计记在服务器上，部署 / 卸载记在实例上
+    recorder = JobRecorder(sessionmaker, job_id, steps=job_steps(target.kind))
+    label = {"prepare": "初始化", "install": "部署"}.get(target.kind, "卸载")
+    # 初始化服务器的审计记在服务器上，部署 / 卸载记在实例上
     audit = ("agents.ssh", "agent_server" if target.kind == "prepare" else "agent_instance")
     try:
-        if target.kind in ("prepare", "install"):
-            await Installer(sessionmaker, settings, recorder, target, client_ip=client_ip).run(
-                secret
-            )
+        if target.kind == "prepare":
+            await AgentServerInstaller(
+                sessionmaker, settings, recorder, target, client_ip=client_ip
+            ).prepare()
+        elif target.kind == "install":
+            await AgentServerInstaller(
+                sessionmaker, settings, recorder, target, client_ip=client_ip
+            ).deploy()
         else:
-            await Uninstaller(
+            await AgentServerUninstaller(
                 sessionmaker, settings, recorder, target, client_ip=client_ip
             ).uninstall(remove_files=remove_files)
     except JobGone:
@@ -1138,19 +1307,23 @@ class SshJobRunner:
     def start(
         self,
         job_id: uuid.UUID,
-        password: SecretStr | None,
         *,
         client_ip: str | None,
         remove_files: bool = False,
+        expected_revision: int | None = None,
     ) -> None:
+        """启动 OpenClaw 服务器的任务。
+
+        不接收密码：任务登录时才按 expected_revision 解密保存的密码。
+        """
         task = asyncio.get_running_loop().create_task(
             run_job(
                 self._sessionmaker,
                 self.settings,
                 job_id,
-                OneTimePassword(password),
                 client_ip=client_ip,
                 remove_files=remove_files,
+                expected_revision=expected_revision,
             ),
             name=f"agent-ssh-job:{job_id}",
         )

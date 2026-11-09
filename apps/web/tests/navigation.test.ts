@@ -80,6 +80,22 @@ describe('sidebar layout', () => {
     expect(within(tools).getByRole('link', { name: '监控大屏' })).toHaveAttribute('href', '/p/screen')
   })
 
+  it('adds the new agent servers page to its default group without losing a saved layout (T-0181)', async () => {
+    // 保存布局时还没有“智能体服务器”：它按默认分组补进来；用户挪过的“OpenClaw 智能体”（原 OpenClaw 实例）仍在用户的分组里
+    setup('owner', { ...layout, placements: { ...layout.placements, '/agents': 'custom-fav' } })
+    await openApp('/')
+    const nav = screen.getByRole('navigation', { name: '主导航' })
+    await vi.waitFor(() => expect(groupNames(nav)[0]).toBe('常用'))
+    const fav = sectionOf(nav, '常用')
+    expect(within(fav).getByRole('link', { name: 'OpenClaw 智能体' })).toHaveAttribute('href', '/agents')
+    expect(within(fav).getByRole('link', { name: /Grafana/ })).toBeInTheDocument()
+    const tools = sectionOf(nav, '连接与工具')
+    expect(within(tools).getByRole('link', { name: '智能体服务器' })).toHaveAttribute('href', '/agent-servers')
+    expect(within(tools).getByRole('link', { name: '运行服务器' })).toHaveAttribute('href', '/runner')
+    expect(within(tools).getByRole('link', { name: '运营看板' })).toHaveAttribute('href', '/p/board')
+    expect(within(nav).queryByRole('link', { name: 'OpenClaw 实例' })).not.toBeInTheDocument()
+  })
+
   it('falls back to the default sidebar when the layout cannot be read, and refetches on the navigation event', async () => {
     class Stream extends EventTarget {
       static last: Stream | null = null
@@ -167,6 +183,9 @@ describe('设置 → 侧栏与页面', () => {
     expect(within(groups).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['分组：常用', '分组：工作空间', '分组：应用', '分组：连接与工具', '分组：管理'])
 
     const places = screen.getByRole('region', { name: '页面位置' })
+    // 新的独立页面也能挪到别的分组（T-0181）
+    expect(within(places).getByLabelText('智能体服务器所在分组')).toBeInTheDocument()
+    expect(within(places).getByLabelText('OpenClaw 智能体所在分组')).toBeInTheDocument()
     const select = within(places).getByLabelText('任务所在分组') as HTMLSelectElement
     const key = (within(select).getByRole('option', { name: '常用' }) as HTMLOptionElement).value
     expect(key).toMatch(/^custom-[a-z0-9][a-z0-9-]{0,39}$/)

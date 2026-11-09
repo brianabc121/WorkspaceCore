@@ -30,12 +30,14 @@ describe('stopping agent runs (T-0126)', () => {
   it('grants the stop-others permission after confirmation with the instance version', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const requests = setup(() => ({ items: [] }), r => path(r) === '/api/v1/agents/instances/inst-a/stop-others' && r.method === 'PUT' ? Response.json({ enabled: true, granted_by: 'user-a', granted_at: at }) : undefined)
-    await openApp('/agents')
+    // 详情一次显示一个智能体（T-0182）：先看已经打开权限的 beta，再回到 alpha
+    const { router } = await openApp('/agents?instance=inst-b')
+    const other = within(await screen.findByRole('article', { name: '实例：beta' })).getByRole('region', { name: '终止其他智能体任务的权限' })
+    expect(within(other).getByText('终止其他智能体任务的权限：已打开')).toBeVisible()
+    await router.push('/agents?instance=inst-a')
     const card = await screen.findByRole('article', { name: '实例：alpha' })
     const section = within(card).getByRole('region', { name: '终止其他智能体任务的权限' })
     expect(within(section).getByText('终止其他智能体任务的权限：关闭')).toBeVisible()
-    const other = within(await screen.findByRole('article', { name: '实例：beta' })).getByRole('region', { name: '终止其他智能体任务的权限' })
-    expect(within(other).getByText('终止其他智能体任务的权限：已打开')).toBeVisible()
     await fireEvent.click(within(section).getByRole('button', { name: '允许它叫停别的智能体' }))
     await vi.waitFor(() => expect(requests.some(r => r.method === 'PUT' && path(r).endsWith('/stop-others'))).toBe(true))
     expect(await requests.find(r => r.method === 'PUT' && path(r).endsWith('/stop-others'))!.clone().json()).toEqual({ enabled: true, version: 3 })
@@ -46,7 +48,7 @@ describe('stopping agent runs (T-0126)', () => {
   it('lists recent stops with who asked and stops a run with a reason', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const requests = setup(() => ({ items: [stop(), stop({ id: 's-0', requested_by: 'user-a', requested_by_instance: null, status: 'expired', aborted: null, reason: '跑偏了' }), stop({ id: 's-x', status: 'failed', aborted: 0, error: 'sessions.abort failed: 1', reason: '第三次' })] }))
-    await openApp('/agents')
+    await openApp('/agents?instance=inst-a')
     const card = await screen.findByRole('article', { name: '实例：alpha' })
     const panel = within(card).getByRole('region', { name: '终止正在执行的任务' })
     const list = await within(panel).findByRole('list', { name: '最近的终止记录' })
@@ -67,7 +69,7 @@ describe('stopping agent runs (T-0126)', () => {
   it('does not stop when the confirmation is cancelled', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false)
     const requests = setup(() => ({ items: [] }))
-    await openApp('/agents')
+    await openApp('/agents?instance=inst-a')
     const panel = within(await screen.findByRole('article', { name: '实例：alpha' })).getByRole('region', { name: '终止正在执行的任务' })
     await fireEvent.update(within(panel).getByLabelText('原因（它会看到）'), '停一下')
     await fireEvent.click(within(panel).getByRole('button', { name: '叫停' }))

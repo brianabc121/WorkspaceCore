@@ -24,6 +24,7 @@ from sqlalchemy import Table, and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.agent_ca import agent_ca_context
+from app.domain.agent_server_credentials import agent_server_password_context
 from app.domain.agent_ssh import agent_ssh_context
 from app.domain.agents import agent_secret_context
 from app.domain.connectors import account_context
@@ -73,6 +74,13 @@ FIELDS: tuple[SealedField, ...] = (
         AgentSshTarget,
         "client_key_ref",
         lambda row: agent_ssh_context(row.id),
+    ),
+    # OpenClaw 服务器保存的登录密码（T-0178）：只重新加密，不改 credential_revision
+    SealedField(
+        "agent_ssh_targets.login_password_ref",
+        AgentSshTarget,
+        "login_password_ref",
+        lambda row: agent_server_password_context(row.id),
     ),
 )
 

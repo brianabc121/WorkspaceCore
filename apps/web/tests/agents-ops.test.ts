@@ -21,7 +21,7 @@ function setup(handler: (r: Request) => Response | Promise<Response | undefined>
   ))
 }
 async function panel() {
-  await openApp('/agents')
+  await openApp('/agents?instance=inst-a')
   const card = await screen.findByRole('article', { name: '实例：alpha' })
   return within(card).getByRole('region', { name: '运维' })
 }

@@ -13,7 +13,9 @@ const core: NavEntry[] = [
   { path: '/mail', title: '邮件', section: '工作空间', description: '查收、阅读、回复 Gmail 邮件（owner 与 admin）。', minRole: 'admin' },
   { path: '/developer', title: '开发者', section: '连接与工具', description: 'GitHub 仓库、Issue、PR 与 Actions 只读视图。' },
   { path: '/operations', title: '运维', section: '连接与工具', description: '服务状态、预设指标与 Grafana 外链。' },
-  { path: '/agents', title: 'OpenClaw 实例', section: '连接与工具', description: '登记实例、接入包、凭证与密钥授权（owner）。', minRole: 'owner' },
+  // 智能体服务器与 OpenClaw 智能体是两个独立页面（T-0181 / T-0182）：服务器用 IP、端口、账号和密码添加并初始化，智能体选服务器自动部署
+  { path: '/agent-servers', title: '智能体服务器', section: '连接与工具', description: '用 IP、端口、账号和密码添加服务器，初始化运行环境，查看上面部署的智能体（owner）。', minRole: 'owner' },
+  { path: '/agents', title: 'OpenClaw 智能体', section: '连接与工具', description: '选择已初始化的服务器自动部署 OpenClaw，或手动登记接入；配置、权限、凭证与运维（owner）。', minRole: 'owner' },
   { path: '/runner', title: '运行服务器', section: '连接与工具', description: '智能体执行命令的容器服务器：环境、模板、运行记录与回收策略（owner 与 admin）。', minRole: 'admin' },
   { path: '/ai', title: 'AI 审批', section: '连接与工具', description: '审批 OpenClaw 实例的写操作，查看每一次工具调用。' },
   { path: '/settings', title: '设置', section: '管理', description: '管理个人资料、工作空间与成员（成员由 owner / admin 管理）。' },

@@ -1350,8 +1350,15 @@ class Runner:
         )
         command.error = (error or "")[:4000] or None
         command.finished_at = specs.now()
+        # 锁住环境这一行再改：同一个环境的两条指令结果可能几乎同时到（建环境与一次性命令的结束），
+        # 不加锁时后提交的那条会拿着旧状态把前一条写的状态盖掉（例如把“待删除”改回“运行中”）
         env = (
-            await self.db.get(RunnerEnvironment, command.environment_id)
+            await self.db.get(
+                RunnerEnvironment,
+                command.environment_id,
+                with_for_update=True,
+                populate_existing=True,
+            )
             if command.environment_id
             else None
         )

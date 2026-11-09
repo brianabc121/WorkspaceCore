@@ -38,11 +38,31 @@ export function useSecretAccesses(scope: string, filter: () => { instance_id?: s
     getNextPageParam: p => p.next_cursor ?? undefined })
 }
 
+// OpenClaw 智能体总览（T-0182，改造契约第 6 节）：只读本地记录；summary 按 server_id / q 统计全部实例（不套用 status、不受分页影响）。
+// 筛选条件进查询键：切换筛选时旧条件迟到的响应不会顶替新条件的结果
+export type OverviewFilters = { server_id?: string; q?: string; status?: Schema['AgentInstanceOut']['status'] }
+export const overviewKey = (user: string | undefined, scope: string) => ['agents', user, scope, 'overview'] as const
+export function useAgentOverview(scope: string, filters: () => OverviewFilters) {
+  const c = context(scope)
+  return useInfiniteQuery({ queryKey: computed(() => [...overviewKey(c.user, scope), filters()]), enabled: c.enabled, initialPageParam: null as string | null,
+    queryFn: async ({ pageParam, signal }) => dataOf(await c.auth.api.GET('/api/v1/agents/overview', { params: { header: c.header, query: { limit: 50, ...filters(), ...(pageParam ? { cursor: pageParam } : {}) } }, signal })),
+    getNextPageParam: p => p.next_cursor ?? undefined })
+}
+
+/** 单个实例（详情不在已取回的列表页里时、部署抽屉继续部署前取最新 version） */
+export function useInstance(scope: string, instanceId: () => string | null, enabled: () => boolean = () => true) {
+  const c = context(scope)
+  return useQuery({ queryKey: computed(() => ['agents', c.user, scope, 'instance', instanceId()]), enabled: computed(() => c.enabled.value && !!instanceId() && enabled()), retry: false,
+    queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/agents/instances/{instance_id}', { params: { header: c.header, path: { instance_id: instanceId()! } }, signal })) })
+}
+
 export function unique<T extends { id: string }>(pages: { items: T[] }[] | undefined): T[] {
   return [...new Map((pages ?? []).flatMap(p => p.items).map(item => [item.id, item])).values()]
 }
 
 export const STATUS = { pending: '等待接入', online: '在线', offline: '离线', disabled: '已停用' } as const
+// 列表与服务器页的“连接状态”：消息在线以 OpenIM 上下线为准，不代表容器在运行（改造规范第 3.3 节）
+export const IM_STATUS = { pending: '待接入', online: '消息在线', offline: '离线', disabled: '已停用' } as const
 export const NETWORK = { intranet: '内网', public: '外网' } as const
 export const SCOPE = { read: '只读', read_write: '读写（写操作要审批）' } as const
 export const ROLE = { admin: 'admin', member: 'member', viewer: 'viewer' } as const
@@ -60,6 +80,7 @@ export function agentError(error: unknown): string {
     FORBIDDEN: '只有 owner 可以管理 OpenClaw 实例与密钥库。',
     NOT_FOUND: '记录不存在，或你已无权访问。',
     WRITE_UNKNOWN: '连接中断，结果未知。接入包可能已经签发：刷新后看凭证列表，需要时重新生成（旧凭证会按选择保留或吊销）。',
+    NOT_IMPLEMENTED: '这项功能的服务端还没有就绪，请稍后再试。',
   }
   return messages[error.code] ?? (error.status === 0 ? '网络连接失败，请检查连接后重试。' : '请求失败，请稍后重试。')
 }

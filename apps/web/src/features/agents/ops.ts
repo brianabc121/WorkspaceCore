@@ -72,6 +72,9 @@ export const OPS_SERVICE: Record<OpsService, string> = { openclaw: 'OpenClaw', t
 
 const UNAVAILABLE: Record<NonNullable<Schema['AgentOpsState']['reason']>, string> = {
   not_deployed: '只适用于部署到 SSH 服务器的实例。手动接入的，先在上面“部署到服务器”（会原样重装接入包，会话和记忆在 state/ 里保留）。',
+  credential_missing: '这台服务器还没有保存登录密码：到“服务器”页补充登录密码后才能执行运维动作。',
+  credential_unreadable: '这台服务器保存的登录密码无法解密：到“服务器”页重新填写登录密码。',
+  host_key_unconfirmed: '这台服务器的主机公钥还没有确认：到“服务器”页核对指纹。',
   key_missing: '这台服务器的专用密钥已吊销：到“服务器”页重新准备这台服务器后才能执行运维动作。',
 }
 export const opsUnavailable = (reason: Schema['AgentOpsState']['reason']) => reason ? UNAVAILABLE[reason] : ''

@@ -24,7 +24,7 @@ function setup(host: (r: Request) => Response | undefined, items: Schema['HostSu
       path(r).endsWith('/ops') ? Response.json({ available: false, reason: 'not_deployed', running: null, items: [] }) : undefined))
 }
 async function section() {
-  await openApp('/agents')
+  await openApp('/agents?instance=inst-a')
   const card = await screen.findByRole('article', { name: '实例：alpha' })
   return within(card).getByRole('region', { name: '负载' })
 }
@@ -118,6 +118,6 @@ describe('instance load', () => {
     expect(within(host).getByRole('region', { name: '它的数据与网络' })).toHaveTextContent('1 小时重启 2 次')
     expect(within(host).getByText('它的 CPU（占整机）')).toBeVisible()
     const link = within(host).getByRole('link', { name: '自动识别的服务器（alpha）' })
-    expect(link).toHaveAttribute('href', '/agents?tab=servers&server=srv-1')
+    expect(link).toHaveAttribute('href', '/agent-servers?server=srv-1')
   })
 })

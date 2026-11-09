@@ -30,6 +30,7 @@ _ERROR_DESCRIPTIONS = {
     403: "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）",
     404: "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）",
     409: "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）",
+    410: "接口已退役（例如 AGENT_SSH_KEY_AUTH_RETIRED），响应里说明替代做法",
     413: "请求体过大（PAYLOAD_TOO_LARGE）",
     422: "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）",
     429: "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）",

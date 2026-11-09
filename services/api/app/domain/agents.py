@@ -400,6 +400,14 @@ class AgentService:
         await self.db.refresh(instance)
         return (await self._instances_out([instance]))[0]
 
+    async def instance_out(self, instance: AgentInstance) -> AgentInstanceOut:
+        """一个实例的输出（重新读取后批量组装）：一次点击部署与总览共用。"""
+        return await self._one_out(instance)
+
+    async def instances_out(self, instances: Sequence[AgentInstance]) -> list[AgentInstanceOut]:
+        """一批实例的输出：凭证、密钥授权、邮箱都是按批查询（不随行数增加查询次数）。"""
+        return await self._instances_out(instances)
+
     async def list_instances(
         self, access: WorkspaceAccess, *, cursor: str | None, limit: int
     ) -> AgentInstancePage:
@@ -429,6 +437,19 @@ class AgentService:
     async def create_instance(
         self, access: WorkspaceAccess, body: AgentInstanceCreate, *, client_ip: str
     ) -> AgentInstanceOut:
+        instance = await self.create_instance_record(access, body, client_ip=client_ip)
+        await self.db.commit()
+        await self._provision_im(instance)
+        return await self._one_out(instance)
+
+    async def create_instance_record(
+        self, access: WorkspaceAccess, body: AgentInstanceCreate, *, client_ip: str
+    ) -> AgentInstance:
+        """登记实例的建模与审计（T-0180 提取）：只写进当前事务（flush），不提交、不调 OpenIM。
+
+        `create_instance` 与一次点击新建并部署（app/domain/agent_deployments.py）共用；
+        提交与之后的 OpenIM 注册由调用方负责。
+        """
         instance_id = uuid.uuid4()
         instance = AgentInstance(
             id=instance_id,
@@ -457,9 +478,12 @@ class AgentService:
             },
             client_ip=client_ip,
         )
-        await self.db.commit()
-        await self._provision_im(instance)
-        return await self._one_out(instance)
+        await self.db.flush()
+        return instance
+
+    async def provision_im(self, instance: AgentInstance) -> bool:
+        """提交之后注册实例的 IM 账号（失败时 im_ready=false，Worker 重试）。"""
+        return await self._provision_im(instance)
 
     async def _provision_im(self, instance: AgentInstance) -> bool:
         """注册实例的 IM 账号并互加好友；失败时 im_ready 保持 false，由 Worker 重试。"""
@@ -589,27 +613,44 @@ class AgentService:
         """设置 OpenClaw 容器的内存、CPU 上限（T-0145，D2）。写审计；重新部署后生效。"""
         instance = await self._instance(access, instance_id)
         self._check_version(instance, body.version)
-        cpus = round(body.cpus, 2) if body.cpus is not None else None
-        if (instance.mem_limit_mb, instance.cpus) != (body.mem_limit_mb, cpus):
-            await self.audit.record(
-                "agents.instance.limits_updated",
-                workspace_ids=[access.workspace.id],
-                actor_id=access.user_id,
-                resource_type="agent_instance",
-                resource_id=instance.id,
-                metadata={
-                    "mem_limit_mb": body.mem_limit_mb,
-                    "cpus": cpus,
-                    "previous": {"mem_limit_mb": instance.mem_limit_mb, "cpus": instance.cpus},
-                },
-                client_ip=client_ip,
-            )
-            instance.mem_limit_mb = body.mem_limit_mb
-            instance.cpus = cpus
-            instance.version += 1
+        await self.apply_limits(access, instance, body.mem_limit_mb, body.cpus, client_ip=client_ip)
         await self.db.commit()
         await self.db.refresh(instance)
         return AgentLimits(mem_limit_mb=instance.mem_limit_mb, cpus=instance.cpus)
+
+    async def apply_limits(
+        self,
+        access: WorkspaceAccess,
+        instance: AgentInstance,
+        mem_limit_mb: int | None,
+        cpus: float | None,
+        *,
+        client_ip: str,
+    ) -> bool:
+        """改资源上限并写审计（不提交）；值没变时什么都不做。返回是否改了。
+
+        范围由 schema 校验（内存 256 MiB ~ 1 TiB、CPU 0.1 ~ 256 核），null 表示不限制（D2 默认）。
+        """
+        rounded = round(cpus, 2) if cpus is not None else None
+        if (instance.mem_limit_mb, instance.cpus) == (mem_limit_mb, rounded):
+            return False
+        await self.audit.record(
+            "agents.instance.limits_updated",
+            workspace_ids=[access.workspace.id],
+            actor_id=access.user_id,
+            resource_type="agent_instance",
+            resource_id=instance.id,
+            metadata={
+                "mem_limit_mb": mem_limit_mb,
+                "cpus": rounded,
+                "previous": {"mem_limit_mb": instance.mem_limit_mb, "cpus": instance.cpus},
+            },
+            client_ip=client_ip,
+        )
+        instance.mem_limit_mb = mem_limit_mb
+        instance.cpus = rounded
+        instance.version += 1
+        return True
 
     async def set_stop_others(
         self,

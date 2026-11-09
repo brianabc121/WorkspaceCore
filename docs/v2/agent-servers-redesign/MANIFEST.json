@@ -1,0 +1,72 @@
+{
+  "package": "workspace-agent-servers-openclaw-redesign",
+  "created_at": "2026-11-09T05:55:49.628122+00:00",
+  "kind": "design_and_development_plan_only",
+  "repository": "brianabc121/WorkspaceCore",
+  "source_of_truth": {
+    "ref": "origin/main",
+    "commit": "4997fc3d61ee2add09541cc48e4fcba6ae9f7d49",
+    "includes_pull_requests": [
+      177,
+      178
+    ]
+  },
+  "pages": [
+    "智能体服务器",
+    "OpenClaw 智能体"
+  ],
+  "implementation_tasks": 6,
+  "business_code_modified": false,
+  "implementation_tests_run": false,
+  "pull_request_created": false,
+  "images": [
+    {
+      "path": "assets/01-agent-servers.png",
+      "width": 1717,
+      "height": 916
+    },
+    {
+      "path": "assets/02-openclaw-agents.png",
+      "width": 1586,
+      "height": 992
+    }
+  ],
+  "package_validation": {
+    "markdown_links": 13,
+    "plan_tasks": 6,
+    "source_image_matches": 2
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 4999,
+      "sha256": "cdcfbced36b7eb448d22a95acc045c2517cd8384f08a54977e0278ce069c26c9"
+    },
+    {
+      "path": "assets/01-agent-servers.png",
+      "bytes": 1622819,
+      "sha256": "3bcd4805ecb9122fe1a2397fea7e5adab877bf752cc8663315040f39690fd364"
+    },
+    {
+      "path": "assets/02-openclaw-agents.png",
+      "bytes": 1477910,
+      "sha256": "597d41de509bbd05163b76545ba41faa6a2e8a383f4ebf359842257dc2d1d1fb"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-09-agent-servers-openclaw-redesign.md",
+      "bytes": 29719,
+      "sha256": "ee065572477e0c9c3cea3a19445e3a7e1ad8c095f4354e2e927e818e96616450"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-09-agent-servers-openclaw-contract.md",
+      "bytes": 14920,
+      "sha256": "e1511f06441852bd125251b95abfd80ec606f59bfee91bde3f02cc9f6d3c29e9"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-09-agent-servers-openclaw-design.md",
+      "bytes": 15065,
+      "sha256": "1c365096be0ebb5cb1d7979abd5e1f7e43b4955d926540f268a75583728de9da"
+    }
+  ],
+  "hash_scope": "All payload files; MANIFEST.json itself is excluded."
+}

@@ -22,7 +22,7 @@ function setup(outbox: () => Schema['ImOutboxOutput']) {
     path(r) === '/api/v1/agents/instances/inst-a/outbox/cancel' ? Response.json({ cancelled: ['m-2'], not_cancellable: [] }) : undefined)
 }
 async function panel() {
-  await openApp('/agents')
+  await openApp('/agents?instance=inst-a')
   const card = await screen.findByRole('article', { name: '实例：alpha' })
   return within(card).getByRole('region', { name: '发件记录' })
 }

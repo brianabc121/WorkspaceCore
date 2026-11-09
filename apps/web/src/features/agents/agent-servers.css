@@ -1,0 +1,70 @@
+/* 智能体服务器页（T-0181，效果图 01）：服务器详情的页头卡片、整机用量、连接与初始化、添加 / 更新连接信息。 */
+
+.asv-endpoint { font-variant-numeric: tabular-nums; max-width: 26ch; }
+
+/* 详情页头 */
+.asv-detail { display: grid; gap: 16px; min-width: 0; }
+.asv-head { padding: 18px 20px; min-width: 0; }
+.asv-head-top { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+.asv-icon { flex: none; display: inline-grid; place-items: center; width: 46px; height: 46px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); }
+.asv-icon svg { width: 24px; height: 24px; }
+.asv-head-title { flex: 1 1 auto; min-width: 0; }
+.asv-head-title h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 1.25rem; overflow-wrap: anywhere; }
+.asv-head-title .asv-sub { font-size: .88rem; margin-top: 4px; }
+.asv-head-actions { flex: none; display: flex; align-items: center; gap: 8px; }
+.asv-close { display: inline-flex; align-items: center; padding: 7px; }
+.asv-close svg { width: 16px; height: 16px; }
+.asv-rename { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.asv-rename input { flex: 1 1 200px; }
+.asv-head-body { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 16px; }
+.asv-meters { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(150px, 230px)); gap: 12px; min-width: 0; }
+.asv-meters li { display: grid; gap: 6px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); min-width: 0; }
+.asv-meter-label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: .8rem; }
+.asv-meter-label svg { width: 15px; height: 15px; }
+.asv-meters b { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.asv-none { color: var(--muted); font-size: .9rem; }
+.asv-deploy-link { margin-left: auto; min-width: 0; }
+.asv-deploy-link .form-help { margin: 0; }
+.asv-go { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 600; text-decoration: none; }
+.asv-go svg { width: 16px; height: 16px; }
+.asv-go:hover { text-decoration: underline; }
+.asv-head-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 16px; margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--line); }
+.asv-head-facts dt { color: var(--muted); font-size: .78rem; }
+.asv-head-facts dd { margin: 4px 0 0; font-size: .9rem; overflow-wrap: anywhere; }
+.asv-head .host-alerts { margin-top: 12px; }
+
+/* 连接与初始化 */
+.asv-init { padding: 16px 18px; display: grid; gap: 12px; min-width: 0; }
+.asv-init .ws-facts { font-size: .88rem; }
+.asv-init .ws-callout .form-actions { margin-top: 10px; }
+.asv-init .ws-callout strong svg, .asv-result svg, .asv-ready svg { width: 18px; height: 18px; flex: none; }
+.asv-init .ssh-job { margin: 0; }
+.asv-init-actions { padding-top: 12px; border-top: 1px solid var(--line); }
+.asv-init > .form-help { margin: 0; }
+.asv-verify { margin: 0; }
+.asv-ready { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--success); font-weight: 600; }
+.asv-fingerprint { display: inline-block; max-width: 100%; overflow-wrap: anywhere; word-break: break-all; font-size: .85rem; }
+.asv-init pre, .asv-form pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* 添加 / 更新连接信息 */
+.asv-connection { min-width: 0; }
+.asv-connection > .asv-form > .form-help:first-child { margin-top: 4px; }
+.asv-target { margin: 10px 0; }
+.asv-password { position: relative; display: flex; min-width: 0; }
+.asv-password input { flex: 1 1 auto; padding-right: 44px; }
+.asv-reveal { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.asv-reveal svg { width: 18px; height: 18px; }
+.asv-reveal:hover { color: var(--text); background: var(--surface-2); }
+.asv-result { --tone: var(--muted); display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 1.05rem; color: var(--tone); }
+
+.asv-unassigned { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: .9rem; }
+.asv-unassigned li { overflow-wrap: anywhere; }
+
+@media (max-width: 760px) {
+  .asv-head { padding: 14px; }
+  .asv-head-top { flex-wrap: wrap; }
+  .asv-meters { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .asv-deploy-link { margin-left: 0; }
+  .asv-init { padding: 12px; }
+  .asv-endpoint { max-width: none; }
+}

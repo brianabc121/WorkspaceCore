@@ -7,7 +7,12 @@
 - `install-docker.sh`：目标服务器上以 root 运行（上传后 `sudo -S bash`）。
   从 Docker 官方软件源安装锁定版本，把账号加入 docker 组；
 - `install-plugin.sh`：锁定的 OpenClaw 镜像里以 node 用户运行（`sh -s`）。
-  下载并核对 openclaw-channel，用临时的空配置安装。
+  下载并核对 openclaw-channel，用临时的空配置安装；
+- `verify.sh`（T-0179）：初始化的最后一步，以登录账号检查 Docker / Compose、平台受控的部署根目录
+  是否可写、能否连到工作台的外网接入地址。只读（只在部署根目录里建一个临时文件再删掉）。
+
+OpenClaw 服务器从 T-0179 起全程用保存的登录密码登录（ADR 2026-11-09-agent-server-password-auth），
+初始化与部署都没有 `authorize_key` 步骤；`authorize_key_command` 只留给运行服务器（Runner）。
 
 远端命令里的路径都经过 `shlex.quote`；密码只从标准输入传给 `sudo -S`，不出现在命令行里。
 """
@@ -15,6 +20,7 @@
 import re
 import shlex
 from importlib import resources
+from urllib.parse import urlsplit
 
 from app.agent_bundle import OPENCLAW_VERSION, PLUGIN_VERSION, short_id
 
@@ -39,13 +45,11 @@ _INSTALL_DIR = re.compile(rf"/{INSTALL_ROOT_NAME}/[0-9a-f]{{12}}$")
 # 交给 uid 1000 的子目录（OpenClaw 的状态、取密钥程序、隧道证书）
 OWNED_DIRS = ("state", "bin", "tls")
 
-# 安装任务的步骤（ADR 第 5.2 节），顺序即执行顺序
+# 部署一个实例的步骤（T-0179），顺序即执行顺序。服务器要先初始化（Docker 可用）：
+# 部署只做环境预检，不安装 Docker、不装公钥
 STEPS = (
     "connect",
     "inspect",
-    "authorize_key",
-    "docker",
-    "reconnect",
     "upload",
     "pull",
     "plugin",
@@ -55,8 +59,10 @@ STEPS = (
     "reflection",
 )
 
-# 准备服务器的步骤（T-0145）：部署实例的前五步；之后在这台服务器上部署实例不用再输密码
-PREPARE_STEPS = STEPS[:5]
+# 初始化服务器的步骤（T-0179）：密码登录 → 只读检查 → 缺 Docker 才按锁定脚本安装 →
+# 装过 Docker 就重新用密码登录（docker 组生效）→ 准备平台受控的部署根目录 → 最终检查。
+# 不建实例、不发接入包、不写 authorized_keys
+PREPARE_STEPS = ("connect", "inspect", "docker", "reconnect", "workspace", "verify")
 
 # 卸载任务的步骤（ADR 第 6 节）
 UNINSTALL_STEPS = ("connect", "inspect", "stop", "unschedule", "remove_files")
@@ -82,8 +88,34 @@ def q(value: str) -> str:
     return shlex.quote(value)
 
 
+def deploy_root(home: str) -> str:
+    """平台受控的部署根目录：每个实例在它下面一个子目录（初始化时建好）。"""
+    return f"{home.rstrip('/')}/{INSTALL_ROOT_NAME}"
+
+
 def install_dir(home: str, instance_id: str) -> str:
-    return f"{home.rstrip('/')}/{INSTALL_ROOT_NAME}/{short_id(instance_id)}"
+    return f"{deploy_root(home)}/{short_id(instance_id)}"
+
+
+def ingress_target(url: str | None) -> tuple[str, int] | None:
+    """外网接入入口（AGENT_PUBLIC_URL）的主机与端口；没配置或写错时为 None。"""
+    if not url:
+        return None
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return None
+    host = parts.hostname
+    if not host:
+        return None
+    return host, port or (443 if parts.scheme == "https" else 80)
+
+
+def verify_command(root: str, ingress: tuple[str, int] | None) -> str:
+    """初始化最后一步的检查命令（脚本 verify.sh 从标准输入读入）。参数都经过引号处理。"""
+    args = [root, *([ingress[0], str(ingress[1])] if ingress else [])]
+    return "sh -s -- " + " ".join(q(arg) for arg in args)
 
 
 def staging_dir(home: str, instance_id: str) -> str:
@@ -96,6 +128,8 @@ def cron_marker(instance_id: str) -> str:
 
 def authorize_key_command(public_key: str) -> str:
     """把专用公钥追加到 ~/.ssh/authorized_keys；已经有同一行就不重复。
+
+    只有运行服务器（Runner）还用；OpenClaw 服务器从 T-0179 起不装公钥。
 
     已有文件的最后一行没有换行符时先补一个，免得专用公钥接在原来那行的末尾。
     """
@@ -214,6 +248,9 @@ _AWK_FOUND = "{for (i = 1; i < NF; i++) if ($i == kt && $(i + 1) == kd) f = 1} E
 
 def revoke_key_command(public_key: str) -> str:
     """从 ~/.ssh/authorized_keys 删掉这把公钥所在的行，其他行原样保留（先写临时文件再替换）。
+
+    OpenClaw 服务器旧公钥的定向退役（T-0179）与运行服务器的吊销共用：只按“类型 公钥数据”匹配
+    同一把公钥，其他用户、运行服务器的公钥不受影响。
 
     最后再按同样的字段规则检查一遍：还能找到这把公钥就返回失败，不会误报已吊销。
     """

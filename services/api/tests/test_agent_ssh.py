@@ -27,6 +27,7 @@ SETTINGS: dict[str, Any] = {
     "agent_ssh_allow_loopback": True,
 }
 ADMIN = {"email": "admin@example.com", "password": "admin password 123456"}
+LOGIN = "server login password"  # 测试用的假密码（T-0178：添加服务器时保存）
 
 
 class _NoLogin(asyncssh.SSHServer):
@@ -79,14 +80,14 @@ class Owner:
     async def create(self, **body: Any) -> httpx.Response:
         return await self.client.post(
             "/api/v1/agents/servers",
-            json={"name": "服务器 A", "username": "deploy", **body},
+            json={"name": "服务器 A", "username": "deploy", "login_password": LOGIN, **body},
             headers=self.headers(),
         )
 
     async def address(self, server_id: str, **body: Any) -> httpx.Response:
         return await self.client.put(
             f"/api/v1/agents/servers/{server_id}/address",
-            json={"username": "deploy", **body},
+            json={"username": "deploy", "login_password": LOGIN, **body},
             headers=self.headers(),
         )
 
@@ -161,7 +162,9 @@ async def test_hostnames_resolve_once_and_are_checked() -> None:
 
 
 async def test_probe_shows_the_fingerprint_and_confirm_pins_it(owner: Owner) -> None:
-    assert (await owner.servers()) == {"items": [], "unassigned": []}
+    empty = await owner.servers()
+    assert empty["items"] == [] and empty["unassigned"] == []
+    assert empty["summary"]["server_count"] == 0
     async with ssh_server() as (port, host_key):
         response = await owner.create(host="LOCALHOST", port=port)
     assert response.status_code == 201, response.text
@@ -174,6 +177,7 @@ async def test_probe_shows_the_fingerprint_and_confirm_pins_it(owner: Owner) -> 
     assert ssh_info["port"] == port and ssh_info["username"] == "deploy"
     assert ssh_info["host_key_algorithm"] == "ssh-ed25519"
     assert ssh_info["host_key_confirmed"] is False and ssh_info["client_key_installed"] is False
+    assert ssh_info["password_set"] is True and ssh_info["auth_method"] == "password"
     stored = await run_sql(owner_db(owner), "SELECT host_key FROM workspace.agent_ssh_targets")
     assert stored == " ".join(host_key.export_public_key().decode().split()[:2])
     listed = await owner.servers()
@@ -218,7 +222,7 @@ async def test_probe_shows_the_fingerprint_and_confirm_pins_it(owner: Owner) -> 
         headers=owner.headers(),
     )
     assert removed.status_code == 204
-    assert (await owner.servers()) == {"items": [], "unassigned": []}
+    assert (await owner.servers())["items"] == []
 
 
 async def test_the_same_server_cannot_be_added_twice(owner: Owner) -> None:

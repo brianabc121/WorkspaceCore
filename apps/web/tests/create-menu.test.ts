@@ -32,13 +32,15 @@ describe('global create menu', () => {
   it('lists what each role can create', async () => {
     setup('owner')
     await openApp('/')
-    expect(items(await openMenu())).toEqual(['新建任务任务', '新建项目项目', '新建日程日历', '新建笔记知识库', '收藏文档AFFiNE 链接', '新建群聊与 OpenClaw 实例', '添加成员工作空间', '登记 OpenClaw 实例接入包'])
+    expect(items(await openMenu())).toEqual(['新建任务任务', '新建项目项目', '新建日程日历', '新建笔记知识库', '收藏文档AFFiNE 链接', '新建群聊与 OpenClaw 实例', '添加成员工作空间', '部署 OpenClaw 智能体选择服务器', '添加智能体服务器IP、账号与密码'])
   })
 
   it('leaves out admin-only and owner-only entries for other roles', async () => {
     setup('admin')
     const first = await openApp('/')
-    expect(items(await openMenu())).not.toContain('登记 OpenClaw 实例接入包')
+    const listed = items(await openMenu())
+    expect(listed).not.toContain('部署 OpenClaw 智能体选择服务器')
+    expect(listed).not.toContain('添加智能体服务器IP、账号与密码')
     first.unmount()
     setup('member')
     await openApp('/')
@@ -112,7 +114,17 @@ describe('global create menu', () => {
     const form = await screen.findByRole('form', { name: '添加成员' })
     await vi.waitFor(() => expect(within(form).getByLabelText('邮箱 *')).toHaveFocus())
 
-    await choose('登记 OpenClaw 实例')
-    expect(await screen.findByRole('dialog', { name: '登记 OpenClaw 实例' })).toBeVisible()
+    // 部署 OpenClaw 智能体（T-0182）：打开部署抽屉；手动登记在智能体页的次要操作里
+    await choose('部署 OpenClaw 智能体')
+    expect(await screen.findByRole('form', { name: '部署 OpenClaw' })).toBeVisible()
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agents'))
+  })
+
+  it('opens the add-server form on the agent servers page (T-0181)', async () => {
+    setup()
+    const { router } = await openApp('/')
+    await choose('添加智能体服务器')
+    expect(await screen.findByRole('form', { name: '添加服务器' })).toBeVisible()
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agent-servers'))
   })
 })

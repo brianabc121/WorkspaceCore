@@ -27,7 +27,7 @@ afterEach(() => vi.restoreAllMocks())
 describe('agent wakeups (T-0121)', () => {
   it('lists wakeups with their session and cancels a pending one', async () => {
     const requests = setup(() => ({ items: [wakeup(), wakeup({ id: 'w-3', source: 'agent', target: null, repeat: 'none', status: 'failed', last_error: '领取后 15 分钟没有报回结果', prompt: '提醒交周报' })], targets: [{ target: 'group:g1', label: '群 发布群' }] }))
-    await openApp('/agents')
+    await openApp('/agents?instance=inst-a')
     const panel = await screen.findByRole('region', { name: '唤醒' })
     const list = await within(panel).findByRole('list', { name: '唤醒列表' })
     expect(list).toHaveTextContent('工作日 · 群 发布群')
@@ -39,7 +39,7 @@ describe('agent wakeups (T-0121)', () => {
   })
   it('creates a repeating wakeup in a chosen session with the browser time zone', async () => {
     const requests = setup(() => ({ items: [], targets: [{ target: 'group:g1', label: '群 发布群' }] }))
-    await openApp('/agents')
+    await openApp('/agents?instance=inst-a')
     const form = await screen.findByRole('form', { name: '新建唤醒' })
     await fireEvent.update(within(form).getByLabelText('要它做的事'), '在项目群发昨天的进展')
     await fireEvent.update(within(form).getByLabelText(/^时间/), '2026-11-09T09:00')

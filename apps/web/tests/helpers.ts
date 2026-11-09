@@ -8,6 +8,7 @@ import { createAppRouter } from '../src/app/router'
 import type { Schema } from '../src/services/api'
 import { overview } from './dashboard-fixtures'
 import { task, project, integration } from './sprint3-fixtures'
+import { overviewOf } from './agents-fixtures'
 
 export const workspace: Schema['WorkspaceOut'] = { id: 'workspace-a', name: '个人空间', role: 'owner', created_at: '2026-10-30T00:00:00Z', updated_at: '2026-10-30T00:00:00Z' }
 export const me: Schema['MeResponse'] = { user: { id: 'user-a', email: 'test@example.com', display_name: '测试用户', created_at: '2026-10-30T00:00:00Z' }, workspaces: [workspace] }
@@ -28,6 +29,15 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (response) return response
     const path = new URL(request.url).pathname
     if (path === '/api/v1/setup/status') return Response.json({ setup_required: false })
+    // OpenClaw 智能体总览与单个实例（T-0182）：测试没单独给出时，用同一个测试的实例列表拼出来（summary 按这些实例统计）
+    const single = /^\/api\/v1\/agents\/instances\/([^/]+)$/.exec(path)
+    if ((path === '/api/v1/agents/overview' || single) && request.method === 'GET') {
+      const listed = await handler?.(new Request(new URL('/api/v1/agents/instances', request.url)))
+      const items = listed?.ok ? ((await listed.json()) as Schema['AgentInstancePage']).items : []
+      if (!single) return Response.json(overviewOf(items))
+      const found = items.find(item => item.id === single[1])
+      return found ? Response.json(found) : fail(404, 'NOT_FOUND')
+    }
     if (path === '/api/v1/me' && request.method === 'GET') return Response.json(me)
     if (path === '/api/v1/auth/sessions') return Response.json({ ...emptyPage, items: [session] })
     if (path === '/api/v1/notifications') return Response.json({ ...emptyPage, unread_count: 0 })
@@ -44,8 +54,8 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     // 实例的发件记录（T-0118）：默认没有
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/outbox$/.test(path) && request.method === 'GET') return Response.json({ items: [], rejected_replies: [] })
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/wakeups$/.test(path) && request.method === 'GET') return Response.json({ items: [], targets: [] })
-    // OpenClaw 服务器（T-0147）：默认没有服务器，实例没有部署
-    if (path === '/api/v1/agents/servers' && request.method === 'GET') return Response.json({ items: [], unassigned: [] })
+    // 智能体服务器（T-0147、T-0181）：默认没有服务器，实例没有部署
+    if (path === '/api/v1/agents/servers' && request.method === 'GET') return Response.json({ items: [], unassigned: [], summary: { server_count: 0, ready_count: 0, successful_deployments: 0, not_initialized_count: 0, needs_credentials_count: 0, deployment_counts_partial: false, generated_at: '2026-11-09T00:00:00Z' } })
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/deployment$/.test(path) && request.method === 'GET') return Response.json({ deployment: null, server: null, job: null, capacity_warning: null })
     // 实例的运行环境权限（T-0140）：默认关闭
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/runner$/.test(path) && request.method === 'GET') return Response.json(runnerOff)

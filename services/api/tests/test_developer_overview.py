@@ -26,6 +26,14 @@ pytestmark = pytest.mark.integration
 NOW = datetime.now(UTC)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_now() -> None:
+    """每个用例开始时重新取“现在”：NOW 若停在导入时刻，全量测试跑到后面时
+    “两分钟前同步”的记录会超过 sync_stale_after_seconds（15 分钟）被判为过期（本地全量复现）。"""
+    global NOW
+    NOW = datetime.now(UTC)
+
+
 class Seed:
     """直接写集成与投影；同一个 asyncpg 连接，批量插入。"""
 

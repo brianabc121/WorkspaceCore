@@ -16,7 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, origin_of
 from app.core.errors import ApiError
 from app.domain import policy
+from app.domain.agent_deployments import AgentDeploymentService
 from app.domain.agent_ops import AgentOpsService
+from app.domain.agent_overview import AgentOverviewService
 from app.domain.agent_servers import AgentServerService
 from app.domain.agents import AgentService
 from app.domain.ai_tools import AiToolService
@@ -219,6 +221,27 @@ def get_agent_server_service(
 ) -> AgentServerService:
     # 准备服务器、部署 / 卸载实例在 API 进程内运行（T-0089 B2、T-0145）；lifespan 里创建
     return AgentServerService(db, settings, redis, getattr(request.app.state, "ssh_jobs", None))
+
+
+def get_agent_deployment_service(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    redis: Annotated[Redis, Depends(get_redis)],
+    im: Annotated[OpenIMClient | None, Depends(get_openim)],
+) -> AgentDeploymentService:
+    # 一次点击新建并部署（T-0180）：任务与部署接口共用进程内的 SshJobRunner
+    return AgentDeploymentService(
+        db, settings, redis, im, getattr(request.app.state, "ssh_jobs", None)
+    )
+
+
+def get_agent_overview_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> AgentOverviewService:
+    # 只读总览（T-0180）：只读本地记录，不需要 Redis、OpenIM 或 SSH
+    return AgentOverviewService(db, settings)
 
 
 def get_agent_ops_service(

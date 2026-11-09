@@ -336,15 +336,31 @@ class AgentCa(Base):
     retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+# 最近一次连接检测的结果（T-0178，迁移 0054）：白名单，只记类别，不记远端原文
+CONNECTION_REASONS = (
+    "connected",
+    "auth_failed",
+    "unreachable",
+    "host_key_changed",
+    "credential_unreadable",
+)
+# 旧专用公钥的退役状态（T-0178）：有历史公钥 / 私钥的记录迁移时回填 pending
+LEGACY_KEY_CLEANUP_STATES = ("not_needed", "pending", "done", "manual_required")
+
+
 class AgentSshTarget(Base):
     """一台 OpenClaw 服务器的 SSH 登录信息（T-0089；T-0145 起按服务器，迁移 0046）。
 
-    与 agent_servers 一一对应（kind=ssh）。一台服务器一把专用密钥（D7），上面的实例都用它：
+    与 agent_servers 一一对应（kind=ssh）：
 
     - 主机公钥先探测、owner 核对指纹并确认后才固定（host_key_confirmed_at），
       之后的连接只接受这把公钥；
-    - 登录密码从不保存；准备服务器时生成的专用私钥以 `enc:v1:` 引用保存（client_key_ref），
-      用途绑定到这条记录（agent_ssh:<id>）。
+    - 登录密码加密保存（T-0178，迁移 0054，
+      docs/decisions/2026-11-09-agent-server-password-auth.md）：
+      `login_password_ref` 是 `enc:v1:` 引用，用途绑定到这条记录（agent_server_password:<id>）；
+      `credential_revision` 每次设置 / 替换密码加 1（主密钥轮换不加），后台任务据此发现密码被换过；
+    - client_key_ref / client_public_key 是旧“一次密码后改用专用密钥”方案（D7）留下的兼容列：
+      新逻辑不再生成新的专用密钥，旧公钥经密码登录后定向退役（legacy_key_cleanup_state）。
 
     每个实例部署在哪个目录记在 agent_deployments。
     """
@@ -352,6 +368,15 @@ class AgentSshTarget(Base):
     __tablename__ = "agent_ssh_targets"
     __table_args__ = (
         CheckConstraint("port BETWEEN 1 AND 65535", name="port"),
+        CheckConstraint("credential_revision >= 0", name="credential_revision"),
+        CheckConstraint(
+            f"last_connection_reason IS NULL OR last_connection_reason IN {CONNECTION_REASONS}",
+            name="last_connection_reason",
+        ),
+        CheckConstraint(
+            f"legacy_key_cleanup_state IN {LEGACY_KEY_CLEANUP_STATES}",
+            name="legacy_key_cleanup_state",
+        ),
         UniqueConstraint("server_id"),
     )
 
@@ -376,8 +401,14 @@ class AgentSshTarget(Base):
     )
     client_key_ref: Mapped[str | None] = mapped_column(Text)
     client_public_key: Mapped[str | None] = mapped_column(Text)
-    # 准备好（专用公钥装上、Docker 可用）的时间
+    # 准备好（初始化完成、Docker 可用）的时间
     prepared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 保存的登录密码（T-0178）：只在后台登录时解密，任何接口都不返回
+    login_password_ref: Mapped[str | None] = mapped_column(Text)
+    credential_revision: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    last_connection_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_connection_reason: Mapped[str | None] = mapped_column(Text)
+    legacy_key_cleanup_state: Mapped[str] = mapped_column(Text, server_default=text("'not_needed'"))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.users.id", ondelete="SET NULL")
@@ -391,6 +422,9 @@ class AgentDeployment(Base):
 
     开始部署时建；部署成功后记下目录与时间；卸载并删除目录后删掉这一行。
     服务器上还有部署记录时不能移除那台服务器。
+
+    runtime_installed（T-0178，迁移 0054）：部署成功写 true，卸载容器但保留目录写 false；
+    迁移前的旧记录是 null（未知），不能凭 installed_at 推断现在还装着。
     """
 
     __tablename__ = "agent_deployments"
@@ -414,6 +448,7 @@ class AgentDeployment(Base):
     )
     install_dir: Mapped[str | None] = mapped_column(Text)
     installed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    runtime_installed: Mapped[bool | None] = mapped_column(Boolean)
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.users.id", ondelete="SET NULL")

@@ -495,6 +495,10 @@ SshJobStepKey = Literal[
     "remove_files",
     # 运行服务器的部署（T-0136）：以 root 运行接入包里的 install.sh
     "install",
+    # OpenClaw 服务器的初始化（T-0179）：准备平台受控的部署根目录、最终检查
+    # （Docker、目录可写、能连到工作台的接入地址）
+    "workspace",
+    "verify",
 ]
 
 
@@ -507,8 +511,9 @@ class AgentSshJobStep(BaseModel):
 class AgentSshJobOut(BaseModel):
     id: UUID
     kind: Literal["prepare", "install", "uninstall"] = Field(
-        description="prepare 准备服务器（装专用公钥、装 Docker）；install 部署一个实例；"
-        "uninstall 卸载一个实例"
+        description="prepare 初始化服务器（OpenClaw 服务器：connect / inspect / docker / "
+        "reconnect / workspace / verify，全程用保存的密码，不装公钥）；install 部署一个实例；"
+        "uninstall 卸载一个实例。运行服务器的部署仍有 authorize_key 步骤"
     )
     status: Literal["running", "succeeded", "failed", "interrupted"]
     steps: list[AgentSshJobStep]
@@ -592,10 +597,21 @@ class AgentOpsActionOut(BaseModel):
 
 
 class AgentOpsState(BaseModel):
-    available: bool = Field(description="部署到了一台 SSH 服务器、专用密钥还在：可以执行运维动作")
-    reason: Literal["not_deployed", "key_missing"] | None = Field(
+    available: bool = Field(description="部署到了一台 SSH 服务器、可以登录：可以执行运维动作")
+    reason: (
+        Literal[
+            "not_deployed",
+            "credential_missing",
+            "credential_unreadable",
+            "host_key_unconfirmed",
+            "key_missing",
+        ]
+        | None
+    ) = Field(
         description="不可用的原因：not_deployed 还没部署到服务器"
-        "（手动接入的实例先部署到一台服务器）；key_missing 这台服务器的专用密钥已吊销"
+        "（手动接入的实例先部署到一台服务器）；credential_missing 服务器还没保存登录密码；"
+        "credential_unreadable 保存的密码无法解密；host_key_unconfirmed 主机公钥还没确认；"
+        "key_missing 已弃用（旧专用密钥方案：专用密钥已吊销）"
     )
     running: AgentOpsActionOut | None = Field(
         description="这台服务器上进行中的动作（同一台服务器同时只有一个）"
@@ -725,17 +741,61 @@ class StopResultResponse(BaseModel):
 
 
 # ---------------------------------------------------------------- OpenClaw 服务器（T-0145、T-0147）
+# 登录密码加密保存、连接检测（T-0178）；部署命令、收据与总览的契约（T-0180）
+# 见 docs/v2/agent-servers-redesign/ 的接口与迁移约定、
+# docs/decisions/2026-11-09-agent-server-password-auth.md
 
 ServerName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+ServerPassword = Annotated[
+    SecretStr,
+    Field(
+        min_length=1,
+        max_length=1024,
+        description="服务器的 SSH 登录密码：只写不读、加密保存；首尾空格原样保留",
+    ),
+]
+ConnectionStatus = Literal[
+    "unknown",
+    "connected",
+    "auth_failed",
+    "unreachable",
+    "host_key_changed",
+    "credential_unreadable",
+    "credentials_required",
+]
+LegacyKeyCleanupState = Literal["not_needed", "pending", "done", "manual_required"]
+InitializationStatus = Literal["not_initialized", "initializing", "ready", "failed", "interrupted"]
+DeployBlockReason = Literal[
+    "not_ssh",
+    "credentials_required",
+    "credential_unreadable",
+    "host_key_unconfirmed",
+    "host_key_changed",
+    "auth_failed",
+    "not_initialized",
+    "initializing",
+    "initialization_failed",
+    "initialization_interrupted",
+    "busy",
+]
+ServerAgentState = Literal[
+    "associated", "deploying", "deployed", "failed", "interrupted", "retained"
+]
 
 
 class AgentServerCreate(_Strict):
-    """添加一台服务器：工作台只读取它的主机公钥（不登录），等 owner 核对指纹后确认。"""
+    """添加一台服务器：IP / 端口 / 账号 / 密码。
 
-    name: ServerName
+    工作台只读取它的主机公钥（不登录）并加密保存密码；owner 核对指纹确认之前，密码不会发给服务器。
+    """
+
+    name: ServerName | None = Field(
+        default=None, description="省略时用 host:port（IPv6 写成 [地址]:端口，超过 100 字符截断）"
+    )
     host: SshHost = Field(description="服务器的 IP 或域名")
     port: int = Field(default=22, ge=1, le=65535)
-    username: SshUsername = Field(description="SSH 账号；之后用 sudo 安装 Docker（需要时）")
+    username: SshUsername = Field(description="SSH 账号；需要时用同一个密码执行 sudo")
+    login_password: ServerPassword
 
 
 class AgentServerUpdate(_Strict):
@@ -744,19 +804,41 @@ class AgentServerUpdate(_Strict):
 
 
 class AgentServerAddress(_Strict):
-    """更换地址或账号：重新读取主机公钥，要重新确认；已经装了专用公钥时先吊销。"""
+    """更换地址或账号：重新读取主机公钥，要重新确认；同时替换登录密码。
+
+    服务器上还有部署记录时不能更换（409 AGENT_SERVER_HAS_DEPLOYMENTS），避免把原有实例挂到新机器上。
+    """
 
     host: SshHost
     port: int = Field(default=22, ge=1, le=65535)
     username: SshUsername
+    login_password: ServerPassword
     version: Version
+
+
+class AgentServerCredentialsIn(_Strict):
+    """替换保存的登录密码：凭证版本加 1、连接状态改回 unknown；保留初始化记录与实例。"""
+
+    version: Version = Field(description="服务器的当前版本号")
+    login_password: ServerPassword
+
+
+class AgentServerTestIn(_Strict):
+    """测试连接：按固定的主机公钥用保存的密码登录，只读检查账号权限与环境。"""
+
+    version: Version = Field(description="服务器的当前版本号")
 
 
 class AgentServerPrepare(_Strict):
-    """准备服务器：用一次登录密码装上工作台的专用公钥、需要时用 sudo 安装 Docker。密码不保存。"""
+    """初始化服务器：用保存的登录密码登录，需要时用 sudo 安装 Docker。"""
 
     version: Version
-    password: SecretStr = Field(min_length=1, max_length=1024)
+
+
+class AgentServerLegacyCleanupIn(_Strict):
+    """旧专用公钥退役：用保存的密码登录，只删掉本工作台那一条公钥，成功后清空旧私钥引用。"""
+
+    version: Version
 
 
 class ServerSshOut(BaseModel):
@@ -768,9 +850,31 @@ class ServerSshOut(BaseModel):
     host_key_fingerprint: str = Field(description="SHA256 指纹，格式与 ssh-keygen -lf 相同")
     host_key_confirmed: bool
     host_key_confirmed_at: datetime | None
-    client_key_installed: bool = Field(description="这台服务器上装了工作台的专用公钥")
-    client_key_fingerprint: str | None
-    prepared_at: datetime | None = Field(description="准备好（专用公钥、Docker 可用）的时间")
+    auth_method: Literal["password"] = Field(
+        default="password", description="登录方式：只用保存的登录密码（不再使用 SSH 客户端密钥）"
+    )
+    password_set: bool = Field(description="已经保存了登录密码（密码本身任何接口都不返回）")
+    credential_revision: int = Field(description="凭证版本：每次设置 / 替换密码加 1")
+    connection_status: ConnectionStatus = Field(
+        description="unknown 没检测过（或密码刚换过）；connected 最近一次检测登录成功；"
+        "auth_failed 密码被拒绝；unreachable 连不上；host_key_changed 主机公钥与确认过的不一致；"
+        "credential_unreadable 保存的密码无法解密（加密密钥不对）；"
+        "credentials_required 还没有保存密码（旧服务器要补录）"
+    )
+    last_connection_at: datetime | None = Field(description="最近一次显式连接检测完成的时间")
+    legacy_key_cleanup_state: LegacyKeyCleanupState = Field(
+        description="旧专用公钥的退役：not_needed 没有旧公钥；pending 等补录密码后清理；"
+        "done 已清理；manual_required 需要在服务器上手动删除那一行"
+    )
+    client_key_installed: bool = Field(
+        description="已弃用（迁移兼容）：服务器上还留有旧方案装的专用公钥；不代表可以部署",
+        json_schema_extra={"deprecated": True},
+    )
+    client_key_fingerprint: str | None = Field(
+        description="已弃用（迁移兼容）：旧专用公钥的 SHA256 指纹",
+        json_schema_extra={"deprecated": True},
+    )
+    prepared_at: datetime | None = Field(description="最近一次初始化成功（Docker 可用）的时间")
 
 
 class AgentServerOut(BaseModel):
@@ -788,9 +892,34 @@ class AgentServerOut(BaseModel):
     mem_total: int | None
     mem_used_percent: float | None
     disk_used_percent: float | None = Field(description="两个分区里较高的已用百分比")
-    instances_total: int
+    instances_total: int = Field(description="归属这台服务器的实例数（部署、手动指定或按指纹识别）")
     instances_online: int
     alerts: list[Literal["disk_low", "memory_low", "load_high", "not_reporting"]]
+    initialization_status: InitializationStatus | None = Field(
+        description="由最近成功的初始化与最近一次初始化任务推导；kind=auto 为 null（不适用）"
+    )
+    deployable: bool = Field(
+        description="现在可以选它部署新的智能体（只是本地判断，实际部署前仍会真实检查）"
+    )
+    deploy_block_reason: DeployBlockReason | None = Field(
+        description="不能部署的第一个原因；可以部署时为 null"
+    )
+    managed_deployments: int = Field(
+        description="部署记录数（含失败待恢复、卸载后保留目录的），不等于部署成功数"
+    )
+    successful_deployments: int | None = Field(
+        description="部署成功且容器仍装着的数量；有运行状态未知的旧记录时为 null"
+    )
+    deployment_counts_partial: bool = Field(
+        description="有运行状态未知的旧部署记录：成功数待核验，不能当成 0"
+    )
+    allocated_mem_limit_mb: int | None = Field(
+        description="有部署记录的实例内存上限之和（MiB）；任一不限制时为 null"
+    )
+    allocated_cpus: float | None = Field(
+        description="有部署记录的实例 CPU 上限之和；任一不限制时为 null"
+    )
+    has_unlimited_limits: bool = Field(description="其中有不限制资源的实例（上限之和不完整）")
     version: int
     created_at: datetime
     updated_at: datetime
@@ -802,7 +931,22 @@ class UnassignedInstance(BaseModel):
     status: InstanceStatus
 
 
+class AgentServerSummary(BaseModel):
+    """当前工作空间全部服务器的统计（不受页面筛选影响；几个数字不要求相加等于服务器数）。"""
+
+    server_count: int = Field(ge=0)
+    ready_count: int = Field(ge=0, description="初始化就绪（环境可用）的 SSH 服务器，不等于在线")
+    successful_deployments: int | None = Field(
+        description="部署成功的智能体数；有运行状态未知的旧记录时为 null（待核验）"
+    )
+    not_initialized_count: int = Field(ge=0, description="还没初始化的 SSH 服务器")
+    needs_credentials_count: int = Field(ge=0, description="还没保存登录密码的 SSH 服务器")
+    deployment_counts_partial: bool
+    generated_at: datetime
+
+
 class AgentServerList(BaseModel):
+    summary: AgentServerSummary
     items: list[AgentServerOut]
     unassigned: list[UnassignedInstance] = Field(description="还没有归属任何服务器的实例")
 
@@ -819,6 +963,15 @@ class ServerAgentRow(BaseModel):
     name: str
     status: InstanceStatus
     deployed: bool = Field(description="经 SSH 部署在这台服务器上（不是只按指纹识别的）")
+    deployment_state: ServerAgentState = Field(
+        description="associated 只是手动指定或按指纹识别；deploying 部署中；deployed 部署成功过；"
+        "failed / interrupted 最近一次部署失败 / 中断（实例保留，可以继续）；"
+        "retained 已卸载容器、保留目录"
+    )
+    latest_job: AgentSshJobOut | None = Field(description="这个实例最近一次部署或卸载任务")
+    deployment_project: str | None = Field(
+        description="平台确定的 Compose 项目名（不是容器名）；没有部署记录时为 null"
+    )
     install_dir: str | None
     mem_limit_mb: int | None
     cpus: float | None
@@ -837,7 +990,10 @@ class AgentServerDetail(BaseModel):
     points: list[HostPoint] = Field(description="整机每小时的平均与峰值")
     agents: list[ServerAgentRow]
     job: AgentSshJobOut | None = Field(description="这台服务器上最近一次 SSH 任务")
-    warning: str | None = None
+    warning: str | None = Field(
+        default=None,
+        description="需要 owner 处理的事项（例如连接检测发现账号不能 sudo、系统不在自动安装范围）",
+    )
 
 
 class AgentDeployIn(_Strict):
@@ -849,7 +1005,9 @@ class AgentDeployIn(_Strict):
         default=None,
         min_length=1,
         max_length=1024,
-        description="服务器还没准备（没装专用公钥）时必填，只用这一次；准备好的服务器不用填",
+        description="已弃用、忽略：登录密码保存在服务器上"
+        "（PUT /agents/servers/{server_id}/credentials）",
+        json_schema_extra={"deprecated": True},
     )
 
 
@@ -872,6 +1030,10 @@ class AgentDeploymentOut(BaseModel):
     server_id: UUID
     install_dir: str | None
     installed_at: datetime | None
+    runtime_installed: bool | None = Field(
+        description="true 部署成功、容器装着；false 已卸载容器、保留目录；"
+        "null 迁移前的旧记录（未知），不代表此刻 Docker 在运行"
+    )
     version: int
 
 
@@ -882,3 +1044,75 @@ class AgentDeploymentState(BaseModel):
     capacity_warning: str | None = Field(
         default=None, description="部署前的容量提醒（D4：不设硬上限，剩余内存或磁盘不多时提醒）"
     )
+
+
+# ---------------------------------------------------------------- 一次点击新建并部署（T-0180）
+
+
+class AgentDeploymentCreateIn(_Strict):
+    """新建一个智能体并部署到一台已就绪的服务器（外网模式、read / member）。
+
+    request_id 同时是 Idempotency-Key（两者必须一致）；不接受地址、密码、镜像、目录或权限开关。
+    """
+
+    request_id: UUID = Field(description="这次部署请求的 ID，必须与 Idempotency-Key 相同")
+    server_id: UUID
+    server_version: Version = Field(description="服务器的当前版本号")
+    name: InstanceName
+    description: InstanceDescription = ""
+    im_nickname: ImNickname | None = Field(default=None, description="不填时用 name")
+    cpus: Annotated[float, Field(ge=0.1, le=256)] | None = Field(
+        default=None, description="CPU 上限（核）；null 不限制（默认）"
+    )
+    mem_limit_mb: Annotated[int, Field(ge=256, le=1 << 20)] | None = Field(
+        default=None, description="内存上限（MiB）；null 不限制（默认）"
+    )
+
+
+class AgentDeploymentCreateOut(BaseModel):
+    request_id: UUID
+    instance: AgentInstanceOut
+    deployment: AgentDeploymentState
+
+
+class AgentDeploymentRequestOut(BaseModel):
+    """部署请求的收据：响应丢失或刷新后按 request_id 找回同一个实例与任务。"""
+
+    request_id: UUID
+    state: Literal["processing", "accepted", "failed", "interrupted"] = Field(
+        description="processing 命令还在处理；accepted 已接纳（任务进度看 deployment.job）；"
+        "failed 命令被拒绝、没有创建实例；interrupted 处理中断"
+    )
+    instance: AgentInstanceOut | None
+    deployment: AgentDeploymentState | None
+    error_code: str | None
+
+
+# ---------------------------------------------------------------- 智能体只读总览（T-0180）
+
+
+class AgentOverviewSummary(BaseModel):
+    """按 server_id / q 的全部实例统计（不套用 status 筛选、不受分页影响）。"""
+
+    total: int = Field(ge=0)
+    online: int = Field(ge=0)
+    offline: int = Field(ge=0)
+    pending: int = Field(ge=0)
+    disabled: int = Field(ge=0)
+    deploying: int = Field(ge=0, description="部署任务进行中（可能与连接状态重叠）")
+    attention: int = Field(ge=0, description="最近部署失败 / 中断，或没停用但离线的实例（去重）")
+
+
+class AgentOverviewRow(BaseModel):
+    instance: AgentInstanceOut
+    server: AgentServerOut | None = Field(description="所在服务器；没有归属时为 null")
+    deployment: AgentDeploymentOut | None
+    latest_job: AgentSshJobOut | None
+    deployment_project: str | None = Field(description="平台确定的 Compose 项目名（不是容器名）")
+
+
+class AgentOverviewOut(BaseModel):
+    summary: AgentOverviewSummary
+    items: list[AgentOverviewRow]
+    next_cursor: str | None
+    generated_at: datetime
