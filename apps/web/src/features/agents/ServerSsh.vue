@@ -39,7 +39,11 @@ function edit() {
 }
 async function changeAddress() {
   if (!formValid.value) return
-  const ok = await act(async () => dataOf(await auth.slowApi.PUT('/api/v1/agents/servers/{server_id}/address', { params: { header, path: path.value }, body: { host: form.host.trim(), port: Number(form.port), username: form.username.trim(), version: server.value.version } })), '已重新读取主机公钥：请在服务器上核对指纹')
+  // T-0178：更换地址时连同登录密码一起替换；密码发出后立即从页面上清掉
+  const secret = password.value
+  password.value = ''
+  if (!secret) return
+  const ok = await act(async () => dataOf(await auth.slowApi.PUT('/api/v1/agents/servers/{server_id}/address', { params: { header, path: path.value }, body: { host: form.host.trim(), port: Number(form.port), username: form.username.trim(), login_password: secret, version: server.value.version } })), '已重新读取主机公钥：请在服务器上核对指纹')
   if (ok) editing.value = false; else settle()
 }
 async function confirm() {
@@ -49,11 +53,9 @@ async function confirm() {
   settle()
 }
 async function prepare() {
-  // 密码只随这一次请求发出，发出后立即从页面上清掉
-  const secret = password.value
-  password.value = ''
-  if (!secret) return
-  await act(async () => dataOf(await auth.api.POST('/api/v1/agents/servers/{server_id}/prepare', { params: { header, path: path.value }, body: { version: server.value.version, password: secret } })), '已开始准备服务器：下面显示每一步的进度')
+  // T-0178：用添加服务器时保存的登录密码，请求里不再带密码
+  // TODO(T-0181)：服务器页重做时换成新的初始化面板
+  await act(async () => dataOf(await auth.api.POST('/api/v1/agents/servers/{server_id}/prepare', { params: { header, path: path.value }, body: { version: server.value.version } })), '已开始准备服务器：下面显示每一步的进度')
   settle()
 }
 async function revoke(force = false) {
@@ -109,10 +111,11 @@ async function remove() {
           <label class="form-field"><span>服务器 IP 或域名 *</span><input v-model.trim="form.host" maxlength="253" autocomplete="off" :aria-invalid="!!form.host && !HOST_PATTERN.test(form.host)" /></label>
           <label class="form-field"><span>SSH 端口 *</span><input v-model.number="form.port" type="number" min="1" max="65535" /></label>
           <label class="form-field"><span>SSH 账号 *</span><input v-model.trim="form.username" maxlength="32" autocomplete="off" :aria-invalid="!!form.username && !USERNAME_PATTERN.test(form.username)" /></label>
+          <label class="form-field"><span>登录密码 *</span><input v-model="password" type="password" maxlength="1024" autocomplete="new-password" /></label>
         </div>
         <p class="form-help">更换后要重新核对主机公钥。</p>
         <div class="form-actions">
-          <button type="submit" class="primary-button" :disabled="busy || !formValid">读取主机公钥</button>
+          <button type="submit" class="primary-button" :disabled="busy || !formValid || !password">读取主机公钥</button>
           <button type="button" class="secondary-button" :disabled="busy" @click="editing = false">取消</button>
         </div>
       </form>
@@ -140,10 +143,9 @@ async function remove() {
           准备时用密码登录一次，装上工作台给这台服务器的专用公钥，需要时用 sudo 安装 Docker（Ubuntu 22.04 / 24.04、Debian 12；已经装了 Docker 的其他发行版也可以），
           再改用专用密钥登录确认。之后在这台服务器上部署多少个实例都不用再输密码。
         </p>
-        <label class="form-field"><span>登录密码 *</span><input v-model="password" type="password" autocomplete="off" maxlength="1024" /></label>
-        <p class="form-help">密码只随这一次请求发送，用于登录、安装公钥和 sudo，工作台不保存；提交后输入框会清空。</p>
+        <p class="form-help">使用添加服务器时保存的登录密码（加密保存、只写不读）。</p>
         <div class="form-actions">
-          <button type="submit" class="primary-button" :disabled="busy || !password">准备服务器</button>
+          <button type="submit" class="primary-button" :disabled="busy">准备服务器</button>
           <button type="button" class="secondary-button" :disabled="busy" @click="edit">更换地址</button>
           <button type="button" class="secondary-button im-danger" :disabled="busy || deployed > 0" @click="remove">移除服务器</button>
         </div>

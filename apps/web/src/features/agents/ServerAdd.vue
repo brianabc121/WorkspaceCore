@@ -5,20 +5,23 @@ import { dataOf } from '../../services/api'
 import { useAgentAction } from './action'
 import { HOST_PATTERN, USERNAME_PATTERN, sshError } from './ssh'
 
-// 添加服务器（T-0147）第一步：名称与 SSH 地址。工作台只读取主机公钥（不登录），
-// 添加后进入服务器详情核对指纹、用一次密码准备服务器。
+// 添加服务器（T-0147）第一步：SSH 地址、账号与登录密码（T-0178：密码加密保存、只写不读）。
+// 工作台只读取主机公钥（不登录），添加后进入服务器详情核对指纹、准备服务器。
+// TODO(T-0181)：服务器页重做时换成新的连接表单（名称可选、测试并保存）。
 const emit = defineEmits<{ close: []; added: [serverId: string] }>()
 const auth = useAuthStore(), scope = auth.workspaceId!
 const { busy, error, act, header } = useAgentAction(scope, sshError)
-const form = reactive({ name: '', host: '', port: 22, username: '' })
-const valid = computed(() => form.name.trim().length > 0 && form.name.trim().length <= 100 && HOST_PATTERN.test(form.host.trim()) && USERNAME_PATTERN.test(form.username.trim()) && Number.isInteger(Number(form.port)) && Number(form.port) >= 1 && Number(form.port) <= 65535)
+const form = reactive({ name: '', host: '', port: 22, username: '', password: '' })
+const valid = computed(() => form.name.trim().length > 0 && form.name.trim().length <= 100 && form.password.length > 0 && form.password.length <= 1024 && HOST_PATTERN.test(form.host.trim()) && USERNAME_PATTERN.test(form.username.trim()) && Number.isInteger(Number(form.port)) && Number(form.port) >= 1 && Number(form.port) <= 65535)
 
 async function submit() {
   if (!valid.value) return
   let id = ''
+  // 密码只在组件内存里（不进 URL、缓存或本地存储；首尾空格原样发送），添加成功后清掉
   const ok = await act(async () => {
-    id = dataOf(await auth.slowApi.POST('/api/v1/agents/servers', { params: { header }, body: { name: form.name.trim(), host: form.host.trim(), port: Number(form.port), username: form.username.trim() } })).server.id
+    id = dataOf(await auth.slowApi.POST('/api/v1/agents/servers', { params: { header }, body: { name: form.name.trim(), host: form.host.trim(), port: Number(form.port), username: form.username.trim(), login_password: form.password } })).server.id
   }, '已读取主机公钥：请在服务器上核对指纹')
+  if (ok) form.password = ''
   if (ok && id) emit('added', id)
 }
 </script>
@@ -35,6 +38,7 @@ async function submit() {
       <label class="form-field"><span>服务器 IP 或域名 *</span><input v-model.trim="form.host" maxlength="253" autocomplete="off" placeholder="203.0.113.10" :aria-invalid="!!form.host && !HOST_PATTERN.test(form.host)" /></label>
       <label class="form-field"><span>SSH 端口 *</span><input v-model.number="form.port" type="number" min="1" max="65535" /></label>
       <label class="form-field"><span>SSH 账号 *</span><input v-model.trim="form.username" maxlength="32" autocomplete="off" placeholder="root 或能用 sudo 的账号" :aria-invalid="!!form.username && !USERNAME_PATTERN.test(form.username)" /></label>
+      <label class="form-field"><span>登录密码 *</span><input v-model="form.password" type="password" maxlength="1024" autocomplete="new-password" /></label>
     </div>
     <div class="form-actions">
       <button type="submit" class="primary-button" :disabled="busy || !valid">读取主机公钥</button>

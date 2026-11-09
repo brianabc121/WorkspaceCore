@@ -8,14 +8,14 @@ const at = '2026-11-07T04:00:00Z'
 const GB = 1024 ** 3
 const path = (r: Request) => new URL(r.url).pathname
 const instance = (over: Partial<Schema['AgentInstanceOut']> = {}): Schema['AgentInstanceOut'] => ({ id: 'inst-a', name: 'alpha', description: '', network_mode: 'public', scope: 'read', max_role: 'member', status: 'pending', im_user_id: 'oc_a', im_nickname: '甲', im_ready: true, acting_user_id: 'user-a', last_seen_at: null, reported_version: null, plugin_version: null, bundle_issued_at: null, im_token_expires_at: null, disabled_at: null, project_admin: { enabled: false, granted_by: null, granted_at: null }, im_media: { enabled: false, granted_by: null, granted_at: null }, stop_others: { enabled: false, granted_by: null, granted_at: null }, mail: { accounts: [], read_enabled: true, send_enabled: false, send_scope: null, recipients: [], send_by: null, send_at: null, version: 3 }, bundle_outdated: false, server_id: null, server_manual: false, limits: { mem_limit_mb: null, cpus: null }, version: 3, created_at: at, updated_at: at, credentials: [], secret_grants: [], ...over })
-const ssh = (over: Partial<Schema['ServerSshOut']> = {}): Schema['ServerSshOut'] => ({ host: 'oc.example.com', address: '203.0.113.10', port: 2222, username: 'deploy', host_key_algorithm: 'ssh-ed25519', host_key_fingerprint: 'SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG', host_key_confirmed: false, host_key_confirmed_at: null, client_key_installed: false, client_key_fingerprint: null, prepared_at: null, ...over })
-const server = (over: Partial<Schema['AgentServerOut']> = {}): Schema['AgentServerOut'] => ({ id: 'srv-1', name: '香港 4 核', kind: 'ssh', ssh: ssh(), reported_at: null, stale: true, cores: null, cpu_percent: null, load15: null, mem_total: null, mem_used_percent: null, disk_used_percent: null, instances_total: 0, instances_online: 0, alerts: [], version: 1, created_at: at, updated_at: at, ...over })
+const ssh = (over: Partial<Schema['ServerSshOut']> = {}): Schema['ServerSshOut'] => ({ host: 'oc.example.com', address: '203.0.113.10', port: 2222, username: 'deploy', host_key_algorithm: 'ssh-ed25519', host_key_fingerprint: 'SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG', host_key_confirmed: false, host_key_confirmed_at: null, client_key_installed: false, client_key_fingerprint: null, prepared_at: null, auth_method: 'password', password_set: true, credential_revision: 1, connection_status: 'unknown', last_connection_at: null, legacy_key_cleanup_state: 'not_needed', ...over })
+const server = (over: Partial<Schema['AgentServerOut']> = {}): Schema['AgentServerOut'] => ({ id: 'srv-1', name: '香港 4 核', kind: 'ssh', ssh: ssh(), reported_at: null, stale: true, cores: null, cpu_percent: null, load15: null, mem_total: null, mem_used_percent: null, disk_used_percent: null, instances_total: 0, instances_online: 0, alerts: [], initialization_status: 'not_initialized', deployable: false, deploy_block_reason: 'not_initialized', managed_deployments: 0, successful_deployments: 0, deployment_counts_partial: false, allocated_mem_limit_mb: 0, allocated_cpus: 0, has_unlimited_limits: false, version: 1, created_at: at, updated_at: at, ...over })
 const PREPARE = ['connect', 'inspect', 'authorize_key', 'docker', 'reconnect'] as const
 const job = (kind: Schema['AgentSshJobOut']['kind'], status: Schema['AgentSshJobOut']['status'], over: Partial<Schema['AgentSshJobOut']> = {}): Schema['AgentSshJobOut'] => ({ id: `job-${kind}`, kind, status, log: '$ sudo -S true\npassword=***', error_code: null, error_message: null, started_at: at, finished_at: status === 'running' ? null : at, updated_at: at,
   steps: PREPARE.map((key, i) => ({ key, status: status === 'succeeded' ? 'done' : i < 2 ? 'done' : i === 2 ? 'running' : 'pending', detail: null })), ...over })
 const detail = (s: Schema['AgentServerOut'], over: Partial<Schema['AgentServerDetail']> = {}): Schema['AgentServerDetail'] => ({ server: s, current: null, range: '24h', points: [], agents: [], job: null, warning: null, ...over })
 const load = (over: Partial<Schema['AgentLoad']> = {}): Schema['AgentLoad'] => ({ reported_at: at, stale: false, available: true, cpu_cores: 1, cpu_percent: 25, mem_bytes: 4 * GB, mem_limit: null, mem_total: 16 * GB, pids: 30, data_bytes: GB, data_truncated: false, rx_rate: 1024, tx_rate: 512, restarts_1h: 0, ...over })
-const row = (id: string, name: string, over: Partial<Schema['ServerAgentRow']> = {}): Schema['ServerAgentRow'] => ({ instance_id: id, name, status: 'online', deployed: true, install_dir: `/home/deploy/myworkspace-openclaw/${id}`, mem_limit_mb: null, cpus: null, load: load(), alerts: [], tokens_1h: 0, running_task: null, ...over })
+const row = (id: string, name: string, over: Partial<Schema['ServerAgentRow']> = {}): Schema['ServerAgentRow'] => ({ instance_id: id, name, status: 'online', deployed: true, deployment_state: 'deployed', latest_job: null, deployment_project: null, install_dir: `/home/deploy/myworkspace-openclaw/${id}`, mem_limit_mb: null, cpus: null, load: load(), alerts: [], tokens_1h: 0, running_task: null, ...over })
 const current: Schema['HostCurrent'] = { reported_at: at, stale: false, cpu_model: 'Test CPU', cores: 4, cpu_percent: 60, load: [1, 1, 1], mem_total: 16 * GB, mem_available: 4 * GB, mem_used: 12 * GB, mem_limit: null, swap_total: 0, swap_used: 0, data_disk: { total: 100 * GB, free: 50 * GB, used: 50 * GB, used_percent: 50 }, root_disk: { total: 100 * GB, free: 50 * GB, used: 50 * GB, used_percent: 50 }, rx_rate: 2048, tx_rate: 1024, uptime_seconds: 86400 }
 const deployment = (over: Partial<Schema['AgentDeploymentState']> = {}): Schema['AgentDeploymentState'] => ({ deployment: null, server: null, job: null, capacity_warning: null, ...over })
 const fail = (status: number, code: string, details: Record<string, unknown> = {}, headers: Record<string, string> = {}) => Response.json({ error: { code, message: 'x', request_id: 'req', details } }, { status, headers })
@@ -42,7 +42,7 @@ async function deployPanel() {
 afterEach(() => vi.restoreAllMocks())
 
 describe('servers tab', () => {
-  it('adds a server, confirms its fingerprint and prepares it with a password sent once', async () => {
+  it('adds a server with its login password, confirms its fingerprint and prepares it', async () => {
     let current = server(), polls = 0
     let state = detail(current)
     const requests = setup(async r => {
@@ -74,8 +74,13 @@ describe('servers tab', () => {
     await fireEvent.update(within(form).getByLabelText('SSH 账号 *'), 'bad user')
     expect(probe).toBeDisabled()
     await fireEvent.update(within(form).getByLabelText('SSH 账号 *'), 'deploy')
+    expect(probe).toBeDisabled()
+    // T-0178：添加时就填登录密码（加密保存、只写不读）
+    const secret = within(form).getByLabelText('登录密码 *') as HTMLInputElement
+    expect(secret).toHaveAttribute('type', 'password')
+    await fireEvent.update(secret, 'hunter2-secret')
     await fireEvent.click(probe)
-    expect(await json(requests, 'POST', '/api/v1/agents/servers')).toEqual({ name: '香港 4 核', host: 'oc.example.com', port: 2222, username: 'deploy' })
+    expect(await json(requests, 'POST', '/api/v1/agents/servers')).toEqual({ name: '香港 4 核', host: 'oc.example.com', port: 2222, username: 'deploy', login_password: 'hunter2-secret' })
 
     // 添加后进入详情：核对指纹
     const keys = await screen.findByRole('region', { name: 'SSH 与专用密钥' })
@@ -88,14 +93,11 @@ describe('servers tab', () => {
     await fireEvent.click(confirm)
     expect(await json(requests, 'POST', '/api/v1/agents/servers/srv-1/confirm')).toEqual({ version: 1, fingerprint: 'SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG' })
 
-    // 准备服务器：一次密码，提交后清空
+    // 准备服务器：用保存的密码，请求里不再带密码
     const prepare = await within(keys).findByRole('form', { name: '准备服务器' })
-    const password = within(prepare).getByLabelText('登录密码 *') as HTMLInputElement
-    expect(password).toHaveAttribute('type', 'password')
-    await fireEvent.update(password, 'hunter2-secret')
+    expect(within(prepare).queryByLabelText('登录密码 *')).not.toBeInTheDocument()
     await fireEvent.click(within(prepare).getByRole('button', { name: '准备服务器' }))
-    expect(password.value).toBe('')
-    expect(await json(requests, 'POST', '/api/v1/agents/servers/srv-1/prepare')).toEqual({ version: 2, password: 'hunter2-secret' })
+    expect(await json(requests, 'POST', '/api/v1/agents/servers/srv-1/prepare')).toEqual({ version: 2 })
     expect(await within(keys).findByText(/服务器已准备好：之后在这台服务器上部署实例不用再输密码/, {}, { timeout: 4000 })).toBeVisible()
     expect(within(keys).getByText(/已装在服务器上（SHA256:client）/)).toBeVisible()
     expect(within(keys).getByText(/password=\*\*\*/)).toBeInTheDocument()
@@ -214,6 +216,7 @@ describe('servers tab', () => {
     await fireEvent.update(within(form).getByLabelText('名称 *'), 'a')
     await fireEvent.update(within(form).getByLabelText('服务器 IP 或域名 *'), '203.0.113.10')
     await fireEvent.update(within(form).getByLabelText('SSH 账号 *'), 'root')
+    await fireEvent.update(within(form).getByLabelText('登录密码 *'), 'pw')
     await fireEvent.click(within(form).getByRole('button', { name: '读取主机公钥' }))
     expect(await within(form).findByText(/连接被拒绝：这个端口上没有 SSH 服务/)).toBeVisible()
     await fireEvent.click(within(form).getByRole('button', { name: '读取主机公钥' }))
@@ -235,7 +238,7 @@ describe('deploy to a server', () => {
       if (path(r) === '/api/v1/agents/instances/inst-a/deployment') { calls++; return Response.json(state) }
       if (path(r) === '/api/v1/agents/instances/inst-a/deploy') {
         const running = deployment({ server: ready, job: job('install', 'running', { steps: [{ key: 'upload', status: 'running', detail: null }, { key: 'online', status: 'pending', detail: null }] }), capacity_warning: '这台服务器剩余内存不多（可用 1.2 GB）：再部署一个实例可能会变慢。' })
-        state = deployment({ server: ready, deployment: { server_id: 'srv-1', install_dir: '/home/deploy/myworkspace-openclaw/0123456789ab', installed_at: at, version: 2 }, job: job('install', 'succeeded', { steps: [{ key: 'upload', status: 'done', detail: null }, { key: 'online', status: 'done', detail: '实例已连上工作台' }] }) })
+        state = deployment({ server: ready, deployment: { server_id: 'srv-1', install_dir: '/home/deploy/myworkspace-openclaw/0123456789ab', installed_at: at, runtime_installed: true, version: 2 }, job: job('install', 'succeeded', { steps: [{ key: 'upload', status: 'done', detail: null }, { key: 'online', status: 'done', detail: '实例已连上工作台' }] }) })
         return Response.json(running, { status: 202 })
       }
     })
@@ -269,7 +272,7 @@ describe('deploy to a server', () => {
 
   it('undeploys with removal of its own directory only', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const deployed = deployment({ server: ready, deployment: { server_id: 'srv-1', install_dir: '/home/deploy/myworkspace-openclaw/0123456789ab', installed_at: at, version: 2 } })
+    const deployed = deployment({ server: ready, deployment: { server_id: 'srv-1', install_dir: '/home/deploy/myworkspace-openclaw/0123456789ab', installed_at: at, runtime_installed: true, version: 2 } })
     const requests = setup(r => {
       if (path(r) === '/api/v1/agents/servers' && r.method === 'GET') return Response.json({ items: [ready], unassigned: [] })
       if (path(r) === '/api/v1/agents/instances/inst-a/deployment') return Response.json(deployed)
