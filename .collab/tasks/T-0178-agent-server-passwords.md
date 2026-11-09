@@ -32,3 +32,4 @@ OpenClaw 服务器改为用 IP、端口、账号、密码添加；密码加密�
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 06:30 UTC · claude · 创建任务（owner: claude）
 - 2026-11-09 06:31 UTC · claude · 开始任务
+- 2026-11-09 07:23 UTC · claude · 契约 + 实现完成（3c3b93d / c3d2190 / 6705349）：迁移 0054、密码加密保存、test-connection、credentials、address；T-0179/T-0180 的端点为接口桩。新增 app/domain/agent_server_ssh.py 与 integrations/ssh.py 的 connect_password_only（越界：供 T-0179 复用，不在其他进行中任务范围内）

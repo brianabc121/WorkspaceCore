@@ -2,9 +2,9 @@
 id: T-0181
 title: 智能体服务器（四）：独立的“智能体服务器”页面、连接表单、初始化与已部署清单，旧链接兼容
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: apps/web/src/pages/AgentServersPage.vue,apps/web/src/app,apps/web/src/features/agents,apps/web/src/pages/AgentsPage.vue,apps/web/tests
 depends_on: T-0180
 created: 2026-11-09
@@ -30,3 +30,4 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 06:30 UTC · claude · 创建任务（owner: claude）
+- 2026-11-09 07:23 UTC · claude · 开始任务
