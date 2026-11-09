@@ -1175,6 +1175,7 @@ class ModelConnectionService:
             total=total,
             synced_at=connection.models_synced_at,
             sync_state=connection.sync_state,
+            discovered=list(connection.discovered_models or []),
         )
 
     async def models_in_use(self, connection_id: uuid.UUID) -> dict[str, list[uuid.UUID]]:
@@ -1225,16 +1226,14 @@ class ModelConnectionService:
         if body.model_scope == "all_available":
             if body.models:
                 raise _invalid("models", "“服务商全部可用模型”使用同步到的模型列表，不接受手工清单")
-            if connection.sync_state != "complete":
+            if not connection.discovered_models:
                 raise ApiError(
                     409,
                     "MODEL_SYNC_REQUIRED",
                     "还没有一次完整的模型同步；模型列表不可用时请改用“指定模型”手工填写",
                 )
-            wanted = {mid for mid, m in existing.items() if m.source == "discovered"}
-            if not wanted:
-                raise ApiError(409, "MODEL_SYNC_REQUIRED", "同步到的模型列表是空的")
-            names = {mid: existing[mid].display_name for mid in wanted}
+            wanted = set(connection.discovered_models)
+            names = {mid: existing[mid].display_name if mid in existing else "" for mid in wanted}
         else:
             models = self._clean_models(body.models)
             if not models:
@@ -1270,7 +1269,11 @@ class ModelConnectionService:
                         connection_id=connection.id,
                         model_id=mid,
                         display_name=names.get(mid, ""),
-                        source="manual",
+                        source=(
+                            "discovered"
+                            if mid in set(connection.discovered_models or [])
+                            else "manual"
+                        ),
                         availability="listed",
                         created_at=now,
                     )

@@ -205,6 +205,9 @@ class ConnectionModelPage(BaseModel):
     total: int = Field(ge=0)
     synced_at: datetime | None
     sync_state: SyncState | None
+    discovered: list[str] = Field(
+        description="最近一次完整同步到的模型 ID（最多 1000 个），供“指定模型”勾选；没有同步过为空"
+    )
 
 
 class ModelSyncResult(BaseModel):
@@ -217,6 +220,9 @@ class ModelSyncResult(BaseModel):
     )
     reason: CheckReason | None
     retry_at: datetime | None
+    discovered: list[str] = Field(
+        description="这次完整同步到的模型 ID；不完整或失败时为上一次的快照"
+    )
     connection: ModelConnectionOut
 
 

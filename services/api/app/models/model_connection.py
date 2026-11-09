@@ -29,7 +29,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -150,6 +150,8 @@ class ModelConnection(Base):
     config_revision: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     sync_state: Mapped[str | None] = mapped_column(Text)
+    # 最近一次完整同步到的模型 ID（最多 1000 个）；同步不完整或失败时保留上一次的完整快照
+    discovered_models: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     models_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_check_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = _created()

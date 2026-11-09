@@ -20,6 +20,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "0056"
 down_revision: str | None = "0055"
@@ -86,6 +87,7 @@ def upgrade() -> None:
         sa.Column("config_revision", sa.Integer(), server_default=sa.text("1"), nullable=False),
         sa.Column("version", sa.Integer(), server_default=sa.text("1"), nullable=False),
         sa.Column("sync_state", sa.Text(), nullable=True),
+        sa.Column("discovered_models", postgresql.ARRAY(sa.Text()), nullable=True),
         sa.Column("models_synced_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_check_id", sa.UUID(), nullable=True),
         sa.Column(
