@@ -32,3 +32,4 @@ updated: 2026-11-09
 - 2026-11-09 09:19 UTC · claude · 开始任务
 - 2026-11-09 09:19 UTC · claude · 验收脚本、浏览器脚本与文档已写（3fac93e 等），按核验修了三处业务问题（5c3ae8e）；等 CI agents job 在真实 sshd + Docker 上跑
 - 2026-11-09 10:17 UTC · claude · status in_progress → done：CI 42592666997 全绿（agents：SSH 验收全部通过、两页浏览器验收与 Runner 浏览器验收全部通过）；核验记录第 6 节已填
+- 2026-11-09 10:50 UTC · claude · CI eb80b75 的 agents 场景 26 失败：一次性环境跑完后没被删除。根因是 Runner.apply_result 读环境不加锁，建环境与命令结束两条结果同时到时，后提交的建环境把“待删除”改回“运行中”。修复：读环境时 FOR UPDATE；新增 test_runner_result_race.py（不加锁时复现为 running，加锁后为 pending_delete）。属于主干上已有的竞争（#178 时场景 26 也偶发过），随本 PR 修掉
