@@ -6,10 +6,10 @@
 """
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 Runtime = Literal["gvisor", "runc", "kvm"]
 RunUser = Literal["user", "root"]
@@ -323,8 +323,30 @@ class RunnerReportContainer(BaseModel):
     env_id: UUID
     name: str
     state: str
-    mem_bytes: int | None = None
+    mem_bytes: int | None = Field(
+        None, description="内存用量（Docker memory_stats.usage，字节，含页缓存）；读不到为空"
+    )
     size_rw: int | None = None
+    cpu_used_cores: float | None = Field(
+        None,
+        ge=0,
+        allow_inf_nan=False,
+        description="最近一个采样窗口里的平均 CPU 核数（累计 CPU 时间差分，可以大于 1）；"
+        "第一次采样、容器重启、读数无效或旧版 runner-agent 为空（T-0184）",
+    )
+    cpu_window_seconds: float | None = Field(
+        None,
+        ge=1,
+        le=180,
+        allow_inf_nan=False,
+        description="cpu_used_cores 对应的采样窗口（秒）；与 cpu_used_cores 同时有值或同时为空",
+    )
+
+    @model_validator(mode="after")
+    def _cpu_pair(self) -> Self:
+        if (self.cpu_used_cores is None) != (self.cpu_window_seconds is None):
+            raise ValueError("cpu_used_cores 与 cpu_window_seconds 要同时有值或同时为空")
+        return self
 
 
 class RunnerReportVolume(BaseModel):

@@ -19555,6 +19555,33 @@
       },
       "RunnerReportContainer": {
         "properties": {
+          "cpu_used_cores": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一个采样窗口里的平均 CPU 核数（累计 CPU 时间差分，可以大于 1）；第一次采样、容器重启、读数无效或旧版 runner-agent 为空（T-0184）",
+            "title": "Cpu Used Cores"
+          },
+          "cpu_window_seconds": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "cpu_used_cores 对应的采样窗口（秒）；与 cpu_used_cores 同时有值或同时为空",
+            "title": "Cpu Window Seconds"
+          },
           "env_id": {
             "format": "uuid",
             "title": "Env Id",
@@ -19569,6 +19596,7 @@
                 "type": "null"
               }
             ],
+            "description": "内存用量（Docker memory_stats.usage，字节，含页缓存）；读不到为空",
             "title": "Mem Bytes"
           },
           "name": {

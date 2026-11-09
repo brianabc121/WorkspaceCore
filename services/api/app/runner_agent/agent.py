@@ -29,6 +29,14 @@ from . import VERSION
 from . import containers as c
 from .client import Workspace, WorkspaceError
 from .docker import Docker, DockerError, tar_of
+from .metrics import (
+    UNKNOWN,
+    ContainerCPUSampler,
+    cpu_total_ns,
+    memory_bytes,
+    nonnegative_int,
+    started_generation,
+)
 from .proxy import EgressProxy, Policy
 
 logger = logging.getLogger("runner_agent")
@@ -157,6 +165,7 @@ class Agent:
     )
     _unsent: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     stopping: threading.Event = field(default_factory=threading.Event)
+    cpu: ContainerCPUSampler = field(default_factory=ContainerCPUSampler)
 
     def __post_init__(self) -> None:
         # exec 单独一个线程池：长时间运行的命令占满了也不耽误停止、删除、读写文件
@@ -799,14 +808,39 @@ class Agent:
             except (DockerError, WorkspaceError, OSError) as error:
                 logger.warning("对账上报失败：%s", error)
 
+    def _usage(self, item: dict[str, Any], name: str) -> dict[str, Any]:
+        """一个运行中环境的内存与 CPU 读数（T-0184）。
+
+        读不到的项上报 None（未知），不补 0；这里的异常只影响这一个容器的读数，容器本身照常上报。
+        """
+        try:
+            stats = self.docker.stats(name)
+            at = time.monotonic_ns()
+            info = self.docker.inspect(name)
+        except (DockerError, OSError, ValueError) as error:
+            logger.info("读取 %s 的用量失败：%s", name, error)
+            return {}
+        out: dict[str, Any] = {"mem_bytes": memory_bytes(stats)}
+        generation = started_generation(info)
+        container_id = str(item.get("Id") or (info or {}).get("Id") or "")
+        if generation and container_id:
+            sample = self.cpu.sample(container_id, generation, cpu_total_ns(stats), at)
+        else:
+            sample = UNKNOWN
+        out["cpu_used_cores"] = sample.used_cores
+        out["cpu_window_seconds"] = sample.window_seconds
+        return out
+
     def report(self) -> dict[str, Any]:
         df = self.docker.system_df()
+        # 数据卷占用：Docker 没算出来时是 -1，缺失也是未知；都报 None，不当成 0
         volume_sizes = {
-            str(v.get("Name")): int((v.get("UsageData") or {}).get("Size") or 0)
+            str(v.get("Name")): nonnegative_int((v.get("UsageData") or {}).get("Size"))
             for v in df.get("Volumes") or []
         }
         labeled = self.docker.containers(f"{c.LABEL_RUNNER}=1")
         envs: list[dict[str, Any]] = []
+        sampled: set[str] = set()
         now = time.time()
         for item in labeled:
             labels = item.get("Labels") or {}
@@ -824,12 +858,10 @@ class Agent:
                 "size_rw": int(item.get("SizeRw") or 0),
             }
             if item.get("State") == "running":
-                try:
-                    stats = self.docker.stats(name)
-                    entry["mem_bytes"] = int((stats.get("memory_stats") or {}).get("usage") or 0)
-                except DockerError:
-                    pass
+                entry.update(self._usage(item, name))
+                sampled.add(str(item.get("Id") or ""))
             envs.append(entry)
+        self.cpu.prune(sampled)
         volumes = [
             {
                 "env_id": (v.get("Labels") or {}).get(c.LABEL_ENV),
@@ -865,7 +897,7 @@ class Agent:
             "disk_bytes": stat.f_blocks * stat.f_frsize,
             "disk_free_bytes": stat.f_bavail * stat.f_frsize,
             "images_bytes": int(sum(int(i.get("Size") or 0) for i in df.get("Images") or [])),
-            "volumes_bytes": int(sum(volume_sizes.values())),
+            "volumes_bytes": int(sum(v for v in volume_sizes.values() if v is not None)),
             "containers_bytes": int(sum(int(i.get("SizeRw") or 0) for i in labeled)),
             "load": os.getloadavg()[0] if hasattr(os, "getloadavg") else None,
         }

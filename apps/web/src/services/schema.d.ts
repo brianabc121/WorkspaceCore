@@ -12512,11 +12512,24 @@ export interface components {
         /** RunnerReportContainer */
         RunnerReportContainer: {
             /**
+             * Cpu Used Cores
+             * @description 最近一个采样窗口里的平均 CPU 核数（累计 CPU 时间差分，可以大于 1）；第一次采样、容器重启、读数无效或旧版 runner-agent 为空（T-0184）
+             */
+            cpu_used_cores?: number | null;
+            /**
+             * Cpu Window Seconds
+             * @description cpu_used_cores 对应的采样窗口（秒）；与 cpu_used_cores 同时有值或同时为空
+             */
+            cpu_window_seconds?: number | null;
+            /**
              * Env Id
              * Format: uuid
              */
             env_id: string;
-            /** Mem Bytes */
+            /**
+             * Mem Bytes
+             * @description 内存用量（Docker memory_stats.usage，字节，含页缓存）；读不到为空
+             */
             mem_bytes?: number | null;
             /** Name */
             name: string;

@@ -30,3 +30,4 @@ updated: 2026-11-09
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 09:33 UTC · claude · 创建任务（owner: claude）
 - 2026-11-09 09:33 UTC · claude · 开始任务
+- 2026-11-09 09:38 UTC · claude · runner-agent CPU 差分采样（metrics.py）、上报字段与校验、单容器读数失败不丢条目、卷 Size=-1 为未知；ADR 2026-11-09-runner-container-metrics；真实 Docker 实测忙 0.985 核 / 闲 0.0；test_runner_cpu_metrics + test_runner_agent 37 passed
