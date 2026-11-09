@@ -29,6 +29,10 @@ function env(name) {
 }
 function check(condition, message) { if (!condition) throw new Error(message) }
 function step(text) { console.log(`通过  ${text}`) }
+// 页面是单页应用：跳转、刷新后要等它渲染出来再判断，不能只看“此刻”的状态
+async function appears(locator, message, timeout = 30000) {
+  await locator.waitFor({ timeout }).catch(() => { throw new Error(message) })
+}
 
 async function noHorizontalScroll(page, what) {
   await page.setViewportSize({ width: 390, height: 844 })
@@ -78,12 +82,12 @@ async function main() {
 
   // ---------------------------------------------------------------- 没有容器服务器 → 服务器设置里添加（外网入口）
   await page.goto(`${base}/runner`)
-  check(await page.getByRole('heading', { level: 1, name: '容器服务器' }).isVisible(), '页面标题应是“容器服务器”（地址仍是 /runner）')
+  await appears(page.getByRole('heading', { level: 1, name: '容器服务器' }), '页面标题应是“容器服务器”（地址仍是 /runner）')
   const empty = page.getByRole('region', { name: '还没有容器服务器' })
   await empty.waitFor()
   await empty.getByRole('button', { name: '去添加容器服务器' }).click()
   await page.waitForURL(/\/runner\?tab=settings$/)
-  check(await page.getByRole('tab', { name: '服务器设置' }).getAttribute('aria-selected') === 'true', '“去添加容器服务器”应切到服务器设置标签')
+  await appears(page.getByRole('tab', { name: '服务器设置', selected: true }), '“去添加容器服务器”应切到服务器设置标签')
   const add = page.getByRole('form', { name: '添加容器服务器' })
   await add.getByLabel('名称').fill(`runner-ui-${run}`)
   await add.getByLabel('连工作台的入口').selectOption('public')
@@ -138,7 +142,9 @@ async function main() {
   const facts = await strip.textContent()
   check(/gVisor 可用/.test(facts), `主机条应显示 gVisor 可用：${facts.slice(0, 300)}`)
   check(/最近联系/.test(facts), `主机条应显示最近联系时间：${facts.slice(0, 300)}`)
-  const cards = await page.getByRole('region', { name: '容器统计' }).textContent()
+  const stats = page.getByRole('region', { name: '容器统计' })
+  await stats.getByText('容器环境总数').waitFor({ timeout: 30000 })
+  const cards = await stats.textContent()
   check(/容器环境总数/.test(cards) && /需关注/.test(cards), `应显示四个统计卡：${cards.slice(0, 200)}`)
   await page.getByRole('region', { name: '容器列表' }).getByText('还没有容器环境').waitFor({ timeout: 30000 })
   await noHorizontalScroll(page, '容器总览')
@@ -147,7 +153,7 @@ async function main() {
   // 旧链接 ?tab=environments（原来的“环境”标签、旧通知）换到容器总览，其余参数保留
   await page.goto(`${base}/runner?tab=environments&state=running`)
   await page.waitForURL(`${base}/runner?state=running`)
-  check(await page.getByRole('tab', { name: '容器总览' }).getAttribute('aria-selected') === 'true', '旧链接应打开容器总览')
+  await appears(page.getByRole('tab', { name: '容器总览', selected: true }), '旧链接应打开容器总览')
   // 详情直链：不存在（或已无权访问）的容器显示提示，不留旧内容
   await page.goto(`${base}/runner?environment_id=00000000-0000-4000-8000-000000000000`)
   await page.getByText('这个容器不存在，或你已无权访问。').waitFor({ timeout: 30000 })
@@ -163,7 +169,7 @@ async function main() {
     await noHorizontalScroll(page, `${tab}标签`)
   }
   await page.reload()
-  check(await page.getByRole('tab', { name: '执行记录' }).getAttribute('aria-selected') === 'true', '刷新后仍停在地址里记着的标签')
+  await appears(page.getByRole('tab', { name: '执行记录', selected: true }), '刷新后仍停在地址里记着的标签')
   step('智能体用量、环境模板、执行记录标签都能打开（地址里记着 ?tab=，刷新后不变），没有加载失败；390px 宽度无横向滚动')
 
   await page.getByRole('tab', { name: '服务器设置' }).click()
