@@ -44,12 +44,13 @@ const shots = path.resolve(__dirname, '../docs/screenshots');
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     } catch (error) { errors.push(error.message); await route.fulfill({ status: 500, body: '{}' }); }
   });
-  await page.goto(baseUrl + '/operations'); await page.getByRole('region', { name: 'API', exact: true }).waitFor();
-  await page.getByRole('region', { name: 'Prometheus', exact: true }).getByText('未部署 / 未配置', { exact: true }).waitFor();
-  const graph = page.getByRole('region', { name: '延迟 P95', exact: true }); await graph.waitFor(); assert.equal(await graph.locator('svg polyline').count(), 2); await graph.getByText('无数据', { exact: true }).waitFor(); await graph.getByText('0 s', { exact: true }).waitFor();
+  // 运维页改版（T-0177）：服务是表格行，时间范围是按钮组；数据表里缺测写“—”，真实的 0 写“0 ms”
+  await page.goto(baseUrl + '/operations'); await page.getByRole('row', { name: 'API', exact: true }).waitFor();
+  await page.getByRole('row', { name: 'Prometheus', exact: true }).getByText('未部署 / 未配置', { exact: true }).waitFor();
+  const graph = page.getByRole('region', { name: '延迟 P95', exact: true }); await graph.waitFor(); assert.equal(await graph.locator('svg [data-segment]').count(), 2); await graph.locator('details.ops-data summary').click(); await graph.getByRole('cell', { name: '—', exact: true }).waitFor(); await graph.getByRole('cell', { name: '0 ms', exact: true }).waitFor();
   const grafana = page.getByRole('link', { name: /在 Grafana 中查看/ }); assert.equal(await grafana.getAttribute('target'), '_blank'); assert.equal(await grafana.getAttribute('rel'), 'noopener noreferrer'); assert.equal(await page.locator('iframe').count(), 0);
   await page.screenshot({ path: path.join(shots, 'sprint5-operations.png'), fullPage: true });
-  await page.getByLabel('查看时间范围', { exact: true }).selectOption('6h'); await page.getByLabel('预设指标视图', { exact: true }).selectOption('latency_p99'); await page.getByRole('region', { name: '延迟 P99', exact: true }).waitFor();
+  await page.getByRole('group', { name: '查看时间范围' }).getByRole('button', { name: '6 小时', exact: true }).click(); await page.getByLabel('预设指标视图', { exact: true }).selectOption('latency_p99'); await page.getByRole('region', { name: '延迟 P99', exact: true }).waitFor();
   assert(reads.some((query) => new URLSearchParams(query).get('range') === '6h' && new URLSearchParams(query).get('views') === 'latency_p99'));
   state = 'stale'; await page.getByRole('button', { name: '刷新运维数据', exact: true }).click(); await page.getByText(/数据可能过期.*截至/).waitFor();
   state = 'not_configured'; await page.getByRole('button', { name: '刷新运维数据', exact: true }).click(); await page.getByText('未部署监控。', { exact: true }).waitFor(); assert.equal(await page.getByRole('link', { name: /Grafana/ }).count(), 0);
@@ -59,7 +60,7 @@ const shots = path.resolve(__dirname, '../docs/screenshots');
   await page.setViewportSize({ width: 390, height: 844 }); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false); await page.screenshot({ path: path.join(shots, 'sprint5-operations-mobile.png'), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 1000 }); await page.goto(baseUrl + '/'); await page.getByRole('article', { name: '服务状态', exact: true }).waitFor(); await page.getByRole('article', { name: 'API 延迟', exact: true }).getByRole('region', { name: '延迟 P99' }).waitFor(); assert.equal(await page.getByText('有核心服务不可用', { exact: true }).count(), 2);
   await page.screenshot({ path: path.join(shots, 'sprint5-operations-home.png'), fullPage: true });
-  role = 'viewer'; await page.goto(baseUrl + '/operations'); await page.reload(); await page.getByRole('region', { name: 'API', exact: true }).waitFor(); assert.equal(await page.getByRole('button', { name: /保存|触发/ }).count(), 0);
+  role = 'viewer'; await page.goto(baseUrl + '/operations'); await page.reload(); await page.getByRole('row', { name: 'API', exact: true }).waitFor(); assert.equal(await page.getByRole('button', { name: /保存|触发/ }).count(), 0);
   assert.deepEqual(errors, []); assert.deepEqual(external, []);
   console.log('PASS: service states/check times, preset range/view queries, null trend gaps vs zero, stale/unavailable/not-configured metrics, safe optional Grafana link, core-down overview with both cards, viewer read-only, dark/light/mobile screenshots; no external requests, iframe or page errors.');
   await browser.close();

@@ -274,7 +274,8 @@ const NOTE_URL = /\/knowledge\/notes\/[0-9a-f-]{36}$/
   await page.locator('.cm-content').click()
   const orphanUrl = await pasteImage(tinyPng(`${run}-orphan`))
   await page.goto(`${base}/operations`)
-  const storage = page.getByRole('region', { name: '知识库图片存储' })
+  // 运维页改版（T-0177）：知识库图片存储在“存储状态”面板里
+  const storage = page.getByRole('region', { name: '存储状态' })
   await storage.getByText('3 张图片').waitFor()
   const removed = Number(seed('cleanup-files', workspace)[0])
   check(removed === 1, `每日清理应只删掉没有引用的那张图片：删了 ${removed} 张`)

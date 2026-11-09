@@ -3,6 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { mockApi, openApp, fail, me, workspace } from './helpers'
 import { services, metrics, opsTime } from './operations-fixtures'
 const path = (r: Request) => new URL(r.url).pathname
+// 运维页改版（T-0177）：服务按表格行显示（行名是服务名），时间范围是一组按钮
+const row = (name: string) => screen.getByRole('row', { name })
+const findRow = (name: string) => screen.findByRole('row', { name })
+const pickRange = (label: string) => fireEvent.click(within(screen.getByRole('group', { name: '查看时间范围' })).getByRole('button', { name: label }))
 function operations(override?: (r: Request) => Response | Promise<Response> | undefined) {
   return mockApi(async (r) => await override?.(r) ?? (path(r) === '/api/v1/operations/services' ? Response.json(services) : path(r) === '/api/v1/operations/metrics' ? Response.json(metrics) : undefined))
 }
@@ -11,7 +15,7 @@ describe('运维页', () => {
     let finish: ((r: Response) => void) | undefined
     operations((r) => path(r).endsWith('/metrics') && new URL(r.url).searchParams.get('range') === '6h' ? new Promise<Response>((resolve) => { finish = resolve }) : undefined)
     await openApp('/operations'); await screen.findByRole('region', { name: 'API P95 延迟' })
-    await fireEvent.update(screen.getByLabelText('查看时间范围'), '6h')
+    await pickRange('6 小时')
     expect(await screen.findByText('正在加载指标…')).toBeVisible()
     expect(screen.queryByRole('region', { name: 'API P95 延迟' })).not.toBeInTheDocument()
     await vi.waitFor(() => expect(finish).toBeDefined())
@@ -26,12 +30,12 @@ describe('运维页', () => {
   it('distinguishes all service states and shows checks without echoing raw reasons', async () => {
     const requests = operations((r) => path(r).endsWith('/services') ? Response.json({ ...services, items: [...services.items, { id: 'custom', name: '可选服务', kind: 'integration', status: 'down', checked_at: opsTime, reason: 'secret=must-not-appear' }] }) : undefined)
     await openApp('/operations')
-    expect(await within(await screen.findByRole('region', { name: 'API' })).findByText('正常')).toBeVisible()
-    expect(within(screen.getByRole('region', { name: 'Worker' })).getByText('降级')).toBeVisible()
-    expect(within(screen.getByRole('region', { name: 'PostgreSQL' })).getByText('不可用')).toBeVisible()
-    expect(within(screen.getByRole('region', { name: 'Redis' })).getByText('尚未检查')).toBeVisible()
-    expect(within(screen.getByRole('region', { name: 'Prometheus' })).getByText('未部署 / 未配置')).toBeVisible()
-    expect(screen.getByRole('region', { name: 'API' }).querySelector('time')).toHaveAttribute('datetime', opsTime)
+    expect(await within(await findRow('API')).findByText('正常')).toBeVisible()
+    expect(within(row('Worker')).getByText('降级')).toBeVisible()
+    expect(within(row('PostgreSQL')).getByText('不可用')).toBeVisible()
+    expect(within(row('Redis')).getByText('尚未检查')).toBeVisible()
+    expect(within(row('Prometheus')).getByText('未部署 / 未配置')).toBeVisible()
+    expect(row('API').querySelector('time')).toHaveAttribute('datetime', opsTime)
     expect(document.body).not.toHaveTextContent('secret=must-not-appear')
     expect(requests.filter((r) => path(r).includes('/operations/')).every((r) => r.headers.get('X-Workspace-Id') === 'workspace-a')).toBe(true)
     expect(requests.every((r) => new URL(r.url).origin === window.location.origin)).toBe(true)
@@ -42,24 +46,26 @@ describe('运维页', () => {
       { id: 'agent:a', name: '实例甲', kind: 'agents', provider: 'openclaw', status: 'down', checked_at: opsTime, reason: 'agent_offline' },
       { id: 'agent:b', name: '实例乙', kind: 'agents', provider: 'openclaw', status: 'not_configured', checked_at: null, reason: 'agent_disabled' }] }) : undefined)
     await openApp('/operations')
-    const openim = await screen.findByRole('region', { name: 'OpenIM' })
+    const openim = await findRow('OpenIM')
     expect(within(openim).getByText('OpenClaw 与 IM')).toBeVisible()
-    expect(within(openim).getByText('IM 回调积压，消息投影可能落后')).toBeVisible()
-    expect(within(screen.getByRole('region', { name: '实例甲' })).getByText('实例离线（IM 未连接）')).toBeVisible()
-    expect(within(screen.getByRole('region', { name: '实例乙' })).getByText('实例已停用')).toBeVisible()
+    expect(openim).toHaveTextContent('IM 回调积压，消息投影可能落后')
+    expect(row('实例甲')).toHaveTextContent('实例离线（IM 未连接）')
+    expect(row('实例乙')).toHaveTextContent('实例已停用')
   })
   it('splits metric trends at null samples, preserves genuine zero and links Grafana safely', async () => {
     operations(); await openApp('/operations')
     const view = await screen.findByRole('region', { name: 'API P95 延迟' })
-    expect(within(view).getByText('无数据')).toBeVisible(); expect(within(view).getByText('0 s')).toBeVisible()
-    expect(view.querySelectorAll('svg polyline')).toHaveLength(2)
+    // 数据表：缺测写“—”，真实的 0 仍是 0；折线在缺测处断成两段
+    const cells = within(within(view).getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent)
+    expect(cells).toEqual(['200 ms', '300 ms', '—', '0 ms', '100 ms'])
+    expect(view.querySelectorAll('svg [data-segment]')).toHaveLength(2)
     const link = screen.getByRole('link', { name: /在 Grafana 中查看/ })
     expect(link).toHaveAttribute('href', metrics.grafana_url); expect(link).toHaveAttribute('target', '_blank'); expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     expect(document.querySelector('iframe')).toBeNull()
   })
   it('requests only preset IDs and range when controls change', async () => {
     const requests = operations(); await openApp('/operations'); await screen.findByRole('region', { name: 'API P95 延迟' })
-    await fireEvent.update(screen.getByLabelText('查看时间范围'), '7d')
+    await pickRange('7 天')
     await fireEvent.update(screen.getByLabelText('预设指标视图'), 'latency_p99')
     await vi.waitFor(() => expect(requests.filter((r) => path(r).endsWith('/metrics')).some((r) => { const p = new URL(r.url).searchParams; return p.get('range') === '7d' && p.getAll('views').includes('latency_p99') })).toBe(true))
     for (const read of requests.filter((r) => path(r).endsWith('/metrics'))) expect([...new URL(read.url).searchParams.keys()].every((key) => ['range', 'views'].includes(key))).toBe(true)
@@ -75,7 +81,7 @@ describe('运维页', () => {
     await openApp('/operations'); await screen.findByRole('region', { name: 'API P95 延迟' })
     broken = true; await fireEvent.click(screen.getByRole('button', { name: '刷新运维数据' }))
     expect(await screen.findAllByText(/数据可能过期.*截至/)).not.toHaveLength(0)
-    expect(screen.getByRole('region', { name: 'API' })).toBeVisible()
+    expect(row('API')).toBeVisible()
     expect(screen.getByRole('region', { name: 'API P95 延迟' })).toBeVisible()
     expect([...document.querySelectorAll('time')].some((el) => el.dateTime === opsTime)).toBe(true)
   })
@@ -84,13 +90,13 @@ describe('运维页', () => {
     operations((r) => revoked && path(r).endsWith('/metrics') ? fail(403, 'FORBIDDEN') : undefined)
     await openApp('/operations'); await screen.findByRole('region', { name: 'API P95 延迟' })
     revoked = true; await fireEvent.click(screen.getByRole('button', { name: '刷新运维数据' }))
-    await vi.waitFor(() => expect(screen.queryByRole('region', { name: 'API' })).not.toBeInTheDocument())
+    await vi.waitFor(() => expect(screen.queryByRole('row', { name: 'API' })).not.toBeInTheDocument())
     expect(screen.queryByRole('region', { name: 'API P95 延迟' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Grafana/ })).not.toBeInTheDocument()
-    await fireEvent.update(screen.getByLabelText('查看时间范围'), '6h')
-    expect(screen.queryByRole('region', { name: 'API' })).not.toBeInTheDocument()
+    await pickRange('6 小时')
+    expect(screen.queryByRole('row', { name: 'API' })).not.toBeInTheDocument()
     revoked = false; await fireEvent.click(screen.getByRole('button', { name: '刷新运维数据' }))
-    expect(await screen.findByRole('region', { name: 'API' })).toBeVisible()
+    expect(await findRow('API')).toBeVisible()
   })
   it('ignores late service data and links from an old workspace', async () => {
     let finish: ((r: Response) => void) | undefined
@@ -100,9 +106,9 @@ describe('运维页', () => {
       if (path(r).endsWith('/metrics')) return Response.json({ ...metrics, grafana_url: r.headers.get('X-Workspace-Id') === 'workspace-a' ? 'https://a.example.com' : null })
     })
     await openApp('/operations'); await vi.waitFor(() => expect(finish).toBeDefined())
-    await fireEvent.update(screen.getByLabelText('当前工作空间'), 'workspace-b'); await screen.findByRole('region', { name: 'B API' })
+    await fireEvent.update(screen.getByLabelText('当前工作空间'), 'workspace-b'); await findRow('B API')
     finish!(Response.json(services)); await Promise.resolve()
-    expect(screen.queryByRole('region', { name: 'API' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('row', { name: 'API' })).not.toBeInTheDocument()
     expect(document.querySelector('a[href="https://a.example.com"]')).toBeNull()
   })
   it.each([null, 'javascript:alert(1)'])('does not render a Grafana entry for %s', async (grafana_url) => {
@@ -122,7 +128,7 @@ describe('运维页：知识库图片存储', () => {
     const checked = { ...status, primary: { ...status.primary, check: { ok: true, reason: null, checked_at: '2026-11-04T02:00:00Z' } } }
     const requests = operations((r) => path(r) === '/api/v1/operations/storage' ? Response.json(status) : path(r) === '/api/v1/operations/storage/check' && r.method === 'POST' ? Response.json(checked) : undefined)
     await openApp('/operations')
-    const panel = await screen.findByRole('region', { name: '知识库图片存储' })
+    const panel = await screen.findByRole('region', { name: '存储状态' })
     await within(panel).findByText('阿里云 OSS')
     expect(panel).toHaveTextContent('kb.s3.oss-cn-hangzhou.aliyuncs.com')
     expect(panel).toHaveTextContent('自检失败：SignatureDoesNotMatch')
@@ -138,6 +144,6 @@ describe('运维页：知识库图片存储', () => {
     operations((r) => path(r) === '/api/v1/me' ? Response.json({ ...me, workspaces: [{ ...workspace, role: 'member' }] }) : path(r) === '/api/v1/operations/storage' ? Response.json(status) : undefined)
     await openApp('/operations')
     await screen.findByRole('region', { name: '服务状态' })
-    expect(screen.queryByRole('region', { name: '知识库图片存储' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '存储状态' })).not.toBeInTheDocument()
   })
 })
