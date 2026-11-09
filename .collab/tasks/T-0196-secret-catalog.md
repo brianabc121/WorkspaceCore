@@ -29,3 +29,4 @@ updated: 2026-11-09
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 12:51 UTC · claude · 创建任务（owner: claude）
 - 2026-11-09 12:52 UTC · claude · 开始任务：人类在对话中要求按 codex 的 AI 审批与管理区方案全面落实
+- 2026-11-09 13:07 UTC · claude · 后端（B6）完成：GET /agents/secrets 加 q（名称/说明字面包含，ILIKE 转义 % _ \，拒绝 NUL）、kind，分页前过滤，AgentSecretPage 加 total（SQL COUNT，total_estimate 同值）；游标带 workspace+q+kind 摘要，换条件 422，旧版无摘要游标仅在无筛选时可用；新增 GET /agents/secrets/{secret_id}（owner、跨空间 404、只有元数据）；_secrets_out 原本就是一次 IN 查询批量取 grants，补了稳定排序。新测试 tests/test_secret_catalog_queries.py。下一步：前端 SecretsPage/详情/取用记录（计划 B6 Step 3–5）。

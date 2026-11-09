@@ -88,6 +88,7 @@ from app.schemas.agents import (
     SecretAccessPage,
     SecretAccessResult,
     SecretGrantsReplace,
+    SecretKind,
     ServerOpsRun,
     VersionBody,
     WakeupTarget,
@@ -886,11 +887,31 @@ async def replace_agent_secret_grants(
 # ---------------------------------------------------------------- 密钥库
 
 
-@router.get("/agents/secrets", summary="密钥列表（owner，不含明文）", responses=_read_errors)
+@router.get(
+    "/agents/secrets",
+    summary="密钥列表（owner，不含明文）",
+    description="按名称排序。q 按名称或说明字面包含搜索（不区分大小写，% 与 _ 按普通字符），"
+    "kind 按类型筛选；条件在本工作空间内、分页之前生效，total 是同样条件下的全量匹配数。"
+    "游标绑定工作空间与条件：换了 q / kind 要从第一页开始，用旧游标请求返回 422。",
+    responses=_read_errors,
+)
 async def list_agent_secrets(
-    access: Owner, service: Service, cursor: Cursor = None, limit: Limit = 50
+    access: Owner,
+    service: Service,
+    q: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            max_length=100,
+            pattern=r"^[^\x00]*$",
+            description="按名称或说明搜索（字面包含）；不能含 NUL 字符",
+        ),
+    ] = None,
+    kind: Annotated[SecretKind | None, Query(description="只看这种类型的密钥")] = None,
+    cursor: Cursor = None,
+    limit: Limit = 50,
 ) -> AgentSecretPage:
-    return await service.list_secrets(access, cursor=cursor, limit=limit)
+    return await service.list_secrets(access, cursor=cursor, limit=limit, q=q, kind=kind)
 
 
 @router.post(
@@ -928,6 +949,20 @@ async def list_secret_accesses(
         cursor=cursor,
         limit=limit,
     )
+
+
+# 固定路径 /agents/secrets/accesses 写在 /agents/secrets/{secret_id} 之前
+
+
+@router.get(
+    "/agents/secrets/{secret_id}",
+    summary="密钥详情（owner，只有元数据）",
+    description="名称、类型、说明、当前值版本、最近轮换时间与授权（实例与 ref_id）；"
+    "从不返回值、密文引用或历史值。不在本工作空间或不存在时 404。",
+    responses=_read_errors,
+)
+async def get_agent_secret(access: Owner, service: Service, secret_id: UUID) -> AgentSecretOut:
+    return await service.get_secret_metadata(access, secret_id)
 
 
 @router.patch(

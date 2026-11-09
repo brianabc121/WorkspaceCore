@@ -290,7 +290,10 @@ class AgentSecretOut(BaseModel):
 
 
 class AgentSecretPage(Page[AgentSecretOut]):
-    pass
+    total: int = Field(
+        description="同样 q / kind 条件下的全部匹配数（服务端计数，不受分页影响）；"
+        "total_estimate 与它相同"
+    )
 
 
 class AgentSecretCreate(_Strict):
