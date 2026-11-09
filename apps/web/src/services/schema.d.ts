@@ -3613,6 +3613,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runner/environments/{environment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 一个环境的详情（admin）
+         * @description 不在列表筛选里也能按 ID 读；只读本地记录（含最新资源读数与新鲜度），不连 Docker / SSH。其他工作空间的环境与不存在的环境都返回 404。
+         */
+        get: operations["get_runner_environment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runner/environments/{environment_id}/actions": {
         parameters: {
             query?: never;
@@ -12189,6 +12209,16 @@ export interface components {
         RunnerEnvAdminList: {
             /** Items */
             items: components["schemas"]["RunnerEnvAdminOut"][];
+            /**
+             * Next Cursor
+             * @description 下一页的游标；没有下一页时为空
+             */
+            next_cursor?: string | null;
+            /**
+             * Total
+             * @description 同样筛选条件（不含分页）下的全部匹配数；旧版服务端没有这一项
+             */
+            total?: number | null;
         };
         /** RunnerEnvAdminOut */
         RunnerEnvAdminOut: {
@@ -12232,6 +12262,8 @@ export interface components {
             mem_bytes: number | null;
             /** Memory Mb */
             memory_mb: number;
+            /** @description 最新资源读数与新鲜度（T-0185）；旧版服务端没有这一项 */
+            metrics?: components["schemas"]["RunnerEnvMetrics"] | null;
             /** Mine */
             mine: boolean;
             /**
@@ -12311,6 +12343,67 @@ export interface components {
              * @description 停止或归档后再用，大约要等多少秒
              */
             wake_seconds: number | null;
+        };
+        /**
+         * RunnerEnvMetrics
+         * @description 一个环境的最新资源读数与新鲜度（T-0185，容器服务器方案指标约定第 5 节）。
+         *
+         *     - CPU 是 runner-agent 用两次累计 CPU 时间差分出的窗口平均核数，不是配置的 cpus；
+         *     - 内存是 Docker memory_stats.usage（字节，含页缓存）；
+         *     - 数据卷只是环境的数据卷，不含镜像与容器可写层。
+         *     每项分别判断：有值且上报时间在 180 秒内、主机在线且没停用 → ok；
+         *     有旧值 → stale（保留数字与时间，上报时间可能为空 = 时间未知）；没有值 → unavailable；
+         *     环境不在运行时 CPU / 内存 → not_running（数值为空）。
+         */
+        RunnerEnvMetrics: {
+            /**
+             * Cpu Percent Of Limit
+             * @description cpu_used_cores / 配置的 cpus × 100；可以超过 100，配置无效时为空
+             */
+            cpu_percent_of_limit: number | null;
+            /**
+             * Cpu Reported At
+             * @description 平台收到这项读数的时间
+             */
+            cpu_reported_at: string | null;
+            /**
+             * Cpu Status
+             * @enum {string}
+             */
+            cpu_status: "ok" | "stale" | "unavailable" | "not_running";
+            /**
+             * Cpu Used Cores
+             * @description 最近一个采样窗口的平均核数，可以大于 1
+             */
+            cpu_used_cores: number | null;
+            /** Cpu Window Seconds */
+            cpu_window_seconds: number | null;
+            /**
+             * Data Volume Bytes
+             * @description 数据卷占用（不含镜像与可写层）
+             */
+            data_volume_bytes: number | null;
+            /** Data Volume Reported At */
+            data_volume_reported_at: string | null;
+            /**
+             * Data Volume Status
+             * @enum {string}
+             */
+            data_volume_status: "ok" | "stale" | "unavailable" | "not_running";
+            /**
+             * Memory Percent Of Limit
+             * @description memory_used_bytes / (memory_mb × 1024²) × 100；可以超过 100
+             */
+            memory_percent_of_limit: number | null;
+            /** Memory Reported At */
+            memory_reported_at: string | null;
+            /**
+             * Memory Status
+             * @enum {string}
+             */
+            memory_status: "ok" | "stale" | "unavailable" | "not_running";
+            /** Memory Used Bytes */
+            memory_used_bytes: number | null;
         };
         /** RunnerHostCreate */
         RunnerHostCreate: {
@@ -30399,6 +30492,14 @@ export interface operations {
                 instance_id?: string | null;
                 lifetime?: ("once" | "session" | "persistent") | null;
                 include_deleted?: boolean;
+                /** @description 按用途或环境 ID 包含查询（% 与 _ 按字面匹配） */
+                q?: string | null;
+                /** @description last_used：最近使用在前；cpu / memory：实时读数高的在前，过期、未知、未运行的排在最后；同分按 ID */
+                sort?: "last_used" | "cpu" | "memory";
+                /** @description 上一页的 next_cursor */
+                cursor?: string | null;
+                /** @description 每页条数；缺省 500 与旧页面兼容，新页面传 50 */
+                limit?: number;
             };
             header: {
                 /** @description 当前工作空间；不是成员时返回 404 */
@@ -30416,6 +30517,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunnerEnvAdminList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_runner_environment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                environment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerEnvAdminOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

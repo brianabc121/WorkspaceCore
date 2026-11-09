@@ -180,6 +180,25 @@ async def list_runner_environments(
     instance_id: UUID | None = None,
     lifetime: Literal["once", "session", "persistent"] | None = None,
     include_deleted: bool = False,
+    q: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            max_length=100,
+            description="按用途或环境 ID 包含查询（% 与 _ 按字面匹配）",
+        ),
+    ] = None,
+    sort: Annotated[
+        Literal["last_used", "cpu", "memory"],
+        Query(
+            description="last_used：最近使用在前；cpu / memory：实时读数高的在前，"
+            "过期、未知、未运行的排在最后；同分按 ID"
+        ),
+    ] = "last_used",
+    cursor: Annotated[str | None, Query(max_length=512, description="上一页的 next_cursor")] = None,
+    limit: Annotated[
+        int, Query(ge=1, le=500, description="每页条数；缺省 500 与旧页面兼容，新页面传 50")
+    ] = 500,
 ) -> RunnerEnvAdminList:
     return await service.environments(
         access,
@@ -187,7 +206,24 @@ async def list_runner_environments(
         instance_id=instance_id,
         lifetime=lifetime,
         include_deleted=include_deleted,
+        q=q,
+        sort=sort,
+        cursor=cursor,
+        limit=limit,
     )
+
+
+@router.get(
+    "/runner/environments/{environment_id}",
+    summary="一个环境的详情（admin）",
+    description="不在列表筛选里也能按 ID 读；只读本地记录（含最新资源读数与新鲜度），"
+    "不连 Docker / SSH。其他工作空间的环境与不存在的环境都返回 404。",
+    responses=_read_errors,
+)
+async def get_runner_environment(
+    access: Admin, service: Service, environment_id: UUID
+) -> RunnerEnvAdminOut:
+    return await service.environment(access, environment_id)
 
 
 @router.post(

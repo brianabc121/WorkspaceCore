@@ -142,7 +142,7 @@ async def _expire_commands(runner: Runner, out: TickResult) -> None:
         out.expired += 1
         command.status = "unknown"
         command.finished_at = specs.now()
-        command.error = "运行服务器在时限内没有回报结果"
+        command.error = "容器服务器在时限内没有回报结果"
         env = (
             await db.get(RunnerEnvironment, command.environment_id)
             if command.environment_id
@@ -152,12 +152,12 @@ async def _expire_commands(runner: Runner, out: TickResult) -> None:
             await _run_unknown(db, command.run_id)
         elif command.kind == "create_env" and env is not None and env.state == "creating":
             env.state = "failed"
-            env.state_reason = "创建超时：运行服务器在时限内没有回报"
+            env.state_reason = "创建超时：容器服务器在时限内没有回报"
         elif command.kind == "build_template" and command.template_id is not None:
             template = await db.get(RunnerTemplate, command.template_id)
             if template is not None and template.build_status == "building":
                 template.build_status = "failed"
-                template.build_error = "构建超时：运行服务器在时限内没有回报"
+                template.build_error = "构建超时：容器服务器在时限内没有回报"
         elif command.kind == "snapshot" and env is not None:
             snapshot_id = command.payload.get("snapshot_id")
             if snapshot_id:
@@ -178,7 +178,7 @@ async def _run_unknown(db: AsyncSession, run_id: uuid.UUID) -> None:
     run.status = "unknown"
     run.finished_at = specs.now()
     run.output = (
-        run.output + "\n[工作台] 结果未知：运行服务器在时限内没有回报（不会自动重跑）"
+        run.output + "\n[工作台] 结果未知：容器服务器在时限内没有回报（不会自动重跑）"
     ).strip()
     if run.wake and run.instance_id is not None:
         db.add(
@@ -189,7 +189,7 @@ async def _run_unknown(db: AsyncSession, run_id: uuid.UUID) -> None:
                 source="runner",
                 target=None,
                 session_key=f"runner:{run.id}",
-                prompt=f"[工作台] 运行 {run.id} 结果未知（运行服务器没有回报）。",
+                prompt=f"[工作台] 运行 {run.id} 结果未知（容器服务器没有回报）。",
                 run_at=specs.now(),
             )
         )
@@ -209,7 +209,7 @@ async def _hosts_offline(runner: Runner, out: TickResult) -> None:
             host.workspace_id,
             type_="runner.host_offline",
             severity="warning",
-            title=f"运行服务器「{host.name}」不在线",
+            title=f"容器服务器「{host.name}」不在线",
             body="超过 90 秒没有连上工作台；智能体暂时不能建环境或执行命令",
             link="/runner",
             key=f"{host.id}:offline:{specs.now():%Y%m%d%H}",
@@ -443,7 +443,7 @@ async def _watermarks(runner: Runner, out: TickResult) -> None:
                     if reserved <= target:
                         break
                     await runner.stop(
-                        Viewer(env.workspace_id), env, "运行服务器内存紧张，按保留分停止"
+                        Viewer(env.workspace_id), env, "容器服务器内存紧张，按保留分停止"
                     )
                     reserved -= int(env.spec.get("memory_mb", 0)) * 1024 * 1024
                     out.stopped += 1
@@ -460,7 +460,7 @@ async def _watermarks(runner: Runner, out: TickResult) -> None:
                     break
                 if math.isinf(ranked.get(env.id, 0.0)):
                     continue
-                if await runner.archive(env, "运行服务器磁盘紧张，按保留分归档"):
+                if await runner.archive(env, "容器服务器磁盘紧张，按保留分归档"):
                     archived += 1
                     out.archived += 1
             await _prune_images(runner, host)
@@ -470,7 +470,7 @@ async def _watermarks(runner: Runner, out: TickResult) -> None:
                 host.workspace_id,
                 type_="runner.disk_emergency",
                 severity="error",
-                title=f"运行服务器「{host.name}」磁盘告急",
+                title=f"容器服务器「{host.name}」磁盘告急",
                 body=f"已用 {usage:.0%}：暂停新建环境，runner-agent 已停止一次性运行",
                 link="/runner",
                 key=f"{host.id}:disk:{specs.now():%Y%m%d%H}",
