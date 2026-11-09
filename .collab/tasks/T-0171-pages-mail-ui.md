@@ -2,7 +2,7 @@
 id: T-0171
 title: 四页改造（六）：邮件页默认全部邮箱 + 单邮箱三栏（账号绑定、回复身份、部分故障）与四页验收
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: apps/web/src/features/mail,apps/web/src/pages/MailPage.vue,apps/web/tests,tests/e2e,.github/workflows/ci-infra.yml
@@ -32,3 +32,4 @@ updated: 2026-11-09
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 01:32 UTC · claude · 创建任务（owner: claude）
 - 2026-11-09 02:29 UTC · claude · 开始任务：按四页改造方案实施（本分支）
+- 2026-11-09 03:07 UTC · claude · status in_progress → done：四页改造完成：后端全量 961 passed / 15 skipped，前端 lint / typecheck / vitest 545 / build / check:api 通过，本地全栈浏览器验收（home、sprint2/3/4、timeline、knowledge、readme_issues、modules、mail）通过，截图已核对；随 PR 合并生效
