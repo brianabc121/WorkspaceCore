@@ -254,7 +254,7 @@ jobs:
             --intranet intranet.test:8443 --public public.test:9443
       - name: 启动 OpenIM（make openim-up）
         run: make openim-up
-      - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道；场景 15 是知识库与每晚复盘（T-0100），场景 23 是 Gmail（T-0131），场景 26 是运行服务器（T-0141））
+      - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道；场景 15 是知识库与每晚复盘（T-0100），场景 23 是 Gmail（T-0131），场景 26 是容器服务器（T-0141；容器读数 T-0188））
         run: |
           # 要以 root 运行：接入包目录交给容器里的 uid 1000（CHECKLIST.md 的做法）。
           # npm 缓存放到临时目录：用 runner 的 ~/.npm 会留下 root 所有的文件，后面的 npm ci 会因 EACCES 失败
@@ -322,7 +322,7 @@ jobs:
         run: node tests/e2e/agent_ssh_browser.cjs
       # T-0141：同一台“新服务器”（上一步已卸载 OpenClaw 并移除服务器），这次在网页上把它部署成运行服务器（外网入口：
       # 内部 CA + 地址映射，原样的接入包）；场景 26 已用接入包手动部署验收过环境与运行，这里验收页面与 SSH 部署
-      - name: 运行服务器浏览器验收（添加运行服务器、SSH 部署到上线、总览显示 gVisor、各标签、卸载、吊销、手机宽度）
+      - name: 容器服务器浏览器验收（添加服务器、SSH 部署到上线、容器总览与主机条、旧链接与详情直链、各标签、卸载、吊销、手机宽度）
         run: node tests/e2e/runner_browser.cjs
       - name: 失败时输出服务状态与日志
         if: failure()

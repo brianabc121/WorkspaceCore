@@ -1685,6 +1685,16 @@ class RunnerSite:
         found = [e for e in items if e["id"] == env_id]
         return found[0] if found else {}
 
+    def detail(self, env_id: str) -> dict[str, Any]:
+        """单环境详情（T-0185）：含最新读数与新鲜度（metrics）。"""
+        data: dict[str, Any] = self.c.owner.call("GET", f"/api/v1/runner/environments/{env_id}")
+        return data
+
+    def reading(self, env_id: str, ok: Callable[[dict[str, Any]], bool], what: str, timeout: float = 300) -> dict[str, Any]:
+        """等到这个环境的读数满足条件（runner-agent 每 60 秒上报一次，CPU 要两次报告才有）。"""
+        return wait_for(what, lambda: (lambda m: m if ok(m) else None)(self.detail(env_id).get("metrics") or {}),
+                        timeout=timeout, interval=10)
+
     def wait_state(self, env_id: str, *states: str, timeout: float = 240) -> dict[str, Any]:
         return wait_for(f"环境 {env_id} 变成 {'/'.join(states)}",
                         lambda: (lambda e: e if e.get("state") in states else None)(self.env(env_id)),
@@ -1803,6 +1813,18 @@ def scenario_26(c: Ctx) -> None:
                 and ran.get("status") == "succeeded" and f"steps-{tag}" in ran["untrusted"]["output"]
                 and env_runtime(session_id) == "runsc",
                 json.dumps({"reused": again.get("reused"), "run": ran.get("status"), "runtime": env_runtime(session_id)}, ensure_ascii=False))
+        # 容器读数在 gVisor 下的样子（T-0188）：内存要有；CPU 记下实际读数（runsc 下读不到累计时间就该是“未知”，不能是假数字）
+        gm = site.reading(session_id, lambda m: m.get("memory_status") == "ok" and m.get("cpu_status") in ("ok", "unavailable"),
+                          "gVisor 环境有内存读数", timeout=200)
+        if gm.get("cpu_status") == "unavailable":  # 再等一次报告，区分“第一次采样”与“读不到”
+            time.sleep(70)
+            gm = site.detail(session_id).get("metrics") or gm
+        c.check("场景 26：gVisor 环境有真实的内存读数与上报时间；CPU 要么是有效的窗口平均，要么如实为未知（不补 0）",
+                gm.get("memory_status") == "ok" and (gm.get("memory_used_bytes") or 0) > 0 and bool(gm.get("memory_reported_at"))
+                and (gm.get("cpu_status") == "unavailable" and gm.get("cpu_used_cores") is None
+                     or gm.get("cpu_status") == "ok" and 0 <= gm.get("cpu_used_cores", -1) < 4 and 1 <= gm.get("cpu_window_seconds", 0) <= 180),
+                json.dumps({k: gm.get(k) for k in ("cpu_status", "cpu_used_cores", "cpu_window_seconds", "memory_status",
+                                                   "memory_used_bytes", "data_volume_status", "data_volume_bytes")}, ensure_ascii=False))
         egress = site.exec(session_id, EGRESS_PROBE)
         out = dict(line.split(" ", 1) for line in egress["untrusted"]["output"].splitlines() if " " in line)
         c.check("场景 26：gvisor 环境（allowlist）按 IP 经 runner-agent 的出口代理访问放行的域名（200），别的域名被代理拒绝（403），直连外网不通",
@@ -1828,8 +1850,38 @@ def scenario_26(c: Ctx) -> None:
                 gvisor_kernel != kernel and runc_kernel == [kernel] and env_runtime(keep_id) == "runc" and tool_code(setup) == "",
                 json.dumps({"host": kernel, "gvisor": gvisor_kernel, "runc": runc_kernel}, ensure_ascii=False))
 
+        # 容器读数（T-0184 / T-0185，真实 Docker）：空闲时接近 0；跑满一个核后 CPU 是差分出的窗口平均（约 1 核）；
+        # 内存与数据卷有读数和上报时间；配置的 cpus 只是上限，不当用量
+        idle = site.reading(keep_id, lambda m: m.get("cpu_status") == "ok", "常驻环境有 CPU 读数（两次报告之后）")
+        busy_start = site.exec(keep_id, "nohup sh -c 'echo $$ > /tmp/busy.pid; while :; do :; done' >/dev/null 2>&1 & echo busy-started")
+        hot = site.reading(keep_id, lambda m: m.get("cpu_status") == "ok" and (m.get("cpu_used_cores") or 0) > 0.5,
+                           "忙的容器 CPU 读数上来", timeout=360)
+        detail = site.detail(keep_id)
+        c.check("场景 26：真实 Docker 上的容器读数：空闲时 CPU 接近 0、跑满一个核后约 1 核（窗口平均），百分比按配置的上限算；"
+                "内存、数据卷都有读数与上报时间",
+                "busy-started" in (busy_start.get("untrusted") or {}).get("output", "")
+                and (idle.get("cpu_used_cores") or 0) < 0.3 and 0.5 < hot["cpu_used_cores"] < 1.5
+                and 1 <= hot["cpu_window_seconds"] <= 180
+                and abs(hot["cpu_percent_of_limit"] - hot["cpu_used_cores"] / detail["cpus"] * 100) < 0.01
+                and hot.get("memory_status") == "ok" and (hot.get("memory_used_bytes") or 0) > 0
+                and hot.get("data_volume_status") == "ok" and hot.get("data_volume_bytes") is not None,
+                json.dumps({"idle": idle.get("cpu_used_cores"), "busy": hot.get("cpu_used_cores"), "window": hot.get("cpu_window_seconds"),
+                            "percent": hot.get("cpu_percent_of_limit"), "cpus": detail.get("cpus"),
+                            "memory": hot.get("memory_used_bytes"), "volume": hot.get("data_volume_bytes")}, ensure_ascii=False))
+        site.exec(keep_id, "kill $(cat /tmp/busy.pid) 2>/dev/null; echo stopped-busy")
+        listed = c.owner.call("GET", f"/api/v1/runner/environments?instance_id={c.a.id}&sort=cpu&limit=50")
+        c.check("场景 26：容器列表按实时 CPU 排序、带匹配总数（服务端分页）",
+                isinstance(listed.get("total"), int) and listed["total"] >= 1 and listed["items"][0]["id"] == keep_id,
+                json.dumps({"total": listed.get("total"), "first": listed["items"][0]["id"] if listed.get("items") else None}, ensure_ascii=False))
+
         stopped = structured(mcp_call(c.a, "env_stop", {"environment_id": keep_id}))
         site.wait_state(keep_id, "stopped")
+        still = site.reading(keep_id, lambda m: m.get("cpu_status") == "not_running" and m.get("memory_status") == "not_running",
+                             "停止后 CPU / 内存为“未运行”", timeout=200)
+        c.check("场景 26：容器停止后 CPU / 内存显示为“未运行”（不是 0），数据卷占用仍在",
+                still.get("cpu_used_cores") is None and still.get("memory_used_bytes") is None
+                and still.get("data_volume_status") in ("ok", "stale") and still.get("data_volume_bytes") is not None,
+                json.dumps({k: still.get(k) for k in ("cpu_status", "memory_status", "data_volume_status", "data_volume_bytes")}, ensure_ascii=False))
         woke = site.exec(keep_id, "cat data/note.txt")
         c.check("场景 26：常驻环境 env_stop 后停止；再 env_exec 自动启动，数据还在",
                 bool(stopped) and woke.get("status") == "succeeded" and f"kept-{tag}" in woke["untrusted"]["output"],

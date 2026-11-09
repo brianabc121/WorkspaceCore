@@ -551,9 +551,10 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
   提示词只写“有 N 条 Issue 动态，请用 issue_inbox 查看”，不含别人写的内容。没配 `wakeup.mjs` 的实例只能在下次运行时自己查。
 - 与任务：`get_task` 带上关联的、未关闭的 Issue（`issues`）；`complete_task` 遇到关联的、未关闭的“阻塞”Issue 返回 `TASK_BLOCKED`（人照常可以完成）；`release_task` 的 `next_step` 提醒开“交接”Issue 或更新任务 README。
 
-## 运行服务器（T-0136 ~ T-0138）
+## 运行服务器 / 容器服务器（T-0136 ~ T-0138；读数与列表 T-0184 / T-0185）
 
-方案 `docs/v2/RUNNER_PLAN.md`，核验记录 `docs/decisions/2026-11-06-runner-verification.md`；`docs/AGENTS.md` 第 8 节例外八。
+页面上叫“容器服务器”（T-0186，`docs/v2/container-server-redesign/`），地址 `/runner`、接口 `/api/v1/runner/*`、工具名与表名不变。
+方案 `docs/v2/RUNNER_PLAN.md`，核验记录 `docs/decisions/2026-11-06-runner-verification.md`、`docs/decisions/2026-11-09-runner-container-metrics.md`；`docs/AGENTS.md` 第 8 节例外八。
 管理员接口只给 owner / admin（member、viewer `403`），全部按当前工作空间过滤；V1 每个工作空间一台运行服务器。
 
 | 方法与路径 | 说明 |
@@ -570,7 +571,8 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST /api/v1/runner/host/ssh/uninstall` | 停止 runner-agent（`202`）：`version`、`remove_files`、`password`（非 root）；还有没删除的环境 `409 RUNNER_HAS_ENVIRONMENTS`；Docker 与 gVisor 保留 |
 | `POST /api/v1/runner/host/ssh/revoke` | 吊销专用密钥（`version`、`force`）：用它登录删掉 `authorized_keys` 里的那一行，再删工作台保存的私钥；连不上时 `force=true` 只删私钥并返回 `warning` |
 | `DELETE /api/v1/runner/host/ssh?version=` | 删除 SSH 地址（`204`）；装着专用公钥时 `409`，先吊销 |
-| `GET /api/v1/runner/environments` | 环境列表：`state`、`instance_id`、`lifetime`、`include_deleted`；每项含智能体写的用途 `untrusted.purpose`、配置记录 `spec`、运行时 / 用户 / 网络、内存与磁盘占用、出口访问记录 `egress.hosts`（`域名:端口` → 次数、字节、拒绝次数）、删除条件、`next_step`、`wake_seconds`、保留分 `retention_score`（分低的先回收；只算运行中与已停止的环境）与 `retention_infinite`（无穷大：常驻环境的数据超过快照上限、重建不出来，只会被停止、不会被自动归档）、快照大小与时间、归档时间、`version` |
+| `GET /api/v1/runner/environments` | 环境列表：`state`、`instance_id`、`lifetime`、`include_deleted`，T-0185 加 `q`（用途或环境 ID 包含查询，1–100 字，`%` / `_` 按字面）、`sort`（`last_used` 默认 / `cpu` / `memory`：实时读数高的在前，过期、未知、未运行排最后，同分按 ID）、`cursor`（≤ 512，绑定工作空间、全部筛选、排序与每页条数，不匹配 `422`）、`limit`（1–500，缺省 500 兼容旧页面）；响应加 `total`（同样筛选下的全部匹配数，在分页前计算）与 `next_cursor`。每项含智能体写的用途 `untrusted.purpose`、配置记录 `spec`、运行时 / 用户 / 网络、内存与磁盘占用、出口访问记录 `egress.hosts`（`域名:端口` → 次数、字节、拒绝次数）、删除条件、`next_step`、`wake_seconds`、保留分 `retention_score`（分低的先回收；只算运行中与已停止的环境）与 `retention_infinite`（无穷大：常驻环境的数据超过快照上限、重建不出来，只会被停止、不会被自动归档）、快照大小与时间、归档时间、`version`；T-0185 起每项带 `metrics`：`cpu_used_cores` / `cpu_percent_of_limit` / `cpu_window_seconds` / `cpu_reported_at` / `cpu_status`、`memory_used_bytes` / `memory_percent_of_limit` / `memory_reported_at` / `memory_status`、`data_volume_bytes` / `data_volume_reported_at` / `data_volume_status`；状态 `ok`（有值、上报时间在 180 秒内、主机在线且没停用）/ `stale`（有旧值，保留数字与时间，时间可能未知）/ `unavailable`（没有值）/ `not_running`（不在运行的环境的 CPU / 内存）；百分比按配置的 `cpus`、`memory_mb × 1024²` 算，可以超过 100 |
+| `GET /api/v1/runner/environments/{id}` | 一个环境的详情（T-0185），与列表项相同；不在列表筛选里也能读；其他工作空间与不存在的都 `404`；只读本地记录，不连 Docker / SSH |
 | `POST /api/v1/runner/environments/{id}/actions` | `action` ∈ `start` / `stop` / `archive`（常驻先停止、做快照，完成后才归档；被保护的 `409`）/ `delete`（立即进入待删除；常驻先做快照，快照保留 30 天）/ `keep`（撤销待删除：回到停止，归档过的回到归档）/ `restore`（归档的按配置记录重建；已删除的常驻环境在快照保留期内从快照恢复，没有快照 `409 SNAPSHOT_NOT_FOUND`）/ `pin` / `unpin`（保护：不被自动回收），带 `version`；审计 `runner.environment_<action>` |
 | `GET /api/v1/runner/templates` | 模板（`RunnerTemplateAdminOut`：谁建的、`untrusted.description`、规格、构建状态、构建日志的结尾 `build_log`（最多 20000 字，已脱敏）、镜像 digest、构建耗时、镜像大小、使用次数、乐观并发的 `version`）；新建、修改、改状态、重新构建都返回同样的结构 |
 | `PUT /api/v1/runner/templates` | 管理员新建 / 修改模板（`name` 只能是小写字母数字与 `._-`）：规格变了版本号加一并下发构建；修改带 `version`；审计 `runner.template_saved` |
@@ -588,7 +590,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 |---|---|
 | `POST /runner-api/v1/poll` | 上报版本与容量（`runtimes`、`kvm`、CPU、内存、磁盘），长轮询领指令（`wait_seconds` ≤ 25，一次最多 10 条，`FOR UPDATE SKIP LOCKED` 后标为 `sent`）。需要注入密钥的指令（`create_env` / `start_env` / `exec`）**这时才解密**放进 `payload.secret_values`（不落库，每次写取密钥记录）；`no-store` |
 | `POST /runner-api/v1/commands/{id}/result` | `status`（`done` / `failed`）、`result`、`error`；重复回报只认第一次（`accepted: false`）；不是这台服务器的指令 `404` |
-| `POST /runner-api/v1/report` | 每分钟对账：带工作台标签的容器、数据卷、镜像与占用、没有标签的容器数（只计数）、出口访问记录。返回 `lost`（记录里有、实际没有：标为 `failed` 并通知管理员）与 `stray`（实际有、记录里没有：runner-agent 先停止、24 小时后删除） |
+| `POST /runner-api/v1/report` | 每分钟对账：带工作台标签的容器、数据卷、镜像与占用、没有标签的容器数（只计数）、出口访问记录。T-0184 起容器项可带 `cpu_used_cores` 与 `cpu_window_seconds`（同时有值或同时为空；有限、非负、窗口 1–180 秒，不合规整份报告 `422`），旧 runner-agent 不带也照常对账；`mem_bytes` 读不到时为空（不再报 0），数据卷 `bytes` 为负数时按未知处理。返回 `lost`（记录里有、实际没有：标为 `failed` 并通知管理员）与 `stray`（实际有、记录里没有：runner-agent 先停止、24 小时后删除） |
 | `PUT /runner-api/v1/snapshots/{id}/parts/{n}` | 上传快照的第 `n` 块（`application/octet-stream`，≤ 16 MB，`n` < 100000）。工作台用这份快照自己的数据密钥（AES-256-GCM，附加数据“快照 ID:块号”）加密后存进对象存储；只认这台服务器、状态是上传中的快照（否则 `404` / `409 SNAPSHOT_CLOSED`），存储不可用 `503 STORAGE_UNAVAILABLE` |
 | `GET /runner-api/v1/snapshots/{id}/parts/{n}` | 恢复时取第 `n` 块（解密后的原文，`no-store`）。快照没就绪 `409 SNAPSHOT_NOT_READY`；没有这一块 `404`；校验失败 `500 SNAPSHOT_CORRUPT` |
 

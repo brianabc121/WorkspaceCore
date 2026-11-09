@@ -2,9 +2,9 @@
 id: T-0188
 title: 容器服务器（五）：真实容器验收、浏览器验收与升级文档
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: tests/e2e,.github/workflows/ci-infra.yml,docs
 depends_on: T-0187
 created: 2026-11-09
@@ -28,3 +28,5 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 09:33 UTC · claude · 创建任务（owner: claude）
+- 2026-11-09 10:19 UTC · claude · 开始任务
+- 2026-11-09 10:19 UTC · claude · 场景 26 加容器读数检查（gVisor 内存 / CPU 如实、runc 忙闲 CPU、按 CPU 排序带 total、停止后未运行）；runner_browser.cjs 改走容器服务器页；api-contract、data-dictionary（0055）、deploy-guide 8.8（口径与升级顺序）、RUNNER_PLAN 标注；核验记录 docs/verification/T-0188-container-server.md（第 5 节等 CI）。下一步：#180 合并后把本分支并到 claude/cool-wright-99qbbg 推送、开 PR、看 CI agents 结果
