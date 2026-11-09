@@ -351,17 +351,17 @@ async function download(page, click) {
   const claimPanel = page.getByRole('region', { name: '任务动态' })
   await claimPanel.getByText(/完成了任务/).waitFor()
   await claimPanel.getByText(`浏览器验收完成 ${run}`, { exact: true }).waitFor()
-  // 智能体完成后任务待查看（T-0164）：完成说明放在“确认结果”上方
-  const reviewBlock = claimPanel.locator('[aria-label="待查看"]')
+  // 智能体完成后任务对每个成员都是“已完成待查看”（T-0166）：详情顶部给出完成说明与“标为已查看”
+  const reviewBlock = page.getByRole('note', { name: '待查看' })
   await reviewBlock.getByText(`完成说明：浏览器验收完成 ${run}`).waitFor()
-  await reviewBlock.getByRole('button', { name: '确认结果' }).waitFor()
+  await reviewBlock.getByRole('button', { name: '标为已查看' }).waitFor()
   const reopenForm = claimPanel.getByRole('form', { name: '打回任务' })
   await reopenForm.getByLabel('打回原因').fill(`缺少回滚步骤 ${run}`)
   await reopenForm.getByRole('button', { name: '打回到进行中' }).click()
   await claimPanel.getByText(/打回了任务/).waitFor()
   const events = (await apiGet(page, workspace, `/api/v1/tasks/${created.body.id}/events`)).items.map((e) => e.kind)
   const reopened = await apiGet(page, workspace, `/api/v1/tasks/${created.body.id}`)
-  check(JSON.stringify(events) === JSON.stringify(['reopened', 'completed', 'claimed', 'opened']) && !reopened.done && reopened.assignee_instance_id === instance.id && !reopened.review_pending,
+  check(JSON.stringify(events) === JSON.stringify(['reopened', 'completed', 'claimed', 'opened']) && !reopened.done && reopened.assignee_instance_id === instance.id && reopened.work_state === 'running',
     `打回后任务应回到进行中、仍由实例执行、不再待查看，动态依次记下：${JSON.stringify(events)}`)
   await reviewBlock.waitFor({ state: 'detached' }) // 打回后不再显示“待查看”
   step('自由接取：任务详情里设为可自由接取（只限项目成员），实例领取并完成（直接生效，任务待查看），管理员写原因打回（不再待查看），动态依次是设为可领取、领取、完成、打回')

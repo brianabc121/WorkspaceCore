@@ -224,6 +224,8 @@ async function noHorizontalScroll(page) {
   await page.getByRole('button', { name: '保存日程' }).click()
   await page.getByRole('button', { name: eventTitle, exact: true }).waitFor()
   await page.getByRole('button', { name: eventTitle, exact: true }).click()
+  // 日历改版（T-0169）：点日程先看详情，再点“编辑日程”打开表单
+  await page.getByRole('button', { name: '编辑日程' }).click()
   await page.getByLabel('日程标题').fill(`${eventTitle} 改`)
   await page.getByLabel('日程地点').fill('三楼会议室')
   await page.getByRole('button', { name: '保存日程' }).click()
