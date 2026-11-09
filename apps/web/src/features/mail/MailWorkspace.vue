@@ -1,170 +1,183 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ArrowLeft, MailOpen, RefreshCw, Settings } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
-import { formatTime } from '../time'
-import {
-  LABELS, SEND_STATUS, downloadAttachment, formatSize, mailError, useMailAccounts, useMailActions, useMailList, useMailSends, useMailThread,
-  type MailMessage, type MailSummary,
-} from './api'
+import { ApiError } from '../../services/api'
+import { useMediaQuery } from '../../composables/useMediaQuery'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { mailError, useMailAccounts, useMailActions, type MailMessage } from './api'
+import { accountName, parseSender, toneOf } from './format'
+import { useMailScope } from './useMailScope'
+import type { Draft, Owner } from './types'
+import AccountNavigation from './AccountNavigation.vue'
+import MailMessageList from './MailMessageList.vue'
+import MailReader from './MailReader.vue'
+import MailComposer from './MailComposer.vue'
+import MailSends from './MailSends.vue'
+import '../workspace/workspace-pages.css'
+import './mail-pages.css'
 
-// 邮件页（T-0130，MAIL_PLAN 第 6 节，owner / admin）：左边标签与搜索，中间邮件列表，右边阅读与回复；
-// “发件记录”里有人和智能体经工作台发的信（结果未知的高亮）。邮件内容一律按纯文字显示。
-const auth = useAuthStore(), scope = auth.workspaceId!, route = useRoute()
-const accounts = useMailAccounts(scope), actions = useMailActions(scope), sends = useMailSends(scope)
-const items = computed(() => accounts.data.value?.items ?? [])
-const account = ref('')
-watch(items, (list) => { if (!list.some(a => a.id === account.value)) account.value = list[0]?.id ?? '' }, { immediate: true })
-const current = computed(() => items.value.find(a => a.id === account.value))
+// 邮件页（T-0171，四页改造规范第 7 节，效果图 04 / 05；owner / admin）：
+// 默认全部邮箱 + 全部邮件（不默认选第一个邮箱），左栏按邮箱 / 分类切换，中栏列表，右栏阅读与回复。
+// ≥1440px 三栏；更窄时阅读器改成右侧抽屉（手机上铺满，列表 → 详情逐级返回）。
+// 邮件内容只在内存：离开邮件页、换工作空间（整页重建）、退出或失权时清掉。
+const auth = useAuthStore(), scope = auth.workspaceId!, route = useRoute(), router = useRouter()
+const accounts = useMailAccounts(scope), actions = useMailActions(scope)
+const docked = useMediaQuery('(min-width: 1440px)')
 const tab = ref<'mail' | 'sends'>(route.query.tab === 'sends' ? 'sends' : 'mail')
+const accountList = computed(() => accounts.data.value?.items ?? [])
+const sendable = computed(() => accountList.value.filter((a) => a.status === 'active' && a.can_send))
+const activeCount = computed(() => accountList.value.filter((a) => a.status === 'active').length)
 
-const search = ref(''), filters = ref({ q: '', label: 'INBOX', page: null as string | null }), pages = ref<(string | null)[]>([])
-const list = useMailList(scope, account, filters)
-const thread = ref<string | null>(null)
-const opened = useMailThread(scope, account, thread)
-const messages = computed(() => opened.data.value?.messages ?? [])
-watch([account, () => filters.value.label, () => filters.value.q], () => { thread.value = null; pages.value = [] })
+type Compose = { key: number; draft: Draft }
+const compose = ref<Compose | null>(null)
+const composer = ref<InstanceType<typeof MailComposer> | null>(null)
+let composeSeq = 0
+const busy = ref(false), sendError = ref(''), unknown = ref(false), notice = ref('')
 
-function pick(label: string) { filters.value = { ...filters.value, label, page: null }; pages.value = [] }
-function find() { filters.value = { ...filters.value, q: search.value, page: null }; pages.value = [] }
-function next() { const token = list.data.value?.next_page_token; if (token) { pages.value.push(filters.value.page); filters.value = { ...filters.value, page: token } } }
-function previous() { filters.value = { ...filters.value, page: pages.value.pop() ?? null } }
-function open(item: MailSummary) { thread.value = item.thread_id; compose.value = null }
+// 正在写的回复与选中的邮件绑在一起：换范围前确认是否放弃；新邮件有自己的发信邮箱，换范围不受影响
+function canLeave() {
+  const form = composer.value
+  if (!compose.value || !form?.isReply()) return true
+  if (form.dirty() && !window.confirm('切换后会放弃这封还没发出的回复，确定吗？')) return false
+  compose.value = null
+  return true
+}
+const mail = useMailScope(scope, { initialAccount: typeof route.query.account === 'string' ? route.query.account : null, canLeave })
+// 单个邮箱可以用 ?account= 深链；换回全部邮箱时去掉
+watch(mail.accountId, (id) => { void router.replace({ query: { ...route.query, account: id ?? undefined } }) })
+watch(mail.accountId, () => { notice.value = '' })
 
-type Draft = { to: string; cc: string; bcc: string; subject: string; body: string; reply: string | null }
-const compose = ref<Draft | null>(null), busy = ref(false), error = ref(''), notice = ref('')
-function write() { compose.value = { to: '', cc: '', bcc: '', subject: '', body: '', reply: null }; error.value = ''; notice.value = '' }
+const list = mail.list
+const pending = computed(() => list.isPending.value)
+const listError = computed(() => (list.data.value ? null : list.error.value))
+const moreError = computed(() => (list.isFetchNextPageError.value ? list.error.value : null))
+const syncedAt = computed(() => (list.dataUpdatedAt.value ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(list.dataUpdatedAt.value) : null))
+const selectedKey = computed(() => (mail.selected.value ? `${mail.selected.value.accountId}:${mail.selected.value.messageId}` : null))
+
+// 失权（403）：清掉已经读到的邮件内容，不再显示
+watch(() => list.error.value, (error) => { if (error instanceof ApiError && error.status === 403) mail.forget() })
+onBeforeUnmount(() => mail.forget())
+
+// 选中邮件所属的邮箱：阅读器顶部显示，回复固定用它
+function ownerOf(id: string): Owner {
+  const index = accountList.value.findIndex((a) => a.id === id)
+  const account = accountList.value[index]
+  const item = mail.items.value.find((i) => i.account_id === id)
+  const name = account ? accountName(account) : item ? accountName({ display_name: item.account_display_name, email: item.account_email }) : '已断开的邮箱'
+  const reason = !account ? '这个邮箱已断开' : account.status !== 'active' ? '这个邮箱需要重新连接' : !account.can_send ? '这个邮箱没有授权发信' : null
+  return { id, name, email: account?.email ?? item?.account_email ?? '', tone: toneOf(Math.max(index, 0)), canSend: reason === null, reason }
+}
+const owner = computed(() => (mail.selected.value ? ownerOf(mail.selected.value.accountId) : null))
+
+function open(draft: Draft) {
+  if (compose.value && composer.value?.dirty() && !window.confirm('放弃正在写的邮件？')) return
+  compose.value = { key: ++composeSeq, draft }
+  sendError.value = ''; unknown.value = false; notice.value = ''
+}
+// 写新邮件：全部邮箱视图下不预选发信邮箱；单个邮箱视图下默认用这个邮箱（能发信时）
+function write() {
+  const current = mail.accountId.value
+  const senderId = current && sendable.value.some((a) => a.id === current) ? current : ''
+  open({ senderId, to: '', cc: '', bcc: '', subject: '', body: '', reply: null })
+}
 function reply(message: MailMessage) {
-  const address = /<([^>]+)>/.exec(message.sender)?.[1] ?? message.sender
-  compose.value = { to: address.trim(), cc: '', bcc: '', subject: '', body: '', reply: message.id }
-  error.value = ''; notice.value = ''
+  const selected = mail.selected.value
+  if (!selected) return
+  open({ senderId: selected.accountId, to: parseSender(message.sender).address, cc: '', bcc: '', subject: '', body: '', reply: { accountId: selected.accountId, messageId: message.id, subject: message.subject } })
 }
-const split = (value: string) => value.split(/[,;，；\s]+/).map(s => s.trim()).filter(Boolean)
-async function send() {
-  const draft = compose.value
-  if (!draft || busy.value || !account.value) return
+function closeReader() {
+  if (compose.value) {
+    if (composer.value?.dirty() && !window.confirm('放弃正在写的邮件？')) return
+    compose.value = null
+    return
+  }
+  mail.selected.value = null
+}
+
+const split = (value: string) => value.split(/[,;，；\s]+/).map((s) => s.trim()).filter(Boolean)
+async function send(draft: Draft) {
+  if (busy.value) return
+  sendError.value = ''
+  const account = sendable.value.find((a) => a.id === draft.senderId)
+  if (!account) { sendError.value = draft.senderId ? '这个邮箱现在不能发信（需要重新连接或没有发信授权）。' : '请先选择发信邮箱。'; return }
+  // 回复关联只属于原邮件所在的邮箱：绝不把 A 邮箱的 reply_to 发到 B 邮箱
+  if (draft.reply && draft.reply.accountId !== account.id) { sendError.value = '回复只能用原邮件所属的邮箱发出。'; return }
   const to = split(draft.to)
-  if (!to.length) { error.value = '至少填一个收件人。'; return }
-  if (!draft.body.trim()) { error.value = '正文不能为空。'; return }
-  if (!draft.reply && !draft.subject.trim()) { error.value = '要写主题。'; return }
-  busy.value = true; error.value = ''; notice.value = ''
+  if (!to.length) { sendError.value = '至少填一个收件人。'; return }
+  if (!draft.body.trim()) { sendError.value = '正文不能为空。'; return }
+  if (!draft.reply && !draft.subject.trim()) { sendError.value = '要写主题。'; return }
+  if (unknown.value && !window.confirm('上一次发送结果未知，可能已经发出。确认在 Gmail 的“已发送”里没有这封信，再发一次吗？')) return
+  busy.value = true
   try {
-    const sent = await actions.send(account.value, {
+    const sent = await actions.send(account.id, {
       to, cc: split(draft.cc), bcc: split(draft.bcc), subject: draft.subject.trim(), body: draft.body,
-      ...(draft.reply ? { reply_to_message_id: draft.reply } : {}),
+      ...(draft.reply ? { reply_to_message_id: draft.reply.messageId } : {}),
     })
-    notice.value = `已发出：${sent.subject}`; compose.value = null
-    if (thread.value) await opened.refetch()
-  } catch (cause) { error.value = mailError(cause) } finally { busy.value = false }
+    notice.value = `已发出：${sent.subject}`
+    compose.value = null; unknown.value = false
+    if (draft.reply) await mail.refreshOpened()
+  } catch (cause) {
+    sendError.value = mailError(cause)
+    if (cause instanceof ApiError && ['TIMEOUT_UNKNOWN', 'WRITE_UNKNOWN'].includes(cause.code)) unknown.value = true
+  } finally { busy.value = false }
 }
-async function download(message: MailMessage, index: number) {
-  const attachment = message.attachments[index]
-  if (!attachment?.attachment_id) return
-  try { await downloadAttachment(scope, account.value, message.id, attachment) } catch (cause) { error.value = mailError(cause) }
-}
-const sendItems = computed(() => sends.data.value?.items ?? [])
+async function refresh() { notice.value = ''; await mail.refresh() }
+async function more() { if (list.hasNextPage.value && !list.isFetchingNextPage.value) await list.fetchNextPage() }
 </script>
 
 <template>
+  <header class="ws-header mx-header">
+    <div>
+      <h1>邮件</h1>
+      <p>统一查看全部邮箱，也可以按邮箱单独查看</p>
+    </div>
+    <div class="ws-actions">
+      <span v-if="accountList.length" class="ws-meta mx-sync"><span class="mx-live" aria-hidden="true" />{{ activeCount }} 个邮箱已连接<template v-if="syncedAt"> · 最近读取 {{ syncedAt }}</template></span>
+      <div class="ws-segment mx-tabs" role="tablist" aria-label="邮件页">
+        <button type="button" role="tab" :aria-selected="tab === 'mail'" @click="tab = 'mail'">邮件</button>
+        <button type="button" role="tab" :aria-selected="tab === 'sends'" @click="tab = 'sends'">发件记录</button>
+      </div>
+      <button v-if="tab === 'mail' && accountList.length" type="button" class="secondary-button" :disabled="list.isFetching.value" @click="refresh">
+        <RefreshCw aria-hidden="true" />{{ mail.accountId.value ? '刷新当前邮箱' : '刷新全部' }}
+      </button>
+      <RouterLink to="/settings/mail" class="secondary-button mx-manage"><Settings aria-hidden="true" />管理邮箱</RouterLink>
+    </div>
+  </header>
+
   <p v-if="accounts.isPending.value" role="status">正在加载邮箱…</p>
   <p v-else-if="accounts.error.value" role="alert">{{ mailError(accounts.error.value) }}</p>
-  <section v-else-if="!items.length" class="panel empty-state">还没有连接 Gmail 邮箱。到 <RouterLink to="/settings/mail">设置 → 邮件</RouterLink> 连接。</section>
+  <section v-else-if="!accountList.length" class="ws-panel ws-panel-body empty-state">还没有连接 Gmail 邮箱。到 <RouterLink to="/settings/mail">设置 → 邮件</RouterLink> 连接。</section>
   <template v-else>
-    <div class="section-heading mail-toolbar">
-      <label v-if="items.length > 1" class="form-field"><span>邮箱</span><select v-model="account"><option v-for="a in items" :key="a.id" :value="a.id">{{ a.email }}</option></select></label>
-      <p v-else class="form-help">邮箱：{{ current?.email }}</p>
-      <div class="form-actions" role="tablist" aria-label="邮件页">
-        <button type="button" role="tab" :aria-selected="tab === 'mail'" class="secondary-button" @click="tab = 'mail'">邮件</button>
-        <button type="button" role="tab" :aria-selected="tab === 'sends'" class="secondary-button" @click="tab = 'sends'">发件记录</button>
-        <button type="button" class="primary-button" :disabled="!current?.can_send || current?.status !== 'active'" @click="tab = 'mail'; write()">写邮件</button>
-      </div>
-    </div>
-    <p v-if="current?.status === 'needs_reconnect'" role="alert" class="feedback">这个邮箱的 Google 授权已失效，请到 <RouterLink to="/settings/mail">设置 → 邮件</RouterLink> 重新连接。</p>
-    <p v-if="error" role="alert" class="feedback">{{ error }}</p>
     <p v-if="notice" role="status" class="feedback">{{ notice }}</p>
-
-    <div v-if="tab === 'mail'" class="mail-layout">
-      <nav class="panel mail-labels" aria-label="邮件标签">
-        <button v-for="l in LABELS" :key="l.id" type="button" class="secondary-button" :aria-pressed="filters.label === l.id" @click="pick(l.id)">{{ l.name }}</button>
-        <button type="button" class="secondary-button" :aria-pressed="filters.label === ''" @click="pick('')">全部邮件</button>
-      </nav>
-      <section class="panel mail-list" aria-label="邮件列表">
-        <form class="mail-search" role="search" @submit.prevent="find">
-          <label class="form-field"><span>搜索（Gmail 搜索语法）</span><input v-model="search" type="search" maxlength="500" placeholder="from:alice@example.com is:unread newer_than:7d" /></label>
-          <button type="submit" class="secondary-button">搜索</button>
-        </form>
-        <p v-if="list.isPending.value" role="status">正在加载邮件…</p>
-        <p v-else-if="list.error.value" role="alert">{{ mailError(list.error.value) }}</p>
-        <p v-else-if="!list.data.value?.items.length" class="empty-state">没有邮件。</p>
-        <ul class="mail-items">
-          <li v-for="item in list.data.value?.items ?? []" :key="item.id">
-            <button type="button" class="mail-item" :class="{ unread: item.unread }" :aria-current="thread === item.thread_id" @click="open(item)">
-              <span class="mail-item-sender">{{ item.sender }}</span>
-              <span class="mail-item-subject">{{ item.subject || '（无主题）' }}</span>
-              <span class="mail-item-snippet">{{ item.snippet }}</span>
-              <span v-if="item.date" class="mail-item-date">{{ formatTime(item.date) }}</span>
-            </button>
-          </li>
-        </ul>
-        <div class="form-actions">
-          <button type="button" class="secondary-button" :disabled="!pages.length" @click="previous">上一页</button>
-          <button type="button" class="secondary-button" :disabled="!list.data.value?.next_page_token" @click="next">下一页</button>
-        </div>
-      </section>
-      <section class="panel mail-reader" aria-label="阅读">
-        <form v-if="compose" class="mail-form" aria-label="写邮件" @submit.prevent="send">
-          <h2>{{ compose.reply ? '回复' : '写邮件' }}</h2>
-          <label class="form-field"><span>收件人</span><input v-model="compose.to" placeholder="多个地址用逗号分隔" /></label>
-          <label class="form-field"><span>抄送</span><input v-model="compose.cc" /></label>
-          <label class="form-field"><span>密送</span><input v-model="compose.bcc" /></label>
-          <label class="form-field"><span>主题</span><input v-model="compose.subject" maxlength="200" :placeholder="compose.reply ? '不填就用原信的主题加 Re:' : ''" /></label>
-          <label class="form-field"><span>正文（纯文字）</span><textarea v-model="compose.body" rows="10" maxlength="20000" /></label>
-          <p class="form-help">正文里像是有令牌、密钥时不会发出。收件人合计最多 20 个。</p>
-          <div class="form-actions"><button type="submit" class="primary-button" :disabled="busy">发送</button><button type="button" class="secondary-button" @click="compose = null">取消</button></div>
-        </form>
-        <template v-else-if="thread">
-          <p v-if="opened.isPending.value" role="status">正在打开…</p>
-          <p v-else-if="opened.error.value" role="alert">{{ mailError(opened.error.value) }}</p>
-          <article v-for="message in messages" :key="message.id" class="mail-message" :aria-label="`邮件：${message.subject || '（无主题）'}`">
-            <h2>{{ message.subject || '（无主题）' }}</h2>
-            <dl class="mail-headers">
-              <div><dt>发件人</dt><dd>{{ message.sender }}</dd></div>
-              <div><dt>收件人</dt><dd>{{ message.to }}</dd></div>
-              <div v-if="message.cc"><dt>抄送</dt><dd>{{ message.cc }}</dd></div>
-              <div v-if="message.date"><dt>时间</dt><dd>{{ formatTime(message.date) }}</dd></div>
-            </dl>
-            <pre class="mail-body">{{ message.text }}</pre>
-            <p v-if="message.truncated" class="form-help">正文太长，只显示了前 20000 字，完整内容请在 Gmail 里看。</p>
-            <ul v-if="message.attachments.length" class="mail-attachments" aria-label="附件">
-              <li v-for="(a, index) in message.attachments" :key="index">
-                <span>{{ a.filename }}（{{ formatSize(a.size) }}）</span>
-                <button v-if="a.attachment_id" type="button" class="secondary-button" @click="download(message, index)">下载</button>
-              </li>
-            </ul>
-            <div class="form-actions"><button type="button" class="secondary-button" :disabled="!current?.can_send" @click="reply(message)">回复</button></div>
-          </article>
-        </template>
-        <p v-else class="empty-state">选一封邮件阅读。</p>
+    <MailSends v-if="tab === 'sends'" :scope="scope" />
+    <div v-else class="ws-panel mx-shell" :class="{ 'is-docked': docked }">
+      <AccountNavigation
+        :accounts="accountList" :states="mail.states.value" :unread="mail.unread.value" :account-id="mail.accountId.value" :label="mail.label.value" :can-write="sendable.length > 0"
+        @write="write" @account="mail.setAccount" @label="mail.setLabel"
+      />
+      <MailMessageList
+        :items="mail.items.value" :accounts="accountList" :current-id="mail.accountId.value" :label="mail.label.value" :filter="mail.filter.value" :query="mail.query.value"
+        :selected-key="selectedKey" :latest="mail.latest.value" :pending="pending" :error="listError" :has-more="list.hasNextPage.value"
+        :loading-more="list.isFetchingNextPage.value" :more-error="moreError"
+        @search="mail.search" @filter="mail.setFilter" @select="mail.select" @more="more" @back="mail.setAccount(null)" @reload="refresh"
+      />
+      <section v-if="docked" class="mx-reader-col" aria-label="阅读">
+        <MailComposer v-if="compose" ref="composer" :key="compose.key" :initial="compose.draft" :sendable="sendable" :busy="busy" :error="sendError" :unknown="unknown" @send="send" @cancel="closeReader" />
+        <MailReader v-else-if="mail.selected.value && owner" :scope="scope" :selected="mail.selected.value" :owner="owner" @reply="reply" />
+        <div v-else class="mx-reader-empty"><MailOpen aria-hidden="true" /><p>选一封邮件阅读。</p></div>
       </section>
     </div>
-
-    <section v-else class="panel" aria-label="发件记录">
-      <p class="form-help">经工作台发的信（人和智能体），不含正文。“结果未知”是 Gmail 没有及时响应：不会自动重发，请到 Gmail 的“已发送”里确认。</p>
-      <p v-if="sends.isPending.value" role="status">正在加载…</p>
-      <p v-else-if="sends.error.value" role="alert">{{ mailError(sends.error.value) }}</p>
-      <p v-else-if="!sendItems.length" class="empty-state">还没有发件记录。</p>
-      <table v-else class="agent-table mail-sends">
-        <thead><tr><th>时间</th><th>谁发的</th><th>收件人</th><th>主题</th><th>结果</th></tr></thead>
-        <tbody>
-          <tr v-for="s in sendItems" :key="s.id" :class="{ 'mail-unknown': s.status === 'unknown' }">
-            <td>{{ formatTime(s.created_at) }}</td>
-            <td>{{ s.actor_kind === 'instance' ? `智能体「${s.actor_name}」` : s.actor_name }}</td>
-            <td>{{ [...s.to, ...s.cc].join('、') }}<template v-if="s.bcc_count">（密送 {{ s.bcc_count }}）</template></td>
-            <td>{{ s.subject }}</td>
-            <td>{{ SEND_STATUS[s.status] }}<template v-if="s.error_code">（{{ s.error_code }}）</template></td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+    <Sheet v-if="tab === 'mail' && !docked" :open="!!compose || !!mail.selected.value" @update:open="(value: boolean) => { if (!value) closeReader() }">
+      <SheetContent side="right" class="mx-sheet w-full gap-0 p-0 sm:max-w-[680px]" :aria-describedby="undefined">
+        <SheetTitle class="sr-only">{{ compose ? '写邮件' : '阅读邮件' }}</SheetTitle>
+        <div class="mx-sheet-head"><button type="button" class="mx-link" @click="closeReader"><ArrowLeft aria-hidden="true" />返回列表</button></div>
+        <div class="mx-sheet-body">
+          <MailComposer v-if="compose" ref="composer" :key="compose.key" :initial="compose.draft" :sendable="sendable" :busy="busy" :error="sendError" :unknown="unknown" @send="send" @cancel="closeReader" />
+          <MailReader v-else-if="mail.selected.value && owner" :scope="scope" :selected="mail.selected.value" :owner="owner" @reply="reply" />
+        </div>
+      </SheetContent>
+    </Sheet>
   </template>
 </template>

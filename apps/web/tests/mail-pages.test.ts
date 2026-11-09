@@ -10,6 +10,8 @@ const account: Schema['MailAccountOut'] = { id: 'acc-1', email: 'owner.mail@gmai
 const settings: Schema['MailSettingsOut'] = { configured: true, client_id: '1234567890-fake.apps.googleusercontent.com', client_secret_set: true, redirect_uri: 'https://ws.example.test/api/v1/mail/oauth/callback', version: 1 }
 const summary = (over: Partial<Schema['MailSummary']> = {}): Schema['MailSummary'] => ({ id: 'm1', thread_id: 't1', sender: 'Alice <alice@example.com>', to: 'owner.mail@gmail.com', cc: '', subject: '合同', date: at, snippet: '请看附件', unread: true, labels: ['INBOX', 'UNREAD'], ...over })
 const message = (over: Partial<Schema['MailMessageOut']> = {}): Schema['MailMessageOut'] => ({ ...summary(), text: '第一行\n<script>alert(1)</script>', truncated: false, attachments: [{ attachment_id: 'att-1', filename: '报价.pdf', mime_type: 'application/pdf', size: 2048 }], ...over })
+const item = (over: Partial<Schema['MailAggregateItem']> = {}): Schema['MailAggregateItem'] => ({ ...summary(), account_id: 'acc-1', account_email: account.email, account_display_name: account.display_name, ...over })
+const state: Schema['MailAggregateAccount'] = { account_id: 'acc-1', email: account.email, display_name: account.display_name, status: 'ok', error_code: null, loaded: 2, exhausted: true, unread: 1, retry_at: null }
 const sent: Schema['MailSendOut'] = { id: 'send-1', account_id: 'acc-1', actor_kind: 'user', actor_name: 'Owner', sender: account.email, to: ['alice@example.com'], cc: [], bcc_count: 0, subject: 'Re: 合同', status: 'sent', error_code: null, gmail_message_id: 'g1', gmail_thread_id: 't1', created_at: at, finished_at: at }
 const owner = () => Response.json({ ...me, workspaces: [{ ...workspace, role: 'owner' }] })
 
@@ -22,7 +24,7 @@ function setup(handler?: (r: Request) => Response | undefined) {
     if (p === '/api/v1/mail/settings' && r.method === 'GET') return Response.json(settings)
     if (p === '/api/v1/mail/accounts' && r.method === 'GET') return Response.json({ items: [account] })
     if (p === '/api/v1/mail/agents' && r.method === 'GET') return Response.json({ items: [{ id: 'inst-a', name: '甲' }, { id: 'inst-b', name: '乙' }] })
-    if (p === '/api/v1/mail/accounts/acc-1/messages') return Response.json({ items: [summary(), summary({ id: 'm2', thread_id: 't2', subject: '周报', unread: false })], next_page_token: null, estimate: 2 })
+    if (p === '/api/v1/mail/messages') return Response.json({ items: [item(), item({ id: 'm2', thread_id: 't2', subject: '周报', unread: false })], accounts: [state], outcome: 'ok', partial: false, next_cursor: null, total_estimate: 2 })
     if (p === '/api/v1/mail/accounts/acc-1/threads/t1') return Response.json({ thread_id: 't1', messages: [message()] })
     if (p === '/api/v1/mail/sends') return Response.json({ items: [sent, { ...sent, id: 'send-2', actor_kind: 'instance', actor_name: '甲', status: 'unknown', error_code: 'TIMEOUT_UNKNOWN', subject: '进展' }] })
     return undefined
@@ -114,12 +116,15 @@ describe('mail page', () => {
     const mail = await screen.findByRole('article', { name: '邮件：合同' })
     expect(mail.querySelector('script')).toBeNull()
     expect(within(mail).getByText(/<script>alert\(1\)<\/script>/)).toBeVisible()
-    expect(within(mail).getByText('报价.pdf（2 KB）')).toBeVisible()
-    const listQuery = new URL(requests.find(r => path(r) === '/api/v1/mail/accounts/acc-1/messages')!.url).searchParams
-    expect(listQuery.get('label')).toBe('INBOX')
+    expect(within(mail).getByRole('button', { name: /报价\.pdf · 2 KB/ })).toBeVisible()
+    // 默认全部邮箱 + 全部邮件：聚合接口不带邮箱、不带标签
+    const listQuery = new URL(requests.find(r => path(r) === '/api/v1/mail/messages')!.url).searchParams
+    expect([...listQuery.keys()]).toEqual([])
+    expect(requests.some(r => path(r) === '/api/v1/mail/accounts/acc-1/threads/t1')).toBe(true)
 
     await fireEvent.click(within(mail).getByRole('button', { name: '回复' }))
     const form = await screen.findByRole('form', { name: '写邮件' })
+    expect(within(form).getByLabelText('发信邮箱')).toHaveValue('acc-1')
     expect(within(form).getByLabelText('收件人')).toHaveValue('alice@example.com')
     await fireEvent.update(within(form).getByLabelText('正文（纯文字）'), '收到，谢谢')
     await fireEvent.click(within(form).getByRole('button', { name: '发送' }))
@@ -135,6 +140,9 @@ describe('mail page', () => {
     await openApp('/mail')
     await fireEvent.click(await screen.findByRole('button', { name: '写邮件' }))
     const form = await screen.findByRole('form', { name: '写邮件' })
+    // 全部邮箱视图写信：发信邮箱没有默认值，要自己选
+    expect(within(form).getByLabelText('发信邮箱')).toHaveValue('')
+    await fireEvent.update(within(form).getByLabelText('发信邮箱'), 'acc-1')
     await fireEvent.update(within(form).getByLabelText('收件人'), 'a@example.com, b@example.com')
     await fireEvent.update(within(form).getByLabelText('主题'), '通知')
     await fireEvent.update(within(form).getByLabelText('正文（纯文字）'), '正文')
