@@ -1,0 +1,157 @@
+/* 开发者页（T-0176，二批四页改造效果图 03）。通用的页头、面板、表格、状态标签在 workspace-pages.css；
+   这里只放开发者页自己的布局。颜色都取主题变量（亮 / 暗主题自动跟随），状态同时有图标与文字。 */
+
+/* 同步状态条 */
+.dv-banner { --tone: var(--success); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 16px; border-radius: 10px; font-size: .9rem;
+  border: 1px solid color-mix(in srgb, var(--tone) 35%, var(--line)); background: color-mix(in srgb, var(--tone) 8%, var(--surface)); }
+.dv-banner > svg { flex: none; width: 18px; height: 18px; color: var(--tone); }
+.dv-banner p { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+.dv-banner.tone-warning { --tone: var(--warning); }
+.dv-banner.tone-danger { --tone: var(--danger); }
+.dv-banner.tone-muted { --tone: var(--muted); }
+.dv-banner-link { color: var(--accent); font-weight: 600; white-space: nowrap; }
+
+/* 统计四卡（已同步范围） */
+.dv-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.dv-stat { --tone: var(--accent); display: flex; align-items: center; gap: 14px; min-width: 0; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line); box-shadow: var(--shadow);
+  background: linear-gradient(120deg, var(--surface) 35%, color-mix(in srgb, var(--tone) 9%, var(--surface))); }
+.dv-stat.tone-blue { --tone: var(--accent); }
+.dv-stat.tone-indigo { --tone: var(--chart-1); }
+.dv-stat.tone-amber { --tone: var(--chart-4); }
+.dv-stat.tone-red { --tone: var(--danger); }
+.dv-stat-icon { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: color-mix(in srgb, var(--tone) 14%, var(--surface)); color: var(--tone); }
+.dv-stat-icon svg { width: 22px; height: 22px; }
+.dv-stat-text { display: grid; gap: 2px; min-width: 0; }
+.dv-stat-label { font-size: .88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dv-stat-value { font-size: 1.55rem; line-height: 1.15; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dv-stat-note { font-size: .74rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dv-scope { color: var(--muted); font-size: .82rem; margin: 8px 2px 12px; line-height: 1.5; }
+
+/* 四个标签 */
+.dv-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 14px; overflow-x: auto; scrollbar-width: none; }
+.dv-tabs button { flex: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; padding: 10px 16px; color: var(--muted); font-size: .92rem; font-weight: 600; white-space: nowrap; }
+.dv-tabs button:hover { color: var(--text); }
+.dv-tabs button[aria-pressed="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* 工具栏 */
+.dv-toolbar { margin-bottom: 14px; }
+.dv-select select { min-width: 140px; max-width: 240px; }
+
+/* 主区 + 侧栏：≥1440 并排；1024–1439 侧栏移到下方两列；更窄单列 */
+.dv-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 400px); gap: 16px; align-items: start; }
+.dv-main, .dv-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (max-width: 1439px) {
+  .dv-layout { grid-template-columns: minmax(0, 1fr); }
+  .dv-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+}
+@media (max-width: 1023px) { .dv-side { grid-template-columns: minmax(0, 1fr); } }
+
+/* 面板 */
+.dv-panel { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dv-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
+.dv-panel-head h2 { display: inline-flex; align-items: center; gap: 8px; font-size: 1.05rem; font-weight: 700; overflow-wrap: anywhere; }
+.dv-panel-head h2 svg { width: 18px; height: 18px; color: var(--muted); }
+.dv-note { display: flex; gap: 6px; align-items: flex-start; color: var(--muted); font-size: .8rem; line-height: 1.5; }
+.dv-note svg { flex: none; width: 15px; height: 15px; margin-top: 2px; }
+.dv-muted { color: var(--muted); }
+.dv-sub { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+.dv-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.dv-empty > svg { width: 22px; height: 22px; color: var(--muted); }
+.dv-empty a, .dv-link { color: var(--accent); font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.dv-link svg { width: 16px; height: 16px; }
+.dv-error { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.dv-more { display: flex; justify-content: center; padding-top: 4px; }
+
+/* 状态标签的色调（ws-state 用 --tone） */
+.ws-state.dv-tone-success { --tone: var(--success); }
+.ws-state.dv-tone-danger { --tone: var(--danger); }
+.ws-state.dv-tone-warning { --tone: var(--warning); }
+.ws-state.dv-tone-accent { --tone: var(--accent); }
+.ws-state.dv-tone-muted { --tone: var(--muted); }
+
+/* 仓库表 */
+.dv-repos { container-type: inline-size; }
+.dv-table .dv-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dv-table tbody tr:last-child td { border-bottom: 0; }
+.dv-repo { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.dv-repo-icon { flex: none; width: 18px; height: 18px; margin-top: 2px; color: var(--muted); }
+.dv-repo-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dv-repo-name { border: 0; padding: 0; background: none; color: var(--text); font-weight: 600; text-align: left; overflow-wrap: anywhere; }
+.dv-repo-name:hover { color: var(--accent); }
+.dv-repo-desc { color: var(--muted); font-size: .78rem; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.dv-repo-warn, .dv-repo-flag { display: inline-flex; align-items: center; gap: 4px; font-size: .76rem; }
+.dv-repo-warn { color: var(--warning); }
+.dv-repo-flag { color: var(--muted); }
+.dv-repo-warn svg, .dv-repo-flag svg { width: 13px; height: 13px; }
+.dv-col-run { white-space: nowrap; }
+.dv-cell-note { display: block; margin-top: 3px; color: var(--muted); font-size: .74rem; }
+.dv-col-time { color: var(--muted); white-space: nowrap; font-size: .84rem; }
+@container (max-width: 620px) { .dv-table .dv-col-time { display: none; } }
+@container (max-width: 440px) {
+  .dv-table thead th, .dv-table tbody td { padding-left: 8px; padding-right: 8px; }
+  .dv-repo-icon, .dv-repo-desc { display: none; }
+  .dv-table .dv-col-run { white-space: normal; }
+  .dv-table thead th { white-space: normal; }
+}
+
+/* 开放 PR */
+.dv-pulls { list-style: none; margin: 0; padding: 0; container-type: inline-size; }
+.dv-pull { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(90px, auto) auto; align-items: center; gap: 6px 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.dv-pull:last-child { border-bottom: 0; }
+.dv-pull-icon { width: 18px; height: 18px; color: var(--muted); }
+.dv-pull-main { min-width: 0; display: grid; gap: 2px; }
+.dv-pull-title { font-weight: 600; overflow-wrap: anywhere; }
+.dv-pull-meta { display: grid; gap: 2px; color: var(--muted); font-size: .8rem; }
+.dv-pull .external-link { white-space: nowrap; font-size: .86rem; color: var(--accent); }
+@container (max-width: 640px) {
+  .dv-pull { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .dv-pull-meta { grid-column: 2 / -1; grid-template-columns: auto auto; justify-content: start; gap: 10px; }
+  .dv-pull .external-link { grid-column: 2 / -1; }
+}
+
+/* 最近更新 */
+.dv-recent { list-style: none; margin: 0; padding: 0 0 0 4px; position: relative; display: grid; gap: 12px; }
+.dv-recent::before { content: ""; position: absolute; left: 9px; top: 10px; bottom: 10px; width: 1px; background: var(--line); }
+.dv-recent li { position: relative; display: flex; align-items: flex-start; gap: 12px; min-width: 0; flex-wrap: wrap; }
+.dv-recent-dot { flex: none; position: relative; z-index: 1; width: 11px; height: 11px; margin-top: 5px; border-radius: 50%; border: 2px solid var(--muted); background: var(--surface); }
+.dv-recent li:first-child .dv-recent-dot { border-color: var(--accent); background: var(--accent); }
+.dv-recent-main { flex: 1 1 220px; min-width: 0; display: grid; gap: 2px; }
+.dv-recent-title { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+a.dv-recent-title:hover { color: var(--accent); }
+.dv-recent-time { margin-left: auto; color: var(--muted); font-size: .8rem; white-space: nowrap; }
+
+/* 失败运行 */
+.dv-run { display: grid; gap: 8px; }
+.dv-run-title { margin: 0 !important; white-space: normal !important; font-weight: 600; }
+.dv-run-facts { font-size: .86rem; }
+.dv-steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.dv-run code { font-size: .82rem; }
+.dv-run .external-link { color: var(--accent); font-weight: 600; font-size: .88rem; }
+
+/* 权限快照 */
+.dv-checks { list-style: none; margin: 0; padding: 0; }
+.dv-checks li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; padding: 9px 2px; border-bottom: 1px solid var(--line); }
+.dv-checks li:last-child { border-bottom: 0; }
+.dv-check-name { font-size: .92rem; }
+.dv-check-detail { grid-column: 1 / -1; color: var(--danger); font-size: .78rem; }
+.dv-permissions-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+
+/* 同步状态 */
+.dv-sync .ws-facts { font-size: .86rem; }
+
+/* 其余三个标签的筛选 */
+.dv-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; margin-bottom: 12px; }
+.dv-filters label { display: grid; gap: 6px; font-size: .86rem; color: var(--muted); }
+
+@media (max-width: 1100px) { .dv-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
+  .dv-stats { gap: 10px; }
+  .dv-stat { padding: 12px; gap: 10px; }
+  .dv-stat-icon { width: 36px; height: 36px; border-radius: 10px; }
+  .dv-stat-icon svg { width: 18px; height: 18px; }
+  .dv-stat-value { font-size: 1.3rem; }
+  .dv-stat-note { white-space: normal; }
+  .dv-select { flex: 1 1 calc(50% - 10px); }
+  .dv-select select { width: 100%; max-width: none; min-width: 0; }
+  .dv-panel { padding: 12px; }
+}
