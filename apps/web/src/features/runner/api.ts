@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError, dataOf, type Schema } from '../../services/api'
 
-// 运行服务器页（T-0140，RUNNER_PLAN 第 11 节，owner / admin）：总览、环境、模板、运行记录、设置。
+// 容器服务器页（原“运行服务器”，T-0140；改版 T-0186 / T-0187，docs/v2/container-server-redesign，owner / admin）：
+// 容器总览、智能体用量、环境模板、执行记录、服务器设置。地址与接口仍是 /runner、/api/v1/runner（只改用户看到的名称）。
 // 查询的 key 以 'runner' 开头；写操作之后刷新全部 'runner' 查询与实例卡片（'agents'）。
 // /api/v1/runner/* 不会自动带 X-Workspace-Id，每次请求都显式传。
 export type RunnerEnv = Schema['RunnerEnvAdminOut']
@@ -23,11 +24,30 @@ export function useRunnerOverview(scope: string) {
     queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/runner/overview', { params: { header: c.header }, signal })) })
 }
 
-export type EnvFilter = { state?: RunnerEnv['state']; lifetime?: RunnerEnv['lifetime']; instance_id?: string; include_deleted?: boolean }
+// 列表的筛选、排序与分页都在服务端做（T-0185）：q 搜用途或环境 ID，sort 按最近使用 / 实时 CPU / 实时内存，
+// cursor 是上一页给的游标，limit 新页面传 50（缺省 500 是给旧页面兼容的）
+export type EnvSort = 'last_used' | 'cpu' | 'memory'
+export type EnvFilter = {
+  state?: RunnerEnv['state']; lifetime?: RunnerEnv['lifetime']; instance_id?: string; include_deleted?: boolean
+  q?: string; sort?: EnvSort; cursor?: string; limit?: number
+}
+/** 写在地址里的筛选（不含分页） */
+export type EnvFilters = Omit<EnvFilter, 'cursor' | 'limit'>
 export function useRunnerEnvironments(scope: string, filter: Ref<EnvFilter>) {
   const c = context(scope)
   return useQuery({ queryKey: computed(() => ['runner', c.user, scope, 'environments', filter.value]), enabled: c.enabled, refetchInterval: 30_000,
-    queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/runner/environments', { params: { header: c.header, query: clean(filter.value) }, signal })) })
+    queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/runner/environments', { params: { header: c.header, query: clean({ ...filter.value, sort: filter.value.sort === 'last_used' ? undefined : filter.value.sort }) }, signal })) })
+}
+
+// 一个环境的详情（T-0185 的 GET /runner/environments/{id}）：不在当前筛选里也能按 ID 读；404 / 403 时不保留旧内容
+export function useRunnerEnvironment(scope: string, environmentId: Ref<string | null>) {
+  const c = context(scope)
+  return useQuery({
+    queryKey: computed(() => ['runner', c.user, scope, 'environment', environmentId.value]),
+    enabled: computed(() => c.enabled.value && !!environmentId.value), refetchInterval: 30_000,
+    retry: (count, error) => !(error instanceof ApiError && [403, 404].includes(error.status)) && count < 2,
+    queryFn: async ({ signal }) => dataOf(await c.auth.api.GET('/api/v1/runner/environments/{environment_id}', { params: { header: c.header, path: { environment_id: environmentId.value! } }, signal })),
+  })
 }
 
 export function useRunnerTemplates(scope: string) {
@@ -75,15 +95,15 @@ export function runnerError(error: unknown): string {
   if (!(error instanceof ApiError)) return '请求失败，请稍后重试。'
   const messages: Record<string, string> = {
     VERSION_CONFLICT: '已被其他人修改，请刷新后再操作。',
-    RUNNER_EXISTS: '这个工作空间已经有一台运行服务器了。',
-    RUNNER_HAS_ENVIRONMENTS: '还有没删除的环境：先在“环境”里删除，再移除运行服务器。',
-    AGENT_INGRESS_NOT_CONFIGURED: '这个入口还没有配置（AGENT_INTRANET_URL / AGENT_PUBLIC_URL），不能接入运行服务器。',
+    RUNNER_EXISTS: '这个工作空间已经有一台容器服务器了。',
+    RUNNER_HAS_ENVIRONMENTS: '还有没删除的环境：先在“容器总览”里删除，再移除容器服务器。',
+    AGENT_INGRESS_NOT_CONFIGURED: '这个入口还没有配置（AGENT_INTRANET_URL / AGENT_PUBLIC_URL），不能接入容器服务器。',
     ENV_UNAVAILABLE: error.message || '环境现在的状态做不了这个操作。',
     SNAPSHOT_NOT_FOUND: '这个环境没有可用的快照了，不能恢复。',
-    RUNNER_UNAVAILABLE: '运行服务器不在线。',
+    RUNNER_UNAVAILABLE: '容器服务器不在线。',
     TEMPLATE_NOT_READY: '模板还没有构建好。',
     VALIDATION_FAILED: error.message || '输入不符合要求，请检查后重试。',
-    FORBIDDEN: '只有 owner / admin 能管理运行服务器。',
+    FORBIDDEN: '只有 owner / admin 能管理容器服务器。',
     NOT_FOUND: '记录不存在，或你已无权访问。',
     WRITE_UNKNOWN: '连接中断，结果未知：已刷新，请看最新状态再决定要不要重试。',
   }
@@ -163,7 +183,7 @@ function csrf() {
   try { return value ? decodeURIComponent(value) : '' } catch { return '' }
 }
 
-// 接入包是 zip（运行服务器凭证只出现在这一次下载里），用 fetch 下载交给浏览器
+// 接入包是 zip（容器服务器凭证只出现在这一次下载里），用 fetch 下载交给浏览器
 export async function downloadRunnerBundle(scope: string): Promise<string> {
   let response: Response
   try {

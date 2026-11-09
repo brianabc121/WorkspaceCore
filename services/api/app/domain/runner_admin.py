@@ -6,19 +6,24 @@
 - 实例卡片上的“运行环境权限”：开关、限额；关掉时停止它所有运行中的环境。
 """
 
+import base64
+import binascii
+import hashlib
+import json
 import math
 import uuid
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from redis.asyncio import Redis
-from sqlalchemy import func, select
+from sqlalchemy import Text, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import runner_bundle
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import notifications, runner_reclaim
+from app.domain import notifications, runner_metrics, runner_reclaim
 from app.domain import runner_specs as specs
 from app.domain.audit import AuditTrail
 from app.domain.policy import WorkspaceAccess, not_found
@@ -77,7 +82,7 @@ class RunnerAdmin:
     async def _host(self, access: WorkspaceAccess) -> RunnerHost:
         host = await self.runner.host(access.workspace.id)
         if host is None:
-            raise ApiError(404, "NOT_FOUND", "还没有添加运行服务器")
+            raise ApiError(404, "NOT_FOUND", "还没有添加容器服务器")
         return host
 
     async def create_host(self, access: WorkspaceAccess, body: RunnerHostCreate) -> RunnerHostOut:
@@ -248,6 +253,9 @@ class RunnerAdmin:
         conditions: dict[uuid.UUID, list[str]],
         policy: dict[str, float],
         score: float | None = None,
+        *,
+        host: RunnerHost | None = None,
+        now: datetime | None = None,
     ) -> RunnerEnvAdminOut:
         base = await self.runner.env_out(
             env, viewer, names=names, templates=templates, conditions=conditions, policy=policy
@@ -270,6 +278,7 @@ class RunnerAdmin:
             deleted_at=env.deleted_at,
             delete_after=env.delete_after,
             version=env.version,
+            metrics=runner_metrics.environment_metrics(env, host, now=now or specs.now()),
         )
 
     async def _outs(
@@ -291,9 +300,18 @@ class RunnerAdmin:
         policy = specs.policy_for(host.policy if host else None)
         live = [e for e in envs if e.state in ("running", "stopped")]
         ranked = await runner_reclaim.scores(self.db, live, policy) if live else {}
+        now = specs.now()
         return [
             await self._env_admin_out(
-                e, viewer, names, templates, conditions, policy, ranked.get(e.id)
+                e,
+                viewer,
+                names,
+                templates,
+                conditions,
+                policy,
+                ranked.get(e.id),
+                host=host,
+                now=now,
             )
             for e in envs
         ]
@@ -306,22 +324,82 @@ class RunnerAdmin:
         instance_id: uuid.UUID | None,
         lifetime: str | None,
         include_deleted: bool,
+        q: str | None = None,
+        sort: Literal["last_used", "cpu", "memory"] = "last_used",
+        cursor: str | None = None,
+        limit: int = 500,
     ) -> RunnerEnvAdminList:
-        stmt = select(RunnerEnvironment).where(
-            RunnerEnvironment.workspace_id == access.workspace.id
-        )
+        """环境列表（T-0185 加服务端搜索、排序与分页）。
+
+        只读本地记录，不连 Docker / SSH。total 是同样筛选条件（不含分页）下的全部匹配数；
+        游标绑定工作空间、全部筛选、排序与每页条数，换了任何一项旧游标返回 422。
+        按 CPU / 内存排序只看实时（与 metrics 的 ok 同一个判断）的读数，过期、未知、未运行排在最后；
+        同分按 UUID 升序，翻页时不重不漏（读数在两次请求之间变化时不承诺冻结的快照）。
+        """
+        workspace_id = access.workspace.id
+        where: list[Any] = [RunnerEnvironment.workspace_id == workspace_id]
         if state:
-            stmt = stmt.where(RunnerEnvironment.state == state)
+            where.append(RunnerEnvironment.state == state)
         elif not include_deleted:
-            stmt = stmt.where(RunnerEnvironment.state != "deleted")
+            where.append(RunnerEnvironment.state != "deleted")
         if instance_id:
-            stmt = stmt.where(RunnerEnvironment.owner_instance_id == instance_id)
+            where.append(RunnerEnvironment.owner_instance_id == instance_id)
         if lifetime:
-            stmt = stmt.where(RunnerEnvironment.lifetime == lifetime)
-        envs = list(
-            await self.db.scalars(stmt.order_by(RunnerEnvironment.last_used_at.desc()).limit(500))
+            where.append(RunnerEnvironment.lifetime == lifetime)
+        text = (q or "").strip()
+        if text:
+            pattern = f"%{_escape_like(text)}%"
+            where.append(
+                or_(
+                    RunnerEnvironment.purpose.ilike(pattern, escape="\\"),
+                    cast(RunnerEnvironment.id, Text).ilike(pattern, escape="\\"),
+                )
+            )
+        key = _scope_key(
+            workspace_id, state, instance_id, lifetime, include_deleted, text, sort, limit
         )
-        return RunnerEnvAdminList(items=await self._outs(access, envs))
+        offset = _decode_cursor(cursor, key)
+        total = int(
+            await self.db.scalar(select(func.count()).select_from(RunnerEnvironment).where(*where))
+            or 0
+        )
+        host = await self.runner.host(workspace_id)
+        now = specs.now()
+        if sort == "cpu":
+            order = [runner_metrics.cpu_sort_key(host, now).desc().nulls_last()]
+        elif sort == "memory":
+            order = [runner_metrics.memory_sort_key(host, now).desc().nulls_last()]
+        else:
+            order = [RunnerEnvironment.last_used_at.desc()]
+        envs = list(
+            await self.db.scalars(
+                select(RunnerEnvironment)
+                .where(*where)
+                .order_by(*order, RunnerEnvironment.id.asc())
+                .offset(offset)
+                .limit(limit)
+            )
+        )
+        end = offset + len(envs)
+        return RunnerEnvAdminList(
+            items=await self._outs(access, envs),
+            total=total,
+            next_cursor=_encode_cursor(end, key) if envs and end < total else None,
+        )
+
+    async def environment(
+        self, access: WorkspaceAccess, environment_id: uuid.UUID
+    ) -> RunnerEnvAdminOut:
+        """一个环境的详情（T-0185）：不在当前列表筛选里也能按 ID 读；跨工作空间、不存在都是 404。"""
+        env = await self.db.scalar(
+            select(RunnerEnvironment).where(
+                RunnerEnvironment.id == environment_id,
+                RunnerEnvironment.workspace_id == access.workspace.id,
+            )
+        )
+        if env is None:
+            raise not_found()
+        return (await self._outs(access, [env]))[0]
 
     async def env_action(
         self, access: WorkspaceAccess, env_id: uuid.UUID, body: RunnerEnvAction
@@ -631,10 +709,54 @@ class RunnerAdmin:
                     type_="runner.instance_enabled",
                     severity="warning",
                     title=f"智能体「{instance.name}」获得了运行环境权限",
-                    body="它可以在运行服务器上建、用、停、删自己的容器环境（例外八）",
+                    body="它可以在容器服务器上建、用、停、删自己的容器环境（例外八）",
                     link="/agents",
                     key=f"{instance.id}:{instance.version}",
                 )
         await self.db.commit()
         await self.db.refresh(instance)
         return await self._runner_out(instance)
+
+
+# ---------------------------------------------------------------- 环境列表的游标（T-0185）
+
+
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _bad_cursor() -> ApiError:
+    return ApiError(
+        422,
+        "VALIDATION_FAILED",
+        "请求参数校验失败",
+        details={
+            "errors": [{"loc": ["query", "cursor"], "msg": "游标无效", "type": "value_error"}]
+        },
+    )
+
+
+def _scope_key(*parts: object) -> str:
+    """游标绑定的范围：工作空间、全部筛选、排序与每页条数；换了任何一项旧游标都不能用。"""
+    raw = "\x1f".join("" if part is None else str(part) for part in parts)
+    return hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+
+def _encode_cursor(offset: int, key: str) -> str:
+    raw = json.dumps({"o": offset, "k": key}, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_cursor(cursor: str | None, key: str) -> int:
+    if not cursor:
+        return 0
+    try:
+        data = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+    except (ValueError, binascii.Error):
+        raise _bad_cursor() from None
+    if not isinstance(data, dict) or data.get("k") != key:
+        raise _bad_cursor()
+    offset = data.get("o")
+    if not isinstance(offset, int) or isinstance(offset, bool) or not 0 <= offset <= 1_000_000:
+        raise _bad_cursor()
+    return offset

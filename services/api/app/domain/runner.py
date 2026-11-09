@@ -149,15 +149,15 @@ class Runner:
         if host is None:
             raise RunnerError(
                 "RUNNER_UNAVAILABLE",
-                "工作空间还没有运行服务器（管理员在 智能体 → 运行服务器 里添加）",
+                "工作空间还没有容器服务器（管理员在“容器服务器”页添加）",
             )
         if host.status == "disabled":
-            raise RunnerError("RUNNER_UNAVAILABLE", "运行服务器已停用")
+            raise RunnerError("RUNNER_UNAVAILABLE", "容器服务器已停用")
         fresh = host.last_seen_at is not None and host.last_seen_at > specs.now() - timedelta(
             seconds=ONLINE_SECONDS
         )
         if not fresh:
-            raise RunnerError("RUNNER_UNAVAILABLE", "运行服务器不在线，稍后再试；管理员会收到告警")
+            raise RunnerError("RUNNER_UNAVAILABLE", "容器服务器不在线，稍后再试；管理员会收到告警")
         return host
 
     def enqueue(
@@ -557,7 +557,7 @@ class Runner:
                 "QUOTA_EXCEEDED", f"磁盘合计会超过你的限额（{int(limits['disk_gb'])} GB）"
             )
         if spec["runtime"] == "gvisor" and host.runtimes and "runsc" not in host.runtimes:
-            raise RunnerError("RUNNER_CAPABILITY", "运行服务器没有装 gVisor（runsc）；可以换 runc")
+            raise RunnerError("RUNNER_CAPABILITY", "容器服务器没有装 gVisor（runsc）；可以换 runc")
         if spec["runtime"] == "kvm" and not host.kvm:
             raise RunnerError(
                 "RUNNER_CAPABILITY",
@@ -568,7 +568,7 @@ class Runner:
         total = int((host.report or {}).get("disk_bytes") or host.disk_bytes or 0)
         free = int((host.report or {}).get("disk_free_bytes") or host.disk_free_bytes or 0)
         if total and 1 - free / total > policy["disk_emergency"]:
-            raise RunnerError("RESOURCE_BUSY", "运行服务器磁盘告急，暂停新建环境；稍后再试")
+            raise RunnerError("RESOURCE_BUSY", "容器服务器磁盘告急，暂停新建环境；稍后再试")
         # 整台服务器：内存按上限累计，不超卖（留 10% 给系统）
         if host.mem_bytes:
             used = await self.db.scalars(
@@ -588,7 +588,7 @@ class Runner:
                     await self.db.commit()
                     raise RunnerError(
                         "RESOURCE_BUSY",
-                        f"运行服务器内存不够：已按保留分停止 {stopped} 个空闲环境，约 30 秒后再试",
+                        f"容器服务器内存不够：已按保留分停止 {stopped} 个空闲环境，约 30 秒后再试",
                     )
                 raise RunnerError(
                     "RESOURCE_BUSY", "运行服务器的内存已经分配满了；稍后再试，或调小 memory_mb"
@@ -894,7 +894,7 @@ class Runner:
             raise RunnerError("ENV_UNAVAILABLE", f"环境现在是 {env.state}，不能执行")
         host = await self.db.get(RunnerHost, env.host_id)
         if host is None:
-            raise RunnerError("RUNNER_UNAVAILABLE", "运行服务器已移除")
+            raise RunnerError("RUNNER_UNAVAILABLE", "容器服务器已移除")
         extra = 0
         if env.state == "archived":
             # 归档的环境按配置记录重建（恢复快照、重放初始化步骤），exec 排在重建之后
@@ -1131,9 +1131,9 @@ class Runner:
         await self.db.commit()
         done = await self.wait_command(command.id, specs.SYNC_WAIT_SECONDS)
         if done is None:
-            raise RunnerError("TIMEOUT", "运行服务器没有及时响应，稍后再试")
+            raise RunnerError("TIMEOUT", "容器服务器没有及时响应，稍后再试")
         if done.status != "done":
-            raise RunnerError("RUNNER_FAILED", done.error or "运行服务器执行失败")
+            raise RunnerError("RUNNER_FAILED", done.error or "容器服务器执行失败")
         result = done.result
         if body.action == "write":
             return EnvFilesOutput(written=True, size=int(result.get("size", 0)))
@@ -1413,7 +1413,9 @@ class Runner:
         elif kind == "archive_env" and env is not None and ok:
             env.state = "archived"
             env.archived_at = specs.now()
-            env.mem_bytes = None
+            # 容器与数据卷都删了：现时读数一并清空（快照大小另记在 snapshot_bytes）
+            env.mem_bytes = env.mem_reported_at = None
+            env.cpu_used_cores = env.cpu_window_seconds = env.cpu_reported_at = None
         elif kind == "exec" and command.run_id is not None:
             await self._finish_run(command, ok, result, error, env)
         elif kind == "snapshot" and env is not None:

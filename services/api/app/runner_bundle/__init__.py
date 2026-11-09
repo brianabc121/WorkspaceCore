@@ -27,7 +27,17 @@ AGENT_IMAGE = (
     "python:3.12.15-slim-trixie"
     "@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704"
 )
-AGENT_MODULES = ("__init__", "__main__", "agent", "client", "containers", "docker", "proxy")
+# runner-agent 的全部模块：新增模块要加在这里，否则接入包里缺文件、agent 起不来（有测试）
+AGENT_MODULES = (
+    "__init__",
+    "__main__",
+    "agent",
+    "client",
+    "containers",
+    "docker",
+    "metrics",
+    "proxy",
+)
 _FILES = resources.files("app.runner_bundle") / "files"
 _AGENT = resources.files("app.runner_agent")
 _DOCKER = resources.files("app.agent_provisioning") / "files" / "install-docker.sh"

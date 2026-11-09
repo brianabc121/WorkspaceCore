@@ -292,6 +292,48 @@ def _bundle_compose(**extra: Any) -> str:
         return zf.read("myworkspace-runner/compose.yaml").decode()
 
 
+def test_bundle_carries_every_agent_module(tmp_path: Any) -> None:
+    """接入包要带上 runner-agent 的全部模块，解压后只靠包里的代码就能导入。
+
+    漏打包时服务器上的 agent 一启动就导入失败、永远不上线（容器服务器改版时漏过 metrics.py）。
+    """
+    import subprocess
+    import sys
+    import zipfile
+    from importlib import resources
+
+    from app import runner_bundle
+
+    package = {
+        p.name.removesuffix(".py")
+        for p in resources.files("app.runner_agent").iterdir()
+        if p.name.endswith(".py")
+    }
+    assert package == set(runner_bundle.AGENT_MODULES)
+
+    data = runner_bundle.build(
+        runner_bundle.RunnerBundleInput(
+            host_name="runner-1",
+            url="https://agent-gateway.myworkspace.internal:9443",
+            token="mwr_x",  # noqa: S106 - 测试值
+            block=[],
+        )
+    )
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        zf.extractall(tmp_path)  # noqa: S202 - 刚由 build() 生成的包
+    agent_dir = tmp_path / "myworkspace-runner" / "agent"
+    # -I：不读环境变量、不把当前目录放进路径，只用解压出来的代码（和容器里一样只用标准库）
+    code = f"import sys; sys.path.insert(0, {str(agent_dir)!r}); import runner_agent.agent"
+    result = subprocess.run(  # noqa: S603 - 固定参数
+        [sys.executable, "-I", "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_bundle_maps_ingress_host_without_dns() -> None:
     """外网入口没有域名（内部主机名 + 工作台地址，T-0088）：容器里把主机名指向工作台。"""
     mapped = _bundle_compose(address="203.0.113.7")

@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import notifications
+from app.domain import notifications, runner_metrics
 from app.domain import runner_specs as specs
 from app.domain.agent_ca import ensure_ca, issue_certificate
 from app.domain.agents import agent_secret_context, normalize_fingerprint
@@ -191,7 +191,7 @@ class RunnerHosts:
         self, workspace_id: uuid.UUID, body: RunnerHostCreate, actor_id: uuid.UUID | None
     ) -> tuple[RunnerHost, str]:
         if await self.get(workspace_id) is not None:
-            raise ApiError(409, "RUNNER_EXISTS", "这个工作空间已经有运行服务器（V1 只支持一台）")
+            raise ApiError(409, "RUNNER_EXISTS", "这个工作空间已经有容器服务器（V1 只支持一台）")
         token = new_token()
         host = RunnerHost(
             id=uuid.uuid4(),
@@ -258,7 +258,7 @@ class RunnerHosts:
 
     async def remove(self, host: RunnerHost, actor_id: uuid.UUID | None, version: int) -> None:
         if host.version != version:
-            raise ApiError(409, "VERSION_CONFLICT", "运行服务器已被修改，请刷新后重试")
+            raise ApiError(409, "VERSION_CONFLICT", "容器服务器已被修改，请刷新后重试")
         live = await self.db.scalar(
             select(RunnerEnvironment.id)
             .where(
@@ -271,7 +271,7 @@ class RunnerHosts:
             raise ApiError(
                 409,
                 "RUNNER_HAS_ENVIRONMENTS",
-                "还有没删除的环境；先在“环境”里删掉（或归档），再移除运行服务器",
+                "还有没删除的环境；先在“环境”里删掉（或归档），再移除容器服务器",
             )
         await self.audit.record(
             "runner.host_removed",
@@ -375,7 +375,7 @@ class RunnerHosts:
                 host.workspace_id,
                 type_="runner.host_online",
                 severity="info",
-                title=f"运行服务器「{host.name}」恢复在线",
+                title=f"容器服务器「{host.name}」恢复在线",
                 body="已重新连上工作台",
                 link="/runner",
                 key=f"{host.id}:online:{specs.now():%Y%m%d%H%M}",
@@ -432,7 +432,8 @@ class RunnerHosts:
         return True
 
     async def report(self, host: RunnerHost, body: RunnerReport) -> RunnerReportResult:
-        host.last_seen_at = specs.now()
+        received = specs.now()  # 这份报告里各项读数的“平台收到时间”（不信 agent 的时钟）
+        host.last_seen_at = received
         host.report = {
             "containers": len(body.containers),
             "volumes": len(body.volumes),
@@ -472,29 +473,30 @@ class RunnerHosts:
         lost: list[uuid.UUID] = []
         for env in envs.values():
             container = containers.get(env.id)
+            # 资源读数（T-0185）：只写本主机的环境；与状态对账互不影响
+            runner_metrics.apply_container_reading(env, container, received)
             if container is not None:
-                env.mem_bytes = container.mem_bytes
                 running = container.state == "running"
                 if env.state == "running" and not running and env.id not in busy:
                     env.state = "stopped"
                     env.stopped_at = env.stopped_at or specs.now()
                     env.state_reason = env.state_reason or f"容器已退出（{container.state}）"
             if env.id in volumes:
-                env.disk_bytes = volumes[env.id].bytes
+                runner_metrics.apply_volume_reading(env, volumes[env.id].bytes, received)
             if env.id in busy or env.state not in EXPECT_CONTAINER:
                 continue
             if container is None:
                 lost.append(env.id)
                 env.state = "failed"
-                env.state_reason = "运行服务器上找不到这个容器（丢失）"
+                env.state_reason = "容器服务器上找不到这个容器（丢失）"
                 await notifications.notify_admins(
                     self.db,
                     host.workspace_id,
                     type_="runner.environment_lost",
                     severity="warning",
-                    title="运行服务器上的环境丢失",
-                    body=f"{env.purpose}：记录里有，运行服务器上找不到容器",
-                    link="/runner?tab=environments",
+                    title="容器服务器上的环境丢失",
+                    body=f"{env.purpose}：记录里有，容器服务器上找不到容器",
+                    link=f"/runner?environment_id={env.id}",
                     key=f"{env.id}:lost",
                 )
         stray = [
@@ -508,7 +510,7 @@ class RunnerHosts:
                 host.workspace_id,
                 type_="runner.environment_stray",
                 severity="warning",
-                title="运行服务器上有记录外的容器",
+                title="容器服务器上有记录外的容器",
                 body=f"{len(stray)} 个带工作台标签、但记录里没有的容器：已停止，24 小时后删除",
                 link="/runner",
                 key=f"{host.id}:stray:{specs.now():%Y%m%d}",

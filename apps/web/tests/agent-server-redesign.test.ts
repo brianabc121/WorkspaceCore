@@ -30,7 +30,7 @@ describe('agent servers page: navigation and old links', () => {
     const links = within(nav).getAllByRole('link').map(a => a.textContent?.trim())
     expect(within(nav).getByRole('link', { name: '智能体服务器' })).toHaveAttribute('href', '/agent-servers')
     expect(within(nav).getByRole('link', { name: 'OpenClaw 智能体' })).toHaveAttribute('href', '/agents')
-    expect(within(nav).getByRole('link', { name: '运行服务器' })).toHaveAttribute('href', '/runner')
+    expect(within(nav).getByRole('link', { name: '容器服务器' })).toHaveAttribute('href', '/runner')
     expect(links.indexOf('智能体服务器')).toBe(links.indexOf('OpenClaw 智能体') - 1)
     expect(links).not.toContain('OpenClaw 实例')
   })

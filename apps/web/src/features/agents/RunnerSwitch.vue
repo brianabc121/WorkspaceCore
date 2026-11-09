@@ -7,7 +7,7 @@ import { formatTime } from '../time'
 import { LIMIT_FIELDS, runnerError, useRunnerAction } from '../runner/api'
 
 // 实例卡片里的“运行环境权限”（T-0140，RUNNER_PLAN 第 8.4、11 节，例外八）：开关（默认关闭）、限额、可以注入的密钥。
-// 打开后它可以在运行服务器上建、用、停、删自己的容器环境并在里面执行命令，直接执行、不审批；
+// 打开后它可以在容器服务器上建、用、停、删自己的容器环境并在里面执行命令，直接执行、不审批；
 // 关掉时它所有运行中的环境都会停止。可以注入的密钥就是密钥库已授权给这个实例的那些。
 const props = defineProps<{ instance: Schema['AgentInstanceOut'] }>()
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id
@@ -44,7 +44,7 @@ async function save(enabled: boolean) {
   if (!v) return
   const body = parsed()
   if (typeof body === 'string') { error.value = body; return }
-  if (enabled && !v.enabled && !window.confirm(`给「${props.instance.name}」打开运行环境权限？它可以在运行服务器的容器里执行任意命令、读到注入给它的密钥，直接执行、不审批；每次都有执行记录，非默认选项会通知管理员。`)) return
+  if (enabled && !v.enabled && !window.confirm(`给「${props.instance.name}」打开运行环境权限？它可以在容器服务器的容器里执行任意命令、读到注入给它的密钥，直接执行、不审批；每次都有执行记录，非默认选项会通知管理员。`)) return
   if (!enabled && v.enabled && !window.confirm(`关闭「${props.instance.name}」的运行环境权限？它所有运行中的环境都会停止（数据卷保留）。`)) return
   const ok = await act(async () => {
     dataOf(await auth.api.PUT('/api/v1/agents/instances/{instance_id}/runner', { params: { header, path: { instance_id: props.instance.id } }, body: { enabled, limits: body, version: v.version } }))
@@ -59,7 +59,7 @@ async function save(enabled: boolean) {
       <h3>运行环境权限：{{ runner.isPending.value ? '…' : summary }}</h3>
       <div v-if="state" class="form-actions">
         <button v-if="state.enabled" type="button" class="secondary-button" :disabled="busy" @click="editing = !editing">{{ editing ? '收起限额' : '改限额' }}</button>
-        <button type="button" class="secondary-button" :class="{ 'im-danger': state.enabled }" :disabled="busy || (!state.enabled && (readOnly || !!instance.disabled_at))" @click="save(!state.enabled)">{{ state.enabled ? '关闭运行环境权限' : '允许它在运行服务器上建环境、执行命令' }}</button>
+        <button type="button" class="secondary-button" :class="{ 'im-danger': state.enabled }" :disabled="busy || (!state.enabled && (readOnly || !!instance.disabled_at))" @click="save(!state.enabled)">{{ state.enabled ? '关闭运行环境权限' : '允许它在容器服务器上建环境、执行命令' }}</button>
       </div>
     </div>
     <p v-if="runner.error.value" role="alert">{{ runnerError(runner.error.value) }}</p>
@@ -74,7 +74,7 @@ async function save(enabled: boolean) {
       可以注入的密钥：{{ state.secrets.length ? state.secrets.join('、') : '没有（在下面的“密钥授权”里授权给它的密钥才能注入）' }}。
       <template v-if="readOnly && !state.enabled"> 这个实例的工具权限是只读，打不开。</template>
       <template v-if="state.enabled && state.enabled_at"> 打开于 {{ formatTime(state.enabled_at) }}。</template>
-      环境、运行记录与回收策略在 <RouterLink to="/runner">运行服务器</RouterLink> 页面。
+      它申请的容器、负载、执行记录与回收在 <RouterLink to="/runner">容器服务器</RouterLink> 页面。
     </p>
   </section>
 </template>

@@ -174,6 +174,12 @@ class RunnerEnvironment(Base):
         CheckConstraint("share = 'none' OR project_id IS NOT NULL", name="share_project"),
         Index("ix_runner_environments_workspace_state", "workspace_id", "state"),
         Index("ix_runner_environments_owner_reuse", "owner_instance_id", "reuse_key"),
+        CheckConstraint("cpu_used_cores IS NULL OR cpu_used_cores >= 0", name="cpu_used_cores"),
+        CheckConstraint(
+            "cpu_window_seconds IS NULL OR (cpu_window_seconds >= 1 AND cpu_window_seconds <= 180)",
+            name="cpu_window_seconds",
+        ),
+        CheckConstraint("(cpu_used_cores IS NULL) = (cpu_window_seconds IS NULL)", name="cpu_pair"),
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
@@ -208,6 +214,14 @@ class RunnerEnvironment(Base):
     use_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     mem_bytes: Mapped[int | None] = mapped_column(BigInteger)
     disk_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    # 最近一次有效读数（T-0185）：CPU 是 runner-agent 差分出的窗口平均核数；
+    # *_reported_at 是平台收到这项读数的服务端时间（与 mem_bytes / disk_bytes 一一对应），
+    # 不是 agent 的时钟
+    cpu_used_cores: Mapped[float | None] = mapped_column(Float)
+    cpu_window_seconds: Mapped[float | None] = mapped_column(Float)
+    cpu_reported_at: Mapped[datetime | None] = _when()
+    mem_reported_at: Mapped[datetime | None] = _when()
+    disk_reported_at: Mapped[datetime | None] = _when()
     egress: Mapped[dict[str, Any]] = _json()
     last_used_at: Mapped[datetime] = _created()
     created_at: Mapped[datetime] = _created()

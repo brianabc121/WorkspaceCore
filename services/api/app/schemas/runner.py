@@ -6,10 +6,10 @@
 """
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 Runtime = Literal["gvisor", "runc", "kvm"]
 RunUser = Literal["user", "root"]
@@ -323,8 +323,30 @@ class RunnerReportContainer(BaseModel):
     env_id: UUID
     name: str
     state: str
-    mem_bytes: int | None = None
+    mem_bytes: int | None = Field(
+        None, description="内存用量（Docker memory_stats.usage，字节，含页缓存）；读不到为空"
+    )
     size_rw: int | None = None
+    cpu_used_cores: float | None = Field(
+        None,
+        ge=0,
+        allow_inf_nan=False,
+        description="最近一个采样窗口里的平均 CPU 核数（累计 CPU 时间差分，可以大于 1）；"
+        "第一次采样、容器重启、读数无效或旧版 runner-agent 为空（T-0184）",
+    )
+    cpu_window_seconds: float | None = Field(
+        None,
+        ge=1,
+        le=180,
+        allow_inf_nan=False,
+        description="cpu_used_cores 对应的采样窗口（秒）；与 cpu_used_cores 同时有值或同时为空",
+    )
+
+    @model_validator(mode="after")
+    def _cpu_pair(self) -> Self:
+        if (self.cpu_used_cores is None) != (self.cpu_window_seconds is None):
+            raise ValueError("cpu_used_cores 与 cpu_window_seconds 要同时有值或同时为空")
+        return self
 
 
 class RunnerReportVolume(BaseModel):
@@ -402,6 +424,38 @@ class RunnerPolicyPut(_Strict):
     policy: dict[str, float]
 
 
+MetricStatus = Literal["ok", "stale", "unavailable", "not_running"]
+
+
+class RunnerEnvMetrics(BaseModel):
+    """一个环境的最新资源读数与新鲜度（T-0185，容器服务器方案指标约定第 5 节）。
+
+    - CPU 是 runner-agent 用两次累计 CPU 时间差分出的窗口平均核数，不是配置的 cpus；
+    - 内存是 Docker memory_stats.usage（字节，含页缓存）；
+    - 数据卷只是环境的数据卷，不含镜像与容器可写层。
+    每项分别判断：有值且上报时间在 180 秒内、主机在线且没停用 → ok；
+    有旧值 → stale（保留数字与时间，上报时间可能为空 = 时间未知）；没有值 → unavailable；
+    环境不在运行时 CPU / 内存 → not_running（数值为空）。
+    """
+
+    cpu_used_cores: float | None = Field(description="最近一个采样窗口的平均核数，可以大于 1")
+    cpu_percent_of_limit: float | None = Field(
+        description="cpu_used_cores / 配置的 cpus × 100；可以超过 100，配置无效时为空"
+    )
+    cpu_window_seconds: float | None
+    cpu_reported_at: datetime | None = Field(description="平台收到这项读数的时间")
+    cpu_status: MetricStatus
+    memory_used_bytes: int | None
+    memory_percent_of_limit: float | None = Field(
+        description="memory_used_bytes / (memory_mb × 1024²) × 100；可以超过 100"
+    )
+    memory_reported_at: datetime | None
+    memory_status: MetricStatus
+    data_volume_bytes: int | None = Field(description="数据卷占用（不含镜像与可写层）")
+    data_volume_reported_at: datetime | None
+    data_volume_status: MetricStatus
+
+
 class RunnerEnvAdminOut(EnvOut):
     owner_instance_id: UUID | None
     template_id: UUID | None
@@ -423,10 +477,17 @@ class RunnerEnvAdminOut(EnvOut):
     deleted_at: datetime | None
     delete_after: datetime | None
     version: int
+    metrics: RunnerEnvMetrics | None = Field(
+        None, description="最新资源读数与新鲜度（T-0185）；旧版服务端没有这一项"
+    )
 
 
 class RunnerEnvAdminList(BaseModel):
     items: list[RunnerEnvAdminOut]
+    total: int | None = Field(
+        None, description="同样筛选条件（不含分页）下的全部匹配数；旧版服务端没有这一项"
+    )
+    next_cursor: str | None = Field(None, description="下一页的游标；没有下一页时为空")
 
 
 class RunnerEnvAction(_Strict):

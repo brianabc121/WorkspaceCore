@@ -84,7 +84,7 @@ describe('工程骨架', () => {
     expect(within(nav).queryByRole('link', { name: '自动化' })).not.toBeInTheDocument()
     expect(within(nav).getByRole('link', { name: '运维' })).toHaveAttribute('href', '/operations')
     expect(within(nav).getByRole('link', { name: 'AI 审批' })).toHaveAttribute('href', '/ai')
-    expect(within(nav).getByRole('link', { name: '运行服务器' })).toHaveAttribute('href', '/runner')
+    expect(within(nav).getByRole('link', { name: '容器服务器' })).toHaveAttribute('href', '/runner')
   })
   it('treats a bookmarked workflows address as a missing page without loading retired APIs', async () => {
     const requests = mockApi()

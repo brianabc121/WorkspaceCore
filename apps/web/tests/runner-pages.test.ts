@@ -1,7 +1,8 @@
-// 运行服务器页（T-0140，docs/v2/RUNNER_PLAN.md 第 11 节）：总览、环境、模板、运行记录、设置；实例卡片上的运行环境权限。
+// 容器服务器页（原“运行服务器”，T-0140；改版 T-0186）：环境模板、执行记录、服务器设置；实例卡片上的运行环境权限。
+// 容器总览、智能体用量与详情在 container-server-pages.test.ts / container-server-detail.test.ts。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, within } from '@testing-library/vue'
-import { mockApi, openApp, me, workspace, fail, runnerOff } from './helpers'
+import { mockApi, openApp, me, workspace, runnerOff } from './helpers'
 import type { Schema } from '../src/services/api'
 
 const at = '2026-11-06T08:00:00Z'
@@ -54,76 +55,11 @@ function setup(handler?: (r: Request) => Response | undefined, options: { role?:
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-describe('运行服务器页', () => {
-  it('shows the host, alerts, usage per agent and recent reclaims; members cannot open it', async () => {
-    setup()
-    await openApp('/runner')
-    const card = await screen.findByRole('region', { name: '运行服务器' })
-    expect(within(card).getByText('运行服务器 A')).toBeVisible()
-    expect(within(card).getByText(/gVisor 没装/)).toBeVisible()
-    const alerts = within(card).getByRole('list', { name: '告警' })
-    expect(alerts).toHaveTextContent('磁盘超过高水位（已用 90%）')
-    expect(alerts).toHaveTextContent('1 个不是工作台建的容器')
-    expect(alerts).toHaveTextContent('没装 gVisor')
-    expect(within(card).getByRole('meter', { name: '磁盘用量' })).toHaveAttribute('aria-valuenow', '90')
-    const usage = screen.getByRole('region', { name: '智能体的用量' })
-    expect(within(usage).getByRole('row', { name: /alpha/ })).toHaveTextContent('2 / 3')
-    expect(screen.getByRole('region', { name: '最近的回收' })).toHaveTextContent('空闲 30 分钟，自动停止')
-    // 点环境数直接筛到这个状态
-    const requests = setup()
-    await fireEvent.click(screen.getByRole('button', { name: '运行中 2' }))
-    await screen.findByRole('list', { name: '环境列表' })
-    expect(requests.some(r => path(r) === '/api/v1/runner/environments' && new URL(r.url).searchParams.get('state') === 'running')).toBe(true)
-  })
-
+describe('容器服务器页：模板、执行记录与设置', () => {
   it('redirects members to forbidden', async () => {
     setup(undefined, { role: 'member' })
     const { router } = await openApp('/runner')
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/forbidden'))
-  })
-
-  it('lists environments with non-default choices marked and runs actions with the version', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const requests = setup(r => (path(r).endsWith('/actions') ? Response.json(env({ state: 'stopped', version: 8 })) : undefined))
-    await openApp('/runner?tab=environments')
-    const first = await screen.findByRole('article', { name: '环境：跑回归测试' })
-    expect(within(first).getByText('空闲 15 分钟后停止')).toBeVisible()
-    expect(within(first).getByText('12.50')).toBeVisible()
-    expect(within(first).queryByRole('note')).toBeNull()
-    const risky = screen.getByRole('article', { name: '环境：安卓模拟器' })
-    expect(within(risky).getByRole('note')).toHaveTextContent('运行时 runc + KVM、root 用户、全部外网')
-    expect(within(risky).getByText(/无穷大/)).toBeVisible()
-    await fireEvent.click(within(first).getByRole('button', { name: '停止' }))
-    await screen.findByText('已停止：跑回归测试')
-    const stop = requests.find(r => r.method === 'POST' && path(r) === '/api/v1/runner/environments/env-1/actions')!
-    expect(await stop.clone().json()).toEqual({ action: 'stop', version: 7 })
-    expect(stop.headers.get('X-Workspace-Id')).toBe('workspace-a')
-    // 常驻环境删除前提示会先做快照
-    await fireEvent.click(within(risky).getByRole('button', { name: '删除' }))
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('先做加密快照（保留 30 天'))
-    // 看这个环境的运行记录
-    await fireEvent.click(within(first).getByRole('button', { name: '运行记录' }))
-    await screen.findByRole('list', { name: '运行记录' })
-    expect(requests.some(r => path(r) === '/api/v1/runner/runs' && new URL(r.url).searchParams.get('environment_id') === 'env-1')).toBe(true)
-  })
-
-  it('offers keep for pending deletes and restore for archived or deleted persistent environments', async () => {
-    setup(r => (path(r) === '/api/v1/runner/environments' && r.method === 'GET'
-      ? Response.json({ items: [
-        env({ id: 'a', untrusted: { purpose: '待删除的' }, state: 'pending_delete', delete_after: at }),
-        env({ id: 'b', untrusted: { purpose: '归档的' }, state: 'archived', archived_at: at }),
-        env({ id: 'c', untrusted: { purpose: '删掉的常驻' }, lifetime: 'persistent', state: 'deleted', snapshot_at: at, snapshot_bytes: 3 * GB }),
-      ] })
-      : path(r).endsWith('/actions') ? fail(409, 'VERSION_CONFLICT') : undefined))
-    await openApp('/runner?tab=environments')
-    const pending = await screen.findByRole('article', { name: '环境：待删除的' })
-    expect(within(pending).getByRole('button', { name: '撤销删除' })).toBeVisible()
-    expect(within(pending).queryByRole('button', { name: '删除' })).toBeNull()
-    expect(within(screen.getByRole('article', { name: '环境：归档的' })).getByRole('button', { name: '恢复' })).toBeVisible()
-    const deleted = screen.getByRole('article', { name: '环境：删掉的常驻' })
-    expect(within(deleted).getByText(/3\.0 GB/)).toBeVisible()
-    await fireEvent.click(within(deleted).getByRole('button', { name: '恢复' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('已被其他人修改，请刷新后再操作。')
   })
 
   it('shows templates with the build log, saves a new one and disables with the version', async () => {
@@ -171,13 +107,13 @@ describe('运行服务器页', () => {
     const requests = setup(r => (path(r) === '/api/v1/runner/host' && r.method === 'POST' ? Response.json(host({ status: 'pending', last_seen_at: null }), { status: 201 }) : undefined),
       { data: overview({ host: null, environments: {}, instances: [], recent: [] }) })
     await openApp('/runner')
-    await fireEvent.click(await screen.findByRole('button', { name: '去添加运行服务器' }))
-    const form = await screen.findByRole('form', { name: '添加运行服务器' })
+    await fireEvent.click(await screen.findByRole('button', { name: '去添加容器服务器' }))
+    const form = await screen.findByRole('form', { name: '添加容器服务器' })
     await fireEvent.update(within(form).getByLabelText('连工作台的入口'), 'public')
     await fireEvent.click(within(form).getByRole('button', { name: '添加' }))
     await screen.findByText(/已添加/)
     const post = requests.find(r => r.method === 'POST' && path(r) === '/api/v1/runner/host')!
-    expect(await post.clone().json()).toEqual({ name: '运行服务器', ingress: 'public' })
+    expect(await post.clone().json()).toEqual({ name: '容器服务器', ingress: 'public' })
   })
 
   it('saves the reclaim policy with the version and removes the host after confirmation', async () => {
@@ -198,9 +134,9 @@ describe('运行服务器页', () => {
     await screen.findByText(/已保存回收策略/)
     const put = requests.find(r => path(r) === '/api/v1/runner/host/policy')!
     expect(await put.clone().json()).toEqual({ version: 4, policy: { session_idle_minutes: 15, mem_high: 0.85, disk_high: 0.75, disk_emergency: 0.95, snapshot_max_gb: 5 } })
-    await fireEvent.click(screen.getByRole('button', { name: '移除运行服务器' }))
+    await fireEvent.click(screen.getByRole('button', { name: '移除容器服务器' }))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('凭证立即失效'))
-    await screen.findByText('已移除运行服务器')
+    await screen.findByText('已移除容器服务器')
     const del = requests.find(r => r.method === 'DELETE' && path(r) === '/api/v1/runner/host')!
     expect(new URL(del.url).searchParams.get('version')).toBe('4')
   })
@@ -232,7 +168,7 @@ describe('instance runner permission', () => {
     expect(await within(section).findByText('运行环境权限：关闭')).toBeVisible()
     expect(within(section).getByText(/在下面的“密钥授权”里授权给它的密钥才能注入/)).toBeVisible()
     await fireEvent.update(within(section).getByLabelText('同时运行的环境'), '5')
-    await fireEvent.click(within(section).getByRole('button', { name: '允许它在运行服务器上建环境、执行命令' }))
+    await fireEvent.click(within(section).getByRole('button', { name: '允许它在容器服务器上建环境、执行命令' }))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('执行任意命令'))
     await within(section).findByText('已打开运行环境权限')
     const put = requests.find(r => r.method === 'PUT' && path(r).endsWith('/runner'))!
@@ -243,12 +179,12 @@ describe('instance runner permission', () => {
     agents(instance({ scope: 'read' }))
     await openApp('/agents?instance=inst-a')
     const section = within(await screen.findByRole('article', { name: '实例：alpha' })).getByRole('region', { name: '运行环境权限' })
-    expect(await within(section).findByRole('button', { name: '允许它在运行服务器上建环境、执行命令' })).toBeDisabled()
+    expect(await within(section).findByRole('button', { name: '允许它在容器服务器上建环境、执行命令' })).toBeDisabled()
     expect(within(section).getByText(/工具权限是只读，打不开/)).toBeVisible()
   })
 })
 
-describe('通过 SSH 部署运行服务器', () => {
+describe('通过 SSH 部署容器服务器', () => {
   const target = (over: Partial<Schema['AgentSshTargetOut']> = {}): Schema['AgentSshTargetOut'] => ({
     host: '203.0.113.20', address: '203.0.113.20', port: 22, username: 'deploy', host_key_algorithm: 'ssh-ed25519', host_key_fingerprint: 'SHA256:abc123',
     host_key_confirmed: false, host_key_confirmed_at: null, client_key_installed: false, client_key_fingerprint: null, install_dir: null, installed_at: null,
@@ -271,7 +207,7 @@ describe('通过 SSH 部署运行服务器', () => {
     }, { role: 'owner' })
     await openApp('/runner?tab=settings')
     const panel = await screen.findByRole('region', { name: '通过 SSH 部署' })
-    const form = await within(panel).findByRole('form', { name: '运行服务器的 SSH 地址' })
+    const form = await within(panel).findByRole('form', { name: '容器服务器的 SSH 地址' })
     await fireEvent.update(within(form).getByLabelText('服务器 IP 或域名 *'), '203.0.113.20')
     await fireEvent.update(within(form).getByLabelText('SSH 账号 *'), 'deploy')
     await fireEvent.click(within(form).getByRole('button', { name: '读取主机公钥' }))
@@ -282,7 +218,7 @@ describe('通过 SSH 部署运行服务器', () => {
     await fireEvent.click(within(panel).getByLabelText(/我已在服务器上核对/))
     await vi.waitFor(() => expect(within(panel).getByRole('button', { name: '确认指纹' })).toBeEnabled())
     await fireEvent.click(within(panel).getByRole('button', { name: '确认指纹' }))
-    const deploy = await within(panel).findByRole('form', { name: '部署运行服务器' })
+    const deploy = await within(panel).findByRole('form', { name: '部署容器服务器' })
     await fireEvent.update(within(deploy).getByLabelText('登录密码 *'), 'server pw')
     await vi.waitFor(() => expect(within(deploy).getByRole('button', { name: '开始部署' })).toBeEnabled())
     await fireEvent.click(within(deploy).getByRole('button', { name: '开始部署' }))

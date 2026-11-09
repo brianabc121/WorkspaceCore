@@ -18685,6 +18685,30 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页的游标；没有下一页时为空",
+            "title": "Next Cursor"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "同样筛选条件（不含分页）下的全部匹配数；旧版服务端没有这一项",
+            "title": "Total"
           }
         },
         "required": [
@@ -18796,6 +18820,17 @@
           "memory_mb": {
             "title": "Memory Mb",
             "type": "integer"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunnerEnvMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最新资源读数与新鲜度（T-0185）；旧版服务端没有这一项"
           },
           "mine": {
             "title": "Mine",
@@ -19069,6 +19104,164 @@
           "version"
         ],
         "title": "RunnerEnvAdminOut",
+        "type": "object"
+      },
+      "RunnerEnvMetrics": {
+        "description": "一个环境的最新资源读数与新鲜度（T-0185，容器服务器方案指标约定第 5 节）。\n\n- CPU 是 runner-agent 用两次累计 CPU 时间差分出的窗口平均核数，不是配置的 cpus；\n- 内存是 Docker memory_stats.usage（字节，含页缓存）；\n- 数据卷只是环境的数据卷，不含镜像与容器可写层。\n每项分别判断：有值且上报时间在 180 秒内、主机在线且没停用 → ok；\n有旧值 → stale（保留数字与时间，上报时间可能为空 = 时间未知）；没有值 → unavailable；\n环境不在运行时 CPU / 内存 → not_running（数值为空）。",
+        "properties": {
+          "cpu_percent_of_limit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "cpu_used_cores / 配置的 cpus × 100；可以超过 100，配置无效时为空",
+            "title": "Cpu Percent Of Limit"
+          },
+          "cpu_reported_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "平台收到这项读数的时间",
+            "title": "Cpu Reported At"
+          },
+          "cpu_status": {
+            "enum": [
+              "ok",
+              "stale",
+              "unavailable",
+              "not_running"
+            ],
+            "title": "Cpu Status",
+            "type": "string"
+          },
+          "cpu_used_cores": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一个采样窗口的平均核数，可以大于 1",
+            "title": "Cpu Used Cores"
+          },
+          "cpu_window_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Window Seconds"
+          },
+          "data_volume_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "数据卷占用（不含镜像与可写层）",
+            "title": "Data Volume Bytes"
+          },
+          "data_volume_reported_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Volume Reported At"
+          },
+          "data_volume_status": {
+            "enum": [
+              "ok",
+              "stale",
+              "unavailable",
+              "not_running"
+            ],
+            "title": "Data Volume Status",
+            "type": "string"
+          },
+          "memory_percent_of_limit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "memory_used_bytes / (memory_mb × 1024²) × 100；可以超过 100",
+            "title": "Memory Percent Of Limit"
+          },
+          "memory_reported_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Reported At"
+          },
+          "memory_status": {
+            "enum": [
+              "ok",
+              "stale",
+              "unavailable",
+              "not_running"
+            ],
+            "title": "Memory Status",
+            "type": "string"
+          },
+          "memory_used_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Used Bytes"
+          }
+        },
+        "required": [
+          "cpu_used_cores",
+          "cpu_percent_of_limit",
+          "cpu_window_seconds",
+          "cpu_reported_at",
+          "cpu_status",
+          "memory_used_bytes",
+          "memory_percent_of_limit",
+          "memory_reported_at",
+          "memory_status",
+          "data_volume_bytes",
+          "data_volume_reported_at",
+          "data_volume_status"
+        ],
+        "title": "RunnerEnvMetrics",
         "type": "object"
       },
       "RunnerHostCreate": {
@@ -19555,6 +19748,33 @@
       },
       "RunnerReportContainer": {
         "properties": {
+          "cpu_used_cores": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一个采样窗口里的平均 CPU 核数（累计 CPU 时间差分，可以大于 1）；第一次采样、容器重启、读数无效或旧版 runner-agent 为空（T-0184）",
+            "title": "Cpu Used Cores"
+          },
+          "cpu_window_seconds": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "cpu_used_cores 对应的采样窗口（秒）；与 cpu_used_cores 同时有值或同时为空",
+            "title": "Cpu Window Seconds"
+          },
           "env_id": {
             "format": "uuid",
             "title": "Env Id",
@@ -19569,6 +19789,7 @@
                 "type": "null"
               }
             ],
+            "description": "内存用量（Docker memory_stats.usage，字节，含页缓存）；读不到为空",
             "title": "Mem Bytes"
           },
           "name": {
@@ -51326,6 +51547,76 @@
             }
           },
           {
+            "description": "按用途或环境 ID 包含查询（% 与 _ 按字面匹配）",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按用途或环境 ID 包含查询（% 与 _ 按字面匹配）",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "last_used：最近使用在前；cpu / memory：实时读数高的在前，过期、未知、未运行的排在最后；同分按 ID",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "last_used",
+              "description": "last_used：最近使用在前；cpu / memory：实时读数高的在前，过期、未知、未运行的排在最后；同分按 ID",
+              "enum": [
+                "last_used",
+                "cpu",
+                "memory"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "上一页的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "每页条数；缺省 500 与旧页面兼容，新页面传 50",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "description": "每页条数；缺省 500 与旧页面兼容，新页面传 50",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
             "description": "当前工作空间；不是成员时返回 404",
             "in": "header",
             "name": "X-Workspace-Id",
@@ -51396,6 +51687,97 @@
           }
         ],
         "summary": "环境列表（admin）",
+        "tags": [
+          "runner"
+        ]
+      }
+    },
+    "/api/v1/runner/environments/{environment_id}": {
+      "get": {
+        "description": "不在列表筛选里也能按 ID 读；只读本地记录（含最新资源读数与新鲜度），不连 Docker / SSH。其他工作空间的环境与不存在的环境都返回 404。",
+        "operationId": "get_runner_environment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "environment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Environment Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunnerEnvAdminOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "一个环境的详情（admin）",
         "tags": [
           "runner"
         ]

@@ -399,7 +399,7 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 |---|---|---|
 | `runner_hosts` | `id`、`workspace_id`、`name`、`status`、`ingress`、`token_hash`、`token_prefix`、`cert_fingerprint`、`cpus`、`mem_bytes`、`disk_bytes`、`disk_free_bytes`、`kvm`、`runtimes`、`docker_version`、`agent_version`、`report`、`policy`、`last_seen_at`、`created_by`、`version` | 每个工作空间一台（唯一 `workspace_id`）；凭证只存 SHA-256（唯一）与前 12 个字符；CHECK `status` ∈ `pending` / `online` / `offline` / `disabled`、`ingress` ∈ `intranet` / `public`；`policy` 是回收策略的覆盖值 |
 | `runner_templates` | `id`、`workspace_id`、`name`、`description`、`owner_instance_id`、`created_by`、`status`、`revision`、`spec`、`build_status`、`build_error`、`build_log`、`image_ref`、`image_digest`、`image_bytes`、`build_seconds`、`built_at`、`last_used_at`、`use_count`、`version` | 唯一 `(workspace_id, name)`，名称 1 ~ 64 字；`spec` 是规整后的规格（镜像、安装步骤、运行时、用户、网络与域名、资源、环境变量、密钥**名称**、要保存的目录）；CHECK `status`、`build_status` ∈ `pending` / `building` / `ready` / `failed`；建立者是实例或用户（删除后置空） |
-| `runner_environments` | `id`、`workspace_id`、`host_id`、`template_id`、`template_revision`、`owner_instance_id`、`purpose`、`lifetime`、`reuse_key`、`state`、`state_reason`、`spec`、`setup`、`share`、`project_id`、`pinned`、`container_name`、`volume_name`、`network_name`、`snapshot_*`、`start_seconds`、`rebuild_seconds`、`use_count`、`mem_bytes`、`disk_bytes`、`egress`、时间字段、`delete_after`、`version` | `spec` 是**配置记录**（建这个环境时的完整规格与镜像 digest）；CHECK `lifetime` ∈ `once` / `session` / `persistent`、`state` ∈ `creating` / `running` / `stopped` / `archived` / `pending_delete` / `deleted` / `failed`、`share` ∈ `none` / `project`（共享时必须有 `project_id`）；索引 `(workspace_id, state)`、`(owner_instance_id, reuse_key)`；容器 / 数据卷 / 网络名是 `mw-env|vol|net-<12 位十六进制>` |
+| `runner_environments` | `id`、`workspace_id`、`host_id`、`template_id`、`template_revision`、`owner_instance_id`、`purpose`、`lifetime`、`reuse_key`、`state`、`state_reason`、`spec`、`setup`、`share`、`project_id`、`pinned`、`container_name`、`volume_name`、`network_name`、`snapshot_*`、`start_seconds`、`rebuild_seconds`、`use_count`、`mem_bytes`、`disk_bytes`、`cpu_used_cores`、`cpu_window_seconds`、`cpu_reported_at`、`mem_reported_at`、`disk_reported_at`、`egress`、时间字段、`delete_after`、`version` | `spec` 是**配置记录**（建这个环境时的完整规格与镜像 digest）；CHECK `lifetime` ∈ `once` / `session` / `persistent`、`state` ∈ `creating` / `running` / `stopped` / `archived` / `pending_delete` / `deleted` / `failed`、`share` ∈ `none` / `project`（共享时必须有 `project_id`）；索引 `(workspace_id, state)`、`(owner_instance_id, reuse_key)`；容器 / 数据卷 / 网络名是 `mw-env|vol|net-<12 位十六进制>` |
 | `runner_delete_conditions` | `id`、`environment_id`、`kind`、`ref_id`、`at`、`seconds`、`created_by_instance_id`、`fired_at` | 删除条件；CHECK `kind` ∈ `run_finished` / `task_done` / `issue_closed` / `project_archived` / `at` / `idle` / `released`；部分索引 `(kind, ref_id) WHERE fired_at IS NULL`；随环境级联删除 |
 | `runner_runs` | `id`、`workspace_id`、`environment_id`、`instance_id`、`command`、`status`、`exit_code`、`timeout_seconds`、`output`、`output_truncated`、`wake`、时间字段 | 一次命令：`command` 脱敏后记录；`output` 最多 1 MB（开头四分之一加结尾，脱敏）；CHECK `status` ∈ `queued` / `running` / `succeeded` / `failed` / `timeout` / `unknown` / `cancelled`；`wake` 表示结束后叫醒智能体 |
 | `runner_commands` | `id`、`workspace_id`、`host_id`、`kind`、`payload`、`status`、`result`、`error`、`attempts`、`environment_id`、`template_id`、`run_id`、`created_at`、`sent_at`、`finished_at`、`deadline_at` | 下发给 runner-agent 的指令（按 `id` 去重）；**`payload` 不含密钥值**（下发时才解密）；`get_files` 之外的 `result` 不存文件内容；CHECK `status` ∈ `pending` / `sent` / `done` / `failed` / `unknown` / `cancelled` |
@@ -557,3 +557,16 @@ OpenClaw 服务器改用保存的加密登录密码（`docs/decisions/2026-11-09
 | `agent_deployments` | `runtime_installed`（布尔，可空） | 部署成功 true、卸载容器保留目录 false；旧记录 null（未知），不凭 `installed_at` 推断 |
 
 **downgrade** 删除这些列与约束，其余数据原样保留；已保存的密码密文随之丢失，已经退役的远端公钥、已清空的旧私钥引用不会恢复。
+
+### 迁移 `0055`（T-0185）
+
+容器服务器的容器读数（`docs/decisions/2026-11-09-runner-container-metrics.md`）。加法迁移，全部可为空，旧记录不回填。
+
+| 表 / 对象 | 字段 | 说明 |
+|---|---|---|
+| `runner_environments` | `cpu_used_cores`（浮点，可空，`>= 0`） | runner-agent 用两次累计 CPU 时间差分出的最近一个窗口的平均核数，可以大于 1；不是配置的 `cpus` |
+| `runner_environments` | `cpu_window_seconds`（浮点，可空，1–180） | 对应的采样窗口；与 `cpu_used_cores` 同时有值或同时为空（CHECK `cpu_pair`） |
+| `runner_environments` | `cpu_reported_at`、`mem_reported_at`、`disk_reported_at`（带时区时间，可空） | 平台收到对应读数的服务端时间（与 `cpu_used_cores`、`mem_bytes`、`disk_bytes` 一一对应），不是 agent 的时钟；普通 poll 不刷新，观测不改 `last_used_at` / `version` |
+
+`mem_bytes` 仍是 Docker `memory_stats.usage`（含页缓存），`disk_bytes` 仍是环境数据卷的占用（不含镜像与可写层）；CPU、内存读不到时连同时间清空，
+数据卷读不到时保留上一次的读数与原时间（回收规则要用）。**downgrade** 只删这五列与约束，`mem_bytes` / `disk_bytes` 原样保留。
