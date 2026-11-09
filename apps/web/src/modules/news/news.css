@@ -84,7 +84,9 @@ a.news-widget-title:hover { color: var(--accent); }
 .news-results .is-ok { color: var(--success); }
 
 /* 今天（T-0174 阅读页）：左侧早报正文 + 相关资讯，右侧关注主题、本期概况、往期入口；1200px 以下单列 */
-.news-today { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 16px; align-items: start; max-width: 1480px; }
+/* 宽版内容区里整页最宽 1480px 并居中：页头按钮、标签条与正文右缘对齐，长文不至于太宽 */
+.news-page { max-width: 1480px; min-width: 0; margin-inline: auto; }
+.news-today { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 16px; align-items: start; }
 .news-reading-col { display: grid; gap: 16px; min-width: 0; }
 .news-reading { padding: 20px 24px; display: grid; gap: 12px; min-width: 0; overflow-wrap: anywhere; }
 .news-reading > h2, .news-reading-head h2 { font-size: 1.25rem; line-height: 1.35; }

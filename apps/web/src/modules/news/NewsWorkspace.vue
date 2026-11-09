@@ -42,25 +42,27 @@ function refresh() { void actions.refresh() }
 </script>
 
 <template>
-  <header class="ws-header">
-    <div>
-      <h1>早报</h1>
-      <p>每天的新闻早报、按平台的热榜、RSS 订阅、搜索与收藏。成员可以收藏或标“不感兴趣”，偏好会影响之后的早报。</p>
+  <div class="news-page">
+    <header class="ws-header">
+      <div>
+        <h1>早报</h1>
+        <p>每天的新闻早报、按平台的热榜、RSS 订阅、搜索与收藏。成员可以收藏或标“不感兴趣”，偏好会影响之后的早报。</p>
+      </div>
+      <div class="ws-actions">
+        <button type="button" class="secondary-button" :disabled="fetching > 0" @click="refresh"><RefreshCw aria-hidden="true" />{{ fetching > 0 ? '正在刷新…' : '刷新' }}</button>
+        <RouterLink v-if="auth.canManage" class="secondary-button" to="/settings/news"><Settings aria-hidden="true" />早报设置</RouterLink>
+      </div>
+    </header>
+    <div class="news-tabs" role="tablist" aria-label="早报">
+      <button v-for="t in TABS" :key="t.key" type="button" role="tab" class="news-tab" :aria-selected="tab === t.key" @click="go(t.key)">{{ t.name }}</button>
     </div>
-    <div class="ws-actions">
-      <button type="button" class="secondary-button" :disabled="fetching > 0" @click="refresh"><RefreshCw aria-hidden="true" />{{ fetching > 0 ? '正在刷新…' : '刷新' }}</button>
-      <RouterLink v-if="auth.canManage" class="secondary-button" to="/settings/news"><Settings aria-hidden="true" />早报设置</RouterLink>
+    <div role="tabpanel" :aria-label="TABS.find(t => t.key === tab)?.name">
+      <NewsTodayTab v-if="tab === 'today'" />
+      <NewsArchiveTab v-else-if="tab === 'archive'" :selected="briefing" @select="select" />
+      <NewsHotTab v-else-if="tab === 'hot'" />
+      <NewsRssTab v-else-if="tab === 'rss'" />
+      <NewsSearchTab v-else-if="tab === 'search'" />
+      <NewsFavoritesTab v-else />
     </div>
-  </header>
-  <div class="news-tabs" role="tablist" aria-label="早报">
-    <button v-for="t in TABS" :key="t.key" type="button" role="tab" class="news-tab" :aria-selected="tab === t.key" @click="go(t.key)">{{ t.name }}</button>
-  </div>
-  <div role="tabpanel" :aria-label="TABS.find(t => t.key === tab)?.name">
-    <NewsTodayTab v-if="tab === 'today'" />
-    <NewsArchiveTab v-else-if="tab === 'archive'" :selected="briefing" @select="select" />
-    <NewsHotTab v-else-if="tab === 'hot'" />
-    <NewsRssTab v-else-if="tab === 'rss'" />
-    <NewsSearchTab v-else-if="tab === 'search'" />
-    <NewsFavoritesTab v-else />
   </div>
 </template>
