@@ -9,6 +9,8 @@ export const SSH_STEP: Record<Schema['AgentSshJobStep']['key'], string> = {
   authorize_key: '安装专用公钥（旧方案的记录）',
   docker: '检测 / 安装 Docker 与 Compose',
   reconnect: '重新登录，确认 Docker 权限生效',
+  workspace: '准备部署目录',
+  verify: '验证 Docker、目录与平台连通',
   upload: '生成并上传接入包',
   pull: '拉取镜像',
   plugin: '安装 IM 插件',
