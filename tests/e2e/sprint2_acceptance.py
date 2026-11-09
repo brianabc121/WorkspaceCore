@@ -29,7 +29,8 @@ from seed import add_corrupt_widget, add_member, create_user
 PASSWORD = "e2e sprint2 passphrase"  # noqa: S105 -- 只用于本脚本临时创建的测试账号
 # 首页聚合的总耗时上限（契约 ADR 第 8 节，DASHBOARD_OVERVIEW_TIMEOUT_SECONDS 的默认值）
 OVERVIEW_BUDGET_SECONDS = 3.0
-STARTER_TYPES = ["note", "quick_links", "todo_summary", "today_tasks"]
+# 默认首页（T-0163，docs/v2/HOME_PLAN.md 第 4 节）
+STARTER_TYPES = ["work_summary", "task_progress", "news_briefing", "calendar_agenda", "my_todos"]
 # 用来确认错误响应和审计日志不回显输入内容的标记
 ECHO_MARK = "e2e-should-not-echo"
 
@@ -95,7 +96,7 @@ def main() -> int:
     )
     widgets = overview.get("widgets") or []
     report.check(
-        "默认首页带 4 个入门组件（按桌面端从上到下、从左到右）",
+        "默认首页带 5 个组件（按桌面端从上到下、从左到右）",
         [w["widget_type"] for w in widgets] == STARTER_TYPES,
         ", ".join(w["widget_type"] for w in widgets),
     )
@@ -112,10 +113,6 @@ def main() -> int:
         and overview.get("today_tasks") == [],
         str(overview.get("summary")),
     )
-    report.check(
-        "便签与快捷链接照常返回",
-        {"note", "quick_links"} <= {w["widget_type"] for w in widgets},
-    )
     listed = alice.request("GET", "/api/v1/dashboards", headers=in_workspace).json() or {}
     report.check(
         "仪表盘列表只有默认首页",
@@ -123,18 +120,31 @@ def main() -> int:
     )
 
     dashboard_id = str(dashboard.get("id"))
-    version = int(dashboard.get("version", 0))
+    # T-0164 起默认首页没有便签：先加一个，下面的权限、版本冲突与审计检查都用它
+    note_body = {
+        "widget_type": "note",
+        "config": {"text": "验收用便签"},
+        "layout": {"desktop": {"x": 0, "y": 14, "w": 4, "h": 2}, "mobile": {"y": 24, "h": 2}},
+    }
+    added = alice.request(
+        "POST", f"/api/v1/dashboards/{dashboard_id}/widgets", note_body, headers=in_workspace
+    )
+    report.check("添加便签组件 → 201", added.status == 201, added.summary)
+    overview = alice.request("GET", "/api/v1/dashboard/overview", headers=in_workspace).json() or {}
+    widgets = overview.get("widgets") or []
+    version = int((overview.get("dashboard") or {}).get("version", 0))
     by_type = {w["widget_type"]: w for w in widgets}
     note = by_type.get("note") or {}
 
     # ---------------------------------------------------------------- A04 保存并刷新布局
     saved = copy.deepcopy(layouts(overview))
+    last_mobile = max(layout["mobile"]["y"] for layout in saved.values())
     for widget_id, layout in saved.items():
         # 整体下移一行并左右对调：桌面端 x 变为 12 - x - w，移动端顺序反转
         desktop = layout["desktop"]
         desktop["x"] = 12 - desktop["x"] - desktop["w"]
         desktop["y"] += 1
-        layout["mobile"]["y"] = 20 - layout["mobile"]["y"]
+        layout["mobile"]["y"] = last_mobile - layout["mobile"]["y"]
         saved[widget_id] = layout
     placements = [{"widget_id": wid, "layout": layout} for wid, layout in saved.items()]
     body: dict[str, Any] = {"version": version, "layout": placements}

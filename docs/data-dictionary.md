@@ -506,3 +506,23 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 | `workspace_navigation` | `workspace_id`（主键，级联删除）、`layout`（JSONB：`sections`、`pages`、`placements`、`section_order`，接口层校验）、`version`、`updated_by`（置空删除）、`updated_at` | 自定义分组、页面挪分组、零代码页面（外部链接、站内页面、知识库笔记、仪表盘、嵌入页） |
 
 **downgrade** 删除这张表（自定义的分组和零代码页面会丢失）。
+
+### 迁移 `0051`（T-0163）
+
+任务的“已完成待查看”（`docs/v2/HOME_PLAN.md` 第 2 节）。已有任务不回填（迁移前完成的按已查看处理）。
+
+| 表 / 对象 | 字段 | 说明 |
+|---|---|---|
+| `tasks` | `review_pending`（布尔，默认 false） | 智能体用 `complete_task` 完成时置真；owner / admin 确认结果、打回或人改完成状态时清掉 |
+| `ix_tasks_review_pending` | `workspace_id`，部分索引 `WHERE review_pending` | 首页按工作空间数待查看的任务 |
+| `task_events.kind` | 增加 `reviewed` | 确认了结果 |
+
+**downgrade** 删除 `reviewed` 动态、恢复原来的种类约束，删除这一列和索引。
+
+### 迁移 `0052`（T-0163）
+
+数据迁移：从没改过的默认首页（组件恰好是迁移 `0004` 的四个入门组件，配置与位置都没动过）换成首页效果图的五个组件
+（`work_summary`、`task_progress`、`news_briefing`、`my_todos`、`calendar_agenda`），仪表盘版本 +1。改过的首页不动，
+可以在页面上“恢复默认首页”。
+
+**downgrade** 把仍是新默认布局的首页换回四个入门组件；改过的保持原样。

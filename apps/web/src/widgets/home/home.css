@@ -1,0 +1,152 @@
+/* 首页改版（T-0164，首页效果图“工作总览”）：页头、工作概况、任务进展、我的待办、AI 新闻速览、提醒与日程。
+   颜色都取主题变量（亮 / 暗主题自动跟随）；色块用 color-mix 从主题色调淡。 */
+
+/* 页头 */
+.home-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px 24px; flex-wrap: wrap; margin-bottom: 18px; }
+.home-header h1 { font-size: 1.6rem; letter-spacing: .01em; }
+.home-header p { color: var(--muted); margin-top: 6px; font-size: .9rem; }
+.home-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.home-updated { color: var(--muted); font-size: .84rem; margin-right: 4px; white-space: nowrap; }
+.home-actions .secondary-button, .home-actions .primary-button { display: inline-flex; align-items: center; gap: 6px; }
+.home-actions svg { width: 16px; height: 16px; }
+
+/* 组件标题栏的标记 */
+.widget-title { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.widget-title h2 { font-size: 1.08rem; font-weight: 700; }
+.widget-title-icon { width: 20px; height: 20px; color: var(--muted); }
+.widget-badge { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border-radius: 12px; font-size: .76rem; font-weight: 600; white-space: nowrap; }
+.widget-badge svg { width: 14px; height: 14px; }
+.widget-badge-warning { background: var(--warning-soft); color: var(--warning); }
+.widget-badge-accent { background: var(--accent-soft); color: var(--accent); }
+.widget-meta { color: var(--muted); font-size: .8rem; white-space: nowrap; }
+.widget-card.is-bare { background: transparent; border: 0; box-shadow: none; }
+.widget-card.is-bare > .widget-body { padding: 0; overflow: visible; }
+
+/* 工作概况 */
+.work-summary { height: 100%; container-type: inline-size; }
+.summary-tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; height: 100%; }
+.summary-tiles > li { min-width: 0; }
+.summary-tile { --tone: var(--accent); display: flex; align-items: center; gap: 14px; height: 100%; min-height: 84px; padding: 16px 18px; border-radius: 14px; border: 1px solid var(--line); box-shadow: var(--shadow); color: var(--text); text-decoration: none;
+  background: linear-gradient(120deg, var(--surface) 35%, color-mix(in srgb, var(--tone) 9%, var(--surface))); transition: border-color .15s, transform .15s; }
+.summary-tile:hover { border-color: color-mix(in srgb, var(--tone) 45%, var(--line)); transform: translateY(-1px); }
+.summary-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.summary-icon { flex: none; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 12px; background: color-mix(in srgb, var(--tone) 14%, var(--surface)); color: var(--tone); }
+.summary-icon svg { width: 24px; height: 24px; }
+.summary-text { display: grid; gap: 4px; min-width: 0; }
+.summary-label { font-size: .9rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.summary-value { font-size: 1.6rem; line-height: 1.1; font-weight: 700; font-variant-numeric: tabular-nums; }
+.summary-tile.tone-blue { --tone: var(--accent); }
+.summary-tile.tone-indigo { --tone: var(--chart-1); }
+.summary-tile.tone-amber { --tone: var(--chart-4); }
+.summary-tile.tone-red { --tone: var(--danger); }
+.summary-tile.tone-violet { --tone: var(--chart-7); }
+
+/* 任务进展 */
+.task-progress { display: flex; flex-direction: column; gap: 12px; container-type: inline-size; }
+.progress-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.progress-tab { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: .88rem; }
+.progress-tab:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.progress-tab[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.progress-tab-count { font-variant-numeric: tabular-nums; opacity: .8; }
+.progress-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .88rem; }
+.progress-table thead th { background: var(--surface-2); color: var(--muted); font-weight: 600; font-size: .8rem; text-align: left; padding: 8px 12px; white-space: nowrap; }
+.progress-table thead th:first-child { border-radius: 8px 0 0 8px; }
+.progress-table thead th:last-child { border-radius: 0 8px 8px 0; }
+.progress-table tbody td { padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; line-height: 1.35; }
+.progress-table tbody tr:last-child td { border-bottom: 0; }
+.progress-task { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; }
+.progress-icon { flex: none; display: grid; place-items: center; width: 22px; height: 22px; color: var(--muted); }
+.progress-icon svg { width: 18px; height: 18px; }
+.progress-icon.status-in_progress { color: var(--accent); }
+.progress-icon.status-blocked { color: var(--danger); }
+.progress-title-wrap { display: grid; gap: 1px; min-width: 0; }
+.progress-title { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-title:hover { color: var(--accent); }
+.progress-note { color: var(--muted); font-size: .76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-owner, .progress-time { color: var(--muted); white-space: nowrap; }
+.progress-owner { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.status-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 12px; font-size: .76rem; font-weight: 600; white-space: nowrap; background: var(--surface-2); color: var(--muted); }
+.status-chip svg { width: 13px; height: 13px; }
+.status-chip.status-review { background: var(--warning-soft); color: var(--warning); }
+.status-chip.status-in_progress { background: var(--accent-soft); color: var(--accent); }
+.status-chip.status-blocked { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); color: var(--danger); }
+.progress-action a { color: var(--accent); font-weight: 600; white-space: nowrap; }
+.progress-empty { padding: 18px 4px; }
+@container (max-width: 620px) {
+  .progress-table thead th:nth-child(2), .progress-table tbody td:nth-child(2), .progress-table thead th:nth-child(4), .progress-table tbody td:nth-child(4) { display: none; }
+}
+@container (max-width: 420px) {
+  .progress-table thead th:nth-child(3), .progress-table tbody td:nth-child(3) { display: none; }
+}
+
+/* 共用：查看更多、添加 */
+.home-more { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: .88rem; font-weight: 600; }
+.home-more svg { width: 16px; height: 16px; }
+.home-add { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 6px 0; color: var(--accent); font-size: .88rem; font-weight: 600; cursor: pointer; }
+.home-add svg { width: 16px; height: 16px; }
+
+/* 我的待办 */
+.my-todos { display: flex; flex-direction: column; gap: 6px; }
+.todo-list { list-style: none; margin: 0; padding: 0; }
+.todo-item { display: flex; align-items: center; gap: 12px; padding: 9px 2px; border-bottom: 1px solid var(--line); }
+.todo-check input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+.todo-title { flex: 1; min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92rem; }
+.todo-title:hover { color: var(--accent); }
+.todo-tag { flex: none; display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 12px; font-size: .76rem; font-weight: 600; }
+.todo-tag.tone-accent { background: var(--accent-soft); color: var(--accent); }
+.todo-tag.tone-danger { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); color: var(--danger); }
+.todo-tag.tone-neutral { background: var(--surface-2); color: var(--muted); }
+.todo-add-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.todo-add-form input { flex: 2 1 200px; }
+.todo-add-form select { flex: 1 1 140px; }
+
+/* AI 新闻速览 */
+.news-digest { display: flex; flex-direction: column; gap: 6px; }
+.digest-list { list-style: none; margin: 0; padding: 0; }
+.digest-item { display: flex; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.digest-item:first-child { padding-top: 2px; }
+.digest-number { flex: none; display: grid; place-items: center; width: 32px; height: 28px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: .9rem; font-variant-numeric: tabular-nums; }
+.digest-body { min-width: 0; display: grid; gap: 3px; }
+.digest-title { margin: 0; font-size: .95rem; font-weight: 700; }
+.digest-text { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.digest-sources { margin: 0; color: var(--muted); font-size: .78rem; }
+.digest-sources a { color: var(--accent); }
+
+/* 提醒与日程 */
+.agenda { display: flex; flex-direction: column; gap: 10px; }
+.agenda-list { list-style: none; margin: 0; padding: 0 0 0 4px; position: relative; display: grid; gap: 14px; }
+.agenda-list::before { content: ""; position: absolute; left: 10px; top: 14px; bottom: 14px; width: 1px; background: var(--line); }
+.agenda-item { position: relative; display: flex; align-items: center; gap: 14px; min-width: 0; }
+.agenda-dot { flex: none; position: relative; z-index: 1; width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--muted); background: var(--surface); }
+.agenda-item.is-next .agenda-dot { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.agenda-time { flex: none; display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 8px; background: var(--surface-2); font-size: .86rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agenda-item.is-next .agenda-time { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.agenda-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92rem; }
+.agenda-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.agenda-add { display: inline-flex; align-items: center; gap: 6px; }
+.agenda-add svg { width: 16px; height: 16px; }
+
+@container (max-width: 980px) {
+  .summary-tile { padding: 12px; gap: 10px; }
+  .summary-icon { width: 36px; height: 36px; border-radius: 10px; }
+  .summary-icon svg { width: 20px; height: 20px; }
+  .summary-label { font-size: .8rem; }
+  .summary-value { font-size: 1.3rem; }
+}
+@container (max-width: 640px) {
+  .summary-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); height: auto; }
+}
+@media (max-width: 760px) {
+  .home-header { align-items: flex-start; }
+  .summary-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-tiles > li:last-child { grid-column: 1 / -1; }
+  .summary-tile { padding: 12px 14px; gap: 10px; min-height: 72px; }
+  .summary-icon { width: 38px; height: 38px; }
+  .summary-value { font-size: 1.35rem; }
+}
+
+/* 首页组件：内容少时标题和正文更紧凑（效果图的卡片内边距） */
+.widget-card[data-widget-type="task_progress"] > .widget-body,
+.widget-card[data-widget-type="my_todos"] > .widget-body,
+.widget-card[data-widget-type="news_briefing"] > .widget-body,
+.widget-card[data-widget-type="calendar_agenda"] > .widget-body { padding-top: 6px; }

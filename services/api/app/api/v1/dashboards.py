@@ -25,6 +25,7 @@ from app.schemas.dashboards import (
     DashboardCreate,
     DashboardOut,
     DashboardOverview,
+    DashboardReset,
     DashboardUpdate,
     WidgetCreate,
     WidgetOut,
@@ -88,6 +89,20 @@ async def update_dashboard(
     dashboard_id: UUID, access: Member, context: Context, service: Service, body: DashboardUpdate
 ) -> DashboardOut:
     return await service.update_dashboard(context, access, dashboard_id, body)
+
+
+@router.post(
+    "/dashboards/{dashboard_id}/reset",
+    summary="恢复默认首页布局（member，乐观并发）",
+    description="删掉这个仪表盘的全部组件，换成默认首页的组件（工作概况、任务进展、AI 新闻速览、"
+    "我的待办、提醒与日程，T-0163）；前端先二次确认。version 不一致时 409 VERSION_CONFLICT。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def reset_dashboard(
+    dashboard_id: UUID, access: Member, context: Context, service: Service, body: DashboardReset
+) -> DashboardOut:
+    return await service.reset_dashboard(context, access, dashboard_id, body)
 
 
 @router.get(

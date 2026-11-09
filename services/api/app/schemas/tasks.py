@@ -57,6 +57,10 @@ TaskStatusFilter = Literal["open", "done", "all"]
 ClaimMode = Literal["assigned", "open"]
 ClaimScope = Literal["all", "project"]
 TaskSort = Literal["due_at", "priority", "updated"]
+TaskAssigneeFilter = Literal["me"]
+# 首页“任务进展”的四种状态（T-0163，docs/v2/HOME_PLAN.md 第 2 节）
+ProgressStatus = Literal["todo", "in_progress", "review", "blocked"]
+ProgressFilter = Literal["all", "todo", "in_progress", "review", "blocked"]
 
 
 class _Strict(BaseModel):
@@ -207,6 +211,9 @@ class TaskOut(BaseModel):
         description="自由接取的范围：all 全部智能体 / project 只限项目成员"
     )
     claimable: bool = Field(description="现在能被领取：open、没有执行者、没有完成")
+    review_pending: bool = Field(
+        description="已完成待查看（T-0163）：智能体完成后等 owner / admin 确认结果或打回"
+    )
     version: str = Field(description="乐观并发用的不透明字符串；修改 / 删除时原样带回")
     created_at: datetime
     updated_at: datetime
@@ -216,11 +223,11 @@ class TaskPage(Page[TaskOut]):
     pass
 
 
-TaskEventKind = Literal["opened", "claimed", "released", "completed", "reopened"]
+TaskEventKind = Literal["opened", "claimed", "released", "completed", "reopened", "reviewed"]
 
 
 class TaskEventOut(BaseModel):
-    """任务的动态（T-0111）：设为自由接取、领取、放弃、完成、打回。"""
+    """任务的动态（T-0111）：设为自由接取、领取、放弃、完成、打回、确认结果（T-0163）。"""
 
     id: UUID
     kind: TaskEventKind
@@ -241,6 +248,12 @@ class TaskReopen(_Strict):
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
 
+class TaskReview(_Strict):
+    """确认结果（owner / admin，T-0163）：已完成待查看的任务不再出现在首页的“待查看”里。"""
+
+    version: TaskVersion
+
+
 class TaskCreate(_Strict):
     project_id: UUID
     title: TaskTitle
@@ -248,6 +261,10 @@ class TaskCreate(_Strict):
     priority: Priority = 0
     due_at: AwareDatetime | None = None
     labels: Labels = Field(default_factory=list)
+    assignee_user_id: UUID | None = Field(
+        default=None,
+        description="执行者（T-0163，首页“添加待办”指派给自己）：必须是本工作空间的成员",
+    )
 
     @model_validator(mode="after")
     def _unique_labels(self) -> Self:
@@ -303,3 +320,48 @@ class TaskUpdate(_Strict):
         if self.labels is not None:
             self.labels = _dedupe(self.labels)
         return self
+
+
+# ---------------------------------------------------------------- 首页任务进展（T-0163）
+
+
+class ProgressCounts(BaseModel):
+    all: int = Field(description="四种状态合计（已完成且已确认的不算）")
+    todo: int
+    in_progress: int
+    review: int = Field(description="已完成待查看")
+    blocked: int
+
+
+class ProgressBlocker(BaseModel):
+    issue_id: UUID
+    number: int
+    title: str = Field(description="阻塞 Issue 的标题；来自人或智能体，按纯文本显示")
+    count: int = Field(description="未关闭的阻塞 Issue 共几条")
+
+
+class ProgressExecutor(BaseModel):
+    kind: Literal["user", "instance"]
+    id: UUID
+    name: str
+
+
+class TaskProgressItem(BaseModel):
+    id: UUID
+    title: str
+    project_id: UUID
+    project_title: str
+    status: ProgressStatus
+    executor: ProgressExecutor | None = Field(description="执行者；没有指派时为 null")
+    due_at: datetime | None
+    updated_at: datetime
+    blocker: ProgressBlocker | None = Field(description="阻塞时第一个未关闭的阻塞 Issue")
+
+
+class TaskProgressOut(BaseModel):
+    counts: ProgressCounts
+    attention: int = Field(description="需要关注：待查看 + 阻塞")
+    items: list[TaskProgressItem] = Field(
+        description="按状态筛选后的一页；全部时按 待查看 → 阻塞 → 进行中 → 待办 排，"
+        "同状态最近更新的在前"
+    )

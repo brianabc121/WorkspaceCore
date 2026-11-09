@@ -6,7 +6,7 @@ import { useOperationsAccessStore } from '../../stores/operationsAccess'
 import { ApiError, dataOf, errorMessage, isAccessError, type Schema } from '../../services/api'
 import { dashboardFileSchema, layoutSchema, type WidgetValue } from '../../widgets/registry'
 
-type Update = Schema['NoteWidgetUpdate'] | Schema['QuickLinksWidgetUpdate'] | Schema['TodoSummaryWidgetUpdate'] | Schema['TodayTasksWidgetUpdate'] | Schema['RecentDocsWidgetUpdate'] | Schema['CalendarAgendaWidgetUpdate'] | Schema['GitHubActivityWidgetUpdate'] | Schema['ServiceHealthWidgetUpdate'] | Schema['ApiLatencyWidgetUpdate'] | Schema['NotificationsWidgetUpdate']
+type Update = Schema['NoteWidgetUpdate'] | Schema['QuickLinksWidgetUpdate'] | Schema['TodoSummaryWidgetUpdate'] | Schema['TodayTasksWidgetUpdate'] | Schema['RecentDocsWidgetUpdate'] | Schema['CalendarAgendaWidgetUpdate'] | Schema['GitHubActivityWidgetUpdate'] | Schema['ServiceHealthWidgetUpdate'] | Schema['ApiLatencyWidgetUpdate'] | Schema['NotificationsWidgetUpdate'] | Schema['WorkSummaryWidgetUpdate'] | Schema['TaskProgressWidgetUpdate'] | Schema['MyTodosWidgetUpdate']
 export function useDashboard() {
   const auth = useAuthStore()
   const search = useDashboardSearch(), operationsAccess = useOperationsAccessStore()
@@ -140,6 +140,19 @@ export function useDashboard() {
       await refresh(overviewQuery)
     }, '已设为首页')
   }
+  // 恢复默认首页（T-0164）：换成首页效果图的五个组件；前端先二次确认
+  async function resetDashboard() {
+    if (!dashboard.value) return false
+    if (!window.confirm('恢复默认首页会删掉这个仪表盘现有的全部组件，换成工作概况、任务进展、AI 新闻速览、我的待办与提醒与日程。继续吗？')) return false
+    const current = dashboard.value
+    return act(async (committed) => {
+      const updated = dataOf(await auth.api.POST('/api/v1/dashboards/{dashboard_id}/reset', { params: { header, path: { dashboard_id: current.id } }, body: { version: current.version } }))
+      committed()
+      editing.value = false; dirty.value = false
+      if (selected.value) { selected.value = updated; await refresh(widgetsQuery) }
+      await refresh(overviewQuery)
+    }, '已恢复默认首页')
+  }
   async function saveWidget(value: WidgetValue, widget?: Schema['WidgetOut']) {
     if (!dashboard.value) return false
     const id = dashboard.value.id
@@ -171,5 +184,7 @@ export function useDashboard() {
       await refresh(overviewQuery)
     }, '组件已删除')
   }
-  return { overview: overviewQuery.data, dashboard, widgets, shownWidgets, choices, loading, fetching, cardLoading, queryError, denied, error, failure, notice, pending, canEdit, editing, dirty, blocked, beginEdit, changeLayout, saveLayout, importJson, reload, choose, loadChoices, makeDefault, saveWidget, removeWidget }
+  // 页头的“更新于 HH:MM”：首页聚合最近一次成功读取的时间
+  const updatedAt = computed(() => (overviewQuery.dataUpdatedAt.value ? new Date(overviewQuery.dataUpdatedAt.value) : null))
+  return { overview: overviewQuery.data, dashboard, widgets, shownWidgets, choices, loading, fetching, cardLoading, queryError, denied, error, failure, notice, pending, canEdit, editing, dirty, blocked, updatedAt, beginEdit, changeLayout, saveLayout, importJson, reload, choose, loadChoices, makeDefault, resetDashboard, saveWidget, removeWidget }
 }

@@ -1,5 +1,5 @@
 // 项目与任务的浏览器验收（T-0082 起：工作台自己的项目与任务，之前是 T-0023 的 Vikunja 验收）——
-// 新建项目 → 新建任务（带 Idempotency-Key、标签、今天截止）→ 编辑并标为完成 → 看板分列 → 首页待办汇总 →
+// 新建项目 → 新建任务（带 Idempotency-Key、标签、今天截止）→ 编辑并标为完成 → 看板分列 → 首页工作概况 →
 // 删除任务 → 改名 / 归档 / 删除项目（连带任务）→ 移动端 → viewer 只读。
 //
 // 前提：Compose 全栈已启动并迁移（make up && make migrate）。
@@ -110,10 +110,10 @@ const projectCard = (page, title) => page.getByRole('region', { name: `项目 ${
 
   // ---------------------------------------------------------------- 首页任务组件
   await page.goto(`${base}/`)
-  const summary = page.getByRole('article', { name: '待办汇总' })
-  await summary.locator('.summary-number').waitFor()
-  check((await summary.locator('.summary-number').textContent()).trim() === '1', '待办汇总应为 1（只有一个未完成）')
-  step('首页待办汇总显示工作台自己的任务数据')
+  // 首页“工作概况”的待办事项（T-0164，原“待办汇总”）：只有一个未完成、没开始的任务
+  await page.waitForFunction(() => document.querySelector('[data-tile="todo"] .summary-value')?.textContent?.trim() === '1')
+  await page.getByRole('article', { name: '任务进展' }).getByRole('link', { name: '一直未完成', exact: true }).waitFor()
+  step('首页工作概况与任务进展显示工作台自己的任务数据')
 
   // ---------------------------------------------------------------- 删除任务（二次确认）
   await page.goto(`${base}/tasks`)

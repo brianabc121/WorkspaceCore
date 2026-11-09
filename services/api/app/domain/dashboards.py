@@ -29,6 +29,7 @@ from app.schemas.dashboards import (
     DashboardCreate,
     DashboardOut,
     DashboardOverview,
+    DashboardReset,
     DashboardUpdate,
     OverviewSummary,
     TaskBrief,
@@ -209,6 +210,35 @@ class DashboardService:
                 metadata={"fields": changed},
                 client_ip=context.client_ip,
             )
+        await self.db.commit()
+        return _dashboard_out(dashboard)
+
+    async def reset_dashboard(
+        self,
+        context: AuthContext,
+        access: WorkspaceAccess,
+        dashboard_id: uuid.UUID,
+        body: DashboardReset,
+    ) -> DashboardOut:
+        """换成默认首页布局（T-0163）：原有组件全部删除（前端先二次确认），版本递增。"""
+        dashboard = await self._locked_dashboard(access, dashboard_id)
+        if body.version != dashboard.version:
+            raise version_conflict(dashboard.version)
+        for widget in await dashboard_repo.list_widgets(self.db, dashboard.id):
+            await dashboard_repo.delete_widget(self.db, widget.id)
+        widgets = dashboard_defaults.starter_widgets()
+        await dashboard_defaults.add_widgets(self.db, dashboard.id, widgets)
+        dashboard.version += 1
+        await self.db.flush()
+        await self.audit.record(
+            "dashboard.reset",
+            workspace_ids=[access.workspace.id],
+            actor_id=context.user.id,
+            resource_type="dashboard",
+            resource_id=dashboard.id,
+            metadata={"widgets": len(widgets)},
+            client_ip=context.client_ip,
+        )
         await self.db.commit()
         return _dashboard_out(dashboard)
 

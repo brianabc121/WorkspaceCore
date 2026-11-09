@@ -33,7 +33,9 @@ function pages() {
   const source = fs.readFileSync(path.join(ROOT, 'apps/web/src/app/navigation.ts'), 'utf8')
   const found = [...source.matchAll(/path: '([^']+)', title: '([^']+)'/g)].map(([, route, title]) => ({ route, title }))
   check(found.length >= 12, `导航定义里只找到 ${found.length} 个页面，navigation.ts 的格式可能变了`)
-  return [...found, { route: '/settings/audit', title: '审计日志' }]
+  // 页头与侧栏名称不同的页面：首页侧栏叫“总览”，页头按效果图叫“工作总览”（T-0164）
+  const headings = { '/': '工作总览' }
+  return [...found.map((page) => ({ ...page, title: headings[page.route] ?? page.title })), { route: '/settings/audit', title: '审计日志' }]
 }
 
 // 全部 GET 接口：路径参数用本次的工作空间与仪表盘，必填的查询参数给固定值；SSE 单独检查。

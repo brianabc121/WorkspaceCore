@@ -1,7 +1,7 @@
 // 新闻早报浏览器验收（T-0155，docs/v2/NEWS_PLAN.md 第 12 节）：真实后端 + 真实 TrendRadar 6.11.0 / MCP 4.1.1——
 // 设置页（启用、推送时间、自建 NewsNow、RSS 源、排除词、ntfy 渠道，密钥只显示“已设置”）→ 测试推送经 MCP 到达 →
 // TrendRadar 推来一份分两批的早报（经内部接收地址）→ 早报页各标签（今天 / 往期 / 热榜 / RSS / 搜索 / 收藏）、
-// 收藏与“不感兴趣”（owner 顺手加排除词，配置文件随之改变）、早报正文的安全渲染 → 首页“今日早报”面板 →
+// 收藏与“不感兴趣”（owner 顺手加排除词，配置文件随之改变）、早报正文的安全渲染 → 首页“AI 新闻速览”面板 →
 // 手机宽度 → viewer 只读（看得到早报，没有收藏与设置）。
 //
 // 前提：Compose 全栈已启动并迁移，TrendRadar 已启动（make up && make migrate && make trendradar-up），
@@ -248,19 +248,35 @@ const item = (scope, title) => scope.getByRole('listitem', { name: title, exact:
   check(await tab(page, '往期').getAttribute('aria-selected') === 'true', '通知里的链接应直接打开往期里的那一份')
   step('往期：列表点开看全文；通知里的链接直接打开那一份早报')
 
-  // ---------------------------------------------------------------- 首页“今日早报”面板
+  // ---------------------------------------------------------------- 首页“AI 新闻速览”面板（T-0164，原“今日早报”）
   const widget = await api(page, workspace, 'POST', `/api/v1/dashboards/${dashboard}/widgets`, {
     widget_type: 'news_briefing', config: { lines: 4 },
-    layout: { desktop: { x: 0, y: 20, w: 6, h: 4 }, mobile: { y: 30, h: 4 } },
+    layout: { desktop: { x: 0, y: 20, w: 6, h: 6 }, mobile: { y: 30, h: 6 } },
   })
-  check(widget.status === 201, `添加“今日早报”组件失败：${widget.status} ${JSON.stringify(widget.body).slice(0, 200)}`)
+  check(widget.status === 201, `添加“AI 新闻速览”组件失败：${widget.status} ${JSON.stringify(widget.body).slice(0, 200)}`)
+  // 面板按今天的兴趣主题列出：每个主题写前两条（有摘要用摘要，否则两条标题），来源链到原文
+  const today = await api(page, workspace, 'GET', '/api/v1/news/today')
+  const firstTopic = (today.body.topics ?? []).find((topic) => topic.items.length)
+  check(firstTopic, `今天应有带条目的兴趣主题：${JSON.stringify(today.body).slice(0, 200)}`)
+  const lead = firstTopic.items.slice(0, 2)
+  const expectedText = lead.find((entry) => entry.summary?.trim())?.summary?.trim() ?? lead.map((entry) => entry.title.trim()).join('；')
   await page.goto(`${base}/`)
-  const card = page.getByRole('article', { name: '今日早报' })
-  await card.getByRole('link', { name: new RegExp(briefingTitle) }).waitFor()
-  await card.getByRole('list', { name: '早报开头' }).getByText(/OpenAI 发布新一代推理模型/).waitFor()
-  await card.getByRole('link', { name: '查看早报 →' }).click()
+  const card = page.locator(`article[data-widget-id="${widget.body.id}"]`)
+  check(await card.getAttribute('aria-label') === 'AI 新闻速览', '首页面板应叫“AI 新闻速览”')
+  const digest = card.getByRole('list', { name: '今日新闻主题' })
+  const entry = digest.getByRole('listitem').filter({ has: page.getByRole('heading', { name: firstTopic.name, exact: true }) })
+  await entry.waitFor()
+  check((await entry.locator('.digest-text').textContent()).trim() === expectedText, `主题“${firstTopic.name}”应写今天的前两条：${expectedText}`)
+  const sources = entry.locator('.digest-sources a')
+  check(await sources.count() > 0, '主题下应列出来源链接')
+  for (const link of await sources.all()) {
+    check(/^https?:\/\//.test(await link.getAttribute('href')), '来源链接只允许 http(s)')
+    check(await link.getAttribute('target') === '_blank' && (await link.getAttribute('rel')).includes('noopener'), '来源链接应在新窗口打开')
+  }
+  check(!(await card.innerHTML()).includes('<script'), '面板里不应出现第三方的脚本')
+  await card.getByRole('link', { name: '阅读完整早报' }).click()
   await page.waitForURL(`${base}/news`)
-  step('首页“今日早报”面板：标题与正文开头几行（纯文字），点开进早报页')
+  step('首页“AI 新闻速览”面板：按主题列出今天的条目与来源（纯文字，链接只允许 http(s)），点开进早报页')
 
   // ---------------------------------------------------------------- 手机宽度
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'zh-CN', timezoneId: 'Asia/Shanghai', storageState: await context.storageState() })

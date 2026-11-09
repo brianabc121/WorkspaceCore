@@ -46,6 +46,10 @@ from app.repositories import integrations as integration_repo
 from app.repositories import tasks as repo
 from app.schemas.tasks import (
     MAX_PROJECT_AGENTS,
+    ProgressBlocker,
+    ProgressCounts,
+    ProgressExecutor,
+    ProgressFilter,
     ProjectAgentBrief,
     ProjectAgentList,
     ProjectAgentOut,
@@ -61,6 +65,8 @@ from app.schemas.tasks import (
     TaskEventOut,
     TaskOut,
     TaskPage,
+    TaskProgressItem,
+    TaskProgressOut,
     TaskSort,
     TaskStatusFilter,
     TaskUpdate,
@@ -126,6 +132,7 @@ def task_out(task: Task) -> TaskOut:
         claim_mode=task.claim_mode,
         claim_scope=task.claim_scope,
         claimable=task_claims.claimable(task),
+        review_pending=task.review_pending,
         version=str(task.version),
         created_at=task.created_at,
         updated_at=task.updated_at,
@@ -285,6 +292,7 @@ class TaskService:
         limit: int,
         assignee_instance_id: uuid.UUID | None = None,
         claimable_for: uuid.UUID | None = None,
+        assignee_user_id: uuid.UUID | None = None,
     ) -> TaskPage:
         offset = decode_cursor(cursor)
         rows = await repo.list_tasks(
@@ -301,6 +309,7 @@ class TaskService:
             limit=limit + 1,
             assignee_instance_id=assignee_instance_id,
             claimable_for=claimable_for,
+            assignee_user_id=assignee_user_id,
         )
         return TaskPage(
             items=[task_out(row) for row in rows[:limit]],
@@ -310,6 +319,52 @@ class TaskService:
 
     async def get_task(self, access: WorkspaceAccess, task_id: uuid.UUID) -> TaskOut:
         return task_out(await self._task(access, task_id))
+
+    async def progress(
+        self, access: WorkspaceAccess, *, status: ProgressFilter, limit: int
+    ) -> TaskProgressOut:
+        """首页“任务进展”（T-0163，docs/v2/HOME_PLAN.md 第 2 节）：四种状态的数量与一页条目。"""
+        counts = await repo.progress_counts(self.db, access.workspace.id)
+        rows = await repo.progress_items(self.db, access.workspace.id, status=status, limit=limit)
+        blocked = [task.id for task, _, state, _, _ in rows if state == "blocked"]
+        blockers = await repo.first_blockers(self.db, blocked)
+        items: list[TaskProgressItem] = []
+        for task, project_title, state, user_name, instance_name in rows:
+            executor: ProgressExecutor | None = None
+            if task.assignee_user_id is not None:
+                executor = ProgressExecutor(
+                    kind="user", id=task.assignee_user_id, name=user_name or ""
+                )
+            elif task.assignee_instance_id is not None:
+                executor = ProgressExecutor(
+                    kind="instance", id=task.assignee_instance_id, name=instance_name or ""
+                )
+            found = blockers.get(task.id)
+            items.append(
+                TaskProgressItem(
+                    id=task.id,
+                    title=task.title,
+                    project_id=task.project_id,
+                    project_title=project_title,
+                    status=state,
+                    executor=executor,
+                    due_at=task.due_at,
+                    updated_at=task.updated_at,
+                    blocker=ProgressBlocker(
+                        issue_id=found[0].id,
+                        number=found[0].number,
+                        title=found[0].title,
+                        count=found[1],
+                    )
+                    if found
+                    else None,
+                )
+            )
+        return TaskProgressOut(
+            counts=ProgressCounts(all=sum(counts.values()), **counts),
+            attention=counts["review"] + counts["blocked"],
+            items=items,
+        )
 
     async def _task(
         self, access: WorkspaceAccess, task_id: uuid.UUID, *, lock: bool = False
@@ -418,6 +473,8 @@ class TaskService:
     ) -> WriteResult:
         async def write() -> WriteResult:
             await self._project(access, body.project_id)
+            if body.assignee_user_id is not None:
+                await self._check_member(access, body.assignee_user_id)
             task = Task(
                 workspace_id=access.workspace.id,
                 project_id=body.project_id,
@@ -426,6 +483,7 @@ class TaskService:
                 priority=body.priority,
                 due_at=body.due_at,
                 labels=body.labels,
+                assignee_user_id=body.assignee_user_id,
                 created_by=context.user.id,
             )
             self.db.add(task)
@@ -471,6 +529,8 @@ class TaskService:
                 value = getattr(body, name)
                 if name == "done" and value != task.done:
                     task.done_at = now if value else None
+                    # 人改了完成状态：不再等人查看（T-0163）
+                    task.review_pending = False
                     if value:
                         # 完成任务：正在执行的一段随之结束（智能体的任务经审批完成时也走这里）
                         await task_runs.end_open_run(
@@ -563,17 +623,20 @@ class TaskService:
             ]
         )
 
+    async def _check_member(self, access: WorkspaceAccess, user_id: uuid.UUID) -> None:
+        member = await self.db.scalar(
+            select(WorkspaceMember.user_id).where(
+                WorkspaceMember.workspace_id == access.workspace.id,
+                WorkspaceMember.user_id == user_id,
+            )
+        )
+        if member is None:
+            raise _bad_assignee("assignee_user_id", "不是本工作空间的成员")
+
     async def _check_assignee(self, access: WorkspaceAccess, body: TaskUpdate) -> None:
         """执行者必须是本工作空间的成员，或本工作空间里没有停用的实例。"""
         if body.assignee_user_id is not None:
-            member = await self.db.scalar(
-                select(WorkspaceMember.user_id).where(
-                    WorkspaceMember.workspace_id == access.workspace.id,
-                    WorkspaceMember.user_id == body.assignee_user_id,
-                )
-            )
-            if member is None:
-                raise _bad_assignee("assignee_user_id", "不是本工作空间的成员")
+            await self._check_member(access, body.assignee_user_id)
         if body.assignee_instance_id is not None:
             instance = await self.db.scalar(
                 select(AgentInstance).where(

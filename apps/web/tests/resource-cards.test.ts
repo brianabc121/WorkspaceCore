@@ -1,4 +1,4 @@
-import { render, fireEvent, screen } from '@testing-library/vue'
+import { render, fireEvent, screen, within } from '@testing-library/vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createMemoryHistory } from 'vue-router'
@@ -7,6 +7,7 @@ import { createAppRouter } from '../src/app/router'
 import { useAuthStore } from '../src/stores/auth'
 import WidgetFrame from '../src/widgets/WidgetFrame.vue'
 import { registry, parseWidget } from '../src/widgets/registry'
+import { dayClock } from '../src/widgets/home/format'
 import { mockApi, openApp, emptyPage, me, workspace, fail } from './helpers'
 import { widget, overview } from './dashboard-fixtures'
 import { source, bookmark, calendarEvent } from './sprint4-fixtures'
@@ -41,8 +42,10 @@ describe('知识与日历首页组件', () => {
       expect(await screen.findByText('刷新后的日程')).toBeVisible()
       expect(screen.queryByText('刷新前的文档')).not.toBeInTheDocument()
       const reads = requests.filter((r) => new URL(r.url).pathname === '/api/v1/calendar/events')
+      // 第一次读取用打开页面时的时刻；刷新后的读取都从刷新时的“现在”开始（移动窗口）
+      expect(new URL(reads[0]!.url).searchParams.get('start')).toBe('2026-10-30T02:00:00.000Z')
       expect(reads).toHaveLength(2)
-      expect(new URL(reads[1]!.url).searchParams.get('start')).toBe('2026-10-30T03:00:00.000Z')
+      for (const read of reads.slice(1)) expect(new URL(read.url).searchParams.get('start')).toBe('2026-10-30T03:00:00.000Z')
     } finally { vi.useRealTimers() }
   })
   it('registers validated defaults and rejects out-of-range configuration', () => {
@@ -61,14 +64,26 @@ describe('知识与日历首页组件', () => {
     expect(new URL(read.url).searchParams.get('sort')).toBe('updated')
     expect(new URL(read.url).searchParams.get('limit')).toBe('1')
   })
-  it('requests a bounded calendar range and shows event timezone', async () => {
-    const requests = mockApi((r) => new URL(r.url).pathname === '/api/v1/calendar/events' ? Response.json({ ...emptyPage, items: [calendarEvent] }) : undefined)
-    await card('calendar_agenda', 'ok', { days: 3, limit: 2 })
-    expect(await screen.findByText('发布评审')).toBeVisible()
-    expect(screen.getByText(/Asia\/Shanghai/)).toBeVisible()
-    const query = new URL(requests.find((r) => new URL(r.url).pathname === '/api/v1/calendar/events')!.url).searchParams
-    expect(Date.parse(query.get('end')!) - Date.parse(query.get('start')!)).toBe(3 * 86400000)
-    expect(query.get('limit')).toBe('2')
+  it('requests a bounded calendar range and shows the events on a timeline', async () => {
+    // 提醒与日程（T-0164）：时间轴上显示“今天 / 明天 + 时刻”，最近的一条高亮
+    const now = new Date('2026-10-30T01:00:00Z')
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(now)
+    try {
+      const later = { ...calendarEvent, id: 'later', title: '周会', start_at: '2026-10-30T05:00:00Z', end_at: '2026-10-30T06:00:00Z' }
+      const requests = mockApi((r) => new URL(r.url).pathname === '/api/v1/calendar/events' ? Response.json({ ...emptyPage, items: [calendarEvent, later] }) : undefined)
+      await card('calendar_agenda', 'ok', { days: 3, limit: 2 })
+      expect(await screen.findByText('发布评审')).toBeVisible()
+      const list = screen.getByRole('list', { name: '近期提醒与日程' })
+      const entries = within(list).getAllByRole('listitem')
+      expect(entries.map((li) => li.querySelector('time')?.textContent)).toEqual([dayClock(calendarEvent.start_at, now), dayClock(later.start_at, now)])
+      expect(entries[0]).toHaveClass('is-next')
+      expect(entries[1]).not.toHaveClass('is-next')
+      expect(screen.getByText('提醒与日程')).toBeVisible()
+      expect(screen.getByRole('link', { name: '查看日历' })).toHaveAttribute('href', '/calendar')
+      const query = new URL(requests.find((r) => new URL(r.url).pathname === '/api/v1/calendar/events')!.url).searchParams
+      expect(Date.parse(query.get('end')!) - Date.parse(query.get('start')!)).toBe(3 * 86400000)
+      expect(query.get('limit')).toBe('2')
+    } finally { vi.useRealTimers() }
   })
   it('shows loading while a list is pending', async () => {
     let finish: ((response: Response) => void) | undefined

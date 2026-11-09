@@ -263,6 +263,11 @@ async def test_release_and_complete(env: ImEnv) -> None:
     assert done["status"] == "completed" and done["already_done"] is False
     current = await get_task(env, task["id"])
     assert current["done"] is True
+    # 智能体完成的任务等人查看（首页“已完成待查看”，T-0163）
+    assert current["review_pending"] is True
+    progress = (await env.client.get("/api/v1/tasks/progress", headers=env.headers())).json()
+    assert progress["counts"]["review"] >= 1
+    assert any(i["id"] == task["id"] and i["status"] == "review" for i in progress["items"])
     assert sorted(r["end_reason"] for r in await runs(env, task["id"])) == ["done", "paused"]
     events = (
         await env.client.get(f"/api/v1/tasks/{task['id']}/events", headers=env.headers())
@@ -293,6 +298,7 @@ async def test_reopen_sends_reason_and_opens_new_run(env: ImEnv) -> None:
     assert response.status_code == 200, response.text
     reopened = response.json()
     assert reopened["done"] is False and reopened["assignee_instance_id"] == a["id"]
+    assert reopened["review_pending"] is False
     open_runs = [r for r in await runs(env, task["id"]) if r["ended_at"] is None]
     assert len(open_runs) == 1 and open_runs[0]["instance_id"] == a["id"]
     messages = texts_to(env, a["im_user_id"])

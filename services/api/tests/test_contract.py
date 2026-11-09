@@ -244,6 +244,9 @@ def test_widget_types_are_a_discriminated_union() -> None:
         "project_progress",
         "im_quick_chat",
         "news_briefing",
+        "work_summary",
+        "task_progress",
+        "my_todos",
     }
 
 

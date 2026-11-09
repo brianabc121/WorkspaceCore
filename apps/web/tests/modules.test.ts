@@ -61,7 +61,8 @@ describe('module registry', () => {
       expect(typeof item.component).toBe('function')
       expect(parseWidget({ ...widget, widget_type: item.type, config: {} })?.config).toEqual(item.configSchema.parse({}))
     }
-    expect(registry.news_briefing).toMatchObject({ title: '今日早报', defaultSize: { w: 6, h: 4 }, module: 'news' })
+    // T-0164：首页效果图里叫“AI 新闻速览”
+    expect(registry.news_briefing).toMatchObject({ title: 'AI 新闻速览', defaultSize: { w: 4, h: 6 }, module: 'news' })
   })
 
   it('merges module nav entries into the existing sections and maps paths and events back to modules', () => {
@@ -157,7 +158,7 @@ describe('应用中心', () => {
     expect(within(news).getByText('已启用', { selector: '.badge' })).toBeVisible()
     expect(within(news).getByText('v1.0.0')).toBeVisible()
     expect(within(news).getByText('news_latest')).toBeVisible()
-    expect(within(news).getByText('今日早报')).toBeVisible()
+    expect(within(news).getByText('AI 新闻速览')).toBeVisible()
     expect(within(news).getByRole('switch', { name: '启用新闻早报' })).toHaveAttribute('aria-checked', 'true')
     const other = screen.getByRole('listitem', { name: '模块：记账' })
     expect(within(other).getByText('需要先部署', { selector: '.badge' })).toBeVisible()
@@ -224,7 +225,7 @@ describe('module widgets', () => {
   it('shows 功能已停用 for a widget of a disabled module without loading it', async () => {
     const requests = mockApi(r => (path(r) === '/api/v1/dashboard/overview' ? Response.json({ ...overview, widgets: [card] }) : path(r) === '/api/v1/modules' ? Response.json({ items: [off] }) : undefined))
     await openApp('/')
-    const article = await screen.findByRole('article', { name: '今日早报' })
+    const article = await screen.findByRole('article', { name: 'AI 新闻速览' })
     expect(await within(article).findByText('功能已停用：「新闻早报」在当前工作空间没有启用。')).toBeVisible()
     expect(within(article).getByRole('link', { name: '到应用中心启用 →' })).toHaveAttribute('href', '/settings/modules')
     expect(requests.some(r => path(r).startsWith('/api/v1/news/'))).toBe(false)
@@ -233,11 +234,12 @@ describe('module widgets', () => {
   it('treats MODULE_DISABLED from the API as 功能已停用 and rechecks the module list', async () => {
     const requests = mockApi(r => {
       if (path(r) === '/api/v1/dashboard/overview') return Response.json({ ...overview, widgets: [card] })
-      if (path(r) === '/api/v1/news/briefings') return Response.json({ error: { code: 'MODULE_DISABLED', message: '这个功能在当前工作空间没有启用', request_id: 'req', details: {} } }, { status: 404 })
+      // 早报的两个接口（今天、最新一份）都因模块停用返回 MODULE_DISABLED
+      if (path(r) === '/api/v1/news/briefings' || path(r) === '/api/v1/news/today') return Response.json({ error: { code: 'MODULE_DISABLED', message: '这个功能在当前工作空间没有启用', request_id: 'req', details: {} } }, { status: 404 })
       return undefined
     })
     await openApp('/')
-    const article = await screen.findByRole('article', { name: '今日早报' })
+    const article = await screen.findByRole('article', { name: 'AI 新闻速览' })
     expect(await within(article).findByText(/功能已停用/)).toBeVisible()
     expect(within(article).queryByRole('alert')).not.toBeInTheDocument()
     await vi.waitFor(() => expect(requests.filter(r => path(r) === '/api/v1/modules').length).toBeGreaterThan(1))
@@ -250,7 +252,7 @@ describe('module widgets', () => {
     render(WidgetEditor, { props: { bottom: 0, busy: false, error: '' }, global: { plugins: [pinia] } })
     const options = Array.from((screen.getByLabelText('组件类型') as HTMLSelectElement).options).map((option) => option.textContent)
     expect(options).toContain('文本便签')
-    expect(options).not.toContain('今日早报')
-    expect(screen.getByText(/通知填写 limit/).textContent).not.toContain('今日早报')
+    expect(options).not.toContain('AI 新闻速览')
+    expect(screen.getByText(/通知填写 limit/).textContent).not.toContain('AI 新闻速览')
   })
 })

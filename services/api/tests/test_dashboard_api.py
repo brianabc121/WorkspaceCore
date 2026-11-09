@@ -62,6 +62,10 @@ def app_of(client: httpx.AsyncClient) -> Any:
     return cast(httpx.ASGITransport, client._transport).app
 
 
+# 默认首页的组件数（T-0163：工作概况、任务进展、AI 新闻速览、我的待办、提醒与日程）
+STARTERS = 5
+
+
 def widget(**overrides: Any) -> dict[str, Any]:
     return {"widget_type": "note", "config": {"text": "你好"}, "layout": LAYOUT, **overrides}
 
@@ -70,11 +74,13 @@ async def test_setup_creates_the_default_dashboard_with_starter_widgets(home: Ho
     data = await home.overview()
     assert data["dashboard"]["is_default"] is True
     assert data["dashboard"]["title"] == "首页"
+    # T-0163：首页效果图的五个组件（docs/v2/HOME_PLAN.md 第 4 节）
     assert [w["widget_type"] for w in data["widgets"]] == [
-        "note",
-        "quick_links",
-        "todo_summary",
-        "today_tasks",
+        "work_summary",
+        "task_progress",
+        "news_briefing",
+        "calendar_agenda",
+        "my_todos",
     ]
     # T-0082：任务是工作台自己的数据，不需要先接入外部服务
     assert data["modules"]["tasks"]["status"] == "ok"
@@ -272,7 +278,7 @@ async def test_invalid_widgets_are_rejected(home: Home, body: dict[str, Any]) ->
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_FAILED"
     assert "javascript" not in response.text
-    assert len((await home.overview())["widgets"]) == 4
+    assert len((await home.overview())["widgets"]) == STARTERS
 
 
 async def test_resources_of_other_workspaces_are_not_found(
@@ -364,7 +370,7 @@ async def test_import_creates_a_dashboard_atomically_and_can_become_default(home
 async def test_limits(home: Home) -> None:
     dashboard = (await home.overview())["dashboard"]
     path = f"/api/v1/dashboards/{dashboard['id']}/widgets"
-    for _ in range(50 - 4):
+    for _ in range(50 - STARTERS):
         assert (
             await home.client.post(path, json=widget(), headers=home.headers(write=True))
         ).status_code == 201
@@ -397,13 +403,13 @@ async def test_unknown_types_in_storage_do_not_break_the_page(home: Home) -> Non
     data = await home.overview()
     legacy = next(w for w in data["widgets"] if w["widget_type"] == "legacy_widget")
     assert legacy["config"] == {"anything": [1, 2]}
-    # 无法解析的布局紧接着放在其余组件下方（入门组件桌面端到第 7 行、移动端到第 13 行）
+    # 无法解析的布局紧接着放在其余组件下方（默认首页桌面端到第 13 行、移动端到第 24 行）
     assert legacy["layout"] == {
-        "desktop": {"x": 0, "y": 7, "w": 4, "h": 3},
-        "mobile": {"y": 13, "h": 3},
+        "desktop": {"x": 0, "y": 13, "w": 4, "h": 3},
+        "mobile": {"y": 24, "h": 3},
     }
     assert data["widgets"][-1]["id"] == legacy["id"]
-    assert len(data["widgets"]) == 5
+    assert len(data["widgets"]) == STARTERS + 1
 
 
 class _FailingProvider:
@@ -455,7 +461,7 @@ async def test_failing_or_slow_modules_only_degrade_themselves(home: Home) -> No
     }
     assert data["modules"]["calendar"]["reason"] == "timeout"
     assert "secret upstream detail" not in str(data)
-    assert len(data["widgets"]) == 4
+    assert len(data["widgets"]) == STARTERS
 
 
 async def test_overview_respects_the_total_time_budget(make_client: ClientFactory) -> None:
@@ -524,7 +530,14 @@ async def test_concurrent_overviews_queue_instead_of_timing_out(make_client: Cli
 
 async def test_dashboard_writes_are_audited_without_content(home: Home) -> None:
     data = await home.overview()
-    dashboard, note = data["dashboard"], data["widgets"][0]
+    dashboard = data["dashboard"]
+    note = (
+        await home.client.post(
+            f"/api/v1/dashboards/{dashboard['id']}/widgets",
+            json=widget(),
+            headers=home.headers(write=True),
+        )
+    ).json()
     await home.client.patch(
         f"/api/v1/widgets/{note['id']}",
         json={"widget_type": "note", "config": {"text": "私密内容"}, "version": note["version"]},
