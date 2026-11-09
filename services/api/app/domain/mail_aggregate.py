@@ -35,6 +35,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
+from app.core.errors import ApiError
 from app.domain import mail_format as fmt
 from app.domain.connectors import ConnectorRuntime
 from app.domain.mail import METADATA_HEADERS, MailError, MailService, can_read
@@ -173,6 +174,8 @@ class Turn:
     finished: bool = False
     status: Status = "pending"
     error_code: str | None = None
+    first: bool = False  # 这个邮箱在当前查询下的第一轮（读收件箱未读数）
+    unread_read: bool = False
 
 
 @dataclass(frozen=True)
@@ -208,7 +211,7 @@ def sort_key(entry: tuple[AccountRef, fmt.ParsedMessage]) -> tuple[int, float, s
     )
 
 
-def _status_of(error: MailError) -> Status:
+def _status_of(error: ApiError) -> Status:
     if error.code == "RATE_LIMITED":
         return "rate_limited"
     if error.code in ("MAIL_RECONNECT", "MAIL_SCOPE_MISSING"):
@@ -464,11 +467,13 @@ class MailAggregateService:
             async def action(client: gmail.GmailClient) -> None:
                 await self._fetch(client, entry, turn, query=query, label=label, limit=limit)
 
+            turn.first = not entry.started
             try:
                 # 重新校验：邮箱还在这个工作空间、没断开、授权有效
                 account = await service.account(workspace_id, ref.id)
                 await service.read_with(account, action)
-            except MailError as error:
+            except ApiError as error:
+                # MailError 与部署层面的错误（例如凭证密钥缺失）：只算这个邮箱失败
                 turn.status, turn.error_code = _status_of(error), error.code
                 if error.code == "RATE_LIMITED":
                     retry = error.details.get("retry_after")
@@ -488,8 +493,7 @@ class MailAggregateService:
         limit: int,
     ) -> None:
         """列一页（还有没取的 ID 时先取完）→ 取元数据。401 重跑时接着上次的进度。"""
-        fresh = not entry.started
-        if fresh or (not entry.pending and entry.token):
+        if not entry.started or (not entry.pending and entry.token):
             async with self._slots:
                 page = await client.list_messages(
                     query=query or None,
@@ -504,8 +508,9 @@ class MailAggregateService:
             entry.pending = [str(m["id"]) for m in refs[:limit]]
             entry.token = str(token) if token else None
             entry.estimate = estimate if isinstance(estimate, int) else None
-        if fresh:
+        if turn.first and not turn.unread_read:
             entry.unread = await self._unread(client)
+            turn.unread_read = True
         await self._metadata(client, entry, turn, limit)
         entry.done = not entry.pending and entry.token is None
         entry.retry_at = None
