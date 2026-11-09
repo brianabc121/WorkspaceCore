@@ -47,6 +47,8 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (path === '/api/v1/im/badges') return Response.json({ im_unread: 0, pending_approvals: 0 })
     if (path === '/api/v1/search') return Response.json(emptyPage)
     if (path === '/api/v1/ai/tool-executions') return Response.json({ ...emptyPage, pending_count: 0 })
+    // AI 审批汇总（T-0191）：默认没有调用记录
+    if (path === '/api/v1/ai/tool-executions/summary') return Response.json({ pending_count: 0, expiring_count: 0, critical_pending_count: 0, exception_count: 0, as_of: new Date().toISOString(), period: new URL(request.url).searchParams.get('period') ?? 'all', expiring_window_seconds: 180, instances: [], tools: [] })
     if (path === '/api/v1/audit-logs') return Response.json(emptyPage)
     if (/^\/api\/v1\/workspaces\/[^/]+\/members$/.test(path) && request.method === 'GET') return Response.json({ ...emptyPage, items: [{ user_id: me.user.id, email: me.user.email, display_name: me.user.display_name, role: 'owner', joined_at: '2026-10-30T00:00:00Z', you: true }] })
     if (path === '/api/v1/knowledge/resources' || path === '/api/v1/knowledge/sources' || path === '/api/v1/calendar/events') return Response.json(emptyPage)
