@@ -144,9 +144,10 @@ async function remove() {
         <button type="button" class="primary-button" :disabled="busy || running || !canLogin || ssh.connection_status === 'auth_failed'" @click="prepare">{{ server.initialization_status === 'ready' ? '重新初始化' : '初始化服务器' }}</button>
         <button v-if="ssh.password_set" type="button" class="secondary-button" :disabled="busy || running" @click="emit('edit', 'credentials')">更新登录密码</button>
         <button type="button" class="secondary-button" :disabled="busy || running || hasDeployments" @click="emit('edit', 'address')">更换地址</button>
-        <button type="button" class="secondary-button im-danger" :disabled="busy || running || hasDeployments" @click="remove">移除服务器</button>
+        <button type="button" class="secondary-button im-danger" :disabled="busy || running || hasDeployments || ssh.legacy_key_cleanup_state === 'pending'" @click="remove">移除服务器</button>
       </div>
       <p v-if="running" class="form-help">这台服务器正在执行任务，结束后再操作。</p>
+      <p v-else-if="ssh.legacy_key_cleanup_state === 'pending'" class="form-help">服务器上还留有旧方案的专用公钥：先完成上面的“旧公钥退役”，再移除服务器。</p>
       <p v-else-if="hasDeployments" class="form-help">这台服务器上有 {{ server.managed_deployments }} 条平台部署记录：要更换地址或移除服务器，先在 OpenClaw 智能体页卸载它们。</p>
     </template>
     <p v-if="error" role="alert">{{ error }}</p>

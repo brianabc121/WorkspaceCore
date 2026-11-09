@@ -8,6 +8,7 @@
 import asyncio
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -452,3 +453,24 @@ async def test_openclaw_installer_refuses_client_keys_but_runner_keeps_them() ->
     assert RunnerInstaller._save_key is not agent_ssh_install.Installer._save_key
     assert RunnerInstaller._authorize is agent_ssh_install.Installer._authorize
     assert RunnerInstaller._connect is agent_ssh_install.Installer._connect
+
+
+def test_retained_deployment_offers_no_instance_ops() -> None:
+    """卸载时保留了目录（容器与定时任务已删除）：实例级运维按未部署处理，
+    以免“重新拉起”绕过部署记录把容器拉起来（T-0183 核验发现）。"""
+    from app.domain.agent_ops import unavailable_reason
+    from app.models import AgentDeployment, AgentSshTarget
+
+    target = AgentSshTarget(host_key_confirmed_at=datetime.now(UTC), login_password_ref=None)
+    retained = AgentDeployment(
+        install_dir="/home/deploy/myworkspace-openclaw/abc", runtime_installed=False
+    )
+    assert unavailable_reason(retained, target, None) == "not_deployed"
+    running = AgentDeployment(
+        install_dir="/home/deploy/myworkspace-openclaw/abc", runtime_installed=True
+    )
+    assert unavailable_reason(running, target, None) == "credential_missing"
+    legacy = AgentDeployment(
+        install_dir="/home/deploy/myworkspace-openclaw/abc", runtime_installed=None
+    )
+    assert unavailable_reason(legacy, target, None) == "credential_missing"

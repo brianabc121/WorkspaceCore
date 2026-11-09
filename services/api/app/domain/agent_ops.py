@@ -223,6 +223,10 @@ def unavailable_reason(
     """
     if deployment is None or not deployment.install_dir or target is None:
         return "not_deployed"
+    if deployment.runtime_installed is False:
+        # 卸载时保留了目录（容器与定时任务已删除）：此时“重新拉起”等动作会绕过部署记录把容器拉起来，
+        # 运维按未部署处理；重新部署后才恢复（T-0183 核验发现）
+        return "not_deployed"
     return _login_reason(target, box)
 
 

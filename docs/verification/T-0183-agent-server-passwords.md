@@ -77,6 +77,11 @@ CI `.github/workflows/ci-infra.yml` 的 `agents` job（GitHub `ubuntu-latest`，
    显示“请求失败，请稍后重试。”。例如旧公钥待退役的服务器点“移除服务器”（`ServerInitializationPanel.vue` 第 147 行，按钮没有因此禁用）
    只看到这句通用提示。
 
+**处理（2026-11-09，同一 PR）**：三条都已修复——
+1. `_verify` 在设置了 `AGENT_PUBLIC_ADDRESS` 时按这个地址与入口端口检查（`test_verify_checks_the_public_address_when_the_ingress_name_has_no_dns`）；
+2. `unavailable_reason` 在 `runtime_installed is False` 时返回 `not_deployed`（`test_retained_deployment_offers_no_instance_ops`）；
+3. 前端补上三个错误码的文字；旧公钥待退役时“移除服务器”禁用并说明原因（`agent-server-redesign.test.ts`）。
+
 ## 6. 结果
 
 待 CI 运行后填写（运行编号、各步骤退出码、`agent_ssh_acceptance.py` 的“全部通过 / N 项失败”、浏览器验收输出）。

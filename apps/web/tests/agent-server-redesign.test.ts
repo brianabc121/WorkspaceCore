@@ -292,6 +292,9 @@ describe('agent servers page: connection and initialization', () => {
     expect(ask).toHaveTextContent('上面已有的智能体照常运行')
     expect(within(panel).getByRole('button', { name: '测试连接' })).toBeDisabled()
     expect(within(panel).getByRole('button', { name: '清理旧公钥' })).toBeDisabled()
+    // 旧公钥还没退役：不能移除服务器（后端也会 409 AGENT_SERVER_LEGACY_KEY_PENDING），并说明原因
+    expect(within(panel).getByRole('button', { name: '移除服务器' })).toBeDisabled()
+    expect(within(panel).getByText(/先完成上面的“旧公钥退役”，再移除服务器/)).toBeVisible()
     // 旧的“专用密钥 / 吊销”入口没有了
     expect(screen.queryByRole('button', { name: /吊销/ })).not.toBeInTheDocument()
     expect(screen.queryByText(/专用密钥已装/)).not.toBeInTheDocument()

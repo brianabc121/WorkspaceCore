@@ -673,6 +673,10 @@ class AgentServerInstaller(Installer):
         """最终检查：Docker 可用、部署目录可写、能连到工作台的外网接入地址。"""
         await self.rec.step("verify", "running")
         ingress = prov.ingress_target(self.settings.agent_public_url)
+        if ingress is not None and self.settings.agent_public_address:
+            # 入口主机名不在公网 DNS 里（没有域名，用 agent-gateway.myworkspace.internal）时，
+            # 接入包的本机隧道直接连这个地址（agent_bundle._tunnel_hosts）；这里按同样的地址检查
+            ingress = (self.settings.agent_public_address, ingress[1])
         result = await self._run(
             conn,
             "检查环境",

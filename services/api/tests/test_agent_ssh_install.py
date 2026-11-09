@@ -850,6 +850,28 @@ async def test_unreachable_ingress_fails_the_initialization(owner: Owner, tmp_pa
     assert {s["key"]: s["status"] for s in job["steps"]}["verify"] == "failed"
 
 
+async def test_verify_checks_the_public_address_when_the_ingress_name_has_no_dns(
+    make_client: ClientFactory, migrated_database_url: str, tmp_path: Path
+) -> None:
+    """没有域名时入口主机名（agent-gateway.myworkspace.internal）只写在接入包隧道的 hosts 里，
+    服务器本机解析不了：初始化最后一步改按 AGENT_PUBLIC_ADDRESS 检查，
+    与隧道连的地址一致（T-0183）。"""
+    host = FakeHost(tmp_path)
+    settings = {**SETTINGS, "agent_public_address": "203.0.113.7"}
+    async with make_client(**settings) as client:
+        setup = await client.post("/api/v1/setup", json=OWNER)
+        assert setup.status_code == 201
+        owner = Owner(client, setup.json()["workspaces"][0]["id"], migrated_database_url)
+        async with ssh_host(host) as (port, _):
+            instance_id, _ = await owner.prepare(port, initialize=False)
+            job = await owner.initialize(owner.servers[instance_id])
+    assert job["status"] == "succeeded", job
+    verify = next(s for s in job["steps"] if s["key"] == "verify")
+    assert "203.0.113.7:9443" in (verify["detail"] or "")
+    probes = [c for c in host.calls() if c.startswith("timeout")]
+    assert probes and all("203.0.113.7" in c and "agent.example.com" not in c for c in probes)
+
+
 async def test_deploy_needs_docker_usable_now(owner: Owner, tmp_path: Path) -> None:
     """初始化之后 Docker 又不能用了：部署在环境预检（inspect）失败，不自己去装 Docker。"""
     host = FakeHost(tmp_path)
