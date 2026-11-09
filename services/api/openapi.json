@@ -4610,12 +4610,25 @@
         "title": "AssigneeUser",
         "type": "object"
       },
-      "AuditLogOut": {
+      "AuditLogView": {
+        "description": "列表与详情（T-0197）：在原记录之外补充显示名，全部只在当前权限内解析。\n\n审计没有通用的“结果”字段，也不补前后值或 IP；metadata 是写入时脱敏过的附加信息。",
         "properties": {
           "action": {
             "description": "例如 auth.login_succeeded、workspace.updated",
             "title": "Action",
             "type": "string"
+          },
+          "action_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "内置事件的中文名；未知事件为 null，按 action 原样显示",
+            "title": "Action Label"
           },
           "actor_id": {
             "anyOf": [
@@ -4629,6 +4642,18 @@
             ],
             "description": "执行者；系统事件为 null",
             "title": "Actor Id"
+          },
+          "actor_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "操作者在当前工作空间的显示名；actor_id 为 null 时是“系统”；已不是成员（被移出或账号已删）时为 null，按 actor_id 显示",
+            "title": "Actor Label"
           },
           "created_at": {
             "format": "date-time",
@@ -4645,6 +4670,18 @@
             "description": "已脱敏的附加信息，不含密码、Token 等",
             "title": "Metadata",
             "type": "object"
+          },
+          "resource_current_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "对象“现在”的名称，不是记录当时的快照；只在你现在能读这个对象时给出，对象已删除、不在本工作空间或无权读取时为 null（例如密钥名只有 owner 能看到）",
+            "title": "Resource Current Name"
           },
           "resource_id": {
             "anyOf": [
@@ -4678,7 +4715,7 @@
           "metadata",
           "created_at"
         ],
-        "title": "AuditLogOut",
+        "title": "AuditLogView",
         "type": "object"
       },
       "Author": {
@@ -15903,11 +15940,11 @@
         "title": "OverviewSummary",
         "type": "object"
       },
-      "Page_AuditLogOut_": {
+      "Page_AuditLogView_": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/AuditLogOut"
+              "$ref": "#/components/schemas/AuditLogView"
             },
             "title": "Items",
             "type": "array"
@@ -15939,7 +15976,7 @@
         "required": [
           "items"
         ],
-        "title": "Page[AuditLogOut]",
+        "title": "Page[AuditLogView]",
         "type": "object"
       },
       "Page_CalendarEventOut_": {
@@ -33657,6 +33694,7 @@
     },
     "/api/v1/audit-logs": {
       "get": {
+        "description": "新的在前。所有筛选都在服务端、分页之前生效；next_cursor 绑定工作空间与筛选条件，换了条件要从第一页重新加载（旧游标 422）。不返回全量总数（total_estimate 为 null）。列表与详情不写审计。",
         "operationId": "list_audit_logs",
         "parameters": [
           {
@@ -33689,6 +33727,155 @@
             }
           },
           {
+            "description": "起点（含），必须带时区；与 before 一起给出",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "起点（含），必须带时区；与 before 一起给出",
+              "title": "After"
+            }
+          },
+          {
+            "description": "终点（不含），必须带时区，且晚于 after",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "终点（不含），必须带时区，且晚于 after",
+              "title": "Before"
+            }
+          },
+          {
+            "description": "只看这个操作者；不能与 system_only=true 同时使用",
+            "in": "query",
+            "name": "actor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只看这个操作者；不能与 system_only=true 同时使用",
+              "title": "Actor Id"
+            }
+          },
+          {
+            "description": "只看系统事件（actor_id 为 null）",
+            "in": "query",
+            "name": "system_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "只看系统事件（actor_id 为 null）",
+              "title": "System Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "事件名精确匹配；不能与 action_prefix 同时使用",
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "事件名精确匹配；不能与 action_prefix 同时使用",
+              "title": "Action"
+            }
+          },
+          {
+            "description": "事件名前缀（按字面，% 与 _ 不是通配符）",
+            "in": "query",
+            "name": "action_prefix",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "事件名前缀（按字面，% 与 _ 不是通配符）",
+              "title": "Action Prefix"
+            }
+          },
+          {
+            "description": "对象类型精确匹配",
+            "in": "query",
+            "name": "resource_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "对象类型精确匹配",
+              "title": "Resource Type"
+            }
+          },
+          {
+            "description": "关键词（按字面、不区分大小写）：匹配 action、resource_type、resource_id、metadata 里的 name / title，以及内置事件的中文名；不搜 IP 哈希与其他 metadata",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "关键词（按字面、不区分大小写）：匹配 action、resource_type、resource_id、metadata 里的 name / title，以及内置事件的中文名；不搜 IP 哈希与其他 metadata",
+              "title": "Q"
+            }
+          },
+          {
             "description": "当前工作空间；不是成员时返回 404",
             "in": "header",
             "name": "X-Workspace-Id",
@@ -33706,7 +33893,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_AuditLogOut_"
+                  "$ref": "#/components/schemas/Page_AuditLogView_"
                 }
               }
             },
@@ -33759,6 +33946,328 @@
           }
         ],
         "summary": "工作空间审计日志（owner / admin）",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
+    "/api/v1/audit-logs/export": {
+      "get": {
+        "description": "与列表同样的筛选；必须给出 after 与 before，最长 31 天，不接受 cursor 与 limit。读取请求时刻之前符合条件的记录，最多 10000 行：超出时 422 AUDIT_EXPORT_TOO_LARGE（不截断），请缩小范围。生成后记一条审计 audit.export_generated（只有时间范围、行数与过滤摘要，不含搜索词与文件内容）。",
+        "operationId": "export_audit_logs",
+        "parameters": [
+          {
+            "description": "起点（含），必须带时区；与 before 一起给出",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "起点（含），必须带时区；与 before 一起给出",
+              "title": "After"
+            }
+          },
+          {
+            "description": "终点（不含），必须带时区，且晚于 after",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "终点（不含），必须带时区，且晚于 after",
+              "title": "Before"
+            }
+          },
+          {
+            "description": "只看这个操作者；不能与 system_only=true 同时使用",
+            "in": "query",
+            "name": "actor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只看这个操作者；不能与 system_only=true 同时使用",
+              "title": "Actor Id"
+            }
+          },
+          {
+            "description": "只看系统事件（actor_id 为 null）",
+            "in": "query",
+            "name": "system_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "只看系统事件（actor_id 为 null）",
+              "title": "System Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "事件名精确匹配；不能与 action_prefix 同时使用",
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "事件名精确匹配；不能与 action_prefix 同时使用",
+              "title": "Action"
+            }
+          },
+          {
+            "description": "事件名前缀（按字面，% 与 _ 不是通配符）",
+            "in": "query",
+            "name": "action_prefix",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "事件名前缀（按字面，% 与 _ 不是通配符）",
+              "title": "Action Prefix"
+            }
+          },
+          {
+            "description": "对象类型精确匹配",
+            "in": "query",
+            "name": "resource_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "对象类型精确匹配",
+              "title": "Resource Type"
+            }
+          },
+          {
+            "description": "关键词（按字面、不区分大小写）：匹配 action、resource_type、resource_id、metadata 里的 name / title，以及内置事件的中文名；不搜 IP 哈希与其他 metadata",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "关键词（按字面、不区分大小写）：匹配 action、resource_type、resource_id、metadata 里的 name / title，以及内置事件的中文名；不搜 IP 哈希与其他 metadata",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "UTF-8（带 BOM）CSV：id、created_at_utc、action、action_label、actor_id、actor_label、resource_type、resource_id、resource_current_name、metadata_json。以 = + - @、制表符或回车开头的单元格前面加 '，按文本显示；不含 IP、IP 哈希与凭据。Cache-Control: no-store"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "导出审计日志为 CSV（owner / admin）",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
+    "/api/v1/audit-logs/{entry_id}": {
+      "get": {
+        "description": "不在当前工作空间（含不属于任何工作空间的记录）时 404。",
+        "operationId": "get_audit_log",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entry Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditLogView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "一条审计记录（owner / admin）",
         "tags": [
           "audit"
         ]

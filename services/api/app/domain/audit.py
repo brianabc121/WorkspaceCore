@@ -6,14 +6,10 @@
   查询始终限定 workspace_id；与任何工作空间都无关的事件写 workspace_id = NULL，不通过 API 暴露。
 """
 
-import base64
-import binascii
-import json
 import math
 import re
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
-from datetime import datetime
+from collections.abc import Iterable, Mapping
 from itertools import islice
 from typing import Any
 
@@ -21,13 +17,10 @@ from pydantic import SecretBytes, SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.core.errors import ApiError
 from app.domain import security
 from app.models import AuditLog
 from app.repositories import audit as audit_repo
 from app.repositories import workspaces as workspace_repo
-from app.schemas.audit import AuditLogOut
-from app.schemas.common import Page
 
 REDACTED = "[REDACTED]"
 _SENSITIVE_KEY = re.compile(
@@ -120,70 +113,3 @@ class AuditTrail:
             metadata=metadata,
             client_ip=client_ip,
         )
-
-
-# ---------------------------------------------------------------- 查询
-
-
-def _encode_cursor(entry: AuditLog) -> str:
-    raw = json.dumps([entry.created_at.isoformat(), str(entry.id)]).encode()
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
-
-
-def _invalid_cursor() -> ApiError:
-    return ApiError(
-        422,
-        "VALIDATION_FAILED",
-        "请求参数校验失败",
-        details={
-            "errors": [{"loc": ["query", "cursor"], "msg": "无效的游标", "type": "value_error"}]
-        },
-    )
-
-
-def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
-    try:
-        decoded = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
-    except (ValueError, binascii.Error):
-        raise _invalid_cursor() from None
-    # 游标来自客户端：先检查结构与类型，再做转换
-    if not (
-        isinstance(decoded, list)
-        and len(decoded) == 2
-        and all(isinstance(part, str) for part in decoded)
-    ):
-        raise _invalid_cursor()
-    try:
-        created_at, entry_id = datetime.fromisoformat(decoded[0]), uuid.UUID(decoded[1])
-    except ValueError:
-        raise _invalid_cursor() from None
-    if created_at.tzinfo is None:
-        raise _invalid_cursor()
-    return created_at, entry_id
-
-
-def _to_out(entry: AuditLog) -> AuditLogOut:
-    return AuditLogOut(
-        id=entry.id,
-        action=entry.action,
-        actor_id=entry.actor_id,
-        resource_type=entry.resource_type,
-        resource_id=entry.resource_id,
-        metadata=entry.metadata_redacted_json,
-        created_at=entry.created_at,
-    )
-
-
-async def list_page(
-    db: AsyncSession, workspace_id: uuid.UUID, *, limit: int, cursor: str | None
-) -> Page[AuditLogOut]:
-    before = _decode_cursor(cursor) if cursor else None
-    rows: Sequence[AuditLog] = await audit_repo.list_for_workspace(
-        db, workspace_id, limit=limit + 1, before=before
-    )
-    page, more = rows[:limit], len(rows) > limit
-    return Page(
-        items=[_to_out(entry) for entry in page],
-        next_cursor=_encode_cursor(page[-1]) if more else None,
-        total_estimate=None,
-    )
