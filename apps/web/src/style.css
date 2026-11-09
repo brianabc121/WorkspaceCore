@@ -22,21 +22,12 @@
   --color-popover-foreground: var(--text);
 }
 
-.knowledge-list, .calendar-agenda { display: grid; gap: 16px; margin: 18px 0; }
+.knowledge-list { display: grid; gap: 16px; margin: 18px 0; }
 .resource-record { min-width: 0; overflow-wrap: anywhere; }
 .resource-record .section-heading { margin: 0 0 12px; }
 .resource-badge { border: 1px solid var(--line); border-radius: 14px; padding: 4px 10px; white-space: nowrap; }
 .resource-relations { padding-left: 20px; color: var(--muted); font-size: .85rem; }
 .related-documents { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 20px; }
-.calendar-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
-.calendar-day { padding: 16px; min-width: 0; overflow-wrap: anywhere; }
-.calendar-day h2 { font-size: .85rem; margin-bottom: 14px; }
-.calendar-record { border-top: 1px solid var(--line); padding: 12px 0; }
-.calendar-record .task-title { white-space: normal; text-align: left; overflow-wrap: anywhere; }
-.calendar-record .form-help { font-size: .75rem; }
-.calendar-agenda .calendar-day h2 { color: var(--accent); }
-@media (max-width: 1100px) { .calendar-week { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .calendar-week { grid-template-columns: minmax(0, 1fr); } }
 
 /* 设计令牌（T-0083）：颜色沿用原来的变量名，新增状态色、圆角、尺寸。亮 / 暗两套。 */
 :root {
@@ -537,31 +528,6 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .assistant-composer { display: grid; gap: 8px; }
 
 /* 日历月视图（T-0085）：6 周网格；手机上每格只显示数量点 */
-.calendar-nav { align-items: center; }
-.calendar-nav p { margin: 0; font-weight: 600; }
-.calendar-month { padding: 0; overflow: hidden; margin: 14px 0; }
-.calendar-month-head, .calendar-month-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.calendar-month-head span { padding: 8px 10px; color: var(--muted); font-size: .76rem; border-bottom: 1px solid var(--line); }
-.calendar-cell { min-height: 108px; min-width: 0; padding: 6px; display: flex; flex-direction: column; gap: 3px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.calendar-month-row .calendar-cell:last-child { border-right: 0; }
-.calendar-month-row:last-child .calendar-cell { border-bottom: 0; }
-.calendar-cell.is-outside { background: var(--bg); }
-.calendar-cell.is-outside .calendar-cell-date { color: var(--muted); font-weight: 400; }
-.calendar-dots { display: none; gap: 3px; }
-.calendar-dots i { width: 6px; height: 6px; border-radius: 3px; background: var(--accent); }
-.calendar-dots i.is-due { background: var(--warning); }
-.calendar-cell-date { align-self: flex-start; min-width: 26px; height: 26px; padding: 0 6px; border: 0; border-radius: 13px; background: none; color: var(--text); font-size: .8rem; font-weight: 600; }
-.calendar-cell-date:hover { background: var(--surface-2); }
-.calendar-cell.is-today .calendar-cell-date { background: var(--accent); color: var(--accent-text); }
-.calendar-chip { display: block; width: 100%; padding: 2px 6px; border: 0; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-size: .74rem; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.calendar-chip-due { background: var(--warning-soft); color: var(--warning); }
-.calendar-more { align-self: flex-start; padding: 0 4px; border: 0; background: none; color: var(--muted); font-size: .72rem; }
-@media (max-width: 760px) {
-  .calendar-cell { min-height: 64px; padding: 4px 2px; align-items: center; }
-  .calendar-chip, .calendar-more { display: none; }
-  .calendar-dots { display: flex; }
-  .calendar-month-head span { padding: 6px 2px; text-align: center; font-size: .7rem; }
-}
 
 /* 首页（T-0085） */
 .dashboard-title { display: flex; align-items: baseline; gap: 10px; }
@@ -594,7 +560,6 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .inline-select select { height: 40px; }
   .task-check { width: 22px; height: 22px; margin-top: 0; }
   .primary-button, .secondary-button { min-height: 40px; }
-  .calendar-cell-date { min-width: 32px; height: 32px; border-radius: 16px; }
   .account-trigger { min-height: 44px; }
   .nav-label { min-height: 36px; }
 }
