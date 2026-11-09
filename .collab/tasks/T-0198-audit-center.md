@@ -28,3 +28,4 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 12:51 UTC · claude · 创建任务（owner: claude）
+- 2026-11-09 14:04 UTC · claude · 前端 C2 已在分支 b5-c2 提交 0cff913：features/audit（筛选条、事件表、详情、导出）+ AuditPage 改用 ManagementPage；新测试 tests/audit-center-redesign.test.ts 12 项通过，全量 vitest 70 文件 672 项通过，lint / typecheck / build / check:api 通过；1440/1280/768/390 亮暗截图无横向滚动。待办：router.ts 给 /settings/audit 加 wide（不在本任务 paths），密钥库页需支持 ?secret= 定位。
