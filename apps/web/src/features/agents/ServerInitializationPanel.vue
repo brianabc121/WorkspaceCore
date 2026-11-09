@@ -59,7 +59,7 @@ async function prepare() {
   settle()
 }
 async function cleanup() {
-  if (!window.confirm('用保存的密码登录这台服务器，只删除 authorized_keys 里工作台以前装的那一行公钥（其他用户与运行服务器的公钥不动），成功后删除工作台保存的旧私钥。继续？')) return
+  if (!window.confirm('用保存的密码登录这台服务器，只删除 authorized_keys 里工作台以前装的那一行公钥（其他用户与容器服务器的公钥不动），成功后删除工作台保存的旧私钥。继续？')) return
   await act(async () => put(dataOf(await auth.slowApi.POST('/api/v1/agents/servers/{server_id}/legacy-key-cleanup', { params: { header, path: path.value }, body: { version: server.value.version } }))), '已处理旧公钥：结果见下方状态')
   settle()
 }
@@ -134,7 +134,7 @@ async function remove() {
       <div v-if="legacy" class="ws-callout tone-amber" role="group" aria-label="旧公钥退役">
         <strong><KeyRound aria-hidden="true" />{{ ssh.legacy_key_cleanup_state === 'manual_required' ? '旧专用公钥需要手动删除' : '旧专用公钥待退役' }}</strong>
         <p v-if="ssh.legacy_key_cleanup_state === 'manual_required'">工作台没能自动删除（服务器拒绝写 authorized_keys，或连不上）。请在服务器上从登录账号的 ~/.ssh/authorized_keys 里删除工作台以前装的那一行，然后再试一次。</p>
-        <p v-else>以前的方案在这台服务器上装过工作台的专用公钥。现在全程用密码登录：用保存的密码登录后，只删除那一行公钥，其他用户与运行服务器的公钥保持不变。</p>
+        <p v-else>以前的方案在这台服务器上装过工作台的专用公钥。现在全程用密码登录：用保存的密码登录后，只删除那一行公钥，其他用户与容器服务器的公钥保持不变。</p>
         <div class="form-actions"><button type="button" class="secondary-button" :disabled="busy || running || !canLogin" @click="cleanup">清理旧公钥</button></div>
         <p v-if="!canLogin" class="form-help">先补充密码、确认指纹，才能清理。</p>
       </div>

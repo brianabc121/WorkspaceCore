@@ -91,7 +91,7 @@ describe('sidebar layout', () => {
     expect(within(fav).getByRole('link', { name: /Grafana/ })).toBeInTheDocument()
     const tools = sectionOf(nav, '连接与工具')
     expect(within(tools).getByRole('link', { name: '智能体服务器' })).toHaveAttribute('href', '/agent-servers')
-    expect(within(tools).getByRole('link', { name: '运行服务器' })).toHaveAttribute('href', '/runner')
+    expect(within(tools).getByRole('link', { name: '容器服务器' })).toHaveAttribute('href', '/runner')
     expect(within(tools).getByRole('link', { name: '运营看板' })).toHaveAttribute('href', '/p/board')
     expect(within(nav).queryByRole('link', { name: 'OpenClaw 实例' })).not.toBeInTheDocument()
   })

@@ -7,7 +7,7 @@ import { formatTime } from '../time'
 import { HOST_PATTERN, SSH_JOB_KIND, SSH_JOB_STATUS, SSH_STEP, SSH_STEP_STATUS, USERNAME_PATTERN, hostKeyCommand, sshError } from '../agents/ssh'
 import { useRunnerAction } from './api'
 
-// 页面上通过 SSH 部署运行服务器（T-0136，RUNNER_PLAN 第 9 节，owner）：与 OpenClaw 实例的 SSH 自动部署同一套流程——
+// 页面上通过 SSH 部署容器服务器（T-0136，RUNNER_PLAN 第 9 节，owner）：与 OpenClaw 实例的 SSH 自动部署同一套流程——
 // 填写服务器 → 只读取主机公钥、在服务器上核对指纹 → 输入一次登录密码部署（工作台换成自己的专用密钥，密码不保存）。
 // 部署：上传接入包，以 root 运行 install.sh（Docker、gVisor、runner-agent），等 runner-agent 连上工作台。
 // 不是 root 账号时 install.sh 要用 sudo，所以每次部署都要填密码。
@@ -31,7 +31,7 @@ const formValid = computed(() => HOST_PATTERN.test(form.host.trim()) && USERNAME
 const replaceable = computed(() => !!target.value && !target.value.client_key_installed && !running.value)
 
 function put(state: State) { cache.setQueryData(key, state) }
-// 任务结束后运行服务器的状态（在线、版本）也变了
+// 任务结束后容器服务器的状态（在线、版本）也变了
 watch(() => job.value?.status, (now, before) => { if (before === 'running' && now && now !== 'running') { notice.value = ''; void refresh() } })
 // 换了服务器（地址、端口、账号、主机公钥）就清空输入过的密码：绝不把一台服务器的密码发给另一台
 watch(() => target.value ? [target.value.address, target.value.port, target.value.username, target.value.host_key_fingerprint].join('\n') : '', () => { password.value = '' })
@@ -114,12 +114,12 @@ async function remove() {
 <template>
   <section class="panel runner-card" aria-label="通过 SSH 部署">
     <h2>通过 SSH 部署（推荐）</h2>
-    <p v-if="!auth.isOwner" class="form-help">只有 owner 能通过 SSH 部署运行服务器（要输入服务器的登录密码）。</p>
+    <p v-if="!auth.isOwner" class="form-help">只有 owner 能通过 SSH 部署容器服务器（要输入服务器的登录密码）。</p>
     <p v-else-if="ssh.isPending.value" role="status">正在加载…</p>
     <p v-else-if="ssh.error.value" role="alert">{{ sshError(ssh.error.value) }}</p>
     <template v-else>
       <p v-if="!target" class="form-help">
-        填写运行服务器的 SSH 地址与账号（root，或能用 sudo 的账号），工作台会装好 Docker、gVisor 与 runner-agent 并让它连回工作台，不用在终端里做任何事。
+        填写容器服务器的 SSH 地址与账号（root，或能用 sudo 的账号），工作台会装好 Docker、gVisor 与 runner-agent 并让它连回工作台，不用在终端里做任何事。
         先只读取服务器的主机公钥（不登录），你核对指纹后，再输入一次登录密码开始部署：工作台换成自己的专用密钥，密码不保存。
       </p>
       <dl v-if="target && !editing" class="agent-facts">
@@ -130,7 +130,7 @@ async function remove() {
         <div v-if="target.install_dir"><dt>安装目录</dt><dd><code>{{ target.install_dir }}</code></dd></div>
       </dl>
 
-      <form v-if="showForm" class="runner-filters" aria-label="运行服务器的 SSH 地址" @submit.prevent="probe">
+      <form v-if="showForm" class="runner-filters" aria-label="容器服务器的 SSH 地址" @submit.prevent="probe">
         <label class="form-field"><span>服务器 IP 或域名 *</span><input v-model.trim="form.host" maxlength="253" autocomplete="off" placeholder="203.0.113.20" /></label>
         <label class="form-field"><span>SSH 端口 *</span><input v-model.number="form.port" type="number" min="1" max="65535" /></label>
         <label class="form-field"><span>SSH 账号 *</span><input v-model.trim="form.username" maxlength="32" autocomplete="off" /></label>
@@ -161,15 +161,15 @@ async function remove() {
             <span class="badge">{{ SSH_STEP_STATUS[step.status] }}</span>
           </li>
         </ol>
-        <p v-if="job.status === 'succeeded' && job.kind === 'install'" role="status">部署完成，运行服务器已连上工作台。</p>
+        <p v-if="job.status === 'succeeded' && job.kind === 'install'" role="status">部署完成，容器服务器已连上工作台。</p>
         <p v-else-if="job.status === 'succeeded'" role="status">卸载完成。</p>
         <p v-else-if="job.status === 'failed'" role="alert">{{ job.error_message ?? '失败，详见日志' }}<template v-if="job.error_code">（{{ job.error_code }}）</template></p>
         <p v-else-if="job.status === 'interrupted'" role="alert">任务被中断（工作台重启过），可以重新开始。</p>
         <details v-if="job.log" :open="job.status === 'failed'"><summary>命令输出（密码、凭证、私钥已替换成 ***）</summary><pre class="runner-output">{{ job.log }}</pre></details>
       </section>
 
-      <form v-if="target?.host_key_confirmed && !editing && !running" class="runner-form" aria-label="部署运行服务器" @submit.prevent="install">
-        <p class="form-help">部署会签发新的运行服务器凭证（旧的立即失效）、上传接入包，以 root 运行安装脚本：装 Docker 29.9.1 与 gVisor release-20261019.0（核对 sha512），启动 runner-agent。第一次要下载，可能需要几分钟。已有的环境不受影响。</p>
+      <form v-if="target?.host_key_confirmed && !editing && !running" class="runner-form" aria-label="部署容器服务器" @submit.prevent="install">
+        <p class="form-help">部署会签发新的容器服务器凭证（旧的立即失效）、上传接入包，以 root 运行安装脚本：装 Docker 29.9.1 与 gVisor release-20261019.0（核对 sha512），启动 runner-agent。第一次要下载，可能需要几分钟。已有的环境不受影响。</p>
         <label class="form-field"><span>{{ target.client_key_installed ? '登录密码（root 账号可以不填；其他账号要用 sudo，必须填）' : '登录密码 *' }}</span><input v-model="password" type="password" autocomplete="off" maxlength="1024" /></label>
         <p class="form-help">密码只随这一次请求发送，用于登录、安装公钥和 sudo，工作台不保存；提交后输入框会清空。</p>
         <div class="form-actions">
@@ -180,7 +180,7 @@ async function remove() {
       </form>
 
       <div v-if="target?.client_key_installed && !running" role="group" aria-label="卸载与吊销" class="runner-form">
-        <label class="check-field"><input v-model="removeFiles" type="checkbox" /> 卸载时同时删除接入包目录（含运行服务器凭证）</label>
+        <label class="check-field"><input v-model="removeFiles" type="checkbox" /> 卸载时同时删除接入包目录（含容器服务器凭证）</label>
         <div class="form-actions">
           <button type="button" class="secondary-button im-danger" :disabled="busy" @click="uninstall">卸载 runner-agent</button>
           <button type="button" class="secondary-button im-danger" :disabled="busy" @click="revoke()">吊销专用密钥</button>

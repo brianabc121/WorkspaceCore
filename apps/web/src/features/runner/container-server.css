@@ -1,0 +1,130 @@
+/* 容器服务器页（T-0186 / T-0187，效果图 docs/v2/container-server-redesign/assets/01）：
+   主机条、标签栏、容器表的读数与进度条、详情一栏（资源负载 / 执行记录 / 配置与回收）。
+   统计卡、状态标签、表格的手机卡片布局与右侧一栏沿用 agents-pages.css；颜色只用主题变量，亮 / 暗主题自动跟随。
+   读数状态（过期、未知、未运行）都有文字，不只靠颜色。 */
+
+/* 主机条 */
+.cs-host { padding: 12px 16px; display: grid; gap: 8px; min-width: 0; }
+.cs-host-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; min-width: 0; font-size: .88rem; }
+.cs-host-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; font-size: 1rem; }
+.cs-host-name svg, .cs-host-fact svg { width: 17px; height: 17px; flex: none; color: var(--muted); }
+.cs-host-fact { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.cs-muted { color: var(--muted); }
+.cs-host-link { margin-left: auto; }
+.cs-host-link svg { width: 15px; height: 15px; }
+.cs-host-more summary { cursor: pointer; color: var(--muted); font-size: .82rem; }
+.cs-host-more .agent-facts { margin: 8px 0 0; font-size: .86rem; }
+.cs-empty { padding: 16px 18px; display: grid; gap: 10px; justify-items: start; }
+
+/* 统计卡上的“查看”与运行中的颜色 */
+.ag-tile.tone-blue { --tone: var(--accent); }
+.cs-tile-link { font-size: .8rem; }
+
+/* 标签栏 */
+.cs-tabbar, .cs-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.cs-tabbar button, .cs-tabs button { flex: none; border: 0; border-bottom: 2px solid transparent; background: none; padding: 10px 14px; color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.cs-tabbar button[aria-selected="true"], .cs-tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.cs-tabbar button:hover, .cs-tabs button:hover { color: var(--text); }
+.cs-tabbar button:focus-visible, .cs-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* 列表工具栏与范围说明 */
+.cs-toolbar { align-items: center; }
+.cs-deleted { font-size: .85rem; white-space: nowrap; }
+.cs-scope { margin: 0 0 0 auto; color: var(--muted); font-size: .82rem; white-space: nowrap; }
+.cs-help { margin: 0; }
+.cs-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.cs-foot .asv-foot { margin: 0; }
+.cs-pager { display: flex; gap: 8px; }
+.cs-pager button { display: inline-flex; align-items: center; gap: 4px; }
+.cs-pager svg { width: 15px; height: 15px; }
+.cs-recent { border-top: 1px solid var(--line); padding-top: 10px; font-size: .86rem; }
+.cs-recent summary { cursor: pointer; color: var(--muted); overflow-wrap: anywhere; }
+.cs-recent .im-contact-list { margin: 8px 0; }
+
+/* 容器表 */
+.cs-table tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cs-purpose { overflow-wrap: anywhere; }
+.cs-id { font-variant-numeric: tabular-nums; }
+.cs-owner { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 600; white-space: nowrap; }
+.cs-owner svg { width: 15px; height: 15px; flex: none; }
+.cs-owner.is-gone { color: var(--muted); font-weight: 400; }
+.cs-chip { display: inline-block; padding: 1px 8px; border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: .78rem; white-space: nowrap; }
+.cs-chip.is-persistent { background: var(--accent-soft); color: var(--accent); }
+.cs-chip.is-pinned { margin-left: 4px; background: color-mix(in srgb, var(--success) 12%, var(--surface)); color: var(--success); }
+.cs-meter-cell { min-width: 8.5em; }
+/* 详情一栏打开时表格变窄：收紧各列，数据卷一列不被挤出去 */
+.asv-layout.has-side .cs-table { font-size: .84rem; }
+.asv-layout.has-side .cs-table thead th { white-space: normal; }
+.asv-layout.has-side .cs-table tbody th[scope="row"] { min-width: 9em; }
+/* 详情已经在右侧打开：行本身可以点（或回车）打开详情，“详情”一列就不占位置了 */
+.asv-layout.has-side .cs-table thead th:last-child, .asv-layout.has-side .cs-table .asv-link-cell { display: none; }
+.asv-layout.has-side .cs-meter-cell { min-width: 7.5em; }
+.asv-layout.has-side .cs-owner svg { display: none; }
+.cs-table td[data-label="数据卷占用"] { white-space: nowrap; }
+.cs-reading { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cs-reading b { font-weight: 600; }
+.cs-reading.is-unavailable b, .cs-reading.is-not_running b { color: var(--muted); font-weight: 400; }
+.cs-reading.is-stale b, .cs-reading.is-legacy b { color: var(--muted); }
+.cs-limit { color: var(--muted); font-size: .85em; }
+.cs-bar-line { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.cs-bar { --tone: var(--success); display: block; flex: 1 1 auto; min-width: 40px; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.cs-bar.is-mem { --tone: var(--chart-7); }
+.cs-bar > span { display: block; height: 100%; border-radius: 3px; background: var(--tone); }
+.cs-bar.is-stale > span, .cs-bar.is-legacy > span { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--tone) 55%, var(--surface)) 0 4px, color-mix(in srgb, var(--tone) 25%, var(--surface)) 4px 8px); }
+.cs-pct { flex: none; color: var(--muted); font-size: .76rem; font-variant-numeric: tabular-nums; }
+.cs-note { display: block; margin-top: 2px; font-size: .74rem; color: var(--muted); }
+.cs-note.is-stale, .cs-note.is-legacy { color: var(--warning); }
+
+/* 详情一栏 */
+.cs-side { padding: 16px 18px; }
+.cs-detail { display: grid; gap: 12px; min-width: 0; }
+.cs-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.cs-detail-title { min-width: 0; }
+.cs-detail-title h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 1.2rem; overflow-wrap: anywhere; }
+.cs-detail-title .asv-sub { margin-top: 4px; font-size: .85rem; }
+.cs-detail-head .icon-button { display: inline-flex; align-items: center; padding: 6px; }
+.cs-detail-head .icon-button svg { width: 16px; height: 16px; }
+.cs-detail [role="tabpanel"] { display: grid; gap: 12px; padding-top: 4px; min-width: 0; }
+.cs-meters { display: grid; gap: 10px; }
+.cs-meter { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); min-width: 0; }
+.cs-meter-head { display: flex; align-items: center; gap: 10px; font-size: .9rem; min-width: 0; }
+.cs-meter-head > span:first-of-type { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.cs-meter-head svg { width: 20px; height: 20px; flex: none; color: var(--muted); }
+.cs-meter-head b { font-size: 1.02rem; font-variant-numeric: tabular-nums; }
+.cs-meter .cs-bar { height: 8px; }
+.cs-meter-when { margin: 0; color: var(--muted); font-size: .78rem; }
+.cs-meter-when.is-stale, .cs-meter-when.is-legacy { color: var(--warning); }
+.cs-meter .form-help, .cs-caliber { margin: 0; font-size: .78rem; }
+.cs-block { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.cs-block h3 { font-size: .95rem; }
+.cs-block .form-help { margin: 0; }
+.cs-facts { display: grid; gap: 6px; margin: 0; font-size: .86rem; }
+.cs-facts > div { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); gap: 8px; }
+.cs-facts dt { color: var(--muted); }
+.cs-facts dd { margin: 0; overflow-wrap: anywhere; }
+.cs-break { overflow-wrap: anywhere; word-break: break-word; }
+.cs-runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: .86rem; }
+.cs-runs li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.cs-runs li .asv-sub { flex-basis: 100%; }
+.cs-runs code { max-width: 100%; overflow-wrap: anywhere; }
+.cs-spin { width: 16px; height: 16px; flex: none; color: var(--accent); animation: cs-spin 1.2s linear infinite; }
+@keyframes cs-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cs-spin { animation: none; } }
+.cs-protect { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.cs-protect > svg { width: 20px; height: 20px; flex: none; color: var(--muted); margin-top: 2px; }
+.cs-protect.is-on > svg { color: var(--success); }
+.cs-protect > div { flex: 1 1 auto; min-width: 0; }
+.cs-protect .secondary-button { flex: none; }
+.cs-actions { flex-wrap: wrap; }
+.cs-block .asv-link svg { width: 15px; height: 15px; }
+
+@media (max-width: 760px) {
+  .cs-host { padding: 10px 12px; }
+  .cs-host-link { margin-left: 0; }
+  .cs-scope { margin-left: 0; white-space: normal; flex-basis: 100%; }
+  .cs-table tbody tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cs-meter-cell { min-width: 0; }
+  .cs-owner { white-space: normal; overflow-wrap: anywhere; }
+  .cs-facts > div { grid-template-columns: 6.5em minmax(0, 1fr); }
+  .cs-protect { flex-wrap: wrap; }
+}
