@@ -543,3 +543,17 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 | 删除 | `tasks.review_pending` 与 `ix_tasks_review_pending` | 由完成轮次与个人查看记录取代（信息已转成 `completion_seq = 1`） |
 
 **downgrade** 恢复 `review_pending`（已完成、轮次 > 0、没有任何人看过这一轮的为真）与它的索引；删除阻塞动态、`task_result_reads`、新列与约束。
+
+### 迁移 `0054`（T-0178）
+
+OpenClaw 服务器改用保存的加密登录密码（`docs/decisions/2026-11-09-agent-server-password-auth.md`）。加法迁移，不删除、不清空旧数据。
+
+| 表 / 对象 | 字段 | 说明 |
+|---|---|---|
+| `agent_ssh_targets` | `login_password_ref`（文本，可空） | 登录密码的 `enc:v1:` 密文引用，加密用途 `agent_server_password:<id>`，已加入加密密钥轮换；任何接口都不返回。旧记录为 null（旧密码从未保存，要补录） |
+| `agent_ssh_targets` | `credential_revision`（整数，默认 0，`>= 0`） | 设置 / 替换密码加 1（主密钥轮换不加）；后台任务按它判断密码是否被换过 |
+| `agent_ssh_targets` | `last_connection_at`、`last_connection_reason` | 最近一次显式连接检测：时间与白名单原因（`connected` / `auth_failed` / `unreachable` / `host_key_changed` / `credential_unreadable`，CHECK） |
+| `agent_ssh_targets` | `legacy_key_cleanup_state`（文本，默认 `not_needed`） | 旧专用公钥的退役：`not_needed` / `pending` / `done` / `manual_required`（CHECK）；有 `client_key_ref` 或 `client_public_key` 的旧记录回填 `pending`。旧私钥 / 公钥列保留，显式退役成功后才清空 |
+| `agent_deployments` | `runtime_installed`（布尔，可空） | 部署成功 true、卸载容器保留目录 false；旧记录 null（未知），不凭 `installed_at` 推断 |
+
+**downgrade** 删除这些列与约束，其余数据原样保留；已保存的密码密文随之丢失，已经退役的远端公钥、已清空的旧私钥引用不会恢复。
