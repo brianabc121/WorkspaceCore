@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import events, task_claims, task_runs
+from app.domain import events, task_claims, task_runs, task_state
 from app.domain.audit import AuditTrail
 from app.domain.auth import Actor
 from app.domain.im_service import ImService
@@ -52,7 +52,7 @@ from app.models import (
     WorkspaceMember,
 )
 from app.schemas.im import ImMessageSend
-from app.schemas.tasks import TaskOut, TaskReopen, TaskReview
+from app.schemas.tasks import TaskOut, TaskReopen
 from app.schemas.timeline import (
     ApprovalWait,
     AssigneeInstance,
@@ -222,6 +222,10 @@ def _task_done() -> ApiError:
     return ApiError(409, "TASK_DONE", "任务已经完成")
 
 
+def _task_blocked() -> ApiError:
+    return ApiError(409, "TASK_BLOCKED", "任务被标记为阻塞：先解除阻塞再开始执行")
+
+
 def _run_open() -> ApiError:
     return ApiError(409, "RUN_ALREADY_OPEN", "这个任务已经有一段正在执行")
 
@@ -323,6 +327,8 @@ class RunService:
         task = await self._task(access, task_id, lock=True)
         if task.done:
             raise _task_done()
+        if task.blocked_at is not None:
+            raise _task_blocked()
         if task.assignee_instance_id is not None:
             raise ApiError(409, "AGENT_TASK", "执行者是智能体：请用“交给它执行”")
         if await task_runs.open_run(self.db, task.id) is not None:
@@ -371,6 +377,8 @@ class RunService:
         task = await self._task(access, task_id)
         if task.done:
             raise _task_done()
+        if task.blocked_at is not None:
+            raise _task_blocked()
         instance = (
             await self.db.scalar(
                 select(AgentInstance).where(
@@ -488,9 +496,8 @@ class RunService:
         if not task.done:
             raise ApiError(409, "TASK_NOT_DONE", "只有已完成的任务可以打回")
         now = _now()
-        task.done = False
-        task.done_at = None
-        task.review_pending = False
+        # 重新打开：轮次不变，再完成时才是新的一轮，重新进入各人的“待查看”（T-0166）
+        task_state.mark_reopened(task)
         task.version += 1
         instance: AgentInstance | None = None
         if task.assignee_instance_id is not None:
@@ -531,7 +538,8 @@ class RunService:
             client_ip=context.client_ip,
         )
         await self.db.flush()
-        out = task_out(task)
+        states = await task_state.load_states(self.db, [task], context.user.id)
+        out = task_out(task, states[task.id])
         instance_id, event_id, project_id = (
             instance.id if instance is not None else None,
             record.id,
@@ -555,59 +563,6 @@ class RunService:
         await task_claims.group_notice(
             self.db, self.im, project_id, f"《{title}》被打回：{body.reason}"
         )
-        return out
-
-    # ---------------------------------------------------------------- 确认结果（T-0163）
-
-    async def review(
-        self, context: Actor, access: WorkspaceAccess, task_id: uuid.UUID, body: TaskReview
-    ) -> TaskOut:
-        """智能体完成的任务“已完成待查看”：owner / admin 看过结果后确认。
-
-        见 docs/v2/HOME_PLAN.md 第 2 节。
-
-        不在待查看时原样返回（重复点击、别人已经确认过都不报错）；版本不一致时 409。
-        """
-        if not has_role(access.role, Role.admin):
-            raise ApiError(403, "FORBIDDEN", "只有 owner / admin 能确认任务结果")
-        task = await self._task(access, task_id, lock=True)
-        if not task.review_pending:
-            out = task_out(task)
-            await self.db.commit()
-            return out
-        if str(task.version) != body.version:
-            raise ApiError(
-                409,
-                "VERSION_CONFLICT",
-                "内容已被其他操作修改，请刷新后重试",
-                details={
-                    "current_version": str(task.version),
-                    "current": task_out(task).model_dump(mode="json"),
-                },
-            )
-        task.review_pending = False
-        task.version += 1
-        user = await self.db.get(User, context.user.id)
-        self.db.add(
-            task_claims.event(
-                task,
-                "reviewed",
-                actor_kind="user",
-                name=user.display_name if user is not None else "",
-                user_id=context.user.id,
-            )
-        )
-        await self.audit.record(
-            "task.reviewed",
-            workspace_ids=[access.workspace.id],
-            actor_id=context.user.id,
-            resource_type="task",
-            resource_id=task.id,
-            client_ip=context.client_ip,
-        )
-        await self.db.flush()
-        out = task_out(task)
-        await self.db.commit()
         return out
 
     async def assignees(self, access: WorkspaceAccess) -> AssigneeOptions:

@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request, Response, Security
 from fastapi.responses import RedirectResponse
 from redis.asyncio import Redis
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import (
     authenticated,
@@ -31,7 +31,7 @@ from app.api.deps import (
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain import mail as mail_domain
-from app.domain import mail_agents
+from app.domain import mail_agents, mail_aggregate
 from app.domain.audit import AuditTrail
 from app.domain.auth import AuthContext
 from app.domain.connectors import ConnectorRuntime
@@ -48,6 +48,9 @@ from app.schemas.mail import (
     MailAccountPatch,
     MailAgentList,
     MailAgentRef,
+    MailAggregateAccount,
+    MailAggregateItem,
+    MailAggregatePage,
     MailAttachmentOut,
     MailConnectIn,
     MailConnectOut,
@@ -476,6 +479,89 @@ async def list_mail_labels(
             for label in labels
             if label.get("id")
         ]
+    )
+
+
+def get_sessionmaker(request: Request) -> async_sessionmaker[AsyncSession]:
+    """聚合读取给每个邮箱 worker 开自己的会话（不共用请求的 AsyncSession）。"""
+    maker: async_sessionmaker[AsyncSession] = request.app.state.sessionmaker
+    return maker
+
+
+@router.get(
+    "/mail/messages",
+    summary="全部邮箱或单个邮箱的邮件（admin，聚合读取）",
+    description=(
+        "不填 account_id：读全部已连接的邮箱，按 Gmail internalDate 倒序合并成一批（同一时间按"
+        " account_id、id 排序，时间未知的放最后；不跨邮箱去重）。填了只读这个邮箱。"
+        "每个邮箱每批最多 per_account_limit 封；“全部邮件”（不填 label）不含垃圾邮件与垃圾箱。"
+        "全部邮箱模式下 label 只能是系统标签，自定义标签要指定邮箱。"
+        "accounts 是每个邮箱的状态：一个邮箱失败不影响其他邮箱。"
+        "next_cursor 加载下一批（15 分钟内有效）；邮箱范围、q、label、per_account_limit 变了旧游标"
+        " 422 MAIL_CURSOR_MISMATCH，过期 422 MAIL_CURSOR_EXPIRED。"
+        "读信、会话、附件、回复仍用 /mail/accounts/{account_id}/… 的接口，必须带所属邮箱。"
+    ),
+    responses=error_responses(401, 403, 404, 422),
+)
+async def list_mail_messages(
+    access: Admin,
+    context: Context,
+    service: Service,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    response: Response,
+    account_id: UUID | None = None,
+    q: Annotated[str | None, Query(max_length=500)] = None,
+    label: Annotated[str | None, Query(max_length=100, pattern=r"^[A-Za-z0-9_-]+$")] = None,
+    cursor: Annotated[
+        str | None, Query(min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    ] = None,
+    per_account_limit: Annotated[
+        int, Query(ge=1, le=mail_aggregate.MAX_LIMIT)
+    ] = mail_aggregate.DEFAULT_LIMIT,
+) -> MailAggregatePage:
+    _no_store(response)
+    # 先取出 ID：聚合读取会结束请求会话的事务，之后不再碰 ORM 对象
+    workspace_id, user_id = access.workspace.id, context.user.id
+    page = await mail_aggregate.MailAggregateService(
+        sessionmaker, service.settings, service.redis, service.runtime
+    ).batch(
+        service.db,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        account_id=account_id,
+        query=(q or "").strip() or None,
+        label=label,
+        cursor=cursor,
+        limit=per_account_limit,
+    )
+    return MailAggregatePage(
+        items=[
+            MailAggregateItem(
+                **summary_out(message).model_dump(),
+                account_id=ref.id,
+                account_email=ref.email,
+                account_display_name=ref.display_name,
+            )
+            for ref, message in page.items
+        ],
+        accounts=[
+            MailAggregateAccount(
+                account_id=r.ref.id,
+                email=r.ref.email,
+                display_name=r.ref.display_name,
+                status=r.status,
+                error_code=r.error_code,
+                loaded=r.loaded,
+                exhausted=r.exhausted,
+                unread=r.unread,
+                retry_at=r.retry_at,
+            )
+            for r in page.accounts
+        ],
+        outcome=page.outcome,
+        partial=page.partial,
+        next_cursor=page.next_cursor,
+        total_estimate=page.total_estimate,
     )
 
 

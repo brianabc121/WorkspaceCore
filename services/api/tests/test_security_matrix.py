@@ -5,7 +5,7 @@
 - 未登录：除首次安装、登录、Webhook 外，一律 401
 - 写请求没有 CSRF Token：一律 403 CSRF_FAILED
 - 非成员带别人的工作空间 ID：一律 404（与不存在的工作空间一样，不暴露存在与否）
-- viewer：工作空间内的写接口一律 403（只改自己通知的已读状态除外）
+- viewer：工作空间内的写接口一律 403（只改自己通知的已读状态、自己“标为已查看”任务结果除外）
 
 鉴权、CSRF、成员与角色检查大多在依赖里，先于请求体校验执行，
 所以多数接口用占位的 ID 与空请求体就能检查；
@@ -35,8 +35,13 @@ PUBLIC = {
     ("POST", "/api/v1/auth/login"),
 }
 # viewer 也可以执行的写操作：只改自己的通知
-# 只改自己的已读状态：viewer 也可以（仍要会话与 CSRF）
-VIEWER_WRITES = {("PATCH", "/api/v1/notifications"), ("POST", "/api/v1/issues/{issue_id}/read")}
+# 只改自己的已读状态：viewer 也可以（仍要会话与 CSRF）；
+# 任务结果的“标为已查看”也只写自己的记录（T-0166）
+VIEWER_WRITES = {
+    ("PATCH", "/api/v1/notifications"),
+    ("POST", "/api/v1/issues/{issue_id}/read"),
+    ("PUT", "/api/v1/tasks/{task_id}/result-view"),
+}
 CAROL = {"email": "carol@example.com", "password": "carol password 123456"}
 # 成员与角色在业务层检查的接口：空请求体会先得到 422（对任何工作空间都一样，不暴露是否存在）
 BODIES: dict[tuple[str, str], dict[str, Any]] = {

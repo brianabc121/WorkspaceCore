@@ -224,6 +224,8 @@ async function noHorizontalScroll(page) {
   await page.getByRole('button', { name: '保存日程' }).click()
   await page.getByRole('button', { name: eventTitle, exact: true }).waitFor()
   await page.getByRole('button', { name: eventTitle, exact: true }).click()
+  // 日历改版（T-0169）：点日程先看详情，再点“编辑日程”打开表单
+  await page.getByRole('button', { name: '编辑日程' }).click()
   await page.getByLabel('日程标题').fill(`${eventTitle} 改`)
   await page.getByLabel('日程地点').fill('三楼会议室')
   await page.getByRole('button', { name: '保存日程' }).click()
@@ -345,7 +347,9 @@ async function noHorizontalScroll(page) {
   await viewer.page.getByLabel('显示时区').fill(ZONE)
   await viewer.page.getByRole('button', { name: '应用日历范围' }).click()
   await viewer.page.getByRole('button', { name: `${eventTitle} 改`, exact: true }).click()
-  await viewer.page.getByText('当前角色只读。').waitFor()
+  // 点日程先看详情（T-0169）；viewer 只看到只读说明，没有“编辑日程”
+  await viewer.page.getByText('当前角色只读，不能修改日程。').waitFor()
+  check(await viewer.page.getByRole('button', { name: '编辑日程' }).count() === 0, 'viewer 不应看到编辑日程')
   check(await viewer.page.getByRole('button', { name: '新建日程' }).count() === 0, 'viewer 不应看到新建日程')
   check(await viewer.page.getByRole('button', { name: '保存日程' }).count() === 0, 'viewer 不应看到保存日程')
   check(await viewer.page.getByRole('button', { name: '删除日程' }).count() === 0, 'viewer 不应看到删除日程')
@@ -360,6 +364,7 @@ async function noHorizontalScroll(page) {
   await page.getByLabel('显示时区').fill(ZONE)
   await page.getByRole('button', { name: '应用日历范围' }).click()
   await page.getByRole('button', { name: `${eventTitle} 改`, exact: true }).click()
+  await page.getByRole('button', { name: '编辑日程' }).click()
   await page.getByRole('button', { name: '删除日程' }).click()
   await page.getByText('日程已删除').waitFor()
   check(await page.getByRole('button', { name: `${eventTitle} 改`, exact: true }).count() === 0, '删除后日程应从日历消失')

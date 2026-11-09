@@ -837,8 +837,9 @@ async def _update_task(
     changes = args.model_dump(mode="json", exclude_unset=True)
     task_id = uuid.UUID(changes.pop("task_id"))
     body = TaskUpdate.model_validate({**changes, "version": row.target_version})
+    # AI 改的完成状态：审批人还没看过结果，不替他记“已查看”（T-0166）
     result = await TaskService(s.db, s.settings, s.runtime).update_task(
-        ctx, access, task_id, row.id, body
+        ctx, access, task_id, row.id, body, self_viewed=False
     )
     _write_ok(result)
     return "已修改任务"
@@ -850,7 +851,7 @@ async def _complete_task(
     task_id = uuid.UUID(s.unsealed(row)["task_id"])
     body = TaskUpdate.model_validate({"version": row.target_version, "done": True})
     result = await TaskService(s.db, s.settings, s.runtime).update_task(
-        ctx, access, task_id, row.id, body
+        ctx, access, task_id, row.id, body, self_viewed=False
     )
     _write_ok(result)
     return "已完成任务"

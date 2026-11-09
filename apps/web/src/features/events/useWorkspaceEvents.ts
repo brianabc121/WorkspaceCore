@@ -9,9 +9,9 @@ import type { Schema } from '../../services/api'
 type Topic = Schema['InvalidateEvent']['topics'][number]
 // 核心功能的主题 → 要刷新的查询键前缀；插拔式模块的主题写在模块的 events 里（T-0159），这里必须覆盖其余所有主题
 const core: Record<Exclude<Topic, ModuleTopic>, string[]> = {
-  // task-progress：首页“工作概况 / 任务进展”（T-0164），任务、执行记录、阻塞 Issue 变化都要刷新
-  overview: ['overview', 'widgets'], tasks: ['tasks', 'task', 'knowledge-link-tasks', 'search', 'task-progress'],
-  projects: ['projects', 'search'], knowledge: ['knowledge', 'knowledge-sources', 'related-docs', 'kb', 'search'],
+  // task-progress：首页“工作概况 / 任务进展”（T-0164）；项目卡片的状态计数、本周完成与最近动态也随任务变化（T-0168）
+  overview: ['overview', 'widgets'], tasks: ['tasks', 'task', 'knowledge-link-tasks', 'search', 'task-progress', 'projects', 'project-summary', 'project-activity', 'task-events'],
+  projects: ['projects', 'search', 'project-summary'], knowledge: ['knowledge', 'knowledge-sources', 'related-docs', 'kb', 'search'],
   calendar: ['calendar', 'search'], developer: ['developer', 'search'], integrations: ['integrations'],
   notifications: ['notifications', 'overview'], operations: ['operations'],
   im: ['im'], agents: ['agents'], ai: ['ai-tool-executions', 'im', 'timeline'],

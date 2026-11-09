@@ -59,8 +59,12 @@ ClaimScope = Literal["all", "project"]
 TaskSort = Literal["due_at", "priority", "updated"]
 TaskAssigneeFilter = Literal["me"]
 # 首页“任务进展”的四种状态（T-0163，docs/v2/HOME_PLAN.md 第 2 节）
-ProgressStatus = Literal["todo", "in_progress", "review", "blocked"]
-ProgressFilter = Literal["all", "todo", "in_progress", "review", "blocked"]
+# 任务状态（T-0166，docs/v2/pages-redesign 规范第 4.2 节；判定在 app/domain/task_state.py）
+WorkState = Literal["todo", "running", "awaiting_view", "blocked", "done"]
+WorkStateFilter = Literal["todo", "running", "awaiting_view", "blocked", "done"]
+# 首页“任务进展”只看需要推进或查看的四种（已完成且已查看的不出现）
+ProgressStatus = Literal["todo", "running", "awaiting_view", "blocked"]
+ProgressFilter = Literal["all", "todo", "running", "awaiting_view", "blocked"]
 
 
 class _Strict(BaseModel):
@@ -106,7 +110,16 @@ class ProjectOut(BaseModel):
     description: str
     archived: bool
     open_tasks: int = Field(description="未完成任务数")
-    done_tasks: int = Field(description="已完成任务数")
+    done_tasks: int = Field(
+        description="已完成任务数（含当前用户还没查看的；进度 = done / (open + done)）"
+    )
+    task_states: "ProjectTaskStates | None" = Field(
+        default=None,
+        description="五种状态各几项，按当前用户的查看状态（T-0166）；没读到时为 null，不是 0",
+    )
+    last_activity_at: datetime | None = Field(
+        default=None, description="最近更新：项目本身或其中任务最后一次修改的时间（T-0166）"
+    )
     agents: list[ProjectAgentBrief] = Field(description="项目的智能体成员（T-0110）")
     im_group: ProjectImGroup
     issue_notices: bool = Field(
@@ -115,6 +128,16 @@ class ProjectOut(BaseModel):
     version: int
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectTaskStates(BaseModel):
+    """项目里任务的五种状态各几项（与任务页同一判定；待查看按当前用户）。"""
+
+    todo: int
+    running: int
+    awaiting_view: int
+    blocked: int
+    done: int
 
 
 class ProjectPage(Page[ProjectOut]):
@@ -211,19 +234,82 @@ class TaskOut(BaseModel):
         description="自由接取的范围：all 全部智能体 / project 只限项目成员"
     )
     claimable: bool = Field(description="现在能被领取：open、没有执行者、没有完成")
-    review_pending: bool = Field(
-        description="已完成待查看（T-0163）：智能体完成后等 owner / admin 确认结果或打回"
+    work_state: WorkState = Field(
+        default="todo",
+        description="任务对当前用户的状态（T-0166）：todo 待办 / running 进行中（有正在执行的"
+        "一段）/ blocked 阻塞（有人写了原因）/ awaiting_view 已完成待查看（当前用户还没看这一轮"
+        "结果）/ done 已完成",
     )
+    completion_seq: int = Field(
+        default=0, ge=0, description="完成轮次：每次未完成→完成加 1；标为已查看时原样带回"
+    )
+    result_viewed: bool = Field(
+        default=False, description="当前用户看过这一轮完成结果（历史任务、未完成过的任务为 true）"
+    )
+    active_run: "TaskActiveRun | None" = Field(
+        default=None, description="正在执行的一段；没有时为 null"
+    )
+    blocker: "TaskBlocker | None" = Field(default=None, description="阻塞原因；没有阻塞时为 null")
     version: str = Field(description="乐观并发用的不透明字符串；修改 / 删除时原样带回")
     created_at: datetime
     updated_at: datetime
+
+
+class TaskActiveRun(BaseModel):
+    id: UUID
+    executor_kind: Literal["user", "instance"]
+    executor_name: str
+    started_at: datetime
+
+
+class TaskBlocker(BaseModel):
+    reason: str = Field(description="阻塞原因；人写的文字，按纯文本显示")
+    blocked_at: datetime
+    blocked_by: UUID | None = Field(description="标记阻塞的成员；已删除时为 null")
+    blocked_by_name: str | None
 
 
 class TaskPage(Page[TaskOut]):
     pass
 
 
-TaskEventKind = Literal["opened", "claimed", "released", "completed", "reopened", "reviewed"]
+class TaskSummary(BaseModel):
+    """任务页筛选标签的计数（T-0166）：与列表用同一组筛选条件，但不套用所选状态。"""
+
+    todo: int
+    running: int
+    awaiting_view: int
+    blocked: int
+    done: int
+    total: int = Field(description="五种状态合计")
+    as_of: datetime = Field(description="统计时间")
+
+
+class TaskResultView(_Strict):
+    """标为已查看（T-0166）：只标当前用户，带回读到的完成轮次。"""
+
+    completion_seq: int = Field(ge=1, description="读取任务时的 completion_seq；已变化时返回 409")
+
+
+class TaskBlock(_Strict):
+    """标记 / 解除阻塞（T-0166，member）：标记不会停止正在执行的一段，解除也不会自动重新开始。"""
+
+    version: TaskVersion
+    blocked: bool
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)] = Field(
+        default="", description="blocked 为 true 时必填（1–2000 字）"
+    )
+
+    @model_validator(mode="after")
+    def _reason(self) -> "TaskBlock":
+        if self.blocked and not self.reason:
+            raise ValueError("标记阻塞时必须写原因")
+        return self
+
+
+TaskEventKind = Literal[
+    "opened", "claimed", "released", "completed", "reopened", "reviewed", "blocked", "unblocked"
+]
 
 
 class TaskEventOut(BaseModel):
@@ -246,12 +332,6 @@ class TaskReopen(_Strict):
 
     version: TaskVersion
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
-
-
-class TaskReview(_Strict):
-    """确认结果（owner / admin，T-0163）：已完成待查看的任务不再出现在首页的“待查看”里。"""
-
-    version: TaskVersion
 
 
 class TaskCreate(_Strict):
@@ -326,18 +406,11 @@ class TaskUpdate(_Strict):
 
 
 class ProgressCounts(BaseModel):
-    all: int = Field(description="四种状态合计（已完成且已确认的不算）")
+    all: int = Field(description="四种状态合计（已完成且已查看的不算）")
     todo: int
-    in_progress: int
-    review: int = Field(description="已完成待查看")
+    running: int
+    awaiting_view: int = Field(description="已完成待查看（按当前用户）")
     blocked: int
-
-
-class ProgressBlocker(BaseModel):
-    issue_id: UUID
-    number: int
-    title: str = Field(description="阻塞 Issue 的标题；来自人或智能体，按纯文本显示")
-    count: int = Field(description="未关闭的阻塞 Issue 共几条")
 
 
 class ProgressExecutor(BaseModel):
@@ -355,7 +428,7 @@ class TaskProgressItem(BaseModel):
     executor: ProgressExecutor | None = Field(description="执行者；没有指派时为 null")
     due_at: datetime | None
     updated_at: datetime
-    blocker: ProgressBlocker | None = Field(description="阻塞时第一个未关闭的阻塞 Issue")
+    blocker: TaskBlocker | None = Field(description="阻塞原因；没有阻塞时为 null")
 
 
 class TaskProgressOut(BaseModel):
@@ -365,3 +438,39 @@ class TaskProgressOut(BaseModel):
         description="按状态筛选后的一页；全部时按 待查看 → 阻塞 → 进行中 → 待办 排，"
         "同状态最近更新的在前"
     )
+
+
+# ---------------------------------------------------------------- 项目页（T-0166）
+
+
+class ProjectSummary(BaseModel):
+    """项目页顶部的三个数（规范第 5 节）。"""
+
+    active: int = Field(description="未归档项目数（项目没有独立的进行中状态，不叫“进行中”）")
+    attention: int = Field(description="需要关注：未归档、当前用户有待查看或有明确阻塞的项目")
+    completed: int = Field(
+        description="时间窗内完成、现在仍是已完成的任务数（按 done_at；不是完整的历史完成事件数）"
+    )
+    as_of: datetime
+
+
+class ProjectActivityItem(BaseModel):
+    id: UUID
+    kind: TaskEventKind
+    actor_kind: Literal["user", "instance", "system"]
+    actor_name: str
+    note: str = Field(description="原因或说明；来自人或智能体，按纯文本显示")
+    task_id: UUID
+    task_title: str
+    project_id: UUID
+    project_title: str
+    created_at: datetime
+
+
+class ProjectActivityPage(BaseModel):
+    items: list[ProjectActivityItem]
+    next_cursor: str | None
+
+
+ProjectOut.model_rebuild()
+TaskOut.model_rebuild()

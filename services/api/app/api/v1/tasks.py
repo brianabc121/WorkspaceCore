@@ -7,7 +7,7 @@ docs/decisions/2026-10-30-sprint-3-tasks-contract.md 第 7 节；
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Response, Security, status
@@ -22,6 +22,7 @@ from app.api.deps import (
     workspace_member,
     workspace_viewer,
 )
+from app.core.errors import ApiError
 from app.domain.auth import AuthContext
 from app.domain.policy import WorkspaceAccess
 from app.domain.tasks import TaskService, WriteResult
@@ -29,25 +30,30 @@ from app.domain.timeline import RunService
 from app.schemas.common import error_responses
 from app.schemas.tasks import (
     ProgressFilter,
+    ProjectActivityPage,
     ProjectAgentList,
     ProjectCreate,
     ProjectOut,
     ProjectPage,
     ProjectProgressList,
+    ProjectSummary,
     ProjectUpdate,
     ProjectVersion,
     TaskAssigneeFilter,
+    TaskBlock,
     TaskCreate,
     TaskEventList,
     TaskOut,
     TaskPage,
     TaskProgressOut,
     TaskReopen,
-    TaskReview,
+    TaskResultView,
     TaskSort,
     TaskStatusFilter,
+    TaskSummary,
     TaskUpdate,
     TaskVersion,
+    WorkStateFilter,
 )
 from app.schemas.timeline import (
     AssigneeOptions,
@@ -94,7 +100,9 @@ def _respond(result: WriteResult) -> Response:
 @router.get(
     "/projects",
     summary="项目列表（viewer）",
-    description="默认不含已归档的项目；每个项目带未完成 / 已完成任务数。",
+    description="默认不含已归档的项目；每个项目带未完成 / 已完成任务数，以及按当前用户查看状态"
+    "的五种任务状态计数与最近更新时间（T-0166）。attention_only 只看需要你关注的（有你待查看"
+    "或明确阻塞的任务），archived_only 只看已归档的；sort=updated 按最近更新排。",
     responses=_read_errors,
 )
 async def list_projects(
@@ -104,9 +112,19 @@ async def list_projects(
     q: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
     cursor: Cursor = None,
     limit: Limit = 30,
+    attention_only: bool = False,
+    archived_only: bool = False,
+    sort: Annotated[Literal["title", "updated"], Query()] = "title",
 ) -> ProjectPage:
     return await service.list_projects(
-        access, include_archived=include_archived, q=q, cursor=cursor, limit=limit
+        access,
+        include_archived=include_archived,
+        q=q,
+        cursor=cursor,
+        limit=limit,
+        attention_only=attention_only,
+        archived_only=archived_only,
+        sort=sort,
     )
 
 
@@ -137,6 +155,42 @@ async def project_progress(
     access: Viewer, service: Service, limit: Annotated[int, Query(ge=1, le=20)] = 5
 ) -> ProjectProgressList:
     return await service.project_progress(access, limit=limit)
+
+
+@router.get(
+    "/projects/summary",
+    summary="项目页顶部的统计（viewer）",
+    description="未归档项目数；其中需要你关注的项目数（有你待查看或明确阻塞的任务）；"
+    "[completed_after, completed_before) 内完成、现在仍是已完成的任务数（按 done_at，"
+    "不是完整的历史完成事件数）。时间窗由前端按显示时区算好（例如本周一 00:00 到下周一 00:00）。",
+    responses=_read_errors,
+)
+async def project_summary(
+    access: Viewer,
+    service: Service,
+    completed_after: Annotated[AwareDatetime, Query()],
+    completed_before: Annotated[AwareDatetime, Query()],
+) -> ProjectSummary:
+    return await service.project_summary(
+        access, completed_after=completed_after, completed_before=completed_before
+    )
+
+
+@router.get(
+    "/projects/activity",
+    summary="项目的最近动态（viewer）",
+    description="任务动态（设为可领取、领取、放弃、完成、打回、标记 / 解除阻塞），新的在前；"
+    "project_id 不填时是全部项目。note 来自人或智能体，按纯文本显示（T-0166）。",
+    responses=_read_errors,
+)
+async def project_activity(
+    access: Viewer,
+    service: Service,
+    project_id: UUID | None = None,
+    cursor: Cursor = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+) -> ProjectActivityPage:
+    return await service.project_activity(access, project_id=project_id, cursor=cursor, limit=limit)
 
 
 @router.get(
@@ -236,7 +290,9 @@ async def request_project_group(
 @router.get(
     "/tasks",
     summary="任务列表（viewer）",
-    description="看板视图由前端按 done 分列。",
+    description="看板视图由前端按 done 分列。work_state 按当前用户的状态筛选（T-0166，"
+    "与 status 取交集；按状态看时传 status=all）；assignee_user_id 与 assignee_instance_id "
+    "只能给一个。",
     responses=_read_errors,
 )
 async def list_tasks(
@@ -255,10 +311,16 @@ async def list_tasks(
         TaskAssigneeFilter | None,
         Query(description="me：只看执行者是当前用户的任务（首页“我的待办”，T-0163）"),
     ] = None,
+    work_state: WorkStateFilter | None = None,
+    assignee_user_id: UUID | None = None,
+    assignee_instance_id: UUID | None = None,
 ) -> TaskPage:
+    user_filter = _assignee_filter(access, assignee, assignee_user_id, assignee_instance_id)
     return await service.list_tasks(
         access,
-        assignee_user_id=access.user_id if assignee == "me" else None,
+        assignee_user_id=user_filter,
+        assignee_instance_id=assignee_instance_id,
+        work_state=work_state,
         status=status_filter,
         project_id=project_id,
         priorities=priority,
@@ -268,6 +330,53 @@ async def list_tasks(
         sort=sort,
         cursor=cursor,
         limit=limit,
+    )
+
+
+def _assignee_filter(
+    access: WorkspaceAccess,
+    assignee: str | None,
+    assignee_user_id: UUID | None,
+    assignee_instance_id: UUID | None,
+) -> UUID | None:
+    """执行者筛选：me、成员、实例三者只能用一个。"""
+    if sum(x is not None for x in (assignee, assignee_user_id, assignee_instance_id)) > 1:
+        raise ApiError(
+            422,
+            "VALIDATION_FAILED",
+            "执行者筛选只能用一个：assignee、assignee_user_id、assignee_instance_id",
+        )
+    return access.user_id if assignee == "me" else assignee_user_id
+
+
+@router.get(
+    "/tasks/summary",
+    summary="任务状态计数（viewer）",
+    description="与任务列表同样的筛选（不含 status / work_state），返回五种状态各几项与合计，"
+    "供任务页的状态筛选标签使用（T-0166）。“已完成待查看”按当前用户的查看状态统计。",
+    responses=_read_errors,
+)
+async def task_summary(
+    access: Viewer,
+    service: Service,
+    project_id: UUID | None = None,
+    priority: Annotated[list[Annotated[int, Field(ge=0, le=5)]] | None, Query()] = None,
+    due_before: Annotated[AwareDatetime | None, Query()] = None,
+    due_after: Annotated[AwareDatetime | None, Query()] = None,
+    q: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    assignee: TaskAssigneeFilter | None = None,
+    assignee_user_id: UUID | None = None,
+    assignee_instance_id: UUID | None = None,
+) -> TaskSummary:
+    return await service.summary(
+        access,
+        project_id=project_id,
+        priorities=priority,
+        due_before=due_before,
+        due_after=due_after,
+        q=q,
+        assignee_user_id=_assignee_filter(access, assignee, assignee_user_id, assignee_instance_id),
+        assignee_instance_id=assignee_instance_id,
     )
 
 
@@ -293,10 +402,9 @@ async def create_task(
 @router.get(
     "/tasks/progress",
     summary="首页任务进展（viewer）",
-    description="未归档项目里任务的四种状态（T-0163，docs/v2/HOME_PLAN.md 第 2 节）："
-    "阻塞（未完成且有未关闭的阻塞 Issue）、已完成待查看（智能体完成、等 owner / admin 确认）、"
-    "进行中（有正在执行的一段或开始过）、待办（其余未完成的）。返回各状态的数量和按状态筛选的一页；"
-    "全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前。已完成且已确认的任务不出现。",
+    description="未归档项目里任务的四种状态（与任务页同一判定，T-0166）：已完成待查看（按当前用户）、"
+    "阻塞（有人写了原因）、进行中（有正在执行的一段）、待办。返回各状态的数量和按状态筛选的一页；"
+    "全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前。已完成且已查看的任务不出现。",
     responses=_read_errors,
 )
 async def task_progress(
@@ -377,6 +485,42 @@ async def update_task(
     return _respond(result)
 
 
+@router.patch(
+    "/tasks/{task_id}/block",
+    summary="标记 / 解除阻塞（member，必须带 Idempotency-Key 与 version）",
+    description=_REPLAY + "blocked=true 时必须写原因（1–2000 字）；false 清除原因。"
+    "标记阻塞不会停止正在执行的一段，解除也不会自动重新开始；阻塞的任务不能被新领取或开始执行。"
+    "已完成的任务返回 409 TASK_DONE；version 不一致返回 409 VERSION_CONFLICT（T-0166）。",
+    response_model=TaskOut,
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def block_task(
+    access: Member,
+    context: Context,
+    service: Service,
+    task_id: UUID,
+    idempotency_key: IdempotencyKey,
+    body: TaskBlock,
+) -> Response:
+    return _respond(await service.block_task(context, access, task_id, idempotency_key, body))
+
+
+@router.put(
+    "/tasks/{task_id}/result-view",
+    summary="标为已查看（viewer）",
+    description="把当前这一轮完成结果记为你已查看，只影响你自己（T-0166）。带回读取任务时的 "
+    "completion_seq；任务已重新打开或又完成了一次时返回 409 COMPLETION_CHANGED，details.current "
+    "是最新的任务。同一轮重复调用是幂等的。打开任务详情不会自动标记。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def view_task_result(
+    access: Viewer, service: Service, task_id: UUID, body: TaskResultView
+) -> TaskOut:
+    return await service.view_result(access, task_id, body)
+
+
 @router.get(
     "/tasks/{task_id}/events",
     summary="任务的动态（viewer）",
@@ -401,20 +545,6 @@ async def reopen_task(
     access: Member, context: Context, runs: Runs, task_id: UUID, body: TaskReopen
 ) -> TaskOut:
     return await runs.reopen(context, access, task_id, body)
-
-
-@router.post(
-    "/tasks/{task_id}/review",
-    summary="确认任务结果（admin，乐观并发）",
-    description="智能体完成的任务处于“已完成待查看”（review_pending）；看过结果后确认，"
-    "任务动态记一条“确认了结果”（T-0163）。不在待查看时原样返回；要返工用“打回”。",
-    dependencies=_write,
-    responses=_write_errors,
-)
-async def review_task(
-    access: Member, context: Context, runs: Runs, task_id: UUID, body: TaskReview
-) -> TaskOut:
-    return await runs.review(context, access, task_id, body)
 
 
 @router.delete(

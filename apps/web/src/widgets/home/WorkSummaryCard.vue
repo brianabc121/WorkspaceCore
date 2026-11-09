@@ -31,10 +31,10 @@ const tiles = computed<Tile[]>(() => {
   const page = reminders.data.value
   const events = page ? `${page.items.length}${page.next_cursor ? '+' : ''}` : '—'
   return [
-    { key: 'todo', label: '待办事项', value: count(counts?.todo), icon: SquareCheckBig, tone: 'blue', to: '/tasks', hint: '还没开始的任务' },
-    { key: 'in_progress', label: '进行中', value: count(counts?.in_progress), icon: CirclePlay, tone: 'indigo', to: '/tasks/timeline', hint: '正在执行或开始过的任务' },
-    { key: 'review', label: '已完成待查看', value: count(counts?.review), icon: Eye, tone: 'amber', to: '/tasks', hint: '智能体完成、等你确认结果的任务' },
-    { key: 'blocked', label: '阻塞任务', value: count(counts?.blocked), icon: TriangleAlert, tone: 'red', to: '/tasks', hint: '有未关闭的阻塞 Issue 的任务' },
+    { key: 'todo', label: '待办事项', value: count(counts?.todo), icon: SquareCheckBig, tone: 'blue', to: '/tasks?state=todo', hint: '未完成、没有正在执行的任务' },
+    { key: 'running', label: '进行中', value: count(counts?.running), icon: CirclePlay, tone: 'indigo', to: '/tasks?state=running', hint: '有正在执行的一段的任务' },
+    { key: 'awaiting_view', label: '已完成待查看', value: count(counts?.awaiting_view), icon: Eye, tone: 'amber', to: '/tasks?state=awaiting_view', hint: '完成了、你还没查看结果的任务' },
+    { key: 'blocked', label: '阻塞任务', value: count(counts?.blocked), icon: TriangleAlert, tone: 'red', to: '/tasks?state=blocked', hint: '有人写明了阻塞原因的任务' },
     { key: 'reminders', label: '近期提醒', value: events, icon: CalendarDays, tone: 'violet', to: '/calendar', hint: days.value === 1 ? '今天剩下的日程' : `今天起 ${days.value} 天内的日程` },
   ]
 })

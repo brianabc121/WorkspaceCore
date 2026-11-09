@@ -34,6 +34,7 @@ describe('本地资源写入恢复', () => {
       if (path(r) === '/api/v1/calendar/events') return denied ? fail(readStatus, 'FORBIDDEN') : Response.json({ ...emptyPage, items: [calendarEvent] })
     })
     await openApp('/calendar?date=2026-10-30'); await fireEvent.click(await screen.findByRole('button', { name: calendarEvent.title }))
+    await fireEvent.click(screen.getByRole('button', { name: '编辑日程' }))
     await fireEvent.update(screen.getByLabelText('日程标题'), '失去权限后的修改')
     await fireEvent.click(screen.getByRole('button', { name: '保存日程' }))
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
@@ -70,6 +71,7 @@ describe('本地资源写入恢复', () => {
     const event = { ...calendarEvent, start_at: '2026-10-30T01:30:45Z', end_at: '2026-10-30T02:30:45Z' }
     const requests = mockApi((r) => path(r) === '/api/v1/calendar/events' ? Response.json({ ...emptyPage, items: [event] }) : r.method === 'PATCH' ? Response.json(event) : undefined)
     await openApp('/calendar?date=2026-10-30'); await fireEvent.click(await screen.findByRole('button', { name: '发布评审' }))
+    await fireEvent.click(screen.getByRole('button', { name: '编辑日程' }))
     await fireEvent.update(screen.getByLabelText('日程标题'), '只改标题'); await fireEvent.click(screen.getByRole('button', { name: '保存日程' }))
     await vi.waitFor(() => expect(requests.some((r) => r.method === 'PATCH')).toBe(true))
     expect(await requests.find((r) => r.method === 'PATCH')!.clone().json()).toEqual({ version: 3, title: '只改标题' })

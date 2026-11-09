@@ -105,12 +105,14 @@ const detail = (page) => page.getByRole('complementary', { name: '选中的任�
 
   // ---------------------------------------------------------------- 入口：任务页“显示方式：时间轴”、项目页“时间轴”
   await page.goto(`${base}/tasks`)
-  await page.getByRole('group', { name: '显示方式' }).getByRole('button', { name: '时间轴' }).click()
+  await page.getByRole('group', { name: '显示方式' }).getByRole('link', { name: '时间轴' }).click()
   await page.waitForURL(/\/tasks\/timeline/)
   await page.getByRole('region', { name: '时间轴', exact: true }).waitFor()
   await page.goto(`${base}/projects`)
-  await page.getByRole('link', { name: '时间轴' }).first().waitFor()
-  const projectLinks = await page.getByRole('link', { name: '时间轴' }).evaluateAll((links) => links.map((a) => a.getAttribute('href')))
+  // 项目卡片的“时间轴”在“更多操作”菜单里（T-0168），菜单收起时链接仍在页面上
+  await page.getByRole('region', { name: /^项目 / }).first().waitFor()
+  await page.getByRole('link', { name: '时间轴', includeHidden: true }).first().waitFor({ state: 'attached' })
+  const projectLinks = await page.getByRole('link', { name: '时间轴', includeHidden: true }).evaluateAll((links) => links.map((a) => a.getAttribute('href')))
   check(projectLinks.includes(`/tasks/timeline?project=${projectA.id}`), `项目页应有带 project 的时间轴入口：${projectLinks.join(' ')}`)
   step('入口：任务页“显示方式”切到时间轴，项目页每个项目有“时间轴”')
 

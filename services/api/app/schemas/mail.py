@@ -1,4 +1,4 @@
-"""Gmail 邮件的接口模型（T-0128，docs/v2/MAIL_PLAN.md）。
+"""Gmail 邮件的接口模型（T-0128，docs/v2/MAIL_PLAN.md；多邮箱聚合 T-0170）。
 
 邮件的发件人、主题、正文、附件名都是外部输入：页面按纯文字显示（不渲染 HTML）。
 """
@@ -134,6 +134,65 @@ class MailList(BaseModel):
 class MailThreadOut(BaseModel):
     thread_id: str
     messages: list[MailMessageOut]
+
+
+# ---------------------------------------------------------------- 多邮箱聚合（T-0170）
+
+MailAggregateAccountStatus = Literal[
+    "ok", "needs_reconnect", "rate_limited", "unavailable", "pending"
+]
+MailAggregateOutcome = Literal["ok", "partial", "pending", "all_failed", "no_access", "no_accounts"]
+
+
+class MailAggregateItem(MailSummary):
+    """一封邮件的摘要，带上所属邮箱：消息 / 会话 ID 只在同一个邮箱里唯一。"""
+
+    account_id: UUID = Field(description="所属邮箱；读信、会话、附件、回复都要带上它")
+    account_email: str
+    account_display_name: str
+
+
+class MailAggregateAccount(BaseModel):
+    """这一批里每个邮箱的读取结果。"""
+
+    account_id: UUID
+    email: str
+    display_name: str
+    status: MailAggregateAccountStatus = Field(
+        description=(
+            "ok 正常（可能是空的）；needs_reconnect 授权失效或缺读取范围；rate_limited Gmail 限流"
+            "（见 retry_at）；unavailable 暂时读不到；pending 这一批没轮到或没读完，加载更多时继续"
+        )
+    )
+    error_code: str | None = Field(description="读取失败时的错误码（工作台自己的）")
+    loaded: int = Field(description="这一批返回了这个邮箱的几封")
+    exhausted: bool = Field(description="这个邮箱在当前条件下已经没有更多邮件")
+    unread: int | None = Field(
+        description="收件箱未读数（Gmail labels.get INBOX 的 messagesUnread）；没有依据时为空"
+    )
+    retry_at: datetime | None = Field(description="限流时建议的重试时间")
+
+
+class MailAggregatePage(BaseModel):
+    items: list[MailAggregateItem] = Field(
+        description=(
+            "这一批的邮件：按 Gmail internalDate 倒序，同一时间按 account_id、id 排序，"
+            "时间未知的放最后；不跨邮箱去重"
+        )
+    )
+    accounts: list[MailAggregateAccount]
+    outcome: MailAggregateOutcome = Field(
+        description=(
+            "ok 全部邮箱正常（items 为空就是真的没有邮件）；partial 部分邮箱失败或没读完；"
+            "pending 没有一个邮箱读完，加载更多继续；all_failed 全部读取失败；"
+            "no_access 全部需要重新连接；no_accounts 没有已连接的邮箱"
+        )
+    )
+    partial: bool = Field(description="有邮箱不是 ok")
+    next_cursor: str | None = Field(description="加载更多用的游标（15 分钟内有效）；没有更多时为空")
+    total_estimate: int | None = Field(
+        description="Gmail 估算的总数之和；有邮箱失败或没读完时为空（不给假的总数）"
+    )
 
 
 class MailSendIn(_Strict):

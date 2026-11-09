@@ -44,6 +44,8 @@ function readOperations(workspace, dashboard, role) {
   const spec = JSON.parse(fs.readFileSync(path.join(ROOT, 'services/api/openapi.json'), 'utf8'))
   const query = {
     start: '2026-01-05T00:00:00+08:00', end: '2026-01-12T00:00:00+08:00', q: 'smoke',
+    // 项目页“本周完成”的时间窗（T-0168）：由前端按显示时区算好传入
+    completed_after: '2026-01-05T00:00:00+08:00', completed_before: '2026-01-12T00:00:00+08:00',
   }
   const known = { workspace_id: workspace, dashboard_id: dashboard }
   const operations = []

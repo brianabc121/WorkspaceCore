@@ -43,6 +43,11 @@ async function login(browser, email, problems, viewport = { width: 1440, height:
 }
 const taskButton = (page, title) => page.locator('button.task-title', { hasText: title })
 const projectCard = (page, title) => page.getByRole('region', { name: `项目 ${title}` })
+// 项目卡片的编辑、归档、删除在“更多操作”菜单里（T-0168）
+async function projectAction(page, title, name) {
+  await projectCard(page, title).locator('summary').click()
+  await projectCard(page, title).getByRole('button', { name }).click()
+}
 
 ;(async () => {
   const [, workspace] = seed('user', `owner-${run}@browser.example.com`, 'Owner')
@@ -90,7 +95,9 @@ const projectCard = (page, title) => page.getByRole('region', { name: `项目 ${
   await createTask('一直未完成', { dueToday: true })
   check(keys.length === 2 && keys.every((key) => /^[0-9a-f-]{36}$/.test(key)) && keys[0] !== keys[1], '每次创建应带新的 UUID 格式 Idempotency-Key')
   check(await taskButton(page, '浏览器新建').count() === 1, '新建的任务应只出现一次')
-  await page.getByText(`${projectTitle} · 验收 · 浏览器`).first().waitFor()
+  const row = page.locator('tr', { has: taskButton(page, '浏览器新建') })
+  await row.getByText(projectTitle, { exact: true }).waitFor()
+  await row.getByText('验收 · 浏览器').waitFor()
   step('新建任务抽屉：每次提交带新的 Idempotency-Key，列表显示所属项目与标签')
 
   // ---------------------------------------------------------------- 编辑（带 version）
@@ -128,17 +135,17 @@ const projectCard = (page, title) => page.getByRole('region', { name: `项目 ${
 
   // ---------------------------------------------------------------- 项目改名、归档、删除
   await page.goto(`${base}/projects`)
-  await projectCard(page, projectTitle).getByRole('button', { name: `编辑项目 ${projectTitle}` }).click()
+  await projectAction(page, projectTitle, `编辑项目 ${projectTitle}`)
   const renamed = `${projectTitle} 改名`
   await page.getByLabel('项目名称').fill(renamed)
   await page.getByRole('button', { name: '保存项目' }).click()
   await projectCard(page, renamed).waitFor()
-  await projectCard(page, renamed).getByRole('button', { name: `归档项目 ${renamed}` }).click()
+  await projectAction(page, renamed, `归档项目 ${renamed}`)
   await page.getByText(`已归档项目「${renamed}」，任务保留`).waitFor()
   check(await projectCard(page, renamed).count() === 0, '归档的项目默认不显示')
-  await page.getByLabel('显示已归档的项目').check()
+  await page.getByRole('group', { name: '筛选项目' }).getByRole('button', { name: /^已归档/ }).click()
   await projectCard(page, renamed).getByText('已归档').waitFor()
-  await projectCard(page, renamed).getByRole('button', { name: `删除项目 ${renamed}` }).click()
+  await projectAction(page, renamed, `删除项目 ${renamed}`)
   await page.getByText(`已删除项目「${renamed}」`).waitFor()
   await page.goto(`${base}/tasks`)
   await page.getByText('还没有项目，请先在「项目」页新建一个项目。').first().waitFor()

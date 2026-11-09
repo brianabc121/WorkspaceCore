@@ -69,5 +69,7 @@ declare module 'vue-router' {
   interface RouteMeta {
     /** 路由属于哪个模块（宿主按注册表自动填写）；模块停用时页面显示“功能未启用” */
     module?: string
+    /** 宽版内容区（四页改造：任务、项目、日历、邮件） */
+    wide?: boolean
   }
 }

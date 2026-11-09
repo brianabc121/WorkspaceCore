@@ -139,7 +139,7 @@ const standalone = computed(() => !!route.meta.standalone && !!auth.user)
             <button v-else class="shell-icon" type="button" :aria-label="themeLabel" :title="themeLabel" @click="theme.toggle"><Moon v-if="theme.theme === 'light'" aria-hidden="true" /><Sun v-else aria-hidden="true" /></button>
           </div>
         </header>
-        <main id="main-content" tabindex="-1">
+        <main id="main-content" tabindex="-1" :class="{ 'is-wide': route.meta.wide }">
           <p v-if="logoutError" role="alert" class="feedback">{{ logoutError }}</p>
           <p v-if="auth.loading" role="status">正在连接工作空间…</p>
           <ModuleDisabledPage v-else-if="disabledModule" :module-key="disabledModule" />

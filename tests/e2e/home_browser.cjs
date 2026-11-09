@@ -1,8 +1,8 @@
 // 首页改版浏览器验收（T-0163 ~ T-0165，docs/v2/HOME_PLAN.md）：真实后端 + 真实前端——
 // 新工作空间的首页是效果图的五个组件 → 准备待办 / 进行中 / 待查看 / 阻塞四种任务和两条日程 →
-// 工作概况的数字、任务进展的“需要你关注 N 项”、页签筛选、阻塞 Issue 标题 → “查看结果”打开任务、确认结果后
-// 待查看减少 → 我的待办添加（指派给自己）并勾选完成 → 提醒与日程就地添加 → 自定义首页与恢复默认首页 →
-// viewer 只读；手机宽度不横向滚动、暗色主题正常。
+// 工作概况的数字、任务进展的“需要你关注 N 项”、页签筛选、阻塞原因（T-0166：明确写的原因，不再借 Issue）→
+// “查看结果”打开任务、标为已查看后待查看减少（只影响自己）→ 我的待办添加（指派给自己）并勾选完成 →
+// 提醒与日程就地添加 → 自定义首页与恢复默认首页 → viewer 只读、仍有自己的待查看；手机宽度不横向滚动、暗色主题正常。
 //
 // 前提：Compose 全栈已启动并迁移（make up && make migrate）。没有 OpenClaw：智能体完成任务由 seed.py review 模拟。
 // 用法（依赖由同目录的 package.json / package-lock.json 锁定）：
@@ -48,7 +48,7 @@ function watch(page, problems) {
     if (response.status() >= 500 && !(response.status() === 503 && pathname.startsWith('/api/v1/im/'))) problems.push(`${response.status()} ${response.request().method()} ${pathname}`)
   })
   page.on('console', (message) => {
-    // 登录前的 401、viewer 确认结果的 403（本脚本故意请求的）、上面忽略的 IM 503 都是预期内的
+    // 登录前的 401、viewer 解除阻塞的 403（本脚本故意请求的）、上面忽略的 IM 503 都是预期内的
     if (message.type() === 'error' && !/\b(401|403|503)\b/.test(message.text())) problems.push(message.text())
   })
 }
@@ -99,8 +99,8 @@ const noHorizontalScroll = (page) => page.evaluate(() => document.documentElemen
   const started = await api(page, workspace, 'POST', `/api/v1/tasks/${running.id}/runs`, {}, idem())
   check([200, 201].includes(started.status), `开始执行失败：${started.status}`)
   const blocked = await create('被卡住的任务')
-  const issue = await api(page, workspace, 'POST', `/api/v1/projects/${project.id}/issues`, { title: '等待补充访问权限', kind: 'blocker', task_ids: [blocked.id] })
-  check(issue.status === 201, `开阻塞 Issue 失败：${issue.status}`)
+  const block = await api(page, workspace, 'PATCH', `/api/v1/tasks/${blocked.id}/block`, { version: blocked.version, blocked: true, reason: '等待补充访问权限' }, idem())
+  check(block.status === 200 && block.body.work_state === 'blocked', `标记阻塞失败：${block.status} ${JSON.stringify(block.body).slice(0, 200)}`)
   const review = await create('智能体做完的方案')
   seed('review', workspace, review.id, '设计助手')
   const now = new Date(), soon = new Date(now.getTime() + 2 * 3600000)
@@ -109,37 +109,35 @@ const noHorizontalScroll = (page) => page.evaluate(() => document.documentElemen
     check(created.status === 201, `新建日程失败：${created.status}`)
   }
   await page.getByRole('button', { name: '刷新首页' }).click()
-  await waitTile(page, 'review', '1')
-  check(await tile(page, 'todo') === '1' && await tile(page, 'in_progress') === '1' && await tile(page, 'blocked') === '1', '工作概况的待办 / 进行中 / 阻塞应各为 1')
+  await waitTile(page, 'awaiting_view', '1')
+  check(await tile(page, 'todo') === '1' && await tile(page, 'running') === '1' && await tile(page, 'blocked') === '1', '工作概况的待办 / 进行中 / 阻塞应各为 1')
   check(Number(await tile(page, 'reminders')) >= 1, '近期提醒应至少有今天的那条')
   const progress = page.getByRole('article', { name: '任务进展' })
   await progress.getByText('需要你关注 2 项').waitFor()
   const rows = progress.locator('tbody tr')
   check(await rows.count() === 4, `全部页签应有 4 行，实际 ${await rows.count()}`)
-  check(await rows.nth(0).getAttribute('data-status') === 'review' && await rows.nth(1).getAttribute('data-status') === 'blocked', '待查看与阻塞应排在前面')
+  check(await rows.nth(0).getAttribute('data-status') === 'awaiting_view' && await rows.nth(1).getAttribute('data-status') === 'blocked', '待查看与阻塞应排在前面')
   await progress.getByText('设计助手').waitFor()
   await progress.getByRole('button', { name: /^阻塞/ }).click()
   // 切换页签时先保留上一页（不闪空），新数据到了才只剩阻塞的任务
   await page.waitForFunction(() => document.querySelectorAll('article[aria-label="任务进展"] tbody tr').length === 1)
   await progress.locator('tbody tr[data-status="blocked"]').getByText('等待补充访问权限').waitFor()
-  check(await progress.getByRole('link', { name: '处理阻塞：被卡住的任务' }).getAttribute('href') === `/issues/${issue.body.id}`, '处理阻塞应链到阻塞 Issue')
+  check(await progress.getByRole('link', { name: '处理阻塞：被卡住的任务' }).getAttribute('href') === `/tasks?task=${blocked.id}`, '处理阻塞应打开任务详情')
   await progress.getByRole('button', { name: /^全部/ }).click()
-  step('工作概况四种状态各 1、近期提醒有日程；任务进展“需要你关注 2 项”、待查看与阻塞在前、执行者名字、阻塞页签与 Issue 标题、处理阻塞链到 Issue')
+  step('工作概况四种状态各 1、近期提醒有日程；任务进展“需要你关注 2 项”、待查看与阻塞在前、执行者名字、阻塞页签显示阻塞原因、处理阻塞打开任务')
 
-  // ---------------------------------------------------------------- 查看结果 → 确认结果
+  // ---------------------------------------------------------------- 查看结果 → 标为已查看
   await progress.getByRole('link', { name: '查看结果：智能体做完的方案' }).click()
   await page.waitForURL(/\/tasks\?task=/)
-  const confirm = page.getByRole('button', { name: '确认结果' })
-  await confirm.waitFor()
-  await page.getByText('完成说明：方案已写进任务 README').waitFor()
-  await confirm.click()
-  await page.getByText('已确认结果').waitFor()
+  const awaiting = page.getByRole('note', { name: '待查看' })
+  await awaiting.getByText('完成说明：方案已写进任务 README').waitFor()
+  await awaiting.getByRole('button', { name: '标为已查看' }).click()
+  await page.getByText('已标为已查看（只影响你自己）').waitFor()
+  check((await api(page, workspace, 'GET', `/api/v1/tasks/${review.id}`)).body.work_state === 'done', '标为已查看后任务对自己应是“已完成”')
   await page.goto(`${base}/`)
-  await waitTile(page, 'review', '0')
+  await waitTile(page, 'awaiting_view', '0')
   await page.getByRole('article', { name: '任务进展' }).getByText('需要你关注 1 项').waitFor()
-  const events = await api(page, workspace, 'GET', `/api/v1/tasks/${review.id}/events`)
-  check(events.body.items[0].kind === 'reviewed', '任务动态应记“确认了结果”')
-  step('“查看结果”打开任务，显示完成说明；确认结果后首页待查看为 0、需要关注降为 1，动态记“确认了结果”')
+  step('“查看结果”打开任务，显示完成说明；标为已查看后首页待查看为 0、需要关注降为 1')
 
   // ---------------------------------------------------------------- 我的待办
   const todos = page.getByRole('article', { name: '我的待办' })
@@ -208,9 +206,15 @@ const noHorizontalScroll = (page) => page.evaluate(() => document.documentElemen
   check(await viewer.page.getByRole('button', { name: '添加待办' }).count() === 0, 'viewer 不应看到“添加待办”')
   check(await viewer.page.getByRole('button', { name: '添加提醒' }).count() === 0, 'viewer 不应看到“添加提醒”')
   check(await viewer.page.getByRole('button', { name: '自定义首页', exact: true }).count() === 0, 'viewer 不应看到“自定义首页”')
-  const denied = await api(viewer.page, workspace, 'POST', `/api/v1/tasks/${review.id}/review`, { version: '1' })
-  check(denied.status === 403, `viewer 确认结果应 403，实际 ${denied.status}`)
-  step('viewer 看得到任务进展，没有添加待办 / 添加提醒 / 自定义首页，确认结果 403')
+  // 别人完成的任务对 viewer 都是待查看：智能体做完的方案 + owner 自己勾掉的那条待办（owner 已查看不影响 viewer）
+  await waitTile(viewer.page, 'awaiting_view', '2')
+  const fresh = (await api(viewer.page, workspace, 'GET', `/api/v1/tasks/${blocked.id}`)).body
+  const denied = await api(viewer.page, workspace, 'PATCH', `/api/v1/tasks/${blocked.id}/block`, { version: fresh.version, blocked: false }, idem())
+  check(denied.status === 403, `viewer 解除阻塞应 403，实际 ${denied.status}`)
+  const reviewNow = (await api(viewer.page, workspace, 'GET', `/api/v1/tasks/${review.id}`)).body
+  const viewed = await api(viewer.page, workspace, 'PUT', `/api/v1/tasks/${review.id}/result-view`, { completion_seq: reviewNow.completion_seq })
+  check(viewed.status === 200, `viewer 标为已查看（只标自己）应 200，实际 ${viewed.status}`)
+  step('viewer 看得到任务进展，没有添加待办 / 添加提醒 / 自定义首页；自己的待查看是 2（别人完成的两项）并可标为已查看，解除阻塞 403')
 
   await browser.close()
   if (problems.length) throw new Error(`页面错误：${problems.join('; ')}`)

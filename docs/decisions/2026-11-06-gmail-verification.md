@@ -41,6 +41,7 @@
 |---|---|---|---|
 | `users.getProfile` | `GET gmail/v1/users/{userId}/profile` | `gmail.readonly` | `emailAddress`、`messagesTotal`、`threadsTotal`、`historyId` |
 | `users.labels.list` | `GET gmail/v1/users/{userId}/labels` | `gmail.readonly` | `labels[].id/name/type/messagesUnread` |
+| `users.labels.get`（T-0170 起用） | `GET gmail/v1/users/{userId}/labels/{id}` | `gmail.readonly` | `messagesUnread`（“The number of unread messages with the label.”）、`messagesTotal`；邮件页“全部邮箱”取每个邮箱 `INBOX` 的未读数 |
 | `users.messages.list` | `GET gmail/v1/users/{userId}/messages` | `gmail.readonly` | `q`（与 Gmail 搜索框同样的语法）、`labelIds`、`maxResults`（默认 100，最大 500）、`pageToken`、`includeSpamTrash`；响应 `messages[]`（只有 `id`、`threadId`）、`nextPageToken`、`resultSizeEstimate` |
 | `users.messages.get` | `GET gmail/v1/users/{userId}/messages/{id}` | `gmail.readonly` | `format` 取 `minimal` / `full`（默认）/ `raw` / `metadata`；`metadataHeaders`；`Message`：`id`、`threadId`、`labelIds`、`snippet`、`internalDate`（毫秒）、`payload`（`MessagePart`：`partId`、`mimeType`、`filename`、`headers[]{name,value}`、`body{size,data(base64url),attachmentId}`、`parts[]`） |
 | `users.threads.get` | `GET gmail/v1/users/{userId}/threads/{id}` | `gmail.readonly` | `format`、`metadataHeaders`；`Thread`：`id`、`messages[]`、`snippet` |
@@ -53,7 +54,7 @@ discovery 文档里的全部 OAuth 范围共 14 个；本方案只申请 `https:
 ## 4. 配额与错误（官方文档）
 
 - 配额：每项目每分钟 1,200,000 单位；**每用户每项目每分钟 6,000 单位**；每项目每天 80,000,000 单位。
-- 单次消耗：`getProfile` 1、`labels.list` 1、`history.list` 2、`messages.list` 5、`messages.get` 20（`format` 为 full / raw / html 时 60）、`messages.attachments.get` 20、`threads.get` 40（full 时 120）、`messages.send` 100。
+- 单次消耗：`getProfile` 1、`labels.list` 1、`labels.get` 1、`history.list` 2、`messages.list` 5、`messages.get` 20（`format` 为 full / raw / html 时 60）、`messages.attachments.get` 20、`threads.get` 40（full 时 120）、`messages.send` 100。
 - 错误：400；401（凭证无效，刷新令牌）；403 `dailyLimitExceeded`、`domainPolicy`、`rateLimitExceeded`、`userRateLimitExceeded`（后两者用指数退避重试）；404；429（每用户每日上限，**含发信上限**，“with a retry time”）；500 / 502 / 503 / 504（指数退避重试）。
 - 发信上限：与 Gmail 本身的每日发信上限共用；超过后可能好几个小时返回 429；“You can't assume that a 200 response means the email was successfully sent.”
 - 发信格式：`raw` 是 base64url 编码的 RFC 2822 邮件；回复要进同一会话时，`Subject` 要一致，`References` 与 `In-Reply-To` 要符合 RFC 2822。
@@ -75,3 +76,12 @@ discovery 文档里的全部 OAuth 范围共 14 个；本方案只申请 `https:
   `docs/deploy-guide.md` 8.7 的清单手工验收（连接、搜索、读只有 HTML 的邮件、发信与回复进同一会话、智能体在允许的范围里发信、
   断开后 Google 账号的“第三方应用”里授权已移除），结果补在这里。模拟服务与真实 Google 可能的差异：错误响应的细节字段、
   `labels.list` 是否带未读数、发信上限的 429 与 Retry-After。
+
+## 7. 补充核验（2026-11-09，T-0170 多邮箱聚合）
+
+- 重新下载 discovery 文档：`revision=20261102` 未变（217716 字节，本次 sha256 `3b0a67df2bc97c3024c800e1b9c4c1b1aa1e716c793bcde8602134c37dbfbb30`，与第 1 节的哈希不同但版本号与大小相同）。
+  `users.labels.get` 的范围含 `gmail.readonly`；`Label.messagesUnread` / `messagesTotal` 字段如上表。配额页（`https://developers.google.com/workspace/gmail/api/reference/quota`）：`labels.get` 1 单位。
+- 系统标签 `INBOX`、`STARRED`、`SENT`、`UNREAD` 见“Manage labels”指南（`https://developers.google.com/workspace/gmail/api/guides/labels`）的系统标签表；全部邮箱模式只接受这些系统标签。
+- 搜索语法：`messages.list` 的 `q` 与 Gmail 搜索框同样的语法，discovery 文档的示例里有 `is:unread`，邮件页的“未读”筛选用它。
+  `has:attachment` 等其他运算符的官方说明在 `https://support.google.com/mail/answer/7190`，本环境访问被代理拦截（403），**没有核验**，所以没有做“有附件”筛选（用户可以自己在搜索框里输入 Gmail 语法）。
+- 读取 / 发送邮件的熔断改为按邮箱计数（`mail:{workspace}:{account}`；OAuth 换令牌与连接时读资料仍按工作空间）：一个邮箱连续出错不再把同一工作空间的其他邮箱一起熔断。这是工作台自己的策略，不涉及第三方接口。

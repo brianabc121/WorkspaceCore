@@ -526,3 +526,20 @@ Gmail 邮件（`docs/v2/MAIL_PLAN.md` 第 4 节）。只新增表与字段；邮
 可以在页面上“恢复默认首页”。
 
 **downgrade** 把仍是新默认布局的首页换回四个入门组件；改过的保持原样。
+
+### 迁移 `0053`（T-0166）
+
+任务的五种状态（`docs/decisions/2026-11-09-task-work-states.md`）：完成轮次、个人查看记录、明确阻塞。
+
+| 表 / 对象 | 字段 | 说明 |
+|---|---|---|
+| `tasks` | `completion_seq`（整数，默认 0，`>= 0`） | 完成轮次：每次未完成→完成加 1。迁移前完成的任务为 0（对所有人都是已完成）；`review_pending` 为真的任务记为 1 |
+| `tasks` | `blocked_at`、`blocked_reason`（≤ 2000 字）、`blocked_by`（用户，置空删除） | 明确阻塞；`blocked_at` 与 `blocked_reason` 成对出现（`ck_tasks_blocked_pair`）。完成时清空 |
+| `ix_tasks_blocked` | `workspace_id`，部分索引 `WHERE blocked_at IS NOT NULL` | 数阻塞的任务 |
+| `uq_tasks_workspace_id_id` | `(workspace_id, id)` 唯一 | 作 `task_result_reads` 复合外键的目标 |
+| `task_result_reads` | `task_id` + `user_id`（主键）、`workspace_id`、`seen_completion_seq`（`>= 0`）、`viewed_at` | 每个成员看过的最大完成轮次。`(workspace_id, task_id)` → `tasks`、`(workspace_id, user_id)` → `workspace_members`，都级联删除：任务删除或成员离开时随之删除，不能跨工作空间 |
+| `ix_task_result_reads_user` | `(workspace_id, user_id)` | 按人读查看记录 |
+| `task_events.kind` | 增加 `blocked`、`unblocked` | 标记 / 解除阻塞（`note` 是原因） |
+| 删除 | `tasks.review_pending` 与 `ix_tasks_review_pending` | 由完成轮次与个人查看记录取代（信息已转成 `completion_seq = 1`） |
+
+**downgrade** 恢复 `review_pending`（已完成、轮次 > 0、没有任何人看过这一轮的为真）与它的索引；删除阻塞动态、`task_result_reads`、新列与约束。

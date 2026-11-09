@@ -8,9 +8,14 @@
 - 撤销 `POST /revoke?token=`：成功 200，令牌不认识 400；
 - Gmail：401 带 `UNAUTHENTICATED`；缺范围 403 `insufficientPermissions`；
   限流 429 `rateLimitExceeded`；
-  Message 资源的 payload 是 MessagePart 树（正文 base64url），`format=metadata` 只给指定的头。
+  Message 资源的 payload 是 MessagePart 树（正文 base64url），`format=metadata` 只给指定的头；
+  `labels/{id}`（labels.get）带 messagesTotal / messagesUnread（T-0170）。
+
+多邮箱聚合（T-0170）用到的：每个邮箱单独的读取故障（read_failures）与延迟（delays）、
+指定消息 ID（不同邮箱里故意相同）、没有 internalDate 的邮件，以及并发请求数的记录。
 """
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -83,6 +88,12 @@ class FakeGoogle:
         self.requests: list[httpx.Request] = []
         self.send_failure: str | None = None  # timeout / rate / server
         self.read_failure: str | None = None  # rate
+        self.read_failures: dict[str, str] = {}  # 邮箱 → rate / server（只影响这个邮箱的读取）
+        self.delays: dict[str, float] = {}  # 邮箱 → 每个 Gmail 请求的延迟（秒）
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self.box_in_flight: dict[str, int] = {}
+        self.max_box_in_flight: dict[str, int] = {}
         self._next = 1000
         self.transport = httpx.MockTransport(self._handle)
 
@@ -136,9 +147,11 @@ class FakeGoogle:
         message_id_header: str | None = None,
         references: str | None = None,
         when: int | None = None,
+        message_id: str | None = None,
+        no_date: bool = False,
     ) -> dict[str, Any]:
         box = self.mailboxes.setdefault(email, Mailbox(email))
-        message_id = self._id("m")
+        message_id = message_id or self._id("m")
         thread = thread_id or self._id("t")
         header_id = message_id_header or f"<{message_id}@mail.example.com>"
         headers = [
@@ -213,6 +226,8 @@ class FakeGoogle:
             "sizeEstimate": 1000,
             "payload": payload,
         }
+        if no_date:
+            message.pop("internalDate")
         box.messages[message_id] = message
         return message
 
@@ -234,8 +249,28 @@ class FakeGoogle:
                     return httpx.Response(200, json={})
                 return httpx.Response(400, json={"error": "invalid_token"})
         if url.host == "gmail.googleapis.com" and url.path.startswith("/gmail/v1/users/me"):
-            return self._gmail(request, url.path.removeprefix("/gmail/v1/users/me"))
+            return await self._timed(request, url.path.removeprefix("/gmail/v1/users/me"))
         return httpx.Response(404, json={"error": {"code": 404, "message": "Not Found"}})
+
+    async def _timed(self, request: httpx.Request, path: str) -> httpx.Response:
+        """记录并发数，按邮箱加延迟（模拟慢邮箱）。"""
+        auth = request.headers.get("authorization", "")
+        grant = self.access_tokens.get(auth.removeprefix("Bearer "))
+        email = grant.email if grant else ""
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        self.box_in_flight[email] = self.box_in_flight.get(email, 0) + 1
+        self.max_box_in_flight[email] = max(
+            self.max_box_in_flight.get(email, 0), self.box_in_flight[email]
+        )
+        try:
+            delay = self.delays.get(email)
+            if delay:
+                await asyncio.sleep(delay)
+            return self._gmail(request, path)
+        finally:
+            self.in_flight -= 1
+            self.box_in_flight[email] -= 1
 
     def _token(self, request: httpx.Request) -> httpx.Response:
         assert request.headers["content-type"].startswith("application/x-www-form-urlencoded")
@@ -320,8 +355,11 @@ class FakeGoogle:
                 "Request had insufficient authentication scopes.",
                 "PERMISSION_DENIED",
             )
-        if self.read_failure == "rate":
+        failure = self.read_failures.get(grant.email) or self.read_failure
+        if failure == "rate":
             return _error(429, "rateLimitExceeded", "Too many requests", "RESOURCE_EXHAUSTED")
+        if failure == "server":
+            return _error(503, "backendError", "Backend Error", "UNAVAILABLE")
         params = request.url.params
         if path == "/labels":
             return httpx.Response(
@@ -338,6 +376,22 @@ class FakeGoogle:
         if path == "/messages":
             return self._list(box, params)
         parts = path.strip("/").split("/")
+        if parts[0] == "labels" and len(parts) == 2:
+            with_label = [m for m in box.messages.values() if parts[1] in m["labelIds"]]
+            return httpx.Response(
+                200,
+                json={
+                    "id": parts[1],
+                    "name": parts[1],
+                    "type": "system",
+                    "messagesTotal": len(with_label),
+                    "messagesUnread": sum(1 for m in with_label if "UNREAD" in m["labelIds"]),
+                    "threadsTotal": len({m["threadId"] for m in with_label}),
+                    "threadsUnread": len(
+                        {m["threadId"] for m in with_label if "UNREAD" in m["labelIds"]}
+                    ),
+                },
+            )
         if parts[0] == "messages" and len(parts) == 2:
             found = box.messages.get(parts[1])
             if found is None:
@@ -352,7 +406,7 @@ class FakeGoogle:
             items = [m for m in box.messages.values() if m["threadId"] == parts[1]]
             if not items:
                 return _error(404, "notFound", "Requested entity was not found.", "NOT_FOUND")
-            items.sort(key=lambda m: int(m["internalDate"]))
+            items.sort(key=lambda m: int(m.get("internalDate") or 0))
             return httpx.Response(
                 200,
                 json={
@@ -374,7 +428,10 @@ class FakeGoogle:
         return out
 
     def _list(self, box: Mailbox, params: httpx.QueryParams) -> httpx.Response:
-        items = sorted(box.messages.values(), key=lambda m: -int(m["internalDate"]))
+        # 和 Gmail 一样按时间倒序（没有 internalDate 的放最后）；默认不含 SPAM / TRASH
+        items = sorted(box.messages.values(), key=lambda m: -int(m.get("internalDate") or 0))
+        if params.get("includeSpamTrash") != "true":
+            items = [m for m in items if not {"SPAM", "TRASH"} & set(m["labelIds"])]
         for label in params.get_list("labelIds"):
             items = [m for m in items if label in m["labelIds"]]
         query = params.get("q") or ""

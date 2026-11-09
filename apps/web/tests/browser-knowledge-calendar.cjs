@@ -26,10 +26,16 @@ fs.mkdirSync(screenshots, { recursive: true });
     try {
       const request = route.request(), url = new URL(request.url()), pathname = url.pathname, method = request.method();
       const writing = !['GET', 'HEAD'].includes(method); let body, status = 200;
-      if (!['/api/v1/setup/status', '/api/v1/me'].includes(pathname)) assert.equal(request.headers()['x-workspace-id'], 'workspace-a');
+      // 外壳级接口（模块、侧栏、未读数）与实时事件流（工作空间在查询参数里）不带工作空间头
+      if (!['/api/v1/setup/status', '/api/v1/me', '/api/v1/modules', '/api/v1/navigation', '/api/v1/im/badges', '/api/v1/notifications', '/api/v1/events/stream'].includes(pathname)) assert.equal(request.headers()['x-workspace-id'], 'workspace-a');
       if (writing) { assert.equal(request.headers()['x-csrf-token'], 'browser-csrf'); writes.push({ path: pathname, method, body: request.postDataJSON() }); }
       if (pathname === '/api/v1/setup/status') body = { setup_required: false };
       else if (pathname === '/api/v1/me') body = { user: { id: 'user-a', display_name: '演示用户', email: 'test@example.com', created_at: time }, workspaces: [{ id: 'workspace-a', name: '个人工作空间', role: 'owner', created_at: time, updated_at: time }] };
+      else if (pathname === '/api/v1/events/stream') status = 204;
+      else if (pathname === '/api/v1/modules') body = { items: [] };
+      else if (pathname === '/api/v1/navigation') body = { version: 0, sections: [], pages: [], placements: {}, section_order: [], embed_origins: [], can_manage: true };
+      else if (pathname === '/api/v1/im/badges') body = { im_unread: 0, pending_approvals: 0 };
+      else if (pathname === '/api/v1/notifications') body = { ...empty, unread_count: 0 };
       else if (pathname === '/api/v1/projects') body = { ...empty, items: [project] };
       else if (pathname === '/api/v1/tasks') body = { ...empty };
       else if (pathname === '/api/v1/knowledge/sources') body = { ...empty, items: [{ ...source, bookmark_count: bookmarks.length }] };
@@ -71,12 +77,13 @@ fs.mkdirSync(screenshots, { recursive: true });
   await page.setViewportSize({ width: 390, height: 844 }); assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   await page.screenshot({ path: path.join(screenshots, 'sprint4-knowledge-mobile.png'), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(baseUrl + '/calendar'); await page.getByRole('button', { name: '版本发布评审', exact: true }).waitFor();
+  await page.goto(baseUrl + '/calendar?date=2026-10-30'); await page.getByRole('button', { name: '版本发布评审', exact: true }).waitFor();
   await page.getByLabel('查看日期', { exact: true }).fill('2026-10-30'); await page.getByLabel('显示时区', { exact: true }).fill('Asia/Shanghai'); await page.getByRole('button', { name: '应用日历范围', exact: true }).click();
   await page.getByRole('button', { name: '新建日程', exact: true }).click(); await page.getByLabel('日程标题', { exact: true }).fill('浏览器日程');
   await page.getByLabel('开始时间', { exact: true }).fill('2026-10-30T09:30'); await page.getByLabel('结束时间', { exact: true }).fill('2026-10-30T10:30'); await page.getByRole('button', { name: '保存日程', exact: true }).click();
   await page.getByRole('button', { name: '浏览器日程', exact: true }).waitFor();
-  await page.getByRole('button', { name: '浏览器日程', exact: true }).click(); await page.getByLabel('日程标题', { exact: true }).fill('浏览器日程更新'); await page.getByRole('button', { name: '保存日程', exact: true }).click();
+  // 周视图里点日程先看详情（T-0169），再点“编辑日程”打开表单
+  await page.getByRole('button', { name: '浏览器日程', exact: true }).click(); await page.getByRole('button', { name: '编辑日程', exact: true }).click(); await page.getByLabel('日程标题', { exact: true }).fill('浏览器日程更新'); await page.getByRole('button', { name: '保存日程', exact: true }).click();
   await page.getByRole('button', { name: '浏览器日程更新', exact: true }).waitFor();
   await page.getByRole('button', { name: '周视图', exact: true }).click(); await page.getByRole('button', { name: '切换到暗色主题' }).click();
   await page.screenshot({ path: path.join(screenshots, 'sprint4-calendar-dark.png'), fullPage: true });

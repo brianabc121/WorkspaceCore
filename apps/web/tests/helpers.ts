@@ -13,7 +13,8 @@ export const workspace: Schema['WorkspaceOut'] = { id: 'workspace-a', name: '个
 export const me: Schema['MeResponse'] = { user: { id: 'user-a', email: 'test@example.com', display_name: '测试用户', created_at: '2026-10-30T00:00:00Z' }, workspaces: [workspace] }
 export const session: Schema['SessionOut'] = { id: 'session-a', current: true, created_at: '2026-10-30T00:00:00Z', expires_at: '2026-11-30T00:00:00Z', last_seen_at: null }
 export const emptyPage = { items: [], next_cursor: null, total_estimate: null }
-export const emptyProgress: Schema['TaskProgressOut'] = { counts: { all: 0, todo: 0, in_progress: 0, review: 0, blocked: 0 }, attention: 0, items: [] }
+export const emptySummary: Schema['TaskSummary'] = { todo: 0, running: 0, awaiting_view: 0, blocked: 0, done: 0, total: 0, as_of: '2026-10-30T00:00:00Z' }
+export const emptyProgress: Schema['TaskProgressOut'] = { counts: { all: 0, todo: 0, running: 0, awaiting_view: 0, blocked: 0 }, attention: 0, items: [] }
 export const runnerOff: Schema['AgentRunnerOut'] = { enabled: false, limits: { envs: 3, persistent: 2, memory_mb: 16384, cpus: 8, disk_gb: 100, execs_per_hour: 120, run_hours_per_day: 8 }, secrets: [], enabled_at: null, version: 1 }
 // 插拔式模块（T-0159）：默认只有新闻早报，已启用
 export const newsModule: Schema['ModuleOut'] = { key: 'news', name: '新闻早报', description: '每天的新闻早报、热榜、RSS、搜索与收藏；智能体可以查新闻。依赖 TrendRadar。', version: '1.0.0', enabled: true, default_enabled: true, ready: true, missing: [], depends_on: [], dependents: [], tools: ['news_latest', 'news_search', 'news_briefing'], widgets: ['news_briefing'], can_manage: true }
@@ -54,6 +55,10 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (path === '/api/v1/dashboard/overview') return Response.json(overview)
     // 首页改版（T-0164）：任务进展默认没有任务，今天没有早报主题
     if (path === '/api/v1/tasks/progress') return Response.json(emptyProgress)
+    if (path === '/api/v1/tasks/summary') return Response.json(emptySummary)
+    if (path === '/api/v1/projects/summary') return Response.json({ active: 0, attention: 0, completed: 0, as_of: '2026-10-30T00:00:00Z' })
+    if (path === '/api/v1/projects/activity') return Response.json({ items: [], next_cursor: null })
+    if (path === '/api/v1/tasks/assignees') return Response.json({ users: [], instances: [] })
     if (path === '/api/v1/news/today') return Response.json({ briefing: null, topics: [], unavailable: false, message: null })
     if (path === '/api/v1/news/briefings') return Response.json(emptyPage)
     if (path === '/api/v1/tasks') return Response.json({ items: [task], next_cursor: null, total_estimate: 1 })

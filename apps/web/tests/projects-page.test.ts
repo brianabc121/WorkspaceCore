@@ -24,7 +24,7 @@ describe('项目页面', () => {
     projectsApi(undefined, () => [project, { ...project, id: 'p2', title: '旧项目', archived: true, open_tasks: 0, done_tasks: 4 }])
     await openApp('/projects')
     const card = await region('发布计划')
-    expect(within(card).getByText(/未完成 1 · 已完成 0/)).toBeVisible()
+    expect(within(card).getByText('进度 0/1')).toBeVisible()
     expect(within(card).getByRole('link', { name: '查看任务' })).toHaveAttribute('href', `/tasks?project_id=${project.id}`)
     expect(within(await region('旧项目')).getByText('已归档')).toBeVisible()
     expect(document.body).not.toHaveTextContent('Vikunja')
@@ -36,8 +36,8 @@ describe('项目页面', () => {
     await openApp('/projects'); await region('发布计划')
     const first = new URL(requests.find((r) => pathOf(r) === '/api/v1/projects')!.url).searchParams
     expect(first.get('include_archived')).toBe('false')
-    await fireEvent.click(screen.getByLabelText('显示已归档的项目'))
-    await vi.waitFor(() => expect(requests.filter((r) => pathOf(r) === '/api/v1/projects').some((r) => new URL(r.url).searchParams.get('include_archived') === 'true')).toBe(true))
+    await fireEvent.click(within(screen.getByRole('group', { name: '筛选项目' })).getByRole('button', { name: /^已归档/ }))
+    await vi.waitFor(() => expect(requests.filter((r) => pathOf(r) === '/api/v1/projects').some((r) => new URL(r.url).searchParams.get('archived_only') === 'true')).toBe(true))
   })
 
   it('creates a project after validating the name', async () => {

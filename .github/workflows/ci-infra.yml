@@ -276,6 +276,9 @@ jobs:
       - name: V2 浏览器验收（密钥库、实例页、通讯录与单聊、导出、建群、IM 审批卡片、审批中心、移动端、member 不可见）
         # 真实 OpenIM；每次用新的工作台用户，登记的实例不需要在线，结束时在页面上停用
         run: node tests/e2e/sprint6_browser.cjs
+      - name: 邮件页浏览器验收（T-0170 / T-0171：默认全部邮箱、同 ID 的邮件不串号、回复只经所属邮箱；模拟 Google）
+        # 上面已把 GOOGLE_* / GMAIL_API_URL 指向 fake-gmail；脚本自己启动模拟 Google 并在结束时删除
+        run: node tests/e2e/mail_browser.cjs
       # T-0088：放在最后，因为它把外网入口换成了内部 CA 签发的证书与内部主机名（前面的验收用的是 public.test）
       - name: 一键配置接入入口（deploy.sh connect 的“OpenClaw 接入入口”一步：没有域名 → 内部主机名 + 本机出站地址）
         run: |

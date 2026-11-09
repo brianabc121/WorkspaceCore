@@ -36,7 +36,7 @@ describe('自由接取与打回', () => {
     const open = { ...task, claim_mode: 'open' as const, claimable: true }
     api(() => open, (r) => pathOf(r) === '/api/v1/me' ? Response.json({ ...me, workspaces: [{ ...workspace, role: 'member' }] }) : undefined)
     await openApp('/tasks')
-    expect(await screen.findByText('可自由接取')).toBeVisible()
+    expect(await screen.findByText('可自由接取', { selector: '.chip' })).toBeVisible()
     await fireEvent.click(await screen.findByRole('button', { name: '准备发布' }))
     const select = await screen.findByLabelText('执行者')
     // 当前是可自由接取：member 能看到这一项（显示现状），但范围不能改

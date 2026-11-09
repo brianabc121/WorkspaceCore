@@ -132,7 +132,7 @@ async def main():
                 await db.flush()
                 await db.execute(update(Task).where(Task.id == task_id).values(
                     assignee_instance_id=instance.id, started_at=now - timedelta(minutes=30), done=True,
-                    done_at=now, review_pending=True, version=Task.version + 1,
+                    done_at=now, completion_seq=Task.completion_seq + 1, version=Task.version + 1,
                 ))
                 db.add(TaskEvent(
                     workspace_id=workspace_id, task_id=task_id, kind="completed", actor_kind="instance",

@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import issues, notifications, project_groups, task_claims, task_runs
+from app.domain import issues, notifications, project_groups, task_claims, task_runs, task_state
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.audit import AuditTrail
 from app.domain.ratelimit import WindowLimiter
@@ -139,6 +139,9 @@ async def _claim(ctx: _Ctx, args: TaskRef) -> tuple[ClaimTaskOutput, After]:
         )
     if task.assignee_user_id is not None or task.assignee_instance_id is not None:
         raise ToolCallError("TASK_ALREADY_CLAIMED", "这个任务已经被领取了")
+    if task.blocked_at is not None:
+        # 明确阻塞的任务不能被新领取，管理员解除后才恢复原来的领取规则（T-0166）
+        raise ToolCallError("TASK_BLOCKED", "这个任务被标记为阻塞，解除之前不能领取")
     if not await task_claims.in_scope(db, task, instance_id):
         raise ToolCallError("TASK_NOT_CLAIMABLE", "这个任务只限项目成员领取")
     if await task_claims.busy(db, instance_id):
@@ -256,10 +259,8 @@ async def _complete(ctx: _Ctx, args: CompleteTaskInput) -> tuple[CompleteTaskOut
             "（issue_get 读详情，issue_comment 说明进展），或者请管理员判断；管理员可以直接完成",
         )
     now = _now()
-    task.done = True
-    task.done_at = now
-    # 等 owner / admin 查看结果（首页“已完成待查看”，T-0163）
-    task.review_pending = True
+    # 新的完成轮次：成员们各自“标为已查看”之前，这个任务对他们是“已完成待查看”（T-0166）
+    task_state.mark_done(task, now)
     await task_runs.end_open_run(db, task, "done", by=None, at=now)
     task.version += 1
     db.add(
