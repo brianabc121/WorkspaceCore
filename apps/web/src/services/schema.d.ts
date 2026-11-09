@@ -781,7 +781,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 密钥列表（owner，不含明文） */
+        /**
+         * 密钥列表（owner，不含明文）
+         * @description 按名称排序。q 按名称或说明字面包含搜索（不区分大小写，% 与 _ 按普通字符），kind 按类型筛选；条件在本工作空间内、分页之前生效，total 是同样条件下的全量匹配数。游标绑定工作空间与条件：换了 q / kind 要从第一页开始，用旧游标请求返回 422。
+         */
         get: operations["list_agent_secrets"];
         put?: never;
         /** 新增密钥（owner，只写不读） */
@@ -816,7 +819,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * 密钥详情（owner，只有元数据）
+         * @description 名称、类型、说明、当前值版本、最近轮换时间与授权（实例与 ref_id）；从不返回值、密文引用或历史值。不在本工作空间或不存在时 404。
+         */
+        get: operations["get_agent_secret"];
         put?: never;
         post?: never;
         /**
@@ -5500,6 +5507,11 @@ export interface components {
              * @description 下一页游标；没有更多数据时为 null
              */
             next_cursor?: string | null;
+            /**
+             * Total
+             * @description 同样 q / kind 条件下的全部匹配数（服务端计数，不受分页影响）；total_estimate 与它相同
+             */
+            total: number;
             /** Total Estimate */
             total_estimate?: number | null;
         };
@@ -17886,6 +17898,10 @@ export interface operations {
     list_agent_secrets: {
         parameters: {
             query?: {
+                /** @description 按名称或说明搜索（字面包含）；不能含 NUL 字符 */
+                q?: string | null;
+                /** @description 只看这种类型的密钥 */
+                kind?: ("model_api_key" | "api_token" | "generic") | null;
                 /** @description 上一页返回的 next_cursor */
                 cursor?: string | null;
                 limit?: number;
@@ -18046,6 +18062,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SecretAccessPage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_agent_secret: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                secret_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSecretOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
