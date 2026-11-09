@@ -16,7 +16,8 @@ export default defineModule({
     { path: '/settings/news', title: '新闻早报', section: '管理', description: '早报的推送时间、来源、兴趣主题、大模型与推送渠道（owner 修改，admin 只读）。', minRole: 'admin', icon: Rss, after: '/settings/mail' },
   ],
   routes: [
-    { path: '/news', component: () => import('./NewsPage.vue') },
+    // 早报阅读页（T-0174）用宽版内容区：正文 + 右侧栏（宿主的 main.is-wide）
+    { path: '/news', component: () => import('./NewsPage.vue'), meta: { wide: true } },
     { path: '/settings/news', component: () => import('./NewsSettingsPage.vue') },
   ],
   widgets: [

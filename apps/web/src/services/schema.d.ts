@@ -1315,6 +1315,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/developer/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 开发者总览（viewer，读本地投影）
+         * @description 所选仓库范围的已同步统计、仓库概览（分页）、开放 PR、时间窗内失败运行与最近更新。只读本地 GitHub 投影：不访问 GitHub，不触发同步或测试连接。统计不能确定时为 null 并标 partial（缺少权限 / 仓库不可见 / 从未成功同步 / 失败运行缺时间），不当成 0。range 只控制失败运行的时间窗（按 GitHub 更新时间）；开放 Issue / PR 是当前状态。Token 被拒、未配置或停用时不返回任何记录，统计为 null；被限流时照常返回缓存并在 sync 里带 retry_at。cursor 只能在同一工作空间、集成与筛选条件下使用，否则 422。
+         */
+        get: operations["developer_overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/developer/pulls": {
         parameters: {
             query?: never;
@@ -1341,6 +1361,26 @@ export interface paths {
         };
         /** GitHub 仓库（viewer，读本地投影） */
         get: operations["list_repos"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/developer/repos/{repo_id}/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 仓库的读权限核验快照（viewer）
+         * @description 管理员上次“测试连接”时这个仓库四项读权限（metadata / issues / pull_requests / actions）的实际结果与核验时间；没有执行的项不出现在 checks 里（未核验），不从 Repo.access 推导。只读快照，不触发测试连接。仓库不在当前仓库清单里时 404；Token 被拒或未配置时不返回旧结果。
+         */
+        get: operations["repository_permissions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2275,6 +2315,26 @@ export interface paths {
         };
         /** 某一版的全文与差异（viewer） */
         get: operations["get_revision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 知识总览：统计与最近更新（viewer）
+         * @description 知识库首页的四个数与最近更新的笔记（二批四页改造规范 4.2）。不填 space_id 是这个工作空间的全部知识库（含已归档的），填了只统计这个知识库；别的工作空间的或不存在的知识库 404。统计是全量的，不受图谱 2000 篇上限与分页影响。[updated_after, updated_before) 只决定 updated_note_count（例如本周一 00:00 到下周一 00:00，由前端按显示时区算好后带时区传入），不截掉总数与最近更新。只读：不写版本、审计与智能体的阅读用量。
+         */
+        get: operations["knowledge_overview"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6491,6 +6551,67 @@ export interface components {
             /** Y */
             y: number;
         };
+        /** DeveloperOverviewOut */
+        DeveloperOverviewOut: {
+            /**
+             * Attention Pulls
+             * @description 最多 5 个开放 PR：已请求审查的在前，再按 GitHub 更新时间倒序；不推断审查结果
+             */
+            attention_pulls: components["schemas"]["PullOut"][];
+            /**
+             * Failed Runs
+             * @description 时间窗内更新的失败运行，最多 3 个
+             */
+            failed_runs: components["schemas"]["RunOut"][];
+            /**
+             * Partial
+             * @description 有不能确定的统计、缺少权限的仓库、尚未同步的已配置仓库或缺时间的失败运行
+             */
+            partial: boolean;
+            /**
+             * Recent Updates
+             * @description 最多 5 条
+             */
+            recent_updates: components["schemas"]["GitHubRecentUpdate"][];
+            repos: components["schemas"]["RepoOverviewPage"];
+            summary: components["schemas"]["DeveloperOverviewSummary"];
+            sync: components["schemas"]["SyncState"];
+        };
+        /**
+         * DeveloperOverviewSummary
+         * @description 所选仓库范围（全部页）的统计，只算已同步到本地的投影；不能确定时为 null。
+         */
+        DeveloperOverviewSummary: {
+            /**
+             * Failed Run Count
+             * @description [window_start, window_end) 内更新的失败运行；同一运行重试只算一次
+             */
+            failed_run_count: number | null;
+            /**
+             * Open Issue Count
+             * @description 当前开放的 Issue（不含 PR）
+             */
+            open_issue_count: number | null;
+            /**
+             * Open Pull Count
+             * @description 当前开放的 PR（不含已合并 / 已关闭）
+             */
+            open_pull_count: number | null;
+            /** Repo Count */
+            repo_count: number | null;
+            /**
+             * Window End
+             * Format: date-time
+             * @description 失败运行时间窗的结束（不含），即服务端当前时间
+             */
+            window_end: string;
+            /**
+             * Window Start
+             * Format: date-time
+             * @description 失败运行时间窗的开始（含）
+             */
+            window_start: string;
+        };
         /** DiffLine */
         DiffLine: {
             /**
@@ -6709,6 +6830,44 @@ export interface components {
              * @description Token 的过期时间（在 GitHub 创建 Token 时设置），用于到期提醒
              */
             token_expires_at?: string | null;
+        };
+        /**
+         * GitHubRecentUpdate
+         * @description 投影的最近更新：只说明“更新于 / 同步于”，不是 GitHub 上的操作事件。
+         */
+        GitHubRecentUpdate: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "repo" | "issue" | "pull" | "run";
+            /** Repo Full Name */
+            repo_full_name: string | null;
+            /**
+             * Repo Id
+             * @description 所属仓库的投影 UUID；仓库本身时为自己的 UUID
+             */
+            repo_id: string | null;
+            /** Source Url */
+            source_url: string;
+            /**
+             * Time Basis
+             * @description source_updated_at：GitHub 上的修改时间；synced_at：没有修改时间，这是同步时间
+             * @enum {string}
+             */
+            time_basis: "source_updated_at" | "synced_at";
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * GitHubRepositoriesRequest
@@ -8210,6 +8369,47 @@ export interface components {
             title?: string | null;
             /** Version */
             version: number;
+        };
+        /** KnowledgeOverviewOut */
+        KnowledgeOverviewOut: {
+            /**
+             * Generated At
+             * Format: date-time
+             * @description 统计时间（服务器，UTC）
+             */
+            generated_at: string;
+            /**
+             * Recent Notes
+             * @description 最近更新的笔记，按 updated_at、id 倒序，每篇一次；不含正文，不受时间窗限制
+             */
+            recent_notes: components["schemas"]["NoteSummary"][];
+            summary: components["schemas"]["KnowledgeOverviewSummary"];
+        };
+        /**
+         * KnowledgeOverviewSummary
+         * @description 知识总览的四个数（二批四页改造规范 4.2）：全量统计，不受图谱 2000 篇上限与分页影响。
+         */
+        KnowledgeOverviewSummary: {
+            /**
+             * Link Count
+             * @description 笔记之间的关联数：两端都是未删除笔记的 [[链接]]，按有向 (源, 目标) 去重，不含指向自己的；选了知识库时至少一端在这个知识库。指向任务、项目、书签与图片的不算
+             */
+            link_count: number;
+            /**
+             * Note Count
+             * @description 所选范围内未删除的笔记数
+             */
+            note_count: number;
+            /**
+             * Space Count
+             * @description 所选范围内的知识库数（含已归档、没有笔记的）；选了知识库时为 1
+             */
+            space_count: number;
+            /**
+             * Updated Note Count
+             * @description updated_at 落在 [updated_after, updated_before) 内的不同笔记数（不是修改次数）
+             */
+            updated_note_count: number;
         };
         /** KnowledgeResourceOut */
         KnowledgeResourceOut: {
@@ -11194,6 +11394,52 @@ export interface components {
              */
             synced_at: string;
         };
+        /**
+         * RepoOverviewPage
+         * @description 仓库按名称排序；next_cursor 只能在同一工作空间、集成与筛选条件下使用。
+         */
+        RepoOverviewPage: {
+            /** Items */
+            items: components["schemas"]["RepoOverviewRow"][];
+            /**
+             * Next Cursor
+             * @description 下一页游标；没有更多数据时为 null
+             */
+            next_cursor?: string | null;
+            /** Total Estimate */
+            total_estimate?: number | null;
+        };
+        /**
+         * RepoOverviewRow
+         * @description 仓库概览的一行。
+         *
+         *     子数字为 null 表示不能确定（缺少权限 / 仓库不可见 / 失败运行缺时间），不是 0。
+         */
+        RepoOverviewRow: {
+            /**
+             * Failed Run Count
+             * @description 时间窗内更新的失败运行（completed 且 conclusion 为 failure / timed_out，按 source_updated_at 归窗）
+             */
+            failed_run_count: number | null;
+            /** @description 这个仓库最近一次运行（按开始时间）；不与任何 PR 关联 */
+            latest_run: components["schemas"]["RunOut"] | null;
+            /**
+             * Open Issue Count
+             * @description 当前开放的 Issue（不含 PR）
+             */
+            open_issue_count: number | null;
+            /**
+             * Open Pull Count
+             * @description 当前开放的 PR（不含已合并 / 已关闭）
+             */
+            open_pull_count: number | null;
+            /**
+             * Partial
+             * @description 这一行有不能确定的数字
+             */
+            partial: boolean;
+            repo: components["schemas"]["RepoOut"];
+        };
         /** RepoPage */
         RepoPage: {
             /** Items */
@@ -11233,6 +11479,35 @@ export interface components {
             name: "metadata" | "issues" | "pull_requests" | "actions";
             /** Ok */
             ok: boolean;
+        };
+        /**
+         * RepositoryPermissionEvidenceOut
+         * @description 管理员上次“测试连接”时这个仓库四项读权限的实际结果；没有执行的项不出现在 checks 里。
+         */
+        RepositoryPermissionEvidenceOut: {
+            /**
+             * Checked At
+             * @description 上次核验时间；从未核验时为 null
+             */
+            checked_at: string | null;
+            /** Checks */
+            checks: components["schemas"]["RepositoryPermissionCheck"][];
+            /**
+             * Complete
+             * @description metadata / issues / pull_requests / actions 四项都有结果
+             */
+            complete: boolean;
+            /**
+             * Full Name
+             * @description Token 被拒或未配置时为 null
+             */
+            full_name: string | null;
+            /**
+             * Repo Id
+             * Format: uuid
+             */
+            repo_id: string;
+            sync: components["schemas"]["SyncState"];
         };
         /**
          * ResourceLinkOut
@@ -19723,6 +19998,65 @@ export interface operations {
             };
         };
     };
+    developer_overview: {
+        parameters: {
+            query?: {
+                repo_id?: string | null;
+                /** @description 仓库名称包含 */
+                q?: string | null;
+                /** @description 失败运行的时间窗：24h / 7d */
+                range?: "24h" | "7d";
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeveloperOverviewOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_pulls: {
         parameters: {
             query?: {
@@ -19805,6 +20139,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RepoPage"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    repository_permissions: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryPermissionEvidenceOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -24221,6 +24607,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RevisionDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    knowledge_overview: {
+        parameters: {
+            query: {
+                /** @description 时间窗起点（含），必须带时区 */
+                updated_after: string;
+                /** @description 时间窗终点（不含），必须带时区且晚于起点 */
+                updated_before: string;
+                space_id?: string | null;
+                /** @description 最近更新返回几篇 */
+                recent_limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeOverviewOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

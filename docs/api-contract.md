@@ -197,6 +197,8 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | POST | `/api/v1/integrations`（`provider: github`） | 新建 GitHub 集成：细粒度 Token（`github_pat_`）+ 要同步的仓库 | 已实现（T-0028） |
 | POST | `/api/v1/integrations/github/repositories` | 列出 Token 能访问的仓库供网页勾选（admin）：新 Token 只用这一次、不保存；不给 Token 时用已保存的 | 已实现（T-0091） |
 | GET | `/api/v1/developer/repos`、`/issues`、`/pulls`、`/runs` | GitHub 投影（带 `sync`；限流时 `reason: rate_limited` 与 `retry_at`） | 已实现（T-0028） |
+| GET | `/api/v1/developer/overview` | 开发者总览（viewer）：所选仓库范围的已同步统计（仓库 / 开放 Issue / 开放 PR / 时间窗内失败运行，不能确定时为 `null` 并标 `partial`）、仓库概览（分页，游标绑定工作空间、集成与筛选）、开放 PR（已请求审查的在前，不推断审查结果，不关联 CI）、失败运行与最近更新（`time_basis` 标明“更新于 / 同步于”）。只读本地投影，不访问 GitHub、不触发同步或测试连接；Token 被拒 / 未配置时不返回记录 | 已实现（T-0175） |
+| GET | `/api/v1/developer/repos/{repo_id}/permissions` | 仓库四项读权限的核验快照（viewer）：管理员上次测试连接时实际得到的结果与 `checked_at`，没有执行的项不出现（未核验），不从 `Repo.access` 推导；Token / 仓库清单 / 启停变化时清除，Token 被拒时不返回 | 已实现（T-0175） |
 | GET | `/api/v1/search?q=` | 跨资源搜索（只返回当前用户可见、未删除的资源） | 已实现（T-0029） |
 
 - 保留的聚合接口与组件：
@@ -316,6 +318,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET | `/api/v1/knowledge/graph` | 全局图谱：笔记、`[[链接]]`、链接到的任务 / 项目 / 书签；`space_id` 可多选，`resources=false` 只要笔记；`files=true` 加上图片节点（`kind = file`，连到正文里引用它的笔记）；超过 2000 篇时 `truncated` | 已实现（T-0098；`files` 为 T-0103） |
 | POST | `/api/v1/knowledge/files` | 上传图片（member 以上）：请求体就是图片本身；只收 PNG / JPEG / GIF / WebP（按文件头判断，SVG 不收），单张不超过 `FILE_MAX_MB`、工作空间合计不超过 `FILE_QUOTA_MB`（413 `PAYLOAD_TOO_LARGE` / `QUOTA_EXCEEDED`，422 `UNSUPPORTED_IMAGE`）；JPEG 去掉 Exif 等元数据（保留方向）；同一工作空间同样的内容返回已有的那张。返回 `FileOut`（`url` 写进正文 `![说明](url)`）；存储没配置完整或不可用时 503 `STORAGE_NOT_CONFIGURED` / `STORAGE_UNAVAILABLE` | 已实现（T-0103） |
 | GET | `/api/v1/knowledge/files/{file_id}` | 读取图片：**不需要 `X-Workspace-Id`**，按图片所属的工作空间校验当前用户（viewer 以上），不是成员与不存在一样 404（笔记里的 `<img>` 由浏览器直接加载）。`Cache-Control: private`、`nosniff`、`ETag`（内容的 SHA-256，支持 `If-None-Match` → 304）；先读写入时的存储，失败再读主存储与副本，内容哈希对不上的跳过 | 已实现（T-0103） |
+| GET | `/api/v1/knowledge/overview?updated_after=&updated_before=[&space_id=][&recent_limit=]` | 知识总览（viewer）：`summary`（`note_count` 未删除笔记数、`space_count` 知识库数（含已归档、没有笔记的；选了知识库为 1）、`link_count` 两端都是未删除笔记的 `[[链接]]` 按有向 (源, 目标) 去重（不含自己链自己，选了知识库时至少一端在库里，任务 / 项目 / 书签 / 图片不算）、`updated_note_count` `updated_at` 落在 `[updated_after, updated_before)` 的不同笔记数）、`recent_notes`（`NoteSummary`，按 `updated_at`、`id` 倒序，不含正文，默认 6 篇、最多 20）、`generated_at`。全量统计，不受图谱 2000 篇上限与分页影响；两个时间必填、带时区且前者早于后者（否则 422），只决定 `updated_note_count`；别的工作空间的知识库 404。只读：不写版本、审计、智能体阅读用量 | 已实现（T-0172） |
 | GET | `/api/v1/knowledge/changes` | 变更记录：每次改动（谁、何时、增删行数、理由、能否一键退回）与保护记录（`kind=guard`） | 已实现（T-0098） |
 | GET | `/api/v1/knowledge/trash` | 回收站 | 已实现（T-0098） |
 | DELETE | `/api/v1/knowledge/trash/{note_id}` | 彻底删除（admin，204） | 已实现（T-0098） |

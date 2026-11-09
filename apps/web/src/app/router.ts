@@ -33,10 +33,15 @@ import AiPage from '../pages/AiPage.vue'
 import AppCenterPage from '../pages/AppCenterPage.vue'
 import NavigationSettingsPage from '../pages/NavigationSettingsPage.vue'
 
-// 知识库的子页面按需加载（编辑器、图谱的依赖较大）。旧的书签链接（?linked_resource_id=、?create=1）转到“外部文档”
+// 知识库的子页面按需加载（编辑器、图谱的依赖较大）。/knowledge 是知识总览（T-0173），完整图谱在 /knowledge/graph。
+// 旧链接：?linked_resource_id=、?create=1（书签）转到“外部文档”；?focus=<知识库>（原来的图谱首页）转到完整图谱，其余参数照带
 const knowledgeRoutes: RouteRecordRaw[] = [
-  { path: '', component: () => import('../features/kb/KbGraphView.vue'), meta: { title: '知识库', kbSection: 'graph' },
-    beforeEnter: (to) => (to.query.linked_resource_id !== undefined || to.query.create !== undefined ? { path: '/knowledge/docs', query: to.query } : true) },
+  { path: '', component: () => import('../features/kb/KbOverviewView.vue'), meta: { title: '知识总览', kbSection: 'overview' },
+    beforeEnter: (to) => {
+      if (to.query.linked_resource_id !== undefined || to.query.create !== undefined) return { path: '/knowledge/docs', query: to.query }
+      if (to.query.focus !== undefined) return { path: '/knowledge/graph', query: to.query, hash: to.hash }
+      return true
+    } },
   { path: 'graph', component: () => import('../features/kb/KbGraphView.vue'), meta: { title: '知识图谱', kbSection: 'graph', kbGraphOnly: true } },
   { path: 'notes', component: () => import('../features/kb/KbNotesView.vue'), meta: { title: '笔记', kbSection: 'notes' } },
   { path: 'notes/new', component: () => import('../features/kb/KbEditorView.vue'), meta: { title: '新建笔记', kbSection: 'notes' } },
@@ -51,8 +56,9 @@ const knowledgeRoutes: RouteRecordRaw[] = [
 // 侧栏项的标题、说明与角色要求（admin = owner / admin，owner = 只有 owner）
 const navMeta = (item: NavItem) => ({ title: item.title, description: item.description, admin: item.minRole === 'admin', owner: item.minRole === 'owner' })
 
-// 任务、项目、日历、邮件四页用宽版内容区（四页改造）：列表与详情并列；其他页面宽度不变
-const WIDE_PAGES = new Set(['/tasks', '/projects', '/calendar', '/mail'])
+// 宽版内容区：任务、项目、日历、邮件（四页改造），开发者、运维（二批四页改造，T-0176 / T-0177）。
+// 列表与详情并列；其他页面宽度不变。知识库是独立页面，自己的布局；早报是模块，在模块路由里声明
+const WIDE_PAGES = new Set(['/tasks', '/projects', '/calendar', '/mail', '/developer', '/operations'])
 
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHistory(), queryClient = new QueryClient()) {
   const auth = useAuthStore(pinia)
@@ -67,7 +73,7 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
       { path: '/settings/audit', component: AuditPage, meta: { title: '审计日志', admin: true } },
       ...navigation.filter((item) => !item.module).map((item) => ({
         path: item.path,
-        // 知识库（T-0099）是带子页面的独立页面：图谱、笔记、编辑器、知识库主页、变更记录、外部文档
+        // 知识库（T-0099）是带子页面的独立页面：总览、图谱、笔记、编辑器、知识库主页、变更记录、外部文档
         ...(item.path === '/knowledge' ? { children: knowledgeRoutes } : {}),
         component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/im': ImPage, '/agents': AgentsPage, '/agents/secrets': SecretsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/modules': AppCenterPage, '/settings/navigation': NavigationSettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage, '/mail': MailPage, '/settings/mail': MailSettingsPage, '/runner': RunnerPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
         // 消息页（T-0095）、知识库（T-0099）是不带工作台侧栏和顶栏的独立页面

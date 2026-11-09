@@ -1,4 +1,34 @@
 import type { Schema } from '../../services/api'
+
+// 运维页（T-0177，二批改造规范第 7.1 节）：服务分组、排序与类型名
+export type ServiceItem = Schema['ServiceStatusOut']
+export type ServiceGroup = 'ok' | 'attention' | 'unknown' | 'not_configured'
+/** 正常 = ok；需关注 = degraded / down；未检查 = unknown；未配置 = not_configured（停用的组件、没配置的连接不算故障） */
+export function serviceGroup(status: ServiceItem['status']): ServiceGroup {
+  return status === 'ok' ? 'ok' : status === 'degraded' || status === 'down' ? 'attention' : status
+}
+export function serviceGroups(items: readonly ServiceItem[]) {
+  const counts: Record<ServiceGroup, number> = { ok: 0, attention: 0, unknown: 0, not_configured: 0 }
+  for (const item of items) counts[serviceGroup(item.status)]++
+  return counts
+}
+// 异常在前（不可用、降级），其次未检查、正常、未配置；同一组按名称、再按 ID 排，刷新后顺序不跳
+const ORDER: Record<ServiceItem['status'], number> = { down: 0, degraded: 1, unknown: 2, ok: 3, not_configured: 4 }
+const collator = new Intl.Collator('zh-CN')
+export function sortServices(items: readonly ServiceItem[]) {
+  return [...items].sort((a, b) => ORDER[a.status] - ORDER[b.status] || collator.compare(a.name, b.name) || collator.compare(a.id, b.id))
+}
+/** 最近一次检查：取各服务 checked_at 里最新的；都没有时为 null（显示“—”，不写“刚刚”） */
+export function latestCheck(items: readonly ServiceItem[]) {
+  let best: string | null = null, value = -Infinity
+  for (const item of items) {
+    const time = item.checked_at ? Date.parse(item.checked_at) : NaN
+    if (Number.isFinite(time) && time > value) { value = time; best = item.checked_at }
+  }
+  return best
+}
+export const serviceKinds: Record<ServiceItem['kind'], string> = { core: '核心服务', monitoring: '监控组件', integration: '外部集成', agents: 'OpenClaw 与 IM' }
+
 export const serviceLabels: Record<Schema['ServiceStatusOut']['status'], string> = { ok: '正常', degraded: '降级', down: '不可用', unknown: '尚未检查', not_configured: '未部署 / 未配置' }
 export function serviceReason(item: Schema['ServiceStatusOut']): string {
   const reasons: Record<string, string> = { timeout: '检查超时', unreachable: '无法连接服务', rate_limited: '服务限流中', token_rejected: '授权失效，请管理员更新连接', not_synced: '尚未完成同步', disabled: '连接已停用', not_deployed: '组件尚未部署', not_configured: '尚未配置连接', not_checked: '尚未完成检查', not_ready: '服务尚未就绪', heartbeat_overdue: 'Worker 心跳已过期', heartbeat_unreadable: '无法读取 Worker 心跳', no_heartbeat: '尚无 Worker 心跳', sync_overdue: '同步已过期', source_unavailable: '外部服务暂不可用', missing_permission: '缺少读取权限', agent_offline: '实例离线（IM 未连接）', agent_not_connected: '实例尚未接入', agent_disabled: '实例已停用', inbox_backlog: 'IM 回调积压，消息投影可能落后' }

@@ -101,7 +101,7 @@ describe('三方合并', () => {
 describe('知识库页面', () => {
   it('is a standalone page with its own rail, space groups and graph', async () => {
     kbApi()
-    await openApp('/knowledge')
+    await openApp('/knowledge/graph') // 完整图谱（T-0173 起 /knowledge 是知识总览）
     expect(await screen.findByRole('navigation', { name: '知识库功能' })).toBeVisible()
     expect(screen.queryByRole('navigation', { name: '主导航' })).not.toBeInTheDocument()
     const groups = screen.getByRole('complementary', { name: '知识库分组' })
@@ -121,7 +121,7 @@ describe('知识库页面', () => {
 
   it('colors the graph by type group by default, lists the types in the legend and filters by a single type', async () => {
     kbApi()
-    await openApp('/knowledge')
+    await openApp('/knowledge/graph')
     const runbook = await screen.findByRole('button', { name: /^发布前检查清单，笔记（操作手册）/ })
     expect(runbook.querySelector('circle')).toHaveClass('f-g-rule')
     expect(screen.getByRole('button', { name: /^工作台 V2 简报，笔记（项目简报）/ }).querySelector('circle')).toHaveClass('f-g-project')

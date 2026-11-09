@@ -5464,6 +5464,137 @@
         "title": "DesktopPosition",
         "type": "object"
       },
+      "DeveloperOverviewOut": {
+        "properties": {
+          "attention_pulls": {
+            "description": "最多 5 个开放 PR：已请求审查的在前，再按 GitHub 更新时间倒序；不推断审查结果",
+            "items": {
+              "$ref": "#/components/schemas/PullOut"
+            },
+            "title": "Attention Pulls",
+            "type": "array"
+          },
+          "failed_runs": {
+            "description": "时间窗内更新的失败运行，最多 3 个",
+            "items": {
+              "$ref": "#/components/schemas/RunOut"
+            },
+            "title": "Failed Runs",
+            "type": "array"
+          },
+          "partial": {
+            "description": "有不能确定的统计、缺少权限的仓库、尚未同步的已配置仓库或缺时间的失败运行",
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "recent_updates": {
+            "description": "最多 5 条",
+            "items": {
+              "$ref": "#/components/schemas/GitHubRecentUpdate"
+            },
+            "title": "Recent Updates",
+            "type": "array"
+          },
+          "repos": {
+            "$ref": "#/components/schemas/RepoOverviewPage"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DeveloperOverviewSummary"
+          },
+          "sync": {
+            "$ref": "#/components/schemas/SyncState"
+          }
+        },
+        "required": [
+          "summary",
+          "repos",
+          "attention_pulls",
+          "failed_runs",
+          "recent_updates",
+          "sync",
+          "partial"
+        ],
+        "title": "DeveloperOverviewOut",
+        "type": "object"
+      },
+      "DeveloperOverviewSummary": {
+        "description": "所选仓库范围（全部页）的统计，只算已同步到本地的投影；不能确定时为 null。",
+        "properties": {
+          "failed_run_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "[window_start, window_end) 内更新的失败运行；同一运行重试只算一次",
+            "title": "Failed Run Count"
+          },
+          "open_issue_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "当前开放的 Issue（不含 PR）",
+            "title": "Open Issue Count"
+          },
+          "open_pull_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "当前开放的 PR（不含已合并 / 已关闭）",
+            "title": "Open Pull Count"
+          },
+          "repo_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Count"
+          },
+          "window_end": {
+            "description": "失败运行时间窗的结束（不含），即服务端当前时间",
+            "format": "date-time",
+            "title": "Window End",
+            "type": "string"
+          },
+          "window_start": {
+            "description": "失败运行时间窗的开始（含）",
+            "format": "date-time",
+            "title": "Window Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo_count",
+          "open_issue_count",
+          "open_pull_count",
+          "failed_run_count",
+          "window_start",
+          "window_end"
+        ],
+        "title": "DeveloperOverviewSummary",
+        "type": "object"
+      },
       "DiffLine": {
         "properties": {
           "sign": {
@@ -5964,6 +6095,84 @@
           "repositories"
         ],
         "title": "GitHubIntegrationCreate",
+        "type": "object"
+      },
+      "GitHubRecentUpdate": {
+        "description": "投影的最近更新：只说明“更新于 / 同步于”，不是 GitHub 上的操作事件。",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "repo",
+              "issue",
+              "pull",
+              "run"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "repo_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Full Name"
+          },
+          "repo_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "所属仓库的投影 UUID；仓库本身时为自己的 UUID",
+            "title": "Repo Id"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "time_basis": {
+            "description": "source_updated_at：GitHub 上的修改时间；synced_at：没有修改时间，这是同步时间",
+            "enum": [
+              "source_updated_at",
+              "synced_at"
+            ],
+            "title": "Time Basis",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "repo_id",
+          "repo_full_name",
+          "title",
+          "source_url",
+          "updated_at",
+          "time_basis"
+        ],
+        "title": "GitHubRecentUpdate",
         "type": "object"
       },
       "GitHubRepositoriesRequest": {
@@ -10003,6 +10212,71 @@
           "version"
         ],
         "title": "IssueUpdate",
+        "type": "object"
+      },
+      "KnowledgeOverviewOut": {
+        "properties": {
+          "generated_at": {
+            "description": "统计时间（服务器，UTC）",
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "recent_notes": {
+            "description": "最近更新的笔记，按 updated_at、id 倒序，每篇一次；不含正文，不受时间窗限制",
+            "items": {
+              "$ref": "#/components/schemas/NoteSummary"
+            },
+            "title": "Recent Notes",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/KnowledgeOverviewSummary"
+          }
+        },
+        "required": [
+          "summary",
+          "recent_notes",
+          "generated_at"
+        ],
+        "title": "KnowledgeOverviewOut",
+        "type": "object"
+      },
+      "KnowledgeOverviewSummary": {
+        "description": "知识总览的四个数（二批四页改造规范 4.2）：全量统计，不受图谱 2000 篇上限与分页影响。",
+        "properties": {
+          "link_count": {
+            "description": "笔记之间的关联数：两端都是未删除笔记的 [[链接]]，按有向 (源, 目标) 去重，不含指向自己的；选了知识库时至少一端在这个知识库。指向任务、项目、书签与图片的不算",
+            "minimum": 0.0,
+            "title": "Link Count",
+            "type": "integer"
+          },
+          "note_count": {
+            "description": "所选范围内未删除的笔记数",
+            "minimum": 0.0,
+            "title": "Note Count",
+            "type": "integer"
+          },
+          "space_count": {
+            "description": "所选范围内的知识库数（含已归档、没有笔记的）；选了知识库时为 1",
+            "minimum": 0.0,
+            "title": "Space Count",
+            "type": "integer"
+          },
+          "updated_note_count": {
+            "description": "updated_at 落在 [updated_after, updated_before) 内的不同笔记数（不是修改次数）",
+            "minimum": 0.0,
+            "title": "Updated Note Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "note_count",
+          "space_count",
+          "link_count",
+          "updated_note_count"
+        ],
+        "title": "KnowledgeOverviewSummary",
         "type": "object"
       },
       "KnowledgeResourceOut": {
@@ -16915,6 +17189,119 @@
         "title": "RepoOut",
         "type": "object"
       },
+      "RepoOverviewPage": {
+        "description": "仓库按名称排序；next_cursor 只能在同一工作空间、集成与筛选条件下使用。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RepoOverviewRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下一页游标；没有更多数据时为 null",
+            "title": "Next Cursor"
+          },
+          "total_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Estimate"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "RepoOverviewPage",
+        "type": "object"
+      },
+      "RepoOverviewRow": {
+        "description": "仓库概览的一行。\n\n子数字为 null 表示不能确定（缺少权限 / 仓库不可见 / 失败运行缺时间），不是 0。",
+        "properties": {
+          "failed_run_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "时间窗内更新的失败运行（completed 且 conclusion 为 failure / timed_out，按 source_updated_at 归窗）",
+            "title": "Failed Run Count"
+          },
+          "latest_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这个仓库最近一次运行（按开始时间）；不与任何 PR 关联"
+          },
+          "open_issue_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "当前开放的 Issue（不含 PR）",
+            "title": "Open Issue Count"
+          },
+          "open_pull_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "当前开放的 PR（不含已合并 / 已关闭）",
+            "title": "Open Pull Count"
+          },
+          "partial": {
+            "description": "这一行有不能确定的数字",
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "repo": {
+            "$ref": "#/components/schemas/RepoOut"
+          }
+        },
+        "required": [
+          "repo",
+          "open_issue_count",
+          "open_pull_count",
+          "failed_run_count",
+          "latest_run",
+          "partial"
+        ],
+        "title": "RepoOverviewRow",
+        "type": "object"
+      },
       "RepoPage": {
         "properties": {
           "items": {
@@ -17019,6 +17406,66 @@
           "ok"
         ],
         "title": "RepositoryPermissionCheck",
+        "type": "object"
+      },
+      "RepositoryPermissionEvidenceOut": {
+        "description": "管理员上次“测试连接”时这个仓库四项读权限的实际结果；没有执行的项不出现在 checks 里。",
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "上次核验时间；从未核验时为 null",
+            "title": "Checked At"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryPermissionCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "complete": {
+            "description": "metadata / issues / pull_requests / actions 四项都有结果",
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Token 被拒或未配置时为 null",
+            "title": "Full Name"
+          },
+          "repo_id": {
+            "format": "uuid",
+            "title": "Repo Id",
+            "type": "string"
+          },
+          "sync": {
+            "$ref": "#/components/schemas/SyncState"
+          }
+        },
+        "required": [
+          "repo_id",
+          "full_name",
+          "checked_at",
+          "checks",
+          "complete",
+          "sync"
+        ],
+        "title": "RepositoryPermissionEvidenceOut",
         "type": "object"
       },
       "ResourceLinkOut": {
@@ -32912,6 +33359,161 @@
         ]
       }
     },
+    "/api/v1/developer/overview": {
+      "get": {
+        "description": "所选仓库范围的已同步统计、仓库概览（分页）、开放 PR、时间窗内失败运行与最近更新。只读本地 GitHub 投影：不访问 GitHub，不触发同步或测试连接。统计不能确定时为 null 并标 partial（缺少权限 / 仓库不可见 / 从未成功同步 / 失败运行缺时间），不当成 0。range 只控制失败运行的时间窗（按 GitHub 更新时间）；开放 Issue / PR 是当前状态。Token 被拒、未配置或停用时不返回任何记录，统计为 null；被限流时照常返回缓存并在 sync 里带 retry_at。cursor 只能在同一工作空间、集成与筛选条件下使用，否则 422。",
+        "operationId": "developer_overview",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repo_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo Id"
+            }
+          },
+          {
+            "description": "仓库名称包含",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "仓库名称包含",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "失败运行的时间窗：24h / 7d",
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "default": "7d",
+              "description": "失败运行的时间窗：24h / 7d",
+              "enum": [
+                "24h",
+                "7d"
+              ],
+              "title": "Range",
+              "type": "string"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 12,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeveloperOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "开发者总览（viewer，读本地投影）",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
     "/api/v1/developer/pulls": {
       "get": {
         "operationId": "list_pulls",
@@ -33178,6 +33780,87 @@
           }
         ],
         "summary": "GitHub 仓库（viewer，读本地投影）",
+        "tags": [
+          "developer"
+        ]
+      }
+    },
+    "/api/v1/developer/repos/{repo_id}/permissions": {
+      "get": {
+        "description": "管理员上次“测试连接”时这个仓库四项读权限（metadata / issues / pull_requests / actions）的实际结果与核验时间；没有执行的项不出现在 checks 里（未核验），不从 Repo.access 推导。只读快照，不触发测试连接。仓库不在当前仓库清单里时 404；Token 被拒或未配置时不返回旧结果。",
+        "operationId": "repository_permissions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repo_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Repo Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryPermissionEvidenceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "仓库的读权限核验快照（viewer）",
         "tags": [
           "developer"
         ]
@@ -40762,6 +41445,132 @@
           }
         ],
         "summary": "某一版的全文与差异（viewer）",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
+    "/api/v1/knowledge/overview": {
+      "get": {
+        "description": "知识库首页的四个数与最近更新的笔记（二批四页改造规范 4.2）。不填 space_id 是这个工作空间的全部知识库（含已归档的），填了只统计这个知识库；别的工作空间的或不存在的知识库 404。统计是全量的，不受图谱 2000 篇上限与分页影响。[updated_after, updated_before) 只决定 updated_note_count（例如本周一 00:00 到下周一 00:00，由前端按显示时区算好后带时区传入），不截掉总数与最近更新。只读：不写版本、审计与智能体的阅读用量。",
+        "operationId": "knowledge_overview",
+        "parameters": [
+          {
+            "description": "时间窗起点（含），必须带时区",
+            "in": "query",
+            "name": "updated_after",
+            "required": true,
+            "schema": {
+              "description": "时间窗起点（含），必须带时区",
+              "format": "date-time",
+              "title": "Updated After",
+              "type": "string"
+            }
+          },
+          {
+            "description": "时间窗终点（不含），必须带时区且晚于起点",
+            "in": "query",
+            "name": "updated_before",
+            "required": true,
+            "schema": {
+              "description": "时间窗终点（不含），必须带时区且晚于起点",
+              "format": "date-time",
+              "title": "Updated Before",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "space_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Space Id"
+            }
+          },
+          {
+            "description": "最近更新返回几篇",
+            "in": "query",
+            "name": "recent_limit",
+            "required": false,
+            "schema": {
+              "default": 6,
+              "description": "最近更新返回几篇",
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Recent Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "知识总览：统计与最近更新（viewer）",
         "tags": [
           "knowledge-base"
         ]

@@ -83,9 +83,11 @@ async function refreshUntil(page, button, locator, timeout = 60000) {
   }
   return (await locator.count()) > 0
 }
+// 运维页改版（T-0177）：服务状态是表格，一行一个服务（行名是服务名）；时间范围是一组按钮
 function service(page, name) {
-  return page.getByRole('region', { name: '服务状态' }).getByRole('region', { name, exact: true })
+  return page.getByRole('region', { name: '服务状态' }).getByRole('row', { name, exact: true })
 }
+const range = (page, label) => page.getByRole('group', { name: '查看时间范围' }).getByRole('button', { name: label, exact: true }).click()
 // 顶栏通知入口的名称形如“通知，3 条未读”
 async function unread(page) {
   const label = await page.getByRole('button', { name: /^通知，\d+ 条未读$/ }).getAttribute('aria-label')
@@ -138,7 +140,7 @@ async function noHorizontalScroll(page) {
   for (const name of ['API', 'PostgreSQL', 'Redis', 'Prometheus']) {
     const record = service(page, name)
     check(await refreshUntil(page, '刷新运维数据', record.getByText('正常', { exact: true })), `${name} 应显示“正常”`)
-    await record.getByText(/最近检查：/).waitFor()
+    await record.locator('time').waitFor()
   }
   check(await refreshUntil(page, '刷新运维数据', service(page, 'Worker').getByText('正常', { exact: true })), 'Worker 心跳到达后应显示“正常”')
   if (!envValue('GRAFANA_URL')) await service(page, 'Grafana').getByText('未部署 / 未配置').waitFor()
@@ -154,14 +156,14 @@ async function noHorizontalScroll(page) {
   check(grafana ? grafanaLinks === 1 : grafanaLinks === 0, `Grafana 链接数量不对：${grafanaLinks}（GRAFANA_DASHBOARD_URL=${grafana || '未设置'}）`)
   const queried = []
   page.on('request', (request) => { if (request.url().includes('/api/v1/operations/metrics')) queried.push(request.url()) })
-  await page.getByLabel('查看时间范围').selectOption('6h')
+  await range(page, '6 小时')
   await page.getByLabel('预设指标视图').selectOption('latency_p95')
   await metrics.getByRole('region', { name: '延迟 P95', exact: true }).waitFor()
-  await page.waitForFunction(() => document.querySelectorAll('section.metric-view').length === 1)
+  await page.waitForFunction(() => document.querySelectorAll('section.ops-metric').length === 1)
   check(queried.some((url) => /range=6h/.test(url) && /views=latency_p95/.test(url)), `应按所选范围与视图请求：${queried.join(', ')}`)
   check(queried.every((url) => !/[?&](query|promql|expr)=/.test(url)), '浏览器不应提交 PromQL')
   await page.getByLabel('预设指标视图').selectOption('')
-  await page.getByLabel('查看时间范围').selectOption('1h')
+  await range(page, '1 小时')
   await metrics.getByRole('region', { name: '服务在线', exact: true }).waitFor()
   step(`预设指标：6 个视图带数据截至时间；切换时间范围与视图只提交预设 ID，不提交 PromQL；Grafana 链接${grafana ? '指向配置的看板' : '未配置时不显示'}`)
 

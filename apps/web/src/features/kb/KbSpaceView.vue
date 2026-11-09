@@ -119,7 +119,7 @@ const newBriefHref = computed(() => space.value ? `/knowledge/notes/new?space=${
             <p class="kb-meta kb-num" style="margin: 0">{{ space.notes }} 篇笔记<template v-if="space.kind === 'project'"> · {{ space.agents.length }} 个智能体参与</template><template v-if="space.last_updated_at"> · 最近更新 {{ when(space.last_updated_at) }}</template></p>
           </div>
           <div class="kb-actions">
-            <RouterLink :to="{ path: '/knowledge', query: { focus: space.id } }" class="kb-btn"><Waypoints aria-hidden="true" />在图谱中查看</RouterLink>
+            <RouterLink :to="{ path: '/knowledge/graph', query: { focus: space.id } }" class="kb-btn"><Waypoints aria-hidden="true" />在图谱中查看</RouterLink>
             <RouterLink v-if="canEdit" :to="`/knowledge/notes/new?space=${space.id}`" class="kb-btn is-primary"><FilePlus2 aria-hidden="true" />新建笔记</RouterLink>
           </div>
         </header>

@@ -1,0 +1,93 @@
+{
+  "package": "workspace-knowledge-news-dev-ops-redesign",
+  "created_at": "2026-11-09T03:49:07.075602+00:00",
+  "kind": "design_and_development_plan_only",
+  "repository": "brianabc121/WorkspaceCore",
+  "source_of_truth": {
+    "ref": "origin/main",
+    "commit": "5f5e9c88b652ad938cef3941be6957642f15bb47",
+    "includes_homepage_pr": 177
+  },
+  "pages": [
+    "知识库",
+    "早报",
+    "开发者",
+    "运维"
+  ],
+  "implementation_tasks": 6,
+  "page_mockups": 4,
+  "style_reference_images": 1,
+  "business_code_modified": false,
+  "implementation_tests_run": false,
+  "pull_request_created": false,
+  "images": [
+    {
+      "path": "assets/00-home-style-reference.png",
+      "width": 1586,
+      "height": 992
+    },
+    {
+      "path": "assets/01-knowledge.png",
+      "width": 1586,
+      "height": 992
+    },
+    {
+      "path": "assets/02-news.png",
+      "width": 1586,
+      "height": 992
+    },
+    {
+      "path": "assets/03-developer.png",
+      "width": 1585,
+      "height": 992
+    },
+    {
+      "path": "assets/04-operations.png",
+      "width": 1586,
+      "height": 992
+    }
+  ],
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 4736,
+      "sha256": "cd78ce81a326643bce8b26318549626cc70369ae342999a9b8fd5303f5aee650"
+    },
+    {
+      "path": "assets/00-home-style-reference.png",
+      "bytes": 1442110,
+      "sha256": "16f4c33ece18fb8c21040d35e444d166317510784a3aeb46bba990d3c8534430"
+    },
+    {
+      "path": "assets/01-knowledge.png",
+      "bytes": 1635689,
+      "sha256": "9ee88d9e591dd283f1b2065690bc8d76560d368b7edb6ed73f83980f5b624a5a"
+    },
+    {
+      "path": "assets/02-news.png",
+      "bytes": 1670364,
+      "sha256": "44bb5550fafe48eced8b2225b21fd0b4adb0293af3824f3cc6ca6ad0c25e3f7c"
+    },
+    {
+      "path": "assets/03-developer.png",
+      "bytes": 1625815,
+      "sha256": "7fea100ba87adec7106c84710cfa6c845407f38af34da58dcfb0991a4c7e4738"
+    },
+    {
+      "path": "assets/04-operations.png",
+      "bytes": 1657603,
+      "sha256": "36128fe46bdc4b2e9aad3787d60dfc6a8b1bf2d2b8a3c16179b0a864438f00f1"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-09-knowledge-news-dev-ops-redesign.md",
+      "bytes": 31019,
+      "sha256": "8300e164cad2912448295192d77fe6eb41294e5f63b049370ea560ac9a95e5f2"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-09-knowledge-news-dev-ops-design.md",
+      "bytes": 16560,
+      "sha256": "ff93a32a3adfe343686c5c3f8057c6faf2b535e81d0ab42f803c0931411cd96d"
+    }
+  ],
+  "hash_scope": "All payload files; MANIFEST.json itself is excluded."
+}

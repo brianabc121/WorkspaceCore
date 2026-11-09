@@ -1,4 +1,5 @@
-"""知识库的列表与汇总查询（T-0098）：笔记列表、[[ 补全、变更记录、回收站、智能体的检索与指标。
+"""知识库的列表与汇总查询（T-0098）：笔记列表、[[ 补全、变更记录、回收站、智能体的检索与指标，
+以及知识总览（T-0172）。
 
 写入路径和权限规则在 app/domain/knowledge_base.py。
 """
@@ -9,16 +10,20 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import Date, Text, and_, case, func, literal, null, or_, select, union_all
+from sqlalchemy.orm import aliased, defer
 from sqlalchemy.sql import ColumnElement
 
+from app.core.errors import ApiError
 from app.domain import knowledge_links as links
 from app.domain.knowledge_base import KnowledgeBase, SpaceState, _alias_match
+from app.domain.policy import WorkspaceAccess
 from app.domain.tasks import decode_cursor, encode_cursor
 from app.models import (
     AgentInstance,
     AiToolExecution,
     KnowledgeBriefRead,
     KnowledgeGuardEvent,
+    KnowledgeLink,
     KnowledgeNote,
     KnowledgeNoteRevision,
     KnowledgeReadStat,
@@ -33,6 +38,8 @@ from app.schemas.knowledge_base import (
     AgentWeek,
     ChangeOut,
     ChangePage,
+    KnowledgeOverviewOut,
+    KnowledgeOverviewSummary,
     NotePage,
     NoteSuggestion,
     SpaceActivity,
@@ -153,6 +160,93 @@ class KnowledgeService(KnowledgeBase):
             )
             for note, space in (await self.db.execute(stmt)).all()
         ]
+
+    # ---------------------------------------------------------------- 知识总览（T-0172）
+
+    async def overview(
+        self,
+        access: WorkspaceAccess,
+        *,
+        space_id: uuid.UUID | None,
+        updated_after: datetime,
+        updated_before: datetime,
+        recent_limit: int = 6,
+    ) -> KnowledgeOverviewOut:
+        """知识总览的统计与最近更新（二批四页改造规范 4.2）。
+
+        可见范围和笔记列表、图谱一样：这个工作空间的所有知识库（viewer 可读，归档的照常计入），
+        未删除的笔记。统计在数据库里聚合，不逐篇查询，不读正文；不写版本、审计与智能体的阅读用量。
+        """
+        if updated_before <= updated_after:
+            raise ApiError(422, "VALIDATION_FAILED", "updated_before 必须晚于 updated_after")
+        workspace_id = access.workspace.id
+        if space_id is not None:
+            await self.space(workspace_id, space_id)  # 别的工作空间的或不存在的知识库：404
+        # 知识库在访问时补建（与知识库列表相同的机制，由路由提交）：
+        # 否则新项目的库要等打开知识库列表才算进来
+        await self.ensure_spaces(workspace_id)
+
+        def visible(note: Any) -> ColumnElement[bool]:
+            alive = and_(note.workspace_id == workspace_id, note.deleted_at.is_(None))
+            return alive if space_id is None else and_(alive, note.space_id == space_id)
+
+        n = KnowledgeNote
+        in_window = and_(n.updated_at >= updated_after, n.updated_at < updated_before)
+        notes, updated = (
+            await self.db.execute(
+                select(func.count(), func.count().filter(in_window))
+                .select_from(n)
+                .where(visible(n))
+            )
+        ).one()
+        if space_id is None:
+            spaces = await self.db.scalar(
+                select(func.count())
+                .select_from(KnowledgeSpace)
+                .where(KnowledgeSpace.workspace_id == workspace_id)
+            )
+        else:
+            spaces = 1
+        # 笔记关联：两端都是这个工作空间里未删除的笔记，按 (源, 目标) 去重；
+        # 指向任务、项目、书签的链接没有 target_note_id，内连接自然排除
+        source, target = aliased(KnowledgeNote), aliased(KnowledgeNote)
+        pairs = (
+            select(KnowledgeLink.source_note_id, KnowledgeLink.target_note_id)
+            .join(source, source.id == KnowledgeLink.source_note_id)
+            .join(target, target.id == KnowledgeLink.target_note_id)
+            .where(
+                KnowledgeLink.workspace_id == workspace_id,
+                KnowledgeLink.source_note_id != KnowledgeLink.target_note_id,
+                source.workspace_id == workspace_id,
+                source.deleted_at.is_(None),
+                target.workspace_id == workspace_id,
+                target.deleted_at.is_(None),
+            )
+            .distinct()
+        )
+        if space_id is not None:
+            pairs = pairs.where(or_(source.space_id == space_id, target.space_id == space_id))
+        link_count = await self.db.scalar(select(func.count()).select_from(pairs.subquery()))
+        rows = (
+            await self.db.scalars(
+                select(n)
+                .options(defer(n.body, raiseload=True))
+                .where(visible(n))
+                .order_by(n.updated_at.desc(), n.id.desc())
+                .limit(recent_limit)
+            )
+        ).all()
+        recent = await self.summaries(rows, await self.space_map(workspace_id))
+        return KnowledgeOverviewOut(
+            summary=KnowledgeOverviewSummary(
+                note_count=int(notes or 0),
+                space_count=int(spaces or 0),
+                link_count=int(link_count or 0),
+                updated_note_count=int(updated or 0),
+            ),
+            recent_notes=recent,
+            generated_at=datetime.now(UTC),
+        )
 
     # ---------------------------------------------------------------- 回收站
 

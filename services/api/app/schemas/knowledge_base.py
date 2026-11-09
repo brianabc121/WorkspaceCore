@@ -320,6 +320,36 @@ class GraphOut(BaseModel):
     total_notes: int
 
 
+# ---------------------------------------------------------------- 知识总览（T-0172）
+
+
+class KnowledgeOverviewSummary(BaseModel):
+    """知识总览的四个数（二批四页改造规范 4.2）：全量统计，不受图谱 2000 篇上限与分页影响。"""
+
+    note_count: int = Field(ge=0, description="所选范围内未删除的笔记数")
+    space_count: int = Field(
+        ge=0, description="所选范围内的知识库数（含已归档、没有笔记的）；选了知识库时为 1"
+    )
+    link_count: int = Field(
+        ge=0,
+        description="笔记之间的关联数：两端都是未删除笔记的 [[链接]]，按有向 (源, 目标) 去重，"
+        "不含指向自己的；选了知识库时至少一端在这个知识库。指向任务、项目、书签与图片的不算",
+    )
+    updated_note_count: int = Field(
+        ge=0,
+        description="updated_at 落在 [updated_after, updated_before) 内的不同笔记数"
+        "（不是修改次数）",
+    )
+
+
+class KnowledgeOverviewOut(BaseModel):
+    summary: KnowledgeOverviewSummary
+    recent_notes: list[NoteSummary] = Field(
+        description="最近更新的笔记，按 updated_at、id 倒序，每篇一次；不含正文，不受时间窗限制"
+    )
+    generated_at: datetime = Field(description="统计时间（服务器，UTC）")
+
+
 # ---------------------------------------------------------------- 变更记录与回收站
 
 

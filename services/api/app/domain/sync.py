@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain import events, github_sync, notifications, sync_lock
+from app.domain import github_permission_evidence as evidence
 from app.domain.connectors import ConnectorRuntime, integration_status_after, rate_limited_until
 from app.integrations.base import ConnectorError
 from app.integrations.github import PROVIDER as GITHUB
@@ -138,6 +139,8 @@ async def _sync_github(
         await github_sync.sync(db, integration, client, full=full)
     except ConnectorError as error:
         integration.status = integration_status_after(error, integration.status)
+        if integration.status == "unauthorized":
+            evidence.clear(integration)  # Token 被拒：逐仓库权限快照不再可信（T-0175）
         await notifications.integration_status_changed(db, integration, old_status)
         if error.kind == "RATE_LIMITED":
             wait = timedelta(seconds=error.retry_after or 60)
