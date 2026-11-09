@@ -369,6 +369,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | `GET /api/v1/mail/agents` | 可以分配邮箱的实例，只有 `id`、`name`（admin 用；实例列表本身只有 owner 能看） |
 | `DELETE /api/v1/mail/accounts/{id}` | 断开：尽力撤销 Google 授权、删除保存的令牌、取消它对智能体的全部分配，发件记录保留；审计 `mail.disconnected`（带取消的分配数） |
 | `GET /api/v1/mail/accounts/{id}/labels` | 标签（`unread` 可能为空） |
+| `GET /api/v1/mail/messages`（T-0170） | 邮件页默认的“全部邮箱”：不填 `account_id` 读全部已连接的邮箱，按 Gmail `internalDate` 倒序合并成一批（不跨邮箱去重）；填了只读这个邮箱。`q`、`label`（全部邮箱时只接受系统标签，自定义标签 `422 MAIL_LABEL_NEEDS_ACCOUNT`）、`cursor`、`per_account_limit`（1–20，默认 10）。返回 `items`（每封带 `account_id`、`account_email`、`account_display_name`）、`accounts`（每个邮箱的 `status`：ok / needs_reconnect / rate_limited / unavailable / pending，`unread` 没有依据时为 null）、`outcome`、`partial`、`next_cursor`（15 分钟有效；范围、查询、用户或工作空间变了 `422 MAIL_CURSOR_MISMATCH`，过期 `422 MAIL_CURSOR_EXPIRED`）、`total_estimate`（部分失败时为 null）。一个邮箱失败不影响其他邮箱；`Cache-Control: no-store`。读信、会话、附件、回复仍用下面带 `{id}` 的接口 |
 | `GET /api/v1/mail/accounts/{id}/messages` | 查收 / 搜索：`q`（Gmail 搜索语法）、`label`（标签 ID）、`page_token`、`limit`（≤ 50）；只取 metadata |
 | `GET /api/v1/mail/accounts/{id}/messages/{message_id}` | 一封邮件：纯文字正文（只有 HTML 时后端转成纯文字，去掉脚本、样式、图片，链接留地址）、超过 20000 字截断（`truncated`）、附件清单 |
 | `GET /api/v1/mail/accounts/{id}/threads/{thread_id}` | 会话，按时间顺序最多最近 20 封 |
