@@ -62,7 +62,8 @@ const navMeta = (item: NavItem) => ({ title: item.title, description: item.descr
 // 智能体服务器、OpenClaw 智能体（T-0181 / T-0182）。列表与详情并列；其他页面宽度不变。
 // 知识库是独立页面，自己的布局；早报是模块，在模块路由里声明
 // 管理区八页（T-0189，方案 docs/v2/ai-admin-redesign）也是宽页面；新闻早报设置在模块路由的 meta 里登记
-const ADMIN_PAGES = ['/ai', '/settings', '/settings/integrations', '/settings/security', '/settings/mail', '/agents/secrets', '/settings/audit']
+// 审计日志不在侧栏导航里，它的路由在下面单独登记 wide
+const ADMIN_PAGES = ['/ai', '/settings', '/settings/integrations', '/settings/security', '/settings/mail', '/agents/secrets']
 const WIDE_PAGES = new Set(['/tasks', '/projects', '/calendar', '/mail', '/developer', '/operations', '/agent-servers', '/agents', '/runner', ...ADMIN_PAGES])
 
 // 旧链接（T-0147 的两个标签）：/agents?tab=servers&server=… 换成独立的服务器页（只带有效的 server 与 range），
@@ -91,7 +92,7 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
       { path: '/setup', component: AuthPage, meta: { title: '首次安装', public: true } },
       { path: '/connection-error', component: ConnectionErrorPage, meta: { title: '连接失败', public: true } },
       { path: '/forbidden', component: UnauthorizedPage, meta: { title: '无权访问' } },
-      { path: '/settings/audit', component: AuditPage, meta: { title: '审计日志', admin: true } },
+      { path: '/settings/audit', component: AuditPage, meta: { title: '审计日志', admin: true, wide: true } },
       ...navigation.filter((item) => !item.module).map((item) => ({
         path: item.path,
         // 知识库（T-0099）是带子页面的独立页面：总览、图谱、笔记、编辑器、知识库主页、变更记录、外部文档

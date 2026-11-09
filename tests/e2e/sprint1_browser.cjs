@@ -125,8 +125,10 @@ async function logout(page) {
   step('在另一台设备登录后撤销它的会话，该设备被引导重新登录')
 
   await laptop.goto(`${base}/settings/audit`)
-  await laptop.locator('.record-list li').first().waitFor()
-  const actions = await laptop.locator('.record-list li strong').allTextContents()
+  // T-0198 审计改版：事件表（默认最近 7 天），每行事件名下面是原始 action；未收录的事件直接显示原名
+  const events = laptop.getByRole('region', { name: '事件记录' })
+  await events.locator('tbody tr').first().waitFor()
+  const actions = (await events.locator('tbody code.au-action, tbody code.au-raw').allTextContents()).map((text) => text.trim())
   for (const action of ['auth.session_revoked', 'workspace.updated', 'user.updated', 'setup.completed', 'workspace.member_added', 'workspace.member_role_changed', 'workspace.member_removed']) {
     if (!actions.includes(action)) throw new Error(`审计日志缺少 ${action}：${actions}`)
   }
