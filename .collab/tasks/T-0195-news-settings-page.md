@@ -28,3 +28,4 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 12:51 UTC · claude · 创建任务（owner: claude）
+- 2026-11-09 13:41 UTC · claude · B5 前端已在 b5-b5n 分支提交（2097f42）：设置页分五个标签共用一份草稿、管理区外壳、状态摘要条与右侧运行状态 / 推送渠道；新增 tests/news-settings-redesign.test.ts（19 条，先确认 17 条失败，模块停用两条本来就由宿主拦截）。lint / typecheck / 全量 vitest 665 条通过，build 通过，1440/1280/768/390 亮暗截图无横向滚动。下一步：主会话审查、合并进 B 系列 PR。
