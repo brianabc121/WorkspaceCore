@@ -622,13 +622,32 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 
 | 方法与路径 | 说明 |
 |---|---|
-| `GET /api/v1/tasks/progress?status=&limit=` | viewer。`status`：`all`（默认）/ `todo` / `in_progress` / `review` / `blocked`；`limit` 1–20（默认 7）。未归档项目里任务的四种状态：阻塞（未完成且有未关闭的阻塞 Issue，优先）、已完成待查看（`review_pending`）、进行中（有正在执行的一段或开始过）、待办（其余未完成的）。返回 `counts`（`all` / `todo` / `in_progress` / `review` / `blocked`）、`attention`（待查看 + 阻塞）、`items`（`id`、`title`、`project_id`、`project_title`、`status`、`executor`（`kind` user / instance、`id`、`name`，没有指派为 null）、`due_at`、`updated_at`、`blocker`（第一个未关闭的阻塞 Issue：`issue_id`、`number`、`title`、`count`））。全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前；已完成且已确认的任务不出现 |
+| `GET /api/v1/tasks/progress?status=&limit=` | viewer。`status`：`all`（默认）/ `todo` / `running` / `awaiting_view` / `blocked`；`limit` 1–20（默认 7）。未归档项目里任务的四种状态，与任务页同一判定（T-0166，见下一节）：已完成待查看（按当前用户）、阻塞（有人写了原因）、进行中（有正在执行的一段）、待办。返回 `counts`（`all` / `todo` / `running` / `awaiting_view` / `blocked`）、`attention`（待查看 + 阻塞）、`items`（`id`、`title`、`project_id`、`project_title`、`status`、`executor`（`kind` user / instance、`id`、`name`，没有指派为 null）、`due_at`、`updated_at`、`blocker`（`reason`、`blocked_at`、`blocked_by`、`blocked_by_name`））。全部时按 待查看 → 阻塞 → 进行中 → 待办 排，同状态最近更新的在前；已完成且你已查看的任务不出现 |
 | `GET /api/v1/tasks?assignee=me` | viewer。只看执行者是当前用户的任务（首页“我的待办”与 `status=open` 一起用） |
 | `POST /api/v1/tasks` | 新增可选字段 `assignee_user_id`：必须是本工作空间成员（否则 `422`），首页“添加待办”指派给自己 |
-| `POST /api/v1/tasks/{id}/review` | owner / admin。`{"version"}`。确认智能体完成的任务的结果：`review_pending` 变 false、版本 +1、动态记 `reviewed`（确认了结果）、审计 `task.reviewed`。不在待查看时原样返回 `200`；版本不一致 `409 VERSION_CONFLICT`；member / viewer `403` |
-| `TaskOut.review_pending` | 智能体用 `complete_task` 完成时为 true；确认结果、打回（`/reopen`）、人改完成状态（`PATCH done`）都会清掉 |
+| ~~`POST /api/v1/tasks/{id}/review`~~ | T-0166 删除：改为每个人自己“标为已查看”（`PUT /tasks/{id}/result-view`） |
+| ~~`TaskOut.review_pending`~~ | T-0166 删除：由 `completion_seq`、`result_viewed`、`work_state` 取代 |
 | `POST /api/v1/dashboards/{id}/reset` | member（能编辑仪表盘的人）。`{"version"}`。删掉这个仪表盘的全部组件，换成默认首页的五个组件（工作概况、任务进展、AI 新闻速览、我的待办、提醒与日程），版本 +1，审计 `dashboard.reset`；版本不一致 `409` |
 | 组件类型 | 新增 `work_summary`（`reminder_days` 1–14，默认 2）、`task_progress`（`limit` 1–20，默认 7）、`my_todos`（`limit` 1–20，默认 5）；`calendar_agenda` 前端改为“提醒与日程”时间轴，`news_briefing` 改为“AI 新闻速览”（今天早报的主题，`GET /api/v1/news/today`） |
+
+## 四页改造：任务状态、项目统计（T-0166 ~ T-0168）
+
+方案 `docs/v2/pages-redesign/`，决策 `docs/decisions/2026-11-09-task-work-states.md`。五种互斥状态 `work_state`：
+`todo`（待办）、`running`（有未结束的执行段）、`awaiting_view`（已完成、你还没查看这一轮结果）、`blocked`（有人写了阻塞原因）、`done`。
+“待查看”按人隔离；迁移前完成的任务对所有人都是 `done`。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `TaskOut` 新字段 | `work_state`、`completion_seq`（完成轮次，迁移前完成的为 0）、`result_viewed`（你看过当前这一轮）、`active_run`（`id`、`executor_kind`、`executor_name`、`started_at`，没有执行中的段为 null）、`blocker`（`reason`、`blocked_at`、`blocked_by`、`blocked_by_name`，没阻塞为 null） |
+| `GET /api/v1/tasks` 新参数 | `work_state`（按你的状态筛选，与 `status` 取交集；按状态看时传 `status=all`）、`assignee_user_id`、`assignee_instance_id`（两者只能给一个，也不能和 `assignee=me` 同时给，否则 `422`） |
+| `GET /api/v1/tasks/summary` | viewer。与列表同样的筛选（不含 `status` / `work_state`），返回 `todo` / `running` / `awaiting_view` / `blocked` / `done` / `total` / `as_of`，供状态筛选标签用 |
+| `PUT /api/v1/tasks/{id}/result-view` | viewer。`{"completion_seq"}`：把这一轮记为你已查看，只影响你自己，同一轮重复调用幂等。任务已重新打开或又完成了一次：`409 COMPLETION_CHANGED`，`details.current` 是最新的任务。打开详情不会自动标记 |
+| `PATCH /api/v1/tasks/{id}/block` | member，必须带 `Idempotency-Key`。`{"version", "blocked", "reason"}`：`blocked=true` 时原因 1–2000 字，`false` 清除。不停止正在执行的一段，解除也不自动重新开始。已完成 `409 TASK_DONE`；版本不一致 `409 VERSION_CONFLICT`。动态记 `blocked` / `unblocked`，审计 `task.blocked` / `task.unblocked` |
+| 领取、开始执行 | 阻塞的任务不能被智能体领取（`claim_task` 返回 `TASK_BLOCKED`），也不能开始新的一段（`POST /tasks/{id}/runs`、交给智能体执行：`409 TASK_BLOCKED`），先解除 |
+| 完成与打回 | 每次未完成→完成 `completion_seq` 加 1，并清掉阻塞；人自己勾完成时同时记自己已查看，智能体（`complete_task`、审批通过的完成）或别人完成时所有人都进入待查看。打回（`/reopen`）不加轮次，再完成才加 |
+| `GET /api/v1/projects` 新参数与字段 | `attention_only`（有你待查看或阻塞任务的项目）、`archived_only`、`sort=updated`（按最近更新）；`ProjectOut.task_states`（五种状态各几项，按你的查看状态）、`last_activity_at`（项目本身或其中任务最后一次修改的时间，取较晚者）。`open_tasks` / `done_tasks` 口径不变 |
+| `GET /api/v1/projects/summary?completed_after=&completed_before=` | viewer。`active`（未归档项目数）、`attention`（需要你关注的项目数）、`completed`（`done_at` 在 `[after, before)` 内且现在仍完成的任务数）、`as_of`。前端按浏览器时区算“本周”（周一 00:00 到下周一 00:00） |
+| `GET /api/v1/projects/activity?project_id=&cursor=&limit=` | viewer。任务动态（设为可领取、领取、放弃、完成、打回、标记 / 解除阻塞），新的在前，keyset 游标；`project_id` 不填是本工作空间的全部项目。返回 `id`、`kind`、`actor_kind`、`actor_name`、`note`（人或智能体写的，按纯文本显示）、`task_id`、`task_title`、`project_id`、`project_title`、`created_at` |
 
 ## 新闻早报（T-0153）
 

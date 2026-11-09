@@ -18,34 +18,33 @@
 
 ## 2. 任务状态（首页用的四种）
 
-任务表只有 `done`，效果图要四种状态。按下面的规则从现有数据算出来，只新增一个字段：
+> T-0166（四页改造，`docs/decisions/2026-11-09-task-work-states.md`）起，首页与任务页、项目卡片用同一套服务端判定，
+> 下表是现在的规则。原来的 `review_pending` + “确认结果”、“有未关闭的阻塞 Issue 就算阻塞”、“开始过就算进行中”都已取代。
 
 | 状态 | 条件（按顺序判断） | 数据来源 |
 | --- | --- | --- |
-| 阻塞 | 未完成，且有未关闭的阻塞 Issue | 已有：Issue 的 `kind = blocker` 关联到任务（T-0123）；智能体可以开阻塞 Issue（例外五），不新增规则 |
-| 已完成待查看 | 已完成，且 `review_pending` | **新增** `tasks.review_pending`（迁移 0051）：智能体用 `complete_task` 完成时置真 |
-| 进行中 | 未完成，有正在执行的一段或开始过（`started_at`） | 已有：执行记录（T-0104） |
+| 已完成待查看 | 已完成，且你还没查看这一轮结果 | `tasks.completion_seq`（完成轮次）+ `task_result_reads`（每人看过的轮次，迁移 0053） |
+| 阻塞 | 未完成，且有人写了阻塞原因 | `tasks.blocked_at / blocked_reason / blocked_by`（`PATCH /api/v1/tasks/{id}/block`） |
+| 进行中 | 未完成，有正在执行的一段 | 执行记录（T-0104）里 `ended_at` 为空的段 |
 | 待办 | 其余未完成的任务 | — |
 
-已完成且已确认的任务不在首页出现。归档项目里的任务不算。
+已完成且你已查看的任务不在首页出现。归档项目里的任务不算。
 
 “待查看”的处理：
-- owner / admin 在任务详情里“确认结果”（`POST /api/v1/tasks/{id}/review`），任务动态记一条“确认了结果”（新的动态种类 `reviewed`）；
-  也可以照旧“打回”（打回、人手动改完成状态都会清掉待查看）。
-- 人自己点完成、或者智能体的完成经审批执行的，不需要再查看。
-- 迁移前已经完成的任务不补标记（按已查看处理）。
+- 每个人在任务详情里“标为已查看”（`PUT /api/v1/tasks/{id}/result-view`），只影响自己；打开详情不会自动标记。
+- 人自己勾完成的，自己不需要再查看；智能体或别人完成的，所有人都进入待查看。打回后再完成是新的一轮，重新进入待查看。
+- 迁移前已经完成的任务对所有人都是已完成。
 
 “需要你关注 N 项” = 待查看 + 阻塞。
 
 ## 3. 接口
 
-- `GET /api/v1/tasks/progress?status=all|todo|in_progress|review|blocked&limit=7`（viewer）：
-  各状态的数量与一页条目（任务、项目、执行者名字、状态、最近更新、截止时间、第一个阻塞 Issue）。
+- `GET /api/v1/tasks/progress?status=all|todo|running|awaiting_view|blocked&limit=7`（viewer）：
+  各状态的数量与一页条目（任务、项目、执行者名字、状态、最近更新、截止时间、阻塞原因）。
   “全部”按 待查看 → 阻塞 → 进行中 → 待办 排，同状态内最近更新的在前。
 - `GET /api/v1/tasks?assignee=me`：只看执行者是自己的任务（我的待办）。
 - `POST /api/v1/tasks` 可带 `assignee_user_id`（必须是本工作空间成员）：添加待办时一次写好。
-- `POST /api/v1/tasks/{id}/review`（admin，乐观并发）：确认结果；不在待查看时原样返回。
-- `TaskOut.review_pending`：任务详情里显示“待查看”和“确认结果”。
+- 待查看与阻塞的接口见 `docs/api-contract.md`“四页改造”一节（T-0166 删除了 `POST /tasks/{id}/review` 与 `review_pending`）。
 - 组件类型：`work_summary`（`reminder_days` 1~14，默认 2：今天和明天）、`task_progress`（`limit`，默认 7）、
   `my_todos`（`limit`，默认 5）。
 - `POST /api/v1/dashboards/{id}/reset`（能编辑仪表盘的人，乐观并发）：把这个仪表盘换成默认首页布局（前端二次确认）。
@@ -67,12 +66,12 @@
 
 ## 5. 权限与安全
 
-- 任务进展、我的待办按工作空间范围读（viewer）；确认结果只给 owner / admin（与打回一致）；
+- 任务进展、我的待办按工作空间范围读（viewer）；“标为已查看”每个人只标自己（viewer 也可以），标记 / 解除阻塞要 member；
   添加待办是 member（与新建任务一致），执行者只能是本工作空间成员。
-- 阻塞 Issue 的标题来自人或智能体，按纯文本显示；新闻来源链接只允许 http(s)，新窗口打开并带 `noopener noreferrer`。
-- 不放宽智能体工具：智能体仍只能经 `complete_task` 完成自己的任务、经 Issue 工具开阻塞 Issue。
+- 阻塞原因来自人，按纯文本显示；新闻来源链接只允许 http(s)，新窗口打开并带 `noopener noreferrer`。
+- 不放宽智能体工具：智能体仍只能经 `complete_task` 完成自己的任务，不能替人标已查看；它可以照旧开阻塞 Issue 说明卡在哪里，但任务算不算阻塞由人标记。
 
 ## 6. 不做 / 以后再说
 
-- 智能体主动把任务标成“阻塞”的专用工具：现在用阻塞 Issue 表达；要不要加专用工具（属于写操作，要么审批、要么新例外）由人类决定。
+- 智能体主动把任务标成“阻塞”的专用工具：现在由人在任务详情里标记（智能体可以开阻塞 Issue 提醒）；要不要给智能体加这个工具（属于写操作，要么审批、要么新例外）由人类决定。
 - 日程的到点提醒推送（通知 / IM）：“提醒”现在就是日程，到点推送等需要时再做。
