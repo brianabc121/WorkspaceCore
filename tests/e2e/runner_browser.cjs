@@ -161,7 +161,8 @@ async function main() {
 
   for (const [tab, key, probe] of [['智能体用量', 'instances', '智能体用量'], ['环境模板', 'templates', null], ['执行记录', 'runs', '筛选运行记录']]) {
     await page.getByRole('tab', { name: tab }).click()
-    await page.waitForURL(new RegExp(`\\?tab=${key}$`))
+    // 前一步打开过容器详情：地址里可能还带着 environment_id（详情只在总览里显示），tab 不一定是第一个参数
+    await page.waitForURL(new RegExp(`[?&]tab=${key}(?:&|$)`))
     if (probe) await page.getByRole('region', { name: probe }).waitFor()
     else await page.getByRole('tabpanel', { name: tab }).waitFor()
     await page.getByText('正在加载').first().waitFor({ state: 'detached', timeout: 30000 }).catch(() => {})
