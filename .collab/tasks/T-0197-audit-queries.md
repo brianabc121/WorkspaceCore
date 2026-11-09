@@ -29,3 +29,4 @@ updated: 2026-11-09
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 12:51 UTC · claude · 创建任务（owner: claude）
 - 2026-11-09 12:52 UTC · claude · 开始任务：人类在对话中要求按 codex 的 AI 审批与管理区方案全面落实
+- 2026-11-09 13:22 UTC · claude · C1 后端完成：AuditQueryService（服务端筛选、HMAC 签名并绑定工作空间与条件的 keyset 游标、单条详情）、audit_labels（中文事件名、成员显示名、按当前权限批量补当前名称，密钥 / OpenClaw 服务器名只给 owner）、GET /audit-logs 加筛选、GET /audit-logs/{id}、GET /audit-logs/export（31 天、10000 行、超出 422 AUDIT_EXPORT_TOO_LARGE、BOM、公式注入防护、no-store、去 IP / 凭据键、记 audit.export_generated 安全摘要）。无迁移（沿用 workspace_id, created_at, id 索引）。新测试 test_audit_queries / test_audit_export 与工作空间、安全矩阵、契约回归通过；OpenAPI 与 schema.d.ts 已重新导出。下一步：C2 前端审计页。

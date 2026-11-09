@@ -69,7 +69,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | GET | `/api/v1/auth/sessions` | 我的会话 | 已实现（T-0011） |
 | DELETE | `/api/v1/auth/sessions/{session_id}` | 撤销会话 | 已实现（T-0011） |
 | POST | `/api/v1/auth/password` | 修改密码 | 已实现（T-0011） |
-| GET | `/api/v1/audit-logs` | 审计日志（需 `X-Workspace-Id`，owner / admin） | 已实现（T-0011） |
+| GET | `/api/v1/audit-logs` | 审计日志（需 `X-Workspace-Id`，owner / admin）；筛选、详情与 CSV 导出见“审计查询与导出（T-0197）” | 已实现（T-0011、T-0197） |
 
 请求头约定：写请求带 `X-CSRF-Token`（值取自 `ws_csrf` Cookie）；工作空间范围的请求带 `X-Workspace-Id`。
 
@@ -695,3 +695,21 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 `trigger_crawl`、`send_notification`、`read_article` 等不开放。
 
 **SSE 主题** `news`：早报送达、设置与收藏变化。**首页组件** `news_briefing`（`config.lines` 2 ~ 20）。
+
+## 审计查询与导出（T-0197）
+
+方案 `docs/v2/ai-admin-redesign/`（接口约定第 5 节）。全部 owner / admin，按 `X-Workspace-Id`；member / viewer `403`，非成员 `404`。
+只读：审计记录仍然只追加（数据库触发器拒绝 UPDATE），没有删除或修改记录的接口；列表与详情不写审计。
+不属于任何工作空间的记录（`workspace_id` 为空）永远不出现。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /api/v1/audit-logs` | 原接口加筛选，仍是 `Page`（`limit` 默认 30、1–100，`cursor`，`total_estimate` 为 null）。`after` / `before`（带时区、成对，`after` 含、`before` 不含且 `after < before`）、`actor_id` 或 `system_only=true`（只看 `actor_id` 为空的系统事件，二者互斥）、`action`（精确）或 `action_prefix`（按字面的前缀，二者互斥，≤128）、`resource_type`（≤64）、`q`（1–100，按字面、不区分大小写匹配 `action` / `resource_type` / `resource_id` 与 metadata 顶层的 `name` / `title`，以及内置事件的中文名；不搜 IP 哈希与其他 metadata）。筛选都在 SQL 里、分页之前生效。`next_cursor` 带签名，绑定工作空间与筛选条件：换了条件或篡改 `422 VALIDATION_FAILED`，从第一页重新加载 |
+| `GET /api/v1/audit-logs/{id}` | 一条记录（`AuditLogView`）；别的工作空间或没有工作空间的记录 `404` |
+| `GET /api/v1/audit-logs/export` | 同样的筛选，必须给 `after` 与 `before`，最长 31 天，不接受 `cursor` / `limit`（`422`）。读本次请求事务开始之前的记录，最多 10000 行：超出 `422 AUDIT_EXPORT_TOO_LARGE`（`details.limit=10000`），不截断。`text/csv; charset=utf-8`、UTF-8 BOM、`Content-Disposition: attachment; filename="audit-logs-YYYYMMDD-YYYYMMDD.csv"`（UTC 日期）、`Cache-Control: no-store`。列：`id`、`created_at_utc`（ISO，`Z` 结尾）、`action`、`action_label`、`actor_id`、`actor_label`、`resource_type`、`resource_id`、`resource_current_name`、`metadata_json`。去掉前导空白后以 `=` `+` `-` `@` 开头、或以制表符 / 回车开头的单元格前面加 `'`。`metadata_json` 再过一遍脱敏，并去掉 IP 类（`ip`、`client_ip`、`source_ip`、`ip_hash` 等）与凭据类的键。生成后在同一个事务里记 `audit.export_generated`：操作者、时间范围、截止点、行数与过滤摘要（搜索词只记“用了”，不记原文；不记文件内容） |
+
+`AuditLogView` 在 `AuditLogOut` 之外多三个可为 null 的字段，都只在当前权限内补充：
+`action_label`（内置事件的中文名，未知事件为 null，界面显示原 action；“已发起”类事件不写成成功）、
+`actor_label`（当前工作空间成员的显示名；`actor_id` 为空是“系统”；已不是成员为 null，显示 ID）、
+`resource_current_name`（对象“现在”的名称，不是当时的快照；只查本地表、批量查：`user`、`workspace`、`project`、`task`、`integration`、`agent_instance`，以及只有 owner 能看到的 `agent_secret`、`agent_server`；对象已删除、不在本工作空间或无权读取为 null）。
+列表与详情的 `metadata` 是写入时脱敏的内容，再过一遍脱敏并去掉 IP 类的键；没有通用的“结果”字段，不补前后值或 IP。
