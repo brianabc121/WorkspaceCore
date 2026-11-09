@@ -85,4 +85,3 @@ discovery 文档里的全部 OAuth 范围共 14 个；本方案只申请 `https:
 - 搜索语法：`messages.list` 的 `q` 与 Gmail 搜索框同样的语法，discovery 文档的示例里有 `is:unread`，邮件页的“未读”筛选用它。
   `has:attachment` 等其他运算符的官方说明在 `https://support.google.com/mail/answer/7190`，本环境访问被代理拦截（403），**没有核验**，所以没有做“有附件”筛选（用户可以自己在搜索框里输入 Gmail 语法）。
 - 读取 / 发送邮件的熔断改为按邮箱计数（`mail:{workspace}:{account}`；OAuth 换令牌与连接时读资料仍按工作空间）：一个邮箱连续出错不再把同一工作空间的其他邮箱一起熔断。这是工作台自己的策略，不涉及第三方接口。
-
