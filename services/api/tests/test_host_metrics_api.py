@@ -92,11 +92,18 @@ async def report(env: ImEnv, token: str, payload: dict[str, Any], expect: int = 
 
 
 async def shift(env: ImEnv, seconds: int) -> None:
-    """把这个工作空间所有实例与服务器上一次上报的时间往前挪，模拟过了一段时间（不真的等）。"""
+    """模拟过了一段时间（不真的等）。
+
+    把这个工作空间所有实例与服务器上一次上报的时间设为“现在减去 seconds”。
+
+    以“现在”为基准而不是在原值上减：测试在上一次上报之后花的时间（查询状态、清限频）不计入间隔，
+    下一次上报算出的速率只差这一次请求本身的耗时。原来在原值上减，CI 慢时多出 1 秒多，
+    60 秒算速率就差了 2% 以上（T-0216）。
+    """
     for table in ("agent_host_state", "agent_servers"):
         await run_sql(
             env.database_url,
-            f"UPDATE workspace.{table} SET reported_at = reported_at - make_interval(secs => $2)"  # noqa: S608
+            f"UPDATE workspace.{table} SET reported_at = now() - make_interval(secs => $2)"  # noqa: S608
             " WHERE workspace_id = $1 AND reported_at IS NOT NULL",
             uuid.UUID(env.workspace_id),
             float(seconds),
