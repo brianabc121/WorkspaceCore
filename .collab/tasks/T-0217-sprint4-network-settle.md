@@ -5,7 +5,7 @@ owner: claude
 status: done
 priority: P2
 branch: claude/cool-wright-99qbbg
-paths: tests/e2e/sprint4_browser.cjs
+paths: tests/e2e/sprint4_browser.cjs,docs/acceptance/sprint4-browser-err-network-changed.md
 depends_on:
 created: 2026-11-10
 updated: 2026-11-10

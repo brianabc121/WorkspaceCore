@@ -158,7 +158,8 @@ async function noHorizontalScroll(page) {
 ;(async () => {
   // 模拟 GitHub 最先起好：docker run / network connect 会在宿主机上新建网卡，网卡的地址（含 IPv6
   // 重复地址检测）还要一两秒才定下来；这期间浏览器正在加载的话，Chromium 会把进行中的请求以
-  // net::ERR_NETWORK_CHANGED 中断（T-0215、T-0217）。所以先起容器、准备数据，至少等 5 秒再启动浏览器
+  // net::ERR_NETWORK_CHANGED 中断（T-0215、T-0217）。所以先起容器、准备数据，至少等 5 秒再启动浏览器。
+  // 问题记录：docs/acceptance/sprint4-browser-err-network-changed.md
   const token = 'github_pat_e2e_' + randomBytes(20).toString('hex')
   const fakeStartedAt = Date.now()
   startFakeGitHub(token)
