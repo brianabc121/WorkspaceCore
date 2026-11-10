@@ -223,6 +223,10 @@ class ModelSyncResult(BaseModel):
     discovered: list[str] = Field(
         description="这次完整同步到的模型 ID；不完整或失败时为上一次的快照"
     )
+    kept_in_use: list[str] = Field(
+        description="服务商这次没有再列出、但正被智能体使用而保留的模型 ID"
+        "（全部可用模型范围下不会默默移除；请先给这些智能体换模型）",
+    )
     connection: ModelConnectionOut
 
 
