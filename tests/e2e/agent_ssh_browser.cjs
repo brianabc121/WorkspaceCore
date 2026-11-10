@@ -97,6 +97,20 @@ async function main() {
   await page.waitForURL(`${base}/`)
   check(await page.getByRole('link', { name: '智能体服务器', exact: true }).count() === 1 && await page.getByRole('link', { name: 'OpenClaw 智能体', exact: true }).count() === 1,
     '侧栏应有“智能体服务器”与“OpenClaw 智能体”两个入口')
+  // 主模型（T-0207）：部署必须选一条连接和模型。这个验收不调模型，连接只要配置完整（地址不会被访问）
+  const relayName = `SSH 网页验收中转 ${run}`
+  const created = await page.evaluate(async ({ name }) => {
+    const me = await (await fetch('/api/v1/me')).json()
+    const csrf = decodeURIComponent((document.cookie.split('; ').find((c) => c.startsWith('ws_csrf=')) || '').slice(8))
+    const response = await fetch('/api/v1/model-connections', {
+      method: 'POST',
+      headers: { 'X-Workspace-Id': me.workspaces[0].id, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, connection_type: 'relay', protocol: 'openai_compatible', base_url: 'https://relay.e2e.invalid/v1',
+        api_key: 'sk-ssh-ui-' + crypto.randomUUID(), models: [{ model_id: 'e2e-model' }] }),
+    })
+    return response.status
+  }, { name: relayName })
+  check(created === 201, `建中转站连接失败：${created}`)
 
   // ---------------------------------------------------------------- 智能体服务器页：添加服务器（只填四项）
   await page.getByRole('link', { name: '智能体服务器', exact: true }).click()
@@ -178,12 +192,18 @@ async function main() {
   check(await deployForm.getByText('平台推荐版本（已锁定）').count() === 1, '部署抽屉应显示锁定的 OpenClaw 版本')
   const name = `ssh-ui-${run}`
   await deployForm.getByLabel('智能体名称 *').fill(name)
+  check(await deployForm.getByRole('button', { name: '开始部署' }).isDisabled(), '没选主模型时不能开始部署')
+  const connectionSelect = deployForm.getByLabel('模型连接 *')
+  await deployForm.getByRole('option', { name: `${relayName} · 第三方中转` }).waitFor({ state: 'attached' })
+  await connectionSelect.selectOption({ label: `${relayName} · 第三方中转` })
+  await deployForm.getByLabel('主模型 *').locator('option[value="e2e-model"]').waitFor({ state: 'attached' })
+  await deployForm.getByLabel('主模型 *').selectOption('e2e-model')
   await deployForm.getByRole('button', { name: '开始部署' }).click()
   const progressRegion = page.getByRole('region', { name: '新智能体的部署' })
   await progressRegion.waitFor({ timeout: 30000 })
   const progress = progressRegion.getByRole('region', { name: '部署进度' })
   await progress.waitFor({ timeout: 30000 })
-  step('“前往部署智能体”打开部署抽屉并预选这台服务器（没有 IP、账号、密码输入），填名称开始部署')
+  step('“前往部署智能体”打开部署抽屉并预选这台服务器（没有 IP、账号、密码输入），填名称、选主模型（没选时不能部署）后开始部署')
 
   const statuses = await follow(page, progress, '部署', INSTALL_TIMEOUT)
   const succeeded = await progress.getByText('部署完成，实例已连上工作台。').count() > 0
