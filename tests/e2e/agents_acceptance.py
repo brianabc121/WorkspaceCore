@@ -1150,8 +1150,16 @@ def scenario_20(c: Ctx) -> None:
     c.owner.send(conv, "@甲 限流第三问", at=[c.a.im_user_id])
     wait_for("甲回复第三问", lambda: c.from_sender(conv, c.a.im_user_id, "限流第三问"), timeout=150)
     notes = [n for r in c.model_calls(c.keys["a"], after) for n in r.get("notes") or []]
+    detail = "; ".join(notes)[:300]
+    if not any("5002" in n for n in notes):
+        # 没看到时带上实例日志里插件的发送失败与补丁记录，便于判断是没放回还是被别的一轮用掉了（T-0213）
+        hints = [line.strip()[-200:] for line in c.a.logs(tail=600).splitlines()
+                 if "[openim]" in line and ("deliver failed" in line or "myworkspace" in line)]
+        calls = [{"at": round(r["at"] - after, 1), "last_user": r.get("last_user", "")[-80:]}
+                 for r in c.model_calls(c.keys["a"], after - 240)]
+        detail = json.dumps({"notes": notes, "logs": hints[-4:], "calls": calls[-6:]}, ensure_ascii=False)[:1500]
     c.check("场景 20：补丁把“回复没有发出（5002）”放回同一个会话，甲下一轮看得到（核验 V3）",
-            any("5002" in n for n in notes), "; ".join(notes)[:300])
+            any("5002" in n for n in notes), detail)
     instance = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}")
     c.check("场景 20：实例上报的插件版本带补丁标记，实例页不再提示重新签发接入包",
             instance["plugin_version"] == "0.3.3+myworkspace.1" and not instance["bundle_outdated"],
