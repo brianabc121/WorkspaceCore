@@ -2,7 +2,7 @@
 id: T-0208
 title: 中转站管理（MC-8）：端到端验收、迁移演练与文档
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: tests/e2e,docs,.github/workflows/ci-infra.yml
@@ -17,10 +17,10 @@ updated: 2026-11-10
 端到端验收、迁移演练与文档：验收矩阵逐项附证据，api-contract、部署与迁移文档更新。（MC-8）方案见 `docs/v2/model-connections/`（设计、接口约定、三个实施计划、迁移手册、验收矩阵、效果图）；人类在对话中要求“根据效果图和开发文档进行全面落实”。
 
 ## 验收标准
-- [ ] 验收矩阵每项写明测试名 / 命令 / 结果，单元、真实 OpenClaw + 假上游、真实服务商冒烟分开
-- [ ] 迁移 dry-run → apply → report 演练记录（脱敏）
-- [ ] 后端、前端、collab check 与 CI 真实输出写进 PR
-- [ ] api-contract、部署指南与核验记录更新
+- [x] 验收矩阵每项写明测试名 / 命令 / 结果，单元、真实 OpenClaw + 假上游、真实服务商冒烟分开
+- [x] 迁移 dry-run → apply → report 演练记录（脱敏）
+- [x] 后端、前端、collab check 与 CI 真实输出写进 PR
+- [x] api-contract、部署指南与核验记录更新
 
 ## 背景 / 约束 / 参考
 （可选）
@@ -30,3 +30,4 @@ updated: 2026-11-10
 - 2026-11-09 23:42 UTC · claude · 创建任务（owner: claude）
 - 2026-11-10 01:37 UTC · claude · 开始任务
 - 2026-11-10 01:38 UTC · claude · 核验记录第 3、5 节已写（本地结果、迁移演练、验收矩阵）；等后端全量与 CI 结果写入第 3、4 节后标 done
+- 2026-11-10 02:33 UTC · claude · status in_progress → done：核验记录第 3 ~ 5 节完成：后端 1316 passed、前端 744、迁移演练、验收矩阵逐项证据、CI 结果（agents 场景 27、sprint6 浏览器、SSH 验收）；CI 发现的三处已在本 PR 修好

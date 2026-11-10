@@ -79,7 +79,22 @@
 
 ## 4. CI 结果
 
-CI_RESULTS
+PR [brianabc121/WorkspaceCore#183](https://github.com/brianabc121/WorkspaceCore/pull/183)。CI 发现并在本 PR 里修好的三处：
+
+1. `secrets`（gitleaks，整个历史）：`model-config` 测试里的 OpenClaw provider 名称（`mwc` + 连接 ID 十六进制）被当成通用密钥，按惯例把指纹登记进 `.gitleaksignore`；
+2. `agents`：多实例验收假设接入包一定有 `models` 段，而新实例没有主模型绑定时不再带固定的 openai 段（验收 R01），改为没有就建上；
+3. `agents`：SSH 网页部署验收没有选主模型（新部署必须选），改为先建一条中转连接再在部署抽屉里选。
+
+`agents` 任务在 `db898c7`（与最终代码只差上面第 3 处验收脚本与文档）上的真实结果（run 42738430439）：
+
+- 多实例端到端（两个真实 OpenClaw 2026.9.36 实例 + 假模型服务）全部通过，其中场景 27 的 11 项：保存后待应用、`model-config.mjs` 应用并回报后已应用、配置里是 exec SecretRef 没有 Key 明文、
+  甲乙按各自模型请求连接 A、切换确认前已应用仍是 A 且迟到回报 409、甲改用连接 B 的模型和 Key、局部合并保留 fake provider / MCP / IM 渠道 / 工具限制（exec 仍 deny）、
+  同机的乙不受影响、换 Key 后下一轮用新 Key、乙改用 Anthropic（`x-api-key`）与 Gemini（`x-goog-api-key`）原生协议、解除后立即取不到 Key 且受管 provider 移除；
+- A15 恢复演练（含 OpenIM）、`sprint6_browser.cjs`（全部通过，含“旧密钥库链接跳到中转站管理”与“添加中转、授权、设为主模型、待应用”两步，504 个接口响应里没有密钥明文）、
+  `mail_browser.cjs`、接入入口自动配置验收、SSH 自动部署验收（`agent_ssh_acceptance.py`，部署时带主模型）都通过；
+- 只有 `agent_ssh_browser.cjs` 停在“开始部署”（没选主模型时按钮不可用，是预期行为），已按上面第 3 处修改。
+
+其余检查（`api`、`web`、`check`、`compose`、`news`、`images`、`deps`、`docker-pins` ×3、`secrets`）在最终提交上的结果以 PR 的检查为准，合并前全部为成功。
 
 ## 5. 验收矩阵
 
