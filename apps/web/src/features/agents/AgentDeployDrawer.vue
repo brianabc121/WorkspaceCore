@@ -10,6 +10,8 @@ import { blockReason, deployable, deploymentKey, initStatus, mib, resources, use
 import { sshError } from './ssh'
 import { forgetDeployment, getAgentDeploymentReceipt, rememberDeployment, startAgentDeployment, type DeploymentRecord } from './deploymentRequests'
 import SshJob from './SshJob.vue'
+import ModelConnectionPicker from './ModelConnectionPicker.vue'
+import { bindingError, type ModelChoice } from './modelBinding'
 
 // 部署 OpenClaw（T-0182，效果图 02 右侧；改造规范第 6 节）：名称、部署服务器（只能选可部署的）、CPU / 内存上限（默认不限制）、
 // 平台推荐版本（已锁定）。没有 IP、账号或密码输入：用服务器页保存的连接信息。
@@ -27,6 +29,8 @@ const phase = ref<Phase>(props.recovery ? 'checking' : 'form')
 const requestId = ref<string | null>(props.recovery?.request_id ?? null)
 const instanceId = ref<string | null>(props.recovery?.instance_id ?? null)
 const form = reactive({ name: '', server_id: '', cpus: '', mem: '' })
+// 主模型（T-0207）：必选；选择即授权给新智能体（与创建同一个事务），不再落回固定的 openai_api_key
+const model = ref<ModelChoice | null>(null)
 const error = ref(''), notice = ref(''), interrupted = ref(false), acceptedName = ref('')
 let timer: ReturnType<typeof setTimeout> | undefined, disposed = false
 onBeforeUnmount(() => { disposed = true; clearTimeout(timer) })
@@ -60,7 +64,7 @@ const mem = computed(() => form.mem.trim() === '' ? null : Number(form.mem))
 const cpuValid = computed(() => cpus.value === null || (Number.isFinite(cpus.value) && cpus.value >= 0.1 && cpus.value <= 256))
 const memValid = computed(() => mem.value === null || (Number.isInteger(mem.value) && mem.value >= 256 && mem.value <= 1048576))
 const nameValid = computed(() => form.name.trim().length >= 1 && form.name.trim().length <= 64)
-const valid = computed(() => nameValid.value && !!chosen.value && cpuValid.value && memValid.value)
+const valid = computed(() => nameValid.value && !!chosen.value && !!model.value && cpuValid.value && memValid.value)
 const FLOW = ['检查服务器环境', '拉取镜像', '创建独立容器与数据目录', '接入工作台', '等待心跳并确认上线']
 
 // 接纳之后：这个实例的部署状态（任务进度每 2 秒取一次）与最新的实例（继续部署时用它的 version）
@@ -86,13 +90,14 @@ function startOver() {
   phase.value = 'form'
 }
 // 结果未知（连接中断、网关错误、原请求还在处理）：先查收据
+const modelCodes = new Set(['MODEL_CONNECTION_DISABLED', 'MODEL_CONNECTION_NOT_READY', 'MODEL_PROTOCOL_UNSUPPORTED', 'MODEL_NOT_ALLOWED', 'CREDENTIAL_UNREADABLE'])
 const unknown = (cause: unknown) => cause instanceof ApiError && (cause.code === 'WRITE_UNKNOWN' || cause.code === 'IDEMPOTENCY_IN_PROGRESS' || (cause.code === 'HTTP_ERROR' && cause.status >= 500))
 
 async function submit() {
   if (!valid.value || phase.value !== 'form' || !chosen.value || !user) return
   // 同一次填写的连点、重试都用同一个 request_id；被明确拒绝后（没有建实例）才换新的
   requestId.value ??= crypto.randomUUID()
-  const body: Schema['AgentDeploymentCreateIn'] = { request_id: requestId.value, server_id: chosen.value.id, server_version: chosen.value.version, name: form.name.trim(), description: '', cpus: cpus.value, mem_limit_mb: mem.value }
+  const body: Schema['AgentDeploymentCreateIn'] = { request_id: requestId.value, server_id: chosen.value.id, server_version: chosen.value.version, name: form.name.trim(), description: '', cpus: cpus.value, mem_limit_mb: mem.value, model: model.value! }
   rememberDeployment(record())
   phase.value = 'sending'; error.value = ''
   try {
@@ -105,7 +110,7 @@ async function submit() {
     // 明确被拒绝：没有创建实例，可以改了再提交（下一次是新的请求）
     forgetDeployment(requestId.value ?? undefined)
     requestId.value = null
-    error.value = sshError(cause)
+    error.value = modelCodes.has(cause instanceof ApiError ? cause.code : '') ? bindingError(cause) : sshError(cause)
     phase.value = 'form'
     void refresh()
   }
@@ -124,7 +129,7 @@ async function check() {
       // 命令被拒绝、没有创建实例：回到表单（不保留 request_id）
       forgetDeployment(requestId.value)
       requestId.value = null
-      error.value = receipt.error_code ? sshError(new ApiError(409, receipt.error_code, '')) : '这次部署请求被拒绝，没有创建智能体。'
+      error.value = receipt.error_code ? (modelCodes.has(receipt.error_code) ? bindingError(new ApiError(409, receipt.error_code, '')) : sshError(new ApiError(409, receipt.error_code, ''))) : '这次部署请求被拒绝，没有创建智能体。'
       phase.value = 'form'
       return
     }
@@ -185,6 +190,7 @@ watch(() => job.value?.status, (now, before) => {
         </details>
         <p class="form-help ag-hint"><Info aria-hidden="true" />尚未初始化、待补密码或正在执行任务的服务器不可选择。</p>
       </div>
+      <ModelConnectionPicker v-model="model" :instance-id="null" :disabled="phase === 'sending'" />
       <div class="ag-field-row">
         <div class="form-field">
           <label :for="ids.cpus">CPU 上限（核）</label>
