@@ -57,7 +57,7 @@ _probe_errors = error_responses(401, 403, 404, 409, 422, 429, 503)
 _LIMITS = (
     "同一连接同一时间只能有一个同步或检测（409 CHECK_IN_PROGRESS）；每个 owner 对每个连接"
     "每分钟最多 5 次同步与检测合计（429 RATE_LIMITED，带 Retry-After）。"
-    "停用的连接也可以同步和检测（排查问题用）；非模型凭据 409 MODEL_CONNECTION_NON_MODEL，"
+    "停用的连接也可以同步和检测（排查问题用）；"
     "没填协议或地址 409 MODEL_CONFIGURATION_INCOMPLETE，协议未核验开放 409 "
     "MODEL_PROTOCOL_UNSUPPORTED；version 不是当前版本 409 VERSION_CONFLICT。"
 )

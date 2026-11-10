@@ -3,7 +3,7 @@ import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-STATE = {"target": None, "reports": [], "keys": {}, "legacy": {}, "resolves": []}
+STATE = {"target": None, "reports": [], "keys": {}, "vault": {}, "resolves": []}
 
 
 class H(BaseHTTPRequestHandler):
@@ -35,7 +35,7 @@ class H(BaseHTTPRequestHandler):
                 STATE["target"]["job_state"] = "succeeded" if body["result"] == "applied" else body["result"]
             return self._json(200, {"apply_state": body["result"], "desired_revision": body["desired_revision"], "applied_revision": None})
         if self.path in ("/agent-api/v1/model-credentials/resolve", "/agent-api/v1/secrets/resolve"):
-            store = STATE["keys"] if "model-credentials" in self.path else STATE["legacy"]
+            store = STATE["keys"] if "model-credentials" in self.path else STATE["vault"]
             STATE["resolves"].append([self.path.rsplit("/", 2)[-2], body.get("ids")])
             ids = body.get("ids") or []
             return self._json(200, {"values": {i: store[i] for i in ids if i in store},

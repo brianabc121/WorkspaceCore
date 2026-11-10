@@ -1,6 +1,6 @@
 # ADR：中转站管理与 OpenClaw 模型连接（T-0200 ~ T-0208）
 
-- 状态：accepted（实现见 T-0200 ~ T-0208；方案包 `docs/v2/model-connections/`）
+- 状态：accepted（实现见 T-0200 ~ T-0208；方案包 `docs/v2/model-connections/`）；2026-11-10 删除旧版兼容（T-0209，第 8 节）
 - 日期：2026-11-09
 - 锁定版本：OpenClaw `openclaw/openclaw:2026.9.36@sha256:eefba69ec4a5fa596f3b1a8fac4f09525ce10435617a23f2a2090ddd3b6c1c2f`
 
@@ -8,7 +8,8 @@
 
 1. 新增“中转站管理”（`/settings/model-connections`）：连接 = 协议 + base URL + API Key + 明确的模型集合。
    Key 仍存在 `agent_secrets` / `agent_secret_versions`（同一套加密与轮换规则），连接只记 `credential_secret_id`，
-   任何接口都不回显 Key、密文、`credential_ref` 或内部 secret_id。旧密钥库的模型 Key 原地纳管（不复制密文、不换 ID）。
+   任何接口都不回显 Key、密文、`credential_ref` 或内部 secret_id。模型服务的 Key 只在连接里保存：连接自己的内部凭据
+   不出现在密钥库里（列表、详情、修改、授权都当作不存在），密钥库也不再接受新建 `model_api_key`（T-0209）。
 2. 每个 OpenClaw 实例一个主绑定（连接 + 模型）。绑定是**目标**，实例确认后才是**已应用**；两者分开存，失败、未知都不显示已应用。
 3. 不加推理网关：OpenClaw 直连连接的 base URL；Key 通过 exec SecretRef 在需要时向工作台取（`mc_<连接 ID>`）。
 4. 配置下发用**实例拉取**：接入包里的 `bin/model-config.mjs` 由宿主机 crontab 每分钟在容器里运行，
@@ -113,8 +114,9 @@ owner 保存绑定（目标修订号 +1，排应用任务 queued）
   （已在 OpenClaw 进程里的 Key 不保证立即失效）。
 - 更换连接的 Key：以它为目标的绑定修订号加 1，实例一分钟内重新应用并 `secrets reload`，不等每 10 分钟的定时任务。
 - 新部署必须选主模型：实例、连接授权、绑定、应用任务在同一个事务里建立；接入包直接写入受管 provider。
-  没有绑定的旧实例保留接入包里的旧 `openai` 段（`openai_api_key`），在实例页设置主模型后由 `model-config.mjs`
-  换成受管 provider 并删掉这段模板（只删与模板完全相同的那一段）；用户自己加的 provider、MCP、IM 渠道、工具限制都不动。
+  还没有主模型的实例（手动登记的），接入包不带模型段；在实例页设置主模型后由 `model-config.mjs` 写入受管 provider。
+  `model-config.mjs` 只动受管 provider（`mwc` 开头）与 `agents.defaults.model`；用户自己加的 provider、MCP、IM 渠道、
+  工具限制都不动。
 
 ## 6. 不做的事
 
@@ -125,7 +127,27 @@ owner 保存绑定（目标修订号 +1，排应用任务 queued）
 
 ## 7. 为什么不做成插拔式模块
 
-人类 2026-11-08 要求新功能按插拔式模块做（`docs/modules/README.md`）。中转站管理不按模块做，原因：
-它替换的是 OpenClaw 智能体本身的模型配置——部署（新部署必须选主模型）、接入包（受管 provider）、取密钥程序（`mc_` 引用）、
-Runner 与旧取密钥接口的启停校验都依赖它；“停用模块”会让已绑定的实例取不到 Key、新部署无法完成。
+人类 2026-11-08 要求新功能按插拔式模块做（`docs/modules/README.md`）。中转站管理不按模块做，**人类 2026-11-10 在对话中确认**：
+它替换的是 OpenClaw 智能体本身的模型配置——部署（新部署必须选主模型）、接入包（受管 provider）、取密钥程序（`mc_` 引用）
+都依赖它；“停用模块”会让已绑定的实例取不到 Key、新部署无法完成。
 所以它和智能体、密钥库一样属于核心（路由登记在 `app/api/v1/__init__.py`，页面替换原来的“密钥库”入口），不提供停用开关。
+
+## 8. 删除旧版兼容（T-0209，2026-11-10）
+
+人类 2026-11-10 在对话中确认：工作台还没有在生产中运行，不需要考虑旧版本升级，选择“删掉旧版兼容代码”。删掉的内容：
+
+- 旧密钥库导入：命令 `app.commands.migrate_model_connections`、`/api/v1/model-connections/migration/*`（迁移记录、归类、
+  页面上的预览导入 / 导入 / 对账）与对应 schema、审计动作 `model_connection.classified`；
+- 连接的 `migration_state`、`legacy_source_id` 两列（迁移 0057 删除；0056 保持不变）；
+- 绑定的 `legacy_active`（实例“旧配置”状态）：还没设置主模型的实例 `apply_state` 为 null，页面显示“未设置”；
+- 接入包模板里的旧 `openai` 段（`openai_api_key`）与 `model-config.mjs` 里删除这段的逻辑；
+- 密钥库与中转站管理之间的托管同步（连接授权同步旧授权、Runner / 旧取 Key 接口按连接状态拦截）：
+  连接的内部凭据直接对密钥库隐藏（含取用记录：`mc_` 的取用只在连接的活动记录里），两边不再互相引用；
+- 页面：“迁移记录”、“旧配置”状态、旧地址 `/agents/secrets` 的跳转与侧栏布局里旧地址的换算；
+- 部署指南里的升级步骤（导入命令、对账）。
+
+保留：密钥库的非模型凭据（GitHub Token、运行环境注入的密钥等）与 `/agent-api/v1/secrets/resolve`，
+在中转站管理的“兼容凭据”页签里管理；模型 Key 只能在连接里保存。
+
+方案包 `docs/v2/model-connections/` 是原始资料，不改；其中的迁移手册（旧密钥库导入、对账、回退）与验收项 M01 ~ M13
+（迁移、归类、旧配置、共用旧 Key 等）随之作废，以本节为准。

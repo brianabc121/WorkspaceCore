@@ -82,14 +82,6 @@ export function legacyAgentsRedirect(to: RouteLocationNormalized) {
   return { path: '/agents', query, hash: to.hash, replace: true }
 }
 
-/** /agents/secrets → /settings/model-connections?tab=compat（其余参数照带，tab=accesses 改成 view=accesses） */
-export function legacySecretsRedirect(to: Pick<RouteLocationNormalized, 'query' | 'hash'>) {
-  const query = { ...to.query }
-  if (query.tab === 'accesses') query.view = 'accesses'
-  query.tab = 'compat'
-  return { path: '/settings/model-connections', query, hash: to.hash }
-}
-
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHistory(), queryClient = new QueryClient()) {
   const auth = useAuthStore(pinia)
   const modules = useModulesStore(pinia)
@@ -123,8 +115,6 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
       { path: '/projects/:project/issues/:number(\\d+)', component: () => import('../pages/IssuePage.vue'), meta: { title: 'Issue', description: '项目里的议题：正文、评论与时间线。' } },
       // 任务时间轴（T-0105）：任务页的一种显示方式，地址里带 project / date / scale / group / task
       { path: '/tasks/timeline', component: () => import('../pages/TaskTimelinePage.vue'), meta: { title: '任务时间轴', description: '每个执行者一条轨道：开始、结束、是否还在执行、消耗了多少 token。' } },
-      // 旧的密钥库（T-0206 并入中转站管理的“迁移与兼容凭据”页签）：保留原参数（?secret= 深链接等），原来的 ?tab=accesses 换成 ?view=accesses
-      { path: '/agents/secrets', redirect: (to) => legacySecretsRedirect(to) },
       // Notification links for AI approvals (OC-1 contract §6) use /approvals?id=…
       { path: '/approvals', redirect: (to) => ({ path: '/ai', query: to.query }) },
       { path: '/:pathMatch(.*)*', component: NotFoundPage, meta: { title: '页面未找到' } },

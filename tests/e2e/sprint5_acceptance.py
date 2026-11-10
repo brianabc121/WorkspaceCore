@@ -17,6 +17,7 @@
 import argparse
 import http.client
 import json
+import re
 import socket
 import subprocess
 import sys
@@ -125,8 +126,10 @@ def run_checks(base: str, report: Report) -> None:
 
     # ---------------------------------------------------------------- DoD：不暴露 Prometheus / Secret
     port = run("docker", "compose", "--profile", "monitoring", "port", "prometheus", "9090", check=False)
-    # 没有发布端口时 docker compose port 输出 ":0"
-    report.check("DoD Prometheus 没有发布端口（只在内部网络）", port in {"", ":0"}, port or "无")
+    # 没有发布端口时 docker compose port 输出 ":0"（较新的 Compose 输出 "invalid IP:0"）；
+    # 发布了才是 "<地址>:<非 0 端口>"，所以按端口号判断，不比对固定文字
+    published = re.fullmatch(r".*:[1-9][0-9]*", port.strip()) is not None
+    report.check("DoD Prometheus 没有发布端口（只在内部网络）", not published, port or "无")
     metrics_page = Client(base).request("GET", "/metrics")
     report.check(
         "DoD 经 Caddy 访问 /metrics 得不到 api 的指标",

@@ -318,7 +318,11 @@ jobs:
           { echo "SSH_TARGET_HOST=$ADDR"; echo "SSH_TARGET_PORT=2222"; echo "SSH_TARGET_USER=mwdeploy"; \
             echo "SSH_HOST_KEY_PUB=$D/host_ed25519.pub"; } >> "$GITHUB_ENV"
       - name: 智能体服务器 SSH 验收（四项添加、密码加密保存、指纹确认、错误密码、初始化加入 docker 组、一次点击部署两个真实 OpenClaw、重部署、保留数据卸载、旧公钥退役）
-        run: sudo -E python3 tests/e2e/agent_ssh_acceptance.py
+        run: |
+          # Ubuntu 26.04 的 runner 用 sudo-rs，忽略 -E（也不支持 --preserve-env=列表）：用到的变量用 env 显式传给 root
+          sudo env SSH_TARGET_HOST="$SSH_TARGET_HOST" SSH_TARGET_PORT="$SSH_TARGET_PORT" \
+            SSH_TARGET_USER="$SSH_TARGET_USER" SSH_TARGET_PASSWORD="$SSH_TARGET_PASSWORD" \
+            SSH_HOST_KEY_PUB="$SSH_HOST_KEY_PUB" python3 tests/e2e/agent_ssh_acceptance.py
       # T-0090 / T-0183：同一台“新服务器”（上一步已卸载、移除服务器并恢复 authorized_keys），这次全程在网页上操作
       - name: 智能体服务器浏览器验收（服务器页四项添加、核对指纹、测试连接、初始化，智能体页选服务器部署到上线、运维、卸载、移除、手机宽度）
         run: node tests/e2e/agent_ssh_browser.cjs

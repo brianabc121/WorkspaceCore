@@ -18,8 +18,6 @@ import { pathToFileURL } from "node:url";
 const CLI_TIMEOUT_MS = 90000;
 const HTTP_TIMEOUT_MS = 10000;
 const RELOAD_SETTLE_MS = 3000;
-// 旧接入包模板里的 openai 段（只有一个指向 openai_api_key 的 exec SecretRef）：换成受管 provider 时一起移除
-const LEGACY_REF = "openai_api_key";
 
 const stateDir = () => process.env.OPENCLAW_STATE_DIR || "/home/node/.openclaw";
 const configPath = () => process.env.OPENCLAW_CONFIG_PATH || `${stateDir()}/openclaw.json`;
@@ -27,14 +25,6 @@ const statePath = () => `${stateDir()}/myworkspace-model-state.json`;
 
 function isManagedKey(key, prefix) {
   return typeof key === "string" && key.startsWith(prefix) && /^[a-z0-9]+$/.test(key);
-}
-
-function isLegacyTemplate(provider) {
-  if (!provider || typeof provider !== "object") return false;
-  const keys = Object.keys(provider);
-  const ref = provider.apiKey;
-  return keys.length === 1 && keys[0] === "apiKey" && ref && typeof ref === "object"
-    && ref.source === "exec" && ref.provider === "myworkspace" && ref.id === LEGACY_REF;
 }
 
 function primaryOf(model) {
@@ -48,9 +38,8 @@ export function buildPatch(current, target) {
   const prefix = target.managed_prefix;
   const providers = current?.models?.providers ?? {};
   const patchProviders = {};
-  for (const [key, value] of Object.entries(providers)) {
+  for (const key of Object.keys(providers)) {
     if (isManagedKey(key, prefix) && key !== target.provider_key) patchProviders[key] = null;
-    else if (target.state === "active" && key === "openai" && isLegacyTemplate(value)) patchProviders[key] = null;
   }
   const patch = {};
   const model = current?.agents?.defaults?.model;

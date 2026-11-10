@@ -86,6 +86,8 @@ export const NETWORK = { intranet: '内网', public: '外网' } as const
 export const SCOPE = { read: '只读', read_write: '读写（写操作要审批）' } as const
 export const ROLE = { admin: 'admin', member: 'member', viewer: 'viewer' } as const
 export const SECRET_KIND = { model_api_key: '模型服务密钥', api_token: 'API 令牌', generic: '其他' } as const
+/** 密钥库里能新建、能筛选的类型：模型服务的 Key 只在中转站管理的连接里（T-0209） */
+export const VAULT_KIND = { api_token: 'API 令牌', generic: '其他' } as const
 
 export function agentError(error: unknown): string {
   if (!(error instanceof ApiError)) return '请求失败，请稍后重试。'

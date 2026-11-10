@@ -142,7 +142,8 @@ describe('approval center redesign', () => {
     expect(within(next).queryByText(/剩余 1\d:/)).not.toBeInTheDocument()
     const row = screen.getByRole('row', { name: '申请：新建日程「项目进度同步」' })
     expect(within(row).getByText(/01:(29|30)/)).toBeVisible()
-    expect(within(row).queryByText(/11:/)).not.toBeInTheDocument()
+    // 只看倒计时：行里“截止 HH:MM”的 <time> 是钟点，11 点多跑测试时也会含 “11:”
+    expect(within(row).queryByText(/11:/, { ignore: 'script, style, time' })).not.toBeInTheDocument()
     expect(within(next).getByRole('button', { name: '批准并执行' })).toBeEnabled()
     const before = gets(requests, 'exec-due').length, listsBefore = lists(requests).length
     await vi.waitFor(() => expect(within(next).getByRole('button', { name: '批准并执行' })).toBeDisabled(), { timeout: 5000 })

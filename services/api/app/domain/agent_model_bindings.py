@@ -45,7 +45,6 @@ from app.models import (
     AgentModelBinding,
     AgentSecret,
     AgentSecretAccess,
-    AgentSecretGrant,
     AgentSecretVersion,
     ModelApplyJob,
     ModelConnection,
@@ -55,7 +54,6 @@ from app.models import (
 from app.schemas.model_connections import (
     AgentModelBindingOut,
     AgentModelConfigOut,
-    LegacyModelInfo,
     ModelApplyJobOut,
     ModelAssignmentPage,
     ModelAssignmentRow,
@@ -71,8 +69,6 @@ from app.schemas.model_connections import (
     PickerConnectionPage,
 )
 
-# 旧接入包模板里 openai 段引用的密钥名
-LEGACY_MODEL_REF = "openai_api_key"
 # 受管 provider 键的前缀（provider_key 生成的键都以它开头，见 model_connections.provider_key）
 MANAGED_PREFIX = "mwc"
 # 应用任务多久没被领取 / 没有回报算“未知”
@@ -300,32 +296,6 @@ class AgentModelBindingService:
         names = await self._names([binding.connection_id, binding.applied_connection_id])
         return binding_out(binding, await self._job(binding), names)
 
-    async def _legacy(self, instance_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, list[str]]:
-        """没有原生绑定的实例在旧密钥库里的授权引用名（非模型凭据除外）。
-
-        只用来显示 legacy_active，不据此猜连接或模型。"""
-        if not instance_ids:
-            return {}
-        rows = await self.db.execute(
-            select(AgentSecretGrant.instance_id, AgentSecretGrant.ref_id)
-            .outerjoin(
-                ModelConnection,
-                ModelConnection.credential_secret_id == AgentSecretGrant.secret_id,
-            )
-            .where(
-                AgentSecretGrant.instance_id.in_(list(instance_ids)),
-                or_(
-                    ModelConnection.id.is_(None),
-                    ModelConnection.migration_state != "non_model",
-                ),
-            )
-            .order_by(AgentSecretGrant.ref_id)
-        )
-        found: dict[uuid.UUID, list[str]] = {}
-        for instance_id, ref_id in rows.all():
-            found.setdefault(instance_id, []).append(ref_id)
-        return found
-
     async def _check_target(
         self,
         access: WorkspaceAccess,
@@ -337,8 +307,6 @@ class AgentModelBindingService:
         """绑定目标的前提：同工作空间、模型连接、启用、配置完整、协议已核验、模型在集合内、
         （已有实例）已授权、Key 可读。instance_id 为 None 表示新部署（选择即授权）。"""
         connection = await self.connections.connection(access, connection_id, lock=True)
-        if connection.migration_state == "non_model":
-            raise _not_found()
         if not connection.enabled:
             raise ApiError(409, "MODEL_CONNECTION_DISABLED", "这条连接已停用")
         if connection.configuration_state != "ready":
@@ -397,13 +365,8 @@ class AgentModelBindingService:
         binding = await self._binding(instance.id)
         if binding is not None:
             out = await self._out(binding)
-            return ModelBindingView(binding=out, apply_state=out.apply_state, legacy=None)
-        refs = (await self._legacy([instance.id])).get(instance.id)
-        if refs:
-            return ModelBindingView(
-                binding=None, apply_state="legacy_active", legacy=LegacyModelInfo(legacy_refs=refs)
-            )
-        return ModelBindingView(binding=None, apply_state=None, legacy=None)
+            return ModelBindingView(binding=out, apply_state=out.apply_state)
+        return ModelBindingView(binding=None, apply_state=None)
 
     async def job(
         self, access: WorkspaceAccess, instance_id: uuid.UUID, job_id: uuid.UUID
@@ -427,7 +390,7 @@ class AgentModelBindingService:
         offset: int = 0,
         limit: int = 50,
     ) -> ModelAssignmentPage:
-        """“OpenClaw 连接分配”表：每个实例一行（目标、已应用、状态或旧配置）。"""
+        """“OpenClaw 连接分配”表：每个实例一行（目标、已应用与应用状态）。"""
         query = select(AgentInstance).where(AgentInstance.workspace_id == access.workspace.id)
         if q:
             query = query.where(AgentInstance.name.ilike(f"%{_escape(q)}%", escape="\\"))
@@ -471,11 +434,9 @@ class AgentModelBindingService:
             [b.connection_id for b in bindings.values()]
             + [b.applied_connection_id for b in bindings.values()]
         )
-        legacy = await self._legacy([i for i in ids if i not in bindings])
         rows = []
         for instance in instances:
             binding = bindings.get(instance.id)
-            refs = legacy.get(instance.id)
             rows.append(
                 ModelAssignmentRow(
                     instance_id=instance.id,
@@ -486,7 +447,6 @@ class AgentModelBindingService:
                     )
                     if binding
                     else None,
-                    legacy=LegacyModelInfo(legacy_refs=refs) if refs and not binding else None,
                 )
             )
         return ModelAssignmentPage(
@@ -508,7 +468,6 @@ class AgentModelBindingService:
                     ModelConnection.workspace_id == access.workspace.id,
                     ModelConnection.enabled.is_(True),
                     ModelConnection.configuration_state == "ready",
-                    ModelConnection.migration_state != "non_model",
                     ModelConnection.protocol.in_(supported_protocols(self.settings)),
                 )
                 .order_by(ModelConnection.name, ModelConnection.id)
@@ -720,17 +679,6 @@ class AgentModelBindingService:
         except ApiError:
             return None
 
-    async def has_legacy_model(self, instance: AgentInstance) -> bool:
-        """接入包模板里的旧 openai 段只引用 openai_api_key：实例有这个旧授权时才保留它。"""
-        return bool(
-            await self.db.scalar(
-                select(AgentSecretGrant.id).where(
-                    AgentSecretGrant.instance_id == instance.id,
-                    AgentSecretGrant.ref_id == LEGACY_MODEL_REF,
-                )
-            )
-        )
-
     # ---------------------------------------------------------------- 实例接口
 
     async def _limit(self, principal: AgentPrincipal, name: str, per_minute: int) -> None:
@@ -779,7 +727,6 @@ class AgentModelBindingService:
             connection is None
             or not connection.enabled
             or connection.configuration_state != "ready"
-            or connection.migration_state == "non_model"
             or connection.protocol not in supported_protocols(self.settings)
             or not connection.base_url
         ):
@@ -949,7 +896,6 @@ class AgentModelBindingService:
                         ModelConnection.id.in_(wanted_ids),
                         ModelConnection.workspace_id == instance.workspace_id,
                         ModelConnection.enabled.is_(True),
-                        ModelConnection.migration_state != "non_model",
                     )
                 )
             ).all()

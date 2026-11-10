@@ -51,7 +51,7 @@ const discovered = computed(() => all.data.value?.discovered ?? [])
 const savedModels = computed(() => all.data.value?.items ?? [])
 const displayNames = computed(() => new Map(savedModels.value.map(m => [m.model_id, m.display_name])))
 
-// 基准取服务端的原值（迁移草稿的类型、协议可能为空）：表单补上的默认值算作修改，保存时一并提交
+// 基准取服务端的原值（草稿的类型、协议可能为空）：表单补上的默认值算作修改，保存时一并提交
 const metaOf = (c: Connection): Meta => ({ name: c.name.trim(), description: c.description.trim(), connection_type: c.connection_type, official_provider: c.connection_type === 'official' ? c.official_provider : null, protocol: c.protocol ?? '', base_url: (c.base_url ?? '').trim() })
 function initMeta(c: Connection | null) {
   const p = props.prefill
@@ -252,7 +252,7 @@ const syncShown = computed(() => (syncResult.value ? syncText(syncResult.value) 
 const checkOpen = ref(props.intent === 'check'), checkMode = ref<'metadata' | 'inference'>('metadata'), checkModel = ref('')
 const checkResult = ref<ConnectionCheck | null>(null)
 const shownCheck = computed(() => checkResult.value ?? props.connection?.last_check ?? null)
-const checkable = computed(() => !!props.connection?.protocol && !!props.connection?.base_url && props.connection.migration_state !== 'non_model')
+const checkable = computed(() => !!props.connection?.protocol && !!props.connection?.base_url)
 async function check() {
   const c = props.connection
   if (!c || checking.busy.value || (checkMode.value === 'inference' && !checkModel.value)) return
@@ -278,7 +278,7 @@ const describe = (error: unknown) => (error instanceof ApiError ? mcError(error)
     <p v-if="connection && status" class="mc-form-status">
       <span class="asv-state" :class="`tone-${status.tone}`">{{ status.label }}</span>
       <span class="asv-sub">配置完整度、启停与检测结果分开显示；检测失败不会自动停用。</span>
-      <button v-if="connection.migration_state !== 'non_model'" type="button" class="secondary-button mc-inline" :disabled="saving.busy.value" @click="emit('toggle', connection)"><Power aria-hidden="true" />{{ connection.enabled ? '停用' : '启用' }}</button>
+      <button type="button" class="secondary-button mc-inline" :disabled="saving.busy.value" @click="emit('toggle', connection)"><Power aria-hidden="true" />{{ connection.enabled ? '停用' : '启用' }}</button>
     </p>
 
     <div class="mc-row">
@@ -324,7 +324,7 @@ const describe = (error: unknown) => (error instanceof ApiError ? mcError(error)
       <div v-if="!editing" class="mc-key"><input :id="ids.key" v-model="apiKey" type="password" autocomplete="new-password" spellcheck="false" maxlength="8192" required /></div>
       <div v-else class="mc-key">
         <p :id="ids.key" class="mc-saved"><Lock aria-hidden="true" />{{ connection?.credential_configured ? '已加密保存' : '没有可用的 Key' }}</p>
-        <button type="button" class="link-button" :disabled="rotating.busy.value || connection?.migration_state === 'non_model'" :aria-expanded="replacing" @click="replacing ? closeReplace() : openReplace()">{{ connection?.credential_configured ? '更换' : '填写' }}</button>
+        <button type="button" class="link-button" :disabled="rotating.busy.value" :aria-expanded="replacing" @click="replacing ? closeReplace() : openReplace()">{{ connection?.credential_configured ? '更换' : '填写' }}</button>
       </div>
     </div>
     <p class="form-help mc-indent">{{ editing ? (connection?.credential_configured ? '已加密保存，原值不回显、不能复制或导出。' : '保存的 Key 无法解密，请填写新的 Key。') : '保存后不再显示，只能更换。' }}</p>

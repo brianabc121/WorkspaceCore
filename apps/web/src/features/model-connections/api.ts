@@ -14,8 +14,6 @@ export type ConnectionModel = Schema['ConnectionModelOut']
 export type Capabilities = Schema['ModelConnectionCapabilities']
 export type Protocol = Schema['ModelConnectionCapabilities']['supported_protocols'][number]
 export type Provider = Schema['OfficialPreset']['provider']
-export type MigrationEntry = Schema['MigrationEntryOut']
-export type MigrationState = NonNullable<NonNullable<NonNullable<import('../../services/schema').operations['list_migration_entries']['parameters']['query']>['state']>>
 export type SyncResult = Schema['ModelSyncResult']
 export type CheckReason = NonNullable<ConnectionCheck['reason']>
 export type Assignment = Schema['ModelAssignmentRow']
@@ -145,20 +143,6 @@ export function useActivity(scope: string, id: () => string | null) {
   })
 }
 
-/** 迁移项（按状态筛选、分页）；counts 是各状态的全量计数 */
-export function useMigrationEntries(scope: string, state: () => MigrationState | null, limit = 50) {
-  const c = context(scope)
-  return useInfiniteQuery({
-    queryKey: computed(() => mcKey(c.user, scope, 'migration', state(), limit)),
-    enabled: c.enabled, initialPageParam: null as string | null,
-    queryFn: async ({ queryKey, pageParam, signal }) => {
-      const s = queryKey[5] as MigrationState | null
-      return dataOf(await c.auth.api.GET('/api/v1/model-connections/migration/entries', { params: { header: c.header, query: { limit, ...(s ? { state: s } : {}), ...cursor(pageParam) } }, signal }))
-    },
-    getNextPageParam: p => p.next_cursor ?? undefined,
-  })
-}
-
 /** OpenClaw 连接分配表 */
 export function useAssignments(scope: string) {
   const c = context(scope)
@@ -179,17 +163,13 @@ export function unique<T extends { id: string }>(pages: { items: T[] }[] | undef
 export const TYPE_LABEL = { official: '官方直连', relay: '第三方中转' } as const
 export const PROTOCOL_LABEL: Record<Protocol, string> = { openai_compatible: 'OpenAI 兼容', anthropic_native: 'Anthropic 原生', gemini_native: 'Gemini 原生' }
 export const SCOPE_LABEL = { selected: '指定模型', all_available: '服务商全部可用模型' } as const
-export const MIGRATION_LABEL: Record<Connection['migration_state'], string> = { native: '新建', needs_configuration: '待完善', needs_classification: '待归类', managed: '已纳管', non_model: '非模型凭据' }
-export const LEGACY_KIND = { model_api_key: '模型服务密钥', api_token: 'API 令牌', generic: '其他' } as const
 
 type Tone = 'green' | 'amber' | 'red' | 'muted' | 'blue'
 
 /** 配置完整度与启停（与检测结果分开显示；检测失败不等于停用） */
-export function configStatus(c: Pick<Connection, 'configuration_state' | 'enabled' | 'migration_state' | 'credential_configured'>): { label: string; tone: Tone } {
-  if (c.migration_state === 'non_model') return { label: '非模型凭据', tone: 'muted' }
-  if (c.migration_state === 'needs_classification') return { label: '待归类', tone: 'amber' }
+export function configStatus(c: Pick<Connection, 'configuration_state' | 'enabled' | 'credential_configured'>): { label: string; tone: Tone } {
   if (c.configuration_state === 'needs_review') return { label: '需复核', tone: 'red' }
-  if (c.configuration_state === 'draft') return { label: c.migration_state === 'needs_configuration' ? '待完善' : '草稿', tone: 'amber' }
+  if (c.configuration_state === 'draft') return { label: '草稿', tone: 'amber' }
   if (!c.enabled) return { label: '已停用', tone: 'muted' }
   return { label: '已启用', tone: 'green' }
 }
@@ -256,7 +236,6 @@ const ACTIONS: Record<string, string> = {
   'model_connection.models_synced': '同步模型',
   'model_connection.checked': '检测连接',
   'model_connection.grants_replaced': '修改智能体授权',
-  'model_connection.classified': '迁移归类',
   'model_connection.deleted': '删除连接',
   'credential.resolved': '智能体取用 Key',
   'agent.model_binding.updated': '设置主模型',
@@ -279,11 +258,6 @@ export function impactOf(error: unknown): Impact | null {
   const value = raw as Partial<Impact>
   const instances = Array.isArray(value.instances) ? value.instances.filter(i => i && typeof i.instance_id === 'string').map(i => ({ instance_id: i.instance_id, instance_name: typeof i.instance_name === 'string' ? i.instance_name : i.instance_id, bound: !!i.bound })) : []
   return { instances, bound_instances: Number(value.bound_instances) || 0, pending_jobs: Number(value.pending_jobs) || 0 }
-}
-/** details 里的数字字段（例如 legacy_grants） */
-export function detailNumber(error: unknown, key: string): number {
-  if (!(error instanceof ApiError)) return 0
-  return Number((error.details as Record<string, unknown> | undefined)?.[key]) || 0
 }
 /** 409 MODEL_IN_USE 的 details.models：{model_id: [instance_id]} */
 export function modelsInUse(error: unknown): Record<string, string[]> {
@@ -313,7 +287,6 @@ export function mcError(error: unknown): string {
     GRANT_IN_USE: '这些智能体正以这个连接为主模型，请先在下方“OpenClaw 连接分配”里更换或解除它们的主模型。',
     MODEL_SYNC_REQUIRED: '还没有一次完整的模型同步：先点“同步模型”，或改用“指定模型”手工填写。',
     CHECK_IN_PROGRESS: '这个连接正在同步或检测，请稍后再试。',
-    MODEL_CONNECTION_NON_MODEL: '这是非模型凭据，请在“迁移与兼容凭据”里管理。',
     MODEL_CONFIGURATION_INCOMPLETE: '还没有填写协议或地址，不能同步或检测。',
     MODEL_NOT_ALLOWED: '这个模型不在连接的模型集合里。',
     MODEL_BINDING_CONFLICT: '有智能体正以它为主模型，或有进行中的应用任务：请先完成切换或解除主模型。',

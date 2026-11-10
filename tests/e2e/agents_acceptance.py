@@ -186,7 +186,7 @@ class Instance:
         (self.dir / "bin" / "server-ca.pem").chmod(0o644)
 
         config = json.loads((self.dir / "state" / "openclaw.json").read_text())
-        # 没有主模型绑定、也没有旧 openai_api_key 授权的新实例，接入包里没有 models 段（T-0205）
+        # 没有主模型绑定的实例，接入包里没有 models 段（T-0205 / T-0209）
         config.setdefault("models", {})["providers"] = {
             "fake": {
                 "baseUrl": f"http://fake-model:{FAKE_MODEL_PORT}/v1",
@@ -2097,7 +2097,9 @@ def setup(args: argparse.Namespace, report: Report, base: str) -> Ctx:
     secrets_: dict[str, str] = {}
     instances: list[Instance] = []
     for label, name, mode, scope in (("a", "甲", "intranet", "read_write"), ("b", "乙", "public", "read")):
-        secret = owner.call("POST", "/api/v1/agents/secrets", {"name": f"model key {label}", "kind": "model_api_key",
+        # 验收用的假模型服务：Key 作为普通的兼容凭据授权，materialize 自己写 fake provider（不是中转站管理的连接）。
+        # 密钥库不再接受 model_api_key（T-0209）；中转站管理连接 + 主模型绑定的真实路径见场景 27。
+        secret = owner.call("POST", "/api/v1/agents/secrets", {"name": f"fake model key {label}", "kind": "generic",
                                                                "value": keys[label]})
         secrets_[label] = secret["id"]
         record = owner.call("POST", "/api/v1/agents/instances", {"name": name, "network_mode": mode, "scope": scope,

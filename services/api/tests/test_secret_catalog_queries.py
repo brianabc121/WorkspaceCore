@@ -35,9 +35,6 @@ OUT_FIELDS = {
     "version",
     "created_at",
     "updated_at",
-    # 中转站管理的映射（T-0203）：还没导入时都是 null
-    "model_connection_id",
-    "migration_state",
 }
 
 
@@ -102,7 +99,7 @@ async def test_search_and_kind_find_the_last_secret_beyond_the_first_page(env: E
         await _create(
             env,
             f"bulk-{i:02d}",
-            kind="model_api_key" if i % 10 == 0 else "generic",
+            kind="api_token" if i % 10 == 0 else "generic",
             description="批量导入的测试密钥",
         )
     last = await _create(env, "zz-last", kind="api_token", description="支付网关 Token")
@@ -117,17 +114,25 @@ async def test_search_and_kind_find_the_last_secret_beyond_the_first_page(env: E
     assert everything[-1]["id"] == last["id"]
 
     # 最后一项不在第一页，也能按说明、按名称（不区分大小写）和按类型找到
-    for params in ({"q": "支付网关"}, {"q": "ZZ-LAST"}, {"q": "token"}, {"kind": "api_token"}):
+    for params in (
+        {"q": "支付网关"},
+        {"q": "ZZ-LAST"},
+        {"q": "token"},
+        {"q": "zz", "kind": "api_token"},
+    ):
         found = await _list(env, **params)
         assert [item["id"] for item in found["items"]] == [last["id"]], params
         assert found["total"] == 1 and found["next_cursor"] is None, params
     assert (await _list(env, q="zz", kind="generic"))["total"] == 0
 
     # 筛选在分页之前：每页的 total 都是全量匹配数，翻完正好是全部匹配
-    models, totals, pages = await _all_pages(env, kind="model_api_key", limit=4)
-    assert totals == {6} and pages == 2
-    assert [item["name"] for item in models] == [f"bulk-{i:02d}" for i in range(0, 54, 10)]
-    assert all(item["kind"] == "model_api_key" for item in models)
+    tokens, totals, pages = await _all_pages(env, kind="api_token", limit=4)
+    assert totals == {7} and pages == 2
+    assert [item["name"] for item in tokens] == [
+        *(f"bulk-{i:02d}" for i in range(0, 54, 10)),
+        "zz-last",
+    ]
+    assert all(item["kind"] == "api_token" for item in tokens)
     matched, totals, _ = await _all_pages(env, q="bulk-5", limit=3)
     assert totals == {4} and [item["name"] for item in matched] == [
         "bulk-50",

@@ -875,9 +875,6 @@ async def revoke_agent_credential(
 @router.put(
     "/agents/instances/{instance_id}/secret-grants",
     summary="设置实例可以取用的密钥（owner，整体替换）",
-    description="被中转站管理托管的密钥只能原样保留已有的授权，新增（含换 ref_id）返回 "
-    "409 MANAGED_BY_MODEL_CONNECTION；对已导入密钥的授权增删同步到连接授权（只作追溯，"
-    "实例的主模型绑定在这个连接上时保留）。",
     dependencies=_write,
     responses=_write_errors,
 )
@@ -889,12 +886,6 @@ async def replace_agent_secret_grants(
 
 # ---------------------------------------------------------------- 密钥库
 
-# 中转站管理托管的密钥（T-0203）
-MANAGED_NOTE = (
-    "被中转站管理托管的密钥（导入后 needs_configuration / managed，或新建连接自己的凭据）"
-    "返回 409 MANAGED_BY_MODEL_CONNECTION，请到中转站管理里修改。"
-)
-
 
 @router.get(
     "/agents/secrets",
@@ -902,8 +893,7 @@ MANAGED_NOTE = (
     description="按名称排序。q 按名称或说明字面包含搜索（不区分大小写，% 与 _ 按普通字符），"
     "kind 按类型筛选；条件在本工作空间内、分页之前生效，total 是同样条件下的全量匹配数。"
     "游标绑定工作空间与条件：换了 q / kind 要从第一页开始，用旧游标请求返回 422。"
-    "新建连接自己的内部凭据不在这里（在中转站管理里）；已导入的密钥带 model_connection_id 与 "
-    "migration_state。",
+    "中转站管理连接自己的 Key 不在密钥库里（列表、详情、修改、授权都当作不存在）。",
     responses=_read_errors,
 )
 async def list_agent_secrets(
@@ -929,6 +919,8 @@ async def list_agent_secrets(
     "/agents/secrets",
     status_code=status.HTTP_201_CREATED,
     summary="新增密钥（owner，只写不读）",
+    description="密钥库只放非模型凭据（API 令牌等）；kind 为 model_api_key 时 422："
+    "模型服务的 Key 在中转站管理里添加连接时保存。",
     dependencies=_write,
     responses=_write_errors,
 )
@@ -941,6 +933,8 @@ async def create_agent_secret(
 @router.get(
     "/agents/secrets/accesses",
     summary="取密钥记录（owner）",
+    description="密钥库凭据的取用记录；实例取中转站管理连接的 Key（mc_ 引用）"
+    "记在连接的活动记录里，不在这里。",
     responses=_read_errors,
 )
 async def list_secret_accesses(
@@ -969,7 +963,7 @@ async def list_secret_accesses(
     "/agents/secrets/{secret_id}",
     summary="密钥详情（owner，只有元数据）",
     description="名称、类型、说明、当前值版本、最近轮换时间与授权（实例与 ref_id）；"
-    "从不返回值、密文引用或历史值。不在本工作空间、不存在或是新建连接自己的内部凭据时 404。",
+    "从不返回值、密文引用或历史值。不在本工作空间或不存在时 404。",
     responses=_read_errors,
 )
 async def get_agent_secret(access: Owner, service: Service, secret_id: UUID) -> AgentSecretOut:
@@ -979,8 +973,6 @@ async def get_agent_secret(access: Owner, service: Service, secret_id: UUID) -> 
 @router.patch(
     "/agents/secrets/{secret_id}",
     summary="修改密钥的名称与说明（owner）",
-    description=f"{MANAGED_NOTE}兼容凭据（needs_classification / non_model）照常修改，"
-    "映射连接的 version 一起加 1。",
     dependencies=_write,
     responses=_write_errors,
 )
@@ -993,9 +985,7 @@ async def update_agent_secret(
 @router.post(
     "/agents/secrets/{secret_id}/rotate",
     summary="轮换密钥的值（owner）",
-    description="新值立即生效，旧值不再下发；实例最迟在下一次 secrets reload（每 10 分钟）时换上。"
-    f"{MANAGED_NOTE}兼容凭据轮换后映射连接的 config_revision 与 version 加 1、旧检测结果作废；"
-    "连接停用时轮换照样可以，但实例取用仍被拒绝。",
+    description="新值立即生效，旧值不再下发；实例最迟在下一次 secrets reload（每 10 分钟）时换上。",
     dependencies=_write,
     responses=_write_errors,
 )
@@ -1009,9 +999,7 @@ async def rotate_agent_secret(
     "/agents/secrets/{secret_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="删除密钥（owner）",
-    description="同时删除对它的授权；之后实例取用返回 NOT_FOUND。"
-    f"{MANAGED_NOTE}兼容凭据连同映射一起删除；映射还有主模型绑定，或在中转站管理里单独授权的实例时 "
-    "409 CONNECTION_IN_USE。",
+    description="同时删除对它的授权；之后实例取用返回 NOT_FOUND。",
     dependencies=_write,
     responses=_write_errors,
 )

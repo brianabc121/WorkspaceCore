@@ -12,7 +12,7 @@ import ModelConnectionPicker from '../agents/ModelConnectionPicker.vue'
 import { useAssignments, type Assignment } from './api'
 
 // OpenClaw 连接分配（规范第 4.3 节）：每个智能体的目标连接与模型、实例确认已应用的连接与模型、应用状态。
-// 保存只改目标：实例取走新配置并回报后才是“已应用”；两者不同时都显示。没有原生绑定、仍按旧接入包运行的是“旧配置”。
+// 保存只改目标：实例取走新配置并回报后才是“已应用”；两者不同时都显示。还没设置主模型的显示“未设置”。
 // “更换连接”用部署抽屉同一个选择器：只能选已授权给这个智能体、启用且配置完整的连接。
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id, cache = useQueryClient()
 const assignments = useAssignments(scope)
@@ -24,7 +24,7 @@ const editing = ref<Assignment | null>(null)
 const choice = ref<ModelChoice | null>(null)
 const target = (r: Assignment) => (r.binding && !r.binding.revoked ? r.binding : null)
 const differs = (r: Assignment) => !!r.binding && r.binding.applied_revision !== r.binding.desired_revision
-const state = (r: Assignment) => applyStatus(r.binding?.apply_state ?? (r.legacy ? 'legacy_active' : null))
+const state = (r: Assignment) => applyStatus(r.binding?.apply_state ?? null)
 function open(r: Assignment) {
   // 预填当前目标（没有目标时从空开始）；换连接时选择器只清空模型、保留新选的连接
   const t = target(r)
@@ -42,7 +42,7 @@ async function save() {
   if (!r || !value || same.value) return
   const ok = await act(async () => {
     const out = dataOf(await auth.api.PUT('/api/v1/agents/instances/{instance_id}/model-binding', { params: { header, path: { instance_id: r.instance_id } }, body: { version: r.binding?.version ?? null, connection_id: value.connection_id, model_id: value.model_id } }))
-    cache.setQueryData(bindingKey(user, scope, r.instance_id), { binding: out, apply_state: out.apply_state, legacy: null })
+    cache.setQueryData(bindingKey(user, scope, r.instance_id), { binding: out, apply_state: out.apply_state })
   }, `已保存「${r.instance_name}」的主模型：实例取走新配置并确认后才显示“已应用”。`)
   if (ok) editing.value = null
 }
@@ -63,7 +63,6 @@ async function save() {
             <td data-label="使用的连接">
               <template v-if="r.binding?.revoked">已解除（不使用模型）</template>
               <template v-else-if="target(r)">{{ target(r)!.connection_name ?? '（连接已删除）' }}</template>
-              <template v-else-if="r.legacy">旧配置<span class="asv-sub">引用：{{ r.legacy.legacy_refs.join('、') || '无' }}</span></template>
               <template v-else>未设置</template>
               <span v-if="differs(r) && r.binding?.applied_revision !== null" class="asv-sub">已应用：{{ r.binding?.applied_connection_id ? r.binding?.applied_connection_name ?? '（连接已删除）' : '已移除受管模型' }}</span>
             </td>
@@ -88,7 +87,7 @@ async function save() {
 
     <ModalPanel v-if="editing" :title="`更换连接：${editing.instance_name}`" :busy="busy" @close="close">
       <form class="mc-assign-form" aria-label="选择连接与模型" @submit.prevent="save">
-        <p class="form-help">当前目标：<template v-if="target(editing)">{{ target(editing)!.connection_name ?? '（连接已删除）' }} · <code>{{ target(editing)!.model_id }}</code></template><template v-else-if="editing.legacy">旧配置（{{ editing.legacy.legacy_refs.join('、') || '无引用' }}），选择后自动迁移到中转站管理的连接</template><template v-else>未设置</template>。{{ state(editing).hint }}</p>
+        <p class="form-help">当前目标：<template v-if="target(editing)">{{ target(editing)!.connection_name ?? '（连接已删除）' }} · <code>{{ target(editing)!.model_id }}</code></template><template v-else>未设置</template>。{{ state(editing).hint }}</p>
         <ModelConnectionPicker v-model="choice" :instance-id="editing.instance_id" :disabled="busy" />
         <p v-if="error" class="feedback" role="alert">{{ error }}</p>
         <div class="form-actions"><button type="submit" class="primary-button" :disabled="busy || !choice || same">{{ busy ? '正在保存…' : '保存' }}</button><button type="button" class="secondary-button" :disabled="busy" @click="close">取消</button></div>

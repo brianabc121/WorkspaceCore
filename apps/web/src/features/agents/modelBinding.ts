@@ -68,7 +68,6 @@ export function applyStatus(state: ApplyState | null | undefined): { label: stri
     case 'failed': return { label: '应用失败', tone: 'red', hint: '实例仍按上一次已应用的配置运行；处理原因后点“重新应用”。' }
     case 'unknown': return { label: '状态待确认', tone: 'amber', hint: '10 分钟内没有收到实例的回报：可能离线，或这个实例的接入包还没有配置应用主模型的定时任务。' }
     case 'manual_required': return { label: '待手动应用', tone: 'amber', hint: '实例不能自动改配置，请按接入包 CHECKLIST.md 手动应用后再点“重新应用”。' }
-    case 'legacy_active': return { label: '旧配置', tone: 'muted', hint: '仍按旧接入包里的模型配置运行，工作台不猜它用的是哪条连接；选择主模型后自动迁移。' }
     default: return { label: '未设置', tone: 'muted', hint: '还没有设置主模型。' }
   }
 }

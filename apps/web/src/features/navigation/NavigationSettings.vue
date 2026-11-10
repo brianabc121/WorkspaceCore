@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
 import { useModulesStore } from '../../stores/modules'
 import { ApiError, dataOf, errorMessage, type Schema } from '../../services/api'
-import { canSee, migratePlacements, navigation } from '../../app/navigation'
+import { canSee, navigation } from '../../app/navigation'
 import { KIND_LABELS, allSections, customKey, defaultSectionKey, sectionOrder, type CustomPage, type NavigationLayout, type Role } from '../../app/sidebar'
 import { useNavigationStore } from '../../stores/navigation'
 import { newId } from './ids'
@@ -27,8 +27,7 @@ const canEdit = computed(() => !!store.layout?.can_manage)
 function fromLayout(value: NavigationLayout): Draft {
   // 指向已不存在的分组的挪动不保留（侧栏里它们本来就回到了原来的分组）
   const known = new Set(allSections(value).map((section) => section.key))
-  // 旧地址（例如 /agents/secrets）换成新地址：保存时一并改过来
-  const placements = Object.fromEntries(Object.entries(migratePlacements(value.placements)).filter(([, key]) => known.has(key)))
+  const placements = Object.fromEntries(Object.entries(value.placements ?? {}).filter(([, key]) => known.has(key)))
   return { sections: (value.sections ?? []).map((section) => ({ ...section })), pages: (value.pages ?? []).map((page) => ({ ...page })), placements, order: sectionOrder(value) }
 }
 function reset(value: NavigationLayout) { draft.value = fromLayout(value); base.value = JSON.stringify(draft.value) }

@@ -44,7 +44,7 @@ function reset() { chosen.value = new Set(granted.value); blocked.value = []; er
 
 <template>
   <section class="mc-tabpanel" aria-label="智能体授权">
-    <p class="form-help">勾选可以使用这条连接的 OpenClaw 智能体。授权后还要在“OpenClaw 连接分配”里把它设为主模型才会生效；撤销授权时同时撤销旧的密钥授权。</p>
+    <p class="form-help">勾选可以使用这条连接的 OpenClaw 智能体。授权后还要在“OpenClaw 连接分配”里把它设为主模型才会生效。</p>
     <p v-if="grants.isPending.value || instances.isPending.value" role="status" class="ws-state-line">正在读取授权…</p>
     <div v-else-if="grants.error.value || instances.error.value" class="ws-state-line"><p role="alert">{{ mcError(grants.error.value ?? instances.error.value) }}</p><button type="button" class="secondary-button" @click="grants.refetch(); instances.refetch()">重试</button></div>
     <p v-else-if="!rows.length" class="ws-state-line">还没有 OpenClaw 智能体。先到 <RouterLink to="/agents">OpenClaw 智能体</RouterLink> 部署或登记。</p>

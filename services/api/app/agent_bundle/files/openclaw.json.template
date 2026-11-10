@@ -15,13 +15,6 @@
       }
     }
   },
-  "models": {
-    "providers": {
-      "openai": {
-        "apiKey": { "source": "exec", "provider": "myworkspace", "id": "openai_api_key" }
-      }
-    }
-  },
   "session": { "dmScope": "per-channel-peer" },
   "tools": {
     "profile": "messaging",

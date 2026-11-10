@@ -36,7 +36,7 @@ async function save() {
   if (!value || sameAsTarget.value) return
   const ok = await act(async () => {
     const out = dataOf(await auth.api.PUT('/api/v1/agents/instances/{instance_id}/model-binding', { params: { header, path: { instance_id: props.instance.id } }, body: { version: binding.value?.version ?? null, connection_id: value.connection_id, model_id: value.model_id } }))
-    store({ binding: out, apply_state: out.apply_state, legacy: null })
+    store({ binding: out, apply_state: out.apply_state })
   }, '已保存：实例取走新配置并确认后才显示“已应用”。')
   if (ok) editing.value = false
 }
@@ -52,7 +52,7 @@ async function revert() {
   const target = { connection_id: b.applied_connection_id, model_id: b.applied_model_id }
   await act(async () => {
     const out = dataOf(await auth.api.PUT('/api/v1/agents/instances/{instance_id}/model-binding', { params: { header, path: { instance_id: props.instance.id } }, body: { version: b.version, ...target } }))
-    store({ binding: out, apply_state: out.apply_state, legacy: null })
+    store({ binding: out, apply_state: out.apply_state })
   }, '已改回上一次已应用的连接与模型：实例确认后显示“已应用”。')
 }
 async function apply() {
@@ -65,7 +65,7 @@ async function remove() {
   if (!b || !window.confirm(`解除「${props.instance.name}」的主模型？\n\n解除后它立即不能再取这条连接的 Key，并移除受管的模型配置；已在 OpenClaw 进程里的 Key 不保证立即失效。连接本身和授权不会删除。`)) return
   await act(async () => {
     const out = dataOf(await auth.api.DELETE('/api/v1/agents/instances/{instance_id}/model-binding', { params: { header, path: { instance_id: props.instance.id }, query: { version: b.version } } }))
-    store({ binding: out, apply_state: out.apply_state, legacy: null })
+    store({ binding: out, apply_state: out.apply_state })
   }, '已解除：实例确认移除配置后显示“已应用”。')
 }
 </script>
@@ -89,7 +89,6 @@ async function remove() {
           </dd>
         </div>
       </dl>
-      <p v-else-if="view.data.value?.legacy" class="form-help">旧配置：接入包里的模型引用 {{ view.data.value.legacy.legacy_refs.join('、') }}。工作台不猜它用的是哪条连接；选一个主模型后自动换成中转站管理的连接。</p>
       <p class="form-help">{{ status.hint }}<template v-if="switching && binding?.applied_connection_id"> 切换确认前，旧连接仍可取 Key。</template></p>
       <p v-if="binding?.last_error_code" class="feedback" role="note">原因：{{ reasonText(binding.last_error_code) }}</p>
 

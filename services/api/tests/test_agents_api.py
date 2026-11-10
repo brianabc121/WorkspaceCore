@@ -67,11 +67,11 @@ class Env:
         return data
 
     async def create_secret(
-        self, name: str = "OpenAI", value: str = SECRET_VALUE
+        self, name: str = "GitHub", value: str = SECRET_VALUE
     ) -> dict[str, Any]:
         response = await self.client.post(
             "/api/v1/agents/secrets",
-            json={"name": name, "kind": "model_api_key", "value": value},
+            json={"name": name, "kind": "api_token", "value": value},
             headers=self.headers(write=True),
         )
         assert response.status_code == 201, response.text
@@ -258,7 +258,7 @@ async def test_secrets_are_write_only_and_resolved_by_grant(env: Env) -> None:
     assert SECRET_VALUE not in str(secret) and secret["value_version"] == 1
     duplicate = await env.client.post(
         "/api/v1/agents/secrets",
-        json={"name": "OpenAI", "value": "other"},
+        json={"name": "GitHub", "value": "other"},
         headers=env.headers(write=True),
     )
     assert duplicate.status_code == 409
@@ -269,30 +269,30 @@ async def test_secrets_are_write_only_and_resolved_by_grant(env: Env) -> None:
     instance = await env.create_instance()
     other = await env.create_instance(name="实例 C")
     updated = await env.grant(
-        instance["id"], [{"secret_id": secret["id"], "ref_id": "openai_api_key"}]
+        instance["id"], [{"secret_id": secret["id"], "ref_id": "github_token"}]
     )
     assert updated["secret_grants"] == [
-        {"secret_id": secret["id"], "secret_name": "OpenAI", "ref_id": "openai_api_key"}
+        {"secret_id": secret["id"], "secret_name": "GitHub", "ref_id": "github_token"}
     ]
     token = await env.issue_token(instance["id"])
     other_token = await env.issue_token(other["id"])
 
-    ok = await resolve(env.client, token, ["openai_api_key", "missing"])
+    ok = await resolve(env.client, token, ["github_token", "missing"])
     assert ok.status_code == 200, ok.text
     assert ok.headers["cache-control"] == "no-store"
     assert ok.json() == {
-        "values": {"openai_api_key": SECRET_VALUE},
+        "values": {"github_token": SECRET_VALUE},
         "errors": {"missing": {"code": "NOT_FOUND"}},
     }
     # 没有授权的实例：与不存在一样是 NOT_FOUND
-    denied = await resolve(env.client, other_token, ["openai_api_key"])
-    assert denied.json() == {"values": {}, "errors": {"openai_api_key": {"code": "NOT_FOUND"}}}
+    denied = await resolve(env.client, other_token, ["github_token"])
+    assert denied.json() == {"values": {}, "errors": {"github_token": {"code": "NOT_FOUND"}}}
 
     accesses = await env.client.get(
         "/api/v1/agents/secrets/accesses", headers=env.headers(), params={"result": "ok"}
     )
     assert [(a["ref_id"], a["value_version"]) for a in accesses.json()["items"]] == [
-        ("openai_api_key", 1)
+        ("github_token", 1)
     ]
     all_accesses = await env.client.get("/api/v1/agents/secrets/accesses", headers=env.headers())
     assert len(all_accesses.json()["items"]) == 3
@@ -304,8 +304,8 @@ async def test_secrets_are_write_only_and_resolved_by_grant(env: Env) -> None:
         headers=env.headers(write=True),
     )
     assert rotated.status_code == 200 and rotated.json()["value_version"] == 2
-    after = await resolve(env.client, token, ["openai_api_key"])
-    assert after.json()["values"] == {"openai_api_key": "sk-rotated"}
+    after = await resolve(env.client, token, ["github_token"])
+    assert after.json()["values"] == {"github_token": "sk-rotated"}
     # 旧版本的密文已清除，旧值无法恢复
     kept = await run_sql(
         env.database_url,
@@ -321,8 +321,8 @@ async def test_secrets_are_write_only_and_resolved_by_grant(env: Env) -> None:
         headers=env.headers(write=True),
     )
     assert deleted.status_code == 204
-    gone = await resolve(env.client, token, ["openai_api_key"])
-    assert gone.json()["errors"] == {"openai_api_key": {"code": "NOT_FOUND"}}
+    gone = await resolve(env.client, token, ["github_token"])
+    assert gone.json()["errors"] == {"github_token": {"code": "NOT_FOUND"}}
 
 
 async def test_resolve_is_rate_limited_per_instance(env: Env) -> None:

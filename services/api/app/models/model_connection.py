@@ -3,10 +3,9 @@
 依据 docs/v2/model-connections/ 的设计与接口约定（T-0200 ~ T-0208），以及
 docs/decisions/2026-11-09-model-connections.md：
 
-- 连接只保存业务元数据（类型、协议、base URL、模型范围、启停、迁移状态）；API Key 仍放在
-  agent_secrets / agent_secret_versions 里（加密用途绑定 secret_id + value_version 不变），
-  credential_secret_id 指向那条内部凭据，一条凭据最多对应一个连接；
-- 旧密钥库导入时连接直接引用原密钥（legacy_source_id = credential_secret_id），不复制密文、不换 ID；
+- 连接只保存业务元数据（类型、协议、base URL、模型范围、启停）；API Key 放在
+  agent_secrets / agent_secret_versions 里（加密用途绑定 secret_id + value_version），
+  credential_secret_id 指向那条内部凭据，一条凭据最多对应一个连接（密钥库里看不到它）；
 - 授权、绑定都带 workspace_id 的复合外键，跨工作空间的引用在数据库层面就建不起来；
 - 绑定分开保存“目标”（connection_id / model_id / desired_revision）与“已应用”
   （applied_*），实例回报确认后才写已应用；
@@ -39,7 +38,6 @@ OFFICIAL_PROVIDERS = ("openai", "anthropic", "google")
 PROTOCOLS = ("openai_compatible", "anthropic_native", "gemini_native")
 MODEL_SCOPES = ("selected", "all_available")
 CONFIGURATION_STATES = ("draft", "ready", "needs_review")
-MIGRATION_STATES = ("native", "needs_configuration", "needs_classification", "managed", "non_model")
 SYNC_STATES = ("complete", "partial", "unsupported", "failed")
 MODEL_SOURCES = ("manual", "discovered")
 MODEL_AVAILABILITY = ("listed", "verified")
@@ -60,7 +58,6 @@ CHECK_REASONS = (
     "stale_revision",
 )
 APPLY_STATES = (
-    "legacy_active",
     "pending",
     "applying",
     "applied",
@@ -105,7 +102,6 @@ class ModelConnection(Base):
         CheckConstraint(
             f"configuration_state IN {_in(CONFIGURATION_STATES)}", name="configuration_state"
         ),
-        CheckConstraint(f"migration_state IN {_in(MIGRATION_STATES)}", name="migration_state"),
         CheckConstraint(
             f"sync_state IS NULL OR sync_state IN {_in(SYNC_STATES)}", name="sync_state"
         ),
@@ -143,9 +139,6 @@ class ModelConnection(Base):
     model_scope: Mapped[str] = mapped_column(Text, server_default=text("'selected'"))
     configuration_state: Mapped[str] = mapped_column(Text, server_default=text("'draft'"))
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
-    migration_state: Mapped[str] = mapped_column(Text, server_default=text("'native'"))
-    # 从旧密钥库导入时指向原密钥（与 credential_secret_id 相同）；新建的连接为 NULL
-    legacy_source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     # URL / 协议 / 模型集合 / Key 变化时加 1；检测结果只在修订号仍一致时写回 last_check
     config_revision: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
@@ -188,7 +181,7 @@ class ModelConnectionModel(Base):
 
 
 class ModelConnectionGrant(Base):
-    """连接授权给哪些实例。导入的旧授权也记在这里（只作追溯，不带来原生模型能力）。"""
+    """连接授权给哪些实例。"""
 
     __tablename__ = "model_connection_grants"
     __table_args__ = (

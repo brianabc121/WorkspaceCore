@@ -5,7 +5,7 @@ import { at, fail, instance, overviewRow, overviewSummary, path } from './agents
 import type { Schema } from '../src/services/api'
 
 // T-0207（web 计划 MC-7）：智能体详情的“主模型”——保存只改目标，不冒充已应用；已有实例只能选已授权的连接；
-// 失败 / 状态待确认 / 待手动分别说明并能重新应用；旧配置的实例不猜连接；解除要确认。
+// 失败 / 状态待确认 / 待手动分别说明并能重新应用；没设置主模型的实例显示“未设置”；解除要确认。
 type View = Schema['ModelBindingView']
 type Binding = Schema['AgentModelBindingOut']
 const a = instance({ id: 'inst-a', name: '开发助手', status: 'online' })
@@ -29,7 +29,7 @@ const binding = (over: Partial<Binding> = {}): Binding => ({
   revoked: false, apply_state: 'pending', last_error_code: null, job_id: 'job-1', version: 1,
   connection_name: '团队多模型中转', applied_connection_name: null, ...over,
 })
-const view = (b: Binding | null, legacy: View['legacy'] = null): View => ({ binding: b, apply_state: b?.apply_state ?? (legacy ? 'legacy_active' : null), legacy })
+const view = (b: Binding | null): View => ({ binding: b, apply_state: b?.apply_state ?? null })
 
 function setup(current: () => View, handler?: (r: Request) => Response | Promise<Response | undefined> | undefined) {
   return mockApi(async r => await handler?.(r) ?? (
@@ -128,11 +128,12 @@ describe('agent primary model', () => {
     expect(within(section).queryByText('已应用', { selector: '.asv-state' })).not.toBeInTheDocument()
   })
 
-  it('shows legacy instances as old configuration without guessing a connection', async () => {
-    setup(() => view(null, { legacy_refs: ['openai_api_key'] }))
+  it('shows an instance without a primary model as not set, with no old-configuration state', async () => {
+    setup(() => view(null))
     const section = await panel()
-    expect(await within(section).findByText('旧配置')).toBeVisible()
-    expect(within(section).getByText(/接入包里的模型引用 openai_api_key/)).toBeVisible()
+    expect(await within(section).findByText('未设置')).toBeVisible()
+    expect(within(section).getByText('还没有设置主模型。')).toBeVisible()
+    expect(within(section).queryByText('旧配置')).not.toBeInTheDocument()
     expect(within(section).queryByText('目标')).not.toBeInTheDocument()
     expect(within(section).getByRole('button', { name: '选择主模型' })).toBeVisible()
   })

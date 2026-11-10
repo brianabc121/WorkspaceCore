@@ -1,17 +1,12 @@
-"""中转站管理：模型连接的增删改查、汇总、Key 更换、模型集合、授权、活动与迁移分类
-（T-0201 / T-0203）。
+"""中转站管理：模型连接的增删改查、汇总、Key 更换、模型集合、授权与活动（T-0201 / T-0209）。
 
 设计与约定：docs/v2/model-connections/、docs/decisions/2026-11-09-model-connections.md。
 
 - 连接的 API Key 存在 agent_secrets / agent_secret_versions
-  （加密用途绑定 secret_id + value_version），
-  新建连接时建一条内部凭据；从旧密钥库导入的连接直接引用原密钥（不复制密文、不换 ID）；
+  （加密用途绑定 secret_id + value_version）：新建连接时建一条内部凭据，密钥库里看不到它；
 - 任何输出都不含 Key 明文、密文、credential_ref 或内部 secret_id；
 - 已配置完整、且有授权或绑定的连接不能改 URL / 协议（复制为新连接再切换）；
-  旧导入项第一次从空补齐例外；
-- 停用会影响实例时先返回影响摘要，确认后才生效；停用后旧取密钥接口、新取密钥接口与 Runner 注入
-  都拒绝这条凭据（见 blocked_secret_ids）；
-- 撤销某实例的授权时，同一事务里撤掉这条凭据对它的旧授权（AgentSecretGrant），分类、迁移不会恢复。
+- 停用会影响实例时先返回影响摘要，确认后才生效；停用后实例取用这条 Key 一律拒绝。
 """
 
 import base64
@@ -39,7 +34,6 @@ from app.models import (
     AgentModelBinding,
     AgentSecret,
     AgentSecretAccess,
-    AgentSecretGrant,
     AgentSecretVersion,
     AuditLog,
     ModelApplyJob,
@@ -60,9 +54,6 @@ from app.schemas.model_connections import (
     GrantInstanceOut,
     GrantsReplace,
     ImpactOut,
-    MigrationClassify,
-    MigrationEntryOut,
-    MigrationEntryPage,
     ModelConnectionCapabilities,
     ModelConnectionCreate,
     ModelConnectionKeyRotate,
@@ -143,7 +134,7 @@ def provider_key(connection_id: uuid.UUID) -> str:
 def secret_ref_id(connection_id: uuid.UUID) -> str:
     """apiKey 的 exec SecretRef id：mc_<连接 ID>。
 
-    与旧密钥库的 ref_id 不会冲突：旧 ref_id 不能以 mc_ 开头。"""
+    与密钥库授权的 ref_id 不会冲突：那边的 ref_id 不能以 mc_ 开头。"""
     return f"mc_{connection_id.hex}"
 
 
@@ -310,23 +301,9 @@ def compute_state(
         and connection.protocol in tuple(protocols)
         and connection.base_url
         and scope_ok
-        and connection.migration_state != "non_model"
     ):
         return "ready"
     return "draft"
-
-
-async def blocked_secret_ids(db: AsyncSession, secret_ids: Iterable[uuid.UUID]) -> set[uuid.UUID]:
-    """被连接托管、且连接已被管理员停用的凭据。旧取密钥接口与 Runner 注入都要拒绝它们。"""
-    ids = list(set(secret_ids))
-    if not ids:
-        return set()
-    rows = await db.scalars(
-        select(ModelConnection.credential_secret_id).where(
-            ModelConnection.credential_secret_id.in_(ids), ModelConnection.enabled.is_(False)
-        )
-    )
-    return set(rows.all())
 
 
 class ModelConnectionService:
@@ -486,8 +463,6 @@ class ModelConnectionService:
             model_scope=connection.model_scope,
             configuration_state=connection.configuration_state,
             enabled=connection.enabled,
-            migration_state=connection.migration_state,
-            legacy_source_id=connection.legacy_source_id,
             model_count=stats.models.get(connection.id, 0),
             model_preview=stats.previews.get(connection.id, []),
             grant_count=stats.grants.get(connection.id, 0),
@@ -538,7 +513,7 @@ class ModelConnectionService:
     async def refresh_state(
         self, connection: ModelConnection, *, credential_ok: bool | None = None
     ) -> None:
-        """重新计算配置完整度；变成 ready 的导入项转为 managed。"""
+        """重新计算配置完整度。"""
         if credential_ok is None:
             credential_ok = connection.configuration_state != "needs_review"
         connection.configuration_state = compute_state(
@@ -547,11 +522,6 @@ class ModelConnectionService:
             credential_ok=credential_ok,
             protocols=self.protocols,
         )
-        if (
-            connection.configuration_state == "ready"
-            and connection.migration_state == "needs_configuration"
-        ):
-            connection.migration_state = "managed"
 
     async def _unverify_models(self, connection_id: uuid.UUID) -> None:
         await self.db.execute(
@@ -645,10 +615,7 @@ class ModelConnectionService:
         enabled: bool | None,
         check_status: str | None,
     ) -> Any:
-        conditions: list[Any] = [
-            ModelConnection.workspace_id == access.workspace.id,
-            ModelConnection.migration_state != "non_model",
-        ]
+        conditions: list[Any] = [ModelConnection.workspace_id == access.workspace.id]
         if q:
             pattern = _like(q.strip())
             conditions.append(
@@ -736,11 +703,8 @@ class ModelConnectionService:
         ).all()
         stats = await self._stats(connections)
         now = _now()
-        total = passed = passed_inference = attention = non_model = 0
+        total = passed = passed_inference = attention = 0
         for c in connections:
-            if c.migration_state == "non_model":
-                non_model += 1
-                continue
             total += 1
             check = stats.checks.get(c.id)
             current = check is not None and check.config_revision == c.config_revision
@@ -754,20 +718,15 @@ class ModelConnectionService:
                 passed += 1
                 if check is not None and check.mode == "inference":
                     passed_inference += 1
-            if (
-                c.configuration_state != "ready"
-                or c.migration_state in ("needs_configuration", "needs_classification")
-                or (current and check is not None and check.status in ("failed", "rate_limited"))
+            if c.configuration_state != "ready" or (
+                current and check is not None and check.status in ("failed", "rate_limited")
             ):
                 attention += 1
         granted = int(
             await self.db.scalar(
                 select(func.count(func.distinct(ModelConnectionGrant.instance_id)))
                 .join(ModelConnection, ModelConnection.id == ModelConnectionGrant.connection_id)
-                .where(
-                    ModelConnectionGrant.workspace_id == access.workspace.id,
-                    ModelConnection.migration_state != "non_model",
-                )
+                .where(ModelConnectionGrant.workspace_id == access.workspace.id)
             )
             or 0
         )
@@ -777,7 +736,6 @@ class ModelConnectionService:
             check_passed_inference=passed_inference,
             needs_attention=attention,
             unique_granted_instances=granted,
-            non_model=non_model,
         )
 
     async def get(self, access: WorkspaceAccess, connection_id: uuid.UUID) -> ModelConnectionOut:
@@ -916,7 +874,7 @@ class ModelConnectionService:
         secret_id = uuid.uuid4()
         connection_id = uuid.uuid4()
         sealed = self._box().seal(body.api_key.get_secret_value(), context=_context(secret_id, 1))
-        # 内部凭据：名字固定由连接 ID 生成，不在旧密钥库里重名
+        # 内部凭据：名字固定由连接 ID 生成，不会与密钥库里的名字重名（密钥库里也看不到它）
         self.db.add(
             AgentSecret(
                 id=secret_id,
@@ -949,7 +907,6 @@ class ModelConnectionService:
             model_scope=body.model_scope,
             configuration_state="draft",
             enabled=False,
-            migration_state="native",
         )
         self.db.add(connection)
         await self.db.flush()
@@ -1055,10 +1012,7 @@ class ModelConnectionService:
         if enable_change is not None and enable_change != connection.enabled:
             if enable_change:
                 await self.refresh_state(connection)
-                if (
-                    connection.configuration_state != "ready"
-                    and connection.legacy_source_id is None
-                ):
+                if connection.configuration_state != "ready":
                     raise ApiError(
                         409, "MODEL_CONNECTION_NOT_READY", "连接还没有配置完整，不能启用"
                     )
@@ -1100,8 +1054,7 @@ class ModelConnectionService:
     async def _guard_endpoint_change(self, connection: ModelConnection) -> None:
         """已配置完整、且有授权或绑定的连接不能改 URL / 协议。
 
-        例外：旧导入项第一次从空补齐 URL / 协议，且没有原生已应用的绑定
-        （只存元数据，不改旧运行时）。"""
+        例外：草稿第一次补齐 URL / 协议（没有地址的连接不能被绑定）。"""
         complete = connection.base_url is not None and connection.protocol is not None
         grants = int(
             await self.db.scalar(
@@ -1137,10 +1090,6 @@ class ModelConnectionService:
         """更换 Key：沿用原有加密与轮换规则（旧值不再下发、不留密文）。不会去服务商撤销旧 Key。"""
         connection = await self.connection(access, connection_id, lock=True)
         self.check_version(connection, body.version)
-        if connection.migration_state == "non_model":
-            raise ApiError(
-                409, "MODEL_CONNECTION_NON_MODEL", "非模型凭据请在“迁移与兼容凭据”里更换"
-            )
         secret = await self.db.get(
             AgentSecret, connection.credential_secret_id, with_for_update=True
         )
@@ -1184,28 +1133,13 @@ class ModelConnectionService:
                 "连接仍有授权、绑定或进行中的应用任务，请先解除",
                 details={"impact": impact.model_dump(mode="json")},
             )
-        legacy_refs = int(
-            await self.db.scalar(
-                select(func.count()).where(
-                    AgentSecretGrant.secret_id == connection.credential_secret_id
-                )
-            )
-            or 0
-        )
-        if legacy_refs:
-            raise ApiError(
-                409,
-                "CONNECTION_IN_USE",
-                "这条凭据仍被旧配置或运行环境引用；请先撤销旧授权，或归类为非模型凭据保留",
-                details={"legacy_grants": legacy_refs},
-            )
         await self.audit.record(
             "model_connection.deleted",
             workspace_ids=[access.workspace.id],
             actor_id=access.user_id,
             resource_type="model_connection",
             resource_id=connection.id,
-            metadata={"name": connection.name, "imported": connection.legacy_source_id is not None},
+            metadata={"name": connection.name},
             client_ip=client_ip,
         )
         secret_id = connection.credential_secret_id
@@ -1406,10 +1340,6 @@ class ModelConnectionService:
     ) -> ModelConnectionOut:
         connection = await self.connection(access, connection_id, lock=True)
         self.check_version(connection, body.version)
-        if connection.migration_state == "non_model":
-            raise ApiError(
-                409, "MODEL_CONNECTION_NON_MODEL", "非模型凭据的授权请在“迁移与兼容凭据”里管理"
-            )
         wanted = set(body.instance_ids)
         if wanted:
             found = set(
@@ -1576,183 +1506,6 @@ class ModelConnectionService:
             ).decode()
         return ConnectionActivityPage(items=page, next_cursor=next_cursor)
 
-    # ---------------------------------------------------------------- 迁移项与分类
-
-    async def migration_entries(
-        self, access: WorkspaceAccess, *, state: str | None, cursor: str | None, limit: int
-    ) -> MigrationEntryPage:
-        key = _cursor_key(access.workspace.id, "migration", state)
-        offset = _decode_cursor(cursor, key)
-        base = [
-            ModelConnection.workspace_id == access.workspace.id,
-            ModelConnection.legacy_source_id.is_not(None),
-        ]
-        conditions = list(base)
-        if state == "needs_review":
-            conditions.append(ModelConnection.configuration_state == "needs_review")
-        elif state:
-            conditions.append(ModelConnection.migration_state == state)
-        total = int(
-            await self.db.scalar(
-                select(func.count()).select_from(ModelConnection).where(*conditions)
-            )
-            or 0
-        )
-        rows = (
-            await self.db.scalars(
-                select(ModelConnection)
-                .where(*conditions)
-                .order_by(ModelConnection.name, ModelConnection.id)
-                .offset(offset)
-                .limit(limit + 1)
-            )
-        ).all()
-        page = list(rows[:limit])
-        outs = await self.outs(page)
-        secrets_ = {
-            s.id: s
-            for s in (
-                await self.db.scalars(
-                    select(AgentSecret).where(
-                        AgentSecret.id.in_([c.credential_secret_id for c in page])
-                    )
-                )
-            ).all()
-        }
-        refs: dict[uuid.UUID, list[str]] = {}
-        for secret_id, ref_id in (
-            await self.db.execute(
-                select(AgentSecretGrant.secret_id, AgentSecretGrant.ref_id).where(
-                    AgentSecretGrant.secret_id.in_(secrets_)
-                )
-            )
-        ).all():
-            refs.setdefault(secret_id, []).append(ref_id)
-        counts: dict[str, int] = {}
-        for migration_state, n in (
-            await self.db.execute(
-                select(ModelConnection.migration_state, func.count())
-                .where(*base)
-                .group_by(ModelConnection.migration_state)
-            )
-        ).all():
-            counts[migration_state] = n
-        counts["needs_review"] = int(
-            await self.db.scalar(
-                select(func.count()).where(
-                    *base, ModelConnection.configuration_state == "needs_review"
-                )
-            )
-            or 0
-        )
-        counts["unmapped"] = int(
-            await self.db.scalar(
-                select(func.count())
-                .select_from(AgentSecret)
-                .where(
-                    AgentSecret.workspace_id == access.workspace.id,
-                    ~select(ModelConnection.id)
-                    .where(ModelConnection.credential_secret_id == AgentSecret.id)
-                    .exists(),
-                )
-            )
-            or 0
-        )
-        items = []
-        for connection, out in zip(page, outs, strict=True):
-            secret = secrets_.get(connection.credential_secret_id)
-            items.append(
-                MigrationEntryOut(
-                    entry_id=connection.id,
-                    connection=out,
-                    legacy_name=secret.name if secret else connection.name,
-                    legacy_kind=(secret.kind if secret else "generic"),
-                    legacy_grant_refs=sorted(refs.get(connection.credential_secret_id, [])),
-                )
-            )
-        return MigrationEntryPage(
-            items=items,
-            next_cursor=_encode_cursor(offset + limit, key) if len(rows) > limit else None,
-            total=total,
-            counts=counts,
-        )
-
-    async def classify(
-        self,
-        access: WorkspaceAccess,
-        entry_id: uuid.UUID,
-        body: MigrationClassify,
-        *,
-        client_ip: str,
-    ) -> MigrationEntryOut:
-        """model ↔ non_model：保留同一个映射、同一条凭据与原授权；不新建、不恢复已撤销的访问。"""
-        connection = await self.connection(access, entry_id, lock=True)
-        if connection.legacy_source_id is None:
-            raise ApiError(404, "NOT_FOUND", "导入项不存在")
-        self.check_version(connection, body.version)
-        if body.purpose == "non_model":
-            if await self._bound_instances(connection.id):
-                raise ApiError(
-                    409,
-                    "MODEL_BINDING_CONFLICT",
-                    "这个连接已有智能体的主模型绑定，请先切换或解除后再归类为非模型凭据",
-                )
-            busy = int(
-                await self.db.scalar(
-                    select(func.count())
-                    .select_from(ModelApplyJob)
-                    .join(
-                        AgentModelBinding,
-                        AgentModelBinding.instance_id == ModelApplyJob.instance_id,
-                    )
-                    .where(
-                        ModelApplyJob.state.in_(("queued", "running")),
-                        AgentModelBinding.connection_id == connection.id,
-                    )
-                )
-                or 0
-            )
-            if busy:
-                raise ApiError(409, "MODEL_BINDING_CONFLICT", "这个连接还有进行中的应用任务")
-            connection.migration_state = "non_model"
-            connection.configuration_state = (
-                "needs_review" if connection.configuration_state == "needs_review" else "draft"
-            )
-        else:
-            connection.migration_state = "needs_configuration"
-            await self.refresh_state(connection)
-        connection.version += 1
-        secret = await self.db.get(AgentSecret, connection.credential_secret_id)
-        if secret is not None:
-            # 旧密钥接口用 secret.version 做并发检查：一起加 1，界面上的冲突能被察觉
-            secret.version += 1
-        await self.audit.record(
-            "model_connection.classified",
-            workspace_ids=[access.workspace.id],
-            actor_id=access.user_id,
-            resource_type="model_connection",
-            resource_id=connection.id,
-            metadata={"purpose": body.purpose},
-            client_ip=client_ip,
-        )
-        await self.db.commit()
-        # 直接组装这一项（不翻导入项列表：超过一页时会找不到它、把原有授权显示成空）
-        out = await self.out(connection)
-        refs = (
-            await self.db.scalars(
-                select(AgentSecretGrant.ref_id).where(
-                    AgentSecretGrant.secret_id == connection.credential_secret_id
-                )
-            )
-        ).all()
-        return MigrationEntryOut(
-            entry_id=connection.id,
-            connection=out,
-            legacy_name=secret.name if secret else connection.name,
-            legacy_kind=(secret.kind if secret else "generic"),
-            legacy_grant_refs=sorted(refs),
-        )
-
 
 def model_out(row: ModelConnectionModel) -> ConnectionModelOut:
     return ConnectionModelOut(
@@ -1775,7 +1528,7 @@ def _context(secret_id: uuid.UUID, value_version: int) -> str:
 async def rotate_secret_value(
     db: AsyncSession, box: CredentialBox, secret: AgentSecret, value: str
 ) -> int:
-    """与旧密钥库的轮换同一套规则：新版本加 1，旧版本的密文立即清除（不能恢复）。"""
+    """与密钥库的轮换同一套规则：新版本加 1，旧版本的密文立即清除（不能恢复）。"""
     now = _now()
     new_version = secret.current_version + 1
     sealed = box.seal(value, context=_context(secret.id, new_version))
@@ -1801,7 +1554,7 @@ async def rotate_secret_value(
 async def revoke_instance_access(
     db: AsyncSession, *, connection: ModelConnection, instance_ids: Iterable[uuid.UUID]
 ) -> None:
-    """撤销实例对这个连接的授权：连接授权与这条凭据对它的旧授权（含 Runner 的引用）一起撤掉。"""
+    """撤销实例对这个连接的授权。"""
     ids = list(instance_ids)
     if not ids:
         return
@@ -1809,11 +1562,5 @@ async def revoke_instance_access(
         delete(ModelConnectionGrant).where(
             ModelConnectionGrant.connection_id == connection.id,
             ModelConnectionGrant.instance_id.in_(ids),
-        )
-    )
-    await db.execute(
-        delete(AgentSecretGrant).where(
-            AgentSecretGrant.secret_id == connection.credential_secret_id,
-            AgentSecretGrant.instance_id.in_(ids),
         )
     )
