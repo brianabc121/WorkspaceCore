@@ -165,7 +165,8 @@ export async function apply(target, { run = cli, read = () => readFileSync(confi
 
 export async function main() {
   const got = await request("GET", "/v1/model-config");
-  if (got.status === 409) return "no_model_binding";
+  // 没有绑定（no_binding）或目标连接不可用（connection_unavailable，例如被停用）：保持现有配置
+  if (got.status === 409) return got.data?.error?.details?.reason ?? "no_model_binding";
   if (got.status !== 200 || !got.data) throw new Error(`workspace returned ${got.status}`);
   const target = got.data;
   const local = readState();

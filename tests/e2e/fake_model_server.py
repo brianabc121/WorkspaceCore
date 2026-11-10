@@ -110,7 +110,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         result = decide(body)
         messages = body.get("messages", [])
-        record = {"at": time.time(), "auth": self.headers.get("Authorization"),
+        record = {"at": time.time(), "auth": self.headers.get("Authorization"), "model": body.get("model"),
                   "last_user": _since_user(messages)[0][-500:], "result": result,
                   "roles": [m.get("role") for m in messages[-6:]],
                   "count": len(messages),

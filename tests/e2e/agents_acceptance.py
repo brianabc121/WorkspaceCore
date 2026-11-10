@@ -1919,11 +1919,126 @@ def scenario_26(c: Ctx) -> None:
         site.teardown()
 
 
+def scenario_27(c: Ctx) -> None:
+    """中转站管理（T-0205）：连接 + 主模型经 model-config.mjs 应用到真实 OpenClaw；切换、换 Key、解除，同机两个实例互不影响。
+
+    两条中转连接都指向假模型服务（不同的 Key），按 Authorization 与请求里的 model 判断实际用的是哪条连接、哪个模型。
+    model-config.mjs 是接入包里每分钟运行的定时任务，这里直接执行一次；对话用 `openclaw agent` 在容器里跑一轮。"""
+    base = f"http://fake-model:{FAKE_MODEL_PORT}/v1"
+    ka, kb, kb2 = ("sk-mca-" + uuid.uuid4().hex, "sk-mcb-" + uuid.uuid4().hex, "sk-mcb2-" + uuid.uuid4().hex)
+
+    def connection(name: str, key: str, models: list[str]) -> dict[str, Any]:
+        result: dict[str, Any] = c.owner.call("POST", "/api/v1/model-connections", {
+            "name": name, "connection_type": "relay", "protocol": "openai_compatible", "base_url": base,
+            "api_key": key, "models": [{"model_id": m} for m in models]})
+        return result
+
+    def grant(conn: dict[str, Any], ids: list[str]) -> None:
+        current = c.owner.call("GET", f"/api/v1/model-connections/{conn['id']}")
+        c.owner.call("PUT", f"/api/v1/model-connections/{conn['id']}/grants", {"version": current["version"], "instance_ids": ids})
+
+    def binding(inst: Instance) -> dict[str, Any] | None:
+        result: dict[str, Any] | None = c.owner.call("GET", f"/api/v1/agents/instances/{inst.id}/model-binding")["binding"]
+        return result
+
+    def bind(inst: Instance, conn: dict[str, Any], model: str) -> dict[str, Any]:
+        current = binding(inst)
+        result: dict[str, Any] = c.owner.call("PUT", f"/api/v1/agents/instances/{inst.id}/model-binding", {
+            "version": current["version"] if current else None, "connection_id": conn["id"], "model_id": model})
+        return result
+
+    def apply(inst: Instance) -> str:
+        out = inst.exec("node", "/opt/myworkspace/bin/model-config.mjs", timeout=300, check=False)
+        return (out.stdout.strip().splitlines() or [""])[-1] + (f" / {out.stderr.strip()[-300:]}" if out.returncode else "")
+
+    def turn(inst: Instance, text: str) -> list[dict[str, Any]]:
+        since = time.time()
+        out = inst.exec("node", "openclaw.mjs", "agent", "--agent", "main", "-m", text, "--json", timeout=300, check=False)
+        records = [r for r in c.model.records() if r["at"] >= since and text in (r.get("last_user") or "")]
+        if not records:
+            print(f"场景 27：{inst.label} 的这一轮没有请求到假模型：{out.stdout[-400:]} {out.stderr[-400:]}", file=sys.stderr)
+        return records
+
+    def used(records: list[dict[str, Any]]) -> set[tuple[str, str]]:
+        return {(str(r.get("auth")), str(r.get("model"))) for r in records}
+
+    def config_text(inst: Instance) -> str:
+        return (inst.dir / "state" / "openclaw.json").read_text()
+
+    conn_a = connection("验收中转 A", ka, ["mc-model-a1", "mc-model-a2"])
+    conn_b = connection("验收中转 B", kb, ["mc-model-b"])
+    grant(conn_a, [c.a.id, c.b.id])
+    grant(conn_b, [c.a.id])
+
+    # 1. 甲、乙绑定同一条连接的不同模型：保存后是“待应用”，实例应用并回报后才是“已应用”
+    first = bind(c.a, conn_a, "mc-model-a1")
+    bind(c.b, conn_a, "mc-model-a2")
+    c.check("场景 27：保存主模型后是待应用，没有已应用快照", first["apply_state"] == "pending" and first["applied_revision"] is None,
+            first["apply_state"])
+    applied_a, applied_b = apply(c.a), apply(c.b)
+    state_a, state_b = binding(c.a), binding(c.b)
+    c.check("场景 27：model-config.mjs 用 config patch 应用并回报，甲、乙都变成已应用",
+            applied_a == "applied" and applied_b == "applied" and state_a is not None and state_b is not None
+            and state_a["apply_state"] == "applied" and state_a["applied_connection_id"] == conn_a["id"]
+            and state_b["applied_model_id"] == "mc-model-a2", f"{applied_a} | {applied_b}")
+    text_a = config_text(c.a)
+    c.check("场景 27：OpenClaw 配置里是受管 provider（exec SecretRef），没有 Key 明文",
+            ka not in text_a and f"mc_{uuid.UUID(conn_a['id']).hex}" in text_a and '"mwc' in text_a)
+    calls_a, calls_b = turn(c.a, "模型连接甲一"), turn(c.b, "模型连接乙一")
+    c.check("场景 27：甲、乙各自按绑定的模型请求连接 A（Key 由取密钥程序向工作台取）",
+            used(calls_a) == {(f"Bearer {ka}", "mc-model-a1")} and used(calls_b) == {(f"Bearer {ka}", "mc-model-a2")},
+            json.dumps([sorted(used(calls_a)), sorted(used(calls_b))]))
+
+    # 2. 甲切换到连接 B：确认前已应用仍是 A；迟到的旧修订号回报被拒绝；乙的配置不变
+    before_b = config_text(c.b)
+    switched = bind(c.a, conn_b, "mc-model-b")
+    api, token = c.a.env("MYWS_AGENT_API"), c.a.env("MYWS_INSTANCE_TOKEN")
+    late, _ = c.a.request("POST", f"{api}/v1/model-config/applied", token=token,
+                          body={"binding_version": first["version"], "desired_revision": first["desired_revision"], "result": "applied"})
+    c.check("场景 27：切换后确认前已应用仍是连接 A；迟到的旧回报 409、不改状态",
+            switched["applied_connection_id"] == conn_a["id"] and switched["apply_state"] == "pending" and late == 409
+            and (binding(c.a) or {}).get("applied_revision") == first["desired_revision"], f"late={late}")
+    applied = apply(c.a)
+    calls_a = turn(c.a, "模型连接甲二")
+    c.check("场景 27：甲应用后改用连接 B 的模型和 Key，不再用 A",
+            applied == "applied" and used(calls_a) == {(f"Bearer {kb}", "mc-model-b")}, f"{applied} {sorted(used(calls_a))}")
+    calls_b = turn(c.b, "模型连接乙二")
+    c.check("场景 27：同一台服务器上的乙没有重启、配置不变，仍用连接 A",
+            config_text(c.b) == before_b and used(calls_b) == {(f"Bearer {ka}", "mc-model-a2")}, json.dumps(sorted(used(calls_b))))
+
+    # 3. 更换连接 B 的 Key：绑定重新应用（secrets reload），下一轮就用新 Key
+    current = c.owner.call("GET", f"/api/v1/model-connections/{conn_b['id']}")
+    c.owner.call("POST", f"/api/v1/model-connections/{conn_b['id']}/rotate-key", {"version": current["version"], "api_key": kb2})
+    pending = binding(c.a)
+    applied = apply(c.a)
+    calls_a = turn(c.a, "模型连接甲三")
+    c.check("场景 27：更换 Key 后甲重新应用，下一轮用新 Key、旧 Key 不再使用",
+            (pending or {}).get("apply_state") == "pending" and applied == "applied"
+            and used(calls_a) == {(f"Bearer {kb2}", "mc-model-b")}, f"{applied} {sorted(used(calls_a))}")
+
+    # 4. 解除乙的绑定：立即不能再取连接 A 的 Key；应用后移除受管 provider 与主模型
+    current_b = binding(c.b) or {}
+    c.owner.call("DELETE", f"/api/v1/agents/instances/{c.b.id}/model-binding?version={current_b.get('version')}")
+    api_b, token_b = c.b.env("MYWS_AGENT_API"), c.b.env("MYWS_INSTANCE_TOKEN")
+    status, text = c.b.request("POST", f"{api_b}/v1/model-credentials/resolve", token=token_b,
+                               body={"ids": [f"mc_{uuid.UUID(conn_a['id']).hex}"]})
+    applied = apply(c.b)
+    removed = binding(c.b) or {}
+    text_b = config_text(c.b)
+    c.check("场景 27：解除后乙立即取不到 Key；应用后受管 provider 与主模型都移除，其他配置保留",
+            status == 200 and '"values": {}' in text.replace('"values":{}', '"values": {}') and applied == "applied"
+            and removed.get("applied_connection_id") is None and '"mwc' not in text_b and '"mcp"' in text_b
+            and '"openclaw-channel"' in text_b, f"{status} {applied}")
+    # 乙恢复成验收用的旧 fake provider（后面的场景不依赖模型连接）
+    c.b.exec("node", "openclaw.mjs", "config", "set", "agents.defaults.model.primary", "fake/fake-model", timeout=120, check=False)
+
+
 SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "2": scenario_2, "3": scenario_3, "4": scenario_4, "5": scenario_5, "7": scenario_7, "8": scenario_8,
     "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "15": scenario_15,
     "16": scenario_16, "17": scenario_17, "18": scenario_18, "19": scenario_19, "20": scenario_20, "21": scenario_21,
-    "22": scenario_22, "23": scenario_23, "25": scenario_25, "24": scenario_24, "26": scenario_26, "6": scenario_6,
+    "22": scenario_22, "23": scenario_23, "25": scenario_25, "24": scenario_24, "26": scenario_26, "27": scenario_27,
+    "6": scenario_6,
 }
 
 

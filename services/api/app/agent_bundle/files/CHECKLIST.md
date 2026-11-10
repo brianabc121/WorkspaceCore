@@ -90,8 +90,8 @@
       网关热加载（不用重启），然后 `secrets reload`，最后把结果报回工作台。MCP、IM 渠道、工具限制和你自己加的 provider 都不动。
       没配这一行时，实例页的主模型一直显示“待应用 / 未知”（不会显示已应用）：
       `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/model-config.mjs`
-      手动检查：`docker compose exec -T openclaw node /opt/myworkspace/bin/model-config.mjs` 输出 `applied`、`unchanged`
-      或 `no_model_binding` 是正常的；`failed:<原因>` 时按原因处理后在实例页点“重新应用”。
+      手动检查：`docker compose exec -T openclaw node /opt/myworkspace/bin/model-config.mjs` 输出 `applied`、`unchanged`、
+      `no_binding`（还没设置主模型）或 `connection_unavailable`（连接被停用）都是正常的；`failed:<原因>` 时按原因处理后在实例页点“重新应用”。
       当前生效的主模型：`docker compose exec -T openclaw node openclaw.mjs config get agents.defaults.model --json`。
 - [ ] 每晚复盘（知识库，T-0100）：OpenClaw 启动后在本目录运行一次 `sh setup-reflection.sh`。
       它用 `openclaw automations add` 建 OpenClaw 自己的定时任务（默认每天 22:00，提示词在 `reflection-prompt.md`）；
