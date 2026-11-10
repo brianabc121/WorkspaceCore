@@ -3259,7 +3259,7 @@ export interface paths {
         };
         /**
          * 旧密钥库导入项（owner）
-         * @description 待完善 / 待归类 / 已纳管 / 非模型凭据 / 需要复核（Key 不可读）。不含 Key。导入用命令 app.commands.migrate_model_connections 按工作空间执行。
+         * @description 待完善 / 待归类 / 已纳管 / 非模型凭据 / 需要复核（Key 不可读）。不含 Key。导入在页面上执行（POST migration/run），也可以用命令 app.commands.migrate_model_connections。
          */
         get: operations["list_migration_entries"];
         put?: never;
@@ -3284,6 +3284,26 @@ export interface paths {
          * @description 保留同一个映射、同一条凭据与原授权，不新建、不恢复已撤销的访问、不改启停；有原生绑定或进行中的应用任务时不能改判为非模型（409 MODEL_BINDING_CONFLICT）。
          */
         post: operations["classify_migration_entry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-connections/migration/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 在页面上导入旧密钥库（owner）
+         * @description 与命令 app.commands.migrate_model_connections 相同：只处理当前工作空间；dry_run 只读预览，apply 按批导入（每批一个事务，可以重复执行，已导入的不重复、撤销过的授权不恢复），report 只读对账。不复制密文、不换 ID、不建模型或绑定、不访问外部服务；只返回计数与错误类别。密钥库没有配置加密密钥时 503。
+         */
+        post: operations["run_model_connection_migration"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10534,6 +10554,29 @@ export interface components {
              */
             views: components["schemas"]["MetricViewOut"][];
         };
+        /** MigrationBatchOut */
+        MigrationBatchOut: {
+            /** Already Mapped */
+            already_mapped: number;
+            /** Batch */
+            batch: number;
+            /**
+             * Error
+             * @description 错误类别（不含异常原文）
+             */
+            error: string | null;
+            /** Failed */
+            failed: number;
+            /** Mapped */
+            mapped: number;
+            /** Scanned */
+            scanned: number;
+            /**
+             * Status
+             * @description committed / rolled_back / read_only
+             */
+            status: string;
+        };
         /** MigrationClassify */
         MigrationClassify: {
             /**
@@ -10587,6 +10630,55 @@ export interface components {
             next_cursor?: string | null;
             /** Total */
             total: number;
+        };
+        /**
+         * MigrationRun
+         * @description 在页面上执行旧密钥导入（与命令 app.commands.migrate_model_connections 相同的逻辑）。
+         */
+        MigrationRun: {
+            /**
+             * Mode
+             * @description dry_run 只读预览；apply 按批导入（可以重复执行）；report 只读对账
+             * @enum {string}
+             */
+            mode: "dry_run" | "apply" | "report";
+        };
+        /**
+         * MigrationRunOut
+         * @description 只有计数与错误类别，不含 Key、密文或名称。
+         */
+        MigrationRunOut: {
+            /** Already Mapped */
+            already_mapped: number;
+            /** Batches */
+            batches: components["schemas"]["MigrationBatchOut"][];
+            /** Failed */
+            failed: number;
+            /**
+             * Mapped
+             * @description 本次新建（dry_run 是将新建）的映射数
+             */
+            mapped: number;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "dry_run" | "apply" | "report";
+            /** Needs Classification */
+            needs_classification: number;
+            /** Needs Configuration */
+            needs_configuration: number;
+            /**
+             * Reconciliation
+             * @description report 才有：映射、授权、绑定、取用记录的对账计数
+             */
+            reconciliation?: {
+                [key: string]: unknown;
+            } | null;
+            /** Scanned */
+            scanned: number;
+            /** Unreadable */
+            unreadable: number;
         };
         /**
          * MobilePosition
@@ -30726,6 +30818,89 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MigrationEntryOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_model_connection_migration: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MigrationRun"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MigrationRunOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

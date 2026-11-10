@@ -10,7 +10,7 @@ docs/decisions/2026-11-09-model-connections.md：
 """
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -360,6 +360,41 @@ class ConnectionCheckRequest(_Strict):
 class GrantsReplace(_Strict):
     version: Version
     instance_ids: Annotated[list[UUID], Field(max_length=500)]
+
+
+class MigrationRun(_Strict):
+    """在页面上执行旧密钥导入（与命令 app.commands.migrate_model_connections 相同的逻辑）。"""
+
+    mode: Literal["dry_run", "apply", "report"] = Field(
+        description="dry_run 只读预览；apply 按批导入（可以重复执行）；report 只读对账"
+    )
+
+
+class MigrationBatchOut(BaseModel):
+    batch: int
+    scanned: int
+    mapped: int
+    already_mapped: int
+    failed: int
+    status: str = Field(description="committed / rolled_back / read_only")
+    error: str | None = Field(description="错误类别（不含异常原文）")
+
+
+class MigrationRunOut(BaseModel):
+    """只有计数与错误类别，不含 Key、密文或名称。"""
+
+    mode: Literal["dry_run", "apply", "report"]
+    scanned: int
+    mapped: int = Field(description="本次新建（dry_run 是将新建）的映射数")
+    already_mapped: int
+    needs_configuration: int
+    needs_classification: int
+    unreadable: int
+    failed: int
+    batches: list[MigrationBatchOut]
+    reconciliation: dict[str, Any] | None = Field(
+        default=None, description="report 才有：映射、授权、绑定、取用记录的对账计数"
+    )
 
 
 class MigrationClassify(_Strict):

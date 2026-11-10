@@ -22,6 +22,9 @@ from app.api.deps import (
     workspace_owner,
 )
 from app.core.config import Settings
+from app.core.errors import ApiError
+from app.domain.credentials import CredentialBox, CredentialError
+from app.domain.model_connection_migration import migrate_workspace
 from app.domain.model_connections import PAGE_DEFAULT, PAGE_MAX, ModelConnectionService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.common import error_responses
@@ -33,6 +36,8 @@ from app.schemas.model_connections import (
     MigrationClassify,
     MigrationEntryOut,
     MigrationEntryPage,
+    MigrationRun,
+    MigrationRunOut,
     ModelConnectionCapabilities,
     ModelConnectionCreate,
     ModelConnectionKeyRotate,
@@ -140,7 +145,7 @@ async def get_model_connection_summary(access: Owner, service: Service) -> Model
     "/migration/entries",
     summary="旧密钥库导入项（owner）",
     description="待完善 / 待归类 / 已纳管 / 非模型凭据 / 需要复核（Key 不可读）。不含 Key。"
-    "导入用命令 app.commands.migrate_model_connections 按工作空间执行。",
+    "导入在页面上执行（POST migration/run），也可以用命令 app.commands.migrate_model_connections。",
     responses=_read_errors,
 )
 async def list_migration_entries(
@@ -154,6 +159,31 @@ async def list_migration_entries(
     limit: Limit = PAGE_DEFAULT,
 ) -> MigrationEntryPage:
     return await service.migration_entries(access, state=state, cursor=cursor, limit=limit)
+
+
+@router.post(
+    "/migration/run",
+    summary="在页面上导入旧密钥库（owner）",
+    description="与命令 app.commands.migrate_model_connections 相同：只处理当前工作空间；"
+    "dry_run 只读预览，apply 按批导入（每批一个事务，可以重复执行，"
+    "已导入的不重复、撤销过的授权不恢复），"
+    "report 只读对账。不复制密文、不换 ID、不建模型或绑定、不访问外部服务；只返回计数与错误类别。"
+    "密钥库没有配置加密密钥时 503。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def run_model_connection_migration(
+    access: Owner,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    body: MigrationRun,
+) -> MigrationRunOut:
+    try:
+        box = CredentialBox.from_settings(settings)
+    except CredentialError as error:
+        raise ApiError(503, "EXTERNAL_UNAVAILABLE", "密钥库未配置加密密钥") from error
+    report = await migrate_workspace(db, settings, box, access.workspace.id, mode=body.mode)
+    return MigrationRunOut.model_validate(report.as_dict())
 
 
 @router.post(

@@ -13742,6 +13742,58 @@
         "title": "MetricsOut",
         "type": "object"
       },
+      "MigrationBatchOut": {
+        "properties": {
+          "already_mapped": {
+            "title": "Already Mapped",
+            "type": "integer"
+          },
+          "batch": {
+            "title": "Batch",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "错误类别（不含异常原文）",
+            "title": "Error"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "mapped": {
+            "title": "Mapped",
+            "type": "integer"
+          },
+          "scanned": {
+            "title": "Scanned",
+            "type": "integer"
+          },
+          "status": {
+            "description": "committed / rolled_back / read_only",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "batch",
+          "scanned",
+          "mapped",
+          "already_mapped",
+          "failed",
+          "status",
+          "error"
+        ],
+        "title": "MigrationBatchOut",
+        "type": "object"
+      },
       "MigrationClassify": {
         "additionalProperties": false,
         "properties": {
@@ -13851,6 +13903,103 @@
           "counts"
         ],
         "title": "MigrationEntryPage",
+        "type": "object"
+      },
+      "MigrationRun": {
+        "additionalProperties": false,
+        "description": "在页面上执行旧密钥导入（与命令 app.commands.migrate_model_connections 相同的逻辑）。",
+        "properties": {
+          "mode": {
+            "description": "dry_run 只读预览；apply 按批导入（可以重复执行）；report 只读对账",
+            "enum": [
+              "dry_run",
+              "apply",
+              "report"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "MigrationRun",
+        "type": "object"
+      },
+      "MigrationRunOut": {
+        "description": "只有计数与错误类别，不含 Key、密文或名称。",
+        "properties": {
+          "already_mapped": {
+            "title": "Already Mapped",
+            "type": "integer"
+          },
+          "batches": {
+            "items": {
+              "$ref": "#/components/schemas/MigrationBatchOut"
+            },
+            "title": "Batches",
+            "type": "array"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "mapped": {
+            "description": "本次新建（dry_run 是将新建）的映射数",
+            "title": "Mapped",
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "dry_run",
+              "apply",
+              "report"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "needs_classification": {
+            "title": "Needs Classification",
+            "type": "integer"
+          },
+          "needs_configuration": {
+            "title": "Needs Configuration",
+            "type": "integer"
+          },
+          "reconciliation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "report 才有：映射、授权、绑定、取用记录的对账计数",
+            "title": "Reconciliation"
+          },
+          "scanned": {
+            "title": "Scanned",
+            "type": "integer"
+          },
+          "unreadable": {
+            "title": "Unreadable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mode",
+          "scanned",
+          "mapped",
+          "already_mapped",
+          "needs_configuration",
+          "needs_classification",
+          "unreadable",
+          "failed",
+          "batches"
+        ],
+        "title": "MigrationRunOut",
         "type": "object"
       },
       "MobilePosition": {
@@ -51947,7 +52096,7 @@
     },
     "/api/v1/model-connections/migration/entries": {
       "get": {
-        "description": "待完善 / 待归类 / 已纳管 / 非模型凭据 / 需要复核（Key 不可读）。不含 Key。导入用命令 app.commands.migrate_model_connections 按工作空间执行。",
+        "description": "待完善 / 待归类 / 已纳管 / 非模型凭据 / 需要复核（Key 不可读）。不含 Key。导入在页面上执行（POST migration/run），也可以用命令 app.commands.migrate_model_connections。",
         "operationId": "list_migration_entries",
         "parameters": [
           {
@@ -52214,6 +52363,135 @@
           }
         ],
         "summary": "把导入项归类为模型连接或非模型凭据（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/model-connections/migration/run": {
+      "post": {
+        "description": "与命令 app.commands.migrate_model_connections 相同：只处理当前工作空间；dry_run 只读预览，apply 按批导入（每批一个事务，可以重复执行，已导入的不重复、撤销过的授权不恢复），report 只读对账。不复制密文、不换 ID、不建模型或绑定、不访问外部服务；只返回计数与错误类别。密钥库没有配置加密密钥时 503。",
+        "operationId": "run_model_connection_migration",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MigrationRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "在页面上导入旧密钥库（owner）",
         "tags": [
           "model-connections"
         ]

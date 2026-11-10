@@ -1257,3 +1257,44 @@ async def test_imported_draft_with_legacy_grants_can_complete_endpoint(env: Env)
         headers=env.headers(write=True),
     )
     assert blocked.status_code == 409 and error_code(blocked) == "MANAGED_BY_MODEL_CONNECTION"
+
+
+async def test_owner_runs_the_import_from_the_page(env: Env) -> None:
+    """页面上的“导入旧密钥”（POST migration/run）：只处理当前工作空间，预览不写，
+    导入可重复，只回计数。"""
+    model = await add_secret(env, "old-openai", value="sk-page-import-" + secrets.token_hex(6))
+    await add_secret(env, "old-token", kind="api_token")
+
+    async def run_mode(mode: str) -> dict[str, Any]:
+        response = await env.client.post(
+            f"{MC}/migration/run", json={"mode": mode}, headers=env.headers(write=True)
+        )
+        assert response.status_code == 200, response.text
+        assert "sk-page-import" not in response.text and "old-openai" not in response.text
+        data: dict[str, Any] = response.json()
+        return data
+
+    preview = await run_mode("dry_run")
+    assert (preview["scanned"], preview["mapped"], preview["already_mapped"]) == (2, 2, 0)
+    assert (preview["needs_configuration"], preview["needs_classification"]) == (1, 1)
+    assert await mappings(env) == {}
+    applied = await run_mode("apply")
+    assert (applied["mapped"], applied["failed"]) == (2, 0)
+    assert {b["status"] for b in applied["batches"]} == {"committed"}
+    again = await run_mode("apply")
+    assert (again["mapped"], again["already_mapped"]) == (0, 2)
+    report = await run_mode("report")
+    assert report["reconciliation"] is not None and report["reconciliation"]["unmapped"] == 0
+    assert str(model["id"]) in {str(k) for k in (await mappings(env))}
+    # 页面上的导入项计数随之更新
+    entries = await env.client.get(f"{MC}/migration/entries", headers=env.headers())
+    assert entries.status_code == 200 and entries.json()["total"] == 2
+    # 只有 owner；没有 CSRF 令牌的请求被拒绝
+    no_csrf = await env.client.post(
+        f"{MC}/migration/run", json={"mode": "apply"}, headers=env.headers()
+    )
+    assert no_csrf.status_code == 403
+    invalid = await env.client.post(
+        f"{MC}/migration/run", json={"mode": "all"}, headers=env.headers(write=True)
+    )
+    assert invalid.status_code == 422
