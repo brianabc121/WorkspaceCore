@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import contextlib
 import json
 import uuid
 from collections.abc import AsyncIterator
@@ -314,19 +315,30 @@ async def open_stream(space: Space, **headers: str) -> httpx.Response:
 
 
 async def test_stream_pushes_invalidations_after_connecting(space: Space) -> None:
-    async def publish_later() -> None:
-        # 等连接真正开始推送（已占用一个连接名额）后再写入，事件一定在它的起点之后
+    done = asyncio.Event()
+
+    async def publish_until_done() -> None:
+        # 连接开始推送（已占用一个连接名额）后，每 0.2 秒写一条，直到这次请求结束。
+        # 起点（resume_point）在占用名额之后才确定：只写一次、固定等一会儿再写，
+        # 在繁忙的 CI 机器上会落在起点之前或推送窗口之后（T-0209 的 CI 里出现过）
         limiter = space.app.state.stream_limiter
         for _ in range(100):
             if limiter._counts:
                 break
             await asyncio.sleep(0.02)
-        await asyncio.sleep(0.3)  # 占用名额之后才确定起点（resume_point）
-        await space.notify_admins()
+        sent = 0
+        while not done.is_set():
+            await space.notify_admins(key=f"k{sent}")
+            sent += 1
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(done.wait(), 0.2)
 
-    publisher = asyncio.create_task(publish_later())
-    response = await open_stream(space)
-    await publisher
+    publisher = asyncio.create_task(publish_until_done())
+    try:
+        response = await open_stream(space)
+    finally:
+        done.set()
+        await publisher
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     pushed = parse_sse(response.text)
