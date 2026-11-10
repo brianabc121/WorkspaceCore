@@ -58,7 +58,7 @@ async function remove() {
 <template>
   <section class="agent-section mc-binding" aria-label="主模型">
     <div class="section-heading">
-      <h3>主模型 <span class="asv-state" :class="`tone-${status.tone}`">{{ status.label }}</span></h3>
+      <h3>主模型 <span v-if="view.isSuccess.value" class="asv-state" :class="`tone-${status.tone}`">{{ status.label }}</span></h3>
       <RouterLink class="asv-go" to="/settings/model-connections">中转站管理<ArrowRight aria-hidden="true" /></RouterLink>
     </div>
     <p v-if="view.isPending.value" role="status">正在读取主模型…</p>

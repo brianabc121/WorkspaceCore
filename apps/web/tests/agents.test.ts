@@ -120,7 +120,7 @@ describe('openclaw instances', () => {
   it('edits secret grants and refuses invalid ref ids', async () => {
     const requests = setup(r => path(r).endsWith('/secret-grants') ? Response.json(instance()) : undefined)
     await openApp('/agents?instance=inst-a')
-    const grants = within(await screen.findByRole('article', { name: '实例：alpha' })).getByRole('region', { name: '密钥授权' })
+    const grants = within(await screen.findByRole('article', { name: '实例：alpha' })).getByRole('region', { name: '高级凭据授权' })
     await fireEvent.click(within(grants).getByRole('button', { name: '编辑授权' }))
     await fireEvent.click(within(grants).getByRole('button', { name: '添加授权' }))
     const refs = within(grants).getAllByLabelText('ref_id')

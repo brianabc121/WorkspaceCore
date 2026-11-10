@@ -138,7 +138,7 @@ function mail(instance: Schema['AgentInstanceOut'], body: Omit<Schema['AgentMail
   void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/mail', { params: { header, path: path(instance) }, body: { ...body, version: instance.version } }), '邮件权限已保存')
 }
 function grants(instance: Schema['AgentInstanceOut'], list: Schema['SecretGrantIn'][]) {
-  void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/secret-grants', { params: { header, path: path(instance) }, body: { grants: list, version: instance.version } }), '密钥授权已保存')
+  void act(() => auth.api.PUT('/api/v1/agents/instances/{instance_id}/secret-grants', { params: { header, path: path(instance) }, body: { grants: list, version: instance.version } }), '凭据授权已保存')
 }
 </script>
 

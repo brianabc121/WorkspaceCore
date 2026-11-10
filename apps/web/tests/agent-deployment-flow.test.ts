@@ -22,6 +22,18 @@ const installJob = (status: Schema['AgentSshJobOut']['status'], over: Partial<Sc
 })
 const fresh = (over: Partial<Schema['AgentInstanceOut']> = {}) => instance({ id: 'inst-n', name: '项目助手', network_mode: 'public', status: 'pending', ...over })
 
+// 主模型（T-0207）：部署必须选中转站管理里的一条连接和它的一个模型
+const OPTION: Schema['PickerConnectionOut'] = { id: 'conn-1', name: '团队多模型中转', connection_type: 'relay', protocol: 'openai_compatible', base_url: 'https://gateway.example.com/v1', model_count: 1, granted: false }
+const MODEL: Schema['ConnectionModelOut'] = { id: 'm-1', model_id: 'gpt-4.1', display_name: 'gpt-4.1', source: 'manual', availability: 'listed', last_seen_at: null, version: 1 }
+async function pickModel(form: HTMLElement) {
+  const connection = await within(form).findByLabelText('模型连接 *') as HTMLSelectElement
+  await vi.waitFor(() => expect([...connection.options].some(o => o.value === 'conn-1')).toBe(true))
+  await fireEvent.update(connection, 'conn-1')
+  const model = await within(form).findByLabelText('主模型 *') as HTMLSelectElement
+  await vi.waitFor(() => expect([...model.options].some(o => o.value === 'gpt-4.1')).toBe(true))
+  await fireEvent.update(model, 'gpt-4.1')
+}
+
 function setup(handler?: (r: Request) => Response | Promise<Response | undefined> | undefined) {
   return mockApi(async r => await handler?.(r) ?? (
     path(r) === '/api/v1/me' && r.method === 'GET' ? Response.json({ ...me, workspaces: [{ ...workspace, role: 'owner' }] }) :
@@ -30,6 +42,9 @@ function setup(handler?: (r: Request) => Response | Promise<Response | undefined
     path(r) === '/api/v1/agents/servers' && r.method === 'GET' ? Response.json(servers) :
     path(r) === '/api/v1/agents/secrets' ? Response.json({ items: [], next_cursor: null, total_estimate: 0 }) :
     path(r) === '/api/v1/agents/host-summary' ? Response.json({ items: [] }) :
+    path(r) === '/api/v1/agents/model-connection-options' ? Response.json({ items: [OPTION], next_cursor: null, total: 1 }) :
+    path(r) === '/api/v1/model-connections/conn-1/models' ? Response.json({ items: [MODEL], next_cursor: null, total: 1, synced_at: null, sync_state: null, discovered: [] }) :
+    path(r).endsWith('/model-binding') && r.method === 'GET' ? Response.json({ binding: null, apply_state: null, legacy: null }) :
     path(r).endsWith('/ops') && r.method === 'GET' ? Response.json({ available: false, reason: 'not_deployed', running: null, items: [] }) : undefined
   ))
 }
@@ -143,7 +158,7 @@ describe('OpenClaw agents page: list', () => {
     // 没有真实容器检测：容器状态写“未检测”
     expect(within(facts).getByText('容器状态').closest('div')).toHaveTextContent('未检测')
     const card = within(detail).getByRole('article', { name: '实例：开发助手' })
-    for (const name of ['项目管理权限', '附件权限', '终止其他智能体任务的权限', '部署到服务器', '资源上限', '运维', '接入包', '凭证', '密钥授权', '负载']) {
+    for (const name of ['项目管理权限', '附件权限', '终止其他智能体任务的权限', '部署到服务器', '资源上限', '运维', '接入包', '凭证', '高级凭据授权', '主模型', '负载']) {
       expect(within(card).getByRole('region', { name })).toBeInTheDocument()
     }
     expect(within(card).getByRole('button', { name: '停用' })).toBeVisible()
@@ -192,12 +207,16 @@ describe('OpenClaw agents page: deploy drawer', () => {
     const start = within(form).getByRole('button', { name: '开始部署' })
     expect(start).toBeDisabled()
     await fireEvent.update(within(form).getByLabelText('智能体名称 *'), ' 项目助手 ')
+    // 没选主模型不能部署；新建时列出全部可用连接，并说明选择即授权
+    expect(start).toBeDisabled()
+    expect(within(form).getByText(/选择即把这条连接授权给新智能体/)).toBeVisible()
+    await pickModel(form)
     await fireEvent.click(start)
     await fireEvent.click(start)
     await vi.waitFor(() => expect(posts(requests, '/api/v1/agents/deployments')).toHaveLength(1))
     const post = posts(requests, '/api/v1/agents/deployments')[0]!
     const body = await post.clone().json() as Schema['AgentDeploymentCreateIn']
-    expect(body).toEqual({ request_id: expect.stringMatching(/^[0-9a-f-]{36}$/), server_id: 'srv-2', server_version: 5, name: '项目助手', description: '', cpus: null, mem_limit_mb: null })
+    expect(body).toEqual({ request_id: expect.stringMatching(/^[0-9a-f-]{36}$/), server_id: 'srv-2', server_version: 5, name: '项目助手', description: '', cpus: null, mem_limit_mb: null, model: { connection_id: 'conn-1', model_id: 'gpt-4.1' } })
     expect(post.headers.get('Idempotency-Key')).toBe(body.request_id)
 
     // 接纳后显示真实步骤，直到部署完成；结束后刷新总览
@@ -239,6 +258,7 @@ describe('OpenClaw agents page: deploy drawer', () => {
     expect(within(form).getByRole('button', { name: '开始部署' })).toBeDisabled()
     await fireEvent.update(within(form).getByLabelText('CPU 上限（核）'), '2')
     await fireEvent.update(within(form).getByLabelText('内存上限（MiB）'), '4096')
+    await pickModel(form)
     await fireEvent.click(within(form).getByRole('button', { name: '开始部署' }))
     await vi.waitFor(() => expect(posts(requests, '/api/v1/agents/deployments')).toHaveLength(1))
     const firstBody = await posts(requests, '/api/v1/agents/deployments')[0]!.clone().json() as Schema['AgentDeploymentCreateIn']
@@ -272,6 +292,7 @@ describe('OpenClaw agents page: recovery', () => {
     const form = await screen.findByRole('form', { name: '部署 OpenClaw' })
     await vi.waitFor(() => expect((within(form).getByLabelText('部署服务器 *') as HTMLSelectElement).value).toBe('srv-1'))
     await fireEvent.update(within(form).getByLabelText('智能体名称 *'), '项目助手')
+    await pickModel(form)
     await fireEvent.click(within(form).getByRole('button', { name: '开始部署' }))
     const progress = await screen.findByRole('region', { name: '新智能体的部署' })
     expect(within(progress).getByText('项目助手')).toBeVisible()

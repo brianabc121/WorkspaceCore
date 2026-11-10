@@ -2,13 +2,13 @@
 id: T-0207
 title: 中转站管理（MC-7）：智能体连接分配、部署与应用状态
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: b6-model-connections
 paths: apps/web/src/features/agents,apps/web/src/features/model-connections,apps/web/tests
 depends_on: T-0204, T-0206
 created: 2026-11-09
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # T-0207 中转站管理（MC-7）：智能体连接分配、部署与应用状态
@@ -28,3 +28,4 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 23:42 UTC · claude · 创建任务（owner: claude）
+- 2026-11-10 00:24 UTC · claude · 开始任务
