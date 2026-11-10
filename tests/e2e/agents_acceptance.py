@@ -186,7 +186,8 @@ class Instance:
         (self.dir / "bin" / "server-ca.pem").chmod(0o644)
 
         config = json.loads((self.dir / "state" / "openclaw.json").read_text())
-        config["models"]["providers"] = {
+        # 没有主模型绑定、也没有旧 openai_api_key 授权的新实例，接入包里没有 models 段（T-0205）
+        config.setdefault("models", {})["providers"] = {
             "fake": {
                 "baseUrl": f"http://fake-model:{FAKE_MODEL_PORT}/v1",
                 "api": "openai-completions",
