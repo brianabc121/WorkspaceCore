@@ -11,7 +11,7 @@ import ManagementSection from '../../components/management/ManagementSection.vue
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import DrawerDetail from '../../components/DrawerDetail.vue'
 import ModalPanel from '../../components/ModalPanel.vue'
-import { SECRET_KIND, unique, useSecrets, type SecretFilters } from './queries'
+import { VAULT_KIND, unique, useSecrets, type SecretFilters } from './queries'
 import { useAgentAction } from './action'
 import { secretError } from './secrets'
 import SecretCatalogTable from './SecretCatalogTable.vue'
@@ -23,8 +23,8 @@ import './secrets.css'
 // 地址里只有 ?tab=accesses 与 ?secret=<id>：刷新、通知链接、后退都能回到同一处。名称 / 说明搜索与类型筛选在服务端、跨所有分页，
 // 标题里的数是服务端 total；换条件就是另一条查询，旧条件的页不会拼进来。只有元数据：值只写不读，新值只在输入框里。
 // 只有 owner 能进这个页面（路由规则），服务端同样只给 owner。
-// 中转站管理（T-0206）把它嵌进“迁移与兼容凭据”页签（embedded）：标题改为“兼容凭据”，内层标签用 ?view=（外层页签已占用 ?tab=），
-// 新建只给非模型类型（模型服务的 Key 在中转站管理的连接里保存，不另开一套）。
+// 中转站管理（T-0206）把它嵌进“兼容凭据”页签（embedded），内层标签用 ?view=（外层页签已占用 ?tab=）。
+// 只放非模型凭据：模型服务的 Key 只在中转站管理的连接里保存，服务端拒绝在这里新建 model_api_key（T-0209）。
 const props = withDefaults(defineProps<{ embedded?: boolean; title?: string; description?: string; tabParam?: string }>(), {
   embedded: false, title: '密钥库', description: '管理智能体可取用的密钥、授权对象与取用记录。只有 owner 可以管理。', tabParam: 'tab',
 })
@@ -85,8 +85,7 @@ function refresh() {
 
 // 添加密钥：值只在这个对话框的输入框里，提交或关闭就清空
 const creating = ref(false)
-const initialKind: Schema['AgentSecretOut']['kind'] = props.embedded ? 'api_token' : 'model_api_key'
-const kinds = computed(() => Object.fromEntries(Object.entries(SECRET_KIND).filter(([k]) => !props.embedded || k !== 'model_api_key')))
+const initialKind: Schema['AgentSecretOut']['kind'] = 'api_token'
 const form = reactive({ name: '', kind: initialKind, description: '', value: '' })
 const SECRET_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/
 const valid = computed(() => SECRET_NAME.test(form.name.trim()) && form.value.length > 0)
@@ -124,7 +123,7 @@ onBeforeUnmount(() => { form.value = '' })
             <template #title>密钥列表<template v-if="typeof total === 'number'"> · {{ total }}</template></template>
             <div class="ws-toolbar">
               <label class="ws-search"><Search aria-hidden="true" /><span class="sr-only">按名称或说明搜索</span><input v-model="search" type="search" placeholder="名称或说明" maxlength="100" /></label>
-              <select v-model="kind" aria-label="按类型筛选"><option value="">全部类型</option><option v-for="(label, value) in SECRET_KIND" :key="value" :value="value">{{ label }}</option></select>
+              <select v-model="kind" aria-label="按类型筛选"><option value="">全部类型</option><option v-for="(label, value) in VAULT_KIND" :key="value" :value="value">{{ label }}</option></select>
             </div>
             <p v-if="secrets.isPending.value" role="status" class="ws-state-line">正在加载密钥…</p>
             <div v-else-if="secrets.error.value && !items.length" class="ws-state-line"><p role="alert">{{ secretError(secrets.error.value) }}</p><button type="button" class="secondary-button" @click="secrets.refetch()">重试</button></div>
@@ -149,8 +148,8 @@ onBeforeUnmount(() => { form.value = '' })
     <ModalPanel v-if="creating" title="添加密钥" :busy="busy" @close="closeCreate">
       <form class="im-group-form" autocomplete="off" @submit.prevent="create">
         <label class="form-field"><span>名称 *（字母、数字、空格、点、下划线、连字符）</span><input v-model="form.name" required maxlength="64" autofocus /></label>
-        <label class="form-field"><span>类型（创建后不能改）</span><select v-model="form.kind"><option v-for="(label, value) in kinds" :key="value" :value="value">{{ label }}</option></select></label>
-        <p v-if="embedded" class="form-help">模型服务的 API Key 请在中转站管理里“添加连接”保存，这里只放其他凭据。</p>
+        <label class="form-field"><span>类型（创建后不能改）</span><select v-model="form.kind"><option v-for="(label, value) in VAULT_KIND" :key="value" :value="value">{{ label }}</option></select></label>
+        <p class="form-help">模型服务的 API Key 请在中转站管理里“添加连接”保存，这里只放其他凭据。</p>
         <label class="form-field"><span>说明</span><textarea v-model="form.description" rows="2" maxlength="500" /></label>
         <label class="form-field"><span>值 *</span><input v-model="form.value" type="password" required autocomplete="new-password" spellcheck="false" /></label>
         <p class="form-help">保存后页面上不再显示这个值，只能轮换为新值。授权在智能体详情里设置。</p>

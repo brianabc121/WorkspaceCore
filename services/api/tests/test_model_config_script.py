@@ -27,7 +27,7 @@ TARGET = {
     "primary": "mwc0123456789abcdef0123/org/model-x",
     "secret_ref_id": "mc_" + "a" * 32,
 }
-LEGACY_OPENAI = {"apiKey": {"source": "exec", "provider": "myworkspace", "id": "openai_api_key"}}
+USER_OPENAI = {"baseUrl": "https://api.openai.com/v1", "apiKey": "${OPENAI_API_KEY}"}
 
 
 def _node(code: str) -> Any:
@@ -59,7 +59,7 @@ def test_patch_only_touches_managed_providers_and_primary() -> None:
     current = {
         "models": {
             "providers": {
-                "openai": LEGACY_OPENAI,
+                "openai": USER_OPENAI,
                 "mwcffffffffffffffffffff": {"baseUrl": "https://old.example.com/v1"},
                 "mine": {"baseUrl": "https://mine.example.com/v1", "models": []},
             }
@@ -72,8 +72,7 @@ def test_patch_only_touches_managed_providers_and_primary() -> None:
     assert patch == {
         "models": {
             "providers": {
-                # 旧模板的 openai 段与旧的受管 provider 删除；用户自己的 provider 不动
-                "openai": None,
+                # 旧的受管 provider 删除；用户自己加的 provider（openai、mine）不动
                 "mwcffffffffffffffffffff": None,
                 TARGET["provider_key"]: {
                     "baseUrl": "https://relay.example.com/v1",
@@ -92,10 +91,9 @@ def test_patch_only_touches_managed_providers_and_primary() -> None:
     }
 
 
-def test_patch_keeps_a_customised_openai_provider_and_same_primary() -> None:
-    custom = {**LEGACY_OPENAI, "baseUrl": "https://api.openai.com/v1"}
+def test_patch_keeps_user_providers_and_same_primary() -> None:
     current = {
-        "models": {"providers": {"openai": custom}},
+        "models": {"providers": {"openai": USER_OPENAI}},
         "agents": {"defaults": {"model": {"primary": TARGET["primary"]}}},
     }
     patch = _patch(current, TARGET)

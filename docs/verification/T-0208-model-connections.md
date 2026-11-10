@@ -3,6 +3,10 @@
 方案 `docs/v2/model-connections/`（README、设计、接口约定、三份实施计划、验收矩阵、迁移手册、效果图）。任务 T-0200 ~ T-0208。
 决定与 OpenClaw 核验：`docs/decisions/2026-11-09-model-connections.md`。
 
+> **T-0209（2026-11-10）补记**：人类确认工作台还没有在生产中运行，旧版兼容已删除（ADR 第 8 节）。本记录里与旧版升级有关的部分——
+> 第 3.2 节迁移演练、第 5.2 节 M01 ~ M13、旧 `/agents/secrets` 跳转、“旧配置”状态，以及引用的迁移测试
+> （`test_model_connection_migration.py`、`test_switching_one_instance_keeps_the_shared_legacy_key` 等）——随代码删除，不再适用；其余结论不变。
+
 报告里分清三种证据：**单元 / 模拟**（pytest、vitest 里的模拟服务商或模拟接口）、**真实 OpenClaw + 假上游**（锁定镜像 + 假模型服务）、
 **真实服务商**（没有做：没有用户的真实 Key，不声称在真实 OpenAI / Anthropic / Google 上验证过）。
 

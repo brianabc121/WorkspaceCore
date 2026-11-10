@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
-import { ArrowLeftRight, ArrowRight, Bot, CircleAlert, CircleCheck, Plus, RefreshCw, Search, Server } from '@lucide/vue'
+import { Bot, CircleAlert, CircleCheck, Plus, RefreshCw, Search, Server } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError } from '../../services/api'
 import { useMediaQuery } from '../../composables/useMediaQuery'
@@ -12,23 +12,22 @@ import DrawerDetail from '../../components/DrawerDetail.vue'
 import ModalPanel from '../../components/ModalPanel.vue'
 import { useAgentAction } from '../agents/action'
 import SecretsWorkspace from '../agents/SecretsWorkspace.vue'
-import { FRESH_SECONDS, detailNumber, fetchModelIds, impactOf, isCode, mcError, unique, useCapabilities, useConnections, useMigrationEntries, useSummary, type Connection, type ConnectionFilters, type CreatePrefill, type DrawerTab, type Impact } from './api'
+import { FRESH_SECONDS, fetchModelIds, impactOf, isCode, mcError, unique, useCapabilities, useConnections, useSummary, type Connection, type ConnectionFilters, type CreatePrefill, type DrawerTab, type Impact } from './api'
 import ConnectionTable from './ConnectionTable.vue'
 import ConnectionDrawer from './ConnectionDrawer.vue'
-import MigrationPanel from './MigrationPanel.vue'
 import AssignmentCard from './AssignmentCard.vue'
 import './model-connections.css'
 
 // 中转站管理（T-0206 / MC-6，效果图 01；规范第 4 节、契约第 1、2 节）。
 // - 汇总卡来自 GET /summary（整个工作空间，不受筛选与分页影响），不用当前页条数代替；“检测通过”分出推理检测。
-// - 页签：全部连接 / 官方直连 / 第三方中转（type 筛选）与“迁移与兼容凭据”；搜索（名称、URL、模型 ID）与状态筛选都在服务端，
+// - 页签：全部连接 / 官方直连 / 第三方中转（type 筛选）与“兼容凭据”（非模型的 Token 等）；搜索（名称、URL、模型 ID）与状态筛选都在服务端，
 //   换条件就是另一条查询、从第一页开始，“共 N 条连接”取服务端 total。
 // - 地址：?tab=official|relay|compat、?connection=<id> 打开详情（不在当前页也能打开）；兼容凭据沿用 ?secret= 与 ?view=accesses。
 // - 详情宽屏在右侧一栏，1440 以下放进右侧抽屉（窄屏全屏）；Esc 关闭，焦点回到打开它的那一行。
 // - 停用：第一次 409 CONNECTION_IN_USE 带影响范围，确认后带 confirm_impact 再提交；删除先确认，409 说明原因。
 type Tab = 'all' | 'official' | 'relay' | 'compat'
-const TABS: { key: Tab; name: string }[] = [{ key: 'all', name: '全部连接' }, { key: 'official', name: '官方直连' }, { key: 'relay', name: '第三方中转' }, { key: 'compat', name: '迁移与兼容凭据' }]
-const STATE_FILTERS = { ready: '配置完整', draft: '草稿 / 待完善', needs_review: '需复核', enabled: '已启用', disabled: '已停用' } as const
+const TABS: { key: Tab; name: string }[] = [{ key: 'all', name: '全部连接' }, { key: 'official', name: '官方直连' }, { key: 'relay', name: '第三方中转' }, { key: 'compat', name: '兼容凭据' }]
+const STATE_FILTERS = { ready: '配置完整', draft: '草稿', needs_review: '需复核', enabled: '已启用', disabled: '已停用' } as const
 const CHECK_FILTERS = { passed: '检测通过', failed: '检测失败', rate_limited: '服务商限流', unsupported: '需手动配置模型', unknown: '结果未知', never: '未检测' } as const
 
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id
@@ -58,18 +57,10 @@ async function tabKey(event: KeyboardEvent) {
   tablist.value?.querySelectorAll<HTMLElement>('[role="tab"]')[target]?.focus()
 }
 
-// ---- 汇总与迁移提示 ----
+// ---- 汇总 ----
 const summary = useSummary(scope)
 const s = computed(() => summary.data.value ?? null)
 const value = (n: number | undefined) => (n === undefined ? '—' : String(n))
-const migration = useMigrationEntries(scope, () => null, 1)
-const counts = computed(() => migration.data.value?.pages[0]?.counts ?? {})
-const pending = computed(() => (counts.value.needs_configuration ?? 0) + (counts.value.needs_classification ?? 0) + (counts.value.needs_review ?? 0))
-const pendingText = computed(() => [
-  counts.value.needs_configuration ? `${counts.value.needs_configuration} 项待补全连接信息` : '',
-  counts.value.needs_classification ? `${counts.value.needs_classification} 项待归类` : '',
-  counts.value.needs_review ? `${counts.value.needs_review} 项需复核` : '',
-].filter(Boolean).join('、'))
 
 // ---- 列表：搜索停顿 300 毫秒再查；空白不发 q（服务端要求 1–100 个字符） ----
 const search = ref(''), q = ref(''), stateFilter = ref<'' | keyof typeof STATE_FILTERS>(''), checkFilter = ref<'' | keyof typeof CHECK_FILTERS>('')
@@ -146,7 +137,7 @@ async function copy(c: Connection) {
   try { models = c.model_scope === 'selected' && c.model_count ? await fetchModelIds(scope, c.id) : [] } catch { models = [] }
   openCreate({ name: `${c.name} 副本`.slice(0, 64), description: c.description, connection_type: c.connection_type ?? 'relay', official_provider: c.official_provider, protocol: c.protocol, base_url: c.base_url, model_scope: c.model_scope, models })
 }
-const removing = ref<Connection | null>(null), removeProblem = ref<{ impact: Impact | null; legacy: number } | null>(null)
+const removing = ref<Connection | null>(null), removeProblem = ref<{ impact: Impact | null } | null>(null)
 function askRemove(c: Connection) { removing.value = c; removeProblem.value = null; error.value = ''; notice.value = '' }
 function cancelRemove() { if (!busy.value) { removing.value = null; removeProblem.value = null; error.value = '' } }
 async function remove() {
@@ -158,7 +149,7 @@ async function remove() {
     if (selected.value === c.id) update({ connection: undefined })
     return
   }
-  if (isCode(failure.value, 'CONNECTION_IN_USE')) removeProblem.value = { impact: impactOf(failure.value), legacy: detailNumber(failure.value, 'legacy_grants') }
+  if (isCode(failure.value, 'CONNECTION_IN_USE')) removeProblem.value = { impact: impactOf(failure.value) }
 }
 
 const refreshing = computed(() => list.isFetching.value || summary.isFetching.value)
@@ -177,11 +168,6 @@ const describeList = (e: unknown) => (e instanceof ApiError ? mcError(e) : '请�
 
     <div class="asv-layout mc-layout" :class="{ 'has-side': drawerOpen && wide }">
       <div class="asv-main">
-        <p v-if="pending > 0" class="mc-banner" role="status">
-          <ArrowLeftRight aria-hidden="true" /><span>旧密钥已导入 · {{ pendingText }}</span>
-          <button type="button" class="link-button mc-link" @click="setTab('compat')">查看迁移记录<ArrowRight aria-hidden="true" /></button>
-        </p>
-
         <section class="ag-summary" aria-label="连接统计">
           <dl class="ag-tiles mc-tiles">
             <div class="ag-tile tone-violet"><dt><Server aria-hidden="true" />连接总数</dt><dd>{{ value(s?.total) }}</dd></div>
@@ -190,7 +176,7 @@ const describeList = (e: unknown) => (e instanceof ApiError ? mcError(e) : '请�
             <div class="ag-tile tone-violet"><dt><Bot aria-hidden="true" />关联智能体</dt><dd>{{ value(s?.unique_granted_instances) }}</dd></div>
           </dl>
           <p v-if="summary.error.value" class="form-help" role="alert">统计读取失败：{{ describeList(summary.error.value) }}</p>
-          <p v-else-if="s" class="form-help">整个工作空间的统计，不受筛选影响。检测通过：启用、配置完整且 15 分钟内对当前配置检测通过（元数据检测不代表模型能推理）；待完善：待补全、待归类、需复核或最近检测失败 / 限流。<template v-if="s.non_model">另有 {{ s.non_model }} 个非模型凭据。</template></p>
+          <p v-else-if="s" class="form-help">整个工作空间的统计，不受筛选影响。检测通过：启用、配置完整且 15 分钟内对当前配置检测通过（元数据检测不代表模型能推理）；待完善：草稿、需复核或最近检测失败 / 限流。</p>
         </section>
 
         <ActionFeedback :error="removing || impactDialog ? '' : error" :notice="notice" />
@@ -218,9 +204,8 @@ const describeList = (e: unknown) => (e instanceof ApiError ? mcError(e) : '请�
           </section>
           <AssignmentCard />
         </div>
-        <div v-else role="tabpanel" aria-label="迁移与兼容凭据" class="mc-panel-stack">
-          <MigrationPanel @open="id => select(id)" />
-          <SecretsWorkspace embedded title="兼容凭据" description="非模型 Token 与旧密钥库里的凭据：轮换、删除与取用记录照旧在这里管理（Runner、旧配置仍在用）。模型服务的 Key 请在连接里更换。" tab-param="view" />
+        <div v-else role="tabpanel" aria-label="兼容凭据" class="mc-panel-stack">
+          <SecretsWorkspace embedded title="兼容凭据" description="GitHub Token、运行环境要注入的密钥等非模型凭据：添加、轮换、删除、授权与取用记录在这里管理。模型服务的 Key 只在上面的连接里保存。" tab-param="view" />
         </div>
       </div>
 
@@ -234,7 +219,7 @@ const describeList = (e: unknown) => (e instanceof ApiError ? mcError(e) : '请�
 
     <ModalPanel v-if="impactDialog" title="确认停用连接" :busy="busy" @close="impactDialog = null">
       <div class="mc-dialog">
-        <p>停用「{{ impactDialog.connection.name }}」会影响下面的智能体：停用后它们不能再取用这条连接的 Key（含旧配置与运行环境的引用），也不能新建绑定；已在进程里的 Key 不保证立即失效，智能体不会被自动停止。</p>
+        <p>停用「{{ impactDialog.connection.name }}」会影响下面的智能体：停用后它们不能再取用这条连接的 Key，也不能新建绑定；已在进程里的 Key 不保证立即失效，智能体不会被自动停止。</p>
         <ul v-if="impactDialog.impact.instances.length"><li v-for="i in impactDialog.impact.instances" :key="i.instance_id">{{ i.instance_name }}<template v-if="i.bound">（以它为主模型）</template></li></ul>
         <p v-if="impactDialog.impact.bound_instances" class="form-help">{{ impactDialog.impact.bound_instances }} 个智能体以它为主模型<template v-if="impactDialog.impact.pending_jobs">，{{ impactDialog.impact.pending_jobs }} 个配置应用任务还没完成</template>。</p>
         <p v-if="error" class="feedback" role="alert">{{ error }}</p>
@@ -254,7 +239,6 @@ const describeList = (e: unknown) => (e instanceof ApiError ? mcError(e) : '请�
             <p v-if="removeProblem.impact.pending_jobs">{{ removeProblem.impact.pending_jobs }} 个配置应用任务还没完成。</p>
             <p>请先在“智能体授权”里撤销授权、在“OpenClaw 连接分配”里更换主模型。</p>
           </template>
-          <p v-else-if="removeProblem.legacy">这条凭据仍被旧配置或运行环境引用（{{ removeProblem.legacy }} 处旧授权）。请先撤销旧授权，或在“迁移与兼容凭据”里归类为非模型凭据保留。</p>
           <p v-else>连接仍在使用中。</p>
         </div>
         <p v-if="error" class="feedback" role="alert">{{ error }}</p>

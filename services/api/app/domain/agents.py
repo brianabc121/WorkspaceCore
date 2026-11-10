@@ -10,16 +10,9 @@ OpenIM 相关的动作（OC-3，app/domain/im.py）：登记实例后注册 IM �
 成功后 im_ready = true（失败时由 Worker 重试）；停用实例、关闭总开关时强制下线；
 实例启动时取 IM 令牌（每小时最多 10 次）。没有部署 OpenIM 时这些动作都跳过。
 
-与中转站管理共用凭据（T-0203，docs/v2/model-connections/ 接口约定“迁移分类与兼容凭据状态”）：
-- 新建连接自己的内部凭据（migration_state = native）不出现在密钥列表与详情里；
-- 映射为 native / needs_configuration / managed 的密钥由连接托管：这里的改名、轮换、删除，
-  以及给实例新增对它的授权都返回 409 MANAGED_BY_MODEL_CONNECTION（已有的授权可以原样保留）；
-- 映射为 needs_classification / non_model 的仍可在这里写，但走同一套规则：密钥的版本检查之外，
-  连接的 version 一起加 1（轮换还让 config_revision 加 1、旧检测结果作废）；删除时连同映射一起删，
-  有原生绑定或旧授权之外的连接授权时 409；
-- 旧授权增删时同步连接授权（只作追溯）：新增补一条；某实例对这条密钥已没有旧授权、
-  也没有绑定到这个连接时撤掉；
-- 取用时（旧取密钥接口与 Runner 注入）连接被停用的凭据一律拒绝，见 blocked_secret_ids。
+中转站管理（T-0200 ~ T-0209）：连接的 Key 也存在 agent_secrets 里，但那是连接自己的内部凭据，
+在这里（列表、详情、改名、轮换、删除、授权）一律当作不存在；模型服务的 Key 只能在中转站管理里保存，
+这里新建 model_api_key 返回 422。
 """
 
 import base64
@@ -36,7 +29,6 @@ from urllib.parse import urlsplit
 
 from redis.asyncio import Redis
 from sqlalchemy import ColumnElement, delete, func, or_, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,11 +40,6 @@ from app.domain.agent_ca import ClientCertificate, ensure_ca, issue_client_certi
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
 from app.domain.im import ImAccounts, im_unavailable
-from app.domain.model_connections import (
-    ModelConnectionService,
-    blocked_secret_ids,
-    rotate_secret_value,
-)
 from app.domain.policy import WorkspaceAccess
 from app.domain.ratelimit import FailureLimiter, WindowLimiter
 from app.domain.tasks import decode_cursor, encode_cursor
@@ -61,7 +48,6 @@ from app.integrations.openim import PLATFORM_WEB, OpenIMClient
 from app.models import (
     AgentCredential,
     AgentInstance,
-    AgentModelBinding,
     AgentSecret,
     AgentSecretAccess,
     AgentSecretGrant,
@@ -69,7 +55,6 @@ from app.models import (
     AgentSettings,
     MailAccount,
     ModelConnection,
-    ModelConnectionGrant,
     WorkspaceMember,
 )
 from app.schemas.agents import (
@@ -152,31 +137,15 @@ HEARTBEAT_PER_MINUTE = 60
 IM_TOKEN_PER_HOUR = 10
 
 
-# 映射为这些迁移状态的密钥由中转站管理托管，旧密钥接口只读（T-0203）
-MANAGED_MIGRATION_STATES = frozenset({"native", "needs_configuration", "managed"})
-
-
 def agent_secret_context(secret_id: uuid.UUID, value_version: int) -> str:
     return f"agent_secret:{secret_id}:{value_version}"
 
 
-def _managed_by_connection(**details: object) -> ApiError:
-    return ApiError(
-        409,
-        "MANAGED_BY_MODEL_CONNECTION",
-        "这条密钥由中转站管理托管，请到中转站管理里修改",
-        details=details,
-    )
-
-
-def _native_secret() -> ColumnElement[bool]:
-    """新建连接自己的内部凭据（不在旧密钥库里显示）。"""
+def _connection_secret() -> ColumnElement[bool]:
+    """中转站管理连接自己的内部凭据（不在密钥库里出现）。"""
     return (
         select(ModelConnection.id)
-        .where(
-            ModelConnection.credential_secret_id == AgentSecret.id,
-            ModelConnection.migration_state == "native",
-        )
+        .where(ModelConnection.credential_secret_id == AgentSecret.id)
         .exists()
     )
 
@@ -1068,12 +1037,11 @@ class AgentService:
             tunnel_target = f"{host}:{url.port or 443}"
             base = f"http://{host}:{self.settings.agent_tunnel_port}"
         whitelist = await self._whitelist(instance.workspace_id)
-        # 主模型（T-0205）：有原生绑定时写入受管 provider 与主模型；没有绑定但有旧授权时保留
-        # 旧的 openai 段（兼容）；都没有时不写模型段（在实例页设置主模型后由 model-config.mjs 应用）
+        # 主模型（T-0205）：有绑定时写入受管 provider 与主模型；没有绑定时不写模型段
+        # （在实例页设置主模型后由 model-config.mjs 应用）
         from app.domain.agent_model_bindings import AgentModelBindingService
 
-        bindings = AgentModelBindingService(self.db, self.settings)
-        managed = await bindings.bundle_model(instance)
+        managed = await AgentModelBindingService(self.db, self.settings).bundle_model(instance)
         model = (
             agent_bundle.BundleModel(
                 provider_key=managed.provider_key,
@@ -1091,7 +1059,6 @@ class AgentService:
             and managed.secret_ref_id
             else None
         )
-        legacy_model = model is None and await bindings.has_legacy_model(instance)
         data = agent_bundle.build(
             agent_bundle.BundleInput(
                 instance_id=str(instance.id),
@@ -1117,7 +1084,6 @@ class AgentService:
                 mem_limit_mb=instance.mem_limit_mb,
                 cpus=instance.cpus,
                 model=model,
-                legacy_model=legacy_model,
             ),
             now=now,
         )
@@ -1175,49 +1141,20 @@ class AgentService:
         instance = await self._instance(access, instance_id)
         self._check_version(instance, body.version)
         secret_ids = {g.secret_id for g in body.grants}
-        current = {
-            (secret_id, ref_id)
-            for secret_id, ref_id in (
-                await self.db.execute(
-                    select(AgentSecretGrant.secret_id, AgentSecretGrant.ref_id).where(
-                        AgentSecretGrant.instance_id == instance.id
-                    )
-                )
-            ).all()
-        }
-        before = {secret_id for secret_id, _ in current}
-        involved = secret_ids | before
-        # 加锁顺序与中转站管理的写入一致（先连接、后密钥），不会互相死锁：
-        # 映射的连接 FOR UPDATE（同步授权时改它的版本），密钥 FOR SHARE（与导入命令排队）
-        mappings = await self._mappings(access, involved, lock=True)
-        if involved:
+        if secret_ids:
             found = set(
                 (
                     await self.db.scalars(
-                        select(AgentSecret.id)
-                        .where(
+                        select(AgentSecret.id).where(
                             AgentSecret.workspace_id == access.workspace.id,
-                            AgentSecret.id.in_(involved),
+                            AgentSecret.id.in_(secret_ids),
+                            ~_connection_secret(),
                         )
-                        .order_by(AgentSecret.id)
-                        .with_for_update(read=True)
                     )
                 ).all()
             )
-            if not secret_ids <= found:
+            if found != secret_ids:
                 raise _not_found("密钥")
-            if await self._newly_mapped(involved, mappings):
-                raise _version_conflict(instance.version)
-        # 被连接托管的密钥：已有的授权原样保留可以，新增（含换 ref_id）要到中转站管理里做
-        managed = sorted(
-            g.ref_id
-            for g in body.grants
-            if (m := mappings.get(g.secret_id)) is not None
-            and m.migration_state in MANAGED_MIGRATION_STATES
-            and (g.secret_id, g.ref_id) not in current
-        )
-        if managed:
-            raise _managed_by_connection(ref_ids=managed)
         await self.db.execute(
             delete(AgentSecretGrant).where(AgentSecretGrant.instance_id == instance.id)
         )
@@ -1230,10 +1167,6 @@ class AgentService:
                     ref_id=grant.ref_id,
                 )
             )
-        await self.db.flush()
-        await self._sync_connection_grants(
-            instance, before=before, after=secret_ids, mappings=mappings
-        )
         instance.version += 1
         await self.audit.record(
             "agents.grants.replaced",
@@ -1247,126 +1180,20 @@ class AgentService:
         await self.db.commit()
         return await self._one_out(instance)
 
-    async def _sync_connection_grants(
-        self,
-        instance: AgentInstance,
-        *,
-        before: set[uuid.UUID],
-        after: set[uuid.UUID],
-        mappings: dict[uuid.UUID, ModelConnection],
-    ) -> None:
-        """旧授权变了之后同步映射连接的授权（只作追溯，不带来原生模型能力）。
-
-        - 新增了对某条已映射密钥的旧授权：补一条连接授权；
-        - 这个实例对某条已映射密钥已没有任何旧授权：撤掉连接授权，
-          除非这个实例的主模型（目标或已应用）就是这个连接——那份授权属于绑定，不跟着旧授权走。
-        授权有变化的连接 version 加 1，页面上的并发修改能被察觉。
-        """
-        for secret_id in before - after:
-            connection = mappings.get(secret_id)
-            if connection is None:
-                continue
-            bound = await self.db.scalar(
-                select(AgentModelBinding.instance_id).where(
-                    AgentModelBinding.instance_id == instance.id,
-                    or_(
-                        AgentModelBinding.connection_id == connection.id,
-                        AgentModelBinding.applied_connection_id == connection.id,
-                    ),
-                )
-            )
-            if bound is not None:
-                continue
-            removed = await self.db.execute(
-                delete(ModelConnectionGrant).where(
-                    ModelConnectionGrant.connection_id == connection.id,
-                    ModelConnectionGrant.instance_id == instance.id,
-                )
-            )
-            if removed.rowcount:  # type: ignore[attr-defined]
-                connection.version += 1
-        for secret_id in after - before:
-            connection = mappings.get(secret_id)
-            if connection is None:
-                continue
-            added = await self.db.execute(
-                pg_insert(ModelConnectionGrant)
-                .values(
-                    workspace_id=instance.workspace_id,
-                    connection_id=connection.id,
-                    instance_id=instance.id,
-                )
-                .on_conflict_do_nothing()
-            )
-            if added.rowcount:  # type: ignore[attr-defined]
-                connection.version += 1
-
     # ---------------------------------------------------------------- 密钥库
 
-    async def _secret(
-        self,
-        access: WorkspaceAccess,
-        secret_id: uuid.UUID,
-        *,
-        lock: bool = False,
-        hide_native: bool = False,
-    ) -> AgentSecret:
-        query = select(AgentSecret).where(
-            AgentSecret.id == secret_id, AgentSecret.workspace_id == access.workspace.id
+    async def _secret(self, access: WorkspaceAccess, secret_id: uuid.UUID) -> AgentSecret:
+        """密钥库里的一条密钥；连接自己的内部凭据与不存在一样 404。"""
+        secret = await self.db.scalar(
+            select(AgentSecret).where(
+                AgentSecret.id == secret_id,
+                AgentSecret.workspace_id == access.workspace.id,
+                ~_connection_secret(),
+            )
         )
-        if hide_native:
-            query = query.where(~_native_secret())
-        if lock:
-            query = query.with_for_update()
-        secret = await self.db.scalar(query)
         if secret is None:
             raise _not_found("密钥")
         return secret
-
-    async def _mappings(
-        self, access: WorkspaceAccess, secret_ids: set[uuid.UUID], *, lock: bool = False
-    ) -> dict[uuid.UUID, ModelConnection]:
-        """这些密钥映射到的连接（每条密钥最多一个）；lock 时按 ID 顺序 FOR UPDATE。"""
-        if not secret_ids:
-            return {}
-        query = (
-            select(ModelConnection)
-            .where(
-                ModelConnection.workspace_id == access.workspace.id,
-                ModelConnection.credential_secret_id.in_(secret_ids),
-            )
-            .order_by(ModelConnection.id)
-        )
-        if lock:
-            query = query.with_for_update()
-        rows = await self.db.scalars(query)
-        return {c.credential_secret_id: c for c in rows.all()}
-
-    async def _newly_mapped(
-        self, secret_ids: set[uuid.UUID], locked: dict[uuid.UUID, ModelConnection]
-    ) -> bool:
-        """等密钥锁的时候导入命令刚给其中某条建了映射（加锁时还看不到）。调用方让用户刷新重试。"""
-        pending = secret_ids - set(locked)
-        if not pending:
-            return False
-        found = await self.db.scalar(
-            select(ModelConnection.id).where(ModelConnection.credential_secret_id.in_(pending))
-        )
-        return found is not None
-
-    async def _lock_for_write(
-        self, access: WorkspaceAccess, secret_id: uuid.UUID
-    ) -> tuple[AgentSecret, ModelConnection | None]:
-        """旧接口写一条密钥前加锁并检查：先锁映射的连接、再锁密钥（与中转站管理的写入同一顺序）。
-
-        被连接托管时 409 MANAGED_BY_MODEL_CONNECTION；兼容凭据返回映射，写入时一起改它的版本。"""
-        connection = (await self._mappings(access, {secret_id}, lock=True)).get(secret_id)
-        if connection is not None and connection.migration_state in MANAGED_MIGRATION_STATES:
-            raise _managed_by_connection(model_connection_id=str(connection.id))
-        secret = await self._secret(access, secret_id, lock=True)
-        if connection is None and await self._newly_mapped({secret.id}, {}):
-            raise _version_conflict(secret.version)
-        return secret, connection
 
     async def _secrets_out(self, secrets_: Sequence[AgentSecret]) -> list[AgentSecretOut]:
         """转换成接口输出：一条查询批量读取这些密钥的全部授权（不逐个密钥查询）。"""
@@ -1389,19 +1216,6 @@ class AgentService:
                         ref_id=grant.ref_id,
                     )
                 )
-        # 中转站管理的映射（同样一条查询批量读取）
-        mapped: dict[uuid.UUID, tuple[uuid.UUID, str]] = {}
-        if ids:
-            for secret_id, connection_id, migration_state in (
-                await self.db.execute(
-                    select(
-                        ModelConnection.credential_secret_id,
-                        ModelConnection.id,
-                        ModelConnection.migration_state,
-                    ).where(ModelConnection.credential_secret_id.in_(ids))
-                )
-            ).all():
-                mapped[secret_id] = (connection_id, migration_state)
         return [
             AgentSecretOut(
                 id=s.id,
@@ -1414,8 +1228,6 @@ class AgentService:
                 version=s.version,
                 created_at=s.created_at,
                 updated_at=s.updated_at,
-                model_connection_id=mapped[s.id][0] if s.id in mapped else None,
-                migration_state=mapped[s.id][1] if s.id in mapped else None,
             )
             for s in secrets_
         ]
@@ -1433,14 +1245,13 @@ class AgentService:
 
         q 是名称或说明的字面包含（不区分大小写），kind 是类型；两者在本工作空间内、分页之前生效，
         total 是同样条件下的全量匹配数（SQL 计数）。游标绑定工作空间与条件，换条件要从第一页开始。
-        新建连接自己的内部凭据不在这里（在中转站管理里）；导入的旧密钥带着映射的连接 ID 与迁移状态。
         """
         q = q or None
         key = _secret_list_key(access.workspace.id, q, kind)
         offset = _decode_secret_cursor(cursor, key, filtered=q is not None or kind is not None)
         conditions: list[ColumnElement[bool]] = [
             AgentSecret.workspace_id == access.workspace.id,
-            ~_native_secret(),
+            ~_connection_secret(),
         ]
         if q is not None:
             pattern = _like_pattern(q)
@@ -1475,10 +1286,8 @@ class AgentService:
     async def get_secret_metadata(
         self, access: WorkspaceAccess, secret_id: uuid.UUID
     ) -> AgentSecretOut:
-        """单个密钥的元数据：名称、类型、说明、值版本、轮换时间与授权；从不含值、密文或历史值。
-
-        新建连接自己的内部凭据与不存在一样 404。"""
-        secret = await self._secret(access, secret_id, hide_native=True)
+        """单个密钥的元数据：名称、类型、说明、值版本、轮换时间与授权；从不含值、密文或历史值。"""
+        secret = await self._secret(access, secret_id)
         return (await self._secrets_out([secret]))[0]
 
     def _seal(self, secret_id: uuid.UUID, value_version: int, value: str) -> str:
@@ -1487,6 +1296,13 @@ class AgentService:
     async def create_secret(
         self, access: WorkspaceAccess, body: AgentSecretCreate, *, client_ip: str
     ) -> AgentSecretOut:
+        if body.kind == "model_api_key":
+            raise ApiError(
+                422,
+                "VALIDATION_FAILED",
+                "模型服务的 API Key 请在中转站管理里添加连接保存",
+                details={"field": "kind"},
+            )
         existing = await self.db.scalar(
             select(AgentSecret.id).where(
                 AgentSecret.workspace_id == access.workspace.id, AgentSecret.name == body.name
@@ -1541,7 +1357,7 @@ class AgentService:
         *,
         client_ip: str,
     ) -> AgentSecretOut:
-        secret, connection = await self._lock_for_write(access, secret_id)
+        secret = await self._secret(access, secret_id)
         if secret.version != body.version:
             raise _version_conflict(secret.version)
         changes = body.model_dump(exclude_unset=True, exclude={"version"})
@@ -1557,18 +1373,6 @@ class AgentService:
             metadata={"fields": sorted(changes)},
             client_ip=client_ip,
         )
-        if connection is not None:
-            # 兼容凭据：连接的版本一起加 1，中转站管理页面上的并发修改能被察觉
-            connection.version += 1
-            await self.audit.record(
-                "model_connection.legacy_updated",
-                workspace_ids=[access.workspace.id],
-                actor_id=access.user_id,
-                resource_type="model_connection",
-                resource_id=connection.id,
-                metadata={"fields": sorted(changes), "via": "agents_secrets"},
-                client_ip=client_ip,
-            )
         try:
             await self.db.commit()
         except IntegrityError:
@@ -1585,13 +1389,29 @@ class AgentService:
         *,
         client_ip: str,
     ) -> AgentSecretOut:
-        secret, connection = await self._lock_for_write(access, secret_id)
+        secret = await self._secret(access, secret_id)
         if secret.version != body.version:
             raise _version_conflict(secret.version)
-        # 与中转站管理更换 Key 同一套规则：新版本加 1，旧值不再下发，也不留密文
-        new_version = await rotate_secret_value(
-            self.db, self._box(), secret, body.value.get_secret_value()
+        now = _now()
+        new_version = secret.current_version + 1
+        ref = self._seal(secret.id, new_version, body.value.get_secret_value())
+        # 旧值不再下发，也不留密文
+        await self.db.execute(
+            update(AgentSecretVersion)
+            .where(AgentSecretVersion.secret_id == secret.id)
+            .values(ciphertext_ref=None, destroyed_at=now)
         )
+        self.db.add(
+            AgentSecretVersion(
+                workspace_id=access.workspace.id,
+                secret_id=secret.id,
+                value_version=new_version,
+                ciphertext_ref=ref,
+            )
+        )
+        secret.current_version = new_version
+        secret.last_rotated_at = now
+        secret.version += 1
         await self.audit.record(
             "agents.secret.rotated",
             workspace_ids=[access.workspace.id],
@@ -1601,24 +1421,6 @@ class AgentService:
             metadata={"value_version": new_version},
             client_ip=client_ip,
         )
-        if connection is not None:
-            # 兼容凭据：Key 换了，连接的配置修订号与版本加 1，旧检测结果作废；
-            # 不改启停——停用的连接轮换后取用仍被拒绝
-            connection.config_revision += 1
-            connection.last_check_id = None
-            connection.version += 1
-            await ModelConnectionService(self.db, self.settings).refresh_state(
-                connection, credential_ok=True
-            )
-            await self.audit.record(
-                "model_connection.key_rotated",
-                workspace_ids=[access.workspace.id],
-                actor_id=access.user_id,
-                resource_type="model_connection",
-                resource_id=connection.id,
-                metadata={"value_version": new_version, "via": "agents_secrets"},
-                client_ip=client_ip,
-            )
         await self.db.commit()
         await self.db.refresh(secret)
         return (await self._secrets_out([secret]))[0]
@@ -1626,11 +1428,9 @@ class AgentService:
     async def delete_secret(
         self, access: WorkspaceAccess, secret_id: uuid.UUID, *, version: int, client_ip: str
     ) -> None:
-        secret, connection = await self._lock_for_write(access, secret_id)
+        secret = await self._secret(access, secret_id)
         if secret.version != version:
             raise _version_conflict(secret.version)
-        if connection is not None:
-            await self._check_mapping_deletable(secret, connection)
         await self.audit.record(
             "agents.secret.deleted",
             workspace_ids=[access.workspace.id],
@@ -1640,67 +1440,8 @@ class AgentService:
             metadata={"name": secret.name},
             client_ip=client_ip,
         )
-        if connection is not None:
-            # 兼容凭据连同映射一起删（映射对密钥是 RESTRICT，先删映射；它的连接授权随之删除）
-            await self.audit.record(
-                "model_connection.deleted",
-                workspace_ids=[access.workspace.id],
-                actor_id=access.user_id,
-                resource_type="model_connection",
-                resource_id=connection.id,
-                metadata={"name": connection.name, "imported": True, "via": "agents_secrets"},
-                client_ip=client_ip,
-            )
-            await self.db.delete(connection)
-            await self.db.flush()
         await self.db.delete(secret)
         await self.db.commit()
-
-    async def _check_mapping_deletable(
-        self, secret: AgentSecret, connection: ModelConnection
-    ) -> None:
-        """彻底删除要求所有引用清零：原生绑定（目标或已应用）必须先解除；
-        连接授权只能是旧授权的追溯（随旧授权一起删），在中转站管理里单独授权的实例要先撤销。"""
-        bound = int(
-            await self.db.scalar(
-                select(func.count())
-                .select_from(AgentModelBinding)
-                .where(
-                    or_(
-                        AgentModelBinding.connection_id == connection.id,
-                        AgentModelBinding.applied_connection_id == connection.id,
-                    )
-                )
-            )
-            or 0
-        )
-        extra = sorted(
-            str(i)
-            for i in (
-                await self.db.scalars(
-                    select(ModelConnectionGrant.instance_id).where(
-                        ModelConnectionGrant.connection_id == connection.id,
-                        ~select(AgentSecretGrant.id)
-                        .where(
-                            AgentSecretGrant.secret_id == secret.id,
-                            AgentSecretGrant.instance_id == ModelConnectionGrant.instance_id,
-                        )
-                        .exists(),
-                    )
-                )
-            ).all()
-        )
-        if bound or extra:
-            raise ApiError(
-                409,
-                "CONNECTION_IN_USE",
-                "这条密钥在中转站管理里还有绑定或单独的授权，请先解除后再删除",
-                details={
-                    "model_connection_id": str(connection.id),
-                    "bound_instances": bound,
-                    "instance_ids": extra,
-                },
-            )
 
     async def list_accesses(
         self,
@@ -1713,8 +1454,13 @@ class AgentService:
         limit: int,
     ) -> SecretAccessPage:
         offset = decode_cursor(cursor)
+        # 中转站管理连接的 Key 的取用（mc_ 引用）记在连接的活动记录里，不出现在密钥库
         stmt = select(AgentSecretAccess).where(
-            AgentSecretAccess.workspace_id == access.workspace.id
+            AgentSecretAccess.workspace_id == access.workspace.id,
+            ~AgentSecretAccess.ref_id.startswith("mc_", autoescape=True),
+            ~select(ModelConnection.id)
+            .where(ModelConnection.credential_secret_id == AgentSecretAccess.secret_id)
+            .exists(),
         )
         if instance_id is not None:
             stmt = stmt.where(AgentSecretAccess.instance_id == instance_id)
@@ -1863,15 +1609,11 @@ class AgentService:
             )
         ).all()
         found = {ref_id: (secret, ref) for ref_id, secret, ref in rows}
-        # 映射的连接被管理员停用：与未授权一样 NOT_FOUND（归类为非模型凭据也不例外）
-        blocked = await blocked_secret_ids(self.db, (secret.id for secret, _ in found.values()))
         values: dict[str, str] = {}
         errors: dict[str, SecretResolveError] = {}
         box = self._box() if found else None
         for ref_id in wanted:
             secret, ref = found.get(ref_id, (None, None))
-            if secret is not None and secret.id in blocked:
-                secret, ref = None, None
             value: str | None = None
             if secret is not None and ref and box is not None:
                 try:

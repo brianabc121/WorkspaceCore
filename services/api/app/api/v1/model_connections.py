@@ -1,9 +1,9 @@
-"""中转站管理：模型连接（owner）。T-0201 / T-0203。
+"""中转站管理：模型连接（owner）。T-0201。
 
 约定：docs/v2/model-connections/docs/superpowers/specs/2026-11-09-model-connections-contract.md
 第 2 节、docs/decisions/2026-11-09-model-connections.md。
 API Key 只写不读：任何响应都不含明文、密文或内部凭据 ID。
-固定路径（capabilities / summary / migration）写在 /{connection_id} 之前。
+固定路径（capabilities / summary）写在 /{connection_id} 之前。
 模型同步与检测的接口在 app/api/v1/model_catalog.py。
 """
 
@@ -22,9 +22,6 @@ from app.api.deps import (
     workspace_owner,
 )
 from app.core.config import Settings
-from app.core.errors import ApiError
-from app.domain.credentials import CredentialBox, CredentialError
-from app.domain.model_connection_migration import migrate_workspace
 from app.domain.model_connections import PAGE_DEFAULT, PAGE_MAX, ModelConnectionService
 from app.domain.policy import WorkspaceAccess
 from app.schemas.common import error_responses
@@ -33,11 +30,6 @@ from app.schemas.model_connections import (
     ConnectionGrantPage,
     ConnectionModelPage,
     GrantsReplace,
-    MigrationClassify,
-    MigrationEntryOut,
-    MigrationEntryPage,
-    MigrationRun,
-    MigrationRunOut,
     ModelConnectionCapabilities,
     ModelConnectionCreate,
     ModelConnectionKeyRotate,
@@ -85,7 +77,7 @@ def _ip(request: Request) -> str:
     "",
     summary="连接列表（owner）",
     description="服务端搜索（名称、URL、模型 ID，按字面、不区分大小写）与筛选，分页之前生效；"
-    "total 是符合条件的全部连接数。归类为非模型凭据的导入项不在这里（见 migration/entries）。"
+    "total 是符合条件的全部连接数。"
     "游标绑定筛选条件，换条件要从第一页重新加载（旧游标 422）。",
     responses=_read_errors,
 )
@@ -141,65 +133,6 @@ async def get_model_connection_summary(access: Owner, service: Service) -> Model
     return await service.summary(access)
 
 
-@router.get(
-    "/migration/entries",
-    summary="旧密钥库导入项（owner）",
-    description="待完善 / 待归类 / 已纳管 / 非模型凭据 / 需要复核（Key 不可读）。不含 Key。"
-    "导入在页面上执行（POST migration/run），也可以用命令 app.commands.migrate_model_connections。",
-    responses=_read_errors,
-)
-async def list_migration_entries(
-    access: Owner,
-    service: Service,
-    state: Literal[
-        "needs_configuration", "needs_classification", "managed", "non_model", "needs_review"
-    ]
-    | None = None,
-    cursor: Cursor = None,
-    limit: Limit = PAGE_DEFAULT,
-) -> MigrationEntryPage:
-    return await service.migration_entries(access, state=state, cursor=cursor, limit=limit)
-
-
-@router.post(
-    "/migration/run",
-    summary="在页面上导入旧密钥库（owner）",
-    description="与命令 app.commands.migrate_model_connections 相同：只处理当前工作空间；"
-    "dry_run 只读预览，apply 按批导入（每批一个事务，可以重复执行，"
-    "已导入的不重复、撤销过的授权不恢复），"
-    "report 只读对账。不复制密文、不换 ID、不建模型或绑定、不访问外部服务；只返回计数与错误类别。"
-    "密钥库没有配置加密密钥时 503。",
-    dependencies=_write,
-    responses=_write_errors,
-)
-async def run_model_connection_migration(
-    access: Owner,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    settings: Annotated[Settings, Depends(get_app_settings)],
-    body: MigrationRun,
-) -> MigrationRunOut:
-    try:
-        box = CredentialBox.from_settings(settings)
-    except CredentialError as error:
-        raise ApiError(503, "EXTERNAL_UNAVAILABLE", "密钥库未配置加密密钥") from error
-    report = await migrate_workspace(db, settings, box, access.workspace.id, mode=body.mode)
-    return MigrationRunOut.model_validate(report.as_dict())
-
-
-@router.post(
-    "/migration/entries/{entry_id}/classify",
-    summary="把导入项归类为模型连接或非模型凭据（owner）",
-    description="保留同一个映射、同一条凭据与原授权，不新建、不恢复已撤销的访问、不改启停；"
-    "有原生绑定或进行中的应用任务时不能改判为非模型（409 MODEL_BINDING_CONFLICT）。",
-    dependencies=_write,
-    responses=_write_errors,
-)
-async def classify_migration_entry(
-    access: Owner, service: Service, request: Request, entry_id: UUID, body: MigrationClassify
-) -> MigrationEntryOut:
-    return await service.classify(access, entry_id, body, client_ip=_ip(request))
-
-
 @router.get("/{connection_id}", summary="一个连接（owner）", responses=_read_errors)
 async def get_model_connection(
     access: Owner, service: Service, connection_id: UUID
@@ -243,7 +176,7 @@ async def create_model_connection(
     summary="修改连接（owner）",
     description="省略的字段不变；不含 Key（用 rotate-key）。已配置完整、且有授权或绑定的连接"
     "改 URL / 协议返回 409 CONNECTION_ENDPOINT_IN_USE（复制为新连接再切换）；"
-    "旧导入项第一次从空补齐例外。停用会影响实例时先 409 CONNECTION_IN_USE（details.impact），"
+    "草稿第一次补齐地址不受限。停用会影响实例时先 409 CONNECTION_IN_USE（details.impact），"
     "确认后带 confirm_impact=true 再提交。",
     dependencies=_write,
     responses=_write_errors,
@@ -280,7 +213,7 @@ async def rotate_model_connection_key(
     "/{connection_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="删除连接（owner）",
-    description="有授权、绑定、进行中的应用任务，或旧配置 / 运行环境仍引用这条凭据时 409 "
+    description="有授权、绑定或进行中的应用任务时 409 "
     "CONNECTION_IN_USE（details 列出影响）；不会顺带删除或停掉智能体。",
     dependencies=_write,
     responses=_write_errors,
@@ -350,7 +283,7 @@ async def list_model_connection_grants(
     "/{connection_id}/grants",
     summary="整体替换连接授权（owner）",
     description="跨工作空间或不存在的实例 404；撤销正以它为主模型的实例返回 409 GRANT_IN_USE"
-    "（先切换或解除主模型）。撤销时同一事务撤掉这条凭据对该实例的旧授权（含运行环境的引用）。",
+    "（先切换或解除主模型）。",
     dependencies=_write,
     responses=_write_errors,
 )

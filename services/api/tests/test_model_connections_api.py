@@ -146,7 +146,6 @@ async def test_owner_workspace_isolation(
                     ("GET", f"{BASE}/capabilities", None),
                     ("GET", f"{BASE}/{cid}", None),
                     ("GET", f"{BASE}/{cid}/models", None),
-                    ("GET", f"{BASE}/migration/entries", None),
                     ("POST", BASE, relay("越权")),
                     ("PATCH", f"{BASE}/{cid}", {"version": 1, "name": "改掉"}),
                     ("POST", f"{BASE}/{cid}/rotate-key", {"version": 1, "api_key": "x"}),
@@ -190,7 +189,7 @@ async def test_connection_crud_never_returns_key(env: Env) -> None:
     assert connection["credential_version"] == 1
     assert connection["configuration_state"] == "ready"
     assert connection["enabled"] is True
-    assert connection["migration_state"] == "native"
+    assert "migration_state" not in connection
     assert connection["model_count"] == 2
     assert connection["model_preview"] == ["gpt-4.1", "gpt-4.1-mini"]
     assert not (
@@ -596,39 +595,83 @@ async def test_models_replace_and_in_use_models(env: Env) -> None:
 # ---------------------------------------------------------------- 授权
 
 
-async def test_revoking_grant_also_revokes_legacy_secret_grant(env: Env) -> None:
+async def test_revoking_a_grant_in_use_is_refused(env: Env) -> None:
     connection = await created(env, relay())
     cid = connection["id"]
     a = await env.create_instance(name="甲")
     b = await env.create_instance(name="乙")
     assert (await put_grants(env, cid, [a["id"], b["id"]])).status_code == 200
-    secret_id = await secret_of(env, cid)
-    # 模拟迁移前留下的旧授权（同一条凭据）
-    for instance in (a, b):
-        await run_sql(
-            env.database_url,
-            "INSERT INTO workspace.agent_secret_grants"
-            " (workspace_id, instance_id, secret_id, ref_id)"
-            " VALUES ($1, $2, $3, 'openai_api_key')",
-            uuid.UUID(env.workspace_id),
-            uuid.UUID(instance["id"]),
-            secret_id,
-        )
     await bind(env, b["id"], cid, "claude-sonnet-4")
     response = await put_grants(env, cid, [a["id"]])
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "GRANT_IN_USE"
     response = await put_grants(env, cid, [b["id"]])
     assert response.status_code == 200, response.text
-    legacy = await run_sql(
-        env.database_url,
-        "SELECT array_agg(instance_id::text) FROM workspace.agent_secret_grants"
-        " WHERE secret_id = $1",
-        secret_id,
-    )
-    assert legacy == [b["id"]]
     grants = (await get(env, f"/{cid}/grants")).json()
     assert [(g["instance_name"], g["bound"]) for g in grants["items"]] == [("乙", True)]
+
+
+async def test_connection_key_stays_out_of_the_secret_vault(env: Env) -> None:
+    """模型服务的 Key 只在中转站管理的连接里（T-0209）：密钥库看不到、改不了、授权不了，
+    也不能在密钥库里新建 model_api_key。"""
+    connection = await created(env, relay())
+    secret_id = str(await secret_of(env, connection["id"]))
+    instance = await env.create_instance(name="甲")
+    vault = "/api/v1/agents/secrets"
+
+    listed = (await env.client.get(vault, headers=env.headers())).json()
+    assert listed["total"] == 0 and listed["items"] == []
+    detail = await env.client.get(f"{vault}/{secret_id}", headers=env.headers())
+    assert detail.status_code == 404
+    rotate = await env.client.post(
+        f"{vault}/{secret_id}/rotate",
+        json={"version": 1, "value": "sk-other-value-123456"},
+        headers=env.headers(write=True),
+    )
+    assert rotate.status_code == 404
+    removed = await env.client.delete(
+        f"{vault}/{secret_id}", params={"version": 1}, headers=env.headers(write=True)
+    )
+    assert removed.status_code == 404
+    granted = await env.client.put(
+        f"/api/v1/agents/instances/{instance['id']}/secret-grants",
+        json={
+            "version": instance["version"],
+            "grants": [{"secret_id": secret_id, "ref_id": "model_key"}],
+        },
+        headers=env.headers(write=True),
+    )
+    assert granted.status_code == 404, granted.text
+
+    # 取用记录：实例取连接 Key（mc_ 引用）记在连接的活动里，不出现在密钥库的取用记录
+    for ref_id, sid, result in (
+        (f"mc_{uuid.UUID(connection['id']).hex}", uuid.UUID(secret_id), "ok"),
+        ("mc_ffffffffffffffffffffffffffffffff", None, "not_found"),
+        ("github_token", None, "not_found"),
+    ):
+        await run_sql(
+            env.database_url,
+            "INSERT INTO workspace.agent_secret_accesses"
+            " (workspace_id, instance_id, instance_name, ref_id, secret_id, value_version, result)"
+            " VALUES ($1, $2, '甲', $3, $4, 1, $5)",
+            uuid.UUID(env.workspace_id),
+            uuid.UUID(instance["id"]),
+            ref_id,
+            sid,
+            result,
+        )
+    accesses = (await env.client.get(f"{vault}/accesses", headers=env.headers())).json()
+    assert [a["ref_id"] for a in accesses["items"]] == ["github_token"]
+    activity = (await get(env, f"/{connection['id']}/activity")).json()
+    assert [i["kind"] for i in activity["items"]].count("access") == 1, activity
+
+    created_key = await env.client.post(
+        vault,
+        json={"name": "OpenAI", "kind": "model_api_key", "value": "sk-vault-model-key-1234"},
+        headers=env.headers(write=True),
+    )
+    assert created_key.status_code == 422
+    assert created_key.json()["error"]["details"] == {"field": "kind"}
 
 
 # ---------------------------------------------------------------- 搜索、分页、汇总

@@ -97,7 +97,8 @@ def main() -> int:
     (HERE / "state").mkdir()
     sys.path.insert(0, str(B6 / "services/api"))
     from app import agent_bundle
-    cfg = json.loads(agent_bundle._openclaw_json([], None, legacy_model=True))
+    # 新实例还没有主模型时接入包不带模型段（T-0209）
+    cfg = json.loads(agent_bundle._openclaw_json([]))
     for k in ("channels", "plugins", "mcp"):
         cfg.pop(k)
     cfg["gateway"]["auth"]["token"] = "local-test-token"
@@ -132,8 +133,8 @@ def main() -> int:
     status, err = apply()
     c = config()
     check("第一次应用：applied", status == "applied", status + " " + err)
-    check("旧模板 openai 段被删掉，受管 provider 写入，主模型指向它",
-          "openai" not in c["models"]["providers"] and ("mwc" + A[:20]) in c["models"]["providers"]
+    check("受管 provider 写入，主模型指向它",
+          ("mwc" + A[:20]) in c["models"]["providers"]
           and c["agents"]["defaults"]["model"]["primary"] == f"mwc{A[:20]}/m-a1", json.dumps(sorted(c["models"]["providers"])))
     check("配置里没有 Key", ka not in json.dumps(c))
     check("工具限制保留", c["tools"]["exec"]["security"] == "deny")

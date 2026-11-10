@@ -62,8 +62,7 @@ def _ip(request: Request) -> str:
     "/agents/model-assignments",
     summary="OpenClaw 连接分配（owner）",
     description="每个实例一行：目标连接与模型、已应用的连接与模型、应用状态；"
-    "没有原生绑定、仍按旧配置运行的实例 legacy 不为空（不猜连接与模型）。"
-    "connection_id 只看以它为目标或已应用的实例。",
+    "还没有设置主模型的实例 binding 为 null。connection_id 只看以它为目标或已应用的实例。",
     responses=_read_errors,
 )
 async def list_model_assignments(
@@ -95,8 +94,7 @@ async def list_model_connection_options(
 @router.get(
     PATH,
     summary="实例的主模型绑定（owner）",
-    description="binding 为 null 且 apply_state 为 legacy_active：实例仍按旧手工配置运行"
-    "（legacy.legacy_refs 是旧授权的引用名）；两者都为 null：还没有配置模型。",
+    description="binding 与 apply_state 都为 null：还没有设置主模型。",
     responses=_read_errors,
 )
 async def get_model_binding(instance_id: UUID, access: Owner, service: Service) -> ModelBindingView:

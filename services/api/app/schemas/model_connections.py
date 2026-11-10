@@ -1,4 +1,4 @@
-"""中转站管理：模型连接、模型目录、检测、授权、迁移分类、智能体主模型绑定（T-0200 ~ T-0205）。
+"""中转站管理：模型连接、模型目录、检测、授权、智能体主模型绑定（T-0200 ~ T-0209）。
 
 约定见 docs/v2/model-connections/docs/superpowers/specs/2026-11-09-model-connections-contract.md 与
 docs/decisions/2026-11-09-model-connections.md：
@@ -10,7 +10,7 @@ docs/decisions/2026-11-09-model-connections.md：
 """
 
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -27,9 +27,6 @@ OfficialProvider = Literal["openai", "anthropic", "google"]
 Protocol = Literal["openai_compatible", "anthropic_native", "gemini_native"]
 ModelScope = Literal["selected", "all_available"]
 ConfigurationState = Literal["draft", "ready", "needs_review"]
-MigrationState = Literal[
-    "native", "needs_configuration", "needs_classification", "managed", "non_model"
-]
 SyncState = Literal["complete", "partial", "unsupported", "failed"]
 ModelSource = Literal["manual", "discovered"]
 ModelAvailability = Literal["listed", "verified"]
@@ -49,11 +46,8 @@ CheckReason = Literal[
     "credential_unreadable",
     "stale_revision",
 ]
-ApplyState = Literal[
-    "legacy_active", "pending", "applying", "applied", "failed", "unknown", "manual_required"
-]
+ApplyState = Literal["pending", "applying", "applied", "failed", "unknown", "manual_required"]
 JobState = Literal["queued", "running", "succeeded", "failed", "unknown", "manual_required"]
-ClassifyPurpose = Literal["model", "non_model"]
 
 MAX_MODELS_PER_CONNECTION = 1000
 API_KEY_MAX = 8192
@@ -117,7 +111,7 @@ class ModelConnectionOut(BaseModel):
     workspace_id: UUID
     name: str
     description: str
-    connection_type: ConnectionType | None = Field(description="迁移草稿可能为 null")
+    connection_type: ConnectionType | None = Field(description="草稿可能为 null")
     official_provider: OfficialProvider | None
     protocol: Protocol | None
     base_url: str | None
@@ -129,10 +123,6 @@ class ModelConnectionOut(BaseModel):
         "（不表示服务商已接受推理请求）"
     )
     enabled: bool = Field(description="管理员启停，与检测结果无关")
-    migration_state: MigrationState
-    legacy_source_id: UUID | None = Field(
-        description="从旧密钥库导入时的原密钥 ID，只用于追溯，不能拿来取 Key"
-    )
     model_count: int = Field(ge=0)
     model_preview: list[str] = Field(
         default_factory=list,
@@ -158,7 +148,7 @@ class ModelConnectionPage(BaseModel):
 
 
 class ModelConnectionSummary(BaseModel):
-    """整个工作空间的统计，不受分页或筛选影响；non_model 不计入。"""
+    """整个工作空间的统计，不受分页或筛选影响。"""
 
     total: int = Field(ge=0)
     check_passed: int = Field(
@@ -168,10 +158,9 @@ class ModelConnectionSummary(BaseModel):
     )
     check_passed_inference: int = Field(ge=0, description="其中最近一次是推理检测通过的")
     needs_attention: int = Field(
-        ge=0, description="待完善 / 待归类 / 需要复核 / 最近检测失败或限流的连接数"
+        ge=0, description="草稿 / 需要复核（Key 不可读）/ 最近检测失败或限流的连接数"
     )
     unique_granted_instances: int = Field(ge=0, description="至少有一个连接授权的实例数（去重）")
-    non_model: int = Field(ge=0, description="归类为非模型凭据的兼容项数")
 
 
 class OfficialPreset(BaseModel):
@@ -275,26 +264,6 @@ class ImpactOut(BaseModel):
     pending_jobs: int = Field(ge=0)
 
 
-class MigrationEntryOut(BaseModel):
-    """旧密钥库的导入项（连接映射）。不含 Key。"""
-
-    entry_id: UUID = Field(description="迁移映射 ID（即连接 ID）")
-    connection: ModelConnectionOut
-    legacy_name: str
-    legacy_kind: Literal["model_api_key", "api_token", "generic"]
-    legacy_grant_refs: list[str] = Field(description="原有授权的 ref_id（OpenClaw 配置里的引用名）")
-
-
-class MigrationEntryPage(BaseModel):
-    items: list[MigrationEntryOut]
-    next_cursor: str | None = None
-    total: int = Field(ge=0)
-    counts: dict[str, int] = Field(
-        description="needs_configuration / needs_classification / managed / non_model / "
-        "needs_review / unmapped（还没导入的旧密钥数）"
-    )
-
-
 # ---------------------------------------------------------------- 输入
 
 
@@ -366,46 +335,6 @@ class GrantsReplace(_Strict):
     instance_ids: Annotated[list[UUID], Field(max_length=500)]
 
 
-class MigrationRun(_Strict):
-    """在页面上执行旧密钥导入（与命令 app.commands.migrate_model_connections 相同的逻辑）。"""
-
-    mode: Literal["dry_run", "apply", "report"] = Field(
-        description="dry_run 只读预览；apply 按批导入（可以重复执行）；report 只读对账"
-    )
-
-
-class MigrationBatchOut(BaseModel):
-    batch: int
-    scanned: int
-    mapped: int
-    already_mapped: int
-    failed: int
-    status: str = Field(description="committed / rolled_back / read_only")
-    error: str | None = Field(description="错误类别（不含异常原文）")
-
-
-class MigrationRunOut(BaseModel):
-    """只有计数与错误类别，不含 Key、密文或名称。"""
-
-    mode: Literal["dry_run", "apply", "report"]
-    scanned: int
-    mapped: int = Field(description="本次新建（dry_run 是将新建）的映射数")
-    already_mapped: int
-    needs_configuration: int
-    needs_classification: int
-    unreadable: int
-    failed: int
-    batches: list[MigrationBatchOut]
-    reconciliation: dict[str, Any] | None = Field(
-        default=None, description="report 才有：映射、授权、绑定、取用记录的对账计数"
-    )
-
-
-class MigrationClassify(_Strict):
-    version: Version
-    purpose: ClassifyPurpose
-
-
 # ---------------------------------------------------------------- 绑定（owner）
 
 
@@ -427,19 +356,10 @@ class AgentModelBindingOut(BaseModel):
     applied_connection_name: str | None
 
 
-class LegacyModelInfo(BaseModel):
-    """没有原生绑定、仍按旧配置运行的实例：只给旧授权的引用名，不猜连接与模型。"""
-
-    legacy_refs: list[str] = Field(description="这个实例在旧密钥库里的授权引用名")
-
-
 class ModelBindingView(BaseModel):
     binding: AgentModelBindingOut | None
     apply_state: ApplyState | None = Field(
-        description="有绑定时同 binding.apply_state；没有绑定、仍按旧配置运行时为 legacy_active"
-    )
-    legacy: LegacyModelInfo | None = Field(
-        description="apply_state 为 legacy_active 时的旧配置信息；有原生绑定时为 null"
+        description="有绑定时同 binding.apply_state；还没有设置主模型时为 null"
     )
 
 
@@ -474,7 +394,6 @@ class ModelAssignmentRow(BaseModel):
     instance_name: str
     instance_status: str
     binding: AgentModelBindingOut | None
-    legacy: LegacyModelInfo | None
 
 
 class ModelAssignmentPage(BaseModel):

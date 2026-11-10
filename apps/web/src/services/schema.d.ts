@@ -543,7 +543,7 @@ export interface paths {
         };
         /**
          * 实例的主模型绑定（owner）
-         * @description binding 为 null 且 apply_state 为 legacy_active：实例仍按旧手工配置运行（legacy.legacy_refs 是旧授权的引用名）；两者都为 null：还没有配置模型。
+         * @description binding 与 apply_state 都为 null：还没有设置主模型。
          */
         get: operations["get_model_binding"];
         /**
@@ -732,10 +732,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * 设置实例可以取用的密钥（owner，整体替换）
-         * @description 被中转站管理托管的密钥只能原样保留已有的授权，新增（含换 ref_id）返回 409 MANAGED_BY_MODEL_CONNECTION；对已导入密钥的授权增删同步到连接授权（只作追溯，实例的主模型绑定在这个连接上时保留）。
-         */
+        /** 设置实例可以取用的密钥（owner，整体替换） */
         put: operations["replace_agent_secret_grants"];
         post?: never;
         delete?: never;
@@ -894,7 +891,7 @@ export interface paths {
         };
         /**
          * OpenClaw 连接分配（owner）
-         * @description 每个实例一行：目标连接与模型、已应用的连接与模型、应用状态；没有原生绑定、仍按旧配置运行的实例 legacy 不为空（不猜连接与模型）。connection_id 只看以它为目标或已应用的实例。
+         * @description 每个实例一行：目标连接与模型、已应用的连接与模型、应用状态；还没有设置主模型的实例 binding 为 null。connection_id 只看以它为目标或已应用的实例。
          */
         get: operations["list_model_assignments"];
         put?: never;
@@ -954,11 +951,14 @@ export interface paths {
         };
         /**
          * 密钥列表（owner，不含明文）
-         * @description 按名称排序。q 按名称或说明字面包含搜索（不区分大小写，% 与 _ 按普通字符），kind 按类型筛选；条件在本工作空间内、分页之前生效，total 是同样条件下的全量匹配数。游标绑定工作空间与条件：换了 q / kind 要从第一页开始，用旧游标请求返回 422。新建连接自己的内部凭据不在这里（在中转站管理里）；已导入的密钥带 model_connection_id 与 migration_state。
+         * @description 按名称排序。q 按名称或说明字面包含搜索（不区分大小写，% 与 _ 按普通字符），kind 按类型筛选；条件在本工作空间内、分页之前生效，total 是同样条件下的全量匹配数。游标绑定工作空间与条件：换了 q / kind 要从第一页开始，用旧游标请求返回 422。中转站管理连接自己的 Key 不在密钥库里（列表、详情、修改、授权都当作不存在）。
          */
         get: operations["list_agent_secrets"];
         put?: never;
-        /** 新增密钥（owner，只写不读） */
+        /**
+         * 新增密钥（owner，只写不读）
+         * @description 密钥库只放非模型凭据（API 令牌等）；kind 为 model_api_key 时 422：模型服务的 Key 在中转站管理里添加连接时保存。
+         */
         post: operations["create_agent_secret"];
         delete?: never;
         options?: never;
@@ -973,7 +973,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 取密钥记录（owner） */
+        /**
+         * 取密钥记录（owner）
+         * @description 密钥库凭据的取用记录；实例取中转站管理连接的 Key（mc_ 引用）记在连接的活动记录里，不在这里。
+         */
         get: operations["list_secret_accesses"];
         put?: never;
         post?: never;
@@ -992,22 +995,19 @@ export interface paths {
         };
         /**
          * 密钥详情（owner，只有元数据）
-         * @description 名称、类型、说明、当前值版本、最近轮换时间与授权（实例与 ref_id）；从不返回值、密文引用或历史值。不在本工作空间、不存在或是新建连接自己的内部凭据时 404。
+         * @description 名称、类型、说明、当前值版本、最近轮换时间与授权（实例与 ref_id）；从不返回值、密文引用或历史值。不在本工作空间或不存在时 404。
          */
         get: operations["get_agent_secret"];
         put?: never;
         post?: never;
         /**
          * 删除密钥（owner）
-         * @description 同时删除对它的授权；之后实例取用返回 NOT_FOUND。被中转站管理托管的密钥（导入后 needs_configuration / managed，或新建连接自己的凭据）返回 409 MANAGED_BY_MODEL_CONNECTION，请到中转站管理里修改。兼容凭据连同映射一起删除；映射还有主模型绑定，或在中转站管理里单独授权的实例时 409 CONNECTION_IN_USE。
+         * @description 同时删除对它的授权；之后实例取用返回 NOT_FOUND。
          */
         delete: operations["delete_agent_secret"];
         options?: never;
         head?: never;
-        /**
-         * 修改密钥的名称与说明（owner）
-         * @description 被中转站管理托管的密钥（导入后 needs_configuration / managed，或新建连接自己的凭据）返回 409 MANAGED_BY_MODEL_CONNECTION，请到中转站管理里修改。兼容凭据（needs_classification / non_model）照常修改，映射连接的 version 一起加 1。
-         */
+        /** 修改密钥的名称与说明（owner） */
         patch: operations["update_agent_secret"];
         trace?: never;
     };
@@ -1022,7 +1022,7 @@ export interface paths {
         put?: never;
         /**
          * 轮换密钥的值（owner）
-         * @description 新值立即生效，旧值不再下发；实例最迟在下一次 secrets reload（每 10 分钟）时换上。被中转站管理托管的密钥（导入后 needs_configuration / managed，或新建连接自己的凭据）返回 409 MANAGED_BY_MODEL_CONNECTION，请到中转站管理里修改。兼容凭据轮换后映射连接的 config_revision 与 version 加 1、旧检测结果作废；连接停用时轮换照样可以，但实例取用仍被拒绝。
+         * @description 新值立即生效，旧值不再下发；实例最迟在下一次 secrets reload（每 10 分钟）时换上。
          */
         post: operations["rotate_agent_secret"];
         delete?: never;
@@ -3215,7 +3215,7 @@ export interface paths {
         };
         /**
          * 连接列表（owner）
-         * @description 服务端搜索（名称、URL、模型 ID，按字面、不区分大小写）与筛选，分页之前生效；total 是符合条件的全部连接数。归类为非模型凭据的导入项不在这里（见 migration/entries）。游标绑定筛选条件，换条件要从第一页重新加载（旧游标 422）。
+         * @description 服务端搜索（名称、URL、模型 ID，按字面、不区分大小写）与筛选，分页之前生效；total 是符合条件的全部连接数。游标绑定筛选条件，换条件要从第一页重新加载（旧游标 422）。
          */
         get: operations["list_model_connections"];
         put?: never;
@@ -3244,66 +3244,6 @@ export interface paths {
         get: operations["get_model_connection_capabilities"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/model-connections/migration/entries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 旧密钥库导入项（owner）
-         * @description 待完善 / 待归类 / 已纳管 / 非模型凭据 / 需要复核（Key 不可读）。不含 Key。导入在页面上执行（POST migration/run），也可以用命令 app.commands.migrate_model_connections。
-         */
-        get: operations["list_migration_entries"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/model-connections/migration/entries/{entry_id}/classify": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 把导入项归类为模型连接或非模型凭据（owner）
-         * @description 保留同一个映射、同一条凭据与原授权，不新建、不恢复已撤销的访问、不改启停；有原生绑定或进行中的应用任务时不能改判为非模型（409 MODEL_BINDING_CONFLICT）。
-         */
-        post: operations["classify_migration_entry"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/model-connections/migration/run": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 在页面上导入旧密钥库（owner）
-         * @description 与命令 app.commands.migrate_model_connections 相同：只处理当前工作空间；dry_run 只读预览，apply 按批导入（每批一个事务，可以重复执行，已导入的不重复、撤销过的授权不恢复），report 只读对账。不复制密文、不换 ID、不建模型或绑定、不访问外部服务；只返回计数与错误类别。密钥库没有配置加密密钥时 503。
-         */
-        post: operations["run_model_connection_migration"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3343,14 +3283,14 @@ export interface paths {
         post?: never;
         /**
          * 删除连接（owner）
-         * @description 有授权、绑定、进行中的应用任务，或旧配置 / 运行环境仍引用这条凭据时 409 CONNECTION_IN_USE（details 列出影响）；不会顺带删除或停掉智能体。
+         * @description 有授权、绑定或进行中的应用任务时 409 CONNECTION_IN_USE（details 列出影响）；不会顺带删除或停掉智能体。
          */
         delete: operations["delete_model_connection"];
         options?: never;
         head?: never;
         /**
          * 修改连接（owner）
-         * @description 省略的字段不变；不含 Key（用 rotate-key）。已配置完整、且有授权或绑定的连接改 URL / 协议返回 409 CONNECTION_ENDPOINT_IN_USE（复制为新连接再切换）；旧导入项第一次从空补齐例外。停用会影响实例时先 409 CONNECTION_IN_USE（details.impact），确认后带 confirm_impact=true 再提交。
+         * @description 省略的字段不变；不含 Key（用 rotate-key）。已配置完整、且有授权或绑定的连接改 URL / 协议返回 409 CONNECTION_ENDPOINT_IN_USE（复制为新连接再切换）；草稿第一次补齐地址不受限。停用会影响实例时先 409 CONNECTION_IN_USE（details.impact），确认后带 confirm_impact=true 再提交。
          */
         patch: operations["update_model_connection"];
         trace?: never;
@@ -3386,7 +3326,7 @@ export interface paths {
         put?: never;
         /**
          * 检测连接（owner）
-         * @description metadata：请求服务商的模型列表接口，只证明 Key 与元数据接口可用，不代表任何模型能推理。inference：用固定的最短提示（ping、最多 16 个输出 token、不流式、不自动重试）对选定的模型发一次真实推理请求，可能产生少量服务商费用；model_id 必须在连接的模型集合里（否则 422 MODEL_NOT_ALLOWED），通过后该模型标为 verified。结果只有固定类别：status = passed / failed / rate_limited / unsupported / unknown，reason 见 CheckReason；限流时 retry_at 取服务商的 Retry-After（没有合法值为 null）。检测期间连接配置变了（例如更换了 Key）时结果记为 unknown / stale_revision，不覆盖当前配置的 last_check。检测结果不改变连接的 version。同一连接同一时间只能有一个同步或检测（409 CHECK_IN_PROGRESS）；每个 owner 对每个连接每分钟最多 5 次同步与检测合计（429 RATE_LIMITED，带 Retry-After）。停用的连接也可以同步和检测（排查问题用）；非模型凭据 409 MODEL_CONNECTION_NON_MODEL，没填协议或地址 409 MODEL_CONFIGURATION_INCOMPLETE，协议未核验开放 409 MODEL_PROTOCOL_UNSUPPORTED；version 不是当前版本 409 VERSION_CONFLICT。
+         * @description metadata：请求服务商的模型列表接口，只证明 Key 与元数据接口可用，不代表任何模型能推理。inference：用固定的最短提示（ping、最多 16 个输出 token、不流式、不自动重试）对选定的模型发一次真实推理请求，可能产生少量服务商费用；model_id 必须在连接的模型集合里（否则 422 MODEL_NOT_ALLOWED），通过后该模型标为 verified。结果只有固定类别：status = passed / failed / rate_limited / unsupported / unknown，reason 见 CheckReason；限流时 retry_at 取服务商的 Retry-After（没有合法值为 null）。检测期间连接配置变了（例如更换了 Key）时结果记为 unknown / stale_revision，不覆盖当前配置的 last_check。检测结果不改变连接的 version。同一连接同一时间只能有一个同步或检测（409 CHECK_IN_PROGRESS）；每个 owner 对每个连接每分钟最多 5 次同步与检测合计（429 RATE_LIMITED，带 Retry-After）。停用的连接也可以同步和检测（排查问题用）；没填协议或地址 409 MODEL_CONFIGURATION_INCOMPLETE，协议未核验开放 409 MODEL_PROTOCOL_UNSUPPORTED；version 不是当前版本 409 VERSION_CONFLICT。
          */
         post: operations["check_model_connection"];
         delete?: never;
@@ -3406,7 +3346,7 @@ export interface paths {
         get: operations["list_model_connection_grants"];
         /**
          * 整体替换连接授权（owner）
-         * @description 跨工作空间或不存在的实例 404；撤销正以它为主模型的实例返回 409 GRANT_IN_USE（先切换或解除主模型）。撤销时同一事务撤掉这条凭据对该实例的旧授权（含运行环境的引用）。
+         * @description 跨工作空间或不存在的实例 404；撤销正以它为主模型的实例返回 409 GRANT_IN_USE（先切换或解除主模型）。
          */
         put: operations["replace_model_connection_grants"];
         post?: never;
@@ -3451,7 +3391,7 @@ export interface paths {
         put?: never;
         /**
          * 从服务商同步模型列表（owner）
-         * @description 向服务商请求一次模型列表（不翻页）。完整结果（不超过 1000 个、响应不超过 2 MiB）保存为快照：“服务商全部可用模型”范围下模型集合换成快照，但正被智能体使用的模型不会移除（kept_in_use 列出）；“指定模型”范围只更新快照，不改变选中的模型。不完整（partial）、失败（failed）或服务商不支持列模型（unsupported）时保留上一次的完整快照与模型集合（kept_previous=true），reason / retry_at 说明原因；不支持列模型时请用“指定模型”手工填写。列出的模型不代表能推理（不会标 verified）。同步期间连接配置变了（例如更换了 Key）时结果作废：sync_state=failed、reason=stale_revision。同一连接同一时间只能有一个同步或检测（409 CHECK_IN_PROGRESS）；每个 owner 对每个连接每分钟最多 5 次同步与检测合计（429 RATE_LIMITED，带 Retry-After）。停用的连接也可以同步和检测（排查问题用）；非模型凭据 409 MODEL_CONNECTION_NON_MODEL，没填协议或地址 409 MODEL_CONFIGURATION_INCOMPLETE，协议未核验开放 409 MODEL_PROTOCOL_UNSUPPORTED；version 不是当前版本 409 VERSION_CONFLICT。
+         * @description 向服务商请求一次模型列表（不翻页）。完整结果（不超过 1000 个、响应不超过 2 MiB）保存为快照：“服务商全部可用模型”范围下模型集合换成快照，但正被智能体使用的模型不会移除（kept_in_use 列出）；“指定模型”范围只更新快照，不改变选中的模型。不完整（partial）、失败（failed）或服务商不支持列模型（unsupported）时保留上一次的完整快照与模型集合（kept_previous=true），reason / retry_at 说明原因；不支持列模型时请用“指定模型”手工填写。列出的模型不代表能推理（不会标 verified）。同步期间连接配置变了（例如更换了 Key）时结果作废：sync_state=failed、reason=stale_revision。同一连接同一时间只能有一个同步或检测（409 CHECK_IN_PROGRESS）；每个 owner 对每个连接每分钟最多 5 次同步与检测合计（429 RATE_LIMITED，带 Retry-After）。停用的连接也可以同步和检测（排查问题用）；没填协议或地址 409 MODEL_CONFIGURATION_INCOMPLETE，协议未核验开放 409 MODEL_PROTOCOL_UNSUPPORTED；version 不是当前版本 409 VERSION_CONFLICT。
          */
         post: operations["sync_model_connection_models"];
         delete?: never;
@@ -5648,7 +5588,7 @@ export interface components {
              * Apply State
              * @enum {string}
              */
-            apply_state: "legacy_active" | "pending" | "applying" | "applied" | "failed" | "unknown" | "manual_required";
+            apply_state: "pending" | "applying" | "applied" | "failed" | "unknown" | "manual_required";
             /**
              * Connection Id
              * @description 目标连接；解除绑定后为 null
@@ -6094,13 +6034,7 @@ export interface components {
         };
         /**
          * AgentSecretOut
-         * @description 从不包含明文。
-         *
-         *     导入中转站管理之后（T-0203），model_connection_id / migration_state 指向映射的连接：
-         *     needs_configuration / managed 由中转站管理托管，这里的改名、轮换、删除与新增授权返回
-         *     409 MANAGED_BY_MODEL_CONNECTION；needs_classification / non_model 仍可在这里修改，
-         *     但同样受连接的版本与停用约束（连接停用后实例取用一律 NOT_FOUND）。
-         *     新建连接自己的内部凭据不出现在密钥库里。
+         * @description 从不包含明文。中转站管理连接自己的 Key 不出现在密钥库里。
          */
         AgentSecretOut: {
             /**
@@ -6127,16 +6061,6 @@ export interface components {
              * Format: date-time
              */
             last_rotated_at: string;
-            /**
-             * Migration State
-             * @description 映射的迁移状态：needs_configuration / managed 由中转站管理托管（这里只读）；needs_classification / non_model 可在这里修改；还没导入时为 null
-             */
-            migration_state?: ("native" | "needs_configuration" | "needs_classification" | "managed" | "non_model") | null;
-            /**
-             * Model Connection Id
-             * @description 映射到的中转站管理连接 ID（即迁移项 entry_id）；还没导入时为 null
-             */
-            model_connection_id?: string | null;
             /** Name */
             name: string;
             /**
@@ -9920,17 +9844,6 @@ export interface components {
              */
             version: number;
         };
-        /**
-         * LegacyModelInfo
-         * @description 没有原生绑定、仍按旧配置运行的实例：只给旧授权的引用名，不猜连接与模型。
-         */
-        LegacyModelInfo: {
-            /**
-             * Legacy Refs
-             * @description 这个实例在旧密钥库里的授权引用名
-             */
-            legacy_refs: string[];
-        };
         /** LinkOut */
         LinkOut: {
             /**
@@ -10554,132 +10467,6 @@ export interface components {
              */
             views: components["schemas"]["MetricViewOut"][];
         };
-        /** MigrationBatchOut */
-        MigrationBatchOut: {
-            /** Already Mapped */
-            already_mapped: number;
-            /** Batch */
-            batch: number;
-            /**
-             * Error
-             * @description 错误类别（不含异常原文）
-             */
-            error: string | null;
-            /** Failed */
-            failed: number;
-            /** Mapped */
-            mapped: number;
-            /** Scanned */
-            scanned: number;
-            /**
-             * Status
-             * @description committed / rolled_back / read_only
-             */
-            status: string;
-        };
-        /** MigrationClassify */
-        MigrationClassify: {
-            /**
-             * Purpose
-             * @enum {string}
-             */
-            purpose: "model" | "non_model";
-            /**
-             * Version
-             * @description 乐观并发版本号；写请求带上读取时的版本
-             */
-            version: number;
-        };
-        /**
-         * MigrationEntryOut
-         * @description 旧密钥库的导入项（连接映射）。不含 Key。
-         */
-        MigrationEntryOut: {
-            connection: components["schemas"]["ModelConnectionOut"];
-            /**
-             * Entry Id
-             * Format: uuid
-             * @description 迁移映射 ID（即连接 ID）
-             */
-            entry_id: string;
-            /**
-             * Legacy Grant Refs
-             * @description 原有授权的 ref_id（OpenClaw 配置里的引用名）
-             */
-            legacy_grant_refs: string[];
-            /**
-             * Legacy Kind
-             * @enum {string}
-             */
-            legacy_kind: "model_api_key" | "api_token" | "generic";
-            /** Legacy Name */
-            legacy_name: string;
-        };
-        /** MigrationEntryPage */
-        MigrationEntryPage: {
-            /**
-             * Counts
-             * @description needs_configuration / needs_classification / managed / non_model / needs_review / unmapped（还没导入的旧密钥数）
-             */
-            counts: {
-                [key: string]: number;
-            };
-            /** Items */
-            items: components["schemas"]["MigrationEntryOut"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
-            /** Total */
-            total: number;
-        };
-        /**
-         * MigrationRun
-         * @description 在页面上执行旧密钥导入（与命令 app.commands.migrate_model_connections 相同的逻辑）。
-         */
-        MigrationRun: {
-            /**
-             * Mode
-             * @description dry_run 只读预览；apply 按批导入（可以重复执行）；report 只读对账
-             * @enum {string}
-             */
-            mode: "dry_run" | "apply" | "report";
-        };
-        /**
-         * MigrationRunOut
-         * @description 只有计数与错误类别，不含 Key、密文或名称。
-         */
-        MigrationRunOut: {
-            /** Already Mapped */
-            already_mapped: number;
-            /** Batches */
-            batches: components["schemas"]["MigrationBatchOut"][];
-            /** Failed */
-            failed: number;
-            /**
-             * Mapped
-             * @description 本次新建（dry_run 是将新建）的映射数
-             */
-            mapped: number;
-            /**
-             * Mode
-             * @enum {string}
-             */
-            mode: "dry_run" | "apply" | "report";
-            /** Needs Classification */
-            needs_classification: number;
-            /** Needs Configuration */
-            needs_configuration: number;
-            /**
-             * Reconciliation
-             * @description report 才有：映射、授权、绑定、取用记录的对账计数
-             */
-            reconciliation?: {
-                [key: string]: unknown;
-            } | null;
-            /** Scanned */
-            scanned: number;
-            /** Unreadable */
-            unreadable: number;
-        };
         /**
          * MobilePosition
          * @description 移动端单列：按 y 从小到大排列。
@@ -10747,7 +10534,6 @@ export interface components {
             instance_name: string;
             /** Instance Status */
             instance_status: string;
-            legacy: components["schemas"]["LegacyModelInfo"] | null;
         };
         /** ModelBindingApply */
         ModelBindingApply: {
@@ -10779,12 +10565,10 @@ export interface components {
         ModelBindingView: {
             /**
              * Apply State
-             * @description 有绑定时同 binding.apply_state；没有绑定、仍按旧配置运行时为 legacy_active
+             * @description 有绑定时同 binding.apply_state；还没有设置主模型时为 null
              */
-            apply_state: ("legacy_active" | "pending" | "applying" | "applied" | "failed" | "unknown" | "manual_required") | null;
+            apply_state: ("pending" | "applying" | "applied" | "failed" | "unknown" | "manual_required") | null;
             binding: components["schemas"]["AgentModelBindingOut"] | null;
-            /** @description apply_state 为 legacy_active 时的旧配置信息；有原生绑定时为 null */
-            legacy: components["schemas"]["LegacyModelInfo"] | null;
         };
         /** ModelConfigApplied */
         ModelConfigApplied: {
@@ -10816,7 +10600,7 @@ export interface components {
              * Apply State
              * @enum {string}
              */
-            apply_state: "legacy_active" | "pending" | "applying" | "applied" | "failed" | "unknown" | "manual_required";
+            apply_state: "pending" | "applying" | "applied" | "failed" | "unknown" | "manual_required";
             /** Desired Revision */
             desired_revision: number;
         };
@@ -10922,7 +10706,7 @@ export interface components {
             configuration_state: "draft" | "ready" | "needs_review";
             /**
              * Connection Type
-             * @description 迁移草稿可能为 null
+             * @description 草稿可能为 null
              */
             connection_type: ("official" | "relay") | null;
             /**
@@ -10956,16 +10740,6 @@ export interface components {
             id: string;
             /** @description 最近一次与当前配置修订号一致的检测；配置变化后为 null */
             last_check: components["schemas"]["ConnectionCheckOut"] | null;
-            /**
-             * Legacy Source Id
-             * @description 从旧密钥库导入时的原密钥 ID，只用于追溯，不能拿来取 Key
-             */
-            legacy_source_id: string | null;
-            /**
-             * Migration State
-             * @enum {string}
-             */
-            migration_state: "native" | "needs_configuration" | "needs_classification" | "managed" | "non_model";
             /** Model Count */
             model_count: number;
             /**
@@ -11015,7 +10789,7 @@ export interface components {
         };
         /**
          * ModelConnectionSummary
-         * @description 整个工作空间的统计，不受分页或筛选影响；non_model 不计入。
+         * @description 整个工作空间的统计，不受分页或筛选影响。
          */
         ModelConnectionSummary: {
             /**
@@ -11030,14 +10804,9 @@ export interface components {
             check_passed_inference: number;
             /**
              * Needs Attention
-             * @description 待完善 / 待归类 / 需要复核 / 最近检测失败或限流的连接数
+             * @description 草稿 / 需要复核（Key 不可读）/ 最近检测失败或限流的连接数
              */
             needs_attention: number;
-            /**
-             * Non Model
-             * @description 归类为非模型凭据的兼容项数
-             */
-            non_model: number;
             /** Total */
             total: number;
             /**
@@ -30723,238 +30492,6 @@ export interface operations {
             };
             /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
             422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    list_migration_entries: {
-        parameters: {
-            query?: {
-                state?: ("needs_configuration" | "needs_classification" | "managed" | "non_model" | "needs_review") | null;
-                /** @description 上一页返回的 next_cursor */
-                cursor?: string | null;
-                limit?: number;
-            };
-            header: {
-                /** @description 当前工作空间；不是成员时返回 404 */
-                "X-Workspace-Id": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MigrationEntryPage"];
-                };
-            };
-            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    classify_migration_entry: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
-                /** @description 当前工作空间；不是成员时返回 404 */
-                "X-Workspace-Id": string;
-            };
-            path: {
-                entry_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MigrationClassify"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MigrationEntryOut"];
-                };
-            };
-            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    run_model_connection_migration: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
-                "X-CSRF-Token"?: string | null;
-                /** @description 当前工作空间；不是成员时返回 404 */
-                "X-Workspace-Id": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MigrationRun"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MigrationRunOut"];
-                };
-            };
-            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
-            503: {
                 headers: {
                     [name: string]: unknown;
                 };

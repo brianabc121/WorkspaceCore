@@ -1748,15 +1748,6 @@ async def test_check_preconditions_and_disabled_connection(
     unsupported = await ctx.check(other["id"], "metadata")
     assert unsupported.status_code == 409 and _error(unsupported) == "MODEL_PROTOCOL_UNSUPPORTED"
 
-    # 非模型凭据
-    await run_sql(
-        ctx.database_url,
-        "UPDATE workspace.model_connections SET migration_state = 'non_model' WHERE id = $1",
-        uuid.UUID(other["id"]),
-    )
-    non_model = await ctx.sync(other["id"])
-    assert non_model.status_code == 409 and _error(non_model) == "MODEL_CONNECTION_NON_MODEL"
-
     # Key 解不开：记为 credential_unreadable，不发请求
     sent = len(ctx.relay.requests)
     await run_sql(

@@ -143,10 +143,8 @@ class BundleInput:
     # OpenClaw 容器的资源上限（D2：默认不设）
     mem_limit_mb: int | None = None
     cpus: float | None = None
-    # 主模型：有原生绑定时写入受管 provider；legacy_model 为真时保留模板里的旧 openai 段
-    # （实例仍按旧授权 openai_api_key 运行）；都没有时不写模型段
+    # 主模型：有绑定时写入受管 provider 与主模型；没有绑定时不写模型段
     model: BundleModel | None = None
-    legacy_model: bool = False
 
 
 def _read(name: str) -> str:
@@ -165,9 +163,7 @@ def model_provider(model: BundleModel) -> dict[str, Any]:
     }
 
 
-def _openclaw_json(
-    whitelist: list[str], model: BundleModel | None = None, *, legacy_model: bool = False
-) -> str:
+def _openclaw_json(whitelist: list[str], model: BundleModel | None = None) -> str:
     # 不能加说明用的键（例如 _comment）：OpenClaw 会把整个配置判为无效
     # （T-0059 用真实 OpenClaw 验收发现）。说明写在 CHECKLIST.md / README.md 里
     config: dict[str, Any] = json.loads(_read("openclaw.json.template"))
@@ -178,9 +174,6 @@ def _openclaw_json(
         config.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
             "primary": f"{model.provider_key}/{model.model_id}"
         }
-    elif not legacy_model:
-        # 新实例不再默认使用固定的 openai_api_key（T-0205）：在实例页设置主模型后自动应用
-        config.pop("models", None)
     return json.dumps(config, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -396,7 +389,7 @@ def build(data: BundleInput, *, now: datetime | None = None) -> bytes:
         _add(
             zf,
             "state/openclaw.json",
-            _openclaw_json(data.whitelist, data.model, legacy_model=data.legacy_model),
+            _openclaw_json(data.whitelist, data.model),
             0o600,
             now,
         )

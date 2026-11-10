@@ -11,7 +11,7 @@ const emit = defineEmits<{ select: [id: string, row: HTMLElement | null]; check:
 const row = (event: Event) => (event.currentTarget as HTMLElement | null)?.closest('tr') ?? null
 let opener: HTMLElement | null = null
 const remember = (event: Event) => { opener = row(event) }
-const typeLabel = (c: Connection) => (c.connection_type ? TYPE_LABEL[c.connection_type] : '旧密钥导入')
+const typeLabel = (c: Connection) => (c.connection_type ? TYPE_LABEL[c.connection_type] : '未选类型')
 const showCheck = (c: Connection) => c.configuration_state === 'ready' || !!c.last_check
 // 菜单项选中后菜单要先关上并把焦点还给“…”按钮，再打开抽屉或对话框（之后焦点能回到这个按钮）
 const later = (fn: () => void) => { setTimeout(fn, 0) }
@@ -27,7 +27,7 @@ const later = (fn: () => void) => { setTimeout(fn, 0) }
             <span class="mc-name">
               <span class="mc-icon" aria-hidden="true"><Cloud v-if="c.connection_type === 'official'" /><Layers v-else-if="c.connection_type === 'relay'" /><KeyRound v-else /></span>
               <span class="mc-name-text">
-                <span class="mc-name-line"><strong>{{ c.name }}</strong><span class="mc-type" :class="`is-${c.connection_type ?? 'legacy'}`">{{ typeLabel(c) }}</span></span>
+                <span class="mc-name-line"><strong>{{ c.name }}</strong><span class="mc-type" :class="`is-${c.connection_type ?? 'draft'}`">{{ typeLabel(c) }}</span></span>
                 <span class="asv-sub mc-url" :title="c.base_url ?? undefined">{{ c.base_url ?? '待补充连接 URL' }}</span>
               </span>
             </span>

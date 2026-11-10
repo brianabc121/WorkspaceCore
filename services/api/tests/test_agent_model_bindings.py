@@ -6,7 +6,7 @@
 - 迟到的旧回报不能覆盖新目标；切换未确认时旧连接仍可取 Key，确认后退休；
 - 实例只能取自己目标 / 已应用连接的 Key；解除绑定、停用连接、撤销授权立即拒绝取用；
 - Key 更换让绑定重新应用；排队太久显示 unknown；
-- 接入包：有绑定写受管 provider（无 Key），旧授权保留 openai 段，都没有不写模型段。
+- 接入包：有绑定写受管 provider（无 Key）；没有绑定不写模型段（旧授权也不写，T-0209）。
 """
 
 import json
@@ -405,21 +405,20 @@ async def test_stale_jobs_show_unknown(env: Env) -> None:
     assert retry.json()["state"] == "queued" and retry.json()["attempt"] == 2
 
 
-async def test_assignments_picker_and_legacy(env: Env) -> None:
+async def test_assignments_and_picker(env: Env) -> None:
     instance, a, b, _ = await setup_two(env)
-    legacy = await env.create_instance(name="旧实例")
-    secret = await env.create_secret()
-    await env.grant(legacy["id"], [{"secret_id": secret["id"], "ref_id": "openai_api_key"}])
+    blank = await env.create_instance(name="空白")
     await put(env, instance["id"], a["id"], "m-1", None)
 
     page = (await env.client.get("/api/v1/agents/model-assignments", headers=env.headers())).json()
     rows = {row["instance_name"]: row for row in page["items"]}
     assert page["total"] == 2
-    assert rows["甲"]["binding"]["connection_name"] == "Alpha" and rows["甲"]["legacy"] is None
-    assert rows["旧实例"]["binding"] is None
-    assert rows["旧实例"]["legacy"] == {"legacy_refs": ["openai_api_key"]}
-    legacy_view = await view(env, legacy["id"])
-    assert legacy_view["apply_state"] == "legacy_active" and legacy_view["binding"] is None
+    assert rows["甲"]["binding"]["connection_name"] == "Alpha"
+    assert "legacy" not in rows["甲"]
+    # 还没有设置主模型的实例：没有绑定，也没有“旧配置”状态（T-0209）
+    assert rows["空白"]["binding"] is None
+    blank_view = await view(env, blank["id"])
+    assert blank_view["apply_state"] is None and blank_view["binding"] is None
     only_a = (
         await env.client.get(
             "/api/v1/agents/model-assignments",
@@ -432,7 +431,7 @@ async def test_assignments_picker_and_legacy(env: Env) -> None:
     options = (
         await env.client.get(
             "/api/v1/agents/model-connection-options",
-            params={"instance_id": legacy["id"]},
+            params={"instance_id": blank["id"]},
             headers=env.headers(),
         )
     ).json()
@@ -481,49 +480,14 @@ async def test_bundle_writes_the_managed_provider_without_a_key(env: Env) -> Non
     resolver = files["bin/myworkspace-secret-resolver"][0]
     assert "/v1/model-credentials/resolve" in resolver and "/v1/secrets/resolve" in resolver
 
-    # 旧授权（没有原生绑定）：保留旧 openai 段
-    legacy = await env.create_instance(name="旧实例")
-    secret = await env.create_secret()
-    await env.grant(legacy["id"], [{"secret_id": secret["id"], "ref_id": "openai_api_key"}])
-    old = json.loads(_unzip(await _bundle(env, legacy["id"]))["state/openclaw.json"][0])
-    assert old["models"]["providers"]["openai"]["apiKey"]["id"] == "openai_api_key"
+    # 实例的旧密钥授权不会变成模型段：模型 Key 只在中转站管理的连接里（T-0209）
+    other = await env.create_instance(name="只有兼容凭据")
+    secret = await env.create_secret(name="GitHub")
+    await env.grant(other["id"], [{"secret_id": secret["id"], "ref_id": "openai_api_key"}])
+    old = json.loads(_unzip(await _bundle(env, other["id"]))["state/openclaw.json"][0])
+    assert "models" not in old
     assert "model" not in old.get("agents", {}).get("defaults", {})
-    # 新实例、没有绑定：不写模型段（不再默认使用 openai_api_key）
+    # 新实例、没有绑定：不写模型段
     blank = await env.create_instance(name="空白")
     fresh = json.loads(_unzip(await _bundle(env, blank["id"]))["state/openclaw.json"][0])
     assert "models" not in fresh
-
-
-async def test_switching_one_instance_keeps_the_shared_legacy_key(env: Env) -> None:
-    """两个实例共用旧的 openai_api_key（验收 M09）：甲改用受管连接并应用后，
-    乙仍能按旧引用取到 Key，甲、乙的旧授权都不被清理（是否撤销由 owner 决定）。"""
-    legacy_value = "sk-shared-legacy-7a3d"
-    secret = await env.create_secret(value=legacy_value)
-    first = await env.create_instance(name="甲")
-    second = await env.create_instance(name="乙")
-    for instance in (first, second):
-        await env.grant(instance["id"], [{"secret_id": secret["id"], "ref_id": "openai_api_key"}])
-    alpha = await connection(env, "Alpha", KEY_A)
-    await grant(env, alpha["id"], [first["id"]])
-    token_first = await env.issue_token(first["id"])
-    token_second = await env.issue_token(second["id"])
-
-    assert (await put(env, first["id"], alpha["id"], "m-1", None)).status_code == 200
-    cfg = (await config(env, token_first)).json()
-    assert (await report(env, token_first, cfg)).json()["apply_state"] == "applied"
-
-    shared = await env.client.post(
-        "/agent-api/v1/secrets/resolve",
-        json={"ids": ["openai_api_key"]},
-        headers=agent_headers(token_second),
-    )
-    assert shared.status_code == 200, shared.text
-    assert shared.json()["values"] == {"openai_api_key": legacy_value}
-    grants = await run_sql(
-        env.database_url,
-        "SELECT count(*) FROM workspace.agent_secret_grants WHERE secret_id = $1",
-        uuid.UUID(secret["id"]),
-    )
-    assert grants == 2
-    # 乙仍是“旧配置”，没有被顺带建绑定
-    assert (await view(env, second["id"]))["apply_state"] == "legacy_active"

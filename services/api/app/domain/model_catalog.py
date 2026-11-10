@@ -130,8 +130,6 @@ class ModelCatalogService:
 
     def _ensure_checkable(self, connection: ModelConnection) -> tuple[str, str]:
         """返回（协议, 协议基地址）。不能访问服务商的连接直接 409。"""
-        if connection.migration_state == "non_model":
-            raise ApiError(409, "MODEL_CONNECTION_NON_MODEL", "非模型凭据不做模型同步或检测")
         if not connection.protocol or not connection.base_url:
             raise ApiError(
                 409,

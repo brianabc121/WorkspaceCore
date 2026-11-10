@@ -5,7 +5,7 @@ import type { Schema } from '../src/services/api'
 
 // 中转站管理（T-0206 / MC-6，web 计划 MC-6；规范第 4 节、契约第 1、2 节）：
 // 列表的搜索 / 页签 / 状态筛选在服务端、total 与汇总来自服务端；官方预设、第三方中转与多模型表单；Key 不回显、空值不提交；
-// 限流 / 凭据 / 不支持 / 过期等检测状态不被当成空成功；迁移草稿与非模型凭据；切换工作空间与迟到的响应；OpenClaw 连接分配。
+// 限流 / 凭据 / 不支持 / 过期等检测状态不被当成空成功；草稿补全与兼容凭据（非模型）；切换工作空间与迟到的响应；OpenClaw 连接分配。
 const path = (r: Request) => new URL(r.url).pathname
 const params = (r: Request) => new URL(r.url).searchParams
 const at = '2026-11-09T04:00:00Z'
@@ -20,7 +20,7 @@ const check = (over: Partial<Schema['ConnectionCheckOut']> = {}): Schema['Connec
 const conn = (over: Partial<Schema['ModelConnectionOut']> = {}): Schema['ModelConnectionOut'] => ({
   id: ID.a, workspace_id: 'workspace-a', name: '团队多模型中转', description: '', connection_type: 'relay', official_provider: null, protocol: 'openai_compatible',
   base_url: 'https://gateway.example.com/v1', credential_configured: true, credential_version: 1, model_scope: 'selected', configuration_state: 'ready', enabled: true,
-  migration_state: 'native', legacy_source_id: null, model_count: 2, model_preview: [], grant_count: 1, binding_count: 0, config_revision: 1, version: 3, last_check: null,
+  model_count: 2, model_preview: [], grant_count: 1, binding_count: 0, config_revision: 1, version: 3, last_check: null,
   models_synced_at: null, sync_state: null, created_at: at, updated_at: at, ...over,
 })
 const modelPage = (ids: string[], over: Partial<Schema['ConnectionModelPage']> = {}): Schema['ConnectionModelPage'] => ({
@@ -64,8 +64,7 @@ describe('中转站管理：列表与汇总', () => {
     const C = conn({ id: ID.c, name: '备用模型连接', model_count: 1 })
     const requests = setup(r => {
       const p = path(r), q = params(r)
-      if (p === '/api/v1/model-connections/summary') return Response.json({ total: 42, check_passed: 7, check_passed_inference: 2, needs_attention: 5, non_model: 1, unique_granted_instances: 9 })
-      if (p === '/api/v1/model-connections/migration/entries') return Response.json({ items: [], next_cursor: null, total: 2, counts: { needs_configuration: 1, needs_classification: 0, managed: 1 } })
+      if (p === '/api/v1/model-connections/summary') return Response.json({ total: 42, check_passed: 7, check_passed_inference: 2, needs_attention: 5, unique_granted_instances: 9 })
       if (p === '/api/v1/model-connections' && r.method === 'GET') {
         if (q.get('q') === 'boom') return Response.json({ error: { code: 'HTTP_ERROR', message: '', request_id: null, details: {} } }, { status: 503 })
         if (q.get('q') === 'nothing') return page([], 0)
@@ -82,7 +81,7 @@ describe('中转站管理：列表与汇总', () => {
     expect(within(tiles).getByText('待完善').closest('div')).toHaveTextContent('待完善5')
     expect(within(tiles).getByText('关联智能体').closest('div')).toHaveTextContent('关联智能体9')
     expect(tiles).toHaveTextContent('元数据检测不代表模型能推理')
-    expect(await screen.findByText(/旧密钥已导入 · 1 项待补全连接信息/)).toBeVisible()
+    expect(screen.queryByText(/旧密钥已导入|迁移记录/)).toBeNull()
 
     const list = screen.getByRole('region', { name: '连接列表' })
     const official = await within(list).findByRole('row', { name: /OpenAI 官方/ })
@@ -126,7 +125,7 @@ describe('中转站管理：列表与汇总', () => {
     // 汇总仍是全工作空间的数
     expect(within(tiles).getByText('连接总数').closest('div')).toHaveTextContent('连接总数42')
 
-    await fireEvent.click(screen.getByRole('button', { name: /查看迁移记录/ }))
+    await fireEvent.click(screen.getByRole('tab', { name: '兼容凭据' }))
     await vi.waitFor(() => expect(router.currentRoute.value.query.tab).toBe('compat'))
   })
 
@@ -141,7 +140,7 @@ describe('中转站管理：列表与汇总', () => {
         A = { ...A, enabled: false, version: 4 }
         return Response.json(A)
       }
-      if (r.method === 'DELETE') return conflict('CONNECTION_IN_USE', { legacy_grants: 2 })
+      if (r.method === 'DELETE') return conflict('CONNECTION_IN_USE', { impact })
     }, { [ID.a]: A }, { [ID.a]: ['gpt-4.1'] })
     await openApp('/settings/model-connections')
     const list = screen.getByRole('region', { name: '连接列表' })
@@ -166,7 +165,9 @@ describe('中转站管理：列表与汇总', () => {
     await fireEvent.click(within(confirm).getByRole('button', { name: '删除' }))
     await vi.waitFor(() => expect(requests.some(r => r.method === 'DELETE')).toBe(true))
     expect(params(requests.find(r => r.method === 'DELETE')!).get('version')).toBe('4')
-    expect(await within(confirm).findByRole('alert')).toHaveTextContent('仍被旧配置或运行环境引用（2 处旧授权）')
+    const problem = await within(confirm).findByRole('alert')
+    expect(problem).toHaveTextContent('连接仍有授权、绑定或进行中的应用任务')
+    expect(problem).toHaveTextContent('开发助手（以它为主模型）')
     expect(screen.getByRole('dialog', { name: '删除连接' })).toBeVisible()
     expect(screen.queryByText(/已删除/)).toBeNull()
   })
@@ -383,7 +384,7 @@ describe('中转站管理：键盘与焦点', () => {
     const A = conn({ id: ID.a, name: 'OpenAI 官方', model_preview: ['gpt-4.1'] })
     setup(r => {
       const p = path(r)
-      if (p === '/api/v1/model-connections/summary') return Response.json({ total: 1, check_passed: 0, check_passed_inference: 0, needs_attention: 0, non_model: 0, unique_granted_instances: 0 })
+      if (p === '/api/v1/model-connections/summary') return Response.json({ total: 1, check_passed: 0, check_passed_inference: 0, needs_attention: 0, unique_granted_instances: 0 })
       if (p === '/api/v1/model-connections' && r.method === 'GET') return page([A])
     }, { [ID.a]: A }, { [ID.a]: ['gpt-4.1'] })
     await openApp('/settings/model-connections')
@@ -406,77 +407,52 @@ describe('中转站管理：键盘与焦点', () => {
   })
 })
 
-describe('中转站管理：迁移与兼容凭据', () => {
-  it('test_migration_drafts_and_non_model_credentials: completes an imported draft without creating bindings, classifies an entry and keeps managing non-model credentials', async () => {
+describe('中转站管理：草稿与兼容凭据', () => {
+  it('test_draft_and_compat_credentials: completes a draft without creating bindings and keeps managing non-model credentials only', async () => {
     const SEC = '20000000-0000-4000-8000-000000000001'
-    let draft = conn({ id: ID.a, name: 'news_model', connection_type: null, protocol: null, base_url: null, configuration_state: 'draft', migration_state: 'needs_configuration', legacy_source_id: SEC, model_count: 0, grant_count: 1, version: 4 })
-    const token = conn({ id: ID.b, name: 'github_token', connection_type: null, protocol: null, base_url: null, configuration_state: 'draft', migration_state: 'needs_classification', model_count: 0, grant_count: 0, version: 2 })
-    const nonModel = conn({ id: ID.c, name: 'deploy_token', connection_type: null, protocol: null, base_url: null, configuration_state: 'draft', migration_state: 'non_model', model_count: 0, version: 1 })
-    const entry = (c: Schema['ModelConnectionOut'], legacy_kind: Schema['MigrationEntryOut']['legacy_kind'], refs: string[]): Schema['MigrationEntryOut'] => ({ entry_id: c.id, connection: c, legacy_name: c.name, legacy_kind, legacy_grant_refs: refs })
+    let draft = conn({ id: ID.a, name: 'news_model', connection_type: null, protocol: null, base_url: null, configuration_state: 'draft', model_count: 0, grant_count: 0, version: 4 })
     const secret: Schema['AgentSecretOut'] = { id: SEC, name: 'deploy_token', kind: 'api_token', description: '部署用', value_version: 1, last_rotated_at: at, grants: [], version: 2, created_at: at, updated_at: at }
     const requests = setup(async r => {
       const p = path(r)
-      if (p === '/api/v1/model-connections/migration/entries') return Response.json({ items: [entry(draft, 'model_api_key', ['openai_api_key']), entry(token, 'api_token', ['github_token']), entry(nonModel, 'api_token', [])], next_cursor: null, total: 3, counts: { needs_configuration: 1, needs_classification: 1, non_model: 1, managed: 0 } })
-      if (p.endsWith('/classify')) return Response.json(entry({ ...token, migration_state: 'non_model', version: 3 }, 'api_token', ['github_token']))
-      if (p === '/api/v1/model-connections/migration/run') {
-        const { mode } = await r.clone().json() as { mode: Schema['MigrationRun']['mode'] }
-        return Response.json({ mode, scanned: 4, mapped: mode === 'report' ? 0 : 1, already_mapped: 3, needs_configuration: 1, needs_classification: 0, unreadable: 0, failed: 0, batches: [],
-          reconciliation: mode === 'report' ? { unmapped: 0, by_state: {}, by_kind: {}, needs_review: 0, disabled: 0, legacy_grants: 2, legacy_grant_instances: 2, connection_grants: 2, missing_connection_grants: 0, extra_connection_grants: 0, bindings: 1, accesses: 5 } : null })
-      }
+      if (p === '/api/v1/model-connections' && r.method === 'GET') return page([draft])
       if (p === `/api/v1/model-connections/${ID.a}` && r.method === 'GET') return Response.json(draft)
       if (p === `/api/v1/model-connections/${ID.a}` && r.method === 'PATCH') { draft = { ...draft, ...(await r.clone().json()), version: 5 }; return Response.json(draft) }
-      if (p === `/api/v1/model-connections/${ID.a}/models` && r.method === 'PUT') { draft = { ...draft, configuration_state: 'ready', migration_state: 'managed', model_count: 1, version: 6 }; return Response.json(draft) }
+      if (p === `/api/v1/model-connections/${ID.a}/models` && r.method === 'PUT') { draft = { ...draft, configuration_state: 'ready', model_count: 1, version: 6 }; return Response.json(draft) }
       if (p === '/api/v1/agents/secrets' && r.method === 'GET') return page([secret])
       if (p === `/api/v1/agents/secrets/${SEC}`) return Response.json(secret)
       if (p === '/api/v1/agents/secrets/accesses') return Response.json({ items: [], next_cursor: null })
     })
-    // 旧的密钥库深链接：跳到“迁移与兼容凭据”，保留 ?secret=
-    const { router } = await openApp(`/agents/secrets?secret=${SEC}`)
-    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/settings/model-connections'))
-    expect(router.currentRoute.value.query).toEqual({ tab: 'compat', secret: SEC })
-    expect(screen.getByRole('tab', { name: '迁移与兼容凭据' })).toHaveAttribute('aria-selected', 'true')
-    // 非模型凭据仍能管理：原密钥库的详情、轮换都还在
+    // 兼容凭据：原密钥库的列表、详情、轮换都在这个页签里；没有迁移记录
+    const { router } = await openApp(`/settings/model-connections?tab=compat&secret=${SEC}`)
+    expect(await screen.findByRole('tab', { name: '兼容凭据' })).toHaveAttribute('aria-selected', 'true')
     const compat = await screen.findByRole('region', { name: '兼容凭据' })
     expect(within(compat).getByRole('heading', { level: 2, name: '兼容凭据' })).toBeVisible()
+    expect(screen.queryByRole('region', { name: '迁移记录' })).toBeNull()
     const secretDetail = await screen.findByRole('region', { name: '密钥详情' })
     expect(await within(secretDetail).findByRole('heading', { name: 'deploy_token' })).toBeVisible()
     expect(within(secretDetail).getByRole('button', { name: '轮换密钥' })).toBeVisible()
+    // 只能建、只能筛非模型类型：模型服务的 Key 在连接里
+    expect(within(within(compat).getByRole('combobox', { name: '按类型筛选' })).queryByRole('option', { name: '模型服务密钥' })).toBeNull()
+    await fireEvent.click(within(compat).getByRole('button', { name: '添加密钥' }))
+    const dialog = await screen.findByRole('dialog', { name: '添加密钥' })
+    expect(within(dialog).queryByRole('option', { name: '模型服务密钥' })).toBeNull()
+    expect(within(dialog).getByLabelText('类型（创建后不能改）')).toHaveValue('api_token')
+    expect(dialog).toHaveTextContent('模型服务的 API Key 请在中转站管理里“添加连接”保存')
+    await fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
 
-    const migration = screen.getByRole('region', { name: '迁移记录' })
-    const draftRow = await within(migration).findByRole('row', { name: /news_model/ })
-    expect(draftRow).toHaveTextContent('待完善')
-    expect(draftRow).toHaveTextContent('openai_api_key')
-    expect(within(migration).getByRole('row', { name: /github_token/ })).toHaveTextContent('待归类')
-    expect(within(migration).getByRole('row', { name: /deploy_token/ })).toHaveTextContent('非模型凭据')
-    expect(within(migration).getByRole('button', { name: /待完善\s*1/ })).toBeVisible()
-    await fireEvent.click(within(migration).getByRole('button', { name: '归为非模型凭据：github_token' }))
-    await vi.waitFor(() => expect(requests.some(r => path(r).endsWith('/classify'))).toBe(true))
-    const classify = requests.find(r => path(r).endsWith('/classify'))!
-    expect(path(classify)).toBe(`/api/v1/model-connections/migration/entries/${ID.b}/classify`)
-    expect(await classify.clone().json()).toEqual({ version: 2, purpose: 'non_model' })
-    expect(await within(migration).findByText(/已归为非模型凭据：仍可在下方“兼容凭据”里管理/)).toBeVisible()
-
-    // 在页面上导入旧密钥：预览只读、导入可重复执行、对账只读；结果只有计数
-    const runs = () => requests.filter(r => path(r) === '/api/v1/model-connections/migration/run')
-    await fireEvent.click(within(migration).getByRole('button', { name: '预览导入' }))
-    expect(await within(migration).findByText('预览完成（没有写入）。')).toBeVisible()
-    expect(await runs()[0]!.clone().json()).toEqual({ mode: 'dry_run' })
-    expect(within(migration).getByLabelText('导入结果')).toHaveTextContent('将新建1')
-    await fireEvent.click(within(migration).getByRole('button', { name: '导入旧密钥' }))
-    expect(await within(migration).findByText(/导入完成：导入项在下方列出/)).toBeVisible()
-    expect(await runs()[1]!.clone().json()).toEqual({ mode: 'apply' })
-    await fireEvent.click(within(migration).getByRole('button', { name: '对账' }))
-    expect(await within(migration).findByText('对账完成（只读）。')).toBeVisible()
-    expect(await runs()[2]!.clone().json()).toEqual({ mode: 'report' })
-    expect(within(migration).getByLabelText('导入结果')).toHaveTextContent('使用中的绑定1')
-
-    // 补全待完善的导入项：只改连接元数据与模型，不建绑定
-    await fireEvent.click(within(migration).getByRole('button', { name: '补全配置：news_model' }))
+    // 草稿：没选类型的显示“未选类型 · 草稿”；补全只改连接元数据与模型，不建绑定
+    await fireEvent.click(screen.getByRole('tab', { name: '全部连接' }))
+    const list = await screen.findByRole('region', { name: '连接列表' })
+    const row = await within(list).findByRole('row', { name: /news_model/ })
+    expect(row).toHaveTextContent('未选类型')
+    expect(row).toHaveTextContent('草稿')
+    await fireEvent.click(within(row).getByRole('button', { name: '管理：news_model' }))
     await vi.waitFor(() => expect(router.currentRoute.value.query.connection).toBe(ID.a))
-    expect(router.currentRoute.value.query.secret).toBeUndefined()
     const panel = await drawer('编辑连接')
     expect(await within(panel).findByRole('heading', { name: 'news_model' })).toBeVisible()
-    expect(panel).toHaveTextContent('待完善')
+    expect(panel).toHaveTextContent('草稿')
+    // 等模型集合读回来再改（读回时以服务端为准）
+    expect(await within(panel).findByText(/还没有模型/)).toBeVisible()
     await fireEvent.update(within(panel).getByLabelText('连接 URL'), 'https://news-gateway.example.com/v1')
     await fireEvent.update(within(panel).getByLabelText('添加模型 ID'), 'news-model-1')
     await fireEvent.click(within(panel).getByRole('button', { name: '添加' }))
@@ -486,12 +462,13 @@ describe('中转站管理：迁移与兼容凭据', () => {
     expect(await requests.find(r => r.method === 'PUT' && path(r).endsWith('/models'))!.clone().json()).toEqual({ version: 5, model_scope: 'selected', models: [{ model_id: 'news-model-1', display_name: null }] })
     expect(await within(panel).findByText('配置已保存。')).toBeVisible()
     expect(requests.some(r => path(r).includes('/model-binding'))).toBe(false)
+  })
 
-    // 兼容凭据里新建只给非模型类型
-    await fireEvent.click(within(compat).getByRole('button', { name: '添加密钥' }))
-    const dialog = await screen.findByRole('dialog', { name: '添加密钥' })
-    expect(within(dialog).queryByRole('option', { name: '模型服务密钥' })).toBeNull()
-    expect(dialog).toHaveTextContent('模型服务的 API Key 请在中转站管理里“添加连接”保存')
+  it('no longer redirects the old secret vault address', async () => {
+    setup(() => undefined)
+    const { router } = await openApp('/agents/secrets')
+    expect(await screen.findByRole('heading', { level: 1, name: '页面未找到' })).toBeVisible()
+    expect(router.currentRoute.value.path).toBe('/agents/secrets')
   })
 })
 
@@ -501,7 +478,7 @@ describe('中转站管理：身份与工作空间', () => {
     const requests = setup(r => {
       const p = path(r), scope = r.headers.get('X-Workspace-Id')
       if (p === '/api/v1/me' && r.method === 'GET') return Response.json({ ...me, workspaces: [workspace, { ...workspace, id: 'workspace-b', name: '空间 B' }] })
-      if (p === '/api/v1/model-connections/summary') return Response.json({ total: scope === 'workspace-a' ? 11 : 22, check_passed: 0, check_passed_inference: 0, needs_attention: 0, non_model: 0, unique_granted_instances: 0 })
+      if (p === '/api/v1/model-connections/summary') return Response.json({ total: scope === 'workspace-a' ? 11 : 22, check_passed: 0, check_passed_inference: 0, needs_attention: 0, unique_granted_instances: 0 })
       if (p === '/api/v1/model-connections' && r.method === 'GET') {
         if (scope === 'workspace-a') return new Promise<Response>(resolve => { finishA = resolve })
         return page([conn({ id: ID.b, name: 'B 空间的连接', workspace_id: 'workspace-b' })])
@@ -529,9 +506,9 @@ describe('中转站管理：身份与工作空间', () => {
     expect(requests.filter(r => r.method === 'GET' && path(r) === '/api/v1/model-connections').map(r => r.headers.get('X-Workspace-Id'))).toEqual(['workspace-a', 'workspace-b'])
   })
 
-  it('is only for the owner and replaces the secret vault in the sidebar, keeping a saved placement of the old path', async () => {
+  it('is only for the owner and replaces the secret vault in the sidebar', async () => {
     setup(r => {
-      if (path(r) === '/api/v1/navigation' && r.method === 'GET') return Response.json({ ...emptyNavigation, version: 2, placements: { '/agents/secrets': 'tools' } })
+      if (path(r) === '/api/v1/navigation' && r.method === 'GET') return Response.json({ ...emptyNavigation, version: 2, placements: { '/settings/model-connections': 'tools' } })
     })
     await openApp('/settings/model-connections')
     const nav = screen.getByRole('navigation', { name: '主导航' })
@@ -550,11 +527,11 @@ describe('中转站管理：身份与工作空间', () => {
 })
 
 describe('中转站管理：OpenClaw 连接分配', () => {
-  it('shows target and applied connection separately, legacy agents as old configuration, and changes the connection with the picker', async () => {
+  it('shows target and applied connection separately, agents without a primary model as not set, and changes the connection with the picker', async () => {
     const rows: Schema['ModelAssignmentRow'][] = [
-      { instance_id: 'inst-a', instance_name: '开发助手', instance_status: 'online', legacy: null, binding: binding({ connection_id: ID.b, connection_name: '团队多模型中转', model_id: 'claude-sonnet-4', desired_revision: 2, applied_revision: 1, apply_state: 'pending', version: 3 }) },
-      { instance_id: 'inst-b', instance_name: '新闻助手', instance_status: 'online', binding: null, legacy: { legacy_refs: ['openai_api_key'] } },
-      { instance_id: 'inst-c', instance_name: '知识助手', instance_status: 'offline', legacy: null, binding: binding({ instance_id: 'inst-c', apply_state: 'failed', last_error_code: 'credential_unavailable', desired_revision: 2, applied_revision: 2 }) },
+      { instance_id: 'inst-a', instance_name: '开发助手', instance_status: 'online', binding: binding({ connection_id: ID.b, connection_name: '团队多模型中转', model_id: 'claude-sonnet-4', desired_revision: 2, applied_revision: 1, apply_state: 'pending', version: 3 }) },
+      { instance_id: 'inst-b', instance_name: '新闻助手', instance_status: 'online', binding: null },
+      { instance_id: 'inst-c', instance_name: '知识助手', instance_status: 'offline', binding: binding({ instance_id: 'inst-c', apply_state: 'failed', last_error_code: 'credential_unavailable', desired_revision: 2, applied_revision: 2 }) },
     ]
     const options: Schema['PickerConnectionPage'] = { items: [
       { id: ID.a, name: 'OpenAI 官方', connection_type: 'official', base_url: 'https://api.openai.com/v1', protocol: 'openai_compatible', model_count: 2, granted: true },
@@ -574,8 +551,8 @@ describe('中转站管理：OpenClaw 连接分配', () => {
     expect(dev).toHaveTextContent('claude-sonnet-4')
     expect(dev).toHaveTextContent('已应用：gpt-4.1')
     expect(dev).toHaveTextContent('待应用')
-    expect(within(card).getByRole('row', { name: /新闻助手/ })).toHaveTextContent('旧配置')
-    expect(within(card).getByRole('row', { name: /新闻助手/ })).toHaveTextContent('openai_api_key')
+    expect(within(card).getByRole('row', { name: /新闻助手/ })).toHaveTextContent('未设置')
+    expect(within(card).getByRole('row', { name: /新闻助手/ })).not.toHaveTextContent('旧配置')
     expect(within(card).getByRole('row', { name: /知识助手/ })).toHaveTextContent('应用失败')
     expect(within(card).getByRole('row', { name: /知识助手/ })).toHaveTextContent('OpenClaw 取不到这条连接的 Key')
 
