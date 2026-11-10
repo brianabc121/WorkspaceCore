@@ -1126,6 +1126,54 @@ def scenario_19(c: Ctx) -> None:
             json.dumps(other, ensure_ascii=False)[:300])
 
 
+def gateway_call(instance: Instance, method: str, params: dict[str, Any]) -> Any:
+    """在实例容器里调本机网关（与接入包 stop-runs.mjs 同样的 `openclaw.mjs gateway call … --json`）。"""
+    out = instance.exec("sh", "-c", 'cd "${MYWS_OPENCLAW_DIR:-/app}" && exec node openclaw.mjs gateway call "$0" --params "$1" --json',
+                        method, json.dumps(params), timeout=60, check=False)
+    if out.returncode != 0:
+        raise RuntimeError(f"{method} exit {out.returncode}: {(out.stderr or '').strip()[-200:]}")
+    return json.loads(out.stdout or "null")
+
+
+def v3_diagnostics(c: Ctx, gid: str, asked: float, after: float) -> dict[str, Any]:
+    """场景 20 的 V3 没通过时收集：补丁放回的事件是根本没进群会话，还是被别的一轮取走了（T-0218）。
+
+    时间都相对第三问发出的时刻（after），单位秒。每一项单独收集，出错只记下原因，不影响场景的判定。
+    网关方法与参数在锁定镜像 openclaw/openclaw:2026.9.36 上核对过：sessions.list 接受空参数；
+    chat.history 是封闭对象，sessionKey 必填、limit 最大 1000。"""
+    out: dict[str, Any] = {}
+    # 拒收前后甲的每一轮模型调用：上下文里有几条“[工作台]”行，最后一条用户消息的末尾（心跳、第三问……）
+    out["calls"] = [{"at": round(r["at"] - after, 1), "notes": len(r.get("notes") or []), "count": r.get("count"),
+                     "last_user": (r.get("last_user") or "")[-100:]}
+                    for r in c.model_calls(c.keys["a"], asked - 60)][-8:]
+    want = f"openim:group:{gid}".lower()
+    try:
+        listed = gateway_call(c.a, "sessions.list", {})
+        rows = listed if isinstance(listed, list) else (listed or {}).get("sessions") or (listed or {}).get("items") or []
+        out["sessions"] = [{"key": r.get("key"), "updatedAt": r.get("updatedAt")} for r in rows if isinstance(r, dict)][:12]
+        key = next((r["key"] for r in out["sessions"] if isinstance(r["key"], str) and r["key"].endswith(want)), None)
+        out["group_key"] = key
+        if key:
+            history = json.dumps(gateway_call(c.a, "chat.history", {"sessionKey": key, "limit": 40}), ensure_ascii=False)
+            # 群会话的记录里有没有补丁放回的事件。chat.history 是给界面显示的整理版，系统事件行可能被去掉，
+            # 所以 0 不能单独下结论；以 calls 里每一轮上下文的 notes 为准，这里作为旁证
+            out["history_notice"] = history.count("[工作台]")
+            out["history_5002"] = "（5002）" in history
+    except Exception as error:  # 诊断失败只记下原因
+        out["gateway_error"] = str(error)[:300]
+    try:
+        since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(asked - 5))
+        lines = c.a.compose("logs", "--no-color", f"--since={since}", "openclaw", check=False, timeout=120).stdout.splitlines()
+        # 关键的几类单独留，免得被插件收消息的日志挤掉：发送失败、补丁报错、心跳、系统事件
+        key_words = ("deliver failed", "myworkspace notice", "[heartbeat]", "system event", "systemevent")
+        out["logs"] = [line.strip()[-220:] for line in lines if any(k in line.lower() for k in key_words)][-10:]
+        out["openim"] = [line.strip()[-160:] for line in lines
+                         if "[openim]" in line and not any(k in line.lower() for k in key_words)][-6:]
+    except Exception as error:  # 诊断失败只记下原因
+        out["logs_error"] = str(error)[:300]
+    return out
+
+
 def scenario_20(c: Ctx) -> None:
     """自动回复被每分钟上限拒收：工作台记下并在限额恢复后补发；插件补丁把原因放回同一个会话（T-0120）。"""
     group = c.owner.call("POST", "/api/v1/im/groups", {
@@ -1141,6 +1189,7 @@ def scenario_20(c: Ctx) -> None:
         out = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}/outbox")
         return [r for r in out["rejected_replies"] if r["conversation_id"] == conv and r["code"] == 5002]
 
+    asked = time.time() - 5  # 第二问刚发出：它的回复在这之后才会被拒收
     c.check("场景 20：甲的第二条自动回复被每分钟上限拒收（5002），工作台记下",
             bool(wait_for("拒收记录", rejected, timeout=150, interval=3)))
     replayed = wait_for("限额恢复后补发", lambda: c.from_sender(conv, c.a.im_user_id, "限流第二问"), timeout=240, interval=5)
@@ -1152,12 +1201,7 @@ def scenario_20(c: Ctx) -> None:
     notes = [n for r in c.model_calls(c.keys["a"], after) for n in r.get("notes") or []]
     detail = "; ".join(notes)[:300]
     if not any("5002" in n for n in notes):
-        # 没看到时带上实例日志里插件的发送失败与补丁记录，便于判断是没放回还是被别的一轮用掉了（T-0213）
-        hints = [line.strip()[-200:] for line in c.a.logs(tail=600).splitlines()
-                 if "[openim]" in line and ("deliver failed" in line or "myworkspace" in line)]
-        calls = [{"at": round(r["at"] - after, 1), "last_user": r.get("last_user", "")[-80:]}
-                 for r in c.model_calls(c.keys["a"], after - 240)]
-        detail = json.dumps({"notes": notes, "logs": hints[-4:], "calls": calls[-6:]}, ensure_ascii=False)[:1500]
+        detail = json.dumps(v3_diagnostics(c, gid, asked, after), ensure_ascii=False)[:4000]
     c.check("场景 20：补丁把“回复没有发出（5002）”放回同一个会话，甲下一轮看得到（核验 V3）",
             any("5002" in n for n in notes), detail)
     instance = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}")
