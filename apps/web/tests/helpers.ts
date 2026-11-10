@@ -20,6 +20,11 @@ export const runnerOff: Schema['AgentRunnerOut'] = { enabled: false, limits: { e
 // 插拔式模块（T-0159）：默认只有新闻早报，已启用
 export const newsModule: Schema['ModuleOut'] = { key: 'news', name: '新闻早报', description: '每天的新闻早报、热榜、RSS、搜索与收藏；智能体可以查新闻。依赖 TrendRadar。', version: '1.0.0', enabled: true, default_enabled: true, ready: true, missing: [], depends_on: [], dependents: [], tools: ['news_latest', 'news_search', 'news_briefing'], widgets: ['news_briefing'], can_manage: true }
 export const emptyNavigation: Schema['NavigationOut'] = { version: 0, sections: [], pages: [], placements: {}, section_order: [], embed_origins: [], can_manage: true }
+export const mcCapabilities: Schema['ModelConnectionCapabilities'] = {
+  enabled: true, supported_protocols: ['openai_compatible'],
+  official_presets: [{ provider: 'openai', label: 'OpenAI', protocol: 'openai_compatible', base_url: 'https://api.openai.com/v1', source: 'https://platform.openai.com/docs/api-reference/introduction' }],
+  limits: { max_models: 1000, check_per_minute: 5, page_max: 100, check_fresh_seconds: 900 },
+}
 export const fail = (status: number, code: string) => Response.json({ error: { code, message: '请求失败', request_id: 'req-test', details: {} } }, { status })
 export function mockApi(handler?: (request: Request) => Response | Promise<Response | undefined> | undefined) {
   const requests: Request[] = []
@@ -61,6 +66,12 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/deployment$/.test(path) && request.method === 'GET') return Response.json({ deployment: null, server: null, job: null, capacity_warning: null })
     // 实例的运行环境权限（T-0140）：默认关闭
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/runner$/.test(path) && request.method === 'GET') return Response.json(runnerOff)
+    // 中转站管理（T-0206）：默认没有连接、没有迁移项、没有智能体分配；只开放 OpenAI 兼容协议与 OpenAI 官方预设
+    if (path === '/api/v1/model-connections' && request.method === 'GET') return Response.json({ items: [], next_cursor: null, total: 0 })
+    if (path === '/api/v1/model-connections/summary') return Response.json({ total: 0, check_passed: 0, check_passed_inference: 0, needs_attention: 0, non_model: 0, unique_granted_instances: 0 })
+    if (path === '/api/v1/model-connections/capabilities') return Response.json(mcCapabilities)
+    if (path === '/api/v1/model-connections/migration/entries') return Response.json({ items: [], next_cursor: null, total: 0, counts: {} })
+    if (path === '/api/v1/agents/model-assignments') return Response.json({ items: [], next_cursor: null, total: 0 })
     if (path === '/api/v1/knowledge/spaces') return Response.json({ items: [] })
     if (path === '/api/v1/knowledge/graph') return Response.json({ nodes: [], edges: [], truncated: false, total_notes: 0 })
     // 知识总览（T-0173）：默认没有笔记

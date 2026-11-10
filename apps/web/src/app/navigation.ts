@@ -24,8 +24,29 @@ const core: NavEntry[] = [
   { path: '/settings/integrations', title: '集成设置', section: '管理', description: '管理员配置 GitHub、测试权限与同步。', minRole: 'admin' },
   { path: '/settings/security', title: '安全设置', section: '管理', description: '管理密码与登录会话。' },
   { path: '/settings/mail', title: '邮件设置', section: '管理', description: '连接 Gmail 邮箱、设置 OAuth 客户端与智能体访问（owner 与 admin）。', minRole: 'admin' },
-  { path: '/agents/secrets', title: '密钥库', section: '管理', description: 'OpenClaw 实例使用的密钥与取用记录（owner）。', minRole: 'owner' },
+  // 中转站管理（T-0206）：官方 API 与第三方中转的连接；原来的“密钥库”并入它的“迁移与兼容凭据”页签（旧地址重定向，见 LEGACY_PATHS）
+  { path: '/settings/model-connections', title: '中转站管理', section: '管理', description: '官方 API 与第三方中转的连接（URL、Key、模型）、智能体授权、OpenClaw 连接分配与兼容凭据（owner）。', minRole: 'owner' },
 ]
+
+/** 改过地址的页面：旧地址 → 新地址。侧栏布局（placements、站内页面链接）里存的旧地址按新地址处理，不会多出重复入口 */
+export const LEGACY_PATHS: Readonly<Record<string, string>> = { '/agents/secrets': '/settings/model-connections' }
+
+/** 布局里“已有页面挪到哪个分组”的旧地址换成新地址；新旧两个都有时以新地址为准 */
+export function migratePlacements(placements: Readonly<Record<string, string>> | undefined): Record<string, string> {
+  const source = placements ?? {}, result: Record<string, string> = {}
+  for (const [path, key] of Object.entries(source)) {
+    const next = LEGACY_PATHS[path]
+    if (!next) result[path] = key
+    else if (!(next in source)) result[next] = key
+  }
+  return result
+}
+
+/** 站内路径（可带 ?query 与 #hash）里的旧地址换成新地址 */
+export function migratePath(path: string): string {
+  for (const [old, next] of Object.entries(LEGACY_PATHS)) if (path === old || path.startsWith(`${old}?`) || path.startsWith(`${old}#`)) return next + path.slice(old.length)
+  return path
+}
 
 /** 侧栏分组的顺序：“应用”是新模块默认的分组 */
 const SECTIONS: readonly NavSection[] = ['工作空间', '应用', '连接与工具', '管理']

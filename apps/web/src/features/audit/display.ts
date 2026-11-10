@@ -54,7 +54,9 @@ export function relatedLink(entry: AuditEntry, isOwner: boolean): { to: RouteLoc
   const type = entry.resource_type, id = entry.resource_id ?? ''
   if (!type || !isUuid(id) || /\.(deleted|removed|purged)$/.test(entry.action)) return null
   switch (type) {
-    case 'agent_secret': return isOwner ? { to: { path: '/agents/secrets', query: { secret: id } }, label: '查看密钥库' } : null
+    // 密钥库并入中转站管理的“迁移与兼容凭据”页签（T-0206）
+    case 'agent_secret': return isOwner ? { to: { path: '/settings/model-connections', query: { tab: 'compat', secret: id } }, label: '查看兼容凭据' } : null
+    case 'model_connection': return isOwner ? { to: { path: '/settings/model-connections', query: { connection: id } }, label: '查看中转站连接' } : null
     case 'agent_instance': return isOwner ? { to: { path: '/agents', query: { instance: id } }, label: '查看智能体' } : null
     case 'agent_server': return isOwner ? { to: { path: '/agent-servers', query: { server: id } }, label: '查看智能体服务器' } : null
     case 'project': return { to: `/projects/${encodeURIComponent(id)}`, label: '查看项目' }

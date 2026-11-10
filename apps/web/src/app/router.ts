@@ -30,7 +30,7 @@ import OperationsPage from '../pages/OperationsPage.vue'
 import ImPage from '../pages/ImPage.vue'
 import AgentsPage from '../pages/AgentsPage.vue'
 import AgentServersPage from '../pages/AgentServersPage.vue'
-import SecretsPage from '../pages/SecretsPage.vue'
+import ModelConnectionsPage from '../pages/ModelConnectionsPage.vue'
 import AiPage from '../pages/AiPage.vue'
 import AppCenterPage from '../pages/AppCenterPage.vue'
 import NavigationSettingsPage from '../pages/NavigationSettingsPage.vue'
@@ -63,7 +63,7 @@ const navMeta = (item: NavItem) => ({ title: item.title, description: item.descr
 // 知识库是独立页面，自己的布局；早报是模块，在模块路由里声明
 // 管理区八页（T-0189，方案 docs/v2/ai-admin-redesign）也是宽页面；新闻早报设置在模块路由的 meta 里登记
 // 审计日志不在侧栏导航里，它的路由在下面单独登记 wide
-const ADMIN_PAGES = ['/ai', '/settings', '/settings/integrations', '/settings/security', '/settings/mail', '/agents/secrets']
+const ADMIN_PAGES = ['/ai', '/settings', '/settings/integrations', '/settings/security', '/settings/mail', '/settings/model-connections']
 const WIDE_PAGES = new Set(['/tasks', '/projects', '/calendar', '/mail', '/developer', '/operations', '/agent-servers', '/agents', '/runner', ...ADMIN_PAGES])
 
 // 旧链接（T-0147 的两个标签）：/agents?tab=servers&server=… 换成独立的服务器页（只带有效的 server 与 range），
@@ -82,6 +82,14 @@ export function legacyAgentsRedirect(to: RouteLocationNormalized) {
   return { path: '/agents', query, hash: to.hash, replace: true }
 }
 
+/** /agents/secrets → /settings/model-connections?tab=compat（其余参数照带，tab=accesses 改成 view=accesses） */
+export function legacySecretsRedirect(to: Pick<RouteLocationNormalized, 'query' | 'hash'>) {
+  const query = { ...to.query }
+  if (query.tab === 'accesses') query.view = 'accesses'
+  query.tab = 'compat'
+  return { path: '/settings/model-connections', query, hash: to.hash }
+}
+
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHistory(), queryClient = new QueryClient()) {
   const auth = useAuthStore(pinia)
   const modules = useModulesStore(pinia)
@@ -97,7 +105,7 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
         path: item.path,
         // 知识库（T-0099）是带子页面的独立页面：总览、图谱、笔记、编辑器、知识库主页、变更记录、外部文档
         ...(item.path === '/knowledge' ? { children: knowledgeRoutes } : {}),
-        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/im': ImPage, '/agents': AgentsPage, '/agent-servers': AgentServersPage, '/agents/secrets': SecretsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/modules': AppCenterPage, '/settings/navigation': NavigationSettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage, '/mail': MailPage, '/settings/mail': MailSettingsPage, '/runner': RunnerPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
+        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/im': ImPage, '/agents': AgentsPage, '/agent-servers': AgentServersPage, '/settings/model-connections': ModelConnectionsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/modules': AppCenterPage, '/settings/navigation': NavigationSettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage, '/mail': MailPage, '/settings/mail': MailSettingsPage, '/runner': RunnerPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
         // 消息页（T-0095）、知识库（T-0099）是不带工作台侧栏和顶栏的独立页面
         meta: { ...navMeta(item), standalone: item.path === '/im' || item.path === '/knowledge', wide: WIDE_PAGES.has(item.path) },
       })),
@@ -115,6 +123,8 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
       { path: '/projects/:project/issues/:number(\\d+)', component: () => import('../pages/IssuePage.vue'), meta: { title: 'Issue', description: '项目里的议题：正文、评论与时间线。' } },
       // 任务时间轴（T-0105）：任务页的一种显示方式，地址里带 project / date / scale / group / task
       { path: '/tasks/timeline', component: () => import('../pages/TaskTimelinePage.vue'), meta: { title: '任务时间轴', description: '每个执行者一条轨道：开始、结束、是否还在执行、消耗了多少 token。' } },
+      // 旧的密钥库（T-0206 并入中转站管理的“迁移与兼容凭据”页签）：保留原参数（?secret= 深链接等），原来的 ?tab=accesses 换成 ?view=accesses
+      { path: '/agents/secrets', redirect: (to) => legacySecretsRedirect(to) },
       // Notification links for AI approvals (OC-1 contract §6) use /approvals?id=…
       { path: '/approvals', redirect: (to) => ({ path: '/ai', query: to.query }) },
       { path: '/:pathMatch(.*)*', component: NotFoundPage, meta: { title: '页面未找到' } },

@@ -7,6 +7,8 @@ import type { Schema } from '../src/services/api'
 // 标题里的数是服务端 total；?secret= 打开详情（不在当前页也按 GET 单项读），详情只有元数据、不回显、无复制；
 // 轮换带新值与记录 version、提交 / 换对象都清空输入，409 不报成功；删除先提示受影响的智能体，删后清面板；
 // 详情里的取用记录按 secret_id 读；不存在或失权时不留旧内容。
+// T-0206：密钥库并入中转站管理的“迁移与兼容凭据”页签（标题“兼容凭据”），/agents/secrets 重定向过去并保留 ?secret=；
+// 内层“取用记录”标签改用 ?view=accesses（外层页签占用 ?tab=）。
 const path = (r: Request) => new URL(r.url).pathname
 const at = '2026-11-08T10:30:00Z'
 const A_ID = '11111111-1111-4111-8111-111111111111', B_ID = '22222222-2222-4222-8222-222222222222'
@@ -57,7 +59,9 @@ describe('密钥库改版', () => {
         return page([D], 1)
       },
     })
-    await openApp('/agents/secrets')
+    const { router } = await openApp('/agents/secrets')
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/settings/model-connections?tab=compat'))
+    expect(await screen.findByRole('heading', { level: 2, name: '兼容凭据' })).toBeVisible()
     const list = await screen.findByRole('region', { name: '密钥列表' })
     // 标题里的数是服务端 total（120），不是第一页的 2 行
     expect(await within(list).findByRole('heading', { name: '密钥列表 · 120' })).toBeVisible()
@@ -86,6 +90,9 @@ describe('密钥库改版', () => {
     // 万一响应里多了值字段也不显示：页面只渲染元数据字段
     const requests = setup({ list: () => page([B]), detail: id => id === A_ID ? Response.json({ ...A, value: 'sk-should-never-render' }) : fail(404, 'NOT_FOUND') })
     const { detail, router } = await openDetail(`/agents/secrets?secret=${A_ID}`, 'openai_main')
+    // 旧的深链接重定向到中转站管理的兼容凭据，保留 ?secret=
+    expect(router.currentRoute.value.path).toBe('/settings/model-connections')
+    expect(router.currentRoute.value.query).toEqual({ tab: 'compat', secret: A_ID })
     expect(requests.some(r => r.method === 'GET' && path(r) === `/api/v1/agents/secrets/${A_ID}`)).toBe(true)
     expect(detail).toHaveTextContent('模型服务密钥 · v3')
     expect(detail).toHaveTextContent('主模型服务连接')
@@ -107,7 +114,8 @@ describe('密钥库改版', () => {
     expect(log).toHaveTextContent('成功')
     // 查看全部：切到“取用记录”标签，按这个密钥筛选
     await fireEvent.click(within(log).getByRole('button', { name: '查看全部取用记录' }))
-    await vi.waitFor(() => expect(router.currentRoute.value.query.tab).toBe('accesses'))
+    await vi.waitFor(() => expect(router.currentRoute.value.query.view).toBe('accesses'))
+    expect(router.currentRoute.value.query.tab).toBe('compat')
     const tab = await screen.findByRole('region', { name: '取用记录' })
     expect(within(tab).getByText('密钥：openai_main')).toBeVisible()
     await vi.waitFor(() => expect(requests.some(r => path(r) === '/api/v1/agents/secrets/accesses' && new URL(r.url).searchParams.get('secret_id') === A_ID && new URL(r.url).searchParams.get('limit') === '50')).toBe(true))
@@ -199,7 +207,8 @@ describe('密钥库改版', () => {
     setup({ detail: id => (gone ? fail(404, 'NOT_FOUND') : byId[id] ? Response.json(byId[id]) : fail(403, 'FORBIDDEN')) })
     const { detail, router } = await openDetail(`/agents/secrets?secret=${A_ID}`, 'openai_main')
     gone = true
-    await fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    // 页头与“兼容凭据”各有一个刷新：点兼容凭据自己的
+    await fireEvent.click(within(screen.getByRole('region', { name: '兼容凭据' })).getAllByRole('button', { name: '刷新' })[0]!)
     expect(await within(detail).findByText('这个密钥不存在，或你已无权访问。')).toBeVisible()
     expect(within(detail).queryByRole('heading', { name: 'openai_main' })).toBeNull()
     expect(within(detail).queryByRole('button', { name: '轮换密钥' })).toBeNull()
