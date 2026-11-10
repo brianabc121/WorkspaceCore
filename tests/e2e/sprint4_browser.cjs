@@ -159,6 +159,12 @@ async function noHorizontalScroll(page) {
   // 明天（显示时区）上午 10 点：落在首页“提醒与日程”的 7 天窗口里
   const tomorrow = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE }).format(new Date(Date.now() + 86400000))
 
+  // 模拟 GitHub 在启动浏览器之前起好：docker run / network connect 会在宿主机上新建网卡，
+  // 浏览器正在加载时 Chromium 会把进行中的请求以 net::ERR_NETWORK_CHANGED 中断（T-0215）
+  const token = 'github_pat_e2e_' + randomBytes(20).toString('hex')
+  startFakeGitHub(token)
+  check(await fakeGitHubReady(), '模拟 GitHub 没有就绪')
+
   const browser = await chromium.launch()
   const problems = []
   const requests = []
@@ -258,10 +264,7 @@ async function noHorizontalScroll(page) {
   await agendaCard.getByText(`${eventTitle} 改`).waitFor()
   step('首页“最近文档”“提醒与日程”组件显示真实数据')
 
-  // ---------------------------------------------------------------- 连接 GitHub（S4-04，模拟 GitHub）
-  const token = 'github_pat_e2e_' + randomBytes(20).toString('hex')
-  startFakeGitHub(token)
-  check(await fakeGitHubReady(), '模拟 GitHub 没有就绪')
+  // ---------------------------------------------------------------- 连接 GitHub（S4-04，模拟 GitHub，开头已启动）
   // T-0091：GitHub 在网页上接入（生成 Token 的链接、读取 Token 能访问的仓库、保存后自动检查权限并开始同步）
   await page.goto(`${base}/settings/integrations`)
   await page.getByRole('button', { name: '新建 GitHub 连接' }).click()
