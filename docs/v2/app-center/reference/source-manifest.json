@@ -1,0 +1,211 @@
+{
+  "baseline_commit": "4760e3471954545c593973862797da21337577b3",
+  "source": "git show <commit>:<path>; not the dirty working tree",
+  "files": [
+    {
+      "path": "docs/AGENTS.md",
+      "bytes": 18461,
+      "sha256": "bbeea424d4857546603086e4314b2b2b7823c38f9ec9ac27a5ffe8474a3affa4"
+    },
+    {
+      "path": "docs/modules/README.md",
+      "bytes": 13849,
+      "sha256": "6dae36e65330d5b5cfd4f8eb4961162a6fd4ba4f8a9a62b43527e513130665cd"
+    },
+    {
+      "path": "docs/v2/MODULES_PLAN.md",
+      "bytes": 5664,
+      "sha256": "37e9dc2d0de83c23d42930ab258392b00023d475465585f20f9f2c4061004139"
+    },
+    {
+      "path": "docs/decisions/2026-11-08-feature-modules.md",
+      "bytes": 5086,
+      "sha256": "30c7d6ac00e71baef121f38ccef7287d9fd16215e3b1e471d46f1e1de506fd15"
+    },
+    {
+      "path": "services/api/app/modules/base.py",
+      "bytes": 6621,
+      "sha256": "84a73074f34505625203ba836f15c5da24bd3941ada27dc1ef88bc7bf20d2d2e"
+    },
+    {
+      "path": "services/api/app/modules/registry.py",
+      "bytes": 4390,
+      "sha256": "dd5f382d73c199d6be9d1d705655ef955aebf39de16bb6b4383f40c1e102942e"
+    },
+    {
+      "path": "services/api/app/modules/service.py",
+      "bytes": 7033,
+      "sha256": "e15065908d7fd0f55915482040b0186a549f626c905201875a4cde00248c2cf5"
+    },
+    {
+      "path": "services/api/app/modules/deps.py",
+      "bytes": 1074,
+      "sha256": "cda6f22f9f7473f8b862fa6b6d8a48cbe90cc45de6c34d58ea86bac798f943ce"
+    },
+    {
+      "path": "services/api/app/modules/news/manifest.py",
+      "bytes": 1769,
+      "sha256": "6928e0e0393bc7b4efe295573f34734b705c9ef1d978d4a5e0dd66bdde0dfa21"
+    },
+    {
+      "path": "services/api/app/modules/news/hooks.py",
+      "bytes": 968,
+      "sha256": "8c38bad1cbf0eeca83d50c93cb270722d295f97ef1d1c8412f6787ef9af273a8"
+    },
+    {
+      "path": "services/api/app/modules/news/health.py",
+      "bytes": 651,
+      "sha256": "3a5d4563494ddfd40e1cc3cf3591c203897f01f5bd5cb6d408dde7334832faa7"
+    },
+    {
+      "path": "services/api/app/modules/news/jobs.py",
+      "bytes": 781,
+      "sha256": "87f69725ab5accc8651413ee6c1b2a4f6f3a0b4468b4bffeedef8bad5ae6e6da"
+    },
+    {
+      "path": "services/api/app/modules/news/tools.py",
+      "bytes": 1180,
+      "sha256": "9a79490909e0a997efd0c2626192e60f3a517b90102e5a8c979607fd0ab9c4e8"
+    },
+    {
+      "path": "services/api/app/models/module.py",
+      "bytes": 1300,
+      "sha256": "e6e2b97150bc7dc015f966a102afba841c621b17000cb2fe4b09c903db628028"
+    },
+    {
+      "path": "services/api/app/schemas/modules.py",
+      "bytes": 1319,
+      "sha256": "554b8bd1618dda7f0c9135820f59500a90d02ea9c856ae176962eb2856d98b0f"
+    },
+    {
+      "path": "services/api/app/api/v1/modules.py",
+      "bytes": 2411,
+      "sha256": "00f70f4e98efa9ad7c834d4a6980b464c68900eadc9937bc0eef90dc3071c936"
+    },
+    {
+      "path": "services/api/app/api/v1/navigation.py",
+      "bytes": 2206,
+      "sha256": "70c6369c3abfd88302a45c7f901e2959b7c29dcddd998f429c35061f74345cd6"
+    },
+    {
+      "path": "services/api/app/api/v1/audit.py",
+      "bytes": 6225,
+      "sha256": "c1371f668faa40c45062f260a0c4668afe643c227f974164f03643fade4d5adf"
+    },
+    {
+      "path": "services/api/app/api/v1/operations.py",
+      "bytes": 3671,
+      "sha256": "92e4cfd4bd2d6f00d896f5e9454696a09100f47f50e2de4f3c387601297d71ff"
+    },
+    {
+      "path": "services/api/app/domain/navigation.py",
+      "bytes": 6500,
+      "sha256": "9949bd1939cf43320aa8e490468cc694f0a13addadbcb91b83b120db7163f577"
+    },
+    {
+      "path": "services/api/app/domain/operations.py",
+      "bytes": 24593,
+      "sha256": "4e20d7331e44b9bd21b9528d2f3fe220781522bf6bfd499c8b9e4d4886c02a91"
+    },
+    {
+      "path": "services/api/app/schemas/navigation.py",
+      "bytes": 4598,
+      "sha256": "53f9e8c8fcef1c41e3506e73f3d9d4b086236ebce7884ffbc1f186a040015f9e"
+    },
+    {
+      "path": "services/api/app/schemas/operations.py",
+      "bytes": 4746,
+      "sha256": "f0bbb57fcf4156880cc72d926ae225e6eab263408b0bd322a33609732a20f493"
+    },
+    {
+      "path": "services/api/app/integrations/http.py",
+      "bytes": 9522,
+      "sha256": "714edaac04cc02725db9e6254229ceccc9d7a2fa07792fadb9621be4af9bb1f3"
+    },
+    {
+      "path": "apps/web/src/pages/AppCenterPage.vue",
+      "bytes": 6925,
+      "sha256": "cd11eec1b0f42c4508a279cb14f3c684008d2b57148853161e1586e172b4e98b"
+    },
+    {
+      "path": "apps/web/src/modules/types.ts",
+      "bytes": 3453,
+      "sha256": "44a211337829f56b8da8bec129b311e215180a27dfc0c087c6119cdb33048ee4"
+    },
+    {
+      "path": "apps/web/src/modules/registry.ts",
+      "bytes": 2756,
+      "sha256": "ad36975175fb7a9a795e89a162c67ea9f152c56e48bb695a921f81e955e3378c"
+    },
+    {
+      "path": "apps/web/src/modules/news/index.ts",
+      "bytes": 2138,
+      "sha256": "c682e2bfdcbe24715d4a0dcbe02a37056b819234e9dc9fd42a0c2f60c7763cc8"
+    },
+    {
+      "path": "apps/web/src/stores/modules.ts",
+      "bytes": 2607,
+      "sha256": "25ace7c28fcd88943868671d7e736ced4582272476a95c4b827593a7b4b96139"
+    },
+    {
+      "path": "apps/web/src/stores/navigation.ts",
+      "bytes": 1998,
+      "sha256": "497f2fe8da21733c1ed34b179aeeeb3b057133ae0f55cfaef3ec5b31c098b170"
+    },
+    {
+      "path": "apps/web/src/features/navigation/NavigationSettings.vue",
+      "bytes": 15682,
+      "sha256": "32e8ff116f1bdaccaae36fce3d6455c054ee3b2234c65d432b3b3a36f2398702"
+    },
+    {
+      "path": "apps/web/src/features/navigation/PageForm.vue",
+      "bytes": 6954,
+      "sha256": "8e3d528a557357a717c935f6408faa45353ab7b2a2c1b3640296b84a4f6d9f3f"
+    },
+    {
+      "path": "apps/web/src/app/navigation.ts",
+      "bytes": 6981,
+      "sha256": "47f60ed88063b43282775779a7076ec199a2af9ff39aeb4b77218a51e002c7d9"
+    },
+    {
+      "path": "apps/web/src/app/router.ts",
+      "bytes": 12583,
+      "sha256": "379d69a2948f9eead178ad8f7f21682c000a44e6dbaffb85a6cb8998be51568c"
+    },
+    {
+      "path": "apps/web/tests/modules.test.ts",
+      "bytes": 16182,
+      "sha256": "dbaa64a8dd7a39a67894914fad5dbcd969ad28afb9f5ff592602aef4fce00b47"
+    },
+    {
+      "path": "services/api/tests/test_modules.py",
+      "bytes": 10787,
+      "sha256": "0e2fdee1c69826579d58c4877d201e8e86b0febbb5ccfcc8058483aad0d1a572"
+    },
+    {
+      "path": "scripts/new_module.py",
+      "bytes": 8656,
+      "sha256": "e9d20f32183ed7d38f62172926eb578a99eeae78355fa377c5b43f62ddd2c8ec"
+    },
+    {
+      "path": "apps/web/package.json",
+      "bytes": 2383,
+      "sha256": "dac7be1d0ae601cd14bbd117b42ead719faf5b13d79a1c574b4f62b57894b967"
+    },
+    {
+      "path": "Makefile",
+      "bytes": 10429,
+      "sha256": "3611d1c653fee25b5eee910bea5772367bb2963afc7d66655471eefa8b1fe261"
+    },
+    {
+      "path": "services/api/app/modules/news/service.py",
+      "bytes": 59299,
+      "sha256": "731b10815b72a25ccd5f27c764388060983b78daef286cddf9e0e213a7aa9659"
+    },
+    {
+      "path": "services/api/app/commands/news_config.py",
+      "bytes": 1544,
+      "sha256": "5408d415141fda91dcb8dc3e047c153b7ca155cc7e7526f304d3d036f0b1d4ad"
+    }
+  ]
+}

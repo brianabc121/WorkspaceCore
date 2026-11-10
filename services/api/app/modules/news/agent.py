@@ -43,6 +43,7 @@ from app.modules.news.models import NewsBriefing, NewsSettings
 from app.modules.news.schemas import NewsBriefingOut
 from app.modules.news.service import (
     MAX_BRIEFING_CHARS,
+    NEWS_CONFIG_BUSY,
     RECEIVE_WINDOW,
     NewsService,
     briefing_out,
@@ -356,6 +357,12 @@ async def tick(
     if service.deployed and (config_missing or _relearn_due(row, service.zone)):
         row = await service.enabled_row()
         if row is not None:
-            await service.relearn_and_render()
-            stats["rendered"] = 1
+            try:
+                await service.relearn_and_render()
+            except ApiError as busy:  # 别的进程正在写配置文件：下一次 tick 再做
+                if busy.code != NEWS_CONFIG_BUSY:
+                    raise
+                logger.info("news config busy, render skipped")
+            else:
+                stats["rendered"] = 1
     return stats

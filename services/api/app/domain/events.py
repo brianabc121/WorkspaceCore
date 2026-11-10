@@ -96,6 +96,13 @@ def mark(db: AsyncSession | Session, workspace_id: uuid.UUID, *topics: EventTopi
     _pending(session).setdefault(workspace_id, set()).update(topics)
 
 
+def carried_info(db: AsyncSession | Session) -> dict[str, Any]:
+    """另开一个会话时要沿用的 info：只带 EventBus，不带这个会话还没发布的变化。"""
+    session = db.sync_session if isinstance(db, AsyncSession) else db
+    bus = session.info.get(_BUS_KEY)
+    return {_BUS_KEY: bus} if bus is not None else {}
+
+
 def _workspace_of(obj: Any) -> uuid.UUID | None:
     workspace_id = getattr(obj, "workspace_id", None)
     return workspace_id if isinstance(workspace_id, uuid.UUID) else None

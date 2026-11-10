@@ -10,7 +10,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cache
-from typing import Any
+from typing import Any, Literal
 
 # 宿主提供的扩展点版本。清单的 host_api 不等于它时启动失败（扩展点有不兼容变化时加一）
 HOST_API = 1
@@ -42,6 +42,32 @@ class ServiceCheckSpec:
     service_id: str
     name: str
     probe: str
+
+
+@dataclass(frozen=True)
+class HookOutcome:
+    """on_toggle 钩子的结果（应用中心 T-0210）：同步记录按它写，不再“没抛异常就算成功”。
+
+    - applied：确实把外部配置协调到了最新目标（例如新闻早报写好了 TrendRadar 配置）；
+    - not_required：这次不需要做什么（没部署、这个工作空间没打开相关功能），reason 说明原因；
+    - failed：做了但没成功，reason 是固定类别（不放异常正文）。
+    旧钩子返回 None 仍然可以调用，记为“结果未确认”（unknown / result_unverified），不当作成功。
+    """
+
+    state: Literal["applied", "not_required", "failed"]
+    reason: str | None = None
+
+    @classmethod
+    def applied(cls) -> "HookOutcome":
+        return cls("applied")
+
+    @classmethod
+    def not_required(cls, reason: str) -> "HookOutcome":
+        return cls("not_required", reason)
+
+    @classmethod
+    def failed(cls, reason: str) -> "HookOutcome":
+        return cls("failed", reason)
 
 
 @dataclass(frozen=True)
@@ -82,9 +108,10 @@ class ModuleManifest:
     # 凭证轮换（app/domain/credential_rotation.py）要处理的加密列：指向 SealedField 元组
     sealed_fields: str | None = None
     service_checks: tuple[ServiceCheckSpec, ...] = ()
-    # 启用 / 停用之后调用（已提交）：
-    # ``async def on_toggle(db, settings, runtime, workspace_id, enabled)``，
-    # 例如新闻早报停用后重新生成 TrendRadar 配置文件、不再推送。失败只记日志，不影响开关本身
+    # 启用 / 停用之后调用（开关已提交）：
+    # ``async def on_toggle(db, settings, runtime, workspace_id, enabled) -> HookOutcome``，
+    # 例如新闻早报停用后重新生成 TrendRadar 配置文件、不再推送。钩子要按数据库里的最新状态协调、
+    # 可以重复执行；失败不回滚开关，结果写进同步记录，owner 可以在应用中心重试（T-0210）
     on_toggle: str | None = None
 
     def targets(self) -> list[str]:

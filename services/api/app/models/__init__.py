@@ -83,7 +83,7 @@ from app.models.model_connection import (
     ModelConnectionGrant,
     ModelConnectionModel,
 )
-from app.models.module import WorkspaceModule
+from app.models.module import ModuleSyncAttempt, WorkspaceModule
 from app.models.navigation import WorkspaceNavigation
 from app.models.notification import Notification
 from app.models.runner import (
@@ -175,6 +175,7 @@ __all__ = [
     "ModelConnectionCheck",
     "ModelConnectionGrant",
     "ModelConnectionModel",
+    "ModuleSyncAttempt",
     "Notification",
     "Project",
     "ProjectAgent",

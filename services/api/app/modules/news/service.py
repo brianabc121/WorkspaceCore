@@ -24,7 +24,8 @@ import re
 import secrets
 import uuid
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import AsyncIterator, Iterable, Sequence
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -51,6 +52,7 @@ from app.integrations.base import ConnectorError
 from app.integrations.http import ConnectorHttp, OutboundPolicy, host_of
 from app.models import AgentInstance
 from app.modules import service as modules
+from app.modules.locks import advisory_lock
 from app.modules.news import config as cfg
 from app.modules.news.client import TrendRadarClient
 from app.modules.news.models import NewsBriefing, NewsFeedback, NewsSettings
@@ -83,6 +85,9 @@ from app.schemas.workspaces import Role
 logger = logging.getLogger("app.news")
 
 INGEST_PATH = "/internal/news/ingest/"
+# 配置文件写锁（部署级，跨进程）：等这么久还拿不到就 409 NEWS_CONFIG_BUSY（Worker 下次再试）
+RENDER_LOCK_WAIT_SECONDS = 10.0
+NEWS_CONFIG_BUSY = "NEWS_CONFIG_BUSY"
 MAX_BATCH_BYTES = 64 * 1024
 MAX_BRIEFING_CHARS = 200_000
 INGEST_PER_MINUTE = 60
@@ -430,6 +435,7 @@ class NewsService:
         self.settings = settings
         self.runtime = runtime
         self.redis = redis
+        self._render_depth = 0
 
     @property
     def deployed(self) -> bool:
@@ -447,8 +453,16 @@ class NewsService:
         return await self.db.scalar(stmt)
 
     async def enabled_row(self) -> NewsSettings | None:
-        """打开了早报的那个工作空间的设置；模块在那个工作空间停用时当作没有打开。"""
-        row = await self.db.scalar(select(NewsSettings).where(NewsSettings.enabled.is_(True)))
+        """打开了早报的那个工作空间的设置；模块在那个工作空间停用时当作没有打开。
+
+        按数据库里的最新值读（populate_existing）：拿到配置文件写锁之前读过的旧对象不会被沿用；
+        这个会话里还没提交的修改先自动 flush，不会被覆盖。
+        """
+        row = await self.db.scalar(
+            select(NewsSettings)
+            .where(NewsSettings.enabled.is_(True))
+            .execution_options(populate_existing=True)
+        )
         if row is None or not await modules.is_enabled(self.db, row.workspace_id, "news"):
             return None
         return row
@@ -602,6 +616,13 @@ class NewsService:
         return await self.settings_out(row)
 
     async def update_settings(
+        self, actor: Actor, access: WorkspaceAccess, body: NewsSettingsIn
+    ) -> NewsSettingsOut:
+        # 先拿配置文件写锁，再锁设置行（锁的顺序见 app/modules/locks.py）
+        async with self.render_lock():
+            return await self._update_settings(actor, access, body)
+
+    async def _update_settings(
         self, actor: Actor, access: WorkspaceAccess, body: NewsSettingsIn
     ) -> NewsSettingsOut:
         workspace_id = access.workspace.id
@@ -773,15 +794,46 @@ class NewsService:
             learned=cfg.Learned({k: int(v) for k, v in scores.items()}),
         )
 
+    @asynccontextmanager
+    async def render_lock(self) -> AsyncIterator[None]:
+        """TrendRadar 配置文件的写锁（应用中心 T-0210）。
+
+        整个部署只有一份配置文件，所以锁按配置目录而不是按工作空间；用数据库的会话级锁，
+        api 的多个进程与 Worker 之间都生效。保存设置、加排除词、Worker 重新生成、模块启停的钩子
+        和部署命令都先拿它，拿到后再读最新状态、写文件、提交结果。同一个 NewsService 里可以重入。
+        等 RENDER_LOCK_WAIT_SECONDS 秒还拿不到：409 NEWS_CONFIG_BUSY。
+        """
+        if self._render_depth:
+            self._render_depth += 1
+            try:
+                yield
+            finally:
+                self._render_depth -= 1
+            return
+        name = f"news-config:{self.settings.news_config_dir}"
+        async with advisory_lock(self.db, name, wait=RENDER_LOCK_WAIT_SECONDS) as acquired:
+            if not acquired:
+                raise ApiError(409, NEWS_CONFIG_BUSY, "正在更新 TrendRadar 配置文件，请稍后再试")
+            self._render_depth = 1
+            try:
+                yield
+            finally:
+                self._render_depth = 0
+
     async def render_current(
         self, *, touch: NewsSettings | None = None, force: bool = False
     ) -> str:
         """按当前启用的工作空间生成配置文件；没有启用的就生成“不抓取、不推送”的配置。
 
         没有部署 TrendRadar 时不写文件（force：部署时第一次启动前也写）。返回错误说明（成功为空）。
+        持有配置文件写锁（调用方已经拿了就重入）；拿不到锁时抛 409 NEWS_CONFIG_BUSY。
         """
         if not self.deployed and not force:
             return ""
+        async with self.render_lock():
+            return await self._render_locked(touch)
+
+    async def _render_locked(self, touch: NewsSettings | None) -> str:
         enabled = await self.enabled_row()
         error = ""
         try:
@@ -859,13 +911,17 @@ class NewsService:
         return Learned(_now(), {k: v for k, v in scores.items() if v}, suggestions)
 
     async def relearn_and_render(self) -> str:
-        """Worker 每天调用：重新计算启用的工作空间的偏好，再生成配置文件。"""
-        row = await self.enabled_row()
-        if row is not None:
-            row.learned = (await self.learn(row.workspace_id)).as_json()
-        error = await self.render_current(touch=row)
-        await self.db.commit()
-        return error
+        """Worker 每天调用：重新计算启用的工作空间的偏好，再生成配置文件。
+
+        拿到配置文件写锁之后才读设置：排队期间模块被停用，就生成停用后的配置。
+        """
+        async with self.render_lock():
+            row = await self.enabled_row()
+            if row is not None:
+                row.learned = (await self.learn(row.workspace_id)).as_json()
+            error = await self.render_current(touch=row)
+            await self.db.commit()
+            return error
 
     # ------------------------------------------------------------ 状态
 
@@ -1298,6 +1354,16 @@ class NewsService:
     # ------------------------------------------------------------ 收藏 / 不感兴趣
 
     async def add_feedback(
+        self, actor: Actor, access: WorkspaceAccess, body: NewsFeedbackIn
+    ) -> NewsFeedbackOut:
+        async with AsyncExitStack() as stack:
+            if body.exclude_word is not None and body.kind == "dismiss":
+                # 加排除词要重新生成配置文件：先拿写锁，再锁设置行
+                await stack.enter_async_context(self.render_lock())
+            return await self._add_feedback(actor, access, body)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    async def _add_feedback(
         self, actor: Actor, access: WorkspaceAccess, body: NewsFeedbackIn
     ) -> NewsFeedbackOut:
         if access.user_id is None:

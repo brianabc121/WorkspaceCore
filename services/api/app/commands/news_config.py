@@ -13,10 +13,11 @@ import sys
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.config import get_settings
+from app.core.errors import ApiError
 from app.core.resources import create_engine
 from app.domain.connectors import ConnectorRuntime
 from app.integrations.http import CircuitBreaker
-from app.modules.news.service import NewsService
+from app.modules.news.service import NEWS_CONFIG_BUSY, NewsService
 
 
 async def run() -> str:
@@ -25,7 +26,12 @@ async def run() -> str:
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
             service = NewsService(db, settings, ConnectorRuntime(settings, CircuitBreaker()))
-            error = await service.render_current(force=True)
+            try:
+                error = await service.render_current(force=True)
+            except ApiError as busy:  # 工作台正在写同一份配置文件（持有写锁）
+                if busy.code != NEWS_CONFIG_BUSY:
+                    raise
+                return "配置文件正在被工作台更新，请稍后重试"
             await db.commit()
             return error
     finally:
