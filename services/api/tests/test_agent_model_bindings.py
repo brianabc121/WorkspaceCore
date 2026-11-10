@@ -492,3 +492,38 @@ async def test_bundle_writes_the_managed_provider_without_a_key(env: Env) -> Non
     blank = await env.create_instance(name="空白")
     fresh = json.loads(_unzip(await _bundle(env, blank["id"]))["state/openclaw.json"][0])
     assert "models" not in fresh
+
+
+async def test_switching_one_instance_keeps_the_shared_legacy_key(env: Env) -> None:
+    """两个实例共用旧的 openai_api_key（验收 M09）：甲改用受管连接并应用后，
+    乙仍能按旧引用取到 Key，甲、乙的旧授权都不被清理（是否撤销由 owner 决定）。"""
+    legacy_value = "sk-shared-legacy-7a3d"
+    secret = await env.create_secret(value=legacy_value)
+    first = await env.create_instance(name="甲")
+    second = await env.create_instance(name="乙")
+    for instance in (first, second):
+        await env.grant(instance["id"], [{"secret_id": secret["id"], "ref_id": "openai_api_key"}])
+    alpha = await connection(env, "Alpha", KEY_A)
+    await grant(env, alpha["id"], [first["id"]])
+    token_first = await env.issue_token(first["id"])
+    token_second = await env.issue_token(second["id"])
+
+    assert (await put(env, first["id"], alpha["id"], "m-1", None)).status_code == 200
+    cfg = (await config(env, token_first)).json()
+    assert (await report(env, token_first, cfg)).json()["apply_state"] == "applied"
+
+    shared = await env.client.post(
+        "/agent-api/v1/secrets/resolve",
+        json={"ids": ["openai_api_key"]},
+        headers=agent_headers(token_second),
+    )
+    assert shared.status_code == 200, shared.text
+    assert shared.json()["values"] == {"openai_api_key": legacy_value}
+    grants = await run_sql(
+        env.database_url,
+        "SELECT count(*) FROM workspace.agent_secret_grants WHERE secret_id = $1",
+        uuid.UUID(secret["id"]),
+    )
+    assert grants == 2
+    # 乙仍是“旧配置”，没有被顺带建绑定
+    assert (await view(env, second["id"]))["apply_state"] == "legacy_active"

@@ -139,13 +139,14 @@ describe('agent primary model', () => {
 
   it('asks before removing the binding and explains a not-granted error', async () => {
     let current = view(binding({ apply_state: 'applied', applied_connection_id: 'conn-1', applied_model_id: 'claude-sonnet-4', applied_revision: 1, applied_at: at, applied_connection_name: '团队多模型中转', version: 3 }))
+    let puts = 0
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
     const requests = setup(() => current, r => {
       if (r.method === 'DELETE' && path(r) === '/api/v1/agents/instances/inst-a/model-binding') {
         current = view(binding({ connection_id: null, model_id: null, revoked: true, desired_revision: 2, applied_connection_id: 'conn-1', applied_model_id: 'claude-sonnet-4', applied_revision: 1, applied_at: at, applied_connection_name: '团队多模型中转', connection_name: null, version: 4 }))
         return Response.json(current.binding)
       }
-      if (r.method === 'PUT' && path(r) === '/api/v1/agents/instances/inst-a/model-binding') return fail(409, 'MODEL_NOT_ALLOWED')
+      if (r.method === 'PUT' && path(r) === '/api/v1/agents/instances/inst-a/model-binding') return fail(409, puts++ ? 'VERSION_CONFLICT' : 'MODEL_NOT_ALLOWED')
     })
     const section = await panel()
     expect(await within(section).findByText('已应用', { selector: '.asv-state' })).toBeVisible()
@@ -167,6 +168,10 @@ describe('agent primary model', () => {
     await fireEvent.update(model, 'gemini-2.5-pro')
     await fireEvent.click(within(section).getByRole('button', { name: '保存' }))
     expect(await within(section).findByText(/还没有授权给这个智能体/)).toBeVisible()
+    // 别人同时改过（版本冲突）：说明原因，不当作已保存
+    await fireEvent.click(within(section).getByRole('button', { name: '保存' }))
+    expect(await within(section).findByText('主模型已被其他人修改，请刷新后再操作。')).toBeVisible()
+    expect(sent(requests, 'PUT', '')).toHaveLength(2)
   })
 })
 

@@ -51,9 +51,11 @@ async function tabKey(event: KeyboardEvent) {
   const next = event.key === 'ArrowRight' ? index + 1 : event.key === 'ArrowLeft' ? index - 1 : event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1 : -2
   if (next === -2) return
   event.preventDefault()
-  setTab(TABS[(next + TABS.length) % TABS.length]!.key)
+  const target = (next + TABS.length) % TABS.length
+  setTab(TABS[target]!.key)
+  // 地址栏更新是异步的，aria-selected 可能还没变：按位置把焦点移到目标页签
   await nextTick()
-  tablist.value?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus()
+  tablist.value?.querySelectorAll<HTMLElement>('[role="tab"]')[target]?.focus()
 }
 
 // ---- 汇总与迁移提示 ----

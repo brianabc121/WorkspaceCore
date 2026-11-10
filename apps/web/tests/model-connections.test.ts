@@ -378,6 +378,34 @@ describe('中转站管理：检测与同步状态', () => {
   })
 })
 
+describe('中转站管理：键盘与焦点', () => {
+  it('test_keyboard_tabs_and_focus_return: arrow keys move between page tabs, and closing the drawer returns focus to the row that opened it', async () => {
+    const A = conn({ id: ID.a, name: 'OpenAI 官方', model_preview: ['gpt-4.1'] })
+    setup(r => {
+      const p = path(r)
+      if (p === '/api/v1/model-connections/summary') return Response.json({ total: 1, check_passed: 0, check_passed_inference: 0, needs_attention: 0, non_model: 0, unique_granted_instances: 0 })
+      if (p === '/api/v1/model-connections' && r.method === 'GET') return page([A])
+    }, { [ID.a]: A }, { [ID.a]: ['gpt-4.1'] })
+    await openApp('/settings/model-connections')
+    const first = await screen.findByRole('tab', { name: '全部连接' })
+    first.focus()
+    await fireEvent.keyDown(first, { key: 'ArrowRight' })
+    await vi.waitFor(() => expect(screen.getByRole('tab', { name: '官方直连' })).toHaveAttribute('aria-selected', 'true'))
+    await vi.waitFor(() => expect(screen.getByRole('tab', { name: '官方直连' })).toHaveFocus())
+    await fireEvent.keyDown(screen.getByRole('tab', { name: '官方直连' }), { key: 'ArrowLeft' })
+    await vi.waitFor(() => expect(screen.getByRole('tab', { name: '全部连接' })).toHaveFocus())
+
+    const manage = await screen.findByRole('button', { name: '管理：OpenAI 官方' })
+    manage.focus()
+    await fireEvent.click(manage)
+    const panel = await drawer('编辑连接')
+    expect(panel).toBeVisible()
+    await fireEvent.click(screen.getByRole('button', { name: '关闭对话框' }))
+    await vi.waitFor(() => expect(screen.queryByRole('region', { name: '编辑连接' })).toBeNull())
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: '管理：OpenAI 官方' })).toHaveFocus())
+  })
+})
+
 describe('中转站管理：迁移与兼容凭据', () => {
   it('test_migration_drafts_and_non_model_credentials: completes an imported draft without creating bindings, classifies an entry and keeps managing non-model credentials', async () => {
     const SEC = '20000000-0000-4000-8000-000000000001'
