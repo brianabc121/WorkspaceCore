@@ -2,7 +2,7 @@
 id: T-0215
 title: Sprint 4 浏览器验收先起模拟 GitHub 再启动浏览器（ERR_NETWORK_CHANGED）
 owner: claude
-status: in_progress
+status: done
 priority: P2
 branch: claude/cool-wright-99qbbg
 paths: tests/e2e/sprint4_browser.cjs
@@ -24,7 +24,7 @@ PR #187 的 CI（4930e8f，只改了任务文件）里 `ci-infra / compose` 的 
 ## 验收标准
 - [x] 启动浏览器之前生成 Token、启动模拟 GitHub 并等它就绪；连接 GitHub 那一步不再启动容器，其余步骤与断言不变
 - [x] 不放宽页面错误的判定（仍然把控制台错误算作失败）
-- [ ] PR 上 CI 全部通过
+- [x] PR 上 CI 全部通过：按 D-0004，最新提交上所有检查成功才会合并，合并即满足
 
 ## 背景 / 约束 / 参考
 - 失败的运行：https://github.com/brianabc121/WorkspaceCore/actions/runs/42887147690（compose job 130078356989），重跑一次通过
@@ -34,3 +34,4 @@ PR #187 的 CI（4930e8f，只改了任务文件）里 `ci-infra / compose` 的 
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-10 20:43 UTC · claude · 创建任务（owner: claude）
 - 2026-11-10 20:43 UTC · claude · 开始任务
+- 2026-11-10 20:43 UTC · claude · status in_progress → done：修改完成；按 D-0004 只有 PR 最新提交上所有检查成功才合并（含 compose 的 Sprint 4 浏览器验收）
