@@ -275,7 +275,7 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
-      - name: V2 浏览器验收（密钥库、实例页、通讯录与单聊、导出、建群、IM 审批卡片、审批中心、移动端、member 不可见）
+      - name: V2 浏览器验收（中转站管理与兼容凭据、实例页、主模型分配、通讯录与单聊、导出、建群、IM 审批卡片、审批中心、移动端、member 不可见）
         # 真实 OpenIM；每次用新的工作台用户，登记的实例不需要在线，结束时在页面上停用
         run: node tests/e2e/sprint6_browser.cjs
       - name: 邮件页浏览器验收（T-0170 / T-0171：默认全部邮箱、同 ID 的邮件不串号、回复只经所属邮箱；模拟 Google）

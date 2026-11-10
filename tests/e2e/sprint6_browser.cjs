@@ -1,5 +1,6 @@
 // Sprint 6 V2 浏览器验收（T-0063；方案第 8 节的页面部分）：真实后端 + 真实 OpenIM 上的 OpenClaw 与 IM 页面——
-// 密钥库：添加密钥后页面上看不到明文 → “OpenClaw 智能体”页：打开总开关、“手动登记 / 接入”、授权密钥、下载接入包 →
+// 旧密钥库链接跳到中转站管理的“迁移与兼容凭据”，添加非模型凭据后页面上看不到明文 → “OpenClaw 智能体”页：打开总开关、“手动登记 / 接入”、下载接入包 →
+// 中转站管理（T-0206 / T-0207）：添加第三方中转连接（Key 只写不读）、授权给实例、在“OpenClaw 连接分配”里设为主模型，状态是“待应用” →
 // 通讯录：登记的实例自动出现 → 单聊：发消息、经 OpenIM 回调投影后显示、导出会话 →
 // 建群（从顶栏“创建”菜单打开）：拉入实例、群信息栏里的防刷屏 →
 // 项目（T-0110 / T-0111）：新建项目时勾选实例并建 IM 项目群；任务设为可自由接取，实例领取并完成（应用代码，与 MCP 同一入口），
@@ -215,11 +216,15 @@ async function download(page, click) {
   const { page } = await login(browser, ownerEmail, problems, traffic)
   const files = []
 
-  // ---------------------------------------------------------------- 密钥库：只写不读
-  const secretName = `model key ${run}`
+  // ---------------------------------------------------------------- 旧密钥库入口 → 中转站管理的兼容凭据：只写不读
+  const secretName = `deploy token ${run}`
   await page.goto(`${base}/agents/secrets`)
-  await page.getByRole('button', { name: '添加密钥' }).click()
+  await page.waitForURL((url) => url.pathname === '/settings/model-connections' && url.searchParams.get('tab') === 'compat')
+  await page.getByRole('heading', { level: 1, name: '中转站管理' }).waitFor()
+  const compat = page.getByRole('region', { name: '兼容凭据' })
+  await compat.getByRole('button', { name: '添加密钥' }).click()
   const secretDialog = page.getByRole('dialog', { name: '添加密钥' })
+  check(await secretDialog.getByRole('option', { name: '模型服务密钥' }).count() === 0, '兼容凭据里不应再能新建模型服务密钥')
   await secretDialog.getByLabel(/^名称 \*/).fill(secretName)
   const valueInput = secretDialog.getByLabel('值 *')
   check(await valueInput.getAttribute('type') === 'password', '密钥值输入框应为密码框')
@@ -228,7 +233,7 @@ async function download(page, click) {
   // 密钥列表改成表格（T-0196）：名称那一格是行标题
   await page.getByRole('rowheader', { name: secretName }).waitFor()
   check(!(await page.content()).includes(SECRET_VALUE), '保存后页面上不应出现密钥明文')
-  step('密钥库：添加密钥（密码框输入），保存后页面上只有名称与版本，没有明文')
+  step('旧密钥库链接跳到中转站管理的“迁移与兼容凭据”；添加非模型凭据（密码框输入，不能选模型服务密钥），保存后页面上只有名称与版本，没有明文')
 
   // ---------------------------------------------------------------- OpenClaw 智能体页：总开关、手动登记 / 接入、授权、接入包
   const name = `浏览器甲${run}`
@@ -260,6 +265,49 @@ async function download(page, click) {
   await page.getByText(/接入包已生成并下载/).waitFor()
   await card.getByText(/^令牌 mwa_/).waitFor()
   step(`实例页：打开总开关，登记内网读写实例（IM 账号 ${instance.im_user_id}），下载接入包 ${bundle.name}，卡片显示有效令牌`)
+
+  // ---------------------------------------------------------------- 中转站管理：添加连接、授权、设为主模型
+  const relayName = `浏览器中转${run}`
+  const modelId = `browser-model-${run}`
+  await page.goto(`${base}/settings/model-connections`)
+  await page.getByRole('region', { name: '连接统计' }).waitFor()
+  await page.getByRole('button', { name: '添加连接' }).click()
+  const createForm = page.getByRole('form', { name: '添加连接' })
+  await createForm.getByLabel('连接名称').fill(relayName)
+  await createForm.getByLabel('第三方中转').check()
+  await createForm.getByLabel('接口协议').selectOption('openai_compatible')
+  await createForm.getByLabel('连接 URL').fill(`https://relay-${run}.example.com/v1`)
+  const keyInput = createForm.getByLabel('API Key', { exact: true })
+  check(await keyInput.getAttribute('type') === 'password', 'API Key 输入框应为密码框')
+  await keyInput.fill(SECRET_VALUE)
+  await createForm.getByLabel('添加模型 ID').fill(modelId)
+  await createForm.getByRole('button', { name: '添加', exact: true }).click()
+  await createForm.getByRole('button', { name: '保存配置' }).click()
+  const editPanel = page.getByRole('complementary', { name: '编辑连接' })
+  await editPanel.getByText('已加密保存', { exact: true }).waitFor()
+  check(!(await page.content()).includes(SECRET_VALUE), '保存连接后页面上不应出现 Key')
+  const relayRow = page.getByRole('region', { name: '连接列表' }).getByRole('row', { name: new RegExp(relayName) })
+  await relayRow.waitFor()
+  await relayRow.getByText(modelId).waitFor()
+  await editPanel.getByRole('tab', { name: '智能体授权' }).click()
+  const grantForm = editPanel.getByRole('form', { name: '授权的智能体' })
+  await grantForm.getByRole('checkbox', { name: new RegExp(name) }).check()
+  await grantForm.getByRole('button', { name: '保存授权' }).click()
+  await grantForm.getByText('授权已保存。').waitFor()
+  const assignments = page.getByRole('region', { name: 'OpenClaw 连接分配' })
+  await assignments.getByRole('button', { name: `更换连接：${name}` }).click()
+  const assign = page.getByRole('dialog', { name: `更换连接：${name}` })
+  await assign.getByLabel('模型连接 *').selectOption({ label: `${relayName} · 第三方中转` })
+  await assign.getByLabel('主模型 *').selectOption(modelId)
+  await assign.getByRole('button', { name: '保存', exact: true }).click()
+  await assign.waitFor({ state: 'detached' })
+  const assignedRow = assignments.getByRole('row', { name: new RegExp(name) })
+  await assignedRow.getByText(relayName).waitFor()
+  await assignedRow.getByText('待应用').waitFor()
+  const binding = await apiGet(page, workspace, `/api/v1/agents/instances/${instance.id}/model-binding`)
+  check(binding.binding && binding.binding.model_id === modelId && binding.apply_state === 'pending', `主模型应保存为目标、状态待应用：${JSON.stringify(binding)}`)
+  check(!JSON.stringify(binding).includes(SECRET_VALUE), '绑定接口不应回显 Key')
+  step(`中转站管理：添加第三方中转「${relayName}」（Key 只写不读），授权给实例，在“OpenClaw 连接分配”里设为主模型 ${modelId}，状态“待应用”（实例确认前不显示已应用）`)
 
   // ---------------------------------------------------------------- 通讯录与单聊
   await page.goto(`${base}/im`)
@@ -427,24 +475,24 @@ async function download(page, click) {
   check(await noHorizontalScroll(page), '390px 宽度下打开 AI 抽屉不应出现横向滚动')
   await sheet.getByRole('button', { name: '关闭对话框' }).click()
   await sheet.waitFor({ state: 'detached' })
-  for (const route of ['/im', '/agents', '/agent-servers', '/agents/secrets', '/ai']) {
+  for (const route of ['/im', '/agents', '/agent-servers', '/settings/model-connections', '/ai']) {
     await page.goto(`${base}${route}`)
     await page.getByRole('heading', { level: 1 }).waitFor()
     await page.waitForLoadState('networkidle')
     check(await noHorizontalScroll(page), `${route} 在 390px 宽度下不应出现横向滚动`)
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
-  step('390px 宽度下 AI 抽屉改为侧滑面板；IM、OpenClaw 智能体、智能体服务器、密钥库、AI 审批页无横向滚动')
+  step('390px 宽度下 AI 抽屉改为侧滑面板；IM、OpenClaw 智能体、智能体服务器、中转站管理、AI 审批页无横向滚动')
 
   // ---------------------------------------------------------------- member：看不到 IM 与实例页
   const member = await login(browser, memberEmail, problems, traffic)
-  for (const label of ['消息', 'OpenClaw 智能体', '智能体服务器', '密钥库']) {
+  for (const label of ['消息', 'OpenClaw 智能体', '智能体服务器', '中转站管理']) {
     check(await member.page.getByRole('link', { name: label, exact: true }).count() === 0, `member 不应看到“${label}”入口`)
   }
   await member.page.goto(`${base}/im`)
   await member.page.waitForLoadState('networkidle')
   check(await member.page.getByRole('textbox', { name: '消息', exact: true }).count() === 0, 'member 打开 /im 不应看到聊天输入框')
-  step('member：导航里没有消息、OpenClaw 智能体、智能体服务器、密钥库，直接打开 /im 也不能聊天')
+  step('member：导航里没有消息、OpenClaw 智能体、智能体服务器、中转站管理，直接打开 /im 也不能聊天')
 
   // ---------------------------------------------------------------- 浏览器只访问工作台；没有密钥明文
   const outside = traffic.requests.filter((url) => !url.startsWith(base) && !url.startsWith('data:') && !url.startsWith('blob:'))
