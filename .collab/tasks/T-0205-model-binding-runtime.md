@@ -4,7 +4,7 @@ title: 中转站管理（MC-5）：OpenClaw 配置生成、应用与真实联调
 owner: claude
 status: in_progress
 priority: P1
-branch: b6-model-connections
+branch: claude/cool-wright-99qbbg
 paths: services/api/app/domain/agent_model_config.py,services/api/app/agent_bundle,services/api/app/agent_provisioning,services/api/app/domain/agent_deployments.py,tests/e2e,.github/workflows/ci-infra.yml
 depends_on: T-0204
 created: 2026-11-09
@@ -29,3 +29,4 @@ updated: 2026-11-10
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 23:42 UTC · claude · 创建任务（owner: claude）
 - 2026-11-10 00:09 UTC · claude · 开始任务
+- 2026-11-10 01:38 UTC · claude · 本机真实 OpenClaw（model_config_openclaw.py）15/15；等 CI agents 场景 27（整套工作台 + 两个实例）通过后标 done

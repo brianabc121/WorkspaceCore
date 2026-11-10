@@ -2,13 +2,13 @@
 id: T-0208
 title: 中转站管理（MC-8）：端到端验收、迁移演练与文档
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: claude/cool-wright-99qbbg
 paths: tests/e2e,docs,.github/workflows/ci-infra.yml
 depends_on: T-0200, T-0201, T-0202, T-0203, T-0204, T-0205, T-0206, T-0207
 created: 2026-11-09
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # T-0208 中转站管理（MC-8）：端到端验收、迁移演练与文档
@@ -28,3 +28,5 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 23:42 UTC · claude · 创建任务（owner: claude）
+- 2026-11-10 01:37 UTC · claude · 开始任务
+- 2026-11-10 01:38 UTC · claude · 核验记录第 3、5 节已写（本地结果、迁移演练、验收矩阵）；等后端全量与 CI 结果写入第 3、4 节后标 done

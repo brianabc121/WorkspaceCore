@@ -725,7 +725,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 
 | 方法与路径 | 说明 |
 |---|---|
-| `GET /` | 服务端搜索 `q`（名称、URL、模型 ID）与筛选 `type`、`configuration_state`、`enabled`、`check_status`（含 `never`），分页之前生效；`total` 是全部匹配数，不含归类为非模型的导入项。游标绑定筛选条件 |
+| `GET /` | 服务端搜索 `q`（名称、URL、模型 ID）与筛选 `type`、`configuration_state`、`enabled`、`check_status`（含 `never`），分页之前生效；`total` 是全部匹配数，不含归类为非模型的导入项。游标绑定筛选条件。每行带 `model_count` 与 `model_preview`（按 ID 排序的前 3 个模型 ID，列表不必逐行再取模型） |
 | `GET /capabilities` · `GET /summary` | 已开放的协议、官方预设与限制；全工作空间统计（不受筛选与分页影响；`check_passed` 只计 ready + 启用、15 分钟内对当前配置修订号检测通过的连接） |
 | `POST /` | 新建（可带 `Idempotency-Key`）：名称、类型、协议、base URL（只收协议基地址，不收 `/chat/completions` 等单次请求地址、userinfo、query）、`api_key`、模型集合；`save_as_draft` 存草稿。官方预设配第三方主机 `422 MODEL_OFFICIAL_HOST_MISMATCH`，未开放的协议 `422 MODEL_PROTOCOL_UNSUPPORTED` |
 | `GET/PATCH/DELETE /{id}` | PATCH 带 `version`；已授权或已绑定的连接改 URL / 协议 `409 CONNECTION_ENDPOINT_IN_USE`（复制为新连接再切换）；停用会影响实例时先 `409 CONNECTION_IN_USE`（`details.impact`），带 `confirm_impact=true` 再提交；有授权 / 绑定 / 旧授权时不能删除 |
