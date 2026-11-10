@@ -147,7 +147,7 @@ async def test_prepare_once_then_deploy_two_instances(owner: Owner, tmp_path: Pa
         dirs = sorted(p.name for p in root.iterdir())
         assert dirs == sorted(i.replace("-", "")[:12] for i in (first, second))
         cron = (host.state / "crontab").read_text().splitlines()
-        assert cron[0] == "0 1 * * * echo keep-me" and len(cron) == 13
+        assert cron[0] == "0 1 * * * echo keep-me" and len(cron) == 15
         assert host.authorized() == [], "不再给服务器装工作台的公钥"
         for instance_id in (first, second):
             code, shown = await _json(owner, "GET", f"/api/v1/agents/instances/{instance_id}")
@@ -215,7 +215,7 @@ async def test_prepare_once_then_deploy_two_instances(owner: Owner, tmp_path: Pa
         assert state["deployment"] is None and state["server"] is None
         assert sorted(p.name for p in root.iterdir()) == [second.replace("-", "")[:12]]
         cron = (host.state / "crontab").read_text().splitlines()
-        assert len(cron) == 7 and all(first.replace("-", "")[:12] not in c for c in cron)
+        assert len(cron) == 8 and all(first.replace("-", "")[:12] not in c for c in cron)
 
         # 还有部署的实例：不能移除
         code, blocked = await _json(

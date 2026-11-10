@@ -190,3 +190,25 @@ describe('agent primary model revert', () => {
     expect(await within(section).findByText('待应用')).toBeVisible()
   })
 })
+
+describe('agent primary model picker', () => {
+  it('keeps the newly chosen connection when the form started from the current target', async () => {
+    const current = view(binding({ apply_state: 'applied', applied_connection_id: 'conn-1', applied_model_id: 'claude-sonnet-4', applied_revision: 1, applied_at: at, applied_connection_name: '团队多模型中转' }))
+    const options: Schema['PickerConnectionPage'] = { ...OPTIONS, items: OPTIONS.items.map(o => ({ ...o, granted: true })) }
+    setup(() => current, r => {
+      if (path(r) === '/api/v1/agents/model-connection-options') return Response.json(options)
+      if (path(r) === '/api/v1/model-connections/conn-2/models') return Response.json({ ...MODELS, items: [{ ...MODELS.items[1]!, id: 'm-9', model_id: 'gpt-4.1', display_name: 'gpt-4.1' }], total: 1 })
+    })
+    const section = await panel()
+    await fireEvent.click(await within(section).findByRole('button', { name: '更换连接或模型' }))
+    const connection = await within(section).findByLabelText('模型连接 *') as HTMLSelectElement
+    await vi.waitFor(() => expect(connection.value).toBe('conn-1'))
+    await fireEvent.update(connection, 'conn-2')
+    // 选了新连接之后不会被预填的旧目标改回去，模型要重新选
+    await vi.waitFor(() => expect(connection.value).toBe('conn-2'))
+    const model = await within(section).findByLabelText('主模型 *') as HTMLSelectElement
+    await vi.waitFor(() => expect([...model.options].some(o => o.value === 'gpt-4.1')).toBe(true))
+    expect(model.value).toBe('')
+    expect(within(section).getByRole('button', { name: '保存' })).toBeDisabled()
+  })
+})

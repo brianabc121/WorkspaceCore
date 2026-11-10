@@ -134,6 +134,10 @@ class ModelConnectionOut(BaseModel):
         description="从旧密钥库导入时的原密钥 ID，只用于追溯，不能拿来取 Key"
     )
     model_count: int = Field(ge=0)
+    model_preview: list[str] = Field(
+        default_factory=list,
+        description="按 ID 排序的前 3 个模型 ID（列表显示用，完整集合见 /models）",
+    )
     grant_count: int = Field(ge=0)
     binding_count: int = Field(ge=0, description="以它为目标或已应用连接的实例数")
     config_revision: int

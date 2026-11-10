@@ -17,9 +17,14 @@ const items = computed(() => options.data.value?.items ?? [])
 const connectionId = ref(props.modelValue?.connection_id ?? '')
 const modelId = ref(props.modelValue?.model_id ?? '')
 const filter = ref('')
+// 父组件预填或改写时同步；换连接时本组件先发出 null（模型要重选），这时保留刚选的连接，只清空模型
 watch(() => props.modelValue, value => {
-  connectionId.value = value?.connection_id ?? ''
-  modelId.value = value?.model_id ?? ''
+  if (value) {
+    connectionId.value = value.connection_id
+    modelId.value = value.model_id
+  } else {
+    modelId.value = ''
+  }
 })
 const chosen = computed(() => items.value.find(o => o.id === connectionId.value) ?? null)
 const models = useConnectionModels(scope, () => chosen.value?.id ?? null)

@@ -130,6 +130,7 @@ _REQUEST_SUFFIXES = (
 )
 
 PAGE_DEFAULT = 50
+MODEL_PREVIEW = 3
 PAGE_MAX = 100
 CHECK_FRESH = timedelta(seconds=CHECK_FRESH_SECONDS)
 
@@ -269,6 +270,7 @@ def _like(text: str) -> str:
 @dataclass
 class _Stats:
     models: dict[uuid.UUID, int]
+    previews: dict[uuid.UUID, list[str]]
     grants: dict[uuid.UUID, int]
     bindings: dict[uuid.UUID, int]
     credential: dict[uuid.UUID, tuple[bool, int]]
@@ -370,7 +372,7 @@ class ModelConnectionService:
     async def _stats(self, connections: Sequence[ModelConnection]) -> _Stats:
         ids = [c.id for c in connections]
         if not ids:
-            return _Stats({}, {}, {}, {}, {})
+            return _Stats({}, {}, {}, {}, {}, {})
         models = dict(
             (
                 await self.db.execute(
@@ -380,6 +382,30 @@ class ModelConnectionService:
                 )
             ).all()
         )
+        # 每条连接按 ID 排序的前 3 个模型（一次查询，列表不必逐行再取）
+        ranked = (
+            select(
+                ModelConnectionModel.connection_id,
+                ModelConnectionModel.model_id,
+                func.row_number()
+                .over(
+                    partition_by=ModelConnectionModel.connection_id,
+                    order_by=ModelConnectionModel.model_id,
+                )
+                .label("rank"),
+            )
+            .where(ModelConnectionModel.connection_id.in_(ids))
+            .subquery()
+        )
+        previews: dict[uuid.UUID, list[str]] = {}
+        for cid, model_id in (
+            await self.db.execute(
+                select(ranked.c.connection_id, ranked.c.model_id)
+                .where(ranked.c.rank <= MODEL_PREVIEW)
+                .order_by(ranked.c.connection_id, ranked.c.rank)
+            )
+        ).all():
+            previews.setdefault(cid, []).append(model_id)
         grants = dict(
             (
                 await self.db.execute(
@@ -434,6 +460,7 @@ class ModelConnectionService:
                 checks[row.connection_id] = row
         return _Stats(
             models=models,
+            previews=previews,
             grants=grants,
             bindings={k: len(v) for k, v in bindings.items()},
             credential=credential,
@@ -462,6 +489,7 @@ class ModelConnectionService:
             migration_state=connection.migration_state,
             legacy_source_id=connection.legacy_source_id,
             model_count=stats.models.get(connection.id, 0),
+            model_preview=stats.previews.get(connection.id, []),
             grant_count=stats.grants.get(connection.id, 0),
             binding_count=stats.bindings.get(connection.id, 0),
             config_revision=connection.config_revision,

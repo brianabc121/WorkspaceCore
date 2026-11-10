@@ -192,6 +192,7 @@ async def test_connection_crud_never_returns_key(env: Env) -> None:
     assert connection["enabled"] is True
     assert connection["migration_state"] == "native"
     assert connection["model_count"] == 2
+    assert connection["model_preview"] == ["gpt-4.1", "gpt-4.1-mini"]
     assert not (
         {"api_key", "credential_ref", "credential_secret_id", "secret_id"} & connection.keys()
     )
@@ -223,6 +224,17 @@ async def test_connection_crud_never_returns_key(env: Env) -> None:
         " WHERE resource_type = 'model_connection'",
     )
     assert audit and KEY not in audit
+
+
+async def test_list_shows_first_three_models_in_one_response(env: Env) -> None:
+    body = relay("多模型中转")
+    body["models"] = [{"model_id": m} for m in ("z-model", "a-model", "m-model", "b-model")]
+    await created(env, body)
+    await created(env, official())
+    items = {c["name"]: c for c in (await get(env)).json()["items"]}
+    assert items["多模型中转"]["model_count"] == 4
+    assert items["多模型中转"]["model_preview"] == ["a-model", "b-model", "m-model"]
+    assert items["OpenAI 官方"]["model_preview"] == ["gpt-4.1", "gpt-4.1-mini"]
 
 
 # ---------------------------------------------------------------- 校验

@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useAuthStore } from '../../stores/auth'
-import { useModelPreview, type Connection } from './api'
+import type { Connection } from './api'
 
-// 表格“支持模型”一格：前几个明确的模型 ID（只读 3 个）+ 总数；“服务商全部可用模型”另加说明。没有模型写“待配置”。
+// 表格“支持模型”一格：列表接口带回的前 3 个模型 ID（按 ID 排序）+ 剩余数；“服务商全部可用模型”另加说明。没有模型写“待配置”。
 const props = defineProps<{ connection: Connection }>()
-const auth = useAuthStore(), scope = auth.workspaceId!
-const preview = useModelPreview(scope, () => props.connection.id, () => props.connection.model_count > 0)
-const shown = computed(() => (preview.data.value?.items ?? []).slice(0, 3).map(m => m.model_id))
+const shown = computed(() => props.connection.model_preview ?? [])
 const more = computed(() => Math.max(0, props.connection.model_count - shown.value.length))
 </script>
 

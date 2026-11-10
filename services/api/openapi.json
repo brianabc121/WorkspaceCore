@@ -14710,6 +14710,14 @@
             "title": "Model Count",
             "type": "integer"
           },
+          "model_preview": {
+            "description": "按 ID 排序的前 3 个模型 ID（列表显示用，完整集合见 /models）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Model Preview",
+            "type": "array"
+          },
           "model_scope": {
             "enum": [
               "selected",

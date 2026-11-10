@@ -85,13 +85,6 @@ export function useConnection(scope: string, id: () => string | null) {
     queryFn: async ({ queryKey, signal }) => dataOf(await c.auth.api.GET('/api/v1/model-connections/{connection_id}', { params: { header: c.header, path: { connection_id: queryKey[5] as string } }, signal })) })
 }
 
-/** 表格里“支持模型”的前几个 ID（只读 3 个；总数取 model_count） */
-export function useModelPreview(scope: string, id: () => string, enabled: () => boolean) {
-  const c = context(scope)
-  return useQuery({ queryKey: computed(() => mcKey(c.user, scope, 'models-preview', id())), enabled: computed(() => c.enabled.value && enabled()), staleTime: 60_000,
-    queryFn: async ({ queryKey, signal }) => dataOf(await c.auth.api.GET('/api/v1/model-connections/{connection_id}/models', { params: { header: c.header, path: { connection_id: queryKey[5] as string }, query: { limit: 3 } }, signal })) })
-}
-
 /** 模型管理页签：独立分页 */
 export function useModels(scope: string, id: () => string | null) {
   const c = context(scope)

@@ -10969,6 +10969,11 @@ export interface components {
             /** Model Count */
             model_count: number;
             /**
+             * Model Preview
+             * @description 按 ID 排序的前 3 个模型 ID（列表显示用，完整集合见 /models）
+             */
+            model_preview?: string[];
+            /**
              * Model Scope
              * @enum {string}
              */

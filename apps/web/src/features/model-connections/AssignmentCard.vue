@@ -26,8 +26,9 @@ const target = (r: Assignment) => (r.binding && !r.binding.revoked ? r.binding :
 const differs = (r: Assignment) => !!r.binding && r.binding.applied_revision !== r.binding.desired_revision
 const state = (r: Assignment) => applyStatus(r.binding?.apply_state ?? (r.legacy ? 'legacy_active' : null))
 function open(r: Assignment) {
-  // 从空的选择开始：选择器换连接时会清空模型，预填当前目标会被它重置（当前目标写在对话框里）
-  choice.value = null
+  // 预填当前目标（没有目标时从空开始）；换连接时选择器只清空模型、保留新选的连接
+  const t = target(r)
+  choice.value = t?.connection_id && t.model_id ? { connection_id: t.connection_id, model_id: t.model_id } : null
   error.value = ''; notice.value = ''
   editing.value = r
 }

@@ -20,7 +20,7 @@ const check = (over: Partial<Schema['ConnectionCheckOut']> = {}): Schema['Connec
 const conn = (over: Partial<Schema['ModelConnectionOut']> = {}): Schema['ModelConnectionOut'] => ({
   id: ID.a, workspace_id: 'workspace-a', name: '团队多模型中转', description: '', connection_type: 'relay', official_provider: null, protocol: 'openai_compatible',
   base_url: 'https://gateway.example.com/v1', credential_configured: true, credential_version: 1, model_scope: 'selected', configuration_state: 'ready', enabled: true,
-  migration_state: 'native', legacy_source_id: null, model_count: 2, grant_count: 1, binding_count: 0, config_revision: 1, version: 3, last_check: null,
+  migration_state: 'native', legacy_source_id: null, model_count: 2, model_preview: [], grant_count: 1, binding_count: 0, config_revision: 1, version: 3, last_check: null,
   models_synced_at: null, sync_state: null, created_at: at, updated_at: at, ...over,
 })
 const modelPage = (ids: string[], over: Partial<Schema['ConnectionModelPage']> = {}): Schema['ConnectionModelPage'] => ({
@@ -59,8 +59,8 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('中转站管理：列表与汇总', () => {
   it('test_connections_list_filters_total_and_summary: searches, tabs and filters on the server, counts from the workspace summary, and tells an empty list from a failed load', async () => {
-    const A = conn({ id: ID.a, name: 'OpenAI 官方', connection_type: 'official', official_provider: 'openai', base_url: 'https://api.openai.com/v1', grant_count: 2, last_check: check({ connection_id: ID.a }) })
-    const B = conn({ id: ID.b, name: '团队多模型中转', model_scope: 'all_available', model_count: 3, grant_count: 3 })
+    const A = conn({ id: ID.a, name: 'OpenAI 官方', connection_type: 'official', official_provider: 'openai', base_url: 'https://api.openai.com/v1', model_preview: ['gpt-4.1', 'gpt-4.1-mini'], grant_count: 2, last_check: check({ connection_id: ID.a }) })
+    const B = conn({ id: ID.b, name: '团队多模型中转', model_scope: 'all_available', model_count: 5, model_preview: ['GPT-5', 'claude-sonnet-4', 'gemini-2.5-pro'], grant_count: 3 })
     const C = conn({ id: ID.c, name: '备用模型连接', model_count: 1 })
     const requests = setup(r => {
       const p = path(r), q = params(r)
@@ -95,8 +95,10 @@ describe('中转站管理：列表与汇总', () => {
     expect(relay).toHaveTextContent('第三方中转')
     expect(relay).toHaveTextContent('服务商全部可用模型')
     expect(relay).toHaveTextContent('未检测')
-    // 预览只读前 3 个模型
-    expect(requests.some(r => path(r) === `/api/v1/model-connections/${ID.b}/models` && params(r).get('limit') === '3')).toBe(true)
+    // 预览用列表接口带回的前 3 个模型 ID，剩下的显示为 +N，不再逐行取模型列表
+    expect(relay).toHaveTextContent('gemini-2.5-pro')
+    expect(relay).toHaveTextContent('+2')
+    expect(requests.some(r => /\/model-connections\/[^/]+\/models$/.test(path(r)))).toBe(false)
     expect(list).toHaveTextContent('共 42 条连接')
     await fireEvent.click(within(list).getByRole('button', { name: '加载更多连接' }))
     expect(await within(list).findByRole('row', { name: /备用模型连接/ })).toBeVisible()
