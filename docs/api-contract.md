@@ -715,3 +715,42 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 `actor_label`（当前工作空间成员的显示名；`actor_id` 为空是“系统”；已不是成员为 null，显示 ID）、
 `resource_current_name`（对象“现在”的名称，不是当时的快照；只查本地表、批量查：`user`、`workspace`、`project`、`task`、`integration`、`agent_instance`，以及只有 owner 能看到的 `agent_secret`、`agent_server`；对象已删除、不在本工作空间或无权读取为 null）。
 列表与详情的 `metadata` 是写入时脱敏的内容，再过一遍脱敏并去掉 IP 类的键；没有通用的“结果”字段，不补前后值或 IP。
+
+## 中转站管理与 OpenClaw 主模型（T-0200 ~ T-0208）
+
+方案 `docs/v2/model-connections/`，决定与 OpenClaw 核验见 `docs/decisions/2026-11-09-model-connections.md`。
+全部 owner（admin / member / viewer `403`，非成员或别的工作空间 `404`）；写操作要 CSRF。**任何响应都不含 Key、密文、`credential_ref` 或内部 secret_id。**
+
+连接（`/api/v1/model-connections`）：
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /` | 服务端搜索 `q`（名称、URL、模型 ID）与筛选 `type`、`configuration_state`、`enabled`、`check_status`（含 `never`），分页之前生效；`total` 是全部匹配数，不含归类为非模型的导入项。游标绑定筛选条件。每行带 `model_count` 与 `model_preview`（按 ID 排序的前 3 个模型 ID，列表不必逐行再取模型） |
+| `GET /capabilities` · `GET /summary` | 已开放的协议、官方预设与限制；全工作空间统计（不受筛选与分页影响；`check_passed` 只计 ready + 启用、15 分钟内对当前配置修订号检测通过的连接） |
+| `POST /` | 新建（可带 `Idempotency-Key`）：名称、类型、协议、base URL（只收协议基地址，不收 `/chat/completions` 等单次请求地址、userinfo、query）、`api_key`、模型集合；`save_as_draft` 存草稿。官方预设配第三方主机 `422 MODEL_OFFICIAL_HOST_MISMATCH`，未开放的协议 `422 MODEL_PROTOCOL_UNSUPPORTED` |
+| `GET/PATCH/DELETE /{id}` | PATCH 带 `version`；已授权或已绑定的连接改 URL / 协议 `409 CONNECTION_ENDPOINT_IN_USE`（复制为新连接再切换）；停用会影响实例时先 `409 CONNECTION_IN_USE`（`details.impact`），带 `confirm_impact=true` 再提交；有授权 / 绑定 / 旧授权时不能删除 |
+| `POST /{id}/rotate-key` | 只换 Key（不能和改地址一起）：凭据版本与配置修订号加 1、旧密文清除、检测结果与“已验证”失效，绑定到它的实例重新应用 |
+| `GET/PUT /{id}/models` · `POST /{id}/models/sync` | 明确的模型 ID（原样大小写，每条连接最多 1000 个）；`all_available` 用最近一次完整同步的列表；同步不完整或失败保留上一份完整列表，不移除被绑定的模型（`409 MODEL_IN_USE`） |
+| `POST /{id}/checks` | `mode=metadata`（列模型）或 `inference`（必须选模型，发一条最短请求，可能产生少量费用）；结果只有固定类别（`passed` / `failed` / `rate_limited` / `unsupported` / `unknown` + 原因），不存远端原文；429 带 `retry_at` |
+| `GET/PUT /{id}/grants` · `GET /{id}/activity` | 授权给哪些实例（撤销授权同时撤掉这条凭据对它的旧授权；在用的实例 `409 GRANT_IN_USE`）；创建 / 配置 / 轮换 / 授权 / 取用 / 应用的脱敏记录 |
+| `GET /migration/entries` · `POST /migration/entries/{id}/classify` · `POST /migration/run` | 旧密钥库的导入项与归类（模型 / 非模型）；在页面上执行导入（`dry_run` / `apply` / `report`，与命令 `app.commands.migrate_model_connections` 相同，只回计数） |
+
+主模型绑定（`/api/v1/agents/...`）：
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /agents/model-assignments` · `GET /agents/model-connection-options` | 每个实例的目标 / 已应用 / 状态（没有原生绑定、仍按旧配置运行的是 `legacy`）；可选的连接（启用、配置完整、协议已开放；带 `instance_id` 时标出是否已授权） |
+| `GET/PUT/DELETE /agents/instances/{id}/model-binding` | 绑定是目标：保存后 `pending`，实例确认后才 `applied`（`applied_*` 快照单独保存）。PUT 第一次 `version=null`；要求连接启用、配置完整、已授权给这个实例、模型在集合里、Key 可读。DELETE 解除（`revoked=true`，立即拒绝后续取 Key） |
+| `POST /agents/instances/{id}/model-binding/apply` · `GET .../jobs/{job_id}` | （重新）应用当前目标：同一修订号复用同一个任务；排队或执行中超过 10 分钟没有结果显示 `unknown` |
+| `POST /agents/deployments` | 新部署必须带 `model: {connection_id, model_id}`：选择即授权给新实例，实例、连接授权、绑定、应用任务同一事务 |
+
+实例接口（`/agent-api/v1/*`，实例凭证；响应 `Cache-Control: no-store`）：
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /model-config` | 自己的非敏感配置：provider 键（`mwc` + 连接 ID 前 20 个十六进制字符）、OpenClaw `api`、base URL、模型 ID、SecretRef id（`mc_<连接 ID>`）、`apply_key`、`fingerprint`；`state=revoked` 表示移除受管配置。没有绑定或连接不可用 `409 MODEL_CONFIGURATION_INCOMPLETE`（`details.reason`）。每分钟 6 次 |
+| `POST /model-config/applied` | 回报 `applied` / `failed` / `manual_required`（`reason` 是固定的小写代码）；只认当前目标的 `desired_revision`，迟到的旧回报 `409 MODEL_BINDING_CONFLICT`、不改状态 |
+| `POST /model-credentials/resolve` | 取 `mc_` Key：只给当前目标或尚未退休的已应用连接，且连接启用、仍授权、绑定没有解除；其他一律 `errors[id].code = NOT_FOUND`；每次取用都写记录。每分钟 60 次 |
+
+旧接口 `/api/v1/agents/secrets*` 与 `/agent-api/v1/secrets/resolve` 继续可用：被连接托管的凭据在旧接口里只读（`409 MANAGED_BY_MODEL_CONNECTION`），
+连接停用后旧取密钥接口与 Runner 注入同样拒绝。

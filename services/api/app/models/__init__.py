@@ -75,6 +75,14 @@ from app.models.knowledge_base import (
     ProjectAgent,
 )
 from app.models.mail import AgentMailAccount, MailAccount, MailOAuthClient, MailSend
+from app.models.model_connection import (
+    AgentModelBinding,
+    ModelApplyJob,
+    ModelConnection,
+    ModelConnectionCheck,
+    ModelConnectionGrant,
+    ModelConnectionModel,
+)
 from app.models.module import WorkspaceModule
 from app.models.navigation import WorkspaceNavigation
 from app.models.notification import Notification
@@ -105,6 +113,7 @@ __all__ = [
     "AgentInstance",
     "AgentInstanceSample",
     "AgentMailAccount",
+    "AgentModelBinding",
     "AgentOpsAction",
     "AgentRunStop",
     "AgentSecret",
@@ -161,6 +170,11 @@ __all__ = [
     "MailAccount",
     "MailOAuthClient",
     "MailSend",
+    "ModelApplyJob",
+    "ModelConnection",
+    "ModelConnectionCheck",
+    "ModelConnectionGrant",
+    "ModelConnectionModel",
     "Notification",
     "Project",
     "ProjectAgent",

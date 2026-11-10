@@ -71,7 +71,7 @@ async function save(enabled: boolean) {
     </form>
     <p v-if="state" class="form-help">
       打开后它用 runner_* / env_* 工具自己决定镜像、安装步骤、运行时、用户、网络（比如要跑安卓模拟器就选 kvm），直接执行、不审批；不能用特权模式、挂 Docker socket 或宿主目录、用宿主网络，也连不到私有网段、工作台与 OpenClaw 服务器。
-      可以注入的密钥：{{ state.secrets.length ? state.secrets.join('、') : '没有（在下面的“密钥授权”里授权给它的密钥才能注入）' }}。
+      可以注入的密钥：{{ state.secrets.length ? state.secrets.join('、') : '没有（在下面的“高级凭据授权”里授权给它的密钥才能注入）' }}。
       <template v-if="readOnly && !state.enabled"> 这个实例的工具权限是只读，打不开。</template>
       <template v-if="state.enabled && state.enabled_at"> 打开于 {{ formatTime(state.enabled_at) }}。</template>
       它申请的容器、负载、执行记录与回收在 <RouterLink to="/runner">容器服务器</RouterLink> 页面。

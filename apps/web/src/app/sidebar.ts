@@ -3,6 +3,7 @@ import { AppWindow, LayoutGrid, Link, NotebookText, FileText } from '@lucide/vue
 import type { Schema } from '../services/api'
 import { safeUrl } from '../widgets/registry'
 import { navIcon } from './navIcons'
+import { migratePath, migratePlacements } from './navigation'
 
 // 侧栏的分组与条目（T-0161）：内置分组 + owner 自定义的分组，按布局里的 section_order 排序；
 // 已有页面（核心功能与模块）默认在自己的分组，placements 可以把它挪到别的分组；零代码页面放在它选的分组里。
@@ -44,7 +45,7 @@ export function sectionOrder(layout: Pick<NavigationLayout, 'sections' | 'sectio
 /** 零代码页面在侧栏里指向哪里：外部链接用 href（新窗口），其余是站内地址 */
 export function pageTarget(page: CustomPage): { to: string | null; href: string | null } {
   if (page.kind === 'link') return { to: null, href: page.url && safeUrl(page.url) ? page.url : null }
-  if (page.kind === 'page') return { to: page.path && /^\/(?!\/)/.test(page.path) ? page.path : null, href: null }
+  if (page.kind === 'page') return { to: page.path && /^\/(?!\/)/.test(page.path) ? migratePath(page.path) : null, href: null }
   if (page.kind === 'note') return { to: page.target_id ? `/knowledge/notes/${page.target_id}` : null, href: null }
   return { to: `/p/${page.id}`, href: null }
 }
@@ -55,7 +56,7 @@ export interface SidebarSection { key: string; title: string; items: SidebarItem
 /** 拼出侧栏：entries 是当前用户能看到的已有页面（已按角色、模块启用过滤），空分组不显示 */
 export function buildSidebar(entries: readonly { path: string; title: string; section: string }[], layout: NavigationLayout | null | undefined, role: Role | undefined): SidebarSection[] {
   const sections = new Map(allSections(layout).map((section) => [section.key, { ...section, items: [] as SidebarItem[] }]))
-  const placements = layout?.placements ?? {}
+  const placements = migratePlacements(layout?.placements)
   for (const entry of entries) {
     const moved = placements[entry.path]
     const key = moved && sections.has(moved) ? moved : defaultSectionKey(entry.section)

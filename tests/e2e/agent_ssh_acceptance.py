@@ -292,12 +292,16 @@ class Agent:
         return [x for x in run("crontab", "-l", "-u", user).stdout.splitlines() if x.endswith(self.marker)]
 
 
+# 新部署必须选主模型（T-0204）：main() 开头建一条中转站连接，所有部署请求都带上它
+MODEL_CHOICE: dict[str, str] = {}
+
+
 def create_deployment(owner: Client, headers: dict[str, str], request_id: str, body: dict[str, Any]) -> Response:
     """一次点击新建并部署（T-0180）：request_id 同时是 Idempotency-Key。"""
     return owner.request(
         "POST",
         "/api/v1/agents/deployments",
-        {"request_id": request_id, **body},
+        {"request_id": request_id, "model": dict(MODEL_CHOICE), **body},
         headers={**headers, "Idempotency-Key": request_id},
     )
 
@@ -423,6 +427,17 @@ def flow(  # 一条完整的验收流程，按页面上的顺序走
     secret = owner.request(
         "POST", "/api/v1/agents/secrets", {"name": "OpenAI", "value": SECRET_VALUE}, headers=headers
     ).json()
+    # 主模型（T-0204）：这个验收不调模型，连接只要配置完整（地址不会被访问）
+    connection = owner.request(
+        "POST", "/api/v1/model-connections",
+        {"name": "SSH 验收中转", "connection_type": "relay", "protocol": "openai_compatible",
+         "base_url": "https://relay.e2e.invalid/v1", "api_key": "sk-ssh-e2e-" + uuid.uuid4().hex,
+         "models": [{"model_id": "e2e-model"}]},
+        headers=headers,
+    )
+    if connection.status != 201:
+        sys.exit(f"建中转站连接失败：{connection.summary}")
+    MODEL_CHOICE.update(connection_id=connection.json()["id"], model_id="e2e-model")
 
     # ---------------------------------------------------------------- 1. 添加服务器：只填四项
     response = owner.request(
@@ -706,8 +721,8 @@ def flow(  # 一条完整的验收流程，按页面上的顺序走
     )
 
     # ---------------------------------------------------------------- 定时任务与上报：两个实例各自的
-    scheduled = all(len(x.cron_lines(user)) == 6 for x in agents)
-    report.check("crontab 里每个实例各六行带自己标记的定时任务（含用量与服务器状态上报）", scheduled,
+    scheduled = all(len(x.cron_lines(user)) == 7 for x in agents)
+    report.check("crontab 里每个实例各七行带自己标记的定时任务（含用量与服务器状态上报、应用主模型）", scheduled,
                  run("crontab", "-l", "-u", user).stdout)
     if scheduled:
         for agent, label in ((a, "甲"), (b, "乙")):
@@ -840,7 +855,7 @@ def flow(  # 一条完整的验收流程，按页面上的顺序走
         print(logs_out.stdout[-6000:], logs_out.stderr[-1000:], file=sys.stderr)
     report.check("重新部署甲没有碰到乙的容器", b.containers("openclaw") == b_before)
     if scheduled:
-        report.check("定时任务没有重复（各六行）", all(len(x.cron_lines(user)) == 6 for x in agents))
+        report.check("定时任务没有重复（各七行）", all(len(x.cron_lines(user)) == 7 for x in agents))
 
     # ---------------------------------------------------------------- 10. 卸载甲：先保留数据，再删除目录
     response = a.undeploy(remove_files=False)
@@ -859,7 +874,7 @@ def flow(  # 一条完整的验收流程，按页面上的顺序走
     report.check("保留数据：甲的容器都删除了、目录还在、定时任务删除了",
                  a.containers(all_states=True) == [] and a.dir.is_dir() and a.cron_lines(user) == [])
     report.check("乙的 OpenClaw 照常运行，定时任务还在", b.containers("openclaw") == b_before
-                 and (not scheduled or len(b.cron_lines(user)) == 6))
+                 and (not scheduled or len(b.cron_lines(user)) == 7))
     view = server.detail()
     rows = {r["instance_id"]: r for r in view["agents"]}
     report.check(
@@ -879,7 +894,7 @@ def flow(  # 一条完整的验收流程，按页面上的顺序走
                  state.get("deployment") is None and state.get("server") is None, json.dumps(state, ensure_ascii=False)[:600])
     report.check("甲的容器都删除了", a.containers(all_states=True) == [])
     report.check("甲的目录删除了，乙的目录还在", not a.dir.exists() and b.dir.exists())
-    report.check("甲的定时任务删除了，乙的还在", a.cron_lines(user) == [] and (not scheduled or len(b.cron_lines(user)) == 6))
+    report.check("甲的定时任务删除了，乙的还在", a.cron_lines(user) == [] and (not scheduled or len(b.cron_lines(user)) == 7))
     report.check("乙的 OpenClaw 照常运行", b.containers("openclaw") == b_before)
     report.check("卸载后甲的运维动作不再可用", ops.state().get("reason") == "not_deployed")
 

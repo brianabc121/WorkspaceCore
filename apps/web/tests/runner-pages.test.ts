@@ -166,7 +166,7 @@ describe('instance runner permission', () => {
     const card = await screen.findByRole('article', { name: '实例：alpha' })
     const section = within(card).getByRole('region', { name: '运行环境权限' })
     expect(await within(section).findByText('运行环境权限：关闭')).toBeVisible()
-    expect(within(section).getByText(/在下面的“密钥授权”里授权给它的密钥才能注入/)).toBeVisible()
+    expect(within(section).getByText(/在下面的“高级凭据授权”里授权给它的密钥才能注入/)).toBeVisible()
     await fireEvent.update(within(section).getByLabelText('同时运行的环境'), '5')
     await fireEvent.click(within(section).getByRole('button', { name: '允许它在容器服务器上建环境、执行命令' }))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('执行任意命令'))

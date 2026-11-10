@@ -232,7 +232,7 @@ describe('audit center redesign', () => {
     expect(aside).not.toHaveTextContent(/旧版本|原版本|版本 2|成功|失败/)
     expect(within(aside).getByText('记录不包含密钥原文。')).toBeVisible()
     expect(within(aside).getByText(/"value_version": 3/)).toBeInTheDocument()
-    expect(within(aside).getByRole('link', { name: /查看密钥库/ })).toHaveAttribute('href', `/agents/secrets?secret=${SECRET_2}`)
+    expect(within(aside).getByRole('link', { name: /查看兼容凭据/ })).toHaveAttribute('href', `/settings/model-connections?tab=compat&secret=${SECRET_2}`)
     expect(aside).not.toHaveTextContent(/IP|ip_hash|不可篡改/)
     expect(screen.queryByRole('button', { name: /删除|编辑/ })).not.toBeInTheDocument()
   })
@@ -242,7 +242,7 @@ describe('audit center redesign', () => {
     await openApp(`/settings/audit?id=${rows[0]!.id}`)
     const aside = await detail()
     expect(await within(aside).findByRole('heading', { name: '轮换密钥' })).toBeVisible()
-    expect(within(aside).queryByRole('link', { name: /密钥库/ })).not.toBeInTheDocument()
+    expect(within(aside).queryByRole('link', { name: /兼容凭据/ })).not.toBeInTheDocument()
   })
 
   it('clears stale details when the linked record does not exist or is no longer readable', async () => {

@@ -1,0 +1,196 @@
+{
+  "baseline_commit": "4fbf8637a59a06c78acc3fececfe26b26ad398dc",
+  "source": "git show <commit>:<path>; working tree files not used",
+  "files": [
+    {
+      "path": "docs/AGENTS.md",
+      "bytes": 18461,
+      "sha256": "bbeea424d4857546603086e4314b2b2b7823c38f9ec9ac27a5ffe8474a3affa4"
+    },
+    {
+      "path": "docs/DEVELOPMENT_SPEC.md",
+      "bytes": 43768,
+      "sha256": "08d9bcd5eadf45ad1548c39b3d553eea936364ef658b091604783b84f9426fa5"
+    },
+    {
+      "path": "docs/TASKS.md",
+      "bytes": 3482,
+      "sha256": "ac0d89f470cb8b6631b122e6afdf0d9fbaff5c7d52e6ae52be1748ff789a1d40"
+    },
+    {
+      "path": "docs/v2/TRANSFORMATION_PLAN.md",
+      "bytes": 32670,
+      "sha256": "9ed5c3c21ba0d99ef925d0b935f4f46d32b59f98d2d89a5eca770047bd68776e"
+    },
+    {
+      "path": "docs/v2/RUNNER_PLAN.md",
+      "bytes": 50391,
+      "sha256": "9005b6b24253313cefc9c7e68cd4048d2a2576f875bec4d2b889e9492255da81"
+    },
+    {
+      "path": "docs/decisions/2026-10-31-v2-oc0-openclaw-openim-verification.md",
+      "bytes": 14510,
+      "sha256": "8d50ebb32b4ef819fa340b4a1c9db79d5167aea6de232e02b45d9c89d3e8b278"
+    },
+    {
+      "path": "docs/decisions/2026-10-31-v2-oc1-contract.md",
+      "bytes": 36245,
+      "sha256": "7c4c5f0dab84bf65d6fb750eeacbd549c40a647534d6266ef60bca7f3221ff0f"
+    },
+    {
+      "path": "docs/decisions/2026-11-09-agent-server-password-auth.md",
+      "bytes": 24121,
+      "sha256": "649c68c95721523a6b37aeac1aa4ab169c2b9a2d58ce21ba7e678ed8ca77c3bd"
+    },
+    {
+      "path": "Makefile",
+      "bytes": 10429,
+      "sha256": "3611d1c653fee25b5eee910bea5772367bb2963afc7d66655471eefa8b1fe261"
+    },
+    {
+      "path": "apps/web/package.json",
+      "bytes": 2383,
+      "sha256": "dac7be1d0ae601cd14bbd117b42ead719faf5b13d79a1c574b4f62b57894b967"
+    },
+    {
+      "path": "apps/web/src/app/navigation.ts",
+      "bytes": 5572,
+      "sha256": "3b9aaed9ba12291be3214912724362c34865b1b2bfca049466a3bbe0c3c3c653"
+    },
+    {
+      "path": "apps/web/src/app/router.ts",
+      "bytes": 11482,
+      "sha256": "abf748ee11bdd2cc512514fceb6becf0f68cdc8757879941e9a94fbba7bbb16e"
+    },
+    {
+      "path": "apps/web/src/pages/SecretsPage.vue",
+      "bytes": 499,
+      "sha256": "e1f75b9fd722ba10854866237f0f1812369a8b44f0061d3144a1fbd301b9d203"
+    },
+    {
+      "path": "apps/web/src/features/agents/SecretsWorkspace.vue",
+      "bytes": 8523,
+      "sha256": "dc28c83971f82152819e4ae9faea709cc5805c112f2979da814aedc2e030f7ed"
+    },
+    {
+      "path": "apps/web/src/features/agents/queries.ts",
+      "bytes": 8135,
+      "sha256": "b7d13d6cf9878a1c09b3084fb3502954e347c59ff79529f33020902ed10325bc"
+    },
+    {
+      "path": "apps/web/src/features/agents/AgentsWorkspace.vue",
+      "bytes": 19178,
+      "sha256": "0b304e44b9a95ad230d45c23a5ddc44cc1d1f665380c86ced7345561782289ab"
+    },
+    {
+      "path": "apps/web/src/features/agents/InstanceCard.vue",
+      "bytes": 10834,
+      "sha256": "1e43cd53f88bca2c37583ba28c4a0064300329819c94c39d46448a3d9d81e9f6"
+    },
+    {
+      "path": "apps/web/src/features/agents/AgentDeployDrawer.vue",
+      "bytes": 17987,
+      "sha256": "8eef5de296ce606c020e09fd76c127fce4d2b5bf0e82290246c3cfb6d652359a"
+    },
+    {
+      "path": "services/api/app/models/agent.py",
+      "bytes": 29539,
+      "sha256": "107591232a43cde3ba69e43c667dc06e219a4486e92acbf43755cf361475c274"
+    },
+    {
+      "path": "services/api/app/domain/agents.py",
+      "bytes": 62481,
+      "sha256": "c03a606e860f64b39c1600dfafc3c7675ed2625df977c1665a92943a0d32bd07"
+    },
+    {
+      "path": "services/api/app/domain/runner_hosts.py",
+      "bytes": 21949,
+      "sha256": "72b1f9df73baa260b03672dd0ba90f3b50f7c4ef1253185fc4f88bc75ca721fc"
+    },
+    {
+      "path": "services/api/app/domain/credentials.py",
+      "bytes": 7072,
+      "sha256": "94724ca7059331cbcf28043cb09f40bc8701fd142a5c2756096e7223153f6e40"
+    },
+    {
+      "path": "services/api/app/domain/credential_rotation.py",
+      "bytes": 6482,
+      "sha256": "1206c7b6114fee2b7c75fdb34b29bb3e9e217d6f9fbd7c470a05aa61d0c861f1"
+    },
+    {
+      "path": "services/api/app/api/v1/agents.py",
+      "bytes": 53523,
+      "sha256": "23559247542d24adfbef73ff881b65c201a5713f3f0d1790f419eb0888bcc288"
+    },
+    {
+      "path": "services/api/app/api/agent_api.py",
+      "bytes": 22898,
+      "sha256": "bd26fb03c0fdbc97d70017e8a8d43788133f4fe0d71fb8f43ed9d898108397a4"
+    },
+    {
+      "path": "services/api/app/schemas/agents.py",
+      "bytes": 42501,
+      "sha256": "9b0ca48a60c80f7994a656ae310544d338dfdbbae84c248e34b5dd67e6de4e6c"
+    },
+    {
+      "path": "services/api/app/integrations/http.py",
+      "bytes": 9522,
+      "sha256": "714edaac04cc02725db9e6254229ceccc9d7a2fa07792fadb9621be4af9bb1f3"
+    },
+    {
+      "path": "services/api/app/agent_bundle/__init__.py",
+      "bytes": 16647,
+      "sha256": "4c97841cf20069900d1fcc8fa056fe5fc4157f0e7065b01d7b22cd05dbef3f55"
+    },
+    {
+      "path": "services/api/app/agent_bundle/files/openclaw.json.template",
+      "bytes": 1938,
+      "sha256": "1183dd0e7cc7d124fd7f9dfd49ad241da1317f79d05670ea88ea7fcc4e02333a"
+    },
+    {
+      "path": "services/api/app/agent_bundle/files/bin/myworkspace-secret-resolver",
+      "bytes": 2769,
+      "sha256": "0a92fcd1051d073852d849b76312c1ecaf9b52556a03d8d7f159aa8af7d8367a"
+    },
+    {
+      "path": "services/api/app/agent_bundle/files/compose.yaml",
+      "bytes": 2169,
+      "sha256": "7b47bdc1aa366b74984bb494cfe27031afa4b1909987ca473ce6bca559280f05"
+    },
+    {
+      "path": "services/api/app/agent_provisioning/__init__.py",
+      "bytes": 12379,
+      "sha256": "0e3a9986a60a87d742b8d4bb80970be898939927b8a35a2b2a12c512a568c407"
+    },
+    {
+      "path": "services/api/app/modules/news/config.py",
+      "bytes": 16931,
+      "sha256": "4c14fd8c49413afaccbc4abc08824cfff668521cbe207d3f9e4f6a29a62addcd"
+    },
+    {
+      "path": "services/api/tests/test_agents_api.py",
+      "bytes": 32908,
+      "sha256": "61e1f5c294683074bb2596c37d61f73eb708d88035fa534fd0f95d05cbe771bb"
+    },
+    {
+      "path": "services/api/tests/test_runner_api.py",
+      "bytes": 26273,
+      "sha256": "acfd29c697c5848eb7f60d97b20e022a3fdfef6255b30af9aa3b71e982619fc2"
+    },
+    {
+      "path": "services/api/tests/test_credential_rotation.py",
+      "bytes": 6917,
+      "sha256": "5bddd62b808b3dbda6d6dcb3a45164b680fc600ec74f7602e45bd1573ddb20b8"
+    },
+    {
+      "path": "services/api/tests/test_oc6_config.py",
+      "bytes": 5608,
+      "sha256": "fdb97da7580d4c77025efaea6353ca7127f68c6eccec82b1ba956b0590c46d98"
+    },
+    {
+      "path": "services/api/tests/test_oc6_security.py",
+      "bytes": 21062,
+      "sha256": "a40f4909c3db9fc9bbb48ffbfc8594e5b7226e90c0ad7718f0a319b4a7ea38df"
+    }
+  ]
+}

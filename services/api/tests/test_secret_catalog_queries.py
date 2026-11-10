@@ -35,6 +35,9 @@ OUT_FIELDS = {
     "version",
     "created_at",
     "updated_at",
+    # 中转站管理的映射（T-0203）：还没导入时都是 null
+    "model_connection_id",
+    "migration_state",
 }
 
 

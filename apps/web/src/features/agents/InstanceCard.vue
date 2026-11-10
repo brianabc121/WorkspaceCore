@@ -4,6 +4,7 @@ import type { Schema } from '../../services/api'
 import { formatTime } from '../time'
 import { NETWORK, ROLE, SCOPE, STATUS } from './queries'
 import DeployPanel from './DeployPanel.vue'
+import ModelBindingPanel from './ModelBindingPanel.vue'
 import LimitsPanel from './LimitsPanel.vue'
 import HostStatus from './HostStatus.vue'
 import OpsPanel from './OpsPanel.vue'
@@ -66,6 +67,7 @@ function saveGrants() { if (grantsValid.value) { emit('grants', rows.value.map(r
     </section>
     <MailSwitch :instance="instance" :busy="busy" :mailboxes="mailboxes ?? []" @save="$emit('mail', $event)" />
     <RunnerSwitch :instance="instance" />
+    <ModelBindingPanel :instance="instance" />
     <DeployPanel :instance="instance" />
     <LimitsPanel :instance="instance" />
     <OpsPanel kind="instance" :target-id="instance.id" />
@@ -90,11 +92,11 @@ function saveGrants() { if (grantsValid.value) { emit('grants', rows.value.map(r
         </li>
       </ul>
     </section>
-    <section class="agent-section" aria-label="密钥授权">
-      <div class="section-heading"><h3>密钥授权（{{ instance.secret_grants.length }}）</h3><button v-if="!editingGrants" type="button" class="secondary-button" :disabled="busy" @click="editGrants">编辑授权</button></div>
+    <section class="agent-section" aria-label="高级凭据授权">
+      <div class="section-heading"><h3>高级凭据授权（{{ instance.secret_grants.length }}）</h3><button v-if="!editingGrants" type="button" class="secondary-button" :disabled="busy" @click="editGrants">编辑授权</button></div>
       <ul v-if="!editingGrants" class="im-contact-list"><li v-for="g in instance.secret_grants" :key="g.ref_id"><span><code>{{ g.ref_id }}</code> → {{ g.secret_name }}</span></li></ul>
       <form v-else class="im-group-form" @submit.prevent="saveGrants">
-        <p class="form-help">ref_id 是 OpenClaw 配置里 SecretRef 的 id（小写字母开头，只含小写字母、数字、下划线），例如 openai_api_key。</p>
+        <p class="form-help">只用于非模型凭据（例如运行环境要用的 Token）和旧接入包的兼容引用；主模型在上面的“主模型”里选，不用再填 openai_api_key。ref_id 是 OpenClaw 配置里 SecretRef 的 id（小写字母开头，只含小写字母、数字、下划线）。</p>
         <div v-for="(row, index) in rows" :key="index" class="im-group-add">
           <label class="form-field"><span>ref_id</span><input v-model.trim="row.ref_id" maxlength="64" :aria-invalid="!validRef(row.ref_id)" /></label>
           <label class="form-field"><span>密钥</span><select v-model="row.secret_id"><option value="">选择密钥</option><option v-for="s in secrets" :key="s.id" :value="s.id">{{ s.name }}</option></select></label>

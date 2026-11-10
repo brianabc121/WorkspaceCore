@@ -23,13 +23,18 @@ import './secrets.css'
 // 地址里只有 ?tab=accesses 与 ?secret=<id>：刷新、通知链接、后退都能回到同一处。名称 / 说明搜索与类型筛选在服务端、跨所有分页，
 // 标题里的数是服务端 total；换条件就是另一条查询，旧条件的页不会拼进来。只有元数据：值只写不读，新值只在输入框里。
 // 只有 owner 能进这个页面（路由规则），服务端同样只给 owner。
+// 中转站管理（T-0206）把它嵌进“迁移与兼容凭据”页签（embedded）：标题改为“兼容凭据”，内层标签用 ?view=（外层页签已占用 ?tab=），
+// 新建只给非模型类型（模型服务的 Key 在中转站管理的连接里保存，不另开一套）。
+const props = withDefaults(defineProps<{ embedded?: boolean; title?: string; description?: string; tabParam?: string }>(), {
+  embedded: false, title: '密钥库', description: '管理智能体可取用的密钥、授权对象与取用记录。只有 owner 可以管理。', tabParam: 'tab',
+})
 type Tab = 'list' | 'accesses'
 const TABS: { key: Tab; name: string }[] = [{ key: 'list', name: '密钥列表' }, { key: 'accesses', name: '取用记录' }]
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id
 const route = useRoute(), router = useRouter(), cache = useQueryClient()
 const wide = typeof window.matchMedia === 'function' ? useMediaQuery('(min-width: 1440px)') : ref(false)
 
-const tab = computed<Tab>(() => (route.query.tab === 'accesses' ? 'accesses' : 'list'))
+const tab = computed<Tab>(() => (route.query[props.tabParam] === 'accesses' ? 'accesses' : 'list'))
 const selected = computed(() => (typeof route.query.secret === 'string' && route.query.secret ? route.query.secret : null))
 function update(patch: Record<string, string | undefined>, push = false) {
   const query: LocationQuery = { ...route.query }
@@ -70,7 +75,7 @@ function deleted(name: string) {
 const accessSecret = ref<{ id: string; name: string } | null>(null)
 function showAccesses(secret: { id: string; name: string }) {
   accessSecret.value = secret
-  update({ tab: 'accesses', secret: wide.value ? selected.value ?? undefined : undefined })
+  update({ [props.tabParam]: 'accesses', secret: wide.value ? selected.value ?? undefined : undefined })
 }
 
 const refreshing = computed(() => secrets.isFetching.value)
@@ -80,10 +85,12 @@ function refresh() {
 
 // 添加密钥：值只在这个对话框的输入框里，提交或关闭就清空
 const creating = ref(false)
-const form = reactive({ name: '', kind: 'model_api_key' as Schema['AgentSecretOut']['kind'], description: '', value: '' })
+const initialKind: Schema['AgentSecretOut']['kind'] = props.embedded ? 'api_token' : 'model_api_key'
+const kinds = computed(() => Object.fromEntries(Object.entries(SECRET_KIND).filter(([k]) => !props.embedded || k !== 'model_api_key')))
+const form = reactive({ name: '', kind: initialKind, description: '', value: '' })
 const SECRET_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/
 const valid = computed(() => SECRET_NAME.test(form.name.trim()) && form.value.length > 0)
-function openCreate() { Object.assign(form, { name: '', kind: 'model_api_key', description: '', value: '' }); error.value = ''; notice.value = ''; creating.value = true }
+function openCreate() { Object.assign(form, { name: '', kind: initialKind, description: '', value: '' }); error.value = ''; notice.value = ''; creating.value = true }
 function closeCreate() { creating.value = false; form.value = '' }
 async function create() {
   if (!valid.value || busy.value) return
@@ -93,13 +100,13 @@ async function create() {
   const ok = await act(async () => { id = dataOf(await auth.api.POST('/api/v1/agents/secrets', { params: { header }, body })).id }, '密钥已保存')
   if (!ok) return
   creating.value = false
-  if (id) update({ tab: undefined, secret: id }, true)
+  if (id) update({ [props.tabParam]: undefined, secret: id }, true)
 }
 onBeforeUnmount(() => { form.value = '' })
 </script>
 
 <template>
-  <ManagementPage title="密钥库" description="管理智能体可取用的密钥、授权对象与取用记录。只有 owner 可以管理。">
+  <ManagementPage :title="title" :description="description" :embedded="embedded">
     <template #actions>
       <button type="button" class="secondary-button" :disabled="refreshing" @click="refresh"><RefreshCw aria-hidden="true" />刷新</button>
       <button type="button" class="primary-button" :disabled="busy" @click="openCreate"><Plus aria-hidden="true" />添加密钥</button>
@@ -109,8 +116,8 @@ onBeforeUnmount(() => { form.value = '' })
       <div class="asv-main">
         <p class="sk-banner"><Info aria-hidden="true" />密钥保存后不可回显，支持轮换为新值。</p>
         <ActionFeedback :error="creating ? '' : error" :notice="notice" />
-        <div class="sk-tabs" role="tablist" aria-label="密钥库">
-          <button v-for="t in TABS" :key="t.key" type="button" role="tab" :aria-selected="tab === t.key" @click="update({ tab: t.key === 'list' ? undefined : t.key })">{{ t.name }}</button>
+        <div class="sk-tabs" role="tablist" :aria-label="title">
+          <button v-for="t in TABS" :key="t.key" type="button" role="tab" :aria-selected="tab === t.key" @click="update({ [tabParam]: t.key === 'list' ? undefined : t.key })">{{ t.name }}</button>
         </div>
         <div role="tabpanel" :aria-label="TABS.find(t => t.key === tab)?.name">
           <ManagementSection v-if="tab === 'list'" title="密钥列表" description="名称、版本与授权可查看，密钥原文不可读取。">
@@ -142,7 +149,8 @@ onBeforeUnmount(() => { form.value = '' })
     <ModalPanel v-if="creating" title="添加密钥" :busy="busy" @close="closeCreate">
       <form class="im-group-form" autocomplete="off" @submit.prevent="create">
         <label class="form-field"><span>名称 *（字母、数字、空格、点、下划线、连字符）</span><input v-model="form.name" required maxlength="64" autofocus /></label>
-        <label class="form-field"><span>类型（创建后不能改）</span><select v-model="form.kind"><option v-for="(label, value) in SECRET_KIND" :key="value" :value="value">{{ label }}</option></select></label>
+        <label class="form-field"><span>类型（创建后不能改）</span><select v-model="form.kind"><option v-for="(label, value) in kinds" :key="value" :value="value">{{ label }}</option></select></label>
+        <p v-if="embedded" class="form-help">模型服务的 API Key 请在中转站管理里“添加连接”保存，这里只放其他凭据。</p>
         <label class="form-field"><span>说明</span><textarea v-model="form.description" rows="2" maxlength="500" /></label>
         <label class="form-field"><span>值 *</span><input v-model="form.value" type="password" required autocomplete="new-password" spellcheck="false" /></label>
         <p class="form-help">保存后页面上不再显示这个值，只能轮换为新值。授权在智能体详情里设置。</p>

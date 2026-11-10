@@ -227,7 +227,9 @@ jobs:
           set_env GOOGLE_OAUTH_TOKEN_URL http://fake-gmail:8080/token
           set_env GOOGLE_OAUTH_REVOKE_URL http://fake-gmail:8080/revoke
           set_env GMAIL_API_URL http://fake-gmail:8080
-          set_env INTEGRATION_ALLOWED_HOSTS fake-gmail
+          # 中转站管理（T-0205，场景 27）：验收的中转连接指向假模型服务 http://fake-model:18080/v1（只在 OpenClaw
+          # 那边可达；明文 http 只对列在这里的主机开放）
+          set_env INTEGRATION_ALLOWED_HOSTS fake-gmail,fake-model
           docker compose --profile agents config --quiet
       # T-0141：场景 26 把这台 runner 当运行服务器。接入包的 install-gvisor.sh 第一次安装时会重启 Docker，
       # 所以在启动任何服务之前用同一个脚本装好（核对 sha512）；之后 install.sh 再运行时 Docker 已认得 runsc，不再重启
@@ -254,7 +256,7 @@ jobs:
             --intranet intranet.test:8443 --public public.test:9443
       - name: 启动 OpenIM（make openim-up）
         run: make openim-up
-      - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道；场景 15 是知识库与每晚复盘（T-0100），场景 23 是 Gmail（T-0131），场景 26 是容器服务器（T-0141；容器读数 T-0188））
+      - name: 多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道；场景 15 是知识库与每晚复盘（T-0100），场景 23 是 Gmail（T-0131），场景 26 是容器服务器（T-0141；容器读数 T-0188），场景 27 是中转站管理的主模型应用（T-0205））
         run: |
           # 要以 root 运行：接入包目录交给容器里的 uid 1000（CHECKLIST.md 的做法）。
           # npm 缓存放到临时目录：用 runner 的 ~/.npm 会留下 root 所有的文件，后面的 npm ci 会因 EACCES 失败
@@ -273,7 +275,7 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
-      - name: V2 浏览器验收（密钥库、实例页、通讯录与单聊、导出、建群、IM 审批卡片、审批中心、移动端、member 不可见）
+      - name: V2 浏览器验收（中转站管理与兼容凭据、实例页、主模型分配、通讯录与单聊、导出、建群、IM 审批卡片、审批中心、移动端、member 不可见）
         # 真实 OpenIM；每次用新的工作台用户，登记的实例不需要在线，结束时在页面上停用
         run: node tests/e2e/sprint6_browser.cjs
       - name: 邮件页浏览器验收（T-0170 / T-0171：默认全部邮箱、同 ID 的邮件不串号、回复只经所属邮箱；模拟 Google）

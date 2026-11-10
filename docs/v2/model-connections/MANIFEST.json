@@ -1,0 +1,72 @@
+{
+  "package": "WorkspaceCore model connections and OpenClaw integration",
+  "date": "2026-11-09",
+  "timezone": "Asia/Shanghai",
+  "baseline_commit": "4fbf8637a59a06c78acc3fececfe26b26ad398dc",
+  "artifact_kind": "development_documentation_and_mockup_only",
+  "product_implementation_performed": false,
+  "product_tests_run": false,
+  "manifest_excludes_itself": true,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 4116,
+      "sha256": "a0972629239e806f423f793432ce4af5bf8e60e2f44d9c3455ddeb2e409500cf"
+    },
+    {
+      "path": "REVIEW.md",
+      "bytes": 1617,
+      "sha256": "5454a4943d8f1bef23ee0da0c7aacfe022762eeff4759ca1336121ea44f486e7"
+    },
+    {
+      "path": "assets/01-model-connections.png",
+      "bytes": 1740315,
+      "sha256": "d819e19953759bd6c19622dc913e720b6eebcb5fe52670258ac48e0ef6331e03"
+    },
+    {
+      "path": "docs/acceptance/2026-11-09-model-connections-tests.md",
+      "bytes": 6341,
+      "sha256": "7a103141dfcf9d86f86ef6f0406589154459c4f4388f548b89b15b89f8606f5c"
+    },
+    {
+      "path": "docs/rollout/2026-11-09-model-connections-migration.md",
+      "bytes": 7766,
+      "sha256": "d09056f3784815d45a38d424b2b97781b43db10b59bcc028c11df21069443b1b"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-09-model-connections-backend.md",
+      "bytes": 10221,
+      "sha256": "919541341cb8d12812ccc6eba47b249520e7ed3d170b40b1a54791a83e85c750"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-09-model-connections-openclaw.md",
+      "bytes": 7473,
+      "sha256": "0206f2a6d2744dd21b56c55af94b39d01284000d50855499d7031d4fefe37391"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-09-model-connections-web.md",
+      "bytes": 6951,
+      "sha256": "020a6d16349d6ac95f97f9ad5cfb8c49f6f640d133fcb48fdf58d79cb6d2e25a"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-09-model-connections-contract.md",
+      "bytes": 16812,
+      "sha256": "0b29bf2ae1259b008584c2f1039a3aad5386b4a2ffbdc9ecb20e4abf5d83f2c9"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-09-model-connections-design.md",
+      "bytes": 11167,
+      "sha256": "0e109c96eb4085d18fa16f00a0a3c4c3596f280a9cd8214c57c07ba3bb0c0212"
+    },
+    {
+      "path": "reference/code-baseline.md",
+      "bytes": 4427,
+      "sha256": "59bebd36e3ac9f78504b986e8ef5d61155a16cc0ceefbe9d0da3e01f45be2cf1"
+    },
+    {
+      "path": "reference/source-manifest.json",
+      "bytes": 6744,
+      "sha256": "820fe3a15a8c8624f1b642afd50c2e85b6b02bcc7852592217fb3c68a3008d94"
+    }
+  ]
+}
