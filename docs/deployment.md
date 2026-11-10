@@ -990,3 +990,25 @@ AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendra
 - 配置文件被删或卷是新的：worker 每分钟检查，缺了就重新生成；每天本地时间 03:10 之后按收藏 / 不感兴趣重新计算偏好并生成一次。
 - 升级 TrendRadar：改 `infra/trendradar/compose.yaml` 的 digest 与 `scripts/trendradar-prompts.sh` 的提交、`prompts.sha256`，并按核验记录重新核对配置格式与 MCP 工具。
 - 停用：`make trendradar-down`；网页上关掉早报会生成“不抓取、不推送”的配置。
+
+## 24. 中转站管理与 OpenClaw 主模型（T-0200 ~ T-0208）
+
+模型的 URL、协议、Key、模型集中在“管理 → 中转站管理”里配置，OpenClaw 实例在实例页选“主模型”（连接 + 模型）。
+设计与 OpenClaw 2026.9.36 的核验见 `docs/decisions/2026-11-09-model-connections.md`。
+
+### 24.1 升级后要做的事（都在页面上）
+
+1. 升级与迁移照常（`sudo bash scripts/deploy.sh upgrade`，迁移 0056 只新增表）。已经在运行的实例不受影响，继续按旧接入包里的模型配置运行（实例页显示“旧配置”）。
+2. 打开“中转站管理 → 迁移与兼容凭据”，先点“预览”，再点“导入旧密钥”：旧密钥库的模型 Key 原地纳管为“待完善”的连接（不复制密文、不换 ID、旧授权照常可用），
+   其他 Token 是“待归类”。补上协议、地址、模型后就能在实例页选它做主模型。也可以在服务器上运行同样的命令（只处理指定的工作空间）：
+   `docker compose exec -T api python -m app.commands.migrate_model_connections --workspace-id <工作空间 ID> --dry-run`（再换成 `--apply`、`--report`）。
+3. 自动部署的实例：在实例页“重新部署”一次，crontab 里会多一行 `model-config.mjs`（每分钟应用主模型）；手动接入的实例换上新接入包并按 `CHECKLIST.md` 加上这一行。
+   没有这一行时，实例页的主模型会停在“待应用 / 状态待确认”，不会显示“已应用”。
+4. 新部署（“部署 OpenClaw”）必须选主模型；手动登记的新实例先下载接入包启动，再在实例页选主模型。
+
+### 24.2 网络与安全
+
+- 中转站的地址默认只收 HTTPS；内网或测试用的明文 HTTP 中转，要把主机名加进 `.env` 的 `INTEGRATION_ALLOWED_HOSTS`（逗号分隔），
+  检测与同步仍经出站策略（不访问私有网段，除非列在这里）。
+- OpenClaw 直连连接的地址，工作台不转发推理请求；Key 不写进接入包或 `openclaw.json`，由取密钥程序在需要时向工作台取（`mc_<连接 ID>`）。
+- 停用连接、解除绑定、撤销授权会立即拒绝后续取 Key；已经在 OpenClaw 进程里的 Key 不保证立即失效（需要时在服务商处撤销 Key）。
