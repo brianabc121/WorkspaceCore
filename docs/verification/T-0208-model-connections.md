@@ -34,11 +34,11 @@
 | 检查 | 命令（执行目录） | 结果 |
 |---|---|---|
 | 后端静态检查 | `ruff check app tests`、`ruff format --check app tests`、`mypy app tests`（services/api） | 全部通过（mypy：397 个文件无问题） |
-| 后端全量 | `pytest -q`（services/api） | BACKEND_FULL_RESULT |
+| 后端全量 | `pytest -q`（services/api） | 1316 passed、15 skipped，退出码 0（44 分 55 秒）。跳过的 15 个都要外部服务：真实 GitHub 3、真实 OpenIM 7、Garage S3 5（跳过原因都是没有设置对应的测试环境变量）；`model-config.mjs` 等脚本测试都实际运行。之后新增的 `test_switching_one_instance_keeps_the_shared_legacy_key` 单独运行通过 |
 | 中转站相关后端 | `pytest tests/test_model_connections_api.py tests/test_model_connection_checks.py tests/test_model_connection_migration.py tests/test_agent_model_bindings.py tests/test_model_config_script.py` | 包含在全量里；单独运行同样通过 |
 | 数据库迁移 | `alembic upgrade head`（空库与 0055 → 0056）、`alembic downgrade 0055` 后再升级 | 通过；降级只删新表，旧密钥库与旧授权原样保留（见第 3.2 节） |
 | OpenAPI 与前端类型 | `python scripts/export_openapi.py --check`、`npm run check:api`（apps/web） | 一致 |
-| 前端 | `npm run lint`、`npm run typecheck`、`npx vitest run`、`npm run build`（apps/web） | WEB_FULL_RESULT |
+| 前端 | `npm run lint`、`npm run typecheck`、`npx vitest run`、`npm run build`（apps/web） | lint / typecheck 无输出；`vitest run` 76 个测试文件 744 个测试全部通过（之后新增键盘焦点与版本冲突两项，所在文件 12 + 8 个测试通过）；构建成功 |
 | 浏览器（本机，真实后端） | 把 `tests/e2e/sprint6_browser.cjs` 里新加的两段原样取出，对本机 API + vite 执行 | 通过：旧 `/agents/secrets` 跳到“迁移与兼容凭据”、添加非模型凭据；添加第三方中转（Key 只写不读）、授权给实例、在“OpenClaw 连接分配”设主模型，状态“待应用” |
 | 真实 OpenClaw（本机） | `tests/e2e/model_config_openclaw.py`（锁定镜像 + `fake_workspace_agent_api.py` + 假模型服务） | 15/15：config patch 校验写入、热加载、`secrets reload`、失败分类（`errors[].kind`）、局部合并、撤销 |
 | 接入包配置校验 | 用锁定镜像的 `openclaw config validate` 校验接入包生成的 `openclaw.json`（受管 provider / 旧模板 / 无模型三种） | 通过 |
