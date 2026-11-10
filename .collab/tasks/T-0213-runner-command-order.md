@@ -2,7 +2,7 @@
 id: T-0213
 title: 运行服务器指令按写入顺序下发（agents 场景 26 在 main 上偶发失败）
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/cool-wright-99qbbg
 paths: services/api/app/models/runner.py,services/api/app/domain/runner_hosts.py,services/api/migrations/versions/,services/api/tests/test_runner_command_order.py,tests/e2e/agents_acceptance.py
@@ -30,7 +30,7 @@ PR #185 合并后，main 上 ci-infra 的 agents 任务失败两项（同一份�
       去掉排序修正时复现为 ['exec', 'create_env']；经 env_exec 的完整路径重建在前、命令照常跑完
 - [x] 迁移：空库 upgrade → alembic check → downgrade 0058 → upgrade → check 通过
 - [x] 场景 20 的 V3 失败时，检查结果里带上实例日志中插件的发送失败 / 补丁记录与最近几次模型调用，下次能定位
-- [ ] PR 上 CI 全部通过（含 agents 场景 26）
+- [x] PR 上 CI 全部通过（含 agents 场景 26）：ce32149 上 12 项检查全部成功
 
 ## 背景 / 约束 / 参考
 - 失败的运行：https://github.com/brianabc121/WorkspaceCore/actions/runs/42849008610（agents job 129944189371）
@@ -42,3 +42,4 @@ PR #185 合并后，main 上 ci-infra 的 agents 任务失败两项（同一份�
 - 2026-11-10 16:57 UTC · claude · 创建任务（owner: claude）
 - 2026-11-10 16:57 UTC · claude · 开始任务
 - 2026-11-10 16:57 UTC · claude · 根因与修复见目标一节；本地：新测试 2 passed（去掉排序修正时复现为 ['exec', 'create_env']）、test_runner_*.py 与迁移测试 96 passed、迁移空库升降级与 alembic check 通过、ruff / mypy（app migrations tests scripts）/ openapi 检查通过。main 上失败的 agents 任务已按规则重跑一次确认偶发。场景 20 的 V3 根因未定，只加了失败时的诊断信息
+- 2026-11-10 17:41 UTC · claude · status in_progress → done：PR #186 的 ce32149 上 12 项检查全部成功（agents 场景 26 通过）；main 上 e5e0956 的 agents 重跑一次也通过，确认 #185 合并后的两项是偶发。场景 20 的 V3 根因待下次失败时按新加的诊断定位
