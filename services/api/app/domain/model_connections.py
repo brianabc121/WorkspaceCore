@@ -78,9 +78,10 @@ from app.schemas.model_connections import (
 # ---------------------------------------------------------------- 协议与官方预设
 
 # 已核验、开放给页面选择的协议
-# （MC-0 核验记录：docs/decisions/2026-11-09-model-connections.md 第 2 节）。
+# （MC-0 核验记录：docs/decisions/2026-11-09-model-connections.md 第 2 节；
+# 原生协议：docs/verification/T-0202-native-protocols.md，在 OpenClaw 2026.9.36 上真实跑通后开放）。
 # 未核验的协议不出现在 capabilities 里，创建 / 修改时选它返回 422 MODEL_PROTOCOL_UNSUPPORTED。
-SUPPORTED_PROTOCOLS: tuple[str, ...] = ("openai_compatible",)
+SUPPORTED_PROTOCOLS: tuple[str, ...] = ("openai_compatible", "anthropic_native", "gemini_native")
 
 # OpenClaw models.providers.<key>.api 的取值（核验记录第 2 节）
 OPENCLAW_API: dict[str, str] = {
@@ -97,6 +98,22 @@ OFFICIAL_PRESETS: tuple[OfficialPreset, ...] = (
         protocol="openai_compatible",
         base_url="https://api.openai.com/v1",
         source="https://platform.openai.com/docs/api-reference/introduction",
+    ),
+    # OpenClaw 对不以 /v1 结尾的地址补 /v1/messages（核验记录第 2 节）
+    OfficialPreset(
+        provider="anthropic",
+        label="Anthropic 官方",
+        protocol="anthropic_native",
+        base_url="https://api.anthropic.com",
+        source="https://platform.claude.com/docs/en/api/overview",
+    ),
+    # Gemini 的基地址含版本路径；OpenClaw 与工作台都拼 {base}/models/<id>:…
+    OfficialPreset(
+        provider="google",
+        label="Google Gemini 官方",
+        protocol="gemini_native",
+        base_url="https://generativelanguage.googleapis.com/v1beta",
+        source="https://ai.google.dev/api",
     ),
 )
 

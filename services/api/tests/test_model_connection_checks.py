@@ -1,7 +1,8 @@
 """中转站管理：模型同步与连接检测（T-0202，MC-2）。
 
 单元部分（不需要外部服务）：OpenAI 兼容协议的 URL 拼接与鉴权头、状态与原因归类、Retry-After、
-响应大小与压缩、超时、推理请求不重试、TLS 校验不变、未核验协议的桩。
+响应大小与压缩、超时、推理请求不重试、TLS 校验不变；Anthropic Messages 与 Gemini 原生协议的
+URL（与 OpenClaw 2026.9.36 一致）、鉴权头、分页参数、请求体与错误归类，以及三个协议共用的网络约束。
 
 集成部分（真实 PostgreSQL / Redis；内存版 OpenAI 兼容中转站接在 ConnectorRuntime.transport 上）：
 指定模型 / 全部可用模型；不支持列模型时只能手工填写；同步不完整保留旧快照、不移除在用模型；
@@ -31,12 +32,18 @@ import pytest
 from pydantic import SecretStr
 
 from app.core.config import Settings
+from app.domain import model_connections
 from app.integrations import model_providers
+from app.integrations.http import ConnectorHttp
 from app.integrations.model_providers import (
+    AnthropicAdapter,
     CappedTransport,
+    GeminiAdapter,
     OpenAICompatibleAdapter,
-    UnverifiedProtocolAdapter,
     adapter_for,
+    anthropic_url,
+    gemini_base,
+    gemini_model_path,
     join_url,
     parse_retry_after,
     provider_http,
@@ -134,12 +141,30 @@ class Recorder:
         return await _resolve(self.reply, request)
 
 
-def make_adapter(reply: Reply) -> tuple[OpenAICompatibleAdapter, Recorder]:
-    recorder = Recorder(reply)
-    settings = Settings(app_env="test", integration_allowed_hosts="relay.test")
+# 测试里的主机都在部署允许列表里：出站策略不做 DNS 解析，请求只到 MockTransport
+TEST_HOSTS = "relay.test,api.anthropic.com,generativelanguage.googleapis.com"
+
+
+def _http(recorder: Recorder) -> ConnectorHttp:
+    settings = Settings(app_env="test", integration_allowed_hosts=TEST_HOSTS)
     http = provider_http(settings, httpx.MockTransport(recorder))
     http.backoff_base_seconds = 0
-    return OpenAICompatibleAdapter(http, clock=lambda: NOW), recorder
+    return http
+
+
+def make_adapter(reply: Reply) -> tuple[OpenAICompatibleAdapter, Recorder]:
+    recorder = Recorder(reply)
+    return OpenAICompatibleAdapter(_http(recorder), clock=lambda: NOW), recorder
+
+
+def make_anthropic(reply: Reply) -> tuple[AnthropicAdapter, Recorder]:
+    recorder = Recorder(reply)
+    return AnthropicAdapter(_http(recorder), clock=lambda: NOW), recorder
+
+
+def make_gemini(reply: Reply) -> tuple[GeminiAdapter, Recorder]:
+    recorder = Recorder(reply)
+    return GeminiAdapter(_http(recorder), clock=lambda: NOW), recorder
 
 
 async def list_with(reply: Reply) -> tuple[model_providers.ModelListing, Recorder]:
@@ -455,21 +480,574 @@ async def test_total_deadline_bounds_slow_servers(monkeypatch: pytest.MonkeyPatc
     assert len(recorder.requests) == 1
 
 
-async def test_unverified_protocols_are_stubs_without_network() -> None:
-    recorder = Recorder(lambda _: listing("a"))
-    http = provider_http(Settings(app_env="test"), httpx.MockTransport(recorder))
-    for protocol in ("anthropic_native", "gemini_native"):
-        adapter = adapter_for(protocol, http)
-        assert isinstance(adapter, UnverifiedProtocolAdapter)
-        listed = await adapter.list_models(base_url=RELAY_URL, api_key=SecretStr(KEY))
-        assert (listed.result.status, listed.result.reason) == (
-            "unsupported",
-            "protocol_unsupported",
-        )
-        inferred = await adapter.infer(base_url=RELAY_URL, api_key=SecretStr(KEY), model_id="m")
-        assert (inferred.status, inferred.reason) == ("unsupported", "protocol_unsupported")
-    assert recorder.requests == []
+def test_adapter_for_maps_every_protocol() -> None:
+    http = provider_http(Settings(app_env="test"), httpx.MockTransport(Recorder(status(500))))
     assert isinstance(adapter_for("openai_compatible", http), OpenAICompatibleAdapter)
+    assert isinstance(adapter_for("anthropic_native", http), AnthropicAdapter)
+    assert isinstance(adapter_for("gemini_native", http), GeminiAdapter)
+    with pytest.raises(ValueError):
+        adapter_for("bedrock", http)
+
+
+# ---------------------------------------------------------------- Anthropic Messages
+
+ANTHROPIC_URL = "https://api.anthropic.com"
+
+
+def anthropic_models(*ids: str, has_more: bool = False) -> httpx.Response:
+    """官方 GET /v1/models 的响应结构（https://platform.claude.com/docs/en/api/models/list）。"""
+    data = [
+        {
+            "type": "model",
+            "id": i,
+            "display_name": i,
+            "created_at": "2026-09-21T00:00:00Z",
+        }
+        for i in ids
+    ]
+    return httpx.Response(
+        200,
+        json={
+            "data": data,
+            "has_more": has_more,
+            "first_id": ids[0] if ids else None,
+            "last_id": ids[-1] if ids else None,
+        },
+    )
+
+
+def anthropic_message(_: httpx.Request) -> httpx.Response:
+    """官方 POST /v1/messages 的响应结构（https://platform.claude.com/docs/en/api/messages/create）。"""
+    return httpx.Response(
+        200,
+        json={
+            "id": "msg_013Zva2CMHLNnXjNJJKqJ2EF",
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "pong"}],
+            "model": "claude-haiku-5-5",
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 8, "output_tokens": 2},
+        },
+    )
+
+
+def anthropic_error(code: int, kind: str, message: str, **kwargs: Any) -> Reply:
+    """官方错误结构（https://platform.claude.com/docs/en/api/errors）。"""
+    body = {
+        "type": "error",
+        "error": {"type": kind, "message": message},
+        "request_id": "req_011CSHoEeqs5C35K2UUqR7Fy",
+    }
+    return status(code, json=body, **kwargs)
+
+
+def test_anthropic_url_matches_openclaw() -> None:
+    """与 OpenClaw resolveAnthropicMessagesUrl 相同：以 /v1 结尾直接拼，否则补 /v1。"""
+    assert anthropic_url("https://api.anthropic.com", "messages") == (
+        "https://api.anthropic.com/v1/messages"
+    )
+    assert anthropic_url("https://api.anthropic.com/", "models") == (
+        "https://api.anthropic.com/v1/models"
+    )
+    assert anthropic_url("https://relay.test/v1", "messages") == "https://relay.test/v1/messages"
+    assert anthropic_url("https://relay.test/v1/", "models") == "https://relay.test/v1/models"
+    assert anthropic_url("https://relay.test/api/anthropic", "messages") == (
+        "https://relay.test/api/anthropic/v1/messages"
+    )
+    assert anthropic_url("https://relay.test/v1beta", "models") == (
+        "https://relay.test/v1beta/v1/models"
+    )
+
+
+def assert_anthropic_auth(sent: httpx.Request) -> None:
+    assert sent.headers["x-api-key"] == KEY
+    assert sent.headers["anthropic-version"] == "2023-06-01"
+    assert sent.headers["accept-encoding"] == "identity"
+    assert "authorization" not in sent.headers and "x-goog-api-key" not in sent.headers
+    assert KEY not in str(sent.url)
+
+
+async def test_anthropic_list_models_request_shape_and_pagination() -> None:
+    adapter, recorder = make_anthropic(
+        lambda _: anthropic_models("claude-opus-5-5", "claude-haiku-5-5", "has space")
+    )
+    listed = await adapter.list_models(base_url=ANTHROPIC_URL, api_key=SecretStr(KEY))
+    assert (listed.result.status, listed.result.reason) == ("passed", None)
+    assert listed.complete is True
+    assert listed.model_ids == ("claude-haiku-5-5", "claude-opus-5-5")
+    (sent,) = recorder.requests
+    # limit 默认 20、最多 1000：只发一次，取最大页
+    assert sent.method == "GET"
+    assert str(sent.url) == "https://api.anthropic.com/v1/models?limit=1000"
+    assert_anthropic_auth(sent)
+
+    # has_more：不完整，不覆盖旧快照
+    adapter, recorder = make_anthropic(lambda _: anthropic_models("a", "b", has_more=True))
+    listed = await adapter.list_models(base_url="https://relay.test/v1", api_key=SecretStr(KEY))
+    assert listed.result.status == "passed" and listed.complete is False
+    assert listed.model_ids == ()
+    assert str(recorder.requests[0].url) == "https://relay.test/v1/models?limit=1000"
+
+    # 结构不对（OpenAI 的列表也是 data[].id，能读；完全不对的结构是 invalid_response）
+    adapter, _ = make_anthropic(status(200, json={"models": ["a"]}))
+    listed = await adapter.list_models(base_url=ANTHROPIC_URL, api_key=SecretStr(KEY))
+    assert (listed.result.status, listed.result.reason) == ("failed", "invalid_response")
+
+
+async def test_anthropic_infer_request_shape_is_fixed_tiny_and_not_retried() -> None:
+    adapter, recorder = make_anthropic(anthropic_message)
+    result = await adapter.infer(
+        base_url=ANTHROPIC_URL, api_key=SecretStr(KEY), model_id="claude-haiku-5-5"
+    )
+    assert (result.status, result.reason) == ("passed", None)
+    (sent,) = recorder.requests
+    assert sent.method == "POST"
+    assert str(sent.url) == "https://api.anthropic.com/v1/messages"
+    assert_anthropic_auth(sent)
+    assert sent.headers["content-type"] == "application/json"
+    assert json.loads(sent.content) == {
+        "model": "claude-haiku-5-5",
+        "max_tokens": 16,
+        "messages": [{"role": "user", "content": "ping"}],
+        "stream": False,
+    }
+    assert KEY.encode() not in sent.content
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected", "attempts"),
+    [
+        (anthropic_error(401, "authentication_error", "invalid x-api-key"), "unauthorized", 1),
+        (anthropic_error(403, "permission_error", "no access"), "forbidden", 1),
+        (status(404), "models_endpoint_unsupported", 1),
+        (anthropic_error(529, "overloaded_error", "Overloaded"), "unreachable", 1),
+        (anthropic_error(500, "api_error", "Internal server error"), "invalid_response", 1),
+        (anthropic_error(503, "api_error", "unavailable"), "unreachable", 2),
+        (status(200, text="<html>login</html>"), "invalid_response", 1),
+    ],
+    ids=["401", "403", "404", "529", "500", "503", "non_json"],
+)
+async def test_anthropic_metadata_classification(
+    reply: Reply, expected: str, attempts: int
+) -> None:
+    adapter, recorder = make_anthropic(reply)
+    listed = await adapter.list_models(base_url=ANTHROPIC_URL, api_key=SecretStr(KEY))
+    assert listed.result.reason == expected
+    assert listed.complete is False
+    assert len(recorder.requests) == attempts
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        (anthropic_error(401, "authentication_error", "invalid x-api-key"), "unauthorized"),
+        (anthropic_error(403, "permission_error", "no access"), "forbidden"),
+        # 模型不存在与组织无权使用：404 not_found_error，message 以 “model: <id>” 开头
+        (anthropic_error(404, "not_found_error", "model: claude-x"), "model_not_available"),
+        # 地址不对的 404 不是“模型不可用”
+        (anthropic_error(404, "not_found_error", "Not Found"), "invalid_response"),
+        (status(404), "invalid_response"),
+        (
+            anthropic_error(400, "invalid_request_error", "max_tokens: field required"),
+            "invalid_response",
+        ),
+        (anthropic_error(402, "billing_error", "billing"), "invalid_response"),
+        (anthropic_error(413, "request_too_large", "too large"), "invalid_response"),
+        (anthropic_error(500, "api_error", "Internal server error"), "invalid_response"),
+        (anthropic_error(504, "timeout_error", "timeout"), "unreachable"),
+        (anthropic_error(529, "overloaded_error", "Overloaded"), "unreachable"),
+        # 200 但不是 message：错误对象或别的结构
+        (status(200, json={"type": "error", "error": {"type": "api_error"}}), "invalid_response"),
+        (
+            status(200, json={"type": "error", "error": {"type": "x", "code": "model_not_found"}}),
+            "model_not_available",
+        ),
+        (status(200, json={"choices": [{"message": {}}]}), "invalid_response"),
+    ],
+    ids=[
+        "401",
+        "403",
+        "404_model",
+        "404_path",
+        "404_bare",
+        "400",
+        "402",
+        "413",
+        "500",
+        "504",
+        "529",
+        "200_error",
+        "200_model_missing",
+        "200_openai_shape",
+    ],
+)
+async def test_anthropic_inference_classification_never_retries(
+    reply: Reply, expected: str
+) -> None:
+    adapter, recorder = make_anthropic(reply)
+    result = await adapter.infer(base_url=ANTHROPIC_URL, api_key=SecretStr(KEY), model_id="m")
+    assert result.status == "failed" and result.reason == expected
+    assert len(recorder.requests) == 1
+
+
+async def test_anthropic_rate_limit_uses_retry_after() -> None:
+    reply = anthropic_error(429, "rate_limit_error", "rate limited", headers={"retry-after": "30"})
+    adapter, recorder = make_anthropic(reply)
+    result = await adapter.infer(base_url=ANTHROPIC_URL, api_key=SecretStr(KEY), model_id="m")
+    assert (result.status, result.reason) == ("rate_limited", None)
+    assert result.retry_at == NOW + timedelta(seconds=30)
+    listed = await adapter.list_models(base_url=ANTHROPIC_URL, api_key=SecretStr(KEY))
+    assert listed.result.status == "rate_limited"
+    assert len(recorder.requests) == 2  # 都不重试
+
+    # 401 / 429 优先于“模型不存在”：错误信息里提到模型也不改变归类
+    for code, expected in ((401, ("failed", "unauthorized")), (429, ("rate_limited", None))):
+        adapter, _ = make_anthropic(anthropic_error(code, "not_found_error", "model: claude-x"))
+        result = await adapter.infer(base_url=ANTHROPIC_URL, api_key=SecretStr(KEY), model_id="m")
+        assert (result.status, result.reason) == expected
+
+
+# ---------------------------------------------------------------- Gemini
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+
+def gemini_models(*models: dict[str, Any], next_page: str | None = None) -> httpx.Response:
+    """GET v1beta/models 的响应结构（ListModelsResponse：models[]、nextPageToken）。"""
+    body: dict[str, Any] = {"models": list(models)}
+    if next_page:
+        body["nextPageToken"] = next_page
+    return httpx.Response(200, json=body)
+
+
+def gemini_model(name: str, *methods: str) -> dict[str, Any]:
+    entry: dict[str, Any] = {"name": f"models/{name}", "displayName": name}
+    if methods:
+        entry["supportedGenerationMethods"] = list(methods)
+    return entry
+
+
+def gemini_ok(_: httpx.Request) -> httpx.Response:
+    """GenerateContentResponse：candidates[].content.parts[].text、finishReason、usageMetadata。"""
+    return httpx.Response(
+        200,
+        json={
+            "candidates": [
+                {
+                    "content": {"role": "model", "parts": [{"text": "pong"}]},
+                    "finishReason": "STOP",
+                    "index": 0,
+                }
+            ],
+            "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1},
+            "modelVersion": "gemini-2.5-flash",
+        },
+    )
+
+
+def gemini_error(
+    code: int, state: str, message: str, *details: dict[str, Any], **kwargs: Any
+) -> Reply:
+    """google.rpc.Status 的 JSON 形式：{"error": {"code", "message", "status", "details"}}。"""
+    error: dict[str, Any] = {"code": code, "message": message, "status": state}
+    if details:
+        error["details"] = list(details)
+    return status(code, json={"error": error}, **kwargs)
+
+
+KEY_INVALID = {
+    "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+    "reason": "API_KEY_INVALID",
+    "domain": "googleapis.com",
+    "metadata": {"service": "generativelanguage.googleapis.com"},
+}
+
+
+def retry_info(delay: str) -> dict[str, Any]:
+    return {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": delay}
+
+
+def test_gemini_urls_match_openclaw() -> None:
+    """与 OpenClaw normalizeGoogleApiBaseUrl / resolveGoogleModelPath 相同。"""
+    assert gemini_base(GEMINI_URL) == GEMINI_URL
+    assert gemini_base(GEMINI_URL + "/") == GEMINI_URL
+    # 官方主机没写版本路径：补 /v1beta；其他主机原样使用
+    assert gemini_base("https://generativelanguage.googleapis.com") == GEMINI_URL
+    assert gemini_base("https://generativelanguage.googleapis.com/v1") == (
+        "https://generativelanguage.googleapis.com/v1"
+    )
+    assert gemini_base("https://relay.test") == "https://relay.test"
+    assert gemini_base("http://generativelanguage.googleapis.com") == (
+        "http://generativelanguage.googleapis.com"
+    )
+    assert gemini_model_path("gemini-2.5-flash") == "models/gemini-2.5-flash"
+    assert gemini_model_path("models/gemini-2.5-flash") == "models/gemini-2.5-flash"
+    assert gemini_model_path("google/gemini-2.5-flash") == "models/gemini-2.5-flash"
+    assert gemini_model_path("tunedModels/my-tune") == "tunedModels/my-tune"
+    # 模型 ID 里的特殊字符不能改变请求路径或带出查询参数
+    assert gemini_model_path("a?key=x#y") == "models/a%3Fkey%3Dx%23y"
+
+
+def assert_gemini_auth(sent: httpx.Request) -> None:
+    assert sent.headers["x-goog-api-key"] == KEY
+    assert sent.headers["accept-encoding"] == "identity"
+    assert "authorization" not in sent.headers and "x-api-key" not in sent.headers
+    assert KEY not in str(sent.url) and "key=" not in str(sent.url)
+
+
+async def test_gemini_list_models_request_shape_and_pagination() -> None:
+    reply = gemini_models(
+        gemini_model("gemini-2.5-flash", "generateContent", "countTokens"),
+        gemini_model("gemini-2.5-pro", "generateContent"),
+        gemini_model("text-embedding-004", "embedContent"),
+        gemini_model("relay-model"),  # 中转站没给 supportedGenerationMethods：保留
+        {"displayName": "no name"},
+    )
+    adapter, recorder = make_gemini(lambda _: reply)
+    listed = await adapter.list_models(base_url=GEMINI_URL, api_key=SecretStr(KEY))
+    assert (listed.result.status, listed.result.reason) == ("passed", None)
+    assert listed.complete is True
+    # models/ 前缀去掉（OpenClaw 发请求时会补回 models/）；只支持 embedContent 的模型不列
+    assert listed.model_ids == ("gemini-2.5-flash", "gemini-2.5-pro", "relay-model")
+    (sent,) = recorder.requests
+    assert sent.method == "GET"
+    assert str(sent.url) == f"{GEMINI_URL}/models?pageSize=1000"
+    assert_gemini_auth(sent)
+
+    # nextPageToken：还有下一页，不完整
+    adapter, _ = make_gemini(lambda _: gemini_models(gemini_model("a"), next_page="next"))
+    listed = await adapter.list_models(base_url=GEMINI_URL, api_key=SecretStr(KEY))
+    assert listed.result.status == "passed" and listed.complete is False
+
+    # proto3 JSON 省略空的重复字段：一个模型都没有时是 {}
+    adapter, _ = make_gemini(status(200, json={}))
+    listed = await adapter.list_models(base_url=GEMINI_URL, api_key=SecretStr(KEY))
+    assert listed.result.status == "passed" and listed.complete is True
+    assert listed.model_ids == ()
+
+    for wrong in ({"models": "x"}, {"data": [{"id": "a"}]}, ["models"]):
+        adapter, _ = make_gemini(status(200, json=wrong))
+        listed = await adapter.list_models(base_url=GEMINI_URL, api_key=SecretStr(KEY))
+        assert (listed.result.status, listed.result.reason) == ("failed", "invalid_response")
+
+
+async def test_gemini_infer_request_shape_is_fixed_tiny_and_not_retried() -> None:
+    adapter, recorder = make_gemini(gemini_ok)
+    result = await adapter.infer(
+        base_url=GEMINI_URL, api_key=SecretStr(KEY), model_id="gemini-2.5-flash"
+    )
+    assert (result.status, result.reason) == ("passed", None)
+    (sent,) = recorder.requests
+    assert sent.method == "POST"
+    assert str(sent.url) == f"{GEMINI_URL}/models/gemini-2.5-flash:generateContent"
+    assert_gemini_auth(sent)
+    assert json.loads(sent.content) == {
+        "contents": [{"role": "user", "parts": [{"text": "ping"}]}],
+        "generationConfig": {"maxOutputTokens": 16},
+    }
+
+    # 中转站地址：原样拼接，不补版本路径
+    adapter, recorder = make_gemini(gemini_ok)
+    await adapter.infer(
+        base_url="https://relay.test/gemini/v1beta", api_key=SecretStr(KEY), model_id="m-1"
+    )
+    assert str(recorder.requests[0].url) == (
+        "https://relay.test/gemini/v1beta/models/m-1:generateContent"
+    )
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected", "attempts"),
+    [
+        # Key 无效：400 INVALID_ARGUMENT + ErrorInfo.reason = API_KEY_INVALID
+        (
+            gemini_error(400, "INVALID_ARGUMENT", "API key not valid.", KEY_INVALID),
+            "unauthorized",
+            1,
+        ),
+        (gemini_error(400, "INVALID_ARGUMENT", "bad request"), "invalid_response", 1),
+        (gemini_error(401, "UNAUTHENTICATED", "no credentials"), "unauthorized", 1),
+        (gemini_error(403, "PERMISSION_DENIED", "denied"), "forbidden", 1),
+        (status(404), "models_endpoint_unsupported", 1),
+        (gemini_error(503, "UNAVAILABLE", "overloaded"), "unreachable", 2),
+        (gemini_error(500, "INTERNAL", "internal"), "invalid_response", 1),
+    ],
+    ids=["key_invalid", "400", "401", "403", "404", "503", "500"],
+)
+async def test_gemini_metadata_classification(reply: Reply, expected: str, attempts: int) -> None:
+    adapter, recorder = make_gemini(reply)
+    listed = await adapter.list_models(base_url=GEMINI_URL, api_key=SecretStr(KEY))
+    assert listed.result.reason == expected
+    assert listed.complete is False
+    assert len(recorder.requests) == attempts
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        (
+            gemini_error(400, "INVALID_ARGUMENT", "API key not valid.", KEY_INVALID),
+            ("failed", "unauthorized"),
+        ),
+        (gemini_error(403, "PERMISSION_DENIED", "denied"), ("failed", "forbidden")),
+        (
+            gemini_error(
+                404,
+                "NOT_FOUND",
+                "models/gemini-x is not found for API version v1beta, or is not supported"
+                " for generateContent.",
+            ),
+            ("failed", "model_not_available"),
+        ),
+        (status(404, text="<html>404</html>"), ("failed", "invalid_response")),
+        (gemini_error(400, "FAILED_PRECONDITION", "location"), ("failed", "invalid_response")),
+        (gemini_error(503, "UNAVAILABLE", "overloaded"), ("failed", "unreachable")),
+        (gemini_error(504, "DEADLINE_EXCEEDED", "deadline"), ("failed", "unreachable")),
+        (status(200, json={"candidates": []}), ("failed", "invalid_response")),
+        (status(200, json={"choices": [{}]}), ("failed", "invalid_response")),
+        # 提示被内容过滤拦下：Key 与模型都可用
+        (
+            status(200, json={"promptFeedback": {"blockReason": "SAFETY"}}),
+            ("passed", None),
+        ),
+    ],
+    ids=[
+        "key_invalid",
+        "403",
+        "404_model",
+        "404_html",
+        "400_precondition",
+        "503",
+        "504",
+        "200_no_candidates",
+        "200_openai_shape",
+        "200_prompt_blocked",
+    ],
+)
+async def test_gemini_inference_classification_never_retries(
+    reply: Reply, expected: tuple[str, str | None]
+) -> None:
+    adapter, recorder = make_gemini(reply)
+    result = await adapter.infer(base_url=GEMINI_URL, api_key=SecretStr(KEY), model_id="m")
+    assert (result.status, result.reason) == expected
+    assert len(recorder.requests) == 1
+
+
+async def test_gemini_rate_limit_uses_retry_after_or_retry_info() -> None:
+    cases: list[tuple[Reply, datetime | None]] = [
+        (
+            gemini_error(429, "RESOURCE_EXHAUSTED", "quota", retry_info("17s")),
+            NOW + timedelta(seconds=17),
+        ),
+        # 小数秒向上取整
+        (
+            gemini_error(429, "RESOURCE_EXHAUSTED", "quota", retry_info("0.250s")),
+            NOW + timedelta(seconds=1),
+        ),
+        # Retry-After 优先
+        (
+            gemini_error(
+                429,
+                "RESOURCE_EXHAUSTED",
+                "quota",
+                retry_info("17s"),
+                headers={"retry-after": "5"},
+            ),
+            NOW + timedelta(seconds=5),
+        ),
+        (gemini_error(429, "RESOURCE_EXHAUSTED", "quota", retry_info("soon")), None),
+        (gemini_error(429, "RESOURCE_EXHAUSTED", "quota", retry_info("172800s")), None),
+        (gemini_error(429, "RESOURCE_EXHAUSTED", "quota"), None),
+    ]
+    for reply, retry_at in cases:
+        adapter, recorder = make_gemini(reply)
+        result = await adapter.infer(base_url=GEMINI_URL, api_key=SecretStr(KEY), model_id="m")
+        assert (result.status, result.reason, result.retry_at) == ("rate_limited", None, retry_at)
+        listed = await adapter.list_models(base_url=GEMINI_URL, api_key=SecretStr(KEY))
+        assert listed.result.status == "rate_limited" and listed.result.retry_at == retry_at
+        assert len(recorder.requests) == 2  # 429 都不重试
+
+
+# ---------------------------------------------------------------- 三个协议共用的网络约束
+
+NATIVE = [
+    (make_adapter, RELAY_URL),
+    (make_anthropic, ANTHROPIC_URL),
+    (make_gemini, GEMINI_URL),
+]
+NATIVE_IDS = ["openai_compatible", "anthropic_native", "gemini_native"]
+
+
+@pytest.mark.parametrize(("factory", "base_url"), NATIVE, ids=NATIVE_IDS)
+@pytest.mark.parametrize(
+    ("reply", "listed", "list_attempts", "inferred"),
+    [
+        (raises(httpx.ReadTimeout), ("failed", "timeout"), 2, ("unknown", "timeout")),
+        (raises(httpx.ConnectError), ("failed", "unreachable"), 2, ("failed", "unreachable")),
+        (raises(httpx.ConnectError, tls=True), ("failed", "tls_error"), 2, ("failed", "tls_error")),
+        (
+            status(302, headers={"location": "http://169.254.169.254/latest/meta-data/"}),
+            ("failed", "invalid_response"),
+            1,
+            ("failed", "invalid_response"),
+        ),
+        (
+            status(
+                200,
+                headers={"content-encoding": "gzip", "content-type": "application/json"},
+                content=gzip.compress(b"{}"),
+            ),
+            ("failed", "invalid_response"),
+            1,
+            ("failed", "invalid_response"),
+        ),
+        (too_large_json, ("passed", None), 1, ("failed", "invalid_response")),
+        (status(502), ("failed", "unreachable"), 2, ("failed", "unreachable")),
+    ],
+    ids=["read_timeout", "connect_error", "tls", "redirect", "gzip", "over_2mib", "502"],
+)
+async def test_every_protocol_shares_network_constraints(
+    factory: Callable[[Reply], tuple[Any, Recorder]],
+    base_url: str,
+    reply: Reply,
+    listed: tuple[str, str | None],
+    list_attempts: int,
+    inferred: tuple[str, str],
+) -> None:
+    """超时、TLS、不跟随跳转、拒绝压缩、2 MiB 上限、GET 最多重试一次、POST 不重试：三个协议一致。"""
+    adapter, recorder = factory(reply)
+    listing_result = await adapter.list_models(base_url=base_url, api_key=SecretStr(KEY))
+    assert (listing_result.result.status, listing_result.result.reason) == listed
+    assert listing_result.complete is False
+    assert len(recorder.requests) == list_attempts
+    recorder.requests.clear()
+    result = await adapter.infer(base_url=base_url, api_key=SecretStr(KEY), model_id="m")
+    assert (result.status, result.reason) == inferred
+    assert len(recorder.requests) == 1
+
+
+@pytest.mark.parametrize(("factory", "base_url"), NATIVE, ids=NATIVE_IDS)
+async def test_every_protocol_total_deadline(
+    factory: Callable[[Reply], tuple[Any, Recorder]],
+    base_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(model_providers, "ATTEMPT_DEADLINE_SECONDS", 0.05)
+    monkeypatch.setattr(model_providers, "RETRY_ALLOWANCE_SECONDS", 0.05)
+
+    async def slow(_: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(5)
+        return listing("a")
+
+    adapter, recorder = factory(slow)
+    listed = await adapter.list_models(base_url=base_url, api_key=SecretStr(KEY))
+    assert (listed.result.status, listed.result.reason) == ("failed", "timeout")
+    recorder.requests.clear()
+    inferred = await adapter.infer(base_url=base_url, api_key=SecretStr(KEY), model_id="m")
+    assert (inferred.status, inferred.reason) == ("unknown", "timeout")
+    assert len(recorder.requests) == 1
 
 
 def test_production_transport_keeps_tls_verification_and_no_redirects() -> None:
@@ -492,7 +1070,9 @@ SETTINGS: dict[str, Any] = {**AGENT_SETTINGS, "integration_allowed_hosts": "rela
 
 @dataclass
 class FakeRelay:
-    """内存版 OpenAI 兼容中转站：GET {base}/models、POST {base}/chat/completions。"""
+    """内存版中转站：OpenAI 兼容（GET {base}/models、POST {base}/chat/completions），
+    另按地址响应 Anthropic（POST …/v1/messages；带 x-api-key 的 GET …/models）与
+    Gemini（GET …/v1beta/models、POST …/models/<id>:generateContent）。"""
 
     models: list[str] = field(default_factory=lambda: ["gpt-4o-mini", "deepseek-chat"])
     requests: list[httpx.Request] = field(default_factory=list)
@@ -507,13 +1087,43 @@ class FakeRelay:
             hook, self.before = self.before, None
             await hook(request)
         path = request.url.path
-        if request.method == "GET" and path.endswith("/models"):
+        if request.method == "GET" and path.endswith("/v1beta/models"):
+            reply = self.list_reply or (
+                lambda _: gemini_models(*[gemini_model(m, "generateContent") for m in self.models])
+            )
+        elif (
+            request.method == "GET" and path.endswith("/models") and "x-api-key" in request.headers
+        ):
+            reply = self.list_reply or (lambda _: anthropic_models(*self.models))
+        elif request.method == "GET" and path.endswith("/models"):
             reply = self.list_reply or (lambda _: listing(*self.models))
         elif request.method == "POST" and path.endswith("/chat/completions"):
             reply = self.chat_reply or self._chat
+        elif request.method == "POST" and path.endswith("/v1/messages"):
+            reply = self.chat_reply or self._anthropic
+        elif request.method == "POST" and path.endswith(":generateContent"):
+            reply = self.chat_reply or self._gemini
         else:
             return httpx.Response(404)
         return await _resolve(reply, request)
+
+    def _anthropic(self, request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        if model not in self.models:
+            missing: httpx.Response = anthropic_error(404, "not_found_error", f"model: {model}")(
+                request
+            )
+            return missing
+        return anthropic_message(request)
+
+    def _gemini(self, request: httpx.Request) -> httpx.Response:
+        model = request.url.path.rsplit("/models/", 1)[1].removesuffix(":generateContent")
+        if model not in self.models:
+            missing: httpx.Response = gemini_error(
+                404, "NOT_FOUND", f"models/{model} is not found"
+            )(request)
+            return missing
+        return gemini_ok(request)
 
     def _chat(self, request: httpx.Request) -> httpx.Response:
         model = json.loads(request.content)["model"]
@@ -839,6 +1449,67 @@ async def test_manual_and_all_available_catalog(ctx: Ctx) -> None:
 
 
 @integration
+@pytest.mark.parametrize(
+    ("protocol", "base_url", "list_url", "post_url", "auth_header"),
+    [
+        (
+            "anthropic_native",
+            "https://relay.test/anthropic",
+            "https://relay.test/anthropic/v1/models?limit=1000",
+            "https://relay.test/anthropic/v1/messages",
+            "x-api-key",
+        ),
+        (
+            "gemini_native",
+            "https://relay.test/v1beta",
+            "https://relay.test/v1beta/models?pageSize=1000",
+            "https://relay.test/v1beta/models/{model}:generateContent",
+            "x-goog-api-key",
+        ),
+    ],
+    ids=["anthropic_native", "gemini_native"],
+)
+async def test_native_protocols_sync_and_check(
+    ctx: Ctx, protocol: str, base_url: str, list_url: str, post_url: str, auth_header: str
+) -> None:
+    """原生协议走同一套接口：同步模型、metadata 检测、逐个模型推理检测；Key 只在各自的请求头里。"""
+    created = await ctx.create(name=f"{protocol} 中转", protocol=protocol, base_url=base_url)
+    cid = created["id"]
+    ctx.relay.models = ["deepseek-chat", "gpt-4o-mini", "qwen-max"]
+
+    result = await ctx.synced(cid)
+    assert result["sync_state"] == "complete", result
+    assert result["discovered"] == sorted(ctx.relay.models)
+    metadata = await ctx.checked(cid, "metadata")
+    assert (metadata["status"], metadata["reason"]) == ("passed", None)
+    for model_id in ("gpt-4o-mini", "deepseek-chat"):
+        check = await ctx.checked(cid, "inference", model_id)
+        assert (check["status"], check["model_id"]) == ("passed", model_id)
+    missing = await ctx.put_models(cid, "selected", ["gpt-4o-mini", "not-listed"])
+    assert missing.status_code == 200, missing.text
+    gone = await ctx.checked(cid, "inference", "not-listed")
+    assert (gone["status"], gone["reason"]) == ("failed", "model_not_available")
+    models = await ctx.models(cid)
+    assert models["gpt-4o-mini"]["availability"] == "verified"
+
+    gets = [r for r in ctx.relay.requests if r.method == "GET"]
+    posts = [r for r in ctx.relay.requests if r.method == "POST"]
+    assert {str(r.url) for r in gets} == {list_url}
+    sent_models = ["gpt-4o-mini", "deepseek-chat", "not-listed"]
+    if protocol == "anthropic_native":
+        assert {str(r.url) for r in posts} == {post_url}
+        assert [json.loads(r.content)["model"] for r in posts] == sent_models
+    else:
+        assert [str(r.url) for r in posts] == [post_url.format(model=m) for m in sent_models]
+    for sent in ctx.relay.requests:
+        assert sent.headers[auth_header] == KEY
+        assert "authorization" not in sent.headers
+        assert KEY not in str(sent.url)
+    for response in ctx.responses:
+        assert KEY not in response.text
+
+
+@integration
 async def test_unsupported_models_endpoint_keeps_manual_mode(ctx: Ctx) -> None:
     ctx.relay.list_reply = status(404, json={"error": {"message": "Not Found"}})
     created = await ctx.create(models=[{"model_id": "gpt-4o-mini"}])
@@ -1025,7 +1696,9 @@ async def test_check_results_are_categories_and_metadata_is_not_inference(ctx: C
 
 
 @integration
-async def test_check_preconditions_and_disabled_connection(ctx: Ctx) -> None:
+async def test_check_preconditions_and_disabled_connection(
+    ctx: Ctx, monkeypatch: pytest.MonkeyPatch
+) -> None:
     created = await ctx.create()
     cid = created["id"]
 
@@ -1064,7 +1737,8 @@ async def test_check_preconditions_and_disabled_connection(ctx: Ctx) -> None:
     assert incomplete.status_code == 409 and _error(incomplete) == "MODEL_CONFIGURATION_INCOMPLETE"
     assert _error(await ctx.sync(draft["id"])) == "MODEL_CONFIGURATION_INCOMPLETE"
 
-    # 协议没有核验开放（例如旧数据里存着）：不能访问服务商
+    # 协议没有核验开放（例如旧数据里存着、或部署只开放了 openai_compatible）：不能访问服务商
+    monkeypatch.setattr(model_connections, "SUPPORTED_PROTOCOLS", ("openai_compatible",))
     other = await ctx.create(name="原生协议")
     await run_sql(
         ctx.database_url,

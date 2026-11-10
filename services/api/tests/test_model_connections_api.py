@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 import pytest
 
+from app.domain import model_connections
 from tests.helpers import OWNER, ClientFactory, add_member, add_user, csrf, run_sql
 from tests.test_agents_api import SETTINGS, Env
 
@@ -236,13 +237,20 @@ async def test_connection_crud_never_returns_key(env: Env) -> None:
         ({"base_url": "https://gateway.example.com/v1#x"}, "MODEL_BASE_URL_INVALID"),
         ({"base_url": "https://gateway.example.com/v1/chat/completions"}, "MODEL_BASE_URL_INVALID"),
         ({"base_url": "ftp://gateway.example.com/v1"}, "MODEL_BASE_URL_INVALID"),
+        ({"base_url": "https://gateway.example.com/v1/messages"}, "MODEL_BASE_URL_INVALID"),
+        (
+            {"base_url": "https://gateway.example.com/v1beta/models/m:generateContent"},
+            "MODEL_BASE_URL_INVALID",
+        ),
         ({"protocol": "anthropic_native"}, "MODEL_PROTOCOL_UNSUPPORTED"),
         ({"models": []}, "MODEL_CONNECTION_NOT_READY"),
     ],
 )
 async def test_create_rejects_invalid_endpoints(
-    env: Env, override: dict[str, Any], code: str
+    env: Env, override: dict[str, Any], code: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # 没有核验开放的协议（这里假设部署只开放了 openai_compatible）选了返回 422
+    monkeypatch.setattr(model_connections, "SUPPORTED_PROTOCOLS", ("openai_compatible",))
     response = await create(env, relay(**override))
     assert response.status_code == 422, response.text
     assert response.json()["error"]["code"] == code
@@ -258,6 +266,77 @@ async def test_official_preset_must_stay_on_official_host(env: Env) -> None:
     assert response.json()["error"]["code"] == "MODEL_OFFICIAL_HOST_MISMATCH"
     response = await create(env, official(connection_type="relay"))
     assert response.status_code == 422
+
+
+ANTHROPIC = {
+    "name": "Anthropic 官方",
+    "official_provider": "anthropic",
+    "protocol": "anthropic_native",
+    "base_url": "https://api.anthropic.com",
+    "models": [{"model_id": "claude-opus-5-5"}],
+}
+GOOGLE = {
+    "name": "Gemini 官方",
+    "official_provider": "google",
+    "protocol": "gemini_native",
+    "base_url": "https://generativelanguage.googleapis.com/v1beta",
+    "models": [{"model_id": "gemini-2.5-flash"}],
+}
+
+
+@pytest.mark.parametrize("preset", [ANTHROPIC, GOOGLE], ids=["anthropic", "google"])
+async def test_native_official_presets(env: Env, preset: dict[str, Any]) -> None:
+    """Anthropic / Gemini 官方预设：协议与官方主机固定；
+    第三方主机返回 MODEL_OFFICIAL_HOST_MISMATCH。"""
+    capabilities = (await get(env, "/capabilities")).json()
+    listed = {p["provider"]: p for p in capabilities["official_presets"]}
+    assert listed[preset["official_provider"]]["protocol"] == preset["protocol"]
+    assert listed[preset["official_provider"]]["base_url"] == preset["base_url"]
+
+    mismatch = await create(env, official(**{**preset, "base_url": "https://relay.example.net/v1"}))
+    assert mismatch.status_code == 422, mismatch.text
+    assert mismatch.json()["error"]["code"] == "MODEL_OFFICIAL_HOST_MISMATCH"
+    assert KEY not in mismatch.text
+    wrong_protocol = await create(env, official(**{**preset, "protocol": "openai_compatible"}))
+    assert wrong_protocol.status_code == 422
+    assert wrong_protocol.json()["error"]["code"] == "VALIDATION_FAILED"
+    assert (await get(env)).json()["total"] == 0
+
+    connection = await created(env, official(**preset))
+    assert connection["connection_type"] == "official"
+    assert connection["official_provider"] == preset["official_provider"]
+    assert connection["protocol"] == preset["protocol"]
+    assert connection["base_url"] == preset["base_url"]
+    assert connection["configuration_state"] == "ready"
+    # 改成第三方主机同样被拒绝
+    response = await patch(
+        env,
+        connection["id"],
+        version=connection["version"],
+        base_url="https://relay.example.net/anthropic",
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "MODEL_OFFICIAL_HOST_MISMATCH"
+
+
+async def test_native_protocols_are_open_for_relays(env: Env) -> None:
+    anthropic = await created(
+        env,
+        relay(
+            "Anthropic 中转",
+            protocol="anthropic_native",
+            base_url="https://gateway.example.com/anthropic/",
+        ),
+    )
+    assert anthropic["protocol"] == "anthropic_native"
+    assert anthropic["base_url"] == "https://gateway.example.com/anthropic"
+    gemini = await created(
+        env,
+        relay(
+            "Gemini 中转", protocol="gemini_native", base_url="https://gateway.example.com/v1beta"
+        ),
+    )
+    assert gemini["protocol"] == "gemini_native"
 
 
 async def test_base_url_is_normalized_and_duplicate_names_conflict(env: Env) -> None:
@@ -578,8 +657,16 @@ async def test_list_filters_total_and_summary(env: Env) -> None:
     assert summary["needs_attention"] == 3
     assert summary["unique_granted_instances"] == 0
     capabilities = (await get(env, "/capabilities")).json()
-    assert capabilities["supported_protocols"] == ["openai_compatible"]
-    assert [p["provider"] for p in capabilities["official_presets"]] == ["openai"]
+    assert capabilities["supported_protocols"] == [
+        "openai_compatible",
+        "anthropic_native",
+        "gemini_native",
+    ]
+    assert [p["provider"] for p in capabilities["official_presets"]] == [
+        "openai",
+        "anthropic",
+        "google",
+    ]
 
 
 async def test_activity_lists_audit_events(env: Env) -> None:

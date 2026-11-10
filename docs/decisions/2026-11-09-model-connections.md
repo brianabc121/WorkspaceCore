@@ -73,7 +73,8 @@ Gemini 官方主机不带版本路径时 OpenClaw 会补 `/v1beta`，非官方�
 
 - 自定义 provider 没有观察到模型列表请求（只有插件提供的 provider 才做发现）；模型列表由工作台同步，见第 4 节。
 - base URL 的主机解析到回环地址时 OpenClaw 拒绝请求（`blocked URL fetch … private/internal/special-use IP`），
-  `request.allowPrivateNetwork: true` 可放开；工作台不替用户打开它。验收用的假模型服务在 Docker 网络里（私有地址）照常可用。
+  `request.allowPrivateNetwork: true` 可放开；工作台不替用户打开它。验收用的假模型服务在 Docker 网络里（私有地址）照常可用
+  （T-0202 用容器名访问，`anthropic-messages` 与 `google-generative-ai` 都没有被拦截）。
 - 启动时会尝试拉取 `https://catalog.openclaw.ai/models/v{1,2}/catalog.json`（`models.catalogRefresh`），离线时只记一行警告。
 
 ## 3. 已开放的协议与官方预设
@@ -81,16 +82,20 @@ Gemini 官方主机不带版本路径时 OpenClaw 会补 `/v1beta`，非官方�
 | 协议 | 状态 | 依据 |
 |---|---|---|
 | `openai_compatible` | 开放 | 第 2.1 节实测请求；真实 OpenClaw 端到端验收（agents 场景 27） |
-| `anthropic_native` | 见核验记录第 3 节 | 请求格式已实测；只有工作台侧的模型同步与检测核验完成、并在真实 OpenClaw 上跑通后才开放 |
-| `gemini_native` | 见核验记录第 3 节 | 同上 |
+| `anthropic_native` | 开放（T-0202） | 工作台侧的模型同步与检测按官方文档核实；真实 OpenClaw 用 `anthropic-messages` 跑通一轮对话（`docs/verification/T-0202-native-protocols.md`） |
+| `gemini_native` | 开放（T-0202） | 同上，`google-generative-ai` |
 
 官方预设只填经核验的协议与 base URL，不代填 Key；官方预设配第三方主机返回 422 `MODEL_OFFICIAL_HOST_MISMATCH`。
 OpenAI：`https://api.openai.com/v1`（https://platform.openai.com/docs/api-reference/introduction）。
+Anthropic：`https://api.anthropic.com`（https://platform.claude.com/docs/en/api/overview；OpenClaw 补 `/v1/messages`）。
+Google Gemini：`https://generativelanguage.googleapis.com/v1beta`（https://ai.google.dev/api；base URL 含版本路径）。
 
 ## 4. 模型同步与检测
 
 见 `app/integrations/model_providers.py` 的文件头与核验记录第 3 节：每个协议的模型列表、推理检测请求格式、分页、
-错误归类与官方文档地址。只经工作台的出站策略访问（固定 IP、超时、不跟随跨站跳转），不保存远端原始响应。
+错误归类与官方文档地址。原生协议见 `docs/verification/T-0202-native-protocols.md` 第 1 节
+（Anthropic：`x-api-key` + `anthropic-version: 2023-06-01`，`GET …/v1/models?limit=1000`、`POST …/v1/messages`；
+Gemini：`x-goog-api-key`，`GET {base}/models?pageSize=1000`、`POST {base}/models/<id>:generateContent`）。只经工作台的出站策略访问（固定 IP、超时、不跟随跨站跳转），不保存远端原始响应。
 
 ## 5. 配置下发与状态
 
