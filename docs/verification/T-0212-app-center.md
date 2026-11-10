@@ -18,7 +18,7 @@
 | `pytest tests/test_module_state_migration.py` | 1 passed |
 | `pytest tests/test_modules.py tests/test_news_api.py tests/test_news_config.py tests/test_news_migration.py` | 45 passed（改动前后各跑一次） |
 | `pytest tests/test_security_matrix.py tests/test_audit_queries.py tests/test_audit_export.py tests/test_operations.py tests/test_navigation_api.py` | 64 passed |
-| 全量 `pytest`（`-x`） | 见第 6 节 |
+| 全量 `pytest -x`（`REQUIRE_INTEGRATION=1`） | 1323 passed、15 skipped（与改动前相同的平台类跳过），用时 44 分 49 秒 |
 | 迁移：空库 `upgrade head` → `alembic check` → `downgrade 0057` → `upgrade head` → `alembic check` | 通过（专用库 `t0210_mig`） |
 | 迁移：已有数据的本地库（0055 → 0058） | 通过，`alembic current` = `0058 (head)` |
 
@@ -80,6 +80,8 @@ CI：`ci-infra.yml` 的 compose job 在 `modules_browser.cjs` 之后运行 `app_
 - 多个 api 进程时，健康缓存是每个进程一份：“最近一次检测”可能因进程而异，页面按 `checked_at` 与 `stale` 显示（ADR 已写明）。
 - 本地浏览器验收用的是挂载源码的已有镜像，不是新构建的镜像；以 CI 的完整构建为准。
 
-## 6. 后端全量测试
+## 6. CI
 
-（见下）
+第一次运行的两处失败与处理：`api` 的 mypy 也检查 `tests/`（本地只查了 `app/`），新测试文件有 3 处类型标注问题，已修正并按 CI 的方式重跑
+（`mypy app migrations tests scripts` 通过）；`news` 里已部署模式的验收排在 `news_browser.cjs` 之后，打开早报推送时 409 `NEWS_TAKEN`，
+已调整到它之前。合并前以 PR 最新提交上的全部检查为准（D-0004）。
