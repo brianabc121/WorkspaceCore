@@ -80,7 +80,7 @@ Gemini 官方主机不带版本路径时 OpenClaw 会补 `/v1beta`，非官方�
 
 | 协议 | 状态 | 依据 |
 |---|---|---|
-| `openai_compatible` | 开放 | 第 2.1 节实测请求；真实 OpenClaw 端到端验收（agents 场景 26） |
+| `openai_compatible` | 开放 | 第 2.1 节实测请求；真实 OpenClaw 端到端验收（agents 场景 27） |
 | `anthropic_native` | 见核验记录第 3 节 | 请求格式已实测；只有工作台侧的模型同步与检测核验完成、并在真实 OpenClaw 上跑通后才开放 |
 | `gemini_native` | 见核验记录第 3 节 | 同上 |
 
@@ -117,3 +117,10 @@ owner 保存绑定（目标修订号 +1，排应用任务 queued）
 - 不迁移 GitHub PAT、Gmail OAuth、服务器密码、新闻早报的模型凭据；
 - 不放宽 OpenClaw 的工具限制（`tools.exec.security = deny` 不变；SecretRef 的受控 exec 不等于允许智能体 exec）；
 - 不替用户打开 `request.allowPrivateNetwork`。
+
+## 7. 为什么不做成插拔式模块
+
+人类 2026-11-08 要求新功能按插拔式模块做（`docs/modules/README.md`）。中转站管理不按模块做，原因：
+它替换的是 OpenClaw 智能体本身的模型配置——部署（新部署必须选主模型）、接入包（受管 provider）、取密钥程序（`mc_` 引用）、
+Runner 与旧取密钥接口的启停校验都依赖它；“停用模块”会让已绑定的实例取不到 Key、新部署无法完成。
+所以它和智能体、密钥库一样属于核心（路由登记在 `app/api/v1/__init__.py`，页面替换原来的“密钥库”入口），不提供停用开关。
