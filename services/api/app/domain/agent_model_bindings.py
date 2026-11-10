@@ -71,6 +71,8 @@ from app.schemas.model_connections import (
     PickerConnectionPage,
 )
 
+# 旧接入包模板里 openai 段引用的密钥名
+LEGACY_MODEL_REF = "openai_api_key"
 # 受管 provider 键的前缀（provider_key 生成的键都以它开头，见 model_connections.provider_key）
 MANAGED_PREFIX = "mwc"
 # 应用任务多久没被领取 / 没有回报算“未知”
@@ -719,7 +721,15 @@ class AgentModelBindingService:
             return None
 
     async def has_legacy_model(self, instance: AgentInstance) -> bool:
-        return bool((await self._legacy([instance.id])).get(instance.id))
+        """接入包模板里的旧 openai 段只引用 openai_api_key：实例有这个旧授权时才保留它。"""
+        return bool(
+            await self.db.scalar(
+                select(AgentSecretGrant.id).where(
+                    AgentSecretGrant.instance_id == instance.id,
+                    AgentSecretGrant.ref_id == LEGACY_MODEL_REF,
+                )
+            )
+        )
 
     # ---------------------------------------------------------------- 实例接口
 
