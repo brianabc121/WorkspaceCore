@@ -1691,17 +1691,21 @@ class ModelConnectionService:
             client_ip=client_ip,
         )
         await self.db.commit()
-        page = await self.migration_entries(access, state=None, cursor=None, limit=PAGE_MAX)
-        found = next((e for e in page.items if e.entry_id == connection.id), None)
-        if found is not None:
-            return found
+        # 直接组装这一项（不翻导入项列表：超过一页时会找不到它、把原有授权显示成空）
         out = await self.out(connection)
+        refs = (
+            await self.db.scalars(
+                select(AgentSecretGrant.ref_id).where(
+                    AgentSecretGrant.secret_id == connection.credential_secret_id
+                )
+            )
+        ).all()
         return MigrationEntryOut(
             entry_id=connection.id,
             connection=out,
             legacy_name=secret.name if secret else connection.name,
             legacy_kind=(secret.kind if secret else "generic"),
-            legacy_grant_refs=[],
+            legacy_grant_refs=sorted(refs),
         )
 
 

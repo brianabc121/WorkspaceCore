@@ -27,6 +27,7 @@ from app.domain.agent_ca import ensure_ca, issue_certificate
 from app.domain.agents import agent_secret_context, normalize_fingerprint
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
+from app.domain.model_connections import blocked_secret_ids
 from app.domain.ratelimit import FailureLimiter
 from app.domain.runner import ONLINE_SECONDS, Runner
 from app.models import (
@@ -115,10 +116,14 @@ async def resolve_env_secrets(
     *,
     record: bool,
     client_ip: str | None = None,
+    for_redaction: bool = False,
 ) -> dict[str, str]:
-    """环境要注入的密钥：按创建它的实例在密钥库里的授权解密；授权已撤销的不再给。
+    """环境要注入的密钥：按创建它的实例在密钥库里的授权解密；授权已撤销的不再给；
+    映射的连接被管理员停用的也不再给（与旧取密钥接口同一个检查，见 blocked_secret_ids，T-0203）。
 
     record=True 时每个密钥写一条取用记录（与实例自己取密钥用同一张表，来源 IP 是运行服务器）。
+    for_redaction=True 只用来给输出脱敏（值不离开工作台）：停用的连接也照样解密，
+    以免停用前已注入容器的值出现在输出里而认不出来。
     """
     names = [str(n) for n in env.spec.get("secrets") or []]
     if not names or env.owner_instance_id is None:
@@ -139,6 +144,11 @@ async def resolve_env_secrets(
         )
     ).all()
     found = {ref_id: (secret, ref) for ref_id, secret, ref in rows}
+    blocked = (
+        set()
+        if for_redaction
+        else await blocked_secret_ids(db, (secret.id for secret, _ in found.values()))
+    )
     try:
         box = CredentialBox.from_settings(settings) if found else None
     except CredentialError:
@@ -146,6 +156,8 @@ async def resolve_env_secrets(
     values: dict[str, str] = {}
     for name in names:
         secret, ref = found.get(name, (None, None))
+        if secret is not None and secret.id in blocked:
+            secret, ref = None, None
         value: str | None = None
         if secret is not None and ref and box is not None:
             try:

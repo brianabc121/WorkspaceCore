@@ -1336,7 +1336,9 @@ class Runner:
         """这个环境注入的密钥原文（只用来脱敏输出）。"""
         from app.domain.runner_hosts import resolve_env_secrets  # 避免循环导入
 
-        values = await resolve_env_secrets(self.db, self.settings, env, record=False)
+        values = await resolve_env_secrets(
+            self.db, self.settings, env, record=False, for_redaction=True
+        )
         return list(values.values())
 
     async def apply_result(

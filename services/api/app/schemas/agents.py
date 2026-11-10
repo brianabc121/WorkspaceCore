@@ -25,7 +25,7 @@ from pydantic import (
 from app.schemas.common import Page
 from app.schemas.host import AgentLoad, HostCurrent, HostPoint
 from app.schemas.mail import AgentMailOut
-from app.schemas.model_connections import NewInstanceModelChoice
+from app.schemas.model_connections import MigrationState, NewInstanceModelChoice
 
 NetworkMode = Literal["intranet", "public"]
 InstanceStatus = Literal["pending", "online", "offline", "disabled"]
@@ -276,7 +276,13 @@ class SecretGrantRef(BaseModel):
 
 
 class AgentSecretOut(BaseModel):
-    """从不包含明文。"""
+    """从不包含明文。
+
+    导入中转站管理之后（T-0203），model_connection_id / migration_state 指向映射的连接：
+    needs_configuration / managed 由中转站管理托管，这里的改名、轮换、删除与新增授权返回
+    409 MANAGED_BY_MODEL_CONNECTION；needs_classification / non_model 仍可在这里修改，
+    但同样受连接的版本与停用约束（连接停用后实例取用一律 NOT_FOUND）。
+    新建连接自己的内部凭据不出现在密钥库里。"""
 
     id: UUID
     name: str
@@ -288,6 +294,15 @@ class AgentSecretOut(BaseModel):
     version: int = Field(description="这条记录的乐观并发版本号（与 value_version 无关）")
     created_at: datetime
     updated_at: datetime
+    model_connection_id: UUID | None = Field(
+        default=None,
+        description="映射到的中转站管理连接 ID（即迁移项 entry_id）；还没导入时为 null",
+    )
+    migration_state: MigrationState | None = Field(
+        default=None,
+        description="映射的迁移状态：needs_configuration / managed 由中转站管理托管（这里只读）；"
+        "needs_classification / non_model 可在这里修改；还没导入时为 null",
+    )
 
 
 class AgentSecretPage(Page[AgentSecretOut]):

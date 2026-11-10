@@ -732,7 +732,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 设置实例可以取用的密钥（owner，整体替换） */
+        /**
+         * 设置实例可以取用的密钥（owner，整体替换）
+         * @description 被中转站管理托管的密钥只能原样保留已有的授权，新增（含换 ref_id）返回 409 MANAGED_BY_MODEL_CONNECTION；对已导入密钥的授权增删同步到连接授权（只作追溯，实例的主模型绑定在这个连接上时保留）。
+         */
         put: operations["replace_agent_secret_grants"];
         post?: never;
         delete?: never;
@@ -951,7 +954,7 @@ export interface paths {
         };
         /**
          * 密钥列表（owner，不含明文）
-         * @description 按名称排序。q 按名称或说明字面包含搜索（不区分大小写，% 与 _ 按普通字符），kind 按类型筛选；条件在本工作空间内、分页之前生效，total 是同样条件下的全量匹配数。游标绑定工作空间与条件：换了 q / kind 要从第一页开始，用旧游标请求返回 422。
+         * @description 按名称排序。q 按名称或说明字面包含搜索（不区分大小写，% 与 _ 按普通字符），kind 按类型筛选；条件在本工作空间内、分页之前生效，total 是同样条件下的全量匹配数。游标绑定工作空间与条件：换了 q / kind 要从第一页开始，用旧游标请求返回 422。新建连接自己的内部凭据不在这里（在中转站管理里）；已导入的密钥带 model_connection_id 与 migration_state。
          */
         get: operations["list_agent_secrets"];
         put?: never;
@@ -989,19 +992,22 @@ export interface paths {
         };
         /**
          * 密钥详情（owner，只有元数据）
-         * @description 名称、类型、说明、当前值版本、最近轮换时间与授权（实例与 ref_id）；从不返回值、密文引用或历史值。不在本工作空间或不存在时 404。
+         * @description 名称、类型、说明、当前值版本、最近轮换时间与授权（实例与 ref_id）；从不返回值、密文引用或历史值。不在本工作空间、不存在或是新建连接自己的内部凭据时 404。
          */
         get: operations["get_agent_secret"];
         put?: never;
         post?: never;
         /**
          * 删除密钥（owner）
-         * @description 同时删除对它的授权；之后实例取用返回 NOT_FOUND。
+         * @description 同时删除对它的授权；之后实例取用返回 NOT_FOUND。被中转站管理托管的密钥（导入后 needs_configuration / managed，或新建连接自己的凭据）返回 409 MANAGED_BY_MODEL_CONNECTION，请到中转站管理里修改。兼容凭据连同映射一起删除；映射还有主模型绑定，或在中转站管理里单独授权的实例时 409 CONNECTION_IN_USE。
          */
         delete: operations["delete_agent_secret"];
         options?: never;
         head?: never;
-        /** 修改密钥的名称与说明（owner） */
+        /**
+         * 修改密钥的名称与说明（owner）
+         * @description 被中转站管理托管的密钥（导入后 needs_configuration / managed，或新建连接自己的凭据）返回 409 MANAGED_BY_MODEL_CONNECTION，请到中转站管理里修改。兼容凭据（needs_classification / non_model）照常修改，映射连接的 version 一起加 1。
+         */
         patch: operations["update_agent_secret"];
         trace?: never;
     };
@@ -1016,7 +1022,7 @@ export interface paths {
         put?: never;
         /**
          * 轮换密钥的值（owner）
-         * @description 新值立即生效，旧值不再下发；实例最迟在下一次 secrets reload（每 10 分钟）时换上。
+         * @description 新值立即生效，旧值不再下发；实例最迟在下一次 secrets reload（每 10 分钟）时换上。被中转站管理托管的密钥（导入后 needs_configuration / managed，或新建连接自己的凭据）返回 409 MANAGED_BY_MODEL_CONNECTION，请到中转站管理里修改。兼容凭据轮换后映射连接的 config_revision 与 version 加 1、旧检测结果作废；连接停用时轮换照样可以，但实例取用仍被拒绝。
          */
         post: operations["rotate_agent_secret"];
         delete?: never;
@@ -6069,6 +6075,12 @@ export interface components {
         /**
          * AgentSecretOut
          * @description 从不包含明文。
+         *
+         *     导入中转站管理之后（T-0203），model_connection_id / migration_state 指向映射的连接：
+         *     needs_configuration / managed 由中转站管理托管，这里的改名、轮换、删除与新增授权返回
+         *     409 MANAGED_BY_MODEL_CONNECTION；needs_classification / non_model 仍可在这里修改，
+         *     但同样受连接的版本与停用约束（连接停用后实例取用一律 NOT_FOUND）。
+         *     新建连接自己的内部凭据不出现在密钥库里。
          */
         AgentSecretOut: {
             /**
@@ -6095,6 +6107,16 @@ export interface components {
              * Format: date-time
              */
             last_rotated_at: string;
+            /**
+             * Migration State
+             * @description 映射的迁移状态：needs_configuration / managed 由中转站管理托管（这里只读）；needs_classification / non_model 可在这里修改；还没导入时为 null
+             */
+            migration_state?: ("native" | "needs_configuration" | "needs_classification" | "managed" | "non_model") | null;
+            /**
+             * Model Connection Id
+             * @description 映射到的中转站管理连接 ID（即迁移项 entry_id）；还没导入时为 null
+             */
+            model_connection_id?: string | null;
             /** Name */
             name: string;
             /**
