@@ -2002,6 +2002,12 @@ def scenario_27(c: Ctx) -> None:
     calls_a = turn(c.a, "模型连接甲二")
     c.check("场景 27：甲应用后改用连接 B 的模型和 Key，不再用 A",
             applied == "applied" and used(calls_a) == {(f"Bearer {kb}", "mc-model-b")}, f"{applied} {sorted(used(calls_a))}")
+    merged = json.loads(config_text(c.a))
+    key_a = "mwc" + uuid.UUID(conn_a["id"]).hex[:20]
+    c.check("场景 27：配置是局部合并——旧的受管 provider 删掉，验收的 fake provider、MCP、IM 渠道与工具限制（exec 仍 deny）都保留",
+            key_a not in merged["models"]["providers"] and "fake" in merged["models"]["providers"]
+            and merged["tools"]["exec"]["security"] == "deny" and "myworkspace" in merged["mcp"]["servers"]
+            and "openim" in merged["channels"], json.dumps(sorted(merged["models"]["providers"])))
     calls_b = turn(c.b, "模型连接乙二")
     c.check("场景 27：同一台服务器上的乙没有重启、配置不变，仍用连接 A",
             config_text(c.b) == before_b and used(calls_b) == {(f"Bearer {ka}", "mc-model-a2")}, json.dumps(sorted(used(calls_b))))
