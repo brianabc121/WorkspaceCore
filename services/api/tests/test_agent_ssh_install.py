@@ -636,10 +636,10 @@ async def test_initialize_then_deploy_with_the_saved_password(owner: Owner, tmp_
         if path.is_file():
             assert PASSWORD.encode() not in path.read_bytes(), path
 
-    # crontab：六行都带标记（每 10 分钟取密钥、每分钟上报用量与服务器状态、
+    # crontab：七行都带标记（每 10 分钟取密钥、每分钟上报用量与服务器状态、应用主模型、
     # 每分钟领取唤醒（T-0121）与终止令（T-0126）、每周一重启）
     cron = (host.state / "crontab").read_text().splitlines()
-    assert len(cron) == 6
+    assert len(cron) == 7
     assert all(line.endswith(f"# mw-openclaw:{host.directory.name}") for line in cron)
     assert "secrets reload --json" in cron[0]
     assert cron[1].startswith("* * * * * ")
@@ -649,7 +649,10 @@ async def test_initialize_then_deploy_with_the_saved_password(owner: Owner, tmp_
     assert cron[3].startswith("* * * * * ")
     assert "exec -T openclaw node /opt/myworkspace/bin/wakeup.mjs" in cron[3]
     assert "exec -T openclaw node /opt/myworkspace/bin/stop-runs.mjs" in cron[4]
-    assert "docker compose restart openclaw" in cron[5]
+    # 每分钟应用工作台设置的主模型（T-0205）
+    assert cron[5].startswith("* * * * * ")
+    assert "exec -T openclaw node /opt/myworkspace/bin/model-config.mjs" in cron[5]
+    assert "docker compose restart openclaw" in cron[6]
 
     # 密码不在任何表里（任务、目标服务器、审计）；任务日志里也没有令牌
     assert await _stored_anywhere(owner, PASSWORD) == 0
@@ -713,7 +716,7 @@ async def test_redeploy_reuses_the_instance_directory(owner: Owner, tmp_path: Pa
     assert len(handover) == 2
     assert handover[0] < reclaim[0] < handover[1]
     cron = (host.state / "crontab").read_text().splitlines()
-    assert len(cron) == 6, "重装时替换这个实例的行，不重复"
+    assert len(cron) == 7, "重装时替换这个实例的行，不重复"
     # 每晚复盘的定时任务：同名的已有就更新，不重复建（T-0100）
     reflection = next(s for s in second["job"]["steps"] if s["key"] == "reflection")
     assert reflection["status"] == "done" and "已更新" in (reflection["detail"] or "")
@@ -1206,8 +1209,8 @@ async def test_uninstall_with_the_saved_password_then_remove(owner: Owner, tmp_p
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
         state = await _install_ok(owner, host, instance_id, version)
-        # 原有的一行 + 带标记的六行
-        assert len((host.state / "crontab").read_text().splitlines()) == 7
+        # 原有的一行 + 带标记的七行
+        assert len((host.state / "crontab").read_text().splitlines()) == 8
         logins = len(host.logins)
 
         # 卸载，保留目录
@@ -1405,12 +1408,12 @@ def test_cron_only_touches_own_lines(tmp_path: Path) -> None:
     sh(prov.schedule_command(mine, INSTANCE))
     sh(prov.schedule_command(mine, INSTANCE))  # 重新部署：不重复
     lines = (state / "crontab").read_text().splitlines()
-    assert lines[0] == user_line and len(lines) == 13
-    assert sum(line.endswith("# mw-openclaw:d06d9d481234") for line in lines) == 6
-    assert sum(line.endswith("# mw-openclaw:0f0f0f0faaaa") for line in lines) == 6
+    assert lines[0] == user_line and len(lines) == 15
+    assert sum(line.endswith("# mw-openclaw:d06d9d481234") for line in lines) == 7
+    assert sum(line.endswith("# mw-openclaw:0f0f0f0faaaa") for line in lines) == 7
     sh(prov.unschedule_command(INSTANCE))
     lines = (state / "crontab").read_text().splitlines()
-    assert lines[0] == user_line and len(lines) == 7
+    assert lines[0] == user_line and len(lines) == 8
     assert all("d06d9d481234" not in line for line in lines[1:])
 
 

@@ -392,6 +392,9 @@ class LegacyModelInfo(BaseModel):
 
 class ModelBindingView(BaseModel):
     binding: AgentModelBindingOut | None
+    apply_state: ApplyState | None = Field(
+        description="有绑定时同 binding.apply_state；没有绑定、仍按旧配置运行时为 legacy_active"
+    )
     legacy: LegacyModelInfo | None = Field(
         description="apply_state 为 legacy_active 时的旧配置信息；有原生绑定时为 null"
     )
@@ -466,23 +469,33 @@ class NewInstanceModelChoice(_Strict):
 
 
 class AgentModelConfigOut(BaseModel):
-    """实例自己的非敏感模型配置。不含 Key。"""
+    """实例自己的非敏感模型配置（GET /agent-api/v1/model-config）。不含 Key。
 
+    state=active：按 provider_key / base_url / model_id 等字段写入受管 provider 与主模型；
+    state=revoked：已解除绑定，移除受管 provider（连接相关字段为 null）。
+    apply_key 变了就要重新应用（目标修订号 + 应用任务的尝试次数）。"""
+
+    state: Literal["active", "revoked"]
     binding_version: int
     desired_revision: int
-    connection_id: UUID
-    provider_key: str = Field(description="OpenClaw 配置里 models.providers 的键（由连接 ID 生成）")
-    api: str = Field(description="OpenClaw 的 provider api 值（例如 openai-completions）")
-    protocol: Protocol
-    base_url: str
-    model_id: str
-    model_name: str
-    primary: str = Field(
+    apply_key: str = Field(description="<desired_revision>.<attempt>；与上次应用的不同就重新应用")
+    job_state: JobState | None = Field(description="当前目标的应用任务状态")
+    managed_prefix: str = Field(description="受管 provider 键的前缀（只改这些 provider）")
+    connection_id: UUID | None
+    provider_key: str | None = Field(
+        description="OpenClaw 配置里 models.providers 的键（由连接 ID 生成）"
+    )
+    api: str | None = Field(description="OpenClaw 的 provider api 值（例如 openai-completions）")
+    protocol: Protocol | None
+    base_url: str | None
+    model_id: str | None
+    model_name: str | None
+    primary: str | None = Field(
         description="agents.defaults.model.primary 的值：<provider_key>/<model_id>"
     )
-    secret_ref_id: str = Field(description="apiKey 的 exec SecretRef id（由连接 ID 生成）")
-    config_revision: int
-    fingerprint: str = Field(description="受管配置片段的摘要；实例据此判断要不要重新应用")
+    secret_ref_id: str | None = Field(description="apiKey 的 exec SecretRef id（由连接 ID 生成）")
+    config_revision: int | None
+    fingerprint: str = Field(description="受管配置片段的摘要")
 
 
 class ModelConfigApplied(_Strict):
@@ -493,6 +506,14 @@ class ModelConfigApplied(_Strict):
         Field(default=None, description="失败类别（固定的小写代码），不含远端原始输出")
     )
     observed_at: AwareDatetime | None = None
+
+
+class ModelConfigAppliedOut(BaseModel):
+    """回报的结果：只回状态，不回连接或内部字段。"""
+
+    apply_state: ApplyState
+    desired_revision: int
+    applied_revision: int | None
 
 
 class ModelCredentialResolveRequest(_Strict):

@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain import idempotency
+from app.domain.agent_model_bindings import AgentModelBindingService
 from app.domain.agent_servers import AgentServerService
 from app.domain.agent_ssh import _version_conflict
 from app.domain.agents import AgentService
@@ -162,6 +163,10 @@ class AgentDeploymentService:
         )
         await self.agents.apply_limits(
             access, instance, body.mem_limit_mb, body.cpus, client_ip=client_ip
+        )
+        # 主模型：授权连接给新实例并建绑定（同一事务；前提不满足时整体回滚、收据记为失败）
+        await AgentModelBindingService(self.db, self.settings).bind_new_instance(
+            access, instance, body.model
         )
         job, revision = await servers.accept_deployment(
             access, instance, server, client_ip=client_ip

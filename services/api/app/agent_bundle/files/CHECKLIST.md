@@ -25,7 +25,10 @@
       不是 0.3.3 的原文件就不改。装好后再 `docker compose up -d`。升级插件前重新做 OC-0 ADR F9 的审查，并更新补丁。
 - [ ] 已经部署过的实例（T-0120 之前）：换上新的接入包后同样运行上面的打补丁命令，再 `docker compose up -d`
       （新凭证会让容器重建）。实例页不再提示“旧接入包”、上报的插件版本是 `0.3.3+myworkspace.1` 就对了。
-- [ ] `state/openclaw.json` 里的模型服务商换成实际使用的那一家；密钥 ID 与工作台密钥库里给这个实例的授权一致。
+- [ ] 主模型在工作台设置，不手改 `state/openclaw.json`（T-0205）：先在“中转站管理”里建连接（协议、地址、Key、模型）并授权给这个实例，
+      再在实例页选连接与模型。接入包里已经写好受管的 provider（键 `mwc…`，Key 是 exec SecretRef `mc_<连接 ID>`，
+      取密钥程序在需要时向工作台取，配置里没有明文）；之后的切换、Key 更换由下面的 `model-config.mjs` 定时任务自动应用。
+      旧实例（接入包里还是 `openai` 段、引用 `openai_api_key`）继续按旧授权运行，在实例页设置主模型后自动换成受管 provider。
       `${VAR}` 由 OpenClaw 从进程环境（`myworkspace.env`）读取，不要把明文写进这个文件；也不要加 `_comment` 之类的说明键（OpenClaw 会判为无效配置）。
 - [ ] 冷启动要 2 ~ 4 分钟：启动时 doctor 会联网检查插件更新，没有外网时要等超时（OC-0 ADR F5）。
 
@@ -81,6 +84,15 @@
       `sessions.list` / `sessions.abort` 中止正在运行的会话，再报回工作台。没有终止令时不调网关。
       没配这一行时只有“软停止”生效（叫停后 5 分钟内它调用工作台工具会被拒绝），终止令 10 分钟后记为过期：
       `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/stop-runs.mjs`
+- [ ] 每分钟应用主模型（T-0205）：脚本取工作台给这个实例设置的连接与模型（不含 Key），目标变了（切换、解除、Key 更换）才动手：
+      只改受管的 provider（键以 `mwc` 开头）与 `agents.defaults.model.primary`，用 OpenClaw 自己的
+      `config patch --stdin --dry-run --allow-exec` 先校验（schema 与 Key 能否取到），再 `config patch --stdin` 一次写入，
+      网关热加载（不用重启），然后 `secrets reload`，最后把结果报回工作台。MCP、IM 渠道、工具限制和你自己加的 provider 都不动。
+      没配这一行时，实例页的主模型一直显示“待应用 / 未知”（不会显示已应用）：
+      `* * * * * cd <本目录> && docker compose exec -T openclaw node /opt/myworkspace/bin/model-config.mjs`
+      手动检查：`docker compose exec -T openclaw node /opt/myworkspace/bin/model-config.mjs` 输出 `applied`、`unchanged`
+      或 `no_model_binding` 是正常的；`failed:<原因>` 时按原因处理后在实例页点“重新应用”。
+      当前生效的主模型：`docker compose exec -T openclaw node openclaw.mjs config get agents.defaults.model --json`。
 - [ ] 每晚复盘（知识库，T-0100）：OpenClaw 启动后在本目录运行一次 `sh setup-reflection.sh`。
       它用 `openclaw automations add` 建 OpenClaw 自己的定时任务（默认每天 22:00，提示词在 `reflection-prompt.md`）；
       重复运行只更新同一个任务。SSH 自动部署会自动运行这一步。

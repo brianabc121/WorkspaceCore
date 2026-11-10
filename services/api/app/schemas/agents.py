@@ -25,6 +25,7 @@ from pydantic import (
 from app.schemas.common import Page
 from app.schemas.host import AgentLoad, HostCurrent, HostPoint
 from app.schemas.mail import AgentMailOut
+from app.schemas.model_connections import NewInstanceModelChoice
 
 NetworkMode = Literal["intranet", "public"]
 InstanceStatus = Literal["pending", "online", "offline", "disabled"]
@@ -1069,6 +1070,10 @@ class AgentDeploymentCreateIn(_Strict):
     )
     mem_limit_mb: Annotated[int, Field(ge=256, le=1 << 20)] | None = Field(
         default=None, description="内存上限（MiB）；null 不限制（默认）"
+    )
+    model: NewInstanceModelChoice = Field(
+        description="主模型：中转站管理里启用、配置完整的连接与其中的模型。"
+        "选择即授权给新实例，与实例、主模型绑定在同一个事务里建立（T-0204）"
     )
 
 

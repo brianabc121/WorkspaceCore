@@ -1096,6 +1096,10 @@ class ModelConnectionService:
         connection.last_check_id = None
         connection.version += 1
         await self.refresh_state(connection, credential_ok=True)
+        # 绑定到它的实例马上重新应用（实例执行 secrets reload 换上新 Key，不等定时任务）
+        from app.domain.agent_model_bindings import advance_bindings
+
+        await advance_bindings(self.db, connection.id)
         await self.audit.record(
             "model_connection.key_rotated",
             workspace_ids=[access.workspace.id],

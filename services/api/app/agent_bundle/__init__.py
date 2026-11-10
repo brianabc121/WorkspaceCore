@@ -17,6 +17,7 @@ zip 里的文件：
 | `bin/channel-patch.mjs` | 755 | 给插件打补丁：自动回复被拒收时把原因放回会话（T-0120） |
 | `bin/wakeup.mjs` | 755 | 每分钟领取到期的唤醒，在容器里跑一轮（T-0121） |
 | `bin/stop-runs.mjs` | 755 | 每分钟领取终止令，中止正在运行的会话（T-0126） |
+| `bin/model-config.mjs` | 755 | 每分钟取工作台设置的主模型，`config patch` 应用后回报（T-0205） |
 | `compose.yaml` | 644 | OpenClaw 服务器上的 Compose（锁定镜像，不开放端口） |
 | `CHECKLIST.md`、`README.md` | 644 | 部署检查清单与说明 |
 | `setup-reflection.sh`、`reflection-prompt.md` | 755 / 644 | 每晚复盘的定时任务（T-0100） |
@@ -62,6 +63,7 @@ BIN_SCRIPTS = (
     "channel-patch.mjs",
     "wakeup.mjs",
     "stop-runs.mjs",
+    "model-config.mjs",
 )
 
 
@@ -95,6 +97,24 @@ def host_salt(workspace_id: str) -> str:
 
 
 @dataclass(frozen=True)
+class BundleModel:
+    """受管的主模型配置（T-0205）：models.providers.<provider_key> 与
+    agents.defaults.model.primary。
+
+    apiKey 是 exec SecretRef（取密钥程序把 mc_ 开头的 id 发给
+    /agent-api/v1/model-credentials/resolve），配置里不出现 Key。
+    provider_key 只用小写字母和数字（OpenClaw 运行时把 provider id 转成小写，
+    含 / 的 id 能通过校验但运行时找不到，核验记录第 3 节）。"""
+
+    provider_key: str
+    api: str
+    base_url: str
+    model_id: str
+    model_name: str
+    secret_ref_id: str
+
+
+@dataclass(frozen=True)
 class BundleInput:
     instance_id: str
     instance_name: str
@@ -123,18 +143,44 @@ class BundleInput:
     # OpenClaw 容器的资源上限（D2：默认不设）
     mem_limit_mb: int | None = None
     cpus: float | None = None
+    # 主模型：有原生绑定时写入受管 provider；legacy_model 为真时保留模板里的旧 openai 段
+    # （实例仍按旧授权 openai_api_key 运行）；都没有时不写模型段
+    model: BundleModel | None = None
+    legacy_model: bool = False
 
 
 def _read(name: str) -> str:
     return (_FILES / name).read_text(encoding="utf-8")
 
 
-def _openclaw_json(whitelist: list[str]) -> str:
+def model_provider(model: BundleModel) -> dict[str, Any]:
+    """受管 provider 的配置段（与 bin/model-config.mjs 写入的一致）。
+
+    custom provider 必须有 baseUrl 与 models；models 的每项必须有 id 与 name（核验记录第 3 节）。"""
+    return {
+        "baseUrl": model.base_url,
+        "api": model.api,
+        "apiKey": {"source": "exec", "provider": "myworkspace", "id": model.secret_ref_id},
+        "models": [{"id": model.model_id, "name": model.model_name}],
+    }
+
+
+def _openclaw_json(
+    whitelist: list[str], model: BundleModel | None = None, *, legacy_model: bool = False
+) -> str:
     # 不能加说明用的键（例如 _comment）：OpenClaw 会把整个配置判为无效
     # （T-0059 用真实 OpenClaw 验收发现）。说明写在 CHECKLIST.md / README.md 里
     config: dict[str, Any] = json.loads(_read("openclaw.json.template"))
     account = config["channels"]["openim"]["accounts"]["default"]
     account["inboundWhitelist"] = whitelist
+    if model is not None:
+        config["models"] = {"providers": {model.provider_key: model_provider(model)}}
+        config.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
+            "primary": f"{model.provider_key}/{model.model_id}"
+        }
+    elif not legacy_model:
+        # 新实例不再默认使用固定的 openai_api_key（T-0205）：在实例页设置主模型后自动应用
+        config.pop("models", None)
     return json.dumps(config, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -202,7 +248,8 @@ def _readme(data: BundleInput, generated_at: datetime) -> str:
         f" `~/myworkspace-openclaw/{short_id(data.instance_id)}/`"
         "（一台服务器可以放多个实例，每个实例一个目录），按 `CHECKLIST.md` 设置属主与权限；",
         "2. 按 `CHECKLIST.md` 安装 `openclaw-channel` 插件并打上工作台的补丁"
-        "（`bin/channel-patch.mjs`），修改 `state/openclaw.json` 里的模型服务商；",
+        "（`bin/channel-patch.mjs`）；主模型在工作台的实例页设置（中转站管理），"
+        "`bin/model-config.mjs` 每分钟自动应用，不用手改 `state/openclaw.json`；",
     ]
     if public:
         steps.append(
@@ -346,7 +393,13 @@ def build(data: BundleInput, *, now: datetime | None = None) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as zf:
         _add(zf, "myworkspace.env", _env(data), 0o600, now)
-        _add(zf, "state/openclaw.json", _openclaw_json(data.whitelist), 0o600, now)
+        _add(
+            zf,
+            "state/openclaw.json",
+            _openclaw_json(data.whitelist, data.model, legacy_model=data.legacy_model),
+            0o600,
+            now,
+        )
         for script in BIN_SCRIPTS:
             _add(zf, f"bin/{script}", _read(f"bin/{script}"), 0o755, now)
         _add(zf, "compose.yaml", _compose(data), 0o644, now)

@@ -7,7 +7,7 @@ test_agent_ssh_install.py 的进程内假服务器（先真实地初始化）。
 import asyncio
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -32,8 +32,37 @@ from tests.test_agent_ssh_install import PASSWORD, SETTINGS, FakeHost, Owner, ss
 
 pytestmark = pytest.mark.integration
 
-owner = base.owner
 fast_online = base.fast_online
+# 新部署必须选主模型（T-0204）：每个测试的 owner 先建一条配置完整的中转连接
+_CHOICE: dict[str, str] = {}
+
+
+async def _model_choice(owner: Owner) -> dict[str, str]:
+    response = await owner.client.post(
+        "/api/v1/model-connections",
+        json={
+            "name": "测试中转",
+            "connection_type": "relay",
+            "protocol": "openai_compatible",
+            "base_url": "https://gateway.example.com/v1",
+            "api_key": "sk-deploy-test-0b7e",
+            "models": [{"model_id": "fake-model"}],
+        },
+        headers=owner.headers(),
+    )
+    assert response.status_code == 201, response.text
+    return {"connection_id": response.json()["id"], "model_id": "fake-model"}
+
+
+@pytest.fixture
+async def owner(make_client: ClientFactory, migrated_database_url: str) -> AsyncIterator[Owner]:
+    async with make_client(**SETTINGS) as client:
+        setup = await client.post("/api/v1/setup", json=OWNER)
+        assert setup.status_code == 201
+        current = Owner(client, setup.json()["workspaces"][0]["id"], migrated_database_url)
+        _CHOICE.clear()
+        _CHOICE.update(await _model_choice(current))
+        yield current
 
 
 async def _call(owner: Owner, method: str, path: str, **kwargs: Any) -> httpx.Response:
@@ -70,6 +99,7 @@ def _body(server: dict[str, Any], request_id: str | None = None, **extra: Any) -
         "server_id": server["id"],
         "server_version": server["version"],
         "name": "甲",
+        "model": dict(_CHOICE),
         **extra,
     }
 
@@ -193,6 +223,15 @@ async def test_one_click_creates_and_deploys_with_safe_defaults(
     assert await _count(owner, "agent_instances") == 1
     assert await _count(owner, "agent_ssh_jobs", "kind = 'install'") == 1
     assert await _count(owner, "agent_deployments") == 1
+    # 主模型：选择即授权给新实例，绑定与应用任务同一事务建立；重放不重复授权（T-0204）
+    assert await _count(owner, "model_connection_grants") == 1
+    assert await _count(owner, "model_apply_jobs") == 1
+    binding = (
+        await _call(owner, "GET", f"/api/v1/agents/instances/{instance['id']}/model-binding")
+    ).json()["binding"]
+    assert binding["connection_id"] == _CHOICE["connection_id"]
+    assert binding["model_id"] == "fake-model" and binding["applied_revision"] is None
+    assert binding["apply_state"] in ("pending", "applying")
     # 幂等记录只存 ID 与状态（不存请求原文、名称、密码）
     record = await run_sql(
         owner.database_url,
@@ -291,6 +330,21 @@ async def test_preconditions_create_nothing(
 
         await refused(_body({**server, "version": server["version"] + 1}), 409, "VERSION_CONFLICT")
         await refused(_body({**server, "id": str(uuid.uuid4())}), 404, "NOT_FOUND")
+        # 主模型：连接不存在、模型不在连接里、连接停用（T-0204）；都在建实例之前回滚
+        await refused(
+            _body(server, model={"connection_id": str(uuid.uuid4()), "model_id": "fake-model"}),
+            404,
+            "NOT_FOUND",
+        )
+        await refused(
+            _body(server, model={**_CHOICE, "model_id": "not-listed"}), 422, "MODEL_NOT_ALLOWED"
+        )
+        await run_sql(owner.database_url, "UPDATE workspace.model_connections SET enabled = false")
+        await refused(_body(server), 409, "MODEL_CONNECTION_DISABLED")
+        await run_sql(owner.database_url, "UPDATE workspace.model_connections SET enabled = true")
+        no_model = _body(server)
+        no_model.pop("model")
+        assert (await _deploy(owner, no_model)).status_code == 422
         # 没保存密码 / 没初始化 / 同机有任务
         target = f"server_id = '{server_id}'"
         await run_sql(
@@ -399,6 +453,8 @@ async def test_preconditions_create_nothing(
     assert await _count(owner, "agent_deployments") == 0
     assert await _count(owner, "agent_ssh_jobs", "kind = 'install'") == 0
     assert await _count(owner, "audit_logs", "action = 'agents.instance.created'") == 0
+    assert await _count(owner, "model_connection_grants") == 0
+    assert await _count(owner, "agent_model_bindings") == 0
 
 
 async def test_only_the_owner_in_its_own_workspace(

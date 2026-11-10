@@ -2,13 +2,13 @@
 id: T-0204
 title: 中转站管理（MC-4）：智能体主模型绑定与实例接口
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: b6-model-connections
 paths: services/api/app/domain/agent_model_bindings.py,services/api/app/api/v1/agent_model_bindings.py,services/api/app/api/agent_api.py,services/api/tests
 depends_on: T-0201, T-0202
 created: 2026-11-09
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # T-0204 中转站管理（MC-4）：智能体主模型绑定与实例接口
@@ -28,3 +28,4 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 23:42 UTC · claude · 创建任务（owner: claude）
+- 2026-11-10 00:09 UTC · claude · 开始任务

@@ -28,6 +28,7 @@ from app.api.deps import client_ip, get_agent_service, get_db, get_redis
 from app.api.media_http import media_response
 from app.core.errors import ApiError
 from app.domain import agent_outbox, agent_stops, agent_wakeups, im_callbacks
+from app.domain.agent_model_bindings import AgentModelBindingService
 from app.domain.agents import AgentPrincipal, AgentService
 from app.domain.host_metrics import HostService
 from app.domain.im import openim_client
@@ -56,6 +57,13 @@ from app.schemas.agents import (
 )
 from app.schemas.common import error_responses
 from app.schemas.host import HostReport, HostReportResult
+from app.schemas.model_connections import (
+    AgentModelConfigOut,
+    ModelConfigApplied,
+    ModelConfigAppliedOut,
+    ModelCredentialResolveRequest,
+    ModelCredentialResolveResponse,
+)
 from app.schemas.openim_callbacks import (
     BEFORE_COMMANDS,
     MAX_CALLBACK_BYTES,
@@ -131,6 +139,71 @@ async def resolve_agent_secrets(
 ) -> SecretResolveResponse:
     response.headers["Cache-Control"] = "no-store"
     return await service.resolve_secrets(
+        principal, body.ids, client_ip=client_ip(request, request.app.state.settings)
+    )
+
+
+def _bindings(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> AgentModelBindingService:
+    return AgentModelBindingService(db, request.app.state.settings, redis)
+
+
+Bindings = Annotated[AgentModelBindingService, Depends(_bindings)]
+
+
+@router.get(
+    "/model-config",
+    summary="取自己的主模型配置（实例的 model-config.mjs，每分钟一次）",
+    description="非敏感配置：OpenClaw provider 键、api、base URL、模型 ID、"
+    "SecretRef id 与 apply_key；不含 Key。"
+    "state=revoked 表示已解除绑定、要移除受管 provider。没有绑定或目标连接不可用时 "
+    "409 MODEL_CONFIGURATION_INCOMPLETE"
+    "（details.reason 为 no_binding / connection_unavailable），"
+    "实例保持现有配置。当前目标的任务在排队时，取配置即标为执行中。每个实例每分钟最多 6 次。",
+    responses=error_responses(401, 409, 429),
+)
+async def get_agent_model_config(
+    response: Response, principal: Principal, service: Bindings
+) -> AgentModelConfigOut:
+    response.headers["Cache-Control"] = "no-store"
+    return await service.model_config(principal)
+
+
+@router.post(
+    "/model-config/applied",
+    summary="回报主模型配置的应用结果（实例的 model-config.mjs）",
+    description="只认当前目标的 desired_revision："
+    "迟到的旧回报 409 MODEL_BINDING_CONFLICT，不改状态。"
+    "result 为 applied / failed / manual_required；reason 是固定的小写代码，不含远端原始输出。"
+    "每个实例每分钟最多 6 次。",
+    responses=error_responses(401, 409, 422, 429),
+)
+async def report_agent_model_config(
+    principal: Principal, service: Bindings, body: ModelConfigApplied
+) -> ModelConfigAppliedOut:
+    return await service.report_applied(principal, body)
+
+
+@router.post(
+    "/model-credentials/resolve",
+    summary="取模型连接的 Key（实例的取密钥程序，ids 为 mc_<连接 ID>）",
+    description="只给当前目标或尚未退休的已应用连接，且连接启用、仍授权给这个实例、绑定没有解除；"
+    "其他一律 errors[id].code = NOT_FOUND。每次取用都写记录；响应带 Cache-Control: no-store。"
+    "每个实例每分钟最多 60 次。",
+    responses=_errors,
+)
+async def resolve_agent_model_credentials(
+    request: Request,
+    response: Response,
+    principal: Principal,
+    service: Bindings,
+    body: ModelCredentialResolveRequest,
+) -> ModelCredentialResolveResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return await service.resolve_credentials(
         principal, body.ids, client_ip=client_ip(request, request.app.state.settings)
     )
 

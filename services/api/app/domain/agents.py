@@ -1023,6 +1023,30 @@ class AgentService:
             tunnel_target = f"{host}:{url.port or 443}"
             base = f"http://{host}:{self.settings.agent_tunnel_port}"
         whitelist = await self._whitelist(instance.workspace_id)
+        # 主模型（T-0205）：有原生绑定时写入受管 provider 与主模型；没有绑定但有旧授权时保留
+        # 旧的 openai 段（兼容）；都没有时不写模型段（在实例页设置主模型后由 model-config.mjs 应用）
+        from app.domain.agent_model_bindings import AgentModelBindingService
+
+        bindings = AgentModelBindingService(self.db, self.settings)
+        managed = await bindings.bundle_model(instance)
+        model = (
+            agent_bundle.BundleModel(
+                provider_key=managed.provider_key,
+                api=managed.api,
+                base_url=managed.base_url,
+                model_id=managed.model_id,
+                model_name=managed.model_name or managed.model_id,
+                secret_ref_id=managed.secret_ref_id,
+            )
+            if managed is not None
+            and managed.provider_key
+            and managed.api
+            and managed.base_url
+            and managed.model_id
+            and managed.secret_ref_id
+            else None
+        )
+        legacy_model = model is None and await bindings.has_legacy_model(instance)
         data = agent_bundle.build(
             agent_bundle.BundleInput(
                 instance_id=str(instance.id),
@@ -1047,6 +1071,8 @@ class AgentService:
                 host_salt=agent_bundle.host_salt(str(instance.workspace_id)),
                 mem_limit_mb=instance.mem_limit_mb,
                 cpus=instance.cpus,
+                model=model,
+                legacy_model=legacy_model,
             ),
             now=now,
         )
