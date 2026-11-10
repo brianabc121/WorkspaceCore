@@ -43,8 +43,10 @@ NEWS_TOOLS = {
 }
 
 
-async def _get(env: ImEnv, path: str, expect: int = 200, **headers: str) -> Any:
-    response = await env.client.get(path, headers={**env.headers(), **headers})
+async def _get(
+    env: ImEnv, path: str, expect: int = 200, headers: dict[str, str] | None = None
+) -> Any:
+    response = await env.client.get(path, headers={**env.headers(), **(headers or {})})
     assert response.status_code == expect, response.text
     return response.json()
 
@@ -180,9 +182,11 @@ async def test_management_permissions_and_scope(env: ImEnv) -> None:
     await _toggle(env, "news", False)
 
     # 另一个工作空间：独立的状态与记录
-    elsewhere = await _get(env, "/api/v1/modules/news/management", **{"X-Workspace-Id": str(other)})
+    elsewhere = await _get(
+        env, "/api/v1/modules/news/management", headers={"X-Workspace-Id": str(other)}
+    )
     assert elsewhere["module"]["enabled"] is True and elsewhere["module"]["state_version"] == 0
-    page = await _get(env, "/api/v1/modules/news/activity", **{"X-Workspace-Id": str(other)})
+    page = await _get(env, "/api/v1/modules/news/activity", headers={"X-Workspace-Id": str(other)})
     assert page["items"] == []
 
     await login(env, "admin@example.com", "admin password 1234")
@@ -276,7 +280,7 @@ async def test_not_deployed_module_can_still_be_enabled(bare: ImEnv) -> None:
         transport_calls.append(request.url.host)
         return await original.handle_async_request(request)
 
-    bare.app.state.connectors.transport.handle_async_request = spy  # type: ignore[method-assign]
+    bare.app.state.connectors.transport.handle_async_request = spy
     news = await _news(bare)
     assert news["module"]["ready"] is False and news["module"]["missing"] == ["TRENDRADAR_MCP_URL"]
     assert news["health"]["state"] == "not_configured"
