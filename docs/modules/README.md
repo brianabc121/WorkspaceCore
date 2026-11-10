@@ -67,7 +67,7 @@ apps/web/tests/<key>*.test.ts
 | `widgets` | 首页小组件类型 | 必须已在 `app/schemas/dashboards.py` 的组件联合类型里，前端模块也要提供组件 |
 | `sealed_fields` | `SealedField` 元组 | 凭证轮换（`python -m app.commands.rotate_credentials`，见 docs/deployment.md）会处理这些加密列 |
 | `service_checks` | `ServiceCheckSpec(id, 名称, "包.模块:probe")` | 运维页显示该外部服务能否连通（只在启用了模块的工作空间显示） |
-| `on_toggle` | `async def on_toggle(db, settings, runtime, workspace_id, enabled)` | owner 启用 / 停用之后调用（已提交）；用来让外部服务跟着变化，例如新闻早报停用后重新生成 TrendRadar 配置、不再推送。失败只记日志 |
+| `on_toggle` | `async def on_toggle(db, settings, runtime, workspace_id, enabled) -> HookOutcome` | owner 启用 / 停用之后、或在应用中心“重试同步”时调用（开关已提交）；用来让外部服务跟着变化，例如新闻早报停用后重新生成 TrendRadar 配置、不再推送。要按数据库里的最新状态协调、可以重复执行；返回 `HookOutcome.applied()` / `.not_required("原因")` / `.failed("原因")`（原因用固定类别，见 `app/modules/sync.py`），只有 `applied` 记为同步成功。宿主给它单独的会话、限时 15 秒，结果写进同步记录，失败不回滚开关（T-0210） |
 
 为什么 `event_topics` 和 `widgets` 还要改宿主文件：它们是 OpenAPI 里的枚举和联合类型，前端据此生成类型，必须静态声明。
 模块清单再声明一次，一致性测试保证两边一致。
@@ -84,6 +84,9 @@ apps/web/tests/<key>*.test.ts
   模块停用时打开这些地址会看到“功能未启用”页。
 - `widgets`：用 `defineWidget({...})` 声明首页小组件（类型、标题、默认大小、zod 配置、按需加载的组件、填写说明）。
 - `events`：实时事件主题 → 要刷新的查询键前缀，例如 `{ news: ['news'] }`。
+- `management`（可选，T-0211）：应用中心的入口与分类 `{ primaryPath, settingsPath, category, helpPath }`。
+  `primaryPath`（“打开应用”）与 `settingsPath`（“应用设置”）必须是本模块 `routes` 里的路径，否则不显示按钮；
+  不写就不显示。宿主不按模块 key 写死任何入口。
 
 接口返回 `MODULE_DISABLED` 时，页面和小组件显示“功能已停用”，不要当成普通错误。
 

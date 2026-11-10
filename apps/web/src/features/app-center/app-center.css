@@ -1,0 +1,157 @@
+/* 应用中心（T-0211，效果图 docs/v2/app-center/assets/01-app-center.png）。颜色只用主题变量，亮 / 暗主题自动跟随。
+   沿用 agents-pages / workspace-pages / secrets 的统计卡、页签、工具栏、状态标签与右侧一栏。 */
+
+.apc-page .ws-actions { align-items: center; }
+.apc-page .ws-actions :is(.primary-button, .secondary-button, .apc-link-button) { display: inline-flex; align-items: center; gap: 6px; }
+.apc-page .ws-actions svg { width: 16px; height: 16px; }
+.apc-layout.has-side { grid-template-columns: minmax(0, 1fr) minmax(360px, 440px); }
+.apc-main, .apc-stack { display: grid; gap: 16px; min-width: 0; align-content: start; }
+.apc-tabs button { display: inline-flex; align-items: center; gap: 8px; }
+.apc-count { display: inline-grid; place-items: center; min-width: 22px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); font-size: .76rem; font-variant-numeric: tabular-nums; }
+.apc-toolbar select { flex: 0 1 200px; min-width: 0; }
+.apc-toolbar .ws-search { max-width: none; flex: 1 1 260px; }
+
+/* 链接样式的按钮 */
+.apc-link-button { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; padding: 6px 2px; color: var(--accent); font-weight: 600; cursor: pointer; text-decoration: none; }
+.apc-link-button svg { width: 16px; height: 16px; }
+.apc-link-button:hover { text-decoration: underline; }
+.apc-link-button:focus-visible, .apc-card:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.apc-button { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.apc-button svg, .apc-icon-text svg, .apc-inline-icon { width: 15px; height: 15px; flex: none; }
+.apc-icon-text { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
+
+/* 模块卡片 */
+.apc-card { display: grid; gap: 14px; padding: 18px 20px; min-width: 0; overflow-wrap: anywhere; border: 1px solid var(--line); }
+.apc-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.apc-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: start; }
+.apc-app-icon { display: inline-grid; place-items: center; width: 52px; height: 52px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); flex: none; }
+.apc-app-icon svg { width: 26px; height: 26px; }
+.apc-card-title { min-width: 0; }
+.apc-card-title h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; font-size: 1.12rem; }
+.apc-card-desc { margin: 6px 0 0; color: var(--muted); font-size: .9rem; }
+.apc-tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 11px; background: var(--accent-soft); color: var(--accent); font-size: .76rem; font-weight: 600; }
+.apc-tag.is-muted { background: var(--surface-2); color: var(--muted); }
+.apc-card-state { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.apc-caps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.apc-caps li { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: .85rem; background: var(--surface); }
+.apc-caps svg { width: 15px; height: 15px; color: var(--muted); }
+.apc-service-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: .9rem; }
+.apc-service-row > svg { width: 16px; height: 16px; color: var(--muted); }
+.apc-service-label { color: var(--muted); }
+.apc-notice { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--warning-soft); color: var(--text); font-size: .88rem; }
+.apc-notice.is-danger { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); }
+.apc-notice svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--warning); }
+.apc-notice.is-danger svg { color: var(--danger); }
+.apc-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.apc-card-actions .apc-details { margin-left: auto; }
+
+/* 启用开关（与旧版应用中心相同的外观） */
+.app-switch { display: inline-flex; align-items: center; gap: 8px; border: 0; background: none; padding: 4px 0; color: var(--text); font-size: .85rem; cursor: pointer; }
+.app-switch:disabled { opacity: .6; cursor: default; }
+.app-switch-track { position: relative; width: 38px; height: 22px; border-radius: 11px; background: var(--line); transition: background .15s; flex-shrink: 0; }
+.app-switch-thumb { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow); transition: transform .15s; }
+.app-switch[aria-checked="true"] .app-switch-track { background: var(--accent); }
+.app-switch[aria-checked="true"] .app-switch-thumb { transform: translateX(16px); }
+.app-switch:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+/* 页面入口 */
+.apc-pages { display: grid; gap: 12px; padding: 16px 18px; min-width: 0; }
+.apc-page-list { list-style: none; margin: 0; padding: 0; display: grid; border: 1px solid var(--line); border-radius: 10px; }
+.apc-page-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--line); min-width: 0; }
+.apc-page-list li:first-child { border-top: 0; }
+.apc-page-icon { width: 20px; height: 20px; color: var(--muted); }
+.apc-page-name { min-width: 0; display: grid; }
+.apc-page-name small { color: var(--muted); font-size: .78rem; }
+.apc-kind { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 12px; font-size: .78rem; font-weight: 600; white-space: nowrap; --tone: var(--accent); background: color-mix(in srgb, var(--tone) 12%, var(--surface)); color: var(--tone); }
+.apc-kind.is-note { --tone: var(--success); }
+.apc-kind.is-embed { --tone: var(--chart-7); }
+.apc-kind.is-dashboard { --tone: var(--warning); }
+.apc-page-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.apc-pages-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.apc-next { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 16px 20px; border: 1px dashed var(--line); border-radius: 12px; }
+.apc-next > svg { width: 30px; height: 30px; color: var(--muted); flex: none; }
+.apc-next > div { flex: 1 1 200px; min-width: 0; }
+.apc-next .form-help { margin: 2px 0 0; }
+.apc-next button { display: inline-flex; align-items: center; gap: 6px; }
+.apc-next button svg { width: 16px; height: 16px; }
+
+/* 详情 */
+.apc-side { max-height: calc(100vh - 32px); }
+.apc-detail { display: grid; gap: 14px; min-width: 0; overflow-wrap: anywhere; }
+.apc-detail-title { display: flex; align-items: center; gap: 12px; }
+.apc-detail-title h3 { margin: 0; font-size: 1.15rem; }
+.apc-detail-title .form-help { margin: 2px 0 0; }
+.apc-detail-body { display: grid; gap: 12px; min-width: 0; }
+.apc-detail-body h4 { margin: 6px 0 0; font-size: .98rem; }
+.apc-facts { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; }
+.apc-facts li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; padding: 9px 12px; border-top: 1px solid var(--line); }
+.apc-facts li:first-child { border-top: 0; }
+.apc-facts li > svg { width: 17px; height: 17px; color: var(--muted); }
+.apc-fact-note { grid-column: 2 / -1; color: var(--muted); font-size: .78rem; display: flex; flex-wrap: wrap; gap: 4px; }
+.apc-checks { display: grid; gap: 6px; justify-items: start; }
+.apc-checks .form-help { margin: 0; }
+.apc-callout { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; padding: 12px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--line)); background: var(--warning-soft); }
+.apc-callout.is-danger { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+.apc-callout > svg { width: 18px; height: 18px; color: var(--warning); margin-top: 2px; }
+.apc-callout.is-danger > svg { color: var(--danger); }
+.apc-callout p { margin: 2px 0 0; font-size: .86rem; color: var(--muted); }
+.apc-callout button { grid-column: 2; justify-self: start; }
+.apc-entry-links { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.apc-entry-links a { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 600; text-decoration: none; }
+.apc-entry-links a:hover { text-decoration: underline; }
+.apc-entry-links svg { width: 16px; height: 16px; }
+.apc-declared { margin: 0; border: 1px solid var(--line); border-radius: 10px; }
+.apc-declared > div { display: grid; grid-template-columns: 7em minmax(0, 1fr); gap: 10px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.apc-declared > div:first-child { border-top: 0; }
+.apc-declared dt { color: var(--muted); font-size: .86rem; }
+.apc-declared dd { margin: 0; font-size: .88rem; }
+.apc-hint { display: flex; align-items: flex-start; gap: 6px; margin: 0; }
+.apc-hint svg { width: 15px; height: 15px; flex: none; margin-top: 2px; }
+.apc-impact { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.apc-impact p { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: .88rem; }
+.apc-impact svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--muted); }
+.apc-impact .is-safe { color: var(--success); font-weight: 600; }
+.apc-impact .is-safe svg { color: var(--success); }
+.apc-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 4px; }
+.apc-detail-actions .primary-button { text-decoration: none; }
+.apc-detail-actions .apc-link-button { margin-left: auto; }
+.apc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.apc-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: .88rem; }
+.apc-list small { color: var(--muted); }
+.apc-dialog { display: grid; gap: 10px; }
+.apc-dialog p { margin: 0; }
+
+/* 操作记录 */
+.apc-activity { display: grid; gap: 10px; min-width: 0; }
+.apc-activity-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.apc-activity-list li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.apc-activity-list li:first-child { border-top: 0; }
+.apc-dot { --tone: var(--accent); width: 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: var(--tone); }
+.apc-dot.tone-green { --tone: var(--success); }
+.apc-dot.tone-red { --tone: var(--danger); }
+.apc-dot.tone-amber { --tone: var(--warning); }
+.apc-activity-body { display: grid; gap: 2px; min-width: 0; }
+.apc-activity-meta { color: var(--muted); font-size: .8rem; }
+
+/* 接入指南 */
+.apc-guide { display: grid; gap: 14px; padding: 18px 20px; }
+.apc-guide-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.apc-guide-list li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.apc-guide-list li > svg { width: 24px; height: 24px; color: var(--accent); }
+.apc-guide-list h3 { margin: 0; font-size: 1rem; }
+.apc-guide-list p { margin: 6px 0 0; font-size: .9rem; }
+.apc-guide-deploy { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
+.apc-guide-deploy h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 1rem; }
+.apc-guide-deploy h3 svg { width: 18px; height: 18px; color: var(--muted); }
+.apc-guide-deploy p { margin: 0; font-size: .9rem; }
+
+@media (max-width: 760px) {
+  .apc-card { padding: 14px; }
+  .apc-card-head { grid-template-columns: auto minmax(0, 1fr); }
+  .apc-card-state { grid-column: 1 / -1; justify-content: flex-start; }
+  .apc-app-icon { width: 44px; height: 44px; }
+  .apc-page-list li { grid-template-columns: auto minmax(0, 1fr); }
+  .apc-page-list li > .apc-kind, .apc-page-list li > .apc-page-actions { grid-column: 2; justify-self: start; }
+  .apc-card-actions .apc-details { margin-left: 0; }
+  .apc-pages, .apc-guide { padding: 12px; }
+}

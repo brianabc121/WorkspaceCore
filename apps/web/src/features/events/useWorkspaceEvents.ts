@@ -19,8 +19,9 @@ const core: Record<Exclude<Topic, ModuleTopic>, string[]> = {
   timeline: ['timeline', 'task-runs', 'task-progress'],
   // 项目 Issues（T-0123）
   issues: ['issues', 'search', 'task-progress'],
-  // 模块启用 / 停用（T-0159）：启用状态由 modules store 重新读取（见 invalidate），首页组件跟着刷新
-  modules: ['overview', 'widgets'],
+  // 模块启用 / 停用（T-0159）：启用状态由 modules store 重新读取（见 invalidate），首页组件跟着刷新；
+  // 应用中心（T-0211）的管理信息、同步结果与操作记录也跟着刷新
+  modules: ['overview', 'widgets', 'app-center'],
   // 侧栏布局（T-0161）：在 navigation store 里，由 invalidate 重新读取
   navigation: [],
 }

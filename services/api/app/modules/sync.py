@@ -120,6 +120,8 @@ class ModuleSyncCoordinator:
         action = _OUTCOME_AUDIT.get(state)
         if action is not None:
             await self._audit(action, attempt, actor_id, client_ip)
+        # 其他打开着应用中心的页面刷新同步结果
+        events.mark(self.db, workspace_id, "modules")
         await self.db.commit()
         return attempt
 

@@ -11,6 +11,8 @@ export type BriefingWidgetConfig = z.output<typeof briefingWidgetConfig>
 
 export default defineModule({
   key: 'news',
+  // 应用中心（T-0211）：“打开应用”与“应用设置”
+  management: { primaryPath: '/news', settingsPath: '/settings/news', category: '资讯' },
   nav: [
     { path: '/news', title: '早报', section: '工作空间', description: '每天的新闻早报、热榜、RSS、搜索与收藏（成员与访客都能看）。', icon: Newspaper, after: '/calendar' },
     { path: '/settings/news', title: '新闻早报', section: '管理', description: '早报的推送时间、来源、兴趣主题、大模型与推送渠道（owner 修改，admin 只读）。', minRole: 'admin', icon: Rss, after: '/settings/mail' },

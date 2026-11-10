@@ -95,11 +95,12 @@ async function main() {
     await sidebar(page).getByRole('link', { name: '早报', exact: true }).waitFor()
     await page.goto(`${base}/settings/modules`)
     await page.getByRole('heading', { name: '应用中心' }).waitFor()
-    const card = page.getByRole('listitem', { name: '模块：新闻早报' })
+    // 应用中心改版（T-0211）：模块是卡片（article），停用要在对话框里确认
+    const card = page.getByRole('article', { name: '模块：新闻早报' })
     const toggle = card.getByRole('switch', { name: '启用新闻早报' })
     check((await toggle.getAttribute('aria-checked')) === 'true', '新闻早报默认应启用')
-    page.once('dialog', (dialog) => dialog.accept())
     await toggle.click()
+    await page.getByRole('dialog', { name: '停用应用' }).getByRole('button', { name: '停用应用' }).click()
     await page.waitForFunction(() => document.querySelector('[role="switch"][aria-label="启用新闻早报"]')?.getAttribute('aria-checked') === 'false')
     await sidebar(page).getByRole('link', { name: '早报', exact: true }).waitFor({ state: 'detached' })
 

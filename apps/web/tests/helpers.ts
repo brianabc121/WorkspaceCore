@@ -18,7 +18,7 @@ export const emptySummary: Schema['TaskSummary'] = { todo: 0, running: 0, awaiti
 export const emptyProgress: Schema['TaskProgressOut'] = { counts: { all: 0, todo: 0, running: 0, awaiting_view: 0, blocked: 0 }, attention: 0, items: [] }
 export const runnerOff: Schema['AgentRunnerOut'] = { enabled: false, limits: { envs: 3, persistent: 2, memory_mb: 16384, cpus: 8, disk_gb: 100, execs_per_hour: 120, run_hours_per_day: 8 }, secrets: [], enabled_at: null, version: 1 }
 // 插拔式模块（T-0159）：默认只有新闻早报，已启用
-export const newsModule: Schema['ModuleOut'] = { key: 'news', name: '新闻早报', description: '每天的新闻早报、热榜、RSS、搜索与收藏；智能体可以查新闻。依赖 TrendRadar。', version: '1.0.0', enabled: true, default_enabled: true, ready: true, missing: [], depends_on: [], dependents: [], tools: ['news_latest', 'news_search', 'news_briefing'], widgets: ['news_briefing'], can_manage: true }
+export const newsModule: Schema['ModuleOut'] = { key: 'news', name: '新闻早报', description: '每天的新闻早报、热榜、RSS、搜索与收藏；智能体可以查新闻。依赖 TrendRadar。', version: '1.0.0', enabled: true, state_version: 0, default_enabled: true, ready: true, missing: [], depends_on: [], dependents: [], tools: ['news_latest', 'news_search', 'news_briefing'], widgets: ['news_briefing'], can_manage: true }
 export const emptyNavigation: Schema['NavigationOut'] = { version: 0, sections: [], pages: [], placements: {}, section_order: [], embed_origins: [], can_manage: true }
 export const mcCapabilities: Schema['ModelConnectionCapabilities'] = {
   enabled: true, supported_protocols: ['openai_compatible'],
