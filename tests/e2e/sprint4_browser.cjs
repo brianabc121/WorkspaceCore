@@ -128,8 +128,13 @@ async function login(browser, email, problems, requests) {
   const page = await context.newPage()
   page.on('pageerror', (error) => problems.push(error.message))
   page.on('console', (message) => {
-    // 登录前查询当前用户的 401 是预期响应，浏览器会把它记为资源加载失败
-    if (message.type() === 'error' && !/\b401\b/.test(message.text())) problems.push(message.text())
+    // 登录前查询当前用户的 401 是预期响应，浏览器会把它记为资源加载失败。
+    // net::ERR_NETWORK_CHANGED 是宿主机网络变化（本脚本起模拟 GitHub 容器会新建网卡）时浏览器中断请求的
+    // 环境事件，应用本身不会产生；页面上的功能都由后面的断言检查（T-0217）
+    const text = message.text()
+    if (message.type() === 'error' && !/\b401\b/.test(text) && !text.includes('net::ERR_NETWORK_CHANGED')) {
+      problems.push(text)
+    }
   })
   page.on('request', (request) => requests.push(request.url()))
   page.on('dialog', (dialog) => dialog.accept())
@@ -151,6 +156,15 @@ async function noHorizontalScroll(page) {
 }
 
 ;(async () => {
+  // 模拟 GitHub 最先起好：docker run / network connect 会在宿主机上新建网卡，网卡的地址（含 IPv6
+  // 重复地址检测）还要一两秒才定下来；这期间浏览器正在加载的话，Chromium 会把进行中的请求以
+  // net::ERR_NETWORK_CHANGED 中断（T-0215、T-0217）。所以先起容器、准备数据，至少等 5 秒再启动浏览器。
+  // 问题记录：docs/acceptance/sprint4-browser-err-network-changed.md
+  const token = 'github_pat_e2e_' + randomBytes(20).toString('hex')
+  const fakeStartedAt = Date.now()
+  startFakeGitHub(token)
+  check(await fakeGitHubReady(), '模拟 GitHub 没有就绪')
+
   const [, workspace, dashboard] = seed('user', `owner4-${run}@browser.example.com`, 'Owner')
   const [viewerId] = seed('user', `viewer4-${run}@browser.example.com`, 'Viewer')
   seed('member', workspace, viewerId, 'viewer')
@@ -159,11 +173,8 @@ async function noHorizontalScroll(page) {
   // 明天（显示时区）上午 10 点：落在首页“提醒与日程”的 7 天窗口里
   const tomorrow = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE }).format(new Date(Date.now() + 86400000))
 
-  // 模拟 GitHub 在启动浏览器之前起好：docker run / network connect 会在宿主机上新建网卡，
-  // 浏览器正在加载时 Chromium 会把进行中的请求以 net::ERR_NETWORK_CHANGED 中断（T-0215）
-  const token = 'github_pat_e2e_' + randomBytes(20).toString('hex')
-  startFakeGitHub(token)
-  check(await fakeGitHubReady(), '模拟 GitHub 没有就绪')
+  const settle = 5000 - (Date.now() - fakeStartedAt)
+  if (settle > 0) await new Promise((resolve) => setTimeout(resolve, settle))
 
   const browser = await chromium.launch()
   const problems = []
