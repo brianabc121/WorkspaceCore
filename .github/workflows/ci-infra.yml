@@ -177,11 +177,12 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
+      - name: 应用中心浏览器验收（已部署 TrendRadar：检测连通、暂停 MCP 后检测超时、配置目录不可写时同步失败与重试成功）
+        # 一个部署同时只能有一个工作空间打开早报推送：排在 news_acceptance.py（结束时关掉自己的）之后、
+        # news_browser.cjs（结束时不关）之前；本脚本打开自己的、结束时（成败都）关掉（T-0212）
+        run: node tests/e2e/app_center_browser.cjs --deployed
       - name: 新闻早报浏览器验收（设置页、早报页各标签、收藏与不感兴趣、首页面板、手机宽度、viewer 只读）
         run: node tests/e2e/news_browser.cjs
-      - name: 应用中心浏览器验收（已部署 TrendRadar：检测连通、暂停 MCP 后检测超时、配置目录不可写时同步失败与重试成功）
-        # 在 news_browser.cjs 之后：它关掉了自己的早报推送，这里再打开自己的、结束时关掉（T-0212）
-        run: node tests/e2e/app_center_browser.cjs --deployed
       - name: 失败时输出服务状态与日志
         if: failure()
         run: |

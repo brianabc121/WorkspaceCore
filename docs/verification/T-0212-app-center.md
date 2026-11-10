@@ -66,7 +66,7 @@
 截图（桌面 1440、手机 390、暗色、同步失败、导航 409 冲突、重试成功）在本地核对过布局与暗色对比度，不提交进仓库（不含 Key 或内部地址）。
 核对中发现并修正：应用中心的样式前缀 `ac-` 与 AI 审批中心重名（会互相覆盖），改为 `apc-`。
 
-CI：`ci-infra.yml` 的 compose job 在 `modules_browser.cjs` 之后运行 `app_center_browser.cjs`；news job 在 `news_browser.cjs` 之后运行 `app_center_browser.cjs --deployed`。
+CI：`ci-infra.yml` 的 compose job 在 `modules_browser.cjs` 之后运行 `app_center_browser.cjs`；news job 在 `news_acceptance.py` 之后、`news_browser.cjs` 之前运行 `app_center_browser.cjs --deployed`（一个部署同时只能有一个工作空间打开早报推送，`news_browser.cjs` 结束时不关；第一次 CI 把它排在后面，打开推送时 409 `NEWS_TAKEN`，已调整顺序）。
 
 ## 4. 安全与数据
 
