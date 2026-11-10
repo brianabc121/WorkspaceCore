@@ -43,9 +43,23 @@ export interface ModuleWidget<T extends string = string, C extends z.ZodType = z
   help?: string
 }
 
+/** 应用中心（T-0211）显示的入口：都必须是本模块 routes 里的路径；不写就不显示对应按钮 */
+export interface ModuleManagement {
+  /** “打开应用”：模块的主页面 */
+  primaryPath?: string
+  /** “应用设置”：模块的设置页 */
+  settingsPath?: string
+  /** 分类标签，例如“资讯” */
+  category?: string
+  /** 帮助页（站内路径，以 / 开头） */
+  helpPath?: string
+}
+
 export interface ModuleDefinition<W extends ModuleWidget = ModuleWidget, E extends ModuleEvents = ModuleEvents> {
   /** 与后端清单的 key 相同 */
   key: string
+  /** 应用中心的入口与分类（T-0211） */
+  management?: ModuleManagement
   nav?: readonly ModuleNavEntry[]
   /** 路由组件必须写成 () => import('./XxxPage.vue')，模块不启用就不下载它的代码 */
   routes?: readonly RouteRecordRaw[]

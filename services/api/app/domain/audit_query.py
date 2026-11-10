@@ -44,6 +44,7 @@ from app.schemas.common import Page
 
 ACTION_MAX = 128
 RESOURCE_TYPE_MAX = 64
+RESOURCE_ID_MAX = 200
 Q_MAX = 100
 EXPORT_MAX_ROWS = 10_000
 EXPORT_MAX_SPAN = timedelta(days=31)
@@ -113,6 +114,8 @@ class AuditFilters:
     action_prefix: str | None = None
     resource_type: str | None = None
     q: str | None = None
+    # 精确的资源标识（应用中心的模块操作记录：resource_type=module 且 resource_id=模块 key）
+    resource_id: str | None = None
 
     def __post_init__(self) -> None:
         after, before = _aware("after", self.after), _aware("before", self.before)
@@ -130,6 +133,7 @@ class AuditFilters:
             ("action", self.action, ACTION_MAX),
             ("action_prefix", self.action_prefix, ACTION_MAX),
             ("resource_type", self.resource_type, RESOURCE_TYPE_MAX),
+            ("resource_id", self.resource_id, RESOURCE_ID_MAX),
             ("q", self.q, Q_MAX),
         ):
             if value is not None and not 1 <= len(value) <= limit:
@@ -144,6 +148,7 @@ class AuditFilters:
             action=self.action,
             action_prefix=self.action_prefix,
             resource_type=self.resource_type,
+            resource_id=self.resource_id,
             q=self.q,
             q_actions=tuple(actions_matching_label(self.q)) if self.q else (),
             cutoff=cutoff,
@@ -151,19 +156,19 @@ class AuditFilters:
 
     def canonical(self) -> str:
         """游标签名用：同样的条件得到同样的文本（时间统一成 UTC）。"""
-        return json.dumps(
-            [
-                _iso(self.after),
-                _iso(self.before),
-                str(self.actor_id) if self.actor_id else None,
-                self.system_only,
-                self.action,
-                self.action_prefix,
-                self.resource_type,
-                self.q,
-            ],
-            ensure_ascii=False,
-        )
+        parts: list[Any] = [
+            _iso(self.after),
+            _iso(self.before),
+            str(self.actor_id) if self.actor_id else None,
+            self.system_only,
+            self.action,
+            self.action_prefix,
+            self.resource_type,
+            self.q,
+        ]
+        if self.resource_id is not None:  # 只在用到时追加：已有的审计页游标不受影响
+            parts.append(["resource_id", self.resource_id])
+        return json.dumps(parts, ensure_ascii=False)
 
     def summary(self) -> dict[str, Any]:
         """写进 audit.export_generated 的安全摘要：不含搜索词原文，任意文字不原样落库。"""

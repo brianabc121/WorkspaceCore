@@ -3,11 +3,13 @@
 - 没有记录时按清单的 default_enabled；
 - 只有 owner 能启用 / 停用；依赖的模块都启用时才能启用，有启用的模块依赖它时不能停用；
 - 停用只改启用记录，模块自己的数据不动，再启用就恢复；
-- 启用 / 停用写审计日志，并发出 modules 事件让前端刷新导航。
+- 启用 / 停用写审计日志，并发出 modules 事件让前端刷新导航；
+- 应用中心（T-0210）：实际启停一次 state_version 加 1；启停、同步重试共用工作空间的模块操作锁
+  （跨进程的 advisory lock），钩子的结果写进同步记录（app/modules/sync.py），失败不回滚开关。
 """
 
-import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import func, select
@@ -22,11 +24,13 @@ from app.domain.policy import WorkspaceAccess, has_role
 from app.models import WorkspaceModule
 from app.modules import registry
 from app.modules.base import ModuleManifest
+from app.modules.locks import advisory_lock, module_operation_lock
+from app.modules.sync import ModuleSyncCoordinator
 from app.schemas.modules import ModuleList, ModuleOut
 from app.schemas.workspaces import Role
 
 MODULE_DISABLED = "MODULE_DISABLED"
-logger = logging.getLogger("app.modules")
+MODULE_BUSY = "MODULE_BUSY"
 
 
 def disabled_error() -> ApiError:
@@ -35,13 +39,8 @@ def disabled_error() -> ApiError:
 
 async def enabled_keys(db: AsyncSession, workspace_id: uuid.UUID) -> set[str]:
     """当前工作空间启用的模块 key。"""
-    rows = await db.execute(
-        select(WorkspaceModule.module_key, WorkspaceModule.enabled).where(
-            WorkspaceModule.workspace_id == workspace_id
-        )
-    )
-    explicit: dict[str, bool] = {key: enabled for key, enabled in rows.tuples()}
-    return {m.key for m in registry.MODULES if explicit.get(m.key, m.default_enabled)}
+    states = await module_states(db, workspace_id)
+    return {key for key, state in states.items() if state.enabled}
 
 
 async def is_enabled(db: AsyncSession, workspace_id: uuid.UUID, key: str) -> bool:
@@ -73,6 +72,37 @@ async def visible_tool_modules(
     return visible
 
 
+@dataclass(frozen=True)
+class ModuleState:
+    enabled: bool
+    version: int
+
+
+async def module_states(db: AsyncSession, workspace_id: uuid.UUID) -> dict[str, ModuleState]:
+    """每个已注册模块在这个工作空间的启用状态与目标版本（没有记录：清单默认值、版本 0）。"""
+    rows = await db.execute(
+        select(
+            WorkspaceModule.module_key, WorkspaceModule.enabled, WorkspaceModule.state_version
+        ).where(WorkspaceModule.workspace_id == workspace_id)
+    )
+    explicit = {key: ModuleState(enabled, version) for key, enabled, version in rows.all()}
+    return {m.key: explicit.get(m.key, ModuleState(m.default_enabled, 0)) for m in registry.MODULES}
+
+
+def busy_error() -> ApiError:
+    return ApiError(409, MODULE_BUSY, "这个工作空间正在启用 / 停用模块或同步配置，请稍后再试")
+
+
+def check_state_version(current: int, expected: int | None) -> None:
+    if expected is not None and expected != current:
+        raise ApiError(
+            409,
+            "VERSION_CONFLICT",
+            "模块状态已被其他操作修改，请刷新后重试",
+            details={"current_state_version": current},
+        )
+
+
 class ModuleService:
     def __init__(self, db: AsyncSession, settings: Settings, runtime: Any = None) -> None:
         self.db = db
@@ -80,7 +110,9 @@ class ModuleService:
         # ConnectorRuntime：交给模块的 on_toggle（例如新闻早报重新生成配置文件）
         self.runtime = runtime
 
-    def _out(self, manifest: ModuleManifest, enabled: bool, access: WorkspaceAccess) -> ModuleOut:
+    def out(
+        self, manifest: ModuleManifest, state: ModuleState, access: WorkspaceAccess
+    ) -> ModuleOut:
         missing = registry.missing_requirements(manifest, self.settings)
         tools = [name for name, key in registry.tool_owners().items() if key == manifest.key]
         return ModuleOut(
@@ -88,7 +120,8 @@ class ModuleService:
             name=manifest.name,
             description=manifest.description,
             version=manifest.version,
-            enabled=enabled,
+            enabled=state.enabled,
+            state_version=state.version,
             default_enabled=manifest.default_enabled,
             ready=not missing,
             missing=[r.env for r in missing],
@@ -100,69 +133,83 @@ class ModuleService:
         )
 
     async def list(self, access: WorkspaceAccess) -> ModuleList:
-        enabled = await enabled_keys(self.db, access.workspace.id)
-        return ModuleList(items=[self._out(m, m.key in enabled, access) for m in registry.MODULES])
+        states = await module_states(self.db, access.workspace.id)
+        return ModuleList(items=[self.out(m, states[m.key], access) for m in registry.MODULES])
 
     async def update(
-        self, access: WorkspaceAccess, key: str, enabled: bool, client_ip: str | None
+        self,
+        access: WorkspaceAccess,
+        key: str,
+        enabled: bool,
+        client_ip: str | None,
+        *,
+        expected_state_version: int | None = None,
     ) -> ModuleOut:
+        """启用 / 停用；持有工作空间的模块操作锁完成“检查依赖 → 写目标 → 提交 → 同步”。
+
+        expected_state_version（新页面必带）与当前不一致时 409 VERSION_CONFLICT；旧客户端可以不带，
+        但同样拿锁、同样检查依赖。目标没变时不写审计、不执行钩子（之前同步失败请用重试接口）。
+        """
         manifest = registry.get(key)
         if manifest is None:
             raise ApiError(404, "NOT_FOUND", "没有这个模块")
         workspace_id = access.workspace.id
-        current = await enabled_keys(self.db, workspace_id)
-        if enabled:
-            missing = [d for d in manifest.depends_on if d not in current]
-            if missing:
-                names = "、".join(registry.BY_KEY[d].name for d in missing)
-                raise ApiError(409, "MODULE_DEPENDENCY", f"请先启用它依赖的模块：{names}")
-        else:
-            blocking = [d for d in registry.dependents(key) if d in current]
-            if blocking:
-                names = "、".join(registry.BY_KEY[d].name for d in blocking)
-                raise ApiError(409, "MODULE_DEPENDENCY", f"请先停用依赖它的模块：{names}")
-        if (key in current) != enabled:
+        async with advisory_lock(self.db, module_operation_lock(workspace_id)) as acquired:
+            if not acquired:
+                raise busy_error()
+            states = await module_states(self.db, workspace_id)
+            state = states[key]
+            check_state_version(state.version, expected_state_version)
+            current = {k for k, v in states.items() if v.enabled}
+            if enabled:
+                missing = [d for d in manifest.depends_on if d not in current]
+                if missing:
+                    names = "、".join(registry.BY_KEY[d].name for d in missing)
+                    raise ApiError(409, "MODULE_DEPENDENCY", f"请先启用它依赖的模块：{names}")
+            else:
+                blocking = [d for d in registry.dependents(key) if d in current]
+                if blocking:
+                    names = "、".join(registry.BY_KEY[d].name for d in blocking)
+                    raise ApiError(409, "MODULE_DEPENDENCY", f"请先停用依赖它的模块：{names}")
+            if state.enabled == enabled:
+                return self.out(manifest, state, access)
             statement = insert(WorkspaceModule).values(
                 workspace_id=workspace_id,
                 module_key=key,
                 enabled=enabled,
+                state_version=1,
                 updated_by=access.user_id,
             )
-            await self.db.execute(
+            version = await self.db.scalar(
                 statement.on_conflict_do_update(
                     index_elements=[WorkspaceModule.workspace_id, WorkspaceModule.module_key],
                     set_={
                         "enabled": enabled,
+                        "state_version": WorkspaceModule.state_version + 1,
                         "updated_by": access.user_id,
                         "updated_at": func.now(),
                     },
-                )
+                ).returning(WorkspaceModule.state_version)
             )
+            state = ModuleState(enabled, int(version or 0))
             await AuditTrail(self.db, self.settings).record(
                 "module.enabled" if enabled else "module.disabled",
                 workspace_ids=[workspace_id],
                 actor_id=access.user_id,
                 resource_type="module",
                 resource_id=key,
-                metadata={"module": key},
+                metadata={"module": key, "state_version": state.version},
                 client_ip=client_ip,
             )
             events.mark(self.db, workspace_id, "modules", "overview")
             await self.db.commit()
-            await self._on_toggle(manifest, workspace_id, enabled)
-        return self._out(manifest, enabled, access)
-
-    async def _on_toggle(
-        self, manifest: ModuleManifest, workspace_id: uuid.UUID, enabled: bool
-    ) -> None:
-        if manifest.on_toggle is None:
-            return
-        try:
-            hook: Any = registry.resolve(manifest.on_toggle)
-            await hook(self.db, self.settings, self.runtime, workspace_id, enabled)
-        except Exception as error:  # 开关已经生效；钩子失败只记日志
-            await self.db.rollback()
-            logger.warning(
-                "module toggle hook failed",
-                extra={"module": manifest.key, "error_type": type(error).__name__},
+            await ModuleSyncCoordinator(self.db, self.settings, self.runtime).run(
+                manifest,
+                workspace_id,
+                state_version=state.version,
+                enabled=enabled,
+                trigger="toggle",
+                actor_id=access.user_id,
+                client_ip=client_ip,
             )
+        return self.out(manifest, state, access)

@@ -10,8 +10,9 @@ import NotePicker from './NotePicker.vue'
 import { newId } from './ids'
 
 // 添加 / 编辑一个零代码页面（T-0161）。只改草稿，点设置页底部的“保存侧栏布局”才提交。
+// immediate（应用中心，T-0211）：确定后由调用方立即整份保存；busy / failure / problems 是保存的状态与出错说明。
 // 校验与后端一致：外部链接、嵌入页只能是 http(s)；嵌入页的来源必须在部署设置 EMBED_ORIGINS 里；站内路径以一个 / 开头。
-const props = defineProps<{ page?: CustomPage; groups: { key: string; title: string }[]; embedOrigins: string[] }>()
+const props = defineProps<{ page?: CustomPage; groups: { key: string; title: string }[]; embedOrigins: string[]; immediate?: boolean; busy?: boolean; failure?: string; problems?: string[] }>()
 const emit = defineEmits<{ close: []; save: [page: CustomPage] }>()
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id
 type Kind = CustomPage['kind']
@@ -43,6 +44,7 @@ function check(): string {
   return ''
 }
 function submit() {
+  if (props.busy) return
   error.value = check()
   if (error.value) return
   const kind = form.kind
@@ -56,7 +58,7 @@ function submit() {
 </script>
 
 <template>
-  <ModalPanel :title="page ? '编辑页面' : '添加页面'" @close="$emit('close')">
+  <ModalPanel :title="page ? (immediate ? '编辑入口' : '编辑页面') : (immediate ? '添加入口' : '添加页面')" :busy="busy" @close="$emit('close')">
     <form class="page-form" @submit.prevent="submit">
       <label class="form-field"><span>名称</span><input v-model="form.title" maxlength="20" autocomplete="off" autofocus></label>
       <label class="form-field"><span>类型</span><select v-model="form.kind" @change="changeKind"><option v-for="(label, kind) in KIND_LABELS" :key="kind" :value="kind">{{ label }}</option></select></label>
@@ -78,9 +80,10 @@ function submit() {
         <div v-if="embedOrigins.length" class="form-help">允许嵌入的来源：<ul class="page-form-origins" aria-label="允许嵌入的来源"><li v-for="origin in embedOrigins" :key="origin"><code>{{ origin }}</code></li></ul>页面会放在带沙箱的框里显示，不带来源信息。</div>
         <p v-else class="agent-notice" role="note">这个部署还不允许嵌入任何网站：要在服务器的 .env 里设置 EMBED_ORIGINS（例如 https://grafana.example.com，多个用空格分隔），再重启 api 和 caddy，见部署指南（docs/deployment.md）。</p>
       </template>
-      <p v-if="error" role="alert">{{ error }}</p>
-      <p class="form-help">确定后点页面底部的“保存侧栏布局”才会生效。</p>
-      <div class="form-actions"><button type="submit" class="primary-button">{{ page ? '更新页面' : '加入页面' }}</button><button type="button" class="secondary-button" @click="$emit('close')">取消</button></div>
+      <p v-if="error || failure" role="alert">{{ error || failure }}<template v-if="!error && problems?.length"><br><template v-for="item in problems" :key="item">{{ item }}<br></template></template></p>
+      <p v-if="immediate" class="form-help">确定后立即保存到侧栏：只改这一项，其余布局原样保留；别人先改过会提示你确认后再保存。“谁能看到”只决定入口是否显示，打开后仍按原来的权限检查。</p>
+      <p v-else class="form-help">确定后点页面底部的“保存侧栏布局”才会生效。</p>
+      <div class="form-actions"><button type="submit" class="primary-button" :disabled="busy">{{ busy ? '正在保存…' : immediate ? '保存入口' : page ? '更新页面' : '加入页面' }}</button><button type="button" class="secondary-button" :disabled="busy" @click="$emit('close')">取消</button></div>
     </form>
   </ModalPanel>
 </template>

@@ -37,6 +37,7 @@ class AuditCriteria:
     action: str | None = None
     action_prefix: str | None = None
     resource_type: str | None = None
+    resource_id: str | None = None
     q: str | None = None
     q_actions: tuple[str, ...] = ()
     cutoff: datetime | None = None
@@ -71,6 +72,8 @@ def _conditions(workspace_id: uuid.UUID, criteria: AuditCriteria) -> list[Column
         conditions.append(AuditLog.action.like(_literal(criteria.action_prefix) + "%", escape="\\"))
     if criteria.resource_type is not None:
         conditions.append(AuditLog.resource_type == criteria.resource_type)
+    if criteria.resource_id is not None:
+        conditions.append(AuditLog.resource_id == criteria.resource_id)
     if criteria.q is not None:
         pattern = f"%{_literal(criteria.q)}%"
         matches = [

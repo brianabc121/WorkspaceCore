@@ -63,7 +63,7 @@ const navMeta = (item: NavItem) => ({ title: item.title, description: item.descr
 // 知识库是独立页面，自己的布局；早报是模块，在模块路由里声明
 // 管理区八页（T-0189，方案 docs/v2/ai-admin-redesign）也是宽页面；新闻早报设置在模块路由的 meta 里登记
 // 审计日志不在侧栏导航里，它的路由在下面单独登记 wide
-const ADMIN_PAGES = ['/ai', '/settings', '/settings/integrations', '/settings/security', '/settings/mail', '/settings/model-connections']
+const ADMIN_PAGES = ['/ai', '/settings', '/settings/integrations', '/settings/security', '/settings/mail', '/settings/model-connections', '/settings/modules']
 const WIDE_PAGES = new Set(['/tasks', '/projects', '/calendar', '/mail', '/developer', '/operations', '/agent-servers', '/agents', '/runner', ...ADMIN_PAGES])
 
 // 旧链接（T-0147 的两个标签）：/agents?tab=servers&server=… 换成独立的服务器页（只带有效的 server 与 range），

@@ -95,6 +95,9 @@ jobs:
       - name: 插拔式模块与侧栏浏览器验收（应用中心停用 / 启用新闻早报、功能未启用页、自定义分组与页面、嵌入页与 CSP、member 只读、手机宽度）
         # 不要求空库：每次新建工作台用户（T-0159 ~ T-0161）
         run: node tests/e2e/modules_browser.cjs
+      - name: 应用中心浏览器验收（四类状态、检测不出站、启停确认与 409、自定义页面整份带版本保存与冲突合并、admin 只读、切换工作空间、手机宽度、暗色）
+        # 不要求空库：每次新建工作台用户；compose job 没有部署 TrendRadar，新闻早报是“待部署”（T-0212）
+        run: node tests/e2e/app_center_browser.cjs
       - name: 首页浏览器验收（工作概况、任务进展与确认结果、我的待办、提醒与日程、恢复默认首页、viewer 只读、手机宽度）
         # 不要求空库：每次新建工作台用户；没有真实 OpenClaw，“智能体完成的任务”由 seed.py review 写入（T-0165）
         run: node tests/e2e/home_browser.cjs
@@ -174,6 +177,10 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
+      - name: 应用中心浏览器验收（已部署 TrendRadar：检测连通、暂停 MCP 后检测超时、配置目录不可写时同步失败与重试成功）
+        # 一个部署同时只能有一个工作空间打开早报推送：排在 news_acceptance.py（结束时关掉自己的）之后、
+        # news_browser.cjs（结束时不关）之前；本脚本打开自己的、结束时（成败都）关掉（T-0212）
+        run: node tests/e2e/app_center_browser.cjs --deployed
       - name: 新闻早报浏览器验收（设置页、早报页各标签、收藏与不感兴趣、首页面板、手机宽度、viewer 只读）
         run: node tests/e2e/news_browser.cjs
       - name: 失败时输出服务状态与日志

@@ -17,8 +17,6 @@ const path = (r: Request) => new URL(r.url).pathname
 type Role = Schema['WorkspaceOut']['role']
 const as = (role: Role) => Response.json({ ...me, workspaces: [{ ...workspace, role }] })
 const off: Schema['ModuleOut'] = { ...newsModule, enabled: false }
-// 一个还没部署、依赖早报的模块，只用来测应用中心的显示
-const finance: Schema['ModuleOut'] = { ...newsModule, key: 'finance', name: '记账', description: '记录收支。', version: '0.1.0', enabled: false, default_enabled: false, ready: false, missing: ['FINANCE_API_URL'], depends_on: ['news'], tools: [], widgets: [] }
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -132,92 +130,7 @@ describe('module enablement in the shell', () => {
   })
 })
 
-describe('应用中心', () => {
-  function setup(role: Role, handler?: (r: Request) => Response | undefined) {
-    let items = [newsModule, finance].map((item) => ({ ...item, can_manage: role === 'owner' }))
-    const requests = mockApi(async r => {
-      const result = handler?.(r)
-      if (result) return result
-      if (path(r) === '/api/v1/me' && r.method === 'GET') return as(role)
-      if (path(r) === '/api/v1/modules') return Response.json({ items })
-      if (path(r) === '/api/v1/modules/news' && r.method === 'PATCH') {
-        const body = await r.clone().json() as Schema['ModuleUpdate']
-        items = items.map((item) => (item.key === 'news' ? { ...item, enabled: body.enabled } : item))
-        return Response.json(items[0])
-      }
-      return undefined
-    })
-    return requests
-  }
-
-  it('lists modules with status, deployment hints, dependencies, tools and widgets', async () => {
-    setup('owner')
-    await openApp('/settings/modules')
-    expect(await screen.findByRole('heading', { level: 1, name: '应用中心' })).toBeVisible()
-    const news = await screen.findByRole('listitem', { name: '模块：新闻早报' })
-    expect(within(news).getByText('已启用', { selector: '.badge' })).toBeVisible()
-    expect(within(news).getByText('v1.0.0')).toBeVisible()
-    expect(within(news).getByText('news_latest')).toBeVisible()
-    expect(within(news).getByText('AI 新闻速览')).toBeVisible()
-    expect(within(news).getByRole('switch', { name: '启用新闻早报' })).toHaveAttribute('aria-checked', 'true')
-    const other = screen.getByRole('listitem', { name: '模块：记账' })
-    expect(within(other).getByText('需要先部署', { selector: '.badge' })).toBeVisible()
-    expect(within(other).getByText('FINANCE_API_URL')).toBeVisible()
-    expect(within(other).getByText('新闻早报', { selector: 'dd' })).toBeVisible()
-    expect(within(other).getByRole('switch', { name: '启用记账' })).toHaveAttribute('aria-checked', 'false')
-  })
-
-  it('lets the owner disable a module after confirming, then refreshes the sidebar', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValue(true)
-    const requests = setup('owner')
-    await openApp('/settings/modules')
-    const nav = screen.getByRole('navigation', { name: '主导航' })
-    expect(nav.querySelector('a[href="/news"]')).toHaveTextContent('早报')
-    const toggle = await screen.findByRole('switch', { name: '启用新闻早报' })
-    await fireEvent.click(toggle)
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('停用后入口、首页组件、智能体工具都会隐藏，数据会保留，再启用就恢复。'))
-    expect(requests.some(r => r.method === 'PATCH')).toBe(false)
-
-    const before = requests.filter(r => path(r) === '/api/v1/modules').length
-    await fireEvent.click(toggle)
-    expect(await screen.findByText('「新闻早报」已停用。')).toBeVisible()
-    const patch = requests.find(r => r.method === 'PATCH')!
-    expect(path(patch)).toBe('/api/v1/modules/news')
-    expect(patch.headers.get('X-Workspace-Id')).toBe('workspace-a')
-    expect(await patch.clone().json()).toEqual({ enabled: false })
-    await vi.waitFor(() => expect(nav.querySelector('a[href="/news"]')).toBeNull())
-    await vi.waitFor(() => expect(requests.filter(r => path(r) === '/api/v1/modules').length).toBeGreaterThan(before))
-    expect(screen.getByRole('switch', { name: '启用新闻早报' })).toHaveAttribute('aria-checked', 'false')
-
-    // 启用不需要确认
-    await fireEvent.click(screen.getByRole('switch', { name: '启用新闻早报' }))
-    expect(await screen.findByText('「新闻早报」已启用。')).toBeVisible()
-    expect(confirm).toHaveBeenCalledTimes(2)
-    await vi.waitFor(() => expect(nav.querySelector('a[href="/news"]')).toHaveTextContent('早报'))
-  })
-
-  it('shows the dependency message from the server', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    setup('owner', r => (r.method === 'PATCH' ? Response.json({ error: { code: 'MODULE_DEPENDENCY', message: '「记账」依赖「新闻早报」：先停用「记账」。', request_id: 'req', details: {} } }, { status: 409 }) : undefined))
-    await openApp('/settings/modules')
-    await fireEvent.click(await screen.findByRole('switch', { name: '启用新闻早报' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('「记账」依赖「新闻早报」：先停用「记账」。')
-  })
-
-  it('is read-only for admins and forbidden for members', async () => {
-    setup('admin')
-    const first = await openApp('/settings/modules')
-    expect(await screen.findByRole('listitem', { name: '模块：新闻早报' })).toBeVisible()
-    expect(screen.getByText('你可以查看；只有 owner 能启用或停用。')).toBeVisible()
-    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
-    first.unmount()
-
-    setup('member')
-    const { router } = await openApp('/settings/modules')
-    expect(router.currentRoute.value.path).toBe('/forbidden')
-    expect(screen.getByRole('navigation', { name: '主导航' }).querySelector('a[href="/settings/modules"]')).toBeNull()
-  })
-})
+// 应用中心的页面测试见 tests/app-center.test.ts（T-0211 改版）
 
 describe('module widgets', () => {
   const card: Schema['WidgetOut'] = { ...widget, id: 'w-news', widget_type: 'news_briefing', config: {} }

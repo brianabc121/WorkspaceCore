@@ -1,0 +1,65 @@
+{
+  "package": "WorkspaceCore App Center development handoff",
+  "baseline_commit": "4760e3471954545c593973862797da21337577b3",
+  "artifact_kind": "documentation_and_mockup",
+  "product_code_changed": false,
+  "product_tests_run": false,
+  "manifest_excludes_itself": true,
+  "files": [
+    {
+      "path": "CLAUDE-HANDOFF.md",
+      "bytes": 54263,
+      "sha256": "f79307cc55876ce5d0290a152193555d6fc737d111cfe5262bb3c0e752e3e6bc"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3623,
+      "sha256": "071e78217a3edc8ebc2045fdc3efc05b1d3eebcb2afce7260097f265a583b38e"
+    },
+    {
+      "path": "REVIEW.md",
+      "bytes": 840,
+      "sha256": "8de72b5bac7ccdd07001aadca9246afdb8602c0c165f6c410ad9010f9419161b"
+    },
+    {
+      "path": "assets/01-app-center.png",
+      "bytes": 1653445,
+      "sha256": "8593f44b1c0acac7b3f6c38dd3fd9eb8f7a1361929377bec03313cf2bf23dc72"
+    },
+    {
+      "path": "docs/acceptance/2026-11-09-app-center-validation.md",
+      "bytes": 5435,
+      "sha256": "52daf920f791582fce72e7517cd4b14141e336f91f1a820a1a48924db50f7730"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-09-app-center-backend.md",
+      "bytes": 9292,
+      "sha256": "3b8ae51e579038c8f15640ec5b95e1f20513d9eadded044691a617c41347a393"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-09-app-center-web.md",
+      "bytes": 7596,
+      "sha256": "00f157a6b9267817169683abb464534e7facc7c52994fefbf89b62b3a5d47a5f"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-09-app-center-contract.md",
+      "bytes": 12824,
+      "sha256": "eb2575fa79f2d18ebc76ecf296f5e07b3ba76daa5cb2173761b095a3c000dc38"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-09-app-center-design.md",
+      "bytes": 9892,
+      "sha256": "89112dea146a0ce6dfc13988791502c7e19bc8dbc5978691d95876fa5ff616df"
+    },
+    {
+      "path": "reference/code-baseline.md",
+      "bytes": 4113,
+      "sha256": "d331732778b6a5109460c46e08cd0b330dd6b9ccf8d6258e2f7312d5c8370a03"
+    },
+    {
+      "path": "reference/source-manifest.json",
+      "bytes": 7064,
+      "sha256": "750414430ac2fb19fdcd44d0d8e75f0cc484ebea23cce660c3fb5dcb1a75a2f7"
+    }
+  ]
+}

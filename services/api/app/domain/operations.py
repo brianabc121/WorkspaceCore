@@ -129,6 +129,17 @@ class ServiceCache:
         if ttl > 0:
             self.entries[key] = (time.monotonic() + ttl, value)
 
+    def remember(self, key: str, value: ServiceStatusOut, ttl: float) -> None:
+        """与 put 相同，但 ttl 为 0 时也留下结果（应用中心要显示“最近一次检测”，标为不新鲜）。"""
+        self.entries[key] = (time.monotonic() + max(ttl, 0), value)
+
+    def peek(self, key: str) -> tuple[ServiceStatusOut, bool] | None:
+        """只读缓存（应用中心）：过期的结果也返回，第二项为 True 表示已过期（不新鲜）。"""
+        entry = self.entries.get(key)
+        if entry is None:
+            return None
+        return entry[1], entry[0] < time.monotonic()
+
 
 _NAMES = {
     "api": "API",
@@ -239,7 +250,21 @@ class DeploymentHealth:
         """插拔式模块声明的外部服务（例如新闻早报的 TrendRadar）：能否连通。"""
         return await self._cached(check.service_id, lambda: self._module_check(check))
 
-    async def _module_check(self, check: ServiceCheckSpec) -> ServiceStatusOut:
+    def cached_module_check(self, check: ServiceCheckSpec) -> tuple[ServiceStatusOut, bool] | None:
+        """应用中心读详情用：只看缓存，不探测（没有缓存返回 None）。"""
+        return self.cache.peek(check.service_id)
+
+    async def fresh_module_check(
+        self, check: ServiceCheckSpec, *, max_seconds: float
+    ) -> ServiceStatusOut:
+        """应用中心的“检测”按钮：现在探测一次（时限不超过 max_seconds），结果写回缓存。"""
+        result = await self._module_check(check, max_seconds=max_seconds)
+        self.cache.remember(check.service_id, result, self.settings.service_status_cache_seconds)
+        return result
+
+    async def _module_check(
+        self, check: ServiceCheckSpec, *, max_seconds: float | None = None
+    ) -> ServiceStatusOut:
         made = registry.resolve(check.probe)(self.settings, self.runtime)
         if made is None:
             return _status(
@@ -250,6 +275,8 @@ class DeploymentHealth:
                 provider=check.service_id,
             )
         probe, limit = made
+        if max_seconds is not None:
+            limit = min(limit, max_seconds)
         result = await self._timed(check.service_id, "integration", probe, limit)
         return result.model_copy(update={"provider": check.service_id})
 

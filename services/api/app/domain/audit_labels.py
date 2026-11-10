@@ -53,6 +53,10 @@ _LABELS: dict[str, str] = {
     "workspace.member_role_changed": "修改成员角色",
     "module.enabled": "启用模块",
     "module.disabled": "停用模块",
+    "module.sync.succeeded": "模块同步成功",
+    "module.sync.failed": "模块同步失败",
+    "module.sync.unknown": "模块同步结果未知",
+    "module.sync.retried": "重试模块同步",
     "navigation.updated": "修改侧栏布局",
     # 审计本身
     "audit.export_generated": "导出审计日志",

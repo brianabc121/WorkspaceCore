@@ -158,7 +158,7 @@ async def test_disabling_news_turns_off_pages_tools_jobs_and_ingest(env: ImEnv) 
     audit = await run_sql(
         env.database_url,
         "SELECT action || ':' || resource_id FROM workspace.audit_logs "
-        "WHERE action LIKE 'module.%' ORDER BY created_at",
+        "WHERE action IN ('module.enabled', 'module.disabled') ORDER BY created_at",
     )
     assert audit == "module.disabled:news"
 
