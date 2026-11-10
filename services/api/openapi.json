@@ -250,6 +250,10 @@
             "description": "内存上限（MiB）；null 不限制（默认）",
             "title": "Mem Limit Mb"
           },
+          "model": {
+            "$ref": "#/components/schemas/NewInstanceModelChoice",
+            "description": "主模型：中转站管理里启用、配置完整的连接与其中的模型。选择即授权给新实例，与实例、主模型绑定在同一个事务里建立（T-0204）"
+          },
           "name": {
             "maxLength": 64,
             "minLength": 1,
@@ -278,7 +282,8 @@
           "request_id",
           "server_id",
           "server_version",
-          "name"
+          "name",
+          "model"
         ],
         "title": "AgentDeploymentCreateIn",
         "type": "object"
@@ -1487,6 +1492,375 @@
           "blocked"
         ],
         "title": "AgentMetrics",
+        "type": "object"
+      },
+      "AgentModelBindingOut": {
+        "properties": {
+          "applied_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At"
+          },
+          "applied_connection_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "实例确认已应用的连接",
+            "title": "Applied Connection Id"
+          },
+          "applied_connection_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Connection Name"
+          },
+          "applied_model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Model Id"
+          },
+          "applied_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Revision"
+          },
+          "apply_state": {
+            "enum": [
+              "legacy_active",
+              "pending",
+              "applying",
+              "applied",
+              "failed",
+              "unknown",
+              "manual_required"
+            ],
+            "title": "Apply State",
+            "type": "string"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "目标连接；解除绑定后为 null",
+            "title": "Connection Id"
+          },
+          "connection_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "目标连接的名称（显示用）",
+            "title": "Connection Name"
+          },
+          "desired_revision": {
+            "description": "目标每变一次加 1",
+            "title": "Desired Revision",
+            "type": "integer"
+          },
+          "instance_id": {
+            "format": "uuid",
+            "title": "Instance Id",
+            "type": "string"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Code"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "revoked": {
+            "description": "已解除绑定：后续模型 Key 取用一律拒绝",
+            "title": "Revoked",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "instance_id",
+          "connection_id",
+          "model_id",
+          "desired_revision",
+          "applied_connection_id",
+          "applied_model_id",
+          "applied_revision",
+          "applied_at",
+          "revoked",
+          "apply_state",
+          "last_error_code",
+          "job_id",
+          "version",
+          "connection_name",
+          "applied_connection_name"
+        ],
+        "title": "AgentModelBindingOut",
+        "type": "object"
+      },
+      "AgentModelConfigOut": {
+        "description": "实例自己的非敏感模型配置（GET /agent-api/v1/model-config）。不含 Key。\n\nstate=active：按 provider_key / base_url / model_id 等字段写入受管 provider 与主模型；\nstate=revoked：已解除绑定，移除受管 provider（连接相关字段为 null）。\napply_key 变了就要重新应用（目标修订号 + 应用任务的尝试次数）。",
+        "properties": {
+          "api": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "OpenClaw 的 provider api 值（例如 openai-completions）",
+            "title": "Api"
+          },
+          "apply_key": {
+            "description": "<desired_revision>.<attempt>；与上次应用的不同就重新应用",
+            "title": "Apply Key",
+            "type": "string"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "binding_version": {
+            "title": "Binding Version",
+            "type": "integer"
+          },
+          "config_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Revision"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
+          "desired_revision": {
+            "title": "Desired Revision",
+            "type": "integer"
+          },
+          "fingerprint": {
+            "description": "受管配置片段的摘要",
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "job_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "queued",
+                  "running",
+                  "succeeded",
+                  "failed",
+                  "unknown",
+                  "manual_required"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "当前目标的应用任务状态",
+            "title": "Job State"
+          },
+          "managed_prefix": {
+            "description": "受管 provider 键的前缀（只改这些 provider）",
+            "title": "Managed Prefix",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          },
+          "primary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "agents.defaults.model.primary 的值：<provider_key>/<model_id>",
+            "title": "Primary"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "enum": [
+                  "openai_compatible",
+                  "anthropic_native",
+                  "gemini_native"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol"
+          },
+          "provider_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "OpenClaw 配置里 models.providers 的键（由连接 ID 生成）",
+            "title": "Provider Key"
+          },
+          "secret_ref_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "apiKey 的 exec SecretRef id（由连接 ID 生成）",
+            "title": "Secret Ref Id"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "revoked"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "binding_version",
+          "desired_revision",
+          "apply_key",
+          "job_state",
+          "managed_prefix",
+          "connection_id",
+          "provider_key",
+          "api",
+          "protocol",
+          "base_url",
+          "model_id",
+          "model_name",
+          "primary",
+          "secret_ref_id",
+          "config_revision",
+          "fingerprint"
+        ],
+        "title": "AgentModelConfigOut",
         "type": "object"
       },
       "AgentOpsActionOut": {
@@ -5706,6 +6080,458 @@
         "title": "CommentUpdate",
         "type": "object"
       },
+      "ConnectionActivityOut": {
+        "description": "创建 / 配置 / 更换 Key / 授权 / 取用 / 应用事件的脱敏投影。",
+        "properties": {
+          "action": {
+            "description": "审计事件名，或 credential.resolved（取用记录）",
+            "title": "Action",
+            "type": "string"
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Id"
+          },
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "instance_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instance Id"
+          },
+          "instance_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instance Name"
+          },
+          "kind": {
+            "enum": [
+              "audit",
+              "access"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "取用记录的结果：ok / not_found / rate_limited",
+            "title": "Result"
+          },
+          "value_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Version"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "action",
+          "at",
+          "actor_id",
+          "instance_id",
+          "instance_name",
+          "result",
+          "value_version"
+        ],
+        "title": "ConnectionActivityOut",
+        "type": "object"
+      },
+      "ConnectionActivityPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionActivityOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ConnectionActivityPage",
+        "type": "object"
+      },
+      "ConnectionCheckOut": {
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "config_revision": {
+            "description": "检测时连接的配置修订号；与当前不同表示结果已过时",
+            "title": "Config Revision",
+            "type": "integer"
+          },
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "mode": {
+            "description": "metadata 只证明认证与元数据接口可用；inference 才是对某个模型的真实推理请求",
+            "enum": [
+              "metadata",
+              "inference"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unauthorized",
+                  "forbidden",
+                  "timeout",
+                  "unreachable",
+                  "tls_error",
+                  "invalid_response",
+                  "model_not_available",
+                  "protocol_unsupported",
+                  "models_endpoint_unsupported",
+                  "destination_not_allowed",
+                  "credential_unreadable",
+                  "stale_revision"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "服务商限流时按 Retry-After 算出的可重试时间；没有合法值时为 null",
+            "title": "Retry At"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "rate_limited",
+              "unsupported",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "connection_id",
+          "config_revision",
+          "mode",
+          "model_id",
+          "status",
+          "reason",
+          "checked_at",
+          "latency_ms",
+          "retry_at"
+        ],
+        "title": "ConnectionCheckOut",
+        "type": "object"
+      },
+      "ConnectionCheckRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "metadata",
+              "inference"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "description": "服务商的模型 ID，原样保存大小写；不能含空白与控制字符",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "inference 必填；会向服务商发一个很短的请求，可能产生少量费用",
+            "title": "Model Id"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "mode"
+        ],
+        "title": "ConnectionCheckRequest",
+        "type": "object"
+      },
+      "ConnectionGrantPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GrantInstanceOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "ConnectionGrantPage",
+        "type": "object"
+      },
+      "ConnectionModelOut": {
+        "properties": {
+          "availability": {
+            "description": "listed：服务商列表里有或手工填写；verified：真实推理检测通过过",
+            "enum": [
+              "listed",
+              "verified"
+            ],
+            "title": "Availability",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "manual",
+              "discovered"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "model_id",
+          "display_name",
+          "source",
+          "availability",
+          "last_seen_at",
+          "version"
+        ],
+        "title": "ConnectionModelOut",
+        "type": "object"
+      },
+      "ConnectionModelPage": {
+        "properties": {
+          "discovered": {
+            "description": "最近一次完整同步到的模型 ID（最多 1000 个），供“指定模型”勾选；没有同步过为空",
+            "items": {
+              "type": "string"
+            },
+            "title": "Discovered",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionModelOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "sync_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "complete",
+                  "partial",
+                  "unsupported",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync State"
+          },
+          "synced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synced At"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "synced_at",
+          "sync_state",
+          "discovered"
+        ],
+        "title": "ConnectionModelPage",
+        "type": "object"
+      },
       "ContainerIn": {
         "additionalProperties": false,
         "description": "这个实例自己容器的 cgroup（v2 或 v1）与数据目录大小。",
@@ -6952,6 +7778,68 @@
           "complete"
         ],
         "title": "GitHubRepositoryList",
+        "type": "object"
+      },
+      "GrantInstanceOut": {
+        "properties": {
+          "bound": {
+            "description": "这个实例以本连接为目标或已应用连接",
+            "title": "Bound",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "instance_id": {
+            "format": "uuid",
+            "title": "Instance Id",
+            "type": "string"
+          },
+          "instance_name": {
+            "title": "Instance Name",
+            "type": "string"
+          },
+          "instance_status": {
+            "title": "Instance Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance_id",
+          "instance_name",
+          "instance_status",
+          "created_at",
+          "bound"
+        ],
+        "title": "GrantInstanceOut",
+        "type": "object"
+      },
+      "GrantsReplace": {
+        "additionalProperties": false,
+        "properties": {
+          "instance_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Instance Ids",
+            "type": "array"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "instance_ids"
+        ],
+        "title": "GrantsReplace",
         "type": "object"
       },
       "GraphEdge": {
@@ -11263,6 +12151,24 @@
         "title": "KnowledgeSourceUpdate",
         "type": "object"
       },
+      "LegacyModelInfo": {
+        "description": "没有原生绑定、仍按旧配置运行的实例：只给旧授权的引用名，不猜连接与模型。",
+        "properties": {
+          "legacy_refs": {
+            "description": "这个实例在旧密钥库里的授权引用名",
+            "items": {
+              "type": "string"
+            },
+            "title": "Legacy Refs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "legacy_refs"
+        ],
+        "title": "LegacyModelInfo",
+        "type": "object"
+      },
       "LinkOut": {
         "properties": {
           "deleted": {
@@ -12804,6 +13710,117 @@
         "title": "MetricsOut",
         "type": "object"
       },
+      "MigrationClassify": {
+        "additionalProperties": false,
+        "properties": {
+          "purpose": {
+            "enum": [
+              "model",
+              "non_model"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "purpose"
+        ],
+        "title": "MigrationClassify",
+        "type": "object"
+      },
+      "MigrationEntryOut": {
+        "description": "旧密钥库的导入项（连接映射）。不含 Key。",
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/ModelConnectionOut"
+          },
+          "entry_id": {
+            "description": "迁移映射 ID（即连接 ID）",
+            "format": "uuid",
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "legacy_grant_refs": {
+            "description": "原有授权的 ref_id（OpenClaw 配置里的引用名）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Legacy Grant Refs",
+            "type": "array"
+          },
+          "legacy_kind": {
+            "enum": [
+              "model_api_key",
+              "api_token",
+              "generic"
+            ],
+            "title": "Legacy Kind",
+            "type": "string"
+          },
+          "legacy_name": {
+            "title": "Legacy Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "connection",
+          "legacy_name",
+          "legacy_kind",
+          "legacy_grant_refs"
+        ],
+        "title": "MigrationEntryOut",
+        "type": "object"
+      },
+      "MigrationEntryPage": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "needs_configuration / needs_classification / managed / non_model / needs_review / unmapped（还没导入的旧密钥数）",
+            "title": "Counts",
+            "type": "object"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MigrationEntryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "counts"
+        ],
+        "title": "MigrationEntryPage",
+        "type": "object"
+      },
       "MobilePosition": {
         "additionalProperties": false,
         "description": "移动端单列：按 y 从小到大排列。",
@@ -12826,6 +13843,1255 @@
           "h"
         ],
         "title": "MobilePosition",
+        "type": "object"
+      },
+      "ModelApplyJobOut": {
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "desired_revision": {
+            "title": "Desired Revision",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "instance_id": {
+            "format": "uuid",
+            "title": "Instance Id",
+            "type": "string"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Code"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "unknown",
+              "manual_required"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "instance_id",
+          "state",
+          "desired_revision",
+          "attempt",
+          "last_error_code",
+          "created_at",
+          "started_at",
+          "finished_at"
+        ],
+        "title": "ModelApplyJobOut",
+        "type": "object"
+      },
+      "ModelAssignmentPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ModelAssignmentRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "ModelAssignmentPage",
+        "type": "object"
+      },
+      "ModelAssignmentRow": {
+        "description": "管理页“OpenClaw 连接分配”表的一行。",
+        "properties": {
+          "binding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentModelBindingOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "instance_id": {
+            "format": "uuid",
+            "title": "Instance Id",
+            "type": "string"
+          },
+          "instance_name": {
+            "title": "Instance Name",
+            "type": "string"
+          },
+          "instance_status": {
+            "title": "Instance Status",
+            "type": "string"
+          },
+          "legacy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LegacyModelInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "instance_id",
+          "instance_name",
+          "instance_status",
+          "binding",
+          "legacy"
+        ],
+        "title": "ModelAssignmentRow",
+        "type": "object"
+      },
+      "ModelBindingApply": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "description": "乐观并发版本号；写请求带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "ModelBindingApply",
+        "type": "object"
+      },
+      "ModelBindingPut": {
+        "additionalProperties": false,
+        "properties": {
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "model_id": {
+            "description": "服务商的模型 ID，原样保存大小写；不能含空白与控制字符",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$",
+            "title": "Model Id",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "description": "乐观并发版本号；写请求带上读取时的版本",
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "首次绑定传 null；已有绑定时必须带当前版本",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "connection_id",
+          "model_id"
+        ],
+        "title": "ModelBindingPut",
+        "type": "object"
+      },
+      "ModelBindingView": {
+        "properties": {
+          "apply_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "legacy_active",
+                  "pending",
+                  "applying",
+                  "applied",
+                  "failed",
+                  "unknown",
+                  "manual_required"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "有绑定时同 binding.apply_state；没有绑定、仍按旧配置运行时为 legacy_active",
+            "title": "Apply State"
+          },
+          "binding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentModelBindingOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "legacy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LegacyModelInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "apply_state 为 legacy_active 时的旧配置信息；有原生绑定时为 null"
+          }
+        },
+        "required": [
+          "binding",
+          "apply_state",
+          "legacy"
+        ],
+        "title": "ModelBindingView",
+        "type": "object"
+      },
+      "ModelConfigApplied": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_version": {
+            "minimum": 1.0,
+            "title": "Binding Version",
+            "type": "integer"
+          },
+          "desired_revision": {
+            "minimum": 1.0,
+            "title": "Desired Revision",
+            "type": "integer"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9_]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "失败类别（固定的小写代码），不含远端原始输出",
+            "title": "Reason"
+          },
+          "result": {
+            "enum": [
+              "applied",
+              "failed",
+              "manual_required"
+            ],
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "binding_version",
+          "desired_revision",
+          "result"
+        ],
+        "title": "ModelConfigApplied",
+        "type": "object"
+      },
+      "ModelConfigAppliedOut": {
+        "description": "回报的结果：只回状态，不回连接或内部字段。",
+        "properties": {
+          "applied_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Revision"
+          },
+          "apply_state": {
+            "enum": [
+              "legacy_active",
+              "pending",
+              "applying",
+              "applied",
+              "failed",
+              "unknown",
+              "manual_required"
+            ],
+            "title": "Apply State",
+            "type": "string"
+          },
+          "desired_revision": {
+            "title": "Desired Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "apply_state",
+          "desired_revision",
+          "applied_revision"
+        ],
+        "title": "ModelConfigAppliedOut",
+        "type": "object"
+      },
+      "ModelConnectionCapabilities": {
+        "properties": {
+          "enabled": {
+            "description": "中转站管理是否启用（部署开关）",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "limits": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "例如 max_models、check_per_minute",
+            "title": "Limits",
+            "type": "object"
+          },
+          "official_presets": {
+            "items": {
+              "$ref": "#/components/schemas/OfficialPreset"
+            },
+            "title": "Official Presets",
+            "type": "array"
+          },
+          "supported_protocols": {
+            "description": "已核验并开放的协议；未核验的不出现，前端不显示",
+            "items": {
+              "enum": [
+                "openai_compatible",
+                "anthropic_native",
+                "gemini_native"
+              ],
+              "type": "string"
+            },
+            "title": "Supported Protocols",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "supported_protocols",
+          "official_presets",
+          "limits"
+        ],
+        "title": "ModelConnectionCapabilities",
+        "type": "object"
+      },
+      "ModelConnectionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key": {
+            "description": "只写；保存后任何接口都不再返回",
+            "format": "password",
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string",
+            "writeOnly": true
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "description": "协议基地址（不含 /chat/completions 等单次请求路径）。必须是 HTTPS；不能带用户名密码、查询参数或片段。尾斜杠会被去掉",
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "connection_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "official",
+                  "relay"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Type"
+          },
+          "description": {
+            "default": "",
+            "description": "纯文本",
+            "maxLength": 500,
+            "title": "Description",
+            "type": "string"
+          },
+          "model_scope": {
+            "default": "selected",
+            "enum": [
+              "selected",
+              "all_available"
+            ],
+            "title": "Model Scope",
+            "type": "string"
+          },
+          "models": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModelInput"
+            },
+            "maxItems": 1000,
+            "title": "Models",
+            "type": "array"
+          },
+          "name": {
+            "description": "工作空间内唯一；纯文本",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "official_provider": {
+            "anyOf": [
+              {
+                "enum": [
+                  "openai",
+                  "anthropic",
+                  "google"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Provider"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "enum": [
+                  "openai_compatible",
+                  "anthropic_native",
+                  "gemini_native"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol"
+          },
+          "save_as_draft": {
+            "default": false,
+            "description": "true：允许 URL / 协议 / 模型暂缺，保存为草稿且默认停用；false：必须配置完整（ready），默认启用",
+            "title": "Save As Draft",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "api_key"
+        ],
+        "title": "ModelConnectionCreate",
+        "type": "object"
+      },
+      "ModelConnectionKeyRotate": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key": {
+            "format": "password",
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string",
+            "writeOnly": true
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "api_key"
+        ],
+        "title": "ModelConnectionKeyRotate",
+        "type": "object"
+      },
+      "ModelConnectionOut": {
+        "description": "连接的元数据。绝不输出 Key 明文、密文、credential_ref 或内部 secret_id。",
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "binding_count": {
+            "description": "以它为目标或已应用连接的实例数",
+            "minimum": 0.0,
+            "title": "Binding Count",
+            "type": "integer"
+          },
+          "config_revision": {
+            "title": "Config Revision",
+            "type": "integer"
+          },
+          "configuration_state": {
+            "description": "ready：类型、已开放的协议、URL、可解密 Key、非空明确模型集合都齐全（不表示服务商已接受推理请求）",
+            "enum": [
+              "draft",
+              "ready",
+              "needs_review"
+            ],
+            "title": "Configuration State",
+            "type": "string"
+          },
+          "connection_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "official",
+                  "relay"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "迁移草稿可能为 null",
+            "title": "Connection Type"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "credential_configured": {
+            "description": "已保存可解密的 Key；不表示服务商接受这个 Key",
+            "title": "Credential Configured",
+            "type": "boolean"
+          },
+          "credential_version": {
+            "description": "Key 的版本，更换时加 1",
+            "title": "Credential Version",
+            "type": "integer"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "管理员启停，与检测结果无关",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "grant_count": {
+            "minimum": 0.0,
+            "title": "Grant Count",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectionCheckOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次与当前配置修订号一致的检测；配置变化后为 null"
+          },
+          "legacy_source_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "从旧密钥库导入时的原密钥 ID，只用于追溯，不能拿来取 Key",
+            "title": "Legacy Source Id"
+          },
+          "migration_state": {
+            "enum": [
+              "native",
+              "needs_configuration",
+              "needs_classification",
+              "managed",
+              "non_model"
+            ],
+            "title": "Migration State",
+            "type": "string"
+          },
+          "model_count": {
+            "minimum": 0.0,
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "model_scope": {
+            "enum": [
+              "selected",
+              "all_available"
+            ],
+            "title": "Model Scope",
+            "type": "string"
+          },
+          "models_synced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models Synced At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "official_provider": {
+            "anyOf": [
+              {
+                "enum": [
+                  "openai",
+                  "anthropic",
+                  "google"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Provider"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "enum": [
+                  "openai_compatible",
+                  "anthropic_native",
+                  "gemini_native"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol"
+          },
+          "sync_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "complete",
+                  "partial",
+                  "unsupported",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync State"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "name",
+          "description",
+          "connection_type",
+          "official_provider",
+          "protocol",
+          "base_url",
+          "credential_configured",
+          "credential_version",
+          "model_scope",
+          "configuration_state",
+          "enabled",
+          "migration_state",
+          "legacy_source_id",
+          "model_count",
+          "grant_count",
+          "binding_count",
+          "config_revision",
+          "version",
+          "sync_state",
+          "models_synced_at",
+          "last_check",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ModelConnectionOut",
+        "type": "object"
+      },
+      "ModelConnectionPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ModelConnectionOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total": {
+            "description": "符合筛选条件的全部连接数（不是当前页条数）",
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "ModelConnectionPage",
+        "type": "object"
+      },
+      "ModelConnectionSummary": {
+        "description": "整个工作空间的统计，不受分页或筛选影响；non_model 不计入。",
+        "properties": {
+          "check_passed": {
+            "description": "ready 且启用、15 分钟内对当前配置修订号检测通过的连接数（metadata 或 inference）",
+            "minimum": 0.0,
+            "title": "Check Passed",
+            "type": "integer"
+          },
+          "check_passed_inference": {
+            "description": "其中最近一次是推理检测通过的",
+            "minimum": 0.0,
+            "title": "Check Passed Inference",
+            "type": "integer"
+          },
+          "needs_attention": {
+            "description": "待完善 / 待归类 / 需要复核 / 最近检测失败或限流的连接数",
+            "minimum": 0.0,
+            "title": "Needs Attention",
+            "type": "integer"
+          },
+          "non_model": {
+            "description": "归类为非模型凭据的兼容项数",
+            "minimum": 0.0,
+            "title": "Non Model",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          },
+          "unique_granted_instances": {
+            "description": "至少有一个连接授权的实例数（去重）",
+            "minimum": 0.0,
+            "title": "Unique Granted Instances",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "check_passed",
+          "check_passed_inference",
+          "needs_attention",
+          "unique_granted_instances",
+          "non_model"
+        ],
+        "title": "ModelConnectionSummary",
+        "type": "object"
+      },
+      "ModelConnectionUpdate": {
+        "additionalProperties": false,
+        "description": "省略的字段不变；null 只能用于草稿的可空字段。不含 api_key（用 rotate-key）。",
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "description": "协议基地址（不含 /chat/completions 等单次请求路径）。必须是 HTTPS；不能带用户名密码、查询参数或片段。尾斜杠会被去掉",
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "confirm_impact": {
+            "default": false,
+            "description": "停用会影响已授权 / 已绑定的实例时，先返回 409 与影响摘要；确认后带 true 再提交",
+            "title": "Confirm Impact",
+            "type": "boolean"
+          },
+          "connection_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "official",
+                  "relay"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "description": "纯文本",
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "description": "工作空间内唯一；纯文本",
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "official_provider": {
+            "anyOf": [
+              {
+                "enum": [
+                  "openai",
+                  "anthropic",
+                  "google"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Provider"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "enum": [
+                  "openai_compatible",
+                  "anthropic_native",
+                  "gemini_native"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "ModelConnectionUpdate",
+        "type": "object"
+      },
+      "ModelCredentialError": {
+        "properties": {
+          "code": {
+            "const": "NOT_FOUND",
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "ModelCredentialError",
+        "type": "object"
+      },
+      "ModelCredentialResolveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "items": {
+              "maxLength": 64,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "ModelCredentialResolveRequest",
+        "type": "object"
+      },
+      "ModelCredentialResolveResponse": {
+        "properties": {
+          "errors": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelCredentialError"
+            },
+            "title": "Errors",
+            "type": "object"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "values",
+          "errors"
+        ],
+        "title": "ModelCredentialResolveResponse",
+        "type": "object"
+      },
+      "ModelInput": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "model_id": {
+            "description": "服务商的模型 ID，原样保存大小写；不能含空白与控制字符",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$",
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id"
+        ],
+        "title": "ModelInput",
+        "type": "object"
+      },
+      "ModelSyncRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "description": "乐观并发版本号；写请求带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "ModelSyncRequest",
+        "type": "object"
+      },
+      "ModelSyncResult": {
+        "properties": {
+          "added": {
+            "minimum": 0.0,
+            "title": "Added",
+            "type": "integer"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/ModelConnectionOut"
+          },
+          "discovered": {
+            "description": "这次完整同步到的模型 ID；不完整或失败时为上一次的快照",
+            "items": {
+              "type": "string"
+            },
+            "title": "Discovered",
+            "type": "array"
+          },
+          "kept_in_use": {
+            "description": "服务商这次没有再列出、但正被智能体使用而保留的模型 ID（全部可用模型范围下不会默默移除；请先给这些智能体换模型）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Kept In Use",
+            "type": "array"
+          },
+          "kept_previous": {
+            "description": "同步不完整或失败时保留上一次完整快照（不会默默移除已绑定的模型）",
+            "title": "Kept Previous",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unauthorized",
+                  "forbidden",
+                  "timeout",
+                  "unreachable",
+                  "tls_error",
+                  "invalid_response",
+                  "model_not_available",
+                  "protocol_unsupported",
+                  "models_endpoint_unsupported",
+                  "destination_not_allowed",
+                  "credential_unreadable",
+                  "stale_revision"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "removed": {
+            "minimum": 0.0,
+            "title": "Removed",
+            "type": "integer"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          },
+          "sync_state": {
+            "enum": [
+              "complete",
+              "partial",
+              "unsupported",
+              "failed"
+            ],
+            "title": "Sync State",
+            "type": "string"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sync_state",
+          "added",
+          "removed",
+          "total",
+          "kept_previous",
+          "reason",
+          "retry_at",
+          "discovered",
+          "kept_in_use",
+          "connection"
+        ],
+        "title": "ModelSyncResult",
+        "type": "object"
+      },
+      "ModelsReplace": {
+        "additionalProperties": false,
+        "properties": {
+          "model_scope": {
+            "enum": [
+              "selected",
+              "all_available"
+            ],
+            "title": "Model Scope",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelInput"
+            },
+            "maxItems": 1000,
+            "title": "Models",
+            "type": "array"
+          },
+          "version": {
+            "description": "乐观并发版本号；写请求带上读取时的版本",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "model_scope",
+          "models"
+        ],
+        "title": "ModelsReplace",
         "type": "object"
       },
       "ModuleList": {
@@ -13348,6 +15614,31 @@
           "tx_bytes"
         ],
         "title": "NetworkIn",
+        "type": "object"
+      },
+      "NewInstanceModelChoice": {
+        "additionalProperties": false,
+        "description": "新部署时选择的主连接与模型：选择即授权给即将创建的实例（同一事务）。",
+        "properties": {
+          "connection_id": {
+            "format": "uuid",
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "model_id": {
+            "description": "服务商的模型 ID，原样保存大小写；不能含空白与控制字符",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$",
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection_id",
+          "model_id"
+        ],
+        "title": "NewInstanceModelChoice",
         "type": "object"
       },
       "NewsBriefingConfig": {
@@ -15895,6 +18186,51 @@
         "title": "NotificationsWidgetUpdate",
         "type": "object"
       },
+      "OfficialPreset": {
+        "properties": {
+          "base_url": {
+            "description": "经核验的官方协议基地址",
+            "title": "Base Url",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "protocol": {
+            "enum": [
+              "openai_compatible",
+              "anthropic_native",
+              "gemini_native"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "openai",
+              "anthropic",
+              "google"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "source": {
+            "description": "核验来源（官方文档地址）",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "label",
+          "protocol",
+          "base_url",
+          "source"
+        ],
+        "title": "OfficialPreset",
+        "type": "object"
+      },
       "OverviewSummary": {
         "description": "未知时为 null，不以 0 冒充（规范第 16 节 A17：不把空数据当正常）。",
         "properties": {
@@ -16370,6 +18706,94 @@
           "new_password"
         ],
         "title": "PasswordChangeRequest",
+        "type": "object"
+      },
+      "PickerConnectionOut": {
+        "description": "选择器里的连接：只列启用且配置完整的。",
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "connection_type": {
+            "enum": [
+              "official",
+              "relay"
+            ],
+            "title": "Connection Type",
+            "type": "string"
+          },
+          "granted": {
+            "description": "已授权给这个实例（新建实例时恒为 false）",
+            "title": "Granted",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_count": {
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "protocol": {
+            "enum": [
+              "openai_compatible",
+              "anthropic_native",
+              "gemini_native"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "connection_type",
+          "protocol",
+          "base_url",
+          "model_count",
+          "granted"
+        ],
+        "title": "PickerConnectionOut",
+        "type": "object"
+      },
+      "PickerConnectionPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PickerConnectionOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "PickerConnectionPage",
         "type": "object"
       },
       "ProgressCounts": {
@@ -25278,6 +27702,207 @@
         ]
       }
     },
+    "/agent-api/v1/model-config": {
+      "get": {
+        "description": "非敏感配置：OpenClaw provider 键、api、base URL、模型 ID、SecretRef id 与 apply_key；不含 Key。state=revoked 表示已解除绑定、要移除受管 provider。没有绑定或目标连接不可用时 409 MODEL_CONFIGURATION_INCOMPLETE（details.reason 为 no_binding / connection_unavailable），实例保持现有配置。当前目标的任务在排队时，取配置即标为执行中。每个实例每分钟最多 6 次。",
+        "operationId": "get_agent_model_config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentModelConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          }
+        },
+        "security": [
+          {
+            "InstanceToken": []
+          }
+        ],
+        "summary": "取自己的主模型配置（实例的 model-config.mjs，每分钟一次）",
+        "tags": [
+          "agent-api"
+        ]
+      }
+    },
+    "/agent-api/v1/model-config/applied": {
+      "post": {
+        "description": "只认当前目标的 desired_revision：迟到的旧回报 409 MODEL_BINDING_CONFLICT，不改状态。result 为 applied / failed / manual_required；reason 是固定的小写代码，不含远端原始输出。每个实例每分钟最多 6 次。",
+        "operationId": "report_agent_model_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelConfigApplied"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConfigAppliedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          }
+        },
+        "security": [
+          {
+            "InstanceToken": []
+          }
+        ],
+        "summary": "回报主模型配置的应用结果（实例的 model-config.mjs）",
+        "tags": [
+          "agent-api"
+        ]
+      }
+    },
+    "/agent-api/v1/model-credentials/resolve": {
+      "post": {
+        "description": "只给当前目标或尚未退休的已应用连接，且连接启用、仍授权给这个实例、绑定没有解除；其他一律 errors[id].code = NOT_FOUND。每次取用都写记录；响应带 Cache-Control: no-store。每个实例每分钟最多 60 次。",
+        "operationId": "resolve_agent_model_credentials",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelCredentialResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCredentialResolveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          }
+        },
+        "security": [
+          {
+            "InstanceToken": []
+          }
+        ],
+        "summary": "取模型连接的 Key（实例的取密钥程序，ids 为 mc_<连接 ID>）",
+        "tags": [
+          "agent-api"
+        ]
+      }
+    },
     "/agent-api/v1/secrets/resolve": {
       "post": {
         "description": "未授权与不存在都返回 errors[id].code = NOT_FOUND；每次取用都写记录。响应带 Cache-Control: no-store。",
@@ -27712,6 +30337,581 @@
         ]
       }
     },
+    "/api/v1/agents/instances/{instance_id}/model-binding": {
+      "delete": {
+        "description": "目标置空、revoked=true：立即拒绝这个实例后续取模型 Key，并排任务移除受管配置。已在进程里的 Key 不保证立即停止工作；不删除连接或授权。",
+        "operationId": "delete_model_binding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentModelBindingOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "解除实例的主模型绑定（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      },
+      "get": {
+        "description": "binding 为 null 且 apply_state 为 legacy_active：实例仍按旧手工配置运行（legacy.legacy_refs 是旧授权的引用名）；两者都为 null：还没有配置模型。",
+        "operationId": "get_model_binding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelBindingView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "实例的主模型绑定（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      },
+      "put": {
+        "description": "第一次 version 传 null，之后必须带当前版本（409 VERSION_CONFLICT）。连接要启用（409 MODEL_CONNECTION_DISABLED）、配置完整（409 MODEL_CONNECTION_NOT_READY）、协议已开放（409 MODEL_PROTOCOL_UNSUPPORTED）、已授权给这个实例（409 MODEL_NOT_ALLOWED）、模型在连接的模型集合里（422 MODEL_NOT_ALLOWED）、Key 可读（409 CREDENTIAL_UNREADABLE）。保存后是 pending：实例应用并回报后才变成 applied；切换期间旧的已应用连接仍可取 Key。",
+        "operationId": "put_model_binding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelBindingPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentModelBindingOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "设置实例的主模型（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/model-binding/apply": {
+      "post": {
+        "description": "同一修订号复用同一个任务；失败、未知、待手动的重新排队（attempt 加 1）。实例的 model-config.mjs 每分钟取一次配置并回报；手动接入的实例按接入包 CHECKLIST.md 操作。",
+        "operationId": "apply_model_binding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelBindingApply"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelApplyJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "（重新）应用当前目标（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/agents/instances/{instance_id}/model-binding/jobs/{job_id}": {
+      "get": {
+        "description": "排队或执行中超过 10 分钟没有结果显示 unknown（不代表失败或成功）。不含远端原始输出或配置内容。",
+        "operationId": "get_model_apply_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelApplyJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "应用任务的状态（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
     "/api/v1/agents/instances/{instance_id}/ops": {
       "get": {
         "description": "只适用于用 SSH 部署过、专用密钥还在的实例（available）；最近 20 次（7 天内），列表不含输出，输出看单条记录（T-0114）。",
@@ -29711,6 +32911,249 @@
         "summary": "取消实例的唤醒（admin）",
         "tags": [
           "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/model-assignments": {
+      "get": {
+        "description": "每个实例一行：目标连接与模型、已应用的连接与模型、应用状态；没有原生绑定、仍按旧配置运行的实例 legacy 不为空（不猜连接与模型）。connection_id 只看以它为目标或已应用的实例。",
+        "operationId": "list_model_assignments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "connection_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Connection Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^\\d{1,6}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelAssignmentPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "OpenClaw 连接分配（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/agents/model-connection-options": {
+      "get": {
+        "description": "只列启用、配置完整、协议已开放的连接。带 instance_id 时标出是否已授权给这个实例（未授权的要先在中转站管理里授权）；新建实例不带，选择即授权给即将创建的实例。",
+        "operationId": "list_model_connection_options",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "instance_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Instance Id"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickerConnectionPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "主模型连接的可选项（owner）",
+        "tags": [
+          "model-connections"
         ]
       }
     },
@@ -48023,6 +51466,2274 @@
         "summary": "修改个人资料（显示名）",
         "tags": [
           "me"
+        ]
+      }
+    },
+    "/api/v1/model-connections": {
+      "get": {
+        "description": "服务端搜索（名称、URL、模型 ID，按字面、不区分大小写）与筛选，分页之前生效；total 是符合条件的全部连接数。归类为非模型凭据的导入项不在这里（见 migration/entries）。游标绑定筛选条件，换条件要从第一页重新加载（旧游标 422）。",
+        "operationId": "list_model_connections",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "description": "官方直连 / 第三方中转",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "official",
+                    "relay"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "官方直连 / 第三方中转",
+              "title": "Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "configuration_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "draft",
+                    "ready",
+                    "needs_review"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Configuration State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "enabled",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enabled"
+            }
+          },
+          {
+            "description": "最近一次（当前配置修订号的）检测结果；never 表示还没检测过",
+            "in": "query",
+            "name": "check_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "passed",
+                    "failed",
+                    "rate_limited",
+                    "unsupported",
+                    "unknown",
+                    "never"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "最近一次（当前配置修订号的）检测结果；never 表示还没检测过",
+              "title": "Check Status"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConnectionPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "连接列表（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      },
+      "post": {
+        "description": "元数据与加密凭据在同一个事务里创建。save_as_draft=false 时必须配置完整（ready）并默认启用；草稿默认停用。URL 只接受 HTTPS 协议基地址（不含用户名密码、查询参数、片段），不接受自定义请求头。未开放的协议 422 MODEL_PROTOCOL_UNSUPPORTED；官方预设配第三方主机 422 MODEL_OFFICIAL_HOST_MISMATCH；同名 409 MODEL_CONNECTION_EXISTS。",
+        "operationId": "create_model_connection",
+        "parameters": [
+          {
+            "description": "可选：同一个键的重复请求返回同一个连接（响应头 Idempotent-Replayed: true），不会再建凭据；换了请求内容 409 IDEMPOTENCY_KEY_REUSED",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "可选：同一个键的重复请求返回同一个连接（响应头 Idempotent-Replayed: true），不会再建凭据；换了请求内容 409 IDEMPOTENCY_KEY_REUSED",
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelConnectionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "新建连接（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/model-connections/capabilities": {
+      "get": {
+        "description": "只列经核验开放的协议；未核验的协议不出现，页面不显示。",
+        "operationId": "get_model_connection_capabilities",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConnectionCapabilities"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "已开放的协议、官方预设与限制（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/model-connections/migration/entries": {
+      "get": {
+        "description": "待完善 / 待归类 / 已纳管 / 非模型凭据 / 需要复核（Key 不可读）。不含 Key。导入用命令 app.commands.migrate_model_connections 按工作空间执行。",
+        "operationId": "list_migration_entries",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "needs_configuration",
+                    "needs_classification",
+                    "managed",
+                    "non_model",
+                    "needs_review"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationEntryPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "旧密钥库导入项（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/model-connections/migration/entries/{entry_id}/classify": {
+      "post": {
+        "description": "保留同一个映射、同一条凭据与原授权，不新建、不恢复已撤销的访问、不改启停；有原生绑定或进行中的应用任务时不能改判为非模型（409 MODEL_BINDING_CONFLICT）。",
+        "operationId": "classify_migration_entry",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entry Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MigrationClassify"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationEntryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "把导入项归类为模型连接或非模型凭据（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/model-connections/summary": {
+      "get": {
+        "description": "不受分页或筛选影响；check_passed 只计 ready + 启用、15 分钟内对当前配置修订号检测通过的连接（check_passed_inference 是其中推理检测通过的）。",
+        "operationId": "get_model_connection_summary",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConnectionSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "整个工作空间的连接统计（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/model-connections/{connection_id}": {
+      "delete": {
+        "description": "有授权、绑定、进行中的应用任务，或旧配置 / 运行环境仍引用这条凭据时 409 CONNECTION_IN_USE（details 列出影响）；不会顺带删除或停掉智能体。",
+        "operationId": "delete_model_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "删除连接（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      },
+      "get": {
+        "operationId": "get_model_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "一个连接（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      },
+      "patch": {
+        "description": "省略的字段不变；不含 Key（用 rotate-key）。已配置完整、且有授权或绑定的连接改 URL / 协议返回 409 CONNECTION_ENDPOINT_IN_USE（复制为新连接再切换）；旧导入项第一次从空补齐例外。停用会影响实例时先 409 CONNECTION_IN_USE（details.impact），确认后带 confirm_impact=true 再提交。",
+        "operationId": "update_model_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelConnectionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "修改连接（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/model-connections/{connection_id}/activity": {
+      "get": {
+        "description": "审计事件（创建 / 配置 / 更换 Key / 授权 / 应用）与取用记录按时间倒序合并；脱敏投影，不含 IP、Key 或远端响应。",
+        "operationId": "list_model_connection_activity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "instance_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Instance Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "result",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ok",
+                    "not_found",
+                    "rate_limited"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Result"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionActivityPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "连接的活动记录（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/model-connections/{connection_id}/checks": {
+      "post": {
+        "description": "metadata：请求服务商的模型列表接口，只证明 Key 与元数据接口可用，不代表任何模型能推理。inference：用固定的最短提示（ping、最多 16 个输出 token、不流式、不自动重试）对选定的模型发一次真实推理请求，可能产生少量服务商费用；model_id 必须在连接的模型集合里（否则 422 MODEL_NOT_ALLOWED），通过后该模型标为 verified。结果只有固定类别：status = passed / failed / rate_limited / unsupported / unknown，reason 见 CheckReason；限流时 retry_at 取服务商的 Retry-After（没有合法值为 null）。检测期间连接配置变了（例如更换了 Key）时结果记为 unknown / stale_revision，不覆盖当前配置的 last_check。检测结果不改变连接的 version。同一连接同一时间只能有一个同步或检测（409 CHECK_IN_PROGRESS）；每个 owner 对每个连接每分钟最多 5 次同步与检测合计（429 RATE_LIMITED，带 Retry-After）。停用的连接也可以同步和检测（排查问题用）；非模型凭据 409 MODEL_CONNECTION_NON_MODEL，没填协议或地址 409 MODEL_CONFIGURATION_INCOMPLETE，协议未核验开放 409 MODEL_PROTOCOL_UNSUPPORTED；version 不是当前版本 409 VERSION_CONFLICT。",
+        "operationId": "check_model_connection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionCheckOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "检测连接（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/model-connections/{connection_id}/grants": {
+      "get": {
+        "operationId": "list_model_connection_grants",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionGrantPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "连接授权给了哪些实例（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      },
+      "put": {
+        "description": "跨工作空间或不存在的实例 404；撤销正以它为主模型的实例返回 409 GRANT_IN_USE（先切换或解除主模型）。撤销时同一事务撤掉这条凭据对该实例的旧授权（含运行环境的引用）。",
+        "operationId": "replace_model_connection_grants",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantsReplace"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "整体替换连接授权（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/model-connections/{connection_id}/models": {
+      "get": {
+        "description": "明确的模型 ID（原样大小写），独立分页；synced_at / sync_state 是最近一次同步。",
+        "operationId": "list_model_connection_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "上一页返回的 next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionModelPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "连接的模型集合（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      },
+      "put": {
+        "description": "selected：给出明确的模型 ID（至少一个）；all_available：使用最近一次完整同步的模型列表（没有完整同步时 409 MODEL_SYNC_REQUIRED）。要移除的模型正被智能体使用时 409 MODEL_IN_USE（details 列出实例）。",
+        "operationId": "replace_model_connection_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelsReplace"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "整体替换模型集合（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/model-connections/{connection_id}/models/sync": {
+      "post": {
+        "description": "向服务商请求一次模型列表（不翻页）。完整结果（不超过 1000 个、响应不超过 2 MiB）保存为快照：“服务商全部可用模型”范围下模型集合换成快照，但正被智能体使用的模型不会移除（kept_in_use 列出）；“指定模型”范围只更新快照，不改变选中的模型。不完整（partial）、失败（failed）或服务商不支持列模型（unsupported）时保留上一次的完整快照与模型集合（kept_previous=true），reason / retry_at 说明原因；不支持列模型时请用“指定模型”手工填写。列出的模型不代表能推理（不会标 verified）。同步期间连接配置变了（例如更换了 Key）时结果作废：sync_state=failed、reason=stale_revision。同一连接同一时间只能有一个同步或检测（409 CHECK_IN_PROGRESS）；每个 owner 对每个连接每分钟最多 5 次同步与检测合计（429 RATE_LIMITED，带 Retry-After）。停用的连接也可以同步和检测（排查问题用）；非模型凭据 409 MODEL_CONNECTION_NON_MODEL，没填协议或地址 409 MODEL_CONFIGURATION_INCOMPLETE，协议未核验开放 409 MODEL_PROTOCOL_UNSUPPORTED；version 不是当前版本 409 VERSION_CONFLICT。",
+        "operationId": "sync_model_connection_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSyncResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "从服务商同步模型列表（owner）",
+        "tags": [
+          "model-connections"
+        ]
+      }
+    },
+    "/api/v1/model-connections/{connection_id}/rotate-key": {
+      "post": {
+        "description": "版本加 1，旧值不再下发、不留密文；检测结果失效。不会去服务商创建或撤销 Key。不能与地址修改合在一次请求里。",
+        "operationId": "rotate_model_connection_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelConnectionKeyRotate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "更换 Key（owner）",
+        "tags": [
+          "model-connections"
         ]
       }
     },
