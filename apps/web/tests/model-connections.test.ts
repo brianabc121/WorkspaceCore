@@ -390,6 +390,11 @@ describe('中转站管理：迁移与兼容凭据', () => {
       const p = path(r)
       if (p === '/api/v1/model-connections/migration/entries') return Response.json({ items: [entry(draft, 'model_api_key', ['openai_api_key']), entry(token, 'api_token', ['github_token']), entry(nonModel, 'api_token', [])], next_cursor: null, total: 3, counts: { needs_configuration: 1, needs_classification: 1, non_model: 1, managed: 0 } })
       if (p.endsWith('/classify')) return Response.json(entry({ ...token, migration_state: 'non_model', version: 3 }, 'api_token', ['github_token']))
+      if (p === '/api/v1/model-connections/migration/run') {
+        const { mode } = await r.clone().json() as { mode: Schema['MigrationRun']['mode'] }
+        return Response.json({ mode, scanned: 4, mapped: mode === 'report' ? 0 : 1, already_mapped: 3, needs_configuration: 1, needs_classification: 0, unreadable: 0, failed: 0, batches: [],
+          reconciliation: mode === 'report' ? { unmapped: 0, by_state: {}, by_kind: {}, needs_review: 0, disabled: 0, legacy_grants: 2, legacy_grant_instances: 2, connection_grants: 2, missing_connection_grants: 0, extra_connection_grants: 0, bindings: 1, accesses: 5 } : null })
+      }
       if (p === `/api/v1/model-connections/${ID.a}` && r.method === 'GET') return Response.json(draft)
       if (p === `/api/v1/model-connections/${ID.a}` && r.method === 'PATCH') { draft = { ...draft, ...(await r.clone().json()), version: 5 }; return Response.json(draft) }
       if (p === `/api/v1/model-connections/${ID.a}/models` && r.method === 'PUT') { draft = { ...draft, configuration_state: 'ready', migration_state: 'managed', model_count: 1, version: 6 }; return Response.json(draft) }
@@ -422,6 +427,20 @@ describe('中转站管理：迁移与兼容凭据', () => {
     expect(path(classify)).toBe(`/api/v1/model-connections/migration/entries/${ID.b}/classify`)
     expect(await classify.clone().json()).toEqual({ version: 2, purpose: 'non_model' })
     expect(await within(migration).findByText(/已归为非模型凭据：仍可在下方“兼容凭据”里管理/)).toBeVisible()
+
+    // 在页面上导入旧密钥：预览只读、导入可重复执行、对账只读；结果只有计数
+    const runs = () => requests.filter(r => path(r) === '/api/v1/model-connections/migration/run')
+    await fireEvent.click(within(migration).getByRole('button', { name: '预览导入' }))
+    expect(await within(migration).findByText('预览完成（没有写入）。')).toBeVisible()
+    expect(await runs()[0]!.clone().json()).toEqual({ mode: 'dry_run' })
+    expect(within(migration).getByLabelText('导入结果')).toHaveTextContent('将新建1')
+    await fireEvent.click(within(migration).getByRole('button', { name: '导入旧密钥' }))
+    expect(await within(migration).findByText(/导入完成：导入项在下方列出/)).toBeVisible()
+    expect(await runs()[1]!.clone().json()).toEqual({ mode: 'apply' })
+    await fireEvent.click(within(migration).getByRole('button', { name: '对账' }))
+    expect(await within(migration).findByText('对账完成（只读）。')).toBeVisible()
+    expect(await runs()[2]!.clone().json()).toEqual({ mode: 'report' })
+    expect(within(migration).getByLabelText('导入结果')).toHaveTextContent('使用中的绑定1')
 
     // 补全待完善的导入项：只改连接元数据与模型，不建绑定
     await fireEvent.click(within(migration).getByRole('button', { name: '补全配置：news_model' }))

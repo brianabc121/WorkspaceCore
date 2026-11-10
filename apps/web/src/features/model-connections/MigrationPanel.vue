@@ -5,6 +5,7 @@ import { useAuthStore } from '../../stores/auth'
 import { dataOf } from '../../services/api'
 import ManagementSection from '../../components/management/ManagementSection.vue'
 import { useAgentAction } from '../agents/action'
+import type { Schema } from '../../services/api'
 import { LEGACY_KIND, MIGRATION_LABEL, mcError, useMigrationEntries, type MigrationEntry, type MigrationState } from './api'
 
 // 迁移记录（契约第 2 节“迁移分类与兼容凭据状态”）：旧密钥库导入的项按状态列出。
@@ -25,6 +26,18 @@ const all = computed(() => ['needs_configuration', 'needs_classification', 'need
 const { busy, error, notice, act, header } = useAgentAction(scope, mcError)
 const TONE: Record<string, string> = { needs_configuration: 'amber', needs_classification: 'amber', needs_review: 'red', managed: 'green', non_model: 'muted', native: 'muted' }
 
+// 在页面上导入旧密钥（与服务器上的迁移命令同一套逻辑）：预览只读、导入按批提交且可以重复执行、对账只读。结果只有计数，不含名称或 Key。
+type RunMode = Schema['MigrationRun']['mode']
+const run = ref<Schema['MigrationRunOut'] | null>(null)
+const RUN_DONE: Record<RunMode, string> = { dry_run: '预览完成（没有写入）。', apply: '导入完成：导入项在下方列出，补全 URL、协议与模型后才能给智能体选用。', report: '对账完成（只读）。' }
+async function migrate(mode: RunMode) {
+  run.value = null
+  await act(async () => {
+    run.value = dataOf(await auth.api.POST('/api/v1/model-connections/migration/run', { params: { header }, body: { mode } }))
+  }, RUN_DONE[mode])
+}
+const recon = computed(() => (run.value?.reconciliation ?? null) as Record<string, number> | null)
+
 async function classify(entry: MigrationEntry, purpose: 'model' | 'non_model') {
   const name = entry.legacy_name
   await act(async () => dataOf(await auth.api.POST('/api/v1/model-connections/migration/entries/{entry_id}/classify', { params: { header, path: { entry_id: entry.entry_id } }, body: { version: entry.connection.version, purpose } })),
@@ -38,7 +51,28 @@ async function classify(entry: MigrationEntry, purpose: 'model' | 'non_model') {
     <div class="ws-chips mc-states-filter" role="group" aria-label="按迁移状态筛选">
       <button v-for="s in STATES" :key="s.key ?? 'all'" type="button" class="ws-chip" :aria-pressed="state === s.key" @click="state = s.key">{{ s.name }}<span class="ws-chip-count">{{ s.key ? counts[s.key] ?? 0 : all }}</span></button>
     </div>
-    <p v-if="counts.unmapped" class="form-help">还有 {{ counts.unmapped }} 个旧密钥没有导入（由管理员在服务器上运行迁移命令）。</p>
+    <div class="mc-migrate-run" role="group" aria-label="导入旧密钥">
+      <p class="form-help"><template v-if="counts.unmapped">还有 {{ counts.unmapped }} 个旧密钥没有导入。</template>导入只建立连接记录并保留原授权，不复制密文、不改旧智能体的运行配置；可以重复执行。</p>
+      <span class="mc-entry-actions">
+        <button type="button" class="secondary-button mc-small" :disabled="busy" @click="migrate('dry_run')">预览导入</button>
+        <button type="button" class="primary-button mc-small" :disabled="busy" @click="migrate('apply')">{{ busy ? '正在处理…' : '导入旧密钥' }}</button>
+        <button type="button" class="secondary-button mc-small" :disabled="busy" @click="migrate('report')">对账</button>
+      </span>
+      <dl v-if="run" class="mc-migrate-result" aria-label="导入结果">
+        <div><dt>扫描</dt><dd>{{ run.scanned }}</dd></div>
+        <div><dt>{{ run.mode === 'dry_run' ? '将新建' : '新建' }}</dt><dd>{{ run.mapped }}</dd></div>
+        <div><dt>已导入过</dt><dd>{{ run.already_mapped }}</dd></div>
+        <div><dt>待完善</dt><dd>{{ run.needs_configuration }}</dd></div>
+        <div><dt>待归类</dt><dd>{{ run.needs_classification }}</dd></div>
+        <div><dt>无法解密</dt><dd>{{ run.unreadable }}</dd></div>
+        <div v-if="run.failed"><dt>失败</dt><dd>{{ run.failed }}</dd></div>
+        <template v-if="recon">
+          <div><dt>未导入</dt><dd>{{ recon.unmapped }}</dd></div>
+          <div><dt>缺少连接授权</dt><dd>{{ recon.missing_connection_grants }}</dd></div>
+          <div><dt>使用中的绑定</dt><dd>{{ recon.bindings }}</dd></div>
+        </template>
+      </dl>
+    </div>
     <p v-if="entries.isPending.value" role="status" class="ws-state-line">正在加载迁移记录…</p>
     <div v-else-if="entries.error.value && !items.length" class="ws-state-line"><p role="alert">{{ mcError(entries.error.value) }}</p><button type="button" class="secondary-button" @click="entries.refetch()">重试</button></div>
     <p v-else-if="!items.length" class="ws-state-line">{{ state ? '没有这个状态的导入项。' : '没有从旧密钥库导入的凭据。' }}</p>

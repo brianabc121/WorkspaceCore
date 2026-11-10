@@ -180,6 +180,12 @@
 
 /* 迁移记录与分配 */
 .mc-states-filter { margin: 0; }
+.mc-migrate-run { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.mc-migrate-run .form-help { margin: 0; }
+.mc-migrate-result { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; font-size: .85rem; }
+.mc-migrate-result div { display: flex; gap: 6px; align-items: baseline; }
+.mc-migrate-result dt { color: var(--muted); }
+.mc-migrate-result dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .mc-entry-actions { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; }
 .mc-assign-form { display: grid; gap: 10px; }
 .mc-assign-form .form-field { margin: 0; }
