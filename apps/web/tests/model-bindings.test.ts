@@ -105,12 +105,15 @@ describe('agent primary model', () => {
     expect(within(section).getByText('已应用').closest('div')).toHaveTextContent('团队多模型中转 · claude-sonnet-4')
     expect(within(section).getByText(/原因：OpenClaw 取不到这条连接的 Key/)).toBeVisible()
     expect(within(section).getByText(/切换确认前，旧连接仍可取 Key/)).toBeVisible()
+    // 可以改回实例确认在用的那组（只改目标）
+    expect(within(section).getByRole('button', { name: '改回已应用的配置' })).toBeVisible()
     await fireEvent.click(within(section).getByRole('button', { name: '重新应用' }))
     await vi.waitFor(() => expect(sent(requests, 'POST', '/apply')).toHaveLength(1))
     expect(await sent(requests, 'POST', '/apply')[0]!.clone().json()).toEqual({ version: 4 })
     expect(await within(section).findByText('待应用')).toBeVisible()
-    // 待应用时不提供“重新应用”
+    // 待应用时不提供“重新应用”与“改回”
     expect(within(section).queryByRole('button', { name: '重新应用' })).not.toBeInTheDocument()
+    expect(within(section).queryByRole('button', { name: '改回已应用的配置' })).not.toBeInTheDocument()
   })
 
   it.each([
@@ -164,5 +167,26 @@ describe('agent primary model', () => {
     await fireEvent.update(model, 'gemini-2.5-pro')
     await fireEvent.click(within(section).getByRole('button', { name: '保存' }))
     expect(await within(section).findByText(/还没有授权给这个智能体/)).toBeVisible()
+  })
+})
+
+describe('agent primary model revert', () => {
+  it('puts the target back to the last applied pair after a failed switch', async () => {
+    let current = view(binding({
+      connection_id: 'conn-2', model_id: 'gpt-4.1', desired_revision: 3, apply_state: 'failed', last_error_code: 'invalid_config',
+      applied_connection_id: 'conn-1', applied_model_id: 'claude-sonnet-4', applied_revision: 2, applied_at: at, applied_connection_name: '团队多模型中转', connection_name: 'OpenAI 官方', version: 6,
+    }))
+    const requests = setup(() => current, async r => {
+      if (r.method === 'PUT' && path(r) === '/api/v1/agents/instances/inst-a/model-binding') {
+        const body = await r.clone().json() as Schema['ModelBindingPut']
+        current = view({ ...current.binding!, connection_id: body.connection_id, model_id: body.model_id, connection_name: '团队多模型中转', desired_revision: 4, apply_state: 'pending', last_error_code: null, version: 7 })
+        return Response.json(current.binding)
+      }
+    })
+    const section = await panel()
+    await fireEvent.click(await within(section).findByRole('button', { name: '改回已应用的配置' }))
+    await vi.waitFor(() => expect(sent(requests, 'PUT', '')).toHaveLength(1))
+    expect(await sent(requests, 'PUT', '')[0]!.clone().json()).toEqual({ version: 6, connection_id: 'conn-1', model_id: 'claude-sonnet-4' })
+    expect(await within(section).findByText('待应用')).toBeVisible()
   })
 })

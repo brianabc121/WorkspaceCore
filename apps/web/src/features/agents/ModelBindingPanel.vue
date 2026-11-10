@@ -40,6 +40,21 @@ async function save() {
   }, '已保存：实例取走新配置并确认后才显示“已应用”。')
   if (ok) editing.value = false
 }
+// 应用失败 / 状态待确认时可以改回实例确认在用的那组连接与模型（只是把目标改回去，不承诺恢复已更换或已撤销的 Key）
+const canRevert = computed(() => {
+  const b = binding.value
+  return !!b && !!b.applied_connection_id && !!b.applied_model_id && !inFlight(state.value)
+    && (b.revoked || b.applied_connection_id !== b.connection_id || b.applied_model_id !== b.model_id)
+})
+async function revert() {
+  const b = binding.value
+  if (!b?.applied_connection_id || !b.applied_model_id) return
+  const target = { connection_id: b.applied_connection_id, model_id: b.applied_model_id }
+  await act(async () => {
+    const out = dataOf(await auth.api.PUT('/api/v1/agents/instances/{instance_id}/model-binding', { params: { header, path: { instance_id: props.instance.id } }, body: { version: b.version, ...target } }))
+    store({ binding: out, apply_state: out.apply_state, legacy: null })
+  }, '已改回上一次已应用的连接与模型：实例确认后显示“已应用”。')
+}
 async function apply() {
   const b = binding.value
   if (!b) return
@@ -81,6 +96,7 @@ async function remove() {
       <div v-if="!editing" class="form-actions">
         <button type="button" class="secondary-button" :disabled="busy" @click="startEdit">{{ binding && !binding.revoked ? '更换连接或模型' : '选择主模型' }}</button>
         <button v-if="binding && !inFlight(state) && state !== 'applied'" type="button" class="secondary-button" :disabled="busy" @click="apply">重新应用</button>
+        <button v-if="canRevert" type="button" class="secondary-button" :disabled="busy" @click="revert">改回已应用的配置</button>
         <button v-if="binding && !binding.revoked" type="button" class="secondary-button danger" :disabled="busy" @click="remove">解除</button>
       </div>
       <form v-else class="mc-binding-form" aria-label="选择主模型" @submit.prevent="save">
