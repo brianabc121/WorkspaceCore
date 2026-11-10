@@ -172,6 +172,27 @@ def test_apply_validates_then_writes_then_reloads_secrets() -> None:
             },
             "credential_unavailable",
         ),
+        # OpenClaw 2026.9.36 实测：失败时 checks 仍是 true，类别在 errors[].kind 里
+        (
+            {
+                "config patch dry": {
+                    "ok": False,
+                    "stdout": '{"ok":false,"checks":{"schema":true,"resolvability":true},'
+                    '"errors":[{"kind":"schema","message":"x"},{"kind":"resolvability"}]}',
+                }
+            },
+            "invalid_config",
+        ),
+        (
+            {
+                "config patch dry": {
+                    "ok": False,
+                    "stdout": '{"ok":false,"checks":{"schema":true,"resolvability":true},'
+                    '"errors":[{"kind":"resolvability","message":"NOT_FOUND"}]}',
+                }
+            },
+            "credential_unavailable",
+        ),
         ({"config patch": {"ok": False, "stdout": ""}}, "patch_failed"),
         ({"secrets reload": {"ok": False, "stdout": ""}}, "reload_failed"),
     ],

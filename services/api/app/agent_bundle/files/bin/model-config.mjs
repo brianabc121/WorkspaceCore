@@ -148,8 +148,10 @@ export async function apply(target, { run = cli, read = () => readFileSync(confi
     const dry = await run(["config", "patch", "--stdin", "--dry-run", "--allow-exec", "--json"], text);
     const checked = lastJson(dry.stdout);
     if (!dry.ok || !checked?.ok) {
-      if (checked?.checks?.schema === false) return { result: "failed", reason: "invalid_config" };
-      if (checked?.checks?.resolvability === false) return { result: "failed", reason: "credential_unavailable" };
+      // 失败时 OpenClaw 在 errors[].kind 里给出类别（schema / resolvability；checks 里仍可能是 true，实测）
+      const kinds = new Set((Array.isArray(checked?.errors) ? checked.errors : []).map((e) => e?.kind));
+      if (kinds.has("schema") || checked?.checks?.schema === false) return { result: "failed", reason: "invalid_config" };
+      if (kinds.has("resolvability") || checked?.checks?.resolvability === false) return { result: "failed", reason: "credential_unavailable" };
       return { result: "failed", reason: "validate_failed" };
     }
     const written = await run(["config", "patch", "--stdin"], text);
