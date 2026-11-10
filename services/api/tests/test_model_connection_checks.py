@@ -198,6 +198,39 @@ async def test_infer_request_shape_is_fixed_tiny_and_not_retried() -> None:
     assert KEY not in str(sent.url) and KEY.encode() not in sent.content
 
 
+async def test_infer_switches_to_max_completion_tokens_only_when_rejected() -> None:
+    """OpenAI 的推理模型拒绝 max_tokens（要求 max_completion_tokens）：被 400 拒绝时（没有生成）
+    换参数再发一次；其他 400 不重发。"""
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        if "max_tokens" in json.loads(request.content):
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "message": "Unsupported parameter: 'max_tokens' is not supported with this"
+                        " model. Use 'max_completion_tokens' instead.",
+                        "type": "invalid_request_error",
+                        "param": "max_tokens",
+                        "code": "unsupported_parameter",
+                    }
+                },
+            )
+        return chat_ok(request)
+
+    result, recorder = await infer_with(reply, "o4-mini")
+    assert result.status == "passed"
+    first, second = recorder.requests
+    assert json.loads(first.content)["max_tokens"] == 16
+    body = json.loads(second.content)
+    assert body["max_completion_tokens"] == 16 and "max_tokens" not in body
+
+    other = status(400, json={"error": {"message": "bad request", "param": "messages"}})
+    result, recorder = await infer_with(other)
+    assert (result.status, result.reason) == ("failed", "invalid_response")
+    assert len(recorder.requests) == 1
+
+
 @pytest.mark.parametrize(
     ("reply", "expected", "attempts"),
     [

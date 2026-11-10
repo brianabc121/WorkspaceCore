@@ -285,6 +285,15 @@ def _says_model_missing(body: Any, status_code: int) -> bool:
     )
 
 
+def _rejects_max_tokens(body: Any, status_code: int) -> bool:
+    """400 且错误说明是 max_tokens 不被这个模型支持（要用 max_completion_tokens）。"""
+    if status_code != 400:
+        return False
+    error = _error_object(body)
+    message = str(error.get("message") or "")
+    return error.get("param") == "max_tokens" or "max_completion_tokens" in message
+
+
 def _causes(error: BaseException) -> Iterator[BaseException]:
     seen: set[int] = set()
     current: BaseException | None = error
@@ -413,10 +422,26 @@ class OpenAICompatibleAdapter:
         return ModelListing(passed, tuple(sorted(ids)), complete=True)
 
     async def infer(self, *, base_url: str, api_key: SecretStr, model_id: str) -> ProbeResult:
+        """推理检测。先用兼容面最广的 max_tokens；服务商以 400 明确拒绝这个参数（OpenAI 的推理模型
+        要求 max_completion_tokens，https://platform.openai.com/docs/api-reference/chat/create）时，
+        换成 max_completion_tokens 再发一次——第一次被拒绝时没有生成，这不是重试生成。"""
+        result, rejected = await self._infer_once(
+            base_url, api_key, model_id, {"max_tokens": PING_MAX_TOKENS}
+        )
+        if rejected:
+            result, _ = await self._infer_once(
+                base_url, api_key, model_id, {"max_completion_tokens": PING_MAX_TOKENS}
+            )
+        return result
+
+    async def _infer_once(
+        self, base_url: str, api_key: SecretStr, model_id: str, limit: dict[str, int]
+    ) -> tuple[ProbeResult, bool]:
+        """返回（结果, 是否因为输出上限参数被拒绝）。"""
         payload = {
             "model": model_id,
             "messages": [{"role": "user", "content": PING_PROMPT}],
-            "max_tokens": PING_MAX_TOKENS,
+            **limit,
             "stream": False,
         }
         started = time.monotonic()
@@ -427,23 +452,25 @@ class OpenAICompatibleAdapter:
         except ResponseTooLarge as error:
             latency = _elapsed_ms(started)
             if 200 <= error.status_code < 300:
-                return ProbeResult("failed", "invalid_response", latency)
-            return self._failure(error.status_code, {}, None, True, latency)
+                return ProbeResult("failed", "invalid_response", latency), False
+            return self._failure(error.status_code, {}, None, True, latency), False
         except EncodedResponse:
-            return ProbeResult("failed", "invalid_response", _elapsed_ms(started))
+            return ProbeResult("failed", "invalid_response", _elapsed_ms(started)), False
         except (ConnectorError, TimeoutError) as error:
-            return _transport_failure(error, write=True)
+            return _transport_failure(error, write=True), False
         latency = _elapsed_ms(started)
         body = _json_body(response)
         if not 200 <= response.status_code < 300:
-            return self._failure(response.status_code, response.headers, body, True, latency)
+            rejected = "max_tokens" in limit and _rejects_max_tokens(body, response.status_code)
+            failure = self._failure(response.status_code, response.headers, body, True, latency)
+            return failure, rejected
         choices = body.get("choices") if isinstance(body, dict) else None
         if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-            return ProbeResult("passed", None, latency)
+            return ProbeResult("passed", None, latency), False
         # 有的中转站用 200 返回错误对象
         if _says_model_missing(body, 404):
-            return ProbeResult("failed", "model_not_available", latency)
-        return ProbeResult("failed", "invalid_response", latency)
+            return ProbeResult("failed", "model_not_available", latency), False
+        return ProbeResult("failed", "invalid_response", latency), False
 
     def _failure(
         self,

@@ -508,6 +508,16 @@ class ModelConnectionService:
         ):
             connection.migration_state = "managed"
 
+    async def _unverify_models(self, connection_id: uuid.UUID) -> None:
+        await self.db.execute(
+            update(ModelConnectionModel)
+            .where(
+                ModelConnectionModel.connection_id == connection_id,
+                ModelConnectionModel.availability == "verified",
+            )
+            .values(availability="listed", version=ModelConnectionModel.version + 1)
+        )
+
     async def impact(self, connection: ModelConnection) -> ImpactOut:
         grants = await self._grant_rows(connection.id, offset=0, limit=PAGE_MAX)
         bound = await self._bound_instances(connection.id)
@@ -991,9 +1001,11 @@ class ModelConnectionService:
             if target_changed:
                 connection.config_revision += 1
                 connection.last_check_id = None
-                # 地址或协议变了，旧的模型目录不再可信，需要重新同步
-                if connection.model_scope == "all_available":
-                    connection.sync_state = None
+                # 地址或协议变了，旧的模型目录与检测结果不再可信，需要重新同步、重新检测
+                connection.sync_state = None
+                connection.discovered_models = []
+                connection.models_synced_at = None
+                await self._unverify_models(connection.id)
         enable_change: bool | None = changes.get("enabled")
         if enable_change is not None and enable_change != connection.enabled:
             if enable_change:
@@ -1095,6 +1107,8 @@ class ModelConnectionService:
         connection.config_revision += 1
         connection.last_check_id = None
         connection.version += 1
+        # 换了 Key，之前的推理检测结果不再代表新 Key
+        await self._unverify_models(connection.id)
         await self.refresh_state(connection, credential_ok=True)
         # 绑定到它的实例马上重新应用（实例执行 secrets reload 换上新 Key，不等定时任务）
         from app.domain.agent_model_bindings import advance_bindings

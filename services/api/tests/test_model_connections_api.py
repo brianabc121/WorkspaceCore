@@ -312,12 +312,21 @@ async def test_draft_is_disabled_and_cannot_be_enabled_until_ready(env: Env) -> 
 async def test_used_endpoint_is_immutable(env: Env) -> None:
     connection = await created(env, relay())
     cid = connection["id"]
+    # 旧地址同步来的模型目录：改地址后清空（不能再拿来切换“全部可用模型”）
+    await run_sql(
+        env.database_url,
+        "UPDATE workspace.model_connections SET discovered_models = ARRAY['old-a', 'old-b'],"
+        " sync_state = 'complete', models_synced_at = now() WHERE id = $1",
+        uuid.UUID(cid),
+    )
     # 没有授权与绑定：可以改地址，配置修订号加 1
     response = await patch(
         env, cid, version=connection["version"], base_url="https://gateway2.example.com/v1"
     )
     assert response.status_code == 200, response.text
     assert response.json()["config_revision"] == connection["config_revision"] + 1
+    page = (await get(env, f"/{cid}/models")).json()
+    assert page["discovered"] == [] and page["sync_state"] is None and page["synced_at"] is None
     instance = await env.create_instance(name="甲")
     assert (await put_grants(env, cid, [instance["id"]])).status_code == 200
     latest = await current(env, cid)
@@ -412,12 +421,21 @@ async def test_rotate_key_bumps_versions_and_destroys_old_ciphertext(env: Env) -
         "SELECT ciphertext_ref FROM workspace.agent_secret_versions WHERE secret_id = $1",
         secret_id,
     )
+    # 之前推理检测通过的模型：换 Key 后不再算“已验证”
+    await run_sql(
+        env.database_url,
+        "UPDATE workspace.model_connection_models SET availability = 'verified'"
+        " WHERE connection_id = $1",
+        uuid.UUID(cid),
+    )
     response = await env.client.post(
         f"{BASE}/{cid}/rotate-key",
         json={"version": connection["version"], "api_key": NEW_KEY},
         headers=env.headers(write=True),
     )
     assert response.status_code == 200, response.text
+    models = (await get(env, f"/{cid}/models")).json()["items"]
+    assert {m["availability"] for m in models} == {"listed"}
     out = response.json()
     assert out["credential_version"] == 2
     assert out["config_revision"] == connection["config_revision"] + 1

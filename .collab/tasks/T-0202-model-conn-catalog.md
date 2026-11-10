@@ -2,13 +2,13 @@
 id: T-0202
 title: 中转站管理（MC-2）：多模型目录与真实连接检测
 owner: claude
-status: todo
+status: in_progress
 priority: P1
-branch:
+branch: b6-model-connections
 paths: services/api/app/domain/model_catalog.py,services/api/app/integrations/model_providers.py,services/api/app/api/v1/model_catalog.py,services/api/tests
 depends_on: T-0201
 created: 2026-11-09
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # T-0202 中转站管理（MC-2）：多模型目录与真实连接检测
@@ -28,3 +28,4 @@ updated: 2026-11-09
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-09 23:42 UTC · claude · 创建任务（owner: claude）
+- 2026-11-10 00:19 UTC · claude · 开始任务
