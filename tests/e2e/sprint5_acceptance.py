@@ -183,21 +183,31 @@ def run_checks(base: str, report: Report) -> None:
     report.check("S5-05 访问日志不记录查询串", marker not in logs)
 
     # ---------------------------------------------------------------- 通知：同一事件去重、已读状态
+    # 只看验收自己发的这条：部署级的服务告警（例如上一步启动 Prometheus 后的 service_recovered）
+    # 会发给所有工作空间的管理员，可能刚好落在这个新工作空间里，不能按整个工作空间的未读总数判断
+    notice_title = f"验收通知-{uuid.uuid4().hex[:8]}"
     notice_key = f"sprint5-{uuid.uuid4().hex}"
     for _ in range(2):
-        notify(ws, user_id, notice_key, "验收通知")
+        notify(ws, user_id, notice_key, notice_title)
     notes = owner.request("GET", "/api/v1/notifications", headers=h).json()
-    notices = [item for item in notes["items"] if item["title"] == "验收通知"]
-    report.check("S5-03 同一个通知事件只写入一次", len(notices) == 1 and notes["unread_count"] == 1)
+    notices = [item for item in notes["items"] if item["title"] == notice_title]
+    report.check(
+        "S5-03 同一个通知事件只写入一次",
+        len(notices) == 1 and notices[0]["read_at"] is None and notes["unread_count"] >= 1,
+        f"{len(notices)} 条，未读 {notes['unread_count']}",
+    )
     if notices:
         marked = owner.request(
             "PATCH", "/api/v1/notifications", {"ids": [notices[0]["id"]]}, headers=h,
         )
         unread = owner.request("GET", "/api/v1/notifications?unread_only=true", headers=h).json()
+        others = [item for item in unread["items"] if item["title"] != notice_title]
         report.check(
             "S5-03 标为已读后未读数与列表更新",
-            marked.status == 200 and unread["unread_count"] == 0 and not unread["items"],
-            marked.summary,
+            marked.status == 200
+            and not [item for item in unread["items"] if item["title"] == notice_title]
+            and unread["unread_count"] == len(others),
+            f"{marked.summary}，其他未读 {[item['type'] for item in others]}",
         )
 
     # ---------------------------------------------------------------- DoD：失败明确显示 stale
