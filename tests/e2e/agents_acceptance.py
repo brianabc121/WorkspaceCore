@@ -2022,16 +2022,42 @@ def scenario_27(c: Ctx) -> None:
             (pending or {}).get("apply_state") == "pending" and applied == "applied"
             and used(calls_a) == {(f"Bearer {kb2}", "mc-model-b")}, f"{applied} {sorted(used(calls_a))}")
 
+    # 3b. 原生协议（T-0202）：乙切到 Anthropic Messages 连接，再切到 Gemini 连接（假模型服务按各自协议应答）
+    kc, kd = "sk-mcc-" + uuid.uuid4().hex, "sk-mcd-" + uuid.uuid4().hex
+    conn_c = c.owner.call("POST", "/api/v1/model-connections", {
+        "name": "验收 Anthropic", "connection_type": "relay", "protocol": "anthropic_native",
+        "base_url": f"http://fake-model:{FAKE_MODEL_PORT}", "api_key": kc, "models": [{"model_id": "claude-fake"}]})
+    conn_d = c.owner.call("POST", "/api/v1/model-connections", {
+        "name": "验收 Gemini", "connection_type": "relay", "protocol": "gemini_native",
+        "base_url": f"http://fake-model:{FAKE_MODEL_PORT}/v1beta", "api_key": kd, "models": [{"model_id": "gemini-fake"}]})
+    grant(conn_c, [c.b.id])
+    grant(conn_d, [c.b.id])
+
+    def native(records: list[dict[str, Any]]) -> set[tuple[str, str, str]]:
+        return {(str(r.get("protocol")), str(r.get("x_api_key") or r.get("x_goog_api_key")), str(r.get("model")))
+                for r in records}
+
+    bind(c.b, conn_c, "claude-fake")
+    applied_c = apply(c.b)
+    calls_c = turn(c.b, "原生协议乙一")
+    bind(c.b, conn_d, "gemini-fake")
+    applied_d = apply(c.b)
+    calls_d = turn(c.b, "原生协议乙二")
+    c.check("场景 27：乙改用 Anthropic 原生协议（x-api-key）与 Gemini 原生协议（x-goog-api-key）的连接，各自请求对的地址、Key 与模型",
+            applied_c == applied_d == "applied" and native(calls_c) == {("anthropic_native", kc, "claude-fake")}
+            and native(calls_d) == {("gemini_native", kd, "gemini-fake")},
+            json.dumps([applied_c, applied_d, sorted(native(calls_c)), sorted(native(calls_d))]))
+
     # 4. 解除乙的绑定：立即不能再取连接 A 的 Key；应用后移除受管 provider 与主模型
     current_b = binding(c.b) or {}
     c.owner.call("DELETE", f"/api/v1/agents/instances/{c.b.id}/model-binding?version={current_b.get('version')}")
     api_b, token_b = c.b.env("MYWS_AGENT_API"), c.b.env("MYWS_INSTANCE_TOKEN")
     status, text = c.b.request("POST", f"{api_b}/v1/model-credentials/resolve", token=token_b,
-                               body={"ids": [f"mc_{uuid.UUID(conn_a['id']).hex}"]})
+                               body={"ids": [f"mc_{uuid.UUID(conn_d['id']).hex}", f"mc_{uuid.UUID(conn_a['id']).hex}"]})
     applied = apply(c.b)
     removed = binding(c.b) or {}
     text_b = config_text(c.b)
-    c.check("场景 27：解除后乙立即取不到 Key；应用后受管 provider 与主模型都移除，其他配置保留",
+    c.check("场景 27：解除后乙立即取不到任何连接的 Key；应用后受管 provider 与主模型都移除，其他配置保留",
             status == 200 and '"values": {}' in text.replace('"values":{}', '"values": {}') and applied == "applied"
             and removed.get("applied_connection_id") is None and '"mwc' not in text_b and '"mcp"' in text_b
             and '"openclaw-channel"' in text_b, f"{status} {applied}")
