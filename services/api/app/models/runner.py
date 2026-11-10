@@ -22,6 +22,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     ForeignKeyConstraint,
+    Identity,
     Index,
     Integer,
     Text,
@@ -314,6 +315,9 @@ class RunnerCommand(Base):
         ForeignKey("workspace.runner_runs.id", ondelete="SET NULL")
     )
     created_at: Mapped[datetime] = _created()
+    # 写入顺序（T-0213）：同一个事务里写的几条指令 created_at 相同（now() 是事务开始时间），
+    # 下发时按它排在 created_at 之后，保证“先重建、再执行”这类先后关系
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True))
     sent_at: Mapped[datetime | None] = _when()
     finished_at: Mapped[datetime | None] = _when()
     deadline_at: Mapped[datetime | None] = _when()

@@ -386,7 +386,9 @@ class RunnerHosts:
         rows = await self.db.scalars(
             select(RunnerCommand)
             .where(RunnerCommand.host_id == host.id, RunnerCommand.status == "pending")
-            .order_by(RunnerCommand.created_at)
+            # created_at 相同（同一个事务写的）时按写入顺序：重建（create_env）一定排在随后的
+            # exec / 读写文件之前，runner-agent 才会让后者等重建做完（T-0213）
+            .order_by(RunnerCommand.created_at, RunnerCommand.seq)
             .limit(POLL_BATCH)
             .with_for_update(skip_locked=True)
         )
