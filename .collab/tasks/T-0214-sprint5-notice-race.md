@@ -2,7 +2,7 @@
 id: T-0214
 title: Sprint 5 验收的通知检查只看自己的通知（与服务恢复告警的竞态）
 owner: claude
-status: in_progress
+status: done
 priority: P2
 branch: claude/cool-wright-99qbbg
 paths: tests/e2e/sprint5_acceptance.py
@@ -24,7 +24,7 @@ PR #186 的 CI（e2fd990，只改了任务文件）里 `ci-infra / compose` 的 
 ## 验收标准
 - [x] S5-03 只看验收自己发的那条通知（标题带随机后缀）：只有 1 条且未读；标已读后未读列表里没有它，未读数等于剩下的其他未读
 - [x] 去重（同一个 key 发两次只写一条）与已读状态仍然检查；其他未读的类型写进检查详情，方便核对
-- [ ] PR 上 CI 全部通过
+- [x] PR 上 CI 全部通过：2d0bfc1 上 12 项检查全部成功（compose 的 Sprint 5 验收含改后的 S5-03）
 
 ## 背景 / 约束 / 参考
 - 失败的运行：https://github.com/brianabc121/WorkspaceCore/actions/runs/42867570546（compose job 130009897684），重跑一次通过
@@ -34,3 +34,4 @@ PR #186 的 CI（e2fd990，只改了任务文件）里 `ci-infra / compose` 的 
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-10 18:49 UTC · claude · 创建任务（owner: claude）
 - 2026-11-10 18:49 UTC · claude · 开始任务
+- 2026-11-10 19:37 UTC · claude · status in_progress → done：PR #187 的 2d0bfc1 上 12 项检查全部成功，compose 的 Sprint 5 验收（改后的 S5-03）通过
