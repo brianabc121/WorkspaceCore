@@ -1502,6 +1502,29 @@ def wait_online(c: Ctx) -> None:
         for i in (c.a, c.b)), timeout=300, interval=5)
 
 
+def im_send_diagnostics(client_key: str, result: dict[str, Any], since: float) -> dict[str, Any]:
+    """im_send 没有正常返回时收集（T-0218）：工具原样的返回、发件箱里这次发送每一条的状态、执行记录有没有写、
+    这段时间工作台 API 的警告与错误日志。2026-11-10 main 上见过消息都发出去了，返回却不是 sent、执行记录也没有。
+    每一项单独收集，出错只记下原因，不影响场景的判定。"""
+    out: dict[str, Any] = {"result": json.dumps(result, ensure_ascii=False)[:400]}
+    try:
+        out["outbox"] = sql("SELECT string_agg(part || ':' || status || ':' || coalesce(error_code, '') || ':' || attempts,"
+                            f" ' ' ORDER BY part) FROM workspace.agent_im_outbox WHERE client_key = '{client_key}'")
+        out["executions"] = sql("SELECT count(*) FROM workspace.ai_tool_executions"
+                                f" WHERE tool_name = 'im_send' AND arguments_display::text LIKE '%{client_key}%'")
+    except Exception as error:  # 诊断失败只记下原因
+        out["sql_error"] = str(error)[:200]
+    try:
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(since - 5))
+        lines = run("docker", "compose", "logs", "--no-color", f"--since={stamp}", "api",
+                    cwd=ROOT, check=False, timeout=120).stdout.splitlines()
+        out["api"] = [line.strip()[-300:] for line in lines
+                      if any(k in line for k in ('"WARNING"', '"ERROR"', '"CRITICAL"', "Traceback", "Error:"))][-8:]
+    except Exception as error:  # 诊断失败只记下原因
+        out["logs_error"] = str(error)[:200]
+    return out
+
+
 def scenario_24(c: Ctx) -> None:
     """主动发附件、定时消息、OpenIM 停掉期间排队（T-0118、T-0119；T-0125 验收，核验记录 V1、V5、V6）。
 
@@ -1523,6 +1546,7 @@ def scenario_24(c: Ctx) -> None:
     refused = mcp_call(c.a, "im_send", {"target": target, "attachments": [note]})
     set_media(True)
     try:
+        sent_at = time.time()
         sent = mcp_call(c.a, "im_send", {
             "target": target, "text": f"附件验收 {tag}", "client_key": f"media-{tag}",
             "attachments": [
@@ -1538,9 +1562,12 @@ def scenario_24(c: Ctx) -> None:
             return last if kinds == ["text", "image", "file", "video"] and tag in (last[0].get("text") or "") else None
 
         got = wait_for("甲发的文字与三个附件", arrived, timeout=120, interval=3)
+        ok = tool_code(refused) == "ATTACHMENT_FORBIDDEN" and data.get("status") == "sent" and bool(got)
+        detail: dict[str, Any] = {"refused": tool_code(refused), "status": data.get("status")}
+        if not ok:
+            detail.update(im_send_diagnostics(f"media-{tag}", sent, sent_at))
         c.check("场景 24：附件权限没打开时带附件被拒（ATTACHMENT_FORBIDDEN）；打开后甲经 im_send 发出文字、图片、文件、视频各一条",
-                tool_code(refused) == "ATTACHMENT_FORBIDDEN" and data.get("status") == "sent" and bool(got),
-                json.dumps({"refused": tool_code(refused), "status": data.get("status")}, ensure_ascii=False))
+                ok, json.dumps(detail, ensure_ascii=False)[:3000])
         file_msg, video_msg = got[2], got[3]
         download = c.owner.client.request("GET", f"/api/v1/im/media/{file_msg['attachment']['media_id']}",
                                           headers=c.owner.headers)
