@@ -214,3 +214,56 @@ async def test_unmanaged_unlimited_instance_excludes_host_from_auto(owner, tmp_p
         result = await _deploy(owner, _auto())
         assert result.status_code == 409 and "UNACCOUNTED_LEGACY_RESOURCES" in result.text
         assert await _count(owner, "agent_instances") == 1
+
+
+async def test_reconcile_legacy_limits_uses_trusted_runtime_and_preserves_desired_settings(
+    owner, tmp_path, monkeypatch
+):
+    from datetime import UTC, datetime
+
+    import app.domain.agent_runtime_resources as runtime_resources
+
+    host = FakeHost(tmp_path)
+    async with ssh_host(host) as (port, _):
+        await _ready_server(owner, port)
+        _park(monkeypatch)
+        result = await _deploy(owner, _auto())
+        assert result.status_code == 202, result.text
+        instance_id = result.json()["instance"]["id"]
+        await run_sql(
+            owner.database_url,
+            "UPDATE workspace.agent_deployments SET selection='{}'::jsonb, "
+            "runtime_installed=true, installed_at=now(), install_dir='/srv/managed/app' "
+            "WHERE instance_id=$1",
+            uuid.UUID(instance_id),
+        )
+        await run_sql(
+            owner.database_url,
+            "UPDATE workspace.agent_ssh_jobs SET status='succeeded' WHERE instance_id=$1",
+            uuid.UUID(instance_id),
+        )
+
+        async def inspect(target, box, *, project, directory):
+            assert project.endswith(instance_id.replace("-", "")[:12])
+            assert directory == "/srv/managed/app"
+            return {
+                "cpus": 2.0,
+                "memory_mb": 4096,
+                "container_id": "a" * 64,
+                "source": "trusted_docker_inspect",
+                "observed_at": datetime.now(UTC).isoformat(),
+            }
+
+        monkeypatch.setattr(runtime_resources, "inspect_runtime_limits", inspect)
+        current = await owner.instance_version(instance_id)
+        response = await _call(
+            owner,
+            "POST",
+            f"/api/v1/agents/instances/{instance_id}/resources/reconcile",
+            json={"version": current},
+        )
+        assert response.status_code == 200, response.text
+        receipt = response.json()["deployment"]["selection"]
+        assert receipt["cpus"] == 2.0 and receipt["memory_mb"] == 4096
+        details = await _call(owner, "GET", f"/api/v1/agents/instances/{instance_id}")
+        assert details.json()["limits"] == {"cpus": 1.0, "mem_limit_mb": 2048}

@@ -135,7 +135,7 @@ describe('容器服务器页：模板、执行记录与设置', () => {
     await fireEvent.click(within(form).getByRole('button', { name: '添加' }))
     await screen.findByText(/已添加/)
     const post = requests.find(r => r.method === 'POST' && path(r) === '/api/v1/runner/hosts')!
-    expect(await post.clone().json()).toEqual({ name: '容器服务器', ingress: 'public' })
+    expect(await post.clone().json()).toEqual({ name: '容器服务器', ingress: 'public', backend: 'docker' })
   })
 
   it('saves the reclaim policy with the version and removes the host after confirmation', async () => {
@@ -204,7 +204,7 @@ describe('instance runner permission', () => {
     await fireEvent.update(within(panel).getByLabelText('确认登录密码'), 'owner-password')
     await fireEvent.click(within(panel).getByRole('button', { name: '确认撤销' }))
     await vi.waitFor(() => expect(requests.some(r => path(r).endsWith('/runner/capabilities/grant-1/revoke'))).toBe(true))
-    expect(within(panel).queryByLabelText('确认登录密码')).not.toBeInTheDocument()
+    await vi.waitFor(() => expect(within(panel).queryByLabelText('确认登录密码')).not.toBeInTheDocument())
   })
 
   it('is off by default and opens with limits after confirmation', async () => {

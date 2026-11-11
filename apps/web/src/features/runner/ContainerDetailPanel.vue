@@ -12,7 +12,7 @@ import ContainerNetworkPanel from './ContainerNetworkPanel.vue'
 
 // 容器详情（T-0187，效果图右侧一栏；手机放进右侧抽屉）：按完整 UUID 读 GET /runner/environments/{id}，
 // 所以不在当前筛选、不在当前页的容器也能直接打开（地址里的 environment_id、通知里的链接）。
-// 不存在或已无权访问时不留旧内容。三块：资源负载、执行记录、配置与回收。
+// 不存在或已无权访问时不留旧内容。资源负载、执行记录、配置与回收、网络与服务分开。
 // 打开、刷新详情只读，不会启动、停止、归档或删除任何东西。
 type Section = 'load' | 'runs' | 'config' | 'network'
 const props = defineProps<{ environmentId: string; aside?: boolean }>()

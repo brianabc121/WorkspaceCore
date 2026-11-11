@@ -204,6 +204,7 @@ async def test_network_workspace_role_csrf_and_missing_runtime(env):
     )
     assert response.status_code == 404
 
+
 @pytest.mark.integration
 async def test_network_host_transport_is_authenticated_and_requires_dataplane_validation(env):
     from app.domain.runner_hosts import hash_token, new_token
@@ -212,28 +213,38 @@ async def test_network_host_transport_is_authenticated_and_requires_dataplane_va
 
     env_id, host_id, _, _ = await seed(env)
     app = app_of(env.client)
-    app.state.settings.agent_ingress_trusted_proxies = '127.0.0.1/32'
+    app.state.settings.agent_ingress_trusted_proxies = "127.0.0.1/32"
     token = new_token()
     async with app.state.sessionmaker() as db:
         host = await db.get(RunnerHost, host_id)
         host.token_hash = hash_token(token)
         host.runtime_metadata = {}
         await db.commit()
-    path = '/runner-api/v1/network'
-    denied = await env.client.post(path + '/desired', json={})
+    path = "/runner-api/v1/network"
+    denied = await env.client.post(path + "/desired", json={})
     assert denied.status_code == 401
-    headers = {'Authorization': 'Bearer ' + token, 'X-MyWS-Ingress': 'intranet'}
-    declared = await post(env, f'/runner/environments/{env_id}/services', {'name': 'db', 'port': 5432})
+    headers = {"Authorization": "Bearer " + token, "X-MyWS-Ingress": "intranet"}
+    declared = await post(
+        env, f"/runner/environments/{env_id}/services", {"name": "db", "port": 5432}
+    )
     assert declared.status_code == 201, declared.text
     service = declared.json()
-    policy = await env.client.post(path + '/desired', headers=headers, json={})
+    policy = await env.client.post(path + "/desired", headers=headers, json={})
     assert policy.status_code == 200, policy.text
-    assert [s['id'] for s in policy.json()['services']] == [service['id']]
-    assert 'token' not in policy.text.lower()
-    ack = await env.client.post(path + '/ack', headers=headers, json={
-        'record_id': service['id'], 'revision': service['desired_revision'], 'generation': 3,
-        'success': True, 'receipt_uid': 'api-object-uid', 'resource_version': '42',
-    })
-    assert ack.status_code == 409 and ack.json()['error']['code'] == 'NETWORK_VALIDATION_REQUIRED'
-    state = await env.get(f'/api/v1/runner/environments/{env_id}/network')
-    assert state['services'][0]['state'] == 'approved_pending_apply'
+    assert [s["id"] for s in policy.json()["services"]] == [service["id"]]
+    assert "token" not in policy.text.lower()
+    ack = await env.client.post(
+        path + "/ack",
+        headers=headers,
+        json={
+            "record_id": service["id"],
+            "revision": service["desired_revision"],
+            "generation": 3,
+            "success": True,
+            "receipt_uid": "api-object-uid",
+            "resource_version": "42",
+        },
+    )
+    assert ack.status_code == 409 and ack.json()["error"]["code"] == "NETWORK_VALIDATION_REQUIRED"
+    state = await env.get(f"/api/v1/runner/environments/{env_id}/network")
+    assert state["services"][0]["state"] == "approved_pending_apply"

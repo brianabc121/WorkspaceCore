@@ -80,11 +80,9 @@ def _reason(candidate: Candidate, request: ResourceRequest, now: datetime) -> st
         return "METRICS_UNKNOWN"
     if any(not _number(v) or _metric(v) < 0 for v in nonnegative):
         return "METRICS_UNKNOWN"
-    if (
-        _metric(candidate.available_memory_mb) > _metric(candidate.memory_mb)
-        or _metric(candidate.disk_free_gb) > _metric(candidate.disk_gb)
-        or _metric(candidate.cpu_load) > 1
-    ):
+    if _metric(candidate.available_memory_mb) > _metric(candidate.memory_mb) or _metric(
+        candidate.disk_free_gb
+    ) > _metric(candidate.disk_gb):
         return "METRICS_UNKNOWN"
     if request.runtime is not None and request.runtime not in candidate.runtimes:
         return "RUNTIME_UNAVAILABLE"

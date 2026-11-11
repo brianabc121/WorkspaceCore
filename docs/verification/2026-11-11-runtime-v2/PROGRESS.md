@@ -35,3 +35,15 @@
 8. 完整独立审阅、真实日志归档、提交推送及PR。保持T-0222 in_progress；Claude审查，Codex不合并。
 
 源文件级报告与独立审阅位于本检出的.superpowers/sdd/runtime-v2/（gitignored）；关键状态以本文与任务日志为可恢复事实。
+
+## 后续检查点（649e2ab之后）
+
+- 历史资源核对已接通owner+CSRF的POST /api/v1/agents/instances/{id}/resources/reconcile及资源面板按钮。固定Docker inspect只读取身份与CPU/内存字段；检查部署版本/凭据/服务器版本及未完成作业，网络调用不持数据库行锁。不修改运行容器或用户的期望上限。实际不限资源仍拒绝，不会当0。
+- 资源解析与核对接口：RED缺少模块/404后，解析2项与真实PG接口1项合计3passed（10.84s）。异步fixture原有缺少datetime导入已修正，不能把此前失败当成功。
+- 前端本次相关3文件30passed（46.99s）；修复了新增backend字段的请求断言和撤销后的异步断言。完整并发FE尝试被中断，没有最终摘要；出现过其他页面超时，仍需无竞争地全面复跑。
+- Node22 build实际成功（Vite1m18s；exit0），已有大chunk和依赖PURE注释警告如实保留，不为通过而屏蔽。
+- CPU归一化load可超过1，原误报未知指标。新回归RED后修正为RESOURCE_PRESSURE，选择器23项+解析2项合计25passed（0.17s）。
+- 后端严格类型检查290源文件成功，最新新增代码仍需最终统一复验；Ruff全树通过。原目录git status仍与起始时相同。
+- 当前PR为草稿 https://github.com/brianabc121/WorkspaceCore/pull/193，已附加到本聊天；不可合并，T-0222继续in_progress。
+
+新增最终审阅重点：当前闲置运行负载仍有尚未使用的内存上限时，外部进程实际内存占用与平台承诺余量须结合可信容器用量计量，避免仅靠当前free+平台total两道门而漏算未用承诺；晚到上报对重启预约的因果证明也需最终复核。禁止据此草稿声称生产容量严格保证已完成。

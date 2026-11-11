@@ -23,6 +23,12 @@ const summary = computed(() => {
   return [l.mem_limit_mb !== null ? `内存 ${l.mem_limit_mb} MiB` : '内存不限', l.cpus !== null ? `CPU ${l.cpus} 核` : 'CPU 不限'].join('，')
 })
 
+async function reconcile() {
+  await act(async () => dataOf(await auth.api.POST('/api/v1/agents/instances/{instance_id}/resources/reconcile', {
+    params: { header, path: { instance_id: props.instance.id } }, body: { version: props.instance.version },
+  })), '实际资源已核对，调度账本已更新；你的设置未改变')
+}
+
 async function save() {
   if (!memValid.value || !cpuValid.value) return
   await act(async () => dataOf(await auth.api.PUT('/api/v1/agents/instances/{instance_id}/limits', { params: { header, path: { instance_id: props.instance.id } }, body: { mem_limit_mb: memValue.value, cpus: cpuValue.value, version: props.instance.version } })), '资源上限已保存：重新部署这个实例后生效')
@@ -38,6 +44,10 @@ async function save() {
       <label class="form-field"><span>CPU 上限（核，可以是小数）</span><input v-model.trim="cpus" inputmode="decimal" placeholder="不限制" :aria-invalid="!cpuValid" /></label>
       <div class="form-actions"><button type="submit" class="secondary-button" :disabled="busy || !memValid || !cpuValid || !changed">保存上限</button></div>
     </form>
+    <div v-if="auth.isOwner && instance.server_id" class="form-actions">
+      <button type="button" class="secondary-button" :disabled="busy" @click="reconcile">核对已部署资源</button>
+      <p class="form-help">只读取服务器现有容器的 CPU、内存上限，不修改容器或你设置的上限。实际未限制的资源不会按零占用计算。</p>
+    </div>
     <p v-if="!memValid" class="feedback">内存上限是 256 到 1048576 之间的整数（MiB）。</p>
     <p v-if="!cpuValid" class="feedback">CPU 上限是 0.1 到 256 之间的数。</p>
     <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>

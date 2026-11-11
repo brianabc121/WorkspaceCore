@@ -96,6 +96,7 @@ def test_explicit_target_never_falls_back():
         ({"pending_memory_mb": 11000}, "INSUFFICIENT_CAPACITY"),
         ({"pending_disk_gb": 79}, "INSUFFICIENT_CAPACITY"),
         ({"cpu_load": 0.96}, "RESOURCE_PRESSURE"),
+        ({"cpu_load": 1.5}, "RESOURCE_PRESSURE"),
     ],
 )
 def test_ineligible_metrics_or_reservations_are_excluded(changes, reason):
