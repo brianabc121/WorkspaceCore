@@ -166,6 +166,12 @@ async def _expire_commands(runner: Runner, out: TickResult) -> None:
                     snapshot.status = "failed"
                     snapshot.error = "快照超时"
             if env.state == "pending_delete":
+                from app.domain.runner_placement import compute_reserved
+
+                env.runtime_metadata = {
+                    **(env.runtime_metadata or {}),
+                    "compute_stopped": not compute_reserved(env),
+                }
                 env.state = "stopped"
                 env.delete_after = None
             env.state_reason = "快照超时，没有归档或删除"
@@ -601,7 +607,7 @@ async def _purge(runner: Runner, out: TickResult) -> None:
     )
     await db.execute(
         delete(RunnerCommand).where(
-            RunnerCommand.status.in_(("done", "failed", "unknown", "cancelled")),
+            RunnerCommand.status.in_(("done", "failed", "cancelled")),
             RunnerCommand.finished_at < now - timedelta(days=COMMAND_KEEP_DAYS),
         )
     )

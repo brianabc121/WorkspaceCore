@@ -416,16 +416,26 @@ async def test_disk_watermarks_prune_and_refuse(env: Env) -> None:
         {"purpose": "x", "lifetime": "session", "spec": {"image": "alpine:3"}},
     )
     error = tool_error(refused)
-    assert error["code"] == "RESOURCE_BUSY" and "磁盘告急" in error["message"]
+    assert error["code"] == "NO_ELIGIBLE_SERVER"
 
 
-async def test_create_makes_room_by_stopping_low_score_envs(env: Env) -> None:
+async def test_create_waits_for_confirmed_stop_before_reusing_capacity(env: Env) -> None:
     rtoken = await add_host(env)
     _instance, token = await agent(env)
     first = (await create_env(env, token, rtoken))["result"]["environment"]
     app = app_of(env.client)
     async with app.state.sessionmaker() as db:
-        await db.execute(update(RunnerHost).values(mem_bytes=4 * 1024**3))
+        await db.execute(
+            update(RunnerHost).values(
+                mem_bytes=4 * 1024**3,
+                report={
+                    "at": specs.now().isoformat(),
+                    "load": 0.1,
+                    "mem_free_bytes": 3 * 1024**3,
+                    "disk_free_bytes": 400 * 1024**3,
+                },
+            )
+        )
         await db.commit()
     # 再建一个 2 GB 的会超过整台服务器的 90%：先按保留分停掉空闲的那个，这次返回忙
     busy = await call(
@@ -435,7 +445,9 @@ async def test_create_makes_room_by_stopping_low_score_envs(env: Env) -> None:
         {"purpose": "x", "lifetime": "session", "spec": {"image": "alpine:3"}},
     )
     error = tool_error(busy)
-    assert error["code"] == "RESOURCE_BUSY" and "已按保留分停止 1 个" in error["message"]
+    assert error["code"] == "NO_ELIGIBLE_SERVER"
+    # 容量筛选不会自行释放预约；实际停止回执到达后才重新使用。
+    await call(env, token, "env_stop", {"environment_id": first["id"]})
     stop = await next_command(env, rtoken, "stop_env")
     assert stop["payload"]["env_id"] == first["id"]
     await report_result(env, rtoken, stop["id"], {})
@@ -462,7 +474,7 @@ async def test_create_makes_room_by_stopping_low_score_envs(env: Env) -> None:
             {"purpose": "y", "lifetime": "session", "spec": {"image": "alpine:3"}},
         )
     )
-    assert full["code"] == "RESOURCE_BUSY" and "分配满了" in full["message"]
+    assert full["code"] == "NO_ELIGIBLE_SERVER"
 
 
 async def test_archived_env_pending_delete_has_no_container(env: Env) -> None:

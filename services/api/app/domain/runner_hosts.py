@@ -39,6 +39,7 @@ from app.models import (
     RunnerEnvironment,
     RunnerHost,
     RunnerRun,
+    RunnerSnapshot,
 )
 from app.schemas.runner import (
     RunnerCommandOut,
@@ -87,6 +88,9 @@ def host_out(host: RunnerHost) -> RunnerHostOut:
     ):
         status = "offline"
     return RunnerHostOut(
+        backend=host.backend or "docker",
+        node_name=host.node_name,
+        runtime_metadata=dict(host.runtime_metadata or {}),
         id=host.id,
         name=host.name,
         status=status,
@@ -190,14 +194,15 @@ class RunnerHosts:
     async def create(
         self, workspace_id: uuid.UUID, body: RunnerHostCreate, actor_id: uuid.UUID | None
     ) -> tuple[RunnerHost, str]:
-        if await self.get(workspace_id) is not None:
-            raise ApiError(409, "RUNNER_EXISTS", "这个工作空间已经有容器服务器（V1 只支持一台）")
         token = new_token()
         host = RunnerHost(
             id=uuid.uuid4(),
             workspace_id=workspace_id,
             name=body.name,
             ingress=body.ingress,
+            backend=body.backend,
+            node_name=body.node_name,
+            runtime_metadata=body.runtime_metadata,
             token_hash=hash_token(token),
             token_prefix=token[:TOKEN_PREFIX_SHOWN],
             created_by=actor_id,
@@ -257,21 +262,28 @@ class RunnerHosts:
         return ca.cert_pem
 
     async def remove(self, host: RunnerHost, actor_id: uuid.UUID | None, version: int) -> None:
+        await self.db.refresh(host, with_for_update=True)
         if host.version != version:
             raise ApiError(409, "VERSION_CONFLICT", "容器服务器已被修改，请刷新后重试")
         live = await self.db.scalar(
             select(RunnerEnvironment.id)
             .where(
                 RunnerEnvironment.host_id == host.id,
-                RunnerEnvironment.state.in_(("creating", "running", "stopped", "pending_delete")),
+                RunnerEnvironment.state != "deleted",
             )
             .limit(1)
         )
-        if live is not None:
+        snapshot = await self.db.scalar(
+            select(RunnerSnapshot.id)
+            .join(RunnerEnvironment, RunnerSnapshot.environment_id == RunnerEnvironment.id)
+            .where(RunnerEnvironment.host_id == host.id, RunnerSnapshot.status != "deleted")
+            .limit(1)
+        )
+        if live is not None or snapshot is not None:
             raise ApiError(
                 409,
                 "RUNNER_HAS_ENVIRONMENTS",
-                "还有没删除的环境；先在“环境”里删掉（或归档），再移除容器服务器",
+                "还有保有或结果未知的环境、快照；完成确认清理后再移除容器服务器",
             )
         await self.audit.record(
             "runner.host_removed",
@@ -467,7 +479,7 @@ class RunnerHosts:
             await self.db.scalars(
                 select(RunnerCommand.environment_id).where(
                     RunnerCommand.host_id == host.id,
-                    RunnerCommand.status.in_(("pending", "sent")),
+                    RunnerCommand.status.in_(("pending", "sent", "unknown")),
                     RunnerCommand.environment_id.is_not(None),
                 )
             )
@@ -479,10 +491,19 @@ class RunnerHosts:
             runner_metrics.apply_container_reading(env, container, received)
             if container is not None:
                 running = container.state == "running"
+                if env.state in ("creating", "failed") and env.id not in busy:
+                    env.state = "running" if running else "stopped"
+                    env.state_reason = "已通过服务器报告确认容器存在"
                 if env.state == "running" and not running and env.id not in busy:
                     env.state = "stopped"
                     env.stopped_at = env.stopped_at or specs.now()
                     env.state_reason = env.state_reason or f"容器已退出（{container.state}）"
+                if env.id not in busy:
+                    env.runtime_metadata = {
+                        **(env.runtime_metadata or {}),
+                        "compute_stopped": not running,
+                        "compute_observed_at": received.isoformat(),
+                    }
             if env.id in volumes:
                 runner_metrics.apply_volume_reading(env, volumes[env.id].bytes, received)
             if env.id in busy or env.state not in EXPECT_CONTAINER:

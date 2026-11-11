@@ -8,7 +8,7 @@ import { useMediaQuery } from '../../composables/useMediaQuery'
 import DrawerDetail from '../../components/DrawerDetail.vue'
 import { runnerError, useRunnerOverview, type EnvFilters, type EnvSort, type RunnerEnv } from './api'
 import { summary } from './containerMetrics'
-import ContainerHostStrip from './ContainerHostStrip.vue'
+import RunnerHostPool from './RunnerHostPool.vue'
 import ContainerDetailPanel from './ContainerDetailPanel.vue'
 import OverviewTab from './OverviewTab.vue'
 import AgentUsageTab from './AgentUsageTab.vue'
@@ -83,6 +83,9 @@ watch(tab, (t) => { if (t !== 'runs') runsFor.value = undefined })
 
 const overview = useRunnerOverview(scope)
 const data = computed(() => overview.data.value)
+const hosts = computed(() => data.value?.hosts?.length ? data.value.hosts : data.value?.host ? [data.value.host] : [])
+const selectedHost = computed(() => hosts.value.find(h => h.id === one(route.query.host_id)) ?? hosts.value[0] ?? null)
+function selectHost(id: string) { update({ host_id: id }) }
 const instances = computed(() => data.value?.instances ?? [])
 const counts = computed(() => summary(data.value?.environments))
 const reload = ref(0)
@@ -110,12 +113,13 @@ const showDetail = computed(() => tab.value === 'overview' && !!selected.value)
   <p v-if="overview.isPending.value" role="status">正在加载…</p>
   <div v-else-if="overview.error.value && !data" class="ws-state-line"><p role="alert">{{ runnerError(overview.error.value) }}</p><button type="button" class="secondary-button" @click="overview.refetch()">重试</button></div>
   <template v-else-if="data">
-    <ContainerHostStrip v-if="data.host" :host="data.host" @settings="go('settings')" />
+    <RunnerHostPool v-if="hosts.length" :hosts="hosts" :selected-id="selectedHost?.id" @select="selectHost" @settings="go('settings')" />
     <section v-else class="ws-panel cs-empty" aria-label="还没有容器服务器">
       <p>还没有接入容器服务器。智能体要在容器里执行命令，先在“服务器设置”里添加一台（专用的 Linux 服务器，装 Docker 与 gVisor）。</p>
       <button type="button" class="primary-button" @click="go('settings')">去添加容器服务器</button>
     </section>
 
+    <p v-if="overview.error.value" role="alert">刷新失败，保留上次的服务器与环境列表：{{ runnerError(overview.error.value) }}</p>
     <section class="ag-summary" aria-label="容器统计">
       <dl class="ag-tiles">
         <div class="ag-tile"><dt><Box aria-hidden="true" />容器环境总数</dt><dd>{{ value(counts?.total) }}</dd></div>
@@ -136,7 +140,7 @@ const showDetail = computed(() => tab.value === 'overview' && !!selected.value)
         <AgentUsageTab v-else-if="tab === 'instances'" :instances="instances" @containers="agentContainers" />
         <TemplatesTab v-else-if="tab === 'templates'" />
         <RunsTab v-else-if="tab === 'runs'" :instances="instances" :environment-id="runsFor" @clear="runsFor = undefined" />
-        <SettingsTab v-else :host="data.host" />
+        <SettingsTab v-else :key="selectedHost?.id" :host="selectedHost" />
       </div>
       <aside v-if="showDetail && wide" class="ws-panel asv-side cs-side" aria-label="容器详情">
         <ContainerDetailPanel :key="selected!" :environment-id="selected!" aside @close="close" @runs="showRuns" />

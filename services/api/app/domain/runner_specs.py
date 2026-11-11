@@ -13,8 +13,8 @@ from typing import Any
 
 # 每个实例的默认限额（第 8.4 节）；管理员在实例卡片上改的值存在 agent_instances.runner_limits
 DEFAULT_LIMITS: dict[str, float] = {
-    "envs": 3,  # 同时运行的环境
-    "persistent": 2,  # 其中常驻
+    "envs": 5,  # 默认保有数量，跨主机包含停止与未知环境
+    "persistent": 5,  # 兼容旧客户端字段；统一保有数量检查由 RunnerQuotaService 实施
     "memory_mb": 16384,
     "cpus": 8,
     "disk_gb": 100,

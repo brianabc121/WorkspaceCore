@@ -110,10 +110,19 @@ class RunnerSshService:
         self.jobs = jobs
         self.audit = AuditTrail(db, settings)
 
+    def for_host(self, host_id: uuid.UUID | None) -> "RunnerSshService":
+        self.host_id = host_id
+        return self
+
     async def _host(self, access: WorkspaceAccess) -> RunnerHost:
-        host: RunnerHost | None = await self.db.scalar(
-            select(RunnerHost).where(RunnerHost.workspace_id == access.workspace.id)
-        )
+        from app.domain.runner import Runner, RunnerError
+
+        try:
+            host = await Runner(self.db, self.settings, self.redis).host(
+                access.workspace.id, getattr(self, "host_id", None)
+            )
+        except RunnerError as error:
+            raise ApiError(409, error.code, error.message) from None
         if host is None:
             raise ApiError(404, "NOT_FOUND", "还没有添加运行服务器")
         return host
@@ -169,9 +178,12 @@ class RunnerSshService:
 
     async def state(self, access: WorkspaceAccess) -> AgentSshState:
         # 还没有添加运行服务器时也是“没有目标服务器”（读接口不返回 404，写接口仍然要先添加）
-        host: RunnerHost | None = await self.db.scalar(
-            select(RunnerHost).where(RunnerHost.workspace_id == access.workspace.id)
-        )
+        try:
+            host = await self._host(access)
+        except ApiError as error:
+            if error.status_code != 404:
+                raise
+            host = None
         return await self._state(await self._target(host) if host else None)
 
     async def _record(

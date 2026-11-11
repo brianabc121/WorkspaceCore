@@ -486,6 +486,21 @@ async def list_agent_servers(access: Owner, service: ServerService) -> AgentServ
     return await service.list_servers(access)
 
 
+@router.post(
+    "/agents/servers/{server_id}/resources/refresh",
+    summary="独立采集服务器资源（owner）",
+    dependencies=_write,
+    responses=error_responses(401, 403, 404, 409, 429, 503),
+)
+async def refresh_agent_server_resources(
+    access: Owner,
+    request: Request,
+    service: ServerService,
+    server_id: UUID,
+) -> AgentServerDetail:
+    return await service.refresh_resources(access, server_id, client_ip=_server_ip(request))
+
+
 def _replayed(response: Response, result: tuple[AgentServerDetail, bool]) -> AgentServerDetail:
     detail, replayed = result
     if replayed:

@@ -65,6 +65,9 @@ class AgentServer(Base):
     cpu_model: Mapped[str | None] = mapped_column(Text)
     uptime_seconds: Mapped[int | None] = mapped_column(BigInteger)
     latest: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    resource_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
     alerts: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

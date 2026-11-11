@@ -90,6 +90,10 @@ async def _ready_server(owner: Owner, port: int) -> str:
     assert confirmed.status_code == 200, confirmed.text
     job = await owner.initialize(server["id"])
     assert job["status"] == "succeeded", job
+    refreshed = await _call(
+        owner, "POST", f"/api/v1/agents/servers/{server['id']}/resources/refresh"
+    )
+    assert refreshed.status_code == 200, refreshed.text
     return str(server["id"])
 
 
@@ -432,7 +436,7 @@ async def test_preconditions_create_nothing(
             f"/api/v1/agents/deployments/requests/{first}",
         )
         assert replay.status_code == 200
-        assert host.logins.count("password") == 2  # 只有初始化时的两次登录
+        assert host.logins.count("password") == 3  # 初始化两次与独立资源采集一次
 
     # 外网接入入口没有配置（另一个应用实例的设置）
     async with make_client(**{**SETTINGS, "agent_public_url": ""}) as other:

@@ -17,6 +17,7 @@ from app.domain import agent_ops
 from app.domain import runner_specs as specs
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.runner import Runner, RunnerError, Viewer
+from app.domain.runner_capabilities import ContainerApprovalRequired, RunnerCapabilityService
 from app.models import AgentInstance, RunnerCommand
 from app.schemas.ai_tools import ToolSpec
 from app.schemas.runner import (
@@ -38,7 +39,7 @@ from app.schemas.runner import (
     RunOut,
 )
 
-READ_TOOLS = frozenset({"runner_templates", "env_find", "env_run"})
+READ_TOOLS = frozenset({"runner_templates", "env_find", "env_run", "runner_hosts"})
 ARG_TEXT_LIMIT = 2000
 
 
@@ -107,6 +108,9 @@ async def _call(
 ) -> tuple[BaseModel, str]:
     viewer = _viewer(instance)
     name = spec.name
+    if name == "runner_hosts":
+        output = await runner.host_candidates(viewer)
+        return output, f"{len(output.items)} 个运行服务器"
     if isinstance(parsed, RunnerTemplatesInput):
         templates = await runner.templates(instance.workspace_id)
         owners = await runner.owner_names(
@@ -217,11 +221,35 @@ async def run(
             else "这个实例没有权限调用这个工具"
         )
         raise ToolCallError(denied, message)
+    if spec.name == "runner_request_capability":
+        pending = await RunnerCapabilityService(
+            service.db, service.settings, service.redis
+        ).request(instance, **parsed.model_dump())
+        await service.db.commit()
+        await service._enqueue_cards(pending.action_id)
+        return pending
     runner = Runner(service.db, service.settings, service.redis)
     reading = spec.name in READ_TOOLS
     instance_id = instance.id
     try:
         output, summary = await _call(runner, instance, spec, parsed)
+    except ContainerApprovalRequired as error:
+        # The quota decision is an intended result: persist the pending approval before returning.
+        await service.db.commit()
+        await service._enqueue_cards(error.approval_id)
+        from app.models import AiToolExecution
+        from app.schemas.ai_tools import ContainerApprovalOutput
+
+        approval = await service.db.get(AiToolExecution, error.approval_id)
+        if approval is None or approval.expires_at is None:
+            raise ToolCallError("NOT_FOUND", "审批记录不存在") from None
+        return ContainerApprovalOutput(
+            action_id=error.approval_id,
+            approval_id=error.approval_id,
+            summary=error.message,
+            expires_at=approval.expires_at,
+            deduplicated=error.deduplicated,
+        )
     except (RunnerError, ToolCallError) as error:
         code = error.code
         message = error.message

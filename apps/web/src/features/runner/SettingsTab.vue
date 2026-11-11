@@ -15,18 +15,19 @@ const name = ref('容器服务器'), ingress = ref<Schema['RunnerHostCreate']['i
 
 async function add() {
   await act(async () => {
-    dataOf(await auth.api.POST('/api/v1/runner/host', { params: { header }, body: { name: name.value.trim(), ingress: ingress.value } }))
+    dataOf(await auth.api.POST('/api/v1/runner/hosts', { params: { header }, body: { name: name.value.trim(), ingress: ingress.value, backend: 'docker' } }))
   }, '已添加：下载接入包，放到容器服务器上运行 install.sh')
 }
 async function bundle() {
   if (props.host?.last_seen_at && !window.confirm('重新下载接入包会签发新凭证，旧凭证立即失效：容器服务器要用新的接入包重新部署才能连上。继续？')) return
   let file = ''
-  if (await act(async () => { file = await downloadRunnerBundle(scope) })) notice.value = `已下载 ${file}：凭证只在这个 zip 里，传到容器服务器后删掉本地的副本`
+  if (await act(async () => { file = await downloadRunnerBundle(scope, props.host!.id) })) notice.value = `已下载 ${file}：凭证只在这个 zip 里，传到容器服务器后删掉本地的副本`
 }
 async function remove() {
-  if (!props.host || !window.confirm(`移除容器服务器「${props.host.name}」？凭证立即失效。服务器上的 runner-agent 与 Docker 不会被卸载。`)) return
+  const host = props.host
+  if (!host || !window.confirm(`移除容器服务器「${host.name}」？凭证立即失效。服务器上的 runner-agent 与 Docker 不会被卸载。`)) return
   await act(async () => {
-    await auth.api.DELETE('/api/v1/runner/host', { params: { header, query: { version: props.host!.version } } })
+    await auth.api.DELETE('/api/v1/runner/hosts/{host_id}', { params: { header, path: { host_id: host.id }, query: { version: host.version } } })
   }, '已移除容器服务器')
 }
 
@@ -46,7 +47,7 @@ async function savePolicy() {
     policy[field.key] = value
   }
   await act(async () => {
-    dataOf(await auth.api.PUT('/api/v1/runner/host/policy', { params: { header }, body: { policy, version: props.host!.version } }))
+    dataOf(await auth.api.PUT('/api/v1/runner/hosts/{host_id}/policy', { params: { header, path: { host_id: props.host!.id } }, body: { policy, version: props.host!.version } }))
   }, '已保存回收策略：下一轮检查（每分钟）起生效')
 }
 </script>
@@ -56,15 +57,15 @@ async function savePolicy() {
   <p v-if="notice" role="status" class="feedback">{{ notice }}</p>
   <section class="panel runner-card" aria-label="容器服务器">
     <h2>容器服务器</h2>
-    <template v-if="!host">
+    <div>
       <p class="form-help">用一台专用的 Linux 服务器（x86_64 或 ARM64，内核 5.6 以上）：接入包会装好锁定版本的 Docker、gVisor 和 runner-agent。runner-agent 主动连工作台的接入入口，服务器不用开入站端口。</p>
       <form class="runner-filters" aria-label="添加容器服务器" @submit.prevent="add">
         <label class="form-field"><span>名称</span><input v-model="name" maxlength="64" required /></label>
         <label class="form-field"><span>连工作台的入口</span><select v-model="ingress"><option value="intranet">内网入口</option><option value="public">外网入口（另发客户端证书）</option></select></label>
         <button type="submit" class="primary-button" :disabled="busy || !name.trim()">添加</button>
       </form>
-    </template>
-    <template v-else>
+    </div>
+    <template v-if="host">
       <dl class="agent-facts">
         <div><dt>名称</dt><dd>{{ host.name }}</dd></div>
         <div><dt>状态</dt><dd>{{ HOST_STATUS[host.status] }}</dd></div>
@@ -80,7 +81,7 @@ async function savePolicy() {
     </template>
   </section>
 
-  <RunnerSshDeploy v-if="host" />
+  <RunnerSshDeploy v-if="host && host.backend !== 'kubernetes'" :key="host.id" :host-id="host.id" />
 
   <form v-if="host" class="panel runner-card runner-form" aria-label="回收策略" @submit.prevent="savePolicy">
     <h2>回收策略</h2>

@@ -175,7 +175,52 @@ describe('OpenClaw agents page: list', () => {
 describe('OpenClaw agents page: deploy drawer', () => {
   const empty = { items: [], next_cursor: null, generated_at: at, summary: overviewSummary() }
 
-  it('opens from the servers page with that server, lists only deployable servers, asks for no address or password, and deploys with unlimited resources by default', { timeout: 15000 }, async () => {
+  it('defaults to auto without a server and shows the actual server after acceptance', async () => {
+    const state = deploymentState({ server: srv2, deployment: deployed('srv-2'), job: installJob('running') })
+    const requests = setup(r => {
+      if (path(r) === '/api/v1/agents/overview') return Response.json(empty)
+      if (path(r) === '/api/v1/agents/deployments' && r.method === 'POST') return Response.json({ request_id: RID, instance: fresh(), deployment: state }, { status: 202 })
+      if (path(r) === '/api/v1/agents/instances/inst-n/deployment') return Response.json(state)
+      if (path(r) === '/api/v1/agents/instances/inst-n') return Response.json(fresh())
+    })
+    await openApp('/agents?deploy=1')
+    const form = await screen.findByRole('form', { name: '部署 OpenClaw' })
+    expect(within(form).getByLabelText('部署位置')).toHaveValue('auto')
+    expect(within(form).queryByLabelText('部署服务器 *')).not.toBeInTheDocument()
+    await fireEvent.update(within(form).getByLabelText('智能体名称 *'), '项目助手')
+    await pickModel(form)
+    await fireEvent.click(within(form).getByRole('button', { name: '开始部署' }))
+    const progress = await screen.findByRole('region', { name: '新智能体的部署' })
+    expect(within(progress).getByRole('link', { name: '新加坡节点 B' })).toHaveAttribute('href', '/agent-servers?server=srv-2')
+    const body = await posts(requests, '/api/v1/agents/deployments')[0]!.clone().json()
+    expect(body.placement).toEqual({ mode: 'auto' })
+    expect(body.server_id).toBeUndefined()
+    expect(body.server_version).toBeUndefined()
+  })
+
+  it('keeps the specified target and list after capacity rejection until the user switches to auto', async () => {
+    const requests = setup(r => {
+      if (path(r) === '/api/v1/agents/overview') return Response.json(empty)
+      if (path(r) === '/api/v1/agents/deployments') return fail(409, 'PLACEMENT_CAPACITY_INSUFFICIENT')
+    })
+    await openApp('/agents?deploy=1')
+    const form = await screen.findByRole('form', { name: '部署 OpenClaw' })
+    await fireEvent.update(within(form).getByLabelText('部署位置'), 'specified')
+    await within(form).findByRole('option', { name: '香港节点 A' })
+    await fireEvent.update(within(form).getByLabelText('部署服务器 *'), 'srv-1')
+    await fireEvent.update(within(form).getByLabelText('智能体名称 *'), '项目助手')
+    await pickModel(form)
+    await fireEvent.click(within(form).getByRole('button', { name: '开始部署' }))
+    expect(await within(form).findByRole('alert')).toBeVisible()
+    expect(within(form).getByLabelText('部署位置')).toHaveValue('specified')
+    expect(within(form).getByLabelText('部署服务器 *')).toHaveValue('srv-1')
+    expect(screen.getByRole('region', { name: '智能体列表' })).toBeVisible()
+    expect(posts(requests, '/api/v1/agents/deployments')).toHaveLength(1)
+    await fireEvent.update(within(form).getByLabelText('部署位置'), 'auto')
+    expect(within(form).queryByLabelText('部署服务器 *')).not.toBeInTheDocument()
+  })
+
+  it('opens from the servers page with that server, lists only deployable servers, asks for no address or password, and deploys with finite default resources', { timeout: 15000 }, async () => {
     let state = deploymentState({ server: srv2, deployment: { ...deployed('srv-2'), installed_at: null, runtime_installed: null }, job: installJob('running') })
     let overviews = 0
     const requests = setup(r => {
@@ -201,8 +246,8 @@ describe('OpenClaw agents page: deploy drawer', () => {
     // 没有 IP、账号或密码输入；版本是锁定的推荐版本；资源默认不限制
     expect(within(form).queryByLabelText(/IP|账号|密码/)).not.toBeInTheDocument()
     expect(within(form).getByText('平台推荐版本（已锁定）')).toBeVisible()
-    expect(within(form).getByLabelText('CPU 上限（核）')).toHaveValue('')
-    expect(within(form).getByLabelText('内存上限（MiB）')).toHaveValue('')
+    expect(within(form).getByLabelText('CPU 上限（核）')).toHaveValue('1')
+    expect(within(form).getByLabelText('内存上限（MiB）')).toHaveValue('2048')
     expect(within(form).getByRole('region', { name: '自动部署流程' })).toHaveTextContent('检查服务器环境拉取镜像创建独立容器与数据目录接入工作台等待心跳并确认上线')
     const start = within(form).getByRole('button', { name: '开始部署' })
     expect(start).toBeDisabled()
@@ -216,7 +261,7 @@ describe('OpenClaw agents page: deploy drawer', () => {
     await vi.waitFor(() => expect(posts(requests, '/api/v1/agents/deployments')).toHaveLength(1))
     const post = posts(requests, '/api/v1/agents/deployments')[0]!
     const body = await post.clone().json() as Schema['AgentDeploymentCreateIn']
-    expect(body).toEqual({ request_id: expect.stringMatching(/^[0-9a-f-]{36}$/), server_id: 'srv-2', server_version: 5, name: '项目助手', description: '', cpus: null, mem_limit_mb: null, model: { connection_id: 'conn-1', model_id: 'gpt-4.1' } })
+    expect(body).toEqual({ request_id: expect.stringMatching(/^[0-9a-f-]{36}$/), placement: { mode: 'specified', server_id: 'srv-2' }, server_version: 5, name: '项目助手', description: '', cpus: 1, mem_limit_mb: 2048, model: { connection_id: 'conn-1', model_id: 'gpt-4.1' } })
     expect(post.headers.get('Idempotency-Key')).toBe(body.request_id)
 
     // 接纳后显示真实步骤，直到部署完成；结束后刷新总览
@@ -262,7 +307,7 @@ describe('OpenClaw agents page: deploy drawer', () => {
     await fireEvent.click(within(form).getByRole('button', { name: '开始部署' }))
     await vi.waitFor(() => expect(posts(requests, '/api/v1/agents/deployments')).toHaveLength(1))
     const firstBody = await posts(requests, '/api/v1/agents/deployments')[0]!.clone().json() as Schema['AgentDeploymentCreateIn']
-    expect(firstBody).toMatchObject({ server_id: 'srv-1', cpus: 2, mem_limit_mb: 4096 })
+    expect(firstBody).toMatchObject({ placement: { mode: 'specified', server_id: 'srv-1' }, cpus: 2, mem_limit_mb: 4096 })
     // 被明确拒绝（没有建实例）：说明原因、留在表单，不显示“已上线”
     expect(await within(form).findByText(/外网接入入口还没有配置/)).toBeVisible()
     expect(screen.queryByRole('region', { name: '新智能体的部署' })).not.toBeInTheDocument()

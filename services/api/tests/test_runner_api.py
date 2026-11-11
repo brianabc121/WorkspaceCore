@@ -92,6 +92,18 @@ async def add_host(env: Env) -> str:
     token = values["MYWS_RUNNER_TOKEN"]
     assert token.startswith("mwr_")
     await poll(env, token)  # 上线
+    report = await env.client.post(
+        "/runner-api/v1/report",
+        json={
+            "mem_bytes": POLL["mem_bytes"],
+            "mem_free_bytes": 24 * 1024**3,
+            "disk_bytes": POLL["disk_bytes"],
+            "disk_free_bytes": POLL["disk_free_bytes"],
+            "load": 0.5,
+        },
+        headers=runner_headers(token),
+    )
+    assert report.status_code == 200, report.text
     return token
 
 
@@ -417,7 +429,7 @@ async def test_quota_and_capability_checks(env: Env) -> None:
         },
     )
     error = tool_error(kvm)
-    assert error["code"] == "RUNNER_CAPABILITY" and "/dev/kvm" in error["message"]
+    assert error["code"] == "NO_ELIGIBLE_SERVER"
     once = await call(
         env, token2, "env_create", {"purpose": "x", "lifetime": "once", "spec": {"image": "a:1"}}
     )

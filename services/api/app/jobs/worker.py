@@ -26,6 +26,7 @@ from app.core.resources import create_engine
 from app.domain import (
     agent_ops,
     agent_outbox,
+    agent_server_resources,
     agent_stops,
     agent_wakeups,
     agent_watch,
@@ -287,6 +288,13 @@ async def check_host_alerts(ctx: dict[str, Any]) -> int:
         return await host_metrics.check_alerts(db)
 
 
+async def refresh_agent_resources(ctx: dict[str, Any]) -> int:
+    """Trusted scheduling telemetry, independently of any running OpenClaw."""
+    context = _sync(ctx)
+    async with context.sessions() as db:
+        return await agent_server_resources.refresh_managed_resources(db, context.settings)
+
+
 async def runner_tick(ctx: dict[str, Any]) -> int:
     """运行服务器（T-0136、T-0139）：指令时限、在线、删除条件、空闲分档、资源水位、清理。"""
     context = _sync(ctx)
@@ -401,6 +409,7 @@ class WorkerSettings:
         cron(cleanup_files, hour=3, minute=37, timeout=1800),
         cron(check_file_storage, hour=4, minute=13, run_at_startup=True, timeout=180),
         cron(runner_tick, second=12, timeout=60, unique=True),
+        cron(refresh_agent_resources, second={0, 30}, timeout=29, unique=True),
         # 插拔式模块的定时任务（清单的 crons，docs/modules/README.md）
         *(cron(registry.resolve(c.target), **c.schedule) for c in registry.cron_specs()),
     ]

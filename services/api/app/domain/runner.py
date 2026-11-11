@@ -19,7 +19,7 @@ from datetime import timedelta
 from typing import Any
 
 from redis.asyncio import Redis
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -49,6 +49,7 @@ from app.schemas.runner import (
     EnvOut,
     EnvText,
     EnvUpdateInput,
+    RunnerHostCandidatesOutput,
     RunnerSpecOut,
     RunnerTemplateOut,
     RunOut,
@@ -138,27 +139,208 @@ class Runner:
 
     # ------------------------------------------------------------------ 服务器与指令
 
-    async def host(self, workspace_id: uuid.UUID) -> RunnerHost | None:
-        result: RunnerHost | None = await self.db.scalar(
-            select(RunnerHost).where(RunnerHost.workspace_id == workspace_id)
-        )
-        return result
-
-    async def online_host(self, workspace_id: uuid.UUID) -> RunnerHost:
-        host = await self.host(workspace_id)
-        if host is None:
-            raise RunnerError(
-                "RUNNER_UNAVAILABLE",
-                "工作空间还没有容器服务器（管理员在“容器服务器”页添加）",
+    async def hosts(self, workspace_id: uuid.UUID) -> list[RunnerHost]:
+        return list(
+            await self.db.scalars(
+                select(RunnerHost)
+                .where(RunnerHost.workspace_id == workspace_id)
+                .order_by(RunnerHost.id)
             )
+        )
+
+    async def host(
+        self, workspace_id: uuid.UUID, host_id: uuid.UUID | None = None
+    ) -> RunnerHost | None:
+        if host_id is not None:
+            return await self.db.scalar(
+                select(RunnerHost).where(
+                    RunnerHost.workspace_id == workspace_id, RunnerHost.id == host_id
+                )
+            )
+        hosts = await self.hosts(workspace_id)
+        if len(hosts) > 1:
+            raise RunnerError("RUNNER_HOST_AMBIGUOUS", "有多台容器服务器，请使用服务器 ID")
+        return hosts[0] if hosts else None
+
+    async def online_host(
+        self, workspace_id: uuid.UUID, host_id: uuid.UUID | None = None
+    ) -> RunnerHost:
+        host = await self.host(workspace_id, host_id)
+        if host is None:
+            raise RunnerError("RUNNER_UNAVAILABLE", "容器服务器不存在或已移除")
         if host.status == "disabled":
             raise RunnerError("RUNNER_UNAVAILABLE", "容器服务器已停用")
         fresh = host.last_seen_at is not None and host.last_seen_at > specs.now() - timedelta(
             seconds=ONLINE_SECONDS
         )
         if not fresh:
-            raise RunnerError("RUNNER_UNAVAILABLE", "容器服务器不在线，稍后再试；管理员会收到告警")
+            raise RunnerError("RUNNER_UNAVAILABLE", "容器服务器不在线，稍后再试")
         return host
+
+    async def _lock_instance(self, instance: AgentInstance) -> None:
+        await self.db.scalar(
+            select(AgentInstance)
+            .where(
+                AgentInstance.id == instance.id,
+                AgentInstance.workspace_id == instance.workspace_id,
+            )
+            .with_for_update()
+        )
+
+    async def select_host(
+        self,
+        workspace_id: uuid.UUID,
+        spec: dict[str, Any],
+        placement: Any,
+        *,
+        exclude_environment: uuid.UUID | None = None,
+        affinity: uuid.UUID | None = None,
+    ) -> RunnerHost:
+        from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
+        from app.domain.runner_placement import candidate_for
+
+        # 稳定排序锁整个候选池；同主机不同实例的创建不能读取同一份未预约容量。
+        hosts = list(
+            await self.db.scalars(
+                select(RunnerHost)
+                .where(RunnerHost.workspace_id == workspace_id)
+                .order_by(RunnerHost.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+        envs = list(
+            await self.db.scalars(
+                select(RunnerEnvironment).where(
+                    RunnerEnvironment.workspace_id == workspace_id,
+                    RunnerEnvironment.state.not_in(("archived", "deleted")),
+                )
+            )
+        )
+        candidates = [
+            candidate_for(
+                host, [e for e in envs if e.host_id == host.id and e.id != exclude_environment]
+            )
+            for host in hosts
+            if affinity is None or host.id == affinity
+        ]
+        try:
+            ranked = rank_candidates(
+                candidates,
+                ResourceRequest(
+                    cpus=spec["cpus"],
+                    memory_mb=spec["memory_mb"],
+                    disk_gb=spec["disk_gb"],
+                    runtime=spec.get("runtime"),
+                ),
+                placement,
+                specs.now(),
+            )
+        except PlacementError as error:
+            raise RunnerError(error.code, error.message) from None
+        return next(host for host in hosts if host.id == ranked[0].server_id)
+
+    async def host_candidates(self, viewer: Viewer) -> RunnerHostCandidatesOutput:
+        from dataclasses import asdict
+
+        from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
+        from app.domain.runner_placement import candidate_for
+        from app.schemas.placement import Placement
+        from app.schemas.runner import RunnerHostCandidateOut, RunnerHostCandidatesOutput
+
+        hosts = await self.hosts(viewer.workspace_id)
+        envs = list(
+            await self.db.scalars(
+                select(RunnerEnvironment).where(
+                    RunnerEnvironment.workspace_id == viewer.workspace_id
+                )
+            )
+        )
+        items = []
+        for host in hosts:
+            candidate = candidate_for(host, [e for e in envs if e.host_id == host.id])
+            reasons = []
+            try:
+                rank_candidates(
+                    [candidate],
+                    ResourceRequest(cpus=0.1, memory_mb=64, disk_gb=1),
+                    Placement(),
+                    specs.now(),
+                )
+            except PlacementError as error:
+                reasons = [error.message]
+            data = asdict(candidate)
+            data.pop("server_id")
+            data.pop("enabled")
+            data.pop("pending_memory_mb", None)
+            data.pop("pending_disk_gb", None)
+            data["runtimes"] = list(data["runtimes"])
+            items.append(
+                RunnerHostCandidateOut(
+                    id=host.id,
+                    name=host.name,
+                    backend=host.backend or "docker",
+                    node_name=host.node_name,
+                    status=host.status,
+                    eligible=not reasons,
+                    reasons=reasons,
+                    **data,
+                )
+            )
+        return RunnerHostCandidatesOutput(items=items)
+
+    async def admit_restart(self, env: RunnerEnvironment) -> RunnerHost:
+        from app.schemas.placement import Placement
+
+        owner = (
+            await self.db.get(AgentInstance, env.owner_instance_id)
+            if env.owner_instance_id
+            else None
+        )
+        if owner is not None:
+            await self._lock_instance(owner)
+            if env.state in ("archived", "deleted"):
+                from app.domain.runner_capabilities import RunnerQuotaService
+
+                await RunnerQuotaService(self.db, self.settings, self.redis).check_count(owner)
+        await self.db.refresh(env, with_for_update=True)
+        pending = await self.db.scalar(
+            select(RunnerCommand.id)
+            .where(
+                RunnerCommand.environment_id == env.id,
+                RunnerCommand.kind.in_(
+                    ("create_env", "start_env", "stop_env", "archive_env", "delete_env", "snapshot")
+                ),
+                RunnerCommand.status.in_(("pending", "sent", "unknown")),
+            )
+            .limit(1)
+        )
+        if pending is not None:
+            raise RunnerError("ENV_UNAVAILABLE", "环境仍有结果未知的操作，请先对账")
+        host = await self.select_host(
+            env.workspace_id,
+            env.spec,
+            Placement(mode="specified", server_id=env.host_id),
+            exclude_environment=env.id,
+        )
+        if owner is not None:
+            await self._check_quota(owner, host, env.spec, env.lifetime, exclude_environment=env.id)
+        return host
+
+    async def start(self, env: RunnerEnvironment) -> None:
+        if env.state == "running":
+            return
+        if env.state != "stopped":
+            raise RunnerError("ENV_UNAVAILABLE", f"环境现在是 {env.state}，不能启动")
+        host = await self.admit_restart(env)
+        env.runtime_metadata = {
+            **(env.runtime_metadata or {}),
+            "compute_stopped": False,
+            "compute_reserved_at": specs.now().isoformat(),
+        }
+        env.state = "creating"
+        self.enqueue(host, "start_env", self.runtime_payload(env), env=env)
+        env.last_used_at = specs.now()
 
     def enqueue(
         self,
@@ -172,6 +354,19 @@ class Runner:
         seconds: int | None = None,
     ) -> RunnerCommand:
         deadline = seconds if seconds is not None else DEADLINES.get(kind, 600)
+        if env is not None:
+            payload = {
+                **payload,
+                "backend": env.runtime_backend or "docker",
+                "runtime_identity": {
+                    "workspace_id": str(env.workspace_id),
+                    "instance_id": str(env.owner_instance_id) if env.owner_instance_id else None,
+                    "env_id": str(env.id),
+                    "allocation_id": str(env.id),
+                    "generation": (env.runtime_metadata or {}).get("generation", 1),
+                    "node_name": host.node_name,
+                },
+            }
         command = RunnerCommand(
             id=uuid.uuid4(),
             workspace_id=host.workspace_id,
@@ -255,7 +450,9 @@ class Runner:
             raise RunnerError("VALIDATION_FAILED", str(error)) from None
         if viewer.instance is not None:
             await self._check_secrets(viewer.instance, normalized["secrets"])
-        host = await self.online_host(viewer.workspace_id)
+        from app.schemas.placement import Placement
+
+        host = await self.select_host(viewer.workspace_id, normalized, Placement())
         template = await self.template_by_name(viewer.workspace_id, name)
         created = template is None
         if template is None:
@@ -280,6 +477,7 @@ class Runner:
                 template.revision += 1
             template.status = "active"
             template.version += 1
+        template.build_host_id = host.id
         template.build_status = "building"
         template.build_error = None
         await self.db.flush()
@@ -369,10 +567,18 @@ class Runner:
             and env.project_id in await self._project_ids(viewer.instance)
         )
 
-    async def env(self, viewer: Viewer, env_id: uuid.UUID) -> RunnerEnvironment:
+    async def env(
+        self, viewer: Viewer, env_id: uuid.UUID, *, allow_shared: bool = False
+    ) -> RunnerEnvironment:
         env = await self.db.get(RunnerEnvironment, env_id)
         if env is None or not await self.can_use(env, viewer):
             raise RunnerError("NOT_FOUND", "没有这个环境（或没有共享给你）")
+        if (
+            viewer.instance is not None
+            and env.owner_instance_id != viewer.instance.id
+            and not allow_shared
+        ):
+            raise RunnerError("ENV_COPY_REQUIRED", "共享环境必须先复制到自己实例后才能使用或修改")
         return env
 
     async def find(
@@ -476,6 +682,9 @@ class Runner:
         step, wake = self.next_step(env, policy)
         spec = env.spec
         return EnvOut(
+            host_id=env.host_id,
+            runtime_backend=env.runtime_backend or "docker",
+            placement=env.placement or {},
             id=env.id,
             untrusted=EnvText(purpose=env.purpose),
             lifetime=env.lifetime,
@@ -521,29 +730,41 @@ class Runner:
             )
 
     async def _check_quota(
-        self, instance: AgentInstance, host: RunnerHost, spec: dict[str, Any], lifetime: str
+        self,
+        instance: AgentInstance,
+        host: RunnerHost,
+        spec: dict[str, Any],
+        lifetime: str,
+        *,
+        exclude_environment: uuid.UUID | None = None,
     ) -> None:
         limits = specs.limits_for(instance.runner_limits)
-        rows = (
-            await self.db.execute(
-                select(RunnerEnvironment.lifetime, RunnerEnvironment.spec).where(
+        retained = list(
+            await self.db.scalars(
+                select(RunnerEnvironment).where(
                     RunnerEnvironment.owner_instance_id == instance.id,
-                    RunnerEnvironment.state.in_(ACTIVE_STATES),
+                    RunnerEnvironment.workspace_id == instance.workspace_id,
+                    RunnerEnvironment.id != exclude_environment if exclude_environment else true(),
+                    RunnerEnvironment.state.not_in(("archived", "deleted")),
                 )
             )
-        ).all()
-        running = len(rows)
-        persistent = sum(1 for life, _ in rows if life == "persistent")
-        memory = sum(int(s.get("memory_mb", 0)) for _, s in rows)
-        cpus = sum(float(s.get("cpus", 0)) for _, s in rows)
-        disk = sum(int(s.get("disk_gb", 0)) for _, s in rows)
-        if running + 1 > limits["envs"]:
-            raise RunnerError(
-                "QUOTA_EXCEEDED",
-                f"你同时运行的环境已到上限（{int(limits['envs'])} 个）；先停掉或释放用不着的",
-            )
-        if lifetime == "persistent" and persistent + 1 > limits["persistent"]:
-            raise RunnerError("QUOTA_EXCEEDED", f"常驻环境最多 {int(limits['persistent'])} 个")
+        )
+        from app.domain.runner_placement import compute_reserved
+
+        active = [env for env in retained if compute_reserved(env)]
+        persistent_limit = (instance.runner_limits or {}).get("persistent")
+        if lifetime == "persistent" and persistent_limit is not None:
+            from app.domain.runner_capabilities import has_capability
+
+            if sum(
+                env.lifetime == "persistent" for env in retained
+            ) + 1 > persistent_limit and not await has_capability(
+                self.db, instance.workspace_id, instance.id, "runner.unlimited_container_count"
+            ):
+                raise RunnerError("QUOTA_EXCEEDED", "常驻环境超过管理员明确设置的数量上限")
+        memory = sum(int(env.spec.get("memory_mb", 0)) for env in active)
+        cpus = sum(float(env.spec.get("cpus", 0)) for env in active)
+        disk = sum(int(env.spec.get("disk_gb", 0)) for env in retained)
         if memory + spec["memory_mb"] > limits["memory_mb"]:
             raise RunnerError(
                 "QUOTA_EXCEEDED",
@@ -632,13 +853,26 @@ class Runner:
     ) -> RunnerEnvironment | None:
         viewer = Viewer(instance.workspace_id, instance=instance)
         for env in await self.find(viewer, reuse_key=reuse_key):
+            if env.owner_instance_id != instance.id:
+                continue
             # 归档的也复用：用到时按配置记录重建
-            if env.state not in ("running", "stopped", "creating", "archived"):
+            if env.state not in (
+                "running",
+                "stopped",
+                "creating",
+                "archived",
+                "failed",
+                "pending_delete",
+            ):
                 continue
             if template_id is not None and env.template_id != template_id:
-                continue
+                raise RunnerError(
+                    "REUSE_CONFLICT", "reuse_key 已绑定不同模板；请复用原环境或明确新建"
+                )
             if template_id is None and env.spec.get("image") != image:
-                continue
+                raise RunnerError(
+                    "REUSE_CONFLICT", "reuse_key 已绑定不同镜像；请复用原环境或明确新建"
+                )
             return env
         return None
 
@@ -646,7 +880,7 @@ class Runner:
         self, instance: AgentInstance, body: EnvCreateInput
     ) -> tuple[RunnerEnvironment, bool, str | None, RunnerRun | None]:
         viewer = Viewer(instance.workspace_id, instance=instance)
-        host = await self.online_host(instance.workspace_id)
+        await self._lock_instance(instance)
         template: RunnerTemplate | None = None
         if body.template:
             template = await self.template_by_name(instance.workspace_id, body.template)
@@ -699,6 +933,12 @@ class Runner:
                 instance, template.id if template else None, spec["image"], body.reuse_key
             )
             if found is not None:
+                if body.placement.mode == "specified" and found.host_id != body.placement.server_id:
+                    raise RunnerError(
+                        "PLACEMENT_CONFLICT", "复用环境在另一台服务器；请使用原服务器或明确新建"
+                    )
+                if found.state in ("creating", "failed", "pending_delete"):
+                    raise RunnerError("ENV_UNAVAILABLE", "环境创建结果仍未知或正在创建，请先对账")
                 await self.touch(found)
                 run = None
                 if command is not None:
@@ -711,9 +951,28 @@ class Runner:
             raise RunnerError("VALIDATION_FAILED", "new=true 时要写 new_reason")
         source: RunnerEnvironment | None = None
         if body.from_environment is not None:
-            source = await self.env(viewer, body.from_environment)
+            source = await self.env(viewer, body.from_environment, allow_shared=True)
             if source.state not in ("running", "stopped"):
                 raise RunnerError("VALIDATION_FAILED", "要复制的环境已经归档或删除")
+        from app.domain.runner_capabilities import RunnerQuotaService
+
+        await RunnerQuotaService(self.db, self.settings, self.redis).check_count(instance)
+        affinity = template.build_host_id if template is not None and template.image_ref else None
+        if template is not None and template.image_ref and affinity is None:
+            raise RunnerError("TEMPLATE_HOST_UNKNOWN", "模板镜像的构建服务器未知，请先重新构建模板")
+        if source is not None:
+            if affinity is not None and affinity != source.host_id:
+                raise RunnerError("PLACEMENT_CONFLICT", "本地模板镜像与源数据卷不在同一台服务器")
+            affinity = source.host_id
+        if (
+            affinity is not None
+            and body.placement.mode == "specified"
+            and affinity != body.placement.server_id
+        ):
+            raise RunnerError("PLACEMENT_CONFLICT", "指定服务器与模板镜像或源数据卷所在服务器不符")
+        host = await self.select_host(
+            instance.workspace_id, spec, body.placement, affinity=affinity
+        )
         await self._check_quota(instance, host, spec, body.lifetime)
         files = self._files(body.files)
         env_id = uuid.uuid4()
@@ -726,6 +985,20 @@ class Runner:
             id=env_id,
             workspace_id=instance.workspace_id,
             host_id=host.id,
+            runtime_backend=host.backend,
+            runtime_metadata={
+                "generation": 1,
+                "node_name": host.node_name,
+                "compute_stopped": False,
+                "compute_reserved_at": specs.now().isoformat(),
+            },
+            placement={
+                "mode": body.placement.mode,
+                "server_id": str(host.id),
+                "reason": "specified"
+                if body.placement.mode == "specified"
+                else "fresh_capacity_load",
+            },
             template_id=template.id if template else None,
             template_revision=template.revision if template else None,
             owner_instance_id=instance.id,
@@ -860,6 +1133,7 @@ class Runner:
             "domains": spec["domains"],
             "memory_mb": spec["memory_mb"],
             "cpus": spec["cpus"],
+            "disk_gb": spec["disk_gb"],
             "pids": spec["pids"],
             "env": spec["env"],
             "start_command": spec.get("start_command"),
@@ -896,6 +1170,8 @@ class Runner:
         if host is None:
             raise RunnerError("RUNNER_UNAVAILABLE", "容器服务器已移除")
         extra = 0
+        if env.state == "stopped":
+            await self.start(env)
         if env.state == "archived":
             # 归档的环境按配置记录重建（恢复快照、重放初始化步骤），exec 排在重建之后
             await self.rebuild(env, "有人使用，自动重建")
@@ -919,7 +1195,7 @@ class Runner:
     async def exec(self, instance: AgentInstance, body: EnvExecInput) -> RunnerRun:
         viewer = Viewer(instance.workspace_id, instance=instance)
         env = await self.env(viewer, body.environment_id)
-        await self.online_host(instance.workspace_id)
+        await self.online_host(instance.workspace_id, env.host_id)
         await self.check_exec_rate(instance)
         try:
             command = specs.command_list(body.command)
@@ -1071,7 +1347,7 @@ class Runner:
 
     async def rebuild(self, env: RunnerEnvironment, reason: str) -> None:
         """按配置记录重建：模板镜像（被清理了就先重建）→ 恢复快照 → 重放初始化步骤 → 启动。"""
-        host = await self.online_host(env.workspace_id)
+        host = await self.admit_restart(env)
         snapshot_info: dict[str, Any] | None = None
         if env.lifetime == "persistent":
             snapshot = await self.latest_snapshot(env)
@@ -1082,6 +1358,12 @@ class Runner:
                     "parts": snapshot.parts,
                 }
         template = await self.db.get(RunnerTemplate, env.template_id) if env.template_id else None
+        env.runtime_metadata = {
+            **(env.runtime_metadata or {}),
+            "compute_stopped": False,
+            "compute_reserved_at": specs.now().isoformat(),
+            "generation": int((env.runtime_metadata or {}).get("generation", 1)) + 1,
+        }
         env.state = "creating"
         env.state_reason = reason
         self.enqueue(
@@ -1095,7 +1377,7 @@ class Runner:
     async def files(self, instance: AgentInstance, body: EnvFilesInput) -> EnvFilesOutput:
         viewer = Viewer(instance.workspace_id, instance=instance)
         env = await self.env(viewer, body.environment_id)
-        host = await self.online_host(instance.workspace_id)
+        host = await self.online_host(instance.workspace_id, env.host_id)
         if env.state == "archived":
             await self.rebuild(env, "读写文件，自动重建")
         elif env.state not in ("running", "stopped"):
@@ -1297,6 +1579,10 @@ class Runner:
         """撤销待删除：回到停止状态，删除条件里已经触发的不再生效。"""
         if env.state != "pending_delete":
             raise RunnerError("VALIDATION_FAILED", "这个环境不在待删除状态")
+        from app.domain.runner_placement import compute_reserved
+
+        reserved = compute_reserved(env)
+        env.runtime_metadata = {**(env.runtime_metadata or {}), "compute_stopped": not reserved}
         env.state = "archived" if env.archived_at is not None else "stopped"
         env.delete_after = None
         env.state_reason = reason
@@ -1403,14 +1689,17 @@ class Runner:
                 env.state_reason = (error or "启动失败")[:500]
                 await self._fail_pending_runs(env, error or "环境没有启动成功")
         elif kind == "stop_env" and env is not None and ok:
+            env.runtime_metadata = {**(env.runtime_metadata or {}), "compute_stopped": True}
             if env.state in ("running", "creating"):
                 env.state = "stopped"
             env.stopped_at = specs.now()
         elif kind == "delete_env" and env is not None and ok:
+            env.runtime_metadata = {**(env.runtime_metadata or {}), "compute_stopped": True}
             env.state = "deleted"
             env.deleted_at = specs.now()
             await self._keep_snapshots(env)
         elif kind == "archive_env" and env is not None and ok:
+            env.runtime_metadata = {**(env.runtime_metadata or {}), "compute_stopped": True}
             env.state = "archived"
             env.archived_at = specs.now()
             # 容器与数据卷都删了：现时读数一并清空（快照大小另记在 snapshot_bytes）
@@ -1451,6 +1740,12 @@ class Runner:
                 snapshot.error = (error or "快照失败")[:500]
             # 快照做不出来：不归档、不删除（数据重建不出来），只停着，通知管理员
             if env.state == "pending_delete":
+                from app.domain.runner_placement import compute_reserved
+
+                env.runtime_metadata = {
+                    **(env.runtime_metadata or {}),
+                    "compute_stopped": not compute_reserved(env),
+                }
                 env.state = "stopped"
                 env.delete_after = None
             action = "删除" if then == "delete" else "归档"

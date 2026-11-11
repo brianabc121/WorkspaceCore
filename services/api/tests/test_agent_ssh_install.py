@@ -9,6 +9,7 @@ chown、crontab、timeout（记录参数、模拟结果），所以 authorized_k
 
 import asyncio
 import hashlib
+import json
 import re
 import secrets
 import stat
@@ -144,6 +145,23 @@ class FakeHost:
         self.logins: list[str] = []
         self.commands: list[str] = []
         self.stdin: list[bytes] = []
+        # Explicit fake host data for the independent SSH probe; this is never
+        # claimed as a real machine capacity verification.
+        self.resources = {
+            "generation": str(uuid.uuid4()),
+            "sequence": 1000,
+            "cores": 16,
+            "cpu_percent": 5,
+            "load1": 0.2,
+            "mem_total": 32 << 30,
+            "mem_available": 24 << 30,
+            "root_total": 200 << 30,
+            "root_free": 150 << 30,
+            "data_total": 200 << 30,
+            "data_free": 150 << 30,
+            "runtime_ready": True,
+            "network_ready": True,
+        }
 
     @property
     def env(self) -> dict[str, str]:
@@ -194,6 +212,11 @@ class FakeHost:
         data = await process.stdin.read()
         self.stdin.append(data)
         if command == "sh -s":
+            if b"/proc/sys/kernel/random/boot_id" in data:
+                self.resources["sequence"] += 1
+                process.stdout.write(json.dumps(self.resources).encode())
+                process.exit(0)
+                return
             process.stdout.write(self.inspect_output().encode())
             process.exit(0)
             return
@@ -420,6 +443,14 @@ class Owner:
         self, instance_id: str, version: int, password: str | None = PASSWORD, **extra: Any
     ) -> httpx.Response:
         """部署。password 是已弃用的字段（T-0178 起忽略，用服务器上保存的密码），保留它检查兼容。"""
+        current = await self._get(f"/api/v1/agents/instances/{instance_id}")
+        if current["limits"]["cpus"] is None or current["limits"]["mem_limit_mb"] is None:
+            limited = await self.client.put(
+                f"/api/v1/agents/instances/{instance_id}/limits",
+                json={"cpus": 1, "mem_limit_mb": 2048, "version": current["version"]},
+                headers=self.headers(),
+            )
+            assert limited.status_code == 200, limited.text
         body: dict[str, Any] = {
             "server_id": self.servers[instance_id],
             "version": await self._instance_version_for(instance_id, version),

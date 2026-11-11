@@ -97,6 +97,8 @@ from app.models.runner import (
     RunnerSshTarget,
     RunnerTemplate,
 )
+from app.models.runner_capability import RunnerCapabilityGrant, RunnerCapabilityRequest
+from app.models.runner_network import RunnerIngressRule, RunnerPublishedEndpoint, RunnerService
 from app.models.search import SearchDocument
 from app.models.task import Project, Task, TaskResultRead
 from app.models.timeline import AgentUsageCursor, AgentUsageMinute, TaskEvent, TaskRun
@@ -180,11 +182,16 @@ __all__ = [
     "Project",
     "ProjectAgent",
     "ResourceLink",
+    "RunnerCapabilityGrant",
+    "RunnerCapabilityRequest",
     "RunnerCommand",
     "RunnerDeleteCondition",
     "RunnerEnvironment",
     "RunnerHost",
+    "RunnerIngressRule",
+    "RunnerPublishedEndpoint",
     "RunnerRun",
+    "RunnerService",
     "RunnerSnapshot",
     "RunnerSshJob",
     "RunnerSshTarget",

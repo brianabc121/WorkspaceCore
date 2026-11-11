@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     agent_public_address: str = ""
     # SSH 自动部署（T-0089）：默认不允许连接本机回环地址；只有测试与 CI（目标是本机的 sshd）才打开
     agent_ssh_allow_loopback: bool = False
+    # T-0222: finite new-deployment scheduling profile, independent trusted telemetry.
+    runner_network_verified: bool = False
+    agent_placement_disk_gb: float = Field(default=10, gt=0, le=10000)
+    agent_placement_metrics_max_age_seconds: int = Field(default=60, ge=5, le=60)
     # 每晚复盘的 OpenClaw 定时任务（知识库方案 3.9，T-0100）：几点、按哪个时区（IANA 时区名）
     agent_reflection_cron: str = "0 22 * * *"
     agent_reflection_timezone: str = "Asia/Shanghai"

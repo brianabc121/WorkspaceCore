@@ -23,6 +23,7 @@ from app.api.deps import (
 )
 from app.core.config import Settings
 from app.domain.policy import WorkspaceAccess
+from app.domain.runner import Viewer
 from app.domain.runner_admin import RunnerAdmin
 from app.domain.runner_ssh import RunnerSshService
 from app.schemas.agents import (
@@ -39,7 +40,9 @@ from app.schemas.runner import (
     RunnerEnvAction,
     RunnerEnvAdminList,
     RunnerEnvAdminOut,
+    RunnerHostCandidatesOutput,
     RunnerHostCreate,
+    RunnerHostList,
     RunnerHostOut,
     RunnerOverview,
     RunnerPolicyPut,
@@ -104,10 +107,17 @@ async def runner_overview(access: Admin, service: Service) -> RunnerOverview:
 
 
 @router.post(
+    "/runner/hosts",
+    operation_id="post_runner_hosts",
+    status_code=201,
+    dependencies=_write,
+    responses=_write_errors,
+)
+@router.post(
     "/runner/host",
-    summary="添加运行服务器（admin，V1 每个工作空间一台）",
+    summary="添加运行服务器（admin）",
     description="只建记录；凭证在下载接入包（或 SSH 自动部署）时签发。"
-    "已经有一台时返回 409 RUNNER_EXISTS。",
+    "支持多台；通过服务器 ID 管理。",
     status_code=status.HTTP_201_CREATED,
     dependencies=_write,
     responses=_write_errors,
@@ -119,6 +129,12 @@ async def create_runner_host(
 
 
 @router.post(
+    "/runner/hosts/{host_id}/bundle",
+    operation_id="post_runner_hosts_host_id_bundle",
+    dependencies=_write,
+    responses=_write_errors,
+)
+@router.post(
     "/runner/host/bundle",
     summary="下载运行服务器接入包并签发新凭证（admin）",
     description="每次调用都签发新凭证（外网入口另签发客户端证书），旧凭证立即失效。",
@@ -126,8 +142,10 @@ async def create_runner_host(
     responses={200: _ZIP, **_write_errors},
     response_model=None,
 )
-async def runner_host_bundle(access: Admin, service: Service) -> Response:
-    filename, data = await service.bundle(access)
+async def runner_host_bundle(
+    access: Admin, service: Service, host_id: UUID | None = None
+) -> Response:
+    filename, data = await service.bundle(access, host_id)
     return Response(
         content=data,
         media_type="application/zip",
@@ -139,6 +157,13 @@ async def runner_host_bundle(access: Admin, service: Service) -> Response:
 
 
 @router.delete(
+    "/runner/hosts/{host_id}",
+    operation_id="delete_runner_hosts_host_id",
+    status_code=204,
+    dependencies=_write,
+    responses=_write_errors,
+)
+@router.delete(
     "/runner/host",
     summary="移除运行服务器（admin，乐观并发）",
     description="还有没删除的环境时返回 409 RUNNER_HAS_ENVIRONMENTS。运行服务器上的容器不受影响。",
@@ -147,12 +172,21 @@ async def runner_host_bundle(access: Admin, service: Service) -> Response:
     responses=_write_errors,
 )
 async def delete_runner_host(
-    access: Admin, service: Service, version: Annotated[int, Query(ge=1)]
+    access: Admin,
+    service: Service,
+    version: Annotated[int, Query(ge=1)],
+    host_id: UUID | None = None,
 ) -> Response:
-    await service.remove_host(access, version)
+    await service.remove_host(access, version, host_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.put(
+    "/runner/hosts/{host_id}/policy",
+    operation_id="put_runner_hosts_host_id_policy",
+    dependencies=_write,
+    responses=_write_errors,
+)
 @router.put(
     "/runner/host/policy",
     summary="设置回收策略（admin，乐观并发）",
@@ -161,9 +195,12 @@ async def delete_runner_host(
     responses=_write_errors,
 )
 async def put_runner_policy(
-    access: Admin, service: Service, body: RunnerPolicyPut
+    access: Admin,
+    service: Service,
+    body: RunnerPolicyPut,
+    host_id: UUID | None = None,
 ) -> RunnerHostOut:
-    return await service.set_policy(access, body)
+    return await service.set_policy(access, body, host_id)
 
 
 # ---------------------------------------------------------------- 环境
@@ -178,6 +215,7 @@ async def list_runner_environments(
     ]
     | None = None,
     instance_id: UUID | None = None,
+    host_id: UUID | None = None,
     lifetime: Literal["once", "session", "persistent"] | None = None,
     include_deleted: bool = False,
     q: Annotated[
@@ -204,6 +242,7 @@ async def list_runner_environments(
         access,
         state=state,
         instance_id=instance_id,
+        host_id=host_id,
         lifetime=lifetime,
         include_deleted=include_deleted,
         q=q,
@@ -348,12 +387,25 @@ _ssh_errors = error_responses(401, 403, 404, 409, 422, 429, 503)
 
 
 @router.get(
+    "/runner/hosts/{host_id}/ssh",
+    operation_id="get_runner_hosts_host_id_ssh",
+    responses=_write_errors,
+)
+@router.get(
     "/runner/host/ssh", summary="运行服务器的 SSH 自动部署（owner）", responses=_read_errors
 )
-async def get_runner_ssh_state(access: Owner, service: SshService) -> AgentSshState:
-    return await service.state(access)
+async def get_runner_ssh_state(
+    access: Owner, service: SshService, host_id: UUID | None = None
+) -> AgentSshState:
+    return await service.for_host(host_id).state(access)
 
 
+@router.put(
+    "/runner/hosts/{host_id}/ssh",
+    operation_id="put_runner_hosts_host_id_ssh",
+    dependencies=_write,
+    responses=_write_errors,
+)
 @router.put(
     "/runner/host/ssh",
     summary="填写或更换运行服务器的 SSH 地址，读取主机公钥（owner）",
@@ -363,11 +415,21 @@ async def get_runner_ssh_state(access: Owner, service: SshService) -> AgentSshSt
     responses=_ssh_errors,
 )
 async def set_runner_ssh(
-    access: Owner, request: Request, service: SshService, body: AgentSshTargetSet
+    access: Owner,
+    request: Request,
+    service: SshService,
+    body: AgentSshTargetSet,
+    host_id: UUID | None = None,
 ) -> AgentSshState:
-    return await service.set_target(access, body, client_ip=_ip(request))
+    return await service.for_host(host_id).set_target(access, body, client_ip=_ip(request))
 
 
+@router.post(
+    "/runner/hosts/{host_id}/ssh/confirm",
+    operation_id="post_runner_hosts_host_id_ssh_confirm",
+    dependencies=_write,
+    responses=_write_errors,
+)
 @router.post(
     "/runner/host/ssh/confirm",
     summary="确认主机公钥指纹（owner）",
@@ -375,11 +437,22 @@ async def set_runner_ssh(
     responses=_write_errors,
 )
 async def confirm_runner_ssh(
-    access: Owner, request: Request, service: SshService, body: AgentSshConfirm
+    access: Owner,
+    request: Request,
+    service: SshService,
+    body: AgentSshConfirm,
+    host_id: UUID | None = None,
 ) -> AgentSshState:
-    return await service.confirm(access, body, client_ip=_ip(request))
+    return await service.for_host(host_id).confirm(access, body, client_ip=_ip(request))
 
 
+@router.post(
+    "/runner/hosts/{host_id}/ssh/install",
+    operation_id="post_runner_hosts_host_id_ssh_install",
+    status_code=202,
+    dependencies=_write,
+    responses=_write_errors,
+)
 @router.post(
     "/runner/host/ssh/install",
     summary="部署或重新部署运行服务器（owner）",
@@ -392,11 +465,22 @@ async def confirm_runner_ssh(
     responses=_ssh_errors,
 )
 async def install_runner_ssh(
-    access: Owner, request: Request, service: SshService, body: AgentSshInstall
+    access: Owner,
+    request: Request,
+    service: SshService,
+    body: AgentSshInstall,
+    host_id: UUID | None = None,
 ) -> AgentSshState:
-    return await service.install(access, body, client_ip=_ip(request))
+    return await service.for_host(host_id).install(access, body, client_ip=_ip(request))
 
 
+@router.post(
+    "/runner/hosts/{host_id}/ssh/uninstall",
+    operation_id="post_runner_hosts_host_id_ssh_uninstall",
+    status_code=202,
+    dependencies=_write,
+    responses=_write_errors,
+)
 @router.post(
     "/runner/host/ssh/uninstall",
     summary="卸载运行服务器上的 runner-agent（owner）",
@@ -407,11 +491,21 @@ async def install_runner_ssh(
     responses=_ssh_errors,
 )
 async def uninstall_runner_ssh(
-    access: Owner, request: Request, service: SshService, body: RunnerSshUninstall
+    access: Owner,
+    request: Request,
+    service: SshService,
+    body: RunnerSshUninstall,
+    host_id: UUID | None = None,
 ) -> AgentSshState:
-    return await service.uninstall(access, body, client_ip=_ip(request))
+    return await service.for_host(host_id).uninstall(access, body, client_ip=_ip(request))
 
 
+@router.post(
+    "/runner/hosts/{host_id}/ssh/revoke",
+    operation_id="post_runner_hosts_host_id_ssh_revoke",
+    dependencies=_write,
+    responses=_write_errors,
+)
 @router.post(
     "/runner/host/ssh/revoke",
     summary="吊销工作台的专用密钥（owner）",
@@ -419,11 +513,22 @@ async def uninstall_runner_ssh(
     responses=_ssh_errors,
 )
 async def revoke_runner_ssh(
-    access: Owner, request: Request, service: SshService, body: AgentSshRevoke
+    access: Owner,
+    request: Request,
+    service: SshService,
+    body: AgentSshRevoke,
+    host_id: UUID | None = None,
 ) -> AgentSshState:
-    return await service.revoke(access, body, client_ip=_ip(request))
+    return await service.for_host(host_id).revoke(access, body, client_ip=_ip(request))
 
 
+@router.delete(
+    "/runner/hosts/{host_id}/ssh",
+    operation_id="delete_runner_hosts_host_id_ssh",
+    status_code=204,
+    dependencies=_write,
+    responses=_write_errors,
+)
 @router.delete(
     "/runner/host/ssh",
     summary="删除运行服务器的 SSH 地址（owner）",
@@ -436,6 +541,34 @@ async def delete_runner_ssh(
     request: Request,
     service: SshService,
     version: Annotated[int, Query(ge=1)],
+    host_id: UUID | None = None,
 ) -> Response:
-    await service.remove(access, version=version, client_ip=_ip(request))
+    await service.for_host(host_id).remove(access, version=version, client_ip=_ip(request))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/runner/hosts", operation_id="get_runner_hosts", responses=_read_errors)
+async def list_runner_hosts(access: Admin, service: Service) -> RunnerHostList:
+    from app.domain.runner_hosts import host_out
+
+    return RunnerHostList(
+        items=[host_out(host) for host in await service.runner.hosts(access.workspace.id)]
+    )
+
+
+@router.get(
+    "/runner/hosts/candidates", operation_id="get_runner_hosts_candidates", responses=_read_errors
+)
+async def list_runner_host_candidates(
+    access: Admin, service: Service
+) -> RunnerHostCandidatesOutput:
+    return await service.runner.host_candidates(Viewer(access.workspace.id, user_id=access.user_id))
+
+
+@router.get(
+    "/runner/hosts/{host_id}", operation_id="get_runner_hosts_host_id", responses=_read_errors
+)
+async def get_runner_host(access: Admin, service: Service, host_id: UUID) -> RunnerHostOut:
+    from app.domain.runner_hosts import host_out
+
+    return host_out(await service._host(access, host_id))

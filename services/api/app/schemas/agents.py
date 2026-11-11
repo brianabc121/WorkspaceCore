@@ -8,7 +8,7 @@
 
 from datetime import datetime
 from ipaddress import ip_address
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 from uuid import UUID
 
 from pydantic import (
@@ -26,6 +26,7 @@ from app.schemas.common import Page
 from app.schemas.host import AgentLoad, HostCurrent, HostPoint
 from app.schemas.mail import AgentMailOut
 from app.schemas.model_connections import NewInstanceModelChoice
+from app.schemas.placement import Placement
 
 NetworkMode = Literal["intranet", "public"]
 InstanceStatus = Literal["pending", "online", "offline", "disabled"]
@@ -888,6 +889,9 @@ class AgentServerOut(BaseModel):
         description="auto 按上报的服务器指纹自动识别（手动部署的实例）；ssh 管理员添加、经 SSH 部署"
     )
     ssh: ServerSshOut | None
+    resource_snapshot: dict[str, Any] | None = Field(
+        default=None, description="独立受信 SSH 资源快照；与实例上报分离"
+    )
     reported_at: datetime | None = Field(description="最近一次有实例上报整机数据的时间")
     stale: bool = Field(description="超过 3 分钟没有任何实例上报")
     cores: int | None
@@ -1031,6 +1035,9 @@ class AgentServerAssign(_Strict):
 
 
 class AgentDeploymentOut(BaseModel):
+    selection: dict[str, Any] | None = Field(
+        default=None, description="持久化调度决定（含实际宿主和预约 ID）"
+    )
     server_id: UUID
     install_dir: str | None
     installed_at: datetime | None
@@ -1060,21 +1067,37 @@ class AgentDeploymentCreateIn(_Strict):
     """
 
     request_id: UUID = Field(description="这次部署请求的 ID，必须与 Idempotency-Key 相同")
-    server_id: UUID
-    server_version: Version = Field(description="服务器的当前版本号")
+    placement: Placement = Field(default_factory=Placement)
+    server_id: UUID | None = Field(default=None, description="旧客户端指定目标；规范化为 specified")
+    server_version: Version | None = Field(default=None, description="指定服务器的可选并发版本号")
     name: InstanceName
     description: InstanceDescription = ""
     im_nickname: ImNickname | None = Field(default=None, description="不填时用 name")
     cpus: Annotated[float, Field(ge=0.1, le=256)] | None = Field(
-        default=None, description="CPU 上限（核）；null 不限制（默认）"
+        default=1.0, description="新部署 CPU 上限（核）；必须有限"
     )
     mem_limit_mb: Annotated[int, Field(ge=256, le=1 << 20)] | None = Field(
-        default=None, description="内存上限（MiB）；null 不限制（默认）"
+        default=2048, description="新部署内存上限（MiB）；必须有限"
     )
     model: NewInstanceModelChoice = Field(
         description="主模型：中转站管理里启用、配置完整的连接与其中的模型。"
         "选择即授权给新实例，与实例、主模型绑定在同一个事务里建立（T-0204）"
     )
+
+    @model_validator(mode="after")
+    def _normalize_placement(self) -> Self:
+        if self.server_id is not None:
+            if "placement" in self.model_fields_set and (
+                self.placement.mode != "specified" or self.placement.server_id != self.server_id
+            ):
+                raise ValueError("placement 与旧 server_id 冲突")
+            self.placement = Placement(mode="specified", server_id=self.server_id)
+        self.server_id = self.placement.server_id
+        if self.placement.mode == "auto" and self.server_version is not None:
+            raise ValueError("auto 不接受 server_version")
+        if self.cpus is None or self.mem_limit_mb is None:
+            raise ValueError("新部署需要有限的 CPU 和内存上限")
+        return self
 
 
 class AgentDeploymentCreateOut(BaseModel):
