@@ -187,6 +187,18 @@ class Runner:
             .with_for_update()
         )
 
+    async def _lock_pool_hosts(self, workspace_id: uuid.UUID) -> list[RunnerHost]:
+        """Global order: instance, host pool by ID, then environment rows."""
+        return list(
+            await self.db.scalars(
+                select(RunnerHost)
+                .where(RunnerHost.workspace_id == workspace_id)
+                .order_by(RunnerHost.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+
     async def select_host(
         self,
         workspace_id: uuid.UUID,
@@ -200,15 +212,7 @@ class Runner:
         from app.domain.runner_placement import candidate_for
 
         # 稳定排序锁整个候选池；同主机不同实例的创建不能读取同一份未预约容量。
-        hosts = list(
-            await self.db.scalars(
-                select(RunnerHost)
-                .where(RunnerHost.workspace_id == workspace_id)
-                .order_by(RunnerHost.id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        )
+        hosts = await self._lock_pool_hosts(workspace_id)
         envs = list(
             await self.db.scalars(
                 select(RunnerEnvironment).where(
@@ -303,6 +307,9 @@ class Runner:
                 from app.domain.runner_capabilities import RunnerQuotaService
 
                 await RunnerQuotaService(self.db, self.settings, self.redis).check_count(owner)
+        # Reports and command results lock host → environment. Acquire the
+        # same host order before touching this row, including on restart.
+        await self._lock_pool_hosts(env.workspace_id)
         await self.db.refresh(env, with_for_update=True)
         pending = await self.db.scalar(
             select(RunnerCommand.id)

@@ -32,6 +32,9 @@ from app.schemas.runner import (
     EnvRunInput,
     EnvSetupInput,
     EnvUpdateInput,
+    RunnerHostMcpCandidateOut,
+    RunnerHostMcpCandidatesOutput,
+    RunnerHostText,
     RunnerTemplateSaveInput,
     RunnerTemplateSaveOutput,
     RunnerTemplatesInput,
@@ -110,7 +113,16 @@ async def _call(
     name = spec.name
     if name == "runner_hosts":
         output = await runner.host_candidates(viewer)
-        return output, f"{len(output.items)} 个运行服务器"
+        safe = RunnerHostMcpCandidatesOutput(
+            items=[
+                RunnerHostMcpCandidateOut(
+                    **item.model_dump(exclude={"name", "node_name"}),
+                    untrusted=RunnerHostText(name=item.name, node_name=item.node_name),
+                )
+                for item in output.items
+            ]
+        )
+        return safe, f"{len(output.items)} 个运行服务器"
     if isinstance(parsed, RunnerTemplatesInput):
         templates = await runner.templates(instance.workspace_id)
         owners = await runner.owner_names(

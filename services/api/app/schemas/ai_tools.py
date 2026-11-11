@@ -86,7 +86,7 @@ from app.schemas.runner import (
     EnvRunInput,
     EnvSetupInput,
     EnvUpdateInput,
-    RunnerHostCandidatesOutput,
+    RunnerHostMcpCandidatesOutput,
     RunnerTemplateSaveInput,
     RunnerTemplateSaveOutput,
     RunnerTemplatesInput,
@@ -247,6 +247,8 @@ class ContainerApprovalOutput(PendingApproval):
 
 class EnvCreateToolOutput(RootModel[EnvCreateOutput | ContainerApprovalOutput]):
     """Creation succeeds or persistently requests the independent count capability."""
+
+    model_config = ConfigDict(json_schema_extra={"type": "object"})
 
 
 class ToolError(BaseModel):
@@ -1633,7 +1635,7 @@ _RUNNER: list[ToolSpec] = [
         "runner_hosts",
         "read",
         EmptyInput,
-        RunnerHostCandidatesOutput,
+        RunnerHostMcpCandidatesOutput,
         "查看有权使用的运行服务器与容量；不会返回凭证或管理网络地址",
     ),
     _spec(

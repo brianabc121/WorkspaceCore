@@ -34,6 +34,7 @@ class Candidate:
     runtimes: tuple[str, ...] = ()
     pending_memory_mb: float = 0
     pending_disk_gb: float = 0
+    observed_committed_memory_mb: float | None = None
 
 
 class PlacementError(ValueError):
@@ -80,6 +81,16 @@ def _reason(candidate: Candidate, request: ResourceRequest, now: datetime) -> st
         return "METRICS_UNKNOWN"
     if any(not _number(v) or _metric(v) < 0 for v in nonnegative):
         return "METRICS_UNKNOWN"
+    credit = candidate.observed_committed_memory_mb
+    if candidate.committed_memory_mb and (
+        not _number(credit)
+        or _metric(credit) < 0
+        or _metric(credit) > candidate.committed_memory_mb
+    ):
+        return "METRICS_UNKNOWN"
+    # MemAvailable already excludes used memory; reserve the unused part of
+    # every promise, including idle workloads which may grow to their limit.
+    unused_memory = max(0, candidate.committed_memory_mb - (credit or 0))
     if _metric(candidate.available_memory_mb) > _metric(candidate.memory_mb) or _metric(
         candidate.disk_free_gb
     ) > _metric(candidate.disk_gb):
@@ -91,6 +102,8 @@ def _reason(candidate: Candidate, request: ResourceRequest, now: datetime) -> st
         or candidate.committed_memory_mb + request.memory_mb > _metric(candidate.memory_mb) * 0.9
         or candidate.committed_disk_gb + request.disk_gb > _metric(candidate.disk_gb) * 0.9
         or request.memory_mb + candidate.pending_memory_mb > _metric(candidate.available_memory_mb)
+        or request.memory_mb + unused_memory + _metric(candidate.memory_mb) * 0.1
+        > _metric(candidate.available_memory_mb)
         or request.disk_gb + candidate.pending_disk_gb > _metric(candidate.disk_free_gb)
     ):
         return "INSUFFICIENT_CAPACITY"

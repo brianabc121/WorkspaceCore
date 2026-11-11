@@ -28,6 +28,7 @@ def host(**changes):
         kvm=False,
         report={
             "at": specs.now().isoformat(),
+            "capacity_sampled_at": specs.now().isoformat(),
             "load": 1.0,
             "mem_free_bytes": 24 * 1024**3,
             "disk_free_bytes": 400 * 1024**3,
@@ -73,6 +74,36 @@ async def test_online_host_checks_requested_host_identity():
     assert "runner_hosts.workspace_id =" in query
 
 
+def test_capacity_samples_are_single_use_bounded_and_bound_to_the_host():
+    from datetime import timedelta
+
+    from app.core.errors import ApiError
+    from app.domain.runner_hosts import accept_report_sample
+    from app.schemas.runner import RunnerReport
+
+    now = specs.now()
+    ticket = uuid.uuid4()
+    node = host(
+        runtime_metadata={
+            "report_sample_id": str(ticket),
+            "report_sample_started_at": now.isoformat(),
+        }
+    )
+    assert accept_report_sample(node, RunnerReport(sample_id=ticket), now) == now
+    with pytest.raises(ApiError) as error:
+        accept_report_sample(node, RunnerReport(sample_id=ticket), now)
+    assert error.value.code == "REPORT_SAMPLE_STALE"
+    node.runtime_metadata = {
+        "report_sample_id": str(ticket),
+        "report_sample_started_at": (now - timedelta(seconds=91)).isoformat(),
+    }
+    with pytest.raises(ApiError):
+        accept_report_sample(node, RunnerReport(sample_id=ticket), now)
+    with pytest.raises(ApiError):
+        accept_report_sample(host(), RunnerReport(sample_id=ticket), now)
+    assert accept_report_sample(node, RunnerReport(), now) is None
+
+
 def test_candidate_requires_report_not_recent_poll():
     from app.domain.runner_placement import candidate_for
 
@@ -92,6 +123,21 @@ def test_stopped_releases_compute_but_retains_disk_and_unknown_reserves_compute(
     assert candidate.committed_cpus == 6
     assert candidate.committed_memory_mb == 3000
     assert candidate.committed_disk_gb == 40
+
+
+def test_candidate_credits_only_measured_nonpending_allocation_memory():
+    from app.domain.runner_placement import candidate_for
+
+    env = RunnerEnvironment(
+        state="running",
+        spec={"cpus": 1, "memory_mb": 2048, "disk_gb": 1},
+        runtime_metadata={"compute_memory_working_set_bytes": 128 << 20},
+    )
+    assert candidate_for(host(), [env]).observed_committed_memory_mb == 128
+    env.runtime_metadata = {}
+    assert candidate_for(host(), [env]).observed_committed_memory_mb is None
+    env.state = "creating"
+    assert candidate_for(host(), [env]).observed_committed_memory_mb == 0
 
 
 async def test_restart_reserves_before_dispatch_and_routes_actual_host():
@@ -247,20 +293,31 @@ async def test_delayed_report_does_not_release_restart_and_failed_host_cannot_be
             await db.flush()
             await runner.apply_result(stop, "done", {}, None)
             await db.commit()
-            # Only3GiB is free according to the trusted full sample; two2GiB starts cannot share it.
+            # 6GiB free minus physical headroom: two 2GiB starts cannot share it.
             node = await db.get(RunnerHost, allocation.host_id)
             node.report = {
                 **node.report,
-                "mem_free_bytes": 3 * 1024**3,
+                "mem_free_bytes": 6 * 1024**3,
                 "at": specs.now().isoformat(),
             }
             await db.commit()
+            service = RunnerHosts(db, app.state.settings)
+            old_sample = await service.begin_report(node)
+            await db.commit()
             await runner.start(allocation)
             await db.commit()
-            service = RunnerHosts(db, app.state.settings)
+            restart = await db.scalar(
+                select(RunnerCommand).where(
+                    RunnerCommand.environment_id == allocation.id,
+                    RunnerCommand.kind == "start_env",
+                )
+            )
+            await runner.apply_result(restart, "done", {}, None)
+            await db.commit()
             await service.report(
                 node,
                 RunnerReport(
+                    sample_id=old_sample.sample_id,
                     containers=[
                         {
                             "env_id": allocation.id,
@@ -269,14 +326,15 @@ async def test_delayed_report_does_not_release_restart_and_failed_host_cannot_be
                         }
                     ],
                     mem_bytes=node.mem_bytes,
-                    mem_free_bytes=3 * 1024**3,
+                    mem_free_bytes=6 * 1024**3,
                     disk_bytes=node.disk_bytes,
                     disk_free_bytes=node.disk_free_bytes,
                     load=0.1,
                 ),
             )
             await db.commit()
-            assert allocation.state == "creating"
+            assert allocation.state == "running"
+            assert allocation.runtime_metadata["compute_stopped"] is False
             from app.domain.runner_placement import candidate_for
 
             candidate = candidate_for(node, [allocation])
@@ -325,7 +383,7 @@ async def test_concurrent_instances_cannot_share_unobserved_free_memory(
         app = app_of(env.client)
         async with app.state.sessionmaker() as db:
             node = (await Runner(db, app.state.settings).hosts(uuid.UUID(env.workspace_id)))[0]
-            node.report = {**node.report, "mem_free_bytes": 3 * 1024**3}
+            node.report = {**node.report, "mem_free_bytes": 6 * 1024**3}
             await db.commit()
 
         async def allocate(instance_id):

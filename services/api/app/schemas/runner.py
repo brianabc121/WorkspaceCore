@@ -341,6 +341,7 @@ class RunnerReportContainer(BaseModel):
     env_id: UUID
     name: str
     state: str
+    memory_working_set_bytes: int | None = Field(None, ge=0, le=1 << 56)
     mem_bytes: int | None = Field(
         None, description="内存用量（Docker memory_stats.usage，字节，含页缓存）；读不到为空"
     )
@@ -388,6 +389,7 @@ class RunnerEgress(BaseModel):
 
 
 class RunnerReport(BaseModel):
+    sample_id: UUID | None = None
     containers: list[RunnerReportContainer] = Field(default_factory=list, max_length=2000)
     volumes: list[RunnerReportVolume] = Field(default_factory=list, max_length=2000)
     images: list[RunnerReportImage] = Field(default_factory=list, max_length=2000)
@@ -406,6 +408,11 @@ class RunnerReport(BaseModel):
 class RunnerReportResult(BaseModel):
     lost: list[UUID]
     stray: list[str]
+
+
+class RunnerReportSample(BaseModel):
+    sample_id: UUID
+    expires_in: int = 90
 
 
 # ---------------------------------------------------------------- 管理员
@@ -630,3 +637,34 @@ class RunnerHostCandidateOut(BaseModel):
 
 class RunnerHostCandidatesOutput(BaseModel):
     items: list[RunnerHostCandidateOut]
+
+
+class RunnerHostText(BaseModel):
+    name: str
+    node_name: str | None
+
+
+class RunnerHostMcpCandidateOut(BaseModel):
+    """MCP separates administrator-provided labels from trusted tool fields."""
+
+    id: UUID
+    untrusted: RunnerHostText
+    backend: str
+    status: str
+    eligible: bool
+    reasons: list[str]
+    runtimes: list[str]
+    cpus: float | None
+    memory_mb: float | None
+    disk_gb: float | None
+    available_memory_mb: float | None
+    disk_free_gb: float | None
+    cpu_load: float | None
+    committed_cpus: float
+    committed_memory_mb: float
+    committed_disk_gb: float
+    observed_at: datetime | None
+
+
+class RunnerHostMcpCandidatesOutput(BaseModel):
+    items: list[RunnerHostMcpCandidateOut]

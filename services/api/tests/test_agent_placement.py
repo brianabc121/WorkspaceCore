@@ -77,6 +77,8 @@ def snapshot():
         "data_free": 80 << 30,
         "runtime_ready": True,
         "network_ready": True,
+        "managed_identities": [],
+        "managed_usage": [],
     }
 
 
@@ -153,6 +155,15 @@ def test_failed_probe_marks_previous_snapshot_ineligible():
     now = datetime.now(UTC)
     previous = parse_resources(json.dumps(snapshot()), received_at=now)
     assert not is_fresh({**previous, "probe_error": "unavailable"}, now)
+
+
+def test_docker_memory_credit_rounds_down_and_never_invents_unknown_usage():
+    from app.domain.agent_server_resources import docker_memory_credit
+
+    assert docker_memory_credit("1.50MiB / 2GiB") == 1.49 * (1 << 20)
+    assert docker_memory_credit("0B / 2GiB") == 0
+    for raw in ("? / 2GiB", "-1MiB / 2GiB", "NaNMiB / 2GiB", "1XB / 2GiB"):
+        assert docker_memory_credit(raw) is None
 
 
 def test_delayed_previous_boot_cannot_replace_new_boot():

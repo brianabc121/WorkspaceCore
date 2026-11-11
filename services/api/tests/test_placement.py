@@ -24,6 +24,7 @@ def candidate(server_id=A, **overrides):
         cpu_load=0.1,
         committed_cpus=1,
         committed_memory_mb=2048,
+        observed_committed_memory_mb=0,
         committed_disk_gb=10,
         observed_at=NOW,
         runtimes=("gvisor", "runc"),
@@ -114,9 +115,41 @@ def test_running_usage_is_not_double_counted_against_free_memory():
     from app.domain.placement import ResourceRequest, rank_candidates
     from app.schemas.placement import Placement
 
-    chosen = candidate(committed_memory_mb=8000, available_memory_mb=4096)
+    chosen = candidate(
+        committed_memory_mb=8000, observed_committed_memory_mb=8000, available_memory_mb=4096
+    )
     result = rank_candidates([chosen], ResourceRequest(1, 2048, 5), Placement(), NOW)
     assert result[0].server_id == A
+
+
+def test_external_memory_usage_preserves_unused_existing_commitments():
+    from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
+    from app.schemas.placement import Placement
+
+    node = candidate(
+        memory_mb=10240,
+        available_memory_mb=1945,
+        committed_memory_mb=1536,
+        observed_committed_memory_mb=100,
+    )
+    with pytest.raises(PlacementError) as error:
+        rank_candidates([node], ResourceRequest(1, 1024, 1), Placement(), NOW)
+    assert error.value.reasons[str(A)] == "INSUFFICIENT_CAPACITY"
+
+
+@pytest.mark.parametrize("credit", [None, -1, float("nan"), 2049])
+def test_existing_commitments_require_valid_bounded_usage_credit(credit):
+    from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
+    from app.schemas.placement import Placement
+
+    with pytest.raises(PlacementError) as error:
+        rank_candidates(
+            [candidate(observed_committed_memory_mb=credit)],
+            ResourceRequest(1, 1024, 1),
+            Placement(),
+            NOW,
+        )
+    assert error.value.reasons[str(A)] == "METRICS_UNKNOWN"
 
 
 def test_deterministic_ties_and_nonpositive_requests():

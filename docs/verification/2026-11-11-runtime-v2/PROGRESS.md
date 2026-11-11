@@ -47,3 +47,56 @@
 - 当前PR为草稿 https://github.com/brianabc121/WorkspaceCore/pull/193，已附加到本聊天；不可合并，T-0222继续in_progress。
 
 新增最终审阅重点：当前闲置运行负载仍有尚未使用的内存上限时，外部进程实际内存占用与平台承诺余量须结合可信容器用量计量，避免仅靠当前free+平台total两道门而漏算未用承诺；晚到上报对重启预约的因果证明也需最终复核。禁止据此草稿声称生产容量严格保证已完成。
+
+## 恢复及继续实施（2026-11-11 23:00 UTC）
+
+环境再次启动时 `/tmp` 被清空，9c03935 后尚未提交的源码、临时依赖和未结束 suite 日志丢失。已按本轮补丁记录恢复；现在 `/workspace/WorkspaceCore-runtime-v2` 是持久实体目录，已不再指向临时目录。原 T-0149 检出的状态未变。新日志在本目录 logs/（本地忽略，不把凭证或大段 traceback 提交到 PR）。
+
+### 新增修复
+
+- 内存准入保留已有容器尚未使用的承诺；SSH 固定只读 Docker 命令和 runner stats 采集可信工作集，可回收缓存不能抵扣。未知工作集不猜成 0，未开始运行的预约完整保留；实时可用内存也保留 10% 总内存余量。
+- runner-agent 0.2.0 在采样前领取宿主认证的、90 秒有效的单次票据。平台起始时间用于因果判断，收到报告的时间只供遥测使用；旧报告不能解除之后的重启预约。旧 agent 不再满足新增调度的可信采样条件，升级步骤见 UPGRADE.md。
+- 暂停/重启中等状态不能当成已停止释放计算。真实 PostgreSQL 暂停容器回归观察 RED 后修正。
+- 新报告锁暴露重启、结果回报的相反锁顺序；两项真实 PostgreSQL NOWAIT 回归均 RED 后修正为实例→服务器池→环境（结果回报为服务器→命令→环境），避免与报告的服务器→环境形成死锁。
+- MCP 服务器名/节点名移入 untrusted；目录契约增加两个已授权工具。真实 MCP tools/list 回归发现 env_create 的联合 schema 没有 type=object，已保留两种对象分支并补齐对象约束，未弱化 SDK 校验。
+
+### 重启后已完成的真实检查
+
+```text
+pytest tests/test_placement.py tests/test_agent_placement.py tests/test_runner_cpu_metrics.py tests/test_runner_multihost.py -m 'not integration' -q
+78 passed, 4 deselected in 0.69s
+
+pytest tests/test_runner_api.py::test_runner_tools_need_the_instance_switch tests/test_runner_api.py::test_paused_container_report_keeps_its_compute_reservation tests/test_runner_api.py::test_report_sampling_requires_auth_and_cannot_be_replayed tests/test_runner_multihost.py::test_delayed_report_does_not_release_restart_and_failed_host_cannot_be_removed -q
+4 passed in 18.04s
+
+pytest tests/test_runner_lock_order.py -q
+2 passed in 16.12s
+
+pytest tests/test_contract.py::test_v2_mcp_outputs_keep_free_text_under_untrusted tests/test_contract.py::test_v2_mcp_tools_match_the_plan -q
+2 passed in 0.26s
+
+pytest -m 'not integration' -q
+636 passed, 42 skipped, 784 deselected in 189.02s
+```
+
+第一次 runner PG 全套在新 MCP 目录问题处停止：31passed、1failed（95.11s），随后上述工具目录定向回归已经通过；不能把这次失败的完整 suite 当通过。更广 PG、最终严格类型检查及前端检查仍在执行，完成后继续追加真实结果。
+
+测试 PostgreSQL 16.15 / Redis 7.4.12 使用此前已固定 digest 的官方镜像内二进制。Docker VFS 可写层会耗尽根盘，现把本任务测试二进制及库解包到 /tmp、仅调整 ELF 解释器位置后以普通用户在 localhost:55432/56379 运行。它们是真实数据库服务；没有把数据库 fake 成对象，也不把此项当 Docker/集群验收。原 daemon 的其他镜像与容器未清理。临时依赖仍可重建，源码与结果保存在持久目录。
+
+### 前端未结束尝试中观察到的失败（需要无竞争复跑）
+
+这次环境重启中断了完整 `npm run test -- --maxWorkers=1`，没有最终结果，不能标绿。已观察到下列用例超时，尚未证明是否与负载无关：
+
+- news-pages：shows banners, pushes a test and asks the agent for a briefing in mode B。
+- approval-center-redesign：sends every filter to the server for both the summary and the list and starts paging again；corrects the countdown with the server clock and, at zero, disables approval and reads again。
+- calendar-pages：requires a read refresh after a conflicting or uncertain write (409)。
+- dashboard：does not repeat a committed widget creation when refreshing metadata fails。
+- model-bindings：saves a target without claiming it is applied, and only offers connections granted to this agent。
+- operations-pages：hides old-range metrics while the selected range is loading；shows OpenIM and OpenClaw instances as their own group with readable reasons。
+- agents-host：shows the three indicators with the over-threshold one marked in words, then the current values and trends。
+
+完整任务仍未完成。上一节待办中的历史只读资源核对、内存闲置承诺与旧报告因果检查已在代码补齐；跨池物理身份防重、完整 Kubernetes 执行/网关/真实双节点网络、完整网络 UI 与最终审查仍需继续，保持草稿和 in_progress。
+
+后续实际检查：`pytest tests/test_runner_multihost.py tests/test_runner_capabilities.py tests/test_runner_api.py tests/test_agent_placement_integration.py tests/test_agent_runtime_reconciliation.py -q` → **51 passed in 173.01s**；包含 runner-agent 新采样、配额/权限、MCP、智能体资源和历史核对。独立锁顺序 PG 两项另见上述结果。`mypy app`（services/api 工作目录，加载项目 strict+pydantic 插件）→ **Success: no issues found in 290 source files**；Ruff app/migrations/tests 全树通过。此前误在根目录运行 mypy、未加载 API 的插件配置，产生 160 项配置相关错误，已用正确项目命令复验，不据此修改其他模块。
+
+磁盘仍有额外待审项：Docker disk_gb 是预算，不是强制文件系统配额；尚未像内存一样对已有卷/可写层未用承诺和外部磁盘占用做独立核算。正式容量保证仍不能仅凭当前空闲磁盘与待创建预算声称完成。

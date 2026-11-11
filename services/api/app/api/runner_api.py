@@ -30,6 +30,7 @@ from app.schemas.runner import (
     RunnerPollResponse,
     RunnerReport,
     RunnerReportResult,
+    RunnerReportSample,
 )
 
 runner_token = HTTPBearer(
@@ -120,13 +121,25 @@ async def command_result(
     return ResultAccepted(accepted=accepted)
 
 
+@router.post("/report/start", response_model=RunnerReportSample, responses=_errors)
+async def begin_report(request: Request, credentials: RunnerCredentials) -> RunnerReportSample:
+    """Issue the sampling epoch before collecting metrics; never trust agent clocks."""
+    app = request.app
+    async with app.state.sessionmaker() as db:
+        hosts = RunnerHosts(db, app.state.settings, app.state.redis)
+        host = await _authenticate(request, credentials, hosts)
+        result = await hosts.begin_report(host)
+        await db.commit()
+    return result
+
+
 @router.post(
     "/report",
     summary="对账（运行服务器，每分钟）",
     description="上报带工作台标签的容器、数据卷、镜像与占用、出口访问记录；"
     "返回记录里有、实际没有的环境（lost）和记录外的容器"
     "（stray，运行服务器先停止、24 小时后删除）。",
-    responses=_errors,
+    responses=error_responses(401, 404, 409, 422, 429),
 )
 async def report(
     request: Request, credentials: RunnerCredentials, body: RunnerReport

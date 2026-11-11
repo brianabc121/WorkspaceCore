@@ -111,6 +111,17 @@ def memory_bytes(stats: dict[str, Any]) -> int | None:
     return nonnegative_int((stats.get("memory_stats") or {}).get("usage"))
 
 
+def memory_working_set_bytes(stats: dict[str, Any]) -> int | None:
+    """Non-reclaimable usage for admission credit; missing cache is unknown."""
+    memory = stats.get("memory_stats") or {}
+    usage = nonnegative_int(memory.get("usage"))
+    counters = memory.get("stats") or {}
+    cache = nonnegative_int(counters.get("total_inactive_file", counters.get("inactive_file")))
+    if usage is None or cache is None or cache > usage:
+        return None
+    return usage - cache
+
+
 def started_generation(inspect: dict[str, Any] | None) -> str | None:
     """容器的启动代次：inspect 的 `State.StartedAt`；读不到或是零值时间就没有可靠的代次。"""
     state = (inspect or {}).get("State") or {}

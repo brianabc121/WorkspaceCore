@@ -23901,6 +23901,18 @@
             "title": "Mem Free Bytes",
             "type": "integer"
           },
+          "sample_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Id"
+          },
           "unlabeled_containers": {
             "default": 0,
             "title": "Unlabeled Containers",
@@ -23968,6 +23980,19 @@
             ],
             "description": "内存用量（Docker memory_stats.usage，字节，含页缓存）；读不到为空",
             "title": "Mem Bytes"
+          },
+          "memory_working_set_bytes": {
+            "anyOf": [
+              {
+                "maximum": 7.205759403792794e+16,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Working Set Bytes"
           },
           "name": {
             "title": "Name",
@@ -24050,6 +24075,25 @@
           "stray"
         ],
         "title": "RunnerReportResult",
+        "type": "object"
+      },
+      "RunnerReportSample": {
+        "properties": {
+          "expires_in": {
+            "default": 90,
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "sample_id": {
+            "format": "uuid",
+            "title": "Sample Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sample_id"
+        ],
+        "title": "RunnerReportSample",
         "type": "object"
       },
       "RunnerReportVolume": {
@@ -69812,6 +69856,16 @@
             },
             "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -69839,6 +69893,73 @@
           }
         ],
         "summary": "对账（运行服务器，每分钟）",
+        "tags": [
+          "runner-api"
+        ]
+      }
+    },
+    "/runner-api/v1/report/start": {
+      "post": {
+        "description": "Issue the sampling epoch before collecting metrics; never trust agent clocks.",
+        "operationId": "begin_report",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunnerReportSample"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          }
+        },
+        "security": [
+          {
+            "RunnerToken": []
+          }
+        ],
+        "summary": "Begin Report",
         "tags": [
           "runner-api"
         ]

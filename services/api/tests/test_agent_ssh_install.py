@@ -161,6 +161,8 @@ class FakeHost:
             "data_free": 150 << 30,
             "runtime_ready": True,
             "network_ready": True,
+            "managed_identities": [],
+            "managed_usage": [],
         }
 
     @property

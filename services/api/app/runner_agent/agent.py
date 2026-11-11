@@ -34,6 +34,7 @@ from .metrics import (
     ContainerCPUSampler,
     cpu_total_ns,
     memory_bytes,
+    memory_working_set_bytes,
     nonnegative_int,
     started_generation,
 )
@@ -820,7 +821,10 @@ class Agent:
         except (DockerError, OSError, ValueError) as error:
             logger.info("读取 %s 的用量失败：%s", name, error)
             return {}
-        out: dict[str, Any] = {"mem_bytes": memory_bytes(stats)}
+        out: dict[str, Any] = {
+            "mem_bytes": memory_bytes(stats),
+            "memory_working_set_bytes": memory_working_set_bytes(stats),
+        }
         generation = started_generation(info)
         container_id = str(item.get("Id") or (info or {}).get("Id") or "")
         if generation and container_id:
@@ -832,6 +836,8 @@ class Agent:
         return out
 
     def report(self) -> dict[str, Any]:
+        sample = self.workspace.post("/report/start", {})
+        _, memory_before = _meminfo()
         df = self.docker.system_df()
         # 数据卷占用：Docker 没算出来时是 -1，缺失也是未知；都报 None，不当成 0
         volume_sizes = {
@@ -887,13 +893,14 @@ class Agent:
             self._disk_emergency(labeled)
         mem_total, mem_free = _meminfo()
         body = {
+            "sample_id": sample["sample_id"],
             "containers": envs,
             "volumes": volumes,
             "images": images,
             "unlabeled_containers": unlabeled,
             "egress": self.proxy.stats.drain(),
             "mem_bytes": mem_total,
-            "mem_free_bytes": mem_free,
+            "mem_free_bytes": min(memory_before, mem_free),
             "disk_bytes": stat.f_blocks * stat.f_frsize,
             "disk_free_bytes": stat.f_bavail * stat.f_frsize,
             "images_bytes": int(sum(int(i.get("Size") or 0) for i in df.get("Images") or [])),

@@ -341,7 +341,8 @@ async def test_mcp_hosts_scoped_safe_and_capability_request_still_requires_runne
     hosts = await call(env, token, "runner_hosts", {})
     assert hosts.get("isError") is not True, hosts
     data = hosts["structuredContent"]
-    assert [h["name"] for h in data["items"]] == ["one"]
+    assert [h["untrusted"]["name"] for h in data["items"]] == ["one"]
+    assert all("name" not in h and "node_name" not in h for h in data["items"])
     assert "token" not in str(data).lower() and "runtime_metadata" not in str(data)
     pending = await call(
         env,

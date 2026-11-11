@@ -8,7 +8,9 @@ charts but never supply placement authority. No caller-provided shell fragments.
 import asyncio
 import json
 import math
+import re
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -52,8 +54,38 @@ root_total=$1; root_free=$2
 set -- $(df -Pk -- "$HOME/myworkspace-openclaw" | awk 'END {printf "%.0f %.0f", $2*1024,$4*1024}')
 data_total=$1; data_free=$2
 seq=$(awk '{printf "%.0f", $1*1000}' /proc/uptime)
-printf '{"generation":"%s","sequence":%s,"cores":%s,"cpu_percent":%s,"load1":%s,"mem_total":%s,"mem_available":%s,"root_total":%s,"root_free":%s,"data_total":%s,"data_free":%s,"runtime_ready":true,"network_ready":true}\n' "$boot" "$seq" "$cores" "$cpu" "$load" "$mem_total" "$mem_available" "$root_total" "$root_free" "$data_total" "$data_free"
+ids=$(docker ps --no-trunc --filter label=com.docker.compose.service=openclaw --format '{{.ID}}')
+identities='[]'; usage='[]'
+if [ -n "$ids" ]; then
+  identities=$(docker inspect --format '{"id":{{json .Id}},"project":{{json (index .Config.Labels "com.docker.compose.project")}},"directory":{{json (index .Config.Labels "com.docker.compose.project.working_dir")}}}' $ids | awk 'BEGIN {printf "["} {if(NR>1) printf ","; printf "%s",$0} END {print "]"}')
+  usage=$(docker stats --no-stream --no-trunc --format '{"id":{{json .ID}},"memory":{{json .MemUsage}}}' $ids | awk 'BEGIN {printf "["} {if(NR>1) printf ","; printf "%s",$0} END {print "]"}')
+fi
+latest_available=$(awk '/^MemAvailable:/ {printf "%.0f", $2*1024}' /proc/meminfo)
+mem_available=$(awk -v before="$mem_available" -v after="$latest_available" 'BEGIN {printf "%.0f", before<after?before:after}')
+printf '{"generation":"%s","sequence":%s,"cores":%s,"cpu_percent":%s,"load1":%s,"mem_total":%s,"mem_available":%s,"root_total":%s,"root_free":%s,"data_total":%s,"data_free":%s,"runtime_ready":true,"network_ready":true,"managed_identities":%s,"managed_usage":%s}\n' "$boot" "$seq" "$cores" "$cpu" "$load" "$mem_total" "$mem_available" "$root_total" "$root_free" "$data_total" "$data_free" "$identities" "$usage"
 """
+
+
+class _ManagedIdentity(BaseModel):
+    id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    project: str
+    directory: str
+
+
+class _ManagedUsage(BaseModel):
+    id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    memory: str = Field(max_length=100)
+
+
+def docker_memory_credit(raw: str) -> float | None:
+    """Subtract a display unit from Docker CLI working set to avoid rounding up."""
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)(B|KiB|MiB|GiB|TiB|PiB) / .+", raw)
+    if match is None:
+        return None
+    number, unit = match.groups()
+    places = len(number.partition(".")[2])
+    lower = max(Decimal(0), Decimal(number) - Decimal(10) ** -places)
+    return float(lower * (1024 ** ("B", "KiB", "MiB", "GiB", "TiB", "PiB").index(unit)))
 
 
 class _Snapshot(BaseModel):
@@ -71,6 +103,8 @@ class _Snapshot(BaseModel):
     data_free: int = Field(ge=0, le=1 << 56)
     runtime_ready: bool
     network_ready: bool
+    managed_identities: list[_ManagedIdentity] = Field(max_length=200)
+    managed_usage: list[_ManagedUsage] = Field(max_length=200)
 
 
 def parse_resources(raw: str, *, received_at: datetime) -> dict[str, Any]:
@@ -79,6 +113,16 @@ def parse_resources(raw: str, *, received_at: datetime) -> dict[str, Any]:
         if len(raw) > MAX_OUTPUT:
             raise ValueError
         value = _Snapshot.model_validate(json.loads(raw))
+        ids = [item.id for item in value.managed_identities]
+        samples = [item.id for item in value.managed_usage]
+        if (
+            len(set(ids)) != len(ids)
+            or len(set(samples)) != len(samples)
+            or set(ids) != set(samples)
+        ):
+            raise ValueError
+        if any(docker_memory_credit(item.memory) is None for item in value.managed_usage):
+            raise ValueError
         if (
             value.mem_available > value.mem_total
             or value.root_free > value.root_total

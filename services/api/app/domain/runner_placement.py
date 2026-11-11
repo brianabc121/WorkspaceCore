@@ -1,6 +1,7 @@
 """运行服务器池：实时指标、持久环境预约与共享筛选契约。"""
 
 from datetime import datetime
+from math import isfinite
 
 from app.domain.placement import Candidate
 from app.models.runner import RunnerEnvironment, RunnerHost
@@ -32,7 +33,7 @@ def candidate_for(host: RunnerHost, environments: list[RunnerEnvironment]) -> Ca
     report = host.report or {}
     observed: datetime | None
     try:
-        observed = datetime.fromisoformat(str(report["at"]))
+        observed = datetime.fromisoformat(str(report["capacity_sampled_at"]))
         if observed.tzinfo is None:
             observed = None
     except (KeyError, TypeError, ValueError):
@@ -40,6 +41,21 @@ def candidate_for(host: RunnerHost, environments: list[RunnerEnvironment]) -> Ca
     compute = [env.spec for env in environments if compute_reserved(env)]
     retained = [env.spec for env in environments if env.state in RETAINED_STATES]
     pending = [env.spec for env in environments if compute_reserved(env) and _pending_compute(env)]
+    memory_credit = 0.0
+    memory_credit_known = True
+    for env in environments:
+        if not compute_reserved(env) or _pending_compute(env):
+            continue
+        value = (env.runtime_metadata or {}).get("compute_memory_working_set_bytes")
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not isfinite(value)
+            or value < 0
+        ):
+            memory_credit_known = False
+            break
+        memory_credit += min(float(env.spec["memory_mb"]), value / 1024**2)
     return Candidate(
         server_id=host.id,
         cpus=host.cpus,
@@ -61,6 +77,7 @@ def candidate_for(host: RunnerHost, environments: list[RunnerEnvironment]) -> Ca
         committed_disk_gb=sum(float(spec.get("disk_gb", 0)) for spec in retained),
         pending_memory_mb=sum(float(spec.get("memory_mb", 0)) for spec in pending),
         pending_disk_gb=sum(float(spec.get("disk_gb", 0)) for spec in pending),
+        observed_committed_memory_mb=memory_credit if memory_credit_known else None,
         observed_at=observed,
         enabled=host.status == "online" and (host.backend or "docker") == "docker",
         runtimes=tuple(

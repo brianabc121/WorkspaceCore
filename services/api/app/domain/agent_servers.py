@@ -1692,6 +1692,9 @@ class AgentServerService:
             ):
                 raise _legacy_reconciliation()
         cpu = memory = disk = pending_memory = pending_disk = 0.0
+        measured_memory = 0.0
+        measured = "managed_identities" in snap and "managed_usage" in snap
+        usage = {item["id"]: item["memory"] for item in snap.get("managed_usage", [])}
         observed = datetime.fromisoformat(snap["sampled_at"])
         for deployment, instance in rows:
             receipt = (deployment.selection or {}) if deployment is not None else {}
@@ -1712,6 +1715,23 @@ class AgentServerService:
             ):
                 pending_memory += allocated_memory
                 pending_disk += allocated_disk
+            elif measured:
+                identities = [
+                    item
+                    for item in snap["managed_identities"]
+                    if item["project"] == project_name(str(instance.id))
+                    and item["directory"] == deployment.install_dir
+                ]
+                if len(identities) > 1:
+                    measured = False
+                elif identities:
+                    credit = agent_server_resources.docker_memory_credit(
+                        usage.get(identities[0]["id"], "")
+                    )
+                    if credit is None:
+                        measured = False
+                    else:
+                        measured_memory += min(allocated_memory, credit / (1 << 20))
         return Candidate(
             server_id=server.id,
             cpus=float(snap["cores"]),
@@ -1725,6 +1745,7 @@ class AgentServerService:
             committed_disk_gb=disk,
             pending_memory_mb=pending_memory,
             pending_disk_gb=pending_disk,
+            observed_committed_memory_mb=measured_memory if measured else None,
             observed_at=observed,
         )
 

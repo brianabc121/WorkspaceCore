@@ -5448,6 +5448,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runner-api/v1/report/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin Report
+         * @description Issue the sampling epoch before collecting metrics; never trust agent clocks.
+         */
+        post: operations["begin_report"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runner-api/v1/snapshots/{snapshot_id}/parts/{index}": {
         parameters: {
             query?: never;
@@ -15258,6 +15278,8 @@ export interface components {
              * @default 0
              */
             mem_free_bytes: number;
+            /** Sample Id */
+            sample_id?: string | null;
             /**
              * Unlabeled Containers
              * @default 0
@@ -15293,6 +15315,8 @@ export interface components {
              * @description 内存用量（Docker memory_stats.usage，字节，含页缓存）；读不到为空
              */
             mem_bytes?: number | null;
+            /** Memory Working Set Bytes */
+            memory_working_set_bytes?: number | null;
             /** Name */
             name: string;
             /** Size Rw */
@@ -15315,6 +15339,19 @@ export interface components {
             lost: string[];
             /** Stray */
             stray: string[];
+        };
+        /** RunnerReportSample */
+        RunnerReportSample: {
+            /**
+             * Expires In
+             * @default 90
+             */
+            expires_in: number;
+            /**
+             * Sample Id
+             * Format: uuid
+             */
+            sample_id: string;
         };
         /** RunnerReportVolume */
         RunnerReportVolume: {
@@ -41018,6 +41055,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunnerReportResult"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    begin_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerReportSample"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

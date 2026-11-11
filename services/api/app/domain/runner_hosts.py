@@ -12,7 +12,7 @@ import hashlib
 import logging
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from redis.asyncio import Redis
@@ -49,6 +49,7 @@ from app.schemas.runner import (
     RunnerPoll,
     RunnerReport,
     RunnerReportResult,
+    RunnerReportSample,
 )
 
 logger = logging.getLogger("app.runner")
@@ -78,6 +79,28 @@ def unauthorized() -> ApiError:
     return ApiError(
         401, "RUNNER_UNAUTHORIZED", "运行服务器认证失败", headers={"WWW-Authenticate": "Bearer"}
     )
+
+
+def accept_report_sample(host: RunnerHost, body: RunnerReport, now: datetime) -> datetime | None:
+    """Host-bound single-use epoch: receipt time cannot stand in for sample time."""
+    if body.sample_id is None:
+        return None
+    metadata = dict(host.runtime_metadata or {})
+    try:
+        started = datetime.fromisoformat(metadata["report_sample_started_at"])
+        if (
+            str(body.sample_id) != metadata["report_sample_id"]
+            or not 0 <= (now - started).total_seconds() <= 90
+        ):
+            raise ValueError
+    except (KeyError, TypeError, ValueError) as error:
+        raise ApiError(
+            409, "REPORT_SAMPLE_STALE", "采样票据过期、已使用或不属于此服务器"
+        ) from error
+    metadata.pop("report_sample_id", None)
+    metadata.pop("report_sample_started_at", None)
+    host.runtime_metadata = metadata
+    return started
 
 
 def host_out(host: RunnerHost) -> RunnerHostOut:
@@ -432,6 +455,7 @@ class RunnerHosts:
         self, host: RunnerHost, command_id: uuid.UUID, body: RunnerCommandResult
     ) -> bool:
         """回报结果；同一条指令重复回报只认第一次。返回是否采用。"""
+        host = await self._lock_report_host(host)
         command = await self.db.scalar(
             select(RunnerCommand)
             .where(RunnerCommand.id == command_id, RunnerCommand.host_id == host.id)
@@ -445,8 +469,35 @@ class RunnerHosts:
         host.last_seen_at = specs.now()
         return True
 
+    async def _lock_report_host(self, host: RunnerHost) -> RunnerHost:
+        current = await self.db.scalar(
+            select(RunnerHost)
+            .where(
+                RunnerHost.id == host.id,
+                RunnerHost.token_hash == host.token_hash,
+                RunnerHost.status != "disabled",
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if current is None:
+            raise unauthorized()
+        return current
+
+    async def begin_report(self, host: RunnerHost) -> RunnerReportSample:
+        host = await self._lock_report_host(host)
+        sample_id = uuid.uuid4()
+        host.runtime_metadata = {
+            **(host.runtime_metadata or {}),
+            "report_sample_id": str(sample_id),
+            "report_sample_started_at": specs.now().isoformat(),
+        }
+        return RunnerReportSample(sample_id=sample_id)
+
     async def report(self, host: RunnerHost, body: RunnerReport) -> RunnerReportResult:
+        host = await self._lock_report_host(host)
         received = specs.now()  # 这份报告里各项读数的“平台收到时间”（不信 agent 的时钟）
+        sampled = accept_report_sample(host, body, received)
         host.last_seen_at = received
         host.report = {
             "containers": len(body.containers),
@@ -462,6 +513,7 @@ class RunnerHosts:
             "containers_bytes": body.containers_bytes,
             "load": body.load,
             "at": specs.now().isoformat(),
+            "capacity_sampled_at": sampled.isoformat() if sampled else None,
         }
         host.disk_free_bytes = body.disk_free_bytes or host.disk_free_bytes
         envs = {
@@ -487,26 +539,40 @@ class RunnerHosts:
         lost: list[uuid.UUID] = []
         for env in envs.values():
             container = containers.get(env.id)
+            reserved = (env.runtime_metadata or {}).get("compute_reserved_at")
+            can_reconcile = reserved is None or (
+                sampled is not None and sampled.isoformat() > str(reserved)
+            )
             # 资源读数（T-0185）：只写本主机的环境；与状态对账互不影响
             runner_metrics.apply_container_reading(env, container, received)
-            if container is not None:
+            if container is not None and can_reconcile:
                 running = container.state == "running"
-                if env.state in ("creating", "failed") and env.id not in busy:
-                    env.state = "running" if running else "stopped"
-                    env.state_reason = "已通过服务器报告确认容器存在"
-                if env.state == "running" and not running and env.id not in busy:
-                    env.state = "stopped"
-                    env.stopped_at = env.stopped_at or specs.now()
-                    env.state_reason = env.state_reason or f"容器已退出（{container.state}）"
+                stopped = container.state in ("exited", "created")
+                if env.id not in busy and env.state in ("creating", "failed", "running", "stopped"):
+                    if running:
+                        env.state = "running"
+                    elif stopped:
+                        env.state = "stopped"
+                        env.stopped_at = env.stopped_at or specs.now()
+                    else:
+                        env.state = "failed"
+                    env.state_reason = (
+                        "已通过服务器报告确认容器存在"
+                        if running or stopped
+                        else f"容器状态尚未确认停止（{container.state}）；保留计算预约"
+                    )
                 if env.id not in busy:
                     env.runtime_metadata = {
                         **(env.runtime_metadata or {}),
-                        "compute_stopped": not running,
-                        "compute_observed_at": received.isoformat(),
+                        "compute_stopped": stopped,
+                        "compute_observed_at": sampled.isoformat() if sampled else None,
+                        "compute_memory_working_set_bytes": (
+                            container.memory_working_set_bytes if sampled else None
+                        ),
                     }
             if env.id in volumes:
                 runner_metrics.apply_volume_reading(env, volumes[env.id].bytes, received)
-            if env.id in busy or env.state not in EXPECT_CONTAINER:
+            if not can_reconcile or env.id in busy or env.state not in EXPECT_CONTAINER:
                 continue
             if container is None:
                 lost.append(env.id)
