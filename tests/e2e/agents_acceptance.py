@@ -1198,11 +1198,17 @@ def scenario_20(c: Ctx) -> None:
     after = time.time()
     c.owner.send(conv, "@甲 限流第三问", at=[c.a.im_user_id])
     wait_for("甲回复第三问", lambda: c.from_sender(conv, c.a.im_user_id, "限流第三问"), timeout=150)
-    notes = [n for r in c.model_calls(c.keys["a"], after) for n in r.get("notes") or []]
-    detail = "; ".join(notes)[:300]
+    # 补丁放回的系统事件只出现在取走它的那一轮的提示里，不留在之后的历史中。锁定版本里甲在 OpenIM 的所有对话
+    # 和 OpenClaw 的定时心跳都在同一个会话 agent:main:main（openclaw-channel 0.3.3 调 resolveAgentRoute 不传 peer，
+    # T-0220），所以拒收之后的下一轮可能是心跳而不是第三问：看拒收之后甲的每一轮，不只看第三问那一轮。
+    turns = c.model_calls(c.keys["a"], asked)
+    notes = [n for r in turns for n in r.get("notes") or []]
+    detail = json.dumps([{"at": round(r["at"] - after, 1), "last_user": (r.get("last_user") or "")[-60:],
+                          "notes": [n[-120:] for n in r.get("notes") or []]} for r in turns if r.get("notes")],
+                        ensure_ascii=False)[:600]
     if not any("5002" in n for n in notes):
         detail = json.dumps(v3_diagnostics(c, gid, asked, after), ensure_ascii=False)[:4000]
-    c.check("场景 20：补丁把“回复没有发出（5002）”放回同一个会话，甲下一轮看得到（核验 V3）",
+    c.check("场景 20：补丁把“回复没有发出（5002）”放回甲的会话，拒收之后甲的下一轮看得到（核验 V3；下一轮可能是定时心跳）",
             any("5002" in n for n in notes), detail)
     instance = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}")
     c.check("场景 20：实例上报的插件版本带补丁标记，实例页不再提示重新签发接入包",
