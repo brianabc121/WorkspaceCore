@@ -141,8 +141,8 @@ describe('approval center redesign', () => {
     await vi.waitFor(() => expect(within(next).getByText(/剩余 00:0[0-3]/)).toBeVisible())
     expect(within(next).queryByText(/剩余 1\d:/)).not.toBeInTheDocument()
     const row = screen.getByRole('row', { name: '申请：新建日程「项目进度同步」' })
-    expect(within(row).getByText(/01:(29|30)/)).toBeVisible()
-    // 只看倒计时：行里“截止 HH:MM”的 <time> 是钟点，11 点多跑测试时也会含 “11:”
+    // 只看倒计时：行里“截止 HH:MM:SS”的 <time> 是钟点，截止时间恰好是 01:29、01:30（或 11 点多）时也会匹配
+    expect(within(row).getByText(/01:(29|30)/, { ignore: 'script, style, time' })).toBeVisible()
     expect(within(row).queryByText(/11:/, { ignore: 'script, style, time' })).not.toBeInTheDocument()
     expect(within(next).getByRole('button', { name: '批准并执行' })).toBeEnabled()
     const before = gets(requests, 'exec-due').length, listsBefore = lists(requests).length
