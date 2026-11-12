@@ -241,3 +241,11 @@ SSH端到端脚本改为验证默认1CPU/2048MiB及真实Docker硬上限/有限�
 本轮定向验收最终：SSH/password未再改的45项已通过；服务器API文件最终修复PUT/limits响应契约（直接返回AgentLimits、没有version，必须GET新version）后整文件 **2 passed in44.09s**。之前三文件组合实际 **46 passed / 1 failed in630.68s**（仅该夹具KeyError），完整失败保留，不声称一次最终47项组合运行。共享helper两个调用点随后的旧公钥退役完整文件 **8 passed in88.64s**；heartbeat9项前述通过。最终全范围Ruff524格式、mypy520、diffcheck与协作检查均成功。
 
 独立focused复审APPROVED、Critical0/Important0：新增SSH会话仅执行固定只读探测，密码与主机公钥约束加强；目标替换真实竞态、主机公钥变更认证前拒绝/不建任务/不改目标仍验证。业务代码、迁移、前端及CI配置与1d1446ce没有新增差异。本次测试与验收适配推送后仍须等待新head完整CI，不能使用上一head成功job替代。
+
+### 容量诊断脚本连接设置修正
+
+e642f43a 的真实多实例、V2浏览器及邮件等验收已通过；SSH验收在新增诊断阶段失败：`Settings.database_url`为SecretStr，直接传给SQLAlchemy create_async_engine触发ArgumentError。这是本次诊断脚本的遗漏，不能据此判断服务器实际容量。已改用产品统一的 `app.core.resources.create_engine(settings)`，集中解密连接设置；不改产品代码、资源预算或选址判定。
+
+新增 test_agent_capacity_acceptance.py 从实际验收方法AST提取原始脚本，真实新Python子进程连接隔离PostgreSQL并读取真正Settings。先实际 **1 failed in6.28s** 复现相同SecretStr错误，修正后 **1 passed in11.73s**。同一回归验证充足容量和超容量拒绝两条路径、准确INSUFFICIENT_CAPACITY原因、资源快照/版本不变、无任务/部署写入、输出不含数据库URL。受信资源数据是显式测试夹具，不冒充远程SSH测量。
+
+最终静态 **Ruff525文件格式通过、strict mypy521 source files成功、OpenAPI最新、diffcheck清洁**。独立focused复审APPROVED，Critical0/Important0；确认只是连接工厂修正与执行级回归，原先1d1446ce实际容量拒绝的具体原因仍须等真实诊断/下轮端到端结果。新head必须全部CI成功后才合并。

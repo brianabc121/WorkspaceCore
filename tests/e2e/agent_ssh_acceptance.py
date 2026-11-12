@@ -248,9 +248,10 @@ import asyncio, json, sys
 from dataclasses import asdict
 from datetime import UTC, datetime
 from uuid import UUID
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.config import get_settings
 from app.core.errors import ApiError
+from app.core.resources import create_engine
 from app.domain.agent_servers import AgentServerService
 from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
 from app.models import AgentServer
@@ -258,7 +259,7 @@ from app.schemas.placement import Placement
 
 async def main():
     settings = get_settings()
-    engine = create_async_engine(settings.database_url)
+    engine = create_engine(settings)
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
             server = await db.get(AgentServer, UUID(sys.argv[1]))

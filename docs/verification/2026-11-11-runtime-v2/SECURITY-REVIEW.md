@@ -103,3 +103,7 @@ Block removal for all retained/unknown allocations, and preserve snapshot/archiv
 SSH端到端等待阶段只刷新真实资源报告，复用生产选择器进行只读诊断，创建请求仍原子准入；默认有限CPU/内存与Docker硬上限及完整预约合计均有断言。不调整生产或CI的10GiB数据预算、10%余量或指标健康规则。当前诊断等待不证明此前TARGET_UNAVAILABLE的具体根因，须以下轮真实端到端结果为准。
 
 父执行真实PG补充：45项不变SSH/password通过，最终服务器API2项通过，旧公钥清理整文件8项通过。审查者阅读前两类日志并做源码/AST/diff检查；8项是父执行的后续结果，不冒充审查者独立重跑。
+
+### 容量诊断进程级回归
+
+诊断脚本SecretStr连接类型遗漏已改为统一create_engine(settings)；独立focused复审APPROVED、无Critical/Important。审查阅读真实执行RED1失败6.28s与GREEN1通过11.73s，确认原脚本在真实Python/PG/Settings下被执行，正向可调度、过量拒绝、无部署写入及URL不出现在输出均验证。没有更改生产引擎、容量规则或准入权限；此结论只修复诊断入口，具体CI主机拒绝原因需真实端到端结果。
