@@ -477,15 +477,18 @@ async def test_heartbeat_reports_versions(env: Env) -> None:
     assert (current["reported_version"], current["plugin_version"]) == ("2026.9.36", "0.3.3")
     assert current["last_seen_at"] is not None
     assert current["credentials"][0]["last_used_at"] is not None
-    # 插件没打补丁（旧接入包）：实例页提示重新签发（T-0120）；打过补丁的上报 0.3.3+myworkspace.1
+    # 插件没打补丁（旧接入包）：实例页提示重新签发（T-0120）
     assert current["bundle_outdated"] is True
-    response = await env.client.post(
-        "/agent-api/v1/heartbeat",
-        json={"openclaw_version": "2026.9.36", "plugin_version": "0.3.3+myworkspace.1"},
-        headers=agent_headers(token),
-    )
-    assert response.status_code == 200
-    assert (await env.instance(instance["id"]))["bundle_outdated"] is False
+    # 只打了旧的第一处（T-0120，各对话还挤在一个会话里）：同样提示；
+    # 两处都打了的上报 0.3.3+myworkspace.2（T-0221）
+    for plugin_version, outdated in (("0.3.3+myworkspace.1", True), ("0.3.3+myworkspace.2", False)):
+        response = await env.client.post(
+            "/agent-api/v1/heartbeat",
+            json={"openclaw_version": "2026.9.36", "plugin_version": plugin_version},
+            headers=agent_headers(token),
+        )
+        assert response.status_code == 200
+        assert (await env.instance(instance["id"]))["bundle_outdated"] is outdated, plugin_version
 
 
 # ---------------------------------------------------------------- 接入包与内部 CA

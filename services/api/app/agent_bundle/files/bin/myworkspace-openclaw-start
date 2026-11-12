@@ -62,14 +62,16 @@ for (let attempt = 1; attempt <= 5; attempt += 1) {
   }
 }
 
-// 插件打上了接入包的补丁（bin/channel-patch.mjs，T-0120）时，上报的版本带 "+myworkspace.1"；
-// 工作台据此在实例页提示旧部署重新签发接入包
+// 插件打上了接入包的补丁（bin/channel-patch.mjs）时，上报的版本带补丁号：两处都打了（T-0120 + T-0221，
+// 各对话各用一个会话）是 "+myworkspace.2"，只有旧的第一处是 "+myworkspace.1"；工作台据此在实例页提示旧部署重新签发接入包
 const PATCH_MARKER = "myworkspace-patch:T-0120";
+const ROUTE_MARKER = "myworkspace-patch:T-0221";
 function pluginVersion() {
   const version = process.env.MYWS_PLUGIN_VERSION;
   if (!version) return undefined;
   try {
     const inbound = readFileSync("/home/node/.openclaw/extensions/openclaw-channel/dist/inbound.js", "utf8");
+    if (inbound.includes(PATCH_MARKER) && inbound.includes(ROUTE_MARKER)) return `${version}+myworkspace.2`;
     if (inbound.includes(PATCH_MARKER)) return `${version}+myworkspace.1`;
   } catch { /* 插件不在默认位置：照原样上报 */ }
   return version;

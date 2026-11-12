@@ -29,6 +29,7 @@ else
   OPENCLAW_CONFIG_PATH=/home/node/.openclaw/plugin-install.json \
     node openclaw.mjs plugins install "$tarball" --force --accept-capabilities
 fi
-# 工作台的小补丁（T-0120）：自动回复被拒收时把原因放回会话。核对原文件与结果的 sha256，
-# 已经打过只核对；新装的与已经装好的插件都走这一步（接入包的 bin/ 挂在 /opt/myworkspace/bin）
+# 工作台的小补丁：自动回复被拒收时把原因放回会话（T-0120），各群、各私聊各用一个会话（T-0221）。
+# 核对原文件与结果的 sha256，已经打过只核对，打过 T-0120 旧补丁的补上新的一处；
+# 新装的与已经装好的插件都走这一步（接入包的 bin/ 挂在 /opt/myworkspace/bin）
 node /opt/myworkspace/bin/channel-patch.mjs

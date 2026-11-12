@@ -101,7 +101,20 @@ V2（禁用发消息工具后自动回复照常）、V3（系统事件进下一�
 - 所以一个实例在 OpenIM 的所有群聊、私聊都在同一个会话里，接入包的 `session.dmScope: per-channel-peer` 对 OpenIM 不起作用。
 - OpenClaw 的定时心跳（默认每 30 分钟）也跑在这个会话里，会取走补丁放回的系统事件。场景 20 在 CI 上三次失败都是这个原因：说明进了心跳那一轮，第三问那一轮没有。
 - 场景 20 的检查已改为看拒收之后甲的每一轮。
-- 各对话共用一个会话、上下文互相带入，是否要改成每个对话一个会话，待人类决定（T-0221）。
+- 各对话共用一个会话、上下文互相带入，是否要改成每个对话一个会话，交人类决定（T-0221）。
+
+**2026-11-12 补充（T-0221，人类决定改成每个对话各用一个会话）**：接入包的补丁加上第二处，给 `resolveAgentRoute` 传
+`peer: { kind: group ? "group" : "direct", id: String(group ? msg.groupID : msg.sendID) }`。在锁定镜像
+`openclaw/openclaw:2026.9.36` 里直接调 `resolveAgentRoute`（`/app/dist/resolve-route-DHVI8a3m.mjs`）核对：
+
+- 不传 `peer` 时是 `agent:main:main`（与上面一致）。
+- `peer {kind: "group", id}` → `agent:main:openim:group:<群 ID 小写>`。
+- `peer {kind: "direct", id}`，配合接入包的 `session.dmScope: per-channel-peer` → `agent:main:openim:direct:<发送者 IM ID 小写>`。
+- `kind` 经 `normalizeChatType` 只认 direct / group / channel（dm 当作 direct）。
+
+定时心跳仍在 `agent:main:main`，不再和群聊、私聊混在一起。打补丁后的 sha256、旧补丁（只有第一处）的升级和插件版本
+`0.3.3+myworkspace.2` 见 `bin/channel-patch.mjs`。场景 20 用网关的 `sessions.list` 核对群的会话和管理员私聊的会话都在，
+新群第一问那一轮的上下文只有这个群自己的几条消息（少于 20 条；改之前带着甲在别处的上百条）。
 
 ### 6.2 终止正在执行的任务（T-0126，2026-11-06）
 
@@ -140,6 +153,11 @@ V4 实测结果（同一次 CI，提交 84f4359）：接入包的 `wakeup.mjs` �
 会话键写法与 openclaw-channel 的 `openim:group:<gid>` / `openim:<sendID>`（小写）一致。
 
 **2026-11-11 更正（T-0220）**：上面只是会话键的写法和 openclaw-channel 的 `baseSessionKey` 一致。群里收到消息时，插件实际用的会话是 `agent:main:main`（见 6.1 的补充），所以唤醒那一轮所在的会话和群消息所在的会话不是同一个。
+
+**2026-11-12（T-0221）**：补丁给 `resolveAgentRoute` 传了 `peer` 之后，群消息在 `agent:main:openim:group:<群 ID 小写>`。
+`openclaw agent --session-key openim:group:<群 ID 小写>` 会被 OpenClaw 补成同一个键（`toAgentStoreSessionKey` 给不带 `agent:` 前缀的键补上
+`agent:main:` 并转小写），唤醒与群消息又在同一个会话里了。发给管理员的唤醒改用 `openim:direct:<管理员的 IM ID>`（小写），
+对应私聊的会话 `agent:main:openim:direct:<…>`；原来的 `openim:<sendID>` 不再使用。
 
 ### 6.4 附件、定时、断线排队与外网模式的 MCP（T-0125，2026-11-06）
 

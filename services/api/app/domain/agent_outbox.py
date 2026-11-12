@@ -74,6 +74,10 @@ SENDS_PER_HOUR = 60
 HOUR_KEY = "im_send_hour:{instance_id}"
 # 工具调用里最多等多久（接入包里 MCP 请求超时是 20 秒）
 SYNC_BUDGET_SECONDS = 12.0
+# im_send 当场逐条发送的那几条，先留给这次工具调用自己发（T-0222）：到期时间设在这段时间之后，
+# Worker（每 5 秒）就不会在工具调用发到一半时拿走或顺延后面的几条（那样工具只能返回 partial）。
+# 工具调用中途退出、或超过 SYNC_BUDGET_SECONDS 没发完的，过了这段时间由 Worker 接着发
+SYNC_RESERVE = timedelta(seconds=30)
 RATE_WAIT = timedelta(minutes=10)
 REPLY_RETRY_WAIT = timedelta(minutes=2)
 REPLY_RETRY_MAX = 3
@@ -288,6 +292,8 @@ class AgentOutbox:
             )
         contents += [(p.content_type, p.content_json, p.summary, p.media.id) for p in prepared]
         rows: list[AgentImOutbox] = []
+        # 当场逐条发的那几条：先留给这次工具调用自己发（SYNC_RESERVE，T-0222）
+        immediate: list[AgentImOutbox] = []
         for part, (content_type, content, plain, media_id) in enumerate(contents):
             row = AgentImOutbox(
                 workspace_id=instance.workspace_id,
@@ -306,7 +312,7 @@ class AgentOutbox:
                 source="tool",
                 if_rate_limited=parsed.if_rate_limited,
                 send_at=send_at or now,
-                next_attempt_at=send_at or now,
+                next_attempt_at=send_at or now + SYNC_RESERVE,
             )
             if verdict is not None:
                 code, retry_after = verdict
@@ -320,6 +326,8 @@ class AgentOutbox:
                     row.error_message = reason_for(code)[0]
             elif send_at is not None:
                 row.status = "scheduled"
+            else:
+                immediate.append(row)
             self.db.add(row)
             rows.append(row)
         try:
@@ -332,12 +340,15 @@ class AgentOutbox:
             )
         for row in rows:
             await ops_metrics.bump(self.ctx.redis, "im_outbox", "created", row.status)
+        # 先记下 ID 再发：deliver 拿不到行时会回滚，回滚让会话里的对象全部过期，之后再读
+        # row.status 会在异步会话里隐式加载而报错（MissingGreenlet；工具返回错误、
+        # 执行记录也没写，T-0222）
+        immediate_ids = [row.id for row in immediate]
         deadline = time.monotonic() + SYNC_BUDGET_SECONDS
-        for item in rows:
-            if item.status == "queued" and item.next_attempt_at <= _now():
-                if time.monotonic() > deadline:
-                    break
-                await self.deliver(item.id)
+        for row_id in immediate_ids:
+            if time.monotonic() > deadline:
+                break
+            await self.deliver(row_id, reserved=True)
         return await self._output(parsed.target, key, rows, replayed=False)
 
     async def _group_members(self, target: agent_im.Target) -> set[str]:
@@ -380,9 +391,11 @@ class AgentOutbox:
             raise ToolCallError(
                 "IDEMPOTENCY_MISMATCH", "这个 client_key 已经用来发过别的内容；换一个键"
             )
-        for row in rows:
-            if row.status in ("queued", "unknown") and row.next_attempt_at <= _now():
-                await self.deliver(row.id)
+        # 同上：先记下 ID，deliver 回滚后不再读过期的对象（T-0222）
+        now = _now()
+        due = [r.id for r in rows if r.status in ("queued", "unknown") and r.next_attempt_at <= now]
+        for row_id in due:
+            await self.deliver(row_id)
         return await self._output(target, key, rows, replayed=True)
 
     async def _output(
@@ -449,17 +462,16 @@ class AgentOutbox:
 
     # ------------------------------------------------------------ 投递
 
-    async def deliver(self, row_id: uuid.UUID) -> None:
-        """发一条到期的消息；拿不到锁（别处在发）就跳过。"""
+    async def deliver(self, row_id: uuid.UUID, *, reserved: bool = False) -> None:
+        """发一条到期的消息；拿不到锁（别处在发）就跳过。
+
+        reserved：im_send 当场发自己刚建、留给自己的那几条（SYNC_RESERVE），不看到期时间。"""
         now = _now()
+        conditions = [AgentImOutbox.id == row_id, AgentImOutbox.status.in_(PENDING)]
+        if not reserved:
+            conditions.append(AgentImOutbox.next_attempt_at <= now)
         row = await self.db.scalar(
-            select(AgentImOutbox)
-            .where(
-                AgentImOutbox.id == row_id,
-                AgentImOutbox.status.in_(PENDING),
-                AgentImOutbox.next_attempt_at <= now,
-            )
-            .with_for_update(skip_locked=True)
+            select(AgentImOutbox).where(*conditions).with_for_update(skip_locked=True)
         )
         if row is None:
             await self.db.rollback()
