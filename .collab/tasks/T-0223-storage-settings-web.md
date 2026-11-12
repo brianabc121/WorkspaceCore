@@ -37,3 +37,4 @@ updated: 2026-11-12
 - 2026-11-12 06:40 UTC · claude · 创建任务（owner: claude）
 - 2026-11-12 06:40 UTC · claude · 开始任务
 - 2026-11-12 08:14 UTC · claude · status in_progress → done：网页“设置 → 图片存储”按工作空间配置 R2 / OSS（迁移 0060、设置接口、前端页面、浏览器验收）；本地后端 1340 passed / 15 skipped，前端 764 passed，Garage 5 passed，storage_browser.cjs 全部通过
+- 2026-11-12 08:27 UTC · claude · CI compose 的知识库浏览器验收失败：tests/e2e/seed.py 的 cleanup-files 还把 FileStores 传给 cleanup_unreferenced（现在要 StoreRegistry）。已改；本地 knowledge_browser.cjs、timeline_browser.cjs、make smoke-full 通过
