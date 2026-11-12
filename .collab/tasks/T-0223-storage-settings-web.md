@@ -2,7 +2,7 @@
 id: T-0223
 title: 知识库图片存储（R2 / OSS）改为在网页上按工作空间配置
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: b6-model-connections
 paths: services/api/app,services/api/migrations,services/api/tests,services/api/openapi.json,apps/web/src,apps/web/tests,scripts/deploy.sh,compose.yaml,.env.example,docs,tests/e2e,.github/workflows/ci-infra.yml
@@ -36,3 +36,4 @@ updated: 2026-11-12
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-12 06:40 UTC · claude · 创建任务（owner: claude）
 - 2026-11-12 06:40 UTC · claude · 开始任务
+- 2026-11-12 08:14 UTC · claude · status in_progress → done：网页“设置 → 图片存储”按工作空间配置 R2 / OSS（迁移 0060、设置接口、前端页面、浏览器验收）；本地后端 1340 passed / 15 skipped，前端 764 passed，Garage 5 passed，storage_browser.cjs 全部通过
