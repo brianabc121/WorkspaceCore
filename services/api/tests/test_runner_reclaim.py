@@ -16,8 +16,9 @@ from typing import Any
 import pytest
 from sqlalchemy import select, update
 
-from app.domain import runner_reclaim
+from app.domain import runner_placement, runner_reclaim
 from app.domain import runner_specs as specs
+from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
 from app.models import (
     AgentWakeup,
     RunnerCommand,
@@ -26,14 +27,19 @@ from app.models import (
     RunnerRun,
     RunnerSnapshot,
 )
+from app.schemas.placement import Placement
 from tests.helpers import tool_error
 from tests.test_mcp_api import call
 from tests.test_runner_api import (
+    POLL,
     SETTINGS,
     add_host,
     agent,
+    begin_sample,
     create_env,
     next_command,
+    physical_id,
+    poll,
     report_result,
     runner_headers,
 )
@@ -419,37 +425,77 @@ async def test_disk_watermarks_prune_and_refuse(env: Env) -> None:
     assert error["code"] == "NO_ELIGIBLE_SERVER"
 
 
-async def test_create_waits_for_confirmed_stop_before_reusing_capacity(env: Env) -> None:
+async def test_create_waits_for_confirmed_stop_before_reusing_capacity(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
     rtoken = await add_host(env)
     _instance, token = await agent(env)
     first = (await create_env(env, token, rtoken))["result"]["environment"]
     app = app_of(env.client)
-    async with app.state.sessionmaker() as db:
-        await db.execute(
-            update(RunnerHost).values(
-                mem_bytes=4 * 1024**3,
-                report={
-                    "at": specs.now().isoformat(),
-                    "load": 0.1,
-                    "mem_free_bytes": 3 * 1024**3,
-                    "disk_free_bytes": 400 * 1024**3,
-                },
-            )
-        )
-        await db.commit()
-    # 再建一个 2 GB 的会超过整台服务器的 90%：先按保留分停掉空闲的那个，这次返回忙
-    busy = await call(
-        env,
-        token,
-        "env_create",
-        {"purpose": "x", "lifetime": "session", "spec": {"image": "alpine:3"}},
+    first_stored = await get_env(env, first["id"])
+    # 后续领指令的 poll 也必须维持同一台 4 GiB 主机的容量。
+    monkeypatch.setitem(POLL, "mem_bytes", 4 * 1024**3)
+    await poll(env, rtoken)
+    report = await env.client.post(
+        "/runner-api/v1/report",
+        json={
+            "sample_id": await begin_sample(env, rtoken),
+            "physical_host_id": physical_id(rtoken),
+            "mem_bytes": 4 * 1024**3,
+            "mem_free_bytes": 3 * 1024**3,
+            "disk_bytes": 500 * 1024**3,
+            "disk_free_bytes": 400 * 1024**3,
+            "load": 0.1,
+            "containers": [
+                {
+                    "env_id": first["id"],
+                    "name": first_stored.container_name,
+                    "state": "running",
+                    "memory_working_set_bytes": 1024**3,
+                }
+            ],
+        },
+        headers=runner_headers(rtoken),
     )
-    error = tool_error(busy)
-    assert error["code"] == "NO_ELIGIBLE_SERVER"
+    assert report.status_code == 200, report.text
+    assert report.json() == {"lost": [], "stray": []}
+
+    async def assert_capacity_refused(purpose: str) -> None:
+        refused = await call(
+            env,
+            token,
+            "env_create",
+            {"purpose": purpose, "lifetime": "session", "spec": {"image": "alpine:3"}},
+        )
+        assert tool_error(refused)["code"] == "NO_ELIGIBLE_SERVER"
+        # 拒绝必须来自真实容量不足，缺失或过期读数不能冒充这个用例。
+        async with app.state.sessionmaker() as db:
+            host = await db.scalar(
+                select(RunnerHost).where(RunnerHost.workspace_id == uuid.UUID(env.workspace_id))
+            )
+            assert host is not None
+            environments = list(
+                await db.scalars(
+                    select(RunnerEnvironment).where(RunnerEnvironment.host_id == host.id)
+                )
+            )
+            with pytest.raises(PlacementError) as rejected:
+                rank_candidates(
+                    [runner_placement.candidate_for(host, environments)],
+                    ResourceRequest(cpus=2, memory_mb=2048, disk_gb=20, runtime="gvisor"),
+                    Placement(),
+                    specs.now(),
+                )
+            assert rejected.value.reasons == {str(host.id): "INSUFFICIENT_CAPACITY"}
+
+    # 再建一个 2 GiB 的会超过整台服务器的 90%；筛选不会自行释放预约。
+    await assert_capacity_refused("x")
     # 容量筛选不会自行释放预约；实际停止回执到达后才重新使用。
     await call(env, token, "env_stop", {"environment_id": first["id"]})
     stop = await next_command(env, rtoken, "stop_env")
     assert stop["payload"]["env_id"] == first["id"]
+    assert (await get_env(env, first["id"])).state == "running"
+    await assert_capacity_refused("stop-in-flight")
     await report_result(env, rtoken, stop["id"], {})
     assert (await get_env(env, first["id"])).state == "stopped"
     # 腾出来之后再建就成了
@@ -463,18 +509,7 @@ async def test_create_waits_for_confirmed_stop_before_reusing_capacity(env: Env)
         {"environment_id": second["environment"]["id"], "command": "sleep 60", "wait_seconds": 0},
     )
     await next_command(env, rtoken, "exec")
-    async with app.state.sessionmaker() as db:  # 长轮询会重新上报容量
-        await db.execute(update(RunnerHost).values(mem_bytes=4 * 1024**3))
-        await db.commit()
-    full = tool_error(
-        await call(
-            env,
-            token,
-            "env_create",
-            {"purpose": "y", "lifetime": "session", "spec": {"image": "alpine:3"}},
-        )
-    )
-    assert full["code"] == "NO_ELIGIBLE_SERVER"
+    await assert_capacity_refused("y")
 
 
 async def test_archived_env_pending_delete_has_no_container(env: Env) -> None:

@@ -6,6 +6,15 @@
 
 2026-11-12 09:20 UTC 合入 origin/main 36c6fb5e（存储设置与 IM 修复）。主干先占用原编号，当前任务为 **T-0224**；PR193/head 分支沿用，任务 owner 仍 codex、in_progress。当前唯一迁移 head 为 **0065**；主干 0060 不改，本任务原 0060–0064 顺延为 0061–0065。下列早期测试数量是合入前证据，正在重新复验集成，不能视为新基线通过。
 
+## 当前验证结论
+
+- 代码仍未覆盖整个方案；T-0224 保持 in_progress，PR193 草稿不可合并。独立剩余覆盖见 REMAINING.md。
+- 合入后 API 非 integration：**703 passed / 42 skipped**；迁移与存储设置 **16 passed**；回收/快照最终整文件 **9 passed in 155.61s**。扩展组合曾 **102 passed / 1 failed**，唯一失败的旧采样测试数据已修正并包含在最终9项中；没有把失败整套计成全绿。
+- 合入后 Ruff、strict mypy **300 source files**、前端 lint/typecheck/build/check:api 和 collab 检查通过。构建保留原 chunk 警告。
+- 完整前端 **774 passed / 8 timed out**；无并发复跑六个文件 **75 passed / 1 timed out**。日历分页重试单例仍能超时，未增加预算或削弱断言。因此前端整体验收尚未通过。
+- 日历对照：合入前081e80ce同文件系统单例3.70s通过；当前单例7.63s超时；基线仅加入存储样式6.64s超时。按需加载存储页实验仍7.135s超时，已完整撤回，未作为修复交付。根因仍需继续定位，不能仅归咎并行或宣称已解决。
+- 未执行生产迁移、真实远程安装或网络切换；Kubernetes候选与网络验证保持关闭。完整可信采集、私网持续对账、exec/files/snapshot、身份网关等仍缺代码，不只是缺集群验收。
+
 ## 合入前检查点（2026-11-12）
 
 PR #193 仍为草稿、不可合并；T-0222 保持 in_progress。下文早期记录是历史证据，当前结果如下：
@@ -172,3 +181,21 @@ npm run test -- --maxWorkers=1
 - `pytest tests/test_agent_placement_migration.py tests/test_runner_multihost_migration.py tests/test_physical_host_migration.py tests/test_storage_settings_api.py -q` → **16 passed in 108.56s**，真实本地 PG 新数据库，验证主干存储表与新迁移链兼容、非空降级拒绝等。
 - 全树 Ruff 通过，`mypy app` → **300 source files** 成功；生成的 OpenAPI / TypeScript 已同步，`npm run check:api` exit 0，`collab.py check` 0 警告。
 - 合并后的完整 API、前端 lint/typecheck/build/测试仍需完成，不沿用先前基线的通过数。
+
+合入后的全量非 integration 实际输出：`RUNTIME_V2_TEST_KUBECTL=/tmp/t0222-kubectl/kubectl pytest -m 'not integration' -q` → **703 passed, 42 skipped, 811 deselected in 381.79s**。执行同时有前端静态构建，占用两核，因此耗时比合入前长；没有提升测试 timeout。核心 PG/快照与完整前端测试仍待结束。
+
+整体剩余覆盖独立核对已保存到 REMAINING.md：当前明确仍缺代码闭环，不只是缺集群验收。可信 K8s 遥测、域/私有服务持续对账、完整运行适配、身份网关及真实数据面不能由已通过的局部审阅替代。
+
+合入后扩展 PG/快照组合实际 **102 passed, 1 failed in 733.63s**（main-integration-runtime-pg.log），不能计为全绿。唯一失败 `test_create_waits_for_confirmed_stop_before_reusing_capacity` 在停止回执后等不到新建指令。初查该测试直接覆盖 report、遗漏新协议的可信采样/身份字段，且 poll helper 会覆盖其模拟的4GiB总内存；正在用实际 candidate reason 诊断确认，尚未放宽产品检查或增加超时。完整前端开始串行复验，诊断期间只允许单用例定向测试。
+
+合入后完整前端实际为 **774 passed, 8 failed / 79 files in 1195.16s**（6 个文件失败，全为 5000ms 超时）：tasks-pages 两项、calendar-week-layout 两项、im/timeline-pages/task-workspace-redesign/issues-pages 各一项。初段短暂并行过单项后端诊断，但后段仍有超时，不能仅归咎并行。当前正在无其他重检查时独立复跑这六个文件，并准备合入前 081e80ce 同代码对照；未提高 timeout、未改这些页面或断言、未把失败计作通过。
+
+扩展 PG 唯一失败已确认来自旧测试数据：缺失可信报告字段导致 METRICS_UNKNOWN，poll 总内存也从4GiB回到32GiB。仅修正 test_runner_reclaim.py，使其走真实认证的采样/报告协议和一致内存数据，并加强停止回执前/后断言。独立 scoped 复审 PASS/APPROVED；最终源全文件复验待上述前端结束后串行执行。
+
+无并发独立复跑六个前端失败文件：**75 passed, 1 failed / 6 files in 95.02s**。仅余日历分页后页失败/继续加载场景仍达到5秒期限；未改产品或测试、未加timeout。随后用只读归档的合入前 081e80ce 对同一场景单独对照：**1 passed, 9 skipped in 24.88s（用例3.52s）**。正在对当前分支同场景做同条件单独运行；尚不能断言是新代码缺陷或仅资源竞争。
+
+### 最终回收/快照修订验证
+
+`pytest tests/test_runner_reclaim.py -q` → **9 passed in 155.61s**（main-integration-reclaim-final.log，最终源包含实际 container_name）。只改旧测试的上报协议与一致内存夹具，产品准入不变；新增断言确认拒绝来自 INSUFFICIENT_CAPACITY，并在 stop ACK 之前仍拒绝创建。独立 scoped 复审 PASS/APPROVED。
+
+存储页按需加载实验的7项存储测试、类型检查和ESLint通过，但日历仍超时，故仅撤回其 router.ts 变更并逐字核验恢复。未保留无证据修复。前端timeout、所有单变量对照及实验结果均保存在本地忽略logs/与.superpowers报告。
