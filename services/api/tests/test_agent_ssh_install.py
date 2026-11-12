@@ -28,7 +28,7 @@ from pydantic import SecretStr
 
 from app import agent_bundle
 from app import agent_provisioning as prov
-from app.domain import agent_ssh_install
+from app.domain import agent_server_resources, agent_ssh_install
 from app.domain.agent_ssh_install import JobRecorder, SshJobRunner
 from app.integrations import ssh
 from tests.helpers import OWNER, ClientFactory, add_member, add_user, csrf, run_sql
@@ -164,6 +164,7 @@ class FakeHost:
         self.logins: list[str] = []
         self.commands: list[str] = []
         self.stdin: list[bytes] = []
+        self.sessions: dict[asyncssh.SSHServerConnection, list[tuple[str, bytes]]] = {}
         # Explicit fake host data for the independent SSH probe; this is never
         # claimed as a real machine capacity verification.
         self.resources: HostResources = {
@@ -217,6 +218,19 @@ class FakeHost:
     def calls(self) -> list[str]:
         return self.log.read_text().splitlines()
 
+    def resource_probe_sessions(self) -> list[list[tuple[str, bytes]]]:
+        """The admission probe has its own connection and only the fixed read-only script."""
+        probes = [
+            commands
+            for commands in self.sessions.values()
+            if any(b"/proc/sys/kernel/random/boot_id" in data for _, data in commands)
+        ]
+        assert all(
+            commands == [("sh -s", agent_server_resources.PROBE_SCRIPT.encode())]
+            for commands in probes
+        ), probes
+        return probes
+
     @property
     def directory(self) -> Path:
         """这个实例的接入包目录：~/myworkspace-openclaw/<实例短号>（测试里一台服务器只部署一个）。"""
@@ -233,6 +247,9 @@ class FakeHost:
         self.commands.append(command)
         data = await process.stdin.read()
         self.stdin.append(data)
+        connection = process.get_extra_info("connection")
+        assert isinstance(connection, asyncssh.SSHServerConnection)
+        self.sessions.setdefault(connection, []).append((command, data))
         if command == "sh -s":
             if b"/proc/sys/kernel/random/boot_id" in data:
                 self.resources["sequence"] += 1
@@ -632,7 +649,8 @@ async def test_initialize_then_deploy_with_the_saved_password(owner: Owner, tmp_
     assert deployment["runtime_installed"] is True
 
     # 全程用密码登录，从来没有尝试公钥；服务器上没有工作台的公钥
-    assert set(host.logins) == {"password"} and len(host.logins) == 3
+    assert set(host.logins) == {"password"} and len(host.logins) == 4
+    assert len(host.resource_probe_sessions()) == 1
     assert host.authorized() == []
     assert not (host.home / ".ssh").exists()
 
@@ -839,8 +857,9 @@ async def test_docker_already_usable_skips_install(owner: Owner, tmp_path: Path)
     assert not any("prune" in c for c in calls)
     # uid 1000：不用改属主
     assert not any(c.startswith("docker run") for c in calls)
-    # 初始化一次登录、部署一次登录
-    assert host.logins == ["password", "password"]
+    # 初始化一次、只读资源探测一次、部署一次；探测连接不执行安装命令。
+    assert host.logins == ["password"] * 3
+    assert len(host.resource_probe_sessions()) == 1
 
 
 # ---------------------------------------------------------------- 失败
@@ -982,17 +1001,50 @@ async def test_not_online_reports_logs_redacted(
     assert deployment["runtime_installed"] is None, "失败不写运行证据"
 
 
-async def test_host_key_changed_is_refused(owner: Owner, tmp_path: Path) -> None:
+async def test_host_key_changed_is_refused(
+    owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         instance_id, version = await owner.prepare(port)
-    logins = len(host.logins)
+    before = await owner.state(instance_id)
+    logins, commands = len(host.logins), list(host.commands)
+    failures: list[str] = []
+    real_connect = ssh.connect_password_only
+
+    async def connect(*args: Any, **kwargs: Any) -> asyncssh.SSHClientConnection:
+        try:
+            return await real_connect(*args, **kwargs)
+        except ssh.SshError as error:
+            failures.append(error.reason)
+            raise
+
+    monkeypatch.setattr(ssh, "connect_password_only", connect)
     # 同一个端口换了一把主机公钥（例如被冒充）：不登录、不发送密码
     async with ssh_host(host, port=port):
-        await owner.install(instance_id, version)
-        state = await owner.finished(instance_id)
-    assert state["job"]["error_code"] == "host_key_changed"
+        response = await owner.install(instance_id, version)
+        state = await owner.state(instance_id)
+    # Admission's real pinned-key resource connection refuses the replacement
+    # before authentication, so no deployment job or remote mutation is created.
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "PHYSICAL_IDENTITY_REQUIRED"
+    assert failures == ["host_key_changed"]
+    assert state["job"]["id"] == before["job"]["id"]
+    assert state["target"] == before["target"]
     assert len(host.logins) == logins
+    assert host.commands == commands
+    assert not host.resource_probe_sessions()
+    assert not host.directory.exists()
+    assert (
+        await run_sql(
+            owner.database_url,
+            "SELECT count(*) FROM workspace.agent_ssh_jobs WHERE kind = 'install'",
+        )
+        == 0
+    )
+    assert (
+        await run_sql(owner.database_url, "SELECT count(*) FROM workspace.agent_deployments") == 0
+    )
 
 
 # ---------------------------------------------------------------- 前提与并发
@@ -1073,25 +1125,37 @@ async def test_install_during_a_replacement_blocks_the_replacement(
 ) -> None:
     """更换服务器的探测进行中，另一个请求对原目标开始了安装：更换必须失败（409），
     不能在安装进行中改写目标（否则任务会把密码发给新服务器）。"""
-    host = FakeHost(tmp_path)
-    async with ssh_host(host) as (port, _):
-        instance_id, version = await owner.prepare(port)
-    monkeypatch.setattr(SshJobRunner, "start", lambda self, *a, **k: None)
-    monkeypatch.setattr(SshJobRunner, "running", lambda self, job_id: True)
-    other = asyncssh.generate_private_key("ssh-ed25519")
-    installs: list[int] = []
+    host = FakeHost(tmp_path / "original")
+    other = FakeHost(tmp_path / "replacement")
+    probe_started, resume_probe = asyncio.Event(), asyncio.Event()
+    real_probe = ssh.probe_host_key
 
     async def probe_while_installing(address: str, port: int) -> ssh.HostKey:
-        installs.append((await owner.install(instance_id, version)).status_code)
-        return ssh.HostKey(
-            algorithm="ssh-ed25519",
-            public_key=" ".join(other.export_public_key().decode().split()[:2]),
-            fingerprint=other.get_fingerprint("sha256"),
-        )
+        probe_started.set()
+        await resume_probe.wait()
+        return await real_probe(address, port)
 
-    monkeypatch.setattr(ssh, "probe_host_key", probe_while_installing)
-    replaced = await owner.replace(instance_id, port=port + 1, version=version)
-    assert installs == [202]
+    async with ssh_host(host) as (port, _), ssh_host(other) as (other_port, _):
+        instance_id, version = await owner.prepare(port)
+        monkeypatch.setattr(SshJobRunner, "start", lambda self, *a, **k: None)
+        monkeypatch.setattr(SshJobRunner, "running", lambda self, job_id: True)
+        monkeypatch.setattr(ssh, "probe_host_key", probe_while_installing)
+        replacing = asyncio.create_task(
+            owner.replace(instance_id, port=other_port, version=version)
+        )
+        try:
+            async with asyncio.timeout(5):
+                await probe_started.wait()
+            installed = await owner.install(instance_id, version)
+        finally:
+            resume_probe.set()
+            replaced = await replacing
+        assert installed.status_code == 202, installed.text
+        state = await owner.state(instance_id)
+        assert state["job"]["kind"] == "install" and state["job"]["status"] == "running"
+    assert len(host.resource_probe_sessions()) == 1
+    assert host.logins == ["password"] * 3
+    assert other.logins == [] and other.commands == []
     assert replaced.status_code == 409, replaced.text
     # 探测之后锁行重新检查：安装已经建了部署记录（T-0178 起先报这个，任务也在进行）
     assert replaced.json()["error"]["code"] == "AGENT_SERVER_HAS_DEPLOYMENTS"
@@ -1127,7 +1191,9 @@ async def test_job_refuses_a_target_that_changed(owner: Owner, tmp_path: Path) -
         finally:
             runner.start = original
     assert state["job"]["error_code"] == "host_key_unconfirmed"
-    assert len(host.logins) == logins
+    assert host.logins[logins:] == ["password"]
+    assert len(host.resource_probe_sessions()) == 1
+    assert list(host.sessions.values())[-1] == host.resource_probe_sessions()[0]
 
 
 async def test_password_replaced_after_acceptance_stops_the_job(
@@ -1161,7 +1227,9 @@ async def test_password_replaced_after_acceptance_stops_the_job(
             runner.start = original
     assert state["job"]["error_code"] == "credential_changed"
     assert _steps(state)["connect"] == "failed"
-    assert len(host.logins) == logins
+    assert host.logins[logins:] == ["password"]
+    assert len(host.resource_probe_sessions()) == 1
+    assert list(host.sessions.values())[-1] == host.resource_probe_sessions()[0]
 
 
 async def test_existing_authorized_keys_are_never_touched(owner: Owner, tmp_path: Path) -> None:

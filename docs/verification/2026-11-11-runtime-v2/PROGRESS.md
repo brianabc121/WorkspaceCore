@@ -224,4 +224,20 @@ npm run test -- --maxWorkers=1
 
 源码冻结后补充回归最终 **15 passed in 172.95s**：`pytest -q --tb=short --show-capture=no tests/test_runner_multihost.py::test_template_attempt_fence_survives_command_retention tests/test_runner_lock_order.py`。覆盖回收/闲置/模板超时先锁宿主、复用/恢复先准入、真实命令与唤醒外键兼容、已清理最新回执不会复活旧结果；保留真实状态/指令/用量和结果断言。
 
-连同前述整组50项、智能体部署11项、真实CLI迁移冒烟和最终520文件静态检查，当前已知合并阻塞均已修复。完整远端CI需以新提交实际结果为准；旧35946bdc的失败记录不删除。后续仍继续REMAINING中的未完成代码，不标done、不启用新数据面。
+连同前述整组50项、智能体部署11项、真实CLI迁移冒烟和最终520文件静态检查，当时已知合并阻塞均已修复；后续1d1446ce的完整CI失败及跟随修订见下节。完整远端CI需以新提交实际结果为准；旧35946bdc的失败记录不删除。后续仍继续REMAINING中的未完成代码，不标done、不启用新数据面。
+
+### 1d1446ce 完整远端CI实际结果与验收契约适配
+
+- Web CI 43252902268：**79 files / 782 tests passed**，构建及其余前端门槛全部成功；ci-security 43252902283、collab 43252902270成功。
+- ci-api 43252902502：**12 failed, 1550 passed, 16 skipped in 2735.55s**。失败为SSH探测新增连接后的旧计数/worker阶段断言、旧无限资源部署夹具，以及heartbeat单测对旧FOR UPDATE参数的断言；本地完整`pytest -x`也在登录计数处停止，**1 failed / 189 passed / 753.39s**。两个完整尝试均不计全绿。
+- ci-infra 43252902914：compose、news及三个Docker安装job全部成功；agents先前失败的场景26已完整成功，含真实gVisor/runc、CPU差分/内存/卷读数、出口拒绝、重启、快照恢复、清理与公开守卫移除登记。之后的智能体SSH验收在第二次部署返回TARGET_UNAVAILABLE。脚本仍期望旧无限资源契约，未打印具体容量原因。
+
+下一补丁只改测试/验收：精确断言新增密码连接仅执行只读PROBE_SCRIPT，所有连接仍固定主机公钥；保持原SSH listener在替换竞态中真实可达，验证主机公钥变更在认证前拒绝且没有部署写入；旧多实例夹具显式设置有限上限。heartbeat mock按已实测兼容锁参数更新，**9 passed / 1 deselected in0.38s**。共享密码安全helper的两个旧公钥退役调用也传入实际SSH主机公钥。
+
+SSH端到端脚本改为验证默认1CPU/2048MiB及真实Docker硬上限/有限合计；部署前刷新可信SSH报告，并用实际产品选择器只读输出候选/原因，实际POST仍重新做原子准入。最多等待180秒的真实资源就绪，不创建试探实例、不写假采样、不放宽安全门槛。已从CI原始状态输出确认4CPU、约16GiB内存，第一实例1.5CPU+第二默认1CPU在总核数预算内。没有证据需要减少磁盘预算，试验性CI2GiB预算已完整撤回，保留与生产相同默认10GiB和10%宿主余量。当前确切拒绝原因须由新增诊断/下轮真实CI确认，不把暂时CPU压力当已证明根因。
+
+本轮完整mypy曾发现加强共享密码helper后遗漏两个调用参数，已补实际host_key；最终全范围再次 **520 source files成功**、正式OpenAPI最新；额外脚本及嵌入Python/YAML语法通过，协作检查0警告。三文件SSH/服务器/密码动作PG GREEN及旧公钥退役跟随验证仍待结束，之后重推同PR。
+
+本轮定向验收最终：SSH/password未再改的45项已通过；服务器API文件最终修复PUT/limits响应契约（直接返回AgentLimits、没有version，必须GET新version）后整文件 **2 passed in44.09s**。之前三文件组合实际 **46 passed / 1 failed in630.68s**（仅该夹具KeyError），完整失败保留，不声称一次最终47项组合运行。共享helper两个调用点随后的旧公钥退役完整文件 **8 passed in88.64s**；heartbeat9项前述通过。最终全范围Ruff524格式、mypy520、diffcheck与协作检查均成功。
+
+独立focused复审APPROVED、Critical0/Important0：新增SSH会话仅执行固定只读探测，密码与主机公钥约束加强；目标替换真实竞态、主机公钥变更认证前拒绝/不建任务/不改目标仍验证。业务代码、迁移、前端及CI配置与1d1446ce没有新增差异。本次测试与验收适配推送后仍须等待新head完整CI，不能使用上一head成功job替代。

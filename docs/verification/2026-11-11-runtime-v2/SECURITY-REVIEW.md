@@ -95,3 +95,11 @@ Block removal for all retained/unknown allocations, and preserve snapshot/archiv
 独立审查阅读真实RED日志和最终完成输出：核心整组50 passed / 最终补充15 passed；确认断言仍覆盖状态、指令、use_count、digest、唤醒和并发拒绝结果。审查者只重复diffcheck，没有把父执行的PG和静态结果冒充独立重跑。全分支远端CI仍以PR新head为准。
 
 已知并接受本检查点回收事务持宿主锁期间对象存储清理可能延长准入等待的吞吐取舍，详见UPGRADE。主干既有SSH安装完成与重部署锁序潜在风险列入REMAINING后续项，未宣称历史所有并发路径已统一。
+
+### SSH验收契约跟随复审
+
+1d1446ce完整CI中的旧测试契约适配经独立focused复审 **APPROVED，Critical0/Important0**；本轮不改产品代码或安全门槛。安全测试新增每次SSH连接固定主机公钥/config=[]检查、资源探测连接只能执行精确PROBE_SCRIPT；主机公钥变更在认证前拒绝，没有新部署任务/容器目录，目标替换测试保留真实可达的原SSH服务器与竞争中的替换listener。旧公钥清理调用传入实际SSH主机公钥。
+
+SSH端到端等待阶段只刷新真实资源报告，复用生产选择器进行只读诊断，创建请求仍原子准入；默认有限CPU/内存与Docker硬上限及完整预约合计均有断言。不调整生产或CI的10GiB数据预算、10%余量或指标健康规则。当前诊断等待不证明此前TARGET_UNAVAILABLE的具体根因，须以下轮真实端到端结果为准。
+
+父执行真实PG补充：45项不变SSH/password通过，最终服务器API2项通过，旧公钥清理整文件8项通过。审查者阅读前两类日志并做源码/AST/diff检查；8项是父执行的后续结果，不冒充审查者独立重跑。

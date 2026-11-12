@@ -64,7 +64,7 @@ async def test_missing_heartbeat_metric_preserves_last_readings_but_invalidates_
     assert node.report["capacity_sampled_at"] is None
     assert node.report["capacity_error"] == "METRICS_UNKNOWN"
     assert candidate_for(node, []).observed_at is None
-    db.refresh.assert_awaited_once_with(node, with_for_update=True)
+    db.refresh.assert_awaited_once_with(node, with_for_update={"key_share": True})
 
 
 async def test_unknown_heartbeat_does_not_become_fresh_when_poll_metrics_resume() -> None:

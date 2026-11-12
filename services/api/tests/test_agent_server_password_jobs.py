@@ -64,6 +64,8 @@ def spy(monkeypatch: pytest.MonkeyPatch) -> Iterator[Spy]:
                 "agent_path": kwargs.get("agent_path", "<default>"),
                 "password": kwargs.get("password") is not None,
                 "preferred_auth": kwargs.get("preferred_auth"),
+                "known_hosts": kwargs.get("known_hosts"),
+                "config": kwargs.get("config"),
             }
         )
         return await real_connect(*args, **kwargs)
@@ -82,7 +84,7 @@ def spy(monkeypatch: pytest.MonkeyPatch) -> Iterator[Spy]:
     yield found
 
 
-def _password_only(spy: Spy) -> None:
+def _password_only(spy: Spy, host_key: asyncssh.SSHKey) -> None:
     assert spy.logins, "应该登录过"
     for login in spy.logins:
         assert login["client_keys"] is None, login
@@ -90,6 +92,10 @@ def _password_only(spy: Spy) -> None:
         assert login["agent_path"] is None, login
         assert login["password"] is True, login
         assert login["preferred_auth"] == "keyboard-interactive,password", login
+        assert login["config"] == [], login
+        known_hosts = login["known_hosts"]
+        assert [key.public_data for key in known_hosts[0]] == [host_key.public_data], login
+        assert known_hosts[1:] == ([], []), login
     assert spy.authorize == []
     assert not [c for c in spy.contexts if c.startswith("agent_ssh:")], spy.contexts
 
@@ -158,7 +164,7 @@ async def test_every_openclaw_ssh_action_logs_in_with_the_saved_password(
     owner: Owner, tmp_path: Path, spy: Spy
 ) -> None:
     host = FakeHost(tmp_path)
-    async with ssh_host(host) as (port, _):
+    async with ssh_host(host) as (port, host_key):
         instance_id, version = await owner.prepare(port, initialize=False)
         server_id = owner.servers[instance_id]
         # 旧方案的专用私钥还在、服务器也还信任它：新的任务仍然只用密码
@@ -187,10 +193,11 @@ async def test_every_openclaw_ssh_action_logs_in_with_the_saved_password(
         await _undeploy(owner, instance_id, remove_files=False)
         await _undeploy(owner, instance_id, remove_files=True)
 
-    _password_only(spy)
-    # 初始化 2 次（装了 Docker，重新登录一次）+ 部署 1 + 运维 8 + 卸载 2
-    assert len(spy.logins) == 13
-    assert set(host.logins) == {"password"} and len(host.logins) == 13
+    _password_only(spy, host_key)
+    # 初始化 2 次 + 独立只读资源探测 1 + 部署 1 + 运维 8 + 卸载 2。
+    assert len(spy.logins) == 14
+    assert set(host.logins) == {"password"} and len(host.logins) == 14
+    assert len(host.resource_probe_sessions()) == 1
     # 服务器上的 authorized_keys 原样：没有新装公钥，旧公钥也只等显式退役
     assert host.authorized() == [legacy]
     row = await run_sql(
