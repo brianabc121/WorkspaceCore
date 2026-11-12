@@ -65,6 +65,7 @@ def test_independent_probe_rejects_incomplete_or_nonfinite_output():
 def snapshot():
     return {
         "generation": str(uuid4()),
+        "physical_host_id": "a" * 64,
         "sequence": 12345,
         "cores": 4,
         "cpu_percent": 10,

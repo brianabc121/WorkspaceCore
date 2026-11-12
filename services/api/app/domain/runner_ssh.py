@@ -134,8 +134,16 @@ class RunnerSshService:
         return target
 
     async def _existing(self, access: WorkspaceAccess) -> RunnerSshTarget:
-        """锁住这一行再读：版本检查与写入在同一个事务里。"""
+        """先锁服务器再锁目标，与移除和后台身份登记保持同一锁顺序。"""
         host = await self._host(access)
+        locked_host = await self.db.scalar(
+            select(RunnerHost)
+            .where(RunnerHost.id == host.id, RunnerHost.workspace_id == access.workspace.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if locked_host is None:
+            raise ApiError(404, "NOT_FOUND", "运行服务器已被移除")
         target: RunnerSshTarget | None = await self.db.scalar(
             select(RunnerSshTarget)
             .where(RunnerSshTarget.host_id == host.id)
@@ -541,6 +549,27 @@ class RunnerInstaller(Installer):
     def key_comment(self) -> str:
         return f"myworkspace-runner-{str(self.target.instance_id)[:8]}"
 
+    async def _claim_physical(self, conn: asyncssh.SSHClientConnection) -> None:
+        from app.domain.physical_hosts import claim_physical_host
+
+        identity = await self._physical_identity(conn)
+        async with self.sessionmaker() as db:
+            host = await db.get(RunnerHost, self.target.instance_id, with_for_update=True)
+            if host is None:
+                raise JobGone
+            await self._locked(db)
+            if not await claim_physical_host(
+                db,
+                identity,
+                workspace_id=host.workspace_id,
+                role="runner",
+                server_id=host.id,
+            ):
+                raise InstallFailed(
+                    "physical_host_conflict", "服务器已在其他位置登记；尚未更改远程部署"
+                )
+            await db.commit()
+
     def _existing_key(self) -> asyncssh.SSHKey | None:
         ref = self.target.client_key_ref
         if ref is None:
@@ -640,6 +669,7 @@ class RunnerInstaller(Installer):
                 "connect", "done", "密码登录（只用这一次）" if password else "专用密钥登录"
             )
             info = await self._inspect(conn)
+            await self._claim_physical(conn)
             if password is not None:
                 await self._authorize(conn, key)
             else:

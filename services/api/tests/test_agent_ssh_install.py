@@ -149,6 +149,7 @@ class FakeHost:
         # claimed as a real machine capacity verification.
         self.resources = {
             "generation": str(uuid.uuid4()),
+            "physical_host_id": uuid.uuid4().hex * 2,
             "sequence": 1000,
             "cores": 16,
             "cpu_percent": 5,
@@ -217,6 +218,10 @@ class FakeHost:
             if b"/proc/sys/kernel/random/boot_id" in data:
                 self.resources["sequence"] += 1
                 process.stdout.write(json.dumps(self.resources).encode())
+                process.exit(0)
+                return
+            if b"# myworkspace-physical-id-v1" in data:
+                process.stdout.write((self.resources["physical_host_id"] + "\n").encode())
                 process.exit(0)
                 return
             process.stdout.write(self.inspect_output().encode())

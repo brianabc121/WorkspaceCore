@@ -39,6 +39,15 @@ case "$1" in
       echo "bundle missing in $dir: $(ls -A "$dir" 2>&1)" >&2; exit 4
     fi
     cp "$dir/runner.env" "$STATE/runner.env"
+    if [ -f "$STATE/install_hold" ]; then
+      touch "$STATE/install_entered"
+      tries=0
+      while [ -f "$STATE/install_hold" ]; do
+        tries=$((tries + 1))
+        if [ "$tries" -ge 400 ]; then echo "install_hold_timeout" >&2; exit 7; fi
+        sleep 0.05
+      done
+    fi
     if [ -f "$STATE/install_fail" ]; then echo "gvisor_sha512_mismatch" >&2; exit 5; fi
     touch "$STATE/up"; echo "runner_agent_started"; exit 0 ;;
 esac
@@ -197,6 +206,153 @@ async def test_root_account_redeploys_with_the_key_only(owner: Owner, tmp_path: 
         assert again["job"]["status"] == "succeeded", again["job"]
         assert _steps(again)["authorize_key"] == "skipped"
         assert not any(c.startswith("sudo ") for c in host.calls())
+
+
+async def test_conflicting_physical_host_is_rejected_before_key_or_runtime_changes(
+    owner: Owner,
+    tmp_path: Path,
+) -> None:
+    from app.domain.physical_hosts import claim_physical_host
+    from app.models import AgentServer
+    from tests.workspace_support import app_of
+
+    host = RunnerHost(tmp_path)
+    async with ssh_host(host) as (port, _):
+        version = await owner.prepare(port)
+        app = app_of(owner.client)
+        async with app.state.sessionmaker() as db:
+            existing = AgentServer(
+                workspace_id=uuid.UUID(owner.workspace), name="existing", kind="ssh"
+            )
+            db.add(existing)
+            await db.flush()
+            assert await claim_physical_host(
+                db,
+                host.resources["physical_host_id"],
+                workspace_id=existing.workspace_id,
+                role="agent",
+                server_id=existing.id,
+            )
+            await db.commit()
+        result = await _install(owner, host, {"version": version, "password": PASSWORD})
+        assert result["job"]["status"] == "failed", result["job"]
+        assert result["job"]["error_code"] == "physical_host_conflict"
+        assert host.authorized() == []
+        assert not host.runner_dir.exists()
+
+
+async def test_host_removal_keeps_identity_during_remote_install(
+    owner: Owner, tmp_path: Path
+) -> None:
+    from app.domain.physical_hosts import claim_physical_host
+    from app.models import AgentServer, PhysicalHostRegistration
+    from tests.workspace_support import app_of
+
+    host = RunnerHost(tmp_path)
+    hold = host.state / "install_hold"
+    hold.touch()
+    async with ssh_host(host) as (port, _):
+        version = await owner.prepare(port)
+        host_id = await run_sql(owner.database_url, "SELECT id FROM workspace.runner_hosts")
+        install = asyncio.create_task(
+            _install(owner, host, {"version": version, "password": PASSWORD})
+        )
+        try:
+            async with asyncio.timeout(10):
+                while not (host.state / "install_entered").exists():
+                    if install.done():
+                        raise AssertionError(f"installer ended before hold: {install.result()}")
+                    await asyncio.sleep(0.02)
+            current = await owner.client.get(
+                f"/api/v1/runner/hosts/{host_id}", headers=owner.headers()
+            )
+            assert current.status_code == 200, current.text
+            removed = await owner.client.delete(
+                f"/api/v1/runner/hosts/{host_id}",
+                params={"version": current.json()["version"]},
+                headers=owner.headers(),
+            )
+            assert removed.status_code == 409, removed.text
+            assert removed.json()["error"]["code"] == "RUNNER_SSH_JOB_RUNNING"
+            app = app_of(owner.client)
+            async with app.state.sessionmaker() as db:
+                registration = await db.get(
+                    PhysicalHostRegistration, host.resources["physical_host_id"]
+                )
+                assert registration is not None
+                assert registration.runner_host_id == host_id
+                competing = AgentServer(
+                    workspace_id=uuid.UUID(owner.workspace), name="other-pool", kind="ssh"
+                )
+                db.add(competing)
+                await db.flush()
+                assert not await claim_physical_host(
+                    db,
+                    host.resources["physical_host_id"],
+                    workspace_id=competing.workspace_id,
+                    role="agent",
+                    server_id=competing.id,
+                )
+                await db.rollback()
+        finally:
+            hold.unlink(missing_ok=True)
+            results = await asyncio.gather(install, return_exceptions=True)
+        assert isinstance(results[0], dict), results[0]
+        assert results[0]["job"]["status"] == "succeeded", results[0]
+        current = await owner.client.get(f"/api/v1/runner/hosts/{host_id}", headers=owner.headers())
+        removed = await owner.client.delete(
+            f"/api/v1/runner/hosts/{host_id}",
+            params={"version": current.json()["version"]},
+            headers=owner.headers(),
+        )
+        assert removed.status_code == 204, removed.text
+        assert (
+            await run_sql(
+                owner.database_url, "SELECT count(*) FROM workspace.physical_host_registrations"
+            )
+            == 0
+        )
+
+
+async def test_start_job_holds_host_lock_before_creating_job(
+    owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy import select
+    from sqlalchemy.exc import DBAPIError
+
+    from app.models import RunnerHost as RunnerHostModel
+    from tests.workspace_support import app_of
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = runner_ssh.RunnerSshService._start
+
+    async def paused_start(service: runner_ssh.RunnerSshService, *args: Any, **kwargs: Any) -> Any:
+        entered.set()
+        await release.wait()
+        return await original(service, *args, **kwargs)
+
+    monkeypatch.setattr(runner_ssh.RunnerSshService, "_start", paused_start)
+    host = RunnerHost(tmp_path)
+    async with ssh_host(host) as (port, _):
+        version = await owner.prepare(port)
+        install = asyncio.create_task(
+            _install(owner, host, {"version": version, "password": PASSWORD})
+        )
+        try:
+            async with asyncio.timeout(10):
+                await entered.wait()
+            app = app_of(owner.client)
+            async with app.state.sessionmaker() as db:
+                with pytest.raises(DBAPIError) as locked:
+                    await db.scalar(select(RunnerHostModel).with_for_update(nowait=True))
+                assert getattr(locked.value.orig, "sqlstate", None) == "55P03"
+                await db.rollback()
+        finally:
+            release.set()
+            results = await asyncio.gather(install, return_exceptions=True)
+        assert isinstance(results[0], dict), results[0]
+        assert results[0]["job"]["status"] == "succeeded", results[0]
 
 
 async def test_failed_install_script_and_uninstall(owner: Owner, tmp_path: Path) -> None:

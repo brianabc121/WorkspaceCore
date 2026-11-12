@@ -137,6 +137,32 @@ def test_external_memory_usage_preserves_unused_existing_commitments():
     assert error.value.reasons[str(A)] == "INSUFFICIENT_CAPACITY"
 
 
+def test_external_disk_usage_preserves_all_retained_promises():
+    from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
+    from app.schemas.placement import Placement
+
+    # Existing stopped/running allocations can still grow to their disk budget.
+    # None of that promise is credited without trusted per-allocation usage.
+    node = candidate(disk_gb=100, disk_free_gb=24, committed_disk_gb=20, pending_disk_gb=0)
+    with pytest.raises(PlacementError) as error:
+        rank_candidates([node], ResourceRequest(1, 512, 5), Placement(), NOW)
+    assert error.value.reasons[str(A)] == "INSUFFICIENT_CAPACITY"
+
+
+def test_disk_admission_keeps_host_emergency_headroom():
+    from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
+    from app.schemas.placement import Placement
+
+    with pytest.raises(PlacementError) as error:
+        rank_candidates(
+            [candidate(disk_gb=100, disk_free_gb=14, committed_disk_gb=0)],
+            ResourceRequest(1, 512, 5),
+            Placement(),
+            NOW,
+        )
+    assert error.value.reasons[str(A)] == "INSUFFICIENT_CAPACITY"
+
+
 @pytest.mark.parametrize("credit", [None, -1, float("nan"), 2049])
 def test_existing_commitments_require_valid_bounded_usage_credit(credit):
     from app.domain.placement import PlacementError, ResourceRequest, rank_candidates

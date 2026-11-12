@@ -361,6 +361,9 @@ class Runner:
         seconds: int | None = None,
     ) -> RunnerCommand:
         deadline = seconds if seconds is not None else DEADLINES.get(kind, 600)
+        # The controller is bound to this registration, never a caller-supplied
+        # destination. Keep this outside the optional environment payload too.
+        payload = {**payload, "host_id": str(host.id)}
         if env is not None:
             payload = {
                 **payload,

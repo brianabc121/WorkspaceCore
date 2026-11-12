@@ -23545,33 +23545,68 @@
             "type": "string"
           },
           "cpus": {
-            "minimum": 0.0,
-            "title": "Cpus",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpus"
           },
           "disk_bytes": {
-            "minimum": 0.0,
-            "title": "Disk Bytes",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Bytes"
           },
           "disk_free_bytes": {
-            "minimum": 0.0,
-            "title": "Disk Free Bytes",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Free Bytes"
           },
           "docker_version": {
-            "maxLength": 32,
-            "title": "Docker Version",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Docker Version"
           },
           "kvm": {
             "title": "Kvm",
             "type": "boolean"
           },
           "mem_bytes": {
-            "minimum": 0.0,
-            "title": "Mem Bytes",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Bytes"
           },
           "runtimes": {
             "items": {
@@ -23591,13 +23626,8 @@
         },
         "required": [
           "agent_version",
-          "docker_version",
           "runtimes",
-          "kvm",
-          "cpus",
-          "mem_bytes",
-          "disk_bytes",
-          "disk_free_bytes"
+          "kvm"
         ],
         "title": "RunnerPoll",
         "type": "object"
@@ -23900,6 +23930,18 @@
             "default": 0,
             "title": "Mem Free Bytes",
             "type": "integer"
+          },
+          "physical_host_id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Physical Host Id"
           },
           "sample_id": {
             "anyOf": [
@@ -69892,7 +69934,7 @@
             "RunnerToken": []
           }
         ],
-        "summary": "对账（运行服务器，每分钟）",
+        "summary": "对账（运行服务器，定期）",
         "tags": [
           "runner-api"
         ]

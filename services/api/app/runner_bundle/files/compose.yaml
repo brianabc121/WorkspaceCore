@@ -20,6 +20,12 @@ services:
       - ./tls:/tls:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/lib/docker:/host-docker:ro
+      - type: bind
+        source: /etc/machine-id
+        target: /run/host-machine-id
+        read_only: true
+        bind:
+          create_host_path: false
     logging:
       driver: json-file
       options:

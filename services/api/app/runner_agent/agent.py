@@ -2,7 +2,7 @@
 
 - 长轮询 `/runner-api/v1/poll` 领指令；同一个环境的指令按顺序执行（每个环境一把锁），不同环境并行；
   指令按 id 去重：执行中的不重复执行，执行过的直接重发结果。
-- 每分钟上报（`/report`）本机带工作台标签的容器、数据卷、镜像与占用和出口访问记录；
+- 定期上报（`/report`）本机带工作台标签的容器、数据卷、镜像与占用和出口访问记录；
   工作台返回记录外的容器（stray）：先停止，停了 24 小时以上的删除。**没有工作台标签的一律不碰。**
 - 断线保护：exec 超时在本机执行（停止这个容器），工作台掉线也守得住。
 """
@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import base64
 import collections
+import hashlib
 import io
 import ipaddress
 import logging
 import os
+import re
 import socket
 import tarfile
 import threading
@@ -23,6 +25,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from . import VERSION
@@ -51,6 +54,7 @@ HELPER_MAX_AGE = 3600
 DONE_KEEP = 200
 LIST_MAX_ENTRIES = 1000
 DISK_EMERGENCY = 0.95
+HOST_MACHINE_ID = Path("/run/host-machine-id")
 # 改变环境状态的指令：同一个环境里按下发顺序一条一条执行；
 # exec 与文件读写等前面的这类指令做完再开始，彼此之间可以并行（停止不用等长时间运行的 exec）
 LIFECYCLE = frozenset(
@@ -72,7 +76,7 @@ class Config:
     kvm: bool = False
     disk_path: str = "/"
     workers: int = 16
-    report_seconds: int = 60
+    report_seconds: int = 30
 
     @classmethod
     def from_env(cls, env: dict[str, str]) -> Config:
@@ -97,6 +101,17 @@ class Config:
 
 class CommandError(Exception):
     """指令执行失败：message 回报给工作台（写给智能体或管理员看）。"""
+
+
+def physical_host_id() -> str | None:
+    """Read only the host's mounted machine-id; never the agent container's ID."""
+    try:
+        machine_id = HOST_MACHINE_ID.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError):
+        return None
+    if re.fullmatch(r"[0-9a-f]{32}", machine_id) is None:
+        return None
+    return hashlib.sha256(("machine-id:" + machine_id).encode("ascii")).hexdigest()
 
 
 def _b64(data: bytes) -> str:
@@ -894,6 +909,7 @@ class Agent:
         mem_total, mem_free = _meminfo()
         body = {
             "sample_id": sample["sample_id"],
+            "physical_host_id": physical_host_id(),
             "containers": envs,
             "volumes": volumes,
             "images": images,

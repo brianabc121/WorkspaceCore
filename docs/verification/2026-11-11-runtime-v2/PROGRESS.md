@@ -1,6 +1,20 @@
 # T-0222 实施进度（未完成）
 
-工作分支：codex/T-0222-runtime-v2-placement-network；检出/workspace/WorkspaceCore-runtime-v2指向/tmp/t0222-source。原/workspace/WorkspaceCore未修改。基线a1053c7。用户明确要求全面实施；不需要再次批准开发，但不能把尚未实现的部分标成完成。
+工作分支：codex/T-0222-runtime-v2-placement-network；当前检出 /workspace/WorkspaceCore-runtime-v2 是持久实体目录。原 /workspace/WorkspaceCore 未修改。基线 a1053c7。用户明确要求全面实施；不需要再次批准开发，但不能把尚未实现的部分标成完成。
+
+## 当前检查点（2026-11-12）
+
+PR #193 仍为草稿、不可合并；T-0222 保持 in_progress。下文早期记录是历史证据，当前结果如下：
+
+- 物理身份防重：0064 全局唯一账本、两种 SSH 安装前置占位和 runner 只读 machine-id 挂载已实现。真实 PostgreSQL 证明同机跨池/跨 workspace 争用只能成功一次，不自动转移身份。报告身份被拒绝时不下发 stray 清理。迁移降级先锁账本，再拒绝删除非空登记。
+- 服务器删除与 SSH 作业启动串行化；运行中的 SSH 安装/卸载阻止删除，避免远程变更尚在执行时释放身份。两项回归先 RED 后 GREEN，完整 SSH 文件 7 passed；独立复审正在进行。
+- 最新完整 API 非 integration：**642 passed, 42 skipped, 795 deselected in 176.01s**。最新完整前端：**77 files / 763 tests passed in 428.07s**。这是物理身份基础实现之后、下述心跳/磁盘及后续控制器/UI修改之前的检查点，不是最终提交全量验收。
+- 相关真实 PG 组合 **56 passed in 231.38s**；跨 workspace 争用和 OpenAPI **6 passed in 14.25s**；降级并发 **2 passed in 9.55s**。严格 mypy **293 source files** 成功，Ruff 通过。Node 22.23.4 的 lint/typecheck/check:api/build 均 exit 0，原有 chunk / PURE 警告保留。
+- 控制器协议补充：命令强制绑定实际 host_id；未知资源心跳允许领取已有指令，保留旧显示读数并撤销容量新鲜度，完整 poll 本身不能恢复准入。9 项单元回归 RED 后 GREEN，含真实 PG 指令投递合计 **10 passed in 3.31s**。
+- 磁盘准入保守保留所有保有环境的预算，并给宿主保留 10% 总盘余量。没有可信逐卷用量时不抵扣旧预算，可能少分配，不能据此宣称 Docker 已强制文件系统配额。两项新回归 RED 后，与选择器/双池适配/心跳组合 **60 passed, 5 deselected in 0.28s**。
+- Task5A 独立生命周期控制器/安全恢复与 Task6B 网络声明管理界面仍在实现、审阅和集成，结果随后追加。没有真实 Kubernetes 双节点 / Cilium / 身份网关验收；默认仍关闭。
+
+本地实际输出：logs/api-unit-release-check.log、web-full-release-check.log、web-quality-physical.log、physical-full-pg.log、physical-cross-workspace.log、physical-downgrade-green.log、physical-delete-fix1-{red,green,full,mypy}.log、heartbeat-{red,green,pg}.log、disk-admission-red.log、disk-heartbeat-green.log。日志目录本地忽略，不提交凭证和大段测试 traceback。
 
 ## 当前已写代码
 
@@ -25,11 +39,11 @@
 
 ## 必须继续的工作，禁止标记done
 
-1. 修复完整前端suite中的功能断言/失败；对其他页面的超时在无并发负载时单独复跑，不能直接增加timeout或掩盖失败。重新typecheck/lint/build/check:api，执行完整API非integration及相关PG回归。
-2. 智能体历史部署无可信资源账本时当前安全拒绝（LEGACY_RESOURCE_RECONCILIATION_REQUIRED）。仍需受控只读Docker资源核对入口，解除有限历史实例的升级阻塞；实际不限资源不得算0或静默改限额。
+1. 前述检查点完整前端和 API 已通过；控制器、心跳、磁盘和新增网络管理修改集成后需最终复验对应范围。不能提高 timeout 或掩盖失败。
+2. 历史只读 Docker 核对入口已经实现并验证；继续保持真实不限资源拒绝准入，不静默改限额。
 3. Kubernetes后端目前仍被候选筛选排除。独立controller/CLI代码只覆盖部分生命周期和私有Service/策略API回执；尚无完整exec/files/snapshot、生产入口脚本、镜像分发/存储验证和全功能下发链路。不可宣称可用。
 4. 私有域DNS策略、跨节点加密/身份与Cilium数据面验证、mTLS身份网关、公网回流/代理绕过防护、TCP/UDP限制和存量连接撤销仍未完成。跨实例通信授权不能凭DB批准直接active；公开入口保持不可用。
-5. 两种服务器角色默认分池，尚需防止同一物理机以两个角色重复记容量（明确拒绝混用或共享可信物理身份账本）。
+5. 物理身份全局账本已实现；完成删除并发修复的独立复审与最终集成检查。
 6. 完成真实双节点PoC及故障/未知状态/撤销测试，记录实际版本/镜像digest。当前仅官方kubectl v1.35.10经SHA256校验安装；没有已配置Kubernetes集群/凭据，单元HTTP/CLI fake不是实测网络。
 7. 新网络管理UI目前能查看和登记内部服务；源/公网申请、撤销/修改的完整界面仍需补齐并接通真实执行业务。
 8. 完整独立审阅、真实日志归档、提交推送及PR。保持T-0222 in_progress；Claude审查，Codex不合并。

@@ -1660,6 +1660,10 @@ class AgentServerService:
     ) -> Candidate:
         """Caller holds server row lock through reservation commit."""
         snap = server.resource_snapshot or {}
+        if snap.get("physical_identity_verified") is not True:
+            raise ApiError(
+                409, "PHYSICAL_IDENTITY_REQUIRED", "请先核对服务器身份，避免重复计算容量"
+            )
         if not agent_server_resources.is_fresh(
             snap, _now(), self.settings.agent_placement_metrics_max_age_seconds
         ):
@@ -1763,10 +1767,14 @@ class AgentServerService:
         errors: dict[uuid.UUID, str] = {}
         for server_id in sorted(server_ids, key=lambda value: value.int):
             server = await self._server(access, server_id, lock=True)
-            if not force and agent_server_resources.is_fresh(
-                server.resource_snapshot or {},
-                _now(),
-                self.settings.agent_placement_metrics_max_age_seconds,
+            if (
+                not force
+                and (server.resource_snapshot or {}).get("physical_identity_verified") is True
+                and agent_server_resources.is_fresh(
+                    server.resource_snapshot or {},
+                    _now(),
+                    self.settings.agent_placement_metrics_max_age_seconds,
+                )
             ):
                 continue
             server.resource_snapshot = {
@@ -1825,8 +1833,24 @@ class AgentServerService:
                 errors[server_id] = "METRICS_STALE"
                 continue
             if agent_server_resources.newer_snapshot(server.resource_snapshot or {}, snapshot):
+                from app.domain.physical_hosts import claim_physical_host
+
+                if not await claim_physical_host(
+                    self.db,
+                    snapshot["physical_host_id"],
+                    workspace_id=server.workspace_id,
+                    role="agent",
+                    server_id=server_id,
+                ):
+                    server.resource_snapshot = {
+                        **(server.resource_snapshot or {}),
+                        "probe_error": "PHYSICAL_HOST_CONFLICT",
+                    }
+                    errors[server_id] = "PHYSICAL_HOST_CONFLICT"
+                    continue
                 server.resource_snapshot = {
                     **snapshot,
+                    "physical_identity_verified": True,
                     "probe_attempted_at": snapshot["sampled_at"],
                 }
         await self.db.commit()
@@ -1838,6 +1862,10 @@ class AgentServerService:
         await self._check_probe_rate(access)
         errors = await self.refresh_resource_snapshots(access, [server_id], force=True)
         if errors:
+            if errors.get(server_id) == "PHYSICAL_HOST_CONFLICT":
+                raise ApiError(
+                    409, "PHYSICAL_HOST_CONFLICT", "同一服务器已在其他位置登记，请先移除重复登记"
+                )
             raise ApiError(503, "METRICS_STALE", "独立资源探测失败；未更新容量数据")
         await self.audit.record(
             "agents.server.resources_refreshed",

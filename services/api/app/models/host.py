@@ -25,6 +25,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -43,6 +44,7 @@ def _workspace() -> Mapped[uuid.UUID]:
 class AgentServer(Base):
     __tablename__ = "agent_servers"
     __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_agent_servers_workspace_id_id"),
         CheckConstraint(f"kind IN {SERVER_KINDS}", name="kind"),
         # 同一个工作空间里同一台机器（同一个 machine_key）只有一条
         Index(

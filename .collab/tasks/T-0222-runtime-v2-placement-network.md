@@ -8,7 +8,7 @@ branch: codex/T-0222-runtime-v2-placement-network
 paths: services/api,apps/web,infra,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows
 depends_on:
 created: 2026-11-11
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # T-0222 按人类确认设计落实双服务器池调度、容器配额审批与跨节点网络
@@ -35,3 +35,4 @@ updated: 2026-11-11
 - 2026-11-11 15:15 UTC · codex · 开发检查点649e2ab已推送并创建草稿PR #193（不可合并）；历史资源只读核对API及3项回归已在本地补齐，接下来提交并复验。完整FE并发检查受中断且观察到多项超时；容器页串行复跑10通过1失败，已定位最后一项为等待异步关闭的断言竞态并修正。仍保持in_progress。
 - 2026-11-11 22:49 UTC · codex · 环境重启清空/tmp，旧临时检出和未结束suite日志丢失；已从远端9c03935恢复为/workspace/WorkspaceCore-runtime-v2实体目录，按本轮补丁恢复容量承诺/可信工作集/采样票据/MCP不可信文本修复，正在重新验证。重启前完整非integration观察621通过2失败，已定位工具目录契约与主机名输出；未结束PG/FE不计通过。
 - 2026-11-11 23:03 UTC · codex · 已恢复持久检出；修复闲置内存承诺、单次采样票据/迟到报告、暂停容器资源误释放、MCP主机名untrusted及联合输出schema。实际API非integration636通过42跳过；相关PG51通过173.01s；两项真实DB锁顺序RED后GREEN；严格mypy290文件、Ruff通过。前端完整suite正在无后端测试竞争地重跑。物理身份防重、磁盘余量细化和分布式网络仍未完成，PR193仍草稿。
+- 2026-11-12 03:56 UTC · codex · 继续实施：0064全局物理身份账本、两类SSH安装前置占位及报告拒绝不清理已完成；并发删除审阅问题已RED→GREEN修复，原审阅者Task3A PASS/APPROVED。检查点完整API642通过42跳过，FE77文件763项通过；新增未知遥测心跳与实际host绑定10项含PG通过，磁盘预算/10%余量组合60通过。控制器恢复与网络管理UI仍在开发，不标done，PR193保持草稿。

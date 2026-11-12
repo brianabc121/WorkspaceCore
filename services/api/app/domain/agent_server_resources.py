@@ -40,6 +40,10 @@ case "$root" in /*) ;; *) exit 1 ;; esac
 [ "$(docker network inspect bridge --format '{{.Driver}}')" = bridge ]
 [ -d "$HOME/myworkspace-openclaw" ]
 boot=$(cat /proc/sys/kernel/random/boot_id)
+machine=$(tr -d '\n' < /etc/machine-id)
+[ "${#machine}" -eq 32 ]
+case "$machine" in *[!0-9a-f]*) exit 1 ;; esac
+physical=$(printf 'machine-id:%s' "$machine" | sha256sum | awk '{print $1}')
 cores=$(getconf _NPROCESSORS_ONLN)
 load=$(awk '{print $1}' /proc/loadavg)
 set -- $(awk '/^cpu / {print $2+$3+$4+$5+$6+$7+$8+$9, $5+$6}' /proc/stat)
@@ -62,7 +66,7 @@ if [ -n "$ids" ]; then
 fi
 latest_available=$(awk '/^MemAvailable:/ {printf "%.0f", $2*1024}' /proc/meminfo)
 mem_available=$(awk -v before="$mem_available" -v after="$latest_available" 'BEGIN {printf "%.0f", before<after?before:after}')
-printf '{"generation":"%s","sequence":%s,"cores":%s,"cpu_percent":%s,"load1":%s,"mem_total":%s,"mem_available":%s,"root_total":%s,"root_free":%s,"data_total":%s,"data_free":%s,"runtime_ready":true,"network_ready":true,"managed_identities":%s,"managed_usage":%s}\n' "$boot" "$seq" "$cores" "$cpu" "$load" "$mem_total" "$mem_available" "$root_total" "$root_free" "$data_total" "$data_free" "$identities" "$usage"
+printf '{"physical_host_id":"%s","generation":"%s","sequence":%s,"cores":%s,"cpu_percent":%s,"load1":%s,"mem_total":%s,"mem_available":%s,"root_total":%s,"root_free":%s,"data_total":%s,"data_free":%s,"runtime_ready":true,"network_ready":true,"managed_identities":%s,"managed_usage":%s}\n' "$physical" "$boot" "$seq" "$cores" "$cpu" "$load" "$mem_total" "$mem_available" "$root_total" "$root_free" "$data_total" "$data_free" "$identities" "$usage"
 """
 
 
@@ -91,6 +95,7 @@ def docker_memory_credit(raw: str) -> float | None:
 class _Snapshot(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     generation: UUID
+    physical_host_id: str = Field(pattern=r"^[a-f0-9]{64}$")
     sequence: int = Field(ge=0)
     cores: int = Field(ge=1, le=4096)
     cpu_percent: float = Field(ge=0, le=100)
@@ -204,6 +209,7 @@ async def refresh_managed_resources(
 
     from app.domain.agent_server_credentials import ServerCredentialError, password_readable
     from app.domain.agent_servers import _connection_snapshot
+    from app.domain.physical_hosts import claim_physical_host
     from app.models import AgentServer
 
     batch_size = max(1, min(batch_size, 4))
@@ -234,10 +240,13 @@ async def refresh_managed_resources(
     for server, target in sorted(rows, key=lambda row: row[0].id.int):
         await db.refresh(server, with_for_update=True)
         await db.refresh(target)
-        if is_fresh(
-            server.resource_snapshot or {},
-            datetime.now(UTC),
-            settings.agent_placement_metrics_max_age_seconds,
+        if (
+            is_fresh(
+                server.resource_snapshot or {},
+                datetime.now(UTC),
+                settings.agent_placement_metrics_max_age_seconds,
+            )
+            and (server.resource_snapshot or {}).get("physical_identity_verified") is True
         ):
             continue
         attempted_at = datetime.now(UTC).isoformat()
@@ -288,8 +297,21 @@ async def refresh_managed_resources(
                 "probe_error": "unavailable",
             }
         elif newer_snapshot(current_server.resource_snapshot or {}, incoming):
+            if not await claim_physical_host(
+                db,
+                incoming["physical_host_id"],
+                workspace_id=workspace_id,
+                role="agent",
+                server_id=server_id,
+            ):
+                current_server.resource_snapshot = {
+                    **(current_server.resource_snapshot or {}),
+                    "probe_error": "PHYSICAL_HOST_CONFLICT",
+                }
+                continue
             current_server.resource_snapshot = {
                 **incoming,
+                "physical_identity_verified": True,
                 "probe_attempted_at": incoming["sampled_at"],
             }
             accepted += 1

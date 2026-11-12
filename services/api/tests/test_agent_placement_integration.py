@@ -44,6 +44,7 @@ async def _snapshot(owner: Owner, server_id: str, **changes: Any) -> None:
     value = agent_server_resources.parse_resources(
         json.dumps({**snapshot(), **changes}), received_at=datetime.now(UTC)
     )
+    value["physical_identity_verified"] = True  # controlled trusted-snapshot fixture
     await run_sql(
         owner.database_url,
         "UPDATE workspace.agent_servers SET resource_snapshot=$1::jsonb WHERE id=$2",
@@ -89,6 +90,59 @@ async def test_stale_empty_host_failure_never_uses_instance_report(owner, tmp_pa
         result.text
     )
     assert await _count(owner, "agent_instances") == 0
+
+
+async def test_two_agent_registrations_cannot_double_count_one_physical_host(
+    owner,
+    tmp_path,
+    monkeypatch,
+):
+    first = FakeHost(tmp_path / "one")
+    second = FakeHost(tmp_path / "two")
+    second.resources["physical_host_id"] = first.resources["physical_host_id"]
+    async with ssh_host(first) as (one, _), ssh_host(second) as (two, _):
+        await _ready_server(owner, one)
+        from tests.test_agent_servers_api import _confirmed_server
+
+        duplicate = await _confirmed_server(owner, two)
+        refused = await owner.initialize(duplicate["id"])
+        assert refused["status"] == "failed", refused
+        assert refused["error_code"] == "physical_host_conflict"
+        assert not (second.home / "myworkspace-openclaw").exists()
+        # Also cover an old already-prepared registration from before this
+        # upgrade: sampling must still reject the conflicting physical host.
+        await run_sql(
+            owner.database_url,
+            "UPDATE workspace.agent_ssh_targets SET prepared_at=now() WHERE server_id=$1",
+            uuid.UUID(duplicate["id"]),
+        )
+        rejected = await _call(
+            owner,
+            "POST",
+            f"/api/v1/agents/servers/{duplicate['id']}/resources/refresh",
+        )
+        assert rejected.status_code == 409, rejected.text
+        assert rejected.json()["error"]["code"] == "PHYSICAL_HOST_CONFLICT"
+        _park(monkeypatch)
+        result = await _deploy(owner, _auto())
+        assert result.status_code == 202, result.text
+        assert await _count(owner, "physical_host_registrations") == 1
+        assert (
+            await _count(
+                owner,
+                "agent_servers",
+                "resource_snapshot->>'physical_identity_verified' = 'true'",
+            )
+            == 1
+        )
+        assert (
+            await _count(
+                owner,
+                "agent_servers",
+                "resource_snapshot->>'probe_error' = 'PHYSICAL_HOST_CONFLICT'",
+            )
+            == 1
+        )
 
 
 async def test_specified_never_falls_back_to_healthy_host(owner, tmp_path, monkeypatch):

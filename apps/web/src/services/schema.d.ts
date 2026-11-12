@@ -5438,7 +5438,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 对账（运行服务器，每分钟）
+         * 对账（运行服务器，定期）
          * @description 上报带工作台标签的容器、数据卷、镜像与占用、出口访问记录；返回记录里有、实际没有的环境（lost）和记录外的容器（stray，运行服务器先停止、24 小时后删除）。
          */
         post: operations["report"];
@@ -15130,17 +15130,17 @@ export interface components {
             /** Agent Version */
             agent_version: string;
             /** Cpus */
-            cpus: number;
+            cpus?: number | null;
             /** Disk Bytes */
-            disk_bytes: number;
+            disk_bytes?: number | null;
             /** Disk Free Bytes */
-            disk_free_bytes: number;
+            disk_free_bytes?: number | null;
             /** Docker Version */
-            docker_version: string;
+            docker_version?: string | null;
             /** Kvm */
             kvm: boolean;
             /** Mem Bytes */
-            mem_bytes: number;
+            mem_bytes?: number | null;
             /** Runtimes */
             runtimes: string[];
             /**
@@ -15278,6 +15278,8 @@ export interface components {
              * @default 0
              */
             mem_free_bytes: number;
+            /** Physical Host Id */
+            physical_host_id?: string | null;
             /** Sample Id */
             sample_id?: string | null;
             /**

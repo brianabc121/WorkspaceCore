@@ -2,7 +2,7 @@
 
 - `POST /runner-api/v1/poll`：长轮询（最多 25 秒）领指令，同时上报容量；
 - `POST /runner-api/v1/commands/{id}/result`：回报一条指令的结果（重复回报只认第一次）；
-- `POST /runner-api/v1/report`：每分钟对账；
+- `POST /runner-api/v1/report`：定期对账；
 - `PUT|GET /runner-api/v1/snapshots/{id}/parts/{n}`：常驻环境快照的分块上传与恢复（T-0139）。
 认证：运行服务器凭证（`mwr_`）+ 接入入口写入的入口请求头（外网另需客户端证书指纹），
 只在请求直接来自接入入口时采用这些请求头。认证失败一律 401 RUNNER_UNAUTHORIZED。
@@ -135,7 +135,7 @@ async def begin_report(request: Request, credentials: RunnerCredentials) -> Runn
 
 @router.post(
     "/report",
-    summary="对账（运行服务器，每分钟）",
+    summary="对账（运行服务器，定期）",
     description="上报带工作台标签的容器、数据卷、镜像与占用、出口访问记录；"
     "返回记录里有、实际没有的环境（lost）和记录外的容器"
     "（stray，运行服务器先停止、24 小时后删除）。",

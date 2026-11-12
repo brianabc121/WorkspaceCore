@@ -86,6 +86,7 @@ from app.models.model_connection import (
 from app.models.module import ModuleSyncAttempt, WorkspaceModule
 from app.models.navigation import WorkspaceNavigation
 from app.models.notification import Notification
+from app.models.physical_host import PhysicalHostRegistration
 from app.models.runner import (
     RunnerCommand,
     RunnerDeleteCondition,
@@ -179,6 +180,7 @@ __all__ = [
     "ModelConnectionModel",
     "ModuleSyncAttempt",
     "Notification",
+    "PhysicalHostRegistration",
     "Project",
     "ProjectAgent",
     "ResourceLink",

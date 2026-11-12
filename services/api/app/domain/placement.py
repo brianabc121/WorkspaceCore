@@ -104,7 +104,14 @@ def _reason(candidate: Candidate, request: ResourceRequest, now: datetime) -> st
         or request.memory_mb + candidate.pending_memory_mb > _metric(candidate.available_memory_mb)
         or request.memory_mb + unused_memory + _metric(candidate.memory_mb) * 0.1
         > _metric(candidate.available_memory_mb)
-        or request.disk_gb + candidate.pending_disk_gb > _metric(candidate.disk_free_gb)
+        # Disk samples include host/image/volume usage, but do not yet prove
+        # each allocation's durable bytes. Conservatively retain every disk
+        # promise against free space, including stopped environments. Never
+        # credit an unknown filesystem usage as though the promise was used.
+        or request.disk_gb
+        + max(candidate.committed_disk_gb, candidate.pending_disk_gb)
+        + _metric(candidate.disk_gb) * 0.1
+        > _metric(candidate.disk_free_gb)
     ):
         return "INSUFFICIENT_CAPACITY"
     if _metric(candidate.cpu_load) >= 0.95:

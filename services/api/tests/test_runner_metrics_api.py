@@ -20,7 +20,16 @@ from sqlalchemy import func, select, update
 from app.domain import runner_specs as specs
 from app.models import AgentInstance, RunnerCommand, RunnerEnvironment, RunnerHost
 from tests.helpers import add_member, add_user, add_workspace
-from tests.test_runner_api import SETTINGS, add_host, agent, create_env, poll, runner_headers
+from tests.test_runner_api import (
+    SETTINGS,
+    add_host,
+    agent,
+    begin_sample,
+    create_env,
+    physical_id,
+    poll,
+    runner_headers,
+)
 from tests.workspace_support import Env, app_of, open_env
 
 pytestmark = pytest.mark.integration
@@ -44,7 +53,14 @@ async def detail(env: Env, env_id: str) -> dict[str, Any]:
 async def report(env: Env, rtoken: str, containers: list[dict[str, Any]], **body: Any) -> None:
     response = await env.client.post(
         "/runner-api/v1/report",
-        json={"containers": containers, "volumes": [], "images": [], **body},
+        json={
+            "sample_id": await begin_sample(env, rtoken),
+            "physical_host_id": physical_id(rtoken),
+            "containers": containers,
+            "volumes": [],
+            "images": [],
+            **body,
+        },
         headers=runner_headers(rtoken),
     )
     assert response.status_code == 200, response.text

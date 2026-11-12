@@ -34,7 +34,7 @@ def candidate_for(host: RunnerHost, environments: list[RunnerEnvironment]) -> Ca
     observed: datetime | None
     try:
         observed = datetime.fromisoformat(str(report["capacity_sampled_at"]))
-        if observed.tzinfo is None:
+        if observed.tzinfo is None or report.get("physical_identity_verified") is not True:
             observed = None
     except (KeyError, TypeError, ValueError):
         observed = None

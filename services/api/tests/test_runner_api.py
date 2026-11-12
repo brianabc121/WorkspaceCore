@@ -9,6 +9,7 @@ env_create → 下发 create_env → 回报 → running；env_exec 同步返回�
 
 import asyncio
 import base64
+import hashlib
 import io
 import secrets
 import uuid
@@ -62,6 +63,11 @@ def runner_headers(token: str | None, ingress: str = "intranet") -> dict[str, st
     return headers
 
 
+def physical_id(token: str) -> str:
+    """Synthetic stable host identity; real agents read the host machine-id mount."""
+    return hashlib.sha256(("test-host:" + token).encode()).hexdigest()
+
+
 async def add_host(env: Env) -> str:
     """添加运行服务器并下载接入包，返回接入包里的凭证。"""
     created = await env.client.post(
@@ -97,6 +103,7 @@ async def add_host(env: Env) -> str:
         "/runner-api/v1/report",
         json={
             "sample_id": sample_id,
+            "physical_host_id": physical_id(token),
             "mem_bytes": POLL["mem_bytes"],
             "mem_free_bytes": 24 * 1024**3,
             "disk_bytes": POLL["disk_bytes"],
@@ -125,6 +132,7 @@ async def test_report_sampling_requires_auth_and_cannot_be_replayed(env: Env) ->
     sample_id = await begin_sample(env, token)
     payload = {
         "sample_id": sample_id,
+        "physical_host_id": physical_id(token),
         "mem_bytes": POLL["mem_bytes"],
         "mem_free_bytes": 24 << 30,
         "disk_bytes": POLL["disk_bytes"],
@@ -610,6 +618,7 @@ async def test_report_marks_lost_and_stray_containers(env: Env) -> None:
         "/runner-api/v1/report",
         json={
             "sample_id": sample_id,
+            "physical_host_id": physical_id(rtoken),
             "containers": [{"env_id": stray_id, "name": "mw-env-0123456789ab", "state": "running"}],
             "volumes": [],
             "images": [],
@@ -647,6 +656,7 @@ async def test_paused_container_report_keeps_its_compute_reservation(env: Env) -
         "/runner-api/v1/report",
         json={
             "sample_id": sample_id,
+            "physical_host_id": physical_id(runner_token),
             "containers": [{"env_id": environment["id"], "name": "paused", "state": "paused"}],
         },
         headers=runner_headers(runner_token),

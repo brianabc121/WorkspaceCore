@@ -29,6 +29,7 @@ def host(**changes):
         report={
             "at": specs.now().isoformat(),
             "capacity_sampled_at": specs.now().isoformat(),
+            "physical_identity_verified": True,
             "load": 1.0,
             "mem_free_bytes": 24 * 1024**3,
             "disk_free_bytes": 400 * 1024**3,
@@ -318,6 +319,7 @@ async def test_delayed_report_does_not_release_restart_and_failed_host_cannot_be
                 node,
                 RunnerReport(
                     sample_id=old_sample.sample_id,
+                    physical_host_id=node.report.get("physical_host_id"),
                     containers=[
                         {
                             "env_id": allocation.id,

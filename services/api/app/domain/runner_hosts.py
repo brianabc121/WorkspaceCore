@@ -40,6 +40,7 @@ from app.models import (
     RunnerHost,
     RunnerRun,
     RunnerSnapshot,
+    RunnerSshJob,
 )
 from app.schemas.runner import (
     RunnerCommandOut,
@@ -288,6 +289,17 @@ class RunnerHosts:
         await self.db.refresh(host, with_for_update=True)
         if host.version != version:
             raise ApiError(409, "VERSION_CONFLICT", "容器服务器已被修改，请刷新后重试")
+        # Job creation takes this same host lock before its target lock. Keep
+        # the physical registration while SSH can still mutate the machine.
+        running_job = await self.db.scalar(
+            select(RunnerSshJob.id)
+            .where(RunnerSshJob.host_id == host.id, RunnerSshJob.status == "running")
+            .limit(1)
+        )
+        if running_job is not None:
+            raise ApiError(
+                409, "RUNNER_SSH_JOB_RUNNING", "服务器正在部署或卸载，请等待 SSH 任务结束后再移除"
+            )
         live = await self.db.scalar(
             select(RunnerEnvironment.id)
             .where(
@@ -392,15 +404,31 @@ class RunnerHosts:
         return host
 
     async def check_in(self, host: RunnerHost, body: RunnerPoll) -> None:
+        # Serialize telemetry invalidation with report sampling and admission;
+        # otherwise an older authenticated row could overwrite a newer report.
+        await self.db.refresh(host, with_for_update=True)
         was = host.status
         host.agent_version = body.agent_version
         host.docker_version = body.docker_version
         host.runtimes = list(body.runtimes)
         host.kvm = body.kvm
-        host.cpus = body.cpus
-        host.mem_bytes = body.mem_bytes
-        host.disk_bytes = body.disk_bytes
-        host.disk_free_bytes = body.disk_free_bytes
+        if all(
+            value is not None
+            for value in (body.cpus, body.mem_bytes, body.disk_bytes, body.disk_free_bytes)
+        ):
+            host.cpus = body.cpus
+            host.mem_bytes = body.mem_bytes
+            host.disk_bytes = body.disk_bytes
+            host.disk_free_bytes = body.disk_free_bytes
+        else:
+            # Keep prior readings for display, but never renew capacity from
+            # unknown telemetry. A subsequent poll cannot restore freshness:
+            # only another complete, identity-verified report may do that.
+            host.report = {
+                **(host.report or {}),
+                "capacity_sampled_at": None,
+                "capacity_error": "METRICS_UNKNOWN",
+            }
         host.last_seen_at = specs.now()
         if host.status in ("pending", "offline"):
             host.status = "online"
@@ -498,6 +526,21 @@ class RunnerHosts:
         host = await self._lock_report_host(host)
         received = specs.now()  # 这份报告里各项读数的“平台收到时间”（不信 agent 的时钟）
         sampled = accept_report_sample(host, body, received)
+        from app.domain.physical_hosts import claim_physical_host
+
+        placement_error = None
+        if sampled is None or body.physical_host_id is None:
+            placement_error = "PHYSICAL_IDENTITY_REQUIRED"
+        elif not await claim_physical_host(
+            self.db,
+            body.physical_host_id,
+            workspace_id=host.workspace_id,
+            role="runner",
+            server_id=host.id,
+        ):
+            placement_error = "PHYSICAL_HOST_CONFLICT"
+        if placement_error is not None:
+            sampled = None
         host.last_seen_at = received
         host.report = {
             "containers": len(body.containers),
@@ -514,8 +557,16 @@ class RunnerHosts:
             "load": body.load,
             "at": specs.now().isoformat(),
             "capacity_sampled_at": sampled.isoformat() if sampled else None,
+            "physical_host_id": body.physical_host_id,
+            "physical_identity_verified": placement_error is None,
+            "placement_error": placement_error,
         }
         host.disk_free_bytes = body.disk_free_bytes or host.disk_free_bytes
+        if placement_error is not None:
+            # This can be a duplicate registration of another pool's machine.
+            # Telemetry is useful, but never order its containers stopped as
+            # "stray" or alter allocation state without a verified identity.
+            return RunnerReportResult(lost=[], stray=[])
         envs = {
             e.id: e
             for e in await self.db.scalars(

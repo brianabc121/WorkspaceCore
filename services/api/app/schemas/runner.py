@@ -311,13 +311,13 @@ class EnvOutput(BaseModel):
 
 class RunnerPoll(BaseModel):
     agent_version: str = Field(max_length=32)
-    docker_version: str = Field(max_length=32)
+    docker_version: str | None = Field(None, max_length=32)
     runtimes: list[str] = Field(max_length=10)
     kvm: bool
-    cpus: int = Field(ge=0)
-    mem_bytes: int = Field(ge=0)
-    disk_bytes: int = Field(ge=0)
-    disk_free_bytes: int = Field(ge=0)
+    cpus: int | None = Field(None, ge=0)
+    mem_bytes: int | None = Field(None, ge=0)
+    disk_bytes: int | None = Field(None, ge=0)
+    disk_free_bytes: int | None = Field(None, ge=0)
     wait_seconds: int = Field(25, ge=0, le=25)
 
 
@@ -390,6 +390,7 @@ class RunnerEgress(BaseModel):
 
 class RunnerReport(BaseModel):
     sample_id: UUID | None = None
+    physical_host_id: str | None = Field(None, pattern=r"^[a-f0-9]{64}$")
     containers: list[RunnerReportContainer] = Field(default_factory=list, max_length=2000)
     volumes: list[RunnerReportVolume] = Field(default_factory=list, max_length=2000)
     images: list[RunnerReportImage] = Field(default_factory=list, max_length=2000)
