@@ -3,6 +3,7 @@
 import asyncio
 import json
 import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -10,6 +11,9 @@ import pytest
 from app.domain import agent_server_resources
 from app.domain.agent_servers import AgentServerService
 from app.domain.agent_ssh_install import SshJobRunner
+from app.domain.credentials import CredentialBox
+from app.domain.policy import WorkspaceAccess
+from app.models import AgentSshJob, AgentSshTarget
 from tests import test_agent_deployment_requests as base
 from tests.helpers import run_sql
 from tests.test_agent_deployment_requests import (
@@ -53,7 +57,9 @@ async def _snapshot(owner: Owner, server_id: str, **changes: Any) -> None:
     )
 
 
-async def test_auto_probes_empty_host_and_persists_actual_selection(owner, tmp_path, monkeypatch):
+async def test_auto_probes_empty_host_and_persists_actual_selection(
+    owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         sid = await _ready_server(owner, port)
@@ -75,7 +81,9 @@ async def test_auto_probes_empty_host_and_persists_actual_selection(owner, tmp_p
         assert (await _receipt(owner, request["request_id"])).json()["state"] == "accepted"
 
 
-async def test_stale_empty_host_failure_never_uses_instance_report(owner, tmp_path, monkeypatch):
+async def test_stale_empty_host_failure_never_uses_instance_report(
+    owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         await _ready_server(owner, port)
@@ -93,10 +101,10 @@ async def test_stale_empty_host_failure_never_uses_instance_report(owner, tmp_pa
 
 
 async def test_two_agent_registrations_cannot_double_count_one_physical_host(
-    owner,
-    tmp_path,
-    monkeypatch,
-):
+    owner: Owner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     first = FakeHost(tmp_path / "one")
     second = FakeHost(tmp_path / "two")
     second.resources["physical_host_id"] = first.resources["physical_host_id"]
@@ -145,7 +153,9 @@ async def test_two_agent_registrations_cannot_double_count_one_physical_host(
         )
 
 
-async def test_specified_never_falls_back_to_healthy_host(owner, tmp_path, monkeypatch):
+async def test_specified_never_falls_back_to_healthy_host(
+    owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     host = FakeHost(tmp_path / "small")
     healthy = FakeHost(tmp_path / "healthy")
     async with ssh_host(host) as (port, _), ssh_host(healthy) as (healthy_port, _):
@@ -158,7 +168,9 @@ async def test_specified_never_falls_back_to_healthy_host(owner, tmp_path, monke
         assert await _count(owner, "agent_instances") == 0
 
 
-async def test_concurrent_admission_counts_pending_failed_jobs(owner, tmp_path, monkeypatch):
+async def test_concurrent_admission_counts_pending_failed_jobs(
+    owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         sid = await _ready_server(owner, port)
@@ -169,13 +181,30 @@ async def test_concurrent_admission_counts_pending_failed_jobs(owner, tmp_path, 
         # their durable resource reservation.
         original = AgentServerService._new_job
 
-        async def failed_job(self, *a, **kw):
-            job = await original(self, *a, **kw)
+        async def failed_job(
+            self: AgentServerService,
+            access: WorkspaceAccess,
+            target: AgentSshTarget,
+            *,
+            kind: str,
+            instance_id: uuid.UUID | None,
+            metadata: dict[str, object],
+            client_ip: str,
+        ) -> AgentSshJob:
+            job = await original(
+                self,
+                access,
+                target,
+                kind=kind,
+                instance_id=instance_id,
+                metadata=metadata,
+                client_ip=client_ip,
+            )
             job.status = "failed"
             await self.db.flush()
             return job
 
-        async def idle(*a, **kw):
+        async def idle(self: AgentServerService, target: AgentSshTarget) -> bool:
             return False
 
         monkeypatch.setattr(AgentServerService, "_new_job", failed_job)
@@ -191,8 +220,8 @@ async def test_concurrent_admission_counts_pending_failed_jobs(owner, tmp_path, 
 
 
 async def test_existing_deploy_requires_capacity_without_rewriting_legacy(
-    owner, tmp_path, monkeypatch
-):
+    owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         sid = await _ready_server(owner, port)
@@ -214,20 +243,39 @@ async def test_existing_deploy_requires_capacity_without_rewriting_legacy(
         assert limits is None
 
 
-async def test_failed_redeploy_keeps_previous_larger_resource_promise(owner, tmp_path, monkeypatch):
+async def test_failed_redeploy_keeps_previous_larger_resource_promise(
+    owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         await _ready_server(owner, port)
         _park(monkeypatch)
         original = AgentServerService._new_job
 
-        async def failed_job(self, *args, **kwargs):
-            job = await original(self, *args, **kwargs)
+        async def failed_job(
+            self: AgentServerService,
+            access: WorkspaceAccess,
+            target: AgentSshTarget,
+            *,
+            kind: str,
+            instance_id: uuid.UUID | None,
+            metadata: dict[str, object],
+            client_ip: str,
+        ) -> AgentSshJob:
+            job = await original(
+                self,
+                access,
+                target,
+                kind=kind,
+                instance_id=instance_id,
+                metadata=metadata,
+                client_ip=client_ip,
+            )
             job.status = "failed"
             await self.db.flush()
             return job
 
-        async def idle(*args, **kwargs):
+        async def idle(self: AgentServerService, target: AgentSshTarget) -> bool:
             return False
 
         monkeypatch.setattr(AgentServerService, "_new_job", failed_job)
@@ -253,7 +301,9 @@ async def test_failed_redeploy_keeps_previous_larger_resource_promise(owner, tmp
         assert retry.json()["deployment"]["selection"]["memory_mb"] == 8192
 
 
-async def test_unmanaged_unlimited_instance_excludes_host_from_auto(owner, tmp_path, monkeypatch):
+async def test_unmanaged_unlimited_instance_excludes_host_from_auto(
+    owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     host = FakeHost(tmp_path)
     async with ssh_host(host) as (port, _):
         server_id = await _ready_server(owner, port)
@@ -271,8 +321,8 @@ async def test_unmanaged_unlimited_instance_excludes_host_from_auto(owner, tmp_p
 
 
 async def test_reconcile_legacy_limits_uses_trusted_runtime_and_preserves_desired_settings(
-    owner, tmp_path, monkeypatch
-):
+    owner: Owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from datetime import UTC, datetime
 
     import app.domain.agent_runtime_resources as runtime_resources
@@ -297,7 +347,13 @@ async def test_reconcile_legacy_limits_uses_trusted_runtime_and_preserves_desire
             uuid.UUID(instance_id),
         )
 
-        async def inspect(target, box, *, project, directory):
+        async def inspect(
+            target: AgentSshTarget,
+            box: CredentialBox,
+            *,
+            project: str,
+            directory: str,
+        ) -> dict[str, object]:
             assert project.endswith(instance_id.replace("-", "")[:12])
             assert directory == "/srv/managed/app"
             return {

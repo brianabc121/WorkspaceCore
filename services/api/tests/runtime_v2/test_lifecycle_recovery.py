@@ -1,20 +1,23 @@
 """Outcome tests at the fake external Kubernetes API boundary."""
 
 import json
+from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
 
+from app.runner_agent.client import Workspace as WorkspaceClient
 from app.runtime_v2.controller import CommandJournal, Controller
 from app.runtime_v2.kubernetes import KubernetesRuntime, RuntimeIdentity
 from app.runtime_v2.runner import Kubectl, KubernetesRunner, OutcomeUnknown
 
 
-def identity():
+def identity() -> RuntimeIdentity:
     return RuntimeIdentity(uuid4(), uuid4(), uuid4(), uuid4(), 3, "node-a")
 
 
-def command(ident, kind="stop_env"):
+def command(ident: RuntimeIdentity, kind: str = "stop_env") -> dict[str, Any]:
     return {
         "id": str(uuid4()),
         "kind": kind,
@@ -34,18 +37,18 @@ def command(ident, kind="stop_env"):
     }
 
 
-class Workspace:
-    def __init__(self):
-        self.sent = []
+class Workspace(WorkspaceClient):
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, dict[str, Any]]] = []
 
-    def post(self, path, body, **kwargs):
+    def post(self, path: str, body: dict[str, Any], *, timeout: float = 30) -> dict[str, Any]:
         self.sent.append((path, body))
         return {"commands": []}
 
 
-class Api:
-    def __init__(self, ident):
-        self.deployment = {
+class Api(Kubectl):
+    def __init__(self, ident: RuntimeIdentity) -> None:
+        self.deployment: dict[str, Any] | None = {
             "metadata": {
                 "uid": "dep-original",
                 "resourceVersion": "17",
@@ -57,7 +60,7 @@ class Api:
             "spec": {"replicas": 1},
             "status": {"observedGeneration": 1},
         }
-        self.claim = {
+        self.claim: dict[str, Any] | None = {
             "metadata": {
                 "uid": "pvc-original",
                 "name": "data-" + ident.environment_id.hex,
@@ -65,14 +68,16 @@ class Api:
                 "labels": ident.labels,
             }
         }
-        self.pods = []
-        self.mutations = []
+        self.pods: list[dict[str, Any]] = []
+        self.mutations: list[list[str]] = []
         self.timeout = True
 
-    def get_optional(self, kind, name, namespace=None):
+    def get_optional(
+        self, kind: str, name: str, namespace: str | None = None
+    ) -> dict[str, Any] | None:
         return self.deployment if kind == "deployment" else self.claim
 
-    def call(self, args, **kwargs):
+    def call(self, args: list[str], *, input_data: str | None = None) -> str:
         if args[0] == "get":
             return json.dumps({"items": self.pods})
         self.mutations.append(args)
@@ -81,7 +86,9 @@ class Api:
         return "{}"
 
 
-def controller(tmp_path, ident, api, workspace):
+def controller(
+    tmp_path: Path, ident: RuntimeIdentity, api: Kubectl, workspace: WorkspaceClient
+) -> Controller:
     return Controller(
         KubernetesRunner(api),
         workspace,
@@ -94,13 +101,14 @@ def controller(tmp_path, ident, api, workspace):
     )
 
 
-def test_restart_proves_stop_read_only_without_replaying_scale(tmp_path):
+def test_restart_proves_stop_read_only_without_replaying_scale(tmp_path: Path) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
     cmd = command(ident)
     first = controller(tmp_path, ident, api, workspace)
     first.process(cmd)
     assert workspace.sent == []
+    assert api.deployment is not None
     api.deployment["spec"]["replicas"] = 0
     second = controller(tmp_path, ident, api, workspace)
     second.process(cmd)
@@ -109,11 +117,12 @@ def test_restart_proves_stop_read_only_without_replaying_scale(tmp_path):
     assert b"do-not-persist-this-secret" not in (tmp_path / "journal.db").read_bytes()
 
 
-def test_restart_replaced_uid_stays_unknown(tmp_path):
+def test_restart_replaced_uid_stays_unknown(tmp_path: Path) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
     cmd = command(ident)
     controller(tmp_path, ident, api, workspace).process(cmd)
+    assert api.deployment is not None
     api.deployment["metadata"]["uid"] = "replacement"
     api.deployment["spec"]["replicas"] = 0
     controller(tmp_path, ident, api, workspace).process(cmd)
@@ -121,7 +130,7 @@ def test_restart_replaced_uid_stays_unknown(tmp_path):
     assert len(api.mutations) == 1
 
 
-def test_stop_is_not_proven_by_empty_pods_while_replicas_still_one(tmp_path):
+def test_stop_is_not_proven_by_empty_pods_while_replicas_still_one(tmp_path: Path) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
     api.timeout = False
@@ -129,7 +138,7 @@ def test_stop_is_not_proven_by_empty_pods_while_replicas_still_one(tmp_path):
     assert workspace.sent == []
 
 
-def test_configured_scope_cannot_be_retargeted_by_payload(tmp_path):
+def test_configured_scope_cannot_be_retargeted_by_payload(tmp_path: Path) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
     cmd = command(ident)
@@ -139,7 +148,7 @@ def test_configured_scope_cannot_be_retargeted_by_payload(tmp_path):
     assert workspace.sent[0][1]["status"] == "failed"
 
 
-def test_node_affinity_binds_actual_metadata_name():
+def test_node_affinity_binds_actual_metadata_name() -> None:
     ident = identity()
     pod = KubernetesRuntime.pod_manifest(ident, "image@sha256:" + "a" * 64, 500, 256)
     term = pod["spec"]["affinity"]["nodeAffinity"][
@@ -148,7 +157,7 @@ def test_node_affinity_binds_actual_metadata_name():
     assert term["matchFields"] == [{"key": "metadata.name", "operator": "In", "values": ["node-a"]}]
 
 
-def test_kubectl_error_does_not_echo_external_secret(monkeypatch):
+def test_kubectl_error_does_not_echo_external_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     import subprocess
 
     monkeypatch.setattr(
@@ -161,7 +170,7 @@ def test_kubectl_error_does_not_echo_external_secret(monkeypatch):
     assert "secret-from-cluster" not in str(error.value)
 
 
-def test_cli_requires_operator_scope_and_absolute_paths():
+def test_cli_requires_operator_scope_and_absolute_paths() -> None:
     from app.runtime_v2.config import ControllerConfig
 
     with pytest.raises(ValueError):
@@ -183,17 +192,18 @@ def test_cli_requires_operator_scope_and_absolute_paths():
         ControllerConfig.from_environ(settings)
 
 
-def test_startup_recovers_without_server_redelivery(tmp_path):
+def test_startup_recovers_without_server_redelivery(tmp_path: Path) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
     controller(tmp_path, ident, api, workspace).process(command(ident))
+    assert api.deployment is not None
     api.deployment["spec"]["replicas"] = 0
     controller(tmp_path, ident, api, workspace).recover_pending()
     assert workspace.sent[0][1]["status"] == "done"
     assert len(api.mutations) == 1
 
 
-def test_unknown_delete_restart_only_observes_no_new_delete(tmp_path):
+def test_unknown_delete_restart_only_observes_no_new_delete(tmp_path: Path) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
     cmd = command(ident, "delete_env")
@@ -211,7 +221,9 @@ def test_unknown_delete_restart_only_observes_no_new_delete(tmp_path):
 
 
 @pytest.mark.parametrize("field,value", [("host_id", str(uuid4())), ("host_id", None)])
-def test_host_scope_is_required_before_mutation(tmp_path, field, value):
+def test_host_scope_is_required_before_mutation(
+    tmp_path: Path, field: str, value: str | None
+) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
     cmd = command(ident)
@@ -221,11 +233,12 @@ def test_host_scope_is_required_before_mutation(tmp_path, field, value):
     assert workspace.sent[0][1]["status"] == "failed"
 
 
-def test_changed_command_identity_does_not_reuse_completed_receipt(tmp_path):
+def test_changed_command_identity_does_not_reuse_completed_receipt(tmp_path: Path) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
     cmd = command(ident)
     controller(tmp_path, ident, api, workspace).process(cmd)
+    assert api.deployment is not None
     api.deployment["spec"]["replicas"] = 0
     controller(tmp_path, ident, api, workspace).process(cmd)
     assert len(workspace.sent) == 1
@@ -235,30 +248,33 @@ def test_changed_command_identity_does_not_reuse_completed_receipt(tmp_path):
 
 
 @pytest.mark.parametrize("field,value", [("namespace", "foreign"), ("uid", ""), ("name", "other")])
-def test_malformed_resource_never_proves_stop(tmp_path, field, value):
+def test_malformed_resource_never_proves_stop(tmp_path: Path, field: str, value: str) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
     cmd = command(ident)
     controller(tmp_path, ident, api, workspace).process(cmd)
+    assert api.deployment is not None
     api.deployment["spec"]["replicas"] = 0
     api.deployment["metadata"][field] = value
     controller(tmp_path, ident, api, workspace).recover_pending()
     assert workspace.sent == []
 
 
-def test_trusted_node_identity_hash_and_unavailable_capacity_fail_closed():
+def test_trusted_node_identity_hash_and_unavailable_capacity_fail_closed() -> None:
     import hashlib
 
     from app.runtime_v2.telemetry import NodeTelemetry, TelemetryUnavailable
 
-    class NodeApi:
-        def __init__(self):
-            self.node = {
+    class NodeApi(Kubectl):
+        def __init__(self) -> None:
+            self.node: dict[str, Any] = {
                 "metadata": {"name": "node-a", "uid": "node-uid"},
                 "status": {"nodeInfo": {"machineID": " AABBCCDDEEFF00112233445566778899 "}},
             }
 
-        def get_optional(self, kind, name, namespace=None):
+        def get_optional(
+            self, kind: str, name: str, namespace: str | None = None
+        ) -> dict[str, Any] | None:
             assert kind == "node" and name == "node-a" and namespace is None
             return self.node
 
@@ -276,7 +292,7 @@ def test_trusted_node_identity_hash_and_unavailable_capacity_fail_closed():
         telemetry.physical_host_id()
 
 
-def test_disabled_cli_never_connects(monkeypatch):
+def test_disabled_cli_never_connects(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.runtime_v2.__main__ import main
 
     monkeypatch.setattr("sys.argv", ["runtime-v2"])
@@ -284,24 +300,28 @@ def test_disabled_cli_never_connects(monkeypatch):
     assert main() == 2
 
 
-def test_unavailable_telemetry_never_sends_zero_capacity_or_report():
+def test_unavailable_telemetry_never_sends_zero_capacity_or_report() -> None:
     from app.runtime_v2.telemetry import NodeTelemetry, TelemetryUnavailable
 
-    class Api:
-        def get_optional(self, *args, **kwargs):
+    class Api(Kubectl):
+        def get_optional(
+            self, kind: str, name: str, namespace: str | None = None
+        ) -> dict[str, Any] | None:
             return {
                 "metadata": {"name": "node-a", "uid": "node-uid"},
                 "status": {"nodeInfo": {"machineID": "a" * 32}},
             }
 
     workspace = Workspace()
-    telemetry = NodeTelemetry(Api(), "node-a")
+    telemetry = NodeTelemetry(Api("/etc/kubeconfig"), "node-a")
     with pytest.raises(TelemetryUnavailable):
         telemetry.report(workspace)
     assert all(path != "/report" for path, body in workspace.sent)
 
 
-def test_authentication_failure_stops_loop_without_logging_token(tmp_path, caplog):
+def test_authentication_failure_stops_loop_without_logging_token(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     from threading import Event
 
     from app.runner_agent.client import WorkspaceError
@@ -311,14 +331,14 @@ def test_authentication_failure_stops_loop_without_logging_token(tmp_path, caplo
     current = controller(tmp_path, ident, Api(ident), workspace)
 
     class Telemetry:
-        def capacity(self):
+        def capacity(self) -> dict[str, Any]:
             raise WorkspaceError(401, "AUTH", "sensitive-operator-token")
 
     assert run(current, Telemetry(), Event()) == 3
     assert "sensitive-operator-token" not in caplog.text
 
 
-def test_loop_uses_bounded_interruptible_backoff(tmp_path):
+def test_loop_uses_bounded_interruptible_backoff(tmp_path: Path) -> None:
     from app.runtime_v2.__main__ import run
     from app.runtime_v2.telemetry import TelemetryUnavailable
 
@@ -326,17 +346,17 @@ def test_loop_uses_bounded_interruptible_backoff(tmp_path):
     current = controller(tmp_path, ident, Api(ident), workspace)
 
     class Telemetry:
-        def capacity(self):
+        def capacity(self) -> dict[str, Any]:
             raise TelemetryUnavailable("unavailable")
 
     class Stop:
-        def __init__(self):
-            self.waits = []
+        def __init__(self) -> None:
+            self.waits: list[float] = []
 
-        def is_set(self):
+        def is_set(self) -> bool:
             return len(self.waits) >= 8
 
-        def wait(self, delay):
+        def wait(self, delay: float) -> bool:
             self.waits.append(delay)
             return self.is_set()
 
@@ -345,48 +365,53 @@ def test_loop_uses_bounded_interruptible_backoff(tmp_path):
     assert stop.waits == [1, 2, 4, 8, 16, 32, 60, 60]
 
 
-def test_recovery_does_not_ack_stale_deployment_observation(tmp_path):
+def test_recovery_does_not_ack_stale_deployment_observation(tmp_path: Path) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
+    assert api.deployment is not None
     api.deployment["metadata"]["generation"] = 2
     cmd = command(ident)
     controller(tmp_path, ident, api, workspace).process(cmd)
+    assert api.deployment is not None
     api.deployment["spec"]["replicas"] = 0
     controller(tmp_path, ident, api, workspace).recover_pending()
     assert workspace.sent == []
 
 
-def test_tls_verification_cannot_be_disabled_by_kubeconfig(monkeypatch):
+def test_tls_verification_cannot_be_disabled_by_kubeconfig(monkeypatch: pytest.MonkeyPatch) -> None:
     import subprocess
 
-    seen = []
+    seen: list[tuple[list[str], dict[str, object]]] = []
 
-    def execute(args, **kwargs):
+    def execute(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         seen.append((args, kwargs))
         return subprocess.CompletedProcess(args, 0, "{}", "")
 
     monkeypatch.setattr(subprocess, "run", execute)
     Kubectl("/etc/kubeconfig").call(["get", "node", "node-a"])
     assert "--insecure-skip-tls-verify=false" in seen[0][0]
-    assert seen[0][1]["timeout"] <= 120
+    timeout = seen[0][1]["timeout"]
+    assert isinstance(timeout, int | float)
+    assert timeout <= 120
 
 
-def test_unknown_capacity_heartbeat_still_polls(tmp_path):
+def test_unknown_capacity_heartbeat_still_polls(tmp_path: Path) -> None:
     from threading import Event
 
     from app.runtime_v2.__main__ import run
     from app.runtime_v2.telemetry import NodeTelemetry
 
-    ident, workspace = identity(), Workspace()
+    ident = identity()
     stop = Event()
 
-    def post(path, body, **kwargs):
-        workspace.sent.append((path, body))
-        if path == "/poll":
-            stop.set()
-        return {"commands": []}
+    class PollingWorkspace(Workspace):
+        def post(self, path: str, body: dict[str, Any], *, timeout: float = 30) -> dict[str, Any]:
+            response = super().post(path, body, timeout=timeout)
+            if path == "/poll":
+                stop.set()
+            return response
 
-    workspace.post = post
+    workspace = PollingWorkspace()
     current = controller(tmp_path, ident, Api(ident), workspace)
     assert run(current, NodeTelemetry(Api(ident), ident.node_name), stop) == 0
     body = workspace.sent[0][1]
@@ -395,10 +420,11 @@ def test_unknown_capacity_heartbeat_still_polls(tmp_path):
     assert all(path != "/report" for path, _ in workspace.sent)
 
 
-def test_scale_fences_both_uid_and_opaque_resource_version():
+def test_scale_fences_both_uid_and_opaque_resource_version() -> None:
     ident = identity()
     api = Api(ident)
     api.timeout = False
+    assert api.deployment is not None
     api.deployment["metadata"]["resourceVersion"] = "opaque-version"
     KubernetesRunner(api).scale(ident, 0)
     args = api.mutations[0]
@@ -409,18 +435,20 @@ def test_scale_fences_both_uid_and_opaque_resource_version():
 
 
 @pytest.mark.parametrize("lost_response", [False, True])
-def test_pending_create_recovers_only_its_known_uids(tmp_path, lost_response):
+def test_pending_create_recovers_only_its_known_uids(tmp_path: Path, lost_response: bool) -> None:
     from copy import deepcopy
 
     ident, workspace = identity(), Workspace()
 
     class CreateApi(Api):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__(ident)
             self.deployment = self.claim = None
             self.created = 0
 
-        def get_optional(self, kind, name, namespace=None):
+        def get_optional(
+            self, kind: str, name: str, namespace: str | None = None
+        ) -> dict[str, Any] | None:
             if kind == "namespace":
                 return {"metadata": {"labels": ident.labels}}
             if kind == "networkpolicy":
@@ -444,7 +472,7 @@ def test_pending_create_recovers_only_its_known_uids(tmp_path, lost_response):
                 }
             return super().get_optional(kind, name, namespace)
 
-        def create(self, obj):
+        def create(self, obj: dict[str, Any]) -> dict[str, Any]:
             self.created += 1
             obj = deepcopy(obj)
             obj["metadata"].update(
@@ -493,7 +521,7 @@ def test_pending_create_recovers_only_its_known_uids(tmp_path, lost_response):
     assert b"do-not-persist-this-secret" not in (tmp_path / "journal.db").read_bytes()
 
 
-def test_config_rejects_plaintext_or_embedded_credentials():
+def test_config_rejects_plaintext_or_embedded_credentials() -> None:
     from app.runtime_v2.config import ControllerConfig
 
     settings = {
@@ -512,20 +540,22 @@ def test_config_rejects_plaintext_or_embedded_credentials():
         ControllerConfig.from_environ(settings)
 
 
-def test_journal_never_keeps_external_error_text(tmp_path):
+def test_journal_never_keeps_external_error_text(tmp_path: Path) -> None:
     journal = CommandJournal(str(tmp_path / "journal.db"))
     journal.begin("receipt")
     journal.finish("receipt", {"status": "failed", "error": "sensitive external secret"})
     assert b"sensitive external secret" not in (tmp_path / "journal.db").read_bytes()
 
 
-def test_signal_handler_requests_interruptible_shutdown(monkeypatch):
+def test_signal_handler_requests_interruptible_shutdown(monkeypatch: pytest.MonkeyPatch) -> None:
     import signal
+    from collections.abc import Callable
     from threading import Event
+    from types import FrameType
 
     from app.runtime_v2.__main__ import install_signal_handlers
 
-    handlers = {}
+    handlers: dict[int, Callable[[int, FrameType | None], None]] = {}
     monkeypatch.setattr(
         signal, "signal", lambda kind, callback: handlers.setdefault(kind, callback)
     )
@@ -536,7 +566,7 @@ def test_signal_handler_requests_interruptible_shutdown(monkeypatch):
     assert signal.SIGINT in handlers
 
 
-def test_kubeconfig_plaintext_endpoint_is_rejected(monkeypatch):
+def test_kubeconfig_plaintext_endpoint_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     import subprocess
 
     config = {"clusters": [{"cluster": {"server": "http://cluster.invalid"}}]}
@@ -549,7 +579,7 @@ def test_kubeconfig_plaintext_endpoint_is_rejected(monkeypatch):
         Kubectl("/etc/kubeconfig").validate_connection()
 
 
-def test_delete_cannot_ack_absence_while_older_write_is_unresolved(tmp_path):
+def test_delete_cannot_ack_absence_while_older_write_is_unresolved(tmp_path: Path) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
     controller(tmp_path, ident, api, workspace).process(command(ident, "start_env"))
@@ -561,20 +591,22 @@ def test_delete_cannot_ack_absence_while_older_write_is_unresolved(tmp_path):
     assert len(api.mutations) == 1
 
 
-def test_completed_receipt_is_not_reacknowledged_for_replaced_object(tmp_path):
+def test_completed_receipt_is_not_reacknowledged_for_replaced_object(tmp_path: Path) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
     cmd = command(ident)
     controller(tmp_path, ident, api, workspace).process(cmd)
+    assert api.deployment is not None
     api.deployment["spec"]["replicas"] = 0
     controller(tmp_path, ident, api, workspace).process(cmd)
     assert len(workspace.sent) == 1
+    assert api.deployment is not None
     api.deployment["metadata"]["uid"] = "replacement"
     controller(tmp_path, ident, api, workspace).process(cmd)
     assert len(workspace.sent) == 1
 
 
-def test_standalone_journal_has_single_controller_owner(tmp_path):
+def test_standalone_journal_has_single_controller_owner(tmp_path: Path) -> None:
     from app.runtime_v2.__main__ import controller_lock
 
     path = str(tmp_path / "journal.db")
@@ -588,7 +620,7 @@ def test_standalone_journal_has_single_controller_owner(tmp_path):
         pass
 
 
-def test_shutdown_never_starts_a_new_mutation(tmp_path):
+def test_shutdown_never_starts_a_new_mutation(tmp_path: Path) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
     current = controller(tmp_path, ident, api, workspace)
@@ -598,9 +630,10 @@ def test_shutdown_never_starts_a_new_mutation(tmp_path):
     assert workspace.sent == []
 
 
-def test_malformed_kubernetes_identity_is_rejected_without_crash(tmp_path):
+def test_malformed_kubernetes_identity_is_rejected_without_crash(tmp_path: Path) -> None:
     ident, workspace = identity(), Workspace()
     api = Api(ident)
+    assert api.deployment is not None
     api.deployment["metadata"] = "malformed"
     controller(tmp_path, ident, api, workspace).process(command(ident))
     assert api.mutations == []

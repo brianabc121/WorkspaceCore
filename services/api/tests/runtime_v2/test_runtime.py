@@ -6,11 +6,11 @@ import pytest
 from app.runtime_v2.kubernetes import KubernetesRuntime, RuntimeIdentity, UnsupportedOperation
 
 
-def identity():
+def identity() -> RuntimeIdentity:
     return RuntimeIdentity(uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), 3, "worker-a")
 
 
-def test_pod_uses_required_affinity_and_fixed_security_context():
+def test_pod_uses_required_affinity_and_fixed_security_context() -> None:
     ident = identity()
     pod = KubernetesRuntime.pod_manifest(
         ident, "registry.example/image@sha256:" + "a" * 64, 500, 256
@@ -26,7 +26,7 @@ def test_pod_uses_required_affinity_and_fixed_security_context():
     assert pod["metadata"]["labels"]["workspace.myworkspace.io/instance"] == ident.instance_id.hex
 
 
-def test_manifest_rejects_mutable_images_and_invalid_resource_requests():
+def test_manifest_rejects_mutable_images_and_invalid_resource_requests() -> None:
     with pytest.raises(ValueError):
         KubernetesRuntime.pod_manifest(identity(), "image:latest", 500, 256)
     with pytest.raises(ValueError):
@@ -34,7 +34,7 @@ def test_manifest_rejects_mutable_images_and_invalid_resource_requests():
 
 
 @pytest.mark.asyncio
-async def test_receipt_uses_actual_binding_and_rejects_stale_generation():
+async def test_receipt_uses_actual_binding_and_rejects_stale_generation() -> None:
     ident = identity()
     pod = KubernetesRuntime.pod_manifest(ident, "image@sha256:" + "a" * 64, 500, 256)
     pod["metadata"]["uid"] = "actual-uid"
@@ -45,7 +45,7 @@ async def test_receipt_uses_actual_binding_and_rejects_stale_generation():
         "conditions": [{"type": "Ready", "status": "True"}],
     }
 
-    async def handle(request):
+    async def handle(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=pod)
 
     async with httpx.AsyncClient(
@@ -62,14 +62,14 @@ async def test_receipt_uses_actual_binding_and_rejects_stale_generation():
 
 
 @pytest.mark.asyncio
-async def test_unsafe_legacy_operations_are_explicitly_unsupported():
+async def test_unsafe_legacy_operations_are_explicitly_unsupported() -> None:
     async with httpx.AsyncClient(base_url="https://cluster.invalid") as client:
         runtime = KubernetesRuntime(client)
         with pytest.raises(UnsupportedOperation):
             await runtime.execute("exec", {}, identity())
 
 
-def test_network_policy_only_allows_same_workspace_and_instance():
+def test_network_policy_only_allows_same_workspace_and_instance() -> None:
     ident = identity()
     policy = KubernetesRuntime.network_policy(ident)
     scope = {
@@ -83,7 +83,7 @@ def test_network_policy_only_allows_same_workspace_and_instance():
     assert spec["policyTypes"] == ["Ingress", "Egress"]
 
 
-def test_node_selector_uses_node_restriction_protected_label():
+def test_node_selector_uses_node_restriction_protected_label() -> None:
     ident = identity()
     pod = KubernetesRuntime.pod_manifest(ident, "image@sha256:" + "a" * 64, 500, 256)
     match = pod["spec"]["affinity"]["nodeAffinity"][

@@ -1,21 +1,39 @@
 """Placement rejects stale metrics and preserves an explicit target."""
 
 from datetime import UTC, datetime, timedelta
+from typing import Any, TypedDict, Unpack
 from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
+
+from app.domain.placement import Candidate
 
 NOW = datetime(2026, 11, 11, 5, 0, tzinfo=UTC)
 A = UUID("00000000-0000-0000-0000-000000000001")
 B = UUID("00000000-0000-0000-0000-000000000002")
 
 
-def candidate(server_id=A, **overrides):
-    from app.domain.placement import Candidate
+class CandidateChanges(TypedDict, total=False):
+    cpus: float | None
+    memory_mb: float | None
+    disk_gb: float | None
+    available_memory_mb: float | None
+    disk_free_gb: float | None
+    cpu_load: float | None
+    committed_cpus: float
+    committed_memory_mb: float
+    observed_committed_memory_mb: float | None
+    committed_disk_gb: float
+    observed_at: datetime | None
+    enabled: bool
+    runtimes: tuple[str, ...]
+    pending_memory_mb: float
+    pending_disk_gb: float
 
-    values = dict(
-        server_id=server_id,
+
+def candidate(server_id: UUID = A, **overrides: Unpack[CandidateChanges]) -> Candidate:
+    values: CandidateChanges = dict(
         cpus=8,
         memory_mb=16384,
         disk_gb=100,
@@ -30,26 +48,44 @@ def candidate(server_id=A, **overrides):
         runtimes=("gvisor", "runc"),
     )
     values.update(overrides)
-    return Candidate(**values)
+    return Candidate(
+        server_id=server_id,
+        cpus=values["cpus"],
+        memory_mb=values["memory_mb"],
+        disk_gb=values["disk_gb"],
+        available_memory_mb=values["available_memory_mb"],
+        disk_free_gb=values["disk_free_gb"],
+        cpu_load=values["cpu_load"],
+        committed_cpus=values["committed_cpus"],
+        committed_memory_mb=values["committed_memory_mb"],
+        observed_committed_memory_mb=values["observed_committed_memory_mb"],
+        committed_disk_gb=values["committed_disk_gb"],
+        observed_at=values["observed_at"],
+        runtimes=values["runtimes"],
+        enabled=values.get("enabled", True),
+        pending_memory_mb=values.get("pending_memory_mb", 0),
+        pending_disk_gb=values.get("pending_disk_gb", 0),
+    )
 
 
-def test_default_contract_and_explicit_validation():
+def test_default_contract_and_explicit_validation() -> None:
     from app.schemas.placement import Placement
 
     assert Placement().mode == "auto"
-    for values in [
+    invalid_inputs: list[dict[str, Any]] = [
         dict(mode="auto", server_id=A),
         dict(mode="specified"),
         dict(mode="specified", server_id="not-a-uuid"),
         dict(mode="typo"),
         dict(mode="auto", url="http://private"),
-    ]:
+    ]
+    for values in invalid_inputs:
         with pytest.raises(ValidationError):
             Placement(**values)
     assert Placement(mode="specified", server_id=A).server_id == A
 
 
-def test_selects_lower_loaded_server_after_pending_capacity():
+def test_selects_lower_loaded_server_after_pending_capacity() -> None:
     from app.domain.placement import ResourceRequest, rank_candidates
     from app.schemas.placement import Placement
 
@@ -62,7 +98,7 @@ def test_selects_lower_loaded_server_after_pending_capacity():
     assert [c.server_id for c in result] == [B, A]
 
 
-def test_explicit_target_never_falls_back():
+def test_explicit_target_never_falls_back() -> None:
     from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
     from app.schemas.placement import Placement
 
@@ -100,7 +136,9 @@ def test_explicit_target_never_falls_back():
         ({"cpu_load": 1.5}, "RESOURCE_PRESSURE"),
     ],
 )
-def test_ineligible_metrics_or_reservations_are_excluded(changes, reason):
+def test_ineligible_metrics_or_reservations_are_excluded(
+    changes: CandidateChanges, reason: str
+) -> None:
     from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
     from app.schemas.placement import Placement
 
@@ -111,7 +149,7 @@ def test_ineligible_metrics_or_reservations_are_excluded(changes, reason):
     assert exc.value.reasons[str(A)] == reason
 
 
-def test_running_usage_is_not_double_counted_against_free_memory():
+def test_running_usage_is_not_double_counted_against_free_memory() -> None:
     from app.domain.placement import ResourceRequest, rank_candidates
     from app.schemas.placement import Placement
 
@@ -122,7 +160,7 @@ def test_running_usage_is_not_double_counted_against_free_memory():
     assert result[0].server_id == A
 
 
-def test_external_memory_usage_preserves_unused_existing_commitments():
+def test_external_memory_usage_preserves_unused_existing_commitments() -> None:
     from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
     from app.schemas.placement import Placement
 
@@ -137,7 +175,7 @@ def test_external_memory_usage_preserves_unused_existing_commitments():
     assert error.value.reasons[str(A)] == "INSUFFICIENT_CAPACITY"
 
 
-def test_external_disk_usage_preserves_all_retained_promises():
+def test_external_disk_usage_preserves_all_retained_promises() -> None:
     from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
     from app.schemas.placement import Placement
 
@@ -149,7 +187,7 @@ def test_external_disk_usage_preserves_all_retained_promises():
     assert error.value.reasons[str(A)] == "INSUFFICIENT_CAPACITY"
 
 
-def test_disk_admission_keeps_host_emergency_headroom():
+def test_disk_admission_keeps_host_emergency_headroom() -> None:
     from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
     from app.schemas.placement import Placement
 
@@ -164,7 +202,7 @@ def test_disk_admission_keeps_host_emergency_headroom():
 
 
 @pytest.mark.parametrize("credit", [None, -1, float("nan"), 2049])
-def test_existing_commitments_require_valid_bounded_usage_credit(credit):
+def test_existing_commitments_require_valid_bounded_usage_credit(credit: float | None) -> None:
     from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
     from app.schemas.placement import Placement
 
@@ -178,7 +216,7 @@ def test_existing_commitments_require_valid_bounded_usage_credit(credit):
     assert error.value.reasons[str(A)] == "METRICS_UNKNOWN"
 
 
-def test_deterministic_ties_and_nonpositive_requests():
+def test_deterministic_ties_and_nonpositive_requests() -> None:
     from app.domain.placement import ResourceRequest, rank_candidates
     from app.schemas.placement import Placement
 

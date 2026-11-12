@@ -11,7 +11,7 @@ from tests.test_agent_server_password_migration import _seed
 pytestmark = pytest.mark.integration
 
 
-def test_placement_migration_roundtrip_preserves_legacy_rows(temp_database_url):
+def test_placement_migration_roundtrip_preserves_legacy_rows(temp_database_url: str) -> None:
     config = alembic_config(temp_database_url)
     command.upgrade(config, "0060")
     ids = _seed(temp_database_url)

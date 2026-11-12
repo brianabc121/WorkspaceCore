@@ -1,9 +1,13 @@
 """Only the platform's host mount supplies the runner's physical identity."""
 
+from pathlib import Path
+
 import pytest
 
 
-def test_runner_reads_normalized_host_machine_id_without_exposing_it(tmp_path, monkeypatch):
+def test_runner_reads_normalized_host_machine_id_without_exposing_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from app.runner_agent import agent
 
     source = tmp_path / "host-machine-id"
@@ -17,10 +21,10 @@ def test_runner_reads_normalized_host_machine_id_without_exposing_it(tmp_path, m
 
 @pytest.mark.parametrize("raw", [None, "", "not-a-machine", "A" * 32, "0" * 31])
 def test_runner_never_invents_a_machine_identity_for_missing_or_invalid_mount(
-    raw,
-    tmp_path,
-    monkeypatch,
-):
+    raw: str | None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app.runner_agent import agent
 
     source = tmp_path / "host-machine-id"

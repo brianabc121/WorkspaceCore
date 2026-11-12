@@ -12,8 +12,8 @@ pytestmark = pytest.mark.integration
 
 
 def test_multihost_upgrade_downgrade_preserves_environment_and_refuses_multi_host(
-    temp_database_url,
-):
+    temp_database_url: str,
+) -> None:
     config = alembic_config(temp_database_url)
     command.upgrade(config, "0061")
     env_id = _seed(temp_database_url)

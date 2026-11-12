@@ -5,7 +5,7 @@ owner: codex
 status: in_progress
 priority: P1
 branch: codex/T-0222-runtime-v2-placement-network
-paths: services/api,apps/web,infra,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows
+paths: services/api,apps/web,infra,tests/e2e,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows
 depends_on:
 created: 2026-11-11
 updated: 2026-11-12
@@ -40,3 +40,6 @@ updated: 2026-11-12
 - 2026-11-12 09:23 UTC · codex · 合入最新origin/main 36c6fb5e：主干已使用T-0222作im_send修复，本任务按协议由后合并方改号T-0224，历史进度不重写；保留PR193原head分支名以避免重复PR。主干已占0060存储迁移，本任务五步迁移顺延0061–0065（物理身份0065），基于主干0060；没有运行生产stamp/重置/迁移。正在复验集成。
 - 2026-11-12 09:30 UTC · codex · 主干36c6fb5e集成检查：0060存储表+0061–0065本任务迁移16项真实PG回归通过，5个迁移函数体确认仅改编号/依赖；唯一head0065，Ruff与strict mypy300通过，正式OpenAPI/TS及check:api同步。正在跑合并后全套，不把旧701/775当新基线结果。
 - 2026-11-12 10:32 UTC · codex · 当前检查点：主干36c6fb5e已合入并推送d0e92f6b；API703通过42跳过，迁移/存储16通过，回收最终整文件9通过155.61s（修正旧可信采样夹具并加强stopACK前后断言，产品准入不变）。Ruff/mypy300及FE lint/typecheck/build/check:api通过。完整FE774通过8超时；无并发六文件75通过1超时，日历单例仍复现。存储懒加载实验未解决并撤回，未增timeout或削弱断言。详见PROGRESS/REMAINING；下次先继续定位FE差异，再按剩余审计实现可信K8s报告、私网持续对账、完整运行适配与身份网关。PR193仍草稿，任务in_progress，无生产迁移。
+- 2026-11-12 15:24 UTC · codex · 人类本轮明确要求合并main，覆盖本次Codex交由Claude合并的角色限制；仅合并当前检查点，保持全部CI门槛与merge commit，不改长期协作协议。未完成的K8s/网络数据面继续关闭，验收仍未全完成，任务保持in_progress。合并前复查发现测试/迁移严格mypy范围遗漏，正在补齐并复验。
+- 2026-11-12 15:31 UTC · codex · 合并质量检查补充tests/e2e路径：当前无其他执行占用该验收脚本；ci-infra场景26在首份可信报告之前保存模板失败，改为等待真实候选可调度并显式给小型验收负载配置资源、失败立即给出MCP原因。验收后通过真实回收器清除快照并经公开移除守卫释放登记，避免后续同机SSH验收与全局物理身份防重冲突；不写假报告、不删除身份账本。完整后端检查另抓到真实并发预检查锁反转，已用已有并发回归复现，修复中。
+- 2026-11-12 15:54 UTC · codex · 按人类合并指令准备交付当前检查点：补齐CI真实范围Ruff524格式/strict mypy520/OpenAPI/collab检查；智能体部署锁序整组11通过，容器核心50通过，新增回执清理/回收/外键锁顺序15最终通过，真实隔离库CLI迁移up/down/up通过。修复均有RED→GREEN，未增timeout/忽略/削弱断言；独立复审源码未发现剩余阻塞。下一步推送同PR193，等待新head全部CI成功再merge commit；完整网络等功能仍关闭，任务in_progress。

@@ -1,13 +1,19 @@
 """Fail-closed network declarations and scoped DB/API lifecycle."""
 
 import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
+from tests.helpers import ClientFactory
+from tests.workspace_support import Env
 
-def test_service_rejects_client_identity_and_raw_destination():
+
+def test_service_rejects_client_identity_and_raw_destination() -> None:
     from app.schemas.runner_network import RunnerServiceCreate
 
     for extra in ({"host": "127.0.0.1"}, {"owner_instance_id": str(uuid.uuid4())}):
@@ -19,7 +25,7 @@ def test_service_rejects_client_identity_and_raw_destination():
             RunnerServiceCreate(name=name, port=port)
 
 
-def test_public_sources_require_finite_explicit_ipv4_scope():
+def test_public_sources_require_finite_explicit_ipv4_scope() -> None:
     from app.schemas.runner_network import RunnerPublishInput
 
     future = datetime.now(UTC) + timedelta(hours=1)
@@ -32,7 +38,7 @@ def test_public_sources_require_finite_explicit_ipv4_scope():
         RunnerPublishInput(source_cidrs=["203.0.113.4/32"], expires_at=None)
 
 
-def test_revision_ack_rejects_stale_host_generation_and_unsupported_gateway():
+def test_revision_ack_rejects_stale_host_generation_and_unsupported_gateway() -> None:
     from app.domain.runner_network import ack_allowed
 
     host, other = uuid.uuid4(), uuid.uuid4()
@@ -44,14 +50,14 @@ def test_revision_ack_rejects_stale_host_generation_and_unsupported_gateway():
 
 
 @pytest.fixture
-async def env(make_client, migrated_database_url):
+async def env(make_client: ClientFactory, migrated_database_url: str) -> AsyncIterator[Env]:
     from tests.workspace_support import open_env
 
     async with open_env(make_client, migrated_database_url) as value:
         yield value
 
 
-async def seed(env):
+async def seed(env: Env) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
     from app.models import RunnerEnvironment, RunnerHost
     from tests.test_runner_capabilities import enabled_instance
     from tests.workspace_support import app_of
@@ -86,12 +92,12 @@ async def seed(env):
         return obj.id, host.id, owner, other
 
 
-async def post(env, path, body):
+async def post(env: Env, path: str, body: dict[str, Any]) -> httpx.Response:
     return await env.client.post("/api/v1" + path, json=body, headers=env.headers(write=True))
 
 
 @pytest.mark.integration
-async def test_private_declaration_identity_and_trusted_ack_lifecycle(env):
+async def test_private_declaration_identity_and_trusted_ack_lifecycle(env: Env) -> None:
     from app.domain.runner_network import RunnerNetworkService
     from tests.workspace_support import app_of
 
@@ -103,9 +109,9 @@ async def test_private_declaration_identity_and_trusted_ack_lifecycle(env):
     assert service["state"] == "approved_pending_apply"
     assert service["owner_instance_id"] == str(owner)
     assert service["connect_host"] is None
-    result = await env.get("/api/v1" + path + "/network")
-    assert result["runtime_status"] == "pending_apply"
-    assert result["published_endpoints"] == []
+    network = await env.get("/api/v1" + path + "/network")
+    assert network["runtime_status"] == "pending_apply"
+    assert network["published_endpoints"] == []
     app = app_of(env.client)
     async with app.state.sessionmaker() as db:
         manager = RunnerNetworkService(db, app.state.settings)
@@ -118,9 +124,9 @@ async def test_private_declaration_identity_and_trusted_ack_lifecycle(env):
             host_id, uuid.UUID(service["id"]), 1, generation=3, success=True
         )
         await db.commit()
-    result = await env.get("/api/v1" + path + "/network")
-    assert result["services"][0]["state"] == "active"
-    assert result["services"][0]["connect_host"] == service["desired_dns"]
+    network = await env.get("/api/v1" + path + "/network")
+    assert network["services"][0]["state"] == "active"
+    assert network["services"][0]["connect_host"] == service["desired_dns"]
     assert (await post(env, path + "/services", {"name": "db", "port": 80})).status_code == 409
     assert (
         await post(
@@ -132,7 +138,7 @@ async def test_private_declaration_identity_and_trusted_ack_lifecycle(env):
 
 
 @pytest.mark.integration
-async def test_owner_consent_source_grant_and_public_pending_revoke(env):
+async def test_owner_consent_source_grant_and_public_pending_revoke(env: Env) -> None:
     from app.domain.runner_network import RunnerNetworkService
     from app.models.runner_network import RunnerPublishedEndpoint
     from tests.helpers import OWNER
@@ -176,7 +182,7 @@ async def test_owner_consent_source_grant_and_public_pending_revoke(env):
 
 
 @pytest.mark.integration
-async def test_network_workspace_role_csrf_and_missing_runtime(env):
+async def test_network_workspace_role_csrf_and_missing_runtime(env: Env) -> None:
     from tests.helpers import csrf
 
     env_id, _, _, _ = await seed(env)
@@ -206,7 +212,9 @@ async def test_network_workspace_role_csrf_and_missing_runtime(env):
 
 
 @pytest.mark.integration
-async def test_network_host_transport_is_authenticated_and_requires_dataplane_validation(env):
+async def test_network_host_transport_is_authenticated_and_requires_dataplane_validation(
+    env: Env,
+) -> None:
     from app.domain.runner_hosts import hash_token, new_token
     from app.models import RunnerHost
     from tests.workspace_support import app_of

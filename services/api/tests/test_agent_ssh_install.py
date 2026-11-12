@@ -18,7 +18,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import asyncssh
 import httpx
@@ -120,6 +120,25 @@ esac
 """
 
 
+class HostResources(TypedDict):
+    generation: str
+    physical_host_id: str
+    sequence: int
+    cores: int
+    cpu_percent: int
+    load1: float
+    mem_total: int
+    mem_available: int
+    root_total: int
+    root_free: int
+    data_total: int
+    data_free: int
+    runtime_ready: bool
+    network_ready: bool
+    managed_identities: list[dict[str, Any]]
+    managed_usage: list[dict[str, Any]]
+
+
 class FakeHost:
     def __init__(self, root: Path, **inspect: str) -> None:
         self.home = root / "home"
@@ -147,7 +166,7 @@ class FakeHost:
         self.stdin: list[bytes] = []
         # Explicit fake host data for the independent SSH probe; this is never
         # claimed as a real machine capacity verification.
-        self.resources = {
+        self.resources: HostResources = {
             "generation": str(uuid.uuid4()),
             "physical_host_id": uuid.uuid4().hex * 2,
             "sequence": 1000,

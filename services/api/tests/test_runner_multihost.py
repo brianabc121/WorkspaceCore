@@ -1,19 +1,20 @@
 """多服务器选择、实际主机路由与持久预约。"""
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.domain import runner_specs as specs
-from app.domain.runner import Runner, RunnerError
+from app.domain.runner import MAX_ATTEMPTS, Runner, RunnerError
 from app.models import RunnerEnvironment, RunnerHost
 from app.schemas.runner import EnvCreateInput
+from tests.helpers import ClientFactory
 
 
-def host(**changes):
+def host(**changes: object) -> RunnerHost:
     values = dict(
         id=uuid.uuid4(),
         workspace_id=uuid.uuid4(),
@@ -38,7 +39,7 @@ def host(**changes):
     return RunnerHost(**(values | changes))
 
 
-def test_create_accepts_explicit_placement_and_legacy_host_id():
+def test_create_accepts_explicit_placement_and_legacy_host_id() -> None:
     target = str(uuid.uuid4())
     body = EnvCreateInput(
         purpose="test", lifetime="session", placement={"mode": "specified", "server_id": target}
@@ -56,7 +57,7 @@ def test_create_accepts_explicit_placement_and_legacy_host_id():
         )
 
 
-async def test_legacy_host_refuses_ambiguous_pool():
+async def test_legacy_host_refuses_ambiguous_pool() -> None:
     db = AsyncMock()
     db.scalars.return_value = [host(), host()]
     with pytest.raises(RunnerError, match="服务器") as error:
@@ -64,7 +65,7 @@ async def test_legacy_host_refuses_ambiguous_pool():
     assert error.value.code == "RUNNER_HOST_AMBIGUOUS"
 
 
-async def test_online_host_checks_requested_host_identity():
+async def test_online_host_checks_requested_host_identity() -> None:
     node = host()
     db = AsyncMock()
     db.scalar.return_value = node
@@ -75,7 +76,7 @@ async def test_online_host_checks_requested_host_identity():
     assert "runner_hosts.workspace_id =" in query
 
 
-def test_capacity_samples_are_single_use_bounded_and_bound_to_the_host():
+def test_capacity_samples_are_single_use_bounded_and_bound_to_the_host() -> None:
     from datetime import timedelta
 
     from app.core.errors import ApiError
@@ -105,7 +106,7 @@ def test_capacity_samples_are_single_use_bounded_and_bound_to_the_host():
     assert accept_report_sample(node, RunnerReport(), now) is None
 
 
-def test_candidate_requires_report_not_recent_poll():
+def test_candidate_requires_report_not_recent_poll() -> None:
     from app.domain.runner_placement import candidate_for
 
     candidate = candidate_for(host(report={}), [])
@@ -113,7 +114,7 @@ def test_candidate_requires_report_not_recent_poll():
     assert candidate.cpu_load is None
 
 
-def test_stopped_releases_compute_but_retains_disk_and_unknown_reserves_compute():
+def test_stopped_releases_compute_but_retains_disk_and_unknown_reserves_compute() -> None:
     from app.domain.runner_placement import candidate_for
 
     allocations = [
@@ -126,7 +127,7 @@ def test_stopped_releases_compute_but_retains_disk_and_unknown_reserves_compute(
     assert candidate.committed_disk_gb == 40
 
 
-def test_candidate_credits_only_measured_nonpending_allocation_memory():
+def test_candidate_credits_only_measured_nonpending_allocation_memory() -> None:
     from app.domain.runner_placement import candidate_for
 
     env = RunnerEnvironment(
@@ -141,7 +142,7 @@ def test_candidate_credits_only_measured_nonpending_allocation_memory():
     assert candidate_for(host(), [env]).observed_committed_memory_mb == 0
 
 
-async def test_restart_reserves_before_dispatch_and_routes_actual_host():
+async def test_restart_reserves_before_dispatch_and_routes_actual_host() -> None:
     node = host()
     env = RunnerEnvironment(
         id=uuid.uuid4(),
@@ -156,18 +157,20 @@ async def test_restart_reserves_before_dispatch_and_routes_actual_host():
         volume_name="volume",
     )
     runner = Runner(AsyncMock(), Settings())
-    runner.admit_restart = AsyncMock(return_value=node)
-    runner.enqueue = MagicMock()
-    await runner.start(env)
-    runner.admit_restart.assert_awaited_once_with(env)
-    assert env.state == "creating"
-    assert runner.enqueue.call_args.args[0].id == env.host_id
+    with (
+        patch.object(runner, "admit_restart", new=AsyncMock(return_value=node)) as admit_restart,
+        patch.object(runner, "enqueue", new=MagicMock()) as enqueue,
+    ):
+        await runner.start(env)
+        admit_restart.assert_awaited_once_with(env)
+        assert env.state == "creating"
+        assert enqueue.call_args.args[0].id == env.host_id
 
 
 @pytest.mark.integration
 async def test_register_multiple_hosts_routes_and_legacy_ambiguity(
-    make_client, migrated_database_url
-):
+    make_client: ClientFactory, migrated_database_url: str
+) -> None:
     from tests.test_runner_api import SETTINGS
     from tests.workspace_support import open_env
 
@@ -199,7 +202,7 @@ async def test_register_multiple_hosts_routes_and_legacy_ambiguity(
         assert response.status_code == 404
 
 
-async def test_shared_environment_requires_copy_before_mutation():
+async def test_shared_environment_requires_copy_before_mutation() -> None:
     viewer_instance = MagicMock(id=uuid.uuid4(), workspace_id=uuid.uuid4())
     environment = RunnerEnvironment(
         id=uuid.uuid4(),
@@ -208,27 +211,28 @@ async def test_shared_environment_requires_copy_before_mutation():
         share="project",
         project_id=uuid.uuid4(),
     )
-    runner = Runner(AsyncMock(), Settings())
-    runner.db.get.return_value = environment
-    runner._project_ids = AsyncMock(return_value={environment.project_id})
+    db = AsyncMock()
+    db.get.return_value = environment
+    runner = Runner(db, Settings())
     from app.domain.runner import Viewer
 
-    with pytest.raises(RunnerError) as error:
-        await runner.env(
-            Viewer(viewer_instance.workspace_id, instance=viewer_instance), environment.id
+    with patch.object(runner, "_project_ids", new=AsyncMock(return_value={environment.project_id})):
+        with pytest.raises(RunnerError) as error:
+            await runner.env(
+                Viewer(viewer_instance.workspace_id, instance=viewer_instance), environment.id
+            )
+        assert error.value.code == "ENV_COPY_REQUIRED"
+        assert (
+            await runner.env(
+                Viewer(viewer_instance.workspace_id, instance=viewer_instance),
+                environment.id,
+                allow_shared=True,
+            )
+            is environment
         )
-    assert error.value.code == "ENV_COPY_REQUIRED"
-    assert (
-        await runner.env(
-            Viewer(viewer_instance.workspace_id, instance=viewer_instance),
-            environment.id,
-            allow_shared=True,
-        )
-        is environment
-    )
 
 
-def test_keep_without_stop_receipt_keeps_compute_reserved():
+def test_keep_without_stop_receipt_keeps_compute_reserved() -> None:
     from app.domain.runner_placement import candidate_for
 
     env = RunnerEnvironment(
@@ -239,7 +243,7 @@ def test_keep_without_stop_receipt_keeps_compute_reserved():
     assert candidate_for(host(), [env]).committed_memory_mb == 2048
 
 
-def test_restart_reservation_outlives_original_created_at_and_stale_report():
+def test_restart_reservation_outlives_original_created_at_and_stale_report() -> None:
     from datetime import timedelta
 
     from app.domain.runner_placement import candidate_for
@@ -256,9 +260,9 @@ def test_restart_reservation_outlives_original_created_at_and_stale_report():
 
 @pytest.mark.integration
 async def test_delayed_report_does_not_release_restart_and_failed_host_cannot_be_removed(
-    make_client,
-    migrated_database_url,
-):
+    make_client: ClientFactory,
+    migrated_database_url: str,
+) -> None:
     from sqlalchemy import select
 
     from app.core.errors import ApiError
@@ -362,16 +366,16 @@ async def test_delayed_report_does_not_release_restart_and_failed_host_cannot_be
             await db.refresh(node)
             allocation.state = "failed"
             await db.commit()
-            with pytest.raises(ApiError) as error:
+            with pytest.raises(ApiError) as removal_error:
                 await service.remove(node, None, node.version)
-            assert error.value.code == "RUNNER_HAS_ENVIRONMENTS"
+            assert removal_error.value.code == "RUNNER_HAS_ENVIRONMENTS"
             assert await db.get(RunnerEnvironment, allocation.id) is not None
 
 
 @pytest.mark.integration
 async def test_concurrent_instances_cannot_share_unobserved_free_memory(
-    make_client, migrated_database_url
-):
+    make_client: ClientFactory, migrated_database_url: str
+) -> None:
     import asyncio
 
     from app.models import AgentInstance
@@ -388,7 +392,7 @@ async def test_concurrent_instances_cannot_share_unobserved_free_memory(
             node.report = {**node.report, "mem_free_bytes": 6 * 1024**3}
             await db.commit()
 
-        async def allocate(instance_id):
+        async def allocate(instance_id: str) -> uuid.UUID | str:
             async with app.state.sessionmaker() as db:
                 instance = await db.get(AgentInstance, uuid.UUID(instance_id))
                 try:
@@ -417,8 +421,8 @@ async def test_concurrent_instances_cannot_share_unobserved_free_memory(
 
 @pytest.mark.integration
 async def test_auto_specified_reuse_conflict_and_operations_use_actual_host(
-    make_client, migrated_database_url
-):
+    make_client: ClientFactory, migrated_database_url: str
+) -> None:
     from sqlalchemy import select
 
     from app.domain.runner_hosts import RunnerHosts
@@ -479,3 +483,192 @@ async def test_auto_specified_reuse_conflict_and_operations_use_actual_host(
             execute = await db.scalar(select(RunnerCommand).where(RunnerCommand.run_id == run.id))
             assert execute.host_id == allocation.host_id
             assert execute.payload["runtime_identity"]["allocation_id"] == str(allocation.id)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("retry", ["resave_same", "resave_other", "rebuild"])
+@pytest.mark.parametrize("old_result", ["done", "failed", "expired"])
+async def test_only_current_template_build_can_change_template(
+    retry: str,
+    old_result: str,
+    make_client: ClientFactory,
+    migrated_database_url: str,
+) -> None:
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app.domain import runner_reclaim
+    from app.domain.runner_hosts import RunnerHosts
+    from app.models import RunnerCommand, RunnerTemplate
+    from app.schemas.runner import RunnerCommandResult, RunnerHostCreate
+    from tests.test_runner_api import SETTINGS, add_host
+    from tests.workspace_support import app_of, open_env
+
+    async with open_env(make_client, migrated_database_url, **SETTINGS) as env:
+        await add_host(env)
+        body = {"name": "attempt-fence", "spec": {"image": "python:3.12-slim"}}
+        response = await env.client.put(
+            "/api/v1/runner/templates", json=body, headers=env.headers(write=True)
+        )
+        assert response.status_code == 200, response.text
+        saved = response.json()
+        template_id = uuid.UUID(saved["id"])
+        app = app_of(env.client)
+        async with app.state.sessionmaker() as db:
+            old = await db.scalar(
+                select(RunnerCommand).where(RunnerCommand.template_id == template_id)
+            )
+            assert old is not None
+            old_id, old_host_id = old.id, old.host_id
+            old.status = "unknown" if old_result == "failed" else "sent"
+            if retry == "resave_other":
+                first = await db.get(RunnerHost, old_host_id)
+                second, _ = await RunnerHosts(db, app.state.settings).create(
+                    first.workspace_id, RunnerHostCreate(name="new-build-host"), None
+                )
+                second.status, second.last_seen_at = "online", specs.now()
+                second.cpus, second.mem_bytes, second.disk_bytes = (
+                    first.cpus,
+                    first.mem_bytes,
+                    first.disk_bytes,
+                )
+                second.disk_free_bytes, second.runtimes = first.disk_free_bytes, first.runtimes
+                second.report = {**first.report, "load": 0.0}
+            await db.commit()
+
+        if retry == "rebuild":
+            response = await env.client.post(
+                f"/api/v1/runner/templates/{template_id}/rebuild", headers=env.headers(write=True)
+            )
+        else:
+            response = await env.client.put(
+                "/api/v1/runner/templates",
+                json={**body, "version": saved["version"]},
+                headers=env.headers(write=True),
+            )
+        assert response.status_code == 200, response.text
+        assert response.json()["revision"] == saved["revision"]
+
+        async with app.state.sessionmaker() as db:
+            commands = list(
+                await db.scalars(
+                    select(RunnerCommand)
+                    .where(RunnerCommand.template_id == template_id)
+                    .order_by(RunnerCommand.seq)
+                )
+            )
+            assert len(commands) == 2
+            old, current = commands
+            assert old.id == old_id
+            assert (current.host_id != old_host_id) == (retry == "resave_other")
+            current_id, current_host_id = current.id, current.host_id
+            if old_result == "expired":
+                old.deadline_at = specs.now() - timedelta(seconds=1)
+                old.attempts = MAX_ATTEMPTS
+                await db.commit()
+                await runner_reclaim._expire_commands(
+                    Runner(db, app.state.settings), runner_reclaim.TickResult()
+                )
+            else:
+                assert await RunnerHosts(db, app.state.settings).result(
+                    await db.get(RunnerHost, old_host_id),
+                    old_id,
+                    RunnerCommandResult(
+                        status=old_result,
+                        result={"image_digest": "sha256:old", "log": "old build"},
+                        error="old failure" if old_result == "failed" else None,
+                    ),
+                )
+            await db.commit()
+
+        async with app.state.sessionmaker() as db:
+            template = await db.get(RunnerTemplate, template_id)
+            assert template is not None
+            assert template.build_host_id == current_host_id
+            assert template.build_status == "building"
+            assert template.build_error is None
+            assert template.image_digest is None
+            assert not template.build_log
+            assert await RunnerHosts(db, app.state.settings).result(
+                await db.get(RunnerHost, current_host_id),
+                current_id,
+                RunnerCommandResult(
+                    status="done",
+                    result={"image_digest": "sha256:current", "log": "current build"},
+                ),
+            )
+            await db.commit()
+            await db.refresh(template)
+            assert template.build_status == "ready"
+            assert template.image_digest == "sha256:current"
+            assert template.build_log == "current build"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("late_status", ["done", "failed"])
+async def test_template_attempt_fence_survives_command_retention(
+    late_status: str, make_client: ClientFactory, migrated_database_url: str
+) -> None:
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app.domain import runner_reclaim
+    from app.domain.runner_hosts import RunnerHosts
+    from app.models import RunnerCommand, RunnerTemplate
+    from app.schemas.runner import RunnerCommandResult
+    from tests.test_runner_api import SETTINGS, add_host
+    from tests.workspace_support import app_of, open_env
+
+    async with open_env(make_client, migrated_database_url, **SETTINGS) as env:
+        await add_host(env)
+        body = {"name": "retained-attempt", "spec": {"image": "python:3.12-slim"}}
+        first = await env.client.put(
+            "/api/v1/runner/templates", json=body, headers=env.headers(write=True)
+        )
+        assert first.status_code == 200, first.text
+        template_id = uuid.UUID(first.json()["id"])
+        second = await env.client.put(
+            "/api/v1/runner/templates",
+            json={**body, "version": first.json()["version"]},
+            headers=env.headers(write=True),
+        )
+        assert second.status_code == 200, second.text
+        app = app_of(env.client)
+        async with app.state.sessionmaker() as db:
+            commands = list(
+                await db.scalars(
+                    select(RunnerCommand)
+                    .where(RunnerCommand.template_id == template_id)
+                    .order_by(RunnerCommand.seq)
+                )
+            )
+            old, current = commands
+            old.status = "unknown"
+            service = RunnerHosts(db, app.state.settings)
+            host = await db.get(RunnerHost, current.host_id)
+            assert await service.result(
+                host,
+                current.id,
+                RunnerCommandResult(status="done", result={"image_digest": "sha256:current"}),
+            )
+            current.finished_at = specs.now() - timedelta(days=8)
+            await db.commit()
+            await runner_reclaim._purge(Runner(db, app.state.settings), runner_reclaim.TickResult())
+            await db.commit()
+            assert await service.result(
+                host,
+                old.id,
+                RunnerCommandResult(
+                    status=late_status,
+                    result={"image_digest": "sha256:stale"},
+                    error="stale failure" if late_status == "failed" else None,
+                ),
+            )
+            await db.commit()
+            template = await db.get(RunnerTemplate, template_id)
+            assert template is not None
+            assert template.build_status == "ready"
+            assert template.image_digest == "sha256:current"
+            assert template.build_error is None

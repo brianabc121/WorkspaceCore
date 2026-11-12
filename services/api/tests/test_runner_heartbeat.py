@@ -11,11 +11,12 @@ from app.domain.runner_hosts import RunnerHosts
 from app.domain.runner_placement import candidate_for
 from app.models import RunnerEnvironment
 from app.schemas.runner import RunnerPoll
+from tests.helpers import ClientFactory
 from tests.test_runner_multihost import host
 
 
 @pytest.mark.parametrize("kind", ["create_env", "start_env", "stop_env", "delete_env"])
-def test_enqueued_lifecycle_binds_host_and_overrides_untrusted_payload(kind):
+def test_enqueued_lifecycle_binds_host_and_overrides_untrusted_payload(kind: str) -> None:
     node = host(node_name="actual-node")
     environment = RunnerEnvironment(
         id=uuid.uuid4(),
@@ -38,12 +39,14 @@ def test_enqueued_lifecycle_binds_host_and_overrides_untrusted_payload(kind):
 
 
 @pytest.mark.parametrize("missing", ["cpus", "mem_bytes", "disk_bytes", "disk_free_bytes"])
-async def test_missing_heartbeat_metric_preserves_last_readings_but_invalidates_admission(missing):
+async def test_missing_heartbeat_metric_preserves_last_readings_but_invalidates_admission(
+    missing: str,
+) -> None:
     node = host()
     original = {
         key: getattr(node, key) for key in ("cpus", "mem_bytes", "disk_bytes", "disk_free_bytes")
     }
-    body = {
+    body: dict[str, object] = {
         "agent_version": "0.2.0",
         "docker_version": None,
         "runtimes": [],
@@ -64,7 +67,7 @@ async def test_missing_heartbeat_metric_preserves_last_readings_but_invalidates_
     db.refresh.assert_awaited_once_with(node, with_for_update=True)
 
 
-async def test_unknown_heartbeat_does_not_become_fresh_when_poll_metrics_resume():
+async def test_unknown_heartbeat_does_not_become_fresh_when_poll_metrics_resume() -> None:
     node = host()
     hosts = RunnerHosts(AsyncMock(), Settings(), AsyncMock())
     unknown = RunnerPoll(agent_version="0.2.0", runtimes=[], kvm=False)
@@ -85,8 +88,8 @@ async def test_unknown_heartbeat_does_not_become_fresh_when_poll_metrics_resume(
 
 @pytest.mark.integration
 async def test_unknown_heartbeat_delivers_pending_command_without_renewing_capacity(
-    make_client, migrated_database_url
-):
+    make_client: ClientFactory, migrated_database_url: str
+) -> None:
     from sqlalchemy import select
 
     from app.models import RunnerHost

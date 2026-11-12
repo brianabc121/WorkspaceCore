@@ -406,7 +406,7 @@ class RunnerHosts:
     async def check_in(self, host: RunnerHost, body: RunnerPoll) -> None:
         # Serialize telemetry invalidation with report sampling and admission;
         # otherwise an older authenticated row could overwrite a newer report.
-        await self.db.refresh(host, with_for_update=True)
+        await self.db.refresh(host, with_for_update={"key_share": True})
         was = host.status
         host.agent_version = body.agent_version
         host.docker_version = body.docker_version
@@ -498,6 +498,8 @@ class RunnerHosts:
         return True
 
     async def _lock_report_host(self, host: RunnerHost) -> RunnerHost:
+        # Non-key telemetry writes serialize with admission and deletion while
+        # allowing foreign-key checks from lifecycle commands.
         current = await self.db.scalar(
             select(RunnerHost)
             .where(
@@ -505,7 +507,7 @@ class RunnerHosts:
                 RunnerHost.token_hash == host.token_hash,
                 RunnerHost.status != "disabled",
             )
-            .with_for_update()
+            .with_for_update(key_share=True)
             .execution_options(populate_existing=True)
         )
         if current is None:

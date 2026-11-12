@@ -1,14 +1,26 @@
 """Historical commitments must come from finite limits of the exact managed container."""
 
 import json
+from typing import TypedDict
 
 import pytest
 
 
-def test_reconciliation_accepts_only_matching_finite_container():
+class RuntimeInspect(TypedDict):
+    project: str
+    directory: str
+    service: str
+    id: str
+    memory: int
+    nano_cpus: int
+    cpu_quota: int
+    cpu_period: int
+
+
+def test_reconciliation_accepts_only_matching_finite_container() -> None:
     from app.domain.agent_runtime_resources import parse_runtime_limits
 
-    row = {
+    row: RuntimeInspect = {
         "project": "myworkspace-openclaw-123456789abc",
         "directory": "/home/deploy/app",
         "service": "openclaw",
@@ -32,10 +44,10 @@ def test_reconciliation_accepts_only_matching_finite_container():
             parse_runtime_limits(json.dumps(row | change), row["project"], row["directory"])
 
 
-def test_reconciliation_understands_finite_cpu_quota_and_rounds_memory_up():
+def test_reconciliation_understands_finite_cpu_quota_and_rounds_memory_up() -> None:
     from app.domain.agent_runtime_resources import parse_runtime_limits
 
-    row = {
+    row: RuntimeInspect = {
         "project": "myworkspace-openclaw-123456789abc",
         "directory": "/app",
         "service": "openclaw",

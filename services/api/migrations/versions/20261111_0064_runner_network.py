@@ -10,7 +10,7 @@ branch_labels = None
 depends_on = None
 
 
-def common():
+def common() -> list[sa.schema.SchemaItem]:
     return [
         sa.Column("id", pg.UUID(as_uuid=True), primary_key=True),
         sa.Column("workspace_id", pg.UUID(as_uuid=True), nullable=False),
@@ -64,7 +64,7 @@ def common():
     ]
 
 
-def service_fk():
+def service_fk() -> sa.ForeignKeyConstraint:
     return sa.ForeignKeyConstraint(
         ["workspace_id", "environment_id", "service_id"],
         [
@@ -76,7 +76,7 @@ def service_fk():
     )
 
 
-def upgrade():
+def upgrade() -> None:
     op.create_table(
         "runner_services",
         *common(),
@@ -117,6 +117,6 @@ def upgrade():
     )
 
 
-def downgrade():
+def downgrade() -> None:
     for table in ("runner_published_endpoints", "runner_ingress_rules", "runner_services"):
         op.drop_table(table, schema="workspace")

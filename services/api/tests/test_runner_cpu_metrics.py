@@ -138,7 +138,9 @@ def test_reading_helpers() -> None:
         ({"memory_stats": {}}, None),
     ],
 )
-def test_capacity_credit_excludes_reclaimable_cache_and_requires_measurement(stats, expected):
+def test_capacity_credit_excludes_reclaimable_cache_and_requires_measurement(
+    stats: dict[str, Any], expected: int | None
+) -> None:
     from app.runner_agent.metrics import memory_working_set_bytes
 
     assert memory_working_set_bytes(stats) == expected

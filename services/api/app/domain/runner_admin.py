@@ -491,9 +491,8 @@ class RunnerAdmin:
         if env.state == "deleted" and env.lifetime == "persistent":
             if await self.runner.latest_snapshot(env) is None:
                 raise ApiError(409, "SNAPSHOT_NOT_FOUND", "这个环境没有可用的快照了")
-            env.deleted_at = None
-            env.state = "archived"
             await self.runner.rebuild(env, "管理员从快照恢复")
+            env.deleted_at = None
             return
         raise ApiError(409, "ENV_UNAVAILABLE", f"环境现在是 {env.state}，不需要恢复")
 
@@ -571,7 +570,10 @@ class RunnerAdmin:
     async def rebuild_template(
         self, access: WorkspaceAccess, template_id: uuid.UUID
     ) -> RunnerTemplateAdminOut:
+        # Serialize with save and result using the same host → template order.
+        await self.runner._lock_pool_hosts(access.workspace.id)
         template = await self._template(access, template_id)
+        await self.db.refresh(template, with_for_update=True)
         try:
             host = await self.runner.online_host(access.workspace.id, template.build_host_id)
         except RunnerError as error:

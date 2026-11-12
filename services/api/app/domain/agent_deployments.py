@@ -134,7 +134,9 @@ class AgentDeploymentService:
         # Replays return earlier in create() and never refresh or pick a new host.
         if body.placement.mode == "specified":
             assert body.placement.server_id is not None  # noqa: S101 - Placement validates specified
-            preflight = await self.servers.server_of(access, body.placement.server_id)
+            # deployable_target locks the SSH target; keep the same server →
+            # target order as admission and resource refresh, including preflight.
+            preflight = await self.servers.server_of(access, body.placement.server_id, lock=True)
             if body.server_version is not None and body.server_version != preflight.version:
                 raise _version_conflict(preflight.version)
             await self.servers.deployable_target(preflight)

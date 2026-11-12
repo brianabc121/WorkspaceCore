@@ -184,7 +184,7 @@ class Runner:
                 AgentInstance.id == instance.id,
                 AgentInstance.workspace_id == instance.workspace_id,
             )
-            .with_for_update()
+            .with_for_update(key_share=True)
         )
 
     async def _lock_pool_hosts(self, workspace_id: uuid.UUID) -> list[RunnerHost]:
@@ -194,7 +194,7 @@ class Runner:
                 select(RunnerHost)
                 .where(RunnerHost.workspace_id == workspace_id)
                 .order_by(RunnerHost.id)
-                .with_for_update()
+                .with_for_update(key_share=True)
                 .execution_options(populate_existing=True)
             )
         )
@@ -437,13 +437,42 @@ class Runner:
         )
         return list(rows)
 
-    async def template_by_name(self, workspace_id: uuid.UUID, name: str) -> RunnerTemplate | None:
-        result: RunnerTemplate | None = await self.db.scalar(
-            select(RunnerTemplate).where(
-                RunnerTemplate.workspace_id == workspace_id, RunnerTemplate.name == name
-            )
+    async def template_by_name(
+        self, workspace_id: uuid.UUID, name: str, *, lock: bool = False
+    ) -> RunnerTemplate | None:
+        query = select(RunnerTemplate).where(
+            RunnerTemplate.workspace_id == workspace_id, RunnerTemplate.name == name
         )
+        if lock:
+            query = query.with_for_update().execution_options(populate_existing=True)
+        result: RunnerTemplate | None = await self.db.scalar(query)
         return result
+
+    async def current_template_build(self, command: RunnerCommand) -> RunnerTemplate | None:
+        """Fence callbacks and expiry by the latest build attempt under the template lock."""
+        if command.template_id is None:
+            return None
+        template = await self.db.get(
+            RunnerTemplate, command.template_id, with_for_update=True, populate_existing=True
+        )
+        if (
+            template is None
+            or template.workspace_id != command.workspace_id
+            or template.build_host_id != command.host_id
+            or template.revision != int(command.payload.get("revision", 0))
+        ):
+            return None
+        latest = await self.db.scalar(
+            select(RunnerCommand.id)
+            .where(
+                RunnerCommand.workspace_id == command.workspace_id,
+                RunnerCommand.template_id == template.id,
+                RunnerCommand.kind == "build_template",
+            )
+            .order_by(RunnerCommand.seq.desc())
+            .limit(1)
+        )
+        return template if latest == command.id else None
 
     async def save_template(
         self,
@@ -463,7 +492,8 @@ class Runner:
         from app.schemas.placement import Placement
 
         host = await self.select_host(viewer.workspace_id, normalized, Placement())
-        template = await self.template_by_name(viewer.workspace_id, name)
+        # Match callbacks' host → template lock order before changing the attempt.
+        template = await self.template_by_name(viewer.workspace_id, name, lock=True)
         created = template is None
         if template is None:
             template = RunnerTemplate(
@@ -949,12 +979,14 @@ class Runner:
                     )
                 if found.state in ("creating", "failed", "pending_delete"):
                     raise RunnerError("ENV_UNAVAILABLE", "环境创建结果仍未知或正在创建，请先对账")
-                await self.touch(found)
                 run = None
                 if command is not None:
                     run = await self.start_run(instance, found, command, body.timeout_seconds)
                 elif found.state == "archived":
                     await self.rebuild(found, "复用，自动重建")
+                # Lifecycle admission locks host → environment; dirtying the row
+                # earlier would let an autoflush acquire those locks in reverse.
+                await self.touch(found)
                 await self.db.commit()
                 return found, True, "已复用同一个 reuse_key 的环境", run
         if body.new and not (body.new_reason or "").strip():
@@ -1661,11 +1693,8 @@ class Runner:
         ok = status == "done"
         kind = command.kind
         if kind == "build_template" and command.template_id is not None:
-            template = await self.db.get(RunnerTemplate, command.template_id)
-            if (
-                template is not None
-                and int(command.payload.get("revision", 0)) == template.revision
-            ):
+            template = await self.current_template_build(command)
+            if template is not None:
                 template.build_status = "ready" if ok else "failed"
                 template.build_error = None if ok else (error or "构建失败")[:2000]
                 template.build_log = _redact(str(result.get("log", ""))[-20000:], [])

@@ -2,17 +2,19 @@
 
 import asyncio
 import uuid
+from typing import Literal
 
 import pytest
 from sqlalchemy import func, select
 
 from app.models import AgentServer, RunnerHost
-from tests.workspace_support import app_of, open_env
+from tests.helpers import ClientFactory
+from tests.workspace_support import Env, app_of, open_env
 
 pytestmark = pytest.mark.integration
 
 
-async def seed(env):
+async def seed(env: Env) -> tuple[AgentServer, RunnerHost]:
     async with app_of(env.client).state.sessionmaker() as db:
         agent = AgentServer(workspace_id=uuid.UUID(env.workspace_id), name="agent", kind="ssh")
         runner = RunnerHost(
@@ -33,10 +35,10 @@ async def seed(env):
 
 @pytest.mark.parametrize("other_workspace", [False, True])
 async def test_concurrent_cross_pool_claim_has_one_winner_and_stable_identity(
-    other_workspace,
-    make_client,
-    migrated_database_url,
-):
+    other_workspace: bool,
+    make_client: ClientFactory,
+    migrated_database_url: str,
+) -> None:
     from app.domain.physical_hosts import claim_physical_host
     from app.models.physical_host import PhysicalHostRegistration
 
@@ -54,7 +56,9 @@ async def test_concurrent_cross_pool_claim_has_one_winner_and_stable_identity(
                 runner.workspace_id = other.id
                 await db.commit()
 
-        async def claim(role, server_id, identity="a" * 64):
+        async def claim(
+            role: Literal["agent", "runner"], server_id: uuid.UUID, identity: str = "a" * 64
+        ) -> bool:
             async with sessions() as db:
                 accepted = await claim_physical_host(
                     db,
@@ -68,14 +72,18 @@ async def test_concurrent_cross_pool_claim_has_one_winner_and_stable_identity(
 
         results = await asyncio.gather(claim("agent", agent.id), claim("runner", runner.id))
         assert sorted(results) == [False, True]
-        winner = ("agent", agent.id) if results[0] else ("runner", runner.id)
+        winner: tuple[Literal["agent", "runner"], uuid.UUID] = (
+            ("agent", agent.id) if results[0] else ("runner", runner.id)
+        )
         assert await claim(*winner)
         assert not await claim(*winner, identity="b" * 64), "cannot silently move a registration"
         async with sessions() as db:
             assert await db.scalar(select(func.count()).select_from(PhysicalHostRegistration)) == 1
 
 
-async def test_claim_rejects_a_server_from_another_workspace(make_client, migrated_database_url):
+async def test_claim_rejects_a_server_from_another_workspace(
+    make_client: ClientFactory, migrated_database_url: str
+) -> None:
     from app.domain.physical_hosts import claim_physical_host
     from app.models.physical_host import PhysicalHostRegistration
 
@@ -93,9 +101,9 @@ async def test_claim_rejects_a_server_from_another_workspace(make_client, migrat
 
 
 async def test_signed_report_needs_unique_physical_proof_for_placement(
-    make_client,
-    migrated_database_url,
-):
+    make_client: ClientFactory,
+    migrated_database_url: str,
+) -> None:
     from app.domain.physical_hosts import claim_physical_host
     from app.domain.runner_hosts import RunnerHosts
     from app.domain.runner_placement import candidate_for
@@ -140,9 +148,9 @@ async def test_signed_report_needs_unique_physical_proof_for_placement(
 
 
 async def test_unverified_physical_report_never_orders_other_containers_stopped(
-    make_client,
-    migrated_database_url,
-):
+    make_client: ClientFactory,
+    migrated_database_url: str,
+) -> None:
     from app.domain.physical_hosts import claim_physical_host
     from app.domain.runner_hosts import RunnerHosts
     from app.schemas.runner import RunnerReport

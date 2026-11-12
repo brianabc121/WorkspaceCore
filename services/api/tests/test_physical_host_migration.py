@@ -13,8 +13,8 @@ pytestmark = pytest.mark.integration
 
 
 def test_physical_registration_migration_keeps_resources_and_refuses_active_downgrade(
-    temp_database_url,
-):
+    temp_database_url: str,
+) -> None:
     config = alembic_config(temp_database_url)
     command.upgrade(config, "0064")
     env_id = _seed(temp_database_url)
@@ -46,8 +46,8 @@ def test_physical_registration_migration_keeps_resources_and_refuses_active_down
 
 
 async def test_downgrade_waits_for_inflight_claim_before_checking_if_ledger_is_empty(
-    temp_database_url,
-):
+    temp_database_url: str,
+) -> None:
     config = alembic_config(temp_database_url)
     await asyncio.to_thread(command.upgrade, config, "0064")
     env_id = await asyncio.to_thread(_seed, temp_database_url)

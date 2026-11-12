@@ -401,8 +401,12 @@ class RunnerCapabilityService:
 
 class RunnerQuotaService(RunnerCapabilityService):
     async def check_count(self, instance: AgentInstance) -> None:
+        # Serialize count decisions without blocking result/wakeup foreign keys.
+        # The instance primary key is never changed by admission.
         await self.db.scalar(
-            select(AgentInstance.id).where(AgentInstance.id == instance.id).with_for_update()
+            select(AgentInstance.id)
+            .where(AgentInstance.id == instance.id)
+            .with_for_update(key_share=True)
         )
         if await has_capability(self.db, instance.workspace_id, instance.id, CAPABILITIES[0]):
             return

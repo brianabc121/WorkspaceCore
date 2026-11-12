@@ -4,6 +4,8 @@ Revision ID: 0063
 Revises: 0062
 """
 
+import uuid
+
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql as pg
@@ -14,7 +16,9 @@ branch_labels = None
 depends_on = None
 
 
-def _fk(column, target, ondelete=None, nullable=False):
+def _fk(
+    column: str, target: str, ondelete: str | None = None, nullable: bool = False
+) -> sa.Column[uuid.UUID]:
     return sa.Column(
         column,
         pg.UUID(as_uuid=True),
@@ -23,8 +27,8 @@ def _fk(column, target, ondelete=None, nullable=False):
     )
 
 
-def upgrade():
-    def common():
+def upgrade() -> None:
+    def common() -> list[sa.schema.SchemaItem]:
         return [
             sa.Column("id", pg.UUID(as_uuid=True), primary_key=True),
             _fk("workspace_id", "workspaces.id", "CASCADE"),
@@ -79,6 +83,6 @@ def upgrade():
     )
 
 
-def downgrade():
+def downgrade() -> None:
     op.drop_table("runner_capability_grants", schema="workspace")
     op.drop_table("runner_capability_requests", schema="workspace")

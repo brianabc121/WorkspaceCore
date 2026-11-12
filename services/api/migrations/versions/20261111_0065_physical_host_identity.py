@@ -10,7 +10,7 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade():
+def upgrade() -> None:
     op.create_unique_constraint(
         "uq_agent_servers_workspace_id_id",
         "agent_servers",
@@ -53,7 +53,7 @@ def upgrade():
     )
 
 
-def downgrade():
+def downgrade() -> None:
     # Serialize the emptiness check with in-flight claims, not just DROP.
     op.get_bind().execute(
         sa.text("LOCK TABLE workspace.physical_host_registrations IN ACCESS EXCLUSIVE MODE")

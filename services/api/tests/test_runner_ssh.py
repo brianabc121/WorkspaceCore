@@ -217,6 +217,8 @@ async def test_conflicting_physical_host_is_rejected_before_key_or_runtime_chang
     from tests.workspace_support import app_of
 
     host = RunnerHost(tmp_path)
+    physical_host_id = host.resources["physical_host_id"]
+    assert isinstance(physical_host_id, str)
     async with ssh_host(host) as (port, _):
         version = await owner.prepare(port)
         app = app_of(owner.client)
@@ -228,7 +230,7 @@ async def test_conflicting_physical_host_is_rejected_before_key_or_runtime_chang
             await db.flush()
             assert await claim_physical_host(
                 db,
-                host.resources["physical_host_id"],
+                physical_host_id,
                 workspace_id=existing.workspace_id,
                 role="agent",
                 server_id=existing.id,
@@ -249,6 +251,8 @@ async def test_host_removal_keeps_identity_during_remote_install(
     from tests.workspace_support import app_of
 
     host = RunnerHost(tmp_path)
+    physical_host_id = host.resources["physical_host_id"]
+    assert isinstance(physical_host_id, str)
     hold = host.state / "install_hold"
     hold.touch()
     async with ssh_host(host) as (port, _):
@@ -288,7 +292,7 @@ async def test_host_removal_keeps_identity_during_remote_install(
                 await db.flush()
                 assert not await claim_physical_host(
                     db,
-                    host.resources["physical_host_id"],
+                    physical_host_id,
                     workspace_id=competing.workspace_id,
                     role="agent",
                     server_id=competing.id,

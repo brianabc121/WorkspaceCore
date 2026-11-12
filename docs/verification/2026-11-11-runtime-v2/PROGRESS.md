@@ -8,10 +8,10 @@
 
 ## 当前验证结论
 
-- 代码仍未覆盖整个方案；T-0224 保持 in_progress，PR193 草稿不可合并。独立剩余覆盖见 REMAINING.md。
+- 代码仍未覆盖整个方案；T-0224 保持 in_progress。人类本轮明确要求将当前检查点合并 main；PR193 暂保留草稿，先修复全部 CI 与当前启用路径的阻塞审查问题，再按 merge commit 合并。该指令只覆盖本次合并执行角色，不修改长期协作协议。独立剩余覆盖见 REMAINING.md。
 - 合入后 API 非 integration：**703 passed / 42 skipped**；迁移与存储设置 **16 passed**；回收/快照最终整文件 **9 passed in 155.61s**。扩展组合曾 **102 passed / 1 failed**，唯一失败的旧采样测试数据已修正并包含在最终9项中；没有把失败整套计成全绿。
 - 合入后 Ruff、strict mypy **300 source files**、前端 lint/typecheck/build/check:api 和 collab 检查通过。构建保留原 chunk 警告。
-- 完整前端 **774 passed / 8 timed out**；无并发复跑六个文件 **75 passed / 1 timed out**。日历分页重试单例仍能超时，未增加预算或削弱断言。因此前端整体验收尚未通过。
+- 本地完整前端曾 **774 passed / 8 timed out**，独立六文件 **75 passed / 1 timed out**；失败过程保留。当前提交 35946bdc 的远端 **Web CI 43201342044 已全部成功**，没有提高 timeout 或削弱断言；远端 CI 是该提交完整前端质量门槛的最新证据。
 - 日历对照：合入前081e80ce同文件系统单例3.70s通过；当前单例7.63s超时；基线仅加入存储样式6.64s超时。按需加载存储页实验仍7.135s超时，已完整撤回，未作为修复交付。根因仍需继续定位，不能仅归咎并行或宣称已解决。
 - 未执行生产迁移、真实远程安装或网络切换；Kubernetes候选与网络验证保持关闭。完整可信采集、私网持续对账、exec/files/snapshot、身份网关等仍缺代码，不只是缺集群验收。
 
@@ -199,3 +199,29 @@ npm run test -- --maxWorkers=1
 `pytest tests/test_runner_reclaim.py -q` → **9 passed in 155.61s**（main-integration-reclaim-final.log，最终源包含实际 container_name）。只改旧测试的上报协议与一致内存夹具，产品准入不变；新增断言确认拒绝来自 INSUFFICIENT_CAPACITY，并在 stop ACK 之前仍拒绝创建。独立 scoped 复审 PASS/APPROVED。
 
 存储页按需加载实验的7项存储测试、类型检查和ESLint通过，但日历仍超时，故仅撤回其 router.ts 变更并逐字核验恢复。未保留无证据修复。前端timeout、所有单变量对照及实验结果均保存在本地忽略logs/与.superpowers报告。
+
+### 2026-11-12 本次合并指令后的质量检查
+
+人类明确要求把当前检查点合入 main，开发范围仍未全部完成，不勾选全部验收、不标 done、不启用 Kubernetes / 网络数据面。原检出未提交工作不动。
+
+35946bdc 的远端结果：Web CI 43201342044、collab 43201339607、ci-security 43201339612 成功；ci-api 43201339751 在 Ruff 格式检查失败（test_runner_lock_order 一处参数换行）；ci-infra 43201339992 的 compose/news/三个 Docker 安装 job 成功，agents 场景26模板保存失败后超时。日志证明上线时间10:55:01早于首份可信采样10:55:29 / 完整报告10:55:30；验收改为等待真实调度候选，负载显式申请合理资源，并立即报告保存错误。结束前通过真实快照回收和公开移除守卫释放服务器登记，不写假指标、不直接改身份账本。
+
+此前只跑了 mypy app，范围不足。按 CI 原命令 `mypy app migrations tests scripts` 首轮实际 **606 errors in 25 files**；已补测试/迁移类型，未配置忽略或删除断言，复验 **Success: no issues found in 520 source files**。Ruff 全树 **524 files already formatted**；正式 OpenAPI 检查最新。
+
+完整 `pytest` 首轮观察到真实并发部署死锁后主动中断：**1 failed, 86 passed in 79.05s**。失败为 test_concurrent_requests_on_one_server_leave_no_extra_instance，原预检查先锁 SSH target、资源采集先锁 server，形成环；修复预检查按 server→target 加锁。整组 `pytest -q tests/test_agent_deployment_requests.py` **11 passed in 108.34s**（真实 PostgreSQL16/Redis7）。这不是完整 suite 通过证据。
+
+独立合并前审查又发现模板构建旧回执覆盖、复用容器过早 touch 引发 autoflush 锁反转，正在补真实回归与修复；未在阻塞项未处理时合并。最终新 head 全量 CI 仍需完成。
+
+本次另以真实本地 PostgreSQL 的新建隔离数据库运行 CI 原样迁移冒烟：`alembic upgrade head → downgrade base → upgrade head` 全部 exit 0，最终 `Migration CLI smoke passed`，记录 merge-migration-cli-smoke.log。只创建并清理本次随机测试数据库，没有动生产或既有数据库。
+
+额外用根目录 Ruff 配置检查 `tests/e2e/agents_acceptance.py` 实际返回28项既有风格诊断；以HEAD原文stdin同配置对照也是28项，诊断码/消息计数完全相同，新增0项。没有把该额外检查标为通过，也未批量改写原验收脚本。CI后端门槛使用services/api配置，全树Ruff成功记录见上。
+
+本轮合并前修复的中间证据：新增模板旧回执/复用/恢复回归首轮 **12 failed, 2 passed in 87.80s**；最小修复后 multihost、lock_order、runner_api、runner_reclaim 整组 **50 passed in 382.00s**。审查再抓到最新构建回执被7天清理、回收锁序和外键锁兼容性，补充回归 **7 failed in 101.24s**、普通stop/delete/archive宿主外键 **3 failed in 35.22s**，均在修复前真实观察。后续新锁序与回执保留修复不靠延长timeout或放宽断言；最终额外回归仍待结果，不能把中间50项称为最终全部通过。
+
+最终冻结源码的CI原范围静态复验：`ruff check .` → **All checks passed!**；`ruff format --check .` → **524 files already formatted**；`mypy app migrations tests scripts` → **Success: no issues found in 520 source files**；`python -m scripts.export_openapi --check` → **openapi.json 是最新的**。`collab.py check` 0警告，`git diff --check` 无输出。
+
+### 本次提交前最终定向结果
+
+源码冻结后补充回归最终 **15 passed in 172.95s**：`pytest -q --tb=short --show-capture=no tests/test_runner_multihost.py::test_template_attempt_fence_survives_command_retention tests/test_runner_lock_order.py`。覆盖回收/闲置/模板超时先锁宿主、复用/恢复先准入、真实命令与唤醒外键兼容、已清理最新回执不会复活旧结果；保留真实状态/指令/用量和结果断言。
+
+连同前述整组50项、智能体部署11项、真实CLI迁移冒烟和最终520文件静态检查，当前已知合并阻塞均已修复。完整远端CI需以新提交实际结果为准；旧35946bdc的失败记录不删除。后续仍继续REMAINING中的未完成代码，不标done、不启用新数据面。

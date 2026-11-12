@@ -2,6 +2,8 @@
 
 import json
 from datetime import UTC, datetime, timedelta
+from types import TracebackType
+from typing import Any, Literal
 from uuid import uuid4
 
 import pytest
@@ -10,7 +12,7 @@ from pydantic import ValidationError
 from app.schemas.agents import AgentDeploymentCreateIn
 
 
-def body(**extra):
+def body(**extra: Any) -> dict[str, Any]:
     return {
         "request_id": str(uuid4()),
         "name": "auto",
@@ -19,13 +21,13 @@ def body(**extra):
     }
 
 
-def test_auto_defaults_are_finite():
+def test_auto_defaults_are_finite() -> None:
     request = AgentDeploymentCreateIn.model_validate(body())
     assert request.placement.mode == "auto"
     assert request.cpus == 1 and request.mem_limit_mb == 2048
 
 
-def test_legacy_target_normalizes_to_specified():
+def test_legacy_target_normalizes_to_specified() -> None:
     server_id = uuid4()
     request = AgentDeploymentCreateIn.model_validate(
         body(server_id=str(server_id), server_version=2)
@@ -35,14 +37,14 @@ def test_legacy_target_normalizes_to_specified():
     assert request.cpus == 1 and request.mem_limit_mb == 2048
 
 
-def test_conflicting_target_and_auto_rejected():
+def test_conflicting_target_and_auto_rejected() -> None:
     with pytest.raises(ValidationError):
         AgentDeploymentCreateIn.model_validate(
             body(server_id=str(uuid4()), placement={"mode": "auto"})
         )
 
 
-def test_equivalent_explicit_inputs_have_same_normalized_fingerprint():
+def test_equivalent_explicit_inputs_have_same_normalized_fingerprint() -> None:
     data = body(server_id=str(uuid4()), server_version=3)
     old = AgentDeploymentCreateIn.model_validate(data)
     new = AgentDeploymentCreateIn.model_validate(
@@ -54,7 +56,7 @@ def test_equivalent_explicit_inputs_have_same_normalized_fingerprint():
     assert old.model_dump(mode="json") == new.model_dump(mode="json")
 
 
-def test_independent_probe_rejects_incomplete_or_nonfinite_output():
+def test_independent_probe_rejects_incomplete_or_nonfinite_output() -> None:
     from app.domain.agent_server_resources import parse_resources
 
     for raw in ("{}", '{"cores":NaN}', "password=should-never-appear"):
@@ -62,7 +64,7 @@ def test_independent_probe_rejects_incomplete_or_nonfinite_output():
             parse_resources(raw, received_at=datetime.now(UTC))
 
 
-def snapshot():
+def snapshot() -> dict[str, Any]:
     return {
         "generation": str(uuid4()),
         "physical_host_id": "a" * 64,
@@ -83,7 +85,7 @@ def snapshot():
     }
 
 
-def test_probe_snapshot_freshness_and_order():
+def test_probe_snapshot_freshness_and_order() -> None:
     from app.domain.agent_server_resources import is_fresh, newer_snapshot, parse_resources
 
     now = datetime.now(UTC)
@@ -95,20 +97,22 @@ def test_probe_snapshot_freshness_and_order():
     assert newer_snapshot(first, {**first, "sequence": first["sequence"] + 1})
 
 
-async def test_trusted_password_channel_and_closed_connection(monkeypatch):
-    from types import SimpleNamespace
-
+async def test_trusted_password_channel_and_closed_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app.domain import agent_server_resources as resources
+    from app.domain.credentials import CredentialBox
+    from app.models import AgentSshTarget
 
     class Input:
-        def write(self, script):
+        def write(self, script: str) -> None:
             assert script == resources.PROBE_SCRIPT
 
-        def write_eof(self):
+        def write_eof(self) -> None:
             pass
 
     class Output:
-        async def read(self, count):
+        async def read(self, count: int) -> str:
             assert count == resources.MAX_OUTPUT + 1
             return json.dumps(snapshot())
 
@@ -117,30 +121,37 @@ async def test_trusted_password_channel_and_closed_connection(monkeypatch):
         stdout = Output()
         exit_status = 0
 
-        async def __aenter__(self):
+        async def __aenter__(self) -> "Process":
             return self
 
-        async def __aexit__(self, *args):
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> Literal[False]:
             return False
 
-        async def wait_closed(self):
+        async def wait_closed(self) -> None:
             pass
 
     class Connection:
         closed = False
 
-        def create_process(self, command, **kwargs):
+        def create_process(self, command: str, **kwargs: object) -> Process:
             assert command == "sh -s"
             return Process()
 
-        def close(self):
+        def close(self) -> None:
             self.closed = True
 
     connection = Connection()
-    target = SimpleNamespace(credential_revision=3)
-    box = object()
+    target = AgentSshTarget(credential_revision=3)
+    box = CredentialBox(b"x" * 32)
 
-    async def connect(actual_target, actual_box, *, expected_revision):
+    async def connect(
+        actual_target: AgentSshTarget, actual_box: CredentialBox, *, expected_revision: int
+    ) -> Connection:
         assert actual_target is target and actual_box is box and expected_revision == 3
         return connection
 
@@ -150,7 +161,7 @@ async def test_trusted_password_channel_and_closed_connection(monkeypatch):
     assert connection.closed
 
 
-def test_failed_probe_marks_previous_snapshot_ineligible():
+def test_failed_probe_marks_previous_snapshot_ineligible() -> None:
     from app.domain.agent_server_resources import is_fresh, parse_resources
 
     now = datetime.now(UTC)
@@ -158,7 +169,7 @@ def test_failed_probe_marks_previous_snapshot_ineligible():
     assert not is_fresh({**previous, "probe_error": "unavailable"}, now)
 
 
-def test_docker_memory_credit_rounds_down_and_never_invents_unknown_usage():
+def test_docker_memory_credit_rounds_down_and_never_invents_unknown_usage() -> None:
     from app.domain.agent_server_resources import docker_memory_credit
 
     assert docker_memory_credit("1.50MiB / 2GiB") == 1.49 * (1 << 20)
@@ -167,7 +178,7 @@ def test_docker_memory_credit_rounds_down_and_never_invents_unknown_usage():
         assert docker_memory_credit(raw) is None
 
 
-def test_delayed_previous_boot_cannot_replace_new_boot():
+def test_delayed_previous_boot_cannot_replace_new_boot() -> None:
     from app.domain.agent_server_resources import newer_snapshot
 
     now = datetime.now(UTC)

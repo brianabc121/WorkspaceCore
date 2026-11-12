@@ -85,3 +85,13 @@ Block removal for all retained/unknown allocations, and preserve snapshot/archiv
 - Reviewed owner-role plus critical step-up before approval, separate requested_by/approved_by identities, immutable approval/request source comparison, grant revision/expiry checks, and stale-ack revoke protection. No concrete owner-identity or grant-activation bypass identified in current Docker-only enabled flow.
 - Actual-host operations were changed to use environment host IDs; legacy singleton lookup rejects ambiguity. New placement respects local template/volume host affinity for creation and rejects specified/reuse mismatches.
 - Source-only reproductions used standard-library stubs around actual extracted methods/pure functions. They do not claim database concurrency or real runtime validation. No database suites, full suites, real Kubernetes cluster, or network acceptance tests were run during this review because other agents were using the shared DB and Task 5 is out of scope.
+
+## 2026-11-12 当前检查点合并前独立复审
+
+对照origin/main 36c6fb5e完成整体启用路径源码审查，随后按冻结修复复审：**APPROVED，剩余Critical 0 / Important 0**。这项结论只批准本次阶段检查点；完整T-0224方案仍在继续，Kubernetes/跨节点网络保持关闭。
+
+已修复的阻塞包括：复用/删除后恢复过早修改环境引发autoflush锁反转；模板同revision旧构建成功/失败/超时覆盖当前宿主的新构建（含7天回执清理后旧unknown复活）；后台回收与报告/准入、外键命令/唤醒的锁序和兼容性。修复采用host先于依赖记录、非键NO KEY UPDATE串行化、tick锁定宿主ID快照、当前构建回执保留及精确回执围栏；删除保护保留排他锁。
+
+独立审查阅读真实RED日志和最终完成输出：核心整组50 passed / 最终补充15 passed；确认断言仍覆盖状态、指令、use_count、digest、唤醒和并发拒绝结果。审查者只重复diffcheck，没有把父执行的PG和静态结果冒充独立重跑。全分支远端CI仍以PR新head为准。
+
+已知并接受本检查点回收事务持宿主锁期间对象存储清理可能延长准入等待的吞吐取舍，详见UPGRADE。主干既有SSH安装完成与重部署锁序潜在风险列入REMAINING后续项，未宣称历史所有并发路径已统一。

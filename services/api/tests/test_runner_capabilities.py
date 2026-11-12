@@ -2,28 +2,30 @@
 
 import asyncio
 import uuid
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
 
 from app.models import AgentInstance, AiToolExecution
-from tests.helpers import OWNER
+from app.schemas.ai_tools import PendingApproval
+from tests.helpers import OWNER, ClientFactory
 from tests.test_ai_tools_api import decide, new_instance
-from tests.workspace_support import app_of, open_env
+from tests.workspace_support import Env, app_of, open_env
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-async def env(make_client, migrated_database_url):
+async def env(make_client: ClientFactory, migrated_database_url: str) -> AsyncIterator[Env]:
     async with open_env(
         make_client, migrated_database_url, agent_ingress_trusted_proxies="127.0.0.1/32"
     ) as value:
         yield value
 
 
-async def enabled_instance(env):
+async def enabled_instance(env: Env) -> uuid.UUID:
     instance = await new_instance(env)
     app = app_of(env.client)
     async with app.state.sessionmaker() as db:
@@ -33,20 +35,26 @@ async def enabled_instance(env):
     return uuid.UUID(instance)
 
 
-async def request(env, instance_id, capability="runner.unlimited_container_count", **kw):
+async def request(
+    env: Env,
+    instance_id: uuid.UUID,
+    capability: str = "runner.unlimited_container_count",
+    *,
+    expires_at: datetime | None = None,
+) -> PendingApproval:
     from app.domain.runner_capabilities import RunnerCapabilityService
 
     app = app_of(env.client)
     async with app.state.sessionmaker() as db:
         instance = await db.get(AgentInstance, instance_id)
         pending = await RunnerCapabilityService(db, app.state.settings, app.state.redis).request(
-            instance, capability=capability, reason="需要更多独立环境", **kw
+            instance, capability=capability, reason="需要更多独立环境", expires_at=expires_at
         )
         await db.commit()
         return pending
 
 
-async def test_capability_schema_is_registered():
+async def test_capability_schema_is_registered() -> None:
     from app.schemas.ai_tools import TOOLS
 
     assert "runner_request_capability" in TOOLS
@@ -55,7 +63,7 @@ async def test_capability_schema_is_registered():
     assert TOOLS["runner_request_capability"].min_role.value == "member"
 
 
-async def test_concurrent_requests_deduplicate_per_instance_capability(env):
+async def test_concurrent_requests_deduplicate_per_instance_capability(env: Env) -> None:
     instance = await enabled_instance(env)
     first, second = await asyncio.gather(request(env, instance), request(env, instance))
     assert first.action_id == second.action_id
@@ -67,7 +75,7 @@ async def test_concurrent_requests_deduplicate_per_instance_capability(env):
         assert row.status == "pending_approval" and row.risk_level == "critical"
 
 
-async def test_owner_approval_persists_independent_grant_and_requires_apply(env):
+async def test_owner_approval_persists_independent_grant_and_requires_apply(env: Env) -> None:
     from app.domain.runner_capabilities import RunnerCapabilityService, has_capability
     from app.models.runner_capability import RunnerCapabilityGrant
 
@@ -100,7 +108,7 @@ async def test_owner_approval_persists_independent_grant_and_requires_apply(env)
         assert not await has_capability(db, grant.workspace_id, instance, grant.capability)
 
 
-async def test_disabled_runner_cannot_request(env):
+async def test_disabled_runner_cannot_request(env: Env) -> None:
     from app.domain.ai_tools import ToolCallError
 
     instance = uuid.UUID(await new_instance(env))
@@ -109,7 +117,7 @@ async def test_disabled_runner_cannot_request(env):
     assert error.value.code == "FORBIDDEN_CAPABILITY"
 
 
-async def test_pending_state_identifies_each_capability(env):
+async def test_pending_state_identifies_each_capability(env: Env) -> None:
     from app.domain.ai_tools import AiToolService
     from app.domain.runner_capabilities import RunnerCapabilityService
 
@@ -128,7 +136,7 @@ async def test_pending_state_identifies_each_capability(env):
         }
 
 
-async def add_held(env, instance_id, states):
+async def add_held(env: Env, instance_id: uuid.UUID, states: Sequence[str]) -> None:
     from app.models import RunnerEnvironment, RunnerHost
 
     app = app_of(env.client)
@@ -160,7 +168,7 @@ async def add_held(env, instance_id, states):
         await db.commit()
 
 
-async def test_held_quota_counts_stopped_pending_delete_failed_across_hosts(env):
+async def test_held_quota_counts_stopped_pending_delete_failed_across_hosts(env: Env) -> None:
     from app.domain.runner_capabilities import ContainerApprovalRequired, RunnerQuotaService
 
     instance = await enabled_instance(env)
@@ -184,10 +192,10 @@ async def test_held_quota_counts_stopped_pending_delete_failed_across_hosts(env)
         await db.commit()
 
 
-async def test_sixth_tool_branch_commits_approval(env):
+async def test_sixth_tool_branch_commits_approval(env: Env) -> None:
     from app.domain import runner_tools
     from app.domain.ai_tools import AiToolService
-    from app.schemas.ai_tools import TOOLS
+    from app.schemas.ai_tools import TOOLS, ContainerApprovalOutput
 
     instance = await enabled_instance(env)
     await add_held(env, instance, ["stopped"] * 5)
@@ -203,6 +211,7 @@ async def test_sixth_tool_branch_commits_approval(env):
             {"purpose": "sixth", "lifetime": "session", "spec": {"image": "alpine:3.20"}},
             request_id=None,
         )
+        assert isinstance(output, ContainerApprovalOutput)
         assert output.code == "APPROVAL_REQUIRED"
         await db.rollback()
     async with app.state.sessionmaker() as db:
@@ -210,11 +219,11 @@ async def test_sixth_tool_branch_commits_approval(env):
         assert row.status == "pending_approval"
 
 
-async def test_revoke_retains_grant_and_stale_apply_cannot_reactivate(env):
+async def test_revoke_retains_grant_and_stale_apply_cannot_reactivate(env: Env) -> None:
     from app.domain.auth import AuthContext
     from app.domain.policy import WorkspaceAccess
     from app.domain.runner_capabilities import RunnerCapabilityService, has_capability
-    from app.models import User, Workspace
+    from app.models import AuthSession, User, Workspace
     from app.models.runner_capability import RunnerCapabilityGrant
     from app.schemas.runner_capabilities import RunnerCapabilityRevokeInput
     from app.schemas.workspaces import Role
@@ -239,7 +248,12 @@ async def test_revoke_retains_grant_and_stale_apply_cannot_reactivate(env):
         access = WorkspaceAccess(
             await db.get(Workspace, grant.workspace_id), Role.owner, env.owner_id
         )
-        context = AuthContext(user=user, session=None, token="", client_ip="127.0.0.1")
+        context = AuthContext(
+            user=user,
+            session=AuthSession(user_id=env.owner_id),
+            token="",
+            client_ip="127.0.0.1",
+        )
         output = await service.revoke(
             context,
             access,
@@ -254,7 +268,9 @@ async def test_revoke_retains_grant_and_stale_apply_cannot_reactivate(env):
         assert await db.get(RunnerCapabilityGrant, grant.id) is not None
 
 
-async def test_admin_cannot_decide_capability_and_member_registrant_is_not_grantor(env):
+async def test_admin_cannot_decide_capability_and_member_registrant_is_not_grantor(
+    env: Env,
+) -> None:
     from tests.helpers import csrf
 
     instance = await enabled_instance(env)
@@ -289,7 +305,7 @@ async def test_admin_cannot_decide_capability_and_member_registrant_is_not_grant
         assert grant.approved_by == env.owner_id
 
 
-async def test_legacy_count_policy_is_effective_after_owner_approval(env):
+async def test_legacy_count_policy_is_effective_after_owner_approval(env: Env) -> None:
     from app.domain.runner_capabilities import has_capability
 
     instance = await enabled_instance(env)
@@ -303,7 +319,7 @@ async def test_legacy_count_policy_is_effective_after_owner_approval(env):
         )
 
 
-async def test_admin_cannot_reject_dedicated_owner_capability(env):
+async def test_admin_cannot_reject_dedicated_owner_capability(env: Env) -> None:
     from tests.helpers import csrf
 
     instance = await enabled_instance(env)
@@ -317,7 +333,7 @@ async def test_admin_cannot_reject_dedicated_owner_capability(env):
         assert response.status_code == 403, response.text
 
 
-async def test_mcp_hosts_scoped_safe_and_capability_request_still_requires_runner(env):
+async def test_mcp_hosts_scoped_safe_and_capability_request_still_requires_runner(env: Env) -> None:
     from app.models import RunnerHost, Workspace
     from tests.helpers import tool_error
     from tests.test_mcp_api import call, issue_token
@@ -364,7 +380,7 @@ async def test_mcp_hosts_scoped_safe_and_capability_request_still_requires_runne
     assert tool_error(refused)["code"] == "FORBIDDEN_CAPABILITY"
 
 
-async def test_explicit_lower_container_limit_remains_effective(env):
+async def test_explicit_lower_container_limit_remains_effective(env: Env) -> None:
     from app.domain.runner import RunnerError
     from app.domain.runner_capabilities import RunnerQuotaService
 
@@ -380,7 +396,7 @@ async def test_explicit_lower_container_limit_remains_effective(env):
         assert error.value.code == "QUOTA_EXCEEDED"
 
 
-async def test_management_request_disabled_runner_returns_forbidden(env):
+async def test_management_request_disabled_runner_returns_forbidden(env: Env) -> None:
     instance = await new_instance(env)
     response = await env.client.post(
         f"/api/v1/agents/instances/{instance}/runner/capabilities/request",
