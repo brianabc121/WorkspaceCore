@@ -1256,76 +1256,12 @@ retire_vikunja() {
   return 0
 }
 
-# ---------------------------------------------------------------- 知识库图片存储（T-0103）
-storage_label() {
-  case "$1" in
-    r2) echo "Cloudflare R2" ;; oss) echo "阿里云 OSS" ;; none) echo "不复制" ;;
-    local | "") echo "本机（卷 kb-files，随 make backup 备份）" ;; *) echo "$1" ;;
-  esac
-}
-
-# 前台：问要不要用 R2 / OSS。密钥只在这一步输入，直接写进 .env（权限 600），不带到后台、不写日志
-plan_storage() {
-  local primary replica kind
-  step "知识库图片存储"
-  info "现在：主存储 $(storage_label "$(env_get FILE_STORAGE)")；副本 $(storage_label "$(env_get FILE_STORAGE_REPLICA)")"
-  info "不配置就存在本机。R2、OSS 都配时一个做主存储、一个做副本（用户主要在国内时主存储选 OSS）"
-  decide STORAGE "配置 Cloudflare R2 / 阿里云 OSS？" n || return 0
-  while :; do
-    choose primary STORAGE_PRIMARY "主存储（local / r2 / oss）" "$(env_get FILE_STORAGE)"
-    [[ ${primary:-local} =~ ^(local|r2|oss)$ ]] && break
-    warn "只能填 local、r2 或 oss"; unset 'ANS[STORAGE_PRIMARY]'
-  done
-  while :; do
-    choose replica STORAGE_REPLICA "副本（none / local / r2 / oss）" "$(env_get FILE_STORAGE_REPLICA)"
-    [[ ${replica:-none} =~ ^(none|local|r2|oss)$ ]] && break
-    warn "只能填 none、local、r2 或 oss"; unset 'ANS[STORAGE_REPLICA]'
-  done
-  primary="${primary:-local}" replica="${replica:-none}"
-  for kind in $(printf '%s\n' "$primary" "$replica" | sort -u); do
-    case "$kind" in r2) storage_ask_r2 ;; oss) storage_ask_oss ;; esac
-  done
-  env_set FILE_STORAGE "$primary"
-  env_set FILE_STORAGE_REPLICA "$replica"
-  ok "图片存储写进了 .env：主存储 $(storage_label "$primary")，副本 $(storage_label "$replica")；后台会重启 api、worker 并自检"
-}
-
-storage_ask_r2() {
-  local value secret
-  info "Cloudflare R2：在 R2 页面建一个私有桶，再建一个只对这个桶有“对象读写”权限的 API 令牌"
-  value="$(ask "R2 账户 ID（R2 页面右侧的 Account ID）" "$(env_get R2_ACCOUNT_ID)")"; env_set R2_ACCOUNT_ID "$value"
-  value="$(ask "R2 桶名" "$(env_get R2_BUCKET)")"; env_set R2_BUCKET "$value"
-  value="$(ask "辖区（欧盟桶填 eu，没有就直接回车）" "$(env_get R2_JURISDICTION)")"; env_set R2_JURISDICTION "$value"
-  value="$(ask "R2 Access Key ID" "$(env_get R2_ACCESS_KEY_ID)")"; env_set R2_ACCESS_KEY_ID "$value"
-  secret="$(ask_secret "R2 Secret Access Key（不显示；直接回车保留原来的）")"
-  [[ -z $secret ]] || env_set R2_SECRET_ACCESS_KEY "$secret"
-}
-
-storage_ask_oss() {
-  local value secret
-  info "阿里云 OSS：建一个私有 Bucket，再建一个只对这个 Bucket 有读写权限的 RAM 用户 AccessKey"
-  value="$(ask "地域（例如 cn-hangzhou）" "$(env_get OSS_REGION)")"; env_set OSS_REGION "$value"
-  value="$(ask "Bucket 名" "$(env_get OSS_BUCKET)")"; env_set OSS_BUCKET "$value"
-  value="$(ask "AccessKey ID" "$(env_get OSS_ACCESS_KEY_ID)")"; env_set OSS_ACCESS_KEY_ID "$value"
-  secret="$(ask_secret "AccessKey Secret（不显示；直接回车保留原来的）")"
-  [[ -z $secret ]] || env_set OSS_ACCESS_KEY_SECRET "$secret"
-}
-
-# 后台：配置改过就重启 api、worker；然后写、读、删一个探测文件，结果也显示在运维页
+# ---------------------------------------------------------------- 知识库图片存储（T-0103；T-0223 起在网页上配置）
+# 主存储、副本与 Cloudflare R2 / 阿里云 OSS 的连接信息由每个工作空间在网页「设置 → 图片存储」里填（owner），
+# 保存前自动自检；部署脚本不再询问、也不写 .env。这里只提示一句。
 connect_storage() {
-  local result
-  step "知识库图片存储：$(storage_label "$(env_get FILE_STORAGE)")，副本 $(storage_label "$(env_get FILE_STORAGE_REPLICA)")"
-  if [[ ${ANS[STORAGE]:-n} == y ]]; then
-    info "按新的配置重启 api 与 worker"
-    compose up -d --no-build --wait --wait-timeout 180 api worker </dev/null >/dev/null 2>&1 \
-      || { warn "api / worker 没有按新配置启动：docker compose logs api 查看原因"; return 0; }
-  fi
-  if result="$(connect_cmd storage-check </dev/null 2>&1)"; then
-    ok "图片存储自检通过（$(printf '%s' "$result" | tr '\n' ' ')）"
-  else
-    warn "图片存储自检失败：$(printf '%s' "$result" | tr '\n' ' ')"
-    todo_add "图片存储自检失败：检查 .env 里的 R2_* / OSS_*（地域、桶名、密钥），改好后运行 bash $ROOT/scripts/deploy.sh connect"
-  fi
+  step "知识库图片存储：默认存在本机（卷 kb-files，随 make backup 备份）"
+  info "要用 Cloudflare R2 / 阿里云 OSS：用 owner 登录网页，在「设置 → 图片存储」里填写，保存时会自动自检"
   return 0
 }
 
@@ -1496,7 +1432,6 @@ plan_connect() {
   if [[ $(status_of setup "$status") != "done" ]]; then
     info "还没有创建管理员：后台会等你在浏览器完成「首次安装」后再接入"
   fi
-  plan_storage
   plan_components
   plan_summary
 }

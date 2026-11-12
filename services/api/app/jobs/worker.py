@@ -48,6 +48,7 @@ from app.domain.ai_tools import AiToolService
 from app.domain.connectors import ConnectorRuntime
 from app.domain.knowledge_base import KnowledgeBase
 from app.domain.operations import WORKER_HEARTBEAT_KEY, DeploymentHealth, ServiceCache
+from app.domain.storage_config import StoreRegistry
 from app.integrations.base import ConnectorError
 from app.integrations.http import CircuitBreaker
 from app.jobs.queue import (
@@ -312,9 +313,8 @@ async def runner_tick(ctx: dict[str, Any]) -> int:
 async def replicate_files(ctx: dict[str, Any]) -> int:
     """知识库图片：把待复制的图片写到副本（T-0103）。没配置副本时什么也不做。"""
     context = _sync(ctx)
-    stores = knowledge_files.FileStores(context.settings)
     async with context.sessions() as db:
-        done = await knowledge_files.replicate_pending(db, stores)
+        done = await knowledge_files.replicate_pending(db, StoreRegistry(db, context.settings))
         await db.commit()
     if done:
         logger.info("kb files replicated", extra={"count": done})
@@ -324,9 +324,10 @@ async def replicate_files(ctx: dict[str, Any]) -> int:
 async def cleanup_files(ctx: dict[str, Any]) -> int:
     """知识库图片：删除没有笔记引用、上传超过 24 小时的图片（T-0103）。"""
     context = _sync(ctx)
-    stores = knowledge_files.FileStores(context.settings)
     async with context.sessions() as db:
-        removed = await knowledge_files.cleanup_unreferenced(db, stores)
+        removed = await knowledge_files.cleanup_unreferenced(
+            db, StoreRegistry(db, context.settings)
+        )
         await db.commit()
     if removed:
         logger.info("kb files cleaned up", extra={"count": removed})
@@ -334,12 +335,14 @@ async def cleanup_files(ctx: dict[str, Any]) -> int:
 
 
 async def check_file_storage(ctx: dict[str, Any]) -> bool:
-    """知识库图片存储自检：写、读、删一个探测对象；启动时和每天跑一次，失败写警告日志（T-0103）。"""
+    """知识库图片存储自检：每个工作空间的主存储与副本各写、读、删一个探测对象；
+    启动时和每天跑一次，失败写警告日志（T-0103；按工作空间配置，T-0223）。"""
     context = _sync(ctx)
-    results = await knowledge_files.run_checks(
-        knowledge_files.FileStores(context.settings), ctx["redis"]
-    )
-    return all(check.ok for check in results.values())
+    async with context.sessions() as db:
+        results = await knowledge_files.run_all_checks(
+            StoreRegistry(db, context.settings), ctx["redis"]
+        )
+    return all(results.values())
 
 
 async def startup(ctx: dict[str, Any]) -> None:

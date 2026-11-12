@@ -3895,7 +3895,7 @@ export interface paths {
         };
         /**
          * 知识库图片存储的状态（owner / admin）
-         * @description 主存储、副本、最近一次自检、这个工作空间的用量与配额、待复制数量。不返回密钥；本地存储不返回路径。
+         * @description 这个工作空间的主存储、副本（在“设置 → 图片存储”里配置）、最近一次自检、用量与配额、待复制数量。不返回密钥；本地存储不返回路径。
          */
         get: operations["storage_status"];
         put?: never;
@@ -3917,7 +3917,7 @@ export interface paths {
         put?: never;
         /**
          * 知识库图片存储自检（owner / admin）
-         * @description 对主存储与副本各写一个探测对象、读回、删除；结果也显示在运维页。
+         * @description 对这个工作空间的主存储与副本各写一个探测对象、读回、删除；结果也显示在运维页。
          */
         post: operations["check_storage"];
         delete?: never;
@@ -4513,6 +4513,30 @@ export interface paths {
          */
         get: operations["search"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 图片存储设置（owner / admin）
+         * @description 主存储、副本与 R2 / OSS 的连接信息。不返回密钥，只说是否已设置；in_use 是还存着本工作空间图片或快照的存储。
+         */
+        get: operations["get_storage_settings"];
+        /**
+         * 保存图片存储设置（owner，乐观并发，先自检再保存）
+         * @description 带上读取时的 version。密钥不填（null）保持不变，空字符串清除。保存前对主存储与副本各写、读、删一个探测对象：不通过返回 422 STORAGE_CHECK_FAILED（details.checks 是各自的结果），设置不变。还存着文件的存储不能清空连接信息（409 STORAGE_IN_USE）。
+         */
+        put: operations["put_storage_settings"];
         post?: never;
         delete?: never;
         options?: never;
@@ -12633,6 +12657,46 @@ export interface components {
              */
             source: string;
         };
+        /** OssSettingsIn */
+        OssSettingsIn: {
+            /**
+             * Access Key Id
+             * @default
+             */
+            access_key_id: string;
+            /**
+             * Access Key Secret
+             * @description 不填（null）保持不变；空字符串清除
+             */
+            access_key_secret?: string | null;
+            /**
+             * Bucket
+             * @default
+             */
+            bucket: string;
+            /**
+             * Region
+             * @default
+             */
+            region: string;
+        };
+        /** OssSettingsOut */
+        OssSettingsOut: {
+            /** Access Key Id */
+            access_key_id: string;
+            /** Bucket */
+            bucket: string;
+            /**
+             * Region
+             * @description 地域，例如 cn-hangzhou
+             */
+            region: string;
+            /**
+             * Secret Set
+             * @description AccessKey Secret 是否已设置（不返回明文）
+             */
+            secret_set: boolean;
+        };
         /**
          * OverviewSummary
          * @description 未知时为 null，不以 0 冒充（规范第 16 节 A17：不把空数据当正常）。
@@ -13431,6 +13495,56 @@ export interface components {
              * @enum {string}
              */
             widget_type: "quick_links";
+        };
+        /** R2SettingsIn */
+        R2SettingsIn: {
+            /**
+             * Access Key Id
+             * @default
+             */
+            access_key_id: string;
+            /**
+             * Account Id
+             * @default
+             */
+            account_id: string;
+            /**
+             * Bucket
+             * @default
+             */
+            bucket: string;
+            /**
+             * Jurisdiction
+             * @default
+             */
+            jurisdiction: string;
+            /**
+             * Secret Access Key
+             * @description 不填（null）保持不变；空字符串清除
+             */
+            secret_access_key?: string | null;
+        };
+        /** R2SettingsOut */
+        R2SettingsOut: {
+            /** Access Key Id */
+            access_key_id: string;
+            /**
+             * Account Id
+             * @description Cloudflare 账户 ID（R2 页面右侧的 Account ID）
+             */
+            account_id: string;
+            /** Bucket */
+            bucket: string;
+            /**
+             * Jurisdiction
+             * @description 辖区（建桶时选了欧盟等辖区才填，例如 eu），没有就是空
+             */
+            jurisdiction: string;
+            /**
+             * Secret Set
+             * @description Secret Access Key 是否已设置（不返回明文）
+             */
+            secret_set: boolean;
         };
         /** ReadinessResponse */
         ReadinessResponse: {
@@ -15395,7 +15509,7 @@ export interface components {
             configured: boolean;
             /**
              * Missing
-             * @description 没配置完整时缺少的环境变量
+             * @description 没配置完整时缺少的字段（“设置 → 图片存储”里的名字）
              */
             missing?: string[];
             /**
@@ -15409,9 +15523,64 @@ export interface components {
              */
             where?: string | null;
         };
+        /** StorageSettingsIn */
+        StorageSettingsIn: {
+            oss?: components["schemas"]["OssSettingsIn"];
+            /**
+             * Primary
+             * @enum {string}
+             */
+            primary: "local" | "r2" | "oss";
+            r2?: components["schemas"]["R2SettingsIn"];
+            /**
+             * Replica
+             * @default none
+             * @enum {string}
+             */
+            replica: "none" | "local" | "r2" | "oss";
+            /**
+             * Version
+             * @description 读取时的 version；没保存过是 0
+             */
+            version: number;
+        };
+        /** StorageSettingsOut */
+        StorageSettingsOut: {
+            /**
+             * Checks
+             * @description 保存时做的自检结果（只在保存的响应里返回）
+             */
+            checks?: {
+                [key: string]: components["schemas"]["StorageCheck"];
+            } | null;
+            /**
+             * In Use
+             * @description 还存着本工作空间图片或快照的存储；它们的连接信息不能清空，否则那些文件读不到
+             */
+            in_use: ("local" | "r2" | "oss")[];
+            oss: components["schemas"]["OssSettingsOut"];
+            /**
+             * Primary
+             * @enum {string}
+             */
+            primary: "local" | "r2" | "oss";
+            r2: components["schemas"]["R2SettingsOut"];
+            /**
+             * Replica
+             * @enum {string}
+             */
+            replica: "none" | "local" | "r2" | "oss";
+            /** Updated At */
+            updated_at: string | null;
+            /**
+             * Version
+             * @description 保存时带上；没保存过是 0
+             */
+            version: number;
+        };
         /**
          * StorageStatus
-         * @description 知识库图片存储（T-0103，owner / admin）。
+         * @description 知识库图片存储（T-0103，owner / admin；按工作空间配置，T-0223）。
          */
         StorageStatus: {
             /** Failed Replication */
@@ -15423,7 +15592,7 @@ export interface components {
             files: number;
             /**
              * Pending Replication
-             * @description 全部工作空间里等待复制到副本的图片
+             * @description 这个工作空间里等待复制到副本的图片
              */
             pending_replication: number;
             primary: components["schemas"]["StorageLocation"];
@@ -36267,6 +36436,148 @@ export interface operations {
             };
             /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_storage_settings: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageSettingsOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_storage_settings: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageSettingsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageSettingsOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

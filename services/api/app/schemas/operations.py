@@ -103,19 +103,21 @@ class StorageLocation(BaseModel):
     where: str | None = Field(
         default=None, description="R2 / OSS 为桶的地址（不含密钥）；本地存储不返回路径"
     )
-    missing: list[str] = Field(default_factory=list, description="没配置完整时缺少的环境变量")
+    missing: list[str] = Field(
+        default_factory=list, description="没配置完整时缺少的字段（“设置 → 图片存储”里的名字）"
+    )
     check: StorageCheck | None = Field(
         default=None, description="最近一次自检（写、读、删探测对象）"
     )
 
 
 class StorageStatus(BaseModel):
-    """知识库图片存储（T-0103，owner / admin）。"""
+    """知识库图片存储（T-0103，owner / admin；按工作空间配置，T-0223）。"""
 
     primary: StorageLocation
     replica: StorageLocation | None
     files: int = Field(description="这个工作空间的图片数")
     used_bytes: int = Field(description="这个工作空间已用的空间")
     quota_bytes: int
-    pending_replication: int = Field(description="全部工作空间里等待复制到副本的图片")
+    pending_replication: int = Field(description="这个工作空间里等待复制到副本的图片")
     failed_replication: int

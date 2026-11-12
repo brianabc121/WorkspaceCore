@@ -24,6 +24,8 @@ const core: NavEntry[] = [
   { path: '/settings/integrations', title: '集成设置', section: '管理', description: '管理员配置 GitHub、测试权限与同步。', minRole: 'admin' },
   { path: '/settings/security', title: '安全设置', section: '管理', description: '管理密码与登录会话。' },
   { path: '/settings/mail', title: '邮件设置', section: '管理', description: '连接 Gmail 邮箱、设置 OAuth 客户端与智能体访问（owner 与 admin）。', minRole: 'admin' },
+  // 图片存储（T-0223）：知识库图片与常驻环境快照存在本机、Cloudflare R2 还是阿里云 OSS，按工作空间设置
+  { path: '/settings/storage', title: '图片存储', section: '管理', description: '知识库图片存在本机、Cloudflare R2 还是阿里云 OSS，副本与连接信息（owner 修改，admin 只读）。', minRole: 'admin' },
   // 中转站管理（T-0206）：官方 API 与第三方中转的连接；非模型的兼容凭据（原来的“密钥库”）在它的“兼容凭据”页签
   { path: '/settings/model-connections', title: '中转站管理', section: '管理', description: '官方 API 与第三方中转的连接（URL、Key、模型）、智能体授权、OpenClaw 连接分配与兼容凭据（owner）。', minRole: 'owner' },
 ]

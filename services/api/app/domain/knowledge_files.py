@@ -3,8 +3,10 @@
 - 上传：只收 PNG / JPEG / GIF / WebP（按文件头判断，不信任文件名与 Content-Type，SVG 不收），
   单张不超过 FILE_MAX_MB，每个工作空间不超过 FILE_QUOTA_MB；JPEG 去掉 Exif 等元数据（保留方向）；
   同一工作空间同一内容只存一份。member 以上可以上传。
-- 存储：写主存储（FILE_STORAGE）成功就返回；配置了副本（FILE_STORAGE_REPLICA）时由 Worker 异步复制，
-  失败重试。读取先读文件写入时的存储，失败再读主存储与副本，并核对内容哈希。
+- 存储：每个工作空间在网页“设置 → 图片存储”里配置主存储与副本
+  （T-0223，app/domain/storage_config.py；没配置就是本机）。写主存储成功就返回；
+  配置了副本时由 Worker 异步复制，失败重试。
+  读取先读文件写入时的存储，失败再读主存储与副本，并核对内容哈希。
 - 读取一律经工作台：`GET /api/v1/knowledge/files/<id>`，viewer 以上，
   按工作空间隔离（别的工作空间 404）。
 - 引用：保存笔记时记下正文引用的本工作空间图片；历史版本里引用过的保留（current = false）。
@@ -33,14 +35,16 @@ from app.core.errors import ApiError
 from app.domain.images import sniff, strip_jpeg_metadata
 from app.domain.policy import WorkspaceAccess, not_found, require_role
 from app.domain.ratelimit import WindowLimiter
+from app.domain.storage_config import StoreRegistry, load_config
 from app.integrations.base import ConnectorError
 from app.integrations.object_storage import (
     ObjectStore,
+    StorageConfig,
     StorageNotConfigured,
     build_store,
     self_check,
 )
-from app.models import KnowledgeFile, KnowledgeFileRef
+from app.models import KnowledgeFile, KnowledgeFileRef, StorageSettings, Workspace
 from app.schemas.operations import StorageCheck, StorageLocation, StorageName, StorageStatus
 from app.schemas.workspaces import Role
 
@@ -106,16 +110,19 @@ async def sync_refs(
 
 @dataclass
 class FileStores:
-    """按配置建主存储与副本；读取历史文件时按名字找（没配置的返回 None）。"""
+    """一个工作空间的主存储与副本（按它的配置建）；读取历史文件时按名字找（没配置的返回 None）。"""
 
     settings: Settings
+    config: StorageConfig = field(default_factory=StorageConfig)
     transport: httpx.AsyncBaseTransport | None = None
     _cache: dict[str, ObjectStore] = field(default_factory=dict)
 
     def get(self, name: str) -> ObjectStore:
         """建名字对应的存储；配置不完整时抛 StorageNotConfigured。"""
         if name not in self._cache:
-            self._cache[name] = build_store(name, self.settings, transport=self.transport)
+            self._cache[name] = build_store(
+                name, self.config, self.settings, transport=self.transport
+            )
         return self._cache[name]
 
     def find(self, name: str | None) -> ObjectStore | None:
@@ -126,12 +133,27 @@ class FileStores:
         except StorageNotConfigured:
             return None
 
+    @property
+    def primary_name(self) -> str:
+        return self.config.primary
+
     def primary(self) -> ObjectStore:
-        return self.get(self.settings.file_storage)
+        return self.get(self.config.primary)
 
     def replica_name(self) -> str | None:
-        name = self.settings.file_storage_replica
-        return None if name in ("none", self.settings.file_storage) else name
+        name = self.config.replica
+        return None if name in ("none", self.config.primary) else name
+
+
+async def stores_for(
+    registry: StoreRegistry, workspace_id: uuid.UUID, cache: dict[uuid.UUID, FileStores]
+) -> FileStores:
+    """按工作空间取 FileStores（Worker 一次处理多个工作空间的图片时缓存）。"""
+    if workspace_id not in cache:
+        cache[workspace_id] = FileStores(
+            registry.settings, await registry.config(workspace_id), registry.transport
+        )
+    return cache[workspace_id]
 
 
 def _storage_error(error: Exception) -> ApiError:
@@ -160,11 +182,20 @@ class FileService:
         *,
         redis: Redis | None = None,
         stores: FileStores | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.db = db
         self.settings = settings
         self.redis = redis
-        self.stores = stores or FileStores(settings)
+        # 测试可以直接给一套存储；否则按图片所属的工作空间读配置
+        self._fixed = stores
+        self.transport = transport
+
+    async def stores(self, workspace_id: uuid.UUID) -> FileStores:
+        if self._fixed is not None:
+            return self._fixed
+        config = await load_config(self.db, self.settings, workspace_id)
+        return FileStores(self.settings, config, self.transport)
 
     @property
     def max_bytes(self) -> int:
@@ -212,16 +243,17 @@ class FileService:
                 f"这个工作空间的图片已用满 {self.settings.file_quota_mb} MB，"
                 "删掉不用的笔记里的图片后，过一天会自动清理",
             )
+        stores = await self.stores(workspace_id)
         try:
-            store = self.stores.primary()
+            store = stores.primary()
             await store.put(object_key(workspace_id, digest), data, info.mime)
         except (StorageNotConfigured, ConnectorError) as error:
             logger.warning(
                 "kb file upload failed",
-                extra={"storage": self.settings.file_storage, "error_kind": _kind(error)},
+                extra={"storage": stores.primary_name, "error_kind": _kind(error)},
             )
             raise _storage_error(error) from error
-        replica = self.stores.replica_name()
+        replica = stores.replica_name()
         stmt = (
             pg_insert(KnowledgeFile)
             .values(
@@ -267,19 +299,20 @@ class FileService:
 
     async def read(self, row: KnowledgeFile) -> FileData:
         """依次读文件写入时的存储、当前主存储、副本；内容哈希对不上的跳过。"""
+        stores = await self.stores(row.workspace_id)
         names: list[str] = []
         for name in (
             row.storage,
-            self.settings.file_storage,
+            stores.primary_name,
             row.replica,
-            self.stores.replica_name(),
+            stores.replica_name(),
         ):
             if name and name != "none" and name not in names:
                 names.append(name)
         key = object_key(row.workspace_id, row.sha256)
         failed: Exception | None = None
         for name in names:
-            store = self.stores.find(name)
+            store = stores.find(name)
             if store is None:
                 continue
             try:
@@ -304,15 +337,35 @@ def _kind(error: Exception) -> str:
 # ---------------------------------------------------------------- Worker：复制与清理
 
 
-async def replicate_pending(db: AsyncSession, stores: FileStores, *, limit: int = 20) -> int:
+async def replicate_pending(db: AsyncSession, registry: StoreRegistry, *, limit: int = 20) -> int:
     """把待复制的图片写到副本；失败记下原因，下次重试，超过次数标为 failed。"""
-    replica = stores.replica_name()
-    if replica is not None:
-        # 后来才配置副本：之前上传的图片也补一份
+    # 后来才配置副本：之前上传的图片也补一份（按各工作空间自己的副本）
+    if registry.fixed is not None:
+        targets: list[tuple[uuid.UUID | None, str]] = []
+        if (replica := FileStores(registry.settings, registry.fixed).replica_name()) is not None:
+            targets.append((None, replica))
+    else:
+        targets = [
+            (workspace_id, name)
+            for workspace_id, name, primary in (
+                await db.execute(
+                    select(
+                        StorageSettings.workspace_id,
+                        StorageSettings.replica_store,
+                        StorageSettings.primary_store,
+                    ).where(StorageSettings.replica_store != "none")
+                )
+            ).all()
+            if name != primary
+        ]
+    for workspace_id, replica in targets:
+        backfill = update(KnowledgeFile).where(
+            KnowledgeFile.replica.is_(None), KnowledgeFile.storage != replica
+        )
+        if workspace_id is not None:
+            backfill = backfill.where(KnowledgeFile.workspace_id == workspace_id)
         await db.execute(
-            update(KnowledgeFile)
-            .where(KnowledgeFile.replica.is_(None), KnowledgeFile.storage != replica)
-            .values(replica=replica, replica_state="pending", replica_attempts=0)
+            backfill.values(replica=replica, replica_state="pending", replica_attempts=0)
         )
     rows = (
         await db.scalars(
@@ -323,8 +376,10 @@ async def replicate_pending(db: AsyncSession, stores: FileStores, *, limit: int 
             .with_for_update(skip_locked=True)
         )
     ).all()
+    cache: dict[uuid.UUID, FileStores] = {}
     done = 0
     for row in rows:
+        stores = await stores_for(registry, row.workspace_id, cache)
         key = object_key(row.workspace_id, row.sha256)
         source, target = stores.find(row.storage), stores.find(row.replica)
         if source is None or target is None:
@@ -356,7 +411,11 @@ async def replicate_pending(db: AsyncSession, stores: FileStores, *, limit: int 
 
 
 async def cleanup_unreferenced(
-    db: AsyncSession, stores: FileStores, *, now: datetime | None = None, limit: int = 500
+    db: AsyncSession,
+    registry: StoreRegistry,
+    *,
+    now: datetime | None = None,
+    limit: int = 500,
 ) -> int:
     """删除没有任何笔记引用、上传超过 24 小时的图片（主存储与副本）。存储删不掉的留到下次。"""
     cutoff = (now or datetime.now(UTC)) - CLEANUP_AFTER
@@ -372,8 +431,10 @@ async def cleanup_unreferenced(
             .with_for_update(skip_locked=True)
         )
     ).all()
+    cache: dict[uuid.UUID, FileStores] = {}
     removed = 0
     for row in rows:
+        stores = await stores_for(registry, row.workspace_id, cache)
         key = object_key(row.workspace_id, row.sha256)
         try:
             for name in {row.storage, row.replica}:
@@ -409,8 +470,8 @@ def store_state(stores: FileStores, name: str) -> StoreState:
     return StoreState(name=name, where=store.where, configured=True, missing=[])
 
 
-async def usage(db: AsyncSession) -> tuple[int, int, int, int]:
-    """（图片数, 已用字节, 待复制, 复制失败），全部工作空间合计。"""
+async def usage(db: AsyncSession, workspace_id: uuid.UUID) -> tuple[int, int, int, int]:
+    """这个工作空间的（图片数, 已用字节, 待复制, 复制失败）。"""
     row = (
         await db.execute(
             select(
@@ -418,7 +479,7 @@ async def usage(db: AsyncSession) -> tuple[int, int, int, int]:
                 func.coalesce(func.sum(KnowledgeFile.size), 0),
                 func.count(KnowledgeFile.id).filter(KnowledgeFile.replica_state == "pending"),
                 func.count(KnowledgeFile.id).filter(KnowledgeFile.replica_state == "failed"),
-            )
+            ).where(KnowledgeFile.workspace_id == workspace_id)
         )
     ).one()
     return int(row[0]), int(row[1]), int(row[2]), int(row[3])
@@ -435,13 +496,16 @@ async def check_store(stores: FileStores, name: str) -> tuple[bool, str | None]:
     return True, None
 
 
-CHECK_KEY = "kb_storage:check"
+def check_key(workspace_id: uuid.UUID) -> str:
+    return f"kb_storage:check:{workspace_id}"
 
 
-async def run_checks(stores: FileStores, redis: Redis | None) -> dict[str, StorageCheck]:
-    """对主存储与副本做一次自检，结果存进 Redis（运维页显示最近一次）。"""
+async def run_checks(
+    stores: FileStores, redis: Redis | None, workspace_id: uuid.UUID
+) -> dict[str, StorageCheck]:
+    """对这个工作空间的主存储与副本做一次自检，结果存进 Redis（运维页显示最近一次）。"""
     results: dict[str, StorageCheck] = {}
-    names: list[str] = [stores.settings.file_storage]
+    names: list[str] = [stores.primary_name]
     if (replica := stores.replica_name()) is not None:
         names.append(replica)
     for name in names:
@@ -449,18 +513,30 @@ async def run_checks(stores: FileStores, redis: Redis | None) -> dict[str, Stora
         results[name] = StorageCheck(ok=ok, reason=reason, checked_at=datetime.now(UTC))
         if not ok:
             logger.warning(
-                "kb storage self-check failed", extra={"storage": name, "reason": reason}
+                "kb storage self-check failed",
+                extra={"storage": name, "reason": reason, "workspace_id": str(workspace_id)},
             )
     if redis is not None:
         payload = {name: check.model_dump(mode="json") for name, check in results.items()}
-        await redis.set(CHECK_KEY, json.dumps(payload), ex=7 * 86400)
+        await redis.set(check_key(workspace_id), json.dumps(payload), ex=7 * 86400)
     return results
 
 
-async def _last_checks(redis: Redis | None) -> dict[str, StorageCheck]:
+async def run_all_checks(registry: StoreRegistry, redis: Redis | None) -> dict[str, bool]:
+    """Worker：每个工作空间各自检一次（启动时与每天）。返回 {工作空间: 是否都通过}。"""
+    results: dict[str, bool] = {}
+    cache: dict[uuid.UUID, FileStores] = {}
+    for workspace_id in (await registry.db.scalars(select(Workspace.id))).all():
+        stores = await stores_for(registry, workspace_id, cache)
+        checks = await run_checks(stores, redis, workspace_id)
+        results[str(workspace_id)] = all(check.ok for check in checks.values())
+    return results
+
+
+async def _last_checks(redis: Redis | None, workspace_id: uuid.UUID) -> dict[str, StorageCheck]:
     if redis is None:
         return {}
-    raw = await redis.get(CHECK_KEY)
+    raw = await redis.get(check_key(workspace_id))
     if not raw:
         return {}
     try:
@@ -478,7 +554,7 @@ async def storage_status(
     checks: dict[str, StorageCheck] | None = None,
 ) -> StorageStatus:
     settings = stores.settings
-    checks = checks if checks is not None else await _last_checks(redis)
+    checks = checks if checks is not None else await _last_checks(redis, workspace_id)
 
     def location(name: str) -> StorageLocation:
         state = store_state(stores, name)
@@ -491,19 +567,12 @@ async def storage_status(
         )
 
     replica = stores.replica_name()
-    files, used = (
-        await db.execute(
-            select(
-                func.count(KnowledgeFile.id), func.coalesce(func.sum(KnowledgeFile.size), 0)
-            ).where(KnowledgeFile.workspace_id == workspace_id)
-        )
-    ).one()
-    _, _, pending, failed = await usage(db)
+    files, used, pending, failed = await usage(db, workspace_id)
     return StorageStatus(
-        primary=location(settings.file_storage),
+        primary=location(stores.primary_name),
         replica=location(replica) if replica else None,
-        files=int(files),
-        used_bytes=int(used),
+        files=files,
+        used_bytes=used,
         quota_bytes=settings.file_quota_mb * 1024 * 1024,
         pending_replication=pending,
         failed_replication=failed,

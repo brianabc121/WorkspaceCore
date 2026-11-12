@@ -86,6 +86,9 @@ jobs:
       - name: 知识库浏览器验收（知识图谱、[[ 补全与链接、版本冲突三方合并、回收站、项目知识库主页与趋势图、图片上传 / 粘贴 / 显示 / 清理、手机宽度、viewer 只读）
         # 不要求空库：每次新建工作台用户；笔记与项目经工作台接口建（T-0100、T-0103、T-0106）
         run: node tests/e2e/knowledge_browser.cjs
+      - name: 图片存储设置浏览器验收（网页上选主存储与副本、填 R2 连接信息、保存前自检、密钥不回显、运维页链接、admin 只读、member 看不到、切换工作空间、手机宽度、暗色）
+        # 不要求空库：每次新建工作台用户；不出站：没选的 R2 不会被连接，R2 / OSS 的真实读写由后端测试与 Garage 覆盖（T-0223）
+        run: node tests/e2e/storage_browser.cjs
       - name: 时间轴浏览器验收（任务页 / 项目页入口、全部与按项目、智能体的一段与 token、开始暂停、拖动计划、执行记录、手机宽度、viewer 只读）
         # 不要求空库：每次新建工作台用户；Compose 里没有真实 OpenClaw，“智能体执行过的一段”由 seed.py 写入（T-0106）
         run: node tests/e2e/timeline_browser.cjs

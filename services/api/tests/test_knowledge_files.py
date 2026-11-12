@@ -15,12 +15,10 @@ from typing import Any
 
 import httpx
 import pytest
-from pydantic import SecretStr
 from sqlalchemy import select
 
-from app.core.config import Settings
 from app.domain import knowledge_files
-from app.domain.knowledge_files import FileService, FileStores
+from app.domain.storage_config import StoreRegistry
 from app.models import KnowledgeFile, KnowledgeFileRef
 from tests.helpers import add_user, add_workspace, csrf, run_sql
 from tests.workspace_support import Env, app_of, open_env
@@ -216,8 +214,8 @@ async def test_refs_follow_note_bodies_and_cleanup(env: Env, files_dir: Path) ->
     assert await _refs(env, kept["id"]) == [(note["id"], False)]
 
     later = datetime.now(UTC) + timedelta(days=2)
-    stores = FileStores(app_of(env.client).state.settings)
     async with app_of(env.client).state.sessionmaker() as db:
+        stores = StoreRegistry(db, app_of(env.client).state.settings)
         removed = await knowledge_files.cleanup_unreferenced(db, stores, now=later)
         await db.commit()
     assert removed == 1
@@ -229,6 +227,7 @@ async def test_refs_follow_note_bodies_and_cleanup(env: Env, files_dir: Path) ->
     # 刚上传的图（不到 24 小时）不清理
     fresh = (await upload(env, png(extra=b"fresh"))).json()
     async with app_of(env.client).state.sessionmaker() as db:
+        stores = StoreRegistry(db, app_of(env.client).state.settings)
         assert await knowledge_files.cleanup_unreferenced(db, stores) == 0
     assert (await env.client.get(fresh["url"], headers=env.headers())).status_code == 200
 
@@ -271,28 +270,38 @@ class FakeS3:
         return httpx.Response(200, content=self.objects[key])
 
 
-def _r2_settings(base: Settings) -> Settings:
-    return base.model_copy(
-        update={
-            "file_storage_replica": "r2",
-            "r2_endpoint": "https://r2.example.com",
-            "r2_access_key_id": "AK",
-            "r2_secret_access_key": SecretStr("SK"),
-            "r2_bucket": "kb",
-        }
+R2 = {
+    "account_id": "acct0001",
+    "bucket": "kb-test",
+    "access_key_id": "AK",
+    "secret_access_key": "SK",
+}
+
+
+async def put_storage(env: Env, body: dict[str, Any]) -> httpx.Response:
+    return await env.client.put(
+        "/api/v1/settings/storage", json=body, headers=env.headers(write=True)
     )
 
 
 async def test_replication_and_fallback_read(env: Env, files_dir: Path) -> None:
     app = app_of(env.client)
     fake = FakeS3()
-    settings = _r2_settings(app.state.settings)
-    app.state.settings = settings  # 之后的上传记下副本为 r2
+    original = app.state.settings
+    # 测试里把 R2 的地址指到假服务（部署级的覆盖，网页上改不了）
+    settings = original.model_copy(update={"r2_endpoint": "https://r2.example.com"})
+    app.state.settings = settings
+    app.state.storage_transport = httpx.MockTransport(fake)
     try:
+        saved = await put_storage(
+            env, {"version": 0, "primary": "local", "replica": "r2", "r2": R2}
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["checks"]["r2"]["ok"] is True  # 保存前的自检写过、删过探测对象
         data = png(extra=b"replicate me")
         created = (await upload(env, data)).json()
-        stores = FileStores(settings, transport=httpx.MockTransport(fake))
         async with app.state.sessionmaker() as db:
+            stores = StoreRegistry(db, settings, transport=httpx.MockTransport(fake))
             row = await db.get(KnowledgeFile, uuid.UUID(created["id"]))
             assert row is not None and (row.replica, row.replica_state) == ("r2", "pending")
             # 副本暂时不可用：记下原因，下次重试
@@ -308,18 +317,30 @@ async def test_replication_and_fallback_read(env: Env, files_dir: Path) -> None:
             await db.commit()
             await db.refresh(row)
             assert row.replica_state == "done"
-        key = f"/kb/kb/{env.workspace_id}/{hashlib.sha256(data).hexdigest()}"
+        key = f"/kb-test/kb/{env.workspace_id}/{hashlib.sha256(data).hexdigest()}"
         assert fake.objects[key] == data
 
-        # 本地文件丢了：从副本读
+        # 本地文件丢了：从副本读（经接口，按这个工作空间的配置）
         (files_dir / "kb" / env.workspace_id / hashlib.sha256(data).hexdigest()).unlink()
-        async with app.state.sessionmaker() as db:
-            service = FileService(db, settings, stores=stores)
-            row = await db.get(KnowledgeFile, uuid.UUID(created["id"]))
-            assert row is not None
-            assert (await service.read(row)).data == data
+        read = await env.client.get(created["url"], headers=env.headers())
+        assert read.status_code == 200 and read.content == data
+
+        # 副本里还有文件：R2 的连接信息不能清空
+        current = await env.get("/api/v1/settings/storage")
+        assert current["in_use"] == ["local", "r2"]
+        cleared = await put_storage(
+            env,
+            {
+                "version": current["version"],
+                "primary": "local",
+                "replica": "none",
+                "r2": {**R2, "secret_access_key": ""},
+            },
+        )
+        assert cleared.status_code == 409 and cleared.json()["error"]["code"] == "STORAGE_IN_USE"
     finally:
-        app.state.settings = settings.model_copy(update={"file_storage_replica": "none"})
+        app.state.settings = original
+        app.state.storage_transport = None
 
 
 async def test_storage_status_and_self_check(env: Env) -> None:
@@ -346,19 +367,24 @@ async def test_storage_status_and_self_check(env: Env) -> None:
         assert denied.status_code == 403
 
 
-async def test_storage_not_configured(
-    make_client: Any, migrated_database_url: str, files_dir: Path
-) -> None:
-    async with open_env(make_client, migrated_database_url, file_storage="oss") as env:
-        failed = await upload(env, png(extra=b"nowhere"))
-        assert failed.status_code == 503
-        error = failed.json()["error"]
-        assert error["code"] == "STORAGE_NOT_CONFIGURED" and "OSS_BUCKET" in error["message"]
-        status = await env.get("/api/v1/operations/storage")
-        assert status["primary"]["configured"] is False
-        assert "OSS_ACCESS_KEY_SECRET" in status["primary"]["missing"]
-        count = await run_sql(env.database_url, "SELECT count(*) FROM workspace.knowledge_files")
-        assert count == 0
+async def test_storage_not_configured(env: Env) -> None:
+    """密钥解不开（换了加密密钥又没留旧的）时当作没填：上传 503，运维页说缺什么。"""
+    await run_sql(
+        env.database_url,
+        "INSERT INTO workspace.storage_settings"
+        " (workspace_id, primary_store, oss_region, oss_bucket, oss_access_key_id, version)"
+        " VALUES ($1, 'oss', 'cn-hangzhou', 'kb', 'AK', 1)",
+        uuid.UUID(env.workspace_id),
+    )
+    failed = await upload(env, png(extra=b"nowhere"))
+    assert failed.status_code == 503
+    error = failed.json()["error"]
+    assert error["code"] == "STORAGE_NOT_CONFIGURED" and "AccessKey Secret" in error["message"]
+    status = await env.get("/api/v1/operations/storage")
+    assert status["primary"]["configured"] is False
+    assert status["primary"]["missing"] == ["AccessKey Secret"]
+    count = await run_sql(env.database_url, "SELECT count(*) FROM workspace.knowledge_files")
+    assert count == 0
 
 
 async def test_graph_shows_image_nodes_on_request(env: Env) -> None:

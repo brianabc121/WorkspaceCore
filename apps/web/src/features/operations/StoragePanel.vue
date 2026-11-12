@@ -6,6 +6,7 @@ import { useAuthStore } from '../../stores/auth'
 import { dataOf, errorMessage, type Schema } from '../../services/api'
 
 // 存储状态（T-0103 知识库图片存储，owner / admin；T-0177 改版）：主存储、副本、最近一次自检、用量与待复制数量。
+// 存在哪里按工作空间在“设置 → 图片存储”里设置（T-0223），这里只显示状态。
 // “执行存储读写自检”会真的写入、读取、删除一个探测对象：只在有权限的人明确点击后调用一次，
 // 进入页面、刷新、切换时间范围、定时刷新都不会调用。没有副本时写“未配置副本”，不当成正常。
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id, header = { 'X-Workspace-Id': scope }
@@ -56,7 +57,7 @@ function state(location: Schema['StorageLocation']) {
         </dd>
         <dd v-else>
           <span class="ops-storage-state is-muted">未配置副本</span>
-          <span class="ops-muted">没有设置 FILE_STORAGE_REPLICA：图片只存在主存储里。</span>
+          <span class="ops-muted">图片只存在主存储里。可以在<RouterLink to="/settings/storage">设置 → 图片存储</RouterLink>里加一个副本。</span>
         </dd>
         <dt>本工作空间</dt>
         <dd>
@@ -69,7 +70,7 @@ function state(location: Schema['StorageLocation']) {
         <p class="ops-muted">会在主存储（和副本）里写入、读取并删除一个探测对象，用来确认存储可用。进入页面和刷新都不会执行。</p>
       </div>
       <p v-if="failure" class="feedback" role="alert">{{ failure }}</p>
-      <p class="ops-muted ops-storage-help">配置方法：部署脚本 <code>deploy.sh connect</code> 的“图片存储”一步，或在 <code>.env</code> 里设置 FILE_STORAGE / FILE_STORAGE_REPLICA 与 R2_* / OSS_*。没有笔记引用的图片上传 24 小时后自动清理。</p>
+      <p class="ops-muted ops-storage-help">主存储、副本与 R2 / OSS 的连接信息在<RouterLink to="/settings/storage">设置 → 图片存储</RouterLink>里改（每个工作空间单独设置，owner 修改）。没有笔记引用的图片上传 24 小时后自动清理。</p>
     </template>
   </section>
 </template>

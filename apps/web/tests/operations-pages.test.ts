@@ -121,7 +121,7 @@ describe('运维页', () => {
 describe('运维页：知识库图片存储', () => {
   const status = {
     primary: { name: 'oss', configured: true, where: 'kb.s3.oss-cn-hangzhou.aliyuncs.com', missing: [], check: { ok: false, reason: 'SignatureDoesNotMatch', checked_at: '2026-11-04T01:00:00Z' } },
-    replica: { name: 'r2', configured: false, where: null, missing: ['R2_BUCKET'], check: null },
+    replica: { name: 'r2', configured: false, where: null, missing: ['桶名'], check: null },
     files: 12, used_bytes: 5 * 1024 * 1024, quota_bytes: 2048 * 1024 * 1024, pending_replication: 3, failed_replication: 1,
   }
   it('shows storage, last self-check, usage and runs a new self-check for admins', async () => {
@@ -132,7 +132,7 @@ describe('运维页：知识库图片存储', () => {
     await within(panel).findByText('阿里云 OSS')
     expect(panel).toHaveTextContent('kb.s3.oss-cn-hangzhou.aliyuncs.com')
     expect(panel).toHaveTextContent('自检失败：SignatureDoesNotMatch')
-    expect(panel).toHaveTextContent('没配置完整：缺少 R2_BUCKET')
+    expect(panel).toHaveTextContent('没配置完整：缺少 桶名')
     expect(panel).toHaveTextContent('待复制 3 张 · 复制失败 1 张')
     expect(panel).toHaveTextContent('12 张图片，已用 5.0 MB / 2.0 GB')
     expect(within(panel).getByRole('meter', { name: '图片配额已用 0%' })).toBeVisible()
