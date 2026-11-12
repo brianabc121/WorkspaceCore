@@ -129,10 +129,11 @@ flowchart LR
 
 ## 知识库图片与任务时间轴（`docs/v2/TIMELINE_PLAN.md`，T-0101 ~ T-0106）
 
-- **知识库图片**（T-0103）：笔记里的图片存到本地卷 `kb-files`、Cloudflare R2 或阿里云 OSS（`FILE_STORAGE`），可以再配一个副本（`FILE_STORAGE_REPLICA`）。
+- **知识库图片**（T-0103）：笔记里的图片存到本地卷 `kb-files`、Cloudflare R2 或阿里云 OSS，可以再配一个副本。
+  存在哪里按工作空间在网页“设置 → 图片存储”里设置（T-0223，表 `storage_settings`，迁移 0060，密钥加密存储；`app/domain/storage_settings.py` 保存与自检、`app/domain/storage_config.py` 读取）。
   - 后端：`app/integrations/object_storage.py`（本地存储与自写 SigV4 的 S3 兼容客户端；R2 用路径风格，OSS 用虚拟主机风格）、`app/domain/knowledge_files.py`（上传、读取、引用、副本复制、清理、自检）。迁移 0026。
-  - Worker：每分钟复制待复制的图片，每天清理没有引用、超过 24 小时的图片，启动时与每天自检一次。
-  - 前端：编辑器插入 / 粘贴 / 拖入，阅读页放大，图谱的“显示图片”，运维页的存储面板。
+  - Worker：每分钟复制待复制的图片，每天清理没有引用、超过 24 小时的图片，启动时与每天对每个工作空间自检一次。
+  - 前端：编辑器插入 / 粘贴 / 拖入，阅读页放大，图谱的“显示图片”，运维页的存储面板，“设置 → 图片存储”。
 - **任务时间轴**（T-0104、T-0105）：任务有执行者（成员或 OpenClaw 实例）和计划开始；每一段执行记在 `task_runs`。
   - 后端：`app/domain/task_runs.py`（开段 / 结段、中断、token 按时间归属）、`app/domain/timeline.py`（时间轴、执行记录、交给智能体执行、用量上报）。迁移 0027。
   - 交给智能体执行：用管理员自己的 IM 账号给实例发一条任务消息，同时开一段；智能体用 `complete_task` 标完成（T-0111 起直接生效，管理员可以打回）。

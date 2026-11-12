@@ -4,7 +4,8 @@
   经 `/runner-api/v1` 一块一块上传；
 - 工作台每块用这份快照自己的数据密钥（随机 32 字节，AES-256-GCM，
   附加数据是“快照 ID:块号”）加密后，
-  存到知识库用的对象存储（本地卷或 S3 兼容），key 是 `runner/<工作空间>/<快照>/<块号>`；
+  存到这个工作空间的图片存储里（本地卷或 S3 兼容，“设置 → 图片存储”的主存储，T-0223），
+  key 是 `runner/<工作空间>/<快照>/<块号>`；
 - 数据密钥用工作台的凭证密钥封存在 `runner_snapshots.key_ref`（用途绑定快照 ID），不出数据库；
 - 恢复时按块解密下发。快照里可能有登录态，按密钥对待：页面上不提供下载。
 """
@@ -23,6 +24,7 @@ from app.core.errors import ApiError
 from app.domain import runner_specs as specs
 from app.domain.credentials import CredentialBox, CredentialError
 from app.domain.knowledge_files import FileStores
+from app.domain.storage_config import load_config
 from app.integrations.base import ConnectorError
 from app.integrations.object_storage import StorageNotConfigured
 from app.models import RunnerEnvironment, RunnerSnapshot
@@ -50,7 +52,13 @@ class SnapshotStore:
     ) -> None:
         self.db = db
         self.settings = settings
-        self.stores = stores or FileStores(settings)
+        # 测试可以直接给一套存储；否则按快照所属的工作空间读配置
+        self._fixed = stores
+
+    async def stores(self, workspace_id: uuid.UUID) -> FileStores:
+        if self._fixed is not None:
+            return self._fixed
+        return FileStores(self.settings, await load_config(self.db, self.settings, workspace_id))
 
     def _box(self) -> CredentialBox:
         try:
@@ -58,8 +66,8 @@ class SnapshotStore:
         except CredentialError as error:
             raise ApiError(503, "EXTERNAL_UNAVAILABLE", "密钥库未配置加密密钥") from error
 
-    def begin(self, env: RunnerEnvironment) -> RunnerSnapshot:
-        """新建一份上传中的快照（随机数据密钥，封存后入库）。调用方负责提交。"""
+    async def begin(self, env: RunnerEnvironment) -> RunnerSnapshot:
+        """新建一份上传中的快照（随机数据密钥，封存后入库），存到工作空间当前的主存储。调用方负责提交。"""
         snapshot_id = uuid.uuid4()
         key = base64.b64encode(AESGCM.generate_key(bit_length=256)).decode()
         snapshot = RunnerSnapshot(
@@ -68,7 +76,7 @@ class SnapshotStore:
             environment_id=env.id,
             status="uploading",
             key_ref=self._box().seal(key, context=snapshot_context(snapshot_id)),
-            store=self.settings.file_storage,
+            store=(await self.stores(env.workspace_id)).primary_name,
         )
         self.db.add(snapshot)
         return snapshot
@@ -90,7 +98,7 @@ class SnapshotStore:
             nonce, data, f"{snapshot.id}:{index}".encode()
         )
         try:
-            store = self.stores.get(snapshot.store)
+            store = (await self.stores(snapshot.workspace_id)).get(snapshot.store)
             await store.put(object_key(snapshot, index), sealed, "application/octet-stream")
         except (ConnectorError, OSError, StorageNotConfigured) as error:
             raise _unavailable(error) from None
@@ -104,7 +112,8 @@ class SnapshotStore:
         if not 0 <= index < snapshot.parts:
             raise ApiError(404, "NOT_FOUND", "没有这一块")
         try:
-            sealed = await self.stores.get(snapshot.store).get(object_key(snapshot, index))
+            stores = await self.stores(snapshot.workspace_id)
+            sealed = await stores.get(snapshot.store).get(object_key(snapshot, index))
         except (ConnectorError, OSError, StorageNotConfigured) as error:
             raise _unavailable(error) from None
         if sealed is None or len(sealed) <= NONCE_BYTES:
@@ -121,7 +130,7 @@ class SnapshotStore:
         if snapshot.status == "deleted":
             return
         try:
-            store = self.stores.get(snapshot.store)
+            store = (await self.stores(snapshot.workspace_id)).get(snapshot.store)
             for index in range(max(snapshot.parts, 0)):
                 await store.delete(object_key(snapshot, index))
         except (ConnectorError, OSError, StorageNotConfigured):

@@ -29,6 +29,7 @@ from app.api.v1 import (
     runner,
     search,
     setup,
+    storage,
     tasks,
     workspaces,
 )
@@ -56,6 +57,7 @@ for module in (
     developer,
     search,
     operations,
+    storage,
     notifications,
     events,
     agents,

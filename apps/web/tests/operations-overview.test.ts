@@ -234,6 +234,10 @@ describe('运维：只读刷新与存储自检', () => {
     const panel = await screen.findByRole('region', { name: '存储状态' })
     expect(await within(panel).findByText('未配置副本')).toBeVisible()
     expect(panel).not.toHaveTextContent('副本正常')
+    // T-0223：存在哪里在网页上设置，不再让人改 .env 或跑部署脚本
+    expect(within(panel).getAllByRole('link', { name: '设置 → 图片存储' })[0]).toHaveAttribute('href', '/settings/storage')
+    expect(panel).not.toHaveTextContent('FILE_STORAGE')
+    expect(panel).not.toHaveTextContent('deploy.sh')
   })
 
   it.each([undefined, null, 'javascript:alert(1)', 'ftp://grafana.example.com'])('shows no Grafana entry for %s', async (grafana_url) => {

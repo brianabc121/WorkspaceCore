@@ -106,7 +106,7 @@ sudo bash scripts/deploy.sh connect
 |---|---|---|
 | OpenIM（「消息」页） | 构建打过补丁的 openim-server 镜像（第一次约 5 ~ 15 分钟，临时占用约 8 GB 磁盘；Docker Hub 限流时自动改用 `mirror.gcr.io` 再试）→ `make openim-up` → 在 `.env` 里填好 `OPENIM_API_URL`、`OPENIM_OBJECT_URL` 并重启 api、worker → 确认工作台连得上 | 内存少于 4 GB 时默认不装（另外占用约 1 GB）；OpenClaw 本身（接入入口与实例）按第 8.6 节配置 |
 | 新闻早报（TrendRadar） | 拉取锁定版本的 TrendRadar 镜像 → 下载并校验 AI 提示词 → `make trendradar-up` → 在 `.env` 里填好 `TRENDRADAR_MCP_URL` 并重启 api、worker | 部署后在网页「设置 → 新闻早报」里启用：选平台、写兴趣关键词、填大模型 Key 和推送渠道（飞书、钉钉、企业微信、Telegram、邮件、ntfy、Bark、Slack、通用 Webhook），点“发一条测试推送”。另外占用约 300 MB 内存；详见手册第 23 节 |
-| 知识库图片存储 | 问图片存哪里（本地 / Cloudflare R2 / 阿里云 OSS，可以再选一个做副本），R2 / OSS 的地域、桶名、密钥当场输入，只写进 `.env` → 重启 api、worker → 自检（写、读、删一个探测文件） | 先在 R2 / OSS 建一个**私有**桶和只能读写这个桶的密钥；不配就存本地（卷 `kb-files`，随备份）。详见手册第 19 节 |
+| 知识库图片存储 | 不再问：部署完成后在网页的“设置 → 图片存储”里选本地 / Cloudflare R2 / 阿里云 OSS（可以再选一个做副本），填桶名与密钥，保存前自动自检 | 先在 R2 / OSS 建一个**私有**桶和只能读写这个桶的密钥；不配就存本地（卷 `kb-files`，随备份）。详见手册第 19 节 |
 
 - 项目与任务由工作台自己管理，不需要接入（T-0082 移除了 Vikunja；从带 Vikunja 的旧版本升级见第 10 步）。
 - 接入以首次安装创建的管理员身份进行：Token 加密保存在工作台，操作写进审计日志，和在网页上配置一样。
@@ -913,7 +913,7 @@ make up && make smoke
 | 安全扫描 / 性能基准 | `make scan` / `make perf`（手册第 15 节） |
 | 轮换加密密钥 | 手册第 6.1 节 |
 | 查看 OpenIM 日志 | `make openim-logs` |
-| 知识库图片存储自检 / 时间轴 token “未上报” | 运维页“知识库图片存储”点“自检” / 手册第 20.2 节 |
+| 知识库图片存储自检 / 时间轴 token “未上报” | 运维页“存储状态”点“执行存储读写自检”，改设置在“设置 → 图片存储” / 手册第 20.2 节 |
 
 “运维”页能看到各服务的状态；监控部署后还有请求量、延迟等预设指标。
 

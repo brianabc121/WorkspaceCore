@@ -216,7 +216,9 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 
 | 方法 | 路径 | 说明 | 状态 |
 |---|---|---|---|
-| GET | `/api/v1/operations/storage` | 知识库图片存储（owner / admin）：主存储、副本（名字、是否配置完整与缺少的变量、R2 / OSS 的桶地址、最近一次自检）、本工作空间的图片数 / 用量 / 配额、全部工作空间待复制与复制失败的数量；不返回密钥，本地存储不返回路径 | 已实现（T-0103） |
+| GET | `/api/v1/operations/storage` | 知识库图片存储（owner / admin）：本工作空间的主存储、副本（名字、是否配置完整与缺少的字段、R2 / OSS 的桶地址、最近一次自检）、图片数 / 用量 / 配额、待复制与复制失败的数量；不返回密钥，本地存储不返回路径 | 已实现（T-0103；按工作空间 T-0223） |
+| GET | `/api/v1/settings/storage` | 图片存储设置（owner / admin，`Cache-Control: no-store`）：`primary`、`replica`、`r2`（账户 ID、桶名、辖区、Access Key ID、`secret_set`）、`oss`（地域、桶名、AccessKey ID、`secret_set`）、`in_use`（还存着本工作空间图片或快照的存储）、`version`、`updated_at`；不返回密钥 | 已实现（T-0223） |
+| PUT | `/api/v1/settings/storage` | 保存（owner，CSRF，乐观并发 `version` → `409 VERSION_CONFLICT`）：密钥 `null` 保持、`""` 清除；账户 ID / 辖区 / 地域 / 桶名只能是小写字母、数字和短横线（地址只由它们拼出 R2 / OSS 的官方域名）→ `422 VALIDATION_FAILED`（`details.errors[].loc`）；选了的存储要填完整；`in_use` 的存储不能清空 → `409 STORAGE_IN_USE`；保存前对主存储与副本各写、读、删一个探测对象，不通过 → `422 STORAGE_CHECK_FAILED`（`details.checks`），设置不变；成功返回设置与 `checks`，审计 `storage.settings_updated`（只记改了哪些字段、哪个存储的密钥换了） | 已实现（T-0223） |
 | POST | `/api/v1/operations/storage/check` | 存储自检（owner / admin）：对主存储与副本各写、读、删一个探测对象，结果存进 Redis 并返回最新的 `StorageStatus`；Worker 启动时和每天也自检一次 | 已实现（T-0103） |
 | GET | `/api/v1/operations/services` | 核心服务、监控组件与集成的状态（没有部署的为 `not_configured`）；V2 另有 `kind = agents` 的 OpenIM 与本工作空间的 OpenClaw 实例（实例只对 owner / admin 列出） | 已实现（T-0035；V2 部分 T-0062） |
 | GET | `/api/v1/operations/metrics?range=&views=` | 预设指标视图，聚合好的数据点；不接受 PromQL；带 `sync` 与 `grafana_url` | 已实现（T-0035） |

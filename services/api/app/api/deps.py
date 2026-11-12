@@ -145,7 +145,13 @@ def get_file_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> FileService:
-    return FileService(db, settings, redis=request.app.state.redis)
+    # storage_transport 只在测试里设置（模拟 R2 / OSS）；生产环境直连对象存储
+    return FileService(
+        db,
+        settings,
+        redis=request.app.state.redis,
+        transport=getattr(request.app.state, "storage_transport", None),
+    )
 
 
 def get_calendar_service(

@@ -428,6 +428,40 @@ class KnowledgeFile(Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class StorageSettings(Base):
+    """工作空间的图片存储配置（T-0223，在网页“设置 → 图片存储”里填，owner 修改）。
+
+    主存储 / 副本是 local / r2 / oss；没有这一行就是本机存储、没有副本。
+    R2 与 OSS 的密钥用凭证密钥加密（用途绑定工作空间与字段），其余是明文。
+    知识库图片与常驻环境快照都存在这里。
+    """
+
+    __tablename__ = "storage_settings"
+    __table_args__ = (
+        CheckConstraint("primary_store IN ('local', 'r2', 'oss')", name="primary_store"),
+        CheckConstraint("replica_store IN ('none', 'local', 'r2', 'oss')", name="replica_store"),
+        CheckConstraint("replica_store <> primary_store", name="replica_differs"),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    primary_store: Mapped[str] = mapped_column(Text, server_default=text("'local'"))
+    replica_store: Mapped[str] = mapped_column(Text, server_default=text("'none'"))
+    r2_account_id: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    r2_bucket: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    r2_jurisdiction: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    r2_access_key_id: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    r2_secret_ref: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    oss_region: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    oss_bucket: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    oss_access_key_id: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    oss_secret_ref: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    version: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    updated_by: Mapped[uuid.UUID | None] = _user_fk()
+    updated_at: Mapped[datetime] = _updated_at()
+
+
 class KnowledgeFileRef(Base):
     """笔记引用了哪些图片。历史版本里引用过的也保留（current = false），保证版本历史里的图片不丢；
     笔记彻底删除时随之删除。没有任何引用、上传超过 24 小时的图片由 Worker 每天清理。"""

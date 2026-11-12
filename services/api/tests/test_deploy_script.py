@@ -849,15 +849,14 @@ def test_state_writes_from_both_sides_do_not_overwrite_each_other(tmp_path: Path
 # ---------------------------------------------------------------- 知识库图片存储（T-0103）
 
 
-def test_storage_step_is_part_of_connect_and_keeps_secrets_out_of_answers() -> None:
-    # 前台问、后台自检；两个密钥只经 ask_secret 当场输入写进 .env，不进 ANS（ANS 会写进回答文件）
-    assert re.search(r"plan_connect\(\) \{.*?plan_storage\n", DEPLOY, re.DOTALL)
+def test_storage_is_configured_on_the_web_not_in_the_deploy_script() -> None:
+    # T-0223：主存储、副本与 R2 / OSS 的连接信息在网页「设置 → 图片存储」里填，
+    # 部署脚本不再问、不写 .env
     assert re.search(r"connect_components\(\) \{.*?connect_storage\n", DEPLOY, re.DOTALL)
-    assert 'secret="$(ask_secret "R2 Secret Access Key' in DEPLOY
-    assert 'secret="$(ask_secret "AccessKey Secret' in DEPLOY
-    secret_lines = [line for line in DEPLOY.splitlines() if "SECRET" in line and "ANS[" in line]
-    assert secret_lines == []
-    assert "connect_cmd storage-check" in DEPLOY
+    assert "plan_storage" not in DEPLOY and "storage-check" not in DEPLOY
+    for name in ("FILE_STORAGE", "R2_ACCOUNT_ID", "R2_SECRET_ACCESS_KEY", "OSS_ACCESS_KEY_SECRET"):
+        assert name not in DEPLOY
+    assert "设置 → 图片存储" in DEPLOY
 
 
 # ---------------------------------------------------------------- 停用旧的 n8n（T-0149）
