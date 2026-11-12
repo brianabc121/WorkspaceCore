@@ -5,7 +5,6 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -174,21 +173,3 @@ async def test_status_reports_openim(
             fake.down = True
             assert await connect.cmd_status(env, args("status")) == 0
             assert capsys.readouterr().out.split() == ["setup=required", "openim=unavailable"]
-
-
-async def test_storage_check_reports_each_store(
-    world: World,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-) -> None:
-    """知识库图片存储自检（T-0103）：本地存储通过；没配置完整的副本报告缺什么，退出码 1。"""
-    app = app_of(world.env.client)
-    app.state.settings = app.state.settings.model_copy(update={"file_dir": str(tmp_path)})
-    assert await call(world, connect.cmd_storage_check, args("storage-check"), monkeypatch) == 0
-    assert capsys.readouterr().out.strip() == "local=ok"
-    app.state.settings = app.state.settings.model_copy(update={"file_storage_replica": "oss"})
-    assert await call(world, connect.cmd_storage_check, args("storage-check"), monkeypatch) == 1
-    lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[0] == "local=ok"
-    assert lines[1].startswith("oss=failed 缺少 OSS_REGION")

@@ -32,6 +32,7 @@ from app.api.v1 import (
     runner_network,
     search,
     setup,
+    storage,
     tasks,
     workspaces,
 )
@@ -59,6 +60,7 @@ for module in (
     developer,
     search,
     operations,
+    storage,
     notifications,
     events,
     agents,

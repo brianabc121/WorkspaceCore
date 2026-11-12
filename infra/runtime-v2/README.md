@@ -1,6 +1,6 @@
 # Runtime v2 开发预览部署材料
 
-**T-0222 / PR #193 尚未完成。这里没有执行安装，也不提供自动切换旧 Docker 环境的动作。**
+**T-0224 / PR #193 尚未完成。这里没有执行安装，也不提供自动切换旧 Docker 环境的动作。**
 
 `controller.env.example` 和 `workspace-runtime-v2.service` 是独立生命周期控制器的配置模板。复制模板本身不会启用后端；`RUNTIME_V2_ENABLED=false`，工作台 `RUNNER_NETWORK_VERIFIED=false`，Kubernetes 调度仍关闭。当前只覆盖 create/start/stop/delete 及持久恢复；完整 exec、文件、快照、资源遥测、网络网关尚未完成。
 

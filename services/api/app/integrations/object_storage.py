@@ -32,7 +32,6 @@ from typing import Protocol
 from urllib.parse import quote, urlsplit
 
 import httpx
-from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.integrations.base import ConnectorError, ConnectorErrorKind
@@ -365,59 +364,93 @@ def oss_endpoint(region: str) -> str:
     return f"https://s3.oss-{region}.aliyuncs.com"
 
 
+@dataclass(frozen=True)
+class R2Account:
+    """一个工作空间的 Cloudflare R2 连接（密钥已解密）。"""
+
+    account_id: str = ""
+    bucket: str = ""
+    jurisdiction: str = ""
+    access_key_id: str = ""
+    secret_access_key: str = ""
+
+
+@dataclass(frozen=True)
+class OssAccount:
+    """一个工作空间的阿里云 OSS 连接（密钥已解密）。"""
+
+    region: str = ""
+    bucket: str = ""
+    access_key_id: str = ""
+    access_key_secret: str = ""
+
+
+@dataclass(frozen=True)
+class StorageConfig:
+    """一个工作空间的图片存储配置（T-0223，网页“设置 → 图片存储”）。没配置过就是本机、没有副本。"""
+
+    primary: str = "local"
+    replica: str = "none"
+    r2: R2Account = R2Account()
+    oss: OssAccount = OssAccount()
+
+
 def build_store(
-    kind: str, settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None
+    kind: str,
+    config: StorageConfig,
+    settings: Settings,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> ObjectStore:
-    """按名字（local / r2 / oss）建存储；必填项缺失时抛 StorageNotConfigured。"""
-    s = settings
-    timeout = s.file_storage_timeout_seconds
+    """按名字（local / r2 / oss）建存储。
+
+    连接信息不完整时抛 StorageNotConfigured（missing 是“设置 → 图片存储”页面上的字段名）。"""
+    timeout = settings.file_storage_timeout_seconds
     if kind == "local":
-        return LocalStore(s.file_dir)
+        return LocalStore(settings.file_dir)
     if kind == "r2":
+        r2 = config.r2
         values = {
-            "R2_ACCOUNT_ID": s.r2_account_id or s.r2_endpoint,
-            "R2_ACCESS_KEY_ID": s.r2_access_key_id,
-            "R2_SECRET_ACCESS_KEY": _secret(s.r2_secret_access_key),
-            "R2_BUCKET": s.r2_bucket,
+            "账户 ID": r2.account_id or settings.r2_endpoint,
+            "桶名": r2.bucket,
+            "Access Key ID": r2.access_key_id,
+            "Secret Access Key": r2.secret_access_key,
         }
         missing = [name for name, value in values.items() if not value]
         if missing:
             raise StorageNotConfigured("r2", missing)
-        config = S3Config(
+        s3 = S3Config(
             name="r2",
-            endpoint=s.r2_endpoint or r2_endpoint(s.r2_account_id, s.r2_jurisdiction),
-            region=s.r2_region or "auto",
-            bucket=s.r2_bucket,
-            access_key=s.r2_access_key_id,
-            secret_key=values["R2_SECRET_ACCESS_KEY"],
+            endpoint=settings.r2_endpoint or r2_endpoint(r2.account_id, r2.jurisdiction),
+            region=settings.r2_region or "auto",
+            bucket=r2.bucket,
+            access_key=r2.access_key_id,
+            secret_key=r2.secret_access_key,
             virtual_hosted=False,
         )
-        return S3Store(config, timeout=timeout, transport=transport)
+        return S3Store(s3, timeout=timeout, transport=transport)
     if kind == "oss":
+        oss = config.oss
         values = {
-            "OSS_REGION": s.oss_region,
-            "OSS_ACCESS_KEY_ID": s.oss_access_key_id,
-            "OSS_ACCESS_KEY_SECRET": _secret(s.oss_access_key_secret),
-            "OSS_BUCKET": s.oss_bucket,
+            "地域": oss.region,
+            "桶名": oss.bucket,
+            "AccessKey ID": oss.access_key_id,
+            "AccessKey Secret": oss.access_key_secret,
         }
         missing = [name for name, value in values.items() if not value]
         if missing:
             raise StorageNotConfigured("oss", missing)
-        config = S3Config(
+        s3 = S3Config(
             name="oss",
-            endpoint=s.oss_endpoint or oss_endpoint(s.oss_region),
-            region=s.oss_region,
-            bucket=s.oss_bucket,
-            access_key=s.oss_access_key_id,
-            secret_key=values["OSS_ACCESS_KEY_SECRET"],
+            endpoint=settings.oss_endpoint or oss_endpoint(oss.region),
+            region=oss.region,
+            bucket=oss.bucket,
+            access_key=oss.access_key_id,
+            secret_key=oss.access_key_secret,
             virtual_hosted=True,
         )
-        return S3Store(config, timeout=timeout, transport=transport)
+        return S3Store(s3, timeout=timeout, transport=transport)
     raise ValueError(f"unknown storage {kind}")
-
-
-def _secret(value: SecretStr | None) -> str:
-    return value.get_secret_value() if value else ""
 
 
 async def self_check(store: ObjectStore) -> None:

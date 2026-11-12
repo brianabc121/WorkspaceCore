@@ -73,26 +73,28 @@ async def get_metrics(
 @router.get(
     "/operations/storage",
     summary="知识库图片存储的状态（owner / admin）",
-    description="主存储、副本、最近一次自检、这个工作空间的用量与配额、待复制数量。"
-    "不返回密钥；本地存储不返回路径。",
+    description="这个工作空间的主存储、副本（在“设置 → 图片存储”里配置）、最近一次自检、"
+    "用量与配额、待复制数量。不返回密钥；本地存储不返回路径。",
     responses=error_responses(401, 403, 404, 422),
 )
 async def storage_status(request: Request, access: Admin, files: Files) -> StorageStatus:
+    stores = await files.stores(access.workspace.id)
     return await knowledge_files.storage_status(
-        files.db, files.stores, request.app.state.redis, access.workspace.id
+        files.db, stores, request.app.state.redis, access.workspace.id
     )
 
 
 @router.post(
     "/operations/storage/check",
     summary="知识库图片存储自检（owner / admin）",
-    description="对主存储与副本各写一个探测对象、读回、删除；结果也显示在运维页。",
+    description="对这个工作空间的主存储与副本各写一个探测对象、读回、删除；结果也显示在运维页。",
     dependencies=[Depends(csrf_protected)],
     responses=error_responses(401, 403, 404, 422),
 )
 async def check_storage(request: Request, access: Admin, files: Files) -> StorageStatus:
     redis = request.app.state.redis
-    checks = await knowledge_files.run_checks(files.stores, redis)
+    stores = await files.stores(access.workspace.id)
+    checks = await knowledge_files.run_checks(stores, redis, access.workspace.id)
     return await knowledge_files.storage_status(
-        files.db, files.stores, redis, access.workspace.id, checks
+        files.db, stores, redis, access.workspace.id, checks
     )

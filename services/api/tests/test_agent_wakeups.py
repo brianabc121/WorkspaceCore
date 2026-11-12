@@ -63,7 +63,7 @@ def test_next_run_keeps_the_local_clock() -> None:
 def test_session_keys_follow_the_channel_plugin() -> None:
     wid = uuid.uuid4()
     assert agent_wakeups.session_key("group", "G123abc", wid) == "openim:group:g123abc"
-    assert agent_wakeups.session_key("user", "ws_ABC", wid) == "openim:ws_abc"
+    assert agent_wakeups.session_key("user", "ws_ABC", wid) == "openim:direct:ws_abc"
     assert agent_wakeups.session_key(None, "", wid) == f"myworkspace-wakeup-{wid.hex}"
 
 
@@ -232,7 +232,7 @@ async def test_instances_claim_due_wakeups_and_report(env: ImEnv) -> None:
     claimed = {item["id"]: item for item in await _claim(env, token)}
     assert set(claimed) == {once["wakeup_id"], repeat.json()["id"]}
     first = claimed[once["wakeup_id"]]
-    assert first["session_key"] == f"openim:{owner}".lower()
+    assert first["session_key"] == f"openim:direct:{owner}".lower()
     assert first["message"].startswith("[工作台唤醒] 这是你自己安排")
     assert first["message"].endswith("TOOL:im_send 提醒管理员交周报")  # 提示词在最后
     assert claimed[repeat.json()["id"]]["session_key"].startswith("myworkspace-wakeup-")

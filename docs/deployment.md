@@ -252,7 +252,7 @@ OpenIM 等独立部署的组件分开升级：
    docker compose exec -T api python -m app.commands.rotate_credentials --dry-run
    docker compose exec -T api python -m app.commands.rotate_credentials
    ```
-   覆盖现有集成凭证、OpenClaw 密钥库、智能体服务器保存的 SSH 登录密码（T-0178，只重新加密，不改凭证版本）与内部 CA 私钥。
+   覆盖现有集成凭证、OpenClaw 密钥库、智能体服务器保存的 SSH 登录密码（T-0178，只重新加密，不改凭证版本）、图片存储的 R2 / OSS 密钥（T-0223）与内部 CA 私钥。
    可以重复运行；只改密文，不改记录的 `updated_at` 和版本号。
 4. 输出“仍是旧密钥：0；失败：0”（退出码 0）之后，**再等 15 分钟**（AI 待审批的最长有效期）：待审批记录里加密的敏感参数与参数校验用的密钥
    不在第 3 步的范围内，第 2 步之前创建的待审批要靠旧密钥才能批准执行。然后清空 `CREDENTIAL_ENCRYPTION_KEYS_PREVIOUS`，再 `docker compose up -d api worker`。
@@ -464,7 +464,7 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
 
 - **进备份**：工作台的 PostgreSQL 数据库（`pg_dump` custom 格式，备份时不用停服务），以及一份记录迁移版本与时间的 `backup-info.json`。
 - **知识库图片的本地存储也进备份**（卷 `kb-files`，第 19 节）：打包成 `kb-files.tar`；`make restore-verify` 解包后按文件名（内容的 SHA-256）逐个核对，数量与备份时一致。
-  图片存在 Cloudflare R2 / 阿里云 OSS 时由对象存储负责持久化，可以再配一个副本（`FILE_STORAGE_REPLICA`）。
+  图片存在 Cloudflare R2 / 阿里云 OSS 时由对象存储负责持久化，可以再配一个副本（网页“设置 → 图片存储”，第 19 节）。
 - **OpenIM 在运行时也进备份**（第 17.5 节）：MongoDB 的 `openim_v3` 库（`mongodump` 归档）与 Garage（元数据快照、节点身份与数据块）。
   OpenIM 的 Kafka、Redis、etcd 不备份：Kafka 只是中转，Redis 是缓存与在线令牌，etcd 只做服务发现。
 - **不进备份**：
@@ -820,25 +820,34 @@ sudo -E python3 tests/e2e/agents_acceptance.py --server-ca <签发入口证书�
 笔记里可以插入、粘贴、拖入图片（PNG / JPEG / GIF / WebP，单张默认 10 MB，每个工作空间默认 2 GB）。设计见 `docs/v2/TIMELINE_PLAN.md` 第 4 节，
 接口核验见 `docs/decisions/2026-11-04-timeline-kb-upgrade-verification.md` 第 3 节。
 
-### 19.1 存在哪里
+### 19.1 存在哪里（网页“设置 → 图片存储”，T-0223）
 
-| 变量 | 含义 |
+每个工作空间在网页的**设置 → 图片存储**（`/settings/storage`）里单独设置，owner 修改，admin 只读；不用改 `.env`、不用跑部署脚本。
+
+| 设置 | 含义 |
 |---|---|
-| `FILE_STORAGE` | 主存储：`local`（默认，卷 `kb-files`）/ `r2` / `oss`。写主存储成功就返回 |
-| `FILE_STORAGE_REPLICA` | 副本：`none`（默认）/ `local` / `r2` / `oss`。Worker 每分钟把新图片复制过去，失败重试；读主存储失败时读副本 |
-| `R2_ACCOUNT_ID`、`R2_BUCKET`、`R2_JURISDICTION`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY` | Cloudflare R2（S3 兼容接口，路径风格，region `auto`） |
-| `OSS_REGION`、`OSS_BUCKET`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`、`OSS_ENDPOINT` | 阿里云 OSS（S3 兼容接口，虚拟托管风格；`OSS_ENDPOINT` 只在需要覆盖默认的 `https://s3.oss-<地域>.aliyuncs.com` 时填） |
-| `FILE_MAX_MB`、`FILE_QUOTA_MB` | 单张上限与每个工作空间的总量 |
+| 主存储 | 本机（默认，卷 `kb-files`）/ Cloudflare R2 / 阿里云 OSS。写主存储成功就返回 |
+| 副本 | 不复制（默认）/ 本机 / R2 / OSS，不能和主存储相同。Worker 每分钟把新图片复制过去，失败重试；读主存储失败时读副本 |
+| Cloudflare R2 | 账户 ID、桶名、辖区（建桶时选了欧盟等辖区才填，例如 `eu`）、Access Key ID、Secret Access Key。S3 兼容接口，路径风格，region `auto` |
+| 阿里云 OSS | 地域（例如 `cn-hangzhou`）、桶名、AccessKey ID、AccessKey Secret。S3 兼容接口，虚拟托管风格 |
 
-- 配置方法：`bash scripts/deploy.sh connect` 的“知识库图片存储”一步（密钥当场输入，只写进 `.env`），或直接改 `.env` 后 `docker compose up -d api worker`。
+- 地址只由这些值拼出官方域名（`https://<账户 ID>[.<辖区>].r2.cloudflarestorage.com`、`https://<桶名>.s3.oss-<地域>.aliyuncs.com`），
+  不能填任意地址；账户 ID、辖区、地域、桶名只能是小写字母、数字和短横线。
+- 密钥用部署的 `CREDENTIAL_ENCRYPTION_KEY` 加密后存进数据库（与其他凭证相同，换加密密钥时由第 6.1 节的 `app.commands.rotate_credentials` 一起重新加密），页面只显示“已设置”，
+  不填表示不改；审计日志只记哪些字段、哪个存储的密钥改了，不记值。
+- **保存前自检**：对选中的主存储与副本各写、读、删一个探测对象，不通过就不保存，页面显示各自的原因（错误码与说明）。
+- 还存着本工作空间图片或常驻环境快照的存储（页面上会列出）不能清空连接信息，否则那些文件读不到。
+- 单张上限与每个工作空间的总量仍是部署级设置：`.env` 的 `FILE_MAX_MB`、`FILE_QUOTA_MB`。
 - 两个都配时一个做主存储、一个做副本，两边都有一份；用户主要在国内时主存储选 OSS、副本选 R2，反过来也行。
 - 桶要保持**私有**，给工作台的密钥只开这个桶的对象读写。图片一律经工作台读取（`GET /api/v1/knowledge/files/<id>`，按工作空间与角色校验），浏览器不直连对象存储。
 - 换了主存储以后，旧图片仍从写入时的存储读（数据库里记着），新图片写到新的主存储；后来才配副本时，Worker 会把以前的图片也补一份。
+- 2026-11-12 之前写在 `.env` 里的 `FILE_STORAGE`、`FILE_STORAGE_REPLICA`、`R2_*`、`OSS_*` 不再读取（升级后在网页上重新填一次；还没有生产数据，不做迁移）。
+  `R2_ENDPOINT`、`R2_REGION`、`OSS_ENDPOINT` 只给测试指向 Garage 用，部署不要设置。
 
 ### 19.2 自检与运维页
 
-- Worker 启动时和每天自检一次：对主存储与副本各写、读、删一个探测文件，失败写警告日志。
-- 运维页（owner / admin）显示主存储、副本、最近一次自检、本工作空间的用量与配额、待复制与复制失败的数量，可以点“自检”立即检查。
+- 保存设置时自检一次（见上）；Worker 启动时和每天对每个工作空间再各自检一次：对主存储与副本各写、读、删一个探测文件，失败写警告日志。
+- 运维页（owner / admin）显示本工作空间的主存储、副本、最近一次自检、用量与配额、待复制与复制失败的数量，可以点“自检”立即检查；改设置点链接去“设置 → 图片存储”。
 - 自检失败的常见原因：密钥填错（`SignatureDoesNotMatch` / `InvalidAccessKeyId`）、地域与桶所在地域不一致（OSS）、桶名写错（`NoSuchBucket`）、R2 辖区没填。
 
 ### 19.3 清理与备份
@@ -853,7 +862,9 @@ sudo -E python3 tests/e2e/agents_acceptance.py --server-ca <签发入口证书�
   - 路径风格（R2 的寻址）与虚拟主机风格（OSS 的寻址；Garage 配 `root_domain`）的读写删、错误密钥的分类；
   - 主存储 R2 + 副本 OSS：上传写主存储，Worker 复制到副本；主存储丢了文件、或主存储拒绝凭证时从副本读；清理时两边都删。
 - 浏览器验收（Compose CI 的 `knowledge_browser.cjs`）：上传、粘贴截图、阅读页显示与放大、图谱的图片节点、没有引用的图片被清理、运维页的张数；本地存储的备份恢复在 A15（第 14 节）。
-- **真实的 R2 / OSS 账号还没有验收**（需要测试桶）：第一次配置后先在运维页点“自检”，通过后再让大家上传图片。
+- 设置页（T-0223）：后端测试用假的 S3 服务核对拼出的主机名（含辖区、OSS 的虚拟托管）、密钥加密与不回显、保存前自检、版本冲突、在用不能清空；
+  CI 的 Garage 测试经设置接口保存后验证主存储 + 副本；浏览器验收 `storage_browser.cjs`（Compose CI）验证页面的保存、校验、只读、切换工作空间与手机宽度。
+- **真实的 R2 / OSS 账号还没有验收**（需要测试桶）：第一次在设置页保存时就会自检，通过才保存。
 
 ## 20. 任务时间轴（T-0104 ~ T-0106）
 

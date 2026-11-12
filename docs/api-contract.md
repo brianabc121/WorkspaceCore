@@ -216,7 +216,9 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 
 | 方法 | 路径 | 说明 | 状态 |
 |---|---|---|---|
-| GET | `/api/v1/operations/storage` | 知识库图片存储（owner / admin）：主存储、副本（名字、是否配置完整与缺少的变量、R2 / OSS 的桶地址、最近一次自检）、本工作空间的图片数 / 用量 / 配额、全部工作空间待复制与复制失败的数量；不返回密钥，本地存储不返回路径 | 已实现（T-0103） |
+| GET | `/api/v1/operations/storage` | 知识库图片存储（owner / admin）：本工作空间的主存储、副本（名字、是否配置完整与缺少的字段、R2 / OSS 的桶地址、最近一次自检）、图片数 / 用量 / 配额、待复制与复制失败的数量；不返回密钥，本地存储不返回路径 | 已实现（T-0103；按工作空间 T-0223） |
+| GET | `/api/v1/settings/storage` | 图片存储设置（owner / admin，`Cache-Control: no-store`）：`primary`、`replica`、`r2`（账户 ID、桶名、辖区、Access Key ID、`secret_set`）、`oss`（地域、桶名、AccessKey ID、`secret_set`）、`in_use`（还存着本工作空间图片或快照的存储）、`version`、`updated_at`；不返回密钥 | 已实现（T-0223） |
+| PUT | `/api/v1/settings/storage` | 保存（owner，CSRF，乐观并发 `version` → `409 VERSION_CONFLICT`）：密钥 `null` 保持、`""` 清除；账户 ID / 辖区 / 地域 / 桶名只能是小写字母、数字和短横线（地址只由它们拼出 R2 / OSS 的官方域名）→ `422 VALIDATION_FAILED`（`details.errors[].loc`）；选了的存储要填完整；`in_use` 的存储不能清空 → `409 STORAGE_IN_USE`；保存前对主存储与副本各写、读、删一个探测对象，不通过 → `422 STORAGE_CHECK_FAILED`（`details.checks`），设置不变；成功返回设置与 `checks`，审计 `storage.settings_updated`（只记改了哪些字段、哪个存储的密钥换了） | 已实现（T-0223） |
 | POST | `/api/v1/operations/storage/check` | 存储自检（owner / admin）：对主存储与副本各写、读、删一个探测对象，结果存进 Redis 并返回最新的 `StorageStatus`；Worker 启动时和每天也自检一次 | 已实现（T-0103） |
 | GET | `/api/v1/operations/services` | 核心服务、监控组件与集成的状态（没有部署的为 `not_configured`）；V2 另有 `kind = agents` 的 OpenIM 与本工作空间的 OpenClaw 实例（实例只对 owner / admin 列出） | 已实现（T-0035；V2 部分 T-0062） |
 | GET | `/api/v1/operations/metrics?range=&views=` | 预设指标视图，聚合好的数据点；不接受 PromQL；带 `sync` 与 `grafana_url` | 已实现（T-0035） |
@@ -417,7 +419,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 | `GET /api/v1/im/media/{media_id}` | 图片内联显示；文件一律 `Content-Disposition: attachment`；视频支持 `Range`（`206` / `416`，`Accept-Ranges: bytes`）；都带 `X-Content-Type-Options: nosniff` |
 | `GET /im/obj/m/{media_id}`（接入入口，不进 OpenAPI） | 实例取已发出的图片、文件、视频，响应头规则同上 |
 
-- `AgentInstanceOut.bundle_outdated`（T-0120）：实例上报的插件版本不是 `0.3.3+myworkspace.1`（插件没打工作台的补丁）时为 true，实例页提示重新签发接入包或经 SSH 重新部署。
+- `AgentInstanceOut.bundle_outdated`（T-0120）：实例上报的插件版本不是 `0.3.3+myworkspace.2`（插件没打工作台的补丁，或只有 T-0120 的旧补丁；T-0221）时为 true，实例页提示重新签发接入包或经 SSH 重新部署。
 - 签发接入包时记下当时的私聊白名单（`agent_instances.bundle_whitelist`，迁移 0033），`im_list_targets` 据此给出 `replies_reach_you`。
 
 **MCP 工具**（`/mcp`，工具清单见 `app/schemas/ai_tools.py`）：
@@ -468,7 +470,7 @@ Sprint 1 新增的业务错误码（`INVALID_CREDENTIALS`、`CSRF_FAILED`、`SET
 
 - `schedule_wakeup`：`prompt`（≤ 2000 字）；`at` 与 `in_minutes` 二选一，最早 5 分钟后、最远 30 天；`target` 是 `im_list_targets` 给的目标（在那个会话里跑，看得到之前的消息），不给是独立会话。每个实例自己安排的最多 20 个待执行（`RATE_LIMITED`）。
 - `cancel_wakeup`：只能取消自己安排、还没开始的（管理员建的 `NOT_FOUND`，已开始或已结束 `CONFLICT`）。待执行的唤醒列在 `im_outbox` 的 `wakeups` 里（`source` = `agent` / `admin` / `issue`）。
-- 会话键与 openclaw-channel 0.3.3 一致：群 `openim:group:<群 ID>`、私聊 `openim:<管理员的 IM ID>`（都转小写），独立会话 `myworkspace-wakeup-<唤醒 ID>`。
+- 会话键与 openclaw-channel 0.3.3 一致：群 `openim:group:<群 ID>`、私聊 `openim:direct:<管理员的 IM ID>`（都转小写；T-0221 起与打过补丁的插件收到消息时用的会话一致），独立会话 `myworkspace-wakeup-<唤醒 ID>`。
 - `wakeup.mjs` 在容器里运行 `node openclaw.mjs agent --session-key <键> --message-file <文件> --timeout 600 --json`（不加 `--deliver`，要发消息时智能体自己用 `im_send`），用锁文件保证同一时间只跑一个，只报回一行原因。
 - 结束的唤醒保留 30 天。Issue 有新动态时的唤醒见“项目里的 Issues”一节。
 

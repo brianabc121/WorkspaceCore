@@ -1312,7 +1312,7 @@ class Runner:
             self.enqueue(
                 host, "stop_env", {"env_id": str(env.id), "container": env.container_name}, env=env
             )
-        snapshot = SnapshotStore(self.db, self.settings).begin(env)
+        snapshot = await SnapshotStore(self.db, self.settings).begin(env)
         await self.db.flush()
         policy = specs.policy_for(host.policy)
         self.enqueue(

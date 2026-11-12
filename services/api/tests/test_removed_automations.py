@@ -61,6 +61,8 @@ def test_old_stream_entries_keep_retained_invalidation_topics() -> None:
         ["n8n-owner"],
         ["public-urls", "--n8n", "https://legacy.example.com"],
         ["save-login", "--app", "n8n", "--username", "owner@example.com"],
+        # 图片存储改在网页“设置 → 图片存储”里配置和自检（T-0223）
+        ["storage-check"],
     ],
 )
 def test_retired_connect_commands_are_rejected(argv: list[str]) -> None:
@@ -71,4 +73,3 @@ def test_retired_connect_commands_are_rejected(argv: list[str]) -> None:
 
 def test_retained_connect_commands_are_available() -> None:
     assert parser().parse_args(["status"]).command == "status"
-    assert parser().parse_args(["storage-check"]).command == "storage-check"

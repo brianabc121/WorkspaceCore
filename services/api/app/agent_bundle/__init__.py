@@ -44,8 +44,10 @@ from typing import Any
 
 OPENCLAW_VERSION = "2026.9.36"
 PLUGIN_VERSION = "0.3.3"
-# 接入包的 channel-patch.mjs 打上的补丁（T-0120）；打过补丁的实例上报 "0.3.3+myworkspace.1"
-PLUGIN_PATCH = "myworkspace.1"
+# 接入包的 channel-patch.mjs 打上的补丁：T-0120（回复被拒收时告诉智能体）
+# + T-0221（各对话各用一个会话）。两处都打了的实例上报 "0.3.3+myworkspace.2"；
+# 只有旧的第一处的上报 "0.3.3+myworkspace.1"（实例页提示重新签发）
+PLUGIN_PATCH = "myworkspace.2"
 PATCHED_PLUGIN_VERSION = f"{PLUGIN_VERSION}+{PLUGIN_PATCH}"
 # 外网模式的本机隧道（OC-2 第 4 部分核验：client 模式的 --listen / --target / --cert / --key）
 GHOSTUNNEL_IMAGE = (

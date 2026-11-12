@@ -38,6 +38,7 @@ from app.core.config import get_settings
 from app.core.resources import create_engine, create_redis
 from sqlalchemy import update
 from app.domain import dashboard_defaults, events, knowledge_files, notifications
+from app.domain.storage_config import StoreRegistry
 from app.domain.security import hash_password
 from app.models import (
     AgentInstance, AgentUsageMinute, KnowledgeFile, Project, Task, TaskEvent, TaskRun, Widget, WorkspaceMember,
@@ -143,7 +144,7 @@ async def main():
                 workspace_id = uuid.UUID(sys.argv[2])
                 await db.execute(update(KnowledgeFile).where(KnowledgeFile.workspace_id == workspace_id)
                                  .values(created_at=datetime.now(UTC) - timedelta(days=2)))
-                print(await knowledge_files.cleanup_unreferenced(db, knowledge_files.FileStores(settings)))
+                print(await knowledge_files.cleanup_unreferenced(db, StoreRegistry(db, settings)))
             elif command == "member":
                 workspace_id, user_id, role = sys.argv[2:5]
                 db.add(WorkspaceMember(

@@ -24,6 +24,7 @@ import pytest
 from app.domain import agent_media
 from app.domain.im import admin_im_user_id
 from app.domain.im_projection import signed_ex
+from app.integrations.openim import OpenIMClient
 from app.jobs import worker
 from tests import fake_openim
 from tests.helpers import run_sql, tool_error
@@ -197,6 +198,99 @@ async def test_image_and_text_file_are_sent_with_signed_ex(env: ImEnv) -> None:
     fetched = await env.client.get(path, headers=INTRANET)
     assert fetched.status_code == 200 and fetched.content == download.content
     assert fetched.headers["content-disposition"].startswith("attachment;")
+
+
+async def _send_four_parts(env: ImEnv, token: str, owner: str, key: str) -> dict[str, Any]:
+    result = await call(
+        env,
+        token,
+        "im_send",
+        {
+            "target": f"user:{owner}",
+            "text": "报告在这里",
+            "client_key": key,
+            "attachments": [
+                {"data_base64": base64.b64encode(png(40, 30)).decode()},
+                {"text_content": "# 周报\n", "filename": "a.md"},
+                {"text_content": "# 附录\n", "filename": "b.md"},
+            ],
+        },
+    )
+    return result
+
+
+async def _executions(env: ImEnv, key: str) -> int:
+    count: int = await run_sql(
+        env.database_url,
+        "SELECT count(*) FROM workspace.ai_tool_executions"
+        " WHERE tool_name = 'im_send' AND arguments_display::text LIKE $1",
+        f"%{key}%",
+    )
+    return count
+
+
+async def test_worker_running_mid_send_leaves_the_tool_its_parts(
+    env: ImEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-0222（agents 场景 24 偶发失败）：im_send 逐条发的途中，Worker 每 5 秒的发件正好运行。
+
+    原来 Worker 会顺延或拿走后面的几条，工具这边 deliver 拿不到行就回滚，
+    回滚让会话里的对象全部过期，下一条读 row.status 时报 MissingGreenlet：
+    工具返回错误、执行记录没写，消息却由 Worker 陆续发出。
+    现在当场发的几条先留给工具调用自己发，Worker 不碰。"""
+    a, token = await _agent(env, "甲")
+    owner = admin_im_user_id(env.owner_id)
+    conv = await _open_dm(env, a["id"])
+    original = OpenIMClient.send_text
+    ran: list[int] = []
+
+    async def send_text(self: OpenIMClient, **kwargs: Any) -> Any:
+        result = await original(self, **kwargs)
+        if not ran:
+            # 第一条（文字）刚发出、后面三条还在排队：Worker 的发件在这时运行（另一个会话）
+            ran.append(await worker.deliver_im_outbox(await _worker_ctx(env)))
+        return result
+
+    monkeypatch.setattr(OpenIMClient, "send_text", send_text)
+    sent = ok(await _send_four_parts(env, token, owner, "mid-send-worker"))
+    assert ran == [0]  # Worker 没有拿到任何一条
+    assert sent["status"] == "sent"
+    assert [m["status"] for m in sent["messages"]] == ["sent"] * 4
+    assert await _executions(env, "mid-send-worker") == 1
+    stored = [m for m in env.fake.messages[conv] if m["sendID"] == a["im_user_id"]]
+    assert [m["contentType"] for m in stored] == [101, 102, 105, 105]
+
+
+async def test_part_taken_away_mid_send_does_not_break_the_tool(
+    env: ImEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-0222：逐条发的途中某一条被别处拿走（这里用取消模拟）。
+
+    deliver 拿不到行而回滚之后，工具照样返回结果、写执行记录，其余几条照常发出。"""
+    a, token = await _agent(env, "甲")
+    owner = admin_im_user_id(env.owner_id)
+    conv = await _open_dm(env, a["id"])
+    original = OpenIMClient.send_text
+    cancelled: list[int] = []
+
+    async def send_text(self: OpenIMClient, **kwargs: Any) -> Any:
+        result = await original(self, **kwargs)
+        if not cancelled:
+            cancelled.append(1)
+            await run_sql(
+                env.database_url,
+                "UPDATE workspace.agent_im_outbox SET status = 'cancelled'"
+                " WHERE client_key = 'mid-send-cancel' AND part = 1",
+            )
+        return result
+
+    monkeypatch.setattr(OpenIMClient, "send_text", send_text)
+    sent = ok(await _send_four_parts(env, token, owner, "mid-send-cancel"))
+    assert [m["status"] for m in sent["messages"]] == ["sent", "cancelled", "sent", "sent"]
+    assert sent["status"] == "partial"
+    assert await _executions(env, "mid-send-cancel") == 1
+    stored = [m for m in env.fake.messages[conv] if m["sendID"] == a["im_user_id"]]
+    assert [m["contentType"] for m in stored] == [101, 105, 105]
 
 
 async def test_blocked_types_secrets_and_private_urls(env: ImEnv) -> None:

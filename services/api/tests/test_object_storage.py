@@ -6,14 +6,16 @@ from typing import Any
 
 import httpx
 import pytest
-from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.integrations.base import ConnectorError
 from app.integrations.object_storage import (
     LocalStore,
+    OssAccount,
+    R2Account,
     S3Config,
     S3Store,
+    StorageConfig,
     StorageNotConfigured,
     authorization,
     build_store,
@@ -296,20 +298,23 @@ def _settings(tmp: Path, **values: Any) -> Settings:
 
 
 def test_build_store_defaults_and_missing_settings(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
     with pytest.raises(StorageNotConfigured) as raised:
-        build_store("r2", _settings(tmp_path, r2_bucket="b"))
-    assert raised.value.missing == ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"]
+        build_store("r2", StorageConfig(r2=R2Account(bucket="b")), settings)
+    assert raised.value.missing == ["账户 ID", "Access Key ID", "Secret Access Key"]
 
     r2 = build_store(
         "r2",
-        _settings(
-            tmp_path,
-            r2_account_id="acc123",
-            r2_access_key_id="AK",
-            r2_secret_access_key=SecretStr("SK"),
-            r2_bucket="kb",
-            r2_jurisdiction="eu",
+        StorageConfig(
+            r2=R2Account(
+                account_id="acc123",
+                access_key_id="AK",
+                secret_access_key="SK",  # noqa: S106 - 测试用的假密钥
+                bucket="kb",
+                jurisdiction="eu",
+            )
         ),
+        settings,
     )
     assert isinstance(r2, S3Store)
     assert r2.config.endpoint == "https://acc123.eu.r2.cloudflarestorage.com"
@@ -317,13 +322,15 @@ def test_build_store_defaults_and_missing_settings(tmp_path: Path) -> None:
 
     oss = build_store(
         "oss",
-        _settings(
-            tmp_path,
-            oss_region="cn-hangzhou",
-            oss_access_key_id="AK",
-            oss_access_key_secret=SecretStr("SK"),
-            oss_bucket="kb",
+        StorageConfig(
+            oss=OssAccount(
+                region="cn-hangzhou",
+                access_key_id="AK",
+                access_key_secret="SK",  # noqa: S106 - 测试用的假密钥
+                bucket="kb",
+            )
         ),
+        settings,
     )
     assert isinstance(oss, S3Store)
     assert oss.config.endpoint == "https://s3.oss-cn-hangzhou.aliyuncs.com"
@@ -331,4 +338,4 @@ def test_build_store_defaults_and_missing_settings(tmp_path: Path) -> None:
     assert oss.where == "kb.s3.oss-cn-hangzhou.aliyuncs.com"
     assert "SK" not in repr(oss.where)
 
-    assert isinstance(build_store("local", _settings(tmp_path)), LocalStore)
+    assert isinstance(build_store("local", StorageConfig(), settings), LocalStore)

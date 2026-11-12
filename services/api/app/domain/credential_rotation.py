@@ -29,11 +29,13 @@ from app.domain.agent_ssh import agent_ssh_context
 from app.domain.agents import agent_secret_context
 from app.domain.connectors import account_context
 from app.domain.credentials import CredentialBox, CredentialError
+from app.domain.storage_config import secret_context as storage_secret_context
 from app.models import (
     AgentCa,
     AgentSecretVersion,
     AgentSshTarget,
     IntegrationAccount,
+    StorageSettings,
 )
 
 _PREFIX = "enc:v1:"
@@ -82,6 +84,19 @@ FIELDS: tuple[SealedField, ...] = (
         "login_password_ref",
         lambda row: agent_server_password_context(row.id),
     ),
+    # 工作空间的图片存储密钥（T-0223，网页“设置 → 图片存储”）
+    SealedField(
+        "storage_settings.r2_secret_ref",
+        StorageSettings,
+        "r2_secret_ref",
+        lambda row: storage_secret_context(row.workspace_id, "r2_secret"),
+    ),
+    SealedField(
+        "storage_settings.oss_secret_ref",
+        StorageSettings,
+        "oss_secret_ref",
+        lambda row: storage_secret_context(row.workspace_id, "oss_secret"),
+    ),
 )
 
 
@@ -126,7 +141,7 @@ async def _rotate_field(
     column = getattr(model, spec.column)
     table: Table = model.__table__
     keep_updated_at = {"updated_at": table.c.updated_at} if "updated_at" in table.c else {}
-    # 单列主键（多数表是 id，news_settings 是 workspace_id）
+    # 单列主键（多数表是 id，news_settings、storage_settings 是 workspace_id）
     (key_column,) = table.primary_key.columns
     key = getattr(model, key_column.key)
     last_id: uuid.UUID | None = None

@@ -1181,8 +1181,25 @@ def scenario_20(c: Ctx) -> None:
     conv, gid = group["conversation_id"], group["group_id"]
     c.owner.call("PUT", f"/api/v1/im/groups/{gid}/policy", {
         "version": group["policy"]["version"], "relay_enabled": True, "max_agent_streak": 8, "max_per_minute": 1})
+    first_at = time.time()
     c.owner.send(conv, "@甲 限流第一问", at=[c.a.im_user_id])
     wait_for("甲回复第一问", lambda: c.from_sender(conv, c.a.im_user_id, "限流第一问"), timeout=150)
+    # 各对话各用一个会话（T-0221）：补丁给 resolveAgentRoute 传 peer 之前，甲在 OpenIM 的所有对话都在 agent:main:main，
+    # 新群的第一问就带着甲在别处的上百条消息（2026-11-11 CI 上是 131 条）
+    first = [r for r in c.model_calls(c.keys["a"], first_at) if "限流第一问" in (r.get("last_user") or "")]
+    try:
+        listed = gateway_call(c.a, "sessions.list", {})
+        rows = listed if isinstance(listed, list) else (listed or {}).get("sessions") or []
+        keys = sorted(r["key"] for r in rows if isinstance(r, dict) and isinstance(r.get("key"), str))
+    except Exception as error:  # 网关读不到时照样判定，详情里写原因
+        keys = [f"error: {str(error)[:200]}"]
+    group_key, direct_key = f"agent:main:openim:group:{gid}".lower(), f"agent:main:openim:direct:{c.admin_im}".lower()
+    c.check("场景 20：各对话各用一个会话（T-0221）：新群在自己的会话里，管理员私聊在另一个会话里，"
+            "第一问那一轮不带甲在别的对话里的消息",
+            # 单独跑场景 20 时没有场景 2 的私聊，就不要求私聊的会话
+            group_key in keys and (direct_key in keys or not c.conv_a) and bool(first) and first[0].get("count", 999) < 20,
+            json.dumps({"keys": keys[:12], "first_count": first[0].get("count") if first else None},
+                       ensure_ascii=False)[:800])
     c.owner.send(conv, "@甲 限流第二问", at=[c.a.im_user_id])
 
     def rejected() -> list[dict[str, Any]]:
@@ -1212,7 +1229,7 @@ def scenario_20(c: Ctx) -> None:
             any("5002" in n for n in notes), detail)
     instance = c.owner.call("GET", f"/api/v1/agents/instances/{c.a.id}")
     c.check("场景 20：实例上报的插件版本带补丁标记，实例页不再提示重新签发接入包",
-            instance["plugin_version"] == "0.3.3+myworkspace.1" and not instance["bundle_outdated"],
+            instance["plugin_version"] == "0.3.3+myworkspace.2" and not instance["bundle_outdated"],
             f"{instance['plugin_version']} / {instance['bundle_outdated']}")
 
 

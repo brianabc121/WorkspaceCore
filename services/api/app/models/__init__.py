@@ -73,6 +73,7 @@ from app.models.knowledge_base import (
     KnowledgeReadStat,
     KnowledgeSpace,
     ProjectAgent,
+    StorageSettings,
 )
 from app.models.mail import AgentMailAccount, MailAccount, MailOAuthClient, MailSend
 from app.models.model_connection import (
@@ -199,6 +200,7 @@ __all__ = [
     "RunnerSshTarget",
     "RunnerTemplate",
     "SearchDocument",
+    "StorageSettings",
     "SyncCursor",
     "Task",
     "TaskEvent",

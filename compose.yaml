@@ -39,22 +39,10 @@ x-api-env: &api-env
   OPENIM_SECRET: ${OPENIM_SECRET:-}
   # OpenIM 对象存储的地址，与 OpenIM 的 IMENV_MINIO_EXTERNALADDRESS 相同；留空时不能上传和显示图片
   OPENIM_OBJECT_URL: ${OPENIM_OBJECT_URL:-}
-  # 知识库图片（T-0103）：主存储 local / r2 / oss，副本 none / local / r2 / oss；local 存在卷 kb-files。
-  # R2 / OSS 走 S3 兼容接口，桶保持私有；图片一律经工作台读取。deploy.sh connect 的“图片存储”一步会写这些变量
-  FILE_STORAGE: ${FILE_STORAGE:-local}
-  FILE_STORAGE_REPLICA: ${FILE_STORAGE_REPLICA:-none}
+  # 知识库图片（T-0103）：单张上限与每个工作空间的总量（MB）。主存储、副本与 Cloudflare R2 / 阿里云 OSS
+  # 由每个工作空间在网页“设置 → 图片存储”里配置（T-0223），这里不再有相关变量；本机存储在卷 kb-files
   FILE_MAX_MB: ${FILE_MAX_MB:-10}
   FILE_QUOTA_MB: ${FILE_QUOTA_MB:-2048}
-  R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
-  R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
-  R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
-  R2_BUCKET: ${R2_BUCKET:-}
-  R2_JURISDICTION: ${R2_JURISDICTION:-}
-  OSS_REGION: ${OSS_REGION:-}
-  OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
-  OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
-  OSS_BUCKET: ${OSS_BUCKET:-}
-  OSS_ENDPOINT: ${OSS_ENDPOINT:-}
   # 新闻早报（T-0152 / T-0153，docs/v2/NEWS_PLAN.md）：独立部署的 TrendRadar（infra/trendradar/compose.yaml，
   # make trendradar-up）。留空表示没有部署：设置页显示“未部署”，智能体看不到 news_* 工具
   TRENDRADAR_MCP_URL: ${TRENDRADAR_MCP_URL:-}
@@ -415,7 +403,7 @@ networks:
 volumes:
   postgres-data:
   redis-data:
-  # 知识库图片的本地存储（FILE_STORAGE=local 或副本为 local 时使用），纳入 make backup
+  # 知识库图片的本机存储（“设置 → 图片存储”选本机做主存储或副本时使用），纳入 make backup
   kb-files:
   caddy-data:
   caddy-config:

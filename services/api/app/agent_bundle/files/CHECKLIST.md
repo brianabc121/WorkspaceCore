@@ -19,12 +19,12 @@
       `echo '{}' > state/plugin-install.json && chown 1000:1000 state/plugin-install.json`
       先起这个实例的网络（`net` 服务，安装插件要联网）：`docker compose up -d net`
       `docker compose run --rm --no-deps -e OPENCLAW_CONFIG_PATH=/home/node/.openclaw/plugin-install.json --entrypoint node openclaw openclaw.mjs plugins install @openim/openclaw-channel@0.3.3 --force --accept-capabilities`
-      然后打上工作台的补丁（自动回复被拒收时把原因放回会话，智能体下一轮看得到；T-0120）：
+      然后打上工作台的补丁（自动回复被拒收时把原因放回会话，智能体下一轮看得到；T-0120。各群、各私聊各用一个会话；T-0221）：
       `docker compose run --rm --no-deps --entrypoint node openclaw /opt/myworkspace/bin/channel-patch.mjs`
-      输出 `plugin_patch_applied`（或重复运行时的 `plugin_patch_already_applied`）才算成功；它核对原文件与结果的 sha256，
+      输出 `plugin_patch_applied`（重复运行时 `plugin_patch_already_applied`，打过 T-0120 旧补丁的补上新的一处时 `plugin_patch_upgraded`）才算成功；它核对原文件与结果的 sha256，
       不是 0.3.3 的原文件就不改。装好后再 `docker compose up -d`。升级插件前重新做 OC-0 ADR F9 的审查，并更新补丁。
 - [ ] 已经部署过的实例（T-0120 之前）：换上新的接入包后同样运行上面的打补丁命令，再 `docker compose up -d`
-      （新凭证会让容器重建）。实例页不再提示“旧接入包”、上报的插件版本是 `0.3.3+myworkspace.1` 就对了。
+      （新凭证会让容器重建）。实例页不再提示“旧接入包”、上报的插件版本是 `0.3.3+myworkspace.2` 就对了。
 - [ ] 主模型在工作台设置，不手改 `state/openclaw.json`（T-0205）：先在“中转站管理”里建连接（协议、地址、Key、模型）并授权给这个实例，
       再在实例页选连接与模型。接入包里已经写好受管的 provider（键 `mwc…`，Key 是 exec SecretRef `mc_<连接 ID>`，
       取密钥程序在需要时向工作台取，配置里没有明文）；之后的切换、Key 更换由下面的 `model-config.mjs` 定时任务自动应用。

@@ -1,11 +1,11 @@
-"""Scoped desired network services and owner-consented ingress (0063)."""
+"""Scoped desired network services and owner-consented ingress (0064)."""
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql as pg
 
-revision = "0063"
-down_revision = "0062"
+revision = "0064"
+down_revision = "0063"
 branch_labels = None
 depends_on = None
 

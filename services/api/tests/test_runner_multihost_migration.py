@@ -15,9 +15,9 @@ def test_multihost_upgrade_downgrade_preserves_environment_and_refuses_multi_hos
     temp_database_url,
 ):
     config = alembic_config(temp_database_url)
-    command.upgrade(config, "0060")
-    env_id = _seed(temp_database_url)
     command.upgrade(config, "0061")
+    env_id = _seed(temp_database_url)
+    command.upgrade(config, "0062")
     row = run(temp_database_url, "SELECT * FROM workspace.runner_environments WHERE id=$1", env_id)[
         0
     ]
@@ -32,13 +32,13 @@ def test_multihost_upgrade_downgrade_preserves_environment_and_refuses_multi_hos
         row["workspace_id"],
     )
     with pytest.raises(RuntimeError, match="不能安全回退"):
-        command.downgrade(config, "0060")
+        command.downgrade(config, "0061")
     assert len(run(temp_database_url, "SELECT id FROM workspace.runner_hosts")) == 2
     assert run(
         temp_database_url, "SELECT id FROM workspace.runner_environments WHERE id=$1", env_id
     )
     run(temp_database_url, "DELETE FROM workspace.runner_hosts WHERE id=$1", host_id)
-    command.downgrade(config, "0060")
+    command.downgrade(config, "0061")
     assert (
         run(
             temp_database_url,
@@ -47,4 +47,4 @@ def test_multihost_upgrade_downgrade_preserves_environment_and_refuses_multi_hos
         )[0]["mem_bytes"]
         == 100
     )
-    command.upgrade(config, "0061")
+    command.upgrade(config, "0062")

@@ -1,4 +1,7 @@
-"""部署组件的接入状态与知识库图片存储自检。"""
+"""部署组件的接入状态（部署脚本调用）。
+
+知识库图片存储改在网页“设置 → 图片存储”里配置和自检（T-0223），这里不再有 storage-check。
+"""
 
 import argparse
 import asyncio
@@ -14,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings, get_settings
 from app.core.errors import ApiError
 from app.core.resources import create_engine, create_redis
-from app.domain import im, knowledge_files
+from app.domain import im
 from app.domain.connectors import ConnectorRuntime
 from app.domain.integrations import IntegrationService
 from app.domain.policy import WorkspaceAccess, has_role, require_role
@@ -153,30 +156,17 @@ async def _openim_state(env: Env) -> str:
 Command = Callable[[Env, argparse.Namespace], Awaitable[int]]
 
 
-async def cmd_storage_check(env: Env, args: argparse.Namespace) -> int:
-    """知识库图片存储自检（T-0103）：主存储与副本各写、读、删一个探测对象。
-
-    一行一个存储：`<名字>=ok` 或 `<名字>=failed <原因>`；有失败时退出码 1。不输出密钥。
-    """
-    results = await knowledge_files.run_checks(knowledge_files.FileStores(env.settings), env.redis)
-    for name, check in results.items():
-        print(f"{name}=ok" if check.ok else f"{name}=failed {check.reason or ''}".rstrip())
-    return 0 if all(check.ok for check in results.values()) else 1
-
-
 COMMANDS: dict[str, Command] = {
     "status": cmd_status,
-    "storage-check": cmd_storage_check,
 }
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="报告组件状态与检查存储（部署脚本调用）")
+    root = argparse.ArgumentParser(description="报告组件状态（部署脚本调用）")
     root.add_argument("--email", help="以哪个工作台用户的身份操作（默认首次安装创建的管理员）")
     root.add_argument("--workspace", type=uuid.UUID, help="工作空间 ID（该用户管理多个时必填）")
     sub = root.add_subparsers(dest="command", required=True)
     sub.add_parser("status", help="是否完成首次安装、各组件是否已接入")
-    sub.add_parser("storage-check", help="知识库图片存储自检：写、读、删一个探测对象")
     return root
 
 

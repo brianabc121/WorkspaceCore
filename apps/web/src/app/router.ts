@@ -22,6 +22,7 @@ import ProjectsPage from '../pages/ProjectsPage.vue'
 import IntegrationsPage from '../pages/IntegrationsPage.vue'
 import MailPage from '../pages/MailPage.vue'
 import MailSettingsPage from '../pages/MailSettingsPage.vue'
+import StorageSettingsPage from '../pages/StorageSettingsPage.vue'
 import RunnerPage from '../pages/RunnerPage.vue'
 import KnowledgePage from '../pages/KnowledgePage.vue'
 import CalendarPage from '../pages/CalendarPage.vue'
@@ -63,7 +64,7 @@ const navMeta = (item: NavItem) => ({ title: item.title, description: item.descr
 // 知识库是独立页面，自己的布局；早报是模块，在模块路由里声明
 // 管理区八页（T-0189，方案 docs/v2/ai-admin-redesign）也是宽页面；新闻早报设置在模块路由的 meta 里登记
 // 审计日志不在侧栏导航里，它的路由在下面单独登记 wide
-const ADMIN_PAGES = ['/ai', '/settings', '/settings/integrations', '/settings/security', '/settings/mail', '/settings/model-connections', '/settings/modules']
+const ADMIN_PAGES = ['/ai', '/settings', '/settings/integrations', '/settings/security', '/settings/mail', '/settings/storage', '/settings/model-connections', '/settings/modules']
 const WIDE_PAGES = new Set(['/tasks', '/projects', '/calendar', '/mail', '/developer', '/operations', '/agent-servers', '/agents', '/runner', ...ADMIN_PAGES])
 
 // 旧链接（T-0147 的两个标签）：/agents?tab=servers&server=… 换成独立的服务器页（只带有效的 server 与 range），
@@ -97,7 +98,7 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
         path: item.path,
         // 知识库（T-0099）是带子页面的独立页面：总览、图谱、笔记、编辑器、知识库主页、变更记录、外部文档
         ...(item.path === '/knowledge' ? { children: knowledgeRoutes } : {}),
-        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/im': ImPage, '/agents': AgentsPage, '/agent-servers': AgentServersPage, '/settings/model-connections': ModelConnectionsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/modules': AppCenterPage, '/settings/navigation': NavigationSettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage, '/mail': MailPage, '/settings/mail': MailSettingsPage, '/runner': RunnerPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
+        component: ({ '/': HomePage, '/tasks': TasksPage, '/projects': ProjectsPage, '/knowledge': KnowledgePage, '/calendar': CalendarPage, '/developer': DeveloperPage, '/operations': OperationsPage, '/im': ImPage, '/agents': AgentsPage, '/agent-servers': AgentServersPage, '/settings/model-connections': ModelConnectionsPage, '/ai': AiPage, '/settings': SettingsPage, '/settings/modules': AppCenterPage, '/settings/navigation': NavigationSettingsPage, '/settings/security': SecurityPage, '/settings/integrations': IntegrationsPage, '/mail': MailPage, '/settings/mail': MailSettingsPage, '/settings/storage': StorageSettingsPage, '/runner': RunnerPage } as Record<string, typeof HomePage>)[item.path] ?? PlaceholderPage,
         // 消息页（T-0095）、知识库（T-0099）是不带工作台侧栏和顶栏的独立页面
         meta: { ...navMeta(item), standalone: item.path === '/im' || item.path === '/knowledge', wide: WIDE_PAGES.has(item.path) },
       })),

@@ -16,12 +16,12 @@ def test_physical_registration_migration_keeps_resources_and_refuses_active_down
     temp_database_url,
 ):
     config = alembic_config(temp_database_url)
-    command.upgrade(config, "0063")
+    command.upgrade(config, "0064")
     env_id = _seed(temp_database_url)
     before = run(
         temp_database_url, "SELECT * FROM workspace.runner_environments WHERE id=$1", env_id
     )[0]
-    command.upgrade(config, "0064")
+    command.upgrade(config, "0065")
     run(
         temp_database_url,
         "INSERT INTO workspace.physical_host_registrations"
@@ -31,27 +31,27 @@ def test_physical_registration_migration_keeps_resources_and_refuses_active_down
         before["host_id"],
     )
     with pytest.raises(RuntimeError, match="物理服务器身份"):
-        command.downgrade(config, "0063")
+        command.downgrade(config, "0064")
     assert (
         run(temp_database_url, "SELECT * FROM workspace.runner_environments WHERE id=$1", env_id)[0]
         == before
     )
     run(temp_database_url, "DELETE FROM workspace.physical_host_registrations")
-    command.downgrade(config, "0063")
+    command.downgrade(config, "0064")
     assert (
         run(temp_database_url, "SELECT * FROM workspace.runner_environments WHERE id=$1", env_id)[0]
         == before
     )
-    command.upgrade(config, "0064")
+    command.upgrade(config, "0065")
 
 
 async def test_downgrade_waits_for_inflight_claim_before_checking_if_ledger_is_empty(
     temp_database_url,
 ):
     config = alembic_config(temp_database_url)
-    await asyncio.to_thread(command.upgrade, config, "0063")
-    env_id = await asyncio.to_thread(_seed, temp_database_url)
     await asyncio.to_thread(command.upgrade, config, "0064")
+    env_id = await asyncio.to_thread(_seed, temp_database_url)
+    await asyncio.to_thread(command.upgrade, config, "0065")
     connection = await asyncpg.connect(asyncpg_dsn(temp_database_url))
     row = await connection.fetchrow(
         "SELECT * FROM workspace.runner_environments WHERE id=$1", env_id
@@ -69,7 +69,7 @@ async def test_downgrade_waits_for_inflight_claim_before_checking_if_ledger_is_e
             row["workspace_id"],
             row["host_id"],
         )
-        work = asyncio.create_task(asyncio.to_thread(command.downgrade, config, "0063"))
+        work = asyncio.create_task(asyncio.to_thread(command.downgrade, config, "0064"))
         until = asyncio.get_running_loop().time() + 10
         while not await observer.fetchval(
             "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() "

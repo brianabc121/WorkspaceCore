@@ -5,9 +5,11 @@
 - 来源：智能体用 `schedule_wakeup` 给自己安排（直接执行，`docs/AGENTS.md` 第 8 节例外四；
   每个实例最多 20 个待执行，最早 5 分钟后、最远 30 天）；管理员在实例页建
   （最多 50 个待执行，可以每天、工作日、每周重复）。
-- 会话：`target` 是 `im_list_targets` 的目标时，在那个会话里跑（看得到之前的消息），
-  会话键与 openclaw-channel 0.3.3 的写法一致
-  （`openim:group:<群 ID>`、`openim:<发送者 IM ID>`，小写）；不给就是独立会话。
+- 会话：`target` 是 `im_list_targets` 的目标时，在那个会话里跑（看得到之前的消息）。
+  会话键与打过补丁的 openclaw-channel 收到消息时用的会话一致
+  （T-0221：补丁给 resolveAgentRoute 传 peer）：`openim:group:<群 ID>`、
+  `openim:direct:<对方 IM ID>`（小写），`openclaw agent --session-key` 把它补成
+  `agent:main:openim:group:…` / `agent:main:openim:direct:…`；不给就是独立会话。
 - 执行：接入包每分钟运行 `wakeup.mjs`，经 `/agent-api/v1/wakeups/claim` 领取到期的
   （领取即标为 running），在容器里 `openclaw agent --session-key <键> --message-file <消息>`，
   再报回结果。重复的唤醒报回后排下一次。领取后 15 分钟没有结果记为失败
@@ -77,12 +79,18 @@ def next_run(run_at: datetime, repeat: str, time_zone: str, after: datetime) -> 
 
 
 def session_key(target_kind: str | None, ident: str, wakeup_id: uuid.UUID) -> str:
-    """与 openclaw-channel 0.3.3 dist/inbound.js 的 baseSessionKey 一致：群 `openim:group:<群 ID>`，
-    私聊 `openim:<对方的 IM ID>`，都转小写；独立会话用唤醒自己的键（核验记录 V4）。"""
+    """与打过补丁的 openclaw-channel 收到消息时用的会话一致（T-0221）。
+
+    群 `openim:group:<群 ID>`，私聊 `openim:direct:<对方的 IM ID>`，都转小写。
+    OpenClaw 2026.9.36 的 resolveAgentRoute 由 peer 得出 `agent:main:openim:group:<群>` /
+    `agent:main:openim:direct:<对方>`（接入包 dmScope: per-channel-peer）；
+    `openclaw agent --session-key` 给不带 `agent:` 的键补上 `agent:main:`，两边一致
+    （核验记录 6.1 的补充）。
+    独立会话用唤醒自己的键（核验记录 V4）。"""
     if target_kind == "group":
         return f"openim:group:{ident}".lower()
     if target_kind == "user":
-        return f"openim:{ident}".lower()
+        return f"openim:direct:{ident}".lower()
     return f"myworkspace-wakeup-{wakeup_id.hex}"
 
 

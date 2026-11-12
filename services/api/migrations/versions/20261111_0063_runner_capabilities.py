@@ -1,15 +1,15 @@
 """Independent runtime capability requests and grants.
 
-Revision ID: 0062
-Revises: 0061
+Revision ID: 0063
+Revises: 0062
 """
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql as pg
 
-revision = "0062"
-down_revision = "0061"
+revision = "0063"
+down_revision = "0062"
 branch_labels = None
 depends_on = None
 

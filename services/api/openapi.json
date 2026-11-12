@@ -630,7 +630,7 @@
           },
           "bundle_outdated": {
             "default": false,
-            "description": "已部署的实例还在用旧接入包，或插件没打工作台的补丁（上报的插件版本不是 0.3.3+myworkspace.1，T-0120）：重新签发接入包或经 SSH 重新部署",
+            "description": "已部署的实例还在用旧接入包，或插件没打工作台的补丁（上报的插件版本不是 0.3.3+myworkspace.2，T-0120、T-0221）：重新签发接入包或经 SSH 重新部署",
             "title": "Bundle Outdated",
             "type": "boolean"
           },
@@ -18612,6 +18612,75 @@
         "title": "OfficialPreset",
         "type": "object"
       },
+      "OssSettingsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "access_key_id": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Access Key Id",
+            "type": "string"
+          },
+          "access_key_secret": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "不填（null）保持不变；空字符串清除",
+            "title": "Access Key Secret"
+          },
+          "bucket": {
+            "default": "",
+            "maxLength": 63,
+            "title": "Bucket",
+            "type": "string"
+          },
+          "region": {
+            "default": "",
+            "maxLength": 40,
+            "title": "Region",
+            "type": "string"
+          }
+        },
+        "title": "OssSettingsIn",
+        "type": "object"
+      },
+      "OssSettingsOut": {
+        "properties": {
+          "access_key_id": {
+            "title": "Access Key Id",
+            "type": "string"
+          },
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "region": {
+            "description": "地域，例如 cn-hangzhou",
+            "title": "Region",
+            "type": "string"
+          },
+          "secret_set": {
+            "description": "AccessKey Secret 是否已设置（不返回明文）",
+            "title": "Secret Set",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "region",
+          "bucket",
+          "access_key_id",
+          "secret_set"
+        ],
+        "title": "OssSettingsOut",
+        "type": "object"
+      },
       "OverviewSummary": {
         "description": "未知时为 null，不以 0 冒充（规范第 16 节 A17：不把空数据当正常）。",
         "properties": {
@@ -20592,6 +20661,87 @@
           "config"
         ],
         "title": "QuickLinksWidgetUpdate",
+        "type": "object"
+      },
+      "R2SettingsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "access_key_id": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Access Key Id",
+            "type": "string"
+          },
+          "account_id": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Account Id",
+            "type": "string"
+          },
+          "bucket": {
+            "default": "",
+            "maxLength": 63,
+            "title": "Bucket",
+            "type": "string"
+          },
+          "jurisdiction": {
+            "default": "",
+            "maxLength": 16,
+            "title": "Jurisdiction",
+            "type": "string"
+          },
+          "secret_access_key": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "不填（null）保持不变；空字符串清除",
+            "title": "Secret Access Key"
+          }
+        },
+        "title": "R2SettingsIn",
+        "type": "object"
+      },
+      "R2SettingsOut": {
+        "properties": {
+          "access_key_id": {
+            "title": "Access Key Id",
+            "type": "string"
+          },
+          "account_id": {
+            "description": "Cloudflare 账户 ID（R2 页面右侧的 Account ID）",
+            "title": "Account Id",
+            "type": "string"
+          },
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "jurisdiction": {
+            "description": "辖区（建桶时选了欧盟等辖区才填，例如 eu），没有就是空",
+            "title": "Jurisdiction",
+            "type": "string"
+          },
+          "secret_set": {
+            "description": "Secret Access Key 是否已设置（不返回明文）",
+            "title": "Secret Set",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "account_id",
+          "bucket",
+          "jurisdiction",
+          "access_key_id",
+          "secret_set"
+        ],
+        "title": "R2SettingsOut",
         "type": "object"
       },
       "ReadinessResponse": {
@@ -26749,7 +26899,7 @@
             "type": "boolean"
           },
           "missing": {
-            "description": "没配置完整时缺少的环境变量",
+            "description": "没配置完整时缺少的字段（“设置 → 图片存储”里的名字）",
             "items": {
               "type": "string"
             },
@@ -26785,8 +26935,136 @@
         "title": "StorageLocation",
         "type": "object"
       },
+      "StorageSettingsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "oss": {
+            "$ref": "#/components/schemas/OssSettingsIn"
+          },
+          "primary": {
+            "enum": [
+              "local",
+              "r2",
+              "oss"
+            ],
+            "title": "Primary",
+            "type": "string"
+          },
+          "r2": {
+            "$ref": "#/components/schemas/R2SettingsIn"
+          },
+          "replica": {
+            "default": "none",
+            "enum": [
+              "none",
+              "local",
+              "r2",
+              "oss"
+            ],
+            "title": "Replica",
+            "type": "string"
+          },
+          "version": {
+            "description": "读取时的 version；没保存过是 0",
+            "minimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "primary"
+        ],
+        "title": "StorageSettingsIn",
+        "type": "object"
+      },
+      "StorageSettingsOut": {
+        "properties": {
+          "checks": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/StorageCheck"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "保存时做的自检结果（只在保存的响应里返回）",
+            "title": "Checks"
+          },
+          "in_use": {
+            "description": "还存着本工作空间图片或快照的存储；它们的连接信息不能清空，否则那些文件读不到",
+            "items": {
+              "enum": [
+                "local",
+                "r2",
+                "oss"
+              ],
+              "type": "string"
+            },
+            "title": "In Use",
+            "type": "array"
+          },
+          "oss": {
+            "$ref": "#/components/schemas/OssSettingsOut"
+          },
+          "primary": {
+            "enum": [
+              "local",
+              "r2",
+              "oss"
+            ],
+            "title": "Primary",
+            "type": "string"
+          },
+          "r2": {
+            "$ref": "#/components/schemas/R2SettingsOut"
+          },
+          "replica": {
+            "enum": [
+              "none",
+              "local",
+              "r2",
+              "oss"
+            ],
+            "title": "Replica",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "version": {
+            "description": "保存时带上；没保存过是 0",
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "primary",
+          "replica",
+          "r2",
+          "oss",
+          "in_use",
+          "version",
+          "updated_at"
+        ],
+        "title": "StorageSettingsOut",
+        "type": "object"
+      },
       "StorageStatus": {
-        "description": "知识库图片存储（T-0103，owner / admin）。",
+        "description": "知识库图片存储（T-0103，owner / admin；按工作空间配置，T-0223）。",
         "properties": {
           "failed_replication": {
             "title": "Failed Replication",
@@ -26798,7 +27076,7 @@
             "type": "integer"
           },
           "pending_replication": {
-            "description": "全部工作空间里等待复制到副本的图片",
+            "description": "这个工作空间里等待复制到副本的图片",
             "title": "Pending Replication",
             "type": "integer"
           },
@@ -58820,7 +59098,7 @@
     },
     "/api/v1/operations/storage": {
       "get": {
-        "description": "主存储、副本、最近一次自检、这个工作空间的用量与配额、待复制数量。不返回密钥；本地存储不返回路径。",
+        "description": "这个工作空间的主存储、副本（在“设置 → 图片存储”里配置）、最近一次自检、用量与配额、待复制数量。不返回密钥；本地存储不返回路径。",
         "operationId": "storage_status",
         "parameters": [
           {
@@ -58901,7 +59179,7 @@
     },
     "/api/v1/operations/storage/check": {
       "post": {
-        "description": "对主存储与副本各写一个探测对象、读回、删除；结果也显示在运维页。",
+        "description": "对这个工作空间的主存储与副本各写一个探测对象、读回、删除；结果也显示在运维页。",
         "operationId": "check_storage",
         "parameters": [
           {
@@ -66101,6 +66379,214 @@
         "summary": "跨资源搜索（viewer）",
         "tags": [
           "search"
+        ]
+      }
+    },
+    "/api/v1/settings/storage": {
+      "get": {
+        "description": "主存储、副本与 R2 / OSS 的连接信息。不返回密钥，只说是否已设置；in_use 是还存着本工作空间图片或快照的存储。",
+        "operationId": "get_storage_settings",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageSettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "图片存储设置（owner / admin）",
+        "tags": [
+          "storage"
+        ]
+      },
+      "put": {
+        "description": "带上读取时的 version。密钥不填（null）保持不变，空字符串清除。保存前对主存储与副本各写、读、删一个探测对象：不通过返回 422 STORAGE_CHECK_FAILED（details.checks 是各自的结果），设置不变。还存着文件的存储不能清空连接信息（409 STORAGE_IN_USE）。",
+        "operationId": "put_storage_settings",
+        "parameters": [
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageSettingsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageSettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "保存图片存储设置（owner，乐观并发，先自检再保存）",
+        "tags": [
+          "storage"
         ]
       }
     },

@@ -20,13 +20,21 @@ from urllib.parse import urlsplit
 
 import httpx
 import pytest
-from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.domain import knowledge_files
 from app.domain.knowledge_files import FileService, FileStores, object_key
+from app.domain.storage_config import StoreRegistry
 from app.integrations.base import ConnectorError
-from app.integrations.object_storage import S3Config, S3Store, build_store, self_check
+from app.integrations.object_storage import (
+    OssAccount,
+    R2Account,
+    S3Config,
+    S3Store,
+    StorageConfig,
+    build_store,
+    self_check,
+)
 from app.models import KnowledgeFile
 from tests.helpers import csrf
 from tests.workspace_support import Env, app_of, open_env
@@ -99,45 +107,46 @@ async def test_wrong_secret_is_an_auth_failure_with_the_s3_error_code() -> None:
     assert raised.value.reason in {"SignatureDoesNotMatch", "AccessDenied", "InvalidAccessKeyId"}
 
 
-async def test_r2_settings_with_an_endpoint_override_reach_garage() -> None:
-    # 与生产代码同一条路径：按配置建存储（R2 的默认是路径风格；endpoint / region 覆盖成 Garage）
-    settings = Settings(
-        r2_endpoint=ENDPOINT,
-        r2_region=os.environ.get("TEST_S3_REGION", "garage"),
-        r2_access_key_id=os.environ.get("TEST_S3_ACCESS_KEY", ""),
-        r2_secret_access_key=SecretStr(os.environ.get("TEST_S3_SECRET_KEY", "")),
-        r2_bucket=os.environ.get("TEST_S3_BUCKET", "kb-test"),
-    )
-    await self_check(build_store("r2", settings))
+def _overrides(base: Settings) -> Settings:
+    """部署级的地址覆盖（只在测试里用）。
 
-
-def _garage_settings(base: Settings, *, r2_secret: str | None = None) -> Settings:
-    """主存储 r2（路径风格，TEST_S3_BUCKET）；副本 oss（虚拟主机风格，TEST_S3_REPLICA_BUCKET）。"""
+    R2 指到 Garage（路径风格），OSS 指到 Garage 的虚拟主机域名。"""
     port = urlsplit(ENDPOINT).port
     return base.model_copy(
         update={
-            "file_storage": "r2",
-            "file_storage_replica": "oss",
             "r2_endpoint": ENDPOINT,
             "r2_region": REGION,
-            "r2_access_key_id": os.environ.get("TEST_S3_ACCESS_KEY", ""),
-            "r2_secret_access_key": SecretStr(
-                r2_secret or os.environ.get("TEST_S3_SECRET_KEY", "")
-            ),
-            "r2_bucket": os.environ.get("TEST_S3_BUCKET", "kb-test"),
             "oss_endpoint": f"http://{ROOT_DOMAIN}:{port}",
-            "oss_region": REGION,
-            "oss_access_key_id": os.environ.get("TEST_S3_ACCESS_KEY", ""),
-            "oss_access_key_secret": SecretStr(os.environ.get("TEST_S3_SECRET_KEY", "")),
-            "oss_bucket": REPLICA_BUCKET,
         }
     )
 
 
+def _garage_config(*, r2_secret: str | None = None) -> StorageConfig:
+    """主存储 r2（路径风格，TEST_S3_BUCKET）；副本 oss（虚拟主机风格，TEST_S3_REPLICA_BUCKET）。"""
+    key = os.environ.get("TEST_S3_ACCESS_KEY", "")
+    return StorageConfig(
+        primary="r2",
+        replica="oss",
+        r2=R2Account(
+            account_id="garage",
+            bucket=os.environ.get("TEST_S3_BUCKET", "kb-test"),
+            access_key_id=key,
+            secret_access_key=r2_secret or SECRET,
+        ),
+        oss=OssAccount(
+            region=REGION, bucket=REPLICA_BUCKET, access_key_id=key, access_key_secret=SECRET
+        ),
+    )
+
+
+async def test_r2_settings_with_an_endpoint_override_reach_garage() -> None:
+    # 与生产代码同一条路径：按配置建存储（R2 的默认是路径风格；endpoint / region 覆盖成 Garage）
+    await self_check(build_store("r2", _garage_config(), _overrides(Settings())))
+
+
 @needs_replica
 async def test_oss_virtual_hosted_addressing_on_garage() -> None:
-    settings = _garage_settings(Settings())
-    store = build_store("oss", settings, transport=ToGarage())
+    store = build_store("oss", _garage_config(), _overrides(Settings()), transport=ToGarage())
     assert (
         isinstance(store, S3Store)
         and store.where == f"{REPLICA_BUCKET}.{ROOT_DOMAIN}:{urlsplit(ENDPOINT).port}"
@@ -156,9 +165,38 @@ async def env(make_client: Any, migrated_database_url: str) -> AsyncIterator[Env
 async def test_primary_and_replica_on_garage(env: Env) -> None:
     app = app_of(env.client)
     original = app.state.settings
-    settings = _garage_settings(original)
-    app.state.settings = settings  # 之后的上传写主存储 r2，记下副本 oss
+    settings = _overrides(original)
+    app.state.settings = settings
+    app.state.storage_transport = ToGarage()
     try:
+        # 在“设置 → 图片存储”里选主存储 R2、副本 OSS（保存前在真实的 Garage 上自检）
+        config = _garage_config()
+        saved = await env.client.put(
+            "/api/v1/settings/storage",
+            json={
+                "version": 0,
+                "primary": "r2",
+                "replica": "oss",
+                "r2": {
+                    "account_id": config.r2.account_id,
+                    "bucket": config.r2.bucket,
+                    "access_key_id": config.r2.access_key_id,
+                    "secret_access_key": config.r2.secret_access_key,
+                },
+                "oss": {
+                    "region": config.oss.region,
+                    "bucket": config.oss.bucket,
+                    "access_key_id": config.oss.access_key_id,
+                    "access_key_secret": config.oss.access_key_secret,
+                },
+            },
+            headers={"X-Workspace-Id": env.workspace_id, **csrf(env.client)},
+        )
+        assert saved.status_code == 200, saved.text
+        assert {name: c["ok"] for name, c in saved.json()["checks"].items()} == {
+            "r2": True,
+            "oss": True,
+        }
         data = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x02\x00\x00\x00\x01" + os.urandom(
             64
         )
@@ -174,13 +212,14 @@ async def test_primary_and_replica_on_garage(env: Env) -> None:
         assert uploaded.status_code == 201, uploaded.text
         created = uploaded.json()
         key = object_key(uuid.UUID(env.workspace_id), hashlib.sha256(data).hexdigest())
-        stores = FileStores(settings, transport=ToGarage())
+        stores = FileStores(settings, config, transport=ToGarage())
         primary, replica = stores.get("r2"), stores.get("oss")
         assert await primary.get(key) == data and await replica.exists(key) is False
 
-        # Worker 复制到副本
+        # Worker 复制到副本（按工作空间读配置）
         async with app.state.sessionmaker() as db:
-            assert await knowledge_files.replicate_pending(db, stores) == 1
+            registry = StoreRegistry(db, settings, transport=ToGarage())
+            assert await knowledge_files.replicate_pending(db, registry) == 1
             await db.commit()
             row = await db.get(KnowledgeFile, uuid.UUID(created["id"]))
             assert row is not None and (row.storage, row.replica, row.replica_state) == (
@@ -194,7 +233,7 @@ async def test_primary_and_replica_on_garage(env: Env) -> None:
             row = await db.get(KnowledgeFile, uuid.UUID(created["id"]))
             assert row is not None
             # 主存储拒绝凭证（例如密钥被轮换）：从副本读
-            wrong = FileStores(_garage_settings(original, r2_secret="0" * 64), transport=ToGarage())
+            wrong = FileStores(settings, _garage_config(r2_secret="0" * 64), transport=ToGarage())
             assert (await FileService(db, settings, stores=wrong).read(row)).data == data
             # 主存储里的文件丢了：从副本读
             await primary.delete(key)
@@ -204,8 +243,10 @@ async def test_primary_and_replica_on_garage(env: Env) -> None:
         await primary.put(key, data, "image/png")
         later = datetime.now(UTC) + timedelta(days=2)
         async with app.state.sessionmaker() as db:
-            assert await knowledge_files.cleanup_unreferenced(db, stores, now=later) == 1
+            registry = StoreRegistry(db, settings, transport=ToGarage())
+            assert await knowledge_files.cleanup_unreferenced(db, registry, now=later) == 1
             await db.commit()
         assert await primary.exists(key) is False and await replica.exists(key) is False
     finally:
         app.state.settings = original
+        app.state.storage_transport = None

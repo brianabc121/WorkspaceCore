@@ -1,4 +1,4 @@
-"""0060 is additive and leaves existing unlimited deployment records intact."""
+"""0061 is additive and leaves existing unlimited deployment records intact."""
 
 import asyncio
 
@@ -13,9 +13,9 @@ pytestmark = pytest.mark.integration
 
 def test_placement_migration_roundtrip_preserves_legacy_rows(temp_database_url):
     config = alembic_config(temp_database_url)
-    command.upgrade(config, "0059")
-    ids = _seed(temp_database_url)
     command.upgrade(config, "0060")
+    ids = _seed(temp_database_url)
+    command.upgrade(config, "0061")
     snapshot = asyncio.run(
         run_sql(
             temp_database_url,
@@ -34,12 +34,12 @@ def test_placement_migration_roundtrip_preserves_legacy_rows(temp_database_url):
         )
         > 0
     )
-    command.downgrade(config, "0059")
+    command.downgrade(config, "0060")
     assert (
         asyncio.run(run_sql(temp_database_url, "SELECT count(*) FROM workspace.agent_deployments"))
         > 0
     )
-    command.upgrade(config, "0060")
+    command.upgrade(config, "0061")
     assert (
         asyncio.run(
             run_sql(

@@ -1,8 +1,12 @@
-# T-0222 实施进度（未完成）
+# T-0224 实施进度（未完成）
 
 工作分支：codex/T-0222-runtime-v2-placement-network；当前检出 /workspace/WorkspaceCore-runtime-v2 是持久实体目录。原 /workspace/WorkspaceCore 未修改。基线 a1053c7。用户明确要求全面实施；不需要再次批准开发，但不能把尚未实现的部分标成完成。
 
-## 当前检查点（2026-11-12）
+## 合入主干后的当前状态
+
+2026-11-12 09:20 UTC 合入 origin/main 36c6fb5e（存储设置与 IM 修复）。主干先占用原编号，当前任务为 **T-0224**；PR193/head 分支沿用，任务 owner 仍 codex、in_progress。当前唯一迁移 head 为 **0065**；主干 0060 不改，本任务原 0060–0064 顺延为 0061–0065。下列早期测试数量是合入前证据，正在重新复验集成，不能视为新基线通过。
+
+## 合入前检查点（2026-11-12）
 
 PR #193 仍为草稿、不可合并；T-0222 保持 in_progress。下文早期记录是历史证据，当前结果如下：
 
@@ -160,3 +164,11 @@ npm run test -- --maxWorkers=1
 `web-current-typecheck.log` 初次真实失败 exit 2：面板 Action 联合类型最终 else 不能证明 recordId，测试 getByRole 传入了不支持的 exact 选项。已交原实现者做显式 endpoint 分支与合法测试参数的最小修复；不会把完整运行测试通过当作类型检查通过。修复后的静态结果见下一段。
 
 真实 Chromium 额外烟测通过：Vite 加载现有网络面板，模拟 API 边界，owner 显式提交公网来源声明，检查工作空间/CSRF 请求头；pending 不显示可连接地址，admin 只读，390px 无横向溢出，无 pageerror。截图 `logs/network-owner-{desktop,mobile}.png`。首个临时 HTML 测试壳直接导入预构建依赖导致超时，改用 Vite 的标准 bare module 导入后通过；没有为此修改产品代码。测试不发送真实密码或真实服务器操作，不证明网络数据面通信。
+
+### origin/main 36c6fb5e 集成后的首轮证明
+
+- 主干存储/IM 实现与 origin/main 对比无额外差异；只在分配功能所需的 runner 调用处保留合并后的异步快照接口。
+- 对五个迁移逐一与合入前 HEAD 比较，确认函数逻辑逐字未变，仅 revision/header/down_revision 顺延；`alembic heads` 唯一输出 `0065 (head)`。
+- `pytest tests/test_agent_placement_migration.py tests/test_runner_multihost_migration.py tests/test_physical_host_migration.py tests/test_storage_settings_api.py -q` → **16 passed in 108.56s**，真实本地 PG 新数据库，验证主干存储表与新迁移链兼容、非空降级拒绝等。
+- 全树 Ruff 通过，`mypy app` → **300 source files** 成功；生成的 OpenAPI / TypeScript 已同步，`npm run check:api` exit 0，`collab.py check` 0 警告。
+- 合并后的完整 API、前端 lint/typecheck/build/测试仍需完成，不沿用先前基线的通过数。
