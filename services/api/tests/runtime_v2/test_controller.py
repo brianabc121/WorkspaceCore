@@ -112,7 +112,7 @@ def test_stop_checks_identity_then_scales_with_resource_version():
 
         def get_optional(self, kind, name, namespace=None):
             return {
-                "metadata": {"labels": identity.labels, "resourceVersion": "42"},
+                "metadata": {"labels": identity.labels, "resourceVersion": "42", "uid": "dep-uid"},
                 "spec": {"replicas": 1},
             }
 
@@ -122,8 +122,10 @@ def test_stop_checks_identity_then_scales_with_resource_version():
 
     api = Api()
     result = KubernetesRunner(api).scale(identity, 0)
-    assert "--resource-version=42" in api.commands[0]
-    assert "--replicas=0" in api.commands[0]
+    args = api.commands[0]
+    patch = json.loads(args[args.index("--patch") + 1])
+    assert {"op": "test", "path": "/metadata/resourceVersion", "value": "42"} in patch
+    assert {"op": "replace", "path": "/spec/replicas", "value": 0} in patch
     assert result["ready"] is False
 
 
@@ -196,10 +198,13 @@ def test_controller_never_acknowledges_a_pending_create(tmp_path):
         def validate_create(self, identity, payload):
             pass
 
-        def create(self, identity, payload):
+        def create(self, identity, payload, **kwargs):
             return {"accepted": True, "ready": False}
 
-        def observe(self, identity):
+        def prepare_lifecycle(self, identity, kind):
+            return {"deployment": "dep", "pvc": "pvc"}
+
+        def reconcile_lifecycle(self, identity, kind, provenance):
             return {"ready": False, "pod_uid": None}
 
     class Workspace:
@@ -211,12 +216,22 @@ def test_controller_never_acknowledges_a_pending_create(tmp_path):
 
     workspace = Workspace()
     journal = CommandJournal(str(tmp_path / "journal.db"))
-    controller = Controller(Runner(), workspace, journal, attempts=1, interval=0)
+    controller = Controller(
+        Runner(),
+        workspace,
+        journal,
+        workspace_id=ident.workspace_id,
+        host_id=ident.workspace_id,
+        node_name=ident.node_name,
+        attempts=1,
+        interval=0,
+    )
     command = {
         "id": str(uuid.uuid4()),
         "kind": "create_env",
         "payload": {
             "env_id": str(ident.environment_id),
+            "host_id": str(ident.workspace_id),
             "runtime_identity": {
                 "workspace_id": str(ident.workspace_id),
                 "instance_id": str(ident.instance_id),
@@ -243,10 +258,13 @@ def test_controller_reports_only_observed_ready_and_reuses_receipt(tmp_path):
         def validate_create(self, identity, payload):
             pass
 
-        def create(self, identity, payload):
+        def create(self, identity, payload, **kwargs):
             self.count += 1
 
-        def observe(self, identity):
+        def prepare_lifecycle(self, identity, kind):
+            return {"deployment": "dep", "pvc": "pvc"}
+
+        def reconcile_lifecycle(self, identity, kind, provenance):
             return {"ready": True, "pod_uid": "actual", "node": "node-a"}
 
     class Workspace:
@@ -257,12 +275,20 @@ def test_controller_reports_only_observed_ready_and_reuses_receipt(tmp_path):
             self.sent.append(body)
 
     runner, workspace = Runner(), Workspace()
-    controller = Controller(runner, workspace, CommandJournal(str(tmp_path / "journal.db")))
+    controller = Controller(
+        runner,
+        workspace,
+        CommandJournal(str(tmp_path / "journal.db")),
+        workspace_id=ident.workspace_id,
+        host_id=ident.workspace_id,
+        node_name=ident.node_name,
+    )
     command = {
         "id": str(uuid.uuid4()),
         "kind": "create_env",
         "payload": {
             "env_id": str(ident.environment_id),
+            "host_id": str(ident.workspace_id),
             "runtime_identity": {
                 "workspace_id": str(ident.workspace_id),
                 "instance_id": str(ident.instance_id),
@@ -292,7 +318,14 @@ def test_controller_polls_with_supplied_host_metrics(tmp_path):
             return {"commands": []}
 
     workspace = Workspace()
-    controller = Controller(object(), workspace, CommandJournal(str(tmp_path / "journal.db")))
+    controller = Controller(
+        object(),
+        workspace,
+        CommandJournal(str(tmp_path / "journal.db")),
+        workspace_id=uuid.uuid4(),
+        host_id=uuid.uuid4(),
+        node_name="node-a",
+    )
     metrics = {
         "agent_version": "1",
         "docker_version": "",
@@ -323,13 +356,19 @@ def test_rejected_legacy_create_is_reported_without_mutation(tmp_path):
 
     workspace = Workspace()
     controller = Controller(
-        KubernetesRunner(object()), workspace, CommandJournal(str(tmp_path / "journal.db"))
+        KubernetesRunner(object()),
+        workspace,
+        CommandJournal(str(tmp_path / "journal.db")),
+        workspace_id=ident.workspace_id,
+        host_id=ident.workspace_id,
+        node_name=ident.node_name,
     )
     command = {
         "id": str(uuid.uuid4()),
         "kind": "create_env",
         "payload": {
             "env_id": str(ident.environment_id),
+            "host_id": str(ident.workspace_id),
             "snapshot": {"id": "legacy"},
             "runtime_identity": {
                 "workspace_id": str(ident.workspace_id),
@@ -343,7 +382,7 @@ def test_rejected_legacy_create_is_reported_without_mutation(tmp_path):
     }
     controller.process(command)
     assert workspace.sent[0]["status"] == "failed"
-    assert "not supported" in workspace.sent[0]["error"]
+    assert "unsupported" in workspace.sent[0]["error"]
 
 
 def test_create_rejects_secret_values_without_acknowledging_them_as_injected():
@@ -396,6 +435,12 @@ def test_controller_acknowledges_delete_only_after_volume_removal(tmp_path):
         def __init__(self):
             self.calls = 0
 
+        def prepare_lifecycle(self, identity, kind):
+            return {"deployment": "dep", "pvc": "pvc"}
+
+        def reconcile_lifecycle(self, identity, kind, provenance):
+            return {"deleted": self.calls >= 2}
+
         def delete(self, identity):
             self.calls += 1
             if self.calls == 1:
@@ -411,13 +456,21 @@ def test_controller_acknowledges_delete_only_after_volume_removal(tmp_path):
 
     runner, workspace = Runner(), Workspace()
     controller = Controller(
-        runner, workspace, CommandJournal(str(tmp_path / "journal.db")), attempts=2, interval=0
+        runner,
+        workspace,
+        CommandJournal(str(tmp_path / "journal.db")),
+        workspace_id=ident.workspace_id,
+        host_id=ident.workspace_id,
+        node_name=ident.node_name,
+        attempts=2,
+        interval=0,
     )
     command = {
         "id": str(uuid.uuid4()),
         "kind": "delete_env",
         "payload": {
             "env_id": str(ident.environment_id),
+            "host_id": str(ident.workspace_id),
             "runtime_identity": {
                 "workspace_id": str(ident.workspace_id),
                 "instance_id": str(ident.instance_id),

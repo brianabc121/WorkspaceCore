@@ -1,0 +1,28 @@
+[Unit]
+Description=Workspace experimental runtime-v2 lifecycle controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=workspace-runtime
+Group=workspace-runtime
+WorkingDirectory=/opt/workspace/services/api
+EnvironmentFile=/etc/workspace/runtime-v2/controller.env
+ExecStart=/opt/workspace/services/api/.venv/bin/python -m app.runtime_v2
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2 3
+TimeoutStopSec=120
+StateDirectory=workspace-runtime-v2
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

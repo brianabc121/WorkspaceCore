@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -44,7 +45,14 @@ class Kubectl:
     def call(self, args: list[str], *, input_data: str | None = None) -> str:
         try:
             result = subprocess.run(  # noqa: S603 - fixed executable and structured argv
-                [self.executable, "--kubeconfig", self.kubeconfig, "--request-timeout=20s", *args],
+                [
+                    self.executable,
+                    "--kubeconfig",
+                    self.kubeconfig,
+                    "--request-timeout=20s",
+                    "--insecure-skip-tls-verify=false",
+                    *args,
+                ],
                 input=input_data,
                 text=True,
                 capture_output=True,
@@ -56,10 +64,29 @@ class Kubectl:
                 "Kubernetes request timed out; reconcile before retrying"
             ) from error
         if result.returncode:
-            raise KubernetesCommandError(
-                f"kubectl failed ({result.returncode}): {result.stderr[:1000]}"
-            )
+            raise KubernetesCommandError(f"Kubernetes request failed (exit {result.returncode})")
         return result.stdout
+
+    def validate_connection(self) -> None:
+        from urllib.parse import urlsplit
+
+        config = json.loads(self.call(["config", "view", "--minify", "-o", "json"]))
+        clusters = config.get("clusters") or []
+        if len(clusters) != 1:
+            raise ValueError("one Kubernetes cluster context is required")
+        cluster = clusters[0].get("cluster") or {}
+        # client-go v1.35.10 merges only nonzero scalar overrides: a false
+        # CLI flag does not clear insecure=true in the selected kubeconfig.
+        if cluster.get("insecure-skip-tls-verify", False) is not False:
+            raise ValueError("Kubernetes TLS verification must be enabled")
+        endpoint = urlsplit(str(cluster.get("server") or ""))
+        if (
+            endpoint.scheme != "https"
+            or not endpoint.hostname
+            or endpoint.username
+            or endpoint.password
+        ):
+            raise ValueError("Kubernetes API requires a verified HTTPS endpoint")
 
     def get(self, kind: str, name: str, namespace: str) -> dict[str, Any]:
         value = json.loads(self.call(["get", kind, name, "-n", namespace, "-o", "json"]))
@@ -74,12 +101,22 @@ class Kubectl:
         if namespace:
             args += ["-n", namespace]
         output = self.call(args)
-        return json.loads(output) if output.strip() else None
+        if not output.strip():
+            return None
+        value = json.loads(output)
+        if not isinstance(value, dict):
+            raise KubernetesCommandError("invalid Kubernetes object response")
+        return value
 
-    def create(self, item: dict[str, Any]) -> None:
+    def create(self, item: dict[str, Any]) -> dict[str, Any]:
         try:
-            self.call(["create", "-f", "-"], input_data=json.dumps(item))
-        except KubernetesCommandError as error:
+            observed = json.loads(
+                self.call(["create", "-f", "-", "-o", "json"], input_data=json.dumps(item))
+            )
+            if not isinstance(observed, dict):
+                raise OutcomeUnknown("create response unavailable")
+            return observed
+        except (KubernetesCommandError, ValueError) as error:
             # kubectl may have lost a response after the API server committed.
             raise OutcomeUnknown(
                 "create result unknown; reconcile object before retrying"
@@ -167,7 +204,11 @@ def workload(
 
 
 def verify_identity(obj: dict[str, Any], identity: RuntimeIdentity) -> None:
-    labels = (obj.get("metadata") or {}).get("labels") or {}
+    if not isinstance(obj, dict) or not isinstance(obj.get("metadata"), dict):
+        raise ValueError("malformed workload identity")
+    labels = obj["metadata"].get("labels")
+    if not isinstance(labels, dict):
+        raise ValueError("malformed workload labels")
     if any(labels.get(key) != value for key, value in identity.labels.items()):
         raise ValueError("workload identity mismatch")
 
@@ -177,13 +218,26 @@ class KubernetesRunner:
 
     def __init__(self, api: Kubectl) -> None:
         self.api = api
-        self._delete_uids: dict[tuple[str, str], str] = {}
+        self._delete_uids: dict[tuple[str, int, str], str] = {}
 
     def validate_create(self, identity: RuntimeIdentity, payload: dict[str, Any]) -> None:
         workload(identity, payload)
 
-    def create(self, identity: RuntimeIdentity, payload: dict[str, Any]) -> dict[str, Any]:
+    def create(
+        self,
+        identity: RuntimeIdentity,
+        payload: dict[str, Any],
+        *,
+        operation_id: str | None = None,
+        receipt: Callable[[str, str], None] | None = None,
+    ) -> dict[str, Any]:
         claim, deployment = workload(identity, payload)
+        if operation_id is not None:
+            operation_id = str(UUID(operation_id))
+            for obj in (claim, deployment):
+                obj["metadata"]["annotations"] = {
+                    "workspace.myworkspace.io/operation": operation_id
+                }
         namespace = self.api.get_optional("namespace", identity.namespace)
         labels = ((namespace or {}).get("metadata") or {}).get("labels") or {}
         scope = {
@@ -199,7 +253,12 @@ class KubernetesRunner:
         for resource, obj in [("pvc", claim), ("deployment", deployment)]:
             existing = self.api.get_optional(resource, obj["metadata"]["name"], identity.namespace)
             if existing is None:
-                self.api.create(obj)
+                observed = self.api.create(obj)
+                if receipt is not None:
+                    if not isinstance(observed, dict):
+                        raise OutcomeUnknown("create UID receipt unavailable")
+                    uid = self._resource_uid(observed, identity, obj["metadata"]["name"])
+                    receipt(resource, uid)
             else:
                 verify_identity(existing, identity)
                 # No blind adoption of an existing object with possibly different storage/spec.
@@ -218,19 +277,27 @@ class KubernetesRunner:
         if deployment is None:
             raise ValueError("deployment does not exist")
         verify_identity(deployment, identity)
-        version = (deployment.get("metadata") or {}).get("resourceVersion")
-        if not isinstance(version, str) or not version.isdigit():
-            raise ValueError("deployment has no resource version")
+        metadata = deployment.get("metadata") or {}
+        version, uid = metadata.get("resourceVersion"), metadata.get("uid")
+        if not isinstance(version, str) or not version or not isinstance(uid, str) or not uid:
+            raise ValueError("deployment UID or resource version missing")
+        self._check_delete_uid(identity, "deployment", uid)
+        patch = [
+            {"op": "test", "path": "/metadata/uid", "value": uid},
+            {"op": "test", "path": "/metadata/resourceVersion", "value": version},
+            {"op": "replace", "path": "/spec/replicas", "value": replicas},
+        ]
         try:
             self.api.call(
                 [
-                    "scale",
+                    "patch",
                     "deployment",
                     identity.pod_name,
                     "-n",
                     identity.namespace,
-                    f"--replicas={replicas}",
-                    f"--resource-version={version}",
+                    "--type=json",
+                    "--patch",
+                    json.dumps(patch),
                 ]
             )
         except KubernetesCommandError as error:
@@ -241,6 +308,163 @@ class KubernetesRunner:
             "generation": identity.generation,
             "allocation_id": str(identity.allocation_id),
         }
+
+    @staticmethod
+    def _resource_uid(obj: dict[str, Any], identity: RuntimeIdentity, name: str) -> str:
+        verify_identity(obj, identity)
+        meta = obj.get("metadata") or {}
+        uid = meta.get("uid")
+        if (
+            meta.get("name") != name
+            or meta.get("namespace") != identity.namespace
+            or not isinstance(uid, str)
+            or not uid
+        ):
+            raise ValueError("resource name, namespace or UID mismatch")
+        return uid
+
+    def prepare_lifecycle(self, identity: RuntimeIdentity, kind: str) -> dict[str, Any]:
+        provenance: dict[str, Any] = {}
+        for resource, name in (
+            ("deployment", identity.pod_name),
+            ("pvc", "data-" + identity.environment_id.hex),
+        ):
+            obj = self.api.get_optional(resource, name, identity.namespace)
+            if obj is None:
+                if kind in ("start_env", "stop_env"):
+                    raise ValueError("lifecycle resource missing")
+                provenance[resource] = None
+            else:
+                uid = self._resource_uid(obj, identity, name)
+                if kind == "create_env":
+                    raise OutcomeUnknown("existing create resource requires reconciliation")
+                self._check_delete_uid(identity, resource, uid)
+                provenance[resource] = uid
+        return provenance
+
+    def reconcile_lifecycle(
+        self, identity: RuntimeIdentity, kind: str, provenance: dict[str, Any]
+    ) -> dict[str, Any]:
+        observed = {}
+        for resource, name in (
+            ("deployment", identity.pod_name),
+            ("pvc", "data-" + identity.environment_id.hex),
+        ):
+            obj = self.api.get_optional(resource, name, identity.namespace)
+            expected = provenance.get(resource)
+            if obj is not None:
+                uid = self._resource_uid(obj, identity, name)
+                if expected is None or uid != expected:
+                    raise OutcomeUnknown("resource UID not proven by operation receipt")
+            elif kind != "delete_env":
+                raise OutcomeUnknown("lifecycle resource not observed")
+            observed[resource] = obj
+        selector = f"workspace.myworkspace.io/environment={identity.environment_id.hex}"
+        listing = json.loads(
+            self.api.call(["get", "pods", "-n", identity.namespace, "-l", selector, "-o", "json"])
+        )
+        if not isinstance(listing, dict):
+            raise ValueError("invalid Pod inventory")
+        pods = listing.get("items")
+        if not isinstance(pods, list) or len(pods) > 1:
+            raise OutcomeUnknown("ambiguous Pod inventory")
+        for pod in pods:
+            verify_identity(pod, identity)
+            meta = pod["metadata"]
+            pod_name = meta.get("name")
+            if not isinstance(pod_name, str) or not pod_name:
+                raise ValueError("Pod name missing")
+            self._resource_uid(pod, identity, pod_name)
+            if (pod.get("spec") or {}).get("nodeName") != identity.node_name:
+                raise OutcomeUnknown("Pod bound outside configured node")
+        result = {
+            "ready": False,
+            "pod_uid": None,
+            "node": None,
+            "pod_ip": None,
+            "allocation_id": str(identity.allocation_id),
+            "generation": identity.generation,
+        }
+        deployment = observed["deployment"]
+        if kind == "delete_env":
+            result["deleted"] = not deployment and not observed["pvc"] and not pods
+            return result
+        if deployment is None or observed["pvc"] is None:
+            return result
+        meta, spec, status = (
+            deployment.get("metadata") or {},
+            deployment.get("spec") or {},
+            deployment.get("status") or {},
+        )
+        generation, seen = meta.get("generation"), status.get("observedGeneration")
+        current = (
+            type(generation) is int and type(seen) is int and generation > 0 and seen >= generation
+        )
+        if not current or meta.get("deletionTimestamp"):
+            return result
+        if kind == "stop_env":
+            result["stopped"] = (
+                spec.get("replicas") == 0
+                and not pods
+                and all(
+                    status.get(key, 0) == 0
+                    for key in (
+                        "replicas",
+                        "readyReplicas",
+                        "availableReplicas",
+                        "terminatingReplicas",
+                    )
+                )
+            )
+            return result
+        if spec.get("replicas") != 1 or len(pods) != 1:
+            return result
+        pod = pods[0]
+        podmeta, podstatus = pod.get("metadata") or {}, pod.get("status") or {}
+        owners = [
+            owner
+            for owner in podmeta.get("ownerReferences") or []
+            if owner.get("controller") is True
+        ]
+        if (
+            len(owners) != 1
+            or owners[0].get("kind") != "ReplicaSet"
+            or not owners[0].get("name")
+            or not owners[0].get("uid")
+        ):
+            raise OutcomeUnknown("Pod owner receipt missing")
+        owner = owners[0]
+        rs = self.api.get_optional("replicaset", owner["name"], identity.namespace)
+        if not rs or self._resource_uid(rs, identity, owner["name"]) != owner["uid"]:
+            raise OutcomeUnknown("ReplicaSet UID mismatch")
+        parents = [
+            parent
+            for parent in (rs.get("metadata") or {}).get("ownerReferences") or []
+            if parent.get("controller") is True
+        ]
+        if (
+            len(parents) != 1
+            or parents[0].get("kind") != "Deployment"
+            or parents[0].get("name") != identity.pod_name
+            or parents[0].get("uid") != provenance.get("deployment")
+        ):
+            raise OutcomeUnknown("Pod Deployment owner mismatch")
+        result.update(
+            {
+                "pod_uid": podmeta["uid"],
+                "node": identity.node_name,
+                "pod_ip": podstatus.get("podIP"),
+            }
+        )
+        result["ready"] = bool(
+            not podmeta.get("deletionTimestamp")
+            and podstatus.get("phase") == "Running"
+            and any(
+                condition.get("type") == "Ready" and condition.get("status") == "True"
+                for condition in podstatus.get("conditions") or []
+            )
+        )
+        return result
 
     def observe(self, identity: RuntimeIdentity) -> dict[str, Any]:
         selector = f"workspace.myworkspace.io/environment={identity.environment_id.hex}"
@@ -327,7 +551,7 @@ class KubernetesRunner:
         }
 
     def _check_delete_uid(self, identity: RuntimeIdentity, kind: str, uid: str) -> None:
-        key = (str(identity.allocation_id), kind)
+        key = (str(identity.allocation_id), identity.generation, kind)
         expected = self._delete_uids.setdefault(key, uid)
         if expected != uid:
             raise OutcomeUnknown(f"{kind} UID changed during deletion")

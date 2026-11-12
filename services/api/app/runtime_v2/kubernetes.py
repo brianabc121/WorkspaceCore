@@ -85,13 +85,20 @@ class KubernetesRuntime:
                         "requiredDuringSchedulingIgnoredDuringExecution": {
                             "nodeSelectorTerms": [
                                 {
+                                    "matchFields": [
+                                        {
+                                            "key": "metadata.name",
+                                            "operator": "In",
+                                            "values": [identity.node_name],
+                                        }
+                                    ],
                                     "matchExpressions": [
                                         {
                                             "key": _NODE_LABEL,
                                             "operator": "In",
                                             "values": [identity.node_name],
                                         }
-                                    ]
+                                    ],
                                 }
                             ]
                         }

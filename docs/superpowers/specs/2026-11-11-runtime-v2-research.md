@@ -62,3 +62,12 @@ origin/main = a1053c77573ebd87a4e82566b40ac302f1db86ac。
 ## 本次新增设计核验边界
 
 独立宿主探测、双池PlacementService、资源预约、实时负载评分、auto/specified契约均是建议新增；未安装报告器、未改真实服务器、未验证实际调度。Kubernetes官方文档核实于2026-11-11。
+
+## 2026-11-12 固定上游源码核验
+本轮只读 HTTPS 下载了下列固定标签文件；SHA256 是下载文件摘要，不是容器镜像 digest。不能由此声称集群已经安装或兼容性验收通过。
+- [Kubernetes kubelet Summary v1alpha1](https://raw.githubusercontent.com/kubernetes/kubernetes/v1.35.10/staging/src/k8s.io/kubelet/pkg/apis/stats/v1alpha1/types.go)：16854 bytes，SHA256 `c3ed2fff06a1e59d5e4210dc3fda167013edfc090ac9fbe45ec19cca1e782c39`。
+- [Kubernetes kubelet server](https://raw.githubusercontent.com/kubernetes/kubernetes/v1.35.10/pkg/kubelet/server/server.go)：45296 bytes，SHA256 `e89803fb66a02360753da9b7a5c9a3672016694f3a3f1ae9efc2b1b1b3ccd583`。
+- [Cilium Helm Chart 1.19.10](https://raw.githubusercontent.com/cilium/cilium/v1.19.10/install/kubernetes/cilium/Chart.yaml)：7261 bytes，SHA256 `73f2c425697af3856a23e9ffbed5f8c3b3f2417236871d0cd3b1c6ad56660e19`。
+- [K3s v1.35.10+k3s1 go.mod](https://raw.githubusercontent.com/k3s-io/k3s/v1.35.10%2Bk3s1/go.mod)：29561 bytes，SHA256 `b266b4ce916a8d4ea09a59166c1c7aa0d0538541bcd317c124f46da72eeaeda9`。
+
+K3s go.mod 明确使用 Kubernetes v1.35.10-k3s1；Cilium Chart appVersion 为 1.19.10。kubelet Summary 有 NodeName、PodReference UID、CPU usageNanoCores、memory availableBytes/workingSetBytes 和文件系统 capacity/available 字段，但这不足以自动授权一个采集器：还需要受信 Node API/RBAC、统计时间/UID/owner-chain 与持久分配身份核对、采样票据起始时序、完整磁盘与容量口径。当前 NodeTelemetry 保留未知状态，不把 metrics.k8s.io 缺失字段补零。

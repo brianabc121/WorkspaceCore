@@ -12,7 +12,7 @@ PR #193 仍为草稿、不可合并；T-0222 保持 in_progress。下文早期�
 - 相关真实 PG 组合 **56 passed in 231.38s**；跨 workspace 争用和 OpenAPI **6 passed in 14.25s**；降级并发 **2 passed in 9.55s**。严格 mypy **293 source files** 成功，Ruff 通过。Node 22.23.4 的 lint/typecheck/check:api/build 均 exit 0，原有 chunk / PURE 警告保留。
 - 控制器协议补充：命令强制绑定实际 host_id；未知资源心跳允许领取已有指令，保留旧显示读数并撤销容量新鲜度，完整 poll 本身不能恢复准入。9 项单元回归 RED 后 GREEN，含真实 PG 指令投递合计 **10 passed in 3.31s**。
 - 磁盘准入保守保留所有保有环境的预算，并给宿主保留 10% 总盘余量。没有可信逐卷用量时不抵扣旧预算，可能少分配，不能据此宣称 Docker 已强制文件系统配额。两项新回归 RED 后，与选择器/双池适配/心跳组合 **60 passed, 5 deselected in 0.28s**。
-- Task5A 独立生命周期控制器/安全恢复与 Task6B 网络声明管理界面仍在实现、审阅和集成，结果随后追加。没有真实 Kubernetes 双节点 / Cilium / 身份网关验收；默认仍关闭。
+- Task5A 独立生命周期控制器/安全恢复与 Task6B 网络声明管理界面已通过 scoped 独立复审，正在完成父级集成检查，详见后文最新结果。没有真实 Kubernetes 双节点 / Cilium / 身份网关验收；默认仍关闭。
 
 本地实际输出：logs/api-unit-release-check.log、web-full-release-check.log、web-quality-physical.log、physical-full-pg.log、physical-cross-workspace.log、physical-downgrade-green.log、physical-delete-fix1-{red,green,full,mypy}.log、heartbeat-{red,green,pg}.log、disk-admission-red.log、disk-heartbeat-green.log。日志目录本地忽略，不提交凭证和大段测试 traceback。
 
@@ -114,3 +114,49 @@ pytest -m 'not integration' -q
 后续实际检查：`pytest tests/test_runner_multihost.py tests/test_runner_capabilities.py tests/test_runner_api.py tests/test_agent_placement_integration.py tests/test_agent_runtime_reconciliation.py -q` → **51 passed in 173.01s**；包含 runner-agent 新采样、配额/权限、MCP、智能体资源和历史核对。独立锁顺序 PG 两项另见上述结果。`mypy app`（services/api 工作目录，加载项目 strict+pydantic 插件）→ **Success: no issues found in 290 source files**；Ruff app/migrations/tests 全树通过。此前误在根目录运行 mypy、未加载 API 的插件配置，产生 160 项配置相关错误，已用正确项目命令复验，不据此修改其他模块。
 
 磁盘仍有额外待审项：Docker disk_gb 是预算，不是强制文件系统配额；尚未像内存一样对已有卷/可写层未用承诺和外部磁盘占用做独立核算。正式容量保证仍不能仅凭当前空闲磁盘与待创建预算声称完成。
+
+### 2026-11-12 后续集成检查与审阅
+
+- 物理身份 Task3A（含安装期间删除修复）独立 scoped 复审 PASS / APPROVED，无剩余 Critical / Important。
+- `pytest -m 'not integration' -q` → **688 passed, 42 skipped, 798 deselected in 188.57s**。Ruff 全树通过，`mypy app` → **296 source files** 成功。此完整检查在控制器审阅修复之前，不当成修复后的验收。
+- 物理身份、迁移、SSH、运行环境、可信指标和未知心跳组合：`pytest tests/test_agent_placement_integration.py tests/test_physical_hosts.py tests/test_physical_host_migration.py tests/test_runner_ssh.py tests/test_runner_api.py tests/test_runner_multihost.py tests/test_runner_metrics_api.py tests/test_runner_heartbeat.py -q` → **69 passed in 211.18s**（含真实本地 PostgreSQL/Redis；FakeSSH 仍非真实远程部署）。
+- Task5A 首次 scoped 审阅发现三项阻塞：kubeconfig 跳过 TLS 校验不能仅靠 false CLI flag 覆盖；重启后不同命令必须继续使用原始资源 UID；重发完成回执不能携带已被替换的旧 Pod UID/IP。均已交原实现者补 RED→GREEN，未豁免。完整可信 Kubernetes 遥测仍保持未知，不下发零值报告。
+- Task6B 补齐既有接口的来源入站/受限公网声明、三类显式确认撤销、权限/作用域/密码清理、过期和旧缓存地址隐藏。新增 **12 项定向测试通过**；独立 scoped 审阅 PASS / APPROVED，无 Critical / Important。没有接口支持的编辑不模拟撤销重建。完整 FE 复验正在进行。
+- 新增 `infra/runtime-v2` 的关闭配置和 systemd 模板，没有安装服务。`systemd-analyze verify --man=no infra/runtime-v2/workspace-runtime-v2.service` 实际 exit 1：预期部署路径 `/opt/workspace/services/api/.venv/bin/python` 尚不存在。未据此声称服务已部署。
+- 官方 kubectl v1.35.10 下载 SHA256 核验：`c49a28f1f4efc4d475ed05f47f2ce8e563bf7bef69ed77fe1b924ea6d83b6327`。实际双节点/Cilium/运行存储仍未测试；当前执行用户有效 capability 为 0，根盘余量不足，没有已配置的集群凭据。
+
+### 控制器三项审阅修复复验
+
+C1/I1/I2 均已修复，原审阅者 scoped 复审逐项 ADDRESSED，规格 PASS / 代码质量 APPROVED，无新 Critical / Important。修复包括拒绝实际选中的 insecure kubeconfig、跨指令/重启保留 allocation+generation 原 UID、防止同代次缺失对象被重新创建、拒绝重发改变了 Pod UID/IP 的旧绑定。
+
+```text
+RUNTIME_V2_TEST_KUBECTL=/tmp/t0222-kubectl/kubectl python -m pytest -q tests/runtime_v2
+77 passed in 1.64s
+
+# 独立审阅者只重复了新审阅回归文件，含真实 kubectl 与本地 TLS：
+13 passed in 1.66s
+
+ruff check app migrations tests
+All checks passed!
+mypy app
+Success: no issues found in 296 source files
+```
+
+新回归初始 10 failed；补充的新代次缓存和同代次缺失对象重建各观察 1 failed，再修复。中间完整定向曾 1 failed / 75 passed：移除临时认证数据后的真实 kubectl 在连服务器前提示用户名并 EOF；已诊断、改为运行时生成且仅存临时 kubeconfig 的一次性 token。最终 77 项包括不可信证书拒绝和显式信任临时 CA 的正向对照，不把一次普通连接失败冒充证书校验成功。
+
+原始/修复日志已从 /tmp 复制到持久的本地忽略 logs/task5a-*.log。独立审查及此项实际 TLS 边界不证明真实 Kubernetes RBAC、Pod 生命周期、存储或 Cilium 可用。完整设计尚未验收，保持 PR193 草稿和 T-0222 in_progress。
+
+### 最终本轮运行结果（控制器修复之后）
+
+```text
+RUNTIME_V2_TEST_KUBECTL=/tmp/t0222-kubectl/kubectl pytest -m 'not integration' -q
+701 passed, 42 skipped, 798 deselected in 211.58s
+
+# Node 22.23.4，全前端串行测试；随后两处仅类型修复另行定向复验：
+npm run test -- --maxWorkers=1
+78 test files passed, 775 tests passed in 440.52s
+```
+
+`web-current-typecheck.log` 初次真实失败 exit 2：面板 Action 联合类型最终 else 不能证明 recordId，测试 getByRole 传入了不支持的 exact 选项。已交原实现者做显式 endpoint 分支与合法测试参数的最小修复；不会把完整运行测试通过当作类型检查通过。修复后的静态结果见下一段。
+
+真实 Chromium 额外烟测通过：Vite 加载现有网络面板，模拟 API 边界，owner 显式提交公网来源声明，检查工作空间/CSRF 请求头；pending 不显示可连接地址，admin 只读，390px 无横向溢出，无 pageerror。截图 `logs/network-owner-{desktop,mobile}.png`。首个临时 HTML 测试壳直接导入预构建依赖导致超时，改用 Vite 的标准 bare module 导入后通过；没有为此修改产品代码。测试不发送真实密码或真实服务器操作，不证明网络数据面通信。
