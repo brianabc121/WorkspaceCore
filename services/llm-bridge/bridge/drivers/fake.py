@@ -70,13 +70,31 @@ class FakeDriver(Driver):
                 if done:
                     raise DriverError("platform_error", "回合被中断")
             reply = f"[{spec.model}] {text}"
+            commands: list[str] = []
+            files: list[str] = []
+            if text.startswith("work:"):
+                # 模拟开发回合：先说一句、执行命令、改文件，停一下再给出结果（work:<停几秒>）
+                await sink("message", {"text": "先看一下代码"})
+                commands, files = ["ls src"], ["src/a.py"]
+                await sink("command", {"command": commands[0]})
+                await sink("files", {"paths": files})
+                waiter = asyncio.create_task(cancel.wait())
+                done, _ = await asyncio.wait({waiter}, timeout=float(text[5:] or 0))
+                waiter.cancel()
+                if done:
+                    raise DriverError("platform_error", "回合被中断")
             history = self.history.setdefault(spec.native_id, [])
             history += [
                 Message("user", text, time.time()),
                 Message("assistant", reply, time.time()),
             ]
             await sink("message", {"text": reply})
-            return TurnOutcome(text=reply, usage={"input_tokens": 1, "output_tokens": 1})
+            return TurnOutcome(
+                text=reply,
+                usage={"input_tokens": 1, "output_tokens": 1},
+                commands=commands,
+                files=files,
+            )
         finally:
             self.running -= 1
 

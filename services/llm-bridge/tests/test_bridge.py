@@ -407,6 +407,118 @@ async def test_controlled_platforms(bridge: Bridge) -> None:
     assert kept.json()["platforms"] == ["codex", "claude", "workbuddy", "fake"]
 
 
+async def test_chat_page_admin_views(bridge: Bridge) -> None:
+    """聊天页用的管理接口：列表的搜索与筛选、会话内容、陆续出现的事件、改标题。"""
+    human, agent = "user:u1", "openclaw-1"
+    mine = await _session(bridge, human, title="检查登录的竞态")
+    theirs = await _session(bridge, agent)
+    assert (await _send(bridge, agent, theirs, "你好", "a1"))["status"] == "completed"
+    first = await _send(bridge, human, mine, "work:0", "h1")
+    assert first["status"] == "completed"
+
+    # 列表：谁建的、是否有回合在进行、搜索、筛选、分页
+    listed = (await bridge.admin("GET", "/admin/sessions")).json()
+    by_id = {s["session_id"]: s for s in listed["sessions"]}
+    assert by_id[mine]["owner_id"] == human and by_id[theirs]["owner_id"] == agent
+    assert not by_id[mine]["busy"] and listed["next_offset"] is None
+    found = (await bridge.admin("GET", "/admin/sessions", params={"q": "登录"})).json()
+    assert [s["session_id"] for s in found["sessions"]] == [mine]
+    # 搜索里的 % 和 _ 按字面处理，不当通配符
+    assert (await bridge.admin("GET", "/admin/sessions", params={"q": "%"})).json()[
+        "sessions"
+    ] == []
+    none = (await bridge.admin("GET", "/admin/sessions", params={"platform": "codex"})).json()
+    assert none["sessions"] == []
+    paged = (await bridge.admin("GET", "/admin/sessions", params={"limit": 1})).json()
+    assert len(paged["sessions"]) == 1 and paged["next_offset"] == 1
+
+    # 会话内容：谁发的、回答、过程（最后一段就是结果，不重复出现）
+    view = (await bridge.admin("GET", f"/admin/sessions/{mine}")).json()
+    assert view["session"]["title"] == "检查登录的竞态" and view["session"]["environment"] is None
+    user, reply = view["messages"]
+    assert (user["role"], user["text"], user["by"], user["by_id"]) == (
+        "user",
+        "work:0",
+        human,
+        human,
+    )
+    assert (reply["role"], reply["status"], reply["text"]) == (
+        "assistant",
+        "completed",
+        "[fake-1] work:0",
+    )
+    assert [(s["kind"], s["text"]) for s in reply["steps"]] == [
+        ("message", "先看一下代码"),
+        ("command", "ls src"),
+        ("files", "src/a.py"),
+    ]
+    assert view["last_event_id"] > 0
+    assert (await bridge.admin("GET", "/admin/sessions/bs_nope")).status_code == 404
+
+    # 进行中的回合：先拿到已经给出的部分，再长轮询等后面的事件
+    running = await _send(bridge, human, mine, "work:0.6", "h2", wait=0)
+    assert running["status"] in ("queued", "running")
+    cursor = view["last_event_id"]
+    kinds: list[str] = []
+    for _ in range(20):
+        batch = (
+            await bridge.admin(
+                "GET",
+                f"/admin/sessions/{mine}/events",
+                params={"after": cursor, "wait_seconds": 5},
+            )
+        ).json()
+        kinds += [e["kind"] for e in batch["events"]]
+        cursor = batch["last_id"]
+        if not batch["busy"] and not batch["events"]:
+            break
+    assert kinds == ["queued", "started", "message", "command", "files", "message", "completed"]
+    partial_text = [e for e in kinds if e == "message"]
+    assert len(partial_text) == 2
+    # 没有回合在进行时不等待，立刻返回
+    started = time.monotonic()
+    idle = (
+        await bridge.admin(
+            "GET", f"/admin/sessions/{mine}/events", params={"after": cursor, "wait_seconds": 20}
+        )
+    ).json()
+    assert idle == {"events": [], "busy": False, "last_id": cursor}
+    assert time.monotonic() - started < 2
+
+    # 没做完的回合：会话内容里带已经给出的部分和失败原因
+    failed = await _send(bridge, human, mine, "fail:platform_error", "h3")
+    assert failed["status"] == "failed"
+    view = (await bridge.admin("GET", f"/admin/sessions/{mine}")).json()
+    last = view["messages"][-1]
+    assert last["status"] == "failed" and last["failure"]["kind"] == "platform_error"
+
+    # 改标题：不改变列表里的先后；密钥照常拦截；空标题不行
+    before = [
+        s["session_id"] for s in (await bridge.admin("GET", "/admin/sessions")).json()["sessions"]
+    ]
+    renamed = await bridge.admin(
+        "PATCH", f"/admin/sessions/{theirs}", json={"title": "  打个  招呼 "}
+    )
+    assert renamed.status_code == 200 and renamed.json()["title"] == "打个 招呼"
+    after = [
+        s["session_id"] for s in (await bridge.admin("GET", "/admin/sessions")).json()["sessions"]
+    ]
+    assert before == after
+    secret = await bridge.admin(
+        "PATCH", f"/admin/sessions/{theirs}", json={"title": "key sk-ant-api03-" + "x" * 40}
+    )
+    assert "sk-ant-api03" not in secret.json()["title"]
+    assert (
+        await bridge.admin("PATCH", f"/admin/sessions/{theirs}", json={"title": "   "})
+    ).status_code == 422
+    # 归档的会话可以单独筛出来
+    await bridge.tool(agent, "llm_session_archive", {"session_id": theirs})
+    archived = (await bridge.admin("GET", "/admin/sessions", params={"status": "archived"})).json()
+    assert [s["session_id"] for s in archived["sessions"]] == [theirs]
+    active = (await bridge.admin("GET", "/admin/sessions", params={"status": "active"})).json()
+    assert [s["session_id"] for s in active["sessions"]] == [mine]
+
+
 async def test_auth(bridge: Bridge) -> None:
     assert (await bridge.client.get("/healthz")).json()["status"] == "ok"
     assert (await bridge.client.get("/admin/status")).status_code == 401
