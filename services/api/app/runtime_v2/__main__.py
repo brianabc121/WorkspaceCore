@@ -14,6 +14,7 @@ from typing import Any
 from app.runner_agent.client import Workspace, WorkspaceError
 from app.runtime_v2.config import ControllerConfig
 from app.runtime_v2.controller import CommandJournal, Controller
+from app.runtime_v2.network import PrivateNetworkReconciler
 from app.runtime_v2.runner import Kubectl, KubernetesCommandError, KubernetesRunner, OutcomeUnknown
 from app.runtime_v2.telemetry import NodeTelemetry, TelemetryUnavailable
 
@@ -45,6 +46,8 @@ def run(controller: Controller, telemetry: Any, stopping: Any) -> int:
     delay = 1
     while not stopping.is_set():
         try:
+            if controller.network is not None:
+                controller.network.reconcile()
             controller.recover_pending()
             controller.poll_once(telemetry.capacity())
             try:
@@ -92,14 +95,24 @@ def main() -> int:
         stopping = threading.Event()
         install_signal_handlers(stopping)
         with controller_lock(config.journal):
+            runner = KubernetesRunner(api)
+            journal = CommandJournal(config.journal)
             controller = Controller(
-                KubernetesRunner(api),
+                runner,
                 workspace,
-                CommandJournal(config.journal),
+                journal,
                 workspace_id=config.workspace_id,
                 host_id=config.host_id,
                 node_name=config.node_name,
                 stopping=stopping,
+                network=PrivateNetworkReconciler(
+                    runner,
+                    workspace,
+                    workspace_id=config.workspace_id,
+                    host_id=config.host_id,
+                    node_name=config.node_name,
+                    journal_path=config.journal,
+                ),
             )
             return run(controller, NodeTelemetry(api, config.node_name), stopping)
     except (

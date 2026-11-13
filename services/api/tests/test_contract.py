@@ -773,7 +773,9 @@ def test_v2_admin_endpoints_use_the_session_and_agent_endpoints_the_instance_tok
 
 def test_v2_internal_and_gateway_routes_are_not_documented() -> None:
     paths = json.loads(render())["paths"]
-    assert not [p for p in paths if p.startswith(("/internal", "/im/", "/mcp"))]
+    assert not [
+        p for p in paths if p.startswith(("/internal", "/api/v1/internal/", "/im/", "/mcp"))
+    ]
 
 
 def test_v2_secrets_and_credentials_never_appear_in_responses() -> None:

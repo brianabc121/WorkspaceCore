@@ -23,12 +23,15 @@ from app.domain.runner_network import RunnerNetworkService
 from app.schemas.runner_network import (
     RunnerIngressInput,
     RunnerIngressOut,
+    RunnerIngressUpdate,
     RunnerNetworkOut,
     RunnerPublishedEndpointOut,
     RunnerPublishInput,
+    RunnerPublishUpdate,
     RunnerRevokeInput,
     RunnerServiceCreate,
     RunnerServiceOut,
+    RunnerServiceUpdate,
 )
 
 router = APIRouter(tags=["runner-network"], dependencies=[Security(authenticated)])
@@ -66,6 +69,57 @@ async def register_service(
     service: Service,
 ) -> RunnerServiceOut:
     return await service.create_service(context, access, environment_id, body)
+
+
+@router.patch(
+    "/runner/environments/{environment_id}/services/{service_id}",
+    dependencies=[Depends(csrf_protected)],
+)
+async def update_service(
+    environment_id: UUID,
+    service_id: UUID,
+    body: RunnerServiceUpdate,
+    context: Context,
+    access: Owner,
+    service: Service,
+) -> RunnerServiceOut:
+    return await service.update_service(context, access, environment_id, service_id, body)
+
+
+@router.patch(
+    "/runner/environments/{environment_id}/ingress/{rule_id}",
+    dependencies=[Depends(csrf_protected)],
+)
+async def update_ingress(
+    environment_id: UUID,
+    rule_id: UUID,
+    body: RunnerIngressUpdate,
+    context: Context,
+    access: Owner,
+    service: Service,
+) -> RunnerIngressOut:
+    return RunnerIngressOut.model_validate(
+        await service.update_rule(context, access, environment_id, rule_id, body, kind="ingress")
+    )
+
+
+@router.patch(
+    "/runner/environments/{environment_id}/published-endpoints/{endpoint_id}",
+    dependencies=[Depends(csrf_protected)],
+)
+async def update_endpoint(
+    environment_id: UUID,
+    endpoint_id: UUID,
+    body: RunnerPublishUpdate,
+    context: Context,
+    access: Owner,
+    service: Service,
+) -> RunnerPublishedEndpointOut:
+    return RunnerPublishedEndpointOut.model_validate(
+        await service.update_rule(
+            context, access, environment_id, endpoint_id, body, kind="published"
+        )
+    )
 
 
 @router.post(

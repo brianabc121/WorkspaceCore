@@ -17,6 +17,15 @@ _IMAGE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/:\-]*@sha256:[a-f0-9]{64}$")
 _NODE = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$")
 
 
+def normalized_policy(spec: dict[str, Any] | None) -> dict[str, Any]:
+    """Kubernetes omits empty optional lists; explicit policyTypes still matters."""
+    value = dict(spec or {})
+    for direction in ("ingress", "egress"):
+        if value.get(direction) is None:
+            value[direction] = []
+    return value
+
+
 class UnsupportedOperation(RuntimeError):
     """The adapter cannot safely provide this legacy operation yet."""
 
@@ -128,7 +137,8 @@ class KubernetesRuntime:
         """Allow only managed pods of the same identity within its namespace.
 
         The deployment must prohibit other policies and tenant label mutation.
-        This policy intentionally provides neither DNS nor public egress.
+        CoreDNS is the only infrastructure exception. Namespace-local peers
+        share the domain across nodes; no namespaceSelector widens that peer.
         """
         scope = {
             _PREFIX + "workspace": identity.workspace_id.hex,
@@ -143,7 +153,23 @@ class KubernetesRuntime:
                 "podSelector": {"matchLabels": scope},
                 "policyTypes": ["Ingress", "Egress"],
                 "ingress": [{"from": [peer]}],
-                "egress": [{"to": [peer]}],
+                "egress": [
+                    {"to": [peer]},
+                    {
+                        "to": [
+                            {
+                                "namespaceSelector": {
+                                    "matchLabels": {"kubernetes.io/metadata.name": "kube-system"}
+                                },
+                                "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
+                            }
+                        ],
+                        "ports": [
+                            {"protocol": "UDP", "port": 53},
+                            {"protocol": "TCP", "port": 53},
+                        ],
+                    },
+                ],
             },
         }
 

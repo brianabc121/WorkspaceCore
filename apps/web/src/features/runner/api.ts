@@ -76,7 +76,7 @@ function clean<T extends Record<string, unknown>>(value: T): Partial<T> {
 }
 
 // 一次只做一个写操作；成功后刷新运行服务器与实例卡片的查询
-export function useRunnerAction(scope: string) {
+export function useRunnerAction(scope: string, formatError: (error: unknown) => string = runnerError) {
   const auth = useAuthStore(), cache = useQueryClient(), user = auth.user?.id
   const busy = ref(false), error = ref(''), notice = ref('')
   const active = () => auth.user?.id === user && auth.workspaceId === scope
@@ -85,7 +85,7 @@ export function useRunnerAction(scope: string) {
     if (busy.value || !active()) return false
     busy.value = true; error.value = ''; notice.value = ''
     try { await effect(); if (!active()) return false; notice.value = success; await refresh(); return true }
-    catch (cause) { if (active()) { error.value = runnerError(cause); if (cause instanceof ApiError && cause.code === 'WRITE_UNKNOWN') await refresh() } return false }
+    catch (cause) { if (active()) { error.value = formatError(cause); if (cause instanceof ApiError && cause.code === 'WRITE_UNKNOWN') await refresh() } return false }
     finally { busy.value = false }
   }
   return { busy, error, notice, act, refresh, header: { 'X-Workspace-Id': scope } }

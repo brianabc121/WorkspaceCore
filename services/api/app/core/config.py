@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     agent_ssh_allow_loopback: bool = False
     # T-0222: finite new-deployment scheduling profile, independent trusted telemetry.
     runner_network_verified: bool = False
+    runner_network_gateway_token: SecretStr = SecretStr("")
+    runner_network_private_host: str = "runner-gateway.runner-system.svc.cluster.local"
+    runner_network_public_host: str = ""
+    runner_network_pod_cidrs: str = "10.42.0.0/16"
+    # Mandatory operator-owned union of managed nodes, platform and Pod CIDRs.
+    runner_network_denied_cidrs: str = ""
     agent_placement_disk_gb: float = Field(default=10, gt=0, le=10000)
     agent_placement_metrics_max_age_seconds: int = Field(default=60, ge=5, le=60)
     # 每晚复盘的 OpenClaw 定时任务（知识库方案 3.9，T-0100）：几点、按哪个时区（IANA 时区名）

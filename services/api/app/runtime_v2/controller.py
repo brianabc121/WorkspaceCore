@@ -12,6 +12,7 @@ from uuid import UUID
 
 from app.runner_agent.client import Workspace
 from app.runtime_v2.kubernetes import RuntimeIdentity
+from app.runtime_v2.network import PrivateNetworkReconciler
 from app.runtime_v2.runner import (
     KubernetesCommandError,
     KubernetesRunner,
@@ -30,6 +31,8 @@ _RESULT_FIELDS = {
     "pod_ip",
     "allocation_id",
     "generation",
+    "deployment_uid",
+    "pvc_uid",
 }
 
 
@@ -202,6 +205,29 @@ class CommandJournal:
                 (command_id,),
             )
 
+    def binding_receipts(self) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        result: list[dict[str, Any]] = []
+        with self._connect() as db:
+            for recovery, value, delivered in db.execute(
+                "SELECT recovery, result, delivered FROM receipts ORDER BY rowid DESC"
+            ):
+                entry = json.loads(recovery) if recovery else {}
+                identity = (entry.get("context") or {}).get("identity") or {}
+                env_id = identity.get("env_id")
+                if not isinstance(env_id, str) or env_id in seen:
+                    continue
+                seen.add(env_id)
+                receipt = json.loads(value) if value else {}
+                if (
+                    delivered
+                    and receipt.get("status") == "done"
+                    and entry.get("provenance")
+                    and (entry.get("context") or {}).get("kind") in ("create_env", "start_env")
+                ):
+                    result.append(entry)
+        return result
+
 
 class Controller:
     def __init__(
@@ -216,6 +242,7 @@ class Controller:
         attempts: int = 30,
         interval: float = 2.0,
         stopping: threading.Event | None = None,
+        network: PrivateNetworkReconciler | None = None,
     ) -> None:
         if type(attempts) is not int or not 1 <= attempts <= 300 or not 0 <= interval <= 10:
             raise ValueError("invalid reconciliation bounds")
@@ -225,6 +252,7 @@ class Controller:
         self.runner, self.workspace, self.journal = runner, workspace, journal
         self.attempts, self.interval = attempts, interval
         self.stopping = stopping or threading.Event()
+        self.network = network
 
     def _context(self, command: dict[str, Any]) -> tuple[RuntimeIdentity, dict[str, Any]]:
         payload = command["payload"]
@@ -278,6 +306,11 @@ class Controller:
                 self.journal.finish(command_id, {"status": "failed"})
                 self._send(command_id, self.journal.begin(command_id))  # type: ignore[arg-type]
             return
+        if command["kind"] == "create_env" and self.network is not None:
+            try:
+                self.network.ensure_domain(ident)
+            except (OutcomeUnknown, KubernetesCommandError, ValueError, KeyError, TypeError):
+                return
         try:
             previous = self.journal.begin(command_id, context)
         except ValueError:
@@ -372,6 +405,18 @@ class Controller:
             self.process(reconstructed)
 
     def poll_once(self, metrics: dict[str, Any]) -> None:
+        if self.network is not None:
+            from app.runtime_v2.bindings import refresh_bindings
+
+            refresh_bindings(
+                self.runner,
+                self.workspace,
+                self.journal.binding_receipts(),
+                workspace_id=self.workspace_id,
+                host_id=self.host_id,
+                node_name=self.node_name,
+            )
+            metrics = {**metrics, "wait_seconds": 2}
         reply = self.workspace.post("/poll", metrics, timeout=45)
         for command in reply.get("commands") or []:
             self.process(command)

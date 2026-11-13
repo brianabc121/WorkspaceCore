@@ -1,0 +1,9 @@
+# Build services/api/Dockerfile first, then pass its immutable image digest.
+ARG WORKSPACE_API_IMAGE
+FROM ${WORKSPACE_API_IMAGE}
+USER root
+ARG TARGETARCH=amd64
+RUN test "$TARGETARCH" = amd64
+RUN python -c "import hashlib, pathlib, urllib.request; p=pathlib.Path('/usr/local/bin/kubectl'); d=urllib.request.urlopen('https://dl.k8s.io/release/v1.35.10/bin/linux/amd64/kubectl',timeout=60).read(); assert hashlib.sha256(d).hexdigest()=='c49a28f1f4efc4d475ed05f47f2ce8e563bf7bef69ed77fe1b924ea6d83b6327'; p.write_bytes(d); p.chmod(0o755)"
+USER 10001:10001
+ENTRYPOINT ["python", "-m", "app.runtime_v2.gateway_main"]
