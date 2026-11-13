@@ -74,14 +74,16 @@ function remove(env: Environment) {
     <form v-if="canWrite && form.open" class="asv-form lb-form" :aria-label="form.id ? '修改开发环境' : '新增开发环境'" @submit.prevent="submit">
       <h3>{{ form.id ? '修改开发环境' : '新增开发环境' }}</h3>
       <div class="lb-grid">
-        <div class="form-field"><label for="lb-env-platform">平台</label>
+        <div class="form-field">
+          <label for="lb-env-platform">平台</label>
           <select id="lb-env-platform" v-model="form.platform" :disabled="!!form.id"><option v-for="p in DEV_PLATFORMS" :key="p.id" :value="p.id">{{ p.name }}</option></select>
           <p class="form-help">{{ form.id ? '建好后不能改平台。' : 'ChatGPT 没有开发模式。' }}</p>
         </div>
         <div class="form-field"><label for="lb-env-name">名字</label><input id="lb-env-name" v-model="form.name" maxlength="60" required /></div>
         <div class="form-field"><label for="lb-env-repo">代码仓库地址（可不填）</label><input id="lb-env-repo" v-model="form.repo_url" maxlength="500" inputmode="url" placeholder="https://github.com/owner/repo" /><p class="form-help">只支持 https:// 开头的地址。</p></div>
         <div class="form-field"><label for="lb-env-branch">分支（可不填）</label><input id="lb-env-branch" v-model="form.branch" maxlength="200" placeholder="main" /></div>
-        <div class="form-field"><label for="lb-env-sandbox">权限</label>
+        <div class="form-field">
+          <label for="lb-env-sandbox">权限</label>
           <select id="lb-env-sandbox" v-model="form.sandbox"><option v-for="[id, name] in SANDBOXES" :key="id" :value="id">{{ name }}</option></select>
         </div>
       </div>

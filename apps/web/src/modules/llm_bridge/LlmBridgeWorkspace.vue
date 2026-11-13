@@ -110,7 +110,8 @@ function remove(bridge: Bridge) {
             <div class="form-field"><label for="lb-bridge-name">名字</label><input id="lb-bridge-name" v-model="form.name" maxlength="40" required placeholder="例如：主账号" /><p class="form-help">智能体用这个名字指定走哪座会话桥。</p></div>
             <div class="form-field"><label for="lb-bridge-url">地址</label><input id="lb-bridge-url" v-model="form.base_url" maxlength="300" required inputmode="url" placeholder="http://10.0.0.5:8787" /></div>
           </div>
-          <div class="form-field"><label for="lb-bridge-token">管理令牌</label>
+          <div class="form-field">
+            <label for="lb-bridge-token">管理令牌</label>
             <input id="lb-bridge-token" v-model="form.token" type="password" autocomplete="new-password" maxlength="200" :required="!form.id" :placeholder="form.id ? '已登记（不回显）；不填表示不改' : '部署会话桥时生成的管理令牌，至少 32 个字符'" />
             <p class="form-help">令牌加密保存，页面上不再显示。</p>
           </div>
