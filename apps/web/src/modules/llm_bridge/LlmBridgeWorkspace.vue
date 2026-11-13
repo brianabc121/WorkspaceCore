@@ -104,7 +104,7 @@ function remove(bridge: Bridge) {
           </tbody>
         </table>
 
-        <form v-if="canWrite && form.open" class="asv-form lb-form" :aria-label="form.id ? '修改会话桥' : '添加会话桥'" @submit.prevent="submit">
+        <form v-if="canWrite && form.open" class="asv-form lb-form" novalidate :aria-label="form.id ? '修改会话桥' : '添加会话桥'" @submit.prevent="submit">
           <h3>{{ form.id ? '修改会话桥' : '添加会话桥' }}</h3>
           <div class="lb-grid">
             <div class="form-field"><label for="lb-bridge-name">名字</label><input id="lb-bridge-name" v-model="form.name" maxlength="40" required placeholder="例如：主账号" /><p class="form-help">智能体用这个名字指定走哪座会话桥。</p></div>

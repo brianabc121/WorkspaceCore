@@ -24,25 +24,25 @@ from app.core.config import Settings
 from app.domain.connectors import ConnectorRuntime
 from app.domain.policy import WorkspaceAccess
 from app.modules.llm_bridge.schemas import (
-    AccountStateOut,
-    BridgeIn,
-    BridgeList,
-    BridgeOut,
-    BridgePatch,
-    BridgeSettings,
-    BridgeSettingsPatch,
-    BridgeStatusOut,
-    EnvironmentIn,
-    EnvironmentList,
-    EnvironmentOut,
-    GrantIn,
-    GrantList,
-    GrantOut,
-    LoginIn,
-    LoginOut,
-    ResetOut,
-    SessionList,
-    TurnList,
+    LlmBridgeAccountStateOut,
+    LlmBridgeEnvironmentIn,
+    LlmBridgeEnvironmentList,
+    LlmBridgeEnvironmentOut,
+    LlmBridgeGrantIn,
+    LlmBridgeGrantList,
+    LlmBridgeGrantOut,
+    LlmBridgeIn,
+    LlmBridgeList,
+    LlmBridgeLoginIn,
+    LlmBridgeLoginOut,
+    LlmBridgeOut,
+    LlmBridgePatch,
+    LlmBridgeResetOut,
+    LlmBridgeSessionList,
+    LlmBridgeSettings,
+    LlmBridgeSettingsPatch,
+    LlmBridgeStatusOut,
+    LlmBridgeTurnList,
 )
 from app.modules.llm_bridge.service import LlmBridgeService
 from app.schemas.common import error_responses
@@ -72,9 +72,9 @@ Service = Annotated[LlmBridgeService, Depends(get_service)]
 
 # ---- 会话桥登记 ----
 @router.get("/llm_bridge/bridges", summary="登记的会话桥（admin）", responses=_read_errors)
-async def list_bridges(access: Admin, service: Service) -> BridgeList:
+async def list_bridges(access: Admin, service: Service) -> LlmBridgeList:
     rows = await service.bridges(access.workspace.id)
-    return BridgeList(bridges=[service.bridge_out(r) for r in rows])
+    return LlmBridgeList(bridges=[service.bridge_out(r) for r in rows])
 
 
 @router.post(
@@ -85,7 +85,7 @@ async def list_bridges(access: Admin, service: Service) -> BridgeList:
     dependencies=_write,
     responses=_write_errors,
 )
-async def create_bridge(access: Owner, service: Service, body: BridgeIn) -> BridgeOut:
+async def create_bridge(access: Owner, service: Service, body: LlmBridgeIn) -> LlmBridgeOut:
     return await service.create_bridge(access, body)
 
 
@@ -96,8 +96,8 @@ async def create_bridge(access: Owner, service: Service, body: BridgeIn) -> Brid
     responses=_write_errors,
 )
 async def update_bridge(
-    access: Owner, service: Service, bridge_id: UUID, body: BridgePatch
-) -> BridgeOut:
+    access: Owner, service: Service, bridge_id: UUID, body: LlmBridgePatch
+) -> LlmBridgeOut:
     return await service.update_bridge(access, bridge_id, body)
 
 
@@ -119,7 +119,7 @@ async def delete_bridge(access: Owner, service: Service, bridge_id: UUID) -> Res
     description="连不上会话桥时 reachable 为 false，error 说明原因。",
     responses=_read_errors,
 )
-async def bridge_status(access: Admin, service: Service, bridge_id: UUID) -> BridgeStatusOut:
+async def bridge_status(access: Admin, service: Service, bridge_id: UUID) -> LlmBridgeStatusOut:
     return await service.status(await service.bridge(access.workspace.id, bridge_id))
 
 
@@ -130,14 +130,14 @@ async def bridge_status(access: Admin, service: Service, bridge_id: UUID) -> Bri
     responses=_write_errors,
 )
 async def update_settings(
-    access: Owner, service: Service, bridge_id: UUID, body: BridgeSettingsPatch
-) -> BridgeSettings:
+    access: Owner, service: Service, bridge_id: UUID, body: LlmBridgeSettingsPatch
+) -> LlmBridgeSettings:
     row = await service.bridge(access.workspace.id, bridge_id)
     values = body.model_dump(exclude_none=True)
     data = await service.admin_write(
         access, row, "settings_updated", "PUT", "/settings", values, values
     )
-    return BridgeSettings(**data)
+    return LlmBridgeSettings(**data)
 
 
 # ---- 各平台的登录 ----
@@ -151,8 +151,8 @@ async def update_settings(
     responses=_write_errors,
 )
 async def login(
-    access: Owner, service: Service, bridge_id: UUID, slot: SlotPath, body: LoginIn
-) -> LoginOut:
+    access: Owner, service: Service, bridge_id: UUID, slot: SlotPath, body: LlmBridgeLoginIn
+) -> LlmBridgeLoginOut:
     row = await service.bridge(access.workspace.id, bridge_id)
     data = await service.admin_write(
         access,
@@ -163,7 +163,7 @@ async def login(
         body.model_dump(exclude_none=True),
         {"slot": slot, "method": body.method},
     )
-    return LoginOut(**data)
+    return LlmBridgeLoginOut(**data)
 
 
 @router.get(
@@ -171,10 +171,12 @@ async def login(
     summary="登录进行到哪一步（admin）",
     responses=_read_errors,
 )
-async def login_state(access: Admin, service: Service, bridge_id: UUID, slot: SlotPath) -> LoginOut:
+async def login_state(
+    access: Admin, service: Service, bridge_id: UUID, slot: SlotPath
+) -> LlmBridgeLoginOut:
     row = await service.bridge(access.workspace.id, bridge_id)
     data = (await service.admin(row, "GET", f"/accounts/{slot}/login")).get("login")
-    return LoginOut(**data) if data else LoginOut(state="none")
+    return LlmBridgeLoginOut(**data) if data else LlmBridgeLoginOut(state="none")
 
 
 @router.post(
@@ -185,9 +187,9 @@ async def login_state(access: Admin, service: Service, bridge_id: UUID, slot: Sl
 )
 async def refresh_account(
     access: Admin, service: Service, bridge_id: UUID, slot: SlotPath
-) -> AccountStateOut:
+) -> LlmBridgeAccountStateOut:
     row = await service.bridge(access.workspace.id, bridge_id)
-    return AccountStateOut(**await service.admin(row, "POST", f"/accounts/{slot}/refresh"))
+    return LlmBridgeAccountStateOut(**await service.admin(row, "POST", f"/accounts/{slot}/refresh"))
 
 
 @router.post(
@@ -213,12 +215,12 @@ async def logout(access: Owner, service: Service, bridge_id: UUID, slot: SlotPat
 )
 async def reset_account(
     access: Owner, service: Service, bridge_id: UUID, slot: SlotPath
-) -> ResetOut:
+) -> LlmBridgeResetOut:
     row = await service.bridge(access.workspace.id, bridge_id)
     data = await service.admin_write(
         access, row, "account_reset", "POST", f"/accounts/{slot}/reset", None, {"slot": slot}
     )
-    return ResetOut(**data)
+    return LlmBridgeResetOut(**data)
 
 
 # ---- 环境 ----
@@ -227,9 +229,11 @@ async def reset_account(
     summary="开发环境列表（admin）",
     responses=_read_errors,
 )
-async def list_environments(access: Admin, service: Service, bridge_id: UUID) -> EnvironmentList:
+async def list_environments(
+    access: Admin, service: Service, bridge_id: UUID
+) -> LlmBridgeEnvironmentList:
     row = await service.bridge(access.workspace.id, bridge_id)
-    return EnvironmentList(**await service.admin(row, "GET", "/environments"))
+    return LlmBridgeEnvironmentList(**await service.admin(row, "GET", "/environments"))
 
 
 @router.post(
@@ -240,14 +244,14 @@ async def list_environments(access: Admin, service: Service, bridge_id: UUID) ->
     responses=_write_errors,
 )
 async def create_environment(
-    access: Owner, service: Service, bridge_id: UUID, body: EnvironmentIn
-) -> EnvironmentOut:
+    access: Owner, service: Service, bridge_id: UUID, body: LlmBridgeEnvironmentIn
+) -> LlmBridgeEnvironmentOut:
     row = await service.bridge(access.workspace.id, bridge_id)
     meta = {"platform": body.platform, "name": body.name, "sandbox": body.sandbox}
     data = await service.admin_write(
         access, row, "environment_created", "POST", "/environments", body.model_dump(), meta
     )
-    return EnvironmentOut(**data)
+    return LlmBridgeEnvironmentOut(**data)
 
 
 @router.put(
@@ -257,8 +261,8 @@ async def create_environment(
     responses=_write_errors,
 )
 async def update_environment(
-    access: Owner, service: Service, bridge_id: UUID, env_id: EnvId, body: EnvironmentIn
-) -> EnvironmentOut:
+    access: Owner, service: Service, bridge_id: UUID, env_id: EnvId, body: LlmBridgeEnvironmentIn
+) -> LlmBridgeEnvironmentOut:
     row = await service.bridge(access.workspace.id, bridge_id)
     meta = {"platform": body.platform, "name": body.name, "sandbox": body.sandbox}
     data = await service.admin_write(
@@ -270,7 +274,7 @@ async def update_environment(
         body.model_dump(),
         meta,
     )
-    return EnvironmentOut(**data)
+    return LlmBridgeEnvironmentOut(**data)
 
 
 @router.delete(
@@ -310,13 +314,13 @@ async def list_sessions(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     sync: bool = False,
-) -> SessionList:
+) -> LlmBridgeSessionList:
     row = await service.bridge(access.workspace.id, bridge_id)
     flag = "true" if sync else "false"
     data: dict[str, Any] = await service.admin(
         row, "GET", f"/sessions?limit={limit}&offset={offset}&sync={flag}"
     )
-    return SessionList(**data)
+    return LlmBridgeSessionList(**data)
 
 
 @router.get(
@@ -326,9 +330,9 @@ async def list_sessions(
 )
 async def list_turns(
     access: Admin, service: Service, bridge_id: UUID, session_id: SessionId
-) -> TurnList:
+) -> LlmBridgeTurnList:
     row = await service.bridge(access.workspace.id, bridge_id)
-    return TurnList(**await service.admin(row, "GET", f"/sessions/{session_id}/turns"))
+    return LlmBridgeTurnList(**await service.admin(row, "GET", f"/sessions/{session_id}/turns"))
 
 
 # ---- 按实例的权限 ----
@@ -337,8 +341,8 @@ async def list_turns(
     summary="每个实例的大模型会话权限（admin）",
     responses=_read_errors,
 )
-async def list_grants(access: Admin, service: Service) -> GrantList:
-    return GrantList(grants=await service.grants(access.workspace.id))
+async def list_grants(access: Admin, service: Service) -> LlmBridgeGrantList:
+    return LlmBridgeGrantList(grants=await service.grants(access.workspace.id))
 
 
 @router.put(
@@ -348,5 +352,7 @@ async def list_grants(access: Admin, service: Service) -> GrantList:
     dependencies=_write,
     responses=_write_errors,
 )
-async def set_grant(access: Owner, service: Service, instance_id: UUID, body: GrantIn) -> GrantOut:
+async def set_grant(
+    access: Owner, service: Service, instance_id: UUID, body: LlmBridgeGrantIn
+) -> LlmBridgeGrantOut:
     return await service.set_grant(access, instance_id, body)

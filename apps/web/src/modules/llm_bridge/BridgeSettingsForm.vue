@@ -42,7 +42,7 @@ async function save() {
       <p role="alert">{{ props.loadError ? bridgeError(props.loadError) : `连不上这座会话桥：${status?.error || '没有给出原因'}` }}</p>
       <button type="button" class="secondary-button" @click="emit('reload')">重试</button>
     </div>
-    <form v-else class="asv-form lb-form" aria-label="会话桥设置" @submit.prevent="save">
+    <form v-else class="asv-form lb-form" novalidate aria-label="会话桥设置" @submit.prevent="save">
       <fieldset class="lb-checks lb-grid" :disabled="!canWrite || busy">
         <div v-for="f in FIELDS" :key="f.key" class="form-field">
           <label :for="`lb-set-${f.key}`">{{ f.label }}</label>

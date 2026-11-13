@@ -57,7 +57,7 @@ function submitLogin(account: Account) {
     let out
     try { out = await props.api.login(props.bridge.id, slot, body) } catch (e) {
       // 会话桥的设置里还没确认风险（例如别人刚关掉）：重新读状态，让确认框显示出来
-      if (e instanceof ApiError && e.status === 403 && slot === 'claude' && method !== 'api_key') { emit('reload'); throw new ApiError(403, 'LB_ACK_REQUIRED', 'Claude 用订阅登录前，要先确认了解合规风险：请勾选下面的风险确认后再试。') }
+      if (e instanceof ApiError && e.status === 403 && slot === 'claude' && method !== 'api_key') { emit('reload'); throw new ApiError(403, 'LB_ACK_REQUIRED', '要先确认风险') }
       throw e
     }
     login.secret = ''
@@ -156,7 +156,7 @@ function reset(account: Account) {
             <button v-if="canWrite && (a.state === 'mismatch' || a.identity)" type="button" class="secondary-button lb-danger" :disabled="!!busy" :aria-label="`更换账号${a.label}`" @click="reset(a)">更换账号</button>
           </div>
 
-          <form v-if="canWrite && login.slot === a.slot" class="asv-form lb-form" :aria-label="`登录${a.label}`" @submit.prevent="submitLogin(a)">
+          <form v-if="canWrite && login.slot === a.slot" class="asv-form lb-form" novalidate :aria-label="`登录${a.label}`" @submit.prevent="submitLogin(a)">
             <fieldset class="lb-checks">
               <legend>登录方式</legend>
               <label v-for="m in methodsOf(a)" :key="m" class="check-field"><input v-model="login.method" type="radio" :name="`lb-method-${a.slot}`" :value="m" @change="login.secret = ''" />{{ METHODS[m].name }}</label>

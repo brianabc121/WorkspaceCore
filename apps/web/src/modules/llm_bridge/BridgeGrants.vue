@@ -10,6 +10,8 @@ const props = defineProps<{ api: LlmBridgeApi; canWrite: boolean }>()
 const grants = props.api.useGrants()
 const list = computed(() => grants.data.value ?? [])
 const error = ref(''), notice = ref(''), busy = ref('')
+// 保存失败时重画这一行：勾选框回到服务器上的状态，不停在刚点的样子
+const redraw = ref(0)
 
 const FLAGS = [
   { key: 'can_write', name: '新建会话和发送', help: '能新建会话、向会话发指令；不开只能看自己的会话。' },
@@ -22,7 +24,7 @@ const bodyOf = (g: Grant): GrantBody => ({ enabled: g.enabled, can_write: g.can_
 async function save(g: Grant, body: GrantBody) {
   if (busy.value) return
   busy.value = g.instance_id; error.value = notice.value = ''
-  try { await props.api.setGrant(g.instance_id, body); notice.value = `已保存「${g.instance_name}」的权限。` } catch (e) { error.value = bridgeError(e); await grants.refetch() } finally { busy.value = '' }
+  try { await props.api.setGrant(g.instance_id, body); notice.value = `已保存「${g.instance_name}」的权限。` } catch (e) { error.value = bridgeError(e); redraw.value += 1; await grants.refetch() } finally { busy.value = '' }
 }
 function setEnabled(g: Grant, enabled: boolean) {
   return save(g, enabled ? { ...bodyOf(g), enabled: true } : { enabled: false, can_write: false, can_account: false, can_takeover: false, platforms: [] })
@@ -50,7 +52,7 @@ const checked = (event: Event) => (event.target as HTMLInputElement).checked
     </div>
     <p v-else-if="!list.length" class="ws-state-line">这个工作空间还没有智能体实例。</p>
     <div v-else>
-      <fieldset v-for="g in list" :key="g.instance_id" class="lb-checks lb-grant" :disabled="!canWrite || !!busy" :aria-label="`实例权限：${g.instance_name}`">
+      <fieldset v-for="g in list" :key="`${g.instance_id}:${redraw}`" class="lb-checks lb-grant" :disabled="!canWrite || !!busy" :aria-label="`实例权限：${g.instance_name}`">
         <div class="lb-account-head"><h3>{{ g.instance_name }}</h3><span class="asv-state" :class="g.enabled ? 'tone-green' : 'tone-muted'">{{ g.enabled ? '已启用' : '未启用' }}</span></div>
         <div class="lb-inline">
           <label class="check-field"><input type="checkbox" :checked="g.enabled" @change="setEnabled(g, checked($event))" />启用</label>

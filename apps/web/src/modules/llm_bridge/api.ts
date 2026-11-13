@@ -58,6 +58,8 @@ const MESSAGES: Record<string, string> = {
   NAME_TAKEN: '已经有同名的会话桥，换一个名字。',
   FORBIDDEN_ROLE: '只有 owner 能修改大模型会话桥。',
   MODULE_DISABLED: '功能已停用：大模型会话桥在当前工作空间没有启用。',
+  // 页面自己给的：会话桥因为还没确认风险拒绝了 Claude 的订阅登录（403）
+  LB_ACK_REQUIRED: 'Claude 用订阅登录前，要先确认了解合规风险：请勾选下面的风险确认后再试。',
 }
 const BRIDGE_CODES = ['CONFLICT', 'NOT_SUPPORTED', 'NOT_LOGGED_IN', 'ACCOUNT_MISMATCH', 'UNAVAILABLE', 'RATE_LIMITED']
 export function bridgeError(error: unknown): string {

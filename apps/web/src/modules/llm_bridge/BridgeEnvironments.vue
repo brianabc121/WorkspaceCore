@@ -71,7 +71,7 @@ function remove(env: Environment) {
       </tbody>
     </table>
 
-    <form v-if="canWrite && form.open" class="asv-form lb-form" :aria-label="form.id ? '修改开发环境' : '新增开发环境'" @submit.prevent="submit">
+    <form v-if="canWrite && form.open" class="asv-form lb-form" novalidate :aria-label="form.id ? '修改开发环境' : '新增开发环境'" @submit.prevent="submit">
       <h3>{{ form.id ? '修改开发环境' : '新增开发环境' }}</h3>
       <div class="lb-grid">
         <div class="form-field">

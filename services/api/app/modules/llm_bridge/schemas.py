@@ -17,7 +17,7 @@ class _In(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class BridgeIn(_In):
+class LlmBridgeIn(_In):
     name: str = Field(min_length=1, max_length=40, description="显示名，也是工具里 bridge 参数的值")
     base_url: str = Field(
         min_length=8, max_length=300, description="会话桥的地址，例如 http://10.0.0.5:8787"
@@ -25,14 +25,14 @@ class BridgeIn(_In):
     token: str = Field(min_length=32, max_length=200, description="会话桥的管理令牌")
 
 
-class BridgePatch(_In):
+class LlmBridgePatch(_In):
     name: str | None = Field(default=None, min_length=1, max_length=40)
     base_url: str | None = Field(default=None, min_length=8, max_length=300)
     token: str | None = Field(default=None, min_length=32, max_length=200)
     enabled: bool | None = None
 
 
-class BridgeOut(BaseModel):
+class LlmBridgeOut(BaseModel):
     id: UUID
     name: str
     base_url: str
@@ -42,11 +42,11 @@ class BridgeOut(BaseModel):
     updated_at: datetime
 
 
-class BridgeList(BaseModel):
-    bridges: list[BridgeOut]
+class LlmBridgeList(BaseModel):
+    bridges: list[LlmBridgeOut]
 
 
-class AccountOut(BaseModel):
+class LlmBridgeAccountOut(BaseModel):
     slot: str
     label: str
     state: str = Field(description="logged_in / logged_out / mismatch / unavailable")
@@ -58,7 +58,7 @@ class AccountOut(BaseModel):
     running: int
 
 
-class ChannelOut(BaseModel):
+class LlmBridgeChannelOut(BaseModel):
     platform: str
     mode: str
     slot: str
@@ -66,7 +66,7 @@ class ChannelOut(BaseModel):
     note: str
 
 
-class BridgeSettings(BaseModel):
+class LlmBridgeSettings(BaseModel):
     concurrency: int = Field(ge=1, le=16, description="每个账号同时进行的回合数")
     turn_timeout_seconds: int = Field(ge=30, le=21600)
     send_per_hour: int = Field(ge=1, le=10000, description="每个实例每小时的发送次数")
@@ -74,7 +74,7 @@ class BridgeSettings(BaseModel):
     claude_subscription_ack: bool = Field(description="已确认了解 Claude 订阅登录的合规风险")
 
 
-class BridgeSettingsPatch(_In):
+class LlmBridgeSettingsPatch(_In):
     concurrency: int | None = Field(default=None, ge=1, le=16)
     turn_timeout_seconds: int | None = Field(default=None, ge=30, le=21600)
     send_per_hour: int | None = Field(default=None, ge=1, le=10000)
@@ -82,41 +82,41 @@ class BridgeSettingsPatch(_In):
     claude_subscription_ack: bool | None = None
 
 
-class BridgeStatusOut(BaseModel):
+class LlmBridgeStatusOut(BaseModel):
     reachable: bool
     error: str = Field(default="", description="连不上时的原因")
     version: str = ""
-    accounts: list[AccountOut] = []
-    channels: list[ChannelOut] = []
+    accounts: list[LlmBridgeAccountOut] = []
+    channels: list[LlmBridgeChannelOut] = []
     queued: int = 0
     running: int = 0
-    settings: BridgeSettings | None = None
+    settings: LlmBridgeSettings | None = None
 
 
-class LoginIn(_In):
+class LlmBridgeLoginIn(_In):
     method: Literal["device_code", "api_key", "oauth_token", "existing"]
     api_key: str | None = Field(default=None, max_length=500)
     oauth_token: str | None = Field(default=None, max_length=2000)
 
 
-class LoginOut(BaseModel):
+class LlmBridgeLoginOut(BaseModel):
     state: str = Field(description="pending / done / failed / none")
     verification_url: str | None = None
     user_code: str | None = None
     detail: str = ""
 
 
-class AccountStateOut(BaseModel):
+class LlmBridgeAccountStateOut(BaseModel):
     state: str
     identity: str | None
     detail: str
 
 
-class ResetOut(BaseModel):
+class LlmBridgeResetOut(BaseModel):
     archived_sessions: int
 
 
-class EnvironmentIn(_In):
+class LlmBridgeEnvironmentIn(_In):
     platform: Platform
     mode: Literal["dev", "cloud"] = "dev"
     name: str = Field(min_length=1, max_length=60)
@@ -128,7 +128,7 @@ class EnvironmentIn(_In):
     enabled: bool = True
 
 
-class EnvironmentOut(BaseModel):
+class LlmBridgeEnvironmentOut(BaseModel):
     id: str
     platform: str
     mode: str
@@ -141,11 +141,11 @@ class EnvironmentOut(BaseModel):
     description: str
 
 
-class EnvironmentList(BaseModel):
-    environments: list[EnvironmentOut]
+class LlmBridgeEnvironmentList(BaseModel):
+    environments: list[LlmBridgeEnvironmentOut]
 
 
-class SessionOut(BaseModel):
+class LlmBridgeSessionOut(BaseModel):
     session_id: str
     platform: str
     mode: str
@@ -159,12 +159,12 @@ class SessionOut(BaseModel):
     turns: int = 0
 
 
-class SessionList(BaseModel):
-    sessions: list[SessionOut]
+class LlmBridgeSessionList(BaseModel):
+    sessions: list[LlmBridgeSessionOut]
     sync_failed: str = ""
 
 
-class TurnOut(BaseModel):
+class LlmBridgeTurnOut(BaseModel):
     turn_id: str
     status: str
     text: str
@@ -175,11 +175,11 @@ class TurnOut(BaseModel):
     finished_at: float | None = None
 
 
-class TurnList(BaseModel):
-    turns: list[TurnOut]
+class LlmBridgeTurnList(BaseModel):
+    turns: list[LlmBridgeTurnOut]
 
 
-class GrantIn(_In):
+class LlmBridgeGrantIn(_In):
     enabled: bool
     can_write: bool = False
     can_account: bool = False
@@ -187,7 +187,7 @@ class GrantIn(_In):
     platforms: list[Platform] = Field(default=[], description="允许的平台；空表示都允许")
 
 
-class GrantOut(BaseModel):
+class LlmBridgeGrantOut(BaseModel):
     instance_id: UUID
     instance_name: str
     enabled: bool
@@ -197,5 +197,5 @@ class GrantOut(BaseModel):
     platforms: list[str]
 
 
-class GrantList(BaseModel):
-    grants: list[GrantOut]
+class LlmBridgeGrantList(BaseModel):
+    grants: list[LlmBridgeGrantOut]

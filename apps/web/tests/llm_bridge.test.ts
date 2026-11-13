@@ -30,7 +30,7 @@ const status = (over: Partial<Schema['BridgeStatusOut']> = {}): Schema['BridgeSt
 })
 const grant = (over: Partial<Schema['GrantOut']> = {}): Schema['GrantOut'] => ({ instance_id: INSTANCE, instance_name: '甲', enabled: true, can_write: true, can_account: true, can_takeover: false, platforms: ['codex'], ...over })
 
-function setup(role: Role, handler?: (r: Request) => Response | Promise<Response> | undefined, bridges = [bridge]) {
+function setup(role: Role, handler?: (r: Request) => Response | undefined | Promise<Response | undefined>, bridges = [bridge]) {
   return mockApi(async r => {
     const result = await handler?.(r)
     if (result) return result
@@ -248,10 +248,13 @@ describe('大模型会话桥', () => {
 
     await fireEvent.click(within(row).getByLabelText('接手别人的会话'))
     await screen.findByText('已保存「甲」的权限。')
+    await waitFor(() => expect(row).toBeEnabled())
     await fireEvent.click(within(row).getByLabelText('Claude'))
     await waitFor(() => expect(within(row).getByLabelText('Claude')).toBeChecked())
+    await waitFor(() => expect(row).toBeEnabled())
     await fireEvent.click(within(row).getByLabelText('启用'))
-    await waitFor(() => expect(within(row).getByLabelText('新建会话和发送')).toBeDisabled())
+    expect(await within(row).findByText('未启用')).toBeVisible()
+    await waitFor(() => expect(row).toBeEnabled())
 
     const bodies = await Promise.all(writes(requests).map(r => r.clone().json()))
     expect(bodies).toEqual([
@@ -259,7 +262,7 @@ describe('大模型会话桥', () => {
       { enabled: true, can_write: true, can_account: true, can_takeover: true, platforms: ['codex', 'claude'] },
       { enabled: false, can_write: false, can_account: false, can_takeover: false, platforms: [] },
     ])
-    for (const name of ['新建会话和发送', '查看账号下全部会话', '接手别人的会话']) expect(within(row).getByLabelText(name)).not.toBeChecked()
+    for (const name of ['新建会话和发送', '查看账号下全部会话', '接手别人的会话']) { expect(within(row).getByLabelText(name)).not.toBeChecked(); expect(within(row).getByLabelText(name)).toBeDisabled() }
   })
 
   it('saves settings within the backend limits and environments in dev mode with an exec warning', async () => {

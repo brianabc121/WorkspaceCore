@@ -25,15 +25,15 @@ from app.models import AgentInstance
 from app.modules.llm_bridge.client import BridgeCallError, BridgeClient, bridge_client
 from app.modules.llm_bridge.models import LlmBridge, LlmBridgeGrant
 from app.modules.llm_bridge.schemas import (
-    AccountOut,
-    BridgeIn,
-    BridgeOut,
-    BridgePatch,
-    BridgeSettings,
-    BridgeStatusOut,
-    ChannelOut,
-    GrantIn,
-    GrantOut,
+    LlmBridgeAccountOut,
+    LlmBridgeChannelOut,
+    LlmBridgeGrantIn,
+    LlmBridgeGrantOut,
+    LlmBridgeIn,
+    LlmBridgeOut,
+    LlmBridgePatch,
+    LlmBridgeSettings,
+    LlmBridgeStatusOut,
 )
 
 SLOTS = ("openai", "claude", "workbuddy")
@@ -91,8 +91,8 @@ class LlmBridgeService:
 
     # ---- 会话桥登记 ----
     @staticmethod
-    def bridge_out(row: LlmBridge) -> BridgeOut:
-        return BridgeOut(
+    def bridge_out(row: LlmBridge) -> LlmBridgeOut:
+        return LlmBridgeOut(
             id=row.id,
             name=row.name,
             base_url=row.base_url,
@@ -145,7 +145,7 @@ class LlmBridgeService:
             metadata=metadata,
         )
 
-    async def create_bridge(self, access: WorkspaceAccess, body: BridgeIn) -> BridgeOut:
+    async def create_bridge(self, access: WorkspaceAccess, body: LlmBridgeIn) -> LlmBridgeOut:
         workspace_id = access.workspace.id
         name = body.name.strip()
         await self._name_free(workspace_id, name, skip=None)
@@ -168,8 +168,8 @@ class LlmBridgeService:
         return self.bridge_out(row)
 
     async def update_bridge(
-        self, access: WorkspaceAccess, bridge_id: uuid.UUID, body: BridgePatch
-    ) -> BridgeOut:
+        self, access: WorkspaceAccess, bridge_id: uuid.UUID, body: LlmBridgePatch
+    ) -> LlmBridgeOut:
         row = await self.bridge(access.workspace.id, bridge_id)
         changed: list[str] = []
         if body.name is not None and body.name.strip() != row.name:
@@ -231,33 +231,37 @@ class LlmBridgeService:
         await self.db.commit()
         return result
 
-    async def status(self, row: LlmBridge) -> BridgeStatusOut:
+    async def status(self, row: LlmBridge) -> LlmBridgeStatusOut:
         try:
             data = await self.client(row).admin("GET", "/status")
         except BridgeCallError as error:
-            return BridgeStatusOut(reachable=False, error=error.message)
+            return LlmBridgeStatusOut(reachable=False, error=error.message)
         except ConnectorError as error:
-            return BridgeStatusOut(reachable=False, error=unavailable(error).message)
+            return LlmBridgeStatusOut(reachable=False, error=unavailable(error).message)
         accounts = [
-            AccountOut(slot=slot, **data["accounts"][slot])
+            LlmBridgeAccountOut(slot=slot, **data["accounts"][slot])
             for slot in SLOTS
             if slot in data.get("accounts", {})
         ]
-        return BridgeStatusOut(
+        return LlmBridgeStatusOut(
             reachable=True,
             version=str(data.get("version", "")),
             accounts=accounts,
-            channels=[ChannelOut(**c) for c in data.get("channels", []) if c["platform"] != "fake"],
+            channels=[
+                LlmBridgeChannelOut(**c)
+                for c in data.get("channels", [])
+                if c["platform"] != "fake"
+            ],
             queued=int(data.get("queued", 0)),
             running=int(data.get("running", 0)),
-            settings=BridgeSettings(**data["settings"]),
+            settings=LlmBridgeSettings(**data["settings"]),
         )
 
     # ---- 按实例的权限 ----
     async def grant(self, instance_id: uuid.UUID) -> LlmBridgeGrant | None:
         return await self.db.get(LlmBridgeGrant, instance_id)
 
-    async def grants(self, workspace_id: uuid.UUID) -> list[GrantOut]:
+    async def grants(self, workspace_id: uuid.UUID) -> list[LlmBridgeGrantOut]:
         instances = (
             await self.db.scalars(
                 select(AgentInstance)
@@ -276,8 +280,8 @@ class LlmBridgeService:
         return [self._grant_out(i, rows.get(i.id)) for i in instances]
 
     @staticmethod
-    def _grant_out(instance: AgentInstance, row: LlmBridgeGrant | None) -> GrantOut:
-        return GrantOut(
+    def _grant_out(instance: AgentInstance, row: LlmBridgeGrant | None) -> LlmBridgeGrantOut:
+        return LlmBridgeGrantOut(
             instance_id=instance.id,
             instance_name=instance.name,
             enabled=bool(row and row.enabled),
@@ -288,8 +292,8 @@ class LlmBridgeService:
         )
 
     async def set_grant(
-        self, access: WorkspaceAccess, instance_id: uuid.UUID, body: GrantIn
-    ) -> GrantOut:
+        self, access: WorkspaceAccess, instance_id: uuid.UUID, body: LlmBridgeGrantIn
+    ) -> LlmBridgeGrantOut:
         instance = await self.db.scalar(
             select(AgentInstance).where(
                 AgentInstance.id == instance_id, AgentInstance.workspace_id == access.workspace.id
