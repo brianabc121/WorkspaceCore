@@ -53007,7 +53007,7 @@
     },
     "/api/v1/llm_bridge/bridges": {
       "get": {
-        "operationId": "list_bridges",
+        "operationId": "llm_bridge_list_bridges",
         "parameters": [
           {
             "description": "当前工作空间；不是成员时返回 404",
@@ -53096,7 +53096,7 @@
       },
       "post": {
         "description": "令牌加密保存，不回传。409 NAME_TAKEN：已经有同名的会话桥。",
-        "operationId": "create_bridge",
+        "operationId": "llm_bridge_create_bridge",
         "parameters": [
           {
             "description": "当前工作空间；不是成员时返回 404",
@@ -53224,7 +53224,7 @@
     },
     "/api/v1/llm_bridge/bridges/{bridge_id}": {
       "delete": {
-        "operationId": "delete_bridge",
+        "operationId": "llm_bridge_delete_bridge",
         "parameters": [
           {
             "in": "path",
@@ -53343,7 +53343,7 @@
         ]
       },
       "patch": {
-        "operationId": "update_bridge",
+        "operationId": "llm_bridge_update_bridge",
         "parameters": [
           {
             "in": "path",
@@ -53481,7 +53481,7 @@
     },
     "/api/v1/llm_bridge/bridges/{bridge_id}/accounts/{slot}/login": {
       "get": {
-        "operationId": "login_state",
+        "operationId": "llm_bridge_login_state",
         "parameters": [
           {
             "in": "path",
@@ -53596,7 +53596,7 @@
       },
       "post": {
         "description": "device_code：返回网址和验证码，用户在自己的浏览器里完成，之后轮询登录状态；api_key / oauth_token：填的值保存在会话桥的数据卷里，不保存在工作台；existing：使用已经在容器里完成的登录。403：Claude 用订阅登录前要先在设置里确认风险。",
-        "operationId": "login",
+        "operationId": "llm_bridge_login",
         "parameters": [
           {
             "in": "path",
@@ -53750,7 +53750,7 @@
     },
     "/api/v1/llm_bridge/bridges/{bridge_id}/accounts/{slot}/logout": {
       "post": {
-        "operationId": "logout",
+        "operationId": "llm_bridge_logout",
         "parameters": [
           {
             "in": "path",
@@ -53887,7 +53887,7 @@
     },
     "/api/v1/llm_bridge/bridges/{bridge_id}/accounts/{slot}/refresh": {
       "post": {
-        "operationId": "refresh_account",
+        "operationId": "llm_bridge_refresh_account",
         "parameters": [
           {
             "in": "path",
@@ -54031,7 +54031,7 @@
     },
     "/api/v1/llm_bridge/bridges/{bridge_id}/accounts/{slot}/reset": {
       "post": {
-        "operationId": "reset_account",
+        "operationId": "llm_bridge_reset_account",
         "parameters": [
           {
             "in": "path",
@@ -54175,7 +54175,7 @@
     },
     "/api/v1/llm_bridge/bridges/{bridge_id}/environments": {
       "get": {
-        "operationId": "list_environments",
+        "operationId": "llm_bridge_list_environments",
         "parameters": [
           {
             "in": "path",
@@ -54273,7 +54273,7 @@
         ]
       },
       "post": {
-        "operationId": "create_environment",
+        "operationId": "llm_bridge_create_environment",
         "parameters": [
           {
             "in": "path",
@@ -54411,7 +54411,7 @@
     },
     "/api/v1/llm_bridge/bridges/{bridge_id}/environments/{env_id}": {
       "delete": {
-        "operationId": "delete_environment",
+        "operationId": "llm_bridge_delete_environment",
         "parameters": [
           {
             "in": "path",
@@ -54540,7 +54540,7 @@
         ]
       },
       "put": {
-        "operationId": "update_environment",
+        "operationId": "llm_bridge_update_environment",
         "parameters": [
           {
             "in": "path",
@@ -54689,7 +54689,7 @@
     "/api/v1/llm_bridge/bridges/{bridge_id}/sessions": {
       "get": {
         "description": "sync=true 时先把官方程序里有、会话桥没登记的会话登记进来。",
-        "operationId": "list_sessions",
+        "operationId": "llm_bridge_list_sessions",
         "parameters": [
           {
             "in": "path",
@@ -54822,7 +54822,7 @@
     },
     "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/turns": {
       "get": {
-        "operationId": "list_turns",
+        "operationId": "llm_bridge_list_turns",
         "parameters": [
           {
             "in": "path",
@@ -54932,7 +54932,7 @@
     },
     "/api/v1/llm_bridge/bridges/{bridge_id}/settings": {
       "put": {
-        "operationId": "update_settings",
+        "operationId": "llm_bridge_update_settings",
         "parameters": [
           {
             "in": "path",
@@ -55071,7 +55071,7 @@
     "/api/v1/llm_bridge/bridges/{bridge_id}/status": {
       "get": {
         "description": "连不上会话桥时 reachable 为 false，error 说明原因。",
-        "operationId": "bridge_status",
+        "operationId": "llm_bridge_bridge_status",
         "parameters": [
           {
             "in": "path",
@@ -55171,7 +55171,7 @@
     },
     "/api/v1/llm_bridge/grants": {
       "get": {
-        "operationId": "list_grants",
+        "operationId": "llm_bridge_list_grants",
         "parameters": [
           {
             "description": "当前工作空间；不是成员时返回 404",
@@ -55262,7 +55262,7 @@
     "/api/v1/llm_bridge/grants/{instance_id}": {
       "put": {
         "description": "enabled 关掉时其余权限一并收回；platforms 为空表示所有平台。",
-        "operationId": "set_grant",
+        "operationId": "llm_bridge_set_grant",
         "parameters": [
           {
             "in": "path",

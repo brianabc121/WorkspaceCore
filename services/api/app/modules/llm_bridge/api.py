@@ -72,7 +72,7 @@ Service = Annotated[LlmBridgeService, Depends(get_service)]
 
 # ---- 会话桥登记 ----
 @router.get("/llm_bridge/bridges", summary="登记的会话桥（admin）", responses=_read_errors)
-async def list_bridges(access: Admin, service: Service) -> LlmBridgeList:
+async def llm_bridge_list_bridges(access: Admin, service: Service) -> LlmBridgeList:
     rows = await service.bridges(access.workspace.id)
     return LlmBridgeList(bridges=[service.bridge_out(r) for r in rows])
 
@@ -85,7 +85,9 @@ async def list_bridges(access: Admin, service: Service) -> LlmBridgeList:
     dependencies=_write,
     responses=_write_errors,
 )
-async def create_bridge(access: Owner, service: Service, body: LlmBridgeIn) -> LlmBridgeOut:
+async def llm_bridge_create_bridge(
+    access: Owner, service: Service, body: LlmBridgeIn
+) -> LlmBridgeOut:
     return await service.create_bridge(access, body)
 
 
@@ -95,7 +97,7 @@ async def create_bridge(access: Owner, service: Service, body: LlmBridgeIn) -> L
     dependencies=_write,
     responses=_write_errors,
 )
-async def update_bridge(
+async def llm_bridge_update_bridge(
     access: Owner, service: Service, bridge_id: UUID, body: LlmBridgePatch
 ) -> LlmBridgeOut:
     return await service.update_bridge(access, bridge_id, body)
@@ -108,7 +110,7 @@ async def update_bridge(
     dependencies=_write,
     responses=_write_errors,
 )
-async def delete_bridge(access: Owner, service: Service, bridge_id: UUID) -> Response:
+async def llm_bridge_delete_bridge(access: Owner, service: Service, bridge_id: UUID) -> Response:
     await service.delete_bridge(access, bridge_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -119,7 +121,9 @@ async def delete_bridge(access: Owner, service: Service, bridge_id: UUID) -> Res
     description="连不上会话桥时 reachable 为 false，error 说明原因。",
     responses=_read_errors,
 )
-async def bridge_status(access: Admin, service: Service, bridge_id: UUID) -> LlmBridgeStatusOut:
+async def llm_bridge_bridge_status(
+    access: Admin, service: Service, bridge_id: UUID
+) -> LlmBridgeStatusOut:
     return await service.status(await service.bridge(access.workspace.id, bridge_id))
 
 
@@ -129,7 +133,7 @@ async def bridge_status(access: Admin, service: Service, bridge_id: UUID) -> Llm
     dependencies=_write,
     responses=_write_errors,
 )
-async def update_settings(
+async def llm_bridge_update_settings(
     access: Owner, service: Service, bridge_id: UUID, body: LlmBridgeSettingsPatch
 ) -> LlmBridgeSettings:
     row = await service.bridge(access.workspace.id, bridge_id)
@@ -150,7 +154,7 @@ async def update_settings(
     dependencies=_write,
     responses=_write_errors,
 )
-async def login(
+async def llm_bridge_login(
     access: Owner, service: Service, bridge_id: UUID, slot: SlotPath, body: LlmBridgeLoginIn
 ) -> LlmBridgeLoginOut:
     row = await service.bridge(access.workspace.id, bridge_id)
@@ -171,7 +175,7 @@ async def login(
     summary="登录进行到哪一步（admin）",
     responses=_read_errors,
 )
-async def login_state(
+async def llm_bridge_login_state(
     access: Admin, service: Service, bridge_id: UUID, slot: SlotPath
 ) -> LlmBridgeLoginOut:
     row = await service.bridge(access.workspace.id, bridge_id)
@@ -185,7 +189,7 @@ async def login_state(
     dependencies=_write,
     responses=_write_errors,
 )
-async def refresh_account(
+async def llm_bridge_refresh_account(
     access: Admin, service: Service, bridge_id: UUID, slot: SlotPath
 ) -> LlmBridgeAccountStateOut:
     row = await service.bridge(access.workspace.id, bridge_id)
@@ -199,7 +203,9 @@ async def refresh_account(
     dependencies=_write,
     responses=_write_errors,
 )
-async def logout(access: Owner, service: Service, bridge_id: UUID, slot: SlotPath) -> Response:
+async def llm_bridge_logout(
+    access: Owner, service: Service, bridge_id: UUID, slot: SlotPath
+) -> Response:
     row = await service.bridge(access.workspace.id, bridge_id)
     await service.admin_write(
         access, row, "account_logout", "POST", f"/accounts/{slot}/logout", None, {"slot": slot}
@@ -213,7 +219,7 @@ async def logout(access: Owner, service: Service, bridge_id: UUID, slot: SlotPat
     dependencies=_write,
     responses=_write_errors,
 )
-async def reset_account(
+async def llm_bridge_reset_account(
     access: Owner, service: Service, bridge_id: UUID, slot: SlotPath
 ) -> LlmBridgeResetOut:
     row = await service.bridge(access.workspace.id, bridge_id)
@@ -229,7 +235,7 @@ async def reset_account(
     summary="开发环境列表（admin）",
     responses=_read_errors,
 )
-async def list_environments(
+async def llm_bridge_list_environments(
     access: Admin, service: Service, bridge_id: UUID
 ) -> LlmBridgeEnvironmentList:
     row = await service.bridge(access.workspace.id, bridge_id)
@@ -243,7 +249,7 @@ async def list_environments(
     dependencies=_write,
     responses=_write_errors,
 )
-async def create_environment(
+async def llm_bridge_create_environment(
     access: Owner, service: Service, bridge_id: UUID, body: LlmBridgeEnvironmentIn
 ) -> LlmBridgeEnvironmentOut:
     row = await service.bridge(access.workspace.id, bridge_id)
@@ -260,7 +266,7 @@ async def create_environment(
     dependencies=_write,
     responses=_write_errors,
 )
-async def update_environment(
+async def llm_bridge_update_environment(
     access: Owner, service: Service, bridge_id: UUID, env_id: EnvId, body: LlmBridgeEnvironmentIn
 ) -> LlmBridgeEnvironmentOut:
     row = await service.bridge(access.workspace.id, bridge_id)
@@ -284,7 +290,7 @@ async def update_environment(
     dependencies=_write,
     responses=_write_errors,
 )
-async def delete_environment(
+async def llm_bridge_delete_environment(
     access: Owner, service: Service, bridge_id: UUID, env_id: EnvId
 ) -> Response:
     row = await service.bridge(access.workspace.id, bridge_id)
@@ -307,7 +313,7 @@ async def delete_environment(
     description="sync=true 时先把官方程序里有、会话桥没登记的会话登记进来。",
     responses=_read_errors,
 )
-async def list_sessions(
+async def llm_bridge_list_sessions(
     access: Admin,
     service: Service,
     bridge_id: UUID,
@@ -328,7 +334,7 @@ async def list_sessions(
     summary="一个会话的回合（admin；最新的在前）",
     responses=_read_errors,
 )
-async def list_turns(
+async def llm_bridge_list_turns(
     access: Admin, service: Service, bridge_id: UUID, session_id: SessionId
 ) -> LlmBridgeTurnList:
     row = await service.bridge(access.workspace.id, bridge_id)
@@ -341,7 +347,7 @@ async def list_turns(
     summary="每个实例的大模型会话权限（admin）",
     responses=_read_errors,
 )
-async def list_grants(access: Admin, service: Service) -> LlmBridgeGrantList:
+async def llm_bridge_list_grants(access: Admin, service: Service) -> LlmBridgeGrantList:
     return LlmBridgeGrantList(grants=await service.grants(access.workspace.id))
 
 
@@ -352,7 +358,7 @@ async def list_grants(access: Admin, service: Service) -> LlmBridgeGrantList:
     dependencies=_write,
     responses=_write_errors,
 )
-async def set_grant(
+async def llm_bridge_set_grant(
     access: Owner, service: Service, instance_id: UUID, body: LlmBridgeGrantIn
 ) -> LlmBridgeGrantOut:
     return await service.set_grant(access, instance_id, body)

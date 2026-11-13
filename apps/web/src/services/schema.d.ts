@@ -2979,13 +2979,13 @@ export interface paths {
             cookie?: never;
         };
         /** 登记的会话桥（admin） */
-        get: operations["list_bridges"];
+        get: operations["llm_bridge_list_bridges"];
         put?: never;
         /**
          * 登记一座会话桥（owner）
          * @description 令牌加密保存，不回传。409 NAME_TAKEN：已经有同名的会话桥。
          */
-        post: operations["create_bridge"];
+        post: operations["llm_bridge_create_bridge"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3003,11 +3003,11 @@ export interface paths {
         put?: never;
         post?: never;
         /** 删除会话桥的登记（owner；不影响会话桥容器本身） */
-        delete: operations["delete_bridge"];
+        delete: operations["llm_bridge_delete_bridge"];
         options?: never;
         head?: never;
         /** 修改会话桥的名字、地址、令牌或停用它（owner） */
-        patch: operations["update_bridge"];
+        patch: operations["llm_bridge_update_bridge"];
         trace?: never;
     };
     "/api/v1/llm_bridge/bridges/{bridge_id}/accounts/{slot}/login": {
@@ -3018,13 +3018,13 @@ export interface paths {
             cookie?: never;
         };
         /** 登录进行到哪一步（admin） */
-        get: operations["login_state"];
+        get: operations["llm_bridge_login_state"];
         put?: never;
         /**
          * 登录一个平台（owner）
          * @description device_code：返回网址和验证码，用户在自己的浏览器里完成，之后轮询登录状态；api_key / oauth_token：填的值保存在会话桥的数据卷里，不保存在工作台；existing：使用已经在容器里完成的登录。403：Claude 用订阅登录前要先在设置里确认风险。
          */
-        post: operations["login"];
+        post: operations["llm_bridge_login"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3041,7 +3041,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** 退出一个平台的登录（owner） */
-        post: operations["logout"];
+        post: operations["llm_bridge_logout"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3058,7 +3058,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** 重新检查一个平台的登录状态（admin） */
-        post: operations["refresh_account"];
+        post: operations["llm_bridge_refresh_account"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3075,7 +3075,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** 更换账号：归档这个平台的全部会话登记，忘掉登记的账号（owner） */
-        post: operations["reset_account"];
+        post: operations["llm_bridge_reset_account"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3090,10 +3090,10 @@ export interface paths {
             cookie?: never;
         };
         /** 开发环境列表（admin） */
-        get: operations["list_environments"];
+        get: operations["llm_bridge_list_environments"];
         put?: never;
         /** 新增开发环境（owner） */
-        post: operations["create_environment"];
+        post: operations["llm_bridge_create_environment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3109,10 +3109,10 @@ export interface paths {
         };
         get?: never;
         /** 修改开发环境（owner；不能改所属的平台） */
-        put: operations["update_environment"];
+        put: operations["llm_bridge_update_environment"];
         post?: never;
         /** 删除开发环境（owner） */
-        delete: operations["delete_environment"];
+        delete: operations["llm_bridge_delete_environment"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3129,7 +3129,7 @@ export interface paths {
          * 会话桥上的会话（admin）
          * @description sync=true 时先把官方程序里有、会话桥没登记的会话登记进来。
          */
-        get: operations["list_sessions"];
+        get: operations["llm_bridge_list_sessions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3146,7 +3146,7 @@ export interface paths {
             cookie?: never;
         };
         /** 一个会话的回合（admin；最新的在前） */
-        get: operations["list_turns"];
+        get: operations["llm_bridge_list_turns"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3164,7 +3164,7 @@ export interface paths {
         };
         get?: never;
         /** 修改会话桥的设置：并发、时限、每小时发送次数等（owner） */
-        put: operations["update_settings"];
+        put: operations["llm_bridge_update_settings"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3183,7 +3183,7 @@ export interface paths {
          * 会话桥的状态：各平台的登录情况、通道、排队、设置（admin）
          * @description 连不上会话桥时 reachable 为 false，error 说明原因。
          */
-        get: operations["bridge_status"];
+        get: operations["llm_bridge_bridge_status"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3200,7 +3200,7 @@ export interface paths {
             cookie?: never;
         };
         /** 每个实例的大模型会话权限（admin） */
-        get: operations["list_grants"];
+        get: operations["llm_bridge_list_grants"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3221,7 +3221,7 @@ export interface paths {
          * 设置一个实例的大模型会话权限（owner）
          * @description enabled 关掉时其余权限一并收回；platforms 为空表示所有平台。
          */
-        put: operations["set_grant"];
+        put: operations["llm_bridge_set_grant"];
         post?: never;
         delete?: never;
         options?: never;
@@ -31400,7 +31400,7 @@ export interface operations {
             };
         };
     };
-    list_bridges: {
+    llm_bridge_list_bridges: {
         parameters: {
             query?: never;
             header: {
@@ -31468,7 +31468,7 @@ export interface operations {
             };
         };
     };
-    create_bridge: {
+    llm_bridge_create_bridge: {
         parameters: {
             query?: never;
             header: {
@@ -31551,7 +31551,7 @@ export interface operations {
             };
         };
     };
-    delete_bridge: {
+    llm_bridge_delete_bridge: {
         parameters: {
             query?: never;
             header: {
@@ -31630,7 +31630,7 @@ export interface operations {
             };
         };
     };
-    update_bridge: {
+    llm_bridge_update_bridge: {
         parameters: {
             query?: never;
             header: {
@@ -31715,7 +31715,7 @@ export interface operations {
             };
         };
     };
-    login_state: {
+    llm_bridge_login_state: {
         parameters: {
             query?: never;
             header: {
@@ -31787,7 +31787,7 @@ export interface operations {
             };
         };
     };
-    login: {
+    llm_bridge_login: {
         parameters: {
             query?: never;
             header: {
@@ -31874,7 +31874,7 @@ export interface operations {
             };
         };
     };
-    logout: {
+    llm_bridge_logout: {
         parameters: {
             query?: never;
             header: {
@@ -31955,7 +31955,7 @@ export interface operations {
             };
         };
     };
-    refresh_account: {
+    llm_bridge_refresh_account: {
         parameters: {
             query?: never;
             header: {
@@ -32038,7 +32038,7 @@ export interface operations {
             };
         };
     };
-    reset_account: {
+    llm_bridge_reset_account: {
         parameters: {
             query?: never;
             header: {
@@ -32121,7 +32121,7 @@ export interface operations {
             };
         };
     };
-    list_environments: {
+    llm_bridge_list_environments: {
         parameters: {
             query?: never;
             header: {
@@ -32191,7 +32191,7 @@ export interface operations {
             };
         };
     };
-    create_environment: {
+    llm_bridge_create_environment: {
         parameters: {
             query?: never;
             header: {
@@ -32276,7 +32276,7 @@ export interface operations {
             };
         };
     };
-    update_environment: {
+    llm_bridge_update_environment: {
         parameters: {
             query?: never;
             header: {
@@ -32362,7 +32362,7 @@ export interface operations {
             };
         };
     };
-    delete_environment: {
+    llm_bridge_delete_environment: {
         parameters: {
             query?: never;
             header: {
@@ -32442,7 +32442,7 @@ export interface operations {
             };
         };
     };
-    list_sessions: {
+    llm_bridge_list_sessions: {
         parameters: {
             query?: {
                 limit?: number;
@@ -32516,7 +32516,7 @@ export interface operations {
             };
         };
     };
-    list_turns: {
+    llm_bridge_list_turns: {
         parameters: {
             query?: never;
             header: {
@@ -32587,7 +32587,7 @@ export interface operations {
             };
         };
     };
-    update_settings: {
+    llm_bridge_update_settings: {
         parameters: {
             query?: never;
             header: {
@@ -32672,7 +32672,7 @@ export interface operations {
             };
         };
     };
-    bridge_status: {
+    llm_bridge_bridge_status: {
         parameters: {
             query?: never;
             header: {
@@ -32742,7 +32742,7 @@ export interface operations {
             };
         };
     };
-    list_grants: {
+    llm_bridge_list_grants: {
         parameters: {
             query?: never;
             header: {
@@ -32810,7 +32810,7 @@ export interface operations {
             };
         };
     };
-    set_grant: {
+    llm_bridge_set_grant: {
         parameters: {
             query?: never;
             header: {
