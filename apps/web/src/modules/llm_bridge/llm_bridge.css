@@ -50,3 +50,6 @@
 .lb-turn-label { color: var(--muted); font-size: .78rem; font-weight: 600; }
 .lb-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .lb-wrap { white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.lb-table .lb-nowrap { white-space: nowrap; }
+/* 手机宽度下表格的一行变成两列的卡片：长说明占满整行 */
+.mg-section .asv-table tbody td.lb-full { grid-column: 1 / -1; }

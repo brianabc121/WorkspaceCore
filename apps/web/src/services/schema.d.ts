@@ -10848,15 +10848,24 @@ export interface components {
             first_login_at: number | null;
             /**
              * Identity
-             * @description 账号标识（打码）
+             * @description 账号标识（打码）；用密钥或令牌登录时会话桥看不到是哪个账号，为空
              */
             identity: string | null;
             /** Label */
             label: string;
             /** Login Methods */
             login_methods: string[];
-            /** Method */
+            /**
+             * Method
+             * @description 登录方式；没有登录时为空
+             */
             method: string | null;
+            /**
+             * Registered
+             * @description 这座会话桥是否已经登记过这个平台的账号（退出登录后仍然保留，“更换账号”才清掉）
+             * @default false
+             */
+            registered: boolean;
             /** Running */
             running: number;
             /** Slot */

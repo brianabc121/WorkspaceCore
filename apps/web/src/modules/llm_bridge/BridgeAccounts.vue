@@ -147,13 +147,14 @@ function reset(account: Account) {
             <dt>进行中</dt><dd>{{ a.running }} 个回合</dd>
           </dl>
           <p v-if="a.detail" class="form-help">{{ a.detail }}</p>
+          <p v-if="a.registered && a.state === 'logged_out'" class="form-help">这座会话桥登记过这个平台的账号{{ a.identity ? `（${a.identity}）` : '' }}。重新登录同一个账号可以接着用原来的会话；要换成别的账号，先点“更换账号”。</p>
           <p v-if="a.state === 'mismatch'" role="note" class="lb-warn is-red">现在登录的账号，和这座会话桥最初登记的不是同一个。为了不把两个账号的会话混在一起，这个平台已暂停使用。要继续用，只能点“更换账号”：这座会话桥上这个平台的全部会话会被归档，然后登记新的账号。</p>
 
           <div class="lb-inline">
             <button v-if="canWrite && a.state !== 'mismatch' && methodsOf(a).length && login.slot !== a.slot" type="button" class="primary-button" :disabled="!!busy || !!device" :aria-label="`登录${a.label}`" @click="openLogin(a)">{{ a.state === 'logged_in' ? '重新登录' : '登录' }}</button>
             <button type="button" class="secondary-button" :disabled="!!busy" :aria-label="`重新检查${a.label}`" @click="recheck(a)">{{ busy === `${a.slot}:refresh` ? '正在检查…' : '重新检查' }}</button>
             <button v-if="canWrite && a.state === 'logged_in'" type="button" class="secondary-button" :disabled="!!busy" :aria-label="`退出登录${a.label}`" @click="logout(a)">退出登录</button>
-            <button v-if="canWrite && (a.state === 'mismatch' || a.identity)" type="button" class="secondary-button lb-danger" :disabled="!!busy" :aria-label="`更换账号${a.label}`" @click="reset(a)">更换账号</button>
+            <button v-if="canWrite && (a.state === 'mismatch' || a.registered)" type="button" class="secondary-button lb-danger" :disabled="!!busy" :aria-label="`更换账号${a.label}`" @click="reset(a)">更换账号</button>
           </div>
 
           <form v-if="canWrite && login.slot === a.slot" class="asv-form lb-form" novalidate :aria-label="`登录${a.label}`" @submit.prevent="submitLogin(a)">
@@ -186,9 +187,9 @@ function reset(account: Account) {
         <tbody>
           <tr v-for="c in status.channels" :key="`${c.platform}.${c.mode}`">
             <th scope="row">{{ platformName(c.platform) }}</th>
-            <td data-label="用法">{{ MODES[c.mode] ?? c.mode }}</td>
-            <td data-label="可用"><span class="asv-state" :class="c.available ? 'tone-green' : 'tone-muted'">{{ c.available ? '可用' : '不可用' }}</span></td>
-            <td data-label="说明">{{ c.note || '—' }}</td>
+            <td data-label="用法" class="lb-nowrap">{{ MODES[c.mode] ?? c.mode }}</td>
+            <td data-label="可用" class="lb-nowrap"><span class="asv-state" :class="c.available ? 'tone-green' : 'tone-muted'">{{ c.available ? '可用' : '不可用' }}</span></td>
+            <td data-label="说明" class="lb-full">{{ c.note || '—' }}</td>
           </tr>
         </tbody>
       </table>

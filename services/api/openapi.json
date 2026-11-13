@@ -12407,7 +12407,7 @@
                 "type": "null"
               }
             ],
-            "description": "账号标识（打码）",
+            "description": "账号标识（打码）；用密钥或令牌登录时会话桥看不到是哪个账号，为空",
             "title": "Identity"
           },
           "label": {
@@ -12430,7 +12430,14 @@
                 "type": "null"
               }
             ],
+            "description": "登录方式；没有登录时为空",
             "title": "Method"
+          },
+          "registered": {
+            "default": false,
+            "description": "这座会话桥是否已经登记过这个平台的账号（退出登录后仍然保留，“更换账号”才清掉）",
+            "title": "Registered",
+            "type": "boolean"
           },
           "running": {
             "title": "Running",

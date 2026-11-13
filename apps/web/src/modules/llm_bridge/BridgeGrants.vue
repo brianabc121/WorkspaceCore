@@ -27,7 +27,8 @@ async function save(g: Grant, body: GrantBody) {
   try { await props.api.setGrant(g.instance_id, body); notice.value = `已保存「${g.instance_name}」的权限。` } catch (e) { error.value = bridgeError(e); redraw.value += 1; await grants.refetch() } finally { busy.value = '' }
 }
 function setEnabled(g: Grant, enabled: boolean) {
-  return save(g, enabled ? { ...bodyOf(g), enabled: true } : { enabled: false, can_write: false, can_account: false, can_takeover: false, platforms: [] })
+  // 关掉时三项权限一并收回；已选的平台保留，再打开时不用重选
+  return save(g, enabled ? { ...bodyOf(g), enabled: true } : { ...bodyOf(g), enabled: false, can_write: false, can_account: false, can_takeover: false })
 }
 const setFlag = (g: Grant, flag: Flag, value: boolean) => save(g, { ...bodyOf(g), [flag]: value })
 function setPlatform(g: Grant, platform: Platform, on: boolean) {

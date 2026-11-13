@@ -57,6 +57,12 @@ _ERROR_CODES = {
     "timeout": "UNAVAILABLE",
     "unavailable": "UNAVAILABLE",
 }
+UNKNOWN_IDENTITY = "unknown"
+_ANONYMOUS = "用密钥或令牌登录的账号（看不到是哪个）"
+_ANONYMOUS_NOTE = (
+    "用密钥或令牌登录时会话桥看不到是哪个账号：换一把密钥不算换账号；"
+    "要换成另一个账号，请先点“更换账号”"
+)
 EXTERNAL_PLATFORM = {
     "openai": "codex",
     "claude": "claude",
@@ -199,24 +205,30 @@ class Engine:
             stored = self.store.upsert_account(slot, state="logged_out")
             detail = status.detail
         else:
-            identity = status.identity or f"method:{status.method}"
-            digest = hashlib.sha256(identity.encode()).hexdigest()
+            # 平台报告了账号（例如邮箱）就按账号比对；用密钥或令牌登录时看不到是哪个账号，
+            # 都记成“未知账号”：换一把密钥不算换账号，从未知账号换成具体账号（或反过来）才算
+            identity = status.identity
+            digest = hashlib.sha256((identity or UNKNOWN_IDENTITY).encode()).hexdigest()
             if stored.get("identity_hash") and stored["identity_hash"] != digest:
+                now = mask_identity(identity) if identity else _ANONYMOUS
+                registered = stored.get("identity_label") or _ANONYMOUS
                 stored = self.store.upsert_account(slot, state="mismatch")
                 detail = (
-                    f"登录目录里现在是另一个账号（{mask_identity(identity)}），"
-                    f"这座桥登记的是 {stored.get('identity_label')}。要换账号请在管理页“更换账号”"
+                    f"现在登录的是另一个账号（{now}），这座会话桥登记的是 {registered}。"
+                    "要换账号请在管理页点“更换账号”"
                 )
             else:
                 stored = self.store.upsert_account(
                     slot,
                     state="logged_in",
                     identity_hash=digest,
-                    identity_label=mask_identity(identity),
+                    identity_label=mask_identity(identity) if identity else None,
                     method=status.method,
                     first_login_at=stored.get("first_login_at") or time.time(),
                 )
                 detail = status.detail
+                if identity is None:
+                    detail = "；".join(part for part in (detail, _ANONYMOUS_NOTE) if part)
         view = {**stored, "detail": detail}
         self._accounts[slot] = (time.monotonic(), view)
         return view
@@ -840,8 +852,11 @@ class Engine:
             accounts[slot] = {
                 "label": SLOT_LABELS.get(slot, slot),
                 "state": account["state"],
+                # 登记过账号（哪怕看不到是哪个）就算 registered：
+                # 退出登录后仍然保留，用来发现换了账号
+                "registered": bool(account.get("identity_hash")),
                 "identity": account.get("identity_label"),
-                "method": account.get("method"),
+                "method": account.get("method") if account["state"] == "logged_in" else None,
                 "detail": account.get("detail", ""),
                 "first_login_at": account.get("first_login_at"),
                 "login_methods": list(self.drivers[slot].login_methods),

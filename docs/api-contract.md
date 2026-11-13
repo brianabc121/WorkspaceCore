@@ -772,7 +772,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `GET /api/v1/llm_bridge/bridges` | 登记的会话桥；令牌不回传，只有 `has_token` |
 | `POST /api/v1/llm_bridge/bridges` | 登记：`name`、`base_url`（http / https）、`token`（≥ 32 个字符，加密保存）。`409 NAME_TAKEN` |
 | `PATCH` / `DELETE /api/v1/llm_bridge/bridges/{id}` | 改名字、地址、令牌、启用停用；删除登记（不影响会话桥容器） |
-| `GET /api/v1/llm_bridge/bridges/{id}/status` | 各账号槽位（`openai` / `claude` / `workbuddy`）的登录状态、通道、排队数、设置；连不上时 `reachable=false` 加 `error`，不报错 |
+| `GET /api/v1/llm_bridge/bridges/{id}/status` | 各账号槽位（`openai` / `claude` / `workbuddy`）的登录状态、通道、排队数、设置；连不上时 `reachable=false` 加 `error`，不报错。账号的 `identity` 是打码后的账号标识（用密钥或令牌登录时为空），`registered` 表示这座桥登记过这个平台的账号（退出登录后仍为 true，“更换账号”后才清掉），`method` 只在已登录时有值 |
 | `PUT /api/v1/llm_bridge/bridges/{id}/settings` | `concurrency`（1 ~ 16）、`turn_timeout_seconds`（30 ~ 21600）、`send_per_hour`、`max_text_chars`、`claude_subscription_ack` |
 | `POST /api/v1/llm_bridge/bridges/{id}/accounts/{slot}/login` | `method`：`device_code`（返回 `verification_url`、`user_code`，`state=pending`）/ `api_key` / `oauth_token` / `existing`。Claude 的非 `api_key` 方式在确认风险前 `403 FORBIDDEN` |
 | `GET .../accounts/{slot}/login` | 登录进行到哪一步：`pending` / `done` / `failed` / `none` |
