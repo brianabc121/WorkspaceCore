@@ -36,7 +36,8 @@ endef
 	smoke-full perf scan \
 	agent-ca agents-up pull openim-pull \
 	openim-build openim-up openim-down openim-logs \
-	trendradar-pull trendradar-prompts trendradar-up trendradar-down trendradar-logs
+	trendradar-pull trendradar-prompts trendradar-up trendradar-down trendradar-logs \
+	llm-bridge-up llm-bridge-down llm-bridge-logs
 
 help: ## 列出可用命令
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-15s %s\n", $$1, $$2}'
@@ -143,6 +144,21 @@ trendradar-down: ## 停止新闻早报；保留抓到的数据
 
 trendradar-logs: ## 跟踪 TrendRadar 日志（Ctrl+C 退出）
 	$(TRENDRADAR_COMPOSE) logs -f --tail=100
+
+# 大模型会话桥（可选，独立项目）：和工作台在同一台服务器上时加入 core 的 integrations 网络
+LLM_BRIDGE_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-llm-bridge \
+	-f infra/llm-bridge/compose.yaml \
+	$$(docker network inspect $(WORKSPACE_PROJECT)_integrations >/dev/null 2>&1 && echo -f infra/llm-bridge/compose.workspace.yaml)
+
+llm-bridge-up: ## 构建并启动大模型会话桥（先设置 LLM_BRIDGE_ADMIN_TOKEN；步骤见 docs/deployment.md 第 25 节）
+	$(LLM_BRIDGE_COMPOSE) up -d --build
+	@echo "会话桥已启动。在网页“应用 → 大模型会话桥”里登记：同机部署填 http://llm-bridge:8787，令牌填 LLM_BRIDGE_ADMIN_TOKEN 的值"
+
+llm-bridge-down: ## 停止大模型会话桥；保留数据卷（登录与会话记录）
+	$(LLM_BRIDGE_COMPOSE) down
+
+llm-bridge-logs: ## 跟踪会话桥日志（Ctrl+C 退出）
+	$(LLM_BRIDGE_COMPOSE) logs -f --tail=100
 
 smoke: ## 经 Caddy 检查健康、就绪、前端页面与安全响应头
 	scripts/smoke.sh http://127.0.0.1:$(HTTP_PORT)

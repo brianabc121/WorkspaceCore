@@ -62,6 +62,8 @@ apps/web/tests/<key>*.test.ts
 | `tools` | `ToolSpec` 元组（`make_spec`，名字以 `<key>_` 开头） | 汇总进工具清单；模块停用时不列出、不能调用 |
 | `tool_handlers` | 读工具名 → 处理函数 | 汇总进 `READ_HANDLERS` |
 | `tools_visible` | `async def visible(db, settings, workspace_id) -> bool` | 模块启用之后还要满足的条件（例如早报还要打开推送） |
+| `tools_for_instance` | `async def visible(db, settings, instance) -> Collection[str]` | 按实例授权的模块用：返回这个实例能看到的工具名，其余不列出（调用时模块自己再检查）。例子：大模型会话桥 |
+| `direct_tools` | `async def run(service, requester, spec, raw, *, request_id) -> BaseModel` | 模块里风险等级为 `direct` 的工具（直接执行、不审批）由它处理；模块自己负责权限检查、限额和执行记录。**把写工具做成 direct 属于放宽审批，必须先有人类批准的例外**（`docs/AGENTS.md` 第 8 节） |
 | `crons` | `CronSpec("包.模块:函数", {"second": 33, "timeout": 120, "unique": True})` | 登记到 worker；**任务自己只处理启用了模块的工作空间** |
 | `event_topics` | 实时事件主题 | 必须已在 `app/schemas/notifications.py` 的 `EventTopic` 里（一致性测试检查） |
 | `widgets` | 首页小组件类型 | 必须已在 `app/schemas/dashboards.py` 的组件联合类型里，前端模块也要提供组件 |
