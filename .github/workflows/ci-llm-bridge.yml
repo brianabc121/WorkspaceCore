@@ -96,12 +96,11 @@ jobs:
         run: make migrate
       - name: 启动会话桥（make llm-bridge-up：第一次生成管理令牌写进 .env，加入工作台的 integrations 网络）
         run: |
+          # make llm-bridge-up 自己等到健康检查通过才返回
           make llm-bridge-up
-          for i in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break
-            sleep 2
-          done
-          # 再运行一次不应重新生成令牌（否则已登记的会话桥会连不上）
+          curl -fsS http://127.0.0.1:8787/healthz
+          # 再运行一次不应重新生成令牌（否则已登记的会话桥会连不上）。
+          # 这一次可能重建容器（构建带来源证明时镜像摘要每次都变），所以后面的检查依赖它等到健康才返回
           before="$(make -s llm-bridge-token)"
           make llm-bridge-up
           [ "$(make -s llm-bridge-token)" = "$before" ] && [ "${#before}" -ge 32 ]
@@ -109,10 +108,6 @@ jobs:
           docker compose exec -T api python -c "import urllib.request; print(urllib.request.urlopen('http://llm-bridge:8787/healthz', timeout=10).read().decode())"
       - name: 会话桥冒烟检查（同机部署的容器）
         run: |
-          for i in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break
-            sleep 2
-          done
           infra/llm-bridge/smoke.sh my-workspace-llm-bridge-llm-bridge-1 http://127.0.0.1:8787 "$(make -s llm-bridge-token)"
       - uses: actions/setup-node@v5
         with:

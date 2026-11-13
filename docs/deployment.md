@@ -1039,7 +1039,7 @@ AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendra
 
 ### 25.1 部署（只有这一步在服务器上做）
 
-1. `make llm-bridge-up`：构建镜像（里面装了锁定版本的 Codex、Claude Code、CodeBuddy Code 命令行）并启动。
+1. `make llm-bridge-up`：构建镜像（里面装了锁定版本的 Codex、Claude Code、CodeBuddy Code 命令行）并启动，等健康检查通过才返回。
    第一次运行会生成管理令牌，写进仓库根目录 `.env` 的 `LLM_BRIDGE_ADMIN_TOKEN`；之后再运行不会改它。
    - 和工作台在同一台服务器：会话桥自动加入工作台的内部网络，工作台用 `http://llm-bridge:8787` 访问，端口只监听本机。
    - 在另一台服务器：在那台机器上
@@ -1047,6 +1047,7 @@ AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendra
      用 `LLM_BRIDGE_BIND=<私网地址>` 让它监听私网地址；不要直接暴露到公网（需要跨公网时放在带 TLS 的反向代理后面）。
 2. `make llm-bridge-token`：显示管理令牌，下一步在网页上登记会话桥时要填（和 `make setup-token` 是同一种用法）。
 3. 升级：拉取新代码后再跑一次 `make llm-bridge-up`。数据卷（登录、会话记录）和令牌都保留。
+   再跑一次会重建容器（没有改动时也可能重建）：正在进行的回合会中断、记成“结果未知”，排队中的回合在重启后继续，所以挑没有回合在跑的时候做。
 4. 检查：`infra/llm-bridge/smoke.sh <容器名> http://127.0.0.1:8787 "$(make -s llm-bridge-token)"`
    （只适用于还没登录任何平台的新容器；同机部署的容器名是 `<项目名>-llm-bridge-llm-bridge-1`）。
 

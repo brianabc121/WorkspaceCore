@@ -151,12 +151,12 @@ LLM_BRIDGE_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORK
 	$$(docker network inspect $(WORKSPACE_PROJECT)_integrations >/dev/null 2>&1 && echo -f infra/llm-bridge/compose.workspace.yaml) \
 	--env-file .env
 
-llm-bridge-up: env ## 构建并启动大模型会话桥；第一次会生成管理令牌写进 .env（步骤见 docs/deployment.md 第 25 节）
+llm-bridge-up: env ## 构建并启动大模型会话桥，等待健康检查通过；第一次会生成管理令牌写进 .env（步骤见 docs/deployment.md 第 25 节）
 	@grep -Eq '^LLM_BRIDGE_ADMIN_TOKEN=.{32,}' .env || { \
 		sed -i '/^LLM_BRIDGE_ADMIN_TOKEN=/d' .env; \
 		echo "LLM_BRIDGE_ADMIN_TOKEN=$$($(PYTHON) -c 'import secrets; print(secrets.token_hex(32))')" >> .env; \
 		echo "已生成会话桥的管理令牌并写进 .env（make llm-bridge-token 查看）"; }
-	$(LLM_BRIDGE_COMPOSE) up -d --build
+	$(LLM_BRIDGE_COMPOSE) up -d --build --wait --wait-timeout 300
 	@echo "会话桥已启动。在网页“应用 → 大模型会话桥”里登记：同机部署的地址填 http://llm-bridge:8787，令牌用 make llm-bridge-token 查看"
 
 llm-bridge-token: ## 显示会话桥的管理令牌（在网页上登记会话桥时填；来自 .env 的 LLM_BRIDGE_ADMIN_TOKEN）
