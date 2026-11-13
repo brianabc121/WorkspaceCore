@@ -1,0 +1,74 @@
+name: ci-llm-bridge
+
+# 大模型会话桥（services/llm-bridge，docs/v2/LLM_BRIDGE_PLAN.md）：ruff、mypy、pytest，
+# 对锁定版本的官方命令行实测（不需要登录的部分），构建镜像并做冒烟检查。
+# 本文件归 claude 维护。
+on:
+  pull_request:
+    paths:
+      - services/llm-bridge/**
+      - infra/llm-bridge/**
+      - .github/workflows/ci-llm-bridge.yml
+  push:
+    branches: [main]
+    paths:
+      - services/llm-bridge/**
+      - infra/llm-bridge/**
+      - .github/workflows/ci-llm-bridge.yml
+
+permissions:
+  contents: read
+
+jobs:
+  llm-bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/llm-bridge
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: services/llm-bridge/uv.lock
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: 安装依赖（必须与 uv.lock 一致）
+        run: uv sync --locked
+      - name: ruff
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: mypy
+        run: uv run mypy bridge
+      - name: pytest
+        run: uv run pytest
+      - name: 安装锁定版本的官方命令行（与 Dockerfile 一致）
+        run: |
+          mkdir -p "$RUNNER_TEMP/cli" && cd "$RUNNER_TEMP/cli"
+          npm install --no-audit --no-fund \
+            @openai/codex@0.169.0 @anthropic-ai/claude-code@2.1.323 @tencent-ai/codebuddy-code@2.184.0
+      - name: 对真实的 codex / codebuddy 实测驱动（不需要登录的部分）
+        run: BRIDGE_LIVE_CLI_DIR="$RUNNER_TEMP/cli/node_modules/.bin" uv run pytest tests/test_live.py -v
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: 构建镜像并启动（管理令牌每次运行随机生成）
+        run: |
+          echo "LLM_BRIDGE_ADMIN_TOKEN=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          export LLM_BRIDGE_ADMIN_TOKEN="$(tail -1 "$GITHUB_ENV" | cut -d= -f2)"
+          docker compose -f infra/llm-bridge/compose.yaml up -d --build
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break
+            sleep 2
+          done
+      - name: 冒烟检查
+        run: >
+          infra/llm-bridge/smoke.sh myworkspace-llm-bridge-llm-bridge-1 http://127.0.0.1:8787
+          "$LLM_BRIDGE_ADMIN_TOKEN"
+      - name: 失败时输出容器日志
+        if: failure()
+        run: docker compose -f infra/llm-bridge/compose.yaml logs --no-color | tail -100

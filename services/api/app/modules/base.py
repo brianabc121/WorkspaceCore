@@ -100,6 +100,15 @@ class ModuleManifest:
     tool_handlers: str | None = None
     # ``async def visible(db, settings, workspace_id) -> bool``：模块启用之后还要满足的条件
     tools_visible: str | None = None
+    # ``async def visible(db, settings, instance) -> Collection[str]``：
+    # 模块的工具里这个实例能看到哪些（按实例授权的模块用；不写就是全部）。
+    # 只影响“列出”，调用时模块自己再检查
+    tools_for_instance: str | None = None
+    # 风险等级为 direct 的工具（直接执行、不审批）的处理函数：
+    # ``async def run(service, requester, spec, raw, *, request_id) -> BaseModel``。
+    # 模块自己负责权限检查、限额与执行记录；把写工具做成 direct 属于放宽审批，要人类决定
+    # （docs/AGENTS.md 第 8 节的例外清单）
+    direct_tools: str | None = None
     crons: tuple[CronSpec, ...] = ()
     # 实时事件主题（必须在 app.schemas.notifications.EventTopic 里）
     event_topics: tuple[str, ...] = ()
@@ -122,6 +131,8 @@ class ModuleManifest:
             self.tools,
             self.tool_handlers,
             self.tools_visible,
+            self.tools_for_instance,
+            self.direct_tools,
             self.sealed_fields,
             self.on_toggle,
             *(c.target for c in self.crons),

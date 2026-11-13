@@ -1029,3 +1029,58 @@ AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendra
   检测与同步仍经出站策略（不访问私有网段，除非列在这里）。
 - OpenClaw 直连连接的地址，工作台不转发推理请求；Key 不写进接入包或 `openclaw.json`，由取密钥程序在需要时向工作台取（`mc_<连接 ID>`）。
 - 停用连接、解除绑定、撤销授权会立即拒绝后续取 Key；已经在 OpenClaw 进程里的 Key 不保证立即失效（需要时在服务商处撤销 Key）。
+
+## 25. 大模型会话桥（可选，T-0227 / T-0228）
+
+让智能体经工作台向 ChatGPT / Codex / Claude / WorkBuddy 发指令、管理会话。方案见 `docs/v2/LLM_BRIDGE_PLAN.md`，
+版本与核验见 `docs/decisions/2026-11-13-llm-bridge-verification.md`。
+
+会话桥是一个独立的容器（`infra/llm-bridge/`），**一个容器每个平台只管一个账号**。
+
+### 25.1 部署（只有这一步在服务器上做）
+
+1. 生成管理令牌并写进仓库根目录的 `.env`：`LLM_BRIDGE_ADMIN_TOKEN=<openssl rand -hex 32 的输出>`。
+2. `make llm-bridge-up`：构建镜像（里面装了锁定版本的 Codex、Claude Code、CodeBuddy Code 命令行）并启动。
+   - 和工作台在同一台服务器：会话桥自动加入工作台的内部网络，工作台用 `http://llm-bridge:8787` 访问，端口只监听本机。
+   - 在另一台服务器：在那台机器上 `docker compose -f infra/llm-bridge/compose.yaml up -d --build`，
+     用 `LLM_BRIDGE_BIND=<私网地址>` 让它监听私网地址；不要直接暴露到公网（需要跨公网时放在带 TLS 的反向代理后面）。
+3. 升级：拉取新代码后再跑一次 `make llm-bridge-up`。数据卷（登录、会话记录）保留。
+4. 检查：`infra/llm-bridge/smoke.sh <容器名> http://127.0.0.1:8787 <令牌>`。
+
+可调的环境变量：`LLM_BRIDGE_PORT`（默认 8787）、`LLM_BRIDGE_BIND`（默认 127.0.0.1）、`LLM_BRIDGE_MEMORY`（默认 4g）、`LLM_BRIDGE_CPUS`（默认 2）。
+
+### 25.2 设置（都在页面上）
+
+1. “设置 → 应用中心”启用“大模型会话桥”。
+2. “应用 → 大模型会话桥”：登记会话桥（名字、地址、令牌）。
+3. 登录各平台：
+   - **ChatGPT / Codex**（同一个 ChatGPT 账号）：点“登录”选设备码，页面显示网址和验证码，在自己的浏览器里完成；也可以填 OpenAI 的 API 密钥。
+   - **Claude**：填 Anthropic 的 API 密钥。要用订阅账号，先在页面上确认了解合规风险，再填 `claude setup-token` 生成的令牌。
+   - **WorkBuddy**：填 CodeBuddy 的 API 密钥。
+   - 页面登录走不通时的备用办法：`docker exec -it <容器名> claude auth login`（或 `codex login --device-auth`、`codebuddy` 里的 `/login`），
+     完成后在页面上选“使用已经在容器里完成的登录”。
+4. 需要开发模式的话，添加开发环境（仓库地址、分支、许可档位）。
+5. 在“实例权限”里给实例打开“大模型会话权限”，按需勾选“新建会话和发送”等。
+
+### 25.3 多个账号
+
+同一个平台要管第二个账号，就再起一座会话桥，然后在页面上登记成另一座：
+
+```bash
+LLM_BRIDGE_ADMIN_TOKEN=<另一枚令牌> LLM_BRIDGE_PORT=8788 WORKSPACE_PROJECT=my-workspace \
+  docker compose -p my-workspace-llm-bridge-b -f infra/llm-bridge/compose.yaml -f infra/llm-bridge/compose.workspace.yaml up -d --build
+```
+
+同机部署时第二座桥在内部网络里的名字也是 `llm-bridge`，会和第一座冲突：登记第二座时用它的容器名
+（`my-workspace-llm-bridge-b-llm-bridge-1`）作主机名。登记了多座桥之后，智能体调用工具时要用 `bridge` 参数指明用哪一座。
+不要把同一个账号登在两座桥上：两边各自并发，会互相挤占限额。
+
+### 25.4 要知道的限制
+
+- chatgpt.com 和 claude.ai 网页里的对话没有官方接口，看不到也续不了；ChatGPT 聊天通道用的是同一个 ChatGPT 登录下的 Codex。
+- 会话列表只包含这座桥的容器里的会话，不包含你在自己电脑、手机上开的会话。
+- `codex.cloud`、`claude.cloud` 两个通道还是接口桩。
+- 登录凭据在会话桥的数据卷里（`<项目名>_llm-bridge-data`）。`make backup` 不包含这个卷：迁移或重建后重新登录即可；
+  要保留会话记录就自己备份这个卷，并注意里面有登录凭据。
+- 换账号：在页面上点“更换账号”（会归档这个平台在这座桥上的全部会话），再重新登录。直接在容器里换登录而不点“更换账号”，
+  会话桥会发现账号不一致并拒绝调用。

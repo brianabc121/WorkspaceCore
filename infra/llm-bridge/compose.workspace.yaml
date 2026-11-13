@@ -1,0 +1,15 @@
+# 会话桥和工作台在同一台服务器上时叠加这个文件（make llm-bridge-up 会自动加上）：
+# 让会话桥加入 core 的 integrations 网络，工作台用 http://llm-bridge:8787 访问它，不用把端口开到宿主机以外。
+# integrations 是内部网络、不提供出网；会话桥访问各平台走它自己的默认网络。
+services:
+  llm-bridge:
+    networks:
+      default: {}
+      workspace-integrations:
+        aliases:
+          - llm-bridge
+
+networks:
+  workspace-integrations:
+    name: ${WORKSPACE_PROJECT:-my-workspace}_integrations
+    external: true

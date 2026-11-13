@@ -906,6 +906,13 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "news_rss",
             "news_related",
             "news_briefing",
+            # 大模型会话桥：只给打开了“大模型会话权限”的实例（T-0228）
+            "llm_bridge_status",
+            "llm_bridge_models",
+            "llm_bridge_environments",
+            "llm_bridge_session_list",
+            "llm_bridge_session_get",
+            "llm_bridge_turn_get",
         },
         "write": {
             "create_task",
@@ -952,6 +959,12 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "env_update",
             "env_stop",
             "env_release",
+            # 大模型会话桥：新建会话、发送、取消、归档，只给打开了“新建会话和发送”的实例。
+            # 直接执行、不审批（人类 2026-11-13 批准，例外九，T-0228）
+            "llm_bridge_session_create",
+            "llm_bridge_send",
+            "llm_bridge_turn_cancel",
+            "llm_bridge_session_archive",
         },
     }
     for spec in TOOLS.values():

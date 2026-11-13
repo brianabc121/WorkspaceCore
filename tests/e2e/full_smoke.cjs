@@ -106,7 +106,7 @@ async function api(page, workspace, method, pathname, body) {
   const progress = { last: '登录' }
   // 探测读接口时，契约已声明、尚未实现的接口返回 501：错误码由探测本身检查（必须是 NOT_IMPLEMENTED），
   // 下面的监听在页面检查开始之前不重复记这些 URL；页面检查阶段的任何 501 照常算失败
-  const probed = { urls: new Set(), active: true }
+  const probed = { urls: new Set(), active: true, notFound: new Set() }
   const probedNotImplemented = (status, url) => status === 501 && probed.active && probed.urls.has(url)
   const step = (text) => { progress.last = text.split('：')[0]; console.log(`通过  ${text}`) }
   page.on('pageerror', (error) => problems.push(`页面错误：${error.message}（${progress.last}）`))
@@ -114,6 +114,11 @@ async function api(page, workspace, method, pathname, body) {
     // 登录前与登出后查询当前用户的 401 是预期响应，浏览器会把它记为资源加载失败
     if (message.type() !== 'error' || /\b401\b/.test(message.text())) return
     if (/\b501\b/.test(message.text()) && probedNotImplemented(501, message.location().url)) return
+    // 探测到默认停用的模块的接口（404 MODULE_DISABLED）：先记下地址，探测结束后核对它们确实都是“模块没有启用”
+    if (/\b404\b/.test(message.text()) && probed.active && probed.urls.has(message.location().url)) {
+      probed.notFound.add(message.location().url)
+      return
+    }
     problems.push(`控制台错误：${message.text()}（${progress.last}）`)
   })
   page.on('response', (response) => {
@@ -144,15 +149,22 @@ async function api(page, workspace, method, pathname, body) {
     for (const url of operations) probed.urls.add(new URL(url, base).href)
     const failed = []
     const declared = []  // 契约已声明、实现任务还没完成的接口（501 NOT_IMPLEMENTED）：单独列出，不算失败
+    const disabled = []  // 默认停用的插拔式模块（例如大模型会话桥）的接口：停用时 404 MODULE_DISABLED，不算失败
     for (const url of operations) {
       const response = await api(page, workspace, 'GET', url)
       if (response.status === 501 && response.body?.error?.code === 'NOT_IMPLEMENTED') declared.push(url)
+      else if (response.status === 404 && response.body?.error?.code === 'MODULE_DISABLED') disabled.push(url)
       else if (response.status !== 200) failed.push(`${url} → ${response.status} ${response.body?.error?.code || ''}`)
     }
     check(failed.length === 0, `读接口没有全部返回 200：\n  ${failed.join('\n  ')}`)
-    const implemented = operations.length - declared.length
+    // 探测阶段浏览器记下的 404 只能来自上面这些“模块没有启用”的接口，别的 404 仍然算错误
+    const disabledUrls = new Set(disabled.map((url) => new URL(url, base).href))
+    const strayNotFound = [...probed.notFound].filter((url) => !disabledUrls.has(url))
+    check(strayNotFound.length === 0, `读接口返回了意外的 404：\n  ${strayNotFound.join('\n  ')}`)
+    const implemented = operations.length - declared.length - disabled.length
     check(implemented >= 25, `只找到 ${implemented} 个已实现的读接口，openapi.json 可能不完整`)
     step(`全部读接口返回 200：${implemented} 个（需要具体资源 ID 或 owner 角色的 ${skipped.length} 个由各 Sprint 验收覆盖）`)
+    if (disabled.length) console.log(`说明  所属模块没有启用（404 MODULE_DISABLED）：${disabled.length} 个\n  ${disabled.join('\n  ')}`)
     if (declared.length) console.log(`说明  契约已声明、尚未实现（501）：${declared.length} 个\n  ${declared.join('\n  ')}`)
 
     // ---------------------------------------------------------------- 核心服务都正常（Worker 心跳每分钟一次，刚启动时最多等 90 秒）

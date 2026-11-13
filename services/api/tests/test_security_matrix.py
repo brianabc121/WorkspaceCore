@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 import pytest
 
+from app.modules import registry
 from tests.helpers import BOB, OWNER, ClientFactory, add_member, add_user, add_workspace, csrf
 
 pytestmark = pytest.mark.integration
@@ -125,6 +126,16 @@ async def world(make_client: ClientFactory, migrated_database_url: str) -> Async
     ):
         setup = (await owner.post("/api/v1/setup", json=OWNER)).json()
         workspace = uuid.UUID(setup["workspaces"][0]["id"])
+        # 默认停用的插拔式模块（例如大模型会话桥）先启用：停用时它们的接口一律 404 MODULE_DISABLED，
+        # 走不到会话、CSRF 和角色检查，矩阵就查不到它们
+        for manifest in registry.MODULES:
+            if not manifest.default_enabled:
+                enabled = await owner.patch(
+                    f"/api/v1/modules/{manifest.key}",
+                    json={"enabled": True},
+                    headers={"X-Workspace-Id": str(workspace), **csrf(owner)},
+                )
+                assert enabled.status_code == 200, enabled.text
         bob_id = await add_user(migrated_database_url, BOB["email"], BOB["password"])
         await add_member(migrated_database_url, workspace, bob_id, "viewer")
         carol_id = await add_user(migrated_database_url, CAROL["email"], CAROL["password"])

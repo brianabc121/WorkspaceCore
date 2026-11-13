@@ -109,7 +109,8 @@ describe('sidebar layout', () => {
     await openApp('/')
     const nav = screen.getByRole('navigation', { name: '主导航' })
     expect(sectionOf(nav, '工作空间').querySelector('a[href="/tasks"]')).toHaveTextContent('任务')
-    expect(groupNames(nav)).toEqual(['工作空间', '连接与工具', '管理'])
+    // 默认侧栏：owner 能看到“应用”分组里的大模型会话桥（模块 llm_bridge，minRole admin）
+    expect(groupNames(nav)).toEqual(['工作空间', '应用', '连接与工具', '管理'])
     broken = false
     Stream.last!.dispatchEvent(new MessageEvent('invalidate', { data: JSON.stringify({ workspace_id: 'workspace-a', topics: ['navigation'], at }) }))
     await vi.waitFor(() => expect(groupNames(nav)[0]).toBe('常用'))

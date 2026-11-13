@@ -761,3 +761,36 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 密钥库 `/api/v1/agents/secrets*` 与 `/agent-api/v1/secrets/resolve` 只管非模型凭据（GitHub Token、运行环境注入的密钥等，
 页面在中转站管理的“兼容凭据”页签）：连接自己的 Key 不出现在密钥库里（列表、详情、修改、授权都当作不存在），
 新建 `kind=model_api_key` 返回 `422 VALIDATION_FAILED`（`details.field = kind`）。旧版兼容（导入、迁移记录、旧配置状态）已删除（T-0209）。
+
+## 大模型会话桥模块 `llm_bridge`（T-0228；docs/v2/LLM_BRIDGE_PLAN.md）
+
+模块停用时下面的接口一律 `404 MODULE_DISABLED`。查看要 admin，修改要 owner（带 CSRF）。
+登录、环境、设置、会话是转给会话桥管理接口的结果；会话桥连不上时 `503 EXTERNAL_UNAVAILABLE`，令牌不对时 `503 BRIDGE_AUTH_FAILED`。
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/v1/llm_bridge/bridges` | 登记的会话桥；令牌不回传，只有 `has_token` |
+| `POST /api/v1/llm_bridge/bridges` | 登记：`name`、`base_url`（http / https）、`token`（≥ 32 个字符，加密保存）。`409 NAME_TAKEN` |
+| `PATCH` / `DELETE /api/v1/llm_bridge/bridges/{id}` | 改名字、地址、令牌、启用停用；删除登记（不影响会话桥容器） |
+| `GET /api/v1/llm_bridge/bridges/{id}/status` | 各账号槽位（`openai` / `claude` / `workbuddy`）的登录状态、通道、排队数、设置；连不上时 `reachable=false` 加 `error`，不报错 |
+| `PUT /api/v1/llm_bridge/bridges/{id}/settings` | `concurrency`（1 ~ 16）、`turn_timeout_seconds`（30 ~ 21600）、`send_per_hour`、`max_text_chars`、`claude_subscription_ack` |
+| `POST /api/v1/llm_bridge/bridges/{id}/accounts/{slot}/login` | `method`：`device_code`（返回 `verification_url`、`user_code`，`state=pending`）/ `api_key` / `oauth_token` / `existing`。Claude 的非 `api_key` 方式在确认风险前 `403 FORBIDDEN` |
+| `GET .../accounts/{slot}/login` | 登录进行到哪一步：`pending` / `done` / `failed` / `none` |
+| `POST .../accounts/{slot}/refresh` / `logout` / `reset` | 重新检查状态；退出登录；更换账号（归档这个槽位的全部会话，返回 `archived_sessions`） |
+| `GET` / `POST /api/v1/llm_bridge/bridges/{id}/environments`，`PUT` / `DELETE .../environments/{env_id}` | 开发环境：`platform`、`name`、`repo_url`（只收 https）、`branch`、`sandbox`（`read_only` / `workspace_write` / `exec`）、`network`、`description`、`enabled` |
+| `GET /api/v1/llm_bridge/bridges/{id}/sessions?limit&offset&sync` | 会话桥上的会话；`sync=true` 先登记官方程序里有、桥里没有的会话 |
+| `GET .../sessions/{session_id}/turns` | 一个会话的回合（最新在前）：消息、状态、结果或失败原因 |
+| `GET /api/v1/llm_bridge/grants`，`PUT /api/v1/llm_bridge/grants/{instance_id}` | 每个实例的权限：`enabled`、`can_write`、`can_account`、`can_takeover`、`platforms`（空 = 全部）。`enabled=false` 时其余一并收回 |
+
+**智能体工具**（只列给打开了权限的实例；每个工具都有可选参数 `bridge`，登记了多座桥时必填）：
+
+| 工具 | 风险 | 说明 |
+|---|---|---|
+| `llm_bridge_status` / `llm_bridge_models` / `llm_bridge_environments` | read | 平台与登录状态；可选模型；可选环境 |
+| `llm_bridge_session_list` / `llm_bridge_session_get` / `llm_bridge_turn_get` | read | 会话列表（`scope=account` 需要 `can_account`）；会话内容（别人的会话需要 `can_takeover`）；回合状态与结果 |
+| `llm_bridge_session_create` / `llm_bridge_send` / `llm_bridge_turn_cancel` / `llm_bridge_session_archive` | direct | 需要 `can_write`；直接执行、不审批，记执行记录；新建会话通知管理员（`llm_bridge.session_created`）。依据是 `docs/AGENTS.md` 的例外九（人类 2026-11-13 批准） |
+
+结果统一是 `{bridge, data}`，`data` 是会话桥返回的内容。回合的 `data.status`：`queued` / `running` / `completed`（带 `result`、`summary`）/
+`failed` / `unknown`（带 `failure.kind`、`failure.message`）/ `cancelled`。错误码：`FORBIDDEN_CAPABILITY`（没有授权、平台不在允许范围）、
+`NOT_FOUND`、`VALIDATION_FAILED`、`CONFLICT`（会话已归档、`request_id` 用在了别的会话）、`RATE_LIMITED`、`NOT_SUPPORTED`（接口桩通道）、
+`EXTERNAL_UNAVAILABLE`（会话桥连不上、平台未登录、账号不一致）。
