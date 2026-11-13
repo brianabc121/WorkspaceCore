@@ -1,0 +1,51 @@
+[project]
+name = "my-workspace-llm-bridge"
+version = "0.1.0"
+description = "大模型会话桥：一个 MCP 服务，让多个调用方向 ChatGPT / Codex / Claude / WorkBuddy 发指令并管理会话"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.162,<0.163",
+    "pydantic>=2.14,<3",
+    "pydantic-settings>=2.16,<3",
+    "uvicorn[standard]>=0.54,<0.55",
+    # 与工作台同一个版本：docs/decisions/2026-10-31-v2-oc0-openclaw-openim-verification.md 第 7 节
+    "mcp==2.3.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2,<10",
+    "pytest-asyncio>=1.4,<2",
+    "httpx>=0.28,<0.29",
+    "ruff>=0.17,<0.18",
+    "mypy>=2.4,<3",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "SIM", "RUF"]
+# 注释和文档用中文书写，全角标点是正常的
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S603", "S607"]
+# 工具说明是给模型看的中文长句
+"bridge/tools.py" = ["E501"]
+"tests/fakes/**" = ["E501", "S101", "S311"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_default_fixture_loop_scope = "function"

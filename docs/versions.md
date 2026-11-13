@@ -77,6 +77,19 @@ OpenIM 的官方镜像有越权问题，已换成自建的补丁镜像（`2026-1
 | MCP Python SDK 2.3.0 | `mcp==2.3.0`（PyPI） | — | MIT | OC-1 起加入 `services/api` 依赖 |
 | ghostunnel v1.11.4 | `ghostunnel/ghostunnel:v1.11.4` | `sha256:e5248233863aadd36383a11c92360f2981141881ef05e38360a6ada8630d36b1` | Apache-2.0 | 外网模式 OpenClaw 服务器的本机隧道（接入包的 `compose.yaml`；`2026-10-31-v2-oc2-agent-ingress-verification.md`） |
 
+### 1.6 大模型会话桥（`infra/llm-bridge/`，可选部署；核验见 `decisions/2026-11-13-llm-bridge-verification.md`）
+
+| 组件 | 版本 | 许可证 | 用途 |
+|---|---|---|---|
+| 基础镜像 | `python:3.12.15-slim-trixie`（与 api 相同的 digest）；Node 取自 `node:22.23.4-trixie-slim@sha256:be1e2a3dc2c4fd68cdfadad2a696a280e0d2749098bee509230174d72fb768c6` | PSF / MIT | 会话桥服务与官方命令行的运行时 |
+| Codex CLI | `@openai/codex@0.169.0`（npm） | Apache-2.0 | ChatGPT 聊天、Codex 通道 |
+| Claude Code | `@anthropic-ai/claude-code@2.1.323`（npm） | 专有（Anthropic 的条款） | Claude 通道 |
+| CodeBuddy Code | `@tencent-ai/codebuddy-code@2.184.0`（npm） | 专有（腾讯的条款） | WorkBuddy 通道 |
+| Python 依赖 | `services/llm-bridge/uv.lock`：fastapi、pydantic、pydantic-settings、uvicorn、`mcp==2.3.0`（与工作台相同） | MIT / BSD | 会话桥服务 |
+
+升级官方命令行：改 `services/llm-bridge/Dockerfile`、`.github/workflows/ci-llm-bridge.yml`、`infra/llm-bridge/smoke.sh` 三处的版本号，
+重新生成 schema 对照核验记录第 2 节，CI 通过后再部署。
+
 ## 2. 后端依赖（`services/api/uv.lock`）
 
 `uv sync --locked` 按锁文件安装，`uv.lock` 同时锁定所有传递依赖及其哈希。下面只列 `pyproject.toml` 里直接声明的依赖。
