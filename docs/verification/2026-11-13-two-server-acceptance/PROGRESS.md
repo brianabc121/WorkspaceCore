@@ -10,7 +10,7 @@
 - 已查当前可见聊天与主干任务日志，未发现其他正在执行的双服务器验收。服务器内是否有既有验收进程、集群和资源，必须在可信 SSH 登录后只读核对；目前未完成该检查。
 - 人类本轮重新授权双机测试，替代历史记录中取消远端测试的本轮范围限制；仍不授权未经验证的生产切换。
 
-## SSH 身份前置：待确认
+## SSH 身份前置：已确认并通过
 
 A：`100.72.60.100:22`；B：`100.121.210.36:22`。均经平台 HTTP CONNECT `proxy:8088`，没有直接连接远端。
 
@@ -23,7 +23,18 @@ No ED25519 host key is known ... and you have requested strict checking.
 Host key verification failed.
 ```
 
-指纹相同不能独立证明两台服务器的身份。已请求人类通过可信渠道确认指纹，未将本次网络扫描结果自行提升为信任。未设置 `StrictHostKeyChecking=no` 或 `accept-new`，未写入信任记录，未认证登录，未执行远端命令。
+初次探测因没有可信记录而拒绝登录。随后人类在当前对话明确确认“两台均为该指纹”；本轮将匹配该指纹的 ED25519 公钥固定到本地专用 known_hosts，保持 `StrictHostKeyChecking=yes`，两台认证成功。生成 known_hosts 时首次误取 ssh-keyscan 的注释 banner，SSH 严格拒绝了格式错误的记录；过滤注释、重新核对指纹后连接成功，没有关闭校验。
+
+实际身份验证输出：
+
+```text
+TARGET 100.72.60.100
+s1348279
+uid=0(root) gid=0(root) groups=0(root)
+TARGET 100.121.210.36
+s8006604
+uid=0(root) gid=0(root) groups=0(root)
+```
 
 ## 后续执行顺序与保护边界
 
@@ -35,7 +46,7 @@ Host key verification failed.
 6. 跨实例授权与在途撤销必须使用独立非生产 DB-backed allocation/generation/Pod UID 和专用规则，通过正常工作台授权流程。验证允许源、未授权源、撤销后 8 秒内断开存量流及拒绝新连接；不能用临时网络 Pod 冒充可信 DB 绑定。
 7. 公网/LB 及其他启用门槛未完成时，保留相应 blocked，不把局部 PASS 当完整 PASS；生产 `RUNNER_NETWORK_VERIFIED` 必须保持关闭。
 
-## 当前结果
+## 初始前置结果（SSH 确认前）
 
 - 本轮未改服务器服务、数据、路由、防火墙、集群或网络开关；尚不能断言远端生产开关的实际值，待只读盘点核实。
 - 仓库 `.env.example` 和 Compose 默认 `RUNNER_NETWORK_VERIFIED=false`，本轮未修改。
@@ -76,3 +87,70 @@ UserWarning: Revision 0066 is present more than once
 这是真实主干集成阻塞，测试未通过。两个分支在合并后存在同名修订，需要先核对既有部署状态，再制定兼容的修复；本轮未改编号、`stamp`、跳过迁移或修改测试。完整原始错误输出随本目录保存。所有数据库操作仅涉及本地测试容器中新建且由测试夹具清理的随机数据库。
 
 仓库根执行 `python3 scripts/collab.py check`：`check 通过（0 个警告）`。该命令不接受 `--as`；首次带该参数时参数解析失败，随后按 CLI 实际支持的格式重跑通过。
+
+## SSH 确认后的只读盘点（15:43 UTC 起）
+
+完整输出：`server-a-inventory.txt`、`server-b-inventory.txt`。命令见 `INVENTORY-COMMANDS.md`。
+
+| 项目 | A | B |
+|---|---|---|
+| 主机名 | s1348279 | s8006604 |
+| Tailscale 名称 | workspace-test-a | workspace-test-b |
+| OS / 内核 | Debian 12 / 6.1.0-50 | Debian 11 / 5.10.0-19 |
+| CPU | 4 | 4 |
+| 总内存 / available | 7923 / 6882 MiB | 3915 / 3554 MiB |
+| 根盘 / 余量 | 40 / 19 GiB | 40 / 37 GiB |
+| 容器运行时 | Docker 29.9.2、containerd | 未发现 |
+| 现存 Docker 容器 | 无 | 无 Docker |
+| 需保护的已有资源 | 3 个 Workspace bridge 网络及 TrendRadar 配置卷；/opt/my-workspace | 系统、SSH、Tailscale |
+| K3s/kubectl/Cilium/runsc/已知 kubeconfig | 未发现 | 未发现 |
+| 现有验收进程 | 未发现 | 未发现 |
+
+B 旧版 `lsblk` 不支持 `MOUNTPOINTS`，首轮原样保存该错误；随后以 `MOUNTPOINT` 只读重跑成功。没有挂载未挂载的盘、清理 Docker 网络/卷、停止服务或变更防火墙。
+
+A 的 `/opt/my-workspace/.env` 不存在，该目录无 `.git`，指定深度未发现 Compose 文件。两个节点均未发现运行中的 Workspace 容器，故无法断言其他位置的生产配置值。本仓库默认网络开关仍为 false，本轮没有启用任何开关。
+
+### 主机身份冲突
+
+两机 `/etc/machine-id` 文件 SHA256 均为：
+
+```text
+73658ad349ec675300d22bdffe711f442745186fed8890811a422861e70da9de
+```
+
+独立 DMI product_uuid 摘要不同：A `fc7297ac8fd8a2b588aa5d3787b10645125b5c283537d4328fd5ae3b41f5a136`；B `e85ca38ef83514d789ae7ddc914be5e8427b92c74c894aabe78e06ab7980a8f9`。boot_id 摘要亦不同，结合不同 hostname、IP、OS 和内核确认是不同运行主机，但克隆 machine-id 会撞上本项目物理主机防重。
+
+源码 `domain/physical_host_probe.py`、`runner_agent/agent.py` 和 `runtime_v2/telemetry.py` 均基于 `sha256('machine-id:' + machine_id)`；`domain/physical_hosts.py` 不允许同一物理身份占用两个 runner 登记。不能用虚构 ID 或修改防重约束冒充双机可信登记。未修改任一 `/etc/machine-id` 或 `/var/lib/dbus/machine-id`。
+
+### A/B 底层互通未通过
+
+从已严格认证的 A、B 分别使用 Python `socket.create_connection((peer,22),5)`，仅尝试读取 SSH banner：
+
+```text
+SOURCE 100.72.60.100 PEER 100.121.210.36
+peer=100.121.210.36 tcp22=failed error=TimeoutError:timed out
+SOURCE 100.121.210.36 PEER 100.72.60.100
+peer=100.72.60.100 tcp22=failed error=timeout:timed out
+```
+
+随后只读筛选 `tailscale status --json` 中目标对端，双方 `BackendState=Running`、`Self.Online=true`，但对端均为 `Peer: []`。对指定对端执行 `tailscale ping --c=1 --timeout=5s --until-direct=false`，双方均输出：
+
+```text
+no matching peer
+```
+
+`iptables -S` 显示两机 INPUT/OUTPUT 为 ACCEPT，INPUT 挂接 ts-input，ts-input 接受 tailscale0；A 的 FORWARD 为 DROP 并挂接现有 Docker/ts-forward 链，B 为 ACCEPT。没有修改规则。此证据定位到两节点缺少对端 Tailscale netmap/可达性；同 tailnet 配置、节点共享范围或 ACL/grants 需管理员核查，不能仅凭这些输出断言具体 ACL 根因。平台 sidecar 能连两端不能替代 A/B 之间可达。
+
+## 当前验收门槛与下一步
+
+1. 先由 tailnet 管理员核实 A、B 所在 tailnet 和共享/ACL/grants，使双方获得对端信息及所需受限节点流量。先复跑上述双向底层探测，不能用公开 IP、额外隧道或放开所有 ACL 绕过。
+2. 解决两个主机的重复 machine-id；这是主机身份变更，需要维护方案（保留原文件、核对 dbus、考虑重启和既有注册影响），不在只读盘点阶段擅自执行。
+3. 修复当前主干重复 0066 修订并通过真实空库迁移和网关集成测试。必须先确认部署历史；不对生产 stamp/删表/修改修订号来隐藏冲突。
+4. 上述门槛满足后，再准备独立非生产 K3s/Cilium/gVisor 环境：A 控制节点、B 工作节点；使用专用数据目录、专用服务名和固定版本/digest，不覆盖 A 的 Docker 配置/网络/卷，不使用默认 K3s ServiceLB/hostPort。先核对 CNI/API/Pod/Service 网段和实际节点端口，再安装。当前没有这些组件的安装副作用。
+5. 按 README 的已有 harness 分别验收同实例双向 TCP/UDP、跨实例直接路径拒绝、DB-backed 授权网关与在途撤销；所有日志和失败都保留。仅网络 Pod 部分通过也不代表完整网络 PASS。
+
+**结论：只读盘点与平台 SSH 身份验证已完成；底层 A/B 可达、可信双机身份、当前主干迁移以及集群前提均未满足，尚未创建任何远端隔离测试资源，真实网络验收未执行。未执行生产网络启用操作，仓库默认开关保持关闭；其他位置的生产配置值未核实。**
+
+## 发布状态
+
+初始前置文档提交 `8a43d84` 已推送到 `codex/T-0224-two-server-acceptance`。创建草稿 PR 的连接器动作被自动审批拒绝，理由是测试文档/日志发布到 GitHub 的授权和目标未获确认；未创建 PR，也未绕过拒绝。确认 SSH 后产生的服务器盘点和后续记录仅保存在本地，不推送，等待明确发布授权。
