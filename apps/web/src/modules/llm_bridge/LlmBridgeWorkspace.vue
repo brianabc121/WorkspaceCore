@@ -126,8 +126,8 @@ function remove(bridge: Bridge) {
           <button v-for="t in TABS" :key="t.key" type="button" role="tab" :aria-selected="tab === t.key" @click="tab = t.key">{{ t.name }}</button>
         </div>
         <div role="tabpanel" :aria-label="TABS.find(t => t.key === tab)?.name" class="lb-panel">
-          <BridgeAccounts v-if="tab === 'accounts'" :key="selected.id" :api="api" :bridge="selected" :status="status.data.value" :loading="status.isPending.value" :error="status.error.value" :can-write="canWrite" @reload="status.refetch()" />
-          <BridgeSettingsForm v-else-if="tab === 'settings'" :key="`s:${selected.id}`" :api="api" :bridge="selected" :status="status.data.value" :loading="status.isPending.value" :error="status.error.value" :can-write="canWrite" @reload="status.refetch()" />
+          <BridgeAccounts v-if="tab === 'accounts'" :key="selected.id" :api="api" :bridge="selected" :status="status.data.value" :loading="status.isPending.value" :load-error="status.error.value" :can-write="canWrite" @reload="status.refetch()" />
+          <BridgeSettingsForm v-else-if="tab === 'settings'" :key="`s:${selected.id}`" :api="api" :bridge="selected" :status="status.data.value" :loading="status.isPending.value" :load-error="status.error.value" :can-write="canWrite" @reload="status.refetch()" />
           <BridgeEnvironments v-else-if="tab === 'environments'" :key="`e:${selected.id}`" :api="api" :bridge="selected" :can-write="canWrite" />
           <BridgeSessions v-else :key="`c:${selected.id}`" :api="api" :bridge="selected" />
         </div>

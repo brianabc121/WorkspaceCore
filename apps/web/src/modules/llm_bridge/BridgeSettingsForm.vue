@@ -6,7 +6,7 @@ import { bridgeError, type Bridge, type BridgeStatus, type LlmBridgeApi } from '
 
 // 会话桥的设置（保存在会话桥里）：并发、单个回合的时限、每个实例每小时的发送次数、单条指令的长度上限。
 // 上下限与后端 BridgeSettingsPatch 一致。
-const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeStatus; loading: boolean; error: unknown; canWrite: boolean }>()
+const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeStatus; loading: boolean; loadError: unknown; canWrite: boolean }>()
 const emit = defineEmits<{ reload: [] }>()
 
 const FIELDS = [
@@ -39,7 +39,7 @@ async function save() {
     <ActionFeedback :error="error" :notice="notice" />
     <p v-if="loading" role="status" class="data-state">正在读取设置…</p>
     <div v-else-if="!settings" class="data-state">
-      <p role="alert">{{ props.error ? bridgeError(props.error) : `连不上这座会话桥：${status?.error || '没有给出原因'}` }}</p>
+      <p role="alert">{{ props.loadError ? bridgeError(props.loadError) : `连不上这座会话桥：${status?.error || '没有给出原因'}` }}</p>
       <button type="button" class="secondary-button" @click="emit('reload')">重试</button>
     </div>
     <form v-else class="asv-form lb-form" aria-label="会话桥设置" @submit.prevent="save">

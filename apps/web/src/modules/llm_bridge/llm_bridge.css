@@ -49,3 +49,4 @@
 .lb-turns pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: .88rem; max-height: 320px; overflow-y: auto; }
 .lb-turn-label { color: var(--muted); font-size: .78rem; font-weight: 600; }
 .lb-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.lb-wrap { white-space: normal; text-align: left; overflow-wrap: anywhere; }

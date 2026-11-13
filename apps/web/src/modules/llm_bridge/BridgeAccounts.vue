@@ -8,7 +8,7 @@ import { ACCOUNT_STATE, METHODS, MODES, bridgeError, methodName, platformName, s
 
 // 一座会话桥的状态：三个账号槽位的登录情况与操作、通道、排队与进行中的回合数。
 // 登录用的密钥 / 令牌只在提交时发出去，提交成功就清空输入框；页面不显示、不记录它们。
-const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeStatus; loading: boolean; error: unknown; canWrite: boolean }>()
+const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeStatus; loading: boolean; loadError: unknown; canWrite: boolean }>()
 const emit = defineEmits<{ reload: [] }>()
 
 const POLL_MS = 3000
@@ -113,8 +113,8 @@ function reset(account: Account) {
     <ActionFeedback :error="error" :notice="notice" />
 
     <p v-if="loading" role="status" class="data-state">正在读取会话桥的状态…</p>
-    <div v-else-if="error || !status" class="data-state">
-      <p role="alert">{{ bridgeError(props.error) }}</p>
+    <div v-else-if="loadError || !status" class="data-state">
+      <p role="alert">{{ bridgeError(props.loadError) }}</p>
       <button type="button" class="secondary-button" @click="emit('reload')">重试</button>
     </div>
     <div v-else-if="!status.reachable" class="data-state">
