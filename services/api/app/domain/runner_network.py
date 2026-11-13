@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Any, TypeVar, overload
 
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -18,8 +18,9 @@ from app.core.errors import ApiError
 from app.domain.auth import AuthContext
 from app.domain.policy import WorkspaceAccess, not_found, require_role
 from app.domain.runner_capabilities import has_capability
+from app.domain.runner_network_limits import require_public_sources, reserve_gateway_slot
 from app.domain.step_up import verify_step_up
-from app.models import AgentInstance, RunnerEnvironment, RunnerHost
+from app.models import AgentInstance, RunnerEnvironment, RunnerHost, Workspace
 from app.models.runner_network import (
     NetworkRecord,
     RunnerIngressRule,
@@ -30,12 +31,15 @@ from app.schemas.runner_network import (
     NetworkRecordOut,
     RunnerIngressInput,
     RunnerIngressOut,
+    RunnerIngressUpdate,
     RunnerNetworkOut,
     RunnerPublishedEndpointOut,
     RunnerPublishInput,
+    RunnerPublishUpdate,
     RunnerRevokeInput,
     RunnerServiceCreate,
     RunnerServiceOut,
+    RunnerServiceUpdate,
 )
 from app.schemas.workspaces import Role
 
@@ -96,6 +100,11 @@ class RunnerNetworkService:
         )
         if body is not None:
             await verify_step_up(self.redis, context.user, body.password)
+        await self.db.scalar(
+            select(Workspace)
+            .where(Workspace.id == access.workspace.id)
+            .with_for_update(key_share=True)
+        )
 
     async def _identity(self, env: RunnerEnvironment) -> None:
         if env.owner_instance_id is None or env.state in ("deleted", "archived", "pending_delete"):
@@ -126,26 +135,21 @@ class RunnerNetworkService:
             desired_generation=int((env.runtime_metadata or {}).get("generation", 0)),
         )
 
-    @staticmethod
     @overload
-    def output(row: RunnerService, env: RunnerEnvironment) -> RunnerServiceOut: ...
+    def output(self, row: RunnerService, env: RunnerEnvironment) -> RunnerServiceOut: ...
 
-    @staticmethod
     @overload
-    def output(row: RunnerIngressRule, env: RunnerEnvironment) -> RunnerIngressOut: ...
+    def output(self, row: RunnerIngressRule, env: RunnerEnvironment) -> RunnerIngressOut: ...
 
-    @staticmethod
     @overload
     def output(
-        row: RunnerPublishedEndpoint, env: RunnerEnvironment
+        self, row: RunnerPublishedEndpoint, env: RunnerEnvironment
     ) -> RunnerPublishedEndpointOut: ...
 
-    @staticmethod
     @overload
-    def output(row: NetworkRecord, env: RunnerEnvironment) -> NetworkRecordOut: ...
+    def output(self, row: NetworkRecord, env: RunnerEnvironment) -> NetworkRecordOut: ...
 
-    @staticmethod
-    def output(row: NetworkRecord, env: RunnerEnvironment) -> NetworkRecordOut:
+    def output(self, row: NetworkRecord, env: RunnerEnvironment) -> NetworkRecordOut:
         schema = (
             RunnerServiceOut
             if isinstance(row, RunnerService)
@@ -160,16 +164,28 @@ class RunnerNetworkService:
         generation = int((env.runtime_metadata or {}).get("generation", 0))
         if row.expires_at and row.expires_at <= now() and row.state != "revoked":
             out.state = "expired"
-        if out.state == "active" and (not identity_current or row.applied_generation != generation):
+        out.revocation_confirmed = (
+            row.state in ("revoked", "expired")
+            and row.applied_revision == row.desired_revision
+            and row.applied_generation == row.desired_generation
+            and row.apply_error is None
+        )
+        if out.state == "active" and (
+            not identity_current or row.applied_generation != generation or env.state != "running"
+        ):
             out.state, out.apply_error = "approved_pending_apply", "NETWORK_RUNTIME_UNCONFIRMED"
         # Private service use is same-owner only. Gateway paths stay pending.
-        if (
-            isinstance(row, RunnerService)
-            and out.state == "active"
-            and row.applied_revision == row.desired_revision
-        ):
-            out.connect_host, out.connect_port = row.desired_dns, row.port
-            out.accepting_new_connections = True
+        if out.state == "active" and row.applied_revision == row.desired_revision:
+            if isinstance(row, RunnerService):
+                out.connect_host, out.connect_port = row.desired_dns, row.port
+            elif self.settings.runner_network_verified:
+                out.connect_host = (
+                    self.settings.runner_network_private_host
+                    if isinstance(row, RunnerIngressRule)
+                    else self.settings.runner_network_public_host or None
+                )
+                out.connect_port = getattr(row, "gateway_port", None)
+            out.accepting_new_connections = bool(out.connect_host and out.connect_port)
         return out
 
     async def _rows(self, model: type[NetworkModel], env: RunnerEnvironment) -> list[NetworkModel]:
@@ -202,6 +218,9 @@ class RunnerNetworkService:
             host_id=env.host_id,
             runtime_status=status,
             runtime_error=error,
+            runtime_ip=(env.runtime_metadata or {}).get("pod_ip")
+            if env.state == "running"
+            else None,
             services=services,
             ingress_rules=rules,
             published_endpoints=endpoints,
@@ -261,6 +280,128 @@ class RunnerNetworkService:
             raise ApiError(409, "SERVICE_UNAVAILABLE", "服务身份已变化或已撤销")
         return row
 
+    async def update_service(
+        self,
+        context: AuthContext,
+        access: WorkspaceAccess,
+        environment_id: uuid.UUID,
+        service_id: uuid.UUID,
+        body: RunnerServiceUpdate,
+    ) -> RunnerServiceOut:
+        await self._owner(context, access, body)
+        env = await self.environment(access.workspace.id, environment_id, lock=True)
+        await self._identity(env)
+        row = await self._service(env, service_id)
+        self._revision(row, body.expected_revision)
+        if body.protocol != "TCP":
+            children = [
+                r
+                for model in (RunnerIngressRule, RunnerPublishedEndpoint)
+                for r in await self._rows(model, env)
+                if isinstance(r, RunnerIngressRule | RunnerPublishedEndpoint)
+                and r.service_id == row.id
+                and r.state not in ("revoked", "expired")
+            ]
+            if children:
+                raise ApiError(
+                    409, "NETWORK_PROTOCOL_UNSUPPORTED", "先撤销跨实例及公网入口，再改为UDP"
+                )
+        duplicate = await self.db.scalar(
+            select(RunnerService.id).where(
+                RunnerService.environment_id == env.id,
+                RunnerService.name == body.name,
+                RunnerService.id != row.id,
+            )
+        )
+        if duplicate:
+            raise ApiError(409, "SERVICE_NAME_EXISTS", "环境内服务名称已存在")
+        row.name, row.port, row.protocol = body.name, body.port, body.protocol
+        row.desired_revision += 1
+        row.state, row.apply_error = "approved_pending_apply", None
+        await self._invalidate_children(env, row.id, revoke=False, context=context)
+        await self._audit(context, env, row, "updated")
+        await self.db.commit()
+        return self.output(row, env)
+
+    @staticmethod
+    def _revision(row: NetworkRecord, expected: int) -> None:
+        if row.desired_revision != expected:
+            raise ApiError(409, "VERSION_CONFLICT", "网络配置已变化，请刷新后重试")
+        if row.state in ("revoked", "expired") or (row.expires_at and row.expires_at <= now()):
+            raise ApiError(409, "SERVICE_UNAVAILABLE", "配置已撤销或过期")
+
+    async def update_rule(
+        self,
+        context: AuthContext,
+        access: WorkspaceAccess,
+        environment_id: uuid.UUID,
+        record_id: uuid.UUID,
+        body: RunnerIngressUpdate | RunnerPublishUpdate,
+        *,
+        kind: str,
+    ) -> NetworkRecordOut:
+        await self._owner(context, access, body)
+        env = await self.environment(access.workspace.id, environment_id, lock=True)
+        await self._identity(env)
+        model = RunnerIngressRule if kind == "ingress" else RunnerPublishedEndpoint
+        row = await self.db.scalar(
+            select(model)
+            .where(
+                model.id == record_id,
+                model.environment_id == env.id,
+                model.workspace_id == env.workspace_id,
+            )
+            .with_for_update()
+        )
+        if row is None:
+            raise not_found()
+        if not isinstance(row, RunnerIngressRule | RunnerPublishedEndpoint):
+            raise TypeError("unexpected network model")
+        self._revision(row, body.expected_revision)
+        await self._service(env, row.service_id)
+        if isinstance(row, RunnerIngressRule) and not await has_capability(
+            self.db, env.workspace_id, row.source_instance_id, "runner.cross_agent_communication"
+        ):
+            raise ApiError(403, "SOURCE_CAPABILITY_REQUIRED", "来源实例需要有效跨智能体通信权限")
+        row.expires_at = body.expires_at
+        if isinstance(row, RunnerPublishedEndpoint) and isinstance(body, RunnerPublishUpdate):
+            require_public_sources(self.settings, body.source_cidrs)
+            row.source_cidrs = body.source_cidrs
+        row.state, row.apply_error = "approved_pending_apply", None
+        row.desired_revision += 1
+        await self._audit(context, env, row, "updated")
+        await self.db.commit()
+        return self.output(row, env)
+
+    async def _invalidate_children(
+        self, env: RunnerEnvironment, service_id: uuid.UUID, *, revoke: bool, context: AuthContext
+    ) -> None:
+        for model in (RunnerIngressRule, RunnerPublishedEndpoint):
+            for child in await self._rows(model, env):
+                if not isinstance(child, RunnerIngressRule | RunnerPublishedEndpoint):
+                    raise TypeError("unexpected network model")
+                if child.service_id != service_id or child.state in ("revoked", "expired"):
+                    continue
+                child.desired_revision += 1
+                child.state = "revoked" if revoke else "approved_pending_apply"
+                child.apply_error = "REVOCATION_PENDING_CONFIRMATION" if revoke else None
+                if revoke:
+                    child.revoked_at, child.revoked_by = now(), context.user.id
+
+    async def _audit(
+        self, context: AuthContext, env: RunnerEnvironment, row: NetworkRecord, verb: str
+    ) -> None:
+        from app.domain.audit import AuditTrail
+
+        await AuditTrail(self.db, self.settings).record(
+            "runner.network." + verb,
+            workspace_ids=[env.workspace_id],
+            actor_id=context.user.id,
+            resource_type="runner_network",
+            resource_id=row.id,
+            metadata={"environment_id": str(env.id), "desired_revision": row.desired_revision},
+        )
+
     async def create_ingress(
         self,
         context: AuthContext,
@@ -272,7 +413,9 @@ class RunnerNetworkService:
         await self._owner(context, access, body)
         env = await self.environment(access.workspace.id, environment_id, lock=True)
         await self._identity(env)
-        await self._service(env, service_id)
+        service = await self._service(env, service_id)
+        if service.protocol != "TCP":
+            raise ApiError(409, "NETWORK_PROTOCOL_UNSUPPORTED", "跨实例及公网网关目前仅支持TCP")
         source = await self.db.scalar(
             select(AgentInstance).where(
                 AgentInstance.id == body.source_instance_id,
@@ -289,6 +432,7 @@ class RunnerNetworkService:
             raise ApiError(
                 403, "SOURCE_CAPABILITY_REQUIRED", "来源实例需要已生效的跨智能体通信权限"
             )
+        await reserve_gateway_slot(self.db, kind="ingress")
         row = RunnerIngressRule(
             **self._fields(env, context),
             service_id=service_id,
@@ -297,6 +441,10 @@ class RunnerNetworkService:
             apply_error=UNAVAILABLE,
         )
         self.db.add(row)
+        await self.db.flush()
+        await self._audit(context, env, row, "ingress_created")
+        service.desired_revision += 1
+        service.state = "approved_pending_apply"
         await self.db.commit()
         return self.output(row, env)
 
@@ -311,7 +459,11 @@ class RunnerNetworkService:
         await self._owner(context, access, body)
         env = await self.environment(access.workspace.id, environment_id, lock=True)
         await self._identity(env)
-        await self._service(env, service_id)
+        service = await self._service(env, service_id)
+        if service.protocol != "TCP":
+            raise ApiError(409, "NETWORK_PROTOCOL_UNSUPPORTED", "跨实例及公网网关目前仅支持TCP")
+        require_public_sources(self.settings, body.source_cidrs)
+        await reserve_gateway_slot(self.db, kind="published")
         row = RunnerPublishedEndpoint(
             **self._fields(env, context),
             service_id=service_id,
@@ -326,6 +478,10 @@ class RunnerNetworkService:
             },
         )
         self.db.add(row)
+        await self.db.flush()
+        await self._audit(context, env, row, "published")
+        service.desired_revision += 1
+        service.state = "approved_pending_apply"
         await self.db.commit()
         return self.output(row, env)
 
@@ -362,6 +518,9 @@ class RunnerNetworkService:
             row.state, row.revoked_at, row.revoked_by = "revoked", now(), context.user.id
             row.desired_revision += 1
             row.apply_error = "REVOCATION_PENDING_CONFIRMATION"
+            if isinstance(row, RunnerService):
+                await self._invalidate_children(env, row.id, revoke=True, context=context)
+            await self._audit(context, env, row, "revoked")
         await self.db.commit()
         return self.output(row, env)
 
@@ -370,13 +529,71 @@ class RunnerNetworkService:
         host = await self.db.get(RunnerHost, host_id)
         if host is None:
             raise not_found()
+        await self.db.scalar(
+            select(Workspace)
+            .where(Workspace.id == host.workspace_id)
+            .with_for_update(key_share=True)
+        )
+        policy_revision = int(
+            await self.db.scalar(
+                text("SELECT nextval('workspace.runner_network_policy_revision_seq')")
+            )
+            or 1
+        )
         result: dict[str, Any] = {
             "host_id": str(host_id),
             "gateway_supported": False,
             "services": [],
             "ingress_rules": [],
             "published_endpoints": [],
+            "domains": [],
         }
+        all_rules = list(
+            await self.db.scalars(
+                select(RunnerIngressRule).where(
+                    RunnerIngressRule.workspace_id == host.workspace_id,
+                    RunnerIngressRule.state.not_in(("revoked", "expired")),
+                    RunnerIngressRule.expires_at > now(),
+                )
+            )
+        )
+        valid_rules = [
+            r
+            for r in all_rules
+            if await has_capability(
+                self.db, host.workspace_id, r.source_instance_id, "runner.cross_agent_communication"
+            )
+        ]
+        environments = await self.db.scalars(
+            select(RunnerEnvironment).where(
+                RunnerEnvironment.host_id == host_id,
+                RunnerEnvironment.workspace_id == host.workspace_id,
+                RunnerEnvironment.runtime_backend == "kubernetes",
+                RunnerEnvironment.owner_instance_id.is_not(None),
+                RunnerEnvironment.state.not_in(("deleted", "archived", "pending_delete")),
+            )
+        )
+        for env in environments:
+            result["domains"].append(
+                {
+                    "workspace_id": str(env.workspace_id),
+                    "instance_id": str(env.owner_instance_id),
+                    "environment_id": str(env.id),
+                    "allocation_id": str(
+                        (env.runtime_metadata or {}).get("allocation_id") or env.id
+                    ),
+                    "generation": int((env.runtime_metadata or {}).get("generation", 1)),
+                    "node_name": host.node_name,
+                    "gateway_revision": policy_revision,
+                    "gateway_ports": sorted(
+                        {
+                            r.gateway_port
+                            for r in valid_rules
+                            if r.source_instance_id == env.owner_instance_id
+                        }
+                    ),
+                }
+            )
         records: tuple[tuple[str, type[NetworkRecord]], ...] = (
             ("services", RunnerService),
             ("ingress_rules", RunnerIngressRule),
@@ -384,9 +601,9 @@ class RunnerNetworkService:
         )
         for key, model in records:
             rows = await self.db.scalars(
-                select(model)
-                .where(model.host_id == host_id, model.workspace_id == host.workspace_id)
-                .with_for_update()
+                select(model).where(
+                    model.host_id == host_id, model.workspace_id == host.workspace_id
+                )
             )
             for row in rows:
                 env = await self.environment(host.workspace_id, row.environment_id)
@@ -397,7 +614,9 @@ class RunnerNetworkService:
                     row.state = "approved_pending_apply"
                 out = self.output(row, env).model_dump(mode="json")
                 out.update(
-                    generation=generation,
+                    generation=row.desired_generation
+                    if row.state in ("revoked", "expired")
+                    else generation,
                     backend=env.runtime_backend,
                     instance_id=str(row.owner_instance_id),
                     allocation_id=str((env.runtime_metadata or {}).get("allocation_id") or env.id),
@@ -406,9 +625,18 @@ class RunnerNetworkService:
                 if row.host_id != env.host_id or row.owner_instance_id != env.owner_instance_id:
                     out["state"] = "revoked"
                 if isinstance(row, RunnerService):
+                    endpoints = await self._rows(RunnerPublishedEndpoint, env)
                     out.update(
                         namespace="oc-" + row.owner_instance_id.hex,
                         service_name="svc-" + row.id.hex,
+                        gateway_ingress=any(r.service_id == row.id for r in valid_rules)
+                        or any(
+                            e.service_id == row.id
+                            and e.state not in ("revoked", "expired")
+                            and e.expires_at
+                            and e.expires_at > now()
+                            for e in endpoints
+                        ),
                     )
                 result[key].append(out)
         await self.db.flush()

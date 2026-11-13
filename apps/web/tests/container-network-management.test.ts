@@ -10,7 +10,7 @@ import { instance } from './agents-fixtures'
 
 const ENV = '10000000-0000-4000-8000-000000000001', TARGET = '20000000-0000-4000-8000-000000000001', SOURCE = '20000000-0000-4000-8000-000000000002'
 const SERVICE = '30000000-0000-4000-8000-000000000001', RULE = '40000000-0000-4000-8000-000000000001', ENDPOINT = '50000000-0000-4000-8000-000000000001'
-const base = { workspace_id: workspace.id, environment_id: ENV, owner_instance_id: TARGET, host_id: 'host-one', state: 'approved_pending_apply' as const, desired_revision: 2, applied_revision: 0, desired_generation: 1, applied_generation: null, apply_error: 'NETWORK_ENFORCEMENT_UNAVAILABLE', expires_at: null, revoked_by: null, revoked_at: null, created_at: '2026-11-12T00:00:00Z', accepting_new_connections: false, connect_host: null, connect_port: null }
+const base = { workspace_id: workspace.id, environment_id: ENV, owner_instance_id: TARGET, host_id: 'host-one', state: 'approved_pending_apply' as const, desired_revision: 2, applied_revision: 0, desired_generation: 1, applied_generation: null, apply_error: 'NETWORK_ENFORCEMENT_UNAVAILABLE', expires_at: null, revoked_by: null, revoked_at: null, created_at: '2026-11-12T00:00:00Z', accepting_new_connections: false, revocation_confirmed: false, connect_host: null, connect_port: null }
 const service = (): Schema['RunnerServiceOut'] => ({ ...base, id: SERVICE, name: 'database', port: 5432, protocol: 'TCP', desired_dns: 'database.internal.invalid', visibility: 'private' })
 const network = (over: Partial<Schema['RunnerNetworkOut']> = {}): Schema['RunnerNetworkOut'] => ({ environment_id: ENV, workspace_id: workspace.id, owner_instance_id: TARGET, host_id: 'host-one', runtime_status: 'pending_apply', runtime_error: 'NETWORK_RUNTIME_UNCONFIRMED', runtime_ip: null, services: [service()], ingress_rules: [{ ...base, id: RULE, service_id: SERVICE, source_instance_id: SOURCE }], published_endpoints: [{ ...base, id: ENDPOINT, service_id: SERVICE, source_cidrs: ['198.51.100.0/24'] }], ...over })
 const path = (r: Request) => new URL(r.url).pathname
@@ -57,7 +57,7 @@ it('posts an owner source declaration with expiry, scoped headers and step-up pa
   await fireEvent.click(screen.getByRole('button', { name: '允许来源访问 database' }))
   const form = screen.getByRole('form', { name: '允许跨智能体来源' })
   await screen.findByRole('option', { name: /来源助手/ })
-  expect(within(form).queryByRole('option', { name: '目标助手' })).toBeNull()
+  expect(within(form).getAllByRole('option').map(o => o.getAttribute('value'))).toEqual(['', SOURCE])
   await fireEvent.update(within(form).getByLabelText('来源智能体'), SOURCE)
   await fireEvent.update(within(form).getByLabelText('有效期至'), until())
   await fireEvent.update(within(form).getByLabelText('确认登录密码'), 'test-password')
@@ -167,5 +167,98 @@ it('does not resurrect a password-bearing confirmation after environment access 
   await client.invalidateQueries({ queryKey: ['runner'] })
   await screen.findByText('database', { exact: true })
   expect(screen.queryByRole('form', { name: '确认撤销网络规则' })).toBeNull()
+  expect(writes(requests)).toHaveLength(0)
+})
+
+it('edits a service with its captured revision and step-up while retaining failed input', async () => {
+  const { requests } = await open({ handler: r => r.method === 'PATCH' ? fail(409, 'VERSION_CONFLICT') : undefined })
+  await fireEvent.click(screen.getByRole('button', { name: '编辑服务 database' }))
+  const form = screen.getByRole('form', { name: '编辑内部服务' })
+  expect(within(form).getByLabelText('服务名称')).toHaveValue('database')
+  await fireEvent.update(within(form).getByLabelText('服务名称'), 'database-new')
+  await fireEvent.update(within(form).getByLabelText('服务端口'), '5433')
+  await fireEvent.update(within(form).getByLabelText('协议'), 'UDP')
+  await fireEvent.update(within(form).getByLabelText('确认登录密码'), 'test-password')
+  await fireEvent.submit(form)
+  expect(await screen.findByRole('alert')).toHaveTextContent('已被其他人修改')
+  const request = requests.find(r => r.method === 'PATCH')!
+  expect(path(request)).toBe(`/api/v1/runner/environments/${ENV}/services/${SERVICE}`)
+  expect(request.headers.get('X-Workspace-Id')).toBe(workspace.id)
+  expect(await request.clone().json()).toEqual({ name: 'database-new', port: 5433, protocol: 'UDP', expected_revision: 2, password: 'test-password' })
+  expect(within(form).getByLabelText('服务名称')).toHaveValue('database-new')
+  expect(within(form).getByLabelText('确认登录密码')).toHaveValue('')
+})
+
+it.each([['编辑入站规则', '编辑跨智能体规则', `ingress/${RULE}`], ['编辑公网入口', '编辑受限公网入口', `published-endpoints/${ENDPOINT}`]])('edits finite authorization leases through %s', async (button, formName, suffix) => {
+  const { requests } = await open({ handler: r => r.method === 'PATCH' ? Response.json(network().ingress_rules[0]) : undefined })
+  await fireEvent.click(screen.getByRole('button', { name: button }))
+  const form = screen.getByRole('form', { name: formName })
+  await fireEvent.update(within(form).getByLabelText('有效期至'), until())
+  if (suffix.startsWith('published')) await fireEvent.update(within(form).getByLabelText('允许的 IPv4 公网来源'), '203.0.113.7/32')
+  await fireEvent.update(within(form).getByLabelText('确认登录密码'), 'test-password')
+  await fireEvent.submit(form)
+  await vi.waitFor(() => expect(requests.some(r => r.method === 'PATCH')).toBe(true))
+  const request = requests.find(r => r.method === 'PATCH')!
+  expect(path(request)).toBe(`/api/v1/runner/environments/${ENV}/${suffix}`)
+  expect(await request.clone().json()).toMatchObject({ expected_revision: 2, password: 'test-password' })
+  expect(new Date((await request.clone().json()).expires_at).getTime()).toBeGreaterThan(Date.now())
+  if (suffix.startsWith('published')) expect(await request.clone().json()).toMatchObject({ source_cidrs: ['203.0.113.7/32'] })
+})
+
+it('keeps UDP private and explains TCP-only cross-instance and public gateways', async () => {
+  await open({ data: network({ runtime_status: 'active', runtime_ip: '10.42.1.7', services: [{ ...service(), protocol: 'UDP' }] }) })
+  expect(screen.getByText(/同一工作空间和同一智能体/)).toBeVisible()
+  expect(screen.getByText('10.42.1.7')).toBeVisible()
+  expect(screen.queryByRole('button', { name: '允许来源访问 database' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '申请公网入口 database' })).toBeNull()
+  expect(screen.getByText(/UDP 仅用于同域私网/)).toBeVisible()
+})
+
+it.each([false, true])('distinguishes requested revocation from confirmed termination (%s)', async confirmed => {
+  await open({ data: network({ services: [{ ...service(), state: 'revoked', revocation_confirmed: confirmed, apply_error: confirmed ? null : 'REVOCATION_PENDING_CONFIRMATION' }] }) })
+  expect(screen.getByText(confirmed ? '已撤销，现有连接关闭已确认' : '已撤销，等待现有连接关闭确认', { exact: false })).toBeVisible()
+})
+
+it('retains public edit values on refresh errors, hides addresses and clears its password', async () => {
+  let down = false
+  const { client } = await open({ handler: r => down && r.method === 'GET' && path(r).endsWith('/network') ? fail(503, 'HTTP_ERROR') : undefined })
+  await fireEvent.click(screen.getByRole('button', { name: '编辑公网入口' }))
+  const form = screen.getByRole('form', { name: '编辑受限公网入口' })
+  await fireEvent.update(within(form).getByLabelText('允许的 IPv4 公网来源'), '203.0.113.7/32')
+  await fireEvent.update(within(form).getByLabelText('确认登录密码'), 'test-password')
+  down = true
+  await client.invalidateQueries({ queryKey: ['runner'] })
+  expect(await screen.findByRole('alert')).toHaveTextContent('显示上次读取的规则')
+  expect(within(form).getByLabelText('允许的 IPv4 公网来源')).toHaveValue('203.0.113.7/32')
+  expect(within(form).getByLabelText('确认登录密码')).toHaveValue('')
+  expect(within(form).getByRole('button', { name: '保存修改' })).toBeDisabled()
+})
+
+it.each([['UNEXPECTED', '请求失败，请稍后重试'], ['STEP_UP_FAILED', '密码验证失败'], ['RATE_LIMITED', '密码验证次数过多'], ['NETWORK_PROTOCOL_UNSUPPORTED', '仅支持 TCP']])('never renders a password echoed for %s', async (code, message) => {
+  await open({ handler: r => r.method === 'POST' ? Response.json({ error: { code, message: 'echo test-password', request_id: 'req', details: {} } }, { status: 500 }) : undefined })
+  await fireEvent.click(screen.getByRole('button', { name: '撤销服务 database' }))
+  const form = screen.getByRole('form', { name: '确认撤销网络规则' })
+  await fireEvent.update(within(form).getByLabelText('确认登录密码'), 'test-password')
+  await fireEvent.submit(form)
+  expect(await screen.findByRole('alert')).toHaveTextContent(message)
+  expect(screen.queryByText(/test-password/)).toBeNull()
+})
+
+it('drops cached source choices after source access is denied and cannot submit them', async () => {
+  let denied = false
+  const { client, requests } = await open({ handler: r => denied && path(r) === '/api/v1/agents/instances' ? fail(403, 'FORBIDDEN') : undefined })
+  await fireEvent.click(screen.getByRole('button', { name: '允许来源访问 database' }))
+  const form = screen.getByRole('form', { name: '允许跨智能体来源' })
+  await screen.findByRole('option', { name: /来源助手/ })
+  await fireEvent.update(within(form).getByLabelText('来源智能体'), SOURCE)
+  await fireEvent.update(within(form).getByLabelText('有效期至'), until())
+  await fireEvent.update(within(form).getByLabelText('确认登录密码'), 'test-password')
+  denied = true
+  await client.invalidateQueries({ queryKey: ['agents'] })
+  expect(await within(form).findByRole('alert')).toHaveTextContent('来源列表读取失败')
+  expect(within(form).queryByRole('option', { name: /来源助手/ })).toBeNull()
+  expect(within(form).getByLabelText('确认登录密码')).toHaveValue('')
+  expect(within(form).getByRole('button', { name: '保存来源规则' })).toBeDisabled()
+  await fireEvent.submit(form)
   expect(writes(requests)).toHaveLength(0)
 })

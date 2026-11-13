@@ -1,0 +1,39 @@
+# Read-only collector permissions. Replace runner-node-a and the subject before
+# applying; do not bind this credential to tenants or workload ServiceAccounts.
+# nodes/proxy grants the API-server's full kubelet proxy GET surface; see
+# network-prerequisites.md. This role does not grant controller write operations.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: runtime-v2-node-telemetry
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/proxy]
+    resourceNames: [runner-node-a]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [pods, persistentvolumeclaims]
+    verbs: [list, get]
+  - apiGroups: [""]
+    resources: [persistentvolumes, namespaces]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [list]
+  - apiGroups: [node.k8s.io]
+    resources: [runtimeclasses]
+    resourceNames: [gvisor]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: runtime-v2-node-telemetry
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: runtime-v2-node-telemetry
+subjects:
+  - kind: ServiceAccount
+    name: runtime-v2-controller-node-a
+    namespace: runner-system

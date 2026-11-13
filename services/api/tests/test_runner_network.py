@@ -85,6 +85,7 @@ async def seed(env: Env) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
             volume_name=uuid.uuid4().hex,
             network_name=uuid.uuid4().hex,
             runtime_backend="kubernetes",
+            state="running",
             runtime_metadata={"generation": 3},
         )
         db.add(obj)

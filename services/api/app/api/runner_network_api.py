@@ -10,9 +10,23 @@ from app.api.runner_api import RunnerCredentials, _authenticate
 from app.core.errors import ApiError
 from app.domain.runner_hosts import RunnerHosts
 from app.domain.runner_network import RunnerNetworkService
+from app.domain.runner_network_bindings import BindingReceipt, update_binding
 from app.schemas.common import error_responses
 
 router = APIRouter(prefix="/runner-api/v1/network", tags=["runner-network-host"])
+
+
+@router.post("/binding", responses=error_responses(401, 404, 409, 422))
+async def runtime_binding(
+    request: Request, response: Response, credentials: RunnerCredentials, body: BindingReceipt
+) -> dict[str, bool]:
+    response.headers["Cache-Control"] = "no-store"
+    app = request.app
+    async with app.state.sessionmaker() as db:
+        host = await _authenticate(
+            request, credentials, RunnerHosts(db, app.state.settings, app.state.redis)
+        )
+        return {"accepted": await update_binding(db, app.state.settings, host, body)}
 
 
 class DesiredRequest(BaseModel):

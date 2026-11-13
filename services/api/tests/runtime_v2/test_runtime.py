@@ -79,7 +79,8 @@ def test_network_policy_only_allows_same_workspace_and_instance() -> None:
     spec = policy["spec"]
     assert spec["podSelector"]["matchLabels"] == scope
     assert spec["ingress"] == [{"from": [{"podSelector": {"matchLabels": scope}}]}]
-    assert spec["egress"] == [{"to": [{"podSelector": {"matchLabels": scope}}]}]
+    assert spec["egress"][0] == {"to": [{"podSelector": {"matchLabels": scope}}]}
+    assert len(spec["egress"]) == 2  # the other exception is restricted managed CoreDNS
     assert spec["policyTypes"] == ["Ingress", "Egress"]
 
 

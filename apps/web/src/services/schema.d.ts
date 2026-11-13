@@ -2363,6 +2363,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/internal/runner-network/gateway/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Gateway Ack */
+        post: operations["gateway_ack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/internal/runner-network/gateway/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Gateway Config */
+        post: operations["gateway_config"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/internal/runner-network/gateway/lease": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Gateway Lease */
+        post: operations["gateway_lease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/internal/runner-network/gateway/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Gateway Ready */
+        post: operations["gateway_ready"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/issue-templates": {
         parameters: {
             query?: never;
@@ -4319,6 +4387,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runner/environments/{environment_id}/ingress/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Ingress */
+        patch: operations["update_ingress"];
+        trace?: never;
+    };
     "/api/v1/runner/environments/{environment_id}/ingress/{rule_id}/revoke": {
         parameters: {
             query?: never;
@@ -4353,6 +4438,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runner/environments/{environment_id}/published-endpoints/{endpoint_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Endpoint */
+        patch: operations["update_endpoint"];
+        trace?: never;
+    };
     "/api/v1/runner/environments/{environment_id}/published-endpoints/{endpoint_id}/revoke": {
         parameters: {
             query?: never;
@@ -4385,6 +4487,23 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/environments/{environment_id}/services/{service_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Service */
+        patch: operations["update_service"];
         trace?: never;
     };
     "/api/v1/runner/environments/{environment_id}/services/{service_id}/ingress": {
@@ -5409,6 +5528,23 @@ export interface paths {
         put?: never;
         /** Acknowledge */
         post: operations["acknowledge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runner-api/v1/network/binding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Runtime Binding */
+        post: operations["runtime_binding"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7740,6 +7876,44 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** BindingReceipt */
+        BindingReceipt: {
+            /**
+             * Allocation Id
+             * Format: uuid
+             */
+            allocation_id: string;
+            /** Deployment Uid */
+            deployment_uid: string;
+            /**
+             * Environment Id
+             * Format: uuid
+             */
+            environment_id: string;
+            /** Generation */
+            generation: number;
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            instance_id: string;
+            /** Node Name */
+            node_name: string;
+            /**
+             * Pod Ip
+             * Format: ipv4
+             */
+            pod_ip: string;
+            /** Pod Uid */
+            pod_uid: string;
+            /** Pvc Uid */
+            pvc_uid: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
         /** BookmarkCreate */
         BookmarkCreate: {
             /**
@@ -8499,6 +8673,8 @@ export interface components {
             /** @description 容器根目录所在的分区（Docker 数据目录，镜像在这里） */
             root: components["schemas"]["DiskIn"] | null;
         };
+        /** Empty */
+        Empty: Record<string, never>;
         /** EnvText */
         EnvText: {
             /** Purpose */
@@ -8630,6 +8806,30 @@ export interface components {
             url: string;
             /** Width */
             width: number;
+        };
+        /** GatewayAck */
+        GatewayAck: {
+            /**
+             * Active
+             * @default true
+             */
+            active: boolean;
+            /** Generation */
+            generation: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "ingress" | "published";
+            /**
+             * Record Id
+             * Format: uuid
+             */
+            record_id: string;
+            /** Revision */
+            revision: number;
+            /** Success */
+            success: boolean;
         };
         /** GitHubActivityConfig */
         GitHubActivityConfig: {
@@ -8842,6 +9042,11 @@ export interface components {
              * @description 超过 2000 篇笔记时按最近修改与链接数截断
              */
             truncated: boolean;
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
         };
         /** HealthResponse */
         HealthResponse: {
@@ -10449,6 +10654,22 @@ export interface components {
              * @description 乐观并发版本号；写请求必须带上读取时的版本
              */
             version: number;
+        };
+        /** LeaseRequest */
+        LeaseRequest: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "ingress" | "published";
+            /** Peer Ip */
+            peer_ip: string;
+            /**
+             * Record Id
+             * Format: uuid
+             */
+            record_id: string;
+            source?: components["schemas"]["WorkloadIdentity"] | null;
         };
         /** LinkOut */
         LinkOut: {
@@ -15130,6 +15351,11 @@ export interface components {
              * Format: uuid
              */
             owner_instance_id: string;
+            /**
+             * Revocation Confirmed
+             * @default false
+             */
+            revocation_confirmed: boolean;
             /** Revoked At */
             revoked_at: string | null;
             /** Revoked By */
@@ -15154,6 +15380,18 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+        };
+        /** RunnerIngressUpdate */
+        RunnerIngressUpdate: {
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Password */
+            password?: string | null;
         };
         /** RunnerInstanceUsage */
         RunnerInstanceUsage: {
@@ -15280,6 +15518,20 @@ export interface components {
             /** Source Cidrs */
             source_cidrs: string[];
         };
+        /** RunnerPublishUpdate */
+        RunnerPublishUpdate: {
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Password */
+            password?: string | null;
+            /** Source Cidrs */
+            source_cidrs: string[];
+        };
         /** RunnerPublishedEndpointOut */
         RunnerPublishedEndpointOut: {
             /**
@@ -15328,6 +15580,11 @@ export interface components {
              * Format: uuid
              */
             owner_instance_id: string;
+            /**
+             * Revocation Confirmed
+             * @default false
+             */
+            revocation_confirmed: boolean;
             /** Revoked At */
             revoked_at: string | null;
             /** Revoked By */
@@ -15599,6 +15856,11 @@ export interface components {
              * @enum {string}
              */
             protocol: "TCP" | "UDP";
+            /**
+             * Revocation Confirmed
+             * @default false
+             */
+            revocation_confirmed: boolean;
             /** Revoked At */
             revoked_at: string | null;
             /** Revoked By */
@@ -15619,6 +15881,23 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+        };
+        /** RunnerServiceUpdate */
+        RunnerServiceUpdate: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Name */
+            name: string;
+            /** Password */
+            password?: string | null;
+            /** Port */
+            port: number;
+            /**
+             * Protocol
+             * @default TCP
+             * @enum {string}
+             */
+            protocol: "TCP" | "UDP";
         };
         /**
          * RunnerSpecIn
@@ -17634,6 +17913,19 @@ export interface components {
              */
             id: string;
         };
+        /** ValidationError */
+        ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+        };
         /** VersionBody */
         VersionBody: {
             /**
@@ -17841,6 +18133,33 @@ export interface components {
              * @enum {string}
              */
             widget_type: "work_summary";
+        };
+        /** WorkloadIdentity */
+        WorkloadIdentity: {
+            /**
+             * Allocation Id
+             * Format: uuid
+             */
+            allocation_id: string;
+            /**
+             * Environment Id
+             * Format: uuid
+             */
+            environment_id: string;
+            /** Generation */
+            generation: number;
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            instance_id: string;
+            /** Pod Uid */
+            pod_uid: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
         };
         /** WorkspaceOut */
         WorkspaceOut: {
@@ -27977,6 +28296,146 @@ export interface operations {
             };
         };
     };
+    gateway_ack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GatewayAck"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gateway_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Empty"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gateway_lease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gateway_ready: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Empty"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     issue_templates: {
         parameters: {
             query?: never;
@@ -36417,6 +36876,47 @@ export interface operations {
             };
         };
     };
+    update_ingress: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                environment_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerIngressUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerIngressOut"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     revoke_ingress: {
         parameters: {
             query?: never;
@@ -36479,6 +36979,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunnerNetworkOut"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_endpoint: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                environment_id: string;
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerPublishUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerPublishedEndpointOut"];
                 };
             };
             /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
@@ -36555,6 +37096,47 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerServiceOut"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_service: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                environment_id: string;
+                service_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerServiceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -41186,6 +41768,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AcknowledgmentResult"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    runtime_binding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindingReceipt"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

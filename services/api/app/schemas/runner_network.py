@@ -22,6 +22,10 @@ class RunnerRevokeInput(BaseModel):
     password: SecretStr | None = None
 
 
+class RunnerServiceUpdate(RunnerServiceCreate, RunnerRevokeInput):
+    expected_revision: int = Field(ge=1)
+
+
 class LeaseInput(RunnerRevokeInput):
     expires_at: AwareDatetime
 
@@ -36,6 +40,10 @@ class LeaseInput(RunnerRevokeInput):
 
 class RunnerIngressInput(LeaseInput):
     source_instance_id: UUID
+
+
+class RunnerIngressUpdate(LeaseInput):
+    expected_revision: int = Field(ge=1)
 
 
 class RunnerPublishInput(LeaseInput):
@@ -63,6 +71,10 @@ class RunnerPublishInput(LeaseInput):
         return list(dict.fromkeys(result))
 
 
+class RunnerPublishUpdate(RunnerPublishInput):
+    expected_revision: int = Field(ge=1)
+
+
 class NetworkRecordOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
@@ -83,6 +95,7 @@ class NetworkRecordOut(BaseModel):
     accepting_new_connections: bool = False
     connect_host: str | None = None
     connect_port: int | None = None
+    revocation_confirmed: bool = False
 
 
 class RunnerServiceOut(NetworkRecordOut):
