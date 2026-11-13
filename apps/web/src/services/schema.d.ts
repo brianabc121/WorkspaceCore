@@ -3024,7 +3024,7 @@ export interface paths {
          * 登录一个平台（owner）
          * @description device_code：返回网址和验证码，用户在自己的浏览器里完成，之后轮询登录状态；api_key / oauth_token：填的值保存在会话桥的数据卷里，不保存在工作台；existing：使用已经在容器里完成的登录。403：Claude 用订阅登录前要先在设置里确认风险。
          */
-        post: operations["login"];
+        post: operations["account_login"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3041,7 +3041,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** 退出一个平台的登录（owner） */
-        post: operations["logout"];
+        post: operations["account_logout"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3129,7 +3129,7 @@ export interface paths {
          * 会话桥上的会话（admin）
          * @description sync=true 时先把官方程序里有、会话桥没登记的会话登记进来。
          */
-        get: operations["list_sessions"];
+        get: operations["list_bridge_sessions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -8141,6 +8141,34 @@ export interface components {
             name?: string | null;
             /** Token */
             token?: string | null;
+        };
+        /** SessionOut */
+        BridgeSessionOut: {
+            /** Created At */
+            created_at: number;
+            /** Mode */
+            mode: string;
+            /** Model */
+            model: string | null;
+            /** Origin */
+            origin: string;
+            /** Owner */
+            owner: string | null;
+            /** Platform */
+            platform: string;
+            /** Session Id */
+            session_id: string;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+            /**
+             * Turns
+             * @default 0
+             */
+            turns: number;
+            /** Updated At */
+            updated_at: number;
         };
         /** BridgeSettings */
         BridgeSettings: {
@@ -13849,7 +13877,7 @@ export interface components {
         /** Page[SessionOut] */
         Page_SessionOut_: {
             /** Items */
-            items: components["schemas"]["app__schemas__auth__SessionOut"][];
+            items: components["schemas"]["SessionOut"][];
             /**
              * Next Cursor
              * @description 下一页游标；没有更多数据时为 null
@@ -16885,12 +16913,37 @@ export interface components {
         /** SessionList */
         SessionList: {
             /** Sessions */
-            sessions: components["schemas"]["app__modules__llm_bridge__schemas__SessionOut"][];
+            sessions: components["schemas"]["BridgeSessionOut"][];
             /**
              * Sync Failed
              * @default
              */
             sync_failed: string;
+        };
+        /** SessionOut */
+        SessionOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Current
+             * @description 是否为发出本次请求的会话
+             */
+            current: boolean;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last Seen At */
+            last_seen_at: string | null;
         };
         /** SessionTokens */
         SessionTokens: {
@@ -18475,59 +18528,6 @@ export interface components {
         WorkspaceUpdate: {
             /** Name */
             name: string;
-        };
-        /** SessionOut */
-        app__modules__llm_bridge__schemas__SessionOut: {
-            /** Created At */
-            created_at: number;
-            /** Mode */
-            mode: string;
-            /** Model */
-            model: string | null;
-            /** Origin */
-            origin: string;
-            /** Owner */
-            owner: string | null;
-            /** Platform */
-            platform: string;
-            /** Session Id */
-            session_id: string;
-            /** Status */
-            status: string;
-            /** Title */
-            title: string;
-            /**
-             * Turns
-             * @default 0
-             */
-            turns: number;
-            /** Updated At */
-            updated_at: number;
-        };
-        /** SessionOut */
-        app__schemas__auth__SessionOut: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Current
-             * @description 是否为发出本次请求的会话
-             */
-            current: boolean;
-            /**
-             * Expires At
-             * Format: date-time
-             */
-            expires_at: string;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Last Seen At */
-            last_seen_at: string | null;
         };
     };
     responses: never;
@@ -31787,7 +31787,7 @@ export interface operations {
             };
         };
     };
-    login: {
+    account_login: {
         parameters: {
             query?: never;
             header: {
@@ -31874,7 +31874,7 @@ export interface operations {
             };
         };
     };
-    logout: {
+    account_logout: {
         parameters: {
             query?: never;
             header: {
@@ -32442,7 +32442,7 @@ export interface operations {
             };
         };
     };
-    list_sessions: {
+    list_bridge_sessions: {
         parameters: {
             query?: {
                 limit?: number;
