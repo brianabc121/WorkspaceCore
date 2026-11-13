@@ -1,10 +1,14 @@
 <script setup lang="ts">
-// 大模型会话桥的页面骨架：按 docs/modules/README.md 补数据和交互
+import { useAuthStore } from '../../stores/auth'
+import ManagementPage from '../../components/management/ManagementPage.vue'
+import LlmBridgeWorkspace from './LlmBridgeWorkspace.vue'
+
+// 大模型会话桥（docs/v2/LLM_BRIDGE_PLAN.md）：owner / admin 能看（admin 只读），其他角色路由已拦截。
+// 换用户或工作空间时整页重建，表单和登录进度不会串到另一个工作空间。
+const auth = useAuthStore()
 </script>
 
 <template>
-  <section class="page">
-    <h1>大模型会话桥</h1>
-    <p>让智能体经会话桥向 ChatGPT / Codex / Claude / WorkBuddy 发指令并管理会话。依赖独立部署的会话桥。</p>
-  </section>
+  <LlmBridgeWorkspace v-if="auth.canManage && auth.workspaceId" :key="`${auth.user?.id}:${auth.workspaceId}`" :scope="auth.workspaceId" />
+  <ManagementPage v-else title="大模型会话桥"><p role="alert">只有 owner / admin 能查看大模型会话桥。</p></ManagementPage>
 </template>
