@@ -115,12 +115,13 @@ python /opt/t0224/lab_fixture.py settle
 - 原 UID 的诊断 Policy 已删除；网关 private/public Service 都仅剩不监听的65535占位端口，公网 Service `allocateLoadBalancerNodePorts=false` 且没有 LB 地址。专用控制面、三份测试工作负载/PV和集群保留供复核，不删除现有业务数据或盲目恢复全机 iptables。
 - 18:52:31 再次严格 SSH 只读核对 A/B：原 hostname/可信指纹、维护后的唯一身份、双方 Tailscale `Running`/对端 online、双向 TCP22、ssh/dbus/tailscaled/专用 K3s 均正常；专用 K3s 仍未开机自启。A 原三份 Workspace Docker 网络 ID 与 TrendRadar 配置卷仍在。原始输出为 `final-host-a.txt`、`final-host-b.txt`。
 - B 身份原件备份保留；三天测试 CA 到期前需由操作者续期或停用测试控制面。所有实际口令、token、私钥和管理员 kubeconfig 保持 root 私有文件，未纳入证据。
+- 19:00 再次只读 `stat` 核对上述私有 env、管理员密码、网关凭据、CA/服务私钥、管理员 kubeconfig 及主机fixture token文件：所列9份均 root:root、0600、普通文件；只读取元数据，没有读取文件值。输出为 `final-private-file-metadata.txt`。
 
 ## 7. 完整后端测试的环境差异
 
 最终代码的持久后台完整 pytest 正在运行，测试使用本地 `workspace` 数据库用户；目前出现4项 `test_integration.py` 的 Alembic `command.check` 失败，不称全套通过。
 
-只复现第一项，实际 `1 failed in 4.41s`。默认 `search_path="$user", public` 在用户名与 schema 同为 workspace 时改变 default_schema，Alembic 对已迁移表报告 remove/add FK 与版本表差异。同一最小数据库/元数据、新建连接的对照实测见 `reflection-user-comparison.txt`：workspace 用户产生 `remove_fk/add_fk`；独立 t0224_ci 用户 default_schema=public，产生0项变更。
+只复现第一项，实际 `1 failed in 4.41s`（原始日志 `integration-workspace-user-failure.log.gz`）。默认 `search_path="$user", public` 在用户名与 schema 同为 workspace 时改变 default_schema，Alembic 对已迁移表报告 remove/add FK 与版本表差异。同一最小数据库/元数据、新建连接的对照实测见 `reflection-user-comparison.txt`：workspace 用户产生 `remove_fk/add_fk`；独立 t0224_ci 用户 default_schema=public，产生0项变更。
 
 未修改产品、迁移环境或原断言。创建本地独立测试角色后，以 CI 相同的“用户名不等于 workspace schema”条件重跑原整文件：
 
@@ -137,3 +138,9 @@ TEST_REDIS_URL=redis://127.0.0.1:6379/15 REQUIRE_INTEGRATION=1 \
 - 公网 LB 尚无实现/外部地址，两个真实独立外部来源及原始 socket 来源保留未验证；原完整 harness 仍只有基础私网部分 PASS / exit2，之后私网网关组件检查的 PASS 不能改写为完整 harness 通过。
 - 生产磁盘配额/可信资源采集、完整 exec/文件/密钥/快照/生命周期适配继续属于 T-0224，不能以本次网络结果结项。
 - 保持任务 `in_progress / codex`、PR203草稿不合并。仓库默认 `RUNNER_NETWORK_VERIFIED=false`、运行适配开关关闭；测试控制面 true 只用于隔离验收，禁止推广到生产。
+
+## 9. 刷新主干发现后续编号修复：正在整合
+
+19:03 前后刷新 origin/main 得到 `6688d15`，包含 PR202 / `aa3edb8`：主干已将网关改为0067、保留桥0066。本分支此前保留网关0066/桥兼容0067的方案与新主干重叠，不能直接合并；上文第2节及既有网络/测试输出保留其当时版本，最终迁移图需要进一步更新。
+
+先让正在运行的原版本完整suite结束，避免变更源树混淆结果。整合方案：沿主干0066桥→0067网关新增0068核对；在进入0067时也识别已存在的历史0066网关，避免重复DDL；0068识别两种已存在0067状态。保持桥数据和三条序列，拒绝部分/未知结构；桥数据降级保护放到实际删除桥表的0066入口，0068本身回退不删除表。回归准备于工作区缓存目录，尚未把整合后结果称为通过。
