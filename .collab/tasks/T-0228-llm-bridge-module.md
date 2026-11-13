@@ -2,7 +2,7 @@
 id: T-0228
 title: 大模型会话桥（二）：工作台模块 llm_bridge（登记会话桥、按实例的权限、llm_* 工具转发、设置接口与页面）
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/trusting-euler-480tpv
 paths: services/api,apps/web,docs
@@ -24,7 +24,7 @@ owner 在页面上登记会话桥、登录各平台、配置开发环境、给�
 - [x] 整链路测试：实例 → 工作台 /mcp → 模块 → 真实的会话桥应用（进程内）
 - [x] 前端页面与测试（lint / typecheck / test / build / check:api）
 - [x] 文档：接口、数据字典、部署指南第 25 节、Makefile 命令、同机部署的网络叠加文件
-- [ ] 后端全量测试通过
+- [x] 后端全量测试通过（CI 的 api job 在提交 f85ac88 上通过）
 - [x] **人类明确批准“例外九”**（2026-11-13，原话“批准例外九”），已写进 `docs/AGENTS.md`
 
 ## 背景 / 约束 / 参考
@@ -39,3 +39,4 @@ owner 在页面上登记会话桥、登录各平台、配置开发环境、给�
 - 2026-11-13 10:49 UTC · claude · 人类 2026-11-13 在对话中要求全面落实方案（任务建好时 owner 已是 claude）。后端模块、迁移 0066、扩展点、整链路测试（5 通过）、文档已写好并本地提交；前端页面由子代理在做；后端全量测试在跑。例外九没有写进 AGENTS.md，等人类批准。
 - 2026-11-13 11:10 UTC · claude · 前端页面完成（子代理实现，我复核）：lint、typecheck、build、check:api 通过，vitest 80 个文件 795 项通过（新增 13 项）；没有做浏览器验收。CI 上发现并修了两个后端契约问题：接口模型名与已有的 SessionOut / LoginIn 等冲突（加 LlmBridge 前缀）、路由函数名作 operationId 与登录模块重复（加 llm_bridge_ 前缀）。后端全量测试仍在跑。合并仍等人类批准例外九。
 - 2026-11-13 11:51 UTC · claude · 人类 2026-11-13 在对话中明确批准例外九（原话“批准例外九”）：已写进 docs/AGENTS.md 第 8 节，方案、接口文档、契约测试的注释同步更新。CI 发现的三项后端测试（工具对照表、安全矩阵两项）和冒烟脚本已修。下一步：最新提交 CI 全绿后按 D-0004 合并。
+- 2026-11-13 12:38 UTC · claude · status in_progress → done：工作台模块与设置页完成：CI 在提交 f85ac88 上 api、compose、web、images、news、llm-bridge、image 等 13 项通过（agents 当时还在跑）；例外九已由人类批准并写进 AGENTS.md。没有做浏览器验收；需要真实账号的验收（登录流程、真实回合、Codex 沙箱）留给后续任务，需要人类登录。
