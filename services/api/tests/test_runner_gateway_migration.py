@@ -12,5 +12,5 @@ from tests.helpers import alembic_config
 async def test_gateway_ports_upgrade_downgrade_upgrade(temp_database_url: str) -> None:
     config = alembic_config(temp_database_url)
     await asyncio.to_thread(command.upgrade, config, "head")
-    await asyncio.to_thread(command.downgrade, config, "0065")
+    await asyncio.to_thread(command.downgrade, config, "0066")
     await asyncio.to_thread(command.upgrade, config, "head")

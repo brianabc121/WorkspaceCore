@@ -86,3 +86,7 @@
 首轮完整API CI返回失败。日志下载连接器遇到Transport closed，原始日志存储下载也未成功；检查注释只给出exit1。读取本地保留的失败缓存后，直接运行并实际复现统一422文档与CSRF矩阵两项失败，不把缓存当本轮结果。
 
 根因是内部机器网关的4个路由误进入浏览器OpenAPI。加强“不公开内部接口”的契约断言，实际RED1 failed；路由设置include_in_schema=False后，重新生成正式OpenAPI/TS。真实最终组合：两个契约 + 完整安全矩阵 + 网关独立鉴权，8 passed in473.35s；没有修改CSRF矩阵、放宽角色、跳过用例或增加超时。check:api/typecheck、Ruff548/strictmypy544/OpenAPI全部通过。广泛的本地诊断批次只获得部分进度后停止，不计为完整通过；完整API结论等待最新修复提交的CI。
+
+## 迁移改号（claude，2026-11-13 15:45 UTC）
+
+PR #199（本任务）与 PR #198（大模型会话桥，迁移 0066 llm_bridge）先后合并，两个 PR 各自的 CI 都基于合并前的 main，文件名不同所以 GitHub 没有报冲突，main 上出现两个 0066、两个 alembic head。本任务的网关端口迁移改为 `20261113_0067_runner_gateway_ports.py`（revision 0067，down_revision 0066），上文提到的“0066 迁移”即现在的 0067。两个迁移改不同的表，互不依赖。实测：空库 `alembic upgrade head` → `downgrade base` → `upgrade head` → `downgrade 0066` → `upgrade head` 均 exit 0；迁移与网关相关测试 30 passed。
