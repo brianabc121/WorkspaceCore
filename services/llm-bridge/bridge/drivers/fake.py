@@ -30,6 +30,8 @@ class FakeDriver(Driver):
 
     def __init__(self) -> None:
         self.identity: str | None = "fake@example.com"
+        # True：已登录但平台不报告是哪个账号（模拟用密钥登录）
+        self.anonymous = False
         self.history: dict[str, list[Message]] = {}
         self.external: list[NativeSession] = []
         self.running = 0
@@ -40,6 +42,8 @@ class FakeDriver(Driver):
         return mode in ("chat", "dev")
 
     async def status(self) -> AccountStatus:
+        if self.anonymous:
+            return AccountStatus(True, None, "api_key")
         return AccountStatus(self.identity is not None, self.identity, "api_key")
 
     async def models(self, mode: Mode) -> list[ModelInfo]:

@@ -44,7 +44,7 @@ export const METHODS: Record<LoginMethod, { name: string; help: string }> = {
 export const methodName = (id: string | null) => (id ? METHODS[id as LoginMethod]?.name ?? id : '—')
 export const SANDBOX: Record<EnvironmentBody['sandbox'], string> = { read_only: '只读', workspace_write: '可写工作区', exec: '可执行命令' }
 export const MODES: Record<string, string> = { dev: '开发', cloud: '云端', chat: '对话' }
-const STATUS: Record<string, string> = { active: '进行中', archived: '已归档', queued: '排队中', running: '进行中', completed: '已完成', done: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断', timeout: '超时', pending: '等待中' }
+const STATUS: Record<string, string> = { active: '进行中', archived: '已归档', queued: '排队中', running: '进行中', completed: '已完成', done: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断', timeout: '超时', pending: '等待中', unknown: '结果未知' }
 export const statusName = (id: string) => STATUS[id] ?? id
 const ORIGIN: Record<string, string> = { bridge: '经会话桥新建', external: '官方程序里已有' }
 export const originName = (id: string) => ORIGIN[id] ?? id

@@ -212,6 +212,41 @@ async def test_single_account_guard(bridge: Bridge) -> None:
     assert (await _send(bridge, "c1", b, "x", "r5"))["error"]["code"] == "ACCOUNT_MISMATCH"
 
 
+async def test_key_logins_are_one_unknown_account(bridge: Bridge) -> None:
+    """用密钥登录时看不到是哪个账号：换密钥不算换账号；换成具体账号才算。"""
+    bridge.fake.anonymous = True
+    await bridge.admin("POST", "/admin/accounts/fake/reset")
+    a = await _session(bridge, "c1")
+    account = (await bridge.admin("GET", "/admin/status")).json()["accounts"]["fake"]
+    assert (account["state"], account["identity"], account["registered"]) == (
+        "logged_in",
+        None,
+        True,
+    )
+    assert account["method"] == "api_key" and "换一把密钥不算换账号" in account["detail"]
+    # 换一把密钥（平台仍然不报告账号）：照常可用
+    await bridge.admin(
+        "POST", "/admin/accounts/fake/login", json={"method": "api_key", "api_key": "k2"}
+    )
+    assert (await _send(bridge, "c1", a, "换了密钥", "r1"))["status"] == "completed"
+    # 换成一个报告了邮箱的登录：这是另一个账号
+    bridge.fake.anonymous = False
+    bridge.fake.identity = "someone@example.com"
+    refreshed = (await bridge.admin("POST", "/admin/accounts/fake/refresh")).json()
+    assert refreshed["state"] == "mismatch" and "看不到是哪个" in refreshed["detail"]
+    assert (await _send(bridge, "c1", a, "x", "r2"))["error"]["code"] == "ACCOUNT_MISMATCH"
+    # 退出登录后：登记还在（registered），但不再显示登录方式
+    await bridge.admin("POST", "/admin/accounts/fake/reset")
+    await bridge.admin("POST", "/admin/accounts/fake/refresh")
+    await bridge.admin("POST", "/admin/accounts/fake/logout")
+    account = (await bridge.admin("GET", "/admin/status")).json()["accounts"]["fake"]
+    assert (account["state"], account["registered"], account["method"]) == (
+        "logged_out",
+        True,
+        None,
+    )
+
+
 async def test_rate_limit(bridge: Bridge) -> None:
     await bridge.admin("PUT", "/admin/settings", json={"send_per_hour": 2})
     a = await _session(bridge, "c1")

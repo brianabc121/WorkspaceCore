@@ -1039,13 +1039,16 @@ AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendra
 
 ### 25.1 部署（只有这一步在服务器上做）
 
-1. 生成管理令牌并写进仓库根目录的 `.env`：`LLM_BRIDGE_ADMIN_TOKEN=<openssl rand -hex 32 的输出>`。
-2. `make llm-bridge-up`：构建镜像（里面装了锁定版本的 Codex、Claude Code、CodeBuddy Code 命令行）并启动。
+1. `make llm-bridge-up`：构建镜像（里面装了锁定版本的 Codex、Claude Code、CodeBuddy Code 命令行）并启动。
+   第一次运行会生成管理令牌，写进仓库根目录 `.env` 的 `LLM_BRIDGE_ADMIN_TOKEN`；之后再运行不会改它。
    - 和工作台在同一台服务器：会话桥自动加入工作台的内部网络，工作台用 `http://llm-bridge:8787` 访问，端口只监听本机。
-   - 在另一台服务器：在那台机器上 `docker compose -f infra/llm-bridge/compose.yaml up -d --build`，
+   - 在另一台服务器：在那台机器上
+     `LLM_BRIDGE_ADMIN_TOKEN=<自己生成的令牌，至少 32 个字符> docker compose -f infra/llm-bridge/compose.yaml up -d --build`，
      用 `LLM_BRIDGE_BIND=<私网地址>` 让它监听私网地址；不要直接暴露到公网（需要跨公网时放在带 TLS 的反向代理后面）。
-3. 升级：拉取新代码后再跑一次 `make llm-bridge-up`。数据卷（登录、会话记录）保留。
-4. 检查：`infra/llm-bridge/smoke.sh <容器名> http://127.0.0.1:8787 <令牌>`。
+2. `make llm-bridge-token`：显示管理令牌，下一步在网页上登记会话桥时要填（和 `make setup-token` 是同一种用法）。
+3. 升级：拉取新代码后再跑一次 `make llm-bridge-up`。数据卷（登录、会话记录）和令牌都保留。
+4. 检查：`infra/llm-bridge/smoke.sh <容器名> http://127.0.0.1:8787 "$(make -s llm-bridge-token)"`
+   （只适用于还没登录任何平台的新容器；同机部署的容器名是 `<项目名>-llm-bridge-llm-bridge-1`）。
 
 可调的环境变量：`LLM_BRIDGE_PORT`（默认 8787）、`LLM_BRIDGE_BIND`（默认 127.0.0.1）、`LLM_BRIDGE_MEMORY`（默认 4g）、`LLM_BRIDGE_CPUS`（默认 2）。
 
@@ -1057,6 +1060,8 @@ AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendra
    - **ChatGPT / Codex**（同一个 ChatGPT 账号）：点“登录”选设备码，页面显示网址和验证码，在自己的浏览器里完成；也可以填 OpenAI 的 API 密钥。
    - **Claude**：填 Anthropic 的 API 密钥。要用订阅账号，先在页面上确认了解合规风险，再填 `claude setup-token` 生成的令牌。
    - **WorkBuddy**：填 CodeBuddy 的 API 密钥。
+   - 用 API 密钥或令牌登录时，会话桥看不到它属于哪个账号：换一把密钥不算换账号；要换成另一个账号，先点“更换账号”。
+     用设备码登录 ChatGPT 时会话桥知道是哪个账号（邮箱），登录成别的账号会被拦下，同样要先点“更换账号”。
    - 页面登录走不通时的备用办法：`docker exec -it <容器名> claude auth login`（或 `codex login --device-auth`、`codebuddy` 里的 `/login`），
      完成后在页面上选“使用已经在容器里完成的登录”。
 4. 需要开发模式的话，添加开发环境（仓库地址、分支、许可档位）。

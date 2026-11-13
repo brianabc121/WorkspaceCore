@@ -50,8 +50,14 @@ class LlmBridgeAccountOut(BaseModel):
     slot: str
     label: str
     state: str = Field(description="logged_in / logged_out / mismatch / unavailable")
-    identity: str | None = Field(description="账号标识（打码）")
-    method: str | None
+    identity: str | None = Field(
+        description="账号标识（打码）；用密钥或令牌登录时会话桥看不到是哪个账号，为空"
+    )
+    registered: bool = Field(
+        default=False,
+        description="这座会话桥是否已经登记过这个平台的账号（退出登录后仍然保留，“更换账号”才清掉）",
+    )
+    method: str | None = Field(description="登录方式；没有登录时为空")
     detail: str
     first_login_at: float | None
     login_methods: list[str]

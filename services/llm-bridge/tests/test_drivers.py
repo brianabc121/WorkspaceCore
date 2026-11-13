@@ -150,11 +150,8 @@ async def test_cli_login_and_env_isolation(tmp_path: Path, monkeypatch: pytest.M
     secret = tmp_path / "secrets" / "claude.json"
     assert secret.stat().st_mode & 0o777 == 0o600
     status = await driver.status()
-    assert (
-        status.logged_in
-        and status.identity.startswith("api_key:")
-        and "sk-ant" not in status.identity
-    )
+    # 用密钥登录：官方程序不报告是哪个账号，驱动也不拿密钥的指纹充当账号
+    assert (status.logged_in, status.identity, status.method) == (True, None, "api_key")
     outcome = await driver.run_turn(spec, "你好", Sink())
     # 聊天模式不给工具；桥自己的环境变量不会传给官方程序
     assert (
