@@ -45,7 +45,9 @@ const states: Record<NetworkRecord['state'], string> = {
   approved_pending_apply: '等待节点应用', active: '已生效', revoked: '已撤销', expired: '已过期', apply_failed: '节点应用失败',
 }
 function clearAction() { action.value = null; password.value = ''; source.value = ''; expires.value = ''; cidrs.value = ''; editName.value = ''; editPort.value = ''; editProtocol.value = 'TCP' }
-watch(fresh, value => { if (!value) password.value = '' }, { flush: 'sync' })
+// A failed or missing read drops the password (the form may describe rules that no longer exist);
+// the 30-second background refetch alone must not wipe what the owner is typing.
+watch(() => !data.value || !!state.error.value, stale => { if (stale) password.value = '' }, { flush: 'sync' })
 watch([instances.error, instances.isFetching], () => {
   if (action.value?.kind === 'ingress') password.value = ''
   if (isAccessError(instances.error.value)) source.value = ''
@@ -89,6 +91,9 @@ function networkError(cause: unknown): string {
     SERVICE_UNAVAILABLE: '服务身份已变化或已撤销，请刷新后检查。',
     SAME_INSTANCE_PRIVATE: '同一智能体使用私网服务，无需跨智能体授权。',
     SOURCE_CAPABILITY_REQUIRED: '来源智能体需要已生效的跨智能体通信权限。',
+    NETWORK_SOURCE_FORBIDDEN: '来源网段属于受管节点或平台禁止的网段，请改用允许的公网来源。',
+    NETWORK_GATEWAY_CAPACITY: '网关可用入口已满，请先撤销不再使用的跨智能体规则或公网入口。',
+    NETWORK_GATEWAY_PORTS_EXHAUSTED: '网关端口池已用尽，需要管理员扩容后才能新建。',
   }
   return cause instanceof ApiError ? messages[cause.code] ?? (cause.status === 0 ? '网络连接失败，请检查连接后重试。' : '请求失败，请稍后重试。') : '请求失败，请稍后重试。'
 }

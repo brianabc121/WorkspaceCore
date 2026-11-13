@@ -112,6 +112,16 @@ it('clears passwords after unknown writes and never automatically replays them',
   expect(writes(requests)).toHaveLength(1)
 })
 
+it('keeps the typed password across a successful background refresh', async () => {
+  const { client } = await open()
+  await fireEvent.click(screen.getByRole('button', { name: '撤销服务 database' }))
+  const form = screen.getByRole('form', { name: '确认撤销网络规则' })
+  await fireEvent.update(within(form).getByLabelText('确认登录密码'), 'test-password')
+  await client.invalidateQueries({ queryKey: ['runner'] })
+  await vi.waitFor(() => expect(within(form).getByRole('button', { name: '确认撤销' })).toBeEnabled())
+  expect(within(form).getByLabelText('确认登录密码')).toHaveValue('test-password')
+})
+
 it('hides cached usable addresses after a failed network refresh', async () => {
   let unavailable = false
   const active = { ...service(), state: 'active' as const, applied_revision: 2, applied_generation: 1, accepting_new_connections: true, connect_host: 'database.internal.invalid', connect_port: 5432, apply_error: null }
@@ -234,7 +244,7 @@ it('retains public edit values on refresh errors, hides addresses and clears its
   expect(within(form).getByRole('button', { name: '保存修改' })).toBeDisabled()
 })
 
-it.each([['UNEXPECTED', '请求失败，请稍后重试'], ['STEP_UP_FAILED', '密码验证失败'], ['RATE_LIMITED', '密码验证次数过多'], ['NETWORK_PROTOCOL_UNSUPPORTED', '仅支持 TCP']])('never renders a password echoed for %s', async (code, message) => {
+it.each([['UNEXPECTED', '请求失败，请稍后重试'], ['STEP_UP_FAILED', '密码验证失败'], ['RATE_LIMITED', '密码验证次数过多'], ['NETWORK_PROTOCOL_UNSUPPORTED', '仅支持 TCP'], ['NETWORK_SOURCE_FORBIDDEN', '改用允许的公网来源'], ['NETWORK_GATEWAY_CAPACITY', '网关可用入口已满'], ['NETWORK_GATEWAY_PORTS_EXHAUSTED', '网关端口池已用尽']])('never renders a password echoed for %s', async (code, message) => {
   await open({ handler: r => r.method === 'POST' ? Response.json({ error: { code, message: 'echo test-password', request_id: 'req', details: {} } }, { status: 500 }) : undefined })
   await fireEvent.click(screen.getByRole('button', { name: '撤销服务 database' }))
   const form = screen.getByRole('form', { name: '确认撤销网络规则' })

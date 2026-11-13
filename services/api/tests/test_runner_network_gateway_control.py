@@ -171,6 +171,55 @@ async def test_gateway_auth_public_lease_and_revoke_confirmation(env: Env) -> No
 
 
 @pytest.mark.integration
+async def test_second_gateway_child_keeps_live_sibling_and_service(env: Env) -> None:
+    # Only the first gateway child changes the node's ingress policy. A later one
+    # must not put the service back to pending: that would withdraw every live
+    # sibling binding and cancel its established sessions until the node re-ACKs.
+    from tests.helpers import OWNER
+
+    service, _ = await running_service(env)
+    prefix = "/api/v1/internal/runner-network/gateway"
+    headers = {"Authorization": "Bearer test-network-gateway-token"}
+    target = f"/runner/environments/{service['environment_id']}"
+    body = {
+        "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+        "source_cidrs": ["203.0.113.4/32"],
+        "password": OWNER["password"],
+    }
+    first = await post(env, target + f"/services/{service['id']}/publish", body)
+    assert first.status_code == 201, first.text
+    await confirm_private_policy(env, service)
+    ack = {
+        "record_id": first.json()["id"],
+        "kind": "published",
+        "revision": 1,
+        "generation": 3,
+        "success": True,
+    }
+    acked = await env.client.post(prefix + "/ack", json=ack, headers=headers)
+    assert acked.status_code == 200 and acked.json()["accepted"], acked.text
+    before = (await env.get("/api/v1" + target + "/network"))["services"][0]
+    assert before["state"] == "active"
+
+    second = await post(
+        env,
+        target + f"/services/{service['id']}/publish",
+        {**body, "source_cidrs": ["198.51.100.7/32"]},
+    )
+    assert second.status_code == 201, second.text
+    after = (await env.get("/api/v1" + target + "/network"))["services"][0]
+    assert after["state"] == "active"
+    assert after["desired_revision"] == before["desired_revision"] == after["applied_revision"]
+    snapshot = await env.client.post(prefix + "/config", json={}, headers=headers)
+    bindings = {b["record_id"]: b for b in snapshot.json()["bindings"]}
+    assert bindings[first.json()["id"]]["active"]
+    assert bindings[second.json()["id"]]["target"] is not None
+    lease = {"record_id": first.json()["id"], "kind": "published", "peer_ip": "203.0.113.4"}
+    allowed = await env.client.post(prefix + "/lease", json=lease, headers=headers)
+    assert allowed.status_code == 200 and allowed.json()["allowed"], allowed.text
+
+
+@pytest.mark.integration
 async def test_public_udp_not_supported_and_managed_sources_never_use_public_route(
     env: Env,
 ) -> None:

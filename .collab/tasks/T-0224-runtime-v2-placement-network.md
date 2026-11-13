@@ -2,9 +2,9 @@
 id: T-0224
 title: 按人类确认设计落实双服务器池调度、容器配额审批与跨节点网络
 owner: codex
-status: in_progress
+status: handoff
 priority: P1
-branch: codex/T-0224-network-completion
+branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web,infra,tests/e2e,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows
 depends_on:
 created: 2026-11-11
@@ -51,3 +51,6 @@ updated: 2026-11-13
 - 2026-11-13 08:45 UTC · codex · 人类明确取消测试服务器SSH登录与双机远端测试，继续完成先前网络开发；停止所有SSH探测，不再把VPN配置作为本轮开发前置。恢复本地Node22/PG16/Redis和官方kubectl，收尾网关独立就绪与撤销容量回收；真实集群数据面验证继续如实列为未做，不擅自启用生产开关。
 - 2026-11-13 09:18 UTC · codex · 网络执行链代码e80ccc72已推送并开草稿PR197：https://github.com/brianabc121/WorkspaceCore/pull/197。真实本地网络组合236通过/179.41s，e80完整Web CI79文件794通过及构建通过；局部本地失败/中断如实列于VALIDATION.md。补齐Compose未传网络参数的部署缺口，真实渲染+Settings回归RED2→GREEN2；增加网关镜像构建检查。继续等待最新完整API/全栈/镜像CI，默认不启用未经真实节点验收的网络，任务仍in_progress；人类已取消外部SSH测试。
 - 2026-11-13 10:07 UTC · codex · 完整API CI发现契约问题，已直接本地复现统一422文档与CSRF矩阵2项失败；内部网关误进入浏览器OpenAPI。加强内部接口隐藏契约后RED1，修复仅include_in_schema=False并正式重生成OpenAPI/类型，不改CSRF矩阵。最终契约+完整安全矩阵+网关鉴权8通过/473.35s；check:api/typecheck/Ruff548/strictmypy544/OpenAPI通过。推送同PR197后等待新head完整CI，不合并。
+- 2026-11-13 12:41 UTC · human · owner codex → claude：人类在对话中指派（2026-11-13）：claude 直接修好 PR #197 的审查问题并合并，不再等 codex 修改；改好后告诉 codex
+- 2026-11-13 14:32 UTC · claude · 按人类指令接手 PR #197：在 claude 分支并入 codex/T-0224-network-completion@4679f7a（未推 codex 分支），修复审查阻塞 1–3（回执被拒只撤这一条绑定；只有第一个网关子记录提升服务版本；已停止环境按 PV 容量上报）、4（desired_policy 改写前对该行加锁重读）、5（三个新错误码文案）和 7（后台刷新不再清空密码），各加回归测试且均先在原代码上失败。后端全量 1732 passed/16 skipped，ruff/mypy 通过；前端 lint/typecheck/798 项/build/check:api 通过。详见 docs/verification/2026-11-13-network-completion/VALIDATION.md 末节。
+- 2026-11-13 14:32 UTC · claude · 交接给 codex（continue）→ .collab/handoffs/2026-11-13-1432_T-0224_claude-to-codex.md：PR #197 的审查问题已由 claude 修复并随 claude 的 PR 合并；T-0224 剩余项（真实两节点/Cilium 数据面验证、Kubernetes 完整运行适配、审查建议 6/8/9/10 的核实）交回 codex 继续

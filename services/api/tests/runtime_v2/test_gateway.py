@@ -214,6 +214,44 @@ async def test_revoke_closes_listener_and_session_before_ack() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rejected_ack_withdraws_only_that_binding() -> None:
+    # An owner changed another workspace's grant after /config, so control rejects
+    # that ACK as stale. Only that listener goes; established streams elsewhere stay.
+    async with running_gateway() as (gateway, control, _):
+        reader, writer = await connect(control)
+        await exchange(reader, writer)
+        other_port = free_port(control.port + 1)
+        other = dict(copy.deepcopy(control.binding), record_id="other", port=other_port)
+        own_config = control.config
+        stale = {"other"}
+
+        async def config() -> dict[str, Any]:
+            snapshot = await own_config()
+            snapshot["bindings"].append(copy.deepcopy(other))
+            return snapshot
+
+        async def ack(body: dict[str, Any]) -> dict[str, Any]:
+            control.acks.append(body)
+            return {"accepted": body["record_id"] not in stale}
+
+        control.config = config  # type: ignore[method-assign]
+        control.ack = ack  # type: ignore[method-assign]
+        await gateway.reconcile()
+        await exchange(reader, writer, b"unrelated stream survives")
+        assert set(gateway.listeners) == {("ingress", "record")}
+        with pytest.raises(OSError):
+            await asyncio.open_connection("127.0.0.1", other_port)
+        stale.clear()  # the next pass reads the current declaration
+        await gateway.reconcile()
+        other_reader, other_writer = await asyncio.open_connection("127.0.0.1", other_port)
+        await exchange(other_reader, other_writer)
+        await exchange(reader, writer)
+        for stream in (writer, other_writer):
+            stream.close()
+            await stream.wait_closed()
+
+
+@pytest.mark.asyncio
 async def test_config_outage_closes_all_streams_and_listener() -> None:
     async with running_gateway() as (gateway, control, _):
         reader, writer = await connect(control)

@@ -89,3 +89,26 @@ CI完整794项通过是单独取得的证据。没有通过增加测试超时、
 ## 交付边界
 
 跨实例/公网仅支持TCP；同实例私网支持TCP/UDP。IPv6和任意公网出口不在当前安全档位内。当前Kubernetes执行器对exec、文件、快照等未实现操作明确拒绝；旧Docker环境保留原后端。这些更广的T-0224事项未冒充完成，任务继续in_progress；本PR由Claude审查，Codex不合并。
+
+## Claude 接手修复 PR #197 审查问题（2026-11-13）
+
+人类 2026-11-13 要求 Claude 直接修好 PR #197 的审查问题并合并，不再等 Codex。Claude 没有推送 Codex 的分支：在自己的分支上并入 `codex/T-0224-network-completion`（head `4679f7a`）后修改，经新的 PR 合并。
+
+| # | 问题 | 修复 | 回归测试（修复前实际失败 → 修复后通过） |
+|---|---|---|---|
+| 1 | 网关回执被拒（owner 在 `/config` 之后改了规则）时，`reconcile` 外层 `except BaseException` 关掉所有工作空间的监听和会话 | `Gateway._ack` 返回是否被接受；被拒只撤下这一条绑定的监听，下一轮按最新声明重开 | `tests/runtime_v2/test_gateway.py::test_rejected_ack_withdraws_only_that_binding` |
+| 2 | 每新增一条入站规则或公网入口都把服务改回 `approved_pending_apply`，`NetworkGateway.target()` 因此暂时撤下同一服务已生效的兄弟规则并断开会话 | 只有服务的第一个网关子记录（`desired_policy` 的 `gateway_ingress` 由关变开）才提升服务版本；后续子记录沿用已生效的节点策略 | `tests/test_runner_network_gateway_control.py::test_second_gateway_child_keeps_live_sibling_and_service` |
+| 3 | 节点上有一个已停止的环境（Deployment 副本数 0、保留 PVC、没有 Pod）时 `seen != set(own)`，节点永远发不出资源上报 | 副本数为 0 的环境按保留卷计入：kubelet 没有 Pod 就没有卷用量，取绑定的本地 PV 声明容量（上限，不是 0）；副本数 1 却没有 Pod 仍拒绝上报 | `tests/runtime_v2/test_node_telemetry.py::test_stopped_environment_reports_retained_volume_capacity`，原 `stopped-pvc` 用例改为 `pod-missing` 与 `stopped-pvc-unbound` 两个拒绝用例 |
+| 4 | `desired_policy` 去掉了行锁却仍改 `desired_generation` / `desired_revision` / `state`，可能与 `update_rule` 并发写出两份共用同一版本的配置 | 扫描仍不加锁（轮询不等 owner 写操作）；要改的那一行先 `FOR UPDATE` 并重读（`populate_existing`），条件仍成立才写 | 并发时序难以稳定复现，未单独加测试；由完整后端测试覆盖原有行为 |
+| 5 | 页面不认识 `NETWORK_SOURCE_FORBIDDEN`、`NETWORK_GATEWAY_CAPACITY`、`NETWORK_GATEWAY_PORTS_EXHAUSTED`，只显示“请求失败，请稍后重试” | `ContainerNetworkPanel.vue` 补三条说明（仍不显示服务器原文，避免回显密码） | `apps/web/tests/container-network-management.test.ts` 参数化用例加三种错误码 |
+| 7 | 每 30 秒的后台刷新会让 `fresh` 变成 false，清空正在输入的确认密码 | 只在读取失败或没有数据时清空密码 | `container-network-management.test.ts::keeps the typed password across a successful background refresh` |
+
+审查里的 6、8、9、10（续租间隔、每次轮询取新的策略版本、`apply_error` 清空、控制器 2 秒周期）是性能或行为取舍，没有确认为缺陷，本次不改，留给 T-0224 后续核实。
+
+本地实际结果（本会话自己的 PostgreSQL 16 与 Redis 容器）：
+
+- `ruff check .` 通过，`ruff format --check .` 548 个文件已格式化，`mypy app tests` 475 个文件无问题；
+- 后端全量 `TEST_DATABASE_URL=… TEST_REDIS_URL=… REQUIRE_INTEGRATION=1 pytest -q`：`1732 passed, 16 skipped in 3284.21s`；
+- 前端 `eslint . --max-warnings 0`、`vue-tsc --noEmit` 通过，`vitest run` 79 个文件 798 项通过，`vite build` 成功，`npm run check:api` 后 `schema.d.ts` 无变化。
+
+真实两节点 / Cilium / 负载均衡的数据面验证仍未做，`RUNNER_NETWORK_VERIFIED` 仍默认关闭，与上文一致。

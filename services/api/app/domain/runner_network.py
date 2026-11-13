@@ -56,6 +56,15 @@ def now() -> datetime:
     return datetime.now(UTC)
 
 
+def admits_gateway(row: RunnerIngressRule | RunnerPublishedEndpoint) -> bool:
+    """A live child whose service's node policy must admit gateway traffic."""
+    return (
+        row.state not in ("revoked", "expired")
+        and row.expires_at is not None
+        and row.expires_at > now()
+    )
+
+
 def ack_allowed(
     host_id: uuid.UUID,
     expected_host: uuid.UUID,
@@ -373,6 +382,38 @@ class RunnerNetworkService:
         await self.db.commit()
         return self.output(row, env)
 
+    async def _gateway_ingress(self, env: RunnerEnvironment, service_id: uuid.UUID) -> bool:
+        """Whether desired_policy already reports gateway_ingress for this service."""
+        for rule in await self._rows(RunnerIngressRule, env):
+            if (
+                isinstance(rule, RunnerIngressRule)
+                and rule.service_id == service_id
+                and admits_gateway(rule)
+                and await has_capability(
+                    self.db,
+                    env.workspace_id,
+                    rule.source_instance_id,
+                    "runner.cross_agent_communication",
+                )
+            ):
+                return True
+        return any(
+            isinstance(row, RunnerPublishedEndpoint)
+            and row.service_id == service_id
+            and admits_gateway(row)
+            for row in await self._rows(RunnerPublishedEndpoint, env)
+        )
+
+    @staticmethod
+    def _fence_gateway_ingress(service: RunnerService, admitted: bool) -> None:
+        # The first gateway child turns on the service's gateway-ingress policy on
+        # the node, so the service waits for the node to confirm it before the
+        # gateway may use it. Later children reuse that applied policy: bumping the
+        # service again would withdraw every live sibling rule and its sessions.
+        if not admitted:
+            service.desired_revision += 1
+            service.state = "approved_pending_apply"
+
     async def _invalidate_children(
         self, env: RunnerEnvironment, service_id: uuid.UUID, *, revoke: bool, context: AuthContext
     ) -> None:
@@ -432,6 +473,7 @@ class RunnerNetworkService:
             raise ApiError(
                 403, "SOURCE_CAPABILITY_REQUIRED", "来源实例需要已生效的跨智能体通信权限"
             )
+        admitted = await self._gateway_ingress(env, service.id)
         await reserve_gateway_slot(self.db, kind="ingress")
         row = RunnerIngressRule(
             **self._fields(env, context),
@@ -443,8 +485,7 @@ class RunnerNetworkService:
         self.db.add(row)
         await self.db.flush()
         await self._audit(context, env, row, "ingress_created")
-        service.desired_revision += 1
-        service.state = "approved_pending_apply"
+        self._fence_gateway_ingress(service, admitted)
         await self.db.commit()
         return self.output(row, env)
 
@@ -463,6 +504,7 @@ class RunnerNetworkService:
         if service.protocol != "TCP":
             raise ApiError(409, "NETWORK_PROTOCOL_UNSUPPORTED", "跨实例及公网网关目前仅支持TCP")
         require_public_sources(self.settings, body.source_cidrs)
+        admitted = await self._gateway_ingress(env, service.id)
         await reserve_gateway_slot(self.db, kind="published")
         row = RunnerPublishedEndpoint(
             **self._fields(env, context),
@@ -480,8 +522,7 @@ class RunnerNetworkService:
         self.db.add(row)
         await self.db.flush()
         await self._audit(context, env, row, "published")
-        service.desired_revision += 1
-        service.state = "approved_pending_apply"
+        self._fence_gateway_ingress(service, admitted)
         await self.db.commit()
         return self.output(row, env)
 
@@ -609,9 +650,22 @@ class RunnerNetworkService:
                 env = await self.environment(host.workspace_id, row.environment_id)
                 generation = int((env.runtime_metadata or {}).get("generation", 0))
                 if row.desired_generation != generation and row.state not in ("revoked", "expired"):
-                    row.desired_generation = generation
-                    row.desired_revision += 1
-                    row.state = "approved_pending_apply"
+                    # The scan above is unlocked so polling never waits on owners. Re-read
+                    # this row under its lock before writing, or a concurrent owner update
+                    # could be overwritten and two contents would share one revision.
+                    await self.db.scalar(
+                        select(model)
+                        .where(model.id == row.id)
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
+                    )
+                    if row.desired_generation != generation and row.state not in (
+                        "revoked",
+                        "expired",
+                    ):
+                        row.desired_generation = generation
+                        row.desired_revision += 1
+                        row.state = "approved_pending_apply"
                 out = self.output(row, env).model_dump(mode="json")
                 out.update(
                     generation=row.desired_generation
@@ -631,10 +685,9 @@ class RunnerNetworkService:
                         service_name="svc-" + row.id.hex,
                         gateway_ingress=any(r.service_id == row.id for r in valid_rules)
                         or any(
-                            e.service_id == row.id
-                            and e.state not in ("revoked", "expired")
-                            and e.expires_at
-                            and e.expires_at > now()
+                            isinstance(e, RunnerPublishedEndpoint)
+                            and e.service_id == row.id
+                            and admits_gateway(e)
                             for e in endpoints
                         ),
                     )

@@ -2,6 +2,8 @@
 
 The supported storage profile is node-local PVs on the node filesystem. Missing
 measurements (including detached PVCs) refuse the whole sample, never imply zero.
+A stopped environment (zero replicas, retained PVC) has no Pod stats, so its
+volume counts at the bound PV's declared capacity.
 Kubernetes lifecycle reconciliation remains fenced by the controller's UID receipts.
 """
 
@@ -292,33 +294,7 @@ class NodeTelemetry:
             ]
             if pod["spec"].get("volumes") != expected_volumes:
                 raise TelemetryUnavailable("Pod storage identity unavailable")
-            claim = self.api.get_optional("pvc", claim_name, identity.namespace)
-            if (
-                claim is None
-                or _identity(claim, self.node_name) != identity
-                or claim.get("status", {}).get("phase") != "Bound"
-            ):
-                raise TelemetryUnavailable("current PVC identity unavailable")
-            inventoried = own_claims.get(key)
-            if inventoried is None or inventoried["metadata"]["uid"] != claim["metadata"]["uid"]:
-                raise TelemetryUnavailable("PVC changed during sampling")
-            pv = self.api.get_optional("pv", claim["spec"]["volumeName"])
-            pv_spec = (pv or {}).get("spec") or {}
-            ref = pv_spec.get("claimRef") or {}
-            if (
-                not (pv or {}).get("metadata", {}).get("uid")
-                or not pv_spec.get("local")
-                or not _pinned(pv_spec.get("nodeAffinity", {}).get("required", {}), self.node_name)
-                or any(
-                    ref.get(k) != v
-                    for k, v in {
-                        "name": claim_name,
-                        "namespace": identity.namespace,
-                        "uid": claim["metadata"]["uid"],
-                    }.items()
-                )
-            ):
-                raise TelemetryUnavailable("persistent volume Node or PVC binding unavailable")
+            self._retained_volume(identity, own_claims.get(key))
             volume_stats = [
                 volume
                 for volume in stats.get("volume", [])
@@ -349,9 +325,59 @@ class NodeTelemetry:
             )
             volumes.append({"env_id": key, "name": claim_name, "bytes": used})
             seen.add(key)
-        if seen != set(own):
-            raise TelemetryUnavailable("managed deployment has unknown or detached storage")
+        for key in sorted(set(own) - seen):
+            # A stopped environment keeps its Deployment at zero replicas and its
+            # retained volume. Without a Pod kubelet reports no volume usage, so
+            # count the bound local PV's declared capacity: an upper bound, never 0.
+            identity, deployment = own[key]
+            if deployment["spec"].get("replicas") != 0:
+                raise TelemetryUnavailable("managed deployment has unknown or detached storage")
+            pv = self._retained_volume(identity, own_claims.get(key))
+            capacity = _quantity(str(pv["spec"]["capacity"]["storage"]))
+            if capacity != int(capacity):
+                raise TelemetryUnavailable("invalid persistent volume capacity")
+            volumes.append(
+                {
+                    "env_id": key,
+                    "name": "data-" + identity.environment_id.hex,
+                    "bytes": _uint(int(capacity)),
+                }
+            )
         return containers, volumes, unknown
+
+    def _retained_volume(
+        self, identity: RuntimeIdentity, inventoried: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """The current claim and its node-local PV, re-read and matched to the inventory."""
+        claim_name = "data-" + identity.environment_id.hex
+        claim = self.api.get_optional("pvc", claim_name, identity.namespace)
+        if (
+            claim is None
+            or _identity(claim, self.node_name) != identity
+            or claim.get("status", {}).get("phase") != "Bound"
+        ):
+            raise TelemetryUnavailable("current PVC identity unavailable")
+        if inventoried is None or inventoried["metadata"]["uid"] != claim["metadata"]["uid"]:
+            raise TelemetryUnavailable("PVC changed during sampling")
+        pv = self.api.get_optional("pv", claim["spec"]["volumeName"])
+        pv_spec = (pv or {}).get("spec") or {}
+        ref = pv_spec.get("claimRef") or {}
+        if (
+            pv is None
+            or not pv.get("metadata", {}).get("uid")
+            or not pv_spec.get("local")
+            or not _pinned(pv_spec.get("nodeAffinity", {}).get("required", {}), self.node_name)
+            or any(
+                ref.get(k) != v
+                for k, v in {
+                    "name": claim_name,
+                    "namespace": identity.namespace,
+                    "uid": claim["metadata"]["uid"],
+                }.items()
+            )
+        ):
+            raise TelemetryUnavailable("persistent volume Node or PVC binding unavailable")
+        return pv
 
     def report(self, workspace: Workspace) -> None:
         # A ticket must precede API reads; failed collection never sends /report.

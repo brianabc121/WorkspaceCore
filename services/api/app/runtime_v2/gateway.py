@@ -362,14 +362,19 @@ class Gateway:
         for key in list(self.listeners):
             await self._stop(key)
 
-    async def _ack(self, binding: dict[str, Any], success: bool) -> None:
+    async def _ack(self, binding: dict[str, Any], success: bool) -> bool:
+        """Report one binding; False when control no longer knows this revision.
+
+        A rejection is the normal race of an owner changing or revoking the
+        declaration after /config. It concerns only that binding: the caller
+        withdraws its listener and the next reconcile reads the current one.
+        """
         async with asyncio.timeout(self.operation_timeout):
             result = await self.control.ack(
                 {key: binding[key] for key in ("record_id", "kind", "revision", "generation")}
                 | {"success": success, "active": bool(binding["active"] and success)}
             )
-            if result.get("accepted") is not True:
-                raise ValueError("control rejected binding acknowledgement")
+        return result.get("accepted") is True
 
     async def reconcile(self) -> None:
         async with self._lock:
@@ -436,7 +441,9 @@ class Gateway:
                         await self._stop(key)
                         await self._ack(binding, False)
                         continue
-                    await self._ack(binding, True)
+                    if not await self._ack(binding, True):
+                        # Stale revision: withdraw only this grant, never the others.
+                        await self._stop(key)
                 if self.operator_denied:
                     # Target readiness belongs to each binding. One stale target must
                     # not prevent unrelated approved grants from becoming usable.

@@ -62,17 +62,22 @@ class Api(Kubectl):
             )
         return json.dumps({"items": self.pods if args[1] == "pods" else self.deployments})
 
-    def add_workload(self) -> RuntimeIdentity:
-        ident = RuntimeIdentity(UUID(int=1), UUID(int=2), UUID(int=3), UUID(int=4), 1, "node-a")
+    def add_workload(self, n: int = 1, *, stopped: bool = False) -> RuntimeIdentity:
+        """Environment n on node-a; a stopped one keeps its PVC but has no Pod."""
+        env_id, allocation = (3, 4) if n == 1 else (100 + n, 200 + n)
+        suffix = "" if n == 1 else f"-{n}"
+        ident = RuntimeIdentity(
+            UUID(int=1), UUID(int=2), UUID(int=env_id), UUID(int=allocation), 1, "node-a"
+        )
         claim, deploy = workload(
             ident, {"image": "repo@sha256:" + "b" * 64, "cpus": 1, "memory_mb": 128, "disk_gb": 1}
         )
-        deploy["metadata"]["uid"] = "deploy-uid"
+        deploy["metadata"]["uid"] = "deploy-uid" + suffix
         pod = {
             "metadata": {
-                "name": "pod-1",
+                "name": f"pod-{n}",
                 "namespace": ident.namespace,
-                "uid": "pod-uid",
+                "uid": "pod-uid" + suffix,
                 "labels": ident.labels,
             },
             "spec": {
@@ -81,26 +86,25 @@ class Api(Kubectl):
             },
             "status": {"phase": "Running"},
         }
-        claim["metadata"]["uid"] = "claim-uid"
-        claim["spec"]["volumeName"] = "pv-1"
+        claim["metadata"]["uid"] = "claim-uid" + suffix
+        claim["spec"]["volumeName"] = f"pv-{n}"
         claim["status"] = {"phase": "Bound"}
-        self.pods.append(pod)
         self.deployments.append(deploy)
         self.objects.update(
             {
-                ("pod", "pod-1"): pod,
                 ("pvc", claim["metadata"]["name"]): claim,
                 ("namespace", ident.namespace): {
                     "metadata": {"name": ident.namespace, "uid": "ns-uid", "labels": ident.labels}
                 },
-                ("pv", "pv-1"): {
-                    "metadata": {"name": "pv-1", "uid": "pv-uid"},
+                ("pv", f"pv-{n}"): {
+                    "metadata": {"name": f"pv-{n}", "uid": "pv-uid" + suffix},
                     "spec": {
-                        "local": {"path": "/runner/data"},
+                        "capacity": {"storage": "1Gi"},
+                        "local": {"path": "/runner/data" + suffix},
                         "claimRef": {
                             "name": claim["metadata"]["name"],
                             "namespace": ident.namespace,
-                            "uid": "claim-uid",
+                            "uid": "claim-uid" + suffix,
                         },
                         "nodeAffinity": {
                             "required": {
@@ -121,10 +125,19 @@ class Api(Kubectl):
                 },
             }
         )
+        if stopped:
+            deploy["spec"]["replicas"] = 0
+            return ident
+        self.pods.append(pod)
+        self.objects[("pod", f"pod-{n}")] = pod
         timestamp = datetime.now(UTC).isoformat()
-        self.summary["pods"] = [
+        self.summary["pods"] += [
             {
-                "podRef": {"name": "pod-1", "namespace": ident.namespace, "uid": "pod-uid"},
+                "podRef": {
+                    "name": f"pod-{n}",
+                    "namespace": ident.namespace,
+                    "uid": "pod-uid" + suffix,
+                },
                 "memory": {"time": timestamp, "workingSetBytes": 64 << 20, "usageBytes": 70 << 20},
                 "containers": [
                     {"name": "environment", "rootfs": {"time": timestamp, "usedBytes": 100}}
@@ -209,7 +222,8 @@ def test_untrusted_node_refuses_capacity_and_report(case: str) -> None:
         "storage-wrong-claim",
         "pv-wrong-node",
         "pod-replaced",
-        "stopped-pvc",
+        "pod-missing",
+        "stopped-pvc-unbound",
     ],
 )
 def test_unknown_workload_never_sends_incomplete_report(case: str) -> None:
@@ -230,14 +244,35 @@ def test_unknown_workload_never_sends_incomplete_report(case: str) -> None:
     elif case == "pod-replaced":
         api.objects[("pod", "pod-1")] = copy.deepcopy(api.pods[0])
         api.objects[("pod", "pod-1")]["metadata"]["uid"] = "replacement"
+    elif case == "pod-missing":
+        # Desired running (replicas 1) without a Pod: usage is unknown, not stopped.
+        api.pods.clear()
+        api.summary["pods"].clear()
     else:
         api.pods.clear()
         api.summary["pods"].clear()
         api.deployments[0]["spec"]["replicas"] = 0
+        api.objects[("pv", "pv-1")]["spec"]["claimRef"]["uid"] = "foreign-claim"
     workspace = Workspace(api)
     with pytest.raises(TelemetryUnavailable):
         NodeTelemetry(api, ident.node_name).report(workspace)  # type: ignore[arg-type]
     assert all(path != "/report" for path, _ in workspace.sent)
+
+
+def test_stopped_environment_reports_retained_volume_capacity() -> None:
+    # Stopping scales the Deployment to zero and keeps the PVC. One stopped
+    # environment must not block every later report from its whole node.
+    api = Api()
+    running = api.add_workload()
+    stopped = api.add_workload(2, stopped=True)
+    workspace = Workspace(api)
+    NodeTelemetry(api, "node-a").report(workspace)  # type: ignore[arg-type]
+    report = dict(workspace.sent)["/report"]
+    assert [c["env_id"] for c in report["containers"]] == [str(running.environment_id)]
+    volumes = {v["env_id"]: v["bytes"] for v in report["volumes"]}
+    # kubelet has no stats without a Pod: the PV's declared capacity, never zero.
+    assert volumes == {str(running.environment_id): 200, str(stopped.environment_id): 1 << 30}
+    assert report["volumes_bytes"] == 200 + (1 << 30)
 
 
 def test_orphaned_ownnode_pvc_never_counts_zero() -> None:
