@@ -1,0 +1,92 @@
+{
+  "utc": "2026-11-13T19:27:54.947612+00:00",
+  "before": {
+    "version": "0067",
+    "tables": {
+      "agent_instances": {
+        "rows": 3,
+        "digest": "d293a67bae123cf234a68e1f186d53b2"
+      },
+      "runner_hosts": {
+        "rows": 2,
+        "digest": "d8d324e664fc37156895265d0f54303b"
+      },
+      "runner_environments": {
+        "rows": 3,
+        "digest": "5dfcf34c966a1159a86aaf2dacaf20af"
+      },
+      "runner_ingress_rules": {
+        "rows": 2,
+        "digest": "a87b1c9861a5279c28af1b7dfe521a6b"
+      },
+      "llm_bridge_bridges": {
+        "rows": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "llm_bridge_grants": {
+        "rows": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      }
+    },
+    "sequences": {
+      "runner_ingress_port_seq": {
+        "last_value": 30001,
+        "is_called": true
+      },
+      "runner_public_port_seq": {
+        "last_value": 20000,
+        "is_called": false
+      },
+      "runner_network_policy_revision_seq": {
+        "last_value": 20,
+        "is_called": true
+      }
+    }
+  },
+  "after": {
+    "version": "0068",
+    "tables": {
+      "agent_instances": {
+        "rows": 3,
+        "digest": "d293a67bae123cf234a68e1f186d53b2"
+      },
+      "runner_hosts": {
+        "rows": 2,
+        "digest": "d8d324e664fc37156895265d0f54303b"
+      },
+      "runner_environments": {
+        "rows": 3,
+        "digest": "5dfcf34c966a1159a86aaf2dacaf20af"
+      },
+      "runner_ingress_rules": {
+        "rows": 2,
+        "digest": "a87b1c9861a5279c28af1b7dfe521a6b"
+      },
+      "llm_bridge_bridges": {
+        "rows": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "llm_bridge_grants": {
+        "rows": 0,
+        "digest": "d41d8cd98f00b204e9800998ecf8427e"
+      }
+    },
+    "sequences": {
+      "runner_ingress_port_seq": {
+        "last_value": 30001,
+        "is_called": true
+      },
+      "runner_public_port_seq": {
+        "last_value": 20000,
+        "is_called": false
+      },
+      "runner_network_policy_revision_seq": {
+        "last_value": 20,
+        "is_called": true
+      }
+    }
+  },
+  "fixture_row_counts_and_digests_preserved": true,
+  "ingress_public_allocators_unchanged": true,
+  "policy_allocator_not_reset": true
+}

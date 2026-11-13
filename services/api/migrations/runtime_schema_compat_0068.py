@@ -1,40 +1,18 @@
-"""大模型会话桥模块（T-0228，docs/v2/LLM_BRIDGE_PLAN.md 第 11 节）
+"""Frozen reconciliation for the historical runtime 0066/0067 revision collision.
 
-两张新表：llm_bridge_bridges（工作空间登记的会话桥，管理令牌加密保存）、
-llm_bridge_grants（按实例的“大模型会话权限”）。只新增，不改已有的表。
-
-downgrade 删掉这两张表。
-
-Revision ID: 0067
-Revises: 0066
-Create Date: 2026-11-13
+Keep independent of evolving application models. Validate the complete old shape
+before replaying either historical DDL; existing rows and allocators stay intact.
 """
 
-from collections.abc import Sequence
-from datetime import datetime
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import sqlalchemy as sa
 from alembic import context, op
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine.reflection import Inspector
-
-revision: str = "0067"
-down_revision: str | None = "0066"
-branch_labels: str | Sequence[str] | None = None
-depends_on: str | Sequence[str] | None = None
-
-
-def _flag(name: str, default: str = "false") -> sa.Column[bool]:
-    return sa.Column(name, sa.Boolean(), server_default=sa.text(default), nullable=False)
-
-
-def _stamp(name: str) -> sa.Column[datetime]:
-    return sa.Column(
-        name, sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
-    )
 
 
 def _verify_columns(
@@ -52,6 +30,7 @@ def _verify_columns(
         if (
             c is None
             or not isinstance(c["type"], kind)
+            or (kind is sa.Integer and isinstance(c["type"], (sa.SmallInteger, sa.BigInteger)))
             or c["nullable"] != nullable
             or actual_default != default
             or (isinstance(c["type"], sa.DateTime) and not c["type"].timezone)
@@ -59,8 +38,20 @@ def _verify_columns(
             raise RuntimeError(f"partial legacy schema; incompatible column {table}.{name}")
 
 
+def _verify_validated_constraints(table: str) -> None:
+    invalid = op.get_bind().scalar(
+        sa.text(
+            "SELECT conname FROM pg_constraint WHERE conrelid=to_regclass(:table) "
+            "AND contype IN ('c','f') AND NOT convalidated LIMIT 1"
+        ),
+        {"table": "workspace." + table},
+    )
+    if invalid is not None:
+        raise RuntimeError(f"partial legacy schema; unvalidated constraint on {table}")
+
+
 def _legacy_state() -> tuple[bool, bool]:
-    """0066 was historically used by two branches: verify both shapes before writing."""
+    """0066 and 0067 have historical meanings: verify both shapes before writing."""
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     gateway = [
@@ -97,6 +88,7 @@ def _legacy_state() -> tuple[bool, bool]:
             ("runner_ingress_rules", "runner_ingress_port_seq", 30000, 39999),
             ("runner_published_endpoints", "runner_public_port_seq", 20000, 29999),
         ):
+            _verify_validated_constraints(table)
             _verify_columns(
                 inspector,
                 table,
@@ -159,6 +151,7 @@ def _legacy_state() -> tuple[bool, bool]:
         raise RuntimeError("partial legacy bridge schema; operator reconciliation required")
     if all(bridge):
         for table, columns in expected.items():
+            _verify_validated_constraints(table)
             if {c["name"] for c in inspector.get_columns(table, schema="workspace")} != columns:
                 raise RuntimeError("partial legacy bridge schema; unexpected columns")
         common = {
@@ -217,95 +210,53 @@ def _legacy_state() -> tuple[bool, bool]:
         ):
             raise RuntimeError("partial legacy bridge schema; missing uniqueness")
     if not any(gateway) and not any(bridge):
-        raise RuntimeError("unknown legacy 0066 state; neither historical schema is present")
+        raise RuntimeError("unknown legacy 0066/0067 state; neither historical schema is present")
     return all(gateway), all(bridge)
 
 
-def upgrade() -> None:
+def _historical(filename: str) -> ModuleType:
+    spec = spec_from_file_location(
+        "runtime_historical_" + filename.removesuffix(".py"),
+        Path(__file__).with_name("versions") / filename,
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("historical runtime migration unavailable")
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _require_online() -> None:
     if context.is_offline_mode():
-        raise RuntimeError("legacy 0066 reconciliation requires an online database")
+        raise RuntimeError("legacy 0066/0067 reconciliation requires an online database")
+
+
+def reconcile_legacy_runtime() -> None:
+    _require_online()
     gateway, bridge = _legacy_state()
     if not gateway:
-        # Replay only the immutable historical DDL when the old bridge branch marked
-        # itself 0066 without applying the gateway migration. Never reset live sequences.
-        spec = spec_from_file_location(
-            "historical_gateway_0066",
-            Path(__file__).with_name("20261113_0066_runner_gateway_ports.py"),
-        )
-        if spec is None or spec.loader is None:
-            raise RuntimeError("historical gateway migration unavailable")
-        module = module_from_spec(spec)
-        spec.loader.exec_module(module)
-        module.upgrade()
-    if bridge:
-        return
-    op.create_table(
-        "llm_bridge_bridges",
-        sa.Column(
-            "id",
-            postgresql.UUID(as_uuid=True),
-            server_default=sa.text("gen_random_uuid()"),
-            nullable=False,
-        ),
-        sa.Column("workspace_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("name", sa.Text(), nullable=False),
-        sa.Column("base_url", sa.Text(), nullable=False),
-        sa.Column("token_ref", sa.Text(), server_default=sa.text("''"), nullable=False),
-        _flag("enabled", "true"),
-        _stamp("created_at"),
-        _stamp("updated_at"),
-        sa.ForeignKeyConstraint(
-            ["workspace_id"],
-            ["workspace.workspaces.id"],
-            name=op.f("fk_llm_bridge_bridges_workspace_id_workspaces"),
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_llm_bridge_bridges")),
-        sa.UniqueConstraint(
-            "workspace_id", "name", name=op.f("uq_llm_bridge_bridges_workspace_id_name")
-        ),
-        schema="workspace",
-    )
-    op.create_table(
-        "llm_bridge_grants",
-        sa.Column("instance_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("workspace_id", postgresql.UUID(as_uuid=True), nullable=False),
-        _flag("enabled"),
-        _flag("can_write"),
-        _flag("can_account"),
-        _flag("can_takeover"),
-        sa.Column(
-            "platforms",
-            postgresql.JSONB(astext_type=sa.Text()),
-            server_default=sa.text("'[]'::jsonb"),
-            nullable=False,
-        ),
-        _stamp("updated_at"),
-        sa.ForeignKeyConstraint(
-            ["instance_id"],
-            ["workspace.agent_instances.id"],
-            name=op.f("fk_llm_bridge_grants_instance_id_agent_instances"),
-            ondelete="CASCADE",
-        ),
-        sa.ForeignKeyConstraint(
-            ["workspace_id"],
-            ["workspace.workspaces.id"],
-            name=op.f("fk_llm_bridge_grants_workspace_id_workspaces"),
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("instance_id", name=op.f("pk_llm_bridge_grants")),
-        schema="workspace",
-    )
+        _historical("20261113_0067_runner_gateway_ports.py")._create_gateway()
+    if not bridge:
+        _historical("20261113_0066_llm_bridge.py").upgrade()
+    if _legacy_state() != (True, True):
+        raise RuntimeError("legacy runtime reconciliation did not produce both schemas")
 
 
-def downgrade() -> None:
-    bind = op.get_bind()
-    if bind.scalar(
+def refuse_bridge_data_loss() -> None:
+    _require_online()
+    _, bridge = _legacy_state()
+    if not bridge:
+        raise RuntimeError("legacy gateway revision must be reconciled before bridge downgrade")
+    # Hold the locks through Alembic's transaction, including both subsequent DROPs.
+    # A writer must not commit new data after the empty result and lose it on DROP.
+    op.execute(
+        "LOCK TABLE workspace.llm_bridge_bridges, workspace.llm_bridge_grants "
+        "IN ACCESS EXCLUSIVE MODE"
+    )
+    if op.get_bind().scalar(
         sa.text(
             "SELECT EXISTS(SELECT 1 FROM workspace.llm_bridge_grants) "
             "OR EXISTS(SELECT 1 FROM workspace.llm_bridge_bridges)"
         )
     ):
         raise RuntimeError("bridge data exists; refusing destructive downgrade")
-    op.drop_table("llm_bridge_grants", schema="workspace")
-    op.drop_table("llm_bridge_bridges", schema="workspace")

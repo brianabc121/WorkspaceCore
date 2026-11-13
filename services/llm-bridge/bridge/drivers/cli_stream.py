@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import json
 import os
 import re
@@ -232,25 +231,28 @@ class CliStreamDriver(Driver):
         return out.decode(errors="replace")
 
     async def status(self) -> AccountStatus:
+        # 账号标识只用官方程序自己报告的（例如邮箱）。用 API 密钥或令牌登录时看不到是哪个账号：
+        # 不拿密钥的指纹充当账号，否则换一把密钥会被当成换账号
         secret = self._secret()
         method = secret.get("method")
-        fingerprint = None
-        if secret.get("value"):
-            digest = hashlib.sha256(secret["value"].encode()).hexdigest()[:12]
-            fingerprint = f"{method}:{digest}"
         if self.profile.auth_cli:
             try:
                 data = json.loads(await self._run_short(["auth", "status"]))
             except ValueError:
                 data = {}
-            if not data.get("loggedIn"):
-                return AccountStatus(logged_in=False, detail="官方程序报告未登录")
-            identity = data.get("email") or fingerprint
-            return AccountStatus(True, identity, str(data.get("authMethod") or method or ""))
+            if data.get("loggedIn"):
+                reported = str(data.get("authMethod") or method or "")
+                return AccountStatus(True, data.get("email") or None, reported)
+            if secret.get("value"):
+                # 配置了密钥或令牌、官方程序却没有确认：不拦在这里，发送时才知道凭据是否有效
+                return AccountStatus(
+                    True, None, method, "官方程序没有确认这份凭据，发送时才能知道是否有效"
+                )
+            return AccountStatus(logged_in=False, detail="官方程序报告未登录")
         if method is None:
             return AccountStatus(logged_in=False, detail="还没有配置登录方式")
         detail = "这个平台没有查询登录状态的命令，发送时才能确认凭据是否有效"
-        return AccountStatus(True, fingerprint, method, detail)
+        return AccountStatus(True, None, method, detail)
 
     async def models(self, mode: Mode) -> list[ModelInfo]:
         if not self.profile.models_from_help:

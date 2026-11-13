@@ -1726,6 +1726,31 @@ def scenario_25(c: Ctx) -> None:
         sql("UPDATE workspace.agent_wakeups SET status = 'cancelled' WHERE source = 'issue' AND status = 'pending'")
 
 
+def scenario_28(c: Ctx) -> None:
+    """外网模式的模型调工作台工具（T-0133）：乙（外网）经模型与 Tool Search 调 list_projects，工作台有执行记录。
+
+    外网模式的 MCP 地址是本机隧道 http://127.0.0.1:<端口>/mcp：OpenClaw 的 SSRF 防护只放行字面上的回环地址，
+    原来“解析到 127.0.0.1 的工作台域名”被拦，模型拿到 Unknown tool id（核验记录 6.4）。外网入口改为接受 Host 127.0.0.1。"""
+    assert c.b.env("MYWS_MCP_URL").startswith("http://127.0.0.1:"), c.b.env("MYWS_MCP_URL")
+    conv_b = c.owner.call("POST", "/api/v1/im/conversations", {"instance_id": c.b.id})["conversation_id"]
+
+    def runs() -> list[dict[str, Any]]:
+        return [e for e in c.owner.call("GET", "/api/v1/ai/tool-executions?limit=100")["items"]
+                if e["instance_id"] == c.b.id and e["tool_name"] == "list_projects"]
+
+    before = {e["id"] for e in runs()}
+    since = time.time()
+    c.owner.send(conv_b, "TOOL:myworkspace__list_projects {}")
+    turns = wait_for("乙经模型调用 list_projects", lambda: [r for r in c.model_calls(c.keys["b"], since)
+                                                     if str(r["result"].get("content", "")).startswith("done:")],
+                     timeout=150)
+    content = str(turns[-1]["result"]["content"])
+    recorded = wait_for("工作台记下乙的 list_projects", lambda: [e for e in runs() if e["id"] not in before],
+                        timeout=30)
+    c.check("场景 28：外网模式的乙经模型（Tool Search）调到工作台工具 list_projects，工作台有执行记录",
+            bool(recorded) and "Unknown tool" not in content, content[:200])
+
+
 # ---------------------------------------------------------------- 运行服务器（T-0141，docs/v2/RUNNER_PLAN.md）
 
 
@@ -2204,7 +2229,7 @@ SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "9": scenario_9, "10": scenario_10, "11": scenario_11, "12": scenario_12, "13": scenario_13, "15": scenario_15,
     "16": scenario_16, "17": scenario_17, "18": scenario_18, "19": scenario_19, "20": scenario_20, "21": scenario_21,
     "22": scenario_22, "23": scenario_23, "25": scenario_25, "24": scenario_24, "26": scenario_26, "27": scenario_27,
-    "6": scenario_6,
+    "28": scenario_28, "6": scenario_6,
 }
 
 

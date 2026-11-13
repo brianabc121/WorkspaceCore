@@ -60,7 +60,14 @@
 这不是有意的：我以为清掉几个环境变量后它处于未登录状态。之后没有再用这份登录做任何调用；
 驱动的子进程只继承白名单里的环境变量，带真实密钥的实测用例要显式提供 `BRIDGE_LIVE_CLAUDE_API_KEY` 才会运行，本次没有运行。
 
-没能核验的：`--resume` 续接真实会话、API 密钥与 `claude setup-token` 令牌两种登录方式、错误结果的真实格式（驱动按 CodeBuddy 实测到的
+**`claude auth status` 的补充核验（T-0229，离线：清空环境变量、不带代理、全新的主目录）**：
+- 设了 `ANTHROPIC_API_KEY`（假值）时输出 `loggedIn: true`、`authMethod: api_key`、`apiKeySource: ANTHROPIC_API_KEY`；
+  设了 `CLAUDE_CODE_OAUTH_TOKEN`（假值）时是 `authMethod: oauth_token`。输出里没有邮箱，所以用密钥或令牌登录时会话桥不知道是哪个账号。
+- **在这个云端会话里，什么凭据都不给它也报告 `loggedIn: true`、`authMethod: oauth_token`**：会话所在的机器在环境变量之外给官方程序
+  提供了登录。这是本环境特有的（CI 的新容器里是未登录，冒烟检查核对过），也是上面那次非有意调用的原因。
+  所以在这类会话里做本机验收时，会话桥不接 Claude 程序（`BRIDGE_CLAUDE_BIN` 指向不存在的路径）。
+
+没能核验的：`--resume` 续接真实会话、API 密钥与 `claude setup-token` 令牌的真实回合、错误结果的真实格式（驱动按 CodeBuddy 实测到的
 `is_error` + `errors` 和文档里的 `result` 两种写法都处理）。
 
 `claude --cloud`：没有非交互的列表和结果接口，`claude.cloud` 是接口桩。
@@ -87,8 +94,11 @@ WorkBuddy 桌面端的会话与 CodeBuddy 命令行的会话是否是同一份�
 | 两个驱动的逻辑 | `tests/test_drivers.py`：对 `tests/fakes/` 里仿真的官方程序；仿真程序的消息形状取自第 2 ~ 4 节的 schema 与实测输出 |
 | 真实程序 | `tests/test_live.py`：CI 里安装锁定版本后实测不需要登录的部分（Codex 的模型、建线程、读取、归档；CodeBuddy 的模型、未登录错误、会话记录） |
 | 镜像 | `infra/llm-bridge/smoke.sh`：非 root、三家版本、健康检查、认证、工具清单、Codex 模型列表、未登录时拒绝新建 |
+| 设置页与同机部署 | `tests/e2e/llm_bridge_browser.cjs`（T-0229）：真实后端 + 真实前端 + 真实会话桥，13 步；CI 的 `workspace` job 用 `make up` + `make llm-bridge-up` 起全栈后运行 |
 
 本会话里 Debian 软件源被网络策略拦截，没能在本地构建完整镜像；镜像的构建和冒烟检查由 CI 完成。
+浏览器验收在本机跑过（工作台 API 与会话桥用 uvicorn 直接启动、前端用 Vite 开发服务器、真实的 codex 与 codebuddy 程序）。
+跑的过程中发现并修了一个部署问题：`make llm-bridge-up` 的 Compose 命令少了 `--env-file .env`，读不到仓库根目录 `.env` 里的令牌。
 
 ## 6. 许可证
 

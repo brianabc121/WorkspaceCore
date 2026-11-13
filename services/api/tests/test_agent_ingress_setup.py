@@ -11,6 +11,7 @@ import json
 import secrets
 import zipfile
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -273,3 +274,45 @@ def test_intranet_bundle_never_gets_the_ca() -> None:
     with zipfile.ZipFile(io.BytesIO(agent_bundle.build(data))) as zf:
         assert "tls/ca.pem" not in zf.namelist()
         assert "--cacert" not in zf.read("compose.yaml").decode()
+
+
+def _env_lines(text: str) -> dict[str, str]:
+    lines = [line for line in text.splitlines() if line and not line.startswith("#")]
+    return dict(line.split("=", 1) for line in lines)
+
+
+def test_public_bundle_mcp_uses_the_literal_loopback_tunnel_address() -> None:
+    """T-0133：OpenClaw 的 SSRF 防护拦下解析到 127.0.0.1 的域名，只放行字面上的回环地址。
+
+    外网模式的 MCP 因此直接写本机隧道的 127.0.0.1；其他请求（实例接口、IM）照旧用外网域名。"""
+    env = _env_lines(_bundle(tunnel_port=18555)["myworkspace.env"][0])
+    assert env["MYWS_MCP_URL"] == "http://127.0.0.1:18555/mcp"
+    assert env["MYWS_AGENT_API"] == f"http://{INTERNAL}:18443/agent-api"
+    assert env["OPENIM_API_ADDR"] == f"http://{INTERNAL}:18443/im/api"
+
+
+def test_intranet_bundle_mcp_keeps_the_ingress_host() -> None:
+    data = agent_bundle.BundleInput(
+        instance_id="00000000-0000-0000-0000-000000000003",
+        instance_name="内网",
+        network_mode="intranet",
+        token="mwa_test",  # noqa: S106 - 测试值
+        base_url="https://agent.internal.example/",
+        whitelist=["ws_1"],
+    )
+    with zipfile.ZipFile(io.BytesIO(agent_bundle.build(data))) as zf:
+        env = _env_lines(zf.read("myworkspace.env").decode())
+    assert env["MYWS_MCP_URL"] == "https://agent.internal.example/mcp"
+
+
+def test_public_ingress_accepts_the_loopback_host_but_still_requires_client_certificates() -> None:
+    """外网入口（:9443）：只有一个站点、接受任何 Host（外网实例的 MCP 用 127.0.0.1），
+    双向证书不变。"""
+    text = (Path(__file__).resolve().parents[3] / "infra" / "caddy" / "agent.Caddyfile").read_text()
+    assert "servers :9443 {\n\t\tstrict_sni_host insecure_off\n\t}" in text
+    site = text.split("\nhttps://:9443 {\n", 1)[1]
+    assert "mode require_and_verify" in site and "trust_pool file /agent-ca/agent-ca.pem" in site
+    assert "import agent_routes public" in site
+    # 这个端口上没有别的站点（关掉 Host 与 SNI 的一致检查才安全）
+    sites = [line for line in text.splitlines() if line.startswith("https://") and ":9443" in line]
+    assert sites == ["https://:9443 {"]

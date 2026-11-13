@@ -24,7 +24,7 @@ Ruling: 保留历史 runner 网关0066，以0067接入会话桥；检查两条�
 - 最终审阅修复定向：14 passed / 29.86s，包含两种历史0066、两分支同时存在、桥权限字段、全部三条序列、异常结构拒绝和数据回退保护。原始输出见 `migration-review-red.txt`、`migration-review-green.txt`（最终版本）、`migration-final.txt`。
 - Ruling: 0067 的旧状态核对要求在线数据库，不支持生成离线 `alembic --sql` 脚本；明确报错，不把未知旧结构假设为完整。
 - Ruling: 回退到0066采用规范化的网关0066语义，非空桥表拒绝破坏性降级；仅在专用空库执行完整up/down/up。未对生产库执行迁移、stamp、删表或降级。
-- 第一轮全套在审阅修复更新期间被新列定义核对阻塞，随后主动停止：3 failed、761 passed、9 skipped、68 errors / 1226.51s，**不是通过**。失败为 `test_migrations_upgrade_downgrade_on_empty_database`、`test_migration_0025_drops_note_confirmation`、`test_migration_0027_task_timeline_keeps_existing_tasks`；错误来自迁移准备阶段同一默认值规范化问题。完整历史日志压缩保存在 `api-superseded-interrupted.log.gz`。最终代码的完整后端 suite 已重新启动，结果待补。
+- 第一轮全套在审阅修复更新期间被新列定义核对阻塞，随后主动停止：3 failed、761 passed、9 skipped、68 errors / 1226.51s，**不是通过**。失败为 `test_migrations_upgrade_downgrade_on_empty_database`、`test_migration_0025_drops_note_confirmation`、`test_migration_0027_task_timeline_keeps_existing_tasks`；错误来自迁移准备阶段同一默认值规范化问题。完整历史日志压缩保存在 `api-superseded-interrupted.log.gz`。该版本后续完整运行结果见第7节；整合新主干后的最终迁移图和定向结果见第9节。
 - 最终代码 Ruff、format（562文件）、mypy（558文件）通过；正式OpenAPI检查无变更。
 
 ## 3. 专用非生产集群：已部署
@@ -119,7 +119,7 @@ python /opt/t0224/lab_fixture.py settle
 
 ## 7. 完整后端测试的环境差异
 
-最终代码的持久后台完整 pytest 正在运行，测试使用本地 `workspace` 数据库用户；目前出现4项 `test_integration.py` 的 Alembic `command.check` 失败，不称全套通过。
+整合新主干之前的代码（API源码为 `a4e062d`，之后到 `f96b020` 只有文档变化）完成持久后台完整 pytest：**5 failed、1745 passed、16 skipped / 3091.84s，退出1**。测试使用本地 `workspace` 数据库用户；4项 `test_integration.py` 加1项 `test_n8n_removal_migration.py::test_removal_upgrade_and_empty_downgrade_preserve_unrelated_data` 均在 Alembic `command.check` 报相同反射差异。原完整日志为 `api-pre-main-integration.log.gz`，不能称全套通过。
 
 只复现第一项，实际 `1 failed in 4.41s`（原始日志 `integration-workspace-user-failure.log.gz`）。默认 `search_path="$user", public` 在用户名与 schema 同为 workspace 时改变 default_schema，Alembic 对已迁移表报告 remove/add FK 与版本表差异。同一最小数据库/元数据、新建连接的对照实测见 `reflection-user-comparison.txt`：workspace 用户产生 `remove_fk/add_fk`；独立 t0224_ci 用户 default_schema=public，产生0项变更。
 
@@ -131,7 +131,7 @@ TEST_REDIS_URL=redis://127.0.0.1:6379/15 REQUIRE_INTEGRATION=1 \
 .venv/bin/pytest -q tests/test_integration.py
 ```
 
-实际输出 `7 passed in 23.67s`，见 `integration-ci-role.txt`。这不是整套重新通过的声明；完整运行结束后保留其原始失败汇总，再与这次环境修正复验分开报告。CI使用 postgres 用户，尚未读取到本 PR 新 head 的 CI 成功证明。
+最初只重跑第一个文件，实际 `7 passed in 23.67s`，见 `integration-ci-role.txt`。完整汇总发现第5项后，用同一独立用户原样重跑两个原文件：`8 passed in 21.42s`，见 `all-drift-tests-ci-role.txt`。未修改产品或原一致性断言。这些结果与原始全套失败分开报告，不作为整套重新通过的声明。CI使用 postgres 用户，尚未读取到本 PR 新 head 的 CI 成功证明。
 
 ## 8. 未验收门槛与下一步
 
@@ -139,8 +139,48 @@ TEST_REDIS_URL=redis://127.0.0.1:6379/15 REQUIRE_INTEGRATION=1 \
 - 生产磁盘配额/可信资源采集、完整 exec/文件/密钥/快照/生命周期适配继续属于 T-0224，不能以本次网络结果结项。
 - 保持任务 `in_progress / codex`、PR203草稿不合并。仓库默认 `RUNNER_NETWORK_VERIFIED=false`、运行适配开关关闭；测试控制面 true 只用于隔离验收，禁止推广到生产。
 
-## 9. 刷新主干发现后续编号修复：正在整合
+## 9. 与新主干整合：0068 单 head、历史升级与数据保护已验证
 
 19:03 前后刷新 origin/main 得到 `6688d15`，包含 PR202 / `aa3edb8`：主干已将网关改为0067、保留桥0066。本分支此前保留网关0066/桥兼容0067的方案与新主干重叠，不能直接合并；上文第2节及既有网络/测试输出保留其当时版本，最终迁移图需要进一步更新。
 
-先让正在运行的原版本完整suite结束，避免变更源树混淆结果。整合方案：沿主干0066桥→0067网关新增0068核对；在进入0067时也识别已存在的历史0066网关，避免重复DDL；0068识别两种已存在0067状态。保持桥数据和三条序列，拒绝部分/未知结构；桥数据降级保护放到实际删除桥表的0066入口，0068本身回退不删除表。回归准备于工作区缓存目录，尚未把整合后结果称为通过。
+等待原版本完整suite结束后，合入 `origin/main@6688d15`；仅任务日志冲突，保留双方全部追加内容。最终沿主干 **0066桥 → 0067网关 → 0068历史核对**。原始桥0066升级DDL与网关0067建表/序列DDL不变；0067升级入口先核对并补齐历史状态，0068使已经停在两种旧0067的库也接受相同核对。冻结逻辑独立于应用模型，位于 `migrations/runtime_schema_compat_0068.py`。
+
+Ruling: 0068回退不删除对象，规范化0067应保留桥/网关两部分；桥数据保护移到实际删桥的0066回退入口。该入口对两桥表取得事务级 ACCESS EXCLUSIVE 锁后才检查空表，锁持续到后续DROP/事务结束。没有数据时仍可完整up/down/up；有数据时拒绝回退、整个PostgreSQL事务回滚。未经核对的网关-only旧0066也不能被当成桥0066直接回退。
+
+- 新回归在主干规范编号、但尚无兼容逻辑时实际 `18 failed / 4 passed / 47.35s`，见 `canonical-initial-red.log.gz`。首轮实现组合 `51 passed / 137.98s`，见 `canonical-initial-green.txt`。
+- 再次按代码审查技能进行独立只读复审，发现3项Important：INTEGER宽度校验误接受SMALLINT/BIGINT；同名正确表达式但NOT VALID的CHECK/FK未拒绝；空表检查和DROP之间并发插入可能丢失。
+- 各加真实PG回归，实际 `9 failed / 22 deselected / 19.42s`，见 `canonical-review-red.log.gz`。并发用例在真实空表SELECT完成后，从第二连接插入并提交，旧实现确实提交后被DROP；采用数据库500ms lock_timeout界定受锁阻塞，没有放宽产品超时或更改原断言。
+- 修复严格整数宽度、查询 `pg_constraint.convalidated`，并为删桥空表检查加事务持锁。独立复审确认3项已解决、没有新阻塞。
+- 最终组合 **60 passed / 160.99s**，见 `canonical-final-green.txt`。命令在仓库根目录执行，环境为上述独立用户/Redis/REQUIRE_INTEGRATION，参数如下：
+
+```sh
+services/api/.venv/bin/pytest -q \
+  services/api/tests/test_migration_revision_collision.py \
+  services/api/tests/test_runner_gateway_migration.py \
+  services/api/tests/test_integration.py \
+  services/api/tests/test_n8n_removal_migration.py \
+  services/api/tests/test_runner_network_gateway_control.py \
+  services/api/tests/test_module_llm_bridge.py
+```
+
+- 最终 Ruff/format565文件、strict mypy559文件、OpenAPI检查通过，`alembic heads` **仅0068**。输出 `canonical-final-quality.txt`。migrations增加仅docstring的 `__init__.py`，解决正常strict mypy发现同一helper被当作两个模块的问题；没有新增ignore或放宽检查。
+- 本轮新主干后的完整suite没有重新运行；最终60项直接覆盖全部改动迁移、旧失败一致性断言及网关/桥API，原完整1745/5/16属于旧代码基线，不外推为最终整套或CI成功。
+
+### 真实测试库 0067→0068
+
+19:27:54，对先前真实网络验收使用的**独立测试库**执行升级；未修改生产数据库。将上述已测试迁移目录只读挂入一次性专用工具容器，使用root私有env，不复制或打印凭据。包 SHA256 `195adb6681830489df5b64dc522c2ba753f54c65e70afb45249d2cffcba5ee0e`；实际驱动源码为 `canonical-upgrade-driver.source.txt`。
+
+```sh
+docker run --rm --user 0 --network t0224-control \
+  --env-file /etc/workspace-t0224/control.env --workdir /app \
+  --mount type=bind,src=/opt/workspace-t0224/fixture-tools/canonical-0068/migrations,dst=/app/migrations,readonly \
+  --mount type=bind,src=/opt/workspace-t0224/fixture-tools/canonical_upgrade.py,dst=/opt/t0224-canonical-upgrade.py,readonly \
+  --entrypoint /opt/venv/bin/python workspace-t0224-gateway:lab-20261114 \
+  /opt/t0224-canonical-upgrade.py
+```
+
+退出0，实际版本0067→0068；3个合成实例、2个主机、3个环境、2条入站规则以及两张空桥表的**行数与整表摘要前后完全相同**。入站/公网端口序列的值与is_called均相同；策略序列只要求不减小，因为运行中的网关可继续正常轮询。完整只读前后结果为 `canonical-live-upgrade.json`。
+
+测试控制面仍使用之前的r3镜像，仅迁移工具挂载新源；升级后CA验证的 `/readyz` 返回数据库/Redis均ok，见 `control-ready-after-canonical.txt`。此前网络PASS对应的镜像、代码版本和实际输出保持原记录，不改写成整合后所有产品功能均已重跑。生产开关继续关闭。
+
+19:29:45 只读再次取得真实 Pod/Service：三个原工作负载 UID 不变、gVisor、全部Ready且重启0；网关原UID不变且重启0，private/public入口仍仅65535占位、LB无地址，fixture phase=settled。输出为 `post-canonical-current-resources.json`。所有非Markdown证据的摘要索引为 `SHA256SUMS`。

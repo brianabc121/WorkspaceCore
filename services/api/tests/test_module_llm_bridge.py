@@ -142,6 +142,9 @@ async def test_bridge_registration_and_admin(rig: Rig) -> None:
     ]
     claude = status["accounts"][1]
     assert claude["state"] == "logged_in" and claude["identity"] == "f***@example.com"
+    assert claude["registered"] is True and claude["method"] == "api_key"
+    # 没登录的平台：没有登记、也不显示登录方式
+    assert all(not a["registered"] and a["method"] is None for a in status["accounts"][::2])
     assert all(c["platform"] != "fake" for c in status["channels"])
     assert status["settings"]["concurrency"] == 2
 

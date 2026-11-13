@@ -16,14 +16,14 @@ const as = (role: Role) => Response.json({ ...me, workspaces: [{ ...workspace, r
 const lbModule: Schema['ModuleOut'] = { ...newsModule, key: 'llm_bridge', name: '大模型会话桥', tools: [], widgets: [] }
 
 const bridge: Schema['LlmBridgeOut'] = { id: BRIDGE, name: '主账号', base_url: 'http://10.0.0.5:8787', enabled: true, has_token: true, created_at: at, updated_at: at }
-const account = (over: Partial<Schema['LlmBridgeAccountOut']>): Schema['LlmBridgeAccountOut'] => ({ slot: 'openai', label: 'OpenAI（ChatGPT / Codex）', state: 'logged_out', identity: null, method: null, detail: '', first_login_at: null, login_methods: ['device_code', 'api_key', 'existing'], running: 0, ...over })
+const account = (over: Partial<Schema['LlmBridgeAccountOut']>): Schema['LlmBridgeAccountOut'] => ({ slot: 'openai', label: 'OpenAI（ChatGPT / Codex）', state: 'logged_out', registered: false, identity: null, method: null, detail: '', first_login_at: null, login_methods: ['device_code', 'api_key', 'existing'], running: 0, ...over })
 const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false }
 const status = (over: Partial<Schema['LlmBridgeStatusOut']> = {}): Schema['LlmBridgeStatusOut'] => ({
   reachable: true, error: '', version: '0.1.0', queued: 1, running: 2, settings,
   accounts: [
-    account({ state: 'logged_in', identity: 'a***@example.com', method: 'device_code', first_login_at: 1794528000 }),
+    account({ state: 'logged_in', registered: true, identity: 'a***@example.com', method: 'device_code', first_login_at: 1794528000 }),
     account({ slot: 'claude', label: 'Claude', login_methods: ['api_key', 'oauth_token', 'existing'] }),
-    account({ slot: 'workbuddy', label: 'WorkBuddy', state: 'mismatch', identity: 'w***', detail: '登录的账号变了', login_methods: ['existing'] }),
+    account({ slot: 'workbuddy', label: 'WorkBuddy', state: 'mismatch', registered: true, identity: 'w***', detail: '登录的账号变了', login_methods: ['existing'] }),
   ],
   channels: [{ platform: 'codex', mode: 'dev', slot: 'openai', available: true, note: '' }, { platform: 'claude', mode: 'cloud', slot: 'claude', available: false, note: '云端通道还没有实现' }],
   ...over,
@@ -234,7 +234,7 @@ describe('大模型会话桥', () => {
     expect(await screen.findByText('已归档 3 个会话；现在可以登录新的账号。')).toBeVisible()
   })
 
-  it('sends the whole grant on every toggle and clears the rest when a grant is disabled', async () => {
+  it('sends the whole grant on every toggle; disabling clears the flags but keeps the chosen platforms', async () => {
     let current = grant()
     const requests = setup('owner', async r => {
       if (path(r) === '/api/v1/llm_bridge/grants') return Response.json({ grants: [current] })
@@ -260,7 +260,8 @@ describe('大模型会话桥', () => {
     expect(bodies).toEqual([
       { enabled: true, can_write: true, can_account: true, can_takeover: true, platforms: ['codex'] },
       { enabled: true, can_write: true, can_account: true, can_takeover: true, platforms: ['codex', 'claude'] },
-      { enabled: false, can_write: false, can_account: false, can_takeover: false, platforms: [] },
+      // 关掉时三项权限收回，已选的平台保留（再打开时不用重选）
+      { enabled: false, can_write: false, can_account: false, can_takeover: false, platforms: ['codex', 'claude'] },
     ])
     for (const name of ['新建会话和发送', '查看账号下全部会话', '接手别人的会话']) { expect(within(row).getByLabelText(name)).not.toBeChecked(); expect(within(row).getByLabelText(name)).toBeDisabled() }
   })

@@ -37,7 +37,7 @@ function submit() {
   return run(async () => { await props.api.saveEnvironment(props.bridge.id, id, body); closeForm(); return id ? `已保存环境「${name}」。` : `已新增环境「${name}」。` })
 }
 function remove(env: Environment) {
-  if (!window.confirm(`删除开发环境「${env.name}」？用它的会话不能再继续发指令。`)) return
+  if (!window.confirm(`删除开发环境「${env.name}」？已经用它建好的会话不受影响，只是不能再用它新建会话。`)) return
   return run(async () => { await props.api.deleteEnvironment(props.bridge.id, env.id); if (form.id === env.id) closeForm(); return `已删除环境「${env.name}」。` })
 }
 </script>
