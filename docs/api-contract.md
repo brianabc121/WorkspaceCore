@@ -788,7 +788,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 |---|---|---|
 | `llm_bridge_status` / `llm_bridge_models` / `llm_bridge_environments` | read | 平台与登录状态；可选模型；可选环境 |
 | `llm_bridge_session_list` / `llm_bridge_session_get` / `llm_bridge_turn_get` | read | 会话列表（`scope=account` 需要 `can_account`）；会话内容（别人的会话需要 `can_takeover`）；回合状态与结果 |
-| `llm_bridge_session_create` / `llm_bridge_send` / `llm_bridge_turn_cancel` / `llm_bridge_session_archive` | direct | 需要 `can_write`；直接执行、不审批，记执行记录；新建会话通知管理员（`llm_bridge.session_created`）。**这是对审批规则的放宽，需要人类批准“例外九”后才上线**（`docs/v2/LLM_BRIDGE_PLAN.md` 第 13 节） |
+| `llm_bridge_session_create` / `llm_bridge_send` / `llm_bridge_turn_cancel` / `llm_bridge_session_archive` | direct | 需要 `can_write`；直接执行、不审批，记执行记录；新建会话通知管理员（`llm_bridge.session_created`）。依据是 `docs/AGENTS.md` 的例外九（人类 2026-11-13 批准） |
 
 结果统一是 `{bridge, data}`，`data` 是会话桥返回的内容。回合的 `data.status`：`queued` / `running` / `completed`（带 `result`、`summary`）/
 `failed` / `unknown`（带 `failure.kind`、`failure.message`）/ `cancelled`。错误码：`FORBIDDEN_CAPABILITY`（没有授权、平台不在允许范围）、
