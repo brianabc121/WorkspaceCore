@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -25,6 +26,7 @@ from app.models import AgentInstance
 from app.modules.llm_bridge.client import BridgeCallError, BridgeClient, bridge_client
 from app.modules.llm_bridge.models import LlmBridge, LlmBridgeGrant
 from app.modules.llm_bridge.schemas import (
+    ALL_PLATFORMS,
     LlmBridgeAccountOut,
     LlmBridgeChannelOut,
     LlmBridgeGrantIn,
@@ -149,21 +151,27 @@ class LlmBridgeService:
         workspace_id = access.workspace.id
         name = body.name.strip()
         await self._name_free(workspace_id, name, skip=None)
+        base_url = clean_url(body.base_url)
+        platforms: list[str] | None = None
+        if body.platforms is not None:
+            # 把“控制的平台”写进会话桥；连不上或令牌不对就不登记
+            platforms = await self._apply_platforms(base_url, body.token, body.platforms)
         bridge_id = uuid.uuid4()
         row = LlmBridge(
             id=bridge_id,
             workspace_id=workspace_id,
             name=name,
-            base_url=clean_url(body.base_url),
+            base_url=base_url,
             token_ref=self.runtime.credentials().seal(
                 body.token, context=secret_context(workspace_id, bridge_id)
             ),
         )
         self.db.add(row)
         await self.db.flush()
-        await self._audit(
-            access, "bridge_created", row.id, {"name": name, "base_url": row.base_url}
-        )
+        metadata: dict[str, Any] = {"name": name, "base_url": row.base_url}
+        if platforms is not None:
+            metadata["platforms"] = platforms
+        await self._audit(access, "bridge_created", row.id, metadata)
         await self.db.commit()
         return self.bridge_out(row)
 
@@ -192,8 +200,47 @@ class LlmBridgeService:
         await self.db.commit()
         return self.bridge_out(row)
 
+    async def _apply_platforms(
+        self, base_url: str, token: str, platforms: Sequence[str]
+    ) -> list[str]:
+        client = bridge_client(self.runtime, base_url, token)
+        try:
+            saved = await client.admin(
+                "PUT", "/settings", {"platforms": list(dict.fromkeys(platforms))}
+            )
+        except BridgeCallError as error:
+            if error.code == "VALIDATION_FAILED" and "没有这个设置" in error.message:
+                raise ApiError(
+                    409,
+                    "BRIDGE_OUTDATED",
+                    "这座会话桥的版本太旧，不支持选择控制的平台：请先升级会话桥再登记",
+                ) from error
+            raise from_bridge(error) from error
+        except ConnectorError as error:
+            raise unavailable(error) from error
+        chosen = saved.get("platforms") if isinstance(saved, dict) else None
+        if not isinstance(chosen, list):
+            raise ApiError(
+                409,
+                "BRIDGE_OUTDATED",
+                "这座会话桥的版本太旧，不支持选择控制的平台：请先升级会话桥再登记",
+            )
+        return [str(p) for p in chosen]
+
     async def delete_bridge(self, access: WorkspaceAccess, bridge_id: uuid.UUID) -> None:
         row = await self.bridge(access.workspace.id, bridge_id)
+        # 只允许用这座桥的实例，删除后一座都不能用（列表变空），不会变成“都能用”
+        grants = (
+            await self.db.scalars(
+                select(LlmBridgeGrant).where(
+                    LlmBridgeGrant.workspace_id == row.workspace_id,
+                    LlmBridgeGrant.bridge_ids.is_not(None),
+                )
+            )
+        ).all()
+        for grant in grants:
+            if grant.bridge_ids is not None and str(row.id) in grant.bridge_ids:
+                grant.bridge_ids = [i for i in grant.bridge_ids if i != str(row.id)]
         await self._audit(access, "bridge_deleted", row.id, {"name": row.name})
         await self.db.delete(row)
         await self.db.commit()
@@ -243,9 +290,14 @@ class LlmBridgeService:
             for slot in SLOTS
             if slot in data.get("accounts", {})
         ]
+        # 旧版本的会话桥不报告 platforms：按“全部”处理
+        platforms = data.get("platforms")
+        if not isinstance(platforms, list):
+            platforms = list(ALL_PLATFORMS)
         return LlmBridgeStatusOut(
             reachable=True,
             version=str(data.get("version", "")),
+            platforms=[p for p in platforms if p in ALL_PLATFORMS],
             accounts=accounts,
             channels=[
                 LlmBridgeChannelOut(**c)
@@ -254,8 +306,15 @@ class LlmBridgeService:
             ],
             queued=int(data.get("queued", 0)),
             running=int(data.get("running", 0)),
-            settings=LlmBridgeSettings(**data["settings"]),
+            settings=self.settings_out(data["settings"]),
         )
+
+    @staticmethod
+    def settings_out(data: dict[str, Any]) -> LlmBridgeSettings:
+        values = dict(data)
+        if isinstance(values.get("platforms"), list):
+            values["platforms"] = [p for p in values["platforms"] if p in ALL_PLATFORMS]
+        return LlmBridgeSettings(**values)
 
     # ---- 按实例的权限 ----
     async def grant(self, instance_id: uuid.UUID) -> LlmBridgeGrant | None:
@@ -280,6 +339,14 @@ class LlmBridgeService:
         return [self._grant_out(i, rows.get(i.id)) for i in instances]
 
     @staticmethod
+    def allowed(grant: LlmBridgeGrant, bridges: list[LlmBridge]) -> list[LlmBridge]:
+        """这个实例能用的会话桥：bridge_ids 为空（NULL）表示都能用。"""
+        if grant.bridge_ids is None:
+            return bridges
+        ids = set(grant.bridge_ids)
+        return [b for b in bridges if str(b.id) in ids]
+
+    @staticmethod
     def _grant_out(instance: AgentInstance, row: LlmBridgeGrant | None) -> LlmBridgeGrantOut:
         return LlmBridgeGrantOut(
             instance_id=instance.id,
@@ -289,6 +356,11 @@ class LlmBridgeService:
             can_account=bool(row and row.can_account),
             can_takeover=bool(row and row.can_takeover),
             platforms=list(row.platforms) if row else [],
+            bridge_ids=(
+                [uuid.UUID(i) for i in row.bridge_ids]
+                if row is not None and row.bridge_ids is not None
+                else None
+            ),
         )
 
     async def set_grant(
@@ -311,6 +383,13 @@ class LlmBridgeService:
         row.can_account = body.enabled and body.can_account
         row.can_takeover = body.enabled and body.can_takeover
         row.platforms = sorted(set(body.platforms))
+        if body.bridge_ids is None:
+            row.bridge_ids = None
+        else:
+            known = {b.id for b in await self.bridges(access.workspace.id)}
+            if any(i not in known for i in body.bridge_ids):
+                raise _invalid("bridge_ids", "没有这个 MCP 管理器")
+            row.bridge_ids = sorted({str(i) for i in body.bridge_ids})
         await self.db.flush()
         await self._audit(
             access,
@@ -323,6 +402,7 @@ class LlmBridgeService:
                 "can_account": row.can_account,
                 "can_takeover": row.can_takeover,
                 "platforms": row.platforms,
+                "bridge_ids": row.bridge_ids,
             },
         )
         await self.db.commit()

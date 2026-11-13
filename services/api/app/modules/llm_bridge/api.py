@@ -79,8 +79,10 @@ async def llm_bridge_list_bridges(access: Admin, service: Service) -> LlmBridgeL
 
 @router.post(
     "/llm_bridge/bridges",
-    summary="登记一座会话桥（owner）",
-    description="令牌加密保存，不回传。409 NAME_TAKEN：已经有同名的会话桥。",
+    summary="登记一座会话桥，也就是新增一个 MCP 管理器（owner）",
+    description="令牌加密保存，不回传。填了 platforms（控制的平台）就先写进会话桥，"
+    "同时验证地址和令牌：503 EXTERNAL_UNAVAILABLE / BRIDGE_AUTH_FAILED 时不登记；"
+    "409 BRIDGE_OUTDATED：会话桥版本太旧，不支持选择平台。409 NAME_TAKEN：已经有同名的。",
     status_code=status.HTTP_201_CREATED,
     dependencies=_write,
     responses=_write_errors,
@@ -129,7 +131,7 @@ async def llm_bridge_bridge_status(
 
 @router.put(
     "/llm_bridge/bridges/{bridge_id}/settings",
-    summary="修改会话桥的设置：并发、时限、每小时发送次数等（owner）",
+    summary="修改会话桥的设置：控制的平台、并发、时限、每小时发送次数等（owner）",
     dependencies=_write,
     responses=_write_errors,
 )
@@ -141,7 +143,7 @@ async def llm_bridge_update_settings(
     data = await service.admin_write(
         access, row, "settings_updated", "PUT", "/settings", values, values
     )
-    return LlmBridgeSettings(**data)
+    return service.settings_out(data)
 
 
 # ---- 各平台的登录 ----

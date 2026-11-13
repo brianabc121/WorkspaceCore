@@ -12387,6 +12387,12 @@
             "title": "Detail",
             "type": "string"
           },
+          "enabled": {
+            "default": true,
+            "description": "这个 MCP 管理器是否控制这个账号对应的平台；不控制时不能登录，已有的登录可以退出",
+            "title": "Enabled",
+            "type": "boolean"
+          },
           "first_login_at": {
             "anyOf": [
               {
@@ -12501,6 +12507,12 @@
         "properties": {
           "available": {
             "title": "Available",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "description": "这个 MCP 管理器是否控制这个平台",
+            "title": "Enabled",
             "type": "boolean"
           },
           "mode": {
@@ -12708,6 +12720,23 @@
       "LlmBridgeGrantIn": {
         "additionalProperties": false,
         "properties": {
+          "bridge_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "允许用的 MCP 管理器；不填（null）表示都允许，包括以后新增的；空列表表示一个都不允许",
+            "title": "Bridge Ids"
+          },
           "can_account": {
             "default": false,
             "title": "Can Account",
@@ -12767,6 +12796,22 @@
       },
       "LlmBridgeGrantOut": {
         "properties": {
+          "bridge_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "允许用的 MCP 管理器；null 表示都允许，空列表表示一个都不允许",
+            "title": "Bridge Ids"
+          },
           "can_account": {
             "title": "Can Account",
             "type": "boolean"
@@ -12807,7 +12852,8 @@
           "can_write",
           "can_account",
           "can_takeover",
-          "platforms"
+          "platforms",
+          "bridge_ids"
         ],
         "title": "LlmBridgeGrantOut",
         "type": "object"
@@ -12828,6 +12874,29 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "platforms": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "chatgpt",
+                    "codex",
+                    "claude",
+                    "workbuddy"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 4,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这个 MCP 管理器控制的平台。填了就在登记时写进会话桥，同时验证地址和令牌：连不上或令牌不对时不登记；不填则不验证，会话桥保持原来的设置",
+            "title": "Platforms"
           },
           "token": {
             "description": "会话桥的管理令牌",
@@ -13180,6 +13249,20 @@
             "title": "Max Text Chars",
             "type": "integer"
           },
+          "platforms": {
+            "default": [
+              "chatgpt",
+              "codex",
+              "claude",
+              "workbuddy"
+            ],
+            "description": "这个 MCP 管理器控制的平台",
+            "items": {
+              "type": "string"
+            },
+            "title": "Platforms",
+            "type": "array"
+          },
           "send_per_hour": {
             "description": "每个实例每小时的发送次数",
             "maximum": 10000.0,
@@ -13244,6 +13327,29 @@
             ],
             "title": "Max Text Chars"
           },
+          "platforms": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "chatgpt",
+                    "codex",
+                    "claude",
+                    "workbuddy"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 4,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这个 MCP 管理器控制的平台（至少一个）。取消勾选的平台不能登录、不能新建会话和发送；已有的登录和会话记录保留",
+            "title": "Platforms"
+          },
           "send_per_hour": {
             "anyOf": [
               {
@@ -13297,6 +13403,15 @@
             "description": "连不上时的原因",
             "title": "Error",
             "type": "string"
+          },
+          "platforms": {
+            "default": [],
+            "description": "这个 MCP 管理器控制的平台",
+            "items": {
+              "type": "string"
+            },
+            "title": "Platforms",
+            "type": "array"
           },
           "queued": {
             "default": 0,
@@ -53318,7 +53433,7 @@
         ]
       },
       "post": {
-        "description": "令牌加密保存，不回传。409 NAME_TAKEN：已经有同名的会话桥。",
+        "description": "令牌加密保存，不回传。填了 platforms（控制的平台）就先写进会话桥，同时验证地址和令牌：503 EXTERNAL_UNAVAILABLE / BRIDGE_AUTH_FAILED 时不登记；409 BRIDGE_OUTDATED：会话桥版本太旧，不支持选择平台。409 NAME_TAKEN：已经有同名的。",
         "operationId": "llm_bridge_create_bridge",
         "parameters": [
           {
@@ -53439,7 +53554,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "登记一座会话桥（owner）",
+        "summary": "登记一座会话桥，也就是新增一个 MCP 管理器（owner）",
         "tags": [
           "llm_bridge"
         ]
@@ -55285,7 +55400,7 @@
             "SessionCookie": []
           }
         ],
-        "summary": "修改会话桥的设置：并发、时限、每小时发送次数等（owner）",
+        "summary": "修改会话桥的设置：控制的平台、并发、时限、每小时发送次数等（owner）",
         "tags": [
           "llm_bridge"
         ]
