@@ -979,12 +979,19 @@ AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendra
 
 ### 23.2 部署步骤
 
-一键部署脚本 `deploy.sh` 的可选组件“新闻早报”会自动做这些；手动部署时：
+一键部署脚本 `deploy.sh` 的可选组件“新闻早报”会自动做这些（包括第 4 步的默认打开）；手动部署时：
 
 1. `make up`（创建 `news` 网络与配置卷）。
 2. `make trendradar-pull`，再 `make trendradar-up`：下载提示词；配置文件还没有时先让 api 写一份“不抓取、不推送”的配置；启动两个容器并等健康。
 3. 第一次部署时在 `.env` 里设置 `TRENDRADAR_MCP_URL=http://trendradar-mcp:3333/mcp`，再 `make up` 让 api、worker 生效。
-4. 在网页 **设置 → 新闻早报** 里启用、选平台、写兴趣、填大模型和推送渠道，点“发一条测试推送”。以后的修改都在网页上，不用重启。
+4. 默认打开早报（T-0225）：`docker compose exec -T api python -m app.commands.connect news-enable`。
+   以首次安装创建的管理员（owner）身份，在他的工作空间里按默认设置打开“启用新闻早报”（默认平台与主题、07:30，先抓取热榜；
+   还没有推送渠道与大模型）。只在这个工作空间还没保存过早报设置、也没有别的工作空间打开时才打开；网页上保存过的设置
+   （包括关掉的）不改，所以重复运行 `deploy.sh connect` 不会把关掉的开关又打开。输出一行 `news=<结果>`：
+   `enabled_now`（这次打开）、`enabled`（已经打开）、`kept_off`（保存过且关着）、`taken`（别的工作空间打开了，一个部署只能有一个）、
+   `module_disabled`（应用中心里停用了新闻早报）、`not_deployed`（没设置 `TRENDRADAR_MCP_URL`）。
+   管理员管理多个工作空间时用 `--workspace <ID>` 指定。
+5. 在网页 **设置 → 新闻早报** 里选平台、写兴趣、填大模型和推送渠道，点“发一条测试推送”。以后的修改都在网页上，不用重启。
 
 ### 23.3 变量
 

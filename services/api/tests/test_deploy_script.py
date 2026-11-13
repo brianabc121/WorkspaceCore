@@ -994,3 +994,66 @@ def test_retire_n8n_without_a_legacy_deployment_is_a_noop(tmp_path: Path) -> Non
         env={"COMPOSE_PROJECT_NAME": ""},
     )
     assert result.stdout == result.stderr == ""
+
+
+def _news(tmp_path: Path, script: str, answer: str, *, status: int = 0) -> tuple[str, str]:
+    """加载 deploy.sh 的函数，把 connect_cmd 换成假的（记下参数、输出 answer），运行 script。"""
+    import os
+    import subprocess
+
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / ".env").write_text(
+        "TRENDRADAR_MCP_URL=http://trendradar-mcp:3333/mcp\n", encoding="utf-8"
+    )
+    log = tmp_path / "connect.log"
+    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]  # 最后一行是 main "$@"
+    stubs = (
+        f'connect_cmd() {{ echo "$*" >> "{log}"; printf "%s\\n" "$ANSWER"; return {status}; }}\n'
+        "news_running() { return 0; }\n"
+    )
+    result = subprocess.run(  # noqa: S603 - 运行仓库里的脚本
+        [
+            "/bin/bash",
+            "-c",
+            functions + '\nPY=python3\nROOT="$1"\n' + stubs + script,
+            "deploy",
+            str(root),
+        ],
+        env={**os.environ, "ANSWER": answer},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    calls = log.read_text(encoding="utf-8") if log.exists() else ""
+    return result.stdout + result.stderr, calls
+
+
+@pytest.mark.parametrize(
+    ("answer", "message"),
+    [
+        ("news=enabled_now", "已默认打开新闻早报"),
+        ("news=enabled", "新闻早报已经打开"),
+        ("news=kept_off", "保持关闭"),
+        ("news=taken", "另一个工作空间已经打开了新闻早报"),
+        ("news=module_disabled", "应用中心"),
+    ],
+)
+def test_news_is_switched_on_after_trendradar_is_deployed(
+    tmp_path: Path, answer: str, message: str
+) -> None:
+    """T-0225：部署好 TrendRadar 后（包括已经部署过、重新运行 connect）默认打开“启用新闻早报”；
+    结果由工作台决定（只在还没保存过设置时打开），脚本只报告。"""
+    out, calls = _news(tmp_path, "connect_news", answer)
+    assert calls.strip() == "news-enable"
+    assert message in out
+
+
+def test_news_enable_failure_does_not_stop_the_deployment(tmp_path: Path) -> None:
+    out, calls = _news(
+        tmp_path, "news_enable; echo after", "失败  不是这个工作空间的 owner", status=2
+    )
+    assert calls.strip() == "news-enable"
+    assert "没有自动打开新闻早报：不是这个工作空间的 owner" in out
+    assert "设置 → 新闻早报" in out
+    assert "after" in out.split()  # 失败只提示，不中断部署脚本

@@ -1,6 +1,7 @@
 """部署组件的接入状态（部署脚本调用）。
 
 知识库图片存储改在网页“设置 → 图片存储”里配置和自检（T-0223），这里不再有 storage-check。
+news-enable：部署好 TrendRadar 后默认打开新闻早报（T-0225）。
 """
 
 import argparse
@@ -25,6 +26,7 @@ from app.integrations.base import ConnectorError
 from app.integrations.http import CircuitBreaker
 from app.jobs.queue import ArqJobQueue, JobQueue
 from app.models import User
+from app.modules.news.service import NewsService
 from app.repositories import users as user_repo
 from app.repositories import workspaces as workspace_repo
 from app.schemas.workspaces import Role
@@ -150,6 +152,20 @@ async def _openim_state(env: Env) -> str:
     return "ok"
 
 
+async def cmd_news_enable(env: Env, args: argparse.Namespace) -> int:
+    """部署好 TrendRadar 后默认打开新闻早报（T-0225）。输出一行 news=<结果>，供部署脚本解析。
+
+    与网页一样只有 owner 能改早报设置；只在这个工作空间还没保存过早报设置、也没有别的工作空间
+    打开时才打开，保存过的设置（包括关掉的）不动。结果见 NewsService.enable_by_default。
+    """
+    actor, access = await resolve(env.db, args.email, args.workspace)
+    if not has_role(access.role, Role.owner):
+        raise Usage(f"{actor.user.email} 不是这个工作空间的 owner，不能打开新闻早报")
+    service = NewsService(env.db, env.settings, env.runtime, env.redis)
+    print(f"news={await service.enable_by_default(actor, access)}")
+    return 0
+
+
 # ---------------------------------------------------------------- 入口
 
 
@@ -158,6 +174,7 @@ Command = Callable[[Env, argparse.Namespace], Awaitable[int]]
 
 COMMANDS: dict[str, Command] = {
     "status": cmd_status,
+    "news-enable": cmd_news_enable,
 }
 
 
@@ -167,6 +184,7 @@ def parser() -> argparse.ArgumentParser:
     root.add_argument("--workspace", type=uuid.UUID, help="工作空间 ID（该用户管理多个时必填）")
     sub = root.add_subparsers(dest="command", required=True)
     sub.add_parser("status", help="是否完成首次安装、各组件是否已接入")
+    sub.add_parser("news-enable", help="部署好 TrendRadar 后默认打开新闻早报（只在还没设置过时）")
     return root
 
 
