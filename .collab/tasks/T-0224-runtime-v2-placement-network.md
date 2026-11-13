@@ -60,3 +60,4 @@ updated: 2026-11-13
 - 2026-11-13 15:48 UTC · codex · 人类确认两机SSH指纹后已严格认证；A=s1348279(4核/8G/19G余量)，B=s8006604(4核/4G/37G余量)。仅只读盘点：A保留3个Workspace网络与TrendRadar卷，无容器；B无Docker；均无K3s/Cilium/gVisor/已有验收。A/B的machine-id摘要相同但DMI与boot摘要不同，现行物理身份防重会冲突。A→B/B→A TCP22均超时；双方Tailscale Running/Online但目标Peer为空，tailscale ping均no matching peer，需要管理员核实tailnet/共享/ACL。未改服务器、安装集群或开生产网络。PR创建被自动审批拒绝（发布授权不足），后续盘点仅本地保存，未绕过发布；等待网络/身份前提处理。
 - 2026-11-13 15:59 UTC · codex · 人类明确回复允许，将本轮实际命令、双机只读盘点与三个阻塞发布到WorkspaceCore草稿PR；仅文档发布，不代表允许修改machine-id、Tailscale策略、迁移或生产网络开关。
 - 2026-11-13 16:12 UTC · codex · 人类应用Tailscale JSON后只读复测：2026-11-13 16:10 UTC（北京时间11-14 00:10），双方Peer可见/Online；Tailscale直连ping A→B2ms、B→A1ms，TCP22双向成功52/27ms，SSH命令退出0，原底层可达性阻塞已解除。主机ID冲突和主干重复0066仍未处理；B只读维护前置及备份/唯一ID/重启/复核方案已记录，等待单独维护确认，未改服务器或生产网络。原始输出随PR203保存。
+- 2026-11-13 16:14 UTC · codex · 复测提交03d1ea4已推送PR203分支；随后更新PR正文被自动审批拒绝，理由是新增服务器/网络/身份证据的发布授权不够明确。未绕过拒绝，正文暂仍为上轮描述；最新结果以报告16:10复测段和原始输出为准。该补充仅本地保存，等待发布授权及B身份维护确认。
