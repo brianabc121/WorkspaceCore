@@ -53,3 +53,16 @@
 .lb-table .lb-nowrap { white-space: nowrap; }
 /* 手机宽度下表格的一行变成两列的卡片：长说明占满整行 */
 .mg-section .asv-table tbody td.lb-full { grid-column: 1 / -1; }
+/* MCP 管理器的卡片：一行几张，选中的那张描边 */
+.lb-managers { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.lb-manager { display: grid; gap: 8px; align-content: start; padding: 14px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.lb-manager.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.lb-manager h3 { font-size: 1rem; margin: 0; overflow-wrap: anywhere; }
+.lb-manager p { margin: 0; overflow-wrap: anywhere; }
+.lb-platforms { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: .88rem; }
+.lb-platforms li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; }
+.lb-control { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.lb-account.is-off { background: var(--surface-2); color: var(--muted); }
+.lb-steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: .86rem; overflow-wrap: anywhere; }
+.lb-deploy summary { cursor: pointer; font-size: .9rem; font-weight: 600; }
+.lb-deploy[open] summary { margin-bottom: 8px; }

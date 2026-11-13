@@ -5,7 +5,7 @@ import ManagementSection from '../../components/management/ManagementSection.vue
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import { MODES, bridgeError, originName, platformName, seconds, statusName, type Bridge, type LlmBridgeApi } from './api'
 
-// 会话桥上的会话（只读）：表格 + 点开看回合。内容来自大模型和智能体，一律按纯文字显示。
+// 一个 MCP 管理器上的会话（只读）：表格 + 点开看回合。内容来自大模型和智能体，一律按纯文字显示。
 const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge }>()
 const LIMIT = 50
 const id = toRef(() => props.bridge.id)
@@ -32,7 +32,7 @@ const failureText = (failure: Record<string, unknown>) => String(failure.message
 </script>
 
 <template>
-  <ManagementSection title="会话" :label="`会话：${bridge.name}`" description="这里只能看到这座会话桥容器里的会话（包括官方程序保存在容器里的）。看不到 chatgpt.com、claude.ai 网页上的对话，也看不到其他机器上的会话。">
+  <ManagementSection title="会话" :label="`会话：${bridge.name}`" description="这里只能看到这个 MCP 管理器容器里的会话（包括官方程序保存在容器里的）。看不到 chatgpt.com、claude.ai 网页上的对话，也看不到其他机器上的会话。">
     <template #actions>
       <button type="button" class="secondary-button" :disabled="syncing" @click="sync"><RefreshCw aria-hidden="true" />{{ syncing ? '正在同步…' : '同步官方程序里的会话' }}</button>
     </template>

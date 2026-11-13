@@ -2982,8 +2982,8 @@ export interface paths {
         get: operations["llm_bridge_list_bridges"];
         put?: never;
         /**
-         * 登记一座会话桥（owner）
-         * @description 令牌加密保存，不回传。409 NAME_TAKEN：已经有同名的会话桥。
+         * 登记一座会话桥，也就是新增一个 MCP 管理器（owner）
+         * @description 令牌加密保存，不回传。填了 platforms（控制的平台）就先写进会话桥，同时验证地址和令牌：503 EXTERNAL_UNAVAILABLE / BRIDGE_AUTH_FAILED 时不登记；409 BRIDGE_OUTDATED：会话桥版本太旧，不支持选择平台。409 NAME_TAKEN：已经有同名的。
          */
         post: operations["llm_bridge_create_bridge"];
         delete?: never;
@@ -3163,7 +3163,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 修改会话桥的设置：并发、时限、每小时发送次数等（owner） */
+        /** 修改会话桥的设置：控制的平台、并发、时限、每小时发送次数等（owner） */
         put: operations["llm_bridge_update_settings"];
         post?: never;
         delete?: never;
@@ -10844,6 +10844,12 @@ export interface components {
         LlmBridgeAccountOut: {
             /** Detail */
             detail: string;
+            /**
+             * Enabled
+             * @description 这个 MCP 管理器是否控制这个账号对应的平台；不控制时不能登录，已有的登录可以退出
+             * @default true
+             */
+            enabled: boolean;
             /** First Login At */
             first_login_at: number | null;
             /**
@@ -10889,6 +10895,12 @@ export interface components {
         LlmBridgeChannelOut: {
             /** Available */
             available: boolean;
+            /**
+             * Enabled
+             * @description 这个 MCP 管理器是否控制这个平台
+             * @default true
+             */
+            enabled: boolean;
             /** Mode */
             mode: string;
             /** Note */
@@ -10973,6 +10985,11 @@ export interface components {
         /** LlmBridgeGrantIn */
         LlmBridgeGrantIn: {
             /**
+             * Bridge Ids
+             * @description 允许用的 MCP 管理器；不填（null）表示都允许，包括以后新增的；空列表表示一个都不允许
+             */
+            bridge_ids?: string[] | null;
+            /**
              * Can Account
              * @default false
              */
@@ -11003,6 +11020,11 @@ export interface components {
         };
         /** LlmBridgeGrantOut */
         LlmBridgeGrantOut: {
+            /**
+             * Bridge Ids
+             * @description 允许用的 MCP 管理器；null 表示都允许，空列表表示一个都不允许
+             */
+            bridge_ids: string[] | null;
             /** Can Account */
             can_account: boolean;
             /** Can Takeover */
@@ -11033,6 +11055,11 @@ export interface components {
              * @description 显示名，也是工具里 bridge 参数的值
              */
             name: string;
+            /**
+             * Platforms
+             * @description 这个 MCP 管理器控制的平台。填了就在登记时写进会话桥，同时验证地址和令牌：连不上或令牌不对时不登记；不填则不验证，会话桥保持原来的设置
+             */
+            platforms?: ("chatgpt" | "codex" | "claude" | "workbuddy")[] | null;
             /**
              * Token
              * @description 会话桥的管理令牌
@@ -11168,6 +11195,17 @@ export interface components {
             /** Max Text Chars */
             max_text_chars: number;
             /**
+             * Platforms
+             * @description 这个 MCP 管理器控制的平台
+             * @default [
+             *       "chatgpt",
+             *       "codex",
+             *       "claude",
+             *       "workbuddy"
+             *     ]
+             */
+            platforms: string[];
+            /**
              * Send Per Hour
              * @description 每个实例每小时的发送次数
              */
@@ -11183,6 +11221,11 @@ export interface components {
             concurrency?: number | null;
             /** Max Text Chars */
             max_text_chars?: number | null;
+            /**
+             * Platforms
+             * @description 这个 MCP 管理器控制的平台（至少一个）。取消勾选的平台不能登录、不能新建会话和发送；已有的登录和会话记录保留
+             */
+            platforms?: ("chatgpt" | "codex" | "claude" | "workbuddy")[] | null;
             /** Send Per Hour */
             send_per_hour?: number | null;
             /** Turn Timeout Seconds */
@@ -11206,6 +11249,12 @@ export interface components {
              * @default
              */
             error: string;
+            /**
+             * Platforms
+             * @description 这个 MCP 管理器控制的平台
+             * @default []
+             */
+            platforms: string[];
             /**
              * Queued
              * @default 0
