@@ -85,7 +85,7 @@ async def run_tool(
         raise BridgeError("VALIDATION_FAILED", f"参数不正确：{where} {first['msg']}") from error
     args = data.model_dump()
     if name == "llm_status":
-        return await engine.overview()
+        return await engine.caller_overview()
     if name == "llm_models":
         return {"models": await engine.models(args["platform"], args["mode"])}
     if name == "llm_environments":

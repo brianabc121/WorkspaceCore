@@ -326,6 +326,87 @@ async def test_channels_and_validation(bridge: Bridge) -> None:
     assert {"platform": "chatgpt", "mode": "chat"}.items() <= overview["channels"][0].items()
 
 
+async def test_controlled_platforms(bridge: Bridge) -> None:
+    """一座桥可以只控制一部分平台：没勾选的不能登录、不能新建和发送，已有的记录还能看。"""
+    status = (await bridge.admin("GET", "/admin/status")).json()
+    everything = ["chatgpt", "codex", "claude", "workbuddy", "fake"]
+    assert status["platforms"] == status["settings"]["platforms"] == everything
+    assert all(a["enabled"] for a in status["accounts"].values())
+    a = await _session(bridge, "c1")
+    assert (await _send(bridge, "c1", a, "之前", "r1"))["status"] == "completed"
+
+    # 1 号管理器只控制 claude / workbuddy（顺序按通道表，不按提交的顺序）
+    saved = await bridge.admin(
+        "PUT", "/admin/settings", json={"platforms": ["workbuddy", "claude"]}
+    )
+    assert saved.json()["platforms"] == ["claude", "workbuddy"]
+    status = (await bridge.admin("GET", "/admin/status")).json()
+    assert status["platforms"] == ["claude", "workbuddy"]
+    enabled = {slot: account["enabled"] for slot, account in status["accounts"].items()}
+    assert enabled == {"openai": False, "claude": True, "workbuddy": True, "fake": False}
+    channels = {(c["platform"], c["mode"]): c for c in status["channels"]}
+    assert (
+        not channels[("codex", "chat")]["enabled"] and not channels[("codex", "chat")]["available"]
+    )
+    assert channels[("claude", "chat")]["enabled"] and channels[("claude", "chat")]["available"]
+    # 智能体看到的概况里只有这座桥控制的平台
+    seen = await bridge.tool("c1", "llm_status")
+    assert set(seen["accounts"]) == {"claude", "workbuddy"}
+    assert {c["platform"] for c in seen["channels"]} == {"claude", "workbuddy"}
+
+    # 没勾选的平台：不能新建、不能查模型和环境、不能向已有会话发送、不能登录
+    for tool, arguments in (
+        ("llm_session_create", {"platform": "codex", "mode": "chat"}),
+        ("llm_models", {"platform": "chatgpt", "mode": "chat"}),
+        ("llm_environments", {"platform": "codex", "mode": "dev"}),
+        ("llm_session_create", {"platform": "fake", "mode": "chat"}),
+    ):
+        refused = await bridge.tool("c1", tool, arguments)
+        assert refused["error"]["code"] == "NOT_SUPPORTED", (tool, refused)
+        assert "没有启用" in refused["error"]["message"]
+        assert "claude、workbuddy" in refused["error"]["message"]
+    assert (await _send(bridge, "c1", a, "之后", "r2"))["error"]["code"] == "NOT_SUPPORTED"
+    for slot in ("openai", "fake"):
+        login = await bridge.admin(
+            "POST", f"/admin/accounts/{slot}/login", json={"method": "api_key", "api_key": "k"}
+        )
+        assert login.status_code == 409 and login.json()["error"]["code"] == "CONFLICT", login.text
+    # 已有的会话记录还能看；账号下全部会话不去读没勾选的平台
+    detail = await bridge.tool("c1", "llm_session_get", {"session_id": a})
+    assert [m["text"] for m in detail["messages"]] == ["之前", "[fake-1] 之前"]
+    listed = await bridge.tool("c1", "llm_session_list", {"scope": "account"}, scopes="account")
+    assert "Fake" not in listed["note"]
+    # 已有的登录可以退出
+    assert (await bridge.admin("POST", "/admin/accounts/fake/logout")).status_code == 200
+
+    # 2 号管理器控制 claude / workbuddy / codex：openai 槽位可用，但 ChatGPT 聊天通道没开
+    saved = await bridge.admin(
+        "PUT", "/admin/settings", json={"platforms": ["claude", "workbuddy", "codex", "fake"]}
+    )
+    assert saved.json()["platforms"] == ["codex", "claude", "workbuddy", "fake"]
+    status = (await bridge.admin("GET", "/admin/status")).json()
+    assert status["accounts"]["openai"]["enabled"]
+    channels = {(c["platform"], c["mode"]): c for c in status["channels"]}
+    assert channels[("codex", "chat")]["available"] and not channels[("chatgpt", "chat")]["enabled"]
+    refused = await bridge.tool("c1", "llm_session_create", {"platform": "chatgpt", "mode": "chat"})
+    assert refused["error"]["code"] == "NOT_SUPPORTED"
+    # 重新勾选后，原来的会话可以接着用
+    await bridge.admin(
+        "POST",
+        "/admin/accounts/fake/login",
+        json={"method": "api_key", "api_key": "fake@example.com"},
+    )
+    assert (await _send(bridge, "c1", a, "回来了", "r3"))["status"] == "completed"
+
+    # 校验：至少一个、不能重复、不能是这座桥没有的平台；其他设置不受影响
+    for bad in ([], ["claude", "claude"], ["nope"], "claude", [1]):
+        refused = await bridge.admin("PUT", "/admin/settings", json={"platforms": bad})
+        assert refused.json()["error"]["code"] == "VALIDATION_FAILED", bad
+    kept = await bridge.admin("PUT", "/admin/settings", json={"concurrency": 3})
+    assert kept.json()["concurrency"] == 3
+    assert kept.json()["platforms"] == ["codex", "claude", "workbuddy", "fake"]
+
+
 async def test_auth(bridge: Bridge) -> None:
     assert (await bridge.client.get("/healthz")).json()["status"] == "ok"
     assert (await bridge.client.get("/admin/status")).status_code == 401
