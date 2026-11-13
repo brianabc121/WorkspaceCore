@@ -112,7 +112,7 @@ function remove(bridge: Bridge) {
           </details>
           <div class="lb-grid">
             <div class="form-field"><label for="lb-bridge-name">名字</label><input id="lb-bridge-name" v-model="form.name" maxlength="40" required placeholder="例如：1 号" /><p class="form-help">智能体用这个名字指定走哪个 MCP 管理器。</p></div>
-            <div class="form-field"><label for="lb-bridge-url">地址</label><input id="lb-bridge-url" v-model="form.base_url" maxlength="300" required inputmode="url" placeholder="http://llm-bridge:8787" /></div>
+            <div class="form-field"><label for="lb-bridge-url">地址</label><input id="lb-bridge-url" v-model="form.base_url" maxlength="300" required inputmode="url" placeholder="http://llm-bridge:8787" /><p class="form-help">工作台访问这个管理器的地址。</p></div>
           </div>
           <div class="form-field">
             <label for="lb-bridge-token">管理令牌</label>

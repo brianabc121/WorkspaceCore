@@ -62,8 +62,7 @@ _ERROR_CODES = {
 UNKNOWN_IDENTITY = "unknown"
 _ANONYMOUS = "用密钥或令牌登录的账号（看不到是哪个）"
 _ANONYMOUS_NOTE = (
-    "用密钥或令牌登录时会话桥看不到是哪个账号：换一把密钥不算换账号；"
-    "要换成另一个账号，请先点“更换账号”"
+    "用密钥或令牌登录时看不到是哪个账号：换一把密钥不算换账号；要换成另一个账号，请先点“更换账号”"
 )
 EXTERNAL_PLATFORM = {
     "openai": "codex",
@@ -283,7 +282,9 @@ class Engine:
         if account["state"] == "unavailable":
             raise BridgeError("UNAVAILABLE", f"{label} 暂时不可用：{account['detail']}")
         if account["state"] != "logged_in":
-            raise BridgeError("NOT_LOGGED_IN", f"{label} 还没有登录，请管理员在会话桥设置页登录")
+            raise BridgeError(
+                "NOT_LOGGED_IN", f"{label} 还没有登录，请管理员在“大模型客户端”页面登录"
+            )
 
     async def login(self, slot: str, method: str, payload: dict[str, str]) -> Row:
         driver = self._driver(slot)
