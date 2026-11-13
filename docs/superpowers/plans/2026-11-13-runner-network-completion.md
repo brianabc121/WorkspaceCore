@@ -16,9 +16,9 @@
 
 文件：domain/runner_network.py、schemas/runner_network.py、models/runner_network.py、api/v1/runner_network.py、新domain/runner_network_gateway.py、新api/runner_network_gateway.py、config/main、0066迁移及测试。
 
-- [ ] 测试先行：权限隔离、同服务编辑、版本冲突、代次变化、来源Grant过期、端口唯一、已撤销拒绝新连接、网关凭据隔离。
-- [ ] 为规则/公网入口分配固定网关端口；GET控制面快照、POST lease、POST ack。控制面不接受任意目标地址，目标来自当前受信运行绑定。
-- [ ] 管理接口补编辑/查询和可执行状态；网络输出含确认地址、PodIP、撤销确认。
+- [x] 测试先行：权限隔离、同服务编辑、版本冲突、代次变化、来源Grant过期、端口唯一、已撤销拒绝新连接、网关凭据隔离。
+- [x] 为规则/公网入口分配固定网关端口；GET控制面快照、POST lease、POST ack。控制面不接受任意目标地址，目标来自当前受信运行绑定。
+- [x] 管理接口补编辑/查询和可执行状态；网络输出含确认地址、PodIP、撤销确认。
 
 网关专用前缀 `/api/v1/internal/runner-network/gateway`，Authorization Bearer独立令牌：
 
@@ -30,24 +30,24 @@
 
 文件：runtime_v2/network.py、runner.py、kubernetes.py、controller.py、__main__.py及runtime_v2测试。消费现有host `/network/desired`、`/network/ack`。desired新增`domains`，每项`workspace_id,instance_id,environment_id,allocation_id,generation,node_name`。
 
-- [ ] RED→GREEN：受控namespace、同域跨节点策略、受限DNS、策略更新旧版本拒绝；私有Service创建/更新/删除实际读取后ACK；无UID不报成功；单服务失败不阻断撤销。
-- [ ] 所有环境即使未登记Service也有domain；create前安装默认拒绝/同域策略；主循环每次持续对账，允许观测结果未知后安全恢复。
-- [ ] 网关身份仅runner-system命名空间受控标签`workspace.myworkspace.io/component=network-gateway`，不向任意Pod开放目标端口；工作负载只允许访问网关已配置服务范围，平台禁区仍拒绝。
+- [x] RED→GREEN：受控namespace、同域跨节点策略、受限DNS、策略更新旧版本拒绝；私有Service创建/更新/删除实际读取后ACK；无UID不报成功；单服务失败不阻断撤销。
+- [x] 所有环境即使未登记Service也有domain；create前安装默认拒绝/同域策略；主循环每次持续对账，允许观测结果未知后安全恢复。
+- [x] 网关身份仅runner-system命名空间受控标签`workspace.myworkspace.io/component=network-gateway`，不向任意Pod开放目标端口；工作负载只允许访问网关已配置服务范围，平台禁区仍拒绝。
 
 ## Task 3 — TCP租约网关（独立模块）
 
 文件：runtime_v2/gateway.py、gateway_main.py及独立socket测试。消费Task1 HTTP契约；Kubectl只读当前Pod身份，验证target UID/IP/保护标签。
 
-- [ ] RED→GREEN：真实socket双向转发、拒绝来源、过期/撤销断开已有连接、控制面故障即断、代次替换拒绝、负载有界/连接上限/时间限制、TLS公网入口、伪造转发头不生效。
-- [ ] 私网来源必须精确匹配唯一Running/Ready Pod，socket IP与保护标签/namespace和UID一致，不能缓存过旧身份；公布端口与规则一一对应。
-- [ ] 配置回报成功前监听/身份依赖必须就绪；绑定撤销关闭监听及会话再ACK；令牌/证书不进日志。
+- [x] RED→GREEN：真实socket双向转发、拒绝来源、过期/撤销断开已有连接、控制面故障即断、代次替换拒绝、负载有界/连接上限/时间限制、TLS公网入口、伪造转发头不生效。
+- [x] 私网来源必须精确匹配唯一Running/Ready Pod，socket IP与保护标签/namespace和UID一致，不能缓存过旧身份；公布端口与规则一一对应。
+- [x] 配置回报成功前监听/身份依赖必须就绪；绑定撤销关闭监听及会话再ACK；令牌/证书不进日志。
 
 ## Task 4 — 管理页面（独立前端）
 
 文件：apps/web/src/features/runner/ContainerNetworkPanel.vue、api.ts及页面测试；生成类型由主代理统一生成。
 
-- [ ] 私有地址/实际节点/同域说明、来源实例选择、服务及授权编辑、过期时间、CIDR、网关TCP说明、版本与撤销确认；失效数据不显示可连接地址。
-- [ ] Owner写操作二次认证、保留失败前输入、切workspace防串数据；等待/失败/已生效明确区分。
+- [x] 私有地址/实际节点/同域说明、来源实例选择、服务及授权编辑、过期时间、CIDR、网关TCP说明、版本与撤销确认；失效数据不显示可连接地址。
+- [x] Owner写操作二次认证、保留失败前输入、切workspace防串数据；等待/失败/已生效明确区分。
 
 ## Task 5 — 部署与验收（主代理集成）
 

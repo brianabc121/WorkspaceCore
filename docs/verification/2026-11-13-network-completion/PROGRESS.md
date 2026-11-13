@@ -69,3 +69,14 @@
 首次前端全套与编译/类型检查并行时，`model-connections.test.ts` 的以下6项超时，已停止该次运行：`test_connections_list_filters_total_and_summary`、`test_official_relay_and_multi_model_form`、`test_saved_key_is_never_revealed_or_submitted_blank`、`test_statuses_do_not_collapse_to_empty`、`test_draft_and_compat_credentials`、`test_workspace_switch_and_stale_responses`。后续完整 test/build/check:api 改为串行，未增加超时或削弱断言；结果仍在执行，随后补录。
 
 下一步：先推送草稿PR保存可审阅代码并运行远端全套CI，同时完成本地串行前端和官方kubectl/网络集成检查；检查未全通过前不转为可合并交付。任务仍in_progress，真实集群验收未做，网络启用开关保持默认关闭。
+
+## PR #197 与代码收尾验证
+
+已提交并推送网络源码e80ccc72，创建草稿PR #197：<https://github.com/brianabc121/WorkspaceCore/pull/197>，由Claude审查。实际验证与本地失败/中断记录集中到本目录`VALIDATION.md`，不使用此前丢失的临时全套日志做通过证据。
+
+- 本地最终网络组合：`236 passed in 179.41s`，无跳过，含真实PG/Redis/socket/TLS及官方kubectl边界。此前fresh-identity超时用例在该组合中通过，没有修改超时。
+- e80ccc72完整前端CI：79文件794项全部通过，check:api/lint/typecheck/build均通过；构建10.14s。本地重复全套曾有未修改页面用例失败并中断，详见VALIDATION，不声称本地完整通过。
+- 继续检查实际部署发现Compose未传新增网络参数；先写真实Compose渲染+Settings读取回归，实际RED2 failed，补齐API/Worker共享配置后GREEN2 passed/0.55s。
+- 新增独立网关镜像构建CI；本轮不发布镜像或部署服务器。后端完整CI与最新提交的最终质量结果见PR检查/正文。
+
+人类取消的是本轮登录测试服务器，不是授权开启未经验证的生产网络。当前网络代码与部署材料继续交付，真实双节点/Cilium/LB验收留作生产启用门槛；更广的exec/文件/快照适配未伪装为已实现，T-0224继续in_progress。

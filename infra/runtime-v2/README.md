@@ -179,7 +179,9 @@ services/api/.venv/bin/python infra/runtime-v2/acceptance_two_nodes.py \
 
 ## 网关镜像与节点前提
 
-`Dockerfile.gateway` 从已构建的 Workspace API 不可变镜像扩展，加入官方 SHA256 锁定的 kubectl v1.35.10（当前amd64）。构建参数必须是管理员核验的 image@sha256 引用，渲染器也强制实际部署镜像有digest；不要填浮动tag。当前环境没有构建该镜像的磁盘容量，未声明Docker构建通过。
+`Dockerfile.gateway` 从已构建的 Workspace API 不可变镜像扩展，加入官方 SHA256 锁定的 kubectl v1.35.10（当前amd64）。构建参数必须是管理员核验的 image@sha256 引用，渲染器也强制实际部署镜像有digest；不要填浮动tag。当前本地环境没有构建该镜像的磁盘容量；`Runtime network image` CI独立构建测试镜像，验证非root用户、kubectl版本和未配置时拒绝启动，实际结果见PR检查。
+
+Workspace使用Compose部署时，在自己的`.env`中设置`RUNNER_NETWORK_GATEWAY_TOKEN`、`RUNNER_NETWORK_PRIVATE_HOST`、`RUNNER_NETWORK_PUBLIC_HOST`、`RUNNER_NETWORK_POD_CIDRS`及`RUNNER_NETWORK_DENIED_CIDRS`。独立令牌须与网关Secret的token一致，Pod网段和节点/平台禁止网段须对应实际集群。Compose共享环境把这些值同时传给API和Worker；配置更新后需按部署流程重新创建相关服务。未完成部署验收前保持`RUNNER_NETWORK_VERIFIED=false`；这些参数的默认值不会自动启用网络。
 
 公网LB必须实际支持直接Pod路由、保留原socket来源且关闭普通NodePort。不要使用会通过hostPort暴露端口的默认K3s ServiceLB，也不要在前面加会SNAT来源的反向代理。节点/Pod/平台CIDR必须完整进入禁止来源名单，IPv6不支持时在受管域和入口都关闭。真实公网原始来源与允许/拒绝/存量撤销验收未通过前，保留功能开关关闭。
 
