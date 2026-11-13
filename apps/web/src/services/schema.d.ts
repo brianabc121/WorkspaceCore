@@ -2363,74 +2363,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/internal/runner-network/gateway/ack": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Gateway Ack */
-        post: operations["gateway_ack"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/internal/runner-network/gateway/config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Gateway Config */
-        post: operations["gateway_config"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/internal/runner-network/gateway/lease": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Gateway Lease */
-        post: operations["gateway_lease"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/internal/runner-network/gateway/ready": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Gateway Ready */
-        post: operations["gateway_ready"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/issue-templates": {
         parameters: {
             query?: never;
@@ -8673,8 +8605,6 @@ export interface components {
             /** @description 容器根目录所在的分区（Docker 数据目录，镜像在这里） */
             root: components["schemas"]["DiskIn"] | null;
         };
-        /** Empty */
-        Empty: Record<string, never>;
         /** EnvText */
         EnvText: {
             /** Purpose */
@@ -8806,30 +8736,6 @@ export interface components {
             url: string;
             /** Width */
             width: number;
-        };
-        /** GatewayAck */
-        GatewayAck: {
-            /**
-             * Active
-             * @default true
-             */
-            active: boolean;
-            /** Generation */
-            generation: number;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "ingress" | "published";
-            /**
-             * Record Id
-             * Format: uuid
-             */
-            record_id: string;
-            /** Revision */
-            revision: number;
-            /** Success */
-            success: boolean;
         };
         /** GitHubActivityConfig */
         GitHubActivityConfig: {
@@ -9042,11 +8948,6 @@ export interface components {
              * @description 超过 2000 篇笔记时按最近修改与链接数截断
              */
             truncated: boolean;
-        };
-        /** HTTPValidationError */
-        HTTPValidationError: {
-            /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
         };
         /** HealthResponse */
         HealthResponse: {
@@ -10654,22 +10555,6 @@ export interface components {
              * @description 乐观并发版本号；写请求必须带上读取时的版本
              */
             version: number;
-        };
-        /** LeaseRequest */
-        LeaseRequest: {
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "ingress" | "published";
-            /** Peer Ip */
-            peer_ip: string;
-            /**
-             * Record Id
-             * Format: uuid
-             */
-            record_id: string;
-            source?: components["schemas"]["WorkloadIdentity"] | null;
         };
         /** LinkOut */
         LinkOut: {
@@ -17913,19 +17798,6 @@ export interface components {
              */
             id: string;
         };
-        /** ValidationError */
-        ValidationError: {
-            /** Context */
-            ctx?: Record<string, never>;
-            /** Input */
-            input?: unknown;
-            /** Location */
-            loc: (string | number)[];
-            /** Message */
-            msg: string;
-            /** Error Type */
-            type: string;
-        };
         /** VersionBody */
         VersionBody: {
             /**
@@ -18133,33 +18005,6 @@ export interface components {
              * @enum {string}
              */
             widget_type: "work_summary";
-        };
-        /** WorkloadIdentity */
-        WorkloadIdentity: {
-            /**
-             * Allocation Id
-             * Format: uuid
-             */
-            allocation_id: string;
-            /**
-             * Environment Id
-             * Format: uuid
-             */
-            environment_id: string;
-            /** Generation */
-            generation: number;
-            /**
-             * Instance Id
-             * Format: uuid
-             */
-            instance_id: string;
-            /** Pod Uid */
-            pod_uid: string;
-            /**
-             * Workspace Id
-             * Format: uuid
-             */
-            workspace_id: string;
         };
         /** WorkspaceOut */
         WorkspaceOut: {
@@ -28292,146 +28137,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    gateway_ack: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GatewayAck"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: boolean;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    gateway_config: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Empty"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    gateway_lease: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LeaseRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    gateway_ready: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Empty"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: boolean;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

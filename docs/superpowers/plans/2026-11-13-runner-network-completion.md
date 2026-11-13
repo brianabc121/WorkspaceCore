@@ -20,11 +20,11 @@
 - [x] 为规则/公网入口分配固定网关端口；GET控制面快照、POST lease、POST ack。控制面不接受任意目标地址，目标来自当前受信运行绑定。
 - [x] 管理接口补编辑/查询和可执行状态；网络输出含确认地址、PodIP、撤销确认。
 
-网关专用前缀 `/api/v1/internal/runner-network/gateway`，Authorization Bearer独立令牌：
+网关专用前缀 `/api/v1/internal/runner-network/gateway`，Authorization Bearer独立令牌；此机器间协议不进入浏览器OpenAPI：
 
 - `POST /config {}` → `{revision:1, bindings:[{record_id,kind:'ingress'|'published',port,revision,generation,active,source_cidrs}], denied_cidrs:[...]}`；包含撤销墓碑。
 - `POST /lease {record_id,kind,peer_ip,source?:{workspace_id,instance_id,environment_id,allocation_id,generation,pod_uid}}` → `{allowed,lease_seconds,revision,generation,target?:{workspace_id,instance_id,environment_id,allocation_id,generation,pod_uid,pod_ip,node_name,port}}`；拒绝不回目标。
-- `POST /ack {record_id,kind,revision,generation,success}` → `{accepted}`。
+- `POST /ack {record_id,kind,revision,generation,success,active}` → `{accepted}`；active区分监听启动与撤下。
 
 ## Task 2 — 私网持续对账（独立运行层）
 

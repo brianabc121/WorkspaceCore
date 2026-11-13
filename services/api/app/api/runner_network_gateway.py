@@ -11,7 +11,9 @@ from app.core.errors import ApiError
 from app.domain.runner_network_gateway import GatewayAck, LeaseRequest, NetworkGateway
 
 router = APIRouter(
-    prefix="/api/v1/internal/runner-network/gateway", tags=["runner-network-gateway"]
+    prefix="/api/v1/internal/runner-network/gateway",
+    tags=["runner-network-gateway"],
+    include_in_schema=False,
 )
 bearer = HTTPBearer(auto_error=False)
 Credentials = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]

@@ -61,6 +61,7 @@ OpenAPI通过正式导出器生成，TypeScript通过openapi-typescript7.13.0生
 - 撤销/过期且尚未确认撤下的入口不能过早释放共享容量：参数化回归实际RED 2 failed / 1 passed，修复后容量与inactive ACK组合4 passed，随后纳入236项。
 - 公网LB等待只撤下公网绑定，私网继续发布；inactive ACK不能把有效记录错误标为监听已启动。
 - 部署接线遗漏：真实Docker Compose渲染结果原本没有网关令牌、地址和网段配置，默认/显式配置两种回归均RED。补齐共享环境与`.env.example`后，`pytest -q tests/test_runner_network_compose.py` 实际 `2 passed in 0.55s`；覆盖API与Worker的渲染环境及实际Settings读取。
+- 首轮完整API CI报告失败；本地实际复现 `test_validation_errors_are_documented_with_unified_format` 与 `test_every_write_requires_a_csrf_token`，2 failed/39.52s。根因是机器网关误进入浏览器OpenAPI，带入默认HTTPValidationError并被当成浏览器CSRF写操作。加强 `test_v2_internal_and_gateway_routes_are_not_documented` 后另观察到1 failed/6.30s；修复只把内部路由标为include_in_schema=False，未调整CSRF矩阵。重新导出OpenAPI/类型后，两个契约、完整安全矩阵和真实网关鉴权组合 `8 passed in 473.35s`。接口生成一致性/前端typecheck、Ruff548文件/strict mypy544文件/OpenAPI检查同时通过。完整CI以修复后最新提交为准。
 
 ## 未通过或中断的本地运行记录
 

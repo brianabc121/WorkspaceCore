@@ -7395,12 +7395,6 @@
         "title": "DisksIn",
         "type": "object"
       },
-      "Empty": {
-        "additionalProperties": false,
-        "properties": {},
-        "title": "Empty",
-        "type": "object"
-      },
       "EnvText": {
         "properties": {
           "purpose": {
@@ -7668,52 +7662,6 @@
           "created_at"
         ],
         "title": "FileOut",
-        "type": "object"
-      },
-      "GatewayAck": {
-        "additionalProperties": false,
-        "properties": {
-          "active": {
-            "default": true,
-            "title": "Active",
-            "type": "boolean"
-          },
-          "generation": {
-            "minimum": 1.0,
-            "title": "Generation",
-            "type": "integer"
-          },
-          "kind": {
-            "enum": [
-              "ingress",
-              "published"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "record_id": {
-            "format": "uuid",
-            "title": "Record Id",
-            "type": "string"
-          },
-          "revision": {
-            "minimum": 1.0,
-            "title": "Revision",
-            "type": "integer"
-          },
-          "success": {
-            "title": "Success",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "record_id",
-          "kind",
-          "revision",
-          "generation",
-          "success"
-        ],
-        "title": "GatewayAck",
         "type": "object"
       },
       "GitHubActivityConfig": {
@@ -8204,19 +8152,6 @@
           "total_notes"
         ],
         "title": "GraphOut",
-        "type": "object"
-      },
-      "HTTPValidationError": {
-        "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "title": "Detail",
-            "type": "array"
-          }
-        },
-        "title": "HTTPValidationError",
         "type": "object"
       },
       "HealthResponse": {
@@ -12356,46 +12291,6 @@
           "version"
         ],
         "title": "KnowledgeSourceUpdate",
-        "type": "object"
-      },
-      "LeaseRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "kind": {
-            "enum": [
-              "ingress",
-              "published"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "peer_ip": {
-            "maxLength": 64,
-            "title": "Peer Ip",
-            "type": "string"
-          },
-          "record_id": {
-            "format": "uuid",
-            "title": "Record Id",
-            "type": "string"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/WorkloadIdentity"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "record_id",
-          "kind",
-          "peer_ip"
-        ],
-        "title": "LeaseRequest",
         "type": "object"
       },
       "LinkOut": {
@@ -29581,46 +29476,6 @@
         "title": "UserOut",
         "type": "object"
       },
-      "ValidationError": {
-        "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "title": "Location",
-            "type": "array"
-          },
-          "msg": {
-            "title": "Message",
-            "type": "string"
-          },
-          "type": {
-            "title": "Error Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError",
-        "type": "object"
-      },
       "VersionBody": {
         "additionalProperties": false,
         "properties": {
@@ -30024,52 +29879,6 @@
         "title": "WorkSummaryWidgetUpdate",
         "type": "object"
       },
-      "WorkloadIdentity": {
-        "additionalProperties": false,
-        "properties": {
-          "allocation_id": {
-            "format": "uuid",
-            "title": "Allocation Id",
-            "type": "string"
-          },
-          "environment_id": {
-            "format": "uuid",
-            "title": "Environment Id",
-            "type": "string"
-          },
-          "generation": {
-            "minimum": 1.0,
-            "title": "Generation",
-            "type": "integer"
-          },
-          "instance_id": {
-            "format": "uuid",
-            "title": "Instance Id",
-            "type": "string"
-          },
-          "pod_uid": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Pod Uid",
-            "type": "string"
-          },
-          "workspace_id": {
-            "format": "uuid",
-            "title": "Workspace Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "workspace_id",
-          "instance_id",
-          "environment_id",
-          "allocation_id",
-          "generation",
-          "pod_uid"
-        ],
-        "title": "WorkloadIdentity",
-        "type": "object"
-      },
       "WorkspaceOut": {
         "properties": {
           "created_at": {
@@ -30123,10 +29932,6 @@
       }
     },
     "securitySchemes": {
-      "HTTPBearer": {
-        "scheme": "bearer",
-        "type": "http"
-      },
       "InstanceToken": {
         "description": "实例凭证（接入包里的 MYWS_INSTANCE_TOKEN）；外网入口另需客户端证书",
         "scheme": "bearer",
@@ -47539,202 +47344,6 @@
         "summary": "测试连接与权限（admin）",
         "tags": [
           "integrations"
-        ]
-      }
-    },
-    "/api/v1/internal/runner-network/gateway/ack": {
-      "post": {
-        "operationId": "gateway_ack",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GatewayAck"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Gateway Ack",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Gateway Ack",
-        "tags": [
-          "runner-network-gateway"
-        ]
-      }
-    },
-    "/api/v1/internal/runner-network/gateway/config": {
-      "post": {
-        "operationId": "gateway_config",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Empty"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Gateway Config",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Gateway Config",
-        "tags": [
-          "runner-network-gateway"
-        ]
-      }
-    },
-    "/api/v1/internal/runner-network/gateway/lease": {
-      "post": {
-        "operationId": "gateway_lease",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LeaseRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Gateway Lease",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Gateway Lease",
-        "tags": [
-          "runner-network-gateway"
-        ]
-      }
-    },
-    "/api/v1/internal/runner-network/gateway/ready": {
-      "post": {
-        "operationId": "gateway_ready",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Empty"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Gateway Ready",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Gateway Ready",
-        "tags": [
-          "runner-network-gateway"
         ]
       }
     },
