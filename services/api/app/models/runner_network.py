@@ -108,6 +108,11 @@ class RunnerIngressRule(NetworkRecord):
     )
     service_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     source_instance_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    gateway_port: Mapped[int] = mapped_column(
+        Integer,
+        unique=True,
+        server_default=text("nextval('workspace.runner_ingress_port_seq')"),
+    )
 
 
 class RunnerPublishedEndpoint(NetworkRecord):
@@ -128,3 +133,8 @@ class RunnerPublishedEndpoint(NetworkRecord):
     service_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     source_cidrs: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     enforcement: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    gateway_port: Mapped[int] = mapped_column(
+        Integer,
+        unique=True,
+        server_default=text("nextval('workspace.runner_public_port_seq')"),
+    )

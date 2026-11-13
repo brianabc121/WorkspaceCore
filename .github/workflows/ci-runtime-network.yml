@@ -1,0 +1,50 @@
+name: Runtime network image
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gateway-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the locked API base and gateway image
+        run: |
+          docker build -t workspace/api:network-ci services/api
+          docker build --build-arg WORKSPACE_API_IMAGE=workspace/api:network-ci \
+            -f infra/runtime-v2/Dockerfile.gateway -t workspace/network-gateway:ci .
+      - name: Verify the non-root image and pinned kubectl
+        run: |
+          test "$(docker image inspect --format '{{.Config.User}}' workspace/network-gateway:ci)" = '10001:10001'
+          docker run --rm --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --entrypoint kubectl \
+            workspace/network-gateway:ci version --client --output=json > kubectl-version.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          version = json.loads(Path('kubectl-version.json').read_text())['clientVersion']['gitVersion']
+          if version != 'v1.35.10':
+              raise SystemExit('unexpected kubectl version')
+          print(version)
+          PY
+      - name: Verify the gateway refuses startup without explicit configuration
+        run: |
+          set +e
+          docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+            workspace/network-gateway:ci > gateway-startup.log 2>&1
+          result=$?
+          set -e
+          test "$result" -eq 2
+          python3 - <<'PY'
+          from pathlib import Path
+          output = Path('gateway-startup.log').read_text()
+          if 'gateway disabled or invalid operator configuration' not in output:
+              raise SystemExit('missing fail-closed startup diagnostic')
+          print('unconfigured gateway refused startup (exit 2)')
+          PY

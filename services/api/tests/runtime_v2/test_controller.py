@@ -607,10 +607,12 @@ def test_private_service_requires_observed_api_receipt_before_applied() -> None:
     assert api.saved["spec"]["type"] == "ClusterIP"
     assert "nodePort" not in api.saved["spec"]["ports"][0]
     api.saved["metadata"]["uid"] = "actual-service-uid"
+    api.saved["metadata"]["resourceVersion"] = "42"
     api.saved["spec"]["clusterIP"] = "10.43.0.12"
     receipt = runner.apply_private_service(ident, service_id, 4, 5432, "TCP")
     assert receipt["applied_revision"] == 4
     assert receipt["cluster_ip"] == "10.43.0.12"
+    assert receipt["resource_version"] == "42"
 
 
 def test_private_service_without_server_uid_is_not_an_applied_receipt() -> None:

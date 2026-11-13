@@ -2,13 +2,13 @@
 id: T-0224
 title: 按人类确认设计落实双服务器池调度、容器配额审批与跨节点网络
 owner: codex
-status: in_progress
+status: handoff
 priority: P1
-branch: codex/T-0222-runtime-v2-placement-network
+branch: claude/cool-wright-99qbbg
 paths: services/api,apps/web,infra,tests/e2e,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows
 depends_on:
 created: 2026-11-11
-updated: 2026-11-12
+updated: 2026-11-13
 ---
 
 # T-0224 按人类确认设计落实双服务器池调度、容器配额审批与跨节点网络
@@ -45,3 +45,13 @@ updated: 2026-11-12
 - 2026-11-12 15:54 UTC · codex · 按人类合并指令准备交付当前检查点：补齐CI真实范围Ruff524格式/strict mypy520/OpenAPI/collab检查；智能体部署锁序整组11通过，容器核心50通过，新增回执清理/回收/外键锁顺序15最终通过，真实隔离库CLI迁移up/down/up通过。修复均有RED→GREEN，未增timeout/忽略/削弱断言；独立复审源码未发现剩余阻塞。下一步推送同PR193，等待新head全部CI成功再merge commit；完整网络等功能仍关闭，任务in_progress。
 - 2026-11-12 20:49 UTC · codex · 1d1446ce完整CI后端1550pass/12fail/16skip；Web782全过、compose/news/Docker安装及真实容器场景全过。旧SSH/有限上限/锁参数测试契约已适配并加强固定公钥/只读探测/认证前拒绝/替换竞态断言：45项SSH-password通过，服务器API最终2通过，旧公钥清理整文件8通过，heartbeat9unit通过。最终Ruff524/mypy520和独立focused复审通过；产品代码及CI配置无新增改动，推送同PR后等待新head全部CI再合并，任务继续in_progress。
 - 2026-11-12 21:30 UTC · codex · e642f43a真实多实例/V2浏览器等通过，新增容量诊断脚本因SecretStr直接传SQLAlchemy失败；已改统一create_engine(settings)，并新增执行原脚本的真实PG/子进程回归，RED1fail6.28s→GREEN1pass11.73s，涵盖实际容量允许/拒绝与只读无写入/URL不泄露。Ruff525、mypy521、OpenAPI及独立复审通过，无产品容量/权限改动；再推同PR并等待新head完整CI后合并。
+- 2026-11-13 02:09 UTC · codex · 人类2026-11-13明确要求继续完成同实例跨服务器互通、跨实例授权/受控公网入站/撤销断连，以及完整网络接口页面。基于已合并PR193的最新origin/main建立后续分支；延续已批准设计，保留原目录未提交工作，不将接口声明当作生效。
+- 2026-11-13 03:07 UTC · codex · 本轮已补私网持续对账、真实TCP租约网关、独立网关权限/端口序列及版本编辑、管理页面、可信节点采集与安全档位；组合局部220通过1跳过，full539文件strictmypy曾通过。继续补自动Pod重启绑定和网关Service/NetworkPolicy精确端口同步，并跑最终全套。人类新增测试服务器SSH握手前errno111，未认证/未改远端；等可达性澄清，详见docs/verification/2026-11-13-network-completion/PROGRESS.md。所有真实跨服务器验证尚未完成，不标done。
+- 2026-11-13 07:57 UTC · codex · SSH诊断：当前执行器是Codex Cloud，HTTP代理可达GitHub，但无VPN/TCP grants，测试SSH及官方SSH443均在认证前被拒绝，未发送密码/修改远端；需要受支持VPN/TCP路径或可直连SSH的执行环境。云端恢复清空/tmp且原全套pytest进程不存在，不能计为通过；源码保留，重跑网关45测试通过，Ruff/collab通过。继续in_progress，详见docs/verification/2026-11-13-network-completion/PROGRESS.md。
+- 2026-11-13 08:45 UTC · codex · 人类明确取消测试服务器SSH登录与双机远端测试，继续完成先前网络开发；停止所有SSH探测，不再把VPN配置作为本轮开发前置。恢复本地Node22/PG16/Redis和官方kubectl，收尾网关独立就绪与撤销容量回收；真实集群数据面验证继续如实列为未做，不擅自启用生产开关。
+- 2026-11-13 09:18 UTC · codex · 网络执行链代码e80ccc72已推送并开草稿PR197：https://github.com/brianabc121/WorkspaceCore/pull/197。真实本地网络组合236通过/179.41s，e80完整Web CI79文件794通过及构建通过；局部本地失败/中断如实列于VALIDATION.md。补齐Compose未传网络参数的部署缺口，真实渲染+Settings回归RED2→GREEN2；增加网关镜像构建检查。继续等待最新完整API/全栈/镜像CI，默认不启用未经真实节点验收的网络，任务仍in_progress；人类已取消外部SSH测试。
+- 2026-11-13 10:07 UTC · codex · 完整API CI发现契约问题，已直接本地复现统一422文档与CSRF矩阵2项失败；内部网关误进入浏览器OpenAPI。加强内部接口隐藏契约后RED1，修复仅include_in_schema=False并正式重生成OpenAPI/类型，不改CSRF矩阵。最终契约+完整安全矩阵+网关鉴权8通过/473.35s；check:api/typecheck/Ruff548/strictmypy544/OpenAPI通过。推送同PR197后等待新head完整CI，不合并。
+- 2026-11-13 12:41 UTC · human · owner codex → claude：人类在对话中指派（2026-11-13）：claude 直接修好 PR #197 的审查问题并合并，不再等 codex 修改；改好后告诉 codex
+- 2026-11-13 14:32 UTC · claude · 按人类指令接手 PR #197：在 claude 分支并入 codex/T-0224-network-completion@4679f7a（未推 codex 分支），修复审查阻塞 1–3（回执被拒只撤这一条绑定；只有第一个网关子记录提升服务版本；已停止环境按 PV 容量上报）、4（desired_policy 改写前对该行加锁重读）、5（三个新错误码文案）和 7（后台刷新不再清空密码），各加回归测试且均先在原代码上失败。后端全量 1732 passed/16 skipped，ruff/mypy 通过；前端 lint/typecheck/798 项/build/check:api 通过。详见 docs/verification/2026-11-13-network-completion/VALIDATION.md 末节。
+- 2026-11-13 14:32 UTC · claude · 交接给 codex（continue）→ .collab/handoffs/2026-11-13-1432_T-0224_claude-to-codex.md：PR #197 的审查问题已由 claude 修复并随 claude 的 PR 合并；T-0224 剩余项（真实两节点/Cilium 数据面验证、Kubernetes 完整运行适配、审查建议 6/8/9/10 的核实）交回 codex 继续
+- 2026-11-13 15:34 UTC · claude · main 修复：PR #199 与 PR #198（0066 llm_bridge）先后合并，main 上出现两个 0066、两个 alembic head。为恢复 main，claude 把本任务的网关端口迁移改号为 0067（down_revision 0066），测试 test_runner_gateway_migration 的回退目标改为 0066；见 docs/verification/2026-11-13-network-completion/PROGRESS.md 末节。只改编号，不改迁移内容。

@@ -38,6 +38,19 @@ def candidate_for(host: RunnerHost, environments: list[RunnerEnvironment]) -> Ca
             observed = None
     except (KeyError, TypeError, ValueError):
         observed = None
+    backend = host.backend or "docker"
+    metadata = host.runtime_metadata or {}
+    kubernetes_ready = (
+        backend == "kubernetes"
+        and observed is not None
+        and type(metadata.get("network_validation_revision")) is int
+        and metadata.get("network_validation_revision") == 1
+        and metadata.get("network_ready") is True
+        and metadata.get("supported_profile") == "gvisor-immutable-v1"
+        and isinstance(host.node_name, str)
+        and bool(host.node_name)
+        and "runsc" in (host.runtimes or [])
+    )
     compute = [env.spec for env in environments if compute_reserved(env)]
     retained = [env.spec for env in environments if env.state in RETAINED_STATES]
     pending = [env.spec for env in environments if compute_reserved(env) and _pending_compute(env)]
@@ -56,6 +69,15 @@ def candidate_for(host: RunnerHost, environments: list[RunnerEnvironment]) -> Ca
             memory_credit_known = False
             break
         memory_credit += min(float(env.spec["memory_mb"]), value / 1024**2)
+    runtimes: tuple[str, ...] = ()
+    if backend == "kubernetes" and kubernetes_ready:
+        runtimes = ("gvisor",)
+    elif backend == "docker":
+        runtimes = tuple(
+            ["runc"]
+            + (["gvisor"] if "runsc" in (host.runtimes or []) else [])
+            + (["kvm"] if host.kvm else [])
+        )
     return Candidate(
         server_id=host.id,
         cpus=host.cpus,
@@ -79,10 +101,6 @@ def candidate_for(host: RunnerHost, environments: list[RunnerEnvironment]) -> Ca
         pending_disk_gb=sum(float(spec.get("disk_gb", 0)) for spec in pending),
         observed_committed_memory_mb=memory_credit if memory_credit_known else None,
         observed_at=observed,
-        enabled=host.status == "online" and (host.backend or "docker") == "docker",
-        runtimes=tuple(
-            ["runc"]
-            + (["gvisor"] if "runsc" in (host.runtimes or []) else [])
-            + (["kvm"] if host.kvm else [])
-        ),
+        enabled=host.status == "online" and (backend == "docker" or kubernetes_ready),
+        runtimes=runtimes,
     )

@@ -210,9 +210,15 @@ class Runner:
     ) -> RunnerHost:
         from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
         from app.domain.runner_placement import candidate_for
+        from app.domain.runner_runtime_profile import UnsupportedRuntimeProfile, kubernetes_profile
 
         # 稳定排序锁整个候选池；同主机不同实例的创建不能读取同一份未预约容量。
         hosts = await self._lock_pool_hosts(workspace_id)
+        managed_new = bool(
+            self.settings.runner_network_verified
+            and exclude_environment is None
+            and any(h.backend == "kubernetes" for h in hosts)
+        )
         envs = list(
             await self.db.scalars(
                 select(RunnerEnvironment).where(
@@ -221,13 +227,36 @@ class Runner:
                 )
             )
         )
-        candidates = [
-            candidate_for(
-                host, [e for e in envs if e.host_id == host.id and e.id != exclude_environment]
+        candidates = []
+        profile_reason: str | None = None
+        for host in hosts:
+            if affinity is not None and host.id != affinity:
+                continue
+            if managed_new and host.backend != "kubernetes":
+                if placement.mode == "specified" and placement.server_id == host.id:
+                    raise RunnerError(
+                        "RUNTIME_NETWORK_UNSUPPORTED",
+                        "受管私网的新环境需要Kubernetes节点；旧Docker节点仅管理已有环境",
+                    )
+                continue
+            if host.backend == "kubernetes":
+                try:
+                    kubernetes_profile(spec)
+                except UnsupportedRuntimeProfile as error:
+                    profile_reason = str(error)
+                    if placement.mode == "specified" and placement.server_id == host.id:
+                        raise RunnerError("RUNTIME_PROFILE_UNSUPPORTED", profile_reason) from None
+                    continue
+                if not self.settings.runner_network_verified:
+                    profile_reason = "受管网络尚未完成验证，不能分配Kubernetes环境"
+                    if placement.mode == "specified" and placement.server_id == host.id:
+                        raise RunnerError("NETWORK_VALIDATION_REQUIRED", profile_reason)
+                    continue
+            candidates.append(
+                candidate_for(
+                    host, [e for e in envs if e.host_id == host.id and e.id != exclude_environment]
+                )
             )
-            for host in hosts
-            if affinity is None or host.id == affinity
-        ]
         try:
             ranked = rank_candidates(
                 candidates,
@@ -241,6 +270,8 @@ class Runner:
                 specs.now(),
             )
         except PlacementError as error:
+            if not candidates and profile_reason is not None:
+                raise RunnerError(error.code, profile_reason) from None
             raise RunnerError(error.code, error.message) from None
         return next(host for host in hosts if host.id == ranked[0].server_id)
 
@@ -249,10 +280,14 @@ class Runner:
 
         from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
         from app.domain.runner_placement import candidate_for
+        from app.domain.runner_runtime_profile import SUPPORTED_PROFILE
         from app.schemas.placement import Placement
         from app.schemas.runner import RunnerHostCandidateOut, RunnerHostCandidatesOutput
 
         hosts = await self.hosts(viewer.workspace_id)
+        managed_new = bool(
+            self.settings.runner_network_verified and any(h.backend == "kubernetes" for h in hosts)
+        )
         envs = list(
             await self.db.scalars(
                 select(RunnerEnvironment).where(
@@ -273,6 +308,14 @@ class Runner:
                 )
             except PlacementError as error:
                 reasons = [error.message]
+            if host.backend == "kubernetes" and (
+                (host.runtime_metadata or {}).get("supported_profile") != SUPPORTED_PROFILE
+            ):
+                reasons = [f"Kubernetes 节点尚未确认支持 {SUPPORTED_PROFILE}"]
+            if managed_new and host.backend != "kubernetes":
+                reasons.append("旧Docker节点仅管理已有环境；受管私网的新环境需要Kubernetes节点")
+            elif host.backend == "kubernetes" and not self.settings.runner_network_verified:
+                reasons.append("受管网络尚未完成验证")
             data = asdict(candidate)
             data.pop("server_id")
             data.pop("enabled")
@@ -1012,8 +1055,18 @@ class Runner:
             and affinity != body.placement.server_id
         ):
             raise RunnerError("PLACEMENT_CONFLICT", "指定服务器与模板镜像或源数据卷所在服务器不符")
+        admission_spec = {
+            **spec,
+            "files": body.files,
+            "copy_from_volume": source is not None,
+            "command": command,
+        }
+        if template is not None:
+            admission_spec.update(
+                template_image=template.image_ref, image_digest=template.image_digest
+            )
         host = await self.select_host(
-            instance.workspace_id, spec, body.placement, affinity=affinity
+            instance.workspace_id, admission_spec, body.placement, affinity=affinity
         )
         await self._check_quota(instance, host, spec, body.lifetime)
         files = self._files(body.files)
@@ -1162,6 +1215,26 @@ class Runner:
                 "steps": list(template.spec.get("steps") or []),
                 "tag": spec["template_image"],
             }
+        if env.runtime_backend == "kubernetes":
+            from app.domain.runner_runtime_profile import (
+                UnsupportedRuntimeProfile,
+                kubernetes_profile,
+            )
+
+            try:
+                spec = kubernetes_profile(
+                    {
+                        **spec,
+                        "files": files,
+                        "copy_from_volume": source is not None,
+                        "setup": env.setup,
+                        "snapshot": snapshot,
+                        "template_build": build,
+                    }
+                )
+            except UnsupportedRuntimeProfile as error:
+                raise RunnerError("RUNTIME_PROFILE_UNSUPPORTED", str(error)) from None
+            image = spec["image"]
         return {
             "env_id": str(env.id),
             "workspace_id": str(env.workspace_id),
@@ -1670,6 +1743,86 @@ class Runner:
     async def apply_result(
         self, command: RunnerCommand, status: str, result: dict[str, Any], error: str | None
     ) -> None:
+        if (
+            status == "done"
+            and command.kind in ("create_env", "start_env")
+            and command.environment_id
+        ):
+            current = await self.db.get(
+                RunnerEnvironment,
+                command.environment_id,
+                with_for_update=True,
+                populate_existing=True,
+            )
+            if current is not None and current.runtime_backend == "kubernetes":
+                from ipaddress import ip_address, ip_network
+
+                identity = command.payload.get("runtime_identity") or {}
+                metadata = current.runtime_metadata or {}
+                host = await self.db.get(RunnerHost, command.host_id)
+                generation = metadata.get("generation")
+                expected = {
+                    "workspace_id": str(current.workspace_id),
+                    "instance_id": str(current.owner_instance_id),
+                    "env_id": str(current.id),
+                    "allocation_id": str(metadata.get("allocation_id") or current.id),
+                    "generation": generation,
+                    "node_name": host.node_name if host else None,
+                }
+                valid = (
+                    current.host_id == command.host_id
+                    and identity == expected
+                    and result.get("ready") is True
+                    and type(generation) is int
+                    and result.get("generation") == generation
+                    and result.get("allocation_id") == expected["allocation_id"]
+                    and result.get("node") == expected["node_name"]
+                    and isinstance(result.get("pod_uid"), str)
+                    and bool(result.get("pod_uid"))
+                    and all(
+                        isinstance(result.get(k), str) and bool(result.get(k))
+                        for k in ("deployment_uid", "pvc_uid")
+                    )
+                    and (
+                        metadata.get("binding_generation") != generation
+                        or all(
+                            metadata.get(k) == result.get(k) for k in ("deployment_uid", "pvc_uid")
+                        )
+                    )
+                )
+                try:
+                    address = ip_address(str(result.get("pod_ip")))
+                    valid = (
+                        valid
+                        and address.version == 4
+                        and any(
+                            address in ip_network(c.strip())
+                            for c in self.settings.runner_network_pod_cidrs.split(",")
+                            if c.strip()
+                        )
+                    )
+                except ValueError:
+                    valid = False
+                if not valid:
+                    raise RunnerError(
+                        "NETWORK_RUNTIME_UNCONFIRMED", "运行回报与当前节点、分配或代次不一致"
+                    )
+                current.runtime_metadata = {
+                    **metadata,
+                    "binding_generation": generation,
+                    **{
+                        key: result[key]
+                        for key in (
+                            "generation",
+                            "allocation_id",
+                            "node",
+                            "pod_uid",
+                            "pod_ip",
+                            "deployment_uid",
+                            "pvc_uid",
+                        )
+                    },
+                }
         command.status = status
         command.result = (
             {k: v for k, v in result.items() if k != "b64"}

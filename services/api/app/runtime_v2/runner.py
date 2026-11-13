@@ -7,13 +7,14 @@ reconciliation have been verified in a real cluster.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from app.runtime_v2.kubernetes import KubernetesRuntime, RuntimeIdentity
+from app.runtime_v2.kubernetes import KubernetesRuntime, RuntimeIdentity, normalized_policy
 
 
 class OutcomeUnknown(RuntimeError):
@@ -33,8 +34,20 @@ class KubernetesCommandError(RuntimeError):
 
 
 class Kubectl:
-    def __init__(self, kubeconfig: str, *, executable: str = "kubectl", timeout: int = 30) -> None:
-        if not Path(kubeconfig).is_absolute():
+    def __init__(
+        self, kubeconfig: str | None, *, executable: str = "kubectl", timeout: int = 30
+    ) -> None:
+        if kubeconfig is None:
+            if (
+                os.environ.get("KUBECONFIG")
+                or not os.environ.get("KUBERNETES_SERVICE_HOST")
+                or not all(
+                    Path("/var/run/secrets/kubernetes.io/serviceaccount/" + name).is_file()
+                    for name in ("ca.crt", "token")
+                )
+            ):
+                raise ValueError("explicit context or mounted in-cluster identity required")
+        elif not Path(kubeconfig).is_absolute():
             raise ValueError("kubeconfig path must be absolute")
         if not 1 <= timeout <= 120:
             raise ValueError("invalid timeout")
@@ -47,8 +60,7 @@ class Kubectl:
             result = subprocess.run(  # noqa: S603 - fixed executable and structured argv
                 [
                     self.executable,
-                    "--kubeconfig",
-                    self.kubeconfig,
+                    *(["--kubeconfig", self.kubeconfig] if self.kubeconfig else []),
                     "--request-timeout=20s",
                     "--insecure-skip-tls-verify=false",
                     *args,
@@ -69,6 +81,9 @@ class Kubectl:
 
     def validate_connection(self) -> None:
         from urllib.parse import urlsplit
+
+        if self.kubeconfig is None:
+            return  # constructor requires the CA-verified mounted service account
 
         config = json.loads(self.call(["config", "view", "--minify", "-o", "json"]))
         clusters = config.get("clusters") or []
@@ -219,6 +234,7 @@ class KubernetesRunner:
     def __init__(self, api: Kubectl) -> None:
         self.api = api
         self._delete_uids: dict[tuple[str, int, str], str] = {}
+        self._service_uids: dict[tuple[UUID, int], str] = {}
 
     def validate_create(self, identity: RuntimeIdentity, payload: dict[str, Any]) -> None:
         workload(identity, payload)
@@ -379,6 +395,8 @@ class KubernetesRunner:
                 raise OutcomeUnknown("Pod bound outside configured node")
         result = {
             "ready": False,
+            "deployment_uid": provenance.get("deployment"),
+            "pvc_uid": provenance.get("pvc"),
             "pod_uid": None,
             "node": None,
             "pod_ip": None,
@@ -556,20 +574,29 @@ class KubernetesRunner:
         if expected != uid:
             raise OutcomeUnknown(f"{kind} UID changed during deletion")
 
-    def _delete_uid(self, path: str, uid: str) -> None:
-        options = {
+    def _delete_uid(self, path: str, uid: str, resource_version: str | None = None) -> None:
+        options: dict[str, Any] = {
             "apiVersion": "v1",
             "kind": "DeleteOptions",
             "preconditions": {"uid": uid},
             "propagationPolicy": "Foreground",
         }
+        if resource_version is not None:
+            options["preconditions"]["resourceVersion"] = resource_version
         try:
             self.api.call(["delete", "--raw", path, "-f", "-"], input_data=json.dumps(options))
         except KubernetesCommandError as error:
             raise OutcomeUnknown("delete result unknown; reconcile before retrying") from error
 
     def apply_private_service(
-        self, identity: RuntimeIdentity, service_id: UUID, revision: int, port: int, protocol: str
+        self,
+        identity: RuntimeIdentity,
+        service_id: UUID,
+        revision: int,
+        port: int,
+        protocol: str,
+        *,
+        expected_uid: str | None = None,
     ) -> dict[str, Any]:
         """Create a ClusterIP Service and return only its observed API receipt."""
         from ipaddress import ip_address
@@ -620,6 +647,9 @@ class KubernetesRunner:
             self.api.create(service)
             raise PendingApply("service creation pending observation")
         spec, meta = observed.get("spec") or {}, observed.get("metadata") or {}
+        previous_uid = expected_uid or self._service_uids.get((service_id, identity.generation))
+        if previous_uid is not None and meta.get("uid") != previous_uid:
+            raise OutcomeUnknown("service UID replaced since receipt")
         labels = meta.get("labels") or {}
         stable = {
             key: value
@@ -630,6 +660,17 @@ class KubernetesRunner:
         }
         if any(labels.get(key) != value for key, value in stable.items()):
             raise ValueError("service identity mismatch")
+        generation = labels.get("workspace.myworkspace.io/generation")
+        if (
+            not isinstance(generation, str)
+            or not generation.isdigit()
+            or int(generation) > identity.generation
+            or (
+                int(generation) == identity.generation
+                and labels.get("workspace.myworkspace.io/allocation") != identity.allocation_id.hex
+            )
+        ):
+            raise ValueError("stale service generation or allocation")
         current_revision = (meta.get("annotations") or {}).get("workspace.myworkspace.io/revision")
         if not isinstance(current_revision, str) or not current_revision.isdigit():
             raise ValueError("service revision missing")
@@ -691,8 +732,8 @@ class KubernetesRunner:
             or ports[0].get("nodePort")
         ):
             raise ValueError("service port mismatch")
-        if not meta.get("uid"):
-            raise PendingApply("service UID not observed")
+        if not meta.get("uid") or not meta.get("resourceVersion"):
+            raise PendingApply("service UID or resource version not observed")
         address = spec.get("clusterIP")
         try:
             if not isinstance(address, str):
@@ -700,13 +741,272 @@ class KubernetesRunner:
             ip_address(address)
         except (ValueError, TypeError):
             raise PendingApply("service cluster IP not allocated") from None
+        self._service_uids[(service_id, identity.generation)] = meta["uid"]
         return {
             "applied_revision": revision,
             "cluster_ip": address,
             "name": name,
             "namespace": identity.namespace,
             "uid": meta.get("uid"),
+            "resource_version": meta["resourceVersion"],
         }
+
+    @staticmethod
+    def _domain_scope(identity: RuntimeIdentity) -> dict[str, str]:
+        return {
+            k: v
+            for k, v in identity.labels.items()
+            if k.endswith("/workspace") or k.endswith("/instance")
+        }
+
+    def ensure_domain(self, identity: RuntimeIdentity) -> dict[str, Any]:
+        """Provision identity labels and deny all traffic before any workload exists."""
+        namespace = self.api.get_optional("namespace", identity.namespace)
+        scope = self._domain_scope(identity)
+        if namespace is None:
+            self.api.create(
+                {
+                    "apiVersion": "v1",
+                    "kind": "Namespace",
+                    "metadata": {
+                        "name": identity.namespace,
+                        "labels": scope,
+                    },
+                }
+            )
+            raise PendingApply("namespace creation pending observation")
+        metadata = namespace.get("metadata") or {}
+        if any((metadata.get("labels") or {}).get(k) != v for k, v in scope.items()):
+            raise ValueError("namespace identity mismatch")
+        if not metadata.get("uid") or metadata.get("deletionTimestamp"):
+            raise PendingApply("namespace UID not observed or namespace terminating")
+        self._apply_policy(
+            identity,
+            {
+                "apiVersion": "networking.k8s.io/v1",
+                "kind": "NetworkPolicy",
+                "metadata": {
+                    "name": "runner-default-deny",
+                    "namespace": identity.namespace,
+                    "labels": scope,
+                },
+                "spec": {
+                    "podSelector": {},
+                    "policyTypes": ["Ingress", "Egress"],
+                    "ingress": [],
+                    "egress": [],
+                },
+            },
+        )
+        return self.apply_domain_policy(identity)
+
+    def _apply_policy(self, identity: RuntimeIdentity, desired: dict[str, Any]) -> dict[str, Any]:
+        name = desired["metadata"]["name"]
+        observed = self.api.get_optional("networkpolicy", name, identity.namespace)
+        if observed is None:
+            self.api.create(desired)
+            raise PendingApply("policy creation pending observation")
+        meta = observed.get("metadata") or {}
+        uid, version = meta.get("uid"), meta.get("resourceVersion")
+        if meta.get("deletionTimestamp") or not uid:
+            raise PendingApply("policy UID not observed or deletion pending")
+        annotations = desired["metadata"].get("annotations") or {}
+        previous = meta.get("annotations") or {}
+        for key in ("workspace.myworkspace.io/revision", "workspace.myworkspace.io/generation"):
+            if key in previous and (
+                key not in annotations or int(previous[key]) > int(annotations[key])
+            ):
+                raise ValueError("stale or missing policy revision or generation")
+        if normalized_policy(observed.get("spec")) != normalized_policy(desired["spec"]) or (
+            desired["metadata"].get("annotations") is not None
+            and meta.get("annotations") != desired["metadata"]["annotations"]
+        ):
+            if not version:
+                raise PendingApply("policy resource version not observed")
+            patch = [
+                {"op": "test", "path": "/metadata/uid", "value": uid},
+                {"op": "test", "path": "/metadata/resourceVersion", "value": version},
+                {
+                    "op": "add",
+                    "path": "/metadata/labels",
+                    "value": desired["metadata"].get("labels", self._domain_scope(identity)),
+                },
+                {"op": "add", "path": "/metadata/annotations", "value": annotations},
+                {"op": "replace", "path": "/spec", "value": desired["spec"]},
+            ]
+            try:
+                self.api.call(
+                    [
+                        "patch",
+                        "networkpolicy",
+                        name,
+                        "-n",
+                        identity.namespace,
+                        "--type=json",
+                        "--patch",
+                        json.dumps(patch),
+                    ]
+                )
+            except KubernetesCommandError as error:
+                raise OutcomeUnknown("policy update requires reconciliation") from error
+            current = self.api.get_optional("networkpolicy", name, identity.namespace)
+            current_meta = (current or {}).get("metadata") or {}
+            if (
+                not current
+                or normalized_policy(current.get("spec")) != normalized_policy(desired["spec"])
+                or current_meta.get("uid") != uid
+                or (current_meta.get("annotations") or {}) != annotations
+                or current_meta.get("deletionTimestamp")
+                or not current_meta.get("resourceVersion")
+            ):
+                raise PendingApply("policy update pending observation")
+            version = current_meta["resourceVersion"]
+        return {
+            "namespace": identity.namespace,
+            "name": name,
+            "uid": uid,
+            "resource_version": version,
+        }
+
+    @staticmethod
+    def _gateway_peer() -> dict[str, Any]:
+        return {
+            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "runner-system"}},
+            "podSelector": {
+                "matchLabels": {"workspace.myworkspace.io/component": "network-gateway"}
+            },
+        }
+
+    def apply_gateway_egress(
+        self, identity: RuntimeIdentity, ports: list[int], revision: int | None = None
+    ) -> dict[str, Any]:
+        if any(type(port) is not int or not 30000 <= port <= 39999 for port in ports):
+            raise ValueError("invalid private gateway port")
+        if ports and revision is None:
+            raise ValueError("gateway ports require policy revision")
+        metadata: dict[str, Any] = {
+            "name": "runner-gateway-egress",
+            "namespace": identity.namespace,
+            "labels": self._domain_scope(identity),
+        }
+        if revision is not None:
+            if type(revision) is not int or revision < 1:
+                raise ValueError("invalid gateway policy revision")
+            metadata["annotations"] = {"workspace.myworkspace.io/revision": str(revision)}
+        return self._apply_policy(
+            identity,
+            {
+                "apiVersion": "networking.k8s.io/v1",
+                "kind": "NetworkPolicy",
+                "metadata": metadata,
+                "spec": {
+                    "podSelector": {"matchLabels": self._domain_scope(identity)},
+                    "policyTypes": ["Egress"],
+                    "egress": (
+                        [
+                            {
+                                "to": [self._gateway_peer()],
+                                "ports": [
+                                    {"protocol": "TCP", "port": port} for port in sorted(set(ports))
+                                ],
+                            }
+                        ]
+                        if ports
+                        else []
+                    ),
+                },
+            },
+        )
+
+    def apply_gateway_ingress(
+        self, identity: RuntimeIdentity, service_id: UUID, revision: int, port: int, enabled: bool
+    ) -> dict[str, Any] | None:
+        name = "gateway-" + UUID(str(service_id)).hex
+        if not enabled:
+            return self._remove_policy(identity, name, revision)
+        if (
+            type(port) is not int
+            or not 1 <= port <= 65535
+            or type(revision) is not int
+            or revision < 1
+        ):
+            raise ValueError("invalid gateway ingress")
+        return self._apply_policy(
+            identity,
+            {
+                "apiVersion": "networking.k8s.io/v1",
+                "kind": "NetworkPolicy",
+                "metadata": {
+                    "name": name,
+                    "namespace": identity.namespace,
+                    "labels": identity.labels,
+                    "annotations": {
+                        "workspace.myworkspace.io/revision": str(revision),
+                        "workspace.myworkspace.io/generation": str(identity.generation),
+                    },
+                },
+                "spec": {
+                    "podSelector": {"matchLabels": identity.labels},
+                    "policyTypes": ["Ingress"],
+                    "ingress": [
+                        {
+                            "from": [self._gateway_peer()],
+                            "ports": [{"protocol": "TCP", "port": port}],
+                        }
+                    ],
+                },
+            },
+        )
+
+    def _remove_policy(
+        self, identity: RuntimeIdentity, name: str, revision: int
+    ) -> dict[str, Any] | None:
+        observed = self.api.get_optional("networkpolicy", name, identity.namespace)
+        if observed is None:
+            return None
+        meta = observed.get("metadata") or {}
+        annotations = meta.get("annotations") or {}
+        if int(annotations.get("workspace.myworkspace.io/revision", 0)) > revision:
+            raise ValueError("stale policy revision")
+        verify_identity(observed, identity)
+        uid, version = meta.get("uid"), meta.get("resourceVersion")
+        if not uid or not version:
+            raise PendingApply("policy UID or version missing")
+        path = f"/apis/networking.k8s.io/v1/namespaces/{identity.namespace}/networkpolicies/{name}"
+        self._delete_uid(path, uid, version)
+        if self.api.get_optional("networkpolicy", name, identity.namespace) is not None:
+            raise PendingDeletion("gateway policy deletion pending")
+        return {"uid": uid, "resource_version": version}
+
+    def delete_private_service(
+        self,
+        identity: RuntimeIdentity,
+        service_id: UUID,
+        revision: int,
+        *,
+        expected_uid: str | None = None,
+    ) -> dict[str, Any] | None:
+        service_id = UUID(str(service_id))
+        name = "svc-" + service_id.hex
+        observed = self.api.get_optional("service", name, identity.namespace)
+        if observed is None:
+            return None
+        verify_identity(observed, identity)
+        meta = observed.get("metadata") or {}
+        uid, version = meta.get("uid"), meta.get("resourceVersion")
+        expected = expected_uid or self._service_uids.get((service_id, identity.generation))
+        if expected is not None and uid != expected:
+            raise OutcomeUnknown("service UID changed during revocation")
+        if not uid or not version:
+            raise PendingDeletion("service UID or resource version not observed")
+        previous = int((meta.get("annotations") or {}).get("workspace.myworkspace.io/revision", 0))
+        if previous < 1 or previous > revision:
+            raise ValueError("stale service revocation revision")
+        self._service_uids[(service_id, identity.generation)] = uid
+        self._delete_uid(f"/api/v1/namespaces/{identity.namespace}/services/{name}", uid, version)
+        if self.api.get_optional("service", name, identity.namespace) is not None:
+            raise PendingDeletion("service deletion pending observation")
+        return {"uid": uid, "resource_version": version}
 
     def apply_domain_policy(self, identity: RuntimeIdentity) -> dict[str, Any]:
         """Install the fixed policy in an already managed namespace.
@@ -722,14 +1022,4 @@ class KubernetesRunner:
         }
         if any(labels.get(k) != v for k, v in scope.items()):
             raise ValueError("namespace identity mismatch")
-        desired = KubernetesRuntime.network_policy(identity)
-        observed = self.api.get_optional("networkpolicy", "runner-domain", identity.namespace)
-        if observed is None:
-            self.api.create(desired)
-            raise PendingApply("policy creation pending observation")
-        if observed.get("spec") != desired["spec"]:
-            raise ValueError("existing policy mismatch")
-        uid = (observed.get("metadata") or {}).get("uid")
-        if not uid:
-            raise PendingApply("policy UID not observed")
-        return {"namespace": identity.namespace, "name": "runner-domain", "uid": uid}
+        return self._apply_policy(identity, KubernetesRuntime.network_policy(identity))

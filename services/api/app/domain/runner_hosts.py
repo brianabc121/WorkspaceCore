@@ -569,6 +569,10 @@ class RunnerHosts:
             # Telemetry is useful, but never order its containers stopped as
             # "stray" or alter allocation state without a verified identity.
             return RunnerReportResult(lost=[], stray=[])
+        if host.backend == "kubernetes":
+            # Capacity inventory has no allocation/generation/Pod UID receipt.
+            # Only the lifecycle controller can change Kubernetes runtime binding.
+            return RunnerReportResult(lost=[], stray=[])
         envs = {
             e.id: e
             for e in await self.db.scalars(
