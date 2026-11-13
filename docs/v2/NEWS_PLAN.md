@@ -45,6 +45,7 @@ NewsNow / RSS / 大模型 / 推送渠道（外网）
 - **卷**：core 新建 `trendradar-config`，api、worker 以读写挂载在 `/var/lib/workspace/trendradar`；TrendRadar 两个容器只读挂载为
   `/app/config`。`trendradar-output`（抓到的数据）只属于 TrendRadar 项目，MCP 只读挂载。
 - **一个部署只有一个 TrendRadar**：同一时刻只有一个工作空间能启用早报（数据库唯一约束），其余工作空间看到“已被另一个工作空间使用”。
+- **部署好就默认打开**（T-0225，人类 2026-11-13 要求）：一键部署脚本部署好 TrendRadar 后，以首次安装创建的管理员身份按默认设置打开他的工作空间的早报（`connect news-enable`）；只在还没保存过设置、也没有别的工作空间打开时打开，保存过的设置（包括关掉的）不改。
 
 ## 4. 设置（网页 → TrendRadar 配置文件）
 

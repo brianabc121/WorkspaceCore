@@ -622,6 +622,43 @@ class NewsService:
         async with self.render_lock():
             return await self._update_settings(actor, access, body)
 
+    async def enable_by_default(self, actor: Actor, access: WorkspaceAccess) -> str:
+        """部署脚本部署好 TrendRadar 后默认打开这个工作空间的早报（T-0225）。
+
+        只在这个工作空间还没保存过早报设置、也没有别的工作空间打开时，按默认设置打开：先抓取热榜，
+        推送渠道与大模型留到网页上填。保存过的设置（包括关掉的）不改，所以重复运行部署脚本不会
+        把用户关掉的开关又打开。与网页保存走同一条路（校验、生成配置文件、审计），返回：
+        not_deployed（没部署 TrendRadar）、module_disabled（应用中心停用了模块）、
+        enabled（已经打开）、taken（别的工作空间打开了）、kept_off（保存过且关着）、
+        enabled_now（这次打开）。
+        """
+        if not self.deployed:
+            return "not_deployed"
+        workspace_id = access.workspace.id
+        if not await modules.is_enabled(self.db, workspace_id, "news"):
+            return "module_disabled"
+        # 与网页保存一样先拿配置文件写锁：两边同时操作时不会都以为“还没保存过”
+        async with self.render_lock():
+            row = await self.row(workspace_id)
+            if row is not None:
+                return "enabled" if row.enabled else "kept_off"
+            taken = await self.db.scalar(
+                select(NewsSettings.workspace_id).where(NewsSettings.enabled.is_(True))
+            )
+            if taken is not None:
+                return "taken"
+            default = self.defaults(workspace_id)
+            body = NewsSettingsIn(
+                version=0,
+                enabled=True,
+                push_times=list(default.push_times),
+                briefing_mode="trendradar",
+                platforms=list(default.platforms),
+                topics=[NewsTopicIn.model_validate(t) for t in default.topics],
+            )
+            await self._update_settings(actor, access, body)
+        return "enabled_now"
+
     async def _update_settings(
         self, actor: Actor, access: WorkspaceAccess, body: NewsSettingsIn
     ) -> NewsSettingsOut:

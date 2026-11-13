@@ -1142,10 +1142,32 @@ news_env() {
   (cd "$ROOT" && make -s up </dev/null)
 }
 
+# 部署好 TrendRadar 后默认打开新闻早报（T-0225）：只在管理员的工作空间还没保存过早报设置、也没有别的
+# 工作空间打开时打开（按默认设置先抓取热榜）；网页上保存过的设置（包括关掉的）不改
+news_enable() {
+  local out
+  if ! out="$(connect_cmd news-enable </dev/null 2>&1)"; then
+    warn "没有自动打开新闻早报：${out##*失败  }"
+    info "用 owner 登录网页，在「设置 → 新闻早报」里打开「启用新闻早报」"
+    return 0
+  fi
+  case "$(status_of news "$out")" in
+    enabled_now) ok "已默认打开新闻早报：先按默认设置抓取热榜；在网页「设置 → 新闻早报」里填兴趣、大模型 Key 与推送渠道" ;;
+    enabled) ok "新闻早报已经打开：在网页「设置 → 新闻早报」里设置兴趣、大模型与推送渠道" ;;
+    kept_off) info "新闻早报之前在网页上关掉了，保持关闭；要用时在「设置 → 新闻早报」里打开" ;;
+    taken) info "另一个工作空间已经打开了新闻早报（一个部署只能有一个），这里不改" ;;
+    module_disabled) info "新闻早报模块在「设置 → 应用中心」里停用了，没有打开；要用时先在那里启用" ;;
+    *) warn "没有自动打开新闻早报（${out}）：在网页「设置 → 新闻早报」里打开" ;;
+  esac
+  return 0
+}
+
 connect_news() {
   step "新闻早报（TrendRadar：每天定时推送早报，可选）"
   if news_running && [[ -n $(env_get TRENDRADAR_MCP_URL) ]]; then
-    ok "已部署：在网页「设置 → 新闻早报」里设置兴趣、大模型与推送渠道"; return 0
+    ok "已部署"
+    news_enable
+    return 0
   fi
   if ! news_running; then
     decide NEWS "$NEWS_PROMPT" y || { info "跳过；以后运行 deploy.sh connect"; return 0; }
@@ -1156,7 +1178,8 @@ connect_news() {
     return 0
   fi
   news_env || { warn "api、worker 没有重启成功（见上面的输出）"; return 0; }
-  ok "新闻早报已部署：到网页「设置 → 新闻早报」里启用，填兴趣、大模型 Key 与推送渠道"
+  ok "新闻早报已部署"
+  news_enable
   return 0
 }
 
