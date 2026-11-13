@@ -1,0 +1,42 @@
+{
+  "probes": [
+    {
+      "name": "node_ssh",
+      "target": "100.72.60.100",
+      "port": 22,
+      "connected": false
+    },
+    {
+      "name": "node_api",
+      "target": "100.72.60.100",
+      "port": 6443,
+      "connected": false
+    },
+    {
+      "name": "test_control",
+      "target": "100.72.60.100",
+      "port": 8443,
+      "connected": false
+    },
+    {
+      "name": "private_database",
+      "target": "172.31.240.2",
+      "port": 5432,
+      "connected": false
+    },
+    {
+      "name": "metadata",
+      "target": "169.254.169.254",
+      "port": 80,
+      "connected": false
+    },
+    {
+      "name": "public_https",
+      "target": "1.1.1.1",
+      "port": 443,
+      "connected": false
+    }
+  ],
+  "managed_dns": "10.245.0.1",
+  "run_id": "1e4c73d9-ad80-4b64-af4f-bab67c84d249"
+}

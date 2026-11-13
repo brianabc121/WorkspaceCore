@@ -1,0 +1,12 @@
+{
+  "source_namespace": "oc-8ef1173c41184fd08c62e65abba5b7f0",
+  "source_pod": "env-fe678277ccad4798828bd108b355a22b-6d6c5498-tlq4h",
+  "denied_namespace": "oc-97f6ae3b605247c093ddc839bb05f6a1",
+  "denied_pod": "env-4adadc489a884d51a2604e981beed9cc-64f4fdf4cf-lmdbf",
+  "gateway_host": "runner-gateway.runner-system.svc.cluster.local",
+  "port": 30000,
+  "revoke_argv": [
+    "/opt/venv/bin/python",
+    "/opt/t0224/revoke_test_rule.py"
+  ]
+}

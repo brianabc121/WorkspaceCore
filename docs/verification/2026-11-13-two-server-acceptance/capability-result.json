@@ -1,0 +1,13 @@
+{
+  "utc": "2026-11-13T18:34:38.769418+00:00",
+  "run_id": "1e4c73d9-ad80-4b64-af4f-bab67c84d249",
+  "source_capability_revocation": "passed",
+  "established_stream_closed_within_8_seconds": true,
+  "new_connection_after_capability_revoke": "denied",
+  "gateway_ports_monotonic": [
+    30000,
+    30001
+  ],
+  "test_control_health_after": "ready",
+  "dedicated_rules_retired": true
+}

@@ -1,6 +1,6 @@
 # T-0224 隔离验收执行账本
 
-所有时间为 UTC（北京时间加8小时）。持续执行中，不作为完整验收通过证明。
+所有时间为 UTC（北京时间加8小时）。私网跨节点互通、隔离、授权和两种撤销已实测通过；公网及更广运行适配仍未验收，不作为完整生产验收通过证明。
 
 ## 授权与边界
 
@@ -40,7 +40,7 @@ Ruling: 保留历史 runner 网关0066，以0067接入会话桥；检查两条�
 - 人类已应用 B→A TCP6443、双向TCP10250和UDP8472的精确Tailscale grants。
 - 已设置受保护Node标签和 `gvisor` RuntimeClass；containerd2.2.10通过专用v3 config drop-in配置runsc与CNI，未覆盖已有宿主containerd配置。
 
-## 4. 真实双节点基础数据面：通过；整体仍blocked
+## 4. 真实双节点基础数据面：通过；公网仍blocked
 
 命令与README一致，使用既有 `acceptance_two_nodes.py`，仅将kubectl通过严格SSH委托给A的官方K3s kubectl，TLS仍校验。输入：
 
@@ -57,14 +57,83 @@ Ruling: 保留历史 runner 网关0066，以0067接入会话桥；检查两条�
 - 重跑 run UUID `8e363798-be80-45b0-bc2c-79807dc802db`，报告 `two-node-after-kubelet-fix.json`：`private_tcp_udp_dns=passed`。四个gVisor Pod分布在真实两机，完成双向同实例TCP/UDP、跨实例直接路径TCP/UDP拒绝和四个DNS查询；本次随机Namespace按UID回执清理。
 - 退出码仍为2，因未提供DB-backed网关fixture和真实公网LB/外部来源。未把该部分PASS当完整网络验收。
 
-## 5. 网关验收控制面与fixture：准备中
+## 5. 真实登记工作负载与私网网关：通过
 
 - 仅新建Docker `t0224-control` 网络（172.31.240.0/24）、`t0224-control-pg`卷以及`t0224-pg`、`t0224-redis`、`t0224-control-api`、`t0224-control-tls`容器。PG/Redis/Caddy使用仓库已有固定digest，未清理或复用生产数据。
 - 控制面为独立数据库、合成owner/实例、专用网关凭据和三天短期CA。私钥/口令仅root文件；不提交凭据、cookie、kubeconfig或含真实值的env文件。
 - **只有这个全新测试控制面**的 `RUNNER_NETWORK_VERIFIED=true` 用于执行验收；生产配置和原环境的默认false未改，不将测试fixture的标记当作生产验收完成。
 - TLS只绑定A的Tailscale8443，使用独立CA和正确SAN验证，数据库无宿主公开端口。运行服务器入口头仅由可信Caddy172.31.240.5写入；mwr token仍独立校验。
 - 初次测试镜像发现工作区源码0600/目录0700经COPY成root所有后非root不可读，仅规范化专用测试构建上下文的代码读取权限后重建；没有修改仓库、业务目录或密钥权限。新镜像迁移head0067和测试库版本0067已实际读取确认。
-- 后续使用独立真实PVC/Deployment及生产 `KubernetesRunner` 的创建/UID回执/observe绑定，不使用前述临时网络Pod冒充可信DB绑定。专用测试本地PV的磁盘配额/生产存储采集仍未验收，不能以网络结果宣称该存储档位可生产调度。
+- 已使用独立真实PVC/Deployment及生产 `KubernetesRunner` 的创建/UID回执/observe绑定，不使用前述临时网络Pod冒充可信DB绑定。专用测试本地PV的磁盘配额/生产存储采集仍未验收，不能以网络结果宣称该存储档位可生产调度。
 - 网关镜像含官方SHA256校验的kubectl v1.35.10，最终部署使用实际内容digest；镜像只在测试主机本地构建/导入，不推公共镜像仓库。
 
-下一步：完成fixture、通过正常owner授权与入站规则配置，真实网关读取socket来源/当前PodUID和DB绑定后验证允许源、拒绝源及撤销存量/新连接。公网LB与两个独立外部来源仍未提供，生产网络开关保持关闭。
+### 实际部署修正
+
+- 网关首次无法访问控制面；实际 Cilium monitor 捕获 Pod→A:8443 的 `Policy denied`。固定版本 chart 配置 `policyCIDRMatchMode=nodes` 并重载专用 Cilium 后，原 NetworkPolicy 的精确节点 /32 和端口生效；没有放宽为任意宿主访问。
+- 原生 kubectl 未自动采用投射 ServiceAccount，实际回退 localhost:8080。增加只读 ConfigMap 显式 kubeconfig，使用已核验 HTTPS API、SA 的 CA 路径和 `tokenFile` 路径，保留最小 RBAC 和投射 token 轮换。实际配置为 `gateway-explicit-sa-config.json`、`gateway-actual-deployment.json`；不包含 token 值。离线渲染器不会自动生成该额外 ConfigMap，部署方仍需提供此配置。
+
+### 真实来源、目标与断言
+
+本轮 run UUID `1e4c73d9-ad80-4b64-af4f-bab67c84d249`。三个合成实例由正常 owner API 创建；专用数据库内的主机/环境fixture通过真实物理身份 claim、防重检查、Kubernetes 创建回执与当前 Pod observation 建立绑定。它们不是生产实例，也不代表已验收完整生命周期控制器/资源采集。
+
+|角色|真实节点|当前 Pod UID|Pod IP|
+|---|---|---|---|
+|允许来源|A|`ebb70210-d5ae-4606-aa65-1729b17fc724`|10.244.0.222|
+|拒绝来源|A|`9724e224-a015-4826-b19c-eb91bd67961c`|10.244.0.178|
+|目标|B|`fbd28395-fb30-4363-a7fb-a1c3b864b451`|10.244.1.163|
+
+三个工作负载使用固定 digest 的 Python echo 镜像、gVisor、非 root、无特权、无 SA token、无宿主网络，实际 UID/Pod/资源回执见 `fixture-resource-receipts.json`、`cluster-final-snapshot.json`。
+
+1. 无来源通信能力时，正常创建入站规则 API 返回403 `SOURCE_CAPABILITY_REQUIRED`。
+2. 通过 owner 的正常二次确认和 Critical 审批，独立网关实际领取并执行来源能力授权；之后创建规则，真实 listener ACK 生效，端口30000。没有直接把数据库状态写成 active。
+3. 在既有 `acceptance_two_nodes.py` 的 **原始 `gateway_checks`** 上执行：允许来源经网关访问跨节点目标成功，拒绝来源失败；两种来源直达目标的 TCP/UDP 均失败。拒绝来源曾有仅指向该网关/端口的临时诊断 egress Policy，结束后按原 UID/resourceVersion 删除；没有开放目标或其他流量。现有 harness 判定连接失败，不额外宣称已单独区分所有拒绝发生层次。
+4. 打开持续 TCP 流，经正常 owner API 撤销规则；harness 原断言确认 **8秒内存量流断开，新连接被拒绝**。18:29:45 输出 `private_gateway_allowed_denied_revocation=passed`。`elapsed_seconds=11.617` 是整个网关检查耗时，不能当作撤销延迟。
+5. 用新规则端口30001再测撤销**来源通信能力**，同一原始 harness 确认存量流8秒内断开、新连接被拒绝。18:34:38 输出 `source_capability_revocation=passed`。端口单调递增，没有复用已撤销30000。
+6. 撤销后目标自身 echo 仍成功、测试控制面 ready、原工作负载 UID 不变；网关 UID `c3a6fbac-5faa-4e26-98a4-1c182133c86c` 不变且重启次数仍0，排除靠目标/网关退出冒充撤销。
+
+实际操作驱动保存在 `operator-fixture-driver.source.txt`，两个正常撤销 API 驱动为 `revoke-rule-driver.source.txt`、`revoke-capability-driver.source.txt`。这些是本次受信任操作者使用的测试夹具源码记录，不是自动生产安装入口；仅路径/环境变量引用，不包含实际凭据。运行于专用工具镜像，数据库/管理员权限仅对新测试控制面有效。
+
+已执行的容器内命令按阶段为（共同的 root 私有 env/CA/kubeconfig/状态目录只读或专用挂载未在此展开）：
+
+```sh
+python /opt/t0224/lab_fixture.py bootstrap
+python /opt/t0224/lab_fixture.py deploy
+python /opt/t0224/lab_fixture.py network
+python /opt/t0224/lab_fixture.py authorize
+python /opt/t0224/lab_fixture.py gateway-test
+python /opt/t0224/lab_fixture.py capability-test
+python /opt/t0224/lab_fixture.py settle
+```
+
+原始输出分别见 `registered-workloads.txt`、`owner-authorization.txt`、`private-gateway-acceptance.txt`、`capability-revocation.txt`、`final-rule-withdrawal.txt`；机器可读结果为 `gateway-result.json`、`capability-result.json` 及两个 revoke-result。基础 harness 的 kubectl 完整 argv/退出码/stderr 记录在 `kubectl-commands.jsonl`，包括先前失败；不记录 stdin、凭据或响应中的 Secret。
+
+## 6. 禁止出站与结束状态
+
+- 同一真实允许来源 Pod 在撤销完成后，依次仅尝试 TCP 连接 A:22、A:6443、测试控制面 A:8443、专用数据库172.31.240.2:5432、元数据169.254.169.254:80、公网1.1.1.1:443，**六项均未连接成功**；没有发送应用数据、查询元数据或数据库内容。
+- 六项分别对应源 IP10.244.0.222 的实际 Cilium `Policy denied` SYN drop；受管 DNS 查询仍返回10.245.0.1。原始结果/丢弃事件为 `prohibited-egress.txt`，结果JSON为 `prohibited-egress-result.json`。这只证明所列地址/协议的实测，不外推为全部互联网或所有协议验证。
+- 正常对账后，两条入站规则均 `state=revoked`、`revocation_confirmed=true`、`accepting_new_connections=false`，来源通信能力也已撤销。目标自己的私有 echo Service 保留，但没有任何测试跨实例入站授权。最终 API 状态为 `final-network.json`。
+- 原 UID 的诊断 Policy 已删除；网关 private/public Service 都仅剩不监听的65535占位端口，公网 Service `allocateLoadBalancerNodePorts=false` 且没有 LB 地址。专用控制面、三份测试工作负载/PV和集群保留供复核，不删除现有业务数据或盲目恢复全机 iptables。
+- 18:52:31 再次严格 SSH 只读核对 A/B：原 hostname/可信指纹、维护后的唯一身份、双方 Tailscale `Running`/对端 online、双向 TCP22、ssh/dbus/tailscaled/专用 K3s 均正常；专用 K3s 仍未开机自启。A 原三份 Workspace Docker 网络 ID 与 TrendRadar 配置卷仍在。原始输出为 `final-host-a.txt`、`final-host-b.txt`。
+- B 身份原件备份保留；三天测试 CA 到期前需由操作者续期或停用测试控制面。所有实际口令、token、私钥和管理员 kubeconfig 保持 root 私有文件，未纳入证据。
+
+## 7. 完整后端测试的环境差异
+
+最终代码的持久后台完整 pytest 正在运行，测试使用本地 `workspace` 数据库用户；目前出现4项 `test_integration.py` 的 Alembic `command.check` 失败，不称全套通过。
+
+只复现第一项，实际 `1 failed in 4.41s`。默认 `search_path="$user", public` 在用户名与 schema 同为 workspace 时改变 default_schema，Alembic 对已迁移表报告 remove/add FK 与版本表差异。同一最小数据库/元数据、新建连接的对照实测见 `reflection-user-comparison.txt`：workspace 用户产生 `remove_fk/add_fk`；独立 t0224_ci 用户 default_schema=public，产生0项变更。
+
+未修改产品、迁移环境或原断言。创建本地独立测试角色后，以 CI 相同的“用户名不等于 workspace schema”条件重跑原整文件：
+
+```sh
+TEST_DATABASE_URL=postgresql+asyncpg://t0224_ci@127.0.0.1:5432/postgres \
+TEST_REDIS_URL=redis://127.0.0.1:6379/15 REQUIRE_INTEGRATION=1 \
+.venv/bin/pytest -q tests/test_integration.py
+```
+
+实际输出 `7 passed in 23.67s`，见 `integration-ci-role.txt`。这不是整套重新通过的声明；完整运行结束后保留其原始失败汇总，再与这次环境修正复验分开报告。CI使用 postgres 用户，尚未读取到本 PR 新 head 的 CI 成功证明。
+
+## 8. 未验收门槛与下一步
+
+- 公网 LB 尚无实现/外部地址，两个真实独立外部来源及原始 socket 来源保留未验证；原完整 harness 仍只有基础私网部分 PASS / exit2，之后私网网关组件检查的 PASS 不能改写为完整 harness 通过。
+- 生产磁盘配额/可信资源采集、完整 exec/文件/密钥/快照/生命周期适配继续属于 T-0224，不能以本次网络结果结项。
+- 保持任务 `in_progress / codex`、PR203草稿不合并。仓库默认 `RUNNER_NETWORK_VERIFIED=false`、运行适配开关关闭；测试控制面 true 只用于隔离验收，禁止推广到生产。

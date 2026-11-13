@@ -186,3 +186,34 @@ Workspace使用Compose部署时，在自己的`.env`中设置`RUNNER_NETWORK_GAT
 公网LB必须实际支持直接Pod路由、保留原socket来源且关闭普通NodePort。不要使用会通过hostPort暴露端口的默认K3s ServiceLB，也不要在前面加会SNAT来源的反向代理。节点/Pod/平台CIDR必须完整进入禁止来源名单，IPv6不支持时在受管域和入口都关闭。真实公网原始来源与允许/拒绝/存量撤销验收未通过前，保留功能开关关闭。
 
 当前测试进度见 `docs/verification/2026-11-13-network-completion/PROGRESS.md`。人类已取消本轮 SSH 登录和远端测试，本次仅交付代码、本地检查和验收材料；未认证或改动远端，真实两节点验收留给部署阶段。
+
+## 后续专用双节点实测补充（2026-11-14 北京时间）
+
+人类随后重新授权两服务器的隔离验收；上述取消远端测试是当时的历史状态。
+最新原始输出、失败诊断、UID回执及实际部署见
+[`2026-11-13-two-server-acceptance/EXECUTION.md`](../../docs/verification/2026-11-13-two-server-acceptance/EXECUTION.md)。
+专用 K3s/Cilium/gVisor 集群已经实际通过基础 TCP/UDP/DNS、跨实例隔离、私网授权网关及
+规则/来源能力撤销后的断连检查；公网 LB、两个独立外部来源、生产存储配额和完整运行适配仍是独立门槛，不能据此开启生产开关。
+
+本轮实际环境还验证了下列部署前提：
+
+- API、kubelet 只绑定 Tailscale 地址时，K3s 使用 `egress-selector-mode=disabled`，
+  由明确节点 ACL 和集群 TLS 保护直接 kubelet 连接。本轮默认 `agent` 代理到 loopback
+  与私有绑定冲突，实际日志/exec 返回 EOF；直接 CA 校验与配置调整后恢复。不要通过关闭 TLS 修复。
+- Cilium `policyCIDRMatchMode=nodes` 使网关 NetworkPolicy 中精确的控制面/API 节点 CIDR
+  能匹配节点身份。本轮实际 monitor 捕获了指定控制端口的 `Policy denied`；配置并重载
+  专用 agent 后恢复。仍只允许所列 CIDR/端口，不能替换为不受限的宿主访问。
+- 本轮网关原生 kubectl 自动配置实际回退到 localhost:8080。已使用只读 ConfigMap
+  提供显式 kubeconfig，并设置 `RUNTIME_V2_GATEWAY_KUBECONFIG` 指向该文件。
+  kubeconfig 只包含已核验 HTTPS API 地址、投射 SA 的 CA 路径及 `tokenFile` 路径，
+  不含 token 值；保留原最小 ServiceAccount/RBAC 和凭据轮换。实际结构见验收记录中的
+  `gateway-explicit-sa-config.json` 与 `gateway-actual-deployment.json`；这个额外 ConfigMap
+  和只读挂载由本轮操作者审阅配置，当前离线渲染器不会自动生成它。
+- 私网网关与测试控制面使用独立凭据和短期 CA。只有全新 `APP_ENV=test` 控制面的
+  `RUNNER_NETWORK_VERIFIED=true` 用于验收，生产配置没有启用。测试环境的节点标记不能
+  作为生产网络、磁盘配额或生命周期全链路已验证的声明。
+- 受管运行环境不应访问节点/平台/元数据/公网。本轮六个禁止目标都以仅 TCP 握手的
+  负向探测和对应 Cilium `Policy denied` 事件核对，未读取元数据或数据库内容。
+
+测试记录中的两条专用入站规则和来源通信能力已撤销；撤下 ACK 已确认，网关 Service
+仅剩不监听的65535占位端口。专用集群/控制面保留用于复核，身份备份与原业务卷保留。

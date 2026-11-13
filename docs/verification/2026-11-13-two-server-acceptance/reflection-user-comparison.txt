@@ -1,0 +1,3 @@
+{"user": "workspace", "search_path": "\"$user\", public", "current_schema": "workspace", "default_schema": "workspace", "alembic_autogenerate_operation_kinds": ["remove_fk", "add_fk"]}
+{"user": "t0224_ci", "search_path": "\"$user\", public", "current_schema": "public", "default_schema": "public", "alembic_autogenerate_operation_kinds": []}
+same schema and metadata, new connections after setup, matching Alembic command.check lifecycle; isolated scratch database dropped; product/migration source unchanged

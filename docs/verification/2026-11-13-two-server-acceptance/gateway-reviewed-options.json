@@ -1,0 +1,32 @@
+{
+  "image": "docker.io/library/workspace-t0224-gateway@sha256:df127f69d8f5909dea4895ae86f0da26a4b04ec1339cd6a22c0eff8595d99baf",
+  "control_url": "https://100.72.60.100:8443",
+  "credential_secret": "runtime-gateway-auth",
+  "tls_secret": "runtime-gateway-tls",
+  "ca_secret": "runtime-control-ca",
+  "pod_cidrs": [
+    "10.244.0.0/16"
+  ],
+  "node_cidrs": [
+    "100.72.60.100/32",
+    "100.121.210.36/32",
+    "156.227.24.0/24"
+  ],
+  "platform_cidrs": [
+    "100.64.0.0/10",
+    "10.245.0.0/16",
+    "172.17.0.0/16",
+    "172.19.0.0/16",
+    "172.25.0.0/16",
+    "172.31.240.0/24",
+    "172.31.252.0/28",
+    "169.254.0.0/16"
+  ],
+  "control_cidrs": [
+    "100.72.60.100/32"
+  ],
+  "api_cidrs": [
+    "100.72.60.100/32"
+  ],
+  "api_port": 6443
+}

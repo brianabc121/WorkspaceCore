@@ -1,0 +1,26 @@
+2026-11-13T18:52:31Z
+s1348279
+uid=0(root) gid=0(root) groups=0(root)
+73658ad349ec675300d22bdffe711f442745186fed8890811a422861e70da9de  /etc/machine-id
+73658ad349ec675300d22bdffe711f442745186fed8890811a422861e70da9de  /var/lib/dbus/machine-id
+active
+active
+active
+active
+disabled
+{"backend_state": "Running", "self_ip": ["100.72.60.100", "fd7a:115c:a1e0::b74b:3c65"], "peer": [{"ips": ["100.121.210.36", "fd7a:115c:a1e0::bc4b:d225"], "online": true}]}
+peer=100.121.210.36 tcp22=connected banner=SSH-2.0-Tailscale
+t0224-control-api Up 2 hours
+t0224-control-tls Up 2 hours
+t0224-redis Up 2 hours
+t0224-pg Up 2 hours
+d8f24f55de4c bridge
+0ac5526e08c1 host
+b2f33ae31c01 my-workspace_agent-im
+342665a9781e my-workspace_im
+13de277f92c3 my-workspace_news
+99e0a7cde274 none
+d5e7147d7caa t0224-control
+b18b0ff9b0764d8e4866933cf38b028b27a1b6e5b75e586dcd7959c2c1fee504
+my-workspace_trendradar-config
+t0224-control-pg

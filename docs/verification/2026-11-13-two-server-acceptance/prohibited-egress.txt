@@ -1,0 +1,16 @@
+{"probes": [{"name": "node_ssh", "target": "100.72.60.100", "port": 22, "connected": false}, {"name": "node_api", "target": "100.72.60.100", "port": 6443, "connected": false}, {"name": "test_control", "target": "100.72.60.100", "port": 8443, "connected": false}, {"name": "private_database", "target": "172.31.240.2", "port": 5432, "connected": false}, {"name": "metadata", "target": "169.254.169.254", "port": 80, "connected": false}, {"name": "public_https", "target": "1.1.1.1", "port": 443, "connected": false}], "managed_dns": "10.245.0.1"}
+
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->host: 10.244.0.222:61183 -> 100.72.60.100:22 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->host: 10.244.0.222:61183 -> 100.72.60.100:22 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->host: 10.244.0.222:41306 -> 100.72.60.100:6443 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->host: 10.244.0.222:41306 -> 100.72.60.100:6443 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->host: 10.244.0.222:52530 -> 100.72.60.100:8443 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->host: 10.244.0.222:52530 -> 100.72.60.100:8443 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->world: 10.244.0.222:64137 -> 172.31.240.2:5432 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->world: 10.244.0.222:64137 -> 172.31.240.2:5432 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->world: 10.244.0.222:56966 -> 169.254.169.254:80 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->world: 10.244.0.222:56966 -> 169.254.169.254:80 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->world: 10.244.0.222:23833 -> 1.1.1.1:443 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->world: 10.244.0.222:23833 -> 1.1.1.1:443 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 0, ifindex 812, file bpf_lxc.c:1654, , identity 51499->world: 10.244.0.222:29541 -> 10.245.93.44:30000 tcp ACK
+all six refused probes correlated with actual Cilium Policy denied drops; no application data sent

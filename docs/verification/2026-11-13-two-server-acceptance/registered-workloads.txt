@@ -1,0 +1,3 @@
+allowed actual registered workload ready ebb70210-d5ae-4606-aa65-1729b17fc724 10.244.0.222
+denied actual registered workload ready 9724e224-a015-4826-b19c-eb91bd67961c 10.244.0.178
+target actual registered workload ready fbd28395-fb30-4363-a7fb-a1c3b864b451 10.244.1.163
