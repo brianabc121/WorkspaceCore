@@ -703,6 +703,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/instances/{instance_id}/resources/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile */
+        post: operations["reconcile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/instances/{instance_id}/runner": {
         parameters: {
             query?: never;
@@ -718,6 +735,57 @@ export interface paths {
          */
         put: operations["put_agent_runner"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/runner/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Capabilities */
+        get: operations["capabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/runner/capabilities/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Capability */
+        post: operations["request_capability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/instances/{instance_id}/runner/capabilities/{grant_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Capability */
+        post: operations["revoke_capability"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1212,6 +1280,23 @@ export interface paths {
          * @description 后台任务用保存的登录密码登录（只用密码，固定主机公钥）：只读检查；缺 Docker 才按锁定脚本安装（需要时用同一个密码经标准输入 sudo，已有的 Docker 沿用、不升级）；装过就重新登录确认 docker 组生效；准备平台受控的部署根目录；最后检查 Docker、目录与工作台接入地址。不建实例、不发接入包、不写 authorized_keys，可以重复执行；成功后 ssh.prepared_at 更新。进度看服务器详情的 job（步骤 connect / inspect / docker / reconnect / workspace / verify）。没确认指纹 409 AGENT_SSH_HOST_KEY_UNCONFIRMED；没保存密码 409 AGENT_SERVER_CREDENTIAL_REQUIRED，密码解不开 409 AGENT_SERVER_CREDENTIAL_UNREADABLE；同一台服务器同时只有一个任务（409 AGENT_SSH_JOB_RUNNING）。
          */
         post: operations["prepare_agent_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/servers/{server_id}/resources/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 独立采集服务器资源（owner） */
+        post: operations["refresh_agent_server_resources"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4234,6 +4319,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runner/environments/{environment_id}/ingress/{rule_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Ingress */
+        post: operations["revoke_ingress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/environments/{environment_id}/network": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Network */
+        get: operations["network"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/environments/{environment_id}/published-endpoints/{endpoint_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Endpoint */
+        post: operations["revoke_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/environments/{environment_id}/services": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register Service */
+        post: operations["register_service"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/environments/{environment_id}/services/{service_id}/ingress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Allow Source */
+        post: operations["allow_source"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/environments/{environment_id}/services/{service_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Service */
+        post: operations["publish_service"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/environments/{environment_id}/services/{service_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Service */
+        post: operations["revoke_service"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runner/host": {
         parameters: {
             query?: never;
@@ -4244,8 +4448,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 添加运行服务器（admin，V1 每个工作空间一台）
-         * @description 只建记录；凭证在下载接入包（或 SSH 自动部署）时签发。已经有一台时返回 409 RUNNER_EXISTS。
+         * 添加运行服务器（admin）
+         * @description 只建记录；凭证在下载接入包（或 SSH 自动部署）时签发。支持多台；通过服务器 ID 管理。
          */
         post: operations["create_runner_host"];
         /**
@@ -4388,6 +4592,180 @@ export interface paths {
          * @description 停止 runner-agent，可选删除接入包目录；还有没删除的环境时 409 RUNNER_HAS_ENVIRONMENTS。Docker 与 gVisor 保留。返回 202。
          */
         post: operations["uninstall_runner_ssh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/hosts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runner Hosts */
+        get: operations["get_runner_hosts"];
+        put?: never;
+        /** Create Runner Host */
+        post: operations["post_runner_hosts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/hosts/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runner Host Candidates */
+        get: operations["get_runner_hosts_candidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/hosts/{host_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Runner Host */
+        get: operations["get_runner_hosts_host_id"];
+        put?: never;
+        post?: never;
+        /** Delete Runner Host */
+        delete: operations["delete_runner_hosts_host_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/hosts/{host_id}/bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Runner Host Bundle */
+        post: operations["post_runner_hosts_host_id_bundle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/hosts/{host_id}/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Runner Policy */
+        put: operations["put_runner_hosts_host_id_policy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/hosts/{host_id}/ssh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Runner Ssh State */
+        get: operations["get_runner_hosts_host_id_ssh"];
+        /** Set Runner Ssh */
+        put: operations["put_runner_hosts_host_id_ssh"];
+        post?: never;
+        /** Delete Runner Ssh */
+        delete: operations["delete_runner_hosts_host_id_ssh"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/hosts/{host_id}/ssh/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Runner Ssh */
+        post: operations["post_runner_hosts_host_id_ssh_confirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/hosts/{host_id}/ssh/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install Runner Ssh */
+        post: operations["post_runner_hosts_host_id_ssh_install"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/hosts/{host_id}/ssh/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Runner Ssh */
+        post: operations["post_runner_hosts_host_id_ssh_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runner/hosts/{host_id}/ssh/uninstall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Uninstall Runner Ssh */
+        post: operations["post_runner_hosts_host_id_ssh_uninstall"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5020,6 +5398,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runner-api/v1/network/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Acknowledge */
+        post: operations["acknowledge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runner-api/v1/network/desired": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Desired */
+        post: operations["desired"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runner-api/v1/poll": {
         parameters: {
             query?: never;
@@ -5050,10 +5462,30 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 对账（运行服务器，每分钟）
+         * 对账（运行服务器，定期）
          * @description 上报带工作台标签的容器、数据卷、镜像与占用、出口访问记录；返回记录里有、实际没有的环境（lost）和记录外的容器（stray，运行服务器先停止、24 小时后删除）。
          */
         post: operations["report"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runner-api/v1/report/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin Report
+         * @description Issue the sampling epoch before collecting metrics; never trust agent clocks.
+         */
+        post: operations["begin_report"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5085,6 +5517,17 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AcknowledgmentResult */
+        AcknowledgmentResult: {
+            /** Accepted */
+            accepted: boolean;
+            /**
+             * Enforcement Scope
+             * @default private_service
+             * @constant
+             */
+            enforcement_scope: "private_service";
+        };
         /** Actor */
         Actor: {
             /**
@@ -5179,9 +5622,10 @@ export interface components {
         AgentDeploymentCreateIn: {
             /**
              * Cpus
-             * @description CPU 上限（核）；null 不限制（默认）
+             * @description 新部署 CPU 上限（核）；必须有限
+             * @default 1
              */
-            cpus?: number | null;
+            cpus: number | null;
             /**
              * Description
              * @description 所在服务器等说明；纯文本
@@ -5195,13 +5639,15 @@ export interface components {
             im_nickname?: string | null;
             /**
              * Mem Limit Mb
-             * @description 内存上限（MiB）；null 不限制（默认）
+             * @description 新部署内存上限（MiB）；必须有限
+             * @default 2048
              */
-            mem_limit_mb?: number | null;
+            mem_limit_mb: number | null;
             /** @description 主模型：中转站管理里启用、配置完整的连接与其中的模型。选择即授权给新实例，与实例、主模型绑定在同一个事务里建立（T-0204） */
             model: components["schemas"]["NewInstanceModelChoice"];
             /** Name */
             name: string;
+            placement?: components["schemas"]["Placement"];
             /**
              * Request Id
              * Format: uuid
@@ -5210,14 +5656,14 @@ export interface components {
             request_id: string;
             /**
              * Server Id
-             * Format: uuid
+             * @description 旧客户端指定目标；规范化为 specified
              */
-            server_id: string;
+            server_id?: string | null;
             /**
              * Server Version
-             * @description 服务器的当前版本号
+             * @description 指定服务器的可选并发版本号
              */
-            server_version: number;
+            server_version?: number | null;
         };
         /** AgentDeploymentCreateOut */
         AgentDeploymentCreateOut: {
@@ -5240,6 +5686,13 @@ export interface components {
              * @description true 部署成功、容器装着；false 已卸载容器、保留目录；null 迁移前的旧记录（未知），不代表此刻 Docker 在运行
              */
             runtime_installed: boolean | null;
+            /**
+             * Selection
+             * @description 持久化调度决定（含实际宿主和预约 ID）
+             */
+            selection?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Server Id
              * Format: uuid
@@ -6494,6 +6947,13 @@ export interface components {
              * @description 最近一次有实例上报整机数据的时间
              */
             reported_at: string | null;
+            /**
+             * Resource Snapshot
+             * @description 独立受信 SSH 资源快照；与实例上报分离
+             */
+            resource_snapshot?: {
+                [key: string]: unknown;
+            } | null;
             ssh: components["schemas"]["ServerSshOut"] | null;
             /**
              * Stale
@@ -7927,6 +8387,8 @@ export interface components {
              */
             version: number;
         };
+        /** DesiredRequest */
+        DesiredRequest: Record<string, never>;
         /**
          * DesktopPosition
          * @description 桌面端 12 列栅格中的位置与大小。
@@ -12852,6 +13314,35 @@ export interface components {
             new_password: string;
         };
         /**
+         * PendingApproval
+         * @description 写工具与高危工具的返回：此时**没有执行**，要等工作台的人审批。
+         */
+        PendingApproval: {
+            /**
+             * Action Id
+             * Format: uuid
+             */
+            action_id: string;
+            /**
+             * Deduplicated
+             * @description 同一实例、同一工具、同样参数已有待审批的记录时，返回那一条，不重复创建
+             */
+            deduplicated: boolean;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Status
+             * @default pending_approval
+             * @constant
+             */
+            status: "pending_approval";
+            /** Summary */
+            summary: string;
+        };
+        /**
          * PickerConnectionOut
          * @description 选择器里的连接：只列启用且配置完整的。
          */
@@ -12891,6 +13382,37 @@ export interface components {
             next_cursor?: string | null;
             /** Total */
             total: number;
+        };
+        /** Placement */
+        Placement: {
+            /**
+             * Mode
+             * @default auto
+             * @enum {string}
+             */
+            mode: "auto" | "specified";
+            /** Server Id */
+            server_id?: string | null;
+        };
+        /** PolicyAcknowledgment */
+        PolicyAcknowledgment: {
+            /** Error */
+            error?: string | null;
+            /** Generation */
+            generation: number;
+            /** Receipt Uid */
+            receipt_uid: string;
+            /**
+             * Record Id
+             * Format: uuid
+             */
+            record_id: string;
+            /** Resource Version */
+            resource_version: string;
+            /** Revision */
+            revision: number;
+            /** Success */
+            success: boolean;
         };
         /** ProgressCounts */
         ProgressCounts: {
@@ -13803,6 +14325,11 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** ResourceReconcileRequest */
+        ResourceReconcileRequest: {
+            /** Version */
+            version: number;
+        };
         /** ResultAccepted */
         ResultAccepted: {
             /** Accepted */
@@ -14012,6 +14539,130 @@ export interface components {
              */
             output: string;
         };
+        /** RunnerCapabilitiesOut */
+        RunnerCapabilitiesOut: {
+            /**
+             * Default Limit
+             * @default 5
+             */
+            default_limit: number;
+            /** Grants */
+            grants: components["schemas"]["RunnerCapabilityGrantOut"][];
+            /** Held Count */
+            held_count: number;
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            instance_id: string;
+            /** Pending Approval Ids */
+            pending_approval_ids: string[];
+            /** Pending Requests */
+            pending_requests: components["schemas"]["RunnerCapabilityPendingOut"][];
+            /** Unlimited Active */
+            unlimited_active: boolean;
+        };
+        /** RunnerCapabilityGrantOut */
+        RunnerCapabilityGrantOut: {
+            /** Applied Revision */
+            applied_revision: number;
+            /**
+             * Approval Id
+             * Format: uuid
+             */
+            approval_id: string;
+            /**
+             * Approved At
+             * Format: date-time
+             */
+            approved_at: string;
+            /**
+             * Approved By
+             * Format: uuid
+             */
+            approved_by: string;
+            /**
+             * Capability
+             * @enum {string}
+             */
+            capability: "runner.unlimited_container_count" | "runner.cross_agent_communication";
+            /** Desired Revision */
+            desired_revision: number;
+            /** Expires At */
+            expires_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            instance_id: string;
+            /** Policy Version */
+            policy_version: number;
+            /** Reason */
+            reason: string;
+            /** Requested By */
+            requested_by: string | null;
+            /** Revoke Reason */
+            revoke_reason: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Revoked By */
+            revoked_by: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "approved_pending_apply" | "active" | "revoked" | "expired" | "apply_failed";
+        };
+        /** RunnerCapabilityPendingOut */
+        RunnerCapabilityPendingOut: {
+            /**
+             * Action Id
+             * Format: uuid
+             */
+            action_id: string;
+            /**
+             * Capability
+             * @enum {string}
+             */
+            capability: "runner.unlimited_container_count" | "runner.cross_agent_communication";
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Status
+             * @default pending_approval
+             * @constant
+             */
+            status: "pending_approval";
+        };
+        /** RunnerCapabilityRequestInput */
+        RunnerCapabilityRequestInput: {
+            /**
+             * Capability
+             * @enum {string}
+             */
+            capability: "runner.unlimited_container_count" | "runner.cross_agent_communication";
+            /** Expires At */
+            expires_at?: string | null;
+            /** Reason */
+            reason: string;
+        };
+        /** RunnerCapabilityRevokeInput */
+        RunnerCapabilityRevokeInput: {
+            /** Password */
+            password?: string | null;
+            /** Reason */
+            reason: string;
+        };
         /** RunnerCommandOut */
         RunnerCommandOut: {
             /**
@@ -14101,6 +14752,8 @@ export interface components {
             egress: {
                 [key: string]: unknown;
             };
+            /** Host Id */
+            host_id?: string | null;
             /**
              * Id
              * Format: uuid
@@ -14140,6 +14793,10 @@ export interface components {
             owner_instance_id: string | null;
             /** Pinned */
             pinned: boolean;
+            /** Placement */
+            placement?: {
+                [key: string]: unknown;
+            };
             /** Project Id */
             project_id: string | null;
             /**
@@ -14160,6 +14817,11 @@ export interface components {
              * @enum {string}
              */
             runtime: "gvisor" | "runc" | "kvm";
+            /**
+             * Runtime Backend
+             * @default docker
+             */
+            runtime_backend: string;
             /**
              * Share
              * @enum {string}
@@ -14263,8 +14925,61 @@ export interface components {
             /** Memory Used Bytes */
             memory_used_bytes: number | null;
         };
+        /** RunnerHostCandidateOut */
+        RunnerHostCandidateOut: {
+            /** Available Memory Mb */
+            available_memory_mb: number | null;
+            /** Backend */
+            backend: string;
+            /** Committed Cpus */
+            committed_cpus: number;
+            /** Committed Disk Gb */
+            committed_disk_gb: number;
+            /** Committed Memory Mb */
+            committed_memory_mb: number;
+            /** Cpu Load */
+            cpu_load: number | null;
+            /** Cpus */
+            cpus: number | null;
+            /** Disk Free Gb */
+            disk_free_gb: number | null;
+            /** Disk Gb */
+            disk_gb: number | null;
+            /** Eligible */
+            eligible: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Memory Mb */
+            memory_mb: number | null;
+            /** Name */
+            name: string;
+            /** Node Name */
+            node_name: string | null;
+            /** Observed At */
+            observed_at: string | null;
+            /** Reasons */
+            reasons: string[];
+            /** Runtimes */
+            runtimes: string[];
+            /** Status */
+            status: string;
+        };
+        /** RunnerHostCandidatesOutput */
+        RunnerHostCandidatesOutput: {
+            /** Items */
+            items: components["schemas"]["RunnerHostCandidateOut"][];
+        };
         /** RunnerHostCreate */
         RunnerHostCreate: {
+            /**
+             * Backend
+             * @default docker
+             * @enum {string}
+             */
+            backend: "docker" | "kubernetes";
             /**
              * Ingress
              * @default intranet
@@ -14273,11 +14988,28 @@ export interface components {
             ingress: "intranet" | "public";
             /** Name */
             name: string;
+            /** Node Name */
+            node_name?: string | null;
+            /** Runtime Metadata */
+            runtime_metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        /** RunnerHostList */
+        RunnerHostList: {
+            /** Items */
+            items: components["schemas"]["RunnerHostOut"][];
         };
         /** RunnerHostOut */
         RunnerHostOut: {
             /** Agent Version */
             agent_version: string | null;
+            /**
+             * Backend
+             * @default docker
+             * @enum {string}
+             */
+            backend: "docker" | "kubernetes";
             /** Cpus */
             cpus: number | null;
             /**
@@ -14309,12 +15041,18 @@ export interface components {
             mem_bytes: number | null;
             /** Name */
             name: string;
+            /** Node Name */
+            node_name?: string | null;
             /** Policy */
             policy: {
                 [key: string]: number;
             };
             /** Report */
             report: {
+                [key: string]: unknown;
+            };
+            /** Runtime Metadata */
+            runtime_metadata?: {
                 [key: string]: unknown;
             };
             /** Runtimes */
@@ -14328,6 +15066,94 @@ export interface components {
             token_prefix: string;
             /** Version */
             version: number;
+        };
+        /** RunnerIngressInput */
+        RunnerIngressInput: {
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Password */
+            password?: string | null;
+            /**
+             * Source Instance Id
+             * Format: uuid
+             */
+            source_instance_id: string;
+        };
+        /** RunnerIngressOut */
+        RunnerIngressOut: {
+            /**
+             * Accepting New Connections
+             * @default false
+             */
+            accepting_new_connections: boolean;
+            /** Applied Generation */
+            applied_generation: number | null;
+            /** Applied Revision */
+            applied_revision: number;
+            /** Apply Error */
+            apply_error: string | null;
+            /** Connect Host */
+            connect_host?: string | null;
+            /** Connect Port */
+            connect_port?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Desired Generation */
+            desired_generation: number;
+            /** Desired Revision */
+            desired_revision: number;
+            /**
+             * Environment Id
+             * Format: uuid
+             */
+            environment_id: string;
+            /** Expires At */
+            expires_at: string | null;
+            /**
+             * Host Id
+             * Format: uuid
+             */
+            host_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Owner Instance Id
+             * Format: uuid
+             */
+            owner_instance_id: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Revoked By */
+            revoked_by: string | null;
+            /**
+             * Service Id
+             * Format: uuid
+             */
+            service_id: string;
+            /**
+             * Source Instance Id
+             * Format: uuid
+             */
+            source_instance_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "approved_pending_apply" | "active" | "revoked" | "expired" | "apply_failed";
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
         };
         /** RunnerInstanceUsage */
         RunnerInstanceUsage: {
@@ -14353,6 +15179,41 @@ export interface components {
             /** Running */
             running: number;
         };
+        /** RunnerNetworkOut */
+        RunnerNetworkOut: {
+            /**
+             * Environment Id
+             * Format: uuid
+             */
+            environment_id: string;
+            /**
+             * Host Id
+             * Format: uuid
+             */
+            host_id: string;
+            /** Ingress Rules */
+            ingress_rules: components["schemas"]["RunnerIngressOut"][];
+            /** Owner Instance Id */
+            owner_instance_id: string | null;
+            /** Published Endpoints */
+            published_endpoints: components["schemas"]["RunnerPublishedEndpointOut"][];
+            /** Runtime Error */
+            runtime_error: string | null;
+            /** Runtime Ip */
+            runtime_ip?: string | null;
+            /**
+             * Runtime Status
+             * @enum {string}
+             */
+            runtime_status: "unknown" | "pending_apply" | "active" | "apply_failed" | "unsupported";
+            /** Services */
+            services: components["schemas"]["RunnerServiceOut"][];
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
         /** RunnerOverview */
         RunnerOverview: {
             /** Environments */
@@ -14360,6 +15221,8 @@ export interface components {
                 [key: string]: number;
             };
             host: components["schemas"]["RunnerHostOut"] | null;
+            /** Hosts */
+            hosts?: components["schemas"]["RunnerHostOut"][];
             /** Instances */
             instances: components["schemas"]["RunnerInstanceUsage"][];
             /** Recent */
@@ -14381,17 +15244,17 @@ export interface components {
             /** Agent Version */
             agent_version: string;
             /** Cpus */
-            cpus: number;
+            cpus?: number | null;
             /** Disk Bytes */
-            disk_bytes: number;
+            disk_bytes?: number | null;
             /** Disk Free Bytes */
-            disk_free_bytes: number;
+            disk_free_bytes?: number | null;
             /** Docker Version */
-            docker_version: string;
+            docker_version?: string | null;
             /** Kvm */
             kvm: boolean;
             /** Mem Bytes */
-            mem_bytes: number;
+            mem_bytes?: number | null;
             /** Runtimes */
             runtimes: string[];
             /**
@@ -14404,6 +15267,88 @@ export interface components {
         RunnerPollResponse: {
             /** Commands */
             commands: components["schemas"]["RunnerCommandOut"][];
+        };
+        /** RunnerPublishInput */
+        RunnerPublishInput: {
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Password */
+            password?: string | null;
+            /** Source Cidrs */
+            source_cidrs: string[];
+        };
+        /** RunnerPublishedEndpointOut */
+        RunnerPublishedEndpointOut: {
+            /**
+             * Accepting New Connections
+             * @default false
+             */
+            accepting_new_connections: boolean;
+            /** Applied Generation */
+            applied_generation: number | null;
+            /** Applied Revision */
+            applied_revision: number;
+            /** Apply Error */
+            apply_error: string | null;
+            /** Connect Host */
+            connect_host?: string | null;
+            /** Connect Port */
+            connect_port?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Desired Generation */
+            desired_generation: number;
+            /** Desired Revision */
+            desired_revision: number;
+            /**
+             * Environment Id
+             * Format: uuid
+             */
+            environment_id: string;
+            /** Expires At */
+            expires_at: string | null;
+            /**
+             * Host Id
+             * Format: uuid
+             */
+            host_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Owner Instance Id
+             * Format: uuid
+             */
+            owner_instance_id: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Revoked By */
+            revoked_by: string | null;
+            /**
+             * Service Id
+             * Format: uuid
+             */
+            service_id: string;
+            /** Source Cidrs */
+            source_cidrs: string[];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "approved_pending_apply" | "active" | "revoked" | "expired" | "apply_failed";
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
         };
         /** RunnerReport */
         RunnerReport: {
@@ -14447,6 +15392,10 @@ export interface components {
              * @default 0
              */
             mem_free_bytes: number;
+            /** Physical Host Id */
+            physical_host_id?: string | null;
+            /** Sample Id */
+            sample_id?: string | null;
             /**
              * Unlabeled Containers
              * @default 0
@@ -14482,6 +15431,8 @@ export interface components {
              * @description 内存用量（Docker memory_stats.usage，字节，含页缓存）；读不到为空
              */
             mem_bytes?: number | null;
+            /** Memory Working Set Bytes */
+            memory_working_set_bytes?: number | null;
             /** Name */
             name: string;
             /** Size Rw */
@@ -14505,6 +15456,19 @@ export interface components {
             /** Stray */
             stray: string[];
         };
+        /** RunnerReportSample */
+        RunnerReportSample: {
+            /**
+             * Expires In
+             * @default 90
+             */
+            expires_in: number;
+            /**
+             * Sample Id
+             * Format: uuid
+             */
+            sample_id: string;
+        };
         /** RunnerReportVolume */
         RunnerReportVolume: {
             /** Bytes */
@@ -14516,6 +15480,11 @@ export interface components {
             env_id: string;
             /** Name */
             name: string;
+        };
+        /** RunnerRevokeInput */
+        RunnerRevokeInput: {
+            /** Password */
+            password?: string | null;
         };
         /** RunnerRunAdminOut */
         RunnerRunAdminOut: {
@@ -14557,6 +15526,99 @@ export interface components {
         RunnerRunList: {
             /** Items */
             items: components["schemas"]["RunnerRunAdminOut"][];
+        };
+        /** RunnerServiceCreate */
+        RunnerServiceCreate: {
+            /** Name */
+            name: string;
+            /** Port */
+            port: number;
+            /**
+             * Protocol
+             * @default TCP
+             * @enum {string}
+             */
+            protocol: "TCP" | "UDP";
+        };
+        /** RunnerServiceOut */
+        RunnerServiceOut: {
+            /**
+             * Accepting New Connections
+             * @default false
+             */
+            accepting_new_connections: boolean;
+            /** Applied Generation */
+            applied_generation: number | null;
+            /** Applied Revision */
+            applied_revision: number;
+            /** Apply Error */
+            apply_error: string | null;
+            /** Connect Host */
+            connect_host?: string | null;
+            /** Connect Port */
+            connect_port?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Desired Dns */
+            desired_dns: string | null;
+            /** Desired Generation */
+            desired_generation: number;
+            /** Desired Revision */
+            desired_revision: number;
+            /**
+             * Environment Id
+             * Format: uuid
+             */
+            environment_id: string;
+            /** Expires At */
+            expires_at: string | null;
+            /**
+             * Host Id
+             * Format: uuid
+             */
+            host_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Owner Instance Id
+             * Format: uuid
+             */
+            owner_instance_id: string;
+            /** Port */
+            port: number;
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "TCP" | "UDP";
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Revoked By */
+            revoked_by: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "approved_pending_apply" | "active" | "revoked" | "expired" | "apply_failed";
+            /**
+             * Visibility
+             * @default private
+             * @constant
+             */
+            visibility: "private";
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
         };
         /**
          * RunnerSpecIn
@@ -19437,6 +20499,91 @@ export interface operations {
             };
         };
     };
+    reconcile: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResourceReconcileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentDeploymentState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_agent_runner: {
         parameters: {
             query?: never;
@@ -19561,6 +20708,121 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    capabilities: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerCapabilitiesOut"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    request_capability: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerCapabilityRequestInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingApproval"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revoke_capability: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                instance_id: string;
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerCapabilityRevokeInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerCapabilityGrantOut"];
                 };
             };
             /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
@@ -21912,6 +23174,96 @@ export interface operations {
             };
             /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    refresh_agent_server_resources: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentServerDetail"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -34860,6 +36212,7 @@ export interface operations {
             query?: {
                 state?: ("creating" | "running" | "stopped" | "archived" | "pending_delete" | "deleted" | "failed") | null;
                 instance_id?: string | null;
+                host_id?: string | null;
                 lifetime?: ("once" | "session" | "persistent") | null;
                 include_deleted?: boolean;
                 /** @description 按用途或环境 ID 包含查询（% 与 _ 按字面匹配） */
@@ -35064,6 +36417,285 @@ export interface operations {
             };
         };
     };
+    revoke_ingress: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                environment_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerRevokeInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerIngressOut"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    network: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                environment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerNetworkOut"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revoke_endpoint: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                environment_id: string;
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerRevokeInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerPublishedEndpointOut"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    register_service: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                environment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerServiceCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerServiceOut"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    allow_source: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                environment_id: string;
+                service_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerIngressInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerIngressOut"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    publish_service: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                environment_id: string;
+                service_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerPublishInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerPublishedEndpointOut"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revoke_service: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                environment_id: string;
+                service_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerRevokeInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerServiceOut"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     create_runner_host: {
         parameters: {
             query?: never;
@@ -35142,6 +36774,7 @@ export interface operations {
         parameters: {
             query: {
                 version: number;
+                host_id?: string | null;
             };
             header: {
                 /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
@@ -35210,7 +36843,9 @@ export interface operations {
     };
     runner_host_bundle: {
         parameters: {
-            query?: never;
+            query?: {
+                host_id?: string | null;
+            };
             header: {
                 /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
                 "X-CSRF-Token"?: string | null;
@@ -35281,7 +36916,9 @@ export interface operations {
     };
     put_runner_policy: {
         parameters: {
-            query?: never;
+            query?: {
+                host_id?: string | null;
+            };
             header: {
                 /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
                 "X-CSRF-Token"?: string | null;
@@ -35355,7 +36992,9 @@ export interface operations {
     };
     get_runner_ssh_state: {
         parameters: {
-            query?: never;
+            query?: {
+                host_id?: string | null;
+            };
             header: {
                 /** @description 当前工作空间；不是成员时返回 404 */
                 "X-Workspace-Id": string;
@@ -35414,7 +37053,9 @@ export interface operations {
     };
     set_runner_ssh: {
         parameters: {
-            query?: never;
+            query?: {
+                host_id?: string | null;
+            };
             header: {
                 /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
                 "X-CSRF-Token"?: string | null;
@@ -35508,6 +37149,7 @@ export interface operations {
         parameters: {
             query: {
                 version: number;
+                host_id?: string | null;
             };
             header: {
                 /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
@@ -35576,7 +37218,9 @@ export interface operations {
     };
     confirm_runner_ssh: {
         parameters: {
-            query?: never;
+            query?: {
+                host_id?: string | null;
+            };
             header: {
                 /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
                 "X-CSRF-Token"?: string | null;
@@ -35650,7 +37294,9 @@ export interface operations {
     };
     install_runner_ssh: {
         parameters: {
-            query?: never;
+            query?: {
+                host_id?: string | null;
+            };
             header: {
                 /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
                 "X-CSRF-Token"?: string | null;
@@ -35742,7 +37388,9 @@ export interface operations {
     };
     revoke_runner_ssh: {
         parameters: {
-            query?: never;
+            query?: {
+                host_id?: string | null;
+            };
             header: {
                 /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
                 "X-CSRF-Token"?: string | null;
@@ -35834,7 +37482,9 @@ export interface operations {
     };
     uninstall_runner_ssh: {
         parameters: {
-            query?: never;
+            query?: {
+                host_id?: string | null;
+            };
             header: {
                 /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
                 "X-CSRF-Token"?: string | null;
@@ -35915,6 +37565,1001 @@ export interface operations {
             };
             /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_runner_hosts: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerHostList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_runner_hosts: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerHostCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerHostOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_runner_hosts_candidates: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerHostCandidatesOutput"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_runner_hosts_host_id: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                host_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerHostOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_runner_hosts_host_id: {
+        parameters: {
+            query: {
+                version: number;
+            };
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                host_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_runner_hosts_host_id_bundle: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                host_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_runner_hosts_host_id_policy: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                host_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerPolicyPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerHostOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_runner_hosts_host_id_ssh: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                host_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSshState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_runner_hosts_host_id_ssh: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                host_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSshTargetSet"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSshState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_runner_hosts_host_id_ssh: {
+        parameters: {
+            query: {
+                version: number;
+            };
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                host_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_runner_hosts_host_id_ssh_confirm: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                host_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSshConfirm"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSshState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_runner_hosts_host_id_ssh_install: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                host_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSshInstall"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSshState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_runner_hosts_host_id_ssh_revoke: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                host_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSshRevoke"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSshState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_runner_hosts_host_id_ssh_uninstall: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                host_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerSshUninstall"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSshState"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -38521,6 +41166,128 @@ export interface operations {
             };
         };
     };
+    acknowledge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolicyAcknowledgment"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcknowledgmentResult"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    desired: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DesiredRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     poll: {
         parameters: {
             query?: never;
@@ -38601,6 +41368,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunnerReportResult"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    begin_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerReportSample"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

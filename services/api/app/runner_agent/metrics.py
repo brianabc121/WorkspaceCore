@@ -10,7 +10,7 @@ Docker 一次性的 stats（`stream=0&one-shot=1`）里 `precpu_stats` 是空的
 第一次采样、计数器回退、读数缺失、窗口太长都返回“未知”（None），
 只有同一代次、有效窗口里 CPU 时间确实没增加，才返回 0.0。
 
-只在原有的每分钟上报里调用，不起额外的线程去轮询 Docker；本模块只做数字校验与差分，不碰 Docker。
+只在原有的定期上报里调用，不起额外的线程去轮询 Docker；本模块只做数字校验与差分，不碰 Docker。
 """
 
 from __future__ import annotations
@@ -109,6 +109,17 @@ def memory_bytes(stats: dict[str, Any]) -> int | None:
     已停止或刚退出的容器 `memory_stats` 是空的：这时是未知，不是 0。
     """
     return nonnegative_int((stats.get("memory_stats") or {}).get("usage"))
+
+
+def memory_working_set_bytes(stats: dict[str, Any]) -> int | None:
+    """Non-reclaimable usage for admission credit; missing cache is unknown."""
+    memory = stats.get("memory_stats") or {}
+    usage = nonnegative_int(memory.get("usage"))
+    counters = memory.get("stats") or {}
+    cache = nonnegative_int(counters.get("total_inactive_file", counters.get("inactive_file")))
+    if usage is None or cache is None or cache > usage:
+        return None
+    return usage - cache
 
 
 def started_generation(inspect: dict[str, Any] | None) -> str | None:

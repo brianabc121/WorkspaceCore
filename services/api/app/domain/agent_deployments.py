@@ -29,14 +29,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import idempotency
+from app.domain import agent_server_resources, idempotency
 from app.domain.agent_model_bindings import AgentModelBindingService
 from app.domain.agent_servers import AgentServerService
 from app.domain.agent_ssh import _version_conflict
 from app.domain.agents import AgentService
+from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
 from app.domain.policy import WorkspaceAccess
 from app.integrations.openim import OpenIMClient
-from app.models import AgentInstance, AgentSettings, IdempotencyRequest
+from app.models import (
+    AgentDeployment,
+    AgentInstance,
+    AgentServer,
+    AgentSettings,
+    IdempotencyRequest,
+)
 from app.repositories import integrations as integration_repo
 from app.schemas.agents import (
     AgentDeploymentCreateIn,
@@ -123,6 +130,32 @@ class AgentDeploymentService:
         self, access: WorkspaceAccess, body: AgentDeploymentCreateIn, *, client_ip: str
     ) -> AgentDeploymentCreateOut:
         assert access.user_id is not None  # noqa: S101 - create 已检查
+        # Fresh trusted probes are collected before taking admission row locks.
+        # Replays return earlier in create() and never refresh or pick a new host.
+        if body.placement.mode == "specified":
+            assert body.placement.server_id is not None  # noqa: S101 - Placement validates specified
+            # deployable_target locks the SSH target; keep the same server →
+            # target order as admission and resource refresh, including preflight.
+            preflight = await self.servers.server_of(access, body.placement.server_id, lock=True)
+            if body.server_version is not None and body.server_version != preflight.version:
+                raise _version_conflict(preflight.version)
+            await self.servers.deployable_target(preflight)
+            server_ids = [preflight.id]
+        else:
+            server_ids = list(
+                (
+                    await self.db.scalars(
+                        select(AgentServer.id)
+                        .where(
+                            AgentServer.workspace_id == access.workspace.id,
+                            AgentServer.kind == "ssh",
+                        )
+                        .order_by(AgentServer.id)
+                        .limit(64)
+                    )
+                ).all()
+            )
+        await self.servers.refresh_resource_snapshots(access, server_ids)
         # 锁住这条幂等记录：同一个请求号的并发重发（包括“处理中”超时后的重发）等这里结束
         record = await integration_repo.get_idempotency(
             self.db, actor_id=access.user_id, key=body.request_id, lock=True
@@ -136,9 +169,7 @@ class AgentDeploymentService:
             )
         servers = self.servers
         servers.ready_to_run()
-        server = await servers.server_of(access, body.server_id, lock=True)
-        if body.server_version != server.version:
-            raise _version_conflict(server.version)
+        server = await self._select_server(access, body, server_ids)
         await self._check_switch(access)
         if not self.settings.agent_public_url:
             raise ApiError(
@@ -172,6 +203,26 @@ class AgentDeploymentService:
             access, instance, server, client_ip=client_ip
         )
         try:
+            deployment = await self.db.scalar(
+                select(AgentDeployment).where(AgentDeployment.instance_id == instance.id)
+            )
+            assert deployment is not None  # noqa: S101 - accept_deployment creates reservation
+            # Existing durable deployment row is the resource reservation: unknown,
+            # failed and pending installs retain it until explicit confirmed removal.
+            deployment.selection = {
+                "requested_mode": body.placement.mode,
+                "requested_server_id": str(body.placement.server_id)
+                if body.placement.server_id
+                else None,
+                "actual_server_id": str(server.id),
+                "reservation_id": str(deployment.id),
+                "metrics_at": server.resource_snapshot["sampled_at"],
+                "cpus": body.cpus,
+                "memory_mb": body.mem_limit_mb,
+                "disk_gb": self.settings.agent_placement_disk_gb,
+                "status": "reserved",
+                "reason_code": None,
+            }
             ids = {
                 "request_id": str(body.request_id),
                 "instance_id": str(instance.id),
@@ -189,6 +240,68 @@ class AgentDeploymentService:
         # 提交之后注册 OpenIM 账号；失败时 im_ready=false，由 Worker 重试（不影响部署）
         await self.agents.provision_im(instance)
         return await self._out(body.request_id, instance, warning=warning)
+
+    async def _select_server(
+        self,
+        access: WorkspaceAccess,
+        body: AgentDeploymentCreateIn,
+        server_ids: list[uuid.UUID],
+    ) -> AgentServer:
+        """Serialize admission against durable commitments, across API processes.
+
+        Every create holds host row locks through deployment/instance/job commit.
+        The next transaction sees pending rows even when no runtime exists yet.
+        No TTL deletes unknown allocations; runtime and pending count once each.
+        """
+        assert body.cpus is not None and body.mem_limit_mb is not None  # noqa: S101 - schema
+        request = ResourceRequest(
+            body.cpus, body.mem_limit_mb, self.settings.agent_placement_disk_gb
+        )
+        candidates = []
+        servers = {}
+        reasons = {}
+        for server_id in sorted(server_ids, key=lambda value: value.int):
+            server = await self.servers.server_of(access, server_id, lock=True)
+            if body.server_version is not None and body.server_version != server.version:
+                raise _version_conflict(server.version)
+            try:
+                await self.servers.deployable_target(server)
+            except ApiError as error:
+                if body.placement.mode == "specified":
+                    raise
+                reasons[str(server_id)] = error.code
+                continue
+            snap = server.resource_snapshot or {}
+            if not agent_server_resources.is_fresh(
+                snap, _now(), self.settings.agent_placement_metrics_max_age_seconds
+            ):
+                reasons[str(server_id)] = "METRICS_STALE"
+                continue
+            if not snap.get("runtime_ready") or not snap.get("network_ready"):
+                reasons[str(server_id)] = "TARGET_UNAVAILABLE"
+                continue
+            try:
+                candidates.append(
+                    await self.servers.placement_candidate(
+                        server, disk_gb=self.settings.agent_placement_disk_gb
+                    )
+                )
+            except ApiError as error:
+                reasons[str(server_id)] = error.code
+                continue
+            servers[server_id] = server
+        if not candidates:
+            code = "METRICS_STALE" if "METRICS_STALE" in reasons.values() else "NO_ELIGIBLE_SERVER"
+            raise ApiError(
+                409, code, "没有满足资源与健康要求的智能体服务器", details={"reasons": reasons}
+            )
+        try:
+            ranked = rank_candidates(candidates, request, body.placement, _now())
+        except PlacementError as error:
+            raise ApiError(
+                409, error.code, error.message, details={"reasons": error.reasons}
+            ) from error
+        return servers[ranked[0].server_id]
 
     async def _check_switch(self, access: WorkspaceAccess) -> None:
         settings = await self.db.get(AgentSettings, access.workspace.id)

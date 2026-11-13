@@ -130,3 +130,14 @@ describe('容器详情', () => {
     expect(posts(requests)).toHaveLength(0)
   })
 })
+
+it('shows network enforcement readiness separately without publishing on open', async () => {
+  const requests = setup({ handler: r => path(r) === `/api/v1/runner/environments/${ID}/network`
+    ? Response.json({ environment_id: ID, workspace_id: 'ws-1', owner_instance_id: env().owner_instance_id, host_id: null,
+      runtime_status: 'unsupported', runtime_error: 'MANAGED_NETWORK_REQUIRES_KUBERNETES', services: [], ingress_rules: [], published_endpoints: [] })
+    : undefined })
+  await openApp(`/runner?environment_id=${ID}`)
+  await fireEvent.click(await screen.findByRole('tab', { name: '网络与服务' }))
+  expect(await screen.findByText('当前容器使用兼容运行后端，受管跨节点网络尚不可用。')).toBeVisible()
+  expect(posts(requests)).toHaveLength(0)
+})

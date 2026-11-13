@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from redis.asyncio import Redis
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -109,12 +109,23 @@ def retention_score(
 async def tick(db: AsyncSession, settings: Settings, redis: Redis | None = None) -> TickResult:
     runner = Runner(db, settings, redis)
     out = TickResult()
-    await _expire_commands(runner, out)
-    await _hosts_offline(runner, out)
-    await _event_conditions(runner, out)
-    await _lifecycle(runner, out)
-    await _watermarks(runner, out)
-    await _purge(runner, out)
+    # Reports and admission lock host → dependent rows. Hold that same order
+    # throughout this tick, including autoflushes and command/wakeup FK checks.
+    # NO KEY UPDATE still serializes host writers while permitting child inserts.
+    host_ids = set(
+        await db.scalars(
+            select(RunnerHost.id)
+            .order_by(RunnerHost.workspace_id, RunnerHost.id)
+            .with_for_update(key_share=True)
+        )
+    )
+    # Hosts registered after the lock snapshot belong to the next tick.
+    await _expire_commands(runner, out, host_ids=host_ids)
+    await _hosts_offline(runner, out, host_ids=host_ids)
+    await _event_conditions(runner, out, host_ids=host_ids)
+    await _lifecycle(runner, out, host_ids=host_ids)
+    await _watermarks(runner, out, host_ids=host_ids)
+    await _purge(runner, out, host_ids=host_ids)
     await db.commit()
     return out
 
@@ -122,13 +133,16 @@ async def tick(db: AsyncSession, settings: Settings, redis: Redis | None = None)
 # ---------------------------------------------------------------- 指令与在线
 
 
-async def _expire_commands(runner: Runner, out: TickResult) -> None:
+async def _expire_commands(
+    runner: Runner, out: TickResult, *, host_ids: set[uuid.UUID] | None = None
+) -> None:
     db = runner.db
     rows = await db.scalars(
         select(RunnerCommand)
         .where(
             RunnerCommand.status.in_(("pending", "sent")),
             RunnerCommand.deadline_at < specs.now(),
+            RunnerCommand.host_id.in_(host_ids) if host_ids is not None else true(),
         )
         .with_for_update(skip_locked=True)
         .limit(200)
@@ -154,7 +168,7 @@ async def _expire_commands(runner: Runner, out: TickResult) -> None:
             env.state = "failed"
             env.state_reason = "创建超时：容器服务器在时限内没有回报"
         elif command.kind == "build_template" and command.template_id is not None:
-            template = await db.get(RunnerTemplate, command.template_id)
+            template = await runner.current_template_build(command)
             if template is not None and template.build_status == "building":
                 template.build_status = "failed"
                 template.build_error = "构建超时：容器服务器在时限内没有回报"
@@ -166,6 +180,12 @@ async def _expire_commands(runner: Runner, out: TickResult) -> None:
                     snapshot.status = "failed"
                     snapshot.error = "快照超时"
             if env.state == "pending_delete":
+                from app.domain.runner_placement import compute_reserved
+
+                env.runtime_metadata = {
+                    **(env.runtime_metadata or {}),
+                    "compute_stopped": not compute_reserved(env),
+                }
                 env.state = "stopped"
                 env.delete_after = None
             env.state_reason = "快照超时，没有归档或删除"
@@ -195,11 +215,17 @@ async def _run_unknown(db: AsyncSession, run_id: uuid.UUID) -> None:
         )
 
 
-async def _hosts_offline(runner: Runner, out: TickResult) -> None:
+async def _hosts_offline(
+    runner: Runner, out: TickResult, *, host_ids: set[uuid.UUID] | None = None
+) -> None:
     db = runner.db
     cutoff = specs.now() - timedelta(seconds=ONLINE_SECONDS)
     hosts = await db.scalars(
-        select(RunnerHost).where(RunnerHost.status == "online", RunnerHost.last_seen_at < cutoff)
+        select(RunnerHost).where(
+            RunnerHost.status == "online",
+            RunnerHost.last_seen_at < cutoff,
+            RunnerHost.id.in_(host_ids) if host_ids is not None else true(),
+        )
     )
     for host in hosts:
         host.status = "offline"
@@ -219,7 +245,9 @@ async def _hosts_offline(runner: Runner, out: TickResult) -> None:
 # ---------------------------------------------------------------- 删除条件
 
 
-async def _event_conditions(runner: Runner, out: TickResult) -> None:
+async def _event_conditions(
+    runner: Runner, out: TickResult, *, host_ids: set[uuid.UUID] | None = None
+) -> None:
     """任务完成（或删除）、Issue 关闭、项目归档（或删除）；创建者实例停用或删除。"""
     db = runner.db
     now = specs.now()
@@ -228,6 +256,11 @@ async def _event_conditions(runner: Runner, out: TickResult) -> None:
             select(RunnerDeleteCondition).where(
                 RunnerDeleteCondition.fired_at.is_(None),
                 RunnerDeleteCondition.kind.in_(("task_done", "issue_closed", "project_archived")),
+                RunnerDeleteCondition.environment_id.in_(
+                    select(RunnerEnvironment.id).where(RunnerEnvironment.host_id.in_(host_ids))
+                )
+                if host_ids is not None
+                else true(),
             )
         )
     )
@@ -256,6 +289,7 @@ async def _event_conditions(runner: Runner, out: TickResult) -> None:
             .outerjoin(AgentInstance, AgentInstance.id == RunnerEnvironment.owner_instance_id)
             .where(
                 RunnerEnvironment.state.in_(("creating", "running", "stopped", "archived")),
+                RunnerEnvironment.host_id.in_(host_ids) if host_ids is not None else true(),
                 (RunnerEnvironment.owner_instance_id.is_(None))
                 | (AgentInstance.status == "disabled"),
             )
@@ -298,13 +332,16 @@ async def _busy(
 # ---------------------------------------------------------------- 空闲分档
 
 
-async def _lifecycle(runner: Runner, out: TickResult) -> None:
+async def _lifecycle(
+    runner: Runner, out: TickResult, *, host_ids: set[uuid.UUID] | None = None
+) -> None:
     db = runner.db
     now = specs.now()
     envs = list(
         await db.scalars(
             select(RunnerEnvironment).where(
-                RunnerEnvironment.state.in_(("running", "stopped", "pending_delete", "archived"))
+                RunnerEnvironment.state.in_(("running", "stopped", "pending_delete", "archived")),
+                RunnerEnvironment.host_id.in_(host_ids) if host_ids is not None else true(),
             )
         )
     )
@@ -412,9 +449,18 @@ async def scores(
     }
 
 
-async def _watermarks(runner: Runner, out: TickResult) -> None:
+async def _watermarks(
+    runner: Runner, out: TickResult, *, host_ids: set[uuid.UUID] | None = None
+) -> None:
     db = runner.db
-    for host in list(await db.scalars(select(RunnerHost).where(RunnerHost.status == "online"))):
+    for host in list(
+        await db.scalars(
+            select(RunnerHost).where(
+                RunnerHost.status == "online",
+                RunnerHost.id.in_(host_ids) if host_ids is not None else true(),
+            )
+        )
+    ):
         policy = specs.policy_for(host.policy)
         envs = list(
             await db.scalars(
@@ -545,7 +591,9 @@ async def _prune_images(runner: Runner, host: RunnerHost) -> None:
 # ---------------------------------------------------------------- 清理
 
 
-async def _purge(runner: Runner, out: TickResult) -> None:
+async def _purge(
+    runner: Runner, out: TickResult, *, host_ids: set[uuid.UUID] | None = None
+) -> None:
     db = runner.db
     now = specs.now()
     store = SnapshotStore(db, runner.settings)
@@ -555,6 +603,11 @@ async def _purge(runner: Runner, out: TickResult) -> None:
             select(RunnerSnapshot)
             .where(
                 RunnerSnapshot.status != "deleted",
+                RunnerSnapshot.environment_id.in_(
+                    select(RunnerEnvironment.id).where(RunnerEnvironment.host_id.in_(host_ids))
+                )
+                if host_ids is not None
+                else true(),
                 (RunnerSnapshot.expires_at < now)
                 | (
                     RunnerSnapshot.status.in_(("failed", "uploading"))
@@ -567,13 +620,21 @@ async def _purge(runner: Runner, out: TickResult) -> None:
         await store.delete(snapshot)
         out.purged += 1
     # 删除记录：已删除超过 archive_retention_days 天、快照也删干净的环境
-    hosts = {h.id: h for h in await db.scalars(select(RunnerHost))}
+    hosts = {
+        h.id: h
+        for h in await db.scalars(
+            select(RunnerHost).where(
+                RunnerHost.id.in_(host_ids) if host_ids is not None else true()
+            )
+        )
+    }
     for env in list(
         await db.scalars(
             select(RunnerEnvironment)
             .where(
                 RunnerEnvironment.state == "deleted",
                 RunnerEnvironment.deleted_at < now - timedelta(days=1),
+                RunnerEnvironment.host_id.in_(host_ids) if host_ids is not None else true(),
             )
             .limit(100)
         )
@@ -596,12 +657,26 @@ async def _purge(runner: Runner, out: TickResult) -> None:
         .where(
             RunnerRun.finished_at < now - timedelta(days=OUTPUT_KEEP_DAYS),
             RunnerRun.output != "",
+            RunnerRun.environment_id.in_(
+                select(RunnerEnvironment.id).where(RunnerEnvironment.host_id.in_(host_ids))
+            )
+            if host_ids is not None
+            else true(),
         )
         .values(output="")
     )
+    # Keep one durable attempt receipt per extant template. Unknown older
+    # commands outlive normal retention and must never become current again.
+    latest_builds = (
+        select(func.max(RunnerCommand.seq))
+        .where(RunnerCommand.kind == "build_template", RunnerCommand.template_id.is_not(None))
+        .group_by(RunnerCommand.template_id)
+    )
     await db.execute(
         delete(RunnerCommand).where(
-            RunnerCommand.status.in_(("done", "failed", "unknown", "cancelled")),
+            RunnerCommand.status.in_(("done", "failed", "cancelled")),
             RunnerCommand.finished_at < now - timedelta(days=COMMAND_KEEP_DAYS),
+            RunnerCommand.seq.not_in(latest_builds),
+            RunnerCommand.host_id.in_(host_ids) if host_ids is not None else true(),
         )
     )

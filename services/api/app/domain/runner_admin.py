@@ -28,6 +28,7 @@ from app.domain import runner_specs as specs
 from app.domain.audit import AuditTrail
 from app.domain.policy import WorkspaceAccess, not_found
 from app.domain.runner import Runner, RunnerError, Viewer, spec_out
+from app.domain.runner_capabilities import ContainerApprovalRequired
 from app.domain.runner_hosts import RunnerHosts, host_out
 from app.models import (
     AgentInstance,
@@ -64,6 +65,11 @@ def _error(error: RunnerError) -> ApiError:
         "VERSION_CONFLICT": 409,
         "FORBIDDEN": 403,
         "RUNNER_UNAVAILABLE": 409,
+        "RUNNER_HOST_AMBIGUOUS": 409,
+        "PLACEMENT_CONFLICT": 409,
+        "NO_ELIGIBLE_HOST": 409,
+        "NO_ELIGIBLE_SERVER": 409,
+        "TARGET_UNAVAILABLE": 409,
         "TEMPLATE_NOT_READY": 409,
     }.get(error.code, 422)
     return ApiError(status, error.code, error.message)
@@ -79,8 +85,11 @@ class RunnerAdmin:
         self.hosts = RunnerHosts(db, settings, redis)
 
     # ---------------------------------------------------------------- 运行服务器
-    async def _host(self, access: WorkspaceAccess) -> RunnerHost:
-        host = await self.runner.host(access.workspace.id)
+    async def _host(self, access: WorkspaceAccess, host_id: uuid.UUID | None = None) -> RunnerHost:
+        try:
+            host = await self.runner.host(access.workspace.id, host_id)
+        except RunnerError as error:
+            raise _error(error) from None
         if host is None:
             raise ApiError(404, "NOT_FOUND", "还没有添加容器服务器")
         return host
@@ -103,9 +112,11 @@ class RunnerAdmin:
         await self.db.refresh(host)
         return host_out(host)
 
-    async def bundle(self, access: WorkspaceAccess) -> tuple[str, bytes]:
+    async def bundle(
+        self, access: WorkspaceAccess, host_id: uuid.UUID | None = None
+    ) -> tuple[str, bytes]:
         """接入包：每次下载都换新凭证（旧的立即失效）。"""
-        host = await self._host(access)
+        host = await self._host(access, host_id)
         return await self.bundle_for(host, access.user_id)
 
     async def bundle_for(self, host: RunnerHost, actor_id: uuid.UUID | None) -> tuple[str, bytes]:
@@ -156,13 +167,17 @@ class RunnerAdmin:
         names.extend(str(t) for t in targets if t)
         return sorted(set(names))
 
-    async def remove_host(self, access: WorkspaceAccess, version: int) -> None:
-        host = await self._host(access)
+    async def remove_host(
+        self, access: WorkspaceAccess, version: int, host_id: uuid.UUID | None = None
+    ) -> None:
+        host = await self._host(access, host_id)
         await self.hosts.remove(host, access.user_id, version)
         await self.db.commit()
 
-    async def set_policy(self, access: WorkspaceAccess, body: RunnerPolicyPut) -> RunnerHostOut:
-        host = await self._host(access)
+    async def set_policy(
+        self, access: WorkspaceAccess, body: RunnerPolicyPut, host_id: uuid.UUID | None = None
+    ) -> RunnerHostOut:
+        host = await self._host(access, host_id)
         await self.hosts.set_policy(host, body.policy, body.version, access.user_id)
         await self.db.commit()
         await self.db.refresh(host)
@@ -171,7 +186,8 @@ class RunnerAdmin:
     # ---------------------------------------------------------------- 总览
     async def overview(self, access: WorkspaceAccess) -> RunnerOverview:
         workspace_id = access.workspace.id
-        host = await self.runner.host(workspace_id)
+        hosts = await self.runner.hosts(workspace_id)
+        host = hosts[0] if len(hosts) == 1 else None
         counts = {
             state: int(count)
             for state, count in await self.db.execute(
@@ -237,6 +253,7 @@ class RunnerAdmin:
             for env in recent_rows
         ]
         return RunnerOverview(
+            hosts=[host_out(item) for item in hosts],
             host=host_out(host) if host else None,
             environments=counts,
             instances=usage,
@@ -296,10 +313,14 @@ class RunnerAdmin:
             )
         }
         conditions = await self.runner.conditions([e.id for e in envs])
-        host = await self.runner.host(access.workspace.id)
-        policy = specs.policy_for(host.policy if host else None)
-        live = [e for e in envs if e.state in ("running", "stopped")]
-        ranked = await runner_reclaim.scores(self.db, live, policy) if live else {}
+        hosts = {host.id: host for host in await self.runner.hosts(access.workspace.id)}
+        ranked = {}
+        for host_id, host in hosts.items():
+            live = [e for e in envs if e.host_id == host_id and e.state in ("running", "stopped")]
+            if live:
+                ranked.update(
+                    await runner_reclaim.scores(self.db, live, specs.policy_for(host.policy))
+                )
         now = specs.now()
         return [
             await self._env_admin_out(
@@ -308,9 +329,9 @@ class RunnerAdmin:
                 names,
                 templates,
                 conditions,
-                policy,
+                specs.policy_for(hosts[e.host_id].policy if e.host_id in hosts else None),
                 ranked.get(e.id),
-                host=host,
+                host=hosts.get(e.host_id),
                 now=now,
             )
             for e in envs
@@ -328,6 +349,7 @@ class RunnerAdmin:
         sort: Literal["last_used", "cpu", "memory"] = "last_used",
         cursor: str | None = None,
         limit: int = 500,
+        host_id: uuid.UUID | None = None,
     ) -> RunnerEnvAdminList:
         """环境列表（T-0185 加服务端搜索、排序与分页）。
 
@@ -338,6 +360,8 @@ class RunnerAdmin:
         """
         workspace_id = access.workspace.id
         where: list[Any] = [RunnerEnvironment.workspace_id == workspace_id]
+        if host_id is not None:
+            where.append(RunnerEnvironment.host_id == host_id)
         if state:
             where.append(RunnerEnvironment.state == state)
         elif not include_deleted:
@@ -356,19 +380,21 @@ class RunnerAdmin:
                 )
             )
         key = _scope_key(
-            workspace_id, state, instance_id, lifetime, include_deleted, text, sort, limit
+            workspace_id, state, instance_id, lifetime, include_deleted, text, sort, limit, host_id
         )
         offset = _decode_cursor(cursor, key)
         total = int(
             await self.db.scalar(select(func.count()).select_from(RunnerEnvironment).where(*where))
             or 0
         )
-        host = await self.runner.host(workspace_id)
+        hosts = await self.runner.hosts(workspace_id)
         now = specs.now()
         if sort == "cpu":
-            order = [runner_metrics.cpu_sort_key(host, now).desc().nulls_last()]
+            keys = [runner_metrics.cpu_sort_key(host, now) for host in hosts]
+            order = [func.coalesce(*keys, None).desc().nulls_last()]
         elif sort == "memory":
-            order = [runner_metrics.memory_sort_key(host, now).desc().nulls_last()]
+            keys = [runner_metrics.memory_sort_key(host, now) for host in hosts]
+            order = [func.coalesce(*keys, None).desc().nulls_last()]
         else:
             order = [RunnerEnvironment.last_used_at.desc()]
         envs = list(
@@ -420,11 +446,9 @@ class RunnerAdmin:
             if body.action == "stop":
                 await self.runner.stop(viewer, env, "管理员停止")
             elif body.action == "start":
-                host = await self.runner.online_host(access.workspace.id)
                 if env.state not in ("stopped", "running"):
                     raise ApiError(409, "ENV_UNAVAILABLE", f"环境现在是 {env.state}，不能启动")
-                self.runner.enqueue(host, "start_env", self.runner.runtime_payload(env), env=env)
-                env.last_used_at = specs.now()
+                await self.runner.start(env)
             elif body.action == "delete":
                 await self.runner.mark_pending_delete(env, "管理员删除")
                 env.delete_after = specs.now()
@@ -439,6 +463,11 @@ class RunnerAdmin:
                 await self._restore(env)
             elif body.action in ("pin", "unpin"):
                 env.pinned = body.action == "pin"
+        except ContainerApprovalRequired as error:
+            await self.db.commit()
+            raise ApiError(
+                409, error.code, error.message, details={"approval_id": str(error.approval_id)}
+            ) from None
         except RunnerError as error:
             raise _error(error) from None
         env.version += 1
@@ -462,9 +491,8 @@ class RunnerAdmin:
         if env.state == "deleted" and env.lifetime == "persistent":
             if await self.runner.latest_snapshot(env) is None:
                 raise ApiError(409, "SNAPSHOT_NOT_FOUND", "这个环境没有可用的快照了")
-            env.deleted_at = None
-            env.state = "archived"
             await self.runner.rebuild(env, "管理员从快照恢复")
+            env.deleted_at = None
             return
         raise ApiError(409, "ENV_UNAVAILABLE", f"环境现在是 {env.state}，不需要恢复")
 
@@ -542,9 +570,12 @@ class RunnerAdmin:
     async def rebuild_template(
         self, access: WorkspaceAccess, template_id: uuid.UUID
     ) -> RunnerTemplateAdminOut:
+        # Serialize with save and result using the same host → template order.
+        await self.runner._lock_pool_hosts(access.workspace.id)
         template = await self._template(access, template_id)
+        await self.db.refresh(template, with_for_update=True)
         try:
-            host = await self.runner.online_host(access.workspace.id)
+            host = await self.runner.online_host(access.workspace.id, template.build_host_id)
         except RunnerError as error:
             raise _error(error) from None
         template.build_status = "building"

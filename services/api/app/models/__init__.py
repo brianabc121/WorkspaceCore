@@ -87,6 +87,7 @@ from app.models.model_connection import (
 from app.models.module import ModuleSyncAttempt, WorkspaceModule
 from app.models.navigation import WorkspaceNavigation
 from app.models.notification import Notification
+from app.models.physical_host import PhysicalHostRegistration
 from app.models.runner import (
     RunnerCommand,
     RunnerDeleteCondition,
@@ -98,6 +99,8 @@ from app.models.runner import (
     RunnerSshTarget,
     RunnerTemplate,
 )
+from app.models.runner_capability import RunnerCapabilityGrant, RunnerCapabilityRequest
+from app.models.runner_network import RunnerIngressRule, RunnerPublishedEndpoint, RunnerService
 from app.models.search import SearchDocument
 from app.models.task import Project, Task, TaskResultRead
 from app.models.timeline import AgentUsageCursor, AgentUsageMinute, TaskEvent, TaskRun
@@ -178,14 +181,20 @@ __all__ = [
     "ModelConnectionModel",
     "ModuleSyncAttempt",
     "Notification",
+    "PhysicalHostRegistration",
     "Project",
     "ProjectAgent",
     "ResourceLink",
+    "RunnerCapabilityGrant",
+    "RunnerCapabilityRequest",
     "RunnerCommand",
     "RunnerDeleteCondition",
     "RunnerEnvironment",
     "RunnerHost",
+    "RunnerIngressRule",
+    "RunnerPublishedEndpoint",
     "RunnerRun",
+    "RunnerService",
     "RunnerSnapshot",
     "RunnerSshJob",
     "RunnerSshTarget",

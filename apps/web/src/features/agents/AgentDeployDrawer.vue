@@ -22,13 +22,15 @@ const emit = defineEmits<{ close: []; view: [instanceId: string] }>()
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id, cache = useQueryClient()
 const active = () => auth.user?.id === user && auth.workspaceId === scope
 const { busy, error: actionError, act, refresh, header } = useAgentAction(scope, sshError)
+const placementId = useId()
+const mode = ref<'auto' | 'specified'>(props.preselect ? 'specified' : 'auto')
 const ids = { name: useId(), server: useId(), cpus: useId(), mem: useId() }
 
 type Phase = 'form' | 'sending' | 'checking' | 'progress' | 'missing'
 const phase = ref<Phase>(props.recovery ? 'checking' : 'form')
 const requestId = ref<string | null>(props.recovery?.request_id ?? null)
 const instanceId = ref<string | null>(props.recovery?.instance_id ?? null)
-const form = reactive({ name: '', server_id: '', cpus: '', mem: '' })
+const form = reactive({ name: '', server_id: '', cpus: '1', mem: '2048' })
 // 主模型（T-0207）：必选；选择即授权给新智能体（与创建同一个事务），不再落回固定的 openai_api_key
 const model = ref<ModelChoice | null>(null)
 const error = ref(''), notice = ref(''), interrupted = ref(false), acceptedName = ref('')
@@ -61,10 +63,10 @@ const allocated = computed(() => {
 
 const cpus = computed(() => form.cpus.trim() === '' ? null : Number(form.cpus))
 const mem = computed(() => form.mem.trim() === '' ? null : Number(form.mem))
-const cpuValid = computed(() => cpus.value === null || (Number.isFinite(cpus.value) && cpus.value >= 0.1 && cpus.value <= 256))
-const memValid = computed(() => mem.value === null || (Number.isInteger(mem.value) && mem.value >= 256 && mem.value <= 1048576))
+const cpuValid = computed(() => cpus.value !== null && (Number.isFinite(cpus.value) && cpus.value >= 0.1 && cpus.value <= 256))
+const memValid = computed(() => mem.value !== null && (Number.isInteger(mem.value) && mem.value >= 256 && mem.value <= 1048576))
 const nameValid = computed(() => form.name.trim().length >= 1 && form.name.trim().length <= 64)
-const valid = computed(() => nameValid.value && !!chosen.value && !!model.value && cpuValid.value && memValid.value)
+const valid = computed(() => nameValid.value && (mode.value === 'auto' || !!chosen.value) && !!model.value && cpuValid.value && memValid.value)
 const FLOW = ['检查服务器环境', '拉取镜像', '创建独立容器与数据目录', '接入工作台', '等待心跳并确认上线']
 
 // 接纳之后：这个实例的部署状态（任务进度每 2 秒取一次）与最新的实例（继续部署时用它的 version）
@@ -94,10 +96,10 @@ const modelCodes = new Set(['MODEL_CONNECTION_DISABLED', 'MODEL_CONNECTION_NOT_R
 const unknown = (cause: unknown) => cause instanceof ApiError && (cause.code === 'WRITE_UNKNOWN' || cause.code === 'IDEMPOTENCY_IN_PROGRESS' || (cause.code === 'HTTP_ERROR' && cause.status >= 500))
 
 async function submit() {
-  if (!valid.value || phase.value !== 'form' || !chosen.value || !user) return
+  if (!valid.value || phase.value !== 'form' || !user) return
   // 同一次填写的连点、重试都用同一个 request_id；被明确拒绝后（没有建实例）才换新的
   requestId.value ??= crypto.randomUUID()
-  const body: Schema['AgentDeploymentCreateIn'] = { request_id: requestId.value, server_id: chosen.value.id, server_version: chosen.value.version, name: form.name.trim(), description: '', cpus: cpus.value, mem_limit_mb: mem.value, model: model.value! }
+  const body: Schema['AgentDeploymentCreateIn'] = { request_id: requestId.value, placement: mode.value === 'auto' ? { mode: 'auto' } : { mode: 'specified', server_id: chosen.value!.id }, ...(mode.value === 'specified' ? { server_version: chosen.value!.version } : {}), name: form.name.trim(), description: '', cpus: cpus.value!, mem_limit_mb: mem.value!, model: model.value! }
   rememberDeployment(record())
   phase.value = 'sending'; error.value = ''
   try {
@@ -172,6 +174,12 @@ watch(() => job.value?.status, (now, before) => {
         <input :id="ids.name" v-model="form.name" maxlength="64" autocomplete="off" placeholder="例如：项目助手" :disabled="phase === 'sending'" />
       </div>
       <div class="form-field">
+        <label :for="placementId">部署位置</label>
+        <select :id="placementId" v-model="mode" :disabled="phase === 'sending'"><option value="auto">自动分配（推荐）</option><option value="specified">指定服务器</option></select>
+        <p v-if="mode === 'auto'" class="form-help">平台按最新资源、负载与创建预约选择服务器，提交后显示实际节点。</p>
+        <p v-else class="form-help">只在指定服务器部署；资源不足或不可用时会保留选择，不会自动换机。</p>
+      </div>
+      <div v-if="mode === 'specified'" class="form-field">
         <label :for="ids.server">部署服务器 *</label>
         <select :id="ids.server" v-model="form.server_id" :disabled="phase === 'sending'">
           <option value="" disabled>{{ serversLoading ? '正在加载服务器…' : targets.length ? '选择一台已初始化的服务器' : '没有可部署的服务器' }}</option>
@@ -194,16 +202,16 @@ watch(() => job.value?.status, (now, before) => {
       <div class="ag-field-row">
         <div class="form-field">
           <label :for="ids.cpus">CPU 上限（核）</label>
-          <input :id="ids.cpus" v-model.trim="form.cpus" inputmode="decimal" placeholder="不限制" :aria-invalid="!cpuValid" :disabled="phase === 'sending'" />
+          <input :id="ids.cpus" v-model.trim="form.cpus" inputmode="decimal" required :aria-invalid="!cpuValid" :disabled="phase === 'sending'" />
         </div>
         <div class="form-field">
           <label :for="ids.mem">内存上限（MiB）</label>
-          <input :id="ids.mem" v-model.trim="form.mem" inputmode="numeric" placeholder="不限制" :aria-invalid="!memValid" :disabled="phase === 'sending'" />
+          <input :id="ids.mem" v-model.trim="form.mem" inputmode="numeric" required :aria-invalid="!memValid" :disabled="phase === 'sending'" />
         </div>
       </div>
-      <p v-if="!cpuValid" class="feedback">CPU 上限是 0.1 到 256 之间的数，留空表示不限制。</p>
-      <p v-else-if="!memValid" class="feedback">内存上限是 256 到 1048576 之间的整数（MiB，例如 4096 = 4 GB），留空表示不限制。</p>
-      <p v-else class="form-help">默认不限制；一台服务器上有多个智能体时，可以给它设上限。{{ mem !== null && memValid ? `内存上限 ${mib(mem)}。` : '' }}</p>
+      <p v-if="!cpuValid" class="feedback">CPU 上限是 0.1 到 256 之间的数，必须填写有限资源上限。</p>
+      <p v-else-if="!memValid" class="feedback">内存上限是 256 到 1048576 之间的整数（MiB，例如 4096 = 4 GB），必须填写有限资源上限。</p>
+      <p v-else class="form-help">默认 1 核、2048 MiB；资源上限参与服务器容量检查。{{ mem !== null && memValid ? `内存上限 ${mib(mem)}。` : '' }}</p>
       <div class="form-field">
         <span class="ag-label">OpenClaw 版本</span>
         <p class="ag-version"><Lock aria-hidden="true" />平台推荐版本（已锁定）</p>

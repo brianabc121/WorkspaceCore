@@ -11,13 +11,14 @@ import { useRunnerAction } from './api'
 // 填写服务器 → 只读取主机公钥、在服务器上核对指纹 → 输入一次登录密码部署（工作台换成自己的专用密钥，密码不保存）。
 // 部署：上传接入包，以 root 运行 install.sh（Docker、gVisor、runner-agent），等 runner-agent 连上工作台。
 // 不是 root 账号时 install.sh 要用 sudo，所以每次部署都要填密码。
+const props = defineProps<{ hostId: string }>()
 type State = Schema['AgentSshState']
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id, cache = useQueryClient()
-const key = ['runner', user, scope, 'ssh'] as const
+const key = ['runner', user, scope, 'ssh', props.hostId] as const
 const ssh = useQuery({
   queryKey: key,
   enabled: computed(() => user === auth.user?.id && scope === auth.workspaceId && auth.isOwner),
-  queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/runner/host/ssh', { params: { header: { 'X-Workspace-Id': scope } }, signal })),
+  queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/runner/hosts/{host_id}/ssh', { params: { header: { 'X-Workspace-Id': scope }, path: { host_id: props.hostId } }, signal })),
   refetchInterval: query => query.state.data?.job?.status === 'running' ? 2000 : false,
 })
 const { busy, error, notice, act, refresh, header } = useRunnerAction(scope)
@@ -59,12 +60,12 @@ async function probe() {
   const t = target.value
   const body: Schema['AgentSshTargetSet'] = { host: form.host.trim(), port: Number(form.port), username: form.username.trim(), ...(t ? { version: t.version } : {}) }
   checked.value = false
-  if (await call(async () => dataOf(await auth.slowApi.PUT('/api/v1/runner/host/ssh', { params: { header }, body })), '已读取主机公钥：请在服务器上核对指纹')) editing.value = false
+  if (await call(async () => dataOf(await auth.slowApi.PUT('/api/v1/runner/hosts/{host_id}/ssh', { params: { header, path: { host_id: props.hostId } }, body })), '已读取主机公钥：请在服务器上核对指纹')) editing.value = false
 }
 async function confirm() {
   const t = target.value
   if (!t || !checked.value) return
-  await call(async () => dataOf(await auth.api.POST('/api/v1/runner/host/ssh/confirm', { params: { header }, body: { version: t.version, fingerprint: t.host_key_fingerprint } })), '指纹已确认：之后只接受这把主机公钥')
+  await call(async () => dataOf(await auth.api.POST('/api/v1/runner/hosts/{host_id}/ssh/confirm', { params: { header, path: { host_id: props.hostId } }, body: { version: t.version, fingerprint: t.host_key_fingerprint } })), '指纹已确认：之后只接受这把主机公钥')
 }
 async function install() {
   const t = target.value
@@ -73,7 +74,7 @@ async function install() {
   const secret = password.value
   password.value = ''
   if (!secret && !t.client_key_installed) return
-  await call(async () => dataOf(await auth.api.POST('/api/v1/runner/host/ssh/install', { params: { header }, body: { version: t.version, ...(secret ? { password: secret } : {}) } })), '已开始部署：下面显示每一步的进度')
+  await call(async () => dataOf(await auth.api.POST('/api/v1/runner/hosts/{host_id}/ssh/install', { params: { header, path: { host_id: props.hostId } }, body: { version: t.version, ...(secret ? { password: secret } : {}) } })), '已开始部署：下面显示每一步的进度')
 }
 async function uninstall() {
   const t = target.value
@@ -81,7 +82,7 @@ async function uninstall() {
   const files = removeFiles.value, secret = password.value
   if (!window.confirm(files ? '停止服务器上的 runner-agent 并删除接入包目录？Docker 与 gVisor 保留。' : '停止服务器上的 runner-agent？接入包目录保留，之后可以重新部署。')) return
   password.value = ''
-  await call(async () => dataOf(await auth.api.POST('/api/v1/runner/host/ssh/uninstall', { params: { header }, body: { version: t.version, remove_files: files, ...(secret ? { password: secret } : {}) } })), '已开始卸载：下面显示每一步的进度')
+  await call(async () => dataOf(await auth.api.POST('/api/v1/runner/hosts/{host_id}/ssh/uninstall', { params: { header, path: { host_id: props.hostId } }, body: { version: t.version, remove_files: files, ...(secret ? { password: secret } : {}) } })), '已开始卸载：下面显示每一步的进度')
 }
 async function revoke(force = false) {
   const t = target.value
@@ -94,7 +95,7 @@ async function revoke(force = false) {
   let failure: unknown = null
   const ok = await act(async () => {
     try {
-      const state = dataOf(await auth.slowApi.POST('/api/v1/runner/host/ssh/revoke', { params: { header }, body: { version: t.version, force } }))
+      const state = dataOf(await auth.slowApi.POST('/api/v1/runner/hosts/{host_id}/ssh/revoke', { params: { header, path: { host_id: props.hostId } }, body: { version: t.version, force } }))
       put(state); warning.value = state.warning ?? ''
     } catch (cause) { failure = cause; throw cause }
   }, force ? '已删除工作台保存的专用私钥' : '专用密钥已吊销')
@@ -105,7 +106,7 @@ async function remove() {
   if (!t || !window.confirm(`删除 SSH 地址 ${t.host}？之后可以重新填写。`)) return
   password.value = ''
   await call(async () => {
-    await auth.api.DELETE('/api/v1/runner/host/ssh', { params: { header, query: { version: t.version } } })
+    await auth.api.DELETE('/api/v1/runner/hosts/{host_id}/ssh', { params: { header, path: { host_id: props.hostId }, query: { version: t.version } } })
     put({ target: null, job: null, warning: null })
   }, '已删除 SSH 地址')
 }

@@ -9,6 +9,7 @@ env_create → 下发 create_env → 回报 → running；env_exec 同步返回�
 
 import asyncio
 import base64
+import hashlib
 import io
 import secrets
 import uuid
@@ -62,6 +63,11 @@ def runner_headers(token: str | None, ingress: str = "intranet") -> dict[str, st
     return headers
 
 
+def physical_id(token: str) -> str:
+    """Synthetic stable host identity; real agents read the host machine-id mount."""
+    return hashlib.sha256(("test-host:" + token).encode()).hexdigest()
+
+
 async def add_host(env: Env) -> str:
     """添加运行服务器并下载接入包，返回接入包里的凭证。"""
     created = await env.client.post(
@@ -92,7 +98,56 @@ async def add_host(env: Env) -> str:
     token = values["MYWS_RUNNER_TOKEN"]
     assert token.startswith("mwr_")
     await poll(env, token)  # 上线
+    sample_id = await begin_sample(env, token)
+    report = await env.client.post(
+        "/runner-api/v1/report",
+        json={
+            "sample_id": sample_id,
+            "physical_host_id": physical_id(token),
+            "mem_bytes": POLL["mem_bytes"],
+            "mem_free_bytes": 24 * 1024**3,
+            "disk_bytes": POLL["disk_bytes"],
+            "disk_free_bytes": POLL["disk_free_bytes"],
+            "load": 0.5,
+        },
+        headers=runner_headers(token),
+    )
+    assert report.status_code == 200, report.text
     return token
+
+
+async def begin_sample(env: Env, token: str) -> str:
+    result = await env.client.post(
+        "/runner-api/v1/report/start", json={}, headers=runner_headers(token)
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["expires_in"] == 90
+    return str(result.json()["sample_id"])
+
+
+async def test_report_sampling_requires_auth_and_cannot_be_replayed(env: Env) -> None:
+    token = await add_host(env)
+    denied = await env.client.post("/runner-api/v1/report/start", json={})
+    assert denied.status_code == 401
+    sample_id = await begin_sample(env, token)
+    payload = {
+        "sample_id": sample_id,
+        "physical_host_id": physical_id(token),
+        "mem_bytes": POLL["mem_bytes"],
+        "mem_free_bytes": 24 << 30,
+        "disk_bytes": POLL["disk_bytes"],
+        "disk_free_bytes": POLL["disk_free_bytes"],
+        "load": 0.1,
+    }
+    first = await env.client.post(
+        "/runner-api/v1/report", json=payload, headers=runner_headers(token)
+    )
+    assert first.status_code == 200, first.text
+    replay = await env.client.post(
+        "/runner-api/v1/report", json=payload, headers=runner_headers(token)
+    )
+    assert replay.status_code == 409
+    assert replay.json()["error"]["code"] == "REPORT_SAMPLE_STALE"
 
 
 async def poll(env: Env, token: str, wait: int = 0) -> list[dict[str, Any]]:
@@ -417,7 +472,7 @@ async def test_quota_and_capability_checks(env: Env) -> None:
         },
     )
     error = tool_error(kvm)
-    assert error["code"] == "RUNNER_CAPABILITY" and "/dev/kvm" in error["message"]
+    assert error["code"] == "NO_ELIGIBLE_SERVER"
     once = await call(
         env, token2, "env_create", {"purpose": "x", "lifetime": "once", "spec": {"image": "a:1"}}
     )
@@ -558,9 +613,12 @@ async def test_report_marks_lost_and_stray_containers(env: Env) -> None:
     _instance, token = await agent(env)
     environment = (await create_env(env, token, rtoken))["result"]["environment"]
     stray_id = str(uuid.uuid4())
+    sample_id = await begin_sample(env, rtoken)
     report = await env.client.post(
         "/runner-api/v1/report",
         json={
+            "sample_id": sample_id,
+            "physical_host_id": physical_id(rtoken),
             "containers": [{"env_id": stray_id, "name": "mw-env-0123456789ab", "state": "running"}],
             "volumes": [],
             "images": [],
@@ -583,6 +641,31 @@ async def test_report_marks_lost_and_stray_containers(env: Env) -> None:
     item = listed.json()["items"][0]
     assert item["state"] == "failed" and "丢失" in item["state_reason"]
     assert item["egress"]["hosts"]["10.0.0.8:22"]["denied"] == 1
+
+
+async def test_paused_container_report_keeps_its_compute_reservation(env: Env) -> None:
+    from app.domain.runner_placement import compute_reserved
+    from app.models import RunnerEnvironment
+    from tests.workspace_support import app_of
+
+    runner_token = await add_host(env)
+    _instance, token = await agent(env)
+    environment = (await create_env(env, token, runner_token))["result"]["environment"]
+    sample_id = await begin_sample(env, runner_token)
+    response = await env.client.post(
+        "/runner-api/v1/report",
+        json={
+            "sample_id": sample_id,
+            "physical_host_id": physical_id(runner_token),
+            "containers": [{"env_id": environment["id"], "name": "paused", "state": "paused"}],
+        },
+        headers=runner_headers(runner_token),
+    )
+    assert response.status_code == 200, response.text
+    async with app_of(env.client).state.sessionmaker() as db:
+        item = await db.get(RunnerEnvironment, uuid.UUID(environment["id"]))
+        assert compute_reserved(item), "paused processes retain their allocated memory"
+        assert item.state != "stopped"
 
 
 async def test_deadlines_retry_or_mark_unknown(env: Env) -> None:

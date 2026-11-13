@@ -2,7 +2,7 @@
 
 - 长轮询 `/runner-api/v1/poll` 领指令；同一个环境的指令按顺序执行（每个环境一把锁），不同环境并行；
   指令按 id 去重：执行中的不重复执行，执行过的直接重发结果。
-- 每分钟上报（`/report`）本机带工作台标签的容器、数据卷、镜像与占用和出口访问记录；
+- 定期上报（`/report`）本机带工作台标签的容器、数据卷、镜像与占用和出口访问记录；
   工作台返回记录外的容器（stray）：先停止，停了 24 小时以上的删除。**没有工作台标签的一律不碰。**
 - 断线保护：exec 超时在本机执行（停止这个容器），工作台掉线也守得住。
 """
@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import base64
 import collections
+import hashlib
 import io
 import ipaddress
 import logging
 import os
+import re
 import socket
 import tarfile
 import threading
@@ -23,6 +25,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from . import VERSION
@@ -34,6 +37,7 @@ from .metrics import (
     ContainerCPUSampler,
     cpu_total_ns,
     memory_bytes,
+    memory_working_set_bytes,
     nonnegative_int,
     started_generation,
 )
@@ -50,6 +54,7 @@ HELPER_MAX_AGE = 3600
 DONE_KEEP = 200
 LIST_MAX_ENTRIES = 1000
 DISK_EMERGENCY = 0.95
+HOST_MACHINE_ID = Path("/run/host-machine-id")
 # 改变环境状态的指令：同一个环境里按下发顺序一条一条执行；
 # exec 与文件读写等前面的这类指令做完再开始，彼此之间可以并行（停止不用等长时间运行的 exec）
 LIFECYCLE = frozenset(
@@ -71,7 +76,7 @@ class Config:
     kvm: bool = False
     disk_path: str = "/"
     workers: int = 16
-    report_seconds: int = 60
+    report_seconds: int = 30
 
     @classmethod
     def from_env(cls, env: dict[str, str]) -> Config:
@@ -96,6 +101,17 @@ class Config:
 
 class CommandError(Exception):
     """指令执行失败：message 回报给工作台（写给智能体或管理员看）。"""
+
+
+def physical_host_id() -> str | None:
+    """Read only the host's mounted machine-id; never the agent container's ID."""
+    try:
+        machine_id = HOST_MACHINE_ID.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError):
+        return None
+    if re.fullmatch(r"[0-9a-f]{32}", machine_id) is None:
+        return None
+    return hashlib.sha256(("machine-id:" + machine_id).encode("ascii")).hexdigest()
 
 
 def _b64(data: bytes) -> str:
@@ -820,7 +836,10 @@ class Agent:
         except (DockerError, OSError, ValueError) as error:
             logger.info("读取 %s 的用量失败：%s", name, error)
             return {}
-        out: dict[str, Any] = {"mem_bytes": memory_bytes(stats)}
+        out: dict[str, Any] = {
+            "mem_bytes": memory_bytes(stats),
+            "memory_working_set_bytes": memory_working_set_bytes(stats),
+        }
         generation = started_generation(info)
         container_id = str(item.get("Id") or (info or {}).get("Id") or "")
         if generation and container_id:
@@ -832,6 +851,8 @@ class Agent:
         return out
 
     def report(self) -> dict[str, Any]:
+        sample = self.workspace.post("/report/start", {})
+        _, memory_before = _meminfo()
         df = self.docker.system_df()
         # 数据卷占用：Docker 没算出来时是 -1，缺失也是未知；都报 None，不当成 0
         volume_sizes = {
@@ -887,13 +908,15 @@ class Agent:
             self._disk_emergency(labeled)
         mem_total, mem_free = _meminfo()
         body = {
+            "sample_id": sample["sample_id"],
+            "physical_host_id": physical_host_id(),
             "containers": envs,
             "volumes": volumes,
             "images": images,
             "unlabeled_containers": unlabeled,
             "egress": self.proxy.stats.drain(),
             "mem_bytes": mem_total,
-            "mem_free_bytes": mem_free,
+            "mem_free_bytes": min(memory_before, mem_free),
             "disk_bytes": stat.f_blocks * stat.f_frsize,
             "disk_free_bytes": stat.f_bavail * stat.f_frsize,
             "images_bytes": int(sum(int(i.get("Size") or 0) for i in df.get("Images") or [])),

@@ -84,7 +84,6 @@ def _json() -> Mapped[dict[str, Any]]:
 class RunnerHost(Base):
     __tablename__ = "runner_hosts"
     __table_args__ = (
-        UniqueConstraint("workspace_id"),
         UniqueConstraint("workspace_id", "id"),
         UniqueConstraint("token_hash"),
         CheckConstraint(f"status IN {HOST_STATUSES}", name="status"),
@@ -96,6 +95,9 @@ class RunnerHost(Base):
     name: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
     ingress: Mapped[str] = mapped_column(Text, server_default=text("'intranet'"))
+    backend: Mapped[str] = mapped_column(Text, server_default=text("'docker'"))
+    node_name: Mapped[str | None] = mapped_column(Text)
+    runtime_metadata: Mapped[dict[str, Any]] = _json()
     token_hash: Mapped[str] = mapped_column(Text)
     token_prefix: Mapped[str] = mapped_column(Text)
     cert_fingerprint: Mapped[str | None] = mapped_column(Text)
@@ -143,6 +145,7 @@ class RunnerTemplate(Base):
     status: Mapped[str] = mapped_column(Text, server_default=text("'active'"))
     revision: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     spec: Mapped[dict[str, Any]] = _json()
+    build_host_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     build_status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
     build_error: Mapped[str | None] = mapped_column(Text)
     build_log: Mapped[str] = mapped_column(Text, server_default=text("''"))
@@ -186,6 +189,9 @@ class RunnerEnvironment(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     host_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    runtime_backend: Mapped[str] = mapped_column(Text, server_default=text("'docker'"))
+    runtime_metadata: Mapped[dict[str, Any]] = _json()
+    placement: Mapped[dict[str, Any]] = _json()
     template_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.runner_templates.id", ondelete="SET NULL")
     )

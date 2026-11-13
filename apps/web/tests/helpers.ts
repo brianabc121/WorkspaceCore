@@ -64,6 +64,9 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     // 智能体服务器（T-0147、T-0181）：默认没有服务器，实例没有部署
     if (path === '/api/v1/agents/servers' && request.method === 'GET') return Response.json({ items: [], unassigned: [], summary: { server_count: 0, ready_count: 0, successful_deployments: 0, not_initialized_count: 0, needs_credentials_count: 0, deployment_counts_partial: false, generated_at: '2026-11-09T00:00:00Z' } })
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/deployment$/.test(path) && request.method === 'GET') return Response.json({ deployment: null, server: null, job: null, capacity_warning: null })
+    if (path === '/api/v1/runner/hosts/candidates' && request.method === 'GET') return Response.json({ items: [] })
+    if (/^\/api\/v1\/runner\/hosts\/[^/]+\/ssh$/.test(path) && request.method === 'GET') return Response.json({ target: null, job: null, warning: null })
+    if (/^\/api\/v1\/agents\/instances\/[^/]+\/runner\/capabilities$/.test(path) && request.method === 'GET') return Response.json({ instance_id: path.split('/')[5], held_count: 0, default_limit: 5, unlimited_active: false, grants: [], pending_approval_ids: [] })
     // 实例的运行环境权限（T-0140）：默认关闭
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/runner$/.test(path) && request.method === 'GET') return Response.json(runnerOff)
     // 中转站管理（T-0206）：默认没有连接、没有迁移项、没有智能体分配；只开放 OpenAI 兼容协议与 OpenAI 官方预设

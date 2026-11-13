@@ -103,7 +103,7 @@ async def test_cleanup_removes_only_this_records_key(
     host = FakeHost(tmp_path)
     _, someone = _public("alice@laptop")
     _, runner = _public("myworkspace-runner-0a1b2c3d")
-    async with ssh_host(host) as (port, _):
+    async with ssh_host(host) as (port, host_key):
         server_id, legacy = await _legacy_server(owner, host, port)
         kind, data, comment = legacy.split()
         (host.home / ".ssh").mkdir(mode=0o700)
@@ -136,7 +136,7 @@ async def test_cleanup_removes_only_this_records_key(
         )
         assert removed.status_code == 204, removed.text
 
-    _password_only(spy)
+    _password_only(spy, host_key)
     assert host.logins == ["password"]
     assert await _audit(owner, "agents.server.legacy_key_cleaned") == 1
     fingerprint = await run_sql(
@@ -190,7 +190,7 @@ async def test_write_failure_and_wrong_password_keep_the_reference(
     owner: Owner, tmp_path: Path, spy: Spy
 ) -> None:
     host = FakeHost(tmp_path)
-    async with ssh_host(host) as (port, _):
+    async with ssh_host(host) as (port, host_key):
         server_id, legacy = await _legacy_server(owner, host, port)
         (host.home / ".ssh").mkdir(mode=0o700)
         (host.home / ".ssh" / "authorized_keys").write_text(legacy + "\n")
@@ -234,7 +234,7 @@ async def test_write_failure_and_wrong_password_keep_the_reference(
         response = await _cleanup(owner, server_id)
         assert response.json()["server"]["ssh"]["legacy_key_cleanup_state"] == "done"
         assert host.authorized() == []
-    _password_only(spy)
+    _password_only(spy, host_key)
     row = await _row(owner, server_id)
     assert row["client_key_ref"] is None
     assert await _audit(owner, "agents.server.legacy_key_cleanup_failed") == 2

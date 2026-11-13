@@ -15,6 +15,7 @@ export const spec = (over: Partial<Schema['RunnerSpecOut']> = {}): Schema['Runne
   env: {}, secrets: [], persist: [], lifetime: 'session', ...over,
 })
 export const host = (over: Partial<Schema['RunnerHostOut']> = {}): Schema['RunnerHostOut'] => ({
+  backend: 'docker', node_name: null, runtime_metadata: {},
   id: 'host-1', name: '容器节点 A', status: 'online', ingress: 'intranet', token_prefix: 'mwr_abcdefgh', cpus: 16, mem_bytes: 32 * GIB, disk_bytes: 500 * GIB, disk_free_bytes: 414 * GIB,
   kvm: false, runtimes: ['runc', 'runsc'], docker_version: '29.9.1', agent_version: '0.2.0', last_seen_at: at,
   report: { mem_bytes: 32 * GIB, mem_free_bytes: 20 * GIB, disk_bytes: 500 * GIB, disk_free_bytes: 414 * GIB, images_bytes: 30 * GIB, containers_bytes: 5 * GIB, volumes_bytes: 40 * GIB, unlabeled_containers: 0, load: 1.5, at },
@@ -26,6 +27,7 @@ export const metrics = (over: Partial<Schema['RunnerEnvMetrics']> = {}): Schema[
   data_volume_bytes: Math.round(1.2 * GIB), data_volume_reported_at: at, data_volume_status: 'ok', ...over,
 })
 export const env = (over: Partial<Schema['RunnerEnvAdminOut']> = {}): Schema['RunnerEnvAdminOut'] => ({
+  runtime_backend: 'docker', host_id: 'host-1', placement: {},
   id: '0a1b2c3d-0000-4000-8000-000000000001', untrusted: { purpose: '前端构建' }, lifetime: 'session', state: 'running', state_reason: null, template: 'node', reuse_key: null, owner: '开发助手', mine: false,
   runtime: 'gvisor', user: 'user', network: 'none', memory_mb: 2048, cpus: 2, delete_when: [], share: 'none', project_id: null, pinned: false, use_count: 3, created_at: at, last_used_at: at,
   next_step: '空闲 15 分钟后停止', wake_seconds: 2.5, owner_instance_id: 'inst-a', template_id: 'tpl-1', spec: spec(), mem_bytes: 640 * MIB, disk_bytes: Math.round(1.2 * GIB), egress: {},

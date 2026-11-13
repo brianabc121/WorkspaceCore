@@ -25,6 +25,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -43,6 +44,7 @@ def _workspace() -> Mapped[uuid.UUID]:
 class AgentServer(Base):
     __tablename__ = "agent_servers"
     __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_agent_servers_workspace_id_id"),
         CheckConstraint(f"kind IN {SERVER_KINDS}", name="kind"),
         # 同一个工作空间里同一台机器（同一个 machine_key）只有一条
         Index(
@@ -65,6 +67,9 @@ class AgentServer(Base):
     cpu_model: Mapped[str | None] = mapped_column(Text)
     uptime_seconds: Mapped[int | None] = mapped_column(BigInteger)
     latest: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    resource_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
     alerts: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

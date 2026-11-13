@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.v1 import (
     agent_model_bindings,
+    agent_resources,
     agents,
     ai,
     audit,
@@ -27,6 +28,8 @@ from app.api.v1 import (
     operations,
     readme,
     runner,
+    runner_capabilities,
+    runner_network,
     search,
     setup,
     storage,
@@ -64,10 +67,13 @@ for module in (
     im,
     mail,
     runner,
+    runner_capabilities,
+    runner_network,
     ai,
     model_connections,
     model_catalog,
     agent_model_bindings,
+    agent_resources,
     modules,
     navigation,
 ):

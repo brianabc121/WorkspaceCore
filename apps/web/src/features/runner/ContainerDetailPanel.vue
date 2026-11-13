@@ -8,12 +8,13 @@ import { RUN_STATUS, runnerError, seconds, STATE, useRunnerEnvironment, useRunne
 import { shortId, STATE_TONE } from './containerMetrics'
 import ContainerResourceMeters from './ContainerResourceMeters.vue'
 import ContainerLifecyclePanel from './ContainerLifecyclePanel.vue'
+import ContainerNetworkPanel from './ContainerNetworkPanel.vue'
 
 // 容器详情（T-0187，效果图右侧一栏；手机放进右侧抽屉）：按完整 UUID 读 GET /runner/environments/{id}，
 // 所以不在当前筛选、不在当前页的容器也能直接打开（地址里的 environment_id、通知里的链接）。
-// 不存在或已无权访问时不留旧内容。三块：资源负载、执行记录、配置与回收。
+// 不存在或已无权访问时不留旧内容。资源负载、执行记录、配置与回收、网络与服务分开。
 // 打开、刷新详情只读，不会启动、停止、归档或删除任何东西。
-type Section = 'load' | 'runs' | 'config'
+type Section = 'load' | 'runs' | 'config' | 'network'
 const props = defineProps<{ environmentId: string; aside?: boolean }>()
 const emit = defineEmits<{ close: []; runs: [environmentId: string] }>()
 const scope = useAuthStore().workspaceId!
@@ -22,7 +23,7 @@ const detail = useRunnerEnvironment(scope, id)
 const env = computed(() => detail.data.value ?? null)
 const gone = computed(() => detail.error.value instanceof ApiError && [403, 404].includes(detail.error.value.status))
 const section = ref<Section>('load')
-const SECTIONS: Record<Section, string> = { load: '资源负载', runs: '执行记录', config: '配置与回收' }
+const SECTIONS: Record<Section, string> = { load: '资源负载', runs: '执行记录', config: '配置与回收', network: '网络与服务' }
 
 const runFilter = computed<RunFilter>(() => ({ environment_id: props.environmentId }))
 const runs = useRunnerRuns(scope, runFilter)
@@ -78,6 +79,7 @@ const active = computed(() => runItems.value.filter(r => r.status === 'running' 
           </template>
           <button type="button" class="asv-link" @click="emit('runs', environmentId)">在执行记录页查看输出<ChevronRight aria-hidden="true" /></button>
         </section>
+        <ContainerNetworkPanel v-else-if="section === 'network'" :environment-id="environmentId" />
         <ContainerLifecyclePanel v-else :env="env" @refresh="detail.refetch()" />
       </div>
       <p v-if="detail.error.value" class="form-help">刷新失败，显示的是上次取回的内容。</p>

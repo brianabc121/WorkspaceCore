@@ -20,6 +20,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    RootModel,
     SecretStr,
     StringConstraints,
     model_validator,
@@ -85,12 +86,14 @@ from app.schemas.runner import (
     EnvRunInput,
     EnvSetupInput,
     EnvUpdateInput,
+    RunnerHostMcpCandidatesOutput,
     RunnerTemplateSaveInput,
     RunnerTemplateSaveOutput,
     RunnerTemplatesInput,
     RunnerTemplatesOutput,
     RunOut,
 )
+from app.schemas.runner_capabilities import RunnerCapabilityRequestInput
 from app.schemas.search import AgentSearchType
 from app.schemas.tasks import (
     Priority,
@@ -235,6 +238,17 @@ class PendingApproval(BaseModel):
     deduplicated: bool = Field(
         description="同一实例、同一工具、同样参数已有待审批的记录时，返回那一条，不重复创建"
     )
+
+
+class ContainerApprovalOutput(PendingApproval):
+    code: Literal["APPROVAL_REQUIRED"] = "APPROVAL_REQUIRED"
+    approval_id: UUID
+
+
+class EnvCreateToolOutput(RootModel[EnvCreateOutput | ContainerApprovalOutput]):
+    """Creation succeeds or persistently requests the independent count capability."""
+
+    model_config = ConfigDict(json_schema_extra={"type": "object"})
 
 
 class ToolError(BaseModel):
@@ -1618,6 +1632,21 @@ _MAIL_SEND: list[ToolSpec] = [
 _RUNNER_NOTE = "宿主保护不变：不开特权、不挂 Docker socket 与宿主目录、到不了私有网段。"
 _RUNNER: list[ToolSpec] = [
     _spec(
+        "runner_hosts",
+        "read",
+        EmptyInput,
+        RunnerHostMcpCandidatesOutput,
+        "查看有权使用的运行服务器与容量；不会返回凭证或管理网络地址",
+    ),
+    _spec(
+        "runner_request_capability",
+        "critical",
+        RunnerCapabilityRequestInput,
+        PendingApproval,
+        "申请免数量上限或跨智能体通信权限；需owner二次认证审批，通信仍需目标入站允许",
+        min_role=Role.member,
+    ),
+    _spec(
         "runner_templates",
         "read",
         RunnerTemplatesInput,
@@ -1647,7 +1676,7 @@ _RUNNER: list[ToolSpec] = [
         "env_create",
         "direct",
         EnvCreateInput,
-        EnvCreateOutput,
+        EnvCreateToolOutput,
         "建环境（直接执行）：必须说明用途（purpose）和类别（lifetime：once 跑一次就删 / "
         "session 接下来反复用 / persistent 里面有要长期保存的东西）。给 template，"
         "或直接给 spec（至少 image）。同一件事用同一个 reuse_key，会先复用已有的环境；"

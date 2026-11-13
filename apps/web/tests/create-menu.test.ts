@@ -78,13 +78,14 @@ describe('global create menu', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.query.create).toBeUndefined())
   })
 
-  it('opens the bookmark form, or the source settings for an admin when no source exists yet', async () => {
+  it('opens the bookmark form when a knowledge source is configured', async () => {
     setup('owner', r => path(r) === '/api/v1/knowledge/sources' ? Response.json({ items: [source], next_cursor: null, total_estimate: 1 }) : undefined)
-    const first = await openApp('/')
+    await openApp('/')
     await choose('收藏文档')
     expect(await screen.findByRole('dialog', { name: '新增收藏' })).toBeVisible()
-    first.unmount()
+  })
 
+  it('opens the source settings for an administrator when no source is configured', async () => {
     setup('owner')
     await openApp('/')
     await choose('收藏文档')

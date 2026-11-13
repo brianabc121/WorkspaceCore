@@ -12,7 +12,7 @@ import hashlib
 import logging
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from redis.asyncio import Redis
@@ -39,6 +39,8 @@ from app.models import (
     RunnerEnvironment,
     RunnerHost,
     RunnerRun,
+    RunnerSnapshot,
+    RunnerSshJob,
 )
 from app.schemas.runner import (
     RunnerCommandOut,
@@ -48,6 +50,7 @@ from app.schemas.runner import (
     RunnerPoll,
     RunnerReport,
     RunnerReportResult,
+    RunnerReportSample,
 )
 
 logger = logging.getLogger("app.runner")
@@ -79,6 +82,28 @@ def unauthorized() -> ApiError:
     )
 
 
+def accept_report_sample(host: RunnerHost, body: RunnerReport, now: datetime) -> datetime | None:
+    """Host-bound single-use epoch: receipt time cannot stand in for sample time."""
+    if body.sample_id is None:
+        return None
+    metadata = dict(host.runtime_metadata or {})
+    try:
+        started = datetime.fromisoformat(metadata["report_sample_started_at"])
+        if (
+            str(body.sample_id) != metadata["report_sample_id"]
+            or not 0 <= (now - started).total_seconds() <= 90
+        ):
+            raise ValueError
+    except (KeyError, TypeError, ValueError) as error:
+        raise ApiError(
+            409, "REPORT_SAMPLE_STALE", "采样票据过期、已使用或不属于此服务器"
+        ) from error
+    metadata.pop("report_sample_id", None)
+    metadata.pop("report_sample_started_at", None)
+    host.runtime_metadata = metadata
+    return started
+
+
 def host_out(host: RunnerHost) -> RunnerHostOut:
     status = host.status
     if status == "online" and (
@@ -87,6 +112,9 @@ def host_out(host: RunnerHost) -> RunnerHostOut:
     ):
         status = "offline"
     return RunnerHostOut(
+        backend=host.backend or "docker",
+        node_name=host.node_name,
+        runtime_metadata=dict(host.runtime_metadata or {}),
         id=host.id,
         name=host.name,
         status=status,
@@ -190,14 +218,15 @@ class RunnerHosts:
     async def create(
         self, workspace_id: uuid.UUID, body: RunnerHostCreate, actor_id: uuid.UUID | None
     ) -> tuple[RunnerHost, str]:
-        if await self.get(workspace_id) is not None:
-            raise ApiError(409, "RUNNER_EXISTS", "这个工作空间已经有容器服务器（V1 只支持一台）")
         token = new_token()
         host = RunnerHost(
             id=uuid.uuid4(),
             workspace_id=workspace_id,
             name=body.name,
             ingress=body.ingress,
+            backend=body.backend,
+            node_name=body.node_name,
+            runtime_metadata=body.runtime_metadata,
             token_hash=hash_token(token),
             token_prefix=token[:TOKEN_PREFIX_SHOWN],
             created_by=actor_id,
@@ -257,21 +286,39 @@ class RunnerHosts:
         return ca.cert_pem
 
     async def remove(self, host: RunnerHost, actor_id: uuid.UUID | None, version: int) -> None:
+        await self.db.refresh(host, with_for_update=True)
         if host.version != version:
             raise ApiError(409, "VERSION_CONFLICT", "容器服务器已被修改，请刷新后重试")
+        # Job creation takes this same host lock before its target lock. Keep
+        # the physical registration while SSH can still mutate the machine.
+        running_job = await self.db.scalar(
+            select(RunnerSshJob.id)
+            .where(RunnerSshJob.host_id == host.id, RunnerSshJob.status == "running")
+            .limit(1)
+        )
+        if running_job is not None:
+            raise ApiError(
+                409, "RUNNER_SSH_JOB_RUNNING", "服务器正在部署或卸载，请等待 SSH 任务结束后再移除"
+            )
         live = await self.db.scalar(
             select(RunnerEnvironment.id)
             .where(
                 RunnerEnvironment.host_id == host.id,
-                RunnerEnvironment.state.in_(("creating", "running", "stopped", "pending_delete")),
+                RunnerEnvironment.state != "deleted",
             )
             .limit(1)
         )
-        if live is not None:
+        snapshot = await self.db.scalar(
+            select(RunnerSnapshot.id)
+            .join(RunnerEnvironment, RunnerSnapshot.environment_id == RunnerEnvironment.id)
+            .where(RunnerEnvironment.host_id == host.id, RunnerSnapshot.status != "deleted")
+            .limit(1)
+        )
+        if live is not None or snapshot is not None:
             raise ApiError(
                 409,
                 "RUNNER_HAS_ENVIRONMENTS",
-                "还有没删除的环境；先在“环境”里删掉（或归档），再移除容器服务器",
+                "还有保有或结果未知的环境、快照；完成确认清理后再移除容器服务器",
             )
         await self.audit.record(
             "runner.host_removed",
@@ -357,15 +404,31 @@ class RunnerHosts:
         return host
 
     async def check_in(self, host: RunnerHost, body: RunnerPoll) -> None:
+        # Serialize telemetry invalidation with report sampling and admission;
+        # otherwise an older authenticated row could overwrite a newer report.
+        await self.db.refresh(host, with_for_update={"key_share": True})
         was = host.status
         host.agent_version = body.agent_version
         host.docker_version = body.docker_version
         host.runtimes = list(body.runtimes)
         host.kvm = body.kvm
-        host.cpus = body.cpus
-        host.mem_bytes = body.mem_bytes
-        host.disk_bytes = body.disk_bytes
-        host.disk_free_bytes = body.disk_free_bytes
+        if all(
+            value is not None
+            for value in (body.cpus, body.mem_bytes, body.disk_bytes, body.disk_free_bytes)
+        ):
+            host.cpus = body.cpus
+            host.mem_bytes = body.mem_bytes
+            host.disk_bytes = body.disk_bytes
+            host.disk_free_bytes = body.disk_free_bytes
+        else:
+            # Keep prior readings for display, but never renew capacity from
+            # unknown telemetry. A subsequent poll cannot restore freshness:
+            # only another complete, identity-verified report may do that.
+            host.report = {
+                **(host.report or {}),
+                "capacity_sampled_at": None,
+                "capacity_error": "METRICS_UNKNOWN",
+            }
         host.last_seen_at = specs.now()
         if host.status in ("pending", "offline"):
             host.status = "online"
@@ -420,6 +483,7 @@ class RunnerHosts:
         self, host: RunnerHost, command_id: uuid.UUID, body: RunnerCommandResult
     ) -> bool:
         """回报结果；同一条指令重复回报只认第一次。返回是否采用。"""
+        host = await self._lock_report_host(host)
         command = await self.db.scalar(
             select(RunnerCommand)
             .where(RunnerCommand.id == command_id, RunnerCommand.host_id == host.id)
@@ -433,8 +497,52 @@ class RunnerHosts:
         host.last_seen_at = specs.now()
         return True
 
+    async def _lock_report_host(self, host: RunnerHost) -> RunnerHost:
+        # Non-key telemetry writes serialize with admission and deletion while
+        # allowing foreign-key checks from lifecycle commands.
+        current = await self.db.scalar(
+            select(RunnerHost)
+            .where(
+                RunnerHost.id == host.id,
+                RunnerHost.token_hash == host.token_hash,
+                RunnerHost.status != "disabled",
+            )
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
+        if current is None:
+            raise unauthorized()
+        return current
+
+    async def begin_report(self, host: RunnerHost) -> RunnerReportSample:
+        host = await self._lock_report_host(host)
+        sample_id = uuid.uuid4()
+        host.runtime_metadata = {
+            **(host.runtime_metadata or {}),
+            "report_sample_id": str(sample_id),
+            "report_sample_started_at": specs.now().isoformat(),
+        }
+        return RunnerReportSample(sample_id=sample_id)
+
     async def report(self, host: RunnerHost, body: RunnerReport) -> RunnerReportResult:
+        host = await self._lock_report_host(host)
         received = specs.now()  # 这份报告里各项读数的“平台收到时间”（不信 agent 的时钟）
+        sampled = accept_report_sample(host, body, received)
+        from app.domain.physical_hosts import claim_physical_host
+
+        placement_error = None
+        if sampled is None or body.physical_host_id is None:
+            placement_error = "PHYSICAL_IDENTITY_REQUIRED"
+        elif not await claim_physical_host(
+            self.db,
+            body.physical_host_id,
+            workspace_id=host.workspace_id,
+            role="runner",
+            server_id=host.id,
+        ):
+            placement_error = "PHYSICAL_HOST_CONFLICT"
+        if placement_error is not None:
+            sampled = None
         host.last_seen_at = received
         host.report = {
             "containers": len(body.containers),
@@ -450,8 +558,17 @@ class RunnerHosts:
             "containers_bytes": body.containers_bytes,
             "load": body.load,
             "at": specs.now().isoformat(),
+            "capacity_sampled_at": sampled.isoformat() if sampled else None,
+            "physical_host_id": body.physical_host_id,
+            "physical_identity_verified": placement_error is None,
+            "placement_error": placement_error,
         }
         host.disk_free_bytes = body.disk_free_bytes or host.disk_free_bytes
+        if placement_error is not None:
+            # This can be a duplicate registration of another pool's machine.
+            # Telemetry is useful, but never order its containers stopped as
+            # "stray" or alter allocation state without a verified identity.
+            return RunnerReportResult(lost=[], stray=[])
         envs = {
             e.id: e
             for e in await self.db.scalars(
@@ -467,7 +584,7 @@ class RunnerHosts:
             await self.db.scalars(
                 select(RunnerCommand.environment_id).where(
                     RunnerCommand.host_id == host.id,
-                    RunnerCommand.status.in_(("pending", "sent")),
+                    RunnerCommand.status.in_(("pending", "sent", "unknown")),
                     RunnerCommand.environment_id.is_not(None),
                 )
             )
@@ -475,17 +592,40 @@ class RunnerHosts:
         lost: list[uuid.UUID] = []
         for env in envs.values():
             container = containers.get(env.id)
+            reserved = (env.runtime_metadata or {}).get("compute_reserved_at")
+            can_reconcile = reserved is None or (
+                sampled is not None and sampled.isoformat() > str(reserved)
+            )
             # 资源读数（T-0185）：只写本主机的环境；与状态对账互不影响
             runner_metrics.apply_container_reading(env, container, received)
-            if container is not None:
+            if container is not None and can_reconcile:
                 running = container.state == "running"
-                if env.state == "running" and not running and env.id not in busy:
-                    env.state = "stopped"
-                    env.stopped_at = env.stopped_at or specs.now()
-                    env.state_reason = env.state_reason or f"容器已退出（{container.state}）"
+                stopped = container.state in ("exited", "created")
+                if env.id not in busy and env.state in ("creating", "failed", "running", "stopped"):
+                    if running:
+                        env.state = "running"
+                    elif stopped:
+                        env.state = "stopped"
+                        env.stopped_at = env.stopped_at or specs.now()
+                    else:
+                        env.state = "failed"
+                    env.state_reason = (
+                        "已通过服务器报告确认容器存在"
+                        if running or stopped
+                        else f"容器状态尚未确认停止（{container.state}）；保留计算预约"
+                    )
+                if env.id not in busy:
+                    env.runtime_metadata = {
+                        **(env.runtime_metadata or {}),
+                        "compute_stopped": stopped,
+                        "compute_observed_at": sampled.isoformat() if sampled else None,
+                        "compute_memory_working_set_bytes": (
+                            container.memory_working_set_bytes if sampled else None
+                        ),
+                    }
             if env.id in volumes:
                 runner_metrics.apply_volume_reading(env, volumes[env.id].bytes, received)
-            if env.id in busy or env.state not in EXPECT_CONTAINER:
+            if not can_reconcile or env.id in busy or env.state not in EXPECT_CONTAINER:
                 continue
             if container is None:
                 lost.append(env.id)

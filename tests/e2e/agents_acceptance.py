@@ -1786,7 +1786,17 @@ class RunnerSite:
             # 没上线时 install.sh 的输出是唯一线索（agent 自己的日志在场景结束时打印）
             print(f"install.sh 退出码 {out.returncode}，输出末尾：\n{log}", file=sys.stderr)
             raise
-        return online, log
+        # Online proves polling works; only the first signed resource report
+        # makes this registration eligible for placement. Never fake its capacity.
+        def eligible() -> dict[str, Any] | None:
+            candidates = c.owner.call("GET", "/api/v1/runner/hosts/candidates")["items"]
+            candidate = next((item for item in candidates if item["id"] == online["id"]), None)
+            if not candidate or not candidate["eligible"]:
+                raise RuntimeError(f"资源报告尚不可调度：{candidate}")
+            return candidate
+
+        wait_for("运行服务器可信资源报告可调度", eligible, timeout=240, interval=3)
+        return c.owner.call("GET", "/api/v1/runner/overview")["host"], log
 
     def env(self, env_id: str) -> dict[str, Any]:
         items = self.c.owner.call("GET", f"/api/v1/runner/environments?include_deleted=true&instance_id={self.c.a.id}")["items"]
@@ -1873,8 +1883,11 @@ def scenario_26(c: Ctx) -> None:
         # 1. 模板：甲自己定义（镜像、安装步骤），在运行服务器上构建
         saved = mcp_call(c.a, "runner_template_save", {
             "name": f"py-{tag}", "description": "验收：一次性测试",
-            "spec": {"image": image, "steps": [f"RUN echo built-{tag} > /built.txt"], "lifetime": "once"},
+            "spec": {"image": image, "steps": [f"RUN echo built-{tag} > /built.txt"], "lifetime": "once",
+                     "cpus": 0.25, "memory_mb": 512, "disk_gb": 2},
             "wait_seconds": 50})
+        if tool_code(saved):
+            raise AssertionError(f"模板保存失败：{json.dumps(saved, ensure_ascii=False)}")
         template = wait_for("模板构建完成", lambda: (lambda t: t if t and t["build_status"] in ("ready", "failed") else None)(
             next((t for t in structured(mcp_call(c.a, "runner_templates", {})).get("items", [])
                   if t["name"] == f"py-{tag}"), None)), timeout=300, interval=5)
@@ -1908,7 +1921,8 @@ def scenario_26(c: Ctx) -> None:
         issue = c.owner.call("POST", f"/api/v1/projects/{project['id']}/issues", {
             "title": f"复现 bug {tag}", "body": "在环境里复现。", "kind": "bug"})
         body = {"purpose": f"复现 Issue {tag}", "lifetime": "session",
-                "spec": {"image": image, "network": "allowlist", "domains": ["pypi.org"]},
+                "spec": {"image": image, "network": "allowlist", "domains": ["pypi.org"],
+                         "cpus": 0.25, "memory_mb": 512, "disk_gb": 2},
                 "reuse_key": f"issue-{tag}", "delete_when": [f"issue_closed:{issue['id']}"]}
         created = structured(mcp_call(c.a, "env_create", body))
         session_id = created["environment"]["id"]
@@ -1949,7 +1963,8 @@ def scenario_26(c: Ctx) -> None:
         # 4. 常驻环境（runc）：停止后再用自动启动；归档后再用从快照重建、重放初始化步骤
         made = structured(mcp_call(c.a, "env_create", {
             "purpose": f"常驻服务 {tag}", "lifetime": "persistent", "reuse_key": f"svc-{tag}",
-            "spec": {"image": image, "runtime": "runc", "persist": ["data"]}}))
+            "spec": {"image": image, "runtime": "runc", "persist": ["data"],
+                     "cpus": 1, "memory_mb": 512, "disk_gb": 2}}))
         keep_id = made["environment"]["id"]
         site.wait_state(keep_id, "running")
         wrote = site.exec(keep_id, f"uname -r; mkdir -p data && echo kept-{tag} > data/note.txt")
@@ -2009,11 +2024,27 @@ def scenario_26(c: Ctx) -> None:
                 json.dumps({"run": rebuilt.get("status"), "output": (rebuilt.get("untrusted") or {}).get("output", "")[-200:],
                             "state": after.get("state")}, ensure_ascii=False))
 
+        # All restore assertions are complete. Let the normal retention worker
+        # remove test snapshots before releasing this physical host for later CI jobs.
+        current_host = c.owner.call("GET", "/api/v1/runner/overview")["host"]
+        c.owner.call("PUT", "/api/v1/runner/host/policy",
+                     {"version": current_host["version"], "policy": {**current_host["policy"], "archive_retention_days": 0}})
         current = site.env(keep_id)
         c.owner.call("POST", f"/api/v1/runner/environments/{keep_id}/actions", {"action": "delete", "version": current["version"]})
         removed = site.wait_state(keep_id, "deleted", timeout=300)
         c.check("场景 26：管理员删除常驻环境后容器不在，记录保留",
                 removed.get("state") == "deleted" and not env_containers(keep_id), removed.get("state_reason") or "")
+        wait_for("验收快照由回收器清理", lambda: sql(
+            "SELECT count(*) FROM workspace.runner_snapshots s JOIN workspace.runner_environments e"
+            f" ON e.id=s.environment_id WHERE e.host_id='{host['id']}' AND s.status != 'deleted'") == "0",
+            timeout=180, interval=3)
+        # Stop the real agent, then use the public removal guard; no ledger or
+        # allocation records are rewritten to pretend that cleanup succeeded.
+        run("docker", "compose", "-f", str(site.dir / "compose.yaml"), "down", cwd=site.dir, timeout=180)
+        current_host = c.owner.call("GET", "/api/v1/runner/overview")["host"]
+        c.owner.call("DELETE", f"/api/v1/runner/hosts/{host['id']}?version={current_host['version']}")
+        c.check("场景 26：全部环境与快照清理后移除登记，释放物理服务器身份供后续验收使用",
+                c.owner.call("GET", "/api/v1/runner/overview")["host"] is None)
         finished = True
     finally:
         # 中途抛异常（例如 agent 没上线）时失败还没记进 report，也要打出 agent 日志

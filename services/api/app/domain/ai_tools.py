@@ -354,6 +354,19 @@ class AiToolService:
         request_id: str | None = None,
     ) -> PendingApproval:
         """写工具 / 高危工具：只建待审批记录，不执行（A14）。"""
+        if spec.name == "runner_request_capability":
+            from app.domain.runner_capabilities import RunnerCapabilityService
+
+            try:
+                parsed = spec.input_model.model_validate(raw)
+            except ValidationError as error:
+                raise ToolCallError("VALIDATION_FAILED", validation_message(error)) from None
+            result = await RunnerCapabilityService(self.db, self.settings, self.redis).request(
+                requester.instance, **parsed.model_dump()
+            )
+            await self.db.commit()
+            await self._enqueue_cards(result.action_id)
+            return result
         try:
             parsed = spec.input_model.model_validate(raw)
         except ValidationError as error:
@@ -779,6 +792,13 @@ class AiToolService:
         reason: str,
     ) -> AiToolExecution:
         row = await self._locked(access, execution_id)
+        if row.tool_name == "runner_request_capability":
+            from app.domain.policy import require_role
+
+            await require_role(
+                self.db, user_id=context.user.id, workspace_id=row.workspace_id, minimum=Role.owner
+            )
+
         try:
             await self._decidable(row, if_match)
         except ApiError:
@@ -809,6 +829,12 @@ class AiToolService:
         except ApiError:
             await self.db.commit()
             raise
+        if row.tool_name == "runner_request_capability":
+            from app.domain.policy import require_role
+
+            await require_role(
+                self.db, user_id=context.user.id, workspace_id=row.workspace_id, minimum=Role.owner
+            )
         if row.risk_level == "critical":
             await self._step_up(context, body)
         instance = await self.db.get(AgentInstance, row.instance_id) if row.instance_id else None
@@ -839,6 +865,19 @@ class AiToolService:
         self, approver: AuthContext, row: AiToolExecution, instance: AgentInstance | None
     ) -> tuple[str, str | None, str | None]:
         """以登记人的身份执行；返回 (状态, 结果说明, 错误码)。"""
+        if row.tool_name == "runner_request_capability":
+            if not self.arguments_intact(row):
+                return "failed", "参数与发起时不一致", "ARGUMENTS_TAMPERED"
+            from app.domain.runner_capabilities import RunnerCapabilityService
+
+            try:
+                summary = await RunnerCapabilityService(
+                    self.db, self.settings, self.redis
+                ).approve_execution(approver, row, instance)
+            except ApiError as error:
+                await self.db.rollback()
+                return "failed", error.message, error.code
+            return "succeeded", summary, None
         spec = TOOLS.get(row.tool_name)
         executor = _EXECUTORS.get(row.tool_name)
         if spec is None or executor is None:

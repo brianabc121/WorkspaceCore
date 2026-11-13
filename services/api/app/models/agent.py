@@ -446,6 +446,7 @@ class AgentDeployment(Base):
     server_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspace.agent_servers.id", ondelete="RESTRICT")
     )
+    selection: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     install_dir: Mapped[str | None] = mapped_column(Text)
     installed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     runtime_installed: Mapped[bool | None] = mapped_column(Boolean)

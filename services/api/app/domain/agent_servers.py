@@ -28,11 +28,12 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, NoReturn
+from math import isfinite
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from pydantic import BaseModel, SecretStr
 from redis.asyncio import Redis
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,7 +42,7 @@ from app import agent_provisioning as prov
 from app.agent_bundle import project_name
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.domain import agent_server_ssh, idempotency
+from app.domain import agent_server_resources, agent_server_ssh, idempotency
 from app.domain.agent_server_credentials import (
     ServerCredentialError,
     credential_required,
@@ -61,6 +62,7 @@ from app.domain.agent_ssh_install import job_steps
 from app.domain.audit import AuditTrail
 from app.domain.credentials import CredentialBox, CredentialError
 from app.domain.host_metrics import STALE_AFTER, HostService, _percent_used, drop_if_empty_auto
+from app.domain.placement import Candidate, PlacementError, ResourceRequest, rank_candidates
 from app.domain.policy import WorkspaceAccess
 from app.domain.ratelimit import WindowLimiter
 from app.integrations import ssh
@@ -106,6 +108,7 @@ from app.schemas.agents import (
     UnassignedInstance,
 )
 from app.schemas.host import HostRange
+from app.schemas.placement import Placement
 
 if TYPE_CHECKING:
     from app.domain.agent_ssh_install import SshJobRunner
@@ -262,6 +265,7 @@ def _server_out(
         name=server.name,
         kind="ssh" if server.kind == "ssh" else "auto",
         ssh=_ssh_out(target, readable) if target is not None else None,
+        resource_snapshot=server.resource_snapshot or None,
         reported_at=server.reported_at,
         stale=server.reported_at is None or now - server.reported_at > STALE_AFTER,
         cores=latest.get("cores"),
@@ -365,8 +369,29 @@ def _legacy_key_present(target: AgentSshTarget) -> bool:
     return target.client_key_ref is not None or bool(target.client_public_key)
 
 
+def _has_resource_commitment(deployment: AgentDeployment) -> bool:
+    values = deployment.selection or {}
+    try:
+        return all(
+            isfinite(float(values[key])) and float(values[key]) > 0
+            for key in ("cpus", "memory_mb", "disk_gb")
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _legacy_reconciliation() -> ApiError:
+    return ApiError(
+        409,
+        "LEGACY_RESOURCE_RECONCILIATION_REQUIRED",
+        "旧部署缺少可信的实际资源账本：请先通过受信 Docker 检查核对资源，"
+        "或确认容器已卸载后重试；实例与数据会保留",
+    )
+
+
 def deployment_out(deployment: AgentDeployment) -> AgentDeploymentOut:
     return AgentDeploymentOut(
+        selection=deployment.selection or None,
         server_id=deployment.server_id,
         install_dir=deployment.install_dir,
         installed_at=deployment.installed_at,
@@ -1122,6 +1147,7 @@ class AgentServerService:
         if await self._busy(target):
             raise _job_running()
         await self._duplicate(access, address, body.port, body.username, skip=target.id)
+        server.resource_snapshot = {}
         target.host = body.host
         target.address = address
         target.port = body.port
@@ -1625,6 +1651,233 @@ class AgentServerService:
         await self.db.delete(server)
         await self.db.commit()
 
+    async def placement_candidate(
+        self,
+        server: AgentServer,
+        *,
+        disk_gb: float,
+        exclude_instance_id: uuid.UUID | None = None,
+    ) -> Candidate:
+        """Caller holds server row lock through reservation commit."""
+        snap = server.resource_snapshot or {}
+        if snap.get("physical_identity_verified") is not True:
+            raise ApiError(
+                409, "PHYSICAL_IDENTITY_REQUIRED", "请先核对服务器身份，避免重复计算容量"
+            )
+        if not agent_server_resources.is_fresh(
+            snap, _now(), self.settings.agent_placement_metrics_max_age_seconds
+        ):
+            raise ApiError(409, "METRICS_STALE", "服务器资源指标未知或过期：请刷新资源后重试")
+        if not snap.get("runtime_ready") or not snap.get("network_ready"):
+            raise ApiError(409, "TARGET_UNAVAILABLE", "服务器运行时或网络未就绪")
+        all_rows = (
+            await self.db.execute(
+                select(AgentDeployment, AgentInstance)
+                .select_from(AgentInstance)
+                .outerjoin(AgentDeployment, AgentInstance.id == AgentDeployment.instance_id)
+                .where(
+                    or_(
+                        AgentDeployment.server_id == server.id, AgentInstance.server_id == server.id
+                    )
+                )
+            )
+        ).all()
+        rows = [row for row in all_rows if row[1].id != exclude_instance_id]
+        if any(instance.cpus is None or instance.mem_limit_mb is None for _, instance in rows):
+            raise ApiError(
+                409,
+                "UNACCOUNTED_LEGACY_RESOURCES",
+                "服务器有旧的无限资源实例：先核对并设置有限资源，再部署",
+            )
+        for deployment, _ in rows:
+            if deployment is None or (
+                deployment.runtime_installed is not False
+                and not _has_resource_commitment(deployment)
+            ):
+                raise _legacy_reconciliation()
+        cpu = memory = disk = pending_memory = pending_disk = 0.0
+        measured_memory = 0.0
+        measured = "managed_identities" in snap and "managed_usage" in snap
+        usage = {item["id"]: item["memory"] for item in snap.get("managed_usage", [])}
+        observed = datetime.fromisoformat(snap["sampled_at"])
+        for deployment, instance in rows:
+            receipt = (deployment.selection or {}) if deployment is not None else {}
+            # Do not free a previously accepted promise because an owner
+            # changed desired limits without redeploying its actual runtime.
+            assert instance.cpus is not None and instance.mem_limit_mb is not None  # noqa: S101
+            allocated_cpu = max(instance.cpus, float(receipt.get("cpus", 0)))
+            allocated_memory = max(instance.mem_limit_mb, int(receipt.get("memory_mb", 0)))
+            allocated_disk = float(receipt.get("disk_gb", disk_gb))
+            cpu += allocated_cpu
+            memory += allocated_memory
+            disk += allocated_disk
+            if (
+                deployment is None
+                or deployment.runtime_installed is not True
+                or deployment.installed_at is None
+                or deployment.installed_at > observed
+            ):
+                pending_memory += allocated_memory
+                pending_disk += allocated_disk
+            elif measured:
+                identities = [
+                    item
+                    for item in snap["managed_identities"]
+                    if item["project"] == project_name(str(instance.id))
+                    and item["directory"] == deployment.install_dir
+                ]
+                if len(identities) > 1:
+                    measured = False
+                elif identities:
+                    credit = agent_server_resources.docker_memory_credit(
+                        usage.get(identities[0]["id"], "")
+                    )
+                    if credit is None:
+                        measured = False
+                    else:
+                        measured_memory += min(allocated_memory, credit / (1 << 20))
+        return Candidate(
+            server_id=server.id,
+            cpus=float(snap["cores"]),
+            memory_mb=snap["mem_total"] / (1 << 20),
+            disk_gb=min(snap["root_total"], snap["data_total"]) / (1 << 30),
+            available_memory_mb=snap["mem_available"] / (1 << 20),
+            disk_free_gb=min(snap["root_free"], snap["data_free"]) / (1 << 30),
+            cpu_load=max(snap["cpu_percent"] / 100, snap["load1"] / snap["cores"]),
+            committed_cpus=cpu,
+            committed_memory_mb=memory,
+            committed_disk_gb=disk,
+            pending_memory_mb=pending_memory,
+            pending_disk_gb=pending_disk,
+            observed_committed_memory_mb=measured_memory if measured else None,
+            observed_at=observed,
+        )
+
+    async def refresh_resource_snapshots(
+        self, access: WorkspaceAccess, server_ids: list[uuid.UUID], *, force: bool = False
+    ) -> dict[uuid.UUID, str]:
+        """Network reads happen before admission, outside its row-lock transaction.
+
+        Read scoped targets, detach immutable credential/identity inputs, release
+        the read transaction, probe at most four hosts concurrently, then apply
+        newer results under short row locks. A failed probe clears no reservation
+        and never installs an all-zero fallback.
+        """
+        pending: list[tuple[uuid.UUID, AgentSshTarget, tuple[object, ...], str]] = []
+        errors: dict[uuid.UUID, str] = {}
+        for server_id in sorted(server_ids, key=lambda value: value.int):
+            server = await self._server(access, server_id, lock=True)
+            if (
+                not force
+                and (server.resource_snapshot or {}).get("physical_identity_verified") is True
+                and agent_server_resources.is_fresh(
+                    server.resource_snapshot or {},
+                    _now(),
+                    self.settings.agent_placement_metrics_max_age_seconds,
+                )
+            ):
+                continue
+            server.resource_snapshot = {
+                **(server.resource_snapshot or {}),
+                "probe_attempted_at": _now().isoformat(),
+            }
+            target = await self._target(server)
+            if target is None:
+                server.resource_snapshot = {
+                    **server.resource_snapshot,
+                    "probe_error": "unavailable",
+                }
+                errors[server_id] = "TARGET_UNAVAILABLE"
+                continue
+            try:
+                self._require_password(target)
+                if target.host_key_confirmed_at is None or target.prepared_at is None:
+                    errors[server_id] = "TARGET_UNAVAILABLE"
+                    continue
+            except ApiError:
+                errors[server_id] = "TARGET_UNAVAILABLE"
+                continue
+            identity = _connection_snapshot(target)
+            self.db.expunge(target)
+            pending.append(
+                (server_id, target, identity, server.resource_snapshot["probe_attempted_at"])
+            )
+        # expire_on_commit=False preserves the request's WorkspaceAccess; rollback
+        # would expire those ORM objects before the business transaction starts.
+        await self.db.commit()
+        if not pending:
+            return errors
+        box = self._require_box()
+        semaphore = asyncio.Semaphore(4)
+
+        async def sample(target: AgentSshTarget) -> dict[str, Any] | None:
+            async with semaphore:
+                try:
+                    return await agent_server_resources.probe_resources(target, box)
+                except (ValueError, ServerCredentialError):
+                    return None
+
+        values = await asyncio.gather(*(sample(target) for _, target, _, _ in pending))
+        for (server_id, _, identity, attempted_at), snapshot in sorted(
+            zip(pending, values, strict=True), key=lambda item: item[0][0].int
+        ):
+            server = await self._server(access, server_id, lock=True)
+            target = await self._target(server, lock=True)
+            if snapshot is None or target is None or _connection_snapshot(target) != identity:
+                if (server.resource_snapshot or {}).get("probe_attempted_at") != attempted_at:
+                    continue
+                server.resource_snapshot = {
+                    **(server.resource_snapshot or {}),
+                    "probe_error": "unavailable",
+                }
+                errors[server_id] = "METRICS_STALE"
+                continue
+            if agent_server_resources.newer_snapshot(server.resource_snapshot or {}, snapshot):
+                from app.domain.physical_hosts import claim_physical_host
+
+                if not await claim_physical_host(
+                    self.db,
+                    snapshot["physical_host_id"],
+                    workspace_id=server.workspace_id,
+                    role="agent",
+                    server_id=server_id,
+                ):
+                    server.resource_snapshot = {
+                        **(server.resource_snapshot or {}),
+                        "probe_error": "PHYSICAL_HOST_CONFLICT",
+                    }
+                    errors[server_id] = "PHYSICAL_HOST_CONFLICT"
+                    continue
+                server.resource_snapshot = {
+                    **snapshot,
+                    "physical_identity_verified": True,
+                    "probe_attempted_at": snapshot["sampled_at"],
+                }
+        await self.db.commit()
+        return errors
+
+    async def refresh_resources(
+        self, access: WorkspaceAccess, server_id: uuid.UUID, *, client_ip: str
+    ) -> AgentServerDetail:
+        await self._check_probe_rate(access)
+        errors = await self.refresh_resource_snapshots(access, [server_id], force=True)
+        if errors:
+            if errors.get(server_id) == "PHYSICAL_HOST_CONFLICT":
+                raise ApiError(
+                    409, "PHYSICAL_HOST_CONFLICT", "同一服务器已在其他位置登记，请先移除重复登记"
+                )
+            raise ApiError(503, "METRICS_STALE", "独立资源探测失败；未更新容量数据")
+        await self.audit.record(
+            "agents.server.resources_refreshed",
+            workspace_ids=[access.workspace.id],
+            actor_id=access.user_id,
+            resource_type="agent_server",
+            resource_id=server_id,
+            client_ip=client_ip,
+        )
+        await self.db.commit()
+        return await self.detail(access, server_id)
+
     # ---------------------------------------------------------------- 实例
 
     def capacity_warning(self, server: AgentServer) -> str | None:
@@ -1759,11 +2012,80 @@ class AgentServerService:
         忽略、不回显）；服务器要已初始化、可以部署（与一次点击新建并部署同一套接纳逻辑）。
         """
         self.ready_to_run()
+        instance = await self._instance(access, instance_id)
+        if body.version != instance.version:
+            raise _version_conflict(instance.version)
+        current = await self.db.scalar(
+            select(AgentDeployment).where(AgentDeployment.instance_id == instance_id)
+        )
+        if current is not None and current.server_id != body.server_id:
+            raise ApiError(
+                409,
+                "AGENT_DEPLOYED_ELSEWHERE",
+                "这个实例已经部署在另一台服务器上：先卸载",
+                details={"server_id": str(current.server_id)},
+            )
+        if (
+            current is not None
+            and current.runtime_installed is not False
+            and not _has_resource_commitment(current)
+        ):
+            raise _legacy_reconciliation()
+        if instance.cpus is None or instance.mem_limit_mb is None:
+            raise ApiError(
+                409,
+                "UNACCOUNTED_LEGACY_RESOURCES",
+                "旧实例的资源不受限：请核对并设置有限 CPU/内存后重新部署；不会自动修改旧实例",
+            )
+        await self.refresh_resource_snapshots(access, [body.server_id])
         instance = await self._instance(access, instance_id, lock=True)
         if body.version != instance.version:
             raise _version_conflict(instance.version)
         server = await self._server(access, body.server_id, lock=True)
+        await self.deployable_target(server)
+        candidate = await self.placement_candidate(
+            server, disk_gb=self.settings.agent_placement_disk_gb, exclude_instance_id=instance.id
+        )
+        assert instance.cpus is not None and instance.mem_limit_mb is not None  # noqa: S101
+        try:
+            rank_candidates(
+                [candidate],
+                ResourceRequest(
+                    instance.cpus, instance.mem_limit_mb, self.settings.agent_placement_disk_gb
+                ),
+                Placement(mode="specified", server_id=server.id),
+                _now(),
+            )
+        except PlacementError as error:
+            raise ApiError(
+                409, error.code, error.message, details={"reasons": error.reasons}
+            ) from error
         job, revision = await self.accept_deployment(access, instance, server, client_ip=client_ip)
+        deployment = await self.db.scalar(
+            select(AgentDeployment).where(AgentDeployment.instance_id == instance_id)
+        )
+        assert deployment is not None  # noqa: S101 - accept_deployment creates it
+        previous = deployment.selection or {}
+        deployment.selection = {
+            "requested_mode": "specified",
+            "requested_server_id": str(server.id),
+            **(deployment.selection or {}),
+            "actual_server_id": str(server.id),
+            "reservation_id": str(deployment.id),
+            "metrics_at": server.resource_snapshot["sampled_at"],
+            # Acceptance/failure never proves the previous runtime disappeared.
+            # Keep the larger promise until authoritative runtime observation.
+            "cpus": max(instance.cpus, float(previous.get("cpus", 0))),
+            "memory_mb": max(instance.mem_limit_mb, int(previous.get("memory_mb", 0))),
+            "disk_gb": max(
+                self.settings.agent_placement_disk_gb, float(previous.get("disk_gb", 0))
+            ),
+            "desired_cpus": instance.cpus,
+            "desired_memory_mb": instance.mem_limit_mb,
+            "desired_disk_gb": self.settings.agent_placement_disk_gb,
+            "status": "reserved",
+            "reason_code": None,
+        }
         warning = self.capacity_warning(server)
         await self.commit_job(job)
         self.launch(job, revision=revision, client_ip=client_ip)

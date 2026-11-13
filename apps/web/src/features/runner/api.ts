@@ -95,7 +95,10 @@ export function runnerError(error: unknown): string {
   if (!(error instanceof ApiError)) return '请求失败，请稍后重试。'
   const messages: Record<string, string> = {
     VERSION_CONFLICT: '已被其他人修改，请刷新后再操作。',
-    RUNNER_EXISTS: '这个工作空间已经有一台容器服务器了。',
+    RUNNER_HOST_AMBIGUOUS: '请选择具体的容器服务器后再操作。',
+    PLACEMENT_UNAVAILABLE: '没有满足条件的服务器，请查看节点排除原因。',
+    PLACEMENT_TARGET_UNAVAILABLE: '指定服务器暂不可用；不会自动换机。',
+    PLACEMENT_CAPACITY_INSUFFICIENT: '指定服务器资源不足；请选择其他节点或主动切换自动分配。',
     RUNNER_HAS_ENVIRONMENTS: '还有没删除的环境：先在“容器总览”里删除，再移除容器服务器。',
     AGENT_INGRESS_NOT_CONFIGURED: '这个入口还没有配置（AGENT_INTRANET_URL / AGENT_PUBLIC_URL），不能接入容器服务器。',
     ENV_UNAVAILABLE: error.message || '环境现在的状态做不了这个操作。',
@@ -169,7 +172,7 @@ export const POLICY_FIELDS: { key: string; label: string; group: string; step?: 
 ]
 
 export const LIMIT_FIELDS: { key: string; label: string; step?: number }[] = [
-  { key: 'envs', label: '同时运行的环境' },
+  { key: 'envs', label: '保有环境总数（含停止、未知、待删除）' },
   { key: 'persistent', label: '其中常驻' },
   { key: 'memory_mb', label: '内存合计（MB）' },
   { key: 'cpus', label: 'CPU 合计（核）', step: 0.5 },
@@ -184,10 +187,10 @@ function csrf() {
 }
 
 // 接入包是 zip（容器服务器凭证只出现在这一次下载里），用 fetch 下载交给浏览器
-export async function downloadRunnerBundle(scope: string): Promise<string> {
+export async function downloadRunnerBundle(scope: string, hostId: string): Promise<string> {
   let response: Response
   try {
-    response = await fetch(new Request(`${window.location.origin}/api/v1/runner/host/bundle`, {
+    response = await fetch(new Request(`${window.location.origin}/api/v1/runner/hosts/${encodeURIComponent(hostId)}/bundle`, {
       method: 'POST', credentials: 'same-origin', headers: { 'X-Workspace-Id': scope, 'X-CSRF-Token': csrf() },
     }))
   } catch { throw new ApiError(0, 'WRITE_UNKNOWN', '请求未完成') }

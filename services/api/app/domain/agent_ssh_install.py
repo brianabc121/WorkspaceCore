@@ -380,6 +380,24 @@ class Installer:
         """专用公钥在 authorized_keys 里的注释（运行服务器的子类覆盖）。"""
         return f"myworkspace-{str(self.target.instance_id)[:8]}"
 
+    async def _physical_identity(self, conn: asyncssh.SSHClientConnection) -> str:
+        from app.domain.physical_host_probe import PHYSICAL_ID_SCRIPT
+
+        result = await self._run(
+            conn,
+            "核对物理服务器身份",
+            "sh -s",
+            stdin=PHYSICAL_ID_SCRIPT,
+            seconds=15,
+        )
+        identity = result.stdout.strip()
+        if not result.ok or re.fullmatch(r"[0-9a-f]{64}", identity) is None:
+            raise InstallFailed(
+                "physical_identity_unavailable",
+                "无法核对服务器身份；尚未更改远程部署",
+            )
+        return identity
+
     def _box(self) -> CredentialBox:
         try:
             return CredentialBox.from_settings(self.settings)
@@ -567,6 +585,33 @@ class AgentServerInstaller(Installer):
 
     # ---------------------------------------------------------------- 初始化
 
+    async def _claim_physical(self, conn: asyncssh.SSHClientConnection) -> None:
+        from app.domain.physical_hosts import claim_physical_host
+        from app.models import AgentServer
+
+        identity = await self._physical_identity(conn)
+        async with self.sessionmaker() as db:
+            server = await db.get(AgentServer, self.target.server_id, with_for_update=True)
+            target = await db.get(AgentSshTarget, self.target.target_id, with_for_update=True)
+            if server is None or target is None:
+                raise JobGone
+            if not self._unchanged(target):
+                raise InstallFailed("target_changed", "服务器在核对期间发生变化，已停止")
+            if target.credential_revision != self.revision:
+                raise _credential_failed(credential_changed())
+            if not await claim_physical_host(
+                db,
+                identity,
+                workspace_id=server.workspace_id,
+                role="agent",
+                server_id=server.id,
+            ):
+                raise InstallFailed(
+                    "physical_host_conflict",
+                    "服务器已在其他位置登记；尚未更改远程部署",
+                )
+            await db.commit()
+
     async def prepare(self) -> None:
         """初始化服务器：只准备基础环境与平台受控的部署根目录，不建实例、不发接入包、不装公钥。"""
         self._check_confirmed()
@@ -575,6 +620,7 @@ class AgentServerInstaller(Installer):
             conn = await self._connect_step()
             info = await self._inspect(conn)
             self.home = info.home
+            await self._claim_physical(conn)
             installed = await self._docker(conn, info)
             if installed:
                 # 新会话里 docker 组才生效：断开后重新用密码登录
@@ -746,6 +792,7 @@ class AgentServerInstaller(Installer):
                 "Docker 可以直接使用",
             )
             self.home = info.home
+            await self._claim_physical(conn)
             await self._deploy(conn, info)
         finally:
             if conn is not None:

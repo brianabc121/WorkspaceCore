@@ -67,6 +67,15 @@ async def _deploy(
     owner: Owner, host: FakeHost, instance_id: str, server_id: str, *, password: str | None = None
 ) -> dict[str, Any]:
     version = await owner.instance_version(instance_id)
+    code, limited = await _json(
+        owner,
+        "PUT",
+        f"/api/v1/agents/instances/{instance_id}/limits",
+        json={"cpus": 1, "mem_limit_mb": 2048, "version": version},
+    )
+    assert code == 200, limited
+    assert limited == {"cpus": 1, "mem_limit_mb": 2048}
+    version = await owner.instance_version(instance_id)
     body: dict[str, Any] = {"server_id": server_id, "version": version}
     if password:
         body["password"] = password
@@ -137,11 +146,12 @@ async def test_prepare_once_then_deploy_two_instances(owner: Owner, tmp_path: Pa
         assert host.logins == ["password", "password"] and host.authorized() == []
         assert list((host.home / prov.INSTALL_ROOT_NAME).iterdir()) == []
 
-        # 两个实例部署到同一台服务器：各自用保存的密码登录一次
+        # 两个有限资源实例部署到同一台服务器：各自登录，首次接纳另做一次只读探测。
         second = await owner.instance()
         await _deploy(owner, host, first, server["id"])
         state = await _deploy(owner, host, second, server["id"])
-        assert host.logins == ["password"] * 4, "全程只用密码，没有公钥登录"
+        assert host.logins == ["password"] * 5, "全程只用密码，没有公钥登录"
+        assert len(host.resource_probe_sessions()) == 1
         assert state["deployment"]["server_id"] == server["id"]
         root = host.home / prov.INSTALL_ROOT_NAME
         dirs = sorted(p.name for p in root.iterdir())
@@ -167,7 +177,7 @@ async def test_prepare_once_then_deploy_two_instances(owner: Owner, tmp_path: Pa
         # 部署成功写了 runtime_installed（T-0180）：成功数是确定的
         assert detail["server"]["successful_deployments"] == 2
         assert detail["server"]["deployment_counts_partial"] is False
-        assert detail["server"]["has_unlimited_limits"] is True
+        assert detail["server"]["has_unlimited_limits"] is False
 
         # 已经部署在这台上：不能再部署到另一台
         code, created = await _json(

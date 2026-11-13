@@ -128,6 +128,24 @@ def test_reading_helpers() -> None:
     assert started_generation(None) is None
 
 
+@pytest.mark.parametrize(
+    "stats,expected",
+    [
+        ({"memory_stats": {"usage": 100, "stats": {"inactive_file": 30}}}, 70),
+        ({"memory_stats": {"usage": 100, "stats": {"total_inactive_file": 40}}}, 60),
+        ({"memory_stats": {"usage": 100, "stats": {"inactive_file": 200}}}, None),
+        ({"memory_stats": {"usage": 100}}, None),
+        ({"memory_stats": {}}, None),
+    ],
+)
+def test_capacity_credit_excludes_reclaimable_cache_and_requires_measurement(
+    stats: dict[str, Any], expected: int | None
+) -> None:
+    from app.runner_agent.metrics import memory_working_set_bytes
+
+    assert memory_working_set_bytes(stats) == expected
+
+
 # ------------------------------------------------------------------ 上报协议
 
 
@@ -237,6 +255,8 @@ class FakeWorkspace:
         self.bodies: list[dict[str, Any]] = []
 
     def post(self, path: str, body: dict[str, Any], timeout: float = 30) -> dict[str, Any]:
+        if path == "/report/start":
+            return {"sample_id": str(uuid.uuid4()), "expires_in": 90}
         assert path == "/report"
         self.bodies.append(body)
         return {"lost": [], "stray": []}

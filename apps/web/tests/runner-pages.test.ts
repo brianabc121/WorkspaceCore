@@ -14,12 +14,14 @@ const spec = (over: Partial<Schema['RunnerSpecOut']> = {}): Schema['RunnerSpecOu
   env: {}, secrets: [], persist: [], lifetime: 'session', ...over,
 })
 const host = (over: Partial<Schema['RunnerHostOut']> = {}): Schema['RunnerHostOut'] => ({
+  backend: 'docker', node_name: null, runtime_metadata: {},
   id: 'host-1', name: '运行服务器 A', status: 'online', ingress: 'intranet', token_prefix: 'mwr_abcdefgh', cpus: 16, mem_bytes: 64 * GB, disk_bytes: 500 * GB, disk_free_bytes: 50 * GB,
   kvm: true, runtimes: ['runc'], docker_version: '29.9.1', agent_version: '0.1.0', last_seen_at: at,
   report: { mem_bytes: 64 * GB, mem_free_bytes: 40 * GB, disk_bytes: 500 * GB, disk_free_bytes: 50 * GB, images_bytes: 30 * GB, containers_bytes: 5 * GB, volumes_bytes: 200 * GB, unlabeled_containers: 1, load: 1.5 },
   policy: { session_idle_minutes: 15, mem_high: 0.85, disk_high: 0.8, disk_emergency: 0.95, snapshot_max_gb: 5 }, version: 4, created_at: at, ...over,
 })
 const env = (over: Partial<Schema['RunnerEnvAdminOut']> = {}): Schema['RunnerEnvAdminOut'] => ({
+  runtime_backend: 'docker', host_id: 'host-1', placement: {},
   id: 'env-1', untrusted: { purpose: '跑回归测试' }, lifetime: 'session', state: 'running', state_reason: null, template: 'py', reuse_key: null, owner: 'alpha', mine: false,
   runtime: 'gvisor', user: 'user', network: 'none', memory_mb: 2048, cpus: 2, delete_when: [], share: 'none', project_id: null, pinned: false, use_count: 3, created_at: at, last_used_at: at,
   next_step: '空闲 15 分钟后停止', wake_seconds: 2.5, owner_instance_id: 'inst-a', template_id: 'tpl-1', spec: spec(), mem_bytes: 512 * 1024 * 1024, disk_bytes: GB, egress: {},
@@ -56,6 +58,26 @@ function setup(handler?: (r: Request) => Response | undefined, options: { role?:
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('容器服务器页：模板、执行记录与设置', () => {
+  it('lists every host and manages the selected host without using the singular endpoint', async () => {
+    const second = host({ id: 'host-2', name: '运行服务器 B', version: 8 })
+    const requests = setup(r => {
+      if (path(r) === '/api/v1/runner/hosts/host-2/policy') return Response.json({ ...second, version: 9 })
+      if (path(r) === '/api/v1/runner/hosts/host-2/ssh') return Response.json({ target: null, job: null, warning: null })
+      return undefined
+    }, { data: { ...overview({ host: null }), hosts: [host(), second] } as Schema['RunnerOverview'] })
+    await openApp('/runner?tab=settings&host_id=host-2')
+    const hosts = await screen.findByRole('region', { name: '容器服务器池' })
+    expect(within(hosts).getByRole('button', { name: /运行服务器 A/ })).toBeVisible()
+    expect(within(hosts).getByRole('button', { name: /运行服务器 B/ })).toHaveAttribute('aria-pressed', 'true')
+    const form = await screen.findByRole('form', { name: '回收策略' })
+    await fireEvent.update(within(form).getByLabelText('磁盘高水位（0 ~ 1）'), '0.75')
+    await fireEvent.click(within(form).getByRole('button', { name: '保存回收策略' }))
+    await screen.findByText(/已保存回收策略/)
+    const write = requests.find(r => r.method === 'PUT' && path(r) === '/api/v1/runner/hosts/host-2/policy')!
+    expect(await write.clone().json()).toMatchObject({ version: 8 })
+    expect(requests.some(r => /^\/api\/v1\/runner\/host(?:\/|$)/.test(path(r)))).toBe(false)
+    expect(screen.getByRole('form', { name: '添加容器服务器' })).toBeVisible()
+  })
   it('redirects members to forbidden', async () => {
     setup(undefined, { role: 'member' })
     const { router } = await openApp('/runner')
@@ -104,7 +126,7 @@ describe('容器服务器页：模板、执行记录与设置', () => {
   })
 
   it('adds a runner host when there is none', async () => {
-    const requests = setup(r => (path(r) === '/api/v1/runner/host' && r.method === 'POST' ? Response.json(host({ status: 'pending', last_seen_at: null }), { status: 201 }) : undefined),
+    const requests = setup(r => (path(r) === '/api/v1/runner/hosts' && r.method === 'POST' ? Response.json(host({ status: 'pending', last_seen_at: null }), { status: 201 }) : undefined),
       { data: overview({ host: null, environments: {}, instances: [], recent: [] }) })
     await openApp('/runner')
     await fireEvent.click(await screen.findByRole('button', { name: '去添加容器服务器' }))
@@ -112,15 +134,15 @@ describe('容器服务器页：模板、执行记录与设置', () => {
     await fireEvent.update(within(form).getByLabelText('连工作台的入口'), 'public')
     await fireEvent.click(within(form).getByRole('button', { name: '添加' }))
     await screen.findByText(/已添加/)
-    const post = requests.find(r => r.method === 'POST' && path(r) === '/api/v1/runner/host')!
-    expect(await post.clone().json()).toEqual({ name: '容器服务器', ingress: 'public' })
+    const post = requests.find(r => r.method === 'POST' && path(r) === '/api/v1/runner/hosts')!
+    expect(await post.clone().json()).toEqual({ name: '容器服务器', ingress: 'public', backend: 'docker' })
   })
 
   it('saves the reclaim policy with the version and removes the host after confirmation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const requests = setup(r => {
-      if (path(r) === '/api/v1/runner/host/policy') return Response.json(host({ version: 5 }))
-      if (path(r) === '/api/v1/runner/host' && r.method === 'DELETE') return new Response(null, { status: 204 })
+      if (path(r) === '/api/v1/runner/hosts/host-1/policy') return Response.json(host({ version: 5 }))
+      if (path(r) === '/api/v1/runner/hosts/host-1' && r.method === 'DELETE') return new Response(null, { status: 204 })
       return undefined
     })
     await openApp('/runner?tab=settings')
@@ -132,12 +154,12 @@ describe('容器服务器页：模板、执行记录与设置', () => {
     await fireEvent.update(within(form).getByLabelText('磁盘高水位（0 ~ 1）'), '0.75')
     await fireEvent.click(within(form).getByRole('button', { name: '保存回收策略' }))
     await screen.findByText(/已保存回收策略/)
-    const put = requests.find(r => path(r) === '/api/v1/runner/host/policy')!
+    const put = requests.find(r => path(r) === '/api/v1/runner/hosts/host-1/policy')!
     expect(await put.clone().json()).toEqual({ version: 4, policy: { session_idle_minutes: 15, mem_high: 0.85, disk_high: 0.75, disk_emergency: 0.95, snapshot_max_gb: 5 } })
     await fireEvent.click(screen.getByRole('button', { name: '移除容器服务器' }))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('凭证立即失效'))
     await screen.findByText('已移除容器服务器')
-    const del = requests.find(r => r.method === 'DELETE' && path(r) === '/api/v1/runner/host')!
+    const del = requests.find(r => r.method === 'DELETE' && path(r) === '/api/v1/runner/hosts/host-1')!
     expect(new URL(del.url).searchParams.get('version')).toBe('4')
   })
 })
@@ -157,6 +179,34 @@ describe('instance runner permission', () => {
       path(r).endsWith('/stops') ? Response.json({ items: [] }) : undefined))
   }
 
+  it('shows held quota and separate capability grants, requests approval and revokes with an owner credential', async () => {
+    const grant = { id: 'grant-1', instance_id: 'inst-a', approval_id: 'approval-1', capability: 'runner.cross_agent_communication', reason: '连接数据库', requested_by: 'user-a', approved_by: 'owner', approved_at: at, state: 'active', expires_at: null, revoked_by: null, revoked_at: null, revoke_reason: null, desired_revision: 2, applied_revision: 2, policy_version: 1 }
+    const requests = agents(instance(), r => {
+      if (path(r).endsWith('/runner')) return Response.json({ ...runnerOff, enabled: true })
+      if (path(r).endsWith('/runner/capabilities')) return Response.json({ instance_id: 'inst-a', held_count: 6, default_limit: 5, unlimited_active: false, grants: [grant], pending_approval_ids: [] })
+      if (path(r).endsWith('/runner/capabilities/request')) return Response.json({ status: 'pending_approval', action_id: 'approval-2', summary: '免除数量上限', expires_at: at, deduplicated: false })
+      if (path(r).endsWith('/runner/capabilities/grant-1/revoke')) return Response.json({ ...grant, state: 'revoked' })
+      return undefined
+    })
+    await openApp('/agents?instance=inst-a')
+    const panel = await screen.findByRole('region', { name: '容器数量与高级权限' })
+    expect(await within(panel).findByText(/保有环境：6 \/ 5/)).toBeVisible()
+    expect(within(panel).getByText(/已超额.*阻止新增/)).toBeVisible()
+    expect(within(panel).getByText(/仍需目标允许/)).toBeVisible()
+    await fireEvent.update(within(panel).getByLabelText('申请能力'), 'runner.unlimited_container_count')
+    await fireEvent.update(within(panel).getByLabelText('申请原因'), '需要独立环境')
+    await fireEvent.click(within(panel).getByRole('button', { name: '申请权限' }))
+    expect(await within(panel).findByRole('link', { name: '查看本次审批' })).toHaveAttribute('href', '/approvals?id=approval-2')
+    const request = requests.find(r => path(r).endsWith('/runner/capabilities/request'))!
+    expect(await request.clone().json()).toEqual({ capability: 'runner.unlimited_container_count', reason: '需要独立环境', expires_at: null })
+    await fireEvent.click(within(panel).getByRole('button', { name: '撤销跨智能体通信权限' }))
+    await fireEvent.update(within(panel).getByLabelText('撤销原因'), '不再需要')
+    await fireEvent.update(within(panel).getByLabelText('确认登录密码'), 'owner-password')
+    await fireEvent.click(within(panel).getByRole('button', { name: '确认撤销' }))
+    await vi.waitFor(() => expect(requests.some(r => path(r).endsWith('/runner/capabilities/grant-1/revoke'))).toBe(true))
+    await vi.waitFor(() => expect(within(panel).queryByLabelText('确认登录密码')).not.toBeInTheDocument())
+  })
+
   it('is off by default and opens with limits after confirmation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const requests = agents(instance(), r => (path(r) === '/api/v1/agents/instances/inst-a/runner' && r.method === 'PUT'
@@ -167,7 +217,7 @@ describe('instance runner permission', () => {
     const section = within(card).getByRole('region', { name: '运行环境权限' })
     expect(await within(section).findByText('运行环境权限：关闭')).toBeVisible()
     expect(within(section).getByText(/在下面的“高级凭据授权”里授权给它的密钥才能注入/)).toBeVisible()
-    await fireEvent.update(within(section).getByLabelText('同时运行的环境'), '5')
+    await fireEvent.update(within(section).getByLabelText('保有环境总数（含停止、未知、待删除）'), '5')
     await fireEvent.click(within(section).getByRole('button', { name: '允许它在容器服务器上建环境、执行命令' }))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('执行任意命令'))
     await within(section).findByText('已打开运行环境权限')
@@ -199,10 +249,10 @@ describe('通过 SSH 部署容器服务器', () => {
     let state: Schema['AgentSshState'] = { target: null, job: null, warning: null }
     const requests = setup(r => {
       const p = path(r)
-      if (p === '/api/v1/runner/host/ssh' && r.method === 'GET') return Response.json(state)
-      if (p === '/api/v1/runner/host/ssh' && r.method === 'PUT') { state = { target: target(), job: null, warning: null }; return Response.json(state) }
-      if (p === '/api/v1/runner/host/ssh/confirm') { state = { target: target({ host_key_confirmed: true, version: 2 }), job: null, warning: null }; return Response.json(state) }
-      if (p === '/api/v1/runner/host/ssh/install') { state = { target: target({ host_key_confirmed: true, version: 2 }), job: job(), warning: null }; return Response.json(state, { status: 202 }) }
+      if (p === '/api/v1/runner/hosts/host-1/ssh' && r.method === 'GET') return Response.json(state)
+      if (p === '/api/v1/runner/hosts/host-1/ssh' && r.method === 'PUT') { state = { target: target(), job: null, warning: null }; return Response.json(state) }
+      if (p === '/api/v1/runner/hosts/host-1/ssh/confirm') { state = { target: target({ host_key_confirmed: true, version: 2 }), job: null, warning: null }; return Response.json(state) }
+      if (p === '/api/v1/runner/hosts/host-1/ssh/install') { state = { target: target({ host_key_confirmed: true, version: 2 }), job: job(), warning: null }; return Response.json(state, { status: 202 }) }
       return undefined
     }, { role: 'owner' })
     await openApp('/runner?tab=settings')
@@ -223,9 +273,9 @@ describe('通过 SSH 部署容器服务器', () => {
     await vi.waitFor(() => expect(within(deploy).getByRole('button', { name: '开始部署' })).toBeEnabled())
     await fireEvent.click(within(deploy).getByRole('button', { name: '开始部署' }))
     expect(await within(panel).findByRole('region', { name: '部署进度' })).toHaveTextContent('运行安装脚本（Docker、gVisor、runner-agent）')
-    const install = requests.find(r => path(r) === '/api/v1/runner/host/ssh/install')!
+    const install = requests.find(r => path(r) === '/api/v1/runner/hosts/host-1/ssh/install')!
     expect(await install.clone().json()).toEqual({ version: 2, password: 'server pw' })
-    const put = requests.find(r => path(r) === '/api/v1/runner/host/ssh' && r.method === 'PUT')!
+    const put = requests.find(r => path(r) === '/api/v1/runner/hosts/host-1/ssh' && r.method === 'PUT')!
     expect(await put.clone().json()).toEqual({ host: '203.0.113.20', port: 22, username: 'deploy' })
   })
 

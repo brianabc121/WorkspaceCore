@@ -895,6 +895,7 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "mail_thread",
             # 运行环境：只给打开了运行环境权限的实例（例外八，T-0137）
             "runner_templates",
+            "runner_hosts",
             "env_find",
             "env_run",
             # 新闻早报：只给启用了早报的工作空间的实例（T-0153）
@@ -913,7 +914,7 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "create_bookmark",
             "mark_notification_read",
         },
-        "critical": {"delete_task", "delete_calendar_event"},
+        "critical": {"delete_task", "delete_calendar_event", "runner_request_capability"},
         # 直接执行、不审批（人类 2026-11-03 决定）
         "knowledge": {"knowledge_write", "knowledge_delete"},
         # 领取 / 放弃 / 完成任务：直接执行、不审批（人类 2026-11-04 决定，T-0111）

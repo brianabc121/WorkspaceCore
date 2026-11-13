@@ -20,7 +20,7 @@
    建好 ~/myworkspace-openclaw 但没有实例子目录，authorized_keys 不变，服务器 ready、可以部署；再初始化一次也成功、不建实例；
 6. 一次点击部署甲（3 GiB、1.5 核）：202，同一个 request_id 立即重放得到同一个实例，收据 accepted；
    甲部署中用另一个 request_id 部署乙到同一台 → 409、实例数不变；部署步骤里没有 authorize_key；
-7. 部署乙（不限资源）：两个实例各自的目录、Compose 项目、网络命名空间、定时任务、资源上限，**两个真实的 OpenClaw 都连上工作台**；
+7. 部署乙（默认有限资源）：两个实例各自的目录、Compose 项目、网络命名空间、定时任务、资源上限，**两个真实的 OpenClaw 都连上工作台**；
    上报、远程运维（二次认证用工作台账号密码，填 SSH 密码被拒）；密码不在任务、服务器、部署、审计、幂等记录里；
 8. 总览 total=2；服务器列表 summary 与这台服务器的部署记录 2、成功 2，逐行 deployed；
 9. 用旧接口重新部署甲（不带密码）：乙的容器不变；
@@ -240,6 +240,66 @@ class Server:
 
     def delete(self) -> Response:
         return self.owner.request("DELETE", f"{self.path}?version={self.version()}", headers=self.headers)
+
+    def wait_capacity(self, cpus: float, memory_mb: int, *, exclude_instance_id: str = "") -> None:
+        """刷新真实 SSH 读数，用产品选择器只读诊断；部署请求仍自行完成原子准入。"""
+        script = r'''
+import asyncio, json, sys
+from dataclasses import asdict
+from datetime import UTC, datetime
+from uuid import UUID
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from app.core.config import get_settings
+from app.core.errors import ApiError
+from app.core.resources import create_engine
+from app.domain.agent_servers import AgentServerService
+from app.domain.placement import PlacementError, ResourceRequest, rank_candidates
+from app.models import AgentServer
+from app.schemas.placement import Placement
+
+async def main():
+    settings = get_settings()
+    engine = create_engine(settings)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            server = await db.get(AgentServer, UUID(sys.argv[1]))
+            if server is None:
+                raise RuntimeError("验收服务器不存在")
+            result = {}
+            try:
+                candidate = await AgentServerService(db, settings).placement_candidate(
+                    server, disk_gb=settings.agent_placement_disk_gb,
+                    exclude_instance_id=UUID(sys.argv[4]) if sys.argv[4] else None)
+                result["candidate"] = asdict(candidate)
+                rank_candidates([candidate], ResourceRequest(float(sys.argv[2]), int(sys.argv[3]),
+                    settings.agent_placement_disk_gb), Placement(mode="specified", server_id=server.id),
+                    datetime.now(UTC))
+                result["eligible"] = True
+            except (ApiError, PlacementError) as error:
+                result.update(eligible=False, code=error.code,
+                    details=getattr(error, "reasons", getattr(error, "details", {})))
+            print(json.dumps(result, default=str))
+    finally:
+        await engine.dispose()
+
+asyncio.run(main())
+'''
+        deadline = time.monotonic() + 180
+        last = ""
+        while time.monotonic() < deadline:
+            refreshed = self.post("resources/refresh", {})
+            if refreshed.status == 429:
+                time.sleep(15)
+                continue
+            if refreshed.status != 200:
+                raise AssertionError(f"刷新可信资源失败：{refreshed.summary} {refreshed.text}")
+            last = compose_exec("api", "python", "-c", script, self.id,
+                                str(cpus), str(memory_mb), exclude_instance_id).strip()
+            print(f"信息  部署前实际容量：{last}", flush=True)
+            if json.loads(last).get("eligible") is True:
+                return
+            time.sleep(15)
+        raise AssertionError(f"服务器没有满足验收负载的可信容量：{last}")
 
     def target_column(self, column: str) -> str:
         return sql_rows(f"SELECT {column} FROM workspace.agent_ssh_targets WHERE server_id = '{self.id}'").strip()
@@ -575,6 +635,7 @@ def flow(  # 一条完整的验收流程，按页面上的顺序走
     )
 
     # ---------------------------------------------------------------- 6. 一次点击部署甲（资源上限 3 GiB、1.5 核）
+    server.wait_capacity(1.5, 3072)
     request_a = str(uuid.uuid4())
     body_a = {"server_id": server.id, "server_version": server.version(), "name": "SSH 部署甲", "mem_limit_mb": 3072, "cpus": 1.5}
     response = create_deployment(owner, headers, request_a, body_a)
@@ -628,16 +689,17 @@ def flow(  # 一条完整的验收流程，按页面上的顺序走
     if not finish_deploy(report, a, "甲", server.id):
         return report.finish()
 
-    # ---------------------------------------------------------------- 7. 部署乙（不限资源）
+    # ---------------------------------------------------------------- 7. 部署乙（默认有限资源）
+    server.wait_capacity(1, 2048)
     response = create_deployment(
         owner, headers, str(uuid.uuid4()), {"server_id": server.id, "server_version": server.version(), "name": "SSH 部署乙"}
     )
-    if not report.check("一次点击部署乙（新的 request_id，不限资源，202）", response.status == 202, response.summary):
+    if not report.check("一次点击部署乙（新的 request_id，默认有限资源，202）", response.status == 202, f"{response.summary} {response.text}"):
         return report.finish()
     instance_b = response.json()["instance"]
     b = Agent(owner, headers, instance_b, home)
     agents = [a, b]
-    report.check("乙不限资源", instance_b["limits"] == {"mem_limit_mb": None, "cpus": None}, json.dumps(instance_b["limits"]))
+    report.check("乙采用默认 2 GiB、1 核", instance_b["limits"] == {"mem_limit_mb": 2048, "cpus": 1.0}, json.dumps(instance_b["limits"]))
     granted = b.grant(secret["id"], int(instance_b["version"]))
     report.check("部署开始后给乙授权密钥", granted.status == 200, granted.summary)
     if not finish_deploy(report, b, "乙", server.id):
@@ -678,9 +740,9 @@ def flow(  # 一条完整的验收流程，按页面上的顺序走
         json.dumps(layout),
     )
     report.check(
-        "甲的 OpenClaw 容器带上了资源上限（3 GiB、1.5 核），乙不限制",
+        "两个 OpenClaw 容器带各自的有限资源上限（甲 3 GiB、1.5 核；乙 2 GiB、1 核）",
         layout[a.short]["openclaw"][-2:] == [str(3072 << 20), "1500000000"]
-        and layout[b.short]["openclaw"][-2:] == ["0", "0"],
+        and layout[b.short]["openclaw"][-2:] == [str(2048 << 20), "1000000000"],
         json.dumps({x.short: layout[x.short]["openclaw"] for x in agents}),
     )
     report.check("authorized_keys 与测试前完全相同（两次部署都没有装平台公钥）", keys.unchanged(), keys.describe())
@@ -707,9 +769,10 @@ def flow(  # 一条完整的验收流程，按页面上的顺序走
         json.dumps(summary),
     )
     report.check(
-        "这台服务器：部署记录 2、成功 2；乙不限资源，所以上限之和不完整",
+        "这台服务器：部署记录 2、成功 2；有限上限之和为 5 GiB、2.5 核",
         item.get("managed_deployments") == 2 and item.get("successful_deployments") == 2
-        and item.get("has_unlimited_limits") is True and item.get("allocated_mem_limit_mb") is None,
+        and item.get("has_unlimited_limits") is False and item.get("allocated_mem_limit_mb") == 5120
+        and item.get("allocated_cpus") == 2.5,
         json.dumps({k: item.get(k) for k in ("managed_deployments", "successful_deployments", "has_unlimited_limits")}),
     )
     rows = {r["instance_id"]: r for r in server.detail()["agents"]}
@@ -836,6 +899,7 @@ def flow(  # 一条完整的验收流程，按页面上的顺序走
     report.check("审计记下 8 个动作与退出码，不含输出", audits == "8" and leaked == "0", f"{audits} / {leaked}")
 
     # ---------------------------------------------------------------- 9. 用旧接口重新部署甲：乙不受影响
+    server.wait_capacity(1.5, 3072, exclude_instance_id=a.id)
     response = a.deploy(server.id)
     report.check("用旧接口重新部署甲（只有 server_id 与 version，不带密码，202）", response.status == 202, response.summary)
     state = wait_job(a.state)
