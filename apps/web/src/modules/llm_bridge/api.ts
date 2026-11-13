@@ -8,21 +8,21 @@ import { formatTime } from '../../features/time'
 // 查看要 admin，修改要 owner（后端同样校验）。登录、设置、环境、会话都由工作台转给会话桥。
 // 令牌、API 密钥只在提交时出现在请求体里：不进查询缓存、不写日志，提交成功后输入框清空。
 // 查询键都以 'llm_bridge' 开头：['llm_bridge', userId, workspaceId, ...]。
-export type Bridge = Schema['BridgeOut']
-export type BridgeStatus = Schema['BridgeStatusOut']
-export type Account = Schema['AccountOut']
-export type BridgeSettings = Schema['BridgeSettings']
-export type SettingsPatch = Schema['BridgeSettingsPatch']
-export type LoginBody = Schema['LoginIn']
+export type Bridge = Schema['LlmBridgeOut']
+export type BridgeStatus = Schema['LlmBridgeStatusOut']
+export type Account = Schema['LlmBridgeAccountOut']
+export type BridgeSettings = Schema['LlmBridgeSettings']
+export type SettingsPatch = Schema['LlmBridgeSettingsPatch']
+export type LoginBody = Schema['LlmBridgeLoginIn']
 export type LoginMethod = LoginBody['method']
-export type LoginState = Schema['LoginOut']
-export type Environment = Schema['EnvironmentOut']
-export type EnvironmentBody = Schema['EnvironmentIn']
-export type Grant = Schema['GrantOut']
-export type GrantBody = Schema['GrantIn']
+export type LoginState = Schema['LlmBridgeLoginOut']
+export type Environment = Schema['LlmBridgeEnvironmentOut']
+export type EnvironmentBody = Schema['LlmBridgeEnvironmentIn']
+export type Grant = Schema['LlmBridgeGrantOut']
+export type GrantBody = Schema['LlmBridgeGrantIn']
 export type Platform = GrantBody['platforms'][number]
-export type BridgeSession = Schema['SessionList']['sessions'][number]
-export type Turn = Schema['TurnOut']
+export type BridgeSession = Schema['LlmBridgeSessionList']['sessions'][number]
+export type Turn = Schema['LlmBridgeTurnOut']
 export type Slot = 'openai' | 'claude' | 'workbuddy'
 
 export const PLATFORMS: readonly { id: Platform; name: string }[] = [
@@ -99,11 +99,11 @@ export function useLlmBridge(scope: string) {
     useGrants: () => useQuery({ queryKey: key(user, scope, 'grants'), enabled: computed(active),
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/grants', { params: { header }, signal })).grants }),
 
-    async createBridge(body: Schema['BridgeIn']) {
+    async createBridge(body: Schema['LlmBridgeIn']) {
       const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges', { params: { header }, body }))
       await invalidate('bridges'); return out
     },
-    async updateBridge(id: string, body: Schema['BridgePatch']) {
+    async updateBridge(id: string, body: Schema['LlmBridgePatch']) {
       const out = dataOf(await auth.api.PATCH('/api/v1/llm_bridge/bridges/{bridge_id}', { params: at(id), body }))
       await Promise.all([invalidate('bridges'), invalidate('bridge', id)]); return out
     },

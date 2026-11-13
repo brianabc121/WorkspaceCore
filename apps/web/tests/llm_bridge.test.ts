@@ -15,10 +15,10 @@ type Role = Schema['WorkspaceOut']['role']
 const as = (role: Role) => Response.json({ ...me, workspaces: [{ ...workspace, role }] })
 const lbModule: Schema['ModuleOut'] = { ...newsModule, key: 'llm_bridge', name: '大模型会话桥', tools: [], widgets: [] }
 
-const bridge: Schema['BridgeOut'] = { id: BRIDGE, name: '主账号', base_url: 'http://10.0.0.5:8787', enabled: true, has_token: true, created_at: at, updated_at: at }
-const account = (over: Partial<Schema['AccountOut']>): Schema['AccountOut'] => ({ slot: 'openai', label: 'OpenAI（ChatGPT / Codex）', state: 'logged_out', identity: null, method: null, detail: '', first_login_at: null, login_methods: ['device_code', 'api_key', 'existing'], running: 0, ...over })
-const settings: Schema['BridgeSettings'] = { concurrency: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false }
-const status = (over: Partial<Schema['BridgeStatusOut']> = {}): Schema['BridgeStatusOut'] => ({
+const bridge: Schema['LlmBridgeOut'] = { id: BRIDGE, name: '主账号', base_url: 'http://10.0.0.5:8787', enabled: true, has_token: true, created_at: at, updated_at: at }
+const account = (over: Partial<Schema['LlmBridgeAccountOut']>): Schema['LlmBridgeAccountOut'] => ({ slot: 'openai', label: 'OpenAI（ChatGPT / Codex）', state: 'logged_out', identity: null, method: null, detail: '', first_login_at: null, login_methods: ['device_code', 'api_key', 'existing'], running: 0, ...over })
+const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false }
+const status = (over: Partial<Schema['LlmBridgeStatusOut']> = {}): Schema['LlmBridgeStatusOut'] => ({
   reachable: true, error: '', version: '0.1.0', queued: 1, running: 2, settings,
   accounts: [
     account({ state: 'logged_in', identity: 'a***@example.com', method: 'device_code', first_login_at: 1794528000 }),
@@ -28,7 +28,7 @@ const status = (over: Partial<Schema['BridgeStatusOut']> = {}): Schema['BridgeSt
   channels: [{ platform: 'codex', mode: 'dev', slot: 'openai', available: true, note: '' }, { platform: 'claude', mode: 'cloud', slot: 'claude', available: false, note: '云端通道还没有实现' }],
   ...over,
 })
-const grant = (over: Partial<Schema['GrantOut']> = {}): Schema['GrantOut'] => ({ instance_id: INSTANCE, instance_name: '甲', enabled: true, can_write: true, can_account: true, can_takeover: false, platforms: ['codex'], ...over })
+const grant = (over: Partial<Schema['LlmBridgeGrantOut']> = {}): Schema['LlmBridgeGrantOut'] => ({ instance_id: INSTANCE, instance_name: '甲', enabled: true, can_write: true, can_account: true, can_takeover: false, platforms: ['codex'], ...over })
 
 function setup(role: Role, handler?: (r: Request) => Response | undefined | Promise<Response | undefined>, bridges = [bridge]) {
   return mockApi(async r => {
@@ -76,7 +76,7 @@ describe('大模型会话桥', () => {
   })
 
   it('explains what a bridge is when none is registered and registers one without keeping the token', async () => {
-    let bridges: Schema['BridgeOut'][] = []
+    let bridges: Schema['LlmBridgeOut'][] = []
     const requests = setup('owner', r => {
       if (path(r) !== '/api/v1/llm_bridge/bridges') return undefined
       if (r.method === 'POST') { bridges = [bridge]; return Response.json(bridge, { status: 201 }) }

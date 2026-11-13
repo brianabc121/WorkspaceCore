@@ -3024,7 +3024,7 @@ export interface paths {
          * 登录一个平台（owner）
          * @description device_code：返回网址和验证码，用户在自己的浏览器里完成，之后轮询登录状态；api_key / oauth_token：填的值保存在会话桥的数据卷里，不保存在工作台；existing：使用已经在容器里完成的登录。403：Claude 用订阅登录前要先在设置里确认风险。
          */
-        post: operations["account_login"];
+        post: operations["login"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3041,7 +3041,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** 退出一个平台的登录（owner） */
-        post: operations["account_logout"];
+        post: operations["logout"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3129,7 +3129,7 @@ export interface paths {
          * 会话桥上的会话（admin）
          * @description sync=true 时先把官方程序里有、会话桥没登记的会话登记进来。
          */
-        get: operations["list_bridge_sessions"];
+        get: operations["list_sessions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5775,42 +5775,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** AccountOut */
-        AccountOut: {
-            /** Detail */
-            detail: string;
-            /** First Login At */
-            first_login_at: number | null;
-            /**
-             * Identity
-             * @description 账号标识（打码）
-             */
-            identity: string | null;
-            /** Label */
-            label: string;
-            /** Login Methods */
-            login_methods: string[];
-            /** Method */
-            method: string | null;
-            /** Running */
-            running: number;
-            /** Slot */
-            slot: string;
-            /**
-             * State
-             * @description logged_in / logged_out / mismatch / unavailable
-             */
-            state: string;
-        };
-        /** AccountStateOut */
-        AccountStateOut: {
-            /** Detail */
-            detail: string;
-            /** Identity */
-            identity: string | null;
-            /** State */
-            state: string;
-        };
         /** AcknowledgmentResult */
         AcknowledgmentResult: {
             /** Accepted */
@@ -8082,166 +8046,6 @@ export interface components {
             /** Visibility */
             visibility?: ("workspace" | "private") | null;
         };
-        /** BridgeIn */
-        BridgeIn: {
-            /**
-             * Base Url
-             * @description 会话桥的地址，例如 http://10.0.0.5:8787
-             */
-            base_url: string;
-            /**
-             * Name
-             * @description 显示名，也是工具里 bridge 参数的值
-             */
-            name: string;
-            /**
-             * Token
-             * @description 会话桥的管理令牌
-             */
-            token: string;
-        };
-        /** BridgeList */
-        BridgeList: {
-            /** Bridges */
-            bridges: components["schemas"]["BridgeOut"][];
-        };
-        /** BridgeOut */
-        BridgeOut: {
-            /** Base Url */
-            base_url: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Enabled */
-            enabled: boolean;
-            /** Has Token */
-            has_token: boolean;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Name */
-            name: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-        };
-        /** BridgePatch */
-        BridgePatch: {
-            /** Base Url */
-            base_url?: string | null;
-            /** Enabled */
-            enabled?: boolean | null;
-            /** Name */
-            name?: string | null;
-            /** Token */
-            token?: string | null;
-        };
-        /** SessionOut */
-        BridgeSessionOut: {
-            /** Created At */
-            created_at: number;
-            /** Mode */
-            mode: string;
-            /** Model */
-            model: string | null;
-            /** Origin */
-            origin: string;
-            /** Owner */
-            owner: string | null;
-            /** Platform */
-            platform: string;
-            /** Session Id */
-            session_id: string;
-            /** Status */
-            status: string;
-            /** Title */
-            title: string;
-            /**
-             * Turns
-             * @default 0
-             */
-            turns: number;
-            /** Updated At */
-            updated_at: number;
-        };
-        /** BridgeSettings */
-        BridgeSettings: {
-            /**
-             * Claude Subscription Ack
-             * @description 已确认了解 Claude 订阅登录的合规风险
-             */
-            claude_subscription_ack: boolean;
-            /**
-             * Concurrency
-             * @description 每个账号同时进行的回合数
-             */
-            concurrency: number;
-            /** Max Text Chars */
-            max_text_chars: number;
-            /**
-             * Send Per Hour
-             * @description 每个实例每小时的发送次数
-             */
-            send_per_hour: number;
-            /** Turn Timeout Seconds */
-            turn_timeout_seconds: number;
-        };
-        /** BridgeSettingsPatch */
-        BridgeSettingsPatch: {
-            /** Claude Subscription Ack */
-            claude_subscription_ack?: boolean | null;
-            /** Concurrency */
-            concurrency?: number | null;
-            /** Max Text Chars */
-            max_text_chars?: number | null;
-            /** Send Per Hour */
-            send_per_hour?: number | null;
-            /** Turn Timeout Seconds */
-            turn_timeout_seconds?: number | null;
-        };
-        /** BridgeStatusOut */
-        BridgeStatusOut: {
-            /**
-             * Accounts
-             * @default []
-             */
-            accounts: components["schemas"]["AccountOut"][];
-            /**
-             * Channels
-             * @default []
-             */
-            channels: components["schemas"]["ChannelOut"][];
-            /**
-             * Error
-             * @description 连不上时的原因
-             * @default
-             */
-            error: string;
-            /**
-             * Queued
-             * @default 0
-             */
-            queued: number;
-            /** Reachable */
-            reachable: boolean;
-            /**
-             * Running
-             * @default 0
-             */
-            running: number;
-            settings?: components["schemas"]["BridgeSettings"] | null;
-            /**
-             * Version
-             * @default
-             */
-            version: string;
-        };
         /** BundleRequest */
         BundleRequest: {
             /**
@@ -8499,19 +8303,6 @@ export interface components {
             next_cursor?: string | null;
             /** Total Estimate */
             total_estimate?: number | null;
-        };
-        /** ChannelOut */
-        ChannelOut: {
-            /** Available */
-            available: boolean;
-            /** Mode */
-            mode: string;
-            /** Note */
-            note: string;
-            /** Platform */
-            platform: string;
-            /** Slot */
-            slot: string;
         };
         /** CommentCreate */
         CommentCreate: {
@@ -8971,78 +8762,6 @@ export interface components {
             /** Purpose */
             purpose: string;
         };
-        /** EnvironmentIn */
-        EnvironmentIn: {
-            /** Branch */
-            branch?: string | null;
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /**
-             * Enabled
-             * @default true
-             */
-            enabled: boolean;
-            /**
-             * Mode
-             * @default dev
-             * @enum {string}
-             */
-            mode: "dev" | "cloud";
-            /** Name */
-            name: string;
-            /**
-             * Network
-             * @default false
-             */
-            network: boolean;
-            /**
-             * Platform
-             * @enum {string}
-             */
-            platform: "chatgpt" | "codex" | "claude" | "workbuddy";
-            /**
-             * Repo Url
-             * @description 只支持 https://
-             */
-            repo_url?: string | null;
-            /**
-             * Sandbox
-             * @default read_only
-             * @enum {string}
-             */
-            sandbox: "read_only" | "workspace_write" | "exec";
-        };
-        /** EnvironmentList */
-        EnvironmentList: {
-            /** Environments */
-            environments: components["schemas"]["EnvironmentOut"][];
-        };
-        /** EnvironmentOut */
-        EnvironmentOut: {
-            /** Branch */
-            branch: string | null;
-            /** Description */
-            description: string;
-            /** Enabled */
-            enabled: boolean;
-            /** Id */
-            id: string;
-            /** Mode */
-            mode: string;
-            /** Name */
-            name: string;
-            /** Network */
-            network: boolean;
-            /** Platform */
-            platform: string;
-            /** Repo Url */
-            repo_url: string | null;
-            /** Sandbox */
-            sandbox: string;
-        };
         /** ErrorBody */
         ErrorBody: {
             /**
@@ -9297,32 +9016,6 @@ export interface components {
              */
             repositories: string[];
         };
-        /** GrantIn */
-        GrantIn: {
-            /**
-             * Can Account
-             * @default false
-             */
-            can_account: boolean;
-            /**
-             * Can Takeover
-             * @default false
-             */
-            can_takeover: boolean;
-            /**
-             * Can Write
-             * @default false
-             */
-            can_write: boolean;
-            /** Enabled */
-            enabled: boolean;
-            /**
-             * Platforms
-             * @description 允许的平台；空表示都允许
-             * @default []
-             */
-            platforms: ("chatgpt" | "codex" | "claude" | "workbuddy")[];
-        };
         /** GrantInstanceOut */
         GrantInstanceOut: {
             /**
@@ -9344,31 +9037,6 @@ export interface components {
             instance_name: string;
             /** Instance Status */
             instance_status: string;
-        };
-        /** GrantList */
-        GrantList: {
-            /** Grants */
-            grants: components["schemas"]["GrantOut"][];
-        };
-        /** GrantOut */
-        GrantOut: {
-            /** Can Account */
-            can_account: boolean;
-            /** Can Takeover */
-            can_takeover: boolean;
-            /** Can Write */
-            can_write: boolean;
-            /** Enabled */
-            enabled: boolean;
-            /**
-             * Instance Id
-             * Format: uuid
-             */
-            instance_id: string;
-            /** Instance Name */
-            instance_name: string;
-            /** Platforms */
-            platforms: string[];
         };
         /** GrantsReplace */
         GrantsReplace: {
@@ -11066,8 +10734,203 @@ export interface components {
             /** Title */
             title: string | null;
         };
-        /** LoginIn */
-        LoginIn: {
+        /** LlmBridgeAccountOut */
+        LlmBridgeAccountOut: {
+            /** Detail */
+            detail: string;
+            /** First Login At */
+            first_login_at: number | null;
+            /**
+             * Identity
+             * @description 账号标识（打码）
+             */
+            identity: string | null;
+            /** Label */
+            label: string;
+            /** Login Methods */
+            login_methods: string[];
+            /** Method */
+            method: string | null;
+            /** Running */
+            running: number;
+            /** Slot */
+            slot: string;
+            /**
+             * State
+             * @description logged_in / logged_out / mismatch / unavailable
+             */
+            state: string;
+        };
+        /** LlmBridgeAccountStateOut */
+        LlmBridgeAccountStateOut: {
+            /** Detail */
+            detail: string;
+            /** Identity */
+            identity: string | null;
+            /** State */
+            state: string;
+        };
+        /** LlmBridgeChannelOut */
+        LlmBridgeChannelOut: {
+            /** Available */
+            available: boolean;
+            /** Mode */
+            mode: string;
+            /** Note */
+            note: string;
+            /** Platform */
+            platform: string;
+            /** Slot */
+            slot: string;
+        };
+        /** LlmBridgeEnvironmentIn */
+        LlmBridgeEnvironmentIn: {
+            /** Branch */
+            branch?: string | null;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Mode
+             * @default dev
+             * @enum {string}
+             */
+            mode: "dev" | "cloud";
+            /** Name */
+            name: string;
+            /**
+             * Network
+             * @default false
+             */
+            network: boolean;
+            /**
+             * Platform
+             * @enum {string}
+             */
+            platform: "chatgpt" | "codex" | "claude" | "workbuddy";
+            /**
+             * Repo Url
+             * @description 只支持 https://
+             */
+            repo_url?: string | null;
+            /**
+             * Sandbox
+             * @default read_only
+             * @enum {string}
+             */
+            sandbox: "read_only" | "workspace_write" | "exec";
+        };
+        /** LlmBridgeEnvironmentList */
+        LlmBridgeEnvironmentList: {
+            /** Environments */
+            environments: components["schemas"]["LlmBridgeEnvironmentOut"][];
+        };
+        /** LlmBridgeEnvironmentOut */
+        LlmBridgeEnvironmentOut: {
+            /** Branch */
+            branch: string | null;
+            /** Description */
+            description: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /** Mode */
+            mode: string;
+            /** Name */
+            name: string;
+            /** Network */
+            network: boolean;
+            /** Platform */
+            platform: string;
+            /** Repo Url */
+            repo_url: string | null;
+            /** Sandbox */
+            sandbox: string;
+        };
+        /** LlmBridgeGrantIn */
+        LlmBridgeGrantIn: {
+            /**
+             * Can Account
+             * @default false
+             */
+            can_account: boolean;
+            /**
+             * Can Takeover
+             * @default false
+             */
+            can_takeover: boolean;
+            /**
+             * Can Write
+             * @default false
+             */
+            can_write: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Platforms
+             * @description 允许的平台；空表示都允许
+             * @default []
+             */
+            platforms: ("chatgpt" | "codex" | "claude" | "workbuddy")[];
+        };
+        /** LlmBridgeGrantList */
+        LlmBridgeGrantList: {
+            /** Grants */
+            grants: components["schemas"]["LlmBridgeGrantOut"][];
+        };
+        /** LlmBridgeGrantOut */
+        LlmBridgeGrantOut: {
+            /** Can Account */
+            can_account: boolean;
+            /** Can Takeover */
+            can_takeover: boolean;
+            /** Can Write */
+            can_write: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            instance_id: string;
+            /** Instance Name */
+            instance_name: string;
+            /** Platforms */
+            platforms: string[];
+        };
+        /** LlmBridgeIn */
+        LlmBridgeIn: {
+            /**
+             * Base Url
+             * @description 会话桥的地址，例如 http://10.0.0.5:8787
+             */
+            base_url: string;
+            /**
+             * Name
+             * @description 显示名，也是工具里 bridge 参数的值
+             */
+            name: string;
+            /**
+             * Token
+             * @description 会话桥的管理令牌
+             */
+            token: string;
+        };
+        /** LlmBridgeList */
+        LlmBridgeList: {
+            /** Bridges */
+            bridges: components["schemas"]["LlmBridgeOut"][];
+        };
+        /** LlmBridgeLoginIn */
+        LlmBridgeLoginIn: {
             /** Api Key */
             api_key?: string | null;
             /**
@@ -11078,8 +10941,8 @@ export interface components {
             /** Oauth Token */
             oauth_token?: string | null;
         };
-        /** LoginOut */
-        LoginOut: {
+        /** LlmBridgeLoginOut */
+        LlmBridgeLoginOut: {
             /**
              * Detail
              * @default
@@ -11094,6 +10957,184 @@ export interface components {
             user_code?: string | null;
             /** Verification Url */
             verification_url?: string | null;
+        };
+        /** LlmBridgeOut */
+        LlmBridgeOut: {
+            /** Base Url */
+            base_url: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Has Token */
+            has_token: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** LlmBridgePatch */
+        LlmBridgePatch: {
+            /** Base Url */
+            base_url?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** Token */
+            token?: string | null;
+        };
+        /** LlmBridgeResetOut */
+        LlmBridgeResetOut: {
+            /** Archived Sessions */
+            archived_sessions: number;
+        };
+        /** LlmBridgeSessionList */
+        LlmBridgeSessionList: {
+            /** Sessions */
+            sessions: components["schemas"]["LlmBridgeSessionOut"][];
+            /**
+             * Sync Failed
+             * @default
+             */
+            sync_failed: string;
+        };
+        /** LlmBridgeSessionOut */
+        LlmBridgeSessionOut: {
+            /** Created At */
+            created_at: number;
+            /** Mode */
+            mode: string;
+            /** Model */
+            model: string | null;
+            /** Origin */
+            origin: string;
+            /** Owner */
+            owner: string | null;
+            /** Platform */
+            platform: string;
+            /** Session Id */
+            session_id: string;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+            /**
+             * Turns
+             * @default 0
+             */
+            turns: number;
+            /** Updated At */
+            updated_at: number;
+        };
+        /** LlmBridgeSettings */
+        LlmBridgeSettings: {
+            /**
+             * Claude Subscription Ack
+             * @description 已确认了解 Claude 订阅登录的合规风险
+             */
+            claude_subscription_ack: boolean;
+            /**
+             * Concurrency
+             * @description 每个账号同时进行的回合数
+             */
+            concurrency: number;
+            /** Max Text Chars */
+            max_text_chars: number;
+            /**
+             * Send Per Hour
+             * @description 每个实例每小时的发送次数
+             */
+            send_per_hour: number;
+            /** Turn Timeout Seconds */
+            turn_timeout_seconds: number;
+        };
+        /** LlmBridgeSettingsPatch */
+        LlmBridgeSettingsPatch: {
+            /** Claude Subscription Ack */
+            claude_subscription_ack?: boolean | null;
+            /** Concurrency */
+            concurrency?: number | null;
+            /** Max Text Chars */
+            max_text_chars?: number | null;
+            /** Send Per Hour */
+            send_per_hour?: number | null;
+            /** Turn Timeout Seconds */
+            turn_timeout_seconds?: number | null;
+        };
+        /** LlmBridgeStatusOut */
+        LlmBridgeStatusOut: {
+            /**
+             * Accounts
+             * @default []
+             */
+            accounts: components["schemas"]["LlmBridgeAccountOut"][];
+            /**
+             * Channels
+             * @default []
+             */
+            channels: components["schemas"]["LlmBridgeChannelOut"][];
+            /**
+             * Error
+             * @description 连不上时的原因
+             * @default
+             */
+            error: string;
+            /**
+             * Queued
+             * @default 0
+             */
+            queued: number;
+            /** Reachable */
+            reachable: boolean;
+            /**
+             * Running
+             * @default 0
+             */
+            running: number;
+            settings?: components["schemas"]["LlmBridgeSettings"] | null;
+            /**
+             * Version
+             * @default
+             */
+            version: string;
+        };
+        /** LlmBridgeTurnList */
+        LlmBridgeTurnList: {
+            /** Turns */
+            turns: components["schemas"]["LlmBridgeTurnOut"][];
+        };
+        /** LlmBridgeTurnOut */
+        LlmBridgeTurnOut: {
+            /** Failure */
+            failure?: {
+                [key: string]: unknown;
+            } | null;
+            /** Finished At */
+            finished_at?: number | null;
+            /** Queued At */
+            queued_at: number;
+            /** Result */
+            result?: string | null;
+            /** Started At */
+            started_at?: number | null;
+            /** Status */
+            status: string;
+            /** Text */
+            text: string;
+            /** Turn Id */
+            turn_id: string;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -14925,11 +14966,6 @@ export interface components {
             repo_id: string;
             sync: components["schemas"]["SyncState"];
         };
-        /** ResetOut */
-        ResetOut: {
-            /** Archived Sessions */
-            archived_sessions: number;
-        };
         /**
          * ResourceLinkOut
          * @description 关联的项目 / 任务；它被删除后关联随之删除（A10）。
@@ -16910,16 +16946,6 @@ export interface components {
              */
             status: "ok" | "degraded" | "down" | "unknown" | "not_configured";
         };
-        /** SessionList */
-        SessionList: {
-            /** Sessions */
-            sessions: components["schemas"]["BridgeSessionOut"][];
-            /**
-             * Sync Failed
-             * @default
-             */
-            sync_failed: string;
-        };
         /** SessionOut */
         SessionOut: {
             /**
@@ -18176,32 +18202,6 @@ export interface components {
             next_cursor?: string | null;
             /** Total Estimate */
             total_estimate?: number | null;
-        };
-        /** TurnList */
-        TurnList: {
-            /** Turns */
-            turns: components["schemas"]["TurnOut"][];
-        };
-        /** TurnOut */
-        TurnOut: {
-            /** Failure */
-            failure?: {
-                [key: string]: unknown;
-            } | null;
-            /** Finished At */
-            finished_at?: number | null;
-            /** Queued At */
-            queued_at: number;
-            /** Result */
-            result?: string | null;
-            /** Started At */
-            started_at?: number | null;
-            /** Status */
-            status: string;
-            /** Text */
-            text: string;
-            /** Turn Id */
-            turn_id: string;
         };
         /** UnassignedInstance */
         UnassignedInstance: {
@@ -31418,7 +31418,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BridgeList"];
+                    "application/json": components["schemas"]["LlmBridgeList"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -31482,7 +31482,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["BridgeIn"];
+                "application/json": components["schemas"]["LlmBridgeIn"];
             };
         };
         responses: {
@@ -31492,7 +31492,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BridgeOut"];
+                    "application/json": components["schemas"]["LlmBridgeOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -31646,7 +31646,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["BridgePatch"];
+                "application/json": components["schemas"]["LlmBridgePatch"];
             };
         };
         responses: {
@@ -31656,7 +31656,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BridgeOut"];
+                    "application/json": components["schemas"]["LlmBridgeOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -31737,7 +31737,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LoginOut"];
+                    "application/json": components["schemas"]["LlmBridgeLoginOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -31787,7 +31787,7 @@ export interface operations {
             };
         };
     };
-    account_login: {
+    login: {
         parameters: {
             query?: never;
             header: {
@@ -31805,7 +31805,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["LoginIn"];
+                "application/json": components["schemas"]["LlmBridgeLoginIn"];
             };
         };
         responses: {
@@ -31815,7 +31815,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LoginOut"];
+                    "application/json": components["schemas"]["LlmBridgeLoginOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -31874,7 +31874,7 @@ export interface operations {
             };
         };
     };
-    account_logout: {
+    logout: {
         parameters: {
             query?: never;
             header: {
@@ -31979,7 +31979,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AccountStateOut"];
+                    "application/json": components["schemas"]["LlmBridgeAccountStateOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -32062,7 +32062,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ResetOut"];
+                    "application/json": components["schemas"]["LlmBridgeResetOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -32141,7 +32141,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvironmentList"];
+                    "application/json": components["schemas"]["LlmBridgeEnvironmentList"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -32207,7 +32207,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["EnvironmentIn"];
+                "application/json": components["schemas"]["LlmBridgeEnvironmentIn"];
             };
         };
         responses: {
@@ -32217,7 +32217,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvironmentOut"];
+                    "application/json": components["schemas"]["LlmBridgeEnvironmentOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -32293,7 +32293,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["EnvironmentIn"];
+                "application/json": components["schemas"]["LlmBridgeEnvironmentIn"];
             };
         };
         responses: {
@@ -32303,7 +32303,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvironmentOut"];
+                    "application/json": components["schemas"]["LlmBridgeEnvironmentOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -32442,7 +32442,7 @@ export interface operations {
             };
         };
     };
-    list_bridge_sessions: {
+    list_sessions: {
         parameters: {
             query?: {
                 limit?: number;
@@ -32466,7 +32466,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionList"];
+                    "application/json": components["schemas"]["LlmBridgeSessionList"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -32537,7 +32537,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TurnList"];
+                    "application/json": components["schemas"]["LlmBridgeTurnList"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -32603,7 +32603,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["BridgeSettingsPatch"];
+                "application/json": components["schemas"]["LlmBridgeSettingsPatch"];
             };
         };
         responses: {
@@ -32613,7 +32613,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BridgeSettings"];
+                    "application/json": components["schemas"]["LlmBridgeSettings"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -32692,7 +32692,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BridgeStatusOut"];
+                    "application/json": components["schemas"]["LlmBridgeStatusOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -32760,7 +32760,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GrantList"];
+                    "application/json": components["schemas"]["LlmBridgeGrantList"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -32826,7 +32826,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GrantIn"];
+                "application/json": components["schemas"]["LlmBridgeGrantIn"];
             };
         };
         responses: {
@@ -32836,7 +32836,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GrantOut"];
+                    "application/json": components["schemas"]["LlmBridgeGrantOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
