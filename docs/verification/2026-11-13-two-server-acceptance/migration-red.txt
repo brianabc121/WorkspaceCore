@@ -1,0 +1,1048 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+___________ test_migration_graph_has_one_unambiguous_upgrade_target ____________
+
+    def test_migration_graph_has_one_unambiguous_upgrade_target() -> None:
+        script = ScriptDirectory.from_config(alembic_config("unused"))
+>       assert len(script.get_heads()) == 1
+E       AssertionError: assert 2 == 1
+E        +  where 2 = len(['0066', '0066'])
+E        +    where ['0066', '0066'] = get_heads()
+E        +      where get_heads = <alembic.script.base.ScriptDirectory object at 0x7fc19f4a0980>.get_heads
+
+tests/test_migration_revision_collision.py:17: AssertionError
+___ test_upgrade_from_each_legacy_branch_preserves_data_and_allocator[base] ____
+
+self = <alembic.script.base.ScriptDirectory object at 0x7fc19f580290>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7fc19f2aa780>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+temp_database_url = 'postgresql+asyncpg://workspace@127.0.0.1:5432/ws_test_c87c55b94882'
+legacy = 'base'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("legacy", ["base", "gateway", "bridge"])
+    def test_upgrade_from_each_legacy_branch_preserves_data_and_allocator(
+        temp_database_url: str, legacy: str
+    ) -> None:
+        config = alembic_config(temp_database_url)
+        command.upgrade(config, "0065")
+        bridge = asyncio.run(_legacy_bridge(temp_database_url)) if legacy == "bridge" else None
+        if legacy == "gateway":
+            command.upgrade(config, "0066")
+    
+            async def advance() -> None:
+                conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
+                try:
+                    await conn.execute("SELECT setval('workspace.runner_ingress_port_seq', 30123)")
+                    await conn.execute("SELECT setval('workspace.runner_network_policy_revision_seq', 81)")
+                finally:
+                    await conn.close()
+    
+            asyncio.run(advance())
+>       command.upgrade(config, "head")
+
+tests/test_migration_revision_collision.py:87: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap_external>:999: in exec_module
+    ???
+<frozen importlib._bootstrap>:488: in _call_with_frames_removed
+    ???
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+<string>:8: in run_migrations
+    ???
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7fc19f580290>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+----------------------------- Captured stdout call -----------------------------
+{"ts": "2026-11-13T16:19:15.457+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T16:19:15.457+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+{"ts": "2026-11-13T16:19:15.484+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade  -> 0001, 创建 workspace schema 与 pgcrypto、pg_trgm 扩展"}
+{"ts": "2026-11-13T16:19:15.502+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0001 -> 0002, 用户、会话、外部身份、工作空间与成员（S1-01）"}
+{"ts": "2026-11-13T16:19:15.557+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0002 -> 0003, 审计日志（S1-05）"}
+{"ts": "2026-11-13T16:19:15.570+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0003 -> 0004, 仪表盘与组件（S2-01）"}
+{"ts": "2026-11-13T16:19:15.593+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0004 -> 0005, 第三方集成、凭证、外部资源投影、幂等记录与同步游标（S3-02 ~ S3-04）"}
+{"ts": "2026-11-13T16:19:15.641+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0005 -> 0006, Webhook Inbox（S3-05）"}
+{"ts": "2026-11-13T16:19:15.651+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0006 -> 0007, 知识来源、文档收藏、跨系统关联与本地日历（S4-01、S4-02）"}
+{"ts": "2026-11-13T16:19:15.697+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0007 -> 0008, 跨资源搜索索引与维护它的触发器（S4-03、S4-05）"}
+{"ts": "2026-11-13T16:19:15.726+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0008 -> 0009, 通知中心（S5-03）"}
+{"ts": "2026-11-13T16:19:15.747+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0009 -> 0010, n8n 连接、白名单工作流与执行记录（S5-04）"}
+{"ts": "2026-11-13T16:19:15.781+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0010 -> 0011, OpenClaw 实例、接入凭证、密钥库与内部 CA（V2 OC-2，S6-01）"}
+{"ts": "2026-11-13T16:19:15.997+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0011 -> 0012, IM：OpenIM 账号、群与回调收件箱（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:16.032+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0012 -> 0013, IM：会话与消息投影（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:16.061+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0013 -> 0014, IM：消息置顶与代发的幂等键（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:16.074+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0014 -> 0015, IM：通讯录分组（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:16.089+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0015 -> 0016, IM：上传的图片（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:16.102+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0016 -> 0017, AI：MCP 工具调用记录与审批（V2 OC-5，S6-02 / S6-03）"}
+{"ts": "2026-11-13T16:19:16.127+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0017 -> 0018, OpenClaw 实例：记下最近一次签发的 IM 令牌何时到期（V2 T-0063）"}
+{"ts": "2026-11-13T16:19:16.129+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0018 -> 0019, Vikunja、n8n 管理界面的登录账号（T-0080）"}
+{"ts": "2026-11-13T16:19:16.139+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0019 -> 0020, 工作台自己的项目与任务，移除 Vikunja（T-0082）"}
+{"ts": "2026-11-13T16:19:16.203+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0020 -> 0021, OpenClaw 实例的 SSH 自动部署目标（V2 T-0089 B1）"}
+{"ts": "2026-11-13T16:19:16.213+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0021 -> 0022, OpenClaw 实例的 SSH 安装任务（V2 T-0089 B2）"}
+{"ts": "2026-11-13T16:19:16.229+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0022 -> 0023, OpenClaw 实例的 SSH 卸载任务（V2 T-0089 B3）"}
+{"ts": "2026-11-13T16:19:16.232+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0023 -> 0024, 知识库（T-0098，docs/v2/KNOWLEDGE_PLAN.md 第 4 节）"}
+{"ts": "2026-11-13T16:19:16.359+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0024 -> 0025, 知识库取消“人已确认”（T-0102，docs/v2/TIMELINE_PLAN.md 第 3 节）"}
+{"ts": "2026-11-13T16:19:16.368+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0025 -> 0026, 知识库图片（T-0103，docs/v2/TIMELINE_PLAN.md 第 4 节）"}
+{"ts": "2026-11-13T16:19:16.401+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0026 -> 0027, 任务时间轴（T-0104，docs/v2/TIMELINE_PLAN.md 第 2.2 节）"}
+{"ts": "2026-11-13T16:19:16.451+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0027 -> 0028, 项目群（T-0110，docs/v2/AGENT_OPS_PLAN.md 第 2.2 节）"}
+{"ts": "2026-11-13T16:19:16.475+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0028 -> 0029, 任务接取（T-0111，docs/v2/AGENT_OPS_PLAN.md 第 3 节）"}
+{"ts": "2026-11-13T16:19:16.507+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0029 -> 0030, 智能体的项目管理权限（T-0112，docs/v2/AGENT_OPS_PLAN.md 第 2.3 节）"}
+{"ts": "2026-11-13T16:19:16.516+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0030 -> 0031, 服务器状态（T-0113，docs/v2/AGENT_OPS_PLAN.md 第 5 节）"}
+{"ts": "2026-11-13T16:19:16.530+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0031 -> 0032, 远程运维动作（T-0114，docs/v2/AGENT_OPS_PLAN.md 第 6.1 节）"}
+{"ts": "2026-11-13T16:19:16.546+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0032 -> 0033, 接入包的私聊白名单快照（T-0117，docs/v2/AGENT_MESSAGING_PLAN.md 第 3.1 节）"}
+{"ts": "2026-11-13T16:19:16.548+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0033 -> 0034, 智能体的发件箱与拒收记录（T-0118，docs/v2/AGENT_MESSAGING_PLAN.md 第 5、6 节）"}
+{"ts": "2026-11-13T16:19:16.584+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0034 -> 0035, IM 附件：文件与视频，智能体的附件开关（T-0119，docs/v2/AGENT_MESSAGING_PLAN.md 第 4 节）"}
+{"ts": "2026-11-13T16:19:16.606+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0035 -> 0036, 智能体的唤醒（T-0121，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.2 节）"}
+{"ts": "2026-11-13T16:19:16.624+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0036 -> 0037, 终止智能体正在执行的任务（T-0126，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.3 节）"}
+{"ts": "2026-11-13T16:19:16.646+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0037 -> 0038, 项目与任务的 README（T-0122，docs/v2/AGENT_MESSAGING_PLAN.md 第 9 节）"}
+{"ts": "2026-11-13T16:19:16.661+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0038 -> 0039, 项目里的 Issues（T-0123，docs/v2/AGENT_MESSAGING_PLAN.md 第 8 节）"}
+{"ts": "2026-11-13T16:19:16.773+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0039 -> 0040, Gmail 邮件（T-0128，docs/v2/MAIL_PLAN.md）"}
+{"ts": "2026-11-13T16:19:16.824+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0040 -> 0041, 邮箱按智能体分配（T-0132，docs/v2/MAIL_PLAN.md M4 修订）"}
+{"ts": "2026-11-13T16:19:16.836+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0041 -> 0042, 运行服务器（T-0136 ~ T-0139，docs/v2/RUNNER_PLAN.md 第 12 节）"}
+{"ts": "2026-11-13T16:19:16.926+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0042 -> 0043, 运行服务器：常驻环境的快照（T-0139，docs/v2/RUNNER_PLAN.md 第 6.5 节）"}
+{"ts": "2026-11-13T16:19:16.939+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0043 -> 0044, 运行服务器：页面上通过 SSH 部署（T-0136，docs/v2/RUNNER_PLAN.md 第 9 节）"}
+{"ts": "2026-11-13T16:19:16.968+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0044 -> 0045, 一台服务器多个 OpenClaw：服务器与两级负载样本（T-0144 / T-0146）"}
+{"ts": "2026-11-13T16:19:17.018+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0045 -> 0046, 一台服务器多个 OpenClaw：SSH 登录信息按服务器，每个实例的部署单独记（T-0144 / T-0145）"}
+{"ts": "2026-11-13T16:19:17.056+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0046 -> 0047, Retire workflow/account storage (T-0149); downgrade restores empty structures."}
+{"ts": "2026-11-13T16:19:17.079+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0047 -> 0048, 新闻早报：设置、早报、反馈三张表（T-0153）"}
+{"ts": "2026-11-13T16:19:17.130+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0048 -> 0049, 插拔式模块的启用记录（T-0159）"}
+{"ts": "2026-11-13T16:19:17.142+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0049 -> 0050, 侧栏布局：自定义分组、页面挪分组、零代码页面（T-0161）"}
+{"ts": "2026-11-13T16:19:17.153+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0050 -> 0051, 任务的“已完成待查看”（T-0163，docs/v2/HOME_PLAN.md 第 2 节）"}
+{"ts": "2026-11-13T16:19:17.162+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0051 -> 0052, 默认首页换成首页效果图的布局（T-0163，docs/v2/HOME_PLAN.md 第 4 节）"}
+{"ts": "2026-11-13T16:19:17.164+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0052 -> 0053, 任务状态闭环（T-0166，docs/v2/pages-redesign 规范第 4.2、4.3 节）"}
+{"ts": "2026-11-13T16:19:17.191+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0053 -> 0054, OpenClaw 服务器的登录密码加密保存与连接检测（T-0178，加法迁移）"}
+{"ts": "2026-11-13T16:19:17.201+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0054 -> 0055, 容器服务器：环境的最新 CPU 读数与逐项上报时间（T-0185，加法迁移）"}
+{"ts": "2026-11-13T16:19:17.209+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0055 -> 0056, 中转站管理：模型连接、模型目录、连接授权、检测结果、智能体主模型绑定与配置应用任务（T-0201，加法迁移）"}
+{"ts": "2026-11-13T16:19:17.276+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0056 -> 0057, 中转站管理：删除旧版兼容字段（T-0209）"}
+{"ts": "2026-11-13T16:19:17.281+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0057 -> 0058, 应用中心：模块启停的状态版本与同步记录（T-0210，方案 docs/v2/app-center/）"}
+{"ts": "2026-11-13T16:19:17.294+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0058 -> 0059, 运行服务器指令的写入顺序（T-0213）"}
+{"ts": "2026-11-13T16:19:17.301+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0059 -> 0060, 工作空间的图片存储配置（T-0223）"}
+{"ts": "2026-11-13T16:19:17.312+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0060 -> 0061, Independent SSH resource snapshots and persistent deployment placement receipts."}
+{"ts": "2026-11-13T16:19:17.315+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0061 -> 0062, 运行服务器池、实际后端与本地镜像构建亲和性。"}
+{"ts": "2026-11-13T16:19:17.327+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0062 -> 0063, Independent runtime capability requests and grants."}
+{"ts": "2026-11-13T16:19:17.354+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0063 -> 0064, Scoped desired network services and owner-consented ingress (0064)."}
+{"ts": "2026-11-13T16:19:17.403+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0064 -> 0065, One physical server contributes capacity to one registration across both pools."}
+{"ts": "2026-11-13T16:19:17.437+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T16:19:17.437+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log call -------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade  -> 0001, 创建 workspace schema 与 pgcrypto、pg_trgm 扩展
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0001 -> 0002, 用户、会话、外部身份、工作空间与成员（S1-01）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0002 -> 0003, 审计日志（S1-05）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0003 -> 0004, 仪表盘与组件（S2-01）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0004 -> 0005, 第三方集成、凭证、外部资源投影、幂等记录与同步游标（S3-02 ~ S3-04）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0005 -> 0006, Webhook Inbox（S3-05）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0006 -> 0007, 知识来源、文档收藏、跨系统关联与本地日历（S4-01、S4-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0007 -> 0008, 跨资源搜索索引与维护它的触发器（S4-03、S4-05）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0008 -> 0009, 通知中心（S5-03）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0009 -> 0010, n8n 连接、白名单工作流与执行记录（S5-04）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0010 -> 0011, OpenClaw 实例、接入凭证、密钥库与内部 CA（V2 OC-2，S6-01）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0011 -> 0012, IM：OpenIM 账号、群与回调收件箱（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0012 -> 0013, IM：会话与消息投影（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0013 -> 0014, IM：消息置顶与代发的幂等键（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0014 -> 0015, IM：通讯录分组（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0015 -> 0016, IM：上传的图片（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0016 -> 0017, AI：MCP 工具调用记录与审批（V2 OC-5，S6-02 / S6-03）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0017 -> 0018, OpenClaw 实例：记下最近一次签发的 IM 令牌何时到期（V2 T-0063）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0018 -> 0019, Vikunja、n8n 管理界面的登录账号（T-0080）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0019 -> 0020, 工作台自己的项目与任务，移除 Vikunja（T-0082）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0020 -> 0021, OpenClaw 实例的 SSH 自动部署目标（V2 T-0089 B1）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0021 -> 0022, OpenClaw 实例的 SSH 安装任务（V2 T-0089 B2）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0022 -> 0023, OpenClaw 实例的 SSH 卸载任务（V2 T-0089 B3）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0023 -> 0024, 知识库（T-0098，docs/v2/KNOWLEDGE_PLAN.md 第 4 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0024 -> 0025, 知识库取消“人已确认”（T-0102，docs/v2/TIMELINE_PLAN.md 第 3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0025 -> 0026, 知识库图片（T-0103，docs/v2/TIMELINE_PLAN.md 第 4 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0026 -> 0027, 任务时间轴（T-0104，docs/v2/TIMELINE_PLAN.md 第 2.2 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0027 -> 0028, 项目群（T-0110，docs/v2/AGENT_OPS_PLAN.md 第 2.2 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0028 -> 0029, 任务接取（T-0111，docs/v2/AGENT_OPS_PLAN.md 第 3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0029 -> 0030, 智能体的项目管理权限（T-0112，docs/v2/AGENT_OPS_PLAN.md 第 2.3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0030 -> 0031, 服务器状态（T-0113，docs/v2/AGENT_OPS_PLAN.md 第 5 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0031 -> 0032, 远程运维动作（T-0114，docs/v2/AGENT_OPS_PLAN.md 第 6.1 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0032 -> 0033, 接入包的私聊白名单快照（T-0117，docs/v2/AGENT_MESSAGING_PLAN.md 第 3.1 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0033 -> 0034, 智能体的发件箱与拒收记录（T-0118，docs/v2/AGENT_MESSAGING_PLAN.md 第 5、6 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0034 -> 0035, IM 附件：文件与视频，智能体的附件开关（T-0119，docs/v2/AGENT_MESSAGING_PLAN.md 第 4 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0035 -> 0036, 智能体的唤醒（T-0121，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.2 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0036 -> 0037, 终止智能体正在执行的任务（T-0126，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0037 -> 0038, 项目与任务的 README（T-0122，docs/v2/AGENT_MESSAGING_PLAN.md 第 9 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0038 -> 0039, 项目里的 Issues（T-0123，docs/v2/AGENT_MESSAGING_PLAN.md 第 8 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0039 -> 0040, Gmail 邮件（T-0128，docs/v2/MAIL_PLAN.md）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0040 -> 0041, 邮箱按智能体分配（T-0132，docs/v2/MAIL_PLAN.md M4 修订）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0041 -> 0042, 运行服务器（T-0136 ~ T-0139，docs/v2/RUNNER_PLAN.md 第 12 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0042 -> 0043, 运行服务器：常驻环境的快照（T-0139，docs/v2/RUNNER_PLAN.md 第 6.5 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0043 -> 0044, 运行服务器：页面上通过 SSH 部署（T-0136，docs/v2/RUNNER_PLAN.md 第 9 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0044 -> 0045, 一台服务器多个 OpenClaw：服务器与两级负载样本（T-0144 / T-0146）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0045 -> 0046, 一台服务器多个 OpenClaw：SSH 登录信息按服务器，每个实例的部署单独记（T-0144 / T-0145）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0046 -> 0047, Retire workflow/account storage (T-0149); downgrade restores empty structures.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0047 -> 0048, 新闻早报：设置、早报、反馈三张表（T-0153）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0048 -> 0049, 插拔式模块的启用记录（T-0159）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0049 -> 0050, 侧栏布局：自定义分组、页面挪分组、零代码页面（T-0161）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0050 -> 0051, 任务的“已完成待查看”（T-0163，docs/v2/HOME_PLAN.md 第 2 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0051 -> 0052, 默认首页换成首页效果图的布局（T-0163，docs/v2/HOME_PLAN.md 第 4 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0052 -> 0053, 任务状态闭环（T-0166，docs/v2/pages-redesign 规范第 4.2、4.3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0053 -> 0054, OpenClaw 服务器的登录密码加密保存与连接检测（T-0178，加法迁移）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0054 -> 0055, 容器服务器：环境的最新 CPU 读数与逐项上报时间（T-0185，加法迁移）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0055 -> 0056, 中转站管理：模型连接、模型目录、连接授权、检测结果、智能体主模型绑定与配置应用任务（T-0201，加法迁移）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0056 -> 0057, 中转站管理：删除旧版兼容字段（T-0209）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0057 -> 0058, 应用中心：模块启停的状态版本与同步记录（T-0210，方案 docs/v2/app-center/）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0058 -> 0059, 运行服务器指令的写入顺序（T-0213）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0059 -> 0060, 工作空间的图片存储配置（T-0223）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0060 -> 0061, Independent SSH resource snapshots and persistent deployment placement receipts.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0061 -> 0062, 运行服务器池、实际后端与本地镜像构建亲和性。
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0062 -> 0063, Independent runtime capability requests and grants.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0063 -> 0064, Scoped desired network services and owner-consented ingress (0064).
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0064 -> 0065, One physical server contributes capacity to one registration across both pools.
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+__ test_upgrade_from_each_legacy_branch_preserves_data_and_allocator[gateway] __
+
+self = <alembic.script.base.ScriptDirectory object at 0x7fc19f093410>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7fc19f092d20>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+temp_database_url = 'postgresql+asyncpg://workspace@127.0.0.1:5432/ws_test_3e55f07f1ca9'
+legacy = 'gateway'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("legacy", ["base", "gateway", "bridge"])
+    def test_upgrade_from_each_legacy_branch_preserves_data_and_allocator(
+        temp_database_url: str, legacy: str
+    ) -> None:
+        config = alembic_config(temp_database_url)
+        command.upgrade(config, "0065")
+        bridge = asyncio.run(_legacy_bridge(temp_database_url)) if legacy == "bridge" else None
+        if legacy == "gateway":
+            command.upgrade(config, "0066")
+    
+            async def advance() -> None:
+                conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
+                try:
+                    await conn.execute("SELECT setval('workspace.runner_ingress_port_seq', 30123)")
+                    await conn.execute("SELECT setval('workspace.runner_network_policy_revision_seq', 81)")
+                finally:
+                    await conn.close()
+    
+            asyncio.run(advance())
+>       command.upgrade(config, "head")
+
+tests/test_migration_revision_collision.py:87: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap_external>:999: in exec_module
+    ???
+<frozen importlib._bootstrap>:488: in _call_with_frames_removed
+    ???
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+<string>:8: in run_migrations
+    ???
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7fc19f093410>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+----------------------------- Captured stdout call -----------------------------
+{"ts": "2026-11-13T16:19:17.670+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T16:19:17.670+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+{"ts": "2026-11-13T16:19:17.692+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade  -> 0001, 创建 workspace schema 与 pgcrypto、pg_trgm 扩展"}
+{"ts": "2026-11-13T16:19:17.708+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0001 -> 0002, 用户、会话、外部身份、工作空间与成员（S1-01）"}
+{"ts": "2026-11-13T16:19:17.750+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0002 -> 0003, 审计日志（S1-05）"}
+{"ts": "2026-11-13T16:19:17.760+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0003 -> 0004, 仪表盘与组件（S2-01）"}
+{"ts": "2026-11-13T16:19:17.783+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0004 -> 0005, 第三方集成、凭证、外部资源投影、幂等记录与同步游标（S3-02 ~ S3-04）"}
+{"ts": "2026-11-13T16:19:17.834+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0005 -> 0006, Webhook Inbox（S3-05）"}
+{"ts": "2026-11-13T16:19:17.844+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0006 -> 0007, 知识来源、文档收藏、跨系统关联与本地日历（S4-01、S4-02）"}
+{"ts": "2026-11-13T16:19:17.889+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0007 -> 0008, 跨资源搜索索引与维护它的触发器（S4-03、S4-05）"}
+{"ts": "2026-11-13T16:19:17.915+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0008 -> 0009, 通知中心（S5-03）"}
+{"ts": "2026-11-13T16:19:17.929+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0009 -> 0010, n8n 连接、白名单工作流与执行记录（S5-04）"}
+{"ts": "2026-11-13T16:19:17.962+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0010 -> 0011, OpenClaw 实例、接入凭证、密钥库与内部 CA（V2 OC-2，S6-01）"}
+{"ts": "2026-11-13T16:19:18.033+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0011 -> 0012, IM：OpenIM 账号、群与回调收件箱（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:18.073+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0012 -> 0013, IM：会话与消息投影（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:18.102+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0013 -> 0014, IM：消息置顶与代发的幂等键（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:18.114+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0014 -> 0015, IM：通讯录分组（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:18.128+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0015 -> 0016, IM：上传的图片（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:18.141+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0016 -> 0017, AI：MCP 工具调用记录与审批（V2 OC-5，S6-02 / S6-03）"}
+{"ts": "2026-11-13T16:19:18.162+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0017 -> 0018, OpenClaw 实例：记下最近一次签发的 IM 令牌何时到期（V2 T-0063）"}
+{"ts": "2026-11-13T16:19:18.165+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0018 -> 0019, Vikunja、n8n 管理界面的登录账号（T-0080）"}
+{"ts": "2026-11-13T16:19:18.174+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0019 -> 0020, 工作台自己的项目与任务，移除 Vikunja（T-0082）"}
+{"ts": "2026-11-13T16:19:18.232+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0020 -> 0021, OpenClaw 实例的 SSH 自动部署目标（V2 T-0089 B1）"}
+{"ts": "2026-11-13T16:19:18.243+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0021 -> 0022, OpenClaw 实例的 SSH 安装任务（V2 T-0089 B2）"}
+{"ts": "2026-11-13T16:19:18.260+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0022 -> 0023, OpenClaw 实例的 SSH 卸载任务（V2 T-0089 B3）"}
+{"ts": "2026-11-13T16:19:18.264+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0023 -> 0024, 知识库（T-0098，docs/v2/KNOWLEDGE_PLAN.md 第 4 节）"}
+{"ts": "2026-11-13T16:19:18.382+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0024 -> 0025, 知识库取消“人已确认”（T-0102，docs/v2/TIMELINE_PLAN.md 第 3 节）"}
+{"ts": "2026-11-13T16:19:18.387+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0025 -> 0026, 知识库图片（T-0103，docs/v2/TIMELINE_PLAN.md 第 4 节）"}
+{"ts": "2026-11-13T16:19:18.408+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0026 -> 0027, 任务时间轴（T-0104，docs/v2/TIMELINE_PLAN.md 第 2.2 节）"}
+{"ts": "2026-11-13T16:19:18.456+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0027 -> 0028, 项目群（T-0110，docs/v2/AGENT_OPS_PLAN.md 第 2.2 节）"}
+{"ts": "2026-11-13T16:19:18.475+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0028 -> 0029, 任务接取（T-0111，docs/v2/AGENT_OPS_PLAN.md 第 3 节）"}
+{"ts": "2026-11-13T16:19:18.507+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0029 -> 0030, 智能体的项目管理权限（T-0112，docs/v2/AGENT_OPS_PLAN.md 第 2.3 节）"}
+{"ts": "2026-11-13T16:19:18.515+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0030 -> 0031, 服务器状态（T-0113，docs/v2/AGENT_OPS_PLAN.md 第 5 节）"}
+{"ts": "2026-11-13T16:19:18.530+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0031 -> 0032, 远程运维动作（T-0114，docs/v2/AGENT_OPS_PLAN.md 第 6.1 节）"}
+{"ts": "2026-11-13T16:19:18.544+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0032 -> 0033, 接入包的私聊白名单快照（T-0117，docs/v2/AGENT_MESSAGING_PLAN.md 第 3.1 节）"}
+{"ts": "2026-11-13T16:19:18.546+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0033 -> 0034, 智能体的发件箱与拒收记录（T-0118，docs/v2/AGENT_MESSAGING_PLAN.md 第 5、6 节）"}
+{"ts": "2026-11-13T16:19:18.574+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0034 -> 0035, IM 附件：文件与视频，智能体的附件开关（T-0119，docs/v2/AGENT_MESSAGING_PLAN.md 第 4 节）"}
+{"ts": "2026-11-13T16:19:18.589+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0035 -> 0036, 智能体的唤醒（T-0121，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.2 节）"}
+{"ts": "2026-11-13T16:19:18.603+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0036 -> 0037, 终止智能体正在执行的任务（T-0126，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.3 节）"}
+{"ts": "2026-11-13T16:19:18.627+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0037 -> 0038, 项目与任务的 README（T-0122，docs/v2/AGENT_MESSAGING_PLAN.md 第 9 节）"}
+{"ts": "2026-11-13T16:19:18.640+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0038 -> 0039, 项目里的 Issues（T-0123，docs/v2/AGENT_MESSAGING_PLAN.md 第 8 节）"}
+{"ts": "2026-11-13T16:19:18.729+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0039 -> 0040, Gmail 邮件（T-0128，docs/v2/MAIL_PLAN.md）"}
+{"ts": "2026-11-13T16:19:18.779+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0040 -> 0041, 邮箱按智能体分配（T-0132，docs/v2/MAIL_PLAN.md M4 修订）"}
+{"ts": "2026-11-13T16:19:18.793+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0041 -> 0042, 运行服务器（T-0136 ~ T-0139，docs/v2/RUNNER_PLAN.md 第 12 节）"}
+{"ts": "2026-11-13T16:19:18.893+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0042 -> 0043, 运行服务器：常驻环境的快照（T-0139，docs/v2/RUNNER_PLAN.md 第 6.5 节）"}
+{"ts": "2026-11-13T16:19:18.906+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0043 -> 0044, 运行服务器：页面上通过 SSH 部署（T-0136，docs/v2/RUNNER_PLAN.md 第 9 节）"}
+{"ts": "2026-11-13T16:19:18.933+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0044 -> 0045, 一台服务器多个 OpenClaw：服务器与两级负载样本（T-0144 / T-0146）"}
+{"ts": "2026-11-13T16:19:18.980+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0045 -> 0046, 一台服务器多个 OpenClaw：SSH 登录信息按服务器，每个实例的部署单独记（T-0144 / T-0145）"}
+{"ts": "2026-11-13T16:19:19.020+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0046 -> 0047, Retire workflow/account storage (T-0149); downgrade restores empty structures."}
+{"ts": "2026-11-13T16:19:19.042+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0047 -> 0048, 新闻早报：设置、早报、反馈三张表（T-0153）"}
+{"ts": "2026-11-13T16:19:19.081+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0048 -> 0049, 插拔式模块的启用记录（T-0159）"}
+{"ts": "2026-11-13T16:19:19.090+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0049 -> 0050, 侧栏布局：自定义分组、页面挪分组、零代码页面（T-0161）"}
+{"ts": "2026-11-13T16:19:19.101+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0050 -> 0051, 任务的“已完成待查看”（T-0163，docs/v2/HOME_PLAN.md 第 2 节）"}
+{"ts": "2026-11-13T16:19:19.107+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0051 -> 0052, 默认首页换成首页效果图的布局（T-0163，docs/v2/HOME_PLAN.md 第 4 节）"}
+{"ts": "2026-11-13T16:19:19.109+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0052 -> 0053, 任务状态闭环（T-0166，docs/v2/pages-redesign 规范第 4.2、4.3 节）"}
+{"ts": "2026-11-13T16:19:19.138+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0053 -> 0054, OpenClaw 服务器的登录密码加密保存与连接检测（T-0178，加法迁移）"}
+{"ts": "2026-11-13T16:19:19.148+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0054 -> 0055, 容器服务器：环境的最新 CPU 读数与逐项上报时间（T-0185，加法迁移）"}
+{"ts": "2026-11-13T16:19:19.156+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0055 -> 0056, 中转站管理：模型连接、模型目录、连接授权、检测结果、智能体主模型绑定与配置应用任务（T-0201，加法迁移）"}
+{"ts": "2026-11-13T16:19:19.228+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0056 -> 0057, 中转站管理：删除旧版兼容字段（T-0209）"}
+{"ts": "2026-11-13T16:19:19.234+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0057 -> 0058, 应用中心：模块启停的状态版本与同步记录（T-0210，方案 docs/v2/app-center/）"}
+{"ts": "2026-11-13T16:19:19.250+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0058 -> 0059, 运行服务器指令的写入顺序（T-0213）"}
+{"ts": "2026-11-13T16:19:19.258+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0059 -> 0060, 工作空间的图片存储配置（T-0223）"}
+{"ts": "2026-11-13T16:19:19.266+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0060 -> 0061, Independent SSH resource snapshots and persistent deployment placement receipts."}
+{"ts": "2026-11-13T16:19:19.269+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0061 -> 0062, 运行服务器池、实际后端与本地镜像构建亲和性。"}
+{"ts": "2026-11-13T16:19:19.281+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0062 -> 0063, Independent runtime capability requests and grants."}
+{"ts": "2026-11-13T16:19:19.307+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0063 -> 0064, Scoped desired network services and owner-consented ingress (0064)."}
+{"ts": "2026-11-13T16:19:19.348+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0064 -> 0065, One physical server contributes capacity to one registration across both pools."}
+{"ts": "2026-11-13T16:19:19.380+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T16:19:19.380+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+{"ts": "2026-11-13T16:19:19.399+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0065 -> 0066, Stable non-recycled TCP gateway ports and monotonically fenced network snapshots."}
+{"ts": "2026-11-13T16:19:19.445+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T16:19:19.445+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log call -------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade  -> 0001, 创建 workspace schema 与 pgcrypto、pg_trgm 扩展
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0001 -> 0002, 用户、会话、外部身份、工作空间与成员（S1-01）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0002 -> 0003, 审计日志（S1-05）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0003 -> 0004, 仪表盘与组件（S2-01）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0004 -> 0005, 第三方集成、凭证、外部资源投影、幂等记录与同步游标（S3-02 ~ S3-04）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0005 -> 0006, Webhook Inbox（S3-05）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0006 -> 0007, 知识来源、文档收藏、跨系统关联与本地日历（S4-01、S4-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0007 -> 0008, 跨资源搜索索引与维护它的触发器（S4-03、S4-05）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0008 -> 0009, 通知中心（S5-03）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0009 -> 0010, n8n 连接、白名单工作流与执行记录（S5-04）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0010 -> 0011, OpenClaw 实例、接入凭证、密钥库与内部 CA（V2 OC-2，S6-01）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0011 -> 0012, IM：OpenIM 账号、群与回调收件箱（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0012 -> 0013, IM：会话与消息投影（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0013 -> 0014, IM：消息置顶与代发的幂等键（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0014 -> 0015, IM：通讯录分组（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0015 -> 0016, IM：上传的图片（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0016 -> 0017, AI：MCP 工具调用记录与审批（V2 OC-5，S6-02 / S6-03）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0017 -> 0018, OpenClaw 实例：记下最近一次签发的 IM 令牌何时到期（V2 T-0063）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0018 -> 0019, Vikunja、n8n 管理界面的登录账号（T-0080）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0019 -> 0020, 工作台自己的项目与任务，移除 Vikunja（T-0082）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0020 -> 0021, OpenClaw 实例的 SSH 自动部署目标（V2 T-0089 B1）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0021 -> 0022, OpenClaw 实例的 SSH 安装任务（V2 T-0089 B2）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0022 -> 0023, OpenClaw 实例的 SSH 卸载任务（V2 T-0089 B3）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0023 -> 0024, 知识库（T-0098，docs/v2/KNOWLEDGE_PLAN.md 第 4 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0024 -> 0025, 知识库取消“人已确认”（T-0102，docs/v2/TIMELINE_PLAN.md 第 3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0025 -> 0026, 知识库图片（T-0103，docs/v2/TIMELINE_PLAN.md 第 4 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0026 -> 0027, 任务时间轴（T-0104，docs/v2/TIMELINE_PLAN.md 第 2.2 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0027 -> 0028, 项目群（T-0110，docs/v2/AGENT_OPS_PLAN.md 第 2.2 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0028 -> 0029, 任务接取（T-0111，docs/v2/AGENT_OPS_PLAN.md 第 3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0029 -> 0030, 智能体的项目管理权限（T-0112，docs/v2/AGENT_OPS_PLAN.md 第 2.3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0030 -> 0031, 服务器状态（T-0113，docs/v2/AGENT_OPS_PLAN.md 第 5 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0031 -> 0032, 远程运维动作（T-0114，docs/v2/AGENT_OPS_PLAN.md 第 6.1 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0032 -> 0033, 接入包的私聊白名单快照（T-0117，docs/v2/AGENT_MESSAGING_PLAN.md 第 3.1 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0033 -> 0034, 智能体的发件箱与拒收记录（T-0118，docs/v2/AGENT_MESSAGING_PLAN.md 第 5、6 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0034 -> 0035, IM 附件：文件与视频，智能体的附件开关（T-0119，docs/v2/AGENT_MESSAGING_PLAN.md 第 4 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0035 -> 0036, 智能体的唤醒（T-0121，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.2 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0036 -> 0037, 终止智能体正在执行的任务（T-0126，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0037 -> 0038, 项目与任务的 README（T-0122，docs/v2/AGENT_MESSAGING_PLAN.md 第 9 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0038 -> 0039, 项目里的 Issues（T-0123，docs/v2/AGENT_MESSAGING_PLAN.md 第 8 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0039 -> 0040, Gmail 邮件（T-0128，docs/v2/MAIL_PLAN.md）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0040 -> 0041, 邮箱按智能体分配（T-0132，docs/v2/MAIL_PLAN.md M4 修订）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0041 -> 0042, 运行服务器（T-0136 ~ T-0139，docs/v2/RUNNER_PLAN.md 第 12 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0042 -> 0043, 运行服务器：常驻环境的快照（T-0139，docs/v2/RUNNER_PLAN.md 第 6.5 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0043 -> 0044, 运行服务器：页面上通过 SSH 部署（T-0136，docs/v2/RUNNER_PLAN.md 第 9 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0044 -> 0045, 一台服务器多个 OpenClaw：服务器与两级负载样本（T-0144 / T-0146）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0045 -> 0046, 一台服务器多个 OpenClaw：SSH 登录信息按服务器，每个实例的部署单独记（T-0144 / T-0145）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0046 -> 0047, Retire workflow/account storage (T-0149); downgrade restores empty structures.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0047 -> 0048, 新闻早报：设置、早报、反馈三张表（T-0153）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0048 -> 0049, 插拔式模块的启用记录（T-0159）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0049 -> 0050, 侧栏布局：自定义分组、页面挪分组、零代码页面（T-0161）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0050 -> 0051, 任务的“已完成待查看”（T-0163，docs/v2/HOME_PLAN.md 第 2 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0051 -> 0052, 默认首页换成首页效果图的布局（T-0163，docs/v2/HOME_PLAN.md 第 4 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0052 -> 0053, 任务状态闭环（T-0166，docs/v2/pages-redesign 规范第 4.2、4.3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0053 -> 0054, OpenClaw 服务器的登录密码加密保存与连接检测（T-0178，加法迁移）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0054 -> 0055, 容器服务器：环境的最新 CPU 读数与逐项上报时间（T-0185，加法迁移）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0055 -> 0056, 中转站管理：模型连接、模型目录、连接授权、检测结果、智能体主模型绑定与配置应用任务（T-0201，加法迁移）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0056 -> 0057, 中转站管理：删除旧版兼容字段（T-0209）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0057 -> 0058, 应用中心：模块启停的状态版本与同步记录（T-0210，方案 docs/v2/app-center/）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0058 -> 0059, 运行服务器指令的写入顺序（T-0213）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0059 -> 0060, 工作空间的图片存储配置（T-0223）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0060 -> 0061, Independent SSH resource snapshots and persistent deployment placement receipts.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0061 -> 0062, 运行服务器池、实际后端与本地镜像构建亲和性。
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0062 -> 0063, Independent runtime capability requests and grants.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0063 -> 0064, Scoped desired network services and owner-consented ingress (0064).
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0064 -> 0065, One physical server contributes capacity to one registration across both pools.
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0065 -> 0066, Stable non-recycled TCP gateway ports and monotonically fenced network snapshots.
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+__ test_upgrade_from_each_legacy_branch_preserves_data_and_allocator[bridge] ___
+
+self = <alembic.script.base.ScriptDirectory object at 0x7fc19f5bd820>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7fc19fa44980>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+temp_database_url = 'postgresql+asyncpg://workspace@127.0.0.1:5432/ws_test_95bcc9ed8e7c'
+legacy = 'bridge'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("legacy", ["base", "gateway", "bridge"])
+    def test_upgrade_from_each_legacy_branch_preserves_data_and_allocator(
+        temp_database_url: str, legacy: str
+    ) -> None:
+        config = alembic_config(temp_database_url)
+        command.upgrade(config, "0065")
+        bridge = asyncio.run(_legacy_bridge(temp_database_url)) if legacy == "bridge" else None
+        if legacy == "gateway":
+            command.upgrade(config, "0066")
+    
+            async def advance() -> None:
+                conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
+                try:
+                    await conn.execute("SELECT setval('workspace.runner_ingress_port_seq', 30123)")
+                    await conn.execute("SELECT setval('workspace.runner_network_policy_revision_seq', 81)")
+                finally:
+                    await conn.close()
+    
+            asyncio.run(advance())
+>       command.upgrade(config, "head")
+
+tests/test_migration_revision_collision.py:87: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap_external>:999: in exec_module
+    ???
+<frozen importlib._bootstrap>:488: in _call_with_frames_removed
+    ???
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+<string>:8: in run_migrations
+    ???
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7fc19f5bd820>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+----------------------------- Captured stdout call -----------------------------
+{"ts": "2026-11-13T16:19:19.630+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T16:19:19.630+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+{"ts": "2026-11-13T16:19:19.650+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade  -> 0001, 创建 workspace schema 与 pgcrypto、pg_trgm 扩展"}
+{"ts": "2026-11-13T16:19:19.668+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0001 -> 0002, 用户、会话、外部身份、工作空间与成员（S1-01）"}
+{"ts": "2026-11-13T16:19:19.712+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0002 -> 0003, 审计日志（S1-05）"}
+{"ts": "2026-11-13T16:19:19.722+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0003 -> 0004, 仪表盘与组件（S2-01）"}
+{"ts": "2026-11-13T16:19:19.742+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0004 -> 0005, 第三方集成、凭证、外部资源投影、幂等记录与同步游标（S3-02 ~ S3-04）"}
+{"ts": "2026-11-13T16:19:19.788+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0005 -> 0006, Webhook Inbox（S3-05）"}
+{"ts": "2026-11-13T16:19:19.798+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0006 -> 0007, 知识来源、文档收藏、跨系统关联与本地日历（S4-01、S4-02）"}
+{"ts": "2026-11-13T16:19:19.846+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0007 -> 0008, 跨资源搜索索引与维护它的触发器（S4-03、S4-05）"}
+{"ts": "2026-11-13T16:19:19.872+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0008 -> 0009, 通知中心（S5-03）"}
+{"ts": "2026-11-13T16:19:19.885+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0009 -> 0010, n8n 连接、白名单工作流与执行记录（S5-04）"}
+{"ts": "2026-11-13T16:19:19.916+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0010 -> 0011, OpenClaw 实例、接入凭证、密钥库与内部 CA（V2 OC-2，S6-01）"}
+{"ts": "2026-11-13T16:19:19.984+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0011 -> 0012, IM：OpenIM 账号、群与回调收件箱（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:20.020+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0012 -> 0013, IM：会话与消息投影（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:20.049+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0013 -> 0014, IM：消息置顶与代发的幂等键（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:20.059+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0014 -> 0015, IM：通讯录分组（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:20.074+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0015 -> 0016, IM：上传的图片（V2 OC-3，S6-02）"}
+{"ts": "2026-11-13T16:19:20.086+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0016 -> 0017, AI：MCP 工具调用记录与审批（V2 OC-5，S6-02 / S6-03）"}
+{"ts": "2026-11-13T16:19:20.105+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0017 -> 0018, OpenClaw 实例：记下最近一次签发的 IM 令牌何时到期（V2 T-0063）"}
+{"ts": "2026-11-13T16:19:20.107+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0018 -> 0019, Vikunja、n8n 管理界面的登录账号（T-0080）"}
+{"ts": "2026-11-13T16:19:20.129+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0019 -> 0020, 工作台自己的项目与任务，移除 Vikunja（T-0082）"}
+{"ts": "2026-11-13T16:19:20.214+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0020 -> 0021, OpenClaw 实例的 SSH 自动部署目标（V2 T-0089 B1）"}
+{"ts": "2026-11-13T16:19:20.231+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0021 -> 0022, OpenClaw 实例的 SSH 安装任务（V2 T-0089 B2）"}
+{"ts": "2026-11-13T16:19:20.437+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0022 -> 0023, OpenClaw 实例的 SSH 卸载任务（V2 T-0089 B3）"}
+{"ts": "2026-11-13T16:19:20.441+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0023 -> 0024, 知识库（T-0098，docs/v2/KNOWLEDGE_PLAN.md 第 4 节）"}
+{"ts": "2026-11-13T16:19:20.562+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0024 -> 0025, 知识库取消“人已确认”（T-0102，docs/v2/TIMELINE_PLAN.md 第 3 节）"}
+{"ts": "2026-11-13T16:19:20.566+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0025 -> 0026, 知识库图片（T-0103，docs/v2/TIMELINE_PLAN.md 第 4 节）"}
+{"ts": "2026-11-13T16:19:20.591+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0026 -> 0027, 任务时间轴（T-0104，docs/v2/TIMELINE_PLAN.md 第 2.2 节）"}
+{"ts": "2026-11-13T16:19:20.646+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0027 -> 0028, 项目群（T-0110，docs/v2/AGENT_OPS_PLAN.md 第 2.2 节）"}
+{"ts": "2026-11-13T16:19:20.663+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0028 -> 0029, 任务接取（T-0111，docs/v2/AGENT_OPS_PLAN.md 第 3 节）"}
+{"ts": "2026-11-13T16:19:20.698+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0029 -> 0030, 智能体的项目管理权限（T-0112，docs/v2/AGENT_OPS_PLAN.md 第 2.3 节）"}
+{"ts": "2026-11-13T16:19:20.709+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0030 -> 0031, 服务器状态（T-0113，docs/v2/AGENT_OPS_PLAN.md 第 5 节）"}
+{"ts": "2026-11-13T16:19:20.725+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0031 -> 0032, 远程运维动作（T-0114，docs/v2/AGENT_OPS_PLAN.md 第 6.1 节）"}
+{"ts": "2026-11-13T16:19:20.741+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0032 -> 0033, 接入包的私聊白名单快照（T-0117，docs/v2/AGENT_MESSAGING_PLAN.md 第 3.1 节）"}
+{"ts": "2026-11-13T16:19:20.743+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0033 -> 0034, 智能体的发件箱与拒收记录（T-0118，docs/v2/AGENT_MESSAGING_PLAN.md 第 5、6 节）"}
+{"ts": "2026-11-13T16:19:20.772+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0034 -> 0035, IM 附件：文件与视频，智能体的附件开关（T-0119，docs/v2/AGENT_MESSAGING_PLAN.md 第 4 节）"}
+{"ts": "2026-11-13T16:19:20.795+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0035 -> 0036, 智能体的唤醒（T-0121，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.2 节）"}
+{"ts": "2026-11-13T16:19:20.810+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0036 -> 0037, 终止智能体正在执行的任务（T-0126，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.3 节）"}
+{"ts": "2026-11-13T16:19:20.835+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0037 -> 0038, 项目与任务的 README（T-0122，docs/v2/AGENT_MESSAGING_PLAN.md 第 9 节）"}
+{"ts": "2026-11-13T16:19:20.851+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0038 -> 0039, 项目里的 Issues（T-0123，docs/v2/AGENT_MESSAGING_PLAN.md 第 8 节）"}
+{"ts": "2026-11-13T16:19:20.945+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0039 -> 0040, Gmail 邮件（T-0128，docs/v2/MAIL_PLAN.md）"}
+{"ts": "2026-11-13T16:19:21.005+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0040 -> 0041, 邮箱按智能体分配（T-0132，docs/v2/MAIL_PLAN.md M4 修订）"}
+{"ts": "2026-11-13T16:19:21.019+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0041 -> 0042, 运行服务器（T-0136 ~ T-0139，docs/v2/RUNNER_PLAN.md 第 12 节）"}
+{"ts": "2026-11-13T16:19:21.116+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0042 -> 0043, 运行服务器：常驻环境的快照（T-0139，docs/v2/RUNNER_PLAN.md 第 6.5 节）"}
+{"ts": "2026-11-13T16:19:21.130+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0043 -> 0044, 运行服务器：页面上通过 SSH 部署（T-0136，docs/v2/RUNNER_PLAN.md 第 9 节）"}
+{"ts": "2026-11-13T16:19:21.155+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0044 -> 0045, 一台服务器多个 OpenClaw：服务器与两级负载样本（T-0144 / T-0146）"}
+{"ts": "2026-11-13T16:19:21.210+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0045 -> 0046, 一台服务器多个 OpenClaw：SSH 登录信息按服务器，每个实例的部署单独记（T-0144 / T-0145）"}
+{"ts": "2026-11-13T16:19:21.257+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0046 -> 0047, Retire workflow/account storage (T-0149); downgrade restores empty structures."}
+{"ts": "2026-11-13T16:19:21.284+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0047 -> 0048, 新闻早报：设置、早报、反馈三张表（T-0153）"}
+{"ts": "2026-11-13T16:19:21.325+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0048 -> 0049, 插拔式模块的启用记录（T-0159）"}
+{"ts": "2026-11-13T16:19:21.335+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0049 -> 0050, 侧栏布局：自定义分组、页面挪分组、零代码页面（T-0161）"}
+{"ts": "2026-11-13T16:19:21.349+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0050 -> 0051, 任务的“已完成待查看”（T-0163，docs/v2/HOME_PLAN.md 第 2 节）"}
+{"ts": "2026-11-13T16:19:21.356+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0051 -> 0052, 默认首页换成首页效果图的布局（T-0163，docs/v2/HOME_PLAN.md 第 4 节）"}
+{"ts": "2026-11-13T16:19:21.358+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0052 -> 0053, 任务状态闭环（T-0166，docs/v2/pages-redesign 规范第 4.2、4.3 节）"}
+{"ts": "2026-11-13T16:19:21.392+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0053 -> 0054, OpenClaw 服务器的登录密码加密保存与连接检测（T-0178，加法迁移）"}
+{"ts": "2026-11-13T16:19:21.407+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0054 -> 0055, 容器服务器：环境的最新 CPU 读数与逐项上报时间（T-0185，加法迁移）"}
+{"ts": "2026-11-13T16:19:21.417+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0055 -> 0056, 中转站管理：模型连接、模型目录、连接授权、检测结果、智能体主模型绑定与配置应用任务（T-0201，加法迁移）"}
+{"ts": "2026-11-13T16:19:21.494+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0056 -> 0057, 中转站管理：删除旧版兼容字段（T-0209）"}
+{"ts": "2026-11-13T16:19:21.502+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0057 -> 0058, 应用中心：模块启停的状态版本与同步记录（T-0210，方案 docs/v2/app-center/）"}
+{"ts": "2026-11-13T16:19:21.516+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0058 -> 0059, 运行服务器指令的写入顺序（T-0213）"}
+{"ts": "2026-11-13T16:19:21.524+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0059 -> 0060, 工作空间的图片存储配置（T-0223）"}
+{"ts": "2026-11-13T16:19:21.534+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0060 -> 0061, Independent SSH resource snapshots and persistent deployment placement receipts."}
+{"ts": "2026-11-13T16:19:21.537+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0061 -> 0062, 运行服务器池、实际后端与本地镜像构建亲和性。"}
+{"ts": "2026-11-13T16:19:21.551+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0062 -> 0063, Independent runtime capability requests and grants."}
+{"ts": "2026-11-13T16:19:21.577+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0063 -> 0064, Scoped desired network services and owner-consented ingress (0064)."}
+{"ts": "2026-11-13T16:19:21.621+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Running upgrade 0064 -> 0065, One physical server contributes capacity to one registration across both pools."}
+{"ts": "2026-11-13T16:19:21.697+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T16:19:21.697+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log call -------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade  -> 0001, 创建 workspace schema 与 pgcrypto、pg_trgm 扩展
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0001 -> 0002, 用户、会话、外部身份、工作空间与成员（S1-01）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0002 -> 0003, 审计日志（S1-05）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0003 -> 0004, 仪表盘与组件（S2-01）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0004 -> 0005, 第三方集成、凭证、外部资源投影、幂等记录与同步游标（S3-02 ~ S3-04）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0005 -> 0006, Webhook Inbox（S3-05）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0006 -> 0007, 知识来源、文档收藏、跨系统关联与本地日历（S4-01、S4-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0007 -> 0008, 跨资源搜索索引与维护它的触发器（S4-03、S4-05）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0008 -> 0009, 通知中心（S5-03）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0009 -> 0010, n8n 连接、白名单工作流与执行记录（S5-04）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0010 -> 0011, OpenClaw 实例、接入凭证、密钥库与内部 CA（V2 OC-2，S6-01）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0011 -> 0012, IM：OpenIM 账号、群与回调收件箱（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0012 -> 0013, IM：会话与消息投影（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0013 -> 0014, IM：消息置顶与代发的幂等键（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0014 -> 0015, IM：通讯录分组（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0015 -> 0016, IM：上传的图片（V2 OC-3，S6-02）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0016 -> 0017, AI：MCP 工具调用记录与审批（V2 OC-5，S6-02 / S6-03）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0017 -> 0018, OpenClaw 实例：记下最近一次签发的 IM 令牌何时到期（V2 T-0063）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0018 -> 0019, Vikunja、n8n 管理界面的登录账号（T-0080）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0019 -> 0020, 工作台自己的项目与任务，移除 Vikunja（T-0082）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0020 -> 0021, OpenClaw 实例的 SSH 自动部署目标（V2 T-0089 B1）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0021 -> 0022, OpenClaw 实例的 SSH 安装任务（V2 T-0089 B2）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0022 -> 0023, OpenClaw 实例的 SSH 卸载任务（V2 T-0089 B3）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0023 -> 0024, 知识库（T-0098，docs/v2/KNOWLEDGE_PLAN.md 第 4 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0024 -> 0025, 知识库取消“人已确认”（T-0102，docs/v2/TIMELINE_PLAN.md 第 3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0025 -> 0026, 知识库图片（T-0103，docs/v2/TIMELINE_PLAN.md 第 4 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0026 -> 0027, 任务时间轴（T-0104，docs/v2/TIMELINE_PLAN.md 第 2.2 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0027 -> 0028, 项目群（T-0110，docs/v2/AGENT_OPS_PLAN.md 第 2.2 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0028 -> 0029, 任务接取（T-0111，docs/v2/AGENT_OPS_PLAN.md 第 3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0029 -> 0030, 智能体的项目管理权限（T-0112，docs/v2/AGENT_OPS_PLAN.md 第 2.3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0030 -> 0031, 服务器状态（T-0113，docs/v2/AGENT_OPS_PLAN.md 第 5 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0031 -> 0032, 远程运维动作（T-0114，docs/v2/AGENT_OPS_PLAN.md 第 6.1 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0032 -> 0033, 接入包的私聊白名单快照（T-0117，docs/v2/AGENT_MESSAGING_PLAN.md 第 3.1 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0033 -> 0034, 智能体的发件箱与拒收记录（T-0118，docs/v2/AGENT_MESSAGING_PLAN.md 第 5、6 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0034 -> 0035, IM 附件：文件与视频，智能体的附件开关（T-0119，docs/v2/AGENT_MESSAGING_PLAN.md 第 4 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0035 -> 0036, 智能体的唤醒（T-0121，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.2 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0036 -> 0037, 终止智能体正在执行的任务（T-0126，docs/v2/AGENT_MESSAGING_PLAN.md 第 7.3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0037 -> 0038, 项目与任务的 README（T-0122，docs/v2/AGENT_MESSAGING_PLAN.md 第 9 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0038 -> 0039, 项目里的 Issues（T-0123，docs/v2/AGENT_MESSAGING_PLAN.md 第 8 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0039 -> 0040, Gmail 邮件（T-0128，docs/v2/MAIL_PLAN.md）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0040 -> 0041, 邮箱按智能体分配（T-0132，docs/v2/MAIL_PLAN.md M4 修订）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0041 -> 0042, 运行服务器（T-0136 ~ T-0139，docs/v2/RUNNER_PLAN.md 第 12 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0042 -> 0043, 运行服务器：常驻环境的快照（T-0139，docs/v2/RUNNER_PLAN.md 第 6.5 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0043 -> 0044, 运行服务器：页面上通过 SSH 部署（T-0136，docs/v2/RUNNER_PLAN.md 第 9 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0044 -> 0045, 一台服务器多个 OpenClaw：服务器与两级负载样本（T-0144 / T-0146）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0045 -> 0046, 一台服务器多个 OpenClaw：SSH 登录信息按服务器，每个实例的部署单独记（T-0144 / T-0145）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0046 -> 0047, Retire workflow/account storage (T-0149); downgrade restores empty structures.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0047 -> 0048, 新闻早报：设置、早报、反馈三张表（T-0153）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0048 -> 0049, 插拔式模块的启用记录（T-0159）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0049 -> 0050, 侧栏布局：自定义分组、页面挪分组、零代码页面（T-0161）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0050 -> 0051, 任务的“已完成待查看”（T-0163，docs/v2/HOME_PLAN.md 第 2 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0051 -> 0052, 默认首页换成首页效果图的布局（T-0163，docs/v2/HOME_PLAN.md 第 4 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0052 -> 0053, 任务状态闭环（T-0166，docs/v2/pages-redesign 规范第 4.2、4.3 节）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0053 -> 0054, OpenClaw 服务器的登录密码加密保存与连接检测（T-0178，加法迁移）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0054 -> 0055, 容器服务器：环境的最新 CPU 读数与逐项上报时间（T-0185，加法迁移）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0055 -> 0056, 中转站管理：模型连接、模型目录、连接授权、检测结果、智能体主模型绑定与配置应用任务（T-0201，加法迁移）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0056 -> 0057, 中转站管理：删除旧版兼容字段（T-0209）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0057 -> 0058, 应用中心：模块启停的状态版本与同步记录（T-0210，方案 docs/v2/app-center/）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0058 -> 0059, 运行服务器指令的写入顺序（T-0213）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0059 -> 0060, 工作空间的图片存储配置（T-0223）
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0060 -> 0061, Independent SSH resource snapshots and persistent deployment placement receipts.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0061 -> 0062, 运行服务器池、实际后端与本地镜像构建亲和性。
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0062 -> 0063, Independent runtime capability requests and grants.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0063 -> 0064, Scoped desired network services and owner-consented ingress (0064).
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade 0064 -> 0065, One physical server contributes capacity to one registration across both pools.
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+=============================== warnings summary ===============================
+tests/test_migration_revision_collision.py::test_migration_graph_has_one_unambiguous_upgrade_target
+tests/test_migration_revision_collision.py::test_upgrade_from_each_legacy_branch_preserves_data_and_allocator[base]
+tests/test_migration_revision_collision.py::test_upgrade_from_each_legacy_branch_preserves_data_and_allocator[gateway]
+tests/test_migration_revision_collision.py::test_upgrade_from_each_legacy_branch_preserves_data_and_allocator[bridge]
+  /workspace/WorkspaceCore/services/api/.venv/lib/python3.12/site-packages/alembic/script/revision.py:208: UserWarning: Revision 0066 is present more than once
+    util.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_migration_revision_collision.py::test_migration_graph_has_one_unambiguous_upgrade_target
+FAILED tests/test_migration_revision_collision.py::test_upgrade_from_each_legacy_branch_preserves_data_and_allocator[base]
+FAILED tests/test_migration_revision_collision.py::test_upgrade_from_each_legacy_branch_preserves_data_and_allocator[gateway]
+FAILED tests/test_migration_revision_collision.py::test_upgrade_from_each_legacy_branch_preserves_data_and_allocator[bridge]
+4 failed, 4 warnings in 6.61s

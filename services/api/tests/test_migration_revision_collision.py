@@ -17,10 +17,10 @@ def test_migration_graph_has_one_unambiguous_upgrade_target() -> None:
     assert script.get_current_head() is not None
 
 
-async def _legacy_bridge(url: str) -> tuple[str, str]:
+async def _legacy_bridge(url: str) -> tuple[str, str, str]:
     """旧桥分支0066的DDL；显式保留历史形状，不由待测迁移生成。"""
     conn = await asyncpg.connect(asyncpg_dsn(url))
-    workspace, owner, bridge = uuid4(), uuid4(), uuid4()
+    workspace, owner, bridge, instance = uuid4(), uuid4(), uuid4(), uuid4()
     try:
         await conn.execute(
             """
@@ -60,7 +60,21 @@ async def _legacy_bridge(url: str) -> tuple[str, str]:
             bridge,
             workspace,
         )
-        return str(bridge), "synthetic-ciphertext"
+        await conn.execute(
+            "INSERT INTO workspace.agent_instances(id,workspace_id,name,network_mode,"
+            "im_user_id,im_nickname) VALUES($1,$2,'legacy','public',$3,'legacy')",
+            instance,
+            workspace,
+            "oc_" + instance.hex,
+        )
+        await conn.execute(
+            "INSERT INTO workspace.llm_bridge_grants(instance_id,workspace_id,enabled,"
+            "can_write,can_account,can_takeover,platforms) "
+            "VALUES($1,$2,true,true,false,true,'[\"codex.cloud\"]'::jsonb)",
+            instance,
+            workspace,
+        )
+        return str(bridge), "synthetic-ciphertext", str(instance)
     finally:
         await conn.close()
 
@@ -83,6 +97,7 @@ def test_upgrade_from_each_legacy_branch_preserves_data_and_allocator(
             conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
             try:
                 await conn.execute("SELECT setval('workspace.runner_ingress_port_seq', 30123)")
+                await conn.execute("SELECT setval('workspace.runner_public_port_seq', 20123)")
                 await conn.execute(
                     "SELECT setval('workspace.runner_network_policy_revision_seq', 81)"
                 )
@@ -103,6 +118,8 @@ def test_upgrade_from_each_legacy_branch_preserves_data_and_allocator(
             )
             assert port == (30124 if legacy in ("gateway", "both") else 30000)
             assert policy == (82 if legacy in ("gateway", "both") else 1)
+            public_port = await conn.fetchval("SELECT nextval('workspace.runner_public_port_seq')")
+            assert public_port == (20124 if legacy in ("gateway", "both") else 20000)
             if bridge:
                 assert (
                     await conn.fetchval(
@@ -111,6 +128,12 @@ def test_upgrade_from_each_legacy_branch_preserves_data_and_allocator(
                     )
                     == bridge[1]
                 )
+                grant = await conn.fetchrow(
+                    "SELECT enabled,can_write,can_account,can_takeover,platforms::text "
+                    "FROM workspace.llm_bridge_grants WHERE instance_id=$1::uuid",
+                    bridge[2],
+                )
+                assert tuple(grant) == (True, True, False, True, '["codex.cloud"]')
         finally:
             await conn.close()
 
@@ -142,3 +165,81 @@ def test_partial_legacy_bridge_is_rejected_without_creating_gateway_objects(
         command.upgrade(config, "head")
     assert asyncio.run(sql("SELECT to_regclass('workspace.runner_ingress_port_seq')")) is None
     assert asyncio.run(sql("SELECT version_num FROM alembic_version")) == "0066"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "damage",
+    ["bridge_type", "bridge_fk", "gateway_default", "gateway_check", "gateway_sequence", "neither"],
+)
+def test_unrecognized_0066_shape_does_not_advance_revision(
+    temp_database_url: str, damage: str
+) -> None:
+    config = alembic_config(temp_database_url)
+    command.upgrade(config, "0065")
+    if damage.startswith("bridge"):
+        asyncio.run(_legacy_bridge(temp_database_url))
+    elif damage != "neither":
+        command.upgrade(config, "0066")
+    statements = {
+        "bridge_type": (
+            "ALTER TABLE workspace.llm_bridge_bridges ALTER COLUMN base_url TYPE varchar(255)"
+        ),
+        "bridge_fk": (
+            "ALTER TABLE workspace.llm_bridge_grants "
+            "DROP CONSTRAINT llm_bridge_grants_instance_id_fkey"
+        ),
+        "gateway_default": (
+            "ALTER TABLE workspace.runner_ingress_rules ALTER COLUMN gateway_port DROP DEFAULT"
+        ),
+        "gateway_check": (
+            "ALTER TABLE workspace.runner_ingress_rules "
+            "DROP CONSTRAINT ck_runner_ingress_rules_gateway_port_range; "
+            "ALTER TABLE workspace.runner_ingress_rules "
+            "ADD CONSTRAINT ck_runner_ingress_rules_gateway_port_range "
+            "CHECK(gateway_port > 0)"
+        ),
+        "gateway_sequence": "ALTER SEQUENCE workspace.runner_ingress_port_seq CYCLE",
+        "neither": "UPDATE alembic_version SET version_num='0066'",
+    }
+
+    async def damage_and_check(*, check: bool) -> None:
+        conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
+        try:
+            if check:
+                assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0066"
+            else:
+                await conn.execute(statements[damage])
+        finally:
+            await conn.close()
+
+    asyncio.run(damage_and_check(check=False))
+    with pytest.raises(RuntimeError, match="legacy"):
+        command.upgrade(config, "head")
+    asyncio.run(damage_and_check(check=True))
+
+
+@pytest.mark.integration
+def test_downgrade_refuses_to_delete_preexisting_bridge_data(temp_database_url: str) -> None:
+    config = alembic_config(temp_database_url)
+    command.upgrade(config, "0065")
+    bridge = asyncio.run(_legacy_bridge(temp_database_url))
+    command.upgrade(config, "head")
+    with pytest.raises(RuntimeError, match="bridge data"):
+        command.downgrade(config, "0066")
+
+    async def preserved() -> None:
+        conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
+        try:
+            assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0067"
+            assert (
+                await conn.fetchval(
+                    "SELECT token_ref FROM workspace.llm_bridge_bridges WHERE id=$1::uuid",
+                    bridge[0],
+                )
+                == bridge[1]
+            )
+        finally:
+            await conn.close()
+
+    asyncio.run(preserved())

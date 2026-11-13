@@ -1,0 +1,19 @@
+2026-11-13T16:30:05Z
+s1348279
+73658ad349ec675300d22bdffe711f442745186fed8890811a422861e70da9de  /etc/machine-id
+73658ad349ec675300d22bdffe711f442745186fed8890811a422861e70da9de  /var/lib/dbus/machine-id
+b7be6c41427ec2c9a0bffe1e94dee3131cf47d064442eb8c626b55d4f2987e92  /proc/sys/kernel/random/boot_id
+active
+active
+active
+active
+peer=100.121.210.36 tcp22=connected banner=SSH-2.0-Tailscale
+NETWORK ID     NAME                    DRIVER    SCOPE
+d8f24f55de4c   bridge                  bridge    local
+0ac5526e08c1   host                    host      local
+b2f33ae31c01   my-workspace_agent-im   bridge    local
+342665a9781e   my-workspace_im         bridge    local
+13de277f92c3   my-workspace_news       bridge    local
+99e0a7cde274   none                    null      local
+DRIVER    VOLUME NAME
+local     my-workspace_trendradar-config
