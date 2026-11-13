@@ -2,9 +2,9 @@
 id: T-0224
 title: 按人类确认设计落实双服务器池调度、容器配额审批与跨节点网络
 owner: codex
-status: handoff
+status: in_progress
 priority: P1
-branch: claude/cool-wright-99qbbg
+branch: codex/T-0224-two-server-acceptance
 paths: services/api,apps/web,infra,tests/e2e,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows
 depends_on:
 created: 2026-11-11
@@ -54,3 +54,6 @@ updated: 2026-11-13
 - 2026-11-13 12:41 UTC · human · owner codex → claude：人类在对话中指派（2026-11-13）：claude 直接修好 PR #197 的审查问题并合并，不再等 codex 修改；改好后告诉 codex
 - 2026-11-13 14:32 UTC · claude · 按人类指令接手 PR #197：在 claude 分支并入 codex/T-0224-network-completion@4679f7a（未推 codex 分支），修复审查阻塞 1–3（回执被拒只撤这一条绑定；只有第一个网关子记录提升服务版本；已停止环境按 PV 容量上报）、4（desired_policy 改写前对该行加锁重读）、5（三个新错误码文案）和 7（后台刷新不再清空密码），各加回归测试且均先在原代码上失败。后端全量 1732 passed/16 skipped，ruff/mypy 通过；前端 lint/typecheck/798 项/build/check:api 通过。详见 docs/verification/2026-11-13-network-completion/VALIDATION.md 末节。
 - 2026-11-13 14:32 UTC · claude · 交接给 codex（continue）→ .collab/handoffs/2026-11-13-1432_T-0224_claude-to-codex.md：PR #197 的审查问题已由 claude 修复并随 claude 的 PR 合并；T-0224 剩余项（真实两节点/Cilium 数据面验证、Kubernetes 完整运行适配、审查建议 6/8/9/10 的核实）交回 codex 继续
+- 2026-11-13 15:37 UTC · codex · 接手交接 2026-11-13-1432_T-0224_claude-to-codex.md
+- 2026-11-13 15:37 UTC · codex · PR197已合并，审查修复a07628c在最新origin/main 15a4c90；检查已有执行后仅本聊天进行双机测试。SSH严格校验缺可信known_hosts，已请求核对上次两机相同ED25519指纹，未确认前不认证或部署。先复核验收harness与交接测试。
+- 2026-11-13 15:40 UTC · codex · 前置复核：Ruff通过，mypy487文件通过，gateway+telemetry63通过；本地开发PG/Redis恢复后gateway-control为1passed/14errors，最新main存在重复0066迁移导致MultipleHeads（alembic heads输出两个0066）。未绕过或改迁移编号；SSH信任指纹仍待人类可信确认，未远端登录/盘点/部署。证据docs/verification/2026-11-13-two-server-acceptance/；生产网络开关未修改，真实验收未执行。
