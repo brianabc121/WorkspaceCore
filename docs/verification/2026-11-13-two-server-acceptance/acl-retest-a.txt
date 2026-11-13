@@ -1,0 +1,9 @@
+2026-11-13T16:10:30Z
+s1348279
+uid=0(root) gid=0(root) groups=0(root)
+[tailscale_peer_status]
+{"BackendState": "Running", "Self": {"HostName": "workspace-test-a", "TailscaleIPs": ["100.72.60.100", "fd7a:115c:a1e0::b74b:3c65"], "Online": true}, "Peer": [{"HostName": "workspace-test-b", "TailscaleIPs": ["100.121.210.36", "fd7a:115c:a1e0::bc4b:d225"], "Online": true, "Active": false, "Relay": "hkg", "RxBytes": 0, "TxBytes": 0, "LastSeen": "0001-01-01T00:00:00Z", "CurAddr": ""}]}
+[tailscale_ping]
+pong from workspace-test-b (100.121.210.36) via 156.227.24.7:41641 in 2ms
+[tcp22_baseline]
+peer=100.121.210.36 tcp22=connected banner=SSH-2.0-Tailscale elapsed_ms=52

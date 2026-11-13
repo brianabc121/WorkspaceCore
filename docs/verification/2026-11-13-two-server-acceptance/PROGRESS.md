@@ -2,6 +2,8 @@
 
 本记录是前置核对，不是双服务器验收通过证明。所有时间为 UTC。
 
+最新状态（2026-11-13 16:10 UTC / 北京时间 11-14 00:10）：人类调整 Tailscale grants 后，两机对端可见、Tailscale ping 和双向 TCP22 均实测通过。剩余主机 machine-id 冲突和主干重复0066迁移尚未处理。未安装集群，真实容器网络与授权撤销验收尚未执行，未启用生产网络。
+
 ## 代码与已有执行
 
 - 2026-11-13，GitHub 连接器实时读取 PR #197：`state=closed`、`merged=true`，`merged_at=2026-11-13T15:28:36Z`。原 head 为 `4679f7ae8048b75c2d2fd5eedbdf871c82a170c3`。
@@ -141,7 +143,7 @@ no matching peer
 
 `iptables -S` 显示两机 INPUT/OUTPUT 为 ACCEPT，INPUT 挂接 ts-input，ts-input 接受 tailscale0；A 的 FORWARD 为 DROP 并挂接现有 Docker/ts-forward 链，B 为 ACCEPT。没有修改规则。此证据定位到两节点缺少对端 Tailscale netmap/可达性；同 tailnet 配置、节点共享范围或 ACL/grants 需管理员核查，不能仅凭这些输出断言具体 ACL 根因。平台 sidecar 能连两端不能替代 A/B 之间可达。
 
-## 当前验收门槛与下一步
+## 首次盘点后的验收门槛与下一步（16:10 复测前）
 
 1. 先由 tailnet 管理员核实 A、B 所在 tailnet 和共享/ACL/grants，使双方获得对端信息及所需受限节点流量。先复跑上述双向底层探测，不能用公开 IP、额外隧道或放开所有 ACL 绕过。
 2. 解决两个主机的重复 machine-id；这是主机身份变更，需要维护方案（保留原文件、核对 dbus、考虑重启和既有注册影响），不在只读盘点阶段擅自执行。
@@ -156,3 +158,39 @@ no matching peer
 初始前置文档提交 `8a43d84` 已推送到 `codex/T-0224-two-server-acceptance`。创建草稿 PR 的连接器动作被自动审批拒绝，理由是测试文档/日志发布到 GitHub 的授权和目标未获确认；未创建 PR，也未绕过拒绝。确认 SSH 后产生的服务器盘点和后续记录仅保存在本地，不推送，等待明确发布授权。
 
 人类随后明确回复“允许”，授权将上述记录发布到 WorkspaceCore 草稿 PR。本轮按该授权推送记录并创建草稿；草稿不是验收通过证明，不合并、不修改服务器或生产网络开关。
+
+草稿 PR 已创建：<https://github.com/brianabc121/WorkspaceCore/pull/203>。后续同任务复测证据在该草稿更新，不另开重复 PR。
+
+## 调整 Tailscale grants 后的实际复测
+
+人类按本聊天提供的配置增加 A→B、B→A 的 `tcp:22` grants，并明确告知已应用。原有 Codex Cloud→测试节点 grants 和 SSH root 规则保留。本轮仍经平台 `proxy:8088`、固定可信公钥和严格 SSH 校验进入两机；只读检查对端状态、指定对端 ping、TCP22 banner，没有赋予两机相互 root 登录权限。
+
+命令沿用 `INVENTORY-COMMANDS.md`；原始输出分别为 `acl-retest-a.txt`、`acl-retest-b.txt`。两次 SSH 命令退出码均为0。
+
+```text
+A（2026-11-13T16:10:30Z）：
+Peer: workspace-test-b, Online=true
+pong from workspace-test-b (100.121.210.36) via 156.227.24.7:41641 in 2ms
+peer=100.121.210.36 tcp22=connected banner=SSH-2.0-Tailscale elapsed_ms=52
+
+B（2026-11-13T16:10:33Z）：
+Peer: workspace-test-a, Online=true
+pong from workspace-test-a (100.72.60.100) via 156.227.24.250:41641 in 1ms
+peer=100.72.60.100 tcp22=connected banner=SSH-2.0-Tailscale elapsed_ms=27
+```
+
+判定：先前“对端不可见/双向TCP22超时”阻塞已解除。ping 显示直连传输，TCP 客户端仍以对端 Tailscale IP 建连。当前仅证明该底层基线，不能推断 K3s/Cilium 所需端口、UDP 工作负载、跨 OpenClaw 策略、授权或撤销已经通过；这些测试尚未执行。
+
+### B 主机身份维护的只读前置与待批准方案
+
+2026-11-13T16:11:46Z，确认 B=`s8006604`，`/etc/machine-id`（0444）和 `/var/lib/dbus/machine-id`（0644）均为普通文件，内容摘要相同，所在 ext4 根文件系统可写。`systemd-id128`、`install`、`cp`、`sha256sum`、`systemctl` 可用；Tailscale 和 dbus 均运行，Tailscale 状态文件存在且0600，仅检查元数据，没有读取凭据。没有发现新的应用服务。输出见 `b-identity-preflight.txt`。
+
+下一步需要对主机身份维护取得单独确认。可审核范围如下，尚未执行：
+
+1. 仅操作 B=`100.121.210.36/s8006604`；再次核对可信 SSH 身份、主机名和原文件摘要，无并发变更才继续。
+2. 在 B 的 root 私有备份目录分别保存两个原始文件及权限；记录备份路径，不删除原备份。
+3. 通过 B 自带的 `systemd-id128 new` 生成唯一32位标识，校验与原值不同；将同一新值写入 `/etc/machine-id` 和 `/var/lib/dbus/machine-id`，保留各自原有所有者及0444/0644权限。
+4. 重启 B 一次使系统及 dbus 统一使用新身份；不改 A、Tailscale 状态、SSH 密钥、业务目录或物理身份防重规则。重启会短暂中断 B 的 SSH/Tailscale 连接，若无法恢复需要管理控制台介入。
+5. 严格核对 B 的 SSH 指纹、原 Tailscale 节点/IP、两个 machine-id 的一致性以及与 A 的差异，复测双向 TCP22；同时确认服务恢复。失败时保留证据和原备份，恢复身份文件及再次重启应按当时实际访问情况处理。
+
+截至本轮只读复测，未获执行该维护/重启的明确确认，未修改任一主机身份或重启服务器。主干仍是 `15a4c90`，迁移冲突的旧输出是该基线结果，不作为本轮新测试通过证据。
