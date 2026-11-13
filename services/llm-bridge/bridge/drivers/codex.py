@@ -85,6 +85,10 @@ class CodexDriver(Driver):
         self._loaded: set[str] = set()
         self._active: dict[str, str] = {}
         self._login: LoginChallenge | None = None
+        self._login_id: str | None = None
+        # “登录完成”的通知可能紧跟着 account/login/start 的应答到达，早于 login() 拿到应答：
+        # 那时还不知道是哪一次登录，先按 loginId 记下，login() 拿到应答后再认领
+        self._early_logins: dict[str, LoginChallenge] = {}
 
     def supports(self, mode: Mode) -> bool:
         return mode in ("chat", "dev")
@@ -210,12 +214,21 @@ class CodexDriver(Driver):
             return
         raw = message.get("params")
         params: dict[str, Any] = raw if isinstance(raw, dict) else {}
-        if method == "account/login/completed" and self._login is not None:
+        if method == "account/login/completed":
             ok = bool(params.get("success"))
-            self._login = LoginChallenge(
+            finished = LoginChallenge(
                 state="done" if ok else "failed",
                 detail="" if ok else str(params.get("error") or ""),
             )
+            raw_id = params.get("loginId")
+            key = raw_id if isinstance(raw_id, str) else ""
+            waiting = self._login is not None and self._login.state == "pending"
+            if waiting:
+                # 只认当前这一次登录的结果（没带编号的也算）；更早那次没做完的登录的结果不要
+                if key in ("", self._login_id or ""):
+                    self._login = finished
+            else:
+                self._early_logins[key] = finished
             return
         thread = params.get("thread")
         thread_id = params.get("threadId") or (
@@ -245,11 +258,22 @@ class CodexDriver(Driver):
             if not key:
                 raise DriverError("invalid", "缺少 api_key")
             await self._call("account/login/start", {"type": "apiKey", "apiKey": key})
+            self._login_id = None
             self._login = LoginChallenge(state="done")
             return self._login
         if method == "device_code":
+            # 上一次登录的结果作废；从这里起到拿到应答之前到达的完成通知都先记下
+            self._login, self._login_id = None, None
+            self._early_logins.clear()
             result = await self._call("account/login/start", {"type": "chatgptDeviceCode"}, wait=60)
-            self._login = LoginChallenge(
+            raw_id = result.get("loginId")
+            self._login_id = raw_id if isinstance(raw_id, str) else None
+            # 完成通知已经先到了：直接是最终结果，不再让页面去等
+            early = self._early_logins.pop(self._login_id or "", None) or self._early_logins.pop(
+                "", None
+            )
+            self._early_logins.clear()
+            self._login = early or LoginChallenge(
                 state="pending",
                 verification_url=result.get("verificationUrl"),
                 user_code=result.get("userCode"),
@@ -263,6 +287,7 @@ class CodexDriver(Driver):
     async def logout(self) -> None:
         await self._call("account/logout", {})
         self._login = None
+        self._login_id = None
 
     async def models(self, mode: Mode) -> list[ModelInfo]:
         result = await self._call("model/list", {})
