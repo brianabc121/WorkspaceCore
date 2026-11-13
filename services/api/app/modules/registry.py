@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.modules.base import CronSpec, ModuleManifest, ServiceCheckSpec, validate
 from app.modules.base import resolve as resolve
+from app.modules.llm_bridge.manifest import MANIFEST as LLM_BRIDGE
 from app.modules.news.manifest import MANIFEST as NEWS
 
 if TYPE_CHECKING:
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
 
 MODULES: tuple[ModuleManifest, ...] = (
     NEWS,
+    LLM_BRIDGE,
     # module-new: 新模块的清单加在这一行上面（make module-new 会自动插入）
 )
 BY_KEY: Mapping[str, ModuleManifest] = {m.key: m for m in MODULES}
@@ -88,6 +90,17 @@ def tool_specs() -> tuple["ToolSpec", ...]:
 def tool_owners() -> Mapping[str, str]:
     """工具名 → 所属模块的 key。"""
     return {spec.name: m.key for m in MODULES if m.tools for spec in resolve(m.tools)}
+
+
+@cache
+def direct_runners() -> Mapping[str, Callable[..., Any]]:
+    """模块里风险等级为 direct 的工具名 → 处理函数（清单的 direct_tools）。"""
+    runners: dict[str, Callable[..., Any]] = {}
+    for manifest in MODULES:
+        if manifest.tools and manifest.direct_tools:
+            run = resolve(manifest.direct_tools)
+            runners.update({s.name: run for s in resolve(manifest.tools) if s.risk == "direct"})
+    return runners
 
 
 def read_handlers() -> dict[str, Callable[..., Any]]:

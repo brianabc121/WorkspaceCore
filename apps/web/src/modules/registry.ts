@@ -1,12 +1,14 @@
 import type { RouteRecordRaw } from 'vue-router'
 import type { EventTopic, ModuleNavEntry } from './types'
 import news from './news'
+import llmBridge from './llm_bridge'
 
 // 模块注册表（T-0159；docs/modules/README.md）：工作台有哪些插拔式模块。
 // 新增模块：上面 import 一行、下面列表里加一行（make module-new 会自动加，所以每个 import 都写在一行里）。
 // 宿主（侧栏、路由、首页小组件、实时事件）只从这里读，不再手写模块的条目。
 export const modules = [
   news,
+  llmBridge,
   // module-new: 新模块加在这一行上面（make module-new 会自动插入）
 ]
 

@@ -72,6 +72,20 @@ async def visible_tool_modules(
     return visible
 
 
+async def hidden_tools_for_instance(
+    db: AsyncSession, settings: Settings, instance: Any, visible_modules: set[str]
+) -> set[str]:
+    """按实例授权的模块（清单的 tools_for_instance）里，这个实例看不到的工具名。"""
+    hidden: set[str] = set()
+    for key in visible_modules:
+        manifest = registry.BY_KEY[key]
+        if manifest.tools is None or manifest.tools_for_instance is None:
+            continue
+        allowed = set(await registry.resolve(manifest.tools_for_instance)(db, settings, instance))
+        hidden.update(s.name for s in registry.resolve(manifest.tools) if s.name not in allowed)
+    return hidden
+
+
 @dataclass(frozen=True)
 class ModuleState:
     enabled: bool

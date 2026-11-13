@@ -193,6 +193,12 @@ async def _list_tools(
             if instance is not None
             else set()
         )
+        # 按实例授权的模块（例如大模型会话桥，例外九）：没授权的实例看不到它的工具
+        module_hidden = (
+            await modules.hidden_tools_for_instance(db, state.settings, instance, visible_modules)
+            if instance is not None
+            else set()
+        )
     owners = registry.tool_owners()
     # 只列这个实例的权限范围里、已经实现的工具；角色是否够在调用时再检查（角色可能变化）。
     # 项目管理工具只列给打开了项目管理权限的实例（T-0112）
@@ -210,6 +216,7 @@ async def _list_tools(
         # 运行环境（T-0137）：只列给打开了“运行环境权限”的实例（例外八）
         and (spec.name not in RUNNER_TOOL_NAMES or runner)
         and (spec.name not in owners or owners[spec.name] in visible_modules)
+        and spec.name not in module_hidden
     ]
     return types.ListToolsResult(tools=tools)
 
@@ -307,6 +314,11 @@ async def _dispatch(
                         raw,
                         request_id=caller.request_id,
                         im=openim_client(state.settings, state.connectors, state.redis),
+                    )
+                elif spec.name in registry.direct_runners():
+                    # 模块自己的直接执行工具（清单的 direct_tools）
+                    output = await registry.direct_runners()[spec.name](
+                        service, requester, spec, raw, request_id=caller.request_id
                     )
                 elif spec.risk == "direct":
                     output = await agent_tasks.run(
