@@ -183,6 +183,16 @@ def _tunnel_host(data: BundleInput) -> str | None:
     return data.tunnel_target.rsplit(":", 1)[0] if data.tunnel_target else None
 
 
+def mcp_url(data: BundleInput) -> str:
+    """MCP 地址。外网模式用本机隧道的字面回环地址（T-0133）：OpenClaw 2026.9.36 的 SSRF 防护只放行
+    主机名本身就是回环地址的 MCP 地址，拦下“解析到 127.0.0.1 的域名”（核验记录
+    docs/decisions/2026-11-04-agent-messaging-verification.md 6.4）。外网入口接受这个 Host
+    （infra/caddy/agent.Caddyfile 的 :9443），双向证书照常由隧道提供。其他请求仍用外网域名。"""
+    if data.tunnel_target:
+        return f"http://127.0.0.1:{data.tunnel_port}/mcp"
+    return data.base_url.rstrip("/") + "/mcp"
+
+
 def _env(data: BundleInput) -> str:
     base = data.base_url.rstrip("/")
     ws = (
@@ -198,7 +208,14 @@ def _env(data: BundleInput) -> str:
         f"MYWS_INSTANCE_ID={data.instance_id}",
         f"MYWS_INSTANCE_TOKEN={data.token}",
         f"MYWS_AGENT_API={base}/agent-api",
-        f"MYWS_MCP_URL={base}/mcp",
+        *(
+            [
+                "# MCP 用本机隧道的回环地址：OpenClaw 的 SSRF 防护拦下解析到 127.0.0.1 的域名",
+            ]
+            if data.tunnel_target
+            else []
+        ),
+        f"MYWS_MCP_URL={mcp_url(data)}",
         *(
             [
                 "# 外网模式：这个域名在 OpenClaw 容器里解析到 127.0.0.1"

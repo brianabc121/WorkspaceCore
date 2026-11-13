@@ -1192,6 +1192,19 @@ upgrade_news() {
   return 0
 }
 
+# 升级：接入入口在运行时重启它（T-0133）。infra/caddy/agent.Caddyfile 是挂载进容器的文件，
+# make up 只管核心服务、不会重建 agent-gateway（--profile agents），不重启就一直用旧配置
+upgrade_agent_gateway() {
+  compose --profile agents ps --status running --services 2>/dev/null | grep -qx agent-gateway || return 0
+  step "OpenClaw 接入入口"
+  if compose --profile agents restart agent-gateway </dev/null >/dev/null 2>&1; then
+    ok "接入入口已重启，用上新版本的配置"
+  else
+    warn "接入入口没有重启成功：运行 docker compose --profile agents logs agent-gateway 查看"
+  fi
+  return 0
+}
+
 # 仅用于停用历史部署的站点，不再生成或挂载第三方应用的公网入口。
 app_site_file() { printf '%s\n' "$ROOT/infra/caddy/apps-enabled/$1.caddy"; }
 restart_caddy_with_apps() {
@@ -1598,6 +1611,7 @@ do_upgrade() {
   retire_n8n
   retire_vikunja
   upgrade_openim
+  upgrade_agent_gateway
   upgrade_news
   step "升级完成：$(git -C "$ROOT" log -1 --format='%h %cs %s')"
   if [[ $AFTER_PULL != "$(git -C "$ROOT" rev-parse HEAD)" ]]; then

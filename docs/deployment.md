@@ -603,7 +603,7 @@ OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式�
 
    | 变量 | 例子 | 说明 |
    |---|---|---|
-   | `AGENT_INTRANET_HOST` / `AGENT_PUBLIC_HOST` | `ws.tailnet.example` / `agent.example.com` | 证书里的域名；外网入口开启客户端证书后 SNI 必须与 Host 一致 |
+   | `AGENT_INTRANET_HOST` / `AGENT_PUBLIC_HOST` | `ws.tailnet.example` / `agent.example.com` | 证书里的域名。外网入口（:9443）只有一个站点、接受任何 Host（外网实例的 MCP 用 127.0.0.1，T-0133），关掉了 Caddy 的 Host 与 SNI 一致检查；每个连接仍必须带内部 CA 签发的客户端证书 |
    | `AGENT_INTRANET_BIND` / `AGENT_INTRANET_PORT` | `100.64.0.5` / `8443` | 内网入口发布的地址与端口（默认 `127.0.0.1:8443`） |
    | `AGENT_PUBLIC_BIND` / `AGENT_PUBLIC_PORT` | `0.0.0.0` / `9443` | 外网入口发布的地址与端口（默认 `127.0.0.1:9443`） |
    | `AGENT_INTRANET_ALLOWED_CIDRS` | `100.64.0.0/10` | 内网入口只接受的来源（空格分隔） |
@@ -759,7 +759,7 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 | 连接 | OpenClaw 直连内网入口（HTTPS） | OpenClaw → 本机隧道（`tunnel` 服务，ghostunnel，监听 127.0.0.1:18443）→ 外网入口（HTTPS + 客户端证书） |
 | 认证 | 实例令牌（绑定内网入口）；入口只接受 `AGENT_INTRANET_ALLOWED_CIDRS` 里的来源 | 实例令牌（绑定外网入口）+ 客户端证书（按指纹校验、可单独吊销）；认证失败按来源 IP 限次 |
 | 接入包里的服务 | `openclaw`；工作台也配置了外网入口时多一个 `image-proxy`（本机取图代理，把图片地址里的外网域名转到内网入口） | `openclaw`、`tunnel` |
-| 域名解析 | 内网入口的域名指向私网地址；外网域名在容器里指向 127.0.0.1（有 `image-proxy` 时） | 外网入口的域名在容器里指向 127.0.0.1（`extra_hosts`），请求都经本机隧道 |
+| 域名解析 | 内网入口的域名指向私网地址；外网域名在容器里指向 127.0.0.1（有 `image-proxy` 时） | 外网入口的域名在容器里指向 127.0.0.1（`extra_hosts`），请求都经本机隧道；MCP 地址直接写 `http://127.0.0.1:18443/mcp`（OpenClaw 的 SSRF 防护拦下解析到回环地址的域名，只放行字面上的回环地址，T-0133） |
 | 私有 CA | `myworkspace.env` 里设 `NODE_EXTRA_CA_CERTS`；`image-proxy` 的命令加 `--cacert` | `tunnel` 的命令加 `--cacert` |
 | 凭证轮换 | 重新生成接入包（旧令牌再保留 24 小时） | 同左；客户端证书 90 天到期，到期前重新生成 |
 | 防火墙 | 服务器 A 的内网入口端口只对私网开放 | 服务器 A 的外网入口端口对公网开放；OpenClaw 服务器只需出站 |

@@ -1057,3 +1057,54 @@ def test_news_enable_failure_does_not_stop_the_deployment(tmp_path: Path) -> Non
     assert "没有自动打开新闻早报：不是这个工作空间的 owner" in out
     assert "设置 → 新闻早报" in out
     assert "after" in out.split()  # 失败只提示，不中断部署脚本
+
+
+# ---------------------------------------------------------------- 升级时重启接入入口（T-0133）
+
+
+def _upgrade_gateway(tmp_path: Path, running: str) -> tuple[str, str]:
+    """加载 deploy.sh 的函数，把 compose 换成假的（记下参数；ps 输出 running），
+    运行 upgrade_agent_gateway。"""
+    import os
+    import subprocess
+
+    root = tmp_path / "root"
+    root.mkdir()
+    log = tmp_path / "compose.log"
+    functions = DEPLOY.rstrip().rsplit("\n", 1)[0]  # 最后一行是 main "$@"
+    stub = (
+        f'compose() {{ echo "$*" >> "{log}";'
+        ' case "$*" in *" ps "*) printf "%s" "$RUNNING" ;; esac; }\n'
+    )
+    result = subprocess.run(  # noqa: S603 - 运行仓库里的脚本
+        [
+            "/bin/bash",
+            "-c",
+            functions + '\nPY=python3\nROOT="$1"\n' + stub + "upgrade_agent_gateway",
+            "deploy",
+            str(root),
+        ],
+        env={**os.environ, "RUNNING": running},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    calls = log.read_text(encoding="utf-8") if log.exists() else ""
+    return result.stdout + result.stderr, calls
+
+
+def test_upgrade_restarts_a_running_agent_gateway_for_the_new_caddyfile(tmp_path: Path) -> None:
+    # agent.Caddyfile 是挂载进容器的文件：make up 不重建 agent-gateway，升级要重启它才用上新配置
+    out, calls = _upgrade_gateway(tmp_path, "api\nagent-gateway\n")
+    assert "--profile agents restart agent-gateway" in calls
+    assert "接入入口已重启" in out
+
+
+def test_upgrade_leaves_an_undeployed_agent_gateway_alone(tmp_path: Path) -> None:
+    out, calls = _upgrade_gateway(tmp_path, "api\ncaddy\n")
+    assert "restart" not in calls and out == ""
+
+
+def test_upgrade_calls_the_agent_gateway_step() -> None:
+    body = DEPLOY.split("do_upgrade() {", 1)[1].split("\n}\n", 1)[0]
+    assert "  upgrade_agent_gateway\n" in body

@@ -624,6 +624,8 @@ async def test_public_bundle_has_a_client_certificate_from_the_internal_ca(env: 
     # 外网模式经本机隧道：公网域名在 OpenClaw 那边解析到 127.0.0.1（Caddy 要求 SNI 与 Host 一致）
     assert _env_value(files, "MYWS_AGENT_API") == "http://agent.example.com:18443/agent-api"
     assert _env_value(files, "MYWS_LOCAL_TUNNEL_HOST") == "agent.example.com"
+    # MCP 例外：OpenClaw 的 SSRF 防护只放行字面上的回环地址（T-0133）
+    assert _env_value(files, "MYWS_MCP_URL") == "http://127.0.0.1:18443/mcp"
     compose = files["compose.yaml"][0]
     assert '"agent.example.com:127.0.0.1"' in compose
     assert "--target=agent.example.com:443" in compose and "--listen=127.0.0.1:18443" in compose
