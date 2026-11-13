@@ -1,10 +1,14 @@
-"""Stable non-recycled TCP gateway ports and monotonically fenced network snapshots."""
+"""Stable non-recycled TCP gateway ports and monotonically fenced network snapshots.
+
+T-0224 首次合并时编号是 0066，与同时合并的大模型会话桥（0066 llm_bridge，PR #198）撞号，
+main 上出现两个 head；改为 0067、接在 0066 之后。两个迁移互不依赖（不同的表）。
+"""
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0066"
-down_revision = "0065"
+revision = "0067"
+down_revision = "0066"
 branch_labels = None
 depends_on = None
 
