@@ -144,15 +144,18 @@ async function api(page, workspace, method, pathname, body) {
     for (const url of operations) probed.urls.add(new URL(url, base).href)
     const failed = []
     const declared = []  // 契约已声明、实现任务还没完成的接口（501 NOT_IMPLEMENTED）：单独列出，不算失败
+    const disabled = []  // 默认停用的插拔式模块（例如大模型会话桥）的接口：停用时 404 MODULE_DISABLED，不算失败
     for (const url of operations) {
       const response = await api(page, workspace, 'GET', url)
       if (response.status === 501 && response.body?.error?.code === 'NOT_IMPLEMENTED') declared.push(url)
+      else if (response.status === 404 && response.body?.error?.code === 'MODULE_DISABLED') disabled.push(url)
       else if (response.status !== 200) failed.push(`${url} → ${response.status} ${response.body?.error?.code || ''}`)
     }
     check(failed.length === 0, `读接口没有全部返回 200：\n  ${failed.join('\n  ')}`)
-    const implemented = operations.length - declared.length
+    const implemented = operations.length - declared.length - disabled.length
     check(implemented >= 25, `只找到 ${implemented} 个已实现的读接口，openapi.json 可能不完整`)
     step(`全部读接口返回 200：${implemented} 个（需要具体资源 ID 或 owner 角色的 ${skipped.length} 个由各 Sprint 验收覆盖）`)
+    if (disabled.length) console.log(`说明  所属模块没有启用（404 MODULE_DISABLED）：${disabled.length} 个\n  ${disabled.join('\n  ')}`)
     if (declared.length) console.log(`说明  契约已声明、尚未实现（501）：${declared.length} 个\n  ${declared.join('\n  ')}`)
 
     // ---------------------------------------------------------------- 核心服务都正常（Worker 心跳每分钟一次，刚启动时最多等 90 秒）
