@@ -12,6 +12,14 @@
 {
 	admin off
 	auto_https off
+	# 外网入口（:9443）：OpenClaw 外网实例的 MCP 地址是本机隧道 http://127.0.0.1:<端口>/mcp
+	# （T-0133：OpenClaw 的 SSRF 防护只放行字面上的回环地址，拦下“解析到 127.0.0.1 的域名”），
+	# 请求的 Host 因此是 127.0.0.1，而隧道的 SNI 是外网域名。开了客户端证书时 Caddy 默认要求
+	# Host 与 SNI 一致，这里关掉这项检查：这个端口只有下面一个站点，每个连接都必须先通过双向证书，
+	# 不存在用一个站点的证书访问另一个站点的问题
+	servers :9443 {
+		strict_sni_host insecure_off
+	}
 }
 
 # 容器自己的健康检查（compose 的 healthcheck）：只绑定容器内的回环地址，外部访问不到
@@ -134,7 +142,9 @@ https://{$AGENT_INTRANET_HOST}:8443, https://{$AGENT_PUBLIC_HOST}:8443 {
 	import agent_routes intranet
 }
 
-https://{$AGENT_PUBLIC_HOST}:9443 {
+# 外网入口：接受任何 Host（外网域名，或外网实例 MCP 用的 127.0.0.1），证书仍是外网域名的；
+# 双向证书照常：没有工作台签发的客户端证书，TLS 握手就失败
+https://:9443 {
 	tls /certs/public.crt /certs/public.key {
 		client_auth {
 			mode require_and_verify

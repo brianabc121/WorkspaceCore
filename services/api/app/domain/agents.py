@@ -1030,8 +1030,8 @@ class AgentService:
             image_proxy_host = urlsplit(self.settings.agent_public_url).hostname
             image_proxy_target = f"{intranet.hostname}:{intranet.port or 443}"
         if public:
-            # 外网模式：公网域名在 OpenClaw 那边解析到本机隧道
-            # （Caddy 开启客户端证书时要求 SNI 与 Host 一致，所以不能用 127.0.0.1）
+            # 外网模式：公网域名在 OpenClaw 那边解析到本机隧道。MCP 例外，用字面的 127.0.0.1
+            # （OpenClaw 的 SSRF 防护拦下解析到回环地址的域名，T-0133；见 agent_bundle.mcp_url）
             url = urlsplit(configured)
             host = url.hostname or ""
             tunnel_target = f"{host}:{url.port or 443}"

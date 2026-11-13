@@ -13,7 +13,8 @@
 2. 外网入口：不带客户端证书、带别的 CA 签发的证书，TLS 握手失败；
 3. 外网入口经本机隧道（ghostunnel 客户端 + 接入包里的客户端证书）：取到密钥、心跳成功，
    API 按 Caddy 传来的指纹认出证书（证明 Caddy 的指纹格式与工作台一致）；
-   /mcp 经隧道到达 MCP 服务器（initialize 成功）；内网令牌经外网入口无效；吊销证书后立即 401；
+   /mcp 经隧道、用接入包里的地址（Host 是 127.0.0.1，T-0133）到达 MCP 服务器（initialize 成功）；
+   内网令牌经外网入口无效；吊销证书后立即 401；
 4. 同一网络里的其他容器直接连 API、伪造入口请求头：401。
 
 只依赖 Python 标准库与 docker；用法：
@@ -270,7 +271,12 @@ def main() -> int:
                 body={"openclaw_version": "2026.9.36", "plugin_version": "0.3.3"},
             )
             report.check("外网入口经隧道：心跳", status == 200, f"{status}")
-            # MCP 服务器（OC-5，T-0057）：经隧道完成 initialize
+            # MCP 服务器（OC-5，T-0057）：经隧道完成 initialize。地址照接入包写的
+            # http://127.0.0.1:<端口>/mcp（OpenClaw 的 SSRF 防护只放行字面上的回环地址，T-0133），
+            # 外网入口接受这个 Host，双向证书照常
+            mcp_url = next(line.split("=", 1)[1] for line in public["myworkspace.env"].splitlines()
+                           if line.startswith("MYWS_MCP_URL="))
+            mcp_hostport = f"127.0.0.1:{TUNNEL_PORT}"
             initialize = {
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -283,7 +289,7 @@ def main() -> int:
             }
             status, text = _send(
                 http.client.HTTPConnection("127.0.0.1", TUNNEL_PORT, timeout=10),
-                tunnel_hostport,
+                mcp_hostport,
                 "POST",
                 "/mcp",
                 public_token,
@@ -291,9 +297,10 @@ def main() -> int:
                 {"Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-11-25"},
             )
             report.check(
-                "外网入口经隧道：/mcp 到达 API 的 MCP 服务器（initialize 成功）",
-                status == 200 and '"serverInfo"' in text,
-                f"{status}",
+                "外网入口经隧道：接入包的 MCP 地址是字面回环地址，Host 127.0.0.1 到达 API 的 MCP 服务器"
+                "（initialize 成功）",
+                mcp_url == f"http://{mcp_hostport}/mcp" and status == 200 and '"serverInfo"' in text,
+                f"{mcp_url} {status}",
             )
             status, _ = plain_request(tunnel_hostport, "POST", "/agent-api/v1/secrets/resolve", token=intranet_token, body=resolve)
             report.check("外网入口经隧道：内网令牌无效", status == 401, f"{status}")

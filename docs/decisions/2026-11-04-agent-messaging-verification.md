@@ -191,3 +191,17 @@ Issues 与 README 的实测结果（同一 PR 的 CI agents 任务，提交 9697
 - 不能只把地址改成 `http://127.0.0.1:<端口>/mcp`：外网入口的 Caddy 按主机名分站点且开了双向证书，要求 Host 与 SNI 一致；
   在锁定镜像里实测 undici 8.10.2 的 `fetch` 会忽略自定义的 `Host` 头（发出去的仍是 `127.0.0.1:<端口>`）。
 - 影响：外网模式实例收发 IM 正常（openclaw-channel 不走这个检查），但模型调不到任何工作台工具（任务、知识库、IM 发消息、Issue、邮件……）。内网模式不受影响。
+
+**已修复（T-0133，2026-11-13，人类选定“改外网入口”）**：
+
+- 接入包：外网模式的 `MYWS_MCP_URL` 改成字面的 `http://127.0.0.1:<隧道端口>/mcp`（OpenClaw 对主机名本身是回环 IP 的地址放行）；
+  其他请求（实例接口、IM、取图）照旧用外网域名。
+- 外网入口（`infra/caddy/agent.Caddyfile` 的 :9443）：只保留一个站点 `https://:9443`，接受任何 Host，并在全局 `servers :9443` 里设
+  `strict_sni_host insecure_off`。Caddy 开了客户端证书时默认要求 Host 与 SNI 一致（隧道的 SNI 是外网域名），所以原来 Host 为 127.0.0.1 时返回
+  421 Misdirected Request。这个端口只有一个站点、所有连接都必须通过双向证书，不存在用一个站点的证书访问另一个站点的问题。
+- 实测（锁定的 `caddy:2.11.7-alpine` 与 `ghostunnel/ghostunnel:v1.11.4`，本地容器）：原配置对 Host 127.0.0.1 返回 421；新配置经隧道
+  `POST /mcp`（Host 127.0.0.1）到达后端，入口请求头为 `public`、客户端证书指纹正确；旧的 Host（外网域名）照常；不带客户端证书
+  （`tlsv13 alert certificate required`）、别的 CA 签发的证书（`alert unknown ca`）都在握手时被拒；内网入口 :8443 不变。
+- MCP 服务端（MCP Python SDK 2.3.0 的 `StreamableHTTPSessionManager`，没传 `security_settings`）不校验 Host，DNS 重绑定防护默认关闭，所以不受影响。
+- 端到端：`tests/e2e/agents_acceptance.py` 场景 28 让外网模式的乙经模型与 Tool Search 调 `list_projects`，工作台记下执行；
+  `tests/e2e/agent_ingress_acceptance.py` 用接入包里的 MCP 地址经隧道 initialize。结果见该 PR 的 CI agents 与 compose 任务。
