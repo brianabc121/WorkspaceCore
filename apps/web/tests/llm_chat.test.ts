@@ -57,6 +57,7 @@ function setup(role: Role, given: Partial<World> = {}, handler?: (r: Request, wo
     if (p === '/api/v1/modules' && r.method === 'GET') return Response.json({ items: [newsModule, lbModule] })
     if (p === '/api/v1/llm_bridge/bridges' && r.method === 'GET') return Response.json({ bridges: world.bridges })
     if (p === '/api/v1/llm_bridge/grants') return Response.json({ grants: [] })
+    if (p === '/api/v1/llm_bridge/deployments' && r.method === 'GET') return Response.json({ jobs: [], available: false })
     if (p === '/api/v1/llm_bridge/chat/groups' && r.method === 'GET') return Response.json({ groups: world.groups.filter(g => g.status === (url.searchParams.get('status') ?? 'active')) })
     const group = /^\/api\/v1\/llm_bridge\/chat\/groups\/([^/]+)$/.exec(p)
     if (group && r.method === 'GET') { const found = world.groups.find(g => g.id === group[1]); return found ? Response.json(found) : fail(404, 'NOT_FOUND') }

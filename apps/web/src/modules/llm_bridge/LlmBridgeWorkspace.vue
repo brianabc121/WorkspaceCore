@@ -6,8 +6,10 @@ import ManagementSection from '../../components/management/ManagementSection.vue
 import DataState from '../../components/DataState.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import { isModuleDisabled } from '../../services/api'
-import { PLATFORMS, bridgeError, useLlmBridge, type Bridge, type Platform } from './api'
+import { PLATFORMS, bridgeError, deployError, newDeployRequestId, useLlmBridge, type Bridge, type Platform } from './api'
 import ManagerCard from './ManagerCard.vue'
+import DeployManager from './DeployManager.vue'
+import DeployJob from './DeployJob.vue'
 import BridgeAccounts from './BridgeAccounts.vue'
 import BridgeSettingsForm from './BridgeSettingsForm.vue'
 import BridgeEnvironments from './BridgeEnvironments.vue'
@@ -17,6 +19,7 @@ import './llm_bridge.css'
 
 // 页面主体：MCP 管理器的列表（owner 增删改），选中一个后看它控制的平台与账号、设置、开发环境、会话；
 // 最下面是按实例的权限。一个 MCP 管理器就是一座登记的会话桥：单独部署的容器，单独维护一套账号。
+// 添加有两种方式：一键部署到服务器（工作台经 SSH 部署并登记，方案第 20 节），或者手动添加已经部署好的。
 const props = defineProps<{ scope: string }>()
 const api = useLlmBridge(props.scope)
 const canWrite = api.canWrite
@@ -34,8 +37,13 @@ const tab = ref<(typeof TABS)[number]['key']>('accounts')
 const ALL = PLATFORMS.map(p => p.id)
 const error = ref(''), notice = ref(''), busy = ref(false)
 const form = reactive({ open: false, id: null as string | null, name: '', base_url: '', token: '', platforms: [...ALL] as Platform[] })
+// 一键部署：这个工作台带着管理器的构建文件时才有（接口里的 available）；只有 owner 能做
+const deployments = api.useDeployments()
+const canDeploy = computed(() => canWrite.value && !!deployments.data.value?.available)
+const addMode = ref<'deploy' | 'manual'>('manual')
 function openForm(bridge?: Bridge) {
   Object.assign(form, { open: true, id: bridge?.id ?? null, name: bridge?.name ?? '', base_url: bridge?.base_url ?? '', token: '', platforms: [...ALL] })
+  addMode.value = !bridge && canDeploy.value ? 'deploy' : 'manual'
   error.value = notice.value = ''
 }
 function closeForm() { Object.assign(form, { open: false, id: null, name: '', base_url: '', token: '', platforms: [...ALL] }) }
@@ -69,6 +77,36 @@ function toggle(bridge: Bridge) {
   if (bridge.enabled && !window.confirm(`停用「${bridge.name}」？停用后智能体不能再经它发指令，它的登录状态和会话记录都保留。`)) return
   return run(async () => { await api.updateBridge(bridge.id, { enabled: !bridge.enabled }); return bridge.enabled ? `已停用「${bridge.name}」。` : `已启用「${bridge.name}」。` })
 }
+async function deployed(id: string, name: string) {
+  await Promise.all([api.invalidate('bridges'), api.invalidate('deployments')])
+  selectedId.value = id; tab.value = 'accounts'
+  notice.value = `已部署并添加「${name}」。接下来在下面的“平台与账号”里登录它控制的平台。`
+}
+
+// 工作台部署的管理器：重新部署（升级）和卸载都是后台任务，进度显示在列表下面
+const jobId = ref<string | null>(null)
+const job = api.useDeployment(jobId)
+const removing = reactive({ bridge: null as Bridge | null, data: false })
+async function startJob(action: () => Promise<{ id: string }>) {
+  if (busy.value) return
+  busy.value = true; error.value = notice.value = ''
+  try { jobId.value = (await action()).id } catch (e) { error.value = deployError(e) } finally { busy.value = false }
+}
+function redeploy(bridge: Bridge) {
+  if (!window.confirm(`重新部署「${bridge.name}」？\n\n会用工作台现在的版本重新构建并重启它：正在进行的回合会中断。登录状态和会话记录都保留。`)) return
+  return startJob(() => api.redeploy(bridge.id, newDeployRequestId()))
+}
+function uninstall() {
+  const bridge = removing.bridge
+  if (!bridge) return
+  const data = removing.data
+  removing.bridge = null
+  return startJob(() => api.uninstall(bridge.id, newDeployRequestId(), data))
+}
+watch(() => job.data.value?.status, async status => {
+  if (status && status !== 'running') await Promise.all([api.invalidate('bridges'), api.invalidate('grants'), api.invalidate('deployments')])
+})
+
 function remove(bridge: Bridge) {
   if (!window.confirm(`删除「${bridge.name}」？\n\n只是从工作台里去掉它，不影响它的容器和里面的登录、会话。只允许用它的实例，之后一个 MCP 管理器都用不了，要到“实例权限”里重新选。`)) return
   return run(async () => { await api.deleteBridge(bridge.id); await api.invalidate('grants'); if (form.id === bridge.id) closeForm(); return `已删除「${bridge.name}」。` })
@@ -96,12 +134,39 @@ function remove(bridge: Bridge) {
         </div>
         <div v-else class="lb-managers" role="list" aria-label="MCP 管理器列表">
           <div v-for="b in list" :key="b.id" role="listitem">
-            <ManagerCard :api="api" :bridge="b" :selected="b.id === selectedId" :can-write="canWrite" :busy="busy" @select="selectedId = b.id" @edit="openForm(b)" @toggle="toggle(b)" @remove="remove(b)" />
+            <ManagerCard :api="api" :bridge="b" :selected="b.id === selectedId" :can-write="canWrite" :busy="busy" @select="selectedId = b.id" @edit="openForm(b)" @toggle="toggle(b)" @remove="remove(b)" @redeploy="redeploy(b)" @uninstall="removing.bridge = b; removing.data = false" />
           </div>
         </div>
 
-        <form v-if="canWrite && form.open" class="asv-form lb-form" novalidate :aria-label="form.id ? '修改 MCP 管理器' : '添加 MCP 管理器'" @submit.prevent="submit">
-          <h3>{{ form.id ? '修改 MCP 管理器' : '添加 MCP 管理器' }}</h3>
+        <form v-if="canWrite && removing.bridge" class="asv-form lb-form" novalidate :aria-label="`卸载${removing.bridge.name}`" @submit.prevent="uninstall">
+          <h3>卸载「{{ removing.bridge.name }}」</h3>
+          <p>工作台登录它所在的服务器，停掉并删除这个容器，再从工作台去掉它。只允许用它的实例，之后一个 MCP 管理器都用不了，要到“实例权限”里重新选。</p>
+          <label class="check-field"><input v-model="removing.data" type="checkbox" />同时删除它的数据（各平台的登录状态和会话记录，不能恢复）</label>
+          <p class="form-help">不勾选时数据卷留在服务器上。服务器已经连不上的话，可以<button type="button" class="asv-link" @click="remove(removing.bridge); removing.bridge = null">只从工作台去掉登记</button>（不动服务器上的容器）。</p>
+          <div class="lb-actions">
+            <button type="button" class="secondary-button" :disabled="busy" @click="removing.bridge = null">取消</button>
+            <button type="submit" class="primary-button lb-danger-button" :disabled="busy">卸载</button>
+          </div>
+        </form>
+
+        <div v-if="jobId" class="lb-form">
+          <p v-if="job.isPending.value" role="status" class="form-help">正在读取进度…</p>
+          <DeployJob v-else-if="job.data.value" :job="job.data.value" />
+          <p v-if="job.error.value" role="alert" class="lb-warn is-red">读不到进度：{{ deployError(job.error.value) }}</p>
+          <div v-if="!job.data.value || job.data.value.status !== 'running'" class="lb-actions"><button type="button" class="secondary-button" @click="jobId = null">关闭</button></div>
+        </div>
+
+        <div v-if="canWrite && form.open && !form.id && canDeploy" class="lb-form lb-add">
+          <h3>添加 MCP 管理器</h3>
+          <div class="lb-modes" role="group" aria-label="添加方式">
+            <button type="button" :aria-pressed="addMode === 'deploy'" @click="addMode = 'deploy'">一键部署到服务器</button>
+            <button type="button" :aria-pressed="addMode === 'manual'" @click="addMode = 'manual'">手动添加（已经部署好了）</button>
+          </div>
+          <DeployManager v-if="addMode === 'deploy'" :api="api" :scope="scope" :names="list.map(b => b.name)" @deployed="deployed" @cancel="closeForm" />
+        </div>
+
+        <form v-if="canWrite && form.open && (form.id || addMode === 'manual')" class="asv-form lb-form" novalidate :aria-label="form.id ? '修改 MCP 管理器' : '添加 MCP 管理器'" @submit.prevent="submit">
+          <h3>{{ form.id ? '修改 MCP 管理器' : canDeploy ? '手动添加' : '添加 MCP 管理器' }}</h3>
           <details v-if="!form.id" class="lb-deploy">
             <summary>还没有部署？先在服务器上启动它</summary>
             <ol class="lb-steps">

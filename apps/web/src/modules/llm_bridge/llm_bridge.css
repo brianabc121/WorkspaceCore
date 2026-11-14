@@ -66,3 +66,19 @@
 .lb-steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: .86rem; overflow-wrap: anywhere; }
 .lb-deploy summary { cursor: pointer; font-size: .9rem; font-weight: 600; }
 .lb-deploy[open] summary { margin-bottom: 8px; }
+/* 一键部署（方案第 20 节）：添加方式的切换、部署表单、任务的步骤与命令输出 */
+.lb-add { display: grid; gap: 10px; }
+.lb-modes { display: inline-flex; flex-wrap: wrap; gap: 2px; justify-self: start; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.lb-modes button { padding: 6px 14px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: .88rem; font-weight: 600; cursor: pointer; }
+.lb-modes button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.lb-deploy-form, .lb-deploy-form form { display: grid; gap: 8px; min-width: 0; }
+.lb-deploy-form .form-field { margin: 8px 0; }
+.lb-job { display: grid; gap: 8px; min-width: 0; }
+.lb-job p { margin: 0; overflow-wrap: anywhere; }
+.lb-job-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.lb-job-steps li { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: .88rem; }
+.lb-job-steps li > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.lb-job-steps li[data-status="pending"] { color: var(--muted); }
+.lb-job-log { margin: 6px 0 0; padding: 10px 12px; max-height: 320px; overflow: auto; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); font: .78rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lb-danger-button { background: var(--danger); border-color: var(--danger); }
+

@@ -26,6 +26,18 @@ export type Platform = GrantBody['platforms'][number]
 export type BridgeSession = Schema['LlmBridgeSessionList']['sessions'][number]
 export type Turn = Schema['LlmBridgeTurnOut']
 export type Slot = 'openai' | 'claude' | 'workbuddy'
+export type DeployJob = Schema['LlmBridgeDeployJobOut']
+export type DeployBody = Schema['LlmBridgeDeployIn']
+
+// 页面上一键部署 MCP 管理器（docs/v2/LLM_BRIDGE_PLAN.md 第 20 节）：任务的种类、状态和每一步的名字
+export const DEPLOY_KIND: Record<string, string> = { deploy: '部署', redeploy: '重新部署', uninstall: '卸载' }
+export const DEPLOY_STATUS: Record<string, string> = { running: '进行中', succeeded: '成功', failed: '失败', interrupted: '已中断' }
+export const DEPLOY_STEP_STATUS: Record<string, string> = { pending: '等待', running: '进行中', done: '完成', failed: '失败' }
+export const DEPLOY_STEP: Record<string, string> = {
+  connect: '登录服务器', inspect: '检查服务器', upload: '上传构建文件', build: '构建镜像（第一次要几分钟）', start: '启动容器',
+  verify: '工作台连接管理器', register: '登记到工作台', stop: '停止并删除容器', remove: '删除部署目录', unregister: '从工作台去掉登记',
+}
+export const newDeployRequestId = () => (typeof crypto.randomUUID === 'function' ? `web-${crypto.randomUUID()}` : `web-${Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')}`)
 
 export const PLATFORMS: readonly { id: Platform; name: string }[] = [
   { id: 'chatgpt', name: 'ChatGPT' }, { id: 'codex', name: 'Codex' }, { id: 'claude', name: 'Claude' }, { id: 'workbuddy', name: 'WorkBuddy' },
@@ -74,6 +86,11 @@ export function bridgeError(error: unknown): string {
   }
   return errorMessage(error)
 }
+/** 一键部署的错误：这些是工作台自己写的中文说明（服务器现在为什么不能部署、有任务在进行等），直接显示 */
+export function deployError(error: unknown): string {
+  if (error instanceof ApiError && [409, 503].includes(error.status) && error.message && !MESSAGES[error.code]) return error.message
+  return bridgeError(error)
+}
 /** MCP 管理器连不上或令牌不对（503）：页面在原地显示说明，不当成页面出错 */
 export const isBridgeDown = (error: unknown) => error instanceof ApiError && ['EXTERNAL_UNAVAILABLE', 'BRIDGE_AUTH_FAILED'].includes(error.code)
 
@@ -101,6 +118,13 @@ export function useLlmBridge(scope: string) {
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/sessions', { params: { ...at(id.value), query: { limit, offset: offset.value } }, signal })) }),
     useTurns: (id: Ref<string>, session: Ref<string | null>) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'turns', session.value)), enabled: computed(() => active() && !!session.value),
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/turns', { params: { header, path: { bridge_id: id.value, session_id: session.value! } }, signal })).turns }),
+    // 一键部署：有任务在跑时每 2 秒读一次进度
+    useDeployments: () => useQuery({ queryKey: key(user, scope, 'deployments'), enabled: computed(active),
+      refetchInterval: (query: { state: { data?: Schema['LlmBridgeDeployJobList'] } }) => (query.state.data?.jobs.some(j => j.status === 'running') ? 2000 : false),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/deployments', { params: { header }, signal })) }),
+    useDeployment: (id: Ref<string | null>) => useQuery({ queryKey: computed(() => key(user, scope, 'deployment', id.value)), enabled: computed(() => active() && !!id.value),
+      refetchInterval: (query: { state: { data?: DeployJob } }) => (query.state.data?.status === 'running' ? 2000 : false),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/deployments/{job_id}', { params: { header, path: { job_id: id.value! } }, signal })) }),
     useGrants: () => useQuery({ queryKey: key(user, scope, 'grants'), enabled: computed(active),
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/grants', { params: { header }, signal })).grants }),
 
@@ -153,6 +177,18 @@ export function useLlmBridge(scope: string) {
     async deleteEnvironment(id: string, envId: string) {
       await auth.api.DELETE('/api/v1/llm_bridge/bridges/{bridge_id}/environments/{env_id}', { params: { header, path: { bridge_id: id, env_id: envId } } })
       await invalidate('bridge', id, 'environments')
+    },
+    async deploy(body: DeployBody) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/deployments', { params: { header }, body }))
+      await invalidate('deployments'); return out
+    },
+    async redeploy(id: string, request_id: string) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/redeploy', { params: at(id), body: { request_id } }))
+      await invalidate('deployments'); return out
+    },
+    async uninstall(id: string, request_id: string, remove_data: boolean) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/uninstall', { params: at(id), body: { request_id, remove_data } }))
+      await invalidate('deployments'); return out
     },
     async setGrant(instanceId: string, body: GrantBody) {
       const out = dataOf(await auth.api.PUT('/api/v1/llm_bridge/grants/{instance_id}', { params: { header, path: { instance_id: instanceId } }, body }))
