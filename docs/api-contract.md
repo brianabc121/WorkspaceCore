@@ -762,7 +762,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 页面在中转站管理的“兼容凭据”页签）：连接自己的 Key 不出现在密钥库里（列表、详情、修改、授权都当作不存在），
 新建 `kind=model_api_key` 返回 `422 VALIDATION_FAILED`（`details.field = kind`）。旧版兼容（导入、迁移记录、旧配置状态）已删除（T-0209）。
 
-## 大模型客户端（会话桥）模块 `llm_bridge`（T-0228、T-0230；docs/v2/LLM_BRIDGE_PLAN.md）
+## 大模型客户端（会话桥）模块 `llm_bridge`（T-0228、T-0230 ~ T-0233；docs/v2/LLM_BRIDGE_PLAN.md）
 
 页面叫“大模型客户端管理”；页面上的一个 MCP 管理器就是这里的一座会话桥（`bridge`）。
 
@@ -813,6 +813,22 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `GET .../chat/groups/{group_id}` | 一组和它的成员：`position`、`bridge_id`（登记被删除后为空）、`bridge_name`、`bridge_enabled`、`platform`、`mode`、`model`、`session_id`（没建成时为空）、`error` |
 | `POST .../chat/groups/{group_id}/messages` | 向每个成员继续发：`text`、`request_id`、`takeover`；返回每个成员的 `turn` 或 `error`（管理器停用、登记被删除、会话没建成的这次不发）。别人建的一组要 `takeover=true`，否则 `409 TAKEOVER_REQUIRED`；已归档的一组 `409` |
 | `POST .../chat/groups/{group_id}/archive` | 归档这一组：只是不再并排显示，每个模型的会话不受影响 |
+
+**一键部署**（T-0233，`docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md`；都在 `/api/v1/llm_bridge` 下，写操作带 CSRF、只有 owner 能做，读 owner / admin）。
+MCP 管理器部署到“智能体服务器”或“容器服务器”登记的服务器上；任务在后台进行，进度用任务接口读。
+部署 MCP 管理器不看这两类服务器自己的准入（资源、配额、正在进行的任务）；管理器的容器不受那两个页面的管理程序影响。
+
+| 接口 | 说明 |
+|---|---|
+| `GET .../deployments/targets` | 可以部署到哪些服务器：`kind`（`agent_server` / `runner_host`）、`id`、`name`、`host`、`deployable`、`block_reason` / `block_message`、`may_need_password`（登录账号不是 root、也不在 docker 组）、`managers`（已有几个管理器）；`available=false` 表示这个工作台没带构建文件。只读登记，不连服务器 |
+| `GET .../deployments`，`GET .../deployments/{job_id}` | 最近的任务；单个任务带脱敏后的 `log`。`kind`：`deploy` / `redeploy` / `restart` / `uninstall`；`status`：`running` / `succeeded` / `failed` / `interrupted`；`mode`：`same_host`（加入工作台的内部网络）/ `tunnel`（只监听服务器本机，工作台经 SSH 通道访问）；`steps` 是每一步的 `key`、`status`、`detail` |
+| `POST .../deployments` | `target_kind`、`target_id`、`name`、`platforms`、`request_id`（幂等）、可选 `sudo_password`。202 返回任务。登录账号用 Docker 要 sudo 密码却没带时，任务在“检查”一步失败（`error_code=sudo_password_required`，密码不对是 `sudo_denied`）。`409 DEPLOY_BLOCKED`：工作台现在登录不上这台服务器；`409 DEPLOY_BUSY`：这台服务器上有 MCP 管理器的任务在进行；`409 NAME_TAKEN`；`503 DEPLOY_UNAVAILABLE` |
+| `POST .../bridges/{id}/redeploy`、`.../restart`、`.../uninstall` | `request_id`、可选 `sudo_password`；卸载另有 `remove_data`（连数据卷一起删）、`force`（不连服务器，只删除登记；返回的任务写明服务器上还留着什么）。`409 NOT_DEPLOYED_HERE`：不是工作台部署的；`409 SERVER_REMOVED`：那台服务器已从工作台移除（只能 `force`）；`409 SUDO_PASSWORD_REQUIRED`：要带登录密码 |
+| `GET .../installs?target_kind&target_id` | 某台服务器上的 MCP 管理器（两个服务器页面的入口用）：`bridge_id`、`name`、`enabled`、`reachable`（停用的不探测，为空）、`version`、`platforms`、`logged_in`、`deployment` |
+
+`GET .../bridges` 的每一项多一个 `deployment`（手动添加的为空）：`target_kind`、`target_id`（服务器已移除时为空）、`server_name`、`mode`、`port`、
+`needs_sudo`、`outdated`（工作台带的构建文件比部署的新）、`deployed_at`。工作台部署的管理器不能 `PATCH` 地址和令牌、不能直接 `DELETE`：`409 BRIDGE_MANAGED`。
+`sudo_password` 只在那一个任务的内存里，不保存、不进日志和审计。
 
 **智能体工具**（只列给打开了权限的实例；每个工具都有可选参数 `bridge`，实例能用多个 MCP 管理器时必填，`llm_bridge_status` 除外：不填时返回 `data.bridges`，列出它能用的每一个和各自控制的平台、登录情况；连不上的标 `reachable=false`）：
 

@@ -333,6 +333,15 @@ jobs:
           sudo env SSH_TARGET_HOST="$SSH_TARGET_HOST" SSH_TARGET_PORT="$SSH_TARGET_PORT" \
             SSH_TARGET_USER="$SSH_TARGET_USER" SSH_TARGET_PASSWORD="$SSH_TARGET_PASSWORD" \
             SSH_HOST_KEY_PUB="$SSH_HOST_KEY_PUB" python3 tests/e2e/agent_ssh_acceptance.py
+      # T-0233：同一台“新服务器”（上一步已移除服务器并恢复 authorized_keys）。页面上一键部署 MCP 管理器走的接口：
+      # 真的在这台机器上构建并启动一个会话桥容器，工作台容器经真实的 sshd 用只能转发一个端口的密钥连过去
+      - name: MCP 管理器一键部署验收（真实构建启动、只监听本机 + SSH 通道、保护标签、清理不影响、重启、重新部署、卸载、移除服务器后照常能用、只删除登记）
+        run: |
+          sudo env SSH_TARGET_HOST="$SSH_TARGET_HOST" SSH_TARGET_PORT="$SSH_TARGET_PORT" \
+            SSH_TARGET_USER="$SSH_TARGET_USER" SSH_TARGET_PASSWORD="$SSH_TARGET_PASSWORD" \
+            python3 tests/e2e/mcp_manager_deploy_acceptance.py
+      - name: MCP 管理器一键部署浏览器验收（服务器页面的入口、表单预选服务器、部署进度、卡片、区块里在线、重启、卸载、手机宽度）
+        run: node tests/e2e/mcp_manager_browser.cjs
       # T-0090 / T-0183：同一台“新服务器”（上一步已卸载、移除服务器并恢复 authorized_keys），这次全程在网页上操作
       - name: 智能体服务器浏览器验收（服务器页四项添加、核对指纹、测试连接、初始化，智能体页选服务器部署到上线、运维、卸载、移除、手机宽度）
         run: node tests/e2e/agent_ssh_browser.cjs
