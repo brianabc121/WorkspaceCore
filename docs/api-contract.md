@@ -846,6 +846,15 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 
 智能体的工具没有变化：`llm_bridge_send` 不带附件（智能体没有上传的途径）。
 
+**插入消息**（T-0236 第三步，`docs/v2/LLM_BRIDGE_QUEUE_PLAN.md` 第 5 节）。
+
+- 发送（`POST .../chat/sessions/{session_id}/messages`）多一项 `mode`：`queue`（默认，排队、不打断）/ `insert`。智能体的 `llm_bridge_send` 同样多 `mode`。
+- 会话正在处理别的消息、`mode=insert` 时：先试着把消息送进正在处理的回合（Codex 的 `turn/steer`）；平台在 10 秒内没有确认收下、或带了附件，就**中断正在处理的回合，把这条消息和“接着刚才没做完的事继续”合成一个新回合**，排在这个会话队列的最前面。Claude / WorkBuddy 目前一律走后一种。
+- 返回多一项 `delivered`：`inserted`（进了正在处理的回合，`turn_id` 是那个回合，没有新回合）/ `merged`（中断后合并重发）/ `queued` / `started`。
+- 被插入打断的回合 `status=interrupted`、`failure.kind=superseded`：不是失败，不参与额度的自动续跑。
+- 会话内容里，提问多一项 `delivery`：`turn` / `inserted` / `merged`。插进去的消息排在它进入的那一回合的提问之后、回答之前。存下来的提问是人发的原话；“接着刚才的做”那一句只给模型看。
+- 插进去的消息同样计入每小时的发送次数；同一个 `request_id` 重试不会插两次。
+
 **额度与额度用完后的自动继续**（T-0237，`docs/v2/LLM_BRIDGE_QUOTA_PLAN.md`）。
 
 - 平台给的是**已用百分比和重置时间**，不是剩余 token 数。Codex 可以随时查；Claude / WorkBuddy 只在跑回合时顺带报出来，接口给的是最近一次看到的。

@@ -3,7 +3,7 @@
 // （services/llm-bridge/tests/fakes/fake_cli.py：参数和事件的形状与真实程序一致，回答是把收到的话原样带回来；
 // 收到 hang 时会一直不回答，用来验收“停止”）。别的都是真的：会话桥、工作台接口、页面。
 //
-// 没有管理器时的说明 → 新建会话并发第一条 → 回答、过程、标题 → Enter 再发一条 → 停止 → 消息队列（排队、置顶、修改、取消）→ 额度用完（中断、暂停、现在就试）→ 图片附件与工具调用 → 改标题 → 搜索 →
+// 没有管理器时的说明 → 新建会话并发第一条 → 回答、过程、标题 → Enter 再发一条 → 停止 → 消息队列（排队、置顶、修改、取消）→ 额度用完（中断、暂停、现在就试）→ 图片附件与工具调用 → 插入消息 → 改标题 → 搜索 →
 // 刷新后还在 → 别的管理员建的会话要确认一次才能接着发 → member 用不了 → 归档后不能再发 →
 // 管理器停用后只能看 → 多模型同问（同一个问题同时发给两个模型、并排看、继续问、回到单会话、别的管理员要确认、归档）→
 // 审计里没有消息内容 → 手机宽度两屏（同问一次看一栏）。
@@ -297,6 +297,26 @@ async function main() {
     await steps.getByText('结果 Read').waitFor()
     step('图片随消息发给模型并存在管理器里，页面上能看到；对话会话拒绝别的文件；读文件这类工具调用和结果记在过程里')
 
+    // ---------------------------------------------------------------- 插入消息（T-0236 第三步）
+    // 假程序收不下回合中追加的消息，所以走的是降级：中断正在处理的回合，把新消息和“接着刚才的做”合成新回合
+    await composer(page).fill('hang')
+    await composer(page).press('Enter')
+    await thread(page).getByText('正在回答…').waitFor({ timeout: 30000 })
+    const modes = page.getByRole('group', { name: '上一条还没答完时怎么发' })
+    check(await modes.getByRole('radio', { name: '排队' }).isChecked(), '默认是排队，不打断')
+    await modes.getByRole('radio', { name: '插入' }).check()
+    await composer(page).fill('插入的消息')
+    await composer(page).press('Enter')
+    await page.getByText(/平台没有收下插入的消息：已中断上一回合/).waitFor({ timeout: 60000 })
+    await thread(page).getByText('这一回合被后面插入的消息打断了；新消息里会接着做。').waitFor({ timeout: 60000 })
+    await thread(page).getByText('插入（合并重发）').waitFor()
+    const mergedReply = thread(page).locator(':scope > li.is-reply').filter({ hasText: ':: 插入的消息' })
+    await mergedReply.waitFor({ timeout: 60000 })
+    check(/请先处理它，然后接着刚才没做完的事继续/.test(await mergedReply.innerText()), '给模型的那份应带上“接着刚才没做完的事继续”')
+    check((await thread(page).locator(':scope > li.is-ask').filter({ hasText: '插入的消息' }).innerText()).includes('接着刚才') === false, '页面上的提问是人发的原话')
+    check((await thread(page).getByText(/这一回合失败了/).count()) === 0, '被插入打断的回合不应显示成失败')
+    step('插入消息：会话在跑时选“插入”，平台收不下就中断上一回合、合并重发；被打断的回合不算失败，页面写明实际怎么送出去的')
+
     // ---------------------------------------------------------------- 改标题、搜索、刷新
     await page.getByRole('button', { name: '改标题' }).click()
     const rename = page.getByRole('form', { name: '改会话标题' })
@@ -313,10 +333,10 @@ async function main() {
     await page.reload()
     await page.getByRole('heading', { level: 2, name: TITLE }).waitFor()
     await thread(page).getByText(':: 第二问').waitFor()
-    // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条；附件那一步的两条
-    check((await countMessages(page)) === 22, `刷新后十一问十一答都还在：${await countMessages(page)}`)
+    // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条；附件那一步的两条；插入那一步的两条
+    check((await countMessages(page)) === 26, `刷新后十三问十三答都还在：${await countMessages(page)}`)
     const info = page.getByRole('complementary', { name: '会话信息' })
-    await info.getByText('回合（11）').waitFor()
+    await info.getByText('回合（13）').waitFor()
     await info.getByText(MANAGER).waitFor()
     step('改标题后列表跟着变；按标题搜索；刷新后从地址回到同一个会话，右栏有会话信息和回合')
 

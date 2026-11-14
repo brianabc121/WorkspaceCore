@@ -37,3 +37,4 @@ updated: 2026-11-14
 - 2026-11-14 13:55 UTC · claude · 开始任务：优化方案、核验记录、使用说明已写；开始第一步
 - 2026-11-14 14:20 UTC · claude · 第一步完成：按平台限流（默认 3）与起跑间隔；队列的查看、修改、置顶（管理器、工作台接口、聊天页、只读工具 llm_bridge_queue）；使用说明。管理器 pytest 29 passed 3 skipped；后端聊天 / 模块 / 契约 53 passed；前端 852 passed；本机浏览器验收 llm_chat_browser.cjs 14 步通过。下一步：第二步（messages / attachments、完整过程、回填、旧会话导入、附件），第三步（插入消息）
 - 2026-11-14 16:27 UTC · claude · 第一步（PR #212）已合并。第二步在本地分支做完：管理器 messages / attachments 落库与回填、旧会话导入与重新导入、输入输出附件、下载、过程里的工具调用；工作台接口；聊天页的回形针、缩略图、文件下载。管理器 48 项测试、工作台与前端相关测试、浏览器验收（llm_chat_browser.cjs 16 步）通过。等 PR #213（T-0237）合并后 rebase 到 main 开第二个 PR。下一步：第三步插入消息（Codex turn/steer；Claude / WorkBuddy 走降级：中断后合并重发）。
+- 2026-11-14 16:44 UTC · claude · 第三步（插入消息）在本地分支做完：管理器 mode=insert（Codex turn/steer；收不下时中断后合并重发，被打断的回合记 interrupted/superseded）、工作台接口与智能体工具的 mode、聊天页“排队 / 插入”。和方案不同：Claude / WorkBuddy 的回合中追加没有做（核验不了运行时行为），一律降级。管理器 52 项、工作台相关 59 项、前端 856 项测试通过；浏览器验收 17 步通过。第二、三步等 PR #213 合并后依次开 PR。
