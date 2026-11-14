@@ -4,7 +4,7 @@
 
 本文用于避免重复踩坑。安装、注册、修改策略和重启属于有副作用的步骤，只在已批准的目标与维护范围内执行。代码块是操作模板，不表示本文编写时重新执行过这些操作。
 
-## 先看这八条
+## 先看这十条
 
 1. **Connected 只证明设备在线，不证明当前客户端有访问权限。** TCP、SSH 登录、TLS 和应用授权要分别验证。
 2. **Reusable 复用注册凭据；持久状态复用设备身份；Ephemeral 回收离线短期设备。** 三者作用不同。
@@ -14,6 +14,8 @@
 6. SSH 保持严格主机公钥校验。`ssh-keyscan` 用于发现公钥，**不是公钥可信的证明**。
 7. 先读已有执行与资源回执，再部署；保护现有服务、网络、卷和数据。公网及完整验收未完成前，生产网络开关保持关闭。
 8. 每个结果附时间、目标、执行路径、命令、退出码和代码版本；历史 PASS、当前失败、推断原因和未执行项目分开记录。
+9. **Codex Cloud 每次更新 Tailscale 密钥后：保存 → Publish/Republish → 从更新后的环境新开 Cloud 会话 → 实测。** 继续旧会话、刷新界面或只保存草稿，不等于替换旧运行实例的 VPN 配置；不要在旧会话反复改服务器来等待新密钥生效。
+10. **本项目访问策略的 `src`、`dst` 都用角色标签。** 云端来源用 `tag:codex-cloud`，SSH 目标用 `tag:workspace-test`；节点互联用 `tag:workspace-test-a/b` 区分方向。IP 用于连接与盘点，不作为会变动的客户端身份，也不把设备显示名称当标签。
 
 ## 目录
 
@@ -67,22 +69,22 @@ flowchart LR
 <a id="keys"></a>
 ## 2. 注册密钥、标签与设备身份
 
-### 2.1 选定的注册方案（Codex 新凭据应用与连接验证待确认）
+### 2.1 选定的注册方案（2026-11-14 新会话已验证 SSH）
 
 下表是角色配置模板，不是已部署结果；实际确认状态见第11节。
 
 |设置|Codex Cloud 短期开发客户端|A/B 长期服务器|
 |---|---|---|
-|身份标签|`tag:codex-cloud`|`tag:workspace-test`|
+|身份标签|`tag:codex-cloud`|共同标签 `tag:workspace-test`，另按角色加 `tag:workspace-test-a` 或 `tag:workspace-test-b`|
 |Reusable|开启，供后续实例注册|按部署需要；单次部署可使用一次性密钥|
 |Ephemeral|开启，回收离线短期节点|关闭，保留长期服务器身份|
 |Pre-approved|启用设备审批且界面提供时开启|按服务器审批流程配置|
 |有效期|明确轮换周期，记录到期日|同样记录；不要和设备密钥有效期混淆|
 |保存位置|平台凭据设置/密钥管理系统|批准的密钥管理系统或仅管理员可读文件|
 
-在 Tailscale 管理端 Keys 页面生成 Codex 专用 Auth key，启用 Reusable、Ephemeral，并明确选择 `tag:codex-cloud`。将值填写到平台用于连接 Tailscale 的凭据位置，保存、应用；若还要影响未来任务，同时更新其环境配置来源。不要把值写进仓库、命令历史或聊天。
+在 Tailscale 管理端 Keys 页面生成 Codex 专用 Auth key，启用 Reusable、Ephemeral，并明确选择 `tag:codex-cloud`。将值填入所用 Cloud 环境的 Tailscale 凭据设置，保存并发布/重新发布，再从该环境新开会话，按第5.4节验收。不要把值写进仓库、命令历史或聊天。
 
-**生成密钥、保存平台配置、当前实例采用新配置、目标连接成功，是四个独立步骤。** 必须逐项核验；新密钥不会自动给旧设备补标签，也不会追溯清理旧的普通设备。
+**生成密钥、保存平台配置、发布环境、新会话采用新版本、目标连接成功，是五个独立步骤。** 必须逐项核验；新密钥不会自动给旧设备补标签，也不会追溯清理旧的普通设备。第11节已记录新会话两机登录成功，但没有读取平台保存的密钥值，也没有取得平台代理自身设备 IP；不据此编造当前节点映射或密钥属性核验结果。
 
 官方依据：[Auth keys](https://tailscale.com/docs/features/access-control/auth-keys)、[Ephemeral nodes](https://tailscale.com/docs/features/ephemeral-nodes)。
 
@@ -226,13 +228,29 @@ sudo tailscale set --ssh
 
 定义 tagOwners 不会给设备自动打标签；只写 ssh 规则也不会自动放通 TCP22。Tailscale SSH 需要两层均允许。[Grants说明](https://tailscale.com/docs/features/access-control/grants/grants-explained)
 
+本项目统一按以下身份写 `grants`（或既有 ACL 的对应来源/目标）及 `ssh` 规则：
+
+|角色|设备必须实际持有的标签|策略中的用途|
+|---|---|---|
+|Codex Cloud 临时客户端|`tag:codex-cloud`|云端 SSH 的 `src`|
+|服务器 A|`tag:workspace-test`、`tag:workspace-test-a`|SSH 共同目标；节点互联 A 角色|
+|服务器 B|`tag:workspace-test`、`tag:workspace-test-b`|SSH 共同目标；节点互联 B 角色|
+
+**同时检查 `src` 和 `dst`，也同时检查网络规则和 SSH 规则。** 只改一端或只改一层仍可能不匹配。给设备命名为 `workspace-test-a` 不会自动赋予 `tag:workspace-test-a`；在 `tagOwners` 声明标签也不会自动分配。A/B 保留共同标签再补角色标签，避免替换标签时丢失已有 SSH 授权。
+
+Tailscale 的网络 grants 语法本身支持 IP/CIDR；这里使用标签是本项目防止节点更换、临时 IP 和角色混淆的约定，不是声称官方禁止 IP 规则。IP 仍是 SSH 连接目标，不能把 `ssh root@tag:workspace-test` 当作标签选择器的用法。
+
+同一 `src`/`dst` 数组里的多个选择器是“任一匹配”，不是“同时持有”。例如节点 A 的方向规则只选 `tag:workspace-test-a`；不要把共同标签也放进该数组，以免把范围扩大到所有测试服务器。
+
 下面是**专用测试环境的最小策略示例**。它授予测试服务器 root 登录，生产环境应改为符合其角色的账号。应用到已有 tailnet 时合并相关条目，保留其他业务所需配置，并审查已有宽泛放行规则；新增窄规则不会抵销既有更宽的允许规则。
 
 ```json
 {
   "tagOwners": {
     "tag:codex-cloud": ["autogroup:admin"],
-    "tag:workspace-test": ["autogroup:admin"]
+    "tag:workspace-test": ["autogroup:admin"],
+    "tag:workspace-test-a": ["autogroup:admin"],
+    "tag:workspace-test-b": ["autogroup:admin"]
   },
   "grants": [
     {
@@ -254,26 +272,30 @@ sudo tailscale set --ssh
 
 只给经过批准的设备赋这些标签。新客户端显示普通用户身份而没有 `tag:codex-cloud` 时，不能因它与旧设备同名就认为该规则匹配。
 
+带标签的 Codex 来源连接带标签的服务器时，Tailscale SSH 使用 `action: "accept"`；官方不支持带标签来源使用 `check` 模式。不要照搬面向人工用户的 `autogroup:self`/`check` 规则，也不要为修复自动化登录扩大到所有成员 root。[Tailscale SSH 支持范围](https://tailscale.com/docs/features/tailscale-ssh)
+
 ### 4.2 SSH 和节点互联是不同方向
 
-本项目 A=`100.72.60.100`、B=`100.121.210.36`。专用测试集群曾使用下列**追加到 grants 数组**的节点规则；它们不是通用生产网络模板：
+本次已核验 A=`100.72.60.100`、B=`100.121.210.36`，这些是连接地址；未来仍须从可信设备记录重新核对。下面将历史固定 IP 节点规则改为角色标签，**追加到 grants 数组**；先确认 A/B 的角色标签已实际赋予且没有误赋给其他设备。本次只修正文档，没有向管理端应用这些规则。
 
 ```json
 [
   {
-    "src": ["100.121.210.36"],
-    "dst": ["100.72.60.100"],
+    "src": ["tag:workspace-test-b"],
+    "dst": ["tag:workspace-test-a"],
     "ip": ["tcp:6443", "tcp:10250", "udp:8472"]
   },
   {
-    "src": ["100.72.60.100"],
-    "dst": ["100.121.210.36"],
+    "src": ["tag:workspace-test-a"],
+    "dst": ["tag:workspace-test-b"],
     "ip": ["tcp:10250", "udp:8472"]
   }
 ]
 ```
 
 这里分别用于 B访问A的集群 API、节点间 kubelet，以及跨节点 Cilium VXLAN。它们不会顺带允许云端客户端访问 API。云端通过 SSH 在受信节点上使用 kubectl，是另一条经过授权的路径。
+
+如果确有 A/B 互相访问 TCP22 的需求，应另加经批准的角色标签网络规则；本段集群端口规则不包含 TCP22，云端 SSH 规则也不会自动允许 A→B。若还需要节点间 Tailscale SSH 登录，另配对应方向的 `ssh` 规则，不能把 TCP22 可达当作已经有 root 登录权限。
 
 控制面、kubelet和overlay端口按实际架构最小放行；不要为调通测试开放所有节点端口。Tailscale 自身的底层传输与承载其中的 VXLAN UDP8472也不是同一层。
 
@@ -340,13 +362,31 @@ ssh -F /dev/null \
 
 示例按本项目 IPv4 地址、不含空格/特殊字符的 socat 路径和已核验的ED25519公钥使用。禁用全局known_hosts来源，避免其他系统记录替代本次专用公钥固定。不要把目标列表、路径或远端命令当作未校验的外部字符串拼接。
 
-### 5.4 保存设置后的验证顺序
+<a id="cloud-key-rotation"></a>
+### 5.4 每次更新密钥后必须发布环境并新开会话
 
-1. 确认新凭据已保存到正确的运行环境；需要未来任务继承时，同步其配置来源。
-2. 按平台支持的方式应用，若要求重新加载则遵循其提示。不要仅凭“保存成功”假设旧VPN连接已采用新凭据。
-3. 读取新状态/配置版本，核对当前设备标签。
-4. 使用新连接探测两个目标；不能复用变更前的长连接作为验证。
-5. 严格 SSH 核对主机身份后再继续开发。不要只因新设备显示Connected便跳过实际请求。
+**固定操作：更新 Tailscale 密钥 → Save → Publish/Republish → 新建 Cloud 会话并选择更新后的环境 → 重新验证两机。** 旧会话继续发送“重连”“继续”不会自动把已发布配置应用到它的旧运行实例。新会话也必须选对环境，单纯新开聊天不足以保证使用新配置。
+
+Codex 桌面端操作顺序（界面名称若变化，以当前环境编辑页为准）：
+
+1. 打开 **Settings → Codex Cloud → Environments**，找到本任务实际使用的环境，进入 **Edit**。
+2. 点击 **Tailscale 旁的铅笔**，更新安全凭据，确认注册方案为带 `tag:codex-cloud` 的 Reusable + Ephemeral。
+3. **Save 后继续 Publish/Republish**，等发布完成；保存草稿不是发布。
+4. **新建会话/任务，Work in 选择 Cloud，并选择刚发布的环境**。需要新配置的既有运行实例应按平台流程替换；保留旧聊天作记录，不再靠旧实例的失败判断新配置无效。
+5. 读取新会话的环境 ID、`source_config_version_id` 和当前观测状态，与旧实例比较；`spec_revision=1` 本身不能识别是否换了环境或配置版本。具备可信设备映射时再核对来源 IP/标签；没有映射时明确写未知。
+6. 通过 `proxy:8088` 对 A/B 的 TCP22 建立**新连接**，然后核验可信 ED25519 指纹；匹配后分别执行 `hostname`、`id`。两个命令退出0才算本轮 SSH 验收通过，不能只看 Connected、Running 或 CONNECT 200。
+
+依据：[官方 Cloud environments 的 VPN 更新流程](https://developers.openai.com/codex/environments/cloud-environments#private-networking-vpn)。这条要求针对托管 Cloud VPN 配置更新；仅修改 Tailscale 访问策略，不等于每次都需要生成新密钥或重建所有会话。
+
+**本次实证：** 旧会话到 A/B 的 CONNECT 均503超时；更新环境后，本新会话的实例 ID 和源配置版本均不同，2026-11-14 15:33起（UTC+8）两机 CONNECT 200、`SSH-2.0-Tailscale`，随后指纹匹配，`hostname/id` 均退出0。完整结果见第11.1节。此对照验证了新环境下连接恢复；没有单独证明旧实例内部超时的具体根因，也没有定位到某一个 Codex 设备 IP。
+
+### 5.5 先核对角色与方向，再判断是否连接成功
+
+- **不要把 Codex 来源节点当服务器目标。** 此次 A/B 为 `100.72.60.100`、`100.121.210.36`；历史截图中的 `100.107.25.64`、`100.113.142.22`、`100.123.123.71` 是 Codex 客户端，不能拿来替代 A/B。它们也不是当前实例已核实的来源 IP。设备清单至少记录“角色、地址、标签、核验时间”。
+- **A→B 通，不等于 Codex→A/B 通。** 两条路径的来源标签、策略方向和平台代理不同，分别验证；不要用服务器之间的成功替代本会话成功。
+- **DERP 是可用的中继方式。** `pong ... via DERP(...)` 后出现 `direct connection not established`，表示没有建立直连，不表示中继没有回复。中继可以承载 SSH；无需为追求直连先改公网防火墙。[官方连接类型](https://tailscale.com/docs/reference/connection-types)
+- **Tailscale ping 不等于实际 TCP22/SSH 验收。** 探测协议与应用连接不同；必须走当前会话的目标 TCP 路径，再核对公钥和登录结果。CONNECT 200 后还要读到 SSH 服务响应，不能把普通 HTTP 代理的200单独报成 SSH 成功。
+- **没有可用的 VPN 重连接口时如实说明。** 不要求用户寻找未核实存在的“重连 VPN”按钮，也不在工作区安装另一个 Tailscale 代替平台代理；按第5.4节更新环境并新开任务。
 
 <a id="ssh"></a>
 ## 6. 严格 SSH 与公钥缓存
@@ -422,7 +462,9 @@ PY
 
 - [ ] 读任务、已有PR、主干合并状态和上次执行账本，确认没有其他部署/验收正在占用目标。
 - [ ] 确认当前运行环境、配置版本、Tailscale当前设备和来源标签。
+- [ ] 本轮若更新过密钥/VPN配置，确认已 Save + Publish/Republish，并从更新后的环境新开 Cloud 会话；旧会话不充当新配置验收。
 - [ ] 核对目标地址/标签/端口、网络规则及实际SSH模式。
+- [ ] 检查 `grants`/既有 ACL 与 `ssh` 的 `src`/`dst` 均使用正确角色标签，且设备真实持有标签；没有把 Codex 来源 IP 当 A/B 目标。
 - [ ] 检查公钥缓存；对每台机器先严格SSH执行hostname/id。
 - [ ] 做有界、只读资源盘点，记录既有服务、端口、Docker网络/卷和测试资源回执。
 - [ ] 需要写操作时明确专用目录、凭据、非生产context、资源限额及清理范围。
@@ -482,8 +524,12 @@ ss -lntup
 |旧Codex节点有标签，新后缀节点无标签|注册凭据是否自带tag；新设置是否真正应用|tagOwners不会自动赋标签，手工给旧节点加标签不会覆盖新节点|
 |Reusable已开，仍产生新节点|平台是否丢失设备状态或按短期实例设计|Reusable不承诺复用设备身份；按需要选持久状态或Ephemeral|
 |生成了新Key，旧节点仍没有标签|当前节点是否重新注册/认证，是否仍在使用旧凭据|新Key不追溯修改旧节点；先确认当前实例采用了什么|
+|更新密钥后旧会话仍503，新会话可连|是否 Save 后 Republish，新任务是否选更新后的 Cloud 环境及配置版本|先按5.4节替换旧运行实例并在新会话实测；不反复改服务器或宣称保存即生效|
+|规则只改了src或只改了grants，仍拒绝|dst是否仍为错误身份，设备共同/角色标签是否齐全，ssh规则是否也匹配|两端、两层一起检查；不扩大为所有成员/所有端口|
 |新任务注册失败，旧设备仍在线|注册密钥是否过期/撤销；已有设备自己的认证状态|Key过期或撤销不等于所有旧设备立即注销|
 |ping失败但TCP可达|ICMP是否在允许范围、诊断路径是否一致|用目标协议验证；不为ping开放所有流量|
+|DERP有pong但显示direct connection not established|是否只是未建立直连；实际TCP/SSH是否成功|中继回复不等于断网，也不等于SSH已通过；按当前来源复测应用|
+|A→B成功，Codex→A/B失败|来源角色、标签、方向与平台代理是否相同|服务器间成功不能替代云端实测，不拿Codex节点IP替代服务器IP|
 |对端不在可见Peer里|tailnet、共享方式、访问策略和节点标签|不凭缺少Peer就修改主机路由或重装客户端|
 |HTTP CONNECT 403|目的授权、平台明确错误码、执行路径|不要换受保护地址绕过策略|
 |HTTP CONNECT 503超时|平台代理当前状态、目标在线/标签、实际端口与防火墙|通用503不单独证明是ACL、平台故障或服务器离线|
@@ -536,8 +582,8 @@ Tailscale只提供节点间承载网络；跨OpenClaw实例的隔离、来源授
 ### 注册密钥轮换
 
 1. 生成作用域相同的新凭据，确认标签、Reusable/Ephemeral、有效期与审批设置。
-2. 在正确的平台安全设置更新并应用；未来环境配置也按需更新。
-3. 用新注册实例核对标签和真实连接，再退役旧注册凭据。
+2. 在正确 Cloud 环境的 Tailscale 安全设置更新，Save 后 Publish/Republish，等发布完成。
+3. 从更新后的环境**新开 Cloud 会话**，替换需要采用新配置的旧实例；按第5.4节核对版本、标签及两机严格 SSH，再退役旧注册凭据。不能在旧会话重试几次就算新凭据已采用。
 4. 撤销Auth key不会自动注销其登记过的所有设备；若需要撤销已登记设备的访问，还须按设备/策略流程处理。
 
 ### 设备与状态回收
@@ -550,6 +596,8 @@ Tailscale只提供节点间承载网络；跨OpenClaw实例的隔离、来源授
 ### 给下一次会话留下什么
 
 保留目标与身份核验记录、来源标签方案、平台设置是否已应用、证书/密钥到期信息、专用context、UID/journal与上次真实输出。说明哪些已完成、哪些只是推断，哪些需要管理端操作；不能只写“下次继续调网络”。
+
+特别记录密钥/VPN配置最后更新及发布的时间、已发布配置版本、哪一个**新会话**完成验证。新会话交接提示应带 A/B 角色与地址、可信指纹、只读命令范围及本手册链接，不带密钥值。
 
 <a id="evidence"></a>
 ## 11. 本项目已发生的案例与证据
@@ -565,7 +613,31 @@ Tailscale只提供节点间承载网络；跨OpenClaw实例的隔离、来源授
 |后续完整CI|代码7f4a591的API1774通过/16跳过，Web811项及六组工作流通过|按提交号陈述结果；新文档提交或新实例不自动继承当前实机结论|
 |2026-11-14会话恢复|执行器北京时间10:25:57启动，逻辑配置未变；平台VPN Running/路由就绪，但A/B22经CONNECT503超时|区分逻辑环境与运行实例，先验证当前来源与标签|
 |新Codex设备缺标签|用户截图显示A/B在线，新-3无codex-cloud标签；缺少平台注册历史/自身设备映射|与ACL不匹配相符，但具体注册触发及标签修正后的结果仍待验证|
-|选择新注册方案|已选带codex-cloud标签的Reusable/Ephemeral方案|截至本文编写，尚未取得用户保存应用后的确认或新连接结果，不写成已经配置完成|
+|选择新注册方案|已选带codex-cloud标签的Reusable/Ephemeral方案；最初尚未确认应用，后续新会话已登录成功|方案、发布与实际服务验证分开；不根据登录成功补写未观测的密钥属性/设备映射|
+|密钥更新后仍在旧会话重试|旧会话到A/B均503；本新会话使用不同运行实例及不同源配置版本，两机SSH均成功|每次密钥更新后Save→Republish→从更新后环境新开Cloud会话，不能只保存或刷新旧聊天|
+|src/dst仍按固定IP或错误身份匹配|手册旧节点互联示例使用A/B固定IP；本轮统一改为角色标签，SSH保留共同目标标签|定义tagOwners并实际赋标签；同时检查两端及网络/SSH两层，本轮未向管理端应用策略|
+|把Codex IP认成服务器/把DERP回复认成失败|历史客户端地址曾被误当A/B目标；A能收到客户端DERP回复，但旧会话实际TCP22仍503|建立带角色的设备清单；区分直连、中继、方向与应用端口，不由ping代替SSH|
+
+### 11.1 2026-11-14 新会话只读复测（已成功）
+
+时间：**2026-11-14 15:33起（UTC+8）**，TCP代理原始响应时间 `2026-11-14 07:33:34 GMT`，随后完成SSH指纹和命令验证。路径：本新会话外层执行器 → `proxy:8088` HTTP CONNECT → A/B Tailscale TCP22。平台代理实时观测：`configured=true`、`state=Running`、`routing_ready=true`。
+
+|目标角色/地址|CONNECT / SSH banner|可信ED25519比对|`hostname`|`id`|SSH退出码|
+|---|---|---|---|---|---|
+|A / `100.72.60.100`|200 / `SSH-2.0-Tailscale`|匹配|`s1348279`|`uid=0(root) gid=0(root) groups=0(root)`|0|
+|B / `100.121.210.36`|200 / `SSH-2.0-Tailscale`|匹配|`s8006604`|`uid=0(root) gid=0(root) groups=0(root)`|0|
+
+两台实际服务均匹配管理员此前可信确认的指纹：
+
+```text
+SHA256:vbzwuvOu30pbIyANTCFBC/b4/At+uvpTB8kvl1QpKJE
+```
+
+公钥经同一路径采集、精确比对后写入本次临时专用 known_hosts；SSH 使用 `StrictHostKeyChecking=yes` 和 `HostKeyAlias=真实目标IP`，仅执行 `hostname; id`，两机标准错误均为空。临时 relay 随本地验证进程退出，未留常驻转发；未修改服务器、ACL、注册密钥或生产开关。相同SSH指纹不替代两机各自的hostname/id核验。
+
+配置来源相同，源配置版本从旧 `cecfgver_6af72486b7a0819b844f25d63c73155f` 变为新 `cecfgver_6af7dbc68128819b8c94f2509863de6a`；完整环境 ID/配置引用及输出见[新会话复测记录](verification/2026-11-14-runtime-network-followup/SSH-NEW-SESSION.md)。新旧 `spec_revision` 都为1，不把这个数字当成同一实例或未更新的证明。
+
+这是已发生的只读 SSH 结果，不等于每次恢复都可直接信任旧结果，也不代表集群、公网、容量或完整运行适配已验收。后续会话仍按第7节检查。
 
 原始证据：
 
@@ -584,6 +656,8 @@ Tailscale只提供节点间承载网络；跨OpenClaw实例的隔离、来源授
 |容器状态与登录参数|[Docker参数](https://tailscale.com/docs/features/containers/docker/docker-params)|
 |名称冲突|[Machine names](https://tailscale.com/docs/concepts/machine-names)|
 |网络规则与SSH双层授权|[Grants说明](https://tailscale.com/docs/features/access-control/grants/grants-explained)、[Grants语法](https://tailscale.com/docs/reference/syntax/grants)、[Tailscale SSH](https://tailscale.com/docs/features/tailscale-ssh)|
+|Cloud VPN更新、发布、新任务及TCP代理|[Cloud environments / Private networking](https://developers.openai.com/codex/environments/cloud-environments#private-networking-vpn)|
+|直连与DERP中继|[Connection types](https://tailscale.com/docs/reference/connection-types)|
 |SSH公钥采集的信任边界|[OpenSSH ssh-keyscan](https://man.openbsd.org/ssh-keyscan.1)|
 
 平台的HTTP/TCP代理与设置应用流程以该平台当前运行时文档和实际工具为准，不能从Tailscale通用文档推断托管平台一定暴露某个管理接口。

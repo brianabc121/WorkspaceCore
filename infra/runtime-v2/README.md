@@ -12,6 +12,8 @@
 
 开始远端开发前先读 [Tailscale部署与开发使用手册](../../docs/tailscale-development-guide.md)，
 核对当前来源标签、代理路径与可信SSH公钥；设备在线或旧测试通过不代表当前连接已验证。
+每次更新 Cloud 的 Tailscale 密钥后，必须 Save → Publish/Republish → 从更新后的环境新开 Cloud 会话再验收；
+网络与 SSH 规则的 src/dst 按角色标签核对，节点角色不要用临时 Codex IP 代替。详见手册第4、5节。
 
 - 一份控制器配置只绑定一个 workspace、RunnerHost 和 Kubernetes Node；命令不能改变绑定。主机的 mwr 凭证只用于既有接入入口，不是用户的 Kubernetes 凭证。
 - `RUNTIME_V2_URL` 是现有受信接入入口的基地址。客户端自己添加 `/runner-api/v1`，不要重复配置该路径。
