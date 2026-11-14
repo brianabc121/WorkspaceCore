@@ -67,7 +67,7 @@ async function copy() {
       <template v-else>
         <p v-if="member.error" class="lc-note is-red" role="alert">{{ member.error }}</p>
         <ol class="lc-messages" :aria-label="`${name}的消息`">
-          <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? i}:${m.role}`" :message="m" :platform="name" :resuming="resuming" @resume="resume" />
+          <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? i}:${m.role}`" :message="m" :platform="name" :resuming="resuming" :source="bridgeId && sessionId ? { chat, bridgeId, sessionId } : undefined" @resume="resume" />
         </ol>
         <p v-if="resumeError" class="lc-note is-red" role="alert">{{ resumeError }}</p>
         <p v-if="lost" class="lc-note is-red" role="alert">{{ lost }} <button type="button" class="asv-link" @click="poll()">重试</button></p>

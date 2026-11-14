@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { seconds } from '../api'
-import { splitText, type ChatMessage } from './chatApi'
+import { splitText, type ChatMessage, type ChatStep, type LlmChatApi } from './chatApi'
+import ChatAttachments from './ChatAttachments.vue'
 
 // 一条消息。回答按纯文字显示：只把三个反引号围起来的部分排成代码块，不渲染 HTML、不执行任何内容。
 // 开发会话的“过程”（中间说的话、命令、改动的文件）收在可以展开的一栏里；回答还没完时默认展开。
 // 被额度打断的回合（T-0237）显示什么时候自动继续，可以“现在就试”或“不要自动继续”。
-const props = defineProps<{ message: ChatMessage; platform: string; resuming?: string }>()
+// source：从哪个管理器的哪个会话取附件的内容；不给就不显示附件。
+const props = defineProps<{ message: ChatMessage; platform: string; resuming?: string; source?: { chat: LlmChatApi; bridgeId: string; sessionId: string } }>()
 const emit = defineEmits<{ resume: [turn: string, now: boolean] }>()
 
-const STEP: Record<string, string> = { message: '说明', command: '命令', files: '改动的文件', notice: '提示' }
+const STEP: Record<string, string> = { message: '说明', command: '命令', files: '改动的文件', notice: '提示', tool: '工具', tool_result: '结果', image: '图片', file: '文件' }
+const stepLabel = (step: ChatStep) => `${STEP[step.kind] ?? step.kind}${step.name && (step.kind === 'tool' || step.kind === 'tool_result') ? ` ${step.name}` : ''}`
+const CODE_STEPS = ['command', 'files', 'tool', 'tool_result']
 const FAILURE: Record<string, string> = { failed: '这一回合失败了', unknown: '这一回合的结果未知' }
 const parts = computed(() => splitText(props.message.text))
 const reply = computed(() => props.message.role === 'assistant')
@@ -55,14 +59,16 @@ const busy = computed(() => !!props.resuming && props.resuming === props.message
       <time v-if="message.at">{{ seconds(message.at) }}</time>
       <span v-if="status === 'cancelled'" class="lc-tag">已停止</span>
       <span v-if="status === 'interrupted'" class="lc-tag">已中断</span>
+      <span v-if="message.imported" class="lc-tag" title="官方程序里原有的内容，第一次打开时导入的">导入的</span>
     </div>
     <details v-if="reply && message.steps?.length" class="lc-steps" :open="pending">
       <summary>过程（{{ message.steps.length }} 步）</summary>
       <ol>
         <li v-for="(step, i) in message.steps" :key="i">
-          <span class="lc-step-kind">{{ STEP[step.kind] ?? step.kind }}</span>
-          <code v-if="step.kind === 'command' || step.kind === 'files'">{{ step.text }}</code>
+          <span class="lc-step-kind" :class="{ 'is-error': step.error }">{{ stepLabel(step) }}{{ step.error ? '（出错）' : '' }}</span>
+          <code v-if="CODE_STEPS.includes(step.kind)">{{ step.text }}</code>
           <span v-else>{{ step.text }}</span>
+          <span v-if="step.truncated" class="lc-tag">已截断</span>
         </li>
       </ol>
     </details>
@@ -74,6 +80,7 @@ const busy = computed(() => !!props.resuming && props.resuming === props.message
       <p v-if="pending" class="lc-wait" role="status">{{ waiting }}</p>
     </div>
     <p v-else-if="reply && status === 'completed'" class="lc-bubble lc-muted">（没有文字回答）</p>
+    <ChatAttachments v-if="source && message.attachments?.length" :chat="source.chat" :bridge-id="source.bridgeId" :session-id="source.sessionId" :items="message.attachments" />
     <p v-if="failure" class="lc-failure" role="alert">{{ failure }}</p>
     <div v-if="interrupted" class="lc-interrupted" role="note">
       <p>{{ interrupted.text }}</p>

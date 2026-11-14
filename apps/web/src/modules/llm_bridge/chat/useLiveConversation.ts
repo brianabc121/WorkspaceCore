@@ -1,5 +1,7 @@
 import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
-import { TERMINAL_EVENTS, chatError, type ChatConversation, type ChatEvent, type ChatMessage, type ChatTurn, type LlmChatApi } from './chatApi'
+import { TERMINAL_EVENTS, chatError, type ChatAttachment, type ChatConversation, type ChatEvent, type ChatMessage, type ChatTurn, type LlmChatApi } from './chatApi'
+
+const STEP_DEFAULTS = { truncated: false, error: false }
 
 // 一个会话的内容和进度（单会话的对话、多模型同问的每一栏都用它）。要在组件的 setup 里调用。
 // 有回合没做完时用长轮询读事件（一段回答、一条命令、改动的文件），在本地接到对应的回答上；
@@ -38,9 +40,11 @@ export function useLiveConversation(
       const steps = (reply.steps ??= [])
       if (e.kind === 'started') { reply.status = 'running'; reply.ahead_in_session = null }
       else if (e.kind === 'message' && e.text) reply.text = reply.text ? `${reply.text}\n\n${e.text}` : e.text
-      else if (e.kind === 'notice' && e.text) steps.push({ kind: 'notice', text: e.text, at: e.at })
-      else if (e.kind === 'command' && e.command) steps.push({ kind: 'command', text: e.command, at: e.at })
-      else if (e.kind === 'files' && e.paths?.length) steps.push({ kind: 'files', text: e.paths.join('、'), at: e.at })
+      else if (e.kind === 'notice' && e.text) steps.push({ ...STEP_DEFAULTS, kind: 'notice', text: e.text, at: e.at })
+      else if (e.kind === 'command' && e.command) steps.push({ ...STEP_DEFAULTS, kind: 'command', text: e.command, at: e.at })
+      else if (e.kind === 'files' && e.paths?.length) steps.push({ ...STEP_DEFAULTS, kind: 'files', text: e.paths.join('、'), at: e.at })
+      // 工具调用、工具结果、产出的图片：事件里不带全部内容，重新读整段会话
+      else if (['tool', 'tool_result', 'image'].includes(e.kind)) stale = true
     }
     if (events.length) hooks.activity?.()
     return stale
@@ -79,12 +83,12 @@ export function useLiveConversation(
   onBeforeUnmount(() => { alive = false; abort.abort(); clearInterval(idle) })
 
   /** 发出去之后：先把这一问和等待中的回答放上去，然后开始读进度 */
-  function sent(turn: ChatTurn, text: string) {
+  function sent(turn: ChatTurn, text: string, attachments: ChatAttachment[] = []) {
     if (!messages.value.some(m => m.turn_id === turn.turn_id)) {
       const at = Date.now() / 1000
       messages.value.push(
-        { role: 'user', turn_id: turn.turn_id, text, at, mine: true, steps: [] },
-        { role: 'assistant', turn_id: turn.turn_id, text: '', at, status: turn.status, steps: [], ahead_in_session: turn.ahead_in_session ?? null },
+        { role: 'user', turn_id: turn.turn_id, text, at, mine: true, steps: [], attachments, imported: false },
+        { role: 'assistant', turn_id: turn.turn_id, text: '', at, status: turn.status, steps: [], ahead_in_session: turn.ahead_in_session ?? null, attachments: [], imported: false },
       )
     }
     hooks.activity?.()

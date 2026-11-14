@@ -35,8 +35,8 @@ const status = (): Schema['LlmBridgeStatusOut'] => ({
   channels: [channel('chatgpt', 'chat', 'openai'), channel('codex', 'dev', 'openai'), channel('claude', 'chat', 'claude'), channel('claude', 'dev', 'claude'), channel('claude', 'cloud', 'claude', { available: false }), channel('workbuddy', 'chat', 'workbuddy')],
 })
 const session = (over: Partial<Session> = {}): Session => ({ session_id: S1, platform: 'claude', mode: 'chat', model: 'sonnet', title: '周报怎么写', status: 'active', origin: 'bridge', owner: '测试用户', owner_kind: 'me', busy: false, turns: 1, created_at: now() - 600, updated_at: now(), environment: null, ...over })
-const asked = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'user', turn_id: turn, text, at: now() - 100, by: '测试用户', mine: true, steps: [], ...over })
-const answered = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'assistant', turn_id: turn, text, at: now() - 90, status: 'completed', steps: [], ...over })
+const asked = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'user', turn_id: turn, text, at: now() - 100, by: '测试用户', mine: true, steps: [], attachments: [], imported: false, ...over })
+const answered = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'assistant', turn_id: turn, text, at: now() - 90, status: 'completed', steps: [], attachments: [], imported: false, ...over })
 const talk = (over: Partial<Session> = {}, messages: Message[] = [asked('写一个周报模板'), answered('好的，模板如下。')], last = 10): Conversation => ({ session: session(over), messages, last_event_id: last })
 const environment = (id: string, name: string): Schema['LlmBridgeEnvironmentOut'] => ({ id, platform: 'codex', mode: 'dev', name, enabled: true, repo_url: 'https://example.com/a.git', branch: 'main', sandbox: 'workspace_write', network: false, description: '' })
 
@@ -143,7 +143,7 @@ describe('大模型聊天', () => {
   })
 
   it('shows a conversation as plain text with code blocks, the steps and the session details', async () => {
-    const reply = answered('好的。\n```python\nprint("<b>hi</b>")\n```\n<i>完</i>', T1, { steps: [{ kind: 'command', text: 'ls src', at: now() }, { kind: 'files', text: 'src/a.py', at: now() }] })
+    const reply = answered('好的。\n```python\nprint("<b>hi</b>")\n```\n<i>完</i>', T1, { steps: [{ kind: 'command', text: 'ls src', at: now(), truncated: false, error: false }, { kind: 'files', text: 'src/a.py', at: now(), truncated: false, error: false }] })
     setup('owner', { conversations: { [S1]: talk({ model: 'sonnet-5' }, [asked('写一个周报模板'), reply]) } })
     const { container } = await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
     expect(await screen.findByRole('heading', { level: 2, name: '周报怎么写' })).toBeVisible()
@@ -404,6 +404,72 @@ describe('大模型聊天', () => {
     expect(screen.getByText('额度用完，这一回合中断了；已经在下面自动继续。')).toBeVisible()
     expect(screen.queryByRole('button', { name: '现在就试' })).not.toBeInTheDocument()
     expect(writes(requests).map(r => r.method)).toEqual(['DELETE', 'POST'])
+  })
+
+  it('attaches images to a message, shows stored attachments and tool steps, and re-imports an external session', async () => {
+    const created = vi.fn(() => 'blob:shown')
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: created, revokeObjectURL: () => undefined }))
+    const file = (id: string, name: string, direction = 'input', media_type = 'image/png'): Schema['LlmChatAttachmentOut'] => ({ id, name, media_type, size: 2048, direction, at: now() })
+    const A1 = `ba_${'1'.repeat(20)}`, A2 = `ba_${'2'.repeat(20)}`, A3 = `ba_${'3'.repeat(20)}`, A4 = `ba_${'4'.repeat(20)}`
+    const step = (kind: string, text: string, over: Partial<Schema['LlmChatStepOut']> = {}): Schema['LlmChatStepOut'] => ({ kind, text, at: now(), truncated: false, error: false, ...over })
+    const stored = talk({ origin: 'external', owner_kind: 'external', owner: '' }, [
+      asked('官方程序里的老问题', T1, { turn_id: null, by: null, mine: null, imported: true }),
+      asked('看这张图', T1, { attachments: [file(A1, '截图.png')] }),
+      answered('看到了', T1, { attachments: [file(A2, 'result.txt', 'output', 'text/plain')], steps: [step('tool', '{"file_path": "README.md"}', { name: 'Read' }), step('tool_result', '很长的内容', { name: 'Read', truncated: true }), step('tool_result', '读不到', { name: 'Grep', error: true })] }),
+    ])
+    const bodies: Schema['LlmChatSendIn'][] = []
+    const uploads: { name: string | null; type: string | null; size: number }[] = []
+    const { requests } = setup('owner', { conversations: { [S1]: stored }, sessions: [session({ origin: 'external', owner_kind: 'external' })] }, async r => {
+      const p = path(r), files = `${chat}/sessions/${S1}/attachments`
+      if (p === files && r.method === 'POST') {
+        uploads.push({ name: query(r).get('name'), type: r.headers.get('content-type'), size: (await r.arrayBuffer()).byteLength })
+        return Response.json(file(uploads.length === 1 ? A3 : A4, query(r).get('name') ?? ''), { status: 201 })
+      }
+      if (p.startsWith(`${files}/`) && r.method === 'GET') return new Response(new Blob(['png']), { headers: { 'Content-Type': 'image/png' } })
+      if (p.startsWith(`${files}/`) && r.method === 'DELETE') return new Response(null, { status: 204 })
+      if (p === `${chat}/sessions/${S1}/reimport`) return Response.json(talk({ origin: 'external', owner_kind: 'external' }, [asked('重新导入后的内容', T1, { turn_id: null, imported: true })]))
+      if (p === `${chat}/sessions/${S1}/messages` && r.method === 'POST') { bodies.push(await r.json() as Schema['LlmChatSendIn']); return Response.json(turn()) }
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    // 已经存下来的：导入的内容有标记；提问上的图片显示成缩略图；回答上的文件能下载；过程里有工具调用和结果
+    expect(await screen.findByText('导入的')).toBeVisible()
+    const image = await screen.findByRole('img', { name: '截图.png' })
+    expect(image).toHaveAttribute('src', 'blob:shown')
+    expect(screen.getByRole('button', { name: '下载文件：result.txt' })).toHaveTextContent('2 KB')
+    expect(screen.getByText('工具 Read')).toBeInTheDocument()
+    expect(screen.getByText('结果 Read')).toBeInTheDocument()
+    expect(screen.getByText('已截断')).toBeInTheDocument()
+    expect(screen.getByText('结果 Grep（出错）')).toBeInTheDocument()
+    // 别的文件不会自己去取，点了才取
+    expect(requests.filter(r => path(r).endsWith(A2))).toEqual([])
+    await fireEvent.click(screen.getByRole('button', { name: '下载文件：result.txt' }))
+    await waitFor(() => expect(requests.filter(r => path(r).endsWith(A2))).toHaveLength(1))
+
+    // 带图片发送：先上传（请求体就是文件），发送时带上编号；对话会话只让选图片
+    const picker = screen.getByLabelText('选择要带上的图片或文件') as HTMLInputElement
+    expect(picker).toHaveAttribute('accept', 'image/png,image/jpeg,image/gif,image/webp')
+    const big = new File([new Uint8Array(1)], '太大.png', { type: 'image/png' })
+    Object.defineProperty(big, 'size', { value: 21 * 1024 * 1024 })
+    await fireEvent.change(picker, { target: { files: [big, new File(['abcd'], '新图.png', { type: 'image/png' }), new File(['xy'], '多余.png', { type: 'image/png' })] } })
+    expect(await screen.findByText('「太大.png」太大：单个最多 20 MB。')).toBeVisible()
+    const pendingList = await screen.findByRole('list', { name: '要带上的附件' })
+    await waitFor(() => expect(within(pendingList).getAllByRole('listitem')).toHaveLength(2))
+    expect(uploads).toEqual([{ name: '新图.png', type: 'application/octet-stream', size: 4 }, { name: '多余.png', type: 'application/octet-stream', size: 2 }])
+    await fireEvent.click(within(pendingList).getByRole('button', { name: '去掉附件：多余.png' }))
+    await waitFor(() => expect(requests.some(r => r.method === 'DELETE' && path(r).endsWith(A4))).toBe(true))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const box = await composer()
+    await fireEvent.update(box, '再看这张')
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toMatchObject({ text: '再看这张', attachments: [A3], takeover: true })
+    await waitFor(() => expect(screen.queryByRole('list', { name: '要带上的附件' })).not.toBeInTheDocument())
+
+    // 重新导入：确认后重新读，内容换成新的
+    await fireEvent.click(screen.getByRole('button', { name: '重新导入' }))
+    expect(await screen.findByText('重新导入后的内容')).toBeVisible()
+    expect(writes(requests).some(r => path(r).endsWith('/reimport'))).toBe(true)
   })
 
   it('creates a session: only logged-in platforms, a development session needs an environment', async () => {
