@@ -3,7 +3,7 @@
 // （services/llm-bridge/tests/fakes/fake_cli.py：参数和事件的形状与真实程序一致，回答是把收到的话原样带回来；
 // 收到 hang 时会一直不回答，用来验收“停止”）。别的都是真的：会话桥、工作台接口、页面。
 //
-// 没有管理器时的说明 → 新建会话并发第一条 → 回答、过程、标题 → Enter 再发一条 → 停止 → 消息队列（排队、置顶、修改、取消）→ 改标题 → 搜索 →
+// 没有管理器时的说明 → 新建会话并发第一条 → 回答、过程、标题 → Enter 再发一条 → 停止 → 消息队列（排队、置顶、修改、取消）→ 额度用完（中断、暂停、现在就试）→ 改标题 → 搜索 →
 // 刷新后还在 → 别的管理员建的会话要确认一次才能接着发 → member 用不了 → 归档后不能再发 →
 // 管理器停用后只能看 → 多模型同问（同一个问题同时发给两个模型、并排看、继续问、回到单会话、别的管理员要确认、归档）→
 // 审计里没有消息内容 → 手机宽度两屏（同问一次看一栏）。
@@ -225,6 +225,45 @@ async function main() {
     check(await until(async () => (await queue.count()) === 0), '队列空了之后面板应消失')
     step('消息队列：会话在跑时再发的消息进队列、不打断；能调到最前面、修改、取消；前面的结束后按顺序处理')
 
+    // ---------------------------------------------------------------- 额度用完：中断、暂停、继续（T-0237）
+    // 假程序收到 limit 时像官方程序那样先报一条被拒绝的额度事件（5 小时额度，带重置时间），再以错误结束
+    await composer(page).fill('limit')
+    await composer(page).press('Enter')
+    await thread(page).getByText(/额度用完，这一回合中断了。.+自动继续。/).waitFor({ timeout: 60000 })
+    await thread(page).getByText('已中断').waitFor()
+    check((await thread(page).getByText(/这一回合失败了/).count()) === 0, '额度用完不应显示成失败')
+    const paused = (await api(page, workspace, 'GET', `/api/v1/llm_bridge/bridges/${bridgeId}/status`)).body?.quota?.claude
+    check(paused?.paused_until > Date.now() / 1000 && paused?.waiting_resume === 1, `Claude 应因为额度暂停，并有一个会话在等：${JSON.stringify(paused)}`)
+    check(paused.windows.some((w) => w.kind === 'five_hour' && w.status === 'exceeded' && w.resets_at === 1900000000), `应记下 5 小时额度已用完和重置时间：${JSON.stringify(paused.windows)}`)
+    // 暂停期间再发的排队，不去撞限额
+    await composer(page).fill('中断后再发')
+    await composer(page).press('Enter')
+    await page.waitForFunction(() => document.querySelector('textarea[aria-label="消息内容"]')?.value === '', null, { timeout: 30000 })
+    await new Promise((resolve) => setTimeout(resolve, 2500))
+    check((await thread(page).getByText(':: 中断后再发').count()) === 0, '平台暂停期间，新发的消息应排队等着')
+    // 管理页的“额度”：窗口、重置时间、暂停
+    const manage = await page.context().newPage()
+    await manage.goto(`${base}/llm_bridge?view=manage`)
+    const card = manage.getByRole('article', { name: '额度：Claude' })
+    await card.getByText('已暂停').waitFor({ timeout: 30000 })
+    await card.getByText('5 小时额度').waitFor()
+    await card.getByText('已用 100%，剩余 0%').waitFor()
+    check(/额度用完，这个平台暂停到 .+有 1 个被打断的会话在等自动继续。/s.test(await card.getByRole('note').innerText()), '额度卡片应说明暂停到什么时候、有几个会话在等')
+    await manage.close()
+    // 不要自动继续 → 现在就试：系统替人发那句话，排在之前排队的那条前面
+    await thread(page).getByRole('button', { name: '不要自动继续' }).click()
+    await thread(page).getByText('额度用完，这一回合中断了。已设成不自动继续。').waitFor({ timeout: 30000 })
+    await thread(page).getByRole('button', { name: '现在就试' }).click()
+    await thread(page).getByText(':: 继续意外中断的任务').waitFor({ timeout: 60000 })
+    await thread(page).getByText(':: 中断后再发').waitFor({ timeout: 60000 })
+    await thread(page).getByText('系统（自动续跑）').waitFor()
+    await thread(page).getByText('额度用完，这一回合中断了；已经在下面自动继续。').waitFor({ timeout: 30000 })
+    const order = await thread(page).locator(':scope > li.is-reply').allInnerTexts()
+    check(order.findIndex((t) => t.includes(':: 继续意外中断的任务')) < order.findIndex((t) => t.includes(':: 中断后再发')), '“继续”应排在之前排队的消息前面')
+    const resumed = (await api(page, workspace, 'GET', `/api/v1/llm_bridge/bridges/${bridgeId}/status`)).body?.quota?.claude
+    check(resumed?.paused_until === null && resumed?.waiting_resume === 0, `继续之后平台不应再暂停：${JSON.stringify(resumed)}`)
+    step('额度用完：回合显示“已中断”和什么时候自动继续，平台暂停、新消息排队；管理页显示额度与重置时间；“不要自动继续”“现在就试”可用，继续的那句话排在最前面')
+
     // ---------------------------------------------------------------- 改标题、搜索、刷新
     await page.getByRole('button', { name: '改标题' }).click()
     const rename = page.getByRole('form', { name: '改会话标题' })
@@ -241,10 +280,10 @@ async function main() {
     await page.reload()
     await page.getByRole('heading', { level: 2, name: TITLE }).waitFor()
     await thread(page).getByText(':: 第二问').waitFor()
-    // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条
-    check((await countMessages(page)) === 12, `刷新后六问六答都还在：${await countMessages(page)}`)
+    // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条
+    check((await countMessages(page)) === 18, `刷新后九问九答都还在：${await countMessages(page)}`)
     const info = page.getByRole('complementary', { name: '会话信息' })
-    await info.getByText('回合（6）').waitFor()
+    await info.getByText('回合（9）').waitFor()
     await info.getByText(MANAGER).waitFor()
     step('改标题后列表跟着变；按标题搜索；刷新后从地址回到同一个会话，右栏有会话信息和回合')
 

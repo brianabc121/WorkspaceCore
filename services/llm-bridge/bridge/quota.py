@@ -97,8 +97,20 @@ def _percent(value: Any) -> float | None:
     return round(max(0.0, float(number)), 1)
 
 
-def window(kind: str, used: Any, resets_at: Any, status: str = "", plan: Any = None) -> Window:
-    percent = _percent(used)
+def window(
+    kind: str,
+    used: Any,
+    resets_at: Any,
+    status: str = "",
+    plan: Any = None,
+    *,
+    fraction: bool = False,
+) -> Window:
+    """fraction：used 明确是 0–1 的比例（不靠数值大小去猜）。"""
+    if fraction and isinstance(used, int | float) and not isinstance(used, bool) and used <= 1:
+        percent: float | None = round(max(0.0, float(used)) * 100, 1)
+    else:
+        percent = _percent(used)
     if status not in ("ok", "warning", "exceeded"):
         status = (
             "exceeded"
@@ -145,9 +157,10 @@ def from_rate_limit_event(event: Any) -> list[Window]:
         info = event if isinstance(event, dict) else {}
     kind = info.get("rateLimitType") or info.get("rate_limit_type") or info.get("kind")
     resets = info.get("resetsAt") or info.get("resets_at")
-    used = info.get("utilization")
+    # utilization 是 0–1 的比例（Anthropic 的统一限额响应头也是这样给的）：1.0 是用完，不是 1%
+    used, fraction = info.get("utilization"), True
     if used is None:
-        used = info.get("percentUsed", info.get("used_percent"))
+        used, fraction = info.get("percentUsed", info.get("used_percent")), False
     raw = str(info.get("status") or "").lower()
     status = (
         "exceeded"
@@ -160,4 +173,4 @@ def from_rate_limit_event(event: Any) -> list[Window]:
     )
     if not isinstance(kind, str) or (resets is None and used is None and not status):
         return []
-    return [window(kind, used, resets, status)]
+    return [window(kind, used, resets, status, fraction=fraction)]

@@ -314,6 +314,12 @@ def test_quota_shapes_and_reset_parsing() -> None:
             "plan": None,
         }
     ]
+    # utilization 是比例：1.0 是用完（不是 1%），0.005 是 0.5%
+    for given, percent in ((1.0, 100.0), (1, 100.0), (0.005, 0.5), (0, 0.0)):
+        (full,) = quota.from_rate_limit_event(
+            {"rate_limit_info": {"rateLimitType": "five_hour", "utilization": given}}
+        )
+        assert full["used_percent"] == percent, (given, full)
     buddy = quota.from_rate_limit_event(
         {"kind": "seven_day", "percentUsed": 23.5, "resetsAt": "2030-03-17T17:46:40Z"}
     )
