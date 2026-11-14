@@ -15087,6 +15087,18 @@
             "description": "谁发的（只有 user 消息有）",
             "title": "By"
           },
+          "delivery": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "提问是怎么送出去的：turn 普通的一个回合；inserted 插进正在处理的回合；merged 中断上一个回合后合并重发；imported 导入的",
+            "title": "Delivery"
+          },
           "failure": {
             "anyOf": [
               {
@@ -15455,6 +15467,16 @@
             "title": "Attachments",
             "type": "array"
           },
+          "mode": {
+            "default": "queue",
+            "description": "会话正在处理别的消息时：queue 排队（不打断）；insert 插入——送进正在处理的回合，平台做不到时中断它、合并重发",
+            "enum": [
+              "queue",
+              "insert"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
           "request_id": {
             "description": "幂等号：重试同一条消息时用同一个，不会重复发送",
             "maxLength": 100,
@@ -15776,6 +15798,18 @@
               }
             ],
             "title": "Ahead In Session"
+          },
+          "delivered": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这条消息实际怎么送出去的：inserted 送进了正在处理的回合（turn_id 是那个回合）；merged 中断了正在处理的回合，和“接着刚才的做”合成新回合；queued 排队；started 直接开始。旧版本的管理器没有这一项",
+            "title": "Delivered"
           },
           "resume": {
             "anyOf": [

@@ -580,3 +580,56 @@ async def test_chat_attachments_and_stored_content(rig: Rig) -> None:  # noqa: F
         "%机密截图%",
     )
     assert leaked == 0
+
+
+async def test_chat_insert_message(rig: Rig) -> None:  # noqa: F811
+    """插入消息：平台收得下就进正在处理的回合；收不下就中断它、合并重发。页面拿到实际用了哪种。"""
+    fake = rig.bridge_app.state.engine.drivers["claude"]
+    created = await new_chat(rig, "sleep:30")
+    session_id, running = created["session"]["session_id"], created["turn"]["turn_id"]
+    base = chat(rig, f"/sessions/{session_id}")
+    for _ in range(100):
+        if fake.running:
+            break
+        await asyncio.sleep(0.05)
+
+    fake.steerable = True
+    inserted = await rig.api(
+        "POST",
+        f"{base}/messages",
+        json={"text": "顺便看日志", "request_id": "i1", "mode": "insert"},
+    )
+    assert inserted.status_code == 200, inserted.text
+    assert (inserted.json()["delivered"], inserted.json()["turn_id"]) == ("inserted", running)
+    view = (await rig.api("GET", base)).json()
+    assert [(m["role"], m["text"], m["delivery"]) for m in view["messages"][:2]] == [
+        ("user", "sleep:30", "turn"),
+        ("user", "顺便看日志", "inserted"),
+    ]
+    assert view["messages"][1]["mine"] is True
+
+    fake.steerable = False
+    merged = await rig.api(
+        "POST", f"{base}/messages", json={"text": "先改这里", "request_id": "i2", "mode": "insert"}
+    )
+    assert merged.status_code == 200 and merged.json()["delivered"] == "merged", merged.text
+    assert merged.json()["turn_id"] != running
+    await wait_idle(rig, session_id)
+    view = (await rig.api("GET", base)).json()
+    first = next(
+        m for m in view["messages"] if m["role"] == "assistant" and m["turn_id"] == running
+    )
+    assert first["status"] == "interrupted" and first["failure"]["kind"] == "superseded"
+    last_ask, last_reply = view["messages"][-2:]
+    assert (last_ask["text"], last_ask["delivery"]) == ("先改这里", "merged")
+    assert last_reply["status"] == "completed"
+    bad = await rig.api(
+        "POST", f"{base}/messages", json={"text": "x", "request_id": "i3", "mode": "now"}
+    )
+    assert bad.status_code == 422
+    # 空闲时插入就是普通的发送
+    plain = await rig.api(
+        "POST", f"{base}/messages", json={"text": "你好", "request_id": "i4", "mode": "insert"}
+    )
+    assert plain.json()["delivered"] == "started"
+    await wait_idle(rig, session_id)

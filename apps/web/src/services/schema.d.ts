@@ -12529,6 +12529,11 @@ export interface components {
              * @description 谁发的（只有 user 消息有）
              */
             by?: string | null;
+            /**
+             * Delivery
+             * @description 提问是怎么送出去的：turn 普通的一个回合；inserted 插进正在处理的回合；merged 中断上一个回合后合并重发；imported 导入的
+             */
+            delivery?: string | null;
             /** Failure */
             failure?: {
                 [key: string]: unknown;
@@ -12701,6 +12706,13 @@ export interface components {
              */
             attachments: string[];
             /**
+             * Mode
+             * @description 会话正在处理别的消息时：queue 排队（不打断）；insert 插入——送进正在处理的回合，平台做不到时中断它、合并重发
+             * @default queue
+             * @enum {string}
+             */
+            mode: "queue" | "insert";
+            /**
              * Request Id
              * @description 幂等号：重试同一条消息时用同一个，不会重复发送
              */
@@ -12844,6 +12856,11 @@ export interface components {
         LlmChatTurnOut: {
             /** Ahead In Session */
             ahead_in_session?: number | null;
+            /**
+             * Delivered
+             * @description 这条消息实际怎么送出去的：inserted 送进了正在处理的回合（turn_id 是那个回合）；merged 中断了正在处理的回合，和“接着刚才的做”合成新回合；queued 排队；started 直接开始。旧版本的管理器没有这一项
+             */
+            delivered?: string | null;
             resume?: components["schemas"]["LlmChatResumeOut"] | null;
             /** Session Id */
             session_id: string;

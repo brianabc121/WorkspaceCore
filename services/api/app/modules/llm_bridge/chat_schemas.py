@@ -103,6 +103,11 @@ class LlmChatMessageOut(BaseModel):
         default=[], description="提问带上的图片 / 文件，或这一回合模型产出的图片 / 文件"
     )
     imported: bool = Field(default=False, description="官方程序里原有的内容（第一次打开时导入的）")
+    delivery: str | None = Field(
+        default=None,
+        description="提问是怎么送出去的：turn 普通的一个回合；inserted 插进正在处理的回合；"
+        "merged 中断上一个回合后合并重发；imported 导入的",
+    )
 
 
 class LlmChatConversationOut(BaseModel):
@@ -152,6 +157,14 @@ class LlmChatTurnOut(BaseModel):
     status: str
     ahead_in_session: int | None = None
     resume: LlmChatResumeOut | None = None
+    delivered: str | None = Field(
+        default=None,
+        description="这条消息实际怎么送出去的："
+        "inserted 送进了正在处理的回合（turn_id 是那个回合）；"
+        "merged 中断了正在处理的回合，和“接着刚才的做”合成新回合；"
+        "queued 排队；started 直接开始。"
+        "旧版本的管理器没有这一项",
+    )
 
 
 class LlmChatCreateIn(_In):
@@ -197,6 +210,11 @@ class LlmChatSendIn(_In):
     )
     takeover: bool = Field(
         default=False, description="发到不是自己建的会话时必须为 true（页面先让人确认）"
+    )
+    mode: Literal["queue", "insert"] = Field(
+        default="queue",
+        description="会话正在处理别的消息时：queue 排队（不打断）；insert 插入——"
+        "送进正在处理的回合，平台做不到时中断它、合并重发",
     )
     attachments: list[Annotated[str, Field(pattern=r"^ba_[0-9a-f]{20}$")]] = Field(
         default=[], max_length=8, description="随这条消息带上的附件（先上传得到编号）"

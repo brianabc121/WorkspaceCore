@@ -60,6 +60,13 @@ class SendInput(_Input):
         le=50,
         description="最多等多少秒；没答完就先返回回合号，之后用 llm_bridge_turn_get 取",
     )
+    mode: Literal["queue", "insert"] | None = Field(
+        default=None,
+        description="会话正在处理别的消息时怎么办。不填或 queue：排队等前面的做完，不打断；"
+        "insert：直接送进正在处理的那一回合，平台做不到时改成中断它、把这条消息和“接着刚才的做”"
+        "合成一个新回合。返回里的 delivered 写明实际用了哪种："
+        "inserted / merged / queued / started",
+    )
 
 
 class TurnGetInput(_Input):

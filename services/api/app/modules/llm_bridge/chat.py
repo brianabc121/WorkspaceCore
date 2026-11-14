@@ -103,6 +103,7 @@ def _turn_out(data: dict[str, Any]) -> LlmChatTurnOut:
         status=data["status"],
         ahead_in_session=data.get("ahead_in_session"),
         resume=data.get("resume"),
+        delivered=data.get("delivered"),
     )
 
 
@@ -223,6 +224,7 @@ class LlmChatService:
                     resume=item.get("resume"),
                     attachments=item.get("attachments") or [],
                     imported=bool(item.get("imported")),
+                    delivery=item.get("delivery") if is_user else None,
                 )
             )
         return LlmChatConversationOut(
@@ -334,6 +336,8 @@ class LlmChatService:
         }
         if body.attachments:  # 没带附件时不传这一项：旧版本的管理器不认识它
             arguments["attachments"] = body.attachments
+        if body.mode != "queue":
+            arguments["mode"] = body.mode
         try:
             data = await self._tool(client, caller, "llm_send", arguments)
         except ApiError as error:
@@ -350,7 +354,12 @@ class LlmChatService:
             access,
             "chat_takeover_sent" if body.takeover else "chat_message_sent",
             bridge_id,
-            {"bridge": bridge_name, "session": session_id, "turn": data.get("turn_id")},
+            {
+                "bridge": bridge_name,
+                "session": session_id,
+                "turn": data.get("turn_id"),
+                **({"delivered": data.get("delivered")} if body.mode == "insert" else {}),
+            },
         )
         await self.db.commit()
         return _turn_out(data)
