@@ -27,6 +27,7 @@ from app.domain import agent_ops, notifications
 from app.domain import runner_specs as specs
 from app.domain.audit import AuditTrail
 from app.domain.ratelimit import WindowLimiter
+from app.domain.runner_runtime_profile import KUBERNETES_COMMANDS
 from app.models import (
     AgentInstance,
     AgentSecretGrant,
@@ -392,6 +393,14 @@ class Runner:
         self.enqueue(host, "start_env", self.runtime_payload(env), env=env)
         env.last_used_at = specs.now()
 
+    @staticmethod
+    def _require_operation(backend: str | None, kind: str) -> None:
+        if backend == "kubernetes" and kind not in KUBERNETES_COMMANDS:
+            raise RunnerError(
+                "RUNTIME_PROFILE_UNSUPPORTED",
+                f"Kubernetes 当前运行档位尚不支持 {kind}，请等待完整运行适配",
+            )
+
     def enqueue(
         self,
         host: RunnerHost,
@@ -403,6 +412,9 @@ class Runner:
         template: RunnerTemplate | None = None,
         seconds: int | None = None,
     ) -> RunnerCommand:
+        self._require_operation(host.backend, kind)
+        if env is not None:
+            self._require_operation(env.runtime_backend, kind)
         deadline = seconds if seconds is not None else DEADLINES.get(kind, 600)
         # The controller is bound to this registration, never a caller-supplied
         # destination. Keep this outside the optional environment payload too.
@@ -535,6 +547,7 @@ class Runner:
         from app.schemas.placement import Placement
 
         host = await self.select_host(viewer.workspace_id, normalized, Placement())
+        self._require_operation(host.backend, "build_template")
         # Match callbacks' host → template lock order before changing the attempt.
         template = await self.template_by_name(viewer.workspace_id, name, lock=True)
         created = template is None
@@ -1281,6 +1294,7 @@ class Runner:
     ) -> RunnerRun:
         if env.state in ("pending_delete", "deleted", "failed"):
             raise RunnerError("ENV_UNAVAILABLE", f"环境现在是 {env.state}，不能执行")
+        self._require_operation(env.runtime_backend, "exec")
         host = await self.db.get(RunnerHost, env.host_id)
         if host is None:
             raise RunnerError("RUNNER_UNAVAILABLE", "容器服务器已移除")
@@ -1402,6 +1416,7 @@ class Runner:
 
     async def start_snapshot(self, host: RunnerHost, env: RunnerEnvironment, *, then: str) -> None:
         """常驻环境做快照（环境先停下来，数据一致），完成后接着 archive 或 delete。"""
+        self._require_operation(env.runtime_backend, "snapshot")
         from app.domain.runner_snapshots import PART_BYTES, SnapshotStore
 
         pending = await self.db.scalar(
@@ -1440,6 +1455,7 @@ class Runner:
         """归档：常驻环境先做快照；会话、一次性的直接删容器与数据卷，只留配置记录。"""
         if env.state not in ("running", "stopped") or env.pinned:
             return False
+        self._require_operation(env.runtime_backend, "archive_env")
         host = await self.db.get(RunnerHost, env.host_id)
         if host is None:
             return False
@@ -1460,9 +1476,7 @@ class Runner:
         )
         return True
 
-    async def rebuild(self, env: RunnerEnvironment, reason: str) -> None:
-        """按配置记录重建：模板镜像（被清理了就先重建）→ 恢复快照 → 重放初始化步骤 → 启动。"""
-        host = await self.admit_restart(env)
+    async def _rebuild_payload(self, env: RunnerEnvironment) -> tuple[dict[str, Any], bool]:
         snapshot_info: dict[str, Any] | None = None
         if env.lifetime == "persistent":
             snapshot = await self.latest_snapshot(env)
@@ -1473,6 +1487,20 @@ class Runner:
                     "parts": snapshot.parts,
                 }
         template = await self.db.get(RunnerTemplate, env.template_id) if env.template_id else None
+        return self.create_payload(
+            env, snapshot=snapshot_info, template=template
+        ), snapshot_info is not None
+
+    async def rebuild(self, env: RunnerEnvironment, reason: str) -> None:
+        """按配置记录重建：模板镜像（被清理了就先重建）→ 恢复快照 → 重放初始化步骤 → 启动。"""
+        if env.runtime_backend == "kubernetes":
+            # Admission can create a quota approval or stop other workloads.
+            # Reject unsupported restore materials before those side effects.
+            await self._rebuild_payload(env)
+        host = await self.admit_restart(env)
+        # Admission refreshes and locks the environment. Re-read materials so
+        # a concurrent update cannot leave us using the preflight snapshot.
+        payload, restoring = await self._rebuild_payload(env)
         env.runtime_metadata = {
             **(env.runtime_metadata or {}),
             "compute_stopped": False,
@@ -1484,14 +1512,15 @@ class Runner:
         self.enqueue(
             host,
             "create_env",
-            self.create_payload(env, snapshot=snapshot_info, template=template),
+            payload,
             env=env,
-            seconds=DEADLINES["create_env"] + (DEADLINES["restore"] if snapshot_info else 0),
+            seconds=DEADLINES["create_env"] + (DEADLINES["restore"] if restoring else 0),
         )
 
     async def files(self, instance: AgentInstance, body: EnvFilesInput) -> EnvFilesOutput:
         viewer = Viewer(instance.workspace_id, instance=instance)
         env = await self.env(viewer, body.environment_id)
+        self._require_operation(env.runtime_backend, "files")
         host = await self.online_host(instance.workspace_id, env.host_id)
         if env.state == "archived":
             await self.rebuild(env, "读写文件，自动重建")
@@ -1602,6 +1631,7 @@ class Runner:
         env = await self.env(viewer, env_id)
         if env.owner_instance_id != instance.id:
             raise RunnerError("FORBIDDEN", "只有建这个环境的智能体能改它")
+        self._require_operation(env.runtime_backend, "setup")
         if any(len(s) > 8000 for s in steps):
             raise RunnerError("VALIDATION_FAILED", "每条初始化步骤最多 8000 字")
         env.setup = list(steps)

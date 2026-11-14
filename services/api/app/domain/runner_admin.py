@@ -576,6 +576,7 @@ class RunnerAdmin:
         await self.db.refresh(template, with_for_update=True)
         try:
             host = await self.runner.online_host(access.workspace.id, template.build_host_id)
+            self.runner._require_operation(host.backend, "build_template")
         except RunnerError as error:
             raise _error(error) from None
         template.build_status = "building"

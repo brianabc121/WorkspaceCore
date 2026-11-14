@@ -33,6 +33,7 @@ from app.domain.runner import (
     ONLINE_SECONDS,
     RETRYABLE,
     Runner,
+    RunnerError,
     Viewer,
 )
 from app.domain.runner_snapshots import SnapshotStore
@@ -371,8 +372,16 @@ async def _lifecycle(
             if env.id in running or env.id in deleting:
                 continue
             if env.delete_after is None or env.delete_after <= now:
-                await runner.delete(env, env.state_reason or "待删除到期")
-                out.deleted += 1
+                try:
+                    await runner.delete(env, env.state_reason or "待删除到期")
+                except RunnerError as error:
+                    if error.code != "RUNTIME_PROFILE_UNSUPPORTED":
+                        raise
+                    # Keep retained data and the pending request; other hosts
+                    # still need their normal lifecycle work in this tick.
+                    env.state_reason = error.message
+                else:
+                    out.deleted += 1
             continue
         if env.state == "archived":
             # 会话、一次性的归档：保留配置记录 archive_retention_days 天后删除记录
@@ -419,7 +428,7 @@ async def _lifecycle(
             due = idle >= policy["persistent_archive_days"] * 86400
         else:
             due = since >= policy["session_archive_hours"] * 3600
-        if due and await runner.archive(env, "停止到点，自动归档"):
+        if due and await _archive_supported(runner, env, "停止到点，自动归档"):
             out.archived += 1
 
 
@@ -506,7 +515,7 @@ async def _watermarks(
                     break
                 if math.isinf(ranked.get(env.id, 0.0)):
                     continue
-                if await runner.archive(env, "容器服务器磁盘紧张，按保留分归档"):
+                if await _archive_supported(runner, env, "容器服务器磁盘紧张，按保留分归档"):
                     archived += 1
                     out.archived += 1
             await _prune_images(runner, host)
@@ -521,6 +530,16 @@ async def _watermarks(
                 link="/runner",
                 key=f"{host.id}:disk:{specs.now():%Y%m%d%H}",
             )
+
+
+async def _archive_supported(runner: Runner, env: RunnerEnvironment, reason: str) -> bool:
+    try:
+        return await runner.archive(env, reason)
+    except RunnerError as error:
+        if error.code != "RUNTIME_PROFILE_UNSUPPORTED":
+            raise
+        env.state_reason = error.message
+        return False
 
 
 async def make_room(runner: Runner, host: RunnerHost, need_bytes: int) -> int:
@@ -557,6 +576,8 @@ async def make_room(runner: Runner, host: RunnerHost, need_bytes: int) -> int:
 
 async def _prune_images(runner: Runner, host: RunnerHost) -> None:
     """清理没人用的模板镜像：保留每个模板当前版本、以及还在的环境用到的镜像。每小时最多一次。"""
+    if host.backend == "kubernetes":
+        return  # Kubernetes image collection belongs to the kubelet, not Docker.
     db = runner.db
     recent = await db.scalar(
         select(RunnerCommand.id).where(

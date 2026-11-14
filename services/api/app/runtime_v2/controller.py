@@ -10,6 +10,7 @@ from contextlib import suppress
 from typing import Any
 from uuid import UUID
 
+from app.domain.runner_runtime_profile import KUBERNETES_COMMANDS
 from app.runner_agent.client import Workspace
 from app.runtime_v2.kubernetes import RuntimeIdentity
 from app.runtime_v2.network import PrivateNetworkReconciler
@@ -21,7 +22,7 @@ from app.runtime_v2.runner import (
 )
 
 _REJECTED = "Kubernetes lifecycle command rejected; unsupported or invalid input"
-_KINDS = {"create_env", "start_env", "stop_env", "delete_env"}
+_KINDS = KUBERNETES_COMMANDS
 _RESULT_FIELDS = {
     "ready",
     "stopped",

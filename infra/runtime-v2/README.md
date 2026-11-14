@@ -6,6 +6,8 @@
 
 `controller.env.example` 和 `workspace-runtime-v2.service` 是独立生命周期控制器的配置模板。复制模板本身不会启用后端；`RUNTIME_V2_ENABLED=false`，工作台 `RUNNER_NETWORK_VERIFIED=false`，Kubernetes 调度仍关闭。当前支持受限 gVisor 不可变镜像档位的 create/start/stop/delete、持久恢复、可信资源采集与网络执行链；exec、初始文件/密钥、快照等其他运行操作仍明确拒绝。网络实现需通过真实节点验收后由部署方启用。
 
+不支持的运行操作在领域入口及命令排队前返回 `RUNTIME_PROFILE_UNSUPPORTED`，不会为了执行/读写文件而先重启环境，也不会先写快照、初始化配置或模板构建状态。恢复时先验证快照等材料，再做容量准入；取得环境锁后重新验证，避免沿用过期材料。后台回收遇到 Kubernetes 不支持的归档/快照会保留数据并记录原因，继续处理其他环境；需要快照的删除会保留待删除请求，不绕过快照直接删卷。Kubernetes 节点的镜像回收由 kubelet 负责，不下发 Docker 镜像清理命令。实际回归见[操作准入验证](../../docs/verification/2026-11-14-runtime-network-followup/OPERATION-ADMISSION.md)。
+
 ## 配置边界
 
 开始远端开发前先读 [Tailscale部署与开发使用手册](../../docs/tailscale-development-guide.md)，
