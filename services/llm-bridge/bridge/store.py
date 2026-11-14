@@ -544,11 +544,13 @@ class Store:
         if statuses:
             sql += f" AND status IN ({', '.join('?' for _ in statuses)})"
             params.extend(statuses)
-        # 按实际处理的顺序：开始过的按开始时间，还在排队的按队列里的位置（可以被调整过）
+        # 按实际处理的顺序：开始过的按开始时间；没开始就结束的（排队时被取消）按结束时间，
+        # 不然它会一直排在最后面；还在排队的在最后，按队列里的位置（可以被调整过）
         order = (
             "queued_at DESC, id"
             if newest_first
-            else "started_at IS NULL, started_at, position, queued_at, id"
+            else "(started_at IS NULL AND finished_at IS NULL), "
+            "COALESCE(started_at, finished_at), position, queued_at, id"
         )
         sql += f" ORDER BY {order} LIMIT ? OFFSET ?"
         return self._all(sql, (*params, limit, offset))

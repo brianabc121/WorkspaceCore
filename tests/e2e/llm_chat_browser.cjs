@@ -3,7 +3,7 @@
 // （services/llm-bridge/tests/fakes/fake_cli.py：参数和事件的形状与真实程序一致，回答是把收到的话原样带回来；
 // 收到 hang 时会一直不回答，用来验收“停止”）。别的都是真的：会话桥、工作台接口、页面。
 //
-// 没有管理器时的说明 → 新建会话并发第一条 → 回答、过程、标题 → Enter 再发一条 → 停止 → 消息队列（排队、置顶、修改、取消）→ 额度用完（中断、暂停、现在就试）→ 改标题 → 搜索 →
+// 没有管理器时的说明 → 新建会话并发第一条 → 回答、过程、标题 → Enter 再发一条 → 停止 → 消息队列（排队、置顶、修改、取消）→ 额度用完（中断、暂停、现在就试）→ 图片附件与工具调用 → 改标题 → 搜索 →
 // 刷新后还在 → 别的管理员建的会话要确认一次才能接着发 → member 用不了 → 归档后不能再发 →
 // 管理器停用后只能看 → 多模型同问（同一个问题同时发给两个模型、并排看、继续问、回到单会话、别的管理员要确认、归档）→
 // 审计里没有消息内容 → 手机宽度两屏（同问一次看一栏）。
@@ -264,6 +264,39 @@ async function main() {
     check(resumed?.paused_until === null && resumed?.waiting_resume === 0, `继续之后平台不应再暂停：${JSON.stringify(resumed)}`)
     step('额度用完：回合显示“已中断”和什么时候自动继续，平台暂停、新消息排队；管理页显示额度与重置时间；“不要自动继续”“现在就试”可用，继续的那句话排在最前面')
 
+    // ---------------------------------------------------------------- 图片附件与完整的过程（T-0236 第二步）
+    // 一张 1×1 的真 PNG：上传到管理器，随消息发出去；假程序在回答里报出收到了几张图片
+    const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
+    await page.getByLabel('选择要带上的图片或文件').setInputFiles({ name: `验收图 ${run}.png`, mimeType: 'image/png', buffer: PNG })
+    const attachedList = page.getByRole('list', { name: '要带上的附件' })
+    await attachedList.getByText(`验收图 ${run}.png`).waitFor({ timeout: 30000 })
+    await composer(page).fill('看图')
+    await composer(page).press('Enter')
+    await thread(page).getByText(':: 看图 images=1').waitFor({ timeout: 60000 })
+    check(await until(async () => (await attachedList.count()) === 0), '发出去之后，待发的附件应清空')
+    const shown = thread(page).getByRole('img', { name: `验收图 ${run}.png` })
+    await shown.waitFor({ timeout: 30000 })
+    check(await until(() => shown.evaluate((img) => img.complete && img.naturalWidth === 1)), '提问上的图片应能显示出来（内容从管理器取回）')
+    // 对话会话只能带图片：别的文件接口直接拒绝；内容和扩展名对不上的也拒绝
+    const refuse = (name, text) => page.evaluate(async ({ url, workspace, name, text }) => {
+      const csrf = document.cookie.split('; ').find((item) => item.startsWith('ws_csrf='))?.slice(8)
+      const response = await fetch(`${url}?name=${encodeURIComponent(name)}`, { method: 'POST', body: text, headers: { 'X-Workspace-Id': workspace, 'X-CSRF-Token': decodeURIComponent(csrf || ''), 'Content-Type': 'application/octet-stream' } })
+      return response.status
+    }, { url: `${chat}/sessions/${firstId}/attachments`, workspace, name, text })
+    check((await refuse('说明.txt', 'hello')) === 422, '对话会话里不能带图片以外的文件')
+    check((await refuse('假的.png', '<html>')) === 422, '内容和扩展名对不上的不收')
+    // 读文件这类工具调用和结果也在“过程”里
+    await composer(page).fill('read')
+    await composer(page).press('Enter')
+    await thread(page).getByText(':: read', { exact: false }).last().waitFor({ timeout: 60000 })
+    const steps = thread(page).locator(':scope > li.is-reply').filter({ hasText: ':: read' })
+    // 等这一回合结束（“还在继续…”消失）再把“过程”展开看：回答没完时它本来就是展开的
+    check(await until(async () => (await steps.getAttribute('data-status')) === 'completed', 60000), '读文件那一回合应完成')
+    await steps.locator('details').evaluate((el) => { el.open = true })
+    await steps.getByText('工具 Read').waitFor({ timeout: 30000 })
+    await steps.getByText('结果 Read').waitFor()
+    step('图片随消息发给模型并存在管理器里，页面上能看到；对话会话拒绝别的文件；读文件这类工具调用和结果记在过程里')
+
     // ---------------------------------------------------------------- 改标题、搜索、刷新
     await page.getByRole('button', { name: '改标题' }).click()
     const rename = page.getByRole('form', { name: '改会话标题' })
@@ -280,10 +313,10 @@ async function main() {
     await page.reload()
     await page.getByRole('heading', { level: 2, name: TITLE }).waitFor()
     await thread(page).getByText(':: 第二问').waitFor()
-    // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条
-    check((await countMessages(page)) === 18, `刷新后九问九答都还在：${await countMessages(page)}`)
+    // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条；附件那一步的两条
+    check((await countMessages(page)) === 22, `刷新后十一问十一答都还在：${await countMessages(page)}`)
     const info = page.getByRole('complementary', { name: '会话信息' })
-    await info.getByText('回合（9）').waitFor()
+    await info.getByText('回合（11）').waitFor()
     await info.getByText(MANAGER).waitFor()
     step('改标题后列表跟着变；按标题搜索；刷新后从地址回到同一个会话，右栏有会话信息和回合')
 

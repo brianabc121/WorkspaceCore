@@ -312,3 +312,17 @@ def test_stale_uploads_are_swept(tmp_path: Path) -> None:
     row = store.add_attachment(session["id"], "input", "a.png", "image/png", 1, "0" * 64, "p")
     assert store.stale_uploads(time.time() - 60) == []
     assert [r["id"] for r in store.stale_uploads(time.time() + 60)] == [row["id"]]
+
+
+async def test_a_message_cancelled_while_queued_keeps_its_place(bridge: Bridge) -> None:
+    """排队时被取消的消息留在它被取消的位置，不会跑到后面发的消息后面去。"""
+    session = await _session(bridge)
+    await _send(bridge, session, "sleep:0.4", "t1", wait_seconds=0)
+    dropped = await _send(bridge, session, "不发了", "t2", wait_seconds=0)
+    await bridge.tool("c1", "llm_turn_cancel", {"turn_id": dropped["turn_id"]})
+    done = await _send(bridge, session, "后来的", "t3")
+    assert done["status"] == "completed"
+    asked = [
+        m["text"] for m in (await _conversation(bridge, session))["messages"] if m["role"] == "user"
+    ]
+    assert asked == ["sleep:0.4", "不发了", "后来的"], asked
