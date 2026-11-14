@@ -80,6 +80,17 @@ def run_turn(state, thread_id, params):
                 out({"id": message["id"], "result": {}})
                 status = "interrupted"
                 break
+            if message.get("method") == "turn/steer":
+                # 回合中追加：回合号对得上就收下，接着把追加的话带进回答里结束
+                steer = message["params"]
+                if steer["expectedTurnId"] != turn_id:
+                    out(
+                        {"id": message["id"], "error": {"code": -32600, "message": "turn mismatch"}}
+                    )
+                    continue
+                out({"id": message["id"], "result": {"turnId": turn_id}})
+                reply = f"steered: {steer['input'][0]['text']}"
+                break
     if status == "completed":
         note(
             "item/completed",
@@ -219,6 +230,8 @@ def main():
                 run_turn(state, params["threadId"], {**params, "_id": mid})
         elif method == "turn/interrupt":
             out({"id": mid, "result": {}})
+        elif method == "turn/steer":  # 没有回合在跑
+            out({"id": mid, "error": {"code": -32600, "message": "no active turn"}})
         elif method == "thread/list":
             data = [
                 {

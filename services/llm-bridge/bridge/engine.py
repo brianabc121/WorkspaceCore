@@ -39,6 +39,10 @@ TERMINAL = ("completed", "failed", "cancelled", "unknown", "interrupted")
 RESUME_TEXT = "继续意外中断的任务"
 SYSTEM_CALLER = "system"
 SYSTEM_LABEL = "系统（自动续跑）"
+# 插入消息降级成“中断后合并重发”时，接在新消息后面给模型看的一句
+MERGED_SUFFIX = (
+    "\n\n（上面是在你做上一件事的中途插进来的新消息。请先处理它，然后接着刚才没做完的事继续。）"
+)
 DEFAULTS: dict[str, Any] = {
     # 每个平台同时进行的会话数（T-0236：按平台计数；一个会话同一时间只跑一个回合）
     "concurrency": 3,
@@ -159,6 +163,8 @@ class Engine:
         self._workers: dict[str, asyncio.Task[None]] = {}
         self._done: dict[str, asyncio.Event] = {}
         self._cancel_requested: set[str] = set()
+        # 被插入的消息打断的回合 → 打断它的那个新回合
+        self._superseded: dict[str, str] = {}
         self._limiters: dict[str, SlotLimiter] = {}
         # 额度用完后的暂停与续跑（T-0237）
         self._pause_wake: dict[str, asyncio.Event] = {}
@@ -744,6 +750,7 @@ class Engine:
         request_id: str,
         wait_seconds: float = 0,
         attachments: list[str] | None = None,
+        mode: str = "queue",
     ) -> Row:
         self._need(caller, "write")
         if not _REQUEST_ID_RE.match(request_id or ""):
@@ -755,6 +762,12 @@ class Engine:
             if existing["session_id"] != session_id:
                 raise BridgeError("CONFLICT", "这个 request_id 已经用在另一个会话上")
             return await self.wait_turn(existing["id"], wait_seconds)
+        inserted = self.store.inserted_by_request(caller.id, request_id)
+        if inserted is not None:  # 重试一条已经插进去的消息：不再插一次
+            if inserted["session_id"] != session_id:
+                raise BridgeError("CONFLICT", "这个 request_id 已经用在另一个会话上")
+            view = await self.wait_turn(inserted["turn_id"], wait_seconds)
+            return {**view, "delivered": "inserted"}
         if not text.strip():
             raise BridgeError("VALIDATION_FAILED", "消息不能为空")
         if len(text) > self.setting("max_text_chars"):
@@ -764,20 +777,67 @@ class Engine:
         session = self._session(caller, session_id)
         if session["status"] != "active":
             raise BridgeError("CONFLICT", "会话已归档，不能再发送")
-        if self.store.count_turns_since(caller.id, time.time() - 3600) >= self.setting(
+        hour_ago = time.time() - 3600
+        sent = self.store.count_turns_since(caller.id, hour_ago)
+        if sent + self.store.count_inserted_since(caller.id, hour_ago) >= self.setting(
             "send_per_hour"
         ):
             raise BridgeError("RATE_LIMITED", "这个调用方本小时的发送次数已到上限")
         self._require_platform(session["platform"])
         await self.require_ready(session["slot"])
         attached = self._pending_attachments(session, attachments or [])
-        turn = self.store.create_turn(session_id, caller.id, request_id, text, by=caller.label)
+        running = self.store.running_turn(session_id) if mode == "insert" else None
+        merged = False
+        if running is not None:
+            # 插入：先试着把消息送进正在跑的回合（带附件的不试，直接合并重发）
+            if not attached and await self._steer(session, running, text):
+                self.store.add_message(
+                    session_id,
+                    running["id"],
+                    "user",
+                    "text",
+                    text,
+                    by=caller.label,
+                    delivery="inserted",
+                    data={"caller_id": caller.id, "request_id": request_id},
+                )
+                self.store.add_event(session_id, running["id"], "inserted", {"by": caller.label})
+                view = await self.wait_turn(running["id"], wait_seconds)
+                return {**view, "delivered": "inserted"}
+            merged = True
+        busy = session_id in self.store.busy_sessions()
+        edge = self.store.queue_edge(session_id, first=True) if mode == "insert" else None
+        turn = self.store.create_turn(
+            session_id,
+            caller.id,
+            request_id,
+            text,
+            by=caller.label,
+            delivery="merged" if merged else "turn",
+        )
+        if edge is not None:  # 插入的消息排在这个会话队列的最前面
+            self.store.update_turn(turn["id"], position=edge - 1)
         asked = self.store.user_message(turn["id"])
         if attached and asked is not None:
             self.store.bind_attachments([a["id"] for a in attached], turn["id"], asked["id"])
         self.store.add_event(session_id, turn["id"], "queued", {"by": caller.label})
-        self._enqueue(turn)
-        return await self.wait_turn(turn["id"], wait_seconds)
+        if merged and running is not None:
+            # 降级：中断正在跑的回合（记成被打断，不是失败），新回合里带上“接着刚才的做”
+            self._superseded[running["id"]] = turn["id"]
+            await self._driver(session["slot"]).cancel(self._spec(session))
+        self._enqueue(self.store.get_turn(turn["id"]) or turn)
+        view = await self.wait_turn(turn["id"], wait_seconds)
+        return {**view, "delivered": "merged" if merged else "queued" if busy else "started"}
+
+    async def _steer(self, session: Row, running: Row, text: str) -> bool:
+        """把消息送进正在跑的回合；平台在规定时间内确认收下、回合也还在跑，才算成功。"""
+        try:
+            async with asyncio.timeout(self.settings.steer_timeout_seconds):
+                accepted = await self._driver(session["slot"]).steer(self._spec(session), text)
+        except (TimeoutError, DriverError):
+            return False
+        now = self.store.get_turn(running["id"])
+        return bool(accepted) and now is not None and now["status"] == "running"
 
     def _enqueue(self, turn: Row) -> None:
         session_id = turn["session_id"]
@@ -823,6 +883,7 @@ class Engine:
     def _finish(self, turn_id: str, **fields: Any) -> None:
         self.store.update_turn(turn_id, finished_at=time.time(), **fields)
         self._cancel_requested.discard(turn_id)
+        self._superseded.pop(turn_id, None)
         event = self._done.pop(turn_id, None)
         if event is not None:
             event.set()
@@ -854,6 +915,9 @@ class Engine:
         spec = self._spec(session)
 
         text = turn["text"]
+        first = self.store.user_message(turn_id)
+        if first is not None and first["delivery"] == "merged":
+            text += MERGED_SUFFIX  # 存下来的提问还是原话，这一句只给模型看
         inputs = self.store.turn_attachments(turn_id, "input")
         if inputs:
             # 图片直接交给模型；别的文件放进工作目录，在提问里注明，由模型自己读
@@ -897,6 +961,21 @@ class Engine:
             )
             return
         except DriverError as error:
+            if turn_id in self._superseded:
+                # 被后面插入的消息打断：不是失败，新回合里会接着做
+                self.store.add_event(
+                    session_id,
+                    turn_id,
+                    "interrupted",
+                    {"kind": "superseded", "by_turn": self._superseded[turn_id]},
+                )
+                self._finish(
+                    turn_id,
+                    status="interrupted",
+                    error_kind="superseded",
+                    error_message="被后面插入的消息打断，新消息里会接着做",
+                )
+                return
             if turn_id in self._cancel_requested:
                 self.store.add_event(session_id, turn_id, "cancelled", {})
                 self._finish(turn_id, status="cancelled")
@@ -1263,6 +1342,21 @@ class Engine:
                     "attachments": files.get((turn["id"], "input"), []),
                 }
             )
+            # 回合中途插进来的消息：排在这一问之后、回答之前
+            for extra in mine:
+                if extra["role"] == "user" and asked is not None and extra["id"] != asked["id"]:
+                    messages.append(
+                        {
+                            "role": "user",
+                            "turn_id": turn["id"],
+                            "text": extra["text"],
+                            "at": extra["at"],
+                            "by": extra["by"],
+                            "by_id": (extra["data"] or {}).get("caller_id"),
+                            "delivery": extra["delivery"],
+                            "attachments": [],
+                        }
+                    )
             steps = [step for step in (_step(m) for m in mine) if step]
             status = turn["status"]
             reply: Row = {
@@ -1482,7 +1576,7 @@ class Engine:
         turn = self.store.get_turn(turn_id)
         if turn is None:
             raise BridgeError("NOT_FOUND", "没有这个回合")
-        if turn["status"] != "interrupted":
+        if turn["status"] != "interrupted" or turn["error_kind"] != "quota_exceeded":
             raise BridgeError("CONFLICT", "这个回合不是被额度打断的")
         if turn["resume_state"] == "done":
             raise BridgeError("CONFLICT", "这个回合已经续跑过了")

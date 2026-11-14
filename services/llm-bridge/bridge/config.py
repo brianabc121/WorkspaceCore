@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     default_min_start_interval: int = Field(default=2, ge=0, le=60)
     # 额度用完后的自动续跑（T-0237）：重置时间之后再等这么久才续；平台没给重置时间时按这么久估
     resume_margin_seconds: float = Field(default=60.0, ge=0, le=3600)
+    # 插入消息：等平台确认“收下了”最多多久，过了就降级成中断后合并重发
+    steer_timeout_seconds: float = Field(default=10.0, ge=1, le=60)
     quota_fallback_seconds: float = Field(default=5 * 3600.0, ge=1, le=7 * 86400)
     rpc_timeout: float = 30.0
     clone_timeout: float = 300.0

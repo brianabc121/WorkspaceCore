@@ -562,6 +562,22 @@ class Store:
         )
         return int(row["n"]) if row else 0
 
+    def count_inserted_since(self, caller_id: str, since: float) -> int:
+        """这个调用方插进正在跑的回合里的消息数（它们不产生新回合，但同样计入发送次数）。"""
+        row = self._one(
+            "SELECT COUNT(*) AS n FROM messages WHERE delivery = 'inserted' AND at >= ? "
+            "AND json_extract(data, '$.caller_id') = ?",
+            (since, caller_id),
+        )
+        return int(row["n"]) if row else 0
+
+    def inserted_by_request(self, caller_id: str, request_id: str) -> Row | None:
+        return self._one(
+            "SELECT * FROM messages WHERE delivery = 'inserted' "
+            "AND json_extract(data, '$.caller_id') = ? AND json_extract(data, '$.request_id') = ?",
+            (caller_id, request_id),
+        )
+
     def queue_position(self, turn: Row) -> int:
         """这个回合前面还有几个没做完的（同一个会话里）。"""
         row = self._one(

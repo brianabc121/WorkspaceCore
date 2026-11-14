@@ -164,6 +164,12 @@ async def test_codex_cancel_and_restart(codex: CodexDriver, tmp_path: Path) -> N
     await codex.cancel(spec)
     with pytest.raises(DriverError, match="中断"):
         await task
+    # 插入消息：没有回合在跑时收不下；回合在跑时用 turn/steer 送进去，回合接着做完
+    assert await codex.steer(spec, "没有回合") is False
+    task = asyncio.create_task(codex.run_turn(spec, "hang", Sink()))
+    await _until(lambda: native in codex._active)
+    assert await codex.steer(spec, "顺便看一下") is True
+    assert (await task).text == "steered: 顺便看一下"
     # 进程重启后（桥重启）：先恢复线程再发送
     await codex.stop()
     assert (await codex.run_turn(spec, "重启之后", Sink())).text == "[None|readOnly] 重启之后"

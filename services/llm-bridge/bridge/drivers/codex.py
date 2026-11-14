@@ -481,6 +481,25 @@ class CodexDriver(Driver):
         except DriverError:
             return self.latest_quota
 
+    async def steer(self, spec: SessionSpec, text: str) -> bool:
+        """`turn/steer`（app-server v2）：要给出正在跑的回合号，应答里的回合号对得上才算收下。"""
+        thread_id = spec.native_id
+        turn_id = self._active.get(thread_id) if thread_id else None
+        if not thread_id or not turn_id:
+            return False
+        try:
+            answer = await self._call(
+                "turn/steer",
+                {
+                    "threadId": thread_id,
+                    "expectedTurnId": turn_id,
+                    "input": [{"type": "text", "text": text}],
+                },
+            )
+        except DriverError:
+            return False
+        return isinstance(answer, dict) and str(answer.get("turnId")) == turn_id
+
     async def cancel(self, spec: SessionSpec) -> None:
         thread_id = spec.native_id
         turn_id = self._active.get(thread_id) if thread_id else None

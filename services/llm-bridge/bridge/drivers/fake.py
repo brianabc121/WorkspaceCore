@@ -40,6 +40,9 @@ class FakeDriver(Driver):
         self._cancel: dict[str, asyncio.Event] = {}
         # 额度：quota_until 之前的回合都以“额度用完”失败；quota_reports_reset=False 时不给重置时间
         self.last_images: tuple[tuple[str, str], ...] = ()
+        # 插入消息：steerable=True 时回合中追加的消息会被收下（记在 steered 里）
+        self.steerable = False
+        self.steered: list[str] = []
         self.quota_until = 0.0
         self.quota_reports_reset = True
         self.current_quota: list[dict[str, Any]] = []
@@ -171,6 +174,12 @@ class FakeDriver(Driver):
     async def cancel(self, spec: SessionSpec) -> None:
         if spec.native_id in self._cancel:
             self._cancel[spec.native_id].set()
+
+    async def steer(self, spec: SessionSpec, text: str) -> bool:
+        if not self.steerable or self.running == 0:
+            return False
+        self.steered.append(text)
+        return True
 
     async def list_native(self, limit: int) -> list[NativeSession]:
         return self.external[:limit]

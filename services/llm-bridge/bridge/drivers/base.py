@@ -143,6 +143,14 @@ class Driver:
     async def run_turn(self, spec: SessionSpec, text: str, sink: EventSink) -> TurnOutcome:
         raise DriverError("not_supported", "这个通道不能发送消息")
 
+    async def steer(self, spec: SessionSpec, text: str) -> bool:
+        """把一条消息送进这个会话正在跑的回合（插入消息）。
+
+        返回 True 表示平台确认收下了；不支持、回合刚好结束、平台拒绝都返回 False，
+        由 engine 降级成“中断后合并重发”。默认不支持。
+        """
+        return False
+
     async def cancel(self, spec: SessionSpec) -> None:
         return None
 
