@@ -168,6 +168,31 @@ class LlmChatRenameIn(_In):
     title: str = Field(min_length=1, max_length=120)
 
 
+# ---- 会话的消息队列（docs/v2/LLM_BRIDGE_QUEUE_PLAN.md 第 4 节）----
+class LlmChatQueueItem(BaseModel):
+    turn_id: str
+    status: str = Field(description="queued / running")
+    text: str
+    by: str | None = Field(description="谁发的")
+    mine: bool = Field(description="是不是我发的")
+    queued_at: float
+    started_at: float | None
+
+
+class LlmChatQueueOut(BaseModel):
+    session_id: str
+    running: LlmChatQueueItem | None = Field(description="正在处理的那一条")
+    queued: list[LlmChatQueueItem] = Field(description="排队中的各条，按将要处理的顺序")
+
+
+class LlmChatQueueEditIn(_In):
+    text: str = Field(min_length=1, max_length=100_000)
+
+
+class LlmChatQueueMoveIn(_In):
+    to: Literal["first", "last"] = Field(description="调到队首或队尾")
+
+
 # ---- 多模型同问（docs/v2/LLM_CHAT_PLAN.md 第 4.3 节）----
 MAX_GROUP_TARGETS = 6
 

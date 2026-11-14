@@ -25,6 +25,8 @@ from app.modules.llm_bridge.chat_schemas import (
     LlmChatMessageOut,
     LlmChatModelOut,
     LlmChatOptionsOut,
+    LlmChatQueueItem,
+    LlmChatQueueOut,
     LlmChatSendIn,
     LlmChatSessionList,
     LlmChatSessionOut,
@@ -83,6 +85,26 @@ def _turn_out(data: dict[str, Any]) -> LlmChatTurnOut:
         session_id=data["session_id"],
         status=data["status"],
         ahead_in_session=data.get("ahead_in_session"),
+    )
+
+
+def _queue_out(data: Any, me: str) -> LlmChatQueueOut:
+    def item(row: dict[str, Any]) -> LlmChatQueueItem:
+        return LlmChatQueueItem(
+            turn_id=row["turn_id"],
+            status=row["status"],
+            text=row["text"],
+            by=row.get("by"),
+            mine=row.get("caller_id") == me,
+            queued_at=row["queued_at"],
+            started_at=row.get("started_at"),
+        )
+
+    running = data.get("running")
+    return LlmChatQueueOut(
+        session_id=data["session_id"],
+        running=item(running) if running else None,
+        queued=[item(row) for row in data.get("queued", [])],
     )
 
 
@@ -323,6 +345,40 @@ class LlmChatService:
         )
         await self.db.commit()
         return _turn_out(data)
+
+    # ---- 队列 ----
+    async def queue(
+        self, access: WorkspaceAccess, row: LlmBridge, session_id: str
+    ) -> LlmChatQueueOut:
+        me, client = caller_id(access.user_id), await self.bridges.client(row)
+        await self.db.commit()
+        return _queue_out(await self._admin(client, "GET", f"/sessions/{session_id}/queue"), me)
+
+    async def change_queued(
+        self,
+        access: WorkspaceAccess,
+        row: LlmBridge,
+        turn_id: str,
+        *,
+        text: str | None = None,
+        to: str | None = None,
+    ) -> LlmChatQueueOut:
+        """改排队中消息的内容，或把它调到队首 / 队尾。已经开始处理的 409。"""
+        me, client = caller_id(access.user_id), await self.bridges.client(row)
+        bridge_id, bridge_name = row.id, row.name
+        await self.db.commit()
+        if text is not None:
+            data = await self._admin(client, "PATCH", f"/turns/{turn_id}", {"text": text})
+        else:
+            data = await self._admin(client, "POST", f"/turns/{turn_id}/move", {"to": to})
+        await self.bridges.audit(
+            access,
+            "chat_queue_edited" if text is not None else "chat_queue_moved",
+            bridge_id,
+            {"bridge": bridge_name, "session": data.get("session_id"), "turn": turn_id},
+        )
+        await self.db.commit()
+        return _queue_out(data, me)
 
     async def rename(
         self, access: WorkspaceAccess, row: LlmBridge, session_id: str, title: str

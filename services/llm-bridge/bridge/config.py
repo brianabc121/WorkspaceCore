@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     # 只给测试用：打开后多一个不访问任何外部服务的平台 fake
     enable_fake: bool = False
     # 等待驱动进程启动、普通请求的超时（秒）
+    # “同一个平台两次开始之间至少隔几秒”在管理员没改过时的值；测试环境设成 0
+    default_min_start_interval: int = Field(default=2, ge=0, le=60)
     rpc_timeout: float = 30.0
     clone_timeout: float = 300.0
 

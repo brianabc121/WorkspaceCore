@@ -16,6 +16,8 @@ export type ChatEvent = Schema['LlmChatEventOut']
 export type ChatOptions = Schema['LlmChatOptionsOut']
 export type ChatCreateBody = Schema['LlmChatCreateIn']
 export type ChatTurn = Schema['LlmChatTurnOut']
+export type ChatQueue = Schema['LlmChatQueueOut']
+export type ChatQueueItem = Schema['LlmChatQueueItem']
 export type SessionFilter = { q: string; platform: Platform | null; status: 'active' | 'archived' }
 export type ChatGroup = Schema['LlmChatGroupOut']
 export type ChatGroupMember = Schema['LlmChatGroupMemberOut']
@@ -109,6 +111,23 @@ export function useLlmChat(scope: string) {
     async send(bridge: string, session: string, body: Schema['LlmChatSendIn']) {
       return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/messages', { params: sessionAt(bridge, session), body }))
     },
+    // 会话的消息队列（docs/v2/LLM_BRIDGE_QUEUE_PLAN.md 第 4 节）：有回合在跑时才读，跑着的时候每 5 秒看一次
+    useQueue: (bridge: Ref<string | null>, session: Ref<string | null>, busy: Ref<boolean>) => useQuery({
+      queryKey: computed(() => key(bridge.value, 'queue', session.value)), enabled: computed(() => active() && !!bridge.value && !!session.value && busy.value),
+      refetchInterval: 5000,
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/queue', { params: sessionAt(bridge.value!, session.value!), signal })),
+    }),
+    async editQueued(bridge: string, turn: string, text: string) {
+      const out = dataOf(await auth.api.PATCH('/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}', { params: { header, path: { bridge_id: bridge, turn_id: turn } }, body: { text } }))
+      cache.setQueryData(key(bridge, 'queue', out.session_id), out)
+      return out
+    },
+    async moveQueued(bridge: string, turn: string, to: 'first' | 'last') {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/move', { params: { header, path: { bridge_id: bridge, turn_id: turn } }, body: { to } }))
+      cache.setQueryData(key(bridge, 'queue', out.session_id), out)
+      return out
+    },
+    invalidateQueue: (bridge: string, session: string) => cache.invalidateQueries({ queryKey: key(bridge, 'queue', session) }),
     async cancel(bridge: string, turn: string) {
       return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/cancel', { params: { header, path: { bridge_id: bridge, turn_id: turn } } }))
     },

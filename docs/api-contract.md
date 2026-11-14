@@ -814,6 +814,21 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST .../chat/groups/{group_id}/messages` | 向每个成员继续发：`text`、`request_id`、`takeover`；返回每个成员的 `turn` 或 `error`（管理器停用、登记被删除、会话没建成的这次不发）。别人建的一组要 `takeover=true`，否则 `409 TAKEOVER_REQUIRED`；已归档的一组 `409` |
 | `POST .../chat/groups/{group_id}/archive` | 归档这一组：只是不再并排显示，每个模型的会话不受影响 |
 
+**限流与消息队列**（T-0236，`docs/v2/LLM_BRIDGE_QUEUE_PLAN.md` 第 2、4 节）。
+
+- 设置（`PUT .../bridges/{id}/settings`）：`concurrency` 的含义改成“每个**平台**同时进行的会话数”（默认 3，ChatGPT / Codex / Claude / WorkBuddy 各算各的；超过的排队等名额，不拒绝）；新增 `min_start_interval_seconds`（同一个平台两次开始之间至少隔几秒，默认 2，0–60）。
+- 状态（`GET .../bridges/{id}/status`）多一个 `load`：每个平台的 `running`（进行中的会话数）、`waiting`（在等的会话数）、`limit`。
+- 会话在处理时再发的消息进这个会话的队列（`status=queued`），不打断正在处理的；队列持久化，管理器重启后继续。
+
+| 接口 | 说明 |
+|---|---|
+| `GET .../chat/sessions/{session_id}/queue` | 这个会话正在处理的那一条（`running`）和排队中的各条（`queued`，按将要处理的顺序）：`turn_id`、`text`、`by`、`mine`、`queued_at` |
+| `PATCH .../chat/turns/{turn_id}` | 改排队中消息的内容：`text`。已经开始处理的 `409 CONFLICT` |
+| `POST .../chat/turns/{turn_id}/move` | `to`：`first` / `last`，调到队首或队尾。已经开始处理的 `409` |
+| `POST .../chat/turns/{turn_id}/cancel` | （已有）取消排队中或进行中的一条 |
+
+智能体多一个只读工具 `llm_bridge_queue`（`session_id`）：看自己能访问的会话的队列。改内容、调顺序只在聊天页（owner / admin）。
+
 **一键部署**（T-0234，`docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md`；都在 `/api/v1/llm_bridge` 下，写操作带 CSRF、只有 owner 能做，读 owner / admin）。
 MCP 管理器部署到“智能体服务器”或“容器服务器”登记的服务器上；任务在后台进行，进度用任务接口读。
 部署 MCP 管理器不看这两类服务器自己的准入（资源、配额、正在进行的任务）；管理器的容器不受那两个页面的管理程序影响。

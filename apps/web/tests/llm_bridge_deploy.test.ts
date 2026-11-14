@@ -39,7 +39,7 @@ const job = (over: Partial<Job> = {}): Job => ({
   mode: null, log: '', error_code: null, error_message: null, started_at: at, finished_at: null, steps: STEPS, ...over,
 })
 const done = (steps: Step[]) => steps.map(s => ({ ...s, status: 'done' }))
-const status: Schema['LlmBridgeStatusOut'] = { reachable: true, error: '', version: '0.1.0', platforms: ['claude', 'workbuddy'], queued: 0, running: 0, settings: null, accounts: [], channels: [] }
+const status: Schema['LlmBridgeStatusOut'] = { reachable: true, error: '', version: '0.1.0', platforms: ['claude', 'workbuddy'], queued: 0, running: 0, load: {}, settings: null, accounts: [], channels: [] }
 
 interface World { bridges: Bridge[]; jobs: Record<string, Job>; available: boolean; targets: Target[] }
 function setup(role: Role, given: Partial<World> = {}, handler?: (r: Request, world: World) => Response | undefined | Promise<Response | undefined>) {

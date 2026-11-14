@@ -157,6 +157,14 @@ class SessionPatchBody(_Body):
     title: str = Field(min_length=1, max_length=200)
 
 
+class TurnEditBody(_Body):
+    text: str = Field(min_length=1)
+
+
+class TurnMoveBody(_Body):
+    to: Literal["first", "last"]
+
+
 class CallerBody(_Body):
     label: str = Field(min_length=1, max_length=80)
     scopes: list[Literal["write", "account", "takeover"]] = []
@@ -380,6 +388,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request, session_id: str, body: SessionPatchBody, _: Admin
     ) -> dict[str, Any]:
         return engine_of(request).rename_session(session_id, body.title)
+
+    @app.get("/admin/sessions/{session_id}/queue")
+    async def admin_queue(request: Request, session_id: str, _: Admin) -> dict[str, Any]:
+        return engine_of(request).queue_view(session_id)
+
+    @app.patch("/admin/turns/{turn_id}")
+    async def admin_turn_edit(
+        request: Request, turn_id: str, body: TurnEditBody, _: Admin
+    ) -> dict[str, Any]:
+        return engine_of(request).edit_queued(turn_id, body.text)
+
+    @app.post("/admin/turns/{turn_id}/move")
+    async def admin_turn_move(
+        request: Request, turn_id: str, body: TurnMoveBody, _: Admin
+    ) -> dict[str, Any]:
+        return engine_of(request).move_queued(turn_id, body.to)
 
     @app.get("/admin/sessions/{session_id}/turns")
     async def admin_turns(request: Request, session_id: str, _: Admin) -> dict[str, Any]:

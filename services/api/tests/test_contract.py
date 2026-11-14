@@ -915,6 +915,7 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "llm_bridge_session_list",
             "llm_bridge_session_get",
             "llm_bridge_turn_get",
+            "llm_bridge_queue",
         },
         "write": {
             "create_task",

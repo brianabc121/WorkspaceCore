@@ -3204,6 +3204,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 聊天：一个会话的消息队列（admin）
+         * @description 正在处理的那一条和排队中的各条，按将要处理的顺序。会话在处理时再发的消息进队列，前面的做完才发给模型。
+         */
+        get: operations["llm_chat_queue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 聊天：修改排队中的一条消息（admin）
+         * @description 只能改还没开始处理的；已经开始的 409。
+         */
+        patch: operations["llm_chat_edit_queued"];
+        trace?: never;
+    };
     "/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/cancel": {
         parameters: {
             query?: never;
@@ -3215,6 +3255,23 @@ export interface paths {
         put?: never;
         /** 聊天：停止一个排队中或进行中的回合（admin） */
         post: operations["llm_chat_cancel_turn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 聊天：把排队中的一条消息调到队首或队尾（admin） */
+        post: operations["llm_chat_move_queued"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11631,6 +11688,24 @@ export interface components {
             /** Bridges */
             bridges: components["schemas"]["LlmBridgeOut"][];
         };
+        /** LlmBridgeLoadOut */
+        LlmBridgeLoadOut: {
+            /**
+             * Limit
+             * @description 同时进行的上限
+             */
+            limit: number;
+            /**
+             * Running
+             * @description 这个平台进行中的会话数
+             */
+            running: number;
+            /**
+             * Waiting
+             * @description 在排队等名额的会话数
+             */
+            waiting: number;
+        };
         /** LlmBridgeLoginIn */
         LlmBridgeLoginIn: {
             /** Api Key */
@@ -11820,11 +11895,17 @@ export interface components {
             claude_subscription_ack: boolean;
             /**
              * Concurrency
-             * @description 每个账号同时进行的回合数
+             * @description 每个平台同时进行的会话数（超过的排队等名额）
              */
             concurrency: number;
             /** Max Text Chars */
             max_text_chars: number;
+            /**
+             * Min Start Interval Seconds
+             * @description 同一个平台两次开始之间至少隔几秒；旧版本的管理器没有这一项
+             * @default 0
+             */
+            min_start_interval_seconds: number;
             /**
              * Platforms
              * @description 这个 MCP 管理器控制的平台
@@ -11852,6 +11933,8 @@ export interface components {
             concurrency?: number | null;
             /** Max Text Chars */
             max_text_chars?: number | null;
+            /** Min Start Interval Seconds */
+            min_start_interval_seconds?: number | null;
             /**
              * Platforms
              * @description 这个 MCP 管理器控制的平台（至少一个）。取消勾选的平台不能登录、不能新建会话和发送；已有的登录和会话记录保留
@@ -11880,6 +11963,14 @@ export interface components {
              * @default
              */
             error: string;
+            /**
+             * Load
+             * @description 每个平台的进行中 / 等待 / 上限；旧版本的管理器没有
+             * @default {}
+             */
+            load: {
+                [key: string]: components["schemas"]["LlmBridgeLoadOut"];
+            };
             /**
              * Platforms
              * @description 这个 MCP 管理器控制的平台
@@ -12270,6 +12361,58 @@ export interface components {
              * @default
              */
             models_error: string;
+        };
+        /** LlmChatQueueEditIn */
+        LlmChatQueueEditIn: {
+            /** Text */
+            text: string;
+        };
+        /** LlmChatQueueItem */
+        LlmChatQueueItem: {
+            /**
+             * By
+             * @description 谁发的
+             */
+            by: string | null;
+            /**
+             * Mine
+             * @description 是不是我发的
+             */
+            mine: boolean;
+            /** Queued At */
+            queued_at: number;
+            /** Started At */
+            started_at: number | null;
+            /**
+             * Status
+             * @description queued / running
+             */
+            status: string;
+            /** Text */
+            text: string;
+            /** Turn Id */
+            turn_id: string;
+        };
+        /** LlmChatQueueMoveIn */
+        LlmChatQueueMoveIn: {
+            /**
+             * To
+             * @description 调到队首或队尾
+             * @enum {string}
+             */
+            to: "first" | "last";
+        };
+        /** LlmChatQueueOut */
+        LlmChatQueueOut: {
+            /**
+             * Queued
+             * @description 排队中的各条，按将要处理的顺序
+             */
+            queued: components["schemas"]["LlmChatQueueItem"][];
+            /** @description 正在处理的那一条 */
+            running: components["schemas"]["LlmChatQueueItem"] | null;
+            /** Session Id */
+            session_id: string;
         };
         /** LlmChatRenameIn */
         LlmChatRenameIn: {
@@ -34113,6 +34256,163 @@ export interface operations {
             };
         };
     };
+    llm_chat_queue: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatQueueOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_edit_queued: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmChatQueueEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatQueueOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     llm_chat_cancel_turn: {
         parameters: {
             query?: never;
@@ -34137,6 +34437,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LlmChatTurnOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_move_queued: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmChatQueueMoveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatQueueOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

@@ -29,8 +29,8 @@ const bridge = (over: Partial<Bridge> = {}): Bridge => ({ id: ONE, name: '主账
 const account = (slot: string, state: string): Schema['LlmBridgeAccountOut'] => ({ slot, label: slot, enabled: true, state, registered: state === 'logged_in', identity: null, method: null, detail: '', first_login_at: null, login_methods: ['existing'], running: 0 })
 const channel = (platform: string, mode: string, slot: string, over: Partial<Schema['LlmBridgeChannelOut']> = {}): Schema['LlmBridgeChannelOut'] => ({ platform, mode, slot, enabled: true, available: true, note: '', ...over })
 const status = (): Schema['LlmBridgeStatusOut'] => ({
-  reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 0, running: 0,
-  settings: { concurrency: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
+  reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 0, running: 0, load: {},
+  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
   accounts: [account('openai', 'logged_in'), account('claude', 'logged_in'), account('workbuddy', 'logged_out')],
   channels: [channel('chatgpt', 'chat', 'openai'), channel('codex', 'dev', 'openai'), channel('claude', 'chat', 'claude'), channel('claude', 'dev', 'claude'), channel('claude', 'cloud', 'claude', { available: false }), channel('workbuddy', 'chat', 'workbuddy')],
 })
@@ -198,7 +198,7 @@ describe('大模型聊天', () => {
     expect(within(messages()[3]!).getByText('还在继续…')).toBeVisible()
     expect(within(messages()[3]!).getByText('ls docs')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '停止' })).toBeVisible()
-    expect(screen.getByText('上一条还没答完：现在发的会排在它后面。')).toBeVisible()
+    expect(screen.getByText('上一条还没答完：现在发的不会打断它，会进队列，等前面的做完再发给模型。')).toBeVisible()
     const events = requests.filter(r => path(r).endsWith('/events'))
     expect(query(events[0]!).get('after')).toBe('10')
     expect(Number(query(events[0]!).get('wait_seconds'))).toBeGreaterThan(0)
@@ -317,6 +317,46 @@ describe('大模型聊天', () => {
     expect(screen.queryByRole('textbox', { name: '消息内容' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '归档会话' })).not.toBeInTheDocument()
     expect(world.conversations[S1]!.session.status).toBe('archived')
+  })
+
+  it('shows the queue of a busy session and lets queued messages be moved, edited and cancelled', async () => {
+    const running = [asked('跑一下测试'), answered('', T1, { status: 'running' })]
+    const item = (id: string, text: string, mine = true): Schema['LlmChatQueueItem'] => ({ turn_id: id, status: 'queued', text, by: mine ? '我' : '研究助手', mine, queued_at: 1794650000, started_at: null })
+    let queued = [item('bt_' + 'a'.repeat(20), '第二条'), item('bt_' + 'b'.repeat(20), '第三条', false)]
+    const bodies: unknown[] = []
+    const view = () => ({ session_id: S1, running: { ...item(T1, '跑一下测试'), status: 'running' }, queued })
+    const { requests } = setup('owner', { conversations: { [S1]: talk({ busy: true }, running) }, events: [new Promise<Events>(() => {})] }, async r => {
+      const p = path(r)
+      if (p === `${chat}/sessions/${S1}/queue`) return Response.json(view())
+      const one = /\/turns\/(bt_\w+)(\/move|\/cancel)?$/.exec(p)
+      if (!one) return undefined
+      if (one[2] === '/move') { bodies.push(await r.json()); queued = [queued[1]!, queued[0]!]; return Response.json(view()) }
+      if (one[2] === '/cancel') { queued = queued.filter(q => q.turn_id !== one[1]); return Response.json(turn(one[1], 'cancelled')) }
+      if (r.method === 'PATCH') { const body = await r.json() as { text: string }; bodies.push(body); queued = queued.map(q => (q.turn_id === one[1] ? { ...q, text: body.text } : q)); return Response.json(view()) }
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const queue = await screen.findByRole('region', { name: '消息队列' })
+    expect(within(queue).getByRole('button', { name: /队列里有 2 条消息/ })).toBeVisible()
+    const rows = () => within(queue).getAllByRole('listitem')
+    expect(rows().map(li => li.textContent)).toEqual([expect.stringContaining('第二条'), expect.stringContaining('第三条')])
+    expect(rows()[1]).toHaveTextContent('研究助手')
+    expect(screen.getByText(/不会打断它，会进队列/)).toBeVisible()
+
+    await fireEvent.click(within(queue).getByRole('button', { name: '把第 2 条调到最前面' }))
+    await waitFor(() => expect(rows()[0]).toHaveTextContent('第三条'))
+    await fireEvent.click(within(queue).getByRole('button', { name: '修改第 1 条' }))
+    const edit = within(queue).getByRole('form', { name: '修改排队中的第 1 条' })
+    const box = within(edit).getByRole('textbox', { name: '消息内容' })
+    await fireEvent.update(box, '改过的第三条')
+    await fireEvent.click(within(edit).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(rows()[0]).toHaveTextContent('改过的第三条'))
+    expect(bodies).toEqual([{ to: 'first' }, { text: '改过的第三条' }])
+    await fireEvent.click(within(queue).getByRole('button', { name: '取消第 2 条' }))
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    expect(writes(requests).map(r => `${r.method} ${path(r).split('/chat')[1]}`)).toEqual([
+      `POST /turns/${'bt_' + 'b'.repeat(20)}/move`, `PATCH /turns/${'bt_' + 'b'.repeat(20)}`, `POST /turns/${'bt_' + 'a'.repeat(20)}/cancel`,
+    ])
   })
 
   it('shows why a turn failed and what is unknown', async () => {

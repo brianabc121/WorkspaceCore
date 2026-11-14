@@ -455,6 +455,11 @@ Claude / WorkBuddy，2 号控制 Claude / WorkBuddy / Codex；每个管理器单
   `myworkspace.mcp-manager`，规则见那份方案的第 8 节）。
 - 第 13 节的规则不变：智能体仍然只能经工作台的工具访问，工作台不挂 Docker socket。
 
+## 21. 限流、内容落库、消息队列、插入消息（人类 2026-11-14 要求，T-0236）
+
+单独成文：`docs/v2/LLM_BRIDGE_QUEUE_PLAN.md`。第 5 节原来写的“每个平台有并发上限（默认 2）”，实现一直是按账号槽位计数；
+从 T-0236 起真正按平台计数，默认 3。
+
 ## 参考资料
 
 已打开核验：

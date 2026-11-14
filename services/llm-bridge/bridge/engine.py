@@ -33,7 +33,10 @@ logger = logging.getLogger("bridge.engine")
 
 TERMINAL = ("completed", "failed", "cancelled", "unknown")
 DEFAULTS: dict[str, Any] = {
-    "concurrency": 2,  # 每个账号槽位同时进行的回合数
+    # 每个平台同时进行的会话数（T-0236：按平台计数；一个会话同一时间只跑一个回合）
+    "concurrency": 3,
+    # 同一个平台两次开始之间至少隔几秒：几个名额不会同时起跑
+    "min_start_interval_seconds": 2,
     "turn_timeout_seconds": 1800,
     "send_per_hour": 120,  # 每个调用方每小时的发送次数
     "max_text_chars": 100_000,
@@ -42,6 +45,7 @@ DEFAULTS: dict[str, Any] = {
 }
 SETTING_LIMITS = {
     "concurrency": (1, 16),
+    "min_start_interval_seconds": (0, 60),
     "turn_timeout_seconds": (30, 6 * 3600),
     "send_per_hour": (1, 10_000),
     "max_text_chars": (1, 1_000_000),
@@ -95,20 +99,31 @@ class Caller:
 
 
 class SlotLimiter:
-    """并发上限可以在运行中调整的信号量。"""
+    """一个平台的名额：上限可以在运行中调整；两次开始之间隔开一段时间。"""
 
     def __init__(self) -> None:
         self._running = 0
         self._cond = asyncio.Condition()
+        self._next_start = 0.0
 
     @property
     def running(self) -> int:
         return self._running
 
-    async def acquire(self, limit: Any) -> None:
+    async def acquire(self, limit: Any, interval: Any = lambda: 0) -> None:
         async with self._cond:
             await self._cond.wait_for(lambda: self._running < limit())
             self._running += 1
+            # 在锁里排好自己的开始时刻：同时拿到名额的几个依次错开
+            now = time.monotonic()
+            start = max(now, self._next_start)
+            self._next_start = start + max(0.0, float(interval()))
+        try:
+            if start > now:
+                await asyncio.sleep(start - now)
+        except BaseException:
+            await self.release()
+            raise
 
     async def release(self) -> None:
         async with self._cond:
@@ -132,13 +147,18 @@ class Engine:
         self._workers: dict[str, asyncio.Task[None]] = {}
         self._done: dict[str, asyncio.Event] = {}
         self._cancel_requested: set[str] = set()
-        self._limiters = {slot: SlotLimiter() for slot in drivers}
+        self._limiters: dict[str, SlotLimiter] = {}
         self._accounts: dict[str, tuple[float, Row]] = {}
         self._idle_seconds = 60.0
 
     # ---- 设置 ----
     def setting(self, key: str) -> Any:
-        return self.store.get_setting(key, DEFAULTS[key])
+        default = (
+            self.settings.default_min_start_interval
+            if key == "min_start_interval_seconds"
+            else DEFAULTS[key]
+        )
+        return self.store.get_setting(key, default)
 
     def settings_view(self) -> Row:
         return {**{key: self.setting(key) for key in DEFAULTS}, "platforms": self.platforms()}
@@ -213,6 +233,9 @@ class Engine:
             )
         for turn in self.store.list_turns(statuses=("queued",), limit=10_000):
             self._enqueue(turn)
+
+    def _limiter(self, platform: str) -> SlotLimiter:
+        return self._limiters.setdefault(platform, SlotLimiter())
 
     async def shutdown(self) -> None:
         for task in list(self._workers.values()):
@@ -746,6 +769,11 @@ class Engine:
                     self._workers.pop(session_id, None)
                     return
                 continue
+            # 队列里的记号只表示“有一条在等”；真正做哪一条按队列里的顺序取（可以被调整过）
+            turn = self.store.next_queued(session_id)
+            if turn is None:
+                continue
+            turn_id = turn["id"]
             try:
                 await self._process(turn_id)
             except Exception:
@@ -770,8 +798,11 @@ class Engine:
             return
         session = self.store.get_session(turn["session_id"])
         assert session is not None  # noqa: S101
-        limiter = self._limiters[session["slot"]]
-        await limiter.acquire(lambda: self.setting("concurrency"))
+        limiter = self._limiter(session["platform"])
+        await limiter.acquire(
+            lambda: self.setting("concurrency"),
+            lambda: self.setting("min_start_interval_seconds"),
+        )
         try:
             turn = self.store.get_turn(turn_id)
             if turn is None or turn["status"] != "queued":  # 排队等并发名额时被取消了
@@ -1008,6 +1039,81 @@ class Engine:
             "last_id": events[-1]["id"] if events else after,
         }
 
+    # ---- 队列（T-0236）----
+    def platform_load(self) -> Row:
+        """每个平台进行中的会话数、在等的会话数和上限。"""
+        waiting = self.store.waiting_by_platform()
+        limit = self.setting("concurrency")
+        return {
+            platform: {
+                "running": self._limiter(platform).running,
+                "waiting": waiting.get(platform, 0),
+                "limit": limit,
+            }
+            for platform in self.platforms()
+        }
+
+    def _queue_item(self, turn: Row, labels: dict[str, Any]) -> Row:
+        return {
+            "turn_id": turn["id"],
+            "status": turn["status"],
+            "text": turn["text"],
+            "by": labels.get(turn["id"]),
+            "caller_id": turn["caller_id"],
+            "queued_at": turn["queued_at"],
+            "started_at": turn["started_at"],
+        }
+
+    def queue_view(self, session_id: str) -> Row:
+        """这个会话正在跑的那一条和排队中的各条（按将要执行的顺序）。"""
+        self._required_session(session_id)
+        labels = {
+            e["turn_id"]: (e["payload"] or {}).get("by")
+            for e in self.store.list_events(session_id, limit=10_000)
+            if e["kind"] == "queued"
+        }
+        running = self.store.running_turn(session_id)
+        return {
+            "session_id": session_id,
+            "running": self._queue_item(running, labels) if running else None,
+            "queued": [self._queue_item(t, labels) for t in self.store.queued_turns(session_id)],
+        }
+
+    def caller_queue(self, caller: Caller, session_id: str) -> Row:
+        self._session(caller, session_id)
+        return self.queue_view(session_id)
+
+    def _queued_turn(self, turn_id: str) -> Row:
+        turn = self.store.get_turn(turn_id)
+        if turn is None:
+            raise BridgeError("NOT_FOUND", "没有这条消息")
+        if turn["status"] != "queued":
+            raise BridgeError("CONFLICT", "这条消息已经开始处理，不能再改")
+        return turn
+
+    def edit_queued(self, turn_id: str, text: str) -> Row:
+        turn = self._queued_turn(turn_id)
+        if not text.strip():
+            raise BridgeError("VALIDATION_FAILED", "消息不能为空")
+        if len(text) > self.setting("max_text_chars"):
+            raise BridgeError(
+                "VALIDATION_FAILED", f"消息太长（最多 {self.setting('max_text_chars')} 个字符）"
+            )
+        self.store.update_turn(turn_id, text=text)
+        self.store.add_event(turn["session_id"], turn_id, "edited", {})
+        return self.queue_view(turn["session_id"])
+
+    def move_queued(self, turn_id: str, to: str) -> Row:
+        """把排队中的一条调到队首或队尾。"""
+        turn = self._queued_turn(turn_id)
+        if to not in ("first", "last"):
+            raise BridgeError("VALIDATION_FAILED", "to 只能是 first 或 last")
+        edge = self.store.queue_edge(turn["session_id"], first=to == "first")
+        if edge is not None:
+            self.store.update_turn(turn_id, position=edge - 1 if to == "first" else edge + 1)
+            self.store.add_event(turn["session_id"], turn_id, "moved", {"to": to})
+        return self.queue_view(turn["session_id"])
+
     def rename_session(self, session_id: str, title: str) -> Row:
         session = self._required_session(session_id)
         clean = " ".join(redact(title).split())[:120]
@@ -1035,7 +1141,10 @@ class Engine:
                 "detail": account.get("detail", ""),
                 "first_login_at": account.get("first_login_at"),
                 "login_methods": list(self.drivers[slot].login_methods),
-                "running": self._limiters[slot].running,
+                "running": sum(
+                    self._limiter(c).running
+                    for c in {c.platform for c in self.channels if c.slot == slot}
+                ),
             }
         channels = [
             {
@@ -1055,6 +1164,8 @@ class Engine:
             "accounts": accounts,
             "channels": channels,
             "queued": queued,
+            # 每个平台进行中的会话数、在等的会话数和上限（T-0236）
+            "load": self.platform_load(),
             "running": running,
         }
 

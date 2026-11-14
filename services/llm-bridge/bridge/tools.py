@@ -78,6 +78,10 @@ class SessionArchiveInput(_Input):
     session_id: str
 
 
+class QueueInput(_Input):
+    session_id: str
+
+
 @dataclass(frozen=True)
 class ToolDef:
     name: str
@@ -126,6 +130,12 @@ TOOLS: tuple[ToolDef, ...] = (
         True,
     ),
     ToolDef("llm_session_get", "查看一个会话的信息和消息记录。" + _NOTE, SessionGetInput, True),
+    ToolDef(
+        "llm_queue",
+        "查看一个会话的消息队列：正在处理的那一条和排队中的各条（按将要处理的顺序）。",
+        QueueInput,
+        True,
+    ),
     ToolDef(
         "llm_session_archive",
         "归档一个会话（之后不能再发送；开发会话的工作目录会被删除）。",

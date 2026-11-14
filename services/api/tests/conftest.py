@@ -21,6 +21,9 @@ from fastapi import FastAPI
 from pydantic import SecretStr
 from sqlalchemy.engine import make_url
 
+# 进程内的会话桥（MCP 管理器）：测试里不等“同一个平台两次开始之间的间隔”（默认 2 秒）
+os.environ.setdefault("BRIDGE_DEFAULT_MIN_START_INTERVAL", "0")
+
 from app.core.config import Settings
 from app.main import create_app
 from tests.helpers import BASE_URL, SETUP_TOKEN, ClientFactory, alembic_config, asyncpg_dsn

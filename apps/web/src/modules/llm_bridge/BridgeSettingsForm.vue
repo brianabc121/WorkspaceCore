@@ -4,19 +4,21 @@ import ManagementSection from '../../components/management/ManagementSection.vue
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import { bridgeError, type Bridge, type BridgeStatus, type LlmBridgeApi } from './api'
 
-// 一个 MCP 管理器的设置（保存在它自己那里）：并发、单个回合的时限、每个实例每小时的发送次数、单条指令的长度上限。
+// 一个 MCP 管理器的设置（保存在它自己那里）：每个平台同时进行的会话数、两次开始的最小间隔（限流，T-0236）、
+// 单个回合的时限、每个实例每小时的发送次数、单条指令的长度上限。
 // 上下限与后端 BridgeSettingsPatch 一致。
 const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeStatus; loading: boolean; loadError: unknown; canWrite: boolean }>()
 const emit = defineEmits<{ reload: [] }>()
 
 const FIELDS = [
-  { key: 'concurrency', label: '同时进行的回合数', help: '每个账号同时进行的回合数（1–16）。', min: 1, max: 16 },
+  { key: 'concurrency', label: '每个平台同时进行的会话数', help: '一个平台（ChatGPT / Codex / Claude / WorkBuddy 各算各的）最多同时有几个会话在跑（1–16）；超过的排队等名额。调小可以降低账号被限制的风险。', min: 1, max: 16 },
+  { key: 'min_start_interval_seconds', label: '两次开始的最小间隔（秒）', help: '同一个平台上两个会话开始处理之间至少隔几秒（0–60），几个名额不会同时起跑。', min: 0, max: 60 },
   { key: 'turn_timeout_seconds', label: '单个回合的时限（秒）', help: '一个回合最长跑多久（30–21600 秒）。', min: 30, max: 21600 },
   { key: 'send_per_hour', label: '每小时发送次数', help: '每个实例每小时最多发多少次指令（1–10000）。', min: 1, max: 10000 },
   { key: 'max_text_chars', label: '单条指令的字数上限', help: '一条指令最多多少个字符（1–1000000）。', min: 1, max: 1000000 },
 ] as const
 type Key = (typeof FIELDS)[number]['key']
-const form = reactive<Record<Key, string>>({ concurrency: '', turn_timeout_seconds: '', send_per_hour: '', max_text_chars: '' })
+const form = reactive<Record<Key, string>>({ concurrency: '', min_start_interval_seconds: '', turn_timeout_seconds: '', send_per_hour: '', max_text_chars: '' })
 const settings = computed(() => (props.status?.reachable ? props.status.settings ?? null : null))
 watch(settings, value => { if (value) for (const f of FIELDS) form[f.key] = String(value[f.key]) }, { immediate: true })
 

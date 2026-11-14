@@ -8,6 +8,7 @@ import { chatError, needsTakeover, newRequestId, ownerText, type LlmChatApi } fr
 import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
 import ChatInfoPanel from './ChatInfoPanel.vue'
+import ChatQueue from './ChatQueue.vue'
 
 // 中间一栏：一个会话的对话。父组件按“管理器 + 会话”给 key，换会话时整个重建。
 // 内容和进度（长轮询读事件）在 useLiveConversation 里。
@@ -69,6 +70,7 @@ async function submit() {
     }
     pending = null; draft.value = ''
     stick = true; sent(turn, text); emit('changed')
+    void props.chat.invalidateQueue(props.bridge.id, props.sessionId)
   } catch (e) {
     sendError.value = needsTakeover(e) ? '没有发送：接着别人建的会话发消息前需要确认。' : chatError(e)
   } finally { sending.value = false }
@@ -145,6 +147,7 @@ function archive() {
         </template>
       </div>
 
+      <ChatQueue v-if="session" :chat="chat" :bridge-id="bridge.id" :session-id="sessionId" :busy="!!activeTurn" @changed="poll()" />
       <form v-if="session" class="lc-composer" aria-label="发送消息" @submit.prevent="submit">
         <p v-if="blocked" class="lc-note" role="note">{{ blocked }}</p>
         <template v-else>
@@ -154,7 +157,7 @@ function archive() {
             <button v-if="activeTurn" type="button" class="secondary-button" :disabled="stopping" @click="stop"><Square aria-hidden="true" />{{ stopping ? '正在停止…' : '停止' }}</button>
             <button type="submit" class="primary-button" :disabled="sending || !draft.trim()"><Send aria-hidden="true" />{{ sending ? '正在发送…' : '发送' }}</button>
           </div>
-          <p v-if="activeTurn" class="lc-hint">上一条还没答完：现在发的会排在它后面。</p>
+          <p v-if="activeTurn" class="lc-hint">上一条还没答完：现在发的不会打断它，会进队列，等前面的做完再发给模型。</p>
         </template>
         <p v-if="sendError" class="lc-note is-red" role="alert">{{ sendError }}</p>
       </form>
