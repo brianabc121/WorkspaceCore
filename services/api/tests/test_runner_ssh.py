@@ -49,6 +49,11 @@ case "$1" in
       done
     fi
     if [ -f "$STATE/install_fail" ]; then echo "gvisor_sha512_mismatch" >&2; exit 5; fi
+    # 与 install-gvisor.sh 一样（T-0233）：要重启 Docker、有 MCP 管理器在运行、又没给允许时以 6 退出
+    echo "install.sh allow_docker_restart=${MW_ALLOW_DOCKER_RESTART:-}" >> "$FAKE_LOG"
+    if [ -f "$STATE/gvisor_managers" ] && [ "${MW_ALLOW_DOCKER_RESTART:-}" != 1 ]; then
+      echo "gvisor_needs_docker_restart $(cat "$STATE/gvisor_managers")" >&2; exit 6
+    fi
     touch "$STATE/up"; echo "runner_agent_started"; exit 0 ;;
 esac
 exec /bin/bash "$@"
@@ -398,6 +403,98 @@ async def test_failed_install_script_and_uninstall(owner: Owner, tmp_path: Path)
         )
         assert deleted.status_code == 204
         assert (await owner.state())["target"] is None
+
+
+async def test_gvisor_restart_under_mcp_managers_needs_the_owner_to_allow_it(
+    owner: Owner, tmp_path: Path
+) -> None:
+    """启用 gVisor 要重启 Docker、而服务器上有 MCP 管理器在运行（T-0233）：
+    任务停下并说明原因；owner 确认后带 allow_docker_restart 再部署，变量经 sudo 真的传到脚本里。"""
+    host = RunnerHost(tmp_path)
+    (host.state / "gvisor_managers").write_text("2")
+    async with ssh_host(host) as (port, _):
+        version = await owner.prepare(port)
+        failed = await _install(owner, host, {"version": version, "password": PASSWORD})
+        assert failed["job"]["status"] == "failed", failed["job"]
+        assert failed["job"]["error_code"] == "gvisor_needs_docker_restart"
+        message = failed["job"]["error_message"]
+        assert "有 2 个 MCP 管理器在运行" in message and "允许重启 Docker" in message
+        assert _steps(failed)["install"] == "failed" and _steps(failed)["online"] == "pending"
+        assert "gvisor_needs_docker_restart 2" in failed["job"]["log"]
+        assert "install.sh allow_docker_restart=" in host.calls()
+        assert not any(runner_ssh.RESTART_ENV in command for command in host.commands)
+        assert failed["target"]["installed_at"] is None
+
+        # 没有确认就重新部署：仍然停在这一步，不会重启
+        again = await _install(
+            owner, host, {"version": failed["target"]["version"], "password": PASSWORD}
+        )
+        assert again["job"]["error_code"] == "gvisor_needs_docker_restart"
+        assert "install.sh allow_docker_restart=1" not in host.calls()
+
+        ok = await _install(
+            owner,
+            host,
+            {
+                "version": again["target"]["version"],
+                "password": PASSWORD,
+                "allow_docker_restart": True,
+            },
+        )
+        assert ok["job"]["status"] == "succeeded", ok["job"]
+        assert _steps(ok) == {key: "done" for key in runner_ssh.STEPS}
+        calls = host.calls()
+        assert any(
+            c.startswith("sudo env MW_ALLOW_DOCKER_RESTART=1 bash ") and c.endswith("/install.sh")
+            for c in calls
+        )
+        assert calls.count("install.sh allow_docker_restart=1") == 1
+    # 审计记下这次部署允许了重启 Docker
+    allowed = await run_sql(
+        owner.database_url,
+        "SELECT string_agg(metadata_redacted_json->>'allow_docker_restart', ','"
+        " ORDER BY created_at) FROM workspace.audit_logs"
+        " WHERE action = 'runner.ssh.install_started'",
+    )
+    assert allowed == "false,false,true"
+
+
+async def test_root_account_passes_the_restart_permission_without_sudo(
+    owner: Owner, tmp_path: Path
+) -> None:
+    host = RunnerHost(tmp_path, uid="0", gid="0")
+    (host.state / "gvisor_managers").write_text("1")
+    async with ssh_host(host) as (port, _):
+        version = await owner.prepare(port)
+        failed = await _install(owner, host, {"version": version, "password": PASSWORD})
+        assert failed["job"]["error_code"] == "gvisor_needs_docker_restart"
+        assert "有 1 个 MCP 管理器在运行" in failed["job"]["error_message"]
+        # root 账号已经装了专用密钥：确认后不用再填密码
+        ok = await _install(
+            owner, host, {"version": failed["target"]["version"], "allow_docker_restart": True}
+        )
+        assert ok["job"]["status"] == "succeeded", ok["job"]
+        assert "install.sh allow_docker_restart=1" in host.calls()
+        assert not any(c.startswith("sudo ") for c in host.calls())
+        assert any(
+            command.startswith("env MW_ALLOW_DOCKER_RESTART=1 bash ") for command in host.commands
+        )
+
+
+async def test_install_body_is_strict_about_the_restart_permission(
+    owner: Owner, tmp_path: Path
+) -> None:
+    host = RunnerHost(tmp_path)
+    async with ssh_host(host) as (port, _):
+        version = await owner.prepare(port)
+        for extra in ({"allow_docker_restart": "maybe"}, {"allow_restart": True}):
+            response = await owner.client.post(
+                "/api/v1/runner/host/ssh/install",
+                json={"version": version, "password": PASSWORD, **extra},
+                headers=owner.headers(),
+            )
+            assert response.status_code == 422, response.text
+        assert host.logins == [] and (await owner.state())["job"] is None
 
 
 async def test_only_the_owner_deploys(owner: Owner, make_client: ClientFactory) -> None:

@@ -19,6 +19,13 @@ LABEL_WORKSPACE = "myworkspace.workspace"
 LABEL_TEMPLATE = "myworkspace.template"
 LABEL_ROLE = "myworkspace.role"
 LABEL_LIFETIME = "myworkspace.lifetime"
+# 工作台经 SSH 部署的 MCP 管理器（compose 项目 mw-mcp-<编号>）的容器、数据卷、网络带的标签。
+# 与 app/modules/llm_bridge/deploy_bundle.py 的 LABEL 相同（有测试核对）；runner-agent 随接入包
+# 分发、只用标准库，不能导入工作台的模块，所以在这里再写一遍。
+# 只用来在上报时把它们单独计数：runner-agent 只处理带 myworkspace.runner=1、名字是
+# mw-(env|vol|net)-… 的对象，管理器两样都不符合，本来就碰不到。不要反过来按这个标签“放行”——
+# 智能体自己写的模板镜像可以带任意标签，按它豁免就能躲开回收。
+LABEL_MCP_MANAGER = "myworkspace.mcp-manager"
 
 RUNTIMES = {"gvisor": "runsc", "runc": "runc", "kvm": "runc"}
 USERS = {"user": "1000:1000", "root": "0:0"}
@@ -260,6 +267,7 @@ __all__ = [
     "LABEL_ENV",
     "LABEL_FIXED_SUBNET",
     "LABEL_LIFETIME",
+    "LABEL_MCP_MANAGER",
     "LABEL_ROLE",
     "LABEL_RUNNER",
     "LABEL_TEMPLATE",
