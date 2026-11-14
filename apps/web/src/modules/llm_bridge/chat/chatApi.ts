@@ -17,6 +17,14 @@ export type ChatOptions = Schema['LlmChatOptionsOut']
 export type ChatCreateBody = Schema['LlmChatCreateIn']
 export type ChatTurn = Schema['LlmChatTurnOut']
 export type SessionFilter = { q: string; platform: Platform | null; status: 'active' | 'archived' }
+export type ChatGroup = Schema['LlmChatGroupOut']
+export type ChatGroupMember = Schema['LlmChatGroupMemberOut']
+export type ChatTarget = Schema['LlmChatTargetIn']
+export type ChatGroupResult = Schema['LlmChatGroupResult']
+/** 整组刚发出的那一条在某一栏的结果：回合，或者没发出去的原因 */
+export interface ColumnSend { id: number; text: string; turn: ChatTurn | null; error: string }
+/** 一组同问最少、最多几个目标（后端同样校验） */
+export const GROUP_TARGETS = { min: 2, max: 6 }
 
 export const EVENT_WAIT_SECONDS = 20
 /** 回合已经结束的事件：收到后重新读会话内容 */
@@ -53,6 +61,33 @@ export function useLlmChat(scope: string) {
       queryKey: computed(() => key(bridge.value, 'options', platform.value, mode.value)), enabled: computed(() => active() && !!bridge.value && !!platform.value),
       queryFn: async ({ signal }) => dataOf(await auth.slowApi.GET('/api/v1/llm_bridge/bridges/{bridge_id}/chat/options', { params: { ...at(bridge.value!), query: { platform: platform.value!, mode: mode.value } }, signal })),
     }),
+    // 多模型同问（docs/v2/LLM_CHAT_PLAN.md 第 4.3 节）：分组登记在工作台，可以跨管理器
+    useGroups: (status: Ref<'active' | 'archived'>, wanted: Ref<boolean>) => useQuery({
+      queryKey: computed(() => key('groups', 'list', status.value)), enabled: computed(() => active() && wanted.value), refetchInterval: 30000,
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/chat/groups', { params: { header, query: { status: status.value } }, signal })).groups,
+    }),
+    useGroup: (id: Ref<string | null>) => useQuery({
+      queryKey: computed(() => key('groups', 'one', id.value)), enabled: computed(() => active() && !!id.value),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/chat/groups/{group_id}', { params: { header, path: { group_id: id.value! } }, signal })),
+    }),
+    async createGroup(body: Schema['LlmChatGroupCreateIn']) {
+      const out = dataOf(await auth.slowApi.POST('/api/v1/llm_bridge/chat/groups', { params: { header }, body }))
+      cache.setQueryData(key('groups', 'one', out.group.id), out.group)
+      await cache.invalidateQueries({ queryKey: key('groups', 'list') })
+      return out
+    },
+    async sendGroup(id: string, body: Schema['LlmChatGroupSendIn']) {
+      const out = dataOf(await auth.slowApi.POST('/api/v1/llm_bridge/chat/groups/{group_id}/messages', { params: { header, path: { group_id: id } }, body }))
+      cache.setQueryData(key('groups', 'one', id), out.group)
+      void cache.invalidateQueries({ queryKey: key('groups', 'list') })
+      return out
+    },
+    async archiveGroup(id: string) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/chat/groups/{group_id}/archive', { params: { header, path: { group_id: id } } }))
+      cache.setQueryData(key('groups', 'one', id), out)
+      await cache.invalidateQueries({ queryKey: key('groups', 'list') })
+      return out
+    },
     invalidateSessions: (bridge: string) => cache.invalidateQueries({ queryKey: key(bridge, 'sessions') }),
     invalidateConversation: (bridge: string, session: string) => cache.invalidateQueries({ queryKey: key(bridge, 'session', session) }),
 
@@ -120,6 +155,9 @@ export function ownerText(session: Pick<ChatSession, 'owner_kind' | 'owner'>): s
   if (session.owner_kind === 'external') return '官方程序里已有'
   return session.owner || (session.owner_kind === 'agent' ? '智能体' : '别的管理员')
 }
+
+/** 列表和各处用的平台标记（两个字母以内） */
+export const PLATFORM_MARK: Record<string, string> = { chatgpt: 'G', codex: 'Cx', claude: 'Cl', workbuddy: 'W' }
 
 /** 把回答按三个反引号拆成普通文字和代码块：只做这一种格式，其余按纯文字显示（不渲染 HTML） */
 export function splitText(text: string): { code: boolean; text: string }[] {

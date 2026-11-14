@@ -132,6 +132,38 @@
 .lc-choice strong { font-size: .9rem; }
 .lc-choice small { color: var(--muted); font-size: .76rem; overflow-wrap: anywhere; }
 
+/* ---- 多模型同问：每个模型一栏 ---- */
+.lc-compare-link { grid-column: 1 / -1; justify-self: start; font-size: .82rem; }
+.lc-compare-link svg { width: 14px; height: 14px; }
+.lc-mark.is-group { background: var(--accent); color: var(--accent-text); }
+.lc-compare { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.lc-compare > .data-state { padding: 24px 16px; }
+.lc-cols { flex: 1; min-height: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(280px, 1fr); gap: 12px; padding: 12px; overflow-x: auto; }
+.lc-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.lc-col-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.lc-col-title { flex: 1; min-width: 0; display: grid; }
+.lc-col-title strong { font-size: .9rem; }
+.lc-col-title span { color: var(--muted); font-size: .74rem; overflow-wrap: anywhere; }
+.lc-tag[data-status="running"] { background: var(--accent-soft); color: var(--accent); }
+.lc-col-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; display: grid; align-content: start; gap: 10px; }
+.lc-col .lc-bubble, .lc-col .lc-steps, .lc-col .lc-failure { max-width: 100%; }
+.lc-col-foot { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: .82rem; }
+.lc-col-tabs { display: flex; gap: 6px; padding: 8px 12px 0; overflow-x: auto; }
+.lc-col-tabs button { flex: none; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: .8rem; cursor: pointer; white-space: nowrap; }
+.lc-col-tabs button[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.lc-app.is-narrow .lc-cols { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); overflow-x: visible; }
+.lc-field-label { font-size: .85rem; font-weight: 600; }
+.lc-targets { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.lc-target { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 2px 4px 2px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); font-size: .84rem; overflow-wrap: anywhere; }
+.lc-target .lc-icon { width: 28px; height: 28px; }
+.lc-target .lc-icon svg { width: 14px; height: 14px; }
+.lc-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 0 12px; align-items: start; min-width: 0; margin: 6px 0 0; padding: 4px 12px 12px; border: 1px dashed var(--line); border-radius: 10px; }
+.lc-picker legend { padding: 0 6px; font-size: .85rem; font-weight: 600; }
+.lc-picker .form-field { margin: 8px 0; }
+.lc-picker-foot { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.lc-picker-foot button { display: inline-flex; align-items: center; gap: 6px; }
+.lc-picker-foot button svg { width: 15px; height: 15px; }
+
 /* 不够宽时会话信息盖在对话上面；手机宽度下整块再矮一些，给底部导航留位置 */
 @media (max-width: 1279px) {
   .lc-chat.has-info { grid-template-columns: minmax(0, 1fr); }

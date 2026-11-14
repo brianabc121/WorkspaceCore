@@ -577,6 +577,8 @@ OpenClaw 服务器改用保存的加密登录密码（`docs/decisions/2026-11-09
 |---|---|---|
 | `llm_bridge_bridges` | `id`、`workspace_id`（级联删除）、`name`、`base_url`、`token_ref`、`enabled`、时间戳 | 工作空间登记的会话桥。唯一 `(workspace_id, name)`。`token_ref` 是 `enc:v1:` 密文引用（用途 `llm_bridge:<工作空间>:<桥>:token`），纳入密钥轮换 |
 | `llm_bridge_grants` | `instance_id`（主键，级联删除）、`workspace_id`（级联删除）、`enabled`、`can_write`、`can_account`、`can_takeover`、`platforms`（JSONB 列表，空 = 全部）、`bridge_ids`（JSONB 列表，可空）、`updated_at` | 每个实例的“大模型会话权限”。没有这一行等于没有授权。`bridge_ids`（迁移 0068）是允许用的 MCP 管理器（`llm_bridge_bridges.id`）：NULL = 全部（包括以后添加的），空列表 = 一个都不能用；删除一个管理器时把它从各行的列表里去掉（列表可能变空，不会变回 NULL）。downgrade 0068 删掉这一列 |
+| `llm_bridge_chat_groups` | `id`、`workspace_id`（级联删除）、`title`、`created_by`（用户被删除后置空）、`created_by_name`、`request_id`、`status`（`active` / `archived`）、时间戳 | 聊天页的“多模型同问”分组（迁移 0069，T-0232）。唯一 `(workspace_id, created_by, request_id)`：同一个人用同一个幂等号再建一次得到的是同一组。索引 `(workspace_id, status, updated_at)` |
+| `llm_bridge_chat_group_members` | `id`、`group_id`（级联删除）、`position`、`bridge_id`（会话桥的登记被删除后置空）、`bridge_name`、`platform`、`mode`、`model`、`session_id`（会话桥上的会话编号；没建成时为空）、`error` | 一组同问里的每个目标（迁移 0069）。唯一 `(group_id, position)`。只存“哪座桥上的哪个会话”，不存消息内容 |
 
 会话、回合、事件、各平台的登录状态不在工作台的数据库里，在会话桥自己数据卷的 SQLite（`services/llm-bridge/bridge/store.py`）。
 **downgrade** 删掉这两张表。

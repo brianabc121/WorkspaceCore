@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -164,3 +166,81 @@ class LlmChatSendIn(_In):
 
 class LlmChatRenameIn(_In):
     title: str = Field(min_length=1, max_length=120)
+
+
+# ---- 多模型同问（docs/v2/LLM_CHAT_PLAN.md 第 4.3 节）----
+MAX_GROUP_TARGETS = 6
+
+
+class LlmChatTargetIn(_In):
+    bridge_id: UUID = Field(description="用哪个 MCP 管理器（它上面登录的账号）")
+    platform: Platform
+    mode: Literal["chat", "dev"] = "chat"
+    model: str | None = Field(default=None, max_length=100)
+    effort: str | None = Field(default=None, max_length=20)
+    environment: str | None = Field(
+        default=None, pattern=r"^be_[0-9a-f]{20}$", description="开发会话必填"
+    )
+
+
+class LlmChatGroupCreateIn(_In):
+    title: str = Field(default="", max_length=120, description="不填时取问题的开头")
+    text: str = Field(min_length=1, max_length=100_000, description="同时发给每个目标的问题")
+    request_id: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=_REQUEST_ID,
+        description="幂等号：用同一个再建一次，得到的是同一组",
+    )
+    targets: list[LlmChatTargetIn] = Field(
+        min_length=2, max_length=MAX_GROUP_TARGETS, description="2 ~ 6 个目标，可以跨 MCP 管理器"
+    )
+
+
+class LlmChatGroupMemberOut(BaseModel):
+    position: int
+    bridge_id: UUID | None = Field(description="MCP 管理器；它的登记被删除后为空")
+    bridge_name: str
+    bridge_enabled: bool = Field(description="管理器还在并且启用着")
+    platform: str
+    mode: str
+    model: str | None
+    session_id: str | None = Field(description="这个目标的会话；没建成时为空，原因在 error")
+    error: str = Field(default="", description="会话没建成、或第一条消息没发出去的原因")
+
+
+class LlmChatGroupOut(BaseModel):
+    id: UUID
+    title: str
+    status: str = Field(description="active / archived")
+    owner: str | None = Field(description="谁建的（显示名）")
+    owner_kind: Literal["me", "user"]
+    members: list[LlmChatGroupMemberOut]
+    created_at: datetime
+    updated_at: datetime
+
+
+class LlmChatGroupList(BaseModel):
+    groups: list[LlmChatGroupOut]
+
+
+class LlmChatGroupResult(BaseModel):
+    position: int
+    turn: LlmChatTurnOut | None = None
+    error: str = Field(default="", description="这一个没发出去的原因")
+
+
+class LlmChatGroupSentOut(BaseModel):
+    group: LlmChatGroupOut
+    results: list[LlmChatGroupResult]
+
+
+class LlmChatGroupSendIn(_In):
+    text: str = Field(min_length=1, max_length=100_000)
+    request_id: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=_REQUEST_ID,
+        description="幂等号：重试用同一个，每个会话都不会重复发送",
+    )
+    takeover: bool = Field(default=False, description="不是自己建的一组要为 true（页面先让人确认）")
