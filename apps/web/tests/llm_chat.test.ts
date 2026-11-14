@@ -29,8 +29,8 @@ const bridge = (over: Partial<Bridge> = {}): Bridge => ({ id: ONE, name: '主账
 const account = (slot: string, state: string): Schema['LlmBridgeAccountOut'] => ({ slot, label: slot, enabled: true, state, registered: state === 'logged_in', identity: null, method: null, detail: '', first_login_at: null, login_methods: ['existing'], running: 0 })
 const channel = (platform: string, mode: string, slot: string, over: Partial<Schema['LlmBridgeChannelOut']> = {}): Schema['LlmBridgeChannelOut'] => ({ platform, mode, slot, enabled: true, available: true, note: '', ...over })
 const status = (): Schema['LlmBridgeStatusOut'] => ({
-  reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 0, running: 0, load: {},
-  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
+  reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 0, running: 0, load: {}, quota: {},
+  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
   accounts: [account('openai', 'logged_in'), account('claude', 'logged_in'), account('workbuddy', 'logged_out')],
   channels: [channel('chatgpt', 'chat', 'openai'), channel('codex', 'dev', 'openai'), channel('claude', 'chat', 'claude'), channel('claude', 'dev', 'claude'), channel('claude', 'cloud', 'claude', { available: false }), channel('workbuddy', 'chat', 'workbuddy')],
 })
@@ -368,6 +368,42 @@ describe('大模型聊天', () => {
     expect(await screen.findByText('这一回合失败了：平台限流了，稍后再试')).toBeVisible()
     expect(screen.getByText('写到一半')).toBeVisible()
     expect(screen.getByText('这一回合的结果未知：超时，结果未知')).toBeVisible()
+  })
+
+  it('shows a turn the quota interrupted, when it continues, and lets it be retried now or left alone', async () => {
+    const at = now() + 3600
+    const interrupted = (state: string) => talk({}, [
+      asked('跑一个长任务'), answered('做到一半', T1, { status: 'interrupted', failure: { kind: 'quota_exceeded', message: '额度用完' }, resume: { state, at, attempt: 0, resumed_by: null } }),
+    ])
+    const { requests, world } = setup('owner', { conversations: { [S1]: interrupted('pending') } }, (r, w) => {
+      if (path(r) !== `${chatOf(ONE)}/turns/${T1}/resume`) return undefined
+      const state = r.method === 'DELETE' ? 'cancelled' : 'forced'
+      w.conversations[S1] = interrupted(state)
+      return Response.json({ turn_id: T1, session_id: S1, status: 'interrupted', resume: { state, at, attempt: 0, resumed_by: null } })
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    expect(await screen.findByText(/额度用完，这一回合中断了。.+自动继续。/)).toBeVisible()
+    expect(screen.getByText('做到一半')).toBeVisible()
+    expect(screen.getByText('已中断')).toBeVisible()
+    expect(screen.queryByText(/这一回合失败了/)).not.toBeInTheDocument()
+
+    await fireEvent.click(screen.getByRole('button', { name: '不要自动继续' }))
+    expect(await screen.findByText('额度用完，这一回合中断了。已设成不自动继续。')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '不要自动继续' })).not.toBeInTheDocument()
+    expect(writes(requests).map(r => r.method)).toEqual(['DELETE'])
+
+    // 现在就试：系统替人发的那句话稍后出现在下面
+    await fireEvent.click(await screen.findByRole('button', { name: '现在就试' }))
+    expect(await screen.findByText('额度用完，这一回合中断了。正在试着继续…')).toBeVisible()
+    world.conversations[S1] = talk({}, [
+      asked('跑一个长任务'), answered('做到一半', T1, { status: 'interrupted', resume: { state: 'done', at, attempt: 0, resumed_by: T2 } }),
+      asked('继续意外中断的任务', T2, { by: '系统（自动续跑）', mine: false }), answered('接着做完了', T2),
+    ])
+    expect(await screen.findByText('接着做完了', {}, { timeout: 5000 })).toBeVisible()
+    expect(screen.getByText('系统（自动续跑）')).toBeVisible()
+    expect(screen.getByText('额度用完，这一回合中断了；已经在下面自动继续。')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '现在就试' })).not.toBeInTheDocument()
+    expect(writes(requests).map(r => r.method)).toEqual(['DELETE', 'POST'])
   })
 
   it('creates a session: only logged-in platforms, a development session needs an environment', async () => {

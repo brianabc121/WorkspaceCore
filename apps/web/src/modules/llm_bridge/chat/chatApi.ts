@@ -30,8 +30,8 @@ export const GROUP_TARGETS = { min: 2, max: 6 }
 
 export const EVENT_WAIT_SECONDS = 20
 /** 回合已经结束的事件：收到后重新读会话内容 */
-export const TERMINAL_EVENTS = ['completed', 'failed', 'cancelled', 'unknown']
-export const TURN_STATUS: Record<string, string> = { queued: '排队中', running: '正在回答', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '结果未知' }
+export const TERMINAL_EVENTS = ['completed', 'failed', 'cancelled', 'unknown', 'interrupted']
+export const TURN_STATUS: Record<string, string> = { queued: '排队中', running: '正在回答', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '结果未知', interrupted: '额度用完，已中断' }
 /** 发送用的幂等号。页面不是 HTTPS 时浏览器不给 randomUUID，退回到随机字节 */
 export function newRequestId() {
   if (typeof crypto.randomUUID === 'function') return `web-${crypto.randomUUID()}`
@@ -128,6 +128,12 @@ export function useLlmChat(scope: string) {
       return out
     },
     invalidateQueue: (bridge: string, session: string) => cache.invalidateQueries({ queryKey: key(bridge, 'queue', session) }),
+    // 被额度打断的回合：现在就试着继续（now），或者不要自动继续
+    async resume(bridge: string, turn: string, now: boolean) {
+      const params = { header, path: { bridge_id: bridge, turn_id: turn } }
+      const path = '/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/resume'
+      return dataOf(now ? await auth.api.POST(path, { params }) : await auth.api.DELETE(path, { params }))
+    },
     async cancel(bridge: string, turn: string) {
       return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/cancel', { params: { header, path: { bridge_id: bridge, turn_id: turn } } }))
     },

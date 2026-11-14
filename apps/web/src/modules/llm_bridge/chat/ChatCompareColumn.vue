@@ -16,7 +16,7 @@ const bridgeId = computed(() => props.member.bridge_id ?? null)
 const sessionId = computed(() => (props.member.bridge_id ? props.member.session_id ?? null : null))
 const box = ref<HTMLElement | null>(null)
 const scrollDown = () => { void nextTick(() => { const el = box.value; if (el) el.scrollTop = el.scrollHeight }) }
-const { conversation, session, messages, lost, activeTurn, poll, sent } = useLiveConversation(props.chat, bridgeId, sessionId, { activity: scrollDown })
+const { conversation, session, messages, lost, activeTurn, poll, sent, resume, resuming, resumeError } = useLiveConversation(props.chat, bridgeId, sessionId, { activity: scrollDown })
 
 const sendProblem = ref('')
 watch(() => props.latest?.id, () => {
@@ -67,8 +67,9 @@ async function copy() {
       <template v-else>
         <p v-if="member.error" class="lc-note is-red" role="alert">{{ member.error }}</p>
         <ol class="lc-messages" :aria-label="`${name}的消息`">
-          <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? i}:${m.role}`" :message="m" :platform="name" />
+          <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? i}:${m.role}`" :message="m" :platform="name" :resuming="resuming" @resume="resume" />
         </ol>
+        <p v-if="resumeError" class="lc-note is-red" role="alert">{{ resumeError }}</p>
         <p v-if="lost" class="lc-note is-red" role="alert">{{ lost }} <button type="button" class="asv-link" @click="poll()">重试</button></p>
       </template>
       <p v-if="sendProblem" class="lc-note is-red" role="alert">这一个没有发出去：{{ sendProblem }}</p>

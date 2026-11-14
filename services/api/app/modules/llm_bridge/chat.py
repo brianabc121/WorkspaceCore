@@ -85,6 +85,7 @@ def _turn_out(data: dict[str, Any]) -> LlmChatTurnOut:
         session_id=data["session_id"],
         status=data["status"],
         ahead_in_session=data.get("ahead_in_session"),
+        resume=data.get("resume"),
     )
 
 
@@ -202,6 +203,7 @@ class LlmChatService:
                     steps=item.get("steps") or [],
                     failure=item.get("failure"),
                     ahead_in_session=item.get("ahead_in_session"),
+                    resume=item.get("resume"),
                 )
             )
         return LlmChatConversationOut(
@@ -379,6 +381,23 @@ class LlmChatService:
         )
         await self.db.commit()
         return _queue_out(data, me)
+
+    async def resume(
+        self, access: WorkspaceAccess, row: LlmBridge, turn_id: str, *, now: bool
+    ) -> LlmChatTurnOut:
+        """被额度打断的回合：现在就试着继续（now），或者不要自动继续。"""
+        client = await self.bridges.client(row)
+        bridge_id, bridge_name = row.id, row.name
+        await self.db.commit()
+        data = await self._admin(client, "POST" if now else "DELETE", f"/turns/{turn_id}/resume")
+        await self.bridges.audit(
+            access,
+            "chat_resume_now" if now else "chat_resume_cancelled",
+            bridge_id,
+            {"bridge": bridge_name, "session": data.get("session_id"), "turn": turn_id},
+        )
+        await self.db.commit()
+        return _turn_out(data)
 
     async def rename(
         self, access: WorkspaceAccess, row: LlmBridge, session_id: str, title: str

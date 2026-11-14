@@ -3,6 +3,7 @@ import { computed, onUnmounted, reactive, ref } from 'vue'
 import { RefreshCw } from '@lucide/vue'
 import ManagementSection from '../../components/management/ManagementSection.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
+import BridgeQuota from './BridgeQuota.vue'
 import { ApiError } from '../../services/api'
 import { ACCOUNT_STATE, METHODS, MODES, PLATFORMS, PLATFORM_SLOT, bridgeError, methodName, platformName, seconds, type Account, type Bridge, type BridgeStatus, type LlmBridgeApi, type LoginBody, type LoginMethod, type Platform, type Slot } from './api'
 
@@ -157,6 +158,8 @@ function reset(account: Account) {
         <span v-for="(load, platform) in status.load" :key="platform" class="mg-tag" :class="{ 'is-full': load.running >= load.limit }">{{ platformName(String(platform)) }}：{{ load.running }} / {{ load.limit }} 个会话在跑<template v-if="load.waiting">，{{ load.waiting }} 个在等</template></span>
         <span v-if="status.version" class="mg-tag">版本 {{ status.version }}</span>
       </div>
+
+      <BridgeQuota :api="api" :bridge="bridge" :status="status" />
 
       <div v-if="device" class="lb-code" role="region" aria-label="设备码登录">
         <p>正在登录「{{ device.label }}」：在你自己的浏览器里打开下面的网址，输入验证码。完成后这里会自动更新。</p>

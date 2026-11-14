@@ -25,7 +25,7 @@ function scrollDown(force = false) {
   if (force) stick = true
   void nextTick(() => { const el = box.value; if (el && stick) el.scrollTop = el.scrollHeight })
 }
-const { conversation, session, messages, lost, activeTurn, poll, sent } = useLiveConversation(
+const { conversation, session, messages, lost, activeTurn, poll, sent, resume, resuming, resumeError } = useLiveConversation(
   props.chat, bridgeId, toRef(props, 'sessionId'), { activity: () => scrollDown(), changed: () => emit('changed') },
 )
 
@@ -141,8 +141,9 @@ function archive() {
         <template v-else-if="session">
           <p v-if="!messages.length" class="lc-none">这个会话里还没有消息。</p>
           <ol v-else class="lc-messages" aria-label="消息">
-            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? i}:${m.role}`" :message="m" :platform="platformName(session.platform)" />
+            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? i}:${m.role}`" :message="m" :platform="platformName(session.platform)" :resuming="resuming" @resume="resume" />
           </ol>
+          <p v-if="resumeError" class="lc-note is-red" role="alert">{{ resumeError }}</p>
           <p v-if="lost" class="lc-note is-red" role="alert">{{ lost }} <button type="button" class="asv-link" @click="poll()">重试</button></p>
         </template>
       </div>

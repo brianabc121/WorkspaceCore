@@ -188,3 +188,9 @@
 .lc-queue-meta { margin: 4px 0 0; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
 .lc-queue-edit { display: grid; gap: 6px; grid-template-columns: 1fr auto auto; align-items: end; }
 .lc-queue-edit textarea { grid-column: 1 / -1; width: 100%; resize: vertical; }
+
+/* 额度用完被打断的回合（T-0237） */
+.lc-interrupted { display: grid; gap: 6px; max-width: min(100%, 720px); padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--warning) 10%, var(--surface)); font-size: .84rem; overflow-wrap: anywhere; }
+.lc-interrupted p { margin: 0; }
+.lc-interrupted-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.lc-col .lc-interrupted { max-width: 100%; }

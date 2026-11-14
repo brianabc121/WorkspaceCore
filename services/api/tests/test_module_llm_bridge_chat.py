@@ -5,6 +5,7 @@
 浏览器的请求 → 工作台接口（角色、接手确认、审计）→ 会话桥（会话归属、事件）→ 驱动。
 """
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -401,3 +402,88 @@ async def test_chat_roles(rig: Rig) -> None:  # noqa: F811
     # 别的工作空间的管理器编号：404
     stranger = await rig.api("GET", f"/bridges/{uuid.uuid4()}/chat/sessions")
     assert stranger.status_code == 404
+
+
+async def test_chat_quota_interruption_and_resume(rig: Rig) -> None:  # noqa: F811
+    """额度用完：回合记成中断，页面看得到额度、重置时间和“什么时候自动继续”；能取消，也能现在就试。"""
+    import time
+
+    engine = rig.bridge_app.state.engine
+    fake = engine.drivers["claude"]
+    until = time.time() + 3600
+    fake.quota_until = until
+    created = await new_chat(rig, "跑一个长任务")
+    session_id, turn_id = created["session"]["session_id"], created["turn"]["turn_id"]
+    await wait_idle(rig, session_id)
+    view = (await rig.api("GET", chat(rig, f"/sessions/{session_id}"))).json()
+    reply = view["messages"][-1]
+    assert reply["status"] == "interrupted" and reply["failure"]["kind"] == "quota_exceeded"
+    assert reply["resume"]["state"] == "pending" and reply["resume"]["at"] >= until
+
+    # 状态和额度接口：窗口、已用百分比、重置时间、暂停到什么时候、有几个会话在等
+    status = (await rig.api("GET", f"/bridges/{rig.bridge_id}/status")).json()
+    quota = (await rig.api("GET", f"/bridges/{rig.bridge_id}/quota")).json()["platforms"]
+    assert status["quota"]["claude"] == quota["claude"]
+    claude = quota["claude"]
+    assert claude["paused_until"] >= until and claude["pause_estimated"] is False
+    assert claude["waiting_resume"] == 1 and claude["can_refresh"] is False
+    (window,) = claude["windows"]
+    assert (window["kind"], window["status"], window["used_percent"]) == (
+        "five_hour",
+        "exceeded",
+        100,
+    )
+    assert window["resets_at"] == pytest.approx(until) and window["reset_passed"] is False
+    refreshed = await rig.api("GET", f"/bridges/{rig.bridge_id}/quota", params={"refresh": "true"})
+    assert refreshed.status_code == 200 and "claude" in refreshed.json()["platforms"]
+
+    # 设置里有三项，能改；发的那句话不能是空的
+    assert status["settings"]["auto_resume"] is True and status["settings"]["auto_resume_max"] == 3
+    assert status["settings"]["resume_text"] == "继续意外中断的任务"
+    saved = await rig.api(
+        "PUT",
+        f"/bridges/{rig.bridge_id}/settings",
+        json={"auto_resume_max": 5, "resume_text": "接着做刚才的任务"},
+    )
+    assert saved.status_code == 200, saved.text
+    assert (saved.json()["auto_resume_max"], saved.json()["resume_text"]) == (5, "接着做刚才的任务")
+    empty = await rig.api("PUT", f"/bridges/{rig.bridge_id}/settings", json={"resume_text": ""})
+    assert empty.status_code == 422
+
+    # 不要自动继续 → 现在就试（额度已经恢复）：系统替人发那句话，回合完成
+    cancelled = await rig.api("DELETE", chat(rig, f"/turns/{turn_id}/resume"))
+    assert cancelled.status_code == 200 and cancelled.json()["resume"]["state"] == "cancelled"
+    fake.quota_until = 0
+    forced = await rig.api("POST", chat(rig, f"/turns/{turn_id}/resume"))
+    assert forced.status_code == 200 and forced.json()["resume"]["state"] == "forced", forced.text
+    for _ in range(100):
+        view = (await rig.api("GET", chat(rig, f"/sessions/{session_id}"))).json()
+        if view["messages"][-1]["status"] == "completed":
+            break
+        await asyncio.sleep(0.1)
+    asked = [(m["text"], m["by"]) for m in view["messages"] if m["role"] == "user"]
+    assert [text for text, _ in asked] == ["跑一个长任务", "接着做刚才的任务"], view["messages"]
+    assert asked[1][1] == "系统（自动续跑）" and asked[0][1] != asked[1][1]
+    interrupted = next(m for m in view["messages"] if m.get("status") == "interrupted")
+    assert interrupted["resume"]["state"] == "done" and interrupted["resume"]["resumed_by"]
+    again = await rig.api("POST", chat(rig, f"/turns/{turn_id}/resume"))
+    assert again.status_code == 409, again.text
+    assert (
+        await rig.api("POST", chat(rig, "/turns/bt_" + "0" * 20 + "/resume"))
+    ).status_code == 404
+
+    # 只有管理员能操作；审计记了动作
+    async with login_as(rig, "quota-member@example.com", "member") as member:
+        denied = await member.post(
+            f"/api/v1/llm_bridge{chat(rig, f'/turns/{turn_id}/resume')}",
+            headers={"X-Workspace-Id": rig.env.workspace_id, **csrf(member)},
+        )
+        assert denied.status_code == 403
+    from tests.helpers import run_sql
+
+    actions = await run_sql(
+        rig.env.database_url,
+        "SELECT string_agg(action, ',') FROM workspace.audit_logs WHERE action LIKE $1",
+        "llm_bridge.chat_resume_%",
+    )
+    assert "llm_bridge.chat_resume_now" in actions and "llm_bridge.chat_resume_cancelled" in actions

@@ -157,6 +157,34 @@ async def llm_chat_cancel_turn(
     return await LlmChatService(bridges).cancel(access, row, turn_id)
 
 
+@router.post(
+    f"{prefix}/turns/{{turn_id}}/resume",
+    summary="聊天：被额度打断的回合，现在就试着继续（admin）",
+    description="不等重置时间；“自动继续”关着或自动续的次数用完时也用它。"
+    "不是被额度打断的、已经续跑过的 409。",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_resume_now(
+    access: Admin, bridges: Bridges, bridge_id: UUID, turn_id: TurnId
+) -> LlmChatTurnOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).resume(access, row, turn_id, now=True)
+
+
+@router.delete(
+    f"{prefix}/turns/{{turn_id}}/resume",
+    summary="聊天：被额度打断的回合，不要自动继续（admin）",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_resume_cancel(
+    access: Admin, bridges: Bridges, bridge_id: UUID, turn_id: TurnId
+) -> LlmChatTurnOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).resume(access, row, turn_id, now=False)
+
+
 @router.get(
     f"{prefix}/sessions/{{session_id}}/queue",
     summary="聊天：一个会话的消息队列（admin）",

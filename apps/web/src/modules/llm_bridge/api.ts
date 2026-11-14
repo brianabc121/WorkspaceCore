@@ -14,6 +14,8 @@ export type Bridge = Schema['LlmBridgeOut']
 export type BridgeStatus = Schema['LlmBridgeStatusOut']
 export type Account = Schema['LlmBridgeAccountOut']
 export type BridgeSettings = Schema['LlmBridgeSettings']
+export type Quota = Schema['LlmBridgeQuotaOut']
+export type QuotaWindow = Schema['LlmBridgeQuotaWindowOut']
 export type SettingsPatch = Schema['LlmBridgeSettingsPatch']
 export type LoginBody = Schema['LlmBridgeLoginIn']
 export type LoginMethod = LoginBody['method']
@@ -91,6 +93,16 @@ export const statusName = (id: string) => STATUS[id] ?? id
 const ORIGIN: Record<string, string> = { bridge: '经 MCP 管理器新建', external: '官方程序里已有' }
 export const originName = (id: string) => ORIGIN[id] ?? id
 /** 会话桥给的时间是秒（浮点数） */
+/** 额度窗口的名字：平台给的别的名字原样显示 */
+const QUOTA_KIND: Record<string, string> = { five_hour: '5 小时额度', weekly: '每周额度', weekly_opus: '每周额度（Opus）', weekly_sonnet: '每周额度（Sonnet）' }
+export const quotaKind = (kind: string) => QUOTA_KIND[kind] ?? kind
+/** 一个窗口用了多少：平台只给已用百分比，剩余是 100 减出来的 */
+export function quotaUsage(w: QuotaWindow) {
+  if (w.reset_passed) return '已过重置时间，等下一次回合确认'
+  if (w.used_percent == null) return w.status === 'exceeded' ? '已用完' : '平台没有给出用量'
+  const used = Math.min(100, Math.max(0, Math.round(w.used_percent)))
+  return `已用 ${used}%，剩余 ${100 - used}%`
+}
 export const seconds = (value: number | null | undefined) => (value ? formatTime(new Date(value * 1000).toISOString()) : '—')
 
 // 工作台自己写的说明；会话桥返回的错误（CONFLICT 等）带的是会话桥写的中文说明，按纯文字显示
@@ -183,6 +195,11 @@ export function useLlmBridge(scope: string) {
     },
     async saveSettings(id: string, body: SettingsPatch) {
       const out = dataOf(await auth.api.PUT('/api/v1/llm_bridge/bridges/{bridge_id}/settings', { params: at(id), body }))
+      await invalidate('bridge', id, 'status'); return out
+    },
+    // 向能随时查的平台（Codex）实查一次额度，再重新读状态
+    async refreshQuota(id: string) {
+      const out = dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/quota', { params: { ...at(id), query: { refresh: true } } }))
       await invalidate('bridge', id, 'status'); return out
     },
     // 同步官方程序里的会话：会话桥要去读官方程序的记录，比普通请求慢

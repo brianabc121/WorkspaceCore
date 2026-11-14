@@ -51,6 +51,19 @@ class LlmChatStepOut(BaseModel):
     at: float | None = None
 
 
+class LlmChatResumeOut(BaseModel):
+    """额度用完被打断后的自动续跑（docs/v2/LLM_BRIDGE_QUOTA_PLAN.md 第 3 节）。"""
+
+    state: str | None = Field(
+        description="pending：到点自动继续；forced：有人点了现在就试；done：已经续跑；"
+        "cancelled：有人说不要自动继续；skipped：到点时没有发（开关关着、会话已归档等）；"
+        "exhausted：自动续的次数用完了"
+    )
+    at: float | None = Field(description="打算什么时候继续（时间戳）")
+    attempt: int = Field(default=0, description="这是第几次自动续跑的回合（0 = 人发的）")
+    resumed_by: str | None = Field(default=None, description="续跑它的那个回合")
+
+
 class LlmChatMessageOut(BaseModel):
     role: str = Field(description="user / assistant")
     turn_id: str | None = None
@@ -61,13 +74,16 @@ class LlmChatMessageOut(BaseModel):
     status: str | None = Field(
         default=None,
         description="回答所在回合的状态："
-        "queued / running / completed / failed / cancelled / unknown",
+        "queued / running / completed / failed / cancelled / unknown / interrupted",
     )
     steps: list[LlmChatStepOut] = Field(
         default=[], description="过程：中间说的话、命令、改动的文件"
     )
     failure: dict[str, Any] | None = None
     ahead_in_session: int | None = Field(default=None, description="排队时前面还有几条")
+    resume: LlmChatResumeOut | None = Field(
+        default=None, description="被额度打断的回合（status=interrupted）：什么时候自动继续"
+    )
 
 
 class LlmChatConversationOut(BaseModel):
@@ -116,6 +132,7 @@ class LlmChatTurnOut(BaseModel):
     session_id: str
     status: str
     ahead_in_session: int | None = None
+    resume: LlmChatResumeOut | None = None
 
 
 class LlmChatCreateIn(_In):

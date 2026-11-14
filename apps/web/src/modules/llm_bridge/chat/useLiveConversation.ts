@@ -95,5 +95,18 @@ export function useLiveConversation(
     const open = messages.value.filter(m => m.role === 'assistant' && (m.status === 'running' || m.status === 'queued'))
     return open.find(m => m.status === 'running') ?? open[0] ?? null
   })
-  return { conversation, session, messages, lost, activeTurn, poll, reload, sent }
+  /** 被额度打断的回合：现在就试着继续（now），或者不要自动继续。现在就试时，系统替人发的那一条稍后才出现，过一会儿再读一次 */
+  const resuming = ref(''), resumeError = ref('')
+  async function resume(turn: string, now: boolean) {
+    const bridge = bridgeId.value
+    if (!bridge || resuming.value) return
+    resuming.value = turn; resumeError.value = ''
+    try {
+      await chat.resume(bridge, turn, now)
+      await reload()
+      if (now) { await pause(1500); if (alive) await reload() }
+      hooks.changed?.()
+    } catch (e) { resumeError.value = chatError(e) } finally { resuming.value = '' }
+  }
+  return { conversation, session, messages, lost, activeTurn, poll, reload, sent, resume, resuming, resumeError }
 }

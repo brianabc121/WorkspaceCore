@@ -82,3 +82,11 @@
 .lb-job-log { margin: 6px 0 0; padding: 10px 12px; max-height: 320px; overflow: auto; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); font: .78rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .lb-danger-button { background: var(--danger); border-color: var(--danger); }
 
+
+/* 额度（T-0237） */
+.lb-quota { display: grid; gap: 8px; }
+.lb-quota-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.lb-quota-head h3, .lb-quota h4 { margin: 0; }
+.lb-windows { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.lb-window-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lb-windows progress { width: 100%; height: 8px; accent-color: var(--accent); }
