@@ -1,5 +1,8 @@
 # 由工作台生成（大模型客户端：页面上一键部署 MCP 管理器，T-0233）。不要手改：重新部署会覆盖。
 # 和 infra/llm-bridge/compose.yaml 是同一个服务，只是网络的接法由工作台按这台服务器的情况填好。
+#
+# 容器、数据卷、网络都带 myworkspace.mcp-manager 标签：智能体服务器页面和容器服务器页面的
+# 管理程序（重启、清理、回收、卸载）都不处理带这个标签的对象（docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 8 节）。
 name: @PROJECT@
 
 services:
@@ -7,7 +10,10 @@ services:
     build:
       context: ./src
     image: myworkspace/llm-bridge:@TAG@
+    # Docker 或服务器重启后自己回来
     restart: unless-stopped
+    labels:
+      myworkspace.mcp-manager: "@SLOT@"
     # 管理令牌在 bridge.env 里（权限 600），不写进这个文件
     env_file:
       - ./bridge.env
@@ -21,6 +27,14 @@ services:
     pids_limit: 1024
     mem_limit: 4g
     cpus: 2
-@NETWORKING@
+@SERVICE_NET@
 volumes:
   llm-bridge-data:
+    labels:
+      myworkspace.mcp-manager: "@SLOT@"
+
+networks:
+  default:
+    labels:
+      myworkspace.mcp-manager: "@SLOT@"
+@TOP_NET@

@@ -1,4 +1,4 @@
-"""一键部署 MCP 管理器时上传到服务器的文件（docs/v2/LLM_BRIDGE_PLAN.md 第 20 节）。
+"""一键部署 MCP 管理器时上传到服务器的文件和执行的命令（docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）。
 
 管理器的镜像没有发布到镜像仓库：在服务器上用上传的构建文件现场构建（和手动部署时
 `docker compose up -d --build` 做的是同一件事）。构建文件是 services/llm-bridge 的
@@ -11,7 +11,6 @@ Dockerfile、依赖锁文件和源码，构建工作台镜像时带进来（serv
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import os
 import re
 import shlex
@@ -35,8 +34,11 @@ _SLOT = re.compile(r"^[0-9a-f]{12}$")
 _NETWORK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}_integrations$")
 _HOSTNAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
 _INSTALL_DIR = re.compile(rf"^/(?:[^/\x00\n\r]+/)*{INSTALL_ROOT}/[0-9a-f]{{12}}$")
-# 运营商级 NAT 的地址段（Tailscale 等组网工具也用它）：不是公网地址
-_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+_PUBLIC_KEY = re.compile(r"^ssh-ed25519 [A-Za-z0-9+/=]+ myworkspace-mcp-[0-9a-f]{12}$")
+# 容器、数据卷、网络都带这个标签：两个服务器页面的管理程序不处理带它的对象
+LABEL = "myworkspace.mcp-manager"
+# 登录账号怎么用 Docker：直接用 / 免密 sudo / sudo 要密码
+ACCESS_DIRECT, ACCESS_SUDO, ACCESS_SUDO_PASSWORD = "direct", "sudo_nopasswd", "sudo_password"
 
 
 class BundleError(Exception):
@@ -89,23 +91,52 @@ def content_tag(files: dict[str, tuple[bytes, int]]) -> str:
     return f"deploy-{digest.hexdigest()[:12]}"
 
 
+_TAGS: dict[Path, str] = {}
+
+
+def current_tag() -> str | None:
+    """这个工作台带的构建文件的版本；没带时为 None。一个进程里只算一次（镜像里的文件不会变）。"""
+    root = source_dir()
+    if root is None:
+        return None
+    if root not in _TAGS:
+        try:
+            _TAGS[root] = content_tag(source_files(root))
+        except BundleError:
+            return None
+    return _TAGS[root]
+
+
 @dataclass(frozen=True)
 class Inspect:
     home: str
-    docker_ready: bool
+    docker: bool  # 装了 Docker
+    access: bool  # 这个账号现在能直接用 Docker
+    compose: bool
+    sudo: bool
+    sudo_nopasswd: bool
     network: str
     port: int | None
 
 
-def inspect_command(hostname: str | None, skip_ports: list[int]) -> str:
-    """只读检查脚本的调用方式（脚本从标准输入给）：参数是工作台后端容器的主机名和不要选的端口。"""
+def inspect_args(hostname: str | None, skip_ports: list[int]) -> str:
     name = hostname if hostname and _HOSTNAME.match(hostname) else "-"
     ports = " ".join(str(int(p)) for p in skip_ports)
-    return f"sh -s -- {q(name)} {q(ports)}"
+    return f"{q(name)} {q(ports)}"
+
+
+def inspect_command(hostname: str | None, skip_ports: list[int]) -> str:
+    """只读检查脚本的调用方式（脚本从标准输入给）：参数是工作台后端容器的主机名和不要选的端口。"""
+    return f"sh -s -- {inspect_args(hostname, skip_ports)}"
 
 
 def inspect_script() -> str:
     return (_FILES / "inspect.sh").read_text(encoding="utf-8")
+
+
+def inspect_inline(hostname: str | None, skip_ports: list[int]) -> str:
+    """同一个检查脚本，写成一条命令（经 sudo 运行时标准输入要留给密码）。"""
+    return f"sh -c {q(inspect_script())} sh {inspect_args(hostname, skip_ports)}"
 
 
 def parse_inspect(stdout: str) -> Inspect:
@@ -124,10 +155,25 @@ def parse_inspect(stdout: str) -> Inspect:
     port = int(port_text) if port_text.isdigit() and int(port_text) in PORT_RANGE else None
     return Inspect(
         home=home,
-        docker_ready=values.get("docker_access") == "yes" and values.get("compose") == "yes",
+        docker=values.get("docker") == "yes",
+        access=values.get("docker_access") == "yes",
+        compose=values.get("compose") == "yes",
+        sudo=values.get("sudo") == "yes",
+        sudo_nopasswd=values.get("sudo_nopasswd") == "yes",
         network=network,
         port=port,
     )
+
+
+def privileged(command: str, access: str) -> str:
+    """登录账号不能直接用 Docker 时，整条命令交给 sudo 里的 sh 执行。
+
+    要密码时密码从标准输入给（`-S`），`-k` 不用上一次缓存的授权——和容器服务器的安装是同一种写法。
+    """
+    if access == ACCESS_DIRECT:
+        return command
+    flags = "-n" if access == ACCESS_SUDO else "-S -p '' -k"
+    return f"sudo {flags} sh -c {q(command)}"
 
 
 def install_dir(home: str, slot: str) -> str:
@@ -144,64 +190,57 @@ def alias(slot: str) -> str:
     return f"mcp-{slot}"
 
 
-def is_private(address: str, *, allow_loopback: bool = False) -> bool:
-    """这个地址是不是私网地址：只有私网地址才把管理器的端口开在上面。"""
-    try:
-        ip = ipaddress.ip_address(address)
-    except ValueError:
-        return False
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        ip = ip.ipv4_mapped
-    if ip.is_loopback:
-        return allow_loopback
-    if ip.is_link_local or ip.is_multicast or ip.is_unspecified:
-        return False
-    return ip.is_private or (ip.version == 4 and ip in _CGNAT)
-
-
 @dataclass(frozen=True)
 class Network:
-    mode: str  # same_host / remote
-    base_url: str
-    block: str  # 写进 compose.yaml 的那一段
+    mode: str  # same_host / tunnel
+    base_url: str  # 登记的地址；tunnel 时是服务器本机地址上的那个端口
+    service: str  # 写进 compose.yaml 里服务的那一段
+    top: str  # 写进 compose.yaml 里 networks 的那一段
     port: int | None = None
 
 
-def plan_network(
-    info: Inspect, *, address: str, slot: str, allow_loopback: bool = False
-) -> Network:
+def plan_network(info: Inspect, *, slot: str) -> Network:
     """管理器的网络怎么接。
 
     - 和工作台同一台机器：加入工作台的内部网络，工作台按网络里的名字访问，端口不开到宿主机上。
-    - 不同机器：端口只开在登记这台服务器用的私网地址上；公网地址不部署（会把端口开到公网上）。
+    - 其他情况：端口只开在这台服务器的本机地址上，工作台经专用的 SSH 通道访问；
+      局域网和公网上都没有这个端口，同机的其他容器也连不到它。
     """
     if info.network:
         name = alias(slot)
-        block = (
+        service = (
             "    networks:\n"
             "      default: {}\n"
             "      workspace-integrations:\n"
             "        aliases:\n"
             f"          - {name}\n"
-            "\n"
-            "networks:\n"
-            "  workspace-integrations:\n"
-            f"    name: {info.network}\n"
-            "    external: true\n"
         )
-        return Network("same_host", f"http://{name}:{BRIDGE_PORT}", block)
-    if not is_private(address, allow_loopback=allow_loopback):
-        raise BundleError(
-            "public_address",
-            "这台服务器是用公网地址登记的：一键部署不会把 MCP 管理器的端口开到公网上。"
-            "请改用私网地址登记这台服务器（或者和它组一个内网），"
-            "也可以按部署指南手动部署，并在前面加 TLS 反向代理。",
-        )
+        top = f"  workspace-integrations:\n    name: {info.network}\n    external: true\n"
+        return Network("same_host", f"http://{name}:{BRIDGE_PORT}", service, top)
     if info.port is None:
         raise BundleError("no_free_port", "这台服务器上 18787 ~ 18886 的端口都被占用了")
-    host = f"[{address}]" if ":" in address else address
-    block = f'    ports:\n      - "{host}:{info.port}:{BRIDGE_PORT}"\n'
-    return Network("remote", f"http://{host}:{info.port}", block, info.port)
+    service = f'    ports:\n      - "127.0.0.1:{info.port}:{BRIDGE_PORT}"\n'
+    return Network("tunnel", f"http://127.0.0.1:{info.port}", service, "", info.port)
+
+
+def tunnel_comment(slot: str) -> str:
+    if not _SLOT.match(slot):
+        raise ValueError("部署编号无效")
+    return f"myworkspace-mcp-{slot}"
+
+
+def tunnel_line(public_key: str, port: int) -> str:
+    """装进 authorized_keys 的那一行：这把密钥不能执行命令、不能开终端，只能转发到这一个端口。
+
+    `restrict` 关掉终端、代理转发、X11 等，再单独放开端口转发并用 `permitopen` 限定目的地；
+    `restrict` 本身不禁止执行命令，所以再加一条固定命令 `/bin/false`——不管客户端要执行什么，
+    跑的都是它。在 OpenSSH 9.6 上实测过，
+    见 docs/decisions/2026-11-14-mcp-manager-deploy-verification.md。
+    """
+    if not _PUBLIC_KEY.match(public_key) or port not in PORT_RANGE:
+        raise ValueError("转发密钥或端口无效")
+    options = f'restrict,port-forwarding,permitopen="127.0.0.1:{port}",command="/bin/false"'
+    return f"{options} {public_key}"
 
 
 def compose_file(slot: str, tag: str, network: Network) -> bytes:
@@ -211,7 +250,9 @@ def compose_file(slot: str, tag: str, network: Network) -> bytes:
     return (
         text.replace("@PROJECT@", project_name(slot))
         .replace("@TAG@", tag)
-        .replace("@NETWORKING@\n", network.block + "\n")
+        .replace("@SLOT@", slot)
+        .replace("@SERVICE_NET@\n", network.service)
+        .replace("@TOP_NET@\n", network.top)
         .encode()
     )
 

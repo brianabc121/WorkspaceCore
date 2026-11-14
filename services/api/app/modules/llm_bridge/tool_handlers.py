@@ -152,12 +152,12 @@ async def forward(
     bridges = await _candidates(service, instance, grant)
     caller = BridgeCaller(str(instance.id), instance.name, _scopes(grant))
     if tool == "llm_bridge_status" and bridge_name is None and len(bridges) > 1:
-        clients = [(b.name, service.client(b)) for b in bridges]
+        clients = [(b.name, await service.client(b)) for b in bridges]
         await db.commit()
         return await _status_of_all(caller, clients)
     bridge = _pick_bridge(bridges, bridge_name)
     # 之后不再用数据库：等会话桥回答可能要几十秒，不占着事务
-    bridge_label, client = bridge.name, service.client(bridge)
+    bridge_label, client = bridge.name, await service.client(bridge)
     await db.commit()
     try:
         data = await client.tool(caller, "llm_" + tool.removeprefix(PREFIX), arguments)

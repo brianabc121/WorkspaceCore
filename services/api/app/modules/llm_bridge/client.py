@@ -5,11 +5,14 @@
 - 管理接口：`<base_url>/admin/*`，同一枚令牌。
 - 只访问登记这座桥时填的那个主机（owner 明确登记的内网服务）；有超时，不自动重试写操作。
   `llm_send` 带幂等号，结果未知时调用方用同一个 request_id 重试是安全的。
+- 工作台部署到别的服务器上的管理器只监听那台服务器的本机地址：地址在发请求时才定下来
+  （`resolve`，经专用的 SSH 通道，见 tunnel.py），连不上按“会话桥暂时连不上”处理。
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -75,6 +78,13 @@ class BridgeClient:
     base_url: str
     token: str
     http: ConnectorHttp
+    # 给了就用它得到实际访问的地址（SSH 通道在本进程里的那一头），base_url 只是登记的地址
+    resolve: Callable[[], Awaitable[str]] | None = None
+
+    async def _base(self) -> str:
+        if self.resolve is None:
+            return self.base_url
+        return (await self.resolve()).rstrip("/")
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.token}"}
@@ -105,7 +115,7 @@ class BridgeClient:
             "params": {"name": name, "arguments": arguments},
         }
         response = await self.http.request(
-            "POST", f"{self.base_url}/mcp", headers=headers, json=body
+            "POST", f"{await self._base()}/mcp", headers=headers, json=body
         )
         self._check_status(response)
         message = _json(response)
@@ -128,7 +138,7 @@ class BridgeClient:
 
     async def admin(self, method: str, path: str, body: Any = None) -> Any:
         response = await self.http.request(
-            method, f"{self.base_url}/admin{path}", headers=self._headers(), json=body
+            method, f"{await self._base()}/admin{path}", headers=self._headers(), json=body
         )
         self._check_status(response)
         payload = _json(response)
@@ -144,16 +154,27 @@ class BridgeClient:
 
 
 def bridge_client(
-    runtime: ConnectorRuntime, base_url: str, token: str, *, breaker: CircuitBreaker | None = None
+    runtime: ConnectorRuntime,
+    base_url: str,
+    token: str,
+    *,
+    breaker: CircuitBreaker | None = None,
+    resolve: Callable[[], Awaitable[str]] | None = None,
+    scope: str | None = None,
 ) -> BridgeClient:
-    """breaker：不给时用全局的熔断计数；一键部署等管理器启动时给它自己的（T-0233）。"""
+    """breaker：不给时用全局的熔断计数；一键部署等管理器启动时给它自己的（T-0233）。
+
+    resolve / scope：经 SSH 通道访问的管理器。通道在本进程里的那一头都是 127.0.0.1，
+    熔断按部署记录分开计数（scope），不然一座连不上会把别的也挡掉。
+    """
+    host = "127.0.0.1" if resolve is not None else host_of(base_url)
     http = ConnectorHttp(
-        policy=OutboundPolicy(frozenset({host_of(base_url)})),
+        policy=OutboundPolicy(frozenset({host})),
         connect_timeout=5.0,
         read_timeout=READ_TIMEOUT,
         read_retries=0,
         breaker=breaker or runtime.breaker,
         transport=runtime.transport,
-        breaker_scope=f"llm_bridge:{host_of(base_url)}",
+        breaker_scope=scope or f"llm_bridge:{host}",
     )
-    return BridgeClient(base_url.rstrip("/"), token, http)
+    return BridgeClient(base_url.rstrip("/"), token, http, resolve)

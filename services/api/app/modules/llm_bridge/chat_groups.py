@@ -206,7 +206,7 @@ class LlmChatGroupService:
         for target in body.targets:
             row = await self.bridges.bridge(workspace_id, target.bridge_id)
             self.chat._writable(row)
-            prepared.append((target, self.bridges.client(row), row.id, row.name))
+            prepared.append((target, await self.bridges.client(row), row.id, row.name))
         title = " ".join((body.title or body.text).split())[:120]
         await self.db.commit()
 
@@ -319,7 +319,9 @@ class LlmChatGroupService:
             elif not row.enabled:
                 reason = "这个 MCP 管理器已停用"
             else:
-                sendable.append((member.position, member.session_id, self.bridges.client(row)))
+                sendable.append(
+                    (member.position, member.session_id, await self.bridges.client(row))
+                )
                 continue
             results[member.position] = LlmChatGroupResult(position=member.position, error=reason)
         await self.db.commit()

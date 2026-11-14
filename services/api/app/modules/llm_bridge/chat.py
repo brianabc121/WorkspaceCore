@@ -145,7 +145,7 @@ class LlmChatService:
         offset: int,
         sync: bool,
     ) -> LlmChatSessionList:
-        me, client = caller_id(access.user_id), self.bridges.client(row)
+        me, client = caller_id(access.user_id), await self.bridges.client(row)
         await self.db.commit()
         params = {"limit": limit, "offset": offset, "status": status, "q": q}
         if platform:
@@ -162,7 +162,7 @@ class LlmChatService:
     async def conversation(
         self, access: WorkspaceAccess, row: LlmBridge, session_id: str
     ) -> LlmChatConversationOut:
-        me, client = caller_id(access.user_id), self.bridges.client(row)
+        me, client = caller_id(access.user_id), await self.bridges.client(row)
         await self.db.commit()
         data = await self._admin(client, "GET", f"/sessions/{session_id}")
         messages = []
@@ -191,7 +191,7 @@ class LlmChatService:
     async def events(
         self, row: LlmBridge, session_id: str, after: int, wait_seconds: float
     ) -> LlmChatEventsOut:
-        client = self.bridges.client(row)
+        client = await self.bridges.client(row)
         await self.db.commit()
         query = urlencode({"after": after, "wait_seconds": wait_seconds})
         data = await self._admin(client, "GET", f"/sessions/{session_id}/events?{query}")
@@ -200,7 +200,7 @@ class LlmChatService:
     async def options(
         self, access: WorkspaceAccess, row: LlmBridge, platform: str, mode: str
     ) -> LlmChatOptionsOut:
-        caller, client = await self._caller(access), self.bridges.client(row)
+        caller, client = await self._caller(access), await self.bridges.client(row)
         await self.db.commit()
         channel = {"platform": platform, "mode": mode}
         models: list[LlmChatModelOut] = []
@@ -224,7 +224,7 @@ class LlmChatService:
         self, access: WorkspaceAccess, row: LlmBridge, body: LlmChatCreateIn
     ) -> LlmChatCreatedOut:
         self._writable(row)
-        caller, client = await self._caller(access), self.bridges.client(row)
+        caller, client = await self._caller(access), await self.bridges.client(row)
         me, bridge_id, bridge_name = caller.instance_id, row.id, row.name
         await self.db.commit()
         arguments = body.model_dump(exclude_none=True, exclude={"text", "request_id"})
@@ -281,7 +281,7 @@ class LlmChatService:
     ) -> LlmChatTurnOut:
         self._writable(row)
         caller = await self._caller(access, SCOPES if body.takeover else OWN_SCOPES)
-        client, bridge_id, bridge_name = self.bridges.client(row), row.id, row.name
+        client, bridge_id, bridge_name = await self.bridges.client(row), row.id, row.name
         await self.db.commit()
         arguments = {
             "session_id": session_id,
@@ -311,7 +311,7 @@ class LlmChatService:
         return _turn_out(data)
 
     async def cancel(self, access: WorkspaceAccess, row: LlmBridge, turn_id: str) -> LlmChatTurnOut:
-        caller, client = await self._caller(access), self.bridges.client(row)
+        caller, client = await self._caller(access), await self.bridges.client(row)
         bridge_id, bridge_name = row.id, row.name
         await self.db.commit()
         data = await self._tool(client, caller, "llm_turn_cancel", {"turn_id": turn_id})
@@ -327,7 +327,7 @@ class LlmChatService:
     async def rename(
         self, access: WorkspaceAccess, row: LlmBridge, session_id: str, title: str
     ) -> LlmChatSessionOut:
-        me, client = caller_id(access.user_id), self.bridges.client(row)
+        me, client = caller_id(access.user_id), await self.bridges.client(row)
         bridge_id, bridge_name = row.id, row.name
         await self.db.commit()
         data = await self._admin(client, "PATCH", f"/sessions/{session_id}", {"title": title})
@@ -343,7 +343,7 @@ class LlmChatService:
     async def archive(
         self, access: WorkspaceAccess, row: LlmBridge, session_id: str
     ) -> LlmChatSessionOut:
-        caller, client = await self._caller(access), self.bridges.client(row)
+        caller, client = await self._caller(access), await self.bridges.client(row)
         me, bridge_id, bridge_name = caller.instance_id, row.id, row.name
         await self.db.commit()
         await self._tool(client, caller, "llm_session_archive", {"session_id": session_id})

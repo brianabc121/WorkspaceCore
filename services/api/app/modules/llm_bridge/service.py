@@ -23,8 +23,9 @@ from app.domain.connectors import ConnectorRuntime
 from app.domain.policy import WorkspaceAccess
 from app.integrations.base import ConnectorError
 from app.models import AgentInstance
+from app.modules.llm_bridge import deploy_bundle, tunnel
 from app.modules.llm_bridge.client import BridgeCallError, BridgeClient, bridge_client
-from app.modules.llm_bridge.models import LlmBridge, LlmBridgeDeployJob, LlmBridgeGrant
+from app.modules.llm_bridge.models import LlmBridge, LlmBridgeGrant, LlmBridgeInstall
 from app.modules.llm_bridge.schemas import (
     ALL_PLATFORMS,
     LlmBridgeAccountOut,
@@ -86,6 +87,20 @@ def from_bridge(error: BridgeCallError) -> ApiError:
     return ApiError(_STATUS.get(error.code, 502), error.code, error.message or "会话桥返回了错误")
 
 
+def install_out(row: LlmBridgeInstall, current_tag: str | None) -> LlmBridgeInstallOut:
+    """current_tag：这个工作台带的构建文件的版本；和部署的不一样就可以重新部署来升级。"""
+    return LlmBridgeInstallOut(
+        target_kind=row.target_kind,
+        target_id=row.server_id if row.target_kind == "agent_server" else row.runner_host_id,
+        server_name=row.server_name,
+        mode=row.mode,
+        port=row.port,
+        needs_sudo=row.needs_sudo,
+        outdated=bool(current_tag and row.source_tag and row.source_tag != current_tag),
+        deployed_at=row.deployed_at,
+    )
+
+
 async def remove_bridge(db: AsyncSession, row: LlmBridge) -> None:
     """去掉一座桥的登记（不提交）。
 
@@ -126,29 +141,19 @@ class LlmBridgeService:
         )
 
     async def installs(self, workspace_id: uuid.UUID) -> dict[uuid.UUID, LlmBridgeInstallOut]:
-        """工作台一键部署的那些桥（T-0233）：桥的 id → 部署在哪台服务器上。"""
+        """工作台部署出去的那些桥（T-0233）：桥的 id → 部署在哪台服务器上。"""
         rows = (
             await self.db.scalars(
-                select(LlmBridgeDeployJob)
-                .where(
-                    LlmBridgeDeployJob.workspace_id == workspace_id,
-                    LlmBridgeDeployJob.bridge_id.is_not(None),
-                    LlmBridgeDeployJob.kind.in_(("deploy", "redeploy")),
-                    LlmBridgeDeployJob.status == "succeeded",
-                )
-                .order_by(LlmBridgeDeployJob.started_at)
+                select(LlmBridgeInstall).where(LlmBridgeInstall.workspace_id == workspace_id)
             )
         ).all()
-        found: dict[uuid.UUID, LlmBridgeInstallOut] = {}
-        for row in rows:  # 按时间升序：最近一次盖掉前面的
-            if row.bridge_id is not None:
-                found[row.bridge_id] = LlmBridgeInstallOut(
-                    server_id=row.server_id,
-                    server_name=row.server_name,
-                    mode=row.mode or "remote",
-                    deployed_at=row.finished_at or row.started_at,
-                )
-        return found
+        tag = deploy_bundle.current_tag()
+        return {row.bridge_id: install_out(row, tag) for row in rows}
+
+    async def install(self, bridge_id: uuid.UUID) -> LlmBridgeInstall | None:
+        return await self.db.scalar(
+            select(LlmBridgeInstall).where(LlmBridgeInstall.bridge_id == bridge_id)
+        )
 
     async def bridges(
         self, workspace_id: uuid.UUID, *, only_enabled: bool = False
@@ -236,6 +241,13 @@ class LlmBridgeService:
             await self._name_free(access.workspace.id, body.name.strip(), skip=row.id)
             row.name = body.name.strip()
             changed.append("name")
+        moved = body.base_url is not None and clean_url(body.base_url) != row.base_url
+        if (moved or body.token is not None) and await self.install(row.id) is not None:
+            raise ApiError(
+                409,
+                "BRIDGE_MANAGED",
+                "这个 MCP 管理器是工作台部署的：地址和令牌由部署管理，不能在这里改",
+            )
         if body.base_url is not None and clean_url(body.base_url) != row.base_url:
             row.base_url = clean_url(body.base_url)
             changed.append("base_url")
@@ -281,22 +293,49 @@ class LlmBridgeService:
 
     async def delete_bridge(self, access: WorkspaceAccess, bridge_id: uuid.UUID) -> None:
         row = await self.bridge(access.workspace.id, bridge_id)
+        if await self.install(row.id) is not None:
+            raise ApiError(
+                409,
+                "BRIDGE_MANAGED",
+                "这个 MCP 管理器是工作台部署的：用“卸载”把服务器上的容器一起处理"
+                "（服务器连不上时，卸载里可以选“只删除登记”）",
+            )
         await self._audit(access, "bridge_deleted", row.id, {"name": row.name})
         await remove_bridge(self.db, row)
         await self.db.commit()
 
-    def client(self, row: LlmBridge) -> BridgeClient:
+    async def client(self, row: LlmBridge) -> BridgeClient:
+        """这座桥的客户端。
+
+        工作台部署到别的服务器上的管理器只监听那台服务器的本机地址：经专用的 SSH 通道访问
+        （tunnel.py）。通道在发请求时才建立，连不上按“会话桥暂时连不上”处理。
+        """
         token = (
             self.runtime.credentials()
             .resolve(row.token_ref, context=secret_context(row.workspace_id, row.id))
             .get_secret_value()
         )
-        return bridge_client(self.runtime, row.base_url, token)
+        install = await self.install(row.id)
+        spec = tunnel.spec_of(install) if install is not None else None
+        if spec is None:
+            return bridge_client(self.runtime, row.base_url, token)
+        settings = self.settings
+
+        async def resolve() -> str:
+            return await tunnel.POOL.url(settings, spec)
+
+        return bridge_client(
+            self.runtime,
+            row.base_url,
+            token,
+            resolve=resolve,
+            scope=f"llm_bridge:install:{spec.install_id}",
+        )
 
     # ---- 转给会话桥的管理操作 ----
     async def admin(self, row: LlmBridge, method: str, path: str, body: Any = None) -> Any:
         try:
-            return await self.client(row).admin(method, path, body)
+            return await (await self.client(row)).admin(method, path, body)
         except BridgeCallError as error:
             raise from_bridge(error) from error
         except ConnectorError as error:
@@ -320,7 +359,7 @@ class LlmBridgeService:
 
     async def status(self, row: LlmBridge) -> LlmBridgeStatusOut:
         try:
-            data = await self.client(row).admin("GET", "/status")
+            data = await (await self.client(row)).admin("GET", "/status")
         except BridgeCallError as error:
             return LlmBridgeStatusOut(reachable=False, error=error.message)
         except ConnectorError as error:
