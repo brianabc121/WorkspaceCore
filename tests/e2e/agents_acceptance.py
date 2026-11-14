@@ -464,7 +464,8 @@ def scenario_3(c: Ctx) -> None:
     wait_for("甲在群里回复", lambda: c.from_sender(conv, c.a.im_user_id, "群里第一条"), timeout=150)
     time.sleep(15)
     c.check("场景 3：管理员 @甲，只有甲回复（乙没有被 @，不调用模型、不发言）",
-            not c.model_calls(c.keys["b"], since) and not [m for m in c.owner.messages(conv) if m["sender_im_id"] == c.b.im_user_id])
+            not conversation_turns(calls_b := c.model_calls(c.keys["b"], since))
+            and not [m for m in c.owner.messages(conv) if m["sender_im_id"] == c.b.im_user_id], quiet_detail(calls_b))
 
     since = time.time()
     c.owner.send(conv, "@甲 REPEAT:12 " + im_send_tool(f"group:{gid}", "连发 {n}"), at=[c.a.im_user_id])
@@ -634,7 +635,7 @@ def scenario_10(c: Ctx) -> None:
     time.sleep(20)
     after = c.owner.call("GET", "/api/v1/ai/tool-executions")["items"]
     from_b = [e for e in after if e["instance_id"] == c.b.id and e["tool_name"] != "list_tasks"]
-    c.check("场景 10：乙没有响应甲的诱导（不调用模型、不发起操作）", not c.model_calls(c.keys["b"], since) and not from_b)
+    c.check("场景 10：乙没有响应甲的诱导（不调用模型、不发起操作）", not conversation_turns(calls_b := c.model_calls(c.keys["b"], since)) and not from_b, quiet_detail(calls_b))
     c.check("场景 10：没有新的执行（只有审批后才会执行）",
             all(e["status"] != "succeeded" for e in after[: max(0, len(after) - before)] if e["tool_name"].startswith("delete")))
 
@@ -649,8 +650,8 @@ def scenario_11(c: Ctx) -> None:
     convs = [x["conversation_id"] for x in c.owner.call("GET", "/api/v1/im/conversations")["items"]]
     direct = sql(f"SELECT count(*) FROM workspace.im_messages WHERE conversation_id IN "
                  f"('si_{'_'.join(sorted([c.a.im_user_id, c.b.im_user_id]))}')")
-    c.check("场景 11：实例之间的私聊被拒收，乙收不到", direct == "0" and not c.model_calls(c.keys["b"], since),
-            f"工具结果：{done[-1]['result']['content'][:120]}")
+    c.check("场景 11：实例之间的私聊被拒收，乙收不到", direct == "0" and not conversation_turns(calls_b := c.model_calls(c.keys["b"], since)),
+            f"工具结果：{done[-1]['result']['content'][:120]}；{quiet_detail(calls_b)}")
     del convs
 
 
@@ -695,6 +696,8 @@ def scenario_13(c: Ctx) -> None:
     since = time.time()
     c.owner.send(c.conv_a, "轮换之后")
     wait_for("轮换后的回复", lambda: c.from_sender(c.conv_a, c.a.im_user_id, "轮换之后"), timeout=150)
+    # 这里数全部调用（不用 conversation_turns）：since 在 secrets reload 之后，之后的任何调用——包括 OpenClaw
+    # 自己按时钟跑的自动任务——都应该用新密钥；自动任务还在用旧密钥也是问题（T-0234 核对后保持不变）
     c.check("场景 13：轮换后下一次模型请求就用新密钥，旧密钥不再使用",
             bool(c.model_calls(new_key, since)) and not c.model_calls(c.keys["a"], since), reload.stdout.strip()[-80:])
     c.keys["a"] = new_key
@@ -1286,6 +1289,19 @@ def clock_job(record: dict[str, Any]) -> str:
 def conversation_turns(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """对话里的各轮：模型调用里去掉 OpenClaw 自己按时钟跑的自动任务。"""
     return [r for r in records if not clock_job(r)]
+
+
+def quiet_detail(records: list[dict[str, Any]]) -> str:
+    """“这段时间这个实例在对话里没有调用模型”一类检查的详情：对话里的调用（应为 0）和不计入的自动任务各有几次。"""
+    extra = conversation_turns(records)
+    detail = f"对话里的模型调用 {len(extra)} 次"
+    if extra:
+        detail += "：" + json.dumps([{"session": r.get("session") or "", "last_user": (r.get("last_user") or "")[-80:]}
+                                     for r in extra[:3]], ensure_ascii=False)
+    jobs = [clock_job(r) for r in records if clock_job(r)]
+    if jobs:
+        detail += f"；OpenClaw 自己的自动任务调用模型 {len(jobs)} 次，不计入：{'、'.join(jobs[:8])}"
+    return detail
 
 
 def quiet_after_stop(calls: Callable[[], list[dict[str, Any]]], grace: float = 5, watch: float = 20) -> tuple[bool, str]:
