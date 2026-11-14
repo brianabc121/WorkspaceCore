@@ -40,12 +40,33 @@ class LlmBridgePatch(_In):
     enabled: bool | None = None
 
 
+class LlmBridgeInstallOut(BaseModel):
+    """工作台部署出去的 MCP 管理器在哪（docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）。"""
+
+    target_kind: Literal["agent_server", "runner_host"] = Field(
+        description="agent_server：智能体服务器；runner_host：容器服务器"
+    )
+    target_id: UUID | None = Field(description="服务器已从工作台移除时为空")
+    server_name: str
+    mode: str = Field(
+        description="same_host：加入工作台的内部网络；tunnel：只监听服务器本机，经 SSH 通道访问"
+    )
+    port: int | None = Field(description="tunnel：服务器本机地址上的端口")
+    needs_sudo: bool = Field(description="重新部署、重启、卸载时要填一次服务器的登录密码")
+    outdated: bool = Field(description="工作台带的构建文件比部署的新：可以重新部署来升级")
+    deployed_at: datetime
+
+
 class LlmBridgeOut(BaseModel):
     id: UUID
     name: str
     base_url: str
     enabled: bool
     has_token: bool
+    deployment: LlmBridgeInstallOut | None = Field(
+        default=None,
+        description="工作台一键部署的管理器：部署在哪台智能体服务器上；手动添加的为空",
+    )
     created_at: datetime
     updated_at: datetime
 

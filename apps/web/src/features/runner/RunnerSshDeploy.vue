@@ -11,6 +11,8 @@ import { useRunnerAction } from './api'
 // 填写服务器 → 只读取主机公钥、在服务器上核对指纹 → 输入一次登录密码部署（工作台换成自己的专用密钥，密码不保存）。
 // 部署：上传接入包，以 root 运行 install.sh（Docker、gVisor、runner-agent），等 runner-agent 连上工作台。
 // 不是 root 账号时 install.sh 要用 sudo，所以每次部署都要填密码。
+// 启用 gVisor 时安装脚本尽量不重启 Docker；非重启不可、而服务器上有 MCP 管理器在运行时任务以
+// gvisor_needs_docker_restart 失败（T-0234）：这时多一个“允许重启 Docker”的勾选项，勾上再部署才会重启。
 const props = defineProps<{ hostId: string }>()
 type State = Schema['AgentSshState']
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id, cache = useQueryClient()
@@ -26,16 +28,20 @@ const target = computed(() => ssh.data.value?.target ?? null)
 const job = computed(() => ssh.data.value?.job ?? null)
 const running = computed(() => job.value?.status === 'running')
 const form = reactive({ host: '', port: 22, username: 'root' })
-const editing = ref(false), checked = ref(false), password = ref(''), removeFiles = ref(false), warning = ref(''), forceable = ref(false)
+const editing = ref(false), checked = ref(false), password = ref(''), removeFiles = ref(false), warning = ref(''), forceable = ref(false), allowRestart = ref(false)
 const showForm = computed(() => !target.value || editing.value)
 const formValid = computed(() => HOST_PATTERN.test(form.host.trim()) && USERNAME_PATTERN.test(form.username.trim()) && Number.isInteger(Number(form.port)) && Number(form.port) >= 1 && Number(form.port) <= 65535)
 const replaceable = computed(() => !!target.value && !target.value.client_key_installed && !running.value)
+// 最近一次部署停在“启用 gVisor 要重启 Docker，但有 MCP 管理器在运行”
+const needsRestart = computed(() => job.value?.kind === 'install' && job.value.status === 'failed' && job.value.error_code === 'gvisor_needs_docker_restart')
 
 function put(state: State) { cache.setQueryData(key, state) }
 // 任务结束后容器服务器的状态（在线、版本）也变了
 watch(() => job.value?.status, (now, before) => { if (before === 'running' && now && now !== 'running') { notice.value = ''; void refresh() } })
-// 换了服务器（地址、端口、账号、主机公钥）就清空输入过的密码：绝不把一台服务器的密码发给另一台
-watch(() => target.value ? [target.value.address, target.value.port, target.value.username, target.value.host_key_fingerprint].join('\n') : '', () => { password.value = '' })
+// 换了服务器（地址、端口、账号、主机公钥）就清空输入过的密码：绝不把一台服务器的密码发给另一台；“允许重启 Docker”同样不带过去
+watch(() => target.value ? [target.value.address, target.value.port, target.value.username, target.value.host_key_fingerprint].join('\n') : '', () => { password.value = ''; allowRestart.value = false })
+// 勾选只对这一次失败有效：换了任务（或不再是这个原因）就取消
+watch(() => needsRestart.value ? job.value?.id : null, () => { allowRestart.value = false })
 
 // SSH 相关的错误码用实例部署那边的说明（同一套接口）
 function explain(cause: unknown) { if (cause instanceof ApiError) error.value = sshError(cause) }
@@ -74,7 +80,10 @@ async function install() {
   const secret = password.value
   password.value = ''
   if (!secret && !t.client_key_installed) return
-  await call(async () => dataOf(await auth.api.POST('/api/v1/runner/hosts/{host_id}/ssh/install', { params: { header, path: { host_id: props.hostId } }, body: { version: t.version, ...(secret ? { password: secret } : {}) } })), '已开始部署：下面显示每一步的进度')
+  // 只有上一次因为这个原因失败、并且勾选了，才带上“允许重启 Docker”；同样只随这一次请求
+  const restart = needsRestart.value && allowRestart.value
+  allowRestart.value = false
+  await call(async () => dataOf(await auth.api.POST('/api/v1/runner/hosts/{host_id}/ssh/install', { params: { header, path: { host_id: props.hostId } }, body: { version: t.version, ...(secret ? { password: secret } : {}), allow_docker_restart: restart } })), '已开始部署：下面显示每一步的进度')
 }
 async function uninstall() {
   const t = target.value
@@ -173,6 +182,10 @@ async function remove() {
         <p class="form-help">部署会签发新的容器服务器凭证（旧的立即失效）、上传接入包，以 root 运行安装脚本：装 Docker 29.9.1 与 gVisor release-20261019.0（核对 sha512），启动 runner-agent。第一次要下载，可能需要几分钟。已有的环境不受影响。</p>
         <label class="form-field"><span>{{ target.client_key_installed ? '登录密码（root 账号可以不填；其他账号要用 sudo，必须填）' : '登录密码 *' }}</span><input v-model="password" type="password" autocomplete="off" maxlength="1024" /></label>
         <p class="form-help">密码只随这一次请求发送，用于登录、安装公钥和 sudo，工作台不保存；提交后输入框会清空。</p>
+        <template v-if="needsRestart">
+          <label class="check-field"><input v-model="allowRestart" type="checkbox" /> 允许重启 Docker</label>
+          <p class="form-help">上一次部署停在启用 gVisor（原因见上面的进度）：勾选后重新部署会重启 Docker，这台服务器上的 MCP 管理器和其他容器短暂中断，之后自己恢复；不勾选时仍会停在这一步。</p>
+        </template>
         <div class="form-actions">
           <button type="submit" class="primary-button" :disabled="busy || (!target.client_key_installed && !password)">{{ target.installed_at ? '重新部署' : '开始部署' }}</button>
           <button v-if="replaceable" type="button" class="secondary-button" :disabled="busy" @click="edit">更换服务器</button>

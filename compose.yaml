@@ -25,6 +25,9 @@ x-hardening: &hardening
 x-api-image: &api-image
   build:
     context: services/api
+    # 大模型客户端的一键部署（T-0234）：MCP 管理器的构建文件随镜像带上（见 services/api/Dockerfile）
+    additional_contexts:
+      llm-bridge-src: services/llm-bridge
   image: my-workspace-api:local
 
 x-api-env: &api-env

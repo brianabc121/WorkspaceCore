@@ -28,7 +28,6 @@ from app.domain.runner_admin import RunnerAdmin
 from app.domain.runner_ssh import RunnerSshService
 from app.schemas.agents import (
     AgentSshConfirm,
-    AgentSshInstall,
     AgentSshRevoke,
     AgentSshState,
     AgentSshTargetSet,
@@ -48,6 +47,7 @@ from app.schemas.runner import (
     RunnerPolicyPut,
     RunnerRunAdminOut,
     RunnerRunList,
+    RunnerSshInstall,
     RunnerSshUninstall,
     RunnerTemplateAdminOut,
     RunnerTemplateAdminSave,
@@ -459,7 +459,10 @@ async def confirm_runner_ssh(
     description="上传接入包到 ~/myworkspace-runner（签发新凭证，旧的立即失效），"
     "以 root 运行 install.sh（Docker 29.9.1、gVisor release-20261019.0、runner-agent），"
     "等 runner-agent 连上工作台。"
-    "不是 root 账号时用 sudo，要填登录密码（只用这一次，不保存）。返回 202，进度看 GET /ssh。",
+    "不是 root 账号时用 sudo，要填登录密码（只用这一次，不保存）。返回 202，进度看 GET /ssh。"
+    "启用 gVisor 时先让 Docker 重新加载配置；仍然要重启 Docker、而服务器上有运行中的 MCP 管理器时，"
+    "任务以 error_code=gvisor_needs_docker_restart 失败，"
+    "确认后带 allow_docker_restart=true 重新部署。",
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=_write,
     responses=_ssh_errors,
@@ -468,7 +471,7 @@ async def install_runner_ssh(
     access: Owner,
     request: Request,
     service: SshService,
-    body: AgentSshInstall,
+    body: RunnerSshInstall,
     host_id: UUID | None = None,
 ) -> AgentSshState:
     return await service.for_host(host_id).install(access, body, client_ip=_ip(request))

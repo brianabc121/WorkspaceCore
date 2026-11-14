@@ -18,6 +18,23 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
 
+# 大模型客户端的一键部署（T-0234）：把 MCP 管理器的构建文件带进镜像（/opt/myworkspace/llm-bridge），
+# 部署时由工作台上传到服务器上现场构建。compose.yaml 用 additional_contexts 把 services/llm-bridge
+# 作为名叫 llm-bridge-src 的构建上下文传进来，顶替下面这个空阶段。
+# 直接 `docker build services/api`（没有这个上下文）时用的就是空阶段：镜像照样能构建，只是不能一键部署。
+FROM scratch AS llm-bridge-src
+
+FROM build AS llm-bridge-files
+COPY --from=llm-bridge-src / /src/
+# 只留构建要用的：Dockerfile、依赖锁文件、源码；测试、虚拟环境、缓存不带
+RUN mkdir -p /out && cd /src \
+    && for f in Dockerfile pyproject.toml uv.lock .dockerignore; do \
+         if [ -f "$f" ]; then cp "$f" /out/; fi; \
+       done \
+    && if [ -d bridge ]; then \
+         cp -r bridge /out/bridge && find /out -name __pycache__ -prune -exec rm -rf {} +; \
+       fi
+
 FROM python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 # 基础镜像（锁定 digest）还没换上修复版本的系统包：构建时只升级 trivy 报出已有修复的那几个
 # （2026-11-06：apt / libapt-pkg7.0 3.0.3 → 3.0.4，CVE-2026-109518；
@@ -35,6 +52,7 @@ RUN groupadd --system --gid 10001 app \
     && chown app:app /var/lib/workspace/trendradar && chmod 750 /var/lib/workspace/trendradar
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build --chown=root:root /app /app
+COPY --from=llm-bridge-files --chown=root:root /out /opt/myworkspace/llm-bridge
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1

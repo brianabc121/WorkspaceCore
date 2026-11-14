@@ -109,6 +109,11 @@ async function platformsOn(page, name) {
 }
 async function addManager(page, { name, url, token, uncheck }) {
   await page.getByRole('button', { name: '添加 MCP 管理器', exact: true }).click()
+  // 这个工作台带着管理器的构建文件（T-0234）：默认打开的是“一键部署到服务器”，这里验收手动添加
+  const manual = page.getByRole('group', { name: '添加方式' }).getByRole('button', { name: /手动添加/ })
+  await manual.waitFor({ timeout: 30000 })
+  check(await page.getByRole('form', { name: '一键部署 MCP 管理器' }).count() === 1, '添加管理器时应先给出“一键部署到服务器”')
+  await manual.click()
   const form = page.getByRole('form', { name: '添加 MCP 管理器' })
   await form.getByLabel('名字').fill(name)
   await form.getByLabel('地址').fill(url)

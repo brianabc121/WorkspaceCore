@@ -36,6 +36,10 @@ src/modules/<key>/
   不要导入 `widgets/registry.ts` 的类型。
 - `events`：实时事件主题 → 要刷新的查询键前缀，例如 `{ news: ['news'] }`。主题必须已在后端
   `InvalidateEvent.topics` 里；查询键按惯例写成 `['<前缀>', userId, workspaceId, ...]`。
+- `serverPanels`：服务器页面上的区块。`agentServer` 显示在智能体服务器的详情里，`runnerHost` 显示在容器服务器
+  “服务器设置”的每台服务器下面；宿主用 `ModuleServerPanels.vue` 渲染已启用模块的区块，服务器页面不导入模块的代码。
+  区块组件收到 props `serverId`、`serverName`，写成 `defineAsyncComponent(() => import('./XxxPanel.vue'))` 按需加载；
+  外层用所在页面的面板样式。参考 `llm_bridge/index.ts` 的“MCP 管理器”。
 
 ## 规则
 
