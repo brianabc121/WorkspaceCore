@@ -19,6 +19,7 @@ import logging
 import re
 import shutil
 import time
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,7 @@ from bridge.channels import SLOT_LABELS, Channel, find
 from bridge.config import Settings
 from bridge.drivers.base import Driver, DriverError, Mode, SessionSpec
 from bridge.redact import mask_identity, redact
-from bridge.store import Row, Store
+from bridge.store import Row, Store, message_of
 
 logger = logging.getLogger("bridge.engine")
 
@@ -763,7 +764,7 @@ class Engine:
             raise BridgeError("RATE_LIMITED", "这个调用方本小时的发送次数已到上限")
         self._require_platform(session["platform"])
         await self.require_ready(session["slot"])
-        turn = self.store.create_turn(session_id, caller.id, request_id, text)
+        turn = self.store.create_turn(session_id, caller.id, request_id, text, by=caller.label)
         self.store.add_event(session_id, turn["id"], "queued", {"by": caller.label})
         self._enqueue(turn)
         return await self.wait_turn(turn["id"], wait_seconds)
@@ -848,6 +849,10 @@ class Engine:
                 return
             clean = {k: redact(v) if isinstance(v, str) else v for k, v in payload.items()}
             self.store.add_event(session_id, turn_id, kind, clean)
+            made = message_of(kind, clean)
+            if made is not None:  # 会话内容落库：每段话、每个过程事件各一行
+                role, message_kind, text, data = made
+                self.store.add_message(session_id, turn_id, role, message_kind, text, data=data)
 
         try:
             async with asyncio.timeout(self.setting("turn_timeout_seconds")):
@@ -887,11 +892,19 @@ class Engine:
         if not session["title"]:
             fields["title"] = " ".join(turn["text"].split())[:120]
         self.store.update_session(session_id, **fields)
+        result = redact(outcome.text)
+        said = [
+            m["text"]
+            for m in self.store.turn_messages(turn_id)
+            if m["role"] == "assistant" and m["kind"] == "text"
+        ]
+        if result and result not in said:  # 结果没有作为一段话报出来过：补一行
+            self.store.add_message(session_id, turn_id, "assistant", "text", result)
         self.store.add_event(session_id, turn_id, "completed", {})
         self._finish(
             turn_id,
             status="completed",
-            result_text=redact(outcome.text),
+            result_text=result,
             summary=summary,
             native_turn_id=outcome.native_turn_id,
         )
@@ -985,6 +998,53 @@ class Engine:
             raise BridgeError("NOT_FOUND", "没有这个会话")
         return session
 
+    async def _imported(self, session: Row, *, again: bool = False) -> list[Row]:
+        """官方程序里已有的会话：第一次打开时向官方程序读一次全部内容存进 messages，之后读库。
+
+        经这座桥发的回合在官方程序的记录里也有，它们已经按回合存着，导入时不重复存。
+        """
+        if session["origin"] != "external":
+            return []
+        session_id = session["id"]
+        if again or session.get("imported_at") is None:
+            try:
+                native = await self._driver(session["slot"]).read(
+                    session["native_id"], session["workdir"]
+                )
+            except DriverError as error:
+                raise from_driver(error) from error
+            known: Counter[tuple[str, str]] = Counter()
+            for turn in self.store.list_turns(session_id=session_id, limit=10_000):
+                known[("user", turn["text"])] += 1
+                if turn["result_text"]:
+                    known[("assistant", turn["result_text"])] += 1
+            self.store.delete_imported_messages(session_id)
+            now = time.time()
+            for item in native:
+                text = redact(item.text)
+                if known[(item.role, text)] > 0:
+                    known[(item.role, text)] -= 1
+                    continue
+                self.store.add_message(
+                    session_id,
+                    None,
+                    item.role,
+                    "text",
+                    text,
+                    delivery="imported",
+                    at=item.at or now,
+                )
+            self.store.mark_imported(session_id, now)
+        return self.store.list_messages(session_id, imported=True)
+
+    async def reimport(self, session_id: str) -> Row:
+        """重新向官方程序读一次这个会话的内容（官方程序里又有了新内容时用）。"""
+        session = self._required_session(session_id)
+        if session["origin"] != "external":
+            raise BridgeError("CONFLICT", "只有官方程序里已有的会话才需要重新导入")
+        await self._imported(session, again=True)
+        return await self.conversation(session_id)
+
     async def conversation(self, session_id: str) -> Row:
         """一个会话的信息和消息：谁发的、回答、过程、失败原因、进行中已经给出的部分。"""
         session = self._required_session(session_id)
@@ -997,34 +1057,35 @@ class Engine:
         view["environment"] = env_view(environment) if environment else None
         events = self.store.list_events(session_id, limit=100_000)
         last_event_id = events[-1]["id"] if events else 0
-        messages: list[Row] = []
-        if session["origin"] == "external":
-            try:
-                native = await self._driver(session["slot"]).read(
-                    session["native_id"], session["workdir"]
-                )
-            except DriverError as error:
-                raise from_driver(error) from error
-            messages = [{"role": m.role, "text": redact(m.text), "at": m.at} for m in native]
-            return {"session": view, "messages": messages, "last_event_id": last_event_id}
+        # 官方程序里已有的内容（第一次打开时导入）排在前面，后面是经这座桥发的各个回合
+        messages: list[Row] = [
+            {"role": m["role"], "text": m["text"], "at": m["at"], "imported": True}
+            for m in await self._imported(session)
+        ]
         by_turn: dict[str, list[Row]] = {}
-        for event in events:
-            if event["turn_id"]:
-                by_turn.setdefault(event["turn_id"], []).append(event)
+        for message in self.store.list_messages(session_id, imported=False):
+            by_turn.setdefault(message["turn_id"], []).append(message)
+        files: dict[tuple[str, str], list[Row]] = {}
+        for attachment in self.store.list_attachments(session_id):
+            if attachment["turn_id"]:
+                key = (attachment["turn_id"], attachment["direction"])
+                files.setdefault(key, []).append(attachment_view(attachment))
         for turn in self.store.list_turns(session_id=session_id, limit=10_000):
             mine = by_turn.get(turn["id"], [])
-            queued = next((e for e in mine if e["kind"] == "queued"), None)
+            asked = next((m for m in mine if m["role"] == "user"), None)
             messages.append(
                 {
                     "role": "user",
                     "turn_id": turn["id"],
                     "text": turn["text"],
                     "at": turn["queued_at"],
-                    "by": (queued["payload"] or {}).get("by") if queued else None,
+                    "by": asked["by"] if asked else None,
                     "by_id": turn["caller_id"],
+                    "delivery": asked["delivery"] if asked else None,
+                    "attachments": files.get((turn["id"], "input"), []),
                 }
             )
-            steps = [step for step in (_step(e) for e in mine) if step]
+            steps = [step for step in (_step(m) for m in mine) if step]
             status = turn["status"]
             reply: Row = {
                 "role": "assistant",
@@ -1033,6 +1094,7 @@ class Engine:
                 "at": turn["finished_at"] or turn["started_at"] or turn["queued_at"],
                 "text": "",
                 "steps": steps,
+                "attachments": files.get((turn["id"], "output"), []),
             }
             if status == "completed":
                 reply["text"] = turn["result_text"] or ""
@@ -1219,6 +1281,7 @@ class Engine:
             SYSTEM_CALLER,
             f"resume:{turn['id']}:{attempt}",
             self.setting("resume_text"),
+            by=SYSTEM_LABEL,
         )
         edge = self.store.queue_edge(session["id"], first=True)
         self.store.update_turn(
@@ -1362,6 +1425,9 @@ class Engine:
                 "VALIDATION_FAILED", f"消息太长（最多 {self.setting('max_text_chars')} 个字符）"
             )
         self.store.update_turn(turn_id, text=text)
+        asked = self.store.user_message(turn_id)
+        if asked is not None:
+            self.store.update_message_text(asked["id"], text)
         self.store.add_event(turn["session_id"], turn_id, "edited", {})
         return self.queue_view(turn["session_id"])
 
@@ -1460,21 +1526,28 @@ def _event_view(event: Row) -> Row:
     return view
 
 
-def _step(event: Row) -> Row | None:
-    """回合进行中的一条事件 → 页面“过程”里的一步；别的事件（排队、完成等）不算。"""
-    payload = event["payload"] or {}
-    kind = event["kind"]
-    if kind in ("message", "notice") and payload.get("text"):
-        return {"kind": kind, "text": str(payload["text"]), "at": event["at"]}
-    if kind == "command" and payload.get("command"):
-        return {"kind": "command", "text": str(payload["command"]), "at": event["at"]}
-    if kind == "files" and payload.get("paths"):
-        return {
-            "kind": "files",
-            "text": "、".join(str(p) for p in payload["paths"]),
-            "at": event["at"],
-        }
-    return None
+def _step(message: Row) -> Row | None:
+    """回合里的一行内容 → 页面“过程”里的一步；提问不算。"""
+    if message["role"] == "user":
+        return None
+    kind = "message" if message["role"] == "assistant" else message["kind"]
+    step: Row = {"kind": kind, "text": message["text"], "at": message["at"]}
+    data = message["data"] or {}
+    for key in ("name", "truncated", "error", "exit_code"):
+        if data.get(key) not in (None, False, ""):
+            step[key] = data[key]
+    return step
+
+
+def attachment_view(attachment: Row) -> Row:
+    return {
+        "id": attachment["id"],
+        "name": attachment["name"],
+        "media_type": attachment["media_type"],
+        "size": attachment["size"],
+        "direction": attachment["direction"],
+        "at": attachment["at"],
+    }
 
 
 def env_view(env: Row) -> Row:
