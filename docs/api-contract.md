@@ -829,6 +829,23 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 
 智能体多一个只读工具 `llm_bridge_queue`（`session_id`）：看自己能访问的会话的队列。改内容、调顺序只在聊天页（owner / admin）。
 
+**会话内容落库与附件**（T-0236 第二步，`docs/v2/LLM_BRIDGE_QUEUE_PLAN.md` 第 3 节）。
+
+- 每条提问、每段回答、每个过程事件（命令、改动的文件、读文件和搜索等工具调用、工具结果）都存在管理器的数据库里；工具结果超过 64 KB 截断并标记。会话内容（`GET .../chat/sessions/{session_id}`）从这些记录里拼出来。
+- 消息多两项：`attachments`（`id`、`name`、`media_type`、`size`、`direction`：`input` 人带上的 / `output` 模型产出的）、`imported`（官方程序里原有的内容）。过程的每一步多 `name`（工具名）、`truncated`、`error`、`exit_code`；`kind` 多了 `tool` / `tool_result` / `image` / `file`。
+- 官方程序里已有的会话（`origin=external`）第一次打开时向官方程序读一次全部内容存下来，之后读库；经工作台发的回合按回合存，不重复导入。
+- 发送（`POST .../chat/sessions/{session_id}/messages`）多一项 `attachments`：先上传得到的附件编号，最多 8 个；一个附件只能随一条消息发出去。图片直接交给模型；别的文件放进会话工作目录的 `attachments/` 下，并在给模型的提问末尾注明路径（存下来的提问仍是原话）。
+- 开发会话里模型改动、新建的文件（工作目录之内、单个不超过 20 MB、每回合最多 50 个）和模型画的图收成 `output` 附件。
+
+| 接口 | 说明 |
+|---|---|
+| `POST .../chat/sessions/{session_id}/attachments?name=` | 上传一个附件（admin）。请求体就是文件内容，单个最多 20 MB（超过 `413`）。图片（PNG / JPEG / GIF / WebP，核对文件头）在哪种会话里都能带；文本、代码、PDF、ZIP 只能在开发会话里带；别的类型、内容和扩展名对不上 `422` |
+| `DELETE .../chat/sessions/{session_id}/attachments/{attachment_id}` | 去掉一个上传了还没发出去的附件；已经发出去的 `409`。没发出去的附件过一天自动清掉 |
+| `GET .../chat/sessions/{session_id}/attachments/{attachment_id}` | 下载（admin）。只有四种图片内联显示，别的一律 `Content-Disposition: attachment`；带 `X-Content-Type-Options: nosniff` 和沙箱 CSP |
+| `POST .../chat/sessions/{session_id}/reimport` | 官方程序里已有的会话重新导入一次内容；不是这类会话 `409` |
+
+智能体的工具没有变化：`llm_bridge_send` 不带附件（智能体没有上传的途径）。
+
 **额度与额度用完后的自动继续**（T-0237，`docs/v2/LLM_BRIDGE_QUOTA_PLAN.md`）。
 
 - 平台给的是**已用百分比和重置时间**，不是剩余 token 数。Codex 可以随时查；Claude / WorkBuddy 只在跑回合时顺带报出来，接口给的是最近一次看到的。
