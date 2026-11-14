@@ -6,6 +6,7 @@ import asyncio
 import json
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -243,6 +244,19 @@ async def test_cli_turns_resume_and_transcripts(tmp_path: Path) -> None:
     assert await driver.read("../../etc/passwd", None) == []
     # 各沙箱档位对应的参数
     read_only = SessionSpec(mode="dev", model=None, workdir=tmp_path / "w", native_id=native)
+    # 带图片的提问：按一条 stream-json 的用户消息从标准输入给，图片是 base64 的 image 内容块
+    picture = tmp_path / "p.png"
+    picture.write_bytes(b"\x89PNG\r\n\x1a\n1234")
+    with_image = replace(spec, images=((str(picture), "image/png"),))
+    seen = await driver.run_turn(with_image, "看图", Sink())
+    assert seen.text.endswith(":: 看图 images=1"), seen.text
+    # 读文件这类工具调用和它的结果也报出来（命令、改文件照旧）
+    tools = Sink()
+    await driver.run_turn(spec, "read", tools)
+    kinds = [kind for kind, _ in tools.events]
+    assert kinds[:2] == ["tool", "tool_result"], kinds
+    assert tools.events[0][1]["name"] == "Read" and "README.md" in tools.events[0][1]["input"]
+    assert tools.events[1][1] == {"name": "Read", "text": "# 说明\n内容", "error": False}
     assert "tools='Read,Glob,Grep'" in (await driver.run_turn(read_only, "x", Sink())).text
     full = SessionSpec(
         mode="dev", model=None, workdir=tmp_path / "w", sandbox="exec", native_id=native

@@ -72,6 +72,8 @@ class SessionSpec:
     native_id: str | None = None
     turn_count: int = 0
     env: dict[str, str] = field(default_factory=dict)  # 管理员给环境勾选的变量
+    # 这一回合随提问带上的图片：(绝对路径, 类型)。别的文件由 engine 放进工作目录，在提问里注明
+    images: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass

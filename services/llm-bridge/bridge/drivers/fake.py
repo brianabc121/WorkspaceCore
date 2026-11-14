@@ -39,6 +39,7 @@ class FakeDriver(Driver):
         self.max_running = 0
         self._cancel: dict[str, asyncio.Event] = {}
         # 额度：quota_until 之前的回合都以“额度用完”失败；quota_reports_reset=False 时不给重置时间
+        self.last_images: tuple[tuple[str, str], ...] = ()
         self.quota_until = 0.0
         self.quota_reports_reset = True
         self.current_quota: list[dict[str, Any]] = []
@@ -104,6 +105,9 @@ class FakeDriver(Driver):
                 if done:
                     raise DriverError("platform_error", "回合被中断")
             reply = f"[{spec.model}] {text}"
+            if spec.images:
+                reply += f"（收到 {len(spec.images)} 张图片）"
+            self.last_images = spec.images
             commands: list[str] = []
             files: list[str] = []
             if text.startswith("work:"):
@@ -117,6 +121,18 @@ class FakeDriver(Driver):
                 waiter.cancel()
                 if done:
                     raise DriverError("platform_error", "回合被中断")
+            if text.startswith("read:"):
+                # 模拟读文件这类工具调用和它的结果
+                await sink("tool", {"name": "Read", "input": '{"file_path": "' + text[5:] + '"}'})
+                await sink("tool_result", {"name": "Read", "text": "文件内容", "error": False})
+            if text.startswith("write:"):
+                # 模拟开发回合在工作目录里写出一个文件（write:<相对路径>）
+                name = text[6:].split("\n")[0]
+                target = spec.workdir / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("generated\n")
+                files = [name]
+                await sink("files", {"paths": files})
             history = self.history.setdefault(spec.native_id, [])
             history += [
                 Message("user", text, time.time()),

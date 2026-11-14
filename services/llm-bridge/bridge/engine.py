@@ -20,16 +20,17 @@ import re
 import shutil
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from bridge import attachments as files
 from bridge import quota
 from bridge.channels import SLOT_LABELS, Channel, find
 from bridge.config import Settings
 from bridge.drivers.base import Driver, DriverError, Mode, SessionSpec
 from bridge.redact import mask_identity, redact
-from bridge.store import Row, Store, message_of
+from bridge.store import Row, Store, message_of, new_id
 
 logger = logging.getLogger("bridge.engine")
 
@@ -252,6 +253,10 @@ class Engine:
             )
         for turn in self.store.list_turns(statuses=("queued",), limit=10_000):
             self._enqueue(turn)
+        # 上传了但一直没有随消息发出去的附件：过一天就清掉
+        for stale in self.store.stale_uploads(time.time() - files.STALE_UPLOAD_SECONDS):
+            (self.attachment_root / stale["path"]).unlink(missing_ok=True)
+            self.store.delete_attachment(stale["id"])
         self._resumer = asyncio.create_task(self._resume_loop(), name="quota-resume")
 
     def _limiter(self, platform: str) -> SlotLimiter:
@@ -738,6 +743,7 @@ class Engine:
         text: str,
         request_id: str,
         wait_seconds: float = 0,
+        attachments: list[str] | None = None,
     ) -> Row:
         self._need(caller, "write")
         if not _REQUEST_ID_RE.match(request_id or ""):
@@ -764,7 +770,11 @@ class Engine:
             raise BridgeError("RATE_LIMITED", "这个调用方本小时的发送次数已到上限")
         self._require_platform(session["platform"])
         await self.require_ready(session["slot"])
+        attached = self._pending_attachments(session, attachments or [])
         turn = self.store.create_turn(session_id, caller.id, request_id, text, by=caller.label)
+        asked = self.store.user_message(turn["id"])
+        if attached and asked is not None:
+            self.store.bind_attachments([a["id"] for a in attached], turn["id"], asked["id"])
         self.store.add_event(session_id, turn["id"], "queued", {"by": caller.label})
         self._enqueue(turn)
         return await self.wait_turn(turn["id"], wait_seconds)
@@ -843,9 +853,28 @@ class Engine:
         driver = self._driver(session["slot"])
         spec = self._spec(session)
 
+        text = turn["text"]
+        inputs = self.store.turn_attachments(turn_id, "input")
+        if inputs:
+            # 图片直接交给模型；别的文件放进工作目录，在提问里注明，由模型自己读
+            spec = replace(
+                spec,
+                images=tuple(
+                    (str(self.attachment_root / a["path"]), a["media_type"])
+                    for a in inputs
+                    if files.is_image(a["media_type"])
+                ),
+            )
+            placed = self._place_files(spec.workdir, inputs)
+            if placed:
+                text += f"\n\n（随这条消息带来的文件已放在工作目录里：{'、'.join(placed)}）"
+
         async def sink(kind: str, payload: Row) -> None:
             if kind == "quota":  # 官方程序报出的额度：记下来，不算会话里的事件
                 self._save_quota(session["slot"], payload.get("windows") or [])
+                return
+            if kind == "image":  # 模型画的图：收进附件，事件里只留名字
+                self._collect_output(session, turn_id, Path(str(payload.get("path"))), image=True)
                 return
             clean = {k: redact(v) if isinstance(v, str) else v for k, v in payload.items()}
             self.store.add_event(session_id, turn_id, kind, clean)
@@ -856,7 +885,7 @@ class Engine:
 
         try:
             async with asyncio.timeout(self.setting("turn_timeout_seconds")):
-                outcome = await driver.run_turn(spec, turn["text"], sink)
+                outcome = await driver.run_turn(spec, text, sink)
         except TimeoutError:
             await driver.cancel(spec)
             self.store.add_event(session_id, turn_id, "failed", {"kind": "timeout"})
@@ -892,6 +921,9 @@ class Engine:
         if not session["title"]:
             fields["title"] = " ".join(turn["text"].split())[:120]
         self.store.update_session(session_id, **fields)
+        if session["mode"] == "dev":  # 开发会话里改动、新建的文件收进附件
+            for path in list(dict.fromkeys(outcome.files))[: files.MAX_OUTPUT_PER_TURN]:
+                self._collect_output(session, turn_id, Path(path))
         result = redact(outcome.text)
         said = [
             m["text"]
@@ -997,6 +1029,152 @@ class Engine:
         if session is None:
             raise BridgeError("NOT_FOUND", "没有这个会话")
         return session
+
+    # ---- 附件（T-0236 第二步）----
+    @property
+    def attachment_root(self) -> Path:
+        return self.settings.data_dir / "attachments"
+
+    def _put_attachment(
+        self,
+        session_id: str,
+        direction: str,
+        name: str,
+        media_type: str,
+        data: bytes,
+        *,
+        turn_id: str | None = None,
+        message_id: str | None = None,
+    ) -> Row:
+        attachment_id = new_id("ba")
+        folder = self.attachment_root / session_id
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / attachment_id  # 文件名是自己生成的编号，不用上传的名字
+        target.write_bytes(data)
+        target.chmod(0o600)
+        return self.store.add_attachment(
+            session_id,
+            direction,
+            name,
+            media_type,
+            len(data),
+            hashlib.sha256(data).hexdigest(),
+            f"{session_id}/{attachment_id}",
+            attachment_id=attachment_id,
+            turn_id=turn_id,
+            message_id=message_id,
+        )
+
+    def upload_attachment(self, session_id: str, name: str, data: bytes) -> Row:
+        """收下一个要随下一条消息发出去的文件；发送时用返回的 id 带上。"""
+        session = self._required_session(session_id)
+        if session["status"] != "active":
+            raise BridgeError("CONFLICT", "会话已归档，不能再发送")
+        name = files.safe_name(name)
+        media_type = files.input_type(name)
+        if media_type is None:
+            raise BridgeError(
+                "VALIDATION_FAILED",
+                "不支持这种文件：可以带图片（PNG / JPEG / GIF / WebP）、文本和代码、PDF、ZIP",
+            )
+        if not data:
+            raise BridgeError("VALIDATION_FAILED", "文件是空的")
+        if len(data) > files.MAX_BYTES:
+            raise BridgeError("VALIDATION_FAILED", "文件太大（单个最多 20 MB）")
+        if not files.looks_like(media_type, data):
+            raise BridgeError("VALIDATION_FAILED", "文件内容和扩展名对不上")
+        if session["mode"] != "dev" and not files.is_image(media_type):
+            raise BridgeError(
+                "VALIDATION_FAILED",
+                "对话会话只能带图片；别的文件要在开发会话里用（模型在工作目录里读）",
+            )
+        pending = [
+            a
+            for a in self.store.list_attachments(session_id)
+            if a["direction"] == "input" and a["turn_id"] is None
+        ]
+        if len(pending) >= files.MAX_PENDING_UPLOADS:
+            raise BridgeError("CONFLICT", "这个会话里还没发出去的附件太多了，先发送或等一会儿")
+        return attachment_view(self._put_attachment(session_id, "input", name, media_type, data))
+
+    def discard_upload(self, session_id: str, attachment_id: str) -> None:
+        """去掉一个上传了还没发出去的附件。"""
+        row = self.store.get_attachment(attachment_id)
+        if row is None or row["session_id"] != session_id:
+            raise BridgeError("NOT_FOUND", "没有这个附件")
+        if row["turn_id"] is not None or row["direction"] != "input":
+            raise BridgeError("CONFLICT", "这个附件已经随消息发出去了")
+        (self.attachment_root / row["path"]).unlink(missing_ok=True)
+        self.store.delete_attachment(attachment_id)
+
+    def _pending_attachments(self, session: Row, ids: list[str]) -> list[Row]:
+        if len(ids) > files.MAX_PER_MESSAGE or len(set(ids)) != len(ids):
+            raise BridgeError(
+                "VALIDATION_FAILED", f"一条消息最多带 {files.MAX_PER_MESSAGE} 个附件，不能重复"
+            )
+        rows: list[Row] = []
+        for attachment_id in ids:
+            row = self.store.get_attachment(attachment_id)
+            if row is None or row["session_id"] != session["id"] or row["direction"] != "input":
+                raise BridgeError("VALIDATION_FAILED", "没有这个附件，或者它不是这个会话的")
+            if row["turn_id"] is not None:
+                raise BridgeError("CONFLICT", "这个附件已经随另一条消息发出去了")
+            rows.append(row)
+        return rows
+
+    def _place_files(self, workdir: Path, inputs: list[Row]) -> list[str]:
+        """把不是图片的附件放进工作目录的 attachments/ 下，返回相对路径。"""
+        placed: list[str] = []
+        for attachment in inputs:
+            if files.is_image(attachment["media_type"]):
+                continue
+            folder = workdir / "attachments"
+            folder.mkdir(parents=True, exist_ok=True)
+            # 前面带上附件编号的后几位：同名的文件不互相覆盖
+            target = folder / f"{attachment['id'][-6:]}-{attachment['name']}"
+            shutil.copyfile(self.attachment_root / attachment["path"], target)
+            placed.append(f"attachments/{target.name}")
+        return placed
+
+    def _collect_output(
+        self, session: Row, turn_id: str, path: Path, *, image: bool = False
+    ) -> None:
+        """模型产出的文件收进附件：只收数据卷里（图片）或这个会话工作目录里的普通文件。"""
+        root = self.settings.data_dir if image else Path(session["workdir"])
+        try:
+            real = (path if path.is_absolute() else root / path).resolve()
+            if not real.is_relative_to(root.resolve()) or not real.is_file():
+                return
+            if real.is_relative_to(self.attachment_root.resolve()):
+                return  # 附件目录里的不再收一遍
+            if real.stat().st_size > files.MAX_BYTES:
+                return
+            data = real.read_bytes()
+        except OSError:
+            return
+        media_type = files.output_type(real.name)
+        if image and not (files.is_image(media_type) and files.looks_like(media_type, data)):
+            return
+        if len(self.store.turn_attachments(turn_id, "output")) >= files.MAX_OUTPUT_PER_TURN:
+            return
+        name = files.safe_name(real.name)
+        message_id = self.store.add_message(
+            session["id"], turn_id, "process", "image" if image else "file", name
+        )
+        self._put_attachment(
+            session["id"], "output", name, media_type, data, turn_id=turn_id, message_id=message_id
+        )
+        if image:
+            self.store.add_event(session["id"], turn_id, "image", {"name": name})
+
+    def attachment_file(self, session_id: str, attachment_id: str) -> tuple[Row, Path]:
+        row = self.store.get_attachment(attachment_id)
+        if row is None or row["session_id"] != session_id:
+            raise BridgeError("NOT_FOUND", "没有这个附件")
+        path = self.attachment_root / row["path"]
+        if not path.is_file():
+            raise BridgeError("NOT_FOUND", "这个附件的文件已经不在了")
+        return row, path
 
     async def _imported(self, session: Row, *, again: bool = False) -> list[Row]:
         """官方程序里已有的会话：第一次打开时向官方程序读一次全部内容存进 messages，之后读库。

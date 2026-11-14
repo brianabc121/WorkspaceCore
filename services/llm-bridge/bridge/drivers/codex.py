@@ -351,7 +351,11 @@ class CodexDriver(Driver):
         try:
             params: dict[str, Any] = {
                 "threadId": thread_id,
-                "input": [{"type": "text", "text": text}],
+                # 图片按本机路径给（UserInput 的 localImage，app-server v2 schema）
+                "input": [
+                    {"type": "text", "text": text},
+                    *({"type": "localImage", "path": path} for path, _ in spec.images),
+                ],
                 "approvalPolicy": "never",
                 "sandboxPolicy": self._sandbox_policy(spec),
             }
@@ -396,6 +400,30 @@ class CodexDriver(Driver):
                     paths = [str(c.get("path")) for c in item.get("changes") or [] if c.get("path")]
                     outcome.files.extend(paths)
                     await sink("files", {"paths": paths})
+                elif kind == "mcpToolCall":
+                    name = f"{item.get('server') or ''}.{item.get('tool') or ''}".strip(".")
+                    await sink(
+                        "tool",
+                        {
+                            "name": name,
+                            "input": json.dumps(item.get("arguments"), ensure_ascii=False),
+                        },
+                    )
+                    if item.get("result") is not None or item.get("error") is not None:
+                        body = item.get("error") or item.get("result")
+                        await sink(
+                            "tool_result",
+                            {
+                                "name": name,
+                                "text": json.dumps(body, ensure_ascii=False),
+                                "error": item.get("error") is not None,
+                            },
+                        )
+                elif kind == "webSearch" and item.get("query"):
+                    await sink("tool", {"name": "web_search", "input": str(item["query"])})
+                elif kind == "imageGeneration" and isinstance(item.get("savedPath"), str):
+                    # 模型画的图：官方程序已经存成文件，交给 engine 收进附件
+                    await sink("image", {"path": item["savedPath"]})
             elif method == "thread/tokenUsage/updated":
                 last = (params.get("tokenUsage") or {}).get("last") or {}
                 outcome.usage = {

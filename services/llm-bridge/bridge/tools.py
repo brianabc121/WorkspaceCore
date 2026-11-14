@@ -36,6 +36,11 @@ class SessionCreateInput(ChannelInput):
 class SendInput(_Input):
     session_id: str = Field(description="会话号（llm_session_create 返回的 session_id）")
     text: str = Field(min_length=1, description="要发送的消息")
+    attachments: list[str] = Field(
+        default=[],
+        max_length=8,
+        description="随这条消息带上的附件编号（由工作台上传得到；智能体一般不用填）",
+    )
     request_id: str = Field(
         min_length=1,
         max_length=100,

@@ -43,7 +43,16 @@ def value(flag):
 
 
 assert "-p" in args and value("--output-format") == "stream-json" and "--verbose" in args
-text = sys.stdin.read()
+text, images = sys.stdin.read(), 0
+if value("--input-format") == "stream-json":
+    # 带图片的提问：一条 stream-json 的用户消息，内容是 text 块和 base64 的 image 块
+    blocks = json.loads(text)["message"]["content"]
+    text = "".join(b["text"] for b in blocks if b["type"] == "text")
+    images = sum(
+        1
+        for b in blocks
+        if b["type"] == "image" and b["source"]["type"] == "base64" and b["source"]["data"]
+    )
 session = value("--session-id") or value("--resume")
 transcript = CONFIG / "projects" / "-fake-cwd" / f"{session}.jsonl"
 if value("--session-id") and transcript.exists():
@@ -96,6 +105,36 @@ if text == "hang":
     time.sleep(60)
 transcript.parent.mkdir(parents=True, exist_ok=True)
 reply = f"model={value('--model')} tools={value('--tools')!r} perm={value('--permission-mode')} leak={os.environ.get('BRIDGE_ADMIN_TOKEN')} extra={os.environ.get('EXTRA_VAR')} :: {text}"
+if images:
+    reply += f" images={images}"
+if text == "read":
+    # 读文件这类工具调用：先报调用，结果作为一条 user 消息报回来
+    emit(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "Read",
+                        "input": {"file_path": "README.md"},
+                    }
+                ]
+            },
+        }
+    )
+    emit(
+        {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "# 说明\n内容"}
+                ],
+            },
+        }
+    )
 with transcript.open("a") as handle:
     handle.write(
         json.dumps(
