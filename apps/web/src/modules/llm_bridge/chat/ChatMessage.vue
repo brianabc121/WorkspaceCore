@@ -39,6 +39,8 @@ const failure = computed(() => {
 // 额度用完被打断：按续跑的状态说明接下来会怎样
 const interrupted = computed(() => {
   if (status.value !== 'interrupted') return null
+  // 被后面插入的消息打断（不是额度）：新回合里会接着做，没有什么可点的
+  if (props.message.failure?.kind === 'superseded') return { text: '这一回合被后面插入的消息打断了；新消息里会接着做。', canNow: false, canCancel: false }
   const resume = props.message.resume, at = resume?.at ? seconds(resume.at) : ''
   const state = resume?.state ?? null
   const text = state === 'pending' ? `额度用完，这一回合中断了。${at ? `${at} ` : '额度重置后'}自动继续。`
@@ -59,6 +61,8 @@ const busy = computed(() => !!props.resuming && props.resuming === props.message
       <time v-if="message.at">{{ seconds(message.at) }}</time>
       <span v-if="status === 'cancelled'" class="lc-tag">已停止</span>
       <span v-if="status === 'interrupted'" class="lc-tag">已中断</span>
+      <span v-if="message.delivery === 'inserted'" class="lc-tag" title="在上一条还没答完时插进去的，进了正在处理的那一回合">插入</span>
+      <span v-if="message.delivery === 'merged'" class="lc-tag" title="插入时平台没有收下：中断了上一回合，这条消息带着“接着刚才的做”重新开始">插入（合并重发）</span>
       <span v-if="message.imported" class="lc-tag" title="官方程序里原有的内容，第一次打开时导入的">导入的</span>
     </div>
     <details v-if="reply && message.steps?.length" class="lc-steps" :open="pending">

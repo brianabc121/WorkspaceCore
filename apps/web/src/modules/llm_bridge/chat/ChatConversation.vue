@@ -25,13 +25,16 @@ function scrollDown(force = false) {
   if (force) stick = true
   void nextTick(() => { const el = box.value; if (el && stick) el.scrollTop = el.scrollHeight })
 }
-const { conversation, session, messages, lost, activeTurn, poll, sent, resume, resuming, resumeError } = useLiveConversation(
+const { conversation, session, messages, lost, activeTurn, poll, reload, sent, resume, resuming, resumeError } = useLiveConversation(
   props.chat, bridgeId, toRef(props, 'sessionId'), { activity: () => scrollDown(), changed: () => emit('changed') },
 )
 
 // ---- 发送 ----
 const draft = ref(props.initialDraft ?? ''), sending = ref(false), stopping = ref(false), sendError = ref(props.initialError ?? '')
 const confirmed = ref(false)
+// 会话在处理别的消息时：排队（默认，不打断）还是插入（送进正在处理的回合；平台做不到就中断它、合并重发）
+const sendMode = ref<'queue' | 'insert'>('queue'), sendNotice = ref('')
+const inserting = computed(() => sendMode.value === 'insert' && activeTurn.value?.status === 'running')
 // 结果未知时再点发送：同一段文字用同一个幂等号，不会发两次
 let pending: { text: string; id: string } | null = null
 const foreign = computed(() => !!session.value && session.value.owner_kind !== 'me')
@@ -60,8 +63,8 @@ async function submit() {
   if (uploading.value) { sendError.value = '附件还在上传，传完再发。'; return }
   if (pending?.text !== text) pending = { text, id: newRequestId() }
   const files = [...attached.value]
-  const body = { text, request_id: pending.id, ...(files.length ? { attachments: files.map(a => a.id) } : {}) }
-  sending.value = true; sendError.value = ''
+  const body = { text, request_id: pending.id, ...(files.length ? { attachments: files.map(a => a.id) } : {}), ...(inserting.value ? { mode: 'insert' as const } : {}) }
+  sending.value = true; sendError.value = sendNotice.value = ''
   try {
     let turn
     try { turn = await props.chat.send(props.bridge.id, props.sessionId, { ...body, takeover: foreign.value }) }
@@ -70,8 +73,18 @@ async function submit() {
       if (!needsTakeover(e) || !allowTakeover()) throw e
       turn = await props.chat.send(props.bridge.id, props.sessionId, { ...body, takeover: true })
     }
-    pending = null; draft.value = ''; attached.value = []
-    stick = true; sent(turn, text, files); emit('changed')
+    pending = null; draft.value = ''; attached.value = []; sendMode.value = 'queue'
+    stick = true
+    if (turn.delivered === 'inserted') {
+      // 没有新回合：消息进了正在处理的那一回合，重新读一次把它显示在那一问后面
+      sendNotice.value = '已插入：这条消息送进了正在处理的回合。'
+      await reload()
+    } else {
+      if (turn.delivered === 'merged') sendNotice.value = '平台没有收下插入的消息：已中断上一回合，这条消息会带着“接着刚才没做完的继续”重新开始。'
+      sent(turn, text, files)
+      if (turn.delivered === 'merged') void reload()
+    }
+    emit('changed')
     void props.chat.invalidateQueue(props.bridge.id, props.sessionId)
   } catch (e) {
     sendError.value = needsTakeover(e) ? '没有发送：接着别人建的会话发消息前需要确认。' : chatError(e)
@@ -171,7 +184,7 @@ function archive() {
         <template v-else-if="session">
           <p v-if="!messages.length" class="lc-none">这个会话里还没有消息。</p>
           <ol v-else class="lc-messages" aria-label="消息">
-            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? i}:${m.role}`" :message="m" :platform="platformName(session.platform)" :resuming="resuming" :source="source" @resume="resume" />
+            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :resuming="resuming" :source="source" @resume="resume" />
           </ol>
           <p v-if="resumeError" class="lc-note is-red" role="alert">{{ resumeError }}</p>
           <p v-if="lost" class="lc-note is-red" role="alert">{{ lost }} <button type="button" class="asv-link" @click="poll()">重试</button></p>
@@ -194,7 +207,12 @@ function archive() {
             <button v-if="activeTurn" type="button" class="secondary-button" :disabled="stopping" @click="stop"><Square aria-hidden="true" />{{ stopping ? '正在停止…' : '停止' }}</button>
             <button type="submit" class="primary-button" :disabled="sending || !draft.trim()"><Send aria-hidden="true" />{{ sending ? '正在发送…' : '发送' }}</button>
           </div>
-          <p v-if="activeTurn" class="lc-hint">上一条还没答完：现在发的不会打断它，会进队列，等前面的做完再发给模型。</p>
+          <fieldset v-if="activeTurn?.status === 'running'" class="lc-mode" aria-label="上一条还没答完时怎么发">
+            <label class="check-field"><input v-model="sendMode" type="radio" name="lc-send-mode" value="queue" />排队</label>
+            <label class="check-field"><input v-model="sendMode" type="radio" name="lc-send-mode" value="insert" />插入</label>
+          </fieldset>
+          <p v-if="activeTurn" class="lc-hint">{{ inserting ? '插入：这条消息直接送进正在处理的回合。平台做不到时，会中断正在处理的回合，把这条消息和“接着刚才没做完的继续”一起重新发。' : '上一条还没答完：现在发的不会打断它，会进队列，等前面的做完再发给模型。' }}</p>
+          <p v-if="sendNotice" class="lc-note" role="status">{{ sendNotice }}</p>
         </template>
         <p v-if="sendError" class="lc-note is-red" role="alert">{{ sendError }}</p>
       </form>

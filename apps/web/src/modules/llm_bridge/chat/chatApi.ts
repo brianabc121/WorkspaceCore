@@ -114,8 +114,8 @@ export function useLlmChat(scope: string) {
       await cache.invalidateQueries({ queryKey: key(bridge, 'sessions') })
       return out
     },
-    // attachments 没有就不传（生成的类型把有默认值的字段也标成必填）
-    async send(bridge: string, session: string, body: Omit<Schema['LlmChatSendIn'], 'attachments'> & { attachments?: string[] }) {
+    // attachments、mode 没有就不传（生成的类型把有默认值的字段也标成必填）
+    async send(bridge: string, session: string, body: Omit<Schema['LlmChatSendIn'], 'attachments' | 'mode'> & { attachments?: string[]; mode?: Schema['LlmChatSendIn']['mode'] }) {
       return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/messages', { params: sessionAt(bridge, session), body: body as Schema['LlmChatSendIn'] }))
     },
     // ---- 附件与旧会话的导入（docs/v2/LLM_BRIDGE_QUEUE_PLAN.md 第 3 节）----

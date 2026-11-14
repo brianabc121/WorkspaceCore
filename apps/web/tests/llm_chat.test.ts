@@ -472,6 +472,54 @@ describe('大模型聊天', () => {
     expect(writes(requests).some(r => path(r).endsWith('/reimport'))).toBe(true)
   })
 
+  it('inserts a message into the running turn, or says it was merged when the platform refused', async () => {
+    const running = () => talk({ busy: true }, [asked('跑一个长任务'), answered('', T1, { status: 'running' })])
+    const bodies: Schema['LlmChatSendIn'][] = []
+    const never = () => new Promise<Events>(() => undefined)
+    const { world } = setup('owner', { conversations: { [S1]: running() }, events: [never()] }, async (r, w) => {
+      if (path(r) !== `${chat}/sessions/${S1}/messages` || r.method !== 'POST') return undefined
+      const body = await r.json() as Schema['LlmChatSendIn']
+      bodies.push(body)
+      if (bodies.length === 1) {
+        // 平台收下了：没有新回合，消息出现在正在处理的那一问后面
+        w.conversations[S1] = talk({ busy: true }, [asked('跑一个长任务'), asked('顺便看日志', T1, { delivery: 'inserted' }), answered('', T1, { status: 'running' })])
+        return Response.json({ ...turn(T1, 'running'), delivered: 'inserted' })
+      }
+      // 平台没收下：上一回合被打断，新回合带着这条消息
+      w.conversations[S1] = talk({ busy: true }, [
+        asked('跑一个长任务'), asked('顺便看日志', T1, { delivery: 'inserted' }),
+        answered('做到一半', T1, { status: 'interrupted', failure: { kind: 'superseded', message: '被后面插入的消息打断' } }),
+        asked('先改这里', T2, { delivery: 'merged' }), answered('', T2, { status: 'running' }),
+      ])
+      return Response.json({ ...turn(T2, 'queued'), delivered: 'merged' })
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const modes = await screen.findByRole('group', { name: '上一条还没答完时怎么发' })
+    expect(within(modes).getByRole('radio', { name: '排队' })).toBeChecked()
+    expect(screen.getByText(/现在发的不会打断它，会进队列/)).toBeVisible()
+    await fireEvent.click(within(modes).getByRole('radio', { name: '插入' }))
+    expect(screen.getByText(/插入：这条消息直接送进正在处理的回合。/)).toBeVisible()
+    const box = await composer()
+    await fireEvent.update(box, '顺便看日志')
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    expect(await screen.findByText('已插入：这条消息送进了正在处理的回合。')).toBeVisible()
+    expect(bodies[0]).toMatchObject({ text: '顺便看日志', mode: 'insert' })
+    expect(await screen.findByText('插入', { selector: '.lc-tag' })).toBeVisible()
+    expect(messages()).toHaveLength(3)
+    // 发完回到“排队”，要插入得再选一次
+    expect(within(screen.getByRole('group', { name: '上一条还没答完时怎么发' })).getByRole('radio', { name: '排队' })).toBeChecked()
+
+    world.events = [never()]
+    await fireEvent.click(within(screen.getByRole('group', { name: '上一条还没答完时怎么发' })).getByRole('radio', { name: '插入' }))
+    await fireEvent.update(box, '先改这里')
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    expect(await screen.findByText(/平台没有收下插入的消息：已中断上一回合/)).toBeVisible()
+    expect(bodies[1]).toMatchObject({ text: '先改这里', mode: 'insert' })
+    expect(await screen.findByText('这一回合被后面插入的消息打断了；新消息里会接着做。')).toBeVisible()
+    expect(screen.getByText('插入（合并重发）')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '现在就试' })).not.toBeInTheDocument()
+  })
+
   it('creates a session: only logged-in platforms, a development session needs an environment', async () => {
     const bodies: Schema['LlmChatCreateIn'][] = []
     const { requests } = setup('owner', { options: { models: [{ id: 'gpt-5', name: 'GPT-5', description: '', default: true, efforts: ['low', 'high'] }], models_error: '', environments: [environment(ENV, '工作台仓库'), environment(ENV2, '文档仓库')] } }, async (r, w) => {

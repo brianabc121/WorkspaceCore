@@ -208,3 +208,4 @@
 .lc-attached li { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 4px 2px 10px; border-radius: 999px; background: var(--surface-2); font-size: .8rem; }
 .lc-step-kind.is-error { color: var(--danger); }
 .lc-col .lc-files { max-width: 100%; }
+.lc-mode { display: flex; gap: 14px; margin: 0; padding: 0; border: 0; font-size: .82rem; }
