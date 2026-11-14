@@ -155,7 +155,7 @@ async function main() {
     step('模块默认停用（接口 404 MODULE_DISABLED、侧栏没有入口），在应用中心启用')
 
     // ---------------------------------------------------------------- 添加 1 号：只控制 Claude / WorkBuddy
-    await page.goto(`${base}/llm_bridge`)
+    await page.goto(`${base}/llm_bridge?view=manage`)
     await page.getByRole('heading', { name: '大模型客户端管理', level: 1 }).waitFor()
     await sidebar(page).getByRole('link', { name: '大模型客户端', exact: true }).waitFor()
     await page.getByText('还没有 MCP 管理器。').waitFor()
@@ -400,7 +400,7 @@ async function main() {
 
     // ---------------------------------------------------------------- admin 只读、member 看不到
     const admin = await login(browser, adminEmail, problems, 'admin')
-    await openAs(admin.page, workspace, '/llm_bridge')
+    await openAs(admin.page, workspace, '/llm_bridge?view=manage')
     await admin.page.getByText('只有 owner 能修改大模型客户端；你看到的是只读视图。').waitFor()
     await card(admin.page, ONE).waitFor()
     await account(admin.page, WORKBUDDY).getByText('未登录').waitFor({ timeout: 60000 })
@@ -424,7 +424,7 @@ async function main() {
 
     // ---------------------------------------------------------------- 手机宽度
     const phone = await login(browser, ownerEmail, problems, 'owner（手机）', { width: 390, height: 844 })
-    await phone.page.goto(`${base}/llm_bridge`)
+    await phone.page.goto(`${base}/llm_bridge?view=manage`)
     await account(phone.page, WORKBUDDY).getByText('未登录').waitFor({ timeout: 60000 })
     await platformsOn(phone.page, ONE)
     check(await noHorizontalScroll(phone.page), '手机宽度下页面不应横向滚动')

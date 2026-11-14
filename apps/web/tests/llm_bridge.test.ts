@@ -55,7 +55,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 describe('大模型客户端管理', () => {
   it('shows the registered bridges, the account states and the channels', async () => {
     const requests = setup('owner')
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     expect(await screen.findByRole('heading', { level: 1, name: '大模型客户端管理' })).toBeVisible()
     const list = await screen.findByRole('region', { name: 'MCP 管理器' })
     expect(await within(list).findByRole('button', { name: '查看 MCP 管理器：主账号' })).toBeVisible()
@@ -83,7 +83,7 @@ describe('大模型客户端管理', () => {
       if (r.method === 'POST') { bridges = [bridge]; return Response.json(bridge, { status: 201 }) }
       return Response.json({ bridges })
     })
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     expect(await screen.findByText('还没有 MCP 管理器。')).toBeVisible()
     expect(screen.getByText(/可以添加多个，各自一套账号。$/, { selector: '.lb-empty p' })).toBeVisible()
 
@@ -117,7 +117,7 @@ describe('大模型客户端管理', () => {
 
   it('gives an admin a read-only view without any write control', async () => {
     const requests = setup('admin', r => (path(r) === `${base}/environments` ? Response.json({ environments: [{ id: 'be_0123456789abcdef0123', platform: 'codex', mode: 'dev', name: '工作台仓库', enabled: true, repo_url: 'https://github.com/o/r', branch: 'main', sandbox: 'workspace_write', network: false, description: '' }] }) : undefined))
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     expect(await screen.findByText('只有 owner 能修改大模型客户端；你看到的是只读视图。')).toBeVisible()
     await screen.findByRole('article', { name: '账号：Claude' })
     for (const name of [/^添加 MCP 管理器$/, /^修改/, /^删除/, /^停用/, /^登录/, /^退出登录/, /^更换账号/]) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
@@ -146,7 +146,7 @@ describe('大模型客户端管理', () => {
       if (polls >= 2) loggedIn = true
       return Response.json({ state: loggedIn ? 'done' : 'pending', detail: '' })
     })
-    const view = await openApp('/llm_bridge')
+    const view = await openApp('/llm_bridge?view=manage')
     const card = await screen.findByRole('article', { name: '账号：OpenAI（ChatGPT / Codex）' })
     await fireEvent.click(within(card).getByRole('button', { name: '登录OpenAI（ChatGPT / Codex）' }))
     const form = within(card).getByRole('form', { name: '登录OpenAI（ChatGPT / Codex）' })
@@ -177,7 +177,7 @@ describe('大模型客户端管理', () => {
       polls += 1
       return Response.json({ state: 'pending', detail: '' })
     })
-    const view = await openApp('/llm_bridge')
+    const view = await openApp('/llm_bridge?view=manage')
     const card = await screen.findByRole('article', { name: '账号：OpenAI（ChatGPT / Codex）' })
     await fireEvent.click(within(card).getByRole('button', { name: '登录OpenAI（ChatGPT / Codex）' }))
     await fireEvent.click(within(card).getByLabelText('设备码登录'))
@@ -201,7 +201,7 @@ describe('大模型客户端管理', () => {
       }
       return undefined
     })
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     const card = await screen.findByRole('article', { name: '账号：Claude' })
     await fireEvent.click(within(card).getByRole('button', { name: '登录Claude' }))
     const form = within(card).getByRole('form', { name: '登录Claude' })
@@ -235,7 +235,7 @@ describe('大模型客户端管理', () => {
   it('archives the sessions only after confirming an account change', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValue(true)
     const requests = setup('owner', r => (path(r) === `${base}/accounts/workbuddy/reset` ? Response.json({ archived_sessions: 3 }) : undefined))
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     const card = await screen.findByRole('article', { name: '账号：WorkBuddy' })
     await fireEvent.click(within(card).getByRole('button', { name: '更换账号WorkBuddy' }))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('这个 MCP 管理器上这个平台的全部会话都会被归档'))
@@ -251,7 +251,7 @@ describe('大模型客户端管理', () => {
       if (path(r) === `/api/v1/llm_bridge/grants/${INSTANCE}` && r.method === 'PUT') { current = { ...current, ...(await r.clone().json()) }; return Response.json(current) }
       return undefined
     })
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     const row = await screen.findByRole('group', { name: '实例权限：甲' })
     expect(within(row).getByLabelText('新建会话和发送')).toBeChecked()
     expect(within(row).getByLabelText('Codex')).toBeChecked()
@@ -286,7 +286,7 @@ describe('大模型客户端管理', () => {
       if (path(r) === `/api/v1/llm_bridge/bridges/${OTHER}/status`) return Response.json(status({ platforms: ['codex', 'claude', 'workbuddy'], accounts: [account({}), claude('b***@example.com'), idle] }))
       return undefined
     }, [one, two])
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     const first = await screen.findByRole('article', { name: 'MCP 管理器：1 号' })
     const second = screen.getByRole('article', { name: 'MCP 管理器：2 号' })
     expect(first).toHaveAttribute('aria-current', 'true')
@@ -319,7 +319,7 @@ describe('大模型客户端管理', () => {
       if (path(r) === `${base}/settings` && r.method === 'PUT') { platforms = (await r.clone().json()).platforms; return Response.json({ ...settings, platforms }) }
       return undefined
     })
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     const control = () => screen.findByRole('group', { name: '控制的平台' })
     expect(within(await control()).getByLabelText('Codex')).toBeChecked()
     // 没勾选、也没登录过的平台不占地方
@@ -364,7 +364,7 @@ describe('大模型客户端管理', () => {
       if (path(r) === `/api/v1/llm_bridge/bridges/${OTHER}/status`) return Response.json(status())
       return undefined
     }, [bridge, two])
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     const row = await screen.findByRole('group', { name: '实例权限：甲' })
     const managers = within(row).getByRole('group', { name: '甲允许的 MCP 管理器' })
     const all = within(managers).getByLabelText('全部（包括以后添加的）')
@@ -393,7 +393,7 @@ describe('大模型客户端管理', () => {
       if (path(r) === `${base}/environments` && r.method === 'POST') return Response.json({ id: 'be_0123456789abcdef0123', ...(await r.clone().json()) }, { status: 201 })
       return undefined
     })
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     const set = await openTab('设置')
     const concurrency = await within(set).findByLabelText('同时进行的回合数')
     expect(concurrency).toHaveValue(2)
@@ -432,7 +432,7 @@ describe('大模型客户端管理', () => {
       if (path(r) === `${base}/sessions/${session.session_id}/turns`) return Response.json({ turns: [{ turn_id: 'bt_1', status: 'failed', text: '把按钮改成蓝色', result: null, failure: { code: 'TIMEOUT', message: '回合超时' }, queued_at: 1794528000 }, { turn_id: 'bt_0', status: 'completed', text: '看看登录页', result: '<b>已看完</b>', queued_at: 1794527000 }] })
       return undefined
     })
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     const panel = await openTab('会话')
     expect(within(panel).getByText(/看不到 chatgpt\.com、claude\.ai 网页上的对话，也看不到其他机器上的会话。/)).toBeVisible()
     const table = await within(panel).findByRole('table', { name: '会话' })
@@ -459,7 +459,7 @@ describe('大模型客户端管理', () => {
       if (path(r) === `${base}/environments`) return fail(503, 'EXTERNAL_UNAVAILABLE')
       return undefined
     })
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     expect(await screen.findByText('连不上这个 MCP 管理器：连接被拒绝')).toBeVisible()
     // 列表里的卡片也如实显示，不是一直转圈
     const card = screen.getByRole('article', { name: 'MCP 管理器：主账号' })
@@ -475,7 +475,7 @@ describe('大模型客户端管理', () => {
 
   it('treats MODULE_DISABLED as 功能已停用, not as a failure', async () => {
     const requests = setup('owner', r => (path(r).startsWith('/api/v1/llm_bridge/') ? fail(404, 'MODULE_DISABLED') : undefined))
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     expect(await screen.findByText('功能已停用：大模型客户端在当前工作空间没有启用。')).toBeVisible()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '添加 MCP 管理器' })).not.toBeInTheDocument()
@@ -484,7 +484,7 @@ describe('大模型客户端管理', () => {
 
   it('keeps members out of the page', async () => {
     const requests = setup('member')
-    await openApp('/llm_bridge')
+    await openApp('/llm_bridge?view=manage')
     await waitFor(() => expect(screen.queryByRole('heading', { level: 1, name: '大模型客户端管理' })).not.toBeInTheDocument())
     expect(requests.some(r => path(r).startsWith('/api/v1/llm_bridge'))).toBe(false)
   })
