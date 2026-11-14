@@ -116,6 +116,36 @@ def _snapshot(value: Any) -> dict[str, Any]:
     return result
 
 
+def runtime_proof(value: Any) -> dict[str, Any]:
+    """Validate common proof separately from operation-specific result data."""
+    required = {
+        "workspace_id",
+        "instance_id",
+        "env_id",
+        "allocation_id",
+        "generation",
+        "node_name",
+        "host_id",
+        "command_id",
+        "deployment_uid",
+        "pvc_uid",
+        "target_kind",
+    }
+    proof = _object(value, required, {"pod_uid", "operation_pod_uid", "stopped"})
+    _integer(proof["generation"], 2**63 - 1, 1)
+    for key, item in proof.items():
+        if key == "generation":
+            continue
+        if key == "stopped":
+            _require(type(item) is bool)
+        else:
+            _require(type(item) is str and 0 < len(item) <= 253 and "\x00" not in item)
+    _require(proof["target_kind"] in {"workload", "volume-helper"})
+    target_uid = "pod_uid" if proof["target_kind"] == "workload" else "operation_pod_uid"
+    _require(target_uid in proof)
+    return proof
+
+
 def operation_result(
     kind: str, value: Any, *, secret_values: Sequence[str] | Mapping[str, str] = ()
 ) -> dict[str, Any]:
@@ -131,10 +161,17 @@ def _operation_result(
     """Validate Docker-shaped results before persistence and redact transient exec secrets."""
     envelope = _object(value, {"status"}, {"result", "error"})
     _require(envelope["status"] in {"done", "failed"})
+    proof = None
+    raw = envelope.get("result")
+    if type(raw) is dict and "runtime_proof" in raw:
+        proof = runtime_proof(raw["runtime_proof"])
+        raw = {key: item for key, item in raw.items() if key != "runtime_proof"}
     if envelope["status"] == "failed":
-        return {"status": "failed", "error": "Kubernetes operation failed"}
+        failed: dict[str, Any] = {"status": "failed", "error": "Kubernetes operation failed"}
+        if proof is not None:
+            failed["result"] = {"runtime_proof": proof}
+        return failed
     _require("result" in envelope and "error" not in envelope)
-    raw = envelope["result"]
     if kind == "exec":
         result = _object(
             raw, {"exit_code", "output_b64", "truncated", "timed_out", "seconds", "started_at"}
@@ -210,6 +247,8 @@ def _operation_result(
                 _require(type(item) is str and 0 < len(item) <= 253 and "\x00" not in item)
     else:
         raise ValueError(_ERROR)
+    if proof is not None:
+        result["runtime_proof"] = proof
     return {"status": "done", "result": result}
 
 

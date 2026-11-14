@@ -427,11 +427,19 @@ class Runner:
                     "workspace_id": str(env.workspace_id),
                     "instance_id": str(env.owner_instance_id) if env.owner_instance_id else None,
                     "env_id": str(env.id),
-                    "allocation_id": str(env.id),
+                    "allocation_id": str(
+                        ((env.runtime_metadata or {}).get("allocation_id") or env.id)
+                        if env.runtime_backend == "kubernetes"
+                        else env.id
+                    ),
                     "generation": (env.runtime_metadata or {}).get("generation", 1),
                     "node_name": host.node_name,
                 },
             }
+        if env is not None and env.runtime_backend == "kubernetes":
+            from app.domain.runner_runtime_receipts import runtime_receipts
+
+            payload["runtime_receipts"] = runtime_receipts(env)
         command = RunnerCommand(
             id=uuid.uuid4(),
             workspace_id=host.workspace_id,
@@ -1773,6 +1781,35 @@ class Runner:
     async def apply_result(
         self, command: RunnerCommand, status: str, result: dict[str, Any], error: str | None
     ) -> None:
+        # Fence success AND failure before touching command, output, quota or state.
+        current = (
+            await self.db.get(
+                RunnerEnvironment,
+                command.environment_id,
+                with_for_update=True,
+                populate_existing=True,
+            )
+            if command.environment_id
+            else None
+        )
+        if (current is not None and current.runtime_backend == "kubernetes") or (
+            command.payload.get("backend") == "kubernetes"
+        ):
+            from app.domain.runner_runtime_receipts import validated_receipt
+
+            host = await self.db.get(RunnerHost, command.host_id)
+            if current is None or not validated_receipt(command, current, host, result):
+                raise RunnerError(
+                    "NETWORK_RUNTIME_UNCONFIRMED", "运行回报与当前节点、分配或代次不一致"
+                )
+            if status == "failed":
+                from app.runtime_v2.journal_results import OPERATION_KINDS
+
+                if command.kind in OPERATION_KINDS:
+                    # Failed operations may retain their validated identity proof,
+                    # never arbitrary failure material or raw remote exceptions.
+                    result = {"runtime_proof": result["runtime_proof"]}
+                    error = "Kubernetes operation failed"
         if (
             status == "done"
             and command.kind in ("create_env", "start_env")
@@ -1804,6 +1841,7 @@ class Runner:
                     and identity == expected
                     and result.get("ready") is True
                     and type(generation) is int
+                    and type(result.get("generation")) is int
                     and result.get("generation") == generation
                     and result.get("allocation_id") == expected["allocation_id"]
                     and result.get("node") == expected["node_name"]
@@ -1815,8 +1853,15 @@ class Runner:
                     )
                     and (
                         metadata.get("binding_generation") != generation
-                        or all(
-                            metadata.get(k) == result.get(k) for k in ("deployment_uid", "pvc_uid")
+                        or (
+                            all(
+                                metadata.get(k) == result.get(k)
+                                for k in ("deployment_uid", "pvc_uid")
+                            )
+                            and (
+                                not metadata.get("pod_uid")
+                                or metadata["pod_uid"] == result["pod_uid"]
+                            )
                         )
                     )
                 )
@@ -1911,7 +1956,13 @@ class Runner:
                 env.state_reason = (error or "启动失败")[:500]
                 await self._fail_pending_runs(env, error or "环境没有启动成功")
         elif kind == "stop_env" and env is not None and ok:
-            env.runtime_metadata = {**(env.runtime_metadata or {}), "compute_stopped": True}
+            metadata = {**(env.runtime_metadata or {}), "compute_stopped": True}
+            if env.runtime_backend == "kubernetes":
+                # Confirmed scale-to-zero revokes the current Pod binding. A
+                # later start can bind a new Pod while retaining PVC ownership.
+                metadata.pop("pod_uid", None)
+                metadata.pop("pod_ip", None)
+            env.runtime_metadata = metadata
             if env.state in ("running", "creating"):
                 env.state = "stopped"
             env.stopped_at = specs.now()
