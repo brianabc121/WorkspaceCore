@@ -15,6 +15,10 @@
 每次更新 Cloud 的 Tailscale 密钥后，必须 Save → Publish/Republish → 从更新后的环境新开 Cloud 会话再验收；
 网络与 SSH 规则的 src/dst 按角色标签核对，节点角色不要用临时 Codex IP 代替。详见手册第4、5节。
 
+接入地址可选择 Tailscale IP、可达内网 IP 或公网 IP，不要求域名，也不要求三种路径同时开启。
+当前双机开发默认走 Tailscale；HTTPS/TLS 用 IP 访问时，证书必须含该 IP 的 SAN，并使用受信 CA。
+公网入口是独立的可选发布能力，其真实来源/撤销验收不由私网成功代替，也不阻塞私网功能开发。
+
 - 一份控制器配置只绑定一个 workspace、RunnerHost 和 Kubernetes Node；命令不能改变绑定。主机的 mwr 凭证只用于既有接入入口，不是用户的 Kubernetes 凭证。
 - `RUNTIME_V2_URL` 是现有受信接入入口的基地址。客户端自己添加 `/runner-api/v1`，不要重复配置该路径。
 - Kubernetes kubeconfig 必须为绝对路径、由操作者维护并仅允许服务账号读取。只接受 HTTPS 和有效证书校验；不能使用 `insecure-skip-tls-verify: true`。验证依赖固定的 kubectl v1.35.10，系统服务的 PATH 必须能找到经官方 SHA256 校验的二进制。所需 Kubernetes RBAC 仍需在真实集群按最终控制器操作逐项验收，不能给租户配置写入权限。
@@ -169,7 +173,7 @@ services/api/.venv/bin/python infra/runtime-v2/acceptance_two_nodes.py \
   --report /secure/public-denied-origin.json
 ```
 
-公网 plan：`host`（LB DNS/IPv4）、`server_name`（证书验证主机名）、`port`（当前已批准
+公网 plan：`host`（LB DNS或IPv4，域名可选）、`server_name`（证书验证身份；IP访问填证书IP SAN中的地址）、`port`（当前已批准
 20000–29999 精确端口）、`ca_file`（只读 CA 路径）、`source_cidrs`（真实批准的 IPv4
 列表）、`external_source_expected`（该外部主机经管理员核验的实际出口 IPv4）、
 `reviewed_config_sha256`（相同认证快照的 fingerprint）；允许源还可提供明确
