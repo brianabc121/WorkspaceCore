@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -129,18 +130,29 @@ func execute(workspace string, q request) (execResult, error) {
 	go func() { waited <- cmd.Wait() }()
 	timer := time.NewTimer(time.Duration(q.Timeout * float64(time.Second)))
 	defer timer.Stop()
+	leaderDone := false
 	select {
 	case err = <-waited:
+		leaderDone = true
 	case <-timer.C:
 		r.TimedOut = true
-		if e := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); e != nil && e != syscall.ESRCH {
+	}
+	// Signal delivery and leader reaping do not prove that every group member
+	// has finished exiting. Bound both leader wait and observable group cleanup.
+	cleanupDeadline := time.Now().Add(2 * time.Second)
+	if e := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); e != nil && e != syscall.ESRCH {
+		return r, rejected
+	}
+	if !leaderDone {
+		cleanupTimer := time.NewTimer(time.Until(cleanupDeadline))
+		defer cleanupTimer.Stop()
+		select {
+		case err = <-waited:
+		case <-cleanupTimer.C:
 			return r, rejected
 		}
-		err = <-waited
 	}
-	// Reap the leader and terminate remaining members, including descendants that
-	// outlive a successful shell. An escaped session still requires workload stop.
-	if e := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); e != nil && e != syscall.ESRCH {
+	if e := waitProcessGroupStopped(cmd.Process.Pid, cleanupDeadline); e != nil {
 		return r, rejected
 	}
 	select {
@@ -186,4 +198,140 @@ func commandPath(name, search string, cwd *os.File) (string, error) {
 		}
 	}
 	return "", rejected
+}
+
+// Wait for observed non-zombie members to disappear, rather than assuming that
+// SIGKILL delivery or pipe EOF is equivalent to process termination. A failed
+// observation is an unknown outcome; no successful exec JSON may be emitted.
+func waitProcessGroupStopped(pgid int, deadline time.Time) error {
+	for {
+		alive, err := processGroupAlive(pgid, deadline)
+		if err != nil {
+			return rejected
+		}
+		if !alive {
+			return nil
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return rejected
+		}
+		pause := 5 * time.Millisecond
+		if remaining < pause {
+			pause = remaining
+		}
+		timer := time.NewTimer(pause)
+		<-timer.C
+	}
+}
+func processGroupAlive(pgid int, deadline time.Time) (bool, error) {
+	if pgid <= 0 {
+		return false, rejected
+	}
+	if err := syscall.Kill(-pgid, 0); err == syscall.ESRCH {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	proc, err := os.Open("/proc")
+	if err != nil {
+		return false, err
+	}
+	defer proc.Close()
+	for {
+		names, err := proc.Readdirnames(64)
+		if err != nil && err != io.EOF {
+			return false, err
+		}
+		for _, name := range names {
+			if time.Now().After(deadline) {
+				return false, rejected
+			}
+			pid, e := strconv.Atoi(name)
+			if e != nil || pid <= 0 {
+				continue
+			}
+			state, group, e := procState("/proc/" + name + "/stat")
+			if os.IsNotExist(e) || e == syscall.ESRCH {
+				continue
+			}
+			if e != nil {
+				return false, e
+			}
+			if group != pgid {
+				continue
+			}
+			if state != "Z" && state != "X" {
+				return true, nil
+			}
+			// A zombie thread-group leader can still have running worker threads.
+			// Inspect all remaining tasks before accepting a zombie process as dead.
+			tasks, e := os.Open("/proc/" + name + "/task")
+			if os.IsNotExist(e) || e == syscall.ESRCH {
+				continue
+			}
+			if e != nil {
+				return false, e
+			}
+			alive, e := liveTasks(tasks, "/proc/"+name+"/task/", pgid, deadline)
+			tasks.Close()
+			if e != nil || alive {
+				return alive, e
+			}
+		}
+		if err == io.EOF {
+			return false, nil
+		}
+	}
+}
+func liveTasks(tasks *os.File, prefix string, pgid int, deadline time.Time) (bool, error) {
+	for {
+		names, err := tasks.Readdirnames(64)
+		if err != nil && err != io.EOF {
+			return false, err
+		}
+		for _, name := range names {
+			if time.Now().After(deadline) {
+				return false, rejected
+			}
+			state, group, e := procState(prefix + name + "/stat")
+			if os.IsNotExist(e) || e == syscall.ESRCH {
+				continue
+			}
+			if e != nil {
+				return false, e
+			}
+			if group == pgid && state != "Z" && state != "X" {
+				return true, nil
+			}
+		}
+		if err == io.EOF {
+			return false, nil
+		}
+	}
+}
+func procState(name string) (string, int, error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, 8193))
+	if err != nil || len(b) > 8192 {
+		return "", 0, rejected
+	}
+	// comm is parenthesized and can itself contain spaces or parentheses.
+	close := strings.LastIndexByte(string(b), ')')
+	if close < 0 {
+		return "", 0, rejected
+	}
+	fields := strings.Fields(string(b[close+1:]))
+	if len(fields) < 3 {
+		return "", 0, rejected
+	}
+	pgid, err := strconv.Atoi(fields[2])
+	if err != nil {
+		return "", 0, rejected
+	}
+	return fields[0], pgid, nil
 }

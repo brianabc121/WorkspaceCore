@@ -688,3 +688,37 @@ func TestRestoreStripsPrivilegedModesAndOwnership(t *testing.T) {
 		t.Fatal("restored foreign owner")
 	}
 }
+
+func TestProcessGroupObservationRejectsLiveStoppedMember(t *testing.T) {
+	cmd := exec.Command("/bin/sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); cmd.Wait() }()
+	if err := syscall.Kill(cmd.Process.Pid, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	// A stopped process is still alive. Observing it must fail at the bound,
+	// rather than mistaking signal delivery or lack of output for termination.
+	start := time.Now()
+	if err := waitProcessGroupStopped(cmd.Process.Pid, time.Now().Add(25*time.Millisecond)); err == nil {
+		t.Fatal("live stopped group falsely proven terminated")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("group cleanup exceeded its observation deadline")
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	// Do not reap yet: the observer must accept a non-running zombie group.
+	if err := waitProcessGroupStopped(cmd.Process.Pid, time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("killed zombie group rejected: %v", err)
+	}
+	if err := cmd.Wait(); err == nil {
+		t.Fatal("SIGKILL unexpectedly exited successfully")
+	}
+	if err := waitProcessGroupStopped(cmd.Process.Pid, time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("terminated group rejected: %v", err)
+	}
+}
