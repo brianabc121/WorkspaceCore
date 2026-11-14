@@ -1,0 +1,33 @@
+[Unit]
+Description=Workspace dedicated node-local bounded ext4 storage
+After=local-fs.target
+Before=k3s.service k3s-agent.service kubelet.service
+RequiresMountsFor=/var/lib/workspace-runtime-images /var/lib/workspace-runtime-mounts /var/lib/workspace-runtime-storage
+
+[Service]
+Type=exec
+User=root
+Group=root
+WorkingDirectory=/opt/workspace/runtime-storage
+ExecStartPre=/usr/bin/python3 /opt/workspace/runtime-storage/storage_host.py restore-mounts --config /etc/workspace/runtime-v2/storage-host.json
+ExecStart=/usr/bin/python3 /opt/workspace/runtime-storage/storage_host.py serve --config /etc/workspace/runtime-v2/storage-host.json
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
+TimeoutStartSec=15min
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_MKNOD
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# Mounts must enter the host mount namespace. Do not add PrivateMounts,
+# PrivateDevices, PrivateTmp, ProtectSystem, ProtectHome, or mount-namespace
+# filesystem restrictions to this dedicated hook without a new design.
+# The existing unprivileged lifecycle controller keeps its original sandbox.
+
+[Install]
+WantedBy=multi-user.target
+RequiredBy=k3s.service k3s-agent.service kubelet.service

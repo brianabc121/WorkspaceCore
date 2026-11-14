@@ -15,14 +15,18 @@ from typing import Annotated
 from fastapi import APIRouter, Path, Request, Response, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.agent_api import CERT_HEADER, INGRESS_HEADER, _from_ingress_proxy
 from app.api.deps import client_ip
 from app.core.errors import ApiError
+from app.domain import runner_specs as specs
+from app.domain.runner import RunnerError
 from app.domain.runner_hosts import RunnerHosts, unauthorized
+from app.domain.runner_runtime_receipts import validated_receipt
 from app.domain.runner_snapshots import MAX_PARTS, PART_BYTES, SnapshotStore
-from app.models import RunnerEnvironment, RunnerHost, RunnerSnapshot
+from app.models import RunnerCommand, RunnerEnvironment, RunnerHost, RunnerSnapshot
 from app.schemas.common import error_responses
 from app.schemas.runner import (
     RunnerCommandResult,
@@ -104,7 +108,7 @@ async def poll(
     "/commands/{command_id}/result",
     summary="回报指令结果（运行服务器）",
     description="同一条指令重复回报只认第一次（accepted=false）。",
-    responses=_errors,
+    responses=error_responses(401, 404, 409, 422, 429),
 )
 async def command_result(
     request: Request,
@@ -116,7 +120,10 @@ async def command_result(
     async with app.state.sessionmaker() as db:
         hosts = RunnerHosts(db, app.state.settings, app.state.redis)
         host = await _authenticate(request, credentials, hosts)
-        accepted = await hosts.result(host, command_id, body)
+        try:
+            accepted = await hosts.result(host, command_id, body)
+        except RunnerError as error:
+            raise ApiError(409, error.code, error.message) from None
         await db.commit()
     return ResultAccepted(accepted=accepted)
 
@@ -159,13 +166,57 @@ PART_HEADROOM = 64 * 1024
 
 
 async def _snapshot_for(
-    db: AsyncSession, host: RunnerHost, snapshot_id: uuid.UUID
+    db: AsyncSession, host: RunnerHost, snapshot_id: uuid.UUID, *, upload: bool = True
 ) -> RunnerSnapshot:
-    """只认这台运行服务器上的环境的快照；别的一律当不存在。"""
+    """Kubernetes parts require one live command in the same current allocation."""
+    missing = ApiError(404, "NOT_FOUND", "没有这份快照")
     snapshot = await db.get(RunnerSnapshot, snapshot_id)
     env = await db.get(RunnerEnvironment, snapshot.environment_id) if snapshot else None
     if snapshot is None or env is None or env.host_id != host.id:
-        raise ApiError(404, "NOT_FOUND", "没有这份快照")
+        raise missing
+    if host.backend != "kubernetes" and env.runtime_backend != "kubernetes":
+        return snapshot
+    # The caller holds the authenticated host lock. Match existing host/status
+    # index first and JSONB reference equality, never scan all host commands.
+    reference = (
+        RunnerCommand.payload["snapshot_id"].as_string()
+        if upload
+        else RunnerCommand.payload["snapshot"]["id"].as_string()
+    )
+    commands = list(
+        await db.scalars(
+            select(RunnerCommand)
+            .where(
+                RunnerCommand.host_id == host.id,
+                RunnerCommand.workspace_id == snapshot.workspace_id,
+                RunnerCommand.environment_id == env.id,
+                RunnerCommand.kind == ("snapshot" if upload else "create_env"),
+                RunnerCommand.status == "sent",
+                RunnerCommand.sent_at.is_not(None),
+                RunnerCommand.finished_at.is_(None),
+                RunnerCommand.deadline_at > specs.now(),
+                reference == str(snapshot.id),
+            )
+            .limit(2)
+            .with_for_update()
+        )
+    )
+    if len(commands) != 1:
+        raise missing
+    # Keep lock order host -> command -> environment, matching result callbacks.
+    env = await db.get(RunnerEnvironment, env.id, with_for_update=True, populate_existing=True)
+    snapshot = await db.get(
+        RunnerSnapshot, snapshot_id, with_for_update=True, populate_existing=True
+    )
+    if (
+        env is None
+        or snapshot is None
+        or snapshot.workspace_id != env.workspace_id
+        or snapshot.environment_id != env.id
+        or snapshot.status != ("uploading" if upload else "ready")
+        or not validated_receipt(commands[0], env, host, require_binding=upload)
+    ):
+        raise missing
     return snapshot
 
 
@@ -185,6 +236,7 @@ async def put_snapshot_part(
     async with app.state.sessionmaker() as db:
         hosts = RunnerHosts(db, app.state.settings, app.state.redis)
         host = await _authenticate(request, credentials, hosts)
+        host = await hosts._lock_report_host(host)
         snapshot = await _snapshot_for(db, host, snapshot_id)
         # 先认证、再读请求体（最多 16 MB 加一点余量）
         data = bytearray()
@@ -216,7 +268,8 @@ async def get_snapshot_part(
     async with app.state.sessionmaker() as db:
         hosts = RunnerHosts(db, app.state.settings, app.state.redis)
         host = await _authenticate(request, credentials, hosts)
-        snapshot = await _snapshot_for(db, host, snapshot_id)
+        host = await hosts._lock_report_host(host)
+        snapshot = await _snapshot_for(db, host, snapshot_id, upload=False)
         data = await SnapshotStore(db, app.state.settings).get_part(snapshot, index)
     return Response(
         content=data,

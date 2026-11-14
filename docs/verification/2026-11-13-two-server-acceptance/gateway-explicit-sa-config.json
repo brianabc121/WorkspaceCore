@@ -1,0 +1,12 @@
+{
+  "apiVersion": "v1",
+  "kind": "ConfigMap",
+  "metadata": {
+    "name": "t0224-gateway-kubeconfig",
+    "namespace": "runner-system",
+    "uid": "c670f9b8-e477-4d47-96ee-e4efdfe6de22"
+  },
+  "data": {
+    "config": "apiVersion: v1\nkind: Config\nclusters:\n- name: t0224\n  cluster:\n    server: https://100.72.60.100:6443\n    certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt\nusers:\n- name: gateway-sa\n  user:\n    tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token\ncontexts:\n- name: gateway\n  context:\n    cluster: t0224\n    user: gateway-sa\n    namespace: runner-system\ncurrent-context: gateway"
+  }
+}

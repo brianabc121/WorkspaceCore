@@ -1,0 +1,107 @@
+Initial effective RED (baseline 180806b, fixed fixture)
+E   Failed: DID NOT RAISE RunnerError
+E   Failed: DID NOT RAISE RunnerError
+E   Failed: DID NOT RAISE RunnerError
+E   Failed: DID NOT RAISE RunnerError
+E   Failed: DID NOT RAISE RunnerError
+E   Failed: DID NOT RAISE RunnerError
+E   Failed: DID NOT RAISE RunnerError
+E   Failed: DID NOT RAISE RunnerError
+E   AssertionError: assert 'NETWORK_VALIDATION_REQUIRED' == 'RUNTIME_PROFILE_UNSUPPORTED'
+E     
+E     - RUNTIME_PROFILE_UNSUPPORTED
+E     + NETWORK_VALIDATION_REQUIRED
+E   AssertionError: assert 'NETWORK_VALIDATION_REQUIRED' == 'RUNTIME_PROFILE_UNSUPPORTED'
+E     
+E     - RUNTIME_PROFILE_UNSUPPORTED
+E     + NETWORK_VALIDATION_REQUIRED
+E   AssertionError: assert 'TIMEOUT' == 'RUNTIME_PROFILE_UNSUPPORTED'
+E     
+E     - RUNTIME_PROFILE_UNSUPPORTED
+E     + TIMEOUT
+E   AssertionError: assert 'TIMEOUT' == 'RUNTIME_PROFILE_UNSUPPORTED'
+E     
+E     - RUNTIME_PROFILE_UNSUPPORTED
+E     + TIMEOUT
+E   AssertionError: assert 'TIMEOUT' == 'RUNTIME_PROFILE_UNSUPPORTED'
+E     
+E     - RUNTIME_PROFILE_UNSUPPORTED
+E     + TIMEOUT
+E   Failed: DID NOT RAISE RunnerError
+E   Failed: DID NOT RAISE RunnerError
+E   Failed: DID NOT RAISE RunnerError
+E   Failed: DID NOT RAISE RunnerError
+E   AssertionError: assert 'Kubernetes' in 'original reason'
+E    +  where 'original reason' = <app.models.runner.RunnerEnvironment object at 0x7f6600d1caa0>.state_reason
+FAILED tests/runtime_v2/test_operation_admission.py::test_enqueue_rejects_unsupported_kubernetes_without_creating_command[exec]
+FAILED tests/runtime_v2/test_operation_admission.py::test_enqueue_rejects_unsupported_kubernetes_without_creating_command[get_files]
+FAILED tests/runtime_v2/test_operation_admission.py::test_enqueue_rejects_unsupported_kubernetes_without_creating_command[put_files]
+FAILED tests/runtime_v2/test_operation_admission.py::test_enqueue_rejects_unsupported_kubernetes_without_creating_command[list_files]
+FAILED tests/runtime_v2/test_operation_admission.py::test_enqueue_rejects_unsupported_kubernetes_without_creating_command[snapshot]
+FAILED tests/runtime_v2/test_operation_admission.py::test_enqueue_rejects_unsupported_kubernetes_without_creating_command[archive_env]
+FAILED tests/runtime_v2/test_operation_admission.py::test_enqueue_rejects_unsupported_kubernetes_without_creating_command[restore]
+FAILED tests/runtime_v2/test_operation_admission.py::test_exec_rejects_before_restart_rebuild_or_run_record[running]
+FAILED tests/runtime_v2/test_operation_admission.py::test_exec_rejects_before_restart_rebuild_or_run_record[stopped]
+FAILED tests/runtime_v2/test_operation_admission.py::test_exec_rejects_before_restart_rebuild_or_run_record[archived]
+FAILED tests/runtime_v2/test_operation_admission.py::test_files_reject_before_queue_or_touch[read]
+FAILED tests/runtime_v2/test_operation_admission.py::test_files_reject_before_queue_or_touch[write]
+FAILED tests/runtime_v2/test_operation_admission.py::test_files_reject_before_queue_or_touch[list]
+FAILED tests/runtime_v2/test_operation_admission.py::test_reject_before_stop_snapshot_record_or_configuration_write[snapshot]
+FAILED tests/runtime_v2/test_operation_admission.py::test_reject_before_stop_snapshot_record_or_configuration_write[archive]
+FAILED tests/runtime_v2/test_operation_admission.py::test_reject_before_stop_snapshot_record_or_configuration_write[delete]
+FAILED tests/runtime_v2/test_operation_admission.py::test_reject_before_stop_snapshot_record_or_configuration_write[setup]
+FAILED tests/runtime_v2/test_operation_admission.py::test_reclaimer_preserves_unsupported_data_and_continues_other_environments
+18 failed, 11 passed in 30.79s
+
+Unsupported host-command/image-prune RED
+E   Failed: DID NOT RAISE RunnerError
+E   Failed: DID NOT RAISE RunnerError
+E   assert 1 == 0
+FAILED tests/runtime_v2/test_operation_admission.py::test_host_commands_cannot_bypass_kubernetes_admission[prune_images]
+FAILED tests/runtime_v2/test_operation_admission.py::test_host_commands_cannot_bypass_kubernetes_admission[build_template]
+FAILED tests/runtime_v2/test_operation_admission.py::test_kubernetes_image_cleanup_does_not_queue_docker_command
+3 failed, 30 deselected in 3.15s
+
+Original save_template/rebuild methods replayed via shipped pytest plugin
+E   assert 1 == 0
+E    +  where 1 = len([<app.models.runner.RunnerTemplate object at 0x7f470e11bfb0>])
+E   AssertionError: assert ('changed', 'building', 2) == ('original', 'ready', 1)
+E     
+E     At index 0 diff: 'changed' != 'original'
+E     Use -v to get more diff
+E   AssertionError: assert ('creating', ...15342+00:00'}) == ('archived', ...opped': True})
+E     
+E     At index 0 diff: 'creating' != 'archived'
+E     Use -v to get more diff
+E   app.domain.runner_capabilities.ContainerApprovalRequired: 已保有5个运行环境，需要owner批准免数量上限权限
+FAILED tests/runtime_v2/test_operation_admission.py::test_template_build_rejects_before_persisting_configuration[False]
+FAILED tests/runtime_v2/test_operation_admission.py::test_template_build_rejects_before_persisting_configuration[True]
+FAILED tests/runtime_v2/test_operation_admission.py::test_restore_rejects_snapshot_before_generation_or_state_write[0]
+FAILED tests/runtime_v2/test_operation_admission.py::test_restore_rejects_snapshot_before_generation_or_state_write[5]
+4 failed, 34 deselected in 11.39s
+
+FINAL SOURCE regression (without replay plugin)
+........................................................................ [ 25%]
+.............................................................s.......... [ 51%]
+........................................................................ [ 77%]
+..............................................................           [100%]
+=========================== short test summary info ============================
+SKIPPED [1] tests/runtime_v2/test_lifecycle_review_regressions.py:167: set RUNTIME_V2_TEST_KUBECTL to checksum-verified official v1.35.10
+277 passed, 1 skipped in 161.64s (0:02:41)
+
+FINAL SOURCE static checks
+All checks passed!
+566 files already formatted
+Success: no issues found in 562 source files
+openapi.json 是最新的
+collab check 通过（0 个警告）
+
+Read-only independent review
+Two Important preflight gaps fixed and reviewed again.
+No remaining Critical/Important/Minor findings.
+
+SSH platform TCP CONNECT, 2026-11-14 04:08 UTC
+100.72.60.100:22 5.01s HTTP/1.1 503 Service Unavailable
+100.121.210.36:22 5.01s HTTP/1.1 503 Service Unavailable
+upstream connect error or disconnect/reset before headers. reset reason: connection timeout
+No SSH host keys obtained; no authentication or remote commands.

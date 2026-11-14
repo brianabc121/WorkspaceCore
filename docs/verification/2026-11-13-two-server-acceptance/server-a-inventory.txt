@@ -1,0 +1,132 @@
+
+[identity]
+2026-11-13T15:43:08Z
+s1348279
+uid=0(root) gid=0(root) groups=0(root)
+73658ad349ec675300d22bdffe711f442745186fed8890811a422861e70da9de  /etc/machine-id
+
+[os]
+PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
+NAME="Debian GNU/Linux"
+VERSION_ID="12"
+VERSION="12 (bookworm)"
+VERSION_CODENAME=bookworm
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+Linux 6.1.0-50-amd64 x86_64 GNU/Linux
+microsoft
+
+[cpu]
+4
+Architecture:                            x86_64
+CPU op-mode(s):                          32-bit, 64-bit
+Address sizes:                           42 bits physical, 48 bits virtual
+Byte Order:                              Little Endian
+CPU(s):                                  4
+On-line CPU(s) list:                     0-3
+Vendor ID:                               GenuineIntel
+BIOS Vendor ID:                          Intel(R) Corporation
+Model name:                              Intel(R) Xeon(R) CPU E5-2670 0 @ 2.60GHz
+BIOS Model name:                         Intel(R) Xeon(R) CPU E5-2670 @ 2.60GHz None CPU @ 2.6GHz
+BIOS CPU family:                         179
+CPU family:                              6
+Model:                                   45
+Thread(s) per core:                      1
+Core(s) per socket:                      4
+Socket(s):                               1
+Stepping:                                7
+BogoMIPS:                                5199.99
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx lm constant_tsc rep_good nopl cpuid tsc_known_freq pni pclmulqdq ssse3 cx16 sse4_1 sse4_2 popcnt aes xsave avx hypervisor lahf_lm pti xsaveopt
+Hypervisor vendor:                       Microsoft
+Virtualization type:                     full
+L1d cache:                               128 KiB (4 instances)
+L1i cache:                               128 KiB (4 instances)
+L2 cache:                                1 MiB (4 instances)
+
+[memory]
+               total        used        free      shared  buff/cache   available
+Mem:            7923        1041        3689           7        3511        6882
+Swap:              0           0           0
+
+[filesystem]
+Filesystem     Type      Size  Used Avail Use% Mounted on
+udev           devtmpfs  3.9G     0  3.9G   0% /dev
+tmpfs          tmpfs     793M  604K  792M   1% /run
+/dev/sdb1      ext4       40G   20G   19G  53% /
+tmpfs          tmpfs     3.9G     0  3.9G   0% /dev/shm
+tmpfs          tmpfs     5.0M     0  5.0M   0% /run/lock
+tmpfs          tmpfs     793M     0  793M   0% /run/user/0
+NAME   TYPE  SIZE FSTYPE  MOUNTPOINTS
+fd0    disk    4K         
+sda    disk   40G         
+`-sda1 part   40G ext4    
+sdb    disk   40G         
+`-sdb1 part   40G ext4    /
+sr0    rom   420K iso9660 
+
+[network]
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+eth0             UP             156.227.24.250/24 fe80::215:5dff:fe00:6/64 
+docker0          DOWN           172.17.0.1/16 fe80::382b:7bff:fe85:42d5/64 
+tailscale0       UNKNOWN        100.72.60.100/32 fd7a:115c:a1e0::b74b:3c65/128 fe80::b7bf:11b4:b39d:e615/64 
+br-342665a9781e  DOWN           172.31.252.8/28 fe80::408a:e5ff:feae:cc2c/64 
+br-b2f33ae31c01  DOWN           172.25.0.1/16 fe80::5406:fcff:fec6:d092/64 
+br-13de277f92c3  DOWN           172.19.0.1/16 fe80::fc54:10ff:fe5c:3556/64 
+default via 156.227.24.1 dev eth0 onlink 
+156.227.24.0/24 dev eth0 proto kernel scope link src 156.227.24.250 
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 linkdown 
+172.19.0.0/16 dev br-13de277f92c3 proto kernel scope link src 172.19.0.1 linkdown 
+172.25.0.0/16 dev br-b2f33ae31c01 proto kernel scope link src 172.25.0.1 linkdown 
+172.31.252.0/28 dev br-342665a9781e proto kernel scope link src 172.31.252.8 linkdown 
+Netid State  Recv-Q Send-Q                          Local Address:Port  Peer Address:PortProcess                                  
+udp   UNCONN 0      0                                     0.0.0.0:41641      0.0.0.0:*    users:(("tailscaled",pid=3724840,fd=21))
+udp   UNCONN 0      0                                        [::]:41641         [::]:*    users:(("tailscaled",pid=3724840,fd=19))
+tcp   LISTEN 0      128                                   0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=509,fd=3))           
+tcp   LISTEN 0      4096                 100.72.60.100%tailscale0:55764      0.0.0.0:*    users:(("tailscaled",pid=3724840,fd=25))
+tcp   LISTEN 0      128                                      [::]:22            [::]:*    users:(("sshd",pid=509,fd=4))           
+tcp   LISTEN 0      4096   [fd7a:115c:a1e0::b74b:3c65]%tailscale0:55067         [::]:*    users:(("tailscaled",pid=3724840,fd=26))
+
+[services]
+  containerd.service        loaded active running containerd container runtime
+  cron.service              loaded active running Regular background program processing daemon
+  dbus.service              loaded active running D-Bus System Message Bus
+  docker.service            loaded active running Docker Application Container Engine
+  getty@tty1.service        loaded active running Getty on tty1
+  hv-kvp-daemon.service     loaded active running Hyper-V key-value pair (KVP) daemon
+  hv-vss-daemon.service     loaded active running Hyper-V volume shadow copy service (VSS) daemon
+  rsyslog.service           loaded active running System Logging Service
+  ssh.service               loaded active running OpenBSD Secure Shell server
+  systemd-journald.service  loaded active running Journal Service
+  systemd-logind.service    loaded active running User Login Management
+  systemd-timesyncd.service loaded active running Network Time Synchronization
+  systemd-udevd.service     loaded active running Rule-based Manager for Device Events and Files
+  tailscaled.service        loaded active running Tailscale node agent
+  user@0.service            loaded active running User Manager for UID 0
+
+[runtime_binaries]
+/usr/bin/docker
+/usr/bin/containerd
+/usr/bin/ctr
+/usr/bin/python3
+
+[containers]
+Server=29.9.2
+NETWORK ID     NAME                    DRIVER    SCOPE
+d8f24f55de4c   bridge                  bridge    local
+0ac5526e08c1   host                    host      local
+b2f33ae31c01   my-workspace_agent-im   bridge    local
+342665a9781e   my-workspace_im         bridge    local
+13de277f92c3   my-workspace_news       bridge    local
+99e0a7cde274   none                    null      local
+DRIVER    VOLUME NAME
+local     my-workspace_trendradar-config
+
+[existing_cluster_files]
+-rw-r--r-- root:root /etc/containerd/config.toml
+
+[existing_test_processes]
+3724840 tailscaled         01:12:51
+3725275 tailscaled            00:00
+3725283 tailscaled            00:00

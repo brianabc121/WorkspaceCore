@@ -1,0 +1,15 @@
+{
+  "utc": "2026-11-13T18:29:45.425092+00:00",
+  "run_id": "1e4c73d9-ad80-4b64-af4f-bab67c84d249",
+  "private_gateway_allowed_denied_revocation": "passed",
+  "registered_direct_cross_instance_tcp_udp": "denied",
+  "established_stream_closed_within_8_seconds": true,
+  "new_connection_after_revoke": "denied",
+  "rule_revocation_confirmed": true,
+  "test_control_health_after": "ready",
+  "same_current_workload_uids": true,
+  "gateway_uid_unchanged": "c3a6fbac-5faa-4e26-98a4-1c182133c86c",
+  "gateway_restart_count_unchanged": 0,
+  "elapsed_seconds": 11.617,
+  "public_tls_external_source": "blocked: real LB and two external source artifacts missing"
+}

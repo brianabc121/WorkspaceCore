@@ -1,0 +1,10 @@
+commit 15a4c90450af443ed3b322fd615b8832258f2b51
+Merge: 42fd84d a07628c
+Author:     brianabc121 <128971313+brianabc121@users.noreply.github.com>
+AuthorDate: Fri Nov 13 23:28:33 2026 +0800
+Commit:     GitHub <noreply@github.com>
+CommitDate: Fri Nov 13 23:28:33 2026 +0800
+
+    Merge pull request #199 from brianabc121/claude/cool-wright-99qbbg
+    
+    [T-0224] 接手 PR #197：修复网关回执、兄弟规则下线与停止环境遥测等审查问题

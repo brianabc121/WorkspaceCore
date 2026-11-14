@@ -7,13 +7,15 @@ main 上出现两个 head；改为 0067、接在 0066 之后。两个迁移互�
 import sqlalchemy as sa
 from alembic import op
 
+from migrations.runtime_schema_compat_0068 import reconcile_legacy_runtime
+
 revision = "0067"
 down_revision = "0066"
 branch_labels = None
 depends_on = None
 
 
-def upgrade() -> None:
+def _create_gateway() -> None:
     op.execute("CREATE SEQUENCE workspace.runner_network_policy_revision_seq AS BIGINT")
     for table, sequence, low, high in (
         ("runner_ingress_rules", "runner_ingress_port_seq", 30000, 39999),
@@ -42,6 +44,12 @@ def upgrade() -> None:
             f"gateway_port BETWEEN {low} AND {high}",
             schema="workspace",
         )
+
+
+def upgrade() -> None:
+    # 0066 may already contain this DDL from the original gateway branch.
+    # Validate both historical shapes before any write; never reset allocators.
+    reconcile_legacy_runtime()
 
 
 def downgrade() -> None:

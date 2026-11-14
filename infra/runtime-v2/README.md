@@ -1,10 +1,23 @@
 # Runtime v2 开发预览部署材料
 
-**T-0224 / PR #193 尚未完成。这里没有执行安装，也不提供自动切换旧 Docker 环境的动作。**
+**T-0224 整体仍在进行。这里的模板不会自动安装或切换已有 Docker 工作负载。**
+
+状态阅读说明（2026-11-14）：本文件保留了早期尚无远端集群时的准备条件；后续专用双节点私网实测与迁移已执行，公网和完整运行适配仍有门槛。最新结果和当前连接状态见[执行账本](../../docs/verification/2026-11-13-two-server-acceptance/EXECUTION.md)，不要将旧准备描述当作当前实机状态。
 
 `controller.env.example` 和 `workspace-runtime-v2.service` 是独立生命周期控制器的配置模板。复制模板本身不会启用后端；`RUNTIME_V2_ENABLED=false`，工作台 `RUNNER_NETWORK_VERIFIED=false`，Kubernetes 调度仍关闭。当前支持受限 gVisor 不可变镜像档位的 create/start/stop/delete、持久恢复、可信资源采集与网络执行链；exec、初始文件/密钥、快照等其他运行操作仍明确拒绝。网络实现需通过真实节点验收后由部署方启用。
 
+不支持的运行操作在领域入口及命令排队前返回 `RUNTIME_PROFILE_UNSUPPORTED`，不会为了执行/读写文件而先重启环境，也不会先写快照、初始化配置或模板构建状态。恢复时先验证快照等材料，再做容量准入；取得环境锁后重新验证，避免沿用过期材料。后台回收遇到 Kubernetes 不支持的归档/快照会保留数据并记录原因，继续处理其他环境；需要快照的删除会保留待删除请求，不绕过快照直接删卷。Kubernetes 节点的镜像回收由 kubelet 负责，不下发 Docker 镜像清理命令。实际回归见[操作准入验证](../../docs/verification/2026-11-14-runtime-network-followup/OPERATION-ADMISSION.md)。
+
 ## 配置边界
+
+开始远端开发前先读 [Tailscale部署与开发使用手册](../../docs/tailscale-development-guide.md)，
+核对当前来源标签、代理路径与可信SSH公钥；设备在线或旧测试通过不代表当前连接已验证。
+每次更新 Cloud 的 Tailscale 密钥后，必须 Save → Publish/Republish → 从更新后的环境新开 Cloud 会话再验收；
+网络与 SSH 规则的 src/dst 按角色标签核对，节点角色不要用临时 Codex IP 代替。详见手册第4、5节。
+
+接入地址可选择 Tailscale IP、可达内网 IP 或公网 IP，不要求域名，也不要求三种路径同时开启。
+当前双机开发默认走 Tailscale；HTTPS/TLS 用 IP 访问时，证书必须含该 IP 的 SAN，并使用受信 CA。
+公网入口是独立的可选发布能力，其真实来源/撤销验收不由私网成功代替，也不阻塞私网功能开发。
 
 - 一份控制器配置只绑定一个 workspace、RunnerHost 和 Kubernetes Node；命令不能改变绑定。主机的 mwr 凭证只用于既有接入入口，不是用户的 Kubernetes 凭证。
 - `RUNTIME_V2_URL` 是现有受信接入入口的基地址。客户端自己添加 `/runner-api/v1`，不要重复配置该路径。
@@ -160,7 +173,7 @@ services/api/.venv/bin/python infra/runtime-v2/acceptance_two_nodes.py \
   --report /secure/public-denied-origin.json
 ```
 
-公网 plan：`host`（LB DNS/IPv4）、`server_name`（证书验证主机名）、`port`（当前已批准
+公网 plan：`host`（LB DNS或IPv4，域名可选）、`server_name`（证书验证身份；IP访问填证书IP SAN中的地址）、`port`（当前已批准
 20000–29999 精确端口）、`ca_file`（只读 CA 路径）、`source_cidrs`（真实批准的 IPv4
 列表）、`external_source_expected`（该外部主机经管理员核验的实际出口 IPv4）、
 `reviewed_config_sha256`（相同认证快照的 fingerprint）；允许源还可提供明确
@@ -186,3 +199,40 @@ Workspace使用Compose部署时，在自己的`.env`中设置`RUNNER_NETWORK_GAT
 公网LB必须实际支持直接Pod路由、保留原socket来源且关闭普通NodePort。不要使用会通过hostPort暴露端口的默认K3s ServiceLB，也不要在前面加会SNAT来源的反向代理。节点/Pod/平台CIDR必须完整进入禁止来源名单，IPv6不支持时在受管域和入口都关闭。真实公网原始来源与允许/拒绝/存量撤销验收未通过前，保留功能开关关闭。
 
 当前测试进度见 `docs/verification/2026-11-13-network-completion/PROGRESS.md`。人类已取消本轮 SSH 登录和远端测试，本次仅交付代码、本地检查和验收材料；未认证或改动远端，真实两节点验收留给部署阶段。
+
+## 后续专用双节点实测补充（2026-11-14 北京时间）
+
+人类随后重新授权两服务器的隔离验收；上述取消远端测试是当时的历史状态。
+最新原始输出、失败诊断、UID回执及实际部署见
+[`2026-11-13-two-server-acceptance/EXECUTION.md`](../../docs/verification/2026-11-13-two-server-acceptance/EXECUTION.md)。
+专用 K3s/Cilium/gVisor 集群已经实际通过基础 TCP/UDP/DNS、跨实例隔离、私网授权网关及
+规则/来源能力撤销后的断连检查；公网 LB、两个独立外部来源、生产存储配额和完整运行适配仍是独立门槛，不能据此开启生产开关。
+
+本轮实际环境还验证了下列部署前提：
+
+- API、kubelet 只绑定 Tailscale 地址时，K3s 使用 `egress-selector-mode=disabled`，
+  由明确节点 ACL 和集群 TLS 保护直接 kubelet 连接。本轮默认 `agent` 代理到 loopback
+  与私有绑定冲突，实际日志/exec 返回 EOF；直接 CA 校验与配置调整后恢复。不要通过关闭 TLS 修复。
+- Cilium `policyCIDRMatchMode=nodes` 使网关 NetworkPolicy 中精确的控制面/API 节点 CIDR
+  能匹配节点身份。本轮实际 monitor 捕获了指定控制端口的 `Policy denied`；配置并重载
+  专用 agent 后恢复。仍只允许所列 CIDR/端口，不能替换为不受限的宿主访问。
+- 本轮网关原生 kubectl 自动配置实际回退到 localhost:8080。已使用只读 ConfigMap
+  提供显式 kubeconfig，并设置 `RUNTIME_V2_GATEWAY_KUBECONFIG` 指向该文件。
+  kubeconfig 只包含已核验 HTTPS API 地址、投射 SA 的 CA 路径及 `tokenFile` 路径，
+  不含 token 值；保留原最小 ServiceAccount/RBAC 和凭据轮换。实际结构见验收记录中的
+  `gateway-explicit-sa-config.json` 与 `gateway-actual-deployment.json`；这个额外 ConfigMap
+  和只读挂载由本轮操作者审阅配置，当前离线渲染器不会自动生成它。
+- 私网网关与测试控制面使用独立凭据和短期 CA。只有全新 `APP_ENV=test` 控制面的
+  `RUNNER_NETWORK_VERIFIED=true` 用于验收，生产配置没有启用。测试环境的节点标记不能
+  作为生产网络、磁盘配额或生命周期全链路已验证的声明。
+- 受管运行环境不应访问节点/平台/元数据/公网。本轮六个禁止目标都以仅 TCP 握手的
+  负向探测和对应 Cilium `Policy denied` 事件核对，未读取元数据或数据库内容。
+
+测试记录中的两条专用入站规则和来源通信能力已撤销；撤下 ACK 已确认，网关 Service
+仅剩不监听的65535占位端口。专用集群/控制面保留用于复核，身份备份与原业务卷保留。
+
+数据库迁移已整合后续主干的编号修复：最终链为0066会话桥→0067网关→0068历史核对。
+0066/0067的旧部署通过在线实际结构核对补缺，保留既有桥权限、记录与端口序列；
+未知/部分结构及未验证约束会拒绝升级，不支持离线SQL导出。不要用手工stamp跳过核对。
+0068回退不删表；实际删除桥表的0066回退入口持锁检查空表，有桥数据会拒绝破坏性回退。
+本轮已在专用真实0067库完成0068升级，记录摘要和分配序列保留；这不代表生产已迁移。

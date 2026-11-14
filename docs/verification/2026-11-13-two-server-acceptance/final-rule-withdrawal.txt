@@ -1,0 +1,1 @@
+all dedicated ingress rules revoked and withdrawal-ACK confirmed; diagnostic-only egress policy removed by original UID

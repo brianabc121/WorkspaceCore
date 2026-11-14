@@ -377,7 +377,7 @@ def public_checks(plan: dict[str, Any], role: str | None) -> dict[str, Any]:
     if role not in ("allowed", "denied"):
         raise ValueError("explicit --external-role required")
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}", plan["host"]):
-        raise ValueError("explicit external gateway hostname required")
+        raise ValueError("explicit external gateway IPv4 address or hostname required")
     if type(plan["port"]) is not int or not 20000 <= plan["port"] <= 29999:
         raise ValueError("reviewed public binding port required")
     expected_source = ipaddress.ip_address(plan["external_source_expected"])

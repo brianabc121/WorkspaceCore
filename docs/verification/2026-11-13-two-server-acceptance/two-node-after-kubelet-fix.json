@@ -1,0 +1,7 @@
+{
+  "run_id": "8e363798-be80-45b0-bc2c-79807dc802db",
+  "context": "t0224-nonproduction",
+  "private_tcp_udp_dns": "passed",
+  "gateway_allowed_denied_revocation": "blocked: DB-backed gateway fixture plan missing",
+  "public_tls_external_source": "blocked: external IPv4 client and real LB required"
+}

@@ -1,0 +1,4 @@
+Source: GitHub job132119505277, commit7f4a591; ANSI color codes removed.
+2026-11-13T19:35:56.0779094Z  Test Files  80 passed (80)
+2026-11-13T19:35:56.0781739Z       Tests  811 passed (811)
+2026-11-13T19:36:26.7819487Z ✓ built in 10.86s

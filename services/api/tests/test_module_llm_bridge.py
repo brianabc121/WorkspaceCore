@@ -79,7 +79,10 @@ async def rig(make_client: Any, migrated_database_url: str, tmp_path: Path) -> A
         bridge_config = importlib.import_module("bridge.config")
         fake_driver = importlib.import_module("bridge.drivers.fake")
         bridge_settings = bridge_config.Settings(
-            data_dir=tmp_path / "bridge", admin_token=BRIDGE_TOKEN
+            data_dir=tmp_path / "bridge",
+            admin_token=BRIDGE_TOKEN,
+            # Only Claude is replaced below. Keep unavailable Codex independent of host tools.
+            codex_bin=str(tmp_path / "uninstalled-codex"),
         )
         bridge_app = bridge_app_module.create_app(bridge_settings)
         down = [False]
@@ -94,7 +97,11 @@ async def rig(make_client: Any, migrated_database_url: str, tmp_path: Path) -> A
 
             async def spawn(host: str, token: str) -> Any:
                 extra = bridge_app_module.create_app(
-                    bridge_config.Settings(data_dir=tmp_path / host, admin_token=token)
+                    bridge_config.Settings(
+                        data_dir=tmp_path / host,
+                        admin_token=token,
+                        codex_bin=str(tmp_path / "uninstalled-codex"),
+                    )
                 )
                 await stack.enter_async_context(extra.router.lifespan_context(extra))
                 extra.state.engine.drivers["claude"] = fake_driver.FakeDriver()
