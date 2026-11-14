@@ -147,6 +147,12 @@ class LlmBridgeService:
             metadata=metadata,
         )
 
+    async def audit(
+        self, access: WorkspaceAccess, action: str, resource_id: uuid.UUID, metadata: dict[str, Any]
+    ) -> None:
+        """记一条审计（动作名前面自动加 llm_bridge.）；不提交事务。"""
+        await self._audit(access, action, resource_id, metadata)
+
     async def create_bridge(self, access: WorkspaceAccess, body: LlmBridgeIn) -> LlmBridgeOut:
         workspace_id = access.workspace.id
         name = body.name.strip()

@@ -44,6 +44,8 @@ class Rig:
     down: list[bool]
     # 再起一座会话桥（另一个主机名、另一枚令牌、另一个数据目录），返回它的应用
     spawn: Callable[[str, str], Awaitable[Any]]
+    # 通往测试里这些会话桥的传输：以别的成员身份登录的客户端要用它才连得到
+    transport: httpx.MockTransport
 
     async def api(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         write = method != "GET"
@@ -113,7 +115,8 @@ async def rig(make_client: Any, migrated_database_url: str, tmp_path: Path) -> A
                 return httpx.Response(response.status_code, headers=response.headers, content=body)
 
             app = env.client._transport.app  # type: ignore[attr-defined]
-            app.state.connectors.transport = httpx.MockTransport(route)
+            transport = httpx.MockTransport(route)
+            app.state.connectors.transport = transport
             enable = await env.client.patch(
                 "/api/v1/modules/llm_bridge",
                 json={"enabled": True},
@@ -126,7 +129,7 @@ async def rig(make_client: Any, migrated_database_url: str, tmp_path: Path) -> A
                 headers=env.headers(write=True),
             )
             assert created.status_code == 201, created.text
-            yield Rig(env, bridge_app, created.json()["id"], down, spawn)
+            yield Rig(env, bridge_app, created.json()["id"], down, spawn, transport)
     finally:
         sys.path.remove(str(BRIDGE_SOURCE))
         for name in [m for m in sys.modules if m == "bridge" or m.startswith("bridge.")]:
