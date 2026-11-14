@@ -259,6 +259,17 @@ async def test_cli_failures(tmp_path: Path) -> None:
     with pytest.raises(DriverError) as caught:
         await driver.run_turn(spec, "crash", Sink())
     assert caught.value.kind == "platform_error" and "sk-ant" not in caught.value.message
+    # 额度用完：和普通失败分开，带着重置时间；回合里报出的额度交给了 engine
+    sink = Sink()
+    with pytest.raises(DriverError) as limited:
+        await driver.run_turn(spec, "limit", sink)
+    assert (limited.value.kind, limited.value.quota, limited.value.resets_at) == (
+        "rate_limited",
+        True,
+        1900000000.0,
+    )
+    quota_events = [payload for kind, payload in sink.events if kind == "quota"]
+    assert quota_events[0]["windows"][0]["status"] == "exceeded"
     task = asyncio.create_task(driver.run_turn(spec, "hang", Sink()))
     await _until(lambda: (spec.native_id or "") in driver._procs)  # 进程起来之后才有东西可取消
     await driver.cancel(spec)

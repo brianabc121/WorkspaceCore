@@ -405,6 +405,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         return engine_of(request).move_queued(turn_id, body.to)
 
+    @app.get("/admin/quota")
+    async def admin_quota(request: Request, _: Admin, refresh: bool = False) -> dict[str, Any]:
+        return await engine_of(request).quota_view(refresh)
+
+    @app.post("/admin/turns/{turn_id}/resume")
+    async def admin_turn_resume(request: Request, turn_id: str, _: Admin) -> dict[str, Any]:
+        return engine_of(request).resume_now(turn_id)
+
+    @app.delete("/admin/turns/{turn_id}/resume")
+    async def admin_turn_resume_cancel(request: Request, turn_id: str, _: Admin) -> dict[str, Any]:
+        return engine_of(request).cancel_resume(turn_id)
+
     @app.get("/admin/sessions/{session_id}/turns")
     async def admin_turns(request: Request, session_id: str, _: Admin) -> dict[str, Any]:
         engine = engine_of(request)

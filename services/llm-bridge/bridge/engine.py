@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from bridge import quota
 from bridge.channels import SLOT_LABELS, Channel, find
 from bridge.config import Settings
 from bridge.drivers.base import Driver, DriverError, Mode, SessionSpec
@@ -31,7 +32,11 @@ from bridge.store import Row, Store
 
 logger = logging.getLogger("bridge.engine")
 
-TERMINAL = ("completed", "failed", "cancelled", "unknown")
+# interrupted：被平台的额度打断，到重置时间后可以自动续跑（T-0237）
+TERMINAL = ("completed", "failed", "cancelled", "unknown", "interrupted")
+RESUME_TEXT = "继续意外中断的任务"
+SYSTEM_CALLER = "system"
+SYSTEM_LABEL = "系统（自动续跑）"
 DEFAULTS: dict[str, Any] = {
     # 每个平台同时进行的会话数（T-0236：按平台计数；一个会话同一时间只跑一个回合）
     "concurrency": 3,
@@ -42,6 +47,10 @@ DEFAULTS: dict[str, Any] = {
     "max_text_chars": 100_000,
     # Claude 用订阅登录（oauth_token / existing）前，管理员要先确认了解合规风险（方案 6.3、D3）
     "claude_subscription_ack": False,
+    # 额度用完被打断的会话，到重置时间后自动发一句“继续”（T-0237）
+    "auto_resume": True,
+    "auto_resume_max": 3,  # 同一次中断最多自动续几次
+    "resume_text": RESUME_TEXT,
 }
 SETTING_LIMITS = {
     "concurrency": (1, 16),
@@ -49,6 +58,7 @@ SETTING_LIMITS = {
     "turn_timeout_seconds": (30, 6 * 3600),
     "send_per_hour": (1, 10_000),
     "max_text_chars": (1, 1_000_000),
+    "auto_resume_max": (1, 10),
 }
 MAX_WAIT_SECONDS = 50
 MAX_EVENT_WAIT_SECONDS = 25
@@ -148,6 +158,10 @@ class Engine:
         self._done: dict[str, asyncio.Event] = {}
         self._cancel_requested: set[str] = set()
         self._limiters: dict[str, SlotLimiter] = {}
+        # 额度用完后的暂停与续跑（T-0237）
+        self._pause_wake: dict[str, asyncio.Event] = {}
+        self._resume_wake = asyncio.Event()
+        self._resumer: asyncio.Task[None] | None = None
         self._accounts: dict[str, tuple[float, Row]] = {}
         self._idle_seconds = 60.0
 
@@ -207,7 +221,11 @@ class Engine:
                 continue
             if key not in DEFAULTS:
                 raise BridgeError("VALIDATION_FAILED", f"没有这个设置：{key}")
-            if isinstance(DEFAULTS[key], bool):
+            if isinstance(DEFAULTS[key], str):
+                if not isinstance(value, str) or not 1 <= len(value.strip()) <= 200:
+                    raise BridgeError("VALIDATION_FAILED", f"{key} 要填 1 到 200 个字")
+                value = value.strip()
+            elif isinstance(DEFAULTS[key], bool):
                 if not isinstance(value, bool):
                     raise BridgeError("VALIDATION_FAILED", f"{key} 必须是 true 或 false")
             else:
@@ -233,14 +251,16 @@ class Engine:
             )
         for turn in self.store.list_turns(statuses=("queued",), limit=10_000):
             self._enqueue(turn)
+        self._resumer = asyncio.create_task(self._resume_loop(), name="quota-resume")
 
     def _limiter(self, platform: str) -> SlotLimiter:
         return self._limiters.setdefault(platform, SlotLimiter())
 
     async def shutdown(self) -> None:
-        for task in list(self._workers.values()):
+        tasks = list(self._workers.values()) + ([self._resumer] if self._resumer else [])
+        for task in tasks:
             task.cancel()
-        for task in list(self._workers.values()):
+        for task in tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         for driver in self.drivers.values():
@@ -769,6 +789,10 @@ class Engine:
                     self._workers.pop(session_id, None)
                     return
                 continue
+            # 这个平台因为额度用完暂停着：等到重置时间（或有人点“现在就试”）再取下一条
+            session = self.store.get_session(session_id)
+            if session is not None:
+                await self._wait_platform(session["platform"])
             # 队列里的记号只表示“有一条在等”；真正做哪一条按队列里的顺序取（可以被调整过）
             turn = self.store.next_queued(session_id)
             if turn is None:
@@ -819,6 +843,9 @@ class Engine:
         spec = self._spec(session)
 
         async def sink(kind: str, payload: Row) -> None:
+            if kind == "quota":  # 官方程序报出的额度：记下来，不算会话里的事件
+                self._save_quota(session["slot"], payload.get("windows") or [])
+                return
             clean = {k: redact(v) if isinstance(v, str) else v for k, v in payload.items()}
             self.store.add_event(session_id, turn_id, kind, clean)
 
@@ -839,6 +866,9 @@ class Engine:
             if turn_id in self._cancel_requested:
                 self.store.add_event(session_id, turn_id, "cancelled", {})
                 self._finish(turn_id, status="cancelled")
+                return
+            if error.quota:
+                self._interrupt(turn, session, error)
                 return
             if error.kind in ("not_logged_in", "unavailable"):
                 self._accounts.pop(session["slot"], None)
@@ -931,6 +961,9 @@ class Engine:
         elif turn["status"] == "completed":
             view["result"] = turn["result_text"] or ""
             view["summary"] = turn["summary"] or {}
+        elif turn["status"] == "interrupted":
+            view["failure"] = {"kind": turn["error_kind"], "message": turn["error_message"]}
+            view["resume"] = self._resume_view(turn)
         elif turn["status"] != "cancelled":
             # 不叫 error：工具出错时的返回才用 error
             view["failure"] = {"kind": turn["error_kind"], "message": turn["error_message"]}
@@ -1013,11 +1046,13 @@ class Engine:
                 # 没做完（进行中、失败、结果未知、已取消）：显示已经给出的部分
                 reply["text"] = "\n\n".join(s["text"] for s in steps if s["kind"] == "message")
                 reply["steps"] = [s for s in steps if s["kind"] != "message"]
-                if status in ("failed", "unknown"):
+                if status in ("failed", "unknown", "interrupted"):
                     reply["failure"] = {
                         "kind": turn["error_kind"],
                         "message": turn["error_message"],
                     }
+                    if status == "interrupted":
+                        reply["resume"] = self._resume_view(turn)
                 elif status == "queued":
                     reply["ahead_in_session"] = self.store.queue_position(turn)
             messages.append(reply)
@@ -1038,6 +1073,233 @@ class Engine:
             "busy": busy,
             "last_id": events[-1]["id"] if events else after,
         }
+
+    # ---- 额度与自动续跑（T-0237，docs/v2/LLM_BRIDGE_QUOTA_PLAN.md）----
+    def _platforms_of(self, slot: str) -> list[str]:
+        return [
+            p
+            for p in self.all_platforms()
+            if any(c.slot == slot and c.platform == p for c in self.channels)
+        ]
+
+    def _save_quota(self, slot: str, windows: list[Row]) -> None:
+        """同一个账号上的平台（ChatGPT 和 Codex）共用一份额度。"""
+        clean = [w for w in windows if isinstance(w, dict) and w.get("kind")]
+        for platform in self._platforms_of(slot):
+            self.store.save_quota(platform, clean)
+
+    def _resume_view(self, turn: Row) -> Row:
+        return {
+            "state": turn[
+                "resume_state"
+            ],  # pending / forced / done / cancelled / skipped / exhausted
+            "at": turn["resume_at"],
+            "attempt": turn["resume_attempt"],
+            "resumed_by": turn["resumed_by"],
+        }
+
+    async def _wait_platform(self, platform: str) -> None:
+        while True:
+            pause = self.store.pauses().get(platform)
+            remaining = pause["until"] - time.time() if pause else 0
+            if remaining <= 0 and pause is None:
+                return
+            # 到点后由续跑的循环解除暂停（它先把“继续”排到队首），这里只等它
+            event = self._pause_wake.setdefault(platform, asyncio.Event())
+            event.clear()
+            self._resume_wake.set()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(event.wait(), max(0.05, min(remaining, 30)))
+
+    def _interrupt(self, turn: Row, session: Row, error: DriverError) -> None:
+        """这个回合是被平台的额度打断的：记成中断，暂停这个平台，到重置时间后续跑。"""
+        now = time.time()
+        resets = error.resets_at or quota.parse_reset(error.message)
+        estimated = not resets
+        if not resets:
+            resets = (
+                now + self.settings.quota_fallback_seconds
+            )  # 平台没说什么时候重置：按一个窗口估
+        until = max(resets, now) + self.settings.resume_margin_seconds
+        attempt = int(turn["resume_attempt"] or 0)
+        state = "pending" if attempt < self.setting("auto_resume_max") else "exhausted"
+        platform = session["platform"]
+        current = self.store.pauses().get(platform)
+        self.store.set_pause(
+            platform,
+            max(until, current["until"]) if current else until,
+            estimated,
+            redact(error.message)[:200],
+        )
+        self.store.add_event(
+            session["id"],
+            turn["id"],
+            "interrupted",
+            {"kind": "quota_exceeded", "resume_at": until, "estimated": estimated, "state": state},
+        )
+        self.store.update_turn(turn["id"], resume_at=until, resume_state=state)
+        self._finish(
+            turn["id"],
+            status="interrupted",
+            error_kind="quota_exceeded",
+            error_message=redact(error.message),
+        )
+        self._resume_wake.set()
+
+    async def _resume_loop(self) -> None:
+        """到重置时间后：解除平台的暂停，给被打断的会话各发一句“继续”。"""
+        while True:
+            try:
+                now = time.time()
+                for platform, pause in self.store.pauses().items():
+                    if pause["until"] <= now:
+                        await self._resume_platform(platform)
+                waits = [p["until"] - time.time() for p in self.store.pauses().values()]
+                timeout = min(60.0, max(0.05, min(waits))) if waits else 60.0
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("quota resume loop failed")
+                timeout = 30.0
+            self._resume_wake.clear()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._resume_wake.wait(), timeout)
+
+    async def _resume_platform(self, platform: str) -> None:
+        channel = next((c for c in self.channels if c.platform == platform), None)
+        driver = self.drivers.get(channel.slot) if channel else None
+        if driver is not None and channel is not None:
+            # 能随时查额度的平台：先确认真的回来了，没回来就按新的重置时间接着等
+            windows: list[Row] | None = None
+            with contextlib.suppress(DriverError):
+                windows = await driver.quota()
+            if windows:
+                self._save_quota(channel.slot, windows)
+                later = [
+                    w["resets_at"]
+                    for w in windows
+                    if w.get("status") == "exceeded" and (w.get("resets_at") or 0) > time.time()
+                ]
+                if later:
+                    self.store.set_pause(
+                        platform,
+                        min(later) + self.settings.resume_margin_seconds,
+                        False,
+                        "额度还没有重置",
+                    )
+                    return
+        pending = self.store.pending_resumes(platform)
+        for turn in pending:
+            self._auto_resume(turn)
+        self.store.clear_pause(platform)
+        event = self._pause_wake.get(platform)
+        if event is not None:
+            event.set()
+
+    def _auto_resume(self, turn: Row) -> None:
+        session = self.store.get_session(turn["session_id"])
+        forced = turn["resume_state"] == "forced"
+        reason = ""
+        if session is None or session["status"] != "active":
+            reason = "会话已归档"
+        elif not self.platform_enabled(session["platform"]):
+            reason = "这个平台已经不由这座桥控制"
+        elif not forced and not self.setting("auto_resume"):
+            reason = "没有打开“额度用完后自动继续”"
+        if reason or session is None:
+            self.store.update_turn(turn["id"], resume_state="skipped")
+            if session is not None:
+                self.store.add_event(
+                    session["id"], turn["id"], "resume_skipped", {"reason": reason}
+                )
+            return
+        attempt = int(turn["resume_attempt"] or 0) + 1
+        new = self.store.create_turn(
+            session["id"],
+            SYSTEM_CALLER,
+            f"resume:{turn['id']}:{attempt}",
+            self.setting("resume_text"),
+        )
+        edge = self.store.queue_edge(session["id"], first=True)
+        self.store.update_turn(
+            new["id"],
+            position=(edge if edge is not None else new["position"])
+            - 1,  # 排在这个会话队列的最前面
+            resume_attempt=attempt,
+            resumes_turn_id=turn["id"],
+        )
+        self.store.update_turn(turn["id"], resume_state="done", resumed_by=new["id"])
+        self.store.add_event(
+            session["id"],
+            new["id"],
+            "queued",
+            {"by": SYSTEM_LABEL, "auto_resume": True, "resumes": turn["id"], "attempt": attempt},
+        )
+        self._enqueue(self.store.get_turn(new["id"]) or new)
+
+    def _interrupted_turn(self, turn_id: str) -> tuple[Row, Row]:
+        turn = self.store.get_turn(turn_id)
+        if turn is None:
+            raise BridgeError("NOT_FOUND", "没有这个回合")
+        if turn["status"] != "interrupted":
+            raise BridgeError("CONFLICT", "这个回合不是被额度打断的")
+        if turn["resume_state"] == "done":
+            raise BridgeError("CONFLICT", "这个回合已经续跑过了")
+        return turn, self._required_session(turn["session_id"])
+
+    def resume_now(self, turn_id: str) -> Row:
+        """不等重置时间，现在就试着续跑（也用于“自动继续”关着、或已经超过次数的时候）。"""
+        turn, session = self._interrupted_turn(turn_id)
+        self.store.update_turn(turn_id, resume_state="forced", resume_at=time.time())
+        self.store.set_pause(session["platform"], time.time(), False, "手动：现在就试")
+        self._resume_wake.set()
+        return self.turn_view(self.store.get_turn(turn_id) or turn)
+
+    def cancel_resume(self, turn_id: str) -> Row:
+        turn, _ = self._interrupted_turn(turn_id)
+        self.store.update_turn(turn_id, resume_state="cancelled")
+        return self.turn_view(self.store.get_turn(turn_id) or turn)
+
+    async def quota_view(self, refresh: bool = False) -> Row:
+        """各平台的额度：每个窗口已用多少、什么时候重置、什么时候看到的；以及是否因为额度暂停着。"""
+        if refresh:
+            for slot, driver in self.drivers.items():
+                windows: list[Row] | None = None
+                with contextlib.suppress(DriverError):
+                    windows = await driver.quota()
+                if windows:
+                    self._save_quota(slot, windows)
+        now = time.time()
+        pauses, tokens = self.store.pauses(), self.store.tokens_since(now - 5 * 3600)
+        rows: dict[str, list[Row]] = {}
+        for row in self.store.quota_windows():
+            passed = bool(row["resets_at"]) and row["resets_at"] <= now
+            rows.setdefault(row["platform"], []).append(
+                {
+                    "kind": row["kind"],
+                    # 重置时间已经过了：旧的百分比不再算数，等下一次回合确认
+                    "used_percent": None if passed else row["used_percent"],
+                    "resets_at": row["resets_at"],
+                    "reset_passed": passed,
+                    "status": "ok" if passed else row["status"],
+                    "plan": row["plan"],
+                    "observed_at": row["observed_at"],
+                }
+            )
+        out: Row = {}
+        for platform in self.platforms():
+            channel = next((c for c in self.channels if c.platform == platform), None)
+            owner = self.drivers.get(channel.slot) if channel else None
+            pause = pauses.get(platform)
+            out[platform] = {
+                "windows": rows.get(platform, []),
+                "can_refresh": bool(getattr(owner, "can_query_quota", False)),
+                "paused_until": pause["until"] if pause else None,
+                "pause_estimated": bool(pause["estimated"]) if pause else False,
+                "waiting_resume": len(self.store.pending_resumes(platform)),
+                "tokens_5h": tokens.get(platform, 0),
+            }
+        return {"platforms": out}
 
     # ---- 队列（T-0236）----
     def platform_load(self) -> Row:
@@ -1166,6 +1428,8 @@ class Engine:
             "queued": queued,
             # 每个平台进行中的会话数、在等的会话数和上限（T-0236）
             "load": self.platform_load(),
+            # 各平台的额度与因为额度暂停的情况（T-0237）
+            "quota": (await self.quota_view())["platforms"],
             "running": running,
         }
 

@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -141,6 +141,37 @@ class Store:
             # 会话队列里的顺序（T-0236）：原来只按入队时间，现在可以调整
             self._db.execute("ALTER TABLE turns ADD COLUMN position REAL")
             self._db.execute("UPDATE turns SET position = queued_at WHERE position IS NULL")
+        # 额度用完后的自动续跑（T-0237）
+        for name, kind in (
+            ("resume_at", "REAL"),
+            ("resume_state", "TEXT"),
+            ("resume_attempt", "INTEGER NOT NULL DEFAULT 0"),
+            ("resumes_turn_id", "TEXT"),
+            ("resumed_by", "TEXT"),
+        ):
+            if name not in columns:
+                self._db.execute(f"ALTER TABLE turns ADD COLUMN {name} {kind}")
+        self._db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS quota_windows (
+                platform TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                used_percent REAL,
+                resets_at REAL,
+                status TEXT NOT NULL DEFAULT 'ok',
+                plan TEXT,
+                observed_at REAL NOT NULL,
+                PRIMARY KEY (platform, kind)
+            );
+            CREATE TABLE IF NOT EXISTS platform_pauses (
+                platform TEXT PRIMARY KEY,
+                until REAL NOT NULL,
+                estimated INTEGER NOT NULL DEFAULT 0,
+                reason TEXT NOT NULL DEFAULT '',
+                since REAL NOT NULL
+            );
+            """
+        )
         self._db.execute(
             "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),)
         )
@@ -392,6 +423,72 @@ class Store:
             (turn["session_id"], turn["id"], turn["position"]),
         )
         return int(row["n"]) if row else 0
+
+    # ---- 额度与续跑（T-0237）----
+    def save_quota(self, platform: str, windows: list[Row]) -> None:
+        for w in windows:
+            self._exec(
+                "INSERT INTO quota_windows (platform, kind, used_percent, resets_at, status, plan,"
+                " observed_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(platform, kind) DO UPDATE SET"
+                " used_percent = excluded.used_percent, resets_at = excluded.resets_at,"
+                " status = excluded.status, plan = COALESCE(excluded.plan, quota_windows.plan),"
+                " observed_at = excluded.observed_at",
+                (
+                    platform,
+                    w["kind"],
+                    w.get("used_percent"),
+                    w.get("resets_at"),
+                    w.get("status") or "ok",
+                    w.get("plan"),
+                    time.time(),
+                ),
+            )
+
+    def quota_windows(self) -> list[Row]:
+        return self._all("SELECT * FROM quota_windows ORDER BY platform, kind")
+
+    def set_pause(self, platform: str, until: float, estimated: bool, reason: str) -> None:
+        self._exec(
+            "INSERT INTO platform_pauses (platform, until, estimated, reason, since)"
+            " VALUES (?,?,?,?,?) ON CONFLICT(platform) DO UPDATE SET until = excluded.until,"
+            " estimated = excluded.estimated, reason = excluded.reason",
+            (platform, until, int(estimated), reason, time.time()),
+        )
+
+    def clear_pause(self, platform: str) -> None:
+        self._exec("DELETE FROM platform_pauses WHERE platform = ?", (platform,))
+
+    def pauses(self) -> dict[str, Row]:
+        return {row["platform"]: row for row in self._all("SELECT * FROM platform_pauses")}
+
+    def pending_resumes(self, platform: str | None = None) -> list[Row]:
+        """被额度打断、还在等自动续跑的回合（按被打断的先后）。"""
+        sql = (
+            "SELECT t.*, s.platform AS platform FROM turns t JOIN sessions s ON s.id = t.session_id"
+            " WHERE t.status = 'interrupted' AND t.resume_state IN ('pending', 'forced')"
+        )
+        params: tuple[Any, ...] = ()
+        if platform:
+            sql += " AND s.platform = ?"
+            params = (platform,)
+        return self._all(sql + " ORDER BY t.finished_at, t.id", params)
+
+    def tokens_since(self, since: float) -> dict[str, int]:
+        """各平台最近一段时间经这座桥用掉的 token（回合摘要里的用量相加）。"""
+        totals: dict[str, int] = {}
+        rows = self._all(
+            "SELECT s.platform AS platform, t.summary AS summary FROM turns t"
+            " JOIN sessions s ON s.id = t.session_id WHERE t.finished_at >= ?"
+            " AND t.summary IS NOT NULL",
+            (since,),
+        )
+        for row in rows:
+            usage = (row["summary"] or {}).get("usage") or {}
+            used = usage.get("total_tokens") or (
+                int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+            )
+            totals[row["platform"]] = totals.get(row["platform"], 0) + int(used or 0)
+        return totals
 
     def next_queued(self, session_id: str) -> Row | None:
         """这个会话队列里排在最前面的那一条。"""

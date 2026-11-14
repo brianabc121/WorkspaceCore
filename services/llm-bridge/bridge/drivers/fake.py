@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from typing import Any
 
 from bridge.drivers.base import (
     AccountStatus,
@@ -37,6 +38,11 @@ class FakeDriver(Driver):
         self.running = 0
         self.max_running = 0
         self._cancel: dict[str, asyncio.Event] = {}
+        # 额度：quota_until 之前的回合都以“额度用完”失败；quota_reports_reset=False 时不给重置时间
+        self.quota_until = 0.0
+        self.quota_reports_reset = True
+        self.current_quota: list[dict[str, Any]] = []
+        self.can_query_quota = False
 
     def supports(self, mode: Mode) -> bool:
         return mode in ("chat", "dev")
@@ -63,6 +69,34 @@ class FakeDriver(Driver):
         try:
             if text.startswith("fail:"):
                 raise DriverError(text[5:], "模拟的失败")  # type: ignore[arg-type]
+            if self.quota_until > time.time():
+                # 模拟额度用完：到 quota_until 之前谁来都被拒绝，并报出额度
+                windows = [
+                    {
+                        "kind": "five_hour",
+                        "used_percent": 100.0,
+                        "resets_at": self.quota_until if self.quota_reports_reset else None,
+                        "status": "exceeded",
+                        "plan": "fake",
+                    }
+                ]
+                await sink("quota", {"windows": windows})
+                raise DriverError(
+                    "rate_limited",
+                    "You've hit your usage limit",
+                    quota=True,
+                    resets_at=self.quota_until if self.quota_reports_reset else None,
+                )
+            self.current_quota = [
+                {
+                    "kind": "five_hour",
+                    "used_percent": 40.0,
+                    "resets_at": time.time() + 3600,
+                    "status": "ok",
+                    "plan": "fake",
+                }
+            ]
+            await sink("quota", {"windows": self.current_quota})
             if text.startswith("sleep:"):
                 waiter = asyncio.create_task(cancel.wait())
                 done, _ = await asyncio.wait({waiter}, timeout=float(text[6:]))
@@ -102,6 +136,21 @@ class FakeDriver(Driver):
             )
         finally:
             self.running -= 1
+
+    async def quota(self) -> list[dict[str, Any]] | None:
+        if not self.can_query_quota:
+            return None
+        if self.quota_until > time.time():
+            return [
+                {
+                    "kind": "five_hour",
+                    "used_percent": 100.0,
+                    "resets_at": self.quota_until,
+                    "status": "exceeded",
+                    "plan": "fake",
+                }
+            ]
+        return self.current_quota
 
     async def cancel(self, spec: SessionSpec) -> None:
         if spec.native_id in self._cancel:

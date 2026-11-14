@@ -65,6 +65,28 @@ if not KEY and not (CONFIG / "logged-in").exists():
         }
     )
     sys.exit(0)
+if text == "limit":
+    # 额度用完：官方程序先报一条被拒绝的额度事件，再以错误结束
+    emit(
+        {
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "rejected",
+                "rateLimitType": "five_hour",
+                "resetsAt": 1900000000,
+                "utilization": 1.0,
+            },
+        }
+    )
+    emit(
+        {
+            "type": "result",
+            "subtype": "error_during_execution",
+            "is_error": True,
+            "result": "You've hit your usage limit. Your limit resets at 1900000000.",
+        }
+    )
+    sys.exit(0)
 if text == "crash":
     sys.stderr.write("boom " + "sk-" + "ant-abcdefghijklmnopqrstuvwxyz0123\n")
     sys.exit(3)

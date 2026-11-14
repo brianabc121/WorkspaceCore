@@ -26,10 +26,20 @@ Sandbox = Literal["read_only", "workspace_write", "exec"]
 
 
 class DriverError(Exception):
-    def __init__(self, kind: ErrorKind, message: str) -> None:
+    def __init__(
+        self,
+        kind: ErrorKind,
+        message: str,
+        *,
+        quota: bool = False,
+        resets_at: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.kind = kind
         self.message = message
+        # 额度用完造成的中断（不是普通的限速）：到重置时间后可以自动续跑
+        self.quota = quota
+        self.resets_at = resets_at
 
 
 @dataclass(frozen=True)
@@ -132,6 +142,17 @@ class Driver:
         raise DriverError("not_supported", "这个通道不能发送消息")
 
     async def cancel(self, spec: SessionSpec) -> None:
+        return None
+
+    # 能不能随时向平台查额度（不能的只在跑回合时由官方程序顺带报出来）
+    can_query_quota = False
+
+    async def quota(self) -> list[dict[str, Any]] | None:
+        """现在向平台查一次额度（各窗口的已用百分比和重置时间）。
+
+        返回 None 表示这个平台不能随时查：它的额度只在跑回合时由官方程序顺带报出来
+        （回合里用 sink("quota", {"windows": [...]}) 交给 engine）。
+        """
         return None
 
     async def list_native(self, limit: int) -> list[NativeSession]:

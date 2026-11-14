@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from bridge import __version__
+from bridge import __version__, quota
 from bridge.drivers.base import (
     AccountStatus,
     Driver,
@@ -69,6 +69,7 @@ def _error_kind(info: Any) -> ErrorKind:
 
 
 class CodexDriver(Driver):
+    can_query_quota = True  # account/rateLimits/read
     slot = "openai"
     login_methods = ("device_code", "api_key")
 
@@ -81,6 +82,7 @@ class CodexDriver(Driver):
         self._start_lock = asyncio.Lock()
         self._next_id = 0
         self._pending: dict[int, asyncio.Future[Any]] = {}
+        self.latest_quota: list[dict[str, Any]] = []
         self._subs: dict[str, asyncio.Queue[dict[str, Any]]] = {}
         self._loaded: set[str] = set()
         self._active: dict[str, str] = {}
@@ -229,6 +231,10 @@ class CodexDriver(Driver):
                     self._login = finished
             else:
                 self._early_logins[key] = finished
+            return
+        if method == "account/rateLimits/updated":
+            # 账号级的通知，不属于哪个会话：记下最新的，回合结束或有人查的时候取
+            self.latest_quota = quota.from_codex(params) or self.latest_quota
             return
         thread = params.get("thread")
         thread_id = params.get("threadId") or (
@@ -409,12 +415,43 @@ class CodexDriver(Driver):
                 status = turn.get("status")
                 if status == "completed":
                     outcome.text = messages[-1] if messages else ""
+                    if self.latest_quota:
+                        await sink("quota", {"windows": self.latest_quota})
                     return outcome
                 error = turn.get("error") or {}
                 text = str(error.get("message") or last_error or "Codex 回合失败")[:500]
                 if status == "interrupted":
                     raise DriverError("platform_error", "回合被中断")
-                raise DriverError(_error_kind(error.get("codexErrorInfo")), text)
+                info = error.get("codexErrorInfo")
+                name = info if isinstance(info, str) else next(iter(info), "") if info else ""
+                if name == "usageLimitExceeded":
+                    # 额度用完：带上重置时间（先实查，查不到用最近一次通知里的）
+                    windows = await self._quota_quietly()
+                    if windows:
+                        await sink("quota", {"windows": windows})
+                    resets = [
+                        w["resets_at"]
+                        for w in windows
+                        if w["status"] == "exceeded" and w["resets_at"]
+                    ]
+                    raise DriverError(
+                        "rate_limited",
+                        text,
+                        quota=True,
+                        resets_at=min(resets) if resets else quota.parse_reset(text),
+                    )
+                raise DriverError(_error_kind(info), text)
+
+    async def quota(self) -> list[dict[str, Any]] | None:
+        result = await self._call("account/rateLimits/read", {})
+        self.latest_quota = quota.from_codex(result)
+        return self.latest_quota
+
+    async def _quota_quietly(self) -> list[dict[str, Any]]:
+        try:
+            return await self.quota() or []
+        except DriverError:
+            return self.latest_quota
 
     async def cancel(self, spec: SessionSpec) -> None:
         thread_id = spec.native_id

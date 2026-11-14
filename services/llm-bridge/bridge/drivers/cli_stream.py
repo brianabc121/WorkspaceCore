@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from bridge import quota
 from bridge.drivers.base import (
     AccountStatus,
     Driver,
@@ -318,6 +319,7 @@ class CliStreamDriver(Driver):
             stderr_task = asyncio.create_task(proc.stderr.read())
             outcome = TurnOutcome(text="", native_turn_id=None)
             messages: list[str] = []
+            limited: list[dict[str, Any]] = []
             result: dict[str, Any] | None = None
             while line := await proc.stdout.readline():
                 try:
@@ -328,6 +330,12 @@ class CliStreamDriver(Driver):
                     continue
                 if event.get("type") == "assistant":
                     await self._on_assistant(event, messages, outcome, sink)
+                elif event.get("type") == "rate_limit_event":
+                    # 官方程序顺带报出的额度：交给 engine 记下来；被拒绝时记住重置时间
+                    windows = quota.from_rate_limit_event(event)
+                    if windows:
+                        await sink("quota", {"windows": windows})
+                        limited += [w for w in windows if w["status"] == "exceeded"]
                 elif event.get("type") == "result":
                     result = event
             await proc.wait()
@@ -335,7 +343,7 @@ class CliStreamDriver(Driver):
             if result is None:
                 tail = redact(stderr.strip()[-300:]) or f"退出码 {proc.returncode}"
                 raise DriverError(_error_kind(tail), f"{self.profile.label} 没有返回结果：{tail}")
-            return self._finish(result, messages, outcome)
+            return self._finish(result, messages, outcome, limited)
         finally:
             self._procs.pop(spec.native_id, None)
             if proc.returncode is None:
@@ -364,7 +372,11 @@ class CliStreamDriver(Driver):
                 await sink("files", {"paths": [outcome.files[-1]]})
 
     def _finish(
-        self, result: dict[str, Any], messages: list[str], outcome: TurnOutcome
+        self,
+        result: dict[str, Any],
+        messages: list[str],
+        outcome: TurnOutcome,
+        limited: list[dict[str, Any]] | None = None,
     ) -> TurnOutcome:
         if result.get("is_error"):
             errors = result.get("errors")
@@ -376,6 +388,15 @@ class CliStreamDriver(Driver):
                 or (messages[-1] if messages else "")
                 or str(result.get("subtype") or "回合失败")
             )
+            # 额度用完：回合里出现过“被拒绝”的额度事件，或者失败信息是官方程序的额度用语
+            if limited or quota.is_quota_text(text):
+                resets = [w["resets_at"] for w in limited or [] if w["resets_at"]]
+                raise DriverError(
+                    "rate_limited",
+                    redact(text)[:500],
+                    quota=True,
+                    resets_at=min(resets) if resets else quota.parse_reset(text),
+                )
             raise DriverError(_error_kind(text), redact(text)[:500])
         raw = result.get("usage")
         usage: dict[str, Any] = raw if isinstance(raw, dict) else {}
