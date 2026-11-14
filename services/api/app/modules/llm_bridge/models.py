@@ -4,12 +4,25 @@
   管理令牌用凭证密钥加密后存引用，不回传浏览器。
 - llm_bridge_grants：按实例的权限（例外九）：没有这一行或 enabled 为 false 的实例
   看不到也调用不了工具。bridge_ids 限定实例能用哪几座桥（NULL 表示都能用）。
+- llm_bridge_chat_groups / llm_bridge_chat_group_members：聊天页的“多模型同问”
+  （docs/v2/LLM_CHAT_PLAN.md 第 4.3 节）。一组同问可以跨会话桥，所以登记在工作台；
+  每个成员就是某座桥上的一个普通会话，消息内容仍然只在会话桥里。
 """
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Text, UniqueConstraint, func, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -60,3 +73,61 @@ class LlmBridgeGrant(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class LlmChatGroup(Base):
+    __tablename__ = "llm_bridge_chat_groups"
+    __table_args__ = (
+        # 同一个人用同一个 request_id 再建一次，得到的是同一组（重试不会建出两组）
+        UniqueConstraint("workspace_id", "created_by", "request_id"),
+        Index("ix_llm_bridge_chat_groups_listing", "workspace_id", "status", "updated_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    title: Mapped[str] = mapped_column(Text)
+    # 谁建的；用户被删除后保留当时的显示名
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_by_name: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    request_id: Mapped[str] = mapped_column(Text)
+    # active / archived
+    status: Mapped[str] = mapped_column(Text, server_default=text("'active'"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class LlmChatGroupMember(Base):
+    __tablename__ = "llm_bridge_chat_group_members"
+    __table_args__ = (UniqueConstraint("group_id", "position"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        # 按命名约定生成的名字超过 PostgreSQL 的 63 个字符，这里直接给一个短的
+        ForeignKey(
+            "workspace.llm_bridge_chat_groups.id",
+            ondelete="CASCADE",
+            name="fk_llm_bridge_chat_group_members_group",
+        )
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    # 会话桥的登记被删除后置空：这一栏只剩当时的名字，不能再读内容
+    bridge_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.llm_bridge_bridges.id", ondelete="SET NULL"), nullable=True
+    )
+    bridge_name: Mapped[str] = mapped_column(Text)
+    platform: Mapped[str] = mapped_column(Text)
+    mode: Mapped[str] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 会话桥上的会话编号；这个目标的会话没建成时为空，原因在 error
+    session_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str] = mapped_column(Text, server_default=text("''"))

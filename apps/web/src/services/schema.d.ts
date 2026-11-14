@@ -3331,6 +3331,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/chat/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 聊天：多模型同问的分组（admin）
+         * @description 按最后活动排序；每一组带它的成员（哪个 MCP 管理器、平台、模型、会话）。
+         */
+        get: operations["llm_chat_list_groups"];
+        put?: never;
+        /**
+         * 聊天：把同一个问题同时发给几个模型（admin）
+         * @description 每个目标各开一个会话并发出问题，可以跨 MCP 管理器；某个目标失败只影响它自己，原因在这个成员的 error 里。一个会话都没建成时 409。用同一个 request_id 再建一次，得到的是同一组。
+         */
+        post: operations["llm_chat_create_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/chat/groups/{group_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 聊天：一组同问和它的成员（admin） */
+        get: operations["llm_chat_get_group"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/chat/groups/{group_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 聊天：归档一组同问（admin）
+         * @description 只是不再把它们并排显示；每个模型的会话不受影响，还能单独继续。
+         */
+        post: operations["llm_chat_archive_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/chat/groups/{group_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 聊天：向一组里的每个模型继续发（admin）
+         * @description 立刻返回每个会话的回合，不等回答。发不出去的（管理器停用、会话没建成）给出原因。409 TAKEOVER_REQUIRED：不是自己建的一组，要带 takeover=true。
+         */
+        post: operations["llm_chat_send_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm_bridge/grants": {
         parameters: {
             query?: never;
@@ -11535,6 +11616,140 @@ export interface components {
             /** Last Id */
             last_id: number;
         };
+        /** LlmChatGroupCreateIn */
+        LlmChatGroupCreateIn: {
+            /**
+             * Request Id
+             * @description 幂等号：用同一个再建一次，得到的是同一组
+             */
+            request_id: string;
+            /**
+             * Targets
+             * @description 2 ~ 6 个目标，可以跨 MCP 管理器
+             */
+            targets: components["schemas"]["LlmChatTargetIn"][];
+            /**
+             * Text
+             * @description 同时发给每个目标的问题
+             */
+            text: string;
+            /**
+             * Title
+             * @description 不填时取问题的开头
+             * @default
+             */
+            title: string;
+        };
+        /** LlmChatGroupList */
+        LlmChatGroupList: {
+            /** Groups */
+            groups: components["schemas"]["LlmChatGroupOut"][];
+        };
+        /** LlmChatGroupMemberOut */
+        LlmChatGroupMemberOut: {
+            /**
+             * Bridge Enabled
+             * @description 管理器还在并且启用着
+             */
+            bridge_enabled: boolean;
+            /**
+             * Bridge Id
+             * @description MCP 管理器；它的登记被删除后为空
+             */
+            bridge_id: string | null;
+            /** Bridge Name */
+            bridge_name: string;
+            /**
+             * Error
+             * @description 会话没建成、或第一条消息没发出去的原因
+             * @default
+             */
+            error: string;
+            /** Mode */
+            mode: string;
+            /** Model */
+            model: string | null;
+            /** Platform */
+            platform: string;
+            /** Position */
+            position: number;
+            /**
+             * Session Id
+             * @description 这个目标的会话；没建成时为空，原因在 error
+             */
+            session_id: string | null;
+        };
+        /** LlmChatGroupOut */
+        LlmChatGroupOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Members */
+            members: components["schemas"]["LlmChatGroupMemberOut"][];
+            /**
+             * Owner
+             * @description 谁建的（显示名）
+             */
+            owner: string | null;
+            /**
+             * Owner Kind
+             * @enum {string}
+             */
+            owner_kind: "me" | "user";
+            /**
+             * Status
+             * @description active / archived
+             */
+            status: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** LlmChatGroupResult */
+        LlmChatGroupResult: {
+            /**
+             * Error
+             * @description 这一个没发出去的原因
+             * @default
+             */
+            error: string;
+            /** Position */
+            position: number;
+            turn?: components["schemas"]["LlmChatTurnOut"] | null;
+        };
+        /** LlmChatGroupSendIn */
+        LlmChatGroupSendIn: {
+            /**
+             * Request Id
+             * @description 幂等号：重试用同一个，每个会话都不会重复发送
+             */
+            request_id: string;
+            /**
+             * Takeover
+             * @description 不是自己建的一组要为 true（页面先让人确认）
+             * @default false
+             */
+            takeover: boolean;
+            /** Text */
+            text: string;
+        };
+        /** LlmChatGroupSentOut */
+        LlmChatGroupSentOut: {
+            group: components["schemas"]["LlmChatGroupOut"];
+            /** Results */
+            results: components["schemas"]["LlmChatGroupResult"][];
+        };
         /** LlmChatMessageOut */
         LlmChatMessageOut: {
             /**
@@ -11715,6 +11930,35 @@ export interface components {
             kind: string;
             /** Text */
             text: string;
+        };
+        /** LlmChatTargetIn */
+        LlmChatTargetIn: {
+            /**
+             * Bridge Id
+             * Format: uuid
+             * @description 用哪个 MCP 管理器（它上面登录的账号）
+             */
+            bridge_id: string;
+            /** Effort */
+            effort?: string | null;
+            /**
+             * Environment
+             * @description 开发会话必填
+             */
+            environment?: string | null;
+            /**
+             * Mode
+             * @default chat
+             * @enum {string}
+             */
+            mode: "chat" | "dev";
+            /** Model */
+            model?: string | null;
+            /**
+             * Platform
+             * @enum {string}
+             */
+            platform: "chatgpt" | "codex" | "claude" | "workbuddy";
         };
         /** LlmChatTurnOut */
         LlmChatTurnOut: {
@@ -34080,6 +34324,377 @@ export interface operations {
             };
             /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_list_groups: {
+        parameters: {
+            query?: {
+                status?: "active" | "archived" | "all";
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatGroupList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_create_group: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmChatGroupCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatGroupSentOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_get_group: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatGroupOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_archive_group: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatGroupOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_send_group: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmChatGroupSendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatGroupSentOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
