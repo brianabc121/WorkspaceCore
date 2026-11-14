@@ -3,7 +3,7 @@
 # 再 `runsc install` 接入 Docker。来源与核验见 docs/decisions/2026-11-06-runner-verification.md 第 3 节。
 # 只支持 x86_64（arm64 的发布包还没有核对校验值）：其他架构跳过，环境只能用 runc。
 #
-# 让 Docker 认得 runsc 时尽量不重启 Docker（T-0233，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 8 节）：
+# 让 Docker 认得 runsc 时尽量不重启 Docker（T-0234，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 8 节）：
 # 先重新加载配置；仍然没有登记、而服务器上有运行中的 MCP 管理器时不擅自重启，
 # 输出 gvisor_needs_docker_restart <数量> 并以退出码 6 结束，由管理员在页面上确认后
 # 带 MW_ALLOW_DOCKER_RESTART=1 再运行。没有 MCP 管理器时照旧重启。

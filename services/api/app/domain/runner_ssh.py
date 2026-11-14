@@ -10,7 +10,7 @@
 install.sh 要 root：root 账号直接运行；其他账号用 sudo，所以每次部署都要填登录密码（只用这一次）。
 启用 gVisor 时脚本先让 Docker 重新加载配置；非重启 Docker 不可、而服务器上有运行中的 MCP 管理器时，
 脚本以固定的退出码停下，任务的错误码是 gvisor_needs_docker_restart：owner 在页面上确认后
-带 allow_docker_restart 重新部署（T-0233，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 8 节）。
+带 allow_docker_restart 重新部署（T-0234，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 8 节）。
 卸载：停止 runner-agent（同样要 root），可选删除接入包目录；环境的容器与数据卷由工作台先删掉。
 """
 

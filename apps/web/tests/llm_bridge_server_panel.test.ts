@@ -1,4 +1,4 @@
-// 两个服务器页面上的“MCP 管理器”区块（T-0233，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 7 节）：
+// 两个服务器页面上的“MCP 管理器”区块（T-0234，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 7 节）：
 // 模块定义的 serverPanels 扩展点（src/modules/ModuleServerPanels.vue）和大模型客户端模块提供的区块
 // （src/modules/llm_bridge/ServerManagersPanel.vue）——列表与链接、没有管理器时的说明、部署入口只给 owner、模块停用后区块消失。
 import { afterEach, describe, expect, it, vi } from 'vitest'

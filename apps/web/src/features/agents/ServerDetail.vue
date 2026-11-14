@@ -22,7 +22,7 @@ import ModuleServerPanels from '../../modules/ModuleServerPanels.vue'
 
 // 服务器详情（T-0147；独立页面 T-0181，效果图 01 下半部分）：名称、地址与真实 CPU / 内存（没有上报写“暂无上报”，不写 0）、
 // 前往部署；连接与初始化；“已部署 OpenClaw”清单（跳到智能体详情）；整机负载与趋势、各智能体负载；服务器级运维。
-// “已部署 OpenClaw”后面是插拔式模块提供的区块（例如大模型客户端的“MCP 管理器”，T-0233）：经 ModuleServerPanels 渲染，这里不导入模块的代码。
+// “已部署 OpenClaw”后面是插拔式模块提供的区块（例如大模型客户端的“MCP 管理器”，T-0234）：经 ModuleServerPanels 渲染，这里不导入模块的代码。
 const props = defineProps<{ serverId: string; range: HostRange }>()
 const emit = defineEmits<{ back: []; edit: [mode: 'credentials' | 'address', server: Server]; range: [range: HostRange] }>()
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id, cache = useQueryClient()

@@ -762,7 +762,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 页面在中转站管理的“兼容凭据”页签）：连接自己的 Key 不出现在密钥库里（列表、详情、修改、授权都当作不存在），
 新建 `kind=model_api_key` 返回 `422 VALIDATION_FAILED`（`details.field = kind`）。旧版兼容（导入、迁移记录、旧配置状态）已删除（T-0209）。
 
-## 大模型客户端（会话桥）模块 `llm_bridge`（T-0228、T-0230 ~ T-0233；docs/v2/LLM_BRIDGE_PLAN.md）
+## 大模型客户端（会话桥）模块 `llm_bridge`（T-0228、T-0230 ~ T-0234；docs/v2/LLM_BRIDGE_PLAN.md）
 
 页面叫“大模型客户端管理”；页面上的一个 MCP 管理器就是这里的一座会话桥（`bridge`）。
 
@@ -814,7 +814,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST .../chat/groups/{group_id}/messages` | 向每个成员继续发：`text`、`request_id`、`takeover`；返回每个成员的 `turn` 或 `error`（管理器停用、登记被删除、会话没建成的这次不发）。别人建的一组要 `takeover=true`，否则 `409 TAKEOVER_REQUIRED`；已归档的一组 `409` |
 | `POST .../chat/groups/{group_id}/archive` | 归档这一组：只是不再并排显示，每个模型的会话不受影响 |
 
-**一键部署**（T-0233，`docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md`；都在 `/api/v1/llm_bridge` 下，写操作带 CSRF、只有 owner 能做，读 owner / admin）。
+**一键部署**（T-0234，`docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md`；都在 `/api/v1/llm_bridge` 下，写操作带 CSRF、只有 owner 能做，读 owner / admin）。
 MCP 管理器部署到“智能体服务器”或“容器服务器”登记的服务器上；任务在后台进行，进度用任务接口读。
 部署 MCP 管理器不看这两类服务器自己的准入（资源、配额、正在进行的任务）；管理器的容器不受那两个页面的管理程序影响。
 

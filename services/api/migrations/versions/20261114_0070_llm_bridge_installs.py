@@ -1,4 +1,4 @@
-"""大模型客户端：一键部署 MCP 管理器（T-0233，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 5 节）
+"""大模型客户端：一键部署 MCP 管理器（T-0234，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 5 节）
 
 新增两张表，不改已有数据：
 

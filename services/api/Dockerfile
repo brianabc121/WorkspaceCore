@@ -18,7 +18,7 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
 
-# 大模型客户端的一键部署（T-0233）：把 MCP 管理器的构建文件带进镜像（/opt/myworkspace/llm-bridge），
+# 大模型客户端的一键部署（T-0234）：把 MCP 管理器的构建文件带进镜像（/opt/myworkspace/llm-bridge），
 # 部署时由工作台上传到服务器上现场构建。compose.yaml 用 additional_contexts 把 services/llm-bridge
 # 作为名叫 llm-bridge-src 的构建上下文传进来，顶替下面这个空阶段。
 # 直接 `docker build services/api`（没有这个上下文）时用的就是空阶段：镜像照样能构建，只是不能一键部署。

@@ -1030,7 +1030,7 @@ AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendra
 - OpenClaw 直连连接的地址，工作台不转发推理请求；Key 不写进接入包或 `openclaw.json`，由取密钥程序在需要时向工作台取（`mc_<连接 ID>`）。
 - 停用连接、解除绑定、撤销授权会立即拒绝后续取 Key；已经在 OpenClaw 进程里的 Key 不保证立即失效（需要时在服务商处撤销 Key）。
 
-## 25. 大模型客户端：MCP 管理器，也就是会话桥（可选，T-0227 / T-0228 / T-0230 ~ T-0233）
+## 25. 大模型客户端：MCP 管理器，也就是会话桥（可选，T-0227 / T-0228 / T-0230 ~ T-0234）
 
 让智能体经工作台向 ChatGPT / Codex / Claude / WorkBuddy 发指令、管理会话。方案见 `docs/v2/LLM_BRIDGE_PLAN.md`，
 版本与核验见 `docs/decisions/2026-11-13-llm-bridge-verification.md`。
@@ -1122,7 +1122,7 @@ LLM_BRIDGE_ADMIN_TOKEN=<另一枚令牌> LLM_BRIDGE_PORT=8788 \
 - 聊天页的回答是一段一段出现的（平台的官方程序按“段”给出），不是逐字；只传文字，不传图片和附件。
 - 页面上一键部署（25.5）走的是服务器页面登记的 SSH 登录，工作台自己仍然不挂 Docker socket。
 
-### 25.5 页面上一键部署（T-0233）
+### 25.5 页面上一键部署（T-0234）
 
 不用在服务器上敲命令：owner 在“应用 → 大模型客户端 → 管理器与账号 → 添加 MCP 管理器 → 一键部署到服务器”里选一台服务器就行。
 方案见 `docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md`。
@@ -1144,5 +1144,5 @@ LLM_BRIDGE_ADMIN_TOKEN=<另一枚令牌> LLM_BRIDGE_PORT=8788 \
   容器、数据卷、网络都带标签 `myworkspace.mcp-manager=<编号>`，`restart: unless-stopped`。
 - 一键部署要用工作台镜像里带的构建文件（`make up` 构建的镜像都带）。页面上提示“这个工作台不能一键部署”时，
   按 25.1 手动部署。
-- 容器服务器升级接入包（T-0233 之后的版本）：gVisor 的安装不再重启 Docker；极少数情况下确实要重启、而这台服务器上
+- 容器服务器升级接入包（T-0234 之后的版本）：gVisor 的安装不再重启 Docker；极少数情况下确实要重启、而这台服务器上
   有 MCP 管理器在运行时，安装会停下来，在容器服务器页面勾选“允许重启 Docker”后再部署。

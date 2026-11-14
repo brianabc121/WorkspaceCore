@@ -395,7 +395,7 @@ class RunnerReport(BaseModel):
     volumes: list[RunnerReportVolume] = Field(default_factory=list, max_length=2000)
     images: list[RunnerReportImage] = Field(default_factory=list, max_length=2000)
     unlabeled_containers: int = 0
-    # 带 myworkspace.mcp-manager 标签的容器（T-0233）：不算进上面的外来容器；
+    # 带 myworkspace.mcp-manager 标签的容器（T-0234）：不算进上面的外来容器；
     # 旧版 runner-agent 不报，按 0
     mcp_manager_containers: int = 0
     egress: dict[str, list[RunnerEgress]] = Field(default_factory=dict)

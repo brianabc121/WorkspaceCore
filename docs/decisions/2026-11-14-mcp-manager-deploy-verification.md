@@ -1,4 +1,4 @@
-# 一键部署 MCP 管理器的核验记录（T-0233，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）
+# 一键部署 MCP 管理器的核验记录（T-0234，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）
 
 > 规则（`docs/AGENTS.md` 第 8 节）：第三方的接口与行为必须在锁定版本上核验，不按名称猜。
 > 本记录是方案里依赖的三件第三方行为的实测结果，都在本会话自己的环境里做（2026-11-14）。

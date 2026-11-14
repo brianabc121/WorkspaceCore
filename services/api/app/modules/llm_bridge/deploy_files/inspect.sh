@@ -1,5 +1,5 @@
 #!/bin/sh
-# 一键部署 MCP 管理器前的只读检查（T-0233，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 3 节）。不改任何东西。
+# 一键部署 MCP 管理器前的只读检查（T-0234，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 3 节）。不改任何东西。
 # 参数：$1 工作台后端容器的主机名（不知道就传 -）；$2 不要选的端口（空格分隔，分给了别的管理器的）。
 # 输出 key=value。登录账号不能直接用 Docker 时，工作台会用 sudo 再运行一遍来读 Docker 里的情况。
 set -u

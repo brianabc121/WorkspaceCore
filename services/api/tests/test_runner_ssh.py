@@ -49,7 +49,7 @@ case "$1" in
       done
     fi
     if [ -f "$STATE/install_fail" ]; then echo "gvisor_sha512_mismatch" >&2; exit 5; fi
-    # 与 install-gvisor.sh 一样（T-0233）：要重启 Docker、有 MCP 管理器在运行、又没给允许时以 6 退出
+    # 与 install-gvisor.sh 一样（T-0234）：要重启 Docker、有 MCP 管理器在运行、又没给允许时以 6 退出
     echo "install.sh allow_docker_restart=${MW_ALLOW_DOCKER_RESTART:-}" >> "$FAKE_LOG"
     if [ -f "$STATE/gvisor_managers" ] && [ "${MW_ALLOW_DOCKER_RESTART:-}" != 1 ]; then
       echo "gvisor_needs_docker_restart $(cat "$STATE/gvisor_managers")" >&2; exit 6
@@ -408,7 +408,7 @@ async def test_failed_install_script_and_uninstall(owner: Owner, tmp_path: Path)
 async def test_gvisor_restart_under_mcp_managers_needs_the_owner_to_allow_it(
     owner: Owner, tmp_path: Path
 ) -> None:
-    """启用 gVisor 要重启 Docker、而服务器上有 MCP 管理器在运行（T-0233）：
+    """启用 gVisor 要重启 Docker、而服务器上有 MCP 管理器在运行（T-0234）：
     任务停下并说明原因；owner 确认后带 allow_docker_restart 再部署，变量经 sudo 真的传到脚本里。"""
     host = RunnerHost(tmp_path)
     (host.state / "gvisor_managers").write_text("2")

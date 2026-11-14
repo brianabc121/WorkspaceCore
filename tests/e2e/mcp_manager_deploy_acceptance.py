@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""页面上一键部署 MCP 管理器的验收（T-0233，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）：
+"""页面上一键部署 MCP 管理器的验收（T-0234，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）：
 真实 sshd（OpenSSH）+ 真实 Docker，真的构建并启动一个会话桥容器。
 
 前提（CI 的 agents job，在「智能体服务器 SSH 验收」之后；那一步结束时已经把服务器从工作台删除、

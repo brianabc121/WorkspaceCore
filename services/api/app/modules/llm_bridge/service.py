@@ -141,7 +141,7 @@ class LlmBridgeService:
         )
 
     async def installs(self, workspace_id: uuid.UUID) -> dict[uuid.UUID, LlmBridgeInstallOut]:
-        """工作台部署出去的那些桥（T-0233）：桥的 id → 部署在哪台服务器上。"""
+        """工作台部署出去的那些桥（T-0234）：桥的 id → 部署在哪台服务器上。"""
         rows = (
             await self.db.scalars(
                 select(LlmBridgeInstall).where(LlmBridgeInstall.workspace_id == workspace_id)

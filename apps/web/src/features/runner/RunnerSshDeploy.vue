@@ -12,7 +12,7 @@ import { useRunnerAction } from './api'
 // 部署：上传接入包，以 root 运行 install.sh（Docker、gVisor、runner-agent），等 runner-agent 连上工作台。
 // 不是 root 账号时 install.sh 要用 sudo，所以每次部署都要填密码。
 // 启用 gVisor 时安装脚本尽量不重启 Docker；非重启不可、而服务器上有 MCP 管理器在运行时任务以
-// gvisor_needs_docker_restart 失败（T-0233）：这时多一个“允许重启 Docker”的勾选项，勾上再部署才会重启。
+// gvisor_needs_docker_restart 失败（T-0234）：这时多一个“允许重启 Docker”的勾选项，勾上再部署才会重启。
 const props = defineProps<{ hostId: string }>()
 type State = Schema['AgentSshState']
 const auth = useAuthStore(), scope = auth.workspaceId!, user = auth.user?.id, cache = useQueryClient()

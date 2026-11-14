@@ -90,7 +90,7 @@ apps/web/tests/<key>*.test.ts
   `primaryPath`（“打开应用”）与 `settingsPath`（“应用设置”）必须是本模块 `routes` 里的路径，否则不显示按钮；
   不写就不显示。宿主不按模块 key 写死任何入口。
 
-- `serverPanels`（可选，T-0233）：在“智能体服务器”的服务器详情（`agentServer`）和“容器服务器”每台服务器的设置
+- `serverPanels`（可选，T-0234）：在“智能体服务器”的服务器详情（`agentServer`）和“容器服务器”每台服务器的设置
   （`runnerHost`）里显示本模块的一个区块，例如 `{ agentServer: () => import('./XxxPanel.vue') }`。
   区块组件收到 `serverId`、`serverName`；模块停用时宿主不渲染。两个服务器页面只放 `<ModuleServerPanels>`，
   不直接引用任何模块的代码。

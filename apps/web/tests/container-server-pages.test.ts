@@ -32,7 +32,7 @@ describe('容器服务器页', () => {
     expect(screen.getByRole('link', { name: /管理申请权限/ })).toHaveAttribute('href', '/agents')
   })
 
-  // T-0233：MCP 管理器是工作台另行部署的，不算“不是工作台建的容器”；runner-agent 单独报它们的数量
+  // T-0234：MCP 管理器是工作台另行部署的，不算“不是工作台建的容器”；runner-agent 单独报它们的数量
   it('mentions MCP managers apart from containers the workspace did not create', async () => {
     setup({ data: overview({ host: host({ report: { ...host().report, unlabeled_containers: 2, mcp_manager_containers: 1 } }) }) })
     await openApp('/runner')

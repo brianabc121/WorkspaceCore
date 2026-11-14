@@ -1,4 +1,4 @@
-// 页面上一键部署 MCP 管理器（T-0233，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md；src/modules/llm_bridge 的
+// 页面上一键部署 MCP 管理器（T-0234，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md；src/modules/llm_bridge 的
 // DeployManager / DeployJob / ManagerCard / ManagerOperation）：两类服务器（智能体服务器、容器服务器）的部署表单、
 // 登录密码（sudo 要密码时）、进度、从服务器页面跳过来时选好服务器；工作台部署的管理器的重新部署、重启、卸载
 // （先问密码、409 后带密码重发、只删除登记时写明服务器上还留着什么）；不能一键部署时只有手动添加、admin 不能操作。

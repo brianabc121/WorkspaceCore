@@ -162,7 +162,7 @@ def bridge_client(
     resolve: Callable[[], Awaitable[str]] | None = None,
     scope: str | None = None,
 ) -> BridgeClient:
-    """breaker：不给时用全局的熔断计数；一键部署等管理器启动时给它自己的（T-0233）。
+    """breaker：不给时用全局的熔断计数；一键部署等管理器启动时给它自己的（T-0234）。
 
     resolve / scope：经 SSH 通道访问的管理器。通道在本进程里的那一头都是 127.0.0.1，
     熔断按部署记录分开计数（scope），不然一座连不上会把别的也挡掉。

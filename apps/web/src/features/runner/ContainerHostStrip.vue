@@ -10,7 +10,7 @@ import { ago, binary } from './containerMetrics'
 // 运行时（gVisor 是否可用）、最近联系与最近一次完整报告。“最近联系”是长轮询的心跳（last_seen_at），
 // “完整报告”是对账上报的时间（report.at）——容器读数跟着报告走，不把心跳说成读数更新。
 // 告警（离线、磁盘 / 内存超过水位、有不是工作台建的容器、没装 gVisor）沿用原来总览页的判断。
-// MCP 管理器（工作台另行部署的，T-0233）不算“不是工作台建的容器”：runner-agent 单独报它们的数量，这里只提一句。
+// MCP 管理器（工作台另行部署的，T-0234）不算“不是工作台建的容器”：runner-agent 单独报它们的数量，这里只提一句。
 const props = defineProps<{ host: Schema['RunnerHostOut'] }>()
 defineEmits<{ settings: [] }>()
 const report = computed(() => (props.host.report ?? {}) as Record<string, number | string | null | undefined>)

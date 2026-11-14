@@ -1,4 +1,4 @@
-"""页面上一键部署 MCP 管理器（T-0233，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）。
+"""页面上一键部署 MCP 管理器（T-0234，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）。
 
 和 test_agent_ssh_install.py 用同一台“服务器”：本机起的真实 SSH 服务（asyncssh），里面的 docker
 是记录调用的桩程序；工作台走真实的登录、SFTP 上传和命令执行。部署出来的管理器由进程内的
