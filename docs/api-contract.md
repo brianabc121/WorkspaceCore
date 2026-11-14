@@ -829,6 +829,20 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 
 智能体多一个只读工具 `llm_bridge_queue`（`session_id`）：看自己能访问的会话的队列。改内容、调顺序只在聊天页（owner / admin）。
 
+**额度与额度用完后的自动继续**（T-0237，`docs/v2/LLM_BRIDGE_QUOTA_PLAN.md`）。
+
+- 平台给的是**已用百分比和重置时间**，不是剩余 token 数。Codex 可以随时查；Claude / WorkBuddy 只在跑回合时顺带报出来，接口给的是最近一次看到的。
+- 状态（`GET .../bridges/{id}/status`）多一个 `quota`：每个平台的 `windows`（`kind`：`five_hour` / `weekly` / 平台给的别的名字；`used_percent`、`resets_at`、`reset_passed`、`status`：`ok` / `warning` / `exceeded`、`plan`、`observed_at`）、`can_refresh`、`paused_until`、`pause_estimated`、`waiting_resume`、`tokens_5h`（最近 5 小时经这个管理器用掉的 token，管理器自己记的）。
+- 设置多三项：`auto_resume`（默认开）、`auto_resume_max`（同一次中断最多自动续几次，默认 3，1–10）、`resume_text`（自动继续时发的那句话，默认“继续意外中断的任务”，1–200 字）。
+- 回合多一个状态 `interrupted`（`failure.kind = quota_exceeded`）：额度用完被打断，不算失败。这样的回合带 `resume`：`state`（`pending` 到点自动继续 / `forced` 有人点了现在就试 / `done` 已经续跑 / `cancelled` 不要自动继续 / `skipped` / `exhausted` 次数用完）、`at`、`attempt`、`resumed_by`。平台暂停期间新发的消息排队，不去撞限额。
+- 到重置时间后，管理器替人往每个被打断的会话里发 `resume_text`，排在这个会话队列的最前面；这一条的 `by` 是“系统（自动续跑）”。
+
+| 接口 | 说明 |
+|---|---|
+| `GET .../bridges/{bridge_id}/quota?refresh=` | 各平台的额度（admin）。`refresh=true` 时向能随时查的平台实查一次 |
+| `POST .../chat/turns/{turn_id}/resume` | 被额度打断的回合，现在就试着继续（admin）。不是被额度打断的、已经续跑过的 `409` |
+| `DELETE .../chat/turns/{turn_id}/resume` | 不要自动继续（admin） |
+
 **一键部署**（T-0234，`docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md`；都在 `/api/v1/llm_bridge` 下，写操作带 CSRF、只有 owner 能做，读 owner / admin）。
 MCP 管理器部署到“智能体服务器”或“容器服务器”登记的服务器上；任务在后台进行，进度用任务接口读。
 部署 MCP 管理器不看这两类服务器自己的准入（资源、配额、正在进行的任务）；管理器的容器不受那两个页面的管理程序影响。
