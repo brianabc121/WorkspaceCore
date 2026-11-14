@@ -2,13 +2,13 @@
 id: T-0230
 title: 大模型客户端管理页面：多个 MCP 管理器、每个管理器选控制的平台并单独登录账号
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/trusting-euler-480tpv
 paths: apps/web/src/modules/llm_bridge,apps/web/tests,services/api/app/modules/llm_bridge,services/api/migrations,services/api/tests,services/llm-bridge,infra/llm-bridge,tests/e2e,.github/workflows/ci-llm-bridge.yml,Makefile,docs
 depends_on:
 created: 2026-11-13
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # T-0230 大模型客户端管理页面：多个 MCP 管理器、每个管理器选控制的平台并单独登录账号
@@ -30,7 +30,7 @@ updated: 2026-11-13
 - [x] 页面“大模型客户端管理”：管理器卡片（控制的平台与各平台是否已登录）、添加时勾选平台、在“平台与账号”里改控制的平台、实例权限里选允许的管理器；前端测试覆盖
 - [x] 部署：`make llm-bridge-up N=2` 再起一个管理器（自己的项目、数据卷、令牌、端口、内部网络里的名字）；部署指南第 25 节
 - [x] 浏览器验收 `tests/e2e/llm_bridge_browser.cjs` 改成两个管理器（1 号 Claude / WorkBuddy，2 号 Codex / Claude / WorkBuddy），本机对两个真实的会话桥跑通
-- [ ] CI：`ci-llm-bridge` 的 `workspace` job（同机起两个管理器、名字与令牌互不串、冒烟、浏览器验收）和其余检查通过
+- [x] CI：`ci-llm-bridge` 的 `workspace` job（同机起两个管理器、名字与令牌互不串、冒烟、浏览器验收）和其余检查通过（提交 `2f1a375`：16 项检查全部成功，`workspace` 是运行 43473335254）
 - [x] 文档：方案第 19 节、部署指南第 25 节、接口文档、数据字典
 
 ## 背景 / 约束 / 参考
@@ -48,3 +48,4 @@ updated: 2026-11-13
 - 2026-11-13 16:42 UTC · claude · 指派记录：这个需求是人类 2026-11-13 在对话中直接提出并交给 claude 的（任务创建时 owner 就写成了 claude，所以没有单独的 owner 变更记录）。
 - 2026-11-13 17:26 UTC · claude · PR #205 第一轮 CI：llm-bridge job 的 test_codex_account_and_models 失败（登录状态一直是 pending）。根因不在测试而在 Codex 驱动：account/login/completed 紧跟着 account/login/start 的应答到达、早于 login() 记下“进行中”时，通知被丢掉，登录状态永远停在进行中（T-0227 就有，机器慢时才出现）。修法：按 loginId 记下早到的完成通知，login() 拿到应答后认领（字段按锁定版本 0.169.0 的协议定义核对过）。假程序加了“应答和通知同一次写入”的模式稳定复现：修之前新用例 3/3 失败，修之后通过；CPU 占满时驱动测试重复 15 遍 0 失败（修之前 12 遍 5 失败）。同一个文件里另外三处“等固定时长再取消”改成等回合真正开始。
 - 2026-11-13 17:29 UTC · claude · PR #205 第一轮 CI 的 workspace job：同机起两个管理器、内部网络里的名字和令牌互不串、两个容器的冒烟都通过；浏览器验收在第一步失败（停用时侧栏不应有入口）。原因是脚本的竞态：模块状态读到之前前端先按启用显示入口，脚本登录后立刻去数。改成重新载入并等 /api/v1/modules 返回后再确认入口消失；本机对两个真实的会话桥连续跑通两遍。
+- 2026-11-14 02:29 UTC · claude · status in_progress → done：提交 2f1a375 上 16 项检查全部成功：workspace job（make llm-bridge-up 与 N=2 同机起两个管理器、内部网络里的名字和令牌互不串、两个容器的冒烟、15 步浏览器验收、验收后的冒烟）、llm-bridge（含新的驱动回归用例）、api（pytest 通过，df24ae0 上那次 Redis 连接超时没有复现）、agents、compose、web 等。没有做的：页面上一键部署管理器（需要人类决定）；各平台真实账号的验收仍留给人类。
