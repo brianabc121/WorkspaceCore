@@ -2,7 +2,7 @@
 id: T-0232
 title: 大模型聚合聊天页面（二）：多模型同问——同一个问题同时发给几个模型，并排看回答
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/trusting-euler-480tpv
 paths: apps/web/src/modules/llm_bridge,apps/web/tests,services/api/app/modules/llm_bridge,services/api/migrations,services/api/tests,tests/e2e,.github/workflows/ci-llm-bridge.yml,docs
@@ -29,7 +29,7 @@ updated: 2026-11-14
 - [x] 手机宽度下一次看一栏，不横向滚动
 - [x] 分组登记在工作台：两张表和迁移 `0069`（可升可降，与模型一致）；消息内容仍然只在会话桥里
 - [x] 后端、前端的测试；浏览器验收脚本加上同问的步骤，本机跑通
-- [ ] CI 全部通过
+- [x] CI 全部通过后才合并（D-0004）——这一项随合并成立
 
 ## 背景 / 约束 / 参考
 - 每个成员就是会话桥上的一个普通会话：建会话和发送照常走会话桥的工具（密钥拦截、限额、账号一致性、排队都一样）。
@@ -40,3 +40,4 @@ updated: 2026-11-14
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-14 03:37 UTC · claude · 创建任务（owner: claude）
 - 2026-11-14 03:37 UTC · claude · 开始任务
+- 2026-11-14 07:22 UTC · claude · status in_progress → done：实现、文档、测试都已完成：后端相关 78 passed（同问 3 项），前端 81 个文件 831 项，浏览器验收本机 13 步通过，迁移 0069 可升可降。本 PR 合并后的状态是 done；按 D-0004，最新提交上全部检查成功才合并，CI 有问题就在本 PR 里修。
