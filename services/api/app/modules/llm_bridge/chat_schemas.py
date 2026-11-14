@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -45,10 +45,25 @@ class LlmChatSessionList(BaseModel):
     sync_failed: str = Field(default="", description="同步官方程序里的会话时读不到的平台")
 
 
+class LlmChatAttachmentOut(BaseModel):
+    """随消息带上的图片 / 文件（input），或模型产出的图片 / 文件（output）。内容另外下载。"""
+
+    id: str
+    name: str
+    media_type: str
+    size: int
+    direction: str = Field(description="input：人带上的；output：模型产出的")
+    at: float | None = None
+
+
 class LlmChatStepOut(BaseModel):
     kind: str = Field(description="message（中间说的话）/ command / files / notice")
     text: str
     at: float | None = None
+    name: str | None = Field(default=None, description="工具名（kind 是 tool / tool_result 时）")
+    truncated: bool = Field(default=False, description="内容太长，后面的没有保存")
+    error: bool = Field(default=False, description="工具报了错")
+    exit_code: int | None = Field(default=None, description="命令的退出码（平台给了才有）")
 
 
 class LlmChatResumeOut(BaseModel):
@@ -84,6 +99,10 @@ class LlmChatMessageOut(BaseModel):
     resume: LlmChatResumeOut | None = Field(
         default=None, description="被额度打断的回合（status=interrupted）：什么时候自动继续"
     )
+    attachments: list[LlmChatAttachmentOut] = Field(
+        default=[], description="提问带上的图片 / 文件，或这一回合模型产出的图片 / 文件"
+    )
+    imported: bool = Field(default=False, description="官方程序里原有的内容（第一次打开时导入的）")
 
 
 class LlmChatConversationOut(BaseModel):
@@ -178,6 +197,9 @@ class LlmChatSendIn(_In):
     )
     takeover: bool = Field(
         default=False, description="发到不是自己建的会话时必须为 true（页面先让人确认）"
+    )
+    attachments: list[Annotated[str, Field(pattern=r"^ba_[0-9a-f]{20}$")]] = Field(
+        default=[], max_length=8, description="随这条消息带上的附件（先上传得到编号）"
     )
 
 

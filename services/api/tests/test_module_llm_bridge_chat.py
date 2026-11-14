@@ -487,3 +487,96 @@ async def test_chat_quota_interruption_and_resume(rig: Rig) -> None:  # noqa: F8
         "llm_bridge.chat_resume_%",
     )
     assert "llm_bridge.chat_resume_now" in actions and "llm_bridge.chat_resume_cancelled" in actions
+
+
+async def test_chat_attachments_and_stored_content(rig: Rig) -> None:  # noqa: F811
+    """图片随消息发给模型、存在管理器里、能下载；过程里有工具调用；自己建的会话不需要重新导入。"""
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+    session_id = (await new_chat(rig, None))["session"]["session_id"]
+    base = chat(rig, f"/sessions/{session_id}")
+
+    async def upload(name: str, data: bytes) -> httpx.Response:
+        return await rig.env.client.post(
+            f"/api/v1/llm_bridge{base}/attachments",
+            params={"name": name},
+            content=data,
+            headers={**rig.env.headers(write=True), "Content-Type": "application/octet-stream"},
+        )
+
+    made = await upload("机密截图.png", png)
+    assert made.status_code == 201, made.text
+    image = made.json()
+    assert (image["name"], image["media_type"], image["size"], image["direction"]) == (
+        "机密截图.png",
+        "image/png",
+        len(png),
+        "input",
+    )
+    # 不收的：对话会话里的非图片、内容和扩展名对不上、太大（工作台先挡）
+    assert (await upload("说明.txt", b"hello")).status_code == 422
+    assert (await upload("假的.png", b"<html>")).status_code == 422
+    assert (await upload("大.png", png + b"0" * (20 * 1024 * 1024))).status_code == 413
+    spare = (await upload("多余.png", png)).json()
+    dropped = await rig.api("DELETE", f"{base}/attachments/{spare['id']}")
+    assert dropped.status_code == 204
+
+    sent = await rig.api(
+        "POST",
+        f"{base}/messages",
+        json={"text": "read:README.md", "request_id": "a1", "attachments": [image["id"]]},
+    )
+    assert sent.status_code == 200, sent.text
+    await wait_idle(rig, session_id)
+    assert rig.bridge_app.state.engine.drivers["claude"].last_images[0][1] == "image/png"
+    view = (await rig.api("GET", base)).json()
+    asked, reply = view["messages"]
+    assert [a["id"] for a in asked["attachments"]] == [image["id"]] and asked["imported"] is False
+    assert reply["text"].endswith("（收到 1 张图片）")
+    assert [(s["kind"], s["name"]) for s in reply["steps"]] == [
+        ("tool", "Read"),
+        ("tool_result", "Read"),
+    ]
+    again = await rig.api(
+        "POST",
+        f"{base}/messages",
+        json={"text": "再发", "request_id": "a2", "attachments": [image["id"]]},
+    )
+    assert again.status_code == 409, again.text
+    bad = await rig.api(
+        "POST", f"{base}/messages", json={"text": "x", "request_id": "a3", "attachments": ["x"]}
+    )
+    assert bad.status_code == 422
+
+    got = await rig.api("GET", f"{base}/attachments/{image['id']}")
+    assert got.status_code == 200 and got.content == png
+    assert got.headers["content-type"] == "image/png"
+    assert got.headers["content-disposition"].startswith("inline; filename*=UTF-8''")
+    assert got.headers["x-content-type-options"] == "nosniff"
+    assert "sandbox" in got.headers["content-security-policy"]
+    missing = await rig.api("GET", f"{base}/attachments/ba_{'0' * 20}")
+    assert missing.status_code == 404
+    assert (await rig.api("POST", f"{base}/reimport")).status_code == 409
+
+    # member 不能上传也不能下载；审计只记类型和大小，不记文件名
+    async with login_as(rig, "files-member@example.com", "member") as member:
+        scope = {"X-Workspace-Id": rig.env.workspace_id}
+        url = f"/api/v1/llm_bridge{base}/attachments"
+        denied = await member.post(
+            url, params={"name": "a.png"}, content=png, headers={**scope, **csrf(member)}
+        )
+        assert denied.status_code == 403
+        assert (await member.get(f"{url}/{image['id']}", headers=scope)).status_code == 403
+    from tests.helpers import run_sql
+
+    logged = await run_sql(
+        rig.env.database_url,
+        "SELECT count(*) FROM workspace.audit_logs WHERE action = $1",
+        "llm_bridge.chat_attachment_uploaded",
+    )
+    assert logged == 2
+    leaked = await run_sql(
+        rig.env.database_url,
+        "SELECT count(*) FROM workspace.audit_logs a WHERE a::text LIKE $1",
+        "%机密截图%",
+    )
+    assert leaked == 0
