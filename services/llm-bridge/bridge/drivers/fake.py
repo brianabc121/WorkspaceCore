@@ -89,6 +89,11 @@ class FakeDriver(Driver):
                 Message("assistant", reply, time.time()),
             ]
             await sink("message", {"text": reply})
+            if text.startswith("tools-after:"):
+                # 模拟官方程序在同一条消息里既回答又调工具：回答的事件先到，工具的事件在后
+                commands, files = ["ls -la"], ["src/b.py"]
+                await sink("command", {"command": commands[0]})
+                await sink("files", {"paths": files})
             return TurnOutcome(
                 text=reply,
                 usage={"input_tokens": 1, "output_tokens": 1},

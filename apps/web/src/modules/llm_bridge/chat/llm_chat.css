@@ -138,7 +138,7 @@
   .lc-info { position: absolute; inset: 0 0 0 auto; z-index: 5; width: min(100%, 320px); box-shadow: -8px 0 24px #0000001a; }
 }
 @media (max-width: 760px) {
-  .lc-app { height: calc(100dvh - var(--topbar-height) - 176px); min-height: 420px; border-radius: 12px; }
+  .lc-app { height: calc(100dvh - var(--topbar-height) - 156px - env(safe-area-inset-bottom)); min-height: 420px; border-radius: 12px; }
   .lc-scroll { padding: 12px; }
   .lc-head, .lc-composer { padding-left: 12px; padding-right: 12px; }
   .lc-new-body { padding: 4px 14px 16px; }

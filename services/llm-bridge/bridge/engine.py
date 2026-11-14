@@ -972,9 +972,12 @@ class Engine:
             }
             if status == "completed":
                 reply["text"] = turn["result_text"] or ""
-                # 最后一段就是结果本身：不在“过程”里再出现一次
-                if steps and steps[-1]["kind"] == "message" and steps[-1]["text"] == reply["text"]:
-                    reply["steps"] = steps[:-1]
+                # 和结果一样的那一段不在“过程”里再出现一次。它不一定排在最后：
+                # 官方程序在同一条消息里既给文字又调工具时，文字的事件先到
+                for index in range(len(steps) - 1, -1, -1):
+                    if steps[index]["kind"] == "message" and steps[index]["text"] == reply["text"]:
+                        reply["steps"] = steps[:index] + steps[index + 1 :]
+                        break
             else:
                 # 没做完（进行中、失败、结果未知、已取消）：显示已经给出的部分
                 reply["text"] = "\n\n".join(s["text"] for s in steps if s["kind"] == "message")

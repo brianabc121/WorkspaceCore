@@ -1,0 +1,11 @@
+# 只给浏览器验收用（CI 的 ci-llm-bridge / workspace job，tests/e2e/llm_chat_browser.cjs），不要用于部署。
+# 叠加在 infra/llm-bridge/compose.yaml 上：把这个 MCP 管理器里的 Claude 程序换成仓库里不访问外网的仿真命令行
+# （services/llm-bridge/tests/fakes/fake_cli.py：参数和事件的形状与真实程序一致，回答是把收到的话原样带回来），
+# 这样不需要任何平台的账号就能在真实的工作台和真实的会话桥容器上验收“新建会话、问答、停止”。
+# 路径相对第一个 compose 文件所在的目录（infra/llm-bridge）。
+services:
+  mcp-manager:
+    environment:
+      BRIDGE_CLAUDE_BIN: /fakes/fake_cli.py
+    volumes:
+      - ../../services/llm-bridge/tests/fakes:/fakes:ro

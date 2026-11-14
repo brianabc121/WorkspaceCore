@@ -14,6 +14,8 @@ on:
       - services/api/app/modules/llm_bridge/**
       - apps/web/src/modules/llm_bridge/**
       - tests/e2e/llm_bridge_browser.cjs
+      - tests/e2e/llm_chat_browser.cjs
+      - tests/e2e/llm-bridge-fake.compose.yaml
       - Makefile
       - .github/workflows/ci-llm-bridge.yml
   push:
@@ -24,6 +26,8 @@ on:
       - services/api/app/modules/llm_bridge/**
       - apps/web/src/modules/llm_bridge/**
       - tests/e2e/llm_bridge_browser.cjs
+      - tests/e2e/llm_chat_browser.cjs
+      - tests/e2e/llm-bridge-fake.compose.yaml
       - Makefile
       - .github/workflows/ci-llm-bridge.yml
 
@@ -167,6 +171,21 @@ jobs:
         run: |
           infra/llm-bridge/smoke.sh my-workspace-llm-bridge-mcp-manager-1 http://127.0.0.1:8787 "$(make -s llm-bridge-token)"
           infra/llm-bridge/smoke.sh my-workspace-llm-bridge-2-mcp-manager-1 http://127.0.0.1:8788 "$(make -s llm-bridge-token N=2)"
+      - name: 启动验收用的 MCP 管理器（同一个镜像；里面的 Claude 程序换成仓库里不访问外网的仿真命令行，只在 CI 里这样用）
+        run: |
+          token="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+          echo "::add-mask::$token"
+          echo "LLM_BRIDGE_FAKE_TOKEN=$token" >> "$GITHUB_ENV"
+          WORKSPACE_PROJECT=my-workspace LLM_BRIDGE_ALIAS=llm-bridge-fake LLM_BRIDGE_ADMIN_TOKEN="$token" LLM_BRIDGE_PORT=8799 \
+            docker compose -p my-workspace-llm-bridge-fake \
+            -f infra/llm-bridge/compose.yaml -f infra/llm-bridge/compose.workspace.yaml -f tests/e2e/llm-bridge-fake.compose.yaml \
+            up -d --wait --wait-timeout 300
+          # 确认换上去了：容器里用的是仿真命令行，镜像里的普通用户能运行它
+          docker exec -e CLAUDE_CONFIG_DIR=/tmp/fake-check my-workspace-llm-bridge-fake-mcp-manager-1 \
+            sh -c 'test "$BRIDGE_CLAUDE_BIN" = /fakes/fake_cli.py && "$BRIDGE_CLAUDE_BIN" auth status'
+      - name: 大模型聚合聊天浏览器验收（没有管理器时的说明；新建会话并提问、回答与过程；Enter 发送；停止；改标题、搜索、刷新；别的管理员建的会话要确认一次；member 不可用；归档；管理器停用后只能看；审计不含消息内容；手机宽度两屏）
+        # 不要求空库：每次新建工作台用户。验收用的管理器在内部网络里叫 llm-bridge-fake
+        run: node tests/e2e/llm_chat_browser.cjs
       - name: 失败时输出服务状态与日志
         if: failure()
         run: |
@@ -175,9 +194,11 @@ jobs:
           docker ps -a --filter name=llm-bridge
           docker logs --tail 150 my-workspace-llm-bridge-mcp-manager-1 2>&1 || true
           docker logs --tail 150 my-workspace-llm-bridge-2-mcp-manager-1 2>&1 || true
+          docker logs --tail 150 my-workspace-llm-bridge-fake-mcp-manager-1 2>&1 || true
       - name: 停止服务
         if: always()
         run: |
+          docker rm -f -v my-workspace-llm-bridge-fake-mcp-manager-1 || true
           make llm-bridge-down N=2 || true
           make llm-bridge-down || true
           make down

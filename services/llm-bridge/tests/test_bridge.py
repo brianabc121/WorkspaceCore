@@ -455,6 +455,15 @@ async def test_chat_page_admin_views(bridge: Bridge) -> None:
     assert view["last_event_id"] > 0
     assert (await bridge.admin("GET", "/admin/sessions/bs_nope")).status_code == 404
 
+    # 官方程序在同一条消息里既回答又调工具时，回答的事件排在工具前面：过程里同样不重复出现回答
+    assert (await _send(bridge, agent, theirs, "tools-after:1", "a2"))["status"] == "completed"
+    after = (await bridge.admin("GET", f"/admin/sessions/{theirs}")).json()["messages"][-1]
+    assert after["text"] == "[fake-1] tools-after:1"
+    assert [(s["kind"], s["text"]) for s in after["steps"]] == [
+        ("command", "ls -la"),
+        ("files", "src/b.py"),
+    ]
+
     # 进行中的回合：先拿到已经给出的部分，再长轮询等后面的事件
     running = await _send(bridge, human, mine, "work:0.6", "h2", wait=0)
     assert running["status"] in ("queued", "running")
