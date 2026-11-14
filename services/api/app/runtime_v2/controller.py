@@ -6,12 +6,20 @@ import json
 import os
 import sqlite3
 import threading
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import suppress
 from typing import Any
 from uuid import UUID
 
 from app.domain.runner_runtime_profile import KUBERNETES_COMMANDS
 from app.runner_agent.client import Workspace
+from app.runtime_v2.journal_crypto import ReceiptCipher
+from app.runtime_v2.journal_results import (
+    NON_BINDING_KINDS,
+    OPERATION_KINDS,
+    journal_context,
+    operation_result,
+)
 from app.runtime_v2.kubernetes import RuntimeIdentity
 from app.runtime_v2.network import PrivateNetworkReconciler
 from app.runtime_v2.runner import (
@@ -52,11 +60,39 @@ class CommandJournal:
                 db.execute("ALTER TABLE receipts ADD COLUMN recovery TEXT")
             if "delivered" not in columns:
                 db.execute("ALTER TABLE receipts ADD COLUMN delivered INTEGER NOT NULL DEFAULT 0")
+            self._cipher = ReceiptCipher(path)
+            # Authenticate before accepting new work; never replace a lost/wrong key.
+            for command_id, value, recovery in db.execute(
+                "SELECT id, result, recovery FROM receipts WHERE result IS NOT NULL"
+            ):
+                self._decode(command_id, value, recovery)
+
+    def _decode(self, command_id: str, value: str, recovery: str | None = None) -> dict[str, Any]:
+        if self._cipher.sealed(value):
+            return self._cipher.decrypt(command_id, value)
+        saved = json.loads(recovery) if recovery else {}
+        if (saved.get("context") or {}).get("kind") in OPERATION_KINDS:
+            raise ValueError("operation receipt authentication unavailable")
+        result: dict[str, Any] = json.loads(value)
+        return result
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=5)
 
+    def _encrypted_history(self, db: sqlite3.Connection) -> Iterator[tuple[str, str]]:
+        for command_id, value, recovery in db.execute(
+            "SELECT id, result, recovery FROM receipts WHERE result IS NOT NULL"
+        ):
+            if self._cipher.sealed(value):
+                yield command_id, value
+            else:
+                # Do not let a removed envelope marker authorize key creation
+                # or bypass authentication of an operation's completed result.
+                self._decode(command_id, value, recovery)
+
     def begin(self, command_id: str, context: dict[str, Any] | None = None) -> str | dict[str, Any]:
+        if context is not None:
+            context = journal_context(context)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -72,7 +108,7 @@ class CommandJournal:
             saved = json.loads(row[1]) if row[1] else {}
             if context is not None and saved.get("context") != context:
                 raise ValueError("command identity changed")
-            return json.loads(row[0]) if row[0] is not None else "unknown"
+            return self._decode(command_id, row[0], row[1]) if row[0] is not None else "unknown"
 
     def recovery(self, command_id: str) -> dict[str, Any]:
         with self._connect() as db:
@@ -173,28 +209,51 @@ class CommandJournal:
                 (
                     row[0],
                     json.loads(row[1]) if row[1] else {},
-                    json.loads(row[2]) if row[2] else None,
+                    self._decode(row[0], row[2], row[1]) if row[2] else None,
                 )
                 for row in db.execute(
                     "SELECT id, recovery, result FROM receipts WHERE delivered = 0 ORDER BY rowid"
                 )
             ]
 
-    def finish(self, command_id: str, result: dict[str, Any]) -> None:
-        safe = (
-            {
-                "status": "done",
-                "result": {
-                    k: v for k, v in (result.get("result") or {}).items() if k in _RESULT_FIELDS
-                },
-            }
-            if result.get("status") == "done"
-            else {"status": "failed", "error": _REJECTED}
-        )
+    def finish(
+        self,
+        command_id: str,
+        result: dict[str, Any],
+        *,
+        secret_values: Sequence[str] | Mapping[str, str] = (),
+    ) -> None:
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT recovery FROM receipts WHERE id = ? AND result IS NULL", (command_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError("missing or already completed receipt")
+            recovery = json.loads(row[0]) if row[0] else {}
+            kind = (recovery.get("context") or {}).get("kind")
+            if kind in OPERATION_KINDS:
+                safe = operation_result(kind, result, secret_values=secret_values)
+                encoded = self._cipher.encrypt(
+                    command_id, safe, history=self._encrypted_history(db)
+                )
+            else:
+                safe = (
+                    {
+                        "status": "done",
+                        "result": {
+                            k: v
+                            for k, v in (result.get("result") or {}).items()
+                            if k in _RESULT_FIELDS
+                        },
+                    }
+                    if result.get("status") == "done"
+                    else {"status": "failed", "error": _REJECTED}
+                )
+                encoded = json.dumps(safe, separators=(",", ":"))
             updated = db.execute(
                 "UPDATE receipts SET result = ? WHERE id = ? AND result IS NULL",
-                (json.dumps(safe, separators=(",", ":")), command_id),
+                (encoded, command_id),
             )
             if updated.rowcount != 1:
                 raise ValueError("missing or already completed receipt")
@@ -210,16 +269,18 @@ class CommandJournal:
         seen: set[str] = set()
         result: list[dict[str, Any]] = []
         with self._connect() as db:
-            for recovery, value, delivered in db.execute(
-                "SELECT recovery, result, delivered FROM receipts ORDER BY rowid DESC"
+            for command_id, recovery, value, delivered in db.execute(
+                "SELECT id, recovery, result, delivered FROM receipts ORDER BY rowid DESC"
             ):
                 entry = json.loads(recovery) if recovery else {}
+                if (entry.get("context") or {}).get("kind") in NON_BINDING_KINDS:
+                    continue
                 identity = (entry.get("context") or {}).get("identity") or {}
                 env_id = identity.get("env_id")
                 if not isinstance(env_id, str) or env_id in seen:
                     continue
                 seen.add(env_id)
-                receipt = json.loads(value) if value else {}
+                receipt = self._decode(command_id, value, recovery) if value else {}
                 if (
                     delivered
                     and receipt.get("status") == "done"

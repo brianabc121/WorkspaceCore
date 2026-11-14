@@ -5,7 +5,7 @@ owner: codex
 status: in_progress
 priority: P1
 branch: codex/T-0224-two-server-acceptance
-paths: services/api,apps/web,infra,tests/e2e,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows,docs/tailscale-development-guide.md,README.md
+paths: services/api,apps/web,infra,tests/e2e,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows,docs/tailscale-development-guide.md,README.md,services/runtime-helper
 depends_on:
 created: 2026-11-11
 updated: 2026-11-14
@@ -78,3 +78,5 @@ updated: 2026-11-14
 - 2026-11-14 07:42 UTC · codex · 完成本次Tailscale文档修订：更新密钥后Save→Publish/Republish→从更新后环境新开Cloud会话；grants/ssh的src/dst统一角色标签，补tagOwners/实际赋标/数组任一匹配、带标签SSH不支持check；补DERP、方向、IP角色误判和无重连按钮边界。新增SSH-NEW-SESSION.md记录本会话真实两机200/指纹匹配/hostname和id退出0，旧503保留历史。5份文档检查：21段shell语法、2段内嵌Python、4段JSON、3条JSONL、49个相对链接/锚点及密钥模式扫描通过；需求逐项核对、git diff --check、collab check通过。仅文档及日志，不重跑产品全套或改远端；任务整体继续in_progress，保留PR203草稿。
 - 2026-11-14 07:51 UTC · codex · 人类在本聊天要求将核对出的迁移/CI、完整Kubernetes操作、双机调度配额、真实存储、公网、恢复与压力测试全部落实。延续既有批准设计，新增2026-11-14-runtime-v2-completion执行计划，沿PR203。当前干净工作区，先整合main解决重复0068；外部真实设施边界需实际核对，不用mock冒充验收。
 - 2026-11-14 08:09 UTC · codex · 全部落实Task1完成：合入origin/main4919497并修复重复0068，a5b1061保留正式0068、增加兼容0069；两种历史0068结构/数据/序列/OID及非空授权scope回退锁保护真实PG回归通过。54项定向用例跨最终有效运行通过，Ruff572/mypy568/OpenAPI、单head0069、CLI升级/回退/升级/current/check均通过，独立审查spec/quality通过。会话桥夹具改为明确缺失Codex路径避免调用宿主真实app-server。官方kubectl摘要核验后TLS用例1pass1.50s。进入Task2A可信静态辅助程序；实机LB Pending、无StorageClass，外部LB及两来源接入信息已异步询问，继续独立工作。
+- 2026-11-14 08:23 UTC · codex · 完整运行适配需要不依赖租户镜像解释器的可信目标UID围栏，按已批准安全约束选用Go静态辅助程序（官方Go1.27.4摘要核验），将task paths扩展services/runtime-helper；inbox无其他进行中占用。辅助程序、独立node-root存储hook与安全回执/二进制传输是文件/接口不共享的基础，按parallel-agents分开实施并各自复审，依赖接线仍串行。无生产切换、旧PV数据未动。
+- 2026-11-14 12:59 UTC · codex · Task2B1安全基础完成：操作回执严格有界并AESGCM加密，瞬时密钥输出在持久化/回调前脱敏；绑定回执跳过非生命周期操作；二进制传输限制输入输出/时间，超时不冒充远端取消。137初轮后独立审查发现替换标记泄露与live换key/tamper未先认证两个High，RED7fail56pass后修复，最终145项含官方TLS通过，6文件Ruff/format/mypy通过；复审两项均ADDRESSED、无新阻塞。尚未开放操作准入，下一步接线。用户澄清接入只需Tailscale/公网IP/内网IP之一、无需域名，默认现有Tailscale；IP SAN真实TLS正反向2项已验证，私网开发不被公网专项阻塞。
