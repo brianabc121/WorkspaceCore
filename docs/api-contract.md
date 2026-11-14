@@ -786,6 +786,23 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 
 状态里的 `platforms` 是这座桥控制的平台；每个账号和通道带 `enabled`（这座桥是否控制它对应的平台），没勾选的通道 `available=false`。
 
+**聊天页面**（T-0231，`docs/v2/LLM_CHAT_PLAN.md`；都在 `/api/v1/llm_bridge/bridges/{id}/chat` 下，owner / admin 可用，写操作带 CSRF）。
+人以 `user:<用户 id>` 的身份经这座桥发消息，和智能体走同一套工具（密钥拦截、限额、账号一致性、排队都一样）；审计只记动作，不记消息内容。
+
+| 接口 | 说明 |
+|---|---|
+| `GET .../chat/sessions?q&platform&status&limit&offset&sync` | 这座桥上的会话（自己的、别的管理员的、智能体的、官方程序里已有的）：`q` 按标题搜索，`status` 是 `active`（默认）/ `archived` / `all`；每个会话带 `owner`（显示名）、`owner_kind`（`me` / `user` / `agent` / `external`）、`busy`（有回合没做完）；返回 `next_offset`、`sync_failed` |
+| `GET .../chat/sessions/{session_id}` | 会话信息（开发会话带 `environment`）和消息：`user` 消息带 `by`、`mine`；`assistant` 消息带所在回合的 `status`（`queued` / `running` / `completed` / `failed` / `cancelled` / `unknown`）、`steps`（过程：`message` / `command` / `files` / `notice`）、`failure`、`ahead_in_session`；没做完的回合给出已经得到的部分；`last_event_id` 用来接着读事件 |
+| `GET .../chat/sessions/{session_id}/events?after&wait_seconds` | `after` 之后的事件（`queued` / `started` / `message` / `command` / `files` / `notice` / `completed` / `failed` / `cancelled` / `unknown`）；没有新事件且还有回合没做完时最多等 `wait_seconds`（0 ~ 25）秒；返回 `busy`、`last_id` |
+| `GET .../chat/options?platform&mode` | 新建会话时可选的模型（带 `default`、`efforts`）和开发环境；读不到模型时 `models` 为空、`models_error` 说明原因 |
+| `POST .../chat/sessions` | 新建会话：`platform`、`mode`（`chat` / `dev`）、可选 `model`、`effort`、`environment`（开发会话必填）、`title`，可以带第一条消息 `text` + `request_id`；`201` 返回 `session`、`turn`；会话建好但第一条没发出去时 `send_error` 说明原因 |
+| `POST .../chat/sessions/{session_id}/messages` | 发一条消息：`text`、`request_id`（幂等号，重试用同一个不会发两次）、`takeover`；立刻返回回合，不等回答。不是自己建的会话要 `takeover=true`，否则 `409 TAKEOVER_REQUIRED` |
+| `POST .../chat/turns/{turn_id}/cancel` | 停止排队中或进行中的回合 |
+| `PATCH .../chat/sessions/{session_id}` | 改标题 |
+| `POST .../chat/sessions/{session_id}/archive` | 归档（之后不能再发送） |
+
+写操作在这座桥停用时 `409 BRIDGE_DISABLED`；桥没有及时回应、结果未知时 `504 EXTERNAL_TIMEOUT`；会话桥自己的拒绝（未登录、限额、密钥拦截等）按原样带着说明返回。
+
 **智能体工具**（只列给打开了权限的实例；每个工具都有可选参数 `bridge`，实例能用多个 MCP 管理器时必填，`llm_bridge_status` 除外：不填时返回 `data.bridges`，列出它能用的每一个和各自控制的平台、登录情况；连不上的标 `reachable=false`）：
 
 | 工具 | 风险 | 说明 |

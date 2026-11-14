@@ -47,6 +47,7 @@ SETTING_LIMITS = {
     "max_text_chars": (1, 1_000_000),
 }
 MAX_WAIT_SECONDS = 50
+MAX_EVENT_WAIT_SECONDS = 25
 ACCOUNT_CACHE_SECONDS = 60
 _MODEL_RE = re.compile(r"^[\w.\-:\[\]/]{1,100}$")
 _REQUEST_ID_RE = re.compile(r"^[\w.\-:]{1,100}$")
@@ -904,6 +905,117 @@ class Engine:
             view["failure"] = {"kind": turn["error_kind"], "message": turn["error_message"]}
         return view
 
+    # ---- 聊天页用（管理接口；docs/v2/LLM_CHAT_PLAN.md 第 4.1 节） ----
+    def admin_session_view(self, session: Row, busy: set[str] | None = None) -> Row:
+        busy = self.store.busy_sessions() if busy is None else busy
+        return {
+            **session_view(session, full=True),
+            "slot": session["slot"],
+            "owner_id": session["caller_id"],
+            "busy": session["id"] in busy,
+        }
+
+    def _required_session(self, session_id: str) -> Row:
+        session = self.store.get_session(session_id)
+        if session is None:
+            raise BridgeError("NOT_FOUND", "没有这个会话")
+        return session
+
+    async def conversation(self, session_id: str) -> Row:
+        """一个会话的信息和消息：谁发的、回答、过程、失败原因、进行中已经给出的部分。"""
+        session = self._required_session(session_id)
+        view = self.admin_session_view(session)
+        environment = (
+            self.store.get_environment(session["environment_id"])
+            if session["environment_id"]
+            else None
+        )
+        view["environment"] = env_view(environment) if environment else None
+        events = self.store.list_events(session_id, limit=100_000)
+        last_event_id = events[-1]["id"] if events else 0
+        messages: list[Row] = []
+        if session["origin"] == "external":
+            try:
+                native = await self._driver(session["slot"]).read(
+                    session["native_id"], session["workdir"]
+                )
+            except DriverError as error:
+                raise from_driver(error) from error
+            messages = [{"role": m.role, "text": redact(m.text), "at": m.at} for m in native]
+            return {"session": view, "messages": messages, "last_event_id": last_event_id}
+        by_turn: dict[str, list[Row]] = {}
+        for event in events:
+            if event["turn_id"]:
+                by_turn.setdefault(event["turn_id"], []).append(event)
+        for turn in self.store.list_turns(session_id=session_id, limit=10_000):
+            mine = by_turn.get(turn["id"], [])
+            queued = next((e for e in mine if e["kind"] == "queued"), None)
+            messages.append(
+                {
+                    "role": "user",
+                    "turn_id": turn["id"],
+                    "text": turn["text"],
+                    "at": turn["queued_at"],
+                    "by": (queued["payload"] or {}).get("by") if queued else None,
+                    "by_id": turn["caller_id"],
+                }
+            )
+            steps = [step for step in (_step(e) for e in mine) if step]
+            status = turn["status"]
+            reply: Row = {
+                "role": "assistant",
+                "turn_id": turn["id"],
+                "status": status,
+                "at": turn["finished_at"] or turn["started_at"] or turn["queued_at"],
+                "text": "",
+                "steps": steps,
+            }
+            if status == "completed":
+                reply["text"] = turn["result_text"] or ""
+                # 和结果一样的那一段不在“过程”里再出现一次。它不一定排在最后：
+                # 官方程序在同一条消息里既给文字又调工具时，文字的事件先到
+                for index in range(len(steps) - 1, -1, -1):
+                    if steps[index]["kind"] == "message" and steps[index]["text"] == reply["text"]:
+                        reply["steps"] = steps[:index] + steps[index + 1 :]
+                        break
+            else:
+                # 没做完（进行中、失败、结果未知、已取消）：显示已经给出的部分
+                reply["text"] = "\n\n".join(s["text"] for s in steps if s["kind"] == "message")
+                reply["steps"] = [s for s in steps if s["kind"] != "message"]
+                if status in ("failed", "unknown"):
+                    reply["failure"] = {
+                        "kind": turn["error_kind"],
+                        "message": turn["error_message"],
+                    }
+                elif status == "queued":
+                    reply["ahead_in_session"] = self.store.queue_position(turn)
+            messages.append(reply)
+        return {"session": view, "messages": messages, "last_event_id": last_event_id}
+
+    async def session_events(self, session_id: str, after: int, wait_seconds: float) -> Row:
+        """这个会话在 after 之后的事件；没有新事件且还有回合没做完时，最多等 wait_seconds 秒。"""
+        self._required_session(session_id)
+        deadline = time.monotonic() + max(0.0, min(wait_seconds, MAX_EVENT_WAIT_SECONDS))
+        while True:
+            events = self.store.list_events(session_id, after_id=after, limit=500)
+            busy = session_id in self.store.busy_sessions()
+            if events or not busy or time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(0.2)
+        return {
+            "events": [_event_view(e) for e in events],
+            "busy": busy,
+            "last_id": events[-1]["id"] if events else after,
+        }
+
+    def rename_session(self, session_id: str, title: str) -> Row:
+        session = self._required_session(session_id)
+        clean = " ".join(redact(title).split())[:120]
+        if not clean:
+            raise BridgeError("VALIDATION_FAILED", "标题不能为空")
+        self.store.update_session(session_id, title=clean, updated_at=session["updated_at"])
+        return self.admin_session_view(self._required_session(session_id))
+
     # ---- 管理页用 ----
     async def overview(self) -> Row:
         enabled = self.platforms()
@@ -954,6 +1066,40 @@ class Engine:
             "accounts": {s: a for s, a in view["accounts"].items() if a["enabled"]},
             "channels": [c for c in view["channels"] if c["enabled"]],
         }
+
+
+def _event_view(event: Row) -> Row:
+    """给聊天页的一条事件：种类、属于哪个回合，以及正文（一段回答、一条命令、改动的文件）。"""
+    payload = event["payload"] or {}
+    view: Row = {
+        "id": event["id"],
+        "turn_id": event["turn_id"],
+        "kind": event["kind"],
+        "at": event["at"],
+    }
+    for key in ("text", "command", "paths", "by"):
+        if key in payload:
+            view[key] = payload[key]
+    if event["kind"] in ("failed", "unknown") and payload.get("kind"):
+        view["reason"] = payload["kind"]
+    return view
+
+
+def _step(event: Row) -> Row | None:
+    """回合进行中的一条事件 → 页面“过程”里的一步；别的事件（排队、完成等）不算。"""
+    payload = event["payload"] or {}
+    kind = event["kind"]
+    if kind in ("message", "notice") and payload.get("text"):
+        return {"kind": kind, "text": str(payload["text"]), "at": event["at"]}
+    if kind == "command" and payload.get("command"):
+        return {"kind": "command", "text": str(payload["command"]), "at": event["at"]}
+    if kind == "files" and payload.get("paths"):
+        return {
+            "kind": "files",
+            "text": "、".join(str(p) for p in payload["paths"]),
+            "at": event["at"],
+        }
+    return None
 
 
 def env_view(env: Row) -> Row:

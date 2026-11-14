@@ -33,7 +33,7 @@ from bridge.drivers.base import Driver
 from bridge.drivers.cli_stream import CliStreamDriver, claude_profile, codebuddy_profile
 from bridge.drivers.codex import CodexDriver
 from bridge.drivers.fake import FakeDriver
-from bridge.engine import BridgeError, Caller, Engine, env_view, session_view
+from bridge.engine import BridgeError, Caller, Engine, env_view
 from bridge.mcp_server import CALLER_STATE_KEY, McpRunner
 from bridge.store import Store
 
@@ -151,6 +151,10 @@ class EnvironmentBody(_Body):
     network: bool = False
     description: str = Field(default="", max_length=300)
     enabled: bool = True
+
+
+class SessionPatchBody(_Body):
+    title: str = Field(min_length=1, max_length=200)
 
 
 class CallerBody(_Body):
@@ -329,17 +333,53 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/admin/sessions")
     async def admin_sessions(
-        request: Request, _: Admin, limit: int = 50, offset: int = 0, sync: bool = False
+        request: Request,
+        _: Admin,
+        limit: int = 50,
+        offset: int = 0,
+        sync: bool = False,
+        q: str = "",
+        platform: str = "",
+        status: Literal["active", "archived", "all"] = "all",
     ) -> dict[str, Any]:
         engine = engine_of(request)
         note = ""
         if sync:
-            failed = await engine.sync_external(list(engine.drivers))
+            # 只读这座桥控制的平台的官方程序记录
+            slots = [slot for slot in engine.drivers if engine.slot_enabled(slot)]
+            failed = await engine.sync_external(slots)
             note = "、".join(SLOT_LABELS.get(s, s) for s in failed)
         rows = engine.store.list_sessions(
-            include_archived=True, limit=min(limit, 200), offset=offset
+            include_archived=True,
+            status=None if status == "all" else status,
+            platform=platform or None,
+            query=q.strip()[:120] or None,
+            limit=min(max(limit, 1), 200) + 1,
+            offset=max(offset, 0),
         )
-        return {"sessions": [session_view(r, full=True) for r in rows], "sync_failed": note}
+        size = min(max(limit, 1), 200)
+        busy = engine.store.busy_sessions()
+        return {
+            "sessions": [engine.admin_session_view(r, busy) for r in rows[:size]],
+            "next_offset": max(offset, 0) + size if len(rows) > size else None,
+            "sync_failed": note,
+        }
+
+    @app.get("/admin/sessions/{session_id}")
+    async def admin_session(request: Request, session_id: str, _: Admin) -> dict[str, Any]:
+        return await engine_of(request).conversation(session_id)
+
+    @app.get("/admin/sessions/{session_id}/events")
+    async def admin_session_events(
+        request: Request, session_id: str, _: Admin, after: int = 0, wait_seconds: float = 0
+    ) -> dict[str, Any]:
+        return await engine_of(request).session_events(session_id, max(after, 0), wait_seconds)
+
+    @app.patch("/admin/sessions/{session_id}")
+    async def admin_session_rename(
+        request: Request, session_id: str, body: SessionPatchBody, _: Admin
+    ) -> dict[str, Any]:
+        return engine_of(request).rename_session(session_id, body.title)
 
     @app.get("/admin/sessions/{session_id}/turns")
     async def admin_turns(request: Request, session_id: str, _: Admin) -> dict[str, Any]:
