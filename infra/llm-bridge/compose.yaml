@@ -1,14 +1,19 @@
-# 大模型会话桥（docs/v2/LLM_BRIDGE_PLAN.md；部署步骤见 docs/deployment.md“大模型会话桥”一节）。
+# 大模型客户端的 MCP 管理器，也就是一座会话桥（docs/v2/LLM_BRIDGE_PLAN.md；部署步骤见 docs/deployment.md 第 25 节）。
 # 可选部署，独立的 Compose 项目：不在核心 compose.yaml 里。
 #
-# 一个容器 = 每个平台最多一个账号。要管第二个账号，再起一个项目：
-#   LLM_BRIDGE_ADMIN_TOKEN=<另一枚令牌> LLM_BRIDGE_PORT=8788 \
-#     docker compose -p myworkspace-llm-bridge-b -f infra/llm-bridge/compose.yaml up -d
+# 一个容器 = 一个 MCP 管理器 = 每个平台最多一个账号。要再加一个管理器，再起一个项目：
+#   和工作台同机：make llm-bridge-up N=2（项目名、令牌、端口、内部网络里的名字都由它按 N 安排）
+#   别的服务器上：LLM_BRIDGE_ADMIN_TOKEN=<另一枚令牌> LLM_BRIDGE_PORT=8788 \
+#     docker compose -p myworkspace-llm-bridge-2 -f infra/llm-bridge/compose.yaml up -d --build
 # 每个项目有自己的数据卷（登录目录、会话记录），互不相干。
+#
+# 服务名特意不叫 llm-bridge：同机的几个管理器都加入工作台的内部网络，Compose 会把服务名登记成
+# 网络里的名字，叫 llm-bridge 的话几个容器会共用这个名字。它们在内部网络里的名字由
+# compose.workspace.yaml 的 LLM_BRIDGE_ALIAS 单独给（llm-bridge、llm-bridge-2 ……）。
 name: myworkspace-llm-bridge
 
 services:
-  llm-bridge:
+  mcp-manager:
     build:
       context: ../../services/llm-bridge
     image: myworkspace/llm-bridge:0.1.0

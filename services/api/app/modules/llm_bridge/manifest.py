@@ -8,9 +8,11 @@ from app.modules.base import ModuleManifest
 
 MANIFEST = ModuleManifest(
     key="llm_bridge",
-    name="大模型会话桥",
-    description="让智能体经会话桥向 ChatGPT / Codex / Claude / WorkBuddy 发指令并管理会话。"
-    "依赖独立部署的会话桥。",
+    # 页面叫“大模型客户端管理”：一个 MCP 管理器就是一座登记的会话桥（方案第 19 节）
+    name="大模型客户端",
+    description="管理一个或多个 MCP 管理器：每个管理器控制选定的平台"
+    "（ChatGPT / Codex / Claude / WorkBuddy）、单独登录一套账号，智能体经它发指令并管理会话。"
+    "每个管理器是独立部署的容器（会话桥）。",
     version="0.1.0",
     # 新模块默认停用：owner 在“应用中心”启用
     default_enabled=False,

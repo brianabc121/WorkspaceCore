@@ -3,7 +3,7 @@
 - llm_bridge_bridges：工作空间登记的会话桥（一座桥 = 一个独立部署的容器 = 每个平台一个账号）。
   管理令牌用凭证密钥加密后存引用，不回传浏览器。
 - llm_bridge_grants：按实例的权限（例外九）：没有这一行或 enabled 为 false 的实例
-  看不到也调用不了工具。
+  看不到也调用不了工具。bridge_ids 限定实例能用哪几座桥（NULL 表示都能用）。
 """
 
 import uuid
@@ -55,6 +55,8 @@ class LlmBridgeGrant(Base):
     can_takeover: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     # 允许的平台；空列表表示都允许
     platforms: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    # 允许用的会话桥（id 的列表）；NULL 表示都允许（包括以后登记的），空列表表示一个都不允许
+    bridge_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

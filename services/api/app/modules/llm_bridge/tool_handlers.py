@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Collection
 from typing import TYPE_CHECKING, Any
 
@@ -20,7 +21,7 @@ from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validat
 from app.domain.connectors import ConnectorRuntime
 from app.integrations.base import ConnectorError
 from app.models import AgentInstance
-from app.modules.llm_bridge.client import BridgeCaller, BridgeCallError
+from app.modules.llm_bridge.client import BridgeCaller, BridgeCallError, BridgeClient
 from app.modules.llm_bridge.models import LlmBridge, LlmBridgeGrant
 from app.modules.llm_bridge.service import LlmBridgeService
 from app.modules.llm_bridge.tool_schemas import BridgeToolOutput
@@ -34,6 +35,7 @@ PREFIX = "llm_bridge_"
 TEXT_LIMIT = 2000
 _NO_GRANT = "管理员还没有给你开“大模型会话权限”"
 _NO_WRITE = "管理员没有给你“新建会话和发送消息”的权限"
+_NO_BRIDGE = "管理员没有给你开任何 MCP 管理器（会话桥）"
 # 会话桥的错误码 → 工作台工具的错误码；其余都当作外部服务不可用
 _CODES = {
     "NOT_FOUND": "NOT_FOUND",
@@ -67,21 +69,64 @@ async def visible_tools(
     return [s.name for s in SPECS if grant.can_write or s.name not in WRITE_TOOL_NAMES]
 
 
-async def _pick_bridge(
-    service: LlmBridgeService, instance: AgentInstance, name: str | None
-) -> LlmBridge:
+async def _candidates(
+    service: LlmBridgeService, instance: AgentInstance, grant: LlmBridgeGrant
+) -> list[LlmBridge]:
+    """这个实例能用的会话桥（MCP 管理器）：启用着的，并且管理员允许它用。"""
     bridges = await service.bridges(instance.workspace_id, only_enabled=True)
     if not bridges:
         raise ToolCallError("EXTERNAL_UNAVAILABLE", "这个工作空间还没有登记可用的会话桥")
+    allowed = service.allowed(grant, bridges)
+    if not allowed:
+        raise ToolCallError("FORBIDDEN_CAPABILITY", _NO_BRIDGE)
+    return allowed
+
+
+def _pick_bridge(bridges: list[LlmBridge], name: str | None) -> LlmBridge:
     if name is None:
         if len(bridges) == 1:
             return bridges[0]
         names = "、".join(b.name for b in bridges)
-        raise ToolCallError("VALIDATION_FAILED", f"登记了多座会话桥，请用 bridge 参数指定：{names}")
+        raise ToolCallError(
+            "VALIDATION_FAILED",
+            f"你能用多个 MCP 管理器（会话桥），请用 bridge 参数指定：{names}。"
+            "不填 bridge 调用 llm_bridge_status 可以看到每一个控制哪些平台",
+        )
     for bridge in bridges:
         if bridge.name == name:
             return bridge
+    # 存在但没有授权的，也按“没有”回答：不透露别的管理器的名字
     raise ToolCallError("NOT_FOUND", f"没有名为 {name} 的会话桥")
+
+
+def _call_error(error: BridgeCallError | ConnectorError) -> ToolCallError:
+    if isinstance(error, BridgeCallError):
+        code = _CODES.get(error.code, "EXTERNAL_UNAVAILABLE")
+        return ToolCallError(code, error.message or "会话桥返回了错误")
+    if error.kind == "TIMEOUT_UNKNOWN":
+        return ToolCallError(
+            "EXTERNAL_UNAVAILABLE",
+            "会话桥没有在时限内回答；用同一个 request_id 重试不会重复发送",
+        )
+    return ToolCallError("EXTERNAL_UNAVAILABLE", "会话桥暂时连不上")
+
+
+async def _status_of_all(
+    caller: BridgeCaller, clients: list[tuple[str, BridgeClient]]
+) -> BridgeToolOutput:
+    """能用多个管理器、又没指定 bridge 时：每一个的概况（控制的平台、登录情况、排队）。"""
+
+    async def one(name: str, client: BridgeClient) -> dict[str, Any]:
+        try:
+            data = await client.tool(caller, "llm_status", {})
+        except (BridgeCallError, ConnectorError) as error:
+            return {"bridge": name, "reachable": False, "error": _call_error(error).message}
+        if not isinstance(data, dict):
+            return {"bridge": name, "reachable": False, "error": "返回了无法识别的结果"}
+        return {"bridge": name, "reachable": True, **data}
+
+    results = await asyncio.gather(*(one(name, client) for name, client in clients))
+    return BridgeToolOutput(bridge="", data={"bridges": list(results)})
 
 
 async def forward(
@@ -104,23 +149,20 @@ async def forward(
     platform = arguments.get("platform")
     if platform and grant.platforms and platform not in grant.platforms:
         raise ToolCallError("FORBIDDEN_CAPABILITY", f"管理员没有给你开 {platform} 这个平台")
-    bridge = await _pick_bridge(service, instance, bridge_name)
+    bridges = await _candidates(service, instance, grant)
     caller = BridgeCaller(str(instance.id), instance.name, _scopes(grant))
+    if tool == "llm_bridge_status" and bridge_name is None and len(bridges) > 1:
+        clients = [(b.name, service.client(b)) for b in bridges]
+        await db.commit()
+        return await _status_of_all(caller, clients)
+    bridge = _pick_bridge(bridges, bridge_name)
     # 之后不再用数据库：等会话桥回答可能要几十秒，不占着事务
     bridge_label, client = bridge.name, service.client(bridge)
     await db.commit()
     try:
         data = await client.tool(caller, "llm_" + tool.removeprefix(PREFIX), arguments)
-    except BridgeCallError as error:
-        code = _CODES.get(error.code, "EXTERNAL_UNAVAILABLE")
-        raise ToolCallError(code, error.message or "会话桥返回了错误") from None
-    except ConnectorError as error:
-        if error.kind == "TIMEOUT_UNKNOWN":
-            raise ToolCallError(
-                "EXTERNAL_UNAVAILABLE",
-                "会话桥没有在时限内回答；用同一个 request_id 重试不会重复发送",
-            ) from None
-        raise ToolCallError("EXTERNAL_UNAVAILABLE", "会话桥暂时连不上") from None
+    except (BridgeCallError, ConnectorError) as error:
+        raise _call_error(error) from None
     if not isinstance(data, dict):
         raise ToolCallError("EXTERNAL_UNAVAILABLE", "会话桥返回了无法识别的结果")
     return BridgeToolOutput(bridge=bridge_label, data=data)

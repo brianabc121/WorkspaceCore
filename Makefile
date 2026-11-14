@@ -37,7 +37,7 @@ endef
 	agent-ca agents-up pull openim-pull \
 	openim-build openim-up openim-down openim-logs \
 	trendradar-pull trendradar-prompts trendradar-up trendradar-down trendradar-logs \
-	llm-bridge-up llm-bridge-token llm-bridge-down llm-bridge-logs
+	llm-bridge-check-n llm-bridge-up llm-bridge-token llm-bridge-down llm-bridge-logs
 
 help: ## 列出可用命令
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-15s %s\n", $$1, $$2}'
@@ -145,27 +145,41 @@ trendradar-down: ## 停止新闻早报；保留抓到的数据
 trendradar-logs: ## 跟踪 TrendRadar 日志（Ctrl+C 退出）
 	$(TRENDRADAR_COMPOSE) logs -f --tail=100
 
-# 大模型会话桥（可选，独立项目）：和工作台在同一台服务器上时加入 core 的 integrations 网络
-LLM_BRIDGE_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) $(COMPOSE) -p $(WORKSPACE_PROJECT)-llm-bridge \
+# 大模型客户端的 MCP 管理器（会话桥；可选，每个是独立的 Compose 项目）。和工作台在同一台服务器上时加入 core 的 integrations 网络。
+# N 是第几个管理器（默认 1）。N=2、3 …… 各有自己的项目、数据卷、令牌（.env 里的 LLM_BRIDGE_ADMIN_TOKEN_<N>）、
+# 本机端口（8786+N）和内部网络里的名字（llm-bridge-<N>）；第 1 个沿用 LLM_BRIDGE_ADMIN_TOKEN、LLM_BRIDGE_PORT 和 llm-bridge。
+N ?= 1
+LLM_BRIDGE_FIRST = $(filter 1,$(N))
+LLM_BRIDGE_HOST = llm-bridge$(if $(LLM_BRIDGE_FIRST),,-$(N))
+LLM_BRIDGE_TOKEN_VAR = LLM_BRIDGE_ADMIN_TOKEN$(if $(LLM_BRIDGE_FIRST),,_$(N))
+LLM_BRIDGE_ARG = $(if $(LLM_BRIDGE_FIRST),, N=$(N))
+LLM_BRIDGE_COMPOSE = WORKSPACE_PROJECT=$(WORKSPACE_PROJECT) LLM_BRIDGE_ALIAS=$(LLM_BRIDGE_HOST) \
+	LLM_BRIDGE_ADMIN_TOKEN="$$(sed -n 's/^$(LLM_BRIDGE_TOKEN_VAR)=//p' .env)" \
+	$(if $(LLM_BRIDGE_FIRST),,LLM_BRIDGE_PORT=$$((8786 + $(N)))) \
+	$(COMPOSE) -p $(WORKSPACE_PROJECT)-$(LLM_BRIDGE_HOST) \
 	-f infra/llm-bridge/compose.yaml \
 	$$(docker network inspect $(WORKSPACE_PROJECT)_integrations >/dev/null 2>&1 && echo -f infra/llm-bridge/compose.workspace.yaml) \
 	--env-file .env
 
-llm-bridge-up: env ## 构建并启动大模型会话桥，等待健康检查通过；第一次会生成管理令牌写进 .env（步骤见 docs/deployment.md 第 25 节）
-	@grep -Eq '^LLM_BRIDGE_ADMIN_TOKEN=.{32,}' .env || { \
-		sed -i '/^LLM_BRIDGE_ADMIN_TOKEN=/d' .env; \
-		echo "LLM_BRIDGE_ADMIN_TOKEN=$$($(PYTHON) -c 'import secrets; print(secrets.token_hex(32))')" >> .env; \
-		echo "已生成会话桥的管理令牌并写进 .env（make llm-bridge-token 查看）"; }
-	$(LLM_BRIDGE_COMPOSE) up -d --build --wait --wait-timeout 300
-	@echo "会话桥已启动。在网页“应用 → 大模型会话桥”里登记：同机部署的地址填 http://llm-bridge:8787，令牌用 make llm-bridge-token 查看"
+llm-bridge-check-n:
+	@case "$(N)" in ''|0*|*[!0-9]*) echo "N 要是 1、2、3 这样的数字：第几个 MCP 管理器（现在是“$(N)”）" >&2; exit 2;; esac
+	@[ "$(N)" -le 50 ] || { echo "N 最大 50" >&2; exit 2; }
 
-llm-bridge-token: ## 显示会话桥的管理令牌（在网页上登记会话桥时填；来自 .env 的 LLM_BRIDGE_ADMIN_TOKEN）
-	@sed -n 's/^LLM_BRIDGE_ADMIN_TOKEN=//p' .env
+llm-bridge-up: llm-bridge-check-n env ## 构建并启动一个 MCP 管理器（会话桥），等健康检查通过；第一次会生成管理令牌写进 .env。再加一个：make llm-bridge-up N=2（步骤见 docs/deployment.md 第 25 节）
+	@grep -Eq '^$(LLM_BRIDGE_TOKEN_VAR)=.{32,}' .env || { \
+		sed -i '/^$(LLM_BRIDGE_TOKEN_VAR)=/d' .env; \
+		echo "$(LLM_BRIDGE_TOKEN_VAR)=$$($(PYTHON) -c 'import secrets; print(secrets.token_hex(32))')" >> .env; \
+		echo "已生成 MCP 管理器 $(N) 的管理令牌并写进 .env（make llm-bridge-token$(LLM_BRIDGE_ARG) 查看）"; }
+	$(LLM_BRIDGE_COMPOSE) up -d --build --wait --wait-timeout 300 --remove-orphans
+	@echo "MCP 管理器 $(N) 已启动。在网页“应用 → 大模型客户端”里添加：同机部署的地址填 http://$(LLM_BRIDGE_HOST):8787，令牌用 make llm-bridge-token$(LLM_BRIDGE_ARG) 查看"
 
-llm-bridge-down: ## 停止大模型会话桥；保留数据卷（登录与会话记录）
+llm-bridge-token: llm-bridge-check-n ## 显示 MCP 管理器的管理令牌（在网页上添加它时填）；第 2 个加 N=2
+	@sed -n 's/^$(LLM_BRIDGE_TOKEN_VAR)=//p' .env
+
+llm-bridge-down: llm-bridge-check-n ## 停止一个 MCP 管理器；保留数据卷（登录与会话记录）；第 2 个加 N=2
 	$(LLM_BRIDGE_COMPOSE) down
 
-llm-bridge-logs: ## 跟踪会话桥日志（Ctrl+C 退出）
+llm-bridge-logs: llm-bridge-check-n ## 跟踪 MCP 管理器的日志（Ctrl+C 退出）；第 2 个加 N=2
 	$(LLM_BRIDGE_COMPOSE) logs -f --tail=100
 
 smoke: ## 经 Caddy 检查健康、就绪、前端页面与安全响应头

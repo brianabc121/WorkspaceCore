@@ -571,12 +571,12 @@ OpenClaw 服务器改用保存的加密登录密码（`docs/decisions/2026-11-09
 `mem_bytes` 仍是 Docker `memory_stats.usage`（含页缓存），`disk_bytes` 仍是环境数据卷的占用（不含镜像与可写层）；CPU、内存读不到时连同时间清空，
 数据卷读不到时保留上一次的读数与原时间（回收规则要用）。**downgrade** 只删这五列与约束，`mem_bytes` / `disk_bytes` 原样保留。
 
-### 大模型会话桥模块（迁移 0066，T-0228）
+### 大模型客户端（会话桥）模块（迁移 0066，T-0228；迁移 0068，T-0230）
 
 | 表 | 列 | 说明 |
 |---|---|---|
 | `llm_bridge_bridges` | `id`、`workspace_id`（级联删除）、`name`、`base_url`、`token_ref`、`enabled`、时间戳 | 工作空间登记的会话桥。唯一 `(workspace_id, name)`。`token_ref` 是 `enc:v1:` 密文引用（用途 `llm_bridge:<工作空间>:<桥>:token`），纳入密钥轮换 |
-| `llm_bridge_grants` | `instance_id`（主键，级联删除）、`workspace_id`（级联删除）、`enabled`、`can_write`、`can_account`、`can_takeover`、`platforms`（JSONB 列表，空 = 全部）、`updated_at` | 每个实例的“大模型会话权限”。没有这一行等于没有授权 |
+| `llm_bridge_grants` | `instance_id`（主键，级联删除）、`workspace_id`（级联删除）、`enabled`、`can_write`、`can_account`、`can_takeover`、`platforms`（JSONB 列表，空 = 全部）、`bridge_ids`（JSONB 列表，可空）、`updated_at` | 每个实例的“大模型会话权限”。没有这一行等于没有授权。`bridge_ids`（迁移 0068）是允许用的 MCP 管理器（`llm_bridge_bridges.id`）：NULL = 全部（包括以后添加的），空列表 = 一个都不能用；删除一个管理器时把它从各行的列表里去掉（列表可能变空，不会变回 NULL）。downgrade 0068 删掉这一列 |
 
 会话、回合、事件、各平台的登录状态不在工作台的数据库里，在会话桥自己数据卷的 SQLite（`services/llm-bridge/bridge/store.py`）。
 **downgrade** 删掉这两张表。

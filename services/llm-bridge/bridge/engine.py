@@ -5,7 +5,9 @@
 - 一个会话一条串行队列；不同会话并行，每个账号槽位有并发上限；
 - 发送带幂等号：同一个调用方用同一个 request_id 重发，返回原来的回合；
 - 一个槽位只认第一次登录的那个账号：发现换了账号就拒绝调用，直到管理员明确更换；
-- 进程重启后：运行中的回合记为 unknown（不知道平台做完没有），排队中的继续排。
+- 进程重启后：运行中的回合记为 unknown（不知道平台做完没有），排队中的继续排；
+- 一座桥可以只控制一部分平台（设置 platforms）：没勾选的平台不能登录、不能新建会话和发送，
+  已有的登录和会话记录保留，还能查看和退出登录。
 """
 
 from __future__ import annotations
@@ -60,8 +62,7 @@ _ERROR_CODES = {
 UNKNOWN_IDENTITY = "unknown"
 _ANONYMOUS = "用密钥或令牌登录的账号（看不到是哪个）"
 _ANONYMOUS_NOTE = (
-    "用密钥或令牌登录时会话桥看不到是哪个账号：换一把密钥不算换账号；"
-    "要换成另一个账号，请先点“更换账号”"
+    "用密钥或令牌登录时看不到是哪个账号：换一把密钥不算换账号；要换成另一个账号，请先点“更换账号”"
 )
 EXTERNAL_PLATFORM = {
     "openai": "codex",
@@ -139,10 +140,50 @@ class Engine:
         return self.store.get_setting(key, DEFAULTS[key])
 
     def settings_view(self) -> Row:
-        return {key: self.setting(key) for key in DEFAULTS}
+        return {**{key: self.setting(key) for key in DEFAULTS}, "platforms": self.platforms()}
+
+    # ---- 这座桥控制哪些平台 ----
+    def all_platforms(self) -> list[str]:
+        """这座桥装了驱动的平台，按通道表的顺序。"""
+        seen: list[str] = []
+        for channel in self.channels:
+            if channel.slot in self.drivers and channel.platform not in seen:
+                seen.append(channel.platform)
+        return seen
+
+    def platforms(self) -> list[str]:
+        """管理员让这座桥控制的平台；没设置过就是全部。"""
+        chosen = self.store.get_setting("platforms", None)
+        known = self.all_platforms()
+        return known if chosen is None else [p for p in known if p in chosen]
+
+    def platform_enabled(self, platform: str) -> bool:
+        return platform in self.platforms()
+
+    def slot_enabled(self, slot: str) -> bool:
+        """这个账号槽位上有没有被勾选的平台（ChatGPT 和 Codex 共用 openai 槽位）。"""
+        enabled = self.platforms()
+        return any(c.slot == slot and c.platform in enabled for c in self.channels)
+
+    def _set_platforms(self, value: Any) -> None:
+        known = self.all_platforms()
+        if (
+            not isinstance(value, list)
+            or not value
+            or any(not isinstance(p, str) for p in value)
+            or len(set(value)) != len(value)
+        ):
+            raise BridgeError("VALIDATION_FAILED", "platforms 要填至少一个平台，不能重复")
+        unknown = [p for p in value if p not in known]
+        if unknown:
+            raise BridgeError("VALIDATION_FAILED", f"这座桥没有这些平台：{'、'.join(unknown)}")
+        self.store.set_setting("platforms", [p for p in known if p in value])
 
     def update_settings(self, values: Row) -> Row:
         for key, value in values.items():
+            if key == "platforms":
+                self._set_platforms(value)
+                continue
             if key not in DEFAULTS:
                 raise BridgeError("VALIDATION_FAILED", f"没有这个设置：{key}")
             if isinstance(DEFAULTS[key], bool):
@@ -241,10 +282,17 @@ class Engine:
         if account["state"] == "unavailable":
             raise BridgeError("UNAVAILABLE", f"{label} 暂时不可用：{account['detail']}")
         if account["state"] != "logged_in":
-            raise BridgeError("NOT_LOGGED_IN", f"{label} 还没有登录，请管理员在会话桥设置页登录")
+            raise BridgeError(
+                "NOT_LOGGED_IN", f"{label} 还没有登录，请管理员在“大模型客户端”页面登录"
+            )
 
     async def login(self, slot: str, method: str, payload: dict[str, str]) -> Row:
         driver = self._driver(slot)
+        if not self.slot_enabled(slot):
+            raise BridgeError(
+                "CONFLICT",
+                f"这座桥没有启用 {SLOT_LABELS.get(slot, slot)}：先在“控制的平台”里勾选，再登录",
+            )
         if method not in driver.login_methods:
             raise BridgeError("VALIDATION_FAILED", f"不支持的登录方式：{method}")
         if slot == "claude" and method != "api_key" and not self.setting("claude_subscription_ack"):
@@ -305,7 +353,16 @@ class Engine:
             raise BridgeError(
                 "NOT_SUPPORTED", f"{platform}.{mode} 还不能用：{channel.note or '未启用'}"
             )
+        self._require_platform(platform)
         return channel
+
+    def _require_platform(self, platform: str) -> None:
+        if not self.platform_enabled(platform):
+            raise BridgeError(
+                "NOT_SUPPORTED",
+                f"这座桥没有启用 {platform}（管理员没有让它控制这个平台）；"
+                f"它控制的平台：{'、'.join(self.platforms())}",
+            )
 
     async def models(self, platform: str, mode: str) -> list[Row]:
         channel = self._channel(platform, mode)
@@ -526,7 +583,9 @@ class Engine:
                 {
                     c.slot
                     for c in self.channels
-                    if c.slot in self.drivers and platform in (None, c.platform)
+                    if c.slot in self.drivers
+                    and platform in (None, c.platform)
+                    and self.platform_enabled(c.platform)
                 }
             )
             failed = await self.sync_external(slots)
@@ -658,6 +717,7 @@ class Engine:
             "send_per_hour"
         ):
             raise BridgeError("RATE_LIMITED", "这个调用方本小时的发送次数已到上限")
+        self._require_platform(session["platform"])
         await self.require_ready(session["slot"])
         turn = self.store.create_turn(session_id, caller.id, request_id, text)
         self.store.add_event(session_id, turn["id"], "queued", {"by": caller.label})
@@ -846,11 +906,14 @@ class Engine:
 
     # ---- 管理页用 ----
     async def overview(self) -> Row:
+        enabled = self.platforms()
         accounts = {}
         for slot in self.drivers:
             account = await self.account(slot)
             accounts[slot] = {
                 "label": SLOT_LABELS.get(slot, slot),
+                # 这个槽位上有没有被勾选的平台；没有时不能登录，已有的登录可以退出
+                "enabled": self.slot_enabled(slot),
                 "state": account["state"],
                 # 登记过账号（哪怕看不到是哪个）就算 registered：
                 # 退出登录后仍然保留，用来发现换了账号
@@ -867,14 +930,30 @@ class Engine:
                 "platform": c.platform,
                 "mode": c.mode,
                 "slot": c.slot,
-                "available": c.available and c.slot in self.drivers,
+                "enabled": c.platform in enabled,
+                "available": c.available and c.slot in self.drivers and c.platform in enabled,
                 "note": c.note,
             }
             for c in self.channels
         ]
         queued = len(self.store.list_turns(statuses=("queued",), limit=100_000))
         running = len(self.store.list_turns(statuses=("running",), limit=100_000))
-        return {"accounts": accounts, "channels": channels, "queued": queued, "running": running}
+        return {
+            "platforms": enabled,
+            "accounts": accounts,
+            "channels": channels,
+            "queued": queued,
+            "running": running,
+        }
+
+    async def caller_overview(self) -> Row:
+        """给调用方（智能体）看的概况：只有这座桥控制的平台。"""
+        view = await self.overview()
+        return {
+            **view,
+            "accounts": {s: a for s, a in view["accounts"].items() if a["enabled"]},
+            "channels": [c for c in view["channels"] if c["enabled"]],
+        }
 
 
 def env_view(env: Row) -> Row:

@@ -4,7 +4,9 @@ import { useAuthStore } from '../../stores/auth'
 import { ApiError, dataOf, errorMessage, type Schema } from '../../services/api'
 import { formatTime } from '../../features/time'
 
-// 大模型会话桥的页面接口（services/api/app/modules/llm_bridge/api.py，都在 /api/v1/llm_bridge 下）。
+// 大模型客户端管理的页面接口（services/api/app/modules/llm_bridge/api.py，都在 /api/v1/llm_bridge 下）。
+// 页面上的“MCP 管理器”就是一座登记在工作台里的会话桥（接口里叫 bridge）：一个单独部署的容器，
+// 控制勾选的平台、单独维护一套账号。
 // 查看要 admin，修改要 owner（后端同样校验）。登录、设置、环境、会话都由工作台转给会话桥。
 // 令牌、API 密钥只在提交时出现在请求体里：不进查询缓存、不写日志，提交成功后输入框清空。
 // 查询键都以 'llm_bridge' 开头：['llm_bridge', userId, workspaceId, ...]。
@@ -29,6 +31,8 @@ export const PLATFORMS: readonly { id: Platform; name: string }[] = [
   { id: 'chatgpt', name: 'ChatGPT' }, { id: 'codex', name: 'Codex' }, { id: 'claude', name: 'Claude' }, { id: 'workbuddy', name: 'WorkBuddy' },
 ]
 export const platformName = (id: string) => PLATFORMS.find(p => p.id === id)?.name ?? id
+/** 平台用哪个账号登录：ChatGPT 聊天和 Codex 用的是同一个 ChatGPT 账号 */
+export const PLATFORM_SLOT: Record<Platform, Slot> = { chatgpt: 'openai', codex: 'openai', claude: 'claude', workbuddy: 'workbuddy' }
 export const ACCOUNT_STATE: Record<string, { text: string; tone: string }> = {
   logged_in: { text: '已登录', tone: 'tone-green' },
   logged_out: { text: '未登录', tone: 'tone-muted' },
@@ -46,18 +50,19 @@ export const SANDBOX: Record<EnvironmentBody['sandbox'], string> = { read_only: 
 export const MODES: Record<string, string> = { dev: '开发', cloud: '云端', chat: '对话' }
 const STATUS: Record<string, string> = { active: '进行中', archived: '已归档', queued: '排队中', running: '进行中', completed: '已完成', done: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断', timeout: '超时', pending: '等待中', unknown: '结果未知' }
 export const statusName = (id: string) => STATUS[id] ?? id
-const ORIGIN: Record<string, string> = { bridge: '经会话桥新建', external: '官方程序里已有' }
+const ORIGIN: Record<string, string> = { bridge: '经 MCP 管理器新建', external: '官方程序里已有' }
 export const originName = (id: string) => ORIGIN[id] ?? id
 /** 会话桥给的时间是秒（浮点数） */
 export const seconds = (value: number | null | undefined) => (value ? formatTime(new Date(value * 1000).toISOString()) : '—')
 
 // 工作台自己写的说明；会话桥返回的错误（CONFLICT 等）带的是会话桥写的中文说明，按纯文字显示
 const MESSAGES: Record<string, string> = {
-  EXTERNAL_UNAVAILABLE: '会话桥暂时连不上：请确认会话桥容器在运行、登记的地址能从工作台访问，稍后重试。',
-  BRIDGE_AUTH_FAILED: '会话桥不接受登记的令牌：请在“修改”里换成会话桥现在用的管理令牌。',
-  NAME_TAKEN: '已经有同名的会话桥，换一个名字。',
-  FORBIDDEN_ROLE: '只有 owner 能修改大模型会话桥。',
-  MODULE_DISABLED: '功能已停用：大模型会话桥在当前工作空间没有启用。',
+  EXTERNAL_UNAVAILABLE: 'MCP 管理器暂时连不上：请确认它的容器在运行、填的地址能从工作台访问，稍后重试。',
+  BRIDGE_AUTH_FAILED: 'MCP 管理器不接受这枚令牌：请换成它现在用的管理令牌（在服务器上用 make llm-bridge-token 查看）。',
+  BRIDGE_OUTDATED: '这个 MCP 管理器的版本太旧，不支持选择控制的平台：请先在服务器上升级它（再运行一次部署命令），然后重新添加。',
+  NAME_TAKEN: '已经有同名的 MCP 管理器，换一个名字。',
+  FORBIDDEN_ROLE: '只有 owner 能修改大模型客户端。',
+  MODULE_DISABLED: '功能已停用：大模型客户端在当前工作空间没有启用。',
   // 页面自己给的：会话桥因为还没确认风险拒绝了 Claude 的订阅登录（403）
   LB_ACK_REQUIRED: 'Claude 用订阅登录前，要先确认了解合规风险：请勾选下面的风险确认后再试。',
 }
@@ -69,7 +74,7 @@ export function bridgeError(error: unknown): string {
   }
   return errorMessage(error)
 }
-/** 会话桥连不上或令牌不对（503）：页面在原地显示说明，不当成页面出错 */
+/** MCP 管理器连不上或令牌不对（503）：页面在原地显示说明，不当成页面出错 */
 export const isBridgeDown = (error: unknown) => error instanceof ApiError && ['EXTERNAL_UNAVAILABLE', 'BRIDGE_AUTH_FAILED'].includes(error.code)
 
 const key = (user: string | undefined, scope: string, ...parts: unknown[]) => ['llm_bridge', user, scope, ...parts]

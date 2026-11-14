@@ -3,17 +3,18 @@ import { computed, reactive, ref, toRef } from 'vue'
 import { Plus } from '@lucide/vue'
 import ManagementSection from '../../components/management/ManagementSection.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
-import { PLATFORMS, SANDBOX, bridgeError, platformName, type Bridge, type Environment, type EnvironmentBody, type LlmBridgeApi } from './api'
+import { PLATFORMS, SANDBOX, bridgeError, platformName, type Bridge, type BridgeStatus, type Environment, type EnvironmentBody, type LlmBridgeApi } from './api'
 
 // 开发环境：智能体在哪个代码仓库、用什么权限干活。只有 Codex / Claude / WorkBuddy 有开发模式（ChatGPT 没有）；
 // 用法固定是“开发”（云端通道目前只是占位）。
-const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; canWrite: boolean }>()
+// 新增时只能选这个 MCP 管理器控制的平台（状态还没读到时不限制，由后端把关）。
+const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeStatus; canWrite: boolean }>()
 const environments = props.api.useEnvironments(toRef(() => props.bridge.id))
 const list = computed(() => environments.data.value ?? [])
-const DEV_PLATFORMS = PLATFORMS.filter(p => p.id !== 'chatgpt')
+const DEV_PLATFORMS = computed(() => PLATFORMS.filter(p => p.id !== 'chatgpt' && (!props.status?.reachable || props.status.platforms.includes(p.id))))
 const SANDBOXES = Object.entries(SANDBOX) as [EnvironmentBody['sandbox'], string][]
 
-const blank = () => ({ open: false, id: null as string | null, platform: 'codex' as EnvironmentBody['platform'], name: '', repo_url: '', branch: '', sandbox: 'read_only' as EnvironmentBody['sandbox'], network: false, description: '', enabled: true })
+const blank = () => ({ open: false, id: null as string | null, platform: (DEV_PLATFORMS.value[0]?.id ?? 'codex') as EnvironmentBody['platform'], name: '', repo_url: '', branch: '', sandbox: 'read_only' as EnvironmentBody['sandbox'], network: false, description: '', enabled: true })
 const form = reactive(blank())
 const error = ref(''), notice = ref(''), busy = ref(false)
 const execWarning = computed(() => form.sandbox === 'exec' && (form.platform === 'claude' || form.platform === 'workbuddy'))
@@ -44,9 +45,10 @@ function remove(env: Environment) {
 
 <template>
   <ManagementSection title="开发环境" :label="`开发环境：${bridge.name}`" description="开发环境决定智能体让大模型在哪个代码仓库、用什么权限干活。只有 Codex、Claude、WorkBuddy 有开发模式；用法固定是“开发”，云端通道目前只是占位。">
-    <template v-if="canWrite && !form.open" #actions>
+    <template v-if="canWrite && !form.open && DEV_PLATFORMS.length" #actions>
       <button type="button" class="primary-button" @click="openForm()"><Plus aria-hidden="true" />新增环境</button>
     </template>
+    <p v-if="!DEV_PLATFORMS.length" role="note" class="lb-warn">这个 MCP 管理器没有控制带开发模式的平台（Codex / Claude / WorkBuddy），不能新增开发环境。</p>
     <ActionFeedback :error="error" :notice="notice" />
     <p v-if="environments.isPending.value" role="status" class="data-state">正在读取开发环境…</p>
     <div v-else-if="environments.error.value" class="data-state">
@@ -76,7 +78,7 @@ function remove(env: Environment) {
       <div class="lb-grid">
         <div class="form-field">
           <label for="lb-env-platform">平台</label>
-          <select id="lb-env-platform" v-model="form.platform" :disabled="!!form.id"><option v-for="p in DEV_PLATFORMS" :key="p.id" :value="p.id">{{ p.name }}</option></select>
+          <select id="lb-env-platform" v-model="form.platform" :disabled="!!form.id"><option v-for="p in form.id ? PLATFORMS : DEV_PLATFORMS" :key="p.id" :value="p.id">{{ p.name }}</option></select>
           <p class="form-help">{{ form.id ? '建好后不能改平台。' : 'ChatGPT 没有开发模式。' }}</p>
         </div>
         <div class="form-field"><label for="lb-env-name">名字</label><input id="lb-env-name" v-model="form.name" maxlength="60" required /></div>
@@ -87,7 +89,7 @@ function remove(env: Environment) {
           <select id="lb-env-sandbox" v-model="form.sandbox"><option v-for="[id, name] in SANDBOXES" :key="id" :value="id">{{ name }}</option></select>
         </div>
       </div>
-      <p v-if="execWarning" role="note" class="lb-warn is-red">注意：{{ platformName(form.platform) }} 的命令以容器里的普通用户身份运行，没有操作系统级沙箱，能读到会话桥数据卷里的其他内容。</p>
+      <p v-if="execWarning" role="note" class="lb-warn is-red">注意：{{ platformName(form.platform) }} 的命令以容器里的普通用户身份运行，没有操作系统级沙箱，能读到这个 MCP 管理器数据卷里的其他内容。</p>
       <div class="form-field"><label for="lb-env-desc">说明（可不填）</label><input id="lb-env-desc" v-model="form.description" maxlength="300" /></div>
       <label class="check-field"><input v-model="form.network" type="checkbox" />允许联网</label>
       <label class="check-field"><input v-model="form.enabled" type="checkbox" />启用这个环境</label>
