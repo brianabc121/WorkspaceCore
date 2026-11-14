@@ -18,6 +18,9 @@ from app.modules.llm_bridge.chat_schemas import (
     LlmChatCreateIn,
     LlmChatEventsOut,
     LlmChatOptionsOut,
+    LlmChatQueueEditIn,
+    LlmChatQueueMoveIn,
+    LlmChatQueueOut,
     LlmChatRenameIn,
     LlmChatSendIn,
     LlmChatSessionList,
@@ -152,6 +155,46 @@ async def llm_chat_cancel_turn(
 ) -> LlmChatTurnOut:
     row = await bridges.bridge(access.workspace.id, bridge_id)
     return await LlmChatService(bridges).cancel(access, row, turn_id)
+
+
+@router.get(
+    f"{prefix}/sessions/{{session_id}}/queue",
+    summary="聊天：一个会话的消息队列（admin）",
+    description="正在处理的那一条和排队中的各条，按将要处理的顺序。会话在处理时再发的消息进队列，前面的做完才发给模型。",
+    responses=read_errors,
+)
+async def llm_chat_queue(
+    access: Admin, bridges: Bridges, bridge_id: UUID, session_id: SessionId
+) -> LlmChatQueueOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).queue(access, row, session_id)
+
+
+@router.patch(
+    f"{prefix}/turns/{{turn_id}}",
+    summary="聊天：修改排队中的一条消息（admin）",
+    description="只能改还没开始处理的；已经开始的 409。",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_edit_queued(
+    access: Admin, bridges: Bridges, bridge_id: UUID, turn_id: TurnId, body: LlmChatQueueEditIn
+) -> LlmChatQueueOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).change_queued(access, row, turn_id, text=body.text)
+
+
+@router.post(
+    f"{prefix}/turns/{{turn_id}}/move",
+    summary="聊天：把排队中的一条消息调到队首或队尾（admin）",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_move_queued(
+    access: Admin, bridges: Bridges, bridge_id: UUID, turn_id: TurnId, body: LlmChatQueueMoveIn
+) -> LlmChatQueueOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).change_queued(access, row, turn_id, to=body.to)
 
 
 @router.patch(

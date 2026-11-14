@@ -96,6 +96,125 @@ async def test_concurrency_cap(bridge: Bridge) -> None:
     assert bridge.fake.max_running == 3
 
 
+async def test_limit_is_per_platform_and_starts_are_spaced(bridge: Bridge) -> None:
+    """每个平台同时进行的会话数默认 3，按平台计数；同一个平台两次开始之间隔开一段时间。"""
+    defaults = (await bridge.admin("GET", "/admin/status")).json()
+    assert defaults["settings"]["concurrency"] == 3
+    load = defaults["load"]["fake"]
+    assert load == {"running": 0, "waiting": 0, "limit": 3}
+    sessions = [await _session(bridge, "c1") for _ in range(5)]
+    started = [
+        await _send(bridge, "c1", s, "sleep:0.4", f"p{i}", wait=0) for i, s in enumerate(sessions)
+    ]
+    await asyncio.sleep(0.15)
+    load = (await bridge.admin("GET", "/admin/status")).json()["load"]["fake"]
+    assert load == {"running": 3, "waiting": 2, "limit": 3}
+    for turn in started:
+        done = await bridge.tool(
+            "c1", "llm_turn_get", {"turn_id": turn["turn_id"], "wait_seconds": 10}
+        )
+        assert done["status"] == "completed"
+    assert bridge.fake.max_running == 3
+
+    # 起跑间隔：三个会话同时发，开始时刻依次错开
+    saved = await bridge.admin("PUT", "/admin/settings", json={"min_start_interval_seconds": 1})
+    assert saved.json()["min_start_interval_seconds"] == 1
+    await asyncio.gather(
+        *(_send(bridge, "c1", s, "快", f"i{i}") for i, s in enumerate(sessions[:3]))
+    )
+    starts = sorted(
+        t["started_at"]
+        for s in sessions[:3]
+        for t in bridge.engine.store.list_turns(session_id=s)
+        if t["request_id"].startswith("i")
+    )
+    assert starts[1] - starts[0] >= 0.9 and starts[2] - starts[1] >= 0.9
+    refused = await bridge.admin("PUT", "/admin/settings", json={"min_start_interval_seconds": 61})
+    assert refused.status_code == 422
+
+
+async def test_queue_can_be_viewed_edited_and_reordered(bridge: Bridge) -> None:
+    a = await _session(bridge, "c1")
+    running = await _send(bridge, "c1", a, "sleep:0.6", "q1", wait=0)
+    second = await _send(bridge, "c1", a, "第二条", "q2", wait=0)
+    third = await _send(bridge, "c1", a, "第三条", "q3", wait=0)
+    await asyncio.sleep(0.1)
+    queue = (await bridge.admin("GET", f"/admin/sessions/{a}/queue")).json()
+    assert queue["running"]["turn_id"] == running["turn_id"]
+    assert [q["text"] for q in queue["queued"]] == ["第二条", "第三条"]
+    assert queue["queued"][0]["by"] and queue["queued"][0]["status"] == "queued"
+    # 调用方自己也能看（只读工具）；别的调用方看不到这个会话
+    mine = await bridge.tool("c1", "llm_queue", {"session_id": a})
+    assert [q["turn_id"] for q in mine["queued"]] == [second["turn_id"], third["turn_id"]]
+    assert (await bridge.tool("c2", "llm_queue", {"session_id": a}))["error"]["code"] == "NOT_FOUND"
+
+    # 第三条调到队首并改内容：先处理它
+    moved = await bridge.admin(
+        "POST", f"/admin/turns/{third['turn_id']}/move", json={"to": "first"}
+    )
+    assert [q["turn_id"] for q in moved.json()["queued"]] == [third["turn_id"], second["turn_id"]]
+    edited = await bridge.admin(
+        "PATCH", f"/admin/turns/{third['turn_id']}", json={"text": "改过的第三条"}
+    )
+    assert edited.json()["queued"][0]["text"] == "改过的第三条"
+    ahead = await bridge.tool(
+        "c1", "llm_turn_get", {"turn_id": second["turn_id"], "wait_seconds": 0}
+    )
+    assert ahead["ahead_in_session"] == 2
+    # 已经开始的不能改、不能调；内容不能为空；不存在的 404
+    for response in (
+        await bridge.admin("PATCH", f"/admin/turns/{running['turn_id']}", json={"text": "x"}),
+        await bridge.admin("POST", f"/admin/turns/{running['turn_id']}/move", json={"to": "last"}),
+    ):
+        assert response.status_code == 409, response.text
+    assert (
+        await bridge.admin("PATCH", f"/admin/turns/{second['turn_id']}", json={"text": "  "})
+    ).status_code == 422
+    assert (
+        await bridge.admin("POST", "/admin/turns/turn_none/move", json={"to": "first"})
+    ).status_code == 404
+
+    for turn in (third, second):
+        done = await bridge.tool(
+            "c1", "llm_turn_get", {"turn_id": turn["turn_id"], "wait_seconds": 10}
+        )
+        assert done["status"] == "completed"
+    turns = {t["id"]: t for t in bridge.engine.store.list_turns(session_id=a)}
+    assert turns[third["turn_id"]]["finished_at"] <= turns[second["turn_id"]]["started_at"]
+    assert turns[third["turn_id"]]["text"] == "改过的第三条"
+    native = bridge.engine.store.get_session(a)["native_id"]
+    assert "改过的第三条" in str(bridge.fake.history[native])
+    empty = (await bridge.admin("GET", f"/admin/sessions/{a}/queue")).json()
+    assert empty["running"] is None and empty["queued"] == []
+
+
+async def test_old_database_gets_queue_positions(tmp_path: Path) -> None:
+    """旧库升级：回合表加上队列顺序一列，已有的回合按入队时间回填。"""
+    import sqlite3
+
+    from bridge.store import SCHEMA_VERSION, Store
+
+    path = tmp_path / "old.db"
+    store = Store(path)
+    store.create_session(
+        id="s1", platform="fake", mode="chat", slot="fake", caller_id="c", caller_label="c"
+    )
+    store.create_turn("s1", "c", "r1", "旧的")
+    store.close()
+    raw = sqlite3.connect(path)
+    raw.execute("ALTER TABLE turns DROP COLUMN position")
+    raw.execute("UPDATE meta SET value = '1' WHERE key = 'schema_version'")
+    raw.commit()
+    raw.close()
+    reopened = Store(path)
+    (turn,) = reopened.list_turns(session_id="s1")
+    assert turn["position"] == turn["queued_at"]
+    assert reopened._one("SELECT value FROM meta WHERE key = 'schema_version'")["value"] == str(
+        SCHEMA_VERSION
+    )
+    reopened.close()
+
+
 async def test_cancel(bridge: Bridge) -> None:
     a = await _session(bridge, "c1")
     running = await _send(bridge, "c1", a, "sleep:30", "r1", wait=0)

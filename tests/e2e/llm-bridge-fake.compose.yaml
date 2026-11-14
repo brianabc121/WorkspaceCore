@@ -8,5 +8,7 @@ services:
     environment:
       BRIDGE_CLAUDE_BIN: /fakes/fake_cli.py
       BRIDGE_CODEBUDDY_BIN: /fakes/fake_cli.py
+      # 验收里连续发消息：不等“同一个平台两次开始之间的间隔”
+      BRIDGE_DEFAULT_MIN_START_INTERVAL: "0"
     volumes:
       - ../../services/llm-bridge/tests/fakes:/fakes:ro

@@ -154,6 +154,7 @@ function reset(account: Account) {
       <div class="lb-counters" role="group" aria-label="回合">
         <span class="mg-tag">排队中 {{ status.queued }}</span>
         <span class="mg-tag">进行中 {{ status.running }}</span>
+        <span v-for="(load, platform) in status.load" :key="platform" class="mg-tag" :class="{ 'is-full': load.running >= load.limit }">{{ platformName(String(platform)) }}：{{ load.running }} / {{ load.limit }} 个会话在跑<template v-if="load.waiting">，{{ load.waiting }} 个在等</template></span>
         <span v-if="status.version" class="mg-tag">版本 {{ status.version }}</span>
       </div>
 

@@ -172,7 +172,7 @@ async def test_bridge_registration_and_admin(rig: Rig) -> None:
     # 没登录的平台：没有登记、也不显示登录方式
     assert all(not a["registered"] and a["method"] is None for a in status["accounts"][::2])
     assert all(c["platform"] != "fake" for c in status["channels"])
-    assert status["settings"]["concurrency"] == 2
+    assert status["settings"]["concurrency"] == 3
 
     updated = await rig.api("PUT", f"/bridges/{rig.bridge_id}/settings", json={"concurrency": 3})
     assert updated.status_code == 200 and updated.json()["concurrency"] == 3

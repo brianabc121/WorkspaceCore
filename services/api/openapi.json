@@ -13344,6 +13344,32 @@
         "title": "LlmBridgeList",
         "type": "object"
       },
+      "LlmBridgeLoadOut": {
+        "properties": {
+          "limit": {
+            "description": "同时进行的上限",
+            "title": "Limit",
+            "type": "integer"
+          },
+          "running": {
+            "description": "这个平台进行中的会话数",
+            "title": "Running",
+            "type": "integer"
+          },
+          "waiting": {
+            "description": "在排队等名额的会话数",
+            "title": "Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "running",
+          "waiting",
+          "limit"
+        ],
+        "title": "LlmBridgeLoadOut",
+        "type": "object"
+      },
       "LlmBridgeLoginIn": {
         "additionalProperties": false,
         "properties": {
@@ -13824,7 +13850,7 @@
             "type": "boolean"
           },
           "concurrency": {
-            "description": "每个账号同时进行的回合数",
+            "description": "每个平台同时进行的会话数（超过的排队等名额）",
             "maximum": 16.0,
             "minimum": 1.0,
             "title": "Concurrency",
@@ -13834,6 +13860,14 @@
             "maximum": 1000000.0,
             "minimum": 1.0,
             "title": "Max Text Chars",
+            "type": "integer"
+          },
+          "min_start_interval_seconds": {
+            "default": 0,
+            "description": "同一个平台两次开始之间至少隔几秒；旧版本的管理器没有这一项",
+            "maximum": 60.0,
+            "minimum": 0.0,
+            "title": "Min Start Interval Seconds",
             "type": "integer"
           },
           "platforms": {
@@ -13914,6 +13948,19 @@
             ],
             "title": "Max Text Chars"
           },
+          "min_start_interval_seconds": {
+            "anyOf": [
+              {
+                "maximum": 60.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Start Interval Seconds"
+          },
           "platforms": {
             "anyOf": [
               {
@@ -13990,6 +14037,15 @@
             "description": "连不上时的原因",
             "title": "Error",
             "type": "string"
+          },
+          "load": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LlmBridgeLoadOut"
+            },
+            "default": {},
+            "description": "每个平台的进行中 / 等待 / 上限；旧版本的管理器没有",
+            "title": "Load",
+            "type": "object"
           },
           "platforms": {
             "default": [],
@@ -14907,6 +14963,135 @@
           "models"
         ],
         "title": "LlmChatOptionsOut",
+        "type": "object"
+      },
+      "LlmChatQueueEditIn": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "maxLength": 100000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "LlmChatQueueEditIn",
+        "type": "object"
+      },
+      "LlmChatQueueItem": {
+        "properties": {
+          "by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "谁发的",
+            "title": "By"
+          },
+          "mine": {
+            "description": "是不是我发的",
+            "title": "Mine",
+            "type": "boolean"
+          },
+          "queued_at": {
+            "title": "Queued At",
+            "type": "number"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "description": "queued / running",
+            "title": "Status",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "turn_id",
+          "status",
+          "text",
+          "by",
+          "mine",
+          "queued_at",
+          "started_at"
+        ],
+        "title": "LlmChatQueueItem",
+        "type": "object"
+      },
+      "LlmChatQueueMoveIn": {
+        "additionalProperties": false,
+        "properties": {
+          "to": {
+            "description": "调到队首或队尾",
+            "enum": [
+              "first",
+              "last"
+            ],
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "title": "LlmChatQueueMoveIn",
+        "type": "object"
+      },
+      "LlmChatQueueOut": {
+        "properties": {
+          "queued": {
+            "description": "排队中的各条，按将要处理的顺序",
+            "items": {
+              "$ref": "#/components/schemas/LlmChatQueueItem"
+            },
+            "title": "Queued",
+            "type": "array"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LlmChatQueueItem"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "正在处理的那一条"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "running",
+          "queued"
+        ],
+        "title": "LlmChatQueueOut",
         "type": "object"
       },
       "LlmChatRenameIn": {
@@ -57379,6 +57564,266 @@
         ]
       }
     },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/queue": {
+      "get": {
+        "description": "正在处理的那一条和排队中的各条，按将要处理的顺序。会话在处理时再发的消息进队列，前面的做完才发给模型。",
+        "operationId": "llm_chat_queue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmChatQueueOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "聊天：一个会话的消息队列（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}": {
+      "patch": {
+        "description": "只能改还没开始处理的；已经开始的 409。",
+        "operationId": "llm_chat_edit_queued",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bt_[0-9a-f]{20}$",
+              "title": "Turn Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmChatQueueEditIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmChatQueueOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "聊天：修改排队中的一条消息（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
     "/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/cancel": {
       "post": {
         "operationId": "llm_chat_cancel_turn",
@@ -57512,6 +57957,154 @@
           }
         ],
         "summary": "聊天：停止一个排队中或进行中的回合（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/move": {
+      "post": {
+        "operationId": "llm_chat_move_queued",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bt_[0-9a-f]{20}$",
+              "title": "Turn Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmChatQueueMoveIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmChatQueueOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "聊天：把排队中的一条消息调到队首或队尾（admin）",
         "tags": [
           "llm_bridge"
         ]

@@ -3,7 +3,7 @@
 // （services/llm-bridge/tests/fakes/fake_cli.py：参数和事件的形状与真实程序一致，回答是把收到的话原样带回来；
 // 收到 hang 时会一直不回答，用来验收“停止”）。别的都是真的：会话桥、工作台接口、页面。
 //
-// 没有管理器时的说明 → 新建会话并发第一条 → 回答、过程、标题 → Enter 再发一条 → 停止 → 改标题 → 搜索 →
+// 没有管理器时的说明 → 新建会话并发第一条 → 回答、过程、标题 → Enter 再发一条 → 停止 → 消息队列（排队、置顶、修改、取消）→ 改标题 → 搜索 →
 // 刷新后还在 → 别的管理员建的会话要确认一次才能接着发 → member 用不了 → 归档后不能再发 →
 // 管理器停用后只能看 → 多模型同问（同一个问题同时发给两个模型、并排看、继续问、回到单会话、别的管理员要确认、归档）→
 // 审计里没有消息内容 → 手机宽度两屏（同问一次看一栏）。
@@ -34,6 +34,15 @@ const TITLE = `验收会话 ${run}`
 const QUESTION = `同问 ${run}`
 // 假的 API 密钥：假程序只看“有没有”，不会发给任何平台
 const FAKE_KEY = `e2e-not-a-real-key-${randomBytes(12).toString('hex')}`
+
+async function until(test, timeout = 30000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    if (await test()) return true
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+  return false
+}
 
 function seed(...args) {
   return execFileSync('python3', [path.join(__dirname, 'seed.py'), ...args], {
@@ -186,6 +195,36 @@ async function main() {
     await stop.waitFor({ state: 'detached' })
     step('回答到一半可以停止，这一回合显示“已停止”')
 
+    // ---------------------------------------------------------------- 消息队列（T-0236）
+    await composer(page).fill('hang')
+    await composer(page).press('Enter')
+    await thread(page).getByText('正在回答…').waitFor({ timeout: 30000 })
+    for (const text of ['排队甲', '排队乙']) {
+      await composer(page).fill(text)
+      await composer(page).press('Enter')
+      await page.waitForFunction(() => document.querySelector('textarea[aria-label="消息内容"]')?.value === '', null, { timeout: 30000 })
+    }
+    const queue = page.getByRole('region', { name: '消息队列' })
+    await queue.getByRole('button', { name: /队列里有 2 条消息/ }).waitFor({ timeout: 30000 })
+    const queued = () => queue.getByRole('listitem').allTextContents()
+    check((await queued()).map((t) => (t.includes('排队甲') ? '甲' : '乙')).join('') === '甲乙', `队列应按发送顺序：${await queued()}`)
+    check((await thread(page).getByText(':: 排队甲').count()) === 0, '前面的还没做完：排队的消息不应已经有回答（没有打断正在跑的）')
+    await queue.getByRole('button', { name: '把第 2 条调到最前面' }).click()
+    check(await until(async () => (await queued())[0].includes('排队乙')), `调到最前面后第一条应是“排队乙”：${await queued()}`)
+    await queue.getByRole('button', { name: '修改第 1 条' }).click()
+    const edit = queue.getByRole('form', { name: '修改排队中的第 1 条' })
+    await edit.getByRole('textbox', { name: '消息内容' }).fill('排队乙（改过）')
+    await edit.getByRole('button', { name: '保存' }).click()
+    check(await until(async () => (await queued())[0].includes('排队乙（改过）')), '修改后队列里应是新的内容')
+    await queue.getByRole('button', { name: '取消第 2 条' }).click()
+    check(await until(async () => (await queued()).length === 1), '取消后队列里只剩一条')
+    // 停掉正在跑的那一条：队列里剩下的那条接着被处理
+    await page.getByRole('button', { name: '停止', exact: true }).click()
+    await thread(page).getByText(':: 排队乙（改过）').waitFor({ timeout: 60000 })
+    check((await thread(page).getByText(':: 排队甲').count()) === 0, '取消的那条不应被处理')
+    check(await until(async () => (await queue.count()) === 0), '队列空了之后面板应消失')
+    step('消息队列：会话在跑时再发的消息进队列、不打断；能调到最前面、修改、取消；前面的结束后按顺序处理')
+
     // ---------------------------------------------------------------- 改标题、搜索、刷新
     await page.getByRole('button', { name: '改标题' }).click()
     const rename = page.getByRole('form', { name: '改会话标题' })
@@ -202,9 +241,10 @@ async function main() {
     await page.reload()
     await page.getByRole('heading', { level: 2, name: TITLE }).waitFor()
     await thread(page).getByText(':: 第二问').waitFor()
-    check((await countMessages(page)) === 6, '刷新后三问三答都还在')
+    // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条
+    check((await countMessages(page)) === 12, `刷新后六问六答都还在：${await countMessages(page)}`)
     const info = page.getByRole('complementary', { name: '会话信息' })
-    await info.getByText('回合（3）').waitFor()
+    await info.getByText('回合（6）').waitFor()
     await info.getByText(MANAGER).waitFor()
     step('改标题后列表跟着变；按标题搜索；刷新后从地址回到同一个会话，右栏有会话信息和回合')
 
