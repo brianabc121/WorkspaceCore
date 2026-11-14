@@ -407,8 +407,8 @@ describe('大模型聊天', () => {
   })
 
   it('attaches images to a message, shows stored attachments and tool steps, and re-imports an external session', async () => {
-    const created = vi.fn(() => 'blob:shown')
-    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: created, revokeObjectURL: () => undefined }))
+    // 下载时用的对象地址（缩略图不用它：页面的 CSP 不允许 blob: 图片）
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:saved', revokeObjectURL: () => undefined }))
     const file = (id: string, name: string, direction = 'input', media_type = 'image/png'): Schema['LlmChatAttachmentOut'] => ({ id, name, media_type, size: 2048, direction, at: now() })
     const A1 = `ba_${'1'.repeat(20)}`, A2 = `ba_${'2'.repeat(20)}`, A3 = `ba_${'3'.repeat(20)}`, A4 = `ba_${'4'.repeat(20)}`
     const step = (kind: string, text: string, over: Partial<Schema['LlmChatStepOut']> = {}): Schema['LlmChatStepOut'] => ({ kind, text, at: now(), truncated: false, error: false, ...over })
@@ -435,7 +435,7 @@ describe('大模型聊天', () => {
     // 已经存下来的：导入的内容有标记；提问上的图片显示成缩略图；回答上的文件能下载；过程里有工具调用和结果
     expect(await screen.findByText('导入的')).toBeVisible()
     const image = await screen.findByRole('img', { name: '截图.png' })
-    expect(image).toHaveAttribute('src', 'blob:shown')
+    expect(image.getAttribute('src')).toMatch(/^data:image\/png;base64,/)
     expect(screen.getByRole('button', { name: '下载文件：result.txt' })).toHaveTextContent('2 KB')
     expect(screen.getByText('工具 Read')).toBeInTheDocument()
     expect(screen.getByText('结果 Read')).toBeInTheDocument()
