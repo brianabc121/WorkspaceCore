@@ -91,6 +91,10 @@ class SessionArchiveInput(_Input):
     session_id: str = Field(max_length=60)
 
 
+class QueueInput(_Input):
+    session_id: str = Field(max_length=60)
+
+
 class BridgeToolOutput(BaseModel):
     """会话桥返回的结果原样放在 data 里（字段见各工具的说明）。"""
 
@@ -115,6 +119,9 @@ DESCRIPTIONS: dict[str, str] = {
     "之后用 llm_bridge_turn_get 取结果。" + _NOTE,
     "llm_bridge_turn_get": "取一次发送（回合）的状态和结果。" + _NOTE,
     "llm_bridge_turn_cancel": "取消排队中或进行中的回合。",
+    "llm_bridge_queue": "查看一个会话的消息队列：正在处理的那一条和排队中的各条"
+    "（按将要处理的顺序）。"
+    "会话在处理时再发的消息会排队，不会打断它。",
     "llm_bridge_session_list": "会话列表。默认只列自己建的；"
     "scope=account 列出这个账号在会话桥上的全部会话（需要管理员授权）。",
     "llm_bridge_session_get": "查看一个会话的信息和消息记录。" + _NOTE,

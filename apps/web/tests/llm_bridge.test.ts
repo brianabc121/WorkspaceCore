@@ -19,9 +19,9 @@ const lbModule: Schema['ModuleOut'] = { ...newsModule, key: 'llm_bridge', name: 
 
 const bridge: Schema['LlmBridgeOut'] = { id: BRIDGE, name: '主账号', base_url: 'http://10.0.0.5:8787', enabled: true, has_token: true, created_at: at, updated_at: at }
 const account = (over: Partial<Schema['LlmBridgeAccountOut']>): Schema['LlmBridgeAccountOut'] => ({ slot: 'openai', label: 'OpenAI（ChatGPT / Codex）', enabled: true, state: 'logged_out', registered: false, identity: null, method: null, detail: '', first_login_at: null, login_methods: ['device_code', 'api_key', 'existing'], running: 0, ...over })
-const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] }
+const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] }
 const status = (over: Partial<Schema['LlmBridgeStatusOut']> = {}): Schema['LlmBridgeStatusOut'] => ({
-  reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 1, running: 2, settings,
+  reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 1, running: 2, load: {}, settings,
   accounts: [
     account({ state: 'logged_in', registered: true, identity: 'a***@example.com', method: 'device_code', first_login_at: 1794528000 }),
     account({ slot: 'claude', label: 'Claude', login_methods: ['api_key', 'oauth_token', 'existing'] }),
@@ -133,7 +133,7 @@ describe('大模型客户端管理', () => {
     expect(within(env).getByText('可写工作区')).toBeVisible()
     expect(within(env).queryByRole('button')).not.toBeInTheDocument()
     const set = await openTab('设置')
-    expect(within(set).getByLabelText('同时进行的回合数')).toBeDisabled()
+    expect(within(set).getByLabelText('每个平台同时进行的会话数')).toBeDisabled()
     expect(within(set).queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument()
     expect(writes(requests)).toEqual([])
   })
@@ -397,17 +397,17 @@ describe('大模型客户端管理', () => {
     })
     await openApp('/llm_bridge?view=manage')
     const set = await openTab('设置')
-    const concurrency = await within(set).findByLabelText('同时进行的回合数')
+    const concurrency = await within(set).findByLabelText('每个平台同时进行的会话数')
     expect(concurrency).toHaveValue(2)
     expect(concurrency).toHaveAttribute('max', '16')
     await fireEvent.update(concurrency, '17')
     await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
-    expect(await within(set).findByText('「同时进行的回合数」要填 1–16 之间的整数。')).toBeVisible()
+    expect(await within(set).findByText('「每个平台同时进行的会话数」要填 1–16 之间的整数。')).toBeVisible()
     expect(writes(requests)).toEqual([])
     await fireEvent.update(concurrency, '4')
     await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
     expect(await within(set).findByText('设置已保存。')).toBeVisible()
-    expect(await writes(requests)[0]!.clone().json()).toEqual({ concurrency: 4, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000 })
+    expect(await writes(requests)[0]!.clone().json()).toEqual({ concurrency: 4, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000 })
 
     const env = await openTab('开发环境')
     await fireEvent.click(await within(env).findByRole('button', { name: '新增环境' }))
@@ -457,7 +457,7 @@ describe('大模型客户端管理', () => {
   it('shows an unreachable bridge and a rejected token as readable messages', async () => {
     let mode: 'unreachable' | 'auth' = 'unreachable'
     setup('owner', r => {
-      if (path(r) === `${base}/status`) return mode === 'unreachable' ? Response.json({ reachable: false, error: '连接被拒绝', version: '', accounts: [], channels: [], queued: 0, running: 0, settings: null }) : fail(503, 'BRIDGE_AUTH_FAILED')
+      if (path(r) === `${base}/status`) return mode === 'unreachable' ? Response.json({ reachable: false, error: '连接被拒绝', version: '', accounts: [], channels: [], queued: 0, running: 0, load: {}, settings: null }) : fail(503, 'BRIDGE_AUTH_FAILED')
       if (path(r) === `${base}/environments`) return fail(503, 'EXTERNAL_UNAVAILABLE')
       return undefined
     })

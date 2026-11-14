@@ -104,6 +104,8 @@ async def run_tool(
         return await engine.get_session(
             caller, args["session_id"], limit=args["limit"], offset=args["offset"]
         )
+    if name == "llm_queue":
+        return engine.caller_queue(caller, args["session_id"])
     return await engine.archive_session(caller, args["session_id"])
 
 

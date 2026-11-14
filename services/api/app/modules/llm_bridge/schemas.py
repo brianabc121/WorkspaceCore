@@ -108,7 +108,15 @@ class LlmBridgeChannelOut(BaseModel):
 
 
 class LlmBridgeSettings(BaseModel):
-    concurrency: int = Field(ge=1, le=16, description="每个账号同时进行的回合数")
+    concurrency: int = Field(
+        ge=1, le=16, description="每个平台同时进行的会话数（超过的排队等名额）"
+    )
+    min_start_interval_seconds: int = Field(
+        default=0,
+        ge=0,
+        le=60,
+        description="同一个平台两次开始之间至少隔几秒；旧版本的管理器没有这一项",
+    )
     turn_timeout_seconds: int = Field(ge=30, le=21600)
     send_per_hour: int = Field(ge=1, le=10000, description="每个实例每小时的发送次数")
     max_text_chars: int = Field(ge=1, le=1_000_000)
@@ -120,6 +128,7 @@ class LlmBridgeSettings(BaseModel):
 
 class LlmBridgeSettingsPatch(_In):
     concurrency: int | None = Field(default=None, ge=1, le=16)
+    min_start_interval_seconds: int | None = Field(default=None, ge=0, le=60)
     turn_timeout_seconds: int | None = Field(default=None, ge=30, le=21600)
     send_per_hour: int | None = Field(default=None, ge=1, le=10000)
     max_text_chars: int | None = Field(default=None, ge=1, le=1_000_000)
@@ -133,6 +142,12 @@ class LlmBridgeSettingsPatch(_In):
     )
 
 
+class LlmBridgeLoadOut(BaseModel):
+    running: int = Field(description="这个平台进行中的会话数")
+    waiting: int = Field(description="在排队等名额的会话数")
+    limit: int = Field(description="同时进行的上限")
+
+
 class LlmBridgeStatusOut(BaseModel):
     reachable: bool
     error: str = Field(default="", description="连不上时的原因")
@@ -142,6 +157,9 @@ class LlmBridgeStatusOut(BaseModel):
     channels: list[LlmBridgeChannelOut] = []
     queued: int = 0
     running: int = 0
+    load: dict[str, LlmBridgeLoadOut] = Field(
+        default={}, description="每个平台的进行中 / 等待 / 上限；旧版本的管理器没有"
+    )
     settings: LlmBridgeSettings | None = None
 
 

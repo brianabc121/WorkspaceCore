@@ -211,6 +211,74 @@ async def test_chat_stop_rename_archive(rig: Rig) -> None:  # noqa: F811
     assert refused.status_code == 409 and refused.json()["error"]["code"] == "BRIDGE_DISABLED"
 
 
+async def test_chat_queue_view_edit_and_reorder(rig: Rig) -> None:  # noqa: F811
+    """会话在处理时再发的消息进队列：能看、能改内容、能置顶；已经开始的不能改。"""
+    created = await new_chat(rig, "sleep:1.5")
+    session_id, running = created["session"]["session_id"], created["turn"]["turn_id"]
+    turns = []
+    for index, text in enumerate(("第二条", "第三条")):
+        sent = await rig.api(
+            "POST",
+            chat(rig, f"/sessions/{session_id}/messages"),
+            json={"text": text, "request_id": f"q{index}"},
+        )
+        assert sent.status_code == 200 and sent.json()["status"] == "queued", sent.text
+        turns.append(sent.json()["turn_id"])
+    second, third = turns
+    queue = (await rig.api("GET", chat(rig, f"/sessions/{session_id}/queue"))).json()
+    assert queue["running"]["turn_id"] == running and queue["running"]["mine"] is True
+    assert [(q["text"], q["mine"]) for q in queue["queued"]] == [("第二条", True), ("第三条", True)]
+
+    moved = await rig.api("POST", chat(rig, f"/turns/{third}/move"), json={"to": "first"})
+    assert moved.status_code == 200, moved.text
+    assert [q["turn_id"] for q in moved.json()["queued"]] == [third, second]
+    edited = await rig.api("PATCH", chat(rig, f"/turns/{third}"), json={"text": "改过的第三条"})
+    assert edited.status_code == 200 and edited.json()["queued"][0]["text"] == "改过的第三条"
+    for refused in (
+        await rig.api("PATCH", chat(rig, f"/turns/{running}"), json={"text": "x"}),
+        await rig.api("POST", chat(rig, f"/turns/{running}/move"), json={"to": "last"}),
+    ):
+        assert refused.status_code == 409, refused.text
+    assert (
+        await rig.api("POST", chat(rig, f"/turns/{second}/move"), json={"to": "middle"})
+    ).status_code == 422
+    assert (await rig.api("GET", chat(rig, f"/sessions/{MISSING}/queue"))).status_code == 404
+
+    await wait_idle(rig, session_id)
+    view = (await rig.api("GET", chat(rig, f"/sessions/{session_id}"))).json()
+    asked = [m["text"] for m in view["messages"] if m["role"] == "user"]
+    assert asked == ["sleep:1.5", "改过的第三条", "第二条"], asked
+    empty = (await rig.api("GET", chat(rig, f"/sessions/{session_id}/queue"))).json()
+    assert empty == {"session_id": session_id, "running": None, "queued": []}
+
+    # 状态里有每个平台的进行中 / 等待 / 上限，设置里有两项限流
+    status = (await rig.api("GET", f"/bridges/{rig.bridge_id}/status")).json()
+    assert status["load"]["claude"] == {"running": 0, "waiting": 0, "limit": 3}
+    assert status["settings"]["concurrency"] == 3
+    saved = await rig.api(
+        "PUT",
+        f"/bridges/{rig.bridge_id}/settings",
+        json={"concurrency": 2, "min_start_interval_seconds": 5},
+    )
+    assert saved.status_code == 200, saved.text
+    assert (saved.json()["concurrency"], saved.json()["min_start_interval_seconds"]) == (2, 5)
+    # 审计记动作，不记消息内容
+    from tests.helpers import run_sql
+
+    actions = await run_sql(
+        rig.env.database_url,
+        "SELECT string_agg(action, ',') FROM workspace.audit_logs WHERE action LIKE $1",
+        "llm_bridge.chat_queue_%",
+    )
+    assert "llm_bridge.chat_queue_edited" in actions and "llm_bridge.chat_queue_moved" in actions
+    leaked = await run_sql(
+        rig.env.database_url,
+        "SELECT count(*) FROM workspace.audit_logs a WHERE a::text LIKE $1",
+        "%改过的第三条%",
+    )
+    assert leaked == 0
+
+
 async def test_chat_takeover_needs_confirmation(rig: Rig) -> None:  # noqa: F811
     """智能体的会话可以看；接着发要带确认，后端不靠页面把关。"""
     env = rig.env

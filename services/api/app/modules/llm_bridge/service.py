@@ -34,6 +34,7 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeGrantOut,
     LlmBridgeIn,
     LlmBridgeInstallOut,
+    LlmBridgeLoadOut,
     LlmBridgeOut,
     LlmBridgePatch,
     LlmBridgeSettings,
@@ -385,6 +386,11 @@ class LlmBridgeService:
             ],
             queued=int(data.get("queued", 0)),
             running=int(data.get("running", 0)),
+            load={
+                platform: LlmBridgeLoadOut(**row)
+                for platform, row in (data.get("load") or {}).items()
+                if platform in ALL_PLATFORMS
+            },
             settings=self.settings_out(data["settings"]),
         )
 

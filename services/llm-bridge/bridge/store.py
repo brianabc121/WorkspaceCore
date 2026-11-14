@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -131,6 +131,18 @@ class Store:
         self._db.execute(
             "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),),
+        )
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """旧库升级：只加列、回填，不删数据。"""
+        columns = {row["name"] for row in self._db.execute("PRAGMA table_info(turns)")}
+        if "position" not in columns:
+            # 会话队列里的顺序（T-0236）：原来只按入队时间，现在可以调整
+            self._db.execute("ALTER TABLE turns ADD COLUMN position REAL")
+            self._db.execute("UPDATE turns SET position = queued_at WHERE position IS NULL")
+        self._db.execute(
+            "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),)
         )
 
     def close(self) -> None:
@@ -324,6 +336,7 @@ class Store:
             "VALUES (?,?,?,?, 'queued', ?, ?)",
             (turn_id, session_id, caller_id, request_id, text, time.time()),
         )
+        self._exec("UPDATE turns SET position = queued_at WHERE id = ?", (turn_id,))
         turn = self.get_turn(turn_id)
         assert turn is not None  # noqa: S101
         return turn
@@ -355,7 +368,13 @@ class Store:
         if statuses:
             sql += f" AND status IN ({', '.join('?' for _ in statuses)})"
             params.extend(statuses)
-        sql += f" ORDER BY queued_at {'DESC' if newest_first else 'ASC'}, id LIMIT ? OFFSET ?"
+        # 按实际处理的顺序：开始过的按开始时间，还在排队的按队列里的位置（可以被调整过）
+        order = (
+            "queued_at DESC, id"
+            if newest_first
+            else "started_at IS NULL, started_at, position, queued_at, id"
+        )
+        sql += f" ORDER BY {order} LIMIT ? OFFSET ?"
         return self._all(sql, (*params, limit, offset))
 
     def count_turns_since(self, caller_id: str, since: float) -> int:
@@ -368,11 +387,50 @@ class Store:
     def queue_position(self, turn: Row) -> int:
         """这个回合前面还有几个没做完的（同一个会话里）。"""
         row = self._one(
-            "SELECT COUNT(*) AS n FROM turns WHERE session_id = ? AND queued_at < ? "
-            "AND status IN ('queued', 'running')",
-            (turn["session_id"], turn["queued_at"]),
+            "SELECT COUNT(*) AS n FROM turns WHERE session_id = ? AND id != ? AND ("
+            "status = 'running' OR (status = 'queued' AND position < ?))",
+            (turn["session_id"], turn["id"], turn["position"]),
         )
         return int(row["n"]) if row else 0
+
+    def next_queued(self, session_id: str) -> Row | None:
+        """这个会话队列里排在最前面的那一条。"""
+        return self._one(
+            "SELECT * FROM turns WHERE session_id = ? AND status = 'queued' "
+            "ORDER BY position, queued_at, id LIMIT 1",
+            (session_id,),
+        )
+
+    def queued_turns(self, session_id: str) -> list[Row]:
+        return self._all(
+            "SELECT * FROM turns WHERE session_id = ? AND status = 'queued' "
+            "ORDER BY position, queued_at, id",
+            (session_id,),
+        )
+
+    def running_turn(self, session_id: str) -> Row | None:
+        return self._one(
+            "SELECT * FROM turns WHERE session_id = ? AND status = 'running' LIMIT 1",
+            (session_id,),
+        )
+
+    def queue_edge(self, session_id: str, *, first: bool) -> float | None:
+        row = self._one(
+            f"SELECT {'MIN' if first else 'MAX'}(position) AS p FROM turns "  # noqa: S608
+            "WHERE session_id = ? AND status = 'queued'",
+            (session_id,),
+        )
+        return float(row["p"]) if row and row["p"] is not None else None
+
+    def waiting_by_platform(self) -> dict[str, int]:
+        """每个平台有多少个会话在等名额或排队（会话里有排队的回合、没有进行中的回合）。"""
+        rows = self._all(
+            "SELECT s.platform AS platform, COUNT(DISTINCT s.id) AS n FROM turns t "
+            "JOIN sessions s ON s.id = t.session_id WHERE t.status = 'queued' AND NOT EXISTS ("
+            "SELECT 1 FROM turns r WHERE r.session_id = s.id AND r.status = 'running') "
+            "GROUP BY s.platform"
+        )
+        return {row["platform"]: int(row["n"]) for row in rows}
 
     # ---- events ----
     def add_event(self, session_id: str, turn_id: str | None, kind: str, payload: Row) -> None:
