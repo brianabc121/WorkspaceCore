@@ -184,3 +184,9 @@ docker run --rm --user 0 --network t0224-control \
 测试控制面仍使用之前的r3镜像，仅迁移工具挂载新源；升级后CA验证的 `/readyz` 返回数据库/Redis均ok，见 `control-ready-after-canonical.txt`。此前网络PASS对应的镜像、代码版本和实际输出保持原记录，不改写成整合后所有产品功能均已重跑。生产开关继续关闭。
 
 19:29:45 只读再次取得真实 Pod/Service：三个原工作负载 UID 不变、gVisor、全部Ready且重启0；网关原UID不变且重启0，private/public入口仍仅65535占位、LB无地址，fixture phase=settled。输出为 `post-canonical-current-resources.json`。所有非Markdown证据的摘要索引为 `SHA256SUMS`。
+
+## 10. 后续CI和连接状态补充（2026-11-14）
+
+代码提交7f4a591的六组CI已全部success：完整API1774通过/16跳过、额外Garage5通过、迁移up/down/up、Web80文件811项及构建、全栈与安全均通过。本轮补录不覆盖此前旧本地失败。最新记录见[后续核对](../2026-11-14-runtime-network-followup/README.md)。
+
+后续恢复执行器时平台VPN Running/路由就绪，但A/B TCP22经平台代理均503超时，未认证或操作远端。用户截图确认A/B在线，而新Codex客户端未显示规则所需tag:codex-cloud；具体平台注册记录不可得，标签原因待实际修正复测。不要将此前私网PASS写成本轮新实测。生产开关继续关闭。

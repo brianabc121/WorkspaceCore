@@ -8,7 +8,7 @@ branch: codex/T-0224-two-server-acceptance
 paths: services/api,apps/web,infra,tests/e2e,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows
 depends_on:
 created: 2026-11-11
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # T-0224 按人类确认设计落实双服务器池调度、容器配额审批与跨节点网络
@@ -69,3 +69,4 @@ updated: 2026-11-13
 - 2026-11-13 19:09 UTC · codex · 刷新origin/main到6688d15发现PR202已将网关改为0067，和本分支旧0067桥兼容迁移重叠；merge-tree确认任务日志冲突，不能直接宣称PR可合并。当前旧版本完整suite约92%，先保持源树不变让其结束。随后沿主干0066桥→0067网关增加0068在线历史核对，共享冻结兼容逻辑支持旧0066网关/桥/both和两种0067，桥数据保护放在实际删桥的0066降级入口；新回归已准备在缓存目录，未混入正在运行测试。将用现有真实0067测试库验证升级保留记录/权限撤销与分配序列，生产继续关闭。
 - 2026-11-13 15:34 UTC · claude · main 修复：PR #199 与 PR #198（0066 llm_bridge）先后合并，main 上出现两个 0066、两个 alembic head。为恢复 main，claude 把本任务的网关端口迁移改号为 0067（down_revision 0066），测试 test_runner_gateway_migration 的回退目标改为 0066；见 docs/verification/2026-11-13-network-completion/PROGRESS.md 末节。只改编号，不改迁移内容。
 - 2026-11-13 19:31 UTC · codex · 整合origin/main6688d15（含PR202/204），保留主干0066桥→0067网关并新增0068历史核对；任务日志冲突保留双方追加。原API完整基线5fail1745pass16skip/3091.84s，5fail均Alembic用户名/schema反射问题，独立CI式用户原两文件8pass21.42s。新兼容回归RED18/4→初轮组合51pass；独立复审3Important（整数宽度、NOT VALID约束、空检查与DROP并发丢数据）真实PG9项RED后修复，最终组合60pass160.99s，复审无剩余阻塞。Ruff/format565、strict mypy559、OpenAPI及单head0068通过。19:27真实隔离测试库0067→0068退出0，6表行数/摘要相同，端口序列保持、策略序列不重置，控制面DB/Redis仍ok。生产未迁移/网络关闭；最新全套CI未确认，旧版网络输出与最终迁移验证分开记录。下一步公网LB/两个外部来源及更广存储/运行适配；继续in_progress/草稿PR203不合并。
+- 2026-11-14 03:00 UTC · codex · 后续核对7f4a591六组CI全部success：API1774pass16skip/2437.46s，Garage5pass，CLI迁移up/down/up，Web80文件811项及构建、全栈/安全通过。核实交接6/8/9/10：版本写入保护跨节点旧快照，不去掉围栏；新revision编辑仍pending且非K8s全局unsupported保留；满负载/长周期容量仍未实测。定向围栏/撤销4pass0.16s。本轮执行器北京时间11月14日10:25:57启动，逻辑环境/源配置版本不变；/tmp信任缓存消失，公网钥未取得前已停止。平台VPN Running/routing_ready=true，A/B22两次CONNECT503超时，未认证或执行远端命令。用户截图确认两机Connected/tag正确，新codex-environment-3无codex-cloud标签，与来源规则不匹配；平台注册历史缺失，恢复重注册为有证据支持的解释，尚不能核实具体触发/自身IP。无可用Tailscale管理接口，需当前客户端赋标签后复测。生产继续关闭，PR203草稿，任务in_progress。证据docs/verification/2026-11-14-runtime-network-followup/，未记录真实邮箱/注册凭据。

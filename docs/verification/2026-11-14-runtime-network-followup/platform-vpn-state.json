@@ -1,0 +1,11 @@
+{
+  "collected_utc": "2026-11-14T02:37:41.483728+00:00",
+  "proxy_observed_at": "2026-11-14T02:37:41.480290+00:00",
+  "policy_revision": "588a6296-b007-4d7d-83d2-5895380a2967",
+  "tailscale": {
+    "configured": true,
+    "observed_at": "2026-11-14T02:37:41.188792+00:00",
+    "state": "Running",
+    "routing_ready": true
+  }
+}
