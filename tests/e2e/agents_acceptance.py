@@ -697,7 +697,7 @@ def scenario_13(c: Ctx) -> None:
     c.owner.send(c.conv_a, "轮换之后")
     wait_for("轮换后的回复", lambda: c.from_sender(c.conv_a, c.a.im_user_id, "轮换之后"), timeout=150)
     # 这里数全部调用（不用 conversation_turns）：since 在 secrets reload 之后，之后的任何调用——包括 OpenClaw
-    # 自己按时钟跑的自动任务——都应该用新密钥；自动任务还在用旧密钥也是问题（T-0234 核对后保持不变）
+    # 自己按时钟跑的自动任务——都应该用新密钥；自动任务还在用旧密钥也是问题（T-0235 核对后保持不变）
     c.check("场景 13：轮换后下一次模型请求就用新密钥，旧密钥不再使用",
             bool(c.model_calls(new_key, since)) and not c.model_calls(c.keys["a"], since), reload.stdout.strip()[-80:])
     c.keys["a"] = new_key
