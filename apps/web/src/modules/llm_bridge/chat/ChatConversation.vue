@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef } from 'vue'
-import { Archive, ArrowLeft, Info, Pencil, Send, Square } from '@lucide/vue'
+import { Archive, ArrowLeft, Info, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
 import { MODES, platformName, type Bridge } from '../api'
-import { chatError, needsTakeover, newRequestId, ownerText, type LlmChatApi } from './chatApi'
+import { ATTACHMENTS, IMAGE_ACCEPT, chatError, fileSize, needsTakeover, newRequestId, ownerText, type ChatAttachment, type LlmChatApi } from './chatApi'
 import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
 import ChatInfoPanel from './ChatInfoPanel.vue'
@@ -25,13 +25,16 @@ function scrollDown(force = false) {
   if (force) stick = true
   void nextTick(() => { const el = box.value; if (el && stick) el.scrollTop = el.scrollHeight })
 }
-const { conversation, session, messages, lost, activeTurn, poll, sent } = useLiveConversation(
+const { conversation, session, messages, lost, activeTurn, poll, reload, sent, resume, resuming, resumeError } = useLiveConversation(
   props.chat, bridgeId, toRef(props, 'sessionId'), { activity: () => scrollDown(), changed: () => emit('changed') },
 )
 
 // ---- 发送 ----
 const draft = ref(props.initialDraft ?? ''), sending = ref(false), stopping = ref(false), sendError = ref(props.initialError ?? '')
 const confirmed = ref(false)
+// 会话在处理别的消息时：排队（默认，不打断）还是插入（送进正在处理的回合；平台做不到就中断它、合并重发）
+const sendMode = ref<'queue' | 'insert'>('queue'), sendNotice = ref('')
+const inserting = computed(() => sendMode.value === 'insert' && activeTurn.value?.status === 'running')
 // 结果未知时再点发送：同一段文字用同一个幂等号，不会发两次
 let pending: { text: string; id: string } | null = null
 const foreign = computed(() => !!session.value && session.value.owner_kind !== 'me')
@@ -57,9 +60,11 @@ async function submit() {
   const text = draft.value.trim()
   if (!text || sending.value || blocked.value) return
   if (foreign.value && !allowTakeover()) return
+  if (uploading.value) { sendError.value = '附件还在上传，传完再发。'; return }
   if (pending?.text !== text) pending = { text, id: newRequestId() }
-  const body = { text, request_id: pending.id }
-  sending.value = true; sendError.value = ''
+  const files = [...attached.value]
+  const body = { text, request_id: pending.id, ...(files.length ? { attachments: files.map(a => a.id) } : {}), ...(inserting.value ? { mode: 'insert' as const } : {}) }
+  sending.value = true; sendError.value = sendNotice.value = ''
   try {
     let turn
     try { turn = await props.chat.send(props.bridge.id, props.sessionId, { ...body, takeover: foreign.value }) }
@@ -68,13 +73,50 @@ async function submit() {
       if (!needsTakeover(e) || !allowTakeover()) throw e
       turn = await props.chat.send(props.bridge.id, props.sessionId, { ...body, takeover: true })
     }
-    pending = null; draft.value = ''
-    stick = true; sent(turn, text); emit('changed')
+    pending = null; draft.value = ''; attached.value = []; sendMode.value = 'queue'
+    stick = true
+    if (turn.delivered === 'inserted') {
+      // 没有新回合：消息进了正在处理的那一回合，重新读一次把它显示在那一问后面
+      sendNotice.value = '已插入：这条消息送进了正在处理的回合。'
+      await reload()
+    } else {
+      if (turn.delivered === 'merged') sendNotice.value = '平台没有收下插入的消息：已中断上一回合，这条消息会带着“接着刚才没做完的继续”重新开始。'
+      sent(turn, text, files)
+      if (turn.delivered === 'merged') void reload()
+    }
+    emit('changed')
     void props.chat.invalidateQueue(props.bridge.id, props.sessionId)
   } catch (e) {
     sendError.value = needsTakeover(e) ? '没有发送：接着别人建的会话发消息前需要确认。' : chatError(e)
   } finally { sending.value = false }
 }
+// ---- 附件：先上传到管理器，发送时带上编号；对话会话只能带图片 ----
+const attached = ref<ChatAttachment[]>([]), uploading = ref(0), picker = ref<HTMLInputElement | null>(null)
+const imagesOnly = computed(() => session.value?.mode !== 'dev')
+async function pick(event: Event) {
+  const input = event.target as HTMLInputElement, chosen = Array.from(input.files ?? [])
+  input.value = ''
+  sendError.value = ''
+  for (const file of chosen) {
+    if (attached.value.length + uploading.value >= ATTACHMENTS.max) { sendError.value = `一条消息最多带 ${ATTACHMENTS.max} 个附件。`; break }
+    if (file.size > ATTACHMENTS.bytes) { sendError.value = `「${file.name}」太大：单个最多 20 MB。`; continue }
+    uploading.value += 1
+    try { attached.value.push(await props.chat.upload(props.bridge.id, props.sessionId, file)) }
+    catch (e) { sendError.value = `「${file.name}」没有传上去：${chatError(e)}` }
+    finally { uploading.value -= 1 }
+  }
+}
+async function detach(item: ChatAttachment) {
+  attached.value = attached.value.filter(a => a.id !== item.id)
+  // 管理器那边的文件一起去掉；去不掉也没关系，没发出去的附件过一天会自动清
+  try { await props.chat.discardUpload(props.bridge.id, props.sessionId, item.id) } catch { /* 见上 */ }
+}
+const source = computed(() => ({ chat: props.chat, bridgeId: props.bridge.id, sessionId: props.sessionId }))
+function reimport() {
+  if (!window.confirm('重新向官方程序读一次这个会话的内容？\n\n官方程序里又有了新内容时用。经工作台发的消息不受影响。')) return
+  return act(() => props.chat.reimport(props.bridge.id, props.sessionId))
+}
+
 function onKey(event: KeyboardEvent) {
   // Enter 发送，Shift + Enter 换行；输入法还在选字时的 Enter 不算
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
@@ -129,6 +171,7 @@ function archive() {
           </p>
         </div>
         <div v-if="session" class="lc-head-actions">
+          <button v-if="session.origin === 'external'" type="button" class="lc-icon" aria-label="重新导入" title="重新向官方程序读一次内容" :disabled="working" @click="reimport"><RefreshCw aria-hidden="true" /></button>
           <button v-if="!renaming && session.origin !== 'external'" type="button" class="lc-icon" aria-label="改标题" title="改标题" :disabled="working" @click="startRename"><Pencil aria-hidden="true" /></button>
           <button v-if="session.status !== 'archived'" type="button" class="lc-icon" aria-label="归档会话" title="归档" :disabled="working" @click="archive"><Archive aria-hidden="true" /></button>
           <button type="button" class="lc-icon" :aria-pressed="infoOpen" aria-label="会话信息" title="会话信息" @click="infoOpen = !infoOpen"><Info aria-hidden="true" /></button>
@@ -141,8 +184,9 @@ function archive() {
         <template v-else-if="session">
           <p v-if="!messages.length" class="lc-none">这个会话里还没有消息。</p>
           <ol v-else class="lc-messages" aria-label="消息">
-            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? i}:${m.role}`" :message="m" :platform="platformName(session.platform)" />
+            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :resuming="resuming" :source="source" @resume="resume" />
           </ol>
+          <p v-if="resumeError" class="lc-note is-red" role="alert">{{ resumeError }}</p>
           <p v-if="lost" class="lc-note is-red" role="alert">{{ lost }} <button type="button" class="asv-link" @click="poll()">重试</button></p>
         </template>
       </div>
@@ -152,12 +196,23 @@ function archive() {
         <p v-if="blocked" class="lc-note" role="note">{{ blocked }}</p>
         <template v-else>
           <p v-if="foreign" class="lc-note" role="note">{{ session.owner_kind === 'external' ? '这是官方程序里已有的会话' : `这是${session.owner_kind === 'agent' ? '智能体' : ''}「${ownerText(session)}」建的会话` }}：可以看；接着发消息前会让你确认一次。</p>
+          <ul v-if="attached.length || uploading" class="lc-attached" aria-label="要带上的附件">
+            <li v-for="a in attached" :key="a.id"><span class="lc-file-name">{{ a.name }}</span><span class="lc-file-size">{{ fileSize(a.size) }}</span><button type="button" class="lc-icon" :aria-label="`去掉附件：${a.name}`" @click="detach(a)"><X aria-hidden="true" /></button></li>
+            <li v-if="uploading" role="status">正在上传 {{ uploading }} 个…</li>
+          </ul>
           <div class="lc-compose-row">
+            <input ref="picker" type="file" multiple hidden :accept="imagesOnly ? IMAGE_ACCEPT : undefined" aria-label="选择要带上的图片或文件" @change="pick" />
+            <button type="button" class="lc-icon" :aria-label="imagesOnly ? '添加图片' : '添加图片或文件'" :title="imagesOnly ? '添加图片（对话会话只能带图片）' : '添加图片或文件（文件会放进工作目录）'" :disabled="sending" @click="picker?.click()"><Paperclip aria-hidden="true" /></button>
             <textarea v-model="draft" rows="2" maxlength="100000" aria-label="消息内容" placeholder="输入消息：Enter 发送，Shift + Enter 换行" @keydown="onKey" />
             <button v-if="activeTurn" type="button" class="secondary-button" :disabled="stopping" @click="stop"><Square aria-hidden="true" />{{ stopping ? '正在停止…' : '停止' }}</button>
             <button type="submit" class="primary-button" :disabled="sending || !draft.trim()"><Send aria-hidden="true" />{{ sending ? '正在发送…' : '发送' }}</button>
           </div>
-          <p v-if="activeTurn" class="lc-hint">上一条还没答完：现在发的不会打断它，会进队列，等前面的做完再发给模型。</p>
+          <fieldset v-if="activeTurn?.status === 'running'" class="lc-mode" aria-label="上一条还没答完时怎么发">
+            <label class="check-field"><input v-model="sendMode" type="radio" name="lc-send-mode" value="queue" />排队</label>
+            <label class="check-field"><input v-model="sendMode" type="radio" name="lc-send-mode" value="insert" />插入</label>
+          </fieldset>
+          <p v-if="activeTurn" class="lc-hint">{{ inserting ? '插入：这条消息直接送进正在处理的回合。平台做不到时，会中断正在处理的回合，把这条消息和“接着刚才没做完的继续”一起重新发。' : '上一条还没答完：现在发的不会打断它，会进队列，等前面的做完再发给模型。' }}</p>
+          <p v-if="sendNotice" class="lc-note" role="status">{{ sendNotice }}</p>
         </template>
         <p v-if="sendError" class="lc-note is-red" role="alert">{{ sendError }}</p>
       </form>

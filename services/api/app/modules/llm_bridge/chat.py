@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode
+
+import httpx
 
 from app.core.errors import ApiError
 from app.domain.policy import WorkspaceAccess
 from app.integrations.base import ConnectorError
 from app.models import User
 from app.modules.llm_bridge.chat_schemas import (
+    LlmChatAttachmentOut,
     LlmChatConversationOut,
     LlmChatCreatedOut,
     LlmChatCreateIn,
@@ -79,12 +82,28 @@ def session_out(session: dict[str, Any], me: str) -> LlmChatSessionOut:
     )
 
 
+def _filename(response: httpx.Response) -> str:
+    """会话桥给的文件名：Content-Disposition 里的 filename*（UTF-8）或 filename。"""
+    header = response.headers.get("content-disposition", "")
+    for part in header.split(";"):
+        key, _, value = part.strip().partition("=")
+        if key.lower() == "filename*" and value.lower().startswith("utf-8''"):
+            return unquote(value[7:]) or "file"
+    for part in header.split(";"):
+        key, _, value = part.strip().partition("=")
+        if key.lower() == "filename":
+            return value.strip('"') or "file"
+    return "file"
+
+
 def _turn_out(data: dict[str, Any]) -> LlmChatTurnOut:
     return LlmChatTurnOut(
         turn_id=data["turn_id"],
         session_id=data["session_id"],
         status=data["status"],
         ahead_in_session=data.get("ahead_in_session"),
+        resume=data.get("resume"),
+        delivered=data.get("delivered"),
     )
 
 
@@ -202,6 +221,10 @@ class LlmChatService:
                     steps=item.get("steps") or [],
                     failure=item.get("failure"),
                     ahead_in_session=item.get("ahead_in_session"),
+                    resume=item.get("resume"),
+                    attachments=item.get("attachments") or [],
+                    imported=bool(item.get("imported")),
+                    delivery=item.get("delivery") if is_user else None,
                 )
             )
         return LlmChatConversationOut(
@@ -311,6 +334,10 @@ class LlmChatService:
             "request_id": body.request_id,
             "wait_seconds": 0,
         }
+        if body.attachments:  # 没带附件时不传这一项：旧版本的管理器不认识它
+            arguments["attachments"] = body.attachments
+        if body.mode != "queue":
+            arguments["mode"] = body.mode
         try:
             data = await self._tool(client, caller, "llm_send", arguments)
         except ApiError as error:
@@ -327,7 +354,12 @@ class LlmChatService:
             access,
             "chat_takeover_sent" if body.takeover else "chat_message_sent",
             bridge_id,
-            {"bridge": bridge_name, "session": session_id, "turn": data.get("turn_id")},
+            {
+                "bridge": bridge_name,
+                "session": session_id,
+                "turn": data.get("turn_id"),
+                **({"delivered": data.get("delivered")} if body.mode == "insert" else {}),
+            },
         )
         await self.db.commit()
         return _turn_out(data)
@@ -379,6 +411,87 @@ class LlmChatService:
         )
         await self.db.commit()
         return _queue_out(data, me)
+
+    # ---- 附件与旧会话的导入（T-0236 第二步）----
+    async def upload(
+        self, access: WorkspaceAccess, row: LlmBridge, session_id: str, name: str, data: bytes
+    ) -> LlmChatAttachmentOut:
+        """收下一个要随下一条消息发出去的图片 / 文件。文件存在管理器那里，工作台不留。"""
+        self._writable(row)
+        client, bridge_id, bridge_name = await self.bridges.client(row), row.id, row.name
+        await self.db.commit()
+        try:
+            made = await client.upload(f"/sessions/{session_id}/attachments", name, data)
+        except BridgeCallError as error:
+            raise from_bridge(error) from error
+        except ConnectorError as error:
+            raise unavailable(error) from error
+        out = LlmChatAttachmentOut(**made)
+        await self.bridges.audit(
+            access,
+            "chat_attachment_uploaded",
+            bridge_id,
+            # 不记文件名和内容：只记类型和大小
+            {
+                "bridge": bridge_name,
+                "session": session_id,
+                "type": out.media_type,
+                "size": out.size,
+            },
+        )
+        await self.db.commit()
+        return out
+
+    async def discard(self, row: LlmBridge, session_id: str, attachment_id: str) -> None:
+        client = await self.bridges.client(row)
+        await self.db.commit()
+        await self._admin(client, "DELETE", f"/sessions/{session_id}/attachments/{attachment_id}")
+
+    async def download(
+        self, row: LlmBridge, session_id: str, attachment_id: str
+    ) -> tuple[bytes, str, str]:
+        """附件的内容、类型、文件名。"""
+        client = await self.bridges.client(row)
+        await self.db.commit()
+        try:
+            response = await client.download(f"/sessions/{session_id}/attachments/{attachment_id}")
+        except BridgeCallError as error:
+            raise from_bridge(error) from error
+        except ConnectorError as error:
+            raise unavailable(error) from error
+        media_type = response.headers.get("content-type", "application/octet-stream")
+        return response.content, media_type.split(";")[0].strip(), _filename(response)
+
+    async def reimport(
+        self, access: WorkspaceAccess, row: LlmBridge, session_id: str
+    ) -> LlmChatConversationOut:
+        """官方程序里已有的会话：重新向官方程序读一次内容。"""
+        self._writable(row)
+        client, bridge_id, bridge_name = await self.bridges.client(row), row.id, row.name
+        await self.db.commit()
+        await self._admin(client, "POST", f"/sessions/{session_id}/reimport")
+        await self.bridges.audit(
+            access, "chat_reimported", bridge_id, {"bridge": bridge_name, "session": session_id}
+        )
+        await self.db.commit()
+        return await self.conversation(access, row, session_id)
+
+    async def resume(
+        self, access: WorkspaceAccess, row: LlmBridge, turn_id: str, *, now: bool
+    ) -> LlmChatTurnOut:
+        """被额度打断的回合：现在就试着继续（now），或者不要自动继续。"""
+        client = await self.bridges.client(row)
+        bridge_id, bridge_name = row.id, row.name
+        await self.db.commit()
+        data = await self._admin(client, "POST" if now else "DELETE", f"/turns/{turn_id}/resume")
+        await self.bridges.audit(
+            access,
+            "chat_resume_now" if now else "chat_resume_cancelled",
+            bridge_id,
+            {"bridge": bridge_name, "session": data.get("session_id"), "turn": turn_id},
+        )
+        await self.db.commit()
+        return _turn_out(data)
 
     async def rename(
         self, access: WorkspaceAccess, row: LlmBridge, session_id: str, title: str

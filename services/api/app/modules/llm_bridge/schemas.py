@@ -121,6 +121,12 @@ class LlmBridgeSettings(BaseModel):
     send_per_hour: int = Field(ge=1, le=10000, description="每个实例每小时的发送次数")
     max_text_chars: int = Field(ge=1, le=1_000_000)
     claude_subscription_ack: bool = Field(description="已确认了解 Claude 订阅登录的合规风险")
+    auto_resume: bool = Field(
+        default=False,
+        description="额度用完被打断的会话，到重置时间后自动发一句“继续”；旧版本的管理器没有这一项",
+    )
+    auto_resume_max: int = Field(default=3, ge=1, le=10, description="同一次中断最多自动续几次")
+    resume_text: str = Field(default="", description="自动续跑时发的那句话")
     platforms: list[str] = Field(
         default=list(ALL_PLATFORMS), description="这个 MCP 管理器控制的平台"
     )
@@ -133,6 +139,9 @@ class LlmBridgeSettingsPatch(_In):
     send_per_hour: int | None = Field(default=None, ge=1, le=10000)
     max_text_chars: int | None = Field(default=None, ge=1, le=1_000_000)
     claude_subscription_ack: bool | None = None
+    auto_resume: bool | None = None
+    auto_resume_max: int | None = Field(default=None, ge=1, le=10)
+    resume_text: str | None = Field(default=None, min_length=1, max_length=200)
     platforms: list[Platform] | None = Field(
         default=None,
         min_length=1,
@@ -148,6 +157,36 @@ class LlmBridgeLoadOut(BaseModel):
     limit: int = Field(description="同时进行的上限")
 
 
+class LlmBridgeQuotaWindowOut(BaseModel):
+    kind: str = Field(description="哪个窗口：five_hour / weekly / 平台给的别的名字")
+    used_percent: float | None = Field(description="已用百分比；重置时间已过或平台没给时为空")
+    resets_at: float | None = Field(description="什么时候重置（时间戳）")
+    reset_passed: bool = Field(description="重置时间已经过了：等下一次回合确认新的用量")
+    status: str = Field(description="ok / warning / exceeded")
+    plan: str | None = Field(default=None, description="套餐（平台给了才有）")
+    observed_at: float = Field(description="什么时候看到的")
+
+
+class LlmBridgeQuotaOut(BaseModel):
+    """一个平台的额度（docs/v2/LLM_BRIDGE_QUOTA_PLAN.md）。
+
+    平台给的是已用百分比，不是剩余 token 数。
+    """
+
+    windows: list[LlmBridgeQuotaWindowOut]
+    can_refresh: bool = Field(
+        description="能不能随时向平台查（Codex 能；Claude / WorkBuddy 只在跑回合时顺带报出来）"
+    )
+    paused_until: float | None = Field(description="因为额度用完暂停到什么时候；没暂停为空")
+    pause_estimated: bool = Field(description="平台没说什么时候重置，暂停的时间是估计的")
+    waiting_resume: int = Field(description="有几个被打断的会话在等自动续跑")
+    tokens_5h: int = Field(description="最近 5 小时经这个管理器用掉的 token（管理器自己记的）")
+
+
+class LlmBridgeQuotaList(BaseModel):
+    platforms: dict[str, LlmBridgeQuotaOut]
+
+
 class LlmBridgeStatusOut(BaseModel):
     reachable: bool
     error: str = Field(default="", description="连不上时的原因")
@@ -159,6 +198,9 @@ class LlmBridgeStatusOut(BaseModel):
     running: int = 0
     load: dict[str, LlmBridgeLoadOut] = Field(
         default={}, description="每个平台的进行中 / 等待 / 上限；旧版本的管理器没有"
+    )
+    quota: dict[str, LlmBridgeQuotaOut] = Field(
+        default={}, description="每个平台的额度与暂停情况；旧版本的管理器没有"
     )
     settings: LlmBridgeSettings | None = None
 

@@ -26,10 +26,20 @@ Sandbox = Literal["read_only", "workspace_write", "exec"]
 
 
 class DriverError(Exception):
-    def __init__(self, kind: ErrorKind, message: str) -> None:
+    def __init__(
+        self,
+        kind: ErrorKind,
+        message: str,
+        *,
+        quota: bool = False,
+        resets_at: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.kind = kind
         self.message = message
+        # 额度用完造成的中断（不是普通的限速）：到重置时间后可以自动续跑
+        self.quota = quota
+        self.resets_at = resets_at
 
 
 @dataclass(frozen=True)
@@ -62,6 +72,8 @@ class SessionSpec:
     native_id: str | None = None
     turn_count: int = 0
     env: dict[str, str] = field(default_factory=dict)  # 管理员给环境勾选的变量
+    # 这一回合随提问带上的图片：(绝对路径, 类型)。别的文件由 engine 放进工作目录，在提问里注明
+    images: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -131,7 +143,26 @@ class Driver:
     async def run_turn(self, spec: SessionSpec, text: str, sink: EventSink) -> TurnOutcome:
         raise DriverError("not_supported", "这个通道不能发送消息")
 
+    async def steer(self, spec: SessionSpec, text: str) -> bool:
+        """把一条消息送进这个会话正在跑的回合（插入消息）。
+
+        返回 True 表示平台确认收下了；不支持、回合刚好结束、平台拒绝都返回 False，
+        由 engine 降级成“中断后合并重发”。默认不支持。
+        """
+        return False
+
     async def cancel(self, spec: SessionSpec) -> None:
+        return None
+
+    # 能不能随时向平台查额度（不能的只在跑回合时由官方程序顺带报出来）
+    can_query_quota = False
+
+    async def quota(self) -> list[dict[str, Any]] | None:
+        """现在向平台查一次额度（各窗口的已用百分比和重置时间）。
+
+        返回 None 表示这个平台不能随时查：它的额度只在跑回合时由官方程序顺带报出来
+        （回合里用 sink("quota", {"windows": [...]}) 交给 engine）。
+        """
         return None
 
     async def list_native(self, limit: int) -> list[NativeSession]:

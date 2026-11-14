@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -100,7 +100,39 @@ CREATE INDEX IF NOT EXISTS events_session ON events (session_id, id);
 """
 
 Row = dict[str, Any]
-_JSON_COLUMNS = {"config", "options", "summary", "scopes", "payload"}
+_JSON_COLUMNS = {"config", "options", "summary", "scopes", "payload", "data"}
+
+
+# 工具结果等大段内容在 messages 里最多存这么多字符，超过的截断并注明
+MAX_MESSAGE_CHARS = 64 * 1024
+
+
+def clip(text: str) -> tuple[str, bool]:
+    if len(text) <= MAX_MESSAGE_CHARS:
+        return text, False
+    return text[:MAX_MESSAGE_CHARS] + "\n…（内容太长，后面的没有保存）", True
+
+
+def message_of(kind: str, payload: Row) -> tuple[str, str, str, Row] | None:
+    """回合里的一条事件 → messages 里的一行（role, kind, text, data）；排队、完成这类不算内容。"""
+    if kind == "message" and payload.get("text"):
+        return "assistant", "text", str(payload["text"]), {}
+    if kind == "notice" and payload.get("text"):
+        return "process", "notice", str(payload["text"]), {}
+    if kind == "command" and payload.get("command"):
+        data = {k: payload[k] for k in ("exit_code", "output") if payload.get(k) is not None}
+        return "process", "command", str(payload["command"]), data
+    if kind == "files" and payload.get("paths"):
+        paths = [str(p) for p in payload["paths"]]
+        return "process", "files", "、".join(paths), {"paths": paths}
+    if kind == "tool" and payload.get("name"):
+        text, cut = clip(str(payload.get("input") or ""))
+        return "process", "tool", text, {"name": str(payload["name"]), "truncated": cut}
+    if kind == "tool_result":
+        text, cut = clip(str(payload.get("text") or ""))
+        data = {"name": payload.get("name"), "truncated": cut, "error": bool(payload.get("error"))}
+        return "process", "tool_result", text, data
+    return None
 
 
 def new_id(prefix: str) -> str:
@@ -141,8 +173,141 @@ class Store:
             # 会话队列里的顺序（T-0236）：原来只按入队时间，现在可以调整
             self._db.execute("ALTER TABLE turns ADD COLUMN position REAL")
             self._db.execute("UPDATE turns SET position = queued_at WHERE position IS NULL")
+        # 额度用完后的自动续跑（T-0237）
+        for name, kind in (
+            ("resume_at", "REAL"),
+            ("resume_state", "TEXT"),
+            ("resume_attempt", "INTEGER NOT NULL DEFAULT 0"),
+            ("resumes_turn_id", "TEXT"),
+            ("resumed_by", "TEXT"),
+        ):
+            if name not in columns:
+                self._db.execute(f"ALTER TABLE turns ADD COLUMN {name} {kind}")
+        self._db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS quota_windows (
+                platform TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                used_percent REAL,
+                resets_at REAL,
+                status TEXT NOT NULL DEFAULT 'ok',
+                plan TEXT,
+                observed_at REAL NOT NULL,
+                PRIMARY KEY (platform, kind)
+            );
+            CREATE TABLE IF NOT EXISTS platform_pauses (
+                platform TEXT PRIMARY KEY,
+                until REAL NOT NULL,
+                estimated INTEGER NOT NULL DEFAULT 0,
+                reason TEXT NOT NULL DEFAULT '',
+                since REAL NOT NULL
+            );
+            """
+        )
+        self._migrate_messages()
         self._db.execute(
             "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),)
+        )
+
+    def _migrate_messages(self) -> None:
+        """会话内容落库（T-0236 第二步）：messages / attachments；已有的回合和事件回填进去。"""
+        self._db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+                turn_id TEXT,
+                seq INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                text TEXT NOT NULL DEFAULT '',
+                data TEXT NOT NULL DEFAULT '{}',
+                by TEXT,
+                delivery TEXT,
+                at REAL NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS messages_session ON messages (session_id, seq);
+            CREATE INDEX IF NOT EXISTS messages_turn ON messages (turn_id);
+            CREATE TABLE IF NOT EXISTS attachments (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+                message_id TEXT,
+                turn_id TEXT,
+                direction TEXT NOT NULL,
+                name TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                sha256 TEXT NOT NULL,
+                path TEXT NOT NULL,
+                at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS attachments_session ON attachments (session_id, at);
+            CREATE INDEX IF NOT EXISTS attachments_turn ON attachments (turn_id);
+            """
+        )
+        columns = {row["name"] for row in self._db.execute("PRAGMA table_info(sessions)")}
+        if "imported_at" not in columns:
+            self._db.execute("ALTER TABLE sessions ADD COLUMN imported_at REAL")
+        done = self._db.execute("SELECT value FROM meta WHERE key = 'messages_backfilled'")
+        if done.fetchone() is not None:
+            return
+        # 回填：每个回合的提问 + 回合里的过程事件；完成的回合补上结果（和最后一段话一样就不重复）
+        turns = self._db.execute(
+            "SELECT * FROM turns WHERE id NOT IN (SELECT turn_id FROM messages "
+            "WHERE turn_id IS NOT NULL) ORDER BY session_id, queued_at, id"
+        ).fetchall()
+        seqs: dict[str, int] = {}
+        for turn in turns:
+            session_id = turn["session_id"]
+            if session_id not in seqs:
+                top = self._db.execute(
+                    "SELECT COALESCE(MAX(seq), 0) FROM messages WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()[0]
+                seqs[session_id] = int(top)
+            events = self._db.execute(
+                "SELECT kind, payload, at FROM events WHERE turn_id = ? ORDER BY id", (turn["id"],)
+            ).fetchall()
+            by = next(
+                (json.loads(e["payload"]).get("by") for e in events if e["kind"] == "queued"), None
+            )
+            rows: list[tuple[str, str, str, Row, str | None, float]] = [
+                ("user", "text", turn["text"], {}, by, turn["queued_at"])
+            ]
+            said: list[str] = []
+            for event in events:
+                made = message_of(event["kind"], json.loads(event["payload"] or "{}"))
+                if made is None:
+                    continue
+                role, kind, text, data = made
+                if role == "assistant":
+                    said.append(text)
+                rows.append((role, kind, text, data, None, event["at"]))
+            result = turn["result_text"]
+            if turn["status"] == "completed" and result and result not in said:
+                at = turn["finished_at"] or turn["queued_at"]
+                rows.append(("assistant", "text", result, {}, None, at))
+            for role, kind, text, data, who, at in rows:
+                seqs[session_id] += 1
+                self._db.execute(
+                    "INSERT INTO messages (id, session_id, turn_id, seq, role, kind, text, data, "
+                    "by, delivery, at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        new_id("bm"),
+                        session_id,
+                        turn["id"],
+                        seqs[session_id],
+                        role,
+                        kind,
+                        text,
+                        json.dumps(data, ensure_ascii=False),
+                        who,
+                        "turn" if role == "user" else None,
+                        at,
+                    ),
+                )
+        self._db.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('messages_backfilled', '1')"
         )
 
     def close(self) -> None:
@@ -329,7 +494,17 @@ class Store:
         return {str(row["session_id"]) for row in rows}
 
     # ---- turns ----
-    def create_turn(self, session_id: str, caller_id: str, request_id: str, text: str) -> Row:
+    def create_turn(
+        self,
+        session_id: str,
+        caller_id: str,
+        request_id: str,
+        text: str,
+        *,
+        by: str | None = None,
+        delivery: str = "turn",
+    ) -> Row:
+        """新回合；同时把这一问写进 messages（by：谁发的）。"""
         turn_id = new_id("bt")
         self._exec(
             "INSERT INTO turns (id, session_id, caller_id, request_id, status, text, queued_at) "
@@ -337,6 +512,7 @@ class Store:
             (turn_id, session_id, caller_id, request_id, text, time.time()),
         )
         self._exec("UPDATE turns SET position = queued_at WHERE id = ?", (turn_id,))
+        self.add_message(session_id, turn_id, "user", "text", text, by=by, delivery=delivery)
         turn = self.get_turn(turn_id)
         assert turn is not None  # noqa: S101
         return turn
@@ -368,11 +544,13 @@ class Store:
         if statuses:
             sql += f" AND status IN ({', '.join('?' for _ in statuses)})"
             params.extend(statuses)
-        # 按实际处理的顺序：开始过的按开始时间，还在排队的按队列里的位置（可以被调整过）
+        # 按实际处理的顺序：开始过的按开始时间；没开始就结束的（排队时被取消）按结束时间，
+        # 不然它会一直排在最后面；还在排队的在最后，按队列里的位置（可以被调整过）
         order = (
             "queued_at DESC, id"
             if newest_first
-            else "started_at IS NULL, started_at, position, queued_at, id"
+            else "(started_at IS NULL AND finished_at IS NULL), "
+            "COALESCE(started_at, finished_at), position, queued_at, id"
         )
         sql += f" ORDER BY {order} LIMIT ? OFFSET ?"
         return self._all(sql, (*params, limit, offset))
@@ -384,6 +562,22 @@ class Store:
         )
         return int(row["n"]) if row else 0
 
+    def count_inserted_since(self, caller_id: str, since: float) -> int:
+        """这个调用方插进正在跑的回合里的消息数（它们不产生新回合，但同样计入发送次数）。"""
+        row = self._one(
+            "SELECT COUNT(*) AS n FROM messages WHERE delivery = 'inserted' AND at >= ? "
+            "AND json_extract(data, '$.caller_id') = ?",
+            (since, caller_id),
+        )
+        return int(row["n"]) if row else 0
+
+    def inserted_by_request(self, caller_id: str, request_id: str) -> Row | None:
+        return self._one(
+            "SELECT * FROM messages WHERE delivery = 'inserted' "
+            "AND json_extract(data, '$.caller_id') = ? AND json_extract(data, '$.request_id') = ?",
+            (caller_id, request_id),
+        )
+
     def queue_position(self, turn: Row) -> int:
         """这个回合前面还有几个没做完的（同一个会话里）。"""
         row = self._one(
@@ -392,6 +586,72 @@ class Store:
             (turn["session_id"], turn["id"], turn["position"]),
         )
         return int(row["n"]) if row else 0
+
+    # ---- 额度与续跑（T-0237）----
+    def save_quota(self, platform: str, windows: list[Row]) -> None:
+        for w in windows:
+            self._exec(
+                "INSERT INTO quota_windows (platform, kind, used_percent, resets_at, status, plan,"
+                " observed_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(platform, kind) DO UPDATE SET"
+                " used_percent = excluded.used_percent, resets_at = excluded.resets_at,"
+                " status = excluded.status, plan = COALESCE(excluded.plan, quota_windows.plan),"
+                " observed_at = excluded.observed_at",
+                (
+                    platform,
+                    w["kind"],
+                    w.get("used_percent"),
+                    w.get("resets_at"),
+                    w.get("status") or "ok",
+                    w.get("plan"),
+                    time.time(),
+                ),
+            )
+
+    def quota_windows(self) -> list[Row]:
+        return self._all("SELECT * FROM quota_windows ORDER BY platform, kind")
+
+    def set_pause(self, platform: str, until: float, estimated: bool, reason: str) -> None:
+        self._exec(
+            "INSERT INTO platform_pauses (platform, until, estimated, reason, since)"
+            " VALUES (?,?,?,?,?) ON CONFLICT(platform) DO UPDATE SET until = excluded.until,"
+            " estimated = excluded.estimated, reason = excluded.reason",
+            (platform, until, int(estimated), reason, time.time()),
+        )
+
+    def clear_pause(self, platform: str) -> None:
+        self._exec("DELETE FROM platform_pauses WHERE platform = ?", (platform,))
+
+    def pauses(self) -> dict[str, Row]:
+        return {row["platform"]: row for row in self._all("SELECT * FROM platform_pauses")}
+
+    def pending_resumes(self, platform: str | None = None) -> list[Row]:
+        """被额度打断、还在等自动续跑的回合（按被打断的先后）。"""
+        sql = (
+            "SELECT t.*, s.platform AS platform FROM turns t JOIN sessions s ON s.id = t.session_id"
+            " WHERE t.status = 'interrupted' AND t.resume_state IN ('pending', 'forced')"
+        )
+        params: tuple[Any, ...] = ()
+        if platform:
+            sql += " AND s.platform = ?"
+            params = (platform,)
+        return self._all(sql + " ORDER BY t.finished_at, t.id", params)
+
+    def tokens_since(self, since: float) -> dict[str, int]:
+        """各平台最近一段时间经这座桥用掉的 token（回合摘要里的用量相加）。"""
+        totals: dict[str, int] = {}
+        rows = self._all(
+            "SELECT s.platform AS platform, t.summary AS summary FROM turns t"
+            " JOIN sessions s ON s.id = t.session_id WHERE t.finished_at >= ?"
+            " AND t.summary IS NOT NULL",
+            (since,),
+        )
+        for row in rows:
+            usage = (row["summary"] or {}).get("usage") or {}
+            used = usage.get("total_tokens") or (
+                int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+            )
+            totals[row["platform"]] = totals.get(row["platform"], 0) + int(used or 0)
+        return totals
 
     def next_queued(self, session_id: str) -> Row | None:
         """这个会话队列里排在最前面的那一条。"""
@@ -431,6 +691,136 @@ class Store:
             "GROUP BY s.platform"
         )
         return {row["platform"]: int(row["n"]) for row in rows}
+
+    # ---- messages（会话内容，T-0236 第二步）----
+    def add_message(
+        self,
+        session_id: str,
+        turn_id: str | None,
+        role: str,
+        kind: str,
+        text: str,
+        *,
+        data: Row | None = None,
+        by: str | None = None,
+        delivery: str | None = None,
+        at: float | None = None,
+    ) -> str:
+        message_id = new_id("bm")
+        with self._lock:
+            # seq 在一条语句里取，同一个连接上不会撞
+            self._db.execute(
+                "INSERT INTO messages (id, session_id, turn_id, seq, role, kind, text, data, by, "
+                "delivery, at) VALUES (?,?,?,(SELECT COALESCE(MAX(seq), 0) + 1 FROM messages "
+                "WHERE session_id = ?),?,?,?,?,?,?,?)",
+                (
+                    message_id,
+                    session_id,
+                    turn_id,
+                    session_id,
+                    role,
+                    kind,
+                    text,
+                    json.dumps(data or {}, ensure_ascii=False),
+                    by,
+                    delivery,
+                    time.time() if at is None else at,
+                ),
+            )
+        return message_id
+
+    def list_messages(self, session_id: str, *, imported: bool | None = None) -> list[Row]:
+        sql = "SELECT * FROM messages WHERE session_id = ?"
+        if imported is not None:
+            sql += " AND turn_id IS NULL" if imported else " AND turn_id IS NOT NULL"
+        return self._all(sql + " ORDER BY seq", (session_id,))
+
+    def turn_messages(self, turn_id: str) -> list[Row]:
+        return self._all("SELECT * FROM messages WHERE turn_id = ? ORDER BY seq", (turn_id,))
+
+    def user_message(self, turn_id: str) -> Row | None:
+        return self._one(
+            "SELECT * FROM messages WHERE turn_id = ? AND role = 'user' ORDER BY seq LIMIT 1",
+            (turn_id,),
+        )
+
+    def update_message_text(self, message_id: str, text: str) -> None:
+        self._exec("UPDATE messages SET text = ? WHERE id = ?", (text, message_id))
+
+    def mark_imported(self, session_id: str, at: float) -> None:
+        # 不动 updated_at：导入不是会话里的新动静
+        self._exec("UPDATE sessions SET imported_at = ? WHERE id = ?", (at, session_id))
+
+    def delete_imported_messages(self, session_id: str) -> None:
+        self._exec("DELETE FROM messages WHERE session_id = ? AND turn_id IS NULL", (session_id,))
+
+    # ---- attachments ----
+    def add_attachment(
+        self,
+        session_id: str,
+        direction: str,
+        name: str,
+        media_type: str,
+        size: int,
+        sha256: str,
+        path: str,
+        *,
+        attachment_id: str | None = None,
+        turn_id: str | None = None,
+        message_id: str | None = None,
+    ) -> Row:
+        attachment_id = attachment_id or new_id("ba")
+        self._exec(
+            "INSERT INTO attachments (id, session_id, message_id, turn_id, direction, name, "
+            "media_type, size, sha256, path, at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                attachment_id,
+                session_id,
+                message_id,
+                turn_id,
+                direction,
+                name,
+                media_type,
+                size,
+                sha256,
+                path,
+                time.time(),
+            ),
+        )
+        row = self.get_attachment(attachment_id)
+        assert row is not None  # noqa: S101
+        return row
+
+    def get_attachment(self, attachment_id: str) -> Row | None:
+        return self._one("SELECT * FROM attachments WHERE id = ?", (attachment_id,))
+
+    def list_attachments(self, session_id: str) -> list[Row]:
+        return self._all(
+            "SELECT * FROM attachments WHERE session_id = ? ORDER BY at, id", (session_id,)
+        )
+
+    def turn_attachments(self, turn_id: str, direction: str) -> list[Row]:
+        return self._all(
+            "SELECT * FROM attachments WHERE turn_id = ? AND direction = ? ORDER BY at, id",
+            (turn_id, direction),
+        )
+
+    def bind_attachments(self, ids: list[str], turn_id: str, message_id: str) -> None:
+        for attachment_id in ids:
+            self._exec(
+                "UPDATE attachments SET turn_id = ?, message_id = ? WHERE id = ?",
+                (turn_id, message_id, attachment_id),
+            )
+
+    def delete_attachment(self, attachment_id: str) -> None:
+        self._exec("DELETE FROM attachments WHERE id = ?", (attachment_id,))
+
+    def stale_uploads(self, before: float) -> list[Row]:
+        """上传了但一直没有随消息发出去的附件。"""
+        return self._all(
+            "SELECT * FROM attachments WHERE direction = 'input' AND turn_id IS NULL AND at < ?",
+            (before,),
+        )
 
     # ---- events ----
     def add_event(self, session_id: str, turn_id: str | None, kind: str, payload: Row) -> None:

@@ -37,6 +37,8 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeLoadOut,
     LlmBridgeOut,
     LlmBridgePatch,
+    LlmBridgeQuotaList,
+    LlmBridgeQuotaOut,
     LlmBridgeSettings,
     LlmBridgeStatusOut,
 )
@@ -391,8 +393,24 @@ class LlmBridgeService:
                 for platform, row in (data.get("load") or {}).items()
                 if platform in ALL_PLATFORMS
             },
+            quota=self.quota_out(data.get("quota")),
             settings=self.settings_out(data["settings"]),
         )
+
+    @staticmethod
+    def quota_out(data: Any) -> dict[str, LlmBridgeQuotaOut]:
+        if not isinstance(data, dict):
+            return {}
+        return {
+            platform: LlmBridgeQuotaOut(**row)
+            for platform, row in data.items()
+            if platform in ALL_PLATFORMS and isinstance(row, dict)
+        }
+
+    async def quota(self, row: LlmBridge, *, refresh: bool) -> LlmBridgeQuotaList:
+        """各平台的额度；refresh 时让管理器向能随时查的平台实查一次。"""
+        data = await self.admin(row, "GET", f"/quota?refresh={'true' if refresh else 'false'}")
+        return LlmBridgeQuotaList(platforms=self.quota_out(data.get("platforms")))
 
     @staticmethod
     def settings_out(data: dict[str, Any]) -> LlmBridgeSettings:

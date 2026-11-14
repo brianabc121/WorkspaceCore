@@ -75,7 +75,10 @@ class Bridge:
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    return Settings(data_dir=tmp_path / "data", admin_token=ADMIN, enable_fake=True)
+    # 测试里额度“重置”后马上续跑，不再多等一分钟
+    return Settings(
+        data_dir=tmp_path / "data", admin_token=ADMIN, enable_fake=True, resume_margin_seconds=0
+    )
 
 
 @pytest.fixture

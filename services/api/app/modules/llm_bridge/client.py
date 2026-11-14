@@ -140,7 +140,33 @@ class BridgeClient:
         response = await self.http.request(
             method, f"{await self._base()}/admin{path}", headers=self._headers(), json=body
         )
+        return self._payload(response)
+
+    async def upload(self, path: str, name: str, data: bytes) -> Any:
+        """把一个文件原样交给会话桥（请求体就是文件内容，文件名在查询参数里）。"""
+        response = await self.http.request(
+            "POST",
+            f"{await self._base()}/admin{path}",
+            headers=self._headers(),
+            params={"name": name},
+            content=data,
+            content_type="application/octet-stream",
+        )
+        return self._payload(response)
+
+    async def download(self, path: str) -> httpx.Response:
+        """取一个文件：成功时返回会话桥的响应（内容和类型原样），失败按会话桥的错误抛出。"""
+        response = await self.http.request(
+            "GET", f"{await self._base()}/admin{path}", headers={**self._headers(), "Accept": "*/*"}
+        )
+        if response.status_code >= 400:
+            self._payload(response)
+        return response
+
+    def _payload(self, response: httpx.Response) -> Any:
         self._check_status(response)
+        if response.status_code == 204:  # 没有内容的成功应答
+            return None
         payload = _json(response)
         if response.status_code >= 400:
             error = _error_of(payload)

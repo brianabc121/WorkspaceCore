@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -45,10 +45,38 @@ class LlmChatSessionList(BaseModel):
     sync_failed: str = Field(default="", description="同步官方程序里的会话时读不到的平台")
 
 
+class LlmChatAttachmentOut(BaseModel):
+    """随消息带上的图片 / 文件（input），或模型产出的图片 / 文件（output）。内容另外下载。"""
+
+    id: str
+    name: str
+    media_type: str
+    size: int
+    direction: str = Field(description="input：人带上的；output：模型产出的")
+    at: float | None = None
+
+
 class LlmChatStepOut(BaseModel):
     kind: str = Field(description="message（中间说的话）/ command / files / notice")
     text: str
     at: float | None = None
+    name: str | None = Field(default=None, description="工具名（kind 是 tool / tool_result 时）")
+    truncated: bool = Field(default=False, description="内容太长，后面的没有保存")
+    error: bool = Field(default=False, description="工具报了错")
+    exit_code: int | None = Field(default=None, description="命令的退出码（平台给了才有）")
+
+
+class LlmChatResumeOut(BaseModel):
+    """额度用完被打断后的自动续跑（docs/v2/LLM_BRIDGE_QUOTA_PLAN.md 第 3 节）。"""
+
+    state: str | None = Field(
+        description="pending：到点自动继续；forced：有人点了现在就试；done：已经续跑；"
+        "cancelled：有人说不要自动继续；skipped：到点时没有发（开关关着、会话已归档等）；"
+        "exhausted：自动续的次数用完了"
+    )
+    at: float | None = Field(description="打算什么时候继续（时间戳）")
+    attempt: int = Field(default=0, description="这是第几次自动续跑的回合（0 = 人发的）")
+    resumed_by: str | None = Field(default=None, description="续跑它的那个回合")
 
 
 class LlmChatMessageOut(BaseModel):
@@ -61,13 +89,25 @@ class LlmChatMessageOut(BaseModel):
     status: str | None = Field(
         default=None,
         description="回答所在回合的状态："
-        "queued / running / completed / failed / cancelled / unknown",
+        "queued / running / completed / failed / cancelled / unknown / interrupted",
     )
     steps: list[LlmChatStepOut] = Field(
         default=[], description="过程：中间说的话、命令、改动的文件"
     )
     failure: dict[str, Any] | None = None
     ahead_in_session: int | None = Field(default=None, description="排队时前面还有几条")
+    resume: LlmChatResumeOut | None = Field(
+        default=None, description="被额度打断的回合（status=interrupted）：什么时候自动继续"
+    )
+    attachments: list[LlmChatAttachmentOut] = Field(
+        default=[], description="提问带上的图片 / 文件，或这一回合模型产出的图片 / 文件"
+    )
+    imported: bool = Field(default=False, description="官方程序里原有的内容（第一次打开时导入的）")
+    delivery: str | None = Field(
+        default=None,
+        description="提问是怎么送出去的：turn 普通的一个回合；inserted 插进正在处理的回合；"
+        "merged 中断上一个回合后合并重发；imported 导入的",
+    )
 
 
 class LlmChatConversationOut(BaseModel):
@@ -116,6 +156,15 @@ class LlmChatTurnOut(BaseModel):
     session_id: str
     status: str
     ahead_in_session: int | None = None
+    resume: LlmChatResumeOut | None = None
+    delivered: str | None = Field(
+        default=None,
+        description="这条消息实际怎么送出去的："
+        "inserted 送进了正在处理的回合（turn_id 是那个回合）；"
+        "merged 中断了正在处理的回合，和“接着刚才的做”合成新回合；"
+        "queued 排队；started 直接开始。"
+        "旧版本的管理器没有这一项",
+    )
 
 
 class LlmChatCreateIn(_In):
@@ -161,6 +210,14 @@ class LlmChatSendIn(_In):
     )
     takeover: bool = Field(
         default=False, description="发到不是自己建的会话时必须为 true（页面先让人确认）"
+    )
+    mode: Literal["queue", "insert"] = Field(
+        default="queue",
+        description="会话正在处理别的消息时：queue 排队（不打断）；insert 插入——"
+        "送进正在处理的回合，平台做不到时中断它、合并重发",
+    )
+    attachments: list[Annotated[str, Field(pattern=r"^ba_[0-9a-f]{20}$")]] = Field(
+        default=[], max_length=8, description="随这条消息带上的附件（先上传得到编号）"
     )
 
 

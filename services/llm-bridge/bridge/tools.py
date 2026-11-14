@@ -36,6 +36,17 @@ class SessionCreateInput(ChannelInput):
 class SendInput(_Input):
     session_id: str = Field(description="会话号（llm_session_create 返回的 session_id）")
     text: str = Field(min_length=1, description="要发送的消息")
+    mode: Literal["queue", "insert"] = Field(
+        default="queue",
+        description="会话正在处理别的消息时怎么办：queue 排队等前面的做完（不打断）；"
+        "insert 直接送进正在处理的那一回合，平台做不到时改成中断它、把这条消息和“接着刚才的做”"
+        "合成一个新回合。返回里的 delivered 写明实际用了哪种",
+    )
+    attachments: list[str] = Field(
+        default=[],
+        max_length=8,
+        description="随这条消息带上的附件编号（由工作台上传得到；智能体一般不用填）",
+    )
     request_id: str = Field(
         min_length=1,
         max_length=100,

@@ -29,14 +29,14 @@ const bridge = (over: Partial<Bridge> = {}): Bridge => ({ id: ONE, name: '主账
 const account = (slot: string, state: string): Schema['LlmBridgeAccountOut'] => ({ slot, label: slot, enabled: true, state, registered: state === 'logged_in', identity: null, method: null, detail: '', first_login_at: null, login_methods: ['existing'], running: 0 })
 const channel = (platform: string, mode: string, slot: string, over: Partial<Schema['LlmBridgeChannelOut']> = {}): Schema['LlmBridgeChannelOut'] => ({ platform, mode, slot, enabled: true, available: true, note: '', ...over })
 const status = (): Schema['LlmBridgeStatusOut'] => ({
-  reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 0, running: 0, load: {},
-  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
+  reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 0, running: 0, load: {}, quota: {},
+  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
   accounts: [account('openai', 'logged_in'), account('claude', 'logged_in'), account('workbuddy', 'logged_out')],
   channels: [channel('chatgpt', 'chat', 'openai'), channel('codex', 'dev', 'openai'), channel('claude', 'chat', 'claude'), channel('claude', 'dev', 'claude'), channel('claude', 'cloud', 'claude', { available: false }), channel('workbuddy', 'chat', 'workbuddy')],
 })
 const session = (over: Partial<Session> = {}): Session => ({ session_id: S1, platform: 'claude', mode: 'chat', model: 'sonnet', title: '周报怎么写', status: 'active', origin: 'bridge', owner: '测试用户', owner_kind: 'me', busy: false, turns: 1, created_at: now() - 600, updated_at: now(), environment: null, ...over })
-const asked = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'user', turn_id: turn, text, at: now() - 100, by: '测试用户', mine: true, steps: [], ...over })
-const answered = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'assistant', turn_id: turn, text, at: now() - 90, status: 'completed', steps: [], ...over })
+const asked = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'user', turn_id: turn, text, at: now() - 100, by: '测试用户', mine: true, steps: [], attachments: [], imported: false, ...over })
+const answered = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'assistant', turn_id: turn, text, at: now() - 90, status: 'completed', steps: [], attachments: [], imported: false, ...over })
 const talk = (over: Partial<Session> = {}, messages: Message[] = [asked('写一个周报模板'), answered('好的，模板如下。')], last = 10): Conversation => ({ session: session(over), messages, last_event_id: last })
 const environment = (id: string, name: string): Schema['LlmBridgeEnvironmentOut'] => ({ id, platform: 'codex', mode: 'dev', name, enabled: true, repo_url: 'https://example.com/a.git', branch: 'main', sandbox: 'workspace_write', network: false, description: '' })
 
@@ -143,7 +143,7 @@ describe('大模型聊天', () => {
   })
 
   it('shows a conversation as plain text with code blocks, the steps and the session details', async () => {
-    const reply = answered('好的。\n```python\nprint("<b>hi</b>")\n```\n<i>完</i>', T1, { steps: [{ kind: 'command', text: 'ls src', at: now() }, { kind: 'files', text: 'src/a.py', at: now() }] })
+    const reply = answered('好的。\n```python\nprint("<b>hi</b>")\n```\n<i>完</i>', T1, { steps: [{ kind: 'command', text: 'ls src', at: now(), truncated: false, error: false }, { kind: 'files', text: 'src/a.py', at: now(), truncated: false, error: false }] })
     setup('owner', { conversations: { [S1]: talk({ model: 'sonnet-5' }, [asked('写一个周报模板'), reply]) } })
     const { container } = await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
     expect(await screen.findByRole('heading', { level: 2, name: '周报怎么写' })).toBeVisible()
@@ -368,6 +368,156 @@ describe('大模型聊天', () => {
     expect(await screen.findByText('这一回合失败了：平台限流了，稍后再试')).toBeVisible()
     expect(screen.getByText('写到一半')).toBeVisible()
     expect(screen.getByText('这一回合的结果未知：超时，结果未知')).toBeVisible()
+  })
+
+  it('shows a turn the quota interrupted, when it continues, and lets it be retried now or left alone', async () => {
+    const at = now() + 3600
+    const interrupted = (state: string) => talk({}, [
+      asked('跑一个长任务'), answered('做到一半', T1, { status: 'interrupted', failure: { kind: 'quota_exceeded', message: '额度用完' }, resume: { state, at, attempt: 0, resumed_by: null } }),
+    ])
+    const { requests, world } = setup('owner', { conversations: { [S1]: interrupted('pending') } }, (r, w) => {
+      if (path(r) !== `${chatOf(ONE)}/turns/${T1}/resume`) return undefined
+      const state = r.method === 'DELETE' ? 'cancelled' : 'forced'
+      w.conversations[S1] = interrupted(state)
+      return Response.json({ turn_id: T1, session_id: S1, status: 'interrupted', resume: { state, at, attempt: 0, resumed_by: null } })
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    expect(await screen.findByText(/额度用完，这一回合中断了。.+自动继续。/)).toBeVisible()
+    expect(screen.getByText('做到一半')).toBeVisible()
+    expect(screen.getByText('已中断')).toBeVisible()
+    expect(screen.queryByText(/这一回合失败了/)).not.toBeInTheDocument()
+
+    await fireEvent.click(screen.getByRole('button', { name: '不要自动继续' }))
+    expect(await screen.findByText('额度用完，这一回合中断了。已设成不自动继续。')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '不要自动继续' })).not.toBeInTheDocument()
+    expect(writes(requests).map(r => r.method)).toEqual(['DELETE'])
+
+    // 现在就试：系统替人发的那句话稍后出现在下面
+    await fireEvent.click(await screen.findByRole('button', { name: '现在就试' }))
+    expect(await screen.findByText('额度用完，这一回合中断了。正在试着继续…')).toBeVisible()
+    world.conversations[S1] = talk({}, [
+      asked('跑一个长任务'), answered('做到一半', T1, { status: 'interrupted', resume: { state: 'done', at, attempt: 0, resumed_by: T2 } }),
+      asked('继续意外中断的任务', T2, { by: '系统（自动续跑）', mine: false }), answered('接着做完了', T2),
+    ])
+    expect(await screen.findByText('接着做完了', {}, { timeout: 5000 })).toBeVisible()
+    expect(screen.getByText('系统（自动续跑）')).toBeVisible()
+    expect(screen.getByText('额度用完，这一回合中断了；已经在下面自动继续。')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '现在就试' })).not.toBeInTheDocument()
+    expect(writes(requests).map(r => r.method)).toEqual(['DELETE', 'POST'])
+  })
+
+  it('attaches images to a message, shows stored attachments and tool steps, and re-imports an external session', async () => {
+    // 下载时用的对象地址（缩略图不用它：页面的 CSP 不允许 blob: 图片）
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:saved', revokeObjectURL: () => undefined }))
+    const file = (id: string, name: string, direction = 'input', media_type = 'image/png'): Schema['LlmChatAttachmentOut'] => ({ id, name, media_type, size: 2048, direction, at: now() })
+    const A1 = `ba_${'1'.repeat(20)}`, A2 = `ba_${'2'.repeat(20)}`, A3 = `ba_${'3'.repeat(20)}`, A4 = `ba_${'4'.repeat(20)}`
+    const step = (kind: string, text: string, over: Partial<Schema['LlmChatStepOut']> = {}): Schema['LlmChatStepOut'] => ({ kind, text, at: now(), truncated: false, error: false, ...over })
+    const stored = talk({ origin: 'external', owner_kind: 'external', owner: '' }, [
+      asked('官方程序里的老问题', T1, { turn_id: null, by: null, mine: null, imported: true }),
+      asked('看这张图', T1, { attachments: [file(A1, '截图.png')] }),
+      answered('看到了', T1, { attachments: [file(A2, 'result.txt', 'output', 'text/plain')], steps: [step('tool', '{"file_path": "README.md"}', { name: 'Read' }), step('tool_result', '很长的内容', { name: 'Read', truncated: true }), step('tool_result', '读不到', { name: 'Grep', error: true })] }),
+    ])
+    const bodies: Schema['LlmChatSendIn'][] = []
+    const uploads: { name: string | null; type: string | null; size: number }[] = []
+    const { requests } = setup('owner', { conversations: { [S1]: stored }, sessions: [session({ origin: 'external', owner_kind: 'external' })] }, async r => {
+      const p = path(r), files = `${chat}/sessions/${S1}/attachments`
+      if (p === files && r.method === 'POST') {
+        uploads.push({ name: query(r).get('name'), type: r.headers.get('content-type'), size: (await r.arrayBuffer()).byteLength })
+        return Response.json(file(uploads.length === 1 ? A3 : A4, query(r).get('name') ?? ''), { status: 201 })
+      }
+      if (p.startsWith(`${files}/`) && r.method === 'GET') return new Response(new Blob(['png']), { headers: { 'Content-Type': 'image/png' } })
+      if (p.startsWith(`${files}/`) && r.method === 'DELETE') return new Response(null, { status: 204 })
+      if (p === `${chat}/sessions/${S1}/reimport`) return Response.json(talk({ origin: 'external', owner_kind: 'external' }, [asked('重新导入后的内容', T1, { turn_id: null, imported: true })]))
+      if (p === `${chat}/sessions/${S1}/messages` && r.method === 'POST') { bodies.push(await r.json() as Schema['LlmChatSendIn']); return Response.json(turn()) }
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    // 已经存下来的：导入的内容有标记；提问上的图片显示成缩略图；回答上的文件能下载；过程里有工具调用和结果
+    expect(await screen.findByText('导入的')).toBeVisible()
+    const image = await screen.findByRole('img', { name: '截图.png' })
+    expect(image.getAttribute('src')).toMatch(/^data:image\/png;base64,/)
+    expect(screen.getByRole('button', { name: '下载文件：result.txt' })).toHaveTextContent('2 KB')
+    expect(screen.getByText('工具 Read')).toBeInTheDocument()
+    expect(screen.getByText('结果 Read')).toBeInTheDocument()
+    expect(screen.getByText('已截断')).toBeInTheDocument()
+    expect(screen.getByText('结果 Grep（出错）')).toBeInTheDocument()
+    // 别的文件不会自己去取，点了才取
+    expect(requests.filter(r => path(r).endsWith(A2))).toEqual([])
+    await fireEvent.click(screen.getByRole('button', { name: '下载文件：result.txt' }))
+    await waitFor(() => expect(requests.filter(r => path(r).endsWith(A2))).toHaveLength(1))
+
+    // 带图片发送：先上传（请求体就是文件），发送时带上编号；对话会话只让选图片
+    const picker = screen.getByLabelText('选择要带上的图片或文件') as HTMLInputElement
+    expect(picker).toHaveAttribute('accept', 'image/png,image/jpeg,image/gif,image/webp')
+    const big = new File([new Uint8Array(1)], '太大.png', { type: 'image/png' })
+    Object.defineProperty(big, 'size', { value: 21 * 1024 * 1024 })
+    await fireEvent.change(picker, { target: { files: [big, new File(['abcd'], '新图.png', { type: 'image/png' }), new File(['xy'], '多余.png', { type: 'image/png' })] } })
+    expect(await screen.findByText('「太大.png」太大：单个最多 20 MB。')).toBeVisible()
+    const pendingList = await screen.findByRole('list', { name: '要带上的附件' })
+    await waitFor(() => expect(within(pendingList).getAllByRole('listitem')).toHaveLength(2))
+    expect(uploads).toEqual([{ name: '新图.png', type: 'application/octet-stream', size: 4 }, { name: '多余.png', type: 'application/octet-stream', size: 2 }])
+    await fireEvent.click(within(pendingList).getByRole('button', { name: '去掉附件：多余.png' }))
+    await waitFor(() => expect(requests.some(r => r.method === 'DELETE' && path(r).endsWith(A4))).toBe(true))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const box = await composer()
+    await fireEvent.update(box, '再看这张')
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toMatchObject({ text: '再看这张', attachments: [A3], takeover: true })
+    await waitFor(() => expect(screen.queryByRole('list', { name: '要带上的附件' })).not.toBeInTheDocument())
+
+    // 重新导入：确认后重新读，内容换成新的
+    await fireEvent.click(screen.getByRole('button', { name: '重新导入' }))
+    expect(await screen.findByText('重新导入后的内容')).toBeVisible()
+    expect(writes(requests).some(r => path(r).endsWith('/reimport'))).toBe(true)
+  })
+
+  it('inserts a message into the running turn, or says it was merged when the platform refused', async () => {
+    const running = () => talk({ busy: true }, [asked('跑一个长任务'), answered('', T1, { status: 'running' })])
+    const bodies: Schema['LlmChatSendIn'][] = []
+    const never = () => new Promise<Events>(() => undefined)
+    const { world } = setup('owner', { conversations: { [S1]: running() }, events: [never()] }, async (r, w) => {
+      if (path(r) !== `${chat}/sessions/${S1}/messages` || r.method !== 'POST') return undefined
+      const body = await r.json() as Schema['LlmChatSendIn']
+      bodies.push(body)
+      if (bodies.length === 1) {
+        // 平台收下了：没有新回合，消息出现在正在处理的那一问后面
+        w.conversations[S1] = talk({ busy: true }, [asked('跑一个长任务'), asked('顺便看日志', T1, { delivery: 'inserted' }), answered('', T1, { status: 'running' })])
+        return Response.json({ ...turn(T1, 'running'), delivered: 'inserted' })
+      }
+      // 平台没收下：上一回合被打断，新回合带着这条消息
+      w.conversations[S1] = talk({ busy: true }, [
+        asked('跑一个长任务'), asked('顺便看日志', T1, { delivery: 'inserted' }),
+        answered('做到一半', T1, { status: 'interrupted', failure: { kind: 'superseded', message: '被后面插入的消息打断' } }),
+        asked('先改这里', T2, { delivery: 'merged' }), answered('', T2, { status: 'running' }),
+      ])
+      return Response.json({ ...turn(T2, 'queued'), delivered: 'merged' })
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const modes = await screen.findByRole('group', { name: '上一条还没答完时怎么发' })
+    expect(within(modes).getByRole('radio', { name: '排队' })).toBeChecked()
+    expect(screen.getByText(/现在发的不会打断它，会进队列/)).toBeVisible()
+    await fireEvent.click(within(modes).getByRole('radio', { name: '插入' }))
+    expect(screen.getByText(/插入：这条消息直接送进正在处理的回合。/)).toBeVisible()
+    const box = await composer()
+    await fireEvent.update(box, '顺便看日志')
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    expect(await screen.findByText('已插入：这条消息送进了正在处理的回合。')).toBeVisible()
+    expect(bodies[0]).toMatchObject({ text: '顺便看日志', mode: 'insert' })
+    expect(await screen.findByText('插入', { selector: '.lc-tag' })).toBeVisible()
+    expect(messages()).toHaveLength(3)
+    // 发完回到“排队”，要插入得再选一次
+    expect(within(screen.getByRole('group', { name: '上一条还没答完时怎么发' })).getByRole('radio', { name: '排队' })).toBeChecked()
+
+    world.events = [never()]
+    await fireEvent.click(within(screen.getByRole('group', { name: '上一条还没答完时怎么发' })).getByRole('radio', { name: '插入' }))
+    await fireEvent.update(box, '先改这里')
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    expect(await screen.findByText(/平台没有收下插入的消息：已中断上一回合/)).toBeVisible()
+    expect(bodies[1]).toMatchObject({ text: '先改这里', mode: 'insert' })
+    expect(await screen.findByText('这一回合被后面插入的消息打断了；新消息里会接着做。')).toBeVisible()
+    expect(screen.getByText('插入（合并重发）')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '现在就试' })).not.toBeInTheDocument()
   })
 
   it('creates a session: only logged-in platforms, a development session needs an environment', async () => {

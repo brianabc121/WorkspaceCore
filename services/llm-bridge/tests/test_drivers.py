@@ -6,6 +6,7 @@ import asyncio
 import json
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -163,6 +164,12 @@ async def test_codex_cancel_and_restart(codex: CodexDriver, tmp_path: Path) -> N
     await codex.cancel(spec)
     with pytest.raises(DriverError, match="中断"):
         await task
+    # 插入消息：没有回合在跑时收不下；回合在跑时用 turn/steer 送进去，回合接着做完
+    assert await codex.steer(spec, "没有回合") is False
+    task = asyncio.create_task(codex.run_turn(spec, "hang", Sink()))
+    await _until(lambda: native in codex._active)
+    assert await codex.steer(spec, "顺便看一下") is True
+    assert (await task).text == "steered: 顺便看一下"
     # 进程重启后（桥重启）：先恢复线程再发送
     await codex.stop()
     assert (await codex.run_turn(spec, "重启之后", Sink())).text == "[None|readOnly] 重启之后"
@@ -243,6 +250,19 @@ async def test_cli_turns_resume_and_transcripts(tmp_path: Path) -> None:
     assert await driver.read("../../etc/passwd", None) == []
     # 各沙箱档位对应的参数
     read_only = SessionSpec(mode="dev", model=None, workdir=tmp_path / "w", native_id=native)
+    # 带图片的提问：按一条 stream-json 的用户消息从标准输入给，图片是 base64 的 image 内容块
+    picture = tmp_path / "p.png"
+    picture.write_bytes(b"\x89PNG\r\n\x1a\n1234")
+    with_image = replace(spec, images=((str(picture), "image/png"),))
+    seen = await driver.run_turn(with_image, "看图", Sink())
+    assert seen.text.endswith(":: 看图 images=1"), seen.text
+    # 读文件这类工具调用和它的结果也报出来（命令、改文件照旧）
+    tools = Sink()
+    await driver.run_turn(spec, "read", tools)
+    kinds = [kind for kind, _ in tools.events]
+    assert kinds[:2] == ["tool", "tool_result"], kinds
+    assert tools.events[0][1]["name"] == "Read" and "README.md" in tools.events[0][1]["input"]
+    assert tools.events[1][1] == {"name": "Read", "text": "# 说明\n内容", "error": False}
     assert "tools='Read,Glob,Grep'" in (await driver.run_turn(read_only, "x", Sink())).text
     full = SessionSpec(
         mode="dev", model=None, workdir=tmp_path / "w", sandbox="exec", native_id=native
@@ -259,6 +279,17 @@ async def test_cli_failures(tmp_path: Path) -> None:
     with pytest.raises(DriverError) as caught:
         await driver.run_turn(spec, "crash", Sink())
     assert caught.value.kind == "platform_error" and "sk-ant" not in caught.value.message
+    # 额度用完：和普通失败分开，带着重置时间；回合里报出的额度交给了 engine
+    sink = Sink()
+    with pytest.raises(DriverError) as limited:
+        await driver.run_turn(spec, "limit", sink)
+    assert (limited.value.kind, limited.value.quota, limited.value.resets_at) == (
+        "rate_limited",
+        True,
+        1900000000.0,
+    )
+    quota_events = [payload for kind, payload in sink.events if kind == "quota"]
+    assert quota_events[0]["windows"][0]["status"] == "exceeded"
     task = asyncio.create_task(driver.run_turn(spec, "hang", Sink()))
     await _until(lambda: (spec.native_id or "") in driver._procs)  # 进程起来之后才有东西可取消
     await driver.cancel(spec)

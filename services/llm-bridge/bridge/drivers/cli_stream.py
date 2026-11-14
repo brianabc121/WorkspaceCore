@@ -12,6 +12,7 @@ codebuddy 2.184.0 上核验，见 docs/decisions/2026-11-13-llm-bridge-verificat
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import os
@@ -21,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from bridge import quota
 from bridge.drivers.base import (
     AccountStatus,
     Driver,
@@ -164,6 +166,8 @@ class CliStreamDriver(Driver):
         self._secret_file = secrets_dir / f"{profile.slot}.json"
         self._timeout = rpc_timeout
         self._procs: dict[str, asyncio.subprocess.Process] = {}
+        # 工具调用的编号 → 工具名：结果报回来时知道是哪个工具的
+        self._tool_names: dict[str, str] = {}
         self._help_models: list[ModelInfo] | None = None
 
     def supports(self, mode: Mode) -> bool:
@@ -290,7 +294,26 @@ class CliStreamDriver(Driver):
             args += ["--tools", _WRITE_TOOLS, "--permission-mode", "acceptEdits"]
         else:  # exec：管理员在环境上明确打开的档位
             args += ["--permission-mode", "bypassPermissions"]
+        if spec.images:  # 带图片时提问按一条 stream-json 的用户消息从标准输入给
+            args += ["--input-format", "stream-json"]
         return args
+
+    @staticmethod
+    def _stdin(spec: SessionSpec, text: str) -> bytes:
+        """标准输入的内容：没有图片就是提问本身；有图片是一条带 image 内容块的用户消息。"""
+        if not spec.images:
+            return text.encode()
+        content: list[dict[str, Any]] = [{"type": "text", "text": text}]
+        for path, media_type in spec.images:
+            data = base64.b64encode(Path(path).read_bytes()).decode()
+            content.append(
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": media_type, "data": data},
+                }
+            )
+        message = {"type": "user", "message": {"role": "user", "content": content}}
+        return (json.dumps(message, ensure_ascii=False) + "\n").encode()
 
     async def run_turn(self, spec: SessionSpec, text: str, sink: EventSink) -> TurnOutcome:
         if not spec.native_id:
@@ -312,12 +335,13 @@ class CliStreamDriver(Driver):
         self._procs[spec.native_id] = proc
         try:
             assert proc.stdin and proc.stdout and proc.stderr  # noqa: S101
-            proc.stdin.write(text.encode())
+            proc.stdin.write(self._stdin(spec, text))
             await proc.stdin.drain()
             proc.stdin.close()
             stderr_task = asyncio.create_task(proc.stderr.read())
             outcome = TurnOutcome(text="", native_turn_id=None)
             messages: list[str] = []
+            limited: list[dict[str, Any]] = []
             result: dict[str, Any] | None = None
             while line := await proc.stdout.readline():
                 try:
@@ -328,6 +352,14 @@ class CliStreamDriver(Driver):
                     continue
                 if event.get("type") == "assistant":
                     await self._on_assistant(event, messages, outcome, sink)
+                elif event.get("type") == "user":
+                    await self._on_tool_results(event, sink)
+                elif event.get("type") == "rate_limit_event":
+                    # 官方程序顺带报出的额度：交给 engine 记下来；被拒绝时记住重置时间
+                    windows = quota.from_rate_limit_event(event)
+                    if windows:
+                        await sink("quota", {"windows": windows})
+                        limited += [w for w in windows if w["status"] == "exceeded"]
                 elif event.get("type") == "result":
                     result = event
             await proc.wait()
@@ -335,7 +367,7 @@ class CliStreamDriver(Driver):
             if result is None:
                 tail = redact(stderr.strip()[-300:]) or f"退出码 {proc.returncode}"
                 raise DriverError(_error_kind(tail), f"{self.profile.label} 没有返回结果：{tail}")
-            return self._finish(result, messages, outcome)
+            return self._finish(result, messages, outcome, limited)
         finally:
             self._procs.pop(spec.native_id, None)
             if proc.returncode is None:
@@ -356,15 +388,42 @@ class CliStreamDriver(Driver):
                 continue
             raw = block.get("input")
             data: dict[str, Any] = raw if isinstance(raw, dict) else {}
-            if block.get("name") == "Bash" and data.get("command"):
+            name = str(block.get("name") or "")
+            if name == "Bash" and data.get("command"):
                 outcome.commands.append(str(data["command"])[:500])
                 await sink("command", {"command": outcome.commands[-1]})
-            elif block.get("name") in ("Edit", "Write") and data.get("file_path"):
+            elif name in ("Edit", "Write") and data.get("file_path"):
                 outcome.files.append(str(data["file_path"]))
                 await sink("files", {"paths": [outcome.files[-1]]})
+            elif name:  # 读文件、搜索和别的工具调用：也记进过程
+                if block.get("id"):
+                    self._tool_names[str(block["id"])] = name
+                await sink("tool", {"name": name, "input": json.dumps(data, ensure_ascii=False)})
+
+    async def _on_tool_results(self, event: dict[str, Any], sink: EventSink) -> None:
+        """官方程序把工具结果作为一条 user 消息报出来：每个 tool_result 内容块记一步。"""
+        content = (event.get("message") or {}).get("content")
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            name = self._tool_names.pop(str(block.get("tool_use_id")), None)
+            if name is None:  # 命令、改文件的结果不单独记（已经有“命令”“改动的文件”两步）
+                continue
+            await sink(
+                "tool_result",
+                {
+                    "name": name,
+                    "text": _block_text(block.get("content")),
+                    "error": bool(block.get("is_error")),
+                },
+            )
 
     def _finish(
-        self, result: dict[str, Any], messages: list[str], outcome: TurnOutcome
+        self,
+        result: dict[str, Any],
+        messages: list[str],
+        outcome: TurnOutcome,
+        limited: list[dict[str, Any]] | None = None,
     ) -> TurnOutcome:
         if result.get("is_error"):
             errors = result.get("errors")
@@ -376,6 +435,15 @@ class CliStreamDriver(Driver):
                 or (messages[-1] if messages else "")
                 or str(result.get("subtype") or "回合失败")
             )
+            # 额度用完：回合里出现过“被拒绝”的额度事件，或者失败信息是官方程序的额度用语
+            if limited or quota.is_quota_text(text):
+                resets = [w["resets_at"] for w in limited or [] if w["resets_at"]]
+                raise DriverError(
+                    "rate_limited",
+                    redact(text)[:500],
+                    quota=True,
+                    resets_at=min(resets) if resets else quota.parse_reset(text),
+                )
             raise DriverError(_error_kind(text), redact(text)[:500])
         raw = result.get("usage")
         usage: dict[str, Any] = raw if isinstance(raw, dict) else {}

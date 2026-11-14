@@ -11,6 +11,12 @@ import { bridgeError, type BridgeStatus, type Platform } from '../api'
 export type ChatSession = Schema['LlmChatSessionOut']
 export type ChatMessage = Schema['LlmChatMessageOut']
 export type ChatStep = Schema['LlmChatStepOut']
+export type ChatAttachment = Schema['LlmChatAttachmentOut']
+/** 附件的上限（和后端一致）：一条消息最多几个、单个多大 */
+export const ATTACHMENTS = { max: 8, bytes: 20 * 1024 * 1024 }
+export const IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp'
+export const isImage = (a: { media_type: string }) => IMAGE_ACCEPT.split(',').includes(a.media_type)
+export const fileSize = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`)
 export type ChatConversation = Schema['LlmChatConversationOut']
 export type ChatEvent = Schema['LlmChatEventOut']
 export type ChatOptions = Schema['LlmChatOptionsOut']
@@ -30,8 +36,8 @@ export const GROUP_TARGETS = { min: 2, max: 6 }
 
 export const EVENT_WAIT_SECONDS = 20
 /** 回合已经结束的事件：收到后重新读会话内容 */
-export const TERMINAL_EVENTS = ['completed', 'failed', 'cancelled', 'unknown']
-export const TURN_STATUS: Record<string, string> = { queued: '排队中', running: '正在回答', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '结果未知' }
+export const TERMINAL_EVENTS = ['completed', 'failed', 'cancelled', 'unknown', 'interrupted']
+export const TURN_STATUS: Record<string, string> = { queued: '排队中', running: '正在回答', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '结果未知', interrupted: '额度用完，已中断' }
 /** 发送用的幂等号。页面不是 HTTPS 时浏览器不给 randomUUID，退回到随机字节 */
 export function newRequestId() {
   if (typeof crypto.randomUUID === 'function') return `web-${crypto.randomUUID()}`
@@ -108,8 +114,37 @@ export function useLlmChat(scope: string) {
       await cache.invalidateQueries({ queryKey: key(bridge, 'sessions') })
       return out
     },
-    async send(bridge: string, session: string, body: Schema['LlmChatSendIn']) {
-      return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/messages', { params: sessionAt(bridge, session), body }))
+    // attachments、mode 没有就不传（生成的类型把有默认值的字段也标成必填）
+    async send(bridge: string, session: string, body: Omit<Schema['LlmChatSendIn'], 'attachments' | 'mode'> & { attachments?: string[]; mode?: Schema['LlmChatSendIn']['mode'] }) {
+      return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/messages', { params: sessionAt(bridge, session), body: body as Schema['LlmChatSendIn'] }))
+    },
+    // ---- 附件与旧会话的导入（docs/v2/LLM_BRIDGE_QUEUE_PLAN.md 第 3 节）----
+    // 上传一个要随下一条消息发出去的图片 / 文件：请求体就是文件内容
+    async upload(bridge: string, session: string, file: File) {
+      return dataOf(await auth.slowApi.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/attachments', {
+        params: { ...sessionAt(bridge, session), query: { name: file.name } }, body: file as unknown as string, bodySerializer: (raw: unknown) => raw as File, headers: { 'Content-Type': 'application/octet-stream' },
+      }))
+    },
+    async discardUpload(bridge: string, session: string, attachment: string) {
+      await auth.api.DELETE('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/attachments/{attachment_id}', { params: { header, path: { bridge_id: bridge, session_id: session, attachment_id: attachment } } })
+    },
+    // 附件的内容：要带工作空间请求头，所以不能直接当图片地址或链接用
+    async attachmentBlob(bridge: string, session: string, attachment: string, signal?: AbortSignal): Promise<Blob> {
+      const path = `/api/v1/llm_bridge/bridges/${encodeURIComponent(bridge)}/chat/sessions/${encodeURIComponent(session)}/attachments/${encodeURIComponent(attachment)}`
+      let response: Response
+      try { response = await fetch(new Request(`${window.location.origin}${path}`, { credentials: 'same-origin', headers: header, signal })) }
+      catch { throw new ApiError(0, 'NETWORK_ERROR', '网络连接失败') }
+      if (!response.ok) {
+        let detail: Partial<Schema['ErrorBody']> = {}
+        try { detail = ((await response.json()) as Schema['ErrorResponse']).error ?? {} } catch { /* 网关返回的不是 JSON */ }
+        throw new ApiError(response.status, detail.code ?? 'HTTP_ERROR', detail.message ?? '请求失败', detail.request_id ?? null)
+      }
+      return response.blob()
+    },
+    async reimport(bridge: string, session: string) {
+      const out = dataOf(await auth.slowApi.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/reimport', { params: sessionAt(bridge, session) }))
+      cache.setQueryData(key(bridge, 'session', session), out)
+      return out
     },
     // 会话的消息队列（docs/v2/LLM_BRIDGE_QUEUE_PLAN.md 第 4 节）：有回合在跑时才读，跑着的时候每 5 秒看一次
     useQueue: (bridge: Ref<string | null>, session: Ref<string | null>, busy: Ref<boolean>) => useQuery({
@@ -128,6 +163,12 @@ export function useLlmChat(scope: string) {
       return out
     },
     invalidateQueue: (bridge: string, session: string) => cache.invalidateQueries({ queryKey: key(bridge, 'queue', session) }),
+    // 被额度打断的回合：现在就试着继续（now），或者不要自动继续
+    async resume(bridge: string, turn: string, now: boolean) {
+      const params = { header, path: { bridge_id: bridge, turn_id: turn } }
+      const path = '/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/resume'
+      return dataOf(now ? await auth.api.POST(path, { params }) : await auth.api.DELETE(path, { params }))
+    },
     async cancel(bridge: string, turn: string) {
       return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/cancel', { params: { header, path: { bridge_id: bridge, turn_id: turn } } }))
     },

@@ -19,19 +19,30 @@ import logging
 import re
 import shutil
 import time
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from bridge import attachments as files
+from bridge import quota
 from bridge.channels import SLOT_LABELS, Channel, find
 from bridge.config import Settings
 from bridge.drivers.base import Driver, DriverError, Mode, SessionSpec
 from bridge.redact import mask_identity, redact
-from bridge.store import Row, Store
+from bridge.store import Row, Store, message_of, new_id
 
 logger = logging.getLogger("bridge.engine")
 
-TERMINAL = ("completed", "failed", "cancelled", "unknown")
+# interrupted：被平台的额度打断，到重置时间后可以自动续跑（T-0237）
+TERMINAL = ("completed", "failed", "cancelled", "unknown", "interrupted")
+RESUME_TEXT = "继续意外中断的任务"
+SYSTEM_CALLER = "system"
+SYSTEM_LABEL = "系统（自动续跑）"
+# 插入消息降级成“中断后合并重发”时，接在新消息后面给模型看的一句
+MERGED_SUFFIX = (
+    "\n\n（上面是在你做上一件事的中途插进来的新消息。请先处理它，然后接着刚才没做完的事继续。）"
+)
 DEFAULTS: dict[str, Any] = {
     # 每个平台同时进行的会话数（T-0236：按平台计数；一个会话同一时间只跑一个回合）
     "concurrency": 3,
@@ -42,6 +53,10 @@ DEFAULTS: dict[str, Any] = {
     "max_text_chars": 100_000,
     # Claude 用订阅登录（oauth_token / existing）前，管理员要先确认了解合规风险（方案 6.3、D3）
     "claude_subscription_ack": False,
+    # 额度用完被打断的会话，到重置时间后自动发一句“继续”（T-0237）
+    "auto_resume": True,
+    "auto_resume_max": 3,  # 同一次中断最多自动续几次
+    "resume_text": RESUME_TEXT,
 }
 SETTING_LIMITS = {
     "concurrency": (1, 16),
@@ -49,6 +64,7 @@ SETTING_LIMITS = {
     "turn_timeout_seconds": (30, 6 * 3600),
     "send_per_hour": (1, 10_000),
     "max_text_chars": (1, 1_000_000),
+    "auto_resume_max": (1, 10),
 }
 MAX_WAIT_SECONDS = 50
 MAX_EVENT_WAIT_SECONDS = 25
@@ -147,7 +163,13 @@ class Engine:
         self._workers: dict[str, asyncio.Task[None]] = {}
         self._done: dict[str, asyncio.Event] = {}
         self._cancel_requested: set[str] = set()
+        # 被插入的消息打断的回合 → 打断它的那个新回合
+        self._superseded: dict[str, str] = {}
         self._limiters: dict[str, SlotLimiter] = {}
+        # 额度用完后的暂停与续跑（T-0237）
+        self._pause_wake: dict[str, asyncio.Event] = {}
+        self._resume_wake = asyncio.Event()
+        self._resumer: asyncio.Task[None] | None = None
         self._accounts: dict[str, tuple[float, Row]] = {}
         self._idle_seconds = 60.0
 
@@ -207,7 +229,11 @@ class Engine:
                 continue
             if key not in DEFAULTS:
                 raise BridgeError("VALIDATION_FAILED", f"没有这个设置：{key}")
-            if isinstance(DEFAULTS[key], bool):
+            if isinstance(DEFAULTS[key], str):
+                if not isinstance(value, str) or not 1 <= len(value.strip()) <= 200:
+                    raise BridgeError("VALIDATION_FAILED", f"{key} 要填 1 到 200 个字")
+                value = value.strip()
+            elif isinstance(DEFAULTS[key], bool):
                 if not isinstance(value, bool):
                     raise BridgeError("VALIDATION_FAILED", f"{key} 必须是 true 或 false")
             else:
@@ -233,14 +259,20 @@ class Engine:
             )
         for turn in self.store.list_turns(statuses=("queued",), limit=10_000):
             self._enqueue(turn)
+        # 上传了但一直没有随消息发出去的附件：过一天就清掉
+        for stale in self.store.stale_uploads(time.time() - files.STALE_UPLOAD_SECONDS):
+            (self.attachment_root / stale["path"]).unlink(missing_ok=True)
+            self.store.delete_attachment(stale["id"])
+        self._resumer = asyncio.create_task(self._resume_loop(), name="quota-resume")
 
     def _limiter(self, platform: str) -> SlotLimiter:
         return self._limiters.setdefault(platform, SlotLimiter())
 
     async def shutdown(self) -> None:
-        for task in list(self._workers.values()):
+        tasks = list(self._workers.values()) + ([self._resumer] if self._resumer else [])
+        for task in tasks:
             task.cancel()
-        for task in list(self._workers.values()):
+        for task in tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         for driver in self.drivers.values():
@@ -717,6 +749,8 @@ class Engine:
         text: str,
         request_id: str,
         wait_seconds: float = 0,
+        attachments: list[str] | None = None,
+        mode: str = "queue",
     ) -> Row:
         self._need(caller, "write")
         if not _REQUEST_ID_RE.match(request_id or ""):
@@ -728,6 +762,12 @@ class Engine:
             if existing["session_id"] != session_id:
                 raise BridgeError("CONFLICT", "这个 request_id 已经用在另一个会话上")
             return await self.wait_turn(existing["id"], wait_seconds)
+        inserted = self.store.inserted_by_request(caller.id, request_id)
+        if inserted is not None:  # 重试一条已经插进去的消息：不再插一次
+            if inserted["session_id"] != session_id:
+                raise BridgeError("CONFLICT", "这个 request_id 已经用在另一个会话上")
+            view = await self.wait_turn(inserted["turn_id"], wait_seconds)
+            return {**view, "delivered": "inserted"}
         if not text.strip():
             raise BridgeError("VALIDATION_FAILED", "消息不能为空")
         if len(text) > self.setting("max_text_chars"):
@@ -737,16 +777,67 @@ class Engine:
         session = self._session(caller, session_id)
         if session["status"] != "active":
             raise BridgeError("CONFLICT", "会话已归档，不能再发送")
-        if self.store.count_turns_since(caller.id, time.time() - 3600) >= self.setting(
+        hour_ago = time.time() - 3600
+        sent = self.store.count_turns_since(caller.id, hour_ago)
+        if sent + self.store.count_inserted_since(caller.id, hour_ago) >= self.setting(
             "send_per_hour"
         ):
             raise BridgeError("RATE_LIMITED", "这个调用方本小时的发送次数已到上限")
         self._require_platform(session["platform"])
         await self.require_ready(session["slot"])
-        turn = self.store.create_turn(session_id, caller.id, request_id, text)
+        attached = self._pending_attachments(session, attachments or [])
+        running = self.store.running_turn(session_id) if mode == "insert" else None
+        merged = False
+        if running is not None:
+            # 插入：先试着把消息送进正在跑的回合（带附件的不试，直接合并重发）
+            if not attached and await self._steer(session, running, text):
+                self.store.add_message(
+                    session_id,
+                    running["id"],
+                    "user",
+                    "text",
+                    text,
+                    by=caller.label,
+                    delivery="inserted",
+                    data={"caller_id": caller.id, "request_id": request_id},
+                )
+                self.store.add_event(session_id, running["id"], "inserted", {"by": caller.label})
+                view = await self.wait_turn(running["id"], wait_seconds)
+                return {**view, "delivered": "inserted"}
+            merged = True
+        busy = session_id in self.store.busy_sessions()
+        edge = self.store.queue_edge(session_id, first=True) if mode == "insert" else None
+        turn = self.store.create_turn(
+            session_id,
+            caller.id,
+            request_id,
+            text,
+            by=caller.label,
+            delivery="merged" if merged else "turn",
+        )
+        if edge is not None:  # 插入的消息排在这个会话队列的最前面
+            self.store.update_turn(turn["id"], position=edge - 1)
+        asked = self.store.user_message(turn["id"])
+        if attached and asked is not None:
+            self.store.bind_attachments([a["id"] for a in attached], turn["id"], asked["id"])
         self.store.add_event(session_id, turn["id"], "queued", {"by": caller.label})
-        self._enqueue(turn)
-        return await self.wait_turn(turn["id"], wait_seconds)
+        if merged and running is not None:
+            # 降级：中断正在跑的回合（记成被打断，不是失败），新回合里带上“接着刚才的做”
+            self._superseded[running["id"]] = turn["id"]
+            await self._driver(session["slot"]).cancel(self._spec(session))
+        self._enqueue(self.store.get_turn(turn["id"]) or turn)
+        view = await self.wait_turn(turn["id"], wait_seconds)
+        return {**view, "delivered": "merged" if merged else "queued" if busy else "started"}
+
+    async def _steer(self, session: Row, running: Row, text: str) -> bool:
+        """把消息送进正在跑的回合；平台在规定时间内确认收下、回合也还在跑，才算成功。"""
+        try:
+            async with asyncio.timeout(self.settings.steer_timeout_seconds):
+                accepted = await self._driver(session["slot"]).steer(self._spec(session), text)
+        except (TimeoutError, DriverError):
+            return False
+        now = self.store.get_turn(running["id"])
+        return bool(accepted) and now is not None and now["status"] == "running"
 
     def _enqueue(self, turn: Row) -> None:
         session_id = turn["session_id"]
@@ -769,6 +860,10 @@ class Engine:
                     self._workers.pop(session_id, None)
                     return
                 continue
+            # 这个平台因为额度用完暂停着：等到重置时间（或有人点“现在就试”）再取下一条
+            session = self.store.get_session(session_id)
+            if session is not None:
+                await self._wait_platform(session["platform"])
             # 队列里的记号只表示“有一条在等”；真正做哪一条按队列里的顺序取（可以被调整过）
             turn = self.store.next_queued(session_id)
             if turn is None:
@@ -788,6 +883,7 @@ class Engine:
     def _finish(self, turn_id: str, **fields: Any) -> None:
         self.store.update_turn(turn_id, finished_at=time.time(), **fields)
         self._cancel_requested.discard(turn_id)
+        self._superseded.pop(turn_id, None)
         event = self._done.pop(turn_id, None)
         if event is not None:
             event.set()
@@ -818,13 +914,42 @@ class Engine:
         driver = self._driver(session["slot"])
         spec = self._spec(session)
 
+        text = turn["text"]
+        first = self.store.user_message(turn_id)
+        if first is not None and first["delivery"] == "merged":
+            text += MERGED_SUFFIX  # 存下来的提问还是原话，这一句只给模型看
+        inputs = self.store.turn_attachments(turn_id, "input")
+        if inputs:
+            # 图片直接交给模型；别的文件放进工作目录，在提问里注明，由模型自己读
+            spec = replace(
+                spec,
+                images=tuple(
+                    (str(self.attachment_root / a["path"]), a["media_type"])
+                    for a in inputs
+                    if files.is_image(a["media_type"])
+                ),
+            )
+            placed = self._place_files(spec.workdir, inputs)
+            if placed:
+                text += f"\n\n（随这条消息带来的文件已放在工作目录里：{'、'.join(placed)}）"
+
         async def sink(kind: str, payload: Row) -> None:
+            if kind == "quota":  # 官方程序报出的额度：记下来，不算会话里的事件
+                self._save_quota(session["slot"], payload.get("windows") or [])
+                return
+            if kind == "image":  # 模型画的图：收进附件，事件里只留名字
+                self._collect_output(session, turn_id, Path(str(payload.get("path"))), image=True)
+                return
             clean = {k: redact(v) if isinstance(v, str) else v for k, v in payload.items()}
             self.store.add_event(session_id, turn_id, kind, clean)
+            made = message_of(kind, clean)
+            if made is not None:  # 会话内容落库：每段话、每个过程事件各一行
+                role, message_kind, text, data = made
+                self.store.add_message(session_id, turn_id, role, message_kind, text, data=data)
 
         try:
             async with asyncio.timeout(self.setting("turn_timeout_seconds")):
-                outcome = await driver.run_turn(spec, turn["text"], sink)
+                outcome = await driver.run_turn(spec, text, sink)
         except TimeoutError:
             await driver.cancel(spec)
             self.store.add_event(session_id, turn_id, "failed", {"kind": "timeout"})
@@ -836,9 +961,27 @@ class Engine:
             )
             return
         except DriverError as error:
+            if turn_id in self._superseded:
+                # 被后面插入的消息打断：不是失败，新回合里会接着做
+                self.store.add_event(
+                    session_id,
+                    turn_id,
+                    "interrupted",
+                    {"kind": "superseded", "by_turn": self._superseded[turn_id]},
+                )
+                self._finish(
+                    turn_id,
+                    status="interrupted",
+                    error_kind="superseded",
+                    error_message="被后面插入的消息打断，新消息里会接着做",
+                )
+                return
             if turn_id in self._cancel_requested:
                 self.store.add_event(session_id, turn_id, "cancelled", {})
                 self._finish(turn_id, status="cancelled")
+                return
+            if error.quota:
+                self._interrupt(turn, session, error)
                 return
             if error.kind in ("not_logged_in", "unavailable"):
                 self._accounts.pop(session["slot"], None)
@@ -857,11 +1000,22 @@ class Engine:
         if not session["title"]:
             fields["title"] = " ".join(turn["text"].split())[:120]
         self.store.update_session(session_id, **fields)
+        if session["mode"] == "dev":  # 开发会话里改动、新建的文件收进附件
+            for path in list(dict.fromkeys(outcome.files))[: files.MAX_OUTPUT_PER_TURN]:
+                self._collect_output(session, turn_id, Path(path))
+        result = redact(outcome.text)
+        said = [
+            m["text"]
+            for m in self.store.turn_messages(turn_id)
+            if m["role"] == "assistant" and m["kind"] == "text"
+        ]
+        if result and result not in said:  # 结果没有作为一段话报出来过：补一行
+            self.store.add_message(session_id, turn_id, "assistant", "text", result)
         self.store.add_event(session_id, turn_id, "completed", {})
         self._finish(
             turn_id,
             status="completed",
-            result_text=redact(outcome.text),
+            result_text=result,
             summary=summary,
             native_turn_id=outcome.native_turn_id,
         )
@@ -931,6 +1085,9 @@ class Engine:
         elif turn["status"] == "completed":
             view["result"] = turn["result_text"] or ""
             view["summary"] = turn["summary"] or {}
+        elif turn["status"] == "interrupted":
+            view["failure"] = {"kind": turn["error_kind"], "message": turn["error_message"]}
+            view["resume"] = self._resume_view(turn)
         elif turn["status"] != "cancelled":
             # 不叫 error：工具出错时的返回才用 error
             view["failure"] = {"kind": turn["error_kind"], "message": turn["error_message"]}
@@ -952,6 +1109,199 @@ class Engine:
             raise BridgeError("NOT_FOUND", "没有这个会话")
         return session
 
+    # ---- 附件（T-0236 第二步）----
+    @property
+    def attachment_root(self) -> Path:
+        return self.settings.data_dir / "attachments"
+
+    def _put_attachment(
+        self,
+        session_id: str,
+        direction: str,
+        name: str,
+        media_type: str,
+        data: bytes,
+        *,
+        turn_id: str | None = None,
+        message_id: str | None = None,
+    ) -> Row:
+        attachment_id = new_id("ba")
+        folder = self.attachment_root / session_id
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / attachment_id  # 文件名是自己生成的编号，不用上传的名字
+        target.write_bytes(data)
+        target.chmod(0o600)
+        return self.store.add_attachment(
+            session_id,
+            direction,
+            name,
+            media_type,
+            len(data),
+            hashlib.sha256(data).hexdigest(),
+            f"{session_id}/{attachment_id}",
+            attachment_id=attachment_id,
+            turn_id=turn_id,
+            message_id=message_id,
+        )
+
+    def upload_attachment(self, session_id: str, name: str, data: bytes) -> Row:
+        """收下一个要随下一条消息发出去的文件；发送时用返回的 id 带上。"""
+        session = self._required_session(session_id)
+        if session["status"] != "active":
+            raise BridgeError("CONFLICT", "会话已归档，不能再发送")
+        name = files.safe_name(name)
+        media_type = files.input_type(name)
+        if media_type is None:
+            raise BridgeError(
+                "VALIDATION_FAILED",
+                "不支持这种文件：可以带图片（PNG / JPEG / GIF / WebP）、文本和代码、PDF、ZIP",
+            )
+        if not data:
+            raise BridgeError("VALIDATION_FAILED", "文件是空的")
+        if len(data) > files.MAX_BYTES:
+            raise BridgeError("VALIDATION_FAILED", "文件太大（单个最多 20 MB）")
+        if not files.looks_like(media_type, data):
+            raise BridgeError("VALIDATION_FAILED", "文件内容和扩展名对不上")
+        if session["mode"] != "dev" and not files.is_image(media_type):
+            raise BridgeError(
+                "VALIDATION_FAILED",
+                "对话会话只能带图片；别的文件要在开发会话里用（模型在工作目录里读）",
+            )
+        pending = [
+            a
+            for a in self.store.list_attachments(session_id)
+            if a["direction"] == "input" and a["turn_id"] is None
+        ]
+        if len(pending) >= files.MAX_PENDING_UPLOADS:
+            raise BridgeError("CONFLICT", "这个会话里还没发出去的附件太多了，先发送或等一会儿")
+        return attachment_view(self._put_attachment(session_id, "input", name, media_type, data))
+
+    def discard_upload(self, session_id: str, attachment_id: str) -> None:
+        """去掉一个上传了还没发出去的附件。"""
+        row = self.store.get_attachment(attachment_id)
+        if row is None or row["session_id"] != session_id:
+            raise BridgeError("NOT_FOUND", "没有这个附件")
+        if row["turn_id"] is not None or row["direction"] != "input":
+            raise BridgeError("CONFLICT", "这个附件已经随消息发出去了")
+        (self.attachment_root / row["path"]).unlink(missing_ok=True)
+        self.store.delete_attachment(attachment_id)
+
+    def _pending_attachments(self, session: Row, ids: list[str]) -> list[Row]:
+        if len(ids) > files.MAX_PER_MESSAGE or len(set(ids)) != len(ids):
+            raise BridgeError(
+                "VALIDATION_FAILED", f"一条消息最多带 {files.MAX_PER_MESSAGE} 个附件，不能重复"
+            )
+        rows: list[Row] = []
+        for attachment_id in ids:
+            row = self.store.get_attachment(attachment_id)
+            if row is None or row["session_id"] != session["id"] or row["direction"] != "input":
+                raise BridgeError("VALIDATION_FAILED", "没有这个附件，或者它不是这个会话的")
+            if row["turn_id"] is not None:
+                raise BridgeError("CONFLICT", "这个附件已经随另一条消息发出去了")
+            rows.append(row)
+        return rows
+
+    def _place_files(self, workdir: Path, inputs: list[Row]) -> list[str]:
+        """把不是图片的附件放进工作目录的 attachments/ 下，返回相对路径。"""
+        placed: list[str] = []
+        for attachment in inputs:
+            if files.is_image(attachment["media_type"]):
+                continue
+            folder = workdir / "attachments"
+            folder.mkdir(parents=True, exist_ok=True)
+            # 前面带上附件编号的后几位：同名的文件不互相覆盖
+            target = folder / f"{attachment['id'][-6:]}-{attachment['name']}"
+            shutil.copyfile(self.attachment_root / attachment["path"], target)
+            placed.append(f"attachments/{target.name}")
+        return placed
+
+    def _collect_output(
+        self, session: Row, turn_id: str, path: Path, *, image: bool = False
+    ) -> None:
+        """模型产出的文件收进附件：只收数据卷里（图片）或这个会话工作目录里的普通文件。"""
+        root = self.settings.data_dir if image else Path(session["workdir"])
+        try:
+            real = (path if path.is_absolute() else root / path).resolve()
+            if not real.is_relative_to(root.resolve()) or not real.is_file():
+                return
+            if real.is_relative_to(self.attachment_root.resolve()):
+                return  # 附件目录里的不再收一遍
+            if real.stat().st_size > files.MAX_BYTES:
+                return
+            data = real.read_bytes()
+        except OSError:
+            return
+        media_type = files.output_type(real.name)
+        if image and not (files.is_image(media_type) and files.looks_like(media_type, data)):
+            return
+        if len(self.store.turn_attachments(turn_id, "output")) >= files.MAX_OUTPUT_PER_TURN:
+            return
+        name = files.safe_name(real.name)
+        message_id = self.store.add_message(
+            session["id"], turn_id, "process", "image" if image else "file", name
+        )
+        self._put_attachment(
+            session["id"], "output", name, media_type, data, turn_id=turn_id, message_id=message_id
+        )
+        if image:
+            self.store.add_event(session["id"], turn_id, "image", {"name": name})
+
+    def attachment_file(self, session_id: str, attachment_id: str) -> tuple[Row, Path]:
+        row = self.store.get_attachment(attachment_id)
+        if row is None or row["session_id"] != session_id:
+            raise BridgeError("NOT_FOUND", "没有这个附件")
+        path = self.attachment_root / row["path"]
+        if not path.is_file():
+            raise BridgeError("NOT_FOUND", "这个附件的文件已经不在了")
+        return row, path
+
+    async def _imported(self, session: Row, *, again: bool = False) -> list[Row]:
+        """官方程序里已有的会话：第一次打开时向官方程序读一次全部内容存进 messages，之后读库。
+
+        经这座桥发的回合在官方程序的记录里也有，它们已经按回合存着，导入时不重复存。
+        """
+        if session["origin"] != "external":
+            return []
+        session_id = session["id"]
+        if again or session.get("imported_at") is None:
+            try:
+                native = await self._driver(session["slot"]).read(
+                    session["native_id"], session["workdir"]
+                )
+            except DriverError as error:
+                raise from_driver(error) from error
+            known: Counter[tuple[str, str]] = Counter()
+            for turn in self.store.list_turns(session_id=session_id, limit=10_000):
+                known[("user", turn["text"])] += 1
+                if turn["result_text"]:
+                    known[("assistant", turn["result_text"])] += 1
+            self.store.delete_imported_messages(session_id)
+            now = time.time()
+            for item in native:
+                text = redact(item.text)
+                if known[(item.role, text)] > 0:
+                    known[(item.role, text)] -= 1
+                    continue
+                self.store.add_message(
+                    session_id,
+                    None,
+                    item.role,
+                    "text",
+                    text,
+                    delivery="imported",
+                    at=item.at or now,
+                )
+            self.store.mark_imported(session_id, now)
+        return self.store.list_messages(session_id, imported=True)
+
+    async def reimport(self, session_id: str) -> Row:
+        """重新向官方程序读一次这个会话的内容（官方程序里又有了新内容时用）。"""
+        session = self._required_session(session_id)
+        if session["origin"] != "external":
+            raise BridgeError("CONFLICT", "只有官方程序里已有的会话才需要重新导入")
+        await self._imported(session, again=True)
+        return await self.conversation(session_id)
+
     async def conversation(self, session_id: str) -> Row:
         """一个会话的信息和消息：谁发的、回答、过程、失败原因、进行中已经给出的部分。"""
         session = self._required_session(session_id)
@@ -964,34 +1314,50 @@ class Engine:
         view["environment"] = env_view(environment) if environment else None
         events = self.store.list_events(session_id, limit=100_000)
         last_event_id = events[-1]["id"] if events else 0
-        messages: list[Row] = []
-        if session["origin"] == "external":
-            try:
-                native = await self._driver(session["slot"]).read(
-                    session["native_id"], session["workdir"]
-                )
-            except DriverError as error:
-                raise from_driver(error) from error
-            messages = [{"role": m.role, "text": redact(m.text), "at": m.at} for m in native]
-            return {"session": view, "messages": messages, "last_event_id": last_event_id}
+        # 官方程序里已有的内容（第一次打开时导入）排在前面，后面是经这座桥发的各个回合
+        messages: list[Row] = [
+            {"role": m["role"], "text": m["text"], "at": m["at"], "imported": True}
+            for m in await self._imported(session)
+        ]
         by_turn: dict[str, list[Row]] = {}
-        for event in events:
-            if event["turn_id"]:
-                by_turn.setdefault(event["turn_id"], []).append(event)
+        for message in self.store.list_messages(session_id, imported=False):
+            by_turn.setdefault(message["turn_id"], []).append(message)
+        files: dict[tuple[str, str], list[Row]] = {}
+        for attachment in self.store.list_attachments(session_id):
+            if attachment["turn_id"]:
+                key = (attachment["turn_id"], attachment["direction"])
+                files.setdefault(key, []).append(attachment_view(attachment))
         for turn in self.store.list_turns(session_id=session_id, limit=10_000):
             mine = by_turn.get(turn["id"], [])
-            queued = next((e for e in mine if e["kind"] == "queued"), None)
+            asked = next((m for m in mine if m["role"] == "user"), None)
             messages.append(
                 {
                     "role": "user",
                     "turn_id": turn["id"],
                     "text": turn["text"],
                     "at": turn["queued_at"],
-                    "by": (queued["payload"] or {}).get("by") if queued else None,
+                    "by": asked["by"] if asked else None,
                     "by_id": turn["caller_id"],
+                    "delivery": asked["delivery"] if asked else None,
+                    "attachments": files.get((turn["id"], "input"), []),
                 }
             )
-            steps = [step for step in (_step(e) for e in mine) if step]
+            # 回合中途插进来的消息：排在这一问之后、回答之前
+            for extra in mine:
+                if extra["role"] == "user" and asked is not None and extra["id"] != asked["id"]:
+                    messages.append(
+                        {
+                            "role": "user",
+                            "turn_id": turn["id"],
+                            "text": extra["text"],
+                            "at": extra["at"],
+                            "by": extra["by"],
+                            "by_id": (extra["data"] or {}).get("caller_id"),
+                            "delivery": extra["delivery"],
+                            "attachments": [],
+                        }
+                    )
+            steps = [step for step in (_step(m) for m in mine) if step]
             status = turn["status"]
             reply: Row = {
                 "role": "assistant",
@@ -1000,6 +1366,7 @@ class Engine:
                 "at": turn["finished_at"] or turn["started_at"] or turn["queued_at"],
                 "text": "",
                 "steps": steps,
+                "attachments": files.get((turn["id"], "output"), []),
             }
             if status == "completed":
                 reply["text"] = turn["result_text"] or ""
@@ -1013,11 +1380,13 @@ class Engine:
                 # 没做完（进行中、失败、结果未知、已取消）：显示已经给出的部分
                 reply["text"] = "\n\n".join(s["text"] for s in steps if s["kind"] == "message")
                 reply["steps"] = [s for s in steps if s["kind"] != "message"]
-                if status in ("failed", "unknown"):
+                if status in ("failed", "unknown", "interrupted"):
                     reply["failure"] = {
                         "kind": turn["error_kind"],
                         "message": turn["error_message"],
                     }
+                    if status == "interrupted":
+                        reply["resume"] = self._resume_view(turn)
                 elif status == "queued":
                     reply["ahead_in_session"] = self.store.queue_position(turn)
             messages.append(reply)
@@ -1038,6 +1407,234 @@ class Engine:
             "busy": busy,
             "last_id": events[-1]["id"] if events else after,
         }
+
+    # ---- 额度与自动续跑（T-0237，docs/v2/LLM_BRIDGE_QUOTA_PLAN.md）----
+    def _platforms_of(self, slot: str) -> list[str]:
+        return [
+            p
+            for p in self.all_platforms()
+            if any(c.slot == slot and c.platform == p for c in self.channels)
+        ]
+
+    def _save_quota(self, slot: str, windows: list[Row]) -> None:
+        """同一个账号上的平台（ChatGPT 和 Codex）共用一份额度。"""
+        clean = [w for w in windows if isinstance(w, dict) and w.get("kind")]
+        for platform in self._platforms_of(slot):
+            self.store.save_quota(platform, clean)
+
+    def _resume_view(self, turn: Row) -> Row:
+        return {
+            "state": turn[
+                "resume_state"
+            ],  # pending / forced / done / cancelled / skipped / exhausted
+            "at": turn["resume_at"],
+            "attempt": turn["resume_attempt"],
+            "resumed_by": turn["resumed_by"],
+        }
+
+    async def _wait_platform(self, platform: str) -> None:
+        while True:
+            pause = self.store.pauses().get(platform)
+            remaining = pause["until"] - time.time() if pause else 0
+            if remaining <= 0 and pause is None:
+                return
+            # 到点后由续跑的循环解除暂停（它先把“继续”排到队首），这里只等它
+            event = self._pause_wake.setdefault(platform, asyncio.Event())
+            event.clear()
+            self._resume_wake.set()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(event.wait(), max(0.05, min(remaining, 30)))
+
+    def _interrupt(self, turn: Row, session: Row, error: DriverError) -> None:
+        """这个回合是被平台的额度打断的：记成中断，暂停这个平台，到重置时间后续跑。"""
+        now = time.time()
+        resets = error.resets_at or quota.parse_reset(error.message)
+        estimated = not resets
+        if not resets:
+            resets = (
+                now + self.settings.quota_fallback_seconds
+            )  # 平台没说什么时候重置：按一个窗口估
+        until = max(resets, now) + self.settings.resume_margin_seconds
+        attempt = int(turn["resume_attempt"] or 0)
+        state = "pending" if attempt < self.setting("auto_resume_max") else "exhausted"
+        platform = session["platform"]
+        current = self.store.pauses().get(platform)
+        self.store.set_pause(
+            platform,
+            max(until, current["until"]) if current else until,
+            estimated,
+            redact(error.message)[:200],
+        )
+        self.store.add_event(
+            session["id"],
+            turn["id"],
+            "interrupted",
+            {"kind": "quota_exceeded", "resume_at": until, "estimated": estimated, "state": state},
+        )
+        self.store.update_turn(turn["id"], resume_at=until, resume_state=state)
+        self._finish(
+            turn["id"],
+            status="interrupted",
+            error_kind="quota_exceeded",
+            error_message=redact(error.message),
+        )
+        self._resume_wake.set()
+
+    async def _resume_loop(self) -> None:
+        """到重置时间后：解除平台的暂停，给被打断的会话各发一句“继续”。"""
+        while True:
+            try:
+                now = time.time()
+                for platform, pause in self.store.pauses().items():
+                    if pause["until"] <= now:
+                        await self._resume_platform(platform)
+                waits = [p["until"] - time.time() for p in self.store.pauses().values()]
+                timeout = min(60.0, max(0.05, min(waits))) if waits else 60.0
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("quota resume loop failed")
+                timeout = 30.0
+            self._resume_wake.clear()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._resume_wake.wait(), timeout)
+
+    async def _resume_platform(self, platform: str) -> None:
+        channel = next((c for c in self.channels if c.platform == platform), None)
+        driver = self.drivers.get(channel.slot) if channel else None
+        if driver is not None and channel is not None:
+            # 能随时查额度的平台：先确认真的回来了，没回来就按新的重置时间接着等
+            windows: list[Row] | None = None
+            with contextlib.suppress(DriverError):
+                windows = await driver.quota()
+            if windows:
+                self._save_quota(channel.slot, windows)
+                later = [
+                    w["resets_at"]
+                    for w in windows
+                    if w.get("status") == "exceeded" and (w.get("resets_at") or 0) > time.time()
+                ]
+                if later:
+                    self.store.set_pause(
+                        platform,
+                        min(later) + self.settings.resume_margin_seconds,
+                        False,
+                        "额度还没有重置",
+                    )
+                    return
+        pending = self.store.pending_resumes(platform)
+        for turn in pending:
+            self._auto_resume(turn)
+        self.store.clear_pause(platform)
+        event = self._pause_wake.get(platform)
+        if event is not None:
+            event.set()
+
+    def _auto_resume(self, turn: Row) -> None:
+        session = self.store.get_session(turn["session_id"])
+        forced = turn["resume_state"] == "forced"
+        reason = ""
+        if session is None or session["status"] != "active":
+            reason = "会话已归档"
+        elif not self.platform_enabled(session["platform"]):
+            reason = "这个平台已经不由这座桥控制"
+        elif not forced and not self.setting("auto_resume"):
+            reason = "没有打开“额度用完后自动继续”"
+        if reason or session is None:
+            self.store.update_turn(turn["id"], resume_state="skipped")
+            if session is not None:
+                self.store.add_event(
+                    session["id"], turn["id"], "resume_skipped", {"reason": reason}
+                )
+            return
+        attempt = int(turn["resume_attempt"] or 0) + 1
+        new = self.store.create_turn(
+            session["id"],
+            SYSTEM_CALLER,
+            f"resume:{turn['id']}:{attempt}",
+            self.setting("resume_text"),
+            by=SYSTEM_LABEL,
+        )
+        edge = self.store.queue_edge(session["id"], first=True)
+        self.store.update_turn(
+            new["id"],
+            position=(edge if edge is not None else new["position"])
+            - 1,  # 排在这个会话队列的最前面
+            resume_attempt=attempt,
+            resumes_turn_id=turn["id"],
+        )
+        self.store.update_turn(turn["id"], resume_state="done", resumed_by=new["id"])
+        self.store.add_event(
+            session["id"],
+            new["id"],
+            "queued",
+            {"by": SYSTEM_LABEL, "auto_resume": True, "resumes": turn["id"], "attempt": attempt},
+        )
+        self._enqueue(self.store.get_turn(new["id"]) or new)
+
+    def _interrupted_turn(self, turn_id: str) -> tuple[Row, Row]:
+        turn = self.store.get_turn(turn_id)
+        if turn is None:
+            raise BridgeError("NOT_FOUND", "没有这个回合")
+        if turn["status"] != "interrupted" or turn["error_kind"] != "quota_exceeded":
+            raise BridgeError("CONFLICT", "这个回合不是被额度打断的")
+        if turn["resume_state"] == "done":
+            raise BridgeError("CONFLICT", "这个回合已经续跑过了")
+        return turn, self._required_session(turn["session_id"])
+
+    def resume_now(self, turn_id: str) -> Row:
+        """不等重置时间，现在就试着续跑（也用于“自动继续”关着、或已经超过次数的时候）。"""
+        turn, session = self._interrupted_turn(turn_id)
+        self.store.update_turn(turn_id, resume_state="forced", resume_at=time.time())
+        self.store.set_pause(session["platform"], time.time(), False, "手动：现在就试")
+        self._resume_wake.set()
+        return self.turn_view(self.store.get_turn(turn_id) or turn)
+
+    def cancel_resume(self, turn_id: str) -> Row:
+        turn, _ = self._interrupted_turn(turn_id)
+        self.store.update_turn(turn_id, resume_state="cancelled")
+        return self.turn_view(self.store.get_turn(turn_id) or turn)
+
+    async def quota_view(self, refresh: bool = False) -> Row:
+        """各平台的额度：每个窗口已用多少、什么时候重置、什么时候看到的；以及是否因为额度暂停着。"""
+        if refresh:
+            for slot, driver in self.drivers.items():
+                windows: list[Row] | None = None
+                with contextlib.suppress(DriverError):
+                    windows = await driver.quota()
+                if windows:
+                    self._save_quota(slot, windows)
+        now = time.time()
+        pauses, tokens = self.store.pauses(), self.store.tokens_since(now - 5 * 3600)
+        rows: dict[str, list[Row]] = {}
+        for row in self.store.quota_windows():
+            passed = bool(row["resets_at"]) and row["resets_at"] <= now
+            rows.setdefault(row["platform"], []).append(
+                {
+                    "kind": row["kind"],
+                    # 重置时间已经过了：旧的百分比不再算数，等下一次回合确认
+                    "used_percent": None if passed else row["used_percent"],
+                    "resets_at": row["resets_at"],
+                    "reset_passed": passed,
+                    "status": "ok" if passed else row["status"],
+                    "plan": row["plan"],
+                    "observed_at": row["observed_at"],
+                }
+            )
+        out: Row = {}
+        for platform in self.platforms():
+            channel = next((c for c in self.channels if c.platform == platform), None)
+            owner = self.drivers.get(channel.slot) if channel else None
+            pause = pauses.get(platform)
+            out[platform] = {
+                "windows": rows.get(platform, []),
+                "can_refresh": bool(getattr(owner, "can_query_quota", False)),
+                "paused_until": pause["until"] if pause else None,
+                "pause_estimated": bool(pause["estimated"]) if pause else False,
+                "waiting_resume": len(self.store.pending_resumes(platform)),
+                "tokens_5h": tokens.get(platform, 0),
+            }
+        return {"platforms": out}
 
     # ---- 队列（T-0236）----
     def platform_load(self) -> Row:
@@ -1100,6 +1697,9 @@ class Engine:
                 "VALIDATION_FAILED", f"消息太长（最多 {self.setting('max_text_chars')} 个字符）"
             )
         self.store.update_turn(turn_id, text=text)
+        asked = self.store.user_message(turn_id)
+        if asked is not None:
+            self.store.update_message_text(asked["id"], text)
         self.store.add_event(turn["session_id"], turn_id, "edited", {})
         return self.queue_view(turn["session_id"])
 
@@ -1166,6 +1766,8 @@ class Engine:
             "queued": queued,
             # 每个平台进行中的会话数、在等的会话数和上限（T-0236）
             "load": self.platform_load(),
+            # 各平台的额度与因为额度暂停的情况（T-0237）
+            "quota": (await self.quota_view())["platforms"],
             "running": running,
         }
 
@@ -1196,21 +1798,28 @@ def _event_view(event: Row) -> Row:
     return view
 
 
-def _step(event: Row) -> Row | None:
-    """回合进行中的一条事件 → 页面“过程”里的一步；别的事件（排队、完成等）不算。"""
-    payload = event["payload"] or {}
-    kind = event["kind"]
-    if kind in ("message", "notice") and payload.get("text"):
-        return {"kind": kind, "text": str(payload["text"]), "at": event["at"]}
-    if kind == "command" and payload.get("command"):
-        return {"kind": "command", "text": str(payload["command"]), "at": event["at"]}
-    if kind == "files" and payload.get("paths"):
-        return {
-            "kind": "files",
-            "text": "、".join(str(p) for p in payload["paths"]),
-            "at": event["at"],
-        }
-    return None
+def _step(message: Row) -> Row | None:
+    """回合里的一行内容 → 页面“过程”里的一步；提问不算。"""
+    if message["role"] == "user":
+        return None
+    kind = "message" if message["role"] == "assistant" else message["kind"]
+    step: Row = {"kind": kind, "text": message["text"], "at": message["at"]}
+    data = message["data"] or {}
+    for key in ("name", "truncated", "error", "exit_code"):
+        if data.get(key) not in (None, False, ""):
+            step[key] = data[key]
+    return step
+
+
+def attachment_view(attachment: Row) -> Row:
+    return {
+        "id": attachment["id"],
+        "name": attachment["name"],
+        "media_type": attachment["media_type"],
+        "size": attachment["size"],
+        "direction": attachment["direction"],
+        "at": attachment["at"],
+    }
 
 
 def env_view(env: Row) -> Row:
