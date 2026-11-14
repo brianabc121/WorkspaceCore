@@ -803,6 +803,17 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 
 写操作在这座桥停用时 `409 BRIDGE_DISABLED`；桥没有及时回应、结果未知时 `504 EXTERNAL_TIMEOUT`；会话桥自己的拒绝（未登录、限额、密钥拦截等）按原样带着说明返回。
 
+**多模型同问**（T-0232；都在 `/api/v1/llm_bridge/chat/groups` 下，owner / admin 可用，写操作带 CSRF）。一组同问可以跨 MCP 管理器，分组登记在工作台；
+每个成员是某座桥上的一个普通会话，内容和进度用上面的单会话接口读。
+
+| 接口 | 说明 |
+|---|---|
+| `GET .../chat/groups?status` | 各组同问（按最后活动排序）：`title`、`status`（`active` / `archived`）、`owner`、`owner_kind`（`me` / `user`）、`members`；`status` 默认 `active` |
+| `POST .../chat/groups` | 把同一个问题同时发给几个模型：`text`、`request_id`（同一个人用同一个再建一次，得到的是同一组）、可选 `title`、`targets`（2 ~ 6 个：`bridge_id`、`platform`、`mode`、可选 `model`、`effort`、`environment`）。`201` 返回 `group` 和每个目标的 `results`（`turn` 或 `error`）。某个目标失败只记在它自己的成员里；一个会话都没建成时 `409`；管理器停用时 `409 BRIDGE_DISABLED` |
+| `GET .../chat/groups/{group_id}` | 一组和它的成员：`position`、`bridge_id`（登记被删除后为空）、`bridge_name`、`bridge_enabled`、`platform`、`mode`、`model`、`session_id`（没建成时为空）、`error` |
+| `POST .../chat/groups/{group_id}/messages` | 向每个成员继续发：`text`、`request_id`、`takeover`；返回每个成员的 `turn` 或 `error`（管理器停用、登记被删除、会话没建成的这次不发）。别人建的一组要 `takeover=true`，否则 `409 TAKEOVER_REQUIRED`；已归档的一组 `409` |
+| `POST .../chat/groups/{group_id}/archive` | 归档这一组：只是不再并排显示，每个模型的会话不受影响 |
+
 **智能体工具**（只列给打开了权限的实例；每个工具都有可选参数 `bridge`，实例能用多个 MCP 管理器时必填，`llm_bridge_status` 除外：不填时返回 `data.bridges`，列出它能用的每一个和各自控制的平台、登录情况；连不上的标 `reachable=false`）：
 
 | 工具 | 风险 | 说明 |

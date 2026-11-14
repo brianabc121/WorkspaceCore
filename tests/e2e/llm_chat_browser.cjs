@@ -1,11 +1,12 @@
-// 大模型聚合聊天浏览器验收（T-0231，docs/v2/LLM_CHAT_PLAN.md）：
-// 真实后端 + 真实前端 + 一个验收用的 MCP 管理器——它里面的 Claude 程序换成了不访问外网的假程序
+// 大模型聚合聊天浏览器验收（T-0231、T-0232，docs/v2/LLM_CHAT_PLAN.md）：
+// 真实后端 + 真实前端 + 一个验收用的 MCP 管理器——它里面的 Claude 和 WorkBuddy 程序换成了不访问外网的假程序
 // （services/llm-bridge/tests/fakes/fake_cli.py：参数和事件的形状与真实程序一致，回答是把收到的话原样带回来；
 // 收到 hang 时会一直不回答，用来验收“停止”）。别的都是真的：会话桥、工作台接口、页面。
 //
 // 没有管理器时的说明 → 新建会话并发第一条 → 回答、过程、标题 → Enter 再发一条 → 停止 → 改标题 → 搜索 →
 // 刷新后还在 → 别的管理员建的会话要确认一次才能接着发 → member 用不了 → 归档后不能再发 →
-// 管理器停用后只能看 → 审计里没有消息内容 → 手机宽度两屏。
+// 管理器停用后只能看 → 多模型同问（同一个问题同时发给两个模型、并排看、继续问、回到单会话、别的管理员要确认、归档）→
+// 审计里没有消息内容 → 手机宽度两屏（同问一次看一栏）。
 //
 // 不验证的：各平台的真实登录和真实回答（需要账号）；智能体建的会话（compose job 没有接入入口，
 // 由 services/api/tests/test_module_llm_bridge_chat.py 和前端测试覆盖）。
@@ -30,6 +31,7 @@ const ADMIN_NAME = `聊天管理员 ${run}`
 const MANAGER = `验收用 ${run}`
 const FIRST = `你好，验收 ${run}`
 const TITLE = `验收会话 ${run}`
+const QUESTION = `同问 ${run}`
 // 假的 API 密钥：假程序只看“有没有”，不会发给任何平台
 const FAKE_KEY = `e2e-not-a-real-key-${randomBytes(12).toString('hex')}`
 
@@ -279,16 +281,73 @@ async function main() {
     check(on.status === 200, `没能重新启用管理器：${JSON.stringify(on)}`)
     step('管理器停用后会话还能看，页面和接口都不能新建、不能发送')
 
+    // ---------------------------------------------------------------- 多模型同问（T-0232）
+    const buddyIn = await api(page, workspace, 'POST', `/api/v1/llm_bridge/bridges/${bridgeId}/accounts/workbuddy/login`, { method: 'api_key', api_key: FAKE_KEY })
+    check(buddyIn.status === 200, `WorkBuddy 登录失败：${JSON.stringify(buddyIn)}`)
+    const groupsApi = '/api/v1/llm_bridge/chat/groups'
+    const tooFew = await api(page, workspace, 'POST', groupsApi, { text: 'x', request_id: requestId(), targets: [{ bridge_id: bridgeId, platform: 'claude', mode: 'chat' }] })
+    check(tooFew.status === 422, `只有一个目标应被拒绝：${tooFew.status}`)
+    await page.goto(`${base}/llm_bridge?m=${bridgeId}`)
+    await side(page).getByRole('button', { name: '多模型同问' }).click()
+    const compare = page.getByRole('form', { name: '多模型同问' })
+    // 当前管理器上已登录、能对话的平台先加进来
+    const chosen = compare.getByRole('list', { name: '发给（2 个）' })
+    await chosen.waitFor({ timeout: 60000 })
+    check((await chosen.getByRole('listitem').allInnerTexts()).join('|') === `Claude · 默认模型 · ${MANAGER}|WorkBuddy · 默认模型 · ${MANAGER}`, `默认应选中已登录的两个平台：${await chosen.innerText()}`)
+    await compare.getByLabel('问题').fill(QUESTION)
+    await compare.getByRole('button', { name: '发给 2 个模型' }).click()
+    await page.getByRole('heading', { level: 2, name: QUESTION }).waitFor({ timeout: 60000 })
+    const groupId = new URL(page.url()).searchParams.get('g')
+    check(/^[0-9a-f-]{36}$/.test(groupId || ''), `地址里应带上这一组：${page.url()}`)
+    const claudeColumn = page.getByRole('region', { name: `Claude（${MANAGER}）` })
+    const buddyColumn = page.getByRole('region', { name: `WorkBuddy（${MANAGER}）` })
+    await claudeColumn.getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
+    await buddyColumn.getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
+    const entry = side(page).getByRole('region', { name: '同问' }).getByRole('button', { name: new RegExp(QUESTION) })
+    check(/同问 2 个模型 · 我/.test(await entry.innerText()), '列表的“同问”里应有这一组')
+    // 继续问：两个模型都收到
+    const ask = page.getByRole('form', { name: '向这一组继续发' })
+    await ask.getByRole('textbox', { name: '问题内容' }).fill('再问一句')
+    await ask.getByRole('textbox', { name: '问题内容' }).press('Enter')
+    await claudeColumn.getByText(':: 再问一句').waitFor({ timeout: 60000 })
+    await buddyColumn.getByText(':: 再问一句').waitFor({ timeout: 60000 })
+    // 每个模型就是一个普通会话：可以回到单会话里单独继续
+    await claudeColumn.getByRole('link', { name: '在这个会话里继续' }).click()
+    await page.getByRole('heading', { level: 2, name: QUESTION }).waitFor()
+    check(/^bs_/.test(new URL(page.url()).searchParams.get('s') || ''), '应回到单会话')
+    await composer(page).fill('单独继续')
+    await composer(page).press('Enter')
+    await thread(page).getByText(':: 单独继续').waitFor({ timeout: 60000 })
+    // 别的管理员能看到这一组；不确认不能接着发
+    const second = await login(browser, adminEmail, problems, 'admin')
+    await openAs(second.page, workspace, '/llm_bridge')
+    const theirGroups = await api(second.page, workspace, 'GET', groupsApi)
+    check(theirGroups.body?.groups?.find((g) => g.id === groupId)?.owner_kind === 'user', `admin 应看到 owner 建的这一组：${JSON.stringify(theirGroups.body)}`)
+    const noTakeover = await api(second.page, workspace, 'POST', `${groupsApi}/${groupId}/messages`, { text: 'x', request_id: requestId() })
+    check(noTakeover.status === 409 && noTakeover.body?.error?.code === 'TAKEOVER_REQUIRED', `别人建的一组不确认应被拒绝：${JSON.stringify(noTakeover)}`)
+    await second.context.close()
+    // 归档这一组：不再并排显示，每个模型的会话还在
+    await page.goto(`${base}/llm_bridge?m=${bridgeId}&g=${groupId}`)
+    await claudeColumn.getByText(':: 单独继续').waitFor({ timeout: 60000 })
+    page.once('dialog', (dialog) => dialog.accept())
+    await page.getByRole('button', { name: '归档这一组' }).click()
+    await page.getByText('这一组同问已归档，不能再一起发').waitFor()
+    await side(page).getByRole('region', { name: '同问' }).waitFor({ state: 'detached' })
+    await side(page).getByRole('button', { name: new RegExp(QUESTION) }).first().waitFor()
+    const archivedGroupSend = await api(page, workspace, 'POST', `${groupsApi}/${groupId}/messages`, { text: 'x', request_id: requestId() })
+    check(archivedGroupSend.status === 409, `归档后的一组接口也应拒绝：${archivedGroupSend.status}`)
+    step('多模型同问：默认选中已登录的平台；同一个问题两个模型并排回答；继续问、回到单会话；别的管理员要确认；归档后会话还在')
+
     // ---------------------------------------------------------------- 审计：记了动作，没有消息内容
     const audit = await api(page, workspace, 'GET', '/api/v1/audit-logs?limit=100&action_prefix=llm_bridge.chat_')
     check(audit.status === 200, `读不到审计：${JSON.stringify(audit)}`)
     const actions = new Set(audit.body.items.map((item) => item.action))
-    for (const action of ['chat_session_created', 'chat_message_sent', 'chat_takeover_sent', 'chat_turn_cancelled', 'chat_session_renamed', 'chat_session_archived']) {
+    for (const action of ['chat_session_created', 'chat_message_sent', 'chat_takeover_sent', 'chat_turn_cancelled', 'chat_session_renamed', 'chat_session_archived', 'chat_group_created', 'chat_group_sent', 'chat_group_archived']) {
       check(actions.has(`llm_bridge.${action}`), `审计里应有 llm_bridge.${action}：${[...actions].join('、')}`)
     }
     const auditText = JSON.stringify(audit.body.items)
-    check(!auditText.includes(FIRST) && !auditText.includes('我来补充一句') && !auditText.includes(FAKE_KEY), '审计里不应有消息内容和密钥')
-    step('审计记下了新建、发送、接着别人的会话发、停止、改标题、归档，不含消息内容')
+    check(!auditText.includes(FIRST) && !auditText.includes('我来补充一句') && !auditText.includes(QUESTION) && !auditText.includes(FAKE_KEY), '审计里不应有消息内容和密钥')
+    step('审计记下了新建、发送、接着别人的会话发、停止、改标题、归档和同问的新建、继续、归档，不含消息内容')
 
     // ---------------------------------------------------------------- 手机宽度：列表和对话分成两屏
     const phone = await login(browser, ownerEmail, problems, 'owner（手机）', { width: 390, height: 844 })
@@ -309,8 +368,17 @@ async function main() {
     await side(phone.page).getByRole('button', { name: '新建会话' }).click()
     await phone.page.getByRole('form', { name: '新建会话' }).getByLabel('第一条消息').waitFor()
     check(await noHorizontalScroll(phone.page), '手机宽度下新建会话不应横向滚动')
+    // 同问在手机上一次看一栏，用标签切换
+    await phone.page.goto(`${base}/llm_bridge?m=${bridgeId}&g=${groupId}`)
+    const tabs = phone.page.getByRole('tablist', { name: '这一组里的模型' })
+    await tabs.waitFor()
+    await phone.page.getByRole('region', { name: `Claude（${MANAGER}）` }).getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
+    check(!(await phone.page.getByRole('region', { name: `WorkBuddy（${MANAGER}）` }).isVisible()), '手机上一次只看一栏')
+    await tabs.getByRole('tab', { name: new RegExp('WorkBuddy') }).click()
+    await phone.page.getByRole('region', { name: `WorkBuddy（${MANAGER}）` }).getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
+    check(await noHorizontalScroll(phone.page), '手机宽度下同问不应横向滚动')
     await phone.context.close()
-    step('手机宽度（390）：列表和对话分成两屏，能返回，会话信息从右上角打开，都不横向滚动')
+    step('手机宽度（390）：列表和对话分成两屏，能返回，会话信息从右上角打开；同问一次看一栏；都不横向滚动')
 
     check(problems.length === 0, `检查过程中出现错误：\n  ${problems.join('\n  ')}`)
     console.log('大模型聚合聊天浏览器验收全部通过')
@@ -321,6 +389,7 @@ async function main() {
         const left = await api(ownerPage, workspace, 'GET', '/api/v1/llm_bridge/bridges')
         for (const bridge of left.body?.bridges ?? []) {
           await api(ownerPage, workspace, 'POST', `/api/v1/llm_bridge/bridges/${bridge.id}/accounts/claude/logout`)
+          await api(ownerPage, workspace, 'POST', `/api/v1/llm_bridge/bridges/${bridge.id}/accounts/workbuddy/logout`)
           await api(ownerPage, workspace, 'DELETE', `/api/v1/llm_bridge/bridges/${bridge.id}`)
         }
         await api(ownerPage, workspace, 'PATCH', '/api/v1/modules/llm_bridge', { enabled: false })
