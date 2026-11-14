@@ -4,7 +4,7 @@ import ManagementSection from '../../components/management/ManagementSection.vue
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import { bridgeError, type Bridge, type BridgeStatus, type LlmBridgeApi } from './api'
 
-// 会话桥的设置（保存在会话桥里）：并发、单个回合的时限、每个实例每小时的发送次数、单条指令的长度上限。
+// 一个 MCP 管理器的设置（保存在它自己那里）：并发、单个回合的时限、每个实例每小时的发送次数、单条指令的长度上限。
 // 上下限与后端 BridgeSettingsPatch 一致。
 const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeStatus; loading: boolean; loadError: unknown; canWrite: boolean }>()
 const emit = defineEmits<{ reload: [] }>()
@@ -35,14 +35,14 @@ async function save() {
 </script>
 
 <template>
-  <ManagementSection title="设置" :label="`设置：${bridge.name}`" description="这些设置保存在会话桥里，对这座会话桥上的所有平台生效。">
+  <ManagementSection title="设置" :label="`设置：${bridge.name}`" description="这些设置保存在这个 MCP 管理器里，对它控制的所有平台生效。">
     <ActionFeedback :error="error" :notice="notice" />
     <p v-if="loading" role="status" class="data-state">正在读取设置…</p>
     <div v-else-if="!settings" class="data-state">
-      <p role="alert">{{ props.loadError ? bridgeError(props.loadError) : `连不上这座会话桥：${status?.error || '没有给出原因'}` }}</p>
+      <p role="alert">{{ props.loadError ? bridgeError(props.loadError) : `连不上这个 MCP 管理器：${status?.error || '没有给出原因'}` }}</p>
       <button type="button" class="secondary-button" @click="emit('reload')">重试</button>
     </div>
-    <form v-else class="asv-form lb-form" novalidate aria-label="会话桥设置" @submit.prevent="save">
+    <form v-else class="asv-form lb-form" novalidate aria-label="MCP 管理器设置" @submit.prevent="save">
       <fieldset class="lb-checks lb-grid" :disabled="!canWrite || busy">
         <div v-for="f in FIELDS" :key="f.key" class="form-field">
           <label :for="`lb-set-${f.key}`">{{ f.label }}</label>
@@ -50,7 +50,7 @@ async function save() {
           <p class="form-help">{{ f.help }}</p>
         </div>
       </fieldset>
-      <p class="form-help">Claude 订阅登录的风险确认：{{ settings.claude_subscription_ack ? '已确认' : '未确认（在“状态与登录”里用订阅方式登录 Claude 时确认）' }}。</p>
+      <p class="form-help">Claude 订阅登录的风险确认：{{ settings.claude_subscription_ack ? '已确认' : '未确认（在“平台与账号”里用订阅方式登录 Claude 时确认）' }}。</p>
       <div v-if="canWrite" class="lb-actions"><button type="submit" class="primary-button" :disabled="busy">{{ busy ? '正在保存…' : '保存设置' }}</button></div>
     </form>
   </ManagementSection>

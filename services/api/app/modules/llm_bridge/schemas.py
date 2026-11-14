@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 Platform = Literal["chatgpt", "codex", "claude", "workbuddy"]
 Slot = Literal["openai", "claude", "workbuddy"]
+ALL_PLATFORMS: tuple[str, ...] = ("chatgpt", "codex", "claude", "workbuddy")
 Sandbox = Literal["read_only", "workspace_write", "exec"]
 
 
@@ -23,6 +24,13 @@ class LlmBridgeIn(_In):
         min_length=8, max_length=300, description="会话桥的地址，例如 http://10.0.0.5:8787"
     )
     token: str = Field(min_length=32, max_length=200, description="会话桥的管理令牌")
+    platforms: list[Platform] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4,
+        description="这个 MCP 管理器控制的平台。填了就在登记时写进会话桥，同时验证地址和令牌："
+        "连不上或令牌不对时不登记；不填则不验证，会话桥保持原来的设置",
+    )
 
 
 class LlmBridgePatch(_In):
@@ -49,6 +57,11 @@ class LlmBridgeList(BaseModel):
 class LlmBridgeAccountOut(BaseModel):
     slot: str
     label: str
+    enabled: bool = Field(
+        default=True,
+        description="这个 MCP 管理器是否控制这个账号对应的平台；"
+        "不控制时不能登录，已有的登录可以退出",
+    )
     state: str = Field(description="logged_in / logged_out / mismatch / unavailable")
     identity: str | None = Field(
         description="账号标识（打码）；用密钥或令牌登录时会话桥看不到是哪个账号，为空"
@@ -68,6 +81,7 @@ class LlmBridgeChannelOut(BaseModel):
     platform: str
     mode: str
     slot: str
+    enabled: bool = Field(default=True, description="这个 MCP 管理器是否控制这个平台")
     available: bool
     note: str
 
@@ -78,6 +92,9 @@ class LlmBridgeSettings(BaseModel):
     send_per_hour: int = Field(ge=1, le=10000, description="每个实例每小时的发送次数")
     max_text_chars: int = Field(ge=1, le=1_000_000)
     claude_subscription_ack: bool = Field(description="已确认了解 Claude 订阅登录的合规风险")
+    platforms: list[str] = Field(
+        default=list(ALL_PLATFORMS), description="这个 MCP 管理器控制的平台"
+    )
 
 
 class LlmBridgeSettingsPatch(_In):
@@ -86,12 +103,20 @@ class LlmBridgeSettingsPatch(_In):
     send_per_hour: int | None = Field(default=None, ge=1, le=10000)
     max_text_chars: int | None = Field(default=None, ge=1, le=1_000_000)
     claude_subscription_ack: bool | None = None
+    platforms: list[Platform] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4,
+        description="这个 MCP 管理器控制的平台（至少一个）。取消勾选的平台不能登录、"
+        "不能新建会话和发送；已有的登录和会话记录保留",
+    )
 
 
 class LlmBridgeStatusOut(BaseModel):
     reachable: bool
     error: str = Field(default="", description="连不上时的原因")
     version: str = ""
+    platforms: list[str] = Field(default=[], description="这个 MCP 管理器控制的平台")
     accounts: list[LlmBridgeAccountOut] = []
     channels: list[LlmBridgeChannelOut] = []
     queued: int = 0
@@ -191,6 +216,12 @@ class LlmBridgeGrantIn(_In):
     can_account: bool = False
     can_takeover: bool = False
     platforms: list[Platform] = Field(default=[], description="允许的平台；空表示都允许")
+    bridge_ids: list[UUID] | None = Field(
+        default=None,
+        max_length=100,
+        description="允许用的 MCP 管理器；不填（null）表示都允许，包括以后新增的；"
+        "空列表表示一个都不允许",
+    )
 
 
 class LlmBridgeGrantOut(BaseModel):
@@ -201,6 +232,9 @@ class LlmBridgeGrantOut(BaseModel):
     can_account: bool
     can_takeover: bool
     platforms: list[str]
+    bridge_ids: list[UUID] | None = Field(
+        description="允许用的 MCP 管理器；null 表示都允许，空列表表示一个都不允许"
+    )
 
 
 class LlmBridgeGrantList(BaseModel):

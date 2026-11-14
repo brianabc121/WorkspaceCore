@@ -8,21 +8,10 @@
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query, Response, Security, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends, Path, Query, Response, status
 
-from app.api.deps import (
-    authenticated,
-    csrf_protected,
-    get_app_settings,
-    get_connectors,
-    get_db,
-    workspace_admin,
-    workspace_owner,
-)
-from app.core.config import Settings
-from app.domain.connectors import ConnectorRuntime
-from app.domain.policy import WorkspaceAccess
+from app.api.deps import csrf_protected
+from app.modules.llm_bridge.deps import Admin, Owner, Service, router
 from app.modules.llm_bridge.schemas import (
     LlmBridgeAccountStateOut,
     LlmBridgeEnvironmentIn,
@@ -44,30 +33,14 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeStatusOut,
     LlmBridgeTurnList,
 )
-from app.modules.llm_bridge.service import LlmBridgeService
 from app.schemas.common import error_responses
 
-router = APIRouter(tags=["llm_bridge"], dependencies=[Security(authenticated)])
-
-Admin = Annotated[WorkspaceAccess, Depends(workspace_admin)]
-Owner = Annotated[WorkspaceAccess, Depends(workspace_owner)]
 SlotPath = Annotated[Literal["openai", "claude", "workbuddy"], Path(description="账号槽位")]
 EnvId = Annotated[str, Path(pattern=r"^be_[0-9a-f]{20}$")]
 SessionId = Annotated[str, Path(pattern=r"^bs_[0-9a-f]{20}$")]
 _write = [Depends(csrf_protected)]
 _read_errors = error_responses(401, 403, 404, 503)
 _write_errors = error_responses(401, 403, 404, 409, 422, 503)
-
-
-def get_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    settings: Annotated[Settings, Depends(get_app_settings)],
-    runtime: Annotated[ConnectorRuntime, Depends(get_connectors)],
-) -> LlmBridgeService:
-    return LlmBridgeService(db, settings, runtime)
-
-
-Service = Annotated[LlmBridgeService, Depends(get_service)]
 
 
 # ---- 会话桥登记 ----
@@ -79,8 +52,10 @@ async def llm_bridge_list_bridges(access: Admin, service: Service) -> LlmBridgeL
 
 @router.post(
     "/llm_bridge/bridges",
-    summary="登记一座会话桥（owner）",
-    description="令牌加密保存，不回传。409 NAME_TAKEN：已经有同名的会话桥。",
+    summary="登记一座会话桥，也就是新增一个 MCP 管理器（owner）",
+    description="令牌加密保存，不回传。填了 platforms（控制的平台）就先写进会话桥，"
+    "同时验证地址和令牌：503 EXTERNAL_UNAVAILABLE / BRIDGE_AUTH_FAILED 时不登记；"
+    "409 BRIDGE_OUTDATED：会话桥版本太旧，不支持选择平台。409 NAME_TAKEN：已经有同名的。",
     status_code=status.HTTP_201_CREATED,
     dependencies=_write,
     responses=_write_errors,
@@ -129,7 +104,7 @@ async def llm_bridge_bridge_status(
 
 @router.put(
     "/llm_bridge/bridges/{bridge_id}/settings",
-    summary="修改会话桥的设置：并发、时限、每小时发送次数等（owner）",
+    summary="修改会话桥的设置：控制的平台、并发、时限、每小时发送次数等（owner）",
     dependencies=_write,
     responses=_write_errors,
 )
@@ -141,7 +116,7 @@ async def llm_bridge_update_settings(
     data = await service.admin_write(
         access, row, "settings_updated", "PUT", "/settings", values, values
     )
-    return LlmBridgeSettings(**data)
+    return service.settings_out(data)
 
 
 # ---- 各平台的登录 ----
@@ -362,3 +337,9 @@ async def llm_bridge_set_grant(
     access: Owner, service: Service, instance_id: UUID, body: LlmBridgeGrantIn
 ) -> LlmBridgeGrantOut:
     return await service.set_grant(access, instance_id, body)
+
+
+# ---- 聊天页面（docs/v2/LLM_CHAT_PLAN.md）：接口写在 chat_api.py，登记在同一个 router 上 ----
+from app.modules.llm_bridge import chat_api as _chat_api  # noqa: E402, F401
+
+__all__ = ["router"]

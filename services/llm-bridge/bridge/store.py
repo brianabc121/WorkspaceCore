@@ -277,9 +277,16 @@ class Store:
         platform: str | None = None,
         slot: str | None = None,
         include_archived: bool = False,
+        status: str | None = None,
+        query: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[Row]:
+        """列出会话。
+
+        给了 status（active / archived）就按它筛，没给时看 include_archived；
+        query 是标题里包含的字。
+        """
         sql, params = "SELECT * FROM sessions WHERE 1=1", []
         if caller_id is not None:
             sql += " AND caller_id = ?"
@@ -290,10 +297,24 @@ class Store:
         if slot:
             sql += " AND slot = ?"
             params.append(slot)
-        if not include_archived:
+        if status in ("active", "archived"):
+            sql += " AND status = ?"
+            params.append(status)
+        elif not include_archived:
             sql += " AND status = 'active'"
+        if query:
+            escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            sql += " AND title LIKE ? ESCAPE '\\'"
+            params.append(f"%{escaped}%")
         sql += " ORDER BY updated_at DESC, id LIMIT ? OFFSET ?"
         return self._all(sql, (*params, limit, offset))
+
+    def busy_sessions(self) -> set[str]:
+        """有排队中或进行中回合的会话。"""
+        rows = self._all(
+            "SELECT DISTINCT session_id FROM turns WHERE status IN ('queued', 'running')"
+        )
+        return {str(row["session_id"]) for row in rows}
 
     # ---- turns ----
     def create_turn(self, session_id: str, caller_id: str, request_id: str, text: str) -> Row:

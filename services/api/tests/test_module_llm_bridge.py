@@ -5,10 +5,11 @@
 实例 → 工作台 /mcp → 模块（权限、转发）→ 会话桥 /mcp → 驱动。
 """
 
+import contextlib
 import importlib
 import sys
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,10 @@ from tests.workspace_support import Env, open_env
 BRIDGE_SOURCE = Path(__file__).resolve().parents[2] / "llm-bridge"
 BRIDGE_URL = "http://bridge.test:8787"
 BRIDGE_TOKEN = "t" * 40
+SECOND_URL = "http://bridge2.test:8787"
+SECOND_TOKEN = "u" * 40
+# 不认识 platforms 这个设置的旧版本会话桥
+OLD_URL = "http://old.test:8787"
 ALL_TOOLS = {spec.name for spec in SPECS}
 READ_TOOLS = ALL_TOOLS - WRITE_TOOL_NAMES
 
@@ -37,6 +42,10 @@ class Rig:
     bridge_app: Any
     bridge_id: str
     down: list[bool]
+    # 再起一座会话桥（另一个主机名、另一枚令牌、另一个数据目录），返回它的应用
+    spawn: Callable[[str, str], Awaitable[Any]]
+    # 通往测试里这些会话桥的传输：以别的成员身份登录的客户端要用它才连得到
+    transport: httpx.MockTransport
 
     async def api(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         write = method != "GET"
@@ -70,27 +79,51 @@ async def rig(make_client: Any, migrated_database_url: str, tmp_path: Path) -> A
         bridge_config = importlib.import_module("bridge.config")
         fake_driver = importlib.import_module("bridge.drivers.fake")
         bridge_settings = bridge_config.Settings(
-            data_dir=tmp_path / "bridge", admin_token=BRIDGE_TOKEN
+            data_dir=tmp_path / "bridge",
+            admin_token=BRIDGE_TOKEN,
+            # Only Claude is replaced below. Keep unavailable Codex independent of host tools.
+            codex_bin=str(tmp_path / "uninstalled-codex"),
         )
         bridge_app = bridge_app_module.create_app(bridge_settings)
         down = [False]
         async with (
+            contextlib.AsyncExitStack() as stack,
             bridge_app.router.lifespan_context(bridge_app),
             open_env(make_client, migrated_database_url, **SETTINGS) as env,
         ):
             # Claude 槽位换成测试驱动：不需要真实登录
             bridge_app.state.engine.drivers["claude"] = fake_driver.FakeDriver()
-            asgi = httpx.ASGITransport(app=bridge_app)
+            hosts = {"bridge.test": httpx.ASGITransport(app=bridge_app)}
+
+            async def spawn(host: str, token: str) -> Any:
+                extra = bridge_app_module.create_app(
+                    bridge_config.Settings(
+                        data_dir=tmp_path / host,
+                        admin_token=token,
+                        codex_bin=str(tmp_path / "uninstalled-codex"),
+                    )
+                )
+                await stack.enter_async_context(extra.router.lifespan_context(extra))
+                extra.state.engine.drivers["claude"] = fake_driver.FakeDriver()
+                hosts[host] = httpx.ASGITransport(app=extra)
+                return extra
 
             async def route(request: httpx.Request) -> httpx.Response:
-                if request.url.host != "bridge.test" or down[0]:
+                if request.url.host == "old.test":
+                    old = {
+                        "error": {"code": "VALIDATION_FAILED", "message": "没有这个设置：platforms"}
+                    }
+                    return httpx.Response(422, json=old)
+                asgi = hosts.get(request.url.host)
+                if asgi is None or down[0]:
                     raise httpx.ConnectError("connection refused", request=request)
                 response = await asgi.handle_async_request(request)
                 body = await response.aread()
                 return httpx.Response(response.status_code, headers=response.headers, content=body)
 
             app = env.client._transport.app  # type: ignore[attr-defined]
-            app.state.connectors.transport = httpx.MockTransport(route)
+            transport = httpx.MockTransport(route)
+            app.state.connectors.transport = transport
             enable = await env.client.patch(
                 "/api/v1/modules/llm_bridge",
                 json={"enabled": True},
@@ -103,7 +136,7 @@ async def rig(make_client: Any, migrated_database_url: str, tmp_path: Path) -> A
                 headers=env.headers(write=True),
             )
             assert created.status_code == 201, created.text
-            yield Rig(env, bridge_app, created.json()["id"], down)
+            yield Rig(env, bridge_app, created.json()["id"], down, spawn, transport)
     finally:
         sys.path.remove(str(BRIDGE_SOURCE))
         for name in [m for m in sys.modules if m == "bridge" or m.startswith("bridge.")]:
@@ -207,6 +240,155 @@ async def test_bridge_registration_and_admin(rig: Rig) -> None:
     assert (await rig.api("DELETE", f"/bridges/{rig.bridge_id}")).status_code == 204
     assert (await rig.api("GET", "/bridges")).json()["bridges"] == []
     assert (await rig.api("GET", f"/bridges/{uuid.uuid4()}/status")).status_code == 404
+
+
+@pytest.mark.integration
+async def test_managers_control_their_own_platforms_and_accounts(rig: Rig) -> None:
+    """人类的例子：1 号管理器控制 claude / workbuddy，2 号多一个 codex；各自一套账号。"""
+    env = rig.env
+    await rig.spawn("bridge2.test", SECOND_TOKEN)
+
+    # 新增时选控制的平台：同时验证地址和令牌，连不上、令牌不对、版本太旧都不登记
+    def body(name: str, url: str, token: str, platforms: list[str]) -> dict[str, Any]:
+        return {"name": name, "base_url": url, "token": token, "platforms": platforms}
+
+    for url, token, code, http in (
+        (SECOND_URL, BRIDGE_TOKEN, "BRIDGE_AUTH_FAILED", 503),  # 1 号的令牌用不到 2 号上
+        ("http://nowhere.test:8787", SECOND_TOKEN, "EXTERNAL_UNAVAILABLE", 503),
+        (OLD_URL, SECOND_TOKEN, "BRIDGE_OUTDATED", 409),
+    ):
+        refused = await rig.api("POST", "/bridges", json=body("2号", url, token, ["claude"]))
+        assert (refused.status_code, refused.json()["error"]["code"]) == (http, code), refused.text
+    empty = await rig.api("POST", "/bridges", json=body("2号", SECOND_URL, SECOND_TOKEN, []))
+    assert empty.status_code == 422
+    assert [b["name"] for b in (await rig.api("GET", "/bridges")).json()["bridges"]] == ["主桥"]
+
+    second = await rig.api(
+        "POST",
+        "/bridges",
+        json=body("2号", SECOND_URL, SECOND_TOKEN, ["claude", "workbuddy", "codex"]),
+    )
+    assert second.status_code == 201, second.text
+    second_id = second.json()["id"]
+    assert SECOND_TOKEN not in second.text
+    # 已经登记的管理器在设置里改控制的平台
+    first = await rig.api(
+        "PUT", f"/bridges/{rig.bridge_id}/settings", json={"platforms": ["claude", "workbuddy"]}
+    )
+    assert first.status_code == 200 and first.json()["platforms"] == ["claude", "workbuddy"]
+    none = await rig.api("PUT", f"/bridges/{rig.bridge_id}/settings", json={"platforms": []})
+    assert none.status_code == 422
+
+    one = (await rig.api("GET", f"/bridges/{rig.bridge_id}/status")).json()
+    two = (await rig.api("GET", f"/bridges/{second_id}/status")).json()
+    assert one["platforms"] == ["claude", "workbuddy"]
+    assert two["platforms"] == two["settings"]["platforms"] == ["codex", "claude", "workbuddy"]
+    assert [(a["slot"], a["enabled"]) for a in one["accounts"]] == [
+        ("openai", False),
+        ("claude", True),
+        ("workbuddy", True),
+    ]
+    assert all(a["enabled"] for a in two["accounts"])
+    codex_on = {
+        b: {c["mode"]: c for c in s["channels"] if c["platform"] == "codex"}
+        for b, s in (("one", one), ("two", two))
+    }
+    assert not codex_on["one"]["chat"]["enabled"] and not codex_on["one"]["chat"]["available"]
+    assert codex_on["two"]["chat"]["enabled"] and codex_on["two"]["chat"]["available"]
+    chatgpt = next(c for c in two["channels"] if c["platform"] == "chatgpt")
+    assert not chatgpt["enabled"]  # 2 号只勾了 Codex，没勾 ChatGPT 聊天
+
+    # 每个管理器单独维护一套账号：同一个平台在两个管理器上登录不同的账号
+    for bridge_id, account in (
+        (rig.bridge_id, "alice@example.com"),
+        (second_id, "bob@example.com"),
+    ):
+        assert (
+            await rig.api("POST", f"/bridges/{bridge_id}/accounts/claude/reset")
+        ).status_code == 200
+        login = await rig.api(
+            "POST",
+            f"/bridges/{bridge_id}/accounts/claude/login",
+            json={"method": "api_key", "api_key": account},
+        )
+        assert login.status_code == 200, login.text
+    identities = []
+    for bridge_id in (rig.bridge_id, second_id):
+        status = (await rig.api("GET", f"/bridges/{bridge_id}/status")).json()
+        identities.append(status["accounts"][1]["identity"])
+    assert identities == ["a***@example.com", "b***@example.com"]
+    # 1 号不控制 Codex：不能在它上面登录 ChatGPT / Codex 的账号
+    blocked = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/accounts/openai/login",
+        json={"method": "api_key", "api_key": "k" * 20},
+    )
+    assert blocked.status_code == 409 and "控制的平台" in blocked.json()["error"]["message"]
+
+    # 智能体：能用多个管理器时，不填 bridge 的状态工具列出每一个和它控制的平台
+    instance = await new_instance(env, name="alpha")
+    token = await issue_token(env, instance)
+    await rig.grant(instance, can_write=True)
+    overview = ok(await call(env, token, "llm_bridge_status", {}))
+    assert {b["bridge"]: (b["reachable"], b["platforms"]) for b in overview["bridges"]} == {
+        "主桥": (True, ["claude", "workbuddy"]),
+        "2号": (True, ["codex", "claude", "workbuddy"]),
+    }
+    assert set(overview["bridges"][0]["accounts"]) == {"claude", "workbuddy"}
+    need_name = tool_error(
+        await call(env, token, "llm_bridge_session_create", {"platform": "claude", "mode": "chat"})
+    )
+    assert need_name["code"] == "VALIDATION_FAILED"
+    assert "主桥" in need_name["message"] and "2号" in need_name["message"]
+
+    async def create(bridge: str | None, platform: str) -> dict[str, Any]:
+        arguments = {"platform": platform, "mode": "chat"}
+        if bridge:
+            arguments["bridge"] = bridge
+        return await call(env, token, "llm_bridge_session_create", arguments)
+
+    off = tool_error(await create("主桥", "codex"))
+    assert off["code"] == "NOT_SUPPORTED" and "没有启用 codex" in off["message"]
+    # 2 号控制 Codex（这里没有登录，所以是“还没有登录”，不是“没有启用”）
+    not_logged_in = tool_error(await create("2号", "codex"))
+    assert not_logged_in["code"] == "EXTERNAL_UNAVAILABLE"
+    assert "没有启用" not in not_logged_in["message"]
+    on_one = ok(await create("主桥", "claude"))
+    on_two = ok(await create("2号", "claude"))
+    # 会话各在各的管理器上
+    for bridge, mine in (("主桥", on_one), ("2号", on_two)):
+        listed = ok(await call(env, token, "llm_bridge_session_list", {"bridge": bridge}))
+        assert [s["session_id"] for s in listed["sessions"]] == [mine["session_id"]]
+
+    # 按实例限定能用的管理器：只给 2 号
+    unknown = await rig.api(
+        "PUT", f"/grants/{instance}", json={"enabled": True, "bridge_ids": [str(uuid.uuid4())]}
+    )
+    assert unknown.status_code == 422
+    await rig.grant(instance, can_write=True, bridge_ids=[second_id])
+    grants = (await rig.api("GET", "/grants")).json()["grants"]
+    assert grants[0]["bridge_ids"] == [second_id]
+    only = await call(env, token, "llm_bridge_status", {})
+    assert only["structuredContent"]["bridge"] == "2号" and "bridges" not in ok(only)
+    assert ok(await create(None, "claude"))["platform"] == "claude"  # 只有一个可用：不用填 bridge
+    hidden = tool_error(await create("主桥", "claude"))
+    assert hidden["code"] == "NOT_FOUND"
+
+    # 删除 2 号：只允许用它的实例一个都不能用了，不会变成“都能用”
+    assert (await rig.api("DELETE", f"/bridges/{second_id}")).status_code == 204
+    grants = (await rig.api("GET", "/grants")).json()["grants"]
+    assert grants[0]["bridge_ids"] == [] and grants[0]["enabled"] is True
+    closed = tool_error(await call(env, token, "llm_bridge_status", {}))
+    assert closed["code"] == "FORBIDDEN_CAPABILITY" and "MCP 管理器" in closed["message"]
+    # 改回“都允许”
+    await rig.grant(instance, can_write=True, bridge_ids=None)
+    assert ok(await call(env, token, "llm_bridge_status", {}))["platforms"] == [
+        "claude",
+        "workbuddy",
+    ]
+
+    actions = [r for r in await records(env) if r["tool_name"].startswith("llm_bridge_")]
+    assert actions, "写工具要有执行记录"
 
 
 @pytest.mark.integration
@@ -355,13 +537,26 @@ async def test_tool_failures_are_explicit(rig: Rig) -> None:
         "POST", "/bridges", json={"name": "副桥", "base_url": BRIDGE_URL, "token": BRIDGE_TOKEN}
     )
     assert extra.status_code == 201
-    ambiguous = tool_error(await call(env, token, "llm_bridge_status", {}))
+    ambiguous = tool_error(await call(env, token, "llm_bridge_session_list", {}))
     assert ambiguous["code"] == "VALIDATION_FAILED" and "主桥、副桥" in ambiguous["message"]
+    # 状态工具不填 bridge：列出每一座
+    both = ok(await call(env, token, "llm_bridge_status", {}))
+    assert [(b["bridge"], b["reachable"]) for b in both["bridges"]] == [
+        ("主桥", True),
+        ("副桥", True),
+    ]
     assert ok(await call(env, token, "llm_bridge_status", {"bridge": "副桥"}))["queued"] == 0
     # 会话桥连不上
     rig.down[0] = True
     offline = tool_error(await call(env, token, "llm_bridge_status", {"bridge": "主桥"}))
     assert offline["code"] == "EXTERNAL_UNAVAILABLE"
+    # 列出每一座时，连不上的如实标出来，不让整次调用失败
+    partial = ok(await call(env, token, "llm_bridge_status", {}))
+    assert [(b["bridge"], b["reachable"]) for b in partial["bridges"]] == [
+        ("主桥", False),
+        ("副桥", False),
+    ]
+    assert all("连不上" in b["error"] for b in partial["bridges"])
     rig.down[0] = False
     # 只读权限范围的实例不能用写工具（实例自身的 scope，与模块的授权是两回事）
     reader = await new_instance(env, scope="read", name="reader")

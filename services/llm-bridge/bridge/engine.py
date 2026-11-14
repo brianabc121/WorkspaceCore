@@ -5,7 +5,9 @@
 - 一个会话一条串行队列；不同会话并行，每个账号槽位有并发上限；
 - 发送带幂等号：同一个调用方用同一个 request_id 重发，返回原来的回合；
 - 一个槽位只认第一次登录的那个账号：发现换了账号就拒绝调用，直到管理员明确更换；
-- 进程重启后：运行中的回合记为 unknown（不知道平台做完没有），排队中的继续排。
+- 进程重启后：运行中的回合记为 unknown（不知道平台做完没有），排队中的继续排；
+- 一座桥可以只控制一部分平台（设置 platforms）：没勾选的平台不能登录、不能新建会话和发送，
+  已有的登录和会话记录保留，还能查看和退出登录。
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ SETTING_LIMITS = {
     "max_text_chars": (1, 1_000_000),
 }
 MAX_WAIT_SECONDS = 50
+MAX_EVENT_WAIT_SECONDS = 25
 ACCOUNT_CACHE_SECONDS = 60
 _MODEL_RE = re.compile(r"^[\w.\-:\[\]/]{1,100}$")
 _REQUEST_ID_RE = re.compile(r"^[\w.\-:]{1,100}$")
@@ -60,8 +63,7 @@ _ERROR_CODES = {
 UNKNOWN_IDENTITY = "unknown"
 _ANONYMOUS = "用密钥或令牌登录的账号（看不到是哪个）"
 _ANONYMOUS_NOTE = (
-    "用密钥或令牌登录时会话桥看不到是哪个账号：换一把密钥不算换账号；"
-    "要换成另一个账号，请先点“更换账号”"
+    "用密钥或令牌登录时看不到是哪个账号：换一把密钥不算换账号；要换成另一个账号，请先点“更换账号”"
 )
 EXTERNAL_PLATFORM = {
     "openai": "codex",
@@ -139,10 +141,50 @@ class Engine:
         return self.store.get_setting(key, DEFAULTS[key])
 
     def settings_view(self) -> Row:
-        return {key: self.setting(key) for key in DEFAULTS}
+        return {**{key: self.setting(key) for key in DEFAULTS}, "platforms": self.platforms()}
+
+    # ---- 这座桥控制哪些平台 ----
+    def all_platforms(self) -> list[str]:
+        """这座桥装了驱动的平台，按通道表的顺序。"""
+        seen: list[str] = []
+        for channel in self.channels:
+            if channel.slot in self.drivers and channel.platform not in seen:
+                seen.append(channel.platform)
+        return seen
+
+    def platforms(self) -> list[str]:
+        """管理员让这座桥控制的平台；没设置过就是全部。"""
+        chosen = self.store.get_setting("platforms", None)
+        known = self.all_platforms()
+        return known if chosen is None else [p for p in known if p in chosen]
+
+    def platform_enabled(self, platform: str) -> bool:
+        return platform in self.platforms()
+
+    def slot_enabled(self, slot: str) -> bool:
+        """这个账号槽位上有没有被勾选的平台（ChatGPT 和 Codex 共用 openai 槽位）。"""
+        enabled = self.platforms()
+        return any(c.slot == slot and c.platform in enabled for c in self.channels)
+
+    def _set_platforms(self, value: Any) -> None:
+        known = self.all_platforms()
+        if (
+            not isinstance(value, list)
+            or not value
+            or any(not isinstance(p, str) for p in value)
+            or len(set(value)) != len(value)
+        ):
+            raise BridgeError("VALIDATION_FAILED", "platforms 要填至少一个平台，不能重复")
+        unknown = [p for p in value if p not in known]
+        if unknown:
+            raise BridgeError("VALIDATION_FAILED", f"这座桥没有这些平台：{'、'.join(unknown)}")
+        self.store.set_setting("platforms", [p for p in known if p in value])
 
     def update_settings(self, values: Row) -> Row:
         for key, value in values.items():
+            if key == "platforms":
+                self._set_platforms(value)
+                continue
             if key not in DEFAULTS:
                 raise BridgeError("VALIDATION_FAILED", f"没有这个设置：{key}")
             if isinstance(DEFAULTS[key], bool):
@@ -241,10 +283,17 @@ class Engine:
         if account["state"] == "unavailable":
             raise BridgeError("UNAVAILABLE", f"{label} 暂时不可用：{account['detail']}")
         if account["state"] != "logged_in":
-            raise BridgeError("NOT_LOGGED_IN", f"{label} 还没有登录，请管理员在会话桥设置页登录")
+            raise BridgeError(
+                "NOT_LOGGED_IN", f"{label} 还没有登录，请管理员在“大模型客户端”页面登录"
+            )
 
     async def login(self, slot: str, method: str, payload: dict[str, str]) -> Row:
         driver = self._driver(slot)
+        if not self.slot_enabled(slot):
+            raise BridgeError(
+                "CONFLICT",
+                f"这座桥没有启用 {SLOT_LABELS.get(slot, slot)}：先在“控制的平台”里勾选，再登录",
+            )
         if method not in driver.login_methods:
             raise BridgeError("VALIDATION_FAILED", f"不支持的登录方式：{method}")
         if slot == "claude" and method != "api_key" and not self.setting("claude_subscription_ack"):
@@ -305,7 +354,16 @@ class Engine:
             raise BridgeError(
                 "NOT_SUPPORTED", f"{platform}.{mode} 还不能用：{channel.note or '未启用'}"
             )
+        self._require_platform(platform)
         return channel
+
+    def _require_platform(self, platform: str) -> None:
+        if not self.platform_enabled(platform):
+            raise BridgeError(
+                "NOT_SUPPORTED",
+                f"这座桥没有启用 {platform}（管理员没有让它控制这个平台）；"
+                f"它控制的平台：{'、'.join(self.platforms())}",
+            )
 
     async def models(self, platform: str, mode: str) -> list[Row]:
         channel = self._channel(platform, mode)
@@ -526,7 +584,9 @@ class Engine:
                 {
                     c.slot
                     for c in self.channels
-                    if c.slot in self.drivers and platform in (None, c.platform)
+                    if c.slot in self.drivers
+                    and platform in (None, c.platform)
+                    and self.platform_enabled(c.platform)
                 }
             )
             failed = await self.sync_external(slots)
@@ -658,6 +718,7 @@ class Engine:
             "send_per_hour"
         ):
             raise BridgeError("RATE_LIMITED", "这个调用方本小时的发送次数已到上限")
+        self._require_platform(session["platform"])
         await self.require_ready(session["slot"])
         turn = self.store.create_turn(session_id, caller.id, request_id, text)
         self.store.add_event(session_id, turn["id"], "queued", {"by": caller.label})
@@ -844,13 +905,127 @@ class Engine:
             view["failure"] = {"kind": turn["error_kind"], "message": turn["error_message"]}
         return view
 
+    # ---- 聊天页用（管理接口；docs/v2/LLM_CHAT_PLAN.md 第 4.1 节） ----
+    def admin_session_view(self, session: Row, busy: set[str] | None = None) -> Row:
+        busy = self.store.busy_sessions() if busy is None else busy
+        return {
+            **session_view(session, full=True),
+            "slot": session["slot"],
+            "owner_id": session["caller_id"],
+            "busy": session["id"] in busy,
+        }
+
+    def _required_session(self, session_id: str) -> Row:
+        session = self.store.get_session(session_id)
+        if session is None:
+            raise BridgeError("NOT_FOUND", "没有这个会话")
+        return session
+
+    async def conversation(self, session_id: str) -> Row:
+        """一个会话的信息和消息：谁发的、回答、过程、失败原因、进行中已经给出的部分。"""
+        session = self._required_session(session_id)
+        view = self.admin_session_view(session)
+        environment = (
+            self.store.get_environment(session["environment_id"])
+            if session["environment_id"]
+            else None
+        )
+        view["environment"] = env_view(environment) if environment else None
+        events = self.store.list_events(session_id, limit=100_000)
+        last_event_id = events[-1]["id"] if events else 0
+        messages: list[Row] = []
+        if session["origin"] == "external":
+            try:
+                native = await self._driver(session["slot"]).read(
+                    session["native_id"], session["workdir"]
+                )
+            except DriverError as error:
+                raise from_driver(error) from error
+            messages = [{"role": m.role, "text": redact(m.text), "at": m.at} for m in native]
+            return {"session": view, "messages": messages, "last_event_id": last_event_id}
+        by_turn: dict[str, list[Row]] = {}
+        for event in events:
+            if event["turn_id"]:
+                by_turn.setdefault(event["turn_id"], []).append(event)
+        for turn in self.store.list_turns(session_id=session_id, limit=10_000):
+            mine = by_turn.get(turn["id"], [])
+            queued = next((e for e in mine if e["kind"] == "queued"), None)
+            messages.append(
+                {
+                    "role": "user",
+                    "turn_id": turn["id"],
+                    "text": turn["text"],
+                    "at": turn["queued_at"],
+                    "by": (queued["payload"] or {}).get("by") if queued else None,
+                    "by_id": turn["caller_id"],
+                }
+            )
+            steps = [step for step in (_step(e) for e in mine) if step]
+            status = turn["status"]
+            reply: Row = {
+                "role": "assistant",
+                "turn_id": turn["id"],
+                "status": status,
+                "at": turn["finished_at"] or turn["started_at"] or turn["queued_at"],
+                "text": "",
+                "steps": steps,
+            }
+            if status == "completed":
+                reply["text"] = turn["result_text"] or ""
+                # 和结果一样的那一段不在“过程”里再出现一次。它不一定排在最后：
+                # 官方程序在同一条消息里既给文字又调工具时，文字的事件先到
+                for index in range(len(steps) - 1, -1, -1):
+                    if steps[index]["kind"] == "message" and steps[index]["text"] == reply["text"]:
+                        reply["steps"] = steps[:index] + steps[index + 1 :]
+                        break
+            else:
+                # 没做完（进行中、失败、结果未知、已取消）：显示已经给出的部分
+                reply["text"] = "\n\n".join(s["text"] for s in steps if s["kind"] == "message")
+                reply["steps"] = [s for s in steps if s["kind"] != "message"]
+                if status in ("failed", "unknown"):
+                    reply["failure"] = {
+                        "kind": turn["error_kind"],
+                        "message": turn["error_message"],
+                    }
+                elif status == "queued":
+                    reply["ahead_in_session"] = self.store.queue_position(turn)
+            messages.append(reply)
+        return {"session": view, "messages": messages, "last_event_id": last_event_id}
+
+    async def session_events(self, session_id: str, after: int, wait_seconds: float) -> Row:
+        """这个会话在 after 之后的事件；没有新事件且还有回合没做完时，最多等 wait_seconds 秒。"""
+        self._required_session(session_id)
+        deadline = time.monotonic() + max(0.0, min(wait_seconds, MAX_EVENT_WAIT_SECONDS))
+        while True:
+            events = self.store.list_events(session_id, after_id=after, limit=500)
+            busy = session_id in self.store.busy_sessions()
+            if events or not busy or time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(0.2)
+        return {
+            "events": [_event_view(e) for e in events],
+            "busy": busy,
+            "last_id": events[-1]["id"] if events else after,
+        }
+
+    def rename_session(self, session_id: str, title: str) -> Row:
+        session = self._required_session(session_id)
+        clean = " ".join(redact(title).split())[:120]
+        if not clean:
+            raise BridgeError("VALIDATION_FAILED", "标题不能为空")
+        self.store.update_session(session_id, title=clean, updated_at=session["updated_at"])
+        return self.admin_session_view(self._required_session(session_id))
+
     # ---- 管理页用 ----
     async def overview(self) -> Row:
+        enabled = self.platforms()
         accounts = {}
         for slot in self.drivers:
             account = await self.account(slot)
             accounts[slot] = {
                 "label": SLOT_LABELS.get(slot, slot),
+                # 这个槽位上有没有被勾选的平台；没有时不能登录，已有的登录可以退出
+                "enabled": self.slot_enabled(slot),
                 "state": account["state"],
                 # 登记过账号（哪怕看不到是哪个）就算 registered：
                 # 退出登录后仍然保留，用来发现换了账号
@@ -867,14 +1042,64 @@ class Engine:
                 "platform": c.platform,
                 "mode": c.mode,
                 "slot": c.slot,
-                "available": c.available and c.slot in self.drivers,
+                "enabled": c.platform in enabled,
+                "available": c.available and c.slot in self.drivers and c.platform in enabled,
                 "note": c.note,
             }
             for c in self.channels
         ]
         queued = len(self.store.list_turns(statuses=("queued",), limit=100_000))
         running = len(self.store.list_turns(statuses=("running",), limit=100_000))
-        return {"accounts": accounts, "channels": channels, "queued": queued, "running": running}
+        return {
+            "platforms": enabled,
+            "accounts": accounts,
+            "channels": channels,
+            "queued": queued,
+            "running": running,
+        }
+
+    async def caller_overview(self) -> Row:
+        """给调用方（智能体）看的概况：只有这座桥控制的平台。"""
+        view = await self.overview()
+        return {
+            **view,
+            "accounts": {s: a for s, a in view["accounts"].items() if a["enabled"]},
+            "channels": [c for c in view["channels"] if c["enabled"]],
+        }
+
+
+def _event_view(event: Row) -> Row:
+    """给聊天页的一条事件：种类、属于哪个回合，以及正文（一段回答、一条命令、改动的文件）。"""
+    payload = event["payload"] or {}
+    view: Row = {
+        "id": event["id"],
+        "turn_id": event["turn_id"],
+        "kind": event["kind"],
+        "at": event["at"],
+    }
+    for key in ("text", "command", "paths", "by"):
+        if key in payload:
+            view[key] = payload[key]
+    if event["kind"] in ("failed", "unknown") and payload.get("kind"):
+        view["reason"] = payload["kind"]
+    return view
+
+
+def _step(event: Row) -> Row | None:
+    """回合进行中的一条事件 → 页面“过程”里的一步；别的事件（排队、完成等）不算。"""
+    payload = event["payload"] or {}
+    kind = event["kind"]
+    if kind in ("message", "notice") and payload.get("text"):
+        return {"kind": kind, "text": str(payload["text"]), "at": event["at"]}
+    if kind == "command" and payload.get("command"):
+        return {"kind": "command", "text": str(payload["command"]), "at": event["at"]}
+    if kind == "files" and payload.get("paths"):
+        return {
+            "kind": "files",
+            "text": "、".join(str(p) for p in payload["paths"]),
+            "at": event["at"],
+        }
+    return None
 
 
 def env_view(env: Row) -> Row:

@@ -18,7 +18,7 @@ from tests.helpers import alembic_config, asyncpg_dsn
 def test_migration_graph_has_one_unambiguous_upgrade_target() -> None:
     script = ScriptDirectory.from_config(alembic_config("unused"))
     assert len(script.get_heads()) == 1
-    assert script.get_current_head() == "0068"
+    assert script.get_current_head() == "0069"
 
 
 async def _legacy_bridge(
@@ -314,7 +314,7 @@ def test_downgrade_refuses_to_delete_preexisting_bridge_data(temp_database_url: 
     async def preserved() -> None:
         conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
         try:
-            assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0068"
+            assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0069"
             assert (
                 await conn.fetchval(
                     "SELECT token_ref FROM workspace.llm_bridge_bridges WHERE id=$1::uuid",
@@ -412,3 +412,238 @@ def test_bridge_insert_cannot_commit_between_empty_check_and_drop(temp_database_
     assert outcomes == ["blocked-by-migration-lock"], (
         "a committed bridge insert was silently dropped"
     )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("published", [False, True], ids=["runtime0068", "main0068"])
+def test_both_published_0068_states_upgrade_without_replacing_data_or_objects(
+    temp_database_url: str, published: bool
+) -> None:
+    config = alembic_config(temp_database_url)
+    command.upgrade(config, "0067")
+    bridge = asyncio.run(_legacy_bridge(temp_database_url, revision="0068", create_tables=False))
+
+    async def snapshot(*, prepare: bool) -> tuple[object, ...]:
+        conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
+        try:
+            if prepare:
+                if published:
+                    # Frozen main0068 DDL and restrictive scope, independent of new migration.
+                    await conn.execute(
+                        "ALTER TABLE workspace.llm_bridge_grants ADD COLUMN bridge_ids jsonb; "
+                        "UPDATE workspace.llm_bridge_grants SET bridge_ids='[]'::jsonb"
+                    )
+                await conn.execute("SELECT setval('workspace.runner_ingress_port_seq', 30123)")
+                await conn.execute("SELECT setval('workspace.runner_public_port_seq', 20123)")
+                await conn.execute(
+                    "SELECT setval('workspace.runner_network_policy_revision_seq', 81)"
+                )
+            objects = await conn.fetch(
+                "SELECT oid,relname FROM pg_class WHERE relnamespace='workspace'::regnamespace "
+                "AND (relname LIKE 'llm_bridge_%' OR relkind='S') ORDER BY relname"
+            )
+            constraints = await conn.fetch(
+                "SELECT oid,pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE connamespace='workspace'::regnamespace ORDER BY oid"
+            )
+            return tuple(map(tuple, objects)), tuple(map(tuple, constraints))
+        finally:
+            await conn.close()
+
+    before = asyncio.run(snapshot(prepare=True))
+    command.upgrade(config, "head")
+    assert asyncio.run(snapshot(prepare=False)) == before
+
+    async def preserved() -> None:
+        conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
+        try:
+            assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0069"
+            grant = await conn.fetchrow(
+                "SELECT enabled,can_write,can_account,can_takeover,"
+                "platforms::text,bridge_ids::text "
+                "FROM workspace.llm_bridge_grants WHERE instance_id=$1::uuid",
+                bridge[2],
+            )
+            assert tuple(grant) == (
+                True,
+                True,
+                False,
+                True,
+                '["codex.cloud"]',
+                "[]" if published else None,
+            )
+            assert (
+                await conn.fetchval(
+                    "SELECT token_ref FROM workspace.llm_bridge_bridges WHERE id=$1::uuid",
+                    bridge[0],
+                )
+                == bridge[1]
+            )
+            for sequence, expected in (
+                ("runner_ingress_port_seq", 30124),
+                ("runner_public_port_seq", 20124),
+                ("runner_network_policy_revision_seq", 82),
+            ):
+                assert await conn.fetchval(f"SELECT nextval('workspace.{sequence}')") == expected
+        finally:
+            await conn.close()
+
+    asyncio.run(preserved())
+    command.upgrade(config, "head")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("damage", ["type", "nullable", "default", "unknown_column"])
+def test_unknown_0068_grant_shape_is_rejected_atomically(
+    temp_database_url: str, damage: str
+) -> None:
+    config = alembic_config(temp_database_url)
+    command.upgrade(config, "0067")
+
+    async def prepare() -> None:
+        conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
+        try:
+            definitions = {
+                "type": "bridge_ids text",
+                "nullable": "bridge_ids jsonb NOT NULL",
+                "default": "bridge_ids jsonb DEFAULT '[]'::jsonb",
+                "unknown_column": "unexpected_grant_scope jsonb",
+            }
+            await conn.execute(
+                "ALTER TABLE workspace.llm_bridge_grants ADD COLUMN " + definitions[damage]
+            )
+            await conn.execute("UPDATE alembic_version SET version_num='0068'")
+        finally:
+            await conn.close()
+
+    asyncio.run(prepare())
+    with pytest.raises(RuntimeError, match="legacy"):
+        command.upgrade(config, "head")
+
+    async def unchanged() -> None:
+        conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
+        try:
+            assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0068"
+        finally:
+            await conn.close()
+
+    asyncio.run(unchanged())
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("scope", ["[]", '["00000000-0000-0000-0000-000000000001"]'])
+def test_downgrade_refuses_to_remove_bridge_access_scopes(
+    temp_database_url: str, scope: str
+) -> None:
+    config = alembic_config(temp_database_url)
+    command.upgrade(config, "0067")
+    bridge = asyncio.run(_legacy_bridge(temp_database_url, revision="0067", create_tables=False))
+    command.upgrade(config, "head")
+
+    async def scoped(*, prepare: bool) -> None:
+        conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
+        try:
+            if prepare:
+                await conn.execute(
+                    "UPDATE workspace.llm_bridge_grants SET bridge_ids=$1::jsonb", scope
+                )
+            else:
+                assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0069"
+                assert (
+                    await conn.fetchval(
+                        "SELECT bridge_ids::text FROM workspace.llm_bridge_grants "
+                        "WHERE instance_id=$1::uuid",
+                        bridge[2],
+                    )
+                    == scope
+                )
+        finally:
+            await conn.close()
+
+    asyncio.run(scoped(prepare=True))
+    with pytest.raises(RuntimeError, match=r"bridge.*scope"):
+        command.downgrade(config, "0067")
+    asyncio.run(scoped(prepare=False))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("shape", ["bridge_only", "gateway_only", "neither"])
+def test_partial_0068_runtime_is_rejected_without_repair(
+    temp_database_url: str, shape: str
+) -> None:
+    config = alembic_config(temp_database_url)
+    command.upgrade(config, "0065")
+    if shape == "bridge_only":
+        asyncio.run(_legacy_bridge(temp_database_url))
+    elif shape == "gateway_only":
+        asyncio.run(_legacy_gateway(temp_database_url))
+
+    async def state(*, prepare: bool) -> tuple[object, ...]:
+        conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
+        try:
+            if prepare:
+                await conn.execute("UPDATE alembic_version SET version_num='0068'")
+            return tuple(
+                await conn.fetchrow(
+                    "SELECT (SELECT version_num FROM alembic_version), "
+                    "to_regclass('workspace.llm_bridge_bridges'), "
+                    "to_regclass('workspace.runner_ingress_port_seq')"
+                )
+            )
+        finally:
+            await conn.close()
+
+    before = asyncio.run(state(prepare=True))
+    with pytest.raises(RuntimeError, match="legacy"):
+        command.upgrade(config, "head")
+    assert asyncio.run(state(prepare=False)) == before
+
+
+@pytest.mark.integration
+def test_scope_update_cannot_commit_between_empty_check_and_column_drop(
+    temp_database_url: str,
+) -> None:
+    config = alembic_config(temp_database_url)
+    command.upgrade(config, "0067")
+    bridge = asyncio.run(_legacy_bridge(temp_database_url, revision="0067", create_tables=False))
+    command.upgrade(config, "head")
+    outcomes: list[str] = []
+
+    async def restrict_access() -> str:
+        conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
+        try:
+            await conn.execute("SET lock_timeout='500ms'")
+            try:
+                await conn.execute(
+                    "UPDATE workspace.llm_bridge_grants SET bridge_ids='[]'::jsonb "
+                    "WHERE instance_id=$1::uuid",
+                    bridge[2],
+                )
+                return "committed"
+            except asyncpg.LockNotAvailableError:
+                return "blocked-by-migration-lock"
+        finally:
+            await conn.close()
+
+    def after_empty_check(
+        _connection: Connection,
+        _cursor: Any,
+        statement: str,
+        _parameters: Any,
+        _context: Any,
+        _executemany: bool,
+    ) -> None:
+        if statement.startswith(
+            "SELECT EXISTS(SELECT 1 FROM workspace.llm_bridge_grants WHERE bridge_ids IS NOT NULL)"
+        ):
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                outcomes.append(
+                    pool.submit(lambda: asyncio.run(restrict_access())).result(timeout=10)
+                )
+
+    event.listen(Engine, "after_cursor_execute", after_empty_check)
+    try:
+        command.downgrade(config, "0067")
+    finally:
+        event.remove(Engine, "after_cursor_execute", after_empty_check)
+    assert outcomes == ["blocked-by-migration-lock"], "scope change was lost during downgrade"

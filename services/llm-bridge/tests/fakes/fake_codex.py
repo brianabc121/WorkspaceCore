@@ -4,6 +4,7 @@
 import json
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -138,24 +139,34 @@ def main():
                 save(state)
                 out({"id": mid, "result": {"type": "apiKey"}})
             else:
-                out(
-                    {
-                        "id": mid,
-                        "result": {
-                            "type": "chatgptDeviceCode",
-                            "loginId": "l1",
-                            "userCode": "ABCD-1234",
-                            "verificationUrl": "https://example.test/device",
-                        },
-                    }
-                )
+                reply = {
+                    "id": mid,
+                    "result": {
+                        "type": "chatgptDeviceCode",
+                        "loginId": "l1",
+                        "userCode": "ABCD-1234",
+                        "verificationUrl": "https://example.test/device",
+                    },
+                }
+                done = {
+                    "method": "account/login/completed",
+                    "params": {"loginId": "l1", "success": True, "error": None},
+                }
                 state["account"] = {
                     "type": "chatgpt",
                     "email": "user@example.com",
                     "planType": "plus",
                 }
-                save(state)
-                note("account/login/completed", {"loginId": "l1", "success": True, "error": None})
+                if (HOME / "complete-login-at-once").exists():
+                    # 应答和“登录完成”在同一次写入里到达：调用方还没拿到应答，通知就已经到了
+                    save(state)
+                    sys.stdout.write(json.dumps(reply) + "\n" + json.dumps(done) + "\n")
+                    sys.stdout.flush()
+                else:
+                    out(reply)
+                    time.sleep(0.1)  # 用户去浏览器里输入验证码
+                    save(state)
+                    out(done)
         elif method == "account/logout":
             state["account"] = None
             save(state)

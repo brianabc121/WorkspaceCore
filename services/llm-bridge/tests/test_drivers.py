@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,24 @@ def _wrapper(tmp_path: Path, script: str) -> str:
     return str(path)
 
 
+async def _until(check: Callable[[], Any], limit: float = 10.0) -> None:
+    """等到条件成立。
+
+    不用固定时长的等待：官方程序是另一个进程，通知什么时候处理完取决于机器快慢
+    （CI 上出现过发起登录 50 毫秒后“登录完成”的通知还没处理到）。
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + limit
+    while True:
+        result = check()
+        if asyncio.iscoroutine(result):
+            result = await result
+        if result:
+            return
+        assert loop.time() < deadline, "等了太久，条件还没成立"
+        await asyncio.sleep(0.01)
+
+
 class Sink:
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, Any]]] = []
@@ -49,7 +68,12 @@ async def test_codex_account_and_models(codex: CodexDriver) -> None:
     assert not (await codex.status()).logged_in
     challenge = await codex.login("device_code", {})
     assert challenge.state == "pending" and challenge.user_code == "ABCD-1234"
-    await asyncio.sleep(0.05)
+
+    async def finished() -> bool:
+        state = await codex.login_state()
+        return state is not None and state.state != "pending"
+
+    await _until(finished)
     assert (await codex.login_state()).state == "done"
     status = await codex.status()
     assert (status.logged_in, status.identity, status.method) == (
@@ -66,6 +90,31 @@ async def test_codex_account_and_models(codex: CodexDriver) -> None:
     with pytest.raises(DriverError) as caught:
         await codex.login("password", {})
     assert caught.value.kind == "not_supported"
+
+
+async def test_codex_login_completed_before_the_reply_is_handled(
+    codex: CodexDriver, tmp_path: Path
+) -> None:
+    """“登录完成”紧跟着应答到达、早于 login() 拿到应答时不能丢，否则页面一直显示“正在等待登录”。"""
+    (tmp_path / "home").mkdir(exist_ok=True)
+    (tmp_path / "home" / "complete-login-at-once").touch()
+    challenge = await codex.login("device_code", {})
+    assert challenge.state == "done"
+    state = await codex.login_state()
+    assert state is not None and state.state == "done"
+    assert (await codex.status()).identity == "user@example.com"
+    # 之后再登录一次不受上一次的通知影响
+    (tmp_path / "home" / "complete-login-at-once").unlink()
+    await codex.logout()
+    again = await codex.login("device_code", {})
+    assert again.state == "pending" and again.user_code == "ABCD-1234"
+
+    async def finished() -> bool:
+        current = await codex.login_state()
+        return current is not None and current.state != "pending"
+
+    await _until(finished)
+    assert (await codex.login_state()).state == "done"
 
 
 async def test_codex_turns(codex: CodexDriver, tmp_path: Path) -> None:
@@ -110,7 +159,7 @@ async def test_codex_cancel_and_restart(codex: CodexDriver, tmp_path: Path) -> N
     assert "plain chat" in state["threads"][native]["instructions"]
     spec = SessionSpec(mode="chat", model=None, workdir=tmp_path / "w", native_id=native)
     task = asyncio.create_task(codex.run_turn(spec, "hang", Sink()))
-    await asyncio.sleep(0.2)
+    await _until(lambda: native in codex._active)  # 回合开始之后才有东西可取消
     await codex.cancel(spec)
     with pytest.raises(DriverError, match="中断"):
         await task
@@ -119,7 +168,7 @@ async def test_codex_cancel_and_restart(codex: CodexDriver, tmp_path: Path) -> N
     assert (await codex.run_turn(spec, "重启之后", Sink())).text == "[None|readOnly] 重启之后"
     # 进程在回合进行中退出
     task = asyncio.create_task(codex.run_turn(spec, "hang", Sink()))
-    await asyncio.sleep(0.2)
+    await _until(lambda: native in codex._active)
     assert codex._proc is not None
     codex._proc.kill()
     with pytest.raises(DriverError) as caught:
@@ -211,7 +260,7 @@ async def test_cli_failures(tmp_path: Path) -> None:
         await driver.run_turn(spec, "crash", Sink())
     assert caught.value.kind == "platform_error" and "sk-ant" not in caught.value.message
     task = asyncio.create_task(driver.run_turn(spec, "hang", Sink()))
-    await asyncio.sleep(0.3)
+    await _until(lambda: (spec.native_id or "") in driver._procs)  # 进程起来之后才有东西可取消
     await driver.cancel(spec)
     with pytest.raises(DriverError):
         await asyncio.wait_for(task, 10)

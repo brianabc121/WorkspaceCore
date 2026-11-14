@@ -22,7 +22,10 @@ echo "$status" | python3 -c '
 import json, sys
 data = json.load(sys.stdin)
 assert set(data["accounts"]) == {"openai", "claude", "workbuddy"}, data["accounts"].keys()
+# 没有选过控制的平台时是全部
+assert data["platforms"] == ["chatgpt", "codex", "claude", "workbuddy"], data["platforms"]
 for slot, account in data["accounts"].items():
+    assert account["enabled"], (slot, account)
     assert account["state"] == "logged_out", (slot, account)   # 新容器：都还没登录，官方程序都能启动
 channels = {(c["platform"], c["mode"]): c["available"] for c in data["channels"]}
 assert channels[("chatgpt", "chat")] and channels[("codex", "dev")] and channels[("claude", "chat")]

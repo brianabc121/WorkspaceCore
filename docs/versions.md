@@ -77,7 +77,7 @@ OpenIM 的官方镜像有越权问题，已换成自建的补丁镜像（`2026-1
 | MCP Python SDK 2.3.0 | `mcp==2.3.0`（PyPI） | — | MIT | OC-1 起加入 `services/api` 依赖 |
 | ghostunnel v1.11.4 | `ghostunnel/ghostunnel:v1.11.4` | `sha256:e5248233863aadd36383a11c92360f2981141881ef05e38360a6ada8630d36b1` | Apache-2.0 | 外网模式 OpenClaw 服务器的本机隧道（接入包的 `compose.yaml`；`2026-10-31-v2-oc2-agent-ingress-verification.md`） |
 
-### 1.6 大模型会话桥（`infra/llm-bridge/`，可选部署；核验见 `decisions/2026-11-13-llm-bridge-verification.md`）
+### 1.6 大模型客户端的 MCP 管理器，即会话桥（`infra/llm-bridge/`，可选部署；核验见 `decisions/2026-11-13-llm-bridge-verification.md`）
 
 | 组件 | 版本 | 许可证 | 用途 |
 |---|---|---|---|

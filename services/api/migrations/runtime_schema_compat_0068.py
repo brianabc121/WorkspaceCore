@@ -1,4 +1,4 @@
-"""Frozen reconciliation for the historical runtime 0066/0067 revision collision.
+"""Frozen reconciliation for the historical runtime 0066/0067/0068 revision collisions.
 
 Keep independent of evolving application models. Validate the complete old shape
 before replaying either historical DDL; existing rows and allocators stay intact.
@@ -152,7 +152,12 @@ def _legacy_state() -> tuple[bool, bool]:
     if all(bridge):
         for table, columns in expected.items():
             _verify_validated_constraints(table)
-            if {c["name"] for c in inspector.get_columns(table, schema="workspace")} != columns:
+            actual = {c["name"] for c in inspector.get_columns(table, schema="workspace")}
+            if table == "llm_bridge_grants" and "bridge_ids" in actual:
+                # Published main0068: exactly nullable JSONB without a default.
+                _verify_columns(inspector, table, {"bridge_ids": (postgresql.JSONB, True, None)})
+                actual.remove("bridge_ids")
+            if actual != columns:
                 raise RuntimeError("partial legacy bridge schema; unexpected columns")
         common = {
             "workspace_id": (sa.Uuid, False, None),
@@ -260,3 +265,34 @@ def refuse_bridge_data_loss() -> None:
         )
     ):
         raise RuntimeError("bridge data exists; refusing destructive downgrade")
+
+
+def reconcile_published_0068() -> None:
+    """Both published 0068 meanings contain complete bridge and gateway schemas.
+
+    The acceptance branch did not yet include main's bridge access scopes.
+    Validate before adding that column; never replay gateway or bridge DDL here.
+    """
+    _require_online()
+    if _legacy_state() != (True, True):
+        raise RuntimeError("partial legacy 0068 schema; operator reconciliation required")
+    inspector = sa.inspect(op.get_bind())
+    if not any(
+        c["name"] == "bridge_ids"
+        for c in inspector.get_columns("llm_bridge_grants", schema="workspace")
+    ):
+        _historical("20261113_0068_llm_bridge_grant_bridges.py").upgrade()
+
+
+def refuse_bridge_scope_loss() -> None:
+    _require_online()
+    _legacy_state()
+    # Prevent a writer committing a restrictive scope between the check and DROP.
+    # Alembic holds this lock until the column drop and revision update commit.
+    op.execute("LOCK TABLE workspace.llm_bridge_grants IN ACCESS EXCLUSIVE MODE")
+    if op.get_bind().scalar(
+        sa.text(
+            "SELECT EXISTS(SELECT 1 FROM workspace.llm_bridge_grants WHERE bridge_ids IS NOT NULL)"
+        )
+    ):
+        raise RuntimeError("bridge access scopes exist; refusing downgrade that broadens grants")
