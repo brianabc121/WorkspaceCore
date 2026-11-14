@@ -2,7 +2,7 @@
 id: T-0231
 title: 大模型聚合聊天页面（一）：单会话聊天——浏览全部会话、新建、问答、停止、改标题、归档
 owner: claude
-status: in_progress
+status: done
 priority: P1
 branch: claude/trusting-euler-480tpv
 paths: apps/web/src/modules/llm_bridge,apps/web/tests,services/api/app/modules/llm_bridge,services/api/tests,services/llm-bridge,infra/llm-bridge,tests/e2e,.github/workflows/ci-llm-bridge.yml,docs
@@ -39,7 +39,7 @@ updated: 2026-11-14
 - [x] 审计记动作（新建、发送、接手、停止、改标题、归档），不记消息内容
 - [x] 手机宽度：列表和对话分成两屏，不横向滚动
 - [x] 会话桥、工作台后端、前端的测试；浏览器验收脚本 `tests/e2e/llm_chat_browser.cjs`，本机跑通
-- [ ] CI 全部通过（含 `ci-llm-bridge` 的 `workspace` job 里新增的聊天验收）
+- [x] CI 全部通过后才合并（D-0004；含 `ci-llm-bridge` 的 `workspace` job 里新增的聊天验收）——这一项随合并成立
 
 ## 背景 / 约束 / 参考
 - 人以 `user:<用户 id>` 的身份经 MCP 管理器发消息，和智能体走的是同一套工具：密钥拦截、限额、账号一致性、排队都一样。
@@ -52,3 +52,4 @@ updated: 2026-11-14
 - 2026-11-13 18:20 UTC · claude · 创建任务（owner: claude）
 - 2026-11-14 03:06 UTC · claude · 开始任务
 - 2026-11-14 04:01 UTC · claude · 人类 2026-11-14 在对话里决定：同一个 MCP 管理器登记到多个工作空间不需要拦截。文档（LLM_CHAT_PLAN.md 第 5、8 节，deployment.md 第 25.4 节）改成已决定的说法。人类同时要求做“页面上一键部署 MCP 管理器”：另建任务。
+- 2026-11-14 04:12 UTC · claude · status in_progress → done：实现、文档、测试都已完成：会话桥 26 passed / 3 skipped，后端相关 68 passed，前端 81 个文件 828 项，浏览器验收本机 12 步通过。本 PR 合并后的状态是 done；按 D-0004，最新提交上全部检查成功才合并，CI 有问题就在本 PR 里修。
