@@ -3816,39 +3816,6 @@
         "title": "AgentSshConfirm",
         "type": "object"
       },
-      "AgentSshInstall": {
-        "additionalProperties": false,
-        "description": "开始自动安装。登录密码只用于这一次（登录、装专用公钥、需要时用 sudo 装 Docker），不保存。",
-        "properties": {
-          "password": {
-            "anyOf": [
-              {
-                "format": "password",
-                "maxLength": 1024,
-                "minLength": 1,
-                "type": "string",
-                "writeOnly": true
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "SSH 登录密码；已经装了专用公钥、且 Docker 可以直接使用时可以不填",
-            "title": "Password"
-          },
-          "version": {
-            "description": "目标服务器的当前版本号",
-            "minimum": 1.0,
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "version"
-        ],
-        "title": "AgentSshInstall",
-        "type": "object"
-      },
       "AgentSshJobOut": {
         "properties": {
           "error_code": {
@@ -12552,6 +12519,16 @@
             "title": "Name",
             "type": "string"
           },
+          "network": {
+            "default": "auto",
+            "description": "auto：和工作台同一台服务器时加入工作台的内部网络，否则经 SSH 通道；tunnel：即使同机也只监听服务器的本机地址、经 SSH 通道访问",
+            "enum": [
+              "auto",
+              "tunnel"
+            ],
+            "title": "Network",
+            "type": "string"
+          },
           "platforms": {
             "description": "它控制的平台",
             "items": {
@@ -12575,18 +12552,44 @@
             "title": "Request Id",
             "type": "string"
           },
-          "server_id": {
-            "description": "部署到哪台智能体服务器（要已经确认主机公钥并初始化）",
+          "sudo_password": {
+            "anyOf": [
+              {
+                "format": "password",
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "登录账号用 Docker 要 sudo 密码时填：只用这一次，不保存、不进日志",
+            "title": "Sudo Password"
+          },
+          "target_id": {
+            "description": "那台服务器的 id",
             "format": "uuid",
-            "title": "Server Id",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "description": "agent_server：智能体服务器；runner_host：容器服务器",
+            "enum": [
+              "agent_server",
+              "runner_host"
+            ],
+            "title": "Target Kind",
             "type": "string"
           }
         },
         "required": [
-          "server_id",
+          "request_id",
+          "target_kind",
+          "target_id",
           "name",
-          "platforms",
-          "request_id"
+          "platforms"
         ],
         "title": "LlmBridgeDeployIn",
         "type": "object"
@@ -12615,17 +12618,6 @@
       },
       "LlmBridgeDeployJobOut": {
         "properties": {
-          "base_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Url"
-          },
           "bridge_id": {
             "anyOf": [
               {
@@ -12679,7 +12671,7 @@
             "type": "string"
           },
           "kind": {
-            "description": "deploy / redeploy / uninstall",
+            "description": "deploy / redeploy / restart / uninstall",
             "title": "Kind",
             "type": "string"
           },
@@ -12704,7 +12696,7 @@
                 "type": "null"
               }
             ],
-            "description": "same_host：和工作台同一台机器，加入内部网络；remote：端口开在私网地址上",
+            "description": "same_host：加入工作台的内部网络；tunnel：只监听服务器本机，经 SSH 通道访问",
             "title": "Mode"
           },
           "name": {
@@ -12717,19 +12709,6 @@
             },
             "title": "Platforms",
             "type": "array"
-          },
-          "server_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "服务器已从工作台移除时为空",
-            "title": "Server Id"
           },
           "server_name": {
             "title": "Server Name",
@@ -12753,19 +12732,40 @@
             },
             "title": "Steps",
             "type": "array"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "服务器已从工作台移除时为空",
+            "title": "Target Id"
+          },
+          "target_kind": {
+            "enum": [
+              "agent_server",
+              "runner_host"
+            ],
+            "title": "Target Kind",
+            "type": "string"
           }
         },
         "required": [
           "id",
           "kind",
           "status",
-          "server_id",
+          "target_kind",
+          "target_id",
           "server_name",
           "bridge_id",
           "name",
           "platforms",
           "mode",
-          "base_url",
           "steps",
           "error_code",
           "error_message",
@@ -12773,6 +12773,112 @@
           "finished_at"
         ],
         "title": "LlmBridgeDeployJobOut",
+        "type": "object"
+      },
+      "LlmBridgeDeployTargetList": {
+        "properties": {
+          "available": {
+            "description": "这个工作台带着 MCP 管理器的构建文件，可以一键部署",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/LlmBridgeDeployTargetOut"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "targets",
+          "available"
+        ],
+        "title": "LlmBridgeDeployTargetList",
+        "type": "object"
+      },
+      "LlmBridgeDeployTargetOut": {
+        "properties": {
+          "block_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "不能部署的原因（给人看的）",
+            "title": "Block Message"
+          },
+          "block_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "不能部署的原因（代码）",
+            "title": "Block Reason"
+          },
+          "deployable": {
+            "title": "Deployable",
+            "type": "boolean"
+          },
+          "host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "登记的地址；没有用 SSH 登记时为空",
+            "title": "Host"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "agent_server",
+              "runner_host"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "managers": {
+            "description": "这台服务器上已经部署的 MCP 管理器数量",
+            "title": "Managers",
+            "type": "integer"
+          },
+          "may_need_password": {
+            "description": "登录账号不是 root、也不在 docker 组：sudo 要密码时部署要填一次登录密码",
+            "title": "May Need Password",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "name",
+          "host",
+          "deployable",
+          "block_reason",
+          "block_message",
+          "may_need_password",
+          "managers"
+        ],
+        "title": "LlmBridgeDeployTargetOut",
         "type": "object"
       },
       "LlmBridgeEnvironmentIn": {
@@ -13148,6 +13254,7 @@
         "type": "object"
       },
       "LlmBridgeInstallOut": {
+        "description": "工作台部署出去的 MCP 管理器在哪（docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）。",
         "properties": {
           "deployed_at": {
             "format": "date-time",
@@ -13155,11 +13262,37 @@
             "type": "string"
           },
           "mode": {
-            "description": "same_host：加入工作台的内部网络；remote：端口开在私网地址上",
+            "description": "same_host：加入工作台的内部网络；tunnel：只监听服务器本机，经 SSH 通道访问",
             "title": "Mode",
             "type": "string"
           },
-          "server_id": {
+          "needs_sudo": {
+            "description": "重新部署、重启、卸载时要填一次服务器的登录密码",
+            "title": "Needs Sudo",
+            "type": "boolean"
+          },
+          "outdated": {
+            "description": "工作台带的构建文件比部署的新：可以重新部署来升级",
+            "title": "Outdated",
+            "type": "boolean"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "tunnel：服务器本机地址上的端口",
+            "title": "Port"
+          },
+          "server_name": {
+            "title": "Server Name",
+            "type": "string"
+          },
+          "target_id": {
             "anyOf": [
               {
                 "format": "uuid",
@@ -13170,17 +13303,26 @@
               }
             ],
             "description": "服务器已从工作台移除时为空",
-            "title": "Server Id"
+            "title": "Target Id"
           },
-          "server_name": {
-            "title": "Server Name",
+          "target_kind": {
+            "description": "agent_server：智能体服务器；runner_host：容器服务器",
+            "enum": [
+              "agent_server",
+              "runner_host"
+            ],
+            "title": "Target Kind",
             "type": "string"
           }
         },
         "required": [
-          "server_id",
+          "target_kind",
+          "target_id",
           "server_name",
           "mode",
+          "port",
+          "needs_sudo",
+          "outdated",
           "deployed_at"
         ],
         "title": "LlmBridgeInstallOut",
@@ -13405,11 +13547,28 @@
         "additionalProperties": false,
         "properties": {
           "request_id": {
+            "description": "幂等号：用同一个再提交一次，得到的是同一个任务",
             "maxLength": 80,
             "minLength": 1,
             "pattern": "^[\\w.\\-:]+$",
             "title": "Request Id",
             "type": "string"
+          },
+          "sudo_password": {
+            "anyOf": [
+              {
+                "format": "password",
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "登录账号用 Docker 要 sudo 密码时填：只用这一次，不保存、不进日志",
+            "title": "Sudo Password"
           }
         },
         "required": [
@@ -13429,6 +13588,134 @@
           "archived_sessions"
         ],
         "title": "LlmBridgeResetOut",
+        "type": "object"
+      },
+      "LlmBridgeRestartIn": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "description": "幂等号：用同一个再提交一次，得到的是同一个任务",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[\\w.\\-:]+$",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "sudo_password": {
+            "anyOf": [
+              {
+                "format": "password",
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "登录账号用 Docker 要 sudo 密码时填：只用这一次，不保存、不进日志",
+            "title": "Sudo Password"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "LlmBridgeRestartIn",
+        "type": "object"
+      },
+      "LlmBridgeServerManagerList": {
+        "properties": {
+          "available": {
+            "description": "这个工作台可以一键部署",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "managers": {
+            "items": {
+              "$ref": "#/components/schemas/LlmBridgeServerManagerOut"
+            },
+            "title": "Managers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "managers",
+          "available"
+        ],
+        "title": "LlmBridgeServerManagerList",
+        "type": "object"
+      },
+      "LlmBridgeServerManagerOut": {
+        "description": "某台服务器上的一个 MCP 管理器（两个服务器页面的入口用）。",
+        "properties": {
+          "bridge_id": {
+            "format": "uuid",
+            "title": "Bridge Id",
+            "type": "string"
+          },
+          "deployment": {
+            "$ref": "#/components/schemas/LlmBridgeInstallOut"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "logged_in": {
+            "description": "已经登录的账号（openai / claude / workbuddy）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Logged In",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "platforms": {
+            "description": "它控制的平台",
+            "items": {
+              "type": "string"
+            },
+            "title": "Platforms",
+            "type": "array"
+          },
+          "reachable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "工作台现在连不连得上它；停用的不探测，为空",
+            "title": "Reachable"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "bridge_id",
+          "name",
+          "enabled",
+          "reachable",
+          "version",
+          "platforms",
+          "logged_in",
+          "deployment"
+        ],
+        "title": "LlmBridgeServerManagerOut",
         "type": "object"
       },
       "LlmBridgeSessionList": {
@@ -13841,6 +14128,12 @@
       "LlmBridgeUninstallIn": {
         "additionalProperties": false,
         "properties": {
+          "force": {
+            "default": false,
+            "description": "不连服务器，只删除工作台里的登记和部署记录（服务器连不上或已移除时用）",
+            "title": "Force",
+            "type": "boolean"
+          },
           "remove_data": {
             "default": false,
             "description": "同时删除数据卷（登录状态和会话记录，不能恢复）",
@@ -13848,11 +14141,28 @@
             "type": "boolean"
           },
           "request_id": {
+            "description": "幂等号：用同一个再提交一次，得到的是同一个任务",
             "maxLength": 80,
             "minLength": 1,
             "pattern": "^[\\w.\\-:]+$",
             "title": "Request Id",
             "type": "string"
+          },
+          "sudo_password": {
+            "anyOf": [
+              {
+                "format": "password",
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "登录账号用 Docker 要 sudo 密码时填：只用这一次，不保存、不进日志",
+            "title": "Sudo Password"
           }
         },
         "required": [
@@ -26776,6 +27086,11 @@
             ],
             "title": "Load"
           },
+          "mcp_manager_containers": {
+            "default": 0,
+            "title": "Mcp Manager Containers",
+            "type": "integer"
+          },
           "mem_bytes": {
             "default": 0,
             "title": "Mem Bytes",
@@ -27758,6 +28073,45 @@
           "lifetime"
         ],
         "title": "RunnerSpecOut",
+        "type": "object"
+      },
+      "RunnerSshInstall": {
+        "additionalProperties": false,
+        "description": "部署或重新部署运行服务器。\n\n登录密码只用于这一次（登录、装专用公钥、用 sudo 运行安装脚本），不保存。",
+        "properties": {
+          "allow_docker_restart": {
+            "default": false,
+            "description": "允许安装脚本重启 Docker。启用 gVisor 时先重新加载 Docker 的配置；仍然不行、而服务器上有运行中的 MCP 管理器时，任务以 gvisor_needs_docker_restart 失败，管理员确认后带上这一项重新部署（重启会让它们短暂中断，之后自己恢复）",
+            "title": "Allow Docker Restart",
+            "type": "boolean"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "format": "password",
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SSH 登录密码；已经装了专用公钥的 root 账号可以不填，其他账号要用 sudo，必须填",
+            "title": "Password"
+          },
+          "version": {
+            "description": "目标服务器的当前版本号",
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "RunnerSshInstall",
         "type": "object"
       },
       "RunnerSshUninstall": {
@@ -57678,7 +58032,7 @@
     },
     "/api/v1/llm_bridge/bridges/{bridge_id}/redeploy": {
       "post": {
-        "description": "同一个目录、同一枚令牌、同一个数据卷：登录状态和会话记录保留。409 NOT_DEPLOYED_HERE：这个管理器不是工作台部署的。",
+        "description": "同一个目录、同一枚令牌、同一个数据卷、同一条通道：登录状态和会话记录保留。登录账号用 Docker 要 sudo 密码时带 sudo_password（只用这一次，不保存、不进日志）；需要却没带：409 SUDO_PASSWORD_REQUIRED。409 NOT_DEPLOYED_HERE：这个管理器不是工作台部署的；409 SERVER_REMOVED：那台服务器已经从工作台移除。",
         "operationId": "llm_bridge_redeploy",
         "parameters": [
           {
@@ -57810,6 +58164,145 @@
           }
         ],
         "summary": "一键部署：重新部署（升级）工作台部署的 MCP 管理器（owner）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/restart": {
+      "post": {
+        "description": "docker compose restart，再确认工作台连得上。进行中的回合会中断。登录账号用 Docker 要 sudo 密码时带 sudo_password（只用这一次，不保存、不进日志）；需要却没带：409 SUDO_PASSWORD_REQUIRED。",
+        "operationId": "llm_bridge_restart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmBridgeRestartIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeDeployJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "一键部署：重启工作台部署的 MCP 管理器（owner）",
         "tags": [
           "llm_bridge"
         ]
@@ -58300,7 +58793,7 @@
     },
     "/api/v1/llm_bridge/bridges/{bridge_id}/uninstall": {
       "post": {
-        "description": "停掉并删除容器、删除部署目录、去掉登记；数据卷默认保留，remove_data=true 时一起删除。",
+        "description": "停掉并删除容器、删除部署目录和转发密钥、去掉登记；数据卷默认保留，remove_data=true 时一起删除。force=true：不连服务器，只删除工作台里的登记（服务器连不上或已移除时用），返回的任务里写明服务器上还留着什么。登录账号用 Docker 要 sudo 密码时带 sudo_password（只用这一次，不保存、不进日志）；需要却没带：409 SUDO_PASSWORD_REQUIRED。",
         "operationId": "llm_bridge_uninstall",
         "parameters": [
           {
@@ -59099,7 +59592,7 @@
         ]
       },
       "post": {
-        "description": "立刻返回任务，部署在后台进行，进度用任务接口读。服务器要已经确认主机公钥、保存了密码并初始化过。409 DEPLOY_BUSY：这台服务器上有任务在进行；503 DEPLOY_UNAVAILABLE：这个工作台不能一键部署。",
+        "description": "立刻返回任务，部署在后台进行，进度用任务接口读。和工作台同一台服务器：加入工作台的内部网络；其他服务器：只监听那台服务器的本机地址，工作台经专用的 SSH 通道访问。登录账号用 Docker 要 sudo 密码却没带 sudo_password 时，任务在“检查”一步失败（error_code=sudo_password_required），带上密码重新提交。409 DEPLOY_BLOCKED：工作台现在登录不上这台服务器；409 DEPLOY_BUSY：这台服务器上有 MCP 管理器的任务在进行；503 DEPLOY_UNAVAILABLE：这个工作台不能一键部署。",
         "operationId": "llm_bridge_deploy",
         "parameters": [
           {
@@ -59220,7 +59713,88 @@
             "SessionCookie": []
           }
         ],
-        "summary": "一键部署：把一个 MCP 管理器部署到智能体服务器上并登记（owner）",
+        "summary": "一键部署：把一个 MCP 管理器部署到智能体服务器或容器服务器上并登记（owner）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/deployments/targets": {
+      "get": {
+        "description": "智能体服务器和容器服务器两类；不能部署的带上原因。只读工作台里的登记，不连服务器。部署 MCP 管理器不看这两类服务器自己的准入（资源、配额、正在进行的任务）。",
+        "operationId": "llm_bridge_deploy_targets",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeDeployTargetList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "一键部署：可以部署到哪些服务器（admin）",
         "tags": [
           "llm_bridge"
         ]
@@ -59540,6 +60114,110 @@
           }
         ],
         "summary": "设置一个实例的大模型会话权限（owner）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/installs": {
+      "get": {
+        "description": "智能体服务器页面和容器服务器页面的“MCP 管理器”入口用：这台服务器上由工作台部署的管理器，带现在连不连得上、已登录的账号。这些容器不受那两个页面的管理程序影响。",
+        "operationId": "llm_bridge_installs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "target_kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "agent_server",
+                "runner_host"
+              ],
+              "title": "Target Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Target Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeServerManagerList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "某台服务器上的 MCP 管理器（admin）",
         "tags": [
           "llm_bridge"
         ]
@@ -71246,7 +71924,7 @@
     },
     "/api/v1/runner/host/ssh/install": {
       "post": {
-        "description": "上传接入包到 ~/myworkspace-runner（签发新凭证，旧的立即失效），以 root 运行 install.sh（Docker 29.9.1、gVisor release-20261019.0、runner-agent），等 runner-agent 连上工作台。不是 root 账号时用 sudo，要填登录密码（只用这一次，不保存）。返回 202，进度看 GET /ssh。",
+        "description": "上传接入包到 ~/myworkspace-runner（签发新凭证，旧的立即失效），以 root 运行 install.sh（Docker 29.9.1、gVisor release-20261019.0、runner-agent），等 runner-agent 连上工作台。不是 root 账号时用 sudo，要填登录密码（只用这一次，不保存）。返回 202，进度看 GET /ssh。启用 gVisor 时先让 Docker 重新加载配置；仍然要重启 Docker、而服务器上有运行中的 MCP 管理器时，任务以 error_code=gvisor_needs_docker_restart 失败，确认后带 allow_docker_restart=true 重新部署。",
         "operationId": "install_runner_ssh",
         "parameters": [
           {
@@ -71301,7 +71979,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AgentSshInstall"
+                "$ref": "#/components/schemas/RunnerSshInstall"
               }
             }
           },
@@ -73018,7 +73696,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AgentSshInstall"
+                "$ref": "#/components/schemas/RunnerSshInstall"
               }
             }
           },

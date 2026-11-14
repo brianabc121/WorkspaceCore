@@ -8,7 +8,7 @@ import { formatTime } from '../../features/time'
 // 页面上的“MCP 管理器”就是一座登记在工作台里的会话桥（接口里叫 bridge）：一个单独部署的容器，
 // 控制勾选的平台、单独维护一套账号。
 // 查看要 admin，修改要 owner（后端同样校验）。登录、设置、环境、会话都由工作台转给会话桥。
-// 令牌、API 密钥只在提交时出现在请求体里：不进查询缓存、不写日志，提交成功后输入框清空。
+// 令牌、API 密钥、服务器的登录密码（sudo 用）只在提交时出现在请求体里：不进查询缓存、不写日志，提交成功后输入框清空。
 // 查询键都以 'llm_bridge' 开头：['llm_bridge', userId, workspaceId, ...]。
 export type Bridge = Schema['LlmBridgeOut']
 export type BridgeStatus = Schema['LlmBridgeStatusOut']
@@ -27,16 +27,42 @@ export type BridgeSession = Schema['LlmBridgeSessionList']['sessions'][number]
 export type Turn = Schema['LlmBridgeTurnOut']
 export type Slot = 'openai' | 'claude' | 'workbuddy'
 export type DeployJob = Schema['LlmBridgeDeployJobOut']
-export type DeployBody = Schema['LlmBridgeDeployIn']
+// network 页面上不露出（默认 auto：同机走内部网络，否则走 SSH 通道）
+export type DeployBody = Omit<Schema['LlmBridgeDeployIn'], 'network'> & { network?: Schema['LlmBridgeDeployIn']['network'] }
+export type DeployTarget = Schema['LlmBridgeDeployTargetOut']
+export type TargetKind = DeployTarget['kind']
+export type Install = Schema['LlmBridgeInstallOut']
+export type ServerManager = Schema['LlmBridgeServerManagerOut']
+/** 工作台部署的管理器上能做的三种操作（都是后台任务） */
+export type ManagedAction = 'redeploy' | 'restart' | 'uninstall'
 
-// 页面上一键部署 MCP 管理器（docs/v2/LLM_BRIDGE_PLAN.md 第 20 节）：任务的种类、状态和每一步的名字
-export const DEPLOY_KIND: Record<string, string> = { deploy: '部署', redeploy: '重新部署', uninstall: '卸载' }
+// 页面上一键部署 MCP 管理器（docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）：能部署到的两类服务器，任务的种类、状态和每一步的名字
+export const TARGET_KIND: Record<TargetKind, { name: string; path: string }> = {
+  agent_server: { name: '智能体服务器', path: '/agent-servers' },
+  runner_host: { name: '容器服务器', path: '/runner' },
+}
+export const DEPLOY_KIND: Record<string, string> = { deploy: '部署', redeploy: '重新部署', restart: '重启', uninstall: '卸载' }
 export const DEPLOY_STATUS: Record<string, string> = { running: '进行中', succeeded: '成功', failed: '失败', interrupted: '已中断' }
 export const DEPLOY_STEP_STATUS: Record<string, string> = { pending: '等待', running: '进行中', done: '完成', failed: '失败' }
 export const DEPLOY_STEP: Record<string, string> = {
   connect: '登录服务器', inspect: '检查服务器', upload: '上传构建文件', build: '构建镜像（第一次要几分钟）', start: '启动容器',
-  verify: '工作台连接管理器', register: '登记到工作台', stop: '停止并删除容器', remove: '删除部署目录', unregister: '从工作台去掉登记',
+  tunnel: '安装转发密钥', verify: '工作台连接管理器', register: '登记到工作台', restart: '重启容器',
+  stop: '停止并删除容器', remove: '删除部署目录', unregister: '从工作台去掉登记',
 }
+/** 工作台怎么访问部署出去的管理器：same_host 加入工作台的内部网络；tunnel 只监听服务器本机，经专用的 SSH 通道 */
+export function networkName(mode: string | null | undefined, port?: number | null): string {
+  if (mode === 'same_host') return '和工作台同机（内部网络）'
+  if (mode === 'tunnel') return port ? `经 SSH 通道（服务器本机端口 ${port}）` : '经 SSH 通道'
+  return mode || '—'
+}
+/** 任务因为 sudo 密码失败：没给（sudo_password_required）或不对（sudo_denied）。填了密码用新的幂等号再提交 */
+export const isSudoJobError = (code: string | null | undefined) => code === 'sudo_password_required' || code === 'sudo_denied'
+/** 重新部署 / 重启 / 卸载被拒绝（409）：这台服务器的登录账号用 Docker 要 sudo 密码，带上密码重发 */
+export const needsSudoPassword = (error: unknown) => error instanceof ApiError && error.code === 'SUDO_PASSWORD_REQUIRED'
+/** 账号（接口里的 slot）的名字：ChatGPT 和 Codex 用的是同一个 OpenAI 账号 */
+const SLOT_NAME: Record<string, string> = { openai: 'OpenAI', claude: 'Claude', workbuddy: 'WorkBuddy' }
+/** 一组账号的名字，按页面上固定的顺序（OpenAI、Claude、WorkBuddy）；不认识的照原样排在后面 */
+export const slotNames = (slots: readonly string[]) => [...Object.keys(SLOT_NAME).filter(s => slots.includes(s)), ...slots.filter(s => !(s in SLOT_NAME))].map(s => SLOT_NAME[s] ?? s)
 export const newDeployRequestId = () => (typeof crypto.randomUUID === 'function' ? `web-${crypto.randomUUID()}` : `web-${Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')}`)
 
 export const PLATFORMS: readonly { id: Platform; name: string }[] = [
@@ -73,6 +99,7 @@ const MESSAGES: Record<string, string> = {
   BRIDGE_AUTH_FAILED: 'MCP 管理器不接受这枚令牌：请换成它现在用的管理令牌（在服务器上用 make llm-bridge-token 查看）。',
   BRIDGE_OUTDATED: '这个 MCP 管理器的版本太旧，不支持选择控制的平台：请先在服务器上升级它（再运行一次部署命令），然后重新添加。',
   NAME_TAKEN: '已经有同名的 MCP 管理器，换一个名字。',
+  BRIDGE_MANAGED: '这个 MCP 管理器是工作台部署的：地址和令牌由部署管理，不能在这里改；要去掉它请用“卸载”。',
   FORBIDDEN_ROLE: '只有 owner 能修改大模型客户端。',
   MODULE_DISABLED: '功能已停用：大模型客户端在当前工作空间没有启用。',
   // 页面自己给的：会话桥因为还没确认风险拒绝了 Claude 的订阅登录（403）
@@ -104,6 +131,13 @@ export function useLlmBridge(scope: string) {
   const invalidate = (...parts: unknown[]) => cache.invalidateQueries({ queryKey: key(user, scope, ...parts) })
   const at = (bridge_id: string) => ({ header, path: { bridge_id } })
   const slotAt = (bridge_id: string, slot: Slot) => ({ header, path: { bridge_id, slot } })
+  const sudo = (password?: string) => (password ? { sudo_password: password } : {})
+  // 任务开始了：先把返回的任务放进进度的缓存（页面马上能显示），再刷新任务列表
+  const started = async (job: DeployJob) => {
+    cache.setQueryData(key(user, scope, 'deployment', job.id), job)
+    await invalidate('deployments')
+    return job
+  }
 
   return {
     canWrite: computed(() => auth.isOwner),
@@ -118,6 +152,12 @@ export function useLlmBridge(scope: string) {
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/sessions', { params: { ...at(id.value), query: { limit, offset: offset.value } }, signal })) }),
     useTurns: (id: Ref<string>, session: Ref<string | null>) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'turns', session.value)), enabled: computed(() => active() && !!session.value),
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/turns', { params: { header, path: { bridge_id: id.value, session_id: session.value! } }, signal })).turns }),
+    // 一键部署能选的服务器（智能体服务器和容器服务器两类）：只读工作台里的登记，不连服务器
+    useDeployTargets: () => useQuery({ queryKey: key(user, scope, 'deploy-targets'), enabled: computed(active),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/deployments/targets', { params: { header }, signal })) }),
+    // 某台服务器上由工作台部署的 MCP 管理器，带现在连不连得上（两个服务器页面的区块用）
+    useServerManagers: (kind: TargetKind, id: Ref<string>) => useQuery({ queryKey: computed(() => key(user, scope, 'installs', kind, id.value)), enabled: computed(() => active() && !!id.value),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/installs', { params: { header, query: { target_kind: kind, target_id: id.value } }, signal })) }),
     // 一键部署：有任务在跑时每 2 秒读一次进度
     useDeployments: () => useQuery({ queryKey: key(user, scope, 'deployments'), enabled: computed(active),
       refetchInterval: (query: { state: { data?: Schema['LlmBridgeDeployJobList'] } }) => (query.state.data?.jobs.some(j => j.status === 'running') ? 2000 : false),
@@ -178,17 +218,20 @@ export function useLlmBridge(scope: string) {
       await auth.api.DELETE('/api/v1/llm_bridge/bridges/{bridge_id}/environments/{env_id}', { params: { header, path: { bridge_id: id, env_id: envId } } })
       await invalidate('bridge', id, 'environments')
     },
+    // 一键部署和下面三种操作都立刻返回任务，在后台进行；登录密码（sudo 用）只在这一次的请求体里
     async deploy(body: DeployBody) {
-      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/deployments', { params: { header }, body }))
-      await invalidate('deployments'); return out
+      return started(dataOf(await auth.api.POST('/api/v1/llm_bridge/deployments', { params: { header }, body: body as Schema['LlmBridgeDeployIn'] })))
     },
-    async redeploy(id: string, request_id: string) {
-      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/redeploy', { params: at(id), body: { request_id } }))
-      await invalidate('deployments'); return out
+    async redeploy(id: string, request_id: string, sudo_password?: string) {
+      return started(dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/redeploy', { params: at(id), body: { request_id, ...sudo(sudo_password) } })))
     },
-    async uninstall(id: string, request_id: string, remove_data: boolean) {
-      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/uninstall', { params: at(id), body: { request_id, remove_data } }))
-      await invalidate('deployments'); return out
+    async restart(id: string, request_id: string, sudo_password?: string) {
+      return started(dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/restart', { params: at(id), body: { request_id, ...sudo(sudo_password) } })))
+    },
+    // force：不连服务器，只删除登记；返回的任务已经结束，第一步的说明里写着服务器上还留着什么
+    async uninstall(id: string, request_id: string, options: { remove_data: boolean; force: boolean; sudo_password?: string }) {
+      const body = { request_id, remove_data: options.remove_data, force: options.force, ...sudo(options.sudo_password) }
+      return started(dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/uninstall', { params: at(id), body })))
     },
     async setGrant(instanceId: string, body: GrantBody) {
       const out = dataOf(await auth.api.PUT('/api/v1/llm_bridge/grants/{instance_id}', { params: { header, path: { instance_id: instanceId } }, body }))

@@ -66,6 +66,8 @@ export function mockApi(handler?: (request: Request) => Response | Promise<Respo
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/deployment$/.test(path) && request.method === 'GET') return Response.json({ deployment: null, server: null, job: null, capacity_warning: null })
     if (path === '/api/v1/runner/hosts/candidates' && request.method === 'GET') return Response.json({ items: [] })
     if (/^\/api\/v1\/runner\/hosts\/[^/]+\/ssh$/.test(path) && request.method === 'GET') return Response.json({ target: null, job: null, warning: null })
+    // 两个服务器页面上的“MCP 管理器”区块（T-0233，大模型客户端模块）：默认这台服务器上没有工作台部署的管理器
+    if (path === '/api/v1/llm_bridge/installs' && request.method === 'GET') return Response.json({ managers: [], available: true })
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/runner\/capabilities$/.test(path) && request.method === 'GET') return Response.json({ instance_id: path.split('/')[5], held_count: 0, default_limit: 5, unlimited_active: false, grants: [], pending_approval_ids: [] })
     // 实例的运行环境权限（T-0140）：默认关闭
     if (/^\/api\/v1\/agents\/instances\/[^/]+\/runner$/.test(path) && request.method === 'GET') return Response.json(runnerOff)

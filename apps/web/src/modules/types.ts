@@ -5,7 +5,7 @@ import type { Schema } from '../services/api'
 
 // 插拔式模块的前端定义（T-0159；写法见 src/modules/README.md 与 docs/modules/README.md 第 4 节）。
 // 一个模块 = src/modules/<key>/index.ts 里的一次 defineModule()，再在 registry.ts 登记一行。
-// 侧栏、路由、首页小组件、实时事件都从注册表读；模块停用时宿主自动隐藏入口、页面显示“功能未启用”。
+// 侧栏、路由、首页小组件、实时事件、服务器页面上的区块都从注册表读；模块停用时宿主自动隐藏入口、页面显示“功能未启用”。
 
 /** 侧栏分组：工作台原有的三个，加上新模块默认放的“应用” */
 export type NavSection = '工作空间' | '应用' | '连接与工具' | '管理'
@@ -55,6 +55,9 @@ export interface ModuleManagement {
   helpPath?: string
 }
 
+/** 服务器页面上能放模块区块的两个位置：智能体服务器的详情、容器服务器“服务器设置”里的每台服务器 */
+export type ServerPanelPlace = 'agentServer' | 'runnerHost'
+
 export interface ModuleDefinition<W extends ModuleWidget = ModuleWidget, E extends ModuleEvents = ModuleEvents> {
   /** 与后端清单的 key 相同 */
   key: string
@@ -66,6 +69,13 @@ export interface ModuleDefinition<W extends ModuleWidget = ModuleWidget, E exten
   widgets?: readonly W[]
   /** 实时事件主题 → 要刷新的查询键前缀，例如 { news: ['news'] } */
   events?: E
+  /**
+   * 服务器页面上由模块提供的区块（宿主用 ModuleServerPanels 渲染，页面本身不导入模块的代码；模块停用时不渲染）：
+   * agentServer 显示在智能体服务器的详情里，runnerHost 显示在容器服务器“服务器设置”的每台服务器下面。
+   * 区块组件收到的 props：serverId: string（那台服务器的 id）、serverName: string（它的名字）。
+   * 组件要按需加载：defineAsyncComponent(() => import('./XxxPanel.vue'))，模块不启用就不下载它的代码。
+   */
+  serverPanels?: { agentServer?: Component; runnerHost?: Component }
 }
 export type ModuleEvents = Partial<Record<EventTopic, readonly string[]>>
 
