@@ -104,6 +104,7 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 |---|---|
 | [`docs/deploy-guide.md`](docs/deploy-guide.md) | 部署教程（从零开始，按步骤） |
 | [`docs/deployment.md`](docs/deployment.md) | 运行手册：全部变量、组件接入细节、升级与回滚、备份恢复、扫描与基准 |
+| [`docs/tailscale-development-guide.md`](docs/tailscale-development-guide.md) | Tailscale从部署到开发：密钥与标签、节点恢复、平台代理、严格SSH、排障与实测案例 |
 | [`docs/release-checklist.md`](docs/release-checklist.md) | 发布前逐项检查 |
 | [`docs/versions.md`](docs/versions.md) | 所有镜像与关键依赖的锁定版本（tag + digest）、许可证与核验来源 |
 | [`docs/threat-model.md`](docs/threat-model.md) | 风险与防护措施 |

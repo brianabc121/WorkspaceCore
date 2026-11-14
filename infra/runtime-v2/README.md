@@ -1,10 +1,15 @@
 # Runtime v2 开发预览部署材料
 
-**T-0224 / PR #193 尚未完成。这里没有执行安装，也不提供自动切换旧 Docker 环境的动作。**
+**T-0224 整体仍在进行。这里的模板不会自动安装或切换已有 Docker 工作负载。**
+
+状态阅读说明（2026-11-14）：本文件保留了早期尚无远端集群时的准备条件；后续专用双节点私网实测与迁移已执行，公网和完整运行适配仍有门槛。最新结果和当前连接状态见[执行账本](../../docs/verification/2026-11-13-two-server-acceptance/EXECUTION.md)，不要将旧准备描述当作当前实机状态。
 
 `controller.env.example` 和 `workspace-runtime-v2.service` 是独立生命周期控制器的配置模板。复制模板本身不会启用后端；`RUNTIME_V2_ENABLED=false`，工作台 `RUNNER_NETWORK_VERIFIED=false`，Kubernetes 调度仍关闭。当前支持受限 gVisor 不可变镜像档位的 create/start/stop/delete、持久恢复、可信资源采集与网络执行链；exec、初始文件/密钥、快照等其他运行操作仍明确拒绝。网络实现需通过真实节点验收后由部署方启用。
 
 ## 配置边界
+
+开始远端开发前先读 [Tailscale部署与开发使用手册](../../docs/tailscale-development-guide.md)，
+核对当前来源标签、代理路径与可信SSH公钥；设备在线或旧测试通过不代表当前连接已验证。
 
 - 一份控制器配置只绑定一个 workspace、RunnerHost 和 Kubernetes Node；命令不能改变绑定。主机的 mwr 凭证只用于既有接入入口，不是用户的 Kubernetes 凭证。
 - `RUNTIME_V2_URL` 是现有受信接入入口的基地址。客户端自己添加 `/runner-api/v1`，不要重复配置该路径。

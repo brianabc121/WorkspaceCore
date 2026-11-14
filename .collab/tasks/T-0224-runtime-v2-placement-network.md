@@ -5,7 +5,7 @@ owner: codex
 status: in_progress
 priority: P1
 branch: codex/T-0224-two-server-acceptance
-paths: services/api,apps/web,infra,tests/e2e,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows
+paths: services/api,apps/web,infra,tests/e2e,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows,docs/tailscale-development-guide.md,README.md
 depends_on:
 created: 2026-11-11
 updated: 2026-11-14
@@ -70,3 +70,5 @@ updated: 2026-11-14
 - 2026-11-13 15:34 UTC · claude · main 修复：PR #199 与 PR #198（0066 llm_bridge）先后合并，main 上出现两个 0066、两个 alembic head。为恢复 main，claude 把本任务的网关端口迁移改号为 0067（down_revision 0066），测试 test_runner_gateway_migration 的回退目标改为 0066；见 docs/verification/2026-11-13-network-completion/PROGRESS.md 末节。只改编号，不改迁移内容。
 - 2026-11-13 19:31 UTC · codex · 整合origin/main6688d15（含PR202/204），保留主干0066桥→0067网关并新增0068历史核对；任务日志冲突保留双方追加。原API完整基线5fail1745pass16skip/3091.84s，5fail均Alembic用户名/schema反射问题，独立CI式用户原两文件8pass21.42s。新兼容回归RED18/4→初轮组合51pass；独立复审3Important（整数宽度、NOT VALID约束、空检查与DROP并发丢数据）真实PG9项RED后修复，最终组合60pass160.99s，复审无剩余阻塞。Ruff/format565、strict mypy559、OpenAPI及单head0068通过。19:27真实隔离测试库0067→0068退出0，6表行数/摘要相同，端口序列保持、策略序列不重置，控制面DB/Redis仍ok。生产未迁移/网络关闭；最新全套CI未确认，旧版网络输出与最终迁移验证分开记录。下一步公网LB/两个外部来源及更广存储/运行适配；继续in_progress/草稿PR203不合并。
 - 2026-11-14 03:00 UTC · codex · 后续核对7f4a591六组CI全部success：API1774pass16skip/2437.46s，Garage5pass，CLI迁移up/down/up，Web80文件811项及构建、全栈/安全通过。核实交接6/8/9/10：版本写入保护跨节点旧快照，不去掉围栏；新revision编辑仍pending且非K8s全局unsupported保留；满负载/长周期容量仍未实测。定向围栏/撤销4pass0.16s。本轮执行器北京时间11月14日10:25:57启动，逻辑环境/源配置版本不变；/tmp信任缓存消失，公网钥未取得前已停止。平台VPN Running/routing_ready=true，A/B22两次CONNECT503超时，未认证或执行远端命令。用户截图确认两机Connected/tag正确，新codex-environment-3无codex-cloud标签，与来源规则不匹配；平台注册历史缺失，恢复重注册为有证据支持的解释，尚不能核实具体触发/自身IP。无可用Tailscale管理接口，需当前客户端赋标签后复测。生产继续关闭，PR203草稿，任务in_progress。证据docs/verification/2026-11-14-runtime-network-followup/，未记录真实邮箱/注册凭据。
+- 2026-11-14 03:31 UTC · codex · 人类明确要求将Tailscale从部署到开发使用的防踩坑文档推送GitHub。本轮仅写长期文档与导航，沿当前PR203，不重复已有测试、不改服务器/密钥/ACL。inbox无其他占用路径；为长期可发现文档，将任务paths补充docs/tailscale-development-guide.md与README.md两个单文件，记录这次范围扩展。覆盖带tag的Reusable/Ephemeral、持久身份、平台TCP代理与严格SSH、分层排障、K3s/Cilium/TLS、实际证据及未验证边界；官方参数重新核验。
+- 2026-11-14 03:44 UTC · codex · 按人类要求完成长期手册docs/tailscale-development-guide.md，根README和Runtime README增加入口并澄清历史状态。覆盖Debian安装、Tagged Reusable/Ephemeral、身份持久化、grants与SSH、平台代理、严格公钥、开发/排障/轮换、K3s/Cilium与证据边界。只读独立审阅无阻塞，修正全局known_hosts回退与方案未应用的标识。10段Bash语法、2段JSON、1段YAML、内嵌Python/相对链接/锚点/密钥模式检查通过；SSH核验代码5个模拟场景通过，ssh-G确认仅专用known_hosts/ED25519严格校验。未运行安装/注册、未修改密钥/ACL/服务器，继续T0224进行中，推送同PR203；此轮仅文档不宣称新head全套CI已完成。
