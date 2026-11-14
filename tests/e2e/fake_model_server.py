@@ -8,7 +8,10 @@ T-0202 起另有 Anthropic Messages 与 Gemini 原生协议（见下）。
   参数里的 `{n}` 换成第几次（从 1 开始），让每次的内容不同（im_send 按内容去重，T-0120）。
 - 其他：回复 `echo: <原文末尾>`。
 每个请求追加写入 FAKE_MODEL_LOG（JSON Lines，含 Authorization 请求头），验收脚本据此判断
-是哪个实例（各自的模型密钥不同）、用的是哪个密钥。只用标准库。用法：python3 -I fake_model_server.py [端口]
+是哪个实例（各自的模型密钥不同）、用的是哪个密钥。记录在请求到达、回复发出之前写入（`at` 是到达的时刻）。
+`session` 是这一轮所在的 OpenClaw 会话键，`system` 是系统提示词的开头（T-0233）：验收脚本据此分清一次调用
+是哪个对话里的一轮，还是 OpenClaw 自己按时钟跑的自动任务（定时心跳、Dreaming、定时任务）。
+只用标准库。用法：python3 -I fake_model_server.py [端口]
 
 原生协议（T-0202，只回复 `echo: <原文末尾>`，不支持工具调用）：
 - Anthropic Messages（https://platform.claude.com/docs/en/api/messages/create 、
@@ -75,6 +78,27 @@ def _since_user(messages: list[dict]) -> tuple[str, int]:
             if text:
                 return text, tool_results
     return "", tool_results
+
+
+# OpenClaw 2026.9.36 在智能体每一轮的用户消息后面附一行 `Runtime: agent=main | session=<会话键> | host=…`
+# （对话、定时心跳、定时任务都有；在锁定镜像上抓请求核对过，T-0233）
+RUNTIME_SESSION = re.compile(r"Runtime: agent=[^|\n]*\| session=(\S+)")
+
+
+def _session(messages: list[dict]) -> str:
+    """这一轮所在的 OpenClaw 会话键；请求里没有 Runtime 行（不是智能体的一轮，例如 memory-core 写 dream diary）时为空。"""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            found = RUNTIME_SESSION.findall(_text(m.get("content")))
+            if found:
+                return str(found[-1])
+    return ""
+
+
+def _system(messages: list[dict]) -> str:
+    """系统提示词的开头（只留 80 个字符，够分清是哪一类请求）。"""
+    first = messages[0] if messages else {}
+    return _text(first.get("content"))[:80] if first.get("role") == "system" else ""
 
 
 def decide(body: dict) -> dict:
@@ -236,6 +260,7 @@ class Handler(BaseHTTPRequestHandler):
         result = decide(body)
         messages = body.get("messages", [])
         record = {"at": time.time(), "auth": self.headers.get("Authorization"), "model": body.get("model"),
+                  "session": _session(messages), "system": _system(messages),
                   "last_user": _since_user(messages)[0][-500:], "result": result,
                   "roles": [m.get("role") for m in messages[-6:]],
                   "count": len(messages),

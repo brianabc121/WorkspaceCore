@@ -145,6 +145,49 @@ V2（禁用发消息工具后自动回复照常）、V3（系统事件进下一�
 | 管理员叫停 | 甲在一件事上反复调用 `knowledge_search`，管理员叫停后它的下一次工具调用拿到 `RUN_STOPPED` 和原因；甲的 `stop-runs.mjs` 在容器里用 `sessions.list({activeOnly: true})` 找到正在运行的会话、`sessions.abort` 中止（`done`，`aborted` 为 1，领取到报回约 6 秒）；之后甲不再调用模型（模型调用次数 66 → 66，那一轮停下，排队的也清掉）；报回成功后解除软停止，甲的工具调用恢复 |
 | 未核对 → 已查明（T-0125，见 6.4） | 乙（外网实例，public 模式）的模型经 Tool Search 调工作台工具时 OpenClaw 报 `Unknown tool id`（提交 3e9b6d5 的那次 CI），调用没到工作台；与终止无关。原因是 OpenClaw 的 SSRF 防护拦下了外网模式的 MCP 地址，见 6.4 |
 
+**2026-11-14 补充（T-0233）：“中止后甲不再调用模型”偶发多出一次调用**
+
+现象：PR #205（提交 `a5eb5e1`，改动与智能体无关）的 agents 任务里，“管理员叫停”一行的最后一项失败，`59 → 60`：
+中止报回 `done`（`aborted: 1`）之后先等 5 秒记一次数，再等 20 秒又记一次，多了 1 次模型调用；其余各项都通过。
+当时这项检查数的是甲的**全部**模型调用。日志里没有每次调用的记录，下面是在锁定镜像上查到和实测到的。
+
+在锁定镜像 `openclaw/openclaw:2026.9.36` 上核对（本地：真实网关 + `tests/e2e/fake_model_server.py` + 一个只有 `knowledge_search`
+的假 MCP 服务；这一轮用 `openclaw agent --session-key agent:main:openim:direct:<对方>` 发起，没有经过 OpenIM 与插件；
+中止用接入包 `stop-runs.mjs` 的 `abortAll`）：
+
+| 项目 | 结果 |
+|---|---|
+| 假模型什么时候记账 | 请求到达、回复发出之前就写记录（`at` 是到达的时刻），不存在“调用早就发出、过几秒才记到账” |
+| `sessions.abort` 什么时候返回 | `src/gateway/server-methods/sessions-abort.ts`：发出中止后等这一轮的结束状态落盘（`settleAbortPersistence`）才应答。实测 25 次（其中 10 次把网关限制在 0.5 核、宿主 CPU 跑满，`abortAll` 要 12 ~ 15 秒）：被叫停的那一轮在中止返回之后的模型调用都是 0 次，它的最后一次调用在返回之前 0.05 ~ 1.3 秒；批量跑的 20 次里，之后 26 秒计数都不变。所以多出的那一次不是被叫停的那一轮晚到的调用 |
+| OpenClaw 自己按时钟跑的自动任务 | 默认就有，接入包没有关（`openclaw cron list --all`）。接入包的真实配置（装上并打过补丁的 openclaw-channel、`plugins.allow: ["openclaw-channel"]`）下也在：启动日志 `http server listening (2 plugins: memory-core, openclaw-channel)`、`memory-core: created managed dreaming cron job` |
+| 定时心跳 `Heartbeat (main)` | 每 30 分钟一次，在主会话 `agent:main:main` 里跑一轮。哪一刻由设备标识决定：`anchorMs = sha256(设备标识:agentId) % 间隔`（`src/infra/heartbeat-schedule.ts`、`src/cron/heartbeat-monitor.ts`），不是“启动后 30 分钟”；四个新实例的 `anchorMs` 各不相同，第一次心跳分别在启动后约 1、6、10、25 分钟。没有投递对象（接入包没配 owner）时，只有主会话里有待处理的系统事件（例如“新建了会话”的通知）才调用模型，否则记为 `skipped: no-route`（`heartbeat-runner-run`）。调用模型时是 1 次 |
+| Dreaming `Memory Dreaming Promotion`（memory-core） | cron `0 3 * * *`（容器时区，CI 与接入包里是 UTC），默认打开（`docs/concepts/dreaming.md`）。实例有过对话之后，每个阶段“材料够了”就调用一次模型写 dream diary（实测 2 次：light、REM），不带工具、不在任何会话里；提示词里是各个会话的对话片段。新实例没有对话时不调用模型 |
+| 定时任务 | 场景 15 建的每晚复盘（`0 22 * * *` Asia/Shanghai，即 14:00 UTC）跑在 `agent:main:cron:<任务>` 会话里，调用模型 1 次；还有每周一次的 `Skill collection review (main)` |
+| 这些调用和中止的关系 | `sessions.abort` 中止的是正在运行的会话。上面几种不是哪个对话里的一轮，到点照常调用模型（用的是同一个模型密钥） |
+| 请求里怎么认 | 智能体每一轮的用户消息后面有一行 `Runtime: agent=main \| session=<会话键> \| host=…`：对话是 `agent:main:openim:direct:<对方>` / `…:group:<群>`，心跳是 `agent:main:main`（提示词以 `Follow the heartbeat monitor scratch context…` 开头），定时任务是 `agent:main:cron:<任务>`；Dreaming 的请求没有这一行、没有工具，系统提示词以 `You are keeping a dream diary` 开头 |
+
+结论：多出的那一次是 OpenClaw 自己按时钟跑的自动任务，落在了那 20 秒里。失败那次的 20 秒大约是 02:59:53 ~ 03:00:13 UTC
+（终止令 02:59:47.566 报回），正好跨过 Dreaming 的 03:00:00；甲的定时心跳也可能落在里面（每次 CI 的时刻不同，落进 20 秒的机会约 1%）。
+是这两种里的哪一种，从那次的日志分不出来（推断）。本地让定时心跳落在这段时间里，现象相同：原来的数法 `84 → 85`。
+
+处理（只改验收，接入包与工作台不变）：假模型的记录多记 `session`（Runtime 行里的会话键）和 `system`（系统提示词开头）；
+场景 22 这一项只数对话里的各轮——会话键和提示词都对得上的定时心跳、Dreaming、定时任务不计入，但写进详情；认不出的一律照数。
+等 5 秒、再看 20 秒、多一次就失败，这些都没变。用仓库里的判定函数（`quiet_after_stop`）对真实网关逐种情形跑过（“原来的数法”是同一份记录按全部调用、同样的两个时刻重算）：
+
+| 情形 | 原来的数法 | 现在 |
+|---|---|---|
+| 中止生效，这段时间里没有自动任务 | 通过（71 → 71） | 通过（71 → 71） |
+| 中止生效，定时心跳落在这段时间里 | 失败（84 → 85） | 通过（84 → 84；定时心跳 1 次不计入） |
+| 中止生效，Dreaming 在这段时间里运行 | 失败（46 → 48） | 通过（46 → 46；Dreaming 2 次不计入） |
+| 中止生效，定时任务在这段时间里运行 | 失败（40 → 41） | 通过（40 → 40；定时任务 1 次不计入） |
+| 没有中止（中止不生效） | 失败（107 → 368） | 失败（107 → 368） |
+| 只中止了别的会话 | 失败（91 → 285） | 失败（91 → 285） |
+| 中止生效，8 秒后同一个会话里又跑了一轮（排队的没清掉） | 失败（45 → 47） | 失败（45 → 47） |
+
+没有在本地验证的：经 OpenIM 与插件收消息发起的那一轮（本地没有整套工作台）；这条路径由 CI 的 agents 任务实测。
+同一个文件里另有几项“这段时间里某个实例没有调用模型”的检查（场景 3、10、11、13）数的也是全部调用，
+自动任务落进去同样会失败；这次没有改，见 T-0233 的任务记录。
+
 ### 6.3 唤醒（T-0121，2026-11-06）
 
 V4 实测结果（同一次 CI，提交 84f4359）：接入包的 `wakeup.mjs` 在甲的容器里领取管理员建的唤醒，用
