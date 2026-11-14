@@ -47,7 +47,8 @@ _write_errors = error_responses(401, 403, 404, 409, 422, 503)
 @router.get("/llm_bridge/bridges", summary="登记的会话桥（admin）", responses=_read_errors)
 async def llm_bridge_list_bridges(access: Admin, service: Service) -> LlmBridgeList:
     rows = await service.bridges(access.workspace.id)
-    return LlmBridgeList(bridges=[service.bridge_out(r) for r in rows])
+    installs = await service.installs(access.workspace.id)
+    return LlmBridgeList(bridges=[service.bridge_out(r, installs.get(r.id)) for r in rows])
 
 
 @router.post(
@@ -342,5 +343,6 @@ async def llm_bridge_set_grant(
 # ---- 聊天页面（docs/v2/LLM_CHAT_PLAN.md）：接口写在 chat_api.py，登记在同一个 router 上 ----
 from app.modules.llm_bridge import chat_api as _chat_api  # noqa: E402, F401
 from app.modules.llm_bridge import chat_group_api as _chat_group_api  # noqa: E402, F401
+from app.modules.llm_bridge import deploy_api as _deploy_api  # noqa: E402, F401
 
 __all__ = ["router"]

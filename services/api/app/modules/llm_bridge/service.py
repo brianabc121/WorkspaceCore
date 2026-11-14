@@ -24,7 +24,7 @@ from app.domain.policy import WorkspaceAccess
 from app.integrations.base import ConnectorError
 from app.models import AgentInstance
 from app.modules.llm_bridge.client import BridgeCallError, BridgeClient, bridge_client
-from app.modules.llm_bridge.models import LlmBridge, LlmBridgeGrant
+from app.modules.llm_bridge.models import LlmBridge, LlmBridgeDeployJob, LlmBridgeGrant
 from app.modules.llm_bridge.schemas import (
     ALL_PLATFORMS,
     LlmBridgeAccountOut,
@@ -32,6 +32,7 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeGrantIn,
     LlmBridgeGrantOut,
     LlmBridgeIn,
+    LlmBridgeInstallOut,
     LlmBridgeOut,
     LlmBridgePatch,
     LlmBridgeSettings,
@@ -85,6 +86,25 @@ def from_bridge(error: BridgeCallError) -> ApiError:
     return ApiError(_STATUS.get(error.code, 502), error.code, error.message or "会话桥返回了错误")
 
 
+async def remove_bridge(db: AsyncSession, row: LlmBridge) -> None:
+    """去掉一座桥的登记（不提交）。
+
+    只允许用这座桥的实例，之后一座都不能用（列表变空），不会变成“都能用”。
+    """
+    grants = (
+        await db.scalars(
+            select(LlmBridgeGrant).where(
+                LlmBridgeGrant.workspace_id == row.workspace_id,
+                LlmBridgeGrant.bridge_ids.is_not(None),
+            )
+        )
+    ).all()
+    for grant in grants:
+        if grant.bridge_ids is not None and str(row.id) in grant.bridge_ids:
+            grant.bridge_ids = [i for i in grant.bridge_ids if i != str(row.id)]
+    await db.delete(row)
+
+
 class LlmBridgeService:
     def __init__(self, db: AsyncSession, settings: Settings, runtime: ConnectorRuntime) -> None:
         self.db = db
@@ -93,16 +113,42 @@ class LlmBridgeService:
 
     # ---- 会话桥登记 ----
     @staticmethod
-    def bridge_out(row: LlmBridge) -> LlmBridgeOut:
+    def bridge_out(row: LlmBridge, deployment: LlmBridgeInstallOut | None = None) -> LlmBridgeOut:
         return LlmBridgeOut(
             id=row.id,
             name=row.name,
             base_url=row.base_url,
             enabled=row.enabled,
             has_token=bool(row.token_ref),
+            deployment=deployment,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
+
+    async def installs(self, workspace_id: uuid.UUID) -> dict[uuid.UUID, LlmBridgeInstallOut]:
+        """工作台一键部署的那些桥（T-0233）：桥的 id → 部署在哪台服务器上。"""
+        rows = (
+            await self.db.scalars(
+                select(LlmBridgeDeployJob)
+                .where(
+                    LlmBridgeDeployJob.workspace_id == workspace_id,
+                    LlmBridgeDeployJob.bridge_id.is_not(None),
+                    LlmBridgeDeployJob.kind.in_(("deploy", "redeploy")),
+                    LlmBridgeDeployJob.status == "succeeded",
+                )
+                .order_by(LlmBridgeDeployJob.started_at)
+            )
+        ).all()
+        found: dict[uuid.UUID, LlmBridgeInstallOut] = {}
+        for row in rows:  # 按时间升序：最近一次盖掉前面的
+            if row.bridge_id is not None:
+                found[row.bridge_id] = LlmBridgeInstallOut(
+                    server_id=row.server_id,
+                    server_name=row.server_name,
+                    mode=row.mode or "remote",
+                    deployed_at=row.finished_at or row.started_at,
+                )
+        return found
 
     async def bridges(
         self, workspace_id: uuid.UUID, *, only_enabled: bool = False
@@ -235,20 +281,8 @@ class LlmBridgeService:
 
     async def delete_bridge(self, access: WorkspaceAccess, bridge_id: uuid.UUID) -> None:
         row = await self.bridge(access.workspace.id, bridge_id)
-        # 只允许用这座桥的实例，删除后一座都不能用（列表变空），不会变成“都能用”
-        grants = (
-            await self.db.scalars(
-                select(LlmBridgeGrant).where(
-                    LlmBridgeGrant.workspace_id == row.workspace_id,
-                    LlmBridgeGrant.bridge_ids.is_not(None),
-                )
-            )
-        ).all()
-        for grant in grants:
-            if grant.bridge_ids is not None and str(row.id) in grant.bridge_ids:
-                grant.bridge_ids = [i for i in grant.bridge_ids if i != str(row.id)]
         await self._audit(access, "bridge_deleted", row.id, {"name": row.name})
-        await self.db.delete(row)
+        await remove_bridge(self.db, row)
         await self.db.commit()
 
     def client(self, row: LlmBridge) -> BridgeClient:

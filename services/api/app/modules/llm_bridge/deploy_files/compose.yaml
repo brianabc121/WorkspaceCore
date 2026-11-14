@@ -1,0 +1,26 @@
+# 由工作台生成（大模型客户端：页面上一键部署 MCP 管理器，T-0233）。不要手改：重新部署会覆盖。
+# 和 infra/llm-bridge/compose.yaml 是同一个服务，只是网络的接法由工作台按这台服务器的情况填好。
+name: @PROJECT@
+
+services:
+  mcp-manager:
+    build:
+      context: ./src
+    image: myworkspace/llm-bridge:@TAG@
+    restart: unless-stopped
+    # 管理令牌在 bridge.env 里（权限 600），不写进这个文件
+    env_file:
+      - ./bridge.env
+    volumes:
+      - llm-bridge-data:/data
+    # 普通用户运行（镜像里的 uid 10001），不要特权、不挂 Docker socket 和宿主目录
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 1024
+    mem_limit: 4g
+    cpus: 2
+@NETWORKING@
+volumes:
+  llm-bridge-data:

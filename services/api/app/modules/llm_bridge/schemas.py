@@ -40,12 +40,23 @@ class LlmBridgePatch(_In):
     enabled: bool | None = None
 
 
+class LlmBridgeInstallOut(BaseModel):
+    server_id: UUID | None = Field(description="服务器已从工作台移除时为空")
+    server_name: str
+    mode: str = Field(description="same_host：加入工作台的内部网络；remote：端口开在私网地址上")
+    deployed_at: datetime
+
+
 class LlmBridgeOut(BaseModel):
     id: UUID
     name: str
     base_url: str
     enabled: bool
     has_token: bool
+    deployment: LlmBridgeInstallOut | None = Field(
+        default=None,
+        description="工作台一键部署的管理器：部署在哪台智能体服务器上；手动添加的为空",
+    )
     created_at: datetime
     updated_at: datetime
 

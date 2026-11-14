@@ -18,7 +18,7 @@ import httpx
 
 from app.domain.connectors import ConnectorRuntime
 from app.integrations.base import ConnectorError
-from app.integrations.http import ConnectorHttp, OutboundPolicy, host_of
+from app.integrations.http import CircuitBreaker, ConnectorHttp, OutboundPolicy, host_of
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 # llm_send / llm_turn_get 最多在会话桥上等 50 秒
@@ -143,13 +143,16 @@ class BridgeClient:
         return payload
 
 
-def bridge_client(runtime: ConnectorRuntime, base_url: str, token: str) -> BridgeClient:
+def bridge_client(
+    runtime: ConnectorRuntime, base_url: str, token: str, *, breaker: CircuitBreaker | None = None
+) -> BridgeClient:
+    """breaker：不给时用全局的熔断计数；一键部署等管理器启动时给它自己的（T-0233）。"""
     http = ConnectorHttp(
         policy=OutboundPolicy(frozenset({host_of(base_url)})),
         connect_timeout=5.0,
         read_timeout=READ_TIMEOUT,
         read_retries=0,
-        breaker=runtime.breaker,
+        breaker=breaker or runtime.breaker,
         transport=runtime.transport,
         breaker_scope=f"llm_bridge:{host_of(base_url)}",
     )
