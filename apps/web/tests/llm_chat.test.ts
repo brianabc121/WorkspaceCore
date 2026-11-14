@@ -1,5 +1,6 @@
 // 大模型聚合聊天页面（docs/v2/LLM_CHAT_PLAN.md；src/modules/llm_bridge/chat）：会话列表与筛选、对话与进度、
-// 发送 / 停止 / 改标题 / 归档、接着别人的会话发消息前的确认、新建会话、管理器停用、角色。
+// 发送 / 停止 / 改标题 / 归档、接着别人的会话发消息前的确认、新建会话、管理器停用、角色；
+// 以及多模型同问（T-0232）：分组列表、并排的每一栏、向一组继续发、新建一组。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, waitFor, within } from '@testing-library/vue'
 import { fail, me, mockApi, newsModule, openApp, workspace } from './helpers'
@@ -11,6 +12,7 @@ type Message = Schema['LlmChatMessageOut']
 type Conversation = Schema['LlmChatConversationOut']
 type Events = Schema['LlmChatEventsOut']
 type Bridge = Schema['LlmBridgeOut']
+type Group = Schema['LlmChatGroupOut']
 
 const at = '2026-11-13T00:00:00Z'
 const ONE = '11111111-1111-4111-8111-111111111111', TWO = '22222222-2222-4222-8222-222222222222'
@@ -43,9 +45,10 @@ interface World {
   /** 读事件时依次给出；可以是还没兑现的 Promise，用来停在“回答到一半” */
   events: (Events | Promise<Events>)[]
   options: Schema['LlmChatOptionsOut']
+  groups: Group[]
 }
 function setup(role: Role, given: Partial<World> = {}, handler?: (r: Request, world: World, url: URL) => Response | undefined | Promise<Response | undefined>) {
-  const world: World = { bridges: [bridge()], sessions: [session()], conversations: { [S1]: talk() }, events: [], options: { models: [], models_error: '', environments: [] }, ...given }
+  const world: World = { bridges: [bridge()], sessions: [session()], conversations: { [S1]: talk() }, events: [], options: { models: [], models_error: '', environments: [] }, groups: [], ...given }
   const requests = mockApi(async r => {
     const url = new URL(r.url), p = url.pathname
     const result = await handler?.(r, world, url)
@@ -54,6 +57,9 @@ function setup(role: Role, given: Partial<World> = {}, handler?: (r: Request, wo
     if (p === '/api/v1/modules' && r.method === 'GET') return Response.json({ items: [newsModule, lbModule] })
     if (p === '/api/v1/llm_bridge/bridges' && r.method === 'GET') return Response.json({ bridges: world.bridges })
     if (p === '/api/v1/llm_bridge/grants') return Response.json({ grants: [] })
+    if (p === '/api/v1/llm_bridge/chat/groups' && r.method === 'GET') return Response.json({ groups: world.groups.filter(g => g.status === (url.searchParams.get('status') ?? 'active')) })
+    const group = /^\/api\/v1\/llm_bridge\/chat\/groups\/([^/]+)$/.exec(p)
+    if (group && r.method === 'GET') { const found = world.groups.find(g => g.id === group[1]); return found ? Response.json(found) : fail(404, 'NOT_FOUND') }
     if (/^\/api\/v1\/llm_bridge\/bridges\/[^/]+\/status$/.test(p)) return Response.json(status())
     const found = /^\/api\/v1\/llm_bridge\/bridges\/[^/]+\/chat(\/.*)$/.exec(p)
     if (!found || r.method !== 'GET') return undefined
@@ -409,5 +415,149 @@ describe('大模型聊天', () => {
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
     await waitFor(() => expect(screen.queryByRole('heading', { level: 1, name: '大模型聊天' })).not.toBeInTheDocument())
     expect(requests.some(r => path(r).startsWith('/api/v1/llm_bridge'))).toBe(false)
+  })
+})
+
+// ---- 多模型同问（T-0232，docs/v2/LLM_CHAT_PLAN.md 第 3.4 节）----
+const GROUP = '99999999-9999-4999-8999-999999999999'
+const groups = '/api/v1/llm_bridge/chat/groups'
+type Member = Schema['LlmChatGroupMemberOut']
+const member = (position: number, over: Partial<Member> = {}): Member => ({ position, bridge_id: ONE, bridge_name: '主账号', bridge_enabled: true, platform: 'claude', mode: 'chat', model: 'sonnet', session_id: S1, error: '', ...over })
+const groupOf = (over: Partial<Group> = {}): Group => ({
+  id: GROUP, title: '解释幂等', status: 'active', owner: '测试用户', owner_kind: 'me', created_at: at, updated_at: at,
+  members: [
+    member(0),
+    member(1, { bridge_id: TWO, bridge_name: '备用', platform: 'chatgpt', model: null, session_id: S2 }),
+    member(2, { platform: 'workbuddy', model: null, session_id: null, error: '平台还没有登录' }),
+  ],
+  ...over,
+})
+const two = [bridge(), bridge({ id: TWO, name: '备用' })]
+const both = (): Record<string, Conversation> => ({
+  [S1]: talk({ title: '解释幂等' }, [asked('解释幂等'), answered('做一次和做多次，结果一样。')]),
+  [S2]: talk({ session_id: S2, platform: 'chatgpt', title: '解释幂等' }, [asked('解释幂等', T2), answered('重复调用没有额外的副作用。', T2)]),
+})
+
+describe('多模型同问', () => {
+  it('lists the groups, shows each model side by side and sends to all of them', async () => {
+    const bodies: Schema['LlmChatGroupSendIn'][] = []
+    const { requests } = setup('owner', { bridges: two, groups: [groupOf()], conversations: both() }, async r => {
+      if (path(r) !== `${groups}/${GROUP}/messages` || r.method !== 'POST') return undefined
+      bodies.push(await r.json() as Schema['LlmChatGroupSendIn'])
+      return Response.json({ group: groupOf(), results: [
+        { position: 0, turn: { turn_id: `bt_${'3'.repeat(20)}`, session_id: S1, status: 'queued', ahead_in_session: 0 }, error: '' },
+        { position: 1, turn: null, error: '这个小时的发送次数用完了' },
+        { position: 2, turn: null, error: '这个模型的会话没有建成' },
+      ] })
+    })
+    const { router } = await openApp('/llm_bridge')
+    const side = await screen.findByRole('complementary', { name: '会话列表' })
+    const asked = await within(side).findByRole('region', { name: '同问' })
+    const entry = within(asked).getByRole('button', { name: /解释幂等/ })
+    expect(entry).toHaveTextContent('同问 3 个模型 · 我')
+    await fireEvent.click(entry)
+    expect(await screen.findByRole('heading', { level: 2, name: '解释幂等' })).toBeVisible()
+    expect(router.currentRoute.value.query).toEqual({ m: ONE, g: GROUP })
+    expect(entry).toHaveAttribute('aria-current', 'true')
+
+    // 每个模型一栏：各自读自己那个管理器上的会话；没建成的那一栏给出原因
+    const claude = await screen.findByRole('region', { name: 'Claude（主账号）' })
+    expect(await within(claude).findByText('做一次和做多次，结果一样。')).toBeVisible()
+    expect(within(claude).getByText('sonnet · 主账号')).toBeVisible()
+    expect(within(claude).getByRole('link', { name: '在这个会话里继续' })).toHaveAttribute('href', `/llm_bridge?m=${ONE}&s=${S1}`)
+    const gpt = screen.getByRole('region', { name: 'ChatGPT（备用）' })
+    expect(await within(gpt).findByText('重复调用没有额外的副作用。')).toBeVisible()
+    expect(requests.some(r => path(r) === `${chatOf(TWO)}/sessions/${S2}`)).toBe(true)
+    const buddy = screen.getByRole('region', { name: 'WorkBuddy（主账号）' })
+    expect(within(buddy).getByText('这个模型的会话没有建成：平台还没有登录')).toBeVisible()
+    expect(within(buddy).queryByRole('link', { name: '在这个会话里继续' })).not.toBeInTheDocument()
+
+    // 继续问：只发给有会话的那两个；某一个没发出去只影响它自己那一栏
+    const form = screen.getByRole('form', { name: '向这一组继续发' })
+    expect(within(form).getByText('有 1 个不能继续发（会话没建成，或者它的 MCP 管理器已停用、已删除）。')).toBeVisible()
+    await fireEvent.update(within(form).getByRole('textbox', { name: '问题内容' }), '举一个例子')
+    await fireEvent.click(within(form).getByRole('button', { name: '发给 2 个模型' }))
+    expect(await within(claude).findByText('举一个例子')).toBeVisible()
+    expect(within(claude).getByText('排队中…')).toBeVisible()
+    expect(within(gpt).getByText('这一个没有发出去：这个小时的发送次数用完了')).toBeVisible()
+    expect(within(gpt).queryByText('举一个例子')).not.toBeInTheDocument()
+    expect(bodies).toEqual([{ text: '举一个例子', request_id: expect.stringMatching(/^web-/), takeover: false }])
+    expect(within(form).getByRole('textbox', { name: '问题内容' })).toHaveValue('')
+  })
+
+  it('asks before continuing a group someone else made, and archives it', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const bodies: Schema['LlmChatGroupSendIn'][] = []
+    const { requests, world } = setup('admin', { bridges: two, groups: [groupOf({ owner: '小王', owner_kind: 'user' })], conversations: both() }, async (r, w) => {
+      if (path(r) === `${groups}/${GROUP}/messages` && r.method === 'POST') {
+        bodies.push(await r.json() as Schema['LlmChatGroupSendIn'])
+        return Response.json({ group: w.groups[0], results: [] })
+      }
+      if (path(r) === `${groups}/${GROUP}/archive` && r.method === 'POST') {
+        w.groups = [groupOf({ owner: '小王', owner_kind: 'user', status: 'archived' })]
+        return Response.json(w.groups[0])
+      }
+      return undefined
+    })
+    await openApp(`/llm_bridge?g=${GROUP}`)
+    const form = await screen.findByRole('form', { name: '向这一组继续发' })
+    expect(within(form).getByText(/这一组是「小王」建的：可以看；接着发问题前会让你确认一次。/)).toBeVisible()
+    const box = within(form).getByRole('textbox', { name: '问题内容' })
+    await fireEvent.update(box, '我也问一句')
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('「小王」建的'))
+    expect(writes(requests)).toEqual([])
+    confirm.mockReturnValue(true)
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(bodies).toEqual([{ text: '我也问一句', request_id: expect.stringMatching(/^web-/), takeover: true }]))
+
+    await fireEvent.click(screen.getByRole('button', { name: '归档这一组' }))
+    expect(await screen.findByText(/这一组同问已归档，不能再一起发；每个模型的会话还在，可以单独继续。/)).toBeVisible()
+    expect(screen.queryByRole('textbox', { name: '问题内容' })).not.toBeInTheDocument()
+    expect(world.groups[0]!.status).toBe('archived')
+    // 归档后不在“同问”里了；每一栏还能看
+    await waitFor(() => expect(within(screen.getByRole('complementary', { name: '会话列表' })).queryByRole('region', { name: '同问' })).not.toBeInTheDocument())
+    expect(screen.getByRole('region', { name: 'Claude（主账号）' })).toBeVisible()
+  })
+
+  it('starts a group with the logged-in platforms and lets models be added across managers', async () => {
+    const bodies: Schema['LlmChatGroupCreateIn'][] = []
+    const { requests } = setup('owner', { bridges: two, conversations: both() }, async (r, w) => {
+      if (path(r) !== groups || r.method !== 'POST') return undefined
+      bodies.push(await r.json() as Schema['LlmChatGroupCreateIn'])
+      w.groups = [groupOf({ title: '解释幂等', members: [member(0), member(1, { bridge_id: TWO, bridge_name: '备用', session_id: S2 })] })]
+      return Response.json({ group: w.groups[0], results: [] }, { status: 201 })
+    })
+    const { router } = await openApp('/llm_bridge')
+    await fireEvent.click(await within(await screen.findByRole('complementary', { name: '会话列表' })).findByRole('button', { name: '多模型同问' }))
+    const form = await screen.findByRole('form', { name: '多模型同问' })
+    // 当前管理器上已登录、能对话的平台先加进来（Codex 只有“开发”，WorkBuddy 没登录）
+    const chosen = await within(form).findByRole('list', { name: '发给（2 个）' })
+    expect(within(chosen).getAllByRole('listitem').map(li => li.textContent)).toEqual(['ChatGPT · 默认模型 · 主账号', 'Claude · 默认模型 · 主账号'])
+
+    await fireEvent.click(within(chosen).getByRole('button', { name: '移除 ChatGPT · 默认模型 · 主账号' }))
+    await fireEvent.update(within(form).getByLabelText('问题'), ' 解释幂等 ')
+    await fireEvent.click(within(form).getByRole('button', { name: '发给 1 个模型' }))
+    expect(await within(form).findByText(/至少选 2 个模型/)).toBeVisible()
+    expect(writes(requests)).toEqual([])
+
+    // 从另一个管理器加一个；同一个不能加两次
+    const picker = within(form).getByRole('group', { name: '添加一个模型' })
+    await fireEvent.update(within(picker).getByLabelText('MCP 管理器'), TWO)
+    await waitFor(() => expect(requests.some(r => path(r) === `/api/v1/llm_bridge/bridges/${TWO}/status`)).toBe(true))
+    await within(picker).findByRole('option', { name: 'Claude' })
+    await fireEvent.update(within(picker).getByLabelText('平台'), 'claude')
+    await fireEvent.click(within(picker).getByRole('button', { name: '添加' }))
+    expect(await within(form).findByRole('list', { name: '发给（2 个）' })).toHaveTextContent('Claude · 默认模型 · 备用')
+    await fireEvent.click(within(picker).getByRole('button', { name: '添加' }))
+    expect(await within(picker).findByText('这个模型已经在里面了。')).toBeVisible()
+
+    await fireEvent.click(within(form).getByRole('button', { name: '发给 2 个模型' }))
+    expect(await screen.findByRole('heading', { level: 2, name: '解释幂等' })).toBeVisible()
+    expect(bodies).toEqual([{ title: '', text: '解释幂等', request_id: expect.stringMatching(/^web-/), targets: [
+      { bridge_id: ONE, platform: 'claude', mode: 'chat' }, { bridge_id: TWO, platform: 'claude', mode: 'chat' },
+    ] }])
+    expect(router.currentRoute.value.query).toEqual({ m: ONE, g: GROUP })
+    expect(await screen.findByRole('region', { name: 'Claude（备用）' })).toBeVisible()
   })
 })

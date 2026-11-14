@@ -1,26 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, toRef, watch } from 'vue'
+import { computed, nextTick, ref, toRef } from 'vue'
 import { Archive, ArrowLeft, Info, Pencil, Send, Square } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
 import { MODES, platformName, type Bridge } from '../api'
-import { TERMINAL_EVENTS, chatError, needsTakeover, newRequestId, ownerText, type ChatConversation, type ChatEvent, type ChatMessage as Message, type LlmChatApi } from './chatApi'
+import { chatError, needsTakeover, newRequestId, ownerText, type LlmChatApi } from './chatApi'
+import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
 import ChatInfoPanel from './ChatInfoPanel.vue'
 
 // 中间一栏：一个会话的对话。父组件按“管理器 + 会话”给 key，换会话时整个重建。
-// 进度：有回合没做完时用长轮询读事件（一段回答、一条命令、改动的文件），在本地接到对应的回答上；
-// 回合结束、或出现这里不认识的回合（别人或智能体发的）时重新读整段会话，以服务器给的为准。
+// 内容和进度（长轮询读事件）在 useLiveConversation 里。
 const props = defineProps<{ chat: LlmChatApi; bridge: Bridge; sessionId: string; narrow: boolean; initialDraft?: string; initialError?: string }>()
 const emit = defineEmits<{ back: []; changed: [] }>()
 
 const bridgeId = computed(() => props.bridge.id)
-const conversation = props.chat.useConversation(bridgeId, toRef(props, 'sessionId'))
-const session = computed(() => conversation.data.value?.session ?? null)
-const messages = ref<Message[]>([])
-const lost = ref('')
-let cursor = 0, alive = true, polling = false
-const abort = new AbortController()
 
 // ---- 滚动：人在底部附近时，新内容出来就跟到底部；往上翻着看时不打扰 ----
 const box = ref<HTMLElement | null>(null)
@@ -30,67 +24,9 @@ function scrollDown(force = false) {
   if (force) stick = true
   void nextTick(() => { const el = box.value; if (el && stick) el.scrollTop = el.scrollHeight })
 }
-
-function load(data: ChatConversation) {
-  messages.value = data.messages.map(m => ({ ...m, steps: [...(m.steps ?? [])] }))
-  cursor = data.last_event_id
-  scrollDown()
-  if (data.session.busy) void poll()
-}
-watch(() => conversation.data.value, data => { if (data) load(data) }, { immediate: true })
-async function reload() {
-  const { data } = await conversation.refetch()
-  if (data && alive) load(data)
-}
-
-/** 把新事件接到对应的回答上；返回 true 表示要重新读整段会话 */
-function apply(events: ChatEvent[]): boolean {
-  let stale = false
-  for (const e of events) {
-    if (!e.turn_id) continue
-    const reply = messages.value.find(m => m.role === 'assistant' && m.turn_id === e.turn_id)
-    if (!reply || TERMINAL_EVENTS.includes(e.kind)) { stale = true; continue }
-    const steps = (reply.steps ??= [])
-    if (e.kind === 'started') { reply.status = 'running'; reply.ahead_in_session = null }
-    else if (e.kind === 'message' && e.text) reply.text = reply.text ? `${reply.text}\n\n${e.text}` : e.text
-    else if (e.kind === 'notice' && e.text) steps.push({ kind: 'notice', text: e.text, at: e.at })
-    else if (e.kind === 'command' && e.command) steps.push({ kind: 'command', text: e.command, at: e.at })
-    else if (e.kind === 'files' && e.paths?.length) steps.push({ kind: 'files', text: e.paths.join('、'), at: e.at })
-  }
-  if (events.length) scrollDown()
-  return stale
-}
-const pause = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms) })
-async function poll() {
-  if (polling || !alive) return
-  polling = true
-  let failures = 0
-  try {
-    while (alive) {
-      let out
-      const asked = Date.now()
-      try {
-        out = await props.chat.events(props.bridge.id, props.sessionId, cursor, abort.signal)
-        failures = 0; lost.value = ''
-      } catch (e) {
-        if (!alive) return
-        if (++failures >= 3) { lost.value = `读不到新的进度：${chatError(e)}`; return }
-        await pause(1500 * failures)
-        continue
-      }
-      if (!alive) return
-      const fresh = out.events.filter(e => e.id > cursor)
-      cursor = Math.max(cursor, out.last_id)
-      if (apply(fresh)) { await reload(); emit('changed') }
-      if (!out.busy) return
-      // 服务器本该等到有新事件才返回：万一立刻空着回来，歇一下再问，不空转
-      if (!fresh.length && Date.now() - asked < 1000) await pause(1000)
-    }
-  } finally { polling = false }
-}
-// 智能体可能随时往这个会话里发消息：空闲时隔一会儿重新读一次
-const idle = setInterval(() => { if (!polling && alive && !conversation.isFetching.value) void reload() }, 15000)
-onBeforeUnmount(() => { alive = false; abort.abort(); clearInterval(idle) })
+const { conversation, session, messages, lost, activeTurn, poll, sent } = useLiveConversation(
+  props.chat, bridgeId, toRef(props, 'sessionId'), { activity: () => scrollDown(), changed: () => emit('changed') },
+)
 
 // ---- 发送 ----
 const draft = ref(props.initialDraft ?? ''), sending = ref(false), stopping = ref(false), sendError = ref(props.initialError ?? '')
@@ -110,10 +46,6 @@ const blocked = computed(() => {
   if (session.value.status === 'archived') return '这个会话已归档，不能再发送。'
   if (!props.bridge.enabled) return '这个 MCP 管理器已停用：可以查看，不能发送。到“管理器与账号”里启用后再试。'
   return ''
-})
-const activeTurn = computed(() => {
-  const open = messages.value.filter(m => m.role === 'assistant' && (m.status === 'running' || m.status === 'queued'))
-  return open.find(m => m.status === 'running') ?? open[0] ?? null
 })
 function allowTakeover() {
   if (confirmed.value) return true
@@ -136,14 +68,7 @@ async function submit() {
       turn = await props.chat.send(props.bridge.id, props.sessionId, { ...body, takeover: true })
     }
     pending = null; draft.value = ''
-    if (!messages.value.some(m => m.turn_id === turn.turn_id)) {
-      const at = Date.now() / 1000
-      messages.value.push(
-        { role: 'user', turn_id: turn.turn_id, text, at, mine: true, steps: [] },
-        { role: 'assistant', turn_id: turn.turn_id, text: '', at, status: turn.status, steps: [], ahead_in_session: turn.ahead_in_session ?? null },
-      )
-    }
-    scrollDown(true); emit('changed'); void poll()
+    stick = true; sent(turn, text); emit('changed')
   } catch (e) {
     sendError.value = needsTakeover(e) ? '没有发送：接着别人建的会话发消息前需要确认。' : chatError(e)
   } finally { sending.value = false }
