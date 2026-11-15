@@ -142,22 +142,26 @@ async function main() {
     const bridges = async () => (await api(page, workspace, 'GET', '/api/v1/llm_bridge/bridges')).body.bridges
     const statusOf = async (id) => (await api(page, workspace, 'GET', `/api/v1/llm_bridge/bridges/${id}/status`)).body
 
-    // ---------------------------------------------------------------- 默认停用 → 应用中心启用
+    // ---------------------------------------------------------------- 默认启用 → 应用中心停用 → 再启用
     const before = await api(page, workspace, 'GET', '/api/v1/llm_bridge/bridges')
-    check(before.status === 404 && before.body.error.code === 'MODULE_DISABLED', `模块默认应停用：${JSON.stringify(before)}`)
-    // 模块状态读到之前，前端先按“启用”显示侧栏入口（免得闪一下）：所以重新载入、等状态读到之后，再确认入口不在
-    const modulesLoaded = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/modules' && response.request().method() === 'GET' && response.ok())
-    await page.reload()
-    await modulesLoaded
-    await sidebar(page).getByRole('link', { name: '任务', exact: true }).waitFor()
-    await sidebar(page).getByRole('link', { name: '大模型客户端', exact: true }).waitFor({ state: 'detached', timeout: 15000 }).catch(() => { throw new Error('停用时侧栏不应有入口') })
+    check(before.status === 200 && before.body.bridges.length === 0, `模块默认应启用（新工作空间没有管理器）：${JSON.stringify(before)}`)
+    await sidebar(page).getByRole('link', { name: '大模型客户端', exact: true }).waitFor({ timeout: 15000 })
     await page.goto(`${base}/settings/modules`)
     await page.getByRole('heading', { name: '应用中心' }).waitFor()
     const toggle = page.getByRole('article', { name: '模块：大模型客户端' }).getByRole('switch', { name: '启用大模型客户端' })
-    check((await toggle.getAttribute('aria-checked')) === 'false', '大模型客户端默认应停用')
+    const switchIs = (value) => page.waitForFunction((want) => document.querySelector('[role="switch"][aria-label="启用大模型客户端"]')?.getAttribute('aria-checked') === want, value)
+    check((await toggle.getAttribute('aria-checked')) === 'true', '大模型客户端默认应启用')
+    // 停用：接口 404 MODULE_DISABLED，侧栏没有入口
     await toggle.click()
-    await page.waitForFunction(() => document.querySelector('[role="switch"][aria-label="启用大模型客户端"]')?.getAttribute('aria-checked') === 'true')
-    step('模块默认停用（接口 404 MODULE_DISABLED、侧栏没有入口），在应用中心启用')
+    // 停用要在对话框里确认（应用中心改版，T-0211）
+    await page.getByRole('dialog', { name: '停用应用' }).getByRole('button', { name: '停用应用' }).click()
+    await switchIs('false')
+    const off = await api(page, workspace, 'GET', '/api/v1/llm_bridge/bridges')
+    check(off.status === 404 && off.body.error.code === 'MODULE_DISABLED', `停用后接口应是 404 MODULE_DISABLED：${JSON.stringify(off)}`)
+    await sidebar(page).getByRole('link', { name: '大模型客户端', exact: true }).waitFor({ state: 'detached', timeout: 15000 }).catch(() => { throw new Error('停用时侧栏不应有入口') })
+    await toggle.click()
+    await switchIs('true')
+    step('模块默认启用（侧栏有入口）；在应用中心停用后接口 404 MODULE_DISABLED、侧栏没有入口；再启用')
 
     // ---------------------------------------------------------------- 添加 1 号：只控制 Claude / WorkBuddy
     await page.goto(`${base}/llm_bridge?view=manage`)
@@ -466,7 +470,7 @@ async function main() {
     check(problems.length === 0, `检查过程中出现错误：\n  ${problems.join('\n  ')}`)
     console.log('大模型客户端管理浏览器验收全部通过')
   } finally {
-    // 成败都收尾：把控制的平台改回全部、删掉这次添加的管理器、关掉模块（别的验收脚本按“模块默认停用”检查）
+    // 成败都收尾：把控制的平台改回全部、删掉这次添加的管理器、关掉模块
     if (ownerPage) {
       try {
         const left = await api(ownerPage, workspace, 'GET', '/api/v1/llm_bridge/bridges')

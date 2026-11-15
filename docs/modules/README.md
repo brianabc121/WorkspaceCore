@@ -184,5 +184,5 @@ cd apps/web && npm run lint && npm run typecheck && npx vitest run && npm run bu
 - **循环导入**：清单里只写导入路径字符串；`tools.py` 只导入 `app.schemas.tool_spec` 和自己的 schema，
   不要导入 `app.schemas.ai_tools`。
 - **工具没出现**：模块是否启用、`tools_visible` 是否返回 True、实例的权限范围（读写工具要 read_write）。
-- **接口一直 404 `MODULE_DISABLED`**：新模块默认停用，先在应用中心（或 `PATCH /api/v1/modules/<key>`）启用。
+- **接口一直 404 `MODULE_DISABLED`**：新模块默认停用（清单里没写 `default_enabled=True` 的），先在应用中心（或 `PATCH /api/v1/modules/<key>`）启用。
 - **前端类型对不上**：后端改了接口要 `python -m scripts.export_openapi`，前端 `npm run generate:api`。
