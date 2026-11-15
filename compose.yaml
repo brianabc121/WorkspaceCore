@@ -146,6 +146,10 @@ services:
       GRAFANA_DASHBOARD_URL: ${GRAFANA_DASHBOARD_URL:-}
       # 访问日志里只记录路由模板（不含路径参数）时设为 route（S5-05）
       LOG_REQUEST_PATH: ${LOG_REQUEST_PATH:-path}
+      # 大模型客户端的“本机部署”（T-0238）：下面的 llm-bridge-local 在 integrations 网络里的地址和它的管理令牌。
+      # 页面上选“本机”就把它添加进来，不用填地址、令牌，也不登录服务器
+      LLM_BRIDGE_LOCAL_URL: http://llm-bridge-local:8787
+      LLM_BRIDGE_LOCAL_TOKEN: ${LLM_BRIDGE_LOCAL_TOKEN:-}
     volumes:
       - kb-files:/data/kb-files
       # 新闻早报：生成的 TrendRadar 配置文件写在这里（TrendRadar 只读挂载同一个卷）
@@ -203,6 +207,37 @@ services:
     # 出站地址仍由 Connector 的 SSRF 检查限制；monitoring 用于健康告警检查 Prometheus / Grafana；
     # im 用于 IM 对账、账号登记；news 用于新闻早报（方案 B 收早报后经 TrendRadar 推送）
     networks: [backend, integrations, egress, monitoring, im, news]
+    logging: *logging
+
+  # 大模型客户端的本机 MCP 管理器（会话桥，T-0238）：随工作台一起构建和启动，升级工作台时跟着升级。
+  # 在网页“大模型客户端 → 管理器与账号 → 添加 MCP 管理器 → 本机”里添加后才会被用到；没添加时它只是空转。
+  # 不发布端口：工作台经 integrations 网络访问；它访问各平台走 llm-egress。普通用户运行（镜像里的 uid 10001），
+  # 不要特权、不挂 Docker socket 和宿主目录。再要一个管理器（第二套账号）用一键部署或 make llm-bridge-up N=2
+  llm-bridge-local:
+    build:
+      context: services/llm-bridge
+    image: myworkspace/llm-bridge:0.1.0
+    restart: unless-stopped
+    environment:
+      # make env（make up 会先运行它）生成；这里不用 :? ——别的 compose 命令（down、ps、只启动部分服务）不该因为它失败。
+      # 为空时这个容器起不来（管理器要求令牌至少 32 个字符），make up 会报出来
+      BRIDGE_ADMIN_TOKEN: ${LLM_BRIDGE_LOCAL_TOKEN:-}
+    volumes:
+      - llm-bridge-local-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 1024
+    mem_limit: ${LLM_BRIDGE_MEMORY:-4g}
+    cpus: ${LLM_BRIDGE_CPUS:-2}
+    networks: [integrations, llm-egress]
     logging: *logging
 
   web:
@@ -377,6 +412,8 @@ networks:
     internal: true
   # 只给 worker 出网用（api 经 frontend 出网）；不接任何别的服务
   egress: {}
+  # 只给本机的 MCP 管理器（llm-bridge-local）出网用：它要访问各大模型平台
+  llm-egress: {}
   # 可选监控：api、worker、prometheus、grafana；internal，不提供出网
   monitoring:
     internal: true
@@ -410,6 +447,8 @@ networks:
     internal: true
 
 volumes:
+  # 本机 MCP 管理器的数据：各平台的登录、会话记录、附件。make down 不会删
+  llm-bridge-local-data:
   postgres-data:
   redis-data:
   # 知识库图片的本机存储（“设置 → 图片存储”选本机做主存储或副本时使用），纳入 make backup

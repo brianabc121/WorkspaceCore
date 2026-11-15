@@ -51,14 +51,16 @@ const error = ref(''), notice = ref(''), busy = ref(false)
 const form = reactive({ open: false, id: null as string | null, managed: false, name: '', base_url: '', token: '', platforms: [...ALL] as Platform[] })
 // 一键部署：这个工作台带着管理器的构建文件时才有（接口里的 available）；只有 owner 能做
 const deployments = api.useDeployments()
-const canDeploy = computed(() => canWrite.value && !!deployments.data.value?.available)
+// 能用“一键部署”那一栏：工作台带着构建文件（部署到服务器），或者随带着本机的管理器（T-0238）
+const local = api.useLocal()
+const canDeploy = computed(() => canWrite.value && (!!deployments.data.value?.available || !!local.data.value?.available))
 const addMode = ref<'deploy' | 'manual'>('manual')
 // 一键部署表单先选好哪台服务器（从服务器页面跳过来时）
 const preselect = ref<{ kind: TargetKind; id: string } | null>(null)
 // 工作台部署的管理器上正在确认的操作（重新部署 / 重启 / 卸载）；和添加、修改的表单同一时间只开一个
 const operation = reactive({ bridge: null as Bridge | null, action: 'redeploy' as ManagedAction, askPassword: false, hint: '', round: 0 })
 function openForm(bridge?: Bridge) {
-  Object.assign(form, { open: true, id: bridge?.id ?? null, managed: !!bridge?.deployment, name: bridge?.name ?? '', base_url: bridge?.base_url ?? '', token: '', platforms: [...ALL] })
+  Object.assign(form, { open: true, id: bridge?.id ?? null, managed: !!bridge?.deployment || (!!bridge && bridge.id === local.data.value?.bridge_id), name: bridge?.name ?? '', base_url: bridge?.base_url ?? '', token: '', platforms: [...ALL] })
   addMode.value = !bridge && canDeploy.value ? 'deploy' : 'manual'
   operation.bridge = null
   error.value = notice.value = ''
@@ -165,7 +167,7 @@ function remove(bridge: Bridge) {
           <p><strong>还没有 MCP 管理器。</strong></p>
           <p>MCP 管理器是一个单独部署的容器，里面装着各平台的官方程序；账号的登录保存在它里面，不保存在工作台。</p>
           <p>每个管理器控制你勾选的平台，在每个平台上只登录一个账号；可以添加多个，各自一套账号。</p>
-          <p>{{ canDeploy ? '点“添加 MCP 管理器”：可以一键部署到智能体服务器或容器服务器，也可以手动添加已经部署好的。' : canWrite ? '点“添加 MCP 管理器”，按里面的步骤部署并填写地址和令牌。' : '请 owner 来添加。' }}</p>
+          <p>{{ canDeploy ? '点“添加 MCP 管理器”：可以直接部署在本机，或一键部署到智能体服务器、容器服务器，也可以手动添加已经部署好的。' : canWrite ? '点“添加 MCP 管理器”，按里面的步骤部署并填写地址和令牌。' : '请 owner 来添加。' }}</p>
         </div>
         <div v-else class="lb-managers" role="list" aria-label="MCP 管理器列表">
           <div v-for="b in list" :key="b.id" role="listitem">
@@ -185,7 +187,7 @@ function remove(bridge: Bridge) {
         <div v-if="canWrite && form.open && !form.id && canDeploy" class="lb-form lb-add">
           <h3>添加 MCP 管理器</h3>
           <div class="lb-modes" role="group" aria-label="添加方式">
-            <button type="button" :aria-pressed="addMode === 'deploy'" @click="addMode = 'deploy'">一键部署到服务器</button>
+            <button type="button" :aria-pressed="addMode === 'deploy'" @click="addMode = 'deploy'">一键部署</button>
             <button type="button" :aria-pressed="addMode === 'manual'" @click="addMode = 'manual'">手动添加（已经部署好了）</button>
           </div>
           <DeployManager v-if="addMode === 'deploy'" :key="preselect ? `${preselect.kind}:${preselect.id}` : 'any'" :api="api" :names="list.map(b => b.name)" :preselect="preselect" @deployed="deployed" @cancel="closeForm" />

@@ -41,9 +41,9 @@ const job = (over: Partial<Job> = {}): Job => ({
 const done = (steps: Step[]) => steps.map(s => ({ ...s, status: 'done' }))
 const status: Schema['LlmBridgeStatusOut'] = { reachable: true, error: '', version: '0.1.0', platforms: ['claude', 'workbuddy'], queued: 0, running: 0, load: {}, quota: {}, settings: null, accounts: [], channels: [] }
 
-interface World { bridges: Bridge[]; jobs: Record<string, Job>; available: boolean; targets: Target[] }
+interface World { bridges: Bridge[]; jobs: Record<string, Job>; available: boolean; targets: Target[]; local: Schema['LlmBridgeLocalOut'] }
 function setup(role: Role, given: Partial<World> = {}, handler?: (r: Request, world: World) => Response | undefined | Promise<Response | undefined>) {
-  const world: World = { bridges: [bridge()], jobs: {}, available: true, targets: [target({ managers: 1 }), cold, container], ...given }
+  const world: World = { bridges: [bridge()], jobs: {}, available: true, targets: [target({ managers: 1 }), cold, container], local: { available: false, bridge_id: null, taken: false }, ...given }
   const requests = mockApi(async r => {
     const result = await handler?.(r, world)
     if (result) return result
@@ -53,6 +53,7 @@ function setup(role: Role, given: Partial<World> = {}, handler?: (r: Request, wo
     if (p === `${api}/bridges` && r.method === 'GET') return Response.json({ bridges: world.bridges })
     if (/\/bridges\/[^/]+\/status$/.test(p)) return Response.json(status)
     if (p === `${api}/grants`) return Response.json({ grants: [] })
+    if (p === `${api}/local` && r.method === 'GET') return Response.json(world.local)
     if (/\/bridges\/[^/]+\/environments$/.test(p)) return Response.json({ environments: [] })
     // 能部署到的服务器：写在“单个任务”前面，/deployments/targets 不是一个任务
     if (p === `${api}/deployments/targets` && r.method === 'GET') return Response.json({ targets: world.targets, available: world.available })
@@ -88,6 +89,39 @@ const requestId = expect.stringMatching(/^web-/)
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('一键部署 MCP 管理器', () => {
+  it('adds the local manager by default: no server, address, token or password to fill in', async () => {
+    const bodies: Schema['LlmBridgeLocalIn'][] = []
+    const LOCAL = '99999999-9999-4999-8999-999999999999'
+    const { requests, world } = setup('owner', { bridges: [], local: { available: true, bridge_id: null, taken: false } }, async (r, w) => {
+      if (path(r) !== `${api}/local` || r.method !== 'POST') return undefined
+      const body = await r.json() as Schema['LlmBridgeLocalIn']
+      bodies.push(body)
+      const made = bridge({ id: LOCAL, name: body.name ?? '本机', base_url: 'http://llm-bridge-local:8787' })
+      w.bridges = [made]; w.local = { available: true, bridge_id: LOCAL, taken: false }
+      return Response.json(made, { status: 201 })
+    })
+    await openApp('/llm_bridge?view=manage')
+    const form = await openDeployForm()
+    // 默认选中“本机”：只有名字（可不填）和要控制的平台
+    await waitFor(() => expect(within(form).getByRole('radio', { name: '本机' })).toBeChecked())
+    expect(within(form).getByText(/不用填地址、令牌，也不用服务器的账号密码/)).toBeVisible()
+    expect(within(form).queryByLabelText('部署到哪台服务器')).not.toBeInTheDocument()
+    expect(within(form).queryByLabelText('登录密码')).not.toBeInTheDocument()
+    await fireEvent.click(within(form).getByRole('checkbox', { name: 'ChatGPT' }))
+    await fireEvent.click(within(form).getByRole('button', { name: '部署在本机' }))
+    expect(await card('本机')).toBeVisible()
+    expect(bodies).toEqual([{ name: '本机', platforms: ['codex', 'claude', 'workbuddy'] }])
+    expect(writes(requests)).toHaveLength(1)
+
+    // 已经添加过：再打开时默认换到服务器；选回“本机”会说明已经加过，没有按钮
+    world.local = { available: true, bridge_id: LOCAL, taken: false }
+    const again = await openDeployForm()
+    await waitFor(() => expect(within(again).getByRole('radio', { name: '智能体服务器' })).toBeChecked())
+    await fireEvent.click(within(again).getByRole('radio', { name: '本机' }))
+    expect(await within(again).findByText(/本机的 MCP 管理器已经添加过了/)).toBeVisible()
+    expect(within(again).queryByRole('button', { name: '部署在本机' })).not.toBeInTheDocument()
+  })
+
   it('deploys to an agent server, shows the progress and selects the new manager', async () => {
     const bodies: DeployIn[] = []
     const { requests, world } = setup('owner', {}, async (r, w) => {
@@ -100,7 +134,7 @@ describe('一键部署 MCP 管理器', () => {
     await fireEvent.click(await screen.findByRole('button', { name: '添加 MCP 管理器' }))
     // 这个工作台能一键部署：默认就是一键部署，也可以改成手动添加
     const modes = await screen.findByRole('group', { name: '添加方式' })
-    expect(within(modes).getByRole('button', { name: '一键部署到服务器' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(modes).getByRole('button', { name: '一键部署' })).toHaveAttribute('aria-pressed', 'true')
     const form = await screen.findByRole('form', { name: '一键部署 MCP 管理器' })
     // 先选服务器类型，再选服务器：只列这一类
     const pick = await within(form).findByLabelText('部署到哪台服务器')

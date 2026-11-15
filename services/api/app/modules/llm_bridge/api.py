@@ -22,6 +22,8 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeGrantOut,
     LlmBridgeIn,
     LlmBridgeList,
+    LlmBridgeLocalIn,
+    LlmBridgeLocalOut,
     LlmBridgeLoginIn,
     LlmBridgeLoginOut,
     LlmBridgeOut,
@@ -66,6 +68,33 @@ async def llm_bridge_create_bridge(
     access: Owner, service: Service, body: LlmBridgeIn
 ) -> LlmBridgeOut:
     return await service.create_bridge(access, body)
+
+
+@router.get(
+    "/llm_bridge/local",
+    summary="本机部署：随工作台一起启动的 MCP 管理器能不能添加（admin）",
+    description="available 为 false：这个工作台没有随带它。"
+    "bridge_id 有值：这个工作空间已经添加了。",
+    responses=_read_errors,
+)
+async def llm_bridge_local_state(access: Admin, service: Service) -> LlmBridgeLocalOut:
+    return await service.local_state(access.workspace.id)
+
+
+@router.post(
+    "/llm_bridge/local",
+    summary="本机部署：把随工作台启动的 MCP 管理器添加进来（owner）",
+    description="不用填地址、令牌，也不登录服务器：地址和令牌由工作台自己掌握，不经过页面。"
+    "409 LOCAL_UNAVAILABLE：没有随带；LOCAL_EXISTS：已经添加过；"
+    "LOCAL_TAKEN：已经被另一个工作空间添加。503：它还没启动好。",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def llm_bridge_add_local(
+    access: Owner, service: Service, body: LlmBridgeLocalIn
+) -> LlmBridgeOut:
+    return await service.add_local(access, body)
 
 
 @router.patch(

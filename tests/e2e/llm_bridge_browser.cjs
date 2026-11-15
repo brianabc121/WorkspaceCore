@@ -109,7 +109,7 @@ async function platformsOn(page, name) {
 }
 async function addManager(page, { name, url, token, uncheck }) {
   await page.getByRole('button', { name: '添加 MCP 管理器', exact: true }).click()
-  // 这个工作台带着管理器的构建文件（T-0234）：默认打开的是“一键部署到服务器”，这里验收手动添加
+  // 这个工作台带着管理器的构建文件（T-0234）：默认打开的是“一键部署”，这里验收手动添加
   const manual = page.getByRole('group', { name: '添加方式' }).getByRole('button', { name: /手动添加/ })
   await manual.waitFor({ timeout: 30000 })
   check(await page.getByRole('form', { name: '一键部署 MCP 管理器' }).count() === 1, '添加管理器时应先给出“一键部署到服务器”')
@@ -466,6 +466,31 @@ async function main() {
     await page.getByText(`已删除「${ONE}」。`).waitFor()
     await page.getByText('还没有 MCP 管理器。').waitFor()
     step(`停用后有提示；${two ? '删除 2 号后只允许用它的实例一个都不能用；' : ''}删除后回到空状态`)
+
+    // ---------------------------------------------------------------- 本机部署（T-0238）：随工作台启动的管理器，点一下就添加
+    const localState = await api(page, workspace, 'GET', '/api/v1/llm_bridge/local')
+    check(localState.status === 200 && localState.body.available === true && localState.body.bridge_id === null, `这个工作台应随带本机的 MCP 管理器：${JSON.stringify(localState)}`)
+    await page.getByRole('button', { name: '添加 MCP 管理器', exact: true }).click()
+    const deployForm = page.getByRole('form', { name: '一键部署 MCP 管理器' })
+    await deployForm.getByRole('radio', { name: '本机', exact: true }).waitFor()
+    check(await deployForm.getByRole('radio', { name: '本机', exact: true }).isChecked(), '默认应选中“本机”')
+    check((await deployForm.getByLabel('部署到哪台服务器').count()) === 0 && (await deployForm.getByLabel('登录密码').count()) === 0, '本机部署不用选服务器、不用填密码')
+    await deployForm.getByRole('checkbox', { name: 'ChatGPT' }).uncheck()
+    await deployForm.getByRole('button', { name: '部署在本机' }).click()
+    await card(page, '本机').waitFor({ timeout: 30000 })
+    const localId = (await api(page, workspace, 'GET', '/api/v1/llm_bridge/local')).body.bridge_id
+    check(typeof localId === 'string', '添加后应记下本机管理器是哪一个')
+    const localStatus = await statusOf(localId)
+    check(localStatus.reachable === true && localStatus.platforms.join() === 'codex,claude,workbuddy', `本机的管理器应连得上，控制勾选的平台：${JSON.stringify({ reachable: localStatus.reachable, platforms: localStatus.platforms, error: localStatus.error })}`)
+    const twice = await api(page, workspace, 'POST', '/api/v1/llm_bridge/local', { platforms: ['claude'] })
+    check(twice.status === 409 && twice.body.error.code === 'LOCAL_EXISTS', `本机的管理器只能添加一次：${JSON.stringify(twice)}`)
+    const retoken = await api(page, workspace, 'PATCH', `/api/v1/llm_bridge/bridges/${localId}`, { token: 'x'.repeat(40) })
+    check(retoken.status === 409 && retoken.body.error.code === 'BRIDGE_MANAGED', `本机管理器的令牌不能在页面上改：${JSON.stringify(retoken)}`)
+    await api(page, workspace, 'PUT', `/api/v1/llm_bridge/bridges/${localId}/settings`, { platforms: ALL_PLATFORMS })
+    acceptNext(page)
+    await card(page, '本机').getByRole('button', { name: '删除本机' }).click()
+    await page.getByText('已删除「本机」。').waitFor()
+    step('本机部署：默认选中“本机”，不选服务器、不填地址令牌密码，点一下就添加好并连得上；只能添加一次，令牌不能在页面上改')
 
     check(problems.length === 0, `检查过程中出现错误：\n  ${problems.join('\n  ')}`)
     console.log('大模型客户端管理浏览器验收全部通过')

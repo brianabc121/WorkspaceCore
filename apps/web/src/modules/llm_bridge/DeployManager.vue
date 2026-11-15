@@ -9,6 +9,7 @@ import DeployJob from './DeployJob.vue'
 // 和工作台同一台服务器时管理器加入工作台的内部网络；其他服务器上它只监听那台服务器的本机地址，工作台经专用的 SSH 通道访问。
 // 登录密码（登录账号用 Docker 要 sudo 密码时才需要）只在提交时发出去，提交后输入框清空；页面不保存、不显示它。
 // preselect：从服务器页面跳过来时（?deploy=<类型>:<服务器>）先选好那台服务器。
+// 本机（T-0238，默认选中）：MCP 管理器随工作台一起启动，选了平台点一下就添加好——不登录服务器、不填地址和令牌。
 const props = defineProps<{ api: LlmBridgeApi; names: string[]; preselect?: { kind: TargetKind; id: string } | null }>()
 const emit = defineEmits<{ deployed: [bridgeId: string, name: string]; cancel: [] }>()
 
@@ -25,8 +26,15 @@ const SOURCE: Record<TargetKind, string> = {
 const targets = props.api.useDeployTargets()
 const all = computed(() => targets.data.value?.targets ?? [])
 const ALL = PLATFORMS.map(p => p.id)
-const form = reactive({ kind: props.preselect?.kind ?? 'agent_server' as TargetKind, server: props.preselect?.id ?? '', name: '', platforms: [...ALL] as Platform[], password: '' })
-const kind = computed(() => TARGET_KIND[form.kind])
+const local = props.api.useLocal()
+const localState = computed(() => local.data.value ?? null)
+// 能选“本机”：这个工作台随带着本机的管理器
+const hasLocal = computed(() => !!localState.value?.available)
+const form = reactive({ kind: props.preselect?.kind ?? 'local' as TargetKind | 'local', server: props.preselect?.id ?? '', name: '', platforms: [...ALL] as Platform[], password: '' })
+const isLocal = computed(() => form.kind === 'local')
+// 选的是哪一类服务器（选“本机”时用不到，给个占位）
+const serverKind = computed<TargetKind>(() => (form.kind === 'local' ? 'agent_server' : form.kind))
+const kind = computed(() => TARGET_KIND[serverKind.value])
 const list = computed(() => all.value.filter(t => t.kind === form.kind))
 const chosen = computed(() => list.value.find(s => s.id === form.server) ?? null)
 const optionText = (s: DeployTarget) => [s.name, s.managers ? `已有 ${s.managers} 个 MCP 管理器` : '', s.deployable ? '' : `不能部署：${s.block_message ?? '暂不能部署'}`].filter(Boolean).join(' · ')
@@ -34,8 +42,14 @@ const optionText = (s: DeployTarget) => [s.name, s.managers ? `已有 ${s.manage
 // 读到服务器之后：没有指定服务器、默认的那一类又一台都没有时，换到有服务器的那一类；
 // 选中的服务器不在当前这一类里，就换成这一类里第一台能部署的
 let settled = !!props.preselect
-watch([all, () => form.kind], () => {
-  if (!targets.data.value) return
+watch([all, () => form.kind, localState], () => {
+  if (!targets.data.value || local.isPending.value) return
+  // 默认是本机；这个工作台没有随带本机的管理器、或者已经加过了，就换到服务器
+  if (isLocal.value) {
+    const usable = hasLocal.value && !localState.value?.bridge_id && !localState.value?.taken
+    if (usable || (settled && hasLocal.value)) { settled = true; return }
+    form.kind = 'agent_server'
+  }
   if (!settled) {
     settled = true
     const other = list.value.length ? undefined : KINDS.find(k => all.value.some(t => t.kind === k))
@@ -53,8 +67,16 @@ watch(() => form.server, () => { form.password = ''; sudo.hint = '' })
 // 登录账号不是 root、也不在 docker 组的服务器，sudo 可能要密码：密码框可填可不填；已经知道要密码时必须填
 const askPassword = computed(() => !!chosen.value && (chosen.value.may_need_password || sudo.server === chosen.value.id))
 let requestId = newDeployRequestId()
+const localName = computed(() => form.name.trim() || '本机')
 const problem = computed(() => {
   const name = form.name.trim()
+  if (isLocal.value) {
+    if (localState.value?.bridge_id) return '本机的 MCP 管理器已经添加过了。'
+    if (localState.value?.taken) return '本机的 MCP 管理器已经被另一个工作空间添加。'
+    if (localName.value.length > 40) return '名字要 1–40 个字。'
+    if (props.names.includes(localName.value)) return '已经有同名的 MCP 管理器，换一个名字。'
+    return form.platforms.length ? '' : '至少勾选一个要控制的平台。'
+  }
   if (!chosen.value) {
     if (!list.value.length) return `还没有${kind.value.name}。`
     return list.value.some(s => s.deployable) ? '选一台服务器。' : `这些服务器现在都不能部署（原因写在列表里）：先到“${kind.value.name}”页处理。`
@@ -70,6 +92,15 @@ async function submit() {
   if (busy.value) return
   if (problem.value) { error.value = problem.value; return }
   busy.value = true; error.value = ''
+  if (form.kind === 'local') {
+    // 本机：没有部署任务，管理器已经随工作台启动，登记好就能用
+    try {
+      const made = await props.api.addLocal({ name: localName.value, platforms: ALL.filter(p => form.platforms.includes(p)) })
+      emit('deployed', made.id, made.name)
+      emit('cancel') // 没有部署进度要看：直接收起表单
+    } catch (e) { error.value = deployError(e) } finally { busy.value = false }
+    return
+  }
   const password = askPassword.value ? form.password : ''
   try {
     const started = await props.api.deploy({ target_kind: form.kind, target_id: form.server, name: form.name.trim(), platforms: ALL.filter(p => form.platforms.includes(p)), request_id: requestId, ...(password ? { sudo_password: password } : {}) })
@@ -106,17 +137,33 @@ function again() { jobId.value = null; requestId = newDeployRequestId(); error.v
       </div>
     </template>
     <form v-else novalidate aria-label="一键部署 MCP 管理器" @submit.prevent="submit">
-      <p class="form-help">工作台登录你选的服务器，把 MCP 管理器部署上去并登记好，不用到服务器上敲命令。和工作台同一台服务器时它加入工作台的内部网络；其他服务器上它只监听那台服务器的本机地址，工作台经专用的 SSH 通道访问，端口不对外开放。</p>
-      <p v-if="targets.isPending.value" role="status" class="form-help">正在读取服务器…</p>
+      <p v-if="isLocal" class="form-help">本机：MCP 管理器已经随工作台一起启动在这台服务器上，选好要控制的平台点“部署在本机”就能用，不用填地址、令牌，也不用服务器的账号密码。升级工作台时它跟着升级。</p>
+      <p v-else class="form-help">工作台登录你选的服务器，把 MCP 管理器部署上去并登记好，不用到服务器上敲命令。和工作台同一台服务器时它加入工作台的内部网络；其他服务器上它只监听那台服务器的本机地址，工作台经专用的 SSH 通道访问，端口不对外开放。</p>
+      <p v-if="targets.isPending.value || local.isPending.value" role="status" class="form-help">正在读取服务器…</p>
       <p v-else-if="targets.error.value" role="alert" class="lb-warn is-red">读不到服务器列表：{{ deployError(targets.error.value) }}</p>
       <template v-else>
         <fieldset class="lb-checks" aria-label="服务器类型">
           <legend>服务器类型</legend>
+          <label v-if="hasLocal" class="check-field"><input v-model="form.kind" type="radio" name="lb-deploy-kind" value="local" />本机</label>
           <label v-for="k in KINDS" :key="k" class="check-field"><input v-model="form.kind" type="radio" name="lb-deploy-kind" :value="k" />{{ TARGET_KIND[k].name }}</label>
         </fieldset>
-        <div v-if="!list.length" class="lb-empty">
+        <template v-if="isLocal">
+          <p v-if="localState?.bridge_id" role="note" class="lb-warn">本机的 MCP 管理器已经添加过了（在上面的列表里）。同一个平台要用第二个账号，就选“智能体服务器”或“容器服务器”再部署一个。</p>
+          <p v-else-if="localState?.taken" role="note" class="lb-warn">本机的 MCP 管理器已经被另一个工作空间添加：一个管理器的账号和会话只归一个工作空间。可以选“智能体服务器”或“容器服务器”另外部署一个。</p>
+          <template v-else>
+            <div class="lb-grid">
+              <div class="form-field"><label for="lb-deploy-name">名字</label><input id="lb-deploy-name" v-model="form.name" maxlength="40" placeholder="本机" /><p class="form-help">智能体用这个名字指定走哪个 MCP 管理器；不填就叫“本机”。</p></div>
+            </div>
+            <fieldset class="lb-checks" aria-label="控制的平台">
+              <legend>控制的平台</legend>
+              <label v-for="p in PLATFORMS" :key="p.id" class="check-field"><input v-model="form.platforms" type="checkbox" :value="p.id" />{{ p.name }}</label>
+            </fieldset>
+            <p class="form-help">添加好之后在“平台与账号”里登录这些平台的账号。</p>
+          </template>
+        </template>
+        <div v-else-if="!list.length" class="lb-empty">
           <p><strong>还没有{{ kind.name }}。</strong></p>
-          <p>{{ ADD[form.kind] }}</p>
+          <p>{{ ADD[serverKind] }}</p>
           <p><RouterLink class="asv-link" :to="kind.path">去{{ kind.name }}页</RouterLink></p>
         </div>
         <template v-else>
@@ -127,7 +174,7 @@ function again() { jobId.value = null; requestId = newDeployRequestId(); error.v
                 <option value="" disabled>选一台服务器</option>
                 <option v-for="s in list" :key="s.id" :value="s.id" :disabled="!s.deployable">{{ optionText(s) }}</option>
               </select>
-              <p class="form-help">{{ SOURCE[form.kind] }}同一台服务器可以部署多个 MCP 管理器，互不相干。<RouterLink class="asv-link" :to="kind.path">管理服务器</RouterLink></p>
+              <p class="form-help">{{ SOURCE[serverKind] }}同一台服务器可以部署多个 MCP 管理器，互不相干。<RouterLink class="asv-link" :to="kind.path">管理服务器</RouterLink></p>
             </div>
             <div class="form-field"><label for="lb-deploy-name">名字</label><input id="lb-deploy-name" v-model="form.name" maxlength="40" required placeholder="例如：2 号" /><p class="form-help">智能体用这个名字指定走哪个 MCP 管理器。</p></div>
           </div>
@@ -148,7 +195,7 @@ function again() { jobId.value = null; requestId = newDeployRequestId(); error.v
       <p v-if="error" role="alert" class="lb-warn is-red">{{ error }}</p>
       <div class="lb-actions">
         <button type="button" class="secondary-button" :disabled="busy" @click="emit('cancel')">取消</button>
-        <button v-if="list.length" type="submit" class="primary-button" :disabled="busy">{{ busy ? '正在开始…' : '开始部署' }}</button>
+        <button v-if="isLocal ? !localState?.bridge_id && !localState?.taken : list.length" type="submit" class="primary-button" :disabled="busy">{{ busy ? '正在开始…' : isLocal ? '部署在本机' : '开始部署' }}</button>
       </div>
     </form>
   </div>

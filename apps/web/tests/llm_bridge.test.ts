@@ -43,6 +43,7 @@ function setup(role: Role, handler?: (r: Request) => Response | undefined | Prom
     if (p === `${base}/status`) return Response.json(status())
     if (p === '/api/v1/llm_bridge/grants') return Response.json({ grants: [grant()] })
     // 一键部署（T-0234）在这个文件里按“不可用”处理：添加管理器走手动填写；一键部署见 llm_bridge_deploy.test.ts
+    if (p === '/api/v1/llm_bridge/local' && r.method === 'GET') return Response.json({ available: false, bridge_id: null, taken: false })
     if (p === '/api/v1/llm_bridge/deployments' && r.method === 'GET') return Response.json({ jobs: [], available: false })
     if (p === `${base}/environments` && r.method === 'GET') return Response.json({ environments: [] })
     if (p === `${base}/sessions`) return Response.json({ sessions: [], sync_failed: '' })

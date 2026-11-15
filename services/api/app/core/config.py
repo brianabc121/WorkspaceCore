@@ -189,6 +189,10 @@ class Settings(BaseSettings):
     # 新闻早报（T-0153，docs/v2/NEWS_PLAN.md）：TrendRadar 两个容器只在内部网络 news 里。
     # trendradar_mcp_url 为空表示没有部署 TrendRadar：设置页显示“未部署”，智能体看不到 news_* 工具
     trendradar_mcp_url: str = ""
+    # 大模型客户端的“本机部署”（T-0238）：随工作台一起启动的那个 MCP 管理器（compose.yaml 的
+    # llm-bridge-local）在内部网络里的地址和管理令牌。任一为空表示没有随带：页面上不能选“本机”
+    llm_bridge_local_url: str = ""
+    llm_bridge_local_token: SecretStr | None = None
     # 生成的 TrendRadar 配置文件写到这里（Compose 的卷 trendradar-config；
     # TrendRadar 只读挂载为 /app/config）
     news_config_dir: str = "/var/lib/workspace/trendradar"
@@ -246,6 +250,7 @@ class Settings(BaseSettings):
         "agent_public_url",
         "openim_api_url",
         "trendradar_mcp_url",
+        "llm_bridge_local_url",
         "news_ingest_base_url",
         "r2_endpoint",
         "oss_endpoint",
