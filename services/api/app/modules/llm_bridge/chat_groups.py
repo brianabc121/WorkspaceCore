@@ -160,6 +160,7 @@ class LlmChatGroupService:
         title: str,
         text: str,
         request_id: str,
+        send: bool = True,
     ) -> _Started:
         arguments = target.model_dump(exclude_none=True, exclude={"bridge_id"}) | {"title": title}
         try:
@@ -168,6 +169,8 @@ class LlmChatGroupService:
             return _Started(error=error.message)
         session_id = str(created["session_id"])
         started = _Started(session_id=session_id, model=created.get("model") or target.model)
+        if not send:  # 页面要先传附件：问题随后用“向这一组继续发”发出
+            return started
         try:
             started.turn = _turn(
                 await self.chat._tool(
@@ -212,7 +215,7 @@ class LlmChatGroupService:
 
         started = await asyncio.gather(
             *(
-                self._start(client, caller, target, title, body.text, body.request_id)
+                self._start(client, caller, target, title, body.text, body.request_id, body.send)
                 for target, client, _, _ in prepared
             )
         )
@@ -277,18 +280,16 @@ class LlmChatGroupService:
         session_id: str,
         body: LlmChatGroupSendIn,
     ) -> LlmChatGroupResult:
+        arguments: dict[str, Any] = {
+            "session_id": session_id,
+            "text": body.text,
+            "request_id": f"{body.request_id}.{session_id[-8:]}",
+            "wait_seconds": 0,
+        }
+        if body.attachments.get(position):  # 没带附件时不传这一项：旧版本的管理器不认识它
+            arguments["attachments"] = body.attachments[position]
         try:
-            data = await self.chat._tool(
-                client,
-                caller,
-                "llm_send",
-                {
-                    "session_id": session_id,
-                    "text": body.text,
-                    "request_id": f"{body.request_id}.{session_id[-8:]}",
-                    "wait_seconds": 0,
-                },
-            )
+            data = await self.chat._tool(client, caller, "llm_send", arguments)
         except ApiError as error:
             return LlmChatGroupResult(position=position, error=error.message)
         return LlmChatGroupResult(position=position, turn=_turn(data))

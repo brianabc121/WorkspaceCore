@@ -111,6 +111,91 @@ async def test_group_asks_several_models_across_managers(rig: Rig) -> None:  # n
     assert "用两句话解释幂等" not in str(logs)
 
 
+async def test_group_question_with_attachments(rig: Rig) -> None:  # noqa: F811
+    """带附件的同问：先只建会话，把附件传到每个会话，再带着各自的编号一起发。"""
+    second = await second_bridge(rig)
+    made = await rig.api(
+        "POST",
+        GROUPS,
+        json={
+            "text": "看这张图",
+            "request_id": "ga1",
+            "send": False,
+            "targets": [target(rig.bridge_id), target(second)],
+        },
+    )
+    assert made.status_code == 201, made.text
+    group, results = made.json()["group"], made.json()["results"]
+    # 会话建好了，问题还没发
+    assert [(r["turn"], r["error"]) for r in results] == [(None, ""), (None, "")]
+    members = group["members"]
+    for member in members:
+        view = (
+            await rig.api(
+                "GET", f"/bridges/{member['bridge_id']}/chat/sessions/{member['session_id']}"
+            )
+        ).json()
+        assert view["messages"] == []
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+    attachments: dict[str, list[str]] = {}
+    for member in members:
+        uploaded = await rig.env.client.post(
+            f"/api/v1/llm_bridge/bridges/{member['bridge_id']}/chat/sessions/"
+            f"{member['session_id']}/attachments",
+            params={"name": "图.png"},
+            content=png,
+            headers={**rig.env.headers(write=True), "Content-Type": "application/octet-stream"},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        attachments[str(member["position"])] = [uploaded.json()["id"]]
+
+    sent = await rig.api(
+        "POST",
+        f"{GROUPS}/{group['id']}/messages",
+        json={"text": "看这张图", "request_id": "ga2", "attachments": attachments},
+    )
+    assert sent.status_code == 200, sent.text
+    assert all(r["turn"] and not r["error"] for r in sent.json()["results"])
+    for member in members:
+        view = await wait_done(rig, member["bridge_id"], member["session_id"])
+        asked = view["messages"][0]
+        assert asked["role"] == "user" and asked["text"] == "看这张图"
+        assert [a["id"] for a in asked["attachments"]] == attachments[str(member["position"])]
+
+    # 别的会话的附件编号用不到这个会话上：只影响它自己那一栏（给第二个成员新传一张）
+    fresh = await rig.env.client.post(
+        f"/api/v1/llm_bridge/bridges/{members[1]['bridge_id']}/chat/sessions/"
+        f"{members[1]['session_id']}/attachments",
+        params={"name": "新图.png"},
+        content=png,
+        headers={**rig.env.headers(write=True), "Content-Type": "application/octet-stream"},
+    )
+    assert fresh.status_code == 201, fresh.text
+    fresh_id = fresh.json()["id"]
+    crossed = await rig.api(
+        "POST",
+        f"{GROUPS}/{group['id']}/messages",
+        json={
+            "text": "再看",
+            "request_id": "ga3",
+            "attachments": {"0": [fresh_id], "1": [fresh_id]},
+        },
+    )
+    assert crossed.status_code == 200, crossed.text
+    first, other = crossed.json()["results"]
+    assert first["turn"] is None and first["error"]
+    assert other["turn"] and not other["error"]
+    # 位置和编号的格式在接口上就检查
+    for bad in ({"9": attachments["0"]}, {"0": ["x"]}):
+        refused = await rig.api(
+            "POST",
+            f"{GROUPS}/{group['id']}/messages",
+            json={"text": "x", "request_id": "ga4", "attachments": bad},
+        )
+        assert refused.status_code == 422, refused.text
+
+
 async def test_group_input_is_checked_before_anything_is_created(rig: Rig) -> None:  # noqa: F811
     one = target(rig.bridge_id)
     for targets, status in (

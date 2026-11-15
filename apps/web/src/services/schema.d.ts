@@ -12544,6 +12544,12 @@ export interface components {
              */
             request_id: string;
             /**
+             * Send
+             * @description false：只建好每个会话，问题先不发——页面要带附件时用：先把附件传到每个会话，再用“向这一组继续发”带上附件发出
+             * @default true
+             */
+            send: boolean;
+            /**
              * Targets
              * @description 2 ~ 6 个目标，可以跨 MCP 管理器
              */
@@ -12650,6 +12656,14 @@ export interface components {
         };
         /** LlmChatGroupSendIn */
         LlmChatGroupSendIn: {
+            /**
+             * Attachments
+             * @description 随这个问题带上的附件：成员的位置（position）→ 传到它那个会话里的附件编号。附件属于会话，所以每个成员各传各的
+             * @default {}
+             */
+            attachments: {
+                [key: string]: string[];
+            };
             /**
              * Request Id
              * @description 幂等号：重试用同一个，每个会话都不会重复发送

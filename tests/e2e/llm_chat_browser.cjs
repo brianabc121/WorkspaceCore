@@ -283,6 +283,24 @@ async function main() {
     const shown = thread(page).getByRole('img', { name: `验收图 ${run}.png` })
     await shown.waitFor({ timeout: 30000 })
     check(await until(() => shown.evaluate((img) => img.complete && img.naturalWidth === 1)), '提问上的图片应能显示出来（内容从管理器取回）')
+    // 粘贴和拖拽（T-0244）：剪贴板里的截图、拖进输入区的图片都当附件加上；拖进来的别的文件说明为什么不行
+    const give = (kind, files) => page.evaluate(({ kind, files }) => {
+      const data = new DataTransfer()
+      for (const f of files) data.items.add(new File([Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0))], f.name, { type: f.type }))
+      const box = document.querySelector('textarea[aria-label="消息内容"]')
+      if (kind === 'paste') box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+      else for (const type of ['dragenter', 'dragover', 'drop']) box.closest('form').dispatchEvent(new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true }))
+    }, { kind, files })
+    const png64 = PNG.toString('base64')
+    await give('paste', [{ name: `粘贴图 ${run}.png`, type: 'image/png', b64: png64 }])
+    await attachedList.getByText(`粘贴图 ${run}.png`).waitFor({ timeout: 30000 })
+    await give('drop', [{ name: `拖入图 ${run}.png`, type: 'image/png', b64: png64 }, { name: '报告.pdf', type: 'application/pdf', b64: 'JVBERg==' }])
+    await attachedList.getByText(`拖入图 ${run}.png`).waitFor({ timeout: 30000 })
+    await page.getByText('「报告.pdf」不是图片：对话会话只能带图片，别的文件要在开发会话里发。').waitFor({ timeout: 30000 })
+    check((await composer(page).inputValue()) === '', '粘贴图片不应往输入框里写东西')
+    await composer(page).fill('看这两张')
+    await composer(page).press('Enter')
+    await thread(page).getByText(':: 看这两张 images=2').waitFor({ timeout: 60000 })
     // 对话会话只能带图片：别的文件接口直接拒绝；内容和扩展名对不上的也拒绝
     const refuse = (name, text) => page.evaluate(async ({ url, workspace, name, text }) => {
       const csrf = document.cookie.split('; ').find((item) => item.startsWith('ws_csrf='))?.slice(8)
@@ -339,10 +357,10 @@ async function main() {
     await page.reload()
     await page.getByRole('heading', { level: 2, name: TITLE }).waitFor()
     await thread(page).getByText(':: 第二问').waitFor()
-    // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条；附件那一步的两条；插入那一步的两条
-    check((await countMessages(page)) === 26, `刷新后十三问十三答都还在：${await countMessages(page)}`)
+    // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条；附件那一步的两条，粘贴和拖入图片的那一条；插入那一步的两条
+    check((await countMessages(page)) === 28, `刷新后十四问十四答都还在：${await countMessages(page)}`)
     const info = page.getByRole('complementary', { name: '会话信息' })
-    await info.getByText('回合（13）').waitFor()
+    await info.getByText('回合（14）').waitFor()
     await info.getByText(MANAGER).waitFor()
     step('改标题后列表跟着变；按标题搜索；刷新后从地址回到同一个会话，右栏有会话信息和回合')
 
@@ -449,6 +467,14 @@ async function main() {
     await ask.getByRole('textbox', { name: '问题内容' }).press('Enter')
     await claudeColumn.getByText(':: 再问一句').waitFor({ timeout: 60000 })
     await buddyColumn.getByText(':: 再问一句').waitFor({ timeout: 60000 })
+    // 带图片继续问（T-0245）：图片传到每个模型自己的会话里，再一起发；两个模型都收到 1 张
+    await ask.getByLabel('选择要带上的图片或文件').setInputFiles({ name: `同问图 ${run}.png`, mimeType: 'image/png', buffer: PNG })
+    await ask.getByRole('list', { name: '要带上的附件' }).getByText(`同问图 ${run}.png`).waitFor({ timeout: 30000 })
+    await ask.getByRole('textbox', { name: '问题内容' }).fill('带图再问')
+    await ask.getByRole('textbox', { name: '问题内容' }).press('Enter')
+    await claudeColumn.getByText(':: 带图再问 images=1').waitFor({ timeout: 60000 })
+    await buddyColumn.getByText(':: 带图再问 images=1').waitFor({ timeout: 60000 })
+    check((await ask.getByRole('list', { name: '要带上的附件' }).count()) === 0, '发出去之后，同问里待发的附件应清空')
     // 每个模型就是一个普通会话：可以回到单会话里单独继续
     await claudeColumn.getByRole('link', { name: '在这个会话里继续' }).click()
     await page.getByRole('heading', { level: 2, name: QUESTION }).waitFor()
