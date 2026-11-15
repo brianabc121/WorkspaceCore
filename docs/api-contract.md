@@ -932,6 +932,15 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 - 执行记录（`GET /api/v1/ai/tool-executions`）里，`llm_bridge_*` 写工具成功时 `arguments.result` 带 `bridge_id`、`session_id`、`turn_id`：能从这条记录找到会话的那一回合。
 - **会话索引**：`GET /api/v1/llm_bridge/sessions`（admin）——所有 MCP 管理器上的会话，按最后活动倒序；`bridge_id`、`owner_kind`（`agent` / `user` / `external`）筛选，`limit` / `offset` 翻页，`sync=true` 先同步再读（连不上的管理器列在 `sync_failed`）。每条有 `bridge_id` / `bridge_name`、`session_id`、平台、用法、模型、`title`、`status`、`owner_kind` / `owner_id` / `owner`、`source`、`busy`、`turns_total` / `turns_failed` / `turns_interrupted`、`tokens`、三个时间。**不含提问和回答**。数据在工作台的 `llm_bridge_sessions` 表里，后台每分钟向每个启用的管理器取一次“变更序号之后变了的会话”（管理器的 `GET /admin/index?after=`）。
 
+**管理员回溯：会话记录、搜索、用量**（T-0251，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.2 的 B1、B4、B5）：
+
+- `GET /api/v1/llm_bridge/sessions` 多这些筛选：`owner_id`（具体是谁：实例的 id，或 `user:<用户 id>`）、`platform`、`mode`、`status`、`problem=true`（有失败、结果未知或中断的回合）、`since` / `until`（最后活动的时间范围）、`q`（标题里有这段文字）。
+- `GET /api/v1/llm_bridge/sessions/owners`：索引里出现过的发起人（`owner_kind`、`owner_id`、`owner`、`sessions`），页面的筛选下拉用。
+- `GET /api/v1/llm_bridge/sessions/search?q=`（admin）：在所有 MCP 管理器的提问和回答里搜索，每个会话给最新的一处：`session`（索引里的会话）、`bridge_id` / `bridge_name`、`session_id`、`turn_id`、`role`、`snippet`、`at`；没搜到的管理器列在 `failed`。内容不存进工作台，现向各个管理器问（管理器的 `GET /admin/search`，按字面匹配，不分大小写）。
+- `GET /api/v1/llm_bridge/usage?days=`（admin，1 ~ 366，默认 30）：按天（UTC）、管理器、平台、发起人汇总的 `turns`、`failed`、`interrupted`、`tokens`。token 是官方程序报的数相加，不是账单；没报的回合算 0，CodeBuddy 的积分拿不到。
+- 会话（聊天页的会话内容和列表）多 `source`：建会话时的出处。聊天页的地址多一个可选的 `t=<回合编号>`：打开会话后定位到那一回合；接手发送的通知链接带着它。
+- 页面：`/llm_bridge?view=records`（会话记录）。
+
 **智能体这条链路的改进**（T-0250，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.1）：
 
 - **结束后叫我**：`llm_bridge_send` 多 `notify`。带上它、回合又没在 `wait_seconds` 内做完时，结果里 `will_notify: true`；回合结束（完成、失败、结果未知、取消，或被打断后没有回合接着做）后工作台给这个实例排一次唤醒（`agent_wakeups.source = llm_bridge`）。提示词里只有回合编号和状态，没有模型写的内容，结果要用 `llm_bridge_turn_get` 取。被打断后有回合接着做的（插入的消息、额度恢复后的续跑）等接着做的那一回合结束才叫。至少叫一次；后台每 15 秒看一次，管理器连不上时下次再看。轮询照旧能用。

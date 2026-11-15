@@ -37,6 +37,10 @@ class LlmChatSessionOut(BaseModel):
     environment: LlmBridgeEnvironmentOut | None = Field(
         default=None, description="开发会话用的环境；只在会话内容里给出"
     )
+    source: dict[str, Any] | None = Field(
+        default=None,
+        description="出处：建会话时工作台记下的——哪个实例或人，智能体当时在执行哪些任务",
+    )
 
 
 class LlmChatSessionList(BaseModel):

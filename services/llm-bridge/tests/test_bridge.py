@@ -532,6 +532,33 @@ async def test_agent_reads_output_files_and_pages_from_the_newest(bridge: Bridge
     assert "generated" not in json.dumps(status)
 
 
+async def test_search_finds_text_in_questions_and_answers_and_usage_adds_up(bridge: Bridge) -> None:
+    """全文搜索和用量汇总（改进方案 4.2 的 B1、B5）。"""
+    a = await _session(bridge, "agent-1")
+    await _send(bridge, "agent-1", a, "帮我写一份季度复盘", "r1")
+    b = await _session(bridge, "user:u1")
+    await _send(bridge, "user:u1", b, "今天天气怎么样", "r2")
+    await _send(bridge, "user:u1", b, "fail:invalid", "r3")
+
+    found = (await bridge.admin("GET", "/admin/search", params={"q": "季度复盘"})).json()["hits"]
+    assert [h["session_id"] for h in found] == [a]
+    # 回答里也有这几个字（仿真程序把提问原样带回来）：给的是最新的一处
+    assert found[0]["role"] == "assistant" and "季度复盘" in found[0]["snippet"]
+    assert (await bridge.admin("GET", "/admin/search", params={"q": "没有这句话"})).json() == {
+        "hits": []
+    }
+    # 通配符当普通字符；太短的不搜
+    assert (await bridge.admin("GET", "/admin/search", params={"q": "%_"})).json()["hits"] == []
+    assert (await bridge.admin("GET", "/admin/search", params={"q": "x"})).status_code == 422
+
+    rows = (await bridge.admin("GET", "/admin/usage")).json()["rows"]
+    by_owner = {r["owner_id"]: r for r in rows}
+    assert by_owner["agent-1"]["turns"] == 1 and by_owner["agent-1"]["failed"] == 0
+    assert by_owner["user:u1"]["turns"] == 2 and by_owner["user:u1"]["failed"] == 1
+    assert by_owner["agent-1"]["tokens"] > 0 and by_owner["agent-1"]["platform"] == "fake"
+    assert by_owner["agent-1"]["day"] == time.strftime("%Y-%m-%d", time.gmtime())
+
+
 async def test_external_sessions(bridge: Bridge) -> None:
     from bridge.drivers.base import Message, NativeSession
 

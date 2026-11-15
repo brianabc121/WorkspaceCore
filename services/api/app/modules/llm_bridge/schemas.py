@@ -418,3 +418,52 @@ class LlmBridgeIndexList(BaseModel):
     sessions: list[LlmBridgeIndexSessionOut]
     next_offset: int | None
     sync_failed: list[str] = Field(description="这次没同步上的 MCP 管理器的名字（sync=true 时）")
+
+
+class LlmBridgeIndexOwnerOut(BaseModel):
+    owner_kind: str
+    owner_id: str | None
+    owner: str
+    sessions: int
+
+
+class LlmBridgeIndexOwnerList(BaseModel):
+    owners: list[LlmBridgeIndexOwnerOut]
+
+
+class LlmBridgeSearchHitOut(BaseModel):
+    session: LlmBridgeIndexSessionOut | None = Field(
+        description="索引里的这个会话；索引还没同步到时为空（只有下面的编号）"
+    )
+    bridge_id: UUID
+    bridge_name: str
+    session_id: str
+    turn_id: str | None
+    role: str = Field(description="user：在提问里；assistant：在回答里")
+    snippet: str = Field(description="这段文字前后的一小段")
+    at: float | None
+
+
+class LlmBridgeSearchOut(BaseModel):
+    hits: list[LlmBridgeSearchHitOut]
+    failed: list[str] = Field(description="没搜到的 MCP 管理器的名字（连不上或版本太旧）")
+
+
+class LlmBridgeUsageRowOut(BaseModel):
+    day: str = Field(description="哪一天（UTC），YYYY-MM-DD")
+    bridge_id: UUID
+    bridge_name: str
+    platform: str
+    owner_kind: str = Field(description="agent / user / system（自动续跑）/ external")
+    owner_id: str | None
+    owner: str
+    turns: int
+    failed: int = Field(description="失败和结果未知的回合数")
+    interrupted: int
+    tokens: int = Field(description="官方程序报的 token 数相加，不是账单；没报的回合算 0")
+
+
+class LlmBridgeUsageOut(BaseModel):
+    days: int
+    rows: list[LlmBridgeUsageRowOut]
+    failed: list[str] = Field(description="没取到的 MCP 管理器的名字")

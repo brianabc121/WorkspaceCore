@@ -503,6 +503,42 @@ class Store:
         )
         return float(row["at"]) if row and row["at"] else None
 
+    def search_messages(self, query: str, limit: int) -> list[Row]:
+        """在提问和回答里找这段文字（不分大小写），最新的在前；每个会话只给最新的一处。
+
+        回答有两处：过程里说的话在 messages，最终的回答在 turns.result_text，都要找。"""
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{escaped}%"
+        rows = self._all(
+            "SELECT session_id, turn_id, role, text, at FROM messages "
+            "WHERE role IN ('user', 'assistant') AND text LIKE ? ESCAPE '\\' "
+            "UNION ALL "
+            "SELECT session_id, id AS turn_id, 'assistant' AS role, result_text AS text, "
+            "finished_at AS at FROM turns WHERE result_text LIKE ? ESCAPE '\\' "
+            "ORDER BY at DESC LIMIT ?",
+            (like, like, limit * 20),
+        )
+        seen: set[str] = set()
+        latest: list[Row] = []
+        for row in rows:
+            if row["session_id"] not in seen:
+                seen.add(row["session_id"])
+                latest.append(row)
+        return latest[:limit]
+
+    def usage_by_day(self, since: float) -> list[Row]:
+        """since 之后结束的回合，按天、平台、发起人汇总：回合数、失败和中断的数量、各回合的用量。"""
+        return self._all(
+            "SELECT date(t.finished_at, 'unixepoch') AS day, s.platform AS platform, "
+            "t.caller_id AS owner_id, MAX(COALESCE(m.by, s.caller_label, '')) AS owner, "
+            "t.status AS status, t.summary AS summary "
+            "FROM turns t JOIN sessions s ON s.id = t.session_id "
+            "LEFT JOIN messages m ON m.turn_id = t.id AND m.role = 'user' "
+            "AND m.delivery != 'inserted' "
+            "WHERE t.finished_at >= ? GROUP BY t.id ORDER BY t.finished_at",
+            (since,),
+        )
+
     def session_tokens(self, session_id: str) -> int:
         """这个会话累计用掉的 token（各回合摘要里的用量相加）。"""
         total = 0

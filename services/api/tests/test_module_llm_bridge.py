@@ -597,7 +597,7 @@ async def test_grant_limits_follow_the_session_and_protections_hold(rig: Rig) ->
     notes = (await env.get("/api/v1/notifications"))["items"]
     takeover = next(n for n in notes if n["type"] == "llm_bridge.takeover_sent")
     assert "boss" in takeover["title"]
-    assert takeover["link"] == f"/llm_bridge?m={rig.bridge_id}&s={session}"
+    assert takeover["link"] == f"/llm_bridge?m={rig.bridge_id}&s={session}&t={taken['turn_id']}"
     made_note = next(n for n in notes if n["type"] == "llm_bridge.session_created")
     assert made_note["link"].startswith(f"/llm_bridge?m={rig.bridge_id}&s=bs_")
 
@@ -846,6 +846,68 @@ async def test_agent_gets_woken_sized_results_and_clear_errors(rig: Rig) -> None
     account = overview["accounts"]["claude"]
     assert account["state"] == "logged_in"
     assert not {"identity", "method", "first_login_at", "detail"} & set(account)
+
+
+@pytest.mark.integration
+async def test_records_can_be_filtered_searched_and_usage_summed(rig: Rig) -> None:
+    """管理员回溯（T-0251）：按发起人、平台、有没有失败筛选；全文搜索；用量汇总。"""
+    env = rig.env
+    agent = await rig.agent("openclaw-1", can_write=True)
+
+    async def send(session_id: str, text: str, rid: str) -> dict[str, Any]:
+        args = {"session_id": session_id, "text": text, "request_id": rid, "wait_seconds": 10}
+        return ok(await call(env, agent, "llm_bridge_send", args))
+
+    create = {"platform": "claude", "mode": "chat"}
+    good = ok(await call(env, agent, "llm_bridge_session_create", {**create, "title": "季度复盘"}))
+    await send(good["session_id"], "帮我列出三个要点", "r1")
+    bad = ok(await call(env, agent, "llm_bridge_session_create", {**create, "title": "失败的那个"}))
+    await send(bad["session_id"], "fail:invalid", "r2")
+    typed = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/chat/sessions",
+        json={**create, "title": "我自己问的", "text": "天气怎么样", "request_id": "h1"},
+    )
+    assert typed.status_code == 201, typed.text
+
+    async def listed(**params: Any) -> list[str]:
+        out = (await rig.api("GET", "/sessions", params=params)).json()
+        return sorted(s["title"] for s in out["sessions"])
+
+    assert await listed(sync=True) == ["失败的那个", "季度复盘", "我自己问的"]
+    assert await listed(owner_kind="agent") == ["失败的那个", "季度复盘"]
+    assert await listed(problem=True) == ["失败的那个"]
+    assert await listed(q="复盘") == ["季度复盘"]
+    assert await listed(platform="codex") == [] and await listed(mode="chat", status="active")
+    assert await listed(until="2000-01-01T00:00:00Z") == []
+    owners = (await rig.api("GET", "/sessions/owners")).json()["owners"]
+    by_kind = {o["owner_kind"]: o for o in owners}
+    assert by_kind["agent"]["owner"] == "openclaw-1" and by_kind["agent"]["sessions"] == 2
+    assert await listed(owner_id=by_kind["agent"]["owner_id"]) == ["失败的那个", "季度复盘"]
+    assert await listed(owner_id=by_kind["user"]["owner_id"]) == ["我自己问的"]
+
+    # 全文搜索：内容在管理器里，现问现答；结果带上索引里的会话
+    found = (await rig.api("GET", "/sessions/search", params={"q": "三个要点"})).json()
+    (hit,) = found["hits"]
+    assert hit["session_id"] == good["session_id"] and "三个要点" in hit["snippet"]
+    assert hit["session"]["title"] == "季度复盘" and hit["bridge_name"] == "主桥"
+    assert found["failed"] == []
+    assert (await rig.api("GET", "/sessions/search", params={"q": "x"})).status_code == 422
+
+    # 用量：按发起人分开，失败的也算回合
+    usage = (await rig.api("GET", "/usage", params={"days": 7})).json()
+    rows = {r["owner_kind"]: r for r in usage["rows"]}
+    assert rows["agent"]["turns"] == 2 and rows["agent"]["failed"] == 1
+    assert rows["agent"]["owner"] == "openclaw-1" and rows["agent"]["tokens"] > 0
+    assert rows["user"]["turns"] == 1 and rows["user"]["bridge_name"] == "主桥"
+    # 管理器连不上：说明哪个没取到
+    rig.down[0] = True
+    assert (await rig.api("GET", "/usage")).json()["failed"] == ["主桥"]
+    assert (await rig.api("GET", "/sessions/search", params={"q": "要点"})).json() == {
+        "hits": [],
+        "failed": ["主桥"],
+    }
+    rig.down[0] = False
 
 
 @pytest.mark.integration

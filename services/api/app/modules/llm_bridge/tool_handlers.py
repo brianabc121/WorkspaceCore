@@ -390,11 +390,12 @@ def _result_ref(bridge_id: str, data: dict[str, Any]) -> dict[str, Any]:
     return ref
 
 
-def _session_link(bridge_id: str, session_id: Any) -> str:
-    """通知里的链接：直接到聊天页的那个会话。"""
+def _session_link(bridge_id: str, session_id: Any, turn_id: Any = None) -> str:
+    """通知里的链接：直接到聊天页的那个会话；给了回合就定位到那一回合。"""
     if not bridge_id or not isinstance(session_id, str):
         return "/llm_bridge"
-    return f"/llm_bridge?m={bridge_id}&s={session_id}"
+    turn = f"&t={turn_id}" if isinstance(turn_id, str) else ""
+    return f"/llm_bridge?m={bridge_id}&s={session_id}{turn}"
 
 
 def _summary(tool: str, output: BridgeToolOutput) -> str:
@@ -499,7 +500,7 @@ async def run(
             severity="warning",
             title=f"智能体「{current.name}」向不是它建的会话发了消息",
             body=f"{data.get('platform')}.{data.get('mode')}（{output.bridge}）",
-            link=_session_link(bridge_id, data.get("session_id")),
+            link=_session_link(bridge_id, data.get("session_id"), data.get("turn_id")),
             key=str(data.get("turn_id")),
         )
     await service.record_knowledge(

@@ -13437,6 +13437,57 @@
         "title": "LlmBridgeIndexList",
         "type": "object"
       },
+      "LlmBridgeIndexOwnerList": {
+        "properties": {
+          "owners": {
+            "items": {
+              "$ref": "#/components/schemas/LlmBridgeIndexOwnerOut"
+            },
+            "title": "Owners",
+            "type": "array"
+          }
+        },
+        "required": [
+          "owners"
+        ],
+        "title": "LlmBridgeIndexOwnerList",
+        "type": "object"
+      },
+      "LlmBridgeIndexOwnerOut": {
+        "properties": {
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "owner_kind": {
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "sessions": {
+            "title": "Sessions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "owner_kind",
+          "owner_id",
+          "owner",
+          "sessions"
+        ],
+        "title": "LlmBridgeIndexOwnerOut",
+        "type": "object"
+      },
       "LlmBridgeIndexSessionOut": {
         "description": "会话索引里的一条（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 3.4）：不含提问和回答。",
         "properties": {
@@ -14207,6 +14258,103 @@
         "title": "LlmBridgeRestartIn",
         "type": "object"
       },
+      "LlmBridgeSearchHitOut": {
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "bridge_id": {
+            "format": "uuid",
+            "title": "Bridge Id",
+            "type": "string"
+          },
+          "bridge_name": {
+            "title": "Bridge Name",
+            "type": "string"
+          },
+          "role": {
+            "description": "user：在提问里；assistant：在回答里",
+            "title": "Role",
+            "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LlmBridgeIndexSessionOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "索引里的这个会话；索引还没同步到时为空（只有下面的编号）"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "snippet": {
+            "description": "这段文字前后的一小段",
+            "title": "Snippet",
+            "type": "string"
+          },
+          "turn_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turn Id"
+          }
+        },
+        "required": [
+          "session",
+          "bridge_id",
+          "bridge_name",
+          "session_id",
+          "turn_id",
+          "role",
+          "snippet",
+          "at"
+        ],
+        "title": "LlmBridgeSearchHitOut",
+        "type": "object"
+      },
+      "LlmBridgeSearchOut": {
+        "properties": {
+          "failed": {
+            "description": "没搜到的 MCP 管理器的名字（连不上或版本太旧）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Failed",
+            "type": "array"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/LlmBridgeSearchHitOut"
+            },
+            "title": "Hits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hits",
+          "failed"
+        ],
+        "title": "LlmBridgeSearchOut",
+        "type": "object"
+      },
       "LlmBridgeServerManagerList": {
         "properties": {
           "available": {
@@ -14848,6 +14996,111 @@
           "request_id"
         ],
         "title": "LlmBridgeUninstallIn",
+        "type": "object"
+      },
+      "LlmBridgeUsageOut": {
+        "properties": {
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "failed": {
+            "description": "没取到的 MCP 管理器的名字",
+            "items": {
+              "type": "string"
+            },
+            "title": "Failed",
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/LlmBridgeUsageRowOut"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "days",
+          "rows",
+          "failed"
+        ],
+        "title": "LlmBridgeUsageOut",
+        "type": "object"
+      },
+      "LlmBridgeUsageRowOut": {
+        "properties": {
+          "bridge_id": {
+            "format": "uuid",
+            "title": "Bridge Id",
+            "type": "string"
+          },
+          "bridge_name": {
+            "title": "Bridge Name",
+            "type": "string"
+          },
+          "day": {
+            "description": "哪一天（UTC），YYYY-MM-DD",
+            "title": "Day",
+            "type": "string"
+          },
+          "failed": {
+            "description": "失败和结果未知的回合数",
+            "title": "Failed",
+            "type": "integer"
+          },
+          "interrupted": {
+            "title": "Interrupted",
+            "type": "integer"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "owner_kind": {
+            "description": "agent / user / system（自动续跑）/ external",
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "tokens": {
+            "description": "官方程序报的 token 数相加，不是账单；没报的回合算 0",
+            "title": "Tokens",
+            "type": "integer"
+          },
+          "turns": {
+            "title": "Turns",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "day",
+          "bridge_id",
+          "bridge_name",
+          "platform",
+          "owner_kind",
+          "owner_id",
+          "owner",
+          "turns",
+          "failed",
+          "interrupted",
+          "tokens"
+        ],
+        "title": "LlmBridgeUsageRowOut",
         "type": "object"
       },
       "LlmChatAttachmentOut": {
@@ -16123,6 +16376,19 @@
           "session_id": {
             "title": "Session Id",
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "出处：建会话时工作台记下的——哪个实例或人，智能体当时在执行哪些任务",
+            "title": "Source"
           },
           "status": {
             "description": "active / archived",
@@ -63235,6 +63501,153 @@
             }
           },
           {
+            "description": "具体是谁：实例的 id，或 user:<用户 id>",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "具体是谁：实例的 id，或 user:<用户 id>",
+              "title": "Owner Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "platform",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "chatgpt",
+                    "codex",
+                    "claude",
+                    "workbuddy"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Platform"
+            }
+          },
+          {
+            "description": "用法",
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "chat",
+                    "dev",
+                    "cloud"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "用法",
+              "title": "Mode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "archived"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "description": "只看有失败、结果未知或中断的回合的",
+            "in": "query",
+            "name": "problem",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "只看有失败、结果未知或中断的回合的",
+              "title": "Problem",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "最后活动不早于",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "最后活动不早于",
+              "title": "Since"
+            }
+          },
+          {
+            "description": "最后活动早于",
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "最后活动早于",
+              "title": "Until"
+            }
+          },
+          {
+            "description": "标题里有这段文字",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "标题里有这段文字",
+              "maxLength": 120,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
             "description": "先同步一次",
             "in": "query",
             "name": "sync",
@@ -63350,6 +63763,313 @@
           }
         ],
         "summary": "所有 MCP 管理器上的会话（索引，不含对话内容；admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/sessions/owners": {
+      "get": {
+        "operationId": "llm_bridge_index_owners",
+        "parameters": [
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeIndexOwnerList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "会话索引里出现过的发起人（筛选用；admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/sessions/search": {
+      "get": {
+        "description": "每个会话给最新的一处和前后一小段文字。内容不存进工作台：现向各个管理器问。连不上或版本太旧的管理器列在 failed 里。",
+        "operationId": "llm_bridge_search",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 120,
+              "minLength": 2,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeSearchOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "在所有 MCP 管理器的提问和回答里搜索（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/usage": {
+      "get": {
+        "description": "回合数、失败和中断的数量、token。token 是官方程序报的数相加，不是账单；CodeBuddy 的积分拿不到。日期按 UTC。",
+        "operationId": "llm_bridge_usage",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 366,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeUsageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "用量：按天、MCP 管理器、平台、发起人汇总（admin）",
         "tags": [
           "llm_bridge"
         ]

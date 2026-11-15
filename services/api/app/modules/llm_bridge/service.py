@@ -8,12 +8,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -39,6 +41,7 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeGrantIn,
     LlmBridgeGrantOut,
     LlmBridgeIn,
+    LlmBridgeIndexOwnerOut,
     LlmBridgeIndexSessionOut,
     LlmBridgeInstallOut,
     LlmBridgeLoadOut,
@@ -48,8 +51,12 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgePatch,
     LlmBridgeQuotaList,
     LlmBridgeQuotaOut,
+    LlmBridgeSearchHitOut,
+    LlmBridgeSearchOut,
     LlmBridgeSettings,
     LlmBridgeStatusOut,
+    LlmBridgeUsageOut,
+    LlmBridgeUsageRowOut,
 )
 
 SLOTS = ("openai", "claude", "workbuddy")
@@ -130,6 +137,13 @@ async def remove_bridge(db: AsyncSession, row: LlmBridge) -> None:
         if grant.bridge_ids is not None and str(row.id) in grant.bridge_ids:
             grant.bridge_ids = [i for i in grant.bridge_ids if i != str(row.id)]
     await db.delete(row)
+
+
+def _owner_kind(owner_id: Any) -> str:
+    """管理器里的调用方编号是谁：没有的是官方程序里已有的会话，user: 开头是人，其余是实例。"""
+    if not isinstance(owner_id, str) or not owner_id:
+        return "external"
+    return "user" if owner_id.startswith("user:") else "agent"
 
 
 class LlmBridgeService:
@@ -515,6 +529,14 @@ class LlmBridgeService:
         *,
         bridge_id: uuid.UUID | None = None,
         owner_kind: str | None = None,
+        owner_id: str | None = None,
+        platform: str | None = None,
+        mode: str | None = None,
+        status: str | None = None,
+        problem: bool = False,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        q: str = "",
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[LlmBridgeIndexSessionOut], int | None]:
@@ -527,6 +549,25 @@ class LlmBridgeService:
             query = query.where(LlmBridgeSession.bridge_id == bridge_id)
         if owner_kind is not None:
             query = query.where(LlmBridgeSession.owner_kind == owner_kind)
+        if owner_id is not None:
+            query = query.where(LlmBridgeSession.owner_id == owner_id)
+        if platform is not None:
+            query = query.where(LlmBridgeSession.platform == platform)
+        if mode is not None:
+            query = query.where(LlmBridgeSession.mode == mode)
+        if status is not None:
+            query = query.where(LlmBridgeSession.status == status)
+        if problem:  # 有失败、结果未知或中断的回合
+            query = query.where(
+                (LlmBridgeSession.turns_failed > 0) | (LlmBridgeSession.turns_interrupted > 0)
+            )
+        if since is not None:
+            query = query.where(LlmBridgeSession.updated_at >= since)
+        if until is not None:
+            query = query.where(LlmBridgeSession.updated_at < until)
+        if q.strip():
+            escaped = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            query = query.where(LlmBridgeSession.title.ilike(f"%{escaped}%", escape="\\"))
         rows = (
             await self.db.execute(
                 query.order_by(LlmBridgeSession.updated_at.desc(), LlmBridgeSession.id)
@@ -534,33 +575,143 @@ class LlmBridgeService:
                 .offset(offset)
             )
         ).all()
-        items = [
-            LlmBridgeIndexSessionOut(
-                bridge_id=row.bridge_id,
-                bridge_name=name,
-                session_id=row.session_id,
-                platform=row.platform,
-                mode=row.mode,
-                model=row.model,
-                title=row.title,
-                status=row.status,
-                origin=row.origin,
-                owner_kind=row.owner_kind,
-                owner_id=row.owner_id,
-                owner=row.owner_label,
-                source=row.source,
-                busy=row.busy,
-                turns_total=row.turns_total,
-                turns_failed=row.turns_failed,
-                turns_interrupted=row.turns_interrupted,
-                tokens=row.tokens,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-                last_turn_at=row.last_turn_at,
-            )
-            for row, name in rows[:limit]
-        ]
+        items = [self._index_out(row, name) for row, name in rows[:limit]]
         return items, offset + limit if len(rows) > limit else None
+
+    @staticmethod
+    def _index_out(row: LlmBridgeSession, name: str) -> LlmBridgeIndexSessionOut:
+        return LlmBridgeIndexSessionOut(
+            bridge_id=row.bridge_id,
+            bridge_name=name,
+            session_id=row.session_id,
+            platform=row.platform,
+            mode=row.mode,
+            model=row.model,
+            title=row.title,
+            status=row.status,
+            origin=row.origin,
+            owner_kind=row.owner_kind,
+            owner_id=row.owner_id,
+            owner=row.owner_label,
+            source=row.source,
+            busy=row.busy,
+            turns_total=row.turns_total,
+            turns_failed=row.turns_failed,
+            turns_interrupted=row.turns_interrupted,
+            tokens=row.tokens,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            last_turn_at=row.last_turn_at,
+        )
+
+    async def index_owners(self, workspace_id: uuid.UUID) -> list[LlmBridgeIndexOwnerOut]:
+        """索引里出现过的发起人（筛选用）：每个人或实例一行，名字取最近一次用的。"""
+        rows = (
+            await self.db.execute(
+                select(
+                    LlmBridgeSession.owner_kind,
+                    LlmBridgeSession.owner_id,
+                    func.max(LlmBridgeSession.owner_label),
+                    func.count(),
+                )
+                .where(LlmBridgeSession.workspace_id == workspace_id)
+                .group_by(LlmBridgeSession.owner_kind, LlmBridgeSession.owner_id)
+                .order_by(func.count().desc())
+            )
+        ).all()
+        return [
+            LlmBridgeIndexOwnerOut(
+                owner_kind=kind, owner_id=owner_id, owner=label or "", sessions=n
+            )
+            for kind, owner_id, label, n in rows
+        ]
+
+    async def _fan_out(
+        self, workspace_id: uuid.UUID, path: str
+    ) -> tuple[list[tuple[LlmBridge, Any]], list[str]]:
+        """向每个启用的管理器读同一个管理接口；连不上或版本太旧的记下名字，不影响别的。"""
+        bridges = await self.bridges(workspace_id, only_enabled=True)
+        clients = [(b, await self.client(b)) for b in bridges]
+        await self.db.commit()  # 等管理器回答时不占着事务
+
+        async def one(client: BridgeClient) -> Any:
+            try:
+                return await client.admin("GET", path)
+            except (BridgeCallError, ConnectorError):
+                return None
+
+        results = await asyncio.gather(*(one(client) for _, client in clients))
+        ok = [(b, data) for (b, _), data in zip(clients, results, strict=True) if data is not None]
+        failed = [b.name for (b, _), data in zip(clients, results, strict=True) if data is None]
+        return ok, failed
+
+    async def search(self, workspace_id: uuid.UUID, q: str, limit: int) -> LlmBridgeSearchOut:
+        """在所有管理器的提问和回答里找这段文字。内容不经过工作台的数据库：现问现答。"""
+        results, failed = await self._fan_out(
+            workspace_id, f"/search?{urlencode({'q': q, 'limit': limit})}"
+        )
+        found: list[tuple[uuid.UUID, str, dict[str, Any]]] = []
+        for bridge, data in results:
+            hits = data.get("hits") if isinstance(data, dict) else None
+            for hit in hits if isinstance(hits, list) else []:
+                if isinstance(hit, dict) and isinstance(hit.get("session_id"), str):
+                    found.append((bridge.id, bridge.name, hit))
+        found.sort(key=lambda item: float(item[2].get("at") or 0), reverse=True)
+        found = found[:limit]
+        known: dict[tuple[uuid.UUID, str], LlmBridgeSession] = {}
+        if found:
+            rows = await self.db.scalars(
+                select(LlmBridgeSession).where(
+                    LlmBridgeSession.workspace_id == workspace_id,
+                    LlmBridgeSession.session_id.in_({hit["session_id"] for _, _, hit in found}),
+                )
+            )
+            known = {(row.bridge_id, row.session_id): row for row in rows}
+        out = []
+        for bridge_id, name, hit in found:
+            row = known.get((bridge_id, hit["session_id"]))
+            out.append(
+                LlmBridgeSearchHitOut(
+                    session=self._index_out(row, name) if row is not None else None,
+                    bridge_id=bridge_id,
+                    bridge_name=name,
+                    session_id=hit["session_id"],
+                    turn_id=hit.get("turn_id"),
+                    role=str(hit.get("role") or ""),
+                    snippet=str(hit.get("snippet") or "")[:400],
+                    at=hit.get("at"),
+                )
+            )
+        return LlmBridgeSearchOut(hits=out, failed=failed)
+
+    async def usage(self, workspace_id: uuid.UUID, days: int) -> LlmBridgeUsageOut:
+        """最近 days 天的用量：各管理器按天、平台、发起人汇总的回合数和 token。"""
+        results, failed = await self._fan_out(workspace_id, f"/usage?days={days}")
+        rows: list[LlmBridgeUsageRowOut] = []
+        for bridge, data in results:
+            items = data.get("rows") if isinstance(data, dict) else None
+            for item in items if isinstance(items, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                owner_id = item.get("owner_id")
+                kind = "system" if owner_id == "system" else _owner_kind(owner_id)
+                rows.append(
+                    LlmBridgeUsageRowOut(
+                        day=str(item.get("day") or ""),
+                        bridge_id=bridge.id,
+                        bridge_name=bridge.name,
+                        platform=str(item.get("platform") or ""),
+                        owner_kind=kind,
+                        owner_id=owner_id,
+                        owner=str(item.get("owner") or "")[:80],
+                        turns=int(item.get("turns") or 0),
+                        failed=int(item.get("failed") or 0),
+                        interrupted=int(item.get("interrupted") or 0),
+                        tokens=int(item.get("tokens") or 0),
+                    )
+                )
+        rows.sort(key=lambda r: (r.day, r.tokens), reverse=True)
+        return LlmBridgeUsageOut(days=days, rows=rows, failed=failed)
 
     async def grant(self, instance_id: uuid.UUID) -> LlmBridgeGrant | None:
         return await self.db.get(LlmBridgeGrant, instance_id)

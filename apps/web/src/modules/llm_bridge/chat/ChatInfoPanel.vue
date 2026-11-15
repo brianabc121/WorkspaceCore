@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import { X } from '@lucide/vue'
-import { CHAT_NO_TOOLS, MODES, NO_QUOTA, SANDBOX, originName, platformName, quotaKind, quotaUsage, seconds, type Quota } from '../api'
+import { CHAT_NO_TOOLS, MODES, NO_QUOTA, SANDBOX, originName, platformName, quotaKind, quotaUsage, seconds, sourceTasks, type Quota } from '../api'
 import { TURN_STATUS, ownerText, type ChatMessage, type ChatSession } from './chatApi'
 
 // 右栏：这个会话的信息、这个平台的额度（T-0242）和回合列表。只显示。
@@ -10,6 +11,8 @@ const props = defineProps<{ session: ChatSession; messages: ChatMessage[]; manag
 defineEmits<{ close: [] }>()
 
 const turns = computed(() => props.messages.filter(m => m.role === 'assistant' && m.turn_id))
+// 出处：智能体建这个会话时正在执行的任务（工作台记的，不保证就是引起这个会话的那一个）
+const tasks = computed(() => sourceTasks(props.session.source))
 const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
 </script>
 
@@ -29,6 +32,10 @@ const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
       </template>
       <dt>MCP 管理器</dt><dd>{{ managerName }}</dd>
       <dt>谁建的</dt><dd>{{ ownerText(session) }}</dd>
+      <template v-if="tasks.length">
+        <dt>当时在做</dt>
+        <dd><span v-for="t in tasks" :key="t.task_id" class="lc-source-task"><RouterLink class="asv-link" :to="`/tasks?task=${t.task_id}`">{{ t.title || t.task_id }}</RouterLink></span></dd>
+      </template>
       <dt>来源</dt><dd>{{ originName(session.origin) }}</dd>
       <dt>开始</dt><dd>{{ seconds(session.created_at) }}</dd>
       <dt>最后活动</dt><dd>{{ seconds(session.updated_at) }}</dd>

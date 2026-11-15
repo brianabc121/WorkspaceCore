@@ -31,6 +31,8 @@ const managerId = computed(() => {
 })
 const manager = computed(() => list.value.find(b => b.id === managerId.value) ?? null)
 const sessionId = computed(() => { const s = one(route.query.s); return s && /^bs_[0-9a-f]{20}$/.test(s) ? s : null })
+// 链接里带 t=<回合>：打开会话后定位到那一回合
+const targetTurn = computed(() => { const t = one(route.query.t); return t && /^bt_[0-9a-f]{20}$/.test(t) ? t : null })
 const groupId = computed(() => { const g = one(route.query.g); return g && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(g) && !sessionId.value ? g : null })
 const creating = computed(() => route.query.new === '1' && !sessionId.value && !groupId.value)
 const comparing = computed(() => route.query.compare === '1' && !sessionId.value && !groupId.value && !creating.value)
@@ -124,7 +126,7 @@ async function sync() {
           @update:manager-id="pickManager($event, { new: '1' })" @created="created" @cancel="router.push(here())"
         />
         <ChatConversation
-          v-else-if="sessionId && manager" :key="`${manager.id}:${sessionId}`" :chat="chat" :bridge="manager" :session-id="sessionId" :narrow="narrow" :quotas="status.data.value?.quota ?? null"
+          v-else-if="sessionId && manager" :key="`${manager.id}:${sessionId}`" :chat="chat" :bridge="manager" :session-id="sessionId" :narrow="narrow" :quotas="status.data.value?.quota ?? null" :target-turn="targetTurn"
           :initial-draft="carry?.session === sessionId ? carry.draft : ''" :initial-error="carry?.session === sessionId ? carry.error : ''"
           @back="router.push(here())" @changed="refreshList"
         />

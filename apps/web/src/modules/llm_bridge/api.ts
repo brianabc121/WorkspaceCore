@@ -25,6 +25,16 @@ export type LoginState = Schema['LlmBridgeLoginOut']
 export type Environment = Schema['LlmBridgeEnvironmentOut']
 export type EnvironmentBody = Schema['LlmBridgeEnvironmentIn']
 export type Grant = Schema['LlmBridgeGrantOut']
+export type IndexSession = Schema['LlmBridgeIndexSessionOut']
+export type SearchHit = Schema['LlmBridgeSearchHitOut']
+export type UsageRow = Schema['LlmBridgeUsageRowOut']
+/** 会话记录的筛选条件：没填的不传 */
+export type IndexFilter = { bridge_id?: string; owner_kind?: 'agent' | 'user' | 'external'; owner_id?: string; platform?: Platform; mode?: 'chat' | 'dev' | 'cloud'; status?: 'active' | 'archived'; problem?: boolean; since?: string; until?: string; q?: string }
+/** 谁建的会话 */
+export const OWNER_KIND: Record<string, string> = { agent: '智能体', user: '人', external: '官方程序里已有', system: '系统（自动续跑）' }
+/** 出处：智能体当时在执行的任务 */
+export type SourceTask = { run_id?: string; task_id?: string; title?: string; project_id?: string }
+export const sourceTasks = (source: Record<string, unknown> | null | undefined): SourceTask[] => (Array.isArray(source?.tasks) ? (source.tasks as SourceTask[]).filter(t => t && typeof t.task_id === 'string') : [])
 export type GrantBody = Schema['LlmBridgeGrantIn']
 export type Platform = GrantBody['platforms'][number]
 export type BridgeSession = Schema['LlmBridgeSessionList']['sessions'][number]
@@ -201,6 +211,23 @@ export function useLlmBridge(scope: string) {
     useDeployment: (id: Ref<string | null>) => useQuery({ queryKey: computed(() => key(user, scope, 'deployment', id.value)), enabled: computed(() => active() && !!id.value),
       refetchInterval: (query: { state: { data?: DeployJob } }) => (query.state.data?.status === 'running' ? 2000 : false),
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/deployments/{job_id}', { params: { header, path: { job_id: id.value! } }, signal })) }),
+    // 会话记录（T-0251）：工作台的会话索引，跨管理器；不含对话内容
+    useIndex: (filter: Ref<IndexFilter>, offset: Ref<number>, limit: number) => useQuery({ queryKey: computed(() => key(user, scope, 'index', filter.value, offset.value, limit)), enabled: computed(active),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/sessions', { params: { header, query: { ...filter.value, limit, offset: offset.value } }, signal })) }),
+    useIndexOwners: () => useQuery({ queryKey: key(user, scope, 'index', 'owners'), enabled: computed(active),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/sessions/owners', { params: { header }, signal })).owners }),
+    /** 现在就同步一次索引（平时后台每分钟同步）；返回没同步上的管理器的名字 */
+    async syncIndex() {
+      const out = dataOf(await auth.slowApi.GET('/api/v1/llm_bridge/sessions', { params: { header, query: { sync: true, limit: 1 } } }))
+      await invalidate('index')
+      return out.sync_failed
+    },
+    /** 在所有管理器的提问和回答里搜索：内容不在工作台，现问现答 */
+    async searchSessions(q: string) {
+      return dataOf(await auth.slowApi.GET('/api/v1/llm_bridge/sessions/search', { params: { header, query: { q } } }))
+    },
+    useUsage: (days: Ref<number>) => useQuery({ queryKey: computed(() => key(user, scope, 'usage', days.value)), enabled: computed(active),
+      queryFn: async ({ signal }) => dataOf(await auth.slowApi.GET('/api/v1/llm_bridge/usage', { params: { header, query: { days: days.value } }, signal })) }),
     useGrants: () => useQuery({ queryKey: key(user, scope, 'grants'), enabled: computed(active),
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/grants', { params: { header }, signal })).grants }),
 

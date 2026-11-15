@@ -83,6 +83,7 @@ def session_out(session: dict[str, Any], me: str) -> LlmChatSessionOut:
         created_at=session["created_at"],
         updated_at=session["updated_at"],
         environment=LlmBridgeEnvironmentOut(**environment) if environment else None,
+        source=session.get("source") if isinstance(session.get("source"), dict) else None,
     )
 
 

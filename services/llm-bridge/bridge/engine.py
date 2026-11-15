@@ -31,7 +31,7 @@ from bridge.channels import SLOT_LABELS, Channel, find
 from bridge.config import Settings
 from bridge.drivers.base import Driver, DriverError, Mode, SessionSpec
 from bridge.redact import mask_identity, redact
-from bridge.store import Row, Store, message_of, new_id
+from bridge.store import Row, Store, message_of, new_id, usage_tokens
 
 logger = logging.getLogger("bridge.engine")
 
@@ -1315,6 +1315,57 @@ class Engine:
             if until:
                 failure["retry_after_seconds"] = max(0, round(until - time.time()))
         return failure
+
+    def search(self, query: str, limit: int) -> Row:
+        """全文搜索：哪些会话的提问或回答里有这段文字，带一小段上下文。"""
+        text = " ".join(query.split())[:120]
+        if len(text) < 2:
+            raise BridgeError("VALIDATION_FAILED", "至少写两个字")
+        hits = []
+        for row in self.store.search_messages(text, min(max(limit, 1), 200)):
+            body = row["text"] or ""
+            at = body.lower().find(text.lower())
+            start, end = max(0, at - 40), min(len(body), at + len(text) + 60)
+            snippet = ("…" if start else "") + body[start:end] + ("…" if end < len(body) else "")
+            hits.append(
+                {
+                    "session_id": row["session_id"],
+                    "turn_id": row["turn_id"],
+                    "role": row["role"],
+                    "snippet": " ".join(snippet.split()),
+                    "at": row["at"],
+                }
+            )
+        return {"hits": hits}
+
+    def usage(self, days: int) -> Row:
+        """最近 days 天按天、平台、发起人的用量：回合数、失败和中断的数量、token。
+
+        token 是官方程序报的数相加，不是账单。"""
+        since = time.time() - max(1, min(days, 366)) * 86400
+        totals: dict[tuple[str, str, str], Row] = {}
+        for row in self.store.usage_by_day(since):
+            key = (row["day"], row["platform"], row["owner_id"] or "")
+            item = totals.setdefault(
+                key,
+                {
+                    "day": row["day"],
+                    "platform": row["platform"],
+                    "owner_id": row["owner_id"],
+                    "owner": row["owner"] or "",
+                    "turns": 0,
+                    "failed": 0,
+                    "interrupted": 0,
+                    "tokens": 0,
+                },
+            )
+            item["turns"] += 1
+            item["failed"] += row["status"] in ("failed", "unknown")
+            item["interrupted"] += row["status"] == "interrupted"
+            item["tokens"] += usage_tokens((row["summary"] or {}).get("usage") or {})
+            if row["owner"]:
+                item["owner"] = row["owner"]
+        return {"rows": list(totals.values())}
 
     def index_page(self, after: int, limit: int) -> Row:
         """给工作台同步会话索引用：变更序号在 after 之后的会话（不含对话内容）。"""

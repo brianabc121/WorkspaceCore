@@ -9,7 +9,7 @@ import ChatAttachments from './ChatAttachments.vue'
 // 被额度打断的回合（T-0237）显示什么时候自动继续，可以“现在就试”或“不要自动继续”。
 // source：从哪个管理器的哪个会话取附件的内容；不给就不显示附件。
 // noTools：对话模式的会话。模型有时把“调用工具”当成文字写出来，这里标明它并没有执行。
-const props = defineProps<{ message: ChatMessage; platform: string; noTools?: boolean; resuming?: string; source?: { chat: LlmChatApi; bridgeId: string; sessionId: string } }>()
+const props = defineProps<{ message: ChatMessage; platform: string; noTools?: boolean; target?: boolean; resuming?: string; source?: { chat: LlmChatApi; bridgeId: string; sessionId: string } }>()
 const emit = defineEmits<{ resume: [turn: string, now: boolean] }>()
 
 const STEP: Record<string, string> = { message: '说明', command: '命令', files: '改动的文件', notice: '提示', tool: '工具', tool_result: '结果', image: '图片', file: '文件' }
@@ -88,7 +88,7 @@ const busy = computed(() => !!props.resuming && props.resuming === props.message
 </script>
 
 <template>
-  <li class="lc-msg" :class="[reply ? 'is-reply' : 'is-ask', { 'is-mine': message.mine }]" :data-status="status || undefined">
+  <li class="lc-msg" :class="[reply ? 'is-reply' : 'is-ask', { 'is-mine': message.mine, 'is-target': target }]" :data-status="status || undefined" :data-turn="message.turn_id || undefined">
     <div class="lc-msg-head">
       <strong>{{ who }}</strong>
       <time v-if="message.at">{{ seconds(message.at) }}</time>

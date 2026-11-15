@@ -12,7 +12,7 @@ import ChatQueue from './ChatQueue.vue'
 
 // 中间一栏：一个会话的对话。父组件按“管理器 + 会话”给 key，换会话时整个重建。
 // 内容和进度（长轮询读事件）在 useLiveConversation 里。
-const props = defineProps<{ chat: LlmChatApi; bridge: Bridge; sessionId: string; narrow: boolean; initialDraft?: string; initialError?: string; quotas?: Record<string, Quota> | null }>()
+const props = defineProps<{ chat: LlmChatApi; bridge: Bridge; sessionId: string; narrow: boolean; initialDraft?: string; initialError?: string; quotas?: Record<string, Quota> | null; targetTurn?: string | null }>()
 const emit = defineEmits<{ back: []; changed: [] }>()
 
 const bridgeId = computed(() => props.bridge.id)
@@ -25,8 +25,17 @@ function scrollDown(force = false) {
   if (force) stick = true
   void nextTick(() => { const el = box.value; if (el && stick) el.scrollTop = el.scrollHeight })
 }
+// 从通知、执行记录、会话记录点过来时带着回合编号：第一次读到内容后滚到那一回合并标出来
+let jumped = false
+function jump() {
+  if (jumped || !props.targetTurn) return
+  const el = box.value?.querySelector<HTMLElement>(`li.is-reply[data-turn="${props.targetTurn}"]`)
+  if (!el) return
+  jumped = true; stick = false
+  el.scrollIntoView?.({ block: 'center' })
+}
 const { conversation, session, messages, lost, activeTurn, poll, reload, sent, resume, resuming, resumeError } = useLiveConversation(
-  props.chat, bridgeId, toRef(props, 'sessionId'), { activity: () => scrollDown(), changed: () => emit('changed') },
+  props.chat, bridgeId, toRef(props, 'sessionId'), { activity: () => { scrollDown(); void nextTick(jump) }, changed: () => emit('changed') },
 )
 
 // ---- 发送 ----
@@ -210,7 +219,7 @@ function archive() {
         <template v-else-if="session">
           <p v-if="!messages.length" class="lc-none">这个会话里还没有消息。</p>
           <ol v-else class="lc-messages" aria-label="消息">
-            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :no-tools="session.mode === 'chat'" :resuming="resuming" :source="source" @resume="resume" />
+            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :no-tools="session.mode === 'chat'" :target="!!targetTurn && m.turn_id === targetTurn" :resuming="resuming" :source="source" @resume="resume" />
           </ol>
           <p v-if="resumeError" class="lc-note is-red" role="alert">{{ resumeError }}</p>
           <p v-if="lost" class="lc-note is-red" role="alert">{{ lost }} <button type="button" class="asv-link" @click="poll()">重试</button></p>

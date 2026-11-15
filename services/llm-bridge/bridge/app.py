@@ -379,6 +379,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise BridgeError("VALIDATION_FAILED", "ids 要是回合编号的列表")
         return engine_of(request).turns_status(ids)
 
+    @app.get("/admin/search")
+    async def admin_search(request: Request, _: Admin, q: str, limit: int = 50) -> dict[str, Any]:
+        """全文搜索提问和回答：每个会话给最新的一处和一小段上下文。"""
+        return engine_of(request).search(q, limit)
+
+    @app.get("/admin/usage")
+    async def admin_usage(request: Request, _: Admin, days: int = 30) -> dict[str, Any]:
+        """最近若干天的用量，按天、平台、发起人汇总。"""
+        return engine_of(request).usage(days)
+
     @app.get("/admin/index")
     async def admin_index(
         request: Request, _: Admin, after: int = 0, limit: int = 200
