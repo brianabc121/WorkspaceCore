@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable, Collection
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ValidationError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -21,6 +22,8 @@ from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validat
 from app.domain.connectors import ConnectorRuntime
 from app.integrations.base import ConnectorError
 from app.models import AgentInstance
+from app.models.task import Task
+from app.models.timeline import TaskRun
 from app.modules.llm_bridge.client import BridgeCaller, BridgeCallError, BridgeClient
 from app.modules.llm_bridge.models import LlmBridge, LlmBridgeGrant
 from app.modules.llm_bridge.service import LlmBridgeService
@@ -187,6 +190,7 @@ async def _forward(
             "管理员没有给你开这个开发环境；能用的见 llm_bridge_environments",
         )
     bridges = await _candidates(service, instance, grant)
+    source = await _source(db, instance) if tool in WRITE_TOOL_NAMES else None
     # 平台的限制一并带给会话桥：发送、取回合、读会话这些调用不带 platform 参数，
     # 只有会话桥知道会话属于哪个平台
     caller = BridgeCaller(
@@ -194,6 +198,7 @@ async def _forward(
         instance.name,
         _scopes(grant),
         tuple(grant.platforms) if grant.platforms else None,
+        source,
     )
     if tool == "llm_bridge_status" and bridge_name is None and len(bridges) > 1:
         clients = [(b.name, await service.client(b)) for b in bridges]
@@ -237,6 +242,44 @@ def _record_arguments(parsed: BaseModel) -> dict[str, Any]:
         clean = agent_ops.redact(text)
         data["text"] = clean if len(clean) <= TEXT_LIMIT else clean[:TEXT_LIMIT] + "…"
     return data
+
+
+async def _source(db: AsyncSession, instance: AgentInstance) -> dict[str, Any]:
+    """出处：哪个实例、它这时候正在执行哪些任务（没结束的执行记录，最多 3 个）。
+
+    由工作台填，不让智能体自己说；管理器只记录，回溯时能从会话点回任务。"""
+    rows = (
+        await db.execute(
+            select(TaskRun.id, Task.id, Task.title, Task.project_id)
+            .join(Task, Task.id == TaskRun.task_id)
+            .where(TaskRun.instance_id == instance.id, TaskRun.ended_at.is_(None))
+            .order_by(TaskRun.started_at.desc())
+            .limit(3)
+        )
+    ).all()
+    return {
+        "kind": "agent",
+        "instance_id": str(instance.id),
+        "instance_name": instance.name,
+        "tasks": [
+            {
+                "run_id": str(run_id),
+                "task_id": str(task_id),
+                "title": agent_ops.redact(title or "")[:120],
+                "project_id": str(project_id),
+            }
+            for run_id, task_id, title, project_id in rows
+        ],
+    }
+
+
+def _result_ref(bridge_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    """执行得到的编号：执行记录里带着，回溯时能从这条记录点到会话的那一回合。"""
+    ref = {"bridge_id": bridge_id}
+    for key in ("session_id", "turn_id"):
+        if isinstance(data.get(key), str):
+            ref[key] = data[key]
+    return ref
 
 
 def _session_link(bridge_id: str, session_id: Any) -> str:
@@ -346,5 +389,6 @@ async def run(
         ok=True,
         summary=_summary(spec.name, output)[:200],
         request_id=request_id,
+        display={**arguments, "result": _result_ref(bridge_id, output.data)},
     )
     return output

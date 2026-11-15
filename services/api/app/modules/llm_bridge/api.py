@@ -22,6 +22,7 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeGrantList,
     LlmBridgeGrantOut,
     LlmBridgeIn,
+    LlmBridgeIndexList,
     LlmBridgeList,
     LlmBridgeLocalIn,
     LlmBridgeLocalOut,
@@ -384,6 +385,35 @@ async def llm_bridge_list_turns(
 ) -> LlmBridgeTurnList:
     row = await service.bridge(access.workspace.id, bridge_id)
     return LlmBridgeTurnList(**await service.admin(row, "GET", f"/sessions/{session_id}/turns"))
+
+
+# ---- 会话索引 ----
+@router.get(
+    "/llm_bridge/sessions",
+    summary="所有 MCP 管理器上的会话（索引，不含对话内容；admin）",
+    description="按最后活动倒序。数据来自工作台的会话索引，后台每分钟同步一次；"
+    "sync=true 时先同步再读（连不上的管理器列在 sync_failed 里，仍给出已有的记录）。"
+    "对话内容不在这里：用聊天页的接口按管理器和会话读。",
+    responses=_read_errors,
+)
+async def llm_bridge_index(
+    access: Admin,
+    service: Service,
+    bridge_id: Annotated[UUID | None, Query(description="只看这个 MCP 管理器")] = None,
+    owner_kind: Annotated[
+        Literal["agent", "user", "external"] | None,
+        Query(description="谁建的：智能体 / 人 / 官方程序里已有"),
+    ] = None,
+    sync: Annotated[bool, Query(description="先同步一次")] = False,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> LlmBridgeIndexList:
+    workspace_id = access.workspace.id
+    failed = await service.sync_index(workspace_id) if sync else []
+    items, next_offset = await service.index(
+        workspace_id, bridge_id=bridge_id, owner_kind=owner_kind, limit=limit, offset=offset
+    )
+    return LlmBridgeIndexList(sessions=items, next_offset=next_offset, sync_failed=failed)
 
 
 # ---- 按实例的权限 ----

@@ -25,7 +25,12 @@ from app.integrations.base import ConnectorError
 from app.models import AgentInstance
 from app.modules.llm_bridge import deploy_bundle, tunnel
 from app.modules.llm_bridge.client import BridgeCallError, BridgeClient, bridge_client
-from app.modules.llm_bridge.models import LlmBridge, LlmBridgeGrant, LlmBridgeInstall
+from app.modules.llm_bridge.models import (
+    LlmBridge,
+    LlmBridgeGrant,
+    LlmBridgeInstall,
+    LlmBridgeSession,
+)
 from app.modules.llm_bridge.schemas import (
     ALL_PLATFORMS,
     LlmBridgeAccountOut,
@@ -34,6 +39,7 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeGrantIn,
     LlmBridgeGrantOut,
     LlmBridgeIn,
+    LlmBridgeIndexSessionOut,
     LlmBridgeInstallOut,
     LlmBridgeLoadOut,
     LlmBridgeLocalIn,
@@ -488,6 +494,74 @@ class LlmBridgeService:
         return LlmBridgeSettings(**values)
 
     # ---- 按实例的权限 ----
+    # ---- 会话索引（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 3.4） ----
+    async def sync_index(self, workspace_id: uuid.UUID) -> list[str]:
+        """现在就把各个管理器上变了的会话同步进索引；返回没同步上的管理器的名字。"""
+        from app.modules.llm_bridge import jobs  # jobs 导入本模块
+
+        targets = [(b.id, b.name) for b in await self.bridges(workspace_id, only_enabled=True)]
+        failed: list[str] = []
+        for bridge_id, name in targets:
+            try:
+                await jobs.sync_bridge(self.db, self.settings, self.runtime, bridge_id)
+            except (BridgeCallError, ConnectorError):
+                await self.db.rollback()
+                failed.append(name)
+        return failed
+
+    async def index(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        bridge_id: uuid.UUID | None = None,
+        owner_kind: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[LlmBridgeIndexSessionOut], int | None]:
+        query = (
+            select(LlmBridgeSession, LlmBridge.name)
+            .join(LlmBridge, LlmBridge.id == LlmBridgeSession.bridge_id)
+            .where(LlmBridgeSession.workspace_id == workspace_id)
+        )
+        if bridge_id is not None:
+            query = query.where(LlmBridgeSession.bridge_id == bridge_id)
+        if owner_kind is not None:
+            query = query.where(LlmBridgeSession.owner_kind == owner_kind)
+        rows = (
+            await self.db.execute(
+                query.order_by(LlmBridgeSession.updated_at.desc(), LlmBridgeSession.id)
+                .limit(limit + 1)
+                .offset(offset)
+            )
+        ).all()
+        items = [
+            LlmBridgeIndexSessionOut(
+                bridge_id=row.bridge_id,
+                bridge_name=name,
+                session_id=row.session_id,
+                platform=row.platform,
+                mode=row.mode,
+                model=row.model,
+                title=row.title,
+                status=row.status,
+                origin=row.origin,
+                owner_kind=row.owner_kind,
+                owner_id=row.owner_id,
+                owner=row.owner_label,
+                source=row.source,
+                busy=row.busy,
+                turns_total=row.turns_total,
+                turns_failed=row.turns_failed,
+                turns_interrupted=row.turns_interrupted,
+                tokens=row.tokens,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+                last_turn_at=row.last_turn_at,
+            )
+            for row, name in rows[:limit]
+        ]
+        return items, offset + limit if len(rows) > limit else None
+
     async def grant(self, instance_id: uuid.UUID) -> LlmBridgeGrant | None:
         return await self.db.get(LlmBridgeGrant, instance_id)
 

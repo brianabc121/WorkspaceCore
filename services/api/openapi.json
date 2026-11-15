@@ -13399,6 +13399,198 @@
         "title": "LlmBridgeIn",
         "type": "object"
       },
+      "LlmBridgeIndexList": {
+        "properties": {
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/LlmBridgeIndexSessionOut"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "sync_failed": {
+            "description": "这次没同步上的 MCP 管理器的名字（sync=true 时）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Sync Failed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions",
+          "next_offset",
+          "sync_failed"
+        ],
+        "title": "LlmBridgeIndexList",
+        "type": "object"
+      },
+      "LlmBridgeIndexSessionOut": {
+        "description": "会话索引里的一条（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 3.4）：不含提问和回答。",
+        "properties": {
+          "bridge_id": {
+            "format": "uuid",
+            "title": "Bridge Id",
+            "type": "string"
+          },
+          "bridge_name": {
+            "title": "Bridge Name",
+            "type": "string"
+          },
+          "busy": {
+            "title": "Busy",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "last_turn_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Turn At"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "origin": {
+            "description": "bridge：经管理器新建；external：官方程序里已有",
+            "title": "Origin",
+            "type": "string"
+          },
+          "owner": {
+            "description": "建会话时的名字",
+            "title": "Owner",
+            "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "实例的 id，或 user:<用户 id>；external 为空",
+            "title": "Owner Id"
+          },
+          "owner_kind": {
+            "description": "agent / user / external",
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "出处：建会话时工作台记下的——哪个实例或人，智能体当时在执行哪些任务",
+            "title": "Source"
+          },
+          "status": {
+            "description": "active / archived",
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "tokens": {
+            "description": "累计 token：官方程序报的数相加，不是账单",
+            "title": "Tokens",
+            "type": "integer"
+          },
+          "turns_failed": {
+            "description": "失败和结果未知的回合数",
+            "title": "Turns Failed",
+            "type": "integer"
+          },
+          "turns_interrupted": {
+            "title": "Turns Interrupted",
+            "type": "integer"
+          },
+          "turns_total": {
+            "title": "Turns Total",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bridge_id",
+          "bridge_name",
+          "session_id",
+          "platform",
+          "mode",
+          "model",
+          "title",
+          "status",
+          "origin",
+          "owner_kind",
+          "owner_id",
+          "owner",
+          "source",
+          "busy",
+          "turns_total",
+          "turns_failed",
+          "turns_interrupted",
+          "tokens",
+          "created_at",
+          "updated_at",
+          "last_turn_at"
+        ],
+        "title": "LlmBridgeIndexSessionOut",
+        "type": "object"
+      },
       "LlmBridgeInstallOut": {
         "description": "工作台部署出去的 MCP 管理器在哪（docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）。",
         "properties": {
@@ -62768,6 +62960,174 @@
           }
         ],
         "summary": "本机部署：把随工作台启动的 MCP 管理器添加进来（owner）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/sessions": {
+      "get": {
+        "description": "按最后活动倒序。数据来自工作台的会话索引，后台每分钟同步一次；sync=true 时先同步再读（连不上的管理器列在 sync_failed 里，仍给出已有的记录）。对话内容不在这里：用聊天页的接口按管理器和会话读。",
+        "operationId": "llm_bridge_index",
+        "parameters": [
+          {
+            "description": "只看这个 MCP 管理器",
+            "in": "query",
+            "name": "bridge_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只看这个 MCP 管理器",
+              "title": "Bridge Id"
+            }
+          },
+          {
+            "description": "谁建的：智能体 / 人 / 官方程序里已有",
+            "in": "query",
+            "name": "owner_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "agent",
+                    "user",
+                    "external"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "谁建的：智能体 / 人 / 官方程序里已有",
+              "title": "Owner Kind"
+            }
+          },
+          {
+            "description": "先同步一次",
+            "in": "query",
+            "name": "sync",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "先同步一次",
+              "title": "Sync",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeIndexList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "所有 MCP 管理器上的会话（索引，不含对话内容；admin）",
         "tags": [
           "llm_bridge"
         ]

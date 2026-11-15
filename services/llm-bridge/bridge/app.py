@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import re
 import secrets
@@ -102,6 +103,20 @@ def require_admin(request: Request) -> None:
         raise HTTPException(401, "令牌不正确")
 
 
+def _source(request: Request) -> dict[str, Any] | None:
+    """工作台带来的出处（X-Bridge-Source：URL 编码的 JSON）。只收小的；读不懂就当没有。"""
+    raw = request.headers.get("x-bridge-source")
+    if not raw or len(raw) > 4000:
+        return None
+    try:
+        data = json.loads(unquote(raw))
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {str(k)[:40]: v for k, v in list(data.items())[:12]}
+
+
 def resolve_caller(request: Request) -> Caller:
     token = _bearer(request)
     if _is_admin(request, token):
@@ -118,7 +133,7 @@ def resolve_caller(request: Request) -> Caller:
             if limited is None
             else frozenset(p for p in (part.strip() for part in limited.split(",")) if p)
         )
-        return Caller(caller_id, label, scopes, platforms)
+        return Caller(caller_id, label, scopes, platforms, _source(request))
     store: Store = request.app.state.store
     row = store.caller_by_token(token_hash(token))
     if row is None:
@@ -354,6 +369,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not request.app.state.store.delete_caller(caller_id):
             raise BridgeError("NOT_FOUND", "没有这个调用方")
         return {"ok": True}
+
+    @app.get("/admin/index")
+    async def admin_index(
+        request: Request, _: Admin, after: int = 0, limit: int = 200
+    ) -> dict[str, Any]:
+        """会话的变更（不含对话内容）：工作台按变更序号增量同步自己的会话索引。"""
+        return engine_of(request).index_page(after, limit)
 
     @app.get("/admin/sessions")
     async def admin_sessions(

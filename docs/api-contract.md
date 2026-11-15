@@ -913,6 +913,25 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 | `llm_bridge_session_list` / `llm_bridge_session_get` / `llm_bridge_turn_get` | read | 会话列表（`scope=account` 需要 `can_account`）；会话内容（别人的会话需要 `can_takeover`）；回合状态与结果 |
 | `llm_bridge_session_create` / `llm_bridge_send` / `llm_bridge_turn_cancel` / `llm_bridge_session_archive` | direct | 需要 `can_write`；直接执行、不审批，记执行记录；新建会话通知管理员（`llm_bridge.session_created`）。依据是 `docs/AGENTS.md` 的例外九（人类 2026-11-13 批准） |
 
+**统一的回合状态、出处、会话索引**（T-0248，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 第 3 节）：
+
+- 回合（`llm_bridge_send` / `llm_bridge_turn_get` 的结果）多这几项，三条链路都读它：
+
+  | 字段 | 什么时候有 | 含义 |
+  |---|---|---|
+  | `timing` | 总有 | `queued_at` / `started_at` / `finished_at`，以及 `waited_seconds`（排了多久）、`ran_seconds`（做了多久） |
+  | `waiting` | 排队时 | 在等什么：`{reason: "session", position}` 会话里前面还有消息；`{reason: "quota", until, estimated}` 平台因额度暂停；`{reason: "platform_slot", running}` 等平台的名额 |
+  | `next_turn_id` | 被打断或续跑时 | 接着做的是哪一回合（被插入的消息打断、额度中断后自动续跑）；一路跟到底就是最终结果 |
+  | `failure.retryable` | 失败、未知、中断时 | `true` 重新发同样的内容有意义（超时以外的临时错误、限流）；`false` 不用或不该重发（要先解决原因，或者已经有回合接着做）；`null` 结果未知，先看会话再决定 |
+  | `failure.retry_after_seconds` | 额度、限流 | 多久以后再试 |
+  | `usage` | 结束后、官方程序报了用量时 | 这一回合的 token 数（官方程序报的，不是账单） |
+  | `outputs` | 结束后、有产出时 | 产出的文件和图片：`id`、`name`、`media_type`、`size` |
+  | `source` | 有出处时 | 见下一条 |
+
+- **出处**（`source`）：由工作台填，不是智能体自己说的。智能体的调用：`{kind: "agent", instance_id, instance_name, tasks: [{run_id, task_id, title, project_id}]}`——`tasks` 是它当时没结束的任务执行，最多 3 个；人在聊天页：`{kind: "user", user_id, name}`。随请求头 `X-Bridge-Source` 带给管理器，存在会话（建的时候）和每个回合上，只记录、不参与权限判断。
+- 执行记录（`GET /api/v1/ai/tool-executions`）里，`llm_bridge_*` 写工具成功时 `arguments.result` 带 `bridge_id`、`session_id`、`turn_id`：能从这条记录找到会话的那一回合。
+- **会话索引**：`GET /api/v1/llm_bridge/sessions`（admin）——所有 MCP 管理器上的会话，按最后活动倒序；`bridge_id`、`owner_kind`（`agent` / `user` / `external`）筛选，`limit` / `offset` 翻页，`sync=true` 先同步再读（连不上的管理器列在 `sync_failed`）。每条有 `bridge_id` / `bridge_name`、`session_id`、平台、用法、模型、`title`、`status`、`owner_kind` / `owner_id` / `owner`、`source`、`busy`、`turns_total` / `turns_failed` / `turns_interrupted`、`tokens`、三个时间。**不含提问和回答**。数据在工作台的 `llm_bridge_sessions` 表里，后台每分钟向每个启用的管理器取一次“变更序号之后变了的会话”（管理器的 `GET /admin/index?after=`）。
+
 **权限与保护的补充**（T-0247，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 第 2 节）：
 
 - 实例权限多一项 `environment_ids`：这个实例能用的开发环境（环境编号）。默认空列表——一个都不能用，新建开发会话返回 `FORBIDDEN_CAPABILITY`，`llm_bridge_environments` 也只列出勾选的。没有 `can_write` 时保存下来的是空列表。

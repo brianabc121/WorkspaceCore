@@ -325,8 +325,11 @@ class AiToolService:
         summary: str,
         error_code: str | None = None,
         request_id: str | None = None,
+        display: dict[str, Any] | None = None,
     ) -> None:
-        """知识库工具（风险等级 knowledge，直接执行、不审批；docs/v2/KNOWLEDGE_PLAN.md 3.7）。"""
+        """知识库工具（风险等级 knowledge，直接执行、不审批；docs/v2/KNOWLEDGE_PLAN.md 3.7）。
+
+        display：页面上显示的参数，不给就显示 arguments（要带上执行得到的编号时用）。"""
         row = self._row(
             requester,
             spec,
@@ -334,6 +337,7 @@ class AiToolService:
             status="succeeded" if ok else "failed",
             summary=summary,
             request_id=request_id,
+            display=display,
         )
         row.executed_at = _now()
         row.error_code = error_code

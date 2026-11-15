@@ -613,6 +613,98 @@ async def test_grant_limits_follow_the_session_and_protections_hold(rig: Rig) ->
 
 
 @pytest.mark.integration
+async def test_provenance_and_session_index(rig: Rig) -> None:
+    """出处跟着会话和回合走；执行记录里有会话和回合的编号；工作台的索引跨管理器、不含内容（T-0248）。"""
+    env = rig.env
+    agent = await rig.agent("openclaw-1", can_write=True)
+    created = ok(
+        await call(env, agent, "llm_bridge_session_create", {"platform": "claude", "mode": "chat"})
+    )
+    session = created["session_id"]
+    assert created["source"]["kind"] == "agent"
+    assert created["source"]["instance_name"] == "openclaw-1" and created["source"]["tasks"] == []
+    sent = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_send",
+            {
+                "session_id": session,
+                "text": "不该进索引的内容",
+                "request_id": "r1",
+                "wait_seconds": 10,
+            },
+        )
+    )
+    # 统一的回合状态：用时、出处都在
+    assert sent["status"] == "completed" and sent["timing"]["ran_seconds"] >= 0
+    assert sent["source"]["instance_name"] == "openclaw-1"
+    # 执行记录能点到会话的那一回合
+    found = await records(env)
+    record = next(r for r in found if "发送消息" in r["summary"])
+    made = next(r for r in found if "新建会话" in r["summary"])
+    assert made["arguments"]["result"] == {"bridge_id": rig.bridge_id, "session_id": session}
+    assert record["arguments"]["result"] == {
+        "bridge_id": rig.bridge_id,
+        "session_id": session,
+        "turn_id": sent["turn_id"],
+    }
+    # 人在聊天页建的会话：出处是这个人
+    typed = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/chat/sessions",
+        json={"platform": "claude", "mode": "chat", "title": "我自己问的"},
+    )
+    assert typed.status_code == 201, typed.text
+
+    # 索引：后台任务还没跑时是空的；同步之后两个会话都在，按最后活动倒序
+    assert (await rig.api("GET", "/sessions")).json()["sessions"] == []
+    listed = (await rig.api("GET", "/sessions", params={"sync": True})).json()
+    assert listed["sync_failed"] == [] and listed["next_offset"] is None
+    by_owner = {s["owner_kind"]: s for s in listed["sessions"]}
+    assert set(by_owner) == {"agent", "user"}
+    mine = by_owner["agent"]
+    assert (mine["session_id"], mine["bridge_name"], mine["owner"]) == (
+        session,
+        "主桥",
+        "openclaw-1",
+    )
+    assert (mine["turns_total"], mine["turns_failed"], mine["busy"]) == (1, 0, False)
+    assert mine["source"]["instance_name"] == "openclaw-1" and mine["last_turn_at"]
+    assert (
+        by_owner["user"]["title"] == "我自己问的" and by_owner["user"]["source"]["kind"] == "user"
+    )
+    assert "不该进索引的内容" not in str(listed).replace(mine["title"], "")
+    only = (await rig.api("GET", "/sessions", params={"owner_kind": "agent"})).json()["sessions"]
+    assert [s["session_id"] for s in only] == [session]
+
+    # 再发一条失败的：定时任务跑一遍，索引跟着变；登记的 updated_at 不因为同步而变
+    before = (await rig.api("GET", "/bridges")).json()["bridges"][0]["updated_at"]
+    failed = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_send",
+            {"session_id": session, "text": "fail:invalid", "request_id": "r2", "wait_seconds": 10},
+        )
+    )
+    assert failed["status"] == "failed" and failed["failure"]["retryable"] is False
+    from app.modules.llm_bridge import jobs
+
+    assert await jobs.index_tick({"sync": env.sync}) == 1
+    again = (await rig.api("GET", "/sessions", params={"owner_kind": "agent"})).json()["sessions"]
+    assert (again[0]["turns_total"], again[0]["turns_failed"]) == (2, 1)
+    assert (await rig.api("GET", "/bridges")).json()["bridges"][0]["updated_at"] == before
+    # 没有变化时什么都不同步
+    assert await jobs.index_tick({"sync": env.sync}) == 0
+    # 管理器连不上：不影响已有的记录，说明哪个没同步上
+    rig.down[0] = True
+    offline = (await rig.api("GET", "/sessions", params={"sync": True})).json()
+    assert offline["sync_failed"] == ["主桥"] and len(offline["sessions"]) == 2
+    rig.down[0] = False
+
+
+@pytest.mark.integration
 async def test_tool_failures_are_explicit(rig: Rig) -> None:
     env = rig.env
     token = await rig.agent("alpha", can_write=True)

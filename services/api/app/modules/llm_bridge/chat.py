@@ -149,7 +149,9 @@ class LlmChatService:
         user = await self.db.get(User, access.user_id) if access.user_id else None
         if user is None:
             raise ApiError(403, "FORBIDDEN_ROLE", "只有登录的管理员能使用聊天")
-        return BridgeCaller(caller_id(user.id), (user.display_name or user.email)[:80], scopes)
+        name = (user.display_name or user.email)[:80]
+        source = {"kind": "user", "user_id": str(user.id), "name": name}
+        return BridgeCaller(caller_id(user.id), name, scopes, None, source)
 
     def _writable(self, row: LlmBridge) -> None:
         if not row.enabled:

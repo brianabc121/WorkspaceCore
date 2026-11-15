@@ -369,6 +369,85 @@ async def test_send_says_when_it_is_a_takeover_and_progress_is_the_latest(bridge
     assert bridge.engine.store.last_progress(mine["turn_id"]) is not None
 
 
+async def test_turn_view_says_what_it_waits_for_and_what_came_of_it(bridge: Bridge) -> None:
+    """统一的回合状态（改进方案 3.1）：在等什么、用时、用量、接替的回合、失败能不能重试。"""
+    a = await _session(bridge, "c1")
+    done = await _send(bridge, "c1", a, "内容", "r1")
+    assert done["timing"]["ran_seconds"] >= 0 and done["timing"]["finished_at"]
+    assert "waiting" not in done and "next_turn_id" not in done
+    # 会话里前面还有消息：排队的回合说明是在等它
+    await _send(bridge, "c1", a, "sleep:0.5", "r2", wait=0)
+    queued = await _send(bridge, "c1", a, "后面的", "r3", wait=0)
+    assert queued["status"] == "queued"
+    assert queued["waiting"] == {"reason": "session", "position": 1}
+    # 平台因额度暂停：说明暂停到什么时候
+    until = time.time() + 600
+    bridge.engine.store.set_pause("fake", until, True, "quota")
+    b = await _session(bridge, "c1")
+    paused = await _send(bridge, "c1", b, "等额度", "r4", wait=0)
+    assert paused["waiting"] == {"reason": "quota", "until": until, "estimated": True}
+    bridge.engine.store.clear_pause("fake")
+    # 失败的回合：说明能不能重发
+    c = await _session(bridge, "c1")
+    slow = await _send(bridge, "c1", c, "fail:timeout", "r5")
+    # 超时：不知道做没做，先看会话再决定，不直接说“能重试”
+    assert slow["status"] == "unknown" and slow["failure"]["retryable"] is None
+    down = await _send(bridge, "c1", c, "fail:platform_error", "r7")
+    assert down["status"] == "failed" and down["failure"]["retryable"] is True
+    wrong = await _send(bridge, "c1", c, "fail:invalid", "r6")
+    assert wrong["failure"]["retryable"] is False
+
+
+async def test_source_is_kept_and_index_feed_follows_changes(bridge: Bridge) -> None:
+    """出处随会话和回合存下来；会话的变更按序号给出，不含对话内容（改进方案 3.3、3.4）。"""
+    from urllib.parse import quote
+
+    source = {
+        "kind": "agent",
+        "instance_id": "i-1",
+        "tasks": [{"task_id": "t-1", "title": "写周报"}],
+    }
+    headers = {**bridge.headers("i-1"), "X-Bridge-Source": quote(json.dumps(source))}
+
+    async def tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        response = await bridge.rpc("tools/call", {"name": name, "arguments": arguments}, headers)
+        payload: dict[str, Any] = json.loads(response.json()["result"]["content"][0]["text"])
+        return payload
+
+    start = (await bridge.admin("GET", "/admin/index")).json()["last_rev"]
+    created = await tool("llm_session_create", {**CHAT, "title": "周报"})
+    assert created["source"] == source
+    sent = await tool(
+        "llm_send",
+        {"session_id": created["session_id"], "text": "机密的内容", "request_id": "s1"},
+    )
+    assert sent["source"] == source and sent["status"] == "completed"
+
+    page = (await bridge.admin("GET", "/admin/index", params={"after": start})).json()
+    (item,) = page["sessions"]
+    assert item["session_id"] == created["session_id"] and item["rev"] == page["last_rev"]
+    assert (item["owner_id"], item["source"], item["turns_total"]) == ("i-1", source, 1)
+    assert item["turns_failed"] == 0 and item["last_turn_at"] and item["tokens"] >= 0
+    assert "机密的内容" not in json.dumps(page, ensure_ascii=False)
+    # 没有新的变化：下一页是空的，序号不动
+    again = (await bridge.admin("GET", "/admin/index", params={"after": page["last_rev"]})).json()
+    assert again == {"sessions": [], "last_rev": page["last_rev"]}
+    # 回合换了状态（失败）也算变化
+    await tool(
+        "llm_send",
+        {"session_id": created["session_id"], "text": "fail:invalid", "request_id": "s2"},
+    )
+    later = (await bridge.admin("GET", "/admin/index", params={"after": page["last_rev"]})).json()
+    assert [(s["turns_total"], s["turns_failed"]) for s in later["sessions"]] == [(2, 1)]
+    # 读不懂的出处当作没有
+    bad = await bridge.rpc(
+        "tools/call",
+        {"name": "llm_session_create", "arguments": CHAT},
+        {**bridge.headers("i-2"), "X-Bridge-Source": "%7Bnot-json"},
+    )
+    assert json.loads(bad.json()["result"]["content"][0]["text"])["source"] is None
+
+
 async def test_external_sessions(bridge: Bridge) -> None:
     from bridge.drivers.base import Message, NativeSession
 

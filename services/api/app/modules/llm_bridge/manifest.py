@@ -4,7 +4,7 @@
 所以没有部署前提（requires）。
 """
 
-from app.modules.base import ModuleManifest
+from app.modules.base import CronSpec, ModuleManifest
 
 MANIFEST = ModuleManifest(
     key="llm_bridge",
@@ -27,4 +27,11 @@ MANIFEST = ModuleManifest(
     tools_for_instance="app.modules.llm_bridge.tool_handlers:visible_tools",
     direct_tools="app.modules.llm_bridge.tool_handlers:run",
     sealed_fields="app.modules.llm_bridge.sealed:SEALED_FIELDS",
+    # 每分钟同步一次会话索引（哪个管理器上有哪些会话，不含对话内容）
+    crons=(
+        CronSpec(
+            "app.modules.llm_bridge.jobs:index_tick",
+            {"second": 17, "timeout": 120, "unique": True},
+        ),
+    ),
 )

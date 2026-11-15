@@ -384,3 +384,37 @@ class LlmBridgeGrantOut(BaseModel):
 
 class LlmBridgeGrantList(BaseModel):
     grants: list[LlmBridgeGrantOut]
+
+
+class LlmBridgeIndexSessionOut(BaseModel):
+    """会话索引里的一条（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 3.4）：不含提问和回答。"""
+
+    bridge_id: UUID
+    bridge_name: str
+    session_id: str
+    platform: str
+    mode: str
+    model: str | None
+    title: str
+    status: str = Field(description="active / archived")
+    origin: str = Field(description="bridge：经管理器新建；external：官方程序里已有")
+    owner_kind: str = Field(description="agent / user / external")
+    owner_id: str | None = Field(description="实例的 id，或 user:<用户 id>；external 为空")
+    owner: str = Field(description="建会话时的名字")
+    source: dict[str, Any] | None = Field(
+        description="出处：建会话时工作台记下的——哪个实例或人，智能体当时在执行哪些任务"
+    )
+    busy: bool
+    turns_total: int
+    turns_failed: int = Field(description="失败和结果未知的回合数")
+    turns_interrupted: int
+    tokens: int = Field(description="累计 token：官方程序报的数相加，不是账单")
+    created_at: datetime
+    updated_at: datetime
+    last_turn_at: datetime | None
+
+
+class LlmBridgeIndexList(BaseModel):
+    sessions: list[LlmBridgeIndexSessionOut]
+    next_offset: int | None
+    sync_failed: list[str] = Field(description="这次没同步上的 MCP 管理器的名字（sync=true 时）")
