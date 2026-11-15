@@ -12509,6 +12509,132 @@
         "title": "LlmBridgeChannelOut",
         "type": "object"
       },
+      "LlmBridgeConnectivityOut": {
+        "description": "管理器所在的服务器到各平台的连通性与延迟（T-0240）。\n\n键是账号槽位：openai / claude / workbuddy。",
+        "properties": {
+          "slots": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LlmBridgeConnectivitySlotOut"
+            },
+            "title": "Slots",
+            "type": "object"
+          },
+          "supported": {
+            "description": "这个管理器的版本支持检测；旧版本为 false",
+            "title": "Supported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "supported",
+          "slots"
+        ],
+        "title": "LlmBridgeConnectivityOut",
+        "type": "object"
+      },
+      "LlmBridgeConnectivitySlotOut": {
+        "properties": {
+          "checked_at": {
+            "description": "什么时候测的",
+            "title": "Checked At",
+            "type": "number"
+          },
+          "need": {
+            "description": "all：列出的地址都要可用；any：有一个可用就行",
+            "title": "Need",
+            "type": "string"
+          },
+          "ok": {
+            "description": "这个平台在管理器所在的服务器上能不能用",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/LlmBridgeConnectivityTargetOut"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "need",
+          "checked_at",
+          "targets"
+        ],
+        "title": "LlmBridgeConnectivitySlotOut",
+        "type": "object"
+      },
+      "LlmBridgeConnectivityTargetOut": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "不可用时的说明",
+            "title": "Error"
+          },
+          "host": {
+            "description": "平台的地址（域名）",
+            "title": "Host",
+            "type": "string"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "平台回的 HTTP 状态码",
+            "title": "Http Status"
+          },
+          "label": {
+            "description": "这个地址是做什么用的",
+            "title": "Label",
+            "type": "string"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "从发起到收到应答的毫秒数；连不上时为空",
+            "title": "Latency Ms"
+          },
+          "ok": {
+            "description": "可用：连得上，平台也正常应答",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "state": {
+            "description": "ok 可用；blocked 连得上但被平台拒绝（这台服务器的 IP 或地区不被允许）；unreachable 连不上",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host",
+          "label",
+          "ok",
+          "state",
+          "latency_ms"
+        ],
+        "title": "LlmBridgeConnectivityTargetOut",
+        "type": "object"
+      },
       "LlmBridgeDeployIn": {
         "additionalProperties": false,
         "properties": {
@@ -59443,6 +59569,119 @@
           }
         ],
         "summary": "聊天：被额度打断的回合，现在就试着继续（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/connectivity": {
+      "get": {
+        "description": "由管理器去访问各平台的地址（不带凭据）：ok 可用；blocked 连得上但被平台拒绝（这台服务器的 IP 或地区不被允许）；unreachable 连不上。结果一分钟内复用，refresh=true 时重新测。旧版本的管理器 supported 为 false。",
+        "operationId": "llm_bridge_bridge_connectivity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "重新测一次",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "重新测一次",
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeConnectivityOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "MCP 管理器所在的服务器到各平台能不能用、延迟多少（admin）",
         "tags": [
           "llm_bridge"
         ]

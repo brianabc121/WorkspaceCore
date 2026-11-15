@@ -869,6 +869,12 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST .../chat/turns/{turn_id}/resume` | 被额度打断的回合，现在就试着继续（admin）。不是被额度打断的、已经续跑过的 `409` |
 | `DELETE .../chat/turns/{turn_id}/resume` | 不要自动继续（admin） |
 
+**平台连通性**（T-0240）。`GET /api/v1/llm_bridge/bridges/{bridge_id}/connectivity?refresh=`（admin）：由管理器在它那台服务器上访问各平台的地址（不带凭据）。
+返回 `supported`（旧版本的管理器为 false）和 `slots`（键是账号槽位 `openai` / `claude` / `workbuddy`）：每个槽位 `ok`、`need`（`all` 都要可用 / `any` 有一个就行）、`checked_at`、
+`targets[]`（`host`、`label`、`ok`、`state`：`ok` 可用 / `blocked` 连得上但被平台拒绝 / `unreachable` 连不上；`latency_ms`、`http_status`、`error`）。结果一分钟内复用，`refresh=true` 重新测。
+
+登录等操作里平台那边没成功时，接口返回 `503 UNAVAILABLE` 并带管理器写的原因（T-0239）；`EXTERNAL_UNAVAILABLE` 只表示管理器本身连不上。
+
 **本机部署**（T-0238，`docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md` 第 9 节）。模块 `llm_bridge` 现在默认启用。
 
 | 接口 | 说明 |

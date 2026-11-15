@@ -149,6 +149,10 @@ def main():
                 state["account"] = {"type": "apiKey"}
                 save(state)
                 out({"id": mid, "result": {"type": "apiKey"}})
+            elif (HOME / "login-fails").exists():
+                # 申请设备码时连不上 OpenAI：官方程序回一个错误
+                failure = {"code": -32603, "message": "error sending request for url"}
+                out({"id": mid, "error": failure})
             else:
                 reply = {
                     "id": mid,

@@ -14,6 +14,7 @@ from app.api.deps import csrf_protected
 from app.modules.llm_bridge.deps import Admin, Owner, Service, router
 from app.modules.llm_bridge.schemas import (
     LlmBridgeAccountStateOut,
+    LlmBridgeConnectivityOut,
     LlmBridgeEnvironmentIn,
     LlmBridgeEnvironmentList,
     LlmBridgeEnvironmentOut,
@@ -131,6 +132,24 @@ async def llm_bridge_bridge_status(
     access: Admin, service: Service, bridge_id: UUID
 ) -> LlmBridgeStatusOut:
     return await service.status(await service.bridge(access.workspace.id, bridge_id))
+
+
+@router.get(
+    "/llm_bridge/bridges/{bridge_id}/connectivity",
+    summary="MCP 管理器所在的服务器到各平台能不能用、延迟多少（admin）",
+    description="由管理器去访问各平台的地址（不带凭据）：ok 可用；blocked 连得上但被平台拒绝"
+    "（这台服务器的 IP 或地区不被允许）；unreachable 连不上。结果一分钟内复用，"
+    "refresh=true 时重新测。旧版本的管理器 supported 为 false。",
+    responses=_read_errors,
+)
+async def llm_bridge_bridge_connectivity(
+    access: Admin,
+    service: Service,
+    bridge_id: UUID,
+    refresh: Annotated[bool, Query(description="重新测一次")] = False,
+) -> LlmBridgeConnectivityOut:
+    row = await service.bridge(access.workspace.id, bridge_id)
+    return await service.connectivity(row, refresh=refresh)
 
 
 @router.get(

@@ -703,3 +703,98 @@ async def test_restart_recovery(tmp_path: Path) -> None:
     assert done["status"] == "completed" and done["result"] == "[fake-1] 还没开始"
     await engine.shutdown()
     store.close()
+
+
+async def test_platform_failure_during_login_is_reported_not_hidden(bridge: Bridge) -> None:
+    """登录时平台那边出错：管理接口带着原因回 424，不回 5xx——工作台会把 5xx 当成“管理器连不上”。"""
+    bridge.fake.login_error = "向平台申请验证码没有成功：连不上平台"
+    failed = await bridge.admin(
+        "POST", "/admin/accounts/fake/login", json={"method": "api_key", "api_key": "k"}
+    )
+    assert failed.status_code == 424, failed.text
+    assert failed.json()["error"] == {
+        "code": "UNAVAILABLE",
+        "message": "向平台申请验证码没有成功：连不上平台",
+    }
+    bridge.fake.login_error = None
+    ok = await bridge.admin(
+        "POST", "/admin/accounts/fake/login", json={"method": "api_key", "api_key": "k"}
+    )
+    assert ok.status_code == 200, ok.text
+
+
+async def test_connectivity_reports_each_platform_with_latency(bridge: Bridge) -> None:
+    """到各平台能不能用、多慢：逐个地址报，分清“连不上”和“被平台拒绝”；一分钟内复用结果。"""
+    from typing import Any
+
+    from bridge import connectivity
+    from bridge.drivers.fake import FakeDriver
+
+    calls: list[str] = []
+
+    async def probe(target: connectivity.Target) -> dict[str, Any]:
+        calls.append(target.host)
+        if target.host == "auth.openai.com":  # 连得上，但平台回的是拦截页
+            note = "平台拒绝了这台服务器的访问（HTTP 403，拦截页）"
+            return {"state": "blocked", "latency_ms": 12, "http_status": 403, "error": note}
+        if target.host == "copilot.tencent.com":
+            note = "超时（8 秒内没有应答）"
+            return {"state": "unreachable", "latency_ms": None, "http_status": None, "error": note}
+        return {"state": "ok", "latency_ms": 42, "http_status": 401, "error": None}
+
+    bridge.engine.probe_host = probe
+    for slot in ("openai", "claude", "workbuddy"):
+        bridge.engine.drivers.setdefault(slot, FakeDriver())
+    slots = (await bridge.admin("GET", "/admin/connectivity")).json()["slots"]
+    assert set(slots) == {"openai", "claude", "workbuddy"}  # 仿真槽位没有平台地址，不列
+    # OpenAI 要三个地址都可用；有一个被拒绝就算用不了，延迟照样给
+    assert slots["openai"]["ok"] is False and slots["openai"]["need"] == "all"
+    blocked = slots["openai"]["targets"][1]
+    assert (blocked["host"], blocked["ok"], blocked["state"], blocked["latency_ms"]) == (
+        "auth.openai.com",
+        False,
+        "blocked",
+        12,
+    )
+    assert "拒绝" in blocked["error"]
+    assert slots["claude"]["ok"] is True
+    assert [t["latency_ms"] for t in slots["claude"]["targets"]] == [42, 42]
+    # CodeBuddy 国内站、国际站有一个可用就行
+    assert slots["workbuddy"]["ok"] is True and slots["workbuddy"]["need"] == "any"
+    assert slots["workbuddy"]["targets"][0]["state"] == "unreachable"
+    count = len(calls)
+    await bridge.admin("GET", "/admin/connectivity")
+    assert len(calls) == count
+    await bridge.admin("GET", "/admin/connectivity", params={"refresh": "true"})
+    assert len(calls) == count * 2
+    denied = await bridge.client.get("/admin/connectivity")
+    assert denied.status_code in (401, 403)
+    # 真的去连一个本机没人听的端口：报连不上，不抛异常
+    real = await connectivity.probe(connectivity.Target("localhost", "本机"))
+    assert real["state"] == "unreachable" and real["latency_ms"] is None and real["error"]
+
+
+def test_connectivity_tells_a_block_page_from_a_normal_answer() -> None:
+    """平台回了什么算可用、什么算被拒绝。拦截页的样子取自一台被 OpenAI 拦截的服务器上的实测。"""
+    from bridge.connectivity import classify
+
+    openai_block = (
+        '<div class="message"><p>Unable to load site</p></div><span class="explanation">'
+        "Please try again later. If you are using a VPN, try turning it off.</span>"
+        '<span class="explanation"> [IP:203.0.113.7 | Ray ID:a5ad0c6498b9e8d4] </span>'
+        "<script>/cdn-cgi/challenge-platform/scripts/jsd/main.js</script>"
+    )
+    assert classify(403, {}, openai_block)[0] == "blocked"
+    assert classify(200, {}, openai_block)[0] == "blocked"  # 不管状态码，拦截页就是被拒绝
+    region = '{"error": {"code": "unsupported_country_region_territory"}}'
+    assert classify(403, {}, region)[0] == "blocked"
+    assert classify(403, {}, "forbidden")[0] == "blocked"
+    assert classify(451, {}, "")[0] == "blocked"
+    # 没带密钥被要求登录、找不到页面：平台正常应答了，算可用
+    for status in (200, 301, 401, 404, 421):
+        assert classify(status, {}, '{"error": "missing api key"}') == ("ok", None)
+    # 普通的人机验证页不算被拒绝
+    assert (
+        classify(403, {"cf-mitigated": "challenge"}, "<title>Just a moment...</title>")[0] == "ok"
+    )
+    assert classify(403, {}, "<title>Just a moment...</title>")[0] == "ok"

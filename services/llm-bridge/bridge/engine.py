@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from bridge import attachments as files
+from bridge import connectivity as net
 from bridge import quota
 from bridge.channels import SLOT_LABELS, Channel, find
 from bridge.config import Settings
@@ -163,6 +164,9 @@ class Engine:
         self._workers: dict[str, asyncio.Task[None]] = {}
         self._done: dict[str, asyncio.Event] = {}
         self._cancel_requested: set[str] = set()
+        # 到各平台的连通性：最近一次的结果（什么时候测的、结果）；probe_host 测试里会换掉
+        self._connectivity: tuple[float, Row] | None = None
+        self.probe_host: Any = net.probe
         # 被插入的消息打断的回合 → 打断它的那个新回合
         self._superseded: dict[str, str] = {}
         self._limiters: dict[str, SlotLimiter] = {}
@@ -1108,6 +1112,17 @@ class Engine:
         if session is None:
             raise BridgeError("NOT_FOUND", "没有这个会话")
         return session
+
+    # ---- 连不连得上各平台（T-0240）----
+    async def connectivity(self, refresh: bool = False) -> Row:
+        """管理器所在的服务器到各平台的连通性和延迟；一分钟内的结果直接复用，refresh 时重新测。"""
+        cached = self._connectivity
+        if cached is not None and not refresh and time.time() - cached[0] < net.CACHE_SECONDS:
+            return {"slots": cached[1]}
+        slots = [slot for slot in self.drivers if slot in net.TARGETS]
+        result = await net.check(slots, self.probe_host)
+        self._connectivity = (time.time(), result)
+        return {"slots": result}
 
     # ---- 附件（T-0236 第二步）----
     @property

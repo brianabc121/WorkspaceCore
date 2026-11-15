@@ -204,6 +204,36 @@ class LlmBridgeQuotaList(BaseModel):
     platforms: dict[str, LlmBridgeQuotaOut]
 
 
+class LlmBridgeConnectivityTargetOut(BaseModel):
+    host: str = Field(description="平台的地址（域名）")
+    label: str = Field(description="这个地址是做什么用的")
+    ok: bool = Field(description="可用：连得上，平台也正常应答")
+    state: str = Field(
+        description="ok 可用；blocked 连得上但被平台拒绝（这台服务器的 IP 或地区不被允许）；"
+        "unreachable 连不上"
+    )
+    latency_ms: int | None = Field(description="从发起到收到应答的毫秒数；连不上时为空")
+    http_status: int | None = Field(default=None, description="平台回的 HTTP 状态码")
+    error: str | None = Field(default=None, description="不可用时的说明")
+
+
+class LlmBridgeConnectivitySlotOut(BaseModel):
+    ok: bool = Field(description="这个平台在管理器所在的服务器上能不能用")
+    need: str = Field(description="all：列出的地址都要可用；any：有一个可用就行")
+    checked_at: float = Field(description="什么时候测的")
+    targets: list[LlmBridgeConnectivityTargetOut]
+
+
+class LlmBridgeConnectivityOut(BaseModel):
+    """管理器所在的服务器到各平台的连通性与延迟（T-0240）。
+
+    键是账号槽位：openai / claude / workbuddy。
+    """
+
+    supported: bool = Field(description="这个管理器的版本支持检测；旧版本为 false")
+    slots: dict[str, LlmBridgeConnectivitySlotOut]
+
+
 class LlmBridgeStatusOut(BaseModel):
     reachable: bool
     error: str = Field(default="", description="连不上时的原因")

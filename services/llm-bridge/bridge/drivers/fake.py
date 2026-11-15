@@ -41,6 +41,8 @@ class FakeDriver(Driver):
         # 额度：quota_until 之前的回合都以“额度用完”失败；quota_reports_reset=False 时不给重置时间
         self.last_images: tuple[tuple[str, str], ...] = ()
         # 插入消息：steerable=True 时回合中追加的消息会被收下（记在 steered 里）
+        # 登录时平台那边出错（例如连不上平台）：login 抛出这段话
+        self.login_error: str | None = None
         self.steerable = False
         self.steered: list[str] = []
         self.quota_until = 0.0
@@ -188,6 +190,8 @@ class FakeDriver(Driver):
         return list(self.history.get(native_id, []))
 
     async def login(self, method: str, payload: dict[str, str]) -> LoginChallenge:
+        if self.login_error:
+            raise DriverError("platform_error", self.login_error)
         self.identity = payload.get("api_key") or "fake@example.com"
         return LoginChallenge(state="done")
 
